@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.*" />
+    <PackageReference Include="Serilog.AspNetCore" Version="8.*" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Radio.Core\Radio.Core.csproj" />
+    <ProjectReference Include="..\Radio.Infrastructure\Radio.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>
