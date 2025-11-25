@@ -1,0 +1,329 @@
+namespace Radio.Infrastructure.Configuration.Stores;
+
+using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using Radio.Infrastructure.Configuration.Abstractions;
+using Radio.Infrastructure.Configuration.Models;
+
+/// <summary>
+/// JSON file-based configuration store implementation.
+/// </summary>
+public sealed class JsonConfigurationStore : ConfigurationStoreBase, IDisposable
+{
+  private readonly string _filePath;
+  private readonly bool _autoSave;
+  private readonly SemaphoreSlim _lock = new(1, 1);
+  private readonly JsonSerializerOptions _jsonOptions;
+
+  private Dictionary<string, StoredEntry> _entries = new();
+  private bool _isLoaded;
+  private bool _isDirty;
+  private bool _disposed;
+
+  private readonly string _storeId;
+
+  /// <inheritdoc/>
+  public override string StoreId => _storeId;
+
+  /// <inheritdoc/>
+  public override ConfigurationStoreType StoreType => ConfigurationStoreType.Json;
+
+  /// <summary>
+  /// Initializes a new instance of the JsonConfigurationStore class.
+  /// </summary>
+  public JsonConfigurationStore(
+    string storeId,
+    string filePath,
+    ISecretsProvider secretsProvider,
+    ILogger<JsonConfigurationStore> logger,
+    bool autoSave = true)
+    : base(secretsProvider, logger)
+  {
+    _storeId = storeId ?? throw new ArgumentNullException(nameof(storeId));
+    _filePath = filePath ?? throw new ArgumentNullException(nameof(filePath));
+    _autoSave = autoSave;
+    _jsonOptions = new JsonSerializerOptions
+    {
+      WriteIndented = true,
+      PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+  }
+
+  /// <inheritdoc/>
+  public override async Task<ConfigurationEntry?> GetEntryAsync(string key, ConfigurationReadMode mode = ConfigurationReadMode.Resolved, CancellationToken ct = default)
+  {
+    await EnsureLoadedAsync(ct);
+    await _lock.WaitAsync(ct);
+    try
+    {
+      if (!_entries.TryGetValue(key, out var stored))
+        return null;
+
+      return await CreateEntryAsync(key, stored.Value, stored.Description, stored.LastModified, mode, ct);
+    }
+    finally
+    {
+      _lock.Release();
+    }
+  }
+
+  /// <inheritdoc/>
+  public override async Task<IReadOnlyList<ConfigurationEntry>> GetAllEntriesAsync(ConfigurationReadMode mode = ConfigurationReadMode.Resolved, CancellationToken ct = default)
+  {
+    await EnsureLoadedAsync(ct);
+    await _lock.WaitAsync(ct);
+    try
+    {
+      var entries = new List<ConfigurationEntry>();
+      foreach (var kvp in _entries)
+      {
+        entries.Add(await CreateEntryAsync(kvp.Key, kvp.Value.Value, kvp.Value.Description, kvp.Value.LastModified, mode, ct));
+      }
+      return entries;
+    }
+    finally
+    {
+      _lock.Release();
+    }
+  }
+
+  /// <inheritdoc/>
+  public override async Task<IReadOnlyList<ConfigurationEntry>> GetEntriesBySectionAsync(string sectionPrefix, ConfigurationReadMode mode = ConfigurationReadMode.Resolved, CancellationToken ct = default)
+  {
+    await EnsureLoadedAsync(ct);
+    await _lock.WaitAsync(ct);
+    try
+    {
+      var prefix = NormalizeSectionPrefix(sectionPrefix);
+      var entries = new List<ConfigurationEntry>();
+
+      foreach (var kvp in _entries.Where(e => e.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+      {
+        entries.Add(await CreateEntryAsync(kvp.Key, kvp.Value.Value, kvp.Value.Description, kvp.Value.LastModified, mode, ct));
+      }
+      return entries;
+    }
+    finally
+    {
+      _lock.Release();
+    }
+  }
+
+  /// <inheritdoc/>
+  public override async Task SetEntryAsync(string key, string value, CancellationToken ct = default)
+  {
+    await EnsureLoadedAsync(ct);
+    await _lock.WaitAsync(ct);
+    try
+    {
+      _entries[key] = new StoredEntry
+      {
+        Value = value,
+        LastModified = DateTimeOffset.UtcNow
+      };
+      _isDirty = true;
+
+      if (_autoSave)
+      {
+        await SaveInternalAsync(ct);
+      }
+    }
+    finally
+    {
+      _lock.Release();
+    }
+  }
+
+  /// <inheritdoc/>
+  public override async Task SetEntriesAsync(IEnumerable<ConfigurationEntry> entries, CancellationToken ct = default)
+  {
+    await EnsureLoadedAsync(ct);
+    await _lock.WaitAsync(ct);
+    try
+    {
+      foreach (var entry in entries)
+      {
+        _entries[entry.Key] = new StoredEntry
+        {
+          Value = entry.RawValue ?? entry.Value,
+          Description = entry.Description,
+          LastModified = DateTimeOffset.UtcNow
+        };
+      }
+      _isDirty = true;
+
+      if (_autoSave)
+      {
+        await SaveInternalAsync(ct);
+      }
+    }
+    finally
+    {
+      _lock.Release();
+    }
+  }
+
+  /// <inheritdoc/>
+  public override async Task<bool> DeleteEntryAsync(string key, CancellationToken ct = default)
+  {
+    await EnsureLoadedAsync(ct);
+    await _lock.WaitAsync(ct);
+    try
+    {
+      if (_entries.Remove(key))
+      {
+        _isDirty = true;
+        if (_autoSave)
+        {
+          await SaveInternalAsync(ct);
+        }
+        return true;
+      }
+      return false;
+    }
+    finally
+    {
+      _lock.Release();
+    }
+  }
+
+  /// <inheritdoc/>
+  public override async Task<bool> ExistsAsync(string key, CancellationToken ct = default)
+  {
+    await EnsureLoadedAsync(ct);
+    await _lock.WaitAsync(ct);
+    try
+    {
+      return _entries.ContainsKey(key);
+    }
+    finally
+    {
+      _lock.Release();
+    }
+  }
+
+  /// <inheritdoc/>
+  public override async Task<bool> SaveAsync(CancellationToken ct = default)
+  {
+    await _lock.WaitAsync(ct);
+    try
+    {
+      if (!_isDirty)
+        return true;
+
+      await SaveInternalAsync(ct);
+      return true;
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to save configuration store: {StoreId}", StoreId);
+      return false;
+    }
+    finally
+    {
+      _lock.Release();
+    }
+  }
+
+  /// <inheritdoc/>
+  public override async Task ReloadAsync(CancellationToken ct = default)
+  {
+    await _lock.WaitAsync(ct);
+    try
+    {
+      await LoadAsync(ct);
+      _isDirty = false;
+    }
+    finally
+    {
+      _lock.Release();
+    }
+  }
+
+  private async Task EnsureLoadedAsync(CancellationToken ct)
+  {
+    if (_isLoaded) return;
+
+    await _lock.WaitAsync(ct);
+    try
+    {
+      if (_isLoaded) return;
+      await LoadAsync(ct);
+      _isLoaded = true;
+    }
+    finally
+    {
+      _lock.Release();
+    }
+  }
+
+  private async Task LoadAsync(CancellationToken ct)
+  {
+    if (!File.Exists(_filePath))
+    {
+      _entries = new Dictionary<string, StoredEntry>();
+      Logger.LogDebug("Configuration file not found, starting with empty store: {Path}", _filePath);
+      return;
+    }
+
+    try
+    {
+      var json = await File.ReadAllTextAsync(_filePath, ct);
+      var data = JsonSerializer.Deserialize<StoreFile>(json, _jsonOptions);
+      _entries = data?.Entries ?? new Dictionary<string, StoredEntry>();
+      Logger.LogDebug("Loaded {Count} entries from {Path}", _entries.Count, _filePath);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to load configuration file: {Path}", _filePath);
+      _entries = new Dictionary<string, StoredEntry>();
+    }
+  }
+
+  private async Task SaveInternalAsync(CancellationToken ct)
+  {
+    var directory = Path.GetDirectoryName(_filePath);
+    if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+    {
+      Directory.CreateDirectory(directory);
+    }
+
+    var data = new StoreFile
+    {
+      Version = 1,
+      LastModified = DateTimeOffset.UtcNow,
+      Entries = _entries
+    };
+
+    // Atomic write using temp file
+    var tempPath = _filePath + ".tmp";
+    var json = JsonSerializer.Serialize(data, _jsonOptions);
+    await File.WriteAllTextAsync(tempPath, json, ct);
+    File.Move(tempPath, _filePath, overwrite: true);
+
+    _isDirty = false;
+    Logger.LogDebug("Saved {Count} entries to {Path}", _entries.Count, _filePath);
+  }
+
+  /// <inheritdoc/>
+  public void Dispose()
+  {
+    if (_disposed) return;
+    _lock.Dispose();
+    _disposed = true;
+  }
+
+  private sealed record StoreFile
+  {
+    public int Version { get; init; }
+    public DateTimeOffset LastModified { get; init; }
+    public Dictionary<string, StoredEntry> Entries { get; init; } = new();
+  }
+
+  private sealed record StoredEntry
+  {
+    public required string Value { get; init; }
+    public string? Description { get; init; }
+    public DateTimeOffset? LastModified { get; init; }
+  }
+}
