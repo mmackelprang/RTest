@@ -6,6 +6,21 @@ Grandpa Anderson's Console Radio Remade - A modern audio command center hosted o
 
 This project restores the original function (Radio/Vinyl) while adding modern capabilities (Spotify, Streaming, Smart Home Events, and Chromecast Audio).
 
+## Current Status
+
+| Phase | Status | Description |
+|-------|--------|-------------|
+| 0 - Project Setup | ✅ Completed | Solution structure, CI/CD pipeline |
+| 1 - Configuration | ✅ Completed | JSON/SQLite stores, secrets management, backup/restore |
+| 2 - Core Audio | ⬜ Not Started | SoundFlow integration |
+| 3 - Audio Sources | ⬜ Not Started | Spotify, Radio, Vinyl, File Player |
+| 4 - Event Sources | ⬜ Not Started | TTS, Audio File Events |
+| 5 - Ducking | ⬜ Not Started | Priority-based audio ducking |
+| 6 - Outputs | ⬜ Not Started | Local audio, Chromecast |
+| 7 - Visualization | ⬜ Not Started | Spectrum, VU meters |
+| 8 - API | ⬜ Not Started | REST endpoints, SignalR |
+| 9 - UI | ⬜ Not Started | Blazor components |
+
 ## Technical Architecture
 
 | Component | Technology |
@@ -27,14 +42,54 @@ RadioConsole/
 ├── src/
 │   ├── Radio.Core/          # Core interfaces, models, and domain logic
 │   ├── Radio.Infrastructure/ # Audio management, configuration, external integrations
+│   │   └── Configuration/   # Configuration infrastructure (Phase 1)
+│   │       ├── Abstractions/  # IConfigurationStore, ISecretsProvider, etc.
+│   │       ├── Models/        # ConfigurationEntry, SecretTag, BackupMetadata
+│   │       ├── Stores/        # JsonConfigurationStore, SqliteConfigurationStore
+│   │       ├── Secrets/       # JsonSecretsProvider, SqliteSecretsProvider
+│   │       ├── Backup/        # ConfigurationBackupService
+│   │       └── Services/      # ConfigurationManager
 │   ├── Radio.API/           # REST API and SignalR hubs
 │   └── Radio.Web/           # Blazor Server UI
 ├── tests/
 │   ├── Radio.Core.Tests/
 │   ├── Radio.Infrastructure.Tests/
+│   │   └── Configuration/   # Tests for configuration infrastructure
 │   └── Radio.API.Tests/
 ├── design/                   # Design documents
 └── scripts/                  # Deployment and utility scripts
+```
+
+## Configuration System
+
+The configuration infrastructure (Phase 1) provides:
+
+- **Dual backing stores**: JSON files and SQLite database
+- **Secrets management**: Tag-based substitution (`${secret:identifier}`)
+- **Encrypted storage**: Secrets encrypted at rest using Data Protection API
+- **Backup/restore**: Full configuration backup and restore capabilities
+- **DI integration**: Easy registration via `AddManagedConfiguration()`
+
+### Usage Example
+
+```csharp
+// Register services
+services.AddManagedConfiguration(configuration);
+
+// Use the configuration manager
+var configManager = serviceProvider.GetRequiredService<IConfigurationManager>();
+
+// Create and use a store
+var store = await configManager.CreateStoreAsync("my-settings");
+await store.SetEntryAsync("AppName", "My App");
+
+// Create a secret
+var secretTag = await configManager.CreateSecretAsync("my-settings", "ApiKey", "secret-value");
+// Store now contains: ApiKey = ${secret:abc123}
+
+// Read with secret resolution
+var value = await configManager.GetValueAsync<string>("my-settings", "ApiKey");
+// Returns: "secret-value"
 ```
 
 ## Getting Started
