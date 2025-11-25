@@ -113,6 +113,7 @@ public class SecretsProviderTests : IDisposable
   public void JsonSecretsProvider_GenerateTag_CreatesUniqueTag()
   {
     // Arrange
+    const int ExpectedTagLength = 12; // Length of GUID substring used for tag generation
     var provider = CreateJsonProvider();
 
     // Act
@@ -121,8 +122,8 @@ public class SecretsProviderTests : IDisposable
 
     // Assert
     Assert.NotEqual(tag1, tag2);
-    Assert.Equal(12, tag1.Length); // GUID substring
-    Assert.Equal(12, tag2.Length);
+    Assert.Equal(ExpectedTagLength, tag1.Length);
+    Assert.Equal(ExpectedTagLength, tag2.Length);
   }
 
   [Fact]

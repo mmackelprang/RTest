@@ -14,7 +14,7 @@ public sealed partial record SecretTag
   /// <summary>The suffix for all secret tags.</summary>
   public const string TagSuffix = "}";
 
-  [GeneratedRegex(@"\$\{secret:([a-zA-Z0-9_-]+)\}", RegexOptions.Compiled)]
+  [GeneratedRegex(@"\$\{secret:([a-zA-Z0-9_-]+)\}", RegexOptions.Compiled | RegexOptions.CultureInvariant)]
   private static partial Regex TagPatternRegex();
 
   /// <summary>The full tag string (e.g., "${secret:abc123}").</summary>

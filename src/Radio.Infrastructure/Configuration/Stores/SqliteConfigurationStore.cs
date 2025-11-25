@@ -254,7 +254,8 @@ public sealed class SqliteConfigurationStore : IConfigurationStore, IAsyncDispos
   private async Task InitializeAsync(CancellationToken ct)
   {
     // Ensure directory exists
-    var dbPath = _connectionString.Replace("Data Source=", "");
+    var builder = new SqliteConnectionStringBuilder(_connectionString);
+    var dbPath = builder.DataSource;
     var directory = Path.GetDirectoryName(dbPath);
     if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
     {
