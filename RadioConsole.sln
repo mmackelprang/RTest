@@ -21,6 +21,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Radio.Infrastructure.Tests"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Radio.API.Tests", "tests\Radio.API.Tests\Radio.API.Tests.csproj", "{6E6685B8-B8B1-4431-8348-B095220D2524}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{07C2787E-EAC7-C090-1BA3-A61EC2A24D84}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Radio.Tools.ConfigurationManager", "tools\Radio.Tools.ConfigurationManager\Radio.Tools.ConfigurationManager.csproj", "{F5CE83E4-7056-435A-B4A7-38458105A489}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -115,6 +119,18 @@ Global
 		{6E6685B8-B8B1-4431-8348-B095220D2524}.Release|x64.Build.0 = Release|Any CPU
 		{6E6685B8-B8B1-4431-8348-B095220D2524}.Release|x86.ActiveCfg = Release|Any CPU
 		{6E6685B8-B8B1-4431-8348-B095220D2524}.Release|x86.Build.0 = Release|Any CPU
+		{F5CE83E4-7056-435A-B4A7-38458105A489}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F5CE83E4-7056-435A-B4A7-38458105A489}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F5CE83E4-7056-435A-B4A7-38458105A489}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{F5CE83E4-7056-435A-B4A7-38458105A489}.Debug|x64.Build.0 = Debug|Any CPU
+		{F5CE83E4-7056-435A-B4A7-38458105A489}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{F5CE83E4-7056-435A-B4A7-38458105A489}.Debug|x86.Build.0 = Debug|Any CPU
+		{F5CE83E4-7056-435A-B4A7-38458105A489}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F5CE83E4-7056-435A-B4A7-38458105A489}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F5CE83E4-7056-435A-B4A7-38458105A489}.Release|x64.ActiveCfg = Release|Any CPU
+		{F5CE83E4-7056-435A-B4A7-38458105A489}.Release|x64.Build.0 = Release|Any CPU
+		{F5CE83E4-7056-435A-B4A7-38458105A489}.Release|x86.ActiveCfg = Release|Any CPU
+		{F5CE83E4-7056-435A-B4A7-38458105A489}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -127,5 +143,6 @@ Global
 		{C4216337-250F-4F8D-8763-F0D475088920} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{AC677B39-1D13-4AB5-92E1-95029D03D9F6} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{6E6685B8-B8B1-4431-8348-B095220D2524} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{F5CE83E4-7056-435A-B4A7-38458105A489} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 	EndGlobalSection
 EndGlobal
