@@ -13,6 +13,8 @@ namespace Radio.Tools.ConfigurationManager;
 /// </summary>
 public sealed class ConfigurationTool
 {
+  private const int ValueDisplayMaxLength = 50;
+
   private readonly IServiceProvider _serviceProvider;
   private readonly IRadioConfigurationManager _configManager;
   private readonly ISecretsProvider _secretsProvider;
@@ -264,7 +266,9 @@ public sealed class ConfigurationTool
 
       foreach (var entry in entries)
       {
-        var value = entry.Value.Length > 50 ? entry.Value[..50] + "..." : entry.Value;
+        var value = entry.Value.Length > ValueDisplayMaxLength
+          ? entry.Value[..ValueDisplayMaxLength] + "..."
+          : entry.Value;
         var secretIndicator = entry.ContainsSecret ? "[red]Yes[/]" : "[grey]No[/]";
         var modified = entry.LastModified?.LocalDateTime.ToString("yyyy-MM-dd HH:mm") ?? "-";
 
@@ -579,7 +583,7 @@ public sealed class ConfigurationTool
 
       foreach (var tag in tags)
       {
-        var fullTag = $"${{secret:{tag}}}";
+        var fullTag = $"{SecretTag.TagPrefix}{tag}{SecretTag.TagSuffix}";
         table.AddRow(tag, fullTag, "[grey]********[/]");
       }
 
