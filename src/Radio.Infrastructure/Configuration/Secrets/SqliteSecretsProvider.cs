@@ -4,18 +4,16 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Radio.Infrastructure.Configuration.Abstractions;
 using Radio.Infrastructure.Configuration.Models;
 
 /// <summary>
 /// Stores secrets in a SQLite database table with encryption.
 /// </summary>
-public sealed class SqliteSecretsProvider : ISecretsProvider, IAsyncDisposable
+public sealed class SqliteSecretsProvider : SecretsProviderBase, IAsyncDisposable
 {
   private const string TableName = "Secrets";
 
   private readonly string _connectionString;
-  private readonly IDataProtector _protector;
   private readonly ILogger<SqliteSecretsProvider> _logger;
   private readonly SemaphoreSlim _lock = new(1, 1);
 
@@ -30,22 +28,20 @@ public sealed class SqliteSecretsProvider : ISecretsProvider, IAsyncDisposable
     IOptions<ConfigurationOptions> options,
     IDataProtectionProvider dataProtection,
     ILogger<SqliteSecretsProvider> logger)
+    : base(dataProtection, logger)
   {
     ArgumentNullException.ThrowIfNull(options);
-    ArgumentNullException.ThrowIfNull(dataProtection);
-    ArgumentNullException.ThrowIfNull(logger);
 
     var opts = options.Value;
     var basePath = Path.GetFullPath(opts.BasePath);
     var dbPath = Path.Combine(basePath, opts.SqliteFileName);
 
     _connectionString = $"Data Source={dbPath}";
-    _protector = dataProtection.CreateProtector("Radio.Configuration.Secrets");
     _logger = logger;
   }
 
   /// <inheritdoc/>
-  public async Task<string?> GetSecretAsync(string tag, CancellationToken ct = default)
+  public override async Task<string?> GetSecretAsync(string tag, CancellationToken ct = default)
   {
     await EnsureInitializedAsync(ct);
 
@@ -65,7 +61,7 @@ public sealed class SqliteSecretsProvider : ISecretsProvider, IAsyncDisposable
   }
 
   /// <inheritdoc/>
-  public async Task<string> SetSecretAsync(string tag, string value, CancellationToken ct = default)
+  public override async Task<string> SetSecretAsync(string tag, string value, CancellationToken ct = default)
   {
     await EnsureInitializedAsync(ct);
 
@@ -92,28 +88,7 @@ public sealed class SqliteSecretsProvider : ISecretsProvider, IAsyncDisposable
   }
 
   /// <inheritdoc/>
-  public string GenerateTag(string? hint = null)
-  {
-    var id = Guid.NewGuid().ToString("N")[..12];
-    if (!string.IsNullOrWhiteSpace(hint))
-    {
-      // Sanitize hint for use in identifier
-      var sanitized = new string(hint
-        .Replace(":", "_")
-        .Replace(" ", "_")
-        .Where(c => char.IsLetterOrDigit(c) || c == '_' || c == '-')
-        .Take(20)
-        .ToArray());
-      if (!string.IsNullOrEmpty(sanitized))
-      {
-        return $"{sanitized}_{id}";
-      }
-    }
-    return id;
-  }
-
-  /// <inheritdoc/>
-  public async Task<bool> DeleteSecretAsync(string tag, CancellationToken ct = default)
+  public override async Task<bool> DeleteSecretAsync(string tag, CancellationToken ct = default)
   {
     await EnsureInitializedAsync(ct);
 
@@ -132,7 +107,7 @@ public sealed class SqliteSecretsProvider : ISecretsProvider, IAsyncDisposable
   }
 
   /// <inheritdoc/>
-  public async Task<IReadOnlyList<string>> ListTagsAsync(CancellationToken ct = default)
+  public override async Task<IReadOnlyList<string>> ListTagsAsync(CancellationToken ct = default)
   {
     await EnsureInitializedAsync(ct);
 
@@ -147,27 +122,6 @@ public sealed class SqliteSecretsProvider : ISecretsProvider, IAsyncDisposable
       tags.Add(reader.GetString(0));
     }
     return tags;
-  }
-
-  /// <inheritdoc/>
-  public bool ContainsSecretTag(string value) => SecretTag.ContainsTag(value);
-
-  /// <inheritdoc/>
-  public async Task<string> ResolveTagsAsync(string value, CancellationToken ct = default)
-  {
-    if (string.IsNullOrEmpty(value) || !ContainsSecretTag(value))
-      return value;
-
-    var result = value;
-    foreach (var tag in SecretTag.ExtractAll(value))
-    {
-      var secret = await GetSecretAsync(tag.Identifier, ct);
-      if (secret != null)
-      {
-        result = result.Replace(tag.Tag, secret);
-      }
-    }
-    return result;
   }
 
   private async Task EnsureInitializedAsync(CancellationToken ct)
@@ -227,24 +181,6 @@ public sealed class SqliteSecretsProvider : ISecretsProvider, IAsyncDisposable
     cmd.Parameters.AddWithValue("@Tag", tag);
     cmd.Parameters.AddWithValue("@LastAccessedAt", DateTimeOffset.UtcNow.ToString("O"));
     await cmd.ExecuteNonQueryAsync(ct);
-  }
-
-  private string Encrypt(string plainText)
-  {
-    return _protector.Protect(plainText);
-  }
-
-  private string Decrypt(string cipherText)
-  {
-    try
-    {
-      return _protector.Unprotect(cipherText);
-    }
-    catch (Exception ex)
-    {
-      _logger.LogError(ex, "Failed to decrypt secret");
-      throw new InvalidOperationException("Failed to decrypt secret", ex);
-    }
   }
 
   /// <inheritdoc/>

@@ -4,16 +4,14 @@ using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Radio.Infrastructure.Configuration.Abstractions;
 using Radio.Infrastructure.Configuration.Models;
 
 /// <summary>
 /// Stores secrets in an encrypted JSON file.
 /// </summary>
-public sealed class JsonSecretsProvider : ISecretsProvider, IDisposable
+public sealed class JsonSecretsProvider : SecretsProviderBase, IDisposable
 {
   private readonly string _filePath;
-  private readonly IDataProtector _protector;
   private readonly ILogger<JsonSecretsProvider> _logger;
   private readonly SemaphoreSlim _lock = new(1, 1);
   private readonly JsonSerializerOptions _jsonOptions;
@@ -29,16 +27,14 @@ public sealed class JsonSecretsProvider : ISecretsProvider, IDisposable
     IOptions<ConfigurationOptions> options,
     IDataProtectionProvider dataProtection,
     ILogger<JsonSecretsProvider> logger)
+    : base(dataProtection, logger)
   {
     ArgumentNullException.ThrowIfNull(options);
-    ArgumentNullException.ThrowIfNull(dataProtection);
-    ArgumentNullException.ThrowIfNull(logger);
 
     var opts = options.Value;
     var basePath = Path.GetFullPath(opts.BasePath);
     _filePath = Path.Combine(basePath, $"{opts.SecretsFileName}.json");
 
-    _protector = dataProtection.CreateProtector("Radio.Configuration.Secrets");
     _logger = logger;
     _jsonOptions = new JsonSerializerOptions
     {
@@ -48,7 +44,7 @@ public sealed class JsonSecretsProvider : ISecretsProvider, IDisposable
   }
 
   /// <inheritdoc/>
-  public async Task<string?> GetSecretAsync(string tag, CancellationToken ct = default)
+  public override async Task<string?> GetSecretAsync(string tag, CancellationToken ct = default)
   {
     await EnsureLoadedAsync(ct);
     await _lock.WaitAsync(ct);
@@ -67,7 +63,7 @@ public sealed class JsonSecretsProvider : ISecretsProvider, IDisposable
   }
 
   /// <inheritdoc/>
-  public async Task<string> SetSecretAsync(string tag, string value, CancellationToken ct = default)
+  public override async Task<string> SetSecretAsync(string tag, string value, CancellationToken ct = default)
   {
     await EnsureLoadedAsync(ct);
     await _lock.WaitAsync(ct);
@@ -86,28 +82,7 @@ public sealed class JsonSecretsProvider : ISecretsProvider, IDisposable
   }
 
   /// <inheritdoc/>
-  public string GenerateTag(string? hint = null)
-  {
-    var id = Guid.NewGuid().ToString("N")[..12];
-    if (!string.IsNullOrWhiteSpace(hint))
-    {
-      // Sanitize hint for use in identifier
-      var sanitized = new string(hint
-        .Replace(":", "_")
-        .Replace(" ", "_")
-        .Where(c => char.IsLetterOrDigit(c) || c == '_' || c == '-')
-        .Take(20)
-        .ToArray());
-      if (!string.IsNullOrEmpty(sanitized))
-      {
-        return $"{sanitized}_{id}";
-      }
-    }
-    return id;
-  }
-
-  /// <inheritdoc/>
-  public async Task<bool> DeleteSecretAsync(string tag, CancellationToken ct = default)
+  public override async Task<bool> DeleteSecretAsync(string tag, CancellationToken ct = default)
   {
     await EnsureLoadedAsync(ct);
     await _lock.WaitAsync(ct);
@@ -128,7 +103,7 @@ public sealed class JsonSecretsProvider : ISecretsProvider, IDisposable
   }
 
   /// <inheritdoc/>
-  public async Task<IReadOnlyList<string>> ListTagsAsync(CancellationToken ct = default)
+  public override async Task<IReadOnlyList<string>> ListTagsAsync(CancellationToken ct = default)
   {
     await EnsureLoadedAsync(ct);
     await _lock.WaitAsync(ct);
@@ -140,27 +115,6 @@ public sealed class JsonSecretsProvider : ISecretsProvider, IDisposable
     {
       _lock.Release();
     }
-  }
-
-  /// <inheritdoc/>
-  public bool ContainsSecretTag(string value) => SecretTag.ContainsTag(value);
-
-  /// <inheritdoc/>
-  public async Task<string> ResolveTagsAsync(string value, CancellationToken ct = default)
-  {
-    if (string.IsNullOrEmpty(value) || !ContainsSecretTag(value))
-      return value;
-
-    var result = value;
-    foreach (var tag in SecretTag.ExtractAll(value))
-    {
-      var secret = await GetSecretAsync(tag.Identifier, ct);
-      if (secret != null)
-      {
-        result = result.Replace(tag.Tag, secret);
-      }
-    }
-    return result;
   }
 
   private async Task EnsureLoadedAsync(CancellationToken ct)
@@ -223,24 +177,6 @@ public sealed class JsonSecretsProvider : ISecretsProvider, IDisposable
     await File.WriteAllTextAsync(tempPath, json, ct);
     File.Move(tempPath, _filePath, overwrite: true);
     _logger.LogDebug("Saved {Count} secrets to {Path}", _secrets.Count, _filePath);
-  }
-
-  private string Encrypt(string plainText)
-  {
-    return _protector.Protect(plainText);
-  }
-
-  private string Decrypt(string cipherText)
-  {
-    try
-    {
-      return _protector.Unprotect(cipherText);
-    }
-    catch (Exception ex)
-    {
-      _logger.LogError(ex, "Failed to decrypt secret");
-      throw new InvalidOperationException("Failed to decrypt secret", ex);
-    }
   }
 
   /// <inheritdoc/>

@@ -8,23 +8,23 @@ using Radio.Infrastructure.Configuration.Models;
 /// <summary>
 /// SQLite database-based configuration store implementation.
 /// </summary>
-public sealed class SqliteConfigurationStore : IConfigurationStore, IAsyncDisposable
+public sealed class SqliteConfigurationStore : ConfigurationStoreBase, IAsyncDisposable
 {
   private readonly string _connectionString;
   private readonly string _tableName;
-  private readonly ISecretsProvider _secretsProvider;
-  private readonly ILogger<SqliteConfigurationStore> _logger;
   private readonly SemaphoreSlim _lock = new(1, 1);
 
   private SqliteConnection? _connection;
   private bool _tableCreated;
   private bool _disposed;
 
-  /// <inheritdoc/>
-  public string StoreId { get; }
+  private readonly string _storeId;
 
   /// <inheritdoc/>
-  public ConfigurationStoreType StoreType => ConfigurationStoreType.Sqlite;
+  public override string StoreId => _storeId;
+
+  /// <inheritdoc/>
+  public override ConfigurationStoreType StoreType => ConfigurationStoreType.Sqlite;
 
   /// <summary>
   /// Initializes a new instance of the SqliteConfigurationStore class.
@@ -34,18 +34,17 @@ public sealed class SqliteConfigurationStore : IConfigurationStore, IAsyncDispos
     string connectionString,
     ISecretsProvider secretsProvider,
     ILogger<SqliteConfigurationStore> logger)
+    : base(secretsProvider, logger)
   {
-    StoreId = storeId ?? throw new ArgumentNullException(nameof(storeId));
+    _storeId = storeId ?? throw new ArgumentNullException(nameof(storeId));
     _connectionString = connectionString ?? throw new ArgumentNullException(nameof(connectionString));
-    _secretsProvider = secretsProvider ?? throw new ArgumentNullException(nameof(secretsProvider));
-    _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     // Use storeId as table name (sanitized)
     _tableName = $"Config_{SanitizeTableName(storeId)}";
   }
 
   /// <inheritdoc/>
-  public async Task<ConfigurationEntry?> GetEntryAsync(string key, ConfigurationReadMode mode = ConfigurationReadMode.Resolved, CancellationToken ct = default)
+  public override async Task<ConfigurationEntry?> GetEntryAsync(string key, ConfigurationReadMode mode = ConfigurationReadMode.Resolved, CancellationToken ct = default)
   {
     await EnsureInitializedAsync(ct);
 
@@ -69,7 +68,7 @@ public sealed class SqliteConfigurationStore : IConfigurationStore, IAsyncDispos
   }
 
   /// <inheritdoc/>
-  public async Task<IReadOnlyList<ConfigurationEntry>> GetAllEntriesAsync(ConfigurationReadMode mode = ConfigurationReadMode.Resolved, CancellationToken ct = default)
+  public override async Task<IReadOnlyList<ConfigurationEntry>> GetAllEntriesAsync(ConfigurationReadMode mode = ConfigurationReadMode.Resolved, CancellationToken ct = default)
   {
     await EnsureInitializedAsync(ct);
 
@@ -93,11 +92,11 @@ public sealed class SqliteConfigurationStore : IConfigurationStore, IAsyncDispos
   }
 
   /// <inheritdoc/>
-  public async Task<IReadOnlyList<ConfigurationEntry>> GetEntriesBySectionAsync(string sectionPrefix, ConfigurationReadMode mode = ConfigurationReadMode.Resolved, CancellationToken ct = default)
+  public override async Task<IReadOnlyList<ConfigurationEntry>> GetEntriesBySectionAsync(string sectionPrefix, ConfigurationReadMode mode = ConfigurationReadMode.Resolved, CancellationToken ct = default)
   {
     await EnsureInitializedAsync(ct);
 
-    var prefix = sectionPrefix.EndsWith(':') ? sectionPrefix : $"{sectionPrefix}:";
+    var prefix = NormalizeSectionPrefix(sectionPrefix);
     var entries = new List<ConfigurationEntry>();
 
     var sql = $"SELECT Key, Value, Description, LastModified FROM {_tableName} WHERE Key LIKE @Prefix";
@@ -120,7 +119,7 @@ public sealed class SqliteConfigurationStore : IConfigurationStore, IAsyncDispos
   }
 
   /// <inheritdoc/>
-  public async Task SetEntryAsync(string key, string value, CancellationToken ct = default)
+  public override async Task SetEntryAsync(string key, string value, CancellationToken ct = default)
   {
     await EnsureInitializedAsync(ct);
 
@@ -139,11 +138,11 @@ public sealed class SqliteConfigurationStore : IConfigurationStore, IAsyncDispos
     cmd.Parameters.AddWithValue("@LastModified", now);
 
     await cmd.ExecuteNonQueryAsync(ct);
-    _logger.LogDebug("Set entry {Key} in store {StoreId}", key, StoreId);
+    Logger.LogDebug("Set entry {Key} in store {StoreId}", key, StoreId);
   }
 
   /// <inheritdoc/>
-  public async Task SetEntriesAsync(IEnumerable<ConfigurationEntry> entries, CancellationToken ct = default)
+  public override async Task SetEntriesAsync(IEnumerable<ConfigurationEntry> entries, CancellationToken ct = default)
   {
     await EnsureInitializedAsync(ct);
 
@@ -172,7 +171,7 @@ public sealed class SqliteConfigurationStore : IConfigurationStore, IAsyncDispos
       }
 
       await transaction.CommitAsync(ct);
-      _logger.LogDebug("Set multiple entries in store {StoreId}", StoreId);
+      Logger.LogDebug("Set multiple entries in store {StoreId}", StoreId);
     }
     catch
     {
@@ -182,7 +181,7 @@ public sealed class SqliteConfigurationStore : IConfigurationStore, IAsyncDispos
   }
 
   /// <inheritdoc/>
-  public async Task<bool> DeleteEntryAsync(string key, CancellationToken ct = default)
+  public override async Task<bool> DeleteEntryAsync(string key, CancellationToken ct = default)
   {
     await EnsureInitializedAsync(ct);
 
@@ -194,14 +193,14 @@ public sealed class SqliteConfigurationStore : IConfigurationStore, IAsyncDispos
     var deleted = await cmd.ExecuteNonQueryAsync(ct);
     if (deleted > 0)
     {
-      _logger.LogDebug("Deleted entry {Key} from store {StoreId}", key, StoreId);
+      Logger.LogDebug("Deleted entry {Key} from store {StoreId}", key, StoreId);
       return true;
     }
     return false;
   }
 
   /// <inheritdoc/>
-  public async Task<bool> ExistsAsync(string key, CancellationToken ct = default)
+  public override async Task<bool> ExistsAsync(string key, CancellationToken ct = default)
   {
     await EnsureInitializedAsync(ct);
 
@@ -215,14 +214,14 @@ public sealed class SqliteConfigurationStore : IConfigurationStore, IAsyncDispos
   }
 
   /// <inheritdoc/>
-  public Task<bool> SaveAsync(CancellationToken ct = default)
+  public override Task<bool> SaveAsync(CancellationToken ct = default)
   {
     // SQLite auto-commits, so nothing to do
     return Task.FromResult(true);
   }
 
   /// <inheritdoc/>
-  public async Task ReloadAsync(CancellationToken ct = default)
+  public override async Task ReloadAsync(CancellationToken ct = default)
   {
     // Close and reopen connection to pick up any external changes
     if (_connection != null)
@@ -278,38 +277,7 @@ public sealed class SqliteConfigurationStore : IConfigurationStore, IAsyncDispos
     await cmd.ExecuteNonQueryAsync(ct);
 
     _tableCreated = true;
-    _logger.LogDebug("SQLite configuration store initialized: {StoreId}", StoreId);
-  }
-
-  private async Task<ConfigurationEntry> CreateEntryAsync(
-    string key,
-    string rawValue,
-    string? description,
-    DateTimeOffset? lastModified,
-    ConfigurationReadMode mode,
-    CancellationToken ct)
-  {
-    var containsSecret = _secretsProvider.ContainsSecretTag(rawValue);
-
-    string resolvedValue;
-    if (mode == ConfigurationReadMode.Resolved && containsSecret)
-    {
-      resolvedValue = await _secretsProvider.ResolveTagsAsync(rawValue, ct);
-    }
-    else
-    {
-      resolvedValue = rawValue;
-    }
-
-    return new ConfigurationEntry
-    {
-      Key = key,
-      Value = resolvedValue,
-      RawValue = containsSecret ? rawValue : null,
-      ContainsSecret = containsSecret,
-      LastModified = lastModified,
-      Description = description
-    };
+    Logger.LogDebug("SQLite configuration store initialized: {StoreId}", StoreId);
   }
 
   private static string SanitizeTableName(string name)
