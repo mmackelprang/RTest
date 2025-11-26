@@ -2,6 +2,11 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
+using SoundFlow.Backends.MiniAudio;
+using SoundFlow.Interfaces;
+using SoundFlow.Metadata;
+using SoundFlow.Providers;
+using SoundFlow.Structs;
 
 namespace Radio.Infrastructure.Audio.Sources.Primary;
 
@@ -16,7 +21,8 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
   private readonly Dictionary<string, string> _metadata = new();
   private Queue<string> _playlist = new();
   private string? _currentFile;
-  private object? _soundComponent;
+  private ISoundDataProvider? _dataProvider;
+  private MiniAudioEngine? _audioEngine;
   private TimeSpan _duration;
   private TimeSpan _position;
 
@@ -75,7 +81,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
   /// <inheritdoc/>
   public override object GetSoundComponent()
   {
-    return _soundComponent ?? throw new InvalidOperationException("Audio source not initialized");
+    return _dataProvider ?? throw new InvalidOperationException("Audio source not initialized");
   }
 
   /// <summary>
@@ -297,11 +303,29 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
       _preferences.CurrentValue.SongPositionMs = (long)_position.TotalMilliseconds;
     }
 
+    CleanupDataProvider();
     _currentFile = null;
     _playlist.Clear();
-    _soundComponent = null;
 
     await base.DisposeAsyncCore();
+  }
+
+  /// <summary>
+  /// Cleans up the data provider and audio engine.
+  /// </summary>
+  private void CleanupDataProvider()
+  {
+    if (_dataProvider is IDisposable disposable)
+    {
+      disposable.Dispose();
+    }
+    _dataProvider = null;
+
+    if (_audioEngine != null)
+    {
+      _audioEngine.Dispose();
+      _audioEngine = null;
+    }
   }
 
   private string GetFullPath(string relativePath)
@@ -339,16 +363,33 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
     _currentFile = _playlist.Dequeue();
     _position = TimeSpan.Zero;
 
-    UpdateMetadataFromFile(_currentFile);
+    // Clean up previous data provider
+    CleanupDataProvider();
 
-    // In a real implementation, this would load the file into SoundFlow
-    _soundComponent = new object(); // Placeholder
-
-    Logger.LogDebug("Loaded file: {File}", _currentFile);
-
-    if (State == AudioSourceState.Created)
+    try
     {
-      State = AudioSourceState.Ready;
+      // Initialize SoundFlow audio engine if not already done
+      _audioEngine ??= new MiniAudioEngine();
+
+      // Create a data provider from the file using SoundFlow
+      using var fileStream = File.OpenRead(_currentFile);
+      _dataProvider = new ChunkedDataProvider(_audioEngine, fileStream);
+
+      // Read metadata from the file
+      UpdateMetadataFromFile(_currentFile);
+
+      Logger.LogDebug("Loaded file: {File}", _currentFile);
+
+      if (State == AudioSourceState.Created)
+      {
+        State = AudioSourceState.Ready;
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to load audio file: {File}", _currentFile);
+      _dataProvider = null;
+      throw;
     }
 
     await Task.CompletedTask;
@@ -362,9 +403,78 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
     _metadata["Directory"] = Path.GetDirectoryName(filePath) ?? "";
     _metadata["Extension"] = Path.GetExtension(filePath);
 
-    // In a real implementation, this would read metadata from the audio file
-    // (ID3 tags for MP3, Vorbis comments for OGG, etc.)
-    _duration = TimeSpan.FromMinutes(3); // Placeholder
-    _metadata["Duration"] = _duration.ToString();
+    // Use SoundFlow's metadata reader to get audio tags
+    try
+    {
+      var result = SoundMetadataReader.Read(filePath);
+      if (result.IsSuccess && result.Value != null)
+      {
+        var formatInfo = result.Value;
+
+        // Get duration from Duration property
+        if (formatInfo.Duration != TimeSpan.Zero)
+        {
+          _duration = formatInfo.Duration;
+        }
+        else
+        {
+          _duration = TimeSpan.Zero;
+        }
+
+        _metadata["Duration"] = _duration.ToString();
+        _metadata["SampleRate"] = formatInfo.SampleRate.ToString();
+        _metadata["Channels"] = formatInfo.ChannelCount.ToString();
+        _metadata["BitRate"] = formatInfo.Bitrate.ToString();
+
+        // Get tags (Title, Artist, Album, etc.)
+        if (formatInfo.Tags != null)
+        {
+          if (!string.IsNullOrEmpty(formatInfo.Tags.Title))
+          {
+            _metadata["Title"] = formatInfo.Tags.Title;
+          }
+          if (!string.IsNullOrEmpty(formatInfo.Tags.Artist))
+          {
+            _metadata["Artist"] = formatInfo.Tags.Artist;
+          }
+          if (!string.IsNullOrEmpty(formatInfo.Tags.Album))
+          {
+            _metadata["Album"] = formatInfo.Tags.Album;
+          }
+          if (!string.IsNullOrEmpty(formatInfo.Tags.Genre))
+          {
+            _metadata["Genre"] = formatInfo.Tags.Genre;
+          }
+          if (formatInfo.Tags.Year.HasValue)
+          {
+            _metadata["Year"] = formatInfo.Tags.Year.Value.ToString();
+          }
+          if (formatInfo.Tags.TrackNumber.HasValue)
+          {
+            _metadata["TrackNumber"] = formatInfo.Tags.TrackNumber.Value.ToString();
+          }
+        }
+
+        Logger.LogDebug(
+          "Loaded metadata for {File}: Title={Title}, Artist={Artist}, Duration={Duration}",
+          Path.GetFileName(filePath),
+          _metadata.GetValueOrDefault("Title"),
+          _metadata.GetValueOrDefault("Artist"),
+          _duration);
+      }
+      else
+      {
+        // Fallback to basic file info only
+        _duration = TimeSpan.Zero;
+        _metadata["Duration"] = _duration.ToString();
+        Logger.LogDebug("Could not read metadata from {File}, using file name as title", filePath);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to read metadata from {File}, using default values", filePath);
+      _duration = TimeSpan.Zero;
+      _metadata["Duration"] = _duration.ToString();
+    }
   }
 }

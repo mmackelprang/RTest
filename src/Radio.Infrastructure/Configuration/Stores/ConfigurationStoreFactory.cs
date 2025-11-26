@@ -156,9 +156,41 @@ public sealed class ConfigurationStoreFactory : IConfigurationStoreFactory
 
   private List<string> ListSqliteStores(string basePath)
   {
-    // For SQLite, we'd need to query the database for table names
-    // This is a simplified implementation that returns an empty list
-    // In a full implementation, we'd query sqlite_master for tables
-    return new List<string>();
+    var storeIds = new List<string>();
+    var dbPath = Path.Combine(basePath, _options.SqliteFileName);
+
+    if (!File.Exists(dbPath))
+    {
+      return storeIds;
+    }
+
+    var connectionString = $"Data Source={dbPath}";
+    using var connection = new Microsoft.Data.Sqlite.SqliteConnection(connectionString);
+    connection.Open();
+
+    // Query sqlite_master for configuration tables
+    // Our tables are named with pattern: Config_{storeId}
+    const string sql = @"
+      SELECT name FROM sqlite_master
+      WHERE type = 'table'
+        AND name LIKE 'Config_%'
+        AND name NOT LIKE 'sqlite_%'";
+
+    using var cmd = connection.CreateCommand();
+    cmd.CommandText = sql;
+
+    using var reader = cmd.ExecuteReader();
+    while (reader.Read())
+    {
+      var tableName = reader.GetString(0);
+      // Extract storeId from table name (remove "Config_" prefix)
+      if (tableName.StartsWith("Config_", StringComparison.Ordinal))
+      {
+        var storeId = tableName["Config_".Length..];
+        storeIds.Add(storeId);
+      }
+    }
+
+    return storeIds;
   }
 }

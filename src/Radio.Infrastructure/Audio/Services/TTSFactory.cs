@@ -268,14 +268,70 @@ public class TTSFactory : ITTSFactory
 
     _logger.LogDebug("Generating Google TTS audio for voice: {Voice}", voice);
 
-    // Google Cloud TTS integration requires the Google.Cloud.TextToSpeech.V1 NuGet package.
-    // This is a placeholder for when the dependency is added.
-    throw new NotSupportedException(
-      "Google Cloud TTS integration is not yet implemented. " +
-      "Add the Google.Cloud.TextToSpeech.V1 NuGet package and implement the API call.");
+    using var httpClient = new HttpClient();
+
+    // Google Cloud Text-to-Speech REST API
+    var endpoint = $"https://texttospeech.googleapis.com/v1/text:synthesize?key={secrets.GoogleAPIKey}";
+
+    // Parse voice to extract language code and voice name
+    // Voice format is typically like "en-US-Standard-A"
+    var languageCode = voice.Contains('-') ? string.Join("-", voice.Split('-').Take(2)) : "en-US";
+
+    var requestBody = new
+    {
+      input = new { text },
+      voice = new
+      {
+        languageCode,
+        name = voice
+      },
+      audioConfig = new
+      {
+        audioEncoding = "LINEAR16",
+        speakingRate = speed,
+        pitch = (pitch - 1.0) * 20 // Convert 0.5-2.0 range to -20 to +20 semitones
+      }
+    };
+
+    var json = System.Text.Json.JsonSerializer.Serialize(requestBody);
+    var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+
+    var response = await httpClient.PostAsync(endpoint, content, cancellationToken);
+
+    if (!response.IsSuccessStatusCode)
+    {
+      var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+      _logger.LogError("Google TTS API error: {StatusCode} - {Error}", response.StatusCode, errorContent);
+      throw new InvalidOperationException($"Google TTS API error: {response.StatusCode}");
+    }
+
+    var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
+    using var document = System.Text.Json.JsonDocument.Parse(responseJson);
+
+    if (!document.RootElement.TryGetProperty("audioContent", out var audioContentElement))
+    {
+      throw new InvalidOperationException("Google TTS response did not contain audio content");
+    }
+
+    var audioBase64 = audioContentElement.GetString();
+    if (string.IsNullOrEmpty(audioBase64))
+    {
+      throw new InvalidOperationException("Google TTS returned empty audio content");
+    }
+
+    var audioBytes = Convert.FromBase64String(audioBase64);
+    var memoryStream = new MemoryStream(audioBytes);
+
+    // Estimate duration from audio size (16-bit, 22050Hz mono - Google's LINEAR16 format)
+    var estimatedDuration = EstimateLinear16Duration(audioBytes.Length);
+
+    _logger.LogDebug("Generated Google TTS audio: {Length} bytes, estimated duration: {Duration}",
+      audioBytes.Length, estimatedDuration);
+
+    return (memoryStream, estimatedDuration);
   }
 
-  private Task<(Stream audioStream, TimeSpan duration)> GenerateAzureTTSAsync(
+  private async Task<(Stream audioStream, TimeSpan duration)> GenerateAzureTTSAsync(
     string text,
     string voice,
     float speed,
@@ -290,11 +346,50 @@ public class TTSFactory : ITTSFactory
 
     _logger.LogDebug("Generating Azure TTS audio for voice: {Voice}", voice);
 
-    // Azure TTS integration requires the Microsoft.CognitiveServices.Speech NuGet package.
-    // This is a placeholder for when the dependency is added.
-    throw new NotSupportedException(
-      "Azure TTS integration is not yet implemented. " +
-      "Add the Microsoft.CognitiveServices.Speech NuGet package and implement the API call.");
+    using var httpClient = new HttpClient();
+
+    // Azure Cognitive Services Speech REST API
+    var endpoint = $"https://{secrets.AzureRegion}.tts.speech.microsoft.com/cognitiveservices/v1";
+
+    // Add required headers
+    httpClient.DefaultRequestHeaders.Add("Ocp-Apim-Subscription-Key", secrets.AzureAPIKey);
+    httpClient.DefaultRequestHeaders.Add("X-Microsoft-OutputFormat", "riff-24khz-16bit-mono-pcm");
+
+    // Create SSML payload for Azure TTS
+    // Speed: Azure uses rate as percentage (e.g., "50%" to "-50%", "100%" is normal, "200%" is 2x)
+    // Pitch: Azure uses semitones (e.g., "+20%", "-20%")
+    var ratePercent = (int)((speed - 1.0) * 100);
+    var pitchPercent = (int)((pitch - 1.0) * 100);
+
+    var ssml = $@"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>
+  <voice name='{voice}'>
+    <prosody rate='{ratePercent:+#;-#;0}%' pitch='{pitchPercent:+#;-#;0}%'>
+      {System.Security.SecurityElement.Escape(text)}
+    </prosody>
+  </voice>
+</speak>";
+
+    var content = new StringContent(ssml, System.Text.Encoding.UTF8, "application/ssml+xml");
+
+    var response = await httpClient.PostAsync(endpoint, content, cancellationToken);
+
+    if (!response.IsSuccessStatusCode)
+    {
+      var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+      _logger.LogError("Azure TTS API error: {StatusCode} - {Error}", response.StatusCode, errorContent);
+      throw new InvalidOperationException($"Azure TTS API error: {response.StatusCode}");
+    }
+
+    var audioBytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+    var memoryStream = new MemoryStream(audioBytes);
+
+    // Estimate duration from audio size (24kHz, 16-bit, mono WAV)
+    var estimatedDuration = EstimateWavDuration24kHz(audioBytes.Length);
+
+    _logger.LogDebug("Generated Azure TTS audio: {Length} bytes, estimated duration: {Duration}",
+      audioBytes.Length, estimatedDuration);
+
+    return (memoryStream, estimatedDuration);
   }
 
   private async Task<IReadOnlyList<TTSVoiceInfo>> GetESpeakVoicesAsync(CancellationToken cancellationToken)
@@ -398,6 +493,40 @@ public class TTSFactory : ITTSFactory
     // Bytes per second = 22050 * 2 = 44100
     // Account for WAV header (~44 bytes)
     const int bytesPerSecond = 44100;
+    const int headerSize = 44;
+
+    if (bytes <= headerSize)
+    {
+      return TimeSpan.Zero;
+    }
+
+    var audioBytes = bytes - headerSize;
+    var seconds = (double)audioBytes / bytesPerSecond;
+
+    return TimeSpan.FromSeconds(seconds);
+  }
+
+  private static TimeSpan EstimateLinear16Duration(long bytes)
+  {
+    // Google TTS LINEAR16 format is 24kHz, 16-bit, mono (as per API docs)
+    // Bytes per second = 24000 * 2 = 48000
+    const int bytesPerSecond = 48000;
+
+    if (bytes <= 0)
+    {
+      return TimeSpan.Zero;
+    }
+
+    var seconds = (double)bytes / bytesPerSecond;
+    return TimeSpan.FromSeconds(seconds);
+  }
+
+  private static TimeSpan EstimateWavDuration24kHz(long bytes)
+  {
+    // Azure riff-24khz-16bit-mono-pcm format
+    // Bytes per second = 24000 * 2 = 48000
+    // Account for WAV header (~44 bytes)
+    const int bytesPerSecond = 48000;
     const int headerSize = 44;
 
     if (bytes <= headerSize)

@@ -1,6 +1,10 @@
 using Microsoft.Extensions.Logging;
 using Radio.Core.Exceptions;
 using Radio.Core.Interfaces.Audio;
+using SoundFlow.Abstracts.Devices;
+using SoundFlow.Backends.MiniAudio;
+using SoundFlow.Enums;
+using SoundFlow.Structs;
 
 namespace Radio.Infrastructure.Audio.Sources.Primary;
 
@@ -15,6 +19,8 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   private readonly Dictionary<string, string> _metadata = new();
   private string? _reservedPort;
   private object? _soundComponent;
+  private AudioCaptureDevice? _captureDevice;
+  private MiniAudioEngine? _audioEngine;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="USBAudioSourceBase"/> class.
@@ -118,19 +124,85 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
 
     try
     {
-      // Create SoundFlow audio capture for USB input
-      // In a real implementation, this would create a SoundFlow capture device
-      _soundComponent = new object(); // Placeholder for actual SoundFlow component
+      // Create SoundFlow MiniAudioEngine for audio capture
+      _audioEngine = new MiniAudioEngine();
 
-      Logger.LogInformation("{SourceName} initialized on USB port {USBPort}", Name, usbPort);
+      // Find the USB capture device matching the port
+      var captureDevices = _audioEngine.CaptureDevices;
+      DeviceInfo? targetDevice = null;
+
+      foreach (var device in captureDevices)
+      {
+        // Match by device name containing the USB port identifier
+        // USB devices on Linux typically include card/device info in the name
+        if (device.Name.Contains(usbPort, StringComparison.OrdinalIgnoreCase))
+        {
+          targetDevice = device;
+          break;
+        }
+      }
+
+      // If no specific device found, use the default capture device if available
+      if (targetDevice == null && captureDevices.Length > 0)
+      {
+        Logger.LogWarning(
+          "Could not find USB capture device for port {USBPort}, using first available capture device",
+          usbPort);
+        targetDevice = captureDevices[0];
+      }
+
+      // Initialize the capture device with standard CD quality audio format (44.1kHz stereo)
+      _captureDevice = _audioEngine.InitializeCaptureDevice(targetDevice, AudioFormat.Cd);
+
+      // Subscribe to audio capture events
+      _captureDevice.OnAudioProcessed += OnAudioCaptured;
+
+      // Store the capture device as the sound component
+      _soundComponent = _captureDevice;
+
+      Logger.LogInformation(
+        "{SourceName} initialized on USB port {USBPort} using device: {DeviceName}",
+        Name, usbPort, targetDevice?.Name ?? "default");
       State = AudioSourceState.Ready;
     }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Failed to initialize {SourceName} audio capture on {USBPort}", Name, usbPort);
+      CleanupCaptureDevice();
       ReleaseUSBPort();
       State = AudioSourceState.Error;
       throw;
+    }
+  }
+
+  /// <summary>
+  /// Called when audio samples are captured from the USB device.
+  /// Override in derived classes to process the captured audio.
+  /// </summary>
+  /// <param name="samples">The captured audio samples.</param>
+  /// <param name="capability">The device capability (should be Record for capture).</param>
+  protected virtual void OnAudioCaptured(Span<float> samples, Capability capability)
+  {
+    // Default implementation does nothing
+    // Derived classes can override to process audio samples
+  }
+
+  /// <summary>
+  /// Cleans up the capture device and audio engine.
+  /// </summary>
+  private void CleanupCaptureDevice()
+  {
+    if (_captureDevice != null)
+    {
+      _captureDevice.OnAudioProcessed -= OnAudioCaptured;
+      _captureDevice.Dispose();
+      _captureDevice = null;
+    }
+
+    if (_audioEngine != null)
+    {
+      _audioEngine.Dispose();
+      _audioEngine = null;
     }
   }
 
@@ -170,6 +242,7 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   /// <inheritdoc/>
   protected override async ValueTask DisposeAsyncCore()
   {
+    CleanupCaptureDevice();
     ReleaseUSBPort();
     _soundComponent = null;
     await base.DisposeAsyncCore();
