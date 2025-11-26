@@ -9,14 +9,10 @@ namespace Radio.Infrastructure.Audio.Sources.Primary;
 /// <summary>
 /// Generic USB audio source that allows users to select any USB audio device.
 /// </summary>
-public class GenericUSBAudioSource : PrimaryAudioSourceBase
+public class GenericUSBAudioSource : USBAudioSourceBase
 {
   private readonly IOptionsMonitor<GenericSourcePreferences> _preferences;
-  private readonly IAudioDeviceManager _deviceManager;
-  private readonly Dictionary<string, string> _metadata = new();
-  private string? _reservedPort;
   private string? _deviceId;
-  private object? _soundComponent;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="GenericUSBAudioSource"/> class.
@@ -28,10 +24,9 @@ public class GenericUSBAudioSource : PrimaryAudioSourceBase
     ILogger<GenericUSBAudioSource> logger,
     IOptionsMonitor<GenericSourcePreferences> preferences,
     IAudioDeviceManager deviceManager)
-    : base(logger)
+    : base(logger, deviceManager)
   {
     _preferences = preferences;
-    _deviceManager = deviceManager;
   }
 
   /// <inheritdoc/>
@@ -40,33 +35,15 @@ public class GenericUSBAudioSource : PrimaryAudioSourceBase
   /// <inheritdoc/>
   public override AudioSourceType Type => AudioSourceType.GenericUSB;
 
-  /// <inheritdoc/>
-  public override TimeSpan? Duration => null; // Live stream has no duration
-
-  /// <inheritdoc/>
-  public override TimeSpan Position => TimeSpan.Zero; // Live stream has no position
-
-  /// <inheritdoc/>
-  public override bool IsSeekable => false; // Live input cannot be seeked
-
-  /// <inheritdoc/>
-  public override IReadOnlyDictionary<string, string> Metadata => _metadata;
-
   /// <summary>
   /// Gets the USB port path for the selected device.
   /// </summary>
-  public string? USBPort => _reservedPort;
+  public string? USBPort => ReservedUSBPort;
 
   /// <summary>
   /// Gets the device ID of the selected audio device.
   /// </summary>
   public string? DeviceId => _deviceId;
-
-  /// <inheritdoc/>
-  public override object GetSoundComponent()
-  {
-    return _soundComponent ?? throw new InvalidOperationException("Audio source not initialized");
-  }
 
   /// <summary>
   /// Initializes the audio source with a specific USB port.
@@ -79,8 +56,8 @@ public class GenericUSBAudioSource : PrimaryAudioSourceBase
   {
     ThrowIfDisposed();
 
-    // Check if USB port is available
-    if (_deviceManager.IsUSBPortInUse(usbPort))
+    // Check if USB port is available before attempting to reserve
+    if (DeviceManager.IsUSBPortInUse(usbPort))
     {
       Logger.LogError("USB port {USBPort} is already in use by another source", usbPort);
       throw new AudioDeviceConflictException(
@@ -90,34 +67,12 @@ public class GenericUSBAudioSource : PrimaryAudioSourceBase
         Id);
     }
 
-    // Reserve and connect
-    _deviceManager.ReserveUSBPort(usbPort, Id);
-    _reservedPort = usbPort;
+    MetadataInternal["Source"] = "Generic USB";
 
-    try
-    {
-      // Create SoundFlow audio capture for USB input
-      _soundComponent = new object(); // Placeholder for actual SoundFlow component
+    await InitializeUSBCaptureAsync(usbPort, cancellationToken);
 
-      _metadata["Source"] = "Generic USB";
-      _metadata["USBPort"] = usbPort;
-
-      // Save to preferences for next session
-      _preferences.CurrentValue.USBPort = usbPort;
-
-      Logger.LogInformation("Generic USB audio source initialized on port {USBPort}", usbPort);
-      State = AudioSourceState.Ready;
-    }
-    catch (Exception ex)
-    {
-      Logger.LogError(ex, "Failed to initialize generic USB audio capture on {USBPort}", usbPort);
-      _deviceManager.ReleaseUSBPort(usbPort);
-      _reservedPort = null;
-      State = AudioSourceState.Error;
-      throw;
-    }
-
-    await Task.CompletedTask;
+    // Save to preferences for next session
+    _preferences.CurrentValue.USBPort = usbPort;
   }
 
   /// <summary>
@@ -141,8 +96,8 @@ public class GenericUSBAudioSource : PrimaryAudioSourceBase
     }
 
     _deviceId = device.Id;
-    _metadata["DeviceName"] = device.Name;
-    _metadata["DeviceId"] = device.Id;
+    MetadataInternal["DeviceName"] = device.Name;
+    MetadataInternal["DeviceId"] = device.Id;
 
     await InitializeWithPortAsync(device.USBPort, cancellationToken);
   }
@@ -150,8 +105,6 @@ public class GenericUSBAudioSource : PrimaryAudioSourceBase
   /// <inheritdoc/>
   protected override async Task InitializeAsync(CancellationToken cancellationToken = default)
   {
-    await base.InitializeAsync(cancellationToken);
-
     // Try to use saved USB port from preferences
     var savedPort = _preferences.CurrentValue.USBPort;
     if (!string.IsNullOrEmpty(savedPort))
@@ -169,48 +122,17 @@ public class GenericUSBAudioSource : PrimaryAudioSourceBase
   /// <inheritdoc/>
   protected override Task PlayCoreAsync(CancellationToken cancellationToken)
   {
-    if (_soundComponent == null || _reservedPort == null)
+    if (ReservedUSBPort == null)
     {
       throw new InvalidOperationException("Generic USB audio source not initialized with a device");
     }
 
-    Logger.LogInformation("Starting generic USB audio capture on {USBPort}", _reservedPort);
-    return Task.CompletedTask;
-  }
-
-  /// <inheritdoc/>
-  protected override Task PauseCoreAsync(CancellationToken cancellationToken)
-  {
-    Logger.LogInformation("Pausing generic USB audio (muting)");
-    return Task.CompletedTask;
-  }
-
-  /// <inheritdoc/>
-  protected override Task ResumeCoreAsync(CancellationToken cancellationToken)
-  {
-    Logger.LogInformation("Resuming generic USB audio");
-    return Task.CompletedTask;
-  }
-
-  /// <inheritdoc/>
-  protected override Task StopCoreAsync(CancellationToken cancellationToken)
-  {
-    Logger.LogInformation("Stopping generic USB audio capture");
-    return Task.CompletedTask;
+    return base.PlayCoreAsync(cancellationToken);
   }
 
   /// <inheritdoc/>
   protected override async ValueTask DisposeAsyncCore()
   {
-    // Release the USB port reservation
-    if (_reservedPort != null)
-    {
-      _deviceManager.ReleaseUSBPort(_reservedPort);
-      Logger.LogDebug("Released USB port {USBPort}", _reservedPort);
-      _reservedPort = null;
-    }
-
-    _soundComponent = null;
     _deviceId = null;
     await base.DisposeAsyncCore();
   }
