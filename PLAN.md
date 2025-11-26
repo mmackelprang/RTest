@@ -1316,7 +1316,7 @@ Create ephemeral audio sources for events. These trigger ducking of primary sour
 **Duration:** 3-4 days  
 **Risk Level:** Low  
 **Priority:** High  
-**Status:** ⚪ Not Started  
+**Status:** 🟢 Completed  
 **Dependencies:** Phase 3, Phase 4
 
 ### Objectives
@@ -1325,10 +1325,10 @@ Create ephemeral audio sources for events. These trigger ducking of primary sour
 3. Support configurable fade policies
 
 ### Deliverables
-- [ ] `IDuckingService` interface and implementation
-- [ ] Fade policies (Smooth, Quick, Instant)
-- [ ] Priority queue for events
-- [ ] Unit tests
+- [x] `IDuckingService` interface and implementation
+- [x] Fade policies (Smooth, Quick, Instant)
+- [x] Priority queue for events
+- [x] Unit tests
 
 ### Coding Assistant Prompt
 
@@ -1707,7 +1707,7 @@ Create deployment infrastructure for Raspberry Pi 5.
 | 2 | 🟢 Completed | 2025-11-26 | 2025-11-26 | Core Audio Engine with SoundFlow/MiniAudio, device enumeration, master mixer, tapped output stream |
 | 3 | ⚪ Not Started | - | - | |
 | 4 | 🟢 Completed | 2025-11-26 | 2025-11-26 | Event audio sources: IEventAudioSource, ITTSFactory, TTS engines (eSpeak/Google/Azure), AudioFileEventSource |
-| 5 | ⚪ Not Started | - | - | |
+| 5 | 🟢 Completed | 2025-11-26 | 2025-11-26 | Ducking & Priority: IDuckingService, fade policies (Smooth/Quick/Instant), priority queue, UAT tests |
 | 6 | ⚪ Not Started | - | - | |
 | 7 | ⚪ Not Started | - | - | |
 | 8 | ⚪ Not Started | - | - | |
@@ -1736,4 +1736,4 @@ As each phase is completed:
 ---
 
 *Last Updated: 2025-11-26*
-*Next Review: After Phase 4 Completion*
+*Next Review: After Phase 6 Completion*

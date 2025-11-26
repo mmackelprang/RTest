@@ -1128,7 +1128,7 @@ public static class TestAudioGenerator
 | Phase 2 | ✅ Implemented | 12 tests | Core Audio Engine Tests |
 | Phase 3 | ✅ Implemented | 14 tests | Primary Audio Sources Tests |
 | Phase 4 | ✅ Implemented | 13 tests | Event Audio Sources Tests |
-| Phase 5 | ⬜ Not Started | 13 tests | Ducking & Priority Tests |
+| Phase 5 | ✅ Implemented | 13 tests | Ducking & Priority Tests |
 | Phase 6 | ⬜ Not Started | 14 tests | Audio Outputs Tests |
 
 ### Phase 4 QA Verification Summary
@@ -1174,6 +1174,51 @@ dotnet run
 # Then select "Phase 4: Event Audio Sources Tests" from the menu
 ```
 
+### Phase 5 QA Verification Summary
+
+The Phase 5 tests enable QA to verify:
+
+1. **Priority Management** (P5-001, P5-002)
+   - Source priority assignment (1-10 scale)
+   - Priority ordering verification (highest first)
+   - Default priorities for primary and event sources
+
+2. **Ducking Behavior** (P5-003 to P5-008)
+   - Automatic ducking when event audio triggers
+   - Configurable duck levels (-6dB, -12dB, -18dB equivalents)
+   - Smooth fade ramp transitions (FadeSmooth, FadeQuick, Instant)
+   - Volume restoration after ducking completes
+   - Multi-source ducking (all background sources duck simultaneously)
+   - Nested ducking events (proper handling when multiple events overlap)
+
+3. **Priority Override** (P5-009, P5-010)
+   - Higher priority sources take precedence
+   - Lower priority sources resume when higher priority completes
+   - Clean handoffs between priority levels
+
+4. **Configuration** (P5-011)
+   - Dynamic configuration changes (DuckingPercentage, AttackMs, ReleaseMs)
+   - Different ducking policies (FadeSmooth, FadeQuick, Instant)
+
+5. **Integration** (P5-012, P5-013)
+   - TTS announcement ducking with background music
+   - Duck-exempt sources remain at original volume
+
+### Running Phase 5 Tests
+
+```bash
+# Run all Phase 5 tests
+cd tools/Radio.Tools.AudioUAT
+dotnet run -- --phase 5
+
+# Run specific test
+dotnet run -- --test P5-003  # Duck on Event Test
+
+# Interactive mode
+dotnet run
+# Then select "Phase 5: Ducking & Priority Tests" from the menu
+```
+
 ---
 
 ## Version History
@@ -1182,3 +1227,4 @@ dotnet run
 |---------|------|--------|---------|
 | 1.0 | 2025-11-26 | GitHub Copilot | Initial phased plan |
 | 1.1 | 2025-11-26 | GitHub Copilot | Phase 4 Event Audio Sources tests implemented |
+| 1.2 | 2025-11-26 | GitHub Copilot | Phase 5 Ducking & Priority tests implemented |

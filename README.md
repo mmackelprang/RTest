@@ -15,7 +15,7 @@ This project restores the original function (Radio/Vinyl) while adding modern ca
 | 2 - Core Audio | ✅ Completed | SoundFlow integration, audio engine, device manager, master mixer |
 | 3 - Audio Sources | ⬜ Not Started | Spotify, Radio, Vinyl, File Player |
 | 4 - Event Sources | ✅ Completed | TTS (eSpeak/Google/Azure), Audio File Events |
-| 5 - Ducking | ⬜ Not Started | Priority-based audio ducking |
+| 5 - Ducking | ✅ Completed | Priority-based audio ducking with configurable fade policies |
 | 6 - Outputs | ⬜ Not Started | Local audio, Chromecast |
 | 7 - Visualization | ⬜ Not Started | Spectrum, VU meters |
 | 8 - API | ⬜ Not Started | REST endpoints, SignalR |
@@ -41,8 +41,8 @@ This project restores the original function (Radio/Vinyl) while adding modern ca
 RadioConsole/
 ├── src/
 │   ├── Radio.Core/          # Core interfaces, models, and domain logic
-│   │   ├── Interfaces/Audio/  # IAudioEngine, IAudioDeviceManager, IEventAudioSource, ITTSFactory, etc.
-│   │   ├── Configuration/     # AudioEngineOptions, TTSOptions, TTSSecrets
+│   │   ├── Interfaces/Audio/  # IAudioEngine, IAudioDeviceManager, IDuckingService, etc.
+│   │   ├── Configuration/     # AudioEngineOptions, AudioOptions, TTSOptions
 │   │   └── Exceptions/        # AudioDeviceConflictException
 │   ├── Radio.Infrastructure/ # Audio management, configuration, external integrations
 │   │   ├── Audio/SoundFlow/   # SoundFlow audio engine implementation (Phase 2)
@@ -54,9 +54,10 @@ RadioConsole/
 │   │   │   ├── EventAudioSourceBase.cs
 │   │   │   ├── TTSEventSource.cs
 │   │   │   └── AudioFileEventSource.cs
-│   │   ├── Audio/Services/    # Audio service factories (Phase 4)
+│   │   ├── Audio/Services/    # Audio services (Phase 4, 5)
 │   │   │   ├── TTSFactory.cs
-│   │   │   └── AudioFileEventSourceFactory.cs
+│   │   │   ├── AudioFileEventSourceFactory.cs
+│   │   │   └── DuckingService.cs    # Phase 5 - Ducking & Priority
 │   │   ├── Configuration/     # Configuration infrastructure (Phase 1)
 │   │   │   ├── Abstractions/  # IConfigurationStore, ISecretsProvider, etc.
 │   │   │   ├── Models/        # ConfigurationEntry, SecretTag, BackupMetadata
@@ -182,6 +183,47 @@ var audioFactory = serviceProvider.GetRequiredService<AudioFileEventSourceFactor
 var eventSource = await audioFactory.CreateFromFileAsync("notifications/doorbell.wav");
 eventSource.PlaybackCompleted += (_, _) => Console.WriteLine("Doorbell played!");
 await eventSource.PlayAsync();
+```
+
+## Ducking & Priority System (Phase 5)
+
+The ducking system automatically reduces the volume of background audio when higher-priority event audio plays:
+
+- **IDuckingService**: Service for managing audio ducking with configurable policies
+- **Priority-based mixing**: Sources assigned priorities 1-10 (higher = more important)
+- **Configurable fade policies**: FadeSmooth, FadeQuick, or Instant transitions
+- **Nested event handling**: Proper volume restoration when multiple events overlap
+
+### Ducking Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| DuckingPercentage | 20 | Volume % when ducked (20 = -14dB) |
+| DuckingAttackMs | 100 | Fade-down time in milliseconds |
+| DuckingReleaseMs | 500 | Fade-up time in milliseconds |
+| DuckingPolicy | FadeSmooth | Transition type |
+
+### Usage Example
+
+```csharp
+// Register services (included in AddSoundFlowAudio)
+services.AddSoundFlowAudio(configuration);
+
+// Get the ducking service
+var duckingService = serviceProvider.GetRequiredService<IDuckingService>();
+
+// Set priority for a source
+duckingService.SetPriority(ttsSource, 9);  // High priority
+
+// Start ducking when event plays
+await duckingService.StartDuckingAsync(eventSource);
+
+// Stop ducking when event completes
+await duckingService.StopDuckingAsync(eventSource);
+
+// Check ducking state
+Console.WriteLine($"Is ducking: {duckingService.IsDucking}");
+Console.WriteLine($"Duck level: {duckingService.CurrentDuckLevel}%");
 ```
 
 ## Getting Started
