@@ -12,101 +12,22 @@ namespace Radio.Infrastructure.Audio.Outputs;
 /// Provides an HTTP endpoint that streams mixed audio to connected clients.
 /// This is used to provide audio data to Chromecast devices and other network clients.
 /// </summary>
-public class HttpStreamOutput : IAudioOutput
+public class HttpStreamOutput : AudioOutputBase
 {
   private readonly ILogger<HttpStreamOutput> _logger;
   private readonly HttpStreamOutputOptions _options;
   private readonly IAudioEngine _audioEngine;
-  private readonly object _stateLock = new();
 
-  private AudioOutputState _state = AudioOutputState.Created;
-  private float _volume = 1.0f;
-  private bool _isMuted;
-  private bool _isEnabled;
-  private bool _disposed;
   private HttpListener? _httpListener;
   private CancellationTokenSource? _serverCts;
   private Task? _serverTask;
   private readonly ConcurrentDictionary<string, HttpStreamClient> _connectedClients = new();
 
   /// <inheritdoc />
-  public string Id { get; }
+  protected override ILogger Logger => _logger;
 
   /// <inheritdoc />
-  public string Name { get; private set; }
-
-  /// <inheritdoc />
-  public AudioOutputType Type => AudioOutputType.HttpStream;
-
-  /// <inheritdoc />
-  public AudioOutputState State
-  {
-    get
-    {
-      lock (_stateLock)
-      {
-        return _state;
-      }
-    }
-    private set
-    {
-      AudioOutputState previousState;
-      lock (_stateLock)
-      {
-        previousState = _state;
-        _state = value;
-      }
-
-      if (previousState != value)
-      {
-        _logger.LogInformation(
-          "HTTP stream output state changed from {PreviousState} to {NewState}",
-          previousState, value);
-
-        StateChanged?.Invoke(this, new AudioOutputStateChangedEventArgs
-        {
-          PreviousState = previousState,
-          NewState = value,
-          OutputId = Id
-        });
-      }
-    }
-  }
-
-  /// <inheritdoc />
-  public float Volume
-  {
-    get => _volume;
-    set
-    {
-      var clamped = Math.Clamp(value, 0f, 1f);
-      if (Math.Abs(_volume - clamped) > 0.0001f)
-      {
-        _volume = clamped;
-        _logger.LogDebug("HTTP stream output volume set to {Volume:P0}", _volume);
-      }
-    }
-  }
-
-  /// <inheritdoc />
-  public bool IsMuted
-  {
-    get => _isMuted;
-    set
-    {
-      if (_isMuted != value)
-      {
-        _isMuted = value;
-        _logger.LogDebug("HTTP stream output mute set to {IsMuted}", _isMuted);
-      }
-    }
-  }
-
-  /// <inheritdoc />
-  public bool IsEnabled => _isEnabled;
-
-  /// <inheritdoc />
-  public event EventHandler<AudioOutputStateChangedEventArgs>? StateChanged;
+  public override AudioOutputType Type => AudioOutputType.HttpStream;
 
   /// <summary>
   /// Event raised when a client connects to the stream.
@@ -143,26 +64,19 @@ public class HttpStreamOutput : IAudioOutput
     ILogger<HttpStreamOutput> logger,
     IOptions<AudioOutputOptions> options,
     IAudioEngine audioEngine)
+    : base("http-stream", $"HTTP Stream :{options?.Value?.HttpStream?.Port ?? 8080}",
+        1.0f, // HTTP streams typically pass through at full volume
+        options?.Value?.HttpStream?.Enabled ?? true)
   {
     _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     _options = options?.Value?.HttpStream ?? throw new ArgumentNullException(nameof(options));
     _audioEngine = audioEngine ?? throw new ArgumentNullException(nameof(audioEngine));
-
-    Id = $"http-stream-{Guid.NewGuid():N}";
-    Name = $"HTTP Stream :{_options.Port}";
-    _isEnabled = _options.Enabled;
   }
 
   /// <inheritdoc />
-  public Task InitializeAsync(CancellationToken cancellationToken = default)
+  public override Task InitializeAsync(CancellationToken cancellationToken = default)
   {
-    ThrowIfDisposed();
-
-    if (State != AudioOutputState.Created && State != AudioOutputState.Error)
-    {
-      throw new InvalidOperationException(
-        $"Cannot initialize output in state {State}. Output must be in Created or Error state.");
-    }
+    ValidateCanInitialize();
 
     State = AudioOutputState.Initializing;
 
@@ -197,15 +111,9 @@ public class HttpStreamOutput : IAudioOutput
   }
 
   /// <inheritdoc />
-  public Task StartAsync(CancellationToken cancellationToken = default)
+  public override Task StartAsync(CancellationToken cancellationToken = default)
   {
-    ThrowIfDisposed();
-
-    if (State != AudioOutputState.Ready && State != AudioOutputState.Stopped)
-    {
-      throw new InvalidOperationException(
-        $"Cannot start output in state {State}. Output must be in Ready or Stopped state.");
-    }
+    ValidateCanStart();
 
     if (_httpListener == null)
     {
@@ -222,7 +130,7 @@ public class HttpStreamOutput : IAudioOutput
       // Start accepting connections
       _serverTask = AcceptConnectionsAsync(_serverCts.Token);
 
-      _isEnabled = true;
+      IsEnabledInternal = true;
       State = AudioOutputState.Streaming;
 
       _logger.LogInformation(
@@ -240,13 +148,10 @@ public class HttpStreamOutput : IAudioOutput
   }
 
   /// <inheritdoc />
-  public async Task StopAsync(CancellationToken cancellationToken = default)
+  public override async Task StopAsync(CancellationToken cancellationToken = default)
   {
-    ThrowIfDisposed();
-
-    if (State != AudioOutputState.Streaming)
+    if (!ValidateCanStop())
     {
-      _logger.LogWarning("Stop requested but server is not streaming (state: {State})", State);
       return;
     }
 
@@ -288,7 +193,7 @@ public class HttpStreamOutput : IAudioOutput
       _serverCts?.Dispose();
       _serverCts = null;
 
-      _isEnabled = false;
+      IsEnabledInternal = false;
       State = AudioOutputState.Stopped;
 
       _logger.LogInformation("HTTP stream server stopped");
@@ -483,21 +388,13 @@ public class HttpStreamOutput : IAudioOutput
     return ms.ToArray();
   }
 
-  private void ThrowIfDisposed()
-  {
-    ObjectDisposedException.ThrowIf(_disposed, this);
-  }
-
   /// <inheritdoc />
-  public async ValueTask DisposeAsync()
+  public override async ValueTask DisposeAsync()
   {
-    if (_disposed)
+    if (IsDisposed)
     {
       return;
     }
-
-    _disposed = true;
-    _isEnabled = false;
 
     if (State == AudioOutputState.Streaming)
     {
@@ -514,8 +411,7 @@ public class HttpStreamOutput : IAudioOutput
     _httpListener?.Close();
     _serverCts?.Dispose();
 
-    State = AudioOutputState.Disposed;
-    _logger.LogInformation("HTTP stream output disposed");
+    DisposeBase();
   }
 }
 

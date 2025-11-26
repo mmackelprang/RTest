@@ -13,105 +13,19 @@ namespace Radio.Infrastructure.Audio.Outputs;
 /// Google Chromecast audio output implementation using SharpCaster.
 /// Streams audio to Chromecast devices via HTTP stream endpoint.
 /// </summary>
-public class GoogleCastOutput : IAudioOutput
+public class GoogleCastOutput : AudioOutputBase
 {
   private readonly ILogger<GoogleCastOutput> _logger;
   private readonly GoogleCastOutputOptions _options;
-  private readonly object _stateLock = new();
-
-  private AudioOutputState _state = AudioOutputState.Created;
-  private float _volume;
-  private bool _isMuted;
-  private bool _isEnabled;
-  private bool _disposed;
   private ChromecastClient? _client;
   private ChromecastReceiver? _connectedReceiver;
   private string? _streamUrl;
 
   /// <inheritdoc />
-  public string Id { get; }
+  protected override ILogger Logger => _logger;
 
   /// <inheritdoc />
-  public string Name { get; private set; }
-
-  /// <inheritdoc />
-  public AudioOutputType Type => AudioOutputType.GoogleCast;
-
-  /// <inheritdoc />
-  public AudioOutputState State
-  {
-    get
-    {
-      lock (_stateLock)
-      {
-        return _state;
-      }
-    }
-    private set
-    {
-      AudioOutputState previousState;
-      lock (_stateLock)
-      {
-        previousState = _state;
-        _state = value;
-      }
-
-      if (previousState != value)
-      {
-        _logger.LogInformation(
-          "Google Cast output state changed from {PreviousState} to {NewState}",
-          previousState, value);
-
-        StateChanged?.Invoke(this, new AudioOutputStateChangedEventArgs
-        {
-          PreviousState = previousState,
-          NewState = value,
-          OutputId = Id
-        });
-      }
-    }
-  }
-
-  /// <inheritdoc />
-  public float Volume
-  {
-    get => _volume;
-    set
-    {
-      var clamped = Math.Clamp(value, 0f, 1f);
-      if (Math.Abs(_volume - clamped) > 0.0001f)
-      {
-        _volume = clamped;
-        _logger.LogDebug("Google Cast output volume set to {Volume:P0}", _volume);
-
-        // Apply volume to connected device if available
-        _ = SetCastVolumeAsync(_volume);
-      }
-    }
-  }
-
-  /// <inheritdoc />
-  public bool IsMuted
-  {
-    get => _isMuted;
-    set
-    {
-      if (_isMuted != value)
-      {
-        _isMuted = value;
-        _logger.LogDebug("Google Cast output mute set to {IsMuted}", _isMuted);
-
-        // Apply mute state to connected device if available
-        _ = SetCastMuteAsync(_isMuted);
-      }
-    }
-  }
-
-  /// <inheritdoc />
-  public bool IsEnabled => _isEnabled;
-
-  /// <inheritdoc />
-  public event EventHandler<AudioOutputStateChangedEventArgs>? StateChanged;
+  public override AudioOutputType Type => AudioOutputType.GoogleCast;
 
   /// <summary>
   /// Event raised when a Chromecast device is discovered.
@@ -141,26 +55,32 @@ public class GoogleCastOutput : IAudioOutput
   public GoogleCastOutput(
     ILogger<GoogleCastOutput> logger,
     IOptions<AudioOutputOptions> options)
+    : base("cast-output", "Google Cast Output",
+        options?.Value?.GoogleCast?.DefaultVolume ?? 0.7f,
+        options?.Value?.GoogleCast?.Enabled ?? false)
   {
     _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     _options = options?.Value?.GoogleCast ?? throw new ArgumentNullException(nameof(options));
-
-    Id = $"cast-output-{Guid.NewGuid():N}";
-    Name = "Google Cast Output";
-    _volume = _options.DefaultVolume;
-    _isEnabled = _options.Enabled;
   }
 
   /// <inheritdoc />
-  public Task InitializeAsync(CancellationToken cancellationToken = default)
+  protected override void OnVolumeChanged(float volume)
   {
-    ThrowIfDisposed();
+    // Apply volume to connected device if available
+    _ = SetCastVolumeAsync(volume);
+  }
 
-    if (State != AudioOutputState.Created && State != AudioOutputState.Error)
-    {
-      throw new InvalidOperationException(
-        $"Cannot initialize output in state {State}. Output must be in Created or Error state.");
-    }
+  /// <inheritdoc />
+  protected override void OnMuteChanged(bool muted)
+  {
+    // Apply mute state to connected device if available
+    _ = SetCastMuteAsync(muted);
+  }
+
+  /// <inheritdoc />
+  public override Task InitializeAsync(CancellationToken cancellationToken = default)
+  {
+    ValidateCanInitialize();
 
     State = AudioOutputState.Initializing;
 
@@ -340,15 +260,9 @@ public class GoogleCastOutput : IAudioOutput
   }
 
   /// <inheritdoc />
-  public async Task StartAsync(CancellationToken cancellationToken = default)
+  public override async Task StartAsync(CancellationToken cancellationToken = default)
   {
-    ThrowIfDisposed();
-
-    if (State != AudioOutputState.Ready && State != AudioOutputState.Stopped)
-    {
-      throw new InvalidOperationException(
-        $"Cannot start output in state {State}. Output must be in Ready or Stopped state.");
-    }
+    ValidateCanStart();
 
     if (_connectedReceiver == null)
     {
@@ -384,7 +298,7 @@ public class GoogleCastOutput : IAudioOutput
         }
       }
 
-      _isEnabled = true;
+      IsEnabledInternal = true;
       State = AudioOutputState.Streaming;
 
       _logger.LogInformation("Google Cast output started streaming to {Name}", ConnectedDevice?.FriendlyName);
@@ -398,13 +312,10 @@ public class GoogleCastOutput : IAudioOutput
   }
 
   /// <inheritdoc />
-  public async Task StopAsync(CancellationToken cancellationToken = default)
+  public override async Task StopAsync(CancellationToken cancellationToken = default)
   {
-    ThrowIfDisposed();
-
-    if (State != AudioOutputState.Streaming)
+    if (!ValidateCanStop())
     {
-      _logger.LogWarning("Stop requested but output is not streaming (state: {State})", State);
       return;
     }
 
@@ -423,7 +334,7 @@ public class GoogleCastOutput : IAudioOutput
         }
       }
 
-      _isEnabled = false;
+      IsEnabledInternal = false;
       State = AudioOutputState.Stopped;
 
       _logger.LogInformation("Google Cast output stopped");
@@ -491,21 +402,13 @@ public class GoogleCastOutput : IAudioOutput
     }
   }
 
-  private void ThrowIfDisposed()
-  {
-    ObjectDisposedException.ThrowIf(_disposed, this);
-  }
-
   /// <inheritdoc />
-  public async ValueTask DisposeAsync()
+  public override async ValueTask DisposeAsync()
   {
-    if (_disposed)
+    if (IsDisposed)
     {
       return;
     }
-
-    _disposed = true;
-    _isEnabled = false;
 
     if (_connectedReceiver != null)
     {
@@ -524,8 +427,7 @@ public class GoogleCastOutput : IAudioOutput
       await _client.DisconnectAsync();
     }
 
-    State = AudioOutputState.Disposed;
-    _logger.LogInformation("Google Cast output disposed");
+    DisposeBase();
   }
 }
 
