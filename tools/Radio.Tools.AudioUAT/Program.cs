@@ -7,6 +7,7 @@ using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Tools.AudioUAT;
 using Radio.Tools.AudioUAT.Phases.Phase2;
+using Radio.Tools.AudioUAT.Phases.Phase3;
 using Radio.Tools.AudioUAT.TestResults;
 using Radio.Tools.AudioUAT.Utilities;
 using Spectre.Console;
@@ -50,6 +51,7 @@ var host = Host.CreateDefaultBuilder(args)
     services.AddSingleton<TestResultsManager>();
     services.AddSingleton<TestRunner>();
     services.AddSingleton<CoreAudioEngineTests>();
+    services.AddSingleton<PrimaryAudioSourceTests>();
   })
   .Build();
 
@@ -90,6 +92,7 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
   var resultsManager = services.GetRequiredService<TestResultsManager>();
   var runner = services.GetRequiredService<TestRunner>();
   var phase2Tests = services.GetRequiredService<CoreAudioEngineTests>();
+  var phase3Tests = services.GetRequiredService<PrimaryAudioSourceTests>();
 
   var testsToRun = new List<IPhaseTest>();
 
@@ -104,13 +107,19 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
     {
       testsToRun.AddRange(phase2Tests.GetAllTests());
     }
+    if (runAll || phaseStr == "3")
+    {
+      testsToRun.AddRange(phase3Tests.GetAllTests());
+    }
   }
   else if (args.Contains("--test"))
   {
     var testId = GetArgValue(args, "--test");
     if (!string.IsNullOrEmpty(testId))
     {
-      var test = phase2Tests.GetAllTests().FirstOrDefault(t => t.TestId == testId);
+      // Search in all phases
+      var allTests = phase2Tests.GetAllTests().Concat(phase3Tests.GetAllTests()).ToList();
+      var test = allTests.FirstOrDefault(t => t.TestId == testId);
       if (test != null)
       {
         testsToRun.Add(test);
@@ -163,6 +172,7 @@ static async Task RunInteractiveMode(IServiceProvider services)
   var resultsManager = services.GetRequiredService<TestResultsManager>();
   var runner = services.GetRequiredService<TestRunner>();
   var phase2Tests = services.GetRequiredService<CoreAudioEngineTests>();
+  var phase3Tests = services.GetRequiredService<PrimaryAudioSourceTests>();
 
   ConsoleUI.WriteWelcomeBanner();
 
@@ -185,6 +195,7 @@ static async Task RunInteractiveMode(IServiceProvider services)
     var choice = ConsoleUI.ShowMenu(
       "[bold]Main Menu[/]",
       "Phase 2: Core Audio Engine Tests",
+      "Phase 3: Primary Audio Sources Tests",
       "View Test Results",
       "Export Results to JSON",
       "Clear Results",
@@ -195,6 +206,10 @@ static async Task RunInteractiveMode(IServiceProvider services)
     {
       case "Phase 2: Core Audio Engine Tests":
         await RunPhase2Menu(services, runner, phase2Tests);
+        break;
+
+      case "Phase 3: Primary Audio Sources Tests":
+        await RunPhase3Menu(services, runner, phase3Tests);
         break;
 
       case "View Test Results":
@@ -350,6 +365,135 @@ static void ViewResults(TestResultsManager resultsManager)
   }
 
   ConsoleUI.PressAnyKeyToContinue();
+}
+
+static async Task RunPhase3Menu(IServiceProvider services, TestRunner runner, PrimaryAudioSourceTests tests)
+{
+  var exit = false;
+  while (!exit)
+  {
+    AnsiConsole.Clear();
+
+    var rule = new Rule("[cyan]Phase 3: Primary Audio Sources Tests[/]")
+    {
+      Justification = Justify.Center
+    };
+    AnsiConsole.Write(rule);
+    AnsiConsole.WriteLine();
+
+    var allTests = tests.GetAllTests();
+    var menuItems = new List<string>
+    {
+      "Run All Phase 3 Tests",
+      "---",
+      "[RADIO TESTS]",
+    };
+
+    // Group tests by category
+    foreach (var test in allTests.Where(t => t.TestId.StartsWith("P3-00")))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("[VINYL TESTS]");
+    foreach (var test in allTests.Where(t => t.TestId is "P3-005" or "P3-006" or "P3-007"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("[SPOTIFY TESTS]");
+    foreach (var test in allTests.Where(t => t.TestId is "P3-008" or "P3-009" or "P3-010"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("[MULTI-SOURCE TESTS]");
+    foreach (var test in allTests.Where(t => t.TestId is "P3-011" or "P3-012" or "P3-013" or "P3-014"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("Return to Main Menu");
+
+    var choice = ConsoleUI.ShowMenu("[bold]Select Test[/]", menuItems.ToArray());
+
+    if (choice == "Return to Main Menu")
+    {
+      exit = true;
+      continue;
+    }
+
+    if (choice.StartsWith("---") || choice.StartsWith("[RADIO") || choice.StartsWith("[VINYL") ||
+        choice.StartsWith("[SPOTIFY") || choice.StartsWith("[MULTI"))
+    {
+      continue;
+    }
+
+    if (choice == "Run All Phase 3 Tests")
+    {
+      AnsiConsole.Clear();
+      ConsoleUI.WriteHeader("Running All Phase 3 Tests");
+
+      await AnsiConsole.Progress()
+        .AutoClear(false)
+        .Columns(
+          new TaskDescriptionColumn(),
+          new ProgressBarColumn(),
+          new PercentageColumn(),
+          new SpinnerColumn())
+        .StartAsync(async ctx =>
+        {
+          var task = ctx.AddTask("Running tests...", maxValue: allTests.Count);
+
+          foreach (var test in allTests)
+          {
+            task.Description = $"Running {test.TestId}...";
+            await runner.RunTestAsync(test);
+            task.Increment(1);
+          }
+        });
+
+      var resultsManager = services.GetRequiredService<TestResultsManager>();
+      ConsoleUI.DisplayTestResults(resultsManager.GetResultsForPhase(3));
+      ConsoleUI.DisplaySummary(resultsManager.GetSummaryForPhase(3));
+      ConsoleUI.PressAnyKeyToContinue();
+    }
+    else
+    {
+      // Extract test ID from choice
+      var testIdMatch = System.Text.RegularExpressions.Regex.Match(choice, @"\[([^\]]+)\]");
+      if (testIdMatch.Success)
+      {
+        var testId = testIdMatch.Groups[1].Value;
+        var test = allTests.FirstOrDefault(t => t.TestId == testId);
+        if (test != null)
+        {
+          AnsiConsole.Clear();
+          var result = await runner.RunTestAsync(test);
+
+          AnsiConsole.WriteLine();
+          if (result.Passed)
+          {
+            ConsoleUI.WriteSuccess($"Test {test.TestId} PASSED");
+          }
+          else if (result.Skipped)
+          {
+            ConsoleUI.WriteWarning($"Test {test.TestId} SKIPPED: {result.Message}");
+          }
+          else
+          {
+            ConsoleUI.WriteError($"Test {test.TestId} FAILED: {result.Message}");
+          }
+
+          ConsoleUI.PressAnyKeyToContinue();
+        }
+      }
+    }
+  }
 }
 
 static async Task ExportResults(TestResultsManager resultsManager)
