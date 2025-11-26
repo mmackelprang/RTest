@@ -1,0 +1,31 @@
+name: TODO to Issues
+
+on:
+  schedule:
+    # Runs every Monday at 9am UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch: # Allow manual triggers
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  todo-issues:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Find TODOs and create issues
+        uses: alstr/todo-to-issue-action@v5
+        with:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IDENTIFIERS: |
+            [
+              {"name": "TODO", "labels": ["tech-debt", "todo"]},
+              {"name": "FIXME", "labels": ["bug", "tech-debt"]},
+              {"name": "HACK", "labels": ["tech-debt"]},
+              {"name": "PLACEHOLDER", "labels": ["incomplete", "tech-debt"]},
+              {"name": "NOT IMPLEMENTED", "labels": ["incomplete", "tech-debt"]},
+              {"name": "FULL IMPLEMENTATION", "labels": ["incomplete", "enhancement"]}
+            ]
