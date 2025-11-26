@@ -38,6 +38,14 @@ public static class AudioServiceExtensions
     services.AddSingleton<SoundFlowAudioEngine>();
     services.AddSingleton<IAudioEngine>(sp => sp.GetRequiredService<SoundFlowAudioEngine>());
 
+    // Bind audio options for ducking configuration
+    services.Configure<AudioOptions>(
+      configuration.GetSection(AudioOptions.SectionName));
+
+    // Register the ducking service (singleton to maintain state)
+    services.AddSingleton<DuckingService>();
+    services.AddSingleton<IDuckingService>(sp => sp.GetRequiredService<DuckingService>());
+
     // Register event audio source services
     services.AddEventAudioSources(configuration);
 
