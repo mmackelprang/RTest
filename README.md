@@ -12,7 +12,7 @@ This project restores the original function (Radio/Vinyl) while adding modern ca
 |-------|--------|-------------|
 | 0 - Project Setup | ✅ Completed | Solution structure, CI/CD pipeline |
 | 1 - Configuration | ✅ Completed | JSON/SQLite stores, secrets management, backup/restore |
-| 2 - Core Audio | ⬜ Not Started | SoundFlow integration |
+| 2 - Core Audio | ✅ Completed | SoundFlow integration, audio engine, device manager, master mixer |
 | 3 - Audio Sources | ⬜ Not Started | Spotify, Radio, Vinyl, File Player |
 | 4 - Event Sources | ⬜ Not Started | TTS, Audio File Events |
 | 5 - Ducking | ⬜ Not Started | Priority-based audio ducking |
@@ -41,20 +41,30 @@ This project restores the original function (Radio/Vinyl) while adding modern ca
 RadioConsole/
 ├── src/
 │   ├── Radio.Core/          # Core interfaces, models, and domain logic
+│   │   ├── Interfaces/Audio/  # IAudioEngine, IAudioDeviceManager, etc.
+│   │   ├── Configuration/     # AudioEngineOptions
+│   │   └── Exceptions/        # AudioDeviceConflictException
 │   ├── Radio.Infrastructure/ # Audio management, configuration, external integrations
-│   │   └── Configuration/   # Configuration infrastructure (Phase 1)
-│   │       ├── Abstractions/  # IConfigurationStore, ISecretsProvider, etc.
-│   │       ├── Models/        # ConfigurationEntry, SecretTag, BackupMetadata
-│   │       ├── Stores/        # JsonConfigurationStore, SqliteConfigurationStore
-│   │       ├── Secrets/       # JsonSecretsProvider, SqliteSecretsProvider
-│   │       ├── Backup/        # ConfigurationBackupService
-│   │       └── Services/      # ConfigurationManager
+│   │   ├── Audio/SoundFlow/   # SoundFlow audio engine implementation (Phase 2)
+│   │   │   ├── SoundFlowAudioEngine.cs
+│   │   │   ├── SoundFlowMasterMixer.cs
+│   │   │   ├── SoundFlowDeviceManager.cs
+│   │   │   └── TappedOutputStream.cs
+│   │   ├── Configuration/     # Configuration infrastructure (Phase 1)
+│   │   │   ├── Abstractions/  # IConfigurationStore, ISecretsProvider, etc.
+│   │   │   ├── Models/        # ConfigurationEntry, SecretTag, BackupMetadata
+│   │   │   ├── Stores/        # JsonConfigurationStore, SqliteConfigurationStore
+│   │   │   ├── Secrets/       # JsonSecretsProvider, SqliteSecretsProvider
+│   │   │   ├── Backup/        # ConfigurationBackupService
+│   │   │   └── Services/      # ConfigurationManager
+│   │   └── DependencyInjection/ # Service registration extensions
 │   ├── Radio.API/           # REST API and SignalR hubs
 │   └── Radio.Web/           # Blazor Server UI
 ├── tests/
 │   ├── Radio.Core.Tests/
 │   ├── Radio.Infrastructure.Tests/
-│   │   └── Configuration/   # Tests for configuration infrastructure
+│   │   ├── Configuration/   # Tests for configuration infrastructure
+│   │   └── Audio/           # Tests for audio engine components
 │   └── Radio.API.Tests/
 ├── design/                   # Design documents
 └── scripts/                  # Deployment and utility scripts
@@ -90,6 +100,42 @@ var secretTag = await configManager.CreateSecretAsync("my-settings", "ApiKey", "
 // Read with secret resolution
 var value = await configManager.GetValueAsync<string>("my-settings", "ApiKey");
 // Returns: "secret-value"
+```
+
+## Audio System
+
+The audio system (Phase 2) provides:
+
+- **SoundFlow Integration**: Cross-platform audio engine using MiniAudio backend
+- **Device Management**: Enumeration of ALSA/USB audio devices with hot-plug detection
+- **Master Mixer**: Volume, balance, and mute controls with source management
+- **Tapped Output Stream**: Ring buffer for streaming audio to Chromecast/HTTP clients
+- **USB Port Management**: Conflict detection and reservation system for USB audio sources
+
+### Usage Example
+
+```csharp
+// Register services
+services.AddSoundFlowAudio(configuration);
+
+// Get the audio engine
+var audioEngine = serviceProvider.GetRequiredService<IAudioEngine>();
+
+// Initialize and start
+await audioEngine.InitializeAsync();
+await audioEngine.StartAsync();
+
+// Get the master mixer
+var mixer = audioEngine.GetMasterMixer();
+mixer.MasterVolume = 0.75f;
+mixer.Balance = 0f; // Center
+
+// Get the device manager
+var deviceManager = serviceProvider.GetRequiredService<IAudioDeviceManager>();
+var devices = await deviceManager.GetOutputDevicesAsync();
+
+// Get the tapped output stream for streaming
+var outputStream = audioEngine.GetMixedOutputStream();
 ```
 
 ## Getting Started
