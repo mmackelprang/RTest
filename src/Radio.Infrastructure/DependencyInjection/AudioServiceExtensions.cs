@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.Outputs;
 using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
 
@@ -48,6 +49,9 @@ public static class AudioServiceExtensions
 
     // Register event audio source services
     services.AddEventAudioSources(configuration);
+
+    // Register audio output services
+    services.AddAudioOutputs(configuration);
 
     return services;
   }
@@ -112,6 +116,33 @@ public static class AudioServiceExtensions
 
     // Register audio file event source factory
     services.AddSingleton<AudioFileEventSourceFactory>();
+
+    return services;
+  }
+
+  /// <summary>
+  /// Adds audio output services (Local, Google Cast, HTTP Stream).
+  /// </summary>
+  /// <param name="services">The service collection.</param>
+  /// <param name="configuration">The configuration instance.</param>
+  /// <returns>The service collection for chaining.</returns>
+  public static IServiceCollection AddAudioOutputs(
+    this IServiceCollection services,
+    IConfiguration configuration)
+  {
+    // Bind audio output options
+    services.Configure<AudioOutputOptions>(
+      configuration.GetSection(AudioOutputOptions.SectionName));
+
+    // Register Local Audio Output (singleton - primary output)
+    services.AddSingleton<LocalAudioOutput>();
+    services.AddSingleton<IAudioOutput>(sp => sp.GetRequiredService<LocalAudioOutput>());
+
+    // Register Google Cast Output (singleton - optional external output)
+    services.AddSingleton<GoogleCastOutput>();
+
+    // Register HTTP Stream Output (singleton - provides stream URL for Chromecast)
+    services.AddSingleton<HttpStreamOutput>();
 
     return services;
   }
