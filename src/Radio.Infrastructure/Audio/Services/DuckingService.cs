@@ -380,7 +380,7 @@ public class DuckingService : IDuckingService
   }
 
   /// <summary>
-  /// Sets the duck level internally and applies to mixer.
+  /// Sets the duck level internally and raises level changed events.
   /// </summary>
   private void SetDuckLevelInternal(float level, bool transitionComplete)
   {
