@@ -6,6 +6,9 @@
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Radio.Infrastructure.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="SoundFlow" Version="1.*" />
     <PackageReference Include="SpotifyAPI.Web" Version="7.*" />
     <PackageReference Include="Serilog" Version="4.*" />

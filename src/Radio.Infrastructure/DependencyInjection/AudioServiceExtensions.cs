@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
 
 namespace Radio.Infrastructure.DependencyInjection;
@@ -37,6 +38,9 @@ public static class AudioServiceExtensions
     services.AddSingleton<SoundFlowAudioEngine>();
     services.AddSingleton<IAudioEngine>(sp => sp.GetRequiredService<SoundFlowAudioEngine>());
 
+    // Register event audio source services
+    services.AddEventAudioSources(configuration);
+
     return services;
   }
 
@@ -64,6 +68,42 @@ public static class AudioServiceExtensions
     // Register the audio engine (singleton for single audio context)
     services.AddSingleton<SoundFlowAudioEngine>();
     services.AddSingleton<IAudioEngine>(sp => sp.GetRequiredService<SoundFlowAudioEngine>());
+
+    return services;
+  }
+
+  /// <summary>
+  /// Adds event audio source services (TTS, Audio File Events).
+  /// </summary>
+  /// <param name="services">The service collection.</param>
+  /// <param name="configuration">The configuration instance.</param>
+  /// <returns>The service collection for chaining.</returns>
+  public static IServiceCollection AddEventAudioSources(
+    this IServiceCollection services,
+    IConfiguration configuration)
+  {
+    // Bind TTS options
+    services.Configure<TTSOptions>(
+      configuration.GetSection(TTSOptions.SectionName));
+
+    // Bind TTS secrets (from secrets store)
+    services.Configure<TTSSecrets>(
+      configuration.GetSection(TTSSecrets.SectionName));
+
+    // Bind TTS preferences
+    services.Configure<TTSPreferences>(
+      configuration.GetSection(TTSPreferences.SectionName));
+
+    // Bind file player options (for audio file events)
+    services.Configure<FilePlayerOptions>(
+      configuration.GetSection(FilePlayerOptions.SectionName));
+
+    // Register TTS factory
+    services.AddSingleton<TTSFactory>();
+    services.AddSingleton<ITTSFactory>(sp => sp.GetRequiredService<TTSFactory>());
+
+    // Register audio file event source factory
+    services.AddSingleton<AudioFileEventSourceFactory>();
 
     return services;
   }

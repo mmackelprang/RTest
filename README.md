@@ -14,7 +14,7 @@ This project restores the original function (Radio/Vinyl) while adding modern ca
 | 1 - Configuration | ✅ Completed | JSON/SQLite stores, secrets management, backup/restore |
 | 2 - Core Audio | ✅ Completed | SoundFlow integration, audio engine, device manager, master mixer |
 | 3 - Audio Sources | ⬜ Not Started | Spotify, Radio, Vinyl, File Player |
-| 4 - Event Sources | ⬜ Not Started | TTS, Audio File Events |
+| 4 - Event Sources | ✅ Completed | TTS (eSpeak/Google/Azure), Audio File Events |
 | 5 - Ducking | ⬜ Not Started | Priority-based audio ducking |
 | 6 - Outputs | ⬜ Not Started | Local audio, Chromecast |
 | 7 - Visualization | ⬜ Not Started | Spectrum, VU meters |
@@ -41,8 +41,8 @@ This project restores the original function (Radio/Vinyl) while adding modern ca
 RadioConsole/
 ├── src/
 │   ├── Radio.Core/          # Core interfaces, models, and domain logic
-│   │   ├── Interfaces/Audio/  # IAudioEngine, IAudioDeviceManager, etc.
-│   │   ├── Configuration/     # AudioEngineOptions
+│   │   ├── Interfaces/Audio/  # IAudioEngine, IAudioDeviceManager, IEventAudioSource, ITTSFactory, etc.
+│   │   ├── Configuration/     # AudioEngineOptions, TTSOptions, TTSSecrets
 │   │   └── Exceptions/        # AudioDeviceConflictException
 │   ├── Radio.Infrastructure/ # Audio management, configuration, external integrations
 │   │   ├── Audio/SoundFlow/   # SoundFlow audio engine implementation (Phase 2)
@@ -50,6 +50,13 @@ RadioConsole/
 │   │   │   ├── SoundFlowMasterMixer.cs
 │   │   │   ├── SoundFlowDeviceManager.cs
 │   │   │   └── TappedOutputStream.cs
+│   │   ├── Audio/Sources/Events/  # Event audio sources (Phase 4)
+│   │   │   ├── EventAudioSourceBase.cs
+│   │   │   ├── TTSEventSource.cs
+│   │   │   └── AudioFileEventSource.cs
+│   │   ├── Audio/Services/    # Audio service factories (Phase 4)
+│   │   │   ├── TTSFactory.cs
+│   │   │   └── AudioFileEventSourceFactory.cs
 │   │   ├── Configuration/     # Configuration infrastructure (Phase 1)
 │   │   │   ├── Abstractions/  # IConfigurationStore, ISecretsProvider, etc.
 │   │   │   ├── Models/        # ConfigurationEntry, SecretTag, BackupMetadata
@@ -64,8 +71,11 @@ RadioConsole/
 │   ├── Radio.Core.Tests/
 │   ├── Radio.Infrastructure.Tests/
 │   │   ├── Configuration/   # Tests for configuration infrastructure
-│   │   └── Audio/           # Tests for audio engine components
+│   │   └── Audio/           # Tests for audio engine and event sources
 │   └── Radio.API.Tests/
+├── tools/
+│   ├── Radio.Tools.AudioUAT/  # Audio UAT testing tool with Phase 2, 3, 4 tests
+│   └── Radio.Tools.ConfigurationManager/  # Configuration management tool
 ├── design/                   # Design documents
 └── scripts/                  # Deployment and utility scripts
 ```
@@ -136,6 +146,42 @@ var devices = await deviceManager.GetOutputDevicesAsync();
 
 // Get the tapped output stream for streaming
 var outputStream = audioEngine.GetMixedOutputStream();
+```
+
+## Event Audio Sources (Phase 4)
+
+The event audio system provides ephemeral audio sources for notifications, announcements, and chimes:
+
+- **IEventAudioSource**: Interface for one-shot audio playback with auto-disposal
+- **ITTSFactory**: Factory for creating TTS audio with multiple engine support
+- **TTSEventSource**: Text-to-Speech audio from eSpeak, Google, or Azure engines
+- **AudioFileEventSource**: Play notification sounds and audio file events
+
+### TTS Engines Supported
+
+| Engine | Type | Requirements |
+|--------|------|--------------|
+| eSpeak-ng | Offline | `espeak-ng` installed |
+| Google Cloud TTS | Cloud | API key in secrets |
+| Azure Speech | Cloud | API key and region in secrets |
+
+### Usage Example
+
+```csharp
+// Register services
+services.AddEventAudioSources(configuration);
+
+// Create TTS audio
+var ttsFactory = serviceProvider.GetRequiredService<ITTSFactory>();
+var ttsSource = await ttsFactory.CreateAsync("Hello, this is a test announcement");
+await ttsSource.PlayAsync();
+// Auto-disposes when playback completes
+
+// Create audio file event
+var audioFactory = serviceProvider.GetRequiredService<AudioFileEventSourceFactory>();
+var eventSource = await audioFactory.CreateFromFileAsync("notifications/doorbell.wav");
+eventSource.PlaybackCompleted += (_, _) => Console.WriteLine("Doorbell played!");
+await eventSource.PlayAsync();
 ```
 
 ## Getting Started
