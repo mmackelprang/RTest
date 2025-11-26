@@ -181,7 +181,8 @@ internal sealed class TappedOutputStream : Stream
 
   /// <inheritdoc/>
   public override void Write(byte[] buffer, int offset, int count) =>
-    throw new NotSupportedException("Use WriteFromEngine instead");
+    throw new NotSupportedException(
+      "Direct writes are not supported. Use WriteFromEngine() to write audio samples to this stream.");
 
   /// <inheritdoc/>
   protected override void Dispose(bool disposing)
