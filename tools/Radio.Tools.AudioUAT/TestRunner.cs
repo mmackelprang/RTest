@@ -1,4 +1,4 @@
-using Radio.Tools.AudioUAT.TestResults;
+using Radio.Tools.AudioUAT.Results;
 
 namespace Radio.Tools.AudioUAT;
 

@@ -8,7 +8,7 @@ using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Tools.AudioUAT;
 using Radio.Tools.AudioUAT.Phases.Phase2;
 using Radio.Tools.AudioUAT.Phases.Phase3;
-using Radio.Tools.AudioUAT.TestResults;
+using Radio.Tools.AudioUAT.Results;
 using Radio.Tools.AudioUAT.Utilities;
 using Spectre.Console;
 
