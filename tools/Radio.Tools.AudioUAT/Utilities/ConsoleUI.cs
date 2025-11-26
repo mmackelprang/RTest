@@ -268,6 +268,11 @@ public static class ConsoleUI
     return value;
   }
 
+  // Balance slider constants
+  private const int BalanceSliderWidth = 20;
+  private const int BalanceValueRange = 200; // -100 to 100
+  private const int BalanceStep = BalanceValueRange / BalanceSliderWidth;
+
   /// <summary>
   /// Creates a balance slider for interactive balance testing.
   /// </summary>
@@ -288,8 +293,8 @@ public static class ConsoleUI
       AnsiConsole.Write(new Rule());
       AnsiConsole.Cursor.MoveUp(1);
 
-      var position = (value + 100) / 10;
-      var bar = new string(' ', position) + "●" + new string(' ', 19 - position);
+      var position = (value + 100) / BalanceStep;
+      var bar = new string(' ', position) + "●" + new string(' ', BalanceSliderWidth - 1 - position);
       var label = value == 0 ? "CENTER" : value < 0 ? $"LEFT {-value}%" : $"RIGHT {value}%";
       AnsiConsole.MarkupLine($"Balance: [cyan]L[{bar}]R[/] [bold]{label}[/]");
 

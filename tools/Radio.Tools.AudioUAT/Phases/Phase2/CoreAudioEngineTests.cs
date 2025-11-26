@@ -551,7 +551,12 @@ public class HotPlugDetectionTest : IPhaseTest
         var timeout = TimeSpan.FromSeconds(30);
         var startTime = DateTime.UtcNow;
 
-        while (!deviceChangedDetected && DateTime.UtcNow - startTime < timeout && !ct.IsCancellationRequested)
+        bool ShouldContinueWaiting() =>
+          !deviceChangedDetected &&
+          DateTime.UtcNow - startTime < timeout &&
+          !ct.IsCancellationRequested;
+
+        while (ShouldContinueWaiting())
         {
           var remaining = timeout - (DateTime.UtcNow - startTime);
           Console.Write($"\rWaiting for device change... {remaining.TotalSeconds:F0}s remaining");

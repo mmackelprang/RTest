@@ -216,6 +216,14 @@ public static class AudioTestHelpers
     return dB < threshold;
   }
 
+  // WAV file format constants
+  private const int BitsPerSample = 16;
+  private const int WavHeaderSize = 36;
+  private static readonly byte[] RiffChunkId = "RIFF"u8.ToArray();
+  private static readonly byte[] WaveFormat = "WAVE"u8.ToArray();
+  private static readonly byte[] FmtChunkId = "fmt "u8.ToArray();
+  private static readonly byte[] DataChunkId = "data"u8.ToArray();
+
   /// <summary>
   /// Generates a WAV file from float samples.
   /// </summary>
@@ -228,26 +236,26 @@ public static class AudioTestHelpers
     using var fs = new FileStream(filePath, FileMode.Create);
     using var writer = new BinaryWriter(fs);
 
-    var bytesPerSample = 2; // 16-bit
+    var bytesPerSample = BitsPerSample / 8;
     var dataSize = samples.Length * bytesPerSample;
 
     // WAV header
-    writer.Write("RIFF"u8.ToArray());
-    writer.Write(36 + dataSize);
-    writer.Write("WAVE"u8.ToArray());
+    writer.Write(RiffChunkId);
+    writer.Write(WavHeaderSize + dataSize);
+    writer.Write(WaveFormat);
 
     // Format chunk
-    writer.Write("fmt "u8.ToArray());
+    writer.Write(FmtChunkId);
     writer.Write(16); // Chunk size
     writer.Write((short)1); // Audio format (PCM)
     writer.Write((short)channels);
     writer.Write(sampleRate);
     writer.Write(sampleRate * channels * bytesPerSample); // Byte rate
     writer.Write((short)(channels * bytesPerSample)); // Block align
-    writer.Write((short)(bytesPerSample * 8)); // Bits per sample
+    writer.Write((short)BitsPerSample);
 
     // Data chunk
-    writer.Write("data"u8.ToArray());
+    writer.Write(DataChunkId);
     writer.Write(dataSize);
 
     // Write samples
