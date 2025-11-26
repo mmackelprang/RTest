@@ -16,7 +16,7 @@ This project restores the original function (Radio/Vinyl) while adding modern ca
 | 3 - Audio Sources | ✅ Completed | Spotify, Radio, Vinyl, File Player |
 | 4 - Event Sources | ✅ Completed | TTS (eSpeak/Google/Azure), Audio File Events |
 | 5 - Ducking | ✅ Completed | Priority-based audio ducking with configurable fade policies |
-| 6 - Outputs | ⬜ Not Started | Local audio, Chromecast |
+| 6 - Outputs | ✅ Completed | Local audio, Chromecast (SharpCaster), HTTP streaming |
 | 7 - Visualization | ⬜ Not Started | Spectrum, VU meters |
 | 8 - API | ⬜ Not Started | REST endpoints, SignalR |
 | 9 - UI | ⬜ Not Started | Blazor components |
@@ -224,6 +224,78 @@ await duckingService.StopDuckingAsync(eventSource);
 // Check ducking state
 Console.WriteLine($"Is ducking: {duckingService.IsDucking}");
 Console.WriteLine($"Duck level: {duckingService.CurrentDuckLevel}%");
+```
+
+## Audio Outputs (Phase 6)
+
+The audio outputs system provides multi-device output support with local speakers and network streaming:
+
+- **IAudioOutput**: Common interface for all audio output types
+- **LocalAudioOutput**: Routes audio to local ALSA/default speakers with device selection
+- **GoogleCastOutput**: Streams audio to Chromecast devices via SharpCaster
+- **HttpStreamOutput**: HTTP server for streaming audio to web clients
+
+### Supported Output Types
+
+| Output Type | Description | Use Case |
+|-------------|-------------|----------|
+| Local | ALSA/default device output | Built-in speakers, USB DACs |
+| GoogleCast | Chromecast streaming | Living room speakers, multi-room |
+| HttpStream | HTTP audio server | Custom clients, Chromecast source |
+
+### Configuration
+
+```json
+{
+  "AudioOutput": {
+    "Local": {
+      "Enabled": true,
+      "PreferredDeviceId": "",
+      "DefaultVolume": 0.8
+    },
+    "GoogleCast": {
+      "Enabled": false,
+      "DiscoveryTimeoutSeconds": 10,
+      "DefaultVolume": 0.7
+    },
+    "HttpStream": {
+      "Enabled": true,
+      "Port": 8080,
+      "EndpointPath": "/stream/audio",
+      "SampleRate": 48000,
+      "Channels": 2
+    }
+  }
+}
+```
+
+### Usage Example
+
+```csharp
+// Register services (included in AddSoundFlowAudio)
+services.AddSoundFlowAudio(configuration);
+
+// Get the local output
+var localOutput = serviceProvider.GetRequiredService<LocalAudioOutput>();
+await localOutput.InitializeAsync();
+await localOutput.StartAsync();
+
+// Get the Chromecast output
+var castOutput = serviceProvider.GetRequiredService<GoogleCastOutput>();
+await castOutput.InitializeAsync();
+var devices = await castOutput.DiscoverDevicesAsync();
+if (devices.Any())
+{
+  await castOutput.ConnectAsync(devices.First());
+  castOutput.SetStreamUrl("http://192.168.1.50:8080/stream/audio");
+  await castOutput.StartAsync();
+}
+
+// Get the HTTP stream output
+var httpOutput = serviceProvider.GetRequiredService<HttpStreamOutput>();
+await httpOutput.InitializeAsync();
+await httpOutput.StartAsync();
+Console.WriteLine($"Stream URL: {httpOutput.StreamUrl}");
 ```
 
 ## Getting Started
