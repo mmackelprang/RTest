@@ -13,7 +13,7 @@ This project restores the original function (Radio/Vinyl) while adding modern ca
 | 0 - Project Setup | ✅ Completed | Solution structure, CI/CD pipeline |
 | 1 - Configuration | ✅ Completed | JSON/SQLite stores, secrets management, backup/restore |
 | 2 - Core Audio | ✅ Completed | SoundFlow integration, audio engine, device manager, master mixer |
-| 3 - Audio Sources | ⬜ Not Started | Spotify, Radio, Vinyl, File Player |
+| 3 - Audio Sources | ✅ Completed | Spotify, Radio, Vinyl, File Player |
 | 4 - Event Sources | ✅ Completed | TTS (eSpeak/Google/Azure), Audio File Events |
 | 5 - Ducking | ✅ Completed | Priority-based audio ducking with configurable fade policies |
 | 6 - Outputs | ⬜ Not Started | Local audio, Chromecast |
