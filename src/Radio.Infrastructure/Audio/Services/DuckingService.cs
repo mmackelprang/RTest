@@ -391,16 +391,11 @@ public class DuckingService : IDuckingService
       _currentDuckLevel = Math.Clamp(level, 0f, 100f);
     }
 
-    // Apply to master mixer - convert percentage to 0-1 scale
-    // When ducking, we reduce the primary sources' effective volume
-    var effectiveVolume = level / 100f;
-
-    // The mixer's MasterVolume is the overall volume
-    // During ducking, we want to reduce it proportionally
-    // We don't change MasterVolume directly; instead, we could:
-    // 1. Store the original master volume
-    // 2. Apply duck level as a multiplier
-    // For now, we emit events that allow the audio manager to handle the actual volume reduction
+    // Note: The DuckingService does not directly modify the mixer volume.
+    // Instead, it emits DuckingLevelChanged events that allow consuming code
+    // (such as an AudioManager or similar orchestration layer) to apply the
+    // volume changes to primary sources as needed. This separation of concerns
+    // allows for more flexible volume management strategies.
 
     _logger.LogTrace(
       "Duck level changed from {Previous:F1}% to {Current:F1}%",
