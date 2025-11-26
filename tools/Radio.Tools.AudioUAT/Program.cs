@@ -4,10 +4,13 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
+using Radio.Infrastructure.Audio.Sources.Events;
 using Radio.Tools.AudioUAT;
 using Radio.Tools.AudioUAT.Phases.Phase2;
 using Radio.Tools.AudioUAT.Phases.Phase3;
+using Radio.Tools.AudioUAT.Phases.Phase4;
 using Radio.Tools.AudioUAT.Results;
 using Radio.Tools.AudioUAT.Utilities;
 using Spectre.Console;
@@ -47,11 +50,19 @@ var host = Host.CreateDefaultBuilder(args)
     services.AddSingleton<SoundFlowAudioEngine>();
     services.AddSingleton<IAudioEngine>(sp => sp.GetRequiredService<SoundFlowAudioEngine>());
 
+    // Register TTS services for Phase 4
+    services.Configure<TTSOptions>(configuration.GetSection(TTSOptions.SectionName));
+    services.Configure<TTSSecrets>(configuration.GetSection(TTSSecrets.SectionName));
+    services.AddSingleton<TTSFactory>();
+    services.AddSingleton<ITTSFactory>(sp => sp.GetRequiredService<TTSFactory>());
+    services.AddSingleton<AudioFileEventSourceFactory>();
+
     // Register UAT services
     services.AddSingleton<TestResultsManager>();
     services.AddSingleton<TestRunner>();
     services.AddSingleton<CoreAudioEngineTests>();
     services.AddSingleton<PrimaryAudioSourceTests>();
+    services.AddSingleton<EventAudioSourceTests>();
   })
   .Build();
 
@@ -93,6 +104,7 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
   var runner = services.GetRequiredService<TestRunner>();
   var phase2Tests = services.GetRequiredService<CoreAudioEngineTests>();
   var phase3Tests = services.GetRequiredService<PrimaryAudioSourceTests>();
+  var phase4Tests = services.GetRequiredService<EventAudioSourceTests>();
 
   var testsToRun = new List<IPhaseTest>();
 
@@ -111,6 +123,10 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
     {
       testsToRun.AddRange(phase3Tests.GetAllTests());
     }
+    if (runAll || phaseStr == "4")
+    {
+      testsToRun.AddRange(phase4Tests.GetAllTests());
+    }
   }
   else if (args.Contains("--test"))
   {
@@ -118,7 +134,10 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
     if (!string.IsNullOrEmpty(testId))
     {
       // Search in all phases
-      var allTests = phase2Tests.GetAllTests().Concat(phase3Tests.GetAllTests()).ToList();
+      var allTests = phase2Tests.GetAllTests()
+        .Concat(phase3Tests.GetAllTests())
+        .Concat(phase4Tests.GetAllTests())
+        .ToList();
       var test = allTests.FirstOrDefault(t => t.TestId == testId);
       if (test != null)
       {
@@ -173,6 +192,7 @@ static async Task RunInteractiveMode(IServiceProvider services)
   var runner = services.GetRequiredService<TestRunner>();
   var phase2Tests = services.GetRequiredService<CoreAudioEngineTests>();
   var phase3Tests = services.GetRequiredService<PrimaryAudioSourceTests>();
+  var phase4Tests = services.GetRequiredService<EventAudioSourceTests>();
 
   ConsoleUI.WriteWelcomeBanner();
 
@@ -196,6 +216,7 @@ static async Task RunInteractiveMode(IServiceProvider services)
       "[bold]Main Menu[/]",
       "Phase 2: Core Audio Engine Tests",
       "Phase 3: Primary Audio Sources Tests",
+      "Phase 4: Event Audio Sources Tests",
       "View Test Results",
       "Export Results to JSON",
       "Clear Results",
@@ -210,6 +231,10 @@ static async Task RunInteractiveMode(IServiceProvider services)
 
       case "Phase 3: Primary Audio Sources Tests":
         await RunPhase3Menu(services, runner, phase3Tests);
+        break;
+
+      case "Phase 4: Event Audio Sources Tests":
+        await RunPhase4Menu(services, runner, phase4Tests);
         break;
 
       case "View Test Results":
@@ -510,4 +535,140 @@ static async Task ExportResults(TestResultsManager resultsManager)
   await resultsManager.ExportToJsonAsync(filename);
   ConsoleUI.WriteSuccess($"Results exported to {filename}");
   ConsoleUI.PressAnyKeyToContinue();
+}
+
+static async Task RunPhase4Menu(IServiceProvider services, TestRunner runner, EventAudioSourceTests tests)
+{
+  var exit = false;
+  while (!exit)
+  {
+    AnsiConsole.Clear();
+
+    var rule = new Rule("[cyan]Phase 4: Event Audio Sources Tests[/]")
+    {
+      Justification = Justify.Center
+    };
+    AnsiConsole.Write(rule);
+    AnsiConsole.WriteLine();
+
+    var allTests = tests.GetAllTests();
+    var menuItems = new List<string>
+    {
+      "Run All Phase 4 Tests",
+      "---",
+      "[SOUND EFFECTS]",
+    };
+
+    // Group tests by category
+    foreach (var test in allTests.Where(t => t.TestId is "P4-001" or "P4-002" or "P4-003" or "P4-004"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("[NOTIFICATIONS]");
+    foreach (var test in allTests.Where(t => t.TestId is "P4-005" or "P4-006" or "P4-007"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("[CHIMES & SCHEDULED]");
+    foreach (var test in allTests.Where(t => t.TestId is "P4-008" or "P4-011" or "P4-012"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("[TEXT-TO-SPEECH]");
+    foreach (var test in allTests.Where(t => t.TestId is "P4-009" or "P4-010"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("[STRESS TESTS]");
+    foreach (var test in allTests.Where(t => t.TestId == "P4-013"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("Return to Main Menu");
+
+    var choice = ConsoleUI.ShowMenu("[bold]Select Test[/]", menuItems.ToArray());
+
+    if (choice == "Return to Main Menu")
+    {
+      exit = true;
+      continue;
+    }
+
+    if (choice.StartsWith("---") || choice.StartsWith("[SOUND") || choice.StartsWith("[NOTIFICATIONS") ||
+        choice.StartsWith("[CHIMES") || choice.StartsWith("[TEXT") || choice.StartsWith("[STRESS"))
+    {
+      continue;
+    }
+
+    if (choice == "Run All Phase 4 Tests")
+    {
+      AnsiConsole.Clear();
+      ConsoleUI.WriteHeader("Running All Phase 4 Tests");
+
+      await AnsiConsole.Progress()
+        .AutoClear(false)
+        .Columns(
+          new TaskDescriptionColumn(),
+          new ProgressBarColumn(),
+          new PercentageColumn(),
+          new SpinnerColumn())
+        .StartAsync(async ctx =>
+        {
+          var task = ctx.AddTask("Running tests...", maxValue: allTests.Count);
+
+          foreach (var test in allTests)
+          {
+            task.Description = $"Running {test.TestId}...";
+            await runner.RunTestAsync(test);
+            task.Increment(1);
+          }
+        });
+
+      var resultsManager = services.GetRequiredService<TestResultsManager>();
+      ConsoleUI.DisplayTestResults(resultsManager.GetResultsForPhase(4));
+      ConsoleUI.DisplaySummary(resultsManager.GetSummaryForPhase(4));
+      ConsoleUI.PressAnyKeyToContinue();
+    }
+    else
+    {
+      // Extract test ID from choice
+      var testIdMatch = System.Text.RegularExpressions.Regex.Match(choice, @"\[([^\]]+)\]");
+      if (testIdMatch.Success)
+      {
+        var testId = testIdMatch.Groups[1].Value;
+        var test = allTests.FirstOrDefault(t => t.TestId == testId);
+        if (test != null)
+        {
+          AnsiConsole.Clear();
+          var result = await runner.RunTestAsync(test);
+
+          AnsiConsole.WriteLine();
+          if (result.Passed)
+          {
+            ConsoleUI.WriteSuccess($"Test {test.TestId} PASSED");
+          }
+          else if (result.Skipped)
+          {
+            ConsoleUI.WriteWarning($"Test {test.TestId} SKIPPED: {result.Message}");
+          }
+          else
+          {
+            ConsoleUI.WriteError($"Test {test.TestId} FAILED: {result.Message}");
+          }
+
+          ConsoleUI.PressAnyKeyToContinue();
+        }
+      }
+    }
+  }
 }
