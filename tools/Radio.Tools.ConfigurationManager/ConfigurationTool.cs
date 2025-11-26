@@ -13,11 +13,13 @@ namespace Radio.Tools.ConfigurationManager;
 /// </summary>
 public sealed class ConfigurationTool
 {
+  // Maximum characters to display in table view to prevent layout issues
   private const int ValueDisplayMaxLength = 50;
 
   private readonly IServiceProvider _serviceProvider;
   private readonly IRadioConfigurationManager _configManager;
   private readonly ISecretsProvider _secretsProvider;
+  private readonly IConfigurationBackupService _backupService;
   private readonly IConfiguration _appConfiguration;
   private bool _rawViewMode;
   private string? _selectedStoreId;
@@ -27,6 +29,7 @@ public sealed class ConfigurationTool
     _serviceProvider = serviceProvider;
     _configManager = serviceProvider.GetRequiredService<IRadioConfigurationManager>();
     _secretsProvider = serviceProvider.GetRequiredService<ISecretsProvider>();
+    _backupService = serviceProvider.GetRequiredService<IConfigurationBackupService>();
     _appConfiguration = appConfiguration;
   }
 
@@ -96,6 +99,8 @@ public sealed class ConfigurationTool
     AnsiConsole.MarkupLine("  [yellow]K[/] - View secret keys");
     AnsiConsole.MarkupLine("  [yellow]X[/] - Add/Update secret");
     AnsiConsole.MarkupLine("  [yellow]Z[/] - Delete secret");
+    AnsiConsole.MarkupLine("  [yellow]B[/] - Backup store");
+    AnsiConsole.MarkupLine("  [yellow]O[/] - Restore from backup");
     AnsiConsole.MarkupLine("  [yellow]Q[/] - Quit");
     AnsiConsole.WriteLine();
 
@@ -119,6 +124,8 @@ public sealed class ConfigurationTool
       ConsoleKey.K => MenuAction.ViewSecretKeys,
       ConsoleKey.X => MenuAction.AddUpdateSecret,
       ConsoleKey.Z => MenuAction.DeleteSecret,
+      ConsoleKey.B => MenuAction.BackupStore,
+      ConsoleKey.O => MenuAction.RestoreBackup,
       ConsoleKey.Q => MenuAction.Exit,
       ConsoleKey.Escape => MenuAction.Exit,
       _ => MenuAction.None
@@ -164,6 +171,12 @@ public sealed class ConfigurationTool
         break;
       case MenuAction.DeleteSecret:
         await DeleteSecretAsync();
+        break;
+      case MenuAction.BackupStore:
+        await BackupStoreAsync();
+        break;
+      case MenuAction.RestoreBackup:
+        await RestoreBackupAsync();
         break;
     }
   }
@@ -748,6 +761,183 @@ public sealed class ConfigurationTool
     catch (Exception ex)
     {
       AnsiConsole.MarkupLine($"[red]Error deleting secret: {ex.Message}[/]");
+    }
+
+    WaitForKeypress();
+  }
+
+  private async Task BackupStoreAsync()
+  {
+    var choice = AnsiConsole.Prompt(
+      new SelectionPrompt<string>()
+        .Title("[bold]What would you like to backup?[/]")
+        .AddChoices(new[] { "Backup selected store", "Backup all stores", "List existing backups", "(Cancel)" })
+        .HighlightStyle(new Style(Color.Yellow))
+    );
+
+    if (choice == "(Cancel)")
+    {
+      AnsiConsole.MarkupLine("[grey]Cancelled.[/]");
+      WaitForKeypress();
+      return;
+    }
+
+    try
+    {
+      if (choice == "List existing backups")
+      {
+        await ListBackupsAsync();
+        return;
+      }
+
+      if (choice == "Backup selected store")
+      {
+        if (_selectedStoreId == null)
+        {
+          AnsiConsole.MarkupLine("[yellow]No store selected. Press 'S' to select one first.[/]");
+          WaitForKeypress();
+          return;
+        }
+
+        var description = AnsiConsole.Ask<string>("[bold]Enter backup description (or empty for none):[/]");
+        var store = await _configManager.GetStoreAsync(_selectedStoreId);
+
+        var backup = await _backupService.CreateBackupAsync(
+          _selectedStoreId,
+          store.StoreType,
+          string.IsNullOrWhiteSpace(description) ? null : description);
+
+        AnsiConsole.MarkupLine($"[green]Backup created:[/]");
+        AnsiConsole.MarkupLine($"  [cyan]ID:[/] {backup.BackupId}");
+        AnsiConsole.MarkupLine($"  [cyan]Store:[/] {backup.StoreId}");
+        AnsiConsole.MarkupLine($"  [cyan]Size:[/] {FormatSize(backup.SizeBytes)}");
+        AnsiConsole.MarkupLine($"  [cyan]Created:[/] {backup.CreatedAt.LocalDateTime:yyyy-MM-dd HH:mm:ss}");
+      }
+      else // Backup all stores
+      {
+        var description = AnsiConsole.Ask<string>("[bold]Enter backup description (or empty for none):[/]");
+
+        var backups = await _backupService.CreateFullBackupAsync(
+          string.IsNullOrWhiteSpace(description) ? null : description);
+
+        AnsiConsole.MarkupLine($"[green]Created {backups.Count} backup(s):[/]");
+        foreach (var backup in backups)
+        {
+          AnsiConsole.MarkupLine($"  [cyan]{backup.StoreId}[/] -> {backup.BackupId} ({FormatSize(backup.SizeBytes)})");
+        }
+      }
+    }
+    catch (Exception ex)
+    {
+      AnsiConsole.MarkupLine($"[red]Error creating backup: {ex.Message}[/]");
+    }
+
+    WaitForKeypress();
+  }
+
+  private async Task ListBackupsAsync()
+  {
+    try
+    {
+      var backups = await _backupService.ListBackupsAsync();
+
+      if (backups.Count == 0)
+      {
+        AnsiConsole.MarkupLine("[yellow]No backups found.[/]");
+        WaitForKeypress();
+        return;
+      }
+
+      var table = new Table().Border(TableBorder.Rounded).Expand();
+      table.AddColumn("[bold]Backup ID[/]");
+      table.AddColumn("[bold]Store ID[/]");
+      table.AddColumn("[bold]Type[/]");
+      table.AddColumn("[bold]Size[/]");
+      table.AddColumn("[bold]Created[/]");
+      table.AddColumn("[bold]Description[/]");
+
+      foreach (var backup in backups.OrderByDescending(b => b.CreatedAt))
+      {
+        table.AddRow(
+          backup.BackupId,
+          backup.StoreId,
+          backup.StoreType.ToString(),
+          FormatSize(backup.SizeBytes),
+          backup.CreatedAt.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss"),
+          backup.Description ?? "-"
+        );
+      }
+
+      AnsiConsole.Write(table);
+    }
+    catch (Exception ex)
+    {
+      AnsiConsole.MarkupLine($"[red]Error listing backups: {ex.Message}[/]");
+    }
+
+    WaitForKeypress();
+  }
+
+  private async Task RestoreBackupAsync()
+  {
+    try
+    {
+      var backups = await _backupService.ListBackupsAsync();
+
+      if (backups.Count == 0)
+      {
+        AnsiConsole.MarkupLine("[yellow]No backups found to restore.[/]");
+        WaitForKeypress();
+        return;
+      }
+
+      var backupChoices = backups
+        .OrderByDescending(b => b.CreatedAt)
+        .Select(b => $"{b.BackupId} | {b.StoreId} | {b.CreatedAt.LocalDateTime:yyyy-MM-dd HH:mm}")
+        .ToList();
+      backupChoices.Add("(Cancel)");
+
+      var selected = AnsiConsole.Prompt(
+        new SelectionPrompt<string>()
+          .Title("[bold]Select backup to restore:[/]")
+          .PageSize(10)
+          .AddChoices(backupChoices)
+          .HighlightStyle(new Style(Color.Yellow))
+      );
+
+      if (selected == "(Cancel)")
+      {
+        AnsiConsole.MarkupLine("[grey]Cancelled.[/]");
+        WaitForKeypress();
+        return;
+      }
+
+      var backupId = selected.Split('|')[0].Trim();
+      var backup = backups.First(b => b.BackupId == backupId);
+
+      AnsiConsole.MarkupLine($"[cyan]Selected backup:[/]");
+      AnsiConsole.MarkupLine($"  [grey]Store:[/] {backup.StoreId}");
+      AnsiConsole.MarkupLine($"  [grey]Created:[/] {backup.CreatedAt.LocalDateTime:yyyy-MM-dd HH:mm:ss}");
+      AnsiConsole.MarkupLine($"  [grey]Description:[/] {backup.Description ?? "None"}");
+
+      var overwrite = AnsiConsole.Confirm("[yellow]Overwrite existing store data if it exists?[/]", false);
+
+      AnsiConsole.MarkupLine("[red]Warning: This will restore configuration data from the backup![/]");
+      var confirm = AnsiConsole.Confirm($"[red]Are you sure you want to restore from '{backupId}'?[/]", false);
+
+      if (!confirm)
+      {
+        AnsiConsole.MarkupLine("[grey]Cancelled.[/]");
+        WaitForKeypress();
+        return;
+      }
+
+      await _backupService.RestoreBackupAsync(backupId, overwrite);
+      AnsiConsole.MarkupLine($"[green]Successfully restored backup '{backupId}' to store '{backup.StoreId}'.[/]");
+    }
+    catch (Exception ex)
+    {
+      AnsiConsole.MarkupLine($"[red]Error restoring backup: {ex.Message}[/]");
     }
 
     WaitForKeypress();

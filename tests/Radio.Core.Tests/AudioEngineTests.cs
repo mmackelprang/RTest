@@ -8,7 +8,7 @@ namespace Radio.Core.Tests;
 public class AudioEngineTests
 {
   [Fact]
-  public void AudioEngineState_HasExpectedValues()
+  public void AudioEngineState_ContainsAllExpectedValues_WhenEnumerated()
   {
     var states = Enum.GetValues<AudioEngineState>();
 
