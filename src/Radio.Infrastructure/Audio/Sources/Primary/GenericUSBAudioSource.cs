@@ -82,10 +82,10 @@ public class GenericUSBAudioSource : PrimaryAudioSourceBase
     // Check if USB port is available
     if (_deviceManager.IsUSBPortInUse(usbPort))
     {
-      Logger.LogError("USB port {USBPort} is already in use", usbPort);
+      Logger.LogError("USB port {USBPort} is already in use by another source", usbPort);
       throw new AudioDeviceConflictException(
-        $"USB port '{usbPort}' is already in use by another source. " +
-        "Please select a different device or stop the conflicting source.",
+        $"USB port '{usbPort}' is already reserved by another audio source. " +
+        "Stop the other source before using this port.",
         usbPort,
         Id);
     }

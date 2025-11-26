@@ -13,6 +13,7 @@ public abstract class PrimaryAudioSourceBase : IPrimaryAudioSource
   private AudioSourceState _state = AudioSourceState.Created;
   private float _volume = 1.0f;
   private bool _disposed;
+  private string? _id;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="PrimaryAudioSourceBase"/> class.
@@ -21,11 +22,10 @@ public abstract class PrimaryAudioSourceBase : IPrimaryAudioSource
   protected PrimaryAudioSourceBase(ILogger logger)
   {
     _logger = logger;
-    Id = $"{Type}-{Guid.NewGuid():N}";
   }
 
   /// <inheritdoc/>
-  public string Id { get; }
+  public string Id => _id ??= $"{Type}-{Guid.NewGuid():N}";
 
   /// <inheritdoc/>
   public abstract string Name { get; }

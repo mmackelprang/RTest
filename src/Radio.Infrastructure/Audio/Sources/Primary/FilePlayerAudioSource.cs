@@ -275,6 +275,8 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
   /// <inheritdoc/>
   protected override Task SeekCoreAsync(TimeSpan position, CancellationToken cancellationToken)
   {
+    // Seeking is only valid for positive positions within the duration
+    // When duration is zero or not set, seeking is limited to position zero
     if (position < TimeSpan.Zero || (_duration > TimeSpan.Zero && position > _duration))
     {
       throw new ArgumentOutOfRangeException(nameof(position), "Seek position out of range");
@@ -305,11 +307,17 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
   private string GetFullPath(string relativePath)
   {
     var rootDirectory = _options.CurrentValue.RootDirectory;
+    string basePath;
     if (!string.IsNullOrEmpty(_rootDir))
     {
-      return Path.Combine(_rootDir, rootDirectory, relativePath);
+      basePath = Path.Combine(_rootDir, rootDirectory, relativePath);
     }
-    return Path.Combine(rootDirectory, relativePath);
+    else
+    {
+      basePath = Path.Combine(rootDirectory, relativePath);
+    }
+    // Normalize the path to handle any leading separators or relative components
+    return Path.GetFullPath(basePath);
   }
 
   private bool IsAudioFile(string path)
