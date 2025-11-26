@@ -60,7 +60,6 @@ var host = Host.CreateDefaultBuilder(args)
 
     // Register Ducking service for Phase 5
     services.Configure<AudioOptions>(configuration.GetSection(AudioOptions.SectionName));
-    services.AddSingleton<IMasterMixer>(sp => sp.GetRequiredService<SoundFlowMasterMixer>());
     services.AddSingleton<DuckingService>();
     services.AddSingleton<IDuckingService>(sp => sp.GetRequiredService<DuckingService>());
 
