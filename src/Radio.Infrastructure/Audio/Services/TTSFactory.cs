@@ -268,14 +268,14 @@ public class TTSFactory : ITTSFactory
 
     _logger.LogDebug("Generating Google TTS audio for voice: {Voice}", voice);
 
-    // In a full implementation, this would call the Google Cloud TTS API
-    // For now, return a placeholder that indicates the feature needs implementation
-    throw new NotImplementedException(
-      "Google Cloud TTS integration requires the Google.Cloud.TextToSpeech.V1 NuGet package. " +
-      "Please implement the API call when this dependency is added.");
+    // Google Cloud TTS integration requires the Google.Cloud.TextToSpeech.V1 NuGet package.
+    // This is a placeholder for when the dependency is added.
+    throw new NotSupportedException(
+      "Google Cloud TTS integration is not yet implemented. " +
+      "Add the Google.Cloud.TextToSpeech.V1 NuGet package and implement the API call.");
   }
 
-  private async Task<(Stream audioStream, TimeSpan duration)> GenerateAzureTTSAsync(
+  private Task<(Stream audioStream, TimeSpan duration)> GenerateAzureTTSAsync(
     string text,
     string voice,
     float speed,
@@ -290,11 +290,11 @@ public class TTSFactory : ITTSFactory
 
     _logger.LogDebug("Generating Azure TTS audio for voice: {Voice}", voice);
 
-    // In a full implementation, this would call the Azure Cognitive Services Speech API
-    // For now, return a placeholder that indicates the feature needs implementation
-    throw new NotImplementedException(
-      "Azure TTS integration requires the Microsoft.CognitiveServices.Speech NuGet package. " +
-      "Please implement the API call when this dependency is added.");
+    // Azure TTS integration requires the Microsoft.CognitiveServices.Speech NuGet package.
+    // This is a placeholder for when the dependency is added.
+    throw new NotSupportedException(
+      "Azure TTS integration is not yet implemented. " +
+      "Add the Microsoft.CognitiveServices.Speech NuGet package and implement the API call.");
   }
 
   private async Task<IReadOnlyList<TTSVoiceInfo>> GetESpeakVoicesAsync(CancellationToken cancellationToken)

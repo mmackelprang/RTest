@@ -201,7 +201,7 @@ public class TTSFactoryTests
   }
 
   [Fact]
-  public async Task CreateAsync_GoogleEngine_ThrowsNotImplemented()
+  public async Task CreateAsync_GoogleEngine_ThrowsNotSupported()
   {
     _secretsMock.Setup(x => x.CurrentValue).Returns(new TTSSecrets
     {
@@ -209,14 +209,14 @@ public class TTSFactoryTests
     });
     var factory = CreateFactory();
 
-    var ex = await Assert.ThrowsAsync<NotImplementedException>(() =>
+    var ex = await Assert.ThrowsAsync<NotSupportedException>(() =>
       factory.CreateAsync("Test", new TTSParameters { Engine = TTSEngine.Google }));
 
     Assert.Contains("Google", ex.Message);
   }
 
   [Fact]
-  public async Task CreateAsync_AzureEngine_ThrowsNotImplemented()
+  public async Task CreateAsync_AzureEngine_ThrowsNotSupported()
   {
     _secretsMock.Setup(x => x.CurrentValue).Returns(new TTSSecrets
     {
@@ -225,7 +225,7 @@ public class TTSFactoryTests
     });
     var factory = CreateFactory();
 
-    var ex = await Assert.ThrowsAsync<NotImplementedException>(() =>
+    var ex = await Assert.ThrowsAsync<NotSupportedException>(() =>
       factory.CreateAsync("Test", new TTSParameters { Engine = TTSEngine.Azure }));
 
     Assert.Contains("Azure", ex.Message);

@@ -14,6 +14,7 @@ public class AudioFileEventSource : EventAudioSourceBase
   private readonly string _name;
   private Stream? _audioStream;
   private CancellationTokenSource? _playbackCts;
+  private Task? _playbackTask;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="AudioFileEventSource"/> class.
@@ -107,7 +108,7 @@ public class AudioFileEventSource : EventAudioSourceBase
   }
 
   /// <inheritdoc/>
-  protected override async Task PlayCoreAsync(CancellationToken cancellationToken)
+  protected override Task PlayCoreAsync(CancellationToken cancellationToken)
   {
     _playbackCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -123,22 +124,8 @@ public class AudioFileEventSource : EventAudioSourceBase
 
       // In a full implementation, this would start playback through SoundFlow
       // For now, simulate playback by waiting for the duration
-
-      _ = Task.Run(async () =>
-      {
-        try
-        {
-          await Task.Delay(_duration, _playbackCts.Token);
-          if (!_playbackCts.IsCancellationRequested)
-          {
-            OnPlaybackCompleted(PlaybackCompletionReason.EndOfContent);
-          }
-        }
-        catch (OperationCanceledException)
-        {
-          // Playback was stopped
-        }
-      }, _playbackCts.Token);
+      // Store the task so we can await it in disposal
+      _playbackTask = PlaybackLoopAsync(_playbackCts.Token);
     }
     catch (Exception ex)
     {
@@ -146,15 +133,51 @@ public class AudioFileEventSource : EventAudioSourceBase
       State = AudioSourceState.Error;
       OnPlaybackCompleted(PlaybackCompletionReason.Error, ex);
     }
+
+    return Task.CompletedTask;
+  }
+
+  private async Task PlaybackLoopAsync(CancellationToken cancellationToken)
+  {
+    try
+    {
+      await Task.Delay(_duration, cancellationToken);
+      if (!cancellationToken.IsCancellationRequested)
+      {
+        State = AudioSourceState.Stopped;
+        OnPlaybackCompleted(PlaybackCompletionReason.EndOfContent);
+      }
+    }
+    catch (OperationCanceledException)
+    {
+      // Playback was stopped
+    }
   }
 
   /// <inheritdoc/>
-  protected override Task StopCoreAsync(CancellationToken cancellationToken)
+  protected override async Task StopCoreAsync(CancellationToken cancellationToken)
   {
     Logger.LogDebug("Stopping audio file event playback");
     _playbackCts?.Cancel();
+
+    // Wait for the playback task to complete
+    if (_playbackTask != null)
+    {
+      try
+      {
+        await _playbackTask.WaitAsync(TimeSpan.FromSeconds(1), cancellationToken);
+      }
+      catch (TimeoutException)
+      {
+        Logger.LogWarning("Playback task did not complete within timeout");
+      }
+      catch (OperationCanceledException)
+      {
+        // Expected when cancellation occurs
+      }
+    }
+
     OnPlaybackCompleted(PlaybackCompletionReason.UserStopped);
-    return Task.CompletedTask;
   }
 
   /// <inheritdoc/>
