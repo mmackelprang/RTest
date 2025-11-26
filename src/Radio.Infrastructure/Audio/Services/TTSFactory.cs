@@ -356,8 +356,9 @@ public class TTSFactory : ITTSFactory
     httpClient.DefaultRequestHeaders.Add("X-Microsoft-OutputFormat", "riff-24khz-16bit-mono-pcm");
 
     // Create SSML payload for Azure TTS
-    // Speed: Azure uses rate as percentage (e.g., "50%" to "-50%", "100%" is normal, "200%" is 2x)
-    // Pitch: Azure uses semitones (e.g., "+20%", "-20%")
+    // Rate: Percentage of default rate (e.g., "+50%" = 1.5x, "-50%" = 0.5x, "0%" = normal)
+    // Pitch: Percentage adjustment (e.g., "+20%" = higher pitch, "-20%" = lower pitch)
+    // Both use percentage format for consistency
     var ratePercent = (int)((speed - 1.0) * 100);
     var pitchPercent = (int)((pitch - 1.0) * 100);
 

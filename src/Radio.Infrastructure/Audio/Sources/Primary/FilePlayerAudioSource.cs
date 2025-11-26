@@ -22,6 +22,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
   private Queue<string> _playlist = new();
   private string? _currentFile;
   private ISoundDataProvider? _dataProvider;
+  private FileStream? _fileStream;
   private MiniAudioEngine? _audioEngine;
   private TimeSpan _duration;
   private TimeSpan _position;
@@ -321,6 +322,10 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
     }
     _dataProvider = null;
 
+    // Dispose the file stream that was kept open for the data provider
+    _fileStream?.Dispose();
+    _fileStream = null;
+
     if (_audioEngine != null)
     {
       _audioEngine.Dispose();
@@ -372,8 +377,9 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
       _audioEngine ??= new MiniAudioEngine();
 
       // Create a data provider from the file using SoundFlow
-      using var fileStream = File.OpenRead(_currentFile);
-      _dataProvider = new ChunkedDataProvider(_audioEngine, fileStream);
+      // Note: We keep the FileStream open (stored as field) because ChunkedDataProvider needs it
+      _fileStream = File.OpenRead(_currentFile);
+      _dataProvider = new ChunkedDataProvider(_audioEngine, _fileStream);
 
       Logger.LogDebug("Loaded file with SoundFlow: {File}", _currentFile);
     }
@@ -382,6 +388,8 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
       // SoundFlow couldn't decode the file - this could happen with unsupported formats
       // or during testing with dummy files. Log and continue without a data provider.
       Logger.LogWarning(ex, "SoundFlow could not decode file: {File}. Using basic file info only.", _currentFile);
+      _fileStream?.Dispose();
+      _fileStream = null;
       _dataProvider = null;
     }
 
