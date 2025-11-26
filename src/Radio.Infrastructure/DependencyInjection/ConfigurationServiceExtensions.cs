@@ -23,10 +23,12 @@ public static class ConfigurationServiceExtensions
   /// </summary>
   /// <param name="services">The service collection.</param>
   /// <param name="configuration">The configuration instance.</param>
+  /// <param name="useSqliteSecrets">If true, uses SQLite secrets provider; otherwise uses JSON.</param>
   /// <returns>The service collection for chaining.</returns>
   public static IServiceCollection AddManagedConfiguration(
     this IServiceCollection services,
-    IConfiguration configuration)
+    IConfiguration configuration,
+    bool useSqliteSecrets = false)
   {
     // Bind configuration options
     services.Configure<ConfigurationOptions>(
@@ -36,8 +38,11 @@ public static class ConfigurationServiceExtensions
     services.AddDataProtection()
       .SetApplicationName("Radio.Configuration");
 
-    // Register secrets provider (default to JSON)
-    services.AddSingleton<ISecretsProvider, JsonSecretsProvider>();
+    // Register secrets provider based on parameter
+    if (useSqliteSecrets)
+      services.AddSingleton<ISecretsProvider, SqliteSecretsProvider>();
+    else
+      services.AddSingleton<ISecretsProvider, JsonSecretsProvider>();
 
     // Register store factory
     services.AddSingleton<IConfigurationStoreFactory, ConfigurationStoreFactory>();
@@ -61,26 +66,6 @@ public static class ConfigurationServiceExtensions
     this IServiceCollection services,
     IConfiguration configuration)
   {
-    // Bind configuration options
-    services.Configure<ConfigurationOptions>(
-      configuration.GetSection(ConfigurationOptions.SectionName));
-
-    // Add data protection for secret encryption
-    services.AddDataProtection()
-      .SetApplicationName("Radio.Configuration");
-
-    // Register SQLite secrets provider
-    services.AddSingleton<ISecretsProvider, SqliteSecretsProvider>();
-
-    // Register store factory
-    services.AddSingleton<IConfigurationStoreFactory, ConfigurationStoreFactory>();
-
-    // Register backup service
-    services.AddSingleton<IConfigurationBackupService, ConfigurationBackupService>();
-
-    // Register configuration manager
-    services.AddSingleton<IRadioConfigurationManager, RadioConfigurationManager>();
-
-    return services;
+    return services.AddManagedConfiguration(configuration, useSqliteSecrets: true);
   }
 }

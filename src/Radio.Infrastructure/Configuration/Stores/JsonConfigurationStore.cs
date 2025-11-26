@@ -52,10 +52,11 @@ public sealed class JsonConfigurationStore : ConfigurationStoreBase, IDisposable
   /// <inheritdoc/>
   public override async Task<ConfigurationEntry?> GetEntryAsync(string key, ConfigurationReadMode mode = ConfigurationReadMode.Resolved, CancellationToken ct = default)
   {
-    await EnsureLoadedAsync(ct);
     await _lock.WaitAsync(ct);
     try
     {
+      if (!_isLoaded) await LoadAsync(ct);
+
       if (!_entries.TryGetValue(key, out var stored))
         return null;
 
@@ -70,10 +71,11 @@ public sealed class JsonConfigurationStore : ConfigurationStoreBase, IDisposable
   /// <inheritdoc/>
   public override async Task<IReadOnlyList<ConfigurationEntry>> GetAllEntriesAsync(ConfigurationReadMode mode = ConfigurationReadMode.Resolved, CancellationToken ct = default)
   {
-    await EnsureLoadedAsync(ct);
     await _lock.WaitAsync(ct);
     try
     {
+      if (!_isLoaded) await LoadAsync(ct);
+
       var entries = new List<ConfigurationEntry>();
       foreach (var kvp in _entries)
       {
@@ -90,10 +92,11 @@ public sealed class JsonConfigurationStore : ConfigurationStoreBase, IDisposable
   /// <inheritdoc/>
   public override async Task<IReadOnlyList<ConfigurationEntry>> GetEntriesBySectionAsync(string sectionPrefix, ConfigurationReadMode mode = ConfigurationReadMode.Resolved, CancellationToken ct = default)
   {
-    await EnsureLoadedAsync(ct);
     await _lock.WaitAsync(ct);
     try
     {
+      if (!_isLoaded) await LoadAsync(ct);
+
       var prefix = NormalizeSectionPrefix(sectionPrefix);
       var entries = new List<ConfigurationEntry>();
 
@@ -112,10 +115,11 @@ public sealed class JsonConfigurationStore : ConfigurationStoreBase, IDisposable
   /// <inheritdoc/>
   public override async Task SetEntryAsync(string key, string value, CancellationToken ct = default)
   {
-    await EnsureLoadedAsync(ct);
     await _lock.WaitAsync(ct);
     try
     {
+      if (!_isLoaded) await LoadAsync(ct);
+
       _entries[key] = new StoredEntry
       {
         Value = value,
@@ -137,10 +141,11 @@ public sealed class JsonConfigurationStore : ConfigurationStoreBase, IDisposable
   /// <inheritdoc/>
   public override async Task SetEntriesAsync(IEnumerable<ConfigurationEntry> entries, CancellationToken ct = default)
   {
-    await EnsureLoadedAsync(ct);
     await _lock.WaitAsync(ct);
     try
     {
+      if (!_isLoaded) await LoadAsync(ct);
+
       foreach (var entry in entries)
       {
         _entries[entry.Key] = new StoredEntry
@@ -166,10 +171,11 @@ public sealed class JsonConfigurationStore : ConfigurationStoreBase, IDisposable
   /// <inheritdoc/>
   public override async Task<bool> DeleteEntryAsync(string key, CancellationToken ct = default)
   {
-    await EnsureLoadedAsync(ct);
     await _lock.WaitAsync(ct);
     try
     {
+      if (!_isLoaded) await LoadAsync(ct);
+
       if (_entries.Remove(key))
       {
         _isDirty = true;
@@ -190,10 +196,11 @@ public sealed class JsonConfigurationStore : ConfigurationStoreBase, IDisposable
   /// <inheritdoc/>
   public override async Task<bool> ExistsAsync(string key, CancellationToken ct = default)
   {
-    await EnsureLoadedAsync(ct);
     await _lock.WaitAsync(ct);
     try
     {
+      if (!_isLoaded) await LoadAsync(ct);
+
       return _entries.ContainsKey(key);
     }
     finally
@@ -240,28 +247,12 @@ public sealed class JsonConfigurationStore : ConfigurationStoreBase, IDisposable
     }
   }
 
-  private async Task EnsureLoadedAsync(CancellationToken ct)
-  {
-    if (_isLoaded) return;
-
-    await _lock.WaitAsync(ct);
-    try
-    {
-      if (_isLoaded) return;
-      await LoadAsync(ct);
-      _isLoaded = true;
-    }
-    finally
-    {
-      _lock.Release();
-    }
-  }
-
   private async Task LoadAsync(CancellationToken ct)
   {
     if (!File.Exists(_filePath))
     {
       _entries = new Dictionary<string, StoredEntry>();
+      _isLoaded = true;
       Logger.LogDebug("Configuration file not found, starting with empty store: {Path}", _filePath);
       return;
     }
@@ -271,12 +262,14 @@ public sealed class JsonConfigurationStore : ConfigurationStoreBase, IDisposable
       var json = await File.ReadAllTextAsync(_filePath, ct);
       var data = JsonSerializer.Deserialize<StoreFile>(json, _jsonOptions);
       _entries = data?.Entries ?? new Dictionary<string, StoredEntry>();
+      _isLoaded = true;
       Logger.LogDebug("Loaded {Count} entries from {Path}", _entries.Count, _filePath);
     }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Failed to load configuration file: {Path}", _filePath);
       _entries = new Dictionary<string, StoredEntry>();
+      _isLoaded = true;
     }
   }
 

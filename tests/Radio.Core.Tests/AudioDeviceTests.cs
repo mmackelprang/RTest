@@ -8,7 +8,7 @@ namespace Radio.Core.Tests;
 public class AudioDeviceTests
 {
   [Fact]
-  public void AudioDeviceType_HasExpectedValues()
+  public void AudioDeviceType_ContainsAllExpectedValues_WhenEnumerated()
   {
     var types = Enum.GetValues<AudioDeviceType>();
 

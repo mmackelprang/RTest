@@ -18,5 +18,7 @@ public enum MenuAction
   RemoveEntry,
   ViewSecretKeys,
   AddUpdateSecret,
-  DeleteSecret
+  DeleteSecret,
+  BackupStore,
+  RestoreBackup
 }

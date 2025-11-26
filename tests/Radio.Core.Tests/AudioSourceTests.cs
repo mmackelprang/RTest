@@ -8,7 +8,7 @@ namespace Radio.Core.Tests;
 public class AudioSourceTests
 {
   [Fact]
-  public void AudioSourceType_HasExpectedValues()
+  public void AudioSourceType_ContainsAllExpectedValues_WhenEnumerated()
   {
     // Verify all expected audio source types exist
     var types = Enum.GetValues<AudioSourceType>();
