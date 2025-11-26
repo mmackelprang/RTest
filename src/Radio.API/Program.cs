@@ -44,3 +44,6 @@ finally
 {
   Log.CloseAndFlush();
 }
+
+// Partial class declaration to enable WebApplicationFactory integration tests
+public partial class Program { }
