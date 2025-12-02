@@ -1368,6 +1368,149 @@ dotnet run
 
 ---
 
+## Phase 9: Audio Fingerprinting & Song Detection Testing
+
+**Objective:** Validate audio fingerprinting, metadata lookup, play history, and unknown song detection.
+
+### Test Cases
+
+| ID | Test Case | Description | Expected Result |
+|----|-----------|-------------|-----------------|
+| P9-001 | Database Initialization | Initialize SQLite fingerprint database | All tables created successfully |
+| P9-002 | Fingerprint Generation | Generate fingerprint from audio samples | Returns valid fingerprint with hash |
+| P9-003 | Cache Store and Retrieve | Store and retrieve fingerprint from cache | Fingerprint stored and retrieved correctly |
+| P9-004 | Metadata Storage | Store and retrieve track metadata | Metadata persists and retrieves correctly |
+| P9-005 | Play History Recording | Record play history entry | Entry recorded with all fields |
+| P9-006 | Play History Retrieval | Retrieve recent play history | Returns entries in descending order |
+| P9-007 | Play Statistics | Calculate play statistics | Statistics calculated correctly |
+| P9-008 | Audio Sample Capture | Capture audio samples from output stream | Samples captured with correct format |
+| P9-009 | Duplicate Suppression | Test duplicate track suppression | Same hash stored only once |
+| P9-010 | Unknown Track Handling | Handle unidentified tracks | Fingerprint stored for manual tagging |
+| P9-011 | Metadata Search | Search track metadata | Search returns matching results |
+| P9-012 | Cache Cleanup | Delete cached fingerprints | Fingerprint removed from cache |
+
+### Interactive Test Menu
+
+```
+═══════════════════════════════════════════════════════════════
+          PHASE 9: AUDIO FINGERPRINTING TESTS
+═══════════════════════════════════════════════════════════════
+
+  DATABASE:
+  [1] Initialize Fingerprint Database
+  [2] Generate Audio Fingerprint
+  [3] Store and Retrieve Cache Entry
+  
+  METADATA:
+  [4] Store Track Metadata
+  [5] Search Metadata
+  
+  PLAY HISTORY:
+  [6] Record Play History Entry
+  [7] Retrieve Recent History
+  [8] Calculate Statistics
+  
+  AUDIO CAPTURE:
+  [9] Capture Audio Samples
+  
+  SPECIAL CASES:
+  [10] Test Duplicate Suppression
+  [11] Test Unknown Track Handling
+  [12] Cache Cleanup Test
+  [13] Run All Phase 9 Tests
+  
+  [R] View Test Results
+  [M] Return to Main Menu
+
+═══════════════════════════════════════════════════════════════
+```
+
+### Phase 9 QA Verification Summary
+
+The Phase 9 tests enable QA to verify:
+
+1. **Database Operations** (P9-001, P9-003, P9-012)
+   - SQLite database initialization
+   - Table creation (FingerprintCache, TrackMetadata, PlayHistory)
+   - CRUD operations on fingerprint cache
+   - Data persistence across sessions
+
+2. **Fingerprint Generation** (P9-002, P9-009)
+   - Audio fingerprint generation from samples
+   - Hash uniqueness for different audio
+   - Duplicate hash suppression
+
+3. **Metadata Management** (P9-004, P9-011)
+   - Track metadata storage (title, artist, album, etc.)
+   - Metadata retrieval by ID and fingerprint
+   - Text search across title, artist, album
+
+4. **Play History** (P9-005, P9-006, P9-007)
+   - Recording plays from various sources
+   - Retrieving recent history
+   - Statistics calculation (total, identified, by source)
+
+5. **Audio Capture** (P9-008)
+   - Capturing samples from SoundFlow output stream
+   - Converting PCM bytes to float samples
+   - Buffer duration accuracy
+
+6. **Unknown Track Handling** (P9-010)
+   - Storing unidentified fingerprints
+   - Marking for manual tagging later
+
+### Running Phase 9 Tests
+
+```bash
+# Run all Phase 9 tests
+cd tools/Radio.Tools.AudioUAT
+dotnet run -- --phase 9
+
+# Run specific test
+dotnet run -- --test P9-002  # Fingerprint Generation Test
+
+# Interactive mode
+dotnet run
+# Then select "Phase 9: Audio Fingerprinting Tests" from the menu
+```
+
+### Configuration for Fingerprinting
+
+Before running Phase 9 tests, ensure the following configuration is set in `appsettings.json`:
+
+```json
+{
+  "Fingerprinting": {
+    "Enabled": true,
+    "SampleDurationSeconds": 15,
+    "IdentificationIntervalSeconds": 30,
+    "MinimumConfidenceThreshold": 0.5,
+    "DuplicateSuppressionMinutes": 5,
+    "DatabasePath": "./data/fingerprints.db",
+    "AcoustId": {
+      "ApiKey": "",
+      "BaseUrl": "https://api.acoustid.org/v2",
+      "MaxRequestsPerSecond": 3,
+      "TimeoutSeconds": 10
+    },
+    "MusicBrainz": {
+      "BaseUrl": "https://musicbrainz.org/ws/2",
+      "ApplicationName": "RadioConsole",
+      "ApplicationVersion": "1.0.0",
+      "ContactEmail": "",
+      "MaxRequestsPerSecond": 1,
+      "TimeoutSeconds": 10
+    }
+  }
+}
+```
+
+**Note:** To enable external API lookups (AcoustID/MusicBrainz), you need to:
+1. Register for an AcoustID API key at https://acoustid.org/new-application
+2. Add the key to the configuration or secrets
+
+---
+
 ## Version History
 
 | Version | Date | Author | Changes |
@@ -1377,3 +1520,4 @@ dotnet run
 | 1.2 | 2025-11-26 | GitHub Copilot | Phase 5 Ducking & Priority tests implemented |
 | 1.3 | 2025-11-26 | GitHub Copilot | Phase 6 Audio Outputs tests implemented |
 | 1.4 | 2025-12-02 | GitHub Copilot | Phase 7 Visualization & Monitoring tests implemented |
+| 1.5 | 2025-12-02 | GitHub Copilot | Phase 9 Audio Fingerprinting & Song Detection tests implemented |

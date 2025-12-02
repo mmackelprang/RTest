@@ -1274,6 +1274,87 @@ Before deployment:
 
 ---
 
+## Setup and Maintenance Guide
+
+### Initial Setup
+
+1. **Add NuGet Packages** (if using real Chromaprint):
+   ```bash
+   dotnet add package Chromaprint.NET
+   ```
+
+2. **Configure Fingerprinting Options** in `appsettings.json`:
+   ```json
+   {
+     "Fingerprinting": {
+       "Enabled": true,
+       "DatabasePath": "./data/fingerprints.db"
+     }
+   }
+   ```
+
+3. **Register Fingerprinting Services** in `Program.cs`:
+   ```csharp
+   builder.Services.AddFingerprinting(builder.Configuration);
+   ```
+
+4. **Initialize Database**: The database is automatically initialized on first use.
+
+### Database Maintenance
+
+The SQLite database (`fingerprints.db`) contains three tables:
+
+- **FingerprintCache**: Stores audio fingerprints and their hashes
+- **TrackMetadata**: Stores track information (title, artist, album, etc.)
+- **PlayHistory**: Records each play event with identification results
+
+**Backup**: Regularly backup the database file. The file can be safely copied while the application is running due to SQLite's WAL mode.
+
+**Cleanup**: Unidentified fingerprints accumulate over time. Consider periodic cleanup of old unmatched fingerprints:
+
+```sql
+DELETE FROM FingerprintCache 
+WHERE Metadata IS NULL 
+AND CreatedAt < datetime('now', '-30 days');
+```
+
+### API Key Management
+
+**AcoustID API Key**:
+- Register at https://acoustid.org/new-application
+- Free tier allows 3 requests/second
+- Store in user secrets or environment variables:
+  ```bash
+  dotnet user-secrets set "Fingerprinting:AcoustId:ApiKey" "your-key-here"
+  ```
+
+**MusicBrainz**:
+- No API key required for anonymous access
+- Rate limit: 1 request/second
+- Contact email required in User-Agent header
+
+### Monitoring
+
+The BackgroundIdentificationService logs:
+- Each identification attempt
+- Cache hits and misses
+- API call results
+- Duplicate suppressions
+
+Monitor log entries with prefix `BackgroundIdentificationService` for:
+- `Identified track: {Title} by {Artist}` - successful identification
+- `Track not identified` - unknown track stored for manual tagging
+- `Suppressing duplicate identification` - duplicate suppression active
+
+### Manual Tagging
+
+For unidentified tracks:
+1. Query unmatched fingerprints via API
+2. Use the FingerprintController API to add manual metadata
+3. Future plays will match against the cached fingerprint
+
+---
+
 ## References
 
 - [AcoustID API Documentation](https://acoustid.org/webservice)
