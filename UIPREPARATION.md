@@ -286,7 +286,7 @@ Based on the UI requirements detailed in the issue, the following functionality 
 
 **Gap:**
 - Ensure radio API accepts flexible frequency input formats
-- Add validation for frequency ranges (AM: 530-1700 kHz, FM: 88-108 MHz)
+- Add validation for frequency ranges (AM: 530-1710 kHz, FM: 88-108 MHz)
 - Return validation errors in structured format
 
 ---
