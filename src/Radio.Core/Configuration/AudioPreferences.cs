@@ -1,3 +1,5 @@
+using Radio.Core.Models.Audio;
+
 namespace Radio.Core.Configuration;
 
 /// <summary>
@@ -100,17 +102,4 @@ public class GenericSourcePreferences
   public string USBPort { get; set; } = "";
 }
 
-/// <summary>
-/// Repeat mode options for audio playback.
-/// </summary>
-public enum RepeatMode
-{
-  /// <summary>No repeat.</summary>
-  Off,
 
-  /// <summary>Repeat the current track.</summary>
-  One,
-
-  /// <summary>Repeat the entire playlist.</summary>
-  All
-}

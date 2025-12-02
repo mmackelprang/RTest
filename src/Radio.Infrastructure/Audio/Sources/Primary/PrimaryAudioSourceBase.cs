@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Models.Audio;
 
 namespace Radio.Infrastructure.Audio.Sources.Primary;
 
@@ -73,6 +74,31 @@ public abstract class PrimaryAudioSourceBase : IPrimaryAudioSource
 
   /// <inheritdoc/>
   public abstract IReadOnlyDictionary<string, string> Metadata { get; }
+
+  // Capability properties - default to false, subclasses override as needed
+
+  /// <inheritdoc/>
+  public virtual bool SupportsNext => false;
+
+  /// <inheritdoc/>
+  public virtual bool SupportsPrevious => false;
+
+  /// <inheritdoc/>
+  public virtual bool SupportsShuffle => false;
+
+  /// <inheritdoc/>
+  public virtual bool SupportsRepeat => false;
+
+  /// <inheritdoc/>
+  public virtual bool SupportsQueue => false;
+
+  // Shuffle and Repeat properties - default values
+
+  /// <inheritdoc/>
+  public virtual bool IsShuffleEnabled => false;
+
+  /// <inheritdoc/>
+  public virtual RepeatMode RepeatMode => RepeatMode.Off;
 
   /// <inheritdoc/>
   public event EventHandler<AudioSourceStateChangedEventArgs>? StateChanged;
@@ -153,6 +179,50 @@ public abstract class PrimaryAudioSourceBase : IPrimaryAudioSource
     }
 
     await SeekCoreAsync(position, cancellationToken);
+  }
+
+  /// <inheritdoc/>
+  public virtual Task NextAsync(CancellationToken cancellationToken = default)
+  {
+    ThrowIfDisposed();
+    if (!SupportsNext)
+    {
+      throw new NotSupportedException($"Audio source {Id} does not support skipping to next track.");
+    }
+    return Task.CompletedTask;
+  }
+
+  /// <inheritdoc/>
+  public virtual Task PreviousAsync(CancellationToken cancellationToken = default)
+  {
+    ThrowIfDisposed();
+    if (!SupportsPrevious)
+    {
+      throw new NotSupportedException($"Audio source {Id} does not support going to previous track.");
+    }
+    return Task.CompletedTask;
+  }
+
+  /// <inheritdoc/>
+  public virtual Task SetShuffleAsync(bool enabled, CancellationToken cancellationToken = default)
+  {
+    ThrowIfDisposed();
+    if (!SupportsShuffle)
+    {
+      throw new NotSupportedException($"Audio source {Id} does not support shuffle mode.");
+    }
+    return Task.CompletedTask;
+  }
+
+  /// <inheritdoc/>
+  public virtual Task SetRepeatModeAsync(RepeatMode mode, CancellationToken cancellationToken = default)
+  {
+    ThrowIfDisposed();
+    if (!SupportsRepeat)
+    {
+      throw new NotSupportedException($"Audio source {Id} does not support repeat mode.");
+    }
+    return Task.CompletedTask;
   }
 
   /// <inheritdoc/>

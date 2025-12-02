@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Models.Audio;
 using SoundFlow.Backends.MiniAudio;
 using SoundFlow.Interfaces;
 using SoundFlow.Metadata;
@@ -63,6 +64,28 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
 
   /// <inheritdoc/>
   public override IReadOnlyDictionary<string, string> Metadata => _metadata;
+
+  // File player supports next, shuffle, repeat, and queue
+  /// <inheritdoc/>
+  public override bool SupportsNext => true;
+
+  /// <inheritdoc/>
+  public override bool SupportsPrevious => true;
+
+  /// <inheritdoc/>
+  public override bool SupportsShuffle => true;
+
+  /// <inheritdoc/>
+  public override bool SupportsRepeat => true;
+
+  /// <inheritdoc/>
+  public override bool SupportsQueue => true;
+
+  /// <inheritdoc/>
+  public override bool IsShuffleEnabled => _preferences.CurrentValue.Shuffle;
+
+  /// <inheritdoc/>
+  public override RepeatMode RepeatMode => _preferences.CurrentValue.Repeat;
 
   /// <summary>
   /// Gets the current playlist.
@@ -189,11 +212,11 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
   }
 
   /// <summary>
-  /// Skips to the next track in the playlist.
+  /// Attempts to skip to the next track in the playlist.
   /// </summary>
   /// <param name="cancellationToken">Cancellation token.</param>
   /// <returns>True if there was a next track; false if the playlist is empty.</returns>
-  public async Task<bool> NextAsync(CancellationToken cancellationToken = default)
+  public async Task<bool> TryNextAsync(CancellationToken cancellationToken = default)
   {
     ThrowIfDisposed();
 
@@ -215,6 +238,12 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
     }
 
     return true;
+  }
+
+  /// <inheritdoc/>
+  public override async Task NextAsync(CancellationToken cancellationToken = default)
+  {
+    await TryNextAsync(cancellationToken);
   }
 
   /// <inheritdoc/>
