@@ -17,7 +17,7 @@ This project restores the original function (Radio/Vinyl) while adding modern ca
 | 4 - Event Sources | ✅ Completed | TTS (eSpeak/Google/Azure), Audio File Events |
 | 5 - Ducking | ✅ Completed | Priority-based audio ducking with configurable fade policies |
 | 6 - Outputs | ✅ Completed | Local audio, Chromecast (SharpCaster), HTTP streaming |
-| 7 - Visualization | ⬜ Not Started | Spectrum, VU meters |
+| 7 - Visualization | ✅ Completed | Spectrum analyzer (FFT), VU meters, waveform display |
 | 8 - API | ⬜ Not Started | REST endpoints, SignalR |
 | 9 - UI | ⬜ Not Started | Blazor components |
 
@@ -41,8 +41,8 @@ This project restores the original function (Radio/Vinyl) while adding modern ca
 RadioConsole/
 ├── src/
 │   ├── Radio.Core/          # Core interfaces, models, and domain logic
-│   │   ├── Interfaces/Audio/  # IAudioEngine, IAudioDeviceManager, IDuckingService, etc.
-│   │   ├── Configuration/     # AudioEngineOptions, AudioOptions, TTSOptions
+│   │   ├── Interfaces/Audio/  # IAudioEngine, IAudioDeviceManager, IDuckingService, IVisualizerService, etc.
+│   │   ├── Configuration/     # AudioEngineOptions, AudioOptions, TTSOptions, VisualizerOptions
 │   │   └── Exceptions/        # AudioDeviceConflictException
 │   ├── Radio.Infrastructure/ # Audio management, configuration, external integrations
 │   │   ├── Audio/SoundFlow/   # SoundFlow audio engine implementation (Phase 2)
@@ -58,6 +58,11 @@ RadioConsole/
 │   │   │   ├── TTSFactory.cs
 │   │   │   ├── AudioFileEventSourceFactory.cs
 │   │   │   └── DuckingService.cs    # Phase 5 - Ducking & Priority
+│   │   ├── Audio/Visualization/  # Audio visualization (Phase 7)
+│   │   │   ├── VisualizerService.cs  # Main visualizer service
+│   │   │   ├── SpectrumAnalyzer.cs   # FFT-based spectrum analysis
+│   │   │   ├── LevelMeter.cs         # Peak/RMS level metering
+│   │   │   └── WaveformAnalyzer.cs   # Time-domain waveform buffer
 │   │   ├── Configuration/     # Configuration infrastructure (Phase 1)
 │   │   │   ├── Abstractions/  # IConfigurationStore, ISecretsProvider, etc.
 │   │   │   ├── Models/        # ConfigurationEntry, SecretTag, BackupMetadata
@@ -72,7 +77,7 @@ RadioConsole/
 │   ├── Radio.Core.Tests/
 │   ├── Radio.Infrastructure.Tests/
 │   │   ├── Configuration/   # Tests for configuration infrastructure
-│   │   └── Audio/           # Tests for audio engine and event sources
+│   │   └── Audio/           # Tests for audio engine, event sources, and visualization
 │   └── Radio.API.Tests/
 ├── tools/
 │   ├── Radio.Tools.AudioUAT/  # Audio UAT testing tool with Phase 2, 3, 4 tests
@@ -297,6 +302,92 @@ await httpOutput.InitializeAsync();
 await httpOutput.StartAsync();
 Console.WriteLine($"Stream URL: {httpOutput.StreamUrl}");
 ```
+
+## Audio Visualization (Phase 7)
+
+The visualization system provides real-time audio analysis for UI displays:
+
+- **IVisualizerService**: Unified service for all visualization types
+- **SpectrumAnalyzer**: FFT-based frequency analysis for spectrum displays
+- **LevelMeter**: Peak and RMS level metering for VU meters
+- **WaveformAnalyzer**: Time-domain sample buffering for waveform displays
+
+### Visualization Types
+
+| Type | Description | Use Case |
+|------|-------------|----------|
+| Spectrum | FFT frequency bins (magnitude per frequency) | Spectrum analyzer display |
+| Level | Peak/RMS measurements with decay | VU meters, level bars |
+| Waveform | Time-domain sample buffer | Oscilloscope display |
+
+### Configuration
+
+```json
+{
+  "Visualizer": {
+    "FFTSize": 2048,
+    "WaveformSampleCount": 512,
+    "PeakHoldTimeMs": 1000,
+    "PeakDecayRate": 0.95,
+    "RmsSmoothing": 0.3,
+    "ApplyWindowFunction": true,
+    "SpectrumSmoothing": 0.5
+  }
+}
+```
+
+### Usage Example
+
+```csharp
+// Register services (included in AddSoundFlowAudio)
+services.AddSoundFlowAudio(configuration);
+
+// Get the visualizer service
+var visualizer = serviceProvider.GetRequiredService<IVisualizerService>();
+
+// Process audio samples (called from audio callback)
+visualizer.ProcessSamples(samples);
+
+// Get spectrum data for display
+var spectrum = visualizer.GetSpectrumData();
+Console.WriteLine($"Spectrum bins: {spectrum.BinCount}");
+Console.WriteLine($"Max frequency: {spectrum.MaxFrequency} Hz");
+// spectrum.Magnitudes contains values 0.0-1.0 for each frequency bin
+
+// Get level data for VU meters
+var levels = visualizer.GetLevelData();
+Console.WriteLine($"Left peak: {levels.LeftPeakDb:F1} dB");
+Console.WriteLine($"Right peak: {levels.RightPeakDb:F1} dB");
+Console.WriteLine($"Clipping: {levels.IsClipping}");
+
+// Get waveform data for display
+var waveform = visualizer.GetWaveformData();
+Console.WriteLine($"Sample count: {waveform.SampleCount}");
+Console.WriteLine($"Duration: {waveform.Duration.TotalMilliseconds:F0} ms");
+// waveform.LeftSamples/RightSamples contain values -1.0 to 1.0
+
+// Reset visualization when changing sources
+visualizer.Reset();
+```
+
+### Data Models
+
+**SpectrumData**: FFT frequency analysis results
+- `Magnitudes`: Array of magnitude values (0.0-1.0) per frequency bin
+- `Frequencies`: Array of frequency values (Hz) per bin
+- `BinCount`: Number of frequency bins (FFTSize / 2)
+- `FrequencyResolution`: Hz per bin (SampleRate / FFTSize)
+
+**LevelData**: Audio level measurements
+- `LeftPeak`/`RightPeak`: Peak levels (0.0-1.0)
+- `LeftRms`/`RightRms`: RMS levels (0.0-1.0)
+- `LeftPeakDb`/`RightPeakDb`: Peak levels in dBFS
+- `IsClipping`: True if audio is at or near maximum level
+
+**WaveformData**: Time-domain sample buffer
+- `LeftSamples`/`RightSamples`: Sample arrays (-1.0 to 1.0)
+- `SampleCount`: Number of samples per channel
+- `Duration`: Time span represented by the buffer
 
 ## Getting Started
 

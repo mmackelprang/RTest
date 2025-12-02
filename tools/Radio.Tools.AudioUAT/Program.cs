@@ -8,12 +8,14 @@ using Radio.Infrastructure.Audio.Outputs;
 using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Infrastructure.Audio.Sources.Events;
+using Radio.Infrastructure.Audio.Visualization;
 using Radio.Tools.AudioUAT;
 using Radio.Tools.AudioUAT.Phases.Phase2;
 using Radio.Tools.AudioUAT.Phases.Phase3;
 using Radio.Tools.AudioUAT.Phases.Phase4;
 using Radio.Tools.AudioUAT.Phases.Phase5;
 using Radio.Tools.AudioUAT.Phases.Phase6;
+using Radio.Tools.AudioUAT.Phases.Phase7;
 using Radio.Tools.AudioUAT.Results;
 using Radio.Tools.AudioUAT.Utilities;
 using Spectre.Console;
@@ -71,6 +73,11 @@ var host = Host.CreateDefaultBuilder(args)
     services.AddSingleton<GoogleCastOutput>();
     services.AddSingleton<HttpStreamOutput>();
 
+    // Register Visualization services for Phase 7
+    services.Configure<VisualizerOptions>(configuration.GetSection(VisualizerOptions.SectionName));
+    services.AddSingleton<VisualizerService>();
+    services.AddSingleton<IVisualizerService>(sp => sp.GetRequiredService<VisualizerService>());
+
     // Register UAT services
     services.AddSingleton<TestResultsManager>();
     services.AddSingleton<TestRunner>();
@@ -79,6 +86,7 @@ var host = Host.CreateDefaultBuilder(args)
     services.AddSingleton<EventAudioSourceTests>();
     services.AddSingleton<DuckingPriorityTests>();
     services.AddSingleton<AudioOutputTests>();
+    services.AddSingleton<VisualizationTests>();
   })
   .Build();
 
@@ -123,6 +131,7 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
   var phase4Tests = services.GetRequiredService<EventAudioSourceTests>();
   var phase5Tests = services.GetRequiredService<DuckingPriorityTests>();
   var phase6Tests = services.GetRequiredService<AudioOutputTests>();
+  var phase7Tests = services.GetRequiredService<VisualizationTests>();
 
   var testsToRun = new List<IPhaseTest>();
 
@@ -153,6 +162,10 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
     {
       testsToRun.AddRange(phase6Tests.GetAllTests());
     }
+    if (runAll || phaseStr == "7")
+    {
+      testsToRun.AddRange(phase7Tests.GetAllTests());
+    }
   }
   else if (args.Contains("--test"))
   {
@@ -165,6 +178,7 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
         .Concat(phase4Tests.GetAllTests())
         .Concat(phase5Tests.GetAllTests())
         .Concat(phase6Tests.GetAllTests())
+        .Concat(phase7Tests.GetAllTests())
         .ToList();
       var test = allTests.FirstOrDefault(t => t.TestId == testId);
       if (test != null)
@@ -223,6 +237,7 @@ static async Task RunInteractiveMode(IServiceProvider services)
   var phase4Tests = services.GetRequiredService<EventAudioSourceTests>();
   var phase5Tests = services.GetRequiredService<DuckingPriorityTests>();
   var phase6Tests = services.GetRequiredService<AudioOutputTests>();
+  var phase7Tests = services.GetRequiredService<VisualizationTests>();
 
   ConsoleUI.WriteWelcomeBanner();
 
@@ -249,6 +264,7 @@ static async Task RunInteractiveMode(IServiceProvider services)
       "Phase 4: Event Audio Sources Tests",
       "Phase 5: Ducking & Priority Tests",
       "Phase 6: Audio Outputs Tests",
+      "Phase 7: Visualization & Monitoring Tests",
       "View Test Results",
       "Export Results to JSON",
       "Clear Results",
@@ -275,6 +291,10 @@ static async Task RunInteractiveMode(IServiceProvider services)
 
       case "Phase 6: Audio Outputs Tests":
         await RunPhase6Menu(services, runner, phase6Tests);
+        break;
+
+      case "Phase 7: Visualization & Monitoring Tests":
+        await RunPhase7Menu(services, runner, phase7Tests);
         break;
 
       case "View Test Results":
@@ -942,6 +962,135 @@ static async Task RunPhase6Menu(IServiceProvider services, TestRunner runner, Au
       var resultsManager = services.GetRequiredService<TestResultsManager>();
       ConsoleUI.DisplayTestResults(resultsManager.GetResultsForPhase(6));
       ConsoleUI.DisplaySummary(resultsManager.GetSummaryForPhase(6));
+      ConsoleUI.PressAnyKeyToContinue();
+    }
+    else
+    {
+      // Extract test ID from choice
+      var testIdMatch = System.Text.RegularExpressions.Regex.Match(choice, @"\[([^\]]+)\]");
+      if (testIdMatch.Success)
+      {
+        var testId = testIdMatch.Groups[1].Value;
+        var test = allTests.FirstOrDefault(t => t.TestId == testId);
+        if (test != null)
+        {
+          AnsiConsole.Clear();
+          var result = await runner.RunTestAsync(test);
+
+          AnsiConsole.WriteLine();
+          if (result.Passed)
+          {
+            ConsoleUI.WriteSuccess($"Test {test.TestId} PASSED");
+          }
+          else if (result.Skipped)
+          {
+            ConsoleUI.WriteWarning($"Test {test.TestId} SKIPPED: {result.Message}");
+          }
+          else
+          {
+            ConsoleUI.WriteError($"Test {test.TestId} FAILED: {result.Message}");
+          }
+
+          ConsoleUI.PressAnyKeyToContinue();
+        }
+      }
+    }
+  }
+}
+
+static async Task RunPhase7Menu(IServiceProvider services, TestRunner runner, VisualizationTests tests)
+{
+  var exit = false;
+  while (!exit)
+  {
+    AnsiConsole.Clear();
+
+    var rule = new Rule("[cyan]Phase 7: Visualization & Monitoring Tests[/]")
+    {
+      Justification = Justify.Center
+    };
+    AnsiConsole.Write(rule);
+    AnsiConsole.WriteLine();
+
+    var allTests = tests.GetAllTests();
+    var menuItems = new List<string>
+    {
+      "Run All Phase 7 Tests",
+      "---",
+      "[SPECTRUM ANALYZER TESTS]",
+    };
+
+    // Group tests by category
+    foreach (var test in allTests.Where(t => t.TestId is "P7-001" or "P7-002" or "P7-003" or "P7-004"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("[LEVEL METER TESTS]");
+    foreach (var test in allTests.Where(t => t.TestId is "P7-005" or "P7-006" or "P7-007" or "P7-008" or "P7-009"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("[WAVEFORM TESTS]");
+    foreach (var test in allTests.Where(t => t.TestId is "P7-010" or "P7-011" or "P7-012"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("[INTEGRATION TESTS]");
+    foreach (var test in allTests.Where(t => t.TestId is "P7-013" or "P7-014" or "P7-015"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("Return to Main Menu");
+
+    var choice = ConsoleUI.ShowMenu("[bold]Select Test[/]", menuItems.ToArray());
+
+    if (choice == "Return to Main Menu")
+    {
+      exit = true;
+      continue;
+    }
+
+    if (choice.StartsWith("---") || choice.StartsWith("[SPECTRUM") || choice.StartsWith("[LEVEL") ||
+        choice.StartsWith("[WAVEFORM") || choice.StartsWith("[INTEGRATION"))
+    {
+      continue;
+    }
+
+    if (choice == "Run All Phase 7 Tests")
+    {
+      AnsiConsole.Clear();
+      ConsoleUI.WriteHeader("Running All Phase 7 Tests");
+
+      await AnsiConsole.Progress()
+        .AutoClear(false)
+        .Columns(
+          new TaskDescriptionColumn(),
+          new ProgressBarColumn(),
+          new PercentageColumn(),
+          new SpinnerColumn())
+        .StartAsync(async ctx =>
+        {
+          var task = ctx.AddTask("Running tests...", maxValue: allTests.Count);
+
+          foreach (var test in allTests)
+          {
+            task.Description = $"Running {test.TestId}...";
+            await runner.RunTestAsync(test);
+            task.Increment(1);
+          }
+        });
+
+      var resultsManager = services.GetRequiredService<TestResultsManager>();
+      ConsoleUI.DisplayTestResults(resultsManager.GetResultsForPhase(7));
+      ConsoleUI.DisplaySummary(resultsManager.GetSummaryForPhase(7));
       ConsoleUI.PressAnyKeyToContinue();
     }
     else

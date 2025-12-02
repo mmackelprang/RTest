@@ -5,6 +5,7 @@ using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Outputs;
 using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
+using Radio.Infrastructure.Audio.Visualization;
 
 namespace Radio.Infrastructure.DependencyInjection;
 
@@ -52,6 +53,9 @@ public static class AudioServiceExtensions
 
     // Register audio output services
     services.AddAudioOutputs(configuration);
+
+    // Register visualization services
+    services.AddVisualization(configuration);
 
     return services;
   }
@@ -143,6 +147,27 @@ public static class AudioServiceExtensions
 
     // Register HTTP Stream Output (singleton - provides stream URL for Chromecast)
     services.AddSingleton<HttpStreamOutput>();
+
+    return services;
+  }
+
+  /// <summary>
+  /// Adds audio visualization services (Spectrum, Level Meter, Waveform).
+  /// </summary>
+  /// <param name="services">The service collection.</param>
+  /// <param name="configuration">The configuration instance.</param>
+  /// <returns>The service collection for chaining.</returns>
+  public static IServiceCollection AddVisualization(
+    this IServiceCollection services,
+    IConfiguration configuration)
+  {
+    // Bind visualizer options
+    services.Configure<VisualizerOptions>(
+      configuration.GetSection(VisualizerOptions.SectionName));
+
+    // Register Visualizer Service (singleton to maintain state)
+    services.AddSingleton<VisualizerService>();
+    services.AddSingleton<IVisualizerService>(sp => sp.GetRequiredService<VisualizerService>());
 
     return services;
   }

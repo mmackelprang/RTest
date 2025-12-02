@@ -16,7 +16,8 @@ The tool will be implemented as a .NET console application that grows incrementa
 4. [Phase 4: Event Audio Sources Testing](#phase-4-event-audio-sources-testing)
 5. [Phase 5: Ducking & Priority System Testing](#phase-5-ducking--priority-system-testing)
 6. [Phase 6: Audio Outputs Testing](#phase-6-audio-outputs-testing)
-7. [Development Prompts](#development-prompts)
+7. [Phase 7: Visualization & Monitoring Testing](#phase-7-visualization--monitoring-testing)
+8. [Development Prompts](#development-prompts)
 
 ---
 
@@ -340,6 +341,69 @@ tools/
   [15] Test Multi-Output Sync
   [16] Test Output Failover
   [17] Run All Phase 6 Tests
+  
+  [R] View Test Results
+  [M] Return to Main Menu
+
+═══════════════════════════════════════════════════════════════
+```
+
+---
+
+## Phase 7: Visualization & Monitoring Testing
+
+**Objective:** Validate audio visualization components: spectrum analyzer (FFT), level meter (VU), and waveform display.
+
+### Test Cases
+
+| ID | Test Case | Description | Expected Result |
+|----|-----------|-------------|-----------------|
+| P7-001 | Spectrum Analyzer Init | Initialize spectrum analyzer with FFT size | Analyzer ready with configured bins |
+| P7-002 | Spectrum FFT Processing | Process audio through FFT | Correct frequency detection |
+| P7-003 | Spectrum Frequency Bins | Verify bin calculation | Bins cover full frequency range |
+| P7-004 | Spectrum Smoothing | Test display smoothing | Stable, non-jittery display |
+| P7-005 | Level Meter Init | Initialize VU meter | Meter ready for measurements |
+| P7-006 | Level Peak Detection | Detect audio peaks | Peak values match input |
+| P7-007 | Level RMS Calculation | Calculate RMS levels | RMS = amplitude / √2 for sine |
+| P7-008 | Level Clipping Detection | Detect audio clipping | Clipping indicator at max level |
+| P7-009 | Level Decibels | Linear to dBFS conversion | Correct dB values |
+| P7-010 | Waveform Buffer | Buffer samples for display | Samples stored correctly |
+| P7-011 | Waveform Stereo | Separate L/R channels | Independent channel buffers |
+| P7-012 | Waveform Downsample | Downsample for display | Peaks preserved |
+| P7-013 | Visualizer Service | Test IVisualizerService | All methods functional |
+| P7-014 | Visualizer Processing | Real-time processing | Fast enough for real-time |
+| P7-015 | Visualizer Reset | Reset visualization state | All data cleared |
+
+### Interactive Test Menu
+
+```
+═══════════════════════════════════════════════════════════════
+            PHASE 7: VISUALIZATION & MONITORING TESTS
+═══════════════════════════════════════════════════════════════
+
+  SPECTRUM ANALYZER:
+  [1] Initialize Spectrum Analyzer
+  [2] FFT Processing Test
+  [3] Frequency Bins Verification
+  [4] Smoothing Test
+  
+  LEVEL METER:
+  [5] Initialize Level Meter
+  [6] Peak Detection Test
+  [7] RMS Calculation Test
+  [8] Clipping Detection Test
+  [9] dBFS Conversion Test
+  
+  WAVEFORM:
+  [10] Waveform Buffer Test
+  [11] Stereo Channels Test
+  [12] Downsampling Test
+  
+  INTEGRATION:
+  [13] Visualizer Service Test
+  [14] Real-time Processing Test
+  [15] Reset Test
+  [16] Run All Phase 7 Tests
   
   [R] View Test Results
   [M] Return to Main Menu
@@ -1130,6 +1194,7 @@ public static class TestAudioGenerator
 | Phase 4 | ✅ Implemented | 13 tests | Event Audio Sources Tests |
 | Phase 5 | ✅ Implemented | 13 tests | Ducking & Priority Tests |
 | Phase 6 | ✅ Implemented | 14 tests | Audio Outputs Tests |
+| Phase 7 | ✅ Implemented | 15 tests | Visualization & Monitoring Tests |
 
 ### Phase 4 QA Verification Summary
 
@@ -1260,6 +1325,47 @@ dotnet run
 # Then select "Phase 6: Audio Outputs Tests" from the menu
 ```
 
+### Phase 7 QA Verification Summary
+
+The Phase 7 tests enable QA to verify:
+
+1. **Spectrum Analyzer** (P7-001 to P7-004)
+   - FFT initialization with configurable size (256-4096)
+   - Accurate frequency detection via FFT processing
+   - Correct frequency bin coverage (0 Hz to Nyquist)
+   - Smooth spectrum display without jitter
+
+2. **Level Meter (VU)** (P7-005 to P7-009)
+   - Peak level detection for left/right channels
+   - RMS calculation for average loudness
+   - Clipping detection when signal exceeds threshold
+   - Linear to dBFS conversion accuracy
+
+3. **Waveform Display** (P7-010 to P7-012)
+   - Circular buffer for time-domain samples
+   - Separate stereo channel visualization
+   - Peak-preserving downsampling for UI display
+
+4. **Integration** (P7-013 to P7-015)
+   - IVisualizerService full API verification
+   - Real-time processing performance (< buffer duration)
+   - State reset for source changes
+
+### Running Phase 7 Tests
+
+```bash
+# Run all Phase 7 tests
+cd tools/Radio.Tools.AudioUAT
+dotnet run -- --phase 7
+
+# Run specific test
+dotnet run -- --test P7-002  # FFT Processing Test
+
+# Interactive mode
+dotnet run
+# Then select "Phase 7: Visualization & Monitoring Tests" from the menu
+```
+
 ---
 
 ## Version History
@@ -1270,3 +1376,4 @@ dotnet run
 | 1.1 | 2025-11-26 | GitHub Copilot | Phase 4 Event Audio Sources tests implemented |
 | 1.2 | 2025-11-26 | GitHub Copilot | Phase 5 Ducking & Priority tests implemented |
 | 1.3 | 2025-11-26 | GitHub Copilot | Phase 6 Audio Outputs tests implemented |
+| 1.4 | 2025-12-02 | GitHub Copilot | Phase 7 Visualization & Monitoring tests implemented |
