@@ -985,6 +985,10 @@ Update the following:
 
 4. Update AudioSourceDto.Metadata to use Dictionary<string, object> instead of Dictionary<string, string>
    - Allows Duration as TimeSpan, TrackNumber as int, etc.
+5. Update IPrimaryAudioSource.Metadata property type to IReadOnlyDictionary<string, object> (was IReadOnlyDictionary<string, string>)
+   - Update all implementing classes to return properly typed values
+   - Update serialization/deserialization logic to handle object values
+   - Update API DTOs and ensure backward compatibility as needed
 
 Success Criteria:
 - All sources use standard keys
