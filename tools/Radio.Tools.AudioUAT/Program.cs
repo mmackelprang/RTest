@@ -9,6 +9,7 @@ using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Infrastructure.Audio.Sources.Events;
 using Radio.Infrastructure.Audio.Visualization;
+using Radio.Infrastructure.DependencyInjection;
 using Radio.Tools.AudioUAT;
 using Radio.Tools.AudioUAT.Phases.Phase2;
 using Radio.Tools.AudioUAT.Phases.Phase3;
@@ -17,6 +18,7 @@ using Radio.Tools.AudioUAT.Phases.Phase5;
 using Radio.Tools.AudioUAT.Phases.Phase6;
 using Radio.Tools.AudioUAT.Phases.Phase7;
 using Radio.Tools.AudioUAT.Phases.Phase8;
+using Radio.Tools.AudioUAT.Phases.Phase9;
 using Radio.Tools.AudioUAT.Results;
 using Radio.Tools.AudioUAT.Utilities;
 using Spectre.Console;
@@ -79,6 +81,9 @@ var host = Host.CreateDefaultBuilder(args)
     services.AddSingleton<VisualizerService>();
     services.AddSingleton<IVisualizerService>(sp => sp.GetRequiredService<VisualizerService>());
 
+    // Register Fingerprinting services for Phase 9
+    services.AddFingerprinting(configuration);
+
     // Register UAT services
     services.AddSingleton<TestResultsManager>();
     services.AddSingleton<TestRunner>();
@@ -89,6 +94,7 @@ var host = Host.CreateDefaultBuilder(args)
     services.AddSingleton<AudioOutputTests>();
     services.AddSingleton<VisualizationTests>();
     services.AddSingleton<ApiSignalRTests>();
+    services.AddSingleton<FingerprintingTests>();
   })
   .Build();
 
@@ -135,6 +141,7 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
   var phase6Tests = services.GetRequiredService<AudioOutputTests>();
   var phase7Tests = services.GetRequiredService<VisualizationTests>();
   var phase8Tests = services.GetRequiredService<ApiSignalRTests>();
+  var phase9Tests = services.GetRequiredService<FingerprintingTests>();
 
   var testsToRun = new List<IPhaseTest>();
 
@@ -173,6 +180,10 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
     {
       testsToRun.AddRange(phase8Tests.GetAllTests());
     }
+    if (runAll || phaseStr == "9")
+    {
+      testsToRun.AddRange(phase9Tests.GetAllTests());
+    }
   }
   else if (args.Contains("--test"))
   {
@@ -187,6 +198,7 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
         .Concat(phase6Tests.GetAllTests())
         .Concat(phase7Tests.GetAllTests())
         .Concat(phase8Tests.GetAllTests())
+        .Concat(phase9Tests.GetAllTests())
         .ToList();
       var test = allTests.FirstOrDefault(t => t.TestId == testId);
       if (test != null)
@@ -247,6 +259,7 @@ static async Task RunInteractiveMode(IServiceProvider services)
   var phase6Tests = services.GetRequiredService<AudioOutputTests>();
   var phase7Tests = services.GetRequiredService<VisualizationTests>();
   var phase8Tests = services.GetRequiredService<ApiSignalRTests>();
+  var phase9Tests = services.GetRequiredService<FingerprintingTests>();
 
   ConsoleUI.WriteWelcomeBanner();
 
@@ -275,6 +288,7 @@ static async Task RunInteractiveMode(IServiceProvider services)
       "Phase 6: Audio Outputs Tests",
       "Phase 7: Visualization & Monitoring Tests",
       "Phase 8: API & SignalR Tests",
+      "Phase 9: Audio Fingerprinting Tests",
       "View Test Results",
       "Export Results to JSON",
       "Clear Results",
@@ -309,6 +323,10 @@ static async Task RunInteractiveMode(IServiceProvider services)
 
       case "Phase 8: API & SignalR Tests":
         await RunPhase8Menu(services, runner, phase8Tests);
+        break;
+
+      case "Phase 9: Audio Fingerprinting Tests":
+        await RunPhase9Menu(services, runner, phase9Tests);
         break;
 
       case "View Test Results":
@@ -1234,6 +1252,135 @@ static async Task RunPhase8Menu(IServiceProvider services, TestRunner runner, Ap
       var resultsManager = services.GetRequiredService<TestResultsManager>();
       ConsoleUI.DisplayTestResults(resultsManager.GetResultsForPhase(8));
       ConsoleUI.DisplaySummary(resultsManager.GetSummaryForPhase(8));
+      ConsoleUI.PressAnyKeyToContinue();
+    }
+    else
+    {
+      // Extract test ID from choice
+      var testIdMatch = System.Text.RegularExpressions.Regex.Match(choice, @"\[([^\]]+)\]");
+      if (testIdMatch.Success)
+      {
+        var testId = testIdMatch.Groups[1].Value;
+        var test = allTests.FirstOrDefault(t => t.TestId == testId);
+        if (test != null)
+        {
+          AnsiConsole.Clear();
+          var result = await runner.RunTestAsync(test);
+
+          AnsiConsole.WriteLine();
+          if (result.Passed)
+          {
+            ConsoleUI.WriteSuccess($"Test {test.TestId} PASSED");
+          }
+          else if (result.Skipped)
+          {
+            ConsoleUI.WriteWarning($"Test {test.TestId} SKIPPED: {result.Message}");
+          }
+          else
+          {
+            ConsoleUI.WriteError($"Test {test.TestId} FAILED: {result.Message}");
+          }
+
+          ConsoleUI.PressAnyKeyToContinue();
+        }
+      }
+    }
+  }
+}
+
+static async Task RunPhase9Menu(IServiceProvider services, TestRunner runner, FingerprintingTests tests)
+{
+  var exit = false;
+  while (!exit)
+  {
+    AnsiConsole.Clear();
+
+    var rule = new Rule("[cyan]Phase 9: Audio Fingerprinting Tests[/]")
+    {
+      Justification = Justify.Center
+    };
+    AnsiConsole.Write(rule);
+    AnsiConsole.WriteLine();
+
+    var allTests = tests.GetAllTests();
+    var menuItems = new List<string>
+    {
+      "Run All Phase 9 Tests",
+      "---",
+      "[DATABASE TESTS]",
+    };
+
+    // Group tests by category
+    foreach (var test in allTests.Where(t => t.TestId is "P9-001" or "P9-003" or "P9-012"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("[FINGERPRINT TESTS]");
+    foreach (var test in allTests.Where(t => t.TestId is "P9-002" or "P9-008" or "P9-009" or "P9-010"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("[METADATA TESTS]");
+    foreach (var test in allTests.Where(t => t.TestId is "P9-004" or "P9-011"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("[PLAY HISTORY TESTS]");
+    foreach (var test in allTests.Where(t => t.TestId is "P9-005" or "P9-006" or "P9-007"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("Return to Main Menu");
+
+    var choice = ConsoleUI.ShowMenu("[bold]Select Test[/]", menuItems.ToArray());
+
+    if (choice == "Return to Main Menu")
+    {
+      exit = true;
+      continue;
+    }
+
+    if (choice.StartsWith("---") || choice.StartsWith("[DATABASE") || choice.StartsWith("[FINGERPRINT") ||
+        choice.StartsWith("[METADATA") || choice.StartsWith("[PLAY"))
+    {
+      continue;
+    }
+
+    if (choice == "Run All Phase 9 Tests")
+    {
+      AnsiConsole.Clear();
+      ConsoleUI.WriteHeader("Running All Phase 9 Tests");
+
+      await AnsiConsole.Progress()
+        .AutoClear(false)
+        .Columns(
+          new TaskDescriptionColumn(),
+          new ProgressBarColumn(),
+          new PercentageColumn(),
+          new SpinnerColumn())
+        .StartAsync(async ctx =>
+        {
+          var task = ctx.AddTask("Running tests...", maxValue: allTests.Count);
+
+          foreach (var test in allTests)
+          {
+            task.Description = $"Running {test.TestId}...";
+            await runner.RunTestAsync(test);
+            task.Increment(1);
+          }
+        });
+
+      var resultsManager = services.GetRequiredService<TestResultsManager>();
+      ConsoleUI.DisplayTestResults(resultsManager.GetResultsForPhase(9));
+      ConsoleUI.DisplaySummary(resultsManager.GetSummaryForPhase(9));
       ConsoleUI.PressAnyKeyToContinue();
     }
     else
