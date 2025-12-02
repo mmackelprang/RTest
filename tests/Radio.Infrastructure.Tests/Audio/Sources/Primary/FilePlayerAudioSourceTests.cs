@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Sources.Primary;
 
 namespace Radio.Infrastructure.Tests.Audio.Sources.Primary;
@@ -299,7 +300,7 @@ public class FilePlayerAudioSourceTests : IDisposable
     var firstFile = source.CurrentFile;
 
     // Act
-    var result = await source.NextAsync();
+    var result = await source.TryNextAsync();
 
     // Assert
     Assert.True(result);
@@ -315,7 +316,7 @@ public class FilePlayerAudioSourceTests : IDisposable
     await source.LoadFileAsync("song.mp3");
 
     // Act
-    var result = await source.NextAsync();
+    var result = await source.TryNextAsync();
 
     // Assert
     Assert.False(result);

@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Models.Audio;
 using SpotifyAPI.Web;
 
 namespace Radio.Infrastructure.Audio.Sources.Primary;
@@ -54,6 +55,28 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase
 
   /// <inheritdoc/>
   public override IReadOnlyDictionary<string, string> Metadata => _metadata;
+
+  // Spotify supports next, previous, shuffle, and repeat
+  /// <inheritdoc/>
+  public override bool SupportsNext => true;
+
+  /// <inheritdoc/>
+  public override bool SupportsPrevious => true;
+
+  /// <inheritdoc/>
+  public override bool SupportsShuffle => true;
+
+  /// <inheritdoc/>
+  public override bool SupportsRepeat => true;
+
+  /// <inheritdoc/>
+  public override bool SupportsQueue => true;
+
+  /// <inheritdoc/>
+  public override bool IsShuffleEnabled => _preferences.CurrentValue.Shuffle;
+
+  /// <inheritdoc/>
+  public override RepeatMode RepeatMode => _preferences.CurrentValue.Repeat;
 
   /// <summary>
   /// Gets a value indicating whether the client is authenticated.
@@ -257,7 +280,7 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase
   /// </summary>
   /// <param name="cancellationToken">Cancellation token.</param>
   /// <returns>A task representing the async operation.</returns>
-  public async Task NextAsync(CancellationToken cancellationToken = default)
+  public override async Task NextAsync(CancellationToken cancellationToken = default)
   {
     ThrowIfDisposed();
     if (_client == null) return;
@@ -271,7 +294,7 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase
   /// </summary>
   /// <param name="cancellationToken">Cancellation token.</param>
   /// <returns>A task representing the async operation.</returns>
-  public async Task PreviousAsync(CancellationToken cancellationToken = default)
+  public override async Task PreviousAsync(CancellationToken cancellationToken = default)
   {
     ThrowIfDisposed();
     if (_client == null) return;
@@ -286,7 +309,7 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase
   /// <param name="enabled">Whether shuffle is enabled.</param>
   /// <param name="cancellationToken">Cancellation token.</param>
   /// <returns>A task representing the async operation.</returns>
-  public async Task SetShuffleAsync(bool enabled, CancellationToken cancellationToken = default)
+  public override async Task SetShuffleAsync(bool enabled, CancellationToken cancellationToken = default)
   {
     ThrowIfDisposed();
     if (_client == null) return;
@@ -301,7 +324,7 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase
   /// <param name="mode">The repeat mode.</param>
   /// <param name="cancellationToken">Cancellation token.</param>
   /// <returns>A task representing the async operation.</returns>
-  public async Task SetRepeatAsync(RepeatMode mode, CancellationToken cancellationToken = default)
+  public override async Task SetRepeatModeAsync(RepeatMode mode, CancellationToken cancellationToken = default)
   {
     ThrowIfDisposed();
     if (_client == null) return;
