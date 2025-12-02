@@ -18,7 +18,7 @@ This project restores the original function (Radio/Vinyl) while adding modern ca
 | 5 - Ducking | ✅ Completed | Priority-based audio ducking with configurable fade policies |
 | 6 - Outputs | ✅ Completed | Local audio, Chromecast (SharpCaster), HTTP streaming |
 | 7 - Visualization | ✅ Completed | Spectrum analyzer (FFT), VU meters, waveform display |
-| 8 - API | ⬜ Not Started | REST endpoints, SignalR |
+| 8 - API | ✅ Completed | REST controllers, SignalR hub, audio streaming, Swagger |
 | 9 - UI | ⬜ Not Started | Blazor components |
 
 ## Technical Architecture
@@ -388,6 +388,83 @@ visualizer.Reset();
 - `LeftSamples`/`RightSamples`: Sample arrays (-1.0 to 1.0)
 - `SampleCount`: Number of samples per channel
 - `Duration`: Time span represented by the buffer
+
+## API & SignalR Integration (Phase 8)
+
+The API layer provides REST endpoints and real-time communication for external clients:
+
+- **REST Controllers**: Complete CRUD operations for audio, sources, devices, and configuration
+- **SignalR Hub**: Real-time visualization data broadcasting at 30fps
+- **Audio Streaming**: HTTP PCM audio stream for Chromecast and web clients
+- **Swagger Documentation**: Interactive API documentation at `/swagger`
+
+### REST API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/audio` | GET | Get current playback state |
+| `/api/audio` | POST | Update playback (play/pause/stop/volume) |
+| `/api/audio/volume/{value}` | POST | Set volume (0.0-1.0) |
+| `/api/audio/mute` | POST | Toggle mute |
+| `/api/sources` | GET | List available audio sources |
+| `/api/sources/active` | GET | Get active sources |
+| `/api/sources` | POST | Switch audio source |
+| `/api/devices/output` | GET | List output devices |
+| `/api/devices/input` | GET | List input devices |
+| `/api/configuration` | GET | Get all settings |
+| `/api/configuration/audio` | GET | Get audio settings |
+| `/api/configuration/visualizer` | GET | Get visualizer settings |
+
+### SignalR Hub
+
+The `AudioVisualizationHub` at `/hubs/visualization` provides real-time audio data:
+
+```javascript
+// Connect to the hub
+const connection = new signalR.HubConnectionBuilder()
+    .withUrl("/hubs/visualization")
+    .build();
+
+// Subscribe to visualization data
+await connection.invoke("SubscribeToAll");
+
+// Receive spectrum updates
+connection.on("ReceiveSpectrum", (data) => {
+    // data.magnitudes - array of frequency bin values
+    // data.frequencies - array of frequency values in Hz
+    // data.binCount - number of frequency bins
+    updateSpectrumDisplay(data);
+});
+
+// Receive level updates
+connection.on("ReceiveLevels", (data) => {
+    // data.leftPeak, data.rightPeak - peak levels
+    // data.leftRms, data.rightRms - RMS levels
+    // data.isClipping - clipping indicator
+    updateVUMeter(data);
+});
+
+// Receive waveform updates
+connection.on("ReceiveWaveform", (data) => {
+    // data.leftSamples, data.rightSamples - sample arrays
+    // data.sampleCount - number of samples
+    updateWaveformDisplay(data);
+});
+```
+
+### Audio Stream Endpoint
+
+The audio stream middleware provides PCM audio at `/stream/audio`:
+
+- **Format**: 16-bit PCM, stereo, 48kHz
+- **Content-Type**: `audio/L16;rate=48000;channels=2`
+- **Use Case**: Chromecast streaming, web audio players
+
+```javascript
+// Connect to audio stream
+const audio = new Audio('/stream/audio');
+audio.play();
+```
 
 ## Getting Started
 
