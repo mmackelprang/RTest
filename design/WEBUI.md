@@ -836,7 +836,7 @@ Requirements:
 
 1. Display layout:
    - Large frequency display: DSEG14Classic-Bold, 48px
-   - Band indicator (AM/FM): DSEG14Classic-Regular, 36px
+   - Band indicator (AM/FM): DSEG14Classic-Regular, 24px
    - Signal strength meter: Visual bars (5 bars)
    - Stereo indicator: "STEREO" text when applicable
    - Sub-band step: "0.1 MHz" or "0.2 MHz"
