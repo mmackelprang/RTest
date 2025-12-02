@@ -109,7 +109,7 @@ public class MockFingerprintServiceTests
 
     for (int i = 0; i < sampleCount; i++)
     {
-      var t = (double)(i / channels) / sampleRate;
+      var t = (double)i / channels / sampleRate;
       samples[i] = (float)Math.Sin(2 * Math.PI * frequency * t);
     }
 

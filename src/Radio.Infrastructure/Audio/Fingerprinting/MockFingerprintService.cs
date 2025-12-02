@@ -94,8 +94,8 @@ public sealed class MockFingerprintService : IFingerprintService
     for (int i = 0; i < samplePoints && i * step < samples.Length; i++)
     {
       var sample = samples[i * step];
-      // Convert float sample (-1 to 1) to byte (0 to 255)
-      hashBytes[i] = (byte)((sample + 1f) * 127.5f);
+      // Convert float sample (-1 to 1) to byte (0 to 255), with clamping for safety
+      hashBytes[i] = (byte)Math.Clamp((sample + 1f) * 127.5f, 0f, 255f);
     }
 
     return Convert.ToBase64String(
