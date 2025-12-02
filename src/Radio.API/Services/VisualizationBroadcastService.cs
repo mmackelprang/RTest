@@ -75,6 +75,10 @@ public class VisualizationBroadcastService : BackgroundService
 
   private async Task BroadcastVisualizationDataAsync(CancellationToken cancellationToken)
   {
+    // Note: SignalR doesn't provide a simple way to check if groups have connections.
+    // The data generation is lightweight, so we generate and send to all subscribed groups.
+    // If performance becomes a concern, consider tracking group membership separately.
+
     // Get visualization data
     var spectrumData = _visualizerService.GetSpectrumData();
     var levelData = _visualizerService.GetLevelData();

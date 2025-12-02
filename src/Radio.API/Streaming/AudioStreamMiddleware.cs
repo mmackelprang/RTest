@@ -12,6 +12,12 @@ public class AudioStreamMiddleware
   private readonly ILogger<AudioStreamMiddleware> _logger;
 
   /// <summary>
+  /// Buffer size for reading audio data (in bytes).
+  /// 4096 bytes = ~21ms at 48kHz stereo 16-bit, providing smooth streaming.
+  /// </summary>
+  private const int StreamBufferSize = 4096;
+
+  /// <summary>
   /// Initializes a new instance of the AudioStreamMiddleware.
   /// </summary>
   public AudioStreamMiddleware(RequestDelegate next, ILogger<AudioStreamMiddleware> logger)
@@ -54,7 +60,7 @@ public class AudioStreamMiddleware
       var audioStream = audioEngine.GetMixedOutputStream();
 
       // Buffer for reading audio data
-      var buffer = new byte[4096];
+      var buffer = new byte[StreamBufferSize];
       var cancellationToken = context.RequestAborted;
 
       _logger.LogInformation("Starting audio stream to {RemoteIp}", context.Connection.RemoteIpAddress);

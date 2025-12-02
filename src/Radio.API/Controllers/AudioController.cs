@@ -92,17 +92,25 @@ public class AudioController : ControllerBase
     {
       var mixer = _audioEngine.GetMasterMixer();
 
-      // Update volume if specified
+      // Validate and update volume if specified
       if (request.Volume.HasValue)
       {
-        mixer.MasterVolume = Math.Clamp(request.Volume.Value, 0f, 1f);
+        if (request.Volume.Value < 0f || request.Volume.Value > 1f)
+        {
+          return BadRequest(new { error = "Volume must be between 0 and 1" });
+        }
+        mixer.MasterVolume = request.Volume.Value;
         _logger.LogInformation("Volume set to {Volume}", mixer.MasterVolume);
       }
 
-      // Update balance if specified
+      // Validate and update balance if specified
       if (request.Balance.HasValue)
       {
-        mixer.Balance = Math.Clamp(request.Balance.Value, -1f, 1f);
+        if (request.Balance.Value < -1f || request.Balance.Value > 1f)
+        {
+          return BadRequest(new { error = "Balance must be between -1 and 1" });
+        }
+        mixer.Balance = request.Balance.Value;
         _logger.LogInformation("Balance set to {Balance}", mixer.Balance);
       }
 
