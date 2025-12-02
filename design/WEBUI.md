@@ -947,8 +947,8 @@ Requirements:
    - Decimal point for FM
    - Clear, Backspace, Confirm, Cancel
    - Validation:
-     * FM: 87.5 - 108.0 MHz
-     * AM: 520 - 1710 kHz
+     * FM: 87.5-108.0 MHz
+     * AM: 520-1710 kHz
    - Error message for invalid input
 
 9. Data binding:
