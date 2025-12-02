@@ -176,9 +176,10 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     {
       if (await reader.ReadAsync(ct))
       {
-        totalPlays = reader.GetInt32(0);
-        identifiedPlays = reader.GetInt32(1);
-        unidentifiedPlays = reader.GetInt32(2);
+        // SQLite returns 64-bit integers for COUNT/SUM - guard for NULL first
+        totalPlays = reader.IsDBNull(0) ? 0 : Convert.ToInt32(reader.GetInt64(0));
+        identifiedPlays = reader.IsDBNull(1) ? 0 : Convert.ToInt32(reader.GetInt64(1));
+        unidentifiedPlays = reader.IsDBNull(2) ? 0 : Convert.ToInt32(reader.GetInt64(2));
       }
     }
 
@@ -196,7 +197,8 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
       while (await reader.ReadAsync(ct))
       {
         var source = Enum.Parse<PlaySource>(reader.GetString(0));
-        playsBySource[source] = reader.GetInt32(1);
+        // SQLite COUNT returns 64-bit integer, guard for NULL
+        playsBySource[source] = reader.IsDBNull(1) ? 0 : Convert.ToInt32(reader.GetInt64(1));
       }
     }
 
@@ -219,7 +221,8 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
         topArtists.Add(new ArtistPlayCount
         {
           Artist = reader.GetString(0),
-          PlayCount = reader.GetInt32(1)
+          // SQLite COUNT returns 64-bit integer, guard for NULL
+          PlayCount = reader.IsDBNull(1) ? 0 : Convert.ToInt32(reader.GetInt64(1))
         });
       }
     }
@@ -244,7 +247,8 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
         {
           Title = reader.GetString(0),
           Artist = reader.GetString(1),
-          PlayCount = reader.GetInt32(2)
+          // SQLite COUNT returns 64-bit integer, guard for NULL
+          PlayCount = reader.IsDBNull(2) ? 0 : Convert.ToInt32(reader.GetInt64(2))
         });
       }
     }

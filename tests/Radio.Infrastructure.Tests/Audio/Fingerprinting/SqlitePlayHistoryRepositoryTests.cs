@@ -267,6 +267,21 @@ public class SqlitePlayHistoryRepositoryTests : IAsyncLifetime
   }
 
   [Fact]
+  public async Task GetStatisticsAsync_WithEmptyDatabase_ReturnsZeroStatistics()
+  {
+    // Act - Call GetStatisticsAsync on empty database
+    var stats = await _repository.GetStatisticsAsync();
+
+    // Assert - Should handle NULL aggregates and return zeros, not throw
+    Assert.Equal(0, stats.TotalPlays);
+    Assert.Equal(0, stats.IdentifiedPlays);
+    Assert.Equal(0, stats.UnidentifiedPlays);
+    Assert.Empty(stats.PlaysBySource);
+    Assert.Empty(stats.TopArtists);
+    Assert.Empty(stats.TopTracks);
+  }
+
+  [Fact]
   public async Task GetStatisticsAsync_ReturnsCorrectStatistics()
   {
     // Arrange
