@@ -52,6 +52,9 @@ builder.Services.AddSignalR();
 // Add Audio Infrastructure services
 builder.Services.AddSoundFlowAudio(builder.Configuration);
 
+// Add Fingerprinting services (for play history)
+builder.Services.AddFingerprinting(builder.Configuration);
+
 // Add Configuration Infrastructure services
 builder.Services.AddManagedConfiguration(builder.Configuration);
 

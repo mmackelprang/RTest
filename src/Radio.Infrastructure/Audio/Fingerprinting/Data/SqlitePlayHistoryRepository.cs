@@ -31,8 +31,8 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     var conn = await _dbContext.GetConnectionAsync(ct);
 
     var sql = """
-      INSERT INTO PlayHistory (Id, TrackMetadataId, FingerprintId, PlayedAt, Source, SourceDetails, Duration, IdentificationConfidence, WasIdentified)
-      VALUES (@Id, @TrackMetadataId, @FingerprintId, @PlayedAt, @Source, @SourceDetails, @Duration, @Confidence, @WasIdentified)
+      INSERT INTO PlayHistory (Id, TrackMetadataId, FingerprintId, PlayedAt, Source, MetadataSource, SourceDetails, Duration, IdentificationConfidence, WasIdentified)
+      VALUES (@Id, @TrackMetadataId, @FingerprintId, @PlayedAt, @Source, @MetadataSource, @SourceDetails, @Duration, @Confidence, @WasIdentified)
       """;
 
     await using var cmd = conn.CreateCommand();
@@ -42,6 +42,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     cmd.Parameters.AddWithValue("@FingerprintId", (object?)entry.FingerprintId ?? DBNull.Value);
     cmd.Parameters.AddWithValue("@PlayedAt", entry.PlayedAt.ToString("O"));
     cmd.Parameters.AddWithValue("@Source", entry.Source.ToString());
+    cmd.Parameters.AddWithValue("@MetadataSource", entry.MetadataSource?.ToString() ?? (object)DBNull.Value);
     cmd.Parameters.AddWithValue("@SourceDetails", (object?)entry.SourceDetails ?? DBNull.Value);
     cmd.Parameters.AddWithValue("@Duration", (object?)entry.DurationSeconds ?? DBNull.Value);
     cmd.Parameters.AddWithValue("@Confidence", (object?)entry.IdentificationConfidence ?? DBNull.Value);
@@ -59,7 +60,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     var conn = await _dbContext.GetConnectionAsync(ct);
 
     var sql = """
-      SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.Source, h.SourceDetails,
+      SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.Source, h.MetadataSource, h.SourceDetails,
              h.Duration, h.IdentificationConfidence, h.WasIdentified,
              m.Title, m.Artist, m.Album, m.AlbumArtist, m.CoverArtUrl
       FROM PlayHistory h
@@ -84,7 +85,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     var conn = await _dbContext.GetConnectionAsync(ct);
 
     var sql = """
-      SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.Source, h.SourceDetails,
+      SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.Source, h.MetadataSource, h.SourceDetails,
              h.Duration, h.IdentificationConfidence, h.WasIdentified,
              m.Title, m.Artist, m.Album, m.AlbumArtist, m.CoverArtUrl
       FROM PlayHistory h
@@ -99,6 +100,60 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     cmd.Parameters.AddWithValue("@End", end.ToString("O"));
 
     return await ReadPlayHistoryListAsync(cmd, ct);
+  }
+
+  /// <inheritdoc/>
+  public async Task<IReadOnlyList<PlayHistoryEntry>> GetBySourceAsync(
+    PlaySource source,
+    int count = 20,
+    CancellationToken ct = default)
+  {
+    var conn = await _dbContext.GetConnectionAsync(ct);
+
+    var sql = """
+      SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.Source, h.MetadataSource, h.SourceDetails,
+             h.Duration, h.IdentificationConfidence, h.WasIdentified,
+             m.Title, m.Artist, m.Album, m.AlbumArtist, m.CoverArtUrl
+      FROM PlayHistory h
+      LEFT JOIN TrackMetadata m ON h.TrackMetadataId = m.Id
+      WHERE h.Source = @Source
+      ORDER BY h.PlayedAt DESC
+      LIMIT @Count
+      """;
+
+    await using var cmd = conn.CreateCommand();
+    cmd.CommandText = sql;
+    cmd.Parameters.AddWithValue("@Source", source.ToString());
+    cmd.Parameters.AddWithValue("@Count", count);
+
+    return await ReadPlayHistoryListAsync(cmd, ct);
+  }
+
+  /// <inheritdoc/>
+  public async Task<bool> ExistsRecentlyPlayedAsync(
+    string title,
+    string artist,
+    int withinMinutes = 5,
+    CancellationToken ct = default)
+  {
+    var conn = await _dbContext.GetConnectionAsync(ct);
+
+    var cutoffTime = DateTime.UtcNow.AddMinutes(-withinMinutes);
+
+    var sql = """
+      SELECT COUNT(*) FROM PlayHistory h
+      JOIN TrackMetadata m ON h.TrackMetadataId = m.Id
+      WHERE m.Title = @Title AND m.Artist = @Artist AND h.PlayedAt >= @CutoffTime
+      """;
+
+    await using var cmd = conn.CreateCommand();
+    cmd.CommandText = sql;
+    cmd.Parameters.AddWithValue("@Title", title);
+    cmd.Parameters.AddWithValue("@Artist", artist);
+    cmd.Parameters.AddWithValue("@CutoffTime", cutoffTime.ToString("O"));
+
+    var count = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+    return count > 0;
   }
 
   /// <inheritdoc/>
@@ -211,7 +266,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     var conn = await _dbContext.GetConnectionAsync(ct);
 
     var sql = """
-      SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.Source, h.SourceDetails,
+      SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.Source, h.MetadataSource, h.SourceDetails,
              h.Duration, h.IdentificationConfidence, h.WasIdentified,
              m.Title, m.Artist, m.Album, m.AlbumArtist, m.CoverArtUrl
       FROM PlayHistory h
@@ -288,6 +343,17 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
       };
     }
 
+    MetadataSource? metadataSource = null;
+    var metadataSourceOrdinal = reader.GetOrdinal("MetadataSource");
+    if (!reader.IsDBNull(metadataSourceOrdinal))
+    {
+      var metadataSourceStr = reader.GetString(metadataSourceOrdinal);
+      if (Enum.TryParse<MetadataSource>(metadataSourceStr, out var parsedSource))
+      {
+        metadataSource = parsedSource;
+      }
+    }
+
     return new PlayHistoryEntry
     {
       Id = reader.GetString(reader.GetOrdinal("Id")),
@@ -297,6 +363,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
         ? null : reader.GetString(reader.GetOrdinal("FingerprintId")),
       PlayedAt = DateTime.Parse(reader.GetString(reader.GetOrdinal("PlayedAt"))),
       Source = Enum.Parse<PlaySource>(reader.GetString(reader.GetOrdinal("Source"))),
+      MetadataSource = metadataSource,
       SourceDetails = reader.IsDBNull(reader.GetOrdinal("SourceDetails"))
         ? null : reader.GetString(reader.GetOrdinal("SourceDetails")),
       DurationSeconds = reader.IsDBNull(reader.GetOrdinal("Duration"))

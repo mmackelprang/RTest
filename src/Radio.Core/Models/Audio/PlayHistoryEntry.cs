@@ -23,6 +23,9 @@ public sealed record PlayHistoryEntry
   /// <summary>Gets the audio source type.</summary>
   public required PlaySource Source { get; init; }
 
+  /// <summary>Gets the source of track metadata (Spotify, FileTag, Fingerprinting, etc.).</summary>
+  public MetadataSource? MetadataSource { get; init; }
+
   /// <summary>Gets additional source details (e.g., station name, file path).</summary>
   public string? SourceDetails { get; init; }
 

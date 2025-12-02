@@ -58,6 +58,7 @@ public sealed class FingerprintDbContext : IAsyncDisposable
       _logger.LogInformation("Connected to fingerprint database: {Path}", dbPath);
 
       await CreateTablesAsync(ct);
+      await MigrateSchemaAsync(ct);
       _initialized = true;
     }
     finally
@@ -127,6 +128,7 @@ public sealed class FingerprintDbContext : IAsyncDisposable
         FingerprintId TEXT,
         PlayedAt TEXT NOT NULL,
         Source TEXT NOT NULL,
+        MetadataSource TEXT,
         SourceDetails TEXT,
         Duration INTEGER,
         IdentificationConfidence REAL,
@@ -150,6 +152,8 @@ public sealed class FingerprintDbContext : IAsyncDisposable
         ON PlayHistory(PlayedAt);
       CREATE INDEX IF NOT EXISTS IX_PlayHistory_TrackMetadataId 
         ON PlayHistory(TrackMetadataId);
+      CREATE INDEX IF NOT EXISTS IX_PlayHistory_Source
+        ON PlayHistory(Source);
       """;
 
     using var cmd = _connection!.CreateCommand();
@@ -157,6 +161,24 @@ public sealed class FingerprintDbContext : IAsyncDisposable
     await cmd.ExecuteNonQueryAsync(ct);
 
     _logger.LogDebug("Fingerprint database tables created/verified");
+  }
+
+  private async Task MigrateSchemaAsync(CancellationToken ct)
+  {
+    // Add MetadataSource column if it doesn't exist (migration for existing databases)
+    var checkColumnSql = "SELECT COUNT(*) FROM pragma_table_info('PlayHistory') WHERE name='MetadataSource'";
+    using var checkCmd = _connection!.CreateCommand();
+    checkCmd.CommandText = checkColumnSql;
+    var columnExists = Convert.ToInt32(await checkCmd.ExecuteScalarAsync(ct)) > 0;
+
+    if (!columnExists)
+    {
+      var alterSql = "ALTER TABLE PlayHistory ADD COLUMN MetadataSource TEXT";
+      using var alterCmd = _connection.CreateCommand();
+      alterCmd.CommandText = alterSql;
+      await alterCmd.ExecuteNonQueryAsync(ct);
+      _logger.LogInformation("Added MetadataSource column to PlayHistory table");
+    }
   }
 
   /// <inheritdoc/>

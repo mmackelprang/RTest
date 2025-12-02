@@ -14,15 +14,18 @@ public class SqlitePlayHistoryRepositoryTests : IAsyncLifetime
 {
   private readonly Mock<ILogger<SqlitePlayHistoryRepository>> _loggerMock;
   private readonly Mock<ILogger<FingerprintDbContext>> _dbLoggerMock;
+  private readonly Mock<ILogger<SqliteTrackMetadataRepository>> _metadataLoggerMock;
   private readonly FingerprintingOptions _options;
   private readonly FingerprintDbContext _dbContext;
   private readonly SqlitePlayHistoryRepository _repository;
+  private readonly SqliteTrackMetadataRepository _metadataRepository;
   private readonly string _testDbPath;
 
   public SqlitePlayHistoryRepositoryTests()
   {
     _loggerMock = new Mock<ILogger<SqlitePlayHistoryRepository>>();
     _dbLoggerMock = new Mock<ILogger<FingerprintDbContext>>();
+    _metadataLoggerMock = new Mock<ILogger<SqliteTrackMetadataRepository>>();
 
     _testDbPath = Path.Combine(Path.GetTempPath(), $"test-history-{Guid.NewGuid()}.db");
     _options = new FingerprintingOptions
@@ -35,6 +38,7 @@ public class SqlitePlayHistoryRepositoryTests : IAsyncLifetime
 
     _dbContext = new FingerprintDbContext(_dbLoggerMock.Object, optionsMock.Object);
     _repository = new SqlitePlayHistoryRepository(_loggerMock.Object, _dbContext);
+    _metadataRepository = new SqliteTrackMetadataRepository(_metadataLoggerMock.Object, _dbContext);
   }
 
   public async Task InitializeAsync()
@@ -66,6 +70,60 @@ public class SqlitePlayHistoryRepositoryTests : IAsyncLifetime
     Assert.Equal(entry.Id, recorded.Id);
     Assert.Equal(entry.Source, recorded.Source);
     Assert.Equal(entry.WasIdentified, recorded.WasIdentified);
+  }
+
+  [Fact]
+  public async Task RecordPlayAsync_WithMetadataSource_PersistsCorrectly()
+  {
+    // Arrange
+    var entry = CreateTestHistoryEntry() with
+    {
+      MetadataSource = MetadataSource.Spotify
+    };
+
+    // Act
+    await _repository.RecordPlayAsync(entry);
+
+    // Assert
+    var recorded = await _repository.GetByIdAsync(entry.Id);
+    Assert.NotNull(recorded);
+    Assert.Equal(MetadataSource.Spotify, recorded.MetadataSource);
+  }
+
+  [Fact]
+  public async Task RecordPlayAsync_WithFileTagMetadataSource_PersistsCorrectly()
+  {
+    // Arrange
+    var entry = CreateTestHistoryEntry() with
+    {
+      MetadataSource = MetadataSource.FileTag
+    };
+
+    // Act
+    await _repository.RecordPlayAsync(entry);
+
+    // Assert
+    var recorded = await _repository.GetByIdAsync(entry.Id);
+    Assert.NotNull(recorded);
+    Assert.Equal(MetadataSource.FileTag, recorded.MetadataSource);
+  }
+
+  [Fact]
+  public async Task RecordPlayAsync_WithFingerprintingMetadataSource_PersistsCorrectly()
+  {
+    // Arrange
+    var entry = CreateTestHistoryEntry() with
+    {
+      MetadataSource = MetadataSource.Fingerprinting
+    };
+
+    // Act
+    await _repository.RecordPlayAsync(entry);
+
+    // Assert
+    var recorded = await _repository.GetByIdAsync(entry.Id);
+    Assert.NotNull(recorded);
+    Assert.Equal(MetadataSource.Fingerprinting, recorded.MetadataSource);
   }
 
   [Fact]
@@ -111,6 +169,101 @@ public class SqlitePlayHistoryRepositoryTests : IAsyncLifetime
 
     // Assert
     Assert.Equal(2, results.Count);
+  }
+
+  [Fact]
+  public async Task GetBySourceAsync_ReturnsEntriesForSpecificSource()
+  {
+    // Arrange
+    var vinylEntry1 = CreateTestHistoryEntry() with { Source = PlaySource.Vinyl };
+    var vinylEntry2 = CreateTestHistoryEntry() with { Source = PlaySource.Vinyl };
+    var radioEntry = CreateTestHistoryEntry() with { Source = PlaySource.Radio };
+    var spotifyEntry = CreateTestHistoryEntry() with { Source = PlaySource.Spotify };
+
+    await _repository.RecordPlayAsync(vinylEntry1);
+    await _repository.RecordPlayAsync(vinylEntry2);
+    await _repository.RecordPlayAsync(radioEntry);
+    await _repository.RecordPlayAsync(spotifyEntry);
+
+    // Act
+    var vinylResults = await _repository.GetBySourceAsync(PlaySource.Vinyl, 10);
+    var radioResults = await _repository.GetBySourceAsync(PlaySource.Radio, 10);
+    var spotifyResults = await _repository.GetBySourceAsync(PlaySource.Spotify, 10);
+
+    // Assert
+    Assert.Equal(2, vinylResults.Count);
+    Assert.All(vinylResults, e => Assert.Equal(PlaySource.Vinyl, e.Source));
+    Assert.Single(radioResults);
+    Assert.Single(spotifyResults);
+    Assert.Equal(PlaySource.Spotify, spotifyResults[0].Source);
+  }
+
+  [Fact]
+  public async Task ExistsRecentlyPlayedAsync_WithRecentMatch_ReturnsTrue()
+  {
+    // Arrange
+    var metadata = new TrackMetadata
+    {
+      Id = Guid.NewGuid().ToString(),
+      Title = "Test Song",
+      Artist = "Test Artist",
+      Source = MetadataSource.Spotify,
+      CreatedAt = DateTime.UtcNow,
+      UpdatedAt = DateTime.UtcNow
+    };
+    await _metadataRepository.StoreAsync(metadata);
+
+    var entry = CreateTestHistoryEntry() with
+    {
+      TrackMetadataId = metadata.Id,
+      PlayedAt = DateTime.UtcNow.AddMinutes(-2)
+    };
+    await _repository.RecordPlayAsync(entry);
+
+    // Act
+    var exists = await _repository.ExistsRecentlyPlayedAsync("Test Song", "Test Artist", 5);
+
+    // Assert
+    Assert.True(exists);
+  }
+
+  [Fact]
+  public async Task ExistsRecentlyPlayedAsync_WithOldMatch_ReturnsFalse()
+  {
+    // Arrange
+    var metadata = new TrackMetadata
+    {
+      Id = Guid.NewGuid().ToString(),
+      Title = "Old Song",
+      Artist = "Old Artist",
+      Source = MetadataSource.Spotify,
+      CreatedAt = DateTime.UtcNow,
+      UpdatedAt = DateTime.UtcNow
+    };
+    await _metadataRepository.StoreAsync(metadata);
+
+    var entry = CreateTestHistoryEntry() with
+    {
+      TrackMetadataId = metadata.Id,
+      PlayedAt = DateTime.UtcNow.AddMinutes(-10)
+    };
+    await _repository.RecordPlayAsync(entry);
+
+    // Act
+    var exists = await _repository.ExistsRecentlyPlayedAsync("Old Song", "Old Artist", 5);
+
+    // Assert
+    Assert.False(exists);
+  }
+
+  [Fact]
+  public async Task ExistsRecentlyPlayedAsync_WithNoMatch_ReturnsFalse()
+  {
+    // Act
+    var exists = await _repository.ExistsRecentlyPlayedAsync("Nonexistent Song", "Unknown Artist", 5);
+
+    // Assert
+    Assert.False(exists);
   }
 
   [Fact]

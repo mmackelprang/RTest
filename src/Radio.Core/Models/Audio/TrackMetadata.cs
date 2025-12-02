@@ -69,5 +69,11 @@ public enum MetadataSource
   Manual,
 
   /// <summary>Metadata extracted from audio file tags.</summary>
-  FileTag
+  FileTag,
+
+  /// <summary>Metadata obtained from Spotify.</summary>
+  Spotify,
+
+  /// <summary>Metadata obtained from fingerprinting service.</summary>
+  Fingerprinting
 }
