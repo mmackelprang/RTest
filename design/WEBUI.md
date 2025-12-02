@@ -835,7 +835,7 @@ Location: /RTest/src/Radio.Web/Components/Shared/RadioDisplay.razor
 Requirements:
 
 1. Display layout:
-   - Large frequency display: DSEG14Classic-Bold, 72px
+   - Large frequency display: DSEG14Classic-Bold, 48px
    - Band indicator (AM/FM): DSEG14Classic-Regular, 36px
    - Signal strength meter: Visual bars (5 bars)
    - Stereo indicator: "STEREO" text when applicable
