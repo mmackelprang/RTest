@@ -366,7 +366,8 @@ Requirements:
 
 1. Install MudBlazor package (latest version):
    - Add PackageReference to Radio.Web.csproj
-   - Version: 7.x or later (Material 3 support)
+   - Version: 7.x or later (based on Material Design 2; Material 3-inspired aesthetics require custom theming)
+     - Note: MudBlazor 7.x does not provide full Material 3 compliance out-of-the-box. Custom theming is required to approximate Material 3 design language.
 
 2. Configure MudBlazor in Program.cs:
    - Add MudBlazor services
