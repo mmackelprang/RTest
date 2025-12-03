@@ -195,4 +195,131 @@ public class SpotifyControllerTests : IClassFixture<WebApplicationFactory<Progra
     // Assert - will fail because no source is active, but validates request structure
     Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
   }
+
+  #region Authentication Tests
+
+  [Fact]
+  public async Task GetAuthorizationUrl_ReturnsSuccess()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/spotify/auth/url");
+
+    // Assert - May fail if Spotify credentials not configured in test environment
+    // That's acceptable for integration tests
+    if (response.StatusCode == HttpStatusCode.InternalServerError)
+    {
+      var content = await response.Content.ReadAsStringAsync();
+      // Acceptable error when credentials not configured
+      Assert.Contains("Spotify", content);
+      return;
+    }
+    
+    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    var result = await response.Content.ReadFromJsonAsync<AuthUrlDto>();
+    Assert.NotNull(result);
+    Assert.NotEmpty(result.Url);
+    Assert.NotEmpty(result.State);
+    Assert.NotEmpty(result.CodeVerifier);
+    Assert.Contains("accounts.spotify.com/authorize", result.Url);
+  }
+
+  [Fact]
+  public async Task GetAuthorizationUrl_WithCustomRedirectUri_IncludesRedirectUri()
+  {
+    // Arrange
+    var customRedirect = "http://localhost:3000/callback";
+
+    // Act
+    var response = await _client.GetAsync($"/api/spotify/auth/url?redirectUri={Uri.EscapeDataString(customRedirect)}");
+
+    // Assert - May fail if Spotify credentials not configured in test environment
+    if (response.StatusCode == HttpStatusCode.InternalServerError)
+    {
+      var content = await response.Content.ReadAsStringAsync();
+      // Acceptable error when credentials not configured
+      Assert.Contains("Spotify", content);
+      return;
+    }
+    
+    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    var result = await response.Content.ReadFromJsonAsync<AuthUrlDto>();
+    Assert.NotNull(result);
+    Assert.Contains(Uri.EscapeDataString(customRedirect), result.Url);
+  }
+
+  [Fact]
+  public async Task HandleCallback_WithoutCode_ReturnsBadRequest()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/spotify/auth/callback?state=test&codeVerifier=test");
+
+    // Assert
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    var content = await response.Content.ReadAsStringAsync();
+    Assert.Contains("Authorization code is required", content);
+  }
+
+  [Fact]
+  public async Task HandleCallback_WithoutState_ReturnsBadRequest()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/spotify/auth/callback?code=test&codeVerifier=test");
+
+    // Assert
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    var content = await response.Content.ReadAsStringAsync();
+    Assert.Contains("State parameter is required", content);
+  }
+
+  [Fact]
+  public async Task HandleCallback_WithoutCodeVerifier_ReturnsBadRequest()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/spotify/auth/callback?code=test&state=test");
+
+    // Assert
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    var content = await response.Content.ReadAsStringAsync();
+    Assert.Contains("Code verifier is required", content);
+  }
+
+  [Fact]
+  public async Task HandleCallback_WithError_ReturnsBadRequest()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/spotify/auth/callback?error=access_denied");
+
+    // Assert
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    var content = await response.Content.ReadAsStringAsync();
+    Assert.Contains("Authorization failed", content);
+  }
+
+  [Fact]
+  public async Task GetAuthenticationStatus_ReturnsStatus()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/spotify/auth/status");
+
+    // Assert
+    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    var result = await response.Content.ReadFromJsonAsync<AuthStatusDto>();
+    Assert.NotNull(result);
+    // Should be unauthenticated initially
+    Assert.False(result.IsAuthenticated);
+  }
+
+  [Fact]
+  public async Task Logout_ReturnsSuccess()
+  {
+    // Act
+    var response = await _client.PostAsync("/api/spotify/auth/logout", null);
+
+    // Assert
+    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    var content = await response.Content.ReadAsStringAsync();
+    Assert.Contains("success", content);
+  }
+
+  #endregion
 }

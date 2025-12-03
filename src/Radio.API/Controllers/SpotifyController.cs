@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Mvc;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Interfaces.External;
 using Radio.Infrastructure.Audio.Sources.Primary;
 using SpotifyAPI.Web;
 
@@ -17,16 +18,19 @@ public class SpotifyController : ControllerBase
 {
   private readonly ILogger<SpotifyController> _logger;
   private readonly IAudioEngine _audioEngine;
+  private readonly ISpotifyAuthService _authService;
 
   /// <summary>
   /// Initializes a new instance of the SpotifyController.
   /// </summary>
   public SpotifyController(
     ILogger<SpotifyController> logger,
-    IAudioEngine audioEngine)
+    IAudioEngine audioEngine,
+    ISpotifyAuthService authService)
   {
     _logger = logger;
     _audioEngine = audioEngine;
+    _authService = authService;
   }
 
   /// <summary>
@@ -525,6 +529,185 @@ public class SpotifyController : ControllerBase
         Height = icon.Height
       }).ToList() ?? new List<IconDto>()
     };
+  }
+
+  #endregion
+
+  #region Authentication Endpoints
+
+  /// <summary>
+  /// Gets the Spotify authorization URL for OAuth login.
+  /// </summary>
+  /// <param name="redirectUri">The redirect URI to use for the callback (optional, defaults to configured value).</param>
+  /// <returns>Authorization URL, state, and code verifier.</returns>
+  [HttpGet("auth/url")]
+  [ProducesResponseType(typeof(AuthUrlDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+  public async Task<ActionResult<AuthUrlDto>> GetAuthorizationUrl(
+    [FromQuery] string? redirectUri = null)
+  {
+    try
+    {
+      // Use provided redirect URI or default to the API's Spotify callback endpoint
+      var redirect = redirectUri ?? $"{Request.Scheme}://{Request.Host}/api/spotify/auth/callback";
+      
+      // Standard Spotify scopes for playback and user data
+      var scopes = new[]
+      {
+        "user-read-playback-state",
+        "user-modify-playback-state",
+        "user-read-currently-playing",
+        "user-read-private",
+        "user-read-email",
+        "playlist-read-private",
+        "playlist-read-collaborative",
+        "user-library-read",
+        "user-top-read",
+        "user-read-recently-played"
+      };
+
+      var result = await _authService.GenerateAuthorizationUrlAsync(redirect, scopes);
+      
+      return Ok(new AuthUrlDto
+      {
+        Url = result.Url,
+        State = result.State,
+        CodeVerifier = result.CodeVerifier
+      });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to generate Spotify authorization URL");
+      return StatusCode(StatusCodes.Status500InternalServerError, 
+        new { error = "Failed to generate authorization URL", details = ex.Message });
+    }
+  }
+
+  /// <summary>
+  /// Handles the OAuth callback from Spotify.
+  /// </summary>
+  /// <param name="code">The authorization code from Spotify.</param>
+  /// <param name="state">The state parameter for CSRF validation.</param>
+  /// <param name="codeVerifier">The PKCE code verifier.</param>
+  /// <param name="redirectUri">The redirect URI used in the authorization request.</param>
+  /// <param name="error">Error code if authorization failed.</param>
+  /// <returns>Success message or error details.</returns>
+  [HttpGet("auth/callback")]
+  [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+  public async Task<IActionResult> HandleCallback(
+    [FromQuery] string? code,
+    [FromQuery] string? state,
+    [FromQuery] string? codeVerifier,
+    [FromQuery] string? redirectUri,
+    [FromQuery] string? error = null)
+  {
+    // Check if Spotify returned an error
+    if (!string.IsNullOrWhiteSpace(error))
+    {
+      _logger.LogWarning("Spotify authorization failed with error: {Error}", error);
+      return BadRequest(new { error = "Authorization failed", details = error });
+    }
+
+    // Validate required parameters
+    if (string.IsNullOrWhiteSpace(code))
+    {
+      return BadRequest(new { error = "Authorization code is required" });
+    }
+
+    if (string.IsNullOrWhiteSpace(state))
+    {
+      return BadRequest(new { error = "State parameter is required" });
+    }
+
+    if (string.IsNullOrWhiteSpace(codeVerifier))
+    {
+      return BadRequest(new { error = "Code verifier is required" });
+    }
+
+    try
+    {
+      // Use provided redirect URI or default
+      var redirect = redirectUri ?? $"{Request.Scheme}://{Request.Host}/api/spotify/auth/callback";
+      
+      var result = await _authService.HandleCallbackAsync(code, state, codeVerifier, redirect);
+      
+      _logger.LogInformation("Successfully authenticated with Spotify");
+      
+      return Ok(new
+      {
+        success = true,
+        message = "Successfully authenticated with Spotify",
+        expiresAt = result.ExpiresAt
+      });
+    }
+    catch (InvalidOperationException ex)
+    {
+      _logger.LogError(ex, "Failed to complete OAuth callback");
+      return BadRequest(new { error = "Authentication failed", details = ex.Message });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Unexpected error during OAuth callback");
+      return StatusCode(StatusCodes.Status500InternalServerError,
+        new { error = "Failed to complete authentication", details = ex.Message });
+    }
+  }
+
+  /// <summary>
+  /// Gets the current Spotify authentication status.
+  /// </summary>
+  /// <returns>Authentication status including user information if authenticated.</returns>
+  [HttpGet("auth/status")]
+  [ProducesResponseType(typeof(AuthStatusDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+  public async Task<ActionResult<AuthStatusDto>> GetAuthenticationStatus()
+  {
+    try
+    {
+      var status = await _authService.GetAuthenticationStatusAsync();
+      
+      return Ok(new AuthStatusDto
+      {
+        IsAuthenticated = status.IsAuthenticated,
+        Username = status.Username,
+        DisplayName = status.DisplayName,
+        ExpiresAt = status.ExpiresAt,
+        UserId = status.UserId
+      });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to get authentication status");
+      return StatusCode(StatusCodes.Status500InternalServerError,
+        new { error = "Failed to get authentication status", details = ex.Message });
+    }
+  }
+
+  /// <summary>
+  /// Logs out from Spotify by clearing all stored tokens.
+  /// </summary>
+  /// <returns>Success message.</returns>
+  [HttpPost("auth/logout")]
+  [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+  public async Task<IActionResult> Logout()
+  {
+    try
+    {
+      await _authService.LogoutAsync();
+      
+      _logger.LogInformation("Successfully logged out from Spotify");
+      
+      return Ok(new { success = true, message = "Successfully logged out from Spotify" });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to logout from Spotify");
+      return StatusCode(StatusCodes.Status500InternalServerError,
+        new { error = "Failed to logout", details = ex.Message });
+    }
   }
 
   #endregion

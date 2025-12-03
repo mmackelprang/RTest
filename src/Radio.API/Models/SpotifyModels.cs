@@ -375,3 +375,56 @@ public class PlaySpotifyUriRequest
   /// </summary>
   public string? ContextUri { get; set; }
 }
+
+/// <summary>
+/// Spotify authorization URL response.
+/// </summary>
+public class AuthUrlDto
+{
+  /// <summary>
+  /// Gets or sets the authorization URL to redirect the user to.
+  /// </summary>
+  public string Url { get; set; } = "";
+
+  /// <summary>
+  /// Gets or sets the state parameter for CSRF protection.
+  /// </summary>
+  public string State { get; set; } = "";
+
+  /// <summary>
+  /// Gets or sets the PKCE code verifier.
+  /// Should be stored and used when handling the callback.
+  /// </summary>
+  public string CodeVerifier { get; set; } = "";
+}
+
+/// <summary>
+/// Spotify authentication status response.
+/// </summary>
+public class AuthStatusDto
+{
+  /// <summary>
+  /// Gets or sets a value indicating whether the user is authenticated.
+  /// </summary>
+  public bool IsAuthenticated { get; set; }
+
+  /// <summary>
+  /// Gets or sets the Spotify username (if authenticated).
+  /// </summary>
+  public string? Username { get; set; }
+
+  /// <summary>
+  /// Gets or sets the user's display name (if authenticated).
+  /// </summary>
+  public string? DisplayName { get; set; }
+
+  /// <summary>
+  /// Gets or sets when the current access token expires (if authenticated).
+  /// </summary>
+  public DateTimeOffset? ExpiresAt { get; set; }
+
+  /// <summary>
+  /// Gets or sets the user's Spotify user ID (if authenticated).
+  /// </summary>
+  public string? UserId { get; set; }
+}
