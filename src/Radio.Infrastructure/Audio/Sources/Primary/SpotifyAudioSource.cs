@@ -23,7 +23,7 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private TimeSpan? _duration;
   private bool _isAuthenticated;
   private Timer? _pollingTimer;
-  private readonly ConcurrentBag<QueueItem> _queueItems = new();
+  private List<QueueItem> _queueItems = new();
   private int _currentIndex = -1;
   private readonly SemaphoreSlim _pollingLock = new(1, 1);
 
@@ -91,7 +91,7 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   // IPlayQueue implementation
 
   /// <inheritdoc/>
-  public IReadOnlyList<QueueItem> QueueItems => _queueItems.ToList();
+  public IReadOnlyList<QueueItem> QueueItems => _queueItems.AsReadOnly();
 
   /// <inheritdoc/>
   public int CurrentIndex => _currentIndex;
@@ -424,6 +424,7 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
       if (queue.CurrentlyPlaying is FullTrack currentTrack)
       {
         items.Add(CreateQueueItem(currentTrack, index++, true));
+        _currentIndex = 0; // Current track is at index 0
       }
 
       // Add upcoming tracks
@@ -434,6 +435,9 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
           items.Add(CreateQueueItem(track, index++, false));
         }
       }
+
+      // Update internal queue state
+      _queueItems = items;
 
       return items;
     }
@@ -550,13 +554,12 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
         {
           ChangeType = QueueChangeType.CurrentChanged
         });
+
+        Logger.LogDebug("Track changed to: {TrackUri}", currentTrackUri);
       }
 
-      // Update position if significantly different (more than 1 second)
-      if (Math.Abs((_position - previousPosition).TotalSeconds) > 1)
-      {
-        OnStateChanged(State, State);
-      }
+      // Note: Position updates are reflected in the Position property
+      // No need to raise state changed event for position updates alone
     }
     catch (Exception ex)
     {
