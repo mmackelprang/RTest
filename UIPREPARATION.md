@@ -586,6 +586,9 @@ Success Criteria:
 ```
 
 #### Task 2.2: Implement IPlayQueue in FilePlayerAudioSource
+**Status:** ✅ Completed  
+**Implementation Date:** 2025-12-03
+
 **Prompt for Copilot Agent:**
 ```
 Implement IPlayQueue interface in FilePlayerAudioSource.
@@ -632,7 +635,102 @@ Success Criteria:
 - Metadata extraction works for mp3, flac, wav
 - Events fired appropriately
 - Unit tests pass
+- Update documentation and `/RTest/UIPREPARATION.md` with status and capabilities.
+- Update UAT tests if needed.
 ```
+
+**Implementation Summary:**
+- ✅ FilePlayerAudioSource now implements IPlayQueue interface
+- ✅ Implemented `GetQueueAsync()`:
+  - Returns current queue as list of QueueItem
+  - Uses SoundFlow's SoundMetadataReader for metadata extraction
+  - Populates Title, Artist, Album, Duration from file tags
+  - Marks current item with IsCurrent = true
+  - Handles files without metadata gracefully (uses filename as title, "--" for missing fields)
+- ✅ Implemented `AddToQueueAsync()`:
+  - Adds track to queue at specified position or end
+  - Works with full queue (current + remaining tracks)
+  - Updates original order list for shuffle/repeat support
+  - Raises QueueChanged event with Added type
+  - Validates file exists and has supported extension
+- ✅ Implemented `RemoveFromQueueAsync()`:
+  - Removes item at specified index
+  - When removing current item, automatically loads next track
+  - Stops playback if no tracks remain
+  - Adjusts current index when removing items before current
+  - Raises QueueChanged event with Removed type
+- ✅ Implemented `ClearQueueAsync()`:
+  - Stops playback completely
+  - Clears playlist, original order, and play history
+  - Resets current file and index
+  - Raises QueueChanged event with Cleared type
+- ✅ Implemented `MoveQueueItemAsync()`:
+  - Reorders queue items by moving from one index to another
+  - Updates current index when current item is moved or when items are moved around it
+  - Rebuilds queue maintaining proper state
+  - Raises QueueChanged event with Moved type
+- ✅ Implemented `JumpToIndexAsync()`:
+  - Jumps to and loads item at specified index
+  - Starts playback of the selected item
+  - Updates current index and rebuilds queue
+  - Loads file metadata using SoundFlow
+  - Raises QueueChanged event with CurrentChanged type
+- ✅ Added IPlayQueue properties:
+  - `QueueItems` - Returns current queue as readonly list
+  - `CurrentIndex` - Tracks current position in queue (0-based)
+  - `Count` - Total number of items in queue
+- ✅ Added `QueueChanged` event that fires on all queue modifications
+- ✅ Internal tracking with `_currentIndex` field maintains queue position
+- ✅ Metadata extraction supports: MP3, FLAC, WAV, OGG, AAC, M4A, WMA
+- ✅ Helper methods added:
+  - `GetAllTracksInOrder()` - Returns current + queued tracks
+  - `RebuildQueueFromList()` - Reconstructs queue from track list
+  - `GetQueueItemsInternal()` - Creates QueueItem list with metadata
+  - `CreateQueueItem()` - Extracts metadata and creates QueueItem
+  - `OnQueueChanged()` - Raises QueueChanged event
+- ✅ All 63 unit tests pass including 22 new IPlayQueue-specific tests
+- ✅ All existing FilePlayerAudioSource tests continue to pass (no regressions)
+
+**Files Modified:**
+- `/src/Radio.Infrastructure/Audio/Sources/Primary/FilePlayerAudioSource.cs` - Added IPlayQueue implementation
+- `/tests/Radio.Infrastructure.Tests/Audio/Sources/Primary/FilePlayerAudioSourceTests.cs` - Added 22 comprehensive unit tests
+
+**Capabilities Confirmed:**
+- ✅ `SupportsQueue = true` - Full queue management support
+- ✅ Queue operations work correctly with current track and remaining queue
+- ✅ Metadata extraction works for all supported formats using SoundFlow
+- ✅ Events fired appropriately on all queue changes
+- ✅ Position-based insertion and removal work correctly
+- ✅ Current index tracking works across all operations
+- ✅ Queue operations integrate with existing shuffle/repeat functionality
+- ✅ Graceful handling of files without metadata tags
+
+**Test Coverage:**
+- `GetQueueAsync_WithLoadedFiles_ReturnsQueueItems` - Verifies queue retrieval
+- `GetQueueAsync_ExtractsMetadata_PopulatesQueueItems` - Verifies metadata extraction
+- `AddToQueueAsync_AddsToEnd_WhenPositionNotSpecified` - Tests append operation
+- `AddToQueueAsync_InsertsAtPosition_WhenPositionSpecified` - Tests position-based insert
+- `AddToQueueAsync_RaisesQueueChangedEvent` - Verifies event firing
+- `AddToQueueAsync_NonExistentFile_ThrowsFileNotFoundException` - Tests error handling
+- `RemoveFromQueueAsync_RemovesItem_UpdatesQueue` - Tests item removal
+- `RemoveFromQueueAsync_RemovesCurrentItem_SkipsToNext` - Tests current item removal
+- `RemoveFromQueueAsync_RaisesQueueChangedEvent` - Verifies event firing
+- `RemoveFromQueueAsync_InvalidIndex_ThrowsArgumentOutOfRangeException` - Tests bounds checking
+- `ClearQueueAsync_ClearsAllItems_StopsPlayback` - Tests queue clearing
+- `ClearQueueAsync_RaisesQueueChangedEvent` - Verifies event firing
+- `MoveQueueItemAsync_ReordersItems` - Tests item reordering
+- `MoveQueueItemAsync_MovesCurrentItem_UpdatesCurrentIndex` - Tests moving current item
+- `MoveQueueItemAsync_RaisesQueueChangedEvent` - Verifies event firing
+- `MoveQueueItemAsync_InvalidIndices_ThrowsArgumentOutOfRangeException` - Tests bounds checking
+- `JumpToIndexAsync_JumpsToItem_StartsPlayback` - Tests jumping to index
+- `JumpToIndexAsync_RaisesQueueChangedEvent` - Verifies event firing
+- `JumpToIndexAsync_InvalidIndex_ThrowsArgumentOutOfRangeException` - Tests bounds checking
+- `QueueItems_ReturnsCurrentQueue` - Tests property accessor
+- `CurrentIndex_TracksCurrentPosition` - Tests index tracking
+- `Count_ReturnsCorrectTotalCount` - Tests count property
+
+---
+
 
 #### Task 2.3: Create Queue Management API Endpoints
 **Prompt for Copilot Agent:**
