@@ -4,7 +4,6 @@ using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using SpotifyAPI.Web;
-using System.Collections.Concurrent;
 
 namespace Radio.Infrastructure.Audio.Sources.Primary;
 
@@ -26,6 +25,7 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private List<QueueItem> _queueItems = new();
   private int _currentIndex = -1;
   private readonly SemaphoreSlim _pollingLock = new(1, 1);
+  private readonly object _queueLock = new(); // Protects _queueItems and _currentIndex
 
   /// <summary>
   /// Initializes a new instance of the <see cref="SpotifyAudioSource"/> class.
@@ -91,13 +91,40 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   // IPlayQueue implementation
 
   /// <inheritdoc/>
-  public IReadOnlyList<QueueItem> QueueItems => _queueItems.AsReadOnly();
+  public IReadOnlyList<QueueItem> QueueItems
+  {
+    get
+    {
+      lock (_queueLock)
+      {
+        return _queueItems.ToList().AsReadOnly();
+      }
+    }
+  }
 
   /// <inheritdoc/>
-  public int CurrentIndex => _currentIndex;
+  public int CurrentIndex
+  {
+    get
+    {
+      lock (_queueLock)
+      {
+        return _currentIndex;
+      }
+    }
+  }
 
   /// <inheritdoc/>
-  public int Count => _queueItems.Count;
+  public int Count
+  {
+    get
+    {
+      lock (_queueLock)
+      {
+        return _queueItems.Count;
+      }
+    }
+  }
 
   /// <inheritdoc/>
   public event EventHandler<QueueChangedEventArgs>? QueueChanged;
@@ -436,8 +463,12 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
         }
       }
 
-      // Update internal queue state
-      _queueItems = items;
+      // Update internal queue state with proper locking
+      lock (_queueLock)
+      {
+        _queueItems = items;
+        _currentIndex = items.Any(i => i.IsCurrent) ? 0 : -1;
+      }
 
       return items;
     }
