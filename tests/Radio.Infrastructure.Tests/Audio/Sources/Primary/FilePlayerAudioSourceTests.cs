@@ -308,18 +308,20 @@ public class FilePlayerAudioSourceTests : IDisposable
   }
 
   [Fact]
-  public async Task NextAsync_EmptyPlaylist_ReturnsFalse()
+  public async Task NextAsync_EmptyPlaylistWithRepeatOff_Stops()
   {
     // Arrange
     var source = CreateSource();
+    _preferences.Repeat = RepeatMode.Off;
     CreateTestFile("song.mp3");
     await source.LoadFileAsync("song.mp3");
+    await source.PlayAsync();
 
-    // Act
-    var result = await source.TryNextAsync();
+    // Act - NextAsync on single track with no repeat should stop
+    await source.NextAsync();
 
     // Assert
-    Assert.False(result);
+    Assert.Equal(AudioSourceState.Stopped, source.State);
   }
 
   [Fact]
@@ -403,4 +405,370 @@ public class FilePlayerAudioSourceTests : IDisposable
     await Assert.ThrowsAsync<ObjectDisposedException>(() => source.StopAsync());
     await Assert.ThrowsAsync<ObjectDisposedException>(() => source.SeekAsync(TimeSpan.Zero));
   }
+
+  #region Track Navigation Tests
+
+  [Fact]
+  public async Task NextAsync_WithMultipleTracks_MovesToNextTrack()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    CreateTestFile("song3.mp3");
+    await source.LoadDirectoryAsync("");
+    var firstFile = source.CurrentFile;
+
+    // Act
+    await source.NextAsync();
+
+    // Assert
+    Assert.NotEqual(firstFile, source.CurrentFile);
+    Assert.Equal(1, source.RemainingTracks); // 1 track remaining in queue
+  }
+
+  [Fact]
+  public async Task NextAsync_WithRepeatOne_ReplaysCurrentTrack()
+  {
+    // Arrange
+    var source = CreateSource();
+    _preferences.Repeat = RepeatMode.One;
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    await source.LoadDirectoryAsync("");
+    var firstFile = source.CurrentFile;
+    await source.PlayAsync();
+
+    // Act
+    await source.NextAsync();
+
+    // Assert
+    Assert.Equal(firstFile, source.CurrentFile);
+    Assert.Equal(TimeSpan.Zero, source.Position);
+  }
+
+  [Fact]
+  public async Task NextAsync_EndOfPlaylistWithRepeatOff_Stops()
+  {
+    // Arrange
+    var source = CreateSource();
+    _preferences.Repeat = RepeatMode.Off;
+    CreateTestFile("song1.mp3");
+    await source.LoadFileAsync("song1.mp3");
+    await source.PlayAsync();
+
+    // Act
+    await source.NextAsync();
+
+    // Assert
+    Assert.Equal(AudioSourceState.Stopped, source.State);
+  }
+
+  [Fact]
+  public async Task NextAsync_EndOfPlaylistWithRepeatAll_RestartsPlaylist()
+  {
+    // Arrange
+    var source = CreateSource();
+    _preferences.Repeat = RepeatMode.All;
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    await source.LoadDirectoryAsync("");
+    
+    // Move through all tracks
+    await source.NextAsync(); // song2
+    await source.NextAsync(); // should loop back
+
+    // Assert
+    Assert.NotNull(source.CurrentFile);
+    Assert.Equal(1, source.RemainingTracks); // Playlist reloaded with 2 tracks, one loaded
+  }
+
+  [Fact]
+  public async Task PreviousAsync_PositionGreaterThan3Seconds_SeeksToBeginning()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    await source.LoadFileAsync("song1.mp3");
+    await source.SeekAsync(TimeSpan.FromSeconds(5));
+    await source.PlayAsync();
+
+    // Act
+    await source.PreviousAsync();
+
+    // Assert
+    Assert.Equal(TimeSpan.Zero, source.Position);
+    Assert.Equal(AudioSourceState.Playing, source.State);
+  }
+
+  [Fact]
+  public async Task PreviousAsync_PositionLessThan3Seconds_GoesToPreviousTrack()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    await source.LoadDirectoryAsync("");
+    await source.NextAsync(); // Move to song2
+    var secondFile = source.CurrentFile;
+
+    // Position is 0, which is < 3 seconds
+    // Act
+    await source.PreviousAsync();
+
+    // Assert
+    Assert.NotEqual(secondFile, source.CurrentFile);
+    Assert.Equal(TimeSpan.Zero, source.Position);
+  }
+
+  [Fact]
+  public async Task PreviousAsync_AtBeginningOfPlaylist_SeeksToZero()
+  {
+    // Arrange
+    var source = CreateSource();
+    _preferences.Repeat = RepeatMode.Off;
+    CreateTestFile("song1.mp3");
+    await source.LoadFileAsync("song1.mp3");
+    await source.SeekAsync(TimeSpan.FromSeconds(1));
+
+    // Act
+    await source.PreviousAsync();
+
+    // Assert
+    Assert.Equal(TimeSpan.Zero, source.Position);
+  }
+
+  [Fact]
+  public async Task PreviousAsync_AtBeginningWithRepeatAll_GoesToLastTrack()
+  {
+    // Arrange
+    var source = CreateSource();
+    _preferences.Repeat = RepeatMode.All;
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    CreateTestFile("song3.mp3");
+    await source.LoadDirectoryAsync("");
+    var firstFile = source.CurrentFile;
+
+    // Act
+    await source.PreviousAsync();
+
+    // Assert
+    Assert.NotEqual(firstFile, source.CurrentFile);
+    Assert.Contains("song3.mp3", source.CurrentFile);
+  }
+
+  [Fact]
+  public async Task SetShuffleAsync_EnableShuffle_ShufflesPlaylist()
+  {
+    // Arrange
+    var source = CreateSource();
+    _preferences.Shuffle = false;
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    CreateTestFile("song3.mp3");
+    CreateTestFile("song4.mp3");
+    CreateTestFile("song5.mp3");
+    await source.LoadDirectoryAsync("");
+
+    // Act
+    await source.SetShuffleAsync(true);
+
+    // Assert
+    Assert.True(_preferences.Shuffle);
+    // Can't easily test randomization, but we can verify it's enabled
+    Assert.True(source.IsShuffleEnabled);
+  }
+
+  [Fact]
+  public async Task SetShuffleAsync_DisableShuffle_RestoresOriginalOrder()
+  {
+    // Arrange
+    var source = CreateSource();
+    _preferences.Shuffle = true;
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    CreateTestFile("song3.mp3");
+    await source.LoadDirectoryAsync(""); // Loads shuffled
+
+    // Act
+    await source.SetShuffleAsync(false);
+
+    // Assert
+    Assert.False(_preferences.Shuffle);
+    Assert.False(source.IsShuffleEnabled);
+  }
+
+  [Fact]
+  public async Task SetShuffleAsync_AlreadySet_NoChange()
+  {
+    // Arrange
+    var source = CreateSource();
+    _preferences.Shuffle = true;
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    await source.LoadDirectoryAsync("");
+
+    // Act
+    await source.SetShuffleAsync(true); // Already enabled
+
+    // Assert
+    Assert.True(_preferences.Shuffle);
+  }
+
+  [Fact]
+  public async Task SetRepeatModeAsync_Off_SetsRepeatOff()
+  {
+    // Arrange
+    var source = CreateSource();
+    _preferences.Repeat = RepeatMode.All;
+
+    // Act
+    await source.SetRepeatModeAsync(RepeatMode.Off);
+
+    // Assert
+    Assert.Equal(RepeatMode.Off, _preferences.Repeat);
+    Assert.Equal(RepeatMode.Off, source.RepeatMode);
+  }
+
+  [Fact]
+  public async Task SetRepeatModeAsync_One_SetsRepeatOne()
+  {
+    // Arrange
+    var source = CreateSource();
+    _preferences.Repeat = RepeatMode.Off;
+
+    // Act
+    await source.SetRepeatModeAsync(RepeatMode.One);
+
+    // Assert
+    Assert.Equal(RepeatMode.One, _preferences.Repeat);
+    Assert.Equal(RepeatMode.One, source.RepeatMode);
+  }
+
+  [Fact]
+  public async Task SetRepeatModeAsync_All_SetsRepeatAll()
+  {
+    // Arrange
+    var source = CreateSource();
+    _preferences.Repeat = RepeatMode.Off;
+
+    // Act
+    await source.SetRepeatModeAsync(RepeatMode.All);
+
+    // Assert
+    Assert.Equal(RepeatMode.All, _preferences.Repeat);
+    Assert.Equal(RepeatMode.All, source.RepeatMode);
+  }
+
+  [Fact]
+  public async Task SetRepeatModeAsync_AlreadySet_NoChange()
+  {
+    // Arrange
+    var source = CreateSource();
+    _preferences.Repeat = RepeatMode.One;
+
+    // Act
+    await source.SetRepeatModeAsync(RepeatMode.One);
+
+    // Assert
+    Assert.Equal(RepeatMode.One, _preferences.Repeat);
+  }
+
+  [Fact]
+  public void CapabilityProperties_FilePlayer_AllSupported()
+  {
+    // Arrange & Act
+    var source = CreateSource();
+
+    // Assert
+    Assert.True(source.SupportsNext);
+    Assert.True(source.SupportsPrevious);
+    Assert.True(source.SupportsShuffle);
+    Assert.True(source.SupportsRepeat);
+    Assert.True(source.SupportsQueue);
+  }
+
+  [Fact]
+  public async Task TryNextAsync_WrapperMethod_CallsNextAsync()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    await source.LoadDirectoryAsync("");
+
+    // Act
+    var result = await source.TryNextAsync();
+
+    // Assert
+    Assert.True(result);
+    Assert.NotNull(source.CurrentFile);
+  }
+
+  [Fact]
+  public async Task NavigationMethods_AfterDispose_ThrowObjectDisposedException()
+  {
+    // Arrange
+    var source = CreateSource();
+    await source.DisposeAsync();
+
+    // Act & Assert
+    await Assert.ThrowsAsync<ObjectDisposedException>(() => source.NextAsync());
+    await Assert.ThrowsAsync<ObjectDisposedException>(() => source.PreviousAsync());
+    await Assert.ThrowsAsync<ObjectDisposedException>(() => source.SetShuffleAsync(true));
+    await Assert.ThrowsAsync<ObjectDisposedException>(() => source.SetRepeatModeAsync(RepeatMode.All));
+  }
+
+  [Fact]
+  public async Task NextAndPreviousNavigation_ComplexScenario_WorksCorrectly()
+  {
+    // Arrange
+    var source = CreateSource();
+    _preferences.Repeat = RepeatMode.Off;
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    CreateTestFile("song3.mp3");
+    await source.LoadDirectoryAsync("");
+    var song1 = source.CurrentFile;
+
+    // Act & Assert - Navigate forward
+    await source.NextAsync();
+    var song2 = source.CurrentFile;
+    Assert.NotEqual(song1, song2);
+
+    await source.NextAsync();
+    var song3 = source.CurrentFile;
+    Assert.NotEqual(song2, song3);
+
+    // Navigate backward
+    await source.PreviousAsync();
+    Assert.Equal(song2, source.CurrentFile);
+
+    await source.PreviousAsync();
+    Assert.Equal(song1, source.CurrentFile);
+  }
+
+  [Fact]
+  public async Task ShuffleWithMultipleTracks_MaintainsAllTracks()
+  {
+    // Arrange
+    var source = CreateSource();
+    _preferences.Shuffle = false;
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    CreateTestFile("song3.mp3");
+    CreateTestFile("song4.mp3");
+    await source.LoadDirectoryAsync("");
+    var totalTracks = source.RemainingTracks + 1; // +1 for current
+
+    // Act
+    await source.SetShuffleAsync(true);
+
+    // Assert - All tracks should still be in playlist
+    var tracksAfterShuffle = source.RemainingTracks + 1;
+    Assert.Equal(totalTracks, tracksAfterShuffle);
+  }
+
+  #endregion
 }

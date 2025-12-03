@@ -21,6 +21,8 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
   private readonly string _rootDir;
   private readonly Dictionary<string, string> _metadata = new();
   private Queue<string> _playlist = new();
+  private List<string> _originalOrder = new(); // Store original order for shuffle toggle
+  private List<string> _playedHistory = new(); // Track played songs for Previous
   private string? _currentFile;
   private ISoundDataProvider? _dataProvider;
   private FileStream? _fileStream;
@@ -132,6 +134,8 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
 
     _playlist.Clear();
     _playlist.Enqueue(fullPath);
+    _originalOrder = new List<string> { fullPath };
+    _playedHistory.Clear();
     await LoadCurrentFileAsync(cancellationToken);
 
     Logger.LogInformation("Loaded audio file: {FilePath}", fullPath);
@@ -163,17 +167,17 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
       throw new InvalidOperationException($"No audio files found in directory: {fullPath}");
     }
 
-    // Apply shuffle if enabled
+    // Store original order and apply shuffle if enabled
+    audioFiles = audioFiles.OrderBy(f => f).ToList();
+    _originalOrder = new List<string>(audioFiles);
+
     if (_preferences.CurrentValue.Shuffle)
     {
-      audioFiles = audioFiles.OrderBy(_ => Random.Shared.Next()).ToList();
-    }
-    else
-    {
-      audioFiles = audioFiles.OrderBy(f => f).ToList();
+      audioFiles = ShuffleList(audioFiles);
     }
 
     _playlist = new Queue<string>(audioFiles);
+    _playedHistory.Clear();
     await LoadCurrentFileAsync(cancellationToken);
 
     Logger.LogInformation("Loaded {Count} audio files from directory: {DirectoryPath}", audioFiles.Count, fullPath);
@@ -199,51 +203,269 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
       throw new InvalidOperationException("No valid audio files in playlist");
     }
 
-    // Apply shuffle if enabled
+    // Store original order and apply shuffle if enabled
+    _originalOrder = new List<string>(validFiles);
+
     if (_preferences.CurrentValue.Shuffle)
     {
-      validFiles = validFiles.OrderBy(_ => Random.Shared.Next()).ToList();
+      validFiles = ShuffleList(validFiles);
     }
 
     _playlist = new Queue<string>(validFiles);
+    _playedHistory.Clear();
     await LoadCurrentFileAsync(cancellationToken);
 
     Logger.LogInformation("Loaded playlist with {Count} files", validFiles.Count);
   }
 
-  /// <summary>
-  /// Attempts to skip to the next track in the playlist.
-  /// </summary>
-  /// <param name="cancellationToken">Cancellation token.</param>
-  /// <returns>True if there was a next track; false if the playlist is empty.</returns>
-  public async Task<bool> TryNextAsync(CancellationToken cancellationToken = default)
-  {
-    ThrowIfDisposed();
-
-    if (_playlist.Count == 0)
-    {
-      if (_preferences.CurrentValue.Repeat == RepeatMode.All && _currentFile != null)
-      {
-        // Reload the directory/playlist
-        Logger.LogDebug("Playlist empty but repeat all is enabled");
-      }
-      return false;
-    }
-
-    await LoadCurrentFileAsync(cancellationToken);
-
-    if (State == AudioSourceState.Playing)
-    {
-      await PlayCoreAsync(cancellationToken);
-    }
-
-    return true;
-  }
-
   /// <inheritdoc/>
   public override async Task NextAsync(CancellationToken cancellationToken = default)
   {
-    await TryNextAsync(cancellationToken);
+    ThrowIfDisposed();
+
+    // Handle RepeatMode.One - replay current track
+    if (_preferences.CurrentValue.Repeat == RepeatMode.One && _currentFile != null)
+    {
+      Logger.LogDebug("Repeat One enabled - replaying current track");
+      _position = TimeSpan.Zero;
+      if (State == AudioSourceState.Playing)
+      {
+        await PlayCoreAsync(cancellationToken);
+      }
+      return;
+    }
+
+    // Add current file to history before moving to next
+    if (_currentFile != null && !_playedHistory.Contains(_currentFile))
+    {
+      _playedHistory.Add(_currentFile);
+    }
+
+    // Check if playlist has more tracks
+    if (_playlist.Count > 0)
+    {
+      await LoadCurrentFileAsync(cancellationToken);
+
+      if (State == AudioSourceState.Playing)
+      {
+        await PlayCoreAsync(cancellationToken);
+      }
+      return;
+    }
+
+    // Playlist is empty - check repeat mode
+    if (_preferences.CurrentValue.Repeat == RepeatMode.All && _originalOrder.Count > 0)
+    {
+      Logger.LogDebug("Playlist empty but Repeat All enabled - reloading playlist");
+
+      // Rebuild playlist from original order
+      var files = new List<string>(_originalOrder);
+      if (_preferences.CurrentValue.Shuffle)
+      {
+        files = ShuffleList(files);
+      }
+
+      _playlist = new Queue<string>(files);
+      _playedHistory.Clear();
+      await LoadCurrentFileAsync(cancellationToken);
+
+      if (State == AudioSourceState.Playing)
+      {
+        await PlayCoreAsync(cancellationToken);
+      }
+      return;
+    }
+
+    // No repeat or reached end - stop playback
+    Logger.LogDebug("Reached end of playlist with no repeat");
+    await StopAsync(cancellationToken);
+  }
+
+  /// <inheritdoc/>
+  public override async Task PreviousAsync(CancellationToken cancellationToken = default)
+  {
+    ThrowIfDisposed();
+
+    // If position > 3 seconds, seek to beginning
+    if (_position > TimeSpan.FromSeconds(3))
+    {
+      Logger.LogDebug("Position > 3 seconds, seeking to beginning");
+      await SeekAsync(TimeSpan.Zero, cancellationToken);
+      if (State == AudioSourceState.Playing)
+      {
+        await PlayCoreAsync(cancellationToken);
+      }
+      return;
+    }
+
+    // Go to previous track in history
+    if (_playedHistory.Count > 0)
+    {
+      var previousFile = _playedHistory[^1];
+      _playedHistory.RemoveAt(_playedHistory.Count - 1);
+
+      // Put current file back at front of playlist if it exists
+      if (_currentFile != null)
+      {
+        var tempList = _playlist.ToList();
+        tempList.Insert(0, _currentFile);
+        _playlist = new Queue<string>(tempList);
+      }
+
+      // Load previous file
+      _currentFile = previousFile;
+      _position = TimeSpan.Zero;
+      CleanupDataProvider();
+
+      // Restore file metadata and data provider
+      try
+      {
+        _audioEngine ??= new MiniAudioEngine();
+        _fileStream = File.OpenRead(_currentFile);
+        _dataProvider = new ChunkedDataProvider(_audioEngine, _fileStream);
+        Logger.LogDebug("Loaded previous file with SoundFlow: {File}", _currentFile);
+      }
+      catch (Exception ex)
+      {
+        Logger.LogWarning(ex, "SoundFlow could not decode previous file: {File}", _currentFile);
+        _fileStream?.Dispose();
+        _fileStream = null;
+        _dataProvider = null;
+      }
+
+      UpdateMetadataFromFile(_currentFile);
+
+      if (State == AudioSourceState.Playing)
+      {
+        await PlayCoreAsync(cancellationToken);
+      }
+
+      Logger.LogInformation("Went to previous track: {File}", _currentFile);
+      return;
+    }
+
+    // No previous track - handle repeat modes
+    if (_preferences.CurrentValue.Repeat == RepeatMode.All && _originalOrder.Count > 0)
+    {
+      Logger.LogDebug("At start of playlist with Repeat All - going to last track");
+
+      // Go to last track in original order
+      var lastFile = _originalOrder[^1];
+      _currentFile = lastFile;
+      _position = TimeSpan.Zero;
+      CleanupDataProvider();
+
+      try
+      {
+        _audioEngine ??= new MiniAudioEngine();
+        _fileStream = File.OpenRead(_currentFile);
+        _dataProvider = new ChunkedDataProvider(_audioEngine, _fileStream);
+      }
+      catch (Exception ex)
+      {
+        Logger.LogWarning(ex, "SoundFlow could not decode file: {File}", _currentFile);
+        _fileStream?.Dispose();
+        _fileStream = null;
+        _dataProvider = null;
+      }
+
+      UpdateMetadataFromFile(_currentFile);
+
+      if (State == AudioSourceState.Playing)
+      {
+        await PlayCoreAsync(cancellationToken);
+      }
+      return;
+    }
+
+    // Already at beginning - just seek to start
+    Logger.LogDebug("Already at beginning of playlist");
+    await SeekAsync(TimeSpan.Zero, cancellationToken);
+  }
+
+  /// <inheritdoc/>
+  public override async Task SetShuffleAsync(bool enabled, CancellationToken cancellationToken = default)
+  {
+    ThrowIfDisposed();
+
+    if (_preferences.CurrentValue.Shuffle == enabled)
+    {
+      Logger.LogDebug("Shuffle mode already set to {Enabled}", enabled);
+      return;
+    }
+
+    // Update preference
+    _preferences.CurrentValue.Shuffle = enabled;
+    Logger.LogInformation("Shuffle mode set to {Enabled}", enabled);
+
+    // Rebuild playlist with current state
+    var remainingTracks = _playlist.ToList();
+    
+    // Add current file to the list if it exists
+    if (_currentFile != null)
+    {
+      remainingTracks.Insert(0, _currentFile);
+    }
+
+    if (enabled)
+    {
+      // Enable shuffle - randomize remaining tracks except current
+      if (_currentFile != null && remainingTracks.Count > 1)
+      {
+        var current = remainingTracks[0];
+        var toShuffle = remainingTracks.Skip(1).ToList();
+        toShuffle = ShuffleList(toShuffle);
+        remainingTracks = new List<string> { current };
+        remainingTracks.AddRange(toShuffle);
+      }
+    }
+    else
+    {
+      // Disable shuffle - restore original order for remaining tracks
+      if (_originalOrder.Count > 0)
+      {
+        // Find current position in original order
+        var currentIndex = _currentFile != null ? _originalOrder.IndexOf(_currentFile) : -1;
+        
+        if (currentIndex >= 0)
+        {
+          // Rebuild playlist with remaining tracks in original order
+          remainingTracks = _originalOrder.Skip(currentIndex).ToList();
+        }
+        else
+        {
+          // Couldn't find current in original order - just sort what we have
+          remainingTracks.Sort();
+        }
+      }
+    }
+
+    // Remove current file from list and rebuild playlist
+    if (_currentFile != null && remainingTracks.Count > 0 && remainingTracks[0] == _currentFile)
+    {
+      remainingTracks.RemoveAt(0);
+    }
+
+    _playlist = new Queue<string>(remainingTracks);
+    
+    await Task.CompletedTask;
+  }
+
+  /// <inheritdoc/>
+  public override Task SetRepeatModeAsync(RepeatMode mode, CancellationToken cancellationToken = default)
+  {
+    ThrowIfDisposed();
+
+    if (_preferences.CurrentValue.Repeat == mode)
+    {
+      Logger.LogDebug("Repeat mode already set to {Mode}", mode);
+      return Task.CompletedTask;
+    }
+
+    _preferences.CurrentValue.Repeat = mode;
+    Logger.LogInformation("Repeat mode set to {Mode}", mode);
+    
+    return Task.CompletedTask;
   }
 
   /// <inheritdoc/>
@@ -336,8 +558,42 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
     CleanupDataProvider();
     _currentFile = null;
     _playlist.Clear();
+    _originalOrder.Clear();
+    _playedHistory.Clear();
 
     await base.DisposeAsyncCore();
+  }
+
+  /// <summary>
+  /// Attempts to skip to the next track in the playlist.
+  /// </summary>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <returns>True if there was a next track; false if the playlist is empty.</returns>
+  public async Task<bool> TryNextAsync(CancellationToken cancellationToken = default)
+  {
+    await NextAsync(cancellationToken);
+    return _currentFile != null;
+  }
+
+  /// <summary>
+  /// Shuffles a list using the Fisher-Yates algorithm.
+  /// </summary>
+  /// <param name="list">The list to shuffle.</param>
+  /// <returns>A new shuffled list.</returns>
+  private static List<string> ShuffleList(List<string> list)
+  {
+    var shuffled = new List<string>(list);
+    var random = Random.Shared;
+    var n = shuffled.Count;
+    
+    // Fisher-Yates shuffle algorithm
+    for (var i = n - 1; i > 0; i--)
+    {
+      var j = random.Next(i + 1);
+      (shuffled[i], shuffled[j]) = (shuffled[j], shuffled[i]);
+    }
+    
+    return shuffled;
   }
 
   /// <summary>

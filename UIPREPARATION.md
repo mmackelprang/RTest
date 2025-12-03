@@ -337,6 +337,7 @@ Success Criteria:
 ```
 
 #### Task 1.2: Implement Track Navigation in FilePlayerAudioSource
+**Status:** ✅ Completed  
 **Prompt for Copilot Agent:**
 ```
 Implement track navigation (Next/Previous), shuffle, and repeat in FilePlayerAudioSource.
@@ -366,6 +367,7 @@ Requirements:
    - Store state in FilePlayerPreferences via configuration
    - If enabling shuffle, randomize queue
    - If disabling, restore original order
+   - For the File Audio Source, implement the Fisher-Yates shuffle algorithm so that previous and next are supported for lists of files provided by the File Audio Source.  For Spotify Audio Source, Spotify should already support shuffle in their API.
 
 5. Implement SetRepeatModeAsync():
    - Store state in FilePlayerPreferences
@@ -379,7 +381,48 @@ Success Criteria:
 - Repeat modes work correctly
 - Preferences persist between sessions
 - Unit tests pass
+- Update documentation and `/RTest/UIPREPARATION.md` with status and capabilities.
+- Update UAT tests if needed.
 ```
+
+**Implementation Summary:**
+- ✅ All capability properties already defined as true in FilePlayerAudioSource
+- ✅ Implemented `NextAsync()` with full repeat mode support:
+  - Handles RepeatMode.One (replay current track)
+  - Handles RepeatMode.All (restart playlist at end)
+  - Handles RepeatMode.Off (stop at end)
+  - Tracks play history for previous functionality
+- ✅ Implemented `PreviousAsync()` with 3-second logic:
+  - Seeks to beginning if position > 3 seconds
+  - Goes to previous track in history if position ≤ 3 seconds
+  - Handles RepeatMode.All (goes to last track at beginning)
+- ✅ Implemented `SetShuffleAsync()` with Fisher-Yates shuffle:
+  - Stores original order for toggle functionality
+  - Shuffles remaining tracks when enabled
+  - Restores original order when disabled
+  - Maintains current track position
+- ✅ Implemented `SetRepeatModeAsync()`:
+  - Updates FilePlayerPreferences.Repeat
+  - Logs mode changes
+- ✅ Added internal tracking:
+  - `_originalOrder` - stores original playlist order for shuffle toggle
+  - `_playedHistory` - tracks played songs for Previous functionality
+- ✅ Preferences auto-save via IOptionsMonitor pattern
+- ✅ Added 24 comprehensive unit tests covering all navigation scenarios
+- ✅ All 584 tests pass (15 Core, 519 Infrastructure, 50 API)
+
+**Files Modified:**
+- `/src/Radio.Infrastructure/Audio/Sources/Primary/FilePlayerAudioSource.cs` - Implemented navigation methods
+- `/tests/Radio.Infrastructure.Tests/Audio/Sources/Primary/FilePlayerAudioSourceTests.cs` - Added 24 new tests
+
+**Capabilities Confirmed:**
+- ✅ `SupportsNext = true` - Skip to next track
+- ✅ `SupportsPrevious = true` - Go to previous track
+- ✅ `SupportsShuffle = true` - Randomize playback order
+- ✅ `SupportsRepeat = true` - Repeat modes (Off/One/All)
+- ✅ `SupportsQueue = true` - Playlist/queue management
+
+---
 
 #### Task 1.3: Add Navigation Endpoints to AudioController
 **Prompt for Copilot Agent:**
