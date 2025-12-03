@@ -75,5 +75,7 @@
 - For troubleshooting, generate sample log/debug output as comments where possible
 - Markdown: Always auto-document code with summary tables/samples in /docs/
 
-## CURRENT SESSION GOAL
-[I will type the specific task here after you acknowledge this context.]
+## Workflow & Checkoff Process
+- **UAT Tests:** After addressing each issue, evaluate if new User Acceptance Tests need to be added to `tools/Radio.Tools.AudioUAT`.
+- **Smoke Test:** As part of the checkoff process for each issue, run a smoke test of the `AudioUAT` tool to ensure it is functioning correctly.
+- 
