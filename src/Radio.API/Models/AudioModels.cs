@@ -49,6 +49,36 @@ public class PlaybackStateDto
   /// Gets or sets the current ducking state.
   /// </summary>
   public DuckingStateDto? DuckingState { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether the source can skip to next track.
+  /// </summary>
+  public bool CanNext { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether the source can go to previous track.
+  /// </summary>
+  public bool CanPrevious { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether the source can toggle shuffle.
+  /// </summary>
+  public bool CanShuffle { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether the source can change repeat mode.
+  /// </summary>
+  public bool CanRepeat { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether shuffle is currently enabled.
+  /// </summary>
+  public bool IsShuffleEnabled { get; set; }
+
+  /// <summary>
+  /// Gets or sets the current repeat mode (Off, One, All).
+  /// </summary>
+  public string? RepeatMode { get; set; }
 }
 
 /// <summary>
@@ -262,4 +292,26 @@ public class AvailableSourcesDto
   /// Gets or sets the active sources in the mixer.
   /// </summary>
   public List<AudioSourceDto> ActiveSources { get; set; } = [];
+}
+
+/// <summary>
+/// Request to set shuffle state.
+/// </summary>
+public class SetShuffleRequest
+{
+  /// <summary>
+  /// Gets or sets whether shuffle should be enabled.
+  /// </summary>
+  public bool Enabled { get; set; }
+}
+
+/// <summary>
+/// Request to set repeat mode.
+/// </summary>
+public class SetRepeatModeRequest
+{
+  /// <summary>
+  /// Gets or sets the repeat mode (Off, One, All).
+  /// </summary>
+  public string Mode { get; set; } = "Off";
 }
