@@ -58,6 +58,9 @@ builder.Services.AddFingerprinting(builder.Configuration);
 // Add Configuration Infrastructure services
 builder.Services.AddManagedConfiguration(builder.Configuration);
 
+// Add External Services (Spotify authentication, etc.)
+builder.Services.AddSpotifyServices();
+
 // Add the visualization broadcast background service
 builder.Services.AddHostedService<VisualizationBroadcastService>();
 
