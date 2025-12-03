@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Mvc;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
@@ -39,7 +40,7 @@ public class SpotifyController : ControllerBase
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
   [ProducesResponseType(StatusCodes.Status500InternalServerError)]
   public async Task<ActionResult<SpotifySearchResultDto>> Search(
-    [FromQuery] string query,
+    [FromQuery][Required] string query,
     [FromQuery] string? types = null)
   {
     if (string.IsNullOrWhiteSpace(query))
