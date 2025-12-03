@@ -177,8 +177,9 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
       }
 
       // Start polling timer for playback state updates (every 2 seconds)
+      // Use synchronous callback to avoid async void pattern
       _pollingTimer = new Timer(
-        async _ => await PollPlaybackStateAsync(),
+        _ => PollPlaybackStateAsync().GetAwaiter().GetResult(),
         null,
         TimeSpan.Zero,
         TimeSpan.FromSeconds(2));
@@ -446,12 +447,13 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
       var queue = await _client.Player.GetQueue(cancellationToken);
       var items = new List<QueueItem>();
       int index = 0;
+      int currentIdx = -1;
 
       // Add currently playing track
       if (queue.CurrentlyPlaying is FullTrack currentTrack)
       {
         items.Add(CreateQueueItem(currentTrack, index++, true));
-        _currentIndex = 0; // Current track is at index 0
+        currentIdx = 0; // Current track is at index 0
       }
 
       // Add upcoming tracks
@@ -467,7 +469,7 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
       lock (_queueLock)
       {
         _queueItems = items;
-        _currentIndex = items.Any(i => i.IsCurrent) ? 0 : -1;
+        _currentIndex = currentIdx;
       }
 
       return items;
