@@ -1300,10 +1300,10 @@ Define IRadioControls interface with:
 4. Create enums and models in /RTest/src/Radio.Core/Models/Audio/:
 
 RadioBand enum:
-   public enum RadioBand { AM, FM }
+   public enum RadioBand { AM, FM, WB, VHF, SW }
 
 RadioEqualizerMode enum:
-   public enum RadioEqualizerMode { Off, Rock, Pop, Jazz, Classical, Speech }
+   public enum RadioEqualizerMode { Off, Pop, Rock, Country, Classical }
 
 ScanDirection enum:
    public enum ScanDirection { Up, Down }
@@ -1326,10 +1326,10 @@ Success Criteria:
 
 **Implementation Summary:**
 - ✅ Created `RadioBand` enum in `/src/Radio.Core/Models/Audio/RadioBand.cs`
-  - Defines AM and FM frequency bands
-  - Includes XML documentation with typical frequency ranges
+  - Defines 5 frequency bands: AM, FM, WB (weather), VHF, SW (shortwave)
+  - Includes XML documentation with typical frequency ranges for each band
 - ✅ Created `RadioEqualizerMode` enum in `/src/Radio.Core/Models/Audio/RadioEqualizerMode.cs`
-  - Defines 6 equalizer presets: Off, Rock, Pop, Jazz, Classical, Speech
+  - Defines 5 equalizer presets: Off, Pop, Rock, Country, Classical
   - Each mode documented with its intended use
 - ✅ Created `ScanDirection` enum in `/src/Radio.Core/Models/Audio/ScanDirection.cs`
   - Defines Up and Down scan directions

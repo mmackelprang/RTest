@@ -11,27 +11,22 @@ public enum RadioEqualizerMode
   Off,
 
   /// <summary>
-  /// Rock music preset with enhanced bass and treble.
-  /// </summary>
-  Rock,
-
-  /// <summary>
   /// Pop music preset with balanced frequency response.
   /// </summary>
   Pop,
 
   /// <summary>
-  /// Jazz preset optimized for acoustic instruments.
+  /// Rock music preset with enhanced bass and treble.
   /// </summary>
-  Jazz,
+  Rock,
+
+  /// <summary>
+  /// Country music preset optimized for vocals and acoustic instruments.
+  /// </summary>
+  Country,
 
   /// <summary>
   /// Classical music preset with natural, wide frequency range.
   /// </summary>
-  Classical,
-
-  /// <summary>
-  /// Speech preset optimized for voice clarity.
-  /// </summary>
-  Speech
+  Classical
 }
