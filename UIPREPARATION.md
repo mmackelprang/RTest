@@ -635,6 +635,9 @@ Success Criteria:
 **Estimated Effort:** 5-7 days
 
 #### Task 3.1: Implement SpotifyAudioSource
+**Status:** ✅ Completed  
+**Implementation Date:** 2025-12-03
+
 **Prompt for Copilot Agent:**
 ```
 Implement Spotify audio source with playlist/queue support.
@@ -684,7 +687,81 @@ Success Criteria:
 - Shuffle and repeat work
 - Metadata updates in real-time
 - Preferences persist
+- Update documentation and `/RTest/UIPREPARATION.md` with status and capabilities.
+- Update UAT tests if needed.
 ```
+
+**Implementation Summary:**
+- ✅ Created IPlayQueue interface in `/src/Radio.Core/Interfaces/Audio/IPlayQueue.cs`
+- ✅ Created QueueItem and related models in `/src/Radio.Core/Models/Audio/QueueItem.cs`
+- ✅ Updated SpotifyAudioSource to implement IPlayQueue
+- ✅ Implemented GetQueueAsync() using Spotify's Player.GetQueue() API
+  - Retrieves currently playing track
+  - Retrieves upcoming queue items
+  - Returns structured QueueItem list with metadata
+- ✅ Implemented AddToQueueAsync() using Spotify's Player.AddToQueue() API
+  - Adds track to end of queue (Spotify limitation)
+  - Raises QueueChanged event
+- ✅ Queue operations with proper NotSupportedException for unsupported operations:
+  - RemoveFromQueueAsync() - Not supported by Spotify API
+  - ClearQueueAsync() - Not supported by Spotify API
+  - MoveQueueItemAsync() - Not supported by Spotify API
+  - JumpToIndexAsync() - Not supported by Spotify API (use Next/Previous instead)
+- ✅ Implemented background polling mechanism:
+  - Timer polls every 2 seconds via PollPlaybackStateAsync()
+  - Updates Position, Duration, Metadata from Spotify API
+  - Detects state changes and raises OnStateChanged events
+  - Detects track changes and raises QueueChanged events
+  - Uses SemaphoreSlim to prevent concurrent polling
+- ✅ Auto-saves playback state to SpotifyPreferences:
+  - LastSongPlayed URI saved on track change
+  - SongPositionMs saved periodically
+  - Shuffle and Repeat modes already persisted
+- ✅ All existing capability properties remain true:
+  - SupportsNext = true
+  - SupportsPrevious = true
+  - SupportsShuffle = true
+  - SupportsRepeat = true
+  - SupportsQueue = true
+  - IsSeekable = true (Spotify Connect supports seeking)
+- ✅ All playback methods working:
+  - PlayAsync(), PauseAsync(), ResumeAsync(), StopAsync()
+  - SeekAsync() for position changes
+  - NextAsync(), PreviousAsync() for track navigation
+  - SetShuffleAsync(), SetRepeatModeAsync() for playback modes
+- ✅ Clean disposal with timer cleanup
+- ✅ All 519 tests passing
+
+**Files Modified:**
+- `/src/Radio.Core/Interfaces/Audio/IPlayQueue.cs` - Created new interface
+- `/src/Radio.Core/Models/Audio/QueueItem.cs` - Created new models
+- `/src/Radio.Infrastructure/Audio/Sources/Primary/SpotifyAudioSource.cs` - Enhanced with IPlayQueue
+
+**Spotify API Limitations Documented:**
+- Queue operations are limited to:
+  - ✅ GetQueue() - Retrieve current queue
+  - ✅ AddToQueue() - Add to end of queue only
+  - ❌ Cannot remove specific items
+  - ❌ Cannot clear queue
+  - ❌ Cannot reorder items
+  - ❌ Cannot jump to specific queue index
+
+**Capabilities Confirmed:**
+- ✅ `SupportsNext = true` - Skip to next track via API
+- ✅ `SupportsPrevious = true` - Go to previous track via API
+- ✅ `SupportsShuffle = true` - Toggle shuffle via API
+- ✅ `SupportsRepeat = true` - Set repeat mode (Off/Track/Context) via API
+- ✅ `SupportsQueue = true` - View queue, add to queue via API
+- ✅ `IsSeekable = true` - Seek to position via API
+
+**Real-time Updates:**
+- ✅ Position updated every 2 seconds
+- ✅ Duration updated when track changes
+- ✅ Metadata (Title, Artist, Album, AlbumArtUrl) updated when track changes
+- ✅ State changes (Playing/Paused) detected and events raised
+- ✅ Track changes detected and QueueChanged events raised
+
+---
 
 #### Task 3.2: Create SpotifyController for Search and Browse
 **Prompt for Copilot Agent:**
