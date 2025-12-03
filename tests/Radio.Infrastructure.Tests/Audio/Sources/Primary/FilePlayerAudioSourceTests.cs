@@ -771,4 +771,432 @@ public class FilePlayerAudioSourceTests : IDisposable
   }
 
   #endregion
+
+  #region IPlayQueue Tests
+
+  [Fact]
+  public async Task GetQueueAsync_WithLoadedFiles_ReturnsQueueItems()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    CreateTestFile("song3.mp3");
+    await source.LoadDirectoryAsync("");
+
+    // Act
+    var queue = await source.GetQueueAsync();
+
+    // Assert
+    Assert.NotNull(queue);
+    Assert.Equal(3, queue.Count);
+    Assert.True(queue[0].IsCurrent); // First item is current
+    Assert.False(queue[1].IsCurrent);
+    Assert.False(queue[2].IsCurrent);
+    Assert.Equal(0, queue[0].Index);
+    Assert.Equal(1, queue[1].Index);
+    Assert.Equal(2, queue[2].Index);
+  }
+
+  [Fact]
+  public async Task GetQueueAsync_ExtractsMetadata_PopulatesQueueItems()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    await source.LoadDirectoryAsync("");
+
+    // Act
+    var queue = await source.GetQueueAsync();
+
+    // Assert
+    Assert.NotNull(queue);
+    Assert.Equal(2, queue.Count);
+    
+    // Check metadata fields are populated (using defaults since test files don't have tags)
+    Assert.NotNull(queue[0].Title);
+    Assert.NotNull(queue[0].Artist);
+    Assert.NotNull(queue[0].Album);
+    Assert.NotNull(queue[0].Id);
+  }
+
+  [Fact]
+  public async Task AddToQueueAsync_AddsToEnd_WhenPositionNotSpecified()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    CreateTestFile("song3.mp3");
+    await source.LoadFileAsync("song1.mp3");
+
+    // Act
+    await source.AddToQueueAsync("song2.mp3");
+    await source.AddToQueueAsync("song3.mp3");
+
+    // Assert
+    var queue = await source.GetQueueAsync();
+    Assert.Equal(3, queue.Count);
+    Assert.Contains("song1.mp3", queue[0].Id);
+    Assert.Contains("song2.mp3", queue[1].Id);
+    Assert.Contains("song3.mp3", queue[2].Id);
+  }
+
+  [Fact]
+  public async Task AddToQueueAsync_InsertsAtPosition_WhenPositionSpecified()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    CreateTestFile("song3.mp3");
+    await source.LoadFileAsync("song1.mp3");
+    await source.AddToQueueAsync("song3.mp3");
+
+    // Act - Insert song2 at position 1 (between song1 and song3)
+    await source.AddToQueueAsync("song2.mp3", position: 1);
+
+    // Assert
+    var queue = await source.GetQueueAsync();
+    Assert.Equal(3, queue.Count);
+    Assert.Contains("song1.mp3", queue[0].Id);
+    Assert.Contains("song2.mp3", queue[1].Id);
+    Assert.Contains("song3.mp3", queue[2].Id);
+  }
+
+  [Fact]
+  public async Task AddToQueueAsync_RaisesQueueChangedEvent()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    await source.LoadFileAsync("song1.mp3");
+
+    QueueChangedEventArgs? eventArgs = null;
+    source.QueueChanged += (sender, args) => eventArgs = args;
+
+    // Act
+    await source.AddToQueueAsync("song2.mp3");
+
+    // Assert
+    Assert.NotNull(eventArgs);
+    Assert.Equal(QueueChangeType.Added, eventArgs.ChangeType);
+    Assert.NotNull(eventArgs.AffectedItem);
+    Assert.Contains("song2.mp3", eventArgs.AffectedItem.Id);
+  }
+
+  [Fact]
+  public async Task AddToQueueAsync_NonExistentFile_ThrowsFileNotFoundException()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    await source.LoadFileAsync("song1.mp3");
+
+    // Act & Assert
+    await Assert.ThrowsAsync<FileNotFoundException>(
+      () => source.AddToQueueAsync("nonexistent.mp3"));
+  }
+
+  [Fact]
+  public async Task RemoveFromQueueAsync_RemovesItem_UpdatesQueue()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    CreateTestFile("song3.mp3");
+    await source.LoadDirectoryAsync("");
+
+    // Act - Remove second item
+    await source.RemoveFromQueueAsync(1);
+
+    // Assert
+    var queue = await source.GetQueueAsync();
+    Assert.Equal(2, queue.Count);
+    Assert.Contains("song1.mp3", queue[0].Id);
+    Assert.Contains("song3.mp3", queue[1].Id);
+  }
+
+  [Fact]
+  public async Task RemoveFromQueueAsync_RemovesCurrentItem_SkipsToNext()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    CreateTestFile("song3.mp3");
+    await source.LoadDirectoryAsync("");
+    var currentBefore = source.CurrentFile;
+
+    // Act - Remove current item (index 0)
+    await source.RemoveFromQueueAsync(0);
+
+    // Assert
+    var queue = await source.GetQueueAsync();
+    Assert.Equal(2, queue.Count);
+    Assert.NotEqual(currentBefore, source.CurrentFile); // Current changed
+    Assert.Contains("song2.mp3", source.CurrentFile); // Moved to next
+  }
+
+  [Fact]
+  public async Task RemoveFromQueueAsync_RaisesQueueChangedEvent()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    await source.LoadDirectoryAsync("");
+
+    QueueChangedEventArgs? eventArgs = null;
+    source.QueueChanged += (sender, args) => eventArgs = args;
+
+    // Act
+    await source.RemoveFromQueueAsync(1);
+
+    // Assert
+    Assert.NotNull(eventArgs);
+    Assert.Equal(QueueChangeType.Removed, eventArgs.ChangeType);
+    Assert.Equal(1, eventArgs.AffectedIndex);
+  }
+
+  [Fact]
+  public async Task RemoveFromQueueAsync_InvalidIndex_ThrowsArgumentOutOfRangeException()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    await source.LoadFileAsync("song1.mp3");
+
+    // Act & Assert
+    await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+      () => source.RemoveFromQueueAsync(10));
+  }
+
+  [Fact]
+  public async Task ClearQueueAsync_ClearsAllItems_StopsPlayback()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    await source.LoadDirectoryAsync("");
+    await source.PlayAsync();
+
+    // Act
+    await source.ClearQueueAsync();
+
+    // Assert
+    var queue = await source.GetQueueAsync();
+    Assert.Empty(queue);
+    Assert.Equal(AudioSourceState.Stopped, source.State);
+    Assert.Null(source.CurrentFile);
+  }
+
+  [Fact]
+  public async Task ClearQueueAsync_RaisesQueueChangedEvent()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    await source.LoadFileAsync("song1.mp3");
+
+    QueueChangedEventArgs? eventArgs = null;
+    source.QueueChanged += (sender, args) => eventArgs = args;
+
+    // Act
+    await source.ClearQueueAsync();
+
+    // Assert
+    Assert.NotNull(eventArgs);
+    Assert.Equal(QueueChangeType.Cleared, eventArgs.ChangeType);
+  }
+
+  [Fact]
+  public async Task MoveQueueItemAsync_ReordersItems()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    CreateTestFile("song3.mp3");
+    await source.LoadDirectoryAsync("");
+
+    // Act - Move song3 (index 2) to position 1
+    await source.MoveQueueItemAsync(fromIndex: 2, toIndex: 1);
+
+    // Assert
+    var queue = await source.GetQueueAsync();
+    Assert.Contains("song1.mp3", queue[0].Id);
+    Assert.Contains("song3.mp3", queue[1].Id); // Moved here
+    Assert.Contains("song2.mp3", queue[2].Id);
+  }
+
+  [Fact]
+  public async Task MoveQueueItemAsync_MovesCurrentItem_UpdatesCurrentIndex()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    CreateTestFile("song3.mp3");
+    await source.LoadDirectoryAsync("");
+    var currentBefore = source.CurrentFile;
+
+    // Act - Move current item (index 0) to position 2
+    await source.MoveQueueItemAsync(fromIndex: 0, toIndex: 2);
+
+    // Assert
+    Assert.Equal(currentBefore, source.CurrentFile); // Current file unchanged
+    Assert.Equal(2, source.CurrentIndex); // Index updated
+  }
+
+  [Fact]
+  public async Task MoveQueueItemAsync_RaisesQueueChangedEvent()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    await source.LoadDirectoryAsync("");
+
+    QueueChangedEventArgs? eventArgs = null;
+    source.QueueChanged += (sender, args) => eventArgs = args;
+
+    // Act
+    await source.MoveQueueItemAsync(fromIndex: 0, toIndex: 1);
+
+    // Assert
+    Assert.NotNull(eventArgs);
+    Assert.Equal(QueueChangeType.Moved, eventArgs.ChangeType);
+    Assert.Equal(1, eventArgs.AffectedIndex); // New position
+  }
+
+  [Fact]
+  public async Task MoveQueueItemAsync_InvalidIndices_ThrowsArgumentOutOfRangeException()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    await source.LoadFileAsync("song1.mp3");
+
+    // Act & Assert
+    await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+      () => source.MoveQueueItemAsync(fromIndex: 0, toIndex: 10));
+    await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+      () => source.MoveQueueItemAsync(fromIndex: 10, toIndex: 0));
+  }
+
+  [Fact]
+  public async Task JumpToIndexAsync_JumpsToItem_StartsPlayback()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    CreateTestFile("song3.mp3");
+    await source.LoadDirectoryAsync("");
+
+    // Act - Jump to second item
+    await source.JumpToIndexAsync(1);
+
+    // Assert
+    Assert.Contains("song2.mp3", source.CurrentFile);
+    Assert.Equal(1, source.CurrentIndex);
+    Assert.Equal(AudioSourceState.Playing, source.State);
+    
+    var queue = await source.GetQueueAsync();
+    Assert.True(queue[1].IsCurrent);
+  }
+
+  [Fact]
+  public async Task JumpToIndexAsync_RaisesQueueChangedEvent()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    await source.LoadDirectoryAsync("");
+
+    QueueChangedEventArgs? eventArgs = null;
+    source.QueueChanged += (sender, args) => eventArgs = args;
+
+    // Act
+    await source.JumpToIndexAsync(1);
+
+    // Assert
+    Assert.NotNull(eventArgs);
+    Assert.Equal(QueueChangeType.CurrentChanged, eventArgs.ChangeType);
+    Assert.Equal(1, eventArgs.AffectedIndex);
+    Assert.True(eventArgs.AffectedItem?.IsCurrent);
+  }
+
+  [Fact]
+  public async Task JumpToIndexAsync_InvalidIndex_ThrowsArgumentOutOfRangeException()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    await source.LoadFileAsync("song1.mp3");
+
+    // Act & Assert
+    await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+      () => source.JumpToIndexAsync(10));
+  }
+
+  [Fact]
+  public void QueueItems_ReturnsCurrentQueue()
+  {
+    // Arrange
+    var source = CreateSource();
+
+    // Act
+    var queueItems = source.QueueItems;
+
+    // Assert
+    Assert.NotNull(queueItems);
+    Assert.Empty(queueItems); // Initially empty
+  }
+
+  [Fact]
+  public async Task CurrentIndex_TracksCurrentPosition()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    await source.LoadDirectoryAsync("");
+
+    // Assert initial
+    Assert.Equal(0, source.CurrentIndex);
+
+    // Act - Jump to next
+    await source.JumpToIndexAsync(1);
+
+    // Assert
+    Assert.Equal(1, source.CurrentIndex);
+  }
+
+  [Fact]
+  public async Task Count_ReturnsCorrectTotalCount()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    CreateTestFile("song3.mp3");
+
+    // Assert initially empty
+    Assert.Equal(0, source.Count);
+
+    // Load files
+    await source.LoadDirectoryAsync("");
+
+    // Assert
+    Assert.Equal(3, source.Count);
+  }
+
+  #endregion
 }

@@ -14,7 +14,7 @@ namespace Radio.Infrastructure.Audio.Sources.Primary;
 /// <summary>
 /// Audio file player source supporting single files, playlists, and directories.
 /// </summary>
-public class FilePlayerAudioSource : PrimaryAudioSourceBase
+public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 {
   private readonly IOptionsMonitor<FilePlayerOptions> _options;
   private readonly IOptionsMonitor<FilePlayerPreferences> _preferences;
@@ -29,6 +29,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
   private MiniAudioEngine? _audioEngine;
   private TimeSpan _duration;
   private TimeSpan _position;
+  private int _currentIndex = -1; // Track current position in queue
 
   /// <summary>
   /// Initializes a new instance of the <see cref="FilePlayerAudioSource"/> class.
@@ -104,6 +105,19 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
   /// </summary>
   public int RemainingTracks => _playlist.Count;
 
+  // IPlayQueue implementation
+  /// <inheritdoc/>
+  public IReadOnlyList<QueueItem> QueueItems => GetQueueItemsInternal();
+
+  /// <inheritdoc/>
+  public int CurrentIndex => _currentIndex;
+
+  /// <inheritdoc/>
+  public int Count => _playlist.Count + (_currentFile != null ? 1 : 0);
+
+  /// <inheritdoc/>
+  public event EventHandler<QueueChangedEventArgs>? QueueChanged;
+
   /// <inheritdoc/>
   public override object GetSoundComponent()
   {
@@ -136,6 +150,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
     _playlist.Enqueue(fullPath);
     _originalOrder = new List<string> { fullPath };
     _playedHistory.Clear();
+    _currentIndex = -1; // Will be set when LoadCurrentFileAsync is called
     await LoadCurrentFileAsync(cancellationToken);
 
     Logger.LogInformation("Loaded audio file: {FilePath}", fullPath);
@@ -178,6 +193,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
 
     _playlist = new Queue<string>(audioFiles);
     _playedHistory.Clear();
+    _currentIndex = -1; // Will be set when LoadCurrentFileAsync is called
     await LoadCurrentFileAsync(cancellationToken);
 
     Logger.LogInformation("Loaded {Count} audio files from directory: {DirectoryPath}", audioFiles.Count, fullPath);
@@ -213,6 +229,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
 
     _playlist = new Queue<string>(validFiles);
     _playedHistory.Clear();
+    _currentIndex = -1; // Will be set when LoadCurrentFileAsync is called
     await LoadCurrentFileAsync(cancellationToken);
 
     Logger.LogInformation("Loaded playlist with {Count} files", validFiles.Count);
@@ -575,6 +592,312 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
     return _currentFile != null;
   }
 
+  // IPlayQueue implementation methods
+
+  /// <inheritdoc/>
+  public Task<IReadOnlyList<QueueItem>> GetQueueAsync(CancellationToken cancellationToken = default)
+  {
+    ThrowIfDisposed();
+    return Task.FromResult<IReadOnlyList<QueueItem>>(GetQueueItemsInternal());
+  }
+
+  /// <inheritdoc/>
+  public async Task AddToQueueAsync(string trackIdentifier, int? position = null, CancellationToken cancellationToken = default)
+  {
+    ThrowIfDisposed();
+
+    var fullPath = GetFullPath(trackIdentifier);
+    if (!File.Exists(fullPath))
+    {
+      throw new FileNotFoundException($"Audio file not found: {fullPath}", fullPath);
+    }
+
+    if (!IsAudioFile(fullPath))
+    {
+      throw new ArgumentException($"Unsupported audio format: {Path.GetExtension(fullPath)}", nameof(trackIdentifier));
+    }
+
+    // Get all tracks (current + queue)
+    var allTracks = GetAllTracksInOrder();
+
+    if (position.HasValue)
+    {
+      // Insert at specified position in the full queue
+      if (position.Value < 0 || position.Value > allTracks.Count)
+      {
+        throw new ArgumentOutOfRangeException(nameof(position), "Position is out of range");
+      }
+      allTracks.Insert(position.Value, fullPath);
+    }
+    else
+    {
+      // Add to end
+      allTracks.Add(fullPath);
+    }
+
+    // Also add to original order for shuffle/repeat support
+    if (!_originalOrder.Contains(fullPath))
+    {
+      _originalOrder.Add(fullPath);
+    }
+
+    // Rebuild queue from all tracks, keeping current position
+    var newCurrentIndex = _currentFile != null ? allTracks.IndexOf(_currentFile) : -1;
+    RebuildQueueFromList(allTracks, newCurrentIndex);
+
+    var actualIndex = position ?? allTracks.Count - 1;
+    Logger.LogInformation("Added track to queue: {Track} at position {Position}", Path.GetFileName(fullPath), actualIndex);
+
+    // Raise QueueChanged event
+    OnQueueChanged(new QueueChangedEventArgs
+    {
+      ChangeType = QueueChangeType.Added,
+      AffectedIndex = actualIndex,
+      AffectedItem = CreateQueueItem(fullPath, actualIndex, false)
+    });
+
+    await Task.CompletedTask;
+  }
+
+  /// <inheritdoc/>
+  public async Task RemoveFromQueueAsync(int index, CancellationToken cancellationToken = default)
+  {
+    ThrowIfDisposed();
+
+    var allTracks = GetAllTracksInOrder();
+
+    if (index < 0 || index >= allTracks.Count)
+    {
+      throw new ArgumentOutOfRangeException(nameof(index), "Index is out of range");
+    }
+
+    var removedFile = allTracks[index];
+    var removedItem = CreateQueueItem(removedFile, index, index == _currentIndex);
+
+    // Remove from all tracks list
+    allTracks.RemoveAt(index);
+
+    // If removing current item, skip to next
+    if (index == _currentIndex)
+    {
+      Logger.LogInformation("Removing current item, skipping to next");
+      
+      // If there are more tracks, load the next one (which is now at the same index)
+      if (allTracks.Count > 0)
+      {
+        var nextIndex = Math.Min(index, allTracks.Count - 1);
+        var nextFile = allTracks[nextIndex];
+        
+        // Set current file and update queue
+        _currentFile = nextFile;
+        _currentIndex = nextIndex;
+        _playlist = new Queue<string>(allTracks.Skip(nextIndex + 1));
+        _position = TimeSpan.Zero;
+        
+        // Load the file
+        CleanupDataProvider();
+        try
+        {
+          _audioEngine ??= new MiniAudioEngine();
+          _fileStream = File.OpenRead(_currentFile);
+          _dataProvider = new ChunkedDataProvider(_audioEngine, _fileStream);
+          Logger.LogDebug("Loaded file with SoundFlow: {File}", _currentFile);
+        }
+        catch (Exception ex)
+        {
+          Logger.LogWarning(ex, "SoundFlow could not decode file: {File}", _currentFile);
+          _fileStream?.Dispose();
+          _fileStream = null;
+          _dataProvider = null;
+        }
+        
+        UpdateMetadataFromFile(_currentFile);
+        
+        if (State == AudioSourceState.Playing)
+        {
+          await PlayCoreAsync(cancellationToken);
+        }
+      }
+      else
+      {
+        // No more tracks, stop playback
+        await StopAsync(cancellationToken);
+        _currentFile = null;
+        _currentIndex = -1;
+        _playlist.Clear();
+      }
+    }
+    else
+    {
+      // Not removing current item, just update the queue
+      // Adjust current index if needed
+      var currentFile = _currentFile;
+      var newCurrentIndex = currentFile != null ? allTracks.IndexOf(currentFile) : -1;
+      
+      RebuildQueueFromList(allTracks, newCurrentIndex);
+    }
+
+    Logger.LogInformation("Removed track from queue at index {Index}: {Track}", index, Path.GetFileName(removedFile));
+
+    // Raise QueueChanged event
+    OnQueueChanged(new QueueChangedEventArgs
+    {
+      ChangeType = QueueChangeType.Removed,
+      AffectedIndex = index,
+      AffectedItem = removedItem
+    });
+
+    await Task.CompletedTask;
+  }
+
+  /// <inheritdoc/>
+  public async Task ClearQueueAsync(CancellationToken cancellationToken = default)
+  {
+    ThrowIfDisposed();
+
+    Logger.LogInformation("Clearing queue");
+
+    // Stop playback
+    await StopAsync(cancellationToken);
+
+    // Clear all internal state
+    _playlist.Clear();
+    _originalOrder.Clear();
+    _playedHistory.Clear();
+    _currentFile = null;
+    _currentIndex = -1;
+
+    // Raise QueueChanged event
+    OnQueueChanged(new QueueChangedEventArgs
+    {
+      ChangeType = QueueChangeType.Cleared
+    });
+  }
+
+  /// <inheritdoc/>
+  public async Task MoveQueueItemAsync(int fromIndex, int toIndex, CancellationToken cancellationToken = default)
+  {
+    ThrowIfDisposed();
+
+    var allTracks = GetAllTracksInOrder();
+
+    if (fromIndex < 0 || fromIndex >= allTracks.Count)
+    {
+      throw new ArgumentOutOfRangeException(nameof(fromIndex), "From index is out of range");
+    }
+
+    if (toIndex < 0 || toIndex >= allTracks.Count)
+    {
+      throw new ArgumentOutOfRangeException(nameof(toIndex), "To index is out of range");
+    }
+
+    if (fromIndex == toIndex)
+    {
+      return; // No-op
+    }
+
+    var movedFile = allTracks[fromIndex];
+    var movedItem = CreateQueueItem(movedFile, toIndex, false);
+
+    // Remove from old position
+    allTracks.RemoveAt(fromIndex);
+    
+    // Insert at new position
+    allTracks.Insert(toIndex, movedFile);
+
+    // Update current index if needed
+    var newCurrentIndex = _currentIndex;
+    if (_currentIndex == fromIndex)
+    {
+      // Moving the current item
+      newCurrentIndex = toIndex;
+    }
+    else if (fromIndex < _currentIndex && toIndex >= _currentIndex)
+    {
+      // Moving an item from before current to after current
+      newCurrentIndex--;
+    }
+    else if (fromIndex > _currentIndex && toIndex <= _currentIndex)
+    {
+      // Moving an item from after current to before current
+      newCurrentIndex++;
+    }
+
+    RebuildQueueFromList(allTracks, newCurrentIndex);
+
+    Logger.LogInformation("Moved track from index {FromIndex} to {ToIndex}", fromIndex, toIndex);
+
+    // Raise QueueChanged event
+    OnQueueChanged(new QueueChangedEventArgs
+    {
+      ChangeType = QueueChangeType.Moved,
+      AffectedIndex = toIndex,
+      AffectedItem = movedItem
+    });
+
+    await Task.CompletedTask;
+  }
+
+  /// <inheritdoc/>
+  public async Task JumpToIndexAsync(int index, CancellationToken cancellationToken = default)
+  {
+    ThrowIfDisposed();
+
+    var allTracks = GetAllTracksInOrder();
+
+    if (index < 0 || index >= allTracks.Count)
+    {
+      throw new ArgumentOutOfRangeException(nameof(index), "Index is out of range");
+    }
+
+    var targetFile = allTracks[index];
+
+    Logger.LogInformation("Jumping to queue index {Index}: {Track}", index, Path.GetFileName(targetFile));
+
+    // Update current file and index
+    _currentFile = targetFile;
+    _currentIndex = index;
+    _position = TimeSpan.Zero;
+
+    // Rebuild queue to start from this position
+    RebuildQueueFromList(allTracks, index);
+
+    // Load the file
+    CleanupDataProvider();
+
+    try
+    {
+      _audioEngine ??= new MiniAudioEngine();
+      _fileStream = File.OpenRead(_currentFile);
+      _dataProvider = new ChunkedDataProvider(_audioEngine, _fileStream);
+      Logger.LogDebug("Loaded file with SoundFlow: {File}", _currentFile);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "SoundFlow could not decode file: {File}", _currentFile);
+      _fileStream?.Dispose();
+      _fileStream = null;
+      _dataProvider = null;
+    }
+
+    UpdateMetadataFromFile(_currentFile);
+
+    // Start playback
+    if (State != AudioSourceState.Playing)
+    {
+      State = AudioSourceState.Playing;
+    }
+    await PlayCoreAsync(cancellationToken);
+
+    // Raise QueueChanged event
+    OnQueueChanged(new QueueChangedEventArgs
+    {
+      ChangeType = QueueChangeType.CurrentChanged,
+      AffectedIndex = index,
+      AffectedItem = CreateQueueItem(targetFile, index, true)
+    });
+  }
+
   /// <summary>
   /// Shuffles a list using the Fisher-Yates algorithm.
   /// </summary>
@@ -618,6 +941,121 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
     }
   }
 
+  /// <summary>
+  /// Gets all tracks in order (current + queue).
+  /// </summary>
+  private List<string> GetAllTracksInOrder()
+  {
+    var allTracks = new List<string>();
+    if (_currentFile != null)
+    {
+      allTracks.Add(_currentFile);
+    }
+    allTracks.AddRange(_playlist);
+    return allTracks;
+  }
+
+  /// <summary>
+  /// Rebuilds the queue from a list of tracks, setting the current file at the specified index.
+  /// </summary>
+  private void RebuildQueueFromList(List<string> allTracks, int currentIndex)
+  {
+    if (currentIndex >= 0 && currentIndex < allTracks.Count)
+    {
+      _currentFile = allTracks[currentIndex];
+      _currentIndex = currentIndex;
+      _playlist = new Queue<string>(allTracks.Skip(currentIndex + 1));
+    }
+    else
+    {
+      _currentFile = null;
+      _currentIndex = -1;
+      _playlist = new Queue<string>(allTracks);
+    }
+  }
+
+  /// <summary>
+  /// Gets the queue items for the IPlayQueue interface.
+  /// </summary>
+  private List<QueueItem> GetQueueItemsInternal()
+  {
+    var items = new List<QueueItem>();
+    var allTracks = GetAllTracksInOrder();
+
+    for (var i = 0; i < allTracks.Count; i++)
+    {
+      var file = allTracks[i];
+      items.Add(CreateQueueItem(file, i, i == _currentIndex));
+    }
+
+    return items;
+  }
+
+  /// <summary>
+  /// Creates a QueueItem from a file path.
+  /// </summary>
+  private QueueItem CreateQueueItem(string filePath, int index, bool isCurrent)
+  {
+    // Read metadata from file using SoundFlow
+    var title = Path.GetFileNameWithoutExtension(filePath);
+    var artist = "--";
+    var album = "--";
+    TimeSpan? duration = null;
+
+    try
+    {
+      var result = SoundMetadataReader.Read(filePath);
+      if (result.IsSuccess && result.Value != null)
+      {
+        var formatInfo = result.Value;
+        
+        if (formatInfo.Duration != TimeSpan.Zero)
+        {
+          duration = formatInfo.Duration;
+        }
+
+        if (formatInfo.Tags != null)
+        {
+          if (!string.IsNullOrEmpty(formatInfo.Tags.Title))
+          {
+            title = formatInfo.Tags.Title;
+          }
+          if (!string.IsNullOrEmpty(formatInfo.Tags.Artist))
+          {
+            artist = formatInfo.Tags.Artist;
+          }
+          if (!string.IsNullOrEmpty(formatInfo.Tags.Album))
+          {
+            album = formatInfo.Tags.Album;
+          }
+        }
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "Failed to read metadata for {File}, using defaults", filePath);
+    }
+
+    return new QueueItem
+    {
+      Id = filePath,
+      Title = title,
+      Artist = artist,
+      Album = album,
+      Duration = duration,
+      Index = index,
+      IsCurrent = isCurrent
+    };
+  }
+
+  /// <summary>
+  /// Raises the QueueChanged event.
+  /// </summary>
+  private void OnQueueChanged(QueueChangedEventArgs args)
+  {
+    QueueChanged?.Invoke(this, args);
+  }
+
   private string GetFullPath(string relativePath)
   {
     var rootDirectory = _options.CurrentValue.RootDirectory;
@@ -646,12 +1084,19 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
     if (_playlist.Count == 0)
     {
       _currentFile = null;
+      _currentIndex = -1;
       OnPlaybackCompleted(PlaybackCompletionReason.EndOfContent);
       return;
     }
 
     _currentFile = _playlist.Dequeue();
     _position = TimeSpan.Zero;
+
+    // Update current index - it should be 0 since we're loading the front of the queue
+    // But we need to account for the overall position in the original order
+    var allTracks = new List<string> { _currentFile };
+    allTracks.AddRange(_playlist);
+    _currentIndex = 0;
 
     // Clean up previous data provider
     CleanupDataProvider();
@@ -687,6 +1132,14 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase
     {
       State = AudioSourceState.Ready;
     }
+
+    // Raise queue changed event for current item change
+    OnQueueChanged(new QueueChangedEventArgs
+    {
+      ChangeType = QueueChangeType.CurrentChanged,
+      AffectedIndex = _currentIndex,
+      AffectedItem = CreateQueueItem(_currentFile, _currentIndex, true)
+    });
 
     await Task.CompletedTask;
   }
