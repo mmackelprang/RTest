@@ -4,6 +4,7 @@ using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using SpotifyAPI.Web;
+using System.Collections.Concurrent;
 
 namespace Radio.Infrastructure.Audio.Sources.Primary;
 
@@ -11,7 +12,7 @@ namespace Radio.Infrastructure.Audio.Sources.Primary;
 /// Spotify audio source using SpotifyAPI-NET.
 /// Controls playback through the Spotify Connect API.
 /// </summary>
-public class SpotifyAudioSource : PrimaryAudioSourceBase
+public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
 {
   private readonly IOptionsMonitor<SpotifySecrets> _secrets;
   private readonly IOptionsMonitor<SpotifyPreferences> _preferences;
@@ -21,6 +22,10 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase
   private TimeSpan _position;
   private TimeSpan? _duration;
   private bool _isAuthenticated;
+  private Timer? _pollingTimer;
+  private readonly ConcurrentBag<QueueItem> _queueItems = new();
+  private int _currentIndex = -1;
+  private readonly SemaphoreSlim _pollingLock = new(1, 1);
 
   /// <summary>
   /// Initializes a new instance of the <see cref="SpotifyAudioSource"/> class.
@@ -83,6 +88,20 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase
   /// </summary>
   public bool IsAuthenticated => _isAuthenticated;
 
+  // IPlayQueue implementation
+
+  /// <inheritdoc/>
+  public IReadOnlyList<QueueItem> QueueItems => _queueItems.ToList();
+
+  /// <inheritdoc/>
+  public int CurrentIndex => _currentIndex;
+
+  /// <inheritdoc/>
+  public int Count => _queueItems.Count;
+
+  /// <inheritdoc/>
+  public event EventHandler<QueueChangedEventArgs>? QueueChanged;
+
   /// <inheritdoc/>
   public override object GetSoundComponent()
   {
@@ -129,6 +148,13 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase
         Logger.LogDebug("Restoring last played track: {Track}", prefs.LastSongPlayed);
         _metadata["LastTrackUri"] = prefs.LastSongPlayed;
       }
+
+      // Start polling timer for playback state updates (every 2 seconds)
+      _pollingTimer = new Timer(
+        async _ => await PollPlaybackStateAsync(),
+        null,
+        TimeSpan.Zero,
+        TimeSpan.FromSeconds(2));
 
       State = AudioSourceState.Ready;
     }
@@ -377,9 +403,201 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase
     }
   }
 
+  // IPlayQueue implementation
+
+  /// <inheritdoc/>
+  public async Task<IReadOnlyList<QueueItem>> GetQueueAsync(CancellationToken cancellationToken = default)
+  {
+    ThrowIfDisposed();
+    if (_client == null)
+    {
+      return Array.Empty<QueueItem>();
+    }
+
+    try
+    {
+      var queue = await _client.Player.GetQueue(cancellationToken);
+      var items = new List<QueueItem>();
+      int index = 0;
+
+      // Add currently playing track
+      if (queue.CurrentlyPlaying is FullTrack currentTrack)
+      {
+        items.Add(CreateQueueItem(currentTrack, index++, true));
+      }
+
+      // Add upcoming tracks
+      foreach (var item in queue.Queue)
+      {
+        if (item is FullTrack track)
+        {
+          items.Add(CreateQueueItem(track, index++, false));
+        }
+      }
+
+      return items;
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to get Spotify queue");
+      return Array.Empty<QueueItem>();
+    }
+  }
+
+  /// <inheritdoc/>
+  public async Task AddToQueueAsync(string trackIdentifier, int? position = null, CancellationToken cancellationToken = default)
+  {
+    ThrowIfDisposed();
+    if (_client == null)
+    {
+      throw new InvalidOperationException("Spotify client not initialized");
+    }
+
+    try
+    {
+      // Spotify API only supports adding to the end of the queue
+      // The position parameter is ignored for Spotify
+      await _client.Player.AddToQueue(new PlayerAddToQueueRequest(trackIdentifier), cancellationToken);
+      
+      Logger.LogInformation("Added track to Spotify queue: {TrackUri}", trackIdentifier);
+
+      // Update queue and raise event
+      var queue = await GetQueueAsync(cancellationToken);
+      QueueChanged?.Invoke(this, new QueueChangedEventArgs
+      {
+        ChangeType = QueueChangeType.Added,
+        AffectedIndex = queue.Count - 1,
+        AffectedItem = queue.LastOrDefault()
+      });
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to add track to Spotify queue");
+      throw;
+    }
+  }
+
+  /// <inheritdoc/>
+  public Task RemoveFromQueueAsync(int index, CancellationToken cancellationToken = default)
+  {
+    // Spotify API doesn't support removing specific items from the queue
+    throw new NotSupportedException("Spotify API does not support removing individual items from the queue.");
+  }
+
+  /// <inheritdoc/>
+  public Task ClearQueueAsync(CancellationToken cancellationToken = default)
+  {
+    // Spotify API doesn't support clearing the queue
+    throw new NotSupportedException("Spotify API does not support clearing the queue.");
+  }
+
+  /// <inheritdoc/>
+  public Task MoveQueueItemAsync(int fromIndex, int toIndex, CancellationToken cancellationToken = default)
+  {
+    // Spotify API doesn't support reordering queue items
+    throw new NotSupportedException("Spotify API does not support reordering queue items.");
+  }
+
+  /// <inheritdoc/>
+  public Task JumpToIndexAsync(int index, CancellationToken cancellationToken = default)
+  {
+    // Spotify API doesn't support jumping to a specific queue index
+    // Users must use Next/Previous to navigate
+    throw new NotSupportedException("Spotify API does not support jumping to a specific queue index. Use NextAsync() or PreviousAsync() to navigate.");
+  }
+
+  /// <summary>
+  /// Polls the Spotify API for current playback state updates.
+  /// Called every 2 seconds by the polling timer.
+  /// </summary>
+  private async Task PollPlaybackStateAsync()
+  {
+    if (_client == null || !_isAuthenticated)
+    {
+      return;
+    }
+
+    // Prevent concurrent polling
+    if (!await _pollingLock.WaitAsync(0))
+    {
+      return;
+    }
+
+    try
+    {
+      var previousState = State;
+      var previousPosition = _position;
+      var previousTrackUri = _metadata.TryGetValue("TrackUri", out var uri) ? uri : null;
+
+      await UpdatePlaybackStateAsync(CancellationToken.None);
+
+      // Check if playback state changed
+      if (State != previousState)
+      {
+        OnStateChanged(previousState, State);
+      }
+
+      // Check if track changed
+      var currentTrackUri = _metadata.TryGetValue("TrackUri", out var currentUri) ? currentUri : null;
+      if (currentTrackUri != previousTrackUri && !string.IsNullOrEmpty(currentTrackUri))
+      {
+        // Save last played track
+        _preferences.CurrentValue.LastSongPlayed = currentTrackUri;
+        _preferences.CurrentValue.SongPositionMs = (long)_position.TotalMilliseconds;
+
+        // Update queue and raise event
+        QueueChanged?.Invoke(this, new QueueChangedEventArgs
+        {
+          ChangeType = QueueChangeType.CurrentChanged
+        });
+      }
+
+      // Update position if significantly different (more than 1 second)
+      if (Math.Abs((_position - previousPosition).TotalSeconds) > 1)
+      {
+        OnStateChanged(State, State);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "Error during Spotify playback state polling");
+    }
+    finally
+    {
+      _pollingLock.Release();
+    }
+  }
+
+  /// <summary>
+  /// Creates a QueueItem from a Spotify track.
+  /// </summary>
+  private QueueItem CreateQueueItem(FullTrack track, int index, bool isCurrent)
+  {
+    return new QueueItem
+    {
+      Id = track.Uri,
+      Title = track.Name,
+      Artist = string.Join(", ", track.Artists.Select(a => a.Name)),
+      Album = track.Album.Name,
+      Duration = TimeSpan.FromMilliseconds(track.DurationMs),
+      AlbumArtUrl = track.Album.Images.FirstOrDefault()?.Url,
+      Index = index,
+      IsCurrent = isCurrent
+    };
+  }
+
   /// <inheritdoc/>
   protected override async ValueTask DisposeAsyncCore()
   {
+    // Stop polling timer
+    if (_pollingTimer != null)
+    {
+      await _pollingTimer.DisposeAsync();
+      _pollingTimer = null;
+    }
+
+    _pollingLock.Dispose();
+
     if (_client != null && _currentPlayback?.Item is FullTrack track)
     {
       // Save state for next session
