@@ -66,6 +66,12 @@ public class AudioController : ControllerBase
         {
           state.Position = primary.Position;
           state.Duration = primary.Duration;
+          state.CanNext = primary.SupportsNext;
+          state.CanPrevious = primary.SupportsPrevious;
+          state.CanShuffle = primary.SupportsShuffle;
+          state.CanRepeat = primary.SupportsRepeat;
+          state.IsShuffleEnabled = primary.IsShuffleEnabled;
+          state.RepeatMode = primary.RepeatMode.ToString();
         }
       }
 
@@ -284,6 +290,158 @@ public class AudioController : ControllerBase
     _logger.LogInformation("Mute toggled to {IsMuted}", mixer.IsMuted);
 
     return Ok(new { isMuted = mixer.IsMuted });
+  }
+
+  /// <summary>
+  /// Skips to the next track.
+  /// </summary>
+  [HttpPost("next")]
+  [ProducesResponseType(typeof(PlaybackStateDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  public async Task<ActionResult<PlaybackStateDto>> Next()
+  {
+    try
+    {
+      var mixer = _audioEngine.GetMasterMixer();
+      var activeSources = mixer.GetActiveSources();
+      var primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary);
+
+      if (primarySource is not IPrimaryAudioSource primary)
+      {
+        return BadRequest(new { error = "No primary audio source is active" });
+      }
+
+      if (!primary.SupportsNext)
+      {
+        return BadRequest(new { error = "The active source does not support next track navigation" });
+      }
+
+      await primary.NextAsync();
+      _logger.LogInformation("Skipped to next track");
+
+      return GetPlaybackState();
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error skipping to next track");
+      return StatusCode(500, new { error = "Failed to skip to next track" });
+    }
+  }
+
+  /// <summary>
+  /// Goes to the previous track.
+  /// </summary>
+  [HttpPost("previous")]
+  [ProducesResponseType(typeof(PlaybackStateDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  public async Task<ActionResult<PlaybackStateDto>> Previous()
+  {
+    try
+    {
+      var mixer = _audioEngine.GetMasterMixer();
+      var activeSources = mixer.GetActiveSources();
+      var primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary);
+
+      if (primarySource is not IPrimaryAudioSource primary)
+      {
+        return BadRequest(new { error = "No primary audio source is active" });
+      }
+
+      if (!primary.SupportsPrevious)
+      {
+        return BadRequest(new { error = "The active source does not support previous track navigation" });
+      }
+
+      await primary.PreviousAsync();
+      _logger.LogInformation("Went to previous track");
+
+      return GetPlaybackState();
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error going to previous track");
+      return StatusCode(500, new { error = "Failed to go to previous track" });
+    }
+  }
+
+  /// <summary>
+  /// Sets the shuffle state.
+  /// </summary>
+  /// <param name="request">The shuffle state request.</param>
+  [HttpPost("shuffle")]
+  [ProducesResponseType(typeof(PlaybackStateDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  public async Task<ActionResult<PlaybackStateDto>> SetShuffle([FromBody] SetShuffleRequest request)
+  {
+    try
+    {
+      var mixer = _audioEngine.GetMasterMixer();
+      var activeSources = mixer.GetActiveSources();
+      var primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary);
+
+      if (primarySource is not IPrimaryAudioSource primary)
+      {
+        return BadRequest(new { error = "No primary audio source is active" });
+      }
+
+      if (!primary.SupportsShuffle)
+      {
+        return BadRequest(new { error = "The active source does not support shuffle mode" });
+      }
+
+      await primary.SetShuffleAsync(request.Enabled);
+      _logger.LogInformation("Shuffle set to {Enabled}", request.Enabled);
+
+      return GetPlaybackState();
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error setting shuffle state");
+      return StatusCode(500, new { error = "Failed to set shuffle state" });
+    }
+  }
+
+  /// <summary>
+  /// Sets the repeat mode.
+  /// </summary>
+  /// <param name="request">The repeat mode request.</param>
+  [HttpPost("repeat")]
+  [ProducesResponseType(typeof(PlaybackStateDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  public async Task<ActionResult<PlaybackStateDto>> SetRepeatMode([FromBody] SetRepeatModeRequest request)
+  {
+    try
+    {
+      var mixer = _audioEngine.GetMasterMixer();
+      var activeSources = mixer.GetActiveSources();
+      var primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary);
+
+      if (primarySource is not IPrimaryAudioSource primary)
+      {
+        return BadRequest(new { error = "No primary audio source is active" });
+      }
+
+      if (!primary.SupportsRepeat)
+      {
+        return BadRequest(new { error = "The active source does not support repeat mode" });
+      }
+
+      // Parse the repeat mode from string
+      if (!Enum.TryParse<Radio.Core.Models.Audio.RepeatMode>(request.Mode, ignoreCase: true, out var repeatMode))
+      {
+        return BadRequest(new { error = $"Invalid repeat mode. Valid values are: Off, One, All" });
+      }
+
+      await primary.SetRepeatModeAsync(repeatMode);
+      _logger.LogInformation("Repeat mode set to {RepeatMode}", repeatMode);
+
+      return GetPlaybackState();
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error setting repeat mode");
+      return StatusCode(500, new { error = "Failed to set repeat mode" });
+    }
   }
 
   private static AudioSourceDto MapToAudioSourceDto(IAudioSource source)
