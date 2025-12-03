@@ -1,0 +1,814 @@
+openapi: 3.0.3
+info:
+  title: Radio Console API
+  description: API for controlling a vintage radio console with Spotify, FM/AM radio, file playback, and audio visualization
+  version: 1.0.0
+  contact:
+    name: Radio Console Support
+
+servers:
+  - url: http://localhost:3000/api
+    description: Local development server
+  - url: https://radio-console.local/api
+    description: Raspberry Pi production server
+
+tags:
+  - name: Playback
+    description: Universal playback control operations
+  - name: Sources
+    description: Audio source management
+  - name: Radio
+    description: FM/AM/SW radio tuner operations
+  - name: Spotify
+    description: Spotify integration endpoints
+  - name: Files
+    description: Audio file management
+  - name: Metadata
+    description: Track metadata and album art
+  - name: System
+    description: System configuration and monitoring
+  - name: Visualization
+    description: Real-time audio visualization data
+
+paths:
+  # Playback Control
+  /playback/state:
+    get:
+      tags: [Playback]
+      summary: Get current playback state
+      responses:
+        '200':
+          description: Current playback state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaybackState'
+    
+    put:
+      tags: [Playback]
+      summary: Update playback state
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaybackStateUpdate'
+      responses:
+        '200':
+          description: Playback state updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaybackState'
+
+  /playback/play:
+    post:
+      tags: [Playback]
+      summary: Start playback
+      responses:
+        '200':
+          description: Playback started
+
+  /playback/pause:
+    post:
+      tags: [Playback]
+      summary: Pause playback
+      responses:
+        '200':
+          description: Playback paused
+
+  /playback/next:
+    post:
+      tags: [Playback]
+      summary: Skip to next track
+      responses:
+        '200':
+          description: Skipped to next track
+
+  /playback/previous:
+    post:
+      tags: [Playback]
+      summary: Skip to previous track
+      responses:
+        '200':
+          description: Skipped to previous track
+
+  /playback/seek:
+    post:
+      tags: [Playback]
+      summary: Seek to position
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [position]
+              properties:
+                position:
+                  type: number
+                  description: Position in seconds
+      responses:
+        '200':
+          description: Seeked to position
+
+  /playback/volume:
+    put:
+      tags: [Playback]
+      summary: Set volume level
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [volume]
+              properties:
+                volume:
+                  type: integer
+                  minimum: 0
+                  maximum: 100
+      responses:
+        '200':
+          description: Volume updated
+
+  # Audio Sources
+  /sources/active:
+    get:
+      tags: [Sources]
+      summary: Get active audio source
+      responses:
+        '200':
+          description: Active audio source
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  source:
+                    $ref: '#/components/schemas/AudioSource'
+    
+    put:
+      tags: [Sources]
+      summary: Switch audio source
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source]
+              properties:
+                source:
+                  $ref: '#/components/schemas/AudioSource'
+      responses:
+        '200':
+          description: Audio source switched
+
+  /sources/available:
+    get:
+      tags: [Sources]
+      summary: List available audio sources
+      responses:
+        '200':
+          description: List of available sources
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sources:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AudioSource'
+
+  # Radio Operations
+  /radio/tune:
+    post:
+      tags: [Radio]
+      summary: Tune to specific frequency
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [frequency, band]
+              properties:
+                frequency:
+                  type: number
+                  description: Frequency in MHz (FM) or kHz (AM)
+                band:
+                  $ref: '#/components/schemas/RadioBand'
+      responses:
+        '200':
+          description: Tuned to frequency
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RadioState'
+        '400':
+          description: Invalid frequency for band
+
+  /radio/state:
+    get:
+      tags: [Radio]
+      summary: Get radio state
+      responses:
+        '200':
+          description: Current radio state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RadioState'
+
+  /radio/scan:
+    post:
+      tags: [Radio]
+      summary: Auto-scan for stations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                direction:
+                  type: string
+                  enum: [up, down]
+                  default: up
+      responses:
+        '200':
+          description: Scan started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  scanning:
+                    type: boolean
+
+  /radio/presets:
+    get:
+      tags: [Radio]
+      summary: Get saved radio presets
+      responses:
+        '200':
+          description: List of presets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RadioPreset'
+    
+    post:
+      tags: [Radio]
+      summary: Save current station as preset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+      responses:
+        '201':
+          description: Preset saved
+
+  /radio/presets/{id}:
+    delete:
+      tags: [Radio]
+      summary: Delete radio preset
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Preset deleted
+
+  # Spotify Integration
+  /spotify/auth:
+    get:
+      tags: [Spotify]
+      summary: Get Spotify authentication status
+      responses:
+        '200':
+          description: Authentication status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  authenticated:
+                    type: boolean
+                  username:
+                    type: string
+
+  /spotify/search:
+    get:
+      tags: [Spotify]
+      summary: Search Spotify catalog
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [all, track, album, artist, playlist, show, audiobook]
+            default: all
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SpotifySearchResult'
+
+  /spotify/play:
+    post:
+      tags: [Spotify]
+      summary: Play Spotify track/album/playlist
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [uri]
+              properties:
+                uri:
+                  type: string
+                  description: Spotify URI (track, album, or playlist)
+      responses:
+        '200':
+          description: Playback started
+
+  /spotify/playlists:
+    get:
+      tags: [Spotify]
+      summary: Get user playlists
+      responses:
+        '200':
+          description: List of playlists
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    name:
+                      type: string
+                    trackCount:
+                      type: integer
+
+  # File Management
+  /files:
+    get:
+      tags: [Files]
+      summary: List audio files
+      parameters:
+        - name: path
+          in: query
+          schema:
+            type: string
+            default: /
+        - name: recursive
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: List of audio files
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AudioFile'
+
+  /files/play:
+    post:
+      tags: [Files]
+      summary: Play audio file
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path:
+                  type: string
+      responses:
+        '200':
+          description: File playback started
+
+  /files/queue:
+    post:
+      tags: [Files]
+      summary: Add files to playback queue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [paths]
+              properties:
+                paths:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Files added to queue
+
+  # Metadata
+  /metadata/current:
+    get:
+      tags: [Metadata]
+      summary: Get current track metadata
+      responses:
+        '200':
+          description: Current track metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrackMetadata'
+
+  /metadata/history:
+    get:
+      tags: [Metadata]
+      summary: Get playback history
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Playback history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HistoryEntry'
+
+  # System Management
+  /system/stats:
+    get:
+      tags: [System]
+      summary: Get system statistics
+      responses:
+        '200':
+          description: System statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemStats'
+
+  /system/config:
+    get:
+      tags: [System]
+      summary: Get system configuration
+      responses:
+        '200':
+          description: System configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+    put:
+      tags: [System]
+      summary: Update system configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Configuration updated
+
+  /system/logs:
+    get:
+      tags: [System]
+      summary: Get system logs
+      parameters:
+        - name: level
+          in: query
+          schema:
+            type: string
+            enum: [info, warning, error]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: System logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LogEntry'
+
+  /system/metrics:
+    get:
+      tags: [System]
+      summary: Get system metrics
+      parameters:
+        - name: timeRange
+          in: query
+          schema:
+            type: string
+            enum: [minute, hour, day, week, month]
+            default: day
+      responses:
+        '200':
+          description: System metrics
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MetricEntry'
+
+  # Visualization
+  /visualization/data:
+    get:
+      tags: [Visualization]
+      summary: Get real-time visualization data (use WebSocket for streaming)
+      responses:
+        '200':
+          description: Current visualization snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisualizationData'
+
+components:
+  schemas:
+    AudioSource:
+      type: string
+      enum: [spotify, radio, files, vinyl, aux]
+
+    RadioBand:
+      type: string
+      enum: [am, fm, sw, vhf, weather, air]
+
+    PlaybackState:
+      type: object
+      properties:
+        isPlaying:
+          type: boolean
+        position:
+          type: number
+          description: Current position in seconds
+        duration:
+          type: number
+          description: Total duration in seconds
+        volume:
+          type: integer
+          minimum: 0
+          maximum: 100
+        balance:
+          type: integer
+          minimum: -100
+          maximum: 100
+        isMuted:
+          type: boolean
+        shuffle:
+          type: boolean
+        repeat:
+          type: string
+          enum: [off, one, all]
+        isSeekable:
+          type: boolean
+
+    PlaybackStateUpdate:
+      type: object
+      properties:
+        isPlaying:
+          type: boolean
+        position:
+          type: number
+        volume:
+          type: integer
+        balance:
+          type: integer
+        isMuted:
+          type: boolean
+        shuffle:
+          type: boolean
+        repeat:
+          type: string
+          enum: [off, one, all]
+
+    RadioState:
+      type: object
+      properties:
+        frequency:
+          type: number
+        band:
+          $ref: '#/components/schemas/RadioBand'
+        signalStrength:
+          type: integer
+          minimum: 0
+          maximum: 100
+        isStereo:
+          type: boolean
+        stepSize:
+          type: number
+        eqMode:
+          type: string
+          enum: [off, rock, pop, jazz, classical, speech]
+
+    RadioPreset:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        frequency:
+          type: number
+        band:
+          $ref: '#/components/schemas/RadioBand'
+
+    SpotifySearchResult:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [track, album, artist, playlist, show, audiobook]
+        name:
+          type: string
+        artist:
+          type: string
+        album:
+          type: string
+        imageUrl:
+          type: string
+        duration:
+          type: integer
+        uri:
+          type: string
+
+    AudioFile:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        path:
+          type: string
+        duration:
+          type: integer
+        artist:
+          type: string
+        album:
+          type: string
+        size:
+          type: integer
+
+    TrackMetadata:
+      type: object
+      properties:
+        title:
+          type: string
+        artist:
+          type: string
+        album:
+          type: string
+        albumArt:
+          type: string
+          format: uri
+        genre:
+          type: string
+        year:
+          type: integer
+
+    HistoryEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        artist:
+          type: string
+        album:
+          type: string
+        source:
+          $ref: '#/components/schemas/AudioSource'
+        metadataSource:
+          type: string
+          enum: [spotify, file, fingerprinting]
+        timePlayed:
+          type: integer
+          format: int64
+
+    SystemStats:
+      type: object
+      properties:
+        cpuUsage:
+          type: number
+          description: CPU usage percentage
+        ramUsage:
+          type: number
+          description: RAM usage percentage
+        threadCount:
+          type: integer
+        uptime:
+          type: integer
+          description: System uptime in seconds
+
+    LogEntry:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        level:
+          type: string
+          enum: [info, warning, error]
+        message:
+          type: string
+
+    MetricEntry:
+      type: object
+      properties:
+        timestamp:
+          type: integer
+          format: int64
+        type:
+          type: string
+          enum: [tts-alert, audio-alert, characters-ttsed, audio-played]
+        value:
+          type: number
+
+    VisualizationData:
+      type: object
+      properties:
+        fft:
+          type: array
+          items:
+            type: number
+          description: FFT spectrum data (frequency domain)
+        waveform:
+          type: array
+          items:
+            type: number
+          description: Waveform data (time domain)
+        vuLeft:
+          type: number
+          minimum: 0
+          maximum: 100
+        vuRight:
+          type: number
+          minimum: 0
+          maximum: 100
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+
+security:
+  - BearerAuth: []
