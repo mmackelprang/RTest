@@ -38,21 +38,13 @@ public class QueueController : ControllerBase
   {
     try
     {
-      var mixer = _audioEngine.GetMasterMixer();
-      var activeSources = mixer.GetActiveSources();
-      var primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary);
-
-      if (primarySource == null)
+      var result = TryGetQueueSource(out var queueSource);
+      if (result != null)
       {
-        return NotFound(new { error = "No primary audio source is active" });
+        return result;
       }
 
-      if (primarySource is not IPlayQueue queueSource)
-      {
-        return BadRequest(new { error = "The active source does not support queue management" });
-      }
-
-      var queue = await queueSource.GetQueueAsync();
+      var queue = await queueSource!.GetQueueAsync();
       var queueDtos = queue.Select(MapToQueueItemDto).ToList();
 
       return Ok(queueDtos);
@@ -77,21 +69,13 @@ public class QueueController : ControllerBase
   {
     try
     {
-      var mixer = _audioEngine.GetMasterMixer();
-      var activeSources = mixer.GetActiveSources();
-      var primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary);
-
-      if (primarySource == null)
+      var result = TryGetQueueSource(out var queueSource);
+      if (result != null)
       {
-        return NotFound(new { error = "No primary audio source is active" });
+        return result;
       }
 
-      if (primarySource is not IPlayQueue queueSource)
-      {
-        return BadRequest(new { error = "The active source does not support queue management" });
-      }
-
-      await queueSource.AddToQueueAsync(request.TrackIdentifier, request.Position);
+      await queueSource!.AddToQueueAsync(request.TrackIdentifier, request.Position);
       _logger.LogInformation("Added track to queue: {TrackIdentifier}", request.TrackIdentifier);
 
       var queue = await queueSource.GetQueueAsync();
@@ -119,21 +103,13 @@ public class QueueController : ControllerBase
   {
     try
     {
-      var mixer = _audioEngine.GetMasterMixer();
-      var activeSources = mixer.GetActiveSources();
-      var primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary);
-
-      if (primarySource == null)
+      var result = TryGetQueueSource(out var queueSource);
+      if (result != null)
       {
-        return NotFound(new { error = "No primary audio source is active" });
+        return result;
       }
 
-      if (primarySource is not IPlayQueue queueSource)
-      {
-        return BadRequest(new { error = "The active source does not support queue management" });
-      }
-
-      await queueSource.RemoveFromQueueAsync(index);
+      await queueSource!.RemoveFromQueueAsync(index);
       _logger.LogInformation("Removed item from queue at index: {Index}", index);
 
       var queue = await queueSource.GetQueueAsync();
@@ -165,21 +141,13 @@ public class QueueController : ControllerBase
   {
     try
     {
-      var mixer = _audioEngine.GetMasterMixer();
-      var activeSources = mixer.GetActiveSources();
-      var primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary);
-
-      if (primarySource == null)
+      var result = TryGetQueueSource(out var queueSource);
+      if (result != null)
       {
-        return NotFound(new { error = "No primary audio source is active" });
+        return result;
       }
 
-      if (primarySource is not IPlayQueue queueSource)
-      {
-        return BadRequest(new { error = "The active source does not support queue management" });
-      }
-
-      await queueSource.ClearQueueAsync();
+      await queueSource!.ClearQueueAsync();
       _logger.LogInformation("Cleared queue");
 
       return Ok(new { message = "Queue cleared successfully", itemCount = 0 });
@@ -204,21 +172,13 @@ public class QueueController : ControllerBase
   {
     try
     {
-      var mixer = _audioEngine.GetMasterMixer();
-      var activeSources = mixer.GetActiveSources();
-      var primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary);
-
-      if (primarySource == null)
+      var result = TryGetQueueSource(out var queueSource);
+      if (result != null)
       {
-        return NotFound(new { error = "No primary audio source is active" });
+        return result;
       }
 
-      if (primarySource is not IPlayQueue queueSource)
-      {
-        return BadRequest(new { error = "The active source does not support queue management" });
-      }
-
-      await queueSource.MoveQueueItemAsync(request.FromIndex, request.ToIndex);
+      await queueSource!.MoveQueueItemAsync(request.FromIndex, request.ToIndex);
       _logger.LogInformation("Moved queue item from index {FromIndex} to {ToIndex}", request.FromIndex, request.ToIndex);
 
       var queue = await queueSource.GetQueueAsync();
@@ -251,46 +211,17 @@ public class QueueController : ControllerBase
   {
     try
     {
-      var mixer = _audioEngine.GetMasterMixer();
-      var activeSources = mixer.GetActiveSources();
-      var primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary);
-
-      if (primarySource == null)
+      var result = TryGetQueueSource(out var queueSource, out var primarySource);
+      if (result != null)
       {
-        return NotFound(new { error = "No primary audio source is active" });
+        return result;
       }
 
-      if (primarySource is not IPlayQueue queueSource)
-      {
-        return BadRequest(new { error = "The active source does not support queue management" });
-      }
-
-      await queueSource.JumpToIndexAsync(index);
+      await queueSource!.JumpToIndexAsync(index);
       _logger.LogInformation("Jumped to queue index: {Index}", index);
 
       // Return updated playback state
-      var state = new PlaybackStateDto
-      {
-        IsPlaying = _audioEngine.State == AudioEngineState.Running,
-        IsPaused = primarySource.State == AudioSourceState.Paused,
-        Volume = mixer.MasterVolume,
-        IsMuted = mixer.IsMuted,
-        Balance = mixer.Balance
-      };
-
-      if (primarySource is IPrimaryAudioSource primary)
-      {
-        state.ActiveSource = MapToAudioSourceDto(primarySource);
-        state.Position = primary.Position;
-        state.Duration = primary.Duration;
-        state.CanNext = primary.SupportsNext;
-        state.CanPrevious = primary.SupportsPrevious;
-        state.CanShuffle = primary.SupportsShuffle;
-        state.CanRepeat = primary.SupportsRepeat;
-        state.IsShuffleEnabled = primary.IsShuffleEnabled;
-        state.RepeatMode = primary.RepeatMode.ToString();
-      }
-
+      var state = BuildPlaybackStateDto(primarySource!);
       return Ok(state);
     }
     catch (ArgumentOutOfRangeException ex)
@@ -339,5 +270,76 @@ public class QueueController : ControllerBase
     }
 
     return dto;
+  }
+
+  /// <summary>
+  /// Tries to get the active queue source and validates it supports queue management.
+  /// </summary>
+  /// <param name="queueSource">The queue source if found and valid, otherwise null.</param>
+  /// <param name="primarySource">The primary source if found, otherwise null.</param>
+  /// <returns>An error ActionResult if validation fails, otherwise null.</returns>
+  private ActionResult? TryGetQueueSource(out IPlayQueue? queueSource, out IAudioSource? primarySource)
+  {
+    var mixer = _audioEngine.GetMasterMixer();
+    var activeSources = mixer.GetActiveSources();
+    primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary);
+
+    if (primarySource == null)
+    {
+      queueSource = null;
+      return NotFound(new { error = "No primary audio source is active" });
+    }
+
+    if (primarySource is not IPlayQueue queue)
+    {
+      queueSource = null;
+      return BadRequest(new { error = "The active source does not support queue management" });
+    }
+
+    queueSource = queue;
+    return null;
+  }
+
+  /// <summary>
+  /// Tries to get the active queue source. Overload without primarySource output parameter.
+  /// </summary>
+  /// <param name="queueSource">The queue source if found and valid, otherwise null.</param>
+  /// <returns>An error ActionResult if validation fails, otherwise null.</returns>
+  private ActionResult? TryGetQueueSource(out IPlayQueue? queueSource)
+  {
+    return TryGetQueueSource(out queueSource, out _);
+  }
+
+  /// <summary>
+  /// Builds a PlaybackStateDto from the given primary source and current engine state.
+  /// </summary>
+  /// <param name="primarySource">The primary audio source.</param>
+  /// <returns>A fully populated PlaybackStateDto.</returns>
+  private PlaybackStateDto BuildPlaybackStateDto(IAudioSource primarySource)
+  {
+    var mixer = _audioEngine.GetMasterMixer();
+    var state = new PlaybackStateDto
+    {
+      IsPlaying = _audioEngine.State == AudioEngineState.Running,
+      IsPaused = primarySource.State == AudioSourceState.Paused,
+      Volume = mixer.MasterVolume,
+      IsMuted = mixer.IsMuted,
+      Balance = mixer.Balance
+    };
+
+    if (primarySource is IPrimaryAudioSource primary)
+    {
+      state.ActiveSource = MapToAudioSourceDto(primarySource);
+      state.Position = primary.Position;
+      state.Duration = primary.Duration;
+      state.CanNext = primary.SupportsNext;
+      state.CanPrevious = primary.SupportsPrevious;
+      state.CanShuffle = primary.SupportsShuffle;
+      state.CanRepeat = primary.SupportsRepeat;
+      state.IsShuffleEnabled = primary.IsShuffleEnabled;
+      state.RepeatMode = primary.RepeatMode.ToString();
+    }
+
+    return state;
   }
 }
