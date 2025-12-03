@@ -283,4 +283,193 @@ public class SpotifyAudioSourceTests
     Assert.NotNull(_preferencesMock.Object.CurrentValue.LastSongPlayed);
     Assert.Equal(30000, _preferencesMock.Object.CurrentValue.SongPositionMs);
   }
+
+  // IPlayQueue Tests
+
+  [Fact]
+  public void QueueItems_InitiallyEmpty()
+  {
+    // Arrange
+    var source = CreateSource();
+
+    // Act
+    var items = source.QueueItems;
+
+    // Assert
+    Assert.Empty(items);
+  }
+
+  [Fact]
+  public void CurrentIndex_InitiallyNegativeOne()
+  {
+    // Arrange
+    var source = CreateSource();
+
+    // Act
+    var index = source.CurrentIndex;
+
+    // Assert
+    Assert.Equal(-1, index);
+  }
+
+  [Fact]
+  public void Count_InitiallyZero()
+  {
+    // Arrange
+    var source = CreateSource();
+
+    // Act
+    var count = source.Count;
+
+    // Assert
+    Assert.Equal(0, count);
+  }
+
+  [Fact]
+  public async Task GetQueueAsync_WithoutClient_ReturnsEmptyList()
+  {
+    // Arrange
+    var source = CreateSource();
+
+    // Act
+    var queue = await source.GetQueueAsync();
+
+    // Assert
+    Assert.Empty(queue);
+  }
+
+  [Fact]
+  public async Task AddToQueueAsync_WithoutClient_ThrowsInvalidOperationException()
+  {
+    // Arrange
+    var source = CreateSource();
+
+    // Act & Assert
+    await Assert.ThrowsAsync<InvalidOperationException>(
+      () => source.AddToQueueAsync("spotify:track:abc123"));
+  }
+
+  [Fact]
+  public async Task RemoveFromQueueAsync_ThrowsNotSupportedException()
+  {
+    // Arrange
+    var source = CreateSource();
+
+    // Act & Assert
+    var exception = await Assert.ThrowsAsync<NotSupportedException>(
+      () => source.RemoveFromQueueAsync(0));
+
+    Assert.Contains("does not support removing", exception.Message);
+  }
+
+  [Fact]
+  public async Task ClearQueueAsync_ThrowsNotSupportedException()
+  {
+    // Arrange
+    var source = CreateSource();
+
+    // Act & Assert
+    var exception = await Assert.ThrowsAsync<NotSupportedException>(
+      () => source.ClearQueueAsync());
+
+    Assert.Contains("does not support clearing", exception.Message);
+  }
+
+  [Fact]
+  public async Task MoveQueueItemAsync_ThrowsNotSupportedException()
+  {
+    // Arrange
+    var source = CreateSource();
+
+    // Act & Assert
+    var exception = await Assert.ThrowsAsync<NotSupportedException>(
+      () => source.MoveQueueItemAsync(0, 1));
+
+    Assert.Contains("does not support reordering", exception.Message);
+  }
+
+  [Fact]
+  public async Task JumpToIndexAsync_ThrowsNotSupportedException()
+  {
+    // Arrange
+    var source = CreateSource();
+
+    // Act & Assert
+    var exception = await Assert.ThrowsAsync<NotSupportedException>(
+      () => source.JumpToIndexAsync(0));
+
+    Assert.Contains("does not support jumping", exception.Message);
+  }
+
+  [Fact]
+  public void SupportsQueue_ReturnsTrue()
+  {
+    // Arrange
+    var source = CreateSource();
+
+    // Act & Assert
+    Assert.True(source.SupportsQueue);
+  }
+
+  [Fact]
+  public void SupportsNext_ReturnsTrue()
+  {
+    // Arrange
+    var source = CreateSource();
+
+    // Act & Assert
+    Assert.True(source.SupportsNext);
+  }
+
+  [Fact]
+  public void SupportsPrevious_ReturnsTrue()
+  {
+    // Arrange
+    var source = CreateSource();
+
+    // Act & Assert
+    Assert.True(source.SupportsPrevious);
+  }
+
+  [Fact]
+  public void SupportsShuffle_ReturnsTrue()
+  {
+    // Arrange
+    var source = CreateSource();
+
+    // Act & Assert
+    Assert.True(source.SupportsShuffle);
+  }
+
+  [Fact]
+  public void SupportsRepeat_ReturnsTrue()
+  {
+    // Arrange
+    var source = CreateSource();
+
+    // Act & Assert
+    Assert.True(source.SupportsRepeat);
+  }
+
+  [Fact]
+  public void IsShuffleEnabled_ReflectsPreferences()
+  {
+    // Arrange
+    _preferences.Shuffle = true;
+    var source = CreateSource();
+
+    // Act & Assert
+    Assert.True(source.IsShuffleEnabled);
+  }
+
+  [Fact]
+  public void RepeatMode_ReflectsPreferences()
+  {
+    // Arrange
+    _preferences.Repeat = RepeatMode.All;
+    var source = CreateSource();
+
+    // Act & Assert
+    Assert.Equal(RepeatMode.All, source.RepeatMode);
+  }
 }
