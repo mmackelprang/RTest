@@ -14,16 +14,19 @@ public class SourcesController : ControllerBase
 {
   private readonly ILogger<SourcesController> _logger;
   private readonly IAudioEngine _audioEngine;
+  private readonly IAudioManager? _audioManager;
 
   /// <summary>
   /// Initializes a new instance of the SourcesController.
   /// </summary>
   public SourcesController(
     ILogger<SourcesController> logger,
-    IAudioEngine audioEngine)
+    IAudioEngine audioEngine,
+    IAudioManager? audioManager = null)
   {
     _logger = logger;
     _audioEngine = audioEngine;
+    _audioManager = audioManager;
   }
 
   /// <summary>
@@ -119,15 +122,11 @@ public class SourcesController : ControllerBase
   /// </summary>
   /// <param name="request">The source selection request.</param>
   /// <returns>The selected source information.</returns>
-  /// <remarks>
-  /// Note: Full source switching requires AudioManager implementation.
-  /// This endpoint validates the request and logs the selection.
-  /// </remarks>
   [HttpPost]
   [ProducesResponseType(typeof(AudioSourceDto), StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
   [ProducesResponseType(StatusCodes.Status501NotImplemented)]
-  public ActionResult<AudioSourceDto> SelectSource([FromBody] SelectSourceRequest request)
+  public async Task<ActionResult<AudioSourceDto>> SelectSource([FromBody] SelectSourceRequest request)
   {
     try
     {
@@ -142,16 +141,55 @@ public class SourcesController : ControllerBase
         return BadRequest(new { error = $"Invalid source type: {request.SourceType}" });
       }
 
-      // Note: Full implementation requires IAudioManager to switch sources
-      // For now, we return 501 Not Implemented to indicate this requires Phase 3 completion
       _logger.LogInformation("Source selection requested: {SourceType}", sourceType);
 
-      return StatusCode(501, new
+      // Check if audio manager is available
+      if (_audioManager == null)
       {
-        message = "Source switching not yet implemented",
-        requestedSource = sourceType.ToString(),
-        note = "This requires Primary Audio Sources (Phase 3) to be completed"
-      });
+        return StatusCode(501, new
+        {
+          message = "Source switching not yet implemented",
+          requestedSource = sourceType.ToString(),
+          note = "This requires IAudioManager implementation to be completed"
+        });
+      }
+
+      // Get the mixer and find the requested source
+      var mixer = _audioEngine.GetMasterMixer();
+      var activeSources = mixer.GetActiveSources();
+      
+      // Look for an existing source of the requested type
+      var targetSource = activeSources.FirstOrDefault(s => s.Type == sourceType);
+      
+      if (targetSource == null)
+      {
+        return BadRequest(new
+        {
+          error = $"Source type {sourceType} is not available or not configured",
+          availableSources = activeSources.Select(s => s.Type.ToString()).ToList()
+        });
+      }
+
+      // Switch to the requested source
+      try
+      {
+        await _audioManager.SwitchSourceAsync(targetSource);
+        
+        _logger.LogInformation(
+          "Successfully switched to source: {SourceType}",
+          sourceType);
+
+        return Ok(MapToAudioSourceDto(targetSource));
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "Failed to switch to source: {SourceType}", sourceType);
+        return StatusCode(500, new
+        {
+          error = "Failed to switch audio source",
+          details = ex.Message
+        });
+      }
     }
     catch (Exception ex)
     {

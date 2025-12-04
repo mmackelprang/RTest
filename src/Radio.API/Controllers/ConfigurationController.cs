@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Radio.API.Models;
 using Radio.Core.Configuration;
+using RadioConfigurationManager = Radio.Infrastructure.Configuration.Abstractions.IConfigurationManager;
 
 namespace Radio.API.Controllers;
 
@@ -17,6 +18,7 @@ public class ConfigurationController : ControllerBase
   private readonly IOptionsMonitor<AudioOptions> _audioOptions;
   private readonly IOptionsMonitor<VisualizerOptions> _visualizerOptions;
   private readonly IOptionsMonitor<AudioOutputOptions> _outputOptions;
+  private readonly RadioConfigurationManager? _configurationManager;
 
   /// <summary>
   /// Initializes a new instance of the ConfigurationController.
@@ -25,12 +27,14 @@ public class ConfigurationController : ControllerBase
     ILogger<ConfigurationController> logger,
     IOptionsMonitor<AudioOptions> audioOptions,
     IOptionsMonitor<VisualizerOptions> visualizerOptions,
-    IOptionsMonitor<AudioOutputOptions> outputOptions)
+    IOptionsMonitor<AudioOutputOptions> outputOptions,
+    RadioConfigurationManager? configurationManager = null)
   {
     _logger = logger;
     _audioOptions = audioOptions;
     _visualizerOptions = visualizerOptions;
     _outputOptions = outputOptions;
+    _configurationManager = configurationManager;
   }
 
   /// <summary>
@@ -201,19 +205,13 @@ public class ConfigurationController : ControllerBase
   /// <summary>
   /// Updates a configuration setting.
   /// </summary>
-  /// <remarks>
-  /// Note: Configuration updates require the managed configuration system from Phase 1.
-  /// This endpoint validates the request structure but returns 501 Not Implemented
-  /// for actual persistence, as runtime configuration changes would require
-  /// the IConfigurationManager implementation.
-  /// </remarks>
   /// <param name="request">The configuration update request.</param>
   /// <returns>Success or error response.</returns>
   [HttpPost]
   [ProducesResponseType(StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
   [ProducesResponseType(StatusCodes.Status501NotImplemented)]
-  public ActionResult UpdateConfiguration([FromBody] UpdateConfigurationRequest request)
+  public async Task<ActionResult> UpdateConfiguration([FromBody] UpdateConfigurationRequest request)
   {
     try
     {
@@ -231,16 +229,49 @@ public class ConfigurationController : ControllerBase
         "Configuration update requested: {Section}:{Key} = {Value}",
         request.Section, request.Key, request.Value);
 
-      // Note: Full implementation requires IConfigurationManager to persist changes
-      // The current IOptionsMonitor provides read-only access to configuration
-      return StatusCode(501, new
+      // Check if configuration manager is available
+      if (_configurationManager == null)
       {
-        message = "Configuration update requires IConfigurationManager integration",
-        section = request.Section,
-        key = request.Key,
-        value = request.Value,
-        note = "Configuration values are read-only at runtime without the managed configuration system"
-      });
+        return StatusCode(501, new
+        {
+          message = "Configuration update requires IConfigurationManager integration",
+          section = request.Section,
+          key = request.Key,
+          value = request.Value,
+          note = "Configuration values are read-only at runtime without the managed configuration system"
+        });
+      }
+
+      // Update the configuration using the configuration manager
+      // The store ID typically corresponds to the section name
+      var storeId = request.Section.ToLowerInvariant();
+      
+      try
+      {
+        await _configurationManager.SetValueAsync(storeId, request.Key, request.Value);
+        
+        _logger.LogInformation(
+          "Configuration updated successfully: {Section}:{Key}",
+          request.Section, request.Key);
+
+        return Ok(new
+        {
+          message = "Configuration updated successfully",
+          section = request.Section,
+          key = request.Key,
+          value = request.Value
+        });
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "Failed to update configuration: {Section}:{Key}", 
+          request.Section, request.Key);
+        return BadRequest(new
+        {
+          error = "Failed to update configuration",
+          details = ex.Message
+        });
+      }
     }
     catch (Exception ex)
     {
