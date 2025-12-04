@@ -1940,6 +1940,22 @@ Success Criteria:
 **Estimated Effort:** 1-2 days
 
 #### Task 8.1: Update WEBUI.md with Examples Look and Feel
+**Status:** ✅ Completed  
+**Implementation Date:** 2025-12-04
+
+**Summary:**
+All requested updates to `/design/WEBUI.md` have been verified as already present in the documentation:
+
+1. ✅ **Global Music Controls section** - Material 3 design, touch-screen friendliness (min 48px targets), and conditional controls based on source capabilities (SupportsNext, SupportsPrevious, SupportsShuffle, SupportsRepeat) are documented.
+
+2. ✅ **Now Playing section** - Larger display, generic music icon when no track, dashes ("--") for artist/song when empty, and read-only (no touch interactions) are documented.
+
+3. ✅ **Playlist Queue section** - "Date Added" column explicitly marked as NOT needed, handles estimated song length, filename as title, empty albums, and drag-to-reorder support documented.
+
+4. ✅ **Radio Display section** - DSEG14Classic-Bold font for frequency (48px), DSEG14Classic-Regular for band display, orange or legacy green color options, and availability of all radio state components from IRadioControls are documented.
+
+5. ✅ **Radio Controls section** - "Set" button between up/down arrows, Set button opens keypad for frequency entry, long-press for scan behavior, Sub Band button changes frequency step, EQ button changes device EQ (not global), and Volume buttons change device volume (not global) are all documented.
+
 **Prompt for Copilot Agent:**
 ```
 Update /RTest/design/WEBUI.md to reflect the UI examples provided in the issue.
