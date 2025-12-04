@@ -260,8 +260,10 @@ public class FileBrowserTests : IDisposable
     {
       Directory.CreateDirectory(directory);
     }
-    // Create minimal MP3 file with ID3v2 header (simulated)
-    File.WriteAllBytes(fullPath, new byte[] { 0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00 });
+    // Create minimal MP3 file with ID3v2 header (simulated for testing)
+    // ID3v2 header format: "ID3" (3 bytes) + version (2 bytes) + flags (1 byte) + size (4 bytes)
+    var id3Header = new byte[] { 0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00 };
+    File.WriteAllBytes(fullPath, id3Header);
     return fullPath;
   }
 

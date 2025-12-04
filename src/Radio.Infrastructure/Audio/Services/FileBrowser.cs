@@ -185,6 +185,11 @@ public class FileBrowser : IFileBrowser
   /// <summary>
   /// Extracts metadata from an audio file using SoundFlow's SoundMetadataReader.
   /// </summary>
+  /// <remarks>
+  /// Uses Task.Run to offload CPU-bound metadata reading from the thread pool.
+  /// For production systems with high load, consider implementing a dedicated
+  /// thread pool or queueing system to prevent thread pool starvation.
+  /// </remarks>
   private async Task<(
     string? Title,
     string? Artist,
@@ -221,9 +226,9 @@ public class FileBrowser : IFileBrowser
           string.IsNullOrWhiteSpace(tags?.Artist) ? null : tags.Artist,
           string.IsNullOrWhiteSpace(tags?.Album) ? null : tags.Album,
           duration,
-          null, // SoundFlow SoundTags doesn't expose track number
-          null, // SoundFlow SoundTags doesn't expose genre
-          null // SoundFlow SoundTags doesn't expose year
+          null, // TODO: SoundFlow SoundTags doesn't currently expose track number - consider enhancement
+          null, // TODO: SoundFlow SoundTags doesn't currently expose genre - consider enhancement
+          null // TODO: SoundFlow SoundTags doesn't currently expose year - consider enhancement
         );
       }, cancellationToken);
     }

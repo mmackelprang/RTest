@@ -228,6 +228,11 @@ public class FilesController : ControllerBase
   /// <summary>
   /// Gets or activates the File Player audio source.
   /// </summary>
+  /// <remarks>
+  /// TODO: Implement automatic source switching via IAudioManager.SwitchSourceAsync
+  /// when the full AudioManager implementation is available (Phase 3).
+  /// Currently returns null if File Player is not the active source.
+  /// </remarks>
   private async Task<IPrimaryAudioSource?> GetOrActivateFilePlayerSourceAsync(
     CancellationToken cancellationToken)
   {
@@ -242,9 +247,8 @@ public class FilesController : ControllerBase
       return primarySource;
     }
 
-    // Note: Full source switching requires AudioManager.SwitchSourceAsync
-    // For now, if File Player is not active, we cannot activate it automatically
-    _logger.LogWarning("File Player source is not currently active. Source switching not yet fully implemented.");
+    // TODO: When IAudioManager.SwitchSourceAsync is available, activate File Player here
+    _logger.LogWarning("File Player source is not currently active. Automatic source switching requires Phase 3 completion.");
     return null;
   }
 
