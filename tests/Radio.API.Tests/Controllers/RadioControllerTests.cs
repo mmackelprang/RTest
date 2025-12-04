@@ -282,12 +282,12 @@ public class RadioControllerTests : IClassFixture<WebApplicationFactory<Program>
   [Fact]
   public async Task CreatePreset_WithValidData_ReturnsCreated()
   {
-    // Arrange
+    // Arrange - Use unique frequency to avoid collisions
     var request = new CreateRadioPresetRequest
     {
       Name = "Test Station",
       Band = "FM",
-      Frequency = 101.5
+      Frequency = 99.9 // Unique frequency for this test
     };
 
     // Act
@@ -299,18 +299,18 @@ public class RadioControllerTests : IClassFixture<WebApplicationFactory<Program>
     Assert.NotNull(preset);
     Assert.Equal("Test Station", preset.Name);
     Assert.Equal("FM", preset.Band);
-    Assert.Equal(101.5, preset.Frequency);
+    Assert.Equal(99.9, preset.Frequency);
     Assert.NotEmpty(preset.Id);
   }
 
   [Fact]
   public async Task CreatePreset_WithoutName_UsesDefaultName()
   {
-    // Arrange
+    // Arrange - Use unique frequency
     var request = new CreateRadioPresetRequest
     {
       Band = "AM",
-      Frequency = 1010
+      Frequency = 950 // Unique frequency for this test
     };
 
     // Act
@@ -320,9 +320,9 @@ public class RadioControllerTests : IClassFixture<WebApplicationFactory<Program>
     Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     var preset = await response.Content.ReadFromJsonAsync<RadioPresetDto>();
     Assert.NotNull(preset);
-    Assert.Equal("AM - 1010", preset.Name);
+    Assert.Equal("AM - 950", preset.Name);
     Assert.Equal("AM", preset.Band);
-    Assert.Equal(1010, preset.Frequency);
+    Assert.Equal(950, preset.Frequency);
   }
 
   [Fact]
