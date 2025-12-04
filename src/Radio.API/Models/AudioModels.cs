@@ -79,6 +79,31 @@ public class PlaybackStateDto
   /// Gets or sets the current repeat mode (Off, One, All).
   /// </summary>
   public string? RepeatMode { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether the source can start playback.
+  /// </summary>
+  public bool CanPlay { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether the source can pause playback.
+  /// </summary>
+  public bool CanPause { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether the source can stop playback.
+  /// </summary>
+  public bool CanStop { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether the source can seek to a position.
+  /// </summary>
+  public bool CanSeek { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether the source supports queue management.
+  /// </summary>
+  public bool CanQueue { get; set; }
 }
 
 /// <summary>
@@ -178,6 +203,27 @@ public class AudioSourceDto
   /// Values are typed objects (e.g., TimeSpan for Duration, int for TrackNumber).
   /// </summary>
   public Dictionary<string, object>? Metadata { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether this source is a radio tuner.
+  /// </summary>
+  public bool IsRadio { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether this source is a streaming source (e.g., Spotify, internet radio).
+  /// </summary>
+  public bool IsStreaming { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether this source has a playback queue.
+  /// </summary>
+  public bool HasQueue { get; set; }
+
+  /// <summary>
+  /// Gets or sets a dictionary of additional capabilities for this source.
+  /// Keys are capability names (e.g., "SupportsNext", "SupportsEqualizer") and values indicate whether supported.
+  /// </summary>
+  public Dictionary<string, bool>? Capabilities { get; set; }
 }
 
 /// <summary>

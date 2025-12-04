@@ -318,4 +318,32 @@ public class AudioControllerTests : IClassFixture<WebApplicationFactory<Program>
     Assert.NotNull(nowPlaying.Album);
     Assert.NotNull(nowPlaying.AlbumArtUrl);
   }
+
+  [Fact]
+  public async Task GetPlaybackState_IncludesNewUICapabilityHints()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/audio");
+
+    // Assert
+    Assert.True(response.IsSuccessStatusCode, $"Expected success, got {response.StatusCode}");
+
+    var state = await response.Content.ReadFromJsonAsync<PlaybackStateDto>();
+    Assert.NotNull(state);
+
+    // Verify new UI capability hint properties are present
+    // When no source is active, these should be false
+    Assert.False(state.CanPlay);
+    Assert.False(state.CanPause);
+    Assert.False(state.CanStop);
+    Assert.False(state.CanSeek);
+    Assert.False(state.CanQueue);
+    
+    // These were already tested in GetPlaybackState_IncludesNavigationCapabilities
+    // but verify they still exist
+    Assert.False(state.CanNext);
+    Assert.False(state.CanPrevious);
+    Assert.False(state.CanShuffle);
+    Assert.False(state.CanRepeat);
+  }
 }

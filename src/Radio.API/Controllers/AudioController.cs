@@ -66,10 +66,21 @@ public class AudioController : ControllerBase
         {
           state.Position = primary.Position;
           state.Duration = primary.Duration;
+          
+          // Playback control capabilities
+          state.CanPlay = true; // All primary sources can play
+          state.CanPause = true; // All primary sources can pause
+          state.CanStop = true; // All primary sources can stop
+          state.CanSeek = primary.IsSeekable;
+          
+          // Navigation and queue capabilities
           state.CanNext = primary.SupportsNext;
           state.CanPrevious = primary.SupportsPrevious;
           state.CanShuffle = primary.SupportsShuffle;
           state.CanRepeat = primary.SupportsRepeat;
+          state.CanQueue = primary.SupportsQueue;
+          
+          // Current state
           state.IsShuffleEnabled = primary.IsShuffleEnabled;
           state.RepeatMode = primary.RepeatMode.ToString();
         }
@@ -549,13 +560,45 @@ public class AudioController : ControllerBase
       Type = source.Type.ToString(),
       Category = source.Category.ToString(),
       State = source.State.ToString(),
-      Volume = source.Volume
+      Volume = source.Volume,
+      
+      // Determine source characteristics based on type
+      IsRadio = source.Type == AudioSourceType.Radio,
+      IsStreaming = source.Type == AudioSourceType.Spotify, // Spotify is the only guaranteed streaming source
+      
+      // Build capabilities dictionary
+      Capabilities = new Dictionary<string, bool>()
     };
 
     if (source is IPrimaryAudioSource primary)
     {
       dto.IsSeekable = primary.IsSeekable;
       dto.Metadata = primary.Metadata.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+      
+      // Check if source implements IPlayQueue interface
+      dto.HasQueue = source is IPlayQueue;
+      
+      // Add primary source capabilities to dictionary
+      dto.Capabilities["SupportsPlay"] = true; // All primary sources support play
+      dto.Capabilities["SupportsPause"] = true; // All primary sources support pause
+      dto.Capabilities["SupportsStop"] = true; // All primary sources support stop
+      dto.Capabilities["SupportsSeek"] = primary.IsSeekable;
+      dto.Capabilities["SupportsNext"] = primary.SupportsNext;
+      dto.Capabilities["SupportsPrevious"] = primary.SupportsPrevious;
+      dto.Capabilities["SupportsShuffle"] = primary.SupportsShuffle;
+      dto.Capabilities["SupportsRepeat"] = primary.SupportsRepeat;
+      dto.Capabilities["SupportsQueue"] = primary.SupportsQueue;
+    }
+    
+    // Add radio-specific capabilities if source implements IRadioControls
+    // All sources implementing IRadioControls support these core radio features by design
+    if (source is IRadioControls)
+    {
+      dto.Capabilities["SupportsRadioControls"] = true;
+      dto.Capabilities["SupportsFrequencyTuning"] = true; // Required by IRadioControls
+      dto.Capabilities["SupportsScanning"] = true; // Required by IRadioControls
+      dto.Capabilities["SupportsEqualizer"] = true; // Required by IRadioControls
+      dto.Capabilities["SupportsDeviceVolume"] = true; // Required by IRadioControls
     }
 
     return dto;
