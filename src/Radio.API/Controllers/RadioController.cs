@@ -433,7 +433,7 @@ public class RadioController : ControllerBase
   /// <response code="201">Returns the created preset.</response>
   /// <response code="400">If the preset already exists or validation fails.</response>
   /// <response code="409">If a preset with the same band/frequency already exists.</response>
-  /// <response code="507">If the maximum number of presets (50) has been reached.</response>
+  /// <response code="507">If the maximum number of presets has been reached.</response>
   [HttpPost("presets")]
   [ProducesResponseType(typeof(RadioPresetDto), StatusCodes.Status201Created)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]

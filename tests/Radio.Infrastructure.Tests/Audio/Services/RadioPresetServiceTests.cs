@@ -117,17 +117,17 @@ public class RadioPresetServiceTests
   public async Task AddPresetAsync_ThrowsWhenMaxPresetsReached()
   {
     // Arrange
+    var service = CreateService();
+
     _repositoryMock
       .Setup(r => r.GetCountAsync(It.IsAny<CancellationToken>()))
-      .ReturnsAsync(50);
-
-    var service = CreateService();
+      .ReturnsAsync(service.MaxPresets);
 
     // Act & Assert
     var exception = await Assert.ThrowsAsync<InvalidOperationException>(
       () => service.AddPresetAsync(null, RadioBand.FM, 101.5));
 
-    Assert.Contains("Maximum of 50 presets reached", exception.Message);
+    Assert.Contains($"Maximum of {service.MaxPresets} presets reached", exception.Message);
     _repositoryMock.Verify(r => r.AddAsync(It.IsAny<RadioPreset>(), It.IsAny<CancellationToken>()), Times.Never);
   }
 
