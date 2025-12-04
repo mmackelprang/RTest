@@ -24,6 +24,8 @@ public sealed class MetricsOptions
 
   /// <summary>
   /// SQLite database path for metrics storage.
+  /// DEPRECATED: Use DatabaseOptions.GetMetricsDatabasePath() instead for new deployments.
+  /// This is maintained for backward compatibility.
   /// Default: ./data/metrics.db
   /// </summary>
   public string DatabasePath { get; set; } = "./data/metrics.db";

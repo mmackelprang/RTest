@@ -3,6 +3,7 @@ namespace Radio.Infrastructure.Configuration.Stores;
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Radio.Core.Configuration;
 using Radio.Infrastructure.Configuration.Abstractions;
 using Radio.Infrastructure.Configuration.Models;
 
@@ -14,6 +15,7 @@ public sealed class ConfigurationStoreFactory : IConfigurationStoreFactory
   private readonly ConfigurationOptions _options;
   private readonly ISecretsProvider _secretsProvider;
   private readonly ILoggerFactory _loggerFactory;
+  private readonly DatabasePathResolver? _pathResolver;
   private readonly ConcurrentDictionary<string, IConfigurationStore> _storeCache = new();
 
   /// <summary>
@@ -22,7 +24,8 @@ public sealed class ConfigurationStoreFactory : IConfigurationStoreFactory
   public ConfigurationStoreFactory(
     IOptions<ConfigurationOptions> options,
     ISecretsProvider secretsProvider,
-    ILoggerFactory loggerFactory)
+    ILoggerFactory loggerFactory,
+    DatabasePathResolver? pathResolver = null)
   {
     ArgumentNullException.ThrowIfNull(options);
     ArgumentNullException.ThrowIfNull(secretsProvider);
@@ -31,6 +34,7 @@ public sealed class ConfigurationStoreFactory : IConfigurationStoreFactory
     _options = options.Value;
     _secretsProvider = secretsProvider;
     _loggerFactory = loggerFactory;
+    _pathResolver = pathResolver;
   }
 
   /// <inheritdoc/>
@@ -122,8 +126,17 @@ public sealed class ConfigurationStoreFactory : IConfigurationStoreFactory
 
   private SqliteConfigurationStore CreateSqliteStore(string storeId)
   {
-    var basePath = Path.GetFullPath(_options.BasePath);
-    var dbPath = Path.Combine(basePath, _options.SqliteFileName);
+    string dbPath;
+    if (_pathResolver != null)
+    {
+      dbPath = _pathResolver.GetConfigurationDatabasePath(_options.BasePath, _options.SqliteFileName);
+    }
+    else
+    {
+      var basePath = Path.GetFullPath(_options.BasePath);
+      dbPath = Path.Combine(basePath, _options.SqliteFileName);
+    }
+    
     var connectionString = $"Data Source={dbPath}";
 
     return new SqliteConfigurationStore(

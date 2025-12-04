@@ -14,16 +14,21 @@ public sealed class MetricsDbContext : IAsyncDisposable
 {
   private readonly ILogger<MetricsDbContext> _logger;
   private readonly MetricsOptions _options;
+  private readonly DatabasePathResolver? _pathResolver;
   private readonly SemaphoreSlim _initLock = new(1, 1);
   private readonly ConcurrentDictionary<string, int> _metricDefinitionCache = new();
   
   private SqliteConnection? _connection;
   private bool _isInitialized;
 
-  public MetricsDbContext(ILogger<MetricsDbContext> logger, IOptions<MetricsOptions> options)
+  public MetricsDbContext(
+    ILogger<MetricsDbContext> logger, 
+    IOptions<MetricsOptions> options,
+    DatabasePathResolver? pathResolver = null)
   {
     _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+    _pathResolver = pathResolver;
   }
 
   /// <summary>
@@ -45,7 +50,8 @@ public sealed class MetricsDbContext : IAsyncDisposable
       }
 
       // Ensure the directory exists
-      var dbPath = Path.GetFullPath(_options.DatabasePath);
+      var dbPath = _pathResolver?.GetMetricsDatabasePath(_options.DatabasePath) 
+        ?? Path.GetFullPath(_options.DatabasePath);
       var directory = Path.GetDirectoryName(dbPath);
       if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
       {
