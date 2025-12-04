@@ -17,7 +17,8 @@ The tool will be implemented as a .NET console application that grows incrementa
 5. [Phase 5: Ducking & Priority System Testing](#phase-5-ducking--priority-system-testing)
 6. [Phase 6: Audio Outputs Testing](#phase-6-audio-outputs-testing)
 7. [Phase 7: Visualization & Monitoring Testing](#phase-7-visualization--monitoring-testing)
-8. [Development Prompts](#development-prompts)
+8. [Phase 10: Database Backup & Restore Testing](#phase-10-database-backup--restore-testing)
+9. [Development Prompts](#development-prompts)
 
 ---
 
@@ -29,6 +30,7 @@ tools/
     ├── Radio.Tools.AudioUAT.csproj
     ├── Program.cs
     ├── TestRunner.cs
+    ├── appsettings.json           (includes Database configuration)
     ├── TestResults/
     │   └── TestResultsManager.cs
     ├── Phases/
@@ -40,8 +42,16 @@ tools/
     │   │   └── EventAudioSourceTests.cs
     │   ├── Phase5/
     │   │   └── DuckingPriorityTests.cs
-    │   └── Phase6/
-    │       └── AudioOutputTests.cs
+    │   ├── Phase6/
+    │   │   └── AudioOutputTests.cs
+    │   ├── Phase7/
+    │   │   └── VisualizationTests.cs
+    │   ├── Phase8/
+    │   │   └── ApiSignalRTests.cs
+    │   ├── Phase9/
+    │   │   └── FingerprintingTests.cs
+    │   └── Phase10/
+    │       └── BackupRestoreTests.cs  (NEW)
     ├── Utilities/
     │   ├── AudioTestHelpers.cs
     │   ├── ConsoleUI.cs
@@ -1521,3 +1531,180 @@ Before running Phase 9 tests, ensure the following configuration is set in `apps
 | 1.3 | 2025-11-26 | GitHub Copilot | Phase 6 Audio Outputs tests implemented |
 | 1.4 | 2025-12-02 | GitHub Copilot | Phase 7 Visualization & Monitoring tests implemented |
 | 1.5 | 2025-12-02 | GitHub Copilot | Phase 9 Audio Fingerprinting & Song Detection tests implemented |
+
+---
+
+## Phase 10: Database Backup & Restore Testing
+
+**Objective:** Validate unified database backup and restore functionality across all SQLite databases (configuration, metrics, fingerprinting).
+
+### Configuration Requirements
+
+Before running Phase 10 tests, ensure your `appsettings.json` includes the unified database configuration:
+
+```json
+{
+  "Database": {
+    "RootPath": "./data",
+    "ConfigurationSubdirectory": "config",
+    "ConfigurationFileName": "configuration.db",
+    "MetricsSubdirectory": "metrics",
+    "MetricsFileName": "metrics.db",
+    "FingerprintingSubdirectory": "fingerprints",
+    "FingerprintingFileName": "fingerprints.db",
+    "BackupSubdirectory": "backups",
+    "BackupRetentionDays": 30
+  },
+  "ManagedConfiguration": {
+    "DefaultStoreType": "Sqlite",
+    "BasePath": "./config",
+    "SqliteFileName": "configuration.db",
+    "AutoSave": true
+  },
+  "Metrics": {
+    "Enabled": true,
+    "DatabasePath": "./data/metrics.db"
+  },
+  "Fingerprinting": {
+    "Enabled": true,
+    "DatabasePath": "./data/fingerprints.db"
+  }
+}
+```
+
+### Test Cases
+
+| ID | Test Case | Description | Expected Result |
+|----|-----------|-------------|-----------------|
+| P10-001 | Database Path Resolution | Verify all database paths resolve correctly | All paths use unified root directory |
+| P10-002 | Create Full Backup | Create backup of all databases | Single archive with configuration, metrics, and fingerprinting databases |
+| P10-003 | Restore from Backup | Restore databases from backup archive | All databases restored and data verified |
+| P10-004 | Backup Cleanup | Test automatic cleanup of old backups | Old backups deleted based on retention policy |
+
+### Interactive Test Menu
+
+```
+═══════════════════════════════════════════════════════════════
+          PHASE 10: DATABASE BACKUP & RESTORE TESTS
+═══════════════════════════════════════════════════════════════
+
+  [1] Database Path Resolution
+  [2] Create Full Backup
+  [3] Restore from Backup
+  [4] Backup Cleanup
+  [5] Run All Phase 10 Tests
+  
+  [R] View Test Results
+  [M] Return to Main Menu
+  [Q] Quit
+```
+
+### Running Phase 10 Tests
+
+**Automated Mode:**
+```bash
+# Run all Phase 10 tests
+dotnet run -- --phase 10
+
+# Run specific test
+dotnet run -- --test P10-001
+```
+
+**Interactive Mode:**
+```bash
+# Start interactive mode
+dotnet run
+
+# Navigate to: Phase 10: Database Backup & Restore Tests
+```
+
+### Test Details
+
+#### P10-001: Database Path Resolution
+- **Purpose**: Verify DatabasePathResolver correctly resolves paths for all databases
+- **Validates**: 
+  - All paths use configured root directory
+  - Configuration, metrics, and fingerprinting paths are consistent
+  - Backup directory is correctly configured
+- **Output**: Table showing resolved paths for all databases
+
+#### P10-002: Create Full Backup
+- **Purpose**: Test unified backup creation across all databases
+- **Pre-conditions**: Initializes test data in all three databases
+- **Validates**:
+  - Backup archive created successfully
+  - All database files included in backup
+  - Manifest and README included
+  - File size is reasonable
+- **Output**: Backup metadata including ID, size, and included databases
+
+#### P10-003: Restore from Backup
+- **Purpose**: Verify backup restore functionality
+- **Process**:
+  1. Finds most recent backup
+  2. Restores all databases with overwrite
+  3. Verifies restored data integrity
+- **Validates**:
+  - All databases restored successfully
+  - Data integrity maintained
+  - Application can access restored databases
+- **Output**: Restore confirmation and verification results
+
+#### P10-004: Backup Cleanup
+- **Purpose**: Test automatic cleanup of old backups
+- **Validates**:
+  - Cleanup respects retention policy (BackupRetentionDays)
+  - Old backups are deleted
+  - Recent backups are preserved
+- **Output**: Count of deleted backups
+
+### Backup File Format
+
+Backups are stored as `.dbbackup` files (ZIP format) with the naming pattern:
+```
+unified_YYYYMMDD_HHMMSS_XXXXXX.dbbackup
+```
+
+Example: `unified_20231204_143022_a1b2c3.dbbackup`
+
+**Archive Contents:**
+```
+unified_20231204_143022_a1b2c3.dbbackup
+├── databases/
+│   ├── configuration.db
+│   ├── metrics.db
+│   └── fingerprints.db
+├── manifest.json
+└── README.txt
+```
+
+### Expected Results
+
+**Successful Test Run:**
+- ✅ P10-001: All paths resolve under unified root directory
+- ✅ P10-002: Backup created with all 3 databases (typically 100-500 KB)
+- ✅ P10-003: Databases restored and test data verified
+- ✅ P10-004: Old backups cleaned up per retention policy
+
+### Troubleshooting
+
+**Issue**: Database path resolution fails
+- **Solution**: Verify `Database.RootPath` is set in appsettings.json
+
+**Issue**: Backup creation fails
+- **Solution**: Ensure backup directory is writable and has sufficient disk space
+
+**Issue**: Restore fails with "file in use" error
+- **Solution**: Stop any running Radio Console instances accessing the databases
+
+**Issue**: No backups found for cleanup test
+- **Solution**: Run P10-002 first to create a backup
+
+### Notes
+
+- Phase 10 tests create real database files in `./data/` directory
+- Backups are retained in `./data/backups/` for manual inspection
+- Tests use SQLite for secrets provider to test full configuration database
+- Backup archives include encrypted secrets (encrypted at rest)
+- For production use, store backups in secure, off-site location
+

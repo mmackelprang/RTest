@@ -19,6 +19,7 @@ using Radio.Tools.AudioUAT.Phases.Phase6;
 using Radio.Tools.AudioUAT.Phases.Phase7;
 using Radio.Tools.AudioUAT.Phases.Phase8;
 using Radio.Tools.AudioUAT.Phases.Phase9;
+using Radio.Tools.AudioUAT.Phases.Phase10;
 using Radio.Tools.AudioUAT.Results;
 using Radio.Tools.AudioUAT.Utilities;
 using Spectre.Console;
@@ -84,6 +85,10 @@ var host = Host.CreateDefaultBuilder(args)
     // Register Fingerprinting services for Phase 9
     services.AddFingerprinting(configuration);
 
+    // Register Configuration and Metrics services for Phase 10 (Backup/Restore)
+    services.AddManagedConfiguration(configuration, useSqliteSecrets: true);
+    services.AddMetrics(configuration);
+
     // Register UAT services
     services.AddSingleton<TestResultsManager>();
     services.AddSingleton<TestRunner>();
@@ -95,6 +100,7 @@ var host = Host.CreateDefaultBuilder(args)
     services.AddSingleton<VisualizationTests>();
     services.AddSingleton<ApiSignalRTests>();
     services.AddSingleton<FingerprintingTests>();
+    services.AddSingleton<BackupRestoreTests>();
   })
   .Build();
 
@@ -142,6 +148,7 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
   var phase7Tests = services.GetRequiredService<VisualizationTests>();
   var phase8Tests = services.GetRequiredService<ApiSignalRTests>();
   var phase9Tests = services.GetRequiredService<FingerprintingTests>();
+  var phase10Tests = services.GetRequiredService<BackupRestoreTests>();
 
   var testsToRun = new List<IPhaseTest>();
 
@@ -184,6 +191,10 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
     {
       testsToRun.AddRange(phase9Tests.GetAllTests());
     }
+    if (runAll || phaseStr == "10")
+    {
+      testsToRun.AddRange(phase10Tests.GetAllTests());
+    }
   }
   else if (args.Contains("--test"))
   {
@@ -199,6 +210,7 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
         .Concat(phase7Tests.GetAllTests())
         .Concat(phase8Tests.GetAllTests())
         .Concat(phase9Tests.GetAllTests())
+        .Concat(phase10Tests.GetAllTests())
         .ToList();
       var test = allTests.FirstOrDefault(t => t.TestId == testId);
       if (test != null)
@@ -260,6 +272,7 @@ static async Task RunInteractiveMode(IServiceProvider services)
   var phase7Tests = services.GetRequiredService<VisualizationTests>();
   var phase8Tests = services.GetRequiredService<ApiSignalRTests>();
   var phase9Tests = services.GetRequiredService<FingerprintingTests>();
+  var phase10Tests = services.GetRequiredService<BackupRestoreTests>();
 
   ConsoleUI.WriteWelcomeBanner();
 
@@ -289,6 +302,7 @@ static async Task RunInteractiveMode(IServiceProvider services)
       "Phase 7: Visualization & Monitoring Tests",
       "Phase 8: API & SignalR Tests",
       "Phase 9: Audio Fingerprinting Tests",
+      "Phase 10: Database Backup & Restore Tests",
       "View Test Results",
       "Export Results to JSON",
       "Clear Results",
@@ -327,6 +341,10 @@ static async Task RunInteractiveMode(IServiceProvider services)
 
       case "Phase 9: Audio Fingerprinting Tests":
         await RunPhase9Menu(services, runner, phase9Tests);
+        break;
+
+      case "Phase 10: Database Backup & Restore Tests":
+        await RunPhase10Menu(services, runner, phase10Tests);
         break;
 
       case "View Test Results":
@@ -1386,6 +1404,104 @@ static async Task RunPhase9Menu(IServiceProvider services, TestRunner runner, Fi
     else
     {
       // Extract test ID from choice
+      var testIdMatch = System.Text.RegularExpressions.Regex.Match(choice, @"\[([^\]]+)\]");
+      if (testIdMatch.Success)
+      {
+        var testId = testIdMatch.Groups[1].Value;
+        var test = allTests.FirstOrDefault(t => t.TestId == testId);
+        if (test != null)
+        {
+          AnsiConsole.Clear();
+          var result = await runner.RunTestAsync(test);
+
+          AnsiConsole.WriteLine();
+          if (result.Passed)
+          {
+            ConsoleUI.WriteSuccess($"Test {test.TestId} PASSED");
+          }
+          else if (result.Skipped)
+          {
+            ConsoleUI.WriteWarning($"Test {test.TestId} SKIPPED: {result.Message}");
+          }
+          else
+          {
+            ConsoleUI.WriteError($"Test {test.TestId} FAILED: {result.Message}");
+          }
+
+          ConsoleUI.PressAnyKeyToContinue();
+        }
+      }
+    }
+  }
+}
+
+static async Task RunPhase10Menu(IServiceProvider services, TestRunner runner, BackupRestoreTests tests)
+{
+  var exit = false;
+  while (!exit)
+  {
+    AnsiConsole.Clear();
+
+    var rule = new Rule("[cyan]Phase 10: Database Backup & Restore Tests[/]")
+    {
+      Justification = Justify.Center
+    };
+    AnsiConsole.Write(rule);
+    AnsiConsole.WriteLine();
+
+    var allTests = tests.GetAllTests();
+    var menuItems = new List<string>
+    {
+      "Run All Phase 10 Tests",
+      "---",
+    };
+
+    foreach (var test in allTests)
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("Return to Main Menu");
+
+    var choice = ConsoleUI.ShowMenu("[bold]Select Test[/]", menuItems.ToArray());
+
+    if (choice == "Return to Main Menu")
+    {
+      exit = true;
+      continue;
+    }
+
+    if (choice.StartsWith("---"))
+    {
+      continue;
+    }
+
+    if (choice == "Run All Phase 10 Tests")
+    {
+      AnsiConsole.Clear();
+      ConsoleUI.WriteHeader("Running All Phase 10 Tests");
+
+      await AnsiConsole.Progress()
+        .StartAsync(async ctx =>
+        {
+          var task = ctx.AddTask("Running tests...", maxValue: allTests.Count);
+
+          foreach (var test in allTests)
+          {
+            task.Description = $"Running {test.TestId}...";
+            await runner.RunTestAsync(test);
+            task.Increment(1);
+          }
+        });
+
+      var resultsManager = services.GetRequiredService<TestResultsManager>();
+      ConsoleUI.DisplayTestResults(resultsManager.GetResultsForPhase(10));
+      ConsoleUI.DisplaySummary(resultsManager.GetSummaryForPhase(10));
+      ConsoleUI.PressAnyKeyToContinue();
+    }
+    else
+    {
       var testIdMatch = System.Text.RegularExpressions.Regex.Match(choice, @"\[([^\]]+)\]");
       if (testIdMatch.Success)
       {
