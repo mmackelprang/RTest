@@ -194,7 +194,9 @@ public class AudioStateUpdateService : BackgroundService
     {
       Volume = _audioManager.MasterVolume,
       IsMuted = _audioManager.IsMuted,
-      Balance = 0.0f // TODO: Get balance from audio manager if available
+      // Note: Balance is not currently tracked by IAudioManager
+      // This will be implemented when balance control is added to the audio engine
+      Balance = 0.0f
     };
 
     if (HasVolumeChanged(_lastVolume, currentVolume))
@@ -295,7 +297,8 @@ public class AudioStateUpdateService : BackgroundService
       IsPaused = activeSource?.State == AudioSourceState.Paused,
       Volume = _audioManager?.MasterVolume ?? 0.0f,
       IsMuted = _audioManager?.IsMuted ?? false,
-      Balance = 0.0f, // TODO: Get from audio manager
+      // Note: Balance is not currently tracked by IAudioManager
+      Balance = 0.0f,
       Position = activeSource is IPrimaryAudioSource primary ? primary.Position : null,
       Duration = activeSource is IPrimaryAudioSource primaryDur ? primaryDur.Duration : null,
       ActiveSource = activeSource != null ? MapToAudioSourceDto(activeSource) : null
@@ -362,7 +365,7 @@ public class AudioStateUpdateService : BackgroundService
       Category = source.Category.ToString(),
       State = source.State.ToString(),
       Volume = source.Volume,
-      Metadata = source is IPrimaryAudioSource primary
+      Metadata = source is IPrimaryAudioSource primary && primary.Metadata != null
         ? primary.Metadata.ToDictionary(kvp => kvp.Key, kvp => kvp.Value)
         : new Dictionary<string, object>()
     };
