@@ -282,47 +282,65 @@ public class RadioControllerTests : IClassFixture<WebApplicationFactory<Program>
   [Fact]
   public async Task CreatePreset_WithValidData_ReturnsCreated()
   {
-    // Arrange - Use unique frequency to avoid collisions
+    // Arrange - Use very unique frequency to avoid collisions
+    var uniqueFreq = 88.1 + (DateTime.Now.Millisecond % 10) * 0.1; // Range: 88.1-88.9
     var request = new CreateRadioPresetRequest
     {
       Name = "Test Station",
       Band = "FM",
-      Frequency = 99.9 // Unique frequency for this test
+      Frequency = uniqueFreq
     };
 
     // Act
     var response = await _client.PostAsJsonAsync("/api/radio/presets", request);
 
     // Assert
+    if (response.StatusCode == HttpStatusCode.Conflict)
+    {
+      // If we got a conflict, try one more time with a different frequency
+      uniqueFreq += 10.0;
+      request = request with { Frequency = uniqueFreq };
+      response = await _client.PostAsJsonAsync("/api/radio/presets", request);
+    }
+
     Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     var preset = await response.Content.ReadFromJsonAsync<RadioPresetDto>();
     Assert.NotNull(preset);
     Assert.Equal("Test Station", preset.Name);
     Assert.Equal("FM", preset.Band);
-    Assert.Equal(99.9, preset.Frequency);
+    Assert.Equal(uniqueFreq, preset.Frequency);
     Assert.NotEmpty(preset.Id);
   }
 
   [Fact]
   public async Task CreatePreset_WithoutName_UsesDefaultName()
   {
-    // Arrange - Use unique frequency
+    // Arrange - Use very unique frequency
+    var uniqueFreq = 700 + (DateTime.Now.Millisecond % 100); // Range: 700-799 kHz
     var request = new CreateRadioPresetRequest
     {
       Band = "AM",
-      Frequency = 950 // Unique frequency for this test
+      Frequency = uniqueFreq
     };
 
     // Act
     var response = await _client.PostAsJsonAsync("/api/radio/presets", request);
 
     // Assert
+    if (response.StatusCode == HttpStatusCode.Conflict)
+    {
+      // If we got a conflict, try one more time with a different frequency
+      uniqueFreq += 100;
+      request = request with { Frequency = uniqueFreq };
+      response = await _client.PostAsJsonAsync("/api/radio/presets", request);
+    }
+
     Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     var preset = await response.Content.ReadFromJsonAsync<RadioPresetDto>();
     Assert.NotNull(preset);
-    Assert.Equal("AM - 950", preset.Name);
+    Assert.Equal($"AM - {uniqueFreq}", preset.Name);
     Assert.Equal("AM", preset.Band);
-    Assert.Equal(950, preset.Frequency);
+    Assert.Equal(uniqueFreq, preset.Frequency);
   }
 
   [Fact]
