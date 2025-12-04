@@ -29,7 +29,9 @@ public sealed class FingerprintingOptions
   /// <summary>MusicBrainz API configuration.</summary>
   public MusicBrainzOptions MusicBrainz { get; set; } = new();
 
-  /// <summary>SQLite database path for fingerprint cache.</summary>
+  /// <summary>
+  /// SQLite database path for fingerprint cache.
+  /// </summary>
   public string DatabasePath { get; set; } = "./data/fingerprints.db";
 }
 

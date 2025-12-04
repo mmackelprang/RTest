@@ -17,13 +17,15 @@ public class SqliteMetricsRepositoryTests : IAsyncLifetime
   public SqliteMetricsRepositoryTests()
   {
     _testDbPath = Path.Combine(Path.GetTempPath(), $"test_metrics_repo_{Guid.NewGuid()}.db");
-    var options = Options.Create(new MetricsOptions
+    var databaseOptions = Options.Create(new DatabaseOptions
     {
-      DatabasePath = _testDbPath,
-      Enabled = true
+      RootPath = Path.GetDirectoryName(_testDbPath)!,
+      MetricsSubdirectory = "",
+      MetricsFileName = Path.GetFileName(_testDbPath)
     });
+    var pathResolver = new DatabasePathResolver(databaseOptions);
 
-    _dbContext = new MetricsDbContext(NullLogger<MetricsDbContext>.Instance, options);
+    _dbContext = new MetricsDbContext(NullLogger<MetricsDbContext>.Instance, pathResolver);
     _repository = new SqliteMetricsRepository(
       NullLogger<SqliteMetricsRepository>.Instance,
       _dbContext);

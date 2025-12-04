@@ -11,7 +11,7 @@ namespace Radio.Infrastructure.Audio.Fingerprinting.Data;
 public sealed class FingerprintDbContext : IAsyncDisposable
 {
   private readonly ILogger<FingerprintDbContext> _logger;
-  private readonly FingerprintingOptions _options;
+  private readonly DatabasePathResolver _pathResolver;
   private readonly SemaphoreSlim _initLock = new(1, 1);
   private SqliteConnection? _connection;
   private bool _initialized;
@@ -21,13 +21,13 @@ public sealed class FingerprintDbContext : IAsyncDisposable
   /// Initializes a new instance of the <see cref="FingerprintDbContext"/> class.
   /// </summary>
   /// <param name="logger">The logger instance.</param>
-  /// <param name="options">The fingerprinting options.</param>
+  /// <param name="pathResolver">Database path resolver for unified path management.</param>
   public FingerprintDbContext(
     ILogger<FingerprintDbContext> logger,
-    IOptions<FingerprintingOptions> options)
+    DatabasePathResolver pathResolver)
   {
     _logger = logger;
-    _options = options.Value;
+    _pathResolver = pathResolver ?? throw new ArgumentNullException(nameof(pathResolver));
   }
 
   /// <summary>
@@ -43,7 +43,7 @@ public sealed class FingerprintDbContext : IAsyncDisposable
     {
       if (_initialized) return;
 
-      var dbPath = _options.DatabasePath;
+      var dbPath = _pathResolver.GetFingerprintingDatabasePath();
       var directory = Path.GetDirectoryName(dbPath);
       if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
       {

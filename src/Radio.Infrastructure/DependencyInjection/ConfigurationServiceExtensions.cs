@@ -3,6 +3,7 @@ namespace Radio.Infrastructure.DependencyInjection;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Radio.Core.Configuration;
 using Radio.Infrastructure.Configuration.Abstractions;
 using Radio.Infrastructure.Configuration.Backup;
 using Radio.Infrastructure.Configuration.Models;
@@ -30,6 +31,13 @@ public static class ConfigurationServiceExtensions
     IConfiguration configuration,
     bool useSqliteSecrets = false)
   {
+    // Bind unified database options
+    services.Configure<DatabaseOptions>(
+      configuration.GetSection(DatabaseOptions.SectionName));
+
+    // Register database path resolver
+    services.AddSingleton<DatabasePathResolver>();
+
     // Bind configuration options
     services.Configure<ConfigurationOptions>(
       configuration.GetSection(ConfigurationOptions.SectionName));
@@ -47,8 +55,9 @@ public static class ConfigurationServiceExtensions
     // Register store factory
     services.AddSingleton<IConfigurationStoreFactory, ConfigurationStoreFactory>();
 
-    // Register backup service
+    // Register backup services
     services.AddSingleton<IConfigurationBackupService, ConfigurationBackupService>();
+    services.AddSingleton<IUnifiedDatabaseBackupService, UnifiedDatabaseBackupService>();
 
     // Register configuration manager
     services.AddSingleton<IRadioConfigurationManager, RadioConfigurationManager>();

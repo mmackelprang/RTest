@@ -36,12 +36,23 @@ public class ConfigurationBackupTests : IDisposable
 
     var optionsMock = Options.Create(_options);
     var dataProtection = DataProtectionProvider.Create("TestApp");
+    
+    var databaseOptions = Options.Create(new Radio.Core.Configuration.DatabaseOptions
+    {
+      RootPath = _testDirectory,
+      ConfigurationSubdirectory = "",
+      ConfigurationFileName = "config.db",
+      BackupSubdirectory = "backups"
+    });
+    var pathResolver = new Radio.Core.Configuration.DatabasePathResolver(databaseOptions);
+    
     var secretsProvider = new JsonSecretsProvider(optionsMock, dataProtection, NullLogger<JsonSecretsProvider>.Instance);
 
     _storeFactory = new ConfigurationStoreFactory(
       optionsMock,
       secretsProvider,
-      NullLoggerFactory.Instance);
+      NullLoggerFactory.Instance,
+      pathResolver);
 
     _backupService = new ConfigurationBackupService(
       optionsMock,

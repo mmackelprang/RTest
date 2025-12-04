@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Radio.Core.Configuration;
 using Radio.Infrastructure.Configuration.Models;
 
 /// <summary>
@@ -15,6 +16,7 @@ public sealed class SqliteSecretsProvider : SecretsProviderBase, IAsyncDisposabl
 
   private readonly string _connectionString;
   private readonly ILogger<SqliteSecretsProvider> _logger;
+  private readonly DatabasePathResolver _pathResolver;
   private readonly SemaphoreSlim _lock = new(1, 1);
 
   private SqliteConnection? _connection;
@@ -25,19 +27,18 @@ public sealed class SqliteSecretsProvider : SecretsProviderBase, IAsyncDisposabl
   /// Initializes a new instance of the SqliteSecretsProvider class.
   /// </summary>
   public SqliteSecretsProvider(
-    IOptions<ConfigurationOptions> options,
+    DatabasePathResolver pathResolver,
     IDataProtectionProvider dataProtection,
     ILogger<SqliteSecretsProvider> logger)
     : base(dataProtection, logger)
   {
-    ArgumentNullException.ThrowIfNull(options);
+    ArgumentNullException.ThrowIfNull(pathResolver);
 
-    var opts = options.Value;
-    var basePath = Path.GetFullPath(opts.BasePath);
-    var dbPath = Path.Combine(basePath, opts.SqliteFileName);
-
-    _connectionString = $"Data Source={dbPath}";
+    _pathResolver = pathResolver;
     _logger = logger;
+
+    var dbPath = _pathResolver.GetConfigurationDatabasePath();
+    _connectionString = $"Data Source={dbPath}";
   }
 
   /// <inheritdoc/>

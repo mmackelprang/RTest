@@ -94,9 +94,58 @@ The configuration infrastructure (Phase 1) provides:
 - **Secrets management**: Tag-based substitution (`${secret:identifier}`)
 - **Encrypted storage**: Secrets encrypted at rest using Data Protection API
 - **Backup/restore**: Full configuration backup and restore capabilities
+- **Unified database paths**: Centralized path management for all SQLite databases
+- **Unified backup system**: Single-operation backup of all databases
 - **DI integration**: Easy registration via `AddManagedConfiguration()`
 
-### Usage Example
+### Database Configuration
+
+All SQLite databases (configuration, metrics, fingerprinting) can now be configured through a unified `Database` section:
+
+```json
+{
+  "Database": {
+    "RootPath": "./data",
+    "ConfigurationSubdirectory": "config",
+    "MetricsSubdirectory": "metrics",
+    "FingerprintingSubdirectory": "fingerprints",
+    "BackupSubdirectory": "backups",
+    "BackupRetentionDays": 30
+  }
+}
+```
+
+This places all databases under a consistent directory structure:
+- Configuration: `./data/config/configuration.db`
+- Metrics: `./data/metrics/metrics.db`
+- Fingerprinting: `./data/fingerprints/fingerprints.db`
+- Backups: `./data/backups/`
+
+**Note**: Legacy configuration paths are still supported for backward compatibility.
+
+### Unified Database Backup
+
+The unified backup system backs up all SQLite databases in a single operation:
+
+```csharp
+// Create backup of all databases
+var backupService = serviceProvider.GetRequiredService<IUnifiedDatabaseBackupService>();
+var backup = await backupService.CreateFullBackupAsync("Daily backup");
+
+// Backup file: ./data/backups/unified_20231204_143022_a1b2c3.dbbackup
+Console.WriteLine($"Created backup: {backup.BackupId}");
+Console.WriteLine($"Included databases: {string.Join(", ", backup.IncludedDatabases)}");
+
+// Restore from backup
+await backupService.RestoreBackupAsync(backup.BackupId, overwrite: true);
+
+// Automatic cleanup of old backups
+var deleted = await backupService.CleanupOldBackupsAsync();
+```
+
+For detailed information, see [Database Configuration](design/DATABASE_CONFIGURATION.md).
+
+### Configuration Usage Example
 
 ```csharp
 // Register services
@@ -502,6 +551,7 @@ dotnet run --project src/Radio.Web
 - [Development Plan](PLAN.md) - Detailed development phases
 - [Audio Architecture](design/AUDIO.md) - Audio system design
 - [Configuration](design/CONFIGURATION.md) - Configuration infrastructure
+- [Database Configuration](design/DATABASE_CONFIGURATION.md) - Unified database paths and backup system
 - [Web UI](design/WEBUI.md) - UI design specifications
 
 ## License
