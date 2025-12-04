@@ -20,9 +20,10 @@ This document provides comprehensive API documentation for the Radio Console RES
 8. [Metrics Endpoints](#metrics-endpoints)
 9. [Play History Endpoints](#play-history-endpoints)
 10. [Configuration Endpoints](#configuration-endpoints)
-11. [SignalR Hubs](#signalr-hubs)
-12. [Common Response Codes](#common-response-codes)
-13. [Error Response Format](#error-response-format)
+11. [System Management Endpoints](#system-management-endpoints)
+12. [SignalR Hubs](#signalr-hubs)
+13. [Common Response Codes](#common-response-codes)
+14. [Error Response Format](#error-response-format)
 
 ---
 
@@ -1347,7 +1348,7 @@ Gets the currently active primary source.
 
 ### POST /api/sources
 
-Activates a specific audio source.
+Activates (switches to) a specific audio source.
 
 **Request Body:**
 
@@ -1358,11 +1359,57 @@ Activates a specific audio source.
 }
 ```
 
-**Response:** 200 OK - Returns activated `AudioSourceDto`
+**Fields:**
+- `sourceType` (required): Source type to activate - `"Spotify"`, `"Radio"`, `"Vinyl"`, `"FilePlayer"`, or `"GenericUSB"`
+- `configuration` (optional): Source-specific configuration parameters (reserved for future use)
+
+**Response:** 200 OK
+
+```json
+{
+  "id": "spotify-1",
+  "name": "Spotify",
+  "type": "Spotify",
+  "category": "Primary",
+  "state": "Playing",
+  "volume": 1.0,
+  "metadata": {
+    "Title": "Bohemian Rhapsody",
+    "Artist": "Queen"
+  }
+}
+```
 
 **Error Responses:**
-- `400 Bad Request` - Invalid source type or configuration
-- `500 Internal Server Error` - Failed to activate source
+- `400 Bad Request` - Invalid source type or source not available/configured
+- `500 Internal Server Error` - Failed to switch to source
+- `501 Not Implemented` - Audio manager not available
+
+**Notes:**
+- Requires IAudioManager to be available for source switching
+- Only one primary source can be active at a time
+- Switching sources will stop playback on the previous source
+- If the requested source type is not available, returns list of available sources in error
+
+**Example:**
+
+```bash
+POST /api/sources
+Content-Type: application/json
+
+{
+  "sourceType": "Radio"
+}
+```
+
+**Example Error Response (source not available):**
+
+```json
+{
+  "error": "Source type Radio is not available or not configured",
+  "availableSources": ["Spotify", "FilePlayer"]
+}
+```
 
 ---
 
@@ -1778,7 +1825,151 @@ Updates configuration values.
 }
 ```
 
+**Fields:**
+- `section` (required): Configuration section name (e.g., "audio", "visualizer", "output")
+- `key` (required): Configuration key to update
+- `value` (required): New value for the configuration key
+
 **Response:** 200 OK
+
+```json
+{
+  "message": "Configuration updated successfully",
+  "section": "audio",
+  "key": "duckingPercentage",
+  "value": "25"
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - Missing section or key, or invalid value
+- `500 Internal Server Error` - Failed to update configuration
+- `501 Not Implemented` - Configuration manager not available
+
+**Notes:**
+- Requires the managed configuration system (IConfigurationManager) to be available
+- Changes are persisted to the configuration store
+- Some configuration changes may require application restart to take effect
+
+---
+
+## System Management Endpoints
+
+Base path: `/api/system`
+
+Monitor system health, resource usage, and access system logs.
+
+### GET /api/system/stats
+
+Gets comprehensive system statistics including resource usage and application state.
+
+**Response:** 200 OK
+
+```json
+{
+  "cpuUsagePercent": 23.45,
+  "ramUsageMb": 156.78,
+  "diskUsagePercent": 45.2,
+  "threadCount": 42,
+  "appUptime": "2d 5h 32m",
+  "systemUptime": "15d 7h 14m",
+  "audioEngineState": "Active - Spotify (Playing)",
+  "systemTemperature": "45.3°C"
+}
+```
+
+**Fields:**
+- `cpuUsagePercent`: CPU usage percentage (0-100)
+- `ramUsageMb`: RAM usage in megabytes
+- `diskUsagePercent`: Disk usage percentage (0-100)
+- `threadCount`: Number of active threads
+- `appUptime`: Application uptime in human-readable format
+- `systemUptime`: System uptime in human-readable format
+- `audioEngineState`: Current audio engine state and active source
+- `systemTemperature`: System temperature in Celsius (shows "N/A" if not available)
+
+**Error Responses:**
+- `500 Internal Server Error` - Failed to retrieve system stats
+
+**Notes:**
+- CPU usage is measured over a short sampling period (~100ms)
+- Temperature reading is only available on Linux systems (reads from `/sys/class/thermal/thermal_zone0/temp`)
+- On non-Linux systems or when temperature sensor is unavailable, returns "N/A"
+
+**Example:**
+```bash
+GET /api/system/stats
+```
+
+---
+
+### GET /api/system/logs
+
+Gets system logs with optional filtering by level, count, and age.
+
+**Query Parameters:**
+- `level` (optional): Log level filter - `"info"`, `"warning"`, or `"error"`. Default is `"warning"`.
+- `limit` (optional): Maximum number of log entries to return (1-10000). Default is 100.
+- `maxAgeMinutes` (optional): Maximum age of logs in minutes. If not specified, no age filtering is applied.
+
+**Response:** 200 OK
+
+```json
+{
+  "logs": [
+    {
+      "timestamp": "2024-12-04T22:15:30Z",
+      "level": "Warning",
+      "message": "Audio source transition delayed",
+      "exception": null,
+      "sourceContext": "Radio.Infrastructure.Audio.AudioManager"
+    },
+    {
+      "timestamp": "2024-12-04T22:10:15Z",
+      "level": "Error",
+      "message": "Failed to connect to Spotify",
+      "exception": "System.Net.Http.HttpRequestException: Connection timeout...",
+      "sourceContext": "Radio.Infrastructure.External.Spotify.SpotifyClient"
+    }
+  ],
+  "totalCount": 2,
+  "filters": {
+    "level": "warning",
+    "limit": 100,
+    "maxAgeMinutes": null
+  }
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - Invalid log level or limit out of range
+- `500 Internal Server Error` - Failed to retrieve logs
+
+**Valid Log Levels:**
+- `info` - Informational messages and above (Info, Warning, Error)
+- `warning` - Warning messages and above (Warning, Error)
+- `error` - Error messages only
+
+**Notes:**
+- Log retrieval requires Serilog file sink configuration
+- Logs are returned in reverse chronological order (newest first)
+- If no logs match the criteria, returns an empty array
+
+**Example Requests:**
+
+```bash
+# Get last 100 warning and error logs (default)
+GET /api/system/logs
+
+# Get last 50 error logs
+GET /api/system/logs?level=error&limit=50
+
+# Get info logs from last 30 minutes
+GET /api/system/logs?level=info&maxAgeMinutes=30
+
+# Get last 200 warning logs from last hour
+GET /api/system/logs?level=warning&limit=200&maxAgeMinutes=60
+```
 
 ---
 

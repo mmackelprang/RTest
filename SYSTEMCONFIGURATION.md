@@ -209,6 +209,52 @@ Configuration options are static settings that define application behavior. They
 
 ---
 
+### SystemManagement
+
+**Section Name:** `SystemManagement`  
+**Source File:** N/A (Not yet implemented as a formal options class)  
+**Description:** Configuration options for system management and logging.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `Logs.DefaultLevel` | `string` | `warning` | Default log level filter for `/api/system/logs` endpoint |
+| `Logs.DefaultLimit` | `int` | `100` | Default maximum number of log entries to return |
+| `Logs.MaxLimit` | `int` | `10000` | Maximum allowed limit for log retrieval |
+| `Logs.FilePath` | `string` | `logs/radio-.txt` | Path template for Serilog file sink logs |
+| `Stats.CpuSampleDurationMs` | `int` | `100` | Duration to sample CPU usage in milliseconds |
+| `Stats.TemperaturePath` | `string` | `/sys/class/thermal/thermal_zone0/temp` | Linux path to CPU temperature sensor |
+
+**Notes:**
+- Log retrieval from `/api/system/logs` requires Serilog file sink to be configured
+- The temperature path is only applicable on Linux systems (Raspberry Pi)
+- Log file path supports Serilog rolling file syntax with date placeholders
+
+**Example Serilog Configuration:**
+
+```json
+{
+  "Serilog": {
+    "MinimumLevel": "Information",
+    "WriteTo": [
+      {
+        "Name": "Console"
+      },
+      {
+        "Name": "File",
+        "Args": {
+          "path": "logs/radio-.txt",
+          "rollingInterval": "Day",
+          "retainedFileCountLimit": 7,
+          "outputTemplate": "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}"
+        }
+      }
+    ]
+  }
+}
+```
+
+---
+
 ## Preferences
 
 Preferences are user-modifiable settings that are persisted and auto-saved on change.
