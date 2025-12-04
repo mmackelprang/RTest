@@ -13,15 +13,16 @@ This document provides comprehensive API documentation for the Radio Console RES
 1. [Audio Control Endpoints](#audio-control-endpoints)
 2. [Queue Management Endpoints](#queue-management-endpoints)
 3. [Spotify Endpoints](#spotify-endpoints)
-4. [Radio Control Endpoints](#radio-control-endpoints)
-5. [Sources Management Endpoints](#sources-management-endpoints)
-6. [Device Management Endpoints](#device-management-endpoints)
-7. [Metrics Endpoints](#metrics-endpoints)
-8. [Play History Endpoints](#play-history-endpoints)
-9. [Configuration Endpoints](#configuration-endpoints)
-10. [SignalR Hubs](#signalr-hubs)
-11. [Common Response Codes](#common-response-codes)
-12. [Error Response Format](#error-response-format)
+4. [File Management Endpoints](#file-management-endpoints)
+5. [Radio Control Endpoints](#radio-control-endpoints)
+6. [Sources Management Endpoints](#sources-management-endpoints)
+7. [Device Management Endpoints](#device-management-endpoints)
+8. [Metrics Endpoints](#metrics-endpoints)
+9. [Play History Endpoints](#play-history-endpoints)
+10. [Configuration Endpoints](#configuration-endpoints)
+11. [SignalR Hubs](#signalr-hubs)
+12. [Common Response Codes](#common-response-codes)
+13. [Error Response Format](#error-response-format)
 
 ---
 
@@ -768,6 +769,173 @@ Initiates playback of a Spotify track, album, or playlist.
 **Error Responses:**
 - `400 Bad Request` - Missing URI, Spotify not available, not authenticated, or not active source
 - `500 Internal Server Error` - Failed to start playback
+
+---
+
+## File Management Endpoints
+
+Base path: `/api/files`
+
+Browse and manage audio files for the File Player source. Allows listing files, playing files, and adding files to the playback queue.
+
+### GET /api/files
+
+Lists audio files in the specified directory. Supports optional path and recursive parameters.
+
+**Query Parameters:**
+- `path` (optional): Path relative to the configured root directory. Empty or null returns files from the root directory.
+- `recursive` (optional): Boolean. If true, searches subdirectories recursively. Default is false.
+
+**Response:** 200 OK
+
+```json
+[
+  {
+    "path": "music/song1.mp3",
+    "fileName": "song1.mp3",
+    "extension": ".mp3",
+    "sizeBytes": 5242880,
+    "createdAt": "2025-01-01T12:00:00Z",
+    "lastModifiedAt": "2025-01-01T12:00:00Z",
+    "title": "Song Title",
+    "artist": "Artist Name",
+    "album": "Album Name",
+    "duration": "00:03:45",
+    "trackNumber": 1,
+    "genre": "Rock",
+    "year": 2024
+  },
+  {
+    "path": "music/song2.flac",
+    "fileName": "song2.flac",
+    "extension": ".flac",
+    "sizeBytes": 31457280,
+    "createdAt": "2025-01-02T14:30:00Z",
+    "lastModifiedAt": "2025-01-02T14:30:00Z",
+    "title": "Another Song",
+    "artist": "Another Artist",
+    "album": "Another Album",
+    "duration": "00:04:22",
+    "trackNumber": null,
+    "genre": null,
+    "year": null
+  }
+]
+```
+
+**Supported Audio Formats:**
+- `.mp3` - MP3
+- `.flac` - FLAC
+- `.wav` - WAV
+- `.ogg` - Ogg Vorbis
+- `.aac` - AAC
+- `.m4a` - M4A
+- `.wma` - Windows Media Audio
+
+**Metadata:**
+- Metadata (title, artist, album, duration) is extracted using SoundFlow's metadata reader
+- If metadata is unavailable, `title` defaults to the filename without extension
+- Other metadata fields will be `null` if not available
+
+**Error Responses:**
+- `500 Internal Server Error` - Failed to list audio files
+
+**Example Requests:**
+
+```bash
+# List files in root directory
+GET /api/files
+
+# List files in subdirectory
+GET /api/files?path=music/rock
+
+# List files recursively
+GET /api/files?recursive=true
+
+# List files in subdirectory recursively
+GET /api/files?path=music&recursive=true
+```
+
+---
+
+### POST /api/files/play
+
+Plays a specific audio file. If the File Player source is not currently active, returns an error.
+
+**Request Body:**
+
+```json
+{
+  "path": "music/song1.mp3"
+}
+```
+
+**Response:** 200 OK
+
+```json
+{
+  "success": true,
+  "message": "File is now playing",
+  "filePath": "music/song1.mp3",
+  "fileName": "song1.mp3",
+  "title": "Song Title",
+  "artist": "Artist Name",
+  "album": "Album Name",
+  "duration": "00:03:45"
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - File path is required or file not found/not supported
+- `500 Internal Server Error` - Failed to activate File Player source or failed to play audio file
+
+**Notes:**
+- The file must exist in the configured file player root directory
+- The File Player source must be the currently active source
+- If the source is not active, you must first switch to the File Player source via the Sources API
+
+---
+
+### POST /api/files/queue
+
+Adds one or more audio files to the playback queue. If the File Player source is not currently active, returns an error.
+
+**Request Body:**
+
+```json
+{
+  "paths": [
+    "music/song1.mp3",
+    "music/song2.flac",
+    "music/folder/song3.wav"
+  ]
+}
+```
+
+**Response:** 200 OK
+
+```json
+{
+  "success": true,
+  "message": "Added 2 file(s) to queue",
+  "addedCount": 2,
+  "failedCount": 1,
+  "failedPaths": [
+    "music/folder/song3.wav"
+  ]
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - At least one file path is required or File Player source does not support queue operations
+- `500 Internal Server Error` - Failed to activate File Player source or failed to add files to queue
+
+**Notes:**
+- Each file is validated before adding to the queue
+- Files that don't exist or aren't supported audio formats are skipped
+- The response indicates how many files were successfully added and which ones failed
+- The File Player source must be the currently active source
+- The File Player source must support queue operations
 
 ---
 
