@@ -176,6 +176,7 @@ public sealed class BufferedMetricsCollector : IMetricsCollector, IHostedService
     if (_flushTimer != null)
     {
       await _flushTimer.DisposeAsync();
+      _flushTimer = null;
     }
 
     _flushLock.Dispose();

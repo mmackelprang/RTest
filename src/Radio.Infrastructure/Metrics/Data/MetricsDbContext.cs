@@ -84,7 +84,7 @@ public sealed class MetricsDbContext : IAsyncDisposable
   {
     get
     {
-      if (!_isInitialized || _connection == null)
+      if (_connection == null)
       {
         throw new InvalidOperationException("MetricsDbContext is not initialized. Call InitializeAsync first.");
       }

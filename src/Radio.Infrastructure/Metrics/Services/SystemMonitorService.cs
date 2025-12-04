@@ -86,7 +86,15 @@ public sealed class SystemMonitorService : BackgroundService
     try
     {
       var dbPath = Path.GetFullPath(_options.DatabasePath);
-      var drive = new DriveInfo(Path.GetPathRoot(dbPath) ?? "/");
+      var rootPath = Path.GetPathRoot(dbPath);
+      
+      // Handle cases where GetPathRoot returns null or empty
+      if (string.IsNullOrEmpty(rootPath))
+      {
+        rootPath = OperatingSystem.IsWindows() ? "C:\\" : "/";
+      }
+      
+      var drive = new DriveInfo(rootPath);
       if (drive.IsReady)
       {
         var usedPercent = ((drive.TotalSize - drive.AvailableFreeSpace) / (double)drive.TotalSize) * 100.0;
