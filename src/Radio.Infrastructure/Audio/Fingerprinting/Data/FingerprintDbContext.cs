@@ -137,6 +137,16 @@ public sealed class FingerprintDbContext : IAsyncDisposable
         FOREIGN KEY (FingerprintId) REFERENCES FingerprintCache(Id)
       );
 
+      -- Radio presets table
+      CREATE TABLE IF NOT EXISTS RadioPresets (
+        Id TEXT PRIMARY KEY,
+        Name TEXT NOT NULL,
+        Band TEXT NOT NULL,
+        Frequency REAL NOT NULL,
+        CreatedAt TEXT NOT NULL,
+        LastModifiedAt TEXT NOT NULL
+      );
+
       -- Indexes for performance
       CREATE INDEX IF NOT EXISTS IX_FingerprintCache_ChromaprintHash 
         ON FingerprintCache(ChromaprintHash);
@@ -154,6 +164,8 @@ public sealed class FingerprintDbContext : IAsyncDisposable
         ON PlayHistory(TrackMetadataId);
       CREATE INDEX IF NOT EXISTS IX_PlayHistory_Source
         ON PlayHistory(Source);
+      CREATE INDEX IF NOT EXISTS IX_RadioPresets_Band_Frequency
+        ON RadioPresets(Band, Frequency);
       """;
 
     using var cmd = _connection!.CreateCommand();

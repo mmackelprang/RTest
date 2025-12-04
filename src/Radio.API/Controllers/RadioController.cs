@@ -15,16 +15,19 @@ public class RadioController : ControllerBase
 {
   private readonly ILogger<RadioController> _logger;
   private readonly IAudioEngine _audioEngine;
+  private readonly IRadioPresetService _presetService;
 
   /// <summary>
   /// Initializes a new instance of the RadioController.
   /// </summary>
   public RadioController(
     ILogger<RadioController> logger,
-    IAudioEngine audioEngine)
+    IAudioEngine audioEngine,
+    IRadioPresetService presetService)
   {
     _logger = logger;
     _audioEngine = audioEngine;
+    _presetService = presetService;
   }
 
   /// <summary>
@@ -397,5 +400,109 @@ public class RadioController : ControllerBase
       IsScanning = radioSource.IsScanning,
       ScanDirection = radioSource.ScanDirection?.ToString()
     };
+  }
+
+  // ===== RADIO PRESET ENDPOINTS =====
+
+  /// <summary>
+  /// Gets all saved radio presets.
+  /// </summary>
+  /// <returns>List of all radio presets.</returns>
+  /// <response code="200">Returns the list of presets.</response>
+  [HttpGet("presets")]
+  [ProducesResponseType(typeof(IEnumerable<RadioPresetDto>), StatusCodes.Status200OK)]
+  public async Task<ActionResult<IEnumerable<RadioPresetDto>>> GetPresets()
+  {
+    try
+    {
+      var presets = await _presetService.GetAllPresetsAsync();
+      return Ok(presets.Select(RadioPresetDto.FromModel));
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error getting radio presets");
+      return StatusCode(500, new { error = "Failed to get radio presets" });
+    }
+  }
+
+  /// <summary>
+  /// Adds a new radio preset.
+  /// </summary>
+  /// <param name="request">The preset to create.</param>
+  /// <returns>The created preset.</returns>
+  /// <response code="201">Returns the created preset.</response>
+  /// <response code="400">If the preset already exists or validation fails.</response>
+  /// <response code="409">If a preset with the same band/frequency already exists.</response>
+  /// <response code="507">If the maximum number of presets (50) has been reached.</response>
+  [HttpPost("presets")]
+  [ProducesResponseType(typeof(RadioPresetDto), StatusCodes.Status201Created)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status409Conflict)]
+  [ProducesResponseType(StatusCodes.Status507InsufficientStorage)]
+  public async Task<ActionResult<RadioPresetDto>> CreatePreset([FromBody] CreateRadioPresetRequest request)
+  {
+    try
+    {
+      // Validate band enum
+      if (!Enum.TryParse<RadioBand>(request.Band, true, out var band))
+      {
+        return BadRequest(new { error = $"Invalid band: {request.Band}. Valid values are: {string.Join(", ", Enum.GetNames<RadioBand>())}" });
+      }
+
+      // Validate frequency range (basic validation, specific ranges are enforced by radio controls)
+      if (request.Frequency <= 0)
+      {
+        return BadRequest(new { error = "Frequency must be greater than 0" });
+      }
+
+      var preset = await _presetService.AddPresetAsync(request.Name, band, request.Frequency);
+      var dto = RadioPresetDto.FromModel(preset);
+
+      return CreatedAtAction(nameof(GetPresets), new { id = preset.Id }, dto);
+    }
+    catch (InvalidOperationException ex) when (ex.Message.Contains("already exists"))
+    {
+      _logger.LogWarning(ex, "Preset collision for {Band} - {Frequency}", request.Band, request.Frequency);
+      return Conflict(new { error = ex.Message });
+    }
+    catch (InvalidOperationException ex) when (ex.Message.Contains("Maximum"))
+    {
+      _logger.LogWarning(ex, "Maximum preset limit reached");
+      return StatusCode(507, new { error = ex.Message });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error creating radio preset");
+      return StatusCode(500, new { error = "Failed to create radio preset" });
+    }
+  }
+
+  /// <summary>
+  /// Deletes a radio preset by ID.
+  /// </summary>
+  /// <param name="id">The preset ID to delete.</param>
+  /// <returns>No content if successful.</returns>
+  /// <response code="204">If the preset was deleted successfully.</response>
+  /// <response code="404">If the preset was not found.</response>
+  [HttpDelete("presets/{id}")]
+  [ProducesResponseType(StatusCodes.Status204NoContent)]
+  [ProducesResponseType(StatusCodes.Status404NotFound)]
+  public async Task<ActionResult> DeletePreset(string id)
+  {
+    try
+    {
+      var deleted = await _presetService.DeletePresetAsync(id);
+      if (!deleted)
+      {
+        return NotFound(new { error = $"Preset with ID '{id}' not found" });
+      }
+
+      return NoContent();
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error deleting radio preset {Id}", id);
+      return StatusCode(500, new { error = "Failed to delete radio preset" });
+    }
   }
 }
