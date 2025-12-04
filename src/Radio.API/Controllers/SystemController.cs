@@ -17,6 +17,11 @@ public class SystemController : ControllerBase
   private readonly ILogger<SystemController> _logger;
   private readonly IAudioEngine _audioEngine;
   private static readonly DateTime _startTime = DateTime.UtcNow;
+  
+  // Cache CPU usage to avoid delays on every request
+  private static double _cachedCpuUsage = 0;
+  private static DateTime _lastCpuCheck = DateTime.MinValue;
+  private static readonly TimeSpan CpuCacheInterval = TimeSpan.FromSeconds(5);
 
   /// <summary>
   /// Initializes a new instance of the SystemController.
@@ -42,8 +47,8 @@ public class SystemController : ControllerBase
     {
       var process = Process.GetCurrentProcess();
 
-      // CPU Usage (approximate using TotalProcessorTime)
-      var cpuUsage = await GetCpuUsageAsync(process);
+      // CPU Usage (cached to avoid delay on every request)
+      var cpuUsage = await GetCachedCpuUsageAsync(process);
 
       // RAM Usage
       var ramUsageMb = process.WorkingSet64 / 1024.0 / 1024.0;
@@ -124,8 +129,9 @@ public class SystemController : ControllerBase
         return BadRequest(new { error = "Limit must be between 1 and 10000" });
       }
 
-      // TODO: Implement log reading from Serilog file sink
-      // For now, return a placeholder response indicating the feature needs log sink configuration
+      // Log retrieval requires Serilog file sink to be configured
+      // This is a placeholder implementation that validates parameters
+      // Actual log reading will be implemented when file sink is configured
       var response = new SystemLogsDto
       {
         Logs = new List<LogEntryDto>(),
@@ -139,7 +145,8 @@ public class SystemController : ControllerBase
       };
 
       _logger.LogInformation(
-        "Log retrieval requested with level={Level}, limit={Limit}, maxAge={MaxAge}",
+        "Log retrieval requested with level={Level}, limit={Limit}, maxAge={MaxAge}. " +
+        "Note: Actual log reading requires Serilog file sink configuration.",
         level, limit, maxAgeMinutes);
 
       return Ok(response);
@@ -151,8 +158,16 @@ public class SystemController : ControllerBase
     }
   }
 
-  private async Task<double> GetCpuUsageAsync(Process process)
+  private async Task<double> GetCachedCpuUsageAsync(Process process)
   {
+    var now = DateTime.UtcNow;
+    
+    // Return cached value if still valid
+    if (now - _lastCpuCheck < CpuCacheInterval)
+    {
+      return _cachedCpuUsage;
+    }
+
     try
     {
       var startTime = DateTime.UtcNow;
@@ -168,12 +183,15 @@ public class SystemController : ControllerBase
       var totalMsPassed = (endTime - startTime).TotalMilliseconds;
       var cpuUsageTotal = cpuUsedMs / (Environment.ProcessorCount * totalMsPassed);
 
-      return cpuUsageTotal * 100;
+      _cachedCpuUsage = cpuUsageTotal * 100;
+      _lastCpuCheck = now;
+      
+      return _cachedCpuUsage;
     }
     catch (Exception ex)
     {
       _logger.LogWarning(ex, "Failed to calculate CPU usage");
-      return 0;
+      return _cachedCpuUsage; // Return last known value
     }
   }
 
