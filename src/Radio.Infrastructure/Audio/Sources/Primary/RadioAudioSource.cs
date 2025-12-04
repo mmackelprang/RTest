@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
-using Radio.Core.Events;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
@@ -16,7 +15,6 @@ namespace Radio.Infrastructure.Audio.Sources.Primary;
 public class RadioAudioSource : USBAudioSourceBase
 {
   private readonly IOptionsMonitor<DeviceOptions> _deviceOptions;
-  private readonly BackgroundIdentificationService? _identificationService;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="RadioAudioSource"/> class.
@@ -30,16 +28,9 @@ public class RadioAudioSource : USBAudioSourceBase
     IOptionsMonitor<DeviceOptions> deviceOptions,
     IAudioDeviceManager deviceManager,
     BackgroundIdentificationService? identificationService = null)
-    : base(logger, deviceManager)
+    : base(logger, deviceManager, identificationService)
   {
     _deviceOptions = deviceOptions;
-    _identificationService = identificationService;
-
-    // Subscribe to track identification events if service is available
-    if (_identificationService != null)
-    {
-      _identificationService.TrackIdentified += OnTrackIdentified;
-    }
   }
 
   /// <inheritdoc/>
@@ -75,67 +66,5 @@ public class RadioAudioSource : USBAudioSourceBase
     MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = StandardMetadataKeys.DefaultAlbumArtUrl;
     MetadataInternal["Source"] = "Radio";
     MetadataInternal["Device"] = "Raddy RF320";
-  }
-
-  /// <summary>
-  /// Handles the TrackIdentified event from the fingerprinting service.
-  /// Updates metadata with identified track information.
-  /// </summary>
-  private void OnTrackIdentified(object? sender, TrackIdentifiedEventArgs e)
-  {
-    // Only update metadata if this is the active source
-    if (State != AudioSourceState.Playing && State != AudioSourceState.Paused)
-    {
-      return;
-    }
-
-    var track = e.Track;
-    Logger.LogInformation(
-      "Updating Radio metadata from fingerprinting: {Title} by {Artist} (confidence: {Confidence:P0})",
-      track.Title, track.Artist, e.Confidence);
-
-    // Update metadata with fingerprinted track information using StandardMetadataKeys
-    MetadataInternal[StandardMetadataKeys.Title] = track.Title;
-    MetadataInternal[StandardMetadataKeys.Artist] = track.Artist;
-    MetadataInternal[StandardMetadataKeys.Album] = track.Album ?? StandardMetadataKeys.DefaultAlbum;
-    
-    // Use CoverArtUrl from fingerprinting if available, otherwise use default
-    MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = !string.IsNullOrEmpty(track.CoverArtUrl)
-      ? track.CoverArtUrl
-      : StandardMetadataKeys.DefaultAlbumArtUrl;
-
-    // Add optional metadata if available
-    if (track.Genre != null)
-    {
-      MetadataInternal[StandardMetadataKeys.Genre] = track.Genre;
-    }
-
-    if (track.ReleaseYear.HasValue)
-    {
-      MetadataInternal[StandardMetadataKeys.Year] = track.ReleaseYear.Value;
-    }
-
-    if (track.TrackNumber.HasValue)
-    {
-      MetadataInternal[StandardMetadataKeys.TrackNumber] = track.TrackNumber.Value;
-    }
-
-    // Keep source information
-    MetadataInternal["Source"] = "Radio";
-    MetadataInternal["Device"] = "Raddy RF320";
-    MetadataInternal["IdentificationConfidence"] = e.Confidence;
-    MetadataInternal["IdentifiedAt"] = e.IdentifiedAt;
-  }
-
-  /// <inheritdoc/>
-  protected override async ValueTask DisposeAsyncCore()
-  {
-    // Unsubscribe from events
-    if (_identificationService != null)
-    {
-      _identificationService.TrackIdentified -= OnTrackIdentified;
-    }
-
-    await base.DisposeAsyncCore();
   }
 }
