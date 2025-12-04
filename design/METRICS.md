@@ -41,46 +41,70 @@ Three separate tables: `MetricData_Minute`, `MetricData_Hour`, `MetricData_Day`.
 
 ## Implementation Phases
 
-### Phase 1: Core Domain Definitions
+### Phase 1: Core Domain Definitions ✅ COMPLETED
 Define the interfaces and types in the Core layer. This establishes the contract that the rest of the application will use.
 
-**Files:**
-*   `src/RadioConsole.Core/Metrics/MetricType.cs`
-*   `src/RadioConsole.Core/Metrics/MetricPoint.cs` (DTO for reading)
-*   `src/RadioConsole.Core/Interfaces/IMetricsCollector.cs`
-*   `src/RadioConsole.Core/Interfaces/IMetricsReader.cs`
+**Status:** ✅ Completed (2025-12-04)
 
-**Coding Assistant Prompt:**
-> "I need to implement the Core metrics domain. Please create an Enum `MetricType` (Counter, Gauge), and an interface `IMetricsCollector` with methods `Increment(key, value, tags)` and `Gauge(key, value, tags)`. Also create `IMetricsReader` for retrieving history. Place these in `RadioConsole.Core/Metrics` and `RadioConsole.Core/Interfaces`."
+**Files Created:**
+*   `src/Radio.Core/Metrics/MetricType.cs` ✅
+*   `src/Radio.Core/Metrics/MetricResolution.cs` ✅
+*   `src/Radio.Core/Metrics/MetricPoint.cs` ✅
+*   `src/Radio.Core/Interfaces/IMetricsCollector.cs` ✅
+*   `src/Radio.Core/Interfaces/IMetricsReader.cs` ✅
+*   `src/Radio.Core/Configuration/MetricsOptions.cs` ✅
 
-### Phase 2: SQLite Infrastructure
+**Notes:**
+- Added MetricResolution enum for time bucket resolution
+- MetricsOptions configured with sensible defaults
+- All interfaces include comprehensive XML documentation
+
+### Phase 2: SQLite Infrastructure ✅ COMPLETED
 Implement the persistence layer. This involves creating the SQLite tables and the repository to read/write them.
 
-**Files:**
-*   `src/RadioConsole.Infrastructure/Data/MetricsDbContext.cs` (or existing context)
-*   `src/RadioConsole.Infrastructure/Repositories/SqliteMetricsRepository.cs`
+**Status:** ✅ Completed (2025-12-04)
 
-**Coding Assistant Prompt:**
-> "Implement `SqliteMetricsRepository` in the Infrastructure layer. It needs to manage tables for `MetricDefinitions` and `MetricData_Minute/Hour/Day`. Implement a method `SaveBucketsAsync` that takes a batch of in-memory buckets and upserts them into the `MetricData_Minute` table. Ensure you handle the foreign key relationship with `MetricDefinitions` efficiently (cache the definitions)."
+**Files Created:**
+*   `src/Radio.Infrastructure/Metrics/Data/MetricsDbContext.cs` ✅
+*   `src/Radio.Infrastructure/Metrics/Repositories/SqliteMetricsRepository.cs` ✅
 
-### Phase 3: Buffered Collector Service
+**Notes:**
+- MetricsDbContext manages connection, schema creation, and metric definition caching
+- SqliteMetricsRepository implements IMetricsReader and provides SaveBuckets, Rollup, and Prune operations
+- Database schema includes MetricDefinitions and three resolution tables (Minute/Hour/Day)
+- Efficient upsert operations for handling concurrent metric writes
+
+### Phase 3: Buffered Collector Service ✅ COMPLETED
 Implement the logic that buffers metrics in memory to prevent disk thrashing. This service will flush to the database every 60 seconds.
 
-**Files:**
-*   `src/RadioConsole.Infrastructure/Services/BufferedMetricsCollector.cs`
+**Status:** ✅ Completed (2025-12-04)
 
-**Coding Assistant Prompt:**
-> "Create a class `BufferedMetricsCollector` that implements `IMetricsCollector` and `IHostedService`. It should use a `ConcurrentDictionary` to aggregate metrics in memory. Use a `System.Threading.Timer` to flush this buffer to the `SqliteMetricsRepository` every 60 seconds. Ensure thread safety when swapping the buffer during a flush."
+**Files Created:**
+*   `src/Radio.Infrastructure/Metrics/Services/BufferedMetricsCollector.cs` ✅
 
-### Phase 4: Rollup & Pruning Service
+**Notes:**
+- Implements both IMetricsCollector and IHostedService
+- Uses ConcurrentDictionary for thread-safe metric buffering
+- Timer-based periodic flush configurable via MetricsOptions
+- Respects metrics.Enabled configuration flag
+
+### Phase 4: Rollup & Pruning Service ✅ COMPLETED
 Implement the background service that aggregates data from Minute -> Hour -> Day and deletes old data.
 
-**Logic:**
-*   **Hourly:** Aggregate `MetricData_Minute` > 2 hours old into `MetricData_Hour`. Delete processed minute rows.
-*   **Daily:** Aggregate `MetricData_Hour` > 48 hours old into `MetricData_Day`. Delete processed hour rows.
+**Status:** ✅ Completed (2025-12-04)
 
-**Coding Assistant Prompt:**
-> "Create a `MetricsRollupService` (BackgroundService). It should run hourly. It needs to query `MetricData_Minute`, aggregate the rows by Hour (Sum for counters, recalculate Min/Max/Avg for gauges), insert them into `MetricData_Hour`, and then delete the old minute rows. Repeat the pattern for rolling Hour data into Day data."
+**Files Created:**
+*   `src/Radio.Infrastructure/Metrics/Services/MetricsRollupService.cs` ✅
+
+**Logic:**
+*   **Hourly:** Aggregate `MetricData_Minute` > retention period into `MetricData_Hour`. Delete processed minute rows. ✅
+*   **Daily:** Aggregate `MetricData_Hour` > retention period into `MetricData_Day`. Delete processed hour rows. ✅
+*   **Pruning:** Delete data older than configured retention periods for each resolution. ✅
+
+**Notes:**
+- Runs as BackgroundService with configurable interval
+- Respects retention policies from MetricsOptions
+- Comprehensive error handling and logging
 
 ### Phase 5: Integration (Adding the Metrics)
 Inject the collector into existing services and instrument the code.
