@@ -17,6 +17,9 @@ public sealed class UnifiedDatabaseBackupService : IUnifiedDatabaseBackupService
   private const string ManifestFileName = "manifest.json";
   private const string DatabasesFolder = "databases";
   private const string ReadmeFileName = "README.txt";
+  private const string ConfigDatabaseName = "configuration.db";
+  private const string MetricsDatabaseName = "metrics.db";
+  private const string FingerprintingDatabaseName = "fingerprints.db";
 
   private readonly DatabaseOptions _databaseOptions;
   private readonly DatabasePathResolver _pathResolver;
@@ -394,9 +397,9 @@ public sealed class UnifiedDatabaseBackupService : IUnifiedDatabaseBackupService
 
     return new List<(string, string)>
     {
-      (configPath, "configuration.db"),
-      (metricsPath, "metrics.db"),
-      (fingerprintingPath, "fingerprints.db")
+      (configPath, ConfigDatabaseName),
+      (metricsPath, MetricsDatabaseName),
+      (fingerprintingPath, FingerprintingDatabaseName)
     };
   }
 

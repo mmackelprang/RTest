@@ -252,11 +252,27 @@ public class UnifiedDatabaseBackupTests : IDisposable
     CreateDummyDatabase(_pathResolver.GetConfigurationDatabasePath());
     var backup = await _backupService.CreateFullBackupAsync();
 
-    // Modify retention to make backup old
-    _databaseOptions.BackupRetentionDays = 0;
+    // Create new service with zero retention to make backup old
+    var zeroRetentionOptions = new DatabaseOptions
+    {
+      RootPath = _databaseOptions.RootPath,
+      ConfigurationSubdirectory = _databaseOptions.ConfigurationSubdirectory,
+      ConfigurationFileName = _databaseOptions.ConfigurationFileName,
+      MetricsSubdirectory = _databaseOptions.MetricsSubdirectory,
+      MetricsFileName = _databaseOptions.MetricsFileName,
+      FingerprintingSubdirectory = _databaseOptions.FingerprintingSubdirectory,
+      FingerprintingFileName = _databaseOptions.FingerprintingFileName,
+      BackupSubdirectory = _databaseOptions.BackupSubdirectory,
+      BackupRetentionDays = 0  // Zero retention to make all backups old
+    };
+    var zeroRetentionPathResolver = new DatabasePathResolver(Options.Create(zeroRetentionOptions));
+    var zeroRetentionService = new UnifiedDatabaseBackupService(
+      Options.Create(zeroRetentionOptions),
+      zeroRetentionPathResolver,
+      NullLogger<UnifiedDatabaseBackupService>.Instance);
 
     // Act
-    var deletedCount = await _backupService.CleanupOldBackupsAsync();
+    var deletedCount = await zeroRetentionService.CleanupOldBackupsAsync();
 
     // Assert
     Assert.Equal(1, deletedCount);
