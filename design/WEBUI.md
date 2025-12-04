@@ -236,11 +236,38 @@ A **Material 3-compliant**, touchscreen interface for an embedded music controll
 - **Success criteria**: Save works without errors, presets display correctly, tune to preset works, delete with confirmation works, 50-preset limit enforced, duplicate detection works, keyboard is touch-friendly
 
 ### System Configuration Manager
-- **Functionality**: Advanced settings with configuration/preferences/secrets grid, backup/restore, shutdown, view system status (memory / cpu / processes / disk space, network info)
+- **Functionality**: Advanced settings with configuration/preferences/secrets grid, backup/restore, shutdown, view system status (memory / cpu / processes / disk space, network info, temperature)
 - **Purpose**: Complete system administration and configuration management
 - **Trigger**: Click system config icon in main nav
 - **Progression**: Open dialog → Select component → Load config grid → Edit values → Add/delete rows → Save → Persist to API
-- **Success criteria**: All config editable, backup/restore works, shutdown initiates gracefully
+- **System Stats Display**:
+  - **CPU Usage**: Real-time percentage with visual indicator (graph or gauge)
+  - **RAM Usage**: Current memory consumption in MB with percentage
+  - **Disk Usage**: Storage utilization percentage
+  - **Thread Count**: Active application threads
+  - **App Uptime**: Time since application start
+  - **System Uptime**: Time since system boot
+  - **Audio Engine State**: Current audio source and playback status
+  - **System Temperature**: CPU temperature (Raspberry Pi only, shows "N/A" on other systems)
+- **System Logs Viewer**:
+  - **Log Level Filter**: Dropdown to select Info/Warning/Error (default: Warning)
+  - **Limit Control**: Number of log entries to display (default: 100, max: 10000)
+  - **Time Range Filter**: Optional filter for logs from last X minutes
+  - **Auto-refresh**: Toggle for real-time log updates
+  - **Log Display**: Scrollable table with columns for Timestamp, Level, Source, Message
+  - **Export**: Button to download logs as text file
+- **API Integration**:
+  - Use `/api/system/stats` for real-time system statistics
+  - Use `/api/system/logs` with level/limit parameters for log retrieval
+  - Poll stats every 5-10 seconds for current values
+  - Consider SignalR for real-time log streaming (future enhancement)
+- **Success criteria**: 
+  - All config editable and persists correctly
+  - System stats update in real-time with minimal performance impact
+  - Logs are filterable and display properly
+  - Backup/restore works correctly
+  - Shutdown initiates gracefully
+  - Temperature displays correctly on Raspberry Pi or shows "N/A" on other systems
 
 ### Debug Management
 - **Functionality**: CRUD interface for TTS and audio file prompts, View recent LOGs from API or Web
