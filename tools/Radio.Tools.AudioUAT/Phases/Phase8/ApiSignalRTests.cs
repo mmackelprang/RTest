@@ -36,6 +36,7 @@ public class ApiSignalRTests
       new SourcesControllerTest(_serviceProvider),
       new DevicesControllerTest(_serviceProvider),
       new ConfigurationControllerTest(_serviceProvider),
+      new RadioPresetsApiTest(_serviceProvider),
       // SignalR Tests
       new SignalRHubConnectionTest(_serviceProvider),
       new SignalRSpectrumDataTest(_serviceProvider),

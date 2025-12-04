@@ -4,6 +4,7 @@ using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Fingerprinting.Data;
+using Radio.Infrastructure.Audio.Services;
 
 namespace Radio.Infrastructure.DependencyInjection;
 
@@ -33,9 +34,13 @@ public static class FingerprintingServiceExtensions
     services.AddScoped<IFingerprintCacheRepository, SqliteFingerprintCacheRepository>();
     services.AddScoped<ITrackMetadataRepository, SqliteTrackMetadataRepository>();
     services.AddScoped<IPlayHistoryRepository, SqlitePlayHistoryRepository>();
+    services.AddScoped<IRadioPresetRepository, SqliteRadioPresetRepository>();
 
     // Register fingerprint service
     services.AddSingleton<IFingerprintService, MockFingerprintService>();
+
+    // Register radio preset service (scoped to match repository)
+    services.AddScoped<IRadioPresetService, RadioPresetService>();
 
     // Register metadata lookup service as scoped (uses repositories)
     services.AddScoped<IMetadataLookupService, MetadataLookupService>();

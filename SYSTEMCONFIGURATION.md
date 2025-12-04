@@ -399,6 +399,43 @@ Example:
 | `Google` | Google Cloud Text-to-Speech |
 | `Azure` | Azure Cognitive Services Speech |
 
+### RadioBand
+| Value | Description |
+|-------|-------------|
+| `AM` | Amplitude Modulation (520-1710 kHz) |
+| `FM` | Frequency Modulation (87.5-108 MHz) |
+| `WB` | Weather Band |
+| `VHF` | Very High Frequency |
+| `SW` | Shortwave |
+
+---
+
+## Radio Presets
+
+Radio presets are saved radio station configurations that allow users to quickly tune to their favorite stations. They are stored in the SQLite database (in the `RadioPresets` table) alongside other audio data.
+
+### Features
+- **Maximum Presets:** 50 presets can be saved
+- **Collision Detection:** Duplicate presets (same band and frequency) are prevented
+- **Custom Names:** Users can provide custom names, or the system generates a default name in the format `{Band} - {Frequency}`
+- **Persistence:** Presets are stored in the database and persist across application restarts
+
+### Database Schema
+The `RadioPresets` table includes the following fields:
+- `Id` (TEXT PRIMARY KEY): Unique identifier for the preset
+- `Name` (TEXT NOT NULL): Display name for the preset
+- `Band` (TEXT NOT NULL): Radio band (AM, FM, WB, VHF, SW)
+- `Frequency` (REAL NOT NULL): Station frequency
+- `CreatedAt` (TEXT NOT NULL): ISO 8601 timestamp when preset was created
+- `LastModifiedAt` (TEXT NOT NULL): ISO 8601 timestamp when preset was last modified
+
+### REST API Endpoints
+- `GET /api/radio/presets`: Retrieve all saved presets
+- `POST /api/radio/presets`: Create a new preset
+- `DELETE /api/radio/presets/{id}`: Delete a preset by ID
+
+See [API Reference](design/API_REFERENCE.md) for detailed API documentation.
+
 ---
 
 *Last Updated: 2025-12-04*

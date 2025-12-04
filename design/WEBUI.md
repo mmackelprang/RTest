@@ -143,6 +143,46 @@ A **Material 3-compliant**, touchscreen interface for an embedded music controll
 - **Purpose**: Full control of radio receiver hardware functions
 - **Success criteria**: All buttons responsive with appropriate touch feedback, long-press scan works reliably, keypad validation prevents invalid frequencies, device volume and EQ changes apply to hardware
 
+### Radio Preset Management (Touch-Friendly)
+- **Functionality**: Save, browse, and select favorite radio stations when Radio is the active source
+- **Save Current Station**:
+  - **Save button**: Prominent button to save the current station as a preset
+  - Opens dialog with:
+    * Current frequency and band displayed (read-only)
+    * Name input field with on-screen keyboard (defaults to "{Band} - {Frequency}" if left blank)
+    * Save/Cancel buttons (touch-friendly, min 48px)
+  - Validation:
+    * Checks if preset already exists (same band/frequency) - shows error if duplicate
+    * Checks if 50-preset limit reached - shows error if full
+    * Name is optional; uses default if blank
+  - Success feedback: Brief confirmation toast showing preset was saved
+- **Browse Presets**:
+  - **Presets button**: Opens presets list dialog
+  - Dialog displays:
+    * List of saved presets, sorted alphabetically by name
+    * Each item shows: Name (bold), Band, Frequency
+    * Tap preset to tune radio to that station and close dialog
+    * Delete button (X) on each row to remove preset with confirmation
+    * Close button to dismiss without selecting
+  - Touch targets: Minimum 56px height per row for easy selection
+  - Empty state: Shows message "No presets saved yet" with icon
+- **UI Elements**:
+  - Save button: Positioned near radio controls, always visible when Radio is active
+  - Presets button: Adjacent to Save button
+  - Dialog styling: Material 3 elevated card with slide-up animation
+  - Keyboard: Full QWERTY layout optimized for landscape 12.5" × 3.75" display
+  - Confirmation dialogs: For delete actions, clear and touch-friendly
+- **Error Handling**:
+  - Duplicate preset: "A preset already exists for {Band} - {Frequency}: {Name}"
+  - Maximum reached: "Maximum of 50 presets reached. Please delete one first."
+  - API errors: Generic "Failed to save preset" with retry option
+- **Data Binding**:
+  - Uses `/api/radio/presets` endpoints (GET, POST, DELETE)
+  - Real-time updates: When preset is created/deleted, refresh list automatically
+  - Current frequency/band retrieved from radio state
+- **Purpose**: Allow users to quickly save and recall favorite radio stations
+- **Success criteria**: Save works without errors, presets display correctly, tune to preset works, delete with confirmation works, 50-preset limit enforced, duplicate detection works, keyboard is touch-friendly
+
 ### System Configuration Manager
 - **Functionality**: Advanced settings with configuration/preferences/secrets grid, backup/restore, shutdown, view system status (memory / cpu / processes / disk space, network info)
 - **Purpose**: Complete system administration and configuration management
