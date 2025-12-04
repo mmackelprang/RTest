@@ -1,0 +1,47 @@
+name: Audit System Configuration
+
+on:
+  schedule:
+    - cron: '0 9 * * 1' # Mondays at 9am UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Run Audit Script
+        id: audit
+        run: |
+          # Run the script
+          python scripts/audit_config.py
+          
+          # Check if the report file exists
+          if [ -f config_audit_report.md ]; then
+            echo "issues_found=true" >> $GITHUB_OUTPUT
+          else
+            echo "issues_found=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Issue if Missing Configs Found
+        if: steps.audit.outputs.issues_found == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Create the issue
+          gh issue create \
+            --title "Documentation Gap: Missing Configuration Options" \
+            --body-file config_audit_report.md \
+            --label "documentation" \
+            --assignee "${{ github.repository_owner }}"
