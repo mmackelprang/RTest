@@ -9,7 +9,7 @@ using Radio.Core.Configuration;
 public class DatabasePathResolverTests
 {
   [Fact]
-  public void GetConfigurationDatabasePath_WithoutLegacy_UsesNewPath()
+  public void GetConfigurationDatabasePath_ReturnsConfiguredPath()
   {
     // Arrange
     var databaseOptions = new DatabaseOptions
@@ -30,42 +30,7 @@ public class DatabasePathResolverTests
   }
 
   [Fact]
-  public void GetConfigurationDatabasePath_WithLegacyNonDefault_UsesLegacyPath()
-  {
-    // Arrange
-    var databaseOptions = new DatabaseOptions
-    {
-      RootPath = "./data"
-    };
-    var resolver = new DatabasePathResolver(Options.Create(databaseOptions));
-
-    // Act
-    var path = resolver.GetConfigurationDatabasePath("./legacy", "old.db");
-
-    // Assert
-    Assert.Contains("legacy", path);
-    Assert.Contains("old.db", path);
-  }
-
-  [Fact]
-  public void GetConfigurationDatabasePath_WithLegacyDefault_UsesNewPath()
-  {
-    // Arrange
-    var databaseOptions = new DatabaseOptions
-    {
-      RootPath = "./data"
-    };
-    var resolver = new DatabasePathResolver(Options.Create(databaseOptions));
-
-    // Act - using default legacy values
-    var path = resolver.GetConfigurationDatabasePath("./config", "configuration.db");
-
-    // Assert - should use new path since legacy is default
-    Assert.Contains("data", path);
-  }
-
-  [Fact]
-  public void GetMetricsDatabasePath_WithoutLegacy_UsesNewPath()
+  public void GetMetricsDatabasePath_ReturnsConfiguredPath()
   {
     // Arrange
     var databaseOptions = new DatabaseOptions
@@ -86,21 +51,7 @@ public class DatabasePathResolverTests
   }
 
   [Fact]
-  public void GetMetricsDatabasePath_WithLegacyNonDefault_UsesLegacyPath()
-  {
-    // Arrange
-    var databaseOptions = new DatabaseOptions();
-    var resolver = new DatabasePathResolver(Options.Create(databaseOptions));
-
-    // Act
-    var path = resolver.GetMetricsDatabasePath("./custom/metrics.db");
-
-    // Assert
-    Assert.Contains("custom", path);
-  }
-
-  [Fact]
-  public void GetFingerprintingDatabasePath_WithoutLegacy_UsesNewPath()
+  public void GetFingerprintingDatabasePath_ReturnsConfiguredPath()
   {
     // Arrange
     var databaseOptions = new DatabaseOptions
@@ -121,7 +72,7 @@ public class DatabasePathResolverTests
   }
 
   [Fact]
-  public void GetBackupPath_WithoutLegacy_UsesNewPath()
+  public void GetBackupPath_ReturnsConfiguredPath()
   {
     // Arrange
     var databaseOptions = new DatabaseOptions
@@ -152,5 +103,24 @@ public class DatabasePathResolverTests
     // Assert
     Assert.Equal(3, paths.Count);
     Assert.All(paths, p => Assert.False(string.IsNullOrWhiteSpace(p)));
+  }
+
+  [Fact]
+  public void GetAllDatabasePaths_ContainsAllExpectedDatabases()
+  {
+    // Arrange
+    var databaseOptions = new DatabaseOptions
+    {
+      RootPath = "./data"
+    };
+    var resolver = new DatabasePathResolver(Options.Create(databaseOptions));
+
+    // Act
+    var paths = resolver.GetAllDatabasePaths();
+
+    // Assert
+    Assert.Contains(paths, p => p.Contains("configuration.db"));
+    Assert.Contains(paths, p => p.Contains("metrics.db"));
+    Assert.Contains(paths, p => p.Contains("fingerprints.db"));
   }
 }

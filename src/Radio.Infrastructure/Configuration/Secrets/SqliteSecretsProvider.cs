@@ -16,7 +16,7 @@ public sealed class SqliteSecretsProvider : SecretsProviderBase, IAsyncDisposabl
 
   private readonly string _connectionString;
   private readonly ILogger<SqliteSecretsProvider> _logger;
-  private readonly DatabasePathResolver? _pathResolver;
+  private readonly DatabasePathResolver _pathResolver;
   private readonly SemaphoreSlim _lock = new(1, 1);
 
   private SqliteConnection? _connection;
@@ -27,30 +27,17 @@ public sealed class SqliteSecretsProvider : SecretsProviderBase, IAsyncDisposabl
   /// Initializes a new instance of the SqliteSecretsProvider class.
   /// </summary>
   public SqliteSecretsProvider(
-    IOptions<ConfigurationOptions> options,
+    DatabasePathResolver pathResolver,
     IDataProtectionProvider dataProtection,
-    ILogger<SqliteSecretsProvider> logger,
-    DatabasePathResolver? pathResolver = null)
+    ILogger<SqliteSecretsProvider> logger)
     : base(dataProtection, logger)
   {
-    ArgumentNullException.ThrowIfNull(options);
+    ArgumentNullException.ThrowIfNull(pathResolver);
 
-    var opts = options.Value;
     _pathResolver = pathResolver;
     _logger = logger;
 
-    // Use DatabasePathResolver if available, otherwise fall back to legacy
-    string dbPath;
-    if (_pathResolver != null)
-    {
-      dbPath = _pathResolver.GetConfigurationDatabasePath(opts.BasePath, opts.SqliteFileName);
-    }
-    else
-    {
-      var basePath = Path.GetFullPath(opts.BasePath);
-      dbPath = Path.Combine(basePath, opts.SqliteFileName);
-    }
-
+    var dbPath = _pathResolver.GetConfigurationDatabasePath();
     _connectionString = $"Data Source={dbPath}";
   }
 

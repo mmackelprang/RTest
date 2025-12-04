@@ -13,8 +13,6 @@ public sealed class ConfigurationOptions
 
   /// <summary>
   /// Base path for configuration files.
-  /// DEPRECATED: Use DatabaseOptions.RootPath instead for new deployments.
-  /// This is maintained for backward compatibility.
   /// </summary>
   public string BasePath { get; set; } = "./config";
 
@@ -23,8 +21,6 @@ public sealed class ConfigurationOptions
 
   /// <summary>
   /// SQLite database filename.
-  /// DEPRECATED: Use DatabaseOptions.ConfigurationFileName instead for new deployments.
-  /// This is maintained for backward compatibility.
   /// </summary>
   public string SqliteFileName { get; set; } = "configuration.db";
 
@@ -33,8 +29,6 @@ public sealed class ConfigurationOptions
 
   /// <summary>
   /// Path for backup files.
-  /// DEPRECATED: Use DatabaseOptions.GetBackupPath() instead for new deployments.
-  /// This is maintained for backward compatibility.
   /// </summary>
   public string BackupPath { get; set; } = "./config/backups";
 

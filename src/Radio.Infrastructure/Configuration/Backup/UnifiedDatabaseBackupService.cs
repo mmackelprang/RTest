@@ -23,19 +23,12 @@ public sealed class UnifiedDatabaseBackupService : IUnifiedDatabaseBackupService
   private readonly ILogger<UnifiedDatabaseBackupService> _logger;
   private readonly JsonSerializerOptions _jsonOptions;
 
-  private readonly IOptions<Radio.Infrastructure.Configuration.Models.ConfigurationOptions> _configOptions;
-  private readonly IOptions<MetricsOptions> _metricsOptions;
-  private readonly IOptions<FingerprintingOptions> _fingerprintingOptions;
-
   /// <summary>
   /// Initializes a new instance of the UnifiedDatabaseBackupService class.
   /// </summary>
   public UnifiedDatabaseBackupService(
     IOptions<DatabaseOptions> databaseOptions,
     DatabasePathResolver pathResolver,
-    IOptions<Radio.Infrastructure.Configuration.Models.ConfigurationOptions> configOptions,
-    IOptions<MetricsOptions> metricsOptions,
-    IOptions<FingerprintingOptions> fingerprintingOptions,
     ILogger<UnifiedDatabaseBackupService> logger)
   {
     ArgumentNullException.ThrowIfNull(databaseOptions);
@@ -44,9 +37,6 @@ public sealed class UnifiedDatabaseBackupService : IUnifiedDatabaseBackupService
 
     _databaseOptions = databaseOptions.Value;
     _pathResolver = pathResolver;
-    _configOptions = configOptions;
-    _metricsOptions = metricsOptions;
-    _fingerprintingOptions = fingerprintingOptions;
     _logger = logger;
     _jsonOptions = new JsonSerializerOptions
     {
@@ -239,7 +229,7 @@ public sealed class UnifiedDatabaseBackupService : IUnifiedDatabaseBackupService
   /// <inheritdoc/>
   public Task<IReadOnlyList<UnifiedBackupMetadata>> ListBackupsAsync(CancellationToken ct = default)
   {
-    var backupPath = _pathResolver.GetBackupPath(_configOptions.Value.BackupPath);
+    var backupPath = _pathResolver.GetBackupPath();
     if (!Directory.Exists(backupPath))
     {
       return Task.FromResult<IReadOnlyList<UnifiedBackupMetadata>>(Array.Empty<UnifiedBackupMetadata>());
@@ -335,7 +325,7 @@ public sealed class UnifiedDatabaseBackupService : IUnifiedDatabaseBackupService
   /// <inheritdoc/>
   public Task<int> CleanupOldBackupsAsync(CancellationToken ct = default)
   {
-    var backupPath = _pathResolver.GetBackupPath(_configOptions.Value.BackupPath);
+    var backupPath = _pathResolver.GetBackupPath();
     if (!Directory.Exists(backupPath))
     {
       return Task.FromResult(0);
@@ -382,13 +372,13 @@ public sealed class UnifiedDatabaseBackupService : IUnifiedDatabaseBackupService
 
   private string GetBackupFilePath(string backupId)
   {
-    var backupPath = _pathResolver.GetBackupPath(_configOptions.Value.BackupPath);
+    var backupPath = _pathResolver.GetBackupPath();
     return Path.Combine(backupPath, $"{backupId}{BackupExtension}");
   }
 
   private void EnsureBackupDirectoryExists()
   {
-    var backupPath = _pathResolver.GetBackupPath(_configOptions.Value.BackupPath);
+    var backupPath = _pathResolver.GetBackupPath();
     if (!Directory.Exists(backupPath))
     {
       Directory.CreateDirectory(backupPath);
@@ -398,11 +388,9 @@ public sealed class UnifiedDatabaseBackupService : IUnifiedDatabaseBackupService
 
   private List<(string dbPath, string dbName)> GetAllDatabasePaths()
   {
-    var configPath = _pathResolver.GetConfigurationDatabasePath(
-      _configOptions.Value.BasePath,
-      _configOptions.Value.SqliteFileName);
-    var metricsPath = _pathResolver.GetMetricsDatabasePath(_metricsOptions.Value.DatabasePath);
-    var fingerprintingPath = _pathResolver.GetFingerprintingDatabasePath(_fingerprintingOptions.Value.DatabasePath);
+    var configPath = _pathResolver.GetConfigurationDatabasePath();
+    var metricsPath = _pathResolver.GetMetricsDatabasePath();
+    var fingerprintingPath = _pathResolver.GetFingerprintingDatabasePath();
 
     return new List<(string, string)>
     {

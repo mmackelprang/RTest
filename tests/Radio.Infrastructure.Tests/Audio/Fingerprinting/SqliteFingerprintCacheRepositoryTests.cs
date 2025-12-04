@@ -30,10 +30,15 @@ public class SqliteFingerprintCacheRepositoryTests : IAsyncLifetime
       DatabasePath = _testDbPath
     };
 
-    var optionsMock = new Mock<IOptions<FingerprintingOptions>>();
-    optionsMock.Setup(o => o.Value).Returns(_options);
+    var databaseOptions = Options.Create(new DatabaseOptions
+    {
+      RootPath = Path.GetDirectoryName(_testDbPath)!,
+      FingerprintingSubdirectory = "",
+      FingerprintingFileName = Path.GetFileName(_testDbPath)
+    });
+    var pathResolver = new DatabasePathResolver(databaseOptions);
 
-    _dbContext = new FingerprintDbContext(_dbLoggerMock.Object, optionsMock.Object);
+    _dbContext = new FingerprintDbContext(_dbLoggerMock.Object, pathResolver);
     _repository = new SqliteFingerprintCacheRepository(_loggerMock.Object, _dbContext);
   }
 

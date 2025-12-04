@@ -14,6 +14,7 @@ public class SecretsProviderTests : IDisposable
   private readonly string _testDirectory;
   private readonly ConfigurationOptions _options;
   private readonly IDataProtectionProvider _dataProtection;
+  private readonly Radio.Core.Configuration.DatabasePathResolver _pathResolver;
 
   public SecretsProviderTests()
   {
@@ -26,6 +27,14 @@ public class SecretsProviderTests : IDisposable
       SecretsFileName = "secrets",
       SqliteFileName = "secrets.db"
     };
+
+    var databaseOptions = Options.Create(new Radio.Core.Configuration.DatabaseOptions
+    {
+      RootPath = _testDirectory,
+      ConfigurationSubdirectory = "",
+      ConfigurationFileName = "secrets.db"
+    });
+    _pathResolver = new Radio.Core.Configuration.DatabasePathResolver(databaseOptions);
 
     _dataProtection = DataProtectionProvider.Create("TestApp");
   }
@@ -271,7 +280,7 @@ public class SecretsProviderTests : IDisposable
   private SqliteSecretsProvider CreateSqliteProvider()
   {
     return new SqliteSecretsProvider(
-      Options.Create(_options),
+      _pathResolver,
       _dataProtection,
       NullLogger<SqliteSecretsProvider>.Instance);
   }

@@ -40,31 +40,15 @@ public class UnifiedDatabaseBackupTests : IDisposable
       BackupSubdirectory = "backups"
     };
 
-    _configOptions = new ConfigurationOptions
-    {
-      BasePath = Path.Combine(_testDirectory, "config"),
-      SqliteFileName = "configuration.db",
-      BackupPath = Path.Combine(_testDirectory, "backups")
-    };
-
-    _metricsOptions = new MetricsOptions
-    {
-      DatabasePath = Path.Combine(_testDirectory, "metrics", "metrics.db")
-    };
-
-    _fingerprintingOptions = new FingerprintingOptions
-    {
-      DatabasePath = Path.Combine(_testDirectory, "fingerprints", "fingerprints.db")
-    };
+    _configOptions = new ConfigurationOptions();
+    _metricsOptions = new MetricsOptions();
+    _fingerprintingOptions = new FingerprintingOptions();
 
     _pathResolver = new DatabasePathResolver(Options.Create(_databaseOptions));
 
     _backupService = new UnifiedDatabaseBackupService(
       Options.Create(_databaseOptions),
       _pathResolver,
-      Options.Create(_configOptions),
-      Options.Create(_metricsOptions),
-      Options.Create(_fingerprintingOptions),
       NullLogger<UnifiedDatabaseBackupService>.Instance);
   }
 
@@ -87,9 +71,9 @@ public class UnifiedDatabaseBackupTests : IDisposable
   public async Task CreateFullBackupAsync_CreatesBackupFile()
   {
     // Arrange - Create some dummy database files
-    CreateDummyDatabase(_pathResolver.GetConfigurationDatabasePath(_configOptions.BasePath, _configOptions.SqliteFileName));
-    CreateDummyDatabase(_pathResolver.GetMetricsDatabasePath(_metricsOptions.DatabasePath));
-    CreateDummyDatabase(_pathResolver.GetFingerprintingDatabasePath(_fingerprintingOptions.DatabasePath));
+    CreateDummyDatabase(_pathResolver.GetConfigurationDatabasePath());
+    CreateDummyDatabase(_pathResolver.GetMetricsDatabasePath());
+    CreateDummyDatabase(_pathResolver.GetFingerprintingDatabasePath());
 
     // Act
     var backup = await _backupService.CreateFullBackupAsync("Test unified backup");
@@ -110,7 +94,7 @@ public class UnifiedDatabaseBackupTests : IDisposable
   public async Task CreateFullBackupAsync_WithPartialDatabases_BacksUpOnlyExisting()
   {
     // Arrange - Create only one database
-    CreateDummyDatabase(_pathResolver.GetConfigurationDatabasePath(_configOptions.BasePath, _configOptions.SqliteFileName));
+    CreateDummyDatabase(_pathResolver.GetConfigurationDatabasePath());
 
     // Act
     var backup = await _backupService.CreateFullBackupAsync();
@@ -125,7 +109,7 @@ public class UnifiedDatabaseBackupTests : IDisposable
   public async Task CreateFullBackupAsync_IncludesManifest()
   {
     // Arrange
-    CreateDummyDatabase(_pathResolver.GetConfigurationDatabasePath(_configOptions.BasePath, _configOptions.SqliteFileName));
+    CreateDummyDatabase(_pathResolver.GetConfigurationDatabasePath());
 
     // Act
     var backup = await _backupService.CreateFullBackupAsync("Manifest test");
@@ -140,7 +124,7 @@ public class UnifiedDatabaseBackupTests : IDisposable
   public async Task CreateFullBackupAsync_IncludesReadme()
   {
     // Arrange
-    CreateDummyDatabase(_pathResolver.GetConfigurationDatabasePath(_configOptions.BasePath, _configOptions.SqliteFileName));
+    CreateDummyDatabase(_pathResolver.GetConfigurationDatabasePath());
 
     // Act
     var backup = await _backupService.CreateFullBackupAsync("Readme test");
@@ -155,8 +139,8 @@ public class UnifiedDatabaseBackupTests : IDisposable
   public async Task RestoreBackupAsync_RestoresDatabases()
   {
     // Arrange - Create databases and backup
-    var configPath = _pathResolver.GetConfigurationDatabasePath(_configOptions.BasePath, _configOptions.SqliteFileName);
-    var metricsPath = _pathResolver.GetMetricsDatabasePath(_metricsOptions.DatabasePath);
+    var configPath = _pathResolver.GetConfigurationDatabasePath();
+    var metricsPath = _pathResolver.GetMetricsDatabasePath();
     CreateDummyDatabase(configPath);
     CreateDummyDatabase(metricsPath);
 
@@ -178,7 +162,7 @@ public class UnifiedDatabaseBackupTests : IDisposable
   public async Task RestoreBackupAsync_WithoutOverwrite_ThrowsIfDatabaseExists()
   {
     // Arrange
-    var configPath = _pathResolver.GetConfigurationDatabasePath(_configOptions.BasePath, _configOptions.SqliteFileName);
+    var configPath = _pathResolver.GetConfigurationDatabasePath();
     CreateDummyDatabase(configPath);
     var backup = await _backupService.CreateFullBackupAsync();
 
@@ -191,7 +175,7 @@ public class UnifiedDatabaseBackupTests : IDisposable
   public async Task ListBackupsAsync_ReturnsAllBackups()
   {
     // Arrange
-    CreateDummyDatabase(_pathResolver.GetConfigurationDatabasePath(_configOptions.BasePath, _configOptions.SqliteFileName));
+    CreateDummyDatabase(_pathResolver.GetConfigurationDatabasePath());
     var backup1 = await _backupService.CreateFullBackupAsync("First");
     await Task.Delay(100); // Ensure different timestamps
     var backup2 = await _backupService.CreateFullBackupAsync("Second");
@@ -211,7 +195,7 @@ public class UnifiedDatabaseBackupTests : IDisposable
   public async Task DeleteBackupAsync_DeletesBackup()
   {
     // Arrange
-    CreateDummyDatabase(_pathResolver.GetConfigurationDatabasePath(_configOptions.BasePath, _configOptions.SqliteFileName));
+    CreateDummyDatabase(_pathResolver.GetConfigurationDatabasePath());
     var backup = await _backupService.CreateFullBackupAsync();
 
     // Act
@@ -226,7 +210,7 @@ public class UnifiedDatabaseBackupTests : IDisposable
   public async Task ExportBackupAsync_ExportsBackupToStream()
   {
     // Arrange
-    CreateDummyDatabase(_pathResolver.GetConfigurationDatabasePath(_configOptions.BasePath, _configOptions.SqliteFileName));
+    CreateDummyDatabase(_pathResolver.GetConfigurationDatabasePath());
     var backup = await _backupService.CreateFullBackupAsync();
 
     // Act
@@ -243,7 +227,7 @@ public class UnifiedDatabaseBackupTests : IDisposable
   public async Task ImportBackupAsync_ImportsBackupFromStream()
   {
     // Arrange
-    CreateDummyDatabase(_pathResolver.GetConfigurationDatabasePath(_configOptions.BasePath, _configOptions.SqliteFileName));
+    CreateDummyDatabase(_pathResolver.GetConfigurationDatabasePath());
     var originalBackup = await _backupService.CreateFullBackupAsync();
 
     using var exportStream = new MemoryStream();
@@ -265,7 +249,7 @@ public class UnifiedDatabaseBackupTests : IDisposable
   public async Task CleanupOldBackupsAsync_DeletesOldBackups()
   {
     // Arrange - Create a backup
-    CreateDummyDatabase(_pathResolver.GetConfigurationDatabasePath(_configOptions.BasePath, _configOptions.SqliteFileName));
+    CreateDummyDatabase(_pathResolver.GetConfigurationDatabasePath());
     var backup = await _backupService.CreateFullBackupAsync();
 
     // Modify retention to make backup old

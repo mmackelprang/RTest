@@ -15,7 +15,7 @@ public sealed class ConfigurationStoreFactory : IConfigurationStoreFactory
   private readonly ConfigurationOptions _options;
   private readonly ISecretsProvider _secretsProvider;
   private readonly ILoggerFactory _loggerFactory;
-  private readonly DatabasePathResolver? _pathResolver;
+  private readonly DatabasePathResolver _pathResolver;
   private readonly ConcurrentDictionary<string, IConfigurationStore> _storeCache = new();
 
   /// <summary>
@@ -25,11 +25,12 @@ public sealed class ConfigurationStoreFactory : IConfigurationStoreFactory
     IOptions<ConfigurationOptions> options,
     ISecretsProvider secretsProvider,
     ILoggerFactory loggerFactory,
-    DatabasePathResolver? pathResolver = null)
+    DatabasePathResolver pathResolver)
   {
     ArgumentNullException.ThrowIfNull(options);
     ArgumentNullException.ThrowIfNull(secretsProvider);
     ArgumentNullException.ThrowIfNull(loggerFactory);
+    ArgumentNullException.ThrowIfNull(pathResolver);
 
     _options = options.Value;
     _secretsProvider = secretsProvider;
@@ -126,17 +127,7 @@ public sealed class ConfigurationStoreFactory : IConfigurationStoreFactory
 
   private SqliteConfigurationStore CreateSqliteStore(string storeId)
   {
-    string dbPath;
-    if (_pathResolver != null)
-    {
-      dbPath = _pathResolver.GetConfigurationDatabasePath(_options.BasePath, _options.SqliteFileName);
-    }
-    else
-    {
-      var basePath = Path.GetFullPath(_options.BasePath);
-      dbPath = Path.Combine(basePath, _options.SqliteFileName);
-    }
-    
+    var dbPath = _pathResolver.GetConfigurationDatabasePath();
     var connectionString = $"Data Source={dbPath}";
 
     return new SqliteConfigurationStore(
