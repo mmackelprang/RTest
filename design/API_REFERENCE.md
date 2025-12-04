@@ -997,6 +997,133 @@ Sets the radio device volume (separate from master volume).
 
 ---
 
+## Radio Presets Endpoints
+
+Base path: `/api/radio/presets`
+
+Manage saved radio station presets. Presets allow users to save their favorite radio stations for quick access.
+
+### Features
+- **Maximum Presets:** 50 presets can be saved
+- **Collision Detection:** Duplicate presets (same band and frequency) are prevented
+- **Custom Names:** Users can provide custom names, or the system generates a default name in the format `{Band} - {Frequency}`
+
+### GET /api/radio/presets
+
+Gets all saved radio presets.
+
+**Response:** 200 OK
+
+```json
+[
+  {
+    "id": "a1b2c3d4",
+    "name": "My Favorite Station",
+    "band": "FM",
+    "frequency": 101.5,
+    "createdAt": "2025-12-04T12:00:00Z"
+  },
+  {
+    "id": "e5f6g7h8",
+    "name": "AM - 1010",
+    "band": "AM",
+    "frequency": 1010,
+    "createdAt": "2025-12-04T12:15:00Z"
+  }
+]
+```
+
+**Error Responses:**
+- `500 Internal Server Error` - Failed to retrieve presets
+
+---
+
+### POST /api/radio/presets
+
+Creates a new radio preset.
+
+**Request Body:**
+
+```json
+{
+  "name": "My Favorite Station",
+  "band": "FM",
+  "frequency": 101.5
+}
+```
+
+**Fields:**
+- `name` (optional): Display name for the preset. If not provided, generates default name like "FM - 101.5"
+- `band` (required): One of `"AM"`, `"FM"`, `"WB"`, `"VHF"`, `"SW"` (case-insensitive)
+- `frequency` (required): Station frequency (must be greater than 0)
+
+**Response:** 201 Created
+
+```json
+{
+  "id": "a1b2c3d4",
+  "name": "My Favorite Station",
+  "band": "FM",
+  "frequency": 101.5,
+  "createdAt": "2025-12-04T12:00:00Z"
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - Invalid band, zero/negative frequency, or validation error
+- `409 Conflict` - A preset with the same band and frequency already exists
+- `507 Insufficient Storage` - Maximum of 50 presets reached
+- `500 Internal Server Error` - Failed to create preset
+
+**Example Error Responses:**
+
+```json
+// Invalid band
+{
+  "error": "Invalid band: XYZ. Valid values are: AM, FM, WB, VHF, SW"
+}
+
+// Frequency validation
+{
+  "error": "Frequency must be greater than 0"
+}
+
+// Collision (409)
+{
+  "error": "A preset already exists for FM - 101.5: My Favorite Station"
+}
+
+// Maximum reached (507)
+{
+  "error": "Maximum of 50 presets reached. Please delete an existing preset first."
+}
+```
+
+---
+
+### DELETE /api/radio/presets/{id}
+
+Deletes a radio preset by ID.
+
+**Path Parameters:**
+- `id` (required): The preset ID to delete
+
+**Response:** 204 No Content
+
+**Error Responses:**
+- `404 Not Found` - Preset with the specified ID not found
+- `500 Internal Server Error` - Failed to delete preset
+
+**Example Error Response:**
+
+```json
+{
+  "error": "Preset with ID 'nonexistent-id' not found"
+}
+```
+
+---
+
 ## Sources Management Endpoints
 
 Base path: `/api/sources`
