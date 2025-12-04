@@ -564,8 +564,7 @@ public class AudioController : ControllerBase
       
       // Determine source characteristics based on type
       IsRadio = source.Type == AudioSourceType.Radio,
-      IsStreaming = source.Type == AudioSourceType.Spotify || 
-                    source.Type == AudioSourceType.GenericUSB, // GenericUSB could be streaming
+      IsStreaming = source.Type == AudioSourceType.Spotify, // Spotify is the only guaranteed streaming source
       
       // Build capabilities dictionary
       Capabilities = new Dictionary<string, bool>()
@@ -592,13 +591,14 @@ public class AudioController : ControllerBase
     }
     
     // Add radio-specific capabilities if source implements IRadioControls
+    // All sources implementing IRadioControls support these core radio features by design
     if (source is IRadioControls)
     {
       dto.Capabilities["SupportsRadioControls"] = true;
-      dto.Capabilities["SupportsFrequencyTuning"] = true;
-      dto.Capabilities["SupportsScanning"] = true;
-      dto.Capabilities["SupportsEqualizer"] = true;
-      dto.Capabilities["SupportsDeviceVolume"] = true;
+      dto.Capabilities["SupportsFrequencyTuning"] = true; // Required by IRadioControls
+      dto.Capabilities["SupportsScanning"] = true; // Required by IRadioControls
+      dto.Capabilities["SupportsEqualizer"] = true; // Required by IRadioControls
+      dto.Capabilities["SupportsDeviceVolume"] = true; // Required by IRadioControls
     }
 
     return dto;
