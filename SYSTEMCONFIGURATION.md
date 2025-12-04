@@ -115,6 +115,82 @@ Configuration options are static settings that define application behavior. They
 
 ---
 
+### Visualizer
+
+**Section Name:** `Visualizer`  
+**Source File:** `src/Radio.Core/Configuration/VisualizerOptions.cs`  
+**Description:** Configuration options for the audio visualizer service.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `FFTSize` | `int` | `2048` | FFT size for spectrum analysis. Must be a power of 2 (e.g., 256, 512, 1024, 2048, 4096). Larger values provide better frequency resolution but slower updates. |
+| `WaveformSampleCount` | `int` | `512` | Number of waveform samples to keep in the buffer |
+| `PeakHoldTimeMs` | `int` | `1000` | Peak hold time in milliseconds for level metering. Peaks will be held at their maximum value for this duration before decaying. |
+| `PeakDecayRate` | `float` | `0.95` | Peak decay rate per second (0.0 to 1.0). Higher values cause faster decay after peak hold expires. |
+| `RmsSmoothing` | `float` | `0.3` | RMS smoothing factor (0.0 to 1.0). Higher values provide smoother, more stable RMS readings. |
+| `ApplyWindowFunction` | `bool` | `true` | Whether to apply windowing to FFT input (Hann window) |
+| `MinFrequency` | `float` | `20` | Minimum frequency to display in spectrum analysis (Hz) |
+| `MaxFrequency` | `float` | `20000` | Maximum frequency to display in spectrum analysis (Hz) |
+| `SpectrumSmoothing` | `float` | `0.5` | Spectrum smoothing factor (0.0 to 1.0). Higher values provide smoother spectrum display. |
+
+---
+
+### Fingerprinting
+
+**Section Name:** `Fingerprinting`  
+**Source File:** `src/Radio.Core/Configuration/FingerprintingOptions.cs`  
+**Description:** Configuration options for the audio fingerprinting system.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `Enabled` | `bool` | `true` | Enable or disable automatic fingerprinting |
+| `SampleDurationSeconds` | `int` | `15` | Duration of audio to capture for fingerprinting (seconds) |
+| `IdentificationIntervalSeconds` | `int` | `30` | Interval between identification attempts (seconds) |
+| `MinimumConfidenceThreshold` | `double` | `0.5` | Minimum confidence threshold for accepting a match (0.0 to 1.0) |
+| `DuplicateSuppressionMinutes` | `int` | `5` | Minutes to suppress duplicate identifications of the same track |
+| `DatabasePath` | `string` | `./data/fingerprints.db` | SQLite database path for fingerprint cache |
+| `AcoustId.ApiKey` | `string` | `""` | AcoustID API key (register at https://acoustid.org/new-application) |
+| `AcoustId.BaseUrl` | `string` | `https://api.acoustid.org/v2` | AcoustID API base URL |
+| `AcoustId.MaxRequestsPerSecond` | `int` | `3` | Maximum requests per second (AcoustID limit is 3) |
+| `AcoustId.TimeoutSeconds` | `int` | `10` | Request timeout in seconds |
+| `MusicBrainz.BaseUrl` | `string` | `https://musicbrainz.org/ws/2` | MusicBrainz API base URL |
+| `MusicBrainz.ApplicationName` | `string` | `RadioConsole` | Application name for User-Agent header |
+| `MusicBrainz.ApplicationVersion` | `string` | `1.0.0` | Application version for User-Agent header |
+| `MusicBrainz.ContactEmail` | `string` | `""` | Contact email for User-Agent header |
+| `MusicBrainz.MaxRequestsPerSecond` | `int` | `1` | Maximum requests per second (MusicBrainz limit is 1 for anonymous) |
+| `MusicBrainz.TimeoutSeconds` | `int` | `10` | Request timeout in seconds |
+
+---
+
+### AudioOutput
+
+**Section Name:** `AudioOutput`  
+**Source File:** `src/Radio.Core/Configuration/AudioOutputOptions.cs`  
+**Description:** Configuration options for audio outputs.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `Local.Enabled` | `bool` | `true` | Whether the local output is enabled by default |
+| `Local.PreferredDeviceId` | `string` | `""` | Preferred device ID for local output. If empty, uses the system default device. |
+| `Local.DefaultVolume` | `float` | `0.8` | Default volume level (0.0 to 1.0) |
+| `GoogleCast.Enabled` | `bool` | `false` | Whether Google Cast output is enabled |
+| `GoogleCast.DiscoveryTimeoutSeconds` | `int` | `10` | Discovery timeout in seconds |
+| `GoogleCast.PreferredDeviceName` | `string` | `""` | Preferred cast device name. If empty, uses the first discovered device. |
+| `GoogleCast.DefaultVolume` | `float` | `0.7` | Default volume level for cast (0.0 to 1.0) |
+| `GoogleCast.AutoReconnect` | `bool` | `true` | Whether to automatically reconnect on disconnect |
+| `GoogleCast.ReconnectDelaySeconds` | `int` | `5` | Reconnect delay in seconds |
+| `HttpStream.Enabled` | `bool` | `true` | Whether the HTTP stream output is enabled |
+| `HttpStream.Port` | `int` | `8080` | HTTP stream server port |
+| `HttpStream.EndpointPath` | `string` | `/stream/audio` | Stream endpoint path |
+| `HttpStream.ContentType` | `string` | `audio/wav` | Audio format for the stream |
+| `HttpStream.SampleRate` | `int` | `48000` | Sample rate for the stream |
+| `HttpStream.Channels` | `int` | `2` | Number of channels for the stream |
+| `HttpStream.BitsPerSample` | `int` | `16` | Bits per sample for the stream |
+| `HttpStream.MaxConcurrentClients` | `int` | `10` | Maximum number of concurrent clients |
+| `HttpStream.ClientBufferSize` | `int` | `65536` | Buffer size in bytes for each client |
+
+---
+
 ## Preferences
 
 Preferences are user-modifiable settings that are persisted and auto-saved on change.
@@ -307,4 +383,4 @@ Example:
 
 ---
 
-*Last Updated: 2025-11-26*
+*Last Updated: 2025-12-04*
