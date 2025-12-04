@@ -73,7 +73,7 @@ public abstract class PrimaryAudioSourceBase : IPrimaryAudioSource
   public abstract bool IsSeekable { get; }
 
   /// <inheritdoc/>
-  public abstract IReadOnlyDictionary<string, string> Metadata { get; }
+  public abstract IReadOnlyDictionary<string, object> Metadata { get; }
 
   // Capability properties - default to false, subclasses override as needed
 

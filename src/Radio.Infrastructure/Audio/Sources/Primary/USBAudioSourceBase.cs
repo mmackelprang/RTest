@@ -16,7 +16,7 @@ namespace Radio.Infrastructure.Audio.Sources.Primary;
 public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
 {
   private readonly IAudioDeviceManager _deviceManager;
-  private readonly Dictionary<string, string> _metadata = new();
+  private readonly Dictionary<string, object> _metadata = new();
   private string? _reservedPort;
   private object? _soundComponent;
   private AudioCaptureDevice? _captureDevice;
@@ -43,7 +43,7 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   public override bool IsSeekable => false; // Live input cannot be seeked
 
   /// <inheritdoc/>
-  public override IReadOnlyDictionary<string, string> Metadata => _metadata;
+  public override IReadOnlyDictionary<string, object> Metadata => _metadata;
 
   /// <summary>
   /// Gets the reserved USB port path, or null if not reserved.
@@ -58,7 +58,7 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   /// <summary>
   /// Gets the metadata dictionary for modification by derived classes.
   /// </summary>
-  protected Dictionary<string, string> MetadataInternal => _metadata;
+  protected Dictionary<string, object> MetadataInternal => _metadata;
 
   /// <summary>
   /// Gets or sets the sound component. Can be accessed by derived classes.

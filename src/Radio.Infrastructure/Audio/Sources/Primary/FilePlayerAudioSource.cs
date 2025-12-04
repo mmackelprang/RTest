@@ -19,7 +19,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private readonly IOptionsMonitor<FilePlayerOptions> _options;
   private readonly IOptionsMonitor<FilePlayerPreferences> _preferences;
   private readonly string _rootDir;
-  private readonly Dictionary<string, string> _metadata = new();
+  private readonly Dictionary<string, object> _metadata = new();
   private Queue<string> _playlist = new();
   private List<string> _originalOrder = new(); // Store original order for shuffle toggle
   private List<string> _playedHistory = new(); // Track played songs for Previous
@@ -66,7 +66,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   public override bool IsSeekable => true;
 
   /// <inheritdoc/>
-  public override IReadOnlyDictionary<string, string> Metadata => _metadata;
+  public override IReadOnlyDictionary<string, object> Metadata => _metadata;
 
   // File player supports next, shuffle, repeat, and queue
   /// <inheritdoc/>
@@ -1147,7 +1147,14 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private void UpdateMetadataFromFile(string filePath)
   {
     _metadata.Clear();
-    _metadata["Title"] = Path.GetFileNameWithoutExtension(filePath);
+    
+    // Set default values first
+    _metadata[StandardMetadataKeys.Title] = Path.GetFileNameWithoutExtension(filePath);
+    _metadata[StandardMetadataKeys.Artist] = StandardMetadataKeys.DefaultArtist;
+    _metadata[StandardMetadataKeys.Album] = StandardMetadataKeys.DefaultAlbum;
+    _metadata[StandardMetadataKeys.AlbumArtUrl] = StandardMetadataKeys.DefaultAlbumArtUrl;
+    
+    // Additional file info (not standard metadata)
     _metadata["FileName"] = Path.GetFileName(filePath);
     _metadata["Directory"] = Path.GetDirectoryName(filePath) ?? "";
     _metadata["Extension"] = Path.GetExtension(filePath);
@@ -1170,52 +1177,52 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
           _duration = TimeSpan.Zero;
         }
 
-        _metadata["Duration"] = _duration.ToString();
-        _metadata["SampleRate"] = formatInfo.SampleRate.ToString();
-        _metadata["Channels"] = formatInfo.ChannelCount.ToString();
-        _metadata["BitRate"] = formatInfo.Bitrate.ToString();
+        _metadata[StandardMetadataKeys.Duration] = _duration;
+        _metadata["SampleRate"] = formatInfo.SampleRate;
+        _metadata["Channels"] = formatInfo.ChannelCount;
+        _metadata["BitRate"] = formatInfo.Bitrate;
 
-        // Get tags (Title, Artist, Album, etc.)
+        // Get tags (Title, Artist, Album, etc.) - override defaults if available
         if (formatInfo.Tags != null)
         {
           if (!string.IsNullOrEmpty(formatInfo.Tags.Title))
           {
-            _metadata["Title"] = formatInfo.Tags.Title;
+            _metadata[StandardMetadataKeys.Title] = formatInfo.Tags.Title;
           }
           if (!string.IsNullOrEmpty(formatInfo.Tags.Artist))
           {
-            _metadata["Artist"] = formatInfo.Tags.Artist;
+            _metadata[StandardMetadataKeys.Artist] = formatInfo.Tags.Artist;
           }
           if (!string.IsNullOrEmpty(formatInfo.Tags.Album))
           {
-            _metadata["Album"] = formatInfo.Tags.Album;
+            _metadata[StandardMetadataKeys.Album] = formatInfo.Tags.Album;
           }
           if (!string.IsNullOrEmpty(formatInfo.Tags.Genre))
           {
-            _metadata["Genre"] = formatInfo.Tags.Genre;
+            _metadata[StandardMetadataKeys.Genre] = formatInfo.Tags.Genre;
           }
           if (formatInfo.Tags.Year.HasValue)
           {
-            _metadata["Year"] = formatInfo.Tags.Year.Value.ToString();
+            _metadata[StandardMetadataKeys.Year] = formatInfo.Tags.Year.Value;
           }
           if (formatInfo.Tags.TrackNumber.HasValue)
           {
-            _metadata["TrackNumber"] = formatInfo.Tags.TrackNumber.Value.ToString();
+            _metadata[StandardMetadataKeys.TrackNumber] = formatInfo.Tags.TrackNumber.Value;
           }
         }
 
         Logger.LogDebug(
           "Loaded metadata for {File}: Title={Title}, Artist={Artist}, Duration={Duration}",
           Path.GetFileName(filePath),
-          _metadata.GetValueOrDefault("Title"),
-          _metadata.GetValueOrDefault("Artist"),
+          _metadata.GetValueOrDefault(StandardMetadataKeys.Title),
+          _metadata.GetValueOrDefault(StandardMetadataKeys.Artist),
           _duration);
       }
       else
       {
         // Fallback to basic file info only
         _duration = TimeSpan.Zero;
-        _metadata["Duration"] = _duration.ToString();
+        _metadata[StandardMetadataKeys.Duration] = _duration;
         Logger.LogDebug("Could not read metadata from {File}, using file name as title", filePath);
       }
     }
@@ -1223,7 +1230,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     {
       Logger.LogWarning(ex, "Failed to read metadata from {File}, using default values", filePath);
       _duration = TimeSpan.Zero;
-      _metadata["Duration"] = _duration.ToString();
+      _metadata[StandardMetadataKeys.Duration] = _duration;
     }
   }
 }

@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Models.Audio;
 
 namespace Radio.Infrastructure.Audio.Sources.Primary;
 
@@ -44,6 +45,11 @@ public class RadioAudioSource : USBAudioSourceBase
   {
     var usbPort = _deviceOptions.CurrentValue.Radio.USBPort;
 
+    // Set standard metadata with defaults for Radio source
+    MetadataInternal[StandardMetadataKeys.Title] = "Radio";
+    MetadataInternal[StandardMetadataKeys.Artist] = StandardMetadataKeys.DefaultArtist;
+    MetadataInternal[StandardMetadataKeys.Album] = StandardMetadataKeys.DefaultAlbum;
+    MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = StandardMetadataKeys.DefaultAlbumArtUrl;
     MetadataInternal["Source"] = "Radio";
     MetadataInternal["Device"] = "Raddy RF320";
 

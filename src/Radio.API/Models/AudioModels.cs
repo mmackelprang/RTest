@@ -175,8 +175,9 @@ public class AudioSourceDto
 
   /// <summary>
   /// Gets or sets the metadata about current content.
+  /// Values are typed objects (e.g., TimeSpan for Duration, int for TrackNumber).
   /// </summary>
-  public Dictionary<string, string>? Metadata { get; set; }
+  public Dictionary<string, object>? Metadata { get; set; }
 }
 
 /// <summary>

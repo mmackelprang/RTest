@@ -68,9 +68,10 @@ public interface IPrimaryAudioSource : IAudioSource
 
   /// <summary>
   /// Gets metadata about the currently playing content.
-  /// Common keys include: Title, Artist, Album, Duration.
+  /// Use StandardMetadataKeys constants for consistent key names.
+  /// Values are typed objects (e.g., TimeSpan for Duration, int for TrackNumber).
   /// </summary>
-  IReadOnlyDictionary<string, string> Metadata { get; }
+  IReadOnlyDictionary<string, object> Metadata { get; }
 
   // Capability properties
 

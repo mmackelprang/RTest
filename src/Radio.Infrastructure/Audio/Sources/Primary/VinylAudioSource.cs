@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Models.Audio;
 
 namespace Radio.Infrastructure.Audio.Sources.Primary;
 
@@ -44,6 +45,11 @@ public class VinylAudioSource : USBAudioSourceBase
   {
     var usbPort = _deviceOptions.CurrentValue.Vinyl.USBPort;
 
+    // Set standard metadata with defaults for Vinyl source
+    MetadataInternal[StandardMetadataKeys.Title] = "Vinyl";
+    MetadataInternal[StandardMetadataKeys.Artist] = StandardMetadataKeys.DefaultArtist;
+    MetadataInternal[StandardMetadataKeys.Album] = StandardMetadataKeys.DefaultAlbum;
+    MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = StandardMetadataKeys.DefaultAlbumArtUrl;
     MetadataInternal["Source"] = "Vinyl";
     MetadataInternal["Device"] = "Turntable";
 
