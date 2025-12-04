@@ -69,6 +69,8 @@ public class RadioController : ControllerBase
   {
     try
     {
+      // Note: Frequency validation is delegated to IRadioControls.SetFrequencyAsync
+      // which throws ArgumentOutOfRangeException for invalid values
       var radioSource = GetActiveRadioSource();
       if (radioSource == null)
       {
@@ -198,6 +200,8 @@ public class RadioController : ControllerBase
   {
     try
     {
+      // Note: Step validation is delegated to IRadioControls.SetFrequencyStepAsync
+      // which throws ArgumentOutOfRangeException for invalid values
       var radioSource = GetActiveRadioSource();
       if (radioSource == null)
       {
@@ -346,8 +350,11 @@ public class RadioController : ControllerBase
         return BadRequest(new { error = "Radio is not the active source" });
       }
 
+      // Note: DeviceVolume is a synchronous property per IRadioControls interface design
       radioSource.DeviceVolume = request.Volume;
-      return Ok(MapToRadioStateDto(radioSource));
+      
+      // Return result on the same async context
+      return await Task.FromResult(Ok(MapToRadioStateDto(radioSource)));
     }
     catch (Exception ex)
     {
