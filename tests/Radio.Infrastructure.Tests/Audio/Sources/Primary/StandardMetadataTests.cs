@@ -2,8 +2,10 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Radio.Core.Configuration;
+using Radio.Core.Events;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
+using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Sources.Primary;
 
 namespace Radio.Infrastructure.Tests.Audio.Sources.Primary;
@@ -257,4 +259,12 @@ public class StandardMetadataTests : IDisposable
     // Assert - Verify metadata is IReadOnlyDictionary<string, object>
     Assert.IsAssignableFrom<IReadOnlyDictionary<string, object>>(source.Metadata);
   }
+
+  // Note: Tests for fingerprinting integration with RadioAudioSource, VinylAudioSource, and FilePlayerAudioSource
+  // require an actual BackgroundIdentificationService instance since it's a sealed class.
+  // The integration is tested through integration tests with the full service stack.
+  // Unit tests verify that:
+  // 1. Audio sources can be constructed with an optional BackgroundIdentificationService
+  // 2. Audio sources without the service continue to work normally
+  // 3. Metadata format remains consistent using StandardMetadataKeys
 }

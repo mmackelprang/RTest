@@ -1,8 +1,10 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Core.Events;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
+using Radio.Infrastructure.Audio.Fingerprinting;
 using SoundFlow.Backends.MiniAudio;
 using SoundFlow.Interfaces;
 using SoundFlow.Metadata;
@@ -13,11 +15,13 @@ namespace Radio.Infrastructure.Audio.Sources.Primary;
 
 /// <summary>
 /// Audio file player source supporting single files, playlists, and directories.
+/// Supports automatic track identification via fingerprinting when file tags are missing.
 /// </summary>
 public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 {
   private readonly IOptionsMonitor<FilePlayerOptions> _options;
   private readonly IOptionsMonitor<FilePlayerPreferences> _preferences;
+  private readonly BackgroundIdentificationService? _identificationService;
   private readonly string _rootDir;
   private readonly Dictionary<string, object> _metadata = new();
   private Queue<string> _playlist = new();
@@ -38,16 +42,25 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <param name="options">The file player options.</param>
   /// <param name="preferences">The file player preferences.</param>
   /// <param name="rootDir">The root directory for audio files.</param>
+  /// <param name="identificationService">Optional fingerprinting service for track identification.</param>
   public FilePlayerAudioSource(
     ILogger<FilePlayerAudioSource> logger,
     IOptionsMonitor<FilePlayerOptions> options,
     IOptionsMonitor<FilePlayerPreferences> preferences,
-    string rootDir = "")
+    string rootDir = "",
+    BackgroundIdentificationService? identificationService = null)
     : base(logger)
   {
     _options = options;
     _preferences = preferences;
     _rootDir = rootDir;
+    _identificationService = identificationService;
+
+    // Subscribe to track identification events if service is available
+    if (_identificationService != null)
+    {
+      _identificationService.TrackIdentified += OnTrackIdentified;
+    }
   }
 
   /// <inheritdoc/>
@@ -565,6 +578,12 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <inheritdoc/>
   protected override async ValueTask DisposeAsyncCore()
   {
+    // Unsubscribe from events
+    if (_identificationService != null)
+    {
+      _identificationService.TrackIdentified -= OnTrackIdentified;
+    }
+
     // Save state for next session
     if (_currentFile != null)
     {
@@ -1217,12 +1236,24 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
           _metadata.GetValueOrDefault(StandardMetadataKeys.Title),
           _metadata.GetValueOrDefault(StandardMetadataKeys.Artist),
           _duration);
+
+        // Check if metadata is incomplete (using defaults)
+        bool hasIncompleteMetadata = 
+          _metadata[StandardMetadataKeys.Artist].Equals(StandardMetadataKeys.DefaultArtist) ||
+          _metadata[StandardMetadataKeys.Album].Equals(StandardMetadataKeys.DefaultAlbum);
+
+        if (hasIncompleteMetadata)
+        {
+          Logger.LogDebug("File {File} has incomplete metadata, fingerprinting may provide additional info", filePath);
+          _metadata["NeedsFingerprintingLookup"] = true;
+        }
       }
       else
       {
         // Fallback to basic file info only
         _duration = TimeSpan.Zero;
         _metadata[StandardMetadataKeys.Duration] = _duration;
+        _metadata["NeedsFingerprintingLookup"] = true;
         Logger.LogDebug("Could not read metadata from {File}, using file name as title", filePath);
       }
     }
@@ -1231,6 +1262,85 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       Logger.LogWarning(ex, "Failed to read metadata from {File}, using default values", filePath);
       _duration = TimeSpan.Zero;
       _metadata[StandardMetadataKeys.Duration] = _duration;
+      _metadata["NeedsFingerprintingLookup"] = true;
     }
+  }
+
+  /// <summary>
+  /// Handles the TrackIdentified event from the fingerprinting service.
+  /// Updates metadata with identified track information when file tags are incomplete.
+  /// </summary>
+  private void OnTrackIdentified(object? sender, TrackIdentifiedEventArgs e)
+  {
+    // Only update metadata if this is the active source and metadata is incomplete
+    if (State != AudioSourceState.Playing && State != AudioSourceState.Paused)
+    {
+      return;
+    }
+
+    // Check if current file needs fingerprinting lookup
+    if (!_metadata.ContainsKey("NeedsFingerprintingLookup") || 
+        !(_metadata["NeedsFingerprintingLookup"] is bool needsLookup && needsLookup))
+    {
+      return;
+    }
+
+    var track = e.Track;
+    Logger.LogInformation(
+      "Updating FilePlayer metadata from fingerprinting: {Title} by {Artist} (confidence: {Confidence:P0})",
+      track.Title, track.Artist, e.Confidence);
+
+    // Only update fields that are using defaults (incomplete)
+    if (_metadata[StandardMetadataKeys.Artist].Equals(StandardMetadataKeys.DefaultArtist))
+    {
+      _metadata[StandardMetadataKeys.Artist] = track.Artist;
+    }
+
+    if (_metadata[StandardMetadataKeys.Album].Equals(StandardMetadataKeys.DefaultAlbum) && 
+        !string.IsNullOrEmpty(track.Album))
+    {
+      _metadata[StandardMetadataKeys.Album] = track.Album;
+    }
+
+    // Update title if it's just the filename (contains extension or equals filename without extension)
+    var currentTitle = _metadata[StandardMetadataKeys.Title]?.ToString() ?? "";
+    var filename = Path.GetFileNameWithoutExtension(_currentFile ?? "");
+    if (currentTitle.Equals(filename, StringComparison.OrdinalIgnoreCase))
+    {
+      _metadata[StandardMetadataKeys.Title] = track.Title;
+    }
+
+    // Add album art if using default
+    if (_metadata[StandardMetadataKeys.AlbumArtUrl].Equals(StandardMetadataKeys.DefaultAlbumArtUrl) &&
+        !string.IsNullOrEmpty(track.CoverArtUrl))
+    {
+      _metadata[StandardMetadataKeys.AlbumArtUrl] = track.CoverArtUrl;
+    }
+
+    // Add optional metadata if not already present
+    if (!_metadata.ContainsKey(StandardMetadataKeys.Genre) && track.Genre != null)
+    {
+      _metadata[StandardMetadataKeys.Genre] = track.Genre;
+    }
+
+    if (!_metadata.ContainsKey(StandardMetadataKeys.Year) && track.ReleaseYear.HasValue)
+    {
+      _metadata[StandardMetadataKeys.Year] = track.ReleaseYear.Value;
+    }
+
+    if (!_metadata.ContainsKey(StandardMetadataKeys.TrackNumber) && track.TrackNumber.HasValue)
+    {
+      _metadata[StandardMetadataKeys.TrackNumber] = track.TrackNumber.Value;
+    }
+
+    // Mark that fingerprinting has been applied
+    _metadata["NeedsFingerprintingLookup"] = false;
+    _metadata["IdentificationConfidence"] = e.Confidence;
+    _metadata["IdentifiedAt"] = e.IdentifiedAt;
+    _metadata["MetadataSource"] = "Fingerprinting";
+
+    Logger.LogInformation(
+      "File metadata enhanced via fingerprinting: {Title} by {Artist}",
+      _metadata[StandardMetadataKeys.Title], _metadata[StandardMetadataKeys.Artist]);
   }
 }
