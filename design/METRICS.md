@@ -41,53 +41,151 @@ Three separate tables: `MetricData_Minute`, `MetricData_Hour`, `MetricData_Day`.
 
 ## Implementation Phases
 
-### Phase 1: Core Domain Definitions
+### Phase 1: Core Domain Definitions ✅ COMPLETED
 Define the interfaces and types in the Core layer. This establishes the contract that the rest of the application will use.
 
-**Files:**
-*   `src/RadioConsole.Core/Metrics/MetricType.cs`
-*   `src/RadioConsole.Core/Metrics/MetricPoint.cs` (DTO for reading)
-*   `src/RadioConsole.Core/Interfaces/IMetricsCollector.cs`
-*   `src/RadioConsole.Core/Interfaces/IMetricsReader.cs`
+**Status:** ✅ Completed (2025-12-04)
 
-**Coding Assistant Prompt:**
-> "I need to implement the Core metrics domain. Please create an Enum `MetricType` (Counter, Gauge), and an interface `IMetricsCollector` with methods `Increment(key, value, tags)` and `Gauge(key, value, tags)`. Also create `IMetricsReader` for retrieving history. Place these in `RadioConsole.Core/Metrics` and `RadioConsole.Core/Interfaces`."
+**Files Created:**
+*   `src/Radio.Core/Metrics/MetricType.cs` ✅
+*   `src/Radio.Core/Metrics/MetricResolution.cs` ✅
+*   `src/Radio.Core/Metrics/MetricPoint.cs` ✅
+*   `src/Radio.Core/Interfaces/IMetricsCollector.cs` ✅
+*   `src/Radio.Core/Interfaces/IMetricsReader.cs` ✅
+*   `src/Radio.Core/Configuration/MetricsOptions.cs` ✅
 
-### Phase 2: SQLite Infrastructure
+**Notes:**
+- Added MetricResolution enum for time bucket resolution
+- MetricsOptions configured with sensible defaults
+- All interfaces include comprehensive XML documentation
+
+### Phase 2: SQLite Infrastructure ✅ COMPLETED
 Implement the persistence layer. This involves creating the SQLite tables and the repository to read/write them.
 
-**Files:**
-*   `src/RadioConsole.Infrastructure/Data/MetricsDbContext.cs` (or existing context)
-*   `src/RadioConsole.Infrastructure/Repositories/SqliteMetricsRepository.cs`
+**Status:** ✅ Completed (2025-12-04)
 
-**Coding Assistant Prompt:**
-> "Implement `SqliteMetricsRepository` in the Infrastructure layer. It needs to manage tables for `MetricDefinitions` and `MetricData_Minute/Hour/Day`. Implement a method `SaveBucketsAsync` that takes a batch of in-memory buckets and upserts them into the `MetricData_Minute` table. Ensure you handle the foreign key relationship with `MetricDefinitions` efficiently (cache the definitions)."
+**Files Created:**
+*   `src/Radio.Infrastructure/Metrics/Data/MetricsDbContext.cs` ✅
+*   `src/Radio.Infrastructure/Metrics/Repositories/SqliteMetricsRepository.cs` ✅
 
-### Phase 3: Buffered Collector Service
+**Notes:**
+- MetricsDbContext manages connection, schema creation, and metric definition caching
+- SqliteMetricsRepository implements IMetricsReader and provides SaveBuckets, Rollup, and Prune operations
+- Database schema includes MetricDefinitions and three resolution tables (Minute/Hour/Day)
+- Efficient upsert operations for handling concurrent metric writes
+
+### Phase 3: Buffered Collector Service ✅ COMPLETED
 Implement the logic that buffers metrics in memory to prevent disk thrashing. This service will flush to the database every 60 seconds.
 
-**Files:**
-*   `src/RadioConsole.Infrastructure/Services/BufferedMetricsCollector.cs`
+**Status:** ✅ Completed (2025-12-04)
 
-**Coding Assistant Prompt:**
-> "Create a class `BufferedMetricsCollector` that implements `IMetricsCollector` and `IHostedService`. It should use a `ConcurrentDictionary` to aggregate metrics in memory. Use a `System.Threading.Timer` to flush this buffer to the `SqliteMetricsRepository` every 60 seconds. Ensure thread safety when swapping the buffer during a flush."
+**Files Created:**
+*   `src/Radio.Infrastructure/Metrics/Services/BufferedMetricsCollector.cs` ✅
 
-### Phase 4: Rollup & Pruning Service
+**Notes:**
+- Implements both IMetricsCollector and IHostedService
+- Uses ConcurrentDictionary for thread-safe metric buffering
+- Timer-based periodic flush configurable via MetricsOptions
+- Respects metrics.Enabled configuration flag
+
+### Phase 4: Rollup & Pruning Service ✅ COMPLETED
 Implement the background service that aggregates data from Minute -> Hour -> Day and deletes old data.
 
+**Status:** ✅ Completed (2025-12-04)
+
+**Files Created:**
+*   `src/Radio.Infrastructure/Metrics/Services/MetricsRollupService.cs` ✅
+
 **Logic:**
-*   **Hourly:** Aggregate `MetricData_Minute` > 2 hours old into `MetricData_Hour`. Delete processed minute rows.
-*   **Daily:** Aggregate `MetricData_Hour` > 48 hours old into `MetricData_Day`. Delete processed hour rows.
+*   **Hourly:** Aggregate `MetricData_Minute` > retention period into `MetricData_Hour`. Delete processed minute rows. ✅
+*   **Daily:** Aggregate `MetricData_Hour` > retention period into `MetricData_Day`. Delete processed hour rows. ✅
+*   **Pruning:** Delete data older than configured retention periods for each resolution. ✅
 
-**Coding Assistant Prompt:**
-> "Create a `MetricsRollupService` (BackgroundService). It should run hourly. It needs to query `MetricData_Minute`, aggregate the rows by Hour (Sum for counters, recalculate Min/Max/Avg for gauges), insert them into `MetricData_Hour`, and then delete the old minute rows. Repeat the pattern for rolling Hour data into Day data."
+**Notes:**
+- Runs as BackgroundService with configurable interval
+- Respects retention policies from MetricsOptions
+- Comprehensive error handling and logging
 
-### Phase 5: Integration (Adding the Metrics)
+### Phase 5: Integration (Adding the Metrics) ✅ COMPLETED
 Inject the collector into existing services and instrument the code.
+
+**Status:** ✅ Completed (2025-12-04)
+
+**Files Created:**
+*   `src/Radio.Infrastructure/Metrics/Services/SystemMonitorService.cs` ✅
+*   `src/Radio.Infrastructure/DependencyInjection/MetricsServiceExtensions.cs` ✅
 
 **Integration Points:**
 
-#### 1. Audio Playback & Library (Core)
+#### 1. System Health & Hardware (Infrastructure) ✅ COMPLETED
+*   **Location:** `SystemMonitorService` (New Background Service) ✅
+*   **Metrics:**
+    *   `system.disk_usage_percent` (Gauge): Check drive available space. ✅
+    *   `system.cpu_temp_celsius` (Gauge): Read from Pi sensors (`/sys/class/thermal/thermal_zone0/temp`). ✅
+    *   `system.memory_usage_mb` (Gauge): `Process.GetCurrentProcess().WorkingSet64`. ✅
+    *   `db.file_size_mb` (Gauge): Check `FileInfo` size of the SQLite db. ✅
+
+#### 2. Audio Playback & Library (Core) - Deferred
+*   **Locations:** `AudioPlayerService`, `LibraryManager`
+*   **Metrics:** (Will be instrumented when audio services are available)
+    *   `radio.songs_played_total` (Counter): Increment when track finishes.
+    *   `radio.songs_skipped` (Counter): Increment when track is skipped.
+    *   `radio.playback_errors` (Counter): Increment on playback exceptions.
+    *   `library.tracks_total` (Gauge): Update after library scan.
+    *   `library.scan_duration_ms` (Gauge): Measure duration of scan operation.
+    *   `library.new_tracks_added` (Counter): Count of new files found during scan.
+
+#### 3. Text-to-Speech Services (Infrastructure) - Deferred
+*   **Locations:** `TtsService` (and specific providers like `AzureTtsProvider`, `GoogleTtsProvider`)
+*   **Metrics:** (Will be instrumented when TTS services are instrumented)
+    *   `tts.requests_total` (Counter): Increment on request, tag by provider (e.g., `provider=azure`).
+    *   `tts.latency_ms` (Gauge): Measure stopwatch time from request to audio ready.
+    *   `tts.characters_processed` (Counter): Increment by `text.Length`. Critical for cost tracking.
+    *   `tts.cache_hits` / `tts.cache_misses` (Counter): Increment based on whether audio file existed locally.
+
+#### 4. API & Web Usage (Web/API) - Deferred
+*   **Location:** `RadioController`, `WebSocketHub`
+*   **Metrics:** (Will be added when instrumented)
+    *   `api.requests_total` (Counter): Middleware to count HTTP requests.
+    *   `websocket.connected_clients` (Gauge): Track active connections in Hub.
+    *   `ui.button_clicks` (Counter): Received via API from frontend (e.g., `POST /api/metrics/event`).
+
+**Notes:**
+- Core metrics infrastructure is complete and functional
+- System monitoring service is running and collecting metrics every 5 minutes
+- DI registration is complete and metrics services are properly configured
+- Additional instrumentation points can be added as services become available
+
+### Phase 6: REST API Layer ✅ COMPLETED
+Expose the metrics to the frontend for visualization.
+
+**Status:** ✅ Completed (2025-12-04)
+
+**Files Created:**
+*   `src/Radio.API/Controllers/MetricsController.cs` ✅
+
+**Endpoints:**
+1.  **Get History:** `GET /api/metrics/history` ✅
+    *   **Params:** `key` (string), `start` (DateTimeOffset), `end` (DateTimeOffset), `resolution` (Minute/Hour/Day)
+    *   **Response:** JSON array of time-series data points.
+    *   **Usage:** Charts (e.g., "Songs per Hour").
+2.  **Get Snapshots:** `GET /api/metrics/snapshots` ✅
+    *   **Params:** `keys` (comma-separated string)
+    *   **Response:** Dictionary of metric keys to aggregate values.
+    *   **Usage:** Multiple dashboard widgets.
+3.  **Get Aggregate:** `GET /api/metrics/aggregate` ✅
+    *   **Params:** `key` (string)
+    *   **Response:** Single value (Total for Counters, Last for Gauges).
+    *   **Usage:** Dashboard widgets (e.g., "Total Characters Spoken", "Current CPU Temp").
+4.  **List Keys:** `GET /api/metrics/keys` ✅
+    *   **Response:** List of all available metric keys.
+    *   **Usage:** Metric discovery for UI.
+
+**Notes:**
+- All endpoints include proper error handling and logging
+- API includes comprehensive XML documentation for Swagger
+- Supports flexible querying with different time resolutions
+- Metric key listing enables dynamic UI construction
 *   **Locations:** `AudioPlayerService`, `LibraryManager`
 *   **Metrics:**
     *   `radio.songs_played_total` (Counter): Increment when track finishes.
