@@ -64,6 +64,9 @@ builder.Services.AddSpotifyServices();
 // Add the visualization broadcast background service
 builder.Services.AddHostedService<VisualizationBroadcastService>();
 
+// Add the audio state update background service
+builder.Services.AddHostedService<AudioStateUpdateService>();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -87,14 +90,15 @@ app.UseAuthorization();
 // Map controllers
 app.MapControllers();
 
-// Map SignalR hub
+// Map SignalR hubs
 app.MapHub<AudioVisualizationHub>("/hubs/visualization");
+app.MapHub<AudioStateHub>("/hubs/audio");
 
 try
 {
   Log.Information("Starting Radio Console API");
   Log.Information("Swagger UI available at /swagger");
-  Log.Information("SignalR hub available at /hubs/visualization");
+  Log.Information("SignalR hubs available at /hubs/visualization and /hubs/audio");
   Log.Information("Audio stream available at /stream/audio");
   app.Run();
 }
