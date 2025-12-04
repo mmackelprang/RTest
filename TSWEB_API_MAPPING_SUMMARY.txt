@@ -1,0 +1,49 @@
+TSWEB API MAPPING - QUICK REFERENCE
+====================================
+
+OVERALL STATUS:
+- Total Endpoints Analyzed: 102+
+- Fully Compatible: 7 endpoints (7%)
+- Partial Match: 20 endpoints (20%)
+- Missing in C#: 21 endpoints (21%)
+- C# Only: 49 endpoints (48%)
+- SignalR Implementations: 5 hubs
+
+CRITICAL MISSING FEATURES (Must Implement):
+1. Radio Presets System (GET/POST/DELETE /radio/presets)
+2. File Management System (GET/POST /files, /files/play, /files/queue)
+3. System Stats (GET /system/stats - CPU, RAM, uptime)
+4. System Logs (GET /system/logs - with filtering)
+5. Source Switching (Complete the 501 implementation)
+6. Configuration Updates (Complete the 501 implementation)
+
+TOP RECOMMENDATIONS:
+1. Add separate REST endpoints matching TypeScript spec (/api/playback/*)
+2. Implement radio preset management system
+3. Implement file browser and playback system
+4. Add system monitoring endpoints
+5. Update TypeScript spec to include all C# features
+
+IMPLEMENTATION PHASES:
+Phase 1 (Weeks 1-2): Critical missing features
+Phase 2 (Week 3): System monitoring
+Phase 3 (Week 4): API normalization
+Phase 4 (Week 5): Documentation
+Phase 5 (Week 6+): Blazor integration
+
+STRENGTHS OF C# IMPLEMENTATION:
+- Excellent Spotify OAuth with PKCE
+- Comprehensive queue management
+- Advanced metrics system
+- Real-time SignalR hubs
+- Detailed play history tracking
+- Device management APIs
+
+NEXT STEPS:
+1. Review TSWEB_API_MAPPING.md for full details
+2. Prioritize radio presets and file management
+3. Complete partial implementations
+4. Add endpoint aliases for consistency
+5. Update TypeScript spec with C# features
+
+See TSWEB_API_MAPPING.md for complete analysis and recommendations.
