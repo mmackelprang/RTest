@@ -475,8 +475,10 @@ public class AudioController : ControllerBase
           nowPlaying.Position = primary.Position;
           nowPlaying.Duration = primary.Duration;
 
-          // Calculate progress percentage if duration is available
-          if (primary.Duration.HasValue && primary.Duration.Value.TotalSeconds > 0)
+          // Calculate progress percentage if both duration and position are valid
+          if (primary.Duration.HasValue && 
+              primary.Duration.Value.TotalSeconds > 0 && 
+              primary.Position.TotalSeconds >= 0)
           {
             nowPlaying.ProgressPercentage = (primary.Position.TotalSeconds / primary.Duration.Value.TotalSeconds) * 100.0;
           }
