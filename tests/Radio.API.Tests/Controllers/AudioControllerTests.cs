@@ -234,4 +234,88 @@ public class AudioControllerTests : IClassFixture<WebApplicationFactory<Program>
     Assert.False(state.IsShuffleEnabled);
     // RepeatMode will be null when no active source
   }
+
+  [Fact]
+  public async Task GetNowPlaying_WithNoActiveSource_ReturnsValidDefaults()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/audio/nowplaying");
+
+    // Assert
+    Assert.True(response.IsSuccessStatusCode, $"Expected success, got {response.StatusCode}");
+
+    var nowPlaying = await response.Content.ReadFromJsonAsync<NowPlayingDto>();
+    Assert.NotNull(nowPlaying);
+
+    // Verify defaults are returned when no source is active
+    Assert.Equal("None", nowPlaying.SourceType);
+    Assert.Equal("No Source", nowPlaying.SourceName);
+    Assert.False(nowPlaying.IsPlaying);
+    Assert.False(nowPlaying.IsPaused);
+
+    // Track info should have defaults (never null)
+    Assert.Equal("No Track", nowPlaying.Title);
+    Assert.Equal("--", nowPlaying.Artist);
+    Assert.Equal("--", nowPlaying.Album);
+    Assert.Equal("/images/default-album-art.png", nowPlaying.AlbumArtUrl);
+
+    // Timing should be null when no track
+    Assert.Null(nowPlaying.Position);
+    Assert.Null(nowPlaying.Duration);
+    Assert.Null(nowPlaying.ProgressPercentage);
+
+    // Extended metadata should be null when no source
+    Assert.Null(nowPlaying.ExtendedMetadata);
+  }
+
+  [Fact]
+  public async Task GetNowPlaying_AlwaysReturnsNonNullStrings()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/audio/nowplaying");
+
+    // Assert
+    Assert.True(response.IsSuccessStatusCode, $"Expected success, got {response.StatusCode}");
+
+    var nowPlaying = await response.Content.ReadFromJsonAsync<NowPlayingDto>();
+    Assert.NotNull(nowPlaying);
+
+    // Verify that all string properties are never null
+    Assert.NotNull(nowPlaying.SourceType);
+    Assert.NotNull(nowPlaying.SourceName);
+    Assert.NotNull(nowPlaying.Title);
+    Assert.NotNull(nowPlaying.Artist);
+    Assert.NotNull(nowPlaying.Album);
+    Assert.NotNull(nowPlaying.AlbumArtUrl);
+
+    // These strings should never be empty when defaults are returned
+    Assert.NotEmpty(nowPlaying.SourceType);
+    Assert.NotEmpty(nowPlaying.SourceName);
+    Assert.NotEmpty(nowPlaying.Title);
+    Assert.NotEmpty(nowPlaying.Artist);
+    Assert.NotEmpty(nowPlaying.Album);
+    Assert.NotEmpty(nowPlaying.AlbumArtUrl);
+  }
+
+  [Fact]
+  public async Task GetNowPlaying_ReturnsExpectedStructure()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/audio/nowplaying");
+
+    // Assert
+    Assert.True(response.IsSuccessStatusCode, $"Expected success, got {response.StatusCode}");
+
+    var nowPlaying = await response.Content.ReadFromJsonAsync<NowPlayingDto>();
+    Assert.NotNull(nowPlaying);
+
+    // Verify the DTO has all expected properties populated
+    // (using the deserialized object instead of string checking for case-insensitive JSON)
+    Assert.NotNull(nowPlaying.SourceType);
+    Assert.NotNull(nowPlaying.SourceName);
+    Assert.NotNull(nowPlaying.Title);
+    Assert.NotNull(nowPlaying.Artist);
+    Assert.NotNull(nowPlaying.Album);
+    Assert.NotNull(nowPlaying.AlbumArtUrl);
+  }
 }
