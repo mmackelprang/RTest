@@ -1,6 +1,9 @@
 using Microsoft.Extensions.Logging;
+using Radio.Core.Events;
 using Radio.Core.Exceptions;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Models.Audio;
+using Radio.Infrastructure.Audio.Fingerprinting;
 using SoundFlow.Abstracts.Devices;
 using SoundFlow.Backends.MiniAudio;
 using SoundFlow.Enums;
@@ -11,12 +14,13 @@ namespace Radio.Infrastructure.Audio.Sources.Primary;
 /// <summary>
 /// Base class for USB audio sources that capture audio from USB audio input devices.
 /// Provides common functionality for USB port reservation, sound component management,
-/// and live stream handling.
+/// live stream handling, and fingerprinting integration.
 /// </summary>
 public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
 {
   private readonly IAudioDeviceManager _deviceManager;
-  private readonly Dictionary<string, string> _metadata = new();
+  private readonly Dictionary<string, object> _metadata = new();
+  private readonly BackgroundIdentificationService? _identificationService;
   private string? _reservedPort;
   private object? _soundComponent;
   private AudioCaptureDevice? _captureDevice;
@@ -27,10 +31,21 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   /// </summary>
   /// <param name="logger">The logger instance.</param>
   /// <param name="deviceManager">The audio device manager.</param>
-  protected USBAudioSourceBase(ILogger logger, IAudioDeviceManager deviceManager)
+  /// <param name="identificationService">Optional fingerprinting service for track identification.</param>
+  protected USBAudioSourceBase(
+    ILogger logger, 
+    IAudioDeviceManager deviceManager,
+    BackgroundIdentificationService? identificationService = null)
     : base(logger)
   {
     _deviceManager = deviceManager;
+    _identificationService = identificationService;
+
+    // Subscribe to track identification events if service is available
+    if (_identificationService != null)
+    {
+      _identificationService.TrackIdentified += OnTrackIdentified;
+    }
   }
 
   /// <inheritdoc/>
@@ -43,7 +58,7 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   public override bool IsSeekable => false; // Live input cannot be seeked
 
   /// <inheritdoc/>
-  public override IReadOnlyDictionary<string, string> Metadata => _metadata;
+  public override IReadOnlyDictionary<string, object> Metadata => _metadata;
 
   /// <summary>
   /// Gets the reserved USB port path, or null if not reserved.
@@ -58,7 +73,7 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   /// <summary>
   /// Gets the metadata dictionary for modification by derived classes.
   /// </summary>
-  protected Dictionary<string, string> MetadataInternal => _metadata;
+  protected Dictionary<string, object> MetadataInternal => _metadata;
 
   /// <summary>
   /// Gets or sets the sound component. Can be accessed by derived classes.
@@ -239,9 +254,92 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
     return Task.CompletedTask;
   }
 
+  /// <summary>
+  /// Handles the TrackIdentified event from the fingerprinting service.
+  /// Updates metadata with identified track information.
+  /// </summary>
+  /// <param name="sender">The event sender.</param>
+  /// <param name="e">The event arguments containing track metadata.</param>
+  private void OnTrackIdentified(object? sender, TrackIdentifiedEventArgs e)
+  {
+    // Only update metadata if this is the active source
+    if (State != AudioSourceState.Playing && State != AudioSourceState.Paused)
+    {
+      return;
+    }
+
+    var track = e.Track;
+    Logger.LogInformation(
+      "Updating {SourceName} metadata from fingerprinting: {Title} by {Artist} (confidence: {Confidence:P0})",
+      Name, track.Title, track.Artist, e.Confidence);
+
+    // Update metadata with fingerprinted track information using StandardMetadataKeys
+    UpdateMetadataFromFingerprint(track, e.Confidence, e.IdentifiedAt);
+  }
+
+  /// <summary>
+  /// Updates metadata from fingerprinted track information.
+  /// Can be overridden by derived classes to customize behavior.
+  /// </summary>
+  /// <param name="track">The identified track metadata.</param>
+  /// <param name="confidence">The confidence level of the identification.</param>
+  /// <param name="identifiedAt">When the track was identified.</param>
+  protected virtual void UpdateMetadataFromFingerprint(TrackMetadata track, double confidence, DateTime identifiedAt)
+  {
+    // Store current source/device info to restore later
+    var sourceInfo = _metadata.TryGetValue("Source", out var source) ? source : null;
+    var deviceInfo = _metadata.TryGetValue("Device", out var device) ? device : null;
+
+    // Update standard metadata fields
+    _metadata[StandardMetadataKeys.Title] = track.Title;
+    _metadata[StandardMetadataKeys.Artist] = track.Artist;
+    _metadata[StandardMetadataKeys.Album] = track.Album ?? StandardMetadataKeys.DefaultAlbum;
+    
+    // Use CoverArtUrl from fingerprinting if available, otherwise use default
+    _metadata[StandardMetadataKeys.AlbumArtUrl] = !string.IsNullOrEmpty(track.CoverArtUrl)
+      ? track.CoverArtUrl
+      : StandardMetadataKeys.DefaultAlbumArtUrl;
+
+    // Add optional metadata if available
+    if (track.Genre != null)
+    {
+      _metadata[StandardMetadataKeys.Genre] = track.Genre;
+    }
+
+    if (track.ReleaseYear.HasValue)
+    {
+      _metadata[StandardMetadataKeys.Year] = track.ReleaseYear.Value;
+    }
+
+    if (track.TrackNumber.HasValue)
+    {
+      _metadata[StandardMetadataKeys.TrackNumber] = track.TrackNumber.Value;
+    }
+
+    // Restore source/device information
+    if (sourceInfo != null)
+    {
+      _metadata["Source"] = sourceInfo;
+    }
+    if (deviceInfo != null)
+    {
+      _metadata["Device"] = deviceInfo;
+    }
+
+    // Add fingerprinting metadata
+    _metadata["IdentificationConfidence"] = confidence;
+    _metadata["IdentifiedAt"] = identifiedAt;
+  }
+
   /// <inheritdoc/>
   protected override async ValueTask DisposeAsyncCore()
   {
+    // Unsubscribe from fingerprinting events
+    if (_identificationService != null)
+    {
+      _identificationService.TrackIdentified -= OnTrackIdentified;
+    }
+
     CleanupCaptureDevice();
     ReleaseUSBPort();
     _soundComponent = null;

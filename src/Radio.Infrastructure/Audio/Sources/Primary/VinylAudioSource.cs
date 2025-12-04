@@ -2,12 +2,15 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Models.Audio;
+using Radio.Infrastructure.Audio.Fingerprinting;
 
 namespace Radio.Infrastructure.Audio.Sources.Primary;
 
 /// <summary>
 /// Vinyl turntable USB audio source.
 /// Captures audio from a USB audio input device connected to a turntable.
+/// Supports automatic track identification via fingerprinting.
 /// </summary>
 public class VinylAudioSource : USBAudioSourceBase
 {
@@ -19,11 +22,13 @@ public class VinylAudioSource : USBAudioSourceBase
   /// <param name="logger">The logger instance.</param>
   /// <param name="deviceOptions">The device options configuration.</param>
   /// <param name="deviceManager">The audio device manager.</param>
+  /// <param name="identificationService">Optional fingerprinting service for track identification.</param>
   public VinylAudioSource(
     ILogger<VinylAudioSource> logger,
     IOptionsMonitor<DeviceOptions> deviceOptions,
-    IAudioDeviceManager deviceManager)
-    : base(logger, deviceManager)
+    IAudioDeviceManager deviceManager,
+    BackgroundIdentificationService? identificationService = null)
+    : base(logger, deviceManager, identificationService)
   {
     _deviceOptions = deviceOptions;
   }
@@ -44,9 +49,22 @@ public class VinylAudioSource : USBAudioSourceBase
   {
     var usbPort = _deviceOptions.CurrentValue.Vinyl.USBPort;
 
-    MetadataInternal["Source"] = "Vinyl";
-    MetadataInternal["Device"] = "Turntable";
+    // Set standard metadata with defaults for Vinyl source
+    SetDefaultMetadata();
 
     await InitializeUSBCaptureAsync(usbPort, cancellationToken);
+  }
+
+  /// <summary>
+  /// Sets default metadata for the Vinyl source when no track is identified.
+  /// </summary>
+  private void SetDefaultMetadata()
+  {
+    MetadataInternal[StandardMetadataKeys.Title] = "Vinyl";
+    MetadataInternal[StandardMetadataKeys.Artist] = StandardMetadataKeys.DefaultArtist;
+    MetadataInternal[StandardMetadataKeys.Album] = StandardMetadataKeys.DefaultAlbum;
+    MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = StandardMetadataKeys.DefaultAlbumArtUrl;
+    MetadataInternal["Source"] = "Vinyl";
+    MetadataInternal["Device"] = "Turntable";
   }
 }

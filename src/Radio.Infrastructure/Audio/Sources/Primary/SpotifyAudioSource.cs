@@ -17,7 +17,7 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private readonly IOptionsMonitor<SpotifyPreferences> _preferences;
   private SpotifyClient? _client;
   private CurrentlyPlayingContext? _currentPlayback;
-  private Dictionary<string, string> _metadata = new();
+  private Dictionary<string, object> _metadata = new();
   private TimeSpan _position;
   private TimeSpan? _duration;
   private bool _isAuthenticated;
@@ -59,7 +59,7 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   public override bool IsSeekable => true;
 
   /// <inheritdoc/>
-  public override IReadOnlyDictionary<string, string> Metadata => _metadata;
+  public override IReadOnlyDictionary<string, object> Metadata => _metadata;
 
   // Spotify supports next, previous, shuffle, and repeat
   /// <inheritdoc/>
@@ -414,14 +414,25 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
       if (_currentPlayback.Item is FullTrack track)
       {
         _duration = TimeSpan.FromMilliseconds(track.DurationMs);
-        _metadata = new Dictionary<string, string>
+        _metadata = new Dictionary<string, object>
         {
-          ["Title"] = track.Name,
-          ["Artist"] = string.Join(", ", track.Artists.Select(a => a.Name)),
-          ["Album"] = track.Album.Name,
-          ["Duration"] = _duration.Value.ToString(),
-          ["TrackUri"] = track.Uri,
-          ["AlbumArtUrl"] = track.Album.Images.FirstOrDefault()?.Url ?? ""
+          [StandardMetadataKeys.Title] = track.Name,
+          [StandardMetadataKeys.Artist] = string.Join(", ", track.Artists.Select(a => a.Name)),
+          [StandardMetadataKeys.Album] = track.Album.Name,
+          [StandardMetadataKeys.Duration] = _duration.Value,
+          [StandardMetadataKeys.AlbumArtUrl] = track.Album.Images.FirstOrDefault()?.Url ?? StandardMetadataKeys.DefaultAlbumArtUrl,
+          ["TrackUri"] = track.Uri
+        };
+      }
+      else
+      {
+        // No track playing - set defaults
+        _metadata = new Dictionary<string, object>
+        {
+          [StandardMetadataKeys.Title] = StandardMetadataKeys.DefaultTitle,
+          [StandardMetadataKeys.Artist] = StandardMetadataKeys.DefaultArtist,
+          [StandardMetadataKeys.Album] = StandardMetadataKeys.DefaultAlbum,
+          [StandardMetadataKeys.AlbumArtUrl] = StandardMetadataKeys.DefaultAlbumArtUrl
         };
       }
     }
@@ -564,7 +575,7 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
     {
       var previousState = State;
       var previousPosition = _position;
-      var previousTrackUri = _metadata.TryGetValue("TrackUri", out var uri) ? uri : null;
+      var previousTrackUri = _metadata.TryGetValue("TrackUri", out var uri) ? uri as string : null;
 
       await UpdatePlaybackStateAsync(CancellationToken.None);
 
@@ -575,7 +586,7 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
       }
 
       // Check if track changed
-      var currentTrackUri = _metadata.TryGetValue("TrackUri", out var currentUri) ? currentUri : null;
+      var currentTrackUri = _metadata.TryGetValue("TrackUri", out var currentUri) ? currentUri as string : null;
       if (currentTrackUri != previousTrackUri && !string.IsNullOrEmpty(currentTrackUri))
       {
         // Save last played track

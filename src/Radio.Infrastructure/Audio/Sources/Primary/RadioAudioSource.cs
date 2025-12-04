@@ -2,12 +2,15 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Models.Audio;
+using Radio.Infrastructure.Audio.Fingerprinting;
 
 namespace Radio.Infrastructure.Audio.Sources.Primary;
 
 /// <summary>
 /// Raddy RF320 USB Radio audio source.
 /// Captures audio from a USB audio input device.
+/// Supports automatic track identification via fingerprinting.
 /// </summary>
 public class RadioAudioSource : USBAudioSourceBase
 {
@@ -19,11 +22,13 @@ public class RadioAudioSource : USBAudioSourceBase
   /// <param name="logger">The logger instance.</param>
   /// <param name="deviceOptions">The device options configuration.</param>
   /// <param name="deviceManager">The audio device manager.</param>
+  /// <param name="identificationService">Optional fingerprinting service for track identification.</param>
   public RadioAudioSource(
     ILogger<RadioAudioSource> logger,
     IOptionsMonitor<DeviceOptions> deviceOptions,
-    IAudioDeviceManager deviceManager)
-    : base(logger, deviceManager)
+    IAudioDeviceManager deviceManager,
+    BackgroundIdentificationService? identificationService = null)
+    : base(logger, deviceManager, identificationService)
   {
     _deviceOptions = deviceOptions;
   }
@@ -44,9 +49,22 @@ public class RadioAudioSource : USBAudioSourceBase
   {
     var usbPort = _deviceOptions.CurrentValue.Radio.USBPort;
 
-    MetadataInternal["Source"] = "Radio";
-    MetadataInternal["Device"] = "Raddy RF320";
+    // Set standard metadata with defaults for Radio source
+    SetDefaultMetadata();
 
     await InitializeUSBCaptureAsync(usbPort, cancellationToken);
+  }
+
+  /// <summary>
+  /// Sets default metadata for the Radio source when no track is identified.
+  /// </summary>
+  private void SetDefaultMetadata()
+  {
+    MetadataInternal[StandardMetadataKeys.Title] = "Radio";
+    MetadataInternal[StandardMetadataKeys.Artist] = StandardMetadataKeys.DefaultArtist;
+    MetadataInternal[StandardMetadataKeys.Album] = StandardMetadataKeys.DefaultAlbum;
+    MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = StandardMetadataKeys.DefaultAlbumArtUrl;
+    MetadataInternal["Source"] = "Radio";
+    MetadataInternal["Device"] = "Raddy RF320";
   }
 }
