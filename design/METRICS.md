@@ -106,12 +106,86 @@ Implement the background service that aggregates data from Minute -> Hour -> Day
 - Respects retention policies from MetricsOptions
 - Comprehensive error handling and logging
 
-### Phase 5: Integration (Adding the Metrics)
+### Phase 5: Integration (Adding the Metrics) ✅ COMPLETED
 Inject the collector into existing services and instrument the code.
+
+**Status:** ✅ Completed (2025-12-04)
+
+**Files Created:**
+*   `src/Radio.Infrastructure/Metrics/Services/SystemMonitorService.cs` ✅
+*   `src/Radio.Infrastructure/DependencyInjection/MetricsServiceExtensions.cs` ✅
 
 **Integration Points:**
 
-#### 1. Audio Playback & Library (Core)
+#### 1. System Health & Hardware (Infrastructure) ✅ COMPLETED
+*   **Location:** `SystemMonitorService` (New Background Service) ✅
+*   **Metrics:**
+    *   `system.disk_usage_percent` (Gauge): Check drive available space. ✅
+    *   `system.cpu_temp_celsius` (Gauge): Read from Pi sensors (`/sys/class/thermal/thermal_zone0/temp`). ✅
+    *   `system.memory_usage_mb` (Gauge): `Process.GetCurrentProcess().WorkingSet64`. ✅
+    *   `db.file_size_mb` (Gauge): Check `FileInfo` size of the SQLite db. ✅
+
+#### 2. Audio Playback & Library (Core) - Deferred
+*   **Locations:** `AudioPlayerService`, `LibraryManager`
+*   **Metrics:** (Will be instrumented when audio services are available)
+    *   `radio.songs_played_total` (Counter): Increment when track finishes.
+    *   `radio.songs_skipped` (Counter): Increment when track is skipped.
+    *   `radio.playback_errors` (Counter): Increment on playback exceptions.
+    *   `library.tracks_total` (Gauge): Update after library scan.
+    *   `library.scan_duration_ms` (Gauge): Measure duration of scan operation.
+    *   `library.new_tracks_added` (Counter): Count of new files found during scan.
+
+#### 3. Text-to-Speech Services (Infrastructure) - Deferred
+*   **Locations:** `TtsService` (and specific providers like `AzureTtsProvider`, `GoogleTtsProvider`)
+*   **Metrics:** (Will be instrumented when TTS services are instrumented)
+    *   `tts.requests_total` (Counter): Increment on request, tag by provider (e.g., `provider=azure`).
+    *   `tts.latency_ms` (Gauge): Measure stopwatch time from request to audio ready.
+    *   `tts.characters_processed` (Counter): Increment by `text.Length`. Critical for cost tracking.
+    *   `tts.cache_hits` / `tts.cache_misses` (Counter): Increment based on whether audio file existed locally.
+
+#### 4. API & Web Usage (Web/API) - Deferred
+*   **Location:** `RadioController`, `WebSocketHub`
+*   **Metrics:** (Will be added when instrumented)
+    *   `api.requests_total` (Counter): Middleware to count HTTP requests.
+    *   `websocket.connected_clients` (Gauge): Track active connections in Hub.
+    *   `ui.button_clicks` (Counter): Received via API from frontend (e.g., `POST /api/metrics/event`).
+
+**Notes:**
+- Core metrics infrastructure is complete and functional
+- System monitoring service is running and collecting metrics every 5 minutes
+- DI registration is complete and metrics services are properly configured
+- Additional instrumentation points can be added as services become available
+
+### Phase 6: REST API Layer ✅ COMPLETED
+Expose the metrics to the frontend for visualization.
+
+**Status:** ✅ Completed (2025-12-04)
+
+**Files Created:**
+*   `src/Radio.API/Controllers/MetricsController.cs` ✅
+
+**Endpoints:**
+1.  **Get History:** `GET /api/metrics/history` ✅
+    *   **Params:** `key` (string), `start` (DateTimeOffset), `end` (DateTimeOffset), `resolution` (Minute/Hour/Day)
+    *   **Response:** JSON array of time-series data points.
+    *   **Usage:** Charts (e.g., "Songs per Hour").
+2.  **Get Snapshots:** `GET /api/metrics/snapshots` ✅
+    *   **Params:** `keys` (comma-separated string)
+    *   **Response:** Dictionary of metric keys to aggregate values.
+    *   **Usage:** Multiple dashboard widgets.
+3.  **Get Aggregate:** `GET /api/metrics/aggregate` ✅
+    *   **Params:** `key` (string)
+    *   **Response:** Single value (Total for Counters, Last for Gauges).
+    *   **Usage:** Dashboard widgets (e.g., "Total Characters Spoken", "Current CPU Temp").
+4.  **List Keys:** `GET /api/metrics/keys` ✅
+    *   **Response:** List of all available metric keys.
+    *   **Usage:** Metric discovery for UI.
+
+**Notes:**
+- All endpoints include proper error handling and logging
+- API includes comprehensive XML documentation for Swagger
+- Supports flexible querying with different time resolutions
+- Metric key listing enables dynamic UI construction
 *   **Locations:** `AudioPlayerService`, `LibraryManager`
 *   **Metrics:**
     *   `radio.songs_played_total` (Counter): Increment when track finishes.

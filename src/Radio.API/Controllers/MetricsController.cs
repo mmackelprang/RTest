@@ -1,0 +1,176 @@
+using Microsoft.AspNetCore.Mvc;
+using Radio.Core.Interfaces;
+using Radio.Core.Metrics;
+
+namespace Radio.API.Controllers;
+
+/// <summary>
+/// API controller for metrics data access.
+/// Provides endpoints for historical data and current snapshots.
+/// </summary>
+[ApiController]
+[Route("api/[controller]")]
+[Produces("application/json")]
+public class MetricsController : ControllerBase
+{
+  private readonly ILogger<MetricsController> _logger;
+  private readonly IMetricsReader _metricsReader;
+
+  /// <summary>
+  /// Initializes a new instance of the MetricsController.
+  /// </summary>
+  public MetricsController(
+    ILogger<MetricsController> logger,
+    IMetricsReader metricsReader)
+  {
+    _logger = logger;
+    _metricsReader = metricsReader;
+  }
+
+  /// <summary>
+  /// Gets historical time-series data for a metric.
+  /// </summary>
+  /// <param name="key">The metric key (e.g., "audio.songs_played")</param>
+  /// <param name="start">Start timestamp</param>
+  /// <param name="end">End timestamp</param>
+  /// <param name="resolution">Time bucket resolution (Minute, Hour, Day)</param>
+  /// <param name="ct">Cancellation token</param>
+  /// <returns>List of metric data points</returns>
+  [HttpGet("history")]
+  [ProducesResponseType(typeof(IReadOnlyList<MetricPoint>), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+  public async Task<ActionResult<IReadOnlyList<MetricPoint>>> GetHistory(
+    [FromQuery] string key,
+    [FromQuery] DateTimeOffset start,
+    [FromQuery] DateTimeOffset end,
+    [FromQuery] MetricResolution resolution = MetricResolution.Minute,
+    CancellationToken ct = default)
+  {
+    if (string.IsNullOrWhiteSpace(key))
+    {
+      return BadRequest("Metric key is required");
+    }
+
+    if (start >= end)
+    {
+      return BadRequest("Start time must be before end time");
+    }
+
+    try
+    {
+      var history = await _metricsReader.GetHistoryAsync(
+        key,
+        start,
+        end,
+        resolution,
+        null,
+        ct);
+
+      return Ok(history);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to retrieve metric history for {Key}", key);
+      return StatusCode(500, "An error occurred while retrieving metric history");
+    }
+  }
+
+  /// <summary>
+  /// Gets aggregate/current snapshot values for one or more metrics.
+  /// For counters: returns total sum across all time periods.
+  /// For gauges: returns the most recent value.
+  /// </summary>
+  /// <param name="keys">Comma-separated list of metric keys</param>
+  /// <param name="ct">Cancellation token</param>
+  /// <returns>Dictionary of metric keys to their aggregate values</returns>
+  [HttpGet("snapshots")]
+  [ProducesResponseType(typeof(IReadOnlyDictionary<string, double>), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+  public async Task<ActionResult<IReadOnlyDictionary<string, double>>> GetSnapshots(
+    [FromQuery] string keys,
+    CancellationToken ct = default)
+  {
+    if (string.IsNullOrWhiteSpace(keys))
+    {
+      return BadRequest("At least one metric key is required");
+    }
+
+    try
+    {
+      var keyList = keys.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+      var snapshots = await _metricsReader.GetCurrentSnapshotsAsync(keyList, ct);
+
+      return Ok(snapshots);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to retrieve metric snapshots");
+      return StatusCode(500, "An error occurred while retrieving metric snapshots");
+    }
+  }
+
+  /// <summary>
+  /// Gets the aggregate value for a single metric.
+  /// For counters: returns total sum across all time periods.
+  /// For gauges: returns the most recent value.
+  /// </summary>
+  /// <param name="key">The metric key</param>
+  /// <param name="ct">Cancellation token</param>
+  /// <returns>The aggregate value, or 404 if metric not found</returns>
+  [HttpGet("aggregate")]
+  [ProducesResponseType(typeof(double), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status404NotFound)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+  public async Task<ActionResult<double>> GetAggregate(
+    [FromQuery] string key,
+    CancellationToken ct = default)
+  {
+    if (string.IsNullOrWhiteSpace(key))
+    {
+      return BadRequest("Metric key is required");
+    }
+
+    try
+    {
+      var value = await _metricsReader.GetAggregateAsync(key, ct);
+
+      if (value == null)
+      {
+        return NotFound($"Metric '{key}' not found");
+      }
+
+      return Ok(value.Value);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to retrieve aggregate for {Key}", key);
+      return StatusCode(500, "An error occurred while retrieving metric aggregate");
+    }
+  }
+
+  /// <summary>
+  /// Lists all available metric keys in the system.
+  /// </summary>
+  /// <param name="ct">Cancellation token</param>
+  /// <returns>List of metric keys</returns>
+  [HttpGet("keys")]
+  [ProducesResponseType(typeof(IReadOnlyList<string>), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+  public async Task<ActionResult<IReadOnlyList<string>>> ListMetricKeys(
+    CancellationToken ct = default)
+  {
+    try
+    {
+      var keys = await _metricsReader.ListMetricKeysAsync(ct);
+      return Ok(keys);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to list metric keys");
+      return StatusCode(500, "An error occurred while listing metric keys");
+    }
+  }
+}
