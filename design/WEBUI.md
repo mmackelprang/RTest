@@ -101,6 +101,58 @@ A **Material 3-compliant**, touchscreen interface for an embedded music controll
 - **Purpose**: Enable discovery and selection of Spotify content
 - **Success criteria**: Search is fast, filter pills work, browse hierarchy navigable, selected content plays correctly
 
+### File Player Music Selection
+- **Functionality**: File browser and selection interface for local audio files when File Player is the active source
+- **Layout**:
+  - **Path Display**: Shows current directory path with breadcrumb navigation
+  - **Up/Home Buttons**: Navigation buttons to go up one level or return to root directory
+  - **File/Folder List**: Scrollable list of directories and audio files
+  - **Play/Add Buttons**: Actions for each file
+- **File List Display**:
+  - **Folders**: Displayed with folder icon, tap to navigate into folder
+  - **Audio Files**: Displayed with audio icon, showing:
+    * **Title**: From metadata (or filename if no metadata)
+    * **Artist**: From metadata (or "--" if unavailable)
+    * **Duration**: From metadata (or "--" if unavailable)
+    * **File Size**: In MB/GB
+  - **Sort Options**: By name, date modified, size, or duration
+  - **Filter**: Show all files or filter by extension (.mp3, .flac, .wav, etc.)
+- **File Operations**:
+  - **Single Tap**: Select file (highlight)
+  - **Double Tap/Play Button**: Play file immediately (replaces current track)
+  - **Add Button**: Add file to queue
+  - **Multi-Select Mode**: Long-press to enable, then tap multiple files to add batch to queue
+- **Directory Navigation Flow**:
+  1. User taps folder → Navigate into folder → Update breadcrumb
+  2. User taps "Up" → Go to parent directory
+  3. User taps breadcrumb segment → Jump to that directory level
+- **Search Feature**:
+  - **Search Bar**: Filter files in current directory (and subdirectories if recursive enabled)
+  - **Recursive Toggle**: Search current directory only vs. all subdirectories
+  - **Search Criteria**: Filename, title, artist, album
+- **API Integration**:
+  - **GET /api/files**: List files with optional `path` and `recursive` parameters
+  - **POST /api/files/play**: Play selected file
+  - **POST /api/files/queue**: Add files to queue (single or multiple)
+- **Supported Formats Display**:
+  - Show icons/badges for file types: MP3, FLAC, WAV, OGG, AAC, M4A, WMA
+  - Color-code by format for quick identification
+- **Empty State**:
+  - When directory is empty: "No audio files found in this directory"
+  - When search returns no results: "No files match your search"
+- **Performance Considerations**:
+  - Lazy loading for large directories (load first 50, scroll to load more)
+  - Cache metadata to avoid re-reading files
+  - Show loading spinner when reading directory or metadata
+- **Purpose**: Enable users to browse and play local audio files stored on the system
+- **Success criteria**: 
+  - Directory navigation is smooth and intuitive
+  - File metadata displays correctly (or falls back to filename)
+  - Play and queue operations work without errors
+  - Large directories load and scroll smoothly
+  - Search filters results accurately
+  - Multi-select allows batch operations
+
 ### Radio Display (LED Aesthetic, Read-Only)
 - **Functionality**: Large LED-style display showing current radio state (visible when Radio is active source)
 - **Display Components**:

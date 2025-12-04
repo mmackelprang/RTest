@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Outputs;
@@ -110,9 +112,19 @@ public static class AudioServiceExtensions
     services.Configure<TTSPreferences>(
       configuration.GetSection(TTSPreferences.SectionName));
 
-    // Bind file player options (for audio file events)
+    // Bind file player options (for audio file events and file browser)
     services.Configure<FilePlayerOptions>(
       configuration.GetSection(FilePlayerOptions.SectionName));
+
+    // Register File Browser service
+    services.AddSingleton<FileBrowser>(sp =>
+    {
+      var logger = sp.GetRequiredService<ILogger<FileBrowser>>();
+      var options = sp.GetRequiredService<IOptionsMonitor<FilePlayerOptions>>();
+      var rootDir = configuration["RootDir"] ?? Directory.GetCurrentDirectory();
+      return new FileBrowser(logger, options, rootDir);
+    });
+    services.AddSingleton<IFileBrowser>(sp => sp.GetRequiredService<FileBrowser>());
 
     // Register TTS factory
     services.AddSingleton<TTSFactory>();
