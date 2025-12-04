@@ -444,6 +444,100 @@ public class AudioController : ControllerBase
     }
   }
 
+  /// <summary>
+  /// Gets the current "Now Playing" information with structured track metadata.
+  /// Always returns valid content with defaults when no track is available.
+  /// </summary>
+  /// <returns>The current now playing information.</returns>
+  [HttpGet("nowplaying")]
+  [ProducesResponseType(typeof(NowPlayingDto), StatusCodes.Status200OK)]
+  public ActionResult<NowPlayingDto> GetNowPlaying()
+  {
+    try
+    {
+      var mixer = _audioEngine.GetMasterMixer();
+      var activeSources = mixer.GetActiveSources();
+      var primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary);
+
+      var nowPlaying = new NowPlayingDto();
+
+      if (primarySource != null)
+      {
+        // Source information
+        nowPlaying.SourceType = primarySource.Type.ToString();
+        nowPlaying.SourceName = primarySource.Name;
+        nowPlaying.IsPlaying = _audioEngine.State == AudioEngineState.Running && primarySource.State == AudioSourceState.Playing;
+        nowPlaying.IsPaused = primarySource.State == AudioSourceState.Paused;
+
+        if (primarySource is IPrimaryAudioSource primary)
+        {
+          // Timing information
+          nowPlaying.Position = primary.Position;
+          nowPlaying.Duration = primary.Duration;
+
+          // Calculate progress percentage if duration is available
+          if (primary.Duration.HasValue && primary.Duration.Value.TotalSeconds > 0)
+          {
+            nowPlaying.ProgressPercentage = (primary.Position.TotalSeconds / primary.Duration.Value.TotalSeconds) * 100.0;
+          }
+
+          // Extract metadata with defaults
+          ExtractMetadataToNowPlaying(primary.Metadata, nowPlaying);
+        }
+      }
+      else
+      {
+        // No source active - return defaults
+        nowPlaying.SourceType = "None";
+        nowPlaying.SourceName = "No Source";
+        nowPlaying.IsPlaying = false;
+        nowPlaying.IsPaused = false;
+      }
+
+      return Ok(nowPlaying);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error getting now playing information");
+      return StatusCode(500, new { error = "Failed to get now playing information" });
+    }
+  }
+
+  /// <summary>
+  /// Extracts metadata from the source and populates the NowPlayingDto with defaults for missing values.
+  /// </summary>
+  private static void ExtractMetadataToNowPlaying(IReadOnlyDictionary<string, object> metadata, NowPlayingDto nowPlaying)
+  {
+    // Extract standard metadata keys with fallback to defaults
+    nowPlaying.Title = GetMetadataValue(metadata, "Title") ?? "No Track";
+    nowPlaying.Artist = GetMetadataValue(metadata, "Artist") ?? "--";
+    nowPlaying.Album = GetMetadataValue(metadata, "Album") ?? "--";
+    nowPlaying.AlbumArtUrl = GetMetadataValue(metadata, "AlbumArtUrl") ?? "/images/default-album-art.png";
+
+    // Build extended metadata dictionary from non-standard keys
+    var extendedKeys = metadata.Keys.Except(new[] { "Title", "Artist", "Album", "AlbumArtUrl" });
+    if (extendedKeys.Any())
+    {
+      nowPlaying.ExtendedMetadata = new Dictionary<string, object>();
+      foreach (var key in extendedKeys)
+      {
+        nowPlaying.ExtendedMetadata[key] = metadata[key];
+      }
+    }
+  }
+
+  /// <summary>
+  /// Gets a metadata value as a string, handling null and type conversion.
+  /// </summary>
+  private static string? GetMetadataValue(IReadOnlyDictionary<string, object> metadata, string key)
+  {
+    if (metadata.TryGetValue(key, out var value) && value != null)
+    {
+      return value.ToString();
+    }
+    return null;
+  }
+
   private static AudioSourceDto MapToAudioSourceDto(IAudioSource source)
   {
     var dto = new AudioSourceDto
