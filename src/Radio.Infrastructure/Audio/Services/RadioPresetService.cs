@@ -26,8 +26,8 @@ public sealed class RadioPresetService : IRadioPresetService
     ILogger<RadioPresetService> logger,
     IRadioPresetRepository repository)
   {
-    _logger = logger;
-    _repository = repository;
+    _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    _repository = repository ?? throw new ArgumentNullException(nameof(repository));
   }
 
   /// <inheritdoc/>

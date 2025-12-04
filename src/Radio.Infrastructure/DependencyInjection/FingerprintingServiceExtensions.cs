@@ -39,8 +39,8 @@ public static class FingerprintingServiceExtensions
     // Register fingerprint service
     services.AddSingleton<IFingerprintService, MockFingerprintService>();
 
-    // Register radio preset service
-    services.AddSingleton<IRadioPresetService, RadioPresetService>();
+    // Register radio preset service (scoped to match repository)
+    services.AddScoped<IRadioPresetService, RadioPresetService>();
 
     // Register metadata lookup service as scoped (uses repositories)
     services.AddScoped<IMetadataLookupService, MetadataLookupService>();

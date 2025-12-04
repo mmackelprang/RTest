@@ -264,4 +264,162 @@ public class RadioControllerTests : IClassFixture<WebApplicationFactory<Program>
     var content = await response.Content.ReadAsStringAsync();
     Assert.Contains("Volume must be between 0 and 100", content);
   }
+
+  // ===== RADIO PRESET TESTS =====
+
+  [Fact]
+  public async Task GetPresets_ReturnsEmptyList()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/radio/presets");
+
+    // Assert
+    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    var presets = await response.Content.ReadFromJsonAsync<List<RadioPresetDto>>();
+    Assert.NotNull(presets);
+  }
+
+  [Fact]
+  public async Task CreatePreset_WithValidData_ReturnsCreated()
+  {
+    // Arrange
+    var request = new CreateRadioPresetRequest
+    {
+      Name = "Test Station",
+      Band = "FM",
+      Frequency = 101.5
+    };
+
+    // Act
+    var response = await _client.PostAsJsonAsync("/api/radio/presets", request);
+
+    // Assert
+    Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    var preset = await response.Content.ReadFromJsonAsync<RadioPresetDto>();
+    Assert.NotNull(preset);
+    Assert.Equal("Test Station", preset.Name);
+    Assert.Equal("FM", preset.Band);
+    Assert.Equal(101.5, preset.Frequency);
+    Assert.NotEmpty(preset.Id);
+  }
+
+  [Fact]
+  public async Task CreatePreset_WithoutName_UsesDefaultName()
+  {
+    // Arrange
+    var request = new CreateRadioPresetRequest
+    {
+      Band = "AM",
+      Frequency = 1010
+    };
+
+    // Act
+    var response = await _client.PostAsJsonAsync("/api/radio/presets", request);
+
+    // Assert
+    Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    var preset = await response.Content.ReadFromJsonAsync<RadioPresetDto>();
+    Assert.NotNull(preset);
+    Assert.Equal("AM - 1010", preset.Name);
+    Assert.Equal("AM", preset.Band);
+    Assert.Equal(1010, preset.Frequency);
+  }
+
+  [Fact]
+  public async Task CreatePreset_WithInvalidBand_ReturnsBadRequest()
+  {
+    // Arrange
+    var request = new CreateRadioPresetRequest
+    {
+      Band = "InvalidBand",
+      Frequency = 101.5
+    };
+
+    // Act
+    var response = await _client.PostAsJsonAsync("/api/radio/presets", request);
+
+    // Assert
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    var content = await response.Content.ReadAsStringAsync();
+    Assert.Contains("Invalid band", content);
+  }
+
+  [Fact]
+  public async Task CreatePreset_WithZeroFrequency_ReturnsBadRequest()
+  {
+    // Arrange
+    var request = new CreateRadioPresetRequest
+    {
+      Band = "FM",
+      Frequency = 0
+    };
+
+    // Act
+    var response = await _client.PostAsJsonAsync("/api/radio/presets", request);
+
+    // Assert
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    var content = await response.Content.ReadAsStringAsync();
+    Assert.Contains("Frequency must be greater than 0", content);
+  }
+
+  [Fact]
+  public async Task CreatePreset_WithNegativeFrequency_ReturnsBadRequest()
+  {
+    // Arrange
+    var request = new CreateRadioPresetRequest
+    {
+      Band = "FM",
+      Frequency = -10
+    };
+
+    // Act
+    var response = await _client.PostAsJsonAsync("/api/radio/presets", request);
+
+    // Assert
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    var content = await response.Content.ReadAsStringAsync();
+    Assert.Contains("Frequency must be greater than 0", content);
+  }
+
+  [Fact]
+  public async Task DeletePreset_WithNonexistentId_ReturnsNotFound()
+  {
+    // Act
+    var response = await _client.DeleteAsync("/api/radio/presets/nonexistent-id");
+
+    // Assert
+    Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    var content = await response.Content.ReadAsStringAsync();
+    Assert.Contains("not found", content);
+  }
+
+  [Fact]
+  public async Task CreateAndDeletePreset_WorksCorrectly()
+  {
+    // Arrange - Create a preset first
+    var createRequest = new CreateRadioPresetRequest
+    {
+      Name = "Delete Test Station",
+      Band = "FM",
+      Frequency = 102.5
+    };
+
+    var createResponse = await _client.PostAsJsonAsync("/api/radio/presets", createRequest);
+    Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+    var createdPreset = await createResponse.Content.ReadFromJsonAsync<RadioPresetDto>();
+    Assert.NotNull(createdPreset);
+
+    // Act - Delete the preset
+    var deleteResponse = await _client.DeleteAsync($"/api/radio/presets/{createdPreset.Id}");
+
+    // Assert
+    Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
+
+    // Verify it's deleted
+    var getResponse = await _client.GetAsync("/api/radio/presets");
+    var presets = await getResponse.Content.ReadFromJsonAsync<List<RadioPresetDto>>();
+    Assert.NotNull(presets);
+    Assert.DoesNotContain(presets, p => p.Id == createdPreset.Id);
+  }
 }
