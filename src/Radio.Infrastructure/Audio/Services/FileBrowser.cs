@@ -68,7 +68,7 @@ public class FileBrowser : IFileBrowser
       files.Count, basePath, recursive);
 
     var audioFiles = new List<AudioFileInfo>();
-    var previousCount = 0; // In a real implementation, this would track existing files
+    var previousCount = 0; // TODO: In a real implementation, this would track existing files from a database
 
     foreach (var file in files)
     {
@@ -87,7 +87,7 @@ public class FileBrowser : IFileBrowser
     _metricsCollector?.Gauge("library.tracks_total", audioFiles.Count);
     _metricsCollector?.Gauge("library.scan_duration_ms", stopwatch.ElapsedMilliseconds);
     
-    // Track new files (in a real implementation, this would compare with existing database)
+    // Track new files (simplified implementation - in production, this would compare with existing database)
     var newFilesCount = audioFiles.Count - previousCount;
     if (newFilesCount > 0)
     {

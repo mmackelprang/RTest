@@ -8,6 +8,11 @@ namespace Radio.API.Hubs;
 /// SignalR hub for real-time audio state updates.
 /// Provides playback state, now playing info, queue updates, and radio state to connected clients.
 /// </summary>
+/// <remarks>
+/// Note: The connected client count is tracked using a static field, which means in multi-instance
+/// deployments each instance will maintain its own count. For accurate cross-instance metrics,
+/// consider using a distributed counter service (e.g., Redis) or a scoped service.
+/// </remarks>
 public class AudioStateHub : Hub
 {
   private readonly ILogger<AudioStateHub> _logger;

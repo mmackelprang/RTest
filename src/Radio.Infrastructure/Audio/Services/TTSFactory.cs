@@ -86,9 +86,9 @@ public class TTSFactory : ITTSFactory
     _metricsCollector?.Increment("tts.requests_total", 1.0, providerTag);
     _metricsCollector?.Increment("tts.characters_processed", text.Length);
 
-    // Check for cached audio (simplified - in real implementation would check actual cache)
+    // Check for cached audio (simplified - TODO: implement actual cache checking)
     var cacheKey = $"{engine}_{voice}_{text.GetHashCode()}";
-    var isCached = false; // In real implementation, check if audio file exists
+    var isCached = false; // In production, this would check if audio file exists in cache
 
     if (isCached)
     {
