@@ -1,5 +1,3 @@
----
-
 ## Proposed Future Expansion
 
 *Analysis Date: 2025-12-05*
