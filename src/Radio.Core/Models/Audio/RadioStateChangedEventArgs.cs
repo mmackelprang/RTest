@@ -1,3 +1,5 @@
+using System;
+
 namespace Radio.Core.Models.Audio;
 
 /// <summary>
@@ -5,23 +7,31 @@ namespace Radio.Core.Models.Audio;
 /// </summary>
 public class RadioStateChangedEventArgs : EventArgs
 {
-  /// <summary>
-  /// Gets the current frequency in MHz (for FM) or kHz (for AM).
-  /// </summary>
-  public double Frequency { get; init; }
+    /// <summary>
+    /// Gets the name of the property that changed.
+    /// </summary>
+    public string PropertyName { get; }
 
-  /// <summary>
-  /// Gets the current radio band (AM or FM).
-  /// </summary>
-  public RadioBand Band { get; init; }
+    /// <summary>
+    /// Gets the new value of the property.
+    /// </summary>
+    public object? NewValue { get; }
 
-  /// <summary>
-  /// Gets the signal strength as a percentage (0-100).
-  /// </summary>
-  public int SignalStrength { get; init; }
+    /// <summary>
+    /// Gets the old value of the property.
+    /// </summary>
+    public object? OldValue { get; }
 
-  /// <summary>
-  /// Gets a value indicating whether the radio is receiving a stereo signal (FM only).
-  /// </summary>
-  public bool IsStereo { get; init; }
+    /// <summary>
+    /// Gets the timestamp of the change.
+    /// </summary>
+    public DateTime Timestamp { get; }
+
+    public RadioStateChangedEventArgs(string propertyName, object? newValue, object? oldValue = null)
+    {
+        PropertyName = propertyName ?? throw new ArgumentNullException(nameof(propertyName));
+        NewValue = newValue;
+        OldValue = oldValue;
+        Timestamp = DateTime.Now;
+    }
 }
