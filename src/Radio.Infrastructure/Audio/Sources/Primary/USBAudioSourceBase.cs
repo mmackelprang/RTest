@@ -126,6 +126,23 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   }
 
   /// <summary>
+  /// Sets default metadata for the USB audio source when no track is identified.
+  /// Derived classes should provide specific values via properties.
+  /// </summary>
+  /// <param name="title">The default title for this source.</param>
+  /// <param name="sourceName">The source name (e.g., "Radio", "Vinyl").</param>
+  /// <param name="deviceName">The device name (e.g., "Raddy RF320", "Turntable").</param>
+  protected void SetDefaultMetadata(string title, string sourceName, string deviceName)
+  {
+    MetadataInternal[StandardMetadataKeys.Title] = title;
+    MetadataInternal[StandardMetadataKeys.Artist] = StandardMetadataKeys.DefaultArtist;
+    MetadataInternal[StandardMetadataKeys.Album] = StandardMetadataKeys.DefaultAlbum;
+    MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = StandardMetadataKeys.DefaultAlbumArtUrl;
+    MetadataInternal["Source"] = sourceName;
+    MetadataInternal["Device"] = deviceName;
+  }
+
+  /// <summary>
   /// Initializes the USB audio capture on the specified port.
   /// </summary>
   /// <param name="usbPort">The USB port to use.</param>
