@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.SignalR;
 using Radio.API.Models;
+using Radio.Core.Interfaces;
 
 namespace Radio.API.Hubs;
 
@@ -10,13 +11,21 @@ namespace Radio.API.Hubs;
 public class AudioStateHub : Hub
 {
   private readonly ILogger<AudioStateHub> _logger;
+  private readonly IMetricsCollector? _metricsCollector;
+  private static int _connectedClients = 0;
+  private static readonly object _lockObject = new();
 
   /// <summary>
   /// Initializes a new instance of the AudioStateHub.
   /// </summary>
-  public AudioStateHub(ILogger<AudioStateHub> logger)
+  /// <param name="logger">The logger instance.</param>
+  /// <param name="metricsCollector">Optional metrics collector.</param>
+  public AudioStateHub(
+    ILogger<AudioStateHub> logger,
+    IMetricsCollector? metricsCollector = null)
   {
     _logger = logger;
+    _metricsCollector = metricsCollector;
   }
 
   /// <summary>
@@ -64,7 +73,14 @@ public class AudioStateHub : Hub
   /// </summary>
   public override async Task OnConnectedAsync()
   {
-    _logger.LogInformation("Client {ConnectionId} connected to AudioStateHub", Context.ConnectionId);
+    lock (_lockObject)
+    {
+      _connectedClients++;
+      _metricsCollector?.Gauge("websocket.connected_clients", _connectedClients);
+    }
+
+    _logger.LogInformation("Client {ConnectionId} connected to AudioStateHub (total: {Count})", 
+      Context.ConnectionId, _connectedClients);
     await base.OnConnectedAsync();
   }
 
@@ -74,13 +90,21 @@ public class AudioStateHub : Hub
   /// <param name="exception">Exception that caused the disconnect, if any.</param>
   public override async Task OnDisconnectedAsync(Exception? exception)
   {
+    lock (_lockObject)
+    {
+      _connectedClients--;
+      _metricsCollector?.Gauge("websocket.connected_clients", _connectedClients);
+    }
+
     if (exception != null)
     {
-      _logger.LogWarning(exception, "Client {ConnectionId} disconnected with error", Context.ConnectionId);
+      _logger.LogWarning(exception, "Client {ConnectionId} disconnected with error (total: {Count})", 
+        Context.ConnectionId, _connectedClients);
     }
     else
     {
-      _logger.LogInformation("Client {ConnectionId} disconnected", Context.ConnectionId);
+      _logger.LogInformation("Client {ConnectionId} disconnected (total: {Count})", 
+        Context.ConnectionId, _connectedClients);
     }
     await base.OnDisconnectedAsync(exception);
   }

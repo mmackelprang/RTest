@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Events;
+using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
@@ -22,6 +23,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private readonly IOptionsMonitor<FilePlayerOptions> _options;
   private readonly IOptionsMonitor<FilePlayerPreferences> _preferences;
   private readonly BackgroundIdentificationService? _identificationService;
+  private readonly IMetricsCollector? _metricsCollector;
   private readonly string _rootDir;
   private readonly Dictionary<string, object> _metadata = new();
   private Queue<string> _playlist = new();
@@ -43,18 +45,21 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <param name="preferences">The file player preferences.</param>
   /// <param name="rootDir">The root directory for audio files.</param>
   /// <param name="identificationService">Optional fingerprinting service for track identification.</param>
+  /// <param name="metricsCollector">Optional metrics collector for tracking playback metrics.</param>
   public FilePlayerAudioSource(
     ILogger<FilePlayerAudioSource> logger,
     IOptionsMonitor<FilePlayerOptions> options,
     IOptionsMonitor<FilePlayerPreferences> preferences,
     string rootDir = "",
-    BackgroundIdentificationService? identificationService = null)
+    BackgroundIdentificationService? identificationService = null,
+    IMetricsCollector? metricsCollector = null)
     : base(logger)
   {
     _options = options;
     _preferences = preferences;
     _rootDir = rootDir;
     _identificationService = identificationService;
+    _metricsCollector = metricsCollector;
 
     // Subscribe to track identification events if service is available
     if (_identificationService != null)
@@ -253,6 +258,9 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   {
     ThrowIfDisposed();
 
+    // Track skip metric if moving from a playing track
+    var wasSkipped = State == AudioSourceState.Playing && _currentFile != null;
+
     // Handle RepeatMode.One - replay current track
     if (_preferences.CurrentValue.Repeat == RepeatMode.One && _currentFile != null)
     {
@@ -269,6 +277,12 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     if (_currentFile != null && !_playedHistory.Contains(_currentFile))
     {
       _playedHistory.Add(_currentFile);
+    }
+
+    // Track skip metric if this was user-initiated
+    if (wasSkipped)
+    {
+      _metricsCollector?.Increment("radio.songs_skipped");
     }
 
     // Check if playlist has more tracks
@@ -525,6 +539,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     }
 
     // In a real implementation, this would start SoundFlow playback
+    // When playback completes naturally (not skipped), increment: _metricsCollector?.Increment("radio.songs_played_total");
     Logger.LogInformation("Playing file: {File}", _currentFile);
 
     return Task.CompletedTask;
@@ -725,6 +740,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
         catch (Exception ex)
         {
           Logger.LogWarning(ex, "SoundFlow could not decode file: {File}", _currentFile);
+          _metricsCollector?.Increment("radio.playback_errors");
           _fileStream?.Dispose();
           _fileStream = null;
           _dataProvider = null;
