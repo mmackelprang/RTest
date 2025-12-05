@@ -117,6 +117,9 @@ public interface IRadioControls
   /// <returns>A task representing the asynchronous operation.</returns>
   Task StopScanAsync(CancellationToken ct = default);
 
+  Task<bool> GetPowerStateAsync(CancellationToken ct = default);
+  Task TogglePowerStateAsync(CancellationToken ct = default);
+
   /// <summary>
   /// Occurs when any radio state property changes (frequency, band, signal strength, stereo status).
   /// </summary>
