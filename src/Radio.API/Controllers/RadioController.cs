@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Radio.API.Extensions;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
@@ -372,13 +373,7 @@ public class RadioController : ControllerBase
   /// <returns>The active radio source, or null if no radio is active.</returns>
   private IRadioControls? GetActiveRadioSource()
   {
-    var mixer = _audioEngine.GetMasterMixer();
-    var activeSources = mixer.GetActiveSources();
-    var primarySource = activeSources.FirstOrDefault(s => 
-      s.Category == AudioSourceCategory.Primary && 
-      s.Type == AudioSourceType.Radio);
-
-    return primarySource as IRadioControls;
+    return _audioEngine.GetActiveRadioSource();
   }
 
   /// <summary>

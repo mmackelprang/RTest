@@ -67,7 +67,8 @@ public class GenericUSBAudioSource : USBAudioSourceBase
         Id);
     }
 
-    MetadataInternal["Source"] = "Generic USB";
+    // Set default metadata for generic USB source
+    SetDefaultMetadata("Generic USB Audio", "Generic USB", "USB Device");
 
     await InitializeUSBCaptureAsync(usbPort, cancellationToken);
 

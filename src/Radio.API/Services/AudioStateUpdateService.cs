@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.SignalR;
 using Radio.API.Hubs;
+using Radio.API.Mappers;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
@@ -301,7 +302,7 @@ public class AudioStateUpdateService : BackgroundService
       Balance = 0.0f,
       Position = activeSource is IPrimaryAudioSource primary ? primary.Position : null,
       Duration = activeSource is IPrimaryAudioSource primaryDur ? primaryDur.Duration : null,
-      ActiveSource = activeSource != null ? MapToAudioSourceDto(activeSource) : null
+      ActiveSource = activeSource?.MapToDto()
     };
 
     // Add capability flags if primary source
@@ -339,37 +340,17 @@ public class AudioStateUpdateService : BackgroundService
     // Get metadata if available
     if (activeSource is IPrimaryAudioSource primaryMeta && primaryMeta.Metadata != null)
     {
-      if (primaryMeta.Metadata.TryGetValue("Title", out var title) && title != null)
-        dto.Title = title.ToString() ?? "No Track";
-      if (primaryMeta.Metadata.TryGetValue("Artist", out var artist) && artist != null)
-        dto.Artist = artist.ToString() ?? "--";
-      if (primaryMeta.Metadata.TryGetValue("Album", out var album) && album != null)
-        dto.Album = album.ToString() ?? "--";
-      if (primaryMeta.Metadata.TryGetValue("AlbumArtUrl", out var artUrl) && artUrl != null)
-        dto.AlbumArtUrl = artUrl.ToString() ?? "/images/default-album-art.png";
-
-      // Copy extended metadata
-      dto.ExtendedMetadata = new Dictionary<string, object>(primaryMeta.Metadata);
+      var metadataDto = primaryMeta.MapToNowPlaying();
+      dto.Title = metadataDto.Title;
+      dto.Artist = metadataDto.Artist;
+      dto.Album = metadataDto.Album;
+      dto.AlbumArtUrl = metadataDto.AlbumArtUrl;
+      dto.ExtendedMetadata = metadataDto.ExtendedMetadata;
     }
 
     return dto;
   }
 
-  private static AudioSourceDto MapToAudioSourceDto(IAudioSource source)
-  {
-    return new AudioSourceDto
-    {
-      Id = source.Id,
-      Name = source.Name,
-      Type = source.Type.ToString(),
-      Category = source.Category.ToString(),
-      State = source.State.ToString(),
-      Volume = source.Volume,
-      Metadata = source is IPrimaryAudioSource primary && primary.Metadata != null
-        ? primary.Metadata.ToDictionary(kvp => kvp.Key, kvp => kvp.Value)
-        : new Dictionary<string, object>()
-    };
-  }
 
   private static QueueItemDto MapToQueueItemDto(QueueItem item)
   {

@@ -60,11 +60,6 @@ public class VinylAudioSource : USBAudioSourceBase
   /// </summary>
   private void SetDefaultMetadata()
   {
-    MetadataInternal[StandardMetadataKeys.Title] = "Vinyl";
-    MetadataInternal[StandardMetadataKeys.Artist] = StandardMetadataKeys.DefaultArtist;
-    MetadataInternal[StandardMetadataKeys.Album] = StandardMetadataKeys.DefaultAlbum;
-    MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = StandardMetadataKeys.DefaultAlbumArtUrl;
-    MetadataInternal["Source"] = "Vinyl";
-    MetadataInternal["Device"] = "Turntable";
+    SetDefaultMetadata("Vinyl", "Vinyl", "Turntable");
   }
 }

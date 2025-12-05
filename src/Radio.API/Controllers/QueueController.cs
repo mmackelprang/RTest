@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Radio.API.Extensions;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
 
@@ -280,9 +281,7 @@ public class QueueController : ControllerBase
   /// <returns>An error ActionResult if validation fails, otherwise null.</returns>
   private ActionResult? TryGetQueueSource(out IPlayQueue? queueSource, out IAudioSource? primarySource)
   {
-    var mixer = _audioEngine.GetMasterMixer();
-    var activeSources = mixer.GetActiveSources();
-    primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary);
+    primarySource = _audioEngine.GetActivePrimaryAudioSource();
 
     if (primarySource == null)
     {

@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
+using Radio.API.Extensions;
+using Radio.API.Mappers;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
 
@@ -41,7 +43,7 @@ public class SourcesController : ControllerBase
     {
       var mixer = _audioEngine.GetMasterMixer();
       var activeSources = mixer.GetActiveSources();
-      var primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary);
+      var primarySource = _audioEngine.GetActivePrimaryAudioSource();
 
       var result = new AvailableSourcesDto
       {
@@ -54,7 +56,7 @@ public class SourcesController : ControllerBase
           AudioSourceType.GenericUSB.ToString()
         ],
         ActiveSourceType = primarySource?.Type.ToString(),
-        ActiveSources = activeSources.Select(MapToAudioSourceDto).ToList()
+        ActiveSources = activeSources.Select(s => s.MapToDto()).ToList()
       };
 
       return Ok(result);
@@ -79,7 +81,7 @@ public class SourcesController : ControllerBase
       var mixer = _audioEngine.GetMasterMixer();
       var activeSources = mixer.GetActiveSources();
 
-      return Ok(activeSources.Select(MapToAudioSourceDto).ToList());
+      return Ok(activeSources.Select(s => s.MapToDto()).ToList());
     }
     catch (Exception ex)
     {
@@ -99,16 +101,14 @@ public class SourcesController : ControllerBase
   {
     try
     {
-      var mixer = _audioEngine.GetMasterMixer();
-      var activeSources = mixer.GetActiveSources();
-      var primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary);
+      var primarySource = _audioEngine.GetActivePrimaryAudioSource();
 
       if (primarySource == null)
       {
         return NotFound(new { error = "No primary source active" });
       }
 
-      return Ok(MapToAudioSourceDto(primarySource));
+      return Ok(primarySource.MapToDto());
     }
     catch (Exception ex)
     {
@@ -179,7 +179,7 @@ public class SourcesController : ControllerBase
           "Successfully switched to source: {SourceType}",
           sourceType);
 
-        return Ok(MapToAudioSourceDto(targetSource));
+        return Ok(targetSource.MapToDto());
       }
       catch (Exception ex)
       {
@@ -211,7 +211,7 @@ public class SourcesController : ControllerBase
       var mixer = _audioEngine.GetMasterMixer();
       var eventSources = mixer.GetActiveSources()
         .Where(s => s.Category == AudioSourceCategory.Event)
-        .Select(MapToAudioSourceDto)
+        .Select(s => s.MapToDto())
         .ToList();
 
       return Ok(eventSources);
@@ -221,26 +221,5 @@ public class SourcesController : ControllerBase
       _logger.LogError(ex, "Error getting event sources");
       return StatusCode(500, new { error = "Failed to get event sources" });
     }
-  }
-
-  private static AudioSourceDto MapToAudioSourceDto(IAudioSource source)
-  {
-    var dto = new AudioSourceDto
-    {
-      Id = source.Id,
-      Name = source.Name,
-      Type = source.Type.ToString(),
-      Category = source.Category.ToString(),
-      State = source.State.ToString(),
-      Volume = source.Volume
-    };
-
-    if (source is IPrimaryAudioSource primary)
-    {
-      dto.IsSeekable = primary.IsSeekable;
-      dto.Metadata = primary.Metadata.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
-    }
-
-    return dto;
   }
 }

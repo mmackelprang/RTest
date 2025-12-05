@@ -60,11 +60,6 @@ public class RadioAudioSource : USBAudioSourceBase
   /// </summary>
   private void SetDefaultMetadata()
   {
-    MetadataInternal[StandardMetadataKeys.Title] = "Radio";
-    MetadataInternal[StandardMetadataKeys.Artist] = StandardMetadataKeys.DefaultArtist;
-    MetadataInternal[StandardMetadataKeys.Album] = StandardMetadataKeys.DefaultAlbum;
-    MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = StandardMetadataKeys.DefaultAlbumArtUrl;
-    MetadataInternal["Source"] = "Radio";
-    MetadataInternal["Device"] = "Raddy RF320";
+    SetDefaultMetadata("Radio", "Radio", "Raddy RF320");
   }
 }

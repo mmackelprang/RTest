@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Radio.API.Extensions;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.API.Models;
@@ -237,9 +238,7 @@ public class FilesController : ControllerBase
     CancellationToken cancellationToken)
   {
     // Get the mixer to check active sources
-    var mixer = _audioEngine.GetMasterMixer();
-    var activeSources = mixer.GetActiveSources();
-    var primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary) as IPrimaryAudioSource;
+    var primarySource = _audioEngine.GetActivePrimarySource();
 
     // If File Player is already active, return it
     if (primarySource?.Type == AudioSourceType.FilePlayer)
