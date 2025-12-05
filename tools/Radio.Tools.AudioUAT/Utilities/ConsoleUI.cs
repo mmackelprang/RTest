@@ -294,9 +294,10 @@ public static class ConsoleUI
       AnsiConsole.Cursor.MoveUp(1);
 
       var position = (value + 100) / BalanceStep;
+      position = Math.Clamp(position, 0, BalanceSliderWidth - 1);
       var bar = new string(' ', position) + "●" + new string(' ', BalanceSliderWidth - 1 - position);
       var label = value == 0 ? "CENTER" : value < 0 ? $"LEFT {-value}%" : $"RIGHT {value}%";
-      AnsiConsole.MarkupLine($"Balance: [cyan]L[{bar}]R[/] [bold]{label}[/]");
+      AnsiConsole.MarkupLine($"Balance: [cyan]L[[{bar}]]R[/] [bold]{label}[/]");
 
       key = Console.ReadKey(true);
 

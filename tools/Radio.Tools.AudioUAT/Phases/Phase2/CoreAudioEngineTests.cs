@@ -352,8 +352,9 @@ public class DeviceSelectionTest : IPhaseTest
       ConsoleUI.WriteInfo("Available devices:");
       for (var i = 0; i < devices.Count; i++)
       {
-        var marker = devices[i].IsDefault ? " [DEFAULT]" : "";
-        ConsoleUI.WriteInfo($"  [{i + 1}] {devices[i].Name}{marker}");
+        var marker = devices[i].IsDefault ? " [[DEFAULT]]" : "";
+        var safeName = Spectre.Console.Markup.Escape(devices[i].Name);
+        ConsoleUI.WriteInfo($"  [[{i + 1}]] {safeName}{marker}");
       }
 
       if (devices.Count == 1)
@@ -453,10 +454,10 @@ public class USBDeviceDetectionTest : IPhaseTest
         ConsoleUI.WriteInfo("USB Output Devices:");
         foreach (var device in usbOutputDevices)
         {
-          ConsoleUI.WriteInfo($"  - {device.Name}");
+          ConsoleUI.WriteInfo($"  - {Spectre.Console.Markup.Escape(device.Name)}");
           if (device.USBPort != null)
           {
-            ConsoleUI.WriteInfo($"    USB Port: {device.USBPort}");
+            ConsoleUI.WriteInfo($"    USB Port: {Spectre.Console.Markup.Escape(device.USBPort)}");
           }
         }
       }
@@ -466,10 +467,10 @@ public class USBDeviceDetectionTest : IPhaseTest
         ConsoleUI.WriteInfo("USB Input Devices:");
         foreach (var device in usbInputDevices)
         {
-          ConsoleUI.WriteInfo($"  - {device.Name}");
+          ConsoleUI.WriteInfo($"  - {Spectre.Console.Markup.Escape(device.Name)}");
           if (device.USBPort != null)
           {
-            ConsoleUI.WriteInfo($"    USB Port: {device.USBPort}");
+            ConsoleUI.WriteInfo($"    USB Port: {Spectre.Console.Markup.Escape(device.USBPort)}");
           }
         }
       }

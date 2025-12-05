@@ -54,6 +54,7 @@ public class UnifiedDatabaseBackupTests : IDisposable
 
   public void Dispose()
   {
+    Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
     try
     {
       if (Directory.Exists(_testDirectory))
@@ -294,5 +295,8 @@ public class UnifiedDatabaseBackupTests : IDisposable
     using var cmd = connection.CreateCommand();
     cmd.CommandText = "CREATE TABLE Test (Id INTEGER PRIMARY KEY, Value TEXT)";
     cmd.ExecuteNonQuery();
+    
+    connection.Close();
+    Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
   }
 }

@@ -50,9 +50,22 @@ public class SqliteFingerprintCacheRepositoryTests : IAsyncLifetime
   public async Task DisposeAsync()
   {
     await _dbContext.DisposeAsync();
+    Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+    
     if (File.Exists(_testDbPath))
     {
-      File.Delete(_testDbPath);
+      try 
+      {
+        File.Delete(_testDbPath);
+      }
+      catch (IOException)
+      {
+        await Task.Delay(50);
+        if (File.Exists(_testDbPath))
+        {
+           File.Delete(_testDbPath);
+        }
+      }
     }
   }
 

@@ -28,5 +28,10 @@ public enum RadioBand
   /// <summary>
   /// Shortwave band (typically 1.6-30 MHz).
   /// </summary>
-  SW
+  SW,
+
+  /// <summary>
+  /// Air band (typically 118-137 MHz).
+  /// </summary>
+  AIR
 }

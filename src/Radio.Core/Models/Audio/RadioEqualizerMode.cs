@@ -28,5 +28,15 @@ public enum RadioEqualizerMode
   /// <summary>
   /// Classical music preset with natural, wide frequency range.
   /// </summary>
-  Classical
+  Classical,
+
+  /// <summary>
+  /// Jazz music preset.
+  /// </summary>
+  Jazz,
+
+  /// <summary>
+  /// Normal equalization preset.
+  /// </summary>
+  Normal
 }
