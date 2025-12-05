@@ -125,9 +125,9 @@ Inject the collector into existing services and instrument the code.
     *   `system.memory_usage_mb` (Gauge): `Process.GetCurrentProcess().WorkingSet64`. ✅
     *   `db.file_size_mb` (Gauge): Check `FileInfo` size of the SQLite db. ✅
 
-#### 2. Audio Playback & Library (Core) - Deferred
+#### 2. Audio Playback & Library (Core) 
 *   **Locations:** `AudioPlayerService`, `LibraryManager`
-*   **Metrics:** (Will be instrumented when audio services are available)
+*   **Metrics:** (Instrument when audio services are ready)
     *   `radio.songs_played_total` (Counter): Increment when track finishes.
     *   `radio.songs_skipped` (Counter): Increment when track is skipped.
     *   `radio.playback_errors` (Counter): Increment on playback exceptions.
@@ -135,20 +135,22 @@ Inject the collector into existing services and instrument the code.
     *   `library.scan_duration_ms` (Gauge): Measure duration of scan operation.
     *   `library.new_tracks_added` (Counter): Count of new files found during scan.
 
-#### 3. Text-to-Speech Services (Infrastructure) - Deferred
+#### 3. Text-to-Speech Services (Infrastructure)
 *   **Locations:** `TtsService` (and specific providers like `AzureTtsProvider`, `GoogleTtsProvider`)
-*   **Metrics:** (Will be instrumented when TTS services are instrumented)
+*   **Metrics:** (Instrumented when TTS services are ready)
     *   `tts.requests_total` (Counter): Increment on request, tag by provider (e.g., `provider=azure`).
     *   `tts.latency_ms` (Gauge): Measure stopwatch time from request to audio ready.
     *   `tts.characters_processed` (Counter): Increment by `text.Length`. Critical for cost tracking.
     *   `tts.cache_hits` / `tts.cache_misses` (Counter): Increment based on whether audio file existed locally.
 
-#### 4. API & Web Usage (Web/API) - Deferred
+#### 4. API Usage (API)
 *   **Location:** `RadioController`, `WebSocketHub`
 *   **Metrics:** (Will be added when instrumented)
     *   `api.requests_total` (Counter): Middleware to count HTTP requests.
     *   `websocket.connected_clients` (Gauge): Track active connections in Hub.
-    *   `ui.button_clicks` (Counter): Received via API from frontend (e.g., `POST /api/metrics/event`).
+
+#### 5. Web Usage (Web) - deferred until Web UI ready
+*   `ui.button_clicks` (Counter): Received via API from frontend (e.g., `POST /api/metrics/event`).
 
 **Notes:**
 - Core metrics infrastructure is complete and functional
