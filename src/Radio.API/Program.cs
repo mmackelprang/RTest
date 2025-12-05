@@ -1,6 +1,7 @@
 using System.Reflection;
 using Microsoft.OpenApi.Models;
 using Radio.API.Hubs;
+using Radio.API.Middleware;
 using Radio.API.Services;
 using Radio.API.Streaming;
 using Radio.Infrastructure.DependencyInjection;
@@ -47,6 +48,9 @@ builder.Services.AddSwaggerGen(options =>
 // Add SignalR
 builder.Services.AddSignalR();
 
+// Add Metrics services
+builder.Services.AddMetrics(builder.Configuration);
+
 // Add Audio Infrastructure services
 builder.Services.AddSoundFlowAudio(builder.Configuration);
 
@@ -77,6 +81,9 @@ if (app.Environment.IsDevelopment())
     options.RoutePrefix = "swagger";
   });
 }
+
+// Add API metrics middleware (before other middleware)
+app.UseApiMetrics();
 
 // Add audio stream middleware
 app.UseAudioStream();
