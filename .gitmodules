@@ -1,0 +1,3 @@
+[submodule "external/RaddyRF320BT"]
+	path = external/RaddyRF320BT
+	url = https://github.com/mmackelprang/RaddyRF320BT
