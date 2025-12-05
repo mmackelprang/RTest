@@ -89,6 +89,153 @@ Configuration options are static settings that define application behavior. They
 
 ---
 
+### Serilog Logging
+
+**Section Name:** `Serilog`  
+**Source File:** `src/Radio.API/appsettings.json`  
+**Description:** Configuration for application logging using Serilog with Console and File sinks.
+
+#### Overview
+
+The Radio Console API uses Serilog for structured logging with two configured sinks:
+- **Console Sink**: Outputs logs to the console for real-time monitoring
+- **File Sink**: Persists logs to disk for diagnostics and historical analysis
+
+#### Configuration Structure
+
+```json
+{
+  "Serilog": {
+    "Using": [ "Serilog.Sinks.File", "Serilog.Sinks.Console" ],
+    "MinimumLevel": {
+      "Default": "Information",
+      "Override": {
+        "Microsoft": "Warning",
+        "System": "Warning"
+      }
+    },
+    "WriteTo": [
+      { "Name": "Console" },
+      {
+        "Name": "File",
+        "Args": {
+          "path": "./logs/radio-.txt",
+          "rollingInterval": "Day",
+          "retainedFileCountLimit": 7,
+          "outputTemplate": "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}"
+        }
+      }
+    ],
+    "Enrich": [ "FromLogContext" ]
+  }
+}
+```
+
+#### File Sink Configuration
+
+| Property | Value | Description |
+|----------|-------|-------------|
+| `path` | `./logs/radio-.txt` | Log file path pattern. Date will be inserted before `.txt` (e.g., `radio-20231205.txt`) |
+| `rollingInterval` | `Day` | Logs are rotated daily |
+| `retainedFileCountLimit` | `7` | Keep logs for the last 7 days |
+| `outputTemplate` | Custom format | Structured format for parsing by the System Log API |
+
+#### Output Template Format
+
+The output template is specifically designed to be parseable by the System Log API:
+
+```
+{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}
+```
+
+Example log entry:
+```
+2023-12-05 13:26:45.123 +00:00 [INF] [Radio.API.Controllers.SystemController] Log retrieval requested with level=info, limit=100
+```
+
+#### Log Levels
+
+- **Verbose**: Detailed diagnostic information (not typically used in production)
+- **Debug**: Internal system events useful for debugging
+- **Information** (Default): General informational messages about application flow
+- **Warning**: Potentially harmful situations that don't prevent operation
+- **Error**: Error events that might still allow the application to continue
+- **Fatal**: Very severe error events that lead to application termination
+
+#### Log File Location
+
+Log files are stored in the `./logs` directory relative to the application's working directory:
+- **Development**: `<project-root>/logs/`
+- **Production (Linux/Pi)**: Ensure the application user has write permissions to the logs directory
+
+**Important for Linux/Pi deployments:**
+- Create the logs directory with appropriate permissions: `mkdir -p ./logs && chmod 755 ./logs`
+- Ensure the user running the application has write access
+- Consider log rotation and disk space monitoring
+
+#### System Log API
+
+The REST API provides a `/api/system/logs` endpoint to retrieve and filter logs programmatically.
+
+**Endpoint:** `GET /api/system/logs`
+
+**Query Parameters:**
+- `level` (string, default: "warning"): Minimum log level to return (info, warning, error)
+- `limit` (int, default: 100): Maximum number of log entries to return (1-10000)
+- `maxAgeMinutes` (int, optional): Only return logs within this many minutes from now
+
+**Example Requests:**
+```bash
+# Get recent warnings and errors
+GET /api/system/logs?level=warning&limit=50
+
+# Get all info-level logs from the last hour
+GET /api/system/logs?level=info&limit=200&maxAgeMinutes=60
+
+# Get only errors
+GET /api/system/logs?level=error&limit=100
+```
+
+**Response Format:**
+```json
+{
+  "logs": [
+    {
+      "timestamp": "2023-12-05T13:26:45.123Z",
+      "level": "INF",
+      "message": "Log retrieval requested...",
+      "exception": null,
+      "sourceContext": "Radio.API.Controllers.SystemController"
+    }
+  ],
+  "totalCount": 1,
+  "filters": {
+    "level": "info",
+    "limit": 100,
+    "maxAgeMinutes": null
+  }
+}
+```
+
+#### Behavioral Changes from File Sink
+
+When the file sink is configured:
+- **Durability**: Logs persist across application restarts and crashes
+- **Daily Rotation**: New log file created each day (e.g., `radio-20231205.txt`, `radio-20231206.txt`)
+- **Retention**: Logs older than 7 days are automatically deleted
+- **Disk Usage**: Monitor disk space; each day's logs can vary based on activity
+- **Performance**: Minimal impact; file writes are buffered and asynchronous
+
+#### Best Practices
+
+1. **Log Level**: Use `Information` level in production to balance detail with volume
+2. **Disk Space**: Monitor the `./logs` directory on resource-constrained devices (e.g., Raspberry Pi)
+3. **Permissions**: Verify write permissions before deployment
+4. **Diagnostics**: Use the `/api/system/logs` endpoint for remote diagnostics instead of SSH access
+5. **Avoid Duplicates**: Configuration is defined in `appsettings.json` only; do not add additional sinks in code
+
+---
+
 ### Devices
 
 **Section Name:** `Devices`  
