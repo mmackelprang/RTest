@@ -121,27 +121,22 @@ public class AudioDeviceDto
   public string Name { get; set; } = string.Empty;
 
   /// <summary>
-  /// Gets or sets the device type.
+  /// Gets or sets the device type (Input, Output, Duplex).
   /// </summary>
   public string Type { get; set; } = string.Empty;
 
   /// <summary>
-  /// Gets or sets whether this device is currently in use.
-  /// </summary>
-  public bool IsActive { get; set; }
-
-  /// <summary>
-  /// Gets or sets whether this device is the default device.
+  /// Gets or sets whether this is the default device.
   /// </summary>
   public bool IsDefault { get; set; }
 
   /// <summary>
-  /// Gets or sets whether this device is a USB device.
+  /// Gets or sets whether this is a USB device.
   /// </summary>
   public bool IsUSBDevice { get; set; }
 
   /// <summary>
-  /// Gets or sets the USB port path if applicable.
+  /// Gets or sets the USB port path (if applicable).
   /// </summary>
   public string? USBPort { get; set; }
 
@@ -154,11 +149,6 @@ public class AudioDeviceDto
   /// Gets or sets supported sample rates.
   /// </summary>
   public int[]? SupportedSampleRates { get; set; }
-
-  /// <summary>
-  /// Gets or sets additional device properties.
-  /// </summary>
-  public Dictionary<string, string>? Properties { get; set; }
 }
 
 /// <summary>
