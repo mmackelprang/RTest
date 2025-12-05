@@ -24,6 +24,10 @@ public class SystemController : ControllerBase
   private static double _cachedCpuUsage = 0;
   private static DateTime _lastCpuCheck = DateTime.MinValue;
   private static readonly TimeSpan CpuCacheInterval = TimeSpan.FromSeconds(5);
+  
+  // Constants for log parsing
+  private const int MaxExceptionLines = 50;
+  private const int MaxLogFileSizeBytes = 50 * 1024 * 1024; // 50 MB safety limit
 
   /// <summary>
   /// Initializes a new instance of the SystemController.
@@ -201,6 +205,16 @@ public class SystemController : ControllerBase
     {
       try
       {
+        // Safety check: skip files that are too large to prevent memory issues
+        var fileInfo = new FileInfo(logFile);
+        if (fileInfo.Length > MaxLogFileSizeBytes)
+        {
+          _logger.LogWarning(
+            "Skipping large log file {LogFile} ({Size} bytes exceeds {MaxSize} bytes limit)",
+            logFile, fileInfo.Length, MaxLogFileSizeBytes);
+          continue;
+        }
+
         var lines = System.IO.File.ReadAllLines(logFile);
         
         // Process lines in reverse order (newest first within each file)
@@ -252,7 +266,7 @@ public class SystemController : ControllerBase
             {
               // It's likely an exception or continuation
               var exceptionLines = new List<string>();
-              for (int j = i + 1; j < lines.Length && j < i + 50; j++)
+              for (int j = i + 1; j < lines.Length && j < i + MaxExceptionLines; j++)
               {
                 if (string.IsNullOrWhiteSpace(lines[j]) || regex.IsMatch(lines[j]))
                   break;
@@ -296,7 +310,7 @@ public class SystemController : ControllerBase
       "VRB" or "VERBOSE" => 0,
       "DBG" or "DEBUG" => 1,
       "INF" or "INFO" or "INFORMATION" => 2,
-      "WRN" or "WRG" or "WARNING" => 3,
+      "WRN" or "WARNING" => 3,
       "ERR" or "ERROR" => 4,
       "FTL" or "FATAL" => 5,
       _ => 2 // Default to INFO level
