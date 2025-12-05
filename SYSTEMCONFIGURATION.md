@@ -4,6 +4,21 @@ This document provides a comprehensive reference for all Configuration, Preferen
 
 ---
 
+## Configuration File Location
+
+**Primary Configuration File:** `src/Radio.API/appsettings.json`
+
+The Radio Console application uses a **consolidated configuration approach** where all application settings are defined in a single `appsettings.json` file located in the Radio.API project. This design choice provides several benefits:
+
+- **Single Source of Truth**: All configuration sections (Database, ManagedConfiguration, Metrics, Fingerprinting, AudioEngine, Serilog) are in one location
+- **Simplified Deployment**: Only one configuration file needs to be managed and deployed
+- **Easier Maintenance**: Configuration changes are made in a single, well-organized file
+- **Environment Overrides**: Standard ASP.NET Core configuration layering allows for `appsettings.Development.json`, `appsettings.Production.json`, and environment variables to override settings as needed
+
+**Reference Example:** See `design/appsettings.example.json` for a complete template with all available configuration options.
+
+---
+
 ## Table of Contents
 
 - [Configuration Options](#configuration-options)
@@ -100,6 +115,8 @@ Configuration options are static settings that define application behavior. They
 The Radio Console API uses Serilog for structured logging with two configured sinks:
 - **Console Sink**: Outputs logs to the console for real-time monitoring
 - **File Sink**: Persists logs to disk for diagnostics and historical analysis
+
+**Note:** The `appsettings.json` file contains all application configuration sections (Database, ManagedConfiguration, Metrics, Fingerprinting, AudioEngine, and Serilog) in a single consolidated file for easier management and deployment. This eliminates the need for multiple configuration files and simplifies the deployment process.
 
 #### Configuration Structure
 
