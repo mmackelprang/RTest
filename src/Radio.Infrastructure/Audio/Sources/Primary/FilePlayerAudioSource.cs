@@ -23,7 +23,6 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private readonly IOptionsMonitor<FilePlayerOptions> _options;
   private readonly IOptionsMonitor<FilePlayerPreferences> _preferences;
   private readonly BackgroundIdentificationService? _identificationService;
-  private readonly IMetricsCollector? _metricsCollector;
   private readonly string _rootDir;
   private readonly Dictionary<string, object> _metadata = new();
   private Queue<string> _playlist = new();
@@ -53,13 +52,12 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     string rootDir = "",
     BackgroundIdentificationService? identificationService = null,
     IMetricsCollector? metricsCollector = null)
-    : base(logger)
+    : base(logger, metricsCollector)
   {
     _options = options;
     _preferences = preferences;
     _rootDir = rootDir;
     _identificationService = identificationService;
-    _metricsCollector = metricsCollector;
 
     // Subscribe to track identification events if service is available
     if (_identificationService != null)
@@ -282,7 +280,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     // Track skip metric if this was user-initiated
     if (wasSkipped)
     {
-      _metricsCollector?.Increment("radio.songs_skipped");
+      TrackSkipped();
     }
 
     // Check if playlist has more tracks
@@ -539,7 +537,8 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     }
 
     // In a real implementation, this would start SoundFlow playback
-    // When playback completes naturally (not skipped), increment: _metricsCollector?.Increment("radio.songs_played_total");
+    // When playback completes naturally (not skipped), call: OnPlaybackCompleted(PlaybackCompletionReason.EndOfContent)
+    // This will automatically track the audio.songs_played_total metric
     Logger.LogInformation("Playing file: {File}", _currentFile);
 
     return Task.CompletedTask;
@@ -740,7 +739,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
         catch (Exception ex)
         {
           Logger.LogWarning(ex, "SoundFlow could not decode file: {File}", _currentFile);
-          _metricsCollector?.Increment("radio.playback_errors");
+          TrackPlaybackError();
           _fileStream?.Dispose();
           _fileStream = null;
           _dataProvider = null;

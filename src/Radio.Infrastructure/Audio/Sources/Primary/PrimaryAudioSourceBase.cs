@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 
@@ -11,6 +12,7 @@ namespace Radio.Infrastructure.Audio.Sources.Primary;
 public abstract class PrimaryAudioSourceBase : IPrimaryAudioSource
 {
   private readonly ILogger _logger;
+  private readonly IMetricsCollector? _metricsCollector;
   private AudioSourceState _state = AudioSourceState.Created;
   private float _volume = 1.0f;
   private bool _disposed;
@@ -20,10 +22,17 @@ public abstract class PrimaryAudioSourceBase : IPrimaryAudioSource
   /// Initializes a new instance of the <see cref="PrimaryAudioSourceBase"/> class.
   /// </summary>
   /// <param name="logger">The logger instance.</param>
-  protected PrimaryAudioSourceBase(ILogger logger)
+  /// <param name="metricsCollector">Optional metrics collector for tracking playback metrics.</param>
+  protected PrimaryAudioSourceBase(ILogger logger, IMetricsCollector? metricsCollector = null)
   {
     _logger = logger;
+    _metricsCollector = metricsCollector;
   }
+
+  /// <summary>
+  /// Gets the metrics collector for derived classes.
+  /// </summary>
+  protected IMetricsCollector? MetricsCollector => _metricsCollector;
 
   /// <inheritdoc/>
   public string Id => _id ??= $"{Type}-{Guid.NewGuid():N}";
@@ -325,12 +334,36 @@ public abstract class PrimaryAudioSourceBase : IPrimaryAudioSource
   /// <param name="error">Any error that occurred, if applicable.</param>
   protected virtual void OnPlaybackCompleted(PlaybackCompletionReason reason, Exception? error = null)
   {
+    // Track metrics for natural completion
+    if (reason == PlaybackCompletionReason.EndOfContent)
+    {
+      _metricsCollector?.Increment("audio.songs_played_total");
+    }
+
     PlaybackCompleted?.Invoke(this, new AudioSourceCompletedEventArgs
     {
       SourceId = Id,
       Reason = reason,
       Error = error
     });
+  }
+
+  /// <summary>
+  /// Tracks that a track was skipped (for metrics).
+  /// Should be called by derived classes when implementing NextAsync if a track is being skipped during playback.
+  /// </summary>
+  protected void TrackSkipped()
+  {
+    _metricsCollector?.Increment("audio.songs_skipped");
+  }
+
+  /// <summary>
+  /// Tracks that a playback error occurred (for metrics).
+  /// Should be called by derived classes when handling playback exceptions.
+  /// </summary>
+  protected void TrackPlaybackError()
+  {
+    _metricsCollector?.Increment("audio.playback_errors");
   }
 
   /// <summary>

@@ -32,11 +32,13 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   /// <param name="logger">The logger instance.</param>
   /// <param name="deviceManager">The audio device manager.</param>
   /// <param name="identificationService">Optional fingerprinting service for track identification.</param>
+  /// <param name="metricsCollector">Optional metrics collector for tracking playback metrics.</param>
   protected USBAudioSourceBase(
     ILogger logger, 
     IAudioDeviceManager deviceManager,
-    BackgroundIdentificationService? identificationService = null)
-    : base(logger)
+    BackgroundIdentificationService? identificationService = null,
+    Radio.Core.Interfaces.IMetricsCollector? metricsCollector = null)
+    : base(logger, metricsCollector)
   {
     _deviceManager = deviceManager;
     _identificationService = identificationService;
