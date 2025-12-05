@@ -1,9 +1,11 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using SoundFlow.Metadata;
+using System.Diagnostics;
 
 namespace Radio.Infrastructure.Audio.Services;
 
@@ -14,6 +16,7 @@ public class FileBrowser : IFileBrowser
 {
   private readonly ILogger<FileBrowser> _logger;
   private readonly IOptionsMonitor<FilePlayerOptions> _options;
+  private readonly IMetricsCollector? _metricsCollector;
   private readonly string _rootDir;
 
   // Supported audio file extensions
@@ -28,14 +31,17 @@ public class FileBrowser : IFileBrowser
   /// <param name="logger">The logger instance.</param>
   /// <param name="options">The file player options.</param>
   /// <param name="rootDir">The root directory for resolving relative paths.</param>
+  /// <param name="metricsCollector">Optional metrics collector for tracking scan operations.</param>
   public FileBrowser(
     ILogger<FileBrowser> logger,
     IOptionsMonitor<FilePlayerOptions> options,
-    string rootDir)
+    string rootDir,
+    IMetricsCollector? metricsCollector = null)
   {
     _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     _options = options ?? throw new ArgumentNullException(nameof(options));
     _rootDir = rootDir ?? throw new ArgumentNullException(nameof(rootDir));
+    _metricsCollector = metricsCollector;
   }
 
   /// <inheritdoc/>
@@ -44,6 +50,7 @@ public class FileBrowser : IFileBrowser
     bool recursive = false,
     CancellationToken cancellationToken = default)
   {
+    var stopwatch = Stopwatch.StartNew();
     var basePath = GetFullPath(path);
 
     if (!Directory.Exists(basePath))
@@ -61,6 +68,7 @@ public class FileBrowser : IFileBrowser
       files.Count, basePath, recursive);
 
     var audioFiles = new List<AudioFileInfo>();
+    var previousCount = 0; // TODO: In a real implementation, this would track existing files from a database
 
     foreach (var file in files)
     {
@@ -71,6 +79,19 @@ public class FileBrowser : IFileBrowser
       {
         audioFiles.Add(audioFile);
       }
+    }
+
+    stopwatch.Stop();
+
+    // Track metrics
+    _metricsCollector?.Gauge("library.tracks_total", audioFiles.Count);
+    _metricsCollector?.Gauge("library.scan_duration_ms", stopwatch.ElapsedMilliseconds);
+    
+    // Track new files (simplified implementation - in production, this would compare with existing database)
+    var newFilesCount = audioFiles.Count - previousCount;
+    if (newFilesCount > 0)
+    {
+      _metricsCollector?.Increment("library.new_tracks_added", newFilesCount);
     }
 
     return audioFiles;

@@ -107,8 +107,16 @@ public sealed class BufferedMetricsCollector : IMetricsCollector, IHostedService
       _flushTimer = null;
     }
 
-    // Final flush
-    await FlushAsync(ct);
+    // Final flush - but only if not already disposed
+    try
+    {
+      await FlushAsync(ct);
+    }
+    catch (ObjectDisposedException)
+    {
+      // Ignore if already disposed
+      _logger.LogDebug("Metrics collector already disposed during stop");
+    }
 
     _logger.LogInformation("Metrics collector stopped");
   }

@@ -33,11 +33,13 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <param name="logger">The logger instance.</param>
   /// <param name="secrets">The Spotify secrets configuration.</param>
   /// <param name="preferences">The Spotify preferences.</param>
+  /// <param name="metricsCollector">Optional metrics collector for tracking playback metrics.</param>
   public SpotifyAudioSource(
     ILogger<SpotifyAudioSource> logger,
     IOptionsMonitor<SpotifySecrets> secrets,
-    IOptionsMonitor<SpotifyPreferences> preferences)
-    : base(logger)
+    IOptionsMonitor<SpotifyPreferences> preferences,
+    Radio.Core.Interfaces.IMetricsCollector? metricsCollector = null)
+    : base(logger, metricsCollector)
   {
     _secrets = secrets;
     _preferences = preferences;

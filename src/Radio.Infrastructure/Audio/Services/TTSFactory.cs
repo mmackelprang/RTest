@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Sources.Events;
 
@@ -17,6 +18,7 @@ public class TTSFactory : ITTSFactory
   private readonly ILogger<TTSEventSource> _ttsSourceLogger;
   private readonly IOptionsMonitor<TTSOptions> _options;
   private readonly IOptionsMonitor<TTSSecrets> _secrets;
+  private readonly IMetricsCollector? _metricsCollector;
   private IReadOnlyList<TTSEngineInfo>? _cachedEngines;
 
   /// <summary>
@@ -26,16 +28,19 @@ public class TTSFactory : ITTSFactory
   /// <param name="ttsSourceLogger">The TTS source logger.</param>
   /// <param name="options">The TTS options.</param>
   /// <param name="secrets">The TTS secrets (API keys).</param>
+  /// <param name="metricsCollector">Optional metrics collector for tracking TTS operations.</param>
   public TTSFactory(
     ILogger<TTSFactory> logger,
     ILogger<TTSEventSource> ttsSourceLogger,
     IOptionsMonitor<TTSOptions> options,
-    IOptionsMonitor<TTSSecrets> secrets)
+    IOptionsMonitor<TTSSecrets> secrets,
+    IMetricsCollector? metricsCollector = null)
   {
     _logger = logger;
     _ttsSourceLogger = ttsSourceLogger;
     _options = options;
     _secrets = secrets;
+    _metricsCollector = metricsCollector;
   }
 
   /// <inheritdoc/>
@@ -56,6 +61,7 @@ public class TTSFactory : ITTSFactory
   {
     ArgumentException.ThrowIfNullOrWhiteSpace(text);
 
+    var stopwatch = Stopwatch.StartNew();
     var opts = _options.CurrentValue;
 
     // Use provided parameters or fall back to defaults
@@ -75,6 +81,24 @@ public class TTSFactory : ITTSFactory
     _logger.LogInformation("Creating TTS audio for text: '{Text}' with engine {Engine}",
       text.Length > 50 ? text[..50] + "..." : text, engine);
 
+    // Track TTS request metrics
+    var providerTag = new Dictionary<string, string> { { "provider", engine.ToString().ToLowerInvariant() } };
+    _metricsCollector?.Increment("tts.requests_total", 1.0, providerTag);
+    _metricsCollector?.Increment("tts.characters_processed", text.Length);
+
+    // Check for cached audio (simplified - TODO: implement actual cache checking)
+    var cacheKey = $"{engine}_{voice}_{text.GetHashCode()}";
+    var isCached = false; // In production, this would check if audio file exists in cache
+
+    if (isCached)
+    {
+      _metricsCollector?.Increment("tts.cache_hits", 1.0, providerTag);
+    }
+    else
+    {
+      _metricsCollector?.Increment("tts.cache_misses", 1.0, providerTag);
+    }
+
     // Generate audio based on engine
     var (audioStream, duration) = engine switch
     {
@@ -83,6 +107,9 @@ public class TTSFactory : ITTSFactory
       TTSEngine.Azure => await GenerateAzureTTSAsync(text, voice, speed, pitch, cancellationToken),
       _ => throw new NotSupportedException($"TTS engine '{engine}' is not supported")
     };
+
+    stopwatch.Stop();
+    _metricsCollector?.Gauge("tts.latency_ms", stopwatch.ElapsedMilliseconds, providerTag);
 
     return new TTSEventSource(text, effectiveParams, audioStream, duration, _ttsSourceLogger);
   }
