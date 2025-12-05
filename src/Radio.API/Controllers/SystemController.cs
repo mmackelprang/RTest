@@ -3,6 +3,8 @@ using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
+using System.Globalization;
 
 namespace Radio.API.Controllers;
 
@@ -22,6 +24,10 @@ public class SystemController : ControllerBase
   private static double _cachedCpuUsage = 0;
   private static DateTime _lastCpuCheck = DateTime.MinValue;
   private static readonly TimeSpan CpuCacheInterval = TimeSpan.FromSeconds(5);
+  
+  // Constants for log parsing
+  private const int MaxExceptionLines = 50;
+  private const int MaxLogFileSizeBytes = 50 * 1024 * 1024; // 50 MB safety limit
 
   /// <summary>
   /// Initializes a new instance of the SystemController.
@@ -129,13 +135,13 @@ public class SystemController : ControllerBase
         return BadRequest(new { error = "Limit must be between 1 and 10000" });
       }
 
-      // Log retrieval requires Serilog file sink to be configured
-      // This is a placeholder implementation that validates parameters
-      // Actual log reading will be implemented when file sink is configured
+      // Read and parse log files
+      var logs = ReadLogFiles(level, limit, maxAgeMinutes);
+
       var response = new SystemLogsDto
       {
-        Logs = new List<LogEntryDto>(),
-        TotalCount = 0,
+        Logs = logs,
+        TotalCount = logs.Count,
         Filters = new LogFilterDto
         {
           Level = level,
@@ -145,9 +151,8 @@ public class SystemController : ControllerBase
       };
 
       _logger.LogInformation(
-        "Log retrieval requested with level={Level}, limit={Limit}, maxAge={MaxAge}. " +
-        "Note: Actual log reading requires Serilog file sink configuration.",
-        level, limit, maxAgeMinutes);
+        "Log retrieval requested with level={Level}, limit={Limit}, maxAge={MaxAge}. Returned {Count} logs.",
+        level, limit, maxAgeMinutes, logs.Count);
 
       return Ok(response);
     }
@@ -156,6 +161,160 @@ public class SystemController : ControllerBase
       _logger.LogError(ex, "Error getting system logs");
       return StatusCode(500, new { error = "Failed to get system logs" });
     }
+  }
+
+  private List<LogEntryDto> ReadLogFiles(string level, int limit, int? maxAgeMinutes)
+  {
+    var logEntries = new List<LogEntryDto>();
+    var logsDirectory = Path.Combine(Directory.GetCurrentDirectory(), "logs");
+
+    // Check if logs directory exists
+    if (!Directory.Exists(logsDirectory))
+    {
+      _logger.LogWarning("Logs directory does not exist: {LogsDirectory}", logsDirectory);
+      return logEntries;
+    }
+
+    // Get all log files matching the pattern, sorted by date (newest first)
+    var logFiles = Directory.GetFiles(logsDirectory, "radio-*.txt")
+      .OrderByDescending(f => new FileInfo(f).LastWriteTimeUtc)
+      .ToList();
+
+    if (logFiles.Count == 0)
+    {
+      _logger.LogWarning("No log files found in directory: {LogsDirectory}", logsDirectory);
+      return logEntries;
+    }
+
+    // Regex pattern matching the output template in appsettings.json
+    // Format: {Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}
+    var logPattern = @"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} [+-]\d{2}:\d{2}) \[(\w+)\] \[(.*?)\] (.*)$";
+    var regex = new Regex(logPattern, RegexOptions.Compiled);
+
+    // Determine minimum timestamp if maxAgeMinutes is specified
+    DateTime? minTimestamp = maxAgeMinutes.HasValue
+      ? DateTime.UtcNow.AddMinutes(-maxAgeMinutes.Value)
+      : null;
+
+    // Normalize level for comparison
+    var normalizedLevel = level.ToUpperInvariant();
+    var levelPriority = GetLevelPriority(normalizedLevel);
+
+    // Read log files until we have enough entries
+    foreach (var logFile in logFiles)
+    {
+      try
+      {
+        // Safety check: skip files that are too large to prevent memory issues
+        var fileInfo = new FileInfo(logFile);
+        if (fileInfo.Length > MaxLogFileSizeBytes)
+        {
+          _logger.LogWarning(
+            "Skipping large log file {LogFile} ({Size} bytes exceeds {MaxSize} bytes limit)",
+            logFile, fileInfo.Length, MaxLogFileSizeBytes);
+          continue;
+        }
+
+        var lines = System.IO.File.ReadAllLines(logFile);
+        
+        // Process lines in reverse order (newest first within each file)
+        for (int i = lines.Length - 1; i >= 0 && logEntries.Count < limit; i--)
+        {
+          var line = lines[i];
+          if (string.IsNullOrWhiteSpace(line))
+            continue;
+
+          var match = regex.Match(line);
+          if (!match.Success)
+            continue;
+
+          var timestampStr = match.Groups[1].Value;
+          var logLevel = match.Groups[2].Value;
+          var sourceContext = match.Groups[3].Value;
+          var message = match.Groups[4].Value;
+
+          // Parse timestamp
+          if (!DateTime.TryParseExact(
+            timestampStr,
+            "yyyy-MM-dd HH:mm:ss.fff zzz",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out var timestamp))
+          {
+            continue;
+          }
+
+          // Convert to UTC for comparison
+          var timestampUtc = timestamp.ToUniversalTime();
+
+          // Filter by age
+          if (minTimestamp.HasValue && timestampUtc < minTimestamp.Value)
+            continue;
+
+          // Filter by level
+          var entryLevelPriority = GetLevelPriority(logLevel);
+          if (entryLevelPriority < levelPriority)
+            continue;
+
+          // Check for exception on next lines
+          string? exception = null;
+          if (i + 1 < lines.Length && !string.IsNullOrWhiteSpace(lines[i + 1]))
+          {
+            // Check if next line is part of exception stack trace
+            var nextLine = lines[i + 1];
+            if (!regex.IsMatch(nextLine))
+            {
+              // It's likely an exception or continuation
+              var exceptionLines = new List<string>();
+              for (int j = i + 1; j < lines.Length && j < i + MaxExceptionLines; j++)
+              {
+                if (string.IsNullOrWhiteSpace(lines[j]) || regex.IsMatch(lines[j]))
+                  break;
+                exceptionLines.Add(lines[j]);
+              }
+              if (exceptionLines.Count > 0)
+              {
+                exception = string.Join(Environment.NewLine, exceptionLines);
+              }
+            }
+          }
+
+          logEntries.Add(new LogEntryDto
+          {
+            Timestamp = timestamp,
+            Level = logLevel,
+            Message = message,
+            Exception = exception,
+            SourceContext = sourceContext
+          });
+        }
+
+        // Stop if we've collected enough entries
+        if (logEntries.Count >= limit)
+          break;
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Failed to read log file: {LogFile}", logFile);
+        continue;
+      }
+    }
+
+    return logEntries;
+  }
+
+  private static int GetLevelPriority(string level)
+  {
+    return level.ToUpperInvariant() switch
+    {
+      "VRB" or "VERBOSE" => 0,
+      "DBG" or "DEBUG" => 1,
+      "INF" or "INFO" or "INFORMATION" => 2,
+      "WRN" or "WARNING" => 3,
+      "ERR" or "ERROR" => 4,
+      "FTL" or "FATAL" => 5,
+      _ => 2 // Default to INFO level
+    };
   }
 
   private async Task<double> GetCachedCpuUsageAsync(Process process)
