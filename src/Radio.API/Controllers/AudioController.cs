@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Radio.API.Extensions;
 using Radio.API.Mappers;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
@@ -41,8 +42,7 @@ public class AudioController : ControllerBase
     try
     {
       var mixer = _audioEngine.GetMasterMixer();
-      var activeSources = mixer.GetActiveSources();
-      var primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary);
+      var primarySource = _audioEngine.GetActivePrimaryAudioSource();
 
       var state = new PlaybackStateDto
       {
@@ -140,8 +140,7 @@ public class AudioController : ControllerBase
       }
 
       // Handle playback actions
-      var activeSources = mixer.GetActiveSources();
-      var primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary);
+      var primarySource = _audioEngine.GetActivePrimaryAudioSource();
 
       switch (request.Action)
       {
@@ -314,9 +313,7 @@ public class AudioController : ControllerBase
   {
     try
     {
-      var mixer = _audioEngine.GetMasterMixer();
-      var activeSources = mixer.GetActiveSources();
-      var primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary);
+      var primarySource = _audioEngine.GetActivePrimaryAudioSource();
 
       if (primarySource is not IPrimaryAudioSource primary)
       {
@@ -350,9 +347,7 @@ public class AudioController : ControllerBase
   {
     try
     {
-      var mixer = _audioEngine.GetMasterMixer();
-      var activeSources = mixer.GetActiveSources();
-      var primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary);
+      var primarySource = _audioEngine.GetActivePrimaryAudioSource();
 
       if (primarySource is not IPrimaryAudioSource primary)
       {
@@ -387,9 +382,7 @@ public class AudioController : ControllerBase
   {
     try
     {
-      var mixer = _audioEngine.GetMasterMixer();
-      var activeSources = mixer.GetActiveSources();
-      var primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary);
+      var primarySource = _audioEngine.GetActivePrimaryAudioSource();
 
       if (primarySource is not IPrimaryAudioSource primary)
       {
@@ -425,8 +418,7 @@ public class AudioController : ControllerBase
     try
     {
       var mixer = _audioEngine.GetMasterMixer();
-      var activeSources = mixer.GetActiveSources();
-      var primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary);
+      var primarySource = _audioEngine.GetActivePrimaryAudioSource();
 
       if (primarySource is not IPrimaryAudioSource primary)
       {
@@ -467,9 +459,7 @@ public class AudioController : ControllerBase
   {
     try
     {
-      var mixer = _audioEngine.GetMasterMixer();
-      var activeSources = mixer.GetActiveSources();
-      var primarySource = activeSources.FirstOrDefault(s => s.Category == AudioSourceCategory.Primary);
+      var primarySource = _audioEngine.GetActivePrimaryAudioSource();
 
       var nowPlaying = new NowPlayingDto();
 
