@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.Factories;
 using Radio.Infrastructure.Audio.Outputs;
 using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
@@ -49,6 +50,10 @@ public static class AudioServiceExtensions
     // Register the ducking service (singleton to maintain state)
     services.AddSingleton<DuckingService>();
     services.AddSingleton<IDuckingService>(sp => sp.GetRequiredService<DuckingService>());
+
+    // Register radio factory (singleton for device management)
+    services.AddSingleton<RadioFactory>();
+    services.AddSingleton<IRadioFactory>(sp => sp.GetRequiredService<RadioFactory>());
 
     // Register event audio source services
     services.AddEventAudioSources(configuration);
