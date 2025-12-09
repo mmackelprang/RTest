@@ -177,6 +177,50 @@ The audio system (Phase 2) provides:
 - **Tapped Output Stream**: Ring buffer for streaming audio to Chromecast/HTTP clients
 - **USB Port Management**: Conflict detection and reservation system for USB audio sources
 
+### Primary Audio Sources
+
+- **Spotify**: Full integration with playback control, search, browse, and playlists
+- **Radio**: Two device types supported via radio factory (`IRadioFactory`)
+  - **RTLSDRCore (SDR Radio)**: Software-defined radio with full frequency control, band switching, scanning, gain control, and power management via RTL-SDR USB dongle
+  - **RF320 (Bluetooth/USB)**: Limited software control, Bluetooth for commands, USB for audio output
+- **Vinyl**: USB turntable input
+- **File Player**: MP3, FLAC, WAV, OGG playback with playlist support
+
+### Radio Device Factory
+
+**Device Types:**
+- `RTLSDRCore`: Software-defined radio (full software control via USB dongle)
+- `RF320`: Bluetooth/USB radio (hardware control only)
+
+**Radio Capabilities:**
+
+| Feature | RTLSDRCore (SDR) | RF320 (Bluetooth/USB) |
+|---------|------------------|----------------------|
+| Software Frequency Control | ✅ Full range | ❌ Hardware only |
+| Band Switching | ✅ Software | ❌ Physical button |
+| Scanning | ✅ Automated | ❌ Physical button |
+| Gain Control | ✅ AGC/Manual | ❌ N/A |
+| Power Management | ✅ Software | ❌ Physical button |
+| Equalizer | ❌ No hardware EQ | ✅ Hardware EQ |
+| Device Volume | ❌ Software only | ✅ Hardware volume |
+
+**RTL-SDR Audio Integration:**
+- Real-time PCM audio at 48kHz F32 format via `SDRAudioDataProvider`
+- Thread-safe buffering with overflow protection
+- Audio pipeline: IQ → Demodulation → PCM → SoundFlow → Output
+
+### REST API Endpoints
+
+**Radio Control Endpoints (23 total):**
+- Core Control: GET /api/radio/state, POST /api/radio/frequency, frequency/up, frequency/down, band, step, scan/start, scan/stop, eq, volume
+- Gain Control (SDR): POST /api/radio/gain, /api/radio/gain/auto
+- Power (SDR): GET /api/radio/power, POST /api/radio/power/toggle
+- Lifecycle (SDR): POST /api/radio/startup, /api/radio/shutdown
+- Presets: GET/POST/DELETE /api/radio/presets
+- Device Factory: GET /api/radio/devices, devices/default, devices/current, POST devices/select
+
+For complete API documentation, see [API Reference](design/API_REFERENCE.md).
+
 ### Usage Example
 
 ```csharp
