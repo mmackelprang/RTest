@@ -68,27 +68,63 @@
 - `FrequencyChanged` - Frequency change event
 - `SignalStrengthUpdated` - Signal strength event
 
+### PR #103 Review Comments ✅ (Completed)
+
+All review comments from PR #103 have been addressed:
+
+1. **Frequency in Hz with value object** ✅
+   - `Frequency` struct in `src/Radio.Core/Models/Audio/Frequency.cs` stores values in Hz internally
+   - Provides `Kilohertz` and `Megahertz` properties for unit conversion
+   - Used consistently throughout `IRadioControl` interface and Radio API
+   - Documentation updated to specify Hz as the canonical unit
+
+2. **Volume as int 0-100** ✅
+   - `IRadioControl.DeviceVolume` property uses int 0-100 range
+   - API endpoint `/api/radio/volume` validates 0-100 range
+   - `RadioStateDto.DeviceVolume` uses int 0-100
+   - Synchronized with `Volume` (float 0.0-1.0) property as documented
+
+3. **RTLSDRCore event translation** ✅ (Documented for future implementation)
+   - Event mapping requirements documented in TASK_4_2_SUMMARY.md
+   - RTLSDRCore events: `FrequencyChanged`, `SignalStrengthUpdated`, `StateChanged`, `AudioDataAvailable`
+   - Radio.Core events: `RadioControlFrequencyChangedEventArgs`, `RadioControlSignalStrengthEventArgs`, `RadioStateChangedEventArgs`
+   - Translation will be implemented in SDRRadioAudioSource (see section 3.1 below)
+
+4. **RadioProtocol.Core TODOs replaced** ✅
+   - `src/Radio.Infrastructure/DependencyInjection/AudioServiceExtensions.cs` - Added note about RadioProtocol.Core being removed
+   - `src/Radio.API/Program.cs` - Added note that RadioProtocol.Core will be added back in a future phase
+
 ### Remaining Work 🚧
 
-#### 3. Audio Integration - Implementation (0% Complete)
+#### 3. Audio Integration - Implementation (50% Complete)
 
-**Required Tasks:**
+**Completed Tasks:**
 
-1. **Create SDRRadioAudioSource** (`src/Radio.Infrastructure/Audio/Sources/Primary/SDRRadioAudioSource.cs`)
-   - Wrapper around RTLSDRCore.RadioReceiver
-   - Implements IPrimaryAudioSource
-   - Implements IRadioControl (async adapter for sync RadioReceiver methods)
-   - Bridges RTLSDRCore types to Radio.Core types:
+1. **Create SDRRadioAudioSource** (`src/Radio.Infrastructure/Audio/Sources/Primary/SDRRadioAudioSource.cs`) ✅
+   - ✅ Wrapper around RTLSDRCore.RadioReceiver
+   - ✅ Implements IPrimaryAudioSource
+   - ✅ Implements IRadioControl (async adapter for sync RadioReceiver methods)
+   - ✅ Bridges RTLSDRCore types to Radio.Core types:
      - RTLSDRCore.Models.RadioBand → Radio.Core.Models.Audio.RadioBand
      - RTLSDRCore.Enums.ModulationType → modulation handling
-     - long frequencyHz → double frequency (MHz/kHz)
-   - Manages SoundFlow audio component for SDR output
+     - long frequencyHz → Frequency struct (stores in Hz)
+     - RTLSDRCore.Enums.BandType → Radio.Core.Models.Audio.RadioBand
+   - ✅ **Event Translation Implemented** (PR #103 Review Comment #3)
+     - RTLSDRCore.FrequencyChangedEventArgs (long oldFrequency, long newFrequency) → RadioControlFrequencyChangedEventArgs (Frequency, Frequency)
+     - RTLSDRCore.SignalStrengthEventArgs (float Strength) → RadioControlSignalStrengthEventArgs (float)
+     - RTLSDRCore.ReceiverStateChangedEventArgs → RadioStateChangedEventArgs
+     - RTLSDRCore.AudioDataAvailable → Internal audio pipeline (no public event needed)
+   - ⏳ Manages SoundFlow audio component for SDR output (TODO: GetSoundComponent implementation)
 
-2. **Extend RadioAudioSource** (`src/Radio.Infrastructure/Audio/Sources/Primary/RadioAudioSource.cs`)
-   - Implement IRadioControl interface
-   - Add RF320-specific radio controls (if supported by hardware)
-   - Stub methods if RF320 doesn't support advanced features
-   - Document RF320 capabilities vs limitations
+2. **Extend RadioAudioSource** (`src/Radio.Infrastructure/Audio/Sources/Primary/RadioAudioSource.cs`) ✅
+   - ✅ Implements IRadioControl interface (explicit interface implementation for events)
+   - ✅ All methods stubbed with appropriate warnings and documentation
+   - ✅ Hardware limitations documented: RF320 is Bluetooth-controlled with USB audio output
+   - ✅ No software control over radio functions (frequency, band, scanning, etc.)
+   - ✅ Physical controls required for all radio operations
+   - ✅ API compatibility maintained for unified radio interface
+
+**Remaining Tasks:**
 
 3. **Add Configuration Support**
    - Create `RadioOptions` configuration class
@@ -96,31 +132,28 @@
    - Add DefaultRadioDevice setting
    - Add radio-specific defaults (frequency ranges, step sizes, etc.)
 
-#### 4. Factory Pattern (0% Complete)
+#### 4. Factory Pattern (100% Complete) ✅
 
-**Required Tasks:**
+**Completed Tasks:**
 
-1. **Create IRadioFactory** (`src/Radio.Core/Interfaces/Audio/IRadioFactory.cs`)
-   ```csharp
-   public interface IRadioFactory
-   {
-     IPrimaryAudioSource CreateRadioSource(string deviceType);
-     IEnumerable<string> GetAvailableDeviceTypes();
-     string GetDefaultDeviceType();
-   }
-   ```
+1. **Create IRadioFactory** (`src/Radio.Core/Interfaces/Audio/IRadioFactory.cs`) ✅
+   - ✅ CreateRadioSource(deviceType) method
+   - ✅ GetAvailableDeviceTypes() method
+   - ✅ GetDefaultDeviceType() method
+   - ✅ IsDeviceAvailable(deviceType) method
 
-2. **Implement RadioFactory** (`src/Radio.Infrastructure/Audio/Factories/RadioFactory.cs`)
-   - Support "RTLSDRCore" device type → SDRRadioAudioSource
-   - Support "RF320" device type → RadioAudioSource
-   - Read from configuration: `DefaultRadioDevice` (default: "RTLSDRCore")
-   - Device availability checking
-   - Proper error handling and logging
+2. **Implement RadioFactory** (`src/Radio.Infrastructure/Audio/Factories/RadioFactory.cs`) ✅
+   - ✅ Support "RTLSDRCore" device type → SDRRadioAudioSource
+   - ✅ Support "RF320" device type → RadioAudioSource
+   - ✅ Read from configuration: `Radio:DefaultDevice` (default: "RTLSDRCore")
+   - ✅ Device availability checking (IsRTLSDRAvailable, IsRF320Available)
+   - ✅ Proper error handling and logging
+   - ✅ Automatic fallback to first available device
 
-3. **Register in DI Container**
-   - Update `AudioServiceExtensions.cs`
-   - Add `services.AddRadioFactory(configuration)`
-   - Register factory as singleton
+3. **Register in DI Container** ✅
+   - ✅ Updated `AudioServiceExtensions.cs`
+   - ✅ Added RadioFactory registration as singleton
+   - ✅ Registered IRadioFactory interface
 
 #### 5. API Integration (0% Complete)
 
