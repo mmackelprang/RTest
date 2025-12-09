@@ -21,6 +21,7 @@ public class StandardMetadataTests : IDisposable
   private readonly Mock<IOptionsMonitor<FilePlayerOptions>> _filePlayerOptionsMock;
   private readonly Mock<IOptionsMonitor<FilePlayerPreferences>> _filePlayerPreferencesMock;
   private readonly Mock<IOptionsMonitor<DeviceOptions>> _deviceOptionsMock;
+  private readonly Mock<IOptionsMonitor<RadioOptions>> _radioOptionsMock;
   private readonly Mock<IAudioDeviceManager> _deviceManagerMock;
   private readonly string _testDir;
 
@@ -59,6 +60,15 @@ public class StandardMetadataTests : IDisposable
 
     _deviceOptionsMock = new Mock<IOptionsMonitor<DeviceOptions>>();
     _deviceOptionsMock.Setup(o => o.CurrentValue).Returns(deviceOptions);
+
+    var radioOptions = new RadioOptions
+    {
+      DefaultDevice = "RTLSDRCore",
+      DefaultDeviceVolume = 50
+    };
+
+    _radioOptionsMock = new Mock<IOptionsMonitor<RadioOptions>>();
+    _radioOptionsMock.Setup(o => o.CurrentValue).Returns(radioOptions);
 
     // Setup device manager to indicate ports are not in use
     _deviceManagerMock.Setup(m => m.IsUSBPortInUse(It.IsAny<string>())).Returns(false);
@@ -187,6 +197,7 @@ public class StandardMetadataTests : IDisposable
     var source = new RadioAudioSource(
       _radioLoggerMock.Object,
       _deviceOptionsMock.Object,
+      _radioOptionsMock.Object,
       _deviceManagerMock.Object);
 
     // Act
@@ -241,6 +252,7 @@ public class StandardMetadataTests : IDisposable
     var source = new RadioAudioSource(
       _radioLoggerMock.Object,
       _deviceOptionsMock.Object,
+      _radioOptionsMock.Object,
       _deviceManagerMock.Object);
 
     // Assert - Verify metadata is IReadOnlyDictionary<string, object>

@@ -17,9 +17,11 @@ public class USBAudioSourceTests
   private readonly Mock<ILogger<VinylAudioSource>> _vinylLoggerMock;
   private readonly Mock<ILogger<GenericUSBAudioSource>> _genericLoggerMock;
   private readonly Mock<IOptionsMonitor<DeviceOptions>> _deviceOptionsMock;
+  private readonly Mock<IOptionsMonitor<RadioOptions>> _radioOptionsMock;
   private readonly Mock<IOptionsMonitor<GenericSourcePreferences>> _genericPreferencesMock;
   private readonly Mock<IAudioDeviceManager> _deviceManagerMock;
   private readonly DeviceOptions _deviceOptions;
+  private readonly RadioOptions _radioOptions;
   private readonly GenericSourcePreferences _genericPreferences;
 
   public USBAudioSourceTests()
@@ -35,10 +37,19 @@ public class USBAudioSourceTests
       Cast = new CastDeviceOptions { DefaultDevice = "" }
     };
 
+    _radioOptions = new RadioOptions
+    {
+      DefaultDevice = "RTLSDRCore",
+      DefaultDeviceVolume = 50
+    };
+
     _genericPreferences = new GenericSourcePreferences { USBPort = "" };
 
     _deviceOptionsMock = new Mock<IOptionsMonitor<DeviceOptions>>();
     _deviceOptionsMock.Setup(o => o.CurrentValue).Returns(_deviceOptions);
+
+    _radioOptionsMock = new Mock<IOptionsMonitor<RadioOptions>>();
+    _radioOptionsMock.Setup(o => o.CurrentValue).Returns(_radioOptions);
 
     _genericPreferencesMock = new Mock<IOptionsMonitor<GenericSourcePreferences>>();
     _genericPreferencesMock.Setup(o => o.CurrentValue).Returns(_genericPreferences);
@@ -393,6 +404,7 @@ public class USBAudioSourceTests
     return new RadioAudioSource(
       _radioLoggerMock.Object,
       _deviceOptionsMock.Object,
+      _radioOptionsMock.Object,
       _deviceManagerMock.Object);
   }
 
