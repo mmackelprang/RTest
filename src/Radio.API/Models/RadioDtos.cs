@@ -49,6 +49,21 @@ public class RadioStateDto
   /// Gets or sets the scan direction if scanning; otherwise, null.
   /// </summary>
   public string? ScanDirection { get; set; }
+
+  /// <summary>
+  /// Gets or sets a value indicating whether automatic gain control is enabled.
+  /// </summary>
+  public bool AutoGainEnabled { get; set; }
+
+  /// <summary>
+  /// Gets or sets the manual gain value in dB (only effective when AutoGainEnabled is false).
+  /// </summary>
+  public float Gain { get; set; }
+
+  /// <summary>
+  /// Gets or sets a value indicating whether the radio receiver is running.
+  /// </summary>
+  public bool IsRunning { get; set; }
 }
 
 /// <summary>
@@ -115,4 +130,26 @@ public class SetDeviceVolumeRequest
   /// Gets or sets the volume level (0-100).
   /// </summary>
   public int Volume { get; set; }
+}
+
+/// <summary>
+/// Request to set manual gain value.
+/// </summary>
+public class SetGainRequest
+{
+  /// <summary>
+  /// Gets or sets the gain value in dB.
+  /// </summary>
+  public float Gain { get; set; }
+}
+
+/// <summary>
+/// Request to toggle automatic gain control.
+/// </summary>
+public class SetAutoGainRequest
+{
+  /// <summary>
+  /// Gets or sets whether automatic gain control should be enabled.
+  /// </summary>
+  public bool Enabled { get; set; }
 }
