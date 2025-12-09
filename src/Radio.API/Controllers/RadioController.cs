@@ -81,7 +81,7 @@ public class RadioController : ControllerBase
         return BadRequest(new { error = "Radio is not the active source" });
       }
 
-      await radioSource.SetFrequencyAsync(request.Frequency);
+      await radioSource.SetFrequencyAsync(new Frequency(request.Frequency));
       return Ok(MapToRadioStateDto(radioSource));
     }
     catch (ArgumentOutOfRangeException ex)
@@ -212,7 +212,7 @@ public class RadioController : ControllerBase
         return BadRequest(new { error = "Radio is not the active source" });
       }
 
-      await radioSource.SetFrequencyStepAsync(request.Step);
+      await radioSource.SetFrequencyStepAsync(new Frequency(request.Step));
       return Ok(MapToRadioStateDto(radioSource));
     }
     catch (ArgumentOutOfRangeException ex)
@@ -385,9 +385,9 @@ public class RadioController : ControllerBase
   {
     return new RadioStateDto
     {
-      Frequency = radioSource.CurrentFrequency,
+      Frequency = radioSource.CurrentFrequency.Hertz, // Convert to Hz for API
       Band = radioSource.CurrentBand.ToString(),
-      FrequencyStep = radioSource.FrequencyStep,
+      FrequencyStep = radioSource.FrequencyStep.Hertz, // Convert to Hz for API
       SignalStrength = radioSource.SignalStrength,
       IsStereo = radioSource.IsStereo,
       EqualizerMode = radioSource.EqualizerMode.ToString(),

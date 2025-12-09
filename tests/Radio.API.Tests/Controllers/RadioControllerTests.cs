@@ -37,7 +37,7 @@ public class RadioControllerTests : IClassFixture<WebApplicationFactory<Program>
     // Arrange
     var request = new SetFrequencyRequest
     {
-      Frequency = 101.5
+      Frequency = 101_500_000 // 101.5 MHz in Hz
     };
 
     // Act
@@ -115,7 +115,7 @@ public class RadioControllerTests : IClassFixture<WebApplicationFactory<Program>
     // Arrange
     var request = new SetFrequencyStepRequest
     {
-      Step = 0.1
+      Step = 100_000 // 0.1 MHz in Hz
     };
 
     // Act

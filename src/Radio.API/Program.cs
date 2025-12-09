@@ -54,9 +54,8 @@ builder.Services.AddMetrics(builder.Configuration);
 // Add Audio Infrastructure services
 builder.Services.AddSoundFlowAudio(builder.Configuration);
 
-// Add Radio Hardware services
-// TODO: Re-enable when RadioProtocol.Core is available
-// builder.Services.AddRadioHardware(builder.Configuration);
+// NOTE: RadioProtocol.Core has been removed and replaced by RTLSDRCore integration.
+// The AddRadioHardware method is no longer needed. See TASK_4_2_SUMMARY.md for details.
 
 // Add Fingerprinting services (for play history)
 builder.Services.AddFingerprinting(builder.Configuration);

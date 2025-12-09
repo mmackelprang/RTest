@@ -34,18 +34,20 @@ public interface IRadioControl
   #region Frequency Control
 
   /// <summary>
-  /// Gets the current tuned frequency in MHz (for FM/VHF/SW) or kHz (for AM/WB).
+  /// Gets the current tuned frequency.
+  /// The frequency is always stored in Hertz (Hz) internally to avoid unit ambiguity.
+  /// Use <see cref="Frequency.Megahertz"/> or <see cref="Frequency.Kilohertz"/> properties for unit conversion.
   /// </summary>
-  double CurrentFrequency { get; }
+  Frequency CurrentFrequency { get; }
 
   /// <summary>
   /// Sets the radio frequency to a specific value.
   /// </summary>
-  /// <param name="frequency">The frequency to tune to in MHz (FM/VHF/SW) or kHz (AM/WB).</param>
+  /// <param name="frequency">The frequency to tune to. Use <see cref="Frequency.FromMegahertz"/> or <see cref="Frequency.FromKilohertz"/> to create from common units.</param>
   /// <param name="cancellationToken">Cancellation token.</param>
   /// <returns>A task representing the asynchronous operation.</returns>
   /// <exception cref="ArgumentOutOfRangeException">Thrown when the frequency is outside the valid range for the current band.</exception>
-  Task SetFrequencyAsync(double frequency, CancellationToken cancellationToken = default);
+  Task SetFrequencyAsync(Frequency frequency, CancellationToken cancellationToken = default);
 
   /// <summary>
   /// Steps the radio frequency up by one frequency step.
@@ -109,18 +111,19 @@ public interface IRadioControl
   Task SetBandAsync(RadioBand band, CancellationToken cancellationToken = default);
 
   /// <summary>
-  /// Gets the frequency step size used for tuning up/down in MHz (FM) or kHz (AM).
+  /// Gets the frequency step size used for tuning up/down.
+  /// The step is stored in Hertz (Hz) to avoid unit ambiguity.
   /// </summary>
-  double FrequencyStep { get; }
+  Frequency FrequencyStep { get; }
 
   /// <summary>
   /// Sets the frequency step size for tuning up/down.
   /// </summary>
-  /// <param name="step">The step size in MHz (FM/VHF/SW) or kHz (AM/WB).</param>
+  /// <param name="step">The step size. Use <see cref="Frequency.FromMegahertz"/> or <see cref="Frequency.FromKilohertz"/> to create from common units.</param>
   /// <param name="cancellationToken">Cancellation token.</param>
   /// <returns>A task representing the asynchronous operation.</returns>
   /// <exception cref="ArgumentOutOfRangeException">Thrown when the step size is invalid.</exception>
-  Task SetFrequencyStepAsync(double step, CancellationToken cancellationToken = default);
+  Task SetFrequencyStepAsync(Frequency step, CancellationToken cancellationToken = default);
 
   #endregion
 
@@ -129,12 +132,26 @@ public interface IRadioControl
   /// <summary>
   /// Gets or sets the volume level (0.0 to 1.0).
   /// This is the device-specific volume, separate from master volume.
+  /// <para>
+  /// <b>Synchronization contract:</b> This property and <see cref="DeviceVolume"/> are alternative representations of the same value.
+  /// Implementers MUST keep these properties synchronized. Setting either property MUST update the other accordingly.
+  /// </para>
+  /// <para>
+  /// <b>Conversion:</b> <c>DeviceVolume = (int)Math.Round(Volume * 100)</c> and <c>Volume = DeviceVolume / 100.0f</c>.
+  /// </para>
   /// </summary>
   float Volume { get; set; }
 
   /// <summary>
   /// Gets or sets the device-specific volume level (0-100).
-  /// This is an alternative representation of Volume for UI compatibility.
+  /// This is an alternative representation of <see cref="Volume"/> for UI compatibility.
+  /// <para>
+  /// <b>Synchronization contract:</b> This property and <see cref="Volume"/> are alternative representations of the same value.
+  /// Implementers MUST keep these properties synchronized. Setting either property MUST update the other accordingly.
+  /// </para>
+  /// <para>
+  /// <b>Conversion:</b> <c>DeviceVolume = (int)Math.Round(Volume * 100)</c> and <c>Volume = DeviceVolume / 100.0f</c>.
+  /// </para>
   /// </summary>
   int DeviceVolume { get; set; }
 
@@ -216,37 +233,38 @@ public interface IRadioControl
   /// <summary>
   /// Event raised when frequency changes.
   /// </summary>
-  event EventHandler<FrequencyChangedEventArgs>? FrequencyChanged;
+  event EventHandler<RadioControlFrequencyChangedEventArgs>? FrequencyChanged;
 
   /// <summary>
   /// Event raised when signal strength is updated.
   /// </summary>
-  event EventHandler<SignalStrengthEventArgs>? SignalStrengthUpdated;
+  event EventHandler<RadioControlSignalStrengthEventArgs>? SignalStrengthUpdated;
 
   #endregion
 }
 
 /// <summary>
-/// Event arguments for frequency changes.
+/// Event arguments for radio frequency changes.
+/// Named to avoid conflicts with RTLSDRCore.FrequencyChangedEventArgs.
 /// </summary>
-public class FrequencyChangedEventArgs : EventArgs
+public class RadioControlFrequencyChangedEventArgs : EventArgs
 {
   /// <summary>
   /// Gets the previous frequency.
   /// </summary>
-  public double OldFrequency { get; }
+  public Frequency OldFrequency { get; }
 
   /// <summary>
   /// Gets the new frequency.
   /// </summary>
-  public double NewFrequency { get; }
+  public Frequency NewFrequency { get; }
 
   /// <summary>
   /// Creates new frequency changed event args.
   /// </summary>
   /// <param name="oldFrequency">Previous frequency.</param>
   /// <param name="newFrequency">New frequency.</param>
-  public FrequencyChangedEventArgs(double oldFrequency, double newFrequency)
+  public RadioControlFrequencyChangedEventArgs(Frequency oldFrequency, Frequency newFrequency)
   {
     OldFrequency = oldFrequency;
     NewFrequency = newFrequency;
@@ -254,9 +272,10 @@ public class FrequencyChangedEventArgs : EventArgs
 }
 
 /// <summary>
-/// Event arguments for signal strength updates.
+/// Event arguments for radio signal strength updates.
+/// Named to avoid conflicts with RTLSDRCore.SignalStrengthEventArgs.
 /// </summary>
-public class SignalStrengthEventArgs : EventArgs
+public class RadioControlSignalStrengthEventArgs : EventArgs
 {
   /// <summary>
   /// Gets the signal strength (0.0 to 1.0).
@@ -267,7 +286,7 @@ public class SignalStrengthEventArgs : EventArgs
   /// Creates new signal strength event args.
   /// </summary>
   /// <param name="signalStrength">Signal strength value.</param>
-  public SignalStrengthEventArgs(float signalStrength)
+  public RadioControlSignalStrengthEventArgs(float signalStrength)
   {
     SignalStrength = signalStrength;
   }
