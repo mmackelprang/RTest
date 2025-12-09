@@ -24,6 +24,7 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   private ScanDirection? _scanDirection;
   private Task? _scanTask;
   private CancellationTokenSource? _scanCts;
+  private SDRAudioDataProvider? _audioProvider;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="SDRRadioAudioSource"/> class.
@@ -77,9 +78,13 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// <inheritdoc/>
   public override object GetSoundComponent()
   {
-    // TODO: Return SoundFlow audio component for SDR audio output
-    // This will be wired up to the AudioDataAvailable event from RadioReceiver
-    throw new NotImplementedException("SoundFlow audio component integration pending");
+    // Return the SoundFlow audio data provider for SDR audio output
+    // This is wired up to the AudioDataAvailable event from RadioReceiver
+    if (_audioProvider == null)
+    {
+      _audioProvider = new SDRAudioDataProvider(_radioReceiver, Logger);
+    }
+    return _audioProvider;
   }
 
   #endregion
@@ -529,6 +534,9 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     _radioReceiver.FrequencyChanged -= OnRTLSDRFrequencyChanged;
     _radioReceiver.SignalStrengthUpdated -= OnRTLSDRSignalStrengthUpdated;
     _radioReceiver.StateChanged -= OnRTLSDRStateChanged;
+
+    // Dispose audio provider
+    _audioProvider?.Dispose();
 
     // Clean up scan resources
     _scanCts?.Dispose();
