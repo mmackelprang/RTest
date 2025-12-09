@@ -55,7 +55,8 @@ builder.Services.AddMetrics(builder.Configuration);
 builder.Services.AddSoundFlowAudio(builder.Configuration);
 
 // Add Radio Hardware services
-builder.Services.AddRadioHardware(builder.Configuration);
+// TODO: Re-enable when RadioProtocol.Core is available
+// builder.Services.AddRadioHardware(builder.Configuration);
 
 // Add Fingerprinting services (for play history)
 builder.Services.AddFingerprinting(builder.Configuration);
