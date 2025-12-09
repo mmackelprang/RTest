@@ -368,6 +368,188 @@ public class RadioController : ControllerBase
   }
 
   /// <summary>
+  /// Sets the manual gain value for the radio receiver.
+  /// </summary>
+  /// <param name="request">The gain value in dB.</param>
+  /// <returns>The updated radio state.</returns>
+  /// <response code="200">Returns the updated radio state.</response>
+  /// <response code="400">If the radio is not active or automatic gain is enabled.</response>
+  [HttpPost("gain")]
+  [ProducesResponseType(typeof(RadioStateDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  public ActionResult<RadioStateDto> SetGain([FromBody] SetGainRequest request)
+  {
+    try
+    {
+      var radioSource = GetActiveRadioSource();
+      if (radioSource == null)
+      {
+        return BadRequest(new { error = "Radio is not the active source" });
+      }
+
+      if (radioSource.AutoGainEnabled)
+      {
+        return BadRequest(new { error = "Cannot set manual gain while automatic gain control is enabled" });
+      }
+
+      radioSource.Gain = request.Gain;
+      return Ok(MapToRadioStateDto(radioSource));
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error setting gain");
+      return StatusCode(500, new { error = "Failed to set gain" });
+    }
+  }
+
+  /// <summary>
+  /// Toggles automatic gain control on or off.
+  /// </summary>
+  /// <param name="request">Whether to enable automatic gain control.</param>
+  /// <returns>The updated radio state.</returns>
+  /// <response code="200">Returns the updated radio state.</response>
+  /// <response code="400">If the radio is not active.</response>
+  [HttpPost("gain/auto")]
+  [ProducesResponseType(typeof(RadioStateDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  public ActionResult<RadioStateDto> SetAutoGain([FromBody] SetAutoGainRequest request)
+  {
+    try
+    {
+      var radioSource = GetActiveRadioSource();
+      if (radioSource == null)
+      {
+        return BadRequest(new { error = "Radio is not the active source" });
+      }
+
+      radioSource.AutoGainEnabled = request.Enabled;
+      return Ok(MapToRadioStateDto(radioSource));
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error setting automatic gain control");
+      return StatusCode(500, new { error = "Failed to set automatic gain control" });
+    }
+  }
+
+  /// <summary>
+  /// Gets the power state of the radio receiver.
+  /// </summary>
+  /// <returns>The power state (true if powered on, false if off).</returns>
+  /// <response code="200">Returns the power state.</response>
+  /// <response code="400">If the radio is not active.</response>
+  [HttpGet("power")]
+  [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  public async Task<ActionResult<bool>> GetPowerState()
+  {
+    try
+    {
+      var radioSource = GetActiveRadioSource();
+      if (radioSource == null)
+      {
+        return BadRequest(new { error = "Radio is not the active source" });
+      }
+
+      var powerState = await radioSource.GetPowerStateAsync();
+      return Ok(powerState);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error getting power state");
+      return StatusCode(500, new { error = "Failed to get power state" });
+    }
+  }
+
+  /// <summary>
+  /// Toggles the power state of the radio receiver.
+  /// </summary>
+  /// <returns>The updated power state.</returns>
+  /// <response code="200">Returns the new power state.</response>
+  /// <response code="400">If the radio is not active.</response>
+  [HttpPost("power/toggle")]
+  [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  public async Task<ActionResult<bool>> TogglePowerState()
+  {
+    try
+    {
+      var radioSource = GetActiveRadioSource();
+      if (radioSource == null)
+      {
+        return BadRequest(new { error = "Radio is not the active source" });
+      }
+
+      await radioSource.TogglePowerStateAsync();
+      var newPowerState = await radioSource.GetPowerStateAsync();
+      return Ok(newPowerState);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error toggling power state");
+      return StatusCode(500, new { error = "Failed to toggle power state" });
+    }
+  }
+
+  /// <summary>
+  /// Starts the radio receiver.
+  /// </summary>
+  /// <returns>Success status.</returns>
+  /// <response code="200">If the radio started successfully.</response>
+  /// <response code="400">If the radio is not active or failed to start.</response>
+  [HttpPost("startup")]
+  [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  public async Task<ActionResult<bool>> Startup()
+  {
+    try
+    {
+      var radioSource = GetActiveRadioSource();
+      if (radioSource == null)
+      {
+        return BadRequest(new { error = "Radio is not the active source" });
+      }
+
+      var result = await radioSource.StartupAsync();
+      return Ok(result);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error starting radio receiver");
+      return StatusCode(500, new { error = "Failed to start radio receiver" });
+    }
+  }
+
+  /// <summary>
+  /// Shuts down the radio receiver.
+  /// </summary>
+  /// <returns>No content on success.</returns>
+  /// <response code="204">If the radio shut down successfully.</response>
+  /// <response code="400">If the radio is not active.</response>
+  [HttpPost("shutdown")]
+  [ProducesResponseType(StatusCodes.Status204NoContent)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  public async Task<ActionResult> Shutdown()
+  {
+    try
+    {
+      var radioSource = GetActiveRadioSource();
+      if (radioSource == null)
+      {
+        return BadRequest(new { error = "Radio is not the active source" });
+      }
+
+      await radioSource.ShutdownAsync();
+      return NoContent();
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error shutting down radio receiver");
+      return StatusCode(500, new { error = "Failed to shut down radio receiver" });
+    }
+  }
+
+  /// <summary>
   /// Gets the active radio source from the audio engine.
   /// </summary>
   /// <returns>The active radio source, or null if no radio is active.</returns>
@@ -393,7 +575,10 @@ public class RadioController : ControllerBase
       EqualizerMode = radioSource.EqualizerMode.ToString(),
       DeviceVolume = radioSource.DeviceVolume,
       IsScanning = radioSource.IsScanning,
-      ScanDirection = radioSource.ScanDirection?.ToString()
+      ScanDirection = radioSource.ScanDirection?.ToString(),
+      AutoGainEnabled = radioSource.AutoGainEnabled,
+      Gain = radioSource.Gain,
+      IsRunning = radioSource.IsRunning
     };
   }
 
