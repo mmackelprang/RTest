@@ -21,17 +21,17 @@ public static class AudioEngineExtensions
   }
 
   /// <summary>
-  /// Gets the currently active radio source (source that implements IRadioControls), if any.
+  /// Gets the currently active radio source (source that implements IRadioControl), if any.
   /// </summary>
   /// <param name="audioEngine">The audio engine.</param>
   /// <returns>The active radio source, or null if none is active.</returns>
-  public static IRadioControls? GetActiveRadioSource(this IAudioEngine audioEngine)
+  public static IRadioControl? GetActiveRadioSource(this IAudioEngine audioEngine)
   {
     var mixer = audioEngine.GetMasterMixer();
     var activeSources = mixer.GetActiveSources();
     return activeSources.FirstOrDefault(s => 
       s.Category == AudioSourceCategory.Primary && 
-      s is IRadioControls) as IRadioControls;
+      s is IRadioControl) as IRadioControl;
   }
 
   /// <summary>

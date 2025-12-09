@@ -54,15 +54,15 @@ public static class AudioDtoMapper
       dto.Capabilities["SupportsQueue"] = primary.SupportsQueue;
     }
     
-    // Add radio-specific capabilities if source implements IRadioControls
-    // All sources implementing IRadioControls support these core radio features by design
-    if (source is IRadioControls)
+    // Add radio-specific capabilities if source implements IRadioControl
+    // All sources implementing IRadioControl support these core radio features by design
+    if (source is IRadioControl)
     {
       dto.Capabilities["SupportsRadioControls"] = true;
-      dto.Capabilities["SupportsFrequencyTuning"] = true; // Required by IRadioControls
-      dto.Capabilities["SupportsScanning"] = true; // Required by IRadioControls
-      dto.Capabilities["SupportsEqualizer"] = true; // Required by IRadioControls
-      dto.Capabilities["SupportsDeviceVolume"] = true; // Required by IRadioControls
+      dto.Capabilities["SupportsFrequencyTuning"] = true; // Required by IRadioControl
+      dto.Capabilities["SupportsScanning"] = true; // Required by IRadioControl
+      dto.Capabilities["SupportsEqualizer"] = true; // Required by IRadioControl
+      dto.Capabilities["SupportsDeviceVolume"] = true; // Required by IRadioControl
     }
 
     return dto;

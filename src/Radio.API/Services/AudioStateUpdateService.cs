@@ -167,7 +167,7 @@ public class AudioStateUpdateService : BackgroundService
 
   private async Task CheckRadioStateAsync(IAudioSource? activeSource, CancellationToken cancellationToken)
   {
-    if (activeSource is not IRadioControls radioControls)
+    if (activeSource is not IRadioControl radioControls)
     {
       return;
     }
@@ -367,7 +367,7 @@ public class AudioStateUpdateService : BackgroundService
     };
   }
 
-  private static RadioStateDto MapToRadioStateDto(IRadioControls radioControls)
+  private static RadioStateDto MapToRadioStateDto(IRadioControl radioControls)
   {
     return new RadioStateDto
     {
