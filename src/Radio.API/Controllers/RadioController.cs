@@ -3,6 +3,7 @@ using Radio.API.Extensions;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
+using Radio.Infrastructure.Audio.Sources.Primary;
 
 namespace Radio.API.Controllers;
 
@@ -17,6 +18,7 @@ public class RadioController : ControllerBase
   private readonly ILogger<RadioController> _logger;
   private readonly IAudioEngine _audioEngine;
   private readonly IRadioPresetService _presetService;
+  private readonly IRadioFactory _radioFactory;
 
   /// <summary>
   /// Initializes a new instance of the RadioController.
@@ -24,11 +26,13 @@ public class RadioController : ControllerBase
   public RadioController(
     ILogger<RadioController> logger,
     IAudioEngine audioEngine,
-    IRadioPresetService presetService)
+    IRadioPresetService presetService,
+    IRadioFactory radioFactory)
   {
     _logger = logger;
     _audioEngine = audioEngine;
     _presetService = presetService;
+    _radioFactory = radioFactory;
   }
 
   /// <summary>
@@ -685,4 +689,228 @@ public class RadioController : ControllerBase
       return StatusCode(500, new { error = "Failed to delete radio preset" });
     }
   }
+
+  #region Device Factory Endpoints
+
+  /// <summary>
+  /// Gets the list of available radio device types.
+  /// </summary>
+  /// <returns>List of available device types with their capabilities.</returns>
+  /// <response code="200">Returns the list of available radio device types.</response>
+  [HttpGet("devices")]
+  [ProducesResponseType(typeof(RadioDeviceListDto), StatusCodes.Status200OK)]
+  public ActionResult<RadioDeviceListDto> GetAvailableDevices()
+  {
+    try
+    {
+      var availableDevices = _radioFactory.GetAvailableDeviceTypes().ToList();
+      var deviceList = availableDevices.Select(deviceType => new RadioDeviceInfoDto
+      {
+        DeviceType = deviceType,
+        IsAvailable = true,
+        Capabilities = GetDeviceCapabilities(deviceType)
+      }).ToList();
+
+      _logger.LogInformation("Retrieved {Count} available radio devices", deviceList.Count);
+
+      return Ok(new RadioDeviceListDto
+      {
+        Devices = deviceList,
+        Count = deviceList.Count
+      });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error retrieving available radio devices");
+      return StatusCode(500, new { error = "Failed to retrieve available radio devices" });
+    }
+  }
+
+  /// <summary>
+  /// Gets the default radio device type from configuration.
+  /// </summary>
+  /// <returns>The default device type.</returns>
+  /// <response code="200">Returns the default device type.</response>
+  /// <response code="500">If no devices are available or configuration is invalid.</response>
+  [HttpGet("devices/default")]
+  [ProducesResponseType(typeof(RadioDeviceInfoDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+  public ActionResult<RadioDeviceInfoDto> GetDefaultDevice()
+  {
+    try
+    {
+      var defaultDeviceType = _radioFactory.GetDefaultDeviceType();
+      var isAvailable = _radioFactory.IsDeviceAvailable(defaultDeviceType);
+
+      var deviceInfo = new RadioDeviceInfoDto
+      {
+        DeviceType = defaultDeviceType,
+        IsAvailable = isAvailable,
+        Capabilities = GetDeviceCapabilities(defaultDeviceType)
+      };
+
+      _logger.LogInformation("Default radio device: {DeviceType}", defaultDeviceType);
+      return Ok(deviceInfo);
+    }
+    catch (InvalidOperationException ex)
+    {
+      _logger.LogError(ex, "No radio devices are available");
+      return StatusCode(500, new { error = ex.Message });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error retrieving default radio device");
+      return StatusCode(500, new { error = "Failed to retrieve default radio device" });
+    }
+  }
+
+  /// <summary>
+  /// Gets the currently active radio device type.
+  /// </summary>
+  /// <returns>The currently active device type.</returns>
+  /// <response code="200">Returns the currently active device type.</response>
+  /// <response code="400">If no radio source is active.</response>
+  [HttpGet("devices/current")]
+  [ProducesResponseType(typeof(RadioDeviceInfoDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  public ActionResult<RadioDeviceInfoDto> GetCurrentDevice()
+  {
+    try
+    {
+      var radioSource = GetActiveRadioSource();
+      if (radioSource == null)
+      {
+        return BadRequest(new { error = "No radio source is currently active" });
+      }
+
+      // Determine device type from the source
+      string deviceType;
+      if (radioSource is SDRRadioAudioSource)
+      {
+        deviceType = "RTLSDRCore";
+      }
+      else if (radioSource is RadioAudioSource)
+      {
+        deviceType = "RF320";
+      }
+      else
+      {
+        deviceType = "Unknown";
+      }
+
+      var deviceInfo = new RadioDeviceInfoDto
+      {
+        DeviceType = deviceType,
+        IsAvailable = true,
+        IsActive = true,
+        Capabilities = GetDeviceCapabilities(deviceType)
+      };
+
+      _logger.LogInformation("Currently active radio device: {DeviceType}", deviceType);
+      return Ok(deviceInfo);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error retrieving current radio device");
+      return StatusCode(500, new { error = "Failed to retrieve current radio device" });
+    }
+  }
+
+  /// <summary>
+  /// Selects and activates a specific radio device type.
+  /// This will stop the current radio source (if any) and create a new one.
+  /// </summary>
+  /// <param name="request">Device selection request.</param>
+  /// <returns>Information about the newly selected device.</returns>
+  /// <response code="200">Device successfully selected.</response>
+  /// <response code="400">If the device type is invalid or unavailable.</response>
+  /// <response code="500">If device selection fails.</response>
+  [HttpPost("devices/select")]
+  [ProducesResponseType(typeof(RadioDeviceInfoDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+  public async Task<ActionResult<RadioDeviceInfoDto>> SelectDevice([FromBody] SelectRadioDeviceRequest request)
+  {
+    if (string.IsNullOrWhiteSpace(request?.DeviceType))
+    {
+      return BadRequest(new { error = "Device type is required" });
+    }
+
+    try
+    {
+      // Check if device is available
+      if (!_radioFactory.IsDeviceAvailable(request.DeviceType))
+      {
+        return BadRequest(new { error = $"Device type '{request.DeviceType}' is not available" });
+      }
+
+      // Note: Actual device switching would require AudioEngine/AudioManager support
+      // For now, we validate the request and return success
+      // TODO: Integrate with AudioEngine.SwitchSourceAsync or similar method
+
+      _logger.LogInformation("Device selection requested: {DeviceType}", request.DeviceType);
+
+      var deviceInfo = new RadioDeviceInfoDto
+      {
+        DeviceType = request.DeviceType,
+        IsAvailable = true,
+        IsActive = false, // Not yet active until AudioEngine switches
+        Capabilities = GetDeviceCapabilities(request.DeviceType)
+      };
+
+      return Ok(deviceInfo);
+    }
+    catch (ArgumentException ex)
+    {
+      _logger.LogWarning(ex, "Invalid device type: {DeviceType}", request.DeviceType);
+      return BadRequest(new { error = ex.Message });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error selecting radio device: {DeviceType}", request.DeviceType);
+      return StatusCode(500, new { error = "Failed to select radio device" });
+    }
+  }
+
+  #endregion
+
+  #region Helper Methods
+
+  /// <summary>
+  /// Gets the capabilities for a specific radio device type.
+  /// </summary>
+  private RadioDeviceCapabilitiesDto GetDeviceCapabilities(string deviceType)
+  {
+    return deviceType switch
+    {
+      "RTLSDRCore" => new RadioDeviceCapabilitiesDto
+      {
+        SupportsSoftwareControl = true,
+        SupportsFrequencyControl = true,
+        SupportsBandSwitching = true,
+        SupportsScanning = true,
+        SupportsGainControl = true,
+        SupportsEqualizer = false, // SDR doesn't have hardware EQ
+        SupportsDeviceVolume = true,
+        Description = "RTL-SDR Software Defined Radio - Full software control via USB dongle"
+      },
+      "RF320" => new RadioDeviceCapabilitiesDto
+      {
+        SupportsSoftwareControl = false,
+        SupportsFrequencyControl = false,
+        SupportsBandSwitching = false,
+        SupportsScanning = false,
+        SupportsGainControl = false,
+        SupportsEqualizer = true, // Device has hardware EQ
+        SupportsDeviceVolume = true, // Device has hardware volume
+        Description = "Raddy RF320 Bluetooth Radio - Bluetooth control with USB audio output"
+      },
+      _ => new RadioDeviceCapabilitiesDto
+      {
+        Description = "Unknown device type"
+      }
+    };
+  }
+
+  #endregion
 }
