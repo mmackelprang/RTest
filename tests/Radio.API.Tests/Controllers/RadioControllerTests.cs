@@ -265,6 +265,96 @@ public class RadioControllerTests : IClassFixture<WebApplicationFactory<Program>
     Assert.Contains("Volume must be between 0 and 100", content);
   }
 
+  // ===== GAIN CONTROL TESTS =====
+
+  [Fact]
+  public async Task SetGain_WithNoActiveRadio_ReturnsBadRequest()
+  {
+    // Arrange
+    var request = new SetGainRequest
+    {
+      Gain = 20.0f
+    };
+
+    // Act
+    var response = await _client.PostAsJsonAsync("/api/radio/gain", request);
+
+    // Assert
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    var content = await response.Content.ReadAsStringAsync();
+    Assert.Contains("Radio is not the active source", content);
+  }
+
+  [Fact]
+  public async Task SetAutoGain_WithNoActiveRadio_ReturnsBadRequest()
+  {
+    // Arrange
+    var request = new SetAutoGainRequest
+    {
+      Enabled = true
+    };
+
+    // Act
+    var response = await _client.PostAsJsonAsync("/api/radio/gain/auto", request);
+
+    // Assert
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    var content = await response.Content.ReadAsStringAsync();
+    Assert.Contains("Radio is not the active source", content);
+  }
+
+  // ===== POWER STATE TESTS =====
+
+  [Fact]
+  public async Task GetPowerState_WithNoActiveRadio_ReturnsBadRequest()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/radio/power");
+
+    // Assert
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    var content = await response.Content.ReadAsStringAsync();
+    Assert.Contains("Radio is not the active source", content);
+  }
+
+  [Fact]
+  public async Task TogglePowerState_WithNoActiveRadio_ReturnsBadRequest()
+  {
+    // Act
+    var response = await _client.PostAsync("/api/radio/power/toggle", null);
+
+    // Assert
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    var content = await response.Content.ReadAsStringAsync();
+    Assert.Contains("Radio is not the active source", content);
+  }
+
+  // ===== LIFECYCLE TESTS =====
+
+  [Fact]
+  public async Task Startup_WithNoActiveRadio_ReturnsBadRequest()
+  {
+    // Act
+    var response = await _client.PostAsync("/api/radio/startup", null);
+
+    // Assert
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    var content = await response.Content.ReadAsStringAsync();
+    Assert.Contains("Radio is not the active source", content);
+  }
+
+  [Fact]
+  public async Task Shutdown_WithNoActiveRadio_ReturnsBadRequest()
+  {
+    // Act
+    var response = await _client.PostAsync("/api/radio/shutdown", null);
+
+    // Assert
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    var content = await response.Content.ReadAsStringAsync();
+    Assert.Contains("Radio is not the active source", content);
+  }
+
   // ===== RADIO PRESET TESTS =====
 
   [Fact]

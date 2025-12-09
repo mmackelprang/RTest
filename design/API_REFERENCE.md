@@ -961,17 +961,34 @@ Gets the current state of the radio device.
 
 ```json
 {
-  "frequency": 101.5,
+  "frequency": 101500000,
   "band": "FM",
-  "frequencyStep": 0.1,
+  "frequencyStep": 100000,
   "signalStrength": 85,
   "isStereo": true,
   "equalizerMode": "Rock",
   "deviceVolume": 75,
   "isScanning": false,
-  "scanDirection": null
+  "scanDirection": null,
+  "autoGainEnabled": false,
+  "gain": 20.0,
+  "isRunning": true
 }
 ```
+
+**Fields:**
+- `frequency`: Current frequency in Hertz (Hz)
+- `band`: Current band (AM, FM, WB, VHF, SW)
+- `frequencyStep`: Frequency step size in Hz
+- `signalStrength`: Signal quality (0-100%)
+- `isStereo`: Stereo indicator (FM only)
+- `equalizerMode`: Current EQ preset
+- `deviceVolume`: Device-specific volume (0-100)
+- `isScanning`: Whether currently scanning
+- `scanDirection`: Scan direction (Up/Down) or null
+- `autoGainEnabled`: AGC state (RTLSDRCore only)
+- `gain`: Manual gain in dB (RTLSDRCore only, when AGC off)
+- `isRunning`: Receiver running state (RTLSDRCore only)
 
 **Error Responses:**
 - `400 Bad Request` - Radio is not the active source
@@ -1290,6 +1307,354 @@ Deletes a radio preset by ID.
   "error": "Preset with ID 'nonexistent-id' not found"
 }
 ```
+
+---
+
+### POST /api/radio/gain
+
+Sets the manual gain value in dB. Only works when automatic gain control is disabled (RTLSDRCore only).
+
+**Request Body:**
+
+```json
+{
+  "gain": 20.0
+}
+```
+
+**Fields:**
+- `gain` (required): Gain value in dB
+
+**Response:** 200 OK
+
+```json
+{
+  "frequency": 101500000,
+  "band": "FM",
+  "frequencyStep": 100000,
+  "signalStrength": 85,
+  "isStereo": true,
+  "equalizerMode": "Off",
+  "deviceVolume": 75,
+  "isScanning": false,
+  "scanDirection": null,
+  "autoGainEnabled": false,
+  "gain": 20.0,
+  "isRunning": true
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - Radio is not the active source or automatic gain is enabled
+- `500 Internal Server Error` - Failed to set gain
+
+**Notes:**
+- RTLSDRCore only - RF320 does not support gain control
+- Manual gain can only be set when AutoGainEnabled is false
+- Use `/api/radio/gain/auto` to toggle automatic gain control
+
+---
+
+### POST /api/radio/gain/auto
+
+Toggles automatic gain control on or off (RTLSDRCore only).
+
+**Request Body:**
+
+```json
+{
+  "enabled": true
+}
+```
+
+**Fields:**
+- `enabled` (required): true to enable AGC, false to disable
+
+**Response:** 200 OK
+
+```json
+{
+  "frequency": 101500000,
+  "band": "FM",
+  "frequencyStep": 100000,
+  "signalStrength": 85,
+  "isStereo": true,
+  "equalizerMode": "Off",
+  "deviceVolume": 75,
+  "isScanning": false,
+  "scanDirection": null,
+  "autoGainEnabled": true,
+  "gain": 0.0,
+  "isRunning": true
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - Radio is not the active source
+- `500 Internal Server Error` - Failed to set automatic gain control
+
+**Notes:**
+- RTLSDRCore only - RF320 does not support gain control
+- When AGC is enabled, manual gain control is disabled
+- Gain value is ignored when AGC is enabled
+
+---
+
+### GET /api/radio/power
+
+Gets the power state of the radio receiver (RTLSDRCore only).
+
+**Response:** 200 OK
+
+```json
+true
+```
+
+**Returns:**
+- Boolean: `true` if powered on, `false` if powered off
+
+**Error Responses:**
+- `400 Bad Request` - Radio is not the active source
+- `500 Internal Server Error` - Failed to get power state
+
+**Notes:**
+- RTLSDRCore only - RF320 uses physical power button
+
+---
+
+### POST /api/radio/power/toggle
+
+Toggles the power state of the radio receiver (RTLSDRCore only).
+
+**Response:** 200 OK
+
+```json
+false
+```
+
+**Returns:**
+- Boolean: New power state (`true` for on, `false` for off)
+
+**Error Responses:**
+- `400 Bad Request` - Radio is not the active source
+- `500 Internal Server Error` - Failed to toggle power state
+
+**Notes:**
+- RTLSDRCore only - RF320 uses physical power button
+- Toggles between on/off states
+- Returns the new power state after toggle
+
+---
+
+### POST /api/radio/startup
+
+Starts the radio receiver (RTLSDRCore only).
+
+**Response:** 200 OK
+
+```json
+true
+```
+
+**Returns:**
+- Boolean: `true` if startup succeeded, `false` otherwise
+
+**Error Responses:**
+- `400 Bad Request` - Radio is not the active source or failed to start
+- `500 Internal Server Error` - Failed to start radio receiver
+
+**Notes:**
+- RTLSDRCore only - initializes RadioReceiver hardware
+- Required before radio can receive signals
+- Check `IsRunning` property in radio state to verify status
+
+---
+
+### POST /api/radio/shutdown
+
+Shuts down the radio receiver (RTLSDRCore only).
+
+**Response:** 204 No Content
+
+**Error Responses:**
+- `400 Bad Request` - Radio is not the active source
+- `500 Internal Server Error` - Failed to shut down radio receiver
+
+**Notes:**
+- RTLSDRCore only - cleanly stops receiver and releases resources
+- Stops signal reception
+- Does not unload the radio source from audio engine
+
+---
+
+## Radio Device Factory Endpoints
+
+Base path: `/api/radio/devices`
+
+Enumerate and select radio device types (RTLSDRCore vs RF320).
+
+### GET /api/radio/devices
+
+Lists all available radio device types with their capabilities.
+
+**Response:** 200 OK
+
+```json
+{
+  "devices": [
+    {
+      "deviceType": "RTLSDRCore",
+      "name": "RTL-SDR Software Defined Radio",
+      "description": "Full software control via RTL-SDR USB dongle",
+      "capabilities": {
+        "supportsSoftwareControl": true,
+        "supportsFrequencyControl": true,
+        "supportsBandSwitching": true,
+        "supportsScanning": true,
+        "supportsGainControl": true,
+        "supportsEqualizer": false,
+        "supportsDeviceVolume": false
+      }
+    },
+    {
+      "deviceType": "RF320",
+      "name": "RF320 Bluetooth/USB Radio",
+      "description": "Bluetooth control with USB audio output",
+      "capabilities": {
+        "supportsSoftwareControl": false,
+        "supportsFrequencyControl": false,
+        "supportsBandSwitching": false,
+        "supportsScanning": false,
+        "supportsGainControl": false,
+        "supportsEqualizer": true,
+        "supportsDeviceVolume": true
+      }
+    }
+  ]
+}
+```
+
+**Error Responses:**
+- `500 Internal Server Error` - Failed to retrieve device list
+
+---
+
+### GET /api/radio/devices/default
+
+Gets the default radio device type from configuration.
+
+**Response:** 200 OK
+
+```json
+{
+  "deviceType": "RTLSDRCore",
+  "name": "RTL-SDR Software Defined Radio",
+  "description": "Full software control via RTL-SDR USB dongle",
+  "capabilities": {
+    "supportsSoftwareControl": true,
+    "supportsFrequencyControl": true,
+    "supportsBandSwitching": true,
+    "supportsScanning": true,
+    "supportsGainControl": true,
+    "supportsEqualizer": false,
+    "supportsDeviceVolume": false
+  }
+}
+```
+
+**Error Responses:**
+- `404 Not Found` - Default device type not configured or invalid
+- `500 Internal Server Error` - Failed to retrieve default device
+
+---
+
+### GET /api/radio/devices/current
+
+Gets the currently active radio device type.
+
+**Response:** 200 OK
+
+```json
+{
+  "deviceType": "RTLSDRCore",
+  "name": "RTL-SDR Software Defined Radio",
+  "description": "Full software control via RTL-SDR USB dongle",
+  "capabilities": {
+    "supportsSoftwareControl": true,
+    "supportsFrequencyControl": true,
+    "supportsBandSwitching": true,
+    "supportsScanning": true,
+    "supportsGainControl": true,
+    "supportsEqualizer": false,
+    "supportsDeviceVolume": false
+  }
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - No radio source is currently active
+- `500 Internal Server Error` - Failed to retrieve current device
+
+---
+
+### POST /api/radio/devices/select
+
+Selects a radio device type (framework in place for future AudioManager integration).
+
+**Request Body:**
+
+```json
+{
+  "deviceType": "RTLSDRCore"
+}
+```
+
+**Fields:**
+- `deviceType` (required): Device type identifier ("RTLSDRCore" or "RF320")
+
+**Response:** 200 OK
+
+```json
+{
+  "deviceType": "RTLSDRCore",
+  "name": "RTL-SDR Software Defined Radio",
+  "description": "Full software control via RTL-SDR USB dongle",
+  "capabilities": {
+    "supportsSoftwareControl": true,
+    "supportsFrequencyControl": true,
+    "supportsBandSwitching": true,
+    "supportsScanning": true,
+    "supportsGainControl": true,
+    "supportsEqualizer": false,
+    "supportsDeviceVolume": false
+  }
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - Empty or invalid device type
+- `500 Internal Server Error` - Failed to select device
+
+**Notes:**
+- Framework endpoint for future device switching
+- Actual device switching requires AudioManager integration
+- Returns selected device capabilities
+
+---
+
+## Radio Device Comparison
+
+| Feature | RTLSDRCore (SDR) | RF320 (Bluetooth/USB) |
+|---------|------------------|----------------------|
+| Software Frequency Control | ✅ Full range | ❌ Hardware only |
+| Band Switching | ✅ Software | ❌ Physical button |
+| Scanning | ✅ Automated | ❌ Physical button |
+| Gain Control (AGC/Manual) | ✅ Yes | ❌ N/A |
+| Power Management | ✅ Software | ❌ Physical button |
+| Lifecycle (Startup/Shutdown) | ✅ Software | ❌ N/A |
+| Equalizer | ❌ No hardware EQ | ✅ Hardware EQ |
+| Device Volume | ❌ Software only | ✅ Hardware volume |
+| Audio Output | ✅ USB via SoundFlow | ✅ USB via SoundFlow |
 
 ---
 
