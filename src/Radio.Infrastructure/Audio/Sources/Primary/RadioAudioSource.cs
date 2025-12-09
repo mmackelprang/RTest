@@ -50,7 +50,7 @@ public class RadioAudioSource : USBAudioSourceBase, Radio.Core.Interfaces.Audio.
 
     // Initialize from configuration
     var options = _radioOptions.CurrentValue;
-    _frequencyStep = Frequency.FromKilohertz(options.DefaultFMStepMHz * 1000); // Convert MHz to kHz
+    _frequencyStep = Frequency.FromMegahertz(options.DefaultFMStepMHz);
     _deviceVolume = options.DefaultDeviceVolume;
   }
 
