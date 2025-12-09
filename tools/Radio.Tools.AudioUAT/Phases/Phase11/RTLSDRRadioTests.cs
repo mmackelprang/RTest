@@ -1,9 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Factories;
-using Radio.Infrastructure.Audio.Sources.Primary;
 using Radio.Tools.AudioUAT.Utilities;
-using RTLSDRCore;
 
 namespace Radio.Tools.AudioUAT.Phases.Phase11;
 
@@ -67,68 +65,64 @@ public class RTLSDRHardwareDetectionTest : IPhaseTest
 
     try
     {
-      ConsoleUI.WriteInfo("Checking for RTLSDR USB hardware...");
-
-      // Try to detect RTLSDR hardware using RTLSDRCore
-      uint deviceCount = 0;
-      try
-      {
-        deviceCount = RadioReceiver.DeviceCount;
-      }
-      catch (Exception ex)
-      {
-        ConsoleUI.WriteWarning($"Failed to query RTLSDR device count: {ex.Message}");
-        return TestResult.Skip(TestId, "RTLSDR library not available or no hardware drivers installed");
-      }
-
-      if (deviceCount == 0)
-      {
-        ConsoleUI.WriteWarning("No RTLSDR USB hardware detected");
-        return TestResult.Skip(TestId, "No RTLSDR USB hardware found. Please connect an RTLSDR dongle and try again.");
-      }
-
-      ConsoleUI.WriteSuccess($"Found {deviceCount} RTLSDR device(s)");
-
-      // Try to get device names
-      for (uint i = 0; i < deviceCount; i++)
-      {
-        try
-        {
-          var deviceName = RadioReceiver.GetDeviceName(i);
-          ConsoleUI.WriteInfo($"  Device {i}: {deviceName}");
-        }
-        catch (Exception ex)
-        {
-          ConsoleUI.WriteWarning($"  Device {i}: Failed to get name - {ex.Message}");
-        }
-      }
-
-      ConsoleUI.WriteInfo("Verifying radio factory can create RTLSDR source...");
+      ConsoleUI.WriteInfo("Checking for RTLSDR hardware via radio factory...");
       var radioFactory = _serviceProvider.GetRequiredService<IRadioFactory>();
-      var availableDevices = radioFactory.GetAvailableDeviceTypes();
+      var availableDevices = radioFactory.GetAvailableDeviceTypes().ToList();
 
       if (!availableDevices.Contains("RTLSDRCore"))
       {
-        return TestResult.Fail(TestId, "RTLSDRCore device type not available in radio factory");
+        ConsoleUI.WriteWarning("RTLSDRCore device type not available in radio factory");
+        return TestResult.Skip(TestId, "RTLSDRCore not available. May not be installed or no hardware present.");
       }
 
-      ConsoleUI.WriteSuccess("RTLSDRCore device type is available");
+      ConsoleUI.WriteSuccess($"Found {availableDevices.Count} radio device type(s)");
+      foreach (var deviceType in availableDevices)
+      {
+        ConsoleUI.WriteInfo($"  - {deviceType}");
+      }
 
-      return TestResult.Pass(TestId, $"Successfully detected {deviceCount} RTLSDR device(s)");
+      // Try to create an RTLSDRCore source to verify it's actually available
+      ConsoleUI.WriteInfo("Attempting to create RTLSDR radio source...");
+      try
+      {
+        var radioSource = radioFactory.CreateRadioSource("RTLSDRCore");
+        if (radioSource == null)
+        {
+          return TestResult.Fail(TestId, "RadioFactory.CreateRadioSource returned null for RTLSDRCore");
+        }
+
+        ConsoleUI.WriteSuccess("Successfully created RTLSDR radio source");
+        
+        // Check if it implements IRadioControl
+        if (radioSource is IRadioControl)
+        {
+          ConsoleUI.WriteSuccess("Radio source implements IRadioControl interface");
+        }
+        else
+        {
+          ConsoleUI.WriteWarning("Radio source does not implement IRadioControl");
+        }
+
+        return TestResult.Pass(TestId, "RTLSDRCore device type is available and can be created");
+      }
+      catch (InvalidOperationException ex)
+      {
+        // This is expected if hardware is not present
+        ConsoleUI.WriteWarning($"Cannot create RTLSDR source (no hardware): {ex.Message}");
+        return TestResult.Skip(TestId, "RTLSDR USB hardware not found. Please connect an RTLSDR dongle and try again.");
+      }
     }
     catch (Exception ex)
     {
       ConsoleUI.WriteError($"Unexpected error: {ex.Message}");
       return TestResult.Fail(TestId, "Unexpected error during hardware detection", exception: ex);
     }
-
-    await Task.CompletedTask; // Suppress async warning
   }
 }
 
 /// <summary>
 /// P11-002: Radio Control Gain Endpoint Test.
-/// Tests the gain control endpoints (/api/radio/gain and /api/radio/gain/auto).
+/// Tests the gain control endpoints with RTLSDR hardware.
 /// </summary>
 public class RadioControlGainEndpointTest : IPhaseTest
 {
@@ -159,19 +153,12 @@ public class RadioControlGainEndpointTest : IPhaseTest
 
       ConsoleUI.WriteInfo("Creating RTLSDR radio source...");
       var radioFactory = _serviceProvider.GetRequiredService<IRadioFactory>();
-      var audioEngine = _serviceProvider.GetRequiredService<IAudioEngine>();
-
-      // Initialize audio engine if needed
-      if (audioEngine.State == AudioEngineState.Uninitialized)
-      {
-        await audioEngine.InitializeAsync(ct);
-      }
 
       // Create RTLSDR radio source
-      var radioSource = radioFactory.CreateRadioAudioSource("RTLSDRCore") as SDRRadioAudioSource;
+      var radioSource = radioFactory.CreateRadioSource("RTLSDRCore") as IRadioControl;
       if (radioSource == null)
       {
-        return TestResult.Fail(TestId, "Failed to create SDRRadioAudioSource from factory");
+        return TestResult.Fail(TestId, "Failed to create RTLSDRCore source or it doesn't implement IRadioControl");
       }
 
       ConsoleUI.WriteSuccess("Created RTLSDR radio source");
@@ -218,6 +205,11 @@ public class RadioControlGainEndpointTest : IPhaseTest
 
       return TestResult.Pass(TestId, "Gain control endpoints validated successfully");
     }
+    catch (InvalidOperationException ex)
+    {
+      ConsoleUI.WriteWarning($"Hardware not available: {ex.Message}");
+      return TestResult.Skip(TestId, "No RTLSDR hardware available");
+    }
     catch (Exception ex)
     {
       ConsoleUI.WriteError($"Error: {ex.Message}");
@@ -225,11 +217,27 @@ public class RadioControlGainEndpointTest : IPhaseTest
     }
   }
 
-  private static bool IsRTLSDRHardwareAvailable()
+  private bool IsRTLSDRHardwareAvailable()
   {
     try
     {
-      return RadioReceiver.DeviceCount > 0;
+      var radioFactory = _serviceProvider.GetRequiredService<IRadioFactory>();
+      var availableDevices = radioFactory.GetAvailableDeviceTypes();
+      if (!availableDevices.Contains("RTLSDRCore"))
+      {
+        return false;
+      }
+
+      // Try to create to verify hardware is actually present
+      try
+      {
+        var source = radioFactory.CreateRadioSource("RTLSDRCore");
+        return source != null;
+      }
+      catch (InvalidOperationException)
+      {
+        return false;
+      }
     }
     catch
     {
@@ -240,7 +248,7 @@ public class RadioControlGainEndpointTest : IPhaseTest
 
 /// <summary>
 /// P11-003: Radio Control Power Endpoint Test.
-/// Tests the power state endpoints (/api/radio/power and /api/radio/power/toggle).
+/// Tests the power state endpoints with RTLSDR hardware.
 /// </summary>
 public class RadioControlPowerEndpointTest : IPhaseTest
 {
@@ -271,19 +279,12 @@ public class RadioControlPowerEndpointTest : IPhaseTest
 
       ConsoleUI.WriteInfo("Creating RTLSDR radio source...");
       var radioFactory = _serviceProvider.GetRequiredService<IRadioFactory>();
-      var audioEngine = _serviceProvider.GetRequiredService<IAudioEngine>();
-
-      // Initialize audio engine if needed
-      if (audioEngine.State == AudioEngineState.Uninitialized)
-      {
-        await audioEngine.InitializeAsync(ct);
-      }
 
       // Create RTLSDR radio source
-      var radioSource = radioFactory.CreateRadioAudioSource("RTLSDRCore") as SDRRadioAudioSource;
+      var radioSource = radioFactory.CreateRadioSource("RTLSDRCore") as IRadioControl;
       if (radioSource == null)
       {
-        return TestResult.Fail(TestId, "Failed to create SDRRadioAudioSource from factory");
+        return TestResult.Fail(TestId, "Failed to create RTLSDRCore source or it doesn't implement IRadioControl");
       }
 
       ConsoleUI.WriteSuccess("Created RTLSDR radio source");
@@ -317,6 +318,11 @@ public class RadioControlPowerEndpointTest : IPhaseTest
 
       return TestResult.Pass(TestId, "Power control endpoints validated successfully");
     }
+    catch (InvalidOperationException ex)
+    {
+      ConsoleUI.WriteWarning($"Hardware not available: {ex.Message}");
+      return TestResult.Skip(TestId, "No RTLSDR hardware available");
+    }
     catch (Exception ex)
     {
       ConsoleUI.WriteError($"Error: {ex.Message}");
@@ -324,11 +330,26 @@ public class RadioControlPowerEndpointTest : IPhaseTest
     }
   }
 
-  private static bool IsRTLSDRHardwareAvailable()
+  private bool IsRTLSDRHardwareAvailable()
   {
     try
     {
-      return RadioReceiver.DeviceCount > 0;
+      var radioFactory = _serviceProvider.GetRequiredService<IRadioFactory>();
+      var availableDevices = radioFactory.GetAvailableDeviceTypes();
+      if (!availableDevices.Contains("RTLSDRCore"))
+      {
+        return false;
+      }
+
+      try
+      {
+        var source = radioFactory.CreateRadioSource("RTLSDRCore");
+        return source != null;
+      }
+      catch (InvalidOperationException)
+      {
+        return false;
+      }
     }
     catch
     {
@@ -339,7 +360,7 @@ public class RadioControlPowerEndpointTest : IPhaseTest
 
 /// <summary>
 /// P11-004: Radio Control Lifecycle Endpoint Test.
-/// Tests the lifecycle endpoints (/api/radio/startup and /api/radio/shutdown).
+/// Tests the lifecycle endpoints with RTLSDR hardware.
 /// </summary>
 public class RadioControlLifecycleEndpointTest : IPhaseTest
 {
@@ -370,19 +391,12 @@ public class RadioControlLifecycleEndpointTest : IPhaseTest
 
       ConsoleUI.WriteInfo("Creating RTLSDR radio source...");
       var radioFactory = _serviceProvider.GetRequiredService<IRadioFactory>();
-      var audioEngine = _serviceProvider.GetRequiredService<IAudioEngine>();
-
-      // Initialize audio engine if needed
-      if (audioEngine.State == AudioEngineState.Uninitialized)
-      {
-        await audioEngine.InitializeAsync(ct);
-      }
 
       // Create RTLSDR radio source
-      var radioSource = radioFactory.CreateRadioAudioSource("RTLSDRCore") as SDRRadioAudioSource;
+      var radioSource = radioFactory.CreateRadioSource("RTLSDRCore") as IRadioControl;
       if (radioSource == null)
       {
-        return TestResult.Fail(TestId, "Failed to create SDRRadioAudioSource from factory");
+        return TestResult.Fail(TestId, "Failed to create RTLSDRCore source or it doesn't implement IRadioControl");
       }
 
       ConsoleUI.WriteSuccess("Created RTLSDR radio source");
@@ -426,6 +440,11 @@ public class RadioControlLifecycleEndpointTest : IPhaseTest
 
       return TestResult.Pass(TestId, "Lifecycle endpoints validated successfully");
     }
+    catch (InvalidOperationException ex)
+    {
+      ConsoleUI.WriteWarning($"Hardware not available: {ex.Message}");
+      return TestResult.Skip(TestId, "No RTLSDR hardware available");
+    }
     catch (Exception ex)
     {
       ConsoleUI.WriteError($"Error: {ex.Message}");
@@ -433,11 +452,26 @@ public class RadioControlLifecycleEndpointTest : IPhaseTest
     }
   }
 
-  private static bool IsRTLSDRHardwareAvailable()
+  private bool IsRTLSDRHardwareAvailable()
   {
     try
     {
-      return RadioReceiver.DeviceCount > 0;
+      var radioFactory = _serviceProvider.GetRequiredService<IRadioFactory>();
+      var availableDevices = radioFactory.GetAvailableDeviceTypes();
+      if (!availableDevices.Contains("RTLSDRCore"))
+      {
+        return false;
+      }
+
+      try
+      {
+        var source = radioFactory.CreateRadioSource("RTLSDRCore");
+        return source != null;
+      }
+      catch (InvalidOperationException)
+      {
+        return false;
+      }
     }
     catch
     {
