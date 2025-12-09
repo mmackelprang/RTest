@@ -139,7 +139,7 @@ public class RadioFactoryTests
     // Act & Assert
     var exception = Assert.Throws<ArgumentException>(() =>
       factory.CreateRadioSource("InvalidDevice"));
-    Assert.Contains("Unknown device type", exception.Message);
+    Assert.Contains("Unsupported radio device type", exception.Message);
   }
 
   [Fact]

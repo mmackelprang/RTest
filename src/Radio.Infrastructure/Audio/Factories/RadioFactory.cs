@@ -221,9 +221,14 @@ public class RadioFactory : IRadioFactory
   {
     try
     {
-      // RF320 is available if the USB port is configured
+      // RF320 is available if the USB port is configured and not in use
       var usbPort = _deviceOptions.CurrentValue.Radio?.USBPort;
-      return !string.IsNullOrWhiteSpace(usbPort);
+      if (string.IsNullOrWhiteSpace(usbPort))
+      {
+        return false;
+      }
+
+      return !_deviceManager.IsUSBPortInUse(usbPort);
     }
     catch
     {
