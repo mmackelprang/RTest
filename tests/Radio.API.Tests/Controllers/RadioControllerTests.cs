@@ -454,7 +454,7 @@ public class RadioControllerTests : IClassFixture<WebApplicationFactory<Program>
     var deviceList = await response.Content.ReadFromJsonAsync<RadioDeviceListDto>();
     Assert.NotNull(deviceList);
     Assert.NotNull(deviceList.Devices);
-    Assert.True(deviceList.Count >= 0);
+    // Count property is derived from Devices collection
   }
 
   [Fact]

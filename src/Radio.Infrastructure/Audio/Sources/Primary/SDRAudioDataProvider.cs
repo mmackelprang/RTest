@@ -97,8 +97,7 @@ public class SDRAudioDataProvider : IDisposable
 
     // Queue the audio samples for playback
     // Note: We clone the array to avoid issues if RTL-SDR reuses the buffer
-    var samplesCopy = new float[e.Samples.Length];
-    Array.Copy(e.Samples, samplesCopy, e.Samples.Length);
+    var samplesCopy = e.Samples.ToArray();
     _audioBuffer.Enqueue(samplesCopy);
 
     // Prevent buffer from growing too large (drop oldest chunks if full)
@@ -155,7 +154,9 @@ public class SDRAudioDataProvider : IDisposable
     if (samplesRead == 0)
     {
       Array.Fill(buffer, 0.0f, offset, count);
-      return 0;
+      // Return count to indicate buffer was filled (with silence)
+      // Some audio engines expect this to continue playback smoothly
+      return count;
     }
 
     // Fill any remaining space with silence

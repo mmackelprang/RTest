@@ -844,17 +844,16 @@ public class RadioController : ControllerBase
         return BadRequest(new { error = $"Device type '{request.DeviceType}' is not available" });
       }
 
-      // Note: Actual device switching would require AudioEngine/AudioManager support
-      // For now, we validate the request and return success
-      // TODO: Integrate with AudioEngine.SwitchSourceAsync or similar method
-
-      _logger.LogInformation("Device selection requested: {DeviceType}", request.DeviceType);
+      // TODO: Actual device switching requires AudioEngine/AudioManager support
+      // For now, we validate the request and return device info
+      // Future work: Integrate with AudioEngine.SwitchSourceAsync or AudioManager.SelectRadioDevice
+      _logger.LogInformation("Device selection validated for: {DeviceType} (switching not yet implemented)", request.DeviceType);
 
       var deviceInfo = new RadioDeviceInfoDto
       {
         DeviceType = request.DeviceType,
         IsAvailable = true,
-        IsActive = false, // Not yet active until AudioEngine switches
+        IsActive = false, // Not yet active - device switching requires AudioManager integration
         Capabilities = GetDeviceCapabilities(request.DeviceType)
       };
 
