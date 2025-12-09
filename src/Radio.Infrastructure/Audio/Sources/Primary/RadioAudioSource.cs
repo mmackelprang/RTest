@@ -21,28 +21,37 @@ namespace Radio.Infrastructure.Audio.Sources.Primary;
 public class RadioAudioSource : USBAudioSourceBase, Radio.Core.Interfaces.Audio.IRadioControl
 {
   private readonly IOptionsMonitor<DeviceOptions> _deviceOptions;
+  private readonly IOptionsMonitor<RadioOptions> _radioOptions;
   private readonly ILogger<RadioAudioSource> _logger;
 
   // Default state values (cannot be changed programmatically on RF320)
-  private Frequency _frequencyStep = Frequency.FromKilohertz(100);
-  private int _deviceVolume = 50;
+  private Frequency _frequencyStep;
+  private int _deviceVolume;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="RadioAudioSource"/> class.
   /// </summary>
   /// <param name="logger">The logger instance.</param>
   /// <param name="deviceOptions">The device options configuration.</param>
+  /// <param name="radioOptions">The radio options configuration.</param>
   /// <param name="deviceManager">The audio device manager.</param>
   /// <param name="identificationService">Optional fingerprinting service for track identification.</param>
   public RadioAudioSource(
     ILogger<RadioAudioSource> logger,
     IOptionsMonitor<DeviceOptions> deviceOptions,
+    IOptionsMonitor<RadioOptions> radioOptions,
     IAudioDeviceManager deviceManager,
     BackgroundIdentificationService? identificationService = null)
     : base(logger, deviceManager, identificationService)
   {
     _deviceOptions = deviceOptions;
+    _radioOptions = radioOptions;
     _logger = logger;
+
+    // Initialize from configuration
+    var options = _radioOptions.CurrentValue;
+    _frequencyStep = Frequency.FromMegahertz(options.DefaultFMStepMHz);
+    _deviceVolume = options.DefaultDeviceVolume;
   }
 
   /// <inheritdoc/>

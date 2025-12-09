@@ -1,4 +1,6 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using RTLSDRCore;
@@ -14,9 +16,10 @@ namespace Radio.Infrastructure.Audio.Sources.Primary;
 public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces.Audio.IRadioControl
 {
   private readonly RadioReceiver _radioReceiver;
+  private readonly IOptionsMonitor<RadioOptions> _radioOptions;
   private readonly Dictionary<string, object> _metadata = new();
-  private Frequency _frequencyStep = Frequency.FromKilohertz(100); // Default 100 kHz step
-  private int _deviceVolume = 50; // Default 50%
+  private Frequency _frequencyStep;
+  private int _deviceVolume;
   private bool _isScanning;
   private ScanDirection? _scanDirection;
   private Task? _scanTask;
@@ -27,12 +30,20 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// </summary>
   /// <param name="logger">The logger instance.</param>
   /// <param name="radioReceiver">The RTLSDRCore radio receiver.</param>
+  /// <param name="radioOptions">Radio configuration options.</param>
   public SDRRadioAudioSource(
     ILogger<SDRRadioAudioSource> logger,
-    RadioReceiver radioReceiver)
+    RadioReceiver radioReceiver,
+    IOptionsMonitor<RadioOptions> radioOptions)
     : base(logger)
   {
     _radioReceiver = radioReceiver ?? throw new ArgumentNullException(nameof(radioReceiver));
+    _radioOptions = radioOptions ?? throw new ArgumentNullException(nameof(radioOptions));
+
+    // Initialize from configuration
+    var options = _radioOptions.CurrentValue;
+    _frequencyStep = Frequency.FromMegahertz(options.DefaultFMStepMHz);
+    _deviceVolume = options.DefaultDeviceVolume;
 
     // Subscribe to RTLSDRCore events and translate to Radio.Core events
     _radioReceiver.FrequencyChanged += OnRTLSDRFrequencyChanged;
@@ -249,8 +260,10 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     get => _radioReceiver.Volume;
     set
     {
-      _radioReceiver.Volume = Math.Clamp(value, 0.0f, 1.0f);
-      _deviceVolume = (int)Math.Round(value * 100);
+      var clampedValue = Math.Clamp(value, 0.0f, 1.0f);
+      _radioReceiver.Volume = clampedValue;
+      base.Volume = clampedValue; // Maintain consistency with base class
+      _deviceVolume = (int)Math.Round(clampedValue * 100);
     }
   }
 
