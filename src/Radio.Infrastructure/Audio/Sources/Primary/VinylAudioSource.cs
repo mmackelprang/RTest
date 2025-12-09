@@ -50,16 +50,8 @@ public class VinylAudioSource : USBAudioSourceBase
     var usbPort = _deviceOptions.CurrentValue.Vinyl.USBPort;
 
     // Set standard metadata with defaults for Vinyl source
-    SetDefaultMetadata();
+    SetDefaultMetadata("Vinyl", "Vinyl", "Turntable");
 
     await InitializeUSBCaptureAsync(usbPort, cancellationToken);
-  }
-
-  /// <summary>
-  /// Sets default metadata for the Vinyl source when no track is identified.
-  /// </summary>
-  private void SetDefaultMetadata()
-  {
-    SetDefaultMetadata("Vinyl", "Vinyl", "Turntable");
   }
 }
