@@ -42,7 +42,7 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
 
     // Initialize from configuration
     var options = _radioOptions.CurrentValue;
-    _frequencyStep = Frequency.FromKilohertz(options.DefaultFMStepMHz * 1000); // Convert MHz to kHz
+    _frequencyStep = Frequency.FromMegahertz(options.DefaultFMStepMHz);
     _deviceVolume = options.DefaultDeviceVolume;
 
     // Subscribe to RTLSDRCore events and translate to Radio.Core events
