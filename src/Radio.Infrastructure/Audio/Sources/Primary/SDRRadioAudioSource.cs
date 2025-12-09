@@ -240,6 +240,10 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   #region IRadioControl Audio Control
 
   /// <inheritdoc/>
+  /// <remarks>
+  /// Uses 'new' keyword because both PrimaryAudioSourceBase and IRadioControl define Volume.
+  /// IRadioControl requires synchronization with DeviceVolume property.
+  /// </remarks>
   public new float Volume
   {
     get => _radioReceiver.Volume;
@@ -342,6 +346,11 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   #region IRadioControl Events
 
   /// <inheritdoc/>
+  /// <remarks>
+  /// Uses 'new' keyword because both PrimaryAudioSourceBase and IRadioControl define StateChanged.
+  /// Base class uses AudioSourceStateChangedEventArgs while IRadioControl uses RadioStateChangedEventArgs.
+  /// Both events serve different purposes and are intentionally separate.
+  /// </remarks>
   public new event EventHandler<RadioStateChangedEventArgs>? StateChanged;
 
   /// <inheritdoc/>
@@ -460,22 +469,6 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     };
   }
 
-  /// <summary>
-  /// Maps Radio.Core RadioBand to RTLSDRCore RadioBand (deprecated, kept for reference).
-  /// </summary>
-  private static RTLSDRCore.Models.RadioBand MapBandToRTLSDR(RadioBand band)
-  {
-    return band switch
-    {
-      RadioBand.FM => RTLSDRCore.Bands.BandPresets.FmBroadcast,
-      RadioBand.AM => RTLSDRCore.Bands.BandPresets.AmBroadcast,
-      RadioBand.WB => RTLSDRCore.Bands.BandPresets.Weather,
-      RadioBand.VHF => RTLSDRCore.Bands.BandPresets.Aircraft,
-      RadioBand.SW => RTLSDRCore.Bands.BandPresets.Shortwave,
-      _ => throw new ArgumentException($"Unsupported band: {band}", nameof(band))
-    };
-  }
-
   #endregion
 
   #region PrimaryAudioSourceBase Overrides
@@ -488,10 +481,10 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   }
 
   /// <inheritdoc/>
-  protected override Task PlayCoreAsync(CancellationToken cancellationToken = default)
+  protected override async Task PlayCoreAsync(CancellationToken cancellationToken = default)
   {
     // Playback is handled by RadioReceiver startup
-    return StartupAsync(cancellationToken).ContinueWith(t => { }, cancellationToken);
+    await StartupAsync(cancellationToken);
   }
 
   /// <inheritdoc/>
