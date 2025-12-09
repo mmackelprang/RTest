@@ -96,7 +96,7 @@ All review comments from PR #103 have been addressed:
 
 ### Remaining Work 🚧
 
-#### 3. Audio Integration - Implementation (25% Complete)
+#### 3. Audio Integration - Implementation (40% Complete)
 
 **Completed Tasks:**
 
@@ -116,13 +116,15 @@ All review comments from PR #103 have been addressed:
      - RTLSDRCore.AudioDataAvailable → Internal audio pipeline (no public event needed)
    - ⏳ Manages SoundFlow audio component for SDR output (TODO: GetSoundComponent implementation)
 
-**Remaining Tasks:**
+2. **Extend RadioAudioSource** (`src/Radio.Infrastructure/Audio/Sources/Primary/RadioAudioSource.cs`) ✅
+   - ✅ Implements IRadioControl interface (explicit interface implementation for events)
+   - ✅ All methods stubbed with appropriate warnings and documentation
+   - ✅ Hardware limitations documented: RF320 is Bluetooth-controlled with USB audio output
+   - ✅ No software control over radio functions (frequency, band, scanning, etc.)
+   - ✅ Physical controls required for all radio operations
+   - ✅ API compatibility maintained for unified radio interface
 
-2. **Extend RadioAudioSource** (`src/Radio.Infrastructure/Audio/Sources/Primary/RadioAudioSource.cs`)
-   - Implement IRadioControl interface
-   - Add RF320-specific radio controls (if supported by hardware)
-   - Stub methods if RF320 doesn't support advanced features
-   - Document RF320 capabilities vs limitations
+**Remaining Tasks:**
 
 3. **Add Configuration Support**
    - Create `RadioOptions` configuration class
