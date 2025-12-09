@@ -68,6 +68,32 @@
 - `FrequencyChanged` - Frequency change event
 - `SignalStrengthUpdated` - Signal strength event
 
+### PR #103 Review Comments ✅ (Completed)
+
+All review comments from PR #103 have been addressed:
+
+1. **Frequency in Hz with value object** ✅
+   - `Frequency` struct in `src/Radio.Core/Models/Audio/Frequency.cs` stores values in Hz internally
+   - Provides `Kilohertz` and `Megahertz` properties for unit conversion
+   - Used consistently throughout `IRadioControl` interface and Radio API
+   - Documentation updated to specify Hz as the canonical unit
+
+2. **Volume as int 0-100** ✅
+   - `IRadioControl.DeviceVolume` property uses int 0-100 range
+   - API endpoint `/api/radio/volume` validates 0-100 range
+   - `RadioStateDto.DeviceVolume` uses int 0-100
+   - Synchronized with `Volume` (float 0.0-1.0) property as documented
+
+3. **RTLSDRCore event translation** ✅ (Documented for future implementation)
+   - Event mapping requirements documented in TASK_4_2_SUMMARY.md
+   - RTLSDRCore events: `FrequencyChanged`, `SignalStrengthUpdated`, `StateChanged`, `AudioDataAvailable`
+   - Radio.Core events: `RadioControlFrequencyChangedEventArgs`, `RadioControlSignalStrengthEventArgs`, `RadioStateChangedEventArgs`
+   - Translation will be implemented in SDRRadioAudioSource (see section 3.1 below)
+
+4. **RadioProtocol.Core TODOs replaced** ✅
+   - `src/Radio.Infrastructure/DependencyInjection/AudioServiceExtensions.cs` - Added note about RadioProtocol.Core being removed
+   - `src/Radio.API/Program.cs` - Added note that RadioProtocol.Core will be added back in a future phase
+
 ### Remaining Work 🚧
 
 #### 3. Audio Integration - Implementation (0% Complete)
@@ -81,7 +107,12 @@
    - Bridges RTLSDRCore types to Radio.Core types:
      - RTLSDRCore.Models.RadioBand → Radio.Core.Models.Audio.RadioBand
      - RTLSDRCore.Enums.ModulationType → modulation handling
-     - long frequencyHz → double frequency (MHz/kHz)
+     - long frequencyHz → Frequency struct (stores in Hz)
+   - **Critical: Event Translation** (PR #103 Review Comment #3)
+     - RTLSDRCore.FrequencyChangedEventArgs (long oldFrequency, long newFrequency) → RadioControlFrequencyChangedEventArgs (Frequency, Frequency)
+     - RTLSDRCore.SignalStrengthEventArgs (float signalStrength) → RadioControlSignalStrengthEventArgs (float)
+     - RTLSDRCore.ReceiverStateChangedEventArgs → RadioStateChangedEventArgs
+     - RTLSDRCore.AudioDataAvailable → Internal audio pipeline (no public event needed)
    - Manages SoundFlow audio component for SDR output
 
 2. **Extend RadioAudioSource** (`src/Radio.Infrastructure/Audio/Sources/Primary/RadioAudioSource.cs`)
