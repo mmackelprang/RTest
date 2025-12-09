@@ -167,7 +167,7 @@ public class AudioStateUpdateService : BackgroundService
 
   private async Task CheckRadioStateAsync(IAudioSource? activeSource, CancellationToken cancellationToken)
   {
-    if (activeSource is not IRadioControls radioControls)
+    if (activeSource is not IRadioControl radioControls)
     {
       return;
     }
@@ -367,13 +367,13 @@ public class AudioStateUpdateService : BackgroundService
     };
   }
 
-  private static RadioStateDto MapToRadioStateDto(IRadioControls radioControls)
+  private static RadioStateDto MapToRadioStateDto(IRadioControl radioControls)
   {
     return new RadioStateDto
     {
-      Frequency = radioControls.CurrentFrequency,
+      Frequency = radioControls.CurrentFrequency.Hertz, // Convert to Hz for API
       Band = radioControls.CurrentBand.ToString(),
-      FrequencyStep = radioControls.FrequencyStep,
+      FrequencyStep = radioControls.FrequencyStep.Hertz, // Convert to Hz for API
       SignalStrength = radioControls.SignalStrength,
       IsStereo = radioControls.IsStereo,
       EqualizerMode = radioControls.EqualizerMode.ToString(),

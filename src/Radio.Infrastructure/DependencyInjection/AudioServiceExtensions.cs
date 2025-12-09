@@ -8,8 +8,6 @@ using Radio.Infrastructure.Audio.Outputs;
 using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Infrastructure.Audio.Visualization;
-using RadioProtocol.Core;
-using RadioProtocol.Core.Logging;
 
 namespace Radio.Infrastructure.DependencyInjection;
 
@@ -186,18 +184,7 @@ public static class AudioServiceExtensions
     return services;
   }
 
-  public static IServiceCollection AddRadioHardware(this IServiceCollection services, IConfiguration config)
-{
-    // 1. Register the Logger Wrapper
-    // This bridges RadioProtocol's IRadioLogger to your application's Serilog ILogger
-    services.AddSingleton<IRadioLogger, RadioLogger>();
-
-    // 2. Register the Manager
-    services.AddSingleton<IRadioManager, RadioManager>();
-
-    // 3. Register the Factory (if you need custom configuration)
-    services.AddSingleton<RadioManagerBuilder>();
-
-    return services;
-}
+  // NOTE: RadioProtocol.Core has been removed and replaced by RTLSDRCore integration.
+  // The AddRadioHardware method is no longer needed as RTLSDRCore provides equivalent functionality.
+  // See TASK_4_2_SUMMARY.md for details on the RTLSDRCore integration.
 }

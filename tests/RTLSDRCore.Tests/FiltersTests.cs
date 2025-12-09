@@ -87,7 +87,7 @@ public class FiltersTests
         filter.Process(input, output);
 
         // Output should have valid values
-        Assert.True(output.Skip(50).Any(s => Math.Abs(s.I) > 0.1f));
+        Assert.Contains(output.Skip(50), s => Math.Abs(s.I) > 0.1f);
     }
 
     [Fact]

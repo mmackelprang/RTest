@@ -6,9 +6,9 @@ namespace Radio.API.Models;
 public class RadioStateDto
 {
   /// <summary>
-  /// Gets or sets the current frequency in MHz (FM) or kHz (AM).
+  /// Gets or sets the current frequency in Hertz (Hz).
   /// </summary>
-  public double Frequency { get; set; }
+  public long Frequency { get; set; }
 
   /// <summary>
   /// Gets or sets the current band (AM, FM, etc.).
@@ -16,9 +16,9 @@ public class RadioStateDto
   public string Band { get; set; } = string.Empty;
 
   /// <summary>
-  /// Gets or sets the frequency step size in MHz (FM) or kHz (AM).
+  /// Gets or sets the frequency step size in Hertz (Hz).
   /// </summary>
-  public double FrequencyStep { get; set; }
+  public long FrequencyStep { get; set; }
 
   /// <summary>
   /// Gets or sets the signal strength as a percentage (0-100).
@@ -57,9 +57,9 @@ public class RadioStateDto
 public class SetFrequencyRequest
 {
   /// <summary>
-  /// Gets or sets the frequency to tune to in MHz (FM) or kHz (AM).
+  /// Gets or sets the frequency to tune to in Hertz (Hz).
   /// </summary>
-  public double Frequency { get; set; }
+  public long Frequency { get; set; }
 }
 
 /// <summary>
@@ -79,9 +79,9 @@ public class SetBandRequest
 public class SetFrequencyStepRequest
 {
   /// <summary>
-  /// Gets or sets the step size in MHz (FM) or kHz (AM).
+  /// Gets or sets the step size in Hertz (Hz).
   /// </summary>
-  public double Step { get; set; }
+  public long Step { get; set; }
 }
 
 /// <summary>

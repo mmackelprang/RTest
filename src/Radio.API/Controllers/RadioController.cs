@@ -73,7 +73,7 @@ public class RadioController : ControllerBase
   {
     try
     {
-      // Note: Frequency validation is delegated to IRadioControls.SetFrequencyAsync
+      // Note: Frequency validation is delegated to IRadioControl.SetFrequencyAsync
       // which throws ArgumentOutOfRangeException for invalid values
       var radioSource = GetActiveRadioSource();
       if (radioSource == null)
@@ -81,7 +81,7 @@ public class RadioController : ControllerBase
         return BadRequest(new { error = "Radio is not the active source" });
       }
 
-      await radioSource.SetFrequencyAsync(request.Frequency);
+      await radioSource.SetFrequencyAsync(new Frequency(request.Frequency));
       return Ok(MapToRadioStateDto(radioSource));
     }
     catch (ArgumentOutOfRangeException ex)
@@ -204,7 +204,7 @@ public class RadioController : ControllerBase
   {
     try
     {
-      // Note: Step validation is delegated to IRadioControls.SetFrequencyStepAsync
+      // Note: Step validation is delegated to IRadioControl.SetFrequencyStepAsync
       // which throws ArgumentOutOfRangeException for invalid values
       var radioSource = GetActiveRadioSource();
       if (radioSource == null)
@@ -212,7 +212,7 @@ public class RadioController : ControllerBase
         return BadRequest(new { error = "Radio is not the active source" });
       }
 
-      await radioSource.SetFrequencyStepAsync(request.Step);
+      await radioSource.SetFrequencyStepAsync(new Frequency(request.Step));
       return Ok(MapToRadioStateDto(radioSource));
     }
     catch (ArgumentOutOfRangeException ex)
@@ -354,7 +354,7 @@ public class RadioController : ControllerBase
         return BadRequest(new { error = "Radio is not the active source" });
       }
 
-      // Note: DeviceVolume is a synchronous property per IRadioControls interface design
+      // Note: DeviceVolume is a synchronous property per IRadioControl interface design
       radioSource.DeviceVolume = request.Volume;
       
       // Return result on the same async context
@@ -371,23 +371,23 @@ public class RadioController : ControllerBase
   /// Gets the active radio source from the audio engine.
   /// </summary>
   /// <returns>The active radio source, or null if no radio is active.</returns>
-  private IRadioControls? GetActiveRadioSource()
+  private IRadioControl? GetActiveRadioSource()
   {
     return _audioEngine.GetActiveRadioSource();
   }
 
   /// <summary>
-  /// Maps an IRadioControls instance to a RadioStateDto.
+  /// Maps an IRadioControl instance to a RadioStateDto.
   /// </summary>
   /// <param name="radioSource">The radio source.</param>
   /// <returns>The radio state DTO.</returns>
-  private static RadioStateDto MapToRadioStateDto(IRadioControls radioSource)
+  private static RadioStateDto MapToRadioStateDto(IRadioControl radioSource)
   {
     return new RadioStateDto
     {
-      Frequency = radioSource.CurrentFrequency,
+      Frequency = radioSource.CurrentFrequency.Hertz, // Convert to Hz for API
       Band = radioSource.CurrentBand.ToString(),
-      FrequencyStep = radioSource.FrequencyStep,
+      FrequencyStep = radioSource.FrequencyStep.Hertz, // Convert to Hz for API
       SignalStrength = radioSource.SignalStrength,
       IsStereo = radioSource.IsStereo,
       EqualizerMode = radioSource.EqualizerMode.ToString(),

@@ -17,7 +17,7 @@ public class DemodulatorTests
         var count = demodulator.Demodulate(input, output);
 
         Assert.Equal(1024, count);
-        Assert.True(output.Any(s => Math.Abs(s) > 0.001f));
+        Assert.Contains(output, s => Math.Abs(s) > 0.001f);
     }
 
     [Fact]
