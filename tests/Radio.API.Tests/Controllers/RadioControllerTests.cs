@@ -440,4 +440,192 @@ public class RadioControllerTests : IClassFixture<WebApplicationFactory<Program>
     Assert.NotNull(presets);
     Assert.DoesNotContain(presets, p => p.Id == createdPreset.Id);
   }
+
+  #region Device Factory Endpoint Tests
+
+  [Fact]
+  public async Task GetAvailableDevices_ReturnsDeviceList()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/radio/devices");
+
+    // Assert
+    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    var deviceList = await response.Content.ReadFromJsonAsync<RadioDeviceListDto>();
+    Assert.NotNull(deviceList);
+    Assert.NotNull(deviceList.Devices);
+    // Count property is derived from Devices collection
+  }
+
+  [Fact]
+  public async Task GetAvailableDevices_ReturnsDevicesWithCapabilities()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/radio/devices");
+
+    // Assert
+    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    var deviceList = await response.Content.ReadFromJsonAsync<RadioDeviceListDto>();
+    Assert.NotNull(deviceList);
+
+    // Each device should have capabilities
+    foreach (var device in deviceList.Devices)
+    {
+      Assert.NotNull(device.DeviceType);
+      Assert.NotNull(device.Capabilities);
+      Assert.NotNull(device.Capabilities.Description);
+    }
+  }
+
+  [Fact]
+  public async Task GetDefaultDevice_ReturnsDeviceInfo()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/radio/devices/default");
+
+    // Assert
+    // This should succeed even if no devices are available (will return 500 with error)
+    // or return 200 with device info
+    Assert.True(
+      response.StatusCode == HttpStatusCode.OK ||
+      response.StatusCode == HttpStatusCode.InternalServerError);
+
+    if (response.StatusCode == HttpStatusCode.OK)
+    {
+      var deviceInfo = await response.Content.ReadFromJsonAsync<RadioDeviceInfoDto>();
+      Assert.NotNull(deviceInfo);
+      Assert.NotNull(deviceInfo.DeviceType);
+      Assert.NotNull(deviceInfo.Capabilities);
+    }
+  }
+
+  [Fact]
+  public async Task GetCurrentDevice_WithNoActiveRadio_ReturnsBadRequest()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/radio/devices/current");
+
+    // Assert
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    var content = await response.Content.ReadAsStringAsync();
+    Assert.Contains("No radio source is currently active", content);
+  }
+
+  [Fact]
+  public async Task SelectDevice_WithEmptyDeviceType_ReturnsBadRequest()
+  {
+    // Arrange
+    var request = new SelectRadioDeviceRequest
+    {
+      DeviceType = ""
+    };
+
+    // Act
+    var response = await _client.PostAsJsonAsync("/api/radio/devices/select", request);
+
+    // Assert
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    var content = await response.Content.ReadAsStringAsync();
+    Assert.Contains("Device type is required", content);
+  }
+
+  [Fact]
+  public async Task SelectDevice_WithInvalidDeviceType_ReturnsBadRequest()
+  {
+    // Arrange
+    var request = new SelectRadioDeviceRequest
+    {
+      DeviceType = "InvalidDevice123"
+    };
+
+    // Act
+    var response = await _client.PostAsJsonAsync("/api/radio/devices/select", request);
+
+    // Assert
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    var content = await response.Content.ReadAsStringAsync();
+    Assert.Contains("not available", content);
+  }
+
+  [Fact]
+  public async Task SelectDevice_WithValidDeviceType_ReturnsDeviceInfo()
+  {
+    // First, get list of available devices
+    var devicesResponse = await _client.GetAsync("/api/radio/devices");
+    var deviceList = await devicesResponse.Content.ReadFromJsonAsync<RadioDeviceListDto>();
+
+    // Skip test if no devices available
+    if (deviceList == null || deviceList.Devices.Count == 0)
+    {
+      return;
+    }
+
+    // Arrange - use first available device
+    var request = new SelectRadioDeviceRequest
+    {
+      DeviceType = deviceList.Devices[0].DeviceType
+    };
+
+    // Act
+    var response = await _client.PostAsJsonAsync("/api/radio/devices/select", request);
+
+    // Assert
+    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    var deviceInfo = await response.Content.ReadFromJsonAsync<RadioDeviceInfoDto>();
+    Assert.NotNull(deviceInfo);
+    Assert.Equal(request.DeviceType, deviceInfo.DeviceType);
+    Assert.NotNull(deviceInfo.Capabilities);
+  }
+
+  [Fact]
+  public async Task DeviceCapabilities_RTLSDRCore_HasExpectedFeatures()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/radio/devices");
+
+    // Assert
+    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    var deviceList = await response.Content.ReadFromJsonAsync<RadioDeviceListDto>();
+    Assert.NotNull(deviceList);
+
+    var rtlsdr = deviceList.Devices.FirstOrDefault(d => d.DeviceType == "RTLSDRCore");
+    if (rtlsdr != null)
+    {
+      // RTL-SDR should have software control capabilities
+      Assert.True(rtlsdr.Capabilities.SupportsSoftwareControl);
+      Assert.True(rtlsdr.Capabilities.SupportsFrequencyControl);
+      Assert.True(rtlsdr.Capabilities.SupportsBandSwitching);
+      Assert.True(rtlsdr.Capabilities.SupportsScanning);
+      Assert.True(rtlsdr.Capabilities.SupportsGainControl);
+      Assert.False(rtlsdr.Capabilities.SupportsEqualizer); // No hardware EQ
+      Assert.True(rtlsdr.Capabilities.SupportsDeviceVolume);
+    }
+  }
+
+  [Fact]
+  public async Task DeviceCapabilities_RF320_HasExpectedFeatures()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/radio/devices");
+
+    // Assert
+    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    var deviceList = await response.Content.ReadFromJsonAsync<RadioDeviceListDto>();
+    Assert.NotNull(deviceList);
+
+    var rf320 = deviceList.Devices.FirstOrDefault(d => d.DeviceType == "RF320");
+    if (rf320 != null)
+    {
+      // RF320 has limited software control (Bluetooth/USB audio only)
+      Assert.False(rf320.Capabilities.SupportsSoftwareControl);
+      Assert.False(rf320.Capabilities.SupportsFrequencyControl);
+      Assert.False(rf320.Capabilities.SupportsBandSwitching);
+      Assert.False(rf320.Capabilities.SupportsScanning);
+      Assert.False(rf320.Capabilities.SupportsGainControl);
+      Assert.True(rf320.Capabilities.SupportsEqualizer); // Hardware EQ
+      Assert.True(rf320.Capabilities.SupportsDeviceVolume); // Hardware volume
+    }
+  }
+
+  #endregion
 }

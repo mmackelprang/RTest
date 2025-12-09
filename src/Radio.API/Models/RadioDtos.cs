@@ -153,3 +153,102 @@ public class SetAutoGainRequest
   /// </summary>
   public bool Enabled { get; set; }
 }
+
+/// <summary>
+/// Request to select a radio device type.
+/// </summary>
+public class SelectRadioDeviceRequest
+{
+  /// <summary>
+  /// Gets or sets the device type to select (e.g., "RTLSDRCore", "RF320").
+  /// </summary>
+  public string DeviceType { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Information about a radio device type.
+/// </summary>
+public class RadioDeviceInfoDto
+{
+  /// <summary>
+  /// Gets or sets the device type identifier.
+  /// </summary>
+  public string DeviceType { get; set; } = string.Empty;
+
+  /// <summary>
+  /// Gets or sets whether the device is currently available.
+  /// </summary>
+  public bool IsAvailable { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether the device is currently active.
+  /// </summary>
+  public bool IsActive { get; set; }
+
+  /// <summary>
+  /// Gets or sets the device capabilities.
+  /// </summary>
+  public RadioDeviceCapabilitiesDto Capabilities { get; set; } = new();
+}
+
+/// <summary>
+/// List of available radio devices.
+/// </summary>
+public class RadioDeviceListDto
+{
+  /// <summary>
+  /// Gets or sets the list of radio devices.
+  /// </summary>
+  public List<RadioDeviceInfoDto> Devices { get; set; } = new();
+
+  /// <summary>
+  /// Gets or sets the total count of available devices.
+  /// </summary>
+  public int Count { get; set; }
+}
+
+/// <summary>
+/// Capabilities of a radio device type.
+/// </summary>
+public class RadioDeviceCapabilitiesDto
+{
+  /// <summary>
+  /// Gets or sets whether the device supports software control.
+  /// </summary>
+  public bool SupportsSoftwareControl { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether the device supports frequency control.
+  /// </summary>
+  public bool SupportsFrequencyControl { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether the device supports band switching.
+  /// </summary>
+  public bool SupportsBandSwitching { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether the device supports automatic scanning.
+  /// </summary>
+  public bool SupportsScanning { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether the device supports gain control.
+  /// </summary>
+  public bool SupportsGainControl { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether the device supports equalizer.
+  /// </summary>
+  public bool SupportsEqualizer { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether the device supports volume control.
+  /// </summary>
+  public bool SupportsDeviceVolume { get; set; }
+
+  /// <summary>
+  /// Gets or sets a human-readable description of the device.
+  /// </summary>
+  public string Description { get; set; } = string.Empty;
+}
