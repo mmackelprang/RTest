@@ -15,16 +15,19 @@ public class MetricsController : ControllerBase
 {
   private readonly ILogger<MetricsController> _logger;
   private readonly IMetricsReader _metricsReader;
+  private readonly IMetricsCollector? _metricsCollector;
 
   /// <summary>
   /// Initializes a new instance of the MetricsController.
   /// </summary>
   public MetricsController(
     ILogger<MetricsController> logger,
-    IMetricsReader metricsReader)
+    IMetricsReader metricsReader,
+    IMetricsCollector? metricsCollector = null)
   {
     _logger = logger;
     _metricsReader = metricsReader;
+    _metricsCollector = metricsCollector;
   }
 
   /// <summary>
@@ -173,4 +176,84 @@ public class MetricsController : ControllerBase
       return StatusCode(500, "An error occurred while listing metric keys");
     }
   }
+
+  /// <summary>
+  /// Records a UI event metric from the frontend.
+  /// This endpoint allows the frontend to track user interactions like button clicks.
+  /// </summary>
+  /// <param name="request">The event data including event name and optional metadata</param>
+  /// <returns>Success status</returns>
+  /// <response code="200">Event recorded successfully</response>
+  /// <response code="400">Invalid request data</response>
+  [HttpPost("event")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  public IActionResult RecordUIEvent([FromBody] UIEventRequest request)
+  {
+    if (string.IsNullOrWhiteSpace(request?.EventName))
+    {
+      return BadRequest(new { error = "Event name is required" });
+    }
+
+    if (request.EventName.Length > 100)
+    {
+      return BadRequest(new { error = "Event name too long (max 100 characters)" });
+    }
+
+    // Validate tags dictionary
+    if (request.Tags != null)
+    {
+      if (request.Tags.Count > 20)
+      {
+        return BadRequest(new { error = "Too many tags (max 20)" });
+      }
+
+      foreach (var kvp in request.Tags)
+      {
+        if (kvp.Key.Length > 100 || kvp.Value.Length > 200)
+        {
+          return BadRequest(new { error = "Tag key or value too long" });
+        }
+      }
+    }
+
+    try
+    {
+      // Record the event as a counter metric with robust normalization
+      var metricName = $"ui.{System.Text.RegularExpressions.Regex.Replace(request.EventName.ToLowerInvariant(), @"[^a-z0-9_]", "_")}";
+      _metricsCollector?.Increment(metricName, 1.0, request.Tags);
+
+      _logger.LogDebug("Recorded UI event: {EventName} with tags: {Tags}", 
+        request.EventName, 
+        request.Tags != null ? string.Join(", ", request.Tags.Select(kvp => $"{kvp.Key}={kvp.Value}")) : "none");
+
+      return Ok(new { success = true, metric = metricName });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to record UI event: {EventName}", request.EventName);
+      return BadRequest(new { error = "Failed to record event" });
+    }
+  }
+}
+
+/// <summary>
+/// Request model for recording UI events.
+/// </summary>
+public class UIEventRequest
+{
+  /// <summary>
+  /// The name of the UI event (e.g., "button_clicks", "play_clicked", "volume_changed").
+  /// Will be converted to metric name like "ui.button_clicks".
+  /// </summary>
+  [System.ComponentModel.DataAnnotations.Required]
+  [System.ComponentModel.DataAnnotations.StringLength(100, MinimumLength = 1)]
+  public string EventName { get; set; } = string.Empty;
+
+  /// <summary>
+  /// Optional tags/metadata for the event (e.g., button name, screen location).
+  /// Maximum 20 tags allowed.
+  /// </summary>
+  [System.ComponentModel.DataAnnotations.MaxLength(20)]
+  public IDictionary<string, string>? Tags { get; set; }
 }
