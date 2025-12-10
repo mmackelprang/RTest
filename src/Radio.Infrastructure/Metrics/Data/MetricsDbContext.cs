@@ -227,8 +227,23 @@ public sealed class MetricsDbContext : IAsyncDisposable
   {
     if (_connection != null)
     {
-      await _connection.DisposeAsync();
-      _connection = null;
+      try
+      {
+        // Close the connection first to ensure any pending transactions are handled
+        if (_connection.State == System.Data.ConnectionState.Open)
+        {
+          await _connection.CloseAsync();
+        }
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Error closing database connection during disposal");
+      }
+      finally
+      {
+        await _connection.DisposeAsync();
+        _connection = null;
+      }
     }
 
     _initLock.Dispose();
