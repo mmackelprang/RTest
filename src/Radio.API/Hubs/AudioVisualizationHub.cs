@@ -199,6 +199,7 @@ public class AudioVisualizationHub : Hub
       _logger.LogInformation("Client {ConnectionId} disconnected (total: {Count})", 
         Context.ConnectionId, _connectedClients);
     }
+    
     await base.OnDisconnectedAsync(exception);
   }
 
