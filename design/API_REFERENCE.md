@@ -2015,6 +2015,61 @@ Gets all available metric keys.
 
 ---
 
+### POST /api/metrics/event
+
+Records a UI event metric from the frontend for tracking user interactions.
+
+**Request Body:**
+
+```json
+{
+  "eventName": "play_button_clicked",
+  "tags": {
+    "screen": "now_playing",
+    "source": "spotify"
+  }
+}
+```
+
+**Fields:**
+- `eventName` (required): Name of the UI event (1-100 characters). Will be converted to metric name like `ui.play_button_clicked`
+- `tags` (optional): Dictionary of metadata tags (max 20 tags, keys max 100 chars, values max 200 chars)
+
+**Response:** 200 OK
+
+```json
+{
+  "success": true,
+  "metric": "ui.play_button_clicked"
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - Missing event name, name too long, too many tags, or tag validation error
+- `500 Internal Server Error` - Failed to record event
+
+**Example:**
+```bash
+POST /api/metrics/event
+Content-Type: application/json
+
+{
+  "eventName": "volume_changed",
+  "tags": {
+    "direction": "up",
+    "screen": "main"
+  }
+}
+```
+
+**Notes:**
+- Event names are normalized to lowercase with special characters replaced by underscores
+- Recorded as counter metrics with `ui.` prefix
+- Useful for tracking user interactions like button clicks, screen navigation, feature usage
+- Tags allow segmentation and filtering of event data
+
+---
+
 ## Play History Endpoints
 
 Base path: `/api/playhistory`
