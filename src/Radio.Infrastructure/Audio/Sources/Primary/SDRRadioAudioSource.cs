@@ -432,8 +432,8 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     // Track signal strength as gauge metric with frequency and band tags
     MetricsCollector?.Gauge("radio.signal_strength", e.Strength * 100, new Dictionary<string, string>
     {
-      ["frequency_mhz"] = (Frequency.Hz / 1_000_000.0).ToString("F2"),
-      ["band"] = Frequency.Band.ToString()
+      ["frequency_mhz"] = (CurrentFrequency.Hertz / 1_000_000.0).ToString("F2"),
+      ["band"] = CurrentBand.ToString()
     });
     
     SignalStrengthUpdated?.Invoke(this, new RadioControlSignalStrengthEventArgs(e.Strength));
@@ -475,21 +475,30 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
       "Updating SDR Radio metadata from fingerprinting: {Title} by {Artist} (confidence: {Confidence:P0})",
       track.Title, track.Artist, e.Confidence);
 
-    // Update metadata with fingerprinted track information
+    UpdateMetadataFromFingerprint(track, e.Confidence, e.IdentifiedAt);
+  }
+
+  /// <summary>
+  /// Updates metadata from fingerprinting results.
+  /// Follows the same pattern as USBAudioSourceBase for consistency.
+  /// </summary>
+  protected virtual void UpdateMetadataFromFingerprint(TrackMetadata track, double confidence, DateTime identifiedAt)
+  {
+    // Store current source/device info to restore later
+    var sourceInfo = _metadata.TryGetValue("Source", out var source) ? source : null;
+    var deviceInfo = _metadata.TryGetValue("Device", out var device) ? device : null;
+
+    // Update standard metadata fields
     _metadata[StandardMetadataKeys.Title] = track.Title;
     _metadata[StandardMetadataKeys.Artist] = track.Artist;
+    _metadata[StandardMetadataKeys.Album] = track.Album ?? StandardMetadataKeys.DefaultAlbum;
+    
+    // Use CoverArtUrl from fingerprinting if available, otherwise use default
+    _metadata[StandardMetadataKeys.AlbumArtUrl] = !string.IsNullOrEmpty(track.CoverArtUrl)
+      ? track.CoverArtUrl
+      : StandardMetadataKeys.DefaultAlbumArtUrl;
 
-    if (!string.IsNullOrEmpty(track.Album))
-    {
-      _metadata[StandardMetadataKeys.Album] = track.Album;
-    }
-
-    if (!string.IsNullOrEmpty(track.CoverArtUrl))
-    {
-      _metadata[StandardMetadataKeys.AlbumArtUrl] = track.CoverArtUrl;
-    }
-
-    // Add optional metadata
+    // Add optional metadata if available
     if (track.Genre != null)
     {
       _metadata[StandardMetadataKeys.Genre] = track.Genre;
@@ -500,11 +509,25 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
       _metadata[StandardMetadataKeys.Year] = track.ReleaseYear.Value;
     }
 
-    // Add fingerprinting metadata (use standard keys for consistency)
-    _metadata["IdentificationConfidence"] = e.Confidence;
-    _metadata["IdentifiedAt"] = e.IdentifiedAt;
+    if (track.TrackNumber.HasValue)
+    {
+      _metadata[StandardMetadataKeys.TrackNumber] = track.TrackNumber.Value;
+    }
+
+    // Restore source/device information
+    if (sourceInfo != null)
+    {
+      _metadata["Source"] = sourceInfo;
+    }
+    if (deviceInfo != null)
+    {
+      _metadata["Device"] = deviceInfo;
+    }
+
+    // Add fingerprinting metadata with standard keys for consistency
+    _metadata["IdentificationConfidence"] = confidence;
+    _metadata["IdentifiedAt"] = identifiedAt;
     _metadata["MetadataSource"] = "Fingerprinting";
-    _metadata["FingerprintProvider"] = "ACRCloud"; // Or from config
   }
 
   #endregion

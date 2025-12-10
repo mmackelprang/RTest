@@ -216,4 +216,87 @@ public class MetricsControllerTests
     var okResult = Assert.IsType<OkObjectResult>(result.Result);
     Assert.Equal(expectedValue, okResult.Value);
   }
+
+  [Fact]
+  public void RecordUIEvent_WithTooLongEventName_ReturnsBadRequest()
+  {
+    // Arrange
+    var request = new UIEventRequest
+    {
+      EventName = new string('a', 101) // 101 characters
+    };
+
+    // Act
+    var result = _controller.RecordUIEvent(request);
+
+    // Assert
+    var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
+    Assert.NotNull(badRequestResult.Value);
+  }
+
+  [Fact]
+  public void RecordUIEvent_WithTooManyTags_ReturnsBadRequest()
+  {
+    // Arrange
+    var tags = new Dictionary<string, string>();
+    for (int i = 0; i < 21; i++)
+    {
+      tags[$"tag{i}"] = $"value{i}";
+    }
+
+    var request = new UIEventRequest
+    {
+      EventName = "test_event",
+      Tags = tags
+    };
+
+    // Act
+    var result = _controller.RecordUIEvent(request);
+
+    // Assert
+    var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
+    Assert.NotNull(badRequestResult.Value);
+  }
+
+  [Fact]
+  public void RecordUIEvent_WithTooLongTagValue_ReturnsBadRequest()
+  {
+    // Arrange
+    var request = new UIEventRequest
+    {
+      EventName = "test_event",
+      Tags = new Dictionary<string, string>
+      {
+        ["test"] = new string('a', 201) // 201 characters
+      }
+    };
+
+    // Act
+    var result = _controller.RecordUIEvent(request);
+
+    // Assert
+    var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
+    Assert.NotNull(badRequestResult.Value);
+  }
+
+  [Fact]
+  public void RecordUIEvent_WithSpecialCharacters_NormalizesCorrectly()
+  {
+    // Arrange
+    var request = new UIEventRequest
+    {
+      EventName = "play-button.clicked!"
+    };
+
+    // Act
+    var result = _controller.RecordUIEvent(request);
+
+    // Assert
+    Assert.IsType<OkObjectResult>(result);
+
+    // Verify normalized metric name (special chars replaced with underscores)
+    _mockMetricsCollector.Verify(
+      x => x.Increment("ui.play_button_clicked_", 1.0, null),
+      Times.Once);
+  }
 }

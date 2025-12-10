@@ -194,15 +194,33 @@ public class MetricsController : ControllerBase
     {
       return BadRequest(new { error = "Event name is required" });
     }
+
     if (request.EventName.Length > 100)
     {
       return BadRequest(new { error = "Event name too long (max 100 characters)" });
     }
 
+    // Validate tags dictionary
+    if (request.Tags != null)
+    {
+      if (request.Tags.Count > 20)
+      {
+        return BadRequest(new { error = "Too many tags (max 20)" });
+      }
+
+      foreach (var kvp in request.Tags)
+      {
+        if (kvp.Key.Length > 100 || kvp.Value.Length > 200)
+        {
+          return BadRequest(new { error = "Tag key or value too long" });
+        }
+      }
+    }
+
     try
     {
-      // Record the event as a counter metric
-      var metricName = $"ui.{request.EventName.ToLowerInvariant().Replace(' ', '_')}";
+      // Record the event as a counter metric with robust normalization
+      var metricName = $"ui.{System.Text.RegularExpressions.Regex.Replace(request.EventName.ToLowerInvariant(), @"[^a-z0-9_]", "_")}";
       _metricsCollector?.Increment(metricName, 1.0, request.Tags);
 
       _logger.LogDebug("Recorded UI event: {EventName} with tags: {Tags}", 
@@ -228,10 +246,14 @@ public class UIEventRequest
   /// The name of the UI event (e.g., "button_clicks", "play_clicked", "volume_changed").
   /// Will be converted to metric name like "ui.button_clicks".
   /// </summary>
+  [System.ComponentModel.DataAnnotations.Required]
+  [System.ComponentModel.DataAnnotations.StringLength(100, MinimumLength = 1)]
   public string EventName { get; set; } = string.Empty;
 
   /// <summary>
   /// Optional tags/metadata for the event (e.g., button name, screen location).
+  /// Maximum 20 tags allowed.
   /// </summary>
+  [System.ComponentModel.DataAnnotations.MaxLength(20)]
   public IDictionary<string, string>? Tags { get; set; }
 }
