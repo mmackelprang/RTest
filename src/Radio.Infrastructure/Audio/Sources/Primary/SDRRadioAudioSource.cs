@@ -429,8 +429,12 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// </summary>
   private void OnRTLSDRSignalStrengthUpdated(object? sender, RTLSDRCore.SignalStrengthEventArgs e)
   {
-    // Track signal strength as gauge metric
-    MetricsCollector?.Gauge("radio.signal_strength", e.Strength * 100);
+    // Track signal strength as gauge metric with frequency and band tags
+    MetricsCollector?.Gauge("radio.signal_strength", e.Strength * 100, new Dictionary<string, string>
+    {
+      ["frequency_mhz"] = (Frequency.Hz / 1_000_000.0).ToString("F2"),
+      ["band"] = Frequency.Band.ToString()
+    });
     
     SignalStrengthUpdated?.Invoke(this, new RadioControlSignalStrengthEventArgs(e.Strength));
   }
