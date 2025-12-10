@@ -71,17 +71,9 @@ public class RadioAudioSource : USBAudioSourceBase, Radio.Core.Interfaces.Audio.
     var usbPort = _deviceOptions.CurrentValue.Radio.USBPort;
 
     // Set standard metadata with defaults for Radio source
-    SetDefaultMetadata();
+    SetDefaultMetadata("Radio", "Radio", "Raddy RF320");
 
     await InitializeUSBCaptureAsync(usbPort, cancellationToken);
-  }
-
-  /// <summary>
-  /// Sets default metadata for the Radio source when no track is identified.
-  /// </summary>
-  private void SetDefaultMetadata()
-  {
-    SetDefaultMetadata("Radio", "Radio", "Raddy RF320");
   }
 
   #region IRadioControl Implementation (Stub - RF320 Hardware Limitations)
