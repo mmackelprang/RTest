@@ -500,9 +500,10 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
       _metadata[StandardMetadataKeys.Year] = track.ReleaseYear.Value;
     }
 
-    // Add fingerprinting metadata
-    _metadata["FingerprintConfidence"] = e.Confidence;
-    _metadata["FingerprintedAt"] = e.IdentifiedAt;
+    // Add fingerprinting metadata (use standard keys for consistency)
+    _metadata["IdentificationConfidence"] = e.Confidence;
+    _metadata["IdentifiedAt"] = e.IdentifiedAt;
+    _metadata["MetadataSource"] = "Fingerprinting";
     _metadata["FingerprintProvider"] = "ACRCloud"; // Or from config
   }
 
