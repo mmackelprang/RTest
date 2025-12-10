@@ -105,13 +105,8 @@ public class SDRRadioAudioSourceFingerprintingTests
     var confidence = 0.95;
     var identifiedAt = DateTime.UtcNow;
 
-    // Use reflection to invoke the protected method
-    var method = typeof(SDRRadioAudioSource).GetMethod(
-      "UpdateMetadataFromFingerprint",
-      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
     // Act
-    method?.Invoke(source, new object[] { track, confidence, identifiedAt });
+    InvokeUpdateMetadataFromFingerprint(source, track, confidence, identifiedAt);
 
     // Assert
     Assert.Contains(StandardMetadataKeys.Title, source.Metadata.Keys);
@@ -139,13 +134,8 @@ public class SDRRadioAudioSourceFingerprintingTests
     var confidence = 0.98;
     var identifiedAt = DateTime.UtcNow;
 
-    // Use reflection to invoke the protected method
-    var method = typeof(SDRRadioAudioSource).GetMethod(
-      "UpdateMetadataFromFingerprint",
-      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
     // Act
-    method?.Invoke(source, new object[] { track, confidence, identifiedAt });
+    InvokeUpdateMetadataFromFingerprint(source, track, confidence, identifiedAt);
 
     // Assert
     Assert.Equal("Complete Song", source.Metadata[StandardMetadataKeys.Title]);
@@ -171,13 +161,8 @@ public class SDRRadioAudioSourceFingerprintingTests
     var confidence = 0.90;
     var identifiedAt = DateTime.UtcNow;
 
-    // Use reflection to invoke the protected method
-    var method = typeof(SDRRadioAudioSource).GetMethod(
-      "UpdateMetadataFromFingerprint",
-      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
     // Act
-    method?.Invoke(source, new object[] { track, confidence, identifiedAt });
+    InvokeUpdateMetadataFromFingerprint(source, track, confidence, identifiedAt);
 
     // Assert
     Assert.Equal(StandardMetadataKeys.DefaultAlbumArtUrl, source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
@@ -197,13 +182,8 @@ public class SDRRadioAudioSourceFingerprintingTests
     var confidence = 0.88;
     var identifiedAt = DateTime.UtcNow;
 
-    // Use reflection to invoke the protected method
-    var method = typeof(SDRRadioAudioSource).GetMethod(
-      "UpdateMetadataFromFingerprint",
-      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
     // Act
-    method?.Invoke(source, new object[] { track, confidence, identifiedAt });
+    InvokeUpdateMetadataFromFingerprint(source, track, confidence, identifiedAt);
 
     // Assert
     Assert.Equal(StandardMetadataKeys.DefaultAlbumArtUrl, source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
@@ -216,10 +196,7 @@ public class SDRRadioAudioSourceFingerprintingTests
     var source = CreateSource(identificationService: null);
     
     // Add Source metadata using reflection to access private field
-    var metadataField = typeof(SDRRadioAudioSource).GetField(
-      "_metadata",
-      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-    var metadata = (Dictionary<string, object>)metadataField!.GetValue(source)!;
+    var metadata = GetMetadataDictionary(source);
     metadata["Source"] = "Test Source";
 
     var track = CreateTrackMetadata(
@@ -230,13 +207,8 @@ public class SDRRadioAudioSourceFingerprintingTests
     var confidence = 0.95;
     var identifiedAt = DateTime.UtcNow;
 
-    // Use reflection to invoke the protected method
-    var method = typeof(SDRRadioAudioSource).GetMethod(
-      "UpdateMetadataFromFingerprint",
-      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
     // Act
-    method?.Invoke(source, new object[] { track, confidence, identifiedAt });
+    InvokeUpdateMetadataFromFingerprint(source, track, confidence, identifiedAt);
 
     // Assert
     Assert.Contains("Source", source.Metadata.Keys);
@@ -250,10 +222,7 @@ public class SDRRadioAudioSourceFingerprintingTests
     var source = CreateSource(identificationService: null);
     
     // Add Device metadata using reflection to access private field
-    var metadataField = typeof(SDRRadioAudioSource).GetField(
-      "_metadata",
-      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-    var metadata = (Dictionary<string, object>)metadataField!.GetValue(source)!;
+    var metadata = GetMetadataDictionary(source);
     metadata["Device"] = "Test Device";
 
     var track = CreateTrackMetadata(
@@ -264,13 +233,8 @@ public class SDRRadioAudioSourceFingerprintingTests
     var confidence = 0.95;
     var identifiedAt = DateTime.UtcNow;
 
-    // Use reflection to invoke the protected method
-    var method = typeof(SDRRadioAudioSource).GetMethod(
-      "UpdateMetadataFromFingerprint",
-      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
     // Act
-    method?.Invoke(source, new object[] { track, confidence, identifiedAt });
+    InvokeUpdateMetadataFromFingerprint(source, track, confidence, identifiedAt);
 
     // Assert
     Assert.Contains("Device", source.Metadata.Keys);
@@ -290,13 +254,8 @@ public class SDRRadioAudioSourceFingerprintingTests
     var confidence = 0.92;
     var identifiedAt = DateTime.UtcNow;
 
-    // Use reflection to invoke the protected method
-    var method = typeof(SDRRadioAudioSource).GetMethod(
-      "UpdateMetadataFromFingerprint",
-      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
     // Act
-    method?.Invoke(source, new object[] { track, confidence, identifiedAt });
+    InvokeUpdateMetadataFromFingerprint(source, track, confidence, identifiedAt);
 
     // Assert
     Assert.Contains("IdentificationConfidence", source.Metadata.Keys);
@@ -316,13 +275,8 @@ public class SDRRadioAudioSourceFingerprintingTests
     var confidence = 0.92;
     var identifiedAt = new DateTime(2024, 1, 15, 10, 30, 0, DateTimeKind.Utc);
 
-    // Use reflection to invoke the protected method
-    var method = typeof(SDRRadioAudioSource).GetMethod(
-      "UpdateMetadataFromFingerprint",
-      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
     // Act
-    method?.Invoke(source, new object[] { track, confidence, identifiedAt });
+    InvokeUpdateMetadataFromFingerprint(source, track, confidence, identifiedAt);
 
     // Assert
     Assert.Contains("IdentifiedAt", source.Metadata.Keys);
@@ -342,13 +296,8 @@ public class SDRRadioAudioSourceFingerprintingTests
     var confidence = 0.92;
     var identifiedAt = DateTime.UtcNow;
 
-    // Use reflection to invoke the protected method
-    var method = typeof(SDRRadioAudioSource).GetMethod(
-      "UpdateMetadataFromFingerprint",
-      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
     // Act
-    method?.Invoke(source, new object[] { track, confidence, identifiedAt });
+    InvokeUpdateMetadataFromFingerprint(source, track, confidence, identifiedAt);
 
     // Assert
     Assert.Contains("MetadataSource", source.Metadata.Keys);
@@ -376,10 +325,7 @@ public class SDRRadioAudioSourceFingerprintingTests
     var eventArgs = new TrackIdentifiedEventArgs(track, 0.96);
 
     // Act - Raise the TrackIdentified event using reflection
-    var onTrackIdentifiedMethod = typeof(SDRRadioAudioSource).GetMethod(
-      "OnTrackIdentified",
-      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-    onTrackIdentifiedMethod?.Invoke(source, new object[] { identificationService, eventArgs });
+    InvokeOnTrackIdentified(source, identificationService, eventArgs);
 
     // Assert - Check that metadata was updated
     Assert.Equal("Identified Song", source.Metadata[StandardMetadataKeys.Title]);
@@ -387,6 +333,37 @@ public class SDRRadioAudioSourceFingerprintingTests
     Assert.Equal("Identified Album", source.Metadata[StandardMetadataKeys.Album]);
     Assert.Contains("IdentificationConfidence", source.Metadata.Keys);
     Assert.Equal(0.96, source.Metadata["IdentificationConfidence"]);
+  }
+
+  [Fact]
+  public void OnTrackIdentified_WhenPaused_UpdatesMetadata()
+  {
+    // Arrange
+    var identificationService = CreateIdentificationService();
+    var source = CreateSource(identificationService: identificationService);
+    
+    // Manually set the state to Paused using reflection to bypass hardware requirement
+    var stateField = typeof(PrimaryAudioSourceBase).GetField(
+      "_state",
+      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+    stateField?.SetValue(source, AudioSourceState.Paused);
+
+    var track = CreateTrackMetadata(
+      title: "Paused Song",
+      artist: "Paused Artist",
+      album: "Paused Album"
+    );
+    var eventArgs = new TrackIdentifiedEventArgs(track, 0.93);
+
+    // Act - Raise the TrackIdentified event using reflection
+    InvokeOnTrackIdentified(source, identificationService, eventArgs);
+
+    // Assert - Check that metadata was updated
+    Assert.Equal("Paused Song", source.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("Paused Artist", source.Metadata[StandardMetadataKeys.Artist]);
+    Assert.Equal("Paused Album", source.Metadata[StandardMetadataKeys.Album]);
+    Assert.Contains("IdentificationConfidence", source.Metadata.Keys);
+    Assert.Equal(0.93, source.Metadata["IdentificationConfidence"]);
   }
 
   [Fact]
@@ -407,10 +384,7 @@ public class SDRRadioAudioSourceFingerprintingTests
     var eventArgs = new TrackIdentifiedEventArgs(track, 0.96);
 
     // Act - Raise the TrackIdentified event while source is in Created state
-    var onTrackIdentifiedMethod = typeof(SDRRadioAudioSource).GetMethod(
-      "OnTrackIdentified",
-      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-    onTrackIdentifiedMethod?.Invoke(source, new object[] { identificationService, eventArgs });
+    InvokeOnTrackIdentified(source, identificationService, eventArgs);
 
     // Assert - Metadata should not have been updated to the new track
     // The metadata should still have the default SDR Radio metadata
@@ -432,13 +406,8 @@ public class SDRRadioAudioSourceFingerprintingTests
     var confidence = 0.85;
     var identifiedAt = DateTime.UtcNow;
 
-    // Use reflection to invoke the protected method
-    var method = typeof(SDRRadioAudioSource).GetMethod(
-      "UpdateMetadataFromFingerprint",
-      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
     // Act
-    method?.Invoke(source, new object[] { track, confidence, identifiedAt });
+    InvokeUpdateMetadataFromFingerprint(source, track, confidence, identifiedAt);
 
     // Assert
     Assert.Equal(StandardMetadataKeys.DefaultAlbum, source.Metadata[StandardMetadataKeys.Album]);
@@ -460,32 +429,13 @@ public class SDRRadioAudioSourceFingerprintingTests
     var confidence = 0.80;
     var identifiedAt = DateTime.UtcNow;
 
-    // Use reflection to invoke the protected method
-    var method = typeof(SDRRadioAudioSource).GetMethod(
-      "UpdateMetadataFromFingerprint",
-      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
     // Act
-    method?.Invoke(source, new object[] { track, confidence, identifiedAt });
+    InvokeUpdateMetadataFromFingerprint(source, track, confidence, identifiedAt);
 
-    // Assert - Optional fields should not be added when null
-    // The metadata dictionary may contain these keys from previous operations,
-    // but the values should be either not present or have default values
-    if (source.Metadata.ContainsKey(StandardMetadataKeys.Genre))
-    {
-      // If key exists, verify it's not the null track value
-      Assert.NotEqual(track.Genre, source.Metadata[StandardMetadataKeys.Genre]);
-    }
-    if (source.Metadata.ContainsKey(StandardMetadataKeys.Year))
-    {
-      // If key exists, verify it's not the null track value
-      Assert.NotEqual(track.ReleaseYear, source.Metadata[StandardMetadataKeys.Year]);
-    }
-    if (source.Metadata.ContainsKey(StandardMetadataKeys.TrackNumber))
-    {
-      // If key exists, verify it's not the null track value
-      Assert.NotEqual(track.TrackNumber, source.Metadata[StandardMetadataKeys.TrackNumber]);
-    }
+    // Assert - Optional fields should not be present in metadata when null
+    Assert.False(source.Metadata.ContainsKey(StandardMetadataKeys.Genre));
+    Assert.False(source.Metadata.ContainsKey(StandardMetadataKeys.Year));
+    Assert.False(source.Metadata.ContainsKey(StandardMetadataKeys.TrackNumber));
   }
 
   #region Helper Methods
@@ -535,6 +485,46 @@ public class SDRRadioAudioSourceFingerprintingTests
       CreatedAt = DateTime.UtcNow,
       UpdatedAt = DateTime.UtcNow
     };
+  }
+
+  /// <summary>
+  /// Helper method to invoke the protected UpdateMetadataFromFingerprint method via reflection.
+  /// </summary>
+  private void InvokeUpdateMetadataFromFingerprint(
+    SDRRadioAudioSource source,
+    TrackMetadata track,
+    double confidence,
+    DateTime identifiedAt)
+  {
+    var method = typeof(SDRRadioAudioSource).GetMethod(
+      "UpdateMetadataFromFingerprint",
+      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+    method?.Invoke(source, new object[] { track, confidence, identifiedAt });
+  }
+
+  /// <summary>
+  /// Helper method to invoke the private OnTrackIdentified event handler via reflection.
+  /// </summary>
+  private void InvokeOnTrackIdentified(
+    SDRRadioAudioSource source,
+    BackgroundIdentificationService identificationService,
+    TrackIdentifiedEventArgs eventArgs)
+  {
+    var method = typeof(SDRRadioAudioSource).GetMethod(
+      "OnTrackIdentified",
+      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+    method?.Invoke(source, new object[] { identificationService, eventArgs });
+  }
+
+  /// <summary>
+  /// Helper method to access the private _metadata field via reflection.
+  /// </summary>
+  private Dictionary<string, object> GetMetadataDictionary(SDRRadioAudioSource source)
+  {
+    var metadataField = typeof(SDRRadioAudioSource).GetField(
+      "_metadata",
+      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+    return (Dictionary<string, object>)metadataField!.GetValue(source)!;
   }
 
   #endregion
