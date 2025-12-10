@@ -194,6 +194,10 @@ public class MetricsController : ControllerBase
     {
       return BadRequest(new { error = "Event name is required" });
     }
+    if (request.EventName.Length > 100)
+    {
+      return BadRequest(new { error = "Event name too long (max 100 characters)" });
+    }
 
     try
     {
