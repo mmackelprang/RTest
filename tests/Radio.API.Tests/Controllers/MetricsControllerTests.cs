@@ -118,7 +118,7 @@ public class MetricsControllerTests
     var result = _controller.RecordUIEvent(request);
 
     // Assert
-    var okResult = Assert.IsType<OkObjectResult>(result);
+    Assert.IsType<OkObjectResult>(result);
 
     _mockMetricsCollector.Verify(
       x => x.Increment("ui.play_clicked", 1.0, null),
