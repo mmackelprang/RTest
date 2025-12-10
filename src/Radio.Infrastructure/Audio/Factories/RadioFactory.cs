@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Sources.Primary;
@@ -22,6 +23,7 @@ public class RadioFactory : IRadioFactory
   private readonly IAudioDeviceManager _deviceManager;
   private readonly BackgroundIdentificationService? _identificationService;
   private readonly IConfiguration _configuration;
+  private readonly IMetricsCollector? _metricsCollector;
 
   /// <summary>
   /// Supported device type identifiers.
@@ -45,6 +47,7 @@ public class RadioFactory : IRadioFactory
   /// <param name="deviceManager">Audio device manager.</param>
   /// <param name="configuration">Application configuration.</param>
   /// <param name="identificationService">Optional fingerprinting service.</param>
+  /// <param name="metricsCollector">Optional metrics collector.</param>
   public RadioFactory(
     ILogger<RadioFactory> logger,
     ILoggerFactory loggerFactory,
@@ -52,7 +55,8 @@ public class RadioFactory : IRadioFactory
     IOptionsMonitor<RadioOptions> radioOptions,
     IAudioDeviceManager deviceManager,
     IConfiguration configuration,
-    BackgroundIdentificationService? identificationService = null)
+    BackgroundIdentificationService? identificationService = null,
+    IMetricsCollector? metricsCollector = null)
   {
     _logger = logger;
     _loggerFactory = loggerFactory;
@@ -61,6 +65,7 @@ public class RadioFactory : IRadioFactory
     _deviceManager = deviceManager;
     _configuration = configuration;
     _identificationService = identificationService;
+    _metricsCollector = metricsCollector;
   }
 
   /// <inheritdoc/>
@@ -153,7 +158,12 @@ public class RadioFactory : IRadioFactory
       }
 
       var logger = _loggerFactory.CreateLogger<SDRRadioAudioSource>();
-      var source = new SDRRadioAudioSource(logger, radioReceiver, _radioOptions);
+      var source = new SDRRadioAudioSource(
+        logger, 
+        radioReceiver, 
+        _radioOptions, 
+        _metricsCollector,
+        _identificationService);
 
       _logger.LogInformation("Successfully created RTL-SDR radio source");
       return source;

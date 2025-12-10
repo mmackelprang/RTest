@@ -1,8 +1,10 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
+using Radio.Infrastructure.Audio.Fingerprinting;
 using RTLSDRCore;
 using RTLSDRCore.Enums;
 
@@ -17,6 +19,7 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
 {
   private readonly RadioReceiver _radioReceiver;
   private readonly IOptionsMonitor<RadioOptions> _radioOptions;
+  private readonly BackgroundIdentificationService? _identificationService;
   private readonly Dictionary<string, object> _metadata = new();
   private Frequency _frequencyStep;
   private int _deviceVolume;
@@ -32,14 +35,19 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// <param name="logger">The logger instance.</param>
   /// <param name="radioReceiver">The RTLSDRCore radio receiver.</param>
   /// <param name="radioOptions">Radio configuration options.</param>
+  /// <param name="metricsCollector">Optional metrics collector for tracking radio operations.</param>
+  /// <param name="identificationService">Optional fingerprinting service for track identification.</param>
   public SDRRadioAudioSource(
     ILogger<SDRRadioAudioSource> logger,
     RadioReceiver radioReceiver,
-    IOptionsMonitor<RadioOptions> radioOptions)
-    : base(logger)
+    IOptionsMonitor<RadioOptions> radioOptions,
+    IMetricsCollector? metricsCollector = null,
+    BackgroundIdentificationService? identificationService = null)
+    : base(logger, metricsCollector)
   {
     _radioReceiver = radioReceiver ?? throw new ArgumentNullException(nameof(radioReceiver));
     _radioOptions = radioOptions ?? throw new ArgumentNullException(nameof(radioOptions));
+    _identificationService = identificationService;
 
     // Initialize from configuration
     var options = _radioOptions.CurrentValue;
@@ -50,6 +58,12 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     _radioReceiver.FrequencyChanged += OnRTLSDRFrequencyChanged;
     _radioReceiver.SignalStrengthUpdated += OnRTLSDRSignalStrengthUpdated;
     _radioReceiver.StateChanged += OnRTLSDRStateChanged;
+
+    // Subscribe to track identification events if service is available
+    if (_identificationService != null)
+    {
+      _identificationService.TrackIdentified += OnTrackIdentified;
+    }
 
     // Initialize metadata
     SetDefaultMetadata();
@@ -179,6 +193,12 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     _scanDirection = direction;
     _scanCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
+    // Track scan started metric
+    MetricsCollector?.Increment("radio.scan_started", 1.0, new Dictionary<string, string>
+    {
+      ["direction"] = direction.ToString().ToLowerInvariant()
+    });
+
     // Start scan in background task
     _scanTask = Task.Run(() =>
     {
@@ -213,6 +233,9 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
 
     _radioReceiver.CancelScan();
     _scanCts?.Cancel();
+
+    // Track scan stopped metric
+    MetricsCollector?.Increment("radio.scan_stopped");
 
     if (_scanTask != null)
     {
@@ -249,6 +272,12 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     {
       throw new ArgumentException($"Failed to set band to {band}", nameof(band));
     }
+
+    // Track band change metric
+    MetricsCollector?.Increment("radio.band_changes", 1.0, new Dictionary<string, string>
+    {
+      ["band"] = band.ToString().ToLowerInvariant()
+    });
   }
 
   #endregion
@@ -388,6 +417,10 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   {
     var oldFreq = new Frequency(e.OldFrequency);
     var newFreq = new Frequency(e.NewFrequency);
+    
+    // Track frequency change metric
+    MetricsCollector?.Increment("radio.frequency_changes");
+    
     FrequencyChanged?.Invoke(this, new RadioControlFrequencyChangedEventArgs(oldFreq, newFreq));
   }
 
@@ -396,6 +429,9 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// </summary>
   private void OnRTLSDRSignalStrengthUpdated(object? sender, RTLSDRCore.SignalStrengthEventArgs e)
   {
+    // Track signal strength as gauge metric
+    MetricsCollector?.Gauge("radio.signal_strength", e.Strength * 100);
+    
     SignalStrengthUpdated?.Invoke(this, new RadioControlSignalStrengthEventArgs(e.Strength));
   }
 
@@ -412,6 +448,58 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
       "State",
       e.NewState.ToString(),
       e.OldState.ToString()));
+  }
+
+  #endregion
+
+  #region Fingerprinting
+
+  /// <summary>
+  /// Handles the TrackIdentified event from the fingerprinting service.
+  /// Updates metadata with identified track information for radio streams.
+  /// </summary>
+  private void OnTrackIdentified(object? sender, Radio.Core.Events.TrackIdentifiedEventArgs e)
+  {
+    // Only update metadata if this is the active source
+    if (State != AudioSourceState.Playing && State != AudioSourceState.Paused)
+    {
+      return;
+    }
+
+    var track = e.Track;
+    Logger.LogInformation(
+      "Updating SDR Radio metadata from fingerprinting: {Title} by {Artist} (confidence: {Confidence:P0})",
+      track.Title, track.Artist, e.Confidence);
+
+    // Update metadata with fingerprinted track information
+    _metadata[StandardMetadataKeys.Title] = track.Title;
+    _metadata[StandardMetadataKeys.Artist] = track.Artist;
+
+    if (!string.IsNullOrEmpty(track.Album))
+    {
+      _metadata[StandardMetadataKeys.Album] = track.Album;
+    }
+
+    if (!string.IsNullOrEmpty(track.CoverArtUrl))
+    {
+      _metadata[StandardMetadataKeys.AlbumArtUrl] = track.CoverArtUrl;
+    }
+
+    // Add optional metadata
+    if (track.Genre != null)
+    {
+      _metadata[StandardMetadataKeys.Genre] = track.Genre;
+    }
+
+    if (track.ReleaseYear.HasValue)
+    {
+      _metadata[StandardMetadataKeys.Year] = track.ReleaseYear.Value;
+    }
+
+    // Add fingerprinting metadata
+    _metadata["FingerprintConfidence"] = e.Confidence;
+    _metadata["FingerprintedAt"] = e.IdentifiedAt;
+    _metadata["FingerprintProvider"] = "ACRCloud"; // Or from config
   }
 
   #endregion
@@ -530,10 +618,16 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// <inheritdoc/>
   protected override ValueTask DisposeAsyncCore()
   {
-    // Unsubscribe from events
+    // Unsubscribe from RTLSDRCore events
     _radioReceiver.FrequencyChanged -= OnRTLSDRFrequencyChanged;
     _radioReceiver.SignalStrengthUpdated -= OnRTLSDRSignalStrengthUpdated;
     _radioReceiver.StateChanged -= OnRTLSDRStateChanged;
+
+    // Unsubscribe from fingerprinting events
+    if (_identificationService != null)
+    {
+      _identificationService.TrackIdentified -= OnTrackIdentified;
+    }
 
     // Dispose audio provider
     _audioProvider?.Dispose();

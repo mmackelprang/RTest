@@ -15,16 +15,19 @@ public class MetricsController : ControllerBase
 {
   private readonly ILogger<MetricsController> _logger;
   private readonly IMetricsReader _metricsReader;
+  private readonly IMetricsCollector? _metricsCollector;
 
   /// <summary>
   /// Initializes a new instance of the MetricsController.
   /// </summary>
   public MetricsController(
     ILogger<MetricsController> logger,
-    IMetricsReader metricsReader)
+    IMetricsReader metricsReader,
+    IMetricsCollector? metricsCollector = null)
   {
     _logger = logger;
     _metricsReader = metricsReader;
+    _metricsCollector = metricsCollector;
   }
 
   /// <summary>
@@ -173,4 +176,58 @@ public class MetricsController : ControllerBase
       return StatusCode(500, "An error occurred while listing metric keys");
     }
   }
+
+  /// <summary>
+  /// Records a UI event metric from the frontend.
+  /// This endpoint allows the frontend to track user interactions like button clicks.
+  /// </summary>
+  /// <param name="request">The event data including event name and optional metadata</param>
+  /// <returns>Success status</returns>
+  /// <response code="200">Event recorded successfully</response>
+  /// <response code="400">Invalid request data</response>
+  [HttpPost("event")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  public IActionResult RecordUIEvent([FromBody] UIEventRequest request)
+  {
+    if (string.IsNullOrWhiteSpace(request?.EventName))
+    {
+      return BadRequest(new { error = "Event name is required" });
+    }
+
+    try
+    {
+      // Record the event as a counter metric
+      var metricName = $"ui.{request.EventName.ToLowerInvariant().Replace(' ', '_')}";
+      _metricsCollector?.Increment(metricName, 1.0, request.Tags);
+
+      _logger.LogDebug("Recorded UI event: {EventName} with tags: {Tags}", 
+        request.EventName, 
+        request.Tags != null ? string.Join(", ", request.Tags.Select(kvp => $"{kvp.Key}={kvp.Value}")) : "none");
+
+      return Ok(new { success = true, metric = metricName });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to record UI event: {EventName}", request.EventName);
+      return BadRequest(new { error = "Failed to record event" });
+    }
+  }
+}
+
+/// <summary>
+/// Request model for recording UI events.
+/// </summary>
+public class UIEventRequest
+{
+  /// <summary>
+  /// The name of the UI event (e.g., "button_clicks", "play_clicked", "volume_changed").
+  /// Will be converted to metric name like "ui.button_clicks".
+  /// </summary>
+  public string EventName { get; set; } = string.Empty;
+
+  /// <summary>
+  /// Optional tags/metadata for the event (e.g., button name, screen location).
+  /// </summary>
+  public IDictionary<string, string>? Tags { get; set; }
 }

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.SignalR;
 using Radio.API.Models;
+using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 
 namespace Radio.API.Hubs;
@@ -8,20 +9,33 @@ namespace Radio.API.Hubs;
 /// SignalR hub for real-time audio visualization data.
 /// Provides spectrum, level, and waveform data to connected clients.
 /// </summary>
+/// <remarks>
+/// Note: The connected client count is tracked using a static field, which means in multi-instance
+/// deployments each instance will maintain its own count. For accurate cross-instance metrics,
+/// consider using a distributed counter service (e.g., Redis) or a scoped service.
+/// </remarks>
 public class AudioVisualizationHub : Hub
 {
   private readonly ILogger<AudioVisualizationHub> _logger;
   private readonly IVisualizerService _visualizerService;
+  private readonly IMetricsCollector? _metricsCollector;
+  private static int _connectedClients = 0;
+  private static readonly object _lockObject = new();
 
   /// <summary>
   /// Initializes a new instance of the AudioVisualizationHub.
   /// </summary>
+  /// <param name="logger">The logger instance.</param>
+  /// <param name="visualizerService">The visualizer service.</param>
+  /// <param name="metricsCollector">Optional metrics collector.</param>
   public AudioVisualizationHub(
     ILogger<AudioVisualizationHub> logger,
-    IVisualizerService visualizerService)
+    IVisualizerService visualizerService,
+    IMetricsCollector? metricsCollector = null)
   {
     _logger = logger;
     _visualizerService = visualizerService;
+    _metricsCollector = metricsCollector;
   }
 
   /// <summary>
@@ -153,7 +167,14 @@ public class AudioVisualizationHub : Hub
   /// </summary>
   public override async Task OnConnectedAsync()
   {
-    _logger.LogInformation("Client {ConnectionId} connected to AudioVisualizationHub", Context.ConnectionId);
+    lock (_lockObject)
+    {
+      _connectedClients++;
+      _metricsCollector?.Gauge("websocket.connected_clients", _connectedClients);
+    }
+
+    _logger.LogInformation("Client {ConnectionId} connected to AudioVisualizationHub (total: {Count})", 
+      Context.ConnectionId, _connectedClients);
     await base.OnConnectedAsync();
   }
 
@@ -162,13 +183,21 @@ public class AudioVisualizationHub : Hub
   /// </summary>
   public override async Task OnDisconnectedAsync(Exception? exception)
   {
+    lock (_lockObject)
+    {
+      _connectedClients--;
+      _metricsCollector?.Gauge("websocket.connected_clients", _connectedClients);
+    }
+
     if (exception != null)
     {
-      _logger.LogWarning(exception, "Client {ConnectionId} disconnected with error", Context.ConnectionId);
+      _logger.LogWarning(exception, "Client {ConnectionId} disconnected with error (total: {Count})", 
+        Context.ConnectionId, _connectedClients);
     }
     else
     {
-      _logger.LogInformation("Client {ConnectionId} disconnected", Context.ConnectionId);
+      _logger.LogInformation("Client {ConnectionId} disconnected (total: {Count})", 
+        Context.ConnectionId, _connectedClients);
     }
     await base.OnDisconnectedAsync(exception);
   }
