@@ -128,7 +128,8 @@ public sealed class ConfigurationStoreFactory : IConfigurationStoreFactory
   private SqliteConfigurationStore CreateSqliteStore(string storeId)
   {
     var dbPath = _pathResolver.GetConfigurationDatabasePath();
-    var connectionString = $"Data Source={dbPath}";
+    // Use Cache=Shared to allow proper WAL mode coordination between connections
+    var connectionString = $"Data Source={dbPath};Cache=Shared";
 
     return new SqliteConfigurationStore(
       storeId,
@@ -168,7 +169,7 @@ public sealed class ConfigurationStoreFactory : IConfigurationStoreFactory
       return storeIds;
     }
 
-    var connectionString = $"Data Source={dbPath}";
+    var connectionString = $"Data Source={dbPath};Cache=Shared";
     using var connection = new Microsoft.Data.Sqlite.SqliteConnection(connectionString);
     connection.Open();
 

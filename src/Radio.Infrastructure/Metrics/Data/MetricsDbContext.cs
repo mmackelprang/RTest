@@ -55,10 +55,33 @@ public sealed class MetricsDbContext : IAsyncDisposable
         Directory.CreateDirectory(directory);
       }
 
-      // Create connection
-      var connectionString = $"Data Source={dbPath}";
+      // Create connection with WAL mode and busy timeout for better concurrency
+      var connectionString = $"Data Source={dbPath};Cache=Shared";
       _connection = new SqliteConnection(connectionString);
       await _connection.OpenAsync(ct);
+
+      // Enable WAL mode for better concurrency (allows concurrent reads/writes)
+      await using (var cmd = _connection.CreateCommand())
+      {
+        cmd.CommandText = "PRAGMA journal_mode=WAL;";
+        var result = await cmd.ExecuteScalarAsync(ct);
+        if (string.Equals(result?.ToString(), "wal", StringComparison.OrdinalIgnoreCase))
+        {
+          _logger.LogDebug("WAL mode enabled for metrics database");
+        }
+        else
+        {
+          _logger.LogWarning("Failed to enable WAL mode, journal_mode is: {Mode}", result);
+        }
+      }
+
+      // Set busy timeout to 5 seconds to reduce lock contention
+      await using (var cmd = _connection.CreateCommand())
+      {
+        cmd.CommandText = "PRAGMA busy_timeout=5000;";
+        await cmd.ExecuteNonQueryAsync(ct);
+        _logger.LogDebug("Set busy timeout to 5000ms for metrics database");
+      }
 
       // Create schema
       await CreateSchemaAsync(ct);

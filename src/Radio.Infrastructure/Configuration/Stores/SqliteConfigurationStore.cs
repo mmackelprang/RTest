@@ -264,6 +264,29 @@ public sealed class SqliteConfigurationStore : ConfigurationStoreBase, IAsyncDis
     _connection = new SqliteConnection(_connectionString);
     await _connection.OpenAsync(ct);
 
+    // Enable WAL mode for better concurrency (allows concurrent reads/writes)
+    await using (var walCmd = _connection.CreateCommand())
+    {
+      walCmd.CommandText = "PRAGMA journal_mode=WAL;";
+      var result = await walCmd.ExecuteScalarAsync(ct);
+      if (string.Equals(result?.ToString(), "wal", StringComparison.OrdinalIgnoreCase))
+      {
+        Logger.LogDebug("WAL mode enabled for configuration store {StoreId}", StoreId);
+      }
+      else
+      {
+        Logger.LogWarning("Failed to enable WAL mode for configuration store {StoreId}, journal_mode is: {Mode}", StoreId, result);
+      }
+    }
+
+    // Set busy timeout to 5 seconds to reduce lock contention
+    await using (var timeoutCmd = _connection.CreateCommand())
+    {
+      timeoutCmd.CommandText = "PRAGMA busy_timeout=5000;";
+      await timeoutCmd.ExecuteNonQueryAsync(ct);
+      Logger.LogDebug("Set busy timeout to 5000ms for configuration store {StoreId}", StoreId);
+    }
+
     var createTableSql = $@"
       CREATE TABLE IF NOT EXISTS {_tableName} (
         Key TEXT PRIMARY KEY,
@@ -297,7 +320,21 @@ public sealed class SqliteConfigurationStore : ConfigurationStoreBase, IAsyncDis
 
     if (_connection != null)
     {
-      await _connection.DisposeAsync();
+      try
+      {
+        // Close the connection first to ensure any pending operations are handled
+        if (_connection.State == System.Data.ConnectionState.Open)
+        {
+          await _connection.CloseAsync();
+        }
+        await _connection.DisposeAsync();
+      }
+      catch (Exception ex)
+      {
+        Logger.LogWarning(ex, "Error disposing configuration database connection");
+      }
+      
+      _connection = null;
     }
 
     _lock.Dispose();
