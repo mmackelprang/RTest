@@ -21,18 +21,11 @@ public sealed class DatabasePathResolver
 
   /// <summary>
   /// Gets the resolved configuration database path.
+  /// Metrics are also stored in this database.
   /// </summary>
   public string GetConfigurationDatabasePath()
   {
     return Path.GetFullPath(_databaseOptions.GetConfigurationDatabasePath());
-  }
-
-  /// <summary>
-  /// Gets the resolved metrics database path.
-  /// </summary>
-  public string GetMetricsDatabasePath()
-  {
-    return Path.GetFullPath(_databaseOptions.GetMetricsDatabasePath());
   }
 
   /// <summary>
@@ -59,7 +52,6 @@ public sealed class DatabasePathResolver
     return new[]
     {
       GetConfigurationDatabasePath(),
-      GetMetricsDatabasePath(),
       GetFingerprintingDatabasePath()
     };
   }

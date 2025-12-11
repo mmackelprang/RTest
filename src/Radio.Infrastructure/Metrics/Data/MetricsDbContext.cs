@@ -47,7 +47,8 @@ public sealed class MetricsDbContext : IAsyncDisposable
       }
 
       // Ensure the directory exists
-      var dbPath = _pathResolver.GetMetricsDatabasePath();
+      // Metrics are now stored in the configuration database
+      var dbPath = _pathResolver.GetConfigurationDatabasePath();
       var directory = Path.GetDirectoryName(dbPath);
       if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
       {

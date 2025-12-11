@@ -20,8 +20,8 @@ public class SqliteMetricsRepositoryTests : IAsyncLifetime
     var databaseOptions = Options.Create(new DatabaseOptions
     {
       RootPath = Path.GetDirectoryName(_testDbPath)!,
-      MetricsSubdirectory = "",
-      MetricsFileName = Path.GetFileName(_testDbPath)
+      ConfigurationSubdirectory = "",
+      ConfigurationFileName = Path.GetFileName(_testDbPath)
     });
     var pathResolver = new DatabasePathResolver(databaseOptions);
 

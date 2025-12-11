@@ -33,8 +33,6 @@ public class UnifiedDatabaseBackupTests : IDisposable
       RootPath = _testDirectory,
       ConfigurationSubdirectory = "config",
       ConfigurationFileName = "configuration.db",
-      MetricsSubdirectory = "metrics",
-      MetricsFileName = "metrics.db",
       FingerprintingSubdirectory = "fingerprints",
       FingerprintingFileName = "fingerprints.db",
       BackupSubdirectory = "backups"
@@ -73,7 +71,6 @@ public class UnifiedDatabaseBackupTests : IDisposable
   {
     // Arrange - Create some dummy database files
     CreateDummyDatabase(_pathResolver.GetConfigurationDatabasePath());
-    CreateDummyDatabase(_pathResolver.GetMetricsDatabasePath());
     CreateDummyDatabase(_pathResolver.GetFingerprintingDatabasePath());
 
     // Act
@@ -85,9 +82,9 @@ public class UnifiedDatabaseBackupTests : IDisposable
     Assert.Equal("Test unified backup", backup.Description);
     Assert.True(File.Exists(backup.FilePath));
     Assert.True(backup.SizeBytes > 0);
-    Assert.Equal(3, backup.IncludedDatabases.Count);
+    // Metrics are stored in the configuration database, so we only have 2 separate database files
+    Assert.Equal(2, backup.IncludedDatabases.Count);
     Assert.Contains("configuration.db", backup.IncludedDatabases);
-    Assert.Contains("metrics.db", backup.IncludedDatabases);
     Assert.Contains("fingerprints.db", backup.IncludedDatabases);
   }
 
@@ -141,22 +138,18 @@ public class UnifiedDatabaseBackupTests : IDisposable
   {
     // Arrange - Create databases and backup
     var configPath = _pathResolver.GetConfigurationDatabasePath();
-    var metricsPath = _pathResolver.GetMetricsDatabasePath();
     CreateDummyDatabase(configPath);
-    CreateDummyDatabase(metricsPath);
 
     var backup = await _backupService.CreateFullBackupAsync();
 
-    // Delete the databases
+    // Delete the database
     File.Delete(configPath);
-    File.Delete(metricsPath);
 
     // Act
     await _backupService.RestoreBackupAsync(backup.BackupId, overwrite: true);
 
     // Assert
     Assert.True(File.Exists(configPath));
-    Assert.True(File.Exists(metricsPath));
   }
 
   [Fact]
@@ -259,8 +252,6 @@ public class UnifiedDatabaseBackupTests : IDisposable
       RootPath = _databaseOptions.RootPath,
       ConfigurationSubdirectory = _databaseOptions.ConfigurationSubdirectory,
       ConfigurationFileName = _databaseOptions.ConfigurationFileName,
-      MetricsSubdirectory = _databaseOptions.MetricsSubdirectory,
-      MetricsFileName = _databaseOptions.MetricsFileName,
       FingerprintingSubdirectory = _databaseOptions.FingerprintingSubdirectory,
       FingerprintingFileName = _databaseOptions.FingerprintingFileName,
       BackupSubdirectory = _databaseOptions.BackupSubdirectory,
