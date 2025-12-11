@@ -138,7 +138,7 @@ All backend APIs must be implemented and tested before starting UI development. 
 
 ## API Capabilities Matrix
 
-This comprehensive matrix maps **ALL 88 REST API endpoints and 6 SignalR events** to UI components, ensuring complete API coverage.
+This comprehensive matrix maps **ALL 86 REST API endpoints and 6 SignalR events** to UI components, ensuring complete API coverage.
 
 | Category | Endpoint | Phase | UI Component | Notes |
 |----------|----------|-------|--------------|-------|
