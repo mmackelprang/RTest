@@ -31,18 +31,6 @@ public sealed class DatabaseOptions
   public string ConfigurationFileName { get; set; } = "configuration.db";
 
   /// <summary>
-  /// Subdirectory within RootPath for metrics database.
-  /// Default: metrics (results in ./data/metrics/metrics.db)
-  /// </summary>
-  public string MetricsSubdirectory { get; set; } = "metrics";
-
-  /// <summary>
-  /// Filename for the metrics database.
-  /// Default: metrics.db
-  /// </summary>
-  public string MetricsFileName { get; set; } = "metrics.db";
-
-  /// <summary>
   /// Subdirectory within RootPath for fingerprinting database.
   /// Default: fingerprints (results in ./data/fingerprints/fingerprints.db)
   /// </summary>
@@ -68,18 +56,11 @@ public sealed class DatabaseOptions
 
   /// <summary>
   /// Gets the full path to the configuration database.
+  /// Metrics are also stored in this database.
   /// </summary>
   public string GetConfigurationDatabasePath()
   {
     return Path.Combine(RootPath, ConfigurationSubdirectory, ConfigurationFileName);
-  }
-
-  /// <summary>
-  /// Gets the full path to the metrics database.
-  /// </summary>
-  public string GetMetricsDatabasePath()
-  {
-    return Path.Combine(RootPath, MetricsSubdirectory, MetricsFileName);
   }
 
   /// <summary>
@@ -106,7 +87,6 @@ public sealed class DatabaseOptions
     return new[]
     {
       GetConfigurationDatabasePath(),
-      GetMetricsDatabasePath(),
       GetFingerprintingDatabasePath()
     };
   }

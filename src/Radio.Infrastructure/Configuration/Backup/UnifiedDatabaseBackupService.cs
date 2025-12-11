@@ -9,7 +9,8 @@ using Radio.Infrastructure.Configuration.Abstractions;
 
 /// <summary>
 /// Provides unified backup and restore capabilities for all SQLite databases.
-/// Creates single archive files containing configuration, metrics, and fingerprinting databases.
+/// Creates single archive files containing configuration and fingerprinting databases.
+/// Metrics are stored in the configuration database.
 /// </summary>
 public sealed class UnifiedDatabaseBackupService : IUnifiedDatabaseBackupService
 {
@@ -18,7 +19,6 @@ public sealed class UnifiedDatabaseBackupService : IUnifiedDatabaseBackupService
   private const string DatabasesFolder = "databases";
   private const string ReadmeFileName = "README.txt";
   private const string ConfigDatabaseName = "configuration.db";
-  private const string MetricsDatabaseName = "metrics.db";
   private const string FingerprintingDatabaseName = "fingerprints.db";
 
   private readonly DatabaseOptions _databaseOptions;
@@ -392,13 +392,11 @@ public sealed class UnifiedDatabaseBackupService : IUnifiedDatabaseBackupService
   private List<(string dbPath, string dbName)> GetAllDatabasePaths()
   {
     var configPath = _pathResolver.GetConfigurationDatabasePath();
-    var metricsPath = _pathResolver.GetMetricsDatabasePath();
     var fingerprintingPath = _pathResolver.GetFingerprintingDatabasePath();
 
     return new List<(string, string)>
     {
       (configPath, ConfigDatabaseName),
-      (metricsPath, MetricsDatabaseName),
       (fingerprintingPath, FingerprintingDatabaseName)
     };
   }

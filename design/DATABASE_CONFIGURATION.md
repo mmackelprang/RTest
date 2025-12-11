@@ -2,9 +2,8 @@
 
 ## Overview
 
-The Radio Console application uses multiple SQLite databases for different subsystems:
-- **Configuration Database**: Stores application configuration and encrypted secrets
-- **Metrics Database**: Stores performance metrics and monitoring data
+The Radio Console application uses two SQLite databases for different subsystems:
+- **Configuration Database**: Stores application configuration, encrypted secrets, and metrics data
 - **Fingerprinting Database**: Stores audio fingerprints, track metadata, and play history
 
 This document describes the unified database configuration system that provides:
@@ -27,8 +26,6 @@ All databases are now configurable through a single `Database` section in `appse
     "RootPath": "./data",
     "ConfigurationSubdirectory": "config",
     "ConfigurationFileName": "configuration.db",
-    "MetricsSubdirectory": "metrics",
-    "MetricsFileName": "metrics.db",
     "FingerprintingSubdirectory": "fingerprints",
     "FingerprintingFileName": "fingerprints.db",
     "BackupSubdirectory": "backups",
@@ -38,8 +35,7 @@ All databases are now configurable through a single `Database` section in `appse
 ```
 
 With these settings, the databases will be located at:
-- Configuration: `./data/config/configuration.db`
-- Metrics: `./data/metrics/metrics.db`
+- Configuration (includes metrics): `./data/config/configuration.db`
 - Fingerprinting: `./data/fingerprints/fingerprints.db`
 - Backups: `./data/backups/`
 
@@ -54,16 +50,13 @@ For backward compatibility, the old configuration format is still supported:
     "SqliteFileName": "configuration.db",
     "BackupPath": "./config/backups"
   },
-  "Metrics": {
-    "DatabasePath": "./data/metrics.db"
-  },
   "Fingerprinting": {
     "DatabasePath": "./data/fingerprints.db"
   }
 }
 ```
 
-**Note**: If you specify non-default values in the legacy configuration, those will take precedence over the new unified configuration. This ensures existing deployments continue to work without changes.
+**Note**: Metrics data is now stored in the configuration database alongside configuration entries and encrypted secrets. If you specify non-default values in the legacy configuration, those will take precedence over the new unified configuration. This ensures existing deployments continue to work without changes.
 
 ---
 
@@ -104,8 +97,7 @@ public class MyService
 Backups are stored as compressed ZIP archives with the `.dbbackup` extension. Each backup contains:
 
 1. **databases/** folder - Contains all SQLite database files
-   - `configuration.db`
-   - `metrics.db`
+   - `configuration.db` (includes metrics data)
    - `fingerprints.db`
 
 2. **manifest.json** - Backup metadata
@@ -115,7 +107,7 @@ Backups are stored as compressed ZIP archives with the `.dbbackup` extension. Ea
      "backupId": "unified_20231204_143022_a1b2c3",
      "createdAt": "2023-12-04T14:30:22Z",
      "description": "Daily backup",
-     "includedDatabases": ["configuration.db", "metrics.db", "fingerprints.db"],
+     "includedDatabases": ["configuration.db", "fingerprints.db"],
      "includesSecrets": true
    }
    ```
@@ -226,9 +218,7 @@ Recommended production directory structure:
 /var/radioconsole/
 ├── data/
 │   ├── config/
-│   │   └── configuration.db
-│   ├── metrics/
-│   │   └── metrics.db
+│   │   └── configuration.db (includes metrics)
 │   ├── fingerprints/
 │   │   └── fingerprints.db
 │   └── backups/
@@ -319,21 +309,23 @@ To migrate to the new unified database configuration:
    ```bash
    # Create new directory structure
    mkdir -p ./data/config
-   mkdir -p ./data/metrics
    mkdir -p ./data/fingerprints
    mkdir -p ./data/backups
 
    # Move existing databases
    mv ./config/configuration.db ./data/config/
-   mv ./data/metrics.db ./data/metrics/
    mv ./data/fingerprints.db ./data/fingerprints/
+
+   # Note: Metrics data is now stored in the configuration database
+   # If you have a separate metrics.db, you will need to migrate the data
+   # or it will be recreated with a fresh metrics database in configuration.db
 
    # Move existing backups
    mv ./config/backups/* ./data/backups/
    ```
 
 3. **Remove Legacy Configuration**:
-   - You can remove the old `ManagedConfiguration.BasePath`, `Metrics.DatabasePath`, and `Fingerprinting.DatabasePath` settings
+   - You can remove the old `ManagedConfiguration.BasePath` and `Fingerprinting.DatabasePath` settings
    - Or keep them for rollback capability
 
 4. **Test the Application**:
@@ -398,19 +390,16 @@ Configuration class for database path management.
 - `RootPath` (string): Root directory for all databases (default: "./data")
 - `ConfigurationSubdirectory` (string): Subdirectory for configuration database (default: "config")
 - `ConfigurationFileName` (string): Configuration database filename (default: "configuration.db")
-- `MetricsSubdirectory` (string): Subdirectory for metrics database (default: "metrics")
-- `MetricsFileName` (string): Metrics database filename (default: "metrics.db")
 - `FingerprintingSubdirectory` (string): Subdirectory for fingerprinting database (default: "fingerprints")
 - `FingerprintingFileName` (string): Fingerprinting database filename (default: "fingerprints.db")
 - `BackupSubdirectory` (string): Subdirectory for backups (default: "backups")
 - `BackupRetentionDays` (int): Number of days to retain backups (default: 30)
 
 **Methods**:
-- `GetConfigurationDatabasePath()`: Returns full path to configuration database
-- `GetMetricsDatabasePath()`: Returns full path to metrics database
+- `GetConfigurationDatabasePath()`: Returns full path to configuration database (metrics are stored here)
 - `GetFingerprintingDatabasePath()`: Returns full path to fingerprinting database
 - `GetBackupPath()`: Returns full path to backup directory
-- `GetAllDatabasePaths()`: Returns array of all database paths
+- `GetAllDatabasePaths()`: Returns array of all database paths (2 databases: configuration and fingerprinting)
 
 ### IUnifiedDatabaseBackupService
 

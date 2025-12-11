@@ -26,24 +26,6 @@ public class DatabaseOptionsTests
   }
 
   [Fact]
-  public void GetMetricsDatabasePath_ReturnsCorrectPath()
-  {
-    // Arrange
-    var options = new DatabaseOptions
-    {
-      RootPath = "./data",
-      MetricsSubdirectory = "metrics",
-      MetricsFileName = "metrics.db"
-    };
-
-    // Act
-    var path = options.GetMetricsDatabasePath();
-
-    // Assert
-    Assert.Equal(Path.Combine("./data", "metrics", "metrics.db"), path);
-  }
-
-  [Fact]
   public void GetFingerprintingDatabasePath_ReturnsCorrectPath()
   {
     // Arrange
@@ -79,7 +61,7 @@ public class DatabaseOptionsTests
   }
 
   [Fact]
-  public void GetAllDatabasePaths_ReturnsAllThreePaths()
+  public void GetAllDatabasePaths_ReturnsTwoPaths()
   {
     // Arrange
     var options = new DatabaseOptions
@@ -91,9 +73,9 @@ public class DatabaseOptionsTests
     var paths = options.GetAllDatabasePaths();
 
     // Assert
-    Assert.Equal(3, paths.Count);
+    // Metrics are stored in the configuration database, so we only have 2 separate database files
+    Assert.Equal(2, paths.Count);
     Assert.Contains(paths, p => p.Contains("configuration.db"));
-    Assert.Contains(paths, p => p.Contains("metrics.db"));
     Assert.Contains(paths, p => p.Contains("fingerprints.db"));
   }
 
@@ -107,8 +89,6 @@ public class DatabaseOptionsTests
     Assert.Equal("./data", options.RootPath);
     Assert.Equal("config", options.ConfigurationSubdirectory);
     Assert.Equal("configuration.db", options.ConfigurationFileName);
-    Assert.Equal("metrics", options.MetricsSubdirectory);
-    Assert.Equal("metrics.db", options.MetricsFileName);
     Assert.Equal("fingerprints", options.FingerprintingSubdirectory);
     Assert.Equal("fingerprints.db", options.FingerprintingFileName);
     Assert.Equal("backups", options.BackupSubdirectory);

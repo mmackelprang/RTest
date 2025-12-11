@@ -59,11 +59,12 @@ Configuration options are static settings that define application behavior. They
 **Source File:** `src/Radio.Core/Configuration/MetricsOptions.cs`  
 **Description:** Configuration options for the metrics collection system.
 
+**Note:** Metrics data is now stored in the configuration database (`configuration.db`) rather than a separate metrics database. This consolidates storage and reduces the number of database files.
+
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `Enabled` | `bool` | `true` | Enable or disable metrics collection |
 | `FlushIntervalSeconds` | `int` | `60` | Interval in seconds for flushing buffered metrics to disk |
-| `DatabasePath` | `string` | `./data/metrics.db` | SQLite database path for metrics storage |
 | `RetentionMinuteData` | `int` | `120` | Minutes to retain minute-resolution data (2 hours default) |
 | `RetentionHourData` | `int` | `48` | Hours to retain hour-resolution data (48 hours default) |
 | `RetentionDayData` | `int` | `365` | Days to retain day-resolution data (1 year default) |

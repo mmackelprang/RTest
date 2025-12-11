@@ -46,8 +46,7 @@ public class DatabasePathResolutionTest : IPhaseTest
     {
       var pathResolver = _serviceProvider.GetRequiredService<DatabasePathResolver>();
       var table = new Table().AddColumn("Database").AddColumn("Path");
-      table.AddRow("Configuration", pathResolver.GetConfigurationDatabasePath());
-      table.AddRow("Metrics", pathResolver.GetMetricsDatabasePath());
+      table.AddRow("Configuration (includes metrics)", pathResolver.GetConfigurationDatabasePath());
       table.AddRow("Fingerprinting", pathResolver.GetFingerprintingDatabasePath());
       table.AddRow("Backup Directory", pathResolver.GetBackupPath());
       AnsiConsole.Write(table);

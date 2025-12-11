@@ -30,27 +30,6 @@ public class DatabasePathResolverTests
   }
 
   [Fact]
-  public void GetMetricsDatabasePath_ReturnsConfiguredPath()
-  {
-    // Arrange
-    var databaseOptions = new DatabaseOptions
-    {
-      RootPath = "./newdata",
-      MetricsSubdirectory = "met",
-      MetricsFileName = "metrics.db"
-    };
-    var resolver = new DatabasePathResolver(Options.Create(databaseOptions));
-
-    // Act
-    var path = resolver.GetMetricsDatabasePath();
-
-    // Assert
-    Assert.Contains("newdata", path);
-    Assert.Contains("met", path);
-    Assert.Contains("metrics.db", path);
-  }
-
-  [Fact]
   public void GetFingerprintingDatabasePath_ReturnsConfiguredPath()
   {
     // Arrange
@@ -91,7 +70,7 @@ public class DatabasePathResolverTests
   }
 
   [Fact]
-  public void GetAllDatabasePaths_ReturnsThreePaths()
+  public void GetAllDatabasePaths_ReturnsTwoPaths()
   {
     // Arrange
     var databaseOptions = new DatabaseOptions();
@@ -101,7 +80,8 @@ public class DatabasePathResolverTests
     var paths = resolver.GetAllDatabasePaths();
 
     // Assert
-    Assert.Equal(3, paths.Count);
+    // Metrics are stored in the configuration database, so we only have 2 separate database files
+    Assert.Equal(2, paths.Count);
     Assert.All(paths, p => Assert.False(string.IsNullOrWhiteSpace(p)));
   }
 
@@ -119,8 +99,8 @@ public class DatabasePathResolverTests
     var paths = resolver.GetAllDatabasePaths();
 
     // Assert
+    // Metrics are stored in the configuration database
     Assert.Contains(paths, p => p.Contains("configuration.db"));
-    Assert.Contains(paths, p => p.Contains("metrics.db"));
     Assert.Contains(paths, p => p.Contains("fingerprints.db"));
   }
 }
