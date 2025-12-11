@@ -239,7 +239,6 @@ This comprehensive matrix maps **ALL 86 REST API endpoints and 6 SignalR events*
 | **System** | | | | **2 endpoints** |
 | | `GET /api/system/stats` | 8 | System Dashboard | System stats |
 | | `GET /api/system/logs` | 8 | Log Viewer | View logs |
-| **SignalR** | | | | **6 events** |
 | | PlaybackStateChanged | 3 | State Updates | Real-time state |
 | | NowPlayingChanged | 3 | Track Display | Real-time track |
 | | QueueChanged | 4 | Queue Updates | Real-time queue |
