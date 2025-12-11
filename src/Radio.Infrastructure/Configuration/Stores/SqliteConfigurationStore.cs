@@ -269,7 +269,7 @@ public sealed class SqliteConfigurationStore : ConfigurationStoreBase, IAsyncDis
     {
       walCmd.CommandText = "PRAGMA journal_mode=WAL;";
       var result = await walCmd.ExecuteScalarAsync(ct);
-      if (result?.ToString()?.Equals("wal", StringComparison.OrdinalIgnoreCase) == true)
+      if (string.Equals(result?.ToString(), "wal", StringComparison.OrdinalIgnoreCase))
       {
         Logger.LogDebug("WAL mode enabled for configuration store {StoreId}", StoreId);
       }
@@ -327,16 +327,14 @@ public sealed class SqliteConfigurationStore : ConfigurationStoreBase, IAsyncDis
         {
           await _connection.CloseAsync();
         }
+        await _connection.DisposeAsync();
       }
       catch (Exception ex)
       {
-        Logger.LogWarning(ex, "Error closing configuration database connection during disposal");
+        Logger.LogWarning(ex, "Error disposing configuration database connection");
       }
-      finally
-      {
-        await _connection.DisposeAsync();
-        _connection = null;
-      }
+      
+      _connection = null;
     }
 
     _lock.Dispose();

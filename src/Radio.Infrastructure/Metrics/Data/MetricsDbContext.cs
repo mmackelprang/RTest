@@ -65,7 +65,7 @@ public sealed class MetricsDbContext : IAsyncDisposable
       {
         cmd.CommandText = "PRAGMA journal_mode=WAL;";
         var result = await cmd.ExecuteScalarAsync(ct);
-        if (result?.ToString()?.Equals("wal", StringComparison.OrdinalIgnoreCase) == true)
+        if (string.Equals(result?.ToString(), "wal", StringComparison.OrdinalIgnoreCase))
         {
           _logger.LogDebug("WAL mode enabled for metrics database");
         }
