@@ -268,7 +268,15 @@ public sealed class SqliteConfigurationStore : ConfigurationStoreBase, IAsyncDis
     await using (var walCmd = _connection.CreateCommand())
     {
       walCmd.CommandText = "PRAGMA journal_mode=WAL;";
-      await walCmd.ExecuteNonQueryAsync(ct);
+      var result = await walCmd.ExecuteScalarAsync(ct);
+      if (result?.ToString()?.Equals("wal", StringComparison.OrdinalIgnoreCase) == true)
+      {
+        Logger.LogDebug("WAL mode enabled for configuration store {StoreId}", StoreId);
+      }
+      else
+      {
+        Logger.LogWarning("Failed to enable WAL mode for configuration store {StoreId}, journal_mode is: {Mode}", StoreId, result);
+      }
     }
 
     // Set busy timeout to 5 seconds to reduce lock contention
@@ -276,6 +284,7 @@ public sealed class SqliteConfigurationStore : ConfigurationStoreBase, IAsyncDis
     {
       timeoutCmd.CommandText = "PRAGMA busy_timeout=5000;";
       await timeoutCmd.ExecuteNonQueryAsync(ct);
+      Logger.LogDebug("Set busy timeout to 5000ms for configuration store {StoreId}", StoreId);
     }
 
     var createTableSql = $@"

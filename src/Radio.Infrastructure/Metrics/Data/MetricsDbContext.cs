@@ -64,7 +64,15 @@ public sealed class MetricsDbContext : IAsyncDisposable
       await using (var cmd = _connection.CreateCommand())
       {
         cmd.CommandText = "PRAGMA journal_mode=WAL;";
-        await cmd.ExecuteNonQueryAsync(ct);
+        var result = await cmd.ExecuteScalarAsync(ct);
+        if (result?.ToString()?.Equals("wal", StringComparison.OrdinalIgnoreCase) == true)
+        {
+          _logger.LogDebug("WAL mode enabled for metrics database");
+        }
+        else
+        {
+          _logger.LogWarning("Failed to enable WAL mode, journal_mode is: {Mode}", result);
+        }
       }
 
       // Set busy timeout to 5 seconds to reduce lock contention
@@ -72,6 +80,7 @@ public sealed class MetricsDbContext : IAsyncDisposable
       {
         cmd.CommandText = "PRAGMA busy_timeout=5000;";
         await cmd.ExecuteNonQueryAsync(ct);
+        _logger.LogDebug("Set busy timeout to 5000ms for metrics database");
       }
 
       // Create schema
