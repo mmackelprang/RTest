@@ -264,6 +264,20 @@ public sealed class SqliteConfigurationStore : ConfigurationStoreBase, IAsyncDis
     _connection = new SqliteConnection(_connectionString);
     await _connection.OpenAsync(ct);
 
+    // Enable WAL mode for better concurrency (allows concurrent reads/writes)
+    await using (var walCmd = _connection.CreateCommand())
+    {
+      walCmd.CommandText = "PRAGMA journal_mode=WAL;";
+      await walCmd.ExecuteNonQueryAsync(ct);
+    }
+
+    // Set busy timeout to 5 seconds to reduce lock contention
+    await using (var timeoutCmd = _connection.CreateCommand())
+    {
+      timeoutCmd.CommandText = "PRAGMA busy_timeout=5000;";
+      await timeoutCmd.ExecuteNonQueryAsync(ct);
+    }
+
     var createTableSql = $@"
       CREATE TABLE IF NOT EXISTS {_tableName} (
         Key TEXT PRIMARY KEY,
@@ -297,7 +311,23 @@ public sealed class SqliteConfigurationStore : ConfigurationStoreBase, IAsyncDis
 
     if (_connection != null)
     {
-      await _connection.DisposeAsync();
+      try
+      {
+        // Close the connection first to ensure any pending operations are handled
+        if (_connection.State == System.Data.ConnectionState.Open)
+        {
+          await _connection.CloseAsync();
+        }
+      }
+      catch (Exception ex)
+      {
+        Logger.LogWarning(ex, "Error closing configuration database connection during disposal");
+      }
+      finally
+      {
+        await _connection.DisposeAsync();
+        _connection = null;
+      }
     }
 
     _lock.Dispose();
