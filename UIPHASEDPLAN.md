@@ -1857,7 +1857,7 @@ This phased development plan provides a comprehensive roadmap for implementing t
 
 ### Key Achievements
 
-✅ **Complete API Coverage**: All 88 REST endpoints + 6 SignalR events utilized  
+✅ **Complete API Coverage**: All 86 REST endpoints + 6 SignalR events utilized  
 ✅ **Material 3 Compliance**: Touch-friendly UI optimized for 12.5" × 3.75" display  
 ✅ **Real-time Updates**: SignalR integration for live state synchronization  
 ✅ **Comprehensive Features**: Playback, queue, Spotify, files, radio, system, metrics, history  
