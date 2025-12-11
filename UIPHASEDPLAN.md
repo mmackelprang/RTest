@@ -162,7 +162,7 @@ This comprehensive matrix maps **ALL 86 REST API endpoints and 6 SignalR events*
 | | `DELETE /api/queue` | 4 | Clear Queue Button | Clear all |
 | | `POST /api/queue/move` | 4 | Drag & Drop | Reorder |
 | | `POST /api/queue/jump/{index}` | 4 | Track Click | Jump to track |
-| **Spotify** | | | | **11 endpoints** |
+| **Spotify** | | | | **10 endpoints** |
 | | `GET /api/spotify/auth/url` | 5 | Auth Flow | Get OAuth URL |
 | | `GET /api/spotify/auth/callback` | 5 | Auth Callback | Handle OAuth |
 | | `GET /api/spotify/auth/status` | 5 | Auth Status | Check auth |
@@ -177,7 +177,7 @@ This comprehensive matrix maps **ALL 86 REST API endpoints and 6 SignalR events*
 | | `GET /api/files` | 6 | File Browser | List files |
 | | `POST /api/files/play` | 6 | Play Button | Play file |
 | | `POST /api/files/queue` | 6 | Add to Queue | Add files |
-| **Radio** | | | | **24 endpoints** |
+| **Radio** | | | | **23 endpoints** |
 | | `GET /api/radio/state` | 7 | Radio Display | Get radio state |
 | | `POST /api/radio/frequency` | 7 | Freq Keypad | Set frequency |
 | | `POST /api/radio/frequency/up` | 7 | Up Button | Step up |
@@ -246,7 +246,7 @@ This comprehensive matrix maps **ALL 86 REST API endpoints and 6 SignalR events*
 | | VolumeChanged | 3 | Volume Updates | Real-time volume |
 | | Visualization Data | 10 | Viz Display | Real-time viz |
 
-**Total**: 88 REST endpoints + 6 SignalR events = 94 API capabilities, all utilized.
+**Total**: 86 REST endpoints + 6 SignalR events = 92 API capabilities, all utilized.
 
 ---
 
@@ -441,7 +441,7 @@ Requirements:
    - MoveQueueItemAsync(int from, int to) : Task<List<QueueItemDto>>
    - JumpToIndexAsync(int index) : Task<PlaybackStateDto>
 
-3. Create SpotifyApiService.cs for Spotify integration (11 endpoints):
+3. Create SpotifyApiService.cs for Spotify integration (10 endpoints):
    - GetAuthUrlAsync(string redirectUri) : Task<SpotifyAuthUrlDto>
    - HandleCallbackAsync(string code, string state, string codeVerifier) : Task<AuthCallbackResponse>
    - GetAuthStatusAsync() : Task<SpotifyAuthStatusDto>
@@ -458,7 +458,7 @@ Requirements:
    - PlayFileAsync(string path) : Task<FilePlayResponse>
    - AddFilesToQueueAsync(List<string> paths) : Task<QueueAddResponse>
 
-5. Create RadioApiService.cs for radio control (24 endpoints):
+5. Create RadioApiService.cs for radio control (23 endpoints):
    - GetRadioStateAsync() : Task<RadioStateDto>
    - SetFrequencyAsync(double frequency) : Task<RadioStateDto>
    - FrequencyUpAsync() : Task<RadioStateDto>
@@ -546,7 +546,7 @@ builder.Services.AddHttpClient<AudioApiService>(client =>
 ```
 
 Success Criteria:
-- All 88 API endpoints covered by service methods
+- All 86 API endpoints covered by service methods
 - Services compile without errors
 - Services registered in DI container
 - Retry policies configured
@@ -1177,7 +1177,7 @@ Success Criteria:
 - Device selector shows devices and allows switching
 ```
 
-**API Endpoints Used (24 total):**
+**API Endpoints Used (23 total):**
 - All radio control and preset endpoints listed in API matrix
 
 ---
@@ -1784,11 +1784,17 @@ Success Criteria:
    SyslogIdentifier=radio-web
    User=pi
    Environment=ASPNETCORE_ENVIRONMENT=Production
-   Environment=ASPNETCORE_URLS=http://0.0.0.0:5050
+   Environment=ASPNETCORE_URLS=http://localhost:5050
 
    [Install]
    WantedBy=multi-user.target
    ```
+
+   > **Security Note:**  
+   > For local kiosk-only usage, binding to `localhost:5050` ensures the UI is only accessible from the Pi itself.  
+   > For remote access, do **not** expose the Blazor Web UI directly over HTTP.  
+   > Instead, use a reverse proxy (e.g., nginx, Caddy) to terminate HTTPS and forward requests to `localhost:5050`.  
+   > This ensures all traffic is encrypted and allows for additional authentication and access controls.
 
 4. **Enable and Start Service:**
    ```bash
