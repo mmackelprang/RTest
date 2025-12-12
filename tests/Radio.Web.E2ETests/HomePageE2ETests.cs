@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.Playwright;
 using Microsoft.Playwright.NUnit;
 
@@ -40,8 +41,8 @@ public class HomePageE2ETests : PageTest
   public async Task HomePage_HasTransportControls()
   {
     // Assert - Should have transport control buttons
-    // Play/Pause button
-    var playButton = Page.Locator("button").Filter(new() { HasText = new Regex("Play|Pause", RegexOptions.IgnoreCase) }).First;
+    // Play/Pause button - look for icon buttons
+    var playButton = Page.Locator("button[title*='Play' i], button[title*='Pause' i]").First;
     await Expect(playButton).ToBeVisibleAsync();
 
     // Next button
@@ -69,8 +70,9 @@ public class HomePageE2ETests : PageTest
     await Expect(appBar).ToBeVisibleAsync();
     
     // Should have navigation icons
-    var navIcons = appBar.Locator("button").Count;
-    Assert.That(await navIcons, Is.GreaterThanOrEqualTo(6), "Should have at least 6 navigation buttons");
+    var navIcons = appBar.Locator("button");
+    var count = await navIcons.CountAsync();
+    Assert.That(count, Is.GreaterThanOrEqualTo(6), "Should have at least 6 navigation buttons");
   }
 
   [Test]

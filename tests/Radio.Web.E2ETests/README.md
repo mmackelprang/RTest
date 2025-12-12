@@ -6,12 +6,12 @@ End-to-end tests for the Radio Console Web UI using Playwright.
 
 1. Install Playwright browsers:
    ```bash
-   pwsh bin/Debug/net10.0/playwright.ps1 install
+   pwsh bin/Debug/net8.0/playwright.ps1 install
    ```
    
    Or on Linux/Mac:
    ```bash
-   ./bin/Debug/net10.0/playwright.sh install
+   ./bin/Debug/net8.0/playwright.sh install
    ```
 
 2. The Radio Console application must be running before executing E2E tests:

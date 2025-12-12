@@ -1,5 +1,6 @@
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Configuration;
 using Radio.Web.Components.Pages;
@@ -14,8 +15,12 @@ namespace Radio.Web.Tests.Components.Pages;
 /// </summary>
 public class HomePageTests : TestContext
 {
+  private readonly ILoggerFactory _loggerFactory;
+
   public HomePageTests()
   {
+    _loggerFactory = new NullLoggerFactory();
+    
     // Set up minimal dependencies with in-memory configuration
     var configuration = new ConfigurationBuilder()
       .AddInMemoryCollection(new Dictionary<string, string?>
@@ -25,7 +30,7 @@ public class HomePageTests : TestContext
       .Build();
 
     Services.AddSingleton<IConfiguration>(configuration);
-    Services.AddSingleton(new NullLoggerFactory());
+    Services.AddSingleton(_loggerFactory);
     
     // Add HttpClient for API services
     Services.AddHttpClient<AudioApiService>();
@@ -38,6 +43,15 @@ public class HomePageTests : TestContext
         sp.GetRequiredService<IConfiguration>()
       )
     );
+  }
+
+  protected override void Dispose(bool disposing)
+  {
+    if (disposing)
+    {
+      _loggerFactory?.Dispose();
+    }
+    base.Dispose(disposing);
   }
 
   [Fact]

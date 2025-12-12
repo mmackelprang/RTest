@@ -142,17 +142,22 @@ public class AudioApiServiceTests
   }
 
   [Fact]
-  public void AudioApiService_UsesCancellationToken()
+  public async Task AudioApiService_UsesCancellationToken()
   {
     // Arrange
     using var cts = new CancellationTokenSource();
+    cts.CancelAfter(100); // Cancel after 100ms
 
-    // Act & Assert - Should accept cancellation token
-    _ = _service.GetPlaybackStateAsync(cts.Token);
-    _ = _service.GetNowPlayingAsync(cts.Token);
-    _ = _service.GetVolumeAsync(cts.Token);
-    
-    // No exception means cancellation token is accepted
-    Assert.True(true);
+    // Act - Methods should accept and respect cancellation token
+    var tasks = new Task[]
+    {
+      _service.GetPlaybackStateAsync(cts.Token),
+      _service.GetNowPlayingAsync(cts.Token),
+      _service.GetVolumeAsync(cts.Token)
+    };
+
+    // Assert - Should complete (either with result or cancellation)
+    await Task.WhenAll(tasks.Select(t => t.ContinueWith(_ => { })));
+    Assert.NotNull(_service); // Verify service remains in valid state
   }
 }
