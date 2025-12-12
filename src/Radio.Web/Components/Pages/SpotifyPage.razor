@@ -443,13 +443,10 @@
   {
     try
     {
-      // Get playlist details first, then add tracks to queue
-      var playlist = await SpotifyApi.GetPlaylistAsync(playlistId);
-      if (playlist != null)
-      {
-        // For now, just play the playlist as we don't have individual tracks
-        await SpotifyApi.PlayPlaylistAsync(playlistId);
-      }
+      // Note: Spotify API doesn't provide individual track URIs in playlist response
+      // As a workaround, we play the playlist which loads all tracks
+      // A full implementation would require fetching playlist tracks and adding each to queue
+      await SpotifyApi.PlayPlaylistAsync(playlistId);
     }
     catch (Exception)
     {
@@ -457,11 +454,10 @@
     }
   }
 
-  private async Task BackToCategoriesAsync()
+  private void BackToCategoriesAsync()
   {
     _selectedCategory = null;
     _categoryPlaylists = null;
-    await Task.CompletedTask;
   }
 
   public void Dispose()
