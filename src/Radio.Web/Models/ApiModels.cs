@@ -49,6 +49,63 @@ public record QueueItemDto(
   bool IsCurrent
 );
 
+// Sources API DTOs
+public record AudioSourceDto(
+  string Id,
+  string Name,
+  string Type,
+  string Category,
+  string State,
+  float Volume,
+  Dictionary<string, string>? Metadata
+);
+
+// Devices API DTOs
+public record AudioDeviceDto(
+  string Id,
+  string Name,
+  string Type,
+  bool IsDefault,
+  bool IsActive
+);
+
+public record UsbPortDto(
+  string Id,
+  string Name,
+  bool IsReserved,
+  string? ReservedBy
+);
+
+// Metrics API DTOs
+public record MetricDto(
+  string Name,
+  double Value,
+  string Unit,
+  DateTime Timestamp,
+  Dictionary<string, string>? Tags
+);
+
+public record MetricHistoryDto(
+  DateTime Timestamp,
+  double Value
+);
+
+// File API DTOs
+public record FileListDto(
+  string CurrentPath,
+  List<FileItemDto> Items
+);
+
+public record FileItemDto(
+  string Name,
+  string Path,
+  bool IsDirectory,
+  long? Size,
+  string? Duration,
+  string? Artist,
+  string? Album
+);
+
 // System API DTOs
 public record SystemStatsDto(
   double CpuUsage,

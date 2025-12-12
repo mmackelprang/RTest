@@ -35,16 +35,46 @@ builder.Services.AddHttpClient<SystemApiService>(client =>
   client.Timeout = TimeSpan.FromSeconds(30);
 });
 
+builder.Services.AddHttpClient<QueueApiService>(client =>
+{
+  client.BaseAddress = new Uri(apiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(30);
+});
+
+builder.Services.AddHttpClient<SourcesApiService>(client =>
+{
+  client.BaseAddress = new Uri(apiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(30);
+});
+
+builder.Services.AddHttpClient<ConfigurationApiService>(client =>
+{
+  client.BaseAddress = new Uri(apiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(30);
+});
+
+builder.Services.AddHttpClient<DevicesApiService>(client =>
+{
+  client.BaseAddress = new Uri(apiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(30);
+});
+
+builder.Services.AddHttpClient<MetricsApiService>(client =>
+{
+  client.BaseAddress = new Uri(apiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(30);
+});
+
+builder.Services.AddHttpClient<FileApiService>(client =>
+{
+  client.BaseAddress = new Uri(apiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(30);
+});
+
 // TODO: Add remaining API client services
-// - QueueApiService (6 endpoints)
 // - SpotifyApiService (10 endpoints)
-// - FileApiService (3 endpoints)
 // - RadioApiService (23 endpoints)
-// - SourcesApiService (5 endpoints)
-// - DevicesApiService (7 endpoints)
-// - MetricsApiService (5 endpoints)
 // - PlayHistoryApiService (8 endpoints)
-// - ConfigurationApiService (5 endpoints)
 
 // TODO: Register SignalR hub service as singleton (Phase 1 Task 1.3)
 // builder.Services.AddSingleton<AudioStateHubService>();
