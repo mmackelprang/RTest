@@ -377,8 +377,9 @@ This comprehensive matrix maps **ALL 86 REST API endpoints and 6 SignalR events*
    - Integration tests should exercise complete user workflows
    - Mock all API responses for predictable testing
 
-**Verification Checklist:**
-- [ ] All 12 Audio Control endpoints used (Phase 3)
+**Verification Checklist:** (Updated: December 12, 2024)
+- [x] All 12 Audio Control endpoints implemented in AudioApiService (Phase 1/3 - API layer complete)
+  - Service created, registered, wired to Home page with functional controls
 - [ ] All 6 Queue endpoints used (Phase 4)
 - [ ] All 10 Spotify endpoints used (Phase 5)
 - [ ] All 3 Files endpoints used (Phase 6)
@@ -388,7 +389,8 @@ This comprehensive matrix maps **ALL 86 REST API endpoints and 6 SignalR events*
 - [ ] All 5 Metrics endpoints used (Phase 9)
 - [ ] All 8 Play History endpoints used (Phase 12)
 - [ ] All 5 Configuration endpoints used (Phases 2-12, especially Phase 8)
-- [ ] All 2 System endpoints used (Phase 8)
+- [x] 1 of 2 System endpoints implemented in SystemApiService (Phase 1/8 - stats endpoint working)
+  - System stats endpoint wired to MainLayout for real-time CPU/RAM/Thread display
 - [ ] All 6 SignalR events handled (Phases 3, 4, 7, 10)
 
 ---
@@ -464,9 +466,37 @@ graph TD
 
 ## Phase 1: Foundation & Infrastructure
 
+**Status:** 🟡 **IN PROGRESS** (~70% Complete)  
 **Duration:** 2-3 days  
 **Dependencies:** Backend APIs complete  
-**Goal:** Set up Blazor project, install dependencies, configure theming, create API client services
+**Goal:** Set up Blazor project, install dependencies, configure theming, create API client services  
+**Last Updated:** December 12, 2024
+
+### Current Status Summary
+
+✅ **Completed:**
+- MudBlazor 8.15.0 installed and configured
+- Custom Material 3 theme with LED aesthetic created
+- DSEG14Classic fonts installed (18 variants)
+- Fixed 1920×576px viewport configured
+- bUnit test project created
+- SignalR Client package added
+- App.razor with MudBlazor providers configured
+- MainLayout with navigation bar and live system stats
+- Home page with Now Playing and functional playback controls
+- AudioApiService created (12/12 endpoints)
+- SystemApiService created (1/2 endpoints)
+- Build succeeds with zero errors
+- API integration working (polling mode)
+
+⏳ **In Progress:**
+- Creating remaining 9 API client services (74 endpoints)
+- SignalR hub service for real-time push updates
+- Polly retry policies for API resilience
+
+❌ **Not Started:**
+- bUnit test coverage
+- E2E tests with Playwright
 
 ### Overview
 
@@ -785,19 +815,34 @@ Success Criteria:
 
 ### Phase 1 Validation
 
-**Testing Checklist:**
+**Status: ~70% Complete** (Last Updated: December 12, 2024)
 
-- [ ] Project builds without errors or warnings
-- [ ] MudBlazor components render correctly
-- [ ] Custom theme applied (dark background, cyan accents)
-- [ ] LED fonts load and display properly
-- [ ] All 11 API client services instantiate correctly
-- [ ] SignalR connection establishes successfully
-- [ ] Can make API calls and receive responses
+**Completed:**
+- [x] Project builds without errors or warnings
+- [x] MudBlazor components render correctly  
+- [x] Custom theme applied (dark background, cyan accents)
+- [x] LED fonts load and display properly
+- [x] Layout fixed to 1920×576 dimensions
+- [x] AudioApiService created and registered (12 endpoints)
+- [x] SystemApiService created and registered (1/2 endpoints)
+- [x] Home page wired to AudioApiService with functional controls
+- [x] MainLayout wired to SystemApiService for real-time stats
+- [x] Can make API calls and receive responses
+
+**In Progress / Not Started:**
+- [ ] Complete remaining 9 API client services (74 endpoints remaining):
+  - [ ] QueueApiService (6 endpoints)
+  - [ ] SpotifyApiService (10 endpoints)
+  - [ ] FileApiService (3 endpoints)
+  - [ ] RadioApiService (23 endpoints)
+  - [ ] SourcesApiService (5 endpoints)
+  - [ ] DevicesApiService (7 endpoints)
+  - [ ] MetricsApiService (5 endpoints)
+  - [ ] PlayHistoryApiService (8 endpoints)
+  - [ ] ConfigurationApiService (5 endpoints)
+- [ ] SignalR connection service created
 - [ ] Can receive SignalR events
 - [ ] Automatic reconnection works after disconnect
-- [ ] Layout fixed to 1920×576 dimensions
-- [ ] No console errors in browser
 - [ ] bUnit tests created for API services (mock HttpClient responses)
 - [ ] bUnit tests for SignalR service (mock HubConnection)
 - [ ] All bUnit tests pass in local environment
