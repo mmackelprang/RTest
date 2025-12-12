@@ -43,7 +43,7 @@ This document provides a comprehensive, step-by-step development plan for implem
 3. **Real-time Updates**: Utilize SignalR for live audio state, queue, and visualization updates
 4. **Metrics & Observability**: Integrate comprehensive metrics dashboard and system monitoring
 5. **Progressive Enhancement**: Build incrementally with continuous testing and validation
-6. **Comprehensive Testing**: Use bUnit for Blazor component testing as part of build/test pipeline
+6. **Comprehensive Testing**: Use bUnit for Blazor component testing; E2E tests (Playwright) for critical user workflows
 7. **Configuration via REST API**: All configuration and preferences must use Configuration REST endpoints; JSON files only for bootstrapping
 
 ### Estimated Timeline
@@ -66,7 +66,7 @@ This document provides a comprehensive, step-by-step development plan for implem
 - **State Management**: Blazor component state + SignalR push updates
 - **Visualization**: HTML5 Canvas with JavaScript Interop
 - **Fonts**: DSEG14Classic (LED displays), Inter (general UI)
-- **Testing**: bUnit for Blazor component testing, integrated into GitHub Actions CI/CD
+- **Testing**: bUnit for component testing, Playwright for E2E tests, integrated into GitHub Actions CI/CD
 
 ---
 
@@ -137,6 +137,7 @@ All backend APIs must be implemented and tested before starting UI development. 
 - Git for version control
 - Access to Raspberry Pi 5 for testing (or similar Linux environment)
 - **bUnit** NuGet package for Blazor component testing (integrated into build/test pipeline)
+- **Playwright for .NET** for end-to-end testing in real browser environments
 
 ---
 
@@ -1762,6 +1763,8 @@ Locations: Various components across /src/Radio.Web/
 **Testing Requirements**: 
 - Complete bUnit test coverage for all components (target: 80%+ component coverage)
 - Run all tests in GitHub Actions build workflow
+- **Create E2E tests for 5-10 core user scenarios using Playwright or Selenium**
+- E2E tests verify: app startup, basic playback, queue operations, navigation, configuration persistence
 - Integration tests for end-to-end user workflows
 - Performance tests for visualizations and animations
 - Verify all tests pass consistently
@@ -2006,6 +2009,200 @@ public class HomePageTests : TestContext
 
 ### Integration Testing
 
+This section was previously focused on bUnit component testing. See "Blazor Component Testing with bUnit" section above.
+
+### End-to-End (E2E) Testing
+
+**Framework:** Playwright for .NET or Selenium WebDriver  
+**Purpose:** Verify basic functionality of the Blazor web app in a real browser environment  
+**Test Project:** tests/Radio.Web.E2ETests
+
+**E2E Testing Requirements:**
+
+1. **Framework Setup:**
+   ```bash
+   # Recommended: Playwright for .NET
+   dotnet add package Microsoft.Playwright
+   dotnet add package Microsoft.Playwright.NUnit
+   
+   # Install Playwright browsers
+   pwsh bin/Debug/net8.0/playwright.ps1 install
+   ```
+
+2. **Test Environment:**
+   - Run E2E tests against a deployed instance of the Blazor app
+   - Use TestServer for in-memory hosting during CI/CD
+   - Mock external dependencies (Spotify API, radio hardware) with test doubles
+   - Use test database/configuration for isolation
+
+3. **Core E2E Test Scenarios:**
+
+   **Scenario 1: Application Startup and Navigation**
+   - App loads and displays home page
+   - Navigation bar renders with all expected icons
+   - System stats display and update
+   - Can navigate between main sections (Home, Queue, Spotify, Radio, System)
+   - Page transitions are smooth
+
+   **Scenario 2: Basic Playback Controls**
+   - Now Playing displays correctly (even in empty state)
+   - Play button is clickable and triggers playback
+   - Volume slider is interactive and changes volume
+   - Transport controls (play/pause/next/previous) work
+   - Real-time updates via SignalR reflect in UI
+
+   **Scenario 3: Queue Management**
+   - Queue page displays when queue-supporting source is active
+   - Can add items to queue
+   - Queue displays added items
+   - Can remove items from queue
+   - Can clear entire queue
+
+   **Scenario 4: Configuration Persistence**
+   - Change a setting in System Configuration page
+   - Verify setting is saved via Configuration REST API
+   - Refresh browser
+   - Verify setting persisted after refresh
+
+   **Scenario 5: Source Switching**
+   - Source selector displays available sources
+   - Can switch between sources
+   - UI adapts to show source-specific controls
+   - Source state persists across navigation
+
+4. **Example E2E Test (Playwright):**
+
+   ```csharp
+   [TestFixture]
+   public class BasicFunctionalityTests : PageTest
+   {
+       private const string BaseUrl = "http://localhost:5050";
+       
+       [Test]
+       public async Task HomePageLoadsAndDisplaysNowPlaying()
+       {
+           // Arrange - Navigate to home page
+           await Page.GotoAsync(BaseUrl);
+           
+           // Assert - Page loaded
+           await Expect(Page).ToHaveTitleAsync("Radio Console");
+           
+           // Assert - Now Playing section visible
+           var nowPlaying = Page.Locator(".now-playing");
+           await Expect(nowPlaying).ToBeVisibleAsync();
+           
+           // Assert - Transport controls visible
+           var playButton = Page.Locator("button.play-button");
+           await Expect(playButton).ToBeVisibleAsync();
+       }
+       
+       [Test]
+       public async Task CanNavigateBetweenPages()
+       {
+           // Arrange
+           await Page.GotoAsync(BaseUrl);
+           
+           // Act - Click system config icon
+           await Page.Locator("nav >> text=System").ClickAsync();
+           
+           // Assert - System config page loads
+           await Expect(Page.Locator("h1:has-text('System Configuration')")).ToBeVisibleAsync();
+       }
+       
+       [Test]
+       public async Task VolumeSliderChangesVolume()
+       {
+           // Arrange
+           await Page.GotoAsync(BaseUrl);
+           
+           // Act - Move volume slider
+           var volumeSlider = Page.Locator("input[type='range'].volume-slider");
+           await volumeSlider.FillAsync("0.7");
+           
+           // Assert - Volume API called (verify via network inspection or state change)
+           await Task.Delay(500); // Allow for API call
+           
+           // Verify volume display updated
+           var volumeDisplay = Page.Locator(".volume-display");
+           await Expect(volumeDisplay).ToContainTextAsync("70%");
+       }
+       
+       [Test]
+       public async Task ConfigurationPersistsAcrossRefresh()
+       {
+           // Arrange
+           await Page.GotoAsync($"{BaseUrl}/system");
+           
+           // Act - Change a setting
+           var settingInput = Page.Locator("input[name='DefaultSource']");
+           await settingInput.FillAsync("Spotify");
+           await Page.Locator("button:has-text('Save')").ClickAsync();
+           
+           // Verify save confirmation
+           await Expect(Page.Locator(".toast:has-text('Saved')")).ToBeVisibleAsync();
+           
+           // Refresh page
+           await Page.ReloadAsync();
+           
+           // Assert - Setting persisted
+           await Expect(settingInput).ToHaveValueAsync("Spotify");
+       }
+   }
+   ```
+
+5. **GitHub Actions Integration:**
+   
+   Add E2E tests to build workflow:
+   
+   ```yaml
+   - name: Run E2E Tests
+     run: |
+       # Start app in background
+       dotnet run --project src/Radio.Web --urls "http://localhost:5050" &
+       APP_PID=$!
+       
+       # Wait for app to be ready
+       timeout 30 bash -c 'until curl -s http://localhost:5050 > /dev/null; do sleep 1; done'
+       
+       # Run E2E tests
+       dotnet test tests/Radio.Web.E2ETests --configuration Release --logger "trx;LogFileName=e2e-results.trx"
+       
+       # Cleanup
+       kill $APP_PID
+   ```
+
+6. **E2E Testing Best Practices:**
+   - Keep tests fast (< 30 seconds per test)
+   - Use page object pattern for maintainability
+   - Test happy paths and critical user journeys only
+   - Mock external dependencies to avoid flakiness
+   - Run E2E tests separately from unit/component tests
+   - Use explicit waits with timeouts (avoid sleep)
+   - Take screenshots on test failures for debugging
+   - Test on target browser (Chromium for Raspberry Pi)
+   - Verify accessibility in E2E tests (aria labels, keyboard nav)
+
+7. **E2E Test Coverage Goals:**
+   - 5-10 core scenarios covering critical user paths
+   - Focus on integration between components, not exhaustive testing
+   - Verify SignalR real-time updates work end-to-end
+   - Test configuration persistence via REST API
+   - Verify navigation and routing work correctly
+   - Test responsive behavior on target display size (1920×576)
+
+8. **When to Run E2E Tests:**
+   - Before merging feature branches
+   - After deployment to staging environment
+   - As part of release validation
+   - Periodically on main branch (nightly builds)
+   - On-demand for testing specific scenarios
+
+**E2E vs. Component Testing:**
+- **bUnit (Component):** Test individual components in isolation, mock all dependencies, fast execution
+- **E2E (Playwright):** Test complete user workflows in real browser, minimal mocking, slower but higher confidence
+
+Both are necessary for comprehensive test coverage. Use bUnit for most testing (80%+), E2E for critical paths (5-10 scenarios).
+
 ### Manual Testing Checklist
 
 #### Functional Testing
@@ -2216,7 +2413,7 @@ This phased development plan provides a comprehensive roadmap for implementing t
 ✅ **Comprehensive Features**: Playback, queue, Spotify, files, radio, system, metrics, history  
 ✅ **Performance Optimized**: 60fps visualizations, efficient rendering, minimal latency  
 ✅ **Production Ready**: Deployment guide, testing strategy, troubleshooting  
-✅ **Comprehensive Testing**: bUnit tests for all components, integrated into CI/CD pipeline  
+✅ **Comprehensive Testing**: bUnit tests for components + E2E tests for critical workflows, integrated into CI/CD  
 ✅ **Configuration via REST API**: All user preferences and settings stored via Configuration REST endpoints
 
 ### Next Steps
