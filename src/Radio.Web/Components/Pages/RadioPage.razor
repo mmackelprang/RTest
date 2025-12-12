@@ -82,9 +82,12 @@
       <MudSelect T="string" Value="@_radioState.Band" ValueChanged="@HandleBandChangeAsync" 
                  Label="Band" Variant="Variant.Outlined" Dense="true" 
                  Style="min-width: 150px;">
-        <MudSelectItem Value="@("FM")">FM</MudSelectItem>
         <MudSelectItem Value="@("AM")">AM</MudSelectItem>
+        <MudSelectItem Value="@("FM")">FM</MudSelectItem>
+        <MudSelectItem Value="@("AIR")">Aircraft</MudSelectItem>
+        <MudSelectItem Value="@("SW")">Shortwave</MudSelectItem>
         <MudSelectItem Value="@("WB")">Weather</MudSelectItem>
+        <MudSelectItem Value="@("VHF")">VHF</MudSelectItem>
       </MudSelect>
       
       <MudSelect T="string" Value="@_radioState.Step.ToString()" ValueChanged="@HandleStepChangeAsync" 
@@ -495,37 +498,46 @@
   
   private string FormatFrequency(double frequency, string band)
   {
-    if (band == "AM")
+    // AM band uses kHz (no decimal), all others use MHz (one decimal)
+    return band switch
     {
-      return frequency.ToString("0");
-    }
-    else
-    {
-      return frequency.ToString("0.0");
-    }
+      "AM" => frequency.ToString("0"),        // AM: kHz format (e.g., "1010")
+      "FM" => frequency.ToString("0.0"),      // FM: MHz format (e.g., "101.5")
+      "AIR" => frequency.ToString("0.000"),   // Aircraft: MHz format with 3 decimals (e.g., "121.500")
+      "SW" => frequency.ToString("0.000"),    // Shortwave: MHz format with 3 decimals (e.g., "7.200")
+      "WB" => frequency.ToString("0.000"),    // Weather: MHz format with 3 decimals (e.g., "162.400")
+      "VHF" => frequency.ToString("0.000"),   // VHF: MHz format with 3 decimals (e.g., "156.800")
+      _ => frequency.ToString("0.000")        // Default: 3 decimals for unknown bands
+    };
   }
   
   private double GetMinFrequency()
   {
-    if (_radioState == null) return 88.0;
+    if (_radioState == null) return 0;
     return _radioState.Band switch
     {
-      "FM" => 87.5,
-      "AM" => 520,
-      "WB" => 162.400,
-      _ => 0
+      "AM" => 520,         // AM: 520-1710 kHz (Medium Wave)
+      "FM" => 87.5,        // FM: 87.5-108.0 MHz
+      "AIR" => 108.0,      // Aircraft: 108.0-137.0 MHz (VHF Air Band)
+      "SW" => 1.8,         // Shortwave: 1.8-30.0 MHz (HF bands)
+      "WB" => 162.400,     // Weather: 162.400-162.550 MHz (NOAA Weather Radio)
+      "VHF" => 136.0,      // VHF: 136.0-174.0 MHz (VHF band)
+      _ => 0               // Default: no minimum for unknown bands
     };
   }
   
   private double GetMaxFrequency()
   {
-    if (_radioState == null) return 108.0;
+    if (_radioState == null) return 1000;
     return _radioState.Band switch
     {
-      "FM" => 108.0,
-      "AM" => 1710,
-      "WB" => 162.550,
-      _ => 1000
+      "AM" => 1710,        // AM: 520-1710 kHz (Medium Wave)
+      "FM" => 108.0,       // FM: 87.5-108.0 MHz
+      "AIR" => 137.0,      // Aircraft: 108.0-137.0 MHz (VHF Air Band)
+      "SW" => 30.0,        // Shortwave: 1.8-30.0 MHz (HF bands)
+      "WB" => 162.550,     // Weather: 162.400-162.550 MHz (NOAA Weather Radio)
+      "VHF" => 174.0,      // VHF: 136.0-174.0 MHz (VHF band)
+      _ => 1000            // Default: reasonable maximum for unknown bands
     };
   }
   
