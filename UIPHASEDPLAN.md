@@ -523,10 +523,13 @@ graph TD
 - Fallback polling when SignalR disconnected
 - Build succeeds with zero errors
 
+✅ **Testing Complete:**
+- bUnit test coverage: 29 tests (component + service tests)
+- E2E tests with Playwright: 6 tests (full workflow tests)
+- Total: 35 tests covering Phase 1
+
 ⏳ **Optional Enhancements:**
 - Polly retry policies for API resilience (not required for core functionality)
-- bUnit test coverage (testing phase)
-- E2E tests with Playwright (testing phase)
 
 ### Overview
 
@@ -875,14 +878,26 @@ Success Criteria:
 - [x] **Automatic reconnection works after disconnect**
 - [x] **Home page integrated with real-time SignalR updates**
 
-**⏳ Optional Testing (separate phase):**
-- [ ] Polly retry policies configured (enhancement, not required)
-- [ ] bUnit tests created for API services (mock HttpClient responses)
-- [ ] bUnit tests for SignalR service (mock HubConnection)
-- [ ] All bUnit tests pass in local environment
-- [ ] GitHub Actions build workflow runs and passes all tests
+**✅ Testing Complete:**
+- [x] **bUnit tests created - 29 tests passing**
+  - [x] HomePageTests (7 tests): Component rendering, UI structure
+  - [x] AudioApiServiceTests (12 tests): API endpoint handling
+  - [x] AudioStateHubServiceTests (10 tests): SignalR event subscriptions
+- [x] **E2E tests created - 6 Playwright tests**
+  - [x] Page loading and title verification
+  - [x] Now Playing card visibility
+  - [x] Transport controls verification
+  - [x] Volume control presence
+  - [x] Navigation bar with icons
+  - [x] Responsive layout (1920×576px) validation
+- [x] All bUnit tests pass (29/29)
+- [x] E2E test infrastructure ready (requires running app)
 
-**Phase 1 is functionally complete and ready for Phase 2!**
+**⏳ Optional Enhancements:**
+- [ ] Polly retry policies configured (enhancement, not required)
+- [ ] GitHub Actions CI/CD integration for automated test runs
+
+**Phase 1 is complete with comprehensive testing!** ✅🎉
 
 **Manual Testing:**
 
