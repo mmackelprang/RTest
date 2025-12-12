@@ -66,6 +66,7 @@
 - All new code must be covered by unit tests.  For existing projects, use the frameworks in place.  For new projects use xUnit.
 - Write unit tests for business logic and integration tests for data access and API endpoints.
 - Test code with mocks when hardware is not present
+- Wnen writing Blazor code creat bUnit tests that cover and validate the Blazor functionality.
 
 ## Copilot Preferences
 - For this greenfield project backwards compatibility is **NEVER** a concern.  Whenever a change might cause a backward compatibility problem, do **NOT** worry about maintaining backwards comaptibility.
