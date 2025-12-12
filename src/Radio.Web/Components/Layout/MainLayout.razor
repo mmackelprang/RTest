@@ -1,5 +1,76 @@
 @inherits LayoutComponentBase
+@inject SystemApiService SystemApi
 
-<main>
-  @Body
-</main>
+<div class="layout-container" style="width: 1920px; height: 576px; overflow: hidden;">
+  <!-- Top Navigation Bar - 60px height -->
+  <MudAppBar Fixed="true" Elevation="1" Style="height: 60px;">
+    <!-- LEFT: Date/Time Display -->
+    <div class="led-display" style="font-size: 24px; min-width: 300px;">
+      @_currentTime
+    </div>
+    
+    <!-- CENTER: System Stats -->
+    <MudSpacer />
+    <div class="led-display-cyan" style="font-size: 18px; display: flex; gap: 24px; font-family: 'DSEG14Classic-Regular', monospace;">
+      <span>CPU: @_cpuUsage%</span>
+      <span>RAM: @_ramUsage MB</span>
+      <span>Threads: @_threadCount</span>
+    </div>
+    <MudSpacer />
+    
+    <!-- RIGHT: Navigation Icons -->
+    <MudIconButton Icon="@Icons.Material.Filled.Home" Color="Color.Inherit" Href="/" title="Home / Now Playing" />
+    <MudIconButton Icon="@Icons.Material.Filled.QueueMusic" Color="Color.Inherit" Href="/queue" title="Queue" />
+    <MudIconButton Icon="@Icons.Material.Filled.Radio" Color="Color.Inherit" Href="/radio" title="Radio" />
+    <MudIconButton Icon="@Icons.Material.Filled.Folder" Color="Color.Inherit" Href="/files" title="File Browser" />
+    <MudIconButton Icon="@Icons.Material.Filled.ShowChart" Color="Color.Inherit" Href="/visualizer" title="Visualizer" />
+    <MudIconButton Icon="@Icons.Material.Filled.Settings" Color="Color.Inherit" Href="/system" title="System Config" />
+  </MudAppBar>
+  
+  <!-- Main Content Area - 516px height (576 - 60) -->
+  <div class="content-area" style="height: 516px; margin-top: 60px; overflow-y: auto;">
+    @Body
+  </div>
+</div>
+
+@code {
+  private string _currentTime = DateTime.Now.ToString("HH:mm:ss");
+  private string _cpuUsage = "0";
+  private string _ramUsage = "0";
+  private string _threadCount = "0";
+  private System.Threading.Timer? _timer;
+
+  protected override void OnInitialized()
+  {
+    // Update time and system stats every second
+    _timer = new System.Threading.Timer(async _ =>
+    {
+      _currentTime = DateTime.Now.ToString("HH:mm:ss");
+      await UpdateSystemStatsAsync();
+      await InvokeAsync(StateHasChanged);
+    }, null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
+  }
+
+  private async Task UpdateSystemStatsAsync()
+  {
+    try
+    {
+      var stats = await SystemApi.GetSystemStatsAsync();
+      if (stats != null)
+      {
+        _cpuUsage = stats.CpuUsage.ToString("F1");
+        _ramUsage = stats.RamUsageMb.ToString();
+        _threadCount = stats.ThreadCount.ToString();
+      }
+    }
+    catch (Exception)
+    {
+      // Silently fail to avoid disrupting UI updates
+    }
+  }
+
+  public void Dispose()
+  {
+    _timer?.Dispose();
+  }
+}

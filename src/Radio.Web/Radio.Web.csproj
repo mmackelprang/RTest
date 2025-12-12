@@ -9,4 +9,8 @@
     <ProjectReference Include="..\Radio.Core\Radio.Core.csproj" />
     <ProjectReference Include="..\Radio.Infrastructure\Radio.Infrastructure.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.1" />
+    <PackageReference Include="MudBlazor" Version="8.15.0" />
+  </ItemGroup>
 </Project>
