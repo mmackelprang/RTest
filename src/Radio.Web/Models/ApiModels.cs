@@ -87,7 +87,30 @@ public record MetricDto(
 
 public record MetricHistoryDto(
   DateTime Timestamp,
-  double Value
+  double Value,
+  int Count,
+  double Min,
+  double Max,
+  Dictionary<string, string>? Tags
+);
+
+public record MetricAggregateDto(
+  int Count,
+  double Sum,
+  double Average,
+  double Min,
+  double Max,
+  double StdDev
+);
+
+public record MetricEventRequest(
+  string EventName,
+  Dictionary<string, string>? Tags
+);
+
+public record MetricEventResponse(
+  bool Success,
+  string Metric
 );
 
 // File API DTOs
