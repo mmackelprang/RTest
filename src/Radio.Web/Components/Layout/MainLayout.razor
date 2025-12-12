@@ -1,4 +1,5 @@
 @inherits LayoutComponentBase
+@inject SystemApiService SystemApi
 
 <div class="layout-container" style="width: 1920px; height: 576px; overflow: hidden;">
   <!-- Top Navigation Bar - 60px height -->
@@ -18,12 +19,12 @@
     <MudSpacer />
     
     <!-- RIGHT: Navigation Icons -->
-    <MudIconButton Icon="@Icons.Material.Filled.Home" Color="Color.Inherit" Href="/" Title="Home / Now Playing" />
-    <MudIconButton Icon="@Icons.Material.Filled.QueueMusic" Color="Color.Inherit" Href="/queue" Title="Queue" />
-    <MudIconButton Icon="@Icons.Material.Filled.Radio" Color="Color.Inherit" Href="/radio" Title="Radio" />
-    <MudIconButton Icon="@Icons.Material.Filled.Folder" Color="Color.Inherit" Href="/files" Title="File Browser" />
-    <MudIconButton Icon="@Icons.Material.Filled.ShowChart" Color="Color.Inherit" Href="/visualizer" Title="Visualizer" />
-    <MudIconButton Icon="@Icons.Material.Filled.Settings" Color="Color.Inherit" Href="/system" Title="System Config" />
+    <MudIconButton Icon="@Icons.Material.Filled.Home" Color="Color.Inherit" Href="/" title="Home / Now Playing" />
+    <MudIconButton Icon="@Icons.Material.Filled.QueueMusic" Color="Color.Inherit" Href="/queue" title="Queue" />
+    <MudIconButton Icon="@Icons.Material.Filled.Radio" Color="Color.Inherit" Href="/radio" title="Radio" />
+    <MudIconButton Icon="@Icons.Material.Filled.Folder" Color="Color.Inherit" Href="/files" title="File Browser" />
+    <MudIconButton Icon="@Icons.Material.Filled.ShowChart" Color="Color.Inherit" Href="/visualizer" title="Visualizer" />
+    <MudIconButton Icon="@Icons.Material.Filled.Settings" Color="Color.Inherit" Href="/system" title="System Config" />
   </MudAppBar>
   
   <!-- Main Content Area - 516px height (576 - 60) -->
@@ -41,12 +42,31 @@
 
   protected override void OnInitialized()
   {
-    // Update time every second
+    // Update time and system stats every second
     _timer = new System.Threading.Timer(async _ =>
     {
       _currentTime = DateTime.Now.ToString("HH:mm:ss");
+      await UpdateSystemStatsAsync();
       await InvokeAsync(StateHasChanged);
     }, null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
+  }
+
+  private async Task UpdateSystemStatsAsync()
+  {
+    try
+    {
+      var stats = await SystemApi.GetSystemStatsAsync();
+      if (stats != null)
+      {
+        _cpuUsage = stats.CpuUsage.ToString("F1");
+        _ramUsage = stats.RamUsageMb.ToString();
+        _threadCount = stats.ThreadCount.ToString();
+      }
+    }
+    catch (Exception)
+    {
+      // Silently fail to avoid disrupting UI updates
+    }
   }
 
   public void Dispose()

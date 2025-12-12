@@ -1,5 +1,6 @@
 @page "/"
 @rendermode InteractiveServer
+@inject AudioApiService AudioApi
 
 <PageTitle>Now Playing - Radio Console</PageTitle>
 
@@ -46,32 +47,37 @@
                    Color="@(_isShuffleEnabled ? Color.Primary : Color.Default)" 
                    Size="Size.Large"
                    Style="min-width: 60px; min-height: 60px;"
-                   Title="Shuffle" />
+                   OnClick="HandleShuffleAsync"
+                   title="Shuffle" />
     
     <MudIconButton Icon="@Icons.Material.Filled.SkipPrevious" 
                    Color="Color.Default" 
                    Size="Size.Large"
                    Style="min-width: 60px; min-height: 60px;"
-                   Title="Previous" />
+                   OnClick="HandlePreviousAsync"
+                   title="Previous" />
     
     <MudIconButton Icon="@(_isPlaying ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)" 
                    Color="Color.Primary" 
                    Size="Size.Large"
                    Style="min-width: 80px; min-height: 80px; font-size: 48px;"
                    Class="primary-action"
-                   Title="@(_isPlaying ? "Pause" : "Play")" />
+                   OnClick="HandlePlayPauseAsync"
+                   title="@(_isPlaying ? "Pause" : "Play")" />
     
     <MudIconButton Icon="@Icons.Material.Filled.SkipNext" 
                    Color="Color.Default" 
                    Size="Size.Large"
                    Style="min-width: 60px; min-height: 60px;"
-                   Title="Next" />
+                   OnClick="HandleNextAsync"
+                   title="Next" />
     
     <MudIconButton Icon="@Icons.Material.Filled.Repeat" 
                    Color="@(_repeatMode != "Off" ? Color.Primary : Color.Default)" 
                    Size="Size.Large"
                    Style="min-width: 60px; min-height: 60px;"
-                   Title="@($"Repeat: {_repeatMode}")" />
+                   OnClick="HandleRepeatAsync"
+                   title="@($"Repeat: {_repeatMode}")" />
   </div>
   
   <!-- Volume Control -->
@@ -79,8 +85,9 @@
     <div style="display: flex; align-items: center; gap: 16px;">
       <MudIconButton Icon="@(_isMuted ? Icons.Material.Filled.VolumeOff : Icons.Material.Filled.VolumeUp)" 
                      Color="Color.Default" 
-                     Title="@(_isMuted ? "Unmute" : "Mute")" />
-      <MudSlider @bind-Value="_volume" Min="0" Max="1" Step="0.01" Style="flex: 1;" Color="Color.Primary">
+                     OnClick="HandleMuteAsync"
+                     title="@(_isMuted ? "Unmute" : "Mute")" />
+      <MudSlider Value="_volume" ValueChanged="@((double v) => OnVolumeChanged(v))" Min="0" Max="1" Step="0.01" Style="flex: 1;" Color="Color.Primary">
         Volume: @((_volume * 100).ToString("F0"))%
       </MudSlider>
     </div>
@@ -98,11 +105,107 @@
   private string? _album = null;
   private string? _albumArtUrl = null;
   private string? _source = null;
+  private System.Threading.Timer? _timer;
 
   protected override async Task OnInitializedAsync()
   {
-    // TODO: Initialize API clients and SignalR connection
-    // For now, show empty state
-    await Task.CompletedTask;
+    await RefreshPlaybackStateAsync();
+    
+    // Update playback state every 2 seconds
+    _timer = new System.Threading.Timer(async _ =>
+    {
+      await RefreshPlaybackStateAsync();
+      await InvokeAsync(StateHasChanged);
+    }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+  }
+
+  private async Task RefreshPlaybackStateAsync()
+  {
+    try
+    {
+      var state = await AudioApi.GetPlaybackStateAsync();
+      if (state != null)
+      {
+        _isPlaying = state.IsPlaying;
+        _isMuted = state.IsMuted;
+        _isShuffleEnabled = state.IsShuffleEnabled;
+        _repeatMode = state.RepeatMode;
+        _volume = state.Volume;
+      }
+
+      var nowPlaying = await AudioApi.GetNowPlayingAsync();
+      if (nowPlaying != null)
+      {
+        _title = nowPlaying.Title;
+        _artist = nowPlaying.Artist;
+        _album = nowPlaying.Album;
+        _albumArtUrl = nowPlaying.AlbumArtUrl;
+        _source = nowPlaying.Source;
+      }
+    }
+    catch (Exception)
+    {
+      // Silently fail to avoid disrupting UI updates
+    }
+  }
+
+  private async Task HandlePlayPauseAsync()
+  {
+    if (_isPlaying)
+    {
+      await AudioApi.UpdatePlaybackStateAsync(new UpdatePlaybackRequest("pause", null, null, null));
+    }
+    else
+    {
+      await AudioApi.StartAsync();
+    }
+    await RefreshPlaybackStateAsync();
+  }
+
+  private async Task HandleNextAsync()
+  {
+    await AudioApi.NextAsync();
+    await RefreshPlaybackStateAsync();
+  }
+
+  private async Task HandlePreviousAsync()
+  {
+    await AudioApi.PreviousAsync();
+    await RefreshPlaybackStateAsync();
+  }
+
+  private async Task HandleShuffleAsync()
+  {
+    await AudioApi.SetShuffleAsync(!_isShuffleEnabled);
+    await RefreshPlaybackStateAsync();
+  }
+
+  private async Task HandleRepeatAsync()
+  {
+    await AudioApi.SetRepeatAsync(_repeatMode);
+    await RefreshPlaybackStateAsync();
+  }
+
+  private async Task HandleMuteAsync()
+  {
+    await AudioApi.ToggleMuteAsync(!_isMuted);
+    await RefreshPlaybackStateAsync();
+  }
+
+  private async Task HandleVolumeChangeAsync(double newVolume)
+  {
+    _volume = newVolume;
+    await AudioApi.SetVolumeAsync((float)newVolume);
+  }
+
+  private void OnVolumeChanged(double newVolume)
+  {
+    _volume = newVolume;
+    _ = HandleVolumeChangeAsync(newVolume); // Fire and forget
+  }
+
+  public void Dispose()
+  {
+    _timer?.Dispose();
   }
 }
