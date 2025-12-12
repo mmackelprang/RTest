@@ -26,5 +26,6 @@ jobs:
         run: dotnet build --no-restore --configuration Release
       - name: Install Playwright Browsers
         run: pwsh tests/Radio.Web.E2ETests/bin/Release/net8.0/playwright.ps1 install --with-deps
+        continue-on-error: false
       - name: Test
-        run: dotnet test --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage" --filter "FullyQualifiedName!~E2ETests"
+        run: dotnet test --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage" --filter "FullyQualifiedName!~Radio.Web.E2ETests"
