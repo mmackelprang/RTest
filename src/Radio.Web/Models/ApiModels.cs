@@ -87,7 +87,30 @@ public record MetricDto(
 
 public record MetricHistoryDto(
   DateTime Timestamp,
-  double Value
+  double Value,
+  int Count,
+  double Min,
+  double Max,
+  Dictionary<string, string>? Tags
+);
+
+public record MetricAggregateDto(
+  int Count,
+  double Sum,
+  double Average,
+  double Min,
+  double Max,
+  double StdDev
+);
+
+public record MetricEventRequest(
+  string EventName,
+  Dictionary<string, string>? Tags
+);
+
+public record MetricEventResponse(
+  bool Success,
+  string Metric
 );
 
 // File API DTOs
@@ -230,8 +253,32 @@ public record RadioDeviceDto(
 
 // System API DTOs
 public record SystemStatsDto(
-  double CpuUsage,
-  long RamUsageMb,
+  double CpuUsagePercent,
+  double RamUsageMb,
+  double DiskUsagePercent,
   int ThreadCount,
-  double? Temperature
+  string AppUptime,
+  string SystemUptime,
+  string AudioEngineState,
+  string SystemTemperature
+);
+
+public record LogEntryDto(
+  DateTime Timestamp,
+  string Level,
+  string Message,
+  string? Exception,
+  string SourceContext
+);
+
+public record SystemLogsResponse(
+  List<LogEntryDto> Logs,
+  int TotalCount,
+  LogFilters Filters
+);
+
+public record LogFilters(
+  string Level,
+  int Limit,
+  int? MaxAgeMinutes
 );
