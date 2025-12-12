@@ -106,6 +106,121 @@ public record FileItemDto(
   string? Album
 );
 
+// Play History API DTOs
+public record PlayHistoryListDto(
+  int TotalCount,
+  List<PlayHistoryItemDto> Items
+);
+
+public record PlayHistoryItemDto(
+  string Id,
+  string? Title,
+  string? Artist,
+  string? Album,
+  string Source,
+  DateTime PlayedAt,
+  int DurationSeconds
+);
+
+public record PlayHistoryStatsDto(
+  int TotalPlays,
+  int UniqueTracksCount,
+  string MostPlayedTrack,
+  string MostPlayedArtist,
+  Dictionary<string, int> PlaysBySource
+);
+
+// Spotify API DTOs
+public record SpotifyAuthStatusDto(
+  bool IsAuthenticated,
+  string? UserName,
+  DateTime? ExpiresAt
+);
+
+public record SpotifySearchResultsDto(
+  List<SpotifyTrackDto>? Tracks,
+  List<SpotifyAlbumDto>? Albums,
+  List<SpotifyArtistDto>? Artists,
+  List<SpotifyPlaylistDto>? Playlists
+);
+
+public record SpotifyTrackDto(
+  string Id,
+  string Name,
+  string Artist,
+  string Album,
+  string? AlbumArtUrl,
+  int DurationMs
+);
+
+public record SpotifyAlbumDto(
+  string Id,
+  string Name,
+  string Artist,
+  string? ImageUrl,
+  int TotalTracks
+);
+
+public record SpotifyArtistDto(
+  string Id,
+  string Name,
+  string? ImageUrl,
+  int Followers
+);
+
+public record SpotifyPlaylistDto(
+  string Id,
+  string Name,
+  string? Description,
+  string? ImageUrl,
+  int TotalTracks
+);
+
+public record SpotifyCategoryDto(
+  string Id,
+  string Name,
+  string? IconUrl
+);
+
+public record SpotifyUserDto(
+  string Id,
+  string DisplayName,
+  string? Email,
+  string? ImageUrl
+);
+
+// Radio API DTOs
+public record RadioStateDto(
+  double Frequency,
+  string Band,
+  double Step,
+  int? SignalStrength,
+  bool IsScanning,
+  string? ScanDirection,
+  int? Gain,
+  bool AutoGain,
+  string? Equalizer,
+  int? DeviceVolume
+);
+
+public record RadioPowerStateDto(
+  bool IsPoweredOn
+);
+
+public record RadioPresetDto(
+  int Slot,
+  string Name,
+  double Frequency,
+  string Band
+);
+
+public record RadioDeviceDto(
+  string Type,
+  string Name,
+  bool IsAvailable,
+  Dictionary<string, string>? Capabilities
+);
+
 // System API DTOs
 public record SystemStatsDto(
   double CpuUsage,

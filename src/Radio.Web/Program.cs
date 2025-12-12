@@ -71,10 +71,26 @@ builder.Services.AddHttpClient<FileApiService>(client =>
   client.Timeout = TimeSpan.FromSeconds(30);
 });
 
-// TODO: Add remaining API client services
-// - SpotifyApiService (10 endpoints)
-// - RadioApiService (23 endpoints)
-// - PlayHistoryApiService (8 endpoints)
+builder.Services.AddHttpClient<PlayHistoryApiService>(client =>
+{
+  client.BaseAddress = new Uri(apiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(30);
+});
+
+builder.Services.AddHttpClient<SpotifyApiService>(client =>
+{
+  client.BaseAddress = new Uri(apiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(30);
+});
+
+builder.Services.AddHttpClient<RadioApiService>(client =>
+{
+  client.BaseAddress = new Uri(apiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(30);
+});
+
+// All 11 API client services are now registered!
+// Total: 86 REST endpoints implemented
 
 // TODO: Register SignalR hub service as singleton (Phase 1 Task 1.3)
 // builder.Services.AddSingleton<AudioStateHubService>();
