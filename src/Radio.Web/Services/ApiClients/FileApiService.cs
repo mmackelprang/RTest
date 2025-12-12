@@ -59,4 +59,32 @@ public class FileApiService
       return false;
     }
   }
+  
+  public async Task<FileListDto?> ListFilesAsync(string path, bool recursive, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var url = $"/api/files?path={Uri.EscapeDataString(path)}&recursive={recursive}";
+      return await _httpClient.GetFromJsonAsync<FileListDto>(url, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to list files at path {Path}", path);
+      return null;
+    }
+  }
+  
+  public async Task<bool> AddFilesToQueueAsync(List<string> filePaths, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var response = await _httpClient.PostAsJsonAsync("/api/files/queue", new { paths = filePaths }, cancellationToken);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to add files to queue");
+      return false;
+    }
+  }
 }

@@ -31,17 +31,28 @@ public class SpotifyApiService
     }
   }
 
-  public async Task<string?> GetAuthUrlAsync(CancellationToken cancellationToken = default)
+  public async Task<SpotifyAuthUrlDto?> GetAuthUrlAsync(string redirectUri, CancellationToken cancellationToken = default)
   {
     try
     {
-      var response = await _httpClient.GetFromJsonAsync<Dictionary<string, string>>("/api/spotify/auth/url", cancellationToken);
-      return response?["url"];
+      return await _httpClient.GetFromJsonAsync<SpotifyAuthUrlDto>($"/api/spotify/auth/url?redirectUri={Uri.EscapeDataString(redirectUri)}", cancellationToken);
     }
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to get Spotify auth URL");
       return null;
+    }
+  }
+  
+  public async Task LogoutAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      await _httpClient.PostAsync("/api/spotify/auth/logout", null, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to logout from Spotify");
     }
   }
 
@@ -50,6 +61,20 @@ public class SpotifyApiService
     try
     {
       var typeParam = !string.IsNullOrEmpty(type) ? $"&type={type}" : "";
+      return await _httpClient.GetFromJsonAsync<SpotifySearchResultsDto>($"/api/spotify/search?q={Uri.EscapeDataString(query)}{typeParam}", cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to search Spotify");
+      return null;
+    }
+  }
+  
+  public async Task<SpotifySearchResultsDto?> SearchAsync(string query, List<string> types, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var typeParam = types.Any() ? $"&type={string.Join(",", types)}" : "";
       return await _httpClient.GetFromJsonAsync<SpotifySearchResultsDto>($"/api/spotify/search?q={Uri.EscapeDataString(query)}{typeParam}", cancellationToken);
     }
     catch (Exception ex)
@@ -136,6 +161,21 @@ public class SpotifyApiService
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to add Spotify track to queue");
+      return false;
+    }
+  }
+  
+  public async Task<bool> PlayUriAsync(string uri, string? contextUri = null, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var body = new { uri, contextUri };
+      var response = await _httpClient.PostAsJsonAsync("/api/spotify/play", body, cancellationToken);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to play Spotify URI");
       return false;
     }
   }

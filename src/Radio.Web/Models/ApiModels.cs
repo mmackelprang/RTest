@@ -150,7 +150,8 @@ public record SpotifyTrackDto(
   string Artist,
   string Album,
   string? AlbumArtUrl,
-  int DurationMs
+  int DurationMs,
+  string Uri
 );
 
 public record SpotifyAlbumDto(
@@ -187,6 +188,12 @@ public record SpotifyUserDto(
   string DisplayName,
   string? Email,
   string? ImageUrl
+);
+
+public record SpotifyAuthUrlDto(
+  string Url,
+  string State,
+  string CodeVerifier
 );
 
 // Radio API DTOs
