@@ -82,6 +82,18 @@
                    title="@($"Repeat: {_repeatMode}")" />
   </div>
   
+  <!-- Progress Bar -->
+  @if (!string.IsNullOrEmpty(_position) && !string.IsNullOrEmpty(_duration))
+  {
+    <div style="margin-top: 32px; width: 100%; max-width: 600px;">
+      <MudProgressLinear Color="Color.Primary" Size="Size.Medium" Value="@_progressPercent" Style="height: 8px; border-radius: 4px;" />
+      <div style="display: flex; justify-content: space-between; margin-top: 8px; font-size: 14px; color: var(--text-secondary);">
+        <span>@_position</span>
+        <span>@_duration</span>
+      </div>
+    </div>
+  }
+  
   <!-- Volume Control -->
   <div style="margin-top: 32px; width: 100%; max-width: 500px;">
     <div style="display: flex; align-items: center; gap: 16px;">
@@ -94,6 +106,17 @@
       </MudSlider>
     </div>
   </div>
+  
+  <!-- Balance Control -->
+  <div style="margin-top: 16px; width: 100%; max-width: 500px;">
+    <div style="display: flex; align-items: center; gap: 16px;">
+      <span style="min-width: 20px; text-align: center; color: var(--text-secondary);">L</span>
+      <MudSlider Value="_balance" ValueChanged="@((double b) => OnBalanceChanged(b))" Min="-1" Max="1" Step="0.01" Style="flex: 1;" Color="Color.Primary">
+        Balance: @(_balance == 0 ? "Center" : _balance < 0 ? $"L {(-_balance * 100):F0}%" : $"R {(_balance * 100):F0}%")
+      </MudSlider>
+      <span style="min-width: 20px; text-align: center; color: var(--text-secondary);">R</span>
+    </div>
+  </div>
 </div>
 
 @code {
@@ -102,11 +125,15 @@
   private bool _isShuffleEnabled = false;
   private string _repeatMode = "Off";
   private double _volume = 0.75;
+  private double _balance = 0.0;
   private string? _title = null;
   private string? _artist = null;
   private string? _album = null;
   private string? _albumArtUrl = null;
   private string? _source = null;
+  private string? _position = null;
+  private string? _duration = null;
+  private double _progressPercent = 0.0;
   private System.Threading.Timer? _timer;
 
   protected override async Task OnInitializedAsync()
@@ -174,6 +201,18 @@
         _isShuffleEnabled = state.IsShuffleEnabled;
         _repeatMode = state.RepeatMode;
         _volume = state.Volume;
+        _balance = state.Balance;
+        _position = state.Position;
+        _duration = state.Duration;
+        
+        // Calculate progress percentage
+        if (!string.IsNullOrEmpty(_position) && !string.IsNullOrEmpty(_duration))
+        {
+          if (TimeSpan.TryParse(_position, out var pos) && TimeSpan.TryParse(_duration, out var dur) && dur.TotalSeconds > 0)
+          {
+            _progressPercent = (pos.TotalSeconds / dur.TotalSeconds) * 100.0;
+          }
+        }
       }
 
       var nowPlaying = await AudioApi.GetNowPlayingAsync();
@@ -245,6 +284,18 @@
   {
     _volume = newVolume;
     _ = HandleVolumeChangeAsync(newVolume); // Fire and forget
+  }
+  
+  private async Task HandleBalanceChangeAsync(double newBalance)
+  {
+    _balance = newBalance;
+    await AudioApi.UpdatePlaybackStateAsync(new UpdatePlaybackRequest(null, null, null, (float)newBalance));
+  }
+  
+  private void OnBalanceChanged(double newBalance)
+  {
+    _balance = newBalance;
+    _ = HandleBalanceChangeAsync(newBalance); // Fire and forget
   }
 
   public async ValueTask DisposeAsync()
