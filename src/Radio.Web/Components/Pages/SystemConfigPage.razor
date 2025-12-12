@@ -1,0 +1,483 @@
+@page "/system"
+@inject SystemApiService SystemApi
+@inject ConfigurationApiService ConfigApi
+@inject SourcesApiService SourcesApi
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+<PageTitle>System Configuration</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Style="height: 516px; padding: 16px;">
+  <MudTabs Elevation="2" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-4" @bind-ActivePanelIndex="_activeTab">
+    
+    <!-- Tab 1: System Statistics -->
+    <MudTabPanel Text="System Stats" Icon="@Icons.Material.Filled.Insights">
+      <MudGrid Spacing="3">
+        <!-- CPU Usage -->
+        <MudItem xs="6" md="3">
+          <MudCard>
+            <MudCardContent>
+              <MudText Typo="Typo.h6">CPU Usage</MudText>
+              <MudProgressCircular Color="Color.Primary" Size="Size.Large" Value="@_cpuUsage" />
+              <MudText Typo="Typo.h5" Color="Color.Primary">@_cpuUsage.ToString("F1")%</MudText>
+            </MudCardContent>
+          </MudCard>
+        </MudItem>
+
+        <!-- RAM Usage -->
+        <MudItem xs="6" md="3">
+          <MudCard>
+            <MudCardContent>
+              <MudText Typo="Typo.h6">RAM Usage</MudText>
+              <MudProgressCircular Color="Color.Secondary" Size="Size.Large" Value="@(_ramUsageMb / 10)" />
+              <MudText Typo="Typo.h5" Color="Color.Secondary">@_ramUsageMb.ToString("F0") MB</MudText>
+            </MudCardContent>
+          </MudCard>
+        </MudItem>
+
+        <!-- Disk Usage -->
+        <MudItem xs="6" md="3">
+          <MudCard>
+            <MudCardContent>
+              <MudText Typo="Typo.h6">Disk Usage</MudText>
+              <MudProgressCircular Color="Color.Info" Size="Size.Large" Value="@_diskUsage" />
+              <MudText Typo="Typo.h5" Color="Color.Info">@_diskUsage.ToString("F1")%</MudText>
+            </MudCardContent>
+          </MudCard>
+        </MudItem>
+
+        <!-- Thread Count -->
+        <MudItem xs="6" md="3">
+          <MudCard>
+            <MudCardContent>
+              <MudText Typo="Typo.h6">Active Threads</MudText>
+              <MudText Typo="Typo.h3" Color="Color.Success">@_threadCount</MudText>
+            </MudCardContent>
+          </MudCard>
+        </MudItem>
+
+        <!-- App Uptime -->
+        <MudItem xs="6" md="4">
+          <MudCard>
+            <MudCardContent>
+              <MudText Typo="Typo.h6">App Uptime</MudText>
+              <MudText Typo="Typo.body1">@_appUptime</MudText>
+            </MudCardContent>
+          </MudCard>
+        </MudItem>
+
+        <!-- System Uptime -->
+        <MudItem xs="6" md="4">
+          <MudCard>
+            <MudCardContent>
+              <MudText Typo="Typo.h6">System Uptime</MudText>
+              <MudText Typo="Typo.body1">@_systemUptime</MudText>
+            </MudCardContent>
+          </MudCard>
+        </MudItem>
+
+        <!-- Temperature -->
+        <MudItem xs="6" md="4">
+          <MudCard>
+            <MudCardContent>
+              <MudText Typo="Typo.h6">Temperature</MudText>
+              <MudText Typo="Typo.body1" Color="@(_temperature == "N/A" ? Color.Default : Color.Warning)">@_temperature</MudText>
+            </MudCardContent>
+          </MudCard>
+        </MudItem>
+
+        <!-- Audio Engine State -->
+        <MudItem xs="12">
+          <MudCard>
+            <MudCardContent>
+              <MudText Typo="Typo.h6">Audio Engine State</MudText>
+              <MudText Typo="Typo.body1">@_audioEngineState</MudText>
+            </MudCardContent>
+          </MudCard>
+        </MudItem>
+      </MudGrid>
+    </MudTabPanel>
+
+    <!-- Tab 2: Configuration Management -->
+    <MudTabPanel Text="Configuration" Icon="@Icons.Material.Filled.Tune">
+      <MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-2">
+        
+        <!-- Audio Configuration -->
+        <MudTabPanel Text="Audio">
+          @if (_audioConfig != null)
+          {
+            <MudSimpleTable Dense="true" Hover="true">
+              <thead>
+                <tr>
+                  <th>Setting</th>
+                  <th>Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                @foreach (var kvp in _audioConfig)
+                {
+                  <tr>
+                    <td><strong>@kvp.Key</strong></td>
+                    <td>@kvp.Value</td>
+                  </tr>
+                }
+              </tbody>
+            </MudSimpleTable>
+          }
+          else
+          {
+            <MudText>Loading audio configuration...</MudText>
+          }
+        </MudTabPanel>
+
+        <!-- Visualizer Configuration -->
+        <MudTabPanel Text="Visualizer">
+          @if (_visualizerConfig != null)
+          {
+            <MudSimpleTable Dense="true" Hover="true">
+              <thead>
+                <tr>
+                  <th>Setting</th>
+                  <th>Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                @foreach (var kvp in _visualizerConfig)
+                {
+                  <tr>
+                    <td><strong>@kvp.Key</strong></td>
+                    <td>@kvp.Value</td>
+                  </tr>
+                }
+              </tbody>
+            </MudSimpleTable>
+          }
+          else
+          {
+            <MudText>Loading visualizer configuration...</MudText>
+          }
+        </MudTabPanel>
+
+        <!-- Output Configuration -->
+        <MudTabPanel Text="Output">
+          @if (_outputConfig != null)
+          {
+            <MudSimpleTable Dense="true" Hover="true">
+              <thead>
+                <tr>
+                  <th>Setting</th>
+                  <th>Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                @foreach (var kvp in _outputConfig)
+                {
+                  <tr>
+                    <td><strong>@kvp.Key</strong></td>
+                    <td>@kvp.Value</td>
+                  </tr>
+                }
+              </tbody>
+            </MudSimpleTable>
+          }
+          else
+          {
+            <MudText>Loading output configuration...</MudText>
+          }
+        </MudTabPanel>
+      </MudTabs>
+      
+      <MudAlert Severity="Severity.Info" Class="mt-4">
+        Configuration editing will be enhanced in future updates. Currently showing read-only values.
+      </MudAlert>
+    </MudTabPanel>
+
+    <!-- Tab 3: Log Viewer -->
+    <MudTabPanel Text="Logs" Icon="@Icons.Material.Filled.Article">
+      <MudStack Row="true" Spacing="2" Class="mb-3">
+        <MudSelect T="string" @bind-Value="_logLevel" Label="Log Level" Variant="Variant.Outlined" Dense="true" Style="min-width: 150px;">
+          <MudSelectItem Value="@("info")">Info</MudSelectItem>
+          <MudSelectItem Value="@("warning")">Warning</MudSelectItem>
+          <MudSelectItem Value="@("error")">Error</MudSelectItem>
+        </MudSelect>
+
+        <MudNumericField @bind-Value="_logLimit" Label="Limit" Variant="Variant.Outlined" Min="1" Max="10000" Style="width: 120px;" />
+
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadLogsAsync" StartIcon="@Icons.Material.Filled.Refresh">
+          Refresh
+        </MudButton>
+
+        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="ExportLogsAsync" StartIcon="@Icons.Material.Filled.Download" Disabled="@(_logs == null || _logs.Count == 0)">
+          Export
+        </MudButton>
+      </MudStack>
+
+      @if (_logsLoading)
+      {
+        <MudProgressLinear Color="Color.Primary" Indeterminate="true" />
+      }
+      else if (_logs != null && _logs.Count > 0)
+      {
+        <div style="height: 350px; overflow-y: auto;">
+          <MudSimpleTable Dense="true" Hover="true" FixedHeader="true">
+            <thead>
+              <tr>
+                <th style="width: 180px;">Timestamp</th>
+                <th style="width: 100px;">Level</th>
+                <th style="width: 250px;">Source</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody>
+              @foreach (var log in _logs)
+              {
+                <tr>
+                  <td>@log.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                  <td>
+                    <MudChip T="string" Size="Size.Small" Color="@GetLogLevelColor(log.Level)">@log.Level</MudChip>
+                  </td>
+                  <td>@GetShortSourceName(log.SourceContext)</td>
+                  <td>
+                    @log.Message
+                    @if (!string.IsNullOrEmpty(log.Exception))
+                    {
+                      <MudText Typo="Typo.caption" Color="Color.Error">@log.Exception</MudText>
+                    }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </MudSimpleTable>
+        </div>
+        <MudText Typo="Typo.caption" Class="mt-2">Showing @_logs.Count of @_totalLogCount logs</MudText>
+      }
+      else
+      {
+        <MudAlert Severity="Severity.Info">No logs found matching the current filters.</MudAlert>
+      }
+    </MudTabPanel>
+
+    <!-- Tab 4: Event Sources -->
+    <MudTabPanel Text="Event Sources" Icon="@Icons.Material.Filled.EventNote">
+      @if (_eventSources != null && _eventSources.Count > 0)
+      {
+        <MudSimpleTable Dense="true" Hover="true">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Name</th>
+              <th>Type</th>
+              <th>State</th>
+              <th>Volume</th>
+              <th>Metadata</th>
+            </tr>
+          </thead>
+          <tbody>
+            @foreach (var source in _eventSources)
+            {
+              <tr>
+                <td>@source.Id</td>
+                <td><strong>@source.Name</strong></td>
+                <td>@source.Type</td>
+                <td><MudChip T="string" Size="Size.Small" Color="@(source.State == "Active" ? Color.Success : Color.Default)">@source.State</MudChip></td>
+                <td>@source.Volume.ToString("P0")</td>
+                <td>
+                  @if (source.Metadata != null && source.Metadata.Count > 0)
+                  {
+                    <MudText Typo="Typo.caption">@string.Join(", ", source.Metadata.Select(m => $"{m.Key}: {m.Value}"))</MudText>
+                  }
+                  else
+                  {
+                    <MudText Typo="Typo.caption" Color="Color.Default">None</MudText>
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </MudSimpleTable>
+      }
+      else if (_eventSourcesLoading)
+      {
+        <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+      }
+      else
+      {
+        <MudAlert Severity="Severity.Info">No event sources configured.</MudAlert>
+      }
+    </MudTabPanel>
+
+  </MudTabs>
+</MudContainer>
+
+@code {
+  private int _activeTab = 0;
+  private System.Threading.Timer? _statsTimer;
+
+  // System Stats
+  private double _cpuUsage = 0;
+  private double _ramUsageMb = 0;
+  private double _diskUsage = 0;
+  private int _threadCount = 0;
+  private string _appUptime = "N/A";
+  private string _systemUptime = "N/A";
+  private string _temperature = "N/A";
+  private string _audioEngineState = "Unknown";
+
+  // Configuration
+  private Dictionary<string, object>? _audioConfig;
+  private Dictionary<string, object>? _visualizerConfig;
+  private Dictionary<string, object>? _outputConfig;
+
+  // Logs
+  private string _logLevel = "warning";
+  private int _logLimit = 100;
+  private List<LogEntryDto> _logs = new();
+  private int _totalLogCount = 0;
+  private bool _logsLoading = false;
+
+  // Event Sources
+  private List<AudioSourceDto>? _eventSources;
+  private bool _eventSourcesLoading = false;
+
+  protected override async Task OnInitializedAsync()
+  {
+    // Load initial data
+    await LoadSystemStatsAsync();
+    await LoadConfigurationAsync();
+    await LoadLogsAsync();
+    await LoadEventSourcesAsync();
+
+    // Update system stats every 5 seconds
+    _statsTimer = new System.Threading.Timer(async _ =>
+    {
+      await LoadSystemStatsAsync();
+      await InvokeAsync(StateHasChanged);
+    }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+  }
+
+  private async Task LoadSystemStatsAsync()
+  {
+    try
+    {
+      var stats = await SystemApi.GetSystemStatsAsync();
+      if (stats != null)
+      {
+        _cpuUsage = stats.CpuUsagePercent;
+        _ramUsageMb = stats.RamUsageMb;
+        _diskUsage = stats.DiskUsagePercent;
+        _threadCount = stats.ThreadCount;
+        _appUptime = stats.AppUptime;
+        _systemUptime = stats.SystemUptime;
+        _temperature = stats.SystemTemperature;
+        _audioEngineState = stats.AudioEngineState;
+      }
+    }
+    catch (Exception)
+    {
+      // Silently fail - stats will show default values
+    }
+  }
+
+  private async Task LoadConfigurationAsync()
+  {
+    try
+    {
+      _audioConfig = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("audio");
+      _visualizerConfig = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("visualizer");
+      _outputConfig = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("output");
+    }
+    catch (Exception)
+    {
+      Snackbar.Add("Failed to load configuration", Severity.Error);
+    }
+  }
+
+  private async Task LoadLogsAsync()
+  {
+    _logsLoading = true;
+    try
+    {
+      var response = await SystemApi.GetSystemLogsAsync(_logLevel, _logLimit);
+      if (response != null)
+      {
+        _logs = response.Logs;
+        _totalLogCount = response.TotalCount;
+      }
+      else
+      {
+        _logs = new List<LogEntryDto>();
+        _totalLogCount = 0;
+      }
+    }
+    catch (Exception)
+    {
+      Snackbar.Add("Failed to load logs", Severity.Error);
+      _logs = new List<LogEntryDto>();
+    }
+    finally
+    {
+      _logsLoading = false;
+    }
+  }
+
+  private async Task LoadEventSourcesAsync()
+  {
+    _eventSourcesLoading = true;
+    try
+    {
+      _eventSources = await SourcesApi.GetEventSourcesAsync();
+    }
+    catch (Exception)
+    {
+      Snackbar.Add("Failed to load event sources", Severity.Error);
+    }
+    finally
+    {
+      _eventSourcesLoading = false;
+    }
+  }
+
+  private async Task ExportLogsAsync()
+  {
+    try
+    {
+      if (_logs == null || _logs.Count == 0)
+        return;
+
+      var content = string.Join("\n", _logs.Select(log =>
+        $"[{log.Timestamp:yyyy-MM-dd HH:mm:ss}] [{log.Level}] {log.SourceContext}: {log.Message}" +
+        (string.IsNullOrEmpty(log.Exception) ? "" : $"\n{log.Exception}")));
+
+      var fileName = $"radio-console-logs-{DateTime.Now:yyyyMMdd-HHmmss}.txt";
+      
+      // Note: This is a placeholder. Actual file download in Blazor requires JavaScript interop
+      Snackbar.Add($"Export functionality: {fileName} ({content.Length} characters)", Severity.Info);
+    }
+    catch (Exception)
+    {
+      Snackbar.Add("Failed to export logs", Severity.Error);
+    }
+  }
+
+  private Color GetLogLevelColor(string level) => level.ToLower() switch
+  {
+    "error" => Color.Error,
+    "warning" => Color.Warning,
+    "info" => Color.Info,
+    _ => Color.Default
+  };
+
+  private string GetShortSourceName(string sourceContext)
+  {
+    if (string.IsNullOrEmpty(sourceContext))
+      return "Unknown";
+    
+    var parts = sourceContext.Split('.');
+    return parts.Length > 0 ? parts[^1] : sourceContext;
+  }
+
+  public void Dispose()
+  {
+    _statsTimer?.Dispose();
+  }
+}

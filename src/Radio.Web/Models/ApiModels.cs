@@ -230,8 +230,32 @@ public record RadioDeviceDto(
 
 // System API DTOs
 public record SystemStatsDto(
-  double CpuUsage,
-  long RamUsageMb,
+  double CpuUsagePercent,
+  double RamUsageMb,
+  double DiskUsagePercent,
   int ThreadCount,
-  double? Temperature
+  string AppUptime,
+  string SystemUptime,
+  string AudioEngineState,
+  string SystemTemperature
+);
+
+public record LogEntryDto(
+  DateTime Timestamp,
+  string Level,
+  string Message,
+  string? Exception,
+  string SourceContext
+);
+
+public record SystemLogsResponse(
+  List<LogEntryDto> Logs,
+  int TotalCount,
+  LogFilters Filters
+);
+
+public record LogFilters(
+  string Level,
+  int Limit,
+  int? MaxAgeMinutes
 );

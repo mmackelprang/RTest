@@ -83,4 +83,17 @@ public class SourcesApiService
       return null;
     }
   }
+
+  public async Task<List<AudioSourceDto>?> GetEventSourcesAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      return await _httpClient.GetFromJsonAsync<List<AudioSourceDto>>("/api/sources/events", cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to get event sources");
+      return null;
+    }
+  }
 }

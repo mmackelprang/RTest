@@ -152,8 +152,8 @@
       var stats = await SystemApi.GetSystemStatsAsync();
       if (stats != null)
       {
-        _cpuUsage = stats.CpuUsage.ToString("F1");
-        _ramUsage = stats.RamUsageMb.ToString();
+        _cpuUsage = stats.CpuUsagePercent.ToString("F1");
+        _ramUsage = stats.RamUsageMb.ToString("F0");
         _threadCount = stats.ThreadCount.ToString();
       }
     }
