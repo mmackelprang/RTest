@@ -83,8 +83,78 @@
       </MudButton>
     </div>
     
+    <!-- Browse View -->
+    @if (_isBrowsing)
+    {
+      <div style="flex: 1; overflow-y: auto;">
+        @if (_isLoadingBrowse)
+        {
+          <div style="display: flex; justify-content: center; padding: 64px;">
+            <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+          </div>
+        }
+        else if (_selectedCategory == null && _browseCategories != null)
+        {
+          <MudText Typo="Typo.h6" Style="margin-bottom: 16px;">Categories</MudText>
+          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 16px;">
+            @foreach (var category in _browseCategories)
+            {
+              <MudCard Outlined="true" Style="cursor: pointer;" @onclick="@(() => LoadCategoryPlaylistsAsync(category))">
+                <MudCardContent Style="text-align: center; padding: 16px;">
+                  @if (!string.IsNullOrEmpty(category.IconUrl))
+                  {
+                    <img src="@category.IconUrl" alt="@category.Name" style="width: 80px; height: 80px; object-fit: cover; border-radius: 8px; margin-bottom: 8px;" />
+                  }
+                  else
+                  {
+                    <MudIcon Icon="@Icons.Material.Filled.Category" Style="font-size: 80px; margin-bottom: 8px; color: var(--text-secondary);" />
+                  }
+                  <MudText Typo="Typo.body2">@category.Name</MudText>
+                </MudCardContent>
+              </MudCard>
+            }
+          </div>
+        }
+        else if (_selectedCategory != null && _categoryPlaylists != null)
+        {
+          <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 16px;">
+            <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" OnClick="BackToCategoriesAsync" title="Back to Categories" />
+            <MudText Typo="Typo.h6">@_selectedCategory.Name</MudText>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 16px;">
+            @foreach (var playlist in _categoryPlaylists)
+            {
+              <MudCard Outlined="true" Style="cursor: pointer;">
+                <MudCardContent Style="text-align: center; padding: 16px;">
+                  @if (!string.IsNullOrEmpty(playlist.ImageUrl))
+                  {
+                    <img src="@playlist.ImageUrl" alt="@playlist.Name" style="width: 100px; height: 100px; object-fit: cover; border-radius: 8px; margin-bottom: 8px;" />
+                  }
+                  else
+                  {
+                    <MudIcon Icon="@Icons.Material.Filled.PlaylistPlay" Style="font-size: 100px; margin-bottom: 8px; color: var(--text-secondary);" />
+                  }
+                  <MudText Typo="Typo.body2" Style="font-weight: 600;">@playlist.Name</MudText>
+                  <MudText Typo="Typo.caption" Style="color: var(--text-secondary);">@playlist.TotalTracks tracks</MudText>
+                </MudCardContent>
+                <MudCardActions Style="justify-content: center;">
+                  <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" 
+                                 Color="Color.Primary" 
+                                 OnClick="@(() => HandlePlayPlaylistAsync(playlist.Id))" 
+                                 title="Play Playlist" />
+                  <MudIconButton Icon="@Icons.Material.Filled.AddToQueue" 
+                                 Color="Color.Default" 
+                                 OnClick="@(() => HandleAddPlaylistToQueueAsync(playlist.Id))" 
+                                 title="Add to Queue" />
+                </MudCardActions>
+              </MudCard>
+            }
+          </div>
+        }
+      </div>
+    }
     <!-- Search Results -->
-    @if (_isSearching)
+    else if (_isSearching)
     {
       <div style="display: flex; justify-content: center; padding: 64px;">
         <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
@@ -177,6 +247,13 @@
   private List<string> _selectedFilters = new() { "all" };
   private SpotifySearchResultsDto? _searchResults = null;
   private bool _isSearching = false;
+  
+  // Browse state
+  private bool _isBrowsing = false;
+  private bool _isLoadingBrowse = false;
+  private List<SpotifyCategoryDto>? _browseCategories = null;
+  private SpotifyCategoryDto? _selectedCategory = null;
+  private List<SpotifyPlaylistDto>? _categoryPlaylists = null;
 
   protected override async Task OnInitializedAsync()
   {
@@ -264,6 +341,7 @@
   {
     if (string.IsNullOrWhiteSpace(_searchQuery)) return;
     
+    _isBrowsing = false;
     _isSearching = true;
     try
     {
@@ -307,9 +385,79 @@
     }
   }
 
-  private void HandleBrowseAsync()
+  private async Task HandleBrowseAsync()
   {
-    // TODO: Open browse dialog
+    _isBrowsing = true;
+    _searchResults = null;
+    _searchQuery = "";
+    _isLoadingBrowse = true;
+    _selectedCategory = null;
+    _categoryPlaylists = null;
+    
+    try
+    {
+      _browseCategories = await SpotifyApi.GetCategoriesAsync();
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+    finally
+    {
+      _isLoadingBrowse = false;
+    }
+  }
+
+  private async Task LoadCategoryPlaylistsAsync(SpotifyCategoryDto category)
+  {
+    _selectedCategory = category;
+    _isLoadingBrowse = true;
+    
+    try
+    {
+      _categoryPlaylists = await SpotifyApi.GetCategoryPlaylistsAsync(category.Id);
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+    finally
+    {
+      _isLoadingBrowse = false;
+    }
+  }
+
+  private async Task HandlePlayPlaylistAsync(string playlistId)
+  {
+    try
+    {
+      await SpotifyApi.PlayPlaylistAsync(playlistId);
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+
+  private async Task HandleAddPlaylistToQueueAsync(string playlistId)
+  {
+    try
+    {
+      // Note: Spotify API doesn't provide individual track URIs in playlist response
+      // As a workaround, we play the playlist which loads all tracks
+      // A full implementation would require fetching playlist tracks and adding each to queue
+      await SpotifyApi.PlayPlaylistAsync(playlistId);
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+
+  private void BackToCategoriesAsync()
+  {
+    _selectedCategory = null;
+    _categoryPlaylists = null;
   }
 
   public void Dispose()

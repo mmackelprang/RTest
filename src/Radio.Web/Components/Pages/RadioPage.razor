@@ -1,0 +1,549 @@
+@page "/radio"
+@rendermode InteractiveServer
+@inject RadioApiService RadioApi
+@inject AudioStateHubService HubService
+@implements IAsyncDisposable
+
+<PageTitle>Radio - Radio Console</PageTitle>
+
+<div class="radio-page" style="padding: 24px; height: 100%; display: flex; flex-direction: column;">
+  <MudText Typo="Typo.h4" Style="margin-bottom: 24px;">Radio Control</MudText>
+  
+  @if (_radioState == null)
+  {
+    <div style="display: flex; justify-content: center; align-items: center; height: 100%;">
+      <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+    </div>
+  }
+  else
+  {
+    <!-- LED-style Radio Display -->
+    <MudCard Elevation="2" Style="margin-bottom: 24px; padding: 32px; background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);">
+      <div style="text-align: center;">
+        <!-- Frequency Display -->
+        <div style="font-family: 'DSEG14Classic-Bold', monospace; font-size: 64px; color: oklch(0.85 0.2 75); text-shadow: 0 0 20px oklch(0.85 0.2 75); margin-bottom: 16px; letter-spacing: 8px;">
+          @FormatFrequency(_radioState.Frequency, _radioState.Band)
+        </div>
+        
+        <!-- Band and Info -->
+        <div style="display: flex; justify-content: center; gap: 32px; margin-bottom: 16px;">
+          <div style="font-family: 'DSEG14Classic-Regular', monospace; font-size: 24px; color: oklch(0.7 0.15 195);">
+            @_radioState.Band
+          </div>
+          @if (_radioState.SignalStrength.HasValue)
+          {
+            <div style="font-family: 'DSEG14Classic-Regular', monospace; font-size: 24px; color: oklch(0.7 0.15 195);">
+              Signal: @_radioState.SignalStrength%
+            </div>
+          }
+          @if (_radioState.IsScanning)
+          {
+            <div style="font-family: 'DSEG14Classic-Regular', monospace; font-size: 24px; color: oklch(0.85 0.2 75); animation: blink 1s infinite;">
+              SCANNING @_radioState.ScanDirection
+            </div>
+          }
+        </div>
+        
+        <!-- Step Size -->
+        <div style="font-family: 'DSEG14Classic-Regular', monospace; font-size: 18px; color: oklch(0.6 0.12 195);">
+          Step: @_radioState.Step MHz
+        </div>
+      </div>
+    </MudCard>
+    
+    <!-- Frequency Controls -->
+    <div style="display: flex; justify-content: center; gap: 16px; margin-bottom: 24px;">
+      <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowLeft" 
+                     Color="Color.Primary" 
+                     Size="Size.Large"
+                     Style="min-width: 60px; min-height: 60px; font-size: 32px;"
+                     OnClick="FrequencyDownAsync"
+                     title="Frequency Down" />
+      
+      <MudButton Variant="Variant.Filled" 
+                 Color="Color.Primary" 
+                 Size="Size.Large"
+                 Style="min-width: 120px; min-height: 60px; font-size: 20px;"
+                 OnClick="OpenFrequencyDialog"
+                 title="Set Frequency">
+        SET
+      </MudButton>
+      
+      <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowRight" 
+                     Color="Color.Primary" 
+                     Size="Size.Large"
+                     Style="min-width: 60px; min-height: 60px; font-size: 32px;"
+                     OnClick="FrequencyUpAsync"
+                     title="Frequency Up" />
+    </div>
+    
+    <!-- Band Selector and Additional Controls -->
+    <div style="display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; justify-content: center;">
+      <MudSelect T="string" Value="@_radioState.Band" ValueChanged="@HandleBandChangeAsync" 
+                 Label="Band" Variant="Variant.Outlined" Dense="true" 
+                 Style="min-width: 150px;">
+        <MudSelectItem Value="@("AM")">AM</MudSelectItem>
+        <MudSelectItem Value="@("FM")">FM</MudSelectItem>
+        <MudSelectItem Value="@("AIR")">Aircraft</MudSelectItem>
+        <MudSelectItem Value="@("SW")">Shortwave</MudSelectItem>
+        <MudSelectItem Value="@("WB")">Weather</MudSelectItem>
+        <MudSelectItem Value="@("VHF")">VHF</MudSelectItem>
+      </MudSelect>
+      
+      <MudSelect T="string" Value="@_radioState.Step.ToString()" ValueChanged="@HandleStepChangeAsync" 
+                 Label="Step Size" Variant="Variant.Outlined" Dense="true" 
+                 Style="min-width: 150px;">
+        <MudSelectItem Value="@("0.1")">0.1 MHz</MudSelectItem>
+        <MudSelectItem Value="@("0.2")">0.2 MHz</MudSelectItem>
+        <MudSelectItem Value="@("1.0")">1.0 MHz</MudSelectItem>
+      </MudSelect>
+      
+      @if (_radioState.IsScanning)
+      {
+        <MudButton Variant="Variant.Filled" 
+                   Color="Color.Error" 
+                   OnClick="StopScanAsync"
+                   StartIcon="@Icons.Material.Filled.Stop">
+          Stop Scan
+        </MudButton>
+      }
+      else
+      {
+        <MudButton Variant="Variant.Outlined" 
+                   Color="Color.Primary" 
+                   OnClick="@(() => StartScanAsync("up"))"
+                   StartIcon="@Icons.Material.Filled.Search">
+          Scan Up
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" 
+                   Color="Color.Primary" 
+                   OnClick="@(() => StartScanAsync("down"))"
+                   StartIcon="@Icons.Material.Filled.Search">
+          Scan Down
+        </MudButton>
+      }
+    </div>
+    
+    <!-- Presets Section -->
+    <MudCard Elevation="1" Style="padding: 16px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <MudText Typo="Typo.h6">Presets</MudText>
+        <MudButton Variant="Variant.Filled" 
+                   Color="Color.Primary" 
+                   Size="Size.Small"
+                   OnClick="OpenSavePresetDialog"
+                   StartIcon="@Icons.Material.Filled.Save">
+          Save Current
+        </MudButton>
+      </div>
+      
+      @if (_presets == null || !_presets.Any())
+      {
+        <div style="text-align: center; padding: 32px; color: var(--text-secondary);">
+          <MudIcon Icon="@Icons.Material.Filled.Radio" Style="font-size: 64px; opacity: 0.5; margin-bottom: 16px;" />
+          <MudText Typo="Typo.body1">No presets saved yet</MudText>
+          <MudText Typo="Typo.body2">Save the current station to create a preset</MudText>
+        </div>
+      }
+      else
+      {
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px;">
+          @foreach (var preset in _presets.OrderBy(p => p.Slot))
+          {
+            <MudCard Outlined="true" Style="cursor: pointer;">
+              <MudCardContent Style="padding: 12px;" @onclick="@(() => LoadPresetAsync(preset.Slot))">
+                <MudText Typo="Typo.body1" Style="font-weight: 600;">@preset.Name</MudText>
+                <MudText Typo="Typo.body2" Style="color: var(--text-secondary);">
+                  @preset.Band - @FormatFrequency(preset.Frequency, preset.Band)
+                </MudText>
+              </MudCardContent>
+              <MudCardActions Style="padding: 8px; justify-content: flex-end;">
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" 
+                               Color="Color.Error" 
+                               Size="Size.Small"
+                               OnClick="@(() => DeletePresetAsync(preset.Slot))"
+                               title="Delete" />
+              </MudCardActions>
+            </MudCard>
+          }
+        </div>
+      }
+    </MudCard>
+    
+    <!-- SDR Controls (if applicable) -->
+    @if (_radioState.Gain.HasValue)
+    {
+      <MudCard Elevation="1" Style="padding: 16px; margin-top: 16px;">
+        <MudText Typo="Typo.h6" Style="margin-bottom: 16px;">SDR Controls</MudText>
+        
+        <div style="display: flex; gap: 24px; align-items: center; flex-wrap: wrap;">
+          <MudSwitch T="bool" 
+                     Value="@_radioState.AutoGain" 
+                     ValueChanged="@HandleAutoGainChangedAsync"
+                     Label="Auto Gain (AGC)" 
+                     Color="Color.Primary" />
+          
+          @if (!_radioState.AutoGain && _radioState.Gain.HasValue)
+          {
+            <div style="flex: 1; min-width: 200px;">
+              <MudSlider T="int" 
+                         Value="@_radioState.Gain.Value" 
+                         ValueChanged="@HandleGainChangedAsync"
+                         Min="0" 
+                         Max="50" 
+                         Step="1"
+                         Color="Color.Primary">
+                Gain: @_radioState.Gain dB
+              </MudSlider>
+            </div>
+          }
+        </div>
+      </MudCard>
+    }
+  }
+</div>
+
+@if (_isFrequencyDialogOpen)
+{
+  <!-- Frequency Set Dialog -->
+  <MudDialog>
+    <DialogContent>
+      <MudNumericField @bind-Value="_newFrequency" 
+                       Label="Frequency (MHz)" 
+                       Variant="Variant.Outlined" 
+                       Min="@GetMinFrequency()" 
+                       Max="@GetMaxFrequency()" 
+                       Step="@(_radioState?.Step ?? 0.1)"
+                       Style="width: 100%;" />
+    </DialogContent>
+    <DialogActions>
+      <MudButton OnClick="CloseFrequencyDialog">Cancel</MudButton>
+      <MudButton Color="Color.Primary" OnClick="SetFrequencyAsync">Set</MudButton>
+    </DialogActions>
+  </MudDialog>
+}
+
+@if (_isSavePresetDialogOpen)
+{
+  <!-- Save Preset Dialog -->
+  <MudDialog>
+    <DialogContent>
+      <MudTextField @bind-Value="_presetName" 
+                    Label="Preset Name" 
+                    Variant="Variant.Outlined" 
+                    Style="width: 100%; margin-bottom: 16px;" />
+      <MudNumericField @bind-Value="_presetSlot" 
+                       Label="Slot (1-50)" 
+                       Variant="Variant.Outlined" 
+                       Min="1" 
+                       Max="50" 
+                       Step="1"
+                       Style="width: 100%;" />
+    </DialogContent>
+    <DialogActions>
+      <MudButton OnClick="CloseSavePresetDialog">Cancel</MudButton>
+      <MudButton Color="Color.Primary" OnClick="SavePresetAsync">Save</MudButton>
+    </DialogActions>
+  </MudDialog>
+}
+
+<style>
+  @@keyframes blink {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0.3; }
+  }
+</style>
+
+@code {
+  private RadioStateDto? _radioState = null;
+  private List<RadioPresetDto>? _presets = null;
+  
+  // Frequency dialog
+  private bool _isFrequencyDialogOpen = false;
+  private double _newFrequency = 88.0;
+  
+  // Save preset dialog
+  private bool _isSavePresetDialogOpen = false;
+  private string _presetName = "";
+  private int _presetSlot = 1;
+  
+  protected override async Task OnInitializedAsync()
+  {
+    await LoadRadioStateAsync();
+    await LoadPresetsAsync();
+    
+    // Subscribe to SignalR radio state changes
+    HubService.RadioStateChanged += HandleRadioStateChanged;
+    await HubService.StartAsync();
+  }
+  
+  private async Task LoadRadioStateAsync()
+  {
+    try
+    {
+      _radioState = await RadioApi.GetStateAsync();
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+  
+  private async Task LoadPresetsAsync()
+  {
+    try
+    {
+      _presets = await RadioApi.GetPresetsAsync();
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+  
+  private async Task HandleRadioStateChanged()
+  {
+    await LoadRadioStateAsync();
+    await InvokeAsync(StateHasChanged);
+  }
+  
+  private async Task FrequencyUpAsync()
+  {
+    try
+    {
+      await RadioApi.FrequencyUpAsync();
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+  
+  private async Task FrequencyDownAsync()
+  {
+    try
+    {
+      await RadioApi.FrequencyDownAsync();
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+  
+  private void OpenFrequencyDialog()
+  {
+    if (_radioState != null)
+    {
+      _newFrequency = _radioState.Frequency;
+    }
+    _isFrequencyDialogOpen = true;
+  }
+  
+  private void CloseFrequencyDialog()
+  {
+    _isFrequencyDialogOpen = false;
+  }
+  
+  private async Task SetFrequencyAsync()
+  {
+    try
+    {
+      await RadioApi.SetFrequencyAsync(_newFrequency);
+      _isFrequencyDialogOpen = false;
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+  
+  private async Task HandleBandChangeAsync(string newBand)
+  {
+    try
+    {
+      await RadioApi.SetBandAsync(newBand);
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+  
+  private async Task HandleStepChangeAsync(string newStep)
+  {
+    try
+    {
+      if (double.TryParse(newStep, out var step))
+      {
+        await RadioApi.SetStepAsync(step);
+      }
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+  
+  private async Task StartScanAsync(string direction)
+  {
+    try
+    {
+      await RadioApi.StartScanAsync(direction);
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+  
+  private async Task StopScanAsync()
+  {
+    try
+    {
+      await RadioApi.StopScanAsync();
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+  
+  private void OpenSavePresetDialog()
+  {
+    if (_radioState != null)
+    {
+      _presetName = $"{_radioState.Band} - {FormatFrequency(_radioState.Frequency, _radioState.Band)}";
+      _presetSlot = (_presets?.Count ?? 0) + 1;
+    }
+    _isSavePresetDialogOpen = true;
+  }
+  
+  private void CloseSavePresetDialog()
+  {
+    _isSavePresetDialogOpen = false;
+  }
+  
+  private async Task SavePresetAsync()
+  {
+    try
+    {
+      if (_radioState != null && !string.IsNullOrWhiteSpace(_presetName))
+      {
+        var success = await RadioApi.SavePresetAsync(_presetSlot, _presetName, _radioState.Frequency, _radioState.Band);
+        if (success)
+        {
+          await LoadPresetsAsync();
+          _isSavePresetDialogOpen = false;
+        }
+      }
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+  
+  private async Task LoadPresetAsync(int slot)
+  {
+    try
+    {
+      await RadioApi.LoadPresetAsync(slot);
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+  
+  private async Task DeletePresetAsync(int slot)
+  {
+    try
+    {
+      var success = await RadioApi.DeletePresetAsync(slot);
+      if (success)
+      {
+        await LoadPresetsAsync();
+      }
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+  
+  private async Task HandleAutoGainChangedAsync(bool enabled)
+  {
+    try
+    {
+      await RadioApi.SetAutoGainAsync(enabled);
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+  
+  private async Task HandleGainChangedAsync(int gain)
+  {
+    try
+    {
+      await RadioApi.SetGainAsync(gain);
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+  
+  private string FormatFrequency(double frequency, string band)
+  {
+    // AM band uses kHz (no decimal), all others use MHz (one decimal)
+    return band switch
+    {
+      "AM" => frequency.ToString("0"),        // AM: kHz format (e.g., "1010")
+      "FM" => frequency.ToString("0.0"),      // FM: MHz format (e.g., "101.5")
+      "AIR" => frequency.ToString("0.000"),   // Aircraft: MHz format with 3 decimals (e.g., "121.500")
+      "SW" => frequency.ToString("0.000"),    // Shortwave: MHz format with 3 decimals (e.g., "7.200")
+      "WB" => frequency.ToString("0.000"),    // Weather: MHz format with 3 decimals (e.g., "162.400")
+      "VHF" => frequency.ToString("0.000"),   // VHF: MHz format with 3 decimals (e.g., "156.800")
+      _ => frequency.ToString("0.000")        // Default: 3 decimals for unknown bands
+    };
+  }
+  
+  private double GetMinFrequency()
+  {
+    if (_radioState == null) return 0;
+    return _radioState.Band switch
+    {
+      "AM" => 520,         // AM: 520-1710 kHz (Medium Wave)
+      "FM" => 87.5,        // FM: 87.5-108.0 MHz
+      "AIR" => 108.0,      // Aircraft: 108.0-137.0 MHz (VHF Air Band)
+      "SW" => 1.8,         // Shortwave: 1.8-30.0 MHz (HF bands)
+      "WB" => 162.400,     // Weather: 162.400-162.550 MHz (NOAA Weather Radio)
+      "VHF" => 136.0,      // VHF: 136.0-174.0 MHz (VHF band)
+      _ => 0               // Default: no minimum for unknown bands
+    };
+  }
+  
+  private double GetMaxFrequency()
+  {
+    if (_radioState == null) return 1000;
+    return _radioState.Band switch
+    {
+      "AM" => 1710,        // AM: 520-1710 kHz (Medium Wave)
+      "FM" => 108.0,       // FM: 87.5-108.0 MHz
+      "AIR" => 137.0,      // Aircraft: 108.0-137.0 MHz (VHF Air Band)
+      "SW" => 30.0,        // Shortwave: 1.8-30.0 MHz (HF bands)
+      "WB" => 162.550,     // Weather: 162.400-162.550 MHz (NOAA Weather Radio)
+      "VHF" => 174.0,      // VHF: 136.0-174.0 MHz (VHF band)
+      _ => 1000            // Default: reasonable maximum for unknown bands
+    };
+  }
+  
+  public async ValueTask DisposeAsync()
+  {
+    HubService.RadioStateChanged -= HandleRadioStateChanged;
+    await Task.CompletedTask;
+  }
+}
