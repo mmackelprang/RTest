@@ -43,6 +43,8 @@ This document provides a comprehensive, step-by-step development plan for implem
 3. **Real-time Updates**: Utilize SignalR for live audio state, queue, and visualization updates
 4. **Metrics & Observability**: Integrate comprehensive metrics dashboard and system monitoring
 5. **Progressive Enhancement**: Build incrementally with continuous testing and validation
+6. **Comprehensive Testing**: Use bUnit for Blazor component testing as part of build/test pipeline
+7. **Configuration via REST API**: All configuration and preferences must use Configuration REST endpoints; JSON files only for bootstrapping
 
 ### Estimated Timeline
 
@@ -64,6 +66,7 @@ This document provides a comprehensive, step-by-step development plan for implem
 - **State Management**: Blazor component state + SignalR push updates
 - **Visualization**: HTML5 Canvas with JavaScript Interop
 - **Fonts**: DSEG14Classic (LED displays), Inter (general UI)
+- **Testing**: bUnit for Blazor component testing, integrated into GitHub Actions CI/CD
 
 ---
 
@@ -133,6 +136,107 @@ All backend APIs must be implemented and tested before starting UI development. 
 - Node.js (optional, for asset bundling)
 - Git for version control
 - Access to Raspberry Pi 5 for testing (or similar Linux environment)
+- **bUnit** NuGet package for Blazor component testing (integrated into build/test pipeline)
+
+---
+
+## Configuration and State Management Strategy
+
+### Configuration REST API as Single Source of Truth
+
+**CRITICAL REQUIREMENT**: All user preferences, settings, and persistent UI state MUST be stored and retrieved via the Configuration REST API endpoints. This ensures:
+
+1. **Centralized Configuration Management**
+   - All settings stored server-side in SQLite database
+   - Consistent across all UI clients (browser refresh, multiple devices)
+   - Survives application restarts and updates
+   - Can be backed up and restored as part of system backup
+
+2. **Configuration REST Endpoints** (Base path: `/api/configuration`)
+   - `GET /api/configuration` - Get all configuration sections
+   - `GET /api/configuration/audio` - Get audio-specific configuration
+   - `GET /api/configuration/visualizer` - Get visualizer configuration
+   - `GET /api/configuration/output` - Get output configuration
+   - `POST /api/configuration` - Update configuration values (section, key, value)
+
+3. **What Goes in Configuration REST API** (YES):
+   ✅ User preferences (default source, theme settings, display preferences)
+   ✅ Audio settings (ducking, default volume, balance)
+   ✅ Visualizer settings (default mode, colors, sensitivity)
+   ✅ Output settings (device selection, sample rate)
+   ✅ UI state (last page visited, panel sizes, sort orders)
+   ✅ Radio preferences (default band, step size, LED colors)
+   ✅ File browser preferences (default path, view mode, sort)
+   ✅ Queue display preferences (columns, sort order)
+   ✅ Metrics dashboard settings (selected metrics, time ranges)
+   ✅ Any user-configurable setting that should persist
+
+4. **What Goes in JSON Configuration Files** (appsettings.json) (NO for user settings):
+   ⚠️ **ONLY** for application bootstrap settings:
+   - ApiBaseUrl (required before API is accessible)
+   - Logging configuration (Serilog settings)
+   - Application-level constants (cannot be changed by users)
+   - Development/Production environment switches
+   
+   ❌ **NEVER** use for:
+   - User preferences or choices
+   - UI state or display settings
+   - Audio configuration
+   - Device selections
+   - Anything a user should be able to change
+
+5. **What Goes in Browser Storage** (localStorage/sessionStorage):
+   ❌ **DO NOT USE** for persistent settings
+   ⚠️ **ONLY** for temporary session data:
+   - OAuth state/code verifier (temporary, security-related)
+   - Temporary UI state that doesn't need to persist (expanded panels during single session)
+   - Cache for performance (with server as source of truth)
+
+### Implementation Pattern
+
+Every phase that requires configuration should follow this pattern:
+
+```csharp
+// In Blazor component
+[Inject] private ConfigurationApiService ConfigService { get; set; }
+
+// Load configuration on component initialization
+protected override async Task OnInitializedAsync()
+{
+    var audioConfig = await ConfigService.GetAudioConfigurationAsync();
+    defaultVolume = audioConfig.DefaultVolume;
+    duckingEnabled = audioConfig.DuckingEnabled;
+}
+
+// Save configuration when user changes a setting
+private async Task SavePreference(string key, string value)
+{
+    await ConfigService.UpdateConfigurationAsync("audio", key, value);
+    // Optionally show success toast
+}
+```
+
+### Configuration in Each Phase
+
+- **Phase 2**: Navigation preferences, default page
+- **Phase 3**: Playback defaults (volume, repeat mode, shuffle)
+- **Phase 4**: Queue display preferences
+- **Phase 5**: Spotify default filters, search preferences
+- **Phase 6**: File browser default path, view mode, sort order
+- **Phase 7**: Radio default band, step size, LED colors, preset sort
+- **Phase 8**: System dashboard refresh interval, log level filter
+- **Phase 9**: Metrics dashboard selected metrics, time ranges, chart types
+- **Phase 10**: Visualizer default mode, colors, sensitivity
+- **Phase 11**: Default audio devices, USB port preferences
+- **Phase 12**: History display preferences, filters, items per page
+
+### Testing Configuration
+
+bUnit tests must verify:
+- Configuration is loaded on component initialization
+- Configuration changes call POST /api/configuration correctly
+- UI reflects configuration values from API
+- Error handling when configuration API is unavailable
 
 ---
 
@@ -248,6 +352,44 @@ This comprehensive matrix maps **ALL 86 REST API endpoints and 6 SignalR events*
 
 **Total**: 86 REST endpoints + 6 SignalR events = 92 API capabilities, all utilized.
 
+### API Coverage Requirements
+
+**CRITICAL**: The Web UI MUST provide full functionality for ALL 86 REST API endpoints. This means:
+
+1. **Every endpoint has a corresponding UI element:**
+   - Buttons, forms, dialogs, or automated calls for each POST/DELETE endpoint
+   - Display components for each GET endpoint
+   - Clear user paths to access each API function
+
+2. **Configuration endpoints are PRIMARY for settings:**
+   - POST /api/configuration - Used for ALL user preferences and settings
+   - GET /api/configuration/* - Source of truth for all configuration display
+   - NO user settings stored in JSON files or browser storage
+
+3. **No orphaned endpoints:**
+   - Every endpoint in the API Reference must be callable from the UI
+   - Every feature in the backend must be accessible from the frontend
+   - Document any temporarily unavailable features with clear TODOs
+
+4. **Testing requirement:**
+   - bUnit tests must verify each API endpoint is called correctly
+   - Integration tests should exercise complete user workflows
+   - Mock all API responses for predictable testing
+
+**Verification Checklist:**
+- [ ] All 12 Audio Control endpoints used (Phase 3)
+- [ ] All 6 Queue endpoints used (Phase 4)
+- [ ] All 10 Spotify endpoints used (Phase 5)
+- [ ] All 3 Files endpoints used (Phase 6)
+- [ ] All 23 Radio endpoints used (Phase 7)
+- [ ] All 5 Sources endpoints used (Phase 2)
+- [ ] All 7 Devices endpoints used (Phase 11)
+- [ ] All 5 Metrics endpoints used (Phase 9)
+- [ ] All 8 Play History endpoints used (Phase 12)
+- [ ] All 5 Configuration endpoints used (Phases 2-12, especially Phase 8)
+- [ ] All 2 System endpoints used (Phase 8)
+- [ ] All 6 SignalR events handled (Phases 3, 4, 7, 10)
+
 ---
 
 ## Development Phases Overview
@@ -350,6 +492,13 @@ Requirements:
    dotnet add package MudBlazor
    ```
 
+   Also install bUnit for component testing (in test project):
+   ```bash
+   cd tests/Radio.Web.Tests
+   dotnet add package bUnit
+   dotnet add package bUnit.web
+   ```
+
 2. Configure MudBlazor services in Program.cs:
    ```csharp
    builder.Services.AddMudServices(config =>
@@ -406,6 +555,8 @@ Success Criteria:
 - LED fonts load and display properly
 - Layout fixed to 1920×576 dimensions
 - Touch targets meet 48px minimum size
+- bUnit test project created with basic tests
+- All tests pass in GitHub Actions workflow
 ```
 
 ### Task 1.2: Create Comprehensive API Client Services
@@ -522,6 +673,12 @@ Requirements:
     - GetVisualizerConfigurationAsync() : Task<VisualizerConfigDto>
     - GetOutputConfigurationAsync() : Task<OutputConfigDto>
     - UpdateConfigurationAsync(string section, string key, string value) : Task<ConfigUpdateResponse>
+    
+    **IMPORTANT**: This service is the PRIMARY mechanism for all user preferences and configuration.
+    JSON configuration files (appsettings.json) should ONLY be used for:
+    - Application bootstrapping settings (API URLs, logging levels)
+    - Settings required BEFORE the REST API is available
+    All user preferences, audio settings, and UI state MUST use these REST endpoints.
 
 11. Create SystemApiService.cs for system management (2 endpoints):
     - GetSystemStatsAsync() : Task<SystemStatsDto>
@@ -640,6 +797,10 @@ Success Criteria:
 - [ ] Automatic reconnection works after disconnect
 - [ ] Layout fixed to 1920×576 dimensions
 - [ ] No console errors in browser
+- [ ] bUnit tests created for API services (mock HttpClient responses)
+- [ ] bUnit tests for SignalR service (mock HubConnection)
+- [ ] All bUnit tests pass in local environment
+- [ ] GitHub Actions build workflow runs and passes all tests
 
 **Manual Testing:**
 
@@ -665,6 +826,10 @@ Success Criteria:
 Create the main application layout with persistent navigation bar for 1920×576 touchscreen.
 
 Location: /src/Radio.Web/Components/Layout/MainLayout.razor
+
+**Testing Requirements**: Create bUnit tests for all components in tests/Radio.Web.Tests/. Test rendering, state management, and user interactions.
+
+**Configuration Requirements**: Any user preferences (default page, theme settings, etc.) MUST be stored via Configuration REST API endpoints, NOT in local JSON files.
 
 Requirements:
 
@@ -734,6 +899,10 @@ Success Criteria:
 Create the home page with Now Playing display and global music controls.
 
 Location: /src/Radio.Web/Components/Pages/Home.razor
+
+**Testing Requirements**: Create bUnit tests for Home.razor and all transport control components. Mock API responses and SignalR events. Test state updates and user interactions.
+
+**Configuration Requirements**: Volume preferences, repeat mode preferences, and other playback settings MUST be persisted via POST /api/configuration, NOT in local storage or JSON files.
 
 Requirements:
 
@@ -815,6 +984,10 @@ Create queue management UI with reordering support.
 
 Location: /src/Radio.Web/Components/Pages/QueuePage.razor
 
+**Testing Requirements**: Create bUnit tests for QueuePage.razor. Test drag-and-drop logic, queue updates via SignalR, and all queue operations (add, remove, clear, reorder).
+
+**Configuration Requirements**: Queue display preferences (column visibility, sort order) MUST be stored via Configuration REST API.
+
 Requirements:
 
 1. Queue Display:
@@ -881,6 +1054,10 @@ Success Criteria:
 Create Spotify integration UI with authentication, search, browse, and playback.
 
 Location: /src/Radio.Web/Components/Pages/SpotifyPage.razor
+
+**Testing Requirements**: Create bUnit tests for SpotifyPage.razor including OAuth flow, search functionality, filter pills, and browse dialogs. Mock all Spotify API responses.
+
+**Configuration Requirements**: Spotify user preferences (default search filters, favorite categories) MUST be stored via Configuration REST API, NOT in browser localStorage.
 
 Requirements:
 
@@ -970,6 +1147,10 @@ Create file browser interface for local audio files.
 
 Location: /src/Radio.Web/Components/Pages/FileBrowserPage.razor
 
+**Testing Requirements**: Create bUnit tests for FileBrowserPage.razor including directory navigation, file filtering, multi-select, and file operations. Mock GET /api/files responses.
+
+**Configuration Requirements**: File browser preferences (default path, sort order, view mode, recursive search preference) MUST be stored via Configuration REST API.
+
 Requirements:
 
 1. Path Navigation:
@@ -1044,6 +1225,10 @@ Locations:
 - /src/Radio.Web/Components/Shared/RadioDisplay.razor
 - /src/Radio.Web/Components/Shared/RadioControls.razor
 
+**Testing Requirements**: Create bUnit tests for RadioDisplay and RadioControls. Test LED rendering, frequency validation, scan operations, and real-time SignalR updates.
+
+**Configuration Requirements**: Radio preferences (default band, default step size, LED color preference, EQ mode) MUST be stored via Configuration REST API.
+
 Requirements:
 
 1. Radio Display (LED aesthetic):
@@ -1096,6 +1281,10 @@ Create radio preset management interface.
 
 Location: /src/Radio.Web/Components/Shared/RadioPresets.razor
 
+**Testing Requirements**: Create bUnit tests for RadioPresets.razor. Test preset save/load/delete operations, duplicate detection, and max preset validation.
+
+**Configuration Requirements**: Radio presets are stored server-side via POST /api/radio/presets. UI preferences (preset list sort order, view mode) stored via Configuration REST API.
+
 Requirements:
 
 1. Save Preset Button:
@@ -1138,6 +1327,10 @@ Success Criteria:
 Create SDR-specific controls for gain, power, and lifecycle management.
 
 Location: /src/Radio.Web/Components/Shared/SDRControls.razor
+
+**Testing Requirements**: Create bUnit tests for SDRControls.razor. Test gain control, AGC toggle, power management, and device selection.
+
+**Configuration Requirements**: SDR preferences (default gain, AGC enabled, default device) MUST be stored via Configuration REST API.
 
 Requirements:
 
@@ -1195,6 +1388,22 @@ Create system configuration and management interface.
 
 Location: /src/Radio.Web/Components/Pages/SystemConfigPage.razor
 
+**Testing Requirements**: Create bUnit tests for SystemConfigPage.razor. Test system stats updates, configuration editing, log viewer filtering, and event sources display.
+
+**Configuration Requirements**: 
+**CRITICAL**: ALL user-editable settings MUST use Configuration REST API endpoints:
+- GET /api/configuration/audio - Audio preferences
+- GET /api/configuration/visualizer - Visualizer settings
+- GET /api/configuration/output - Output settings
+- POST /api/configuration - Update any configuration value
+
+JSON configuration files (appsettings.json) should ONLY contain:
+- ApiBaseUrl (required before API is available)
+- Logging configuration (for application diagnostics)
+- Bootstrap settings (cannot be changed via API)
+
+DO NOT store user preferences, audio settings, or UI state in JSON files or browser localStorage.
+
 Requirements:
 
 1. System Statistics Dashboard (updates every 5 seconds):
@@ -1213,6 +1422,7 @@ Requirements:
    - Editable MudDataGrid with columns: Key, Value, Description
    - Inline editing or edit dialog
    - Save button: POST /api/configuration
+   - **CRITICAL**: This is the PRIMARY configuration interface - ALL user settings flow through these REST endpoints
 
 3. Log Viewer:
    - Level filter dropdown: Info, Warning, Error (default: Warning)
@@ -1265,6 +1475,10 @@ Success Criteria:
 Create metrics and observability dashboard.
 
 Location: /src/Radio.Web/Components/Pages/MetricsDashboard.razor
+
+**Testing Requirements**: Create bUnit tests for MetricsDashboard.razor. Test metrics discovery, gauge rendering, time-series chart data binding, and UI event tracking.
+
+**Configuration Requirements**: Metrics dashboard preferences (selected metrics, time range, refresh interval, chart types) MUST be stored via Configuration REST API.
 
 Requirements:
 
@@ -1333,6 +1547,10 @@ Create real-time audio visualization components.
 Locations:
 - /src/Radio.Web/Components/Pages/VisualizerPage.razor
 - /src/Radio.Web/wwwroot/js/visualizer.js
+
+**Testing Requirements**: Create bUnit tests for VisualizerPage.razor and visualization components. Test visualization mode switching, canvas rendering logic, and SignalR data handling. Use mock SignalR hub for testing.
+
+**Configuration Requirements**: Visualizer preferences (default mode, color scheme, sensitivity) MUST be stored via GET /api/configuration/visualizer and updated via POST /api/configuration.
 
 Requirements:
 
@@ -1403,6 +1621,10 @@ Create device management interface for audio input/output devices.
 
 Location: /src/Radio.Web/Components/Pages/DeviceManagementPage.razor
 
+**Testing Requirements**: Create bUnit tests for DeviceManagementPage.razor. Test device list rendering, default device selection, USB reservation display, and device refresh operations.
+
+**Configuration Requirements**: Device preferences (default output device, USB port reservations) MUST be stored via Configuration REST API. This ensures device settings persist across restarts.
+
 Requirements:
 
 1. Output Devices Section:
@@ -1464,6 +1686,10 @@ Success Criteria:
 Create play history and analytics interface.
 
 Location: /src/Radio.Web/Components/Pages/PlayHistoryPage.razor
+
+**Testing Requirements**: Create bUnit tests for PlayHistoryPage.razor. Test history list rendering, filtering (date range, source, today), pagination, detail view, and statistics display.
+
+**Configuration Requirements**: Play history display preferences (default filter, sort order, items per page, visible columns) MUST be stored via Configuration REST API.
 
 Requirements:
 
@@ -1532,6 +1758,15 @@ Success Criteria:
 Add final polish, animations, and ensure touch-friendly interactions across all components.
 
 Locations: Various components across /src/Radio.Web/
+
+**Testing Requirements**: 
+- Complete bUnit test coverage for all components (target: 80%+ component coverage)
+- Run all tests in GitHub Actions build workflow
+- Integration tests for end-to-end user workflows
+- Performance tests for visualizations and animations
+- Verify all tests pass consistently
+
+**Configuration Requirements**: Verify ALL user preferences use Configuration REST API. Audit codebase for any localStorage, sessionStorage, or JSON file usage for user settings - these must be migrated to REST API.
 
 Requirements:
 
@@ -1638,25 +1873,138 @@ Success Criteria:
    - Test data refresh
    - Test observable updates
 
-### Integration Testing
+### Blazor Component Testing with bUnit
 
-**Framework:** bUnit (Blazor Component Testing)
+**Framework:** bUnit (https://bunit.dev)  
+**Coverage Target:** 80%+ for UI components  
+**Test Project:** tests/Radio.Web.Tests
+
+**bUnit Setup Requirements:**
+
+1. **NuGet Packages:**
+   ```bash
+   dotnet add package bUnit
+   dotnet add package bUnit.web
+   dotnet add package bUnit.testcomponents
+   ```
+
+2. **Test Infrastructure:**
+   - Create TestContext for each test class
+   - Mock IHttpClientFactory for API calls
+   - Mock HubConnection for SignalR tests
+   - Register all required services in DI container
+   - Use bUnit's ComponentFactories for custom components
+
+3. **GitHub Actions Integration:**
+   - All bUnit tests MUST run as part of `dotnet test` in build.yml workflow
+   - Tests must pass for PR merge approval
+   - Code coverage reports should include component testing
+   - Use `--collect:"XPlat Code Coverage"` flag
 
 **Test Categories:**
 
 1. **Component Rendering:**
    - Test each page component renders without errors
-   - Test conditional visibility
-   - Test data binding
+   - Test conditional visibility based on source capabilities
+   - Test data binding (one-way and two-way)
+   - Test parameter passing between components
+   - Test component lifecycle (OnInitialized, OnParametersSet)
+   - Verify CSS classes applied correctly
+   - Test responsive behavior (if applicable)
 
 2. **User Interactions:**
-   - Test button clicks
-   - Test form submissions
-   - Test drag-and-drop
+   - Test button clicks trigger correct methods
+   - Test form submissions and validation
+   - Test drag-and-drop operations (queue reordering)
+   - Test keyboard navigation (Tab, Enter, Esc)
+   - Test touch interactions (tap, long-press, swipe)
+   - Test slider and input controls
+   - Test dialog open/close operations
 
-3. **SignalR Integration:**
-   - Test real-time updates
-   - Test UI reflects SignalR events
+3. **API Integration:**
+   - Mock API client responses
+   - Test loading states while API calls are in flight
+   - Test error handling and error messages
+   - Test retry logic on failures
+   - Test data refresh operations
+   - Verify correct API endpoints called with correct payloads
+
+4. **SignalR Integration:**
+   - Mock HubConnection in tests
+   - Test real-time updates from SignalR events
+   - Test UI reflects PlaybackStateChanged events
+   - Test UI reflects NowPlayingChanged events
+   - Test UI reflects QueueChanged events
+   - Test UI reflects RadioStateChanged events
+   - Test connection state handling (connected, disconnected, reconnecting)
+
+5. **State Management:**
+   - Test component state updates correctly
+   - Test cascading parameters
+   - Test state persistence via Configuration API
+   - Test state synchronization across components
+
+6. **Conditional UI Logic:**
+   - Test controls appear/disappear based on source capabilities
+   - Test feature flags and conditional features
+   - Test permission-based UI elements
+
+**Example bUnit Test Structure:**
+
+```csharp
+public class HomePageTests : TestContext
+{
+    [Fact]
+    public void Home_RendersNowPlaying_WhenTrackExists()
+    {
+        // Arrange
+        var mockAudioApi = Substitute.For<IAudioApiService>();
+        mockAudioApi.GetNowPlayingAsync().Returns(new NowPlayingDto 
+        { 
+            Title = "Test Song", 
+            Artist = "Test Artist" 
+        });
+        Services.AddSingleton(mockAudioApi);
+        
+        // Act
+        var cut = RenderComponent<Home>();
+        
+        // Assert
+        cut.Find("h2").TextContent.Should().Contain("Test Song");
+        cut.Find(".artist").TextContent.Should().Contain("Test Artist");
+    }
+    
+    [Fact]
+    public void PlayButton_CallsStartAsync_WhenClicked()
+    {
+        // Arrange
+        var mockAudioApi = Substitute.For<IAudioApiService>();
+        Services.AddSingleton(mockAudioApi);
+        var cut = RenderComponent<Home>();
+        
+        // Act
+        cut.Find("button.play-button").Click();
+        
+        // Assert
+        mockAudioApi.Received(1).StartAsync();
+    }
+}
+```
+
+**bUnit Testing Best Practices:**
+
+1. Use descriptive test names following pattern: `ComponentName_ExpectedBehavior_WhenCondition`
+2. Follow AAA pattern: Arrange, Act, Assert
+3. Mock all external dependencies (API services, SignalR, navigation)
+4. Test one behavior per test
+5. Use FluentAssertions for readable assertions
+6. Clean up resources in Dispose() method
+7. Use test fixtures for common setup across test classes
+8. Test both happy path and error scenarios
+9. Verify accessibility attributes (ARIA labels, roles)
+10. Test with realistic data, not just empty/null cases
+
+### Integration Testing
 
 ### Manual Testing Checklist
 
@@ -1867,7 +2215,9 @@ This phased development plan provides a comprehensive roadmap for implementing t
 ✅ **Real-time Updates**: SignalR integration for live state synchronization  
 ✅ **Comprehensive Features**: Playback, queue, Spotify, files, radio, system, metrics, history  
 ✅ **Performance Optimized**: 60fps visualizations, efficient rendering, minimal latency  
-✅ **Production Ready**: Deployment guide, testing strategy, troubleshooting
+✅ **Production Ready**: Deployment guide, testing strategy, troubleshooting  
+✅ **Comprehensive Testing**: bUnit tests for all components, integrated into CI/CD pipeline  
+✅ **Configuration via REST API**: All user preferences and settings stored via Configuration REST endpoints
 
 ### Next Steps
 
