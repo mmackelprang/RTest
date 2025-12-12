@@ -1,6 +1,7 @@
 using MudBlazor;
 using MudBlazor.Services;
 using Radio.Web.Services.ApiClients;
+using Radio.Web.Services.Hub;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -92,8 +93,8 @@ builder.Services.AddHttpClient<RadioApiService>(client =>
 // All 11 API client services are now registered!
 // Total: 86 REST endpoints implemented
 
-// TODO: Register SignalR hub service as singleton (Phase 1 Task 1.3)
-// builder.Services.AddSingleton<AudioStateHubService>();
+// Register SignalR hub service as singleton (Phase 1 Task 1.3)
+builder.Services.AddSingleton<AudioStateHubService>();
 
 var app = builder.Build();
 
