@@ -1,0 +1,155 @@
+@page "/queue"
+@rendermode InteractiveServer
+@inject QueueApiService QueueApi
+@inject AudioStateHubService HubService
+@inject AudioApiService AudioApi
+@implements IAsyncDisposable
+
+<PageTitle>Queue - Radio Console</PageTitle>
+
+<div class="queue-page" style="padding: 24px; height: 100%; display: flex; flex-direction: column;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+    <MudText Typo="Typo.h4">Queue</MudText>
+    <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="HandleClearQueueAsync" Disabled="@(!_queueItems.Any())">
+      Clear All
+    </MudButton>
+  </div>
+  
+  @if (!_queueItems.Any())
+  {
+    <!-- Empty State -->
+    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-secondary);">
+      <MudIcon Icon="@Icons.Material.Filled.QueueMusic" Style="font-size: 120px; margin-bottom: 16px; opacity: 0.5;" />
+      <MudText Typo="Typo.h5">No tracks in queue</MudText>
+      <MudText Typo="Typo.body1" Style="margin-top: 8px;">Add tracks from Spotify or File Browser</MudText>
+    </div>
+  }
+  else
+  {
+    <!-- Queue Table -->
+    <MudTable Items="@_queueItems" Hover="true" Dense="true" FixedHeader="true" Height="calc(100% - 80px)" Style="overflow-y: auto;">
+      <HeaderContent>
+        <MudTh Style="width: 60px;">#</MudTh>
+        <MudTh>Title</MudTh>
+        <MudTh Style="width: 250px;">Artist</MudTh>
+        <MudTh Style="width: 200px;">Album</MudTh>
+        <MudTh Style="width: 80px;">Duration</MudTh>
+        <MudTh Style="width: 80px;">Actions</MudTh>
+      </HeaderContent>
+      <RowTemplate>
+        <MudTd Style="width: 60px;">@context.Index</MudTd>
+        <MudTd DataLabel="Title" Style="cursor: pointer;" @onclick="@(() => HandleJumpToAsync(context.Index))">
+          <div style="font-weight: @(context.IsCurrent ? "600" : "400"); color: @(context.IsCurrent ? "var(--mud-palette-primary)" : "inherit");">
+            @context.Title
+          </div>
+        </MudTd>
+        <MudTd DataLabel="Artist" Style="width: 250px;">@context.Artist</MudTd>
+        <MudTd DataLabel="Album" Style="width: 200px;">@context.Album</MudTd>
+        <MudTd DataLabel="Duration" Style="width: 80px;">@context.Duration</MudTd>
+        <MudTd DataLabel="Actions" Style="width: 80px;">
+          <MudIconButton Icon="@Icons.Material.Filled.Delete" 
+                         Size="Size.Small" 
+                         OnClick="@(() => HandleRemoveAsync(context.Index))" 
+                         title="Remove" />
+        </MudTd>
+      </RowTemplate>
+    </MudTable>
+  }
+</div>
+
+@code {
+  private List<QueueItemDto> _queueItems = new();
+
+  protected override async Task OnInitializedAsync()
+  {
+    // Subscribe to SignalR QueueChanged event
+    HubService.QueueChanged += OnQueueChanged;
+
+    // Start SignalR connection if not already connected
+    if (!HubService.IsConnected)
+    {
+      try
+      {
+        await HubService.StartAsync();
+      }
+      catch (Exception ex)
+      {
+        Console.WriteLine($"Failed to connect to SignalR: {ex.Message}");
+      }
+    }
+
+    // Initial load
+    await RefreshQueueAsync();
+  }
+
+  private async Task OnQueueChanged()
+  {
+    await RefreshQueueAsync();
+    await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task RefreshQueueAsync()
+  {
+    try
+    {
+      var queue = await QueueApi.GetQueueAsync();
+      if (queue != null)
+      {
+        _queueItems = queue;
+      }
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+
+  private async Task HandleJumpToAsync(int index)
+  {
+    try
+    {
+      await QueueApi.JumpToPositionAsync(index);
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+
+  private async Task HandleRemoveAsync(int index)
+  {
+    try
+    {
+      var success = await QueueApi.RemoveFromQueueAsync(index);
+      if (success)
+      {
+        await RefreshQueueAsync();
+      }
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+
+  private async Task HandleClearQueueAsync()
+  {
+    try
+    {
+      var success = await QueueApi.ClearQueueAsync();
+      if (success)
+      {
+        _queueItems.Clear();
+      }
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+
+  public async ValueTask DisposeAsync()
+  {
+    HubService.QueueChanged -= OnQueueChanged;
+  }
+}

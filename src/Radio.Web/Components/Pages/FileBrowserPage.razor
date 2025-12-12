@@ -1,0 +1,253 @@
+@page "/files"
+@rendermode InteractiveServer
+@inject FileApiService FileApi
+@inject AudioApiService AudioApi
+@inject QueueApiService QueueApi
+
+<PageTitle>File Browser - Radio Console</PageTitle>
+
+<div class="file-browser-page" style="padding: 24px; height: 100%; display: flex; flex-direction: column;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+    <MudText Typo="Typo.h4">File Browser</MudText>
+    <div style="display: flex; gap: 8px;">
+      <MudButton Variant="Variant.Outlined" 
+                 Color="Color.Default" 
+                 Size="Size.Small" 
+                 OnClick="HandleHomeAsync"
+                 StartIcon="@Icons.Material.Filled.Home"
+                 title="Home">
+        Home
+      </MudButton>
+      <MudButton Variant="Variant.Outlined" 
+                 Color="Color.Default" 
+                 Size="Size.Small" 
+                 OnClick="HandleUpAsync"
+                 StartIcon="@Icons.Material.Filled.ArrowUpward"
+                 Disabled="@(_currentPath == "/" || _currentPath == _rootPath)"
+                 title="Up">
+        Up
+      </MudButton>
+    </div>
+  </div>
+  
+  <!-- Breadcrumb Navigation -->
+  <div style="margin-bottom: 16px;">
+    <MudBreadcrumbs Items="@_breadcrumbs" Style="padding: 8px 0;">
+      <ItemTemplate Context="item">
+        <MudLink Href="#" OnClick="@(() => NavigateToPath(item.Href ?? "/"))" Style="cursor: pointer;">@item.Text</MudLink>
+      </ItemTemplate>
+    </MudBreadcrumbs>
+  </div>
+  
+  <!-- Search and Filter -->
+  <div style="margin-bottom: 16px; display: flex; gap: 16px;">
+    <MudTextField @bind-Value="_searchQuery" 
+                  Label="Search files" 
+                  Variant="Variant.Outlined" 
+                  Adornment="Adornment.End" 
+                  AdornmentIcon="@Icons.Material.Filled.Search"
+                  OnKeyUp="@(async (e) => { if (e.Key == "Enter") await LoadFilesAsync(); })"
+                  Style="flex: 1;" />
+    <MudSwitch T="bool" @bind-Value="_recursive" Label="Recursive" Color="Color.Primary" />
+    <MudSelect T="string" @bind-Value="_filterExtension" Label="Filter" Variant="Variant.Outlined" Dense="true" Style="min-width: 150px;">
+      <MudSelectItem Value="@("*")">All</MudSelectItem>
+      <MudSelectItem Value="@(".mp3")">MP3</MudSelectItem>
+      <MudSelectItem Value="@(".flac")">FLAC</MudSelectItem>
+      <MudSelectItem Value="@(".wav")">WAV</MudSelectItem>
+      <MudSelectItem Value="@(".ogg")">OGG</MudSelectItem>
+      <MudSelectItem Value="@(".m4a")">M4A/AAC</MudSelectItem>
+    </MudSelect>
+  </div>
+  
+  @if (_isLoading)
+  {
+    <div style="display: flex; justify-content: center; padding: 64px;">
+      <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+    </div>
+  }
+  else if (!_fileItems.Any())
+  {
+    <!-- Empty State -->
+    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-secondary);">
+      <MudIcon Icon="@Icons.Material.Filled.FolderOff" Style="font-size: 120px; margin-bottom: 16px; opacity: 0.5;" />
+      <MudText Typo="Typo.h5">No audio files found</MudText>
+      <MudText Typo="Typo.body2" Style="margin-top: 8px;">Try a different directory or search term</MudText>
+    </div>
+  }
+  else
+  {
+    <!-- File List -->
+    <div style="flex: 1; overflow-y: auto;">
+      <MudList T="string" Dense="true">
+        @foreach (var item in _fileItems.Where(f => f.IsDirectory))
+        {
+          <MudListItem T="string" Icon="@Icons.Material.Filled.Folder" IconColor="Color.Primary" @onclick="@(() => NavigateToDirectory(item.Path))">
+            <div style="display: flex; justify-content: space-between; width: 100%;">
+              <MudText Typo="Typo.body1" Style="font-weight: 500;">@item.Name</MudText>
+            </div>
+          </MudListItem>
+          <MudDivider />
+        }
+        
+        @foreach (var item in _fileItems.Where(f => !f.IsDirectory))
+        {
+          <MudListItem T="string" Icon="@Icons.Material.Filled.MusicNote" IconColor="Color.Default" Style="min-height: 72px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+              <div style="flex: 1;">
+                <MudText Typo="Typo.body1" Style="font-weight: 500; margin-bottom: 4px;">
+                  @(!string.IsNullOrEmpty(item.Artist) ? $"{item.Artist} - {item.Name}" : item.Name)
+                </MudText>
+                @if (!string.IsNullOrEmpty(item.Album) || !string.IsNullOrEmpty(item.Duration))
+                {
+                  <MudText Typo="Typo.caption" Style="color: var(--text-secondary);">
+                    @item.Album @(!string.IsNullOrEmpty(item.Album) && !string.IsNullOrEmpty(item.Duration) ? " • " : "") @item.Duration
+                  </MudText>
+                }
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" 
+                               Size="Size.Medium" 
+                               OnClick="@(() => HandlePlayFileAsync(item.Path))" 
+                               title="Play" />
+                <MudIconButton Icon="@Icons.Material.Filled.Add" 
+                               Size="Size.Medium" 
+                               OnClick="@(() => HandleAddToQueueAsync(item.Path))" 
+                               title="Add to Queue" />
+              </div>
+            </div>
+          </MudListItem>
+          <MudDivider />
+        }
+      </MudList>
+    </div>
+  }
+</div>
+
+@code {
+  private string _currentPath = "/";
+  private string _rootPath = "/";
+  private string _searchQuery = "";
+  private string _filterExtension = "*";
+  private bool _recursive = false;
+  private bool _isLoading = false;
+  private List<FileItemDto> _fileItems = new();
+  private List<MudBlazor.BreadcrumbItem> _breadcrumbs = new();
+
+  protected override async Task OnInitializedAsync()
+  {
+    await LoadFilesAsync();
+    UpdateBreadcrumbs();
+  }
+
+  private async Task LoadFilesAsync()
+  {
+    _isLoading = true;
+    try
+    {
+      var result = await FileApi.ListFilesAsync(_currentPath, _recursive);
+      if (result != null)
+      {
+        _fileItems = result.Items ?? new List<FileItemDto>();
+        
+        // Apply filter
+        if (_filterExtension != "*")
+        {
+          _fileItems = _fileItems.Where(f => f.IsDirectory || f.Name.EndsWith(_filterExtension, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+        
+        // Apply search
+        if (!string.IsNullOrWhiteSpace(_searchQuery))
+        {
+          _fileItems = _fileItems.Where(f => 
+            f.Name.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ||
+            f.Artist?.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) == true ||
+            f.Album?.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) == true
+          ).ToList();
+        }
+        
+        // Sort: directories first, then files alphabetically
+        _fileItems = _fileItems.OrderByDescending(f => f.IsDirectory).ThenBy(f => f.Name).ToList();
+      }
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+    finally
+    {
+      _isLoading = false;
+    }
+  }
+
+  private void UpdateBreadcrumbs()
+  {
+    _breadcrumbs.Clear();
+    _breadcrumbs.Add(new MudBlazor.BreadcrumbItem("Home", href: _rootPath, icon: Icons.Material.Filled.Home));
+    
+    if (_currentPath != _rootPath)
+    {
+      var parts = _currentPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+      var path = "";
+      foreach (var part in parts)
+      {
+        path += "/" + part;
+        _breadcrumbs.Add(new MudBlazor.BreadcrumbItem(part, href: path));
+      }
+    }
+  }
+
+  private async Task NavigateToDirectory(string path)
+  {
+    _currentPath = path;
+    UpdateBreadcrumbs();
+    await LoadFilesAsync();
+  }
+
+  private async Task NavigateToPath(string path)
+  {
+    _currentPath = path;
+    UpdateBreadcrumbs();
+    await LoadFilesAsync();
+  }
+
+  private async Task HandleHomeAsync()
+  {
+    _currentPath = _rootPath;
+    UpdateBreadcrumbs();
+    await LoadFilesAsync();
+  }
+
+  private async Task HandleUpAsync()
+  {
+    if (_currentPath == _rootPath) return;
+    
+    var lastSlash = _currentPath.TrimEnd('/').LastIndexOf('/');
+    _currentPath = lastSlash > 0 ? _currentPath.Substring(0, lastSlash) : _rootPath;
+    UpdateBreadcrumbs();
+    await LoadFilesAsync();
+  }
+
+  private async Task HandlePlayFileAsync(string path)
+  {
+    try
+    {
+      await FileApi.PlayFileAsync(path);
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+
+  private async Task HandleAddToQueueAsync(string path)
+  {
+    try
+    {
+      await FileApi.AddFilesToQueueAsync(new List<string> { path });
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+}

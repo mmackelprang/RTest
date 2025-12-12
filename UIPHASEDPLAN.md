@@ -1869,12 +1869,21 @@ Locations: Various components across /src/Radio.Web/
 
 Requirements:
 
-1. Page Transitions:
+1. Page Transitions (from Phase 2):
    - Horizontal slide animation between pages (250ms)
    - Smooth easing function
    - Use Blazor PageTransition or custom CSS transitions
+   - Apply to MainLayout navigation between Home, Queue, Spotify, Files, Radio, System, Metrics, Visualizer pages
 
-2. Touch Feedback:
+2. Queue Drag-and-Drop Reordering (from Phase 4):
+   - Implement drag-and-drop for QueuePage.razor to reorder queue items
+   - Use MudBlazor drag-drop or HTML5 drag API
+   - Visual feedback during drag (cursor change, item highlighting)
+   - Call POST /api/queue/move on drop with fromIndex and toIndex
+   - Only enable if source.CanReorderQueue capability is true
+   - Test on touchscreen with 72px row height for easy touch interaction
+
+3. Touch Feedback:
    - Ripple effect on all buttons (Material Design)
    - Ensure MudBlazor ripple is enabled globally
    - Visual press state (scale down slightly on press)

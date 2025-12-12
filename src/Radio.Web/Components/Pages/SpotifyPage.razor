@@ -1,0 +1,319 @@
+@page "/spotify"
+@rendermode InteractiveServer
+@inject SpotifyApiService SpotifyApi
+@inject QueueApiService QueueApi
+@inject NavigationManager NavigationManager
+@implements IDisposable
+
+<PageTitle>Spotify - Radio Console</PageTitle>
+
+<div class="spotify-page" style="padding: 24px; height: 100%; display: flex; flex-direction: column;">
+  
+  @if (!_isAuthenticated)
+  {
+    <!-- Authentication Prompt -->
+    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%;">
+      <MudIcon Icon="@Icons.Material.Filled.LibraryMusic" Style="font-size: 120px; margin-bottom: 24px; color: #1DB954;" />
+      <MudText Typo="Typo.h4" Style="margin-bottom: 16px;">Connect to Spotify</MudText>
+      <MudText Typo="Typo.body1" Style="margin-bottom: 32px; color: var(--text-secondary);">
+        Sign in to your Spotify account to search and play music
+      </MudText>
+      <MudButton Variant="Variant.Filled" 
+                 Color="Color.Success" 
+                 Size="Size.Large" 
+                 OnClick="HandleLoginAsync"
+                 StartIcon="@Icons.Material.Filled.Login"
+                 Style="min-width: 200px; min-height: 60px;">
+        Login to Spotify
+      </MudButton>
+    </div>
+  }
+  else
+  {
+    <!-- Authenticated View -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <MudText Typo="Typo.h4">Spotify</MudText>
+      <div style="display: flex; gap: 16px; align-items: center;">
+        <MudText Typo="Typo.body2" Style="color: var(--text-secondary);">Logged in as: @_userName</MudText>
+        <MudButton Variant="Variant.Outlined" 
+                   Color="Color.Default" 
+                   Size="Size.Small" 
+                   OnClick="HandleLogoutAsync"
+                   StartIcon="@Icons.Material.Filled.Logout">
+          Logout
+        </MudButton>
+      </div>
+    </div>
+    
+    <!-- Search Bar -->
+    <div style="margin-bottom: 16px;">
+      <MudTextField @bind-Value="_searchQuery" 
+                    Label="Search Spotify" 
+                    Variant="Variant.Outlined" 
+                    Adornment="Adornment.End" 
+                    AdornmentIcon="@Icons.Material.Filled.Search"
+                    OnAdornmentClick="HandleSearchAsync"
+                    OnKeyUp="@(async (e) => { if (e.Key == "Enter") await HandleSearchAsync(); })"
+                    Style="width: 100%;" />
+    </div>
+    
+    <!-- Filter Pills -->
+    <div style="margin-bottom: 24px; display: flex; gap: 8px; flex-wrap: wrap;">
+      <MudChip T="string" Text="All" Variant="@(_selectedFilters.Contains("all") ? Variant.Filled : Variant.Outlined)" 
+               Color="@(_selectedFilters.Contains("all") ? Color.Primary : Color.Default)"
+               OnClick="@(() => ToggleFilter("all"))">All</MudChip>
+      <MudChip T="string" Text="Tracks" Variant="@(_selectedFilters.Contains("track") ? Variant.Filled : Variant.Outlined)" 
+               Color="@(_selectedFilters.Contains("track") ? Color.Primary : Color.Default)"
+               OnClick="@(() => ToggleFilter("track"))">Music</MudChip>
+      <MudChip T="string" Text="Albums" Variant="@(_selectedFilters.Contains("album") ? Variant.Filled : Variant.Outlined)" 
+               Color="@(_selectedFilters.Contains("album") ? Color.Primary : Color.Default)"
+               OnClick="@(() => ToggleFilter("album"))">Albums</MudChip>
+      <MudChip T="string" Text="Artists" Variant="@(_selectedFilters.Contains("artist") ? Variant.Filled : Variant.Outlined)" 
+               Color="@(_selectedFilters.Contains("artist") ? Color.Primary : Color.Default)"
+               OnClick="@(() => ToggleFilter("artist"))">Artists</MudChip>
+      <MudChip T="string" Text="Playlists" Variant="@(_selectedFilters.Contains("playlist") ? Variant.Filled : Variant.Outlined)" 
+               Color="@(_selectedFilters.Contains("playlist") ? Color.Primary : Color.Default)"
+               OnClick="@(() => ToggleFilter("playlist"))">Playlists</MudChip>
+      <MudButton Variant="Variant.Outlined" 
+                 Color="Color.Default" 
+                 Size="Size.Small" 
+                 OnClick="HandleBrowseAsync"
+                 StartIcon="@Icons.Material.Filled.Explore">
+        Browse
+      </MudButton>
+    </div>
+    
+    <!-- Search Results -->
+    @if (_isSearching)
+    {
+      <div style="display: flex; justify-content: center; padding: 64px;">
+        <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+      </div>
+    }
+    else if (_searchResults != null)
+    {
+      <div style="flex: 1; overflow-y: auto;">
+        <!-- Tracks -->
+        @if (_searchResults.Tracks?.Any() == true)
+        {
+          <MudText Typo="Typo.h6" Style="margin-bottom: 16px;">Tracks</MudText>
+          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px;">
+            @foreach (var track in _searchResults.Tracks.Take(10))
+            {
+              <MudCard Style="cursor: pointer;" @onclick="@(() => HandlePlayTrackAsync(track.Uri))">
+                <MudCardMedia Image="@(track.AlbumArtUrl ?? "/icons/music-note.svg")" Height="200" />
+                <MudCardContent Style="padding: 12px;">
+                  <MudText Typo="Typo.body2" Style="font-weight: 600; margin-bottom: 4px;">@track.Name</MudText>
+                  <MudText Typo="Typo.caption" Style="color: var(--text-secondary);">@track.Artist</MudText>
+                </MudCardContent>
+                <MudCardActions Style="padding: 8px;">
+                  <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" OnClick="@(() => HandlePlayTrackAsync(track.Uri))" title="Play" />
+                  <MudIconButton Icon="@Icons.Material.Filled.Add" Size="Size.Small" OnClick="@(() => HandleAddToQueueAsync(track.Uri))" title="Add to Queue" />
+                </MudCardActions>
+              </MudCard>
+            }
+          </div>
+        }
+        
+        <!-- Albums -->
+        @if (_searchResults.Albums?.Any() == true)
+        {
+          <MudText Typo="Typo.h6" Style="margin-bottom: 16px;">Albums</MudText>
+          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px;">
+            @foreach (var album in _searchResults.Albums.Take(6))
+            {
+              <MudCard Style="cursor: pointer;">
+                <MudCardMedia Image="@(album.ImageUrl ?? "/icons/album.svg")" Height="200" />
+                <MudCardContent Style="padding: 12px;">
+                  <MudText Typo="Typo.body2" Style="font-weight: 600; margin-bottom: 4px;">@album.Name</MudText>
+                  <MudText Typo="Typo.caption" Style="color: var(--text-secondary);">@album.Artist</MudText>
+                </MudCardContent>
+              </MudCard>
+            }
+          </div>
+        }
+        
+        <!-- Playlists -->
+        @if (_searchResults.Playlists?.Any() == true)
+        {
+          <MudText Typo="Typo.h6" Style="margin-bottom: 16px;">Playlists</MudText>
+          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px;">
+            @foreach (var playlist in _searchResults.Playlists.Take(6))
+            {
+              <MudCard Style="cursor: pointer;">
+                <MudCardMedia Image="@(playlist.ImageUrl ?? "/icons/playlist.svg")" Height="200" />
+                <MudCardContent Style="padding: 12px;">
+                  <MudText Typo="Typo.body2" Style="font-weight: 600;">@playlist.Name</MudText>
+                </MudCardContent>
+              </MudCard>
+            }
+          </div>
+        }
+      </div>
+    }
+    else if (!string.IsNullOrEmpty(_searchQuery))
+    {
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-secondary);">
+        <MudIcon Icon="@Icons.Material.Filled.SearchOff" Style="font-size: 120px; margin-bottom: 16px; opacity: 0.5;" />
+        <MudText Typo="Typo.h5">No results found</MudText>
+        <MudText Typo="Typo.body2" Style="margin-top: 8px;">Try a different search term</MudText>
+      </div>
+    }
+    else
+    {
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-secondary);">
+        <MudIcon Icon="@Icons.Material.Filled.Search" Style="font-size: 120px; margin-bottom: 16px; opacity: 0.5;" />
+        <MudText Typo="Typo.h5">Search for music</MudText>
+        <MudText Typo="Typo.body2" Style="margin-top: 8px;">Enter a song, artist, album, or playlist name</MudText>
+      </div>
+    }
+  }
+</div>
+
+@code {
+  private bool _isAuthenticated = false;
+  private string? _userName = null;
+  private string _searchQuery = "";
+  private List<string> _selectedFilters = new() { "all" };
+  private SpotifySearchResultsDto? _searchResults = null;
+  private bool _isSearching = false;
+
+  protected override async Task OnInitializedAsync()
+  {
+    await CheckAuthStatusAsync();
+  }
+
+  private async Task CheckAuthStatusAsync()
+  {
+    try
+    {
+      var status = await SpotifyApi.GetAuthStatusAsync();
+      if (status != null)
+      {
+        _isAuthenticated = status.IsAuthenticated;
+        _userName = status.UserName;
+      }
+    }
+    catch (Exception)
+    {
+      _isAuthenticated = false;
+    }
+  }
+
+  private async Task HandleLoginAsync()
+  {
+    try
+    {
+      var authUrl = await SpotifyApi.GetAuthUrlAsync($"{NavigationManager.BaseUri}spotify/callback");
+      if (authUrl != null && !string.IsNullOrEmpty(authUrl.Url))
+      {
+        // Store state and code verifier in session storage
+        // For now, just navigate to the OAuth URL
+        NavigationManager.NavigateTo(authUrl.Url, forceLoad: true);
+      }
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+
+  private async Task HandleLogoutAsync()
+  {
+    try
+    {
+      await SpotifyApi.LogoutAsync();
+      _isAuthenticated = false;
+      _userName = null;
+      _searchResults = null;
+      _searchQuery = "";
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+
+  private void ToggleFilter(string filter)
+  {
+    if (filter == "all")
+    {
+      _selectedFilters.Clear();
+      _selectedFilters.Add("all");
+    }
+    else
+    {
+      _selectedFilters.Remove("all");
+      if (_selectedFilters.Contains(filter))
+      {
+        _selectedFilters.Remove(filter);
+      }
+      else
+      {
+        _selectedFilters.Add(filter);
+      }
+      
+      if (!_selectedFilters.Any())
+      {
+        _selectedFilters.Add("all");
+      }
+    }
+  }
+
+  private async Task HandleSearchAsync()
+  {
+    if (string.IsNullOrWhiteSpace(_searchQuery)) return;
+    
+    _isSearching = true;
+    try
+    {
+      var types = _selectedFilters.Contains("all") 
+        ? new List<string> { "track", "album", "artist", "playlist" }
+        : _selectedFilters;
+      
+      _searchResults = await SpotifyApi.SearchAsync(_searchQuery, types);
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+    finally
+    {
+      _isSearching = false;
+    }
+  }
+
+  private async Task HandlePlayTrackAsync(string uri)
+  {
+    try
+    {
+      await SpotifyApi.PlayUriAsync(uri, null);
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+
+  private async Task HandleAddToQueueAsync(string uri)
+  {
+    try
+    {
+      await QueueApi.AddToQueueAsync(uri);
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+
+  private void HandleBrowseAsync()
+  {
+    // TODO: Open browse dialog
+  }
+
+  public void Dispose()
+  {
+    // Cleanup if needed
+  }
+}

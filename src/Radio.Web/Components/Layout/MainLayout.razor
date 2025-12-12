@@ -1,30 +1,57 @@
 @inherits LayoutComponentBase
 @inject SystemApiService SystemApi
+@inject SourcesApiService SourcesApi
+@inject NavigationManager NavigationManager
+@implements IDisposable
 
 <div class="layout-container" style="width: 1920px; height: 576px; overflow: hidden;">
   <!-- Top Navigation Bar - 60px height -->
   <MudAppBar Fixed="true" Elevation="1" Style="height: 60px;">
     <!-- LEFT: Date/Time Display -->
-    <div class="led-display" style="font-size: 24px; min-width: 300px;">
+    <div class="led-display" style="font-size: 24px; min-width: 300px; font-family: 'DSEG14Classic-Bold', monospace; color: oklch(0.8 0.18 75);">
       @_currentTime
     </div>
     
-    <!-- CENTER: System Stats -->
+    <!-- Source Selector -->
     <MudSpacer />
-    <div class="led-display-cyan" style="font-size: 18px; display: flex; gap: 24px; font-family: 'DSEG14Classic-Regular', monospace;">
+    <MudSelect T="string" Value="@_selectedSourceId" ValueChanged="@HandleSourceChangeAsync" 
+               Label="Audio Source" Variant="Variant.Outlined" Dense="true" 
+               Style="min-width: 200px; margin-right: 24px;">
+      @foreach (var source in _availableSources)
+      {
+        <MudSelectItem Value="@source.Id">@source.Name</MudSelectItem>
+      }
+    </MudSelect>
+    
+    <!-- CENTER: System Stats -->
+    <div class="led-display-cyan" style="font-size: 18px; display: flex; gap: 24px; font-family: 'DSEG14Classic-Regular', monospace; color: oklch(0.7 0.15 195);">
       <span>CPU: @_cpuUsage%</span>
       <span>RAM: @_ramUsage MB</span>
       <span>Threads: @_threadCount</span>
     </div>
     <MudSpacer />
     
-    <!-- RIGHT: Navigation Icons -->
-    <MudIconButton Icon="@Icons.Material.Filled.Home" Color="Color.Inherit" Href="/" title="Home / Now Playing" />
-    <MudIconButton Icon="@Icons.Material.Filled.QueueMusic" Color="Color.Inherit" Href="/queue" title="Queue" />
-    <MudIconButton Icon="@Icons.Material.Filled.Radio" Color="Color.Inherit" Href="/radio" title="Radio" />
-    <MudIconButton Icon="@Icons.Material.Filled.Folder" Color="Color.Inherit" Href="/files" title="File Browser" />
-    <MudIconButton Icon="@Icons.Material.Filled.ShowChart" Color="Color.Inherit" Href="/visualizer" title="Visualizer" />
-    <MudIconButton Icon="@Icons.Material.Filled.Settings" Color="Color.Inherit" Href="/system" title="System Config" />
+    <!-- RIGHT: Navigation Icons (48px touch targets) -->
+    <MudIconButton Icon="@Icons.Material.Filled.Home" Color="Color.Inherit" Href="/" Size="Size.Large" title="Home / Now Playing" />
+    @if (_showQueueNav)
+    {
+      <MudIconButton Icon="@Icons.Material.Filled.QueueMusic" Color="Color.Inherit" Href="/queue" Size="Size.Large" title="Queue" />
+    }
+    @if (_showSpotifyNav)
+    {
+      <MudIconButton Icon="@Icons.Material.Filled.Search" Color="Color.Inherit" Href="/spotify" Size="Size.Large" title="Spotify Search" />
+    }
+    @if (_showRadioNav)
+    {
+      <MudIconButton Icon="@Icons.Material.Filled.Radio" Color="Color.Inherit" Href="/radio" Size="Size.Large" title="Radio Controls" />
+    }
+    @if (_showFilesNav)
+    {
+      <MudIconButton Icon="@Icons.Material.Filled.Folder" Color="Color.Inherit" Href="/files" Size="Size.Large" title="File Browser" />
+    }
+    <MudIconButton Icon="@Icons.Material.Filled.ShowChart" Color="Color.Inherit" Href="/visualizer" Size="Size.Large" title="Visualizer" />
+    <MudIconButton Icon="@Icons.Material.Filled.Dashboard" Color="Color.Inherit" Href="/metrics" Size="Size.Large" title="Metrics" />
+    <MudIconButton Icon="@Icons.Material.Filled.Settings" Color="Color.Inherit" Href="/system" Size="Size.Large" title="System Config" />
   </MudAppBar>
   
   <!-- Main Content Area - 516px height (576 - 60) -->
@@ -39,9 +66,20 @@
   private string _ramUsage = "0";
   private string _threadCount = "0";
   private System.Threading.Timer? _timer;
+  private List<AudioSourceDto> _availableSources = new();
+  private string? _selectedSourceId = null;
+  
+  // Conditional navigation visibility
+  private bool _showQueueNav = false;
+  private bool _showSpotifyNav = false;
+  private bool _showRadioNav = false;
+  private bool _showFilesNav = false;
 
-  protected override void OnInitialized()
+  protected override async Task OnInitializedAsync()
   {
+    // Load available sources
+    await LoadSourcesAsync();
+    
     // Update time and system stats every second
     _timer = new System.Threading.Timer(async _ =>
     {
@@ -49,6 +87,62 @@
       await UpdateSystemStatsAsync();
       await InvokeAsync(StateHasChanged);
     }, null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
+  }
+
+  private async Task LoadSourcesAsync()
+  {
+    try
+    {
+      var sources = await SourcesApi.GetSourcesAsync();
+      if (sources != null)
+      {
+        _availableSources = sources;
+        
+        // Get primary source
+        var primary = await SourcesApi.GetPrimarySourceAsync();
+        if (primary != null)
+        {
+          _selectedSourceId = primary.Id;
+          UpdateNavigationVisibility(primary);
+        }
+      }
+    }
+    catch (Exception)
+    {
+      // Silently fail to avoid disrupting UI
+    }
+  }
+
+  private async Task HandleSourceChangeAsync(string newSourceId)
+  {
+    if (newSourceId == _selectedSourceId) return;
+    
+    try
+    {
+      var success = await SourcesApi.SwitchSourceAsync(newSourceId);
+      if (success)
+      {
+        _selectedSourceId = newSourceId;
+        var source = _availableSources.FirstOrDefault(s => s.Id == newSourceId);
+        if (source != null)
+        {
+          UpdateNavigationVisibility(source);
+        }
+      }
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+
+  private void UpdateNavigationVisibility(AudioSourceDto source)
+  {
+    // Show/hide navigation based on source type
+    _showQueueNav = source.Type is "Spotify" or "FilePlayer" or "Queue";
+    _showSpotifyNav = source.Type == "Spotify";
+    _showRadioNav = source.Type == "Radio" || source.Type == "RTLSDRCore" || source.Type == "RF320";
+    _showFilesNav = source.Type == "FilePlayer";
   }
 
   private async Task UpdateSystemStatsAsync()
