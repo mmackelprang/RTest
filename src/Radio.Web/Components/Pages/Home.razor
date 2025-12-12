@@ -1,6 +1,108 @@
 @page "/"
+@rendermode InteractiveServer
 
-<PageTitle>Home</PageTitle>
+<PageTitle>Now Playing - Radio Console</PageTitle>
 
-<h1>Radio Console</h1>
-<p>Welcome to the Radio Console - Grandpa Anderson's Console Radio Remade.</p>
+<div class="home-page" style="padding: 24px; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+  <!-- Now Playing Display -->
+  <MudCard Elevation="2" Style="width: 100%; max-width: 800px; padding: 32px;">
+    <MudCardContent>
+      <div style="text-align: center;">
+        <!-- Album Art or Generic Icon -->
+        <div style="margin-bottom: 24px;">
+          @if (string.IsNullOrEmpty(_albumArtUrl))
+          {
+            <MudIcon Icon="@Icons.Material.Filled.MusicNote" Style="font-size: 200px; color: var(--text-secondary);" />
+          }
+          else
+          {
+            <img src="@_albumArtUrl" alt="Album Art" style="width: 400px; height: 400px; object-fit: cover; border-radius: 8px;" />
+          }
+        </div>
+        
+        <!-- Track Info -->
+        <MudText Typo="Typo.h3" Style="font-weight: 600; margin-bottom: 8px;">
+          @(_title ?? "No Track Playing")
+        </MudText>
+        <MudText Typo="Typo.h5" Style="margin-bottom: 4px; color: var(--text-secondary);">
+          @(_artist ?? "--")
+        </MudText>
+        <MudText Typo="Typo.h6" Style="color: var(--text-tertiary);">
+          @(_album ?? "--")
+        </MudText>
+        
+        <!-- Source Badge -->
+        @if (!string.IsNullOrEmpty(_source))
+        {
+          <MudChip T="string" Color="Color.Primary" Style="margin-top: 16px;">@_source</MudChip>
+        }
+      </div>
+    </MudCardContent>
+  </MudCard>
+  
+  <!-- Transport Controls -->
+  <div style="margin-top: 32px; display: flex; gap: 16px; align-items: center;">
+    <MudIconButton Icon="@Icons.Material.Filled.Shuffle" 
+                   Color="@(_isShuffleEnabled ? Color.Primary : Color.Default)" 
+                   Size="Size.Large"
+                   Style="min-width: 60px; min-height: 60px;"
+                   Title="Shuffle" />
+    
+    <MudIconButton Icon="@Icons.Material.Filled.SkipPrevious" 
+                   Color="Color.Default" 
+                   Size="Size.Large"
+                   Style="min-width: 60px; min-height: 60px;"
+                   Title="Previous" />
+    
+    <MudIconButton Icon="@(_isPlaying ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)" 
+                   Color="Color.Primary" 
+                   Size="Size.Large"
+                   Style="min-width: 80px; min-height: 80px; font-size: 48px;"
+                   Class="primary-action"
+                   Title="@(_isPlaying ? "Pause" : "Play")" />
+    
+    <MudIconButton Icon="@Icons.Material.Filled.SkipNext" 
+                   Color="Color.Default" 
+                   Size="Size.Large"
+                   Style="min-width: 60px; min-height: 60px;"
+                   Title="Next" />
+    
+    <MudIconButton Icon="@Icons.Material.Filled.Repeat" 
+                   Color="@(_repeatMode != "Off" ? Color.Primary : Color.Default)" 
+                   Size="Size.Large"
+                   Style="min-width: 60px; min-height: 60px;"
+                   Title="@($"Repeat: {_repeatMode}")" />
+  </div>
+  
+  <!-- Volume Control -->
+  <div style="margin-top: 32px; width: 100%; max-width: 500px;">
+    <div style="display: flex; align-items: center; gap: 16px;">
+      <MudIconButton Icon="@(_isMuted ? Icons.Material.Filled.VolumeOff : Icons.Material.Filled.VolumeUp)" 
+                     Color="Color.Default" 
+                     Title="@(_isMuted ? "Unmute" : "Mute")" />
+      <MudSlider @bind-Value="_volume" Min="0" Max="1" Step="0.01" Style="flex: 1;" Color="Color.Primary">
+        Volume: @((_volume * 100).ToString("F0"))%
+      </MudSlider>
+    </div>
+  </div>
+</div>
+
+@code {
+  private bool _isPlaying = false;
+  private bool _isMuted = false;
+  private bool _isShuffleEnabled = false;
+  private string _repeatMode = "Off";
+  private double _volume = 0.75;
+  private string? _title = null;
+  private string? _artist = null;
+  private string? _album = null;
+  private string? _albumArtUrl = null;
+  private string? _source = null;
+
+  protected override async Task OnInitializedAsync()
+  {
+    // TODO: Initialize API clients and SignalR connection
+    // For now, show empty state
+    await Task.CompletedTask;
+  }
+}

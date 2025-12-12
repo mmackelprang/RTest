@@ -1,0 +1,215 @@
+/* Radio Console Custom Material 3 Theme - LED Aesthetic */
+
+/* LED Font Declarations */
+@font-face {
+  font-family: 'DSEG14Classic-Bold';
+  src: url('../fonts/DSEG14Classic-Bold.woff2') format('woff2'),
+       url('../fonts/DSEG14Classic-Bold.woff') format('woff'),
+       url('../fonts/DSEG14Classic-Bold.ttf') format('truetype');
+  font-weight: bold;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'DSEG14Classic-Regular';
+  src: url('../fonts/DSEG14Classic-Regular.woff2') format('woff2'),
+       url('../fonts/DSEG14Classic-Regular.woff') format('woff'),
+       url('../fonts/DSEG14Classic-Regular.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'DSEG14Classic-Light';
+  src: url('../fonts/DSEG14Classic-Light.woff2') format('woff2'),
+       url('../fonts/DSEG14Classic-Light.woff') format('woff'),
+       url('../fonts/DSEG14Classic-Light.ttf') format('truetype');
+  font-weight: 300;
+  font-style: normal;
+}
+
+/* Root CSS Variables - Material 3 Dark Theme with LED Aesthetic */
+:root {
+  /* Background Colors */
+  --background-primary: oklch(0.2 0.01 240);  /* Deep charcoal */
+  --background-secondary: oklch(0.25 0.02 240);  /* Dark slate */
+  --background-tertiary: oklch(0.15 0.01 240);  /* Darker charcoal */
+  
+  /* Primary Colors */
+  --color-primary: oklch(0.75 0.15 195);  /* Electric cyan */
+  --color-primary-dark: oklch(0.65 0.15 195);
+  --color-primary-light: oklch(0.85 0.15 195);
+  
+  /* LED Colors */
+  --led-amber: oklch(0.8 0.18 75);  /* Amber LED */
+  --led-cyan: oklch(0.7 0.15 195);  /* Cyan LED */
+  --led-green: oklch(0.75 0.18 140);  /* Green LED */
+  --led-red: oklch(0.65 0.20 25);  /* Red LED */
+  
+  /* Text Colors */
+  --text-primary: oklch(0.95 0.01 240);  /* Near white */
+  --text-secondary: oklch(0.75 0.02 240);  /* Light gray */
+  --text-tertiary: oklch(0.55 0.02 240);  /* Medium gray */
+  
+  /* Touch Targets */
+  --touch-target-min: 48px;
+  --touch-target-preferred: 60px;
+  
+  /* Spacing */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  
+  /* Fixed Dimensions */
+  --viewport-width: 1920px;
+  --viewport-height: 576px;
+  --nav-bar-height: 60px;
+  --content-height: 516px;
+}
+
+/* Global Styles */
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: var(--viewport-width);
+  height: var(--viewport-height);
+  overflow: hidden;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: var(--background-primary);
+  color: var(--text-primary);
+}
+
+#app {
+  width: 100%;
+  height: 100%;
+}
+
+/* LED Display Styles */
+.led-display {
+  font-family: 'DSEG14Classic-Bold', monospace;
+  color: var(--led-amber);
+  text-shadow: 0 0 10px var(--led-amber),
+               0 0 20px var(--led-amber),
+               0 0 30px var(--led-amber);
+  letter-spacing: 0.1em;
+}
+
+.led-display-cyan {
+  color: var(--led-cyan);
+  text-shadow: 0 0 10px var(--led-cyan),
+               0 0 20px var(--led-cyan),
+               0 0 30px var(--led-cyan);
+}
+
+.led-display-green {
+  color: var(--led-green);
+  text-shadow: 0 0 10px var(--led-green),
+               0 0 20px var(--led-green),
+               0 0 30px var(--led-green);
+}
+
+/* Touch Target Enforcement */
+button, .mud-button-root, .mud-icon-button {
+  min-width: var(--touch-target-min);
+  min-height: var(--touch-target-min);
+}
+
+.primary-action {
+  min-width: var(--touch-target-preferred);
+  min-height: var(--touch-target-preferred);
+}
+
+/* MudBlazor Theme Overrides */
+.mud-theme-primary {
+  color: var(--color-primary) !important;
+}
+
+.mud-paper {
+  background-color: var(--background-secondary) !important;
+}
+
+.mud-appbar {
+  background-color: var(--background-tertiary) !important;
+}
+
+/* Page Transitions */
+.page-transition {
+  animation: slideIn 250ms ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background-tertiary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--background-secondary);
+  border-radius: 6px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary-dark);
+}
+
+/* Loading States */
+.skeleton-loading {
+  background: linear-gradient(
+    90deg,
+    var(--background-secondary) 0%,
+    var(--background-tertiary) 50%,
+    var(--background-secondary) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Utility Classes */
+.full-height {
+  height: 100%;
+}
+
+.full-width {
+  width: 100%;
+}
+
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.no-select {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+}
