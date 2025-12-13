@@ -93,8 +93,9 @@ builder.Services.AddHttpClient<RadioApiService>(client =>
 // All 11 API client services are now registered!
 // Total: 86 REST endpoints implemented
 
-// Register SignalR hub service as singleton (Phase 1 Task 1.3)
+// Register SignalR hub services as singletons (Phase 1 Task 1.3, Phase 10)
 builder.Services.AddSingleton<AudioStateHubService>();
+builder.Services.AddSingleton<AudioVisualizationHubService>();
 
 var app = builder.Build();
 

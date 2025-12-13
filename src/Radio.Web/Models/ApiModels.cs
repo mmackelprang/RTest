@@ -282,3 +282,43 @@ public record LogFilters(
   int Limit,
   int? MaxAgeMinutes
 );
+
+// Visualization API DTOs
+public class SpectrumDataDto
+{
+  public float[] Magnitudes { get; set; } = [];
+  public float[] Frequencies { get; set; } = [];
+  public int BinCount { get; set; }
+  public float FrequencyResolution { get; set; }
+  public float MaxFrequency { get; set; }
+  public long TimestampMs { get; set; }
+}
+
+public class LevelDataDto
+{
+  public float LeftPeak { get; set; }
+  public float RightPeak { get; set; }
+  public float LeftRms { get; set; }
+  public float RightRms { get; set; }
+  public float LeftPeakDb { get; set; }
+  public float RightPeakDb { get; set; }
+  public bool IsClipping { get; set; }
+  public long TimestampMs { get; set; }
+}
+
+public class WaveformDataDto
+{
+  public float[] LeftSamples { get; set; } = [];
+  public float[] RightSamples { get; set; } = [];
+  public int SampleCount { get; set; }
+  public double DurationMs { get; set; }
+  public long TimestampMs { get; set; }
+}
+
+public class VisualizationDataDto
+{
+  public SpectrumDataDto? Spectrum { get; set; }
+  public LevelDataDto? Levels { get; set; }
+  public WaveformDataDto? Waveform { get; set; }
+  public bool IsActive { get; set; }
+}
