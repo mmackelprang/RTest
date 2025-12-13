@@ -292,7 +292,19 @@ public sealed class JsonConfigurationStore : ConfigurationStoreBase, IDisposable
     var tempPath = _filePath + ".tmp";
     var json = JsonSerializer.Serialize(data, _jsonOptions);
     await File.WriteAllTextAsync(tempPath, json, ct);
-    File.Move(tempPath, _filePath, overwrite: true);
+    var backupPath = _filePath + ".bak";
+    if (File.Exists(_filePath))
+    {
+      if (File.Exists(backupPath))
+      {
+        try { File.Delete(backupPath); } catch { /* ignore */ }
+      }
+      File.Replace(tempPath, _filePath, backupPath);
+    }
+    else
+    {
+      File.Move(tempPath, _filePath);
+    }
 
     _isDirty = false;
     Logger.LogDebug("Saved {Count} entries to {Path}", _entries.Count, _filePath);
