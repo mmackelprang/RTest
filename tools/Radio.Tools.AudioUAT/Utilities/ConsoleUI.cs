@@ -41,14 +41,18 @@ public static class ConsoleUI
   /// <returns>The selected option.</returns>
   public static string ShowMenu(string title, params string[] options)
   {
+    // Escape option text to avoid Spectre.Console markup parsing issues
+    var escapedOptions = options.Select(Markup.Escape).ToArray();
+
     var selection = AnsiConsole.Prompt(
       new SelectionPrompt<string>()
         .Title(title)
         .PageSize(15)
         .HighlightStyle(Style.Parse("cyan"))
-        .AddChoices(options));
+        .AddChoices(escapedOptions));
 
-    return selection;
+    // Unescape selection back to original text for downstream logic
+    return selection.Replace("[[", "[").Replace("]]", "]");
   }
 
   /// <summary>
