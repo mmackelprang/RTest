@@ -114,3 +114,5 @@ app.MapRazorComponents<Radio.Web.Components.App>()
   .AddInteractiveServerRenderMode();
 
 app.Run();
+
+public partial class Program { }
