@@ -1,0 +1,300 @@
+@page "/devices"
+@using Radio.Web.Services.ApiClients
+@using Radio.Web.Models
+@inject DevicesApiService DevicesApi
+@inject ISnackbar Snackbar
+@inject ILogger<DeviceManagementPage> Logger
+
+<PageTitle>Device Management - Radio Console</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.False" Class="pa-4">
+  <MudStack Spacing="3">
+    
+    @* Header *@
+    <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+      <MudText Typo="Typo.h4">Device Management</MudText>
+      <MudButton Variant="Variant.Filled" Color="Color.Primary" 
+                 OnClick="RefreshDevicesAsync" StartIcon="@Icons.Material.Filled.Refresh">
+        Refresh Devices
+      </MudButton>
+    </MudStack>
+
+    @* Output Devices Section *@
+    <MudPaper Elevation="2" Class="pa-4">
+      <MudStack Spacing="2">
+        <MudText Typo="Typo.h5">Output Devices</MudText>
+        
+        @if (isLoadingOutput)
+        {
+          <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (outputDevices == null || !outputDevices.Any())
+        {
+          <MudAlert Severity="Severity.Info">No output devices found. Click Refresh to scan for devices.</MudAlert>
+        }
+        else
+        {
+          <MudTable Items="@outputDevices" Hover="true" Striped="true" Dense="true">
+            <HeaderContent>
+              <MudTh>Name</MudTh>
+              <MudTh>Type</MudTh>
+              <MudTh>Status</MudTh>
+              <MudTh>Actions</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+              <MudTd DataLabel="Name">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                  @if (context.IsDefault)
+                  {
+                    <MudIcon Icon="@Icons.Material.Filled.Star" Color="Color.Primary" Size="Size.Small" title="Default Device" />
+                  }
+                  <MudText>@context.Name</MudText>
+                </MudStack>
+              </MudTd>
+              <MudTd DataLabel="Type">@context.Type</MudTd>
+              <MudTd DataLabel="Status">
+                @if (context.IsActive)
+                {
+                  <MudChip T="string" Size="Size.Small" Color="Color.Success">Active</MudChip>
+                }
+                else if (context.IsDefault)
+                {
+                  <MudChip T="string" Size="Size.Small" Color="Color.Primary">Default</MudChip>
+                }
+                else
+                {
+                  <MudChip T="string" Size="Size.Small" Color="Color.Default">Available</MudChip>
+                }
+              </MudTd>
+              <MudTd DataLabel="Actions">
+                @if (!context.IsDefault)
+                {
+                  <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
+                             OnClick="@(() => SetDefaultOutputAsync(context.Id))">
+                    Set as Default
+                  </MudButton>
+                }
+              </MudTd>
+            </RowTemplate>
+          </MudTable>
+        }
+      </MudStack>
+    </MudPaper>
+
+    @* Input Devices Section *@
+    <MudPaper Elevation="2" Class="pa-4">
+      <MudStack Spacing="2">
+        <MudText Typo="Typo.h5">Input Devices</MudText>
+        
+        @if (isLoadingInput)
+        {
+          <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (inputDevices == null || !inputDevices.Any())
+        {
+          <MudAlert Severity="Severity.Info">No input devices found. Click Refresh to scan for devices.</MudAlert>
+        }
+        else
+        {
+          <MudTable Items="@inputDevices" Hover="true" Striped="true" Dense="true">
+            <HeaderContent>
+              <MudTh>Name</MudTh>
+              <MudTh>Type</MudTh>
+              <MudTh>Status</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+              <MudTd DataLabel="Name">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                  @if (context.IsDefault)
+                  {
+                    <MudIcon Icon="@Icons.Material.Filled.Star" Color="Color.Primary" Size="Size.Small" title="Default Device" />
+                  }
+                  <MudText>@context.Name</MudText>
+                </MudStack>
+              </MudTd>
+              <MudTd DataLabel="Type">@context.Type</MudTd>
+              <MudTd DataLabel="Status">
+                @if (context.IsActive)
+                {
+                  <MudChip T="string" Size="Size.Small" Color="Color.Success">Active</MudChip>
+                }
+                else if (context.IsDefault)
+                {
+                  <MudChip T="string" Size="Size.Small" Color="Color.Primary">Default</MudChip>
+                }
+                else
+                {
+                  <MudChip T="string" Size="Size.Small" Color="Color.Default">Available</MudChip>
+                }
+              </MudTd>
+            </RowTemplate>
+          </MudTable>
+        }
+      </MudStack>
+    </MudPaper>
+
+    @* USB Port Reservations Section *@
+    <MudPaper Elevation="2" Class="pa-4">
+      <MudStack Spacing="2">
+        <MudText Typo="Typo.h5">USB Port Reservations</MudText>
+        
+        @if (isLoadingUsb)
+        {
+          <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (usbPorts == null || !usbPorts.Any())
+        {
+          <MudAlert Severity="Severity.Info">No USB port reservations found.</MudAlert>
+        }
+        else
+        {
+          <MudTable Items="@usbPorts" Hover="true" Striped="true" Dense="true">
+            <HeaderContent>
+              <MudTh>Port ID</MudTh>
+              <MudTh>Port Name</MudTh>
+              <MudTh>Reserved</MudTh>
+              <MudTh>Reserved By</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+              <MudTd DataLabel="Port ID">@context.Id</MudTd>
+              <MudTd DataLabel="Port Name">@context.Name</MudTd>
+              <MudTd DataLabel="Reserved">
+                @if (context.IsReserved)
+                {
+                  <MudChip T="string" Size="Size.Small" Color="Color.Warning">Reserved</MudChip>
+                }
+                else
+                {
+                  <MudChip T="string" Size="Size.Small" Color="Color.Success">Available</MudChip>
+                }
+              </MudTd>
+              <MudTd DataLabel="Reserved By">@(context.ReservedBy ?? "-")</MudTd>
+            </RowTemplate>
+          </MudTable>
+        }
+      </MudStack>
+    </MudPaper>
+
+    @* Last Refresh Time *@
+    @if (lastRefreshTime.HasValue)
+    {
+      <MudText Typo="Typo.caption" Color="Color.Secondary">
+        Last refresh: @lastRefreshTime.Value.ToString("HH:mm:ss")
+      </MudText>
+    }
+
+  </MudStack>
+</MudContainer>
+
+@code {
+  private List<AudioDeviceDto>? outputDevices;
+  private List<AudioDeviceDto>? inputDevices;
+  private List<UsbPortDto>? usbPorts;
+  
+  private bool isLoadingOutput = false;
+  private bool isLoadingInput = false;
+  private bool isLoadingUsb = false;
+  
+  private DateTime? lastRefreshTime;
+
+  protected override async Task OnInitializedAsync()
+  {
+    await LoadAllDevicesAsync();
+  }
+
+  private async Task LoadAllDevicesAsync()
+  {
+    try
+    {
+      // Load output devices
+      isLoadingOutput = true;
+      StateHasChanged();
+      outputDevices = await DevicesApi.GetOutputDevicesAsync();
+      isLoadingOutput = false;
+
+      // Load input devices
+      isLoadingInput = true;
+      StateHasChanged();
+      inputDevices = await DevicesApi.GetInputDevicesAsync();
+      isLoadingInput = false;
+
+      // Load USB ports
+      isLoadingUsb = true;
+      StateHasChanged();
+      usbPorts = await DevicesApi.GetUsbPortsAsync();
+      isLoadingUsb = false;
+
+      lastRefreshTime = DateTime.Now;
+      StateHasChanged();
+
+      Logger.LogInformation("Loaded all devices successfully");
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error loading devices");
+      Snackbar.Add("Error loading devices", Severity.Error);
+      isLoadingOutput = false;
+      isLoadingInput = false;
+      isLoadingUsb = false;
+      StateHasChanged();
+    }
+  }
+
+  private async Task RefreshDevicesAsync()
+  {
+    try
+    {
+      Logger.LogInformation("Refreshing devices...");
+      
+      var success = await DevicesApi.RefreshDevicesAsync();
+      
+      if (success)
+      {
+        Snackbar.Add("Devices refreshed successfully", Severity.Success);
+        
+        // Reload all devices
+        await LoadAllDevicesAsync();
+      }
+      else
+      {
+        Snackbar.Add("Failed to refresh devices", Severity.Warning);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error refreshing devices");
+      Snackbar.Add("Error refreshing devices", Severity.Error);
+    }
+  }
+
+  private async Task SetDefaultOutputAsync(string deviceId)
+  {
+    try
+    {
+      Logger.LogInformation("Setting default output device: {DeviceId}", deviceId);
+      
+      var success = await DevicesApi.SetOutputDeviceAsync(deviceId);
+      
+      if (success)
+      {
+        Snackbar.Add("Default output device updated", Severity.Success);
+        
+        // Reload output devices to reflect the change
+        isLoadingOutput = true;
+        StateHasChanged();
+        outputDevices = await DevicesApi.GetOutputDevicesAsync();
+        isLoadingOutput = false;
+        StateHasChanged();
+      }
+      else
+      {
+        Snackbar.Add("Failed to set default output device", Severity.Warning);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error setting default output device");
+      Snackbar.Add("Error setting default output device", Severity.Error);
+    }
+  }
+}
