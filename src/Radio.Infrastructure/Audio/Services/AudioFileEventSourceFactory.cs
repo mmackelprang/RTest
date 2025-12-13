@@ -118,31 +118,29 @@ public class AudioFileEventSourceFactory
 
   private async Task<TimeSpan> GetAudioDurationAsync(string filePath, CancellationToken cancellationToken)
   {
-    // Try to determine the duration from the file
-    // This is a simplified implementation that estimates based on file size
-    // In a full implementation, we would use a proper audio library to read metadata
-
-    var extension = Path.GetExtension(filePath).ToLowerInvariant();
-    var fileInfo = new FileInfo(filePath);
-
-    if (fileInfo.Length == 0)
+    return await Task.Run(() =>
     {
-      return TimeSpan.Zero;
-    }
+      var extension = Path.GetExtension(filePath).ToLowerInvariant();
+      var fileInfo = new FileInfo(filePath);
 
-    // Estimate duration based on file format and typical bitrates
-    var estimatedDuration = extension switch
-    {
-      ".wav" => EstimateWavDuration(fileInfo.Length),
-      ".mp3" => EstimateMp3Duration(fileInfo.Length),
-      ".ogg" => EstimateOggDuration(fileInfo.Length),
-      ".flac" => EstimateFlacDuration(fileInfo.Length),
-      _ => TimeSpan.FromSeconds(5) // Default fallback
-    };
+      if (fileInfo.Length == 0)
+      {
+        return TimeSpan.Zero;
+      }
 
-    _logger.LogDebug("Estimated duration for {File}: {Duration}", filePath, estimatedDuration);
+      var estimatedDuration = extension switch
+      {
+        ".wav" => EstimateWavDuration(fileInfo.Length),
+        ".mp3" => EstimateMp3Duration(fileInfo.Length),
+        ".ogg" => EstimateOggDuration(fileInfo.Length),
+        ".flac" => EstimateFlacDuration(fileInfo.Length),
+        _ => TimeSpan.FromSeconds(5)
+      };
 
-    return estimatedDuration;
+      _logger.LogDebug("Estimated duration for {File}: {Duration}", filePath, estimatedDuration);
+
+      return estimatedDuration;
+    }, cancellationToken);
   }
 
   private static TimeSpan EstimateWavDuration(long bytes)
