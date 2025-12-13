@@ -1,0 +1,43 @@
+name: AudioUAT Smoke
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  audio-uat:
+    name: Run AudioUAT (--all)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Run AudioUAT tool (non-interactive)
+        run: |
+          dotnet run --project tools/Radio.Tools.AudioUAT -- --all --output uat-results.json
+        shell: pwsh
+        continue-on-error: true
+
+      - name: Upload UAT results artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audio-uat-results
+          path: tools/Radio.Tools.AudioUAT/uat-results.json
+
+      - name: Print UAT result summary (optional)
+        if: always()
+        run: |
+          if (Test-Path "tools/Radio.Tools.AudioUAT/uat-results.json") { Get-Content "tools/Radio.Tools.AudioUAT/uat-results.json" | Select-Object -First 50 }
+        shell: pwsh
