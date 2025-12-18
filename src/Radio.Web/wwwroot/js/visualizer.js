@@ -46,6 +46,12 @@ window.visualizer = {
   drawVUMeter: function (canvasId, leftPeak, rightPeak, leftRms, rightRms, isClipping) {
     const canvasData = this.canvases[canvasId];
     if (!canvasData) return;
+    
+    // Validate and clamp inputs
+    leftPeak = Math.max(0, Math.min(1, leftPeak || 0));
+    rightPeak = Math.max(0, Math.min(1, rightPeak || 0));
+    leftRms = Math.max(0, Math.min(1, leftRms || 0));
+    rightRms = Math.max(0, Math.min(1, rightRms || 0));
 
     const { ctx, width, height } = canvasData;
     

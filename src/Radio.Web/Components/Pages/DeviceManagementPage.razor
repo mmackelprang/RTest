@@ -300,6 +300,8 @@
     {
       Logger.LogError(ex, "Error setting default output device");
       Snackbar.Add("Error setting default output device", Severity.Error);
+      isLoadingOutput = false;
+      StateHasChanged();
     }
   }
 }

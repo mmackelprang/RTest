@@ -343,8 +343,23 @@
       // Dispose canvas
       if (jsModule != null)
       {
-        await jsModule.InvokeVoidAsync("visualizer.dispose", "visualizer-canvas");
-        await jsModule.DisposeAsync();
+        try
+        {
+          await jsModule.InvokeVoidAsync("visualizer.dispose", "visualizer-canvas");
+        }
+        catch (Exception ex)
+        {
+          Logger.LogWarning(ex, "Error disposing canvas");
+        }
+        
+        try
+        {
+          await jsModule.DisposeAsync();
+        }
+        catch (Exception ex)
+        {
+          Logger.LogWarning(ex, "Error disposing JS module");
+        }
       }
 
       Logger.LogInformation("VisualizerPage disposed");

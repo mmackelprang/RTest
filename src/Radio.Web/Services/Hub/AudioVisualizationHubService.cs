@@ -111,26 +111,38 @@ public class AudioVisualizationHubService : IAsyncDisposable
 
   public async Task StopAsync()
   {
-    if (_hubConnection != null)
+    await _connectionLock.WaitAsync();
+    try
     {
-      await _hubConnection.StopAsync();
-      _logger.LogInformation("Disconnected from AudioVisualizationHub");
+      if (_hubConnection != null)
+      {
+        await _hubConnection.StopAsync();
+        _logger.LogInformation("Disconnected from AudioVisualizationHub");
+      }
+    }
+    finally
+    {
+      _connectionLock.Release();
     }
   }
 
   // Subscription methods
   public async Task SubscribeToSpectrumAsync()
   {
-    if (_hubConnection != null)
+    if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
       await _hubConnection.InvokeAsync("SubscribeToSpectrum");
       _logger.LogDebug("Subscribed to spectrum updates");
+    }
+    else
+    {
+      _logger.LogWarning("Cannot subscribe to spectrum: Hub not connected");
     }
   }
 
   public async Task UnsubscribeFromSpectrumAsync()
   {
-    if (_hubConnection != null)
+    if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
       await _hubConnection.InvokeAsync("UnsubscribeFromSpectrum");
       _logger.LogDebug("Unsubscribed from spectrum updates");
@@ -139,16 +151,20 @@ public class AudioVisualizationHubService : IAsyncDisposable
 
   public async Task SubscribeToLevelsAsync()
   {
-    if (_hubConnection != null)
+    if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
       await _hubConnection.InvokeAsync("SubscribeToLevels");
       _logger.LogDebug("Subscribed to level updates");
+    }
+    else
+    {
+      _logger.LogWarning("Cannot subscribe to levels: Hub not connected");
     }
   }
 
   public async Task UnsubscribeFromLevelsAsync()
   {
-    if (_hubConnection != null)
+    if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
       await _hubConnection.InvokeAsync("UnsubscribeFromLevels");
       _logger.LogDebug("Unsubscribed from level updates");
@@ -157,16 +173,20 @@ public class AudioVisualizationHubService : IAsyncDisposable
 
   public async Task SubscribeToWaveformAsync()
   {
-    if (_hubConnection != null)
+    if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
       await _hubConnection.InvokeAsync("SubscribeToWaveform");
       _logger.LogDebug("Subscribed to waveform updates");
+    }
+    else
+    {
+      _logger.LogWarning("Cannot subscribe to waveform: Hub not connected");
     }
   }
 
   public async Task UnsubscribeFromWaveformAsync()
   {
-    if (_hubConnection != null)
+    if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
       await _hubConnection.InvokeAsync("UnsubscribeFromWaveform");
       _logger.LogDebug("Unsubscribed from waveform updates");
@@ -175,16 +195,20 @@ public class AudioVisualizationHubService : IAsyncDisposable
 
   public async Task SubscribeToAllAsync()
   {
-    if (_hubConnection != null)
+    if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
       await _hubConnection.InvokeAsync("SubscribeToAll");
       _logger.LogDebug("Subscribed to all visualization updates");
+    }
+    else
+    {
+      _logger.LogWarning("Cannot subscribe to all: Hub not connected");
     }
   }
 
   public async Task UnsubscribeFromAllAsync()
   {
-    if (_hubConnection != null)
+    if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
       await _hubConnection.InvokeAsync("UnsubscribeFromAll");
       _logger.LogDebug("Unsubscribed from all visualization updates");
@@ -194,36 +218,68 @@ public class AudioVisualizationHubService : IAsyncDisposable
   // Get methods for on-demand data
   public async Task<SpectrumDataDto?> GetSpectrumAsync()
   {
-    if (_hubConnection != null)
+    if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
-      return await _hubConnection.InvokeAsync<SpectrumDataDto>("GetSpectrum");
+      try
+      {
+        return await _hubConnection.InvokeAsync<SpectrumDataDto>("GetSpectrum");
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "Error getting spectrum data");
+        return null;
+      }
     }
     return null;
   }
 
   public async Task<LevelDataDto?> GetLevelsAsync()
   {
-    if (_hubConnection != null)
+    if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
-      return await _hubConnection.InvokeAsync<LevelDataDto>("GetLevels");
+      try
+      {
+        return await _hubConnection.InvokeAsync<LevelDataDto>("GetLevels");
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "Error getting level data");
+        return null;
+      }
     }
     return null;
   }
 
   public async Task<WaveformDataDto?> GetWaveformAsync()
   {
-    if (_hubConnection != null)
+    if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
-      return await _hubConnection.InvokeAsync<WaveformDataDto>("GetWaveform");
+      try
+      {
+        return await _hubConnection.InvokeAsync<WaveformDataDto>("GetWaveform");
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "Error getting waveform data");
+        return null;
+      }
     }
     return null;
   }
 
   public async Task<VisualizationDataDto?> GetVisualizationAsync()
   {
-    if (_hubConnection != null)
+    if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
-      return await _hubConnection.InvokeAsync<VisualizationDataDto>("GetVisualization");
+      try
+      {
+        return await _hubConnection.InvokeAsync<VisualizationDataDto>("GetVisualization");
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "Error getting visualization data");
+        return null;
+      }
     }
     return null;
   }
