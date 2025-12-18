@@ -73,6 +73,7 @@
 
   private VisualizationMode currentMode = VisualizationMode.VUMeter;
   private bool isInitialized = false;
+  private bool isDisposed = false;
   private DateTime? lastUpdateTime;
   private int updateCount = 0;
   private IJSObjectReference? jsModule;
@@ -254,7 +255,7 @@
 
   private async Task HandleLevelData(LevelDataDto data)
   {
-    if (!isInitialized || jsModule == null || currentMode != VisualizationMode.VUMeter)
+    if (isDisposed || !isInitialized || jsModule == null || currentMode != VisualizationMode.VUMeter)
       return;
 
     try
@@ -280,7 +281,7 @@
 
   private async Task HandleWaveformData(WaveformDataDto data)
   {
-    if (!isInitialized || jsModule == null || currentMode != VisualizationMode.Waveform)
+    if (isDisposed || !isInitialized || jsModule == null || currentMode != VisualizationMode.Waveform)
       return;
 
     try
@@ -303,7 +304,7 @@
 
   private async Task HandleSpectrumData(SpectrumDataDto data)
   {
-    if (!isInitialized || jsModule == null || currentMode != VisualizationMode.Spectrum)
+    if (isDisposed || !isInitialized || jsModule == null || currentMode != VisualizationMode.Spectrum)
       return;
 
     try
@@ -328,6 +329,9 @@
   {
     try
     {
+      // Set disposed flag to prevent event handlers from executing
+      isDisposed = true;
+
       // Unsubscribe from events
       VisualizationHub.OnLevelData -= HandleLevelData;
       VisualizationHub.OnWaveformData -= HandleWaveformData;

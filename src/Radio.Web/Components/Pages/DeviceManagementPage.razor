@@ -206,22 +206,27 @@
   {
     try
     {
-      // Load output devices
+      // Set all loading flags
       isLoadingOutput = true;
-      StateHasChanged();
-      outputDevices = await DevicesApi.GetOutputDevicesAsync();
-      isLoadingOutput = false;
-
-      // Load input devices
       isLoadingInput = true;
-      StateHasChanged();
-      inputDevices = await DevicesApi.GetInputDevicesAsync();
-      isLoadingInput = false;
-
-      // Load USB ports
       isLoadingUsb = true;
       StateHasChanged();
-      usbPorts = await DevicesApi.GetUsbPortsAsync();
+
+      // Load all devices in parallel for better performance
+      var outputTask = DevicesApi.GetOutputDevicesAsync();
+      var inputTask = DevicesApi.GetInputDevicesAsync();
+      var usbTask = DevicesApi.GetUsbPortsAsync();
+
+      await Task.WhenAll(outputTask, inputTask, usbTask);
+
+      // Assign results
+      outputDevices = await outputTask;
+      inputDevices = await inputTask;
+      usbPorts = await usbTask;
+
+      // Clear loading flags
+      isLoadingOutput = false;
+      isLoadingInput = false;
       isLoadingUsb = false;
 
       lastRefreshTime = DateTime.Now;

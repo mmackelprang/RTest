@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Radio.Web.Models;
 
@@ -60,29 +61,25 @@ public class AudioVisualizationHubService : IAsyncDisposable
       _hubConnection.On<SpectrumDataDto>("SpectrumData", async (data) =>
       {
         _logger.LogTrace("Received SpectrumData event");
-        if (OnSpectrumData != null)
-          await OnSpectrumData.Invoke(data);
+        await InvokeEventHandlersAsync(OnSpectrumData, data, "OnSpectrumData");
       });
 
       _hubConnection.On<LevelDataDto>("LevelData", async (data) =>
       {
         _logger.LogTrace("Received LevelData event");
-        if (OnLevelData != null)
-          await OnLevelData.Invoke(data);
+        await InvokeEventHandlersAsync(OnLevelData, data, "OnLevelData");
       });
 
       _hubConnection.On<WaveformDataDto>("WaveformData", async (data) =>
       {
         _logger.LogTrace("Received WaveformData event");
-        if (OnWaveformData != null)
-          await OnWaveformData.Invoke(data);
+        await InvokeEventHandlersAsync(OnWaveformData, data, "OnWaveformData");
       });
 
       _hubConnection.On<VisualizationDataDto>("VisualizationData", async (data) =>
       {
         _logger.LogTrace("Received VisualizationData event");
-        if (OnVisualizationData != null)
-          await OnVisualizationData.Invoke(data);
+        await InvokeEventHandlersAsync(OnVisualizationData, data, "OnVisualizationData");
       });
 
       _hubConnection.Reconnecting += exception =>
@@ -245,6 +242,30 @@ public class AudioVisualizationHubService : IAsyncDisposable
     }
 
     _connectionLock.Dispose();
+  }
+
+  /// <summary>
+  /// Safely invokes event handlers, catching exceptions from individual handlers
+  /// to ensure all subscribers are notified even if one throws.
+  /// </summary>
+  private async Task InvokeEventHandlersAsync<T>(Func<T, Task>? eventHandler, T data, string eventName)
+  {
+    if (eventHandler == null)
+      return;
+
+    var handlers = eventHandler.GetInvocationList();
+    foreach (var handler in handlers)
+    {
+      try
+      {
+        var func = (Func<T, Task>)handler;
+        await func(data);
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "Exception in {EventName} event handler", eventName);
+      }
+    }
   }
 
   // Custom retry policy for automatic reconnection

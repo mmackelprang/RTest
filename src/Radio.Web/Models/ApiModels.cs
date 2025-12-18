@@ -284,41 +284,41 @@ public record LogFilters(
 );
 
 // Visualization API DTOs
-public class SpectrumDataDto
+public record SpectrumDataDto
 {
-  public float[] Magnitudes { get; set; } = [];
-  public float[] Frequencies { get; set; } = [];
-  public int BinCount { get; set; }
-  public float FrequencyResolution { get; set; }
-  public float MaxFrequency { get; set; }
-  public long TimestampMs { get; set; }
+  public float[] Magnitudes { get; init; } = [];
+  public float[] Frequencies { get; init; } = [];
+  public int BinCount { get; init; }
+  public float FrequencyResolution { get; init; }
+  public float MaxFrequency { get; init; }
+  public long TimestampMs { get; init; }
 }
 
-public class LevelDataDto
+public record LevelDataDto
 {
-  public float LeftPeak { get; set; }
-  public float RightPeak { get; set; }
-  public float LeftRms { get; set; }
-  public float RightRms { get; set; }
-  public float LeftPeakDb { get; set; }
-  public float RightPeakDb { get; set; }
-  public bool IsClipping { get; set; }
-  public long TimestampMs { get; set; }
+  public float LeftPeak { get; init; }
+  public float RightPeak { get; init; }
+  public float LeftRms { get; init; }
+  public float RightRms { get; init; }
+  public float LeftPeakDb { get; init; }
+  public float RightPeakDb { get; init; }
+  public bool IsClipping { get; init; }
+  public long TimestampMs { get; init; }
 }
 
-public class WaveformDataDto
+public record WaveformDataDto
 {
-  public float[] LeftSamples { get; set; } = [];
-  public float[] RightSamples { get; set; } = [];
-  public int SampleCount { get; set; }
-  public double DurationMs { get; set; }
-  public long TimestampMs { get; set; }
+  public float[] LeftSamples { get; init; } = [];
+  public float[] RightSamples { get; init; } = [];
+  public int SampleCount { get; init; }
+  public double DurationMs { get; init; }
+  public long TimestampMs { get; init; }
 }
 
-public class VisualizationDataDto
+public record VisualizationDataDto
 {
-  public SpectrumDataDto? Spectrum { get; set; }
-  public LevelDataDto? Levels { get; set; }
-  public WaveformDataDto? Waveform { get; set; }
-  public bool IsActive { get; set; }
+  public SpectrumDataDto? Spectrum { get; init; }
+  public LevelDataDto? Levels { get; init; }
+  public WaveformDataDto? Waveform { get; init; }
+  public bool IsActive { get; init; }
 }

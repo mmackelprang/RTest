@@ -95,7 +95,7 @@ public class AudioVisualizationHubServiceTests
   }
 
   [Fact]
-  public void Service_Has_Event_Handlers_For_All_Data_Types()
+  public void Service_Allows_Event_Subscription_Without_Throwing()
   {
     // Arrange
     var service = new AudioVisualizationHubService(
