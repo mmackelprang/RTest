@@ -301,7 +301,7 @@
   {
     try
     {
-      await ConfigApi.UpdateConfigurationAsync("ui.radio", key, value.ToString() ?? string.Empty);
+      await ConfigApi.UpdateConfigurationAsync("ui.radio", key, value);
     }
     catch (Exception ex)
     {

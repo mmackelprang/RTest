@@ -108,7 +108,7 @@
   {
     try
     {
-      await ConfigApi.UpdateConfigurationAsync("ui.queue", key, value.ToString() ?? string.Empty);
+      await ConfigApi.UpdateConfigurationAsync("ui.queue", key, value);
     }
     catch (Exception ex)
     {

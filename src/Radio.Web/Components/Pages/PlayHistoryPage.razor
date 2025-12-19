@@ -341,7 +341,7 @@
   {
     try
     {
-      await ConfigApi.UpdateConfigurationAsync("ui.history", key, value.ToString() ?? string.Empty);
+      await ConfigApi.UpdateConfigurationAsync("ui.history", key, value);
     }
     catch (Exception ex)
     {
@@ -353,6 +353,7 @@
   {
     _sourceFilter = filter ?? "All";
     await SavePreferenceAsync("sourceFilter", _sourceFilter);
+    await LoadDataAsync();
   }
 
   private async Task LoadDataAsync()

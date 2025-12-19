@@ -178,7 +178,7 @@
   {
     try
     {
-      await ConfigApi.UpdateConfigurationAsync("ui.filebrowser", key, value.ToString() ?? string.Empty);
+      await ConfigApi.UpdateConfigurationAsync("ui.filebrowser", key, value);
     }
     catch (Exception ex)
     {

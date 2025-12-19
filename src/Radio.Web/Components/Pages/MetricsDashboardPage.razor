@@ -203,7 +203,7 @@
   {
     try
     {
-      await ConfigApi.UpdateConfigurationAsync("ui.metrics", key, value.ToString() ?? string.Empty);
+      await ConfigApi.UpdateConfigurationAsync("ui.metrics", key, value);
     }
     catch (Exception ex)
     {
@@ -215,6 +215,12 @@
   {
     _timeRange = timeRange;
     await SavePreferenceAsync("timeRange", timeRange);
+    
+    // If a metric is currently selected, refresh its details to reflect the new time range
+    if (!string.IsNullOrWhiteSpace(_selectedMetric))
+    {
+      await ViewMetricDetailsAsync(_selectedMetric);
+    }
   }
 
   private async Task LoadAllDataAsync()
