@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.JSInterop;
 using MudBlazor.Services;
 using Radio.Web.Components.Pages;
+using Radio.Web.Services.ApiClients;
 using Radio.Web.Services.Hub;
 
 namespace Radio.Web.Tests.Components.Pages;
@@ -32,9 +33,13 @@ public class VisualizerPageTests : TestContext
 
     Services.AddSingleton<IConfiguration>(configuration);
     Services.AddSingleton(_loggerFactory);
+    Services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
     
     // Add MudBlazor services
     Services.AddMudServices();
+    
+    // Add HttpClient for Configuration API
+    Services.AddHttpClient<ConfigurationApiService>();
     
     // Add SignalR visualization hub service
     Services.AddSingleton(sp => 

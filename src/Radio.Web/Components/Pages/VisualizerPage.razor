@@ -5,6 +5,7 @@
 @inject AudioVisualizationHubService VisualizationHub
 @inject IJSRuntime JS
 @inject ILogger<VisualizerPage> Logger
+@inject ConfigurationApiService ConfigApi
 @implements IAsyncDisposable
 
 <PageTitle>Audio Visualizer - Radio Console</PageTitle>
@@ -82,6 +83,9 @@
   {
     try
     {
+      // Load user preferences
+      await LoadPreferencesAsync();
+
       // Start SignalR connection if not already connected
       if (!VisualizationHub.IsConnected)
       {
@@ -166,6 +170,9 @@
 
     // Request initial data for new mode
     await RequestInitialData();
+
+    // Save preference
+    await SavePreferenceAsync("defaultMode", currentMode.ToString());
 
     StateHasChanged();
   }
@@ -322,6 +329,51 @@
     catch (Exception ex)
     {
       Logger.LogError(ex, "Error drawing spectrum");
+    }
+  }
+
+  /// <summary>
+  /// Load user preferences from Configuration API
+  /// </summary>
+  private async Task LoadPreferencesAsync()
+  {
+    try
+    {
+      var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("ui.visualizer");
+      if (prefs != null)
+      {
+        if (prefs.TryGetValue("defaultMode", out var modeObj) && modeObj != null)
+        {
+          if (Enum.TryParse<VisualizationMode>(modeObj.ToString(), out var mode))
+          {
+            currentMode = mode;
+          }
+        }
+      }
+      else
+      {
+        // Save default if no preferences exist
+        await SavePreferenceAsync("defaultMode", currentMode.ToString());
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to load visualizer preferences");
+    }
+  }
+
+  /// <summary>
+  /// Save a single preference value to Configuration API
+  /// </summary>
+  private async Task SavePreferenceAsync(string key, object value)
+  {
+    try
+    {
+      await ConfigApi.UpdateConfigurationAsync("ui.visualizer", key, value);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to save visualizer preference {Key}", key);
     }
   }
 
