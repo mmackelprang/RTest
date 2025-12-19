@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @inject AudioApiService AudioApi
 @inject AudioStateHubService HubService
+@inject ConfigurationApiService ConfigApi
 @implements IAsyncDisposable
 
 <PageTitle>Now Playing - Radio Console</PageTitle>
@@ -138,6 +139,9 @@
 
   protected override async Task OnInitializedAsync()
   {
+    // Load user preferences first
+    await LoadPreferencesAsync();
+
     // Subscribe to SignalR events for real-time updates
     HubService.PlaybackStateChanged += OnPlaybackStateChanged;
     HubService.NowPlayingChanged += OnNowPlayingChanged;
@@ -157,7 +161,7 @@
       }
     }
 
-    // Initial load
+    // Initial load (this will override preferences with actual current state)
     await RefreshPlaybackStateAsync();
     
     // Fallback polling every 5 seconds if SignalR is disconnected
@@ -278,6 +282,7 @@
   {
     _volume = newVolume;
     await AudioApi.SetVolumeAsync((float)newVolume);
+    await SavePreferenceAsync("volume", newVolume);
   }
 
   private void OnVolumeChanged(double newVolume)
@@ -290,12 +295,76 @@
   {
     _balance = newBalance;
     await AudioApi.UpdatePlaybackStateAsync(new UpdatePlaybackRequest(null, null, null, (float)newBalance));
+    await SavePreferenceAsync("balance", newBalance);
   }
   
   private void OnBalanceChanged(double newBalance)
   {
     _balance = newBalance;
     _ = HandleBalanceChangeAsync(newBalance); // Fire and forget
+  }
+
+  /// <summary>
+  /// Load user preferences from Configuration API
+  /// </summary>
+  private async Task LoadPreferencesAsync()
+  {
+    try
+    {
+      var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("ui.playback");
+      if (prefs != null)
+      {
+        // Only apply preferences for user-controllable settings
+        // Note: Playback state (isPlaying, shuffle, repeat) should come from the actual audio engine,
+        // not from saved preferences, so we only load volume and balance
+        if (prefs.TryGetValue("volume", out var volumeObj))
+        {
+          if (double.TryParse(volumeObj?.ToString(), out var volume))
+          {
+            _volume = volume;
+          }
+        }
+        
+        if (prefs.TryGetValue("balance", out var balanceObj))
+        {
+          if (double.TryParse(balanceObj?.ToString(), out var balance))
+          {
+            _balance = balance;
+          }
+        }
+      }
+      else
+      {
+        // Save defaults if no preferences exist
+        await SavePreferenceAsync("volume", _volume);
+        await SavePreferenceAsync("balance", _balance);
+      }
+    }
+    catch (Exception ex)
+    {
+      // Fail silently, use defaults
+      Console.WriteLine($"Failed to load playback preferences: {ex.Message}");
+    }
+  }
+
+  /// <summary>
+  /// Save a single preference value to Configuration API
+  /// </summary>
+  private async Task SavePreferenceAsync(string key, object value)
+  {
+    try
+    {
+      var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("ui.playback") 
+                  ?? new Dictionary<string, object>();
+      
+      prefs[key] = value;
+      await ConfigApi.UpdateConfigurationAsync("ui.playback", prefs);
+    }
+    catch (Exception ex)
+    {
+      // Fail silently, don't interrupt user workflow
+      Console.WriteLine($"Failed to save preference {key}: {ex.Message}");
+    }
   }
 
   public async ValueTask DisposeAsync()
