@@ -3,6 +3,7 @@
 @inject QueueApiService QueueApi
 @inject AudioStateHubService HubService
 @inject AudioApiService AudioApi
+@inject ILogger<QueuePage> Logger
 @implements IAsyncDisposable
 
 <PageTitle>Queue - Radio Console</PageTitle>
@@ -74,7 +75,7 @@
       }
       catch (Exception ex)
       {
-        Console.WriteLine($"Failed to connect to SignalR: {ex.Message}");
+        Logger.LogWarning(ex, "Failed to connect to SignalR hub for queue updates.");
       }
     }
 
