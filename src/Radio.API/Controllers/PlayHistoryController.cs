@@ -83,6 +83,55 @@ public class PlayHistoryController : ControllerBase
   }
 
   /// <summary>
+  /// Gets play history entries for a specific date.
+  /// </summary>
+  /// <param name="date">The date (yyyy-MM-dd).</param>
+  /// <param name="limit">Number of entries to retrieve.</param>
+  /// <param name="offset">Number of entries to skip.</param>
+  /// <returns>A list of play history entries for the specified date.</returns>
+  [HttpGet("date/{date}")]
+  [ProducesResponseType(typeof(PlayHistoryListDto), StatusCodes.Status200OK)]
+  public async Task<ActionResult<PlayHistoryListDto>> GetByDate(
+    DateTime date,
+    [FromQuery] int? limit = null,
+    [FromQuery] int? offset = null)
+  {
+    try
+    {
+      // Get full day range
+      var start = date.Date;
+      var end = start.AddDays(1);
+      
+      var entries = await _playHistoryRepository.GetByDateRangeAsync(start, end);
+      
+      // Apply pagination in memory since repository doesn't support it for date range yet
+      var query = entries.AsEnumerable();
+      var totalCount = query.Count();
+      
+      if (offset.HasValue)
+      {
+        query = query.Skip(offset.Value);
+      }
+      
+      if (limit.HasValue)
+      {
+        query = query.Take(limit.Value);
+      }
+      
+      return Ok(new PlayHistoryListDto
+      {
+        Items = query.Select(MapToDto).ToList(),
+        TotalCount = totalCount
+      });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error getting play history by date");
+      return StatusCode(500, new { error = "Failed to get play history" });
+    }
+  }
+
+  /// <summary>
   /// Gets play history entries for today.
   /// </summary>
   /// <returns>A list of play history entries from today.</returns>
@@ -108,14 +157,16 @@ public class PlayHistoryController : ControllerBase
   /// Gets play history entries by source type.
   /// </summary>
   /// <param name="source">The source type (Vinyl, Radio, File, Spotify).</param>
-  /// <param name="count">Number of entries to retrieve (default 20, max 100).</param>
+  /// <param name="limit">Number of entries to retrieve (default 20, max 100).</param>
+  /// <param name="offset">Number of entries to skip.</param>
   /// <returns>A list of play history entries for the specified source.</returns>
   [HttpGet("source/{source}")]
-  [ProducesResponseType(typeof(List<PlayHistoryEntryDto>), StatusCodes.Status200OK)]
+  [ProducesResponseType(typeof(PlayHistoryListDto), StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
-  public async Task<ActionResult<List<PlayHistoryEntryDto>>> GetBySource(
+  public async Task<ActionResult<PlayHistoryListDto>> GetBySource(
     string source,
-    [FromQuery] int count = 20)
+    [FromQuery] int? limit = null,
+    [FromQuery] int? offset = null)
   {
     try
     {
@@ -124,14 +175,94 @@ public class PlayHistoryController : ControllerBase
         return BadRequest(new { error = $"Invalid source type: {source}" });
       }
 
-      count = Math.Clamp(count, 1, 100);
-      var entries = await _playHistoryRepository.GetBySourceAsync(playSource, count);
-      return Ok(entries.Select(MapToDto).ToList());
+      // Default limit if not specified
+      int take = limit ?? 20;
+      take = Math.Clamp(take, 1, 100);
+      
+      // Since repository only supports count, we need to fetch enough to handle offset
+      // This is inefficient but works without changing repository interface
+      // Ideally repository should support skip/take
+      int fetchCount = (offset ?? 0) + take;
+      
+      var entries = await _playHistoryRepository.GetBySourceAsync(playSource, fetchCount);
+      var totalCount = entries.Count; // This is approximate since we limited the fetch
+      
+      // If we got fewer items than requested, we know the exact total
+      if (entries.Count < fetchCount)
+      {
+        totalCount = entries.Count;
+      }
+      else
+      {
+        // Otherwise assume there might be more
+        // For accurate pagination we'd need a count query in repository
+        // For now, we'll return a larger number if we hit the limit to enable "Next" button
+        totalCount = fetchCount + 1;
+      }
+
+      var pagedEntries = entries.Skip(offset ?? 0).Take(take);
+      
+      return Ok(new PlayHistoryListDto
+      {
+        Items = pagedEntries.Select(MapToDto).ToList(),
+        TotalCount = totalCount
+      });
     }
     catch (Exception ex)
     {
       _logger.LogError(ex, "Error getting play history by source");
       return StatusCode(500, new { error = "Failed to get play history" });
+    }
+  }
+
+  /// <summary>
+  /// Search play history.
+  /// </summary>
+  /// <param name="q">Search query.</param>
+  /// <param name="limit">Number of entries to retrieve.</param>
+  /// <param name="offset">Number of entries to skip.</param>
+  /// <returns>A list of matching play history entries.</returns>
+  [HttpGet("search")]
+  [ProducesResponseType(typeof(PlayHistoryListDto), StatusCodes.Status200OK)]
+  public async Task<ActionResult<PlayHistoryListDto>> Search(
+    [FromQuery] string q,
+    [FromQuery] int? limit = null,
+    [FromQuery] int? offset = null)
+  {
+    try
+    {
+      // Since repository doesn't have a specific search method exposed in interface yet,
+      // we'll fetch recent history and filter in memory
+      // Note: In a real implementation this should be pushed to the repository
+      var allEntries = await _playHistoryRepository.GetRecentAsync(1000);
+      
+      var query = allEntries.Where(e => 
+        (e.Track?.Title?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
+        (e.Track?.Artist?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
+        (e.Track?.Album?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false));
+        
+      var totalCount = query.Count();
+      
+      if (offset.HasValue)
+      {
+        query = query.Skip(offset.Value);
+      }
+      
+      if (limit.HasValue)
+      {
+        query = query.Take(limit.Value);
+      }
+      
+      return Ok(new PlayHistoryListDto
+      {
+        Items = query.Select(MapToDto).ToList(),
+        TotalCount = totalCount
+      });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error searching play history");
+      return StatusCode(500, new { error = "Failed to search history" });
     }
   }
 

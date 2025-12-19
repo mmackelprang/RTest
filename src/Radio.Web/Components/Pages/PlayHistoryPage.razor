@@ -308,10 +308,34 @@
     {
       // Load history with pagination
       var offset = (_currentPage - 1) * _pageSize;
-      _historyData = await HistoryApi.GetHistoryAsync(_pageSize, offset);
       
-      // Load statistics
-      _stats = await HistoryApi.GetStatsAsync();
+      PlayHistoryListDto? result = null;
+      
+      // Apply active filters
+      if (!string.IsNullOrWhiteSpace(_searchQuery))
+      {
+        result = await HistoryApi.SearchHistoryAsync(_searchQuery, _pageSize, offset);
+      }
+      else if (_selectedDate.HasValue)
+      {
+        result = await HistoryApi.GetHistoryByDateAsync(_selectedDate.Value, _pageSize, offset);
+      }
+      else if (_sourceFilter != "All")
+      {
+        result = await HistoryApi.GetHistoryBySourceAsync(_sourceFilter, _pageSize, offset);
+      }
+      else
+      {
+        result = await HistoryApi.GetHistoryAsync(_pageSize, offset);
+      }
+      
+      _historyData = result;
+      
+      // Load statistics (only on first load)
+      if (_stats == null)
+      {
+        _stats = await HistoryApi.GetStatsAsync();
+      }
     }
     catch (Exception ex)
     {
@@ -327,42 +351,7 @@
   private async Task ApplyFilters()
   {
     _currentPage = 1; // Reset to first page when filtering
-    _isLoading = true;
-    StateHasChanged();
-    
-    try
-    {
-      PlayHistoryListDto? result = null;
-      
-      // Apply filters in priority order
-      if (!string.IsNullOrWhiteSpace(_searchQuery))
-      {
-        result = await HistoryApi.SearchHistoryAsync(_searchQuery);
-      }
-      else if (_selectedDate.HasValue)
-      {
-        result = await HistoryApi.GetHistoryByDateAsync(_selectedDate.Value);
-      }
-      else if (_sourceFilter != "All")
-      {
-        result = await HistoryApi.GetHistoryBySourceAsync(_sourceFilter, _pageSize);
-      }
-      else
-      {
-        result = await HistoryApi.GetHistoryAsync(_pageSize, 0);
-      }
-      
-      _historyData = result;
-    }
-    catch (Exception ex)
-    {
-      Snackbar.Add($"Failed to apply filters: {ex.Message}", Severity.Error);
-    }
-    finally
-    {
-      _isLoading = false;
-      StateHasChanged();
-    }
+    await LoadDataAsync();
   }
 
   private async Task OnSearchKeyUp(KeyboardEventArgs e)

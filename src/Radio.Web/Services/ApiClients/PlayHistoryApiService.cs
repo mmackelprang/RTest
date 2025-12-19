@@ -49,11 +49,15 @@ public class PlayHistoryApiService
     }
   }
 
-  public async Task<PlayHistoryListDto?> GetHistoryBySourceAsync(string source, int? limit = null, CancellationToken cancellationToken = default)
+  public async Task<PlayHistoryListDto?> GetHistoryBySourceAsync(string source, int? limit = null, int? offset = null, CancellationToken cancellationToken = default)
   {
     try
     {
-      var queryString = limit.HasValue ? $"?limit={limit}" : "";
+      var query = new List<string>();
+      if (limit.HasValue) query.Add($"limit={limit}");
+      if (offset.HasValue) query.Add($"offset={offset}");
+      var queryString = query.Any() ? "?" + string.Join("&", query) : "";
+
       return await _httpClient.GetFromJsonAsync<PlayHistoryListDto>($"/api/history/source/{source}{queryString}", cancellationToken);
     }
     catch (Exception ex)
@@ -63,12 +67,17 @@ public class PlayHistoryApiService
     }
   }
 
-  public async Task<PlayHistoryListDto?> GetHistoryByDateAsync(DateTime date, CancellationToken cancellationToken = default)
+  public async Task<PlayHistoryListDto?> GetHistoryByDateAsync(DateTime date, int? limit = null, int? offset = null, CancellationToken cancellationToken = default)
   {
     try
     {
       var dateStr = date.ToString("yyyy-MM-dd");
-      return await _httpClient.GetFromJsonAsync<PlayHistoryListDto>($"/api/history/date/{dateStr}", cancellationToken);
+      var query = new List<string>();
+      if (limit.HasValue) query.Add($"limit={limit}");
+      if (offset.HasValue) query.Add($"offset={offset}");
+      var queryString = query.Any() ? "?" + string.Join("&", query) : "";
+
+      return await _httpClient.GetFromJsonAsync<PlayHistoryListDto>($"/api/history/date/{dateStr}{queryString}", cancellationToken);
     }
     catch (Exception ex)
     {
@@ -77,11 +86,16 @@ public class PlayHistoryApiService
     }
   }
 
-  public async Task<PlayHistoryListDto?> SearchHistoryAsync(string query, CancellationToken cancellationToken = default)
+  public async Task<PlayHistoryListDto?> SearchHistoryAsync(string query, int? limit = null, int? offset = null, CancellationToken cancellationToken = default)
   {
     try
     {
-      return await _httpClient.GetFromJsonAsync<PlayHistoryListDto>($"/api/history/search?q={Uri.EscapeDataString(query)}", cancellationToken);
+      var queryParams = new List<string> { $"q={Uri.EscapeDataString(query)}" };
+      if (limit.HasValue) queryParams.Add($"limit={limit}");
+      if (offset.HasValue) queryParams.Add($"offset={offset}");
+      var queryString = "?" + string.Join("&", queryParams);
+
+      return await _httpClient.GetFromJsonAsync<PlayHistoryListDto>($"/api/history/search{queryString}", cancellationToken);
     }
     catch (Exception ex)
     {
