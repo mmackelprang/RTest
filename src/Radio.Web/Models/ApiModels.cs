@@ -18,6 +18,7 @@ public record PlaybackStateDto(
   bool CanShuffle,
   bool CanRepeat,
   bool CanQueue,
+  bool CanReorderQueue,
   bool IsShuffleEnabled,
   string RepeatMode
 );

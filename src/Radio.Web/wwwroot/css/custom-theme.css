@@ -213,3 +213,49 @@ button, .mud-button-root, .mud-icon-button {
   -webkit-user-select: none;
   -moz-user-select: none;
 }
+
+/* Queue Drag-and-Drop Styles */
+.queue-drop-container {
+  background-color: var(--background-secondary);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.queue-drop-zone {
+  min-height: 100px;
+}
+
+.queue-item-draggable {
+  background-color: var(--background-primary);
+  margin-bottom: 4px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  cursor: grab;
+  touch-action: none;
+}
+
+.queue-item-draggable:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.queue-item-draggable:active {
+  cursor: grabbing;
+}
+
+.queue-item-dragging {
+  background-color: var(--background-primary);
+  opacity: 0.9;
+  transform: rotate(2deg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* Touch-friendly drag handles */
+.mud-icon[style*="cursor: grab"] {
+  font-size: 24px;
+  color: var(--text-secondary);
+  padding: 8px;
+}
+
+.mud-icon[style*="cursor: grab"]:hover {
+  color: var(--color-primary);
+}
