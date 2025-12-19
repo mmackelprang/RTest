@@ -1,8 +1,10 @@
 @page "/system"
+@rendermode InteractiveServer
 @inject SystemApiService SystemApi
 @inject ConfigurationApiService ConfigApi
 @inject SourcesApiService SourcesApi
 @inject ISnackbar Snackbar
+@inject IJSRuntime JSRuntime
 @implements IDisposable
 
 <PageTitle>System Configuration</PageTitle>
@@ -450,12 +452,21 @@
 
       var fileName = $"radio-console-logs-{DateTime.Now:yyyyMMdd-HHmmss}.txt";
       
-      // Note: This is a placeholder. Actual file download in Blazor requires JavaScript interop
-      Snackbar.Add($"Export functionality: {fileName} ({content.Length} characters)", Severity.Info);
+      // Use JavaScript interop to download the file
+      var success = await JSRuntime.InvokeAsync<bool>("fileDownload.downloadTextFile", fileName, content, "text/plain");
+      
+      if (success)
+      {
+        Snackbar.Add($"Logs exported to {fileName}", Severity.Success);
+      }
+      else
+      {
+        Snackbar.Add("Failed to download log file", Severity.Error);
+      }
     }
-    catch (Exception)
+    catch (Exception ex)
     {
-      Snackbar.Add("Failed to export logs", Severity.Error);
+      Snackbar.Add($"Failed to export logs: {ex.Message}", Severity.Error);
     }
   }
 
