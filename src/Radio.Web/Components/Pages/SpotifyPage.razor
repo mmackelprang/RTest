@@ -2,7 +2,9 @@
 @rendermode InteractiveServer
 @inject SpotifyApiService SpotifyApi
 @inject QueueApiService QueueApi
+@inject ConfigurationApiService ConfigApi
 @inject NavigationManager NavigationManager
+@inject ILogger<SpotifyPage> Logger
 @implements IDisposable
 
 <PageTitle>Spotify - Radio Console</PageTitle>
@@ -257,7 +259,50 @@
 
   protected override async Task OnInitializedAsync()
   {
+    await LoadPreferencesAsync();
     await CheckAuthStatusAsync();
+  }
+
+  private async Task LoadPreferencesAsync()
+  {
+    try
+    {
+      var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("ui.spotify");
+      if (prefs != null)
+      {
+        // Load saved filter preferences
+        if (prefs.TryGetValue("filters", out var filtersObj) && filtersObj != null)
+        {
+          var filtersStr = filtersObj.ToString();
+          if (!string.IsNullOrEmpty(filtersStr))
+          {
+            _selectedFilters = filtersStr.Split(',').ToList();
+          }
+        }
+      }
+      else
+      {
+        // Save default filters
+        await SaveFiltersAsync();
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to load preferences for Spotify page");
+    }
+  }
+
+  private async Task SaveFiltersAsync()
+  {
+    try
+    {
+      var filtersStr = string.Join(",", _selectedFilters);
+      await ConfigApi.UpdateConfigurationAsync("ui.spotify", "filters", filtersStr);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to save Spotify filters preference");
+    }
   }
 
   private async Task CheckAuthStatusAsync()
@@ -311,7 +356,7 @@
     }
   }
 
-  private void ToggleFilter(string filter)
+  private async Task ToggleFilter(string filter)
   {
     if (filter == "all")
     {
@@ -335,6 +380,9 @@
         _selectedFilters.Add("all");
       }
     }
+    
+    // Save filter preferences
+    await SaveFiltersAsync();
   }
 
   private async Task HandleSearchAsync()

@@ -1,5 +1,7 @@
 @page "/metrics"
 @inject MetricsApiService MetricsApi
+@inject ConfigurationApiService ConfigApi
+@inject ILogger<MetricsDashboardPage> Logger
 @inject ISnackbar Snackbar
 @implements IDisposable
 
@@ -13,9 +15,9 @@
       <MudText Typo="Typo.h5">Metrics Dashboard</MudText>
       <MudStack Row="true" Spacing="2">
         <MudButtonGroup Variant="Variant.Outlined" Color="Color.Primary">
-          <MudButton Variant="@(_timeRange == "1h" ? Variant.Filled : Variant.Outlined)" OnClick="@(() => _timeRange = "1h")">Last Hour</MudButton>
-          <MudButton Variant="@(_timeRange == "24h" ? Variant.Filled : Variant.Outlined)" OnClick="@(() => _timeRange = "24h")">Last 24 Hours</MudButton>
-          <MudButton Variant="@(_timeRange == "7d" ? Variant.Filled : Variant.Outlined)" OnClick="@(() => _timeRange = "7d")">Last 7 Days</MudButton>
+          <MudButton Variant="@(_timeRange == "1h" ? Variant.Filled : Variant.Outlined)" OnClick="@(async () => await SetTimeRangeAsync("1h"))">Last Hour</MudButton>
+          <MudButton Variant="@(_timeRange == "24h" ? Variant.Filled : Variant.Outlined)" OnClick="@(async () => await SetTimeRangeAsync("24h"))">Last 24 Hours</MudButton>
+          <MudButton Variant="@(_timeRange == "7d" ? Variant.Filled : Variant.Outlined)" OnClick="@(async () => await SetTimeRangeAsync("7d"))">Last 7 Days</MudButton>
         </MudButtonGroup>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAllDataAsync" StartIcon="@Icons.Material.Filled.Refresh">
           Refresh
@@ -158,6 +160,7 @@
 
   protected override async Task OnInitializedAsync()
   {
+    await LoadPreferencesAsync();
     await LoadAllDataAsync();
     
     // Refresh every 10 seconds
@@ -169,6 +172,49 @@
     
     // Track page view
     _ = TrackPageViewAsync();
+  }
+
+  private async Task LoadPreferencesAsync()
+  {
+    try
+    {
+      var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("ui.metrics");
+      if (prefs != null)
+      {
+        // Load saved time range preference
+        if (prefs.TryGetValue("timeRange", out var timeRangeObj) && timeRangeObj != null)
+        {
+          _timeRange = timeRangeObj.ToString() ?? "1h";
+        }
+      }
+      else
+      {
+        // Save default time range
+        await SavePreferenceAsync("timeRange", _timeRange);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to load preferences for Metrics Dashboard page");
+    }
+  }
+
+  private async Task SavePreferenceAsync(string key, object value)
+  {
+    try
+    {
+      await ConfigApi.UpdateConfigurationAsync("ui.metrics", key, value.ToString() ?? string.Empty);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to save preference {Key}", key);
+    }
+  }
+
+  private async Task SetTimeRangeAsync(string timeRange)
+  {
+    _timeRange = timeRange;
+    await SavePreferenceAsync("timeRange", timeRange);
   }
 
   private async Task LoadAllDataAsync()

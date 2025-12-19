@@ -2,6 +2,8 @@
 @rendermode InteractiveServer
 @inject RadioApiService RadioApi
 @inject AudioStateHubService HubService
+@inject ConfigurationApiService ConfigApi
+@inject ILogger<RadioPage> Logger
 @implements IAsyncDisposable
 
 <PageTitle>Radio - Radio Console</PageTitle>
@@ -269,12 +271,42 @@
   
   protected override async Task OnInitializedAsync()
   {
+    await LoadPreferencesAsync();
     await LoadRadioStateAsync();
     await LoadPresetsAsync();
     
     // Subscribe to SignalR radio state changes
     HubService.RadioStateChanged += HandleRadioStateChanged;
     await HubService.StartAsync();
+  }
+  
+  private async Task LoadPreferencesAsync()
+  {
+    try
+    {
+      var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("ui.radio");
+      if (prefs != null)
+      {
+        // Reserved for future: default band, step size preferences
+        // Currently radio state comes from backend
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to load preferences for Radio page");
+    }
+  }
+
+  private async Task SavePreferenceAsync(string key, object value)
+  {
+    try
+    {
+      await ConfigApi.UpdateConfigurationAsync("ui.radio", key, value.ToString() ?? string.Empty);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to save preference {Key}", key);
+    }
   }
   
   private async Task LoadRadioStateAsync()

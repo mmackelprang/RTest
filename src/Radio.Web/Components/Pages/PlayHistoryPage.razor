@@ -2,6 +2,8 @@
 @using Radio.Web.Services.ApiClients
 @using Radio.Web.Models
 @inject PlayHistoryApiService HistoryApi
+@inject ConfigurationApiService ConfigApi
+@inject ILogger<PlayHistoryPage> Logger
 @inject ISnackbar Snackbar
 @implements IDisposable
 
@@ -20,7 +22,8 @@
       </MudItem>
       <MudItem xs="12" sm="6" md="2">
         <MudSelect T="string" Label="Source Filter" 
-                   @bind-Value="_sourceFilter"
+                   Value="_sourceFilter"
+                   ValueChanged="@(async (string val) => await SetSourceFilterAsync(val))"
                    Clearable="true">
           <MudSelectItem Value="@("All")">All Sources</MudSelectItem>
           <MudSelectItem Value="@("Spotify")">Spotify</MudSelectItem>
@@ -305,7 +308,51 @@
 
   protected override async Task OnInitializedAsync()
   {
+    await LoadPreferencesAsync();
     await LoadDataAsync();
+  }
+
+  private async Task LoadPreferencesAsync()
+  {
+    try
+    {
+      var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("ui.history");
+      if (prefs != null)
+      {
+        // Load saved source filter preference
+        if (prefs.TryGetValue("sourceFilter", out var filterObj) && filterObj != null)
+        {
+          _sourceFilter = filterObj.ToString() ?? "All";
+        }
+      }
+      else
+      {
+        // Save default filter
+        await SavePreferenceAsync("sourceFilter", _sourceFilter);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to load preferences for Play History page");
+    }
+  }
+
+  private async Task SavePreferenceAsync(string key, object value)
+  {
+    try
+    {
+      await ConfigApi.UpdateConfigurationAsync("ui.history", key, value.ToString() ?? string.Empty);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to save preference {Key}", key);
+    }
+  }
+
+  private async Task SetSourceFilterAsync(string filter)
+  {
+    _sourceFilter = filter ?? "All";
+    await SavePreferenceAsync("sourceFilter", _sourceFilter);
   }
 
   private async Task LoadDataAsync()
