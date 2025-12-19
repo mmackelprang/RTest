@@ -5,6 +5,7 @@
 @inject AudioApiService AudioApi
 @inject ConfigurationApiService ConfigApi
 @inject ILogger<QueuePage> Logger
+@inject ISnackbar Snackbar
 @implements IAsyncDisposable
 
 <PageTitle>Queue - Radio Console</PageTitle>
@@ -12,9 +13,21 @@
 <div class="queue-page" style="padding: 24px; height: 100%; display: flex; flex-direction: column;">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
     <MudText Typo="Typo.h4">Queue</MudText>
-    <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="HandleClearQueueAsync" Disabled="@(!_queueItems.Any())">
-      Clear All
-    </MudButton>
+    <div style="display: flex; gap: 12px;">
+      @if (_canReorderQueue && _queueItems.Any())
+      {
+        <MudButton Size="Size.Small" 
+                   Variant="@(_isDragEnabled ? Variant.Filled : Variant.Outlined)"
+                   Color="@(_isDragEnabled ? Color.Success : Color.Default)" 
+                   StartIcon="@Icons.Material.Filled.DragIndicator" 
+                   OnClick="@(() => { _isDragEnabled = !_isDragEnabled; StateHasChanged(); })">
+          @(_isDragEnabled ? "Drag Enabled" : "Enable Drag")
+        </MudButton>
+      }
+      <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="HandleClearQueueAsync" Disabled="@(!_queueItems.Any())">
+        Clear All
+      </MudButton>
+    </div>
   </div>
   
   @if (!_queueItems.Any())
@@ -26,9 +39,45 @@
       <MudText Typo="Typo.body1" Style="margin-top: 8px;">Add tracks from Spotify or File Browser</MudText>
     </div>
   }
+  else if (_isDragEnabled && _canReorderQueue)
+  {
+    <!-- Drag-and-Drop Queue -->
+    <MudList T="string" Class="queue-drop-container" Style="height: calc(100% - 80px); overflow-y: auto;">
+      @foreach (var item in _queueItems)
+      {
+        <MudListItem T="string" @key="item.Index">
+          <MudPaper Class="queue-item-draggable" 
+                    Elevation="2" 
+                    Style="@GetItemStyle(item)"
+                    draggable="true"
+                    @ondragstart="@(() => OnDragStart(item))"
+                    @ondragover:preventDefault
+                    @ondrop="@(() => OnDrop(item))">
+            <div style="display: grid; grid-template-columns: 60px 1fr 250px 200px 80px 80px; align-items: center; gap: 8px; padding: 8px;">
+              <div style="display: flex; align-items: center; justify-content: center;">
+                <MudIcon Icon="@Icons.Material.Filled.DragIndicator" Size="Size.Small" Style="cursor: grab;" />
+              </div>
+              <div @onclick="@(() => HandleJumpToAsync(item.Index))" style="cursor: pointer; font-weight: @(item.IsCurrent ? "600" : "400"); color: @(item.IsCurrent ? "var(--mud-palette-primary)" : "inherit");">
+                @item.Title
+              </div>
+              <div>@item.Artist</div>
+              <div>@item.Album</div>
+              <div>@item.Duration</div>
+              <div>
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" 
+                               Size="Size.Small" 
+                               OnClick="@(() => HandleRemoveAsync(item.Index))" 
+                               title="Remove" />
+              </div>
+            </div>
+          </MudPaper>
+        </MudListItem>
+      }
+    </MudList>
+  }
   else
   {
-    <!-- Queue Table -->
+    <!-- Queue Table (Normal Mode) -->
     <MudTable Items="@_queueItems" Hover="true" Dense="true" FixedHeader="true" Height="calc(100% - 80px)" Style="overflow-y: auto;">
       <HeaderContent>
         <MudTh Style="width: 60px;">#</MudTh>
@@ -61,14 +110,21 @@
 
 @code {
   private List<QueueItemDto> _queueItems = new();
+  private bool _isDragEnabled = false;
+  private bool _canReorderQueue = false;
+  private QueueItemDto? _draggedItem = null;
 
   protected override async Task OnInitializedAsync()
   {
     // Load user preferences
     await LoadPreferencesAsync();
 
+    // Check if current source supports queue reordering
+    await CheckQueueCapabilitiesAsync();
+
     // Subscribe to SignalR QueueChanged event
     HubService.QueueChanged += OnQueueChanged;
+    HubService.SourceChanged += OnSourceChanged;
 
     // Start SignalR connection if not already connected
     if (!HubService.IsConnected)
@@ -87,6 +143,20 @@
     await RefreshQueueAsync();
   }
 
+  private async Task CheckQueueCapabilitiesAsync()
+  {
+    try
+    {
+      var state = await AudioApi.GetPlaybackStateAsync();
+      _canReorderQueue = state?.CanReorderQueue ?? false;
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to check queue capabilities");
+      _canReorderQueue = false;
+    }
+  }
+
   private async Task LoadPreferencesAsync()
   {
     try
@@ -94,8 +164,11 @@
       var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("ui.queue");
       if (prefs != null)
       {
-        // Reserved for future: sort order, column visibility
-        // Currently no user-configurable queue preferences
+        // Load drag mode preference
+        if (prefs.TryGetValue("dragEnabled", out var dragEnabled))
+        {
+          _isDragEnabled = Convert.ToBoolean(dragEnabled);
+        }
       }
     }
     catch (Exception ex)
@@ -108,7 +181,7 @@
   {
     try
     {
-      await ConfigApi.UpdateConfigurationAsync("ui.queue", key, value);
+      await ConfigApi.UpdateConfigurationAsync("ui.queue", key, value.ToString() ?? string.Empty);
     }
     catch (Exception ex)
     {
@@ -119,6 +192,12 @@
   private async Task OnQueueChanged()
   {
     await RefreshQueueAsync();
+    await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task OnSourceChanged()
+  {
+    await CheckQueueCapabilitiesAsync();
     await InvokeAsync(StateHasChanged);
   }
 
@@ -135,6 +214,50 @@
     catch (Exception)
     {
       // Silently fail
+    }
+  }
+
+  // HTML5 Drag-and-Drop handlers
+  private void OnDragStart(QueueItemDto item)
+  {
+    _draggedItem = item;
+  }
+
+  private async Task OnDrop(QueueItemDto targetItem)
+  {
+    if (_draggedItem == null || _draggedItem == targetItem)
+      return;
+
+    var fromIndex = _draggedItem.Index;
+    var toIndex = targetItem.Index;
+
+    try
+    {
+      // Call API to reorder
+      var success = await QueueApi.MoveItemAsync(fromIndex, toIndex);
+      
+      if (success)
+      {
+        Snackbar.Add("Queue reordered successfully", Severity.Success);
+        // Refresh from server to get updated indices
+        await RefreshQueueAsync();
+        StateHasChanged();
+      }
+      else
+      {
+        Snackbar.Add("Failed to reorder queue", Severity.Error);
+        await RefreshQueueAsync();
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to reorder queue items");
+      Snackbar.Add("Error reordering queue", Severity.Error);
+      await RefreshQueueAsync();
+    }
+    finally
+    {
+      _draggedItem = null;
     }
   }
 
@@ -182,8 +305,19 @@
     }
   }
 
+  private string GetItemStyle(QueueItemDto item)
+  {
+    var baseStyle = "min-height: 72px; cursor: pointer;";
+    if (item.IsCurrent)
+    {
+      return baseStyle + " border-left: 4px solid var(--mud-palette-primary);";
+    }
+    return baseStyle;
+  }
+
   public async ValueTask DisposeAsync()
   {
     HubService.QueueChanged -= OnQueueChanged;
+    HubService.SourceChanged -= OnSourceChanged;
   }
 }

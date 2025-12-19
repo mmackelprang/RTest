@@ -2,6 +2,8 @@ using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Configuration;
+using MudBlazor;
+using NSubstitute;
 using Radio.Web.Components.Pages;
 using Radio.Web.Services.ApiClients;
 using Radio.Web.Services.Hub;
@@ -36,6 +38,10 @@ public class QueuePageTests : TestContext
         sp.GetRequiredService<IConfiguration>()
       )
     );
+    
+    // Add ISnackbar mock
+    var mockSnackbar = Substitute.For<ISnackbar>();
+    Services.AddSingleton(mockSnackbar);
   }
 
   [Fact]
