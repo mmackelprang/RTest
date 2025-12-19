@@ -158,7 +158,7 @@
       catch (Exception ex)
       {
         // Log error but continue with polling fallback
-        Console.WriteLine($"Failed to connect to SignalR: {ex.Message}");
+        Logger.LogWarning(ex, "Failed to connect to SignalR hub. Continuing with polling fallback.");
       }
     }
 
