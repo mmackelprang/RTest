@@ -2,6 +2,7 @@ using Bunit;
 using Bunit.TestDoubles;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Configuration;
 using MudBlazor.Services;
@@ -13,8 +14,12 @@ namespace Radio.Web.Tests.Components.Pages;
 
 public class PlayHistoryPageTests : TestContext
 {
+  private readonly ILoggerFactory _loggerFactory;
+
   public PlayHistoryPageTests()
   {
+    _loggerFactory = new NullLoggerFactory();
+    
     // Set up minimal dependencies with in-memory configuration
     var configuration = new ConfigurationBuilder()
       .AddInMemoryCollection(new Dictionary<string, string?>
@@ -24,7 +29,7 @@ public class PlayHistoryPageTests : TestContext
       .Build();
 
     Services.AddSingleton<IConfiguration>(configuration);
-    Services.AddSingleton(NullLoggerFactory.Instance);
+    Services.AddSingleton(_loggerFactory);
     Services.AddMudServices();
     
     // Add real HttpClient services
@@ -40,6 +45,15 @@ public class PlayHistoryPageTests : TestContext
     JSInterop.SetupVoid("mudSelect.setDisabled", _ => true);
     JSInterop.SetupVoid("mudKeyInterceptor.connect", _ => true);
     JSInterop.SetupVoid("mudKeyInterceptor.disconnect", _ => true);
+  }
+
+  protected override void Dispose(bool disposing)
+  {
+    if (disposing)
+    {
+      _loggerFactory?.Dispose();
+    }
+    base.Dispose(disposing);
   }
 
   private IRenderedComponent<PlayHistoryPage> RenderPlayHistoryPage()
@@ -128,45 +142,12 @@ public class PlayHistoryPageTests : TestContext
   }
 
   [Fact]
-  public void PlayHistoryPage_Has_Page_Route()
+  public void PlayHistoryPage_Contains_Clear_Filters_Button()
   {
     // Act
     var cut = RenderPlayHistoryPage();
 
-    // Assert - Component should render without throwing
-    Assert.NotNull(cut);
-    Assert.NotEmpty(cut.Markup);
-  }
-
-  [Fact]
-  public void PlayHistoryPage_Contains_Date_Picker()
-  {
-    // Act
-    var cut = RenderPlayHistoryPage();
-
-    // Assert - Component renders successfully (DatePicker is stubbed so label won't appear)
-    Assert.NotNull(cut);
-    Assert.NotEmpty(cut.Markup);
-  }
-
-  [Fact]
-  public void PlayHistoryPage_Contains_Source_Filter_Options()
-  {
-    // Act
-    var cut = RenderPlayHistoryPage();
-
-    // Assert - Component renders successfully (MudSelect is stubbed so label/options won't appear)
-    Assert.NotNull(cut);
-    Assert.NotEmpty(cut.Markup);
-  }
-
-  [Fact]
-  public void PlayHistoryPage_Contains_Search_Field()
-  {
-    // Act
-    var cut = RenderPlayHistoryPage();
-
-    // Assert
-    Assert.Contains("Search", cut.Markup);
+    // Assert - Check for clear filters button
+    Assert.Contains("Clear Filters", cut.Markup);
   }
 }

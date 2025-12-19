@@ -18,7 +18,7 @@
                        @bind-Date="_selectedDate"
                        Clearable="true" />
       </MudItem>
-      <MudItem xs="12" sm="6" md="3">
+      <MudItem xs="12" sm="6" md="2">
         <MudSelect T="string" Label="Source Filter" 
                    @bind-Value="_sourceFilter"
                    Clearable="true">
@@ -28,7 +28,7 @@
           <MudSelectItem Value="@("Radio")">Radio</MudSelectItem>
         </MudSelect>
       </MudItem>
-      <MudItem xs="12" sm="6" md="4">
+      <MudItem xs="12" sm="6" md="3">
         <MudTextField T="string" Label="Search" 
                       @bind-Value="_searchQuery"
                       Placeholder="Search title, artist, album..."
@@ -43,6 +43,15 @@
                    OnClick="@ApplyFilters"
                    StartIcon="@Icons.Material.Filled.FilterList">
           Filter
+        </MudButton>
+      </MudItem>
+      <MudItem xs="12" sm="6" md="2" Class="d-flex align-end">
+        <MudButton Color="Color.Secondary" 
+                   Variant="Variant.Outlined"
+                   FullWidth="true"
+                   OnClick="@ClearAllFilters"
+                   StartIcon="@Icons.Material.Filled.FilterListOff">
+          Clear Filters
         </MudButton>
       </MudItem>
     </MudGrid>
@@ -364,8 +373,22 @@
 
   private async Task RefreshHistory()
   {
+    // Reload data with current filters maintained
     await LoadDataAsync();
     Snackbar.Add("History refreshed", Severity.Success);
+  }
+
+  private async Task ClearAllFilters()
+  {
+    // Clear all filter values
+    _selectedDate = null;
+    _sourceFilter = "All";
+    _searchQuery = "";
+    _currentPage = 1;
+    
+    // Reload with no filters
+    await LoadDataAsync();
+    Snackbar.Add("Filters cleared", Severity.Info);
   }
 
   private async Task OnPageChanged(int page)
