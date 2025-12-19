@@ -27,6 +27,7 @@ public class QueuePageTests : TestContext
     // Add real HttpClient services
     Services.AddHttpClient<QueueApiService>();
     Services.AddHttpClient<AudioApiService>();
+    Services.AddHttpClient<ConfigurationApiService>();
     
     // Add SignalR hub service
     Services.AddSingleton(sp => 

@@ -3,6 +3,7 @@
 @inject QueueApiService QueueApi
 @inject AudioStateHubService HubService
 @inject AudioApiService AudioApi
+@inject ConfigurationApiService ConfigApi
 @inject ILogger<QueuePage> Logger
 @implements IAsyncDisposable
 
@@ -63,6 +64,9 @@
 
   protected override async Task OnInitializedAsync()
   {
+    // Load user preferences
+    await LoadPreferencesAsync();
+
     // Subscribe to SignalR QueueChanged event
     HubService.QueueChanged += OnQueueChanged;
 
@@ -81,6 +85,35 @@
 
     // Initial load
     await RefreshQueueAsync();
+  }
+
+  private async Task LoadPreferencesAsync()
+  {
+    try
+    {
+      var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("ui.queue");
+      if (prefs != null)
+      {
+        // Reserved for future: sort order, column visibility
+        // Currently no user-configurable queue preferences
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to load preferences for Queue page");
+    }
+  }
+
+  private async Task SavePreferenceAsync(string key, object value)
+  {
+    try
+    {
+      await ConfigApi.UpdateConfigurationAsync("ui.queue", key, value);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to save preference {Key}", key);
+    }
   }
 
   private async Task OnQueueChanged()

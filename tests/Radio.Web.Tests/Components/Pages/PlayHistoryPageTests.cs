@@ -34,6 +34,7 @@ public class PlayHistoryPageTests : TestContext
     
     // Add real HttpClient services
     Services.AddHttpClient<PlayHistoryApiService>();
+    Services.AddHttpClient<ConfigurationApiService>();
     
     // Setup JSInterop mocks for MudBlazor components
     JSInterop.Mode = JSRuntimeMode.Loose;

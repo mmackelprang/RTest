@@ -37,6 +37,7 @@ public class MetricsDashboardPageTests : TestContext
     
     // Add HttpClient for API services
     Services.AddHttpClient<MetricsApiService>();
+    Services.AddHttpClient<ConfigurationApiService>();
     
     // Setup JSInterop mocks for MudBlazor components
     JSInterop.Mode = JSRuntimeMode.Loose;

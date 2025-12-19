@@ -3,6 +3,8 @@
 @inject FileApiService FileApi
 @inject AudioApiService AudioApi
 @inject QueueApiService QueueApi
+@inject ConfigurationApiService ConfigApi
+@inject ILogger<FileBrowserPage> Logger
 
 <PageTitle>File Browser - Radio Console</PageTitle>
 
@@ -135,8 +137,53 @@
 
   protected override async Task OnInitializedAsync()
   {
+    await LoadPreferencesAsync();
     await LoadFilesAsync();
     UpdateBreadcrumbs();
+  }
+
+  private async Task LoadPreferencesAsync()
+  {
+    try
+    {
+      var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("ui.filebrowser");
+      if (prefs != null)
+      {
+        // Load saved path preference
+        if (prefs.TryGetValue("lastPath", out var pathObj) && pathObj != null)
+        {
+          _currentPath = pathObj.ToString() ?? "/";
+        }
+        
+        // Load saved filter preference
+        if (prefs.TryGetValue("filterExtension", out var filterObj) && filterObj != null)
+        {
+          _filterExtension = filterObj.ToString() ?? "*";
+        }
+      }
+      else
+      {
+        // Save defaults
+        await SavePreferenceAsync("lastPath", _currentPath);
+        await SavePreferenceAsync("filterExtension", _filterExtension);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to load preferences for FileBrowser page");
+    }
+  }
+
+  private async Task SavePreferenceAsync(string key, object value)
+  {
+    try
+    {
+      await ConfigApi.UpdateConfigurationAsync("ui.filebrowser", key, value);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to save preference {Key}", key);
+    }
   }
 
   private async Task LoadFilesAsync()
@@ -201,6 +248,7 @@
     _currentPath = path;
     UpdateBreadcrumbs();
     await LoadFilesAsync();
+    await SavePreferenceAsync("lastPath", _currentPath);
   }
 
   private async Task NavigateToPath(string path)
@@ -208,6 +256,7 @@
     _currentPath = path;
     UpdateBreadcrumbs();
     await LoadFilesAsync();
+    await SavePreferenceAsync("lastPath", _currentPath);
   }
 
   private async Task HandleHomeAsync()
@@ -215,6 +264,7 @@
     _currentPath = _rootPath;
     UpdateBreadcrumbs();
     await LoadFilesAsync();
+    await SavePreferenceAsync("lastPath", _currentPath);
   }
 
   private async Task HandleUpAsync()
@@ -225,6 +275,7 @@
     _currentPath = lastSlash > 0 ? _currentPath.Substring(0, lastSlash) : _rootPath;
     UpdateBreadcrumbs();
     await LoadFilesAsync();
+    await SavePreferenceAsync("lastPath", _currentPath);
   }
 
   private async Task HandlePlayFileAsync(string path)

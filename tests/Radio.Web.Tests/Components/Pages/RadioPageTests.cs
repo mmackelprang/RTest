@@ -35,6 +35,7 @@ public class RadioPageTests : TestContext
     
     // Add HttpClient for API services
     Services.AddHttpClient<RadioApiService>();
+    Services.AddHttpClient<ConfigurationApiService>();
     
     // Add SignalR hub service
     Services.AddSingleton(sp => 
