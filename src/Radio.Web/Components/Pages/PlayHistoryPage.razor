@@ -1,0 +1,482 @@
+@page "/history"
+@using Radio.Web.Services.ApiClients
+@using Radio.Web.Models
+@inject PlayHistoryApiService HistoryApi
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+<PageTitle>Play History - Radio Console</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.False" Class="pa-4">
+  <MudText Typo="Typo.h4" GutterBottom="true">Play History</MudText>
+  
+  @* Filter Controls *@
+  <MudPaper Class="pa-3 mb-3" Elevation="2">
+    <MudGrid>
+      <MudItem xs="12" sm="6" md="3">
+        <MudDatePicker Label="Filter by Date" 
+                       @bind-Date="_selectedDate"
+                       Clearable="true" />
+      </MudItem>
+      <MudItem xs="12" sm="6" md="2">
+        <MudSelect T="string" Label="Source Filter" 
+                   @bind-Value="_sourceFilter"
+                   Clearable="true">
+          <MudSelectItem Value="@("All")">All Sources</MudSelectItem>
+          <MudSelectItem Value="@("Spotify")">Spotify</MudSelectItem>
+          <MudSelectItem Value="@("FilePlayer")">File Player</MudSelectItem>
+          <MudSelectItem Value="@("Radio")">Radio</MudSelectItem>
+        </MudSelect>
+      </MudItem>
+      <MudItem xs="12" sm="6" md="3">
+        <MudTextField T="string" Label="Search" 
+                      @bind-Value="_searchQuery"
+                      Placeholder="Search title, artist, album..."
+                      Adornment="Adornment.End"
+                      AdornmentIcon="@Icons.Material.Filled.Search"
+                      OnKeyUp="@OnSearchKeyUp" />
+      </MudItem>
+      <MudItem xs="12" sm="6" md="2" Class="d-flex align-end">
+        <MudButton Color="Color.Primary" 
+                   Variant="Variant.Filled"
+                   FullWidth="true"
+                   OnClick="@ApplyFilters"
+                   StartIcon="@Icons.Material.Filled.FilterList">
+          Filter
+        </MudButton>
+      </MudItem>
+      <MudItem xs="12" sm="6" md="2" Class="d-flex align-end">
+        <MudButton Color="Color.Secondary" 
+                   Variant="Variant.Outlined"
+                   FullWidth="true"
+                   OnClick="@ClearAllFilters"
+                   StartIcon="@Icons.Material.Filled.FilterListOff">
+          Clear Filters
+        </MudButton>
+      </MudItem>
+    </MudGrid>
+  </MudPaper>
+
+  @* Statistics Panel *@
+  @if (_stats != null)
+  {
+    <MudPaper Class="pa-3 mb-3" Elevation="2">
+      <MudText Typo="Typo.h6" GutterBottom="true">Statistics</MudText>
+      <MudGrid>
+        <MudItem xs="6" sm="3">
+          <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Total Plays</MudText>
+          <MudText Typo="Typo.h5">@_stats.TotalPlays</MudText>
+        </MudItem>
+        <MudItem xs="6" sm="3">
+          <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Unique Tracks</MudText>
+          <MudText Typo="Typo.h5">@_stats.UniqueTracksCount</MudText>
+        </MudItem>
+        <MudItem xs="6" sm="3">
+          <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Most Played Track</MudText>
+          <MudText Typo="Typo.body1">@_stats.MostPlayedTrack</MudText>
+        </MudItem>
+        <MudItem xs="6" sm="3">
+          <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Most Played Artist</MudText>
+          <MudText Typo="Typo.body1">@_stats.MostPlayedArtist</MudText>
+        </MudItem>
+      </MudGrid>
+      
+      @if (_stats.PlaysBySource.Any())
+      {
+        <MudDivider Class="my-2" />
+        <MudText Typo="Typo.subtitle2" Color="Color.Secondary" GutterBottom="true">Plays by Source</MudText>
+        <MudGrid>
+          @foreach (var source in _stats.PlaysBySource)
+          {
+            <MudItem xs="6" sm="3">
+              <MudChip T="string" Size="Size.Small" Color="Color.Info">@source.Key: @source.Value</MudChip>
+            </MudItem>
+          }
+        </MudGrid>
+      }
+    </MudPaper>
+  }
+
+  @* History List *@
+  <MudPaper Class="pa-3" Elevation="2">
+    <div class="d-flex justify-space-between align-center mb-3">
+      <MudText Typo="Typo.h6">History (@(_historyData?.TotalCount ?? 0) items)</MudText>
+      <div>
+        <MudButton Color="Color.Info" 
+                   Variant="Variant.Outlined"
+                   Size="Size.Small"
+                   OnClick="@RefreshHistory"
+                   StartIcon="@Icons.Material.Filled.Refresh"
+                   Class="mr-2">
+          Refresh
+        </MudButton>
+        @if (_historyData?.Items.Any() == true)
+        {
+          <MudButton Color="Color.Error" 
+                     Variant="Variant.Outlined"
+                     Size="Size.Small"
+                     OnClick="@ShowClearHistoryDialog"
+                     StartIcon="@Icons.Material.Filled.DeleteSweep">
+            Clear All
+          </MudButton>
+        }
+      </div>
+    </div>
+    
+    @if (_isLoading)
+    {
+      <div class="d-flex justify-center pa-4">
+        <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+      </div>
+    }
+    else if (_historyData?.Items.Any() == true)
+    {
+      <MudTable Items="@_historyData.Items" 
+                Hover="true" 
+                Breakpoint="Breakpoint.Sm"
+                Dense="true"
+                FixedHeader="true"
+                Height="400px">
+        <HeaderContent>
+          <MudTh>Date/Time</MudTh>
+          <MudTh>Title</MudTh>
+          <MudTh>Artist</MudTh>
+          <MudTh>Album</MudTh>
+          <MudTh>Source</MudTh>
+          <MudTh>Duration</MudTh>
+          <MudTh>Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+          <MudTd DataLabel="Date/Time">@context.PlayedAt.ToString("yyyy-MM-dd HH:mm")</MudTd>
+          <MudTd DataLabel="Title">@context.Title</MudTd>
+          <MudTd DataLabel="Artist">@context.Artist</MudTd>
+          <MudTd DataLabel="Album">@context.Album</MudTd>
+          <MudTd DataLabel="Source">
+            <MudChip T="string" Size="Size.Small" Color="@GetSourceColor(context.Source)">@context.Source</MudChip>
+          </MudTd>
+          <MudTd DataLabel="Duration">@FormatDuration(context.DurationSeconds)</MudTd>
+          <MudTd DataLabel="Actions">
+            <MudIconButton Icon="@Icons.Material.Filled.Info" 
+                           Size="Size.Small"
+                           Color="Color.Info"
+                           OnClick="@(() => ShowDetailDialog(context))" />
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" 
+                           Size="Size.Small"
+                           Color="Color.Error"
+                           OnClick="@(() => ShowDeleteDialog(context))" />
+          </MudTd>
+        </RowTemplate>
+      </MudTable>
+      
+      @* Pagination *@
+      <div class="d-flex justify-center mt-3">
+        <MudPagination Count="@GetPageCount()" 
+                       Selected="@_currentPage" 
+                       SelectedChanged="@OnPageChanged"
+                       ShowFirstButton="true"
+                       ShowLastButton="true" />
+      </div>
+    }
+    else
+    {
+      <div class="d-flex flex-column align-center justify-center pa-8">
+        <MudIcon Icon="@Icons.Material.Filled.History" Size="Size.Large" Color="Color.Secondary" />
+        <MudText Typo="Typo.h6" Color="Color.Secondary" Class="mt-2">No History Found</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+          Play some music to start building your history
+        </MudText>
+      </div>
+    }
+  </MudPaper>
+</MudContainer>
+
+@* Detail Dialog *@
+@if (_showDetailDialog)
+{
+  <MudDialog>
+    <TitleContent>
+      <MudText Typo="Typo.h6">
+        <MudIcon Icon="@Icons.Material.Filled.Info" Class="mr-1" />
+        Track Details
+      </MudText>
+    </TitleContent>
+    <DialogContent>
+      @if (_selectedItem != null)
+      {
+        <MudGrid>
+          <MudItem xs="12">
+            <MudText Typo="Typo.h6">@_selectedItem.Title</MudText>
+          </MudItem>
+          <MudItem xs="6">
+            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Artist</MudText>
+            <MudText>@_selectedItem.Artist</MudText>
+          </MudItem>
+          <MudItem xs="6">
+            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Album</MudText>
+            <MudText>@_selectedItem.Album</MudText>
+          </MudItem>
+          <MudItem xs="6">
+            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Source</MudText>
+            <MudChip T="string" Size="Size.Small" Color="@GetSourceColor(_selectedItem.Source)">@_selectedItem.Source</MudChip>
+          </MudItem>
+          <MudItem xs="6">
+            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Duration</MudText>
+            <MudText>@FormatDuration(_selectedItem.DurationSeconds)</MudText>
+          </MudItem>
+          <MudItem xs="6">
+            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Played At</MudText>
+            <MudText>@_selectedItem.PlayedAt.ToString("yyyy-MM-dd HH:mm:ss")</MudText>
+          </MudItem>
+          <MudItem xs="6">
+            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Track ID</MudText>
+            <MudText>@_selectedItem.Id</MudText>
+          </MudItem>
+        </MudGrid>
+      }
+    </DialogContent>
+    <DialogActions>
+      <MudButton OnClick="@(() => _showDetailDialog = false)">Close</MudButton>
+    </DialogActions>
+  </MudDialog>
+}
+
+@* Delete Confirmation Dialog *@
+@if (_showDeleteDialog)
+{
+  <MudDialog>
+    <TitleContent>
+      <MudText Typo="Typo.h6">
+        <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Error" Class="mr-1" />
+        Delete History Item
+      </MudText>
+    </TitleContent>
+    <DialogContent>
+      <MudText>Are you sure you want to delete this history item?</MudText>
+      @if (_selectedItem != null)
+      {
+        <MudText Typo="Typo.body2" Class="mt-2">
+          <strong>@_selectedItem.Title</strong> by @_selectedItem.Artist
+        </MudText>
+      }
+    </DialogContent>
+    <DialogActions>
+      <MudButton OnClick="@(() => _showDeleteDialog = false)">Cancel</MudButton>
+      <MudButton Color="Color.Error" Variant="Variant.Filled" OnClick="@ConfirmDelete">Delete</MudButton>
+    </DialogActions>
+  </MudDialog>
+}
+
+@* Clear All Confirmation Dialog *@
+@if (_showClearDialog)
+{
+  <MudDialog>
+    <TitleContent>
+      <MudText Typo="Typo.h6">
+        <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Error" Class="mr-1" />
+        Clear All History
+      </MudText>
+    </TitleContent>
+    <DialogContent>
+      <MudText>Are you sure you want to clear ALL play history?</MudText>
+      <MudText Typo="Typo.body2" Color="Color.Error" Class="mt-2">
+        This action cannot be undone!
+      </MudText>
+    </DialogContent>
+    <DialogActions>
+      <MudButton OnClick="@(() => _showClearDialog = false)">Cancel</MudButton>
+      <MudButton Color="Color.Error" Variant="Variant.Filled" OnClick="@ConfirmClearAll">Clear All</MudButton>
+    </DialogActions>
+  </MudDialog>
+}
+
+@code {
+  private PlayHistoryListDto? _historyData;
+  private PlayHistoryStatsDto? _stats;
+  private PlayHistoryItemDto? _selectedItem;
+  private bool _isLoading = true;
+  private DateTime? _selectedDate;
+  private string _sourceFilter = "All";
+  private string _searchQuery = "";
+  private int _currentPage = 1;
+  private const int _pageSize = 50;
+  private bool _showDetailDialog = false;
+  private bool _showDeleteDialog = false;
+  private bool _showClearDialog = false;
+
+  protected override async Task OnInitializedAsync()
+  {
+    await LoadDataAsync();
+  }
+
+  private async Task LoadDataAsync()
+  {
+    _isLoading = true;
+    StateHasChanged();
+    
+    try
+    {
+      // Load history with pagination
+      var offset = (_currentPage - 1) * _pageSize;
+      
+      PlayHistoryListDto? result = null;
+      
+      // Apply active filters
+      if (!string.IsNullOrWhiteSpace(_searchQuery))
+      {
+        result = await HistoryApi.SearchHistoryAsync(_searchQuery, _pageSize, offset);
+      }
+      else if (_selectedDate.HasValue)
+      {
+        result = await HistoryApi.GetHistoryByDateAsync(_selectedDate.Value, _pageSize, offset);
+      }
+      else if (_sourceFilter != "All")
+      {
+        result = await HistoryApi.GetHistoryBySourceAsync(_sourceFilter, _pageSize, offset);
+      }
+      else
+      {
+        result = await HistoryApi.GetHistoryAsync(_pageSize, offset);
+      }
+      
+      _historyData = result;
+      
+      // Load statistics (only on first load)
+      if (_stats == null)
+      {
+        _stats = await HistoryApi.GetStatsAsync();
+      }
+    }
+    catch (Exception ex)
+    {
+      Snackbar.Add($"Failed to load history: {ex.Message}", Severity.Error);
+    }
+    finally
+    {
+      _isLoading = false;
+      StateHasChanged();
+    }
+  }
+
+  private async Task ApplyFilters()
+  {
+    _currentPage = 1; // Reset to first page when filtering
+    await LoadDataAsync();
+  }
+
+  private async Task OnSearchKeyUp(KeyboardEventArgs e)
+  {
+    if (e.Key == "Enter")
+    {
+      await ApplyFilters();
+    }
+  }
+
+  private async Task RefreshHistory()
+  {
+    // Reload data with current filters maintained
+    await LoadDataAsync();
+    Snackbar.Add("History refreshed", Severity.Success);
+  }
+
+  private async Task ClearAllFilters()
+  {
+    // Clear all filter values
+    _selectedDate = null;
+    _sourceFilter = "All";
+    _searchQuery = "";
+    _currentPage = 1;
+    
+    // Reload with no filters
+    await LoadDataAsync();
+    Snackbar.Add("Filters cleared", Severity.Info);
+  }
+
+  private async Task OnPageChanged(int page)
+  {
+    _currentPage = page;
+    await LoadDataAsync();
+  }
+
+  private int GetPageCount()
+  {
+    if (_historyData == null || _historyData.TotalCount == 0)
+      return 1;
+    
+    return (int)Math.Ceiling(_historyData.TotalCount / (double)_pageSize);
+  }
+
+  private void ShowDetailDialog(PlayHistoryItemDto item)
+  {
+    _selectedItem = item;
+    _showDetailDialog = true;
+  }
+
+  private void ShowDeleteDialog(PlayHistoryItemDto item)
+  {
+    _selectedItem = item;
+    _showDeleteDialog = true;
+  }
+
+  private void ShowClearHistoryDialog()
+  {
+    _showClearDialog = true;
+  }
+
+  private async Task ConfirmDelete()
+  {
+    if (_selectedItem == null) return;
+    
+    var success = await HistoryApi.DeleteHistoryItemAsync(_selectedItem.Id);
+    if (success)
+    {
+      Snackbar.Add("History item deleted", Severity.Success);
+      _showDeleteDialog = false;
+      await LoadDataAsync();
+    }
+    else
+    {
+      Snackbar.Add("Failed to delete history item", Severity.Error);
+    }
+  }
+
+  private async Task ConfirmClearAll()
+  {
+    var success = await HistoryApi.ClearHistoryAsync();
+    if (success)
+    {
+      Snackbar.Add("All history cleared", Severity.Success);
+      _showClearDialog = false;
+      await LoadDataAsync();
+    }
+    else
+    {
+      Snackbar.Add("Failed to clear history", Severity.Error);
+    }
+  }
+
+  private Color GetSourceColor(string source)
+  {
+    return source switch
+    {
+      "Spotify" => Color.Success,
+      "FilePlayer" => Color.Info,
+      "Radio" => Color.Warning,
+      _ => Color.Default
+    };
+  }
+
+  private string FormatDuration(int seconds)
+  {
+    var ts = TimeSpan.FromSeconds(seconds);
+    if (ts.TotalHours >= 1)
+    {
+      return $"{(int)ts.TotalHours}:{ts.Minutes:D2}:{ts.Seconds:D2}";
+    }
+    return $"{ts.Minutes}:{ts.Seconds:D2}";
+  }
+
+  public void Dispose()
+  {
+    // Cleanup if needed
+  }
+}
