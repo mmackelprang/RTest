@@ -3,6 +3,7 @@
 @inject AudioApiService AudioApi
 @inject AudioStateHubService HubService
 @inject ConfigurationApiService ConfigApi
+@inject ILogger<Home> Logger
 @implements IAsyncDisposable
 
 <PageTitle>Now Playing - Radio Console</PageTitle>
@@ -343,7 +344,7 @@
     catch (Exception ex)
     {
       // Fail silently, use defaults
-      Console.WriteLine($"Failed to load playback preferences: {ex.Message}");
+      Logger.LogWarning(ex, "Failed to load playback preferences");
     }
   }
 
@@ -354,16 +355,12 @@
   {
     try
     {
-      var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("ui.playback") 
-                  ?? new Dictionary<string, object>();
-      
-      prefs[key] = value;
-      await ConfigApi.UpdateConfigurationAsync("ui.playback", prefs);
+      await ConfigApi.UpdateConfigurationAsync("ui.playback", key, value);
     }
     catch (Exception ex)
     {
       // Fail silently, don't interrupt user workflow
-      Console.WriteLine($"Failed to save preference {key}: {ex.Message}");
+      Logger.LogWarning(ex, "Failed to save preference {Key}", key);
     }
   }
 

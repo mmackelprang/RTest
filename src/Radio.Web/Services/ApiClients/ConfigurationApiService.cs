@@ -57,6 +57,31 @@ public class ConfigurationApiService
     }
   }
 
+  /// <summary>
+  /// Update a specific key within a configuration section
+  /// </summary>
+  public async Task<bool> UpdateConfigurationAsync(string section, string key, object value, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      // Get existing section or create new one
+      var sectionData = await GetConfigurationAsync<Dictionary<string, object>>(section, cancellationToken) 
+                        ?? new Dictionary<string, object>();
+      
+      // Update the specific key
+      sectionData[key] = value;
+      
+      // Save back the entire section
+      var response = await _httpClient.PostAsJsonAsync($"/api/configuration/{section}", sectionData, cancellationToken);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to update configuration key {Key} in section {Section}", key, section);
+      return false;
+    }
+  }
+
   public async Task<bool> ResetConfigurationAsync(string section, CancellationToken cancellationToken = default)
   {
     try

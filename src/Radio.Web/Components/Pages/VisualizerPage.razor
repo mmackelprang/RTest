@@ -369,11 +369,7 @@
   {
     try
     {
-      var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("ui.visualizer") 
-                  ?? new Dictionary<string, object>();
-      
-      prefs[key] = value;
-      await ConfigApi.UpdateConfigurationAsync("ui.visualizer", prefs);
+      await ConfigApi.UpdateConfigurationAsync("ui.visualizer", key, value);
     }
     catch (Exception ex)
     {
