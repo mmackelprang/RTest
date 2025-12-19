@@ -106,6 +106,18 @@ public class TrackPlayCountDto
 }
 
 /// <summary>
+/// Represents a paginated list of play history entries.
+/// </summary>
+public class PlayHistoryListDto
+{
+  /// <summary>Gets or sets the list of play history entries.</summary>
+  public List<PlayHistoryEntryDto> Items { get; set; } = new();
+
+  /// <summary>Gets or sets the total count of entries.</summary>
+  public int TotalCount { get; set; }
+}
+
+/// <summary>
 /// Request to record a play history entry.
 /// </summary>
 public class RecordPlayRequest
