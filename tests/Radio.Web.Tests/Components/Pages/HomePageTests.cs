@@ -31,10 +31,12 @@ public class HomePageTests : TestContext
 
     Services.AddSingleton<IConfiguration>(configuration);
     Services.AddSingleton(_loggerFactory);
+    Services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
     
     // Add HttpClient for API services
     Services.AddHttpClient<AudioApiService>();
     Services.AddHttpClient<SystemApiService>();
+    Services.AddHttpClient<ConfigurationApiService>();
     
     // Add SignalR hub service
     Services.AddSingleton(sp => 
