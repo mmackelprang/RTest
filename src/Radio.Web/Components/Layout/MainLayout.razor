@@ -57,8 +57,10 @@
   </MudAppBar>
   
   <!-- Main Content Area - 516px height (576 - 60) -->
-  <div class="content-area" style="height: 516px; margin-top: 60px; overflow-y: auto;">
-    @Body
+  <div class="content-area" style="height: 516px; margin-top: 60px; overflow-y: auto; position: relative;">
+    <div class="page-transition">
+      @Body
+    </div>
   </div>
 </div>
 

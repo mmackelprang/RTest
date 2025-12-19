@@ -259,3 +259,47 @@ button, .mud-button-root, .mud-icon-button {
 .mud-icon[style*="cursor: grab"]:hover {
   color: var(--color-primary);
 }
+
+/* Page Transition Animations */
+.page-transition {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transition: transform 250ms ease-out, opacity 250ms ease-out;
+}
+
+.page-transition-active {
+  animation: slideIn 250ms ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Smooth page transitions on navigation */
+.content-area {
+  perspective: 1000px;
+  overflow: hidden; /* Prevent horizontal scroll during transition */
+}
+
+.page-transition > * {
+  backface-visibility: hidden;
+  transform: translateZ(0);
+  will-change: transform, opacity;
+}
+
+/* Performance optimization for animations */
+@media (prefers-reduced-motion: reduce) {
+  .page-transition,
+  .page-transition-active {
+    animation: none;
+    transition: none;
+  }
+}
