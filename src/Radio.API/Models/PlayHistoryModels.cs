@@ -110,11 +110,11 @@ public class TrackPlayCountDto
 /// </summary>
 public class PlayHistoryListDto
 {
-  /// <summary>Gets or sets the list of play history entries.</summary>
-  public List<PlayHistoryEntryDto> Items { get; set; } = new();
-
   /// <summary>Gets or sets the total count of entries.</summary>
   public int TotalCount { get; set; }
+
+  /// <summary>Gets or sets the list of play history entries.</summary>
+  public List<PlayHistoryEntryDto> Items { get; set; } = [];
 }
 
 /// <summary>
