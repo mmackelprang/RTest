@@ -27,7 +27,7 @@ public class PlayHistoryApiService
       if (offset.HasValue) query.Add($"offset={offset}");
       var queryString = query.Any() ? "?" + string.Join("&", query) : "";
       
-      return await _httpClient.GetFromJsonAsync<PlayHistoryListDto>($"/api/history{queryString}", cancellationToken);
+      return await _httpClient.GetFromJsonAsync<PlayHistoryListDto>($"/api/playhistory{queryString}", cancellationToken);
     }
     catch (Exception ex)
     {
@@ -40,7 +40,7 @@ public class PlayHistoryApiService
   {
     try
     {
-      return await _httpClient.GetFromJsonAsync<PlayHistoryItemDto>($"/api/history/{id}", cancellationToken);
+      return await _httpClient.GetFromJsonAsync<PlayHistoryItemDto>($"/api/playhistory/{id}", cancellationToken);
     }
     catch (Exception ex)
     {
@@ -58,7 +58,7 @@ public class PlayHistoryApiService
       if (offset.HasValue) query.Add($"offset={offset}");
       var queryString = query.Any() ? "?" + string.Join("&", query) : "";
 
-      return await _httpClient.GetFromJsonAsync<PlayHistoryListDto>($"/api/history/source/{source}{queryString}", cancellationToken);
+      return await _httpClient.GetFromJsonAsync<PlayHistoryListDto>($"/api/playhistory/source/{source}{queryString}", cancellationToken);
     }
     catch (Exception ex)
     {
@@ -77,7 +77,7 @@ public class PlayHistoryApiService
       if (offset.HasValue) query.Add($"offset={offset}");
       var queryString = query.Any() ? "?" + string.Join("&", query) : "";
 
-      return await _httpClient.GetFromJsonAsync<PlayHistoryListDto>($"/api/history/date/{dateStr}{queryString}", cancellationToken);
+      return await _httpClient.GetFromJsonAsync<PlayHistoryListDto>($"/api/playhistory/date/{dateStr}{queryString}", cancellationToken);
     }
     catch (Exception ex)
     {
@@ -95,7 +95,7 @@ public class PlayHistoryApiService
       if (offset.HasValue) queryParams.Add($"offset={offset}");
       var queryString = "?" + string.Join("&", queryParams);
 
-      return await _httpClient.GetFromJsonAsync<PlayHistoryListDto>($"/api/history/search{queryString}", cancellationToken);
+      return await _httpClient.GetFromJsonAsync<PlayHistoryListDto>($"/api/playhistory/search{queryString}", cancellationToken);
     }
     catch (Exception ex)
     {
@@ -108,7 +108,7 @@ public class PlayHistoryApiService
   {
     try
     {
-      return await _httpClient.GetFromJsonAsync<PlayHistoryStatsDto>("/api/history/stats", cancellationToken);
+      return await _httpClient.GetFromJsonAsync<PlayHistoryStatsDto>("/api/playhistory/statistics", cancellationToken);
     }
     catch (Exception ex)
     {
@@ -121,7 +121,7 @@ public class PlayHistoryApiService
   {
     try
     {
-      var response = await _httpClient.DeleteAsync("/api/history", cancellationToken);
+      var response = await _httpClient.DeleteAsync("/api/playhistory", cancellationToken);
       return response.IsSuccessStatusCode;
     }
     catch (Exception ex)
@@ -135,7 +135,7 @@ public class PlayHistoryApiService
   {
     try
     {
-      var response = await _httpClient.DeleteAsync($"/api/history/{id}", cancellationToken);
+      var response = await _httpClient.DeleteAsync($"/api/playhistory/{id}", cancellationToken);
       return response.IsSuccessStatusCode;
     }
     catch (Exception ex)

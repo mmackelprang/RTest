@@ -71,16 +71,16 @@
           <MudText Typo="Typo.h5">@_stats.TotalPlays</MudText>
         </MudItem>
         <MudItem xs="6" sm="3">
-          <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Unique Tracks</MudText>
-          <MudText Typo="Typo.h5">@_stats.UniqueTracksCount</MudText>
+          <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Identified Plays</MudText>
+          <MudText Typo="Typo.h5">@_stats.IdentifiedPlays</MudText>
         </MudItem>
         <MudItem xs="6" sm="3">
           <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Most Played Track</MudText>
-          <MudText Typo="Typo.body1">@_stats.MostPlayedTrack</MudText>
+          <MudText Typo="Typo.body1">@(_stats.TopTracks.FirstOrDefault()?.Title ?? "-")</MudText>
         </MudItem>
         <MudItem xs="6" sm="3">
           <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Most Played Artist</MudText>
-          <MudText Typo="Typo.body1">@_stats.MostPlayedArtist</MudText>
+          <MudText Typo="Typo.body1">@(_stats.TopArtists.FirstOrDefault()?.Artist ?? "-")</MudText>
         </MudItem>
       </MudGrid>
       

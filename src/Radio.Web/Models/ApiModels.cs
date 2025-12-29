@@ -146,12 +146,16 @@ public record PlayHistoryItemDto(
   int DurationSeconds
 );
 
+public record ArtistPlayCountDto(string Artist, int PlayCount);
+public record TrackPlayCountDto(string Title, string Artist, int PlayCount);
+
 public record PlayHistoryStatsDto(
   int TotalPlays,
-  int UniqueTracksCount,
-  string MostPlayedTrack,
-  string MostPlayedArtist,
-  Dictionary<string, int> PlaysBySource
+  int IdentifiedPlays,
+  int UnidentifiedPlays,
+  Dictionary<string, int> PlaysBySource,
+  List<ArtistPlayCountDto> TopArtists,
+  List<TrackPlayCountDto> TopTracks
 );
 
 // Spotify API DTOs
