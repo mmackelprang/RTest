@@ -19,12 +19,13 @@
       @_currentTime
     </div>
 
-    <!-- Audio Source Selector -->
+    <!-- Audio Source Selector - Material 3 Style -->
     <MudSpacer />
     <MudSelect T="string" Value="@_selectedSourceId" ValueChanged="@HandleSourceChangeAsync"
-               Label="Audio Source" Variant="Variant.Outlined" Dense="true"
+               Label="Audio Source" Variant="Variant.Text" Dense="true"
                AnchorOrigin="Origin.BottomCenter" TransformOrigin="Origin.TopCenter"
-               Style="min-width: 180px; margin-right: 16px;">
+               Style="min-width: 180px; margin-right: 16px; border-bottom: 1px solid rgba(255,255,255,0.3);"
+               Underline="true">
       @if (_availableSources.Count == 0)
       {
         <MudSelectItem Value="@string.Empty" Disabled="true">No sources available</MudSelectItem>
@@ -35,11 +36,12 @@
       }
     </MudSelect>
 
-    <!-- Audio Output Selector -->
+    <!-- Audio Output Selector - Material 3 Style -->
     <MudSelect T="string" Value="@_selectedOutputId" ValueChanged="@HandleOutputChangeAsync"
-               Label="Audio Output" Variant="Variant.Outlined" Dense="true"
+               Label="Audio Output" Variant="Variant.Text" Dense="true"
                AnchorOrigin="Origin.BottomCenter" TransformOrigin="Origin.TopCenter"
-               Style="min-width: 200px; margin-right: 24px;">
+               Style="min-width: 200px; margin-right: 24px; border-bottom: 1px solid rgba(255,255,255,0.3);"
+               Underline="true">
       @if (_availableOutputs.Count == 0)
       {
         <MudSelectItem Value="@string.Empty" Disabled="true">No outputs available</MudSelectItem>
@@ -165,20 +167,25 @@
 
     // Start the clock timer using System.Timers.Timer (works reliably in Blazor Server)
     _timer = new System.Timers.Timer(1000);
-    _timer.Elapsed += async (sender, e) => await OnTimerElapsedAsync();
+    _timer.Elapsed += OnTimerElapsed;
     _timer.AutoReset = true;
     _timer.Start();
     Logger.LogInformation("MainLayout - Timer started");
   }
 
-  private async Task OnTimerElapsedAsync()
+  private void OnTimerElapsed(object? sender, System.Timers.ElapsedEventArgs e)
   {
     _currentTime = DateTime.Now.ToString("HH:mm:ss");
-    await UpdateSystemStatsAsync();
-
+    
     try
     {
-      await InvokeAsync(StateHasChanged);
+      // Invoke state update on the UI thread
+      // Update system stats in background without blocking the clock update
+      InvokeAsync(async () =>
+      {
+        StateHasChanged();
+        await UpdateSystemStatsAsync();
+      });
     }
     catch (ObjectDisposedException)
     {

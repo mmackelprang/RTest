@@ -4,6 +4,69 @@ This document provides a comprehensive reference for all Configuration, Preferen
 
 ---
 
+## Quick Start Guides
+
+### For Development (Windows/Mac/Linux)
+
+1. **Prerequisites**
+   - .NET 8 SDK or later
+   - SQLite (optional, can use JSON files)
+   - Git
+
+2. **Initial Setup**
+   ```bash
+   git clone <repository-url>
+   cd RadioConsole
+   dotnet restore
+   dotnet build
+   ```
+
+3. **Configuration**
+   - Configuration is stored in `src/Radio.API/appsettings.json`
+   - For development, create `appsettings.Development.json` to override settings
+   - Secrets are stored encrypted - see [Secrets Setup](#secrets-setup) below
+
+4. **Running the Application**
+   ```bash
+   # Run API (default: http://localhost:5000)
+   dotnet run --project src/Radio.API
+
+   # Run Web UI (default: http://localhost:5001)
+   dotnet run --project src/Radio.Web
+   ```
+
+### For Production (Raspberry Pi / Linux)
+
+1. **System Prerequisites**
+   ```bash
+   sudo apt update
+   sudo apt install -y dotnet-sdk-8.0 sqlite3 espeak-ng
+   ```
+
+2. **Clone and Build**
+   ```bash
+   git clone <repository-url>
+   cd RadioConsole
+   dotnet restore
+   dotnet publish -c Release -o /opt/radio-console
+   ```
+
+3. **Create Data Directories**
+   ```bash
+   sudo mkdir -p /opt/radio-console/data/{config,metrics,fingerprints,backups}
+   sudo mkdir -p /opt/radio-console/logs
+   sudo chown -R radio:radio /opt/radio-console
+   ```
+
+4. **Configure Production Settings**
+   - Copy `appsettings.json` to `/opt/radio-console/`
+   - Set `DefaultStoreType` to `Sqlite` for better performance
+   - Configure paths to use absolute paths (e.g., `/opt/radio-console/data`)
+
+5. **Setup Systemd Service** (see [Service Setup](#systemd-service-setup))
+
+---
+
 ## Configuration File Location
 
 **Primary Configuration File:** `src/Radio.API/appsettings.json`
@@ -16,6 +79,419 @@ The Radio Console application uses a **consolidated configuration approach** whe
 - **Environment Overrides**: Standard ASP.NET Core configuration layering allows for `appsettings.Development.json`, `appsettings.Production.json`, and environment variables to override settings as needed
 
 **Reference Example:** See `design/appsettings.example.json` for a complete template with all available configuration options.
+
+---
+
+## Secrets Setup
+
+### Required Secrets for Full Functionality
+
+The following secrets are required for various features:
+
+1. **Spotify Integration** (Required for Spotify audio source)
+   - `spotify_clientid`
+   - `spotify_clientsecret`
+   - `spotify_refreshtoken`
+
+2. **Google Cloud Text-to-Speech** (Optional - for cloud TTS)
+   - `google_tts_key`
+
+3. **Azure Speech Services** (Optional - for cloud TTS)
+   - `azure_tts_key`
+   - `azure_tts_region`
+
+4. **AcoustID Fingerprinting** (Optional - for music identification)
+   - `acoustid_apikey`
+
+### How to Configure Secrets
+
+#### Method 1: Using Configuration Manager Tool
+
+```bash
+cd tools/Radio.Tools.ConfigurationManager
+dotnet run
+
+# Follow prompts to:
+# 1. Select "Manage Secrets"
+# 2. Create new secret with identifier and value
+# 3. The tool will generate a secret tag like ${secret:spotify_clientid_abc123}
+```
+
+#### Method 2: Direct Configuration File
+
+1. Create or edit `src/Radio.API/appsettings.json`
+2. Add secret references in configuration:
+
+```json
+{
+  "Spotify": {
+    "ClientID": "${secret:spotify_clientid}",
+    "ClientSecret": "${secret:spotify_clientsecret}",
+    "RefreshToken": "${secret:spotify_refreshtoken}"
+  },
+  "TTS": {
+    "GoogleAPIKey": "${secret:google_tts_key}",
+    "AzureAPIKey": "${secret:azure_tts_key}",
+    "AzureRegion": "${secret:azure_tts_region}"
+  },
+  "Fingerprinting": {
+    "AcoustId": {
+      "ApiKey": "${secret:acoustid_apikey}"
+    }
+  }
+}
+```
+
+3. Create secrets file at `config/secrets.json` (for JSON store) or in SQLite database
+
+#### Method 3: Environment Variables (Production)
+
+For production deployments, you can use environment variables:
+
+```bash
+export SPOTIFY__CLIENTID="your_client_id"
+export SPOTIFY__CLIENTSECRET="your_client_secret"
+export SPOTIFY__REFRESHTOKEN="your_refresh_token"
+```
+
+### Getting API Keys
+
+#### Spotify Setup
+
+1. Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
+2. Click "Create an App"
+3. Note the **Client ID** and **Client Secret**
+4. Add `http://localhost:5000/callback` to Redirect URIs
+5. Get a refresh token using the Authorization Code Flow:
+   ```bash
+   # Use tools/spotify-auth-helper.sh or follow Spotify OAuth docs
+   ```
+
+#### Google Cloud TTS Setup
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Enable "Cloud Text-to-Speech API"
+3. Create credentials (API Key)
+4. Copy the API key
+
+#### Azure Speech Setup
+
+1. Go to [Azure Portal](https://portal.azure.com/)
+2. Create a "Speech Service" resource
+3. Note the **Key** and **Region** from the resource
+
+#### AcoustID Setup
+
+1. Go to [AcoustID Applications](https://acoustid.org/new-application)
+2. Register a new application
+3. Copy the API key
+
+---
+
+## SQLite Setup for Production
+
+### Why SQLite for Production?
+
+- **Performance**: Faster than JSON files for frequent reads/writes
+- **Reliability**: ACID compliance, better concurrency handling
+- **Backup**: Single file backup for entire configuration
+- **Querying**: Easier to query and manage data
+
+### Configuration for SQLite
+
+In `appsettings.json`, set:
+
+```json
+{
+  "ManagedConfiguration": {
+    "DefaultStoreType": "Sqlite",
+    "BasePath": "/opt/radio-console/data/config",
+    "SqliteFileName": "configuration.db",
+    "BackupPath": "/opt/radio-console/data/backups",
+    "BackupRetentionDays": 30
+  },
+  "Database": {
+    "RootPath": "/opt/radio-console/data",
+    "ConfigurationSubdirectory": "config",
+    "MetricsSubdirectory": "metrics",
+    "FingerprintingSubdirectory": "fingerprints",
+    "BackupSubdirectory": "backups"
+  }
+}
+```
+
+### Database Files
+
+The following SQLite databases are created:
+
+- `/opt/radio-console/data/config/configuration.db` - App configuration and secrets
+- `/opt/radio-console/data/metrics/metrics.db` - Performance metrics
+- `/opt/radio-console/data/fingerprints/fingerprints.db` - Audio fingerprint cache
+
+### Backup and Restore
+
+#### Automatic Backups
+
+Backups are created automatically and stored in the backups directory. Old backups are automatically cleaned up based on `BackupRetentionDays`.
+
+#### Manual Backup
+
+```bash
+# Using the configuration manager tool
+cd tools/Radio.Tools.ConfigurationManager
+dotnet run
+# Select "Backup Configuration"
+
+# Or copy database files directly
+cp /opt/radio-console/data/config/configuration.db \
+   /opt/radio-console/data/backups/configuration-$(date +%Y%m%d).db
+```
+
+#### Restore from Backup
+
+```bash
+# Stop the service
+sudo systemctl stop radio-console
+
+# Restore database
+cp /opt/radio-console/data/backups/configuration-20231205.db \
+   /opt/radio-console/data/config/configuration.db
+
+# Start the service
+sudo systemctl start radio-console
+```
+
+---
+
+## Text-to-Speech (TTS) Setup
+
+### eSpeak-NG (Offline, Default)
+
+**Prerequisites:**
+```bash
+# Raspberry Pi / Linux
+sudo apt install espeak-ng
+
+# Verify installation
+espeak-ng --version
+```
+
+**Configuration:**
+```json
+{
+  "TTS": {
+    "DefaultEngine": "ESpeak",
+    "ESpeakPath": "espeak-ng",
+    "DefaultVoice": "en",
+    "DefaultSpeed": 1.0,
+    "DefaultPitch": 1.0
+  }
+}
+```
+
+**No additional setup required** - works offline immediately.
+
+### Google Cloud TTS (Cloud, High Quality)
+
+**Prerequisites:**
+1. Google Cloud account with billing enabled
+2. Text-to-Speech API enabled
+3. API key created (see [Getting API Keys](#getting-api-keys))
+
+**Configuration:**
+```json
+{
+  "TTS": {
+    "DefaultEngine": "Google",
+    "GoogleAPIKey": "${secret:google_tts_key}",
+    "DefaultVoice": "en-US-Standard-A",
+    "DefaultSpeed": 1.0,
+    "DefaultPitch": 1.0
+  }
+}
+```
+
+**Create Secret:**
+```bash
+cd tools/Radio.Tools.ConfigurationManager
+dotnet run
+# Create secret: google_tts_key = <your-api-key>
+```
+
+### Azure Speech (Cloud, High Quality)
+
+**Prerequisites:**
+1. Azure account with active subscription
+2. Speech Service resource created
+3. API key and region noted (see [Getting API Keys](#getting-api-keys))
+
+**Configuration:**
+```json
+{
+  "TTS": {
+    "DefaultEngine": "Azure",
+    "AzureAPIKey": "${secret:azure_tts_key}",
+    "AzureRegion": "${secret:azure_tts_region}",
+    "DefaultVoice": "en-US-JennyNeural",
+    "DefaultSpeed": 1.0,
+    "DefaultPitch": 1.0
+  }
+}
+```
+
+**Create Secrets:**
+```bash
+cd tools/Radio.Tools.ConfigurationManager
+dotnet run
+# Create secret: azure_tts_key = <your-api-key>
+# Create secret: azure_tts_region = <your-region> (e.g., "eastus")
+```
+
+---
+
+## Fingerprinting Setup
+
+Audio fingerprinting identifies songs playing on Radio or Vinyl sources using AcoustID and MusicBrainz.
+
+### Prerequisites
+
+1. AcoustID account and API key (see [Getting API Keys](#getting-api-keys))
+2. Internet connection for lookups
+
+### Configuration
+
+```json
+{
+  "Fingerprinting": {
+    "Enabled": true,
+    "SampleDurationSeconds": 15,
+    "IdentificationIntervalSeconds": 30,
+    "MinimumConfidenceThreshold": 0.5,
+    "DuplicateSuppressionMinutes": 5,
+    "DatabasePath": "./data/fingerprints/fingerprints.db",
+    "AcoustId": {
+      "ApiKey": "${secret:acoustid_apikey}",
+      "BaseUrl": "https://api.acoustid.org/v2",
+      "MaxRequestsPerSecond": 3,
+      "TimeoutSeconds": 10
+    },
+    "MusicBrainz": {
+      "BaseUrl": "https://musicbrainz.org/ws/2",
+      "ApplicationName": "RadioConsole",
+      "ApplicationVersion": "1.0.0",
+      "ContactEmail": "your-email@example.com",
+      "MaxRequestsPerSecond": 1,
+      "TimeoutSeconds": 10
+    }
+  }
+}
+```
+
+### Create Secret
+
+```bash
+cd tools/Radio.Tools.ConfigurationManager
+dotnet run
+# Create secret: acoustid_apikey = <your-api-key>
+```
+
+### Rate Limiting
+
+- **AcoustID**: 3 requests/second (free tier limit)
+- **MusicBrainz**: 1 request/second (anonymous limit)
+
+The system automatically respects these limits.
+
+---
+
+## Systemd Service Setup
+
+For production Linux deployments, create a systemd service:
+
+### Create Service File
+
+Create `/etc/systemd/system/radio-console-api.service`:
+
+```ini
+[Unit]
+Description=Radio Console API
+After=network.target
+
+[Service]
+Type=notify
+User=radio
+Group=radio
+WorkingDirectory=/opt/radio-console
+ExecStart=/usr/bin/dotnet /opt/radio-console/Radio.API.dll
+Restart=always
+RestartSec=10
+Environment="ASPNETCORE_ENVIRONMENT=Production"
+Environment="DOTNET_PRINT_TELEMETRY_MESSAGE=false"
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Create `/etc/systemd/system/radio-console-web.service`:
+
+```ini
+[Unit]
+Description=Radio Console Web UI
+After=network.target radio-console-api.service
+
+[Service]
+Type=notify
+User=radio
+Group=radio
+WorkingDirectory=/opt/radio-console
+ExecStart=/usr/bin/dotnet /opt/radio-console/Radio.Web.dll
+Restart=always
+RestartSec=10
+Environment="ASPNETCORE_ENVIRONMENT=Production"
+Environment="DOTNET_PRINT_TELEMETRY_MESSAGE=false"
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Enable and Start Services
+
+```bash
+# Create user
+sudo useradd -r -s /bin/false radio
+
+# Set permissions
+sudo chown -R radio:radio /opt/radio-console
+
+# Reload systemd
+sudo systemctl daemon-reload
+
+# Enable services
+sudo systemctl enable radio-console-api
+sudo systemctl enable radio-console-web
+
+# Start services
+sudo systemctl start radio-console-api
+sudo systemctl start radio-console-web
+
+# Check status
+sudo systemctl status radio-console-api
+sudo systemctl status radio-console-web
+```
+
+### Manage Services
+
+```bash
+# View logs
+sudo journalctl -u radio-console-api -f
+sudo journalctl -u radio-console-web -f
+
+# Stop services
+sudo systemctl stop radio-console-api radio-console-web
+
+# Restart services
+sudo systemctl restart radio-console-api radio-console-web
+```
 
 ---
 

@@ -31,6 +31,10 @@ public static class AudioServiceExtensions
     services.Configure<AudioEngineOptions>(
       configuration.GetSection(AudioEngineOptions.SectionName));
 
+    // Bind audio preferences for startup behavior
+    services.Configure<AudioPreferences>(
+      configuration.GetSection(AudioPreferences.SectionName));
+
     // Register the master mixer (singleton to maintain state)
     services.AddSingleton<SoundFlowMasterMixer>();
     services.AddSingleton<IMasterMixer>(sp => sp.GetRequiredService<SoundFlowMasterMixer>());
