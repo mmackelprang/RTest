@@ -19,12 +19,13 @@
       @_currentTime
     </div>
 
-    <!-- Audio Source Selector -->
+    <!-- Audio Source Selector - Material 3 Style -->
     <MudSpacer />
     <MudSelect T="string" Value="@_selectedSourceId" ValueChanged="@HandleSourceChangeAsync"
-               Label="Audio Source" Variant="Variant.Outlined" Dense="true"
+               Label="Audio Source" Variant="Variant.Text" Dense="true"
                AnchorOrigin="Origin.BottomCenter" TransformOrigin="Origin.TopCenter"
-               Style="min-width: 180px; margin-right: 16px;">
+               Style="min-width: 180px; margin-right: 16px; border-bottom: 1px solid rgba(255,255,255,0.3);"
+               Underline="true">
       @if (_availableSources.Count == 0)
       {
         <MudSelectItem Value="@string.Empty" Disabled="true">No sources available</MudSelectItem>
@@ -35,11 +36,12 @@
       }
     </MudSelect>
 
-    <!-- Audio Output Selector -->
+    <!-- Audio Output Selector - Material 3 Style -->
     <MudSelect T="string" Value="@_selectedOutputId" ValueChanged="@HandleOutputChangeAsync"
-               Label="Audio Output" Variant="Variant.Outlined" Dense="true"
+               Label="Audio Output" Variant="Variant.Text" Dense="true"
                AnchorOrigin="Origin.BottomCenter" TransformOrigin="Origin.TopCenter"
-               Style="min-width: 200px; margin-right: 24px;">
+               Style="min-width: 200px; margin-right: 24px; border-bottom: 1px solid rgba(255,255,255,0.3);"
+               Underline="true">
       @if (_availableOutputs.Count == 0)
       {
         <MudSelectItem Value="@string.Empty" Disabled="true">No outputs available</MudSelectItem>
