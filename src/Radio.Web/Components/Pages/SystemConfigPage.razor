@@ -271,51 +271,156 @@
 
     <!-- Tab 4: Event Sources -->
     <MudTabPanel Text="Event Sources" Icon="@Icons.Material.Filled.EventNote">
-      @if (_eventSources != null && _eventSources.Count > 0)
-      {
-        <MudSimpleTable Dense="true" Hover="true">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Name</th>
-              <th>Type</th>
-              <th>State</th>
-              <th>Volume</th>
-              <th>Metadata</th>
-            </tr>
-          </thead>
-          <tbody>
-            @foreach (var source in _eventSources)
-            {
-              <tr>
-                <td>@source.Id</td>
-                <td><strong>@source.Name</strong></td>
-                <td>@source.Type</td>
-                <td><MudChip T="string" Size="Size.Small" Color="@(source.State == "Active" ? Color.Success : Color.Default)">@source.State</MudChip></td>
-                <td>@source.Volume.ToString("P0")</td>
-                <td>
-                  @if (source.Metadata != null && source.Metadata.Count > 0)
+      <MudGrid Spacing="3">
+        <!-- TTS Section -->
+        <MudItem xs="12" md="6">
+          <MudCard>
+            <MudCardHeader>
+              <CardHeaderContent>
+                <MudText Typo="Typo.h6">Text-to-Speech</MudText>
+              </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+              <MudTextField @bind-Value="_ttsText" Label="Message" Variant="Variant.Outlined" Lines="3" />
+              
+              <MudSelect @bind-Value="_selectedTTSEngine" Label="TTS Engine" Variant="Variant.Outlined" Class="mt-3">
+                @if (_ttsEngines != null)
+                {
+                  @foreach (var engine in _ttsEngines.Where(e => e.IsAvailable))
                   {
-                    <MudText Typo="Typo.caption">@string.Join(", ", source.Metadata.Select(m => $"{m.Key}: {m.Value}"))</MudText>
+                    <MudSelectItem Value="@engine.Engine">
+                      @engine.Name @(engine.IsOffline ? "(Offline)" : "(Online)")
+                    </MudSelectItem>
                   }
-                  else
+                }
+              </MudSelect>
+
+              <MudTextField @bind-Value="_ttsVoice" Label="Voice (Optional)" Variant="Variant.Outlined" Class="mt-3" 
+                            HelperText="e.g., 'en', 'en-US-Standard-A'" />
+
+              <MudStack Row="true" Spacing="2" Class="mt-3">
+                <MudNumericField @bind-Value="_ttsSpeed" Label="Speed" Variant="Variant.Outlined" 
+                                 Min="0.5" Max="2.0" Step="0.1" Style="width: 150px;" />
+                <MudNumericField @bind-Value="_ttsPitch" Label="Pitch" Variant="Variant.Outlined" 
+                                 Min="0.5" Max="2.0" Step="0.1" Style="width: 150px;" />
+              </MudStack>
+            </MudCardContent>
+            <MudCardActions>
+              <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.RecordVoiceOver" 
+                         OnClick="PlayTTSAsync" Disabled="@(string.IsNullOrWhiteSpace(_ttsText) || _ttsEngines == null || !_ttsEngines.Any(e => e.IsAvailable))">
+                Speak
+              </MudButton>
+            </MudCardActions>
+          </MudCard>
+        </MudItem>
+
+        <!-- Audio File Section -->
+        <MudItem xs="12" md="6">
+          <MudCard>
+            <MudCardHeader>
+              <CardHeaderContent>
+                <MudText Typo="Typo.h6">Audio File Events</MudText>
+              </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+              @if (_notificationSounds != null && _notificationSounds.Count > 0)
+              {
+                <MudSelect @bind-Value="_selectedSoundFile" Label="Notification Sound" Variant="Variant.Outlined">
+                  @foreach (var sound in _notificationSounds)
                   {
-                    <MudText Typo="Typo.caption" Color="Color.Default">None</MudText>
+                    <MudSelectItem Value="@sound.FilePath">@sound.FileName</MudSelectItem>
                   }
-                </td>
-              </tr>
-            }
-          </tbody>
-        </MudSimpleTable>
-      }
-      else if (_eventSourcesLoading)
-      {
-        <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
-      }
-      else
-      {
-        <MudAlert Severity="Severity.Info">No event sources configured.</MudAlert>
-      }
+                </MudSelect>
+                
+                @if (!string.IsNullOrWhiteSpace(_selectedSoundFile))
+                {
+                  var selectedSound = _notificationSounds.FirstOrDefault(s => s.FilePath == _selectedSoundFile);
+                  if (selectedSound != null)
+                  {
+                    <MudText Typo="Typo.caption" Class="mt-2">Size: @FormatFileSize(selectedSound.FileSize)</MudText>
+                  }
+                }
+              }
+              else if (_soundsLoading)
+              {
+                <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+                <MudText Class="ml-2">Loading sounds...</MudText>
+              }
+              else
+              {
+                <MudAlert Severity="Severity.Info">No notification sounds available.</MudAlert>
+              }
+            </MudCardContent>
+            <MudCardActions>
+              <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow" 
+                         OnClick="PlayFileEventAsync" Disabled="@(string.IsNullOrWhiteSpace(_selectedSoundFile))">
+                Play
+              </MudButton>
+            </MudCardActions>
+          </MudCard>
+        </MudItem>
+
+        <!-- Active Event Sources -->
+        <MudItem xs="12">
+          <MudCard>
+            <MudCardHeader>
+              <CardHeaderContent>
+                <MudText Typo="Typo.h6">Active Event Sources</MudText>
+              </CardHeaderContent>
+              <CardHeaderActions>
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Primary" OnClick="LoadEventSourcesAsync" />
+              </CardHeaderActions>
+            </MudCardHeader>
+            <MudCardContent>
+              @if (_eventSources != null && _eventSources.Count > 0)
+              {
+                <MudSimpleTable Dense="true" Hover="true">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Name</th>
+                      <th>Type</th>
+                      <th>State</th>
+                      <th>Volume</th>
+                      <th>Metadata</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @foreach (var source in _eventSources)
+                    {
+                      <tr>
+                        <td>@source.Id</td>
+                        <td><strong>@source.Name</strong></td>
+                        <td>@source.Type</td>
+                        <td><MudChip T="string" Size="Size.Small" Color="@(source.State == "Active" ? Color.Success : Color.Default)">@source.State</MudChip></td>
+                        <td>@source.Volume.ToString("P0")</td>
+                        <td>
+                          @if (source.Metadata != null && source.Metadata.Count > 0)
+                          {
+                            <MudText Typo="Typo.caption">@string.Join(", ", source.Metadata.Select(m => $"{m.Key}: {m.Value}"))</MudText>
+                          }
+                          else
+                          {
+                            <MudText Typo="Typo.caption" Color="Color.Default">None</MudText>
+                          }
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </MudSimpleTable>
+              }
+              else if (_eventSourcesLoading)
+              {
+                <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+              }
+              else
+              {
+                <MudAlert Severity="Severity.Info">No event sources currently active.</MudAlert>
+              }
+            </MudCardContent>
+          </MudCard>
+        </MudItem>
+      </MudGrid>
     </MudTabPanel>
 
   </MudTabs>
@@ -351,6 +456,19 @@
   private List<AudioSourceDto>? _eventSources;
   private bool _eventSourcesLoading = false;
 
+  // TTS
+  private List<TTSEngineInfoDto>? _ttsEngines;
+  private string _ttsText = string.Empty;
+  private string _selectedTTSEngine = "ESpeak";
+  private string _ttsVoice = "en";
+  private double _ttsSpeed = 1.0;
+  private double _ttsPitch = 1.0;
+
+  // Audio Files
+  private List<NotificationSoundDto>? _notificationSounds;
+  private string _selectedSoundFile = string.Empty;
+  private bool _soundsLoading = false;
+
   protected override async Task OnInitializedAsync()
   {
     // Load initial data
@@ -358,6 +476,8 @@
     await LoadConfigurationAsync();
     await LoadLogsAsync();
     await LoadEventSourcesAsync();
+    await LoadTTSEnginesAsync();
+    await LoadNotificationSoundsAsync();
 
     // Update system stats every 5 seconds
     _statsTimer = new System.Threading.Timer(_ =>
@@ -450,6 +570,119 @@
     {
       _eventSourcesLoading = false;
     }
+  }
+
+  private async Task LoadTTSEnginesAsync()
+  {
+    try
+    {
+      _ttsEngines = await SourcesApi.GetTTSEnginesAsync();
+      if (_ttsEngines != null && _ttsEngines.Any(e => e.IsAvailable))
+      {
+        _selectedTTSEngine = _ttsEngines.First(e => e.IsAvailable).Engine;
+      }
+    }
+    catch (Exception)
+    {
+      // Silently fail - TTS section will show as unavailable
+    }
+  }
+
+  private async Task LoadNotificationSoundsAsync()
+  {
+    _soundsLoading = true;
+    try
+    {
+      _notificationSounds = await SourcesApi.GetNotificationSoundsAsync();
+      if (_notificationSounds != null && _notificationSounds.Count > 0)
+      {
+        _selectedSoundFile = _notificationSounds[0].FilePath;
+      }
+    }
+    catch (Exception)
+    {
+      // Silently fail - audio file section will show as unavailable
+    }
+    finally
+    {
+      _soundsLoading = false;
+    }
+  }
+
+  private async Task PlayTTSAsync()
+  {
+    try
+    {
+      if (string.IsNullOrWhiteSpace(_ttsText))
+      {
+        Snackbar.Add("Please enter text to speak", Severity.Warning);
+        return;
+      }
+
+      var success = await SourcesApi.PlayTTSEventAsync(
+        _ttsText,
+        _selectedTTSEngine,
+        _ttsVoice,
+        (float)_ttsSpeed,
+        (float)_ttsPitch);
+
+      if (success)
+      {
+        Snackbar.Add("TTS event started successfully", Severity.Success);
+        // Refresh event sources list to show the new event
+        await LoadEventSourcesAsync();
+      }
+      else
+      {
+        Snackbar.Add("Failed to start TTS event", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Snackbar.Add($"Error playing TTS: {ex.Message}", Severity.Error);
+    }
+  }
+
+  private async Task PlayFileEventAsync()
+  {
+    try
+    {
+      if (string.IsNullOrWhiteSpace(_selectedSoundFile))
+      {
+        Snackbar.Add("Please select a sound file", Severity.Warning);
+        return;
+      }
+
+      var success = await SourcesApi.PlayFileEventAsync(_selectedSoundFile);
+
+      if (success)
+      {
+        Snackbar.Add("Audio file event started successfully", Severity.Success);
+        // Refresh event sources list to show the new event
+        await LoadEventSourcesAsync();
+      }
+      else
+      {
+        Snackbar.Add("Failed to start audio file event", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Snackbar.Add($"Error playing file: {ex.Message}", Severity.Error);
+    }
+  }
+
+  private string FormatFileSize(long bytes)
+  {
+    string[] sizes = { "B", "KB", "MB", "GB" };
+    double len = bytes;
+    int order = 0;
+    while (len >= 1024 && order < sizes.Length - 1)
+    {
+      order++;
+      len = len / 1024;
+    }
+    return $"{len:0.##} {sizes[order]}";
   }
 
   private async Task ExportLogsAsync()
