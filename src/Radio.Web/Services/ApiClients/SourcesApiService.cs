@@ -167,6 +167,20 @@ public class SourcesApiService
     }
   }
 
+  public async Task<List<TTSVoiceInfoDto>?> GetTTSVoicesAsync(string engine, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var url = $"/api/sources/events/tts/voices?engine={Uri.EscapeDataString(engine)}";
+      return await _httpClient.GetFromJsonAsync<List<TTSVoiceInfoDto>>(url, JsonOptions, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to get TTS voices for engine {Engine}", engine);
+      return null;
+    }
+  }
+
   public async Task<List<NotificationSoundDto>?> GetNotificationSoundsAsync(string? subdirectory = null, CancellationToken cancellationToken = default)
   {
     try

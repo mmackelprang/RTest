@@ -19,37 +19,37 @@
   }
   else
   {
-    <!-- LED-style Radio Display -->
+    <!-- Radio Display -->
     <MudCard Elevation="2" Style="margin-bottom: 24px; padding: 32px; background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);">
       <div style="text-align: center;">
         <!-- Frequency Display -->
-        <div style="font-family: 'DSEG14Classic-Bold', monospace; font-size: 64px; color: oklch(0.85 0.2 75); text-shadow: 0 0 20px oklch(0.85 0.2 75); margin-bottom: 16px; letter-spacing: 8px;">
+        <MudText Typo="Typo.h2" Style="font-size: 64px; color: oklch(0.85 0.2 75); margin-bottom: 16px; letter-spacing: 4px; font-weight: 600;">
           @FormatFrequency(_radioState.Frequency, _radioState.Band)
-        </div>
+        </MudText>
         
         <!-- Band and Info -->
         <div style="display: flex; justify-content: center; gap: 32px; margin-bottom: 16px;">
-          <div style="font-family: 'DSEG14Classic-Regular', monospace; font-size: 24px; color: oklch(0.7 0.15 195);">
+          <MudText Typo="Typo.h5" Style="color: oklch(0.7 0.15 195);">
             @_radioState.Band
-          </div>
+          </MudText>
           @if (_radioState.SignalStrength.HasValue)
           {
-            <div style="font-family: 'DSEG14Classic-Regular', monospace; font-size: 24px; color: oklch(0.7 0.15 195);">
+            <MudText Typo="Typo.h5" Style="color: oklch(0.7 0.15 195);">
               Signal: @_radioState.SignalStrength%
-            </div>
+            </MudText>
           }
           @if (_radioState.IsScanning)
           {
-            <div style="font-family: 'DSEG14Classic-Regular', monospace; font-size: 24px; color: oklch(0.85 0.2 75); animation: blink 1s infinite;">
+            <MudText Typo="Typo.h5" Style="color: oklch(0.85 0.2 75); animation: blink 1s infinite;">
               SCANNING @_radioState.ScanDirection
-            </div>
+            </MudText>
           }
         </div>
         
         <!-- Step Size -->
-        <div style="font-family: 'DSEG14Classic-Regular', monospace; font-size: 18px; color: oklch(0.6 0.12 195);">
+        <MudText Typo="Typo.body1" Style="color: oklch(0.6 0.12 195);">
           Step: @_radioState.Step MHz
-        </div>
+        </MudText>
       </div>
     </MudCard>
     

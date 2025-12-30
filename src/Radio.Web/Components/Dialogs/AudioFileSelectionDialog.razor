@@ -1,0 +1,126 @@
+@using MudBlazor
+@inject SourcesApiService SourcesApi
+@inject ILogger<AudioFileSelectionDialog> Logger
+
+<MudDialog>
+  <TitleContent>
+    <MudText Typo="Typo.h6">
+      <MudIcon Icon="@Icons.Material.Filled.AudioFile" Class="mr-2" />
+      Select Audio File
+    </MudText>
+  </TitleContent>
+  <DialogContent>
+    @if (_isLoading)
+    {
+      <div style="display: flex; justify-content: center; padding: 32px;">
+        <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+      </div>
+    }
+    else if (_files == null || _files.Count == 0)
+    {
+      <MudAlert Severity="Severity.Info">No audio files found.</MudAlert>
+    }
+    else
+    {
+      <MudList T="string" Dense="false" Style="max-height: 400px; overflow-y: auto;">
+        @foreach (var file in _files)
+        {
+          <MudListItem T="string" 
+                       OnClick="@(() => SelectFile(file))"
+                       Style="@(SelectedFile == file ? "background-color: var(--mud-palette-action-default-hover);" : "")">
+            <div style="display: flex; align-items: center; gap: 16px; padding: 12px 0;">
+              <MudIcon Icon="@Icons.Material.Filled.MusicNote" Color="Color.Primary" Size="Size.Large" />
+              <div style="flex: 1; min-width: 0;">
+                <MudText Typo="Typo.body1" Style="font-weight: 500;">@file.FileName</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@FormatFileSize(file.FileSize)</MudText>
+              </div>
+              @if (SelectedFile == file)
+              {
+                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" />
+              }
+            </div>
+          </MudListItem>
+          <MudDivider />
+        }
+      </MudList>
+    }
+  </DialogContent>
+  <DialogActions>
+    <MudButton OnClick="Cancel" Variant="Variant.Text">Cancel</MudButton>
+    <MudButton OnClick="Submit" Variant="Variant.Filled" Color="Color.Primary" Disabled="@(SelectedFile == null)">
+      Select
+    </MudButton>
+  </DialogActions>
+</MudDialog>
+
+@code {
+  [CascadingParameter] 
+  public IMudDialogInstance MudDialog { get; set; } = null!;
+
+  [Parameter]
+  public string? InitialSelection { get; set; }
+
+  [Parameter]
+  public string? Subdirectory { get; set; }
+
+  private List<NotificationSoundDto>? _files;
+  private bool _isLoading = true;
+  private NotificationSoundDto? SelectedFile { get; set; }
+
+  protected override async Task OnInitializedAsync()
+  {
+    await LoadFilesAsync();
+  }
+
+  private async Task LoadFilesAsync()
+  {
+    _isLoading = true;
+    try
+    {
+      _files = await SourcesApi.GetNotificationSoundsAsync(Subdirectory);
+      
+      // Set initial selection if provided
+      if (!string.IsNullOrWhiteSpace(InitialSelection) && _files != null)
+      {
+        SelectedFile = _files.FirstOrDefault(f => f.FilePath == InitialSelection);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to load audio files for selection dialog");
+      _files = null;
+    }
+    finally
+    {
+      _isLoading = false;
+    }
+  }
+
+  private void SelectFile(NotificationSoundDto file)
+  {
+    SelectedFile = file;
+  }
+
+  private void Submit()
+  {
+    MudDialog.Close(DialogResult.Ok(SelectedFile?.FilePath));
+  }
+
+  private void Cancel()
+  {
+    MudDialog.Cancel();
+  }
+
+  private static string FormatFileSize(long bytes)
+  {
+    string[] sizes = { "B", "KB", "MB", "GB" };
+    double len = bytes;
+    int order = 0;
+    while (len >= 1024 && order < sizes.Length - 1)
+    {
+      order++;
+      len = len / 1024;
+    }
+    return $"{len:0.##} {sizes[order]}";
+  }
+}
