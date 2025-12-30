@@ -1,0 +1,97 @@
+@page "/diagnostic"
+@inject ILogger<Diagnostic> Logger
+
+<PageTitle>Diagnostic Page</PageTitle>
+
+<h1>Blazor Diagnostic Page</h1>
+
+<p>If you can see this and the button works, Blazor is functioning correctly.</p>
+
+<div style="padding: 10px; margin: 10px 0; border-radius: 4px; @(_isInteractive ? "background: #030; border: 2px solid #0f0;" : "background: #300; border: 2px solid #f00;")">
+    <strong>Render Mode:</strong> @(_isInteractive ? "INTERACTIVE (events will work)" : "STATIC/PRE-RENDERED (events won't work)")
+</div>
+
+<p>Current time: @_currentTime</p>
+<p>Click count: @_clickCount</p>
+
+<button @onclick="HandleClick" style="padding: 20px; font-size: 18px; margin: 10px;">
+    Click Me (@_clickCount)
+</button>
+
+<button @onclick="TestApiCall" style="padding: 20px; font-size: 18px; margin: 10px;">
+    Test API Call
+</button>
+
+<div style="margin-top: 20px; padding: 10px; background: #333; border-radius: 8px;">
+    <h3>Status:</h3>
+    <pre style="color: #0f0;">@_status</pre>
+</div>
+
+@code {
+    private string _currentTime = DateTime.Now.ToString("HH:mm:ss.fff");
+    private int _clickCount = 0;
+    private bool _isInteractive = false;
+    private string _status = "Page loaded successfully.\nWaiting for interactive mode...";
+
+    protected override void OnInitialized()
+    {
+        Logger.LogInformation("Diagnostic.OnInitialized called");
+        _status += $"\n[{DateTime.Now:HH:mm:ss}] OnInitialized completed";
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _isInteractive = true;
+            _status += $"\n[{DateTime.Now:HH:mm:ss}] OnAfterRender - Component is now INTERACTIVE!";
+            Logger.LogInformation("Diagnostic component is now interactive");
+            StateHasChanged();
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Logger.LogInformation("Diagnostic.OnInitializedAsync starting");
+        try
+        {
+            await Task.Delay(100); // Small delay to simulate async work
+            _status += $"\n[{DateTime.Now:HH:mm:ss}] OnInitializedAsync completed";
+            Logger.LogInformation("Diagnostic.OnInitializedAsync completed successfully");
+        }
+        catch (Exception ex)
+        {
+            _status += $"\n[{DateTime.Now:HH:mm:ss}] ERROR: {ex.Message}";
+            Logger.LogError(ex, "Error in Diagnostic.OnInitializedAsync");
+        }
+    }
+
+    private void HandleClick()
+    {
+        _clickCount++;
+        _currentTime = DateTime.Now.ToString("HH:mm:ss.fff");
+        _status += $"\n[{DateTime.Now:HH:mm:ss}] Button clicked! Count: {_clickCount}";
+        Logger.LogInformation("Diagnostic button clicked. Count: {Count}", _clickCount);
+    }
+
+    private async Task TestApiCall()
+    {
+        try
+        {
+            _status += $"\n[{DateTime.Now:HH:mm:ss}] Testing HTTP call...";
+
+            using var httpClient = new HttpClient();
+            httpClient.BaseAddress = new Uri("http://localhost:5000");
+            httpClient.Timeout = TimeSpan.FromSeconds(5);
+
+            var response = await httpClient.GetAsync("/api/system/health");
+            _status += $"\n[{DateTime.Now:HH:mm:ss}] API Response: {response.StatusCode}";
+            Logger.LogInformation("API call completed with status: {Status}", response.StatusCode);
+        }
+        catch (Exception ex)
+        {
+            _status += $"\n[{DateTime.Now:HH:mm:ss}] API Error: {ex.Message}";
+            Logger.LogError(ex, "API call failed");
+        }
+    }
+}

@@ -1,0 +1,21 @@
+@page "/minimal"
+
+<h1>Minimal Test Page</h1>
+
+<p>Time: @_time</p>
+<p>Count: @_count</p>
+
+<button @onclick="OnClick" style="padding: 20px; font-size: 24px;">
+    Click Me!
+</button>
+
+@code {
+    private string _time = DateTime.Now.ToString("HH:mm:ss.fff");
+    private int _count = 0;
+
+    private void OnClick()
+    {
+        _count++;
+        _time = DateTime.Now.ToString("HH:mm:ss.fff");
+    }
+}

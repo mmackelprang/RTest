@@ -198,17 +198,33 @@ public record FileItemDto(
 // Play History API DTOs
 public record PlayHistoryListDto(
   int TotalCount,
-  List<PlayHistoryItemDto> Items
+  List<PlayHistoryEntryDto> Items
 );
 
-public record PlayHistoryItemDto(
+public record PlayHistoryEntryDto(
   string Id,
+  DateTime PlayedAt,
+  string Source,
+  string? MetadataSource,
+  string? SourceDetails,
+  int DurationSeconds,
+  double? IdentificationConfidence,
+  bool WasIdentified,
+  PlayHistoryTrackDto? Track
+)
+{
+  // Helper properties for flat access
+  public string? Title => Track?.Title;
+  public string? Artist => Track?.Artist;
+  public string? Album => Track?.Album;
+}
+
+public record PlayHistoryTrackDto(
   string? Title,
   string? Artist,
   string? Album,
-  string Source,
-  DateTime PlayedAt,
-  int DurationSeconds
+  string? AlbumArtist,
+  string? CoverArtUrl
 );
 
 public record ArtistPlayCountDto(string Artist, int PlayCount);

@@ -36,11 +36,11 @@ public class PlayHistoryApiService
     }
   }
 
-  public async Task<PlayHistoryItemDto?> GetHistoryItemAsync(string id, CancellationToken cancellationToken = default)
+  public async Task<PlayHistoryEntryDto?> GetHistoryItemAsync(string id, CancellationToken cancellationToken = default)
   {
     try
     {
-      return await _httpClient.GetFromJsonAsync<PlayHistoryItemDto>($"/api/playhistory/{id}", cancellationToken);
+      return await _httpClient.GetFromJsonAsync<PlayHistoryEntryDto>($"/api/playhistory/{id}", cancellationToken);
     }
     catch (Exception ex)
     {

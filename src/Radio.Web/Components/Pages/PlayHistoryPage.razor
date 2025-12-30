@@ -295,7 +295,7 @@
 @code {
   private PlayHistoryListDto? _historyData;
   private PlayHistoryStatsDto? _stats;
-  private PlayHistoryItemDto? _selectedItem;
+  private PlayHistoryEntryDto? _selectedItem;
   private bool _isLoading = true;
   private DateTime? _selectedDate;
   private string _sourceFilter = "All";
@@ -453,13 +453,13 @@
     return (int)Math.Ceiling(_historyData.TotalCount / (double)_pageSize);
   }
 
-  private void ShowDetailDialog(PlayHistoryItemDto item)
+  private void ShowDetailDialog(PlayHistoryEntryDto item)
   {
     _selectedItem = item;
     _showDetailDialog = true;
   }
 
-  private void ShowDeleteDialog(PlayHistoryItemDto item)
+  private void ShowDeleteDialog(PlayHistoryEntryDto item)
   {
     _selectedItem = item;
     _showDeleteDialog = true;

@@ -140,40 +140,52 @@
 
   protected override async Task OnInitializedAsync()
   {
-    // Load user preferences first
-    await LoadPreferencesAsync();
-
-    // Subscribe to SignalR events for real-time updates
-    HubService.PlaybackStateChanged += OnPlaybackStateChanged;
-    HubService.NowPlayingChanged += OnNowPlayingChanged;
-    HubService.VolumeChanged += OnVolumeChanged;
-
-    // Start SignalR connection if not already connected
-    if (!HubService.IsConnected)
+    try
     {
-      try
-      {
-        await HubService.StartAsync();
-      }
-      catch (Exception ex)
-      {
-        // Log error but continue with polling fallback
-        Logger.LogWarning(ex, "Failed to connect to SignalR hub. Continuing with polling fallback.");
-      }
+      Logger.LogInformation("Home.OnInitializedAsync starting");
+
+      // Load user preferences first
+      await LoadPreferencesAsync();
+      Logger.LogDebug("Preferences loaded");
+
+      // Subscribe to SignalR events for real-time updates
+      HubService.PlaybackStateChanged += OnPlaybackStateChanged;
+      HubService.NowPlayingChanged += OnNowPlayingChanged;
+      HubService.VolumeChanged += OnVolumeChanged;
+      Logger.LogDebug("Event handlers subscribed to AudioStateHubService");
+
+      // Initial load (this will override preferences with actual current state)
+      await RefreshPlaybackStateAsync();
+      Logger.LogDebug("Initial playback state refreshed");
+
+      // Fallback polling every 5 seconds if SignalR is disconnected
+      _timer = new System.Threading.Timer(TimerCallback, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+
+      Logger.LogInformation("Home.OnInitializedAsync completed successfully");
     }
-
-    // Initial load (this will override preferences with actual current state)
-    await RefreshPlaybackStateAsync();
-    
-    // Fallback polling every 5 seconds if SignalR is disconnected
-    _timer = new System.Threading.Timer(async _ =>
+    catch (Exception ex)
     {
-      if (!HubService.IsConnected)
-      {
-        await RefreshPlaybackStateAsync();
-        await InvokeAsync(StateHasChanged);
-      }
-    }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+      Logger.LogError(ex, "CRITICAL: Exception in Home.OnInitializedAsync - this will crash the Blazor circuit!");
+      throw; // Re-throw to see the actual error
+    }
+  }
+
+  private async void TimerCallback(object? state)
+  {
+    try
+    {
+      // Always poll since SignalR is disabled for debugging
+      await RefreshPlaybackStateAsync();
+      await InvokeAsync(StateHasChanged);
+    }
+    catch (ObjectDisposedException)
+    {
+      // Component was disposed, ignore
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Error in timer callback");
+    }
   }
 
   private async Task OnPlaybackStateChanged()
@@ -238,15 +250,26 @@
 
   private async Task HandlePlayPauseAsync()
   {
-    if (_isPlaying)
+    Logger.LogInformation("HandlePlayPauseAsync called. Current state: IsPlaying={IsPlaying}", _isPlaying);
+    try
     {
-      await AudioApi.UpdatePlaybackStateAsync(new UpdatePlaybackRequest("pause", null, null, null));
+      if (_isPlaying)
+      {
+        Logger.LogDebug("Sending pause request to API");
+        await AudioApi.UpdatePlaybackStateAsync(new UpdatePlaybackRequest("pause", null, null, null));
+      }
+      else
+      {
+        Logger.LogDebug("Sending start request to API");
+        await AudioApi.StartAsync();
+      }
+      await RefreshPlaybackStateAsync();
+      Logger.LogInformation("HandlePlayPauseAsync completed successfully");
     }
-    else
+    catch (Exception ex)
     {
-      await AudioApi.StartAsync();
+      Logger.LogError(ex, "Error in HandlePlayPauseAsync");
     }
-    await RefreshPlaybackStateAsync();
   }
 
   private async Task HandleNextAsync()
@@ -281,13 +304,23 @@
 
   private async Task HandleVolumeChangeAsync(double newVolume)
   {
-    _volume = newVolume;
-    await AudioApi.SetVolumeAsync((float)newVolume);
-    await SavePreferenceAsync("volume", newVolume);
+    Logger.LogInformation("HandleVolumeChangeAsync called. Volume={Volume}", newVolume);
+    try
+    {
+      _volume = newVolume;
+      await AudioApi.SetVolumeAsync((float)newVolume);
+      await SavePreferenceAsync("volume", newVolume);
+      Logger.LogDebug("Volume change completed");
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error in HandleVolumeChangeAsync");
+    }
   }
 
   private void OnVolumeChanged(double newVolume)
   {
+    Logger.LogDebug("OnVolumeChanged event triggered. Volume={Volume}", newVolume);
     _volume = newVolume;
     _ = HandleVolumeChangeAsync(newVolume); // Fire and forget
   }

@@ -4,17 +4,23 @@ window.pageTransitions = {
    * Initialize page transitions by listening to navigation events
    */
   initialize: function() {
-    // Listen for Blazor navigation events
-    Blazor.addEventListener('enhancedload', () => {
-      const content = document.querySelector('.page-transition');
-      if (content) {
-        // Trigger animation by adding and removing a class
-        content.classList.remove('page-transition-active');
-        // Force reflow
-        void content.offsetWidth;
-        content.classList.add('page-transition-active');
-      }
-    });
+    // Wait for Blazor to be available before adding event listener
+    if (typeof Blazor !== 'undefined' && Blazor.addEventListener) {
+      // Listen for Blazor navigation events
+      Blazor.addEventListener('enhancedload', () => {
+        const content = document.querySelector('.page-transition');
+        if (content) {
+          // Trigger animation by adding and removing a class
+          content.classList.remove('page-transition-active');
+          // Force reflow
+          void content.offsetWidth;
+          content.classList.add('page-transition-active');
+        }
+      });
+    } else {
+      // Retry after Blazor has loaded
+      setTimeout(() => window.pageTransitions.initialize(), 100);
+    }
   },
 
   /**

@@ -155,33 +155,53 @@
 
   protected override async Task OnInitializedAsync()
   {
-    Logger.LogInformation("MainLayout.OnInitializedAsync - Starting initialization");
+    try
+    {
+      Logger.LogInformation("MainLayout.OnInitializedAsync - Starting initialization");
 
-    // Load available sources and outputs
-    await LoadSourcesAsync();
-    await LoadOutputDevicesAsync();
+      // Load available sources and outputs
+      await LoadSourcesAsync();
+      await LoadOutputDevicesAsync();
 
-    // Update time immediately
-    _currentTime = DateTime.Now.ToString("HH:mm:ss");
-    Logger.LogInformation("MainLayout - Initial time set to {Time}", _currentTime);
+      // Update time immediately
+      _currentTime = DateTime.Now.ToString("HH:mm:ss");
+      Logger.LogInformation("MainLayout - Initial time set to {Time}", _currentTime);
 
-    // Start the clock timer using System.Timers.Timer (works reliably in Blazor Server)
-    _timer = new System.Timers.Timer(1000);
-    _timer.Elapsed += OnTimerElapsed;
-    _timer.AutoReset = true;
-    _timer.Start();
-    Logger.LogInformation("MainLayout - Timer started");
+      // Start the clock timer using System.Timers.Timer (works reliably in Blazor Server)
+      _timer = new System.Timers.Timer(1000);
+      _timer.Elapsed += OnTimerElapsed;
+      _timer.AutoReset = true;
+      _timer.Start();
+      Logger.LogInformation("MainLayout - Timer started, initialization complete");
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "CRITICAL: Exception in MainLayout.OnInitializedAsync - this will crash the Blazor circuit!");
+      throw;
+    }
   }
 
   private void OnTimerElapsed(object? sender, System.Timers.ElapsedEventArgs e)
   {
     _currentTime = DateTime.Now.ToString("HH:mm:ss");
-    
+
     try
     {
-      // Invoke state update on the UI thread
-      // Update system stats in background without blocking the clock update
-      InvokeAsync(async () =>
+      // Invoke state update on the UI thread - use fire-and-forget with error handling
+      _ = SafeInvokeAsync();
+    }
+    catch (ObjectDisposedException)
+    {
+      // Component was disposed, stop the timer
+      _timer?.Stop();
+    }
+  }
+
+  private async Task SafeInvokeAsync()
+  {
+    try
+    {
+      await InvokeAsync(async () =>
       {
         StateHasChanged();
         await UpdateSystemStatsAsync();
@@ -189,8 +209,11 @@
     }
     catch (ObjectDisposedException)
     {
-      // Component was disposed, stop the timer
       _timer?.Stop();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Error in timer update");
     }
   }
 

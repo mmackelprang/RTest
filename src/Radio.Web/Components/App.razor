@@ -1,3 +1,4 @@
+@using Microsoft.AspNetCore.Components.Web
 <!DOCTYPE html>
 <html lang="en">
 
@@ -9,11 +10,11 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link href="_content/MudBlazor/MudBlazor.min.css" rel="stylesheet" />
   <link href="css/custom-theme.css" rel="stylesheet" />
-  <HeadOutlet @rendermode="InteractiveServer" />
+  <HeadOutlet @rendermode="new InteractiveServerRenderMode(prerender: false)" />
 </head>
 
 <body>
-  <Routes @rendermode="InteractiveServer" />
+  <Routes @rendermode="new InteractiveServerRenderMode(prerender: false)" />
 
   <script src="_framework/blazor.web.js"></script>
   <script src="_content/MudBlazor/MudBlazor.min.js"></script>

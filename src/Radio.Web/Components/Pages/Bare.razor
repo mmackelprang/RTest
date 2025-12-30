@@ -1,0 +1,22 @@
+@page "/bare"
+@layout Radio.Web.Components.Layout.EmptyLayout
+
+<h1 style="color: white; background: #333; padding: 20px;">Bare Test Page (No Layout)</h1>
+
+<p style="color: white;">Time: @_time</p>
+<p style="color: white;">Count: @_count</p>
+
+<button @onclick="OnClick" style="padding: 20px; font-size: 24px;">
+    Click Me!
+</button>
+
+@code {
+    private string _time = DateTime.Now.ToString("HH:mm:ss.fff");
+    private int _count = 0;
+
+    private void OnClick()
+    {
+        _count++;
+        _time = DateTime.Now.ToString("HH:mm:ss.fff");
+    }
+}
