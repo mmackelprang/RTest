@@ -122,4 +122,70 @@ public class SourcesControllerTests : IClassFixture<WebApplicationFactory<Progra
     // Assert - Expect 501 until Phase 3 is completed
     Assert.Equal(System.Net.HttpStatusCode.NotImplemented, response.StatusCode);
   }
+
+  [Fact]
+  public async Task GetTTSEngines_ReturnsEngineList()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/sources/events/tts/engines");
+
+    // Assert
+    Assert.True(response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.NotImplemented,
+      $"Expected success or not implemented, got {response.StatusCode}");
+
+    if (response.IsSuccessStatusCode)
+    {
+      var engines = await response.Content.ReadFromJsonAsync<List<TTSEngineInfoDto>>();
+      Assert.NotNull(engines);
+    }
+  }
+
+  [Fact]
+  public async Task GetNotificationSounds_ReturnsFileList()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/sources/events/sounds");
+
+    // Assert
+    Assert.True(response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.NotImplemented,
+      $"Expected success or not implemented, got {response.StatusCode}");
+
+    if (response.IsSuccessStatusCode)
+    {
+      var sounds = await response.Content.ReadFromJsonAsync<List<NotificationSoundDto>>();
+      Assert.NotNull(sounds);
+    }
+  }
+
+  [Fact]
+  public async Task PlayTTSEvent_WithEmptyText_ReturnsBadRequest()
+  {
+    // Arrange
+    var request = new PlayTTSRequest
+    {
+      Text = ""
+    };
+
+    // Act
+    var response = await _client.PostAsJsonAsync("/api/sources/events/tts", request);
+
+    // Assert
+    Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+  }
+
+  [Fact]
+  public async Task PlayFileEvent_WithEmptyFilePath_ReturnsBadRequest()
+  {
+    // Arrange
+    var request = new PlayFileEventRequest
+    {
+      FilePath = ""
+    };
+
+    // Act
+    var response = await _client.PostAsJsonAsync("/api/sources/events/file", request);
+
+    // Assert
+    Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+  }
 }
