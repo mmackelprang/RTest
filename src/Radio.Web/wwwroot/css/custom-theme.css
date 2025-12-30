@@ -90,28 +90,20 @@ html, body {
   height: 100%;
 }
 
-/* LED Display Styles */
+/* Display Styles - Modern Clean Look */
 .led-display {
-  font-family: 'DSEG14Classic-Bold', monospace;
-  color: var(--led-amber);
-  text-shadow: 0 0 10px var(--led-amber),
-               0 0 20px var(--led-amber),
-               0 0 30px var(--led-amber);
-  letter-spacing: 0.1em;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-weight: 500;
+  color: var(--text-primary);
+  letter-spacing: 0.02em;
 }
 
 .led-display-cyan {
-  color: var(--led-cyan);
-  text-shadow: 0 0 10px var(--led-cyan),
-               0 0 20px var(--led-cyan),
-               0 0 30px var(--led-cyan);
+  color: var(--color-primary);
 }
 
 .led-display-green {
   color: var(--led-green);
-  text-shadow: 0 0 10px var(--led-green),
-               0 0 20px var(--led-green),
-               0 0 30px var(--led-green);
 }
 
 /* Touch Target Enforcement */

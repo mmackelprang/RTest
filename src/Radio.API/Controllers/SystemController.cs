@@ -215,7 +215,13 @@ public class SystemController : ControllerBase
           continue;
         }
 
-        var lines = System.IO.File.ReadAllLines(logFile);
+        // Read file with sharing to allow concurrent access (Serilog has the file open)
+        string[] lines;
+        using (var fs = new FileStream(logFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        using (var sr = new StreamReader(fs))
+        {
+          lines = sr.ReadToEnd().Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        }
         
         // Process lines in reverse order (newest first within each file)
         for (int i = lines.Length - 1; i >= 0 && logEntries.Count < limit; i--)

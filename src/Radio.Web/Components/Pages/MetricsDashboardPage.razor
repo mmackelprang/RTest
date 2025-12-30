@@ -228,10 +228,9 @@
     _loading = true;
     try
     {
-      await Task.WhenAll(
-        LoadAvailableMetricsAsync(),
-        LoadSnapshotsAsync()
-      );
+      // Must load keys first, then snapshots (snapshots depends on keys)
+      await LoadAvailableMetricsAsync();
+      await LoadSnapshotsAsync();
     }
     finally
     {

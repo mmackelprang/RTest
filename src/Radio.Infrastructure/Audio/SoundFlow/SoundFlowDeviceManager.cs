@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Radio.Core.Exceptions;
 using Radio.Core.Interfaces.Audio;
+using SoundFlow.Backends.MiniAudio;
 
 namespace Radio.Infrastructure.Audio.SoundFlow;
 
@@ -29,6 +30,15 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
   public SoundFlowDeviceManager(ILogger<SoundFlowDeviceManager> logger)
   {
     _logger = logger;
+
+    // Initialize device cache immediately
+    var (outputDevices, inputDevices) = EnumerateDevices();
+    _cachedOutputDevices = outputDevices;
+    _cachedInputDevices = inputDevices;
+
+    _logger.LogInformation(
+      "SoundFlowDeviceManager initialized with {OutputCount} output and {InputCount} input devices",
+      outputDevices.Count, inputDevices.Count);
   }
 
   /// <inheritdoc/>
@@ -216,28 +226,83 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
 
     try
     {
-      // Try to get devices from SoundFlow's AudioEngine if available
-      // For now, we'll create a default device as a fallback
-      // The actual enumeration happens when the AudioEngine is initialized
+      // Create a temporary MiniAudioEngine to enumerate devices
+      // This is disposed after enumeration
+      using var tempEngine = new MiniAudioEngine();
 
-      // Add a default output device if none exist
-      if (outputDevices.Count == 0)
+      _logger.LogDebug("Enumerating audio devices using MiniAudio backend...");
+
+      // Enumerate playback (output) devices
+      var playbackDevices = tempEngine.PlaybackDevices;
+      _logger.LogDebug("Found {Count} playback devices from MiniAudio", playbackDevices.Length);
+
+      for (int i = 0; i < playbackDevices.Length; i++)
       {
+        var device = playbackDevices[i];
+        var isDefault = i == 0; // First device is typically the default
+        var isUsb = device.Name.Contains("USB", StringComparison.OrdinalIgnoreCase);
+
         outputDevices.Add(new AudioDeviceInfo
         {
-          Id = "default",
-          Name = "Default Audio Output",
+          Id = $"playback-{i}",
+          Name = device.Name,
           Type = AudioDeviceType.Output,
-          IsDefault = true,
+          IsDefault = isDefault,
           MaxChannels = 2,
           SupportedSampleRates = [44100, 48000, 96000],
-          IsUSBDevice = false
+          IsUSBDevice = isUsb,
+          USBPort = isUsb ? ExtractUSBPort(device.Name) : null
         });
+
+        _logger.LogDebug("  Output device {Index}: {Name} (Default: {IsDefault}, USB: {IsUSB})",
+          i, device.Name, isDefault, isUsb);
       }
+
+      // Enumerate capture (input) devices
+      var captureDevices = tempEngine.CaptureDevices;
+      _logger.LogDebug("Found {Count} capture devices from MiniAudio", captureDevices.Length);
+
+      for (int i = 0; i < captureDevices.Length; i++)
+      {
+        var device = captureDevices[i];
+        var isDefault = i == 0; // First device is typically the default
+        var isUsb = device.Name.Contains("USB", StringComparison.OrdinalIgnoreCase);
+
+        inputDevices.Add(new AudioDeviceInfo
+        {
+          Id = $"capture-{i}",
+          Name = device.Name,
+          Type = AudioDeviceType.Input,
+          IsDefault = isDefault,
+          MaxChannels = 2,
+          SupportedSampleRates = [44100, 48000],
+          IsUSBDevice = isUsb,
+          USBPort = isUsb ? ExtractUSBPort(device.Name) : null
+        });
+
+        _logger.LogDebug("  Input device {Index}: {Name} (Default: {IsDefault}, USB: {IsUSB})",
+          i, device.Name, isDefault, isUsb);
+      }
+
+      // Always add virtual outputs for Google Cast and HTTP Stream
+      // These are software outputs managed by the application
+      outputDevices.Add(new AudioDeviceInfo
+      {
+        Id = "http-stream",
+        Name = "HTTP Audio Stream",
+        Type = AudioDeviceType.Output,
+        IsDefault = false,
+        MaxChannels = 2,
+        SupportedSampleRates = [48000],
+        IsUSBDevice = false
+      });
+
+      _logger.LogInformation("Device enumeration complete: {OutputCount} output, {InputCount} input devices",
+        outputDevices.Count, inputDevices.Count);
     }
     catch (Exception ex)
     {
-      _logger.LogWarning(ex, "Failed to enumerate audio devices, using defaults");
+      _logger.LogWarning(ex, "Failed to enumerate audio devices using MiniAudio, using fallback defaults");
 
       // Ensure we always have at least a default device
       outputDevices.Add(new AudioDeviceInfo
@@ -250,9 +315,38 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
         SupportedSampleRates = [44100, 48000],
         IsUSBDevice = false
       });
+
+      outputDevices.Add(new AudioDeviceInfo
+      {
+        Id = "http-stream",
+        Name = "HTTP Audio Stream",
+        Type = AudioDeviceType.Output,
+        IsDefault = false,
+        MaxChannels = 2,
+        SupportedSampleRates = [48000],
+        IsUSBDevice = false
+      });
     }
 
     return (outputDevices, inputDevices);
+  }
+
+  /// <summary>
+  /// Attempts to extract a USB port identifier from a device name.
+  /// </summary>
+  private static string? ExtractUSBPort(string deviceName)
+  {
+    // Common patterns: "USB Audio Device", "hw:1,0", "plughw:1,0"
+    // Try to extract card number as USB port identifier
+    var match = System.Text.RegularExpressions.Regex.Match(deviceName, @"hw:(\d+)|card\s*(\d+)|USB-(\d+)");
+    if (match.Success)
+    {
+      var cardNum = match.Groups[1].Success ? match.Groups[1].Value :
+                    match.Groups[2].Success ? match.Groups[2].Value :
+                    match.Groups[3].Value;
+      return $"USB-{cardNum}";
+    }
+    return null;
   }
 
   private void RaiseDeviceChangeEvents(

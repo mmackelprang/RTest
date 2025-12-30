@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build:*)",
+      "Bash(curl:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(taskkill:*)",
+      "Bash(dotnet restore:*)"
+    ]
+  }
+}

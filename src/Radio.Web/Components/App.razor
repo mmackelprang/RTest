@@ -1,5 +1,3 @@
-@inherits LayoutComponentBase
-
 <!DOCTYPE html>
 <html lang="en">
 
@@ -11,17 +9,12 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link href="_content/MudBlazor/MudBlazor.min.css" rel="stylesheet" />
   <link href="css/custom-theme.css" rel="stylesheet" />
-  <HeadOutlet />
+  <HeadOutlet @rendermode="InteractiveServer" />
 </head>
 
 <body>
-  <MudThemeProvider Theme="@_customTheme" IsDarkMode="true" />
-  <MudPopoverProvider />
-  <MudDialogProvider />
-  <MudSnackbarProvider />
-  
-  @Body
-  
+  <Routes @rendermode="InteractiveServer" />
+
   <script src="_framework/blazor.web.js"></script>
   <script src="_content/MudBlazor/MudBlazor.min.js"></script>
   <script src="js/fileDownload.js"></script>
@@ -30,28 +23,3 @@
 </body>
 
 </html>
-
-@code {
-  private readonly MudTheme _customTheme = new()
-  {
-    PaletteLight = new PaletteLight()
-    {
-      Primary = "#5CD4E8", // Electric cyan
-      Secondary = "#404045", // Dark slate
-      Background = "#2D2D30", // Deep charcoal
-      Surface = "#404045", // Dark slate
-      AppbarBackground = "#1E1E20", // Darker charcoal
-    },
-    PaletteDark = new PaletteDark()
-    {
-      Primary = "#5CD4E8", // Electric cyan
-      Secondary = "#404045", // Dark slate
-      Background = "#2D2D30", // Deep charcoal
-      Surface = "#404045", // Dark slate
-      AppbarBackground = "#1E1E20", // Darker charcoal
-      TextPrimary = "#F2F2F2", // Near white
-      TextSecondary = "#BFBFC2", // Light gray
-      Tertiary = "#8C8C8F", // Medium gray
-    }
-  };
-}

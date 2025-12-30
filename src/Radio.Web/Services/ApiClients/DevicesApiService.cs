@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Radio.Web.Models;
 
@@ -11,6 +12,10 @@ public class DevicesApiService
 {
   private readonly HttpClient _httpClient;
   private readonly ILogger<DevicesApiService> _logger;
+  private static readonly JsonSerializerOptions JsonOptions = new()
+  {
+    PropertyNameCaseInsensitive = true
+  };
 
   public DevicesApiService(HttpClient httpClient, ILogger<DevicesApiService> logger)
   {
@@ -22,7 +27,7 @@ public class DevicesApiService
   {
     try
     {
-      return await _httpClient.GetFromJsonAsync<List<AudioDeviceDto>>("/api/devices/output", cancellationToken);
+      return await _httpClient.GetFromJsonAsync<List<AudioDeviceDto>>("/api/devices/output", JsonOptions, cancellationToken);
     }
     catch (Exception ex)
     {
@@ -35,7 +40,7 @@ public class DevicesApiService
   {
     try
     {
-      return await _httpClient.GetFromJsonAsync<List<AudioDeviceDto>>("/api/devices/input", cancellationToken);
+      return await _httpClient.GetFromJsonAsync<List<AudioDeviceDto>>("/api/devices/input", JsonOptions, cancellationToken);
     }
     catch (Exception ex)
     {
@@ -48,7 +53,8 @@ public class DevicesApiService
   {
     try
     {
-      return await _httpClient.GetFromJsonAsync<AudioDeviceDto>("/api/devices/output/current", cancellationToken);
+      // Uses /output/default endpoint - returns the default/current output device
+      return await _httpClient.GetFromJsonAsync<AudioDeviceDto>("/api/devices/output/default", JsonOptions, cancellationToken);
     }
     catch (Exception ex)
     {
@@ -61,7 +67,9 @@ public class DevicesApiService
   {
     try
     {
-      var response = await _httpClient.PostAsync($"/api/devices/output/{deviceId}", null, cancellationToken);
+      // API expects JSON body with DeviceId property
+      var request = new { DeviceId = deviceId };
+      var response = await _httpClient.PostAsJsonAsync("/api/devices/output", request, cancellationToken);
       return response.IsSuccessStatusCode;
     }
     catch (Exception ex)
@@ -89,7 +97,7 @@ public class DevicesApiService
   {
     try
     {
-      return await _httpClient.GetFromJsonAsync<List<UsbPortDto>>("/api/devices/usb", cancellationToken);
+      return await _httpClient.GetFromJsonAsync<List<UsbPortDto>>("/api/devices/usb", JsonOptions, cancellationToken);
     }
     catch (Exception ex)
     {
@@ -102,7 +110,7 @@ public class DevicesApiService
   {
     try
     {
-      return await _httpClient.GetFromJsonAsync<UsbPortDto>($"/api/devices/usb/{portId}", cancellationToken);
+      return await _httpClient.GetFromJsonAsync<UsbPortDto>($"/api/devices/usb/{portId}", JsonOptions, cancellationToken);
     }
     catch (Exception ex)
     {

@@ -1,33 +1,80 @@
 @inherits LayoutComponentBase
 @inject SystemApiService SystemApi
 @inject SourcesApiService SourcesApi
+@inject DevicesApiService DevicesApi
 @inject NavigationManager NavigationManager
+@inject ILogger<MainLayout> Logger
 @implements IDisposable
+
+<MudThemeProvider Theme="@_customTheme" IsDarkMode="true" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
 
 <div class="layout-container" style="width: 1920px; height: 576px; overflow: hidden;">
   <!-- Top Navigation Bar - 60px height -->
   <MudAppBar Fixed="true" Elevation="1" Style="height: 60px;">
     <!-- LEFT: Date/Time Display -->
-    <div class="led-display" style="font-size: 24px; min-width: 300px; font-family: 'DSEG14Classic-Bold', monospace; color: oklch(0.8 0.18 75);">
+    <div style="font-size: 22px; min-width: 200px; font-family: 'Inter', sans-serif; font-weight: 500; color: #F2F2F2;">
       @_currentTime
     </div>
-    
-    <!-- Source Selector -->
+
+    <!-- Audio Source Selector -->
     <MudSpacer />
-    <MudSelect T="string" Value="@_selectedSourceId" ValueChanged="@HandleSourceChangeAsync" 
-               Label="Audio Source" Variant="Variant.Outlined" Dense="true" 
-               Style="min-width: 200px; margin-right: 24px;">
+    <MudSelect T="string" Value="@_selectedSourceId" ValueChanged="@HandleSourceChangeAsync"
+               Label="Audio Source" Variant="Variant.Outlined" Dense="true"
+               AnchorOrigin="Origin.BottomCenter" TransformOrigin="Origin.TopCenter"
+               Style="min-width: 180px; margin-right: 16px;">
+      @if (_availableSources.Count == 0)
+      {
+        <MudSelectItem Value="@string.Empty" Disabled="true">No sources available</MudSelectItem>
+      }
       @foreach (var source in _availableSources)
       {
         <MudSelectItem Value="@source.Id">@source.Name</MudSelectItem>
       }
     </MudSelect>
-    
-    <!-- CENTER: System Stats -->
-    <div class="led-display-cyan" style="font-size: 18px; display: flex; gap: 24px; font-family: 'DSEG14Classic-Regular', monospace; color: oklch(0.7 0.15 195);">
-      <span>CPU: @_cpuUsage%</span>
-      <span>RAM: @_ramUsage MB</span>
-      <span>Threads: @_threadCount</span>
+
+    <!-- Audio Output Selector -->
+    <MudSelect T="string" Value="@_selectedOutputId" ValueChanged="@HandleOutputChangeAsync"
+               Label="Audio Output" Variant="Variant.Outlined" Dense="true"
+               AnchorOrigin="Origin.BottomCenter" TransformOrigin="Origin.TopCenter"
+               Style="min-width: 200px; margin-right: 24px;">
+      @if (_availableOutputs.Count == 0)
+      {
+        <MudSelectItem Value="@string.Empty" Disabled="true">No outputs available</MudSelectItem>
+      }
+      @foreach (var output in _availableOutputs)
+      {
+        <MudSelectItem Value="@output.Id">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <MudIcon Icon="@GetOutputIcon(output)" Size="Size.Small" />
+            @output.Name
+          </div>
+        </MudSelectItem>
+      }
+    </MudSelect>
+
+    <!-- CENTER: System Stats with Icons -->
+    <div style="display: flex; align-items: center; gap: 20px; font-family: 'Inter', sans-serif; font-size: 14px; color: #BFBFC2;">
+      <MudTooltip Text="CPU Usage">
+        <div style="display: flex; align-items: center; gap: 4px;">
+          <MudIcon Icon="@Icons.Material.Filled.Memory" Size="Size.Small" />
+          <span>@_cpuUsage%</span>
+        </div>
+      </MudTooltip>
+      <MudTooltip Text="RAM Usage">
+        <div style="display: flex; align-items: center; gap: 4px;">
+          <MudIcon Icon="@Icons.Material.Filled.Storage" Size="Size.Small" />
+          <span>@_ramUsage MB</span>
+        </div>
+      </MudTooltip>
+      <MudTooltip Text="Thread Count">
+        <div style="display: flex; align-items: center; gap: 4px;">
+          <MudIcon Icon="@Icons.Material.Filled.AccountTree" Size="Size.Small" />
+          <span>@_threadCount</span>
+        </div>
+      </MudTooltip>
     </div>
     <MudSpacer />
     
@@ -69,84 +116,246 @@
   private string _cpuUsage = "0";
   private string _ramUsage = "0";
   private string _threadCount = "0";
-  private System.Threading.Timer? _timer;
+  private System.Timers.Timer? _timer;
   private List<AudioSourceDto> _availableSources = new();
+  private List<AudioDeviceDto> _availableOutputs = new();
   private string? _selectedSourceId = null;
-  
+  private string? _selectedOutputId = null;
+
   // Conditional navigation visibility
   private bool _showQueueNav = false;
   private bool _showSpotifyNav = false;
   private bool _showRadioNav = false;
   private bool _showFilesNav = false;
 
+  private readonly MudTheme _customTheme = new()
+  {
+    PaletteLight = new PaletteLight()
+    {
+      Primary = "#5CD4E8",
+      Secondary = "#404045",
+      Background = "#2D2D30",
+      Surface = "#404045",
+      AppbarBackground = "#1E1E20",
+    },
+    PaletteDark = new PaletteDark()
+    {
+      Primary = "#5CD4E8",
+      Secondary = "#404045",
+      Background = "#2D2D30",
+      Surface = "#404045",
+      AppbarBackground = "#1E1E20",
+      TextPrimary = "#F2F2F2",
+      TextSecondary = "#BFBFC2",
+      Tertiary = "#8C8C8F",
+    }
+  };
+
   protected override async Task OnInitializedAsync()
   {
-    // Load available sources
+    Logger.LogInformation("MainLayout.OnInitializedAsync - Starting initialization");
+
+    // Load available sources and outputs
     await LoadSourcesAsync();
-    
-    // Update time and system stats every second
-    _timer = new System.Threading.Timer(async _ =>
+    await LoadOutputDevicesAsync();
+
+    // Update time immediately
+    _currentTime = DateTime.Now.ToString("HH:mm:ss");
+    Logger.LogInformation("MainLayout - Initial time set to {Time}", _currentTime);
+
+    // Start the clock timer using System.Timers.Timer (works reliably in Blazor Server)
+    _timer = new System.Timers.Timer(1000);
+    _timer.Elapsed += async (sender, e) => await OnTimerElapsedAsync();
+    _timer.AutoReset = true;
+    _timer.Start();
+    Logger.LogInformation("MainLayout - Timer started");
+  }
+
+  private async Task OnTimerElapsedAsync()
+  {
+    _currentTime = DateTime.Now.ToString("HH:mm:ss");
+    await UpdateSystemStatsAsync();
+
+    try
     {
-      _currentTime = DateTime.Now.ToString("HH:mm:ss");
-      await UpdateSystemStatsAsync();
       await InvokeAsync(StateHasChanged);
-    }, null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
+    }
+    catch (ObjectDisposedException)
+    {
+      // Component was disposed, stop the timer
+      _timer?.Stop();
+    }
   }
 
   private async Task LoadSourcesAsync()
   {
     try
     {
+      Logger.LogInformation("Loading audio sources...");
       var sources = await SourcesApi.GetSourcesAsync();
-      if (sources != null)
+
+      if (sources != null && sources.Count > 0)
       {
+        Logger.LogInformation("Loaded {Count} audio sources: {Sources}",
+          sources.Count, string.Join(", ", sources.Select(s => s.Name)));
         _availableSources = sources;
-        
-        // Get primary source
-        var primary = await SourcesApi.GetPrimarySourceAsync();
-        if (primary != null)
+
+        // Try to get primary source, but don't fail if not available
+        try
         {
-          _selectedSourceId = primary.Id;
-          UpdateNavigationVisibility(primary);
+          var primary = await SourcesApi.GetPrimarySourceAsync();
+          if (primary != null)
+          {
+            _selectedSourceId = primary.Id;
+            UpdateNavigationVisibility(primary);
+            return;
+          }
+        }
+        catch (Exception ex)
+        {
+          Logger.LogDebug(ex, "No primary source active (expected when no source is playing)");
+        }
+
+        // No primary source active - auto-select Radio as the default source
+        Logger.LogInformation("No active primary source, auto-selecting Radio as default");
+        var radioSource = sources.FirstOrDefault(s => s.Type.Equals("Radio", StringComparison.OrdinalIgnoreCase));
+        if (radioSource != null)
+        {
+          var success = await SourcesApi.SwitchSourceAsync(radioSource.Type);
+          if (success)
+          {
+            _selectedSourceId = radioSource.Id;
+            UpdateNavigationVisibility(radioSource);
+            Logger.LogInformation("Auto-selected Radio source: {SourceType}", radioSource.Type);
+            return;
+          }
+          Logger.LogWarning("Failed to auto-select Radio source");
+        }
+
+        // Fallback to first source if Radio not available
+        if (sources.Count > 0)
+        {
+          _selectedSourceId = sources[0].Id;
+          UpdateNavigationVisibility(sources[0]);
         }
       }
+      else
+      {
+        Logger.LogWarning("No audio sources returned from API");
+      }
     }
-    catch (Exception)
+    catch (Exception ex)
     {
-      // Silently fail to avoid disrupting UI
+      Logger.LogError(ex, "Failed to load audio sources");
+    }
+  }
+
+  private async Task LoadOutputDevicesAsync()
+  {
+    try
+    {
+      Logger.LogInformation("Loading audio output devices...");
+      var outputs = await DevicesApi.GetOutputDevicesAsync();
+
+      if (outputs != null && outputs.Count > 0)
+      {
+        Logger.LogInformation("Loaded {Count} output devices: {Devices}",
+          outputs.Count, string.Join(", ", outputs.Select(d => d.Name)));
+        _availableOutputs = outputs;
+
+        // Try to get current output device
+        try
+        {
+          var current = await DevicesApi.GetCurrentOutputDeviceAsync();
+          if (current != null)
+          {
+            _selectedOutputId = current.Id;
+            return;
+          }
+        }
+        catch (Exception ex)
+        {
+          Logger.LogDebug(ex, "No current output device set");
+        }
+
+        // Default to first (usually the default device)
+        var defaultDevice = outputs.FirstOrDefault(d => d.IsDefault) ?? outputs[0];
+        _selectedOutputId = defaultDevice.Id;
+      }
+      else
+      {
+        Logger.LogWarning("No output devices returned from API");
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to load output devices");
     }
   }
 
   private async Task HandleSourceChangeAsync(string newSourceId)
   {
-    if (newSourceId == _selectedSourceId) return;
-    
+    if (string.IsNullOrEmpty(newSourceId) || newSourceId == _selectedSourceId) return;
+
     try
     {
-      var success = await SourcesApi.SwitchSourceAsync(newSourceId);
+      var source = _availableSources.FirstOrDefault(s => s.Id == newSourceId);
+      if (source == null) return;
+
+      var success = await SourcesApi.SwitchSourceAsync(source.Type);
       if (success)
       {
         _selectedSourceId = newSourceId;
-        var source = _availableSources.FirstOrDefault(s => s.Id == newSourceId);
-        if (source != null)
-        {
-          UpdateNavigationVisibility(source);
-        }
+        UpdateNavigationVisibility(source);
+        Logger.LogInformation("Switched to source: {SourceType}", source.Type);
       }
     }
-    catch (Exception)
+    catch (Exception ex)
     {
-      // Silently fail
+      Logger.LogError(ex, "Failed to switch audio source");
+    }
+  }
+
+  private async Task HandleOutputChangeAsync(string newOutputId)
+  {
+    if (string.IsNullOrEmpty(newOutputId) || newOutputId == _selectedOutputId) return;
+
+    try
+    {
+      var success = await DevicesApi.SetOutputDeviceAsync(newOutputId);
+      if (success)
+      {
+        _selectedOutputId = newOutputId;
+        Logger.LogInformation("Switched audio output to: {OutputId}", newOutputId);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to switch audio output");
     }
   }
 
   private void UpdateNavigationVisibility(AudioSourceDto source)
   {
-    // Show/hide navigation based on source type
     _showQueueNav = source.Type is "Spotify" or "FilePlayer" or "Queue";
     _showSpotifyNav = source.Type == "Spotify";
     _showRadioNav = source.Type == "Radio" || source.Type == "RTLSDRCore" || source.Type == "RF320";
     _showFilesNav = source.Type == "FilePlayer";
+  }
+
+  private static string GetOutputIcon(AudioDeviceDto device)
+  {
+    if (device.Name.Contains("Cast", StringComparison.OrdinalIgnoreCase) ||
+        device.Name.Contains("Chromecast", StringComparison.OrdinalIgnoreCase))
+      return Icons.Material.Filled.Cast;
+    if (device.Name.Contains("HTTP", StringComparison.OrdinalIgnoreCase) ||
+        device.Name.Contains("Stream", StringComparison.OrdinalIgnoreCase))
+      return Icons.Material.Filled.Stream;
+    if (device.IsUSBDevice)
+      return Icons.Material.Filled.Usb;
+    if (device.IsDefault)
+      return Icons.Material.Filled.VolumeUp;
+    return Icons.Material.Filled.Speaker;
   }
 
   private async Task UpdateSystemStatsAsync()
@@ -169,6 +378,7 @@
 
   public void Dispose()
   {
+    _timer?.Stop();
     _timer?.Dispose();
   }
 }

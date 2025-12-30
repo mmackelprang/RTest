@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 
 namespace Radio.Web.Services.ApiClients;
@@ -10,6 +11,10 @@ public class ConfigurationApiService
 {
   private readonly HttpClient _httpClient;
   private readonly ILogger<ConfigurationApiService> _logger;
+  private static readonly JsonSerializerOptions JsonOptions = new()
+  {
+    PropertyNameCaseInsensitive = true
+  };
 
   public ConfigurationApiService(HttpClient httpClient, ILogger<ConfigurationApiService> logger)
   {
@@ -21,7 +26,7 @@ public class ConfigurationApiService
   {
     try
     {
-      return await _httpClient.GetFromJsonAsync<Dictionary<string, object>>("/api/configuration", cancellationToken);
+      return await _httpClient.GetFromJsonAsync<Dictionary<string, object>>("/api/configuration", JsonOptions, cancellationToken);
     }
     catch (Exception ex)
     {
@@ -34,7 +39,10 @@ public class ConfigurationApiService
   {
     try
     {
-      return await _httpClient.GetFromJsonAsync<T>($"/api/configuration/{section}", cancellationToken);
+      _logger.LogDebug("Fetching configuration section: {Section}", section);
+      var result = await _httpClient.GetFromJsonAsync<T>($"/api/configuration/{section}", JsonOptions, cancellationToken);
+      _logger.LogDebug("Successfully loaded configuration section: {Section}", section);
+      return result;
     }
     catch (Exception ex)
     {

@@ -13,6 +13,7 @@ public sealed class SqliteMetricsRepository : IMetricsReader
 {
   private readonly ILogger<SqliteMetricsRepository> _logger;
   private readonly MetricsDbContext _dbContext;
+  private readonly SemaphoreSlim _transactionLock = new(1, 1);
 
   public SqliteMetricsRepository(
     ILogger<SqliteMetricsRepository> logger,
@@ -53,46 +54,55 @@ public sealed class SqliteMetricsRepository : IMetricsReader
       _ => throw new ArgumentException($"Invalid resolution: {resolution}")
     };
 
-    await using var transaction = _dbContext.Connection.BeginTransaction();
+    // Acquire lock to prevent concurrent transactions on the same connection
+    await _transactionLock.WaitAsync(ct);
     try
     {
-      foreach (var bucket in buckets)
+      await using var transaction = _dbContext.Connection.BeginTransaction();
+      try
       {
-        await using var cmd = _dbContext.Connection.CreateCommand();
-        cmd.Transaction = transaction;
+        foreach (var bucket in buckets)
+        {
+          await using var cmd = _dbContext.Connection.CreateCommand();
+          cmd.Transaction = transaction;
 
-        cmd.CommandText = $@"
-          INSERT INTO {tableName} 
-            (MetricId, Timestamp, ValueSum, ValueCount, ValueMin, ValueMax, ValueLast)
-          VALUES 
-            (@MetricId, @Timestamp, @ValueSum, @ValueCount, @ValueMin, @ValueMax, @ValueLast)
-          ON CONFLICT(MetricId, Timestamp) DO UPDATE SET
-            ValueSum = ValueSum + @ValueSum,
-            ValueCount = ValueCount + @ValueCount,
-            ValueMin = MIN(ValueMin, @ValueMin),
-            ValueMax = MAX(ValueMax, @ValueMax),
-            ValueLast = @ValueLast";
+          cmd.CommandText = $@"
+            INSERT INTO {tableName}
+              (MetricId, Timestamp, ValueSum, ValueCount, ValueMin, ValueMax, ValueLast)
+            VALUES
+              (@MetricId, @Timestamp, @ValueSum, @ValueCount, @ValueMin, @ValueMax, @ValueLast)
+            ON CONFLICT(MetricId, Timestamp) DO UPDATE SET
+              ValueSum = ValueSum + @ValueSum,
+              ValueCount = ValueCount + @ValueCount,
+              ValueMin = MIN(ValueMin, @ValueMin),
+              ValueMax = MAX(ValueMax, @ValueMax),
+              ValueLast = @ValueLast";
 
-        cmd.Parameters.AddWithValue("@MetricId", metricId);
-        cmd.Parameters.AddWithValue("@Timestamp", bucket.Timestamp);
-        cmd.Parameters.AddWithValue("@ValueSum", bucket.ValueSum);
-        cmd.Parameters.AddWithValue("@ValueCount", bucket.ValueCount);
-        cmd.Parameters.AddWithValue("@ValueMin", bucket.ValueMin ?? (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("@ValueMax", bucket.ValueMax ?? (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("@ValueLast", bucket.ValueLast ?? (object)DBNull.Value);
+          cmd.Parameters.AddWithValue("@MetricId", metricId);
+          cmd.Parameters.AddWithValue("@Timestamp", bucket.Timestamp);
+          cmd.Parameters.AddWithValue("@ValueSum", bucket.ValueSum);
+          cmd.Parameters.AddWithValue("@ValueCount", bucket.ValueCount);
+          cmd.Parameters.AddWithValue("@ValueMin", bucket.ValueMin ?? (object)DBNull.Value);
+          cmd.Parameters.AddWithValue("@ValueMax", bucket.ValueMax ?? (object)DBNull.Value);
+          cmd.Parameters.AddWithValue("@ValueLast", bucket.ValueLast ?? (object)DBNull.Value);
 
-        await cmd.ExecuteNonQueryAsync(ct);
+          await cmd.ExecuteNonQueryAsync(ct);
+        }
+
+        await transaction.CommitAsync(ct);
+        _logger.LogDebug("Saved {Count} buckets for metric {Key} at {Resolution} resolution",
+          buckets.Count(), key, resolution);
       }
-
-      await transaction.CommitAsync(ct);
-      _logger.LogDebug("Saved {Count} buckets for metric {Key} at {Resolution} resolution",
-        buckets.Count(), key, resolution);
+      catch (Exception ex)
+      {
+        await transaction.RollbackAsync(ct);
+        _logger.LogError(ex, "Failed to save metric buckets for {Key}", key);
+        throw;
+      }
     }
-    catch (Exception ex)
+    finally
     {
-      await transaction.RollbackAsync(ct);
-      _logger.LogError(ex, "Failed to save metric buckets for {Key}", key);
-      throw;
+      _transactionLock.Release();
     }
   }
 
@@ -277,49 +287,58 @@ public sealed class SqliteMetricsRepository : IMetricsReader
   {
     var cutoffUnix = cutoffTime.ToUnixTimeSeconds();
 
-    await using var transaction = _dbContext.Connection.BeginTransaction();
+    // Acquire lock to prevent concurrent transactions on the same connection
+    await _transactionLock.WaitAsync(ct);
     try
     {
-      await using var cmd = _dbContext.Connection.CreateCommand();
-      cmd.Transaction = transaction;
+      await using var transaction = _dbContext.Connection.BeginTransaction();
+      try
+      {
+        await using var cmd = _dbContext.Connection.CreateCommand();
+        cmd.Transaction = transaction;
 
-      // Aggregate minute data into hours
-      cmd.CommandText = @"
-        INSERT INTO MetricData_Hour (MetricId, Timestamp, ValueSum, ValueCount, ValueMin, ValueMax, ValueLast)
-        SELECT 
-          MetricId,
-          (Timestamp / 3600) * 3600 as HourTimestamp,
-          SUM(ValueSum) as ValueSum,
-          SUM(ValueCount) as ValueCount,
-          MIN(ValueMin) as ValueMin,
-          MAX(ValueMax) as ValueMax,
-          MAX(ValueLast) as ValueLast
-        FROM MetricData_Minute
-        WHERE Timestamp < @Cutoff
-        GROUP BY MetricId, HourTimestamp
-        ON CONFLICT(MetricId, Timestamp) DO UPDATE SET
-          ValueSum = ValueSum + excluded.ValueSum,
-          ValueCount = ValueCount + excluded.ValueCount,
-          ValueMin = MIN(ValueMin, excluded.ValueMin),
-          ValueMax = MAX(ValueMax, excluded.ValueMax),
-          ValueLast = excluded.ValueLast";
+        // Aggregate minute data into hours
+        cmd.CommandText = @"
+          INSERT INTO MetricData_Hour (MetricId, Timestamp, ValueSum, ValueCount, ValueMin, ValueMax, ValueLast)
+          SELECT
+            MetricId,
+            (Timestamp / 3600) * 3600 as HourTimestamp,
+            SUM(ValueSum) as ValueSum,
+            SUM(ValueCount) as ValueCount,
+            MIN(ValueMin) as ValueMin,
+            MAX(ValueMax) as ValueMax,
+            MAX(ValueLast) as ValueLast
+          FROM MetricData_Minute
+          WHERE Timestamp < @Cutoff
+          GROUP BY MetricId, HourTimestamp
+          ON CONFLICT(MetricId, Timestamp) DO UPDATE SET
+            ValueSum = ValueSum + excluded.ValueSum,
+            ValueCount = ValueCount + excluded.ValueCount,
+            ValueMin = MIN(ValueMin, excluded.ValueMin),
+            ValueMax = MAX(ValueMax, excluded.ValueMax),
+            ValueLast = excluded.ValueLast";
 
-      cmd.Parameters.AddWithValue("@Cutoff", cutoffUnix);
-      var aggregated = await cmd.ExecuteNonQueryAsync(ct);
+        cmd.Parameters.AddWithValue("@Cutoff", cutoffUnix);
+        var aggregated = await cmd.ExecuteNonQueryAsync(ct);
 
-      // Delete old minute data
-      cmd.CommandText = "DELETE FROM MetricData_Minute WHERE Timestamp < @Cutoff";
-      var deleted = await cmd.ExecuteNonQueryAsync(ct);
+        // Delete old minute data
+        cmd.CommandText = "DELETE FROM MetricData_Minute WHERE Timestamp < @Cutoff";
+        var deleted = await cmd.ExecuteNonQueryAsync(ct);
 
-      await transaction.CommitAsync(ct);
-      _logger.LogInformation("Rolled up {Aggregated} minute records into hours, deleted {Deleted} old records",
-        aggregated, deleted);
+        await transaction.CommitAsync(ct);
+        _logger.LogInformation("Rolled up {Aggregated} minute records into hours, deleted {Deleted} old records",
+          aggregated, deleted);
+      }
+      catch (Exception ex)
+      {
+        await transaction.RollbackAsync(ct);
+        _logger.LogError(ex, "Failed to rollup minute data to hours");
+        throw;
+      }
     }
-    catch (Exception ex)
+    finally
     {
-      await transaction.RollbackAsync(ct);
-      _logger.LogError(ex, "Failed to rollup minute data to hours");
-      throw;
+      _transactionLock.Release();
     }
   }
 
@@ -330,49 +349,58 @@ public sealed class SqliteMetricsRepository : IMetricsReader
   {
     var cutoffUnix = cutoffTime.ToUnixTimeSeconds();
 
-    await using var transaction = _dbContext.Connection.BeginTransaction();
+    // Acquire lock to prevent concurrent transactions on the same connection
+    await _transactionLock.WaitAsync(ct);
     try
     {
-      await using var cmd = _dbContext.Connection.CreateCommand();
-      cmd.Transaction = transaction;
+      await using var transaction = _dbContext.Connection.BeginTransaction();
+      try
+      {
+        await using var cmd = _dbContext.Connection.CreateCommand();
+        cmd.Transaction = transaction;
 
-      // Aggregate hour data into days
-      cmd.CommandText = @"
-        INSERT INTO MetricData_Day (MetricId, Timestamp, ValueSum, ValueCount, ValueMin, ValueMax, ValueLast)
-        SELECT 
-          MetricId,
-          (Timestamp / 86400) * 86400 as DayTimestamp,
-          SUM(ValueSum) as ValueSum,
-          SUM(ValueCount) as ValueCount,
-          MIN(ValueMin) as ValueMin,
-          MAX(ValueMax) as ValueMax,
-          MAX(ValueLast) as ValueLast
-        FROM MetricData_Hour
-        WHERE Timestamp < @Cutoff
-        GROUP BY MetricId, DayTimestamp
-        ON CONFLICT(MetricId, Timestamp) DO UPDATE SET
-          ValueSum = ValueSum + excluded.ValueSum,
-          ValueCount = ValueCount + excluded.ValueCount,
-          ValueMin = MIN(ValueMin, excluded.ValueMin),
-          ValueMax = MAX(ValueMax, excluded.ValueMax),
-          ValueLast = excluded.ValueLast";
+        // Aggregate hour data into days
+        cmd.CommandText = @"
+          INSERT INTO MetricData_Day (MetricId, Timestamp, ValueSum, ValueCount, ValueMin, ValueMax, ValueLast)
+          SELECT
+            MetricId,
+            (Timestamp / 86400) * 86400 as DayTimestamp,
+            SUM(ValueSum) as ValueSum,
+            SUM(ValueCount) as ValueCount,
+            MIN(ValueMin) as ValueMin,
+            MAX(ValueMax) as ValueMax,
+            MAX(ValueLast) as ValueLast
+          FROM MetricData_Hour
+          WHERE Timestamp < @Cutoff
+          GROUP BY MetricId, DayTimestamp
+          ON CONFLICT(MetricId, Timestamp) DO UPDATE SET
+            ValueSum = ValueSum + excluded.ValueSum,
+            ValueCount = ValueCount + excluded.ValueCount,
+            ValueMin = MIN(ValueMin, excluded.ValueMin),
+            ValueMax = MAX(ValueMax, excluded.ValueMax),
+            ValueLast = excluded.ValueLast";
 
-      cmd.Parameters.AddWithValue("@Cutoff", cutoffUnix);
-      var aggregated = await cmd.ExecuteNonQueryAsync(ct);
+        cmd.Parameters.AddWithValue("@Cutoff", cutoffUnix);
+        var aggregated = await cmd.ExecuteNonQueryAsync(ct);
 
-      // Delete old hour data
-      cmd.CommandText = "DELETE FROM MetricData_Hour WHERE Timestamp < @Cutoff";
-      var deleted = await cmd.ExecuteNonQueryAsync(ct);
+        // Delete old hour data
+        cmd.CommandText = "DELETE FROM MetricData_Hour WHERE Timestamp < @Cutoff";
+        var deleted = await cmd.ExecuteNonQueryAsync(ct);
 
-      await transaction.CommitAsync(ct);
-      _logger.LogInformation("Rolled up {Aggregated} hour records into days, deleted {Deleted} old records",
-        aggregated, deleted);
+        await transaction.CommitAsync(ct);
+        _logger.LogInformation("Rolled up {Aggregated} hour records into days, deleted {Deleted} old records",
+          aggregated, deleted);
+      }
+      catch (Exception ex)
+      {
+        await transaction.RollbackAsync(ct);
+        _logger.LogError(ex, "Failed to rollup hour data to days");
+        throw;
+      }
     }
-    catch (Exception ex)
+    finally
     {
-      await transaction.RollbackAsync(ct);
-      _logger.LogError(ex, "Failed to rollup hour data to days");
-      throw;
+      _transactionLock.Release();
     }
   }
 

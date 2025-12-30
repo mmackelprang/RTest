@@ -2,8 +2,24 @@ using MudBlazor;
 using MudBlazor.Services;
 using Radio.Web.Services.ApiClients;
 using Radio.Web.Services.Hub;
+using Serilog;
+
+// Configure Serilog for Web app
+Log.Logger = new LoggerConfiguration()
+  .MinimumLevel.Debug()
+  .MinimumLevel.Override("Microsoft", Serilog.Events.LogEventLevel.Information)
+  .MinimumLevel.Override("Microsoft.AspNetCore", Serilog.Events.LogEventLevel.Warning)
+  .Enrich.FromLogContext()
+  .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}")
+  .WriteTo.File(
+    "logs/web-.txt",
+    rollingInterval: RollingInterval.Day,
+    outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}")
+  .CreateLogger();
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Host.UseSerilog();
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
@@ -24,70 +40,146 @@ builder.Services.AddMudServices(config =>
 // Register API client services with retry policies (Phase 1 Task 1.2)
 var apiBaseUrl = builder.Configuration["ApiBaseUrl"] ?? "http://localhost:5000";
 
+// Configure HttpClientHandler to bypass SSL validation in development
+void ConfigureHttpClientHandler(HttpMessageHandler handler)
+{
+  if (handler is HttpClientHandler clientHandler && builder.Environment.IsDevelopment())
+  {
+    clientHandler.ServerCertificateCustomValidationCallback =
+      HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+  }
+}
+
 builder.Services.AddHttpClient<AudioApiService>(client =>
 {
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
+})
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
 });
 
 builder.Services.AddHttpClient<SystemApiService>(client =>
 {
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
+})
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
 });
 
 builder.Services.AddHttpClient<QueueApiService>(client =>
 {
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
+})
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
 });
 
 builder.Services.AddHttpClient<SourcesApiService>(client =>
 {
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
+})
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
 });
 
 builder.Services.AddHttpClient<ConfigurationApiService>(client =>
 {
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
+})
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
 });
 
 builder.Services.AddHttpClient<DevicesApiService>(client =>
 {
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
+})
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
 });
 
 builder.Services.AddHttpClient<MetricsApiService>(client =>
 {
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
+})
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
 });
 
 builder.Services.AddHttpClient<FileApiService>(client =>
 {
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
+})
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
 });
 
 builder.Services.AddHttpClient<PlayHistoryApiService>(client =>
 {
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
+})
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
 });
 
 builder.Services.AddHttpClient<SpotifyApiService>(client =>
 {
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
+})
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
 });
 
 builder.Services.AddHttpClient<RadioApiService>(client =>
 {
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
+})
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
 });
 
 // All 11 API client services are now registered!
@@ -114,6 +206,37 @@ app.UseAntiforgery();
 app.MapRazorComponents<Radio.Web.Components.App>()
   .AddInteractiveServerRenderMode();
 
-app.Run();
+// Print startup header to console
+var logDirectory = Path.GetFullPath("logs");
+Console.WriteLine();
+Console.WriteLine("╔══════════════════════════════════════════════════════════════════╗");
+Console.WriteLine("║            RADIO CONSOLE WEB - Starting Up                       ║");
+Console.WriteLine("╚══════════════════════════════════════════════════════════════════╝");
+Console.WriteLine($"  API URL: {apiBaseUrl}");
+Console.WriteLine($"  Log files: {logDirectory}");
+Console.WriteLine($"  Environment: {app.Environment.EnvironmentName}");
+Console.WriteLine();
+
+// Log startup header to file
+Log.Information("════════════════════════════════════════════════════════════════════");
+Log.Information("  RADIO CONSOLE WEB - Application Starting");
+Log.Information("  Started at: {Timestamp}", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"));
+Log.Information("  API URL: {ApiUrl}", apiBaseUrl);
+Log.Information("  Environment: {Environment}", app.Environment.EnvironmentName);
+Log.Information("  Log directory: {LogPath}", logDirectory);
+Log.Information("════════════════════════════════════════════════════════════════════");
+
+try
+{
+  app.Run();
+}
+catch (Exception ex)
+{
+  Log.Fatal(ex, "Application terminated unexpectedly");
+}
+finally
+{
+  Log.CloseAndFlush();
+}
 
 public partial class Program { }

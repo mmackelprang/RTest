@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Radio.Web.Models;
 
 // Audio API DTOs
@@ -51,24 +53,87 @@ public record QueueItemDto(
 );
 
 // Sources API DTOs
-public record AudioSourceDto(
-  string Id,
-  string Name,
-  string Type,
-  string Category,
-  string State,
-  float Volume,
-  Dictionary<string, string>? Metadata
-);
+public class AvailableSourcesDto
+{
+  [JsonPropertyName("primarySources")]
+  public List<string> PrimarySources { get; set; } = [];
+
+  [JsonPropertyName("activeSourceType")]
+  public string? ActiveSourceType { get; set; }
+
+  [JsonPropertyName("activeSources")]
+  public List<AudioSourceDto> ActiveSources { get; set; } = [];
+}
+
+public class AudioSourceDto
+{
+  [JsonPropertyName("id")]
+  public string Id { get; set; } = string.Empty;
+
+  [JsonPropertyName("name")]
+  public string Name { get; set; } = string.Empty;
+
+  [JsonPropertyName("type")]
+  public string Type { get; set; } = string.Empty;
+
+  [JsonPropertyName("category")]
+  public string Category { get; set; } = string.Empty;
+
+  [JsonPropertyName("state")]
+  public string State { get; set; } = string.Empty;
+
+  [JsonPropertyName("volume")]
+  public float Volume { get; set; }
+
+  [JsonPropertyName("isSeekable")]
+  public bool IsSeekable { get; set; }
+
+  [JsonPropertyName("metadata")]
+  public Dictionary<string, object>? Metadata { get; set; }
+
+  [JsonPropertyName("isRadio")]
+  public bool IsRadio { get; set; }
+
+  [JsonPropertyName("isStreaming")]
+  public bool IsStreaming { get; set; }
+
+  [JsonPropertyName("hasQueue")]
+  public bool HasQueue { get; set; }
+
+  [JsonPropertyName("capabilities")]
+  public Dictionary<string, bool>? Capabilities { get; set; }
+}
 
 // Devices API DTOs
-public record AudioDeviceDto(
-  string Id,
-  string Name,
-  string Type,
-  bool IsDefault,
-  bool IsActive
-);
+public class AudioDeviceDto
+{
+  [JsonPropertyName("id")]
+  public string Id { get; set; } = string.Empty;
+
+  [JsonPropertyName("name")]
+  public string Name { get; set; } = string.Empty;
+
+  [JsonPropertyName("type")]
+  public string Type { get; set; } = string.Empty;
+
+  [JsonPropertyName("isDefault")]
+  public bool IsDefault { get; set; }
+
+  [JsonPropertyName("isActive")]
+  public bool IsActive { get; set; }
+
+  [JsonPropertyName("isUSBDevice")]
+  public bool IsUSBDevice { get; set; }
+
+  [JsonPropertyName("usbPort")]
+  public string? USBPort { get; set; }
+
+  [JsonPropertyName("maxChannels")]
+  public int MaxChannels { get; set; }
+
+  [JsonPropertyName("supportedSampleRates")]
+  public int[]? SupportedSampleRates { get; set; }
+}
 
 public record UsbPortDto(
   string Id,
@@ -255,6 +320,55 @@ public record RadioDeviceDto(
   bool IsAvailable,
   Dictionary<string, string>? Capabilities
 );
+
+// Configuration API DTOs
+public class AudioConfigurationDto
+{
+  public string? DefaultSource { get; set; }
+  public int DuckingPercentage { get; set; }
+  public string? DuckingPolicy { get; set; }
+  public int DuckingAttackMs { get; set; }
+  public int DuckingReleaseMs { get; set; }
+}
+
+public class VisualizerConfigurationDto
+{
+  public int FFTSize { get; set; }
+  public int WaveformSampleCount { get; set; }
+  public int PeakHoldTimeMs { get; set; }
+  public bool ApplyWindowFunction { get; set; }
+  public float SpectrumSmoothing { get; set; }
+}
+
+public class OutputConfigurationDto
+{
+  public LocalOutputSettingsDto? Local { get; set; }
+  public HttpStreamSettingsDto? HttpStream { get; set; }
+  public GoogleCastSettingsDto? GoogleCast { get; set; }
+}
+
+public class LocalOutputSettingsDto
+{
+  public bool Enabled { get; set; }
+  public string? PreferredDeviceId { get; set; }
+  public float DefaultVolume { get; set; }
+}
+
+public class HttpStreamSettingsDto
+{
+  public bool Enabled { get; set; }
+  public int Port { get; set; }
+  public string? EndpointPath { get; set; }
+  public int SampleRate { get; set; }
+  public int Channels { get; set; }
+}
+
+public class GoogleCastSettingsDto
+{
+  public bool Enabled { get; set; }
+  public int DiscoveryTimeoutSeconds { get; set; }
+  public float DefaultVolume { get; set; }
+}
 
 // System API DTOs
 public record SystemStatsDto(

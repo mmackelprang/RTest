@@ -204,3 +204,29 @@ public class DuckingStateDto
   /// </summary>
   public int ActiveEventCount { get; set; }
 }
+
+/// <summary>
+/// Represents a USB port and its reservation status.
+/// </summary>
+public class UsbPortDto
+{
+  /// <summary>
+  /// Gets or sets the USB port identifier.
+  /// </summary>
+  public string Id { get; set; } = string.Empty;
+
+  /// <summary>
+  /// Gets or sets the human-readable port name.
+  /// </summary>
+  public string Name { get; set; } = string.Empty;
+
+  /// <summary>
+  /// Gets or sets whether this port is currently reserved by a source.
+  /// </summary>
+  public bool IsReserved { get; set; }
+
+  /// <summary>
+  /// Gets or sets the source ID that has reserved this port, if any.
+  /// </summary>
+  public string? ReservedBy { get; set; }
+}

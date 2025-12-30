@@ -153,6 +153,46 @@ public class DevicesController : ControllerBase
   }
 
   /// <summary>
+  /// Gets all known USB ports and their reservation status.
+  /// </summary>
+  /// <returns>List of USB ports.</returns>
+  [HttpGet("usb")]
+  [ProducesResponseType(typeof(List<UsbPortDto>), StatusCodes.Status200OK)]
+  public ActionResult<List<UsbPortDto>> GetUsbPorts()
+  {
+    try
+    {
+      // Get USB port info from the device manager's reservations
+      var reservations = (_deviceManager as Radio.Infrastructure.Audio.SoundFlow.SoundFlowDeviceManager)?
+        .GetUSBPortReservations() ?? new Dictionary<string, string>();
+
+      // Define known USB ports (on Raspberry Pi, these are the common USB audio device paths)
+      var knownPorts = new[]
+      {
+        ("USB-1", "USB Port 1 (Top Left)"),
+        ("USB-2", "USB Port 2 (Top Right)"),
+        ("USB-3", "USB Port 3 (Bottom Left)"),
+        ("USB-4", "USB Port 4 (Bottom Right)")
+      };
+
+      var usbPorts = knownPorts.Select(p => new UsbPortDto
+      {
+        Id = p.Item1,
+        Name = p.Item2,
+        IsReserved = reservations.ContainsKey(p.Item1),
+        ReservedBy = reservations.TryGetValue(p.Item1, out var sourceId) ? sourceId : null
+      }).ToList();
+
+      return Ok(usbPorts);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error getting USB ports");
+      return StatusCode(500, new { error = "Failed to get USB ports" });
+    }
+  }
+
+  /// <summary>
   /// Gets USB port reservations.
   /// </summary>
   /// <returns>Map of USB port to source ID reservations.</returns>

@@ -45,6 +45,22 @@ builder.Services.AddSwaggerGen(options =>
   }
 });
 
+// Add CORS for development
+builder.Services.AddCors(options =>
+{
+  options.AddPolicy("Development", policy =>
+  {
+    policy.WithOrigins(
+        "http://localhost:5002",
+        "https://localhost:5003",
+        "http://localhost:5000",
+        "https://localhost:5001")
+      .AllowAnyMethod()
+      .AllowAnyHeader()
+      .AllowCredentials();
+  });
+});
+
 // Add SignalR
 builder.Services.AddSignalR();
 
@@ -85,13 +101,26 @@ if (app.Environment.IsDevelopment())
   });
 }
 
+// Add CORS middleware (must be early in pipeline)
+if (app.Environment.IsDevelopment())
+{
+  app.UseCors("Development");
+}
+
+// Add Serilog request logging for better visibility
+app.UseSerilogRequestLogging();
+
 // Add API metrics middleware (before other middleware)
 app.UseApiMetrics();
 
 // Add audio stream middleware
 app.UseAudioStream();
 
-app.UseHttpsRedirection();
+// Only redirect to HTTPS in production (avoids SSL certificate issues in dev)
+if (!app.Environment.IsDevelopment())
+{
+  app.UseHttpsRedirection();
+}
 
 app.UseAuthorization();
 
@@ -104,7 +133,26 @@ app.MapHub<AudioStateHub>("/hubs/audio");
 
 try
 {
-  Log.Information("Starting Radio Console API");
+  // Get log file path from configuration
+  var logPath = builder.Configuration["Serilog:WriteTo:1:Args:path"] ?? "./logs/radio-.txt";
+  var logDirectory = Path.GetDirectoryName(Path.GetFullPath(logPath.Replace(".txt", DateTime.Now.ToString("yyyyMMdd") + ".txt")));
+
+  // Print startup header to console
+  Console.WriteLine();
+  Console.WriteLine("╔══════════════════════════════════════════════════════════════════╗");
+  Console.WriteLine("║            RADIO CONSOLE API - Starting Up                       ║");
+  Console.WriteLine("╚══════════════════════════════════════════════════════════════════╝");
+  Console.WriteLine($"  Log files: {logDirectory}");
+  Console.WriteLine($"  Environment: {app.Environment.EnvironmentName}");
+  Console.WriteLine();
+
+  // Log startup header to file
+  Log.Information("════════════════════════════════════════════════════════════════════");
+  Log.Information("  RADIO CONSOLE API - Application Starting");
+  Log.Information("  Started at: {Timestamp}", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"));
+  Log.Information("  Environment: {Environment}", app.Environment.EnvironmentName);
+  Log.Information("  Log directory: {LogPath}", logDirectory);
+  Log.Information("════════════════════════════════════════════════════════════════════");
   Log.Information("Swagger UI available at /swagger");
   Log.Information("SignalR hubs available at /hubs/visualization and /hubs/audio");
   Log.Information("Audio stream available at /stream/audio");

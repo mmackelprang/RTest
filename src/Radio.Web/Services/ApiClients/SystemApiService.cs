@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Radio.Web.Models;
 
@@ -11,6 +12,10 @@ public class SystemApiService
 {
   private readonly HttpClient _httpClient;
   private readonly ILogger<SystemApiService> _logger;
+  private static readonly JsonSerializerOptions JsonOptions = new()
+  {
+    PropertyNameCaseInsensitive = true
+  };
 
   public SystemApiService(HttpClient httpClient, ILogger<SystemApiService> logger)
   {
@@ -22,7 +27,7 @@ public class SystemApiService
   {
     try
     {
-      return await _httpClient.GetFromJsonAsync<SystemStatsDto>("/api/system/stats", cancellationToken);
+      return await _httpClient.GetFromJsonAsync<SystemStatsDto>("/api/system/stats", JsonOptions, cancellationToken);
     }
     catch (Exception ex)
     {
@@ -44,7 +49,7 @@ public class SystemApiService
         queryParams.Add($"maxAgeMinutes={maxAgeMinutes.Value}");
 
       var query = queryParams.Count > 0 ? "?" + string.Join("&", queryParams) : "";
-      return await _httpClient.GetFromJsonAsync<SystemLogsResponse>($"/api/system/logs{query}", cancellationToken);
+      return await _httpClient.GetFromJsonAsync<SystemLogsResponse>($"/api/system/logs{query}", JsonOptions, cancellationToken);
     }
     catch (Exception ex)
     {
