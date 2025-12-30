@@ -22,8 +22,16 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseSerilog();
 
 // Add services to the container.
+// Note: In .NET 8 Blazor Web Apps, use AddRazorComponents() only - NOT AddServerSideBlazor()
 builder.Services.AddRazorComponents()
-  .AddInteractiveServerComponents();
+  .AddInteractiveServerComponents(options =>
+  {
+    // Enable detailed circuit errors in development
+    if (builder.Environment.IsDevelopment())
+    {
+      options.DetailedErrors = true;
+    }
+  });
 
 // Add MudBlazor services
 builder.Services.AddMudServices(config =>

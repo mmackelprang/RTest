@@ -3,12 +3,15 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Factories;
+using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Outputs;
 using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Infrastructure.Audio.Visualization;
+using Radio.Infrastructure.Configuration.Abstractions;
 
 namespace Radio.Infrastructure.DependencyInjection;
 
@@ -35,6 +38,28 @@ public static class AudioServiceExtensions
     services.Configure<AudioPreferences>(
       configuration.GetSection(AudioPreferences.SectionName));
 
+    // Bind Spotify configuration
+    services.Configure<SpotifySecrets>(
+      configuration.GetSection(SpotifySecrets.SectionName));
+    services.Configure<SpotifyPreferences>(
+      configuration.GetSection(SpotifyPreferences.SectionName));
+
+    // Bind FilePlayer preferences
+    services.Configure<FilePlayerPreferences>(
+      configuration.GetSection(FilePlayerPreferences.SectionName));
+
+    // Bind Device options (for Vinyl, USB, etc.)
+    services.Configure<DeviceOptions>(
+      configuration.GetSection(DeviceOptions.SectionName));
+
+    // Bind Generic source preferences
+    services.Configure<GenericSourcePreferences>(
+      configuration.GetSection(GenericSourcePreferences.SectionName));
+
+    // Bind Radio options
+    services.Configure<RadioOptions>(
+      configuration.GetSection(RadioOptions.SectionName));
+
     // Register the master mixer (singleton to maintain state)
     services.AddSingleton<SoundFlowMasterMixer>();
     services.AddSingleton<IMasterMixer>(sp => sp.GetRequiredService<SoundFlowMasterMixer>());
@@ -58,6 +83,10 @@ public static class AudioServiceExtensions
     // Register radio factory (singleton for device management)
     services.AddSingleton<RadioFactory>();
     services.AddSingleton<IRadioFactory>(sp => sp.GetRequiredService<RadioFactory>());
+
+    // Register audio manager (singleton to maintain state)
+    services.AddSingleton<AudioManager>();
+    services.AddSingleton<IAudioManager>(sp => sp.GetRequiredService<AudioManager>());
 
     // Register event audio source services
     services.AddEventAudioSources(configuration);

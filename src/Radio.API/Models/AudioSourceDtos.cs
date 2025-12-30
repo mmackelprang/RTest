@@ -230,3 +230,76 @@ public class UsbPortDto
   /// </summary>
   public string? ReservedBy { get; set; }
 }
+
+/// <summary>
+/// Information about a TTS engine.
+/// </summary>
+public class TTSEngineInfoDto
+{
+  /// <summary>
+  /// Gets or sets the engine type.
+  /// </summary>
+  public string Engine { get; set; } = string.Empty;
+
+  /// <summary>
+  /// Gets or sets the engine name.
+  /// </summary>
+  public string Name { get; set; } = string.Empty;
+
+  /// <summary>
+  /// Gets or sets whether the engine is available.
+  /// </summary>
+  public bool IsAvailable { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether the engine requires an API key.
+  /// </summary>
+  public bool RequiresApiKey { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether the engine works offline.
+  /// </summary>
+  public bool IsOffline { get; set; }
+}
+
+/// <summary>
+/// Request to play a TTS event.
+/// </summary>
+public class PlayTTSRequest
+{
+  /// <summary>
+  /// Gets or sets the text to speak.
+  /// </summary>
+  public string Text { get; set; } = string.Empty;
+
+  /// <summary>
+  /// Gets or sets the TTS engine to use (ESpeak, Google, Azure).
+  /// </summary>
+  public string? Engine { get; set; }
+
+  /// <summary>
+  /// Gets or sets the voice to use.
+  /// </summary>
+  public string? Voice { get; set; }
+
+  /// <summary>
+  /// Gets or sets the speaking speed (0.5-2.0, default 1.0).
+  /// </summary>
+  public float? Speed { get; set; }
+
+  /// <summary>
+  /// Gets or sets the pitch adjustment (0.5-2.0, default 1.0).
+  /// </summary>
+  public float? Pitch { get; set; }
+}
+
+/// <summary>
+/// Request to play an audio file event.
+/// </summary>
+public class PlayFileEventRequest
+{
+  /// <summary>
+  /// Gets or sets the path to the audio file.
+  /// </summary>
+  public string FilePath { get; set; } = string.Empty;
+}

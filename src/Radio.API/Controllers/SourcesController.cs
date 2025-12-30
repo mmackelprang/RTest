@@ -3,6 +3,7 @@ using Radio.API.Extensions;
 using Radio.API.Mappers;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.Services;
 
 namespace Radio.API.Controllers;
 
@@ -17,6 +18,9 @@ public class SourcesController : ControllerBase
   private readonly ILogger<SourcesController> _logger;
   private readonly IAudioEngine _audioEngine;
   private readonly IAudioManager? _audioManager;
+  private readonly ITTSFactory? _ttsFactory;
+  private readonly AudioFileEventSourceFactory? _audioFileFactory;
+  private readonly IDuckingService? _duckingService;
 
   /// <summary>
   /// Initializes a new instance of the SourcesController.
@@ -24,11 +28,17 @@ public class SourcesController : ControllerBase
   public SourcesController(
     ILogger<SourcesController> logger,
     IAudioEngine audioEngine,
-    IAudioManager? audioManager = null)
+    IAudioManager? audioManager = null,
+    ITTSFactory? ttsFactory = null,
+    AudioFileEventSourceFactory? audioFileFactory = null,
+    IDuckingService? duckingService = null)
   {
     _logger = logger;
     _audioEngine = audioEngine;
     _audioManager = audioManager;
+    _ttsFactory = ttsFactory;
+    _audioFileFactory = audioFileFactory;
+    _duckingService = duckingService;
   }
 
   /// <summary>
@@ -157,24 +167,56 @@ public class SourcesController : ControllerBase
       // Get the mixer and find the requested source
       var mixer = _audioEngine.GetMasterMixer();
       var activeSources = mixer.GetActiveSources();
-      
+
       // Look for an existing source of the requested type
       var targetSource = activeSources.FirstOrDefault(s => s.Type == sourceType);
-      
+
+      // If source not found in mixer, try to create it via AudioManager
       if (targetSource == null)
       {
-        return BadRequest(new
+        _logger.LogInformation("Source {SourceType} not in mixer, attempting to create", sourceType);
+
+        // Use AudioManager to create the source
+        if (_audioManager is Radio.Infrastructure.Audio.Services.AudioManager audioManager)
         {
-          error = $"Source type {sourceType} is not available or not configured",
-          availableSources = activeSources.Select(s => s.Type.ToString()).ToList()
-        });
+          try
+          {
+            targetSource = await audioManager.GetOrCreateSourceAsync(sourceType);
+          }
+          catch (NotSupportedException ex)
+          {
+            _logger.LogWarning(ex, "Source type {SourceType} not supported", sourceType);
+            return StatusCode(501, new
+            {
+              message = $"Source type {sourceType} is not yet implemented",
+              supportedSources = new[] { "Radio" }
+            });
+          }
+          catch (Exception ex)
+          {
+            _logger.LogError(ex, "Failed to create source: {SourceType}", sourceType);
+            return StatusCode(500, new
+            {
+              error = $"Failed to create source type {sourceType}",
+              details = ex.Message
+            });
+          }
+        }
+        else
+        {
+          return BadRequest(new
+          {
+            error = $"Source type {sourceType} is not available or not configured",
+            availableSources = activeSources.Select(s => s.Type.ToString()).ToList()
+          });
+        }
       }
 
       // Switch to the requested source
       try
       {
         await _audioManager.SwitchSourceAsync(targetSource);
-        
+
         _logger.LogInformation(
           "Successfully switched to source: {SourceType}",
           sourceType);
@@ -220,6 +262,174 @@ public class SourcesController : ControllerBase
     {
       _logger.LogError(ex, "Error getting event sources");
       return StatusCode(500, new { error = "Failed to get event sources" });
+    }
+  }
+
+  /// <summary>
+  /// Gets available TTS engines.
+  /// </summary>
+  /// <returns>List of available TTS engines.</returns>
+  [HttpGet("events/tts/engines")]
+  [ProducesResponseType(typeof(List<TTSEngineInfoDto>), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status501NotImplemented)]
+  public ActionResult<List<TTSEngineInfoDto>> GetTTSEngines()
+  {
+    if (_ttsFactory == null)
+    {
+      return StatusCode(501, new { error = "TTS service not available" });
+    }
+
+    var engines = _ttsFactory.AvailableEngines.Select(e => new TTSEngineInfoDto
+    {
+      Engine = e.Engine.ToString(),
+      Name = e.Name,
+      IsAvailable = e.IsAvailable,
+      RequiresApiKey = e.RequiresApiKey,
+      IsOffline = e.IsOffline
+    }).ToList();
+
+    return Ok(engines);
+  }
+
+  /// <summary>
+  /// Gets available notification sounds.
+  /// </summary>
+  /// <param name="subdirectory">Optional subdirectory to search in.</param>
+  /// <returns>List of available audio file paths.</returns>
+  [HttpGet("events/sounds")]
+  [ProducesResponseType(typeof(List<string>), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status501NotImplemented)]
+  public ActionResult<List<string>> GetNotificationSounds([FromQuery] string? subdirectory = null)
+  {
+    if (_audioFileFactory == null)
+    {
+      return StatusCode(501, new { error = "Audio file service not available" });
+    }
+
+    var sounds = _audioFileFactory.GetAvailableNotificationSounds(subdirectory);
+    return Ok(sounds.ToList());
+  }
+
+  /// <summary>
+  /// Plays a TTS event.
+  /// </summary>
+  /// <param name="request">The TTS request.</param>
+  /// <returns>The created event source info.</returns>
+  [HttpPost("events/tts")]
+  [ProducesResponseType(typeof(AudioSourceDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status501NotImplemented)]
+  public async Task<ActionResult<AudioSourceDto>> PlayTTSEvent([FromBody] PlayTTSRequest request)
+  {
+    if (_ttsFactory == null || _duckingService == null)
+    {
+      return StatusCode(501, new { error = "TTS service not available" });
+    }
+
+    if (string.IsNullOrWhiteSpace(request.Text))
+    {
+      return BadRequest(new { error = "Text is required" });
+    }
+
+    try
+    {
+      // Parse engine
+      TTSEngine engine = TTSEngine.ESpeak;
+      if (!string.IsNullOrEmpty(request.Engine) && Enum.TryParse<TTSEngine>(request.Engine, true, out var parsed))
+      {
+        engine = parsed;
+      }
+
+      var parameters = new TTSParameters
+      {
+        Engine = engine,
+        Voice = request.Voice ?? "en",
+        Speed = request.Speed ?? 1.0f,
+        Pitch = request.Pitch ?? 1.0f
+      };
+
+      _logger.LogInformation("Creating TTS event: {Text} (engine={Engine})", request.Text, engine);
+
+      var eventSource = await _ttsFactory.CreateAsync(request.Text, parameters);
+
+      // Add to mixer and start ducking
+      var mixer = _audioEngine.GetMasterMixer();
+      mixer.AddSource(eventSource);
+      await _duckingService.StartDuckingAsync(eventSource);
+
+      // Set up cleanup when event completes
+      eventSource.PlaybackCompleted += async (_, _) =>
+      {
+        await _duckingService.StopDuckingAsync(eventSource);
+        mixer.RemoveSource(eventSource);
+        _logger.LogInformation("TTS event completed and cleaned up");
+      };
+
+      // Start playback (fire-and-forget, cleanup handled by PlaybackCompleted)
+      _ = eventSource.PlayAsync();
+
+      return Ok(eventSource.MapToDto());
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error playing TTS event");
+      return StatusCode(500, new { error = "Failed to play TTS event", details = ex.Message });
+    }
+  }
+
+  /// <summary>
+  /// Plays an audio file event.
+  /// </summary>
+  /// <param name="request">The audio file request.</param>
+  /// <returns>The created event source info.</returns>
+  [HttpPost("events/file")]
+  [ProducesResponseType(typeof(AudioSourceDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status501NotImplemented)]
+  public async Task<ActionResult<AudioSourceDto>> PlayFileEvent([FromBody] PlayFileEventRequest request)
+  {
+    if (_audioFileFactory == null || _duckingService == null)
+    {
+      return StatusCode(501, new { error = "Audio file service not available" });
+    }
+
+    if (string.IsNullOrWhiteSpace(request.FilePath))
+    {
+      return BadRequest(new { error = "FilePath is required" });
+    }
+
+    try
+    {
+      _logger.LogInformation("Creating audio file event: {FilePath}", request.FilePath);
+
+      var eventSource = await _audioFileFactory.CreateFromFileAsync(request.FilePath);
+
+      // Add to mixer and start ducking
+      var mixer = _audioEngine.GetMasterMixer();
+      mixer.AddSource(eventSource);
+      await _duckingService.StartDuckingAsync(eventSource);
+
+      // Set up cleanup when event completes
+      eventSource.PlaybackCompleted += async (_, _) =>
+      {
+        await _duckingService.StopDuckingAsync(eventSource);
+        mixer.RemoveSource(eventSource);
+        _logger.LogInformation("Audio file event completed and cleaned up");
+      };
+
+      // Start playback (fire-and-forget, cleanup handled by PlaybackCompleted)
+      _ = eventSource.PlayAsync();
+
+      return Ok(eventSource.MapToDto());
+    }
+    catch (FileNotFoundException ex)
+    {
+      return BadRequest(new { error = "File not found", details = ex.Message });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error playing audio file event");
+      return StatusCode(500, new { error = "Failed to play audio file event", details = ex.Message });
     }
   }
 }

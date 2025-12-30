@@ -422,14 +422,36 @@ public sealed class SqliteMetricsRepository : IMetricsReader
 
     var cutoffUnix = cutoffTime.ToUnixTimeSeconds();
 
-    await using var cmd = _dbContext.Connection.CreateCommand();
-    cmd.CommandText = $"DELETE FROM {tableName} WHERE Timestamp < @Cutoff";
-    cmd.Parameters.AddWithValue("@Cutoff", cutoffUnix);
-
-    var deleted = await cmd.ExecuteNonQueryAsync(ct);
-    if (deleted > 0)
+    // Acquire lock to prevent concurrent transactions on the same connection
+    await _transactionLock.WaitAsync(ct);
+    try
     {
-      _logger.LogInformation("Pruned {Count} old records from {Table}", deleted, tableName);
+      await using var transaction = _dbContext.Connection.BeginTransaction();
+      try
+      {
+        await using var cmd = _dbContext.Connection.CreateCommand();
+        cmd.Transaction = transaction;
+        cmd.CommandText = $"DELETE FROM {tableName} WHERE Timestamp < @Cutoff";
+        cmd.Parameters.AddWithValue("@Cutoff", cutoffUnix);
+
+        var deleted = await cmd.ExecuteNonQueryAsync(ct);
+        await transaction.CommitAsync(ct);
+
+        if (deleted > 0)
+        {
+          _logger.LogInformation("Pruned {Count} old records from {Table}", deleted, tableName);
+        }
+      }
+      catch (Exception ex)
+      {
+        await transaction.RollbackAsync(ct);
+        _logger.LogError(ex, "Failed to prune old data from {Table}", tableName);
+        throw;
+      }
+    }
+    finally
+    {
+      _transactionLock.Release();
     }
   }
 }

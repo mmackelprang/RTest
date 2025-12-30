@@ -5,7 +5,9 @@
       "Bash(curl:*)",
       "Bash(powershell -Command:*)",
       "Bash(taskkill:*)",
-      "Bash(dotnet restore:*)"
+      "Bash(dotnet restore:*)",
+      "Bash(dotnet test:*)",
+      "WebSearch"
     ]
   }
 }

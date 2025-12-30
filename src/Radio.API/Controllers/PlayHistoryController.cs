@@ -33,17 +33,36 @@ public class PlayHistoryController : ControllerBase
   /// <summary>
   /// Gets recent play history entries.
   /// </summary>
-  /// <param name="count">Number of entries to retrieve (default 20, max 100).</param>
+  /// <param name="limit">Number of entries to retrieve (default 20, max 100).</param>
+  /// <param name="offset">Number of entries to skip.</param>
   /// <returns>A list of recent play history entries.</returns>
   [HttpGet]
-  [ProducesResponseType(typeof(List<PlayHistoryEntryDto>), StatusCodes.Status200OK)]
-  public async Task<ActionResult<List<PlayHistoryEntryDto>>> GetRecent([FromQuery] int count = 20)
+  [ProducesResponseType(typeof(PlayHistoryListDto), StatusCodes.Status200OK)]
+  public async Task<ActionResult<PlayHistoryListDto>> GetRecent([FromQuery] int? limit = null, [FromQuery] int? offset = null)
   {
     try
     {
-      count = Math.Clamp(count, 1, 100);
-      var entries = await _playHistoryRepository.GetRecentAsync(count);
-      return Ok(entries.Select(MapToDto).ToList());
+      int take = Math.Clamp(limit ?? 20, 1, 100);
+      int skip = offset ?? 0;
+
+      // Fetch enough entries to handle offset
+      int fetchCount = skip + take;
+      var entries = await _playHistoryRepository.GetRecentAsync(fetchCount);
+
+      int totalCount = entries.Count;
+      if (entries.Count >= fetchCount)
+      {
+        // There may be more entries
+        totalCount = fetchCount + 1;
+      }
+
+      var pagedEntries = entries.Skip(skip).Take(take);
+
+      return Ok(new PlayHistoryListDto
+      {
+        Items = pagedEntries.Select(MapToDto).ToList(),
+        TotalCount = totalCount
+      });
     }
     catch (Exception ex)
     {
