@@ -3,8 +3,10 @@
 @inject SystemApiService SystemApi
 @inject ConfigurationApiService ConfigApi
 @inject SourcesApiService SourcesApi
+@inject AudioStateHubService HubService
 @inject ISnackbar Snackbar
 @inject IJSRuntime JSRuntime
+@inject IDialogService DialogService
 @implements IDisposable
 
 <PageTitle>System Configuration</PageTitle>
@@ -323,37 +325,41 @@
               </CardHeaderContent>
             </MudCardHeader>
             <MudCardContent>
-              @if (_notificationSounds != null && _notificationSounds.Count > 0)
+              @if (!string.IsNullOrWhiteSpace(_selectedSoundFile))
               {
-                <MudSelect @bind-Value="_selectedSoundFile" Label="Notification Sound" Variant="Variant.Outlined">
-                  @foreach (var sound in _notificationSounds)
-                  {
-                    <MudSelectItem Value="@sound.FilePath">@sound.FileName</MudSelectItem>
-                  }
-                </MudSelect>
-                
-                @if (!string.IsNullOrWhiteSpace(_selectedSoundFile))
+                var selectedSound = _notificationSounds?.FirstOrDefault(s => s.FilePath == _selectedSoundFile);
+                if (selectedSound != null)
                 {
-                  var selectedSound = _notificationSounds.FirstOrDefault(s => s.FilePath == _selectedSoundFile);
-                  if (selectedSound != null)
-                  {
-                    <MudText Typo="Typo.caption" Class="mt-2">Size: @FormatFileSize(selectedSound.FileSize)</MudText>
-                  }
+                  <div style="display: flex; align-items: center; gap: 12px; padding: 16px; background: var(--mud-palette-background-grey); border-radius: 8px;">
+                    <MudIcon Icon="@Icons.Material.Filled.MusicNote" Color="Color.Primary" Size="Size.Large" />
+                    <div style="flex: 1;">
+                      <MudText Typo="Typo.body1" Style="font-weight: 500;">@selectedSound.FileName</MudText>
+                      <MudText Typo="Typo.caption" Color="Color.Secondary">@FormatFileSize(selectedSound.FileSize)</MudText>
+                    </div>
+                  </div>
                 }
-              }
-              else if (_soundsLoading)
-              {
-                <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
-                <MudText Class="ml-2">Loading sounds...</MudText>
               }
               else
               {
-                <MudAlert Severity="Severity.Info">No notification sounds available.</MudAlert>
+                <MudAlert Severity="Severity.Info" Dense="true">
+                  Click "Browse Files" to select an audio file
+                </MudAlert>
               }
             </MudCardContent>
             <MudCardActions>
-              <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow" 
-                         OnClick="PlayFileEventAsync" Disabled="@(string.IsNullOrWhiteSpace(_selectedSoundFile))">
+              <MudButton Variant="Variant.Outlined" 
+                         Color="Color.Primary" 
+                         StartIcon="@Icons.Material.Filled.FolderOpen" 
+                         OnClick="OpenFileSelectionDialogAsync"
+                         Size="Size.Large">
+                Browse Files
+              </MudButton>
+              <MudButton Variant="Variant.Filled" 
+                         Color="Color.Primary" 
+                         StartIcon="@Icons.Material.Filled.PlayArrow" 
+                         OnClick="PlayFileEventAsync" 
+                         Disabled="@(string.IsNullOrWhiteSpace(_selectedSoundFile))"
+                         Size="Size.Large">
                 Play
               </MudButton>
             </MudCardActions>
@@ -377,22 +383,21 @@
                 <MudSimpleTable Dense="true" Hover="true">
                   <thead>
                     <tr>
-                      <th>ID</th>
                       <th>Name</th>
                       <th>Type</th>
                       <th>State</th>
                       <th>Volume</th>
                       <th>Metadata</th>
+                      <th style="width: 100px;">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     @foreach (var source in _eventSources)
                     {
                       <tr>
-                        <td>@source.Id</td>
                         <td><strong>@source.Name</strong></td>
                         <td>@source.Type</td>
-                        <td><MudChip T="string" Size="Size.Small" Color="@(source.State == "Active" ? Color.Success : Color.Default)">@source.State</MudChip></td>
+                        <td><MudChip T="string" Size="Size.Small" Color="@GetStateColor(source.State)">@source.State</MudChip></td>
                         <td>@source.Volume.ToString("P0")</td>
                         <td>
                           @if (source.Metadata != null && source.Metadata.Count > 0)
@@ -403,6 +408,13 @@
                           {
                             <MudText Typo="Typo.caption" Color="Color.Default">None</MudText>
                           }
+                        </td>
+                        <td>
+                          <MudIconButton Icon="@Icons.Material.Filled.Replay" 
+                                         Color="Color.Primary" 
+                                         Size="Size.Small"
+                                         OnClick="@(() => ReplayEventAsync(source))"
+                                         title="Replay this event" />
                         </td>
                       </tr>
                     }
@@ -467,7 +479,6 @@
   // Audio Files
   private List<NotificationSoundDto>? _notificationSounds;
   private string _selectedSoundFile = string.Empty;
-  private bool _soundsLoading = false;
 
   protected override async Task OnInitializedAsync()
   {
@@ -479,6 +490,9 @@
     await LoadTTSEnginesAsync();
     await LoadNotificationSoundsAsync();
 
+    // Setup SignalR for real-time event source updates
+    await InitializeSignalRAsync();
+
     // Update system stats every 5 seconds
     _statsTimer = new System.Threading.Timer(_ =>
     {
@@ -488,6 +502,32 @@
         StateHasChanged();
       });
     }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+  }
+
+  private async Task InitializeSignalRAsync()
+  {
+    try
+    {
+      // Subscribe to source changes to catch event source updates
+      HubService.SourceChanged += async () =>
+      {
+        await InvokeAsync(async () =>
+        {
+          await LoadEventSourcesAsync();
+          StateHasChanged();
+        });
+      };
+
+      // Start the hub connection if not already connected
+      if (!HubService.IsConnected)
+      {
+        await HubService.StartAsync();
+      }
+    }
+    catch (Exception)
+    {
+      // Silently fail - fallback to manual refresh
+    }
   }
 
   private async Task LoadSystemStatsAsync()
@@ -590,7 +630,6 @@
 
   private async Task LoadNotificationSoundsAsync()
   {
-    _soundsLoading = true;
     try
     {
       _notificationSounds = await SourcesApi.GetNotificationSoundsAsync();
@@ -602,10 +641,6 @@
     catch (Exception)
     {
       // Silently fail - audio file section will show as unavailable
-    }
-    finally
-    {
-      _soundsLoading = false;
     }
   }
 
@@ -640,6 +675,37 @@
     catch (Exception ex)
     {
       Snackbar.Add($"Error playing TTS: {ex.Message}", Severity.Error);
+    }
+  }
+
+  private async Task OpenFileSelectionDialogAsync()
+  {
+    var parameters = new DialogParameters
+    {
+      { "InitialSelection", _selectedSoundFile },
+      { "Subdirectory", null }
+    };
+
+    var options = new DialogOptions 
+    { 
+      MaxWidth = MaxWidth.Medium, 
+      FullWidth = true,
+      CloseButton = true,
+      CloseOnEscapeKey = true
+    };
+
+    var dialog = await DialogService.ShowAsync<Radio.Web.Components.Dialogs.AudioFileSelectionDialog>("Select Audio File", parameters, options);
+    var result = await dialog.Result;
+
+    if (result != null && !result.Canceled && result.Data is string selectedPath)
+    {
+      _selectedSoundFile = selectedPath;
+      
+      // Load notification sounds if not already loaded to get file info
+      if (_notificationSounds == null)
+      {
+        await LoadNotificationSoundsAsync();
+      }
     }
   }
 
@@ -731,6 +797,76 @@
     
     var parts = sourceContext.Split('.');
     return parts.Length > 0 ? parts[^1] : sourceContext;
+  }
+
+  private Color GetStateColor(string state) => state switch
+  {
+    "Playing" => Color.Success,
+    "Paused" => Color.Warning,
+    "Stopped" => Color.Default,
+    "Error" => Color.Error,
+    "Ready" => Color.Info,
+    _ => Color.Default
+  };
+
+  private async Task ReplayEventAsync(AudioSourceDto source)
+  {
+    try
+    {
+      bool success = false;
+      
+      // Determine event type and replay accordingly
+      if (source.Type == "TTS" && source.Metadata != null)
+      {
+        // Extract TTS parameters from metadata
+        var text = source.Metadata.GetValueOrDefault("Text")?.ToString() ?? source.Name;
+        var engine = source.Metadata.GetValueOrDefault("Engine")?.ToString();
+        var voice = source.Metadata.GetValueOrDefault("Voice")?.ToString();
+        
+        // Parse speed and pitch if available
+        float? speed = null;
+        float? pitch = null;
+        
+        if (source.Metadata.TryGetValue("Speed", out var speedObj) && speedObj != null)
+        {
+          if (float.TryParse(speedObj.ToString(), out var speedVal))
+            speed = speedVal;
+        }
+        
+        if (source.Metadata.TryGetValue("Pitch", out var pitchObj) && pitchObj != null)
+        {
+          if (float.TryParse(pitchObj.ToString(), out var pitchVal))
+            pitch = pitchVal;
+        }
+        
+        success = await SourcesApi.PlayTTSEventAsync(text, engine, voice, speed, pitch);
+      }
+      else if (source.Type == "AudioFileEvent" && source.Metadata != null)
+      {
+        // Extract file path from metadata
+        var filePath = source.Metadata.GetValueOrDefault("FilePath")?.ToString() 
+                    ?? source.Metadata.GetValueOrDefault("Path")?.ToString();
+        
+        if (!string.IsNullOrWhiteSpace(filePath))
+        {
+          success = await SourcesApi.PlayFileEventAsync(filePath);
+        }
+      }
+      
+      if (success)
+      {
+        Snackbar.Add("Event replayed successfully", Severity.Success);
+        // Event sources list will auto-update via SignalR
+      }
+      else
+      {
+        Snackbar.Add("Failed to replay event", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Snackbar.Add($"Error replaying event: {ex.Message}", Severity.Error);
+    }
   }
 
   public void Dispose()
