@@ -1,5 +1,6 @@
 @using MudBlazor
 @inject SourcesApiService SourcesApi
+@inject ILogger<AudioFileSelectionDialog> Logger
 
 <MudDialog>
   <TitleContent>
@@ -84,8 +85,9 @@
         SelectedFile = _files.FirstOrDefault(f => f.FilePath == InitialSelection);
       }
     }
-    catch (Exception)
+    catch (Exception ex)
     {
+      Logger.LogError(ex, "Failed to load audio files for selection dialog");
       _files = null;
     }
     finally

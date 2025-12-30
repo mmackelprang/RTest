@@ -7,6 +7,7 @@
 @inject ISnackbar Snackbar
 @inject IJSRuntime JSRuntime
 @inject IDialogService DialogService
+@inject ILogger<SystemConfigPage> Logger
 @implements IDisposable
 
 <PageTitle>System Configuration</PageTitle>
@@ -539,8 +540,9 @@
         await HubService.StartAsync();
       }
     }
-    catch (Exception)
+    catch (Exception ex)
     {
+      Logger.LogWarning(ex, "Failed to initialize SignalR for event source updates, falling back to manual refresh");
       // Silently fail - fallback to manual refresh
     }
   }
@@ -678,8 +680,9 @@
         _ttsVoice = _googleVoices[0].Id;
       }
     }
-    catch (Exception)
+    catch (Exception ex)
     {
+      Logger.LogWarning(ex, "Failed to load Google TTS voices for engine {Engine}", "Google");
       // Silently fail - voice dropdown will not be shown
     }
   }
@@ -883,16 +886,18 @@
         float? speed = null;
         float? pitch = null;
         
-        if (source.Metadata.TryGetValue("Speed", out var speedObj) && speedObj != null)
+        if (source.Metadata.TryGetValue("Speed", out var speedObj)
+          && speedObj != null
+          && float.TryParse(speedObj.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var speedVal))
         {
-          if (float.TryParse(speedObj.ToString(), out var speedVal))
-            speed = speedVal;
+          speed = speedVal;
         }
         
-        if (source.Metadata.TryGetValue("Pitch", out var pitchObj) && pitchObj != null)
+        if (source.Metadata.TryGetValue("Pitch", out var pitchObj)
+          && pitchObj != null
+          && float.TryParse(pitchObj.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var pitchVal))
         {
-          if (float.TryParse(pitchObj.ToString(), out var pitchVal))
-            pitch = pitchVal;
+          pitch = pitchVal;
         }
         
         success = await SourcesApi.PlayTTSEventAsync(text, engine, voice, speed, pitch);
@@ -906,6 +911,11 @@
         if (!string.IsNullOrWhiteSpace(filePath))
         {
           success = await SourcesApi.PlayFileEventAsync(filePath);
+        }
+        else
+        {
+          Snackbar.Add("Unable to replay: file path not found in metadata", Severity.Warning);
+          return;
         }
       }
       
