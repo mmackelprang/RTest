@@ -70,20 +70,9 @@ public class AudioEngineInitializationService : IHostedService
       // Initialize audio manager if available
       if (_audioManager != null)
       {
-        _logger.LogInformation("Initializing audio manager with default source...");
-        
-        // TODO: Load last audio source from preferences
-        // For now, we'll try to initialize Radio as the default source
-        try
-        {
-          // The audio manager will handle source initialization
-          // This will be implemented when we add automatic startup behavior
-          _logger.LogInformation("Audio manager initialized (manual source selection required)");
-        }
-        catch (Exception ex)
-        {
-          _logger.LogWarning(ex, "Failed to initialize default audio source");
-        }
+        // TODO: Implement automatic startup behavior that selects and activates a default source
+        // For now, no default source is automatically started; manual source selection is required.
+        _logger.LogInformation("Audio manager available (manual source selection required; no default source auto-started)");
       }
     }
     catch (Exception ex)

@@ -362,10 +362,10 @@
     // Update system stats every 5 seconds
     _statsTimer = new System.Threading.Timer(_ =>
     {
-      _ = Task.Run(async () =>
+      InvokeAsync(async () =>
       {
         await LoadSystemStatsAsync();
-        await InvokeAsync(StateHasChanged);
+        StateHasChanged();
       });
     }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
   }

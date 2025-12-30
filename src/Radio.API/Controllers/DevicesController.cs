@@ -173,18 +173,21 @@ public class DevicesController : ControllerBase
       // Combine and filter for USB devices only
       var allDevices = inputDevices.Concat(outputDevices)
         .Where(d => d.IsUSBDevice && !string.IsNullOrEmpty(d.USBPort))
-        .GroupBy(d => d.USBPort)
-        .Select(g => g.First())
         .ToList();
       
       // Create USB port DTOs with reservation status
-      var usbPorts = allDevices.Select(device => new UsbPortDto
-      {
-        Id = device.USBPort!,
-        Name = $"{device.Name} ({device.USBPort})",
-        IsReserved = reservations.ContainsKey(device.USBPort!),
-        ReservedBy = reservations.TryGetValue(device.USBPort!, out var sourceId) ? sourceId : null
-      }).ToList();
+      // USBPort is guaranteed non-null by the Where clause filtering, so we use the null-forgiving operator
+      var usbPorts = allDevices
+        .GroupBy(d => d.USBPort!)  // Non-null due to Where clause
+        .Select(g => g.First())
+        .Select(device => new UsbPortDto
+        {
+          Id = device.USBPort!,
+          Name = $"{device.Name} ({device.USBPort})",
+          IsReserved = reservations.ContainsKey(device.USBPort!),
+          ReservedBy = reservations.TryGetValue(device.USBPort!, out var sourceId) ? sourceId : null
+        })
+        .ToList();
       
       // If no USB devices found, return empty list with message
       if (!usbPorts.Any())

@@ -177,16 +177,15 @@
   {
     _currentTime = DateTime.Now.ToString("HH:mm:ss");
     
-    // Update system stats asynchronously but don't await
-    _ = Task.Run(async () =>
-    {
-      await UpdateSystemStatsAsync();
-    });
-
     try
     {
       // Invoke state update on the UI thread
-      InvokeAsync(StateHasChanged);
+      // Update system stats in background without blocking the clock update
+      InvokeAsync(async () =>
+      {
+        StateHasChanged();
+        await UpdateSystemStatsAsync();
+      });
     }
     catch (ObjectDisposedException)
     {
