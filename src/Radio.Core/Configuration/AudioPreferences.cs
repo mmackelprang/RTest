@@ -19,6 +19,12 @@ public class AudioPreferences
   public string CurrentSource { get; set; } = "Spotify";
 
   /// <summary>
+  /// Gets or sets the currently selected audio output device ID.
+  /// Empty string means use default device.
+  /// </summary>
+  public string CurrentOutput { get; set; } = "";
+
+  /// <summary>
   /// Gets or sets the master volume level (0-100).
   /// </summary>
   public int MasterVolume { get; set; } = 75;

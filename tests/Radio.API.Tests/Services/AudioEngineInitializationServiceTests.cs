@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 using Radio.API.Services;
+using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 
 namespace Radio.API.Tests.Services;
@@ -11,6 +13,8 @@ public class AudioEngineInitializationServiceTests
   private readonly Mock<IAudioEngine> _audioEngineMock;
   private readonly Mock<IAudioDeviceManager> _deviceManagerMock;
   private readonly Mock<IServiceProvider> _serviceProviderMock;
+  private readonly Mock<IOptionsMonitor<AudioPreferences>> _audioPreferencesMock;
+  private readonly Mock<IMasterMixer> _masterMixerMock;
 
   public AudioEngineInitializationServiceTests()
   {
@@ -18,6 +22,18 @@ public class AudioEngineInitializationServiceTests
     _audioEngineMock = new Mock<IAudioEngine>();
     _deviceManagerMock = new Mock<IAudioDeviceManager>();
     _serviceProviderMock = new Mock<IServiceProvider>();
+    _audioPreferencesMock = new Mock<IOptionsMonitor<AudioPreferences>>();
+    _masterMixerMock = new Mock<IMasterMixer>();
+
+    // Setup default audio preferences
+    _audioPreferencesMock
+      .Setup(x => x.CurrentValue)
+      .Returns(new AudioPreferences
+      {
+        CurrentSource = "Radio",
+        CurrentOutput = "",
+        MasterVolume = 75
+      });
   }
 
   private AudioEngineInitializationService CreateService(IAudioManager? audioManager = null)
@@ -30,6 +46,8 @@ public class AudioEngineInitializationServiceTests
       _loggerMock.Object,
       _audioEngineMock.Object,
       _deviceManagerMock.Object,
+      _audioPreferencesMock.Object,
+      _masterMixerMock.Object,
       _serviceProviderMock.Object);
   }
 
@@ -156,16 +174,20 @@ public class AudioEngineInitializationServiceTests
   }
 
   [Fact]
-  public async Task StartAsync_WithAudioManager_LogsAvailability()
+  public async Task StartAsync_AppliesAudioPreferences()
   {
     // Arrange
-    var audioManagerMock = new Mock<IAudioManager>();
-    var service = CreateService(audioManagerMock.Object);
+    var service = CreateService();
     var cancellationToken = CancellationToken.None;
+
+    var outputDevices = new List<AudioDeviceInfo>
+    {
+      new AudioDeviceInfo { Id = "output1", Name = "Speaker", Type = AudioDeviceType.Output, IsDefault = true }
+    };
 
     _deviceManagerMock
       .Setup(x => x.GetOutputDevicesAsync(cancellationToken))
-      .ReturnsAsync(new List<AudioDeviceInfo>());
+      .ReturnsAsync(outputDevices);
 
     _deviceManagerMock
       .Setup(x => x.GetInputDevicesAsync(cancellationToken))
@@ -174,12 +196,12 @@ public class AudioEngineInitializationServiceTests
     // Act
     await service.StartAsync(cancellationToken);
 
-    // Assert
+    // Assert - Verify preferences were applied
     _loggerMock.Verify(
       x => x.Log(
         LogLevel.Information,
         It.IsAny<EventId>(),
-        It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Audio manager available")),
+        It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Startup audio source")),
         null,
         It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
       Times.Once);
