@@ -165,20 +165,26 @@
 
     // Start the clock timer using System.Timers.Timer (works reliably in Blazor Server)
     _timer = new System.Timers.Timer(1000);
-    _timer.Elapsed += async (sender, e) => await OnTimerElapsedAsync();
+    _timer.Elapsed += OnTimerElapsed;
     _timer.AutoReset = true;
     _timer.Start();
     Logger.LogInformation("MainLayout - Timer started");
   }
 
-  private async Task OnTimerElapsedAsync()
+  private void OnTimerElapsed(object? sender, System.Timers.ElapsedEventArgs e)
   {
     _currentTime = DateTime.Now.ToString("HH:mm:ss");
-    await UpdateSystemStatsAsync();
+    
+    // Update system stats asynchronously but don't await
+    _ = Task.Run(async () =>
+    {
+      await UpdateSystemStatsAsync();
+    });
 
     try
     {
-      await InvokeAsync(StateHasChanged);
+      // Invoke state update on the UI thread
+      InvokeAsync(StateHasChanged);
     }
     catch (ObjectDisposedException)
     {

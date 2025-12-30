@@ -158,7 +158,7 @@ public class DevicesController : ControllerBase
   /// <returns>List of USB ports.</returns>
   [HttpGet("usb")]
   [ProducesResponseType(typeof(List<UsbPortDto>), StatusCodes.Status200OK)]
-  public ActionResult<List<UsbPortDto>> GetUsbPorts()
+  public async Task<ActionResult<List<UsbPortDto>>> GetUsbPorts()
   {
     try
     {
@@ -166,22 +166,35 @@ public class DevicesController : ControllerBase
       var reservations = (_deviceManager as Radio.Infrastructure.Audio.SoundFlow.SoundFlowDeviceManager)?
         .GetUSBPortReservations() ?? new Dictionary<string, string>();
 
-      // Define known USB ports (on Raspberry Pi, these are the common USB audio device paths)
-      var knownPorts = new[]
+      // Get actual USB audio devices from the device manager
+      var inputDevices = await _deviceManager.GetInputDevicesAsync();
+      var outputDevices = await _deviceManager.GetOutputDevicesAsync();
+      
+      // Combine and filter for USB devices only
+      var allDevices = inputDevices.Concat(outputDevices)
+        .Where(d => d.IsUSBDevice && !string.IsNullOrEmpty(d.USBPort))
+        .GroupBy(d => d.USBPort)
+        .Select(g => g.First())
+        .ToList();
+      
+      // Create USB port DTOs with reservation status
+      var usbPorts = allDevices.Select(device => new UsbPortDto
       {
-        ("USB-1", "USB Port 1 (Top Left)"),
-        ("USB-2", "USB Port 2 (Top Right)"),
-        ("USB-3", "USB Port 3 (Bottom Left)"),
-        ("USB-4", "USB Port 4 (Bottom Right)")
-      };
-
-      var usbPorts = knownPorts.Select(p => new UsbPortDto
-      {
-        Id = p.Item1,
-        Name = p.Item2,
-        IsReserved = reservations.ContainsKey(p.Item1),
-        ReservedBy = reservations.TryGetValue(p.Item1, out var sourceId) ? sourceId : null
+        Id = device.USBPort!,
+        Name = $"{device.Name} ({device.USBPort})",
+        IsReserved = reservations.ContainsKey(device.USBPort!),
+        ReservedBy = reservations.TryGetValue(device.USBPort!, out var sourceId) ? sourceId : null
       }).ToList();
+      
+      // If no USB devices found, return empty list with message
+      if (!usbPorts.Any())
+      {
+        _logger.LogInformation("No USB audio devices found");
+      }
+      else
+      {
+        _logger.LogInformation("Found {Count} USB audio devices", usbPorts.Count);
+      }
 
       return Ok(usbPorts);
     }

@@ -360,10 +360,13 @@
     await LoadEventSourcesAsync();
 
     // Update system stats every 5 seconds
-    _statsTimer = new System.Threading.Timer(async _ =>
+    _statsTimer = new System.Threading.Timer(_ =>
     {
-      await LoadSystemStatsAsync();
-      await InvokeAsync(StateHasChanged);
+      _ = Task.Run(async () =>
+      {
+        await LoadSystemStatsAsync();
+        await InvokeAsync(StateHasChanged);
+      });
     }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
   }
 
