@@ -441,3 +441,30 @@ public record VisualizationDataDto
   public WaveformDataDto? Waveform { get; init; }
   public bool IsActive { get; init; }
 }
+
+// Event Sources API DTOs
+public record TTSEngineInfoDto(
+  string Engine,
+  string Name,
+  bool IsAvailable,
+  bool RequiresApiKey,
+  bool IsOffline
+);
+
+public record PlayTTSRequest(
+  string Text,
+  string? Engine = null,
+  string? Voice = null,
+  float? Speed = null,
+  float? Pitch = null
+);
+
+public record PlayFileEventRequest(
+  string FilePath
+);
+
+public record NotificationSoundDto(
+  string FileName,
+  string FilePath,
+  long FileSize
+);

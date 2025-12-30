@@ -3,6 +3,7 @@ using Radio.API.Extensions;
 using Radio.API.Mappers;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.Services;
 
 namespace Radio.API.Controllers;
 
@@ -17,6 +18,8 @@ public class SourcesController : ControllerBase
   private readonly ILogger<SourcesController> _logger;
   private readonly IAudioEngine _audioEngine;
   private readonly IAudioManager? _audioManager;
+  private readonly ITTSFactory? _ttsFactory;
+  private readonly AudioFileEventSourceFactory? _fileEventFactory;
 
   /// <summary>
   /// Initializes a new instance of the SourcesController.
@@ -24,11 +27,15 @@ public class SourcesController : ControllerBase
   public SourcesController(
     ILogger<SourcesController> logger,
     IAudioEngine audioEngine,
-    IAudioManager? audioManager = null)
+    IAudioManager? audioManager = null,
+    ITTSFactory? ttsFactory = null,
+    AudioFileEventSourceFactory? fileEventFactory = null)
   {
     _logger = logger;
     _audioEngine = audioEngine;
     _audioManager = audioManager;
+    _ttsFactory = ttsFactory;
+    _fileEventFactory = fileEventFactory;
   }
 
   /// <summary>
@@ -220,6 +227,198 @@ public class SourcesController : ControllerBase
     {
       _logger.LogError(ex, "Error getting event sources");
       return StatusCode(500, new { error = "Failed to get event sources" });
+    }
+  }
+
+  /// <summary>
+  /// Gets available TTS engines.
+  /// </summary>
+  /// <returns>List of TTS engine information.</returns>
+  [HttpGet("events/tts/engines")]
+  [ProducesResponseType(typeof(List<TTSEngineInfoDto>), StatusCodes.Status200OK)]
+  public ActionResult<List<TTSEngineInfoDto>> GetTTSEngines()
+  {
+    try
+    {
+      if (_ttsFactory == null)
+      {
+        return StatusCode(501, new { error = "TTS factory not available" });
+      }
+
+      var engines = _ttsFactory.AvailableEngines
+        .Select(e => new TTSEngineInfoDto
+        {
+          Engine = e.Engine.ToString(),
+          Name = e.Name,
+          IsAvailable = e.IsAvailable,
+          RequiresApiKey = e.RequiresApiKey,
+          IsOffline = e.IsOffline
+        })
+        .ToList();
+
+      return Ok(engines);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error getting TTS engines");
+      return StatusCode(500, new { error = "Failed to get TTS engines" });
+    }
+  }
+
+  /// <summary>
+  /// Gets available notification sound files.
+  /// </summary>
+  /// <param name="subdirectory">Optional subdirectory to search in.</param>
+  /// <returns>List of notification sound files.</returns>
+  [HttpGet("events/sounds")]
+  [ProducesResponseType(typeof(List<NotificationSoundDto>), StatusCodes.Status200OK)]
+  public ActionResult<List<NotificationSoundDto>> GetNotificationSounds([FromQuery] string? subdirectory = null)
+  {
+    try
+    {
+      if (_fileEventFactory == null)
+      {
+        return StatusCode(501, new { error = "File event factory not available" });
+      }
+
+      var files = _fileEventFactory.GetAvailableNotificationSounds(subdirectory);
+      var sounds = files.Select(filePath =>
+      {
+        var fileInfo = new FileInfo(filePath);
+        return new NotificationSoundDto
+        {
+          FileName = fileInfo.Name,
+          FilePath = filePath,
+          FileSize = fileInfo.Length
+        };
+      }).ToList();
+
+      return Ok(sounds);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error getting notification sounds");
+      return StatusCode(500, new { error = "Failed to get notification sounds" });
+    }
+  }
+
+  /// <summary>
+  /// Plays a TTS event.
+  /// </summary>
+  /// <param name="request">The TTS playback request.</param>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <returns>Success response if playback started.</returns>
+  [HttpPost("events/tts")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status501NotImplemented)]
+  public async Task<ActionResult> PlayTTSEvent([FromBody] PlayTTSRequest request, CancellationToken cancellationToken)
+  {
+    try
+    {
+      if (string.IsNullOrWhiteSpace(request.Text))
+      {
+        return BadRequest(new { error = "Text is required" });
+      }
+
+      if (_ttsFactory == null)
+      {
+        return StatusCode(501, new { error = "TTS playback not available" });
+      }
+
+      // Parse engine if provided
+      TTSEngine? engine = null;
+      if (!string.IsNullOrWhiteSpace(request.Engine))
+      {
+        if (Enum.TryParse<TTSEngine>(request.Engine, ignoreCase: true, out var parsedEngine))
+        {
+          engine = parsedEngine;
+        }
+        else
+        {
+          return BadRequest(new { error = $"Invalid TTS engine: {request.Engine}" });
+        }
+      }
+
+      // Build TTS parameters
+      var parameters = new TTSParameters
+      {
+        Engine = engine ?? TTSEngine.ESpeak,
+        Voice = request.Voice ?? "en",
+        Speed = request.Speed ?? 1.0f,
+        Pitch = request.Pitch ?? 1.0f
+      };
+
+      _logger.LogInformation("Playing TTS event: {Text} with engine {Engine}", 
+        request.Text.Length > 50 ? request.Text[..50] + "..." : request.Text, 
+        parameters.Engine);
+
+      // Create TTS event source
+      var ttsSource = await _ttsFactory.CreateAsync(request.Text, parameters, cancellationToken);
+
+      // Add the event source to the mixer and play it
+      var mixer = _audioEngine.GetMasterMixer();
+      mixer.AddSource(ttsSource);
+      
+      // Start playback
+      await ttsSource.PlayAsync(cancellationToken);
+
+      return Ok(new { message = "TTS event started successfully" });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to play TTS event");
+      return StatusCode(500, new { error = "Failed to play TTS event", details = ex.Message });
+    }
+  }
+
+  /// <summary>
+  /// Plays an audio file event.
+  /// </summary>
+  /// <param name="request">The file playback request.</param>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <returns>Success response if playback started.</returns>
+  [HttpPost("events/file")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status501NotImplemented)]
+  public async Task<ActionResult> PlayFileEvent([FromBody] PlayFileEventRequest request, CancellationToken cancellationToken)
+  {
+    try
+    {
+      if (string.IsNullOrWhiteSpace(request.FilePath))
+      {
+        return BadRequest(new { error = "FilePath is required" });
+      }
+
+      if (_fileEventFactory == null)
+      {
+        return StatusCode(501, new { error = "File event playback not available" });
+      }
+
+      _logger.LogInformation("Playing file event: {FilePath}", request.FilePath);
+
+      // Create file event source
+      var fileSource = await _fileEventFactory.CreateFromFileAsync(request.FilePath, cancellationToken);
+
+      // Add the event source to the mixer and play it
+      var mixer = _audioEngine.GetMasterMixer();
+      mixer.AddSource(fileSource);
+      
+      // Start playback
+      await fileSource.PlayAsync(cancellationToken);
+
+      return Ok(new { message = "File event started successfully" });
+    }
+    catch (FileNotFoundException ex)
+    {
+      _logger.LogWarning(ex, "File not found: {FilePath}", request.FilePath);
+      return NotFound(new { error = "File not found", filePath = request.FilePath });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to play file event");
+      return StatusCode(500, new { error = "Failed to play file event", details = ex.Message });
     }
   }
 }
