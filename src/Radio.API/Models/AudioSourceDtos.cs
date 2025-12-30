@@ -237,17 +237,17 @@ public class UsbPortDto
 public class TTSEngineInfoDto
 {
   /// <summary>
-  /// Gets or sets the engine type.
+  /// Gets or sets the engine identifier (ESpeak, Google, Azure).
   /// </summary>
   public string Engine { get; set; } = string.Empty;
 
   /// <summary>
-  /// Gets or sets the engine name.
+  /// Gets or sets the human-readable name of the engine.
   /// </summary>
   public string Name { get; set; } = string.Empty;
 
   /// <summary>
-  /// Gets or sets whether the engine is available.
+  /// Gets or sets whether the engine is currently available.
   /// </summary>
   public bool IsAvailable { get; set; }
 
@@ -263,7 +263,7 @@ public class TTSEngineInfoDto
 }
 
 /// <summary>
-/// Request to play a TTS event.
+/// Request to play TTS event.
 /// </summary>
 public class PlayTTSRequest
 {
@@ -273,33 +273,54 @@ public class PlayTTSRequest
   public string Text { get; set; } = string.Empty;
 
   /// <summary>
-  /// Gets or sets the TTS engine to use (ESpeak, Google, Azure).
+  /// Gets or sets the TTS engine to use (optional).
   /// </summary>
   public string? Engine { get; set; }
 
   /// <summary>
-  /// Gets or sets the voice to use.
+  /// Gets or sets the voice identifier (optional).
   /// </summary>
   public string? Voice { get; set; }
 
   /// <summary>
-  /// Gets or sets the speaking speed (0.5-2.0, default 1.0).
+  /// Gets or sets the speaking rate (0.5-2.0, optional).
   /// </summary>
   public float? Speed { get; set; }
 
   /// <summary>
-  /// Gets or sets the pitch adjustment (0.5-2.0, default 1.0).
+  /// Gets or sets the pitch adjustment (0.5-2.0, optional).
   /// </summary>
   public float? Pitch { get; set; }
 }
 
 /// <summary>
-/// Request to play an audio file event.
+/// Request to play audio file event.
 /// </summary>
 public class PlayFileEventRequest
 {
   /// <summary>
-  /// Gets or sets the path to the audio file.
+  /// Gets or sets the file path to play.
   /// </summary>
   public string FilePath { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Represents information about a notification sound file.
+/// </summary>
+public class NotificationSoundDto
+{
+  /// <summary>
+  /// Gets or sets the file name.
+  /// </summary>
+  public string FileName { get; set; } = string.Empty;
+
+  /// <summary>
+  /// Gets or sets the full file path.
+  /// </summary>
+  public string FilePath { get; set; } = string.Empty;
+
+  /// <summary>
+  /// Gets or sets the file size in bytes.
+  /// </summary>
+  public long FileSize { get; set; }
 }

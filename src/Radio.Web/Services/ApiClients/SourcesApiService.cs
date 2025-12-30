@@ -153,4 +153,88 @@ public class SourcesApiService
       return null;
     }
   }
+
+  public async Task<List<TTSEngineInfoDto>?> GetTTSEnginesAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      return await _httpClient.GetFromJsonAsync<List<TTSEngineInfoDto>>("/api/sources/events/tts/engines", JsonOptions, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to get TTS engines");
+      return null;
+    }
+  }
+
+  public async Task<List<NotificationSoundDto>?> GetNotificationSoundsAsync(string? subdirectory = null, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var url = "/api/sources/events/sounds";
+      if (!string.IsNullOrWhiteSpace(subdirectory))
+      {
+        url += $"?subdirectory={Uri.EscapeDataString(subdirectory)}";
+      }
+      
+      return await _httpClient.GetFromJsonAsync<List<NotificationSoundDto>>(url, JsonOptions, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to get notification sounds");
+      return null;
+    }
+  }
+
+  public async Task<bool> PlayTTSEventAsync(
+    string text, 
+    string? engine = null, 
+    string? voice = null, 
+    float? speed = null, 
+    float? pitch = null, 
+    CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var request = new PlayTTSRequest(text, engine, voice, speed, pitch);
+      var response = await _httpClient.PostAsJsonAsync("/api/sources/events/tts", request, cancellationToken);
+
+      if (!response.IsSuccessStatusCode)
+      {
+        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+        _logger.LogWarning("TTS event playback failed with status {Status}: {Content}",
+          response.StatusCode, content);
+      }
+
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to play TTS event");
+      return false;
+    }
+  }
+
+  public async Task<bool> PlayFileEventAsync(string filePath, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var request = new PlayFileEventRequest(filePath);
+      var response = await _httpClient.PostAsJsonAsync("/api/sources/events/file", request, cancellationToken);
+
+      if (!response.IsSuccessStatusCode)
+      {
+        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+        _logger.LogWarning("File event playback failed with status {Status}: {Content}",
+          response.StatusCode, content);
+      }
+
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to play file event");
+      return false;
+    }
+  }
 }
