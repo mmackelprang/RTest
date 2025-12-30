@@ -282,11 +282,15 @@ public class SourcesController : ControllerBase
       }
 
       var files = _fileEventFactory.GetAvailableNotificationSounds(subdirectory);
-      var sounds = files.Select(filePath => new NotificationSoundDto
+      var sounds = files.Select(filePath =>
       {
-        FileName = Path.GetFileName(filePath),
-        FilePath = filePath,
-        FileSize = new FileInfo(filePath).Length
+        var fileInfo = new FileInfo(filePath);
+        return new NotificationSoundDto
+        {
+          FileName = fileInfo.Name,
+          FilePath = filePath,
+          FileSize = fileInfo.Length
+        };
       }).ToList();
 
       return Ok(sounds);
