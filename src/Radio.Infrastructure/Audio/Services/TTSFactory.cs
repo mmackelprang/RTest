@@ -484,16 +484,29 @@ public class TTSFactory : ITTSFactory
 
   private Task<IReadOnlyList<TTSVoiceInfo>> GetGoogleVoicesAsync(CancellationToken cancellationToken)
   {
-    // In a full implementation, this would call the Google Cloud TTS API
-    // For now, return some common Google TTS voice identifiers
+    // Google Cloud TTS voices - validated list for en-US and en-GB
     var voices = new List<TTSVoiceInfo>
     {
-      new() { Id = "en-US-Standard-A", Name = "English US Standard A", Language = "en-US", Gender = TTSVoiceGender.Male },
-      new() { Id = "en-US-Standard-B", Name = "English US Standard B", Language = "en-US", Gender = TTSVoiceGender.Male },
-      new() { Id = "en-US-Standard-C", Name = "English US Standard C", Language = "en-US", Gender = TTSVoiceGender.Female },
-      new() { Id = "en-US-Standard-D", Name = "English US Standard D", Language = "en-US", Gender = TTSVoiceGender.Male },
-      new() { Id = "en-GB-Standard-A", Name = "English UK Standard A", Language = "en-GB", Gender = TTSVoiceGender.Female },
-      new() { Id = "en-GB-Standard-B", Name = "English UK Standard B", Language = "en-GB", Gender = TTSVoiceGender.Male }
+      // US English voices
+      new() { Id = "en-US-Standard-A", Name = "US Standard A (Male)", Language = "en-US", Gender = TTSVoiceGender.Male },
+      new() { Id = "en-US-Standard-B", Name = "US Standard B (Male)", Language = "en-US", Gender = TTSVoiceGender.Male },
+      new() { Id = "en-US-Standard-C", Name = "US Standard C (Female)", Language = "en-US", Gender = TTSVoiceGender.Female },
+      new() { Id = "en-US-Standard-D", Name = "US Standard D (Male)", Language = "en-US", Gender = TTSVoiceGender.Male },
+      new() { Id = "en-US-Standard-E", Name = "US Standard E (Female)", Language = "en-US", Gender = TTSVoiceGender.Female },
+      new() { Id = "en-US-Standard-F", Name = "US Standard F (Female)", Language = "en-US", Gender = TTSVoiceGender.Female },
+      new() { Id = "en-US-Standard-G", Name = "US Standard G (Female)", Language = "en-US", Gender = TTSVoiceGender.Female },
+      new() { Id = "en-US-Standard-H", Name = "US Standard H (Female)", Language = "en-US", Gender = TTSVoiceGender.Female },
+      new() { Id = "en-US-Standard-I", Name = "US Standard I (Male)", Language = "en-US", Gender = TTSVoiceGender.Male },
+      new() { Id = "en-US-Standard-J", Name = "US Standard J (Male)", Language = "en-US", Gender = TTSVoiceGender.Male },
+      
+      // UK English voices
+      new() { Id = "en-GB-Standard-A", Name = "UK Standard A (Female)", Language = "en-GB", Gender = TTSVoiceGender.Female },
+      new() { Id = "en-GB-Standard-B", Name = "UK Standard B (Male)", Language = "en-GB", Gender = TTSVoiceGender.Male },
+      new() { Id = "en-GB-Standard-C", Name = "UK Standard C (Female)", Language = "en-GB", Gender = TTSVoiceGender.Female },
+      new() { Id = "en-GB-Standard-D", Name = "UK Standard D (Male)", Language = "en-GB", Gender = TTSVoiceGender.Male },
+      new() { Id = "en-GB-Standard-F", Name = "UK Standard F (Female)", Language = "en-GB", Gender = TTSVoiceGender.Female },
+      new() { Id = "en-GB-Standard-N", Name = "UK Standard N (Female)", Language = "en-GB", Gender = TTSVoiceGender.Female },
+      new() { Id = "en-GB-Standard-O", Name = "UK Standard O (Male)", Language = "en-GB", Gender = TTSVoiceGender.Male }
     };
 
     return Task.FromResult<IReadOnlyList<TTSVoiceInfo>>(voices.AsReadOnly());

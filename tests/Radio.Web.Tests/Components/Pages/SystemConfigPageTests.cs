@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using MudBlazor.Services;
 using Radio.Web.Components.Pages;
 using Radio.Web.Services.ApiClients;
+using Radio.Web.Services.Hub;
 
 namespace Radio.Web.Tests.Components.Pages;
 
@@ -39,6 +40,9 @@ public class SystemConfigPageTests : TestContext
     Services.AddHttpClient<SystemApiService>();
     Services.AddHttpClient<ConfigurationApiService>();
     Services.AddHttpClient<SourcesApiService>();
+    
+    // Add AudioStateHubService
+    Services.AddSingleton<AudioStateHubService>();
     
     // Setup JSInterop mocks for MudBlazor components
     JSInterop.Mode = JSRuntimeMode.Loose;
@@ -123,6 +127,63 @@ public class SystemConfigPageTests : TestContext
 
     // Assert - The component renders without error
     Assert.NotNull(cut);
+  }
+
+  [Fact]
+  public void SystemConfigPage_EventSources_Tab_Contains_TTS_Section()
+  {
+    // Act
+    var cut = RenderComponent<SystemConfigPage>();
+
+    // Assert - Check for TTS section
+    Assert.Contains("Text-to-Speech", cut.Markup);
+    Assert.Contains("Message", cut.Markup);
+    Assert.Contains("TTS Engine", cut.Markup);
+  }
+
+  [Fact]
+  public void SystemConfigPage_EventSources_Tab_Contains_AudioFile_Section()
+  {
+    // Act
+    var cut = RenderComponent<SystemConfigPage>();
+
+    // Assert - Check for Audio File Events section
+    Assert.Contains("Audio File Events", cut.Markup);
+    Assert.Contains("Browse Files", cut.Markup);
+  }
+
+  [Fact]
+  public void SystemConfigPage_EventSources_Tab_Contains_ActiveSources_Section()
+  {
+    // Act
+    var cut = RenderComponent<SystemConfigPage>();
+
+    // Assert - Check for Active Event Sources section
+    Assert.Contains("Active Event Sources", cut.Markup);
+  }
+
+  [Fact]
+  public void SystemConfigPage_EventSources_Tab_Shows_Empty_State()
+  {
+    // Act
+    var cut = RenderComponent<SystemConfigPage>();
+
+    // Assert - Should show message when no event sources are active
+    Assert.Contains("No event sources currently active", cut.Markup);
+  }
+
+  [Fact]
+  public void SystemConfigPage_RadioControl_Uses_Modern_Typography()
+  {
+    // This test validates that the Radio Control page doesn't use LED fonts
+    // by checking the absence of DSEG14Classic font family
+    
+    // Act
+    var cut = RenderComponent<RadioPage>();
+
+    // Assert - Should not contain LED font references
+    Assert.DoesNotContain("DSEG14Classic", cut.Markup);
+    Assert.DoesNotContain("text-shadow: 0 0 20px", cut.Markup);
   }
 
   [Fact]

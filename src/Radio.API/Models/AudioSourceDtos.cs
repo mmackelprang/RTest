@@ -263,6 +263,32 @@ public class TTSEngineInfoDto
 }
 
 /// <summary>
+/// Information about a TTS voice.
+/// </summary>
+public class TTSVoiceInfoDto
+{
+  /// <summary>
+  /// Gets or sets the unique voice identifier.
+  /// </summary>
+  public string Id { get; set; } = string.Empty;
+
+  /// <summary>
+  /// Gets or sets the human-readable voice name.
+  /// </summary>
+  public string Name { get; set; } = string.Empty;
+
+  /// <summary>
+  /// Gets or sets the language code (e.g., "en-US").
+  /// </summary>
+  public string Language { get; set; } = string.Empty;
+
+  /// <summary>
+  /// Gets or sets the voice gender (Male, Female, Neutral).
+  /// </summary>
+  public string Gender { get; set; } = string.Empty;
+}
+
+/// <summary>
 /// Request to play TTS event.
 /// </summary>
 public class PlayTTSRequest

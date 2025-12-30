@@ -3,6 +3,7 @@ using Radio.API.Extensions;
 using Radio.API.Mappers;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.Services;
 
 namespace Radio.API.Controllers;
 
@@ -17,6 +18,9 @@ public class SourcesController : ControllerBase
   private readonly ILogger<SourcesController> _logger;
   private readonly IAudioEngine _audioEngine;
   private readonly IAudioManager? _audioManager;
+  private readonly ITTSFactory? _ttsFactory;
+  private readonly AudioFileEventSourceFactory? _fileEventFactory;
+  private readonly IDuckingService? _duckingService;
 
   /// <summary>
   /// Initializes a new instance of the SourcesController.
@@ -24,13 +28,16 @@ public class SourcesController : ControllerBase
   public SourcesController(
     ILogger<SourcesController> logger,
     IAudioEngine audioEngine,
-    IAudioManager? audioManager = null)
+    IAudioManager? audioManager = null,
+    ITTSFactory? ttsFactory = null,
+    AudioFileEventSourceFactory? fileEventFactory = null,
+    IDuckingService? duckingService = null)
   {
     _logger = logger;
     _audioEngine = audioEngine;
     _audioManager = audioManager;
     _ttsFactory = ttsFactory;
-    _audioFileFactory = audioFileFactory;
+    _fileEventFactory = fileEventFactory;
     _duckingService = duckingService;
   }
 
@@ -290,6 +297,54 @@ public class SourcesController : ControllerBase
     {
       _logger.LogError(ex, "Error getting TTS engines");
       return StatusCode(500, new { error = "Failed to get TTS engines" });
+    }
+  }
+
+  /// <summary>
+  /// Gets available voices for a specific TTS engine.
+  /// </summary>
+  /// <param name="engine">The TTS engine to query (ESpeak, Google, Azure).</param>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <returns>List of available voices for the engine.</returns>
+  [HttpGet("events/tts/voices")]
+  [ProducesResponseType(typeof(List<TTSVoiceInfoDto>), StatusCodes.Status200OK)]
+  public async Task<ActionResult<List<TTSVoiceInfoDto>>> GetTTSVoices(
+    [FromQuery] string engine,
+    CancellationToken cancellationToken)
+  {
+    try
+    {
+      if (_ttsFactory == null)
+      {
+        return StatusCode(501, new { error = "TTS factory not available" });
+      }
+
+      if (string.IsNullOrWhiteSpace(engine))
+      {
+        return BadRequest(new { error = "Engine parameter is required" });
+      }
+
+      // Parse engine parameter
+      if (!Enum.TryParse<TTSEngine>(engine, ignoreCase: true, out var ttsEngine))
+      {
+        return BadRequest(new { error = $"Invalid engine: {engine}. Valid values are: ESpeak, Google, Azure" });
+      }
+
+      var voices = await _ttsFactory.GetVoicesAsync(ttsEngine, cancellationToken);
+      var voiceDtos = voices.Select(v => new TTSVoiceInfoDto
+      {
+        Id = v.Id,
+        Name = v.Name,
+        Language = v.Language,
+        Gender = v.Gender.ToString()
+      }).ToList();
+
+      return Ok(voiceDtos);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error getting TTS voices for engine {Engine}", engine);
+      return StatusCode(500, new { error = "Failed to get TTS voices" });
     }
   }
 

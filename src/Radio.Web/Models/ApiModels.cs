@@ -467,6 +467,13 @@ public record TTSEngineInfoDto(
   bool IsOffline
 );
 
+public record TTSVoiceInfoDto(
+  string Id,
+  string Name,
+  string Language,
+  string Gender
+);
+
 public record PlayTTSRequest(
   string Text,
   string? Engine = null,

@@ -285,7 +285,7 @@
             <MudCardContent>
               <MudTextField @bind-Value="_ttsText" Label="Message" Variant="Variant.Outlined" Lines="3" />
               
-              <MudSelect @bind-Value="_selectedTTSEngine" Label="TTS Engine" Variant="Variant.Outlined" Class="mt-3">
+              <MudSelect T="string" Value="_selectedTTSEngine" Label="TTS Engine" Variant="Variant.Outlined" Class="mt-3" ValueChanged="@((string e) => OnTTSEngineChangedAsync(e))">
                 @if (_ttsEngines != null)
                 {
                   @foreach (var engine in _ttsEngines.Where(e => e.IsAvailable))
@@ -297,8 +297,22 @@
                 }
               </MudSelect>
 
-              <MudTextField @bind-Value="_ttsVoice" Label="Voice (Optional)" Variant="Variant.Outlined" Class="mt-3" 
-                            HelperText="e.g., 'en', 'en-US-Standard-A'" />
+              @if (_selectedTTSEngine == "Google" && _googleVoices != null && _googleVoices.Count > 0)
+              {
+                <MudSelect @bind-Value="_ttsVoice" Label="Voice" Variant="Variant.Outlined" Class="mt-3">
+                  @foreach (var voice in _googleVoices)
+                  {
+                    <MudSelectItem Value="@voice.Id">
+                      @voice.Name
+                    </MudSelectItem>
+                  }
+                </MudSelect>
+              }
+              else
+              {
+                <MudTextField @bind-Value="_ttsVoice" Label="Voice (Optional)" Variant="Variant.Outlined" Class="mt-3" 
+                              HelperText="e.g., 'en', 'en-US-Standard-A'" />
+              }
 
               <MudStack Row="true" Spacing="2" Class="mt-3">
                 <MudNumericField @bind-Value="_ttsSpeed" Label="Speed" Variant="Variant.Outlined" 
@@ -470,6 +484,7 @@
 
   // TTS
   private List<TTSEngineInfoDto>? _ttsEngines;
+  private List<TTSVoiceInfoDto>? _googleVoices;
   private string _ttsText = string.Empty;
   private string _selectedTTSEngine = "ESpeak";
   private string _ttsVoice = "en";
@@ -620,11 +635,52 @@
       if (_ttsEngines != null && _ttsEngines.Any(e => e.IsAvailable))
       {
         _selectedTTSEngine = _ttsEngines.First(e => e.IsAvailable).Engine;
+        
+        // Load voices if Google is selected
+        if (_selectedTTSEngine == "Google")
+        {
+          await LoadGoogleVoicesAsync();
+        }
       }
     }
     catch (Exception)
     {
       // Silently fail - TTS section will show as unavailable
+    }
+  }
+
+  private async Task OnTTSEngineChangedAsync(string engine)
+  {
+    _selectedTTSEngine = engine;
+    
+    // Load Google voices when Google engine is selected
+    if (engine == "Google")
+    {
+      await LoadGoogleVoicesAsync();
+    }
+    else
+    {
+      _googleVoices = null;
+    }
+    
+    StateHasChanged();
+  }
+
+  private async Task LoadGoogleVoicesAsync()
+  {
+    try
+    {
+      _googleVoices = await SourcesApi.GetTTSVoicesAsync("Google");
+      
+      // Set default voice if available
+      if (_googleVoices != null && _googleVoices.Count > 0)
+      {
+        _ttsVoice = _googleVoices[0].Id;
+      }
+    }
+    catch (Exception)
+    {
+      // Silently fail - voice dropdown will not be shown
     }
   }
 
