@@ -5,6 +5,7 @@ using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Sources.Events;
+using Radio.Infrastructure.Audio.SoundFlow;
 
 namespace Radio.Infrastructure.Audio.Services;
 
@@ -19,6 +20,7 @@ public class TTSFactory : ITTSFactory
   private readonly IOptionsMonitor<TTSOptions> _options;
   private readonly IOptionsMonitor<TTSSecrets> _secrets;
   private readonly IMetricsCollector? _metricsCollector;
+  private readonly SoundFlowPlaybackService? _playbackService;
   private IReadOnlyList<TTSEngineInfo>? _cachedEngines;
 
   /// <summary>
@@ -29,18 +31,21 @@ public class TTSFactory : ITTSFactory
   /// <param name="options">The TTS options.</param>
   /// <param name="secrets">The TTS secrets (API keys).</param>
   /// <param name="metricsCollector">Optional metrics collector for tracking TTS operations.</param>
+  /// <param name="playbackService">Optional playback service for audio output.</param>
   public TTSFactory(
     ILogger<TTSFactory> logger,
     ILogger<TTSEventSource> ttsSourceLogger,
     IOptionsMonitor<TTSOptions> options,
     IOptionsMonitor<TTSSecrets> secrets,
-    IMetricsCollector? metricsCollector = null)
+    IMetricsCollector? metricsCollector = null,
+    SoundFlowPlaybackService? playbackService = null)
   {
     _logger = logger;
     _ttsSourceLogger = ttsSourceLogger;
     _options = options;
     _secrets = secrets;
     _metricsCollector = metricsCollector;
+    _playbackService = playbackService;
   }
 
   /// <inheritdoc/>
@@ -111,7 +116,7 @@ public class TTSFactory : ITTSFactory
     stopwatch.Stop();
     _metricsCollector?.Gauge("tts.latency_ms", stopwatch.ElapsedMilliseconds, providerTag);
 
-    return new TTSEventSource(text, effectiveParams, audioStream, duration, _ttsSourceLogger);
+    return new TTSEventSource(text, effectiveParams, audioStream, duration, _ttsSourceLogger, _playbackService);
   }
 
   /// <inheritdoc/>

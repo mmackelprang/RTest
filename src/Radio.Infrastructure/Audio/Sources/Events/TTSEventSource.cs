@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.SoundFlow;
 
 namespace Radio.Infrastructure.Audio.Sources.Events;
 
@@ -14,8 +15,9 @@ public class TTSEventSource : EventAudioSourceBase
   private readonly Stream _audioStream;
   private readonly TimeSpan _duration;
   private readonly string _name;
+  private readonly SoundFlowPlaybackService? _playbackService;
   private CancellationTokenSource? _playbackCts;
-  private Task? _playbackTask;
+  private Task? _playbackMonitorTask;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="TTSEventSource"/> class.
@@ -25,18 +27,21 @@ public class TTSEventSource : EventAudioSourceBase
   /// <param name="audioStream">The generated audio stream.</param>
   /// <param name="duration">The duration of the audio.</param>
   /// <param name="logger">The logger instance.</param>
+  /// <param name="playbackService">Optional playback service for audio output.</param>
   internal TTSEventSource(
     string text,
     TTSParameters parameters,
     Stream audioStream,
     TimeSpan duration,
-    ILogger<TTSEventSource> logger)
+    ILogger<TTSEventSource> logger,
+    SoundFlowPlaybackService? playbackService = null)
     : base(logger)
   {
     _text = text;
     _parameters = parameters;
     _audioStream = audioStream;
     _duration = duration;
+    _playbackService = playbackService;
 
     // Create a truncated name for display
     var truncatedText = text.Length > 50 ? text[..47] + "..." : text;
@@ -65,8 +70,7 @@ public class TTSEventSource : EventAudioSourceBase
   /// <inheritdoc/>
   public override object GetSoundComponent()
   {
-    // In a full implementation, this would return the SoundFlow node
-    // For now, return the audio stream
+    // Return the audio stream for use by external components
     return _audioStream;
   }
 
@@ -83,8 +87,6 @@ public class TTSEventSource : EventAudioSourceBase
         _audioStream.Position = 0;
       }
 
-      // In a full implementation, we would create a SoundFlow audio node here
-      // For now, we just mark as ready
       State = AudioSourceState.Ready;
       Logger.LogInformation("TTS event source initialized: {Text}", _text);
     }
@@ -105,13 +107,24 @@ public class TTSEventSource : EventAudioSourceBase
 
     try
     {
-      // In a full implementation, this would start playback through SoundFlow
-      // For now, simulate playback by waiting for the duration
-      // (In production, actual audio playback would occur here)
+      // Reset stream position before playback
+      if (_audioStream.CanSeek)
+      {
+        _audioStream.Position = 0;
+      }
 
-      // Start a task that will signal completion after the duration
-      // Store the task so we can await it in disposal
-      _playbackTask = PlaybackLoopAsync(_playbackCts.Token);
+      // Start playback through SoundFlow if available
+      if (_playbackService != null)
+      {
+        // Start playback asynchronously and monitor completion
+        _playbackMonitorTask = StartPlaybackWithMonitoringAsync(_playbackCts.Token);
+      }
+      else
+      {
+        // Fallback: simulate playback by waiting for the duration
+        Logger.LogWarning("No playback service available, simulating TTS playback duration");
+        _playbackMonitorTask = SimulatePlaybackAsync(_playbackCts.Token);
+      }
     }
     catch (Exception ex)
     {
@@ -123,7 +136,73 @@ public class TTSEventSource : EventAudioSourceBase
     return Task.CompletedTask;
   }
 
-  private async Task PlaybackLoopAsync(CancellationToken cancellationToken)
+  private async Task StartPlaybackWithMonitoringAsync(CancellationToken cancellationToken)
+  {
+    try
+    {
+      // Start playback through SoundFlow
+      var success = await _playbackService!.PlayStreamAsync(
+        Id,
+        _audioStream,
+        Volume,
+        cancellationToken);
+
+      if (!success)
+      {
+        Logger.LogError("Failed to start TTS playback through SoundFlow");
+        State = AudioSourceState.Error;
+        OnPlaybackCompleted(PlaybackCompletionReason.Error,
+          new InvalidOperationException("Failed to start audio playback"));
+        return;
+      }
+
+      Logger.LogDebug("TTS playback started, monitoring for completion");
+
+      // Monitor playback until completion or cancellation
+      // Poll the playback service to check if still playing
+      var checkInterval = TimeSpan.FromMilliseconds(100);
+      var elapsed = TimeSpan.Zero;
+
+      while (!cancellationToken.IsCancellationRequested)
+      {
+        // Check if playback is still active
+        if (!_playbackService.IsPlaying(Id))
+        {
+          // Playback finished naturally
+          Logger.LogDebug("TTS playback completed naturally after {Elapsed}", elapsed);
+          State = AudioSourceState.Stopped;
+          OnPlaybackCompleted(PlaybackCompletionReason.EndOfContent);
+          return;
+        }
+
+        // Safety check: if we've exceeded expected duration by 50%, stop
+        if (elapsed > _duration + TimeSpan.FromSeconds(_duration.TotalSeconds * 0.5 + 1))
+        {
+          Logger.LogWarning("TTS playback exceeded expected duration, stopping");
+          await _playbackService.StopAsync(Id, cancellationToken);
+          State = AudioSourceState.Stopped;
+          OnPlaybackCompleted(PlaybackCompletionReason.EndOfContent);
+          return;
+        }
+
+        await Task.Delay(checkInterval, cancellationToken);
+        elapsed += checkInterval;
+      }
+    }
+    catch (OperationCanceledException)
+    {
+      // Playback was stopped via cancellation
+      Logger.LogDebug("TTS playback cancelled");
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error monitoring TTS playback");
+      State = AudioSourceState.Error;
+      OnPlaybackCompleted(PlaybackCompletionReason.Error, ex);
+    }
+  }
+
+  private async Task SimulatePlaybackAsync(CancellationToken cancellationToken)
   {
     try
     {
@@ -144,18 +223,33 @@ public class TTSEventSource : EventAudioSourceBase
   protected override async Task StopCoreAsync(CancellationToken cancellationToken)
   {
     Logger.LogDebug("Stopping TTS playback");
+
+    // Cancel the playback monitoring
     _playbackCts?.Cancel();
 
-    // Wait for the playback task to complete
-    if (_playbackTask != null)
+    // Stop playback through SoundFlow
+    if (_playbackService != null)
     {
       try
       {
-        await _playbackTask.WaitAsync(TimeSpan.FromSeconds(1), cancellationToken);
+        await _playbackService.StopAsync(Id, cancellationToken);
+      }
+      catch (Exception ex)
+      {
+        Logger.LogWarning(ex, "Error stopping TTS playback through SoundFlow");
+      }
+    }
+
+    // Wait for the monitoring task to complete
+    if (_playbackMonitorTask != null)
+    {
+      try
+      {
+        await _playbackMonitorTask.WaitAsync(TimeSpan.FromSeconds(1), cancellationToken);
       }
       catch (TimeoutException)
       {
-        Logger.LogWarning("Playback task did not complete within timeout");
+        Logger.LogWarning("Playback monitor task did not complete within timeout");
       }
       catch (OperationCanceledException)
       {
@@ -167,19 +261,37 @@ public class TTSEventSource : EventAudioSourceBase
   }
 
   /// <inheritdoc/>
-  protected override ValueTask DisposeAsyncCore()
+  protected override async ValueTask DisposeAsyncCore()
   {
     Logger.LogDebug("Disposing TTS event source");
+
+    // Stop playback if still running
+    if (_playbackService != null && _playbackService.IsPlaying(Id))
+    {
+      try
+      {
+        await _playbackService.StopAsync(Id);
+      }
+      catch (Exception ex)
+      {
+        Logger.LogWarning(ex, "Error stopping playback during disposal");
+      }
+    }
+
     _playbackCts?.Cancel();
     _playbackCts?.Dispose();
     _audioStream.Dispose();
-    return ValueTask.CompletedTask;
   }
 
   /// <inheritdoc/>
   protected override void OnVolumeChanged(float volume)
   {
-    // In a full implementation, apply volume to the sound component
     Logger.LogDebug("TTS volume changed to {Volume}", volume);
+
+    // Apply volume to the playback service
+    if (_playbackService != null)
+    {
+      _playbackService.SetVolume(Id, volume);
+    }
   }
 }
