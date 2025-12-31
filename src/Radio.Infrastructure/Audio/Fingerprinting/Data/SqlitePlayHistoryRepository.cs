@@ -309,6 +309,61 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     return rowsAffected > 0;
   }
 
+  /// <inheritdoc/>
+  public async Task<(IReadOnlyList<PlayHistoryEntry> Items, int TotalCount)> SearchAsync(
+    string searchTerm,
+    int? limit = null,
+    int? offset = null,
+    CancellationToken ct = default)
+  {
+    ArgumentException.ThrowIfNullOrWhiteSpace(searchTerm);
+
+    var conn = await _dbContext.GetConnectionAsync(ct);
+    var searchPattern = $"%{searchTerm}%";
+
+    // Get total count
+    var countSql = """
+      SELECT COUNT(*) FROM PlayHistory h
+      LEFT JOIN TrackMetadata m ON h.TrackMetadataId = m.Id
+      WHERE m.Title LIKE @Search COLLATE NOCASE
+         OR m.Artist LIKE @Search COLLATE NOCASE
+         OR m.Album LIKE @Search COLLATE NOCASE
+      """;
+
+    await using var countCmd = conn.CreateCommand();
+    countCmd.CommandText = countSql;
+    countCmd.Parameters.AddWithValue("@Search", searchPattern);
+
+    var totalCount = Convert.ToInt32(await countCmd.ExecuteScalarAsync(ct));
+
+    // Get items with pagination
+    var itemsSql = """
+      SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.Source, h.MetadataSource, h.SourceDetails,
+             h.Duration, h.IdentificationConfidence, h.WasIdentified,
+             m.Title, m.Artist, m.Album, m.AlbumArtist, m.CoverArtUrl
+      FROM PlayHistory h
+      LEFT JOIN TrackMetadata m ON h.TrackMetadataId = m.Id
+      WHERE m.Title LIKE @Search COLLATE NOCASE
+         OR m.Artist LIKE @Search COLLATE NOCASE
+         OR m.Album LIKE @Search COLLATE NOCASE
+      ORDER BY h.PlayedAt DESC
+      LIMIT @Limit OFFSET @Offset
+      """;
+
+    await using var cmd = conn.CreateCommand();
+    cmd.CommandText = itemsSql;
+    cmd.Parameters.AddWithValue("@Search", searchPattern);
+    cmd.Parameters.AddWithValue("@Limit", limit ?? 50);
+    cmd.Parameters.AddWithValue("@Offset", offset ?? 0);
+
+    var items = await ReadPlayHistoryListAsync(cmd, ct);
+
+    _logger.LogDebug("Search for '{SearchTerm}' returned {Count} of {Total} results",
+      searchTerm, items.Count, totalCount);
+
+    return (items, totalCount);
+  }
+
   private static async Task<IReadOnlyList<PlayHistoryEntry>> ReadPlayHistoryListAsync(
     Microsoft.Data.Sqlite.SqliteCommand cmd,
     CancellationToken ct)

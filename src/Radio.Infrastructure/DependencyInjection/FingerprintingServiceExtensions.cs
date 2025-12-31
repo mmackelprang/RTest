@@ -43,6 +43,23 @@ public static class FingerprintingServiceExtensions
     // Register radio preset service (scoped to match repository)
     services.AddScoped<IRadioPresetService, RadioPresetService>();
 
+    // Register AcoustID client as scoped (uses IHttpClientFactory pattern)
+    services.AddScoped<AcoustIdClient>(sp =>
+    {
+      var httpClient = new HttpClient
+      {
+        Timeout = TimeSpan.FromSeconds(
+          configuration.GetSection(FingerprintingOptions.SectionName)
+            .Get<FingerprintingOptions>()?.AcoustId.TimeoutSeconds ?? 10)
+      };
+      httpClient.DefaultRequestHeaders.Add("User-Agent", "RadioConsole/1.0");
+      
+      return new AcoustIdClient(
+        httpClient,
+        sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<AcoustIdClient>>(),
+        sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<FingerprintingOptions>>());
+    });
+
     // Register metadata lookup service as scoped (uses repositories)
     services.AddScoped<IMetadataLookupService, MetadataLookupService>();
 
