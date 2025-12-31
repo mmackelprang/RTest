@@ -11,12 +11,14 @@ namespace Radio.Infrastructure.Audio.Services;
 
 /// <summary>
 /// File browser service for discovering and listing audio files.
+/// Integrates with IAudioFileRepository to track new, modified, and removed files.
 /// </summary>
 public class FileBrowser : IFileBrowser
 {
   private readonly ILogger<FileBrowser> _logger;
   private readonly IOptionsMonitor<FilePlayerOptions> _options;
   private readonly IMetricsCollector? _metricsCollector;
+  private readonly IAudioFileRepository? _audioFileRepository;
   private readonly string _rootDir;
 
   // Supported audio file extensions
@@ -32,16 +34,19 @@ public class FileBrowser : IFileBrowser
   /// <param name="options">The file player options.</param>
   /// <param name="rootDir">The root directory for resolving relative paths.</param>
   /// <param name="metricsCollector">Optional metrics collector for tracking scan operations.</param>
+  /// <param name="audioFileRepository">Optional repository for persisting audio file state.</param>
   public FileBrowser(
     ILogger<FileBrowser> logger,
     IOptionsMonitor<FilePlayerOptions> options,
     string rootDir,
-    IMetricsCollector? metricsCollector = null)
+    IMetricsCollector? metricsCollector = null,
+    IAudioFileRepository? audioFileRepository = null)
   {
     _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     _options = options ?? throw new ArgumentNullException(nameof(options));
     _rootDir = rootDir ?? throw new ArgumentNullException(nameof(rootDir));
     _metricsCollector = metricsCollector;
+    _audioFileRepository = audioFileRepository;
   }
 
   /// <inheritdoc/>
@@ -68,7 +73,13 @@ public class FileBrowser : IFileBrowser
       files.Count, basePath, recursive);
 
     var audioFiles = new List<AudioFileInfo>();
-    var previousCount = 0; // TODO: In a real implementation, this would track existing files from a database
+    
+    // Get previous count from repository if available
+    var previousCount = 0;
+    if (_audioFileRepository != null)
+    {
+      previousCount = await _audioFileRepository.GetCountAsync(cancellationToken);
+    }
 
     foreach (var file in files)
     {
@@ -87,7 +98,26 @@ public class FileBrowser : IFileBrowser
     _metricsCollector?.Gauge("library.tracks_total", audioFiles.Count);
     _metricsCollector?.Gauge("library.scan_duration_ms", stopwatch.ElapsedMilliseconds);
     
-    // Track new files (simplified implementation - in production, this would compare with existing database)
+    // Update repository with current state and track changes
+    if (_audioFileRepository != null)
+    {
+      await _audioFileRepository.UpsertBatchAsync(audioFiles, cancellationToken);
+      
+      // Remove stale files from database that no longer exist on disk
+      var currentPaths = audioFiles.Select(f => f.Path).ToList();
+      var removedCount = await _audioFileRepository.RemoveStaleAsync(
+        path ?? string.Empty,
+        currentPaths,
+        cancellationToken);
+      
+      if (removedCount > 0)
+      {
+        _metricsCollector?.Increment("library.tracks_removed", removedCount);
+        _logger.LogInformation("Removed {Count} stale audio files from database", removedCount);
+      }
+    }
+
+    // Track new files
     var newFilesCount = audioFiles.Count - previousCount;
     if (newFilesCount > 0)
     {
@@ -130,6 +160,101 @@ public class FileBrowser : IFileBrowser
   public string[] GetSupportedExtensions()
   {
     return SupportedExtensions.ToArray();
+  }
+
+  /// <inheritdoc/>
+  public async Task<int> GetFileCountAsync(CancellationToken cancellationToken = default)
+  {
+    if (_audioFileRepository == null)
+    {
+      return 0;
+    }
+
+    return await _audioFileRepository.GetCountAsync(cancellationToken);
+  }
+
+  /// <inheritdoc/>
+  public async Task<FileScanResult> ScanForChangesAsync(
+    string? path = null,
+    bool recursive = false,
+    CancellationToken cancellationToken = default)
+  {
+    var basePath = GetFullPath(path);
+
+    if (!Directory.Exists(basePath))
+    {
+      _logger.LogWarning("Directory not found for scan: {Path}", basePath);
+      return new FileScanResult();
+    }
+
+    var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+    var currentFilePaths = Directory.GetFiles(basePath, "*.*", searchOption)
+      .Where(IsSupportedAudioFile)
+      .ToList();
+
+    // Get current file infos
+    var currentFiles = new List<AudioFileInfo>();
+    foreach (var file in currentFilePaths)
+    {
+      cancellationToken.ThrowIfCancellationRequested();
+      var audioFile = await CreateAudioFileInfoAsync(file, cancellationToken);
+      if (audioFile != null)
+      {
+        currentFiles.Add(audioFile);
+      }
+    }
+
+    if (_audioFileRepository == null)
+    {
+      // No repository - all files are considered new
+      return new FileScanResult
+      {
+        NewFiles = currentFiles,
+        ModifiedFiles = Array.Empty<AudioFileInfo>(),
+        RemovedPaths = Array.Empty<string>(),
+        TotalFiles = currentFiles.Count
+      };
+    }
+
+    // Get previously scanned files from database
+    var previousFiles = await _audioFileRepository.GetByDirectoryAsync(
+      path ?? string.Empty, recursive, cancellationToken);
+    var previousPathSet = previousFiles.ToDictionary(f => f.Path, f => f);
+
+    // Find new and modified files
+    var newFiles = new List<AudioFileInfo>();
+    var modifiedFiles = new List<AudioFileInfo>();
+
+    foreach (var file in currentFiles)
+    {
+      if (!previousPathSet.TryGetValue(file.Path, out var previousFile))
+      {
+        newFiles.Add(file);
+      }
+      else if (file.LastModifiedAt != previousFile.LastModifiedAt)
+      {
+        modifiedFiles.Add(file);
+      }
+    }
+
+    // Find removed files
+    var currentPathSet = currentFiles.Select(f => f.Path).ToHashSet();
+    var removedPaths = previousFiles
+      .Where(f => !currentPathSet.Contains(f.Path))
+      .Select(f => f.Path)
+      .ToList();
+
+    _logger.LogInformation(
+      "Scan complete: {New} new, {Modified} modified, {Removed} removed files",
+      newFiles.Count, modifiedFiles.Count, removedPaths.Count);
+
+    return new FileScanResult
+    {
+      NewFiles = newFiles,
+      ModifiedFiles = modifiedFiles,
+      RemovedPaths = removedPaths,
+      TotalFiles = currentFiles.Count
+    };
   }
 
   /// <summary>

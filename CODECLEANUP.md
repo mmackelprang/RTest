@@ -33,16 +33,16 @@ The Radio Console project has several areas marked with `TODO` or `In a real imp
 
 ## Phase Summary
 
-| Phase | Area | File | Priority | Complexity | Dependencies |
-|-------|------|------|----------|------------|--------------|
-| 1 | FileBrowser Database | `src/Radio.Infrastructure/Audio/Services/FileBrowser.cs` | Medium | Medium | SQLite/Repository |
-| 2 | AudioFileEventSource SoundFlow | `src/Radio.Infrastructure/Audio/Sources/Events/AudioFileEventSource.cs` | High | High | SoundFlow Integration |
-| 3 | FilesController Source Switching | `src/Radio.API/Controllers/FilesController.cs` | Medium | Low | IAudioManager |
-| 4 | AcoustID API | `src/Radio.Infrastructure/Audio/Fingerprinting/MetadataLookupService.cs` | Low | High | HTTP Client, API Key |
-| 5 | PlayHistory Search | `src/Radio.API/Controllers/PlayHistoryController.cs` | Medium | Medium | Repository Pattern |
-| 6 | RadioFactory Device Enum | `src/Radio.Infrastructure/Audio/Factories/RadioFactory.cs` | Low | Medium | RTL-SDR API |
-| 7 | TTSFactory Azure API | `src/Radio.Infrastructure/Audio/Services/TTSFactory.cs` | Low | Medium | Azure SDK |
-| 8 | FilePlayerAudioSource Playback | `src/Radio.Infrastructure/Audio/Sources/Primary/FilePlayerAudioSource.cs` | High | High | SoundFlow Integration |
+| Phase | Area | File | Priority | Complexity | Status |
+|-------|------|------|----------|------------|--------|
+| 1 | FileBrowser Database | `src/Radio.Infrastructure/Audio/Services/FileBrowser.cs` | Medium | Medium | ✅ Complete |
+| 2 | AudioFileEventSource SoundFlow | `src/Radio.Infrastructure/Audio/Sources/Events/AudioFileEventSource.cs` | High | High | 🔲 Pending |
+| 3 | FilesController Source Switching | `src/Radio.API/Controllers/FilesController.cs` | Medium | Low | 🔲 Pending |
+| 4 | AcoustID API | `src/Radio.Infrastructure/Audio/Fingerprinting/MetadataLookupService.cs` | Low | High | 🔲 Pending |
+| 5 | PlayHistory Search | `src/Radio.API/Controllers/PlayHistoryController.cs` | Medium | Medium | 🔲 Pending |
+| 6 | RadioFactory Device Enum | `src/Radio.Infrastructure/Audio/Factories/RadioFactory.cs` | Low | Medium | 🔲 Pending |
+| 7 | TTSFactory Azure API | `src/Radio.Infrastructure/Audio/Services/TTSFactory.cs` | Low | Medium | 🔲 Pending |
+| 8 | FilePlayerAudioSource Playback | `src/Radio.Infrastructure/Audio/Sources/Primary/FilePlayerAudioSource.cs` | High | High | 🔲 Pending |
 
 ---
 

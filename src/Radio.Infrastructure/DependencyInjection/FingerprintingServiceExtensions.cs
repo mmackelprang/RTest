@@ -35,6 +35,7 @@ public static class FingerprintingServiceExtensions
     services.AddScoped<ITrackMetadataRepository, SqliteTrackMetadataRepository>();
     services.AddScoped<IPlayHistoryRepository, SqlitePlayHistoryRepository>();
     services.AddScoped<IRadioPresetRepository, SqliteRadioPresetRepository>();
+    services.AddScoped<IAudioFileRepository, SqliteAudioFileRepository>();
 
     // Register fingerprint service
     services.AddSingleton<IFingerprintService, MockFingerprintService>();
