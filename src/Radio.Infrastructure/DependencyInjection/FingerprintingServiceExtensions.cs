@@ -62,7 +62,8 @@ public static class FingerprintingServiceExtensions
       return new AcoustIdClient(
         httpClient,
         sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<AcoustIdClient>>(),
-        sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<FingerprintingOptions>>());
+        sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<FingerprintingOptions>>(),
+        ownsHttpClient: true); // HttpClient is created here, so client owns it
     });
 
     // Register metadata lookup service as scoped (uses repositories)

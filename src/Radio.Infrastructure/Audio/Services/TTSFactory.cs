@@ -13,7 +13,7 @@ namespace Radio.Infrastructure.Audio.Services;
 /// Factory for creating TTS audio sources.
 /// Supports eSpeak (offline), Google Cloud TTS, and Azure TTS engines.
 /// </summary>
-public class TTSFactory : ITTSFactory
+public class TTSFactory : ITTSFactory, IDisposable
 {
   private readonly ILogger<TTSFactory> _logger;
   private readonly ILogger<TTSEventSource> _ttsSourceLogger;
@@ -688,5 +688,14 @@ public class TTSFactory : ITTSFactory
     var seconds = (double)audioBytes / bytesPerSecond;
 
     return TimeSpan.FromSeconds(seconds);
+  }
+
+  /// <summary>
+  /// Disposes the factory resources.
+  /// </summary>
+  public void Dispose()
+  {
+    _azureVoiceCacheLock.Dispose();
+    GC.SuppressFinalize(this);
   }
 }

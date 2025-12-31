@@ -590,12 +590,12 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
         // Fallback: wait and check periodically
         while (!cancellationToken.IsCancellationRequested)
         {
-          if (_playbackService != null && _playbackId != null)
+          // Combine if statements for clarity
+          if (_playbackService != null &&
+              _playbackId != null &&
+              !_playbackService.IsPlaying(_playbackId))
           {
-            if (!_playbackService.IsPlaying(_playbackId))
-            {
-              break;
-            }
+            break;
           }
           await Task.Delay(500, cancellationToken);
         }
@@ -708,6 +708,25 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   {
     // Cancel playback monitoring
     _playbackCts?.Cancel();
+
+    // Await the playback monitor task to complete before disposing resources
+    if (_playbackMonitorTask != null)
+    {
+      try
+      {
+        await _playbackMonitorTask;
+      }
+      catch (OperationCanceledException)
+      {
+        // Expected when cancellation is requested
+      }
+      catch (Exception ex)
+      {
+        Logger.LogWarning(ex, "Error awaiting playback monitor task during disposal");
+      }
+      _playbackMonitorTask = null;
+    }
+
     _playbackCts?.Dispose();
     _playbackCts = null;
 

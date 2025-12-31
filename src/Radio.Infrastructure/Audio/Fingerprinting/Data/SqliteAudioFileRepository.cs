@@ -52,28 +52,22 @@ public sealed class SqliteAudioFileRepository : IAudioFileRepository
   {
     var conn = await _dbContext.GetConnectionAsync(ct);
 
-    string sql;
-    if (recursive)
-    {
-      sql = """
+    // Use ternary for simpler assignment
+    var sql = recursive
+      ? """
         SELECT Path, FileName, Extension, SizeBytes, CreatedAt, LastModifiedAt,
                Title, Artist, Album, Duration, TrackNumber, Genre, Year
         FROM AudioFiles
         WHERE Path LIKE @DirPattern
         ORDER BY Path
-        """;
-    }
-    else
-    {
-      // For non-recursive, match files where the directory part equals the specified directory
-      sql = """
+        """
+      : """
         SELECT Path, FileName, Extension, SizeBytes, CreatedAt, LastModifiedAt,
                Title, Artist, Album, Duration, TrackNumber, Genre, Year
         FROM AudioFiles
         WHERE Path LIKE @DirPattern AND Path NOT LIKE @SubDirPattern
         ORDER BY Path
         """;
-    }
 
     await using var cmd = conn.CreateCommand();
     cmd.CommandText = sql;
@@ -175,14 +169,46 @@ public sealed class SqliteAudioFileRepository : IAudioFileRepository
           ScannedAt = excluded.ScannedAt
         """;
 
+      // Reuse a single command and update parameters for each file to reduce allocations
+      await using var cmd = conn.CreateCommand();
+      cmd.CommandText = sql;
+      cmd.Transaction = (Microsoft.Data.Sqlite.SqliteTransaction)transaction;
+
+      // Pre-create parameters once
+      var pathParam = cmd.Parameters.Add("@Path", Microsoft.Data.Sqlite.SqliteType.Text);
+      var fileNameParam = cmd.Parameters.Add("@FileName", Microsoft.Data.Sqlite.SqliteType.Text);
+      var extensionParam = cmd.Parameters.Add("@Extension", Microsoft.Data.Sqlite.SqliteType.Text);
+      var sizeBytesParam = cmd.Parameters.Add("@SizeBytes", Microsoft.Data.Sqlite.SqliteType.Integer);
+      var createdAtParam = cmd.Parameters.Add("@CreatedAt", Microsoft.Data.Sqlite.SqliteType.Text);
+      var lastModifiedAtParam = cmd.Parameters.Add("@LastModifiedAt", Microsoft.Data.Sqlite.SqliteType.Text);
+      var titleParam = cmd.Parameters.Add("@Title", Microsoft.Data.Sqlite.SqliteType.Text);
+      var artistParam = cmd.Parameters.Add("@Artist", Microsoft.Data.Sqlite.SqliteType.Text);
+      var albumParam = cmd.Parameters.Add("@Album", Microsoft.Data.Sqlite.SqliteType.Text);
+      var durationParam = cmd.Parameters.Add("@Duration", Microsoft.Data.Sqlite.SqliteType.Integer);
+      var trackNumberParam = cmd.Parameters.Add("@TrackNumber", Microsoft.Data.Sqlite.SqliteType.Integer);
+      var genreParam = cmd.Parameters.Add("@Genre", Microsoft.Data.Sqlite.SqliteType.Text);
+      var yearParam = cmd.Parameters.Add("@Year", Microsoft.Data.Sqlite.SqliteType.Integer);
+      var scannedAtParam = cmd.Parameters.Add("@ScannedAt", Microsoft.Data.Sqlite.SqliteType.Text);
+
       foreach (var file in files)
       {
         ct.ThrowIfCancellationRequested();
 
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = sql;
-        cmd.Transaction = (Microsoft.Data.Sqlite.SqliteTransaction)transaction;
-        AddAudioFileParameters(cmd, file);
+        // Update parameter values
+        pathParam.Value = file.Path;
+        fileNameParam.Value = file.FileName;
+        extensionParam.Value = file.Extension;
+        sizeBytesParam.Value = file.SizeBytes;
+        createdAtParam.Value = file.CreatedAt.ToString("O");
+        lastModifiedAtParam.Value = file.LastModifiedAt.ToString("O");
+        titleParam.Value = (object?)file.Title ?? DBNull.Value;
+        artistParam.Value = (object?)file.Artist ?? DBNull.Value;
+        albumParam.Value = (object?)file.Album ?? DBNull.Value;
+        durationParam.Value = file.Duration.HasValue ? (object)file.Duration.Value.TotalMilliseconds : DBNull.Value;
+        trackNumberParam.Value = (object?)file.TrackNumber ?? DBNull.Value;
+        genreParam.Value = (object?)file.Genre ?? DBNull.Value;
+        yearParam.Value = (object?)file.Year ?? DBNull.Value;
+        scannedAtParam.Value = DateTimeOffset.UtcNow.ToString("O");
 
         await cmd.ExecuteNonQueryAsync(ct);
       }
@@ -241,23 +267,36 @@ public sealed class SqliteAudioFileRepository : IAudioFileRepository
 
     try
     {
-      var removedCount = 0;
-      foreach (var stalePath in stalePaths)
+      ct.ThrowIfCancellationRequested();
+
+      var totalRemoved = 0;
+
+      // SQLite has a parameter limit of ~999, so batch deletes for large collections
+      const int batchSize = 500;
+      for (var batchStart = 0; batchStart < stalePaths.Count; batchStart += batchSize)
       {
-        ct.ThrowIfCancellationRequested();
+        var batch = stalePaths.Skip(batchStart).Take(batchSize).ToList();
 
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM AudioFiles WHERE Path = @Path";
         cmd.Transaction = (Microsoft.Data.Sqlite.SqliteTransaction)transaction;
-        cmd.Parameters.AddWithValue("@Path", stalePath);
 
-        removedCount += await cmd.ExecuteNonQueryAsync(ct);
+        var parameterNames = new List<string>(batch.Count);
+        for (var i = 0; i < batch.Count; i++)
+        {
+          var parameterName = $"@p{i}";
+          parameterNames.Add(parameterName);
+          cmd.Parameters.AddWithValue(parameterName, batch[i]);
+        }
+
+        cmd.CommandText = $"DELETE FROM AudioFiles WHERE Path IN ({string.Join(",", parameterNames)})";
+
+        totalRemoved += await cmd.ExecuteNonQueryAsync(ct);
       }
 
       await transaction.CommitAsync(ct);
-      _logger.LogInformation("Removed {Count} stale audio files from directory: {Directory}", removedCount, directoryPath);
+      _logger.LogInformation("Removed {Count} stale audio files from directory: {Directory}", totalRemoved, directoryPath);
 
-      return removedCount;
+      return totalRemoved;
     }
     catch
     {
@@ -284,32 +323,51 @@ public sealed class SqliteAudioFileRepository : IAudioFileRepository
     CancellationToken ct = default)
   {
     var conn = await _dbContext.GetConnectionAsync(ct);
-    var staleFiles = new List<AudioFileInfo>();
+    var filesList = currentFiles.ToList();
 
-    foreach (var (path, lastModified) in currentFiles)
+    if (filesList.Count == 0)
     {
-      ct.ThrowIfCancellationRequested();
-
-      var sql = """
-        SELECT Path, FileName, Extension, SizeBytes, CreatedAt, LastModifiedAt,
-               Title, Artist, Album, Duration, TrackNumber, Genre, Year
-        FROM AudioFiles
-        WHERE Path = @Path AND LastModifiedAt != @LastModified
-        """;
-
-      await using var cmd = conn.CreateCommand();
-      cmd.CommandText = sql;
-      cmd.Parameters.AddWithValue("@Path", path);
-      cmd.Parameters.AddWithValue("@LastModified", lastModified.ToString("O"));
-
-      await using var reader = await cmd.ExecuteReaderAsync(ct);
-      if (await reader.ReadAsync(ct))
-      {
-        staleFiles.Add(MapToAudioFileInfo(reader));
-      }
+      return Array.Empty<AudioFileInfo>();
     }
 
-    return staleFiles;
+    var allResults = new List<AudioFileInfo>();
+
+    // SQLite has a parameter limit of ~999, so batch queries for large collections
+    // Each file needs 2 parameters (path and modified), so use batch size of 250
+    const int batchSize = 250;
+
+    for (var batchStart = 0; batchStart < filesList.Count; batchStart += batchSize)
+    {
+      var batch = filesList.Skip(batchStart).Take(batchSize).ToList();
+
+      await using var cmd = conn.CreateCommand();
+
+      for (var i = 0; i < batch.Count; i++)
+      {
+        var (path, lastModified) = batch[i];
+        cmd.Parameters.AddWithValue($"@p{i}", path);
+        cmd.Parameters.AddWithValue($"@m{i}", lastModified.ToString("O"));
+      }
+
+      // Build VALUES clause for the expected file list
+      var valuesClauses = batch.Select((_, i) => $"(@p{i}, @m{i})");
+
+      cmd.CommandText = $"""
+        WITH ExpectedFiles(Path, ExpectedModified) AS (
+          VALUES {string.Join(", ", valuesClauses)}
+        )
+        SELECT af.Path, af.FileName, af.Extension, af.SizeBytes, af.CreatedAt, af.LastModifiedAt,
+               af.Title, af.Artist, af.Album, af.Duration, af.TrackNumber, af.Genre, af.Year
+        FROM AudioFiles af
+        INNER JOIN ExpectedFiles ef ON af.Path = ef.Path
+        WHERE af.LastModifiedAt != ef.ExpectedModified
+        """;
+
+      var batchResults = await ReadAudioFileListAsync(cmd, ct);
+      allResults.AddRange(batchResults);
+    }
+
+    return allResults;
   }
 
   private static async Task<IReadOnlyList<AudioFileInfo>> ReadAudioFileListAsync(

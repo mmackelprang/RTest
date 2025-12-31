@@ -16,6 +16,7 @@ public sealed class AcoustIdClient : IDisposable
   private readonly HttpClient _httpClient;
   private readonly ILogger<AcoustIdClient> _logger;
   private readonly FingerprintingOptions _options;
+  private readonly bool _ownsHttpClient;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="AcoustIdClient"/> class.
@@ -23,14 +24,17 @@ public sealed class AcoustIdClient : IDisposable
   /// <param name="httpClient">The HTTP client.</param>
   /// <param name="logger">The logger instance.</param>
   /// <param name="options">The fingerprinting options.</param>
+  /// <param name="ownsHttpClient">Whether this instance owns (and should dispose) the HttpClient.</param>
   public AcoustIdClient(
     HttpClient httpClient,
     ILogger<AcoustIdClient> logger,
-    IOptions<FingerprintingOptions> options)
+    IOptions<FingerprintingOptions> options,
+    bool ownsHttpClient = true)
   {
     _httpClient = httpClient;
     _logger = logger;
     _options = options.Value;
+    _ownsHttpClient = ownsHttpClient;
   }
 
   /// <summary>
@@ -65,8 +69,8 @@ public sealed class AcoustIdClient : IDisposable
       };
 
       var baseUrl = _options.AcoustId.BaseUrl.TrimEnd('/');
-      var content = new FormUrlEncodedContent(queryParams);
-      var httpResponse = await _httpClient.PostAsync($"{baseUrl}{LookupEndpoint}", content, ct);
+      using var content = new FormUrlEncodedContent(queryParams);
+      using var httpResponse = await _httpClient.PostAsync($"{baseUrl}{LookupEndpoint}", content, ct);
       httpResponse.EnsureSuccessStatusCode();
 
       var response = await httpResponse.Content.ReadFromJsonAsync<AcoustIdResponse>(ct);
@@ -131,7 +135,12 @@ public sealed class AcoustIdClient : IDisposable
   /// <inheritdoc/>
   public void Dispose()
   {
-    // HttpClient is typically managed by HttpClientFactory, so we don't dispose it here
+    // Only dispose the HttpClient if this instance owns it.
+    // If HttpClient was provided via IHttpClientFactory, it should not be disposed here.
+    if (_ownsHttpClient)
+    {
+      _httpClient.Dispose();
+    }
   }
 }
 
