@@ -4,6 +4,8 @@
 @inject AudioStateHubService HubService
 @inject AudioApiService AudioApi
 @inject ConfigurationApiService ConfigApi
+@inject FileApiService FileApi
+@inject IDialogService DialogService
 @inject ILogger<QueuePage> Logger
 @inject ISnackbar Snackbar
 @implements IAsyncDisposable
@@ -14,6 +16,12 @@
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
     <MudText Typo="Typo.h4">Queue</MudText>
     <div style="display: flex; gap: 12px;">
+      <MudButton Variant="Variant.Filled" 
+                 Color="Color.Primary" 
+                 OnClick="OpenFileSelectionDialogAsync"
+                 StartIcon="@Icons.Material.Filled.Add">
+        Add Files
+      </MudButton>
       @if (_canReorderQueue && _queueItems.Any())
       {
         <MudButton Size="Size.Small" 
@@ -36,7 +44,14 @@
     <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-secondary);">
       <MudIcon Icon="@Icons.Material.Filled.QueueMusic" Style="font-size: 120px; margin-bottom: 16px; opacity: 0.5;" />
       <MudText Typo="Typo.h5">No tracks in queue</MudText>
-      <MudText Typo="Typo.body1" Style="margin-top: 8px;">Add tracks from Spotify or File Browser</MudText>
+      <MudText Typo="Typo.body1" Style="margin-top: 8px; margin-bottom: 24px;">Add tracks from the File Browser or click the button below</MudText>
+      <MudButton Variant="Variant.Filled" 
+                 Color="Color.Primary" 
+                 OnClick="OpenFileSelectionDialogAsync"
+                 StartIcon="@Icons.Material.Filled.Add"
+                 Size="Size.Large">
+        Add Files to Queue
+      </MudButton>
     </div>
   }
   else if (_isDragEnabled && _canReorderQueue)
@@ -313,6 +328,42 @@
       return baseStyle + " border-left: 4px solid var(--mud-palette-primary);";
     }
     return baseStyle;
+  }
+
+  private async Task OpenFileSelectionDialogAsync()
+  {
+    var parameters = new DialogParameters();
+    var options = new DialogOptions
+    {
+      CloseButton = true,
+      MaxWidth = MaxWidth.Medium,
+      FullWidth = true
+    };
+
+    var dialog = await DialogService.ShowAsync<Radio.Web.Components.Dialogs.AudioFileSelectionDialog>("Add File to Queue", parameters, options);
+    var result = await dialog.Result;
+
+    if (result != null && !result.Canceled && result.Data is string selectedPath)
+    {
+      try
+      {
+        var success = await FileApi.AddFileToQueueAsync(selectedPath);
+        if (success)
+        {
+          Snackbar.Add("File added to queue", Severity.Success);
+          await RefreshQueueAsync();
+        }
+        else
+        {
+          Snackbar.Add("Failed to add file to queue", Severity.Error);
+        }
+      }
+      catch (Exception ex)
+      {
+        Logger.LogError(ex, "Failed to add file to queue");
+        Snackbar.Add("Error adding file to queue", Severity.Error);
+      }
+    }
   }
 
   public async ValueTask DisposeAsync()
