@@ -35,14 +35,14 @@ The Radio Console project has several areas marked with `TODO` or `In a real imp
 
 | Phase | Area | File | Priority | Complexity | Dependencies |
 |-------|------|------|----------|------------|--------------|
-| 1 | FileBrowser Database | `FileBrowser.cs` | Medium | Medium | SQLite/Repository |
-| 2 | AudioFileEventSource SoundFlow | `AudioFileEventSource.cs` | High | High | SoundFlow Integration |
-| 3 | FilesController Source Switching | `FilesController.cs` | Medium | Low | IAudioManager |
-| 4 | AcoustID API | `MetadataLookupService.cs` | Low | High | HTTP Client, API Key |
-| 5 | PlayHistory Search | `PlayHistoryController.cs` | Medium | Medium | Repository Pattern |
-| 6 | RadioFactory Device Enum | `RadioFactory.cs` | Low | Medium | RTL-SDR API |
-| 7 | TTSFactory Azure API | `TTSFactory.cs` | Low | Medium | Azure SDK |
-| 8 | FilePlayerAudioSource Playback | `FilePlayerAudioSource.cs` | High | High | SoundFlow Integration |
+| 1 | FileBrowser Database | `src/Radio.Infrastructure/Audio/Services/FileBrowser.cs` | Medium | Medium | SQLite/Repository |
+| 2 | AudioFileEventSource SoundFlow | `src/Radio.Infrastructure/Audio/Sources/Events/AudioFileEventSource.cs` | High | High | SoundFlow Integration |
+| 3 | FilesController Source Switching | `src/Radio.API/Controllers/FilesController.cs` | Medium | Low | IAudioManager |
+| 4 | AcoustID API | `src/Radio.Infrastructure/Audio/Fingerprinting/MetadataLookupService.cs` | Low | High | HTTP Client, API Key |
+| 5 | PlayHistory Search | `src/Radio.API/Controllers/PlayHistoryController.cs` | Medium | Medium | Repository Pattern |
+| 6 | RadioFactory Device Enum | `src/Radio.Infrastructure/Audio/Factories/RadioFactory.cs` | Low | Medium | RTL-SDR API |
+| 7 | TTSFactory Azure API | `src/Radio.Infrastructure/Audio/Services/TTSFactory.cs` | Low | Medium | Azure SDK |
+| 8 | FilePlayerAudioSource Playback | `src/Radio.Infrastructure/Audio/Sources/Primary/FilePlayerAudioSource.cs` | High | High | SoundFlow Integration |
 
 ---
 
@@ -503,11 +503,22 @@ Complete the source switching implementation in FilesController.
 
 #### 1. Update FilesController Constructor
 
-Inject IAudioManager:
+Inject IAudioManager (note: using optional injection pattern consistent with existing codebase):
 
 ```csharp
 private readonly IAudioManager? _audioManager;
 
+/// <summary>
+/// Initializes a new instance of the FilesController.
+/// </summary>
+/// <param name="logger">The logger instance.</param>
+/// <param name="audioEngine">The audio engine.</param>
+/// <param name="fileBrowser">The file browser service.</param>
+/// <param name="queueService">The queue service.</param>
+/// <param name="audioManager">
+/// Optional audio manager. When null, source switching is not available.
+/// This is expected during phased rollout before IAudioManager is fully implemented.
+/// </param>
 public FilesController(
   ILogger<FilesController> logger,
   IAudioEngine audioEngine,
@@ -708,15 +719,24 @@ public sealed class AcoustIdClient : IDisposable
       return null;
     }
     
-    var requestUrl = $"{BaseUrl}?client={_apiKey}" +
-      $"&meta=recordings+releasegroups+compress" +
-      $"&duration={duration}" +
-      $"&fingerprint={Uri.EscapeDataString(fingerprint)}";
-    
     try
     {
-      var response = await _httpClient.GetFromJsonAsync<AcoustIdResponse>(
-        requestUrl, ct);
+      // Build URL with proper encoding for fingerprint data
+      // Note: Fingerprints can be very long, so we use POST for larger payloads
+      // which properly encodes all parameters
+      var queryParams = new Dictionary<string, string>
+      {
+        ["client"] = _apiKey,
+        ["meta"] = "recordings+releasegroups+compress",
+        ["duration"] = duration.ToString(),
+        ["fingerprint"] = fingerprint
+      };
+      
+      var content = new FormUrlEncodedContent(queryParams);
+      var httpResponse = await _httpClient.PostAsync(BaseUrl, content, ct);
+      httpResponse.EnsureSuccessStatusCode();
+      
+      var response = await httpResponse.Content.ReadFromJsonAsync<AcoustIdResponse>(ct);
       
       if (response?.Status != "ok" || response.Results == null)
       {
@@ -1065,7 +1085,8 @@ public async Task<(IReadOnlyList<PlayHistoryEntry> Items, int TotalCount)> Searc
   countCommand.Parameters.AddWithValue("@search", searchPattern);
   var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync(ct));
   
-  // Get paginated results
+  // Get paginated results using parameterized queries for LIMIT and OFFSET
+  // to prevent SQL injection
   var query = @"
     SELECT ph.*, tm.*
     FROM PlayHistory ph
@@ -1073,22 +1094,15 @@ public async Task<(IReadOnlyList<PlayHistoryEntry> Items, int TotalCount)> Searc
     WHERE tm.Title LIKE @search COLLATE NOCASE
        OR tm.Artist LIKE @search COLLATE NOCASE
        OR tm.Album LIKE @search COLLATE NOCASE
-    ORDER BY ph.PlayedAt DESC";
-  
-  if (limit.HasValue)
-  {
-    query += $" LIMIT {limit.Value}";
-  }
-  
-  if (offset.HasValue)
-  {
-    query += $" OFFSET {offset.Value}";
-  }
+    ORDER BY ph.PlayedAt DESC
+    LIMIT @limit OFFSET @offset";
   
   var entries = new List<PlayHistoryEntry>();
   
   await using var command = new SqliteCommand(query, connection);
   command.Parameters.AddWithValue("@search", searchPattern);
+  command.Parameters.AddWithValue("@limit", limit ?? -1); // -1 means no limit in SQLite
+  command.Parameters.AddWithValue("@offset", offset ?? 0);
   
   await using var reader = await command.ExecuteReaderAsync(ct);
   while (await reader.ReadAsync(ct))
