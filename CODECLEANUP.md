@@ -721,9 +721,9 @@ public sealed class AcoustIdClient : IDisposable
     
     try
     {
-      // Build URL with proper encoding for fingerprint data
-      // Note: Fingerprints can be very long, so we use POST for larger payloads
-      // which properly encodes all parameters
+      // Use POST for fingerprint data because fingerprints can be very long
+      // (potentially thousands of characters) and may exceed URL length limits
+      // FormUrlEncodedContent handles the encoding for all parameters
       var queryParams = new Dictionary<string, string>
       {
         ["client"] = _apiKey,
@@ -1085,8 +1085,10 @@ public async Task<(IReadOnlyList<PlayHistoryEntry> Items, int TotalCount)> Searc
   countCommand.Parameters.AddWithValue("@search", searchPattern);
   var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync(ct));
   
-  // Get paginated results using parameterized queries for LIMIT and OFFSET
-  // to prevent SQL injection
+  // Get paginated results
+  // Note: Parameterized LIMIT/OFFSET requires SQLite 3.8.0+ (2014)
+  // If using older SQLite, validate inputs are non-negative integers
+  // and use string formatting instead
   var query = @"
     SELECT ph.*, tm.*
     FROM PlayHistory ph
@@ -1101,7 +1103,9 @@ public async Task<(IReadOnlyList<PlayHistoryEntry> Items, int TotalCount)> Searc
   
   await using var command = new SqliteCommand(query, connection);
   command.Parameters.AddWithValue("@search", searchPattern);
-  command.Parameters.AddWithValue("@limit", limit ?? -1); // -1 means no limit in SQLite
+  // For SQLite 3.8.0+, LIMIT -1 means no limit
+  // For older versions, use a large number like 999999999
+  command.Parameters.AddWithValue("@limit", limit ?? -1);
   command.Parameters.AddWithValue("@offset", offset ?? 0);
   
   await using var reader = await command.ExecuteReaderAsync(ct);
