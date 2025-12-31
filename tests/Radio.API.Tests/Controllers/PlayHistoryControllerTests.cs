@@ -28,8 +28,9 @@ public class PlayHistoryControllerTests : IClassFixture<WebApplicationFactory<Pr
     // Assert
     Assert.True(response.IsSuccessStatusCode, $"Expected success, got {response.StatusCode}");
 
-    var entries = await response.Content.ReadFromJsonAsync<List<PlayHistoryEntryDto>>();
-    Assert.NotNull(entries);
+    var result = await response.Content.ReadFromJsonAsync<PlayHistoryListDto>();
+    Assert.NotNull(result);
+    Assert.NotNull(result.Items);
   }
 
   [Fact]
