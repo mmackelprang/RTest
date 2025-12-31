@@ -1125,4 +1125,71 @@ See [API Reference](design/API_REFERENCE.md) for detailed API documentation.
 
 ---
 
-*Last Updated: 2025-12-04*
+*Last Updated: 2025-12-31*
+
+---
+
+## New Configuration Items (Code Cleanup Phase)
+
+The following configuration items were added or updated as part of the Code Cleanup and Production Readiness implementation:
+
+### AudioFiles Database Table (Phase 1)
+
+Audio file metadata is now stored in the fingerprint database for tracking changes and deduplication.
+
+**Table:** `AudioFiles`  
+**Location:** `fingerprints.db` (part of FingerprintDbContext)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `Id` | INTEGER PRIMARY KEY | Unique identifier |
+| `Path` | TEXT NOT NULL UNIQUE | Full path to the audio file |
+| `FileName` | TEXT NOT NULL | File name only |
+| `Extension` | TEXT NOT NULL | File extension |
+| `SizeBytes` | INTEGER NOT NULL | File size in bytes |
+| `CreatedAt` | TEXT NOT NULL | File creation timestamp (ISO 8601) |
+| `LastModifiedAt` | TEXT NOT NULL | File last modified timestamp |
+| `Title` | TEXT | Track title (from metadata) |
+| `Artist` | TEXT | Artist name (from metadata) |
+| `Album` | TEXT | Album name (from metadata) |
+| `Duration` | INTEGER | Duration in milliseconds |
+| `TrackNumber` | INTEGER | Track number |
+| `Genre` | TEXT | Genre |
+| `Year` | INTEGER | Release year |
+| `ScannedAt` | TEXT NOT NULL | When the file was last scanned |
+
+### Azure TTS Voice Caching (Phase 7)
+
+Azure TTS voices are now fetched from the Azure Speech REST API with a 24-hour cache to reduce API calls.
+
+**Behavior:**
+- First request to get voices will call the Azure API
+- Results are cached for 24 hours
+- If Azure credentials are not configured, defaults to a hardcoded list of common neural voices
+- If the API call fails, falls back to defaults
+
+**Required Secrets:**
+- `azure_tts_key`: Azure Cognitive Services Speech API key
+- `azure_tts_region`: Azure region (e.g., "eastus")
+
+### RTL-SDR Device Caching (Phase 6)
+
+RTL-SDR device enumeration now uses a 30-second cache to reduce repeated device queries.
+
+**Behavior:**
+- Devices are enumerated on first request
+- Cache expires after 30 seconds
+- Call `RadioFactory.InvalidateDeviceCache()` to force re-enumeration
+- Always includes a mock device for development/testing
+
+### SoundFlow Playback Integration (Phases 2, 8)
+
+Audio playback now uses the SoundFlow engine via `SoundFlowPlaybackService`.
+
+**Components Updated:**
+- `AudioFileEventSource`: Event sounds play through SoundFlow
+- `FilePlayerAudioSource`: Music files play through SoundFlow
+- `AudioManager`: Now accepts `SoundFlowPlaybackService` for source creation
+
+**Configuration:**
+No additional configuration required - SoundFlow uses the AudioEngine configuration options.

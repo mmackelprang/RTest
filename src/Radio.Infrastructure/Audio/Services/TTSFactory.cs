@@ -552,6 +552,9 @@ public class TTSFactory : ITTSFactory
       try
       {
         // Call Azure Cognitive Services REST API to list voices
+        // Note: HttpClient is created directly in a using block rather than using IHttpClientFactory
+        // because this API call is cached for 24 hours and made very infrequently.
+        // The using pattern ensures proper disposal after each call.
         using var httpClient = new HttpClient();
         httpClient.Timeout = TimeSpan.FromSeconds(10);
         httpClient.DefaultRequestHeaders.Add("Ocp-Apim-Subscription-Key", apiKey);

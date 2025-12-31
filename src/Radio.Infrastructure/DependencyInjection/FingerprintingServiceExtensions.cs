@@ -43,7 +43,12 @@ public static class FingerprintingServiceExtensions
     // Register radio preset service (scoped to match repository)
     services.AddScoped<IRadioPresetService, RadioPresetService>();
 
-    // Register AcoustID client as scoped (uses IHttpClientFactory pattern)
+    // Register AcoustID client as scoped
+    // Note: HttpClient is created directly rather than using IHttpClientFactory due to
+    // package version constraints. This is acceptable because:
+    // 1. AcoustID lookups are infrequent (once per fingerprint, rate-limited to 3/sec)
+    // 2. The client is scoped, so HttpClient instances are tied to request lifetime
+    // 3. Adding IHttpClientFactory would require upgrading Microsoft.Extensions packages
     services.AddScoped<AcoustIdClient>(sp =>
     {
       var httpClient = new HttpClient

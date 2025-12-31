@@ -608,6 +608,8 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
         OnPlaybackCompleted(PlaybackCompletionReason.EndOfContent);
 
         // Auto-advance to next track if queue is not empty
+        // Use CancellationToken.None because auto-advance should proceed even if the
+        // original playback token was cancelled (the song completed naturally)
         if (_playlist.Count > 0)
         {
           await NextAsync(CancellationToken.None);
@@ -625,7 +627,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   }
 
   /// <inheritdoc/>
-  protected override async Task PauseCoreAsync(CancellationToken cancellationToken)
+  protected override Task PauseCoreAsync(CancellationToken cancellationToken)
   {
     Logger.LogDebug("Pausing file playback at {Position}", _position);
 
@@ -634,11 +636,11 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       _playbackService.Pause(_playbackId);
     }
 
-    await Task.CompletedTask;
+    return Task.CompletedTask;
   }
 
   /// <inheritdoc/>
-  protected override async Task ResumeCoreAsync(CancellationToken cancellationToken)
+  protected override Task ResumeCoreAsync(CancellationToken cancellationToken)
   {
     Logger.LogDebug("Resuming file playback from {Position}", _position);
 
@@ -647,7 +649,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       _playbackService.Resume(_playbackId);
     }
 
-    await Task.CompletedTask;
+    return Task.CompletedTask;
   }
 
   /// <inheritdoc/>
