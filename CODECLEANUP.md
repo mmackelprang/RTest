@@ -36,8 +36,8 @@ The Radio Console project has several areas marked with `TODO` or `In a real imp
 | Phase | Area | File | Priority | Complexity | Status |
 |-------|------|------|----------|------------|--------|
 | 1 | FileBrowser Database | `src/Radio.Infrastructure/Audio/Services/FileBrowser.cs` | Medium | Medium | ✅ Complete |
-| 2 | AudioFileEventSource SoundFlow | `src/Radio.Infrastructure/Audio/Sources/Events/AudioFileEventSource.cs` | High | High | 🔲 Pending |
-| 3 | FilesController Source Switching | `src/Radio.API/Controllers/FilesController.cs` | Medium | Low | 🔲 Pending |
+| 2 | AudioFileEventSource SoundFlow | `src/Radio.Infrastructure/Audio/Sources/Events/AudioFileEventSource.cs` | High | High | ✅ Complete |
+| 3 | FilesController Source Switching | `src/Radio.API/Controllers/FilesController.cs` | Medium | Low | ✅ Complete |
 | 4 | AcoustID API | `src/Radio.Infrastructure/Audio/Fingerprinting/MetadataLookupService.cs` | Low | High | 🔲 Pending |
 | 5 | PlayHistory Search | `src/Radio.API/Controllers/PlayHistoryController.cs` | Medium | Medium | 🔲 Pending |
 | 6 | RadioFactory Device Enum | `src/Radio.Infrastructure/Audio/Factories/RadioFactory.cs` | Low | Medium | 🔲 Pending |

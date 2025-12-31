@@ -18,6 +18,7 @@ public class FilesController : ControllerBase
   private readonly ILogger<FilesController> _logger;
   private readonly IFileBrowser _fileBrowser;
   private readonly IAudioEngine _audioEngine;
+  private readonly IAudioManager? _audioManager;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="FilesController"/> class.
@@ -25,11 +26,13 @@ public class FilesController : ControllerBase
   public FilesController(
     ILogger<FilesController> logger,
     IFileBrowser fileBrowser,
-    IAudioEngine audioEngine)
+    IAudioEngine audioEngine,
+    IAudioManager? audioManager = null)
   {
     _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     _fileBrowser = fileBrowser ?? throw new ArgumentNullException(nameof(fileBrowser));
     _audioEngine = audioEngine ?? throw new ArgumentNullException(nameof(audioEngine));
+    _audioManager = audioManager;
   }
 
   /// <summary>
@@ -228,12 +231,8 @@ public class FilesController : ControllerBase
 
   /// <summary>
   /// Gets or activates the File Player audio source.
+  /// Uses IAudioManager to create and switch to the FilePlayer source.
   /// </summary>
-  /// <remarks>
-  /// TODO: Implement automatic source switching via IAudioManager.SwitchSourceAsync
-  /// when the full AudioManager implementation is available (Phase 3).
-  /// Currently returns null if File Player is not the active source.
-  /// </remarks>
   private async Task<IPrimaryAudioSource?> GetOrActivateFilePlayerSourceAsync(
     CancellationToken cancellationToken)
   {
@@ -246,8 +245,26 @@ public class FilesController : ControllerBase
       return primarySource;
     }
 
-    // TODO: When IAudioManager.SwitchSourceAsync is available, activate File Player here
-    _logger.LogWarning("File Player source is not currently active. Automatic source switching requires Phase 3 completion.");
+    // Use AudioManager to get or create FilePlayer source
+    if (_audioManager != null)
+    {
+      var source = await _audioManager.GetOrCreateSourceAsync(
+        AudioSourceType.FilePlayer,
+        switchToSource: true,
+        cancellationToken);
+
+      if (source is IPrimaryAudioSource filePlayerSource)
+      {
+        _logger.LogInformation("Activated File Player source via AudioManager");
+        return filePlayerSource;
+      }
+
+      _logger.LogWarning("AudioManager returned a non-primary source for FilePlayer");
+      return null;
+    }
+
+    // Fallback: AudioManager not available
+    _logger.LogWarning("IAudioManager not available, cannot activate File Player source");
     return null;
   }
 

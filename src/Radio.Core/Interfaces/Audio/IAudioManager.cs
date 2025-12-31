@@ -37,6 +37,18 @@ public interface IAudioManager : IAsyncDisposable
   Task SwitchSourceAsync(IAudioSource source, CancellationToken cancellationToken = default);
 
   /// <summary>
+  /// Gets or creates an audio source of the specified type and optionally switches to it.
+  /// </summary>
+  /// <param name="sourceType">The type of audio source to get or create.</param>
+  /// <param name="switchToSource">If true, switches to the source after getting/creating it.</param>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <returns>The audio source, or null if the type is not supported.</returns>
+  Task<IAudioSource?> GetOrCreateSourceAsync(
+    AudioSourceType sourceType,
+    bool switchToSource = true,
+    CancellationToken cancellationToken = default);
+
+  /// <summary>
   /// Stops all audio playback.
   /// </summary>
   /// <param name="cancellationToken">Cancellation token.</param>
