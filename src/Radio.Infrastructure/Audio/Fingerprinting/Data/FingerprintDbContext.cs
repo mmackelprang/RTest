@@ -147,6 +147,25 @@ public sealed class FingerprintDbContext : IAsyncDisposable
         LastModifiedAt TEXT NOT NULL
       );
 
+      -- Audio files table for FileBrowser tracking
+      CREATE TABLE IF NOT EXISTS AudioFiles (
+        Id INTEGER PRIMARY KEY AUTOINCREMENT,
+        Path TEXT NOT NULL UNIQUE,
+        FileName TEXT NOT NULL,
+        Extension TEXT NOT NULL,
+        SizeBytes INTEGER NOT NULL,
+        CreatedAt TEXT NOT NULL,
+        LastModifiedAt TEXT NOT NULL,
+        Title TEXT,
+        Artist TEXT,
+        Album TEXT,
+        Duration INTEGER,
+        TrackNumber INTEGER,
+        Genre TEXT,
+        Year INTEGER,
+        ScannedAt TEXT NOT NULL
+      );
+
       -- Indexes for performance
       CREATE INDEX IF NOT EXISTS IX_FingerprintCache_ChromaprintHash 
         ON FingerprintCache(ChromaprintHash);
@@ -166,6 +185,8 @@ public sealed class FingerprintDbContext : IAsyncDisposable
         ON PlayHistory(Source);
       CREATE INDEX IF NOT EXISTS IX_RadioPresets_Band_Frequency
         ON RadioPresets(Band, Frequency);
+      CREATE INDEX IF NOT EXISTS IX_AudioFiles_Path
+        ON AudioFiles(Path);
       """;
 
     using var cmd = _connection!.CreateCommand();

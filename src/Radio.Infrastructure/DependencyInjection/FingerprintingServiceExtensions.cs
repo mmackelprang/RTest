@@ -35,12 +35,36 @@ public static class FingerprintingServiceExtensions
     services.AddScoped<ITrackMetadataRepository, SqliteTrackMetadataRepository>();
     services.AddScoped<IPlayHistoryRepository, SqlitePlayHistoryRepository>();
     services.AddScoped<IRadioPresetRepository, SqliteRadioPresetRepository>();
+    services.AddScoped<IAudioFileRepository, SqliteAudioFileRepository>();
 
     // Register fingerprint service
     services.AddSingleton<IFingerprintService, MockFingerprintService>();
 
     // Register radio preset service (scoped to match repository)
     services.AddScoped<IRadioPresetService, RadioPresetService>();
+
+    // Register AcoustID client as scoped
+    // Note: HttpClient is created directly rather than using IHttpClientFactory due to
+    // package version constraints. This is acceptable because:
+    // 1. AcoustID lookups are infrequent (once per fingerprint, rate-limited to 3/sec)
+    // 2. The client is scoped, so HttpClient instances are tied to request lifetime
+    // 3. Adding IHttpClientFactory would require upgrading Microsoft.Extensions packages
+    services.AddScoped<AcoustIdClient>(sp =>
+    {
+      var httpClient = new HttpClient
+      {
+        Timeout = TimeSpan.FromSeconds(
+          configuration.GetSection(FingerprintingOptions.SectionName)
+            .Get<FingerprintingOptions>()?.AcoustId.TimeoutSeconds ?? 10)
+      };
+      httpClient.DefaultRequestHeaders.Add("User-Agent", "RadioConsole/1.0");
+      
+      return new AcoustIdClient(
+        httpClient,
+        sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<AcoustIdClient>>(),
+        sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<FingerprintingOptions>>(),
+        ownsHttpClient: true); // HttpClient is created here, so client owns it
+    });
 
     // Register metadata lookup service as scoped (uses repositories)
     services.AddScoped<IMetadataLookupService, MetadataLookupService>();

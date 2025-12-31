@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Infrastructure.Audio.Sources.Events;
 
 namespace Radio.Infrastructure.Audio.Services;
@@ -14,6 +15,7 @@ public class AudioFileEventSourceFactory
   private readonly ILogger<AudioFileEventSourceFactory> _logger;
   private readonly ILogger<AudioFileEventSource> _sourceLogger;
   private readonly IOptionsMonitor<FilePlayerOptions> _options;
+  private readonly SoundFlowPlaybackService? _playbackService;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="AudioFileEventSourceFactory"/> class.
@@ -21,14 +23,17 @@ public class AudioFileEventSourceFactory
   /// <param name="logger">The factory logger.</param>
   /// <param name="sourceLogger">The source logger.</param>
   /// <param name="options">The file player options.</param>
+  /// <param name="playbackService">Optional SoundFlow playback service.</param>
   public AudioFileEventSourceFactory(
     ILogger<AudioFileEventSourceFactory> logger,
     ILogger<AudioFileEventSource> sourceLogger,
-    IOptionsMonitor<FilePlayerOptions> options)
+    IOptionsMonitor<FilePlayerOptions> options,
+    SoundFlowPlaybackService? playbackService = null)
   {
     _logger = logger;
     _sourceLogger = sourceLogger;
     _options = options;
+    _playbackService = playbackService;
   }
 
   /// <summary>
@@ -56,7 +61,7 @@ public class AudioFileEventSourceFactory
     // Get the duration of the audio file
     var duration = await GetAudioDurationAsync(fullPath, cancellationToken);
 
-    return new AudioFileEventSource(fullPath, duration, _sourceLogger);
+    return new AudioFileEventSource(fullPath, duration, _sourceLogger, _playbackService);
   }
 
   /// <summary>
@@ -76,7 +81,7 @@ public class AudioFileEventSourceFactory
 
     _logger.LogInformation("Creating audio file event source from stream: {Name}", name);
 
-    return new AudioFileEventSource(name, audioStream, duration, _sourceLogger);
+    return new AudioFileEventSource(name, audioStream, duration, _sourceLogger, _playbackService);
   }
 
   /// <summary>

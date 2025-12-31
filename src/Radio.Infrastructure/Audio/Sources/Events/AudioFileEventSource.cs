@@ -1,20 +1,24 @@
 using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.SoundFlow;
 
 namespace Radio.Infrastructure.Audio.Sources.Events;
 
 /// <summary>
 /// Audio file event source for notifications, doorbell sounds, etc.
-/// Plays a single audio file as an ephemeral event.
+/// Plays a single audio file as an ephemeral event using SoundFlow.
 /// </summary>
 public class AudioFileEventSource : EventAudioSourceBase
 {
   private readonly string _filePath;
   private readonly TimeSpan _duration;
   private readonly string _name;
+  private readonly SoundFlowPlaybackService? _playbackService;
   private Stream? _audioStream;
   private CancellationTokenSource? _playbackCts;
   private Task? _playbackTask;
+  private string? _playbackId;
+  private bool _isPlaybackActive;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="AudioFileEventSource"/> class.
@@ -22,15 +26,18 @@ public class AudioFileEventSource : EventAudioSourceBase
   /// <param name="filePath">The path to the audio file.</param>
   /// <param name="duration">The duration of the audio file.</param>
   /// <param name="logger">The logger instance.</param>
+  /// <param name="playbackService">Optional SoundFlow playback service.</param>
   public AudioFileEventSource(
     string filePath,
     TimeSpan duration,
-    ILogger<AudioFileEventSource> logger)
+    ILogger<AudioFileEventSource> logger,
+    SoundFlowPlaybackService? playbackService = null)
     : base(logger)
   {
     _filePath = filePath;
     _duration = duration;
     _name = $"Event: {Path.GetFileName(filePath)}";
+    _playbackService = playbackService;
   }
 
   /// <summary>
@@ -41,17 +48,20 @@ public class AudioFileEventSource : EventAudioSourceBase
   /// <param name="audioStream">The pre-loaded audio stream.</param>
   /// <param name="duration">The duration of the audio.</param>
   /// <param name="logger">The logger instance.</param>
+  /// <param name="playbackService">Optional SoundFlow playback service.</param>
   public AudioFileEventSource(
     string name,
     Stream audioStream,
     TimeSpan duration,
-    ILogger<AudioFileEventSource> logger)
+    ILogger<AudioFileEventSource> logger,
+    SoundFlowPlaybackService? playbackService = null)
     : base(logger)
   {
     _filePath = string.Empty;
     _audioStream = audioStream;
     _duration = duration;
     _name = $"Event: {name}";
+    _playbackService = playbackService;
   }
 
   /// <inheritdoc/>
@@ -71,8 +81,11 @@ public class AudioFileEventSource : EventAudioSourceBase
   /// <inheritdoc/>
   public override object GetSoundComponent()
   {
-    // In a full implementation, this would return the SoundFlow node
-    // For now, return the audio stream or a placeholder object
+    // Return the playback ID for mixer integration, or fallback to stream/path
+    if (!string.IsNullOrEmpty(_playbackId))
+    {
+      return _playbackId;
+    }
     return _audioStream ?? (object)_filePath;
   }
 
@@ -95,7 +108,9 @@ public class AudioFileEventSource : EventAudioSourceBase
         Logger.LogDebug("Loaded audio file: {FilePath}", _filePath);
       }
 
-      // In a full implementation, we would create a SoundFlow audio node here
+      // Generate a unique playback ID
+      _playbackId = $"audio-event-{Guid.NewGuid():N}";
+
       State = AudioSourceState.Ready;
       Logger.LogInformation("Audio file event source initialized: {Name}", _name);
     }
@@ -122,10 +137,17 @@ public class AudioFileEventSource : EventAudioSourceBase
         _audioStream.Position = 0;
       }
 
-      // In a full implementation, this would start playback through SoundFlow
-      // For now, simulate playback by waiting for the duration
-      // Store the task so we can await it in disposal
-      _playbackTask = PlaybackLoopAsync(_playbackCts.Token);
+      // Start playback through SoundFlow if available
+      if (_playbackService != null && _playbackId != null)
+      {
+        _playbackTask = PlayWithSoundFlowAsync(_playbackCts.Token);
+      }
+      else
+      {
+        // Fallback: simulate playback by waiting for the duration
+        Logger.LogDebug("SoundFlow playback service not available, using simulation");
+        _playbackTask = PlaybackLoopAsync(_playbackCts.Token);
+      }
     }
     catch (Exception ex)
     {
@@ -135,6 +157,71 @@ public class AudioFileEventSource : EventAudioSourceBase
     }
 
     return Task.CompletedTask;
+  }
+
+  private async Task PlayWithSoundFlowAsync(CancellationToken cancellationToken)
+  {
+    try
+    {
+      bool success;
+      if (!string.IsNullOrEmpty(_filePath))
+      {
+        // Play from file path
+        success = await _playbackService!.PlayFileAsync(
+          _playbackId!,
+          _filePath,
+          Volume,
+          cancellationToken);
+      }
+      else if (_audioStream != null)
+      {
+        // Play from stream
+        success = await _playbackService!.PlayStreamAsync(
+          _playbackId!,
+          _audioStream,
+          Volume,
+          cancellationToken);
+      }
+      else
+      {
+        Logger.LogError("No audio file or stream available for playback");
+        State = AudioSourceState.Error;
+        OnPlaybackCompleted(PlaybackCompletionReason.Error, new InvalidOperationException("No audio source"));
+        return;
+      }
+
+      if (!success)
+      {
+        Logger.LogError("Failed to start SoundFlow playback");
+        State = AudioSourceState.Error;
+        OnPlaybackCompleted(PlaybackCompletionReason.Error, new InvalidOperationException("Playback failed"));
+        return;
+      }
+
+      _isPlaybackActive = true;
+
+      // Wait for playback to complete (based on duration)
+      // In a full implementation, we would listen for playback end events from SoundFlow
+      await Task.Delay(_duration, cancellationToken);
+
+      if (!cancellationToken.IsCancellationRequested)
+      {
+        _isPlaybackActive = false;
+        State = AudioSourceState.Stopped;
+        OnPlaybackCompleted(PlaybackCompletionReason.EndOfContent);
+      }
+    }
+    catch (OperationCanceledException)
+    {
+      // Playback was stopped
+      _isPlaybackActive = false;
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error during SoundFlow playback");
+      State = AudioSourceState.Error;
+      OnPlaybackCompleted(PlaybackCompletionReason.Error, ex);
+    }
   }
 
   private async Task PlaybackLoopAsync(CancellationToken cancellationToken)
@@ -160,6 +247,13 @@ public class AudioFileEventSource : EventAudioSourceBase
     Logger.LogDebug("Stopping audio file event playback");
     _playbackCts?.Cancel();
 
+    // Stop SoundFlow playback if active
+    if (_playbackService != null && _playbackId != null && _isPlaybackActive)
+    {
+      await _playbackService.StopAsync(_playbackId, cancellationToken);
+      _isPlaybackActive = false;
+    }
+
     // Wait for the playback task to complete
     if (_playbackTask != null)
     {
@@ -181,19 +275,34 @@ public class AudioFileEventSource : EventAudioSourceBase
   }
 
   /// <inheritdoc/>
-  protected override ValueTask DisposeAsyncCore()
+  protected override async ValueTask DisposeAsyncCore()
   {
     Logger.LogDebug("Disposing audio file event source");
     _playbackCts?.Cancel();
     _playbackCts?.Dispose();
+
+    // Stop SoundFlow playback if active
+    if (_playbackService != null && _playbackId != null && _isPlaybackActive)
+    {
+      await _playbackService.StopAsync(_playbackId);
+      _isPlaybackActive = false;
+    }
+
     _audioStream?.Dispose();
-    return ValueTask.CompletedTask;
   }
 
   /// <inheritdoc/>
   protected override void OnVolumeChanged(float volume)
   {
-    // In a full implementation, apply volume to the sound component
-    Logger.LogDebug("Audio file event volume changed to {Volume}", volume);
+    // Apply volume to SoundFlow playback if active
+    if (_playbackService != null && _playbackId != null && _isPlaybackActive)
+    {
+      _playbackService.SetVolume(_playbackId, volume);
+      Logger.LogDebug("Audio file event volume changed to {Volume}", volume);
+    }
+    else
+    {
+      Logger.LogDebug("Audio file event volume changed to {Volume} (not yet playing)", volume);
+    }
   }
 }

@@ -162,8 +162,10 @@ public static class AudioServiceExtensions
     {
       var logger = sp.GetRequiredService<ILogger<FileBrowser>>();
       var options = sp.GetRequiredService<IOptionsMonitor<FilePlayerOptions>>();
+      var metricsCollector = sp.GetService<IMetricsCollector>();
+      var audioFileRepository = sp.GetService<IAudioFileRepository>();
       var rootDir = configuration["RootDir"] ?? Directory.GetCurrentDirectory();
-      return new FileBrowser(logger, options, rootDir);
+      return new FileBrowser(logger, options, rootDir, metricsCollector, audioFileRepository);
     });
     services.AddSingleton<IFileBrowser>(sp => sp.GetRequiredService<FileBrowser>());
 

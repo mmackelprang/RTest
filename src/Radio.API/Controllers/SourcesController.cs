@@ -185,7 +185,7 @@ public class SourcesController : ControllerBase
         {
           try
           {
-            targetSource = await audioManager.GetOrCreateSourceAsync(sourceType);
+            targetSource = await audioManager.GetOrCreateSourceAsync(sourceType, switchToSource: false);
           }
           catch (NotSupportedException ex)
           {
@@ -214,6 +214,16 @@ public class SourcesController : ControllerBase
             availableSources = activeSources.Select(s => s.Type.ToString()).ToList()
           });
         }
+      }
+
+      // Null check for targetSource
+      if (targetSource == null)
+      {
+        return StatusCode(500, new
+        {
+          error = $"Failed to create source type {sourceType}",
+          details = "Source creation returned null"
+        });
       }
 
       // Switch to the requested source

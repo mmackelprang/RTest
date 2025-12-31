@@ -85,4 +85,18 @@ public interface IPlayHistoryRepository
   /// <param name="ct">Cancellation token.</param>
   /// <returns>True if deleted, false if not found.</returns>
   Task<bool> DeleteAsync(string id, CancellationToken ct = default);
+
+  /// <summary>
+  /// Searches play history entries by title, artist, or album.
+  /// </summary>
+  /// <param name="searchTerm">The search term to match against title, artist, or album.</param>
+  /// <param name="limit">Maximum number of results to return.</param>
+  /// <param name="offset">Number of results to skip for pagination.</param>
+  /// <param name="ct">Cancellation token.</param>
+  /// <returns>Paginated search results with total count.</returns>
+  Task<(IReadOnlyList<PlayHistoryEntry> Items, int TotalCount)> SearchAsync(
+    string searchTerm,
+    int? limit = null,
+    int? offset = null,
+    CancellationToken ct = default);
 }

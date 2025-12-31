@@ -80,6 +80,34 @@ public sealed class SqliteTrackMetadataRepository : ITrackMetadataRepository
   }
 
   /// <inheritdoc/>
+  public async Task<TrackMetadata?> FindByMusicBrainzIdAsync(
+    string recordingId,
+    CancellationToken ct = default)
+  {
+    var conn = await _dbContext.GetConnectionAsync(ct);
+
+    var sql = """
+      SELECT Id, FingerprintId, Title, Artist, Album, AlbumArtist, TrackNumber,
+             DiscNumber, ReleaseYear, Genre, MusicBrainzArtistId, MusicBrainzReleaseId,
+             MusicBrainzRecordingId, CoverArtUrl, Source, CreatedAt, UpdatedAt
+      FROM TrackMetadata
+      WHERE MusicBrainzRecordingId = @RecordingId
+      """;
+
+    await using var cmd = conn.CreateCommand();
+    cmd.CommandText = sql;
+    cmd.Parameters.AddWithValue("@RecordingId", recordingId);
+
+    await using var reader = await cmd.ExecuteReaderAsync(ct);
+    if (!await reader.ReadAsync(ct))
+    {
+      return null;
+    }
+
+    return MapToTrackMetadata(reader);
+  }
+
+  /// <inheritdoc/>
   public async Task<TrackMetadata> StoreAsync(
     TrackMetadata metadata,
     CancellationToken ct = default)

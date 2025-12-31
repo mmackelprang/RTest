@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Configuration;
 using MudBlazor;
+using MudBlazor.Services;
 using NSubstitute;
 using Radio.Web.Components.Pages;
 using Radio.Web.Services.ApiClients;
@@ -30,6 +31,7 @@ public class QueuePageTests : TestContext
     Services.AddHttpClient<QueueApiService>();
     Services.AddHttpClient<AudioApiService>();
     Services.AddHttpClient<ConfigurationApiService>();
+    Services.AddHttpClient<FileApiService>();
     
     // Add SignalR hub service
     Services.AddSingleton(sp => 
@@ -42,6 +44,10 @@ public class QueuePageTests : TestContext
     // Add ISnackbar mock
     var mockSnackbar = Substitute.For<ISnackbar>();
     Services.AddSingleton(mockSnackbar);
+    
+    // Add IDialogService mock
+    var mockDialogService = Substitute.For<IDialogService>();
+    Services.AddSingleton(mockDialogService);
   }
 
   [Fact]
@@ -116,5 +122,28 @@ public class QueuePageTests : TestContext
     {
       Assert.True(true); // Component initialized successfully
     }, TimeSpan.FromSeconds(1));
+  }
+
+  [Fact]
+  public void QueuePage_HasAddFilesButton()
+  {
+    // Act
+    var cut = RenderComponent<QueuePage>();
+
+    // Assert - Should have "Add Files" button
+    Assert.Contains("Add Files", cut.Markup);
+  }
+
+  [Fact]
+  public void QueuePage_EmptyState_HasAddFilesToQueueButton()
+  {
+    // Act
+    var cut = RenderComponent<QueuePage>();
+
+    // Assert - Empty state should have large "Add Files to Queue" button
+    cut.WaitForAssertion(() =>
+    {
+      Assert.Contains("Add Files to Queue", cut.Markup);
+    }, TimeSpan.FromSeconds(2));
   }
 }

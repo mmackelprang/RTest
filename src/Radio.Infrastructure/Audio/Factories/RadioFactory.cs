@@ -7,6 +7,8 @@ using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Sources.Primary;
 using RTLSDRCore;
+using RTLSDRCore.Hardware;
+using RTLSDRCore.Models;
 
 namespace Radio.Infrastructure.Audio.Factories;
 
@@ -24,6 +26,12 @@ public class RadioFactory : IRadioFactory
   private readonly BackgroundIdentificationService? _identificationService;
   private readonly IConfiguration _configuration;
   private readonly IMetricsCollector? _metricsCollector;
+
+  // Device enumeration cache
+  private IReadOnlyList<DeviceInfo>? _cachedDevices;
+  private DateTime _deviceCacheExpiry = DateTime.MinValue;
+  private readonly TimeSpan _deviceCacheDuration = TimeSpan.FromSeconds(30);
+  private readonly object _deviceCacheLock = new();
 
   /// <summary>
   /// Supported device type identifiers.
@@ -201,26 +209,83 @@ public class RadioFactory : IRadioFactory
   }
 
   /// <summary>
-  /// Checks if RTL-SDR devices are available.
+  /// Checks if RTL-SDR devices are available using cached enumeration.
   /// </summary>
   private bool IsRTLSDRAvailable()
   {
     try
     {
-      // Try to enumerate RTL-SDR devices without creating a receiver
-      // For now, we'll just check if we can create one - in a real implementation
-      // we'd use a device enumeration API
-      var receiver = RadioReceiver.CreateWithFirstAvailableDevice();
-      if (receiver != null)
+      var devices = GetCachedRTLSDRDevices();
+      var rtlDevice = devices.FirstOrDefault(d => 
+        d.Type == RTLSDRCore.Enums.DeviceType.RTLSDR && d.IsAvailable);
+      
+      if (rtlDevice != null)
       {
-        receiver.Dispose();
+        _logger.LogDebug("RTL-SDR device available: {DeviceName}", rtlDevice.Name);
         return true;
       }
+
+      _logger.LogDebug("No RTL-SDR devices found");
       return false;
     }
-    catch
+    catch (Exception ex)
     {
+      _logger.LogWarning(ex, "Error checking RTL-SDR availability");
       return false;
+    }
+  }
+
+  /// <summary>
+  /// Gets RTL-SDR devices from cache or enumerates if cache is expired.
+  /// </summary>
+  /// <returns>List of device information.</returns>
+  public IReadOnlyList<DeviceInfo> GetRTLSDRDevices()
+  {
+    return GetCachedRTLSDRDevices();
+  }
+
+  /// <summary>
+  /// Gets cached RTL-SDR device list, refreshing if expired.
+  /// </summary>
+  private IReadOnlyList<DeviceInfo> GetCachedRTLSDRDevices()
+  {
+    lock (_deviceCacheLock)
+    {
+      if (_cachedDevices != null && DateTime.UtcNow < _deviceCacheExpiry)
+      {
+        return _cachedDevices;
+      }
+
+      try
+      {
+        _logger.LogDebug("Enumerating RTL-SDR devices...");
+        _cachedDevices = SdrDeviceFactory.EnumerateDevices();
+        _deviceCacheExpiry = DateTime.UtcNow.Add(_deviceCacheDuration);
+        
+        _logger.LogInformation(
+          "Found {Count} SDR devices (cache expires in {Duration}s)",
+          _cachedDevices.Count, _deviceCacheDuration.TotalSeconds);
+        
+        return _cachedDevices;
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "Failed to enumerate RTL-SDR devices");
+        return Array.Empty<DeviceInfo>();
+      }
+    }
+  }
+
+  /// <summary>
+  /// Invalidates the device cache, forcing re-enumeration on next access.
+  /// </summary>
+  public void InvalidateDeviceCache()
+  {
+    lock (_deviceCacheLock)
+    {
+      _cachedDevices = null;
+      _deviceCacheExpiry = DateTime.MinValue;
+      _logger.LogDebug("RTL-SDR device cache invalidated");
     }
   }
 

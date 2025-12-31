@@ -250,31 +250,20 @@ public class PlayHistoryController : ControllerBase
   {
     try
     {
-      // Since repository doesn't have a specific search method exposed in interface yet,
-      // we'll fetch recent history and filter in memory
-      // Note: In a real implementation this should be pushed to the repository
-      var allEntries = await _playHistoryRepository.GetRecentAsync(1000);
-      
-      var query = allEntries.Where(e => 
-        (e.Track?.Title?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
-        (e.Track?.Artist?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
-        (e.Track?.Album?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false));
-        
-      var totalCount = query.Count();
-      
-      if (offset.HasValue)
+      if (string.IsNullOrWhiteSpace(q))
       {
-        query = query.Skip(offset.Value);
+        return BadRequest(new { error = "Search query is required" });
       }
-      
-      if (limit.HasValue)
-      {
-        query = query.Take(limit.Value);
-      }
-      
+
+      // Use repository search method for efficient SQL-based search
+      var (items, totalCount) = await _playHistoryRepository.SearchAsync(
+        q,
+        limit,
+        offset);
+
       return Ok(new PlayHistoryListDto
       {
-        Items = query.Select(MapToDto).ToList(),
+        Items = items.Select(MapToDto).ToList(),
         TotalCount = totalCount
       });
     }

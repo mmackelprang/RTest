@@ -36,6 +36,7 @@ public class AudioManager : IAudioManager
   private readonly BackgroundIdentificationService? _identificationService;
   private readonly IMetricsCollector? _metricsCollector;
   private readonly Configuration.Abstractions.IConfigurationManager? _configurationManager;
+  private readonly SoundFlow.SoundFlowPlaybackService? _playbackService;
 
   // State
   private IAudioSource? _activeSource;
@@ -63,7 +64,8 @@ public class AudioManager : IAudioManager
     IConfiguration configuration,
     BackgroundIdentificationService? identificationService = null,
     IMetricsCollector? metricsCollector = null,
-    Configuration.Abstractions.IConfigurationManager? configurationManager = null)
+    Configuration.Abstractions.IConfigurationManager? configurationManager = null,
+    SoundFlow.SoundFlowPlaybackService? playbackService = null)
   {
     _logger = logger;
     _loggerFactory = loggerFactory;
@@ -81,6 +83,7 @@ public class AudioManager : IAudioManager
     _identificationService = identificationService;
     _metricsCollector = metricsCollector;
     _configurationManager = configurationManager;
+    _playbackService = playbackService;
   }
 
   /// <inheritdoc/>
@@ -231,15 +234,10 @@ public class AudioManager : IAudioManager
     _logger.LogInformation("Audio playback stopped");
   }
 
-  /// <summary>
-  /// Gets or creates a source of the specified type.
-  /// Sources are cached for reuse.
-  /// </summary>
-  /// <param name="sourceType">The type of source to get or create.</param>
-  /// <param name="cancellationToken">Cancellation token.</param>
-  /// <returns>The audio source.</returns>
-  public async Task<IAudioSource> GetOrCreateSourceAsync(
+  /// <inheritdoc/>
+  public async Task<IAudioSource?> GetOrCreateSourceAsync(
     AudioSourceType sourceType,
+    bool switchToSource = true,
     CancellationToken cancellationToken = default)
   {
     ObjectDisposedException.ThrowIf(_disposed, this);
@@ -248,20 +246,41 @@ public class AudioManager : IAudioManager
     if (_sourceCache.TryGetValue(sourceType, out var cachedSource))
     {
       _logger.LogDebug("Returning cached source for type: {SourceType}", sourceType);
+      
+      if (switchToSource && cachedSource != _activeSource)
+      {
+        await SwitchSourceAsync(cachedSource, cancellationToken);
+      }
+      
       return cachedSource;
     }
 
     _logger.LogInformation("Creating new source for type: {SourceType}", sourceType);
 
-    IAudioSource source = sourceType switch
+    IAudioSource? source = null;
+    try
     {
-      AudioSourceType.Radio => CreateRadioSource(),
-      AudioSourceType.Spotify => CreateSpotifySource(),
-      AudioSourceType.FilePlayer => CreateFilePlayerSource(),
-      AudioSourceType.Vinyl => CreateVinylSource(),
-      AudioSourceType.GenericUSB => CreateGenericUSBSource(),
-      _ => throw new NotSupportedException($"Source type {sourceType} is not supported.")
-    };
+      source = sourceType switch
+      {
+        AudioSourceType.Radio => CreateRadioSource(),
+        AudioSourceType.Spotify => CreateSpotifySource(),
+        AudioSourceType.FilePlayer => CreateFilePlayerSource(),
+        AudioSourceType.Vinyl => CreateVinylSource(),
+        AudioSourceType.GenericUSB => CreateGenericUSBSource(),
+        _ => null
+      };
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to create source for type: {SourceType}", sourceType);
+      return null;
+    }
+
+    if (source == null)
+    {
+      _logger.LogWarning("Source type {SourceType} is not supported", sourceType);
+      return null;
+    }
 
     // Cache the source for reuse
     _sourceCache[sourceType] = source;
@@ -273,6 +292,12 @@ public class AudioManager : IAudioManager
     _logger.LogInformation(
       "Created and registered source: {SourceName} ({SourceType})",
       source.Name, source.Type);
+
+    // Switch to the source if requested
+    if (switchToSource)
+    {
+      await SwitchSourceAsync(source, cancellationToken);
+    }
 
     return source;
   }
@@ -299,8 +324,11 @@ public class AudioManager : IAudioManager
 
     try
     {
-      var source = await GetOrCreateSourceAsync(sourceType, cancellationToken);
-      await SwitchSourceAsync(source, cancellationToken);
+      var source = await GetOrCreateSourceAsync(sourceType, switchToSource: true, cancellationToken);
+      if (source == null)
+      {
+        throw new InvalidOperationException($"Failed to create source for type: {sourceType}");
+      }
       _logger.LogInformation("Successfully restored source: {SourceType}", sourceType);
     }
     catch (Exception ex)
@@ -312,8 +340,11 @@ public class AudioManager : IAudioManager
       {
         try
         {
-          var radioSource = await GetOrCreateSourceAsync(AudioSourceType.Radio, cancellationToken);
-          await SwitchSourceAsync(radioSource, cancellationToken);
+          var radioSource = await GetOrCreateSourceAsync(AudioSourceType.Radio, switchToSource: true, cancellationToken);
+          if (radioSource == null)
+          {
+            throw new InvalidOperationException("Failed to create fallback Radio source");
+          }
           _logger.LogInformation("Fell back to Radio source");
         }
         catch (Exception radioEx)
@@ -412,7 +443,8 @@ public class AudioManager : IAudioManager
       _filePlayerPreferences,
       rootDir,
       _identificationService,
-      _metricsCollector);
+      _metricsCollector,
+      _playbackService);
   }
 
   /// <summary>

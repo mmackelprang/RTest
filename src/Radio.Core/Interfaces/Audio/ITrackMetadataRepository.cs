@@ -26,6 +26,16 @@ public interface ITrackMetadataRepository
     CancellationToken ct = default);
 
   /// <summary>
+  /// Gets track metadata by MusicBrainz recording ID.
+  /// </summary>
+  /// <param name="recordingId">The MusicBrainz recording ID.</param>
+  /// <param name="ct">Cancellation token.</param>
+  /// <returns>The track metadata, or null if not found.</returns>
+  Task<TrackMetadata?> FindByMusicBrainzIdAsync(
+    string recordingId,
+    CancellationToken ct = default);
+
+  /// <summary>
   /// Stores or updates track metadata.
   /// </summary>
   /// <param name="metadata">The metadata to store.</param>
