@@ -350,7 +350,8 @@ public class SoundFlowPlaybackService : IDisposable
   /// </summary>
   public void StopAll()
   {
-    ThrowIfDisposed();
+    // Don't throw if disposed - just return
+    if (_disposed) return;
 
     List<string> sourceIds;
     lock (_playersLock)
@@ -373,10 +374,8 @@ public class SoundFlowPlaybackService : IDisposable
   public void Dispose()
   {
     if (_disposed) return;
-    _disposed = true;
 
-    StopAll();
-
+    // Stop all first, then set disposed
     lock (_playersLock)
     {
       foreach (var player in _activePlayers.Values)
@@ -393,5 +392,7 @@ public class SoundFlowPlaybackService : IDisposable
       }
       _activePlayers.Clear();
     }
+
+    _disposed = true;
   }
 }

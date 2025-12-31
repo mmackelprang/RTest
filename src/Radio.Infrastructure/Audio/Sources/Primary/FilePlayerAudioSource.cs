@@ -6,6 +6,7 @@ using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
+using Radio.Infrastructure.Audio.SoundFlow;
 using SoundFlow.Backends.MiniAudio;
 using SoundFlow.Interfaces;
 using SoundFlow.Metadata;
@@ -23,6 +24,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private readonly IOptionsMonitor<FilePlayerOptions> _options;
   private readonly IOptionsMonitor<FilePlayerPreferences> _preferences;
   private readonly BackgroundIdentificationService? _identificationService;
+  private readonly SoundFlowPlaybackService? _playbackService;
   private readonly string _rootDir;
   private readonly Dictionary<string, object> _metadata = new();
   private Queue<string> _playlist = new();
@@ -35,6 +37,9 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private TimeSpan _duration;
   private TimeSpan _position;
   private int _currentIndex = -1; // Track current position in queue
+  private string? _playbackId;
+  private CancellationTokenSource? _playbackCts;
+  private Task? _playbackMonitorTask;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="FilePlayerAudioSource"/> class.
@@ -45,19 +50,22 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <param name="rootDir">The root directory for audio files.</param>
   /// <param name="identificationService">Optional fingerprinting service for track identification.</param>
   /// <param name="metricsCollector">Optional metrics collector for tracking playback metrics.</param>
+  /// <param name="playbackService">Optional SoundFlow playback service for audio output.</param>
   public FilePlayerAudioSource(
     ILogger<FilePlayerAudioSource> logger,
     IOptionsMonitor<FilePlayerOptions> options,
     IOptionsMonitor<FilePlayerPreferences> preferences,
     string rootDir = "",
     BackgroundIdentificationService? identificationService = null,
-    IMetricsCollector? metricsCollector = null)
+    IMetricsCollector? metricsCollector = null,
+    SoundFlowPlaybackService? playbackService = null)
     : base(logger, metricsCollector)
   {
     _options = options;
     _preferences = preferences;
     _rootDir = rootDir;
     _identificationService = identificationService;
+    _playbackService = playbackService;
 
     // Subscribe to track identification events if service is available
     if (_identificationService != null)
@@ -529,39 +537,133 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   }
 
   /// <inheritdoc/>
-  protected override Task PlayCoreAsync(CancellationToken cancellationToken)
+  protected override async Task PlayCoreAsync(CancellationToken cancellationToken)
   {
     if (_currentFile == null)
     {
       throw new InvalidOperationException("No file loaded");
     }
 
-    // In a real implementation, this would start SoundFlow playback
-    // When playback completes naturally (not skipped), call: OnPlaybackCompleted(PlaybackCompletionReason.EndOfContent)
-    // This will automatically track the audio.songs_played_total metric
+    // Generate playback ID for this session
+    _playbackId = $"file-player-{Guid.NewGuid():N}";
+    _playbackCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
     Logger.LogInformation("Playing file: {File}", _currentFile);
 
-    return Task.CompletedTask;
+    // Use SoundFlow playback service if available
+    if (_playbackService != null)
+    {
+      var fullPath = GetFullPath(_currentFile);
+      var success = await _playbackService.PlayFileAsync(
+        _playbackId,
+        fullPath,
+        Volume,
+        _playbackCts.Token);
+
+      if (!success)
+      {
+        Logger.LogError("Failed to start SoundFlow playback for {File}", _currentFile);
+        State = AudioSourceState.Error;
+        return;
+      }
+
+      // Start playback monitoring task
+      _playbackMonitorTask = MonitorPlaybackAsync(_playbackCts.Token);
+    }
+    else
+    {
+      Logger.LogDebug("SoundFlow playback service not available, playback simulation only");
+    }
+  }
+
+  private async Task MonitorPlaybackAsync(CancellationToken cancellationToken)
+  {
+    try
+    {
+      // Wait for the duration of the track
+      if (_duration > TimeSpan.Zero)
+      {
+        await Task.Delay(_duration, cancellationToken);
+      }
+      else
+      {
+        // Fallback: wait and check periodically
+        while (!cancellationToken.IsCancellationRequested)
+        {
+          if (_playbackService != null && _playbackId != null)
+          {
+            if (!_playbackService.IsPlaying(_playbackId))
+            {
+              break;
+            }
+          }
+          await Task.Delay(500, cancellationToken);
+        }
+      }
+
+      if (!cancellationToken.IsCancellationRequested)
+      {
+        // Playback completed naturally
+        State = AudioSourceState.Stopped;
+        OnPlaybackCompleted(PlaybackCompletionReason.EndOfContent);
+
+        // Auto-advance to next track if queue is not empty
+        if (_playlist.Count > 0)
+        {
+          await NextAsync(CancellationToken.None);
+        }
+      }
+    }
+    catch (OperationCanceledException)
+    {
+      // Playback was stopped by user
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error in playback monitoring");
+    }
   }
 
   /// <inheritdoc/>
-  protected override Task PauseCoreAsync(CancellationToken cancellationToken)
+  protected override async Task PauseCoreAsync(CancellationToken cancellationToken)
   {
     Logger.LogDebug("Pausing file playback at {Position}", _position);
-    return Task.CompletedTask;
+
+    if (_playbackService != null && _playbackId != null)
+    {
+      _playbackService.Pause(_playbackId);
+    }
+
+    await Task.CompletedTask;
   }
 
   /// <inheritdoc/>
-  protected override Task ResumeCoreAsync(CancellationToken cancellationToken)
+  protected override async Task ResumeCoreAsync(CancellationToken cancellationToken)
   {
     Logger.LogDebug("Resuming file playback from {Position}", _position);
-    return Task.CompletedTask;
+
+    if (_playbackService != null && _playbackId != null)
+    {
+      _playbackService.Resume(_playbackId);
+    }
+
+    await Task.CompletedTask;
   }
 
   /// <inheritdoc/>
-  protected override Task StopCoreAsync(CancellationToken cancellationToken)
+  protected override async Task StopCoreAsync(CancellationToken cancellationToken)
   {
     Logger.LogDebug("Stopping file playback");
+
+    // Cancel playback monitoring
+    _playbackCts?.Cancel();
+
+    // Stop SoundFlow playback
+    if (_playbackService != null && _playbackId != null)
+    {
+      await _playbackService.StopAsync(_playbackId, cancellationToken);
+      _playbackId = null;
+    }
 
     // Save current position for next session
     if (_currentFile != null)
@@ -571,7 +673,6 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     }
 
     _position = TimeSpan.Zero;
-    return Task.CompletedTask;
   }
 
   /// <inheritdoc/>
@@ -590,8 +691,31 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   }
 
   /// <inheritdoc/>
+  protected override void OnVolumeChanged(float volume)
+  {
+    // Apply volume to SoundFlow playback
+    if (_playbackService != null && _playbackId != null)
+    {
+      _playbackService.SetVolume(_playbackId, volume);
+      Logger.LogDebug("Volume changed to {Volume}", volume);
+    }
+  }
+
+  /// <inheritdoc/>
   protected override async ValueTask DisposeAsyncCore()
   {
+    // Cancel playback monitoring
+    _playbackCts?.Cancel();
+    _playbackCts?.Dispose();
+    _playbackCts = null;
+
+    // Stop SoundFlow playback
+    if (_playbackService != null && _playbackId != null)
+    {
+      await _playbackService.StopAsync(_playbackId);
+      _playbackId = null;
+    }
+
     // Unsubscribe from events
     if (_identificationService != null)
     {

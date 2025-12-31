@@ -36,6 +36,7 @@ public class AudioManager : IAudioManager
   private readonly BackgroundIdentificationService? _identificationService;
   private readonly IMetricsCollector? _metricsCollector;
   private readonly Configuration.Abstractions.IConfigurationManager? _configurationManager;
+  private readonly SoundFlow.SoundFlowPlaybackService? _playbackService;
 
   // State
   private IAudioSource? _activeSource;
@@ -63,7 +64,8 @@ public class AudioManager : IAudioManager
     IConfiguration configuration,
     BackgroundIdentificationService? identificationService = null,
     IMetricsCollector? metricsCollector = null,
-    Configuration.Abstractions.IConfigurationManager? configurationManager = null)
+    Configuration.Abstractions.IConfigurationManager? configurationManager = null,
+    SoundFlow.SoundFlowPlaybackService? playbackService = null)
   {
     _logger = logger;
     _loggerFactory = loggerFactory;
@@ -81,6 +83,7 @@ public class AudioManager : IAudioManager
     _identificationService = identificationService;
     _metricsCollector = metricsCollector;
     _configurationManager = configurationManager;
+    _playbackService = playbackService;
   }
 
   /// <inheritdoc/>
@@ -440,7 +443,8 @@ public class AudioManager : IAudioManager
       _filePlayerPreferences,
       rootDir,
       _identificationService,
-      _metricsCollector);
+      _metricsCollector,
+      _playbackService);
   }
 
   /// <summary>

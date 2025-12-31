@@ -517,10 +517,99 @@ public class TTSFactory : ITTSFactory
     return Task.FromResult<IReadOnlyList<TTSVoiceInfo>>(voices.AsReadOnly());
   }
 
-  private Task<IReadOnlyList<TTSVoiceInfo>> GetAzureVoicesAsync(CancellationToken cancellationToken)
+  // Azure voice cache
+  private IReadOnlyList<TTSVoiceInfo>? _cachedAzureVoices;
+  private DateTime _azureVoiceCacheExpiry = DateTime.MinValue;
+  private readonly TimeSpan _azureVoiceCacheDuration = TimeSpan.FromHours(24);
+  private readonly SemaphoreSlim _azureVoiceCacheLock = new(1, 1);
+
+  private async Task<IReadOnlyList<TTSVoiceInfo>> GetAzureVoicesAsync(CancellationToken cancellationToken)
   {
-    // In a full implementation, this would call the Azure Speech API
-    // For now, return some common Azure TTS voice identifiers
+    // Check cache first
+    if (_cachedAzureVoices != null && DateTime.UtcNow < _azureVoiceCacheExpiry)
+    {
+      return _cachedAzureVoices;
+    }
+
+    await _azureVoiceCacheLock.WaitAsync(cancellationToken);
+    try
+    {
+      // Double-check after acquiring lock
+      if (_cachedAzureVoices != null && DateTime.UtcNow < _azureVoiceCacheExpiry)
+      {
+        return _cachedAzureVoices;
+      }
+
+      var apiKey = _secrets.CurrentValue.AzureAPIKey;
+      var region = _secrets.CurrentValue.AzureRegion;
+
+      if (string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(region))
+      {
+        _logger.LogDebug("Azure Speech credentials not configured, returning default voices");
+        return GetDefaultAzureVoices();
+      }
+
+      try
+      {
+        // Call Azure Cognitive Services REST API to list voices
+        using var httpClient = new HttpClient();
+        httpClient.Timeout = TimeSpan.FromSeconds(10);
+        httpClient.DefaultRequestHeaders.Add("Ocp-Apim-Subscription-Key", apiKey);
+
+        var url = $"https://{region}.tts.speech.microsoft.com/cognitiveservices/voices/list";
+        var response = await httpClient.GetAsync(url, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync(cancellationToken);
+        var voiceData = System.Text.Json.JsonSerializer.Deserialize<List<AzureVoiceDto>>(json);
+
+        if (voiceData != null && voiceData.Count > 0)
+        {
+          var voices = voiceData
+            .Where(v => v.Locale?.StartsWith("en-") == true) // Filter to English voices
+            .Select(v => new TTSVoiceInfo
+            {
+              Id = v.ShortName ?? v.Name ?? "unknown",
+              Name = v.LocalName ?? v.DisplayName ?? v.Name ?? "Unknown",
+              Language = v.Locale ?? "en-US",
+              Gender = v.Gender?.Equals("Male", StringComparison.OrdinalIgnoreCase) == true
+                ? TTSVoiceGender.Male
+                : TTSVoiceGender.Female
+            })
+            .ToList();
+
+          _cachedAzureVoices = voices.AsReadOnly();
+          _azureVoiceCacheExpiry = DateTime.UtcNow.Add(_azureVoiceCacheDuration);
+
+          _logger.LogInformation(
+            "Retrieved {Count} Azure voices (cached for {Hours} hours)",
+            voices.Count, _azureVoiceCacheDuration.TotalHours);
+
+          return _cachedAzureVoices;
+        }
+
+        _logger.LogWarning("Azure Voice API returned empty voice list, using defaults");
+        return GetDefaultAzureVoices();
+      }
+      catch (HttpRequestException ex)
+      {
+        _logger.LogWarning(ex, "Failed to query Azure Voice API, using default voices");
+        return GetDefaultAzureVoices();
+      }
+      catch (TaskCanceledException ex) when (ex.CancellationToken != cancellationToken)
+      {
+        _logger.LogWarning("Azure Voice API request timed out, using default voices");
+        return GetDefaultAzureVoices();
+      }
+    }
+    finally
+    {
+      _azureVoiceCacheLock.Release();
+    }
+  }
+
+  private IReadOnlyList<TTSVoiceInfo> GetDefaultAzureVoices()
+  {
     var voices = new List<TTSVoiceInfo>
     {
       new() { Id = "en-US-JennyNeural", Name = "Jenny (US)", Language = "en-US", Gender = TTSVoiceGender.Female },
@@ -529,8 +618,20 @@ public class TTSFactory : ITTSFactory
       new() { Id = "en-GB-SoniaNeural", Name = "Sonia (UK)", Language = "en-GB", Gender = TTSVoiceGender.Female },
       new() { Id = "en-GB-RyanNeural", Name = "Ryan (UK)", Language = "en-GB", Gender = TTSVoiceGender.Male }
     };
+    return voices.AsReadOnly();
+  }
 
-    return Task.FromResult<IReadOnlyList<TTSVoiceInfo>>(voices.AsReadOnly());
+  /// <summary>
+  /// Azure Voice API response DTO.
+  /// </summary>
+  private class AzureVoiceDto
+  {
+    public string? Name { get; set; }
+    public string? DisplayName { get; set; }
+    public string? LocalName { get; set; }
+    public string? ShortName { get; set; }
+    public string? Gender { get; set; }
+    public string? Locale { get; set; }
   }
 
   private static TimeSpan EstimateWavDuration(long bytes)
