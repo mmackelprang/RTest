@@ -169,7 +169,8 @@ public class AudioManager : IAudioManager
       // Update the active source reference
       _activeSource = source;
 
-      // Start playback on the new source if it's ready
+      // Start playback on the new source if it's ready and can auto-play
+      // Sources like FilePlayer and Spotify require content to be selected first
       if (source is IPrimaryAudioSource newPrimary)
       {
         if (source.State == AudioSourceState.Created)
@@ -177,10 +178,28 @@ public class AudioManager : IAudioManager
           _logger.LogDebug("Initializing source: {SourceName}", source.Name);
         }
 
-        if (source.State != AudioSourceState.Playing)
+        // Only auto-play sources that can play immediately without content selection
+        // FilePlayer needs a file loaded, Spotify needs a track/playlist selected
+        var canAutoPlay = source.Type switch
+        {
+          AudioSourceType.Radio => true,      // Radio tunes to last frequency
+          AudioSourceType.Vinyl => true,      // Vinyl captures from USB input
+          AudioSourceType.GenericUSB => true, // Generic USB captures from input
+          AudioSourceType.FilePlayer => false, // Requires file to be loaded first
+          AudioSourceType.Spotify => false,   // Requires track/playlist selection
+          _ => false
+        };
+
+        if (canAutoPlay && source.State != AudioSourceState.Playing)
         {
           _logger.LogDebug("Starting playback on source: {SourceName}", source.Name);
           await newPrimary.PlayAsync(cancellationToken);
+        }
+        else if (!canAutoPlay)
+        {
+          _logger.LogDebug(
+            "Source {SourceName} requires content selection before playback",
+            source.Name);
         }
       }
 

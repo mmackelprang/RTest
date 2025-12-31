@@ -80,10 +80,41 @@ public class AudioFileEventSourceFactory
   }
 
   /// <summary>
+  /// Gets a list of subdirectories in the notification sounds folder.
+  /// </summary>
+  /// <param name="subdirectory">Optional subdirectory to list subdirectories from.</param>
+  /// <returns>A list of subdirectory names.</returns>
+  public IReadOnlyList<string> GetSubdirectories(string? subdirectory = null)
+  {
+    var rootPath = _options.CurrentValue.RootDirectory;
+    var searchPath = subdirectory != null
+      ? Path.Combine(rootPath, subdirectory)
+      : rootPath;
+
+    // Convert to absolute path for consistent results
+    var absoluteSearchPath = Path.GetFullPath(searchPath);
+
+    if (!Directory.Exists(absoluteSearchPath))
+    {
+      _logger.LogWarning("Directory does not exist: {Path}", absoluteSearchPath);
+      return Array.Empty<string>();
+    }
+
+    var directories = Directory.GetDirectories(absoluteSearchPath)
+      .Select(Path.GetFileName)
+      .Where(name => !string.IsNullOrEmpty(name))
+      .OrderBy(name => name)
+      .ToList();
+
+    return directories.AsReadOnly()!;
+  }
+
+  /// <summary>
   /// Gets a list of available notification sounds from the configured directory.
+  /// Returns absolute file paths for direct use with playback endpoints.
   /// </summary>
   /// <param name="subdirectory">Optional subdirectory to search in.</param>
-  /// <returns>A list of available audio file paths.</returns>
+  /// <returns>A list of available audio file paths (absolute paths).</returns>
   public IReadOnlyList<string> GetAvailableNotificationSounds(string? subdirectory = null)
   {
     var rootPath = _options.CurrentValue.RootDirectory;
@@ -91,15 +122,19 @@ public class AudioFileEventSourceFactory
       ? Path.Combine(rootPath, subdirectory)
       : rootPath;
 
-    if (!Directory.Exists(searchPath))
+    // Convert to absolute path for consistent results
+    var absoluteSearchPath = Path.GetFullPath(searchPath);
+
+    if (!Directory.Exists(absoluteSearchPath))
     {
-      _logger.LogWarning("Notification sounds directory does not exist: {Path}", searchPath);
+      _logger.LogWarning("Notification sounds directory does not exist: {Path}", absoluteSearchPath);
       return Array.Empty<string>();
     }
 
     var supportedExtensions = new[] { ".wav", ".mp3", ".ogg", ".flac" };
-    var files = Directory.GetFiles(searchPath, "*.*")
+    var files = Directory.GetFiles(absoluteSearchPath, "*.*")
       .Where(f => supportedExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
+      .Select(f => Path.GetFullPath(f)) // Ensure absolute paths
       .ToList();
 
     return files.AsReadOnly();

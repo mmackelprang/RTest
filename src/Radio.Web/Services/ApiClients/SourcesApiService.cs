@@ -181,6 +181,25 @@ public class SourcesApiService
     }
   }
 
+  public async Task<List<string>?> GetSoundDirectoriesAsync(string? subdirectory = null, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var url = "/api/sources/events/sounds/directories";
+      if (!string.IsNullOrWhiteSpace(subdirectory))
+      {
+        url += $"?subdirectory={Uri.EscapeDataString(subdirectory)}";
+      }
+
+      return await _httpClient.GetFromJsonAsync<List<string>>(url, JsonOptions, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to get sound directories");
+      return null;
+    }
+  }
+
   public async Task<List<NotificationSoundDto>?> GetNotificationSoundsAsync(string? subdirectory = null, CancellationToken cancellationToken = default)
   {
     try
@@ -190,7 +209,7 @@ public class SourcesApiService
       {
         url += $"?subdirectory={Uri.EscapeDataString(subdirectory)}";
       }
-      
+
       return await _httpClient.GetFromJsonAsync<List<NotificationSoundDto>>(url, JsonOptions, cancellationToken);
     }
     catch (Exception ex)

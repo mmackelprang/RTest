@@ -72,6 +72,9 @@ public static class AudioServiceExtensions
     services.AddSingleton<SoundFlowAudioEngine>();
     services.AddSingleton<IAudioEngine>(sp => sp.GetRequiredService<SoundFlowAudioEngine>());
 
+    // Register the playback service (singleton for managing SoundFlow players)
+    services.AddSingleton<SoundFlowPlaybackService>();
+
     // Bind audio options for ducking configuration
     services.Configure<AudioOptions>(
       configuration.GetSection(AudioOptions.SectionName));

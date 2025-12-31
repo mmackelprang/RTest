@@ -4,6 +4,7 @@ using Radio.API.Mappers;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Services;
+using Radio.Infrastructure.Audio.SoundFlow;
 
 namespace Radio.API.Controllers;
 
@@ -21,6 +22,7 @@ public class SourcesController : ControllerBase
   private readonly ITTSFactory? _ttsFactory;
   private readonly AudioFileEventSourceFactory? _fileEventFactory;
   private readonly IDuckingService? _duckingService;
+  private readonly SoundFlowPlaybackService? _playbackService;
 
   /// <summary>
   /// Initializes a new instance of the SourcesController.
@@ -31,7 +33,8 @@ public class SourcesController : ControllerBase
     IAudioManager? audioManager = null,
     ITTSFactory? ttsFactory = null,
     AudioFileEventSourceFactory? fileEventFactory = null,
-    IDuckingService? duckingService = null)
+    IDuckingService? duckingService = null,
+    SoundFlowPlaybackService? playbackService = null)
   {
     _logger = logger;
     _audioEngine = audioEngine;
@@ -39,6 +42,7 @@ public class SourcesController : ControllerBase
     _ttsFactory = ttsFactory;
     _fileEventFactory = fileEventFactory;
     _duckingService = duckingService;
+    _playbackService = playbackService;
   }
 
   /// <summary>
@@ -349,10 +353,48 @@ public class SourcesController : ControllerBase
   }
 
   /// <summary>
+  /// Gets subdirectories in the notification sounds folder.
+  /// </summary>
+  /// <remarks>
+  /// Returns a list of subdirectory names for folder-based navigation.
+  /// Use this to browse different categories of sounds (e.g., "alarm", "notify", "ring").
+  /// Pass the subdirectory name to subsequent calls to navigate deeper.
+  /// </remarks>
+  /// <param name="subdirectory">Optional current subdirectory path to list subdirectories from.</param>
+  /// <returns>List of subdirectory names.</returns>
+  [HttpGet("events/sounds/directories")]
+  [ProducesResponseType(typeof(List<string>), StatusCodes.Status200OK)]
+  public ActionResult<List<string>> GetSoundDirectories([FromQuery] string? subdirectory = null)
+  {
+    try
+    {
+      if (_fileEventFactory == null)
+      {
+        return StatusCode(501, new { error = "File event factory not available" });
+      }
+
+      var directories = _fileEventFactory.GetSubdirectories(subdirectory);
+      return Ok(directories.ToList());
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error getting sound directories");
+      return StatusCode(500, new { error = "Failed to get sound directories" });
+    }
+  }
+
+  /// <summary>
   /// Gets available notification sound files.
   /// </summary>
-  /// <param name="subdirectory">Optional subdirectory to search in.</param>
-  /// <returns>List of notification sound files.</returns>
+  /// <remarks>
+  /// Returns a list of available audio files with their absolute file paths.
+  /// The FilePath property can be passed directly to the POST /api/sources/events/file
+  /// endpoint to play the sound.
+  ///
+  /// Supported formats: .mp3, .wav, .ogg, .flac
+  /// </remarks>
+  /// <param name="subdirectory">Optional subdirectory to search in (e.g., "alarm", "notify").</param>
+  /// <returns>List of notification sound files with absolute paths.</returns>
   [HttpGet("events/sounds")]
   [ProducesResponseType(typeof(List<NotificationSoundDto>), StatusCodes.Status200OK)]
   public ActionResult<List<NotificationSoundDto>> GetNotificationSounds([FromQuery] string? subdirectory = null)
@@ -458,12 +500,27 @@ public class SourcesController : ControllerBase
   /// <summary>
   /// Plays an audio file event.
   /// </summary>
-  /// <param name="request">The file playback request.</param>
+  /// <remarks>
+  /// **Important:** The FilePath must be an absolute path to the audio file.
+  /// Use the GET /api/sources/events/sounds endpoint to retrieve available sounds
+  /// with their absolute file paths, then pass the FilePath directly to this endpoint.
+  ///
+  /// Supported formats: .mp3, .wav, .ogg, .flac
+  ///
+  /// Example request:
+  /// ```json
+  /// {
+  ///   "filePath": "D:/prj/RTest/RTest/src/Radio.API/media/audio/PD - Morse Code.mp3"
+  /// }
+  /// ```
+  /// </remarks>
+  /// <param name="request">The file playback request containing the absolute file path.</param>
   /// <param name="cancellationToken">Cancellation token.</param>
-  /// <returns>Success response if playback started.</returns>
+  /// <returns>Success response with sourceId if playback started.</returns>
   [HttpPost("events/file")]
   [ProducesResponseType(StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status404NotFound)]
   [ProducesResponseType(StatusCodes.Status501NotImplemented)]
   public async Task<ActionResult> PlayFileEvent([FromBody] PlayFileEventRequest request, CancellationToken cancellationToken)
   {
@@ -479,19 +536,37 @@ public class SourcesController : ControllerBase
         return StatusCode(501, new { error = "File event playback not available" });
       }
 
+      if (_playbackService == null)
+      {
+        return StatusCode(501, new { error = "Playback service not available" });
+      }
+
       _logger.LogInformation("Playing file event: {FilePath}", request.FilePath);
 
-      // Create file event source
+      // Create file event source for tracking
       var fileSource = await _fileEventFactory.CreateFromFileAsync(request.FilePath, cancellationToken);
 
-      // Add the event source to the mixer and play it
+      // Add the event source to the mixer for tracking
       var mixer = _audioEngine.GetMasterMixer();
       mixer.AddSource(fileSource);
-      
-      // Start playback
+
+      // Start actual audio playback through SoundFlow
+      var success = await _playbackService.PlayFileAsync(
+        fileSource.Id,
+        request.FilePath,
+        fileSource.Volume,
+        cancellationToken);
+
+      if (!success)
+      {
+        mixer.RemoveSource(fileSource);
+        return StatusCode(500, new { error = "Failed to start audio playback" });
+      }
+
+      // Mark the source as playing
       await fileSource.PlayAsync(cancellationToken);
 
-      return Ok(new { message = "File event started successfully" });
+      return Ok(new { message = "File event started successfully", sourceId = fileSource.Id });
     }
     catch (FileNotFoundException ex)
     {

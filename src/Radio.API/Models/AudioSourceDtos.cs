@@ -325,7 +325,9 @@ public class PlayTTSRequest
 public class PlayFileEventRequest
 {
   /// <summary>
-  /// Gets or sets the file path to play.
+  /// Gets or sets the absolute file path to play.
+  /// Must be an absolute path (e.g., "D:/audio/sound.mp3").
+  /// Use the GET /api/sources/events/sounds endpoint to get available files with absolute paths.
   /// </summary>
   public string FilePath { get; set; } = string.Empty;
 }
@@ -336,12 +338,13 @@ public class PlayFileEventRequest
 public class NotificationSoundDto
 {
   /// <summary>
-  /// Gets or sets the file name.
+  /// Gets or sets the file name (without path).
   /// </summary>
   public string FileName { get; set; } = string.Empty;
 
   /// <summary>
-  /// Gets or sets the full file path.
+  /// Gets or sets the absolute file path.
+  /// This path can be passed directly to the POST /api/sources/events/file endpoint.
   /// </summary>
   public string FilePath { get; set; } = string.Empty;
 

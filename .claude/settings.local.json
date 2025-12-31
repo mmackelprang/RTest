@@ -7,7 +7,20 @@
       "Bash(taskkill:*)",
       "Bash(dotnet restore:*)",
       "Bash(dotnet test:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(dotnet list:*)",
+      "WebFetch(domain:lsxprime.github.io)",
+      "Bash(findstr:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(dotnet run:*)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(if not exist \"media\\\\audio\" mkdir \"media\\\\audio\")",
+      "Bash(if not exist \"media\\\\sounds\" mkdir \"media\\\\sounds\")",
+      "Bash(dir:*)",
+      "Bash(timeout 20 dotnet run:*)",
+      "Bash(timeout 25 dotnet run:*)",
+      "Bash(timeout:*)"
     ]
   }
 }

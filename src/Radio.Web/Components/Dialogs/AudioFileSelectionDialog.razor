@@ -10,37 +10,103 @@
     </MudText>
   </TitleContent>
   <DialogContent>
+    @* Breadcrumb navigation *@
+    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
+      <MudButton Variant="Variant.Text"
+                 Color="Color.Primary"
+                 Size="Size.Small"
+                 OnClick="@(() => NavigateToPath(null))"
+                 Disabled="@(string.IsNullOrEmpty(_currentPath))">
+        <MudIcon Icon="@Icons.Material.Filled.Home" Size="Size.Small" Class="mr-1" />
+        Root
+      </MudButton>
+      @if (!string.IsNullOrEmpty(_currentPath))
+      {
+        var pathParts = _currentPath.Split('/', '\\').Where(p => !string.IsNullOrEmpty(p)).ToArray();
+        for (int i = 0; i < pathParts.Length; i++)
+        {
+          var index = i;
+          var partialPath = string.Join("/", pathParts.Take(index + 1));
+          <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" Style="color: var(--mud-palette-text-secondary);" />
+          <MudButton Variant="Variant.Text"
+                     Color="@(i == pathParts.Length - 1 ? Color.Default : Color.Primary)"
+                     Size="Size.Small"
+                     Disabled="@(i == pathParts.Length - 1)"
+                     OnClick="@(() => NavigateToPath(partialPath))">
+            @pathParts[index]
+          </MudButton>
+        }
+      }
+    </div>
+
     @if (_isLoading)
     {
       <div style="display: flex; justify-content: center; padding: 32px;">
         <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
       </div>
     }
-    else if (_files == null || _files.Count == 0)
+    else if ((_directories == null || _directories.Count == 0) && (_files == null || _files.Count == 0))
     {
-      <MudAlert Severity="Severity.Info">No audio files found.</MudAlert>
+      <MudAlert Severity="Severity.Info">No audio files or folders found.</MudAlert>
     }
     else
     {
       <MudList T="string" Dense="false" Style="max-height: 400px; overflow-y: auto;">
-        @foreach (var file in _files)
+        @* Back button if in a subdirectory *@
+        @if (!string.IsNullOrEmpty(_currentPath))
         {
-          <MudListItem T="string" 
-                       OnClick="@(() => SelectFile(file))"
-                       Style="@(SelectedFile == file ? "background-color: var(--mud-palette-action-default-hover);" : "")">
-            <div style="display: flex; align-items: center; gap: 16px; padding: 12px 0;">
-              <MudIcon Icon="@Icons.Material.Filled.MusicNote" Color="Color.Primary" Size="Size.Large" />
-              <div style="flex: 1; min-width: 0;">
-                <MudText Typo="Typo.body1" Style="font-weight: 500;">@file.FileName</MudText>
-                <MudText Typo="Typo.caption" Color="Color.Secondary">@FormatFileSize(file.FileSize)</MudText>
-              </div>
-              @if (SelectedFile == file)
-              {
-                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" />
-              }
+          <MudListItem T="string" OnClick="NavigateUp">
+            <div style="display: flex; align-items: center; gap: 16px; padding: 8px 0;">
+              <MudIcon Icon="@Icons.Material.Filled.ArrowBack" Color="Color.Secondary" Size="Size.Large" />
+              <MudText Typo="Typo.body1" Style="font-weight: 500; color: var(--mud-palette-text-secondary);">
+                .. (Go back)
+              </MudText>
             </div>
           </MudListItem>
           <MudDivider />
+        }
+
+        @* Folders first *@
+        @if (_directories != null)
+        {
+          @foreach (var folder in _directories)
+          {
+            <MudListItem T="string" OnClick="@(() => NavigateToFolder(folder))">
+              <div style="display: flex; align-items: center; gap: 16px; padding: 8px 0;">
+                <MudIcon Icon="@Icons.Material.Filled.Folder" Color="Color.Warning" Size="Size.Large" />
+                <div style="flex: 1; min-width: 0;">
+                  <MudText Typo="Typo.body1" Style="font-weight: 500;">@folder</MudText>
+                  <MudText Typo="Typo.caption" Color="Color.Secondary">Folder</MudText>
+                </div>
+                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Secondary" />
+              </div>
+            </MudListItem>
+            <MudDivider />
+          }
+        }
+
+        @* Then files *@
+        @if (_files != null)
+        {
+          @foreach (var file in _files)
+          {
+            <MudListItem T="string"
+                         OnClick="@(() => SelectFile(file))"
+                         Style="@(SelectedFile == file ? "background-color: var(--mud-palette-action-default-hover);" : "")">
+              <div style="display: flex; align-items: center; gap: 16px; padding: 12px 0;">
+                <MudIcon Icon="@Icons.Material.Filled.MusicNote" Color="Color.Primary" Size="Size.Large" />
+                <div style="flex: 1; min-width: 0;">
+                  <MudText Typo="Typo.body1" Style="font-weight: 500;">@file.FileName</MudText>
+                  <MudText Typo="Typo.caption" Color="Color.Secondary">@FormatFileSize(file.FileSize)</MudText>
+                </div>
+                @if (SelectedFile == file)
+                {
+                  <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" />
+                }
+              </div>
+            </MudListItem>
+            <MudDivider />
+          }
         }
       </MudList>
     }
@@ -54,7 +120,7 @@
 </MudDialog>
 
 @code {
-  [CascadingParameter] 
+  [CascadingParameter]
   public IMudDialogInstance MudDialog { get; set; } = null!;
 
   [Parameter]
@@ -63,23 +129,35 @@
   [Parameter]
   public string? Subdirectory { get; set; }
 
+  private List<string>? _directories;
   private List<NotificationSoundDto>? _files;
   private bool _isLoading = true;
+  private string? _currentPath;
   private NotificationSoundDto? SelectedFile { get; set; }
 
   protected override async Task OnInitializedAsync()
   {
-    await LoadFilesAsync();
+    _currentPath = Subdirectory;
+    await LoadContentsAsync();
   }
 
-  private async Task LoadFilesAsync()
+  private async Task LoadContentsAsync()
   {
     _isLoading = true;
+    StateHasChanged();
+
     try
     {
-      _files = await SourcesApi.GetNotificationSoundsAsync(Subdirectory);
-      
-      // Set initial selection if provided
+      // Load both directories and files in parallel
+      var dirTask = SourcesApi.GetSoundDirectoriesAsync(_currentPath);
+      var filesTask = SourcesApi.GetNotificationSoundsAsync(_currentPath);
+
+      await Task.WhenAll(dirTask, filesTask);
+
+      _directories = await dirTask;
+      _files = await filesTask;
+
+      // Set initial selection if provided and we're at the right path
       if (!string.IsNullOrWhiteSpace(InitialSelection) && _files != null)
       {
         SelectedFile = _files.FirstOrDefault(f => f.FilePath == InitialSelection);
@@ -88,12 +166,45 @@
     catch (Exception ex)
     {
       Logger.LogError(ex, "Failed to load audio files for selection dialog");
+      _directories = null;
       _files = null;
     }
     finally
     {
       _isLoading = false;
+      StateHasChanged();
     }
+  }
+
+  private async Task NavigateToFolder(string folderName)
+  {
+    _currentPath = string.IsNullOrEmpty(_currentPath)
+      ? folderName
+      : $"{_currentPath}/{folderName}";
+
+    SelectedFile = null; // Clear selection when navigating
+    await LoadContentsAsync();
+  }
+
+  private async Task NavigateUp()
+  {
+    if (string.IsNullOrEmpty(_currentPath))
+      return;
+
+    var parts = _currentPath.Split('/', '\\').Where(p => !string.IsNullOrEmpty(p)).ToArray();
+    _currentPath = parts.Length > 1
+      ? string.Join("/", parts.Take(parts.Length - 1))
+      : null;
+
+    SelectedFile = null; // Clear selection when navigating
+    await LoadContentsAsync();
+  }
+
+  private async Task NavigateToPath(string? path)
+  {
+    _currentPath = path;
+    SelectedFile = null; // Clear selection when navigating
+    await LoadContentsAsync();
   }
 
   private void SelectFile(NotificationSoundDto file)

@@ -1,6 +1,7 @@
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
+using Radio.Infrastructure.Audio.Sources.Events;
 
 namespace Radio.API.Mappers;
 
@@ -38,10 +39,10 @@ public static class AudioDtoMapper
     {
       dto.IsSeekable = primary.IsSeekable;
       dto.Metadata = primary.Metadata.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
-      
+
       // Check if source implements IPlayQueue interface
       dto.HasQueue = source is IPlayQueue;
-      
+
       // Add primary source capabilities to dictionary
       dto.Capabilities["SupportsPlay"] = true; // All primary sources support play
       dto.Capabilities["SupportsPause"] = true; // All primary sources support pause
@@ -52,6 +53,33 @@ public static class AudioDtoMapper
       dto.Capabilities["SupportsShuffle"] = primary.SupportsShuffle;
       dto.Capabilities["SupportsRepeat"] = primary.SupportsRepeat;
       dto.Capabilities["SupportsQueue"] = primary.SupportsQueue;
+    }
+    else if (source is IEventAudioSource eventSource)
+    {
+      // Extract metadata for event sources
+      dto.Metadata = new Dictionary<string, object>
+      {
+        ["Duration"] = eventSource.Duration.TotalSeconds
+      };
+
+      // Add TTS-specific metadata
+      if (source is TTSEventSource ttsSource)
+      {
+        dto.Metadata["Text"] = ttsSource.Text;
+        dto.Metadata["Engine"] = ttsSource.Parameters.Engine.ToString();
+        dto.Metadata["Voice"] = ttsSource.Parameters.Voice;
+        dto.Metadata["Speed"] = ttsSource.Parameters.Speed;
+        dto.Metadata["Pitch"] = ttsSource.Parameters.Pitch;
+      }
+      // Add audio file event-specific metadata
+      else if (source is AudioFileEventSource fileSource)
+      {
+        dto.Metadata["FilePath"] = fileSource.FilePath;
+      }
+
+      // Event sources support play and stop
+      dto.Capabilities["SupportsPlay"] = true;
+      dto.Capabilities["SupportsStop"] = true;
     }
     
     // Add radio-specific capabilities if source implements IRadioControl

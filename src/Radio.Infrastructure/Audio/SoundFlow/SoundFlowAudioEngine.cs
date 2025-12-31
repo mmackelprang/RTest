@@ -2,7 +2,11 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
+using SoundFlow.Abstracts;
+using SoundFlow.Abstracts.Devices;
 using SoundFlow.Backends.MiniAudio;
+using SoundFlow.Enums;
+using SoundFlow.Structs;
 
 namespace Radio.Infrastructure.Audio.SoundFlow;
 
@@ -21,6 +25,8 @@ public class SoundFlowAudioEngine : IAudioEngine
   private readonly SoundFlowDeviceManager _deviceManager;
 
   private MiniAudioEngine? _engine;
+  private AudioPlaybackDevice? _playbackDevice;
+  private AudioFormat _audioFormat;
   private TappedOutputStream? _outputTap;
   private Timer? _hotPlugTimer;
   private AudioEngineState _state = AudioEngineState.Uninitialized;
@@ -113,6 +119,42 @@ public class SoundFlowAudioEngine : IAudioEngine
 
       // Initialize SoundFlow MiniAudioEngine
       _engine = new MiniAudioEngine();
+
+      // Create audio format for playback with explicit sample format
+      _audioFormat = new AudioFormat
+      {
+        SampleRate = _options.SampleRate,
+        Channels = _options.Channels,
+        Format = SampleFormat.F32  // Use 32-bit float samples
+      };
+
+      // Update device info and get available playback devices
+      _engine.UpdateAudioDevicesInfo();
+      var playbackDevices = _engine.PlaybackDevices;
+      _logger.LogInformation("Found {DeviceCount} playback devices after UpdateAudioDevicesInfo", playbackDevices.Length);
+
+      if (playbackDevices.Length > 0)
+      {
+        // Use the first (default) playback device
+        var deviceInfo = playbackDevices[0];
+        _logger.LogInformation("Initializing playback device: {DeviceName}", deviceInfo.Name);
+
+        try
+        {
+          // Initialize the playback device with our format
+          _playbackDevice = _engine.InitializePlaybackDevice(deviceInfo, _audioFormat);
+          _playbackDevice.Start();
+          _logger.LogInformation("Playback device initialized and started: {DeviceName}", deviceInfo.Name);
+        }
+        catch (Exception ex)
+        {
+          _logger.LogError(ex, "Failed to initialize playback device: {DeviceName}", deviceInfo.Name);
+        }
+      }
+      else
+      {
+        _logger.LogWarning("No playback devices found. Audio output will not be available.");
+      }
 
       // Create output tap for streaming
       _outputTap = new TappedOutputStream(
@@ -249,6 +291,18 @@ public class SoundFlowAudioEngine : IAudioEngine
   internal MiniAudioEngine? GetUnderlyingEngine() => _engine;
 
   /// <summary>
+  /// Gets the initialized playback device.
+  /// </summary>
+  /// <returns>The playback device, or null if not initialized.</returns>
+  internal AudioPlaybackDevice? GetPlaybackDevice() => _playbackDevice;
+
+  /// <summary>
+  /// Gets the audio format used by the engine.
+  /// </summary>
+  /// <returns>The audio format.</returns>
+  internal AudioFormat GetAudioFormat() => _audioFormat;
+
+  /// <summary>
   /// Writes audio samples to the output tap for streaming.
   /// This is called during audio processing to capture the mixed output.
   /// </summary>
@@ -327,6 +381,21 @@ public class SoundFlowAudioEngine : IAudioEngine
 
     // Clear sources
     _masterMixer.ClearSources();
+
+    // Stop and dispose playback device
+    if (_playbackDevice != null)
+    {
+      try
+      {
+        _playbackDevice.Stop();
+        _playbackDevice.Dispose();
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Error stopping playback device during disposal");
+      }
+      _playbackDevice = null;
+    }
 
     // Dispose output tap
     if (_outputTap != null)
