@@ -1,0 +1,198 @@
+@using MudBlazor
+@using Radio.Web.Models
+@using Radio.Web.Services.ApiClients
+
+<MudDialog>
+  <TitleContent>
+    <MudText Typo="Typo.h6">
+      <MudIcon Icon="@Icons.Material.Filled.Cast" Class="mr-2" />
+      Select Cast Device
+    </MudText>
+  </TitleContent>
+  <DialogContent>
+    @if (_isLoading)
+    {
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 32px;">
+        <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Discovering Cast devices...</MudText>
+      </div>
+    }
+    else if (_error != null)
+    {
+      <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+      <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="RefreshDevicesAsync" FullWidth="true">
+        <MudIcon Icon="@Icons.Material.Filled.Refresh" Class="mr-2" />
+        Retry Discovery
+      </MudButton>
+    }
+    else if (_devices == null || _devices.Count == 0)
+    {
+      <MudAlert Severity="Severity.Info" Class="mb-4">
+        No Cast devices found on your network. Make sure your Chromecast or Cast-enabled device is powered on and connected to the same network.
+      </MudAlert>
+      <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="RefreshDevicesAsync" FullWidth="true">
+        <MudIcon Icon="@Icons.Material.Filled.Refresh" Class="mr-2" />
+        Scan Again
+      </MudButton>
+    }
+    else
+    {
+      <MudList T="CastDeviceDto" Dense="false" Style="max-height: 300px; overflow-y: auto;">
+        @foreach (var device in _devices)
+        {
+          var isSelected = _selectedDevice?.Id == device.Id;
+          <MudListItem T="CastDeviceDto"
+                       OnClick="@(() => SelectDevice(device))"
+                       Style="@(isSelected ? "background-color: var(--mud-palette-action-default-hover);" : "")">
+            <div style="display: flex; align-items: center; gap: 16px; padding: 12px 0;">
+              <MudIcon Icon="@GetDeviceIcon(device)" Color="@(isSelected ? Color.Primary : Color.Default)" Size="Size.Large" />
+              <div style="flex: 1; min-width: 0;">
+                <MudText Typo="Typo.body1" Style="font-weight: 500;">@device.Name</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@device.Model - @device.IpAddress</MudText>
+              </div>
+              @if (isSelected)
+              {
+                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" />
+              }
+            </div>
+          </MudListItem>
+          <MudDivider />
+        }
+      </MudList>
+      <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="RefreshDevicesAsync" Class="mt-2" Size="Size.Small">
+        <MudIcon Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" Class="mr-1" />
+        Refresh List
+      </MudButton>
+    }
+
+    @if (_isConnecting)
+    {
+      <div style="display: flex; align-items: center; gap: 8px; margin-top: 16px; padding: 12px; background: var(--mud-palette-background-grey); border-radius: 8px;">
+        <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+        <MudText Typo="Typo.body2">Connecting to @_selectedDevice?.Name...</MudText>
+      </div>
+    }
+  </DialogContent>
+  <DialogActions>
+    <MudButton OnClick="Cancel" Variant="Variant.Text">Cancel</MudButton>
+    <MudButton OnClick="ConnectToDevice"
+               Variant="Variant.Filled"
+               Color="Color.Primary"
+               Disabled="@(_selectedDevice == null || _isConnecting)">
+      Connect
+    </MudButton>
+  </DialogActions>
+</MudDialog>
+
+@code {
+  [CascadingParameter]
+  public IMudDialogInstance MudDialog { get; set; } = null!;
+
+  [Parameter]
+  public DevicesApiService DevicesApi { get; set; } = null!;
+
+  [Parameter]
+  public ILogger Logger { get; set; } = null!;
+
+  private List<CastDeviceDto>? _devices;
+  private CastDeviceDto? _selectedDevice;
+  private bool _isLoading = true;
+  private bool _isConnecting;
+  private string? _error;
+
+  protected override async Task OnInitializedAsync()
+  {
+    await DiscoverDevicesAsync();
+  }
+
+  private async Task DiscoverDevicesAsync()
+  {
+    _isLoading = true;
+    _error = null;
+    StateHasChanged();
+
+    try
+    {
+      _devices = await DevicesApi.DiscoverCastDevicesAsync();
+      if (_devices == null)
+      {
+        _error = "Failed to connect to the Cast discovery service. Please check that the API server is running.";
+      }
+      // Empty list is OK - just means no devices found (UI handles this separately)
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error discovering Cast devices");
+      _error = "An error occurred while searching for Cast devices.";
+    }
+    finally
+    {
+      _isLoading = false;
+      StateHasChanged();
+    }
+  }
+
+  private async Task RefreshDevicesAsync()
+  {
+    _selectedDevice = null;
+    await DiscoverDevicesAsync();
+  }
+
+  private void SelectDevice(CastDeviceDto device)
+  {
+    _selectedDevice = device;
+  }
+
+  private async Task ConnectToDevice()
+  {
+    if (_selectedDevice == null) return;
+
+    _isConnecting = true;
+    StateHasChanged();
+
+    try
+    {
+      var success = await DevicesApi.ConnectToCastDeviceAsync(_selectedDevice);
+      if (success)
+      {
+        Logger.LogInformation("Connected to Cast device: {DeviceName}", _selectedDevice.Name);
+        MudDialog.Close(DialogResult.Ok(_selectedDevice));
+      }
+      else
+      {
+        _error = $"Failed to connect to {_selectedDevice.Name}. Please try again.";
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error connecting to Cast device: {DeviceName}", _selectedDevice.Name);
+      _error = $"Error connecting to {_selectedDevice.Name}: {ex.Message}";
+    }
+    finally
+    {
+      _isConnecting = false;
+      StateHasChanged();
+    }
+  }
+
+  private void Cancel()
+  {
+    MudDialog.Cancel();
+  }
+
+  private static string GetDeviceIcon(CastDeviceDto device)
+  {
+    var model = device.Model.ToLowerInvariant();
+
+    if (model.Contains("audio") || model.Contains("speaker") || model.Contains("home"))
+      return Icons.Material.Filled.Speaker;
+
+    if (model.Contains("tv") || model.Contains("ultra"))
+      return Icons.Material.Filled.Tv;
+
+    if (model.Contains("display") || model.Contains("hub"))
+      return Icons.Material.Filled.TabletAndroid;
+
+    return Icons.Material.Filled.Cast;
+  }
+}
