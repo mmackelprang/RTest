@@ -510,6 +510,9 @@ public record ConnectCastDeviceRequest(
 );
 
 // Device Configuration DTOs
+// Note: These DTOs mirror Radio.API.Models.ConfigurationModels but are duplicated
+// here because Radio.Web does not reference Radio.API (architectural separation).
+// The Web layer communicates with the API via HTTP and maintains its own DTOs.
 public class DeviceOptionsDto
 {
   public RadioDeviceOptionsDto Radio { get; set; } = new();

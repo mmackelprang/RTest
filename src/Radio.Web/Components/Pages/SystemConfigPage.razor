@@ -717,8 +717,10 @@
       _audioConfig = await ConfigApi.GetConfigurationAsync<AudioConfigurationDto>("audio");
       _visualizerConfig = await ConfigApi.GetConfigurationAsync<VisualizerConfigurationDto>("visualizer");
       _outputConfig = await ConfigApi.GetConfigurationAsync<OutputConfigurationDto>("output");
-      _deviceOptions = await ConfigApi.GetConfigurationAsync<DeviceOptionsDto>("devices") 
-                       ?? new DeviceOptionsDto();
+      
+      // Load device options, create default if not found
+      var deviceOptions = await ConfigApi.GetConfigurationAsync<DeviceOptionsDto>("devices");
+      _deviceOptions = deviceOptions ?? new DeviceOptionsDto();
 
       // Populate output config individual fields for binding
       if (_outputConfig != null)
