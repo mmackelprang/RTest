@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.Outputs;
+using Radio.Infrastructure.Audio.SoundFlow;
 
 namespace Radio.API.Controllers;
 
@@ -14,16 +16,28 @@ public class DevicesController : ControllerBase
 {
   private readonly ILogger<DevicesController> _logger;
   private readonly IAudioDeviceManager _deviceManager;
+  private readonly SoundFlowAudioEngine? _audioEngine;
+  private readonly LocalAudioOutput? _localOutput;
+  private readonly GoogleCastOutput? _castOutput;
+  private readonly HttpStreamOutput? _httpOutput;
 
   /// <summary>
   /// Initializes a new instance of the DevicesController.
   /// </summary>
   public DevicesController(
     ILogger<DevicesController> logger,
-    IAudioDeviceManager deviceManager)
+    IAudioDeviceManager deviceManager,
+    SoundFlowAudioEngine? audioEngine = null,
+    LocalAudioOutput? localOutput = null,
+    GoogleCastOutput? castOutput = null,
+    HttpStreamOutput? httpOutput = null)
   {
     _logger = logger;
     _deviceManager = deviceManager;
+    _audioEngine = audioEngine;
+    _localOutput = localOutput;
+    _castOutput = castOutput;
+    _httpOutput = httpOutput;
   }
 
   /// <summary>
@@ -109,10 +123,58 @@ public class DevicesController : ControllerBase
         return BadRequest(new { error = "DeviceId is required" });
       }
 
-      await _deviceManager.SetOutputDeviceAsync(request.DeviceId);
-      _logger.LogInformation("Output device set to {DeviceId}", request.DeviceId);
+      var deviceId = request.DeviceId;
+      _logger.LogInformation("Switching audio output to: {DeviceId}", deviceId);
 
-      return Ok(new { message = "Output device set", deviceId = request.DeviceId });
+      // Handle virtual outputs (HTTP Stream, Google Cast)
+      if (deviceId == "http-stream")
+      {
+        // Activate HTTP stream output, deactivate others
+        await ActivateOutputAsync(_httpOutput, "HTTP Stream");
+        await DeactivateOutputAsync(_castOutput, "Google Cast");
+        // Local output stays active as the source
+      }
+      else if (deviceId == "google-cast")
+      {
+        // Activate Cast output, deactivate HTTP (Cast uses HTTP stream internally)
+        await ActivateOutputAsync(_castOutput, "Google Cast");
+        await DeactivateOutputAsync(_httpOutput, "HTTP Stream");
+        // Local output stays active as the source
+      }
+      else
+      {
+        // Local audio device - switch the local output device
+        await DeactivateOutputAsync(_castOutput, "Google Cast");
+        await DeactivateOutputAsync(_httpOutput, "HTTP Stream");
+
+        // Switch the actual SoundFlow playback device
+        if (_audioEngine != null)
+        {
+          var deviceIndex = _audioEngine.GetDeviceIndexById(deviceId);
+          if (deviceIndex >= 0)
+          {
+            var success = _audioEngine.SwitchPlaybackDevice(deviceIndex);
+            if (!success)
+            {
+              _logger.LogWarning("Failed to switch SoundFlow playback device to {DeviceId}", deviceId);
+            }
+          }
+          else
+          {
+            _logger.LogDebug("Device {DeviceId} is not a local playback device, skipping engine switch", deviceId);
+          }
+        }
+
+        if (_localOutput != null)
+        {
+          await _localOutput.SelectDeviceAsync(deviceId);
+        }
+      }
+
+      await _deviceManager.SetOutputDeviceAsync(deviceId);
+      _logger.LogInformation("Output device set to {DeviceId}", deviceId);
+
+      return Ok(new { message = "Output device set", deviceId = deviceId });
     }
     catch (ArgumentException ex)
     {
@@ -128,6 +190,173 @@ public class DevicesController : ControllerBase
     {
       _logger.LogError(ex, "Error setting output device");
       return StatusCode(500, new { error = "Failed to set output device" });
+    }
+  }
+
+  /// <summary>
+  /// Activates an audio output if available.
+  /// </summary>
+  private async Task ActivateOutputAsync(IAudioOutput? output, string name)
+  {
+    if (output == null)
+    {
+      _logger.LogDebug("{Name} output not available", name);
+      return;
+    }
+
+    try
+    {
+      if (output.State == AudioOutputState.Created)
+      {
+        await output.InitializeAsync();
+      }
+
+      if (output.State == AudioOutputState.Ready || output.State == AudioOutputState.Stopped)
+      {
+        await output.StartAsync();
+        _logger.LogInformation("{Name} output activated", name);
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to activate {Name} output", name);
+    }
+  }
+
+  /// <summary>
+  /// Deactivates an audio output if running.
+  /// </summary>
+  private async Task DeactivateOutputAsync(IAudioOutput? output, string name)
+  {
+    if (output == null)
+    {
+      return;
+    }
+
+    try
+    {
+      if (output.State == AudioOutputState.Streaming)
+      {
+        await output.StopAsync();
+        _logger.LogInformation("{Name} output deactivated", name);
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to deactivate {Name} output", name);
+    }
+  }
+
+  /// <summary>
+  /// Discovers available Google Cast devices on the network.
+  /// </summary>
+  /// <returns>List of available Cast devices.</returns>
+  [HttpGet("cast")]
+  [ProducesResponseType(typeof(List<CastDeviceDto>), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+  public async Task<IActionResult> DiscoverCastDevices(CancellationToken cancellationToken)
+  {
+    if (_castOutput == null)
+    {
+      return StatusCode(503, new { error = "Google Cast output not available" });
+    }
+
+    try
+    {
+      _logger.LogInformation("Discovering Google Cast devices...");
+
+      // Ensure Cast output is initialized
+      if (_castOutput.State == AudioOutputState.Created)
+      {
+        await _castOutput.InitializeAsync(cancellationToken);
+      }
+
+      // Add a timeout to prevent blocking forever if mDNS discovery hangs
+      using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+      timeoutCts.CancelAfter(TimeSpan.FromSeconds(15));
+
+      var devices = await _castOutput.DiscoverDevicesAsync(timeoutCts.Token);
+
+      var result = devices.Select(d => new CastDeviceDto
+      {
+        Id = d.Id,
+        Name = d.FriendlyName,
+        IpAddress = d.IpAddress,
+        Port = d.Port,
+        Model = d.Model
+      }).ToList();
+
+      _logger.LogInformation("Found {Count} Google Cast devices", result.Count);
+      return Ok(result);
+    }
+    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+    {
+      // Timeout occurred during discovery
+      _logger.LogWarning("Cast device discovery timed out after 15 seconds");
+      return Ok(new List<CastDeviceDto>()); // Return empty list on timeout
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error discovering Cast devices");
+      return StatusCode(500, new { error = "Failed to discover Cast devices", details = ex.Message });
+    }
+  }
+
+  /// <summary>
+  /// Connects to a specific Google Cast device.
+  /// </summary>
+  /// <param name="request">The Cast device to connect to.</param>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <returns>Success or error response.</returns>
+  [HttpPost("cast/connect")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+  public async Task<IActionResult> ConnectToCastDevice(
+    [FromBody] ConnectCastDeviceRequest request,
+    CancellationToken cancellationToken)
+  {
+    if (_castOutput == null)
+    {
+      return StatusCode(503, new { error = "Google Cast output not available" });
+    }
+
+    if (string.IsNullOrWhiteSpace(request.DeviceId) ||
+        string.IsNullOrWhiteSpace(request.IpAddress))
+    {
+      return BadRequest(new { error = "DeviceId and IpAddress are required" });
+    }
+
+    try
+    {
+      _logger.LogInformation("Connecting to Cast device: {Name} at {IP}",
+        request.Name, request.IpAddress);
+
+      // Ensure Cast output is initialized
+      if (_castOutput.State == AudioOutputState.Created)
+      {
+        await _castOutput.InitializeAsync(cancellationToken);
+      }
+
+      // Create device info for connection
+      var deviceInfo = new ChromecastDeviceInfo
+      {
+        Id = request.DeviceId,
+        FriendlyName = request.Name ?? "Cast Device",
+        IpAddress = request.IpAddress,
+        Port = request.Port ?? 8009,
+        Model = request.Model ?? "Unknown"
+      };
+
+      await _castOutput.ConnectAsync(deviceInfo, cancellationToken);
+
+      _logger.LogInformation("Connected to Cast device: {Name}", request.Name);
+      return Ok(new { message = "Connected to Cast device", device = request.Name });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error connecting to Cast device: {Name}", request.Name);
+      return StatusCode(500, new { error = "Failed to connect to Cast device", details = ex.Message });
     }
   }
 

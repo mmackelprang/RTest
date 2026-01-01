@@ -608,7 +608,7 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   #region PrimaryAudioSourceBase Overrides
 
   /// <inheritdoc/>
-  protected override Task InitializeAsync(CancellationToken cancellationToken = default)
+  public override Task InitializeAsync(CancellationToken cancellationToken = default)
   {
     // Initialization is handled by StartupAsync
     return Task.CompletedTask;

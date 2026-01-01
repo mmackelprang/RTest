@@ -372,11 +372,13 @@ public class RadioControllerTests : IClassFixture<WebApplicationFactory<Program>
   [Fact]
   public async Task CreatePreset_WithValidData_ReturnsCreated()
   {
-    // Arrange - Use very unique frequency to avoid collisions
-    var uniqueFreq = 88.1 + (DateTime.Now.Millisecond % 10) * 0.1; // Range: 88.1-88.9
+    // Arrange - Use unique frequency and name based on ticks to avoid collisions
+    var uniqueId = DateTime.UtcNow.Ticks % 10000;
+    var uniqueFreq = 88.1 + (uniqueId % 100) * 0.1; // Range: 88.1-97.9
+    var uniqueName = $"Test Station {uniqueId}";
     var request = new CreateRadioPresetRequest
     {
-      Name = "Test Station",
+      Name = uniqueName,
       Band = "FM",
       Frequency = uniqueFreq
     };
@@ -384,19 +386,19 @@ public class RadioControllerTests : IClassFixture<WebApplicationFactory<Program>
     // Act
     var response = await _client.PostAsJsonAsync("/api/radio/presets", request);
 
-    // Assert
-    if (response.StatusCode == HttpStatusCode.Conflict)
+    // Assert - retry with different values if conflict
+    for (var retry = 0; retry < 3 && response.StatusCode == HttpStatusCode.Conflict; retry++)
     {
-      // If we got a conflict, try one more time with a different frequency
-      uniqueFreq += 10.0;
-      request = request with { Frequency = uniqueFreq };
+      uniqueFreq = 100.0 + retry * 2.0 + (DateTime.UtcNow.Ticks % 100) * 0.1;
+      uniqueName = $"Test Station {DateTime.UtcNow.Ticks}";
+      request = request with { Frequency = uniqueFreq, Name = uniqueName };
       response = await _client.PostAsJsonAsync("/api/radio/presets", request);
     }
 
     Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     var preset = await response.Content.ReadFromJsonAsync<RadioPresetDto>();
     Assert.NotNull(preset);
-    Assert.Equal("Test Station", preset.Name);
+    Assert.Equal(uniqueName, preset.Name);
     Assert.Equal("FM", preset.Band);
     Assert.Equal(uniqueFreq, preset.Frequency);
     Assert.NotEmpty(preset.Id);

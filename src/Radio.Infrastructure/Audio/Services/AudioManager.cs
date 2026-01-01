@@ -282,6 +282,19 @@ public class AudioManager : IAudioManager
       return null;
     }
 
+    // Initialize the source before adding to mixer
+    if (source is IPrimaryAudioSource primarySource)
+    {
+      _logger.LogDebug("Initializing source: {SourceName}", source.Name);
+      await primarySource.InitializeAsync(cancellationToken);
+
+      if (source.State == AudioSourceState.Error)
+      {
+        _logger.LogWarning("Source {SourceName} failed to initialize", source.Name);
+        return null;
+      }
+    }
+
     // Cache the source for reuse
     _sourceCache[sourceType] = source;
 
@@ -432,9 +445,9 @@ public class AudioManager : IAudioManager
   /// </summary>
   private IAudioSource CreateFilePlayerSource()
   {
-    var rootDir = _configuration["FilePlayer:RootDirectory"]
-                  ?? _configuration["RootDir"]
-                  ?? Directory.GetCurrentDirectory();
+    // Use the same root directory logic as FileBrowser for consistency
+    // The FilePlayerOptions.RootDirectory is a subdirectory relative to this root
+    var rootDir = _configuration["RootDir"] ?? Directory.GetCurrentDirectory();
 
     var logger = _loggerFactory.CreateLogger<FilePlayerAudioSource>();
     return new FilePlayerAudioSource(
@@ -502,10 +515,13 @@ public class AudioManager : IAudioManager
 
     _logger.LogInformation("Disposing AudioManager");
 
-    // Stop current playback
+    // Stop current playback (don't call StopAsync as it checks disposed flag)
     try
     {
-      await StopAsync();
+      if (_activeSource is IPrimaryAudioSource primarySource)
+      {
+        await primarySource.StopAsync();
+      }
     }
     catch (Exception ex)
     {

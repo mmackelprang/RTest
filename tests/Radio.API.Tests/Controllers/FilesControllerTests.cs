@@ -28,6 +28,8 @@ public class FilesControllerTests : IClassFixture<WebApplicationFactory<Program>
         var mockFileBrowser = new Mock<IFileBrowser>();
         mockFileBrowser.Setup(m => m.ListFilesAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
           .ReturnsAsync(CreateTestAudioFiles());
+        mockFileBrowser.Setup(m => m.ListDirectories(It.IsAny<string?>()))
+          .Returns(new List<string> { "subdir1", "subdir2" });
         mockFileBrowser.Setup(m => m.GetFileInfoAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
           .ReturnsAsync((string path, CancellationToken ct) =>
           {
@@ -51,12 +53,16 @@ public class FilesControllerTests : IClassFixture<WebApplicationFactory<Program>
   {
     // Act
     var response = await _client.GetAsync("/api/files");
-    var files = await response.Content.ReadFromJsonAsync<List<AudioFileInfoDto>>();
+    var result = await response.Content.ReadFromJsonAsync<FileListDto>();
 
     // Assert
     Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    Assert.NotNull(files);
-    Assert.NotEmpty(files);
+    Assert.NotNull(result);
+    Assert.NotNull(result.Items);
+    Assert.NotEmpty(result.Items);
+    // Should include both directories and files
+    Assert.Contains(result.Items, i => i.IsDirectory);
+    Assert.Contains(result.Items, i => !i.IsDirectory);
   }
 
   [Fact]
@@ -64,11 +70,13 @@ public class FilesControllerTests : IClassFixture<WebApplicationFactory<Program>
   {
     // Act
     var response = await _client.GetAsync("/api/files?path=music");
-    var files = await response.Content.ReadFromJsonAsync<List<AudioFileInfoDto>>();
+    var result = await response.Content.ReadFromJsonAsync<FileListDto>();
 
     // Assert
     Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    Assert.NotNull(files);
+    Assert.NotNull(result);
+    Assert.NotNull(result.Items);
+    Assert.Equal("music", result.CurrentPath);
   }
 
   [Fact]
@@ -76,11 +84,14 @@ public class FilesControllerTests : IClassFixture<WebApplicationFactory<Program>
   {
     // Act
     var response = await _client.GetAsync("/api/files?recursive=true");
-    var files = await response.Content.ReadFromJsonAsync<List<AudioFileInfoDto>>();
+    var result = await response.Content.ReadFromJsonAsync<FileListDto>();
 
     // Assert
     Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    Assert.NotNull(files);
+    Assert.NotNull(result);
+    Assert.NotNull(result.Items);
+    // Recursive mode should only return files (no directories)
+    Assert.DoesNotContain(result.Items, i => i.IsDirectory);
   }
 
   [Fact]

@@ -353,3 +353,65 @@ public class NotificationSoundDto
   /// </summary>
   public long FileSize { get; set; }
 }
+
+/// <summary>
+/// Represents a Google Cast device.
+/// </summary>
+public class CastDeviceDto
+{
+  /// <summary>
+  /// Gets or sets the unique device ID.
+  /// </summary>
+  public string Id { get; set; } = string.Empty;
+
+  /// <summary>
+  /// Gets or sets the friendly name of the device.
+  /// </summary>
+  public string Name { get; set; } = string.Empty;
+
+  /// <summary>
+  /// Gets or sets the IP address of the device.
+  /// </summary>
+  public string IpAddress { get; set; } = string.Empty;
+
+  /// <summary>
+  /// Gets or sets the port number.
+  /// </summary>
+  public int Port { get; set; }
+
+  /// <summary>
+  /// Gets or sets the device model.
+  /// </summary>
+  public string Model { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Request to connect to a Cast device.
+/// </summary>
+public class ConnectCastDeviceRequest
+{
+  /// <summary>
+  /// Gets or sets the device ID.
+  /// </summary>
+  public string DeviceId { get; set; } = string.Empty;
+
+  /// <summary>
+  /// Gets or sets the device name.
+  /// </summary>
+  public string? Name { get; set; }
+
+  /// <summary>
+  /// Gets or sets the IP address of the device.
+  /// </summary>
+  public string IpAddress { get; set; } = string.Empty;
+
+  /// <summary>
+  /// Gets or sets the port number.
+  /// </summary>
+  public int? Port { get; set; }
+
+  /// <summary>
+  /// Gets or sets the device model.
+  /// </summary>
+  public string? Model { get; set; }
+}

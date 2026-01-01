@@ -21,6 +21,9 @@ public class GoogleCastOutput : AudioOutputBase
   private ChromecastReceiver? _connectedReceiver;
   private string? _streamUrl;
 
+  // Cache discovered receivers to use the original objects for connection
+  private readonly Dictionary<string, ChromecastReceiver> _discoveredReceivers = new();
+
   /// <inheritdoc />
   protected override ILogger Logger => _logger;
 
@@ -120,6 +123,9 @@ public class GoogleCastOutput : AudioOutputBase
 
     var devices = new List<ChromecastDeviceInfo>();
 
+    // Clear previous cache
+    _discoveredReceivers.Clear();
+
     try
     {
       IChromecastLocator locator = new MdnsChromecastLocator();
@@ -127,9 +133,12 @@ public class GoogleCastOutput : AudioOutputBase
 
       foreach (var device in discoveredDevices)
       {
+        // Generate a stable ID from the device URI
+        var deviceId = device.DeviceUri.ToString();
+
         var deviceInfo = new ChromecastDeviceInfo
         {
-          Id = device.DeviceUri.ToString(),
+          Id = deviceId,
           FriendlyName = device.Name,
           IpAddress = device.DeviceUri.Host,
           Port = device.DeviceUri.Port,
@@ -137,6 +146,10 @@ public class GoogleCastOutput : AudioOutputBase
         };
 
         devices.Add(deviceInfo);
+
+        // Cache the original receiver for later connection
+        _discoveredReceivers[deviceId] = device;
+
         DeviceDiscovered?.Invoke(this, new ChromecastDeviceDiscoveredEventArgs { Device = deviceInfo });
 
         _logger.LogDebug(
@@ -179,14 +192,24 @@ public class GoogleCastOutput : AudioOutputBase
         "Connecting to Chromecast: {Name} at {IP}:{Port}",
         device.FriendlyName, device.IpAddress, device.Port);
 
-      // Create ChromecastReceiver from device info
-      var uri = new Uri($"https://{device.IpAddress}:{device.Port}");
-      _connectedReceiver = new ChromecastReceiver
+      // Try to get the cached receiver from discovery (preferred - uses original SharpCaster object)
+      if (!_discoveredReceivers.TryGetValue(device.Id, out _connectedReceiver))
       {
-        DeviceUri = uri,
-        Name = device.FriendlyName,
-        Model = device.Model
-      };
+        // Fallback: Create ChromecastReceiver from device info
+        // Note: The URI scheme doesn't matter for TCP connection, just host:port
+        _logger.LogDebug("Creating new ChromecastReceiver from device info (not from cache)");
+        var uri = new Uri($"cast://{device.IpAddress}:{device.Port}");
+        _connectedReceiver = new ChromecastReceiver
+        {
+          DeviceUri = uri,
+          Name = device.FriendlyName,
+          Model = device.Model
+        };
+      }
+      else
+      {
+        _logger.LogDebug("Using cached ChromecastReceiver from discovery");
+      }
 
       if (_client == null)
       {

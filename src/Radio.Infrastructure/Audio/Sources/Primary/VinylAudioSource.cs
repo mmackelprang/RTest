@@ -45,7 +45,7 @@ public class VinylAudioSource : USBAudioSourceBase
   public string USBPort => _deviceOptions.CurrentValue.Vinyl.USBPort;
 
   /// <inheritdoc/>
-  protected override async Task InitializeAsync(CancellationToken cancellationToken = default)
+  public override async Task InitializeAsync(CancellationToken cancellationToken = default)
   {
     var usbPort = _deviceOptions.CurrentValue.Vinyl.USBPort;
 

@@ -36,16 +36,16 @@ public class FilesController : ControllerBase
   }
 
   /// <summary>
-  /// Lists audio files in the specified directory.
+  /// Lists audio files and directories in the specified directory.
   /// </summary>
   /// <param name="path">Optional path relative to the configured root directory. Empty for root.</param>
   /// <param name="recursive">If true, searches subdirectories recursively. Default is false.</param>
   /// <param name="cancellationToken">Cancellation token.</param>
-  /// <returns>A list of audio file information.</returns>
-  /// <response code="200">Returns the list of audio files.</response>
+  /// <returns>A list of files and directories.</returns>
+  /// <response code="200">Returns the list of files and directories.</response>
   /// <response code="500">If an error occurs while listing files.</response>
   [HttpGet]
-  [ProducesResponseType(typeof(IEnumerable<AudioFileInfoDto>), StatusCodes.Status200OK)]
+  [ProducesResponseType(typeof(FileListDto), StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status500InternalServerError)]
   public async Task<IActionResult> ListFiles(
     [FromQuery] string? path = null,
@@ -54,20 +54,77 @@ public class FilesController : ControllerBase
   {
     try
     {
-      _logger.LogInformation("Listing audio files from path: {Path}, recursive: {Recursive}", 
-        path ?? "(root)", recursive);
+      var currentPath = path ?? "/";
+      _logger.LogInformation("Listing files from path: {Path}, recursive: {Recursive}",
+        currentPath, recursive);
 
+      var items = new List<FileItemDto>();
+
+      // Get directories (unless recursive mode, which returns flat file list)
+      if (!recursive)
+      {
+        var directories = _fileBrowser.ListDirectories(path);
+        foreach (var dir in directories)
+        {
+          items.Add(new FileItemDto
+          {
+            Name = System.IO.Path.GetFileName(dir),
+            Path = dir,
+            IsDirectory = true,
+            Size = null,
+            Duration = null,
+            Artist = null,
+            Album = null
+          });
+        }
+      }
+
+      // Get audio files
       var files = await _fileBrowser.ListFilesAsync(path, recursive, cancellationToken);
-      var dtos = files.Select(MapToDto).ToList();
+      foreach (var file in files)
+      {
+        items.Add(new FileItemDto
+        {
+          Name = file.FileName,
+          Path = file.Path,
+          IsDirectory = false,
+          Size = file.SizeBytes,
+          Duration = FormatDuration(file.Duration),
+          Artist = file.Artist,
+          Album = file.Album
+        });
+      }
 
-      _logger.LogInformation("Found {Count} audio files", dtos.Count);
-      return Ok(dtos);
+      _logger.LogInformation("Found {Count} items ({DirCount} directories, {FileCount} files)",
+        items.Count,
+        items.Count(i => i.IsDirectory),
+        items.Count(i => !i.IsDirectory));
+
+      return Ok(new FileListDto
+      {
+        CurrentPath = currentPath,
+        Items = items
+      });
     }
     catch (Exception ex)
     {
-      _logger.LogError(ex, "Error listing audio files from path: {Path}", path);
-      return StatusCode(500, new { error = "Failed to list audio files", details = ex.Message });
+      _logger.LogError(ex, "Error listing files from path: {Path}", path);
+      return StatusCode(500, new { error = "Failed to list files", details = ex.Message });
     }
+  }
+
+  /// <summary>
+  /// Formats a TimeSpan duration as a human-readable string (e.g., "3:45").
+  /// </summary>
+  private static string? FormatDuration(TimeSpan? duration)
+  {
+    if (duration == null) return null;
+    var ts = duration.Value;
+    if (ts.Hours > 0)
+    {
+      return $"{ts.Hours}:{ts.Minutes:D2}:{ts.Seconds:D2}";
+    }
+    return $"{ts.Minutes}:{ts.Seconds:D2}";
   }
 
   /// <summary>

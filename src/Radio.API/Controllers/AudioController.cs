@@ -46,7 +46,9 @@ public class AudioController : ControllerBase
 
       var state = new PlaybackStateDto
       {
-        IsPlaying = _audioEngine.State == AudioEngineState.Running,
+        // IsPlaying should be true only when both engine is running AND source is in Playing state
+        IsPlaying = _audioEngine.State == AudioEngineState.Running &&
+                    primarySource?.State == AudioSourceState.Playing,
         IsPaused = primarySource?.State == AudioSourceState.Paused,
         Volume = mixer.MasterVolume,
         IsMuted = mixer.IsMuted,

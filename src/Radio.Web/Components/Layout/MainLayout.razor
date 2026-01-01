@@ -1,9 +1,12 @@
 @inherits LayoutComponentBase
+@using Radio.Web.Components.Dialogs
+@using Radio.Web.Models
 @inject SystemApiService SystemApi
 @inject SourcesApiService SourcesApi
 @inject DevicesApiService DevicesApi
 @inject NavigationManager NavigationManager
 @inject ILogger<MainLayout> Logger
+@inject IDialogService DialogService
 @implements IDisposable
 
 <MudThemeProvider Theme="@_customTheme" IsDarkMode="true" />
@@ -14,8 +17,8 @@
 <div class="layout-container" style="width: 1920px; height: 576px; overflow: hidden;">
   <!-- Top Navigation Bar - 60px height -->
   <MudAppBar Fixed="true" Elevation="1" Style="height: 60px;">
-    <!-- LEFT: Date/Time Display -->
-    <div style="font-size: 22px; min-width: 200px; font-family: 'Inter', sans-serif; font-weight: 500; color: #F2F2F2;">
+    <!-- LEFT: Date/Time Display (fixed width to prevent layout shift) -->
+    <div style="font-size: 22px; width: 100px; font-family: 'JetBrains Mono', 'Consolas', 'Courier New', monospace; font-weight: 500; color: #F2F2F2; letter-spacing: 1px;">
       @_currentTime
     </div>
 
@@ -37,25 +40,35 @@
     </MudSelect>
 
     <!-- Audio Output Selector - Material 3 Style -->
-    <MudSelect T="string" Value="@_selectedOutputId" ValueChanged="@HandleOutputChangeAsync"
-               Label="Audio Output" Variant="Variant.Text" Dense="true"
-               AnchorOrigin="Origin.BottomCenter" TransformOrigin="Origin.TopCenter"
-               Style="min-width: 200px; margin-right: 24px; border-bottom: 1px solid rgba(255,255,255,0.3);"
-               Underline="true">
-      @if (_availableOutputs.Count == 0)
+    <div style="display: flex; align-items: center; gap: 4px;">
+      <MudSelect T="string" Value="@_selectedOutputId" ValueChanged="@HandleOutputChangeAsync"
+                 Label="Audio Output" Variant="Variant.Text" Dense="true"
+                 AnchorOrigin="Origin.BottomCenter" TransformOrigin="Origin.TopCenter"
+                 Style="min-width: 200px; border-bottom: 1px solid rgba(255,255,255,0.3);"
+                 Underline="true">
+        @if (_availableOutputs.Count == 0)
+        {
+          <MudSelectItem Value="@string.Empty" Disabled="true">No outputs available</MudSelectItem>
+        }
+        @foreach (var output in _availableOutputs)
+        {
+          <MudSelectItem Value="@output.Id">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <MudIcon Icon="@GetOutputIcon(output)" Size="Size.Small" />
+              @output.Name
+            </div>
+          </MudSelectItem>
+        }
+      </MudSelect>
+      @if (_selectedOutputId == "google-cast")
       {
-        <MudSelectItem Value="@string.Empty" Disabled="true">No outputs available</MudSelectItem>
+        <MudTooltip Text="Select Cast Device">
+          <MudIconButton Icon="@Icons.Material.Filled.Settings" Color="Color.Inherit"
+                         Size="Size.Small" OnClick="@OpenCastDeviceDialog" />
+        </MudTooltip>
       }
-      @foreach (var output in _availableOutputs)
-      {
-        <MudSelectItem Value="@output.Id">
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <MudIcon Icon="@GetOutputIcon(output)" Size="Size.Small" />
-            @output.Name
-          </div>
-        </MudSelectItem>
-      }
-    </MudSelect>
+    </div>
+    <div style="width: 24px;"></div>
 
     <!-- CENTER: System Stats with Icons -->
     <div style="display: flex; align-items: center; gap: 20px; font-family: 'Inter', sans-serif; font-size: 14px; color: #BFBFC2;">
@@ -386,6 +399,31 @@
     if (device.IsDefault)
       return Icons.Material.Filled.VolumeUp;
     return Icons.Material.Filled.Speaker;
+  }
+
+  private async Task OpenCastDeviceDialog()
+  {
+    var parameters = new DialogParameters
+    {
+      { "DevicesApi", DevicesApi },
+      { "Logger", Logger }
+    };
+
+    var options = new DialogOptions
+    {
+      CloseButton = true,
+      MaxWidth = MaxWidth.Small,
+      FullWidth = true,
+      BackdropClick = true
+    };
+
+    var dialog = await DialogService.ShowAsync<CastDeviceDialog>("Select Cast Device", parameters, options);
+    var result = await dialog.Result;
+
+    if (result is { Canceled: false, Data: CastDeviceDto selectedDevice })
+    {
+      Logger.LogInformation("Selected Cast device: {DeviceName}", selectedDevice.Name);
+    }
   }
 
   private async Task UpdateSystemStatsAsync()

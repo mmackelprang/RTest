@@ -57,7 +57,8 @@ public class SourcesController : ControllerBase
     {
       var mixer = _audioEngine.GetMasterMixer();
       var activeSources = mixer.GetActiveSources();
-      var primarySource = _audioEngine.GetActivePrimaryAudioSource();
+      // Prefer AudioManager's tracked active source
+      var primarySource = _audioManager?.ActiveSource ?? _audioEngine.GetActivePrimaryAudioSource();
 
       var result = new AvailableSourcesDto
       {
@@ -115,7 +116,10 @@ public class SourcesController : ControllerBase
   {
     try
     {
-      var primarySource = _audioEngine.GetActivePrimaryAudioSource();
+      // Prefer AudioManager's tracked active source over the extension method
+      // The extension method just returns the first primary source in the mixer,
+      // which may not be the source the user actually switched to
+      var primarySource = _audioManager?.ActiveSource ?? _audioEngine.GetActivePrimaryAudioSource();
 
       if (primarySource == null)
       {

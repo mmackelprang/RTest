@@ -519,7 +519,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   }
 
   /// <inheritdoc/>
-  protected override async Task InitializeAsync(CancellationToken cancellationToken = default)
+  public override async Task InitializeAsync(CancellationToken cancellationToken = default)
   {
     await base.InitializeAsync(cancellationToken);
 
@@ -539,9 +539,24 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <inheritdoc/>
   protected override async Task PlayCoreAsync(CancellationToken cancellationToken)
   {
+    // Auto-load from queue if no file is currently loaded
     if (_currentFile == null)
     {
-      throw new InvalidOperationException("No file loaded");
+      if (_playlist.Count > 0)
+      {
+        Logger.LogDebug("No file loaded, auto-loading first file from queue");
+        await LoadCurrentFileAsync(cancellationToken);
+
+        // Verify file was loaded successfully
+        if (_currentFile == null)
+        {
+          throw new InvalidOperationException("Failed to load file from queue");
+        }
+      }
+      else
+      {
+        throw new InvalidOperationException("No file loaded and queue is empty");
+      }
     }
 
     // Generate playback ID for this session
@@ -1235,17 +1250,24 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     QueueChanged?.Invoke(this, args);
   }
 
-  private string GetFullPath(string relativePath)
+  private string GetFullPath(string path)
   {
+    // If path is already absolute, return it as-is (normalized)
+    if (Path.IsPathRooted(path))
+    {
+      return Path.GetFullPath(path);
+    }
+
+    // Otherwise, treat as relative path and combine with root directory
     var rootDirectory = _options.CurrentValue.RootDirectory;
     string basePath;
     if (!string.IsNullOrEmpty(_rootDir))
     {
-      basePath = Path.Combine(_rootDir, rootDirectory, relativePath);
+      basePath = Path.Combine(_rootDir, rootDirectory, path);
     }
     else
     {
-      basePath = Path.Combine(rootDirectory, relativePath);
+      basePath = Path.Combine(rootDirectory, path);
     }
     // Normalize the path to handle any leading separators or relative components
     return Path.GetFullPath(basePath);

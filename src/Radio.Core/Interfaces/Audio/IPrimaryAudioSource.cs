@@ -24,6 +24,15 @@ public interface IPrimaryAudioSource : IAudioSource
   bool IsSeekable { get; }
 
   /// <summary>
+  /// Initializes the audio source. Called before first use.
+  /// This prepares the source for playback by connecting to services,
+  /// loading configuration, and validating credentials.
+  /// </summary>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <returns>A task representing the async operation.</returns>
+  Task InitializeAsync(CancellationToken cancellationToken = default);
+
+  /// <summary>
   /// Starts playback of the audio source.
   /// </summary>
   /// <param name="cancellationToken">Cancellation token.</param>

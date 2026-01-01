@@ -465,12 +465,14 @@ public class SpotifyController : ControllerBase
 
   private SpotifyPlaylistDto MapPlaylist(dynamic playlist)
   {
+    // Cast Images to IEnumerable since LINQ extension methods don't work with dynamic
+    var images = playlist.Images as IEnumerable<SpotifyAPI.Web.Image>;
     return new SpotifyPlaylistDto
     {
       Id = playlist.Id,
       Name = playlist.Name,
       Owner = playlist.Owner?.DisplayName ?? playlist.Owner?.Id ?? "Unknown",
-      ImageUrl = playlist.Images?.FirstOrDefault()?.Url,
+      ImageUrl = images?.FirstOrDefault()?.Url,
       TrackCount = playlist.Tracks?.Total ?? 0,
       Uri = playlist.Uri,
       Description = playlist.Description

@@ -118,4 +118,58 @@ public class DevicesApiService
       return null;
     }
   }
+
+  /// <summary>
+  /// Discovers available Google Cast devices on the network.
+  /// </summary>
+  public async Task<List<CastDeviceDto>?> DiscoverCastDevicesAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var response = await _httpClient.GetAsync("/api/devices/cast", cancellationToken);
+
+      if (response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
+      {
+        _logger.LogWarning("Google Cast output is not available (503)");
+        return new List<CastDeviceDto>(); // Return empty list, not null
+      }
+
+      if (!response.IsSuccessStatusCode)
+      {
+        _logger.LogWarning("Failed to discover Cast devices: {StatusCode}", response.StatusCode);
+        return null;
+      }
+
+      var devices = await response.Content.ReadFromJsonAsync<List<CastDeviceDto>>(JsonOptions, cancellationToken);
+      return devices ?? new List<CastDeviceDto>();
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to discover Cast devices");
+      return null;
+    }
+  }
+
+  /// <summary>
+  /// Connects to a specific Google Cast device.
+  /// </summary>
+  public async Task<bool> ConnectToCastDeviceAsync(CastDeviceDto device, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var request = new ConnectCastDeviceRequest(
+        device.Id,
+        device.Name,
+        device.IpAddress,
+        device.Port,
+        device.Model);
+      var response = await _httpClient.PostAsJsonAsync("/api/devices/cast/connect", request, cancellationToken);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to connect to Cast device: {DeviceName}", device.Name);
+      return false;
+    }
+  }
 }

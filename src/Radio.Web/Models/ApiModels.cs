@@ -242,7 +242,7 @@ public record PlayHistoryStatsDto(
 // Spotify API DTOs
 public record SpotifyAuthStatusDto(
   bool IsAuthenticated,
-  string? UserName,
+  string? Username,
   DateTime? ExpiresAt
 );
 
@@ -490,4 +490,21 @@ public record NotificationSoundDto(
   string FileName,
   string FilePath,
   long FileSize
+);
+
+// Cast Device DTOs
+public record CastDeviceDto(
+  string Id,
+  string Name,
+  string IpAddress,
+  int Port,
+  string Model
+);
+
+public record ConnectCastDeviceRequest(
+  string DeviceId,
+  string? Name,
+  string IpAddress,
+  int? Port,
+  string? Model
 );

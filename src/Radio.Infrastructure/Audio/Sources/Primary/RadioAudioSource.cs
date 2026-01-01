@@ -66,7 +66,7 @@ public class RadioAudioSource : USBAudioSourceBase, Radio.Core.Interfaces.Audio.
   public string USBPort => _deviceOptions.CurrentValue.Radio.USBPort;
 
   /// <inheritdoc/>
-  protected override async Task InitializeAsync(CancellationToken cancellationToken = default)
+  public override async Task InitializeAsync(CancellationToken cancellationToken = default)
   {
     var usbPort = _deviceOptions.CurrentValue.Radio.USBPort;
 

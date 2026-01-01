@@ -20,7 +20,11 @@ using Radio.Tools.AudioUAT.Phases.Phase7;
 using Radio.Tools.AudioUAT.Phases.Phase8;
 using Radio.Tools.AudioUAT.Phases.Phase9;
 using Radio.Tools.AudioUAT.Phases.Phase10;
+using Radio.Tools.AudioUAT.Phases.Phase12;
+using Radio.Tools.AudioUAT.Phases.Phase13;
+using Radio.Tools.AudioUAT.Phases.Phase14;
 using Radio.Tools.AudioUAT.Results;
+using Radio.Tools.AudioUAT.Services;
 using Radio.Tools.AudioUAT.Utilities;
 using Spectre.Console;
 
@@ -89,6 +93,10 @@ var host = Host.CreateDefaultBuilder(args)
     services.AddManagedConfiguration(configuration, useSqliteSecrets: true);
     services.AddMetrics(configuration);
 
+    // Register API client for API-based tests
+    var apiBaseUrl = configuration["UAT:ApiBaseUrl"] ?? "http://localhost:5000";
+    services.AddSingleton(new RadioApiClient(apiBaseUrl));
+
     // Register UAT services
     services.AddSingleton<TestResultsManager>();
     services.AddSingleton<TestRunner>();
@@ -101,6 +109,11 @@ var host = Host.CreateDefaultBuilder(args)
     services.AddSingleton<ApiSignalRTests>();
     services.AddSingleton<FingerprintingTests>();
     services.AddSingleton<BackupRestoreTests>();
+
+    // Register API Integration tests (Phase 12-14)
+    services.AddSingleton<FilePlayerApiTests>();
+    services.AddSingleton<RadioApiTests>();
+    services.AddSingleton<SpotifyApiTests>();
   })
   .Build();
 
@@ -149,6 +162,9 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
   var phase8Tests = services.GetRequiredService<ApiSignalRTests>();
   var phase9Tests = services.GetRequiredService<FingerprintingTests>();
   var phase10Tests = services.GetRequiredService<BackupRestoreTests>();
+  var phase12Tests = services.GetRequiredService<FilePlayerApiTests>();
+  var phase13Tests = services.GetRequiredService<RadioApiTests>();
+  var phase14Tests = services.GetRequiredService<SpotifyApiTests>();
 
   var testsToRun = new List<IPhaseTest>();
 
@@ -195,6 +211,18 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
     {
       testsToRun.AddRange(phase10Tests.GetAllTests());
     }
+    if (runAll || phaseStr == "12")
+    {
+      testsToRun.AddRange(phase12Tests.GetAllTests());
+    }
+    if (runAll || phaseStr == "13")
+    {
+      testsToRun.AddRange(phase13Tests.GetAllTests());
+    }
+    if (runAll || phaseStr == "14")
+    {
+      testsToRun.AddRange(phase14Tests.GetAllTests());
+    }
   }
   else if (args.Contains("--test"))
   {
@@ -211,6 +239,9 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
         .Concat(phase8Tests.GetAllTests())
         .Concat(phase9Tests.GetAllTests())
         .Concat(phase10Tests.GetAllTests())
+        .Concat(phase12Tests.GetAllTests())
+        .Concat(phase13Tests.GetAllTests())
+        .Concat(phase14Tests.GetAllTests())
         .ToList();
       var test = allTests.FirstOrDefault(t => t.TestId == testId);
       if (test != null)
@@ -273,6 +304,9 @@ static async Task RunInteractiveMode(IServiceProvider services)
   var phase8Tests = services.GetRequiredService<ApiSignalRTests>();
   var phase9Tests = services.GetRequiredService<FingerprintingTests>();
   var phase10Tests = services.GetRequiredService<BackupRestoreTests>();
+  var phase12Tests = services.GetRequiredService<FilePlayerApiTests>();
+  var phase13Tests = services.GetRequiredService<RadioApiTests>();
+  var phase14Tests = services.GetRequiredService<SpotifyApiTests>();
 
   ConsoleUI.WriteWelcomeBanner();
 
@@ -303,6 +337,9 @@ static async Task RunInteractiveMode(IServiceProvider services)
       "Phase 8: API & SignalR Tests",
       "Phase 9: Audio Fingerprinting Tests",
       "Phase 10: Database Backup & Restore Tests",
+      "Phase 12: FilePlayer API Tests",
+      "Phase 13: Radio API Tests",
+      "Phase 14: Spotify API Tests",
       "View Test Results",
       "Export Results to JSON",
       "Clear Results",
@@ -345,6 +382,18 @@ static async Task RunInteractiveMode(IServiceProvider services)
 
       case "Phase 10: Database Backup & Restore Tests":
         await RunPhase10Menu(services, runner, phase10Tests);
+        break;
+
+      case "Phase 12: FilePlayer API Tests":
+        await RunPhase12Menu(services, runner, phase12Tests);
+        break;
+
+      case "Phase 13: Radio API Tests":
+        await RunPhase13Menu(services, runner, phase13Tests);
+        break;
+
+      case "Phase 14: Spotify API Tests":
+        await RunPhase14Menu(services, runner, phase14Tests);
         break;
 
       case "View Test Results":
@@ -1498,6 +1547,362 @@ static async Task RunPhase10Menu(IServiceProvider services, TestRunner runner, B
       var resultsManager = services.GetRequiredService<TestResultsManager>();
       ConsoleUI.DisplayTestResults(resultsManager.GetResultsForPhase(10));
       ConsoleUI.DisplaySummary(resultsManager.GetSummaryForPhase(10));
+      ConsoleUI.PressAnyKeyToContinue();
+    }
+    else
+    {
+      var testIdMatch = System.Text.RegularExpressions.Regex.Match(choice, @"\[([^\]]+)\]");
+      if (testIdMatch.Success)
+      {
+        var testId = testIdMatch.Groups[1].Value;
+        var test = allTests.FirstOrDefault(t => t.TestId == testId);
+        if (test != null)
+        {
+          AnsiConsole.Clear();
+          var result = await runner.RunTestAsync(test);
+
+          AnsiConsole.WriteLine();
+          if (result.Passed)
+          {
+            ConsoleUI.WriteSuccess($"Test {test.TestId} PASSED");
+          }
+          else if (result.Skipped)
+          {
+            ConsoleUI.WriteWarning($"Test {test.TestId} SKIPPED: {result.Message}");
+          }
+          else
+          {
+            ConsoleUI.WriteError($"Test {test.TestId} FAILED: {result.Message}");
+          }
+
+          ConsoleUI.PressAnyKeyToContinue();
+        }
+      }
+    }
+  }
+}
+
+static async Task RunPhase12Menu(IServiceProvider services, TestRunner runner, FilePlayerApiTests tests)
+{
+  var exit = false;
+  while (!exit)
+  {
+    AnsiConsole.Clear();
+
+    var rule = new Rule("[cyan]Phase 12: FilePlayer API Tests[/]")
+    {
+      Justification = Justify.Center
+    };
+    AnsiConsole.Write(rule);
+    AnsiConsole.WriteLine();
+
+    AnsiConsole.MarkupLine("[yellow]Note: These tests require the Radio.API to be running at the configured URL.[/]");
+    AnsiConsole.WriteLine();
+
+    var allTests = tests.GetAllTests();
+    var menuItems = new List<string>
+    {
+      "Run All Phase 12 Tests",
+      "---",
+    };
+
+    foreach (var test in allTests)
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("Return to Main Menu");
+
+    var choice = ConsoleUI.ShowMenu("[bold]Select Test[/]", menuItems.ToArray());
+
+    if (choice == "Return to Main Menu")
+    {
+      exit = true;
+      continue;
+    }
+
+    if (choice.StartsWith("---"))
+    {
+      continue;
+    }
+
+    if (choice == "Run All Phase 12 Tests")
+    {
+      AnsiConsole.Clear();
+      ConsoleUI.WriteHeader("Running All Phase 12 Tests");
+
+      await AnsiConsole.Progress()
+        .StartAsync(async ctx =>
+        {
+          var task = ctx.AddTask("Running tests...", maxValue: allTests.Count);
+
+          foreach (var test in allTests)
+          {
+            task.Description = $"Running {test.TestId}...";
+            await runner.RunTestAsync(test);
+            task.Increment(1);
+          }
+        });
+
+      var resultsManager = services.GetRequiredService<TestResultsManager>();
+      ConsoleUI.DisplayTestResults(resultsManager.GetResultsForPhase(12));
+      ConsoleUI.DisplaySummary(resultsManager.GetSummaryForPhase(12));
+      ConsoleUI.PressAnyKeyToContinue();
+    }
+    else
+    {
+      var testIdMatch = System.Text.RegularExpressions.Regex.Match(choice, @"\[([^\]]+)\]");
+      if (testIdMatch.Success)
+      {
+        var testId = testIdMatch.Groups[1].Value;
+        var test = allTests.FirstOrDefault(t => t.TestId == testId);
+        if (test != null)
+        {
+          AnsiConsole.Clear();
+          var result = await runner.RunTestAsync(test);
+
+          AnsiConsole.WriteLine();
+          if (result.Passed)
+          {
+            ConsoleUI.WriteSuccess($"Test {test.TestId} PASSED");
+          }
+          else if (result.Skipped)
+          {
+            ConsoleUI.WriteWarning($"Test {test.TestId} SKIPPED: {result.Message}");
+          }
+          else
+          {
+            ConsoleUI.WriteError($"Test {test.TestId} FAILED: {result.Message}");
+          }
+
+          ConsoleUI.PressAnyKeyToContinue();
+        }
+      }
+    }
+  }
+}
+
+static async Task RunPhase13Menu(IServiceProvider services, TestRunner runner, RadioApiTests tests)
+{
+  var exit = false;
+  while (!exit)
+  {
+    AnsiConsole.Clear();
+
+    var rule = new Rule("[cyan]Phase 13: Radio API Tests[/]")
+    {
+      Justification = Justify.Center
+    };
+    AnsiConsole.Write(rule);
+    AnsiConsole.WriteLine();
+
+    AnsiConsole.MarkupLine("[yellow]Note: These tests require the Radio.API to be running and a radio device (RTL-SDR or RF320) connected.[/]");
+    AnsiConsole.WriteLine();
+
+    var allTests = tests.GetAllTests();
+    var menuItems = new List<string>
+    {
+      "Run All Phase 13 Tests",
+      "---",
+      "[DEVICE TESTS]",
+    };
+
+    foreach (var test in allTests.Where(t => t.TestId is "RAD-001" or "RAD-002" or "RAD-003"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("[BAND SELECTION TESTS]");
+    foreach (var test in allTests.Where(t => t.TestId is "RAD-004" or "RAD-005" or "RAD-006"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("[TUNING TESTS]");
+    foreach (var test in allTests.Where(t => t.TestId is "RAD-007" or "RAD-008" or "RAD-009" or "RAD-010" or "RAD-011"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("[METADATA TESTS]");
+    foreach (var test in allTests.Where(t => t.TestId == "RAD-012"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("Return to Main Menu");
+
+    var choice = ConsoleUI.ShowMenu("[bold]Select Test[/]", menuItems.ToArray());
+
+    if (choice == "Return to Main Menu")
+    {
+      exit = true;
+      continue;
+    }
+
+    if (choice.StartsWith("---") || choice.StartsWith("[DEVICE") || choice.StartsWith("[BAND") ||
+        choice.StartsWith("[TUNING") || choice.StartsWith("[METADATA"))
+    {
+      continue;
+    }
+
+    if (choice == "Run All Phase 13 Tests")
+    {
+      AnsiConsole.Clear();
+      ConsoleUI.WriteHeader("Running All Phase 13 Tests");
+
+      await AnsiConsole.Progress()
+        .StartAsync(async ctx =>
+        {
+          var task = ctx.AddTask("Running tests...", maxValue: allTests.Count);
+
+          foreach (var test in allTests)
+          {
+            task.Description = $"Running {test.TestId}...";
+            await runner.RunTestAsync(test);
+            task.Increment(1);
+          }
+        });
+
+      var resultsManager = services.GetRequiredService<TestResultsManager>();
+      ConsoleUI.DisplayTestResults(resultsManager.GetResultsForPhase(13));
+      ConsoleUI.DisplaySummary(resultsManager.GetSummaryForPhase(13));
+      ConsoleUI.PressAnyKeyToContinue();
+    }
+    else
+    {
+      var testIdMatch = System.Text.RegularExpressions.Regex.Match(choice, @"\[([^\]]+)\]");
+      if (testIdMatch.Success)
+      {
+        var testId = testIdMatch.Groups[1].Value;
+        var test = allTests.FirstOrDefault(t => t.TestId == testId);
+        if (test != null)
+        {
+          AnsiConsole.Clear();
+          var result = await runner.RunTestAsync(test);
+
+          AnsiConsole.WriteLine();
+          if (result.Passed)
+          {
+            ConsoleUI.WriteSuccess($"Test {test.TestId} PASSED");
+          }
+          else if (result.Skipped)
+          {
+            ConsoleUI.WriteWarning($"Test {test.TestId} SKIPPED: {result.Message}");
+          }
+          else
+          {
+            ConsoleUI.WriteError($"Test {test.TestId} FAILED: {result.Message}");
+          }
+
+          ConsoleUI.PressAnyKeyToContinue();
+        }
+      }
+    }
+  }
+}
+
+static async Task RunPhase14Menu(IServiceProvider services, TestRunner runner, SpotifyApiTests tests)
+{
+  var exit = false;
+  while (!exit)
+  {
+    AnsiConsole.Clear();
+
+    var rule = new Rule("[cyan]Phase 14: Spotify API Tests[/]")
+    {
+      Justification = Justify.Center
+    };
+    AnsiConsole.Write(rule);
+    AnsiConsole.WriteLine();
+
+    AnsiConsole.MarkupLine("[yellow]Note: These tests require Spotify to be configured and authenticated.[/]");
+    AnsiConsole.WriteLine();
+
+    var allTests = tests.GetAllTests();
+    var menuItems = new List<string>
+    {
+      "Run All Phase 14 Tests",
+      "---",
+      "[SOURCE TESTS]",
+    };
+
+    foreach (var test in allTests.Where(t => t.TestId is "SPOT-001" or "SPOT-005"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("[SEARCH TESTS]");
+    foreach (var test in allTests.Where(t => t.TestId is "SPOT-002" or "SPOT-003" or "SPOT-004"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("[PLAYBACK CONTROL TESTS]");
+    foreach (var test in allTests.Where(t => t.TestId is "SPOT-006" or "SPOT-007" or "SPOT-008" or "SPOT-009"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("[AUDIO CONTROL TESTS]");
+    foreach (var test in allTests.Where(t => t.TestId is "SPOT-010" or "SPOT-011"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("[METADATA TESTS]");
+    foreach (var test in allTests.Where(t => t.TestId == "SPOT-012"))
+    {
+      menuItems.Add($"[{test.TestId}] {test.TestName}");
+    }
+
+    menuItems.Add("---");
+    menuItems.Add("Return to Main Menu");
+
+    var choice = ConsoleUI.ShowMenu("[bold]Select Test[/]", menuItems.ToArray());
+
+    if (choice == "Return to Main Menu")
+    {
+      exit = true;
+      continue;
+    }
+
+    if (choice.StartsWith("---") || choice.StartsWith("[SOURCE") || choice.StartsWith("[SEARCH") ||
+        choice.StartsWith("[PLAYBACK") || choice.StartsWith("[AUDIO") || choice.StartsWith("[METADATA"))
+    {
+      continue;
+    }
+
+    if (choice == "Run All Phase 14 Tests")
+    {
+      AnsiConsole.Clear();
+      ConsoleUI.WriteHeader("Running All Phase 14 Tests");
+
+      await AnsiConsole.Progress()
+        .StartAsync(async ctx =>
+        {
+          var task = ctx.AddTask("Running tests...", maxValue: allTests.Count);
+
+          foreach (var test in allTests)
+          {
+            task.Description = $"Running {test.TestId}...";
+            await runner.RunTestAsync(test);
+            task.Increment(1);
+          }
+        });
+
+      var resultsManager = services.GetRequiredService<TestResultsManager>();
+      ConsoleUI.DisplayTestResults(resultsManager.GetResultsForPhase(14));
+      ConsoleUI.DisplaySummary(resultsManager.GetSummaryForPhase(14));
       ConsoleUI.PressAnyKeyToContinue();
     }
     else

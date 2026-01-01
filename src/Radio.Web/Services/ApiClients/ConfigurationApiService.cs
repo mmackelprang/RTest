@@ -40,7 +40,16 @@ public class ConfigurationApiService
     try
     {
       _logger.LogDebug("Fetching configuration section: {Section}", section);
-      var result = await _httpClient.GetFromJsonAsync<T>($"/api/configuration/{section}", JsonOptions, cancellationToken);
+      var response = await _httpClient.GetAsync($"/api/configuration/{section}", cancellationToken);
+
+      if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+      {
+        _logger.LogDebug("Configuration section {Section} not found, will use defaults", section);
+        return default;
+      }
+
+      response.EnsureSuccessStatusCode();
+      var result = await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken);
       _logger.LogDebug("Successfully loaded configuration section: {Section}", section);
       return result;
     }

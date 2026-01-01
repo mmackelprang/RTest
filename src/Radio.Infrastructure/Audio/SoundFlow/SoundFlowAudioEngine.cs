@@ -303,6 +303,75 @@ public class SoundFlowAudioEngine : IAudioEngine
   internal AudioFormat GetAudioFormat() => _audioFormat;
 
   /// <summary>
+  /// Switches to a different playback device by index.
+  /// </summary>
+  /// <param name="deviceIndex">The index of the device to switch to (from PlaybackDevices array).</param>
+  /// <returns>True if the device was switched successfully.</returns>
+  public bool SwitchPlaybackDevice(int deviceIndex)
+  {
+    if (_engine == null)
+    {
+      _logger.LogWarning("Cannot switch playback device: engine not initialized");
+      return false;
+    }
+
+    var playbackDevices = _engine.PlaybackDevices;
+    if (deviceIndex < 0 || deviceIndex >= playbackDevices.Length)
+    {
+      _logger.LogWarning("Invalid device index {Index}, available devices: {Count}",
+        deviceIndex, playbackDevices.Length);
+      return false;
+    }
+
+    var newDevice = playbackDevices[deviceIndex];
+    _logger.LogInformation("Switching playback device to: {DeviceName} (index {Index})",
+      newDevice.Name, deviceIndex);
+
+    try
+    {
+      // Stop and dispose current playback device
+      if (_playbackDevice != null)
+      {
+        _playbackDevice.Stop();
+        _playbackDevice.Dispose();
+        _playbackDevice = null;
+      }
+
+      // Initialize new playback device
+      _playbackDevice = _engine.InitializePlaybackDevice(newDevice, _audioFormat);
+      _playbackDevice.Start();
+
+      _logger.LogInformation("Successfully switched to playback device: {DeviceName}", newDevice.Name);
+      return true;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to switch to playback device: {DeviceName}", newDevice.Name);
+      return false;
+    }
+  }
+
+  /// <summary>
+  /// Gets the index of a playback device by its ID.
+  /// </summary>
+  /// <param name="deviceId">The device ID (e.g., "playback-0").</param>
+  /// <returns>The device index, or -1 if not found.</returns>
+  public int GetDeviceIndexById(string deviceId)
+  {
+    if (string.IsNullOrEmpty(deviceId) || !deviceId.StartsWith("playback-"))
+    {
+      return -1;
+    }
+
+    if (int.TryParse(deviceId.AsSpan("playback-".Length), out var index))
+    {
+      return index;
+    }
+
+    return -1;
+  }
+
+  /// <summary>
   /// Writes audio samples to the output tap for streaming.
   /// This is called during audio processing to capture the mixed output.
   /// </summary>

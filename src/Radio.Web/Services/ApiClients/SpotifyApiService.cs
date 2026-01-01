@@ -22,7 +22,7 @@ public class SpotifyApiService
   {
     try
     {
-      return await _httpClient.GetFromJsonAsync<SpotifyAuthStatusDto>("/api/spotify/auth", cancellationToken);
+      return await _httpClient.GetFromJsonAsync<SpotifyAuthStatusDto>("/api/spotify/auth/status", cancellationToken);
     }
     catch (Exception ex)
     {
@@ -60,8 +60,8 @@ public class SpotifyApiService
   {
     try
     {
-      var typeParam = !string.IsNullOrEmpty(type) ? $"&type={type}" : "";
-      return await _httpClient.GetFromJsonAsync<SpotifySearchResultsDto>($"/api/spotify/search?q={Uri.EscapeDataString(query)}{typeParam}", cancellationToken);
+      var typeParam = !string.IsNullOrEmpty(type) ? $"&types={type}" : "";
+      return await _httpClient.GetFromJsonAsync<SpotifySearchResultsDto>($"/api/spotify/search?query={Uri.EscapeDataString(query)}{typeParam}", cancellationToken);
     }
     catch (Exception ex)
     {
@@ -74,8 +74,8 @@ public class SpotifyApiService
   {
     try
     {
-      var typeParam = types.Any() ? $"&type={string.Join(",", types)}" : "";
-      return await _httpClient.GetFromJsonAsync<SpotifySearchResultsDto>($"/api/spotify/search?q={Uri.EscapeDataString(query)}{typeParam}", cancellationToken);
+      var typeParam = types.Any() ? $"&types={string.Join(",", types)}" : "";
+      return await _httpClient.GetFromJsonAsync<SpotifySearchResultsDto>($"/api/spotify/search?query={Uri.EscapeDataString(query)}{typeParam}", cancellationToken);
     }
     catch (Exception ex)
     {

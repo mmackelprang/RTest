@@ -45,6 +45,7 @@ _NCrunch_*
 .fake
 .paket/
 paket-files/
+nul
 
 # User files
 *.csproj.user

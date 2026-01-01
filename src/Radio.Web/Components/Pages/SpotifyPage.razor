@@ -1,6 +1,7 @@
 @page "/spotify"
 @rendermode InteractiveServer
 @inject SpotifyApiService SpotifyApi
+@inject SourcesApiService SourcesApi
 @inject QueueApiService QueueApi
 @inject ConfigurationApiService ConfigApi
 @inject NavigationManager NavigationManager
@@ -313,7 +314,13 @@
       if (status != null)
       {
         _isAuthenticated = status.IsAuthenticated;
-        _userName = status.UserName;
+        _userName = status.Username;
+
+        // Auto-activate Spotify as the primary source when authenticated
+        if (_isAuthenticated)
+        {
+          await SourcesApi.SwitchSourceAsync("Spotify");
+        }
       }
     }
     catch (Exception)

@@ -238,8 +238,10 @@ public class SpotifyAuthService : ISpotifyAuthService
         _logger.LogInformation("Refreshing Spotify access token");
 
         // Use refresh token to get new access token
-        var refreshRequest = new PKCETokenRefreshRequest(
+        // Use Authorization Code flow refresh (with ClientSecret) instead of PKCE
+        var refreshRequest = new AuthorizationCodeRefreshRequest(
           secrets.ClientID,
+          secrets.ClientSecret,
           secrets.RefreshToken);
 
         var client = new OAuthClient();
@@ -289,17 +291,42 @@ public class SpotifyAuthService : ISpotifyAuthService
   /// <inheritdoc/>
   public async Task<SpotifyAuthStatus> GetAuthenticationStatusAsync(CancellationToken cancellationToken = default)
   {
-    if (!IsAuthenticated)
-    {
-      return new SpotifyAuthStatus
-      {
-        IsAuthenticated = false
-      };
-    }
-
     try
     {
-      // Auto-refresh if needed
+      // If no cached access token, try to get one using the configured refresh token
+      if (!IsAuthenticated)
+      {
+        var secrets = _secrets.CurrentValue;
+
+        // Check if a refresh token is configured
+        if (!string.IsNullOrWhiteSpace(secrets.RefreshToken))
+        {
+          _logger.LogDebug("No cached access token, attempting to refresh using configured refresh token");
+
+          try
+          {
+            await RefreshAccessTokenAsync(cancellationToken);
+          }
+          catch (Exception refreshEx)
+          {
+            _logger.LogWarning(refreshEx, "Failed to refresh access token using configured refresh token");
+            return new SpotifyAuthStatus
+            {
+              IsAuthenticated = false
+            };
+          }
+        }
+        else
+        {
+          // No refresh token configured
+          return new SpotifyAuthStatus
+          {
+            IsAuthenticated = false
+          };
+        }
+      }
+
+      // Auto-refresh if token is about to expire
       if (_tokenExpiresAt != null && _tokenExpiresAt.Value < DateTimeOffset.UtcNow.AddMinutes(5))
       {
         await RefreshAccessTokenAsync(cancellationToken);
@@ -330,11 +357,11 @@ public class SpotifyAuthService : ISpotifyAuthService
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to get authentication status");
-      
+
       // Clear cached tokens on error
       _currentAccessToken = null;
       _tokenExpiresAt = null;
-      
+
       return new SpotifyAuthStatus
       {
         IsAuthenticated = false

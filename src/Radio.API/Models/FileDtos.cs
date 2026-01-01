@@ -1,6 +1,63 @@
 namespace Radio.API.Models;
 
 /// <summary>
+/// DTO containing file listing results with current path context.
+/// </summary>
+public class FileListDto
+{
+  /// <summary>
+  /// Gets or sets the current directory path.
+  /// </summary>
+  public required string CurrentPath { get; set; }
+
+  /// <summary>
+  /// Gets or sets the list of files and directories.
+  /// </summary>
+  public required List<FileItemDto> Items { get; set; }
+}
+
+/// <summary>
+/// DTO representing a file or directory item.
+/// </summary>
+public class FileItemDto
+{
+  /// <summary>
+  /// Gets or sets the item name (file or directory name).
+  /// </summary>
+  public required string Name { get; set; }
+
+  /// <summary>
+  /// Gets or sets the full path to the item.
+  /// </summary>
+  public required string Path { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether this item is a directory.
+  /// </summary>
+  public bool IsDirectory { get; set; }
+
+  /// <summary>
+  /// Gets or sets the file size in bytes (null for directories).
+  /// </summary>
+  public long? Size { get; set; }
+
+  /// <summary>
+  /// Gets or sets the duration as a string (e.g., "3:45").
+  /// </summary>
+  public string? Duration { get; set; }
+
+  /// <summary>
+  /// Gets or sets the artist name from metadata.
+  /// </summary>
+  public string? Artist { get; set; }
+
+  /// <summary>
+  /// Gets or sets the album name from metadata.
+  /// </summary>
+  public string? Album { get; set; }
+}
+
+/// <summary>
 /// DTO representing audio file information.
 /// </summary>
 public class AudioFileInfoDto

@@ -49,6 +49,16 @@ public interface IFileBrowser
   string[] GetSupportedExtensions();
 
   /// <summary>
+  /// Lists subdirectories in the specified directory.
+  /// </summary>
+  /// <param name="path">
+  /// The path relative to the configured root directory.
+  /// Empty or null returns directories from the root directory.
+  /// </param>
+  /// <returns>A list of relative directory paths.</returns>
+  IReadOnlyList<string> ListDirectories(string? path = null);
+
+  /// <summary>
   /// Gets the count of tracked audio files from the database.
   /// </summary>
   /// <param name="cancellationToken">Cancellation token.</param>

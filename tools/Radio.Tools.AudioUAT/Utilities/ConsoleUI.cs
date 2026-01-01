@@ -9,6 +9,12 @@ namespace Radio.Tools.AudioUAT.Utilities;
 public static class ConsoleUI
 {
   /// <summary>
+  /// Gets or sets whether the UI is running in non-interactive mode.
+  /// When true, confirmation prompts auto-accept and key waits are skipped.
+  /// </summary>
+  public static bool NonInteractiveMode { get; set; } = !Environment.UserInteractive || Console.IsInputRedirected;
+
+  /// <summary>
   /// Writes the welcome banner.
   /// </summary>
   public static void WriteWelcomeBanner()
@@ -41,6 +47,14 @@ public static class ConsoleUI
   /// <returns>The selected option.</returns>
   public static string ShowMenu(string title, params string[] options)
   {
+    if (NonInteractiveMode)
+    {
+      // In non-interactive mode, return the first option
+      var firstOption = options.FirstOrDefault() ?? "";
+      WriteInfo($"{title} [non-interactive]: selecting first option '{firstOption}'");
+      return firstOption;
+    }
+
     // Escape option text to avoid Spectre.Console markup parsing issues
     var escapedOptions = options.Select(Markup.Escape).ToArray();
 
@@ -156,10 +170,33 @@ public static class ConsoleUI
   /// Prompts the user for a yes/no confirmation.
   /// </summary>
   /// <param name="question">The question to ask.</param>
+  /// <param name="defaultValue">Default value to use in non-interactive mode.</param>
   /// <returns>True if the user answered yes.</returns>
-  public static bool Confirm(string question)
+  public static bool Confirm(string question, bool defaultValue = true)
   {
+    if (NonInteractiveMode)
+    {
+      WriteInfo($"{Markup.Escape(question)} (auto-accepted: {(defaultValue ? "yes" : "no")})");
+      return defaultValue;
+    }
     return AnsiConsole.Confirm(question);
+  }
+
+  /// <summary>
+  /// Prompts the user for a yes/no answer with a clear prompt.
+  /// </summary>
+  /// <param name="question">The question to ask.</param>
+  /// <param name="defaultValue">Default value to use in non-interactive mode.</param>
+  /// <returns>True if the user answered yes.</returns>
+  public static bool AskYesNo(string question, bool defaultValue = true)
+  {
+    if (NonInteractiveMode)
+    {
+      WriteInfo($"{Markup.Escape(question)} (auto-accepted: {(defaultValue ? "yes" : "no")})");
+      return defaultValue;
+    }
+    AnsiConsole.MarkupLine($"[yellow]?[/] {question}");
+    return AnsiConsole.Confirm("Your answer");
   }
 
   /// <summary>
@@ -167,6 +204,10 @@ public static class ConsoleUI
   /// </summary>
   public static void PressAnyKeyToContinue()
   {
+    if (NonInteractiveMode)
+    {
+      return; // Skip in non-interactive mode
+    }
     AnsiConsole.WriteLine();
     AnsiConsole.MarkupLine("[grey]Press any key to continue...[/]");
     Console.ReadKey(true);
@@ -232,6 +273,12 @@ public static class ConsoleUI
   /// <returns>The final selected volume.</returns>
   public static int VolumeSlider(int initialValue, Action<int> onValueChanged)
   {
+    if (NonInteractiveMode)
+    {
+      WriteInfo($"Volume slider [non-interactive]: returning initial value {initialValue}%");
+      return initialValue;
+    }
+
     AnsiConsole.MarkupLine("[grey]Use UP/DOWN arrows to adjust, ENTER to confirm[/]");
     AnsiConsole.WriteLine();
 
@@ -285,6 +332,12 @@ public static class ConsoleUI
   /// <returns>The final selected balance.</returns>
   public static int BalanceSlider(int initialValue, Action<int> onValueChanged)
   {
+    if (NonInteractiveMode)
+    {
+      WriteInfo($"Balance slider [non-interactive]: returning initial value {initialValue}");
+      return initialValue;
+    }
+
     AnsiConsole.MarkupLine("[grey]Use LEFT/RIGHT arrows to adjust, ENTER to confirm[/]");
     AnsiConsole.WriteLine();
 

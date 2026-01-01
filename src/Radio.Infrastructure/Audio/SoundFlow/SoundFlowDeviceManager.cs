@@ -297,6 +297,17 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
         IsUSBDevice = false
       });
 
+      outputDevices.Add(new AudioDeviceInfo
+      {
+        Id = "google-cast",
+        Name = "Google Cast",
+        Type = AudioDeviceType.Output,
+        IsDefault = false,
+        MaxChannels = 2,
+        SupportedSampleRates = [48000],
+        IsUSBDevice = false
+      });
+
       _logger.LogInformation("Device enumeration complete: {OutputCount} output, {InputCount} input devices",
         outputDevices.Count, inputDevices.Count);
     }
@@ -320,6 +331,17 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
       {
         Id = "http-stream",
         Name = "HTTP Audio Stream",
+        Type = AudioDeviceType.Output,
+        IsDefault = false,
+        MaxChannels = 2,
+        SupportedSampleRates = [48000],
+        IsUSBDevice = false
+      });
+
+      outputDevices.Add(new AudioDeviceInfo
+      {
+        Id = "google-cast",
+        Name = "Google Cast",
         Type = AudioDeviceType.Output,
         IsDefault = false,
         MaxChannels = 2,

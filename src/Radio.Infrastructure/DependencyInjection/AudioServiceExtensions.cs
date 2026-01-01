@@ -157,8 +157,8 @@ public static class AudioServiceExtensions
     services.Configure<FilePlayerOptions>(
       configuration.GetSection(FilePlayerOptions.SectionName));
 
-    // Register File Browser service
-    services.AddSingleton<FileBrowser>(sp =>
+    // Register File Browser service as scoped (IAudioFileRepository is scoped)
+    services.AddScoped<FileBrowser>(sp =>
     {
       var logger = sp.GetRequiredService<ILogger<FileBrowser>>();
       var options = sp.GetRequiredService<IOptionsMonitor<FilePlayerOptions>>();
@@ -167,7 +167,7 @@ public static class AudioServiceExtensions
       var rootDir = configuration["RootDir"] ?? Directory.GetCurrentDirectory();
       return new FileBrowser(logger, options, rootDir, metricsCollector, audioFileRepository);
     });
-    services.AddSingleton<IFileBrowser>(sp => sp.GetRequiredService<FileBrowser>());
+    services.AddScoped<IFileBrowser>(sp => sp.GetRequiredService<FileBrowser>());
 
     // Register TTS factory
     services.AddSingleton<TTSFactory>();

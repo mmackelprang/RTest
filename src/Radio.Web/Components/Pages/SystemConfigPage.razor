@@ -111,21 +111,47 @@
         <MudTabPanel Text="Audio">
           @if (_audioConfig != null)
           {
-            <MudSimpleTable Dense="true" Hover="true">
-              <thead>
-                <tr>
-                  <th>Setting</th>
-                  <th>Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr><td><strong>Default Source</strong></td><td>@(_audioConfig.DefaultSource ?? "N/A")</td></tr>
-                <tr><td><strong>Ducking Percentage</strong></td><td>@_audioConfig.DuckingPercentage%</td></tr>
-                <tr><td><strong>Ducking Policy</strong></td><td>@(_audioConfig.DuckingPolicy ?? "N/A")</td></tr>
-                <tr><td><strong>Ducking Attack (ms)</strong></td><td>@_audioConfig.DuckingAttackMs</td></tr>
-                <tr><td><strong>Ducking Release (ms)</strong></td><td>@_audioConfig.DuckingReleaseMs</td></tr>
-              </tbody>
-            </MudSimpleTable>
+            <MudGrid Spacing="2">
+              <MudItem xs="12" md="6">
+                <MudSelect T="string" @bind-Value="_audioConfig.DefaultSource" Label="Default Source"
+                           Variant="Variant.Outlined" HelperText="Primary audio source on startup">
+                  <MudSelectItem Value="@("Radio")">Radio</MudSelectItem>
+                  <MudSelectItem Value="@("Spotify")">Spotify</MudSelectItem>
+                  <MudSelectItem Value="@("FilePlayer")">File Player</MudSelectItem>
+                  <MudSelectItem Value="@("Vinyl")">Vinyl</MudSelectItem>
+                </MudSelect>
+              </MudItem>
+              <MudItem xs="12" md="6">
+                <MudSelect T="string" @bind-Value="_audioConfig.DuckingPolicy" Label="Ducking Policy"
+                           Variant="Variant.Outlined" HelperText="How volume is reduced during events">
+                  <MudSelectItem Value="@("FadeSmooth")">Fade Smooth</MudSelectItem>
+                  <MudSelectItem Value="@("FadeLinear")">Fade Linear</MudSelectItem>
+                  <MudSelectItem Value="@("Immediate")">Immediate</MudSelectItem>
+                </MudSelect>
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudNumericField T="int" @bind-Value="_audioConfig.DuckingPercentage" Label="Ducking Level (%)"
+                                 Variant="Variant.Outlined" Min="0" Max="100"
+                                 HelperText="Volume reduction during events" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudNumericField T="int" @bind-Value="_audioConfig.DuckingAttackMs" Label="Ducking Attack (ms)"
+                                 Variant="Variant.Outlined" Min="0" Max="5000"
+                                 HelperText="Time to reduce volume" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudNumericField T="int" @bind-Value="_audioConfig.DuckingReleaseMs" Label="Ducking Release (ms)"
+                                 Variant="Variant.Outlined" Min="0" Max="5000"
+                                 HelperText="Time to restore volume" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAudioConfigAsync"
+                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save Audio Settings
+                </MudButton>
+              </MudItem>
+            </MudGrid>
           }
           else
           {
@@ -138,21 +164,44 @@
         <MudTabPanel Text="Visualizer">
           @if (_visualizerConfig != null)
           {
-            <MudSimpleTable Dense="true" Hover="true">
-              <thead>
-                <tr>
-                  <th>Setting</th>
-                  <th>Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr><td><strong>FFT Size</strong></td><td>@_visualizerConfig.FFTSize</td></tr>
-                <tr><td><strong>Waveform Samples</strong></td><td>@_visualizerConfig.WaveformSampleCount</td></tr>
-                <tr><td><strong>Peak Hold (ms)</strong></td><td>@_visualizerConfig.PeakHoldTimeMs</td></tr>
-                <tr><td><strong>Window Function</strong></td><td>@(_visualizerConfig.ApplyWindowFunction ? "Enabled" : "Disabled")</td></tr>
-                <tr><td><strong>Spectrum Smoothing</strong></td><td>@_visualizerConfig.SpectrumSmoothing.ToString("F2")</td></tr>
-              </tbody>
-            </MudSimpleTable>
+            <MudGrid Spacing="2">
+              <MudItem xs="12" md="4">
+                <MudSelect T="int" @bind-Value="_visualizerConfig.FFTSize" Label="FFT Size"
+                           Variant="Variant.Outlined" HelperText="Frequency resolution">
+                  <MudSelectItem Value="256">256</MudSelectItem>
+                  <MudSelectItem Value="512">512</MudSelectItem>
+                  <MudSelectItem Value="1024">1024</MudSelectItem>
+                  <MudSelectItem Value="2048">2048</MudSelectItem>
+                  <MudSelectItem Value="4096">4096</MudSelectItem>
+                </MudSelect>
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudNumericField T="int" @bind-Value="_visualizerConfig.WaveformSampleCount" Label="Waveform Samples"
+                                 Variant="Variant.Outlined" Min="64" Max="4096"
+                                 HelperText="Points in waveform display" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudNumericField T="int" @bind-Value="_visualizerConfig.PeakHoldTimeMs" Label="Peak Hold (ms)"
+                                 Variant="Variant.Outlined" Min="0" Max="5000"
+                                 HelperText="Peak indicator hold time" />
+              </MudItem>
+              <MudItem xs="12" md="6">
+                <MudNumericField T="float" @bind-Value="_visualizerConfig.SpectrumSmoothing" Label="Spectrum Smoothing"
+                                 Variant="Variant.Outlined" Min="0" Max="1" Step="0.05f"
+                                 HelperText="0 = no smoothing, 1 = max smoothing" />
+              </MudItem>
+              <MudItem xs="12" md="6">
+                <MudCheckBox T="bool" @bind-Value="_visualizerConfig.ApplyWindowFunction" Label="Apply Window Function"
+                             Color="Color.Primary" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveVisualizerConfigAsync"
+                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save Visualizer Settings
+                </MudButton>
+              </MudItem>
+            </MudGrid>
           }
           else
           {
@@ -165,34 +214,70 @@
         <MudTabPanel Text="Output">
           @if (_outputConfig != null)
           {
-            <MudText Typo="Typo.subtitle1" Class="mb-2">Local Output</MudText>
-            <MudSimpleTable Dense="true" Hover="true" Class="mb-4">
-              <tbody>
-                <tr><td><strong>Enabled</strong></td><td>@(_outputConfig.Local?.Enabled == true ? "Yes" : "No")</td></tr>
-                <tr><td><strong>Preferred Device</strong></td><td>@(_outputConfig.Local?.PreferredDeviceId ?? "Default")</td></tr>
-                <tr><td><strong>Default Volume</strong></td><td>@((_outputConfig.Local?.DefaultVolume ?? 0) * 100)%</td></tr>
-              </tbody>
-            </MudSimpleTable>
+            <MudExpansionPanels MultiExpansion="true">
+              <!-- Local Output -->
+              <MudExpansionPanel Text="Local Output" Icon="@Icons.Material.Filled.Speaker">
+                <MudGrid Spacing="2">
+                  <MudItem xs="12" md="4">
+                    <MudCheckBox T="bool" @bind-Value="_localOutputEnabled" Label="Enabled" Color="Color.Primary" />
+                  </MudItem>
+                  <MudItem xs="12" md="4">
+                    <MudTextField T="string" @bind-Value="_localPreferredDevice" Label="Preferred Device ID"
+                                  Variant="Variant.Outlined" HelperText="Leave empty for system default" />
+                  </MudItem>
+                  <MudItem xs="12" md="4">
+                    <MudNumericField T="float" @bind-Value="_localDefaultVolume" Label="Default Volume"
+                                     Variant="Variant.Outlined" Min="0" Max="1" Step="0.05f"
+                                     HelperText="0.0 - 1.0" />
+                  </MudItem>
+                </MudGrid>
+              </MudExpansionPanel>
 
-            <MudText Typo="Typo.subtitle1" Class="mb-2">HTTP Stream</MudText>
-            <MudSimpleTable Dense="true" Hover="true" Class="mb-4">
-              <tbody>
-                <tr><td><strong>Enabled</strong></td><td>@(_outputConfig.HttpStream?.Enabled == true ? "Yes" : "No")</td></tr>
-                <tr><td><strong>Port</strong></td><td>@(_outputConfig.HttpStream?.Port ?? 0)</td></tr>
-                <tr><td><strong>Endpoint</strong></td><td>@(_outputConfig.HttpStream?.EndpointPath ?? "N/A")</td></tr>
-                <tr><td><strong>Sample Rate</strong></td><td>@(_outputConfig.HttpStream?.SampleRate ?? 0) Hz</td></tr>
-                <tr><td><strong>Channels</strong></td><td>@(_outputConfig.HttpStream?.Channels ?? 0)</td></tr>
-              </tbody>
-            </MudSimpleTable>
+              <!-- HTTP Stream -->
+              <MudExpansionPanel Text="HTTP Stream" Icon="@Icons.Material.Filled.Stream">
+                <MudGrid Spacing="2">
+                  <MudItem xs="12" md="3">
+                    <MudCheckBox T="bool" @bind-Value="_httpStreamEnabled" Label="Enabled" Color="Color.Primary" />
+                  </MudItem>
+                  <MudItem xs="12" md="3">
+                    <MudNumericField T="int" @bind-Value="_httpStreamPort" Label="Port"
+                                     Variant="Variant.Outlined" Min="1024" Max="65535" />
+                  </MudItem>
+                  <MudItem xs="12" md="3">
+                    <MudNumericField T="int" @bind-Value="_httpStreamSampleRate" Label="Sample Rate (Hz)"
+                                     Variant="Variant.Outlined" Min="8000" Max="192000" />
+                  </MudItem>
+                  <MudItem xs="12" md="3">
+                    <MudNumericField T="int" @bind-Value="_httpStreamChannels" Label="Channels"
+                                     Variant="Variant.Outlined" Min="1" Max="8" />
+                  </MudItem>
+                </MudGrid>
+              </MudExpansionPanel>
 
-            <MudText Typo="Typo.subtitle1" Class="mb-2">Google Cast</MudText>
-            <MudSimpleTable Dense="true" Hover="true">
-              <tbody>
-                <tr><td><strong>Enabled</strong></td><td>@(_outputConfig.GoogleCast?.Enabled == true ? "Yes" : "No")</td></tr>
-                <tr><td><strong>Discovery Timeout</strong></td><td>@(_outputConfig.GoogleCast?.DiscoveryTimeoutSeconds ?? 0)s</td></tr>
-                <tr><td><strong>Default Volume</strong></td><td>@((_outputConfig.GoogleCast?.DefaultVolume ?? 0) * 100)%</td></tr>
-              </tbody>
-            </MudSimpleTable>
+              <!-- Google Cast -->
+              <MudExpansionPanel Text="Google Cast" Icon="@Icons.Material.Filled.Cast">
+                <MudGrid Spacing="2">
+                  <MudItem xs="12" md="4">
+                    <MudCheckBox T="bool" @bind-Value="_castEnabled" Label="Enabled" Color="Color.Primary" />
+                  </MudItem>
+                  <MudItem xs="12" md="4">
+                    <MudNumericField T="int" @bind-Value="_castDiscoveryTimeout" Label="Discovery Timeout (s)"
+                                     Variant="Variant.Outlined" Min="1" Max="60" />
+                  </MudItem>
+                  <MudItem xs="12" md="4">
+                    <MudNumericField T="float" @bind-Value="_castDefaultVolume" Label="Default Volume"
+                                     Variant="Variant.Outlined" Min="0" Max="1" Step="0.05f"
+                                     HelperText="0.0 - 1.0" />
+                  </MudItem>
+                </MudGrid>
+              </MudExpansionPanel>
+            </MudExpansionPanels>
+
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveOutputConfigAsync" Class="mt-3"
+                       StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">
+              @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+              Save Output Settings
+            </MudButton>
           }
           else
           {
@@ -201,10 +286,6 @@
           }
         </MudTabPanel>
       </MudTabs>
-      
-      <MudAlert Severity="Severity.Info" Class="mt-4">
-        Configuration editing will be enhanced in future updates. Currently showing read-only values.
-      </MudAlert>
     </MudTabPanel>
 
     <!-- Tab 3: Log Viewer -->
@@ -471,6 +552,19 @@
   private AudioConfigurationDto? _audioConfig;
   private VisualizerConfigurationDto? _visualizerConfig;
   private OutputConfigurationDto? _outputConfig;
+  private bool _isSaving = false;
+
+  // Output configuration individual fields (for binding)
+  private bool _localOutputEnabled;
+  private string _localPreferredDevice = "";
+  private float _localDefaultVolume;
+  private bool _httpStreamEnabled;
+  private int _httpStreamPort;
+  private int _httpStreamSampleRate;
+  private int _httpStreamChannels;
+  private bool _castEnabled;
+  private int _castDiscoveryTimeout;
+  private float _castDefaultVolume;
 
   // Logs
   private string _logLevel = "warning";
@@ -577,6 +671,21 @@
       _audioConfig = await ConfigApi.GetConfigurationAsync<AudioConfigurationDto>("audio");
       _visualizerConfig = await ConfigApi.GetConfigurationAsync<VisualizerConfigurationDto>("visualizer");
       _outputConfig = await ConfigApi.GetConfigurationAsync<OutputConfigurationDto>("output");
+
+      // Populate output config individual fields for binding
+      if (_outputConfig != null)
+      {
+        _localOutputEnabled = _outputConfig.Local?.Enabled ?? false;
+        _localPreferredDevice = _outputConfig.Local?.PreferredDeviceId ?? "";
+        _localDefaultVolume = _outputConfig.Local?.DefaultVolume ?? 0.8f;
+        _httpStreamEnabled = _outputConfig.HttpStream?.Enabled ?? false;
+        _httpStreamPort = _outputConfig.HttpStream?.Port ?? 8080;
+        _httpStreamSampleRate = _outputConfig.HttpStream?.SampleRate ?? 48000;
+        _httpStreamChannels = _outputConfig.HttpStream?.Channels ?? 2;
+        _castEnabled = _outputConfig.GoogleCast?.Enabled ?? false;
+        _castDiscoveryTimeout = _outputConfig.GoogleCast?.DiscoveryTimeoutSeconds ?? 10;
+        _castDefaultVolume = _outputConfig.GoogleCast?.DefaultVolume ?? 0.7f;
+      }
     }
     catch (Exception ex)
     {
@@ -932,6 +1041,110 @@
     catch (Exception ex)
     {
       Snackbar.Add($"Error replaying event: {ex.Message}", Severity.Error);
+    }
+  }
+
+  private async Task SaveAudioConfigAsync()
+  {
+    if (_audioConfig == null) return;
+
+    _isSaving = true;
+    try
+    {
+      var success = await ConfigApi.UpdateConfigurationAsync("audio", _audioConfig);
+      if (success)
+      {
+        Snackbar.Add("Audio configuration saved successfully", Severity.Success);
+      }
+      else
+      {
+        Snackbar.Add("Failed to save audio configuration", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error);
+    }
+    finally
+    {
+      _isSaving = false;
+    }
+  }
+
+  private async Task SaveVisualizerConfigAsync()
+  {
+    if (_visualizerConfig == null) return;
+
+    _isSaving = true;
+    try
+    {
+      var success = await ConfigApi.UpdateConfigurationAsync("visualizer", _visualizerConfig);
+      if (success)
+      {
+        Snackbar.Add("Visualizer configuration saved successfully", Severity.Success);
+      }
+      else
+      {
+        Snackbar.Add("Failed to save visualizer configuration", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error);
+    }
+    finally
+    {
+      _isSaving = false;
+    }
+  }
+
+  private async Task SaveOutputConfigAsync()
+  {
+    _isSaving = true;
+    try
+    {
+      // Reconstruct output config from individual fields
+      var outputConfig = new OutputConfigurationDto
+      {
+        Local = new LocalOutputSettingsDto
+        {
+          Enabled = _localOutputEnabled,
+          PreferredDeviceId = string.IsNullOrWhiteSpace(_localPreferredDevice) ? null : _localPreferredDevice,
+          DefaultVolume = _localDefaultVolume
+        },
+        HttpStream = new HttpStreamSettingsDto
+        {
+          Enabled = _httpStreamEnabled,
+          Port = _httpStreamPort,
+          SampleRate = _httpStreamSampleRate,
+          Channels = _httpStreamChannels
+        },
+        GoogleCast = new GoogleCastSettingsDto
+        {
+          Enabled = _castEnabled,
+          DiscoveryTimeoutSeconds = _castDiscoveryTimeout,
+          DefaultVolume = _castDefaultVolume
+        }
+      };
+
+      var success = await ConfigApi.UpdateConfigurationAsync("output", outputConfig);
+      if (success)
+      {
+        Snackbar.Add("Output configuration saved successfully", Severity.Success);
+        _outputConfig = outputConfig;
+      }
+      else
+      {
+        Snackbar.Add("Failed to save output configuration", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error);
+    }
+    finally
+    {
+      _isSaving = false;
     }
   }
 

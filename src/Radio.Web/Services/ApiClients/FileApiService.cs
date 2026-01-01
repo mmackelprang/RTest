@@ -50,7 +50,7 @@ public class FileApiService
   {
     try
     {
-      var response = await _httpClient.PostAsJsonAsync("/api/files/queue", new { path = filePath }, cancellationToken);
+      var response = await _httpClient.PostAsJsonAsync("/api/files/queue", new { Paths = new List<string> { filePath } }, cancellationToken);
       return response.IsSuccessStatusCode;
     }
     catch (Exception ex)
@@ -78,7 +78,7 @@ public class FileApiService
   {
     try
     {
-      var response = await _httpClient.PostAsJsonAsync("/api/files/queue", new { paths = filePaths }, cancellationToken);
+      var response = await _httpClient.PostAsJsonAsync("/api/files/queue", new { Paths = filePaths }, cancellationToken);
       return response.IsSuccessStatusCode;
     }
     catch (Exception ex)

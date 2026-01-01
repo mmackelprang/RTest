@@ -163,6 +163,34 @@ public class FileBrowser : IFileBrowser
   }
 
   /// <inheritdoc/>
+  public IReadOnlyList<string> ListDirectories(string? path = null)
+  {
+    var basePath = GetFullPath(path);
+
+    if (!Directory.Exists(basePath))
+    {
+      _logger.LogWarning("Directory not found: {Path}", basePath);
+      return Array.Empty<string>();
+    }
+
+    try
+    {
+      var directories = Directory.GetDirectories(basePath)
+        .Select(d => GetRelativePath(d))
+        .OrderBy(d => d)
+        .ToList();
+
+      _logger.LogDebug("Found {Count} directories in {Path}", directories.Count, basePath);
+      return directories;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error listing directories in {Path}", basePath);
+      return Array.Empty<string>();
+    }
+  }
+
+  /// <inheritdoc/>
   public async Task<int> GetFileCountAsync(CancellationToken cancellationToken = default)
   {
     if (_audioFileRepository == null)

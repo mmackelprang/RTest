@@ -245,12 +245,8 @@ public abstract class PrimaryAudioSourceBase : IPrimaryAudioSource
     GC.SuppressFinalize(this);
   }
 
-  /// <summary>
-  /// Initializes the audio source.
-  /// </summary>
-  /// <param name="cancellationToken">Cancellation token.</param>
-  /// <returns>A task representing the async operation.</returns>
-  protected virtual Task InitializeAsync(CancellationToken cancellationToken = default)
+  /// <inheritdoc/>
+  public virtual Task InitializeAsync(CancellationToken cancellationToken = default)
   {
     State = AudioSourceState.Initializing;
     return Task.CompletedTask;
