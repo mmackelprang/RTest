@@ -508,3 +508,82 @@ public record ConnectCastDeviceRequest(
   int? Port,
   string? Model
 );
+
+// Device Configuration DTOs
+public class DeviceOptionsDto
+{
+  public RadioDeviceOptionsDto Radio { get; set; } = new();
+  public VinylDeviceOptionsDto Vinyl { get; set; } = new();
+  public CastDeviceOptionsDto Cast { get; set; } = new();
+}
+
+public class RadioDeviceOptionsDto
+{
+  public string USBPort { get; set; } = "/dev/ttyUSB0";
+}
+
+public class VinylDeviceOptionsDto
+{
+  public string USBPort { get; set; } = "/dev/ttyUSB1";
+}
+
+public class CastDeviceOptionsDto
+{
+  public string DefaultDevice { get; set; } = "";
+}
+
+// Preferences DTOs
+public class AudioPreferencesDto
+{
+  public string CurrentSource { get; set; } = "Spotify";
+  public string CurrentOutput { get; set; } = "";
+  public int MasterVolume { get; set; } = 75;
+}
+
+public class SpotifyPreferencesDto
+{
+  public string LastSongPlayed { get; set; } = "";
+  public long SongPositionMs { get; set; } = 0;
+  public bool Shuffle { get; set; } = false;
+  public string Repeat { get; set; } = "Off";
+}
+
+public class FilePlayerPreferencesDto
+{
+  public string LastSongPlayed { get; set; } = "";
+  public long SongPositionMs { get; set; } = 0;
+  public bool Shuffle { get; set; } = false;
+  public string Repeat { get; set; } = "Off";
+}
+
+public class RadioPreferencesDto
+{
+  public float LastFrequency { get; set; } = 101.1f;
+  public string LastBand { get; set; } = "FM";
+  public string LastEQMode { get; set; } = "";
+}
+
+public class GenericSourcePreferencesDto
+{
+  public string USBPort { get; set; } = "";
+}
+
+// Secrets DTOs
+public class SpotifySecretsDto
+{
+  public string ClientID { get; set; } = "";
+  public string ClientSecret { get; set; } = "";
+  public string RefreshToken { get; set; } = "";
+}
+
+public class TTSSecretsDto
+{
+  public string GoogleAPIKey { get; set; } = "";
+  public string AzureAPIKey { get; set; } = "";
+  public string AzureRegion { get; set; } = "";
+}
+
+public class AcoustIdSecretDto
+{
+  public string ApiKey { get; set; } = "";
+}

@@ -1,5 +1,6 @@
 @page "/system"
 @rendermode InteractiveServer
+@using Radio.Web.Models
 @inject SystemApiService SystemApi
 @inject ConfigurationApiService ConfigApi
 @inject SourcesApiService SourcesApi
@@ -285,6 +286,50 @@
             <MudText Class="ml-2">Loading output configuration...</MudText>
           }
         </MudTabPanel>
+
+        <!-- Devices Configuration -->
+        <MudTabPanel Text="Devices">
+          @if (_deviceOptions != null)
+          {
+            <MudGrid Spacing="2">
+              <MudItem xs="12">
+                <MudAlert Severity="Severity.Info" Dense="true">
+                  Configure USB port paths for hardware devices. Linux/Pi uses /dev/ttyUSB*, Windows uses COM ports.
+                </MudAlert>
+              </MudItem>
+              <MudItem xs="12" md="6">
+                <MudTextField T="string" @bind-Value="_deviceOptions.Radio.USBPort" 
+                              Label="Radio USB Port"
+                              Variant="Variant.Outlined"
+                              HelperText="USB port for Raddy RF320 radio (e.g., /dev/ttyUSB0 on Linux, COM3 on Windows)" />
+              </MudItem>
+              <MudItem xs="12" md="6">
+                <MudTextField T="string" @bind-Value="_deviceOptions.Vinyl.USBPort" 
+                              Label="Vinyl USB Port"
+                              Variant="Variant.Outlined"
+                              HelperText="USB port for vinyl turntable (e.g., /dev/ttyUSB1 on Linux, COM4 on Windows)" />
+              </MudItem>
+              <MudItem xs="12" md="6">
+                <MudTextField T="string" @bind-Value="_deviceOptions.Cast.DefaultDevice" 
+                              Label="Default Cast Device"
+                              Variant="Variant.Outlined"
+                              HelperText="Default Chromecast device name (optional)" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveDeviceOptionsAsync"
+                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save Device Settings
+                </MudButton>
+              </MudItem>
+            </MudGrid>
+          }
+          else
+          {
+            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+            <MudText Class="ml-2">Loading device configuration...</MudText>
+          }
+        </MudTabPanel>
       </MudTabs>
     </MudTabPanel>
 
@@ -552,6 +597,7 @@
   private AudioConfigurationDto? _audioConfig;
   private VisualizerConfigurationDto? _visualizerConfig;
   private OutputConfigurationDto? _outputConfig;
+  private DeviceOptionsDto? _deviceOptions;
   private bool _isSaving = false;
 
   // Output configuration individual fields (for binding)
@@ -671,6 +717,8 @@
       _audioConfig = await ConfigApi.GetConfigurationAsync<AudioConfigurationDto>("audio");
       _visualizerConfig = await ConfigApi.GetConfigurationAsync<VisualizerConfigurationDto>("visualizer");
       _outputConfig = await ConfigApi.GetConfigurationAsync<OutputConfigurationDto>("output");
+      _deviceOptions = await ConfigApi.GetConfigurationAsync<DeviceOptionsDto>("devices") 
+                       ?? new DeviceOptionsDto();
 
       // Populate output config individual fields for binding
       if (_outputConfig != null)
@@ -1141,6 +1189,39 @@
     catch (Exception ex)
     {
       Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error);
+    }
+    finally
+    {
+      _isSaving = false;
+    }
+  }
+
+  private async Task SaveDeviceOptionsAsync()
+  {
+    _isSaving = true;
+    try
+    {
+      if (_deviceOptions == null)
+      {
+        Snackbar.Add("Device configuration is not loaded", Severity.Error);
+        return;
+      }
+
+      var success = await ConfigApi.UpdateConfigurationAsync("devices", _deviceOptions);
+      if (success)
+      {
+        Snackbar.Add("Device configuration saved successfully", Severity.Success);
+        Logger.LogInformation("Device configuration updated: Radio USB={RadioUSB}, Vinyl USB={VinylUSB}", 
+          _deviceOptions.Radio.USBPort, _deviceOptions.Vinyl.USBPort);
+      }
+      else
+      {
+        Snackbar.Add("Failed to save device configuration", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Snackbar.Add($"Error saving device configuration: {ex.Message}", Severity.Error);
     }
     finally
     {

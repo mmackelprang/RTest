@@ -203,6 +203,80 @@ public class ConfigurationController : ControllerBase
   }
 
   /// <summary>
+  /// Gets a generic configuration section by section name.
+  /// </summary>
+  /// <param name="section">The configuration section name.</param>
+  /// <returns>The configuration section data.</returns>
+  [HttpGet("{section}")]
+  [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status404NotFound)]
+  public async Task<ActionResult> GetConfigurationSection(string section)
+  {
+    try
+    {
+      if (_configurationManager == null)
+      {
+        return StatusCode(501, new { error = "Configuration manager not available" });
+      }
+
+      var storeId = section.ToLowerInvariant();
+      var store = await _configurationManager.GetStoreAsync(storeId);
+      var entries = await store.GetAllEntriesAsync();
+
+      // Build a dictionary from the entries
+      var result = new Dictionary<string, object?>();
+      foreach (var entry in entries)
+      {
+        result[entry.Key] = entry.Value;
+      }
+
+      return Ok(result);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error getting configuration section {Section}", section);
+      return NotFound(new { error = $"Configuration section '{section}' not found" });
+    }
+  }
+
+  /// <summary>
+  /// Updates an entire configuration section.
+  /// </summary>
+  /// <param name="section">The configuration section name.</param>
+  /// <param name="data">The configuration data to save.</param>
+  /// <returns>Success or error response.</returns>
+  [HttpPost("{section}")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status501NotImplemented)]
+  public async Task<ActionResult> UpdateConfigurationSection(string section, [FromBody] Dictionary<string, object> data)
+  {
+    try
+    {
+      if (_configurationManager == null)
+      {
+        return StatusCode(501, new { error = "Configuration manager not available" });
+      }
+
+      var storeId = section.ToLowerInvariant();
+      
+      // Set each key-value pair
+      foreach (var kvp in data)
+      {
+        await _configurationManager.SetValueAsync(storeId, kvp.Key, kvp.Value);
+      }
+
+      _logger.LogInformation("Configuration section {Section} updated successfully", section);
+      return Ok(new { message = "Configuration updated successfully", section });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error updating configuration section {Section}", section);
+      return StatusCode(500, new { error = "Failed to update configuration" });
+    }
+  }
+
+  /// <summary>
   /// Updates a configuration setting.
   /// </summary>
   /// <param name="request">The configuration update request.</param>
