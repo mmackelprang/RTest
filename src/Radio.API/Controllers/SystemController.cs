@@ -18,6 +18,7 @@ public class SystemController : ControllerBase
 {
   private readonly ILogger<SystemController> _logger;
   private readonly IAudioEngine _audioEngine;
+  private readonly IHostApplicationLifetime _applicationLifetime;
   private static readonly DateTime _startTime = DateTime.UtcNow;
   
   // Cache CPU usage to avoid delays on every request
@@ -34,10 +35,12 @@ public class SystemController : ControllerBase
   /// </summary>
   public SystemController(
     ILogger<SystemController> logger,
-    IAudioEngine audioEngine)
+    IAudioEngine audioEngine,
+    IHostApplicationLifetime applicationLifetime)
   {
     _logger = logger;
     _audioEngine = audioEngine;
+    _applicationLifetime = applicationLifetime;
   }
 
   /// <summary>
@@ -452,5 +455,34 @@ public class SystemController : ControllerBase
       return $"{(int)ts.TotalMinutes}m {ts.Seconds}s";
     }
     return $"{ts.Seconds}s";
+  }
+
+  /// <summary>
+  /// Initiates a graceful shutdown of the application.
+  /// This endpoint is useful for E2E UAT testing to cleanly shutdown the application after tests complete.
+  /// </summary>
+  /// <returns>Confirmation message.</returns>
+  [HttpPost("shutdown")]
+  [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+  public IActionResult Shutdown()
+  {
+    _logger.LogWarning("System shutdown requested via API");
+    
+    // Initiate shutdown after a short delay to allow the response to be sent
+    Task.Run(async () =>
+    {
+      try
+      {
+        await Task.Delay(1000);
+        _logger.LogInformation("Stopping application...");
+        _applicationLifetime.StopApplication();
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "Failed to execute delayed shutdown");
+      }
+    });
+    
+    return Ok(new { message = "Shutdown initiated" });
   }
 }
