@@ -471,9 +471,16 @@ public class SystemController : ControllerBase
     // Initiate shutdown after a short delay to allow the response to be sent
     Task.Run(async () =>
     {
-      await Task.Delay(1000);
-      _logger.LogInformation("Stopping application...");
-      _applicationLifetime.StopApplication();
+      try
+      {
+        await Task.Delay(1000);
+        _logger.LogInformation("Stopping application...");
+        _applicationLifetime.StopApplication();
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "Failed to execute delayed shutdown");
+      }
     });
     
     return Ok(new { message = "Shutdown initiated" });

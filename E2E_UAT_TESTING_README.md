@@ -42,7 +42,7 @@ dotnet run
 .\run-e2e-uat.ps1                          # Run all tests (non-interactive)
 .\run-e2e-uat.ps1 -Phase 15                # Run specific phase only
 .\run-e2e-uat.ps1 -Interactive             # Run with interactive prompts
-.\run-e2e-uat.ps1 -Json -Output results.json  # JSON output for CLI agents
+.\run-e2e-uat.ps1 -Output results.json     # JSON output for CLI agents
 .\run-e2e-uat.ps1 -NoShutdown              # Keep app running after tests
 ```
 
@@ -63,7 +63,7 @@ dotnet run
 ./run-e2e-uat.sh                           # Run all tests (non-interactive)
 ./run-e2e-uat.sh --phase 15                # Run specific phase only
 ./run-e2e-uat.sh --interactive             # Run with interactive prompts
-./run-e2e-uat.sh --json --output results.json  # JSON output for CLI agents
+./run-e2e-uat.sh --output results.json     # JSON output for CLI agents
 ./run-e2e-uat.sh --no-shutdown             # Keep app running after tests
 ```
 
@@ -73,7 +73,7 @@ For automated testing by CLI coding agents:
 
 ```bash
 # Run tests with JSON output for machine parsing
-./run-e2e-uat.sh --json --output e2e-results.json
+./run-e2e-uat.sh --output e2e-results.json
 
 # Check exit code for success/failure
 if [ $? -eq 0 ]; then
@@ -146,20 +146,22 @@ The E2E tests are organized into phases for incremental testing:
 ```powershell
 -Phase <number>       # Run tests for a specific phase (15-22)
 -Interactive          # Enable interactive mode with user prompts
--Json                 # Output results in JSON format (for CLI agents)
 -Output <file>        # Write results to specified file (e.g., results.json)
 -NoShutdown           # Keep application running after tests complete
 ```
+
+**Note**: When `-Output` is specified, the UAT tool will generate JSON-formatted results to the specified file.
 
 ### Bash (`run-e2e-uat.sh`)
 
 ```bash
 --phase <number>      # Run tests for a specific phase (15-22)
 --interactive         # Enable interactive mode with user prompts
---json                # Output results in JSON format (for CLI agents)
 --output <file>       # Write results to specified file (e.g., results.json)
 --no-shutdown         # Keep application running after tests complete
 ```
+
+**Note**: When `--output` is specified, the UAT tool will generate JSON-formatted results to the specified file.
 
 ### Exit Codes
 
@@ -192,7 +194,7 @@ The scripts return specific exit codes for automation:
 4. **Report Results**:
    - Display summary: total tests, passed, failed, skipped
    - Show execution time and performance metrics
-   - Write JSON output if `--json` or `--output` specified
+   - Write JSON output if `--output` specified
 
 5. **Shutdown (Optional)**:
    - By default, gracefully shutdown the application via `POST /api/system/shutdown`
@@ -335,10 +337,10 @@ By default, the tests run in non-interactive mode:
 
 ### JSON Output for Machine Parsing
 
-Use the `--json` and `--output` flags to generate structured test results:
+Use the `--output` flag to generate structured test results:
 
 ```bash
-./run-e2e-uat.sh --json --output e2e-results.json
+./run-e2e-uat.sh --output e2e-results.json
 ```
 
 **JSON Structure:**
@@ -397,7 +399,7 @@ fi
 
 ### Best Practices for CLI Agents
 
-1. **Always use `--json --output`** for structured results parsing
+1. **Always use `--output`** for structured results parsing
 2. **Check exit codes** before parsing results (exit 2/3 means no results)
 3. **Parse failures first** to identify critical issues
 4. **Analyze performance trends** by comparing execution times across runs

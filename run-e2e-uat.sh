@@ -1,15 +1,16 @@
 #!/bin/bash
 #
 # Run E2E UAT Tests
-# Usage: ./run-e2e-uat.sh [--phase <number>] [--interactive] [--json] [--output <file>] [--no-shutdown]
+# Usage: ./run-e2e-uat.sh [--phase <number>] [--interactive] [--output <file>] [--no-shutdown]
 #
 
-set -e
+# Note: Do not use `set -e`; this script handles errors explicitly so that
+# non-critical failures (e.g., best-effort shutdown requests) do not override
+# the actual test exit code.
 
 PHASE=0
 INTERACTIVE=false
 NO_SHUTDOWN=false
-JSON_OUTPUT=false
 OUTPUT_FILE=""
 
 # Parse arguments
@@ -23,10 +24,6 @@ while [[ $# -gt 0 ]]; do
       INTERACTIVE=true
       shift
       ;;
-    --json)
-      JSON_OUTPUT=true
-      shift
-      ;;
     --output)
       OUTPUT_FILE="$2"
       shift 2
@@ -37,7 +34,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       echo "Unknown option: $1"
-      echo "Usage: ./run-e2e-uat.sh [--phase <number>] [--interactive] [--json] [--output <file>] [--no-shutdown]"
+      echo "Usage: ./run-e2e-uat.sh [--phase <number>] [--interactive] [--output <file>] [--no-shutdown]"
       exit 3
       ;;
   esac
@@ -50,7 +47,7 @@ echo ""
 
 # Check if API is running
 echo "Checking if Radio API is running..."
-if curl -f -s -o /dev/null -m 5 "http://localhost:5000/api/sources"; then
+if curl -f -s -o /dev/null -m 5 "http://localhost:5000/api/sources" 2>/dev/null; then
     echo "✓ API is running"
 else
     echo "✗ API is not running!"
@@ -62,7 +59,7 @@ fi
 
 # Check if Web UI is running
 echo "Checking if Radio Web UI is running..."
-if curl -f -s -o /dev/null -m 5 "http://localhost:5001"; then
+if curl -f -s -o /dev/null -m 5 "http://localhost:5001" 2>/dev/null; then
     echo "✓ Web UI is running"
 else
     echo "✗ Web UI is not running!"
@@ -85,8 +82,8 @@ fi
 
 # Run tests
 echo ""
-if [ "$JSON_OUTPUT" = true ]; then
-    echo "Running E2E UAT tests (JSON output mode)..."
+if [ -n "$OUTPUT_FILE" ]; then
+    echo "Running E2E UAT tests (output to $OUTPUT_FILE)..."
 else
     echo "Running E2E UAT tests..."
 fi
@@ -126,7 +123,7 @@ echo "======================================"
 if [ "$NO_SHUTDOWN" = false ]; then
     echo ""
     echo "Shutting down application..."
-    if curl -f -s -o /dev/null -X POST -m 5 "http://localhost:5000/api/system/shutdown"; then
+    if curl -f -s -o /dev/null -X POST -m 5 "http://localhost:5000/api/system/shutdown" 2>/dev/null; then
         echo "✓ Shutdown initiated"
     else
         echo "⚠ Could not shutdown application (may already be stopped)"

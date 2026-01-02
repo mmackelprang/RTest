@@ -1,11 +1,10 @@
 #
 # Run E2E UAT Tests
-# Usage: .\run-e2e-uat.ps1 [-Phase <phase_number>] [-Interactive] [-Json] [-Output <file>] [-NoShutdown]
+# Usage: .\run-e2e-uat.ps1 [-Phase <phase_number>] [-Interactive] [-Output <file>] [-NoShutdown]
 #
 param(
     [int]$Phase = 0,
     [switch]$Interactive = $false,
-    [switch]$Json = $false,
     [string]$Output = "",
     [switch]$NoShutdown = $false
 )
@@ -58,8 +57,8 @@ if ($LASTEXITCODE -ne 0) {
 
 # Run tests
 Write-Host ""
-if ($Json) {
-    Write-Host "Running E2E UAT tests (JSON output mode)..." -ForegroundColor Yellow
+if ($Output) {
+    Write-Host "Running E2E UAT tests (output to $Output)..." -ForegroundColor Yellow
 } else {
     Write-Host "Running E2E UAT tests..." -ForegroundColor Yellow
 }

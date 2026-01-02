@@ -82,7 +82,7 @@ E2E tests will be easy to run on both Windows and Linux via simple scripts:
 
 **CLI Coding Agent Support:**
 - **Non-interactive mode is the default** - tests run automatically without prompts
-- **Structured JSON output** via `--json` flag for machine parsing
+- **Structured JSON output** via `--output` flag for machine parsing
 - **Real-time progress logging** with clear test status (PASS/FAIL/SKIP)
 - **Detailed failure information** including error messages, stack traces, and context
 - **Metrics and timing data** for performance analysis
@@ -100,7 +100,7 @@ E2E tests will be easy to run on both Windows and Linux via simple scripts:
 
 **JSON Output Mode:**
 ```bash
-./run-e2e-uat.sh --json --output results.json
+./run-e2e-uat.sh --output results.json
 ```
 Produces machine-readable JSON with:
 - Test results (pass/fail/skip) for each test
@@ -139,7 +139,7 @@ Produces machine-readable JSON with:
 
 ---
 
-## Phase 1: Enhanced API UAT Tests
+## Phase 15: Enhanced API UAT Tests
 
 **Purpose**: Extend existing API tests to cover all REST endpoints comprehensively.
 
@@ -283,7 +283,7 @@ Tests:
 
 ---
 
-## Phase 2: Web UI E2E Tests (Playwright)
+## Phase 22: Web UI E2E Tests (Playwright)
 
 **Purpose**: Automate critical user workflows in the Blazor Web UI using Playwright.
 
@@ -359,7 +359,7 @@ Tests:
 
 ---
 
-## Phase 3: Visualization E2E Tests
+## Phase 16: Visualization E2E Tests
 
 **Purpose**: Test real-time audio visualization components and SignalR integration.
 
@@ -378,7 +378,7 @@ Tests:
 
 ---
 
-## Phase 4: Casting / Device Selection E2E Tests
+## Phase 17: Casting / Device Selection E2E Tests
 
 **Purpose**: Test output device selection, Chromecast integration, and device switching.
 
@@ -407,7 +407,7 @@ Tests:
 
 ---
 
-## Phase 5: Fingerprinting E2E Tests
+## Phase 18: Fingerprinting E2E Tests
 
 **Purpose**: Test audio fingerprinting, identification, and metadata enrichment.
 
@@ -435,7 +435,7 @@ Tests:
 
 ---
 
-## Phase 6: System Integration E2E Tests
+## Phase 19: System Integration E2E Tests
 
 **Purpose**: Test cross-component workflows that span multiple subsystems.
 
@@ -462,7 +462,7 @@ Tests:
 
 ---
 
-## Phase 7: Configuration Management E2E Tests
+## Phase 20: Configuration Management E2E Tests
 
 **Purpose**: Comprehensive testing of configuration, secrets, and backup/restore.
 
@@ -491,7 +491,7 @@ Tests:
 
 ---
 
-## Phase 8: Performance and Load E2E Tests
+## Phase 21: Performance and Load E2E Tests
 
 **Purpose**: Validate performance, responsiveness, and resource usage under load.
 
