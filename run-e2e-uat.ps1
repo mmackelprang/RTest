@@ -1,10 +1,12 @@
 #
 # Run E2E UAT Tests
-# Usage: .\run-e2e-uat.ps1 [-Phase <phase_number>] [-Interactive] [-NoShutdown]
+# Usage: .\run-e2e-uat.ps1 [-Phase <phase_number>] [-Interactive] [-Json] [-Output <file>] [-NoShutdown]
 #
 param(
     [int]$Phase = 0,
     [switch]$Interactive = $false,
+    [switch]$Json = $false,
+    [string]$Output = "",
     [switch]$NoShutdown = $false
 )
 
@@ -26,7 +28,7 @@ try {
     Write-Host "Please start the Radio API first:" -ForegroundColor Red
     Write-Host "  cd src/Radio.API" -ForegroundColor Yellow
     Write-Host "  dotnet run" -ForegroundColor Yellow
-    exit 1
+    exit 2
 }
 
 # Check if Web UI is running
@@ -40,28 +42,44 @@ try {
     Write-Host "Please start the Radio Web UI first:" -ForegroundColor Red
     Write-Host "  cd src/Radio.Web" -ForegroundColor Yellow
     Write-Host "  dotnet run" -ForegroundColor Yellow
-    exit 1
+    exit 2
 }
 
 Write-Host ""
 
 # Build UAT tool
 Write-Host "Building E2E UAT tool..." -ForegroundColor Yellow
-dotnet build tools/Radio.Tools.AudioUAT --configuration Release
+dotnet build tools/Radio.Tools.AudioUAT --configuration Release --nologo -v q
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "✗ Build failed!" -ForegroundColor Red
+    exit 3
+}
 
 # Run tests
 Write-Host ""
-Write-Host "Running E2E UAT tests..." -ForegroundColor Yellow
+if ($Json) {
+    Write-Host "Running E2E UAT tests (JSON output mode)..." -ForegroundColor Yellow
+} else {
+    Write-Host "Running E2E UAT tests..." -ForegroundColor Yellow
+}
 Write-Host ""
 
-$uatArgs = @("run", "--project", "tools/Radio.Tools.AudioUAT", "--configuration", "Release", "--")
+$uatArgs = @("run", "--project", "tools/Radio.Tools.AudioUAT", "--configuration", "Release", "--no-build", "--")
 
 if ($Phase -gt 0) {
     $uatArgs += "--phase", $Phase
+} else {
+    # Default to all phases if none specified
+    $uatArgs += "--all"
 }
 
 if ($Interactive) {
     $uatArgs += "--interactive"
+}
+
+if ($Output) {
+    $uatArgs += "--output", $Output
 }
 
 dotnet @uatArgs
@@ -70,7 +88,11 @@ $testExitCode = $LASTEXITCODE
 
 Write-Host ""
 Write-Host "======================================" -ForegroundColor Green
-Write-Host "E2E UAT Tests Complete" -ForegroundColor Green
+if ($testExitCode -eq 0) {
+    Write-Host "E2E UAT Tests Complete - ALL PASSED" -ForegroundColor Green
+} else {
+    Write-Host "E2E UAT Tests Complete - SOME FAILED" -ForegroundColor Red
+}
 Write-Host "======================================" -ForegroundColor Green
 
 # Optionally shutdown application

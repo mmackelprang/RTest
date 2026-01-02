@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Run E2E UAT Tests
-# Usage: ./run-e2e-uat.sh [--phase <number>] [--interactive] [--no-shutdown]
+# Usage: ./run-e2e-uat.sh [--phase <number>] [--interactive] [--json] [--output <file>] [--no-shutdown]
 #
 
 set -e
@@ -9,6 +9,8 @@ set -e
 PHASE=0
 INTERACTIVE=false
 NO_SHUTDOWN=false
+JSON_OUTPUT=false
+OUTPUT_FILE=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -21,13 +23,22 @@ while [[ $# -gt 0 ]]; do
       INTERACTIVE=true
       shift
       ;;
+    --json)
+      JSON_OUTPUT=true
+      shift
+      ;;
+    --output)
+      OUTPUT_FILE="$2"
+      shift 2
+      ;;
     --no-shutdown)
       NO_SHUTDOWN=true
       shift
       ;;
     *)
       echo "Unknown option: $1"
-      exit 1
+      echo "Usage: ./run-e2e-uat.sh [--phase <number>] [--interactive] [--json] [--output <file>] [--no-shutdown]"
+      exit 3
       ;;
   esac
 done
@@ -46,7 +57,7 @@ else
     echo "Please start the Radio API first:"
     echo "  cd src/Radio.API"
     echo "  dotnet run"
-    exit 1
+    exit 2
 fi
 
 # Check if Web UI is running
@@ -58,37 +69,57 @@ else
     echo "Please start the Radio Web UI first:"
     echo "  cd src/Radio.Web"
     echo "  dotnet run"
-    exit 1
+    exit 2
 fi
 
 echo ""
 
 # Build UAT tool
 echo "Building E2E UAT tool..."
-dotnet build tools/Radio.Tools.AudioUAT --configuration Release
+dotnet build tools/Radio.Tools.AudioUAT --configuration Release --nologo -v q
+
+if [ $? -ne 0 ]; then
+    echo "✗ Build failed!"
+    exit 3
+fi
 
 # Run tests
 echo ""
-echo "Running E2E UAT tests..."
+if [ "$JSON_OUTPUT" = true ]; then
+    echo "Running E2E UAT tests (JSON output mode)..."
+else
+    echo "Running E2E UAT tests..."
+fi
 echo ""
 
 UAT_ARGS=()
 
 if [ $PHASE -gt 0 ]; then
     UAT_ARGS+=(--phase $PHASE)
+else
+    # Default to all phases if none specified
+    UAT_ARGS+=(--all)
 fi
 
 if [ "$INTERACTIVE" = true ]; then
     UAT_ARGS+=(--interactive)
 fi
 
-dotnet run --project tools/Radio.Tools.AudioUAT --configuration Release -- "${UAT_ARGS[@]}"
+if [ -n "$OUTPUT_FILE" ]; then
+    UAT_ARGS+=(--output "$OUTPUT_FILE")
+fi
+
+dotnet run --project tools/Radio.Tools.AudioUAT --configuration Release --no-build -- "${UAT_ARGS[@]}"
 
 TEST_EXIT_CODE=$?
 
 echo ""
 echo "======================================"
-echo "E2E UAT Tests Complete"
+if [ $TEST_EXIT_CODE -eq 0 ]; then
+    echo "E2E UAT Tests Complete - ALL PASSED"
+else
+    echo "E2E UAT Tests Complete - SOME FAILED"
+fi
 echo "======================================"
 
 # Optionally shutdown application

@@ -66,18 +66,61 @@ All E2E tests will be consolidated into the existing `tools/Radio.Tools.AudioUAT
 E2E tests will be easy to run on both Windows and Linux via simple scripts:
 
 **Windows (PowerShell):**
-- `run-e2e-uat.ps1` - Run all E2E UAT tests
+- `run-e2e-uat.ps1` - Run all E2E UAT tests (non-interactive by default)
 - `run-e2e-uat-interactive.ps1` - Run E2E tests in interactive mode with prompts
 
 **Linux/Raspberry Pi (Bash):**
-- `run-e2e-uat.sh` - Run all E2E UAT tests
+- `run-e2e-uat.sh` - Run all E2E UAT tests (non-interactive by default)
 - `run-e2e-uat-interactive.sh` - Run E2E tests in interactive mode
 
 **Script Responsibilities:**
 1. Check that the application is running (API and Web UI)
 2. Run E2E tests in the desired phase(s)
-3. Generate test reports
-4. Optionally shut down the application after tests complete
+3. Generate test reports (JSON for machine parsing, human-readable for console)
+4. Provide real-time progress updates with clear status indicators
+5. Optionally shut down the application after tests complete
+
+**CLI Coding Agent Support:**
+- **Non-interactive mode is the default** - tests run automatically without prompts
+- **Structured JSON output** via `--json` flag for machine parsing
+- **Real-time progress logging** with clear test status (PASS/FAIL/SKIP)
+- **Detailed failure information** including error messages, stack traces, and context
+- **Metrics and timing data** for performance analysis
+- **Exit codes** indicate success (0) or failure (non-zero) for automation
+
+### CLI Coding Agent Support
+
+**Design for Automation**: These E2E tests are designed to be easily run by CLI coding agents and automation scripts:
+
+**Non-Interactive Mode (Default):**
+- No user prompts or manual inputs required
+- Tests run automatically from start to finish
+- Clear console output with real-time status updates
+- Structured exit codes for success/failure detection
+
+**JSON Output Mode:**
+```bash
+./run-e2e-uat.sh --json --output results.json
+```
+Produces machine-readable JSON with:
+- Test results (pass/fail/skip) for each test
+- Execution times and performance metrics
+- Detailed error messages and stack traces
+- API response samples and debugging context
+- Summary statistics (total, passed, failed, skipped)
+
+**Log Visibility:**
+- Real-time test execution progress: `[Phase 15] Running SYS-001: Get system stats...`
+- Clear status indicators: `✓ PASSED`, `✗ FAILED`, `⊘ SKIPPED`
+- Failure details logged immediately when tests fail
+- API request/response logging for debugging
+- System metrics captured during test execution
+
+**Exit Codes:**
+- `0` - All tests passed successfully
+- `1` - One or more tests failed
+- `2` - Application not running (API or Web UI)
+- `3` - Configuration or setup error
 
 ### CI/CD Considerations
 
@@ -85,13 +128,14 @@ E2E tests will be easy to run on both Windows and Linux via simple scripts:
 - Require real hardware (audio devices, Chromecast, etc.)
 - Need actual service authorizations (Spotify, TTS API keys)
 - Require running on a physical Raspberry Pi with attached devices
-- May involve manual verification steps (e.g., "Did you hear audio?")
+- May involve manual verification steps for certain audio tests
 
-**Usage Model:**
-- Run manually during UAT sessions
-- Run on staging/production hardware before releases
-- Run locally during development to verify changes
-- Generate reports for validation/sign-off
+**Usage Models:**
+- **Manual UAT sessions** - Run interactively during development
+- **Automated UAT validation** - Run via CLI scripts before releases
+- **CLI coding agent testing** - Run non-interactively with JSON output
+- **Staging/production validation** - Run on real hardware with full configuration
+- **Local development** - Quick verification of changes
 
 ---
 

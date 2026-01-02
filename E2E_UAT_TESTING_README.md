@@ -39,10 +39,11 @@ dotnet run
 
 # Run E2E tests
 # Terminal 3:
-.\run-e2e-uat.ps1                  # Run all tests
-.\run-e2e-uat.ps1 -Phase 15        # Run specific phase only
-.\run-e2e-uat.ps1 -Interactive     # Run with interactive prompts
-.\run-e2e-uat.ps1 -NoShutdown      # Keep app running after tests
+.\run-e2e-uat.ps1                          # Run all tests (non-interactive)
+.\run-e2e-uat.ps1 -Phase 15                # Run specific phase only
+.\run-e2e-uat.ps1 -Interactive             # Run with interactive prompts
+.\run-e2e-uat.ps1 -Json -Output results.json  # JSON output for CLI agents
+.\run-e2e-uat.ps1 -NoShutdown              # Keep app running after tests
 ```
 
 ### Linux / Raspberry Pi (Bash)
@@ -59,10 +60,66 @@ dotnet run
 
 # Run E2E tests
 # Terminal 3:
-./run-e2e-uat.sh                   # Run all tests
-./run-e2e-uat.sh --phase 15        # Run specific phase only
-./run-e2e-uat.sh --interactive     # Run with interactive prompts
-./run-e2e-uat.sh --no-shutdown     # Keep app running after tests
+./run-e2e-uat.sh                           # Run all tests (non-interactive)
+./run-e2e-uat.sh --phase 15                # Run specific phase only
+./run-e2e-uat.sh --interactive             # Run with interactive prompts
+./run-e2e-uat.sh --json --output results.json  # JSON output for CLI agents
+./run-e2e-uat.sh --no-shutdown             # Keep app running after tests
+```
+
+### CLI Coding Agent Mode
+
+For automated testing by CLI coding agents:
+
+```bash
+# Run tests with JSON output for machine parsing
+./run-e2e-uat.sh --json --output e2e-results.json
+
+# Check exit code for success/failure
+if [ $? -eq 0 ]; then
+  echo "All tests passed"
+else
+  echo "Tests failed - see results.json for details"
+fi
+```
+
+**JSON Output Structure:**
+```json
+{
+  "testRun": {
+    "id": "run-2026-01-02-14-30-00",
+    "startTime": "2026-01-02T14:30:00Z",
+    "endTime": "2026-01-02T14:45:00Z",
+    "duration": "00:15:00",
+    "totalTests": 150,
+    "passed": 145,
+    "failed": 5,
+    "skipped": 0
+  },
+  "results": [
+    {
+      "testId": "PLAY-001",
+      "phase": 15,
+      "name": "Start playback from stopped state",
+      "status": "passed",
+      "duration": "0.523s",
+      "message": "Playback started successfully"
+    },
+    {
+      "testId": "PLAY-002",
+      "phase": 15,
+      "name": "Pause and resume playback",
+      "status": "failed",
+      "duration": "1.234s",
+      "message": "API returned 500",
+      "error": {
+        "type": "HttpRequestException",
+        "message": "Response status code does not indicate success: 500",
+        "stackTrace": "..."
+      }
+    }
+  ]
+}
 ```
 
 ## Test Phases
@@ -89,6 +146,8 @@ The E2E tests are organized into phases for incremental testing:
 ```powershell
 -Phase <number>       # Run tests for a specific phase (15-22)
 -Interactive          # Enable interactive mode with user prompts
+-Json                 # Output results in JSON format (for CLI agents)
+-Output <file>        # Write results to specified file (e.g., results.json)
 -NoShutdown           # Keep application running after tests complete
 ```
 
@@ -97,27 +156,53 @@ The E2E tests are organized into phases for incremental testing:
 ```bash
 --phase <number>      # Run tests for a specific phase (15-22)
 --interactive         # Enable interactive mode with user prompts
+--json                # Output results in JSON format (for CLI agents)
+--output <file>       # Write results to specified file (e.g., results.json)
 --no-shutdown         # Keep application running after tests complete
 ```
+
+### Exit Codes
+
+The scripts return specific exit codes for automation:
+
+| Code | Meaning |
+|------|---------|
+| `0` | All tests passed successfully |
+| `1` | One or more tests failed |
+| `2` | Application not running (API or Web UI unavailable) |
+| `3` | Configuration or build error |
 
 ## What the Scripts Do
 
 1. **Check Application Status**:
    - Verify API is running at `http://localhost:5000`
    - Verify Web UI is running at `http://localhost:5001`
-   - Exit with error message if either is not available
+   - Exit with code 2 if either is not available
 
 2. **Build UAT Tool**:
    - Compile the `Radio.Tools.AudioUAT` project in Release configuration
+   - Exit with code 3 if build fails
 
 3. **Execute Tests**:
    - Run tests for the specified phase (or all phases if no phase specified)
-   - Display test results in real-time
-   - Generate test reports
+   - Display test results in real-time with clear status indicators
+   - Default to non-interactive mode (no prompts)
+   - Generate test reports (console and/or JSON)
 
-4. **Shutdown (Optional)**:
+4. **Report Results**:
+   - Display summary: total tests, passed, failed, skipped
+   - Show execution time and performance metrics
+   - Write JSON output if `--json` or `--output` specified
+
+5. **Shutdown (Optional)**:
    - By default, gracefully shutdown the application via `POST /api/system/shutdown`
    - Use `-NoShutdown` or `--no-shutdown` to keep the application running
+
+6. **Return Exit Code**:
+   - `0` if all tests passed
+   - `1` if any test failed
+   - `2` if application not running
+   - `3` if build/setup error
 
 ## Configuration
 
@@ -223,11 +308,100 @@ sudo systemctl start radioconsole
 - Pre-release validation on staging hardware
 - Local development verification
 - Hardware integration testing
+- **CLI coding agent validation** - Automated testing with JSON output
 
 For automated CI/CD testing, use:
 - `run-unit-tests-hardware.sh` - Hardware-specific unit tests
 - `run-bunit-tests.sh` - Blazor component tests
 - `run-e2e-tests.sh` - Basic E2E UI tests (Playwright, no hardware)
+
+## CLI Coding Agent Support
+
+The E2E UAT tests are designed to be easily executed and analyzed by CLI coding agents:
+
+### Non-Interactive Mode (Default)
+
+By default, the tests run in non-interactive mode:
+- No user prompts or confirmations required
+- Tests execute automatically from start to finish
+- Real-time progress output to console
+- Clear status indicators for each test
+- Exit codes indicate overall success/failure
+
+```bash
+# Simple execution - no prompts
+./run-e2e-uat.sh
+```
+
+### JSON Output for Machine Parsing
+
+Use the `--json` and `--output` flags to generate structured test results:
+
+```bash
+./run-e2e-uat.sh --json --output e2e-results.json
+```
+
+**JSON Structure:**
+```json
+{
+  "testRun": {
+    "id": "run-2026-01-02-14-30-00",
+    "startTime": "2026-01-02T14:30:00Z",
+    "endTime": "2026-01-02T14:45:00Z",
+    "duration": "00:15:00",
+    "totalTests": 150,
+    "passed": 145,
+    "failed": 5,
+    "skipped": 0
+  },
+  "results": [
+    {
+      "testId": "PLAY-001",
+      "phase": 15,
+      "testName": "Start playback",
+      "status": "passed",
+      "duration": "0.523s",
+      "message": "Playback started successfully"
+    }
+  ]
+}
+```
+
+### Real-Time Console Output
+
+Even in non-interactive mode, tests provide clear real-time feedback:
+
+```
+[Phase 15] Running SYS-001: Get system stats...
+✓ PASSED (0.234s) - System stats retrieved successfully
+
+[Phase 15] Running SYS-003: Get metrics data...
+✗ FAILED (1.423s) - API returned 404 Not Found
+```
+
+### Exit Code Automation
+
+Scripts return specific exit codes for automation workflows:
+
+```bash
+./run-e2e-uat.sh --json --output results.json
+EXIT_CODE=$?
+
+if [ $EXIT_CODE -eq 0 ]; then
+  echo "✓ All tests passed"
+elif [ $EXIT_CODE -eq 1 ]; then
+  echo "✗ Tests failed - see results.json"
+  jq -r '.results[] | select(.status=="failed")' results.json
+fi
+```
+
+### Best Practices for CLI Agents
+
+1. **Always use `--json --output`** for structured results parsing
+2. **Check exit codes** before parsing results (exit 2/3 means no results)
+3. **Parse failures first** to identify critical issues
+4. **Analyze performance trends** by comparing execution times across runs
+5. **Monitor API endpoint health** by tracking failure rates
 
 ## Additional Resources
 
