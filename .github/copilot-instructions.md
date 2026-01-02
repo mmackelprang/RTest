@@ -1,5 +1,5 @@
 # PROJECT CONTEXT: Radio Console (Grandpa's Old Console)
-# MORE CONTEXT: read `/PROJECTPLAN.md`
+# MORE CONTEXT: read `/archive/PROJECTPLAN.md`
 **Target Hardware:** 
   - Raspberry Pi 5 (Linux/Raspbian)
   - Development/Testing done on Windows

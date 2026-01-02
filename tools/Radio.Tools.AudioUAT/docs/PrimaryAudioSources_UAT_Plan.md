@@ -1169,7 +1169,7 @@ Example:
 
 - `/tools/AUDIO_UAT.md` - Overall Audio UAT Tool documentation
 - `/design/AUDIO.md` - Audio architecture and design specifications
-- `/PROJECTPLAN.md` - Project context and overview
+- `/archive/PROJECTPLAN.md` - Project context and overview
 - Radio.Tools.AudioUAT implementation in `tools/Radio.Tools.AudioUAT/`
 
 ---

@@ -591,7 +591,7 @@ dotnet run --project src/Radio.Web
 
 ## Design Documents
 
-- [Project Plan](PROJECTPLAN.md) - High-level project overview
+- [Project Plan](archive/PROJECTPLAN.md) - High-level project overview
 - [Development Plan](PLAN.md) - Detailed development phases
 - [Audio Architecture](design/AUDIO.md) - Audio system design
 - [Configuration](design/CONFIGURATION.md) - Configuration infrastructure
