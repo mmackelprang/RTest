@@ -535,5 +535,40 @@ public class CastDeviceOptionsDto
   public string DefaultDevice { get; set; } = "";
 }
 
-// TODO: Phase 2 - Preferences DTOs will be added when implementing Preferences Management UI
+// Preferences DTOs (Phase 2)
+public class AudioPreferencesDto
+{
+  public string CurrentSource { get; set; } = "Spotify";
+  public string CurrentOutput { get; set; } = "";
+  public int MasterVolume { get; set; } = 75;
+}
+
+public class SpotifyPreferencesDto
+{
+  public string LastSongPlayed { get; set; } = "";
+  public long SongPositionMs { get; set; } = 0;
+  public bool Shuffle { get; set; } = false;
+  public string Repeat { get; set; } = "Off";
+}
+
+public class FilePlayerPreferencesDto
+{
+  public string LastSongPlayed { get; set; } = "";
+  public long SongPositionMs { get; set; } = 0;
+  public bool Shuffle { get; set; } = false;
+  public string Repeat { get; set; } = "Off";
+}
+
+public class RadioPreferencesDto
+{
+  public float LastFrequency { get; set; } = 101.1f;
+  public string LastBand { get; set; } = "FM";
+  public string LastEQMode { get; set; } = "";
+}
+
+public class GenericSourcePreferencesDto
+{
+  public string USBPort { get; set; } = "";
+}
+
 // TODO: Phase 3 - Secrets DTOs will be added when implementing Secrets Management UI

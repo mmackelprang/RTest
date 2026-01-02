@@ -253,3 +253,110 @@ public class CastDeviceOptionsDto
   /// </summary>
   public string DefaultDevice { get; set; } = "";
 }
+
+// ==================== Preferences DTOs (Phase 2) ====================
+
+/// <summary>
+/// User preferences for audio playback.
+/// </summary>
+public class AudioPreferencesDto
+{
+  /// <summary>
+  /// Gets or sets the currently selected audio source.
+  /// </summary>
+  public string CurrentSource { get; set; } = "Spotify";
+
+  /// <summary>
+  /// Gets or sets the currently selected audio output device ID.
+  /// </summary>
+  public string CurrentOutput { get; set; } = "";
+
+  /// <summary>
+  /// Gets or sets the master volume level (0-100).
+  /// </summary>
+  public int MasterVolume { get; set; } = 75;
+}
+
+/// <summary>
+/// User preferences for Spotify playback.
+/// </summary>
+public class SpotifyPreferencesDto
+{
+  /// <summary>
+  /// Gets or sets the URI of the last song played.
+  /// </summary>
+  public string LastSongPlayed { get; set; } = "";
+
+  /// <summary>
+  /// Gets or sets the last song position in milliseconds.
+  /// </summary>
+  public long SongPositionMs { get; set; } = 0;
+
+  /// <summary>
+  /// Gets or sets whether shuffle mode is enabled.
+  /// </summary>
+  public bool Shuffle { get; set; } = false;
+
+  /// <summary>
+  /// Gets or sets the repeat mode (Off, One, All).
+  /// </summary>
+  public string Repeat { get; set; } = "Off";
+}
+
+/// <summary>
+/// User preferences for the file player.
+/// </summary>
+public class FilePlayerPreferencesDto
+{
+  /// <summary>
+  /// Gets or sets the path of the last song played.
+  /// </summary>
+  public string LastSongPlayed { get; set; } = "";
+
+  /// <summary>
+  /// Gets or sets the last song position in milliseconds.
+  /// </summary>
+  public long SongPositionMs { get; set; } = 0;
+
+  /// <summary>
+  /// Gets or sets whether shuffle mode is enabled.
+  /// </summary>
+  public bool Shuffle { get; set; } = false;
+
+  /// <summary>
+  /// Gets or sets the repeat mode (Off, One, All).
+  /// </summary>
+  public string Repeat { get; set; } = "Off";
+}
+
+/// <summary>
+/// User preferences for the radio tuner.
+/// </summary>
+public class RadioPreferencesDto
+{
+  /// <summary>
+  /// Gets or sets the last tuned frequency.
+  /// </summary>
+  public float LastFrequency { get; set; } = 101.1f;
+
+  /// <summary>
+  /// Gets or sets the last band (AM, FM, WB, VHF, SW).
+  /// </summary>
+  public string LastBand { get; set; } = "FM";
+
+  /// <summary>
+  /// Gets or sets the last EQ mode.
+  /// </summary>
+  public string LastEQMode { get; set; } = "";
+}
+
+/// <summary>
+/// User preferences for the generic USB source.
+/// </summary>
+public class GenericSourcePreferencesDto
+{
+  /// <summary>
+  /// Gets or sets the USB port for the generic source.
+  /// </summary>
+  public string USBPort { get; set; } = "";
+}
