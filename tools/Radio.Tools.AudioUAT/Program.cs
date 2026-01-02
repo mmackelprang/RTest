@@ -120,6 +120,9 @@ var host = Host.CreateDefaultBuilder(args)
     services.AddSingleton<AudioPlaybackApiTests>();
     services.AddSingleton<QueueManagementApiTests>();
     services.AddSingleton<SourceManagementApiTests>();
+    services.AddSingleton<DeviceManagementApiTests>();
+    services.AddSingleton<ConfigurationManagementApiTests>();
+    services.AddSingleton<SystemManagementApiTests>();
   })
   .Build();
 
@@ -174,6 +177,9 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
   var phase15AudioTests = services.GetRequiredService<AudioPlaybackApiTests>();
   var phase15QueueTests = services.GetRequiredService<QueueManagementApiTests>();
   var phase15SourceTests = services.GetRequiredService<SourceManagementApiTests>();
+  var phase15DeviceTests = services.GetRequiredService<DeviceManagementApiTests>();
+  var phase15ConfigTests = services.GetRequiredService<ConfigurationManagementApiTests>();
+  var phase15SystemTests = services.GetRequiredService<SystemManagementApiTests>();
 
   var testsToRun = new List<IPhaseTest>();
 
@@ -237,6 +243,9 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
       testsToRun.AddRange(phase15AudioTests.GetAllTests());
       testsToRun.AddRange(phase15QueueTests.GetAllTests());
       testsToRun.AddRange(phase15SourceTests.GetAllTests());
+      testsToRun.AddRange(phase15DeviceTests.GetAllTests());
+      testsToRun.AddRange(phase15ConfigTests.GetAllTests());
+      testsToRun.AddRange(phase15SystemTests.GetAllTests());
     }
   }
   else if (args.Contains("--test"))
@@ -260,6 +269,9 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
         .Concat(phase15AudioTests.GetAllTests())
         .Concat(phase15QueueTests.GetAllTests())
         .Concat(phase15SourceTests.GetAllTests())
+        .Concat(phase15DeviceTests.GetAllTests())
+        .Concat(phase15ConfigTests.GetAllTests())
+        .Concat(phase15SystemTests.GetAllTests())
         .ToList();
       var test = allTests.FirstOrDefault(t => t.TestId == testId);
       if (test != null)

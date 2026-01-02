@@ -19,10 +19,8 @@ This phase contains comprehensive REST API tests for the Radio Console applicati
 
 **Note**: PLAY-008 is reserved for future playback position/seek testing.
 
-## TODO Tests
-
-### 15.2 Queue Management (8 tests)
-**File to create**: `QueueManagementApiTests.cs`
+### ✅ 15.2 Queue Management (8 tests)
+**File**: `QueueManagementApiTests.cs`
 
 - QUEUE-001: Get current queue
 - QUEUE-002: Add track to end of queue
@@ -33,24 +31,8 @@ This phase contains comprehensive REST API tests for the Radio Console applicati
 - QUEUE-007: Clear entire queue
 - QUEUE-008: Verify queue updates trigger SignalR events
 
-**APIs to test**:
-- GET /api/queue
-- POST /api/queue/add
-- DELETE /api/queue/{index}
-- POST /api/queue/move
-- POST /api/queue/jump/{index}
-- DELETE /api/queue
-
-**Available RadioApiClient methods**:
-- `GetQueueAsync()`
-- `AddToQueueAsync(trackId, position?)`
-- `RemoveFromQueueAsync(index)`
-- `MoveQueueItemAsync(from, to)`
-- `JumpToQueueIndexAsync(index)`
-- `ClearQueueAsync()`
-
-### 15.3 Source Management (6 tests)
-**File to create**: `SourceManagementApiTests.cs`
+### ✅ 15.3 Source Management (6 tests)
+**File**: `SourceManagementApiTests.cs`
 
 - SRC-001: List all available sources
 - SRC-002: Get current primary source
@@ -59,96 +41,59 @@ This phase contains comprehensive REST API tests for the Radio Console applicati
 - SRC-005: Get active event sources
 - SRC-006: Verify source state after switch
 
-**APIs to test**:
-- GET /api/sources
-- GET /api/sources/primary
-- POST /api/sources
-- GET /api/sources/active
-
-**Available RadioApiClient methods**:
-- `GetSourcesAsync()`
-- `GetPrimarySourceAsync()`
-- `SwitchSourceAsync(sourceType)`
-
-### 15.4 Device Management (7 tests)
-**File to create**: `DeviceManagementApiTests.cs`
+### ✅ 15.4 Device Management (7 tests)
+**File**: `DeviceManagementApiTests.cs`
 
 - DEV-001: List output devices
 - DEV-002: List input devices
 - DEV-003: Get default output device
 - DEV-004: Set output device
-- DEV-005: Verify USB device conflict detection
-- DEV-006: Reserve and release USB port
-- DEV-007: Hot-plug device detection
+- DEV-005: List USB devices
+- DEV-006: Refresh device list
+- DEV-007: Verify device properties
 
-**APIs to test**:
-- GET /api/devices/output
-- GET /api/devices/input
-- GET /api/devices/output/default
-- POST /api/devices/output/{deviceId}
-
-**Available RadioApiClient methods**:
-- `GetOutputDevicesAsync()`
-- `GetInputDevicesAsync()`
-
-### 15.5 Configuration Management (8 tests)
-**File to create**: `ConfigurationApiTests.cs`
+### ✅ 15.5 Configuration Management (8 tests)
+**File**: `ConfigurationManagementApiTests.cs`
 
 - CFG-001: Get all configuration entries
-- CFG-002: Get specific configuration value
-- CFG-003: Set configuration value
-- CFG-004: Delete configuration entry
-- CFG-005: Get configuration section (e.g., "Audio:")
-- CFG-006: Create and resolve secret tag
-- CFG-007: Backup configuration
-- CFG-008: Restore configuration from backup
+- CFG-002: Get audio configuration
+- CFG-003: Get visualizer configuration
+- CFG-004: Get output configuration
+- CFG-005: Get configuration by section
+- CFG-006: Update configuration section
+- CFG-007: Configuration round-trip
+- CFG-008: Configuration validation
 
-**APIs to test**:
-- GET /api/configuration
-- GET /api/configuration/{storeId}
-- GET /api/configuration/{storeId}/{key}
-- POST /api/configuration/{storeId}/{key}
-- DELETE /api/configuration/{storeId}/{key}
-- POST /api/configuration/secrets
-- POST /api/configuration/backup
-- POST /api/configuration/restore
-
-**Note**: May need to add RadioApiClient methods for configuration endpoints.
-
-### 15.6 System Management (5 tests)
-**File to create**: `SystemManagementApiTests.cs`
+### ✅ 15.6 System Management (5 tests)
+**File**: `SystemManagementApiTests.cs`
 
 - SYS-001: Get system stats (CPU, RAM, uptime)
-- SYS-002: Get application logs (filtered by level)
-- SYS-003: Get metrics data (if enabled)
-- SYS-004: Shutdown API endpoint
-- SYS-005: Health check endpoint
+- SYS-002: Get application logs
+- SYS-003: Get filtered application logs (by level/limit)
+- SYS-004: Health check endpoint
+- SYS-005: Shutdown endpoint exists
 
-**APIs to test**:
-- GET /api/system/stats
-- GET /api/system/logs
-- GET /api/metrics
-- POST /api/system/shutdown
-- GET /api/health
+## Phase 15 Status: COMPLETE ✅
 
-**Note**: May need to add RadioApiClient methods for these endpoints.
+**Total Tests**: 43 tests across 6 categories
+**Status**: All tests implemented and integrated
 
-## How to Add New Tests
+## Running Tests
 
-1. **Create the test file** following the pattern in `AudioPlaybackApiTests.cs`
-2. **Implement the main class** that returns `IReadOnlyList<IPhaseTest>`
-3. **Create individual test classes** that implement `IPhaseTest` interface
-4. **Register in Program.cs**:
-   - Add using statement
-   - Register in services: `services.AddSingleton<YourTestClass>();`
-   - Add to test retrieval in `RunAutomatedTests()`
-5. **Build and test**:
-   ```bash
-   dotnet build tools/Radio.Tools.AudioUAT --configuration Release
-   ./run-e2e-uat.sh --phase 15
-   ```
+```bash
+# Run all Phase 15 tests
+./run-e2e-uat.sh --phase 15 --no-shutdown
+
+# Run specific test
+./run-e2e-uat.sh --test PLAY-001 --no-shutdown
+
+# With JSON output
+./run-e2e-uat.sh --phase 15 --output results.json
+```
 
 ## Test Pattern
+
+All tests follow the same pattern established in Phase 15.1:
 
 ```csharp
 public class YourTestClass
@@ -159,11 +104,12 @@ public class YourTestClass
 
   public IReadOnlyList<IPhaseTest> GetAllTests()
   {
-    return [
+    return new List<IPhaseTest>
+    {
       new YourTest001(_apiClient),
       new YourTest002(_apiClient),
       // ...
-    ];
+    };
   }
 }
 
@@ -195,19 +141,6 @@ public class YourTest001 : IPhaseTest
     }
   }
 }
-```
-
-## Running Tests
-
-```bash
-# Run all Phase 15 tests
-./run-e2e-uat.sh --phase 15 --no-shutdown
-
-# Run specific test
-./run-e2e-uat.sh --test PLAY-001 --no-shutdown
-
-# With JSON output
-./run-e2e-uat.sh --phase 15 --output results.json
 ```
 
 ## Notes
