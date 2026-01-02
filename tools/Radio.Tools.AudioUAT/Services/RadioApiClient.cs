@@ -297,6 +297,49 @@ public class RadioApiClient : IDisposable
     return await response.Content.ReadFromJsonAsync<List<AudioDeviceResponse>>(_jsonOptions, ct);
   }
 
+  /// <summary>
+  /// Gets the default output device.
+  /// </summary>
+  public async Task<AudioDeviceResponse?> GetDefaultOutputDeviceAsync(CancellationToken ct = default)
+  {
+    var response = await _httpClient.GetAsync("/api/devices/output/default", ct);
+    if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+      return null;
+    response.EnsureSuccessStatusCode();
+    return await response.Content.ReadFromJsonAsync<AudioDeviceResponse>(_jsonOptions, ct);
+  }
+
+  /// <summary>
+  /// Sets the output device.
+  /// </summary>
+  public async Task<bool> SetOutputDeviceAsync(string deviceId, CancellationToken ct = default)
+  {
+    var request = new { DeviceId = deviceId };
+    var response = await _httpClient.PostAsJsonAsync("/api/devices/output", request, _jsonOptions, ct);
+    response.EnsureSuccessStatusCode();
+    return response.IsSuccessStatusCode;
+  }
+
+  /// <summary>
+  /// Gets USB devices.
+  /// </summary>
+  public async Task<List<AudioDeviceResponse>?> GetUsbDevicesAsync(CancellationToken ct = default)
+  {
+    var response = await _httpClient.GetAsync("/api/devices/usb", ct);
+    response.EnsureSuccessStatusCode();
+    return await response.Content.ReadFromJsonAsync<List<AudioDeviceResponse>>(_jsonOptions, ct);
+  }
+
+  /// <summary>
+  /// Refreshes the device list.
+  /// </summary>
+  public async Task<bool> RefreshDevicesAsync(CancellationToken ct = default)
+  {
+    var response = await _httpClient.PostAsync("/api/devices/refresh", null, ct);
+    response.EnsureSuccessStatusCode();
+    return response.IsSuccessStatusCode;
+  }
+
   #endregion
 
   #region Balance API
@@ -491,6 +534,91 @@ public class RadioApiClient : IDisposable
     var response = await _httpClient.GetAsync(url, ct);
     response.EnsureSuccessStatusCode();
     return await response.Content.ReadFromJsonAsync<FileBrowserResponse>(_jsonOptions, ct);
+  }
+
+  #endregion
+
+  #region System API
+
+  /// <summary>
+  /// Gets system statistics (CPU, RAM, etc.).
+  /// </summary>
+  public async Task<SystemStatsResponse?> GetSystemStatsAsync(CancellationToken ct = default)
+  {
+    var response = await _httpClient.GetAsync("/api/system/stats", ct);
+    response.EnsureSuccessStatusCode();
+    return await response.Content.ReadFromJsonAsync<SystemStatsResponse>(_jsonOptions, ct);
+  }
+
+  /// <summary>
+  /// Gets system logs.
+  /// </summary>
+  public async Task<SystemLogsResponse?> GetSystemLogsAsync(string? level = null, int? limit = null, CancellationToken ct = default)
+  {
+    var query = new List<string>();
+    if (!string.IsNullOrEmpty(level))
+      query.Add($"level={level}");
+    if (limit.HasValue)
+      query.Add($"limit={limit.Value}");
+
+    var url = "/api/system/logs";
+    if (query.Count > 0)
+      url += "?" + string.Join("&", query);
+
+    var response = await _httpClient.GetAsync(url, ct);
+    response.EnsureSuccessStatusCode();
+    return await response.Content.ReadFromJsonAsync<SystemLogsResponse>(_jsonOptions, ct);
+  }
+
+  /// <summary>
+  /// Initiates a graceful shutdown of the application.
+  /// </summary>
+  public async Task<bool> ShutdownAsync(CancellationToken ct = default)
+  {
+    try
+    {
+      var response = await _httpClient.PostAsync("/api/system/shutdown", null, ct);
+      response.EnsureSuccessStatusCode();
+      return true;
+    }
+    catch
+    {
+      return false;
+    }
+  }
+
+  #endregion
+
+  #region Configuration API
+
+  /// <summary>
+  /// Gets all configuration entries.
+  /// </summary>
+  public async Task<ConfigurationResponse?> GetAllConfigurationAsync(CancellationToken ct = default)
+  {
+    var response = await _httpClient.GetAsync("/api/configuration", ct);
+    response.EnsureSuccessStatusCode();
+    return await response.Content.ReadFromJsonAsync<ConfigurationResponse>(_jsonOptions, ct);
+  }
+
+  /// <summary>
+  /// Gets configuration for a specific section.
+  /// </summary>
+  public async Task<ConfigurationSectionResponse?> GetConfigurationSectionAsync(string section, CancellationToken ct = default)
+  {
+    var response = await _httpClient.GetAsync($"/api/configuration/{section}", ct);
+    response.EnsureSuccessStatusCode();
+    return await response.Content.ReadFromJsonAsync<ConfigurationSectionResponse>(_jsonOptions, ct);
+  }
+
+  /// <summary>
+  /// Updates configuration for a section.
+  /// </summary>
+  public async Task<bool> UpdateConfigurationSectionAsync(string section, Dictionary<string, object> settings, CancellationToken ct = default)
+  {
+    var response = await _httpClient.PostAsJsonAsync($"/api/configuration/{section}", settings, _jsonOptions, ct);
+    response.EnsureSuccessStatusCode();
+    return response.IsSuccessStatusCode;
   }
 
   #endregion
@@ -738,6 +866,41 @@ public class UpdatePlaybackRequest
   public float? Balance { get; set; }
   public bool? IsMuted { get; set; }
   public TimeSpan? SeekPosition { get; set; }
+}
+
+public class SystemStatsResponse
+{
+  public double CpuUsagePercent { get; set; }
+  public long MemoryUsedBytes { get; set; }
+  public long MemoryTotalBytes { get; set; }
+  public int ThreadCount { get; set; }
+  public TimeSpan Uptime { get; set; }
+  public double? CpuTemperature { get; set; }
+}
+
+public class SystemLogsResponse
+{
+  public List<LogEntry> Logs { get; set; } = new();
+  public int TotalCount { get; set; }
+}
+
+public class LogEntry
+{
+  public DateTime Timestamp { get; set; }
+  public string Level { get; set; } = "";
+  public string Message { get; set; } = "";
+  public string? Source { get; set; }
+}
+
+public class ConfigurationResponse
+{
+  public Dictionary<string, object> Configuration { get; set; } = new();
+}
+
+public class ConfigurationSectionResponse
+{
+  public string Section { get; set; } = "";
+  public Dictionary<string, object> Settings { get; set; } = new();
 }
 
 #endregion
