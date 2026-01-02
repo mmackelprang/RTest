@@ -413,3 +413,105 @@ public class AcoustIdSecretDto
   /// </summary>
   public string ApiKey { get; set; } = "";
 }
+
+// ========== Phase 5: Configuration Store Management DTOs ==========
+
+/// <summary>
+/// Configuration store metadata information.
+/// </summary>
+public class ConfigurationStoreInfoDto
+{
+  /// <summary>
+  /// Gets or sets the store type (JSON or SQLite).
+  /// </summary>
+  public string StoreType { get; set; } = "";
+
+  /// <summary>
+  /// Gets or sets the full file path to the store.
+  /// </summary>
+  public string Location { get; set; } = "";
+
+  /// <summary>
+  /// Gets or sets the size of the store in bytes.
+  /// </summary>
+  public long SizeBytes { get; set; }
+
+  /// <summary>
+  /// Gets or sets the last modified timestamp.
+  /// </summary>
+  public DateTime? LastModified { get; set; }
+
+  /// <summary>
+  /// Gets or sets the number of configuration entries in the store.
+  /// </summary>
+  public int EntryCount { get; set; }
+}
+
+/// <summary>
+/// Comparison result between JSON and SQLite configuration stores.
+/// </summary>
+public class ConfigurationComparisonDto
+{
+  /// <summary>
+  /// Gets or sets the number of entries in the JSON store.
+  /// </summary>
+  public int JsonEntryCount { get; set; }
+
+  /// <summary>
+  /// Gets or sets the number of entries in the SQLite store.
+  /// </summary>
+  public int SqliteEntryCount { get; set; }
+
+  /// <summary>
+  /// Gets or sets the list of differences between stores.
+  /// </summary>
+  public List<ConfigurationDifferenceDto> Differences { get; set; } = new();
+}
+
+/// <summary>
+/// A single configuration difference between stores.
+/// </summary>
+public class ConfigurationDifferenceDto
+{
+  /// <summary>
+  /// Gets or sets the configuration key.
+  /// </summary>
+  public string Key { get; set; } = "";
+
+  /// <summary>
+  /// Gets or sets the value in the JSON store (null if not present).
+  /// </summary>
+  public string? JsonValue { get; set; }
+
+  /// <summary>
+  /// Gets or sets the value in the SQLite store (null if not present).
+  /// </summary>
+  public string? SqliteValue { get; set; }
+
+  /// <summary>
+  /// Gets or sets the difference status.
+  /// Values: OnlyInJson, OnlyInSqlite, Different, Same
+  /// </summary>
+  public string Status { get; set; } = "";
+}
+
+/// <summary>
+/// Request to reconcile configuration between stores.
+/// </summary>
+public class ReconcileConfigurationRequestDto
+{
+  /// <summary>
+  /// Gets or sets the source store (json or sqlite).
+  /// </summary>
+  public string SourceStore { get; set; } = "";
+
+  /// <summary>
+  /// Gets or sets the target store (json or sqlite).
+  /// </summary>
+  public string TargetStore { get; set; } = "";
+
+  /// <summary>
+  /// Gets or sets the list of configuration keys to copy.
+  /// </summary>
+  public List<string> Keys { get; set; } = new();
+}
