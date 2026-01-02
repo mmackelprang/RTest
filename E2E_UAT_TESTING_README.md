@@ -8,6 +8,24 @@ The E2E UAT tests are designed to validate the full Radio Console application (A
 
 **Important**: These tests are NOT part of the CI/CD pipeline. They must be run manually on real hardware (e.g., Raspberry Pi 5) with actual devices and service authorizations (Spotify, TTS APIs, Chromecast, etc.).
 
+## Quick Links
+
+- **[CLI Assistant Guide](./CLI_ASSISTANT_E2E_GUIDE.md)** - Comprehensive guide for CLI coding assistants on using E2E tests to find and fix bugs
+- **[E2E Testing Plan](./E2E_TESTING.md)** - Complete testing strategy and phase breakdown
+- **[Implementation Summary](./E2E_IMPLEMENTATION_SUMMARY.md)** - Current progress and technical details
+
+## Current Status
+
+**Phase 15 Complete**: 43 API tests ready for use ✅
+
+The E2E test suite can now help identify bugs in:
+- Audio playback control (9 tests)
+- Queue management (8 tests)
+- Source switching (6 tests)
+- Device management (7 tests)
+- Configuration CRUD (8 tests)
+- System monitoring (5 tests)
+
 ## Test Plan
 
 For comprehensive details on the E2E UAT testing strategy, see [`/E2E_TESTING.md`](./E2E_TESTING.md).
