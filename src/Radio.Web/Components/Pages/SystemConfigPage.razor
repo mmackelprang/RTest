@@ -1,5 +1,6 @@
 @page "/system"
 @rendermode InteractiveServer
+@using Radio.Web.Models
 @inject SystemApiService SystemApi
 @inject ConfigurationApiService ConfigApi
 @inject SourcesApiService SourcesApi
@@ -285,6 +286,50 @@
             <MudText Class="ml-2">Loading output configuration...</MudText>
           }
         </MudTabPanel>
+
+        <!-- Devices Configuration -->
+        <MudTabPanel Text="Devices">
+          @if (_deviceOptions != null)
+          {
+            <MudGrid Spacing="2">
+              <MudItem xs="12">
+                <MudAlert Severity="Severity.Info" Dense="true">
+                  Configure USB port paths for hardware devices. Linux/Pi uses /dev/ttyUSB*, Windows uses COM ports.
+                </MudAlert>
+              </MudItem>
+              <MudItem xs="12" md="6">
+                <MudTextField T="string" @bind-Value="_deviceOptions.Radio.USBPort" 
+                              Label="Radio USB Port"
+                              Variant="Variant.Outlined"
+                              HelperText="USB port for Raddy RF320 radio (e.g., /dev/ttyUSB0 on Linux, COM3 on Windows)" />
+              </MudItem>
+              <MudItem xs="12" md="6">
+                <MudTextField T="string" @bind-Value="_deviceOptions.Vinyl.USBPort" 
+                              Label="Vinyl USB Port"
+                              Variant="Variant.Outlined"
+                              HelperText="USB port for vinyl turntable (e.g., /dev/ttyUSB1 on Linux, COM4 on Windows)" />
+              </MudItem>
+              <MudItem xs="12" md="6">
+                <MudTextField T="string" @bind-Value="_deviceOptions.Cast.DefaultDevice" 
+                              Label="Default Cast Device"
+                              Variant="Variant.Outlined"
+                              HelperText="Default Chromecast device name (optional)" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveDeviceOptionsAsync"
+                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save Device Settings
+                </MudButton>
+              </MudItem>
+            </MudGrid>
+          }
+          else
+          {
+            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+            <MudText Class="ml-2">Loading device configuration...</MudText>
+          }
+        </MudTabPanel>
       </MudTabs>
     </MudTabPanel>
 
@@ -531,6 +576,224 @@
       </MudGrid>
     </MudTabPanel>
 
+    <!-- Tab 5: Preferences -->
+    <MudTabPanel Text="Preferences" Icon="@Icons.Material.Filled.Settings">
+      <MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-2">
+        
+        <!-- Audio Preferences -->
+        <MudTabPanel Text="Audio">
+          @if (_audioPreferences != null)
+          {
+            <MudGrid Spacing="2">
+              <MudItem xs="12">
+                <MudAlert Severity="Severity.Info" Dense="true">
+                  Audio preferences control the default audio source and master volume settings.
+                </MudAlert>
+              </MudItem>
+              <MudItem xs="12" md="6">
+                <MudSelect T="string" @bind-Value="_audioPreferences.CurrentSource" Label="Current Source"
+                           Variant="Variant.Outlined" HelperText="Currently active audio source">
+                  <MudSelectItem Value="@("Spotify")">Spotify</MudSelectItem>
+                  <MudSelectItem Value="@("Radio")">Radio</MudSelectItem>
+                  <MudSelectItem Value="@("FilePlayer")">File Player</MudSelectItem>
+                  <MudSelectItem Value="@("Vinyl")">Vinyl</MudSelectItem>
+                </MudSelect>
+              </MudItem>
+              <MudItem xs="12" md="6">
+                <MudNumericField T="int" @bind-Value="_audioPreferences.MasterVolume" Label="Master Volume"
+                                 Variant="Variant.Outlined" Min="0" Max="100"
+                                 HelperText="Master volume level (0-100)" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAudioPreferencesAsync"
+                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save Audio Preferences
+                </MudButton>
+              </MudItem>
+            </MudGrid>
+          }
+          else
+          {
+            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+            <MudText Class="ml-2">Loading audio preferences...</MudText>
+          }
+        </MudTabPanel>
+
+        <!-- Spotify Preferences -->
+        <MudTabPanel Text="Spotify">
+          @if (_spotifyPreferences != null)
+          {
+            <MudGrid Spacing="2">
+              <MudItem xs="12">
+                <MudAlert Severity="Severity.Info" Dense="true">
+                  Spotify preferences store the last played track and playback state.
+                </MudAlert>
+              </MudItem>
+              <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_spotifyPreferences.LastSongPlayed" Label="Last Song Played (URI)"
+                              Variant="Variant.Outlined" ReadOnly="true"
+                              HelperText="Spotify URI of last played track (read-only)" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudNumericField T="long" @bind-Value="_spotifyPreferences.SongPositionMs" Label="Position (ms)"
+                                 Variant="Variant.Outlined" Min="0"
+                                 HelperText="Last playback position in milliseconds" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudCheckBox T="bool" @bind-Value="_spotifyPreferences.Shuffle" Label="Shuffle" Color="Color.Primary" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudSelect T="string" @bind-Value="_spotifyPreferences.Repeat" Label="Repeat Mode"
+                           Variant="Variant.Outlined">
+                  <MudSelectItem Value="@("Off")">Off</MudSelectItem>
+                  <MudSelectItem Value="@("One")">One</MudSelectItem>
+                  <MudSelectItem Value="@("All")">All</MudSelectItem>
+                </MudSelect>
+              </MudItem>
+              <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveSpotifyPreferencesAsync"
+                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save Spotify Preferences
+                </MudButton>
+              </MudItem>
+            </MudGrid>
+          }
+          else
+          {
+            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+            <MudText Class="ml-2">Loading Spotify preferences...</MudText>
+          }
+        </MudTabPanel>
+
+        <!-- File Player Preferences -->
+        <MudTabPanel Text="File Player">
+          @if (_filePlayerPreferences != null)
+          {
+            <MudGrid Spacing="2">
+              <MudItem xs="12">
+                <MudAlert Severity="Severity.Info" Dense="true">
+                  File Player preferences store the last played file and playback state.
+                </MudAlert>
+              </MudItem>
+              <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_filePlayerPreferences.LastSongPlayed" Label="Last Song Played (Path)"
+                              Variant="Variant.Outlined"
+                              HelperText="File path of last played track" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudNumericField T="long" @bind-Value="_filePlayerPreferences.SongPositionMs" Label="Position (ms)"
+                                 Variant="Variant.Outlined" Min="0"
+                                 HelperText="Last playback position in milliseconds" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudCheckBox T="bool" @bind-Value="_filePlayerPreferences.Shuffle" Label="Shuffle" Color="Color.Primary" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudSelect T="string" @bind-Value="_filePlayerPreferences.Repeat" Label="Repeat Mode"
+                           Variant="Variant.Outlined">
+                  <MudSelectItem Value="@("Off")">Off</MudSelectItem>
+                  <MudSelectItem Value="@("One")">One</MudSelectItem>
+                  <MudSelectItem Value="@("All")">All</MudSelectItem>
+                </MudSelect>
+              </MudItem>
+              <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveFilePlayerPreferencesAsync"
+                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save File Player Preferences
+                </MudButton>
+              </MudItem>
+            </MudGrid>
+          }
+          else
+          {
+            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+            <MudText Class="ml-2">Loading File Player preferences...</MudText>
+          }
+        </MudTabPanel>
+
+        <!-- Radio Preferences -->
+        <MudTabPanel Text="Radio">
+          @if (_radioPreferences != null)
+          {
+            <MudGrid Spacing="2">
+              <MudItem xs="12">
+                <MudAlert Severity="Severity.Info" Dense="true">
+                  Radio preferences store the last tuned frequency and band.
+                </MudAlert>
+              </MudItem>
+              <MudItem xs="12" md="6">
+                <MudNumericField T="float" @bind-Value="_radioPreferences.LastFrequency" Label="Last Frequency (MHz)"
+                                 Variant="Variant.Outlined" Min="0"
+                                 HelperText="Last tuned frequency" />
+              </MudItem>
+              <MudItem xs="12" md="6">
+                <MudSelect T="string" @bind-Value="_radioPreferences.LastBand" Label="Last Band"
+                           Variant="Variant.Outlined">
+                  <MudSelectItem Value="@("AM")">AM</MudSelectItem>
+                  <MudSelectItem Value="@("FM")">FM</MudSelectItem>
+                  <MudSelectItem Value="@("WB")">WB (Weather Band)</MudSelectItem>
+                  <MudSelectItem Value="@("VHF")">VHF</MudSelectItem>
+                  <MudSelectItem Value="@("SW")">SW (Shortwave)</MudSelectItem>
+                </MudSelect>
+              </MudItem>
+              <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_radioPreferences.LastEQMode" Label="Last EQ Mode"
+                              Variant="Variant.Outlined"
+                              HelperText="Last equalizer mode (optional)" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveRadioPreferencesAsync"
+                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save Radio Preferences
+                </MudButton>
+              </MudItem>
+            </MudGrid>
+          }
+          else
+          {
+            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+            <MudText Class="ml-2">Loading Radio preferences...</MudText>
+          }
+        </MudTabPanel>
+
+        <!-- Generic Source Preferences -->
+        <MudTabPanel Text="Generic Source">
+          @if (_genericSourcePreferences != null)
+          {
+            <MudGrid Spacing="2">
+              <MudItem xs="12">
+                <MudAlert Severity="Severity.Info" Dense="true">
+                  Generic Source preferences for USB-based audio sources.
+                </MudAlert>
+              </MudItem>
+              <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_genericSourcePreferences.USBPort" Label="USB Port"
+                              Variant="Variant.Outlined"
+                              HelperText="USB port for generic source (e.g., /dev/ttyUSB2)" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveGenericSourcePreferencesAsync"
+                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save Generic Source Preferences
+                </MudButton>
+              </MudItem>
+            </MudGrid>
+          }
+          else
+          {
+            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+            <MudText Class="ml-2">Loading Generic Source preferences...</MudText>
+          }
+        </MudTabPanel>
+
+      </MudTabs>
+    </MudTabPanel>
+
   </MudTabs>
 </MudContainer>
 
@@ -552,7 +815,15 @@
   private AudioConfigurationDto? _audioConfig;
   private VisualizerConfigurationDto? _visualizerConfig;
   private OutputConfigurationDto? _outputConfig;
+  private DeviceOptionsDto? _deviceOptions;
   private bool _isSaving = false;
+
+  // Preferences
+  private AudioPreferencesDto? _audioPreferences;
+  private SpotifyPreferencesDto? _spotifyPreferences;
+  private FilePlayerPreferencesDto? _filePlayerPreferences;
+  private RadioPreferencesDto? _radioPreferences;
+  private GenericSourcePreferencesDto? _genericSourcePreferences;
 
   // Output configuration individual fields (for binding)
   private bool _localOutputEnabled;
@@ -595,6 +866,7 @@
     // Load initial data
     await LoadSystemStatsAsync();
     await LoadConfigurationAsync();
+    await LoadPreferencesAsync();
     await LoadLogsAsync();
     await LoadEventSourcesAsync();
     await LoadTTSEnginesAsync();
@@ -671,6 +943,10 @@
       _audioConfig = await ConfigApi.GetConfigurationAsync<AudioConfigurationDto>("audio");
       _visualizerConfig = await ConfigApi.GetConfigurationAsync<VisualizerConfigurationDto>("visualizer");
       _outputConfig = await ConfigApi.GetConfigurationAsync<OutputConfigurationDto>("output");
+      
+      // Load device options, create default if not found
+      var deviceOptions = await ConfigApi.GetConfigurationAsync<DeviceOptionsDto>("devices");
+      _deviceOptions = deviceOptions ?? new DeviceOptionsDto();
 
       // Populate output config individual fields for binding
       if (_outputConfig != null)
@@ -1141,6 +1417,218 @@
     catch (Exception ex)
     {
       Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error);
+    }
+    finally
+    {
+      _isSaving = false;
+    }
+  }
+
+  private async Task SaveDeviceOptionsAsync()
+  {
+    _isSaving = true;
+    try
+    {
+      if (_deviceOptions == null)
+      {
+        Snackbar.Add("Device configuration is not loaded", Severity.Error);
+        return;
+      }
+
+      var success = await ConfigApi.UpdateConfigurationAsync("devices", _deviceOptions);
+      if (success)
+      {
+        Snackbar.Add("Device configuration saved successfully", Severity.Success);
+        Logger.LogInformation("Device configuration updated: Radio USB={RadioUSB}, Vinyl USB={VinylUSB}", 
+          _deviceOptions.Radio.USBPort, _deviceOptions.Vinyl.USBPort);
+        StateHasChanged(); // Refresh UI to reflect any server-side normalizations
+      }
+      else
+      {
+        Snackbar.Add("Failed to save device configuration", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Snackbar.Add($"Error saving device configuration: {ex.Message}", Severity.Error);
+    }
+    finally
+    {
+      _isSaving = false;
+    }
+  }
+
+  private async Task LoadPreferencesAsync()
+  {
+    try
+    {
+      // Load or create preferences with default values
+      _audioPreferences = await LoadOrCreatePreferenceAsync<AudioPreferencesDto>("audiopreferences");
+      _spotifyPreferences = await LoadOrCreatePreferenceAsync<SpotifyPreferencesDto>("spotifypreferences");
+      _filePlayerPreferences = await LoadOrCreatePreferenceAsync<FilePlayerPreferencesDto>("fileplayerpreferences");
+      _radioPreferences = await LoadOrCreatePreferenceAsync<RadioPreferencesDto>("radiopreferences");
+      _genericSourcePreferences = await LoadOrCreatePreferenceAsync<GenericSourcePreferencesDto>("genericsourcepreferences");
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error loading preferences");
+      // Continue even if preferences fail to load
+    }
+  }
+
+  private async Task<T> LoadOrCreatePreferenceAsync<T>(string section) where T : class, new()
+  {
+    try
+    {
+      var preference = await ConfigApi.GetConfigurationAsync<T>(section);
+      if (preference == null)
+      {
+        preference = new T();
+        Logger.LogInformation("Preference {Section} not found, creating with default values: {@DefaultValue}", section, preference);
+        await ConfigApi.UpdateConfigurationAsync(section, preference);
+      }
+      return preference;
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to load or create preference {Section}, using default", section);
+      return new T();
+    }
+  }
+
+  private async Task SaveAudioPreferencesAsync()
+  {
+    _isSaving = true;
+    try
+    {
+      if (_audioPreferences == null) return;
+      
+      var success = await ConfigApi.UpdateConfigurationAsync("audiopreferences", _audioPreferences);
+      if (success)
+      {
+        Snackbar.Add("Audio preferences saved successfully", Severity.Success);
+        StateHasChanged();
+      }
+      else
+      {
+        Snackbar.Add("Failed to save audio preferences", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Snackbar.Add($"Error saving audio preferences: {ex.Message}", Severity.Error);
+    }
+    finally
+    {
+      _isSaving = false;
+    }
+  }
+
+  private async Task SaveSpotifyPreferencesAsync()
+  {
+    _isSaving = true;
+    try
+    {
+      if (_spotifyPreferences == null) return;
+      
+      var success = await ConfigApi.UpdateConfigurationAsync("spotifypreferences", _spotifyPreferences);
+      if (success)
+      {
+        Snackbar.Add("Spotify preferences saved successfully", Severity.Success);
+        StateHasChanged();
+      }
+      else
+      {
+        Snackbar.Add("Failed to save Spotify preferences", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Snackbar.Add($"Error saving Spotify preferences: {ex.Message}", Severity.Error);
+    }
+    finally
+    {
+      _isSaving = false;
+    }
+  }
+
+  private async Task SaveFilePlayerPreferencesAsync()
+  {
+    _isSaving = true;
+    try
+    {
+      if (_filePlayerPreferences == null) return;
+      
+      var success = await ConfigApi.UpdateConfigurationAsync("fileplayerpreferences", _filePlayerPreferences);
+      if (success)
+      {
+        Snackbar.Add("File Player preferences saved successfully", Severity.Success);
+        StateHasChanged();
+      }
+      else
+      {
+        Snackbar.Add("Failed to save File Player preferences", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Snackbar.Add($"Error saving File Player preferences: {ex.Message}", Severity.Error);
+    }
+    finally
+    {
+      _isSaving = false;
+    }
+  }
+
+  private async Task SaveRadioPreferencesAsync()
+  {
+    _isSaving = true;
+    try
+    {
+      if (_radioPreferences == null) return;
+      
+      var success = await ConfigApi.UpdateConfigurationAsync("radiopreferences", _radioPreferences);
+      if (success)
+      {
+        Snackbar.Add("Radio preferences saved successfully", Severity.Success);
+        StateHasChanged();
+      }
+      else
+      {
+        Snackbar.Add("Failed to save Radio preferences", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Snackbar.Add($"Error saving Radio preferences: {ex.Message}", Severity.Error);
+    }
+    finally
+    {
+      _isSaving = false;
+    }
+  }
+
+  private async Task SaveGenericSourcePreferencesAsync()
+  {
+    _isSaving = true;
+    try
+    {
+      if (_genericSourcePreferences == null) return;
+      
+      var success = await ConfigApi.UpdateConfigurationAsync("genericsourcepreferences", _genericSourcePreferences);
+      if (success)
+      {
+        Snackbar.Add("Generic Source preferences saved successfully", Severity.Success);
+        StateHasChanged();
+      }
+      else
+      {
+        Snackbar.Add("Failed to save Generic Source preferences", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Snackbar.Add($"Error saving Generic Source preferences: {ex.Message}", Severity.Error);
     }
     finally
     {

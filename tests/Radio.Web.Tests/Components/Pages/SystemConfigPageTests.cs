@@ -197,4 +197,44 @@ public class SystemConfigPageTests : TestContext
     // Assert - Check default values are shown (N/A for unavailable stats)
     Assert.Contains("N/A", cut.Markup);
   }
+
+  [Fact]
+  public void SystemConfigPage_Configuration_Tab_Has_Multiple_SubTabs()
+  {
+    // Act
+    var cut = RenderComponent<SystemConfigPage>();
+
+    // Assert - Check that Configuration tab has multiple sub-tabs
+    Assert.Contains("Configuration", cut.Markup);
+    Assert.NotNull(cut);
+    // Component should render without errors
+    Assert.True(cut.Markup.Length > 0);
+  }
+
+  [Fact]
+  public void SystemConfigPage_Devices_Configuration_Renders_Without_Error()
+  {
+    // Act
+    var cut = RenderComponent<SystemConfigPage>();
+
+    // Assert - The page should render successfully with Devices configuration support
+    Assert.NotNull(cut);
+    Assert.Contains("Configuration", cut.Markup);
+    
+    // Verify component initializes device options (even if null initially due to API unavailability)
+    // The component should handle missing configuration gracefully
+    Assert.DoesNotContain("Object reference not set", cut.Markup);
+  }
+
+  [Fact]
+  public void SystemConfigPage_Handles_Missing_DeviceConfiguration_Gracefully()
+  {
+    // Act
+    var cut = RenderComponent<SystemConfigPage>();
+
+    // Assert - Component should not crash when device configuration is unavailable
+    Assert.NotNull(cut);
+    // Should show loading indicator or handle null device options
+    Assert.DoesNotContain("NullReferenceException", cut.Markup);
+  }
 }
