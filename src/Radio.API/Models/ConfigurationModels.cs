@@ -360,3 +360,56 @@ public class GenericSourcePreferencesDto
   /// </summary>
   public string USBPort { get; set; } = "";
 }
+
+/// <summary>
+/// Spotify API credentials (secrets).
+/// </summary>
+public class SpotifySecretsDto
+{
+  /// <summary>
+  /// Gets or sets the Spotify Client ID.
+  /// </summary>
+  public string ClientID { get; set; } = "";
+
+  /// <summary>
+  /// Gets or sets the Spotify Client Secret.
+  /// </summary>
+  public string ClientSecret { get; set; } = "";
+
+  /// <summary>
+  /// Gets or sets the Spotify Refresh Token.
+  /// </summary>
+  public string RefreshToken { get; set; } = "";
+}
+
+/// <summary>
+/// TTS service API credentials (secrets).
+/// </summary>
+public class TTSSecretsDto
+{
+  /// <summary>
+  /// Gets or sets the Google Cloud Text-to-Speech API key.
+  /// </summary>
+  public string GoogleAPIKey { get; set; } = "";
+
+  /// <summary>
+  /// Gets or sets the Azure Cognitive Services Speech API key.
+  /// </summary>
+  public string AzureAPIKey { get; set; } = "";
+
+  /// <summary>
+  /// Gets or sets the Azure region for Speech Services.
+  /// </summary>
+  public string AzureRegion { get; set; } = "";
+}
+
+/// <summary>
+/// AcoustID API credentials (secrets).
+/// </summary>
+public class AcoustIdSecretDto
+{
+  /// <summary>
+  /// Gets or sets the AcoustID API key.
+  /// </summary>
+  public string ApiKey { get; set; } = "";
+}

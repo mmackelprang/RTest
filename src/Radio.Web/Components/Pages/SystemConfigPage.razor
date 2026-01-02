@@ -794,6 +794,170 @@
       </MudTabs>
     </MudTabPanel>
 
+    <!-- Tab 6: Secrets -->
+    <MudTabPanel Text="Secrets" Icon="@Icons.Material.Filled.Lock">
+      <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+        <strong>Security Notice:</strong> Secrets are sensitive credentials. Values are masked by default and encrypted server-side. Only enter secrets in secure environments.
+      </MudAlert>
+      
+      <MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-2">
+        
+        <!-- Spotify Secrets -->
+        <MudTabPanel Text="Spotify">
+          @if (_spotifySecrets != null)
+          {
+            <MudGrid Spacing="2">
+              <MudItem xs="12">
+                <MudAlert Severity="Severity.Info" Dense="true">
+                  Spotify API credentials for authentication. Get these from <a href="https://developer.spotify.com/dashboard" target="_blank">Spotify Developer Dashboard</a>.
+                </MudAlert>
+              </MudItem>
+              <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_spotifySecrets.ClientID" Label="Client ID"
+                              Variant="Variant.Outlined" 
+                              InputType="@(_showSpotifyClientId ? InputType.Text : InputType.Password)"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@(_showSpotifyClientId ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                              OnAdornmentClick="@(() => _showSpotifyClientId = !_showSpotifyClientId)"
+                              HelperText="Spotify application client identifier" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_spotifySecrets.ClientSecret" Label="Client Secret"
+                              Variant="Variant.Outlined" 
+                              InputType="@(_showSpotifyClientSecret ? InputType.Text : InputType.Password)"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@(_showSpotifyClientSecret ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                              OnAdornmentClick="@(() => _showSpotifyClientSecret = !_showSpotifyClientSecret)"
+                              HelperText="Spotify application client secret key" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_spotifySecrets.RefreshToken" Label="Refresh Token"
+                              Variant="Variant.Outlined" 
+                              InputType="@(_showSpotifyRefreshToken ? InputType.Text : InputType.Password)"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@(_showSpotifyRefreshToken ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                              OnAdornmentClick="@(() => _showSpotifyRefreshToken = !_showSpotifyRefreshToken)"
+                              HelperText="OAuth refresh token for user authorization" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveSpotifySecretsAsync"
+                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving" Class="mr-2">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save Secrets
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="ClearSpotifySecretsAsync"
+                           StartIcon="@Icons.Material.Filled.DeleteForever" Disabled="@_isSaving">
+                  Clear All
+                </MudButton>
+              </MudItem>
+            </MudGrid>
+          }
+          else
+          {
+            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+            <MudText Class="ml-2">Loading Spotify secrets...</MudText>
+          }
+        </MudTabPanel>
+
+        <!-- TTS Secrets -->
+        <MudTabPanel Text="TTS Services">
+          @if (_ttsSecrets != null)
+          {
+            <MudGrid Spacing="2">
+              <MudItem xs="12">
+                <MudAlert Severity="Severity.Info" Dense="true">
+                  API keys for cloud-based Text-to-Speech services. Optional - only needed if using Google or Azure TTS.
+                </MudAlert>
+              </MudItem>
+              <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_ttsSecrets.GoogleAPIKey" Label="Google API Key"
+                              Variant="Variant.Outlined" 
+                              InputType="@(_showGoogleApiKey ? InputType.Text : InputType.Password)"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@(_showGoogleApiKey ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                              OnAdornmentClick="@(() => _showGoogleApiKey = !_showGoogleApiKey)"
+                              HelperText="Google Cloud Text-to-Speech API key" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_ttsSecrets.AzureAPIKey" Label="Azure API Key"
+                              Variant="Variant.Outlined" 
+                              InputType="@(_showAzureApiKey ? InputType.Text : InputType.Password)"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@(_showAzureApiKey ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                              OnAdornmentClick="@(() => _showAzureApiKey = !_showAzureApiKey)"
+                              HelperText="Azure Cognitive Services Speech API key" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_ttsSecrets.AzureRegion" Label="Azure Region"
+                              Variant="Variant.Outlined" 
+                              InputType="@(_showAzureRegion ? InputType.Text : InputType.Password)"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@(_showAzureRegion ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                              OnAdornmentClick="@(() => _showAzureRegion = !_showAzureRegion)"
+                              HelperText="Azure region (e.g., eastus, westus2)" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveTTSSecretsAsync"
+                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving" Class="mr-2">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save Secrets
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="ClearTTSSecretsAsync"
+                           StartIcon="@Icons.Material.Filled.DeleteForever" Disabled="@_isSaving">
+                  Clear All
+                </MudButton>
+              </MudItem>
+            </MudGrid>
+          }
+          else
+          {
+            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+            <MudText Class="ml-2">Loading TTS secrets...</MudText>
+          }
+        </MudTabPanel>
+
+        <!-- AcoustID Secret -->
+        <MudTabPanel Text="AcoustID">
+          @if (_acoustIdSecret != null)
+          {
+            <MudGrid Spacing="2">
+              <MudItem xs="12">
+                <MudAlert Severity="Severity.Info" Dense="true">
+                  AcoustID API key for audio fingerprinting. Get your key from <a href="https://acoustid.org/new-application" target="_blank">AcoustID</a>.
+                </MudAlert>
+              </MudItem>
+              <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_acoustIdSecret.ApiKey" Label="API Key"
+                              Variant="Variant.Outlined" 
+                              InputType="@(_showAcoustIdApiKey ? InputType.Text : InputType.Password)"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@(_showAcoustIdApiKey ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                              OnAdornmentClick="@(() => _showAcoustIdApiKey = !_showAcoustIdApiKey)"
+                              HelperText="AcoustID application API key" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAcoustIdSecretAsync"
+                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving" Class="mr-2">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save Secret
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="ClearAcoustIdSecretAsync"
+                           StartIcon="@Icons.Material.Filled.DeleteForever" Disabled="@_isSaving">
+                  Clear
+                </MudButton>
+              </MudItem>
+            </MudGrid>
+          }
+          else
+          {
+            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+            <MudText Class="ml-2">Loading AcoustID secret...</MudText>
+          }
+        </MudTabPanel>
+
+      </MudTabs>
+    </MudTabPanel>
+
   </MudTabs>
 </MudContainer>
 
@@ -824,6 +988,20 @@
   private FilePlayerPreferencesDto? _filePlayerPreferences;
   private RadioPreferencesDto? _radioPreferences;
   private GenericSourcePreferencesDto? _genericSourcePreferences;
+
+  // Secrets
+  private SpotifySecretsDto? _spotifySecrets;
+  private TTSSecretsDto? _ttsSecrets;
+  private AcoustIdSecretDto? _acoustIdSecret;
+  
+  // Secrets visibility toggles
+  private bool _showSpotifyClientId = false;
+  private bool _showSpotifyClientSecret = false;
+  private bool _showSpotifyRefreshToken = false;
+  private bool _showGoogleApiKey = false;
+  private bool _showAzureApiKey = false;
+  private bool _showAzureRegion = false;
+  private bool _showAcoustIdApiKey = false;
 
   // Output configuration individual fields (for binding)
   private bool _localOutputEnabled;
@@ -867,6 +1045,7 @@
     await LoadSystemStatsAsync();
     await LoadConfigurationAsync();
     await LoadPreferencesAsync();
+    await LoadSecretsAsync();
     await LoadLogsAsync();
     await LoadEventSourcesAsync();
     await LoadTTSEnginesAsync();
@@ -1633,6 +1812,274 @@
     finally
     {
       _isSaving = false;
+    }
+  }
+
+  // ========== Secrets Management ==========
+
+  private async Task LoadSecretsAsync()
+  {
+    try
+    {
+      // Load or create secrets with default values (empty)
+      _spotifySecrets = await LoadOrCreateSecretAsync<SpotifySecretsDto>("spotify");
+      _ttsSecrets = await LoadOrCreateSecretAsync<TTSSecretsDto>("tts");
+      _acoustIdSecret = await LoadOrCreateSecretAsync<AcoustIdSecretDto>("acoustid");
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error loading secrets");
+      // Continue even if secrets fail to load
+    }
+  }
+
+  private async Task<T> LoadOrCreateSecretAsync<T>(string section) where T : class, new()
+  {
+    try
+    {
+      var secret = await ConfigApi.GetConfigurationAsync<T>(section);
+      if (secret == null)
+      {
+        secret = new T();
+        Logger.LogInformation("Secret section {Section} not found, creating with empty values", section);
+        await ConfigApi.UpdateConfigurationAsync(section, secret);
+      }
+      return secret;
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to load or create secret {Section}, using default", section);
+      return new T();
+    }
+  }
+
+  private async Task SaveSpotifySecretsAsync()
+  {
+    _isSaving = true;
+    try
+    {
+      if (_spotifySecrets == null) return;
+      
+      var success = await ConfigApi.UpdateConfigurationAsync("spotify", _spotifySecrets);
+      if (success)
+      {
+        Logger.LogInformation("Spotify secrets updated successfully");
+        Snackbar.Add("Spotify secrets saved and encrypted successfully", Severity.Success);
+        // Hide secrets after save
+        _showSpotifyClientId = false;
+        _showSpotifyClientSecret = false;
+        _showSpotifyRefreshToken = false;
+        StateHasChanged();
+      }
+      else
+      {
+        Snackbar.Add("Failed to save Spotify secrets", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error saving Spotify secrets");
+      Snackbar.Add($"Error saving Spotify secrets: {ex.Message}", Severity.Error);
+    }
+    finally
+    {
+      _isSaving = false;
+    }
+  }
+
+  private async Task ClearSpotifySecretsAsync()
+  {
+    bool? result = await DialogService.ShowMessageBox(
+      "Confirm Clear Secrets",
+      "Are you sure you want to clear all Spotify secrets? This action cannot be undone.",
+      yesText: "Clear", 
+      cancelText: "Cancel");
+
+    if (result == true)
+    {
+      _isSaving = true;
+      try
+      {
+        if (_spotifySecrets != null)
+        {
+          _spotifySecrets.ClientID = "";
+          _spotifySecrets.ClientSecret = "";
+          _spotifySecrets.RefreshToken = "";
+          
+          var success = await ConfigApi.UpdateConfigurationAsync("spotify", _spotifySecrets);
+          if (success)
+          {
+            Logger.LogInformation("Spotify secrets cleared successfully");
+            Snackbar.Add("Spotify secrets cleared successfully", Severity.Success);
+            StateHasChanged();
+          }
+          else
+          {
+            Snackbar.Add("Failed to clear Spotify secrets", Severity.Error);
+          }
+        }
+      }
+      catch (Exception ex)
+      {
+        Logger.LogError(ex, "Error clearing Spotify secrets");
+        Snackbar.Add($"Error clearing Spotify secrets: {ex.Message}", Severity.Error);
+      }
+      finally
+      {
+        _isSaving = false;
+      }
+    }
+  }
+
+  private async Task SaveTTSSecretsAsync()
+  {
+    _isSaving = true;
+    try
+    {
+      if (_ttsSecrets == null) return;
+      
+      var success = await ConfigApi.UpdateConfigurationAsync("tts", _ttsSecrets);
+      if (success)
+      {
+        Logger.LogInformation("TTS secrets updated successfully");
+        Snackbar.Add("TTS secrets saved and encrypted successfully", Severity.Success);
+        // Hide secrets after save
+        _showGoogleApiKey = false;
+        _showAzureApiKey = false;
+        _showAzureRegion = false;
+        StateHasChanged();
+      }
+      else
+      {
+        Snackbar.Add("Failed to save TTS secrets", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error saving TTS secrets");
+      Snackbar.Add($"Error saving TTS secrets: {ex.Message}", Severity.Error);
+    }
+    finally
+    {
+      _isSaving = false;
+    }
+  }
+
+  private async Task ClearTTSSecretsAsync()
+  {
+    bool? result = await DialogService.ShowMessageBox(
+      "Confirm Clear Secrets",
+      "Are you sure you want to clear all TTS secrets? This action cannot be undone.",
+      yesText: "Clear", 
+      cancelText: "Cancel");
+
+    if (result == true)
+    {
+      _isSaving = true;
+      try
+      {
+        if (_ttsSecrets != null)
+        {
+          _ttsSecrets.GoogleAPIKey = "";
+          _ttsSecrets.AzureAPIKey = "";
+          _ttsSecrets.AzureRegion = "";
+          
+          var success = await ConfigApi.UpdateConfigurationAsync("tts", _ttsSecrets);
+          if (success)
+          {
+            Logger.LogInformation("TTS secrets cleared successfully");
+            Snackbar.Add("TTS secrets cleared successfully", Severity.Success);
+            StateHasChanged();
+          }
+          else
+          {
+            Snackbar.Add("Failed to clear TTS secrets", Severity.Error);
+          }
+        }
+      }
+      catch (Exception ex)
+      {
+        Logger.LogError(ex, "Error clearing TTS secrets");
+        Snackbar.Add($"Error clearing TTS secrets: {ex.Message}", Severity.Error);
+      }
+      finally
+      {
+        _isSaving = false;
+      }
+    }
+  }
+
+  private async Task SaveAcoustIdSecretAsync()
+  {
+    _isSaving = true;
+    try
+    {
+      if (_acoustIdSecret == null) return;
+      
+      var success = await ConfigApi.UpdateConfigurationAsync("acoustid", _acoustIdSecret);
+      if (success)
+      {
+        Logger.LogInformation("AcoustID secret updated successfully");
+        Snackbar.Add("AcoustID secret saved and encrypted successfully", Severity.Success);
+        // Hide secret after save
+        _showAcoustIdApiKey = false;
+        StateHasChanged();
+      }
+      else
+      {
+        Snackbar.Add("Failed to save AcoustID secret", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error saving AcoustID secret");
+      Snackbar.Add($"Error saving AcoustID secret: {ex.Message}", Severity.Error);
+    }
+    finally
+    {
+      _isSaving = false;
+    }
+  }
+
+  private async Task ClearAcoustIdSecretAsync()
+  {
+    bool? result = await DialogService.ShowMessageBox(
+      "Confirm Clear Secret",
+      "Are you sure you want to clear the AcoustID secret? This action cannot be undone.",
+      yesText: "Clear", 
+      cancelText: "Cancel");
+
+    if (result == true)
+    {
+      _isSaving = true;
+      try
+      {
+        if (_acoustIdSecret != null)
+        {
+          _acoustIdSecret.ApiKey = "";
+          
+          var success = await ConfigApi.UpdateConfigurationAsync("acoustid", _acoustIdSecret);
+          if (success)
+          {
+            Logger.LogInformation("AcoustID secret cleared successfully");
+            Snackbar.Add("AcoustID secret cleared successfully", Severity.Success);
+            StateHasChanged();
+          }
+          else
+          {
+            Snackbar.Add("Failed to clear AcoustID secret", Severity.Error);
+          }
+        }
+      }
+      catch (Exception ex)
+      {
+        Logger.LogError(ex, "Error clearing AcoustID secret");
+        Snackbar.Add($"Error clearing AcoustID secret: {ex.Message}", Severity.Error);
+      }
+      finally
+      {
+        _isSaving = false;
+      }
     }
   }
 

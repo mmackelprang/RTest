@@ -571,4 +571,22 @@ public class GenericSourcePreferencesDto
   public string USBPort { get; set; } = "";
 }
 
-// TODO: Phase 3 - Secrets DTOs will be added when implementing Secrets Management UI
+// Secrets DTOs
+public class SpotifySecretsDto
+{
+  public string ClientID { get; set; } = "";
+  public string ClientSecret { get; set; } = "";
+  public string RefreshToken { get; set; } = "";
+}
+
+public class TTSSecretsDto
+{
+  public string GoogleAPIKey { get; set; } = "";
+  public string AzureAPIKey { get; set; } = "";
+  public string AzureRegion { get; set; } = "";
+}
+
+public class AcoustIdSecretDto
+{
+  public string ApiKey { get; set; } = "";
+}
