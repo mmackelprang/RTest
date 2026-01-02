@@ -209,9 +209,22 @@ public class ConfigurationController : ControllerBase
   /// <returns>The configuration section data.</returns>
   [HttpGet("{section}")]
   [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
   [ProducesResponseType(StatusCodes.Status404NotFound)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
   public async Task<ActionResult> GetConfigurationSection(string section)
   {
+    // Validate section name
+    if (string.IsNullOrWhiteSpace(section))
+    {
+      return BadRequest(new { error = "Section name is required" });
+    }
+
+    if (!IsValidSectionName(section))
+    {
+      return BadRequest(new { error = "Invalid section name. Only alphanumeric characters, hyphens, and underscores are allowed." });
+    }
+
     try
     {
       if (_configurationManager == null)
@@ -220,22 +233,37 @@ public class ConfigurationController : ControllerBase
       }
 
       var storeId = section.ToLowerInvariant();
-      var store = await _configurationManager.GetStoreAsync(storeId);
-      var entries = await store.GetAllEntriesAsync();
-
-      // Build a dictionary from the entries
-      var result = new Dictionary<string, object?>();
-      foreach (var entry in entries)
+      
+      // Try to get the store
+      try
       {
-        result[entry.Key] = entry.Value;
-      }
+        var store = await _configurationManager.GetStoreAsync(storeId);
+        var entries = await store.GetAllEntriesAsync();
 
-      return Ok(result);
+        // Build a dictionary from the entries
+        var result = new Dictionary<string, object?>();
+        foreach (var entry in entries)
+        {
+          result[entry.Key] = entry.Value;
+        }
+
+        return Ok(result);
+      }
+      catch (FileNotFoundException)
+      {
+        // Store doesn't exist
+        return NotFound(new { error = $"Configuration section '{section}' not found" });
+      }
+      catch (DirectoryNotFoundException)
+      {
+        // Store doesn't exist
+        return NotFound(new { error = $"Configuration section '{section}' not found" });
+      }
     }
     catch (Exception ex)
     {
       _logger.LogError(ex, "Error getting configuration section {Section}", section);
-      return NotFound(new { error = $"Configuration section '{section}' not found" });
+      return StatusCode(500, new { error = "Internal server error while retrieving configuration" });
     }
   }
 
@@ -248,9 +276,42 @@ public class ConfigurationController : ControllerBase
   [HttpPost("{section}")]
   [ProducesResponseType(StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
   [ProducesResponseType(StatusCodes.Status501NotImplemented)]
   public async Task<ActionResult> UpdateConfigurationSection(string section, [FromBody] Dictionary<string, object> data)
   {
+    // Validate section name
+    if (string.IsNullOrWhiteSpace(section))
+    {
+      return BadRequest(new { error = "Section name is required" });
+    }
+
+    if (!IsValidSectionName(section))
+    {
+      return BadRequest(new { error = "Invalid section name. Only alphanumeric characters, hyphens, and underscores are allowed." });
+    }
+
+    // Validate data
+    if (data == null || data.Count == 0)
+    {
+      return BadRequest(new { error = "Configuration data is required" });
+    }
+
+    // Limit data size to prevent memory issues (max 100 keys)
+    if (data.Count > 100)
+    {
+      return BadRequest(new { error = "Configuration data exceeds maximum allowed size (100 keys)" });
+    }
+
+    // Validate keys
+    foreach (var key in data.Keys)
+    {
+      if (string.IsNullOrWhiteSpace(key))
+      {
+        return BadRequest(new { error = "Configuration keys cannot be null or empty" });
+      }
+    }
+
     try
     {
       if (_configurationManager == null)
@@ -266,7 +327,7 @@ public class ConfigurationController : ControllerBase
         await _configurationManager.SetValueAsync(storeId, kvp.Key, kvp.Value);
       }
 
-      _logger.LogInformation("Configuration section {Section} updated successfully", section);
+      _logger.LogInformation("Configuration section {Section} updated successfully with {Count} keys", section, data.Count);
       return Ok(new { message = "Configuration updated successfully", section });
     }
     catch (Exception ex)
@@ -274,6 +335,18 @@ public class ConfigurationController : ControllerBase
       _logger.LogError(ex, "Error updating configuration section {Section}", section);
       return StatusCode(500, new { error = "Failed to update configuration" });
     }
+  }
+
+  /// <summary>
+  /// Validates that a section name contains only allowed characters.
+  /// </summary>
+  private static bool IsValidSectionName(string section)
+  {
+    if (string.IsNullOrWhiteSpace(section))
+      return false;
+
+    // Allow alphanumeric, hyphens, underscores, and dots
+    return System.Text.RegularExpressions.Regex.IsMatch(section, @"^[a-zA-Z0-9_\-\.]+$");
   }
 
   /// <summary>

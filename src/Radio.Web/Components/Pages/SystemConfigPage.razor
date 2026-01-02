@@ -1215,6 +1215,7 @@
         Snackbar.Add("Device configuration saved successfully", Severity.Success);
         Logger.LogInformation("Device configuration updated: Radio USB={RadioUSB}, Vinyl USB={VinylUSB}", 
           _deviceOptions.Radio.USBPort, _deviceOptions.Vinyl.USBPort);
+        StateHasChanged(); // Refresh UI to reflect any server-side normalizations
       }
       else
       {

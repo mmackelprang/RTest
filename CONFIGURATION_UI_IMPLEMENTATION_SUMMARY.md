@@ -180,17 +180,19 @@ GET /api/configuration/devices
 **Response:**
 ```json
 {
-  "radio": {
-    "usbPort": "/dev/ttyUSB0"
+  "Radio": {
+    "USBPort": "/dev/ttyUSB0"
   },
-  "vinyl": {
-    "usbPort": "/dev/ttyUSB1"
+  "Vinyl": {
+    "USBPort": "/dev/ttyUSB1"
   },
-  "cast": {
-    "defaultDevice": ""
+  "Cast": {
+    "DefaultDevice": ""
   }
 }
 ```
+
+**Note:** The API returns a flat Dictionary<string, object> with PascalCase keys that represent the serialized DeviceOptionsDto structure.
 
 ### Update Device Configuration
 
@@ -199,17 +201,19 @@ POST /api/configuration/devices
 Content-Type: application/json
 
 {
-  "radio": {
-    "usbPort": "/dev/ttyUSB0"
+  "Radio": {
+    "USBPort": "/dev/ttyUSB0"
   },
-  "vinyl": {
-    "usbPort": "/dev/ttyUSB1"
+  "Vinyl": {
+    "USBPort": "/dev/ttyUSB1"
   },
-  "cast": {
-    "defaultDevice": "Living Room Speaker"
+  "Cast": {
+    "DefaultDevice": "Living Room Speaker"
   }
 }
 ```
+
+**Note:** The POST body should match the structure returned by GET. The API serializes the DeviceOptionsDto and stores it as a Dictionary<string, object>.
 
 **Response:**
 ```json
