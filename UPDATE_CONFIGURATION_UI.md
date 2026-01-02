@@ -116,38 +116,51 @@ This plan is organized into 6 phases that build upon the existing configuration 
   - Implemented lazy creation (no auto-persist of empty secrets)
   - Improved test assertions within bUnit constraints
 
+### Phase 5: Configuration Store Management ✅ COMPLETE
+
+**Completed:**
+- ✅ Configuration store management DTOs
+- ✅ 5 API endpoints (store-info, compare, reconcile, import, export)
+- ✅ ConfigurationApiService client methods
+- ✅ Store Management UI tab with full functionality
+- ✅ Store info display (type, location, size, entries, modified)
+- ✅ Export buttons (JSON and .radiobak formats)
+- ✅ Import file upload with confirmation
+- ✅ Store comparison table with color-coded status
+- ✅ Reconciliation UI with checkbox selection and bidirectional copy
+- ✅ JavaScript file download helper
+- ✅ bUnit tests (28 SystemConfigPage tests, all passing)
+- ✅ Zero build warnings/errors
+
 ### Implementation Summary
 
-**Phases 1-4 Status:**
+**Phases 1-5 Status:**
 - ✅ Phase 1: API endpoints and DTOs - COMPLETE
 - ✅ Phase 2: Preferences Management UI - COMPLETE (5 preference types)
 - ✅ Phase 3: Secrets Management UI - COMPLETE (3 secrets types) + PR improvements
 - ✅ Phase 4: Configuration Options UI - COMPLETE (Device options with USB ports)
+- ✅ Phase 5: Configuration Store Management - COMPLETE (5 API endpoints + full UI)
 
 **What Works:**
 - Full CRUD operations for preferences (Audio, Spotify, FilePlayer, Radio, GenericSource)
 - Full CRUD operations for secrets (Spotify, TTS, AcoustID)
 - Device configuration (Radio USB port, Vinyl USB port, Cast device)
 - Audio, Visualizer, and Output configuration panels
+- Store management (view info, compare, reconcile, import/export)
 - All data persists to active configuration store (JSON or SQLite)
-- 124 bUnit tests passing
+- 129 bUnit tests passing (28 SystemConfigPage tests)
 - Zero build warnings/errors
 - Refactored code with 67% less duplication
 - Lazy secret creation (security improvement)
 
-### Next Steps: Phase 5 - Configuration Store Management UI
+### Next Steps: Phase 6 - Testing & Documentation
 
-**Prerequisites:**
-Phase 5 requires backend API implementation first:
-- ⏳ `GET /api/configuration/store-info` - Get store metadata
-- ⏳ `GET /api/configuration/compare` - Compare JSON vs SQLite stores
-- ⏳ `POST /api/configuration/reconcile` - Copy values between stores
-- ⏳ `POST /api/configuration/import` - Import configuration from file
-- ⏳ `GET /api/configuration/export` - Export configuration to file
-
-**Recommendation:** Implement Phase 5 backend API endpoints before proceeding with UI implementation.
-
-**Alternative:** Could implement optional Phase 4 configuration panels (TTS, FilePlayer, Radio, AudioEngine, Fingerprinting, Metrics, Database options) if backend work is not ready.
+**Remaining Tasks:**
+- ⏳ Integration testing with real configuration files
+- ⏳ User documentation with screenshots
+- ⏳ Update system configuration guide
+- ⏳ Performance testing
+- ⏳ Security audit
 
 ---
 
