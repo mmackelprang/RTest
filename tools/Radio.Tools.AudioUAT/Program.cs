@@ -119,6 +119,7 @@ var host = Host.CreateDefaultBuilder(args)
     // Register Phase 15 E2E tests
     services.AddSingleton<AudioPlaybackApiTests>();
     services.AddSingleton<QueueManagementApiTests>();
+    services.AddSingleton<SourceManagementApiTests>();
   })
   .Build();
 
@@ -172,6 +173,7 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
   var phase14Tests = services.GetRequiredService<SpotifyApiTests>();
   var phase15AudioTests = services.GetRequiredService<AudioPlaybackApiTests>();
   var phase15QueueTests = services.GetRequiredService<QueueManagementApiTests>();
+  var phase15SourceTests = services.GetRequiredService<SourceManagementApiTests>();
 
   var testsToRun = new List<IPhaseTest>();
 
@@ -234,6 +236,7 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
     {
       testsToRun.AddRange(phase15AudioTests.GetAllTests());
       testsToRun.AddRange(phase15QueueTests.GetAllTests());
+      testsToRun.AddRange(phase15SourceTests.GetAllTests());
     }
   }
   else if (args.Contains("--test"))
@@ -256,6 +259,7 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
         .Concat(phase14Tests.GetAllTests())
         .Concat(phase15AudioTests.GetAllTests())
         .Concat(phase15QueueTests.GetAllTests())
+        .Concat(phase15SourceTests.GetAllTests())
         .ToList();
       var test = allTests.FirstOrDefault(t => t.TestId == testId);
       if (test != null)
