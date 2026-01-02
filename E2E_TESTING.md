@@ -2,22 +2,25 @@
 
 ## Implementation Status
 
-**Status**: Phase 15 partially implemented (9/44 tests complete)
+**Status**: Phase 15.1-15.2 complete (17/44 tests complete - 39%)
 
 **Current Progress**:
 - ✅ System shutdown endpoint exists (`POST /api/system/shutdown`)
 - ✅ Test runner scripts exist (`run-e2e-uat.ps1`, `run-e2e-uat.sh`)  
-- ✅ RadioApiClient extended with missing methods (ToggleMuteAsync, RemoveFromQueueAsync, MoveQueueItemAsync, JumpToQueueIndexAsync)
-- ✅ Phase 15.1: Audio Playback and Control - 9 tests implemented and integrated
-- ⏳ Phase 15.2-15.6: Remaining API tests - TO DO
+- ✅ RadioApiClient extended with all required methods and consistent error handling
+- ✅ Phase 15.1: Audio Playback and Control - 9 tests complete
+- ✅ Phase 15.2: Queue Management - 8 tests complete
+- ⏳ Phase 15.3-15.6: Source, Device, Config, System Management - TO DO
 - ⏳ Phases 16-22: Other E2E test categories - TO DO
 
 **Next Steps**:
-1. Complete remaining Phase 15 test categories (Queue, Source, Device, Config, System Management)
-2. Implement Phases 16-21 (Visualization, Casting, Fingerprinting, System Integration, Configuration, Performance)
-3. Implement Phase 22 (Web UI E2E tests with Playwright)
-4. Add JSON output support to test runner for CLI agent consumption
-5. Update documentation with test execution examples
+1. ✅ Complete Phase 15.2 (Queue Management - 8 tests)
+2. Implement Phase 15.3 (Source Management - 6 tests)
+3. Implement Phase 15.4 (Device Management - 7 tests)
+4. Implement Phase 15.5 (Configuration Management - 8 tests)
+5. Implement Phase 15.6 (System Management - 5 tests)
+6. Implement Phases 16-21 (Visualization, Casting, Fingerprinting, Integration, Configuration, Performance)
+7. Implement Phase 22 (Web UI E2E tests with Playwright)
 
 ---
 
