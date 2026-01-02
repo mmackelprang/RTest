@@ -88,3 +88,9 @@ window.fileDownload = {
     }
   }
 };
+
+// Simple wrapper for backwards compatibility
+window.downloadFile = function(filename, base64Data) {
+  const mimeType = filename.endsWith('.json') ? 'application/json' : 'application/octet-stream';
+  return window.fileDownload.downloadBase64File(filename, base64Data, mimeType);
+};

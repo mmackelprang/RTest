@@ -794,6 +794,326 @@
       </MudTabs>
     </MudTabPanel>
 
+    <!-- Tab 6: Secrets -->
+    <MudTabPanel Text="Secrets" Icon="@Icons.Material.Filled.Lock">
+      <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+        <strong>Security Notice:</strong> Secrets are sensitive credentials. Values are masked by default and encrypted server-side. Only enter secrets in secure environments.
+      </MudAlert>
+      
+      <MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-2">
+        
+        <!-- Spotify Secrets -->
+        <MudTabPanel Text="Spotify">
+          @if (_spotifySecrets != null)
+          {
+            <MudGrid Spacing="2">
+              <MudItem xs="12">
+                <MudAlert Severity="Severity.Info" Dense="true">
+                  Spotify API credentials for authentication. Get these from <a href="https://developer.spotify.com/dashboard" target="_blank">Spotify Developer Dashboard</a>.
+                </MudAlert>
+              </MudItem>
+              <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_spotifySecrets.ClientID" Label="Client ID"
+                              Variant="Variant.Outlined" 
+                              InputType="@(_showSpotifyClientId ? InputType.Text : InputType.Password)"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@(_showSpotifyClientId ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                              OnAdornmentClick="@(() => _showSpotifyClientId = !_showSpotifyClientId)"
+                              HelperText="Spotify application client identifier" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_spotifySecrets.ClientSecret" Label="Client Secret"
+                              Variant="Variant.Outlined" 
+                              InputType="@(_showSpotifyClientSecret ? InputType.Text : InputType.Password)"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@(_showSpotifyClientSecret ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                              OnAdornmentClick="@(() => _showSpotifyClientSecret = !_showSpotifyClientSecret)"
+                              HelperText="Spotify application client secret key" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_spotifySecrets.RefreshToken" Label="Refresh Token"
+                              Variant="Variant.Outlined" 
+                              InputType="@(_showSpotifyRefreshToken ? InputType.Text : InputType.Password)"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@(_showSpotifyRefreshToken ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                              OnAdornmentClick="@(() => _showSpotifyRefreshToken = !_showSpotifyRefreshToken)"
+                              HelperText="OAuth refresh token for user authorization" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveSpotifySecretsAsync"
+                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving" Class="mr-2">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save Secrets
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="ClearSpotifySecretsAsync"
+                           StartIcon="@Icons.Material.Filled.DeleteForever" Disabled="@_isSaving">
+                  Clear All
+                </MudButton>
+              </MudItem>
+            </MudGrid>
+          }
+          else
+          {
+            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+            <MudText Class="ml-2">Loading Spotify secrets...</MudText>
+          }
+        </MudTabPanel>
+
+        <!-- TTS Secrets -->
+        <MudTabPanel Text="TTS Services">
+          @if (_ttsSecrets != null)
+          {
+            <MudGrid Spacing="2">
+              <MudItem xs="12">
+                <MudAlert Severity="Severity.Info" Dense="true">
+                  API keys for cloud-based Text-to-Speech services. Optional - only needed if using Google or Azure TTS.
+                </MudAlert>
+              </MudItem>
+              <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_ttsSecrets.GoogleAPIKey" Label="Google API Key"
+                              Variant="Variant.Outlined" 
+                              InputType="@(_showGoogleApiKey ? InputType.Text : InputType.Password)"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@(_showGoogleApiKey ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                              OnAdornmentClick="@(() => _showGoogleApiKey = !_showGoogleApiKey)"
+                              HelperText="Google Cloud Text-to-Speech API key" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_ttsSecrets.AzureAPIKey" Label="Azure API Key"
+                              Variant="Variant.Outlined" 
+                              InputType="@(_showAzureApiKey ? InputType.Text : InputType.Password)"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@(_showAzureApiKey ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                              OnAdornmentClick="@(() => _showAzureApiKey = !_showAzureApiKey)"
+                              HelperText="Azure Cognitive Services Speech API key" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_ttsSecrets.AzureRegion" Label="Azure Region"
+                              Variant="Variant.Outlined" 
+                              HelperText="Azure region (e.g., eastus, westus2)" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveTTSSecretsAsync"
+                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving" Class="mr-2">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save Secrets
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="ClearTTSSecretsAsync"
+                           StartIcon="@Icons.Material.Filled.DeleteForever" Disabled="@_isSaving">
+                  Clear All
+                </MudButton>
+              </MudItem>
+            </MudGrid>
+          }
+          else
+          {
+            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+            <MudText Class="ml-2">Loading TTS secrets...</MudText>
+          }
+        </MudTabPanel>
+
+        <!-- AcoustID Secret -->
+        <MudTabPanel Text="AcoustID">
+          @if (_acoustIdSecret != null)
+          {
+            <MudGrid Spacing="2">
+              <MudItem xs="12">
+                <MudAlert Severity="Severity.Info" Dense="true">
+                  AcoustID API key for audio fingerprinting. Get your key from <a href="https://acoustid.org/new-application" target="_blank">AcoustID</a>.
+                </MudAlert>
+              </MudItem>
+              <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_acoustIdSecret.ApiKey" Label="API Key"
+                              Variant="Variant.Outlined" 
+                              InputType="@(_showAcoustIdApiKey ? InputType.Text : InputType.Password)"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@(_showAcoustIdApiKey ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                              OnAdornmentClick="@(() => _showAcoustIdApiKey = !_showAcoustIdApiKey)"
+                              HelperText="AcoustID application API key" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAcoustIdSecretAsync"
+                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving" Class="mr-2">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save Secret
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="ClearAcoustIdSecretAsync"
+                           StartIcon="@Icons.Material.Filled.DeleteForever" Disabled="@_isSaving">
+                  Clear
+                </MudButton>
+              </MudItem>
+            </MudGrid>
+          }
+          else
+          {
+            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+            <MudText Class="ml-2">Loading AcoustID secret...</MudText>
+          }
+        </MudTabPanel>
+
+      </MudTabs>
+    </MudTabPanel>
+
+    <!-- Tab 7: Store Management -->
+    <MudTabPanel Text="Store Management" Icon="@Icons.Material.Filled.Storage">
+      <MudStack Spacing="3">
+        
+        <!-- Store Info Section -->
+        <MudPaper Elevation="2" Class="pa-4">
+          <MudText Typo="Typo.h6" Class="mb-3">Current Store Information</MudText>
+          @if (_storeInfo != null)
+          {
+            <MudGrid>
+              <MudItem xs="12" md="6">
+                <MudText><strong>Store Type:</strong> @_storeInfo.StoreType</MudText>
+              </MudItem>
+              <MudItem xs="12" md="6">
+                <MudText><strong>Entry Count:</strong> @_storeInfo.EntryCount</MudText>
+              </MudItem>
+              <MudItem xs="12" md="6">
+                <MudText><strong>Size:</strong> @FormatBytes(_storeInfo.SizeBytes)</MudText>
+              </MudItem>
+              <MudItem xs="12" md="6">
+                <MudText><strong>Last Modified:</strong> @(_storeInfo.LastModified?.ToString("g") ?? "N/A")</MudText>
+              </MudItem>
+              <MudItem xs="12">
+                <MudText Typo="Typo.caption">@_storeInfo.Location</MudText>
+              </MudItem>
+            </MudGrid>
+          }
+          else
+          {
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+          }
+        </MudPaper>
+
+        <!-- Import/Export Section -->
+        <MudPaper Elevation="2" Class="pa-4">
+          <MudText Typo="Typo.h6" Class="mb-3">Import / Export</MudText>
+          <MudStack Row="true" Spacing="2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" 
+                       OnClick="@(() => ExportConfigurationAsync("json"))"
+                       StartIcon="@Icons.Material.Filled.Download">
+              Export JSON
+            </MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Secondary" 
+                       OnClick="@(() => ExportConfigurationAsync("radiobak"))"
+                       StartIcon="@Icons.Material.Filled.Download">
+              Export Backup
+            </MudButton>
+            <MudFileUpload T="IBrowserFile" Accept=".json,.radiobak" FilesChanged="ImportConfigurationAsync">
+              <ActivatorContent>
+                <MudButton Variant="Variant.Filled" Color="Color.Info"
+                           StartIcon="@Icons.Material.Filled.Upload"
+                           HtmlTag="label">
+                  Import
+                </MudButton>
+              </ActivatorContent>
+            </MudFileUpload>
+          </MudStack>
+        </MudPaper>
+
+        <!-- Store Comparison Section -->
+        <MudPaper Elevation="2" Class="pa-4">
+          <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+            <MudText Typo="Typo.h6">Store Comparison</MudText>
+            <MudSpacer />
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" 
+                       OnClick="LoadStoreComparisonAsync"
+                       StartIcon="@Icons.Material.Filled.Refresh"
+                       Disabled="@_isLoadingComparison">
+              @if (_isLoadingComparison) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+              Refresh
+            </MudButton>
+          </MudStack>
+
+          @if (_comparison != null)
+          {
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+              JSON: @_comparison.JsonEntryCount entries | SQLite: @_comparison.SqliteEntryCount entries | 
+              Differences: @_comparison.Differences.Count(d => d.Status != "Same")
+            </MudAlert>
+
+            @if (_comparison.Differences.Any(d => d.Status != "Same"))
+            {
+              <MudStack Row="true" Spacing="2" Class="mb-2">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                           OnClick="@(() => ReconcileSelectedAsync("json", "sqlite"))"
+                           Disabled="@(!_selectedDifferences.Any() || _isSaving)">
+                  Copy JSON → SQLite (@_selectedDifferences.Count)
+                </MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small"
+                           OnClick="@(() => ReconcileSelectedAsync("sqlite", "json"))"
+                           Disabled="@(!_selectedDifferences.Any() || _isSaving)">
+                  Copy SQLite → JSON (@_selectedDifferences.Count)
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                           OnClick="SelectAllDifferences">
+                  Select All Differences
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                           OnClick="ClearSelection">
+                  Clear Selection
+                </MudButton>
+              </MudStack>
+
+              <MudTable Items="@_comparison.Differences" Dense="true" Hover="true" 
+                        FixedHeader="true" Height="400px">
+                <HeaderContent>
+                  <MudTh Style="width:50px"></MudTh>
+                  <MudTh>Key</MudTh>
+                  <MudTh>JSON Value</MudTh>
+                  <MudTh>SQLite Value</MudTh>
+                  <MudTh>Status</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                  <MudTd>
+                    @if (context.Status != "Same")
+                    {
+                      <MudCheckBox T="bool" 
+                                   Value="@_selectedDifferences.Contains(context.Key)"
+                                   ValueChanged="@((bool val) => ToggleDifferenceSelection(context.Key, val))"
+                                   Color="Color.Primary" />
+                    }
+                  </MudTd>
+                  <MudTd>
+                    <MudText Typo="Typo.caption">@context.Key</MudText>
+                  </MudTd>
+                  <MudTd>
+                    <MudText Typo="Typo.caption">@(context.JsonValue ?? "-")</MudText>
+                  </MudTd>
+                  <MudTd>
+                    <MudText Typo="Typo.caption">@(context.SqliteValue ?? "-")</MudText>
+                  </MudTd>
+                  <MudTd>
+                    <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(context.Status)">
+                      @context.Status
+                    </MudChip>
+                  </MudTd>
+                </RowTemplate>
+              </MudTable>
+            }
+            else
+            {
+              <MudAlert Severity="Severity.Success">
+                All configuration entries are in sync between JSON and SQLite stores.
+              </MudAlert>
+            }
+          }
+          else if (_isLoadingComparison)
+          {
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+            <MudText Class="ml-2">Loading comparison...</MudText>
+          }
+          else
+          {
+            <MudText Color="Color.Default">Click Refresh to compare stores</MudText>
+          }
+        </MudPaper>
+
+      </MudStack>
+    </MudTabPanel>
+
   </MudTabs>
 </MudContainer>
 
@@ -824,6 +1144,25 @@
   private FilePlayerPreferencesDto? _filePlayerPreferences;
   private RadioPreferencesDto? _radioPreferences;
   private GenericSourcePreferencesDto? _genericSourcePreferences;
+
+  // Secrets
+  private SpotifySecretsDto? _spotifySecrets;
+  private TTSSecretsDto? _ttsSecrets;
+  private AcoustIdSecretDto? _acoustIdSecret;
+  
+  // Secrets visibility toggles
+  private bool _showSpotifyClientId = false;
+  private bool _showSpotifyClientSecret = false;
+  private bool _showSpotifyRefreshToken = false;
+  private bool _showGoogleApiKey = false;
+  private bool _showAzureApiKey = false;
+  private bool _showAcoustIdApiKey = false;
+
+  // Store Management (Phase 5)
+  private ConfigurationStoreInfoDto? _storeInfo;
+  private ConfigurationComparisonDto? _comparison;
+  private HashSet<string> _selectedDifferences = new();
+  private bool _isLoadingComparison = false;
 
   // Output configuration individual fields (for binding)
   private bool _localOutputEnabled;
@@ -867,10 +1206,14 @@
     await LoadSystemStatsAsync();
     await LoadConfigurationAsync();
     await LoadPreferencesAsync();
+    await LoadSecretsAsync();
     await LoadLogsAsync();
     await LoadEventSourcesAsync();
     await LoadTTSEnginesAsync();
     await LoadNotificationSoundsAsync();
+    
+    // Load store info (Phase 5)
+    _storeInfo = await ConfigApi.GetStoreInfoAsync();
 
     // Setup SignalR for real-time event source updates
     await InitializeSignalRAsync();
@@ -1633,6 +1976,405 @@
     finally
     {
       _isSaving = false;
+    }
+  }
+
+  // ========== Secrets Management ==========
+
+  private async Task LoadSecretsAsync()
+  {
+    try
+    {
+      // Load or create secrets with default values (empty)
+      _spotifySecrets = await LoadOrCreateSecretAsync<SpotifySecretsDto>("spotify");
+      _ttsSecrets = await LoadOrCreateSecretAsync<TTSSecretsDto>("tts");
+      _acoustIdSecret = await LoadOrCreateSecretAsync<AcoustIdSecretDto>("acoustid");
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error loading secrets");
+      // Continue even if secrets fail to load
+    }
+  }
+
+  private async Task<T> LoadOrCreateSecretAsync<T>(string section) where T : class, new()
+  {
+    try
+    {
+      var secret = await ConfigApi.GetConfigurationAsync<T>(section);
+      if (secret == null)
+      {
+        // Create empty in-memory object without persisting until user explicitly saves
+        secret = new T();
+        Logger.LogInformation("Secret section {Section} not found, creating empty in-memory object", section);
+      }
+      return secret;
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to load secret {Section}, using default", section);
+      return new T();
+    }
+  }
+
+  /// <summary>
+  /// Generic method to save secrets and hide visibility toggles after successful save
+  /// </summary>
+  private async Task SaveSecretsAsync<T>(string section, T? secrets, string displayName, params Action[] hideVisibilityToggles) where T : class
+  {
+    _isSaving = true;
+    try
+    {
+      if (secrets == null) return;
+      
+      var success = await ConfigApi.UpdateConfigurationAsync(section, secrets);
+      if (success)
+      {
+        Logger.LogInformation("{DisplayName} secrets updated successfully", displayName);
+        Snackbar.Add($"{displayName} secrets saved and encrypted successfully", Severity.Success);
+        // Hide all visibility toggles
+        foreach (var hideToggle in hideVisibilityToggles)
+        {
+          hideToggle?.Invoke();
+        }
+        StateHasChanged();
+      }
+      else
+      {
+        Snackbar.Add($"Failed to save {displayName} secrets", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error saving {DisplayName} secrets", displayName);
+      Snackbar.Add($"Error saving {displayName} secrets: {ex.Message}", Severity.Error);
+    }
+    finally
+    {
+      _isSaving = false;
+    }
+  }
+
+  /// <summary>
+  /// Generic method to clear secrets with confirmation dialog
+  /// </summary>
+  private async Task ClearSecretsAsync<T>(string section, T? secrets, string displayName, Action clearFields) where T : class
+  {
+    bool? result = await DialogService.ShowMessageBox(
+      "Confirm Clear Secrets",
+      $"Are you sure you want to clear all {displayName} secrets? This action cannot be undone.",
+      yesText: "Clear", 
+      cancelText: "Cancel");
+
+    if (result == true)
+    {
+      _isSaving = true;
+      try
+      {
+        if (secrets != null)
+        {
+          clearFields?.Invoke();
+          
+          var success = await ConfigApi.UpdateConfigurationAsync(section, secrets);
+          if (success)
+          {
+            Logger.LogInformation("{DisplayName} secrets cleared successfully", displayName);
+            Snackbar.Add($"{displayName} secrets cleared successfully", Severity.Success);
+            StateHasChanged();
+          }
+          else
+          {
+            Snackbar.Add($"Failed to clear {displayName} secrets", Severity.Error);
+          }
+        }
+      }
+      catch (Exception ex)
+      {
+        Logger.LogError(ex, "Error clearing {DisplayName} secrets", displayName);
+        Snackbar.Add($"Error clearing {displayName} secrets: {ex.Message}", Severity.Error);
+      }
+      finally
+      {
+        _isSaving = false;
+      }
+    }
+  }
+
+  private async Task SaveSpotifySecretsAsync()
+  {
+    await SaveSecretsAsync(
+      "spotify", 
+      _spotifySecrets, 
+      "Spotify",
+      () => _showSpotifyClientId = false,
+      () => _showSpotifyClientSecret = false,
+      () => _showSpotifyRefreshToken = false
+    );
+  }
+
+  private async Task ClearSpotifySecretsAsync()
+  {
+    await ClearSecretsAsync(
+      "spotify",
+      _spotifySecrets,
+      "Spotify",
+      () =>
+      {
+        if (_spotifySecrets != null)
+        {
+          _spotifySecrets.ClientID = "";
+          _spotifySecrets.ClientSecret = "";
+          _spotifySecrets.RefreshToken = "";
+        }
+      }
+    );
+  }
+
+  private async Task SaveTTSSecretsAsync()
+  {
+    await SaveSecretsAsync(
+      "tts",
+      _ttsSecrets,
+      "TTS",
+      () => _showGoogleApiKey = false,
+      () => _showAzureApiKey = false
+    );
+  }
+
+  private async Task ClearTTSSecretsAsync()
+  {
+    await ClearSecretsAsync(
+      "tts",
+      _ttsSecrets,
+      "TTS",
+      () =>
+      {
+        if (_ttsSecrets != null)
+        {
+          _ttsSecrets.GoogleAPIKey = "";
+          _ttsSecrets.AzureAPIKey = "";
+          _ttsSecrets.AzureRegion = "";
+        }
+      }
+    );
+  }
+
+  private async Task SaveAcoustIdSecretAsync()
+  {
+    await SaveSecretsAsync(
+      "acoustid",
+      _acoustIdSecret,
+      "AcoustID",
+      () => _showAcoustIdApiKey = false
+    );
+  }
+
+  private async Task ClearAcoustIdSecretAsync()
+  {
+    await ClearSecretsAsync(
+      "acoustid",
+      _acoustIdSecret,
+      "AcoustID",
+      () =>
+      {
+        if (_acoustIdSecret != null)
+        {
+          _acoustIdSecret.ApiKey = "";
+        }
+      }
+    );
+  }
+
+  // ========== Phase 5: Store Management Methods ==========
+
+  private string FormatBytes(long bytes)
+  {
+    string[] sizes = { "B", "KB", "MB", "GB" };
+    double len = bytes;
+    int order = 0;
+    while (len >= 1024 && order < sizes.Length - 1)
+    {
+      order++;
+      len = len / 1024;
+    }
+    return $"{len:0.##} {sizes[order]}";
+  }
+
+  private Color GetStatusColor(string status)
+  {
+    return status switch
+    {
+      "OnlyInJson" => Color.Primary,
+      "OnlyInSqlite" => Color.Secondary,
+      "Different" => Color.Warning,
+      "Same" => Color.Success,
+      _ => Color.Default
+    };
+  }
+
+  private async Task LoadStoreComparisonAsync()
+  {
+    _isLoadingComparison = true;
+    _selectedDifferences.Clear();
+    try
+    {
+      _comparison = await ConfigApi.CompareStoresAsync();
+      if (_comparison == null)
+      {
+        Snackbar.Add("Failed to load store comparison", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error loading store comparison");
+      Snackbar.Add($"Error loading comparison: {ex.Message}", Severity.Error);
+    }
+    finally
+    {
+      _isLoadingComparison = false;
+      StateHasChanged();
+    }
+  }
+
+  private void ToggleDifferenceSelection(string key, bool selected)
+  {
+    if (selected)
+    {
+      _selectedDifferences.Add(key);
+    }
+    else
+    {
+      _selectedDifferences.Remove(key);
+    }
+  }
+
+  private void SelectAllDifferences()
+  {
+    if (_comparison != null)
+    {
+      foreach (var diff in _comparison.Differences.Where(d => d.Status != "Same"))
+      {
+        _selectedDifferences.Add(diff.Key);
+      }
+    }
+  }
+
+  private void ClearSelection()
+  {
+    _selectedDifferences.Clear();
+  }
+
+  private async Task ReconcileSelectedAsync(string source, string target)
+  {
+    if (!_selectedDifferences.Any())
+    {
+      Snackbar.Add("No differences selected", Severity.Warning);
+      return;
+    }
+
+    var sourceName = source.ToUpperInvariant();
+    var targetName = target.ToUpperInvariant();
+
+    bool? result = await DialogService.ShowMessageBox(
+      "Confirm Reconciliation",
+      $"Copy {_selectedDifferences.Count} selected entries from {sourceName} to {targetName}?",
+      yesText: "Copy",
+      cancelText: "Cancel");
+
+    if (result == true)
+    {
+      _isSaving = true;
+      try
+      {
+        var request = new ReconcileConfigurationRequestDto
+        {
+          SourceStore = source,
+          TargetStore = target,
+          Keys = _selectedDifferences.ToList()
+        };
+
+        var success = await ConfigApi.ReconcileStoresAsync(request);
+        if (success)
+        {
+          Snackbar.Add($"Successfully copied {_selectedDifferences.Count} entries", Severity.Success);
+          _selectedDifferences.Clear();
+          // Reload comparison
+          await LoadStoreComparisonAsync();
+        }
+        else
+        {
+          Snackbar.Add("Failed to reconcile stores", Severity.Error);
+        }
+      }
+      catch (Exception ex)
+      {
+        Logger.LogError(ex, "Error reconciling stores");
+        Snackbar.Add($"Error reconciling stores: {ex.Message}", Severity.Error);
+      }
+      finally
+      {
+        _isSaving = false;
+      }
+    }
+  }
+
+  private async Task ExportConfigurationAsync(string format)
+  {
+    try
+    {
+      var bytes = await ConfigApi.ExportConfigurationAsync(format);
+      if (bytes != null)
+      {
+        var fileName = $"radio-config-{DateTime.Now:yyyyMMdd-HHmmss}.{format}";
+        await JSRuntime.InvokeVoidAsync("downloadFile", fileName, Convert.ToBase64String(bytes));
+        Snackbar.Add($"Configuration exported as {format.ToUpper()}", Severity.Success);
+      }
+      else
+      {
+        Snackbar.Add("Failed to export configuration", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error exporting configuration");
+      Snackbar.Add($"Error exporting: {ex.Message}", Severity.Error);
+    }
+  }
+
+  private async Task ImportConfigurationAsync(IBrowserFile? file)
+  {
+    if (file == null) return;
+
+    bool? result = await DialogService.ShowMessageBox(
+      "Confirm Import",
+      $"Import configuration from {file.Name}? This will overwrite existing values.",
+      yesText: "Import",
+      cancelText: "Cancel");
+
+    if (result == true)
+    {
+      try
+      {
+        using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024); // 10MB max
+        var success = await ConfigApi.ImportConfigurationAsync(stream, file.Name);
+        
+        if (success)
+        {
+          Snackbar.Add("Configuration imported successfully", Severity.Success);
+          // Reload store info
+          _storeInfo = await ConfigApi.GetStoreInfoAsync();
+          StateHasChanged();
+        }
+        else
+        {
+          Snackbar.Add("Failed to import configuration", Severity.Error);
+        }
+      }
+      catch (Exception ex)
+      {
+        Logger.LogError(ex, "Error importing configuration");
+        Snackbar.Add($"Error importing: {ex.Message}", Severity.Error);
+      }
     }
   }
 

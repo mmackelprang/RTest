@@ -571,4 +571,55 @@ public class GenericSourcePreferencesDto
   public string USBPort { get; set; } = "";
 }
 
-// TODO: Phase 3 - Secrets DTOs will be added when implementing Secrets Management UI
+// Secrets DTOs
+public class SpotifySecretsDto
+{
+  public string ClientID { get; set; } = "";
+  public string ClientSecret { get; set; } = "";
+  public string RefreshToken { get; set; } = "";
+}
+
+public class TTSSecretsDto
+{
+  public string GoogleAPIKey { get; set; } = "";
+  public string AzureAPIKey { get; set; } = "";
+  public string AzureRegion { get; set; } = "";
+}
+
+public class AcoustIdSecretDto
+{
+  public string ApiKey { get; set; } = "";
+}
+
+// ========== Phase 5: Configuration Store Management DTOs ==========
+
+public class ConfigurationStoreInfoDto
+{
+  public string StoreType { get; set; } = "";
+  public string Location { get; set; } = "";
+  public long SizeBytes { get; set; }
+  public DateTime? LastModified { get; set; }
+  public int EntryCount { get; set; }
+}
+
+public class ConfigurationComparisonDto
+{
+  public int JsonEntryCount { get; set; }
+  public int SqliteEntryCount { get; set; }
+  public List<ConfigurationDifferenceDto> Differences { get; set; } = new();
+}
+
+public class ConfigurationDifferenceDto
+{
+  public string Key { get; set; } = "";
+  public string? JsonValue { get; set; }
+  public string? SqliteValue { get; set; }
+  public string Status { get; set; } = "";
+}
+
+public class ReconcileConfigurationRequestDto
+{
+  public string SourceStore { get; set; } = "";
+  public string TargetStore { get; set; } = "";
+  public List<string> Keys { get; set; } = new();
+}

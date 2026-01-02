@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Radio.Web.Models;
 
 namespace Radio.Web.Services.ApiClients;
 
@@ -123,6 +124,97 @@ public class ConfigurationApiService
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to reload configuration");
+      return false;
+    }
+  }
+
+  // ========== Phase 5: Configuration Store Management Methods ==========
+
+  public async Task<ConfigurationStoreInfoDto?> GetStoreInfoAsync(string? storeType = null, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var url = "/api/configuration/store-info";
+      if (!string.IsNullOrEmpty(storeType))
+      {
+        url += $"?storeType={storeType}";
+      }
+
+      return await _httpClient.GetFromJsonAsync<ConfigurationStoreInfoDto>(url, JsonOptions, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to get store info");
+      return null;
+    }
+  }
+
+  public async Task<ConfigurationComparisonDto?> CompareStoresAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      return await _httpClient.GetFromJsonAsync<ConfigurationComparisonDto>("/api/configuration/compare", JsonOptions, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to compare stores");
+      return null;
+    }
+  }
+
+  public async Task<bool> ReconcileStoresAsync(ReconcileConfigurationRequestDto request, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var response = await _httpClient.PostAsJsonAsync("/api/configuration/reconcile", request, cancellationToken);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to reconcile stores");
+      return false;
+    }
+  }
+
+  public async Task<byte[]?> ExportConfigurationAsync(string format = "json", string? storeType = null, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var url = $"/api/configuration/export?format={format}";
+      if (!string.IsNullOrEmpty(storeType))
+      {
+        url += $"&storeType={storeType}";
+      }
+
+      return await _httpClient.GetByteArrayAsync(url, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to export configuration");
+      return null;
+    }
+  }
+
+  public async Task<bool> ImportConfigurationAsync(Stream fileStream, string fileName, string? targetStore = null, bool overwrite = true, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      using var content = new MultipartFormDataContent();
+      var streamContent = new StreamContent(fileStream);
+      content.Add(streamContent, "file", fileName);
+
+      var url = $"/api/configuration/import?overwrite={overwrite}";
+      if (!string.IsNullOrEmpty(targetStore))
+      {
+        url += $"&targetStore={targetStore}";
+      }
+
+      var response = await _httpClient.PostAsync(url, content, cancellationToken);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to import configuration");
       return false;
     }
   }
