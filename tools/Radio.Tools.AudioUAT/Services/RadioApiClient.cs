@@ -231,6 +231,12 @@ public class RadioApiClient : IDisposable
   public async Task<bool> RemoveFromQueueAsync(int index, CancellationToken ct = default)
   {
     var response = await _httpClient.DeleteAsync($"/api/queue/{index}", ct);
+    // Don't throw if queue source not active
+    if (response.StatusCode == System.Net.HttpStatusCode.BadRequest ||
+        response.StatusCode == System.Net.HttpStatusCode.NotFound)
+    {
+      return false;
+    }
     return response.IsSuccessStatusCode;
   }
 
@@ -241,6 +247,12 @@ public class RadioApiClient : IDisposable
   {
     var request = new { FromIndex = fromIndex, ToIndex = toIndex };
     var response = await _httpClient.PostAsJsonAsync("/api/queue/move", request, _jsonOptions, ct);
+    // Don't throw if queue source not active
+    if (response.StatusCode == System.Net.HttpStatusCode.BadRequest ||
+        response.StatusCode == System.Net.HttpStatusCode.NotFound)
+    {
+      return null;
+    }
     response.EnsureSuccessStatusCode();
     return await response.Content.ReadFromJsonAsync<List<QueueItemResponse>>(_jsonOptions, ct);
   }
@@ -251,6 +263,12 @@ public class RadioApiClient : IDisposable
   public async Task<PlaybackStateResponse?> JumpToQueueIndexAsync(int index, CancellationToken ct = default)
   {
     var response = await _httpClient.PostAsync($"/api/queue/jump/{index}", null, ct);
+    // Don't throw if queue source not active
+    if (response.StatusCode == System.Net.HttpStatusCode.BadRequest ||
+        response.StatusCode == System.Net.HttpStatusCode.NotFound)
+    {
+      return null;
+    }
     response.EnsureSuccessStatusCode();
     return await response.Content.ReadFromJsonAsync<PlaybackStateResponse>(_jsonOptions, ct);
   }

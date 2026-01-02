@@ -12,17 +12,19 @@
   - `MoveQueueItemAsync(from, to)` - Reorder queue items
   - `JumpToQueueIndexAsync(index)` - Jump to specific queue position
 
-### Phase 15.1: Audio Playback and Control (9/10 tests - 90% Complete)
+### Phase 15.1: Audio Playback and Control (9 tests - Complete)
 ✅ Fully implemented and integrated into AudioUAT tool:
 - PLAY-001: Start playback from stopped state
 - PLAY-002: Pause and resume playback
 - PLAY-003: Stop playback and verify cleanup
-- PLAY-004: Set master volume (0-100 range)
+- PLAY-004: Set master volume (0.0-1.0 range)
 - PLAY-005: Set balance (-100 to +100 range)
 - PLAY-006: Mute and unmute audio
 - PLAY-007: Get current playback state
 - PLAY-009: Skip to next track (when supported)
 - PLAY-010: Skip to previous track (when supported)
+
+**Note**: PLAY-008 is reserved for future playback position/seek testing.
 
 **Location**: `/tools/Radio.Tools.AudioUAT/Phases/Phase15/AudioPlaybackApiTests.cs`
 

@@ -202,7 +202,7 @@ public class TestPlaybackStop : IPhaseTest
 }
 
 /// <summary>
-/// PLAY-004: Set master volume (0-100 range).
+/// PLAY-004: Set master volume (0.0-1.0 range).
 /// </summary>
 public class TestVolumeControl : IPhaseTest
 {
@@ -289,8 +289,8 @@ public class TestBalanceControl : IPhaseTest
         // Convert back to -100 to 100 range
         var returnedBalance = (int)(result.Balance * 100);
         
-        // Allow small differences due to floating point conversion
-        if (Math.Abs(returnedBalance - testBal) > 2)
+        // Allow tolerance of 1 for floating point conversion (e.g., -100 / 100.0f * 100 = -99.99999)
+        if (Math.Abs(returnedBalance - testBal) > 1)
         {
           return TestResult.Fail(TestId, $"Balance mismatch: set {testBal}, got {returnedBalance}");
         }
