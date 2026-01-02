@@ -225,6 +225,36 @@ public class RadioApiClient : IDisposable
     return response.IsSuccessStatusCode;
   }
 
+  /// <summary>
+  /// Removes a track from the queue by index.
+  /// </summary>
+  public async Task<bool> RemoveFromQueueAsync(int index, CancellationToken ct = default)
+  {
+    var response = await _httpClient.DeleteAsync($"/api/queue/{index}", ct);
+    return response.IsSuccessStatusCode;
+  }
+
+  /// <summary>
+  /// Moves a track in the queue from one position to another.
+  /// </summary>
+  public async Task<List<QueueItemResponse>?> MoveQueueItemAsync(int fromIndex, int toIndex, CancellationToken ct = default)
+  {
+    var request = new { FromIndex = fromIndex, ToIndex = toIndex };
+    var response = await _httpClient.PostAsJsonAsync("/api/queue/move", request, _jsonOptions, ct);
+    response.EnsureSuccessStatusCode();
+    return await response.Content.ReadFromJsonAsync<List<QueueItemResponse>>(_jsonOptions, ct);
+  }
+
+  /// <summary>
+  /// Jumps to a specific index in the queue.
+  /// </summary>
+  public async Task<PlaybackStateResponse?> JumpToQueueIndexAsync(int index, CancellationToken ct = default)
+  {
+    var response = await _httpClient.PostAsync($"/api/queue/jump/{index}", null, ct);
+    response.EnsureSuccessStatusCode();
+    return await response.Content.ReadFromJsonAsync<PlaybackStateResponse>(_jsonOptions, ct);
+  }
+
   #endregion
 
   #region Devices API
@@ -264,6 +294,16 @@ public class RadioApiClient : IDisposable
     response.EnsureSuccessStatusCode();
     var result = await response.Content.ReadFromJsonAsync<PlaybackStateResponse>(_jsonOptions, ct);
     return new VolumeResponse { Volume = result?.Volume ?? 0, Balance = result?.Balance ?? 0 };
+  }
+
+  /// <summary>
+  /// Toggles the mute state.
+  /// </summary>
+  public async Task<MuteResponse?> ToggleMuteAsync(CancellationToken ct = default)
+  {
+    var response = await _httpClient.PostAsync("/api/audio/mute", null, ct);
+    response.EnsureSuccessStatusCode();
+    return await response.Content.ReadFromJsonAsync<MuteResponse>(_jsonOptions, ct);
   }
 
   #endregion
@@ -502,6 +542,11 @@ public class VolumeResponse
   public float Volume { get; set; }
   public bool IsMuted { get; set; }
   public float Balance { get; set; }
+}
+
+public class MuteResponse
+{
+  public bool IsMuted { get; set; }
 }
 
 public class NowPlayingResponse
