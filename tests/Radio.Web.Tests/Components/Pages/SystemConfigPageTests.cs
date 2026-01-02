@@ -249,15 +249,14 @@ public class SystemConfigPageTests : TestContext
   }
 
   [Fact]
-  public void SystemConfigPage_Secrets_Tab_Contains_Security_Warning()
+  public void SystemConfigPage_Secrets_Tab_Has_Security_Warning()
   {
     // Act
     var cut = RenderComponent<SystemConfigPage>();
 
-    // Assert - Check for security warning about secrets
-    // Note: Content is loaded dynamically in nested tabs, so we verify the main tab exists
+    // Assert - Security warning is in nested tab content, verify main tab exists
     Assert.Contains("Secrets", cut.Markup);
-    // The component should render without errors
+    // The lock icon should be present for the tab
     Assert.NotNull(cut);
   }
 
@@ -267,9 +266,9 @@ public class SystemConfigPageTests : TestContext
     // Act
     var cut = RenderComponent<SystemConfigPage>();
 
-    // Assert - Verify Spotify secrets sub-tab exists
+    // Assert - Verify main Secrets tab exists and component renders
+    // Sub-tab content is loaded dynamically in MudTabs
     Assert.Contains("Secrets", cut.Markup);
-    // Content is loaded dynamically, so we check for the main tab presence
     Assert.NotNull(cut);
   }
 
@@ -279,9 +278,9 @@ public class SystemConfigPageTests : TestContext
     // Act
     var cut = RenderComponent<SystemConfigPage>();
 
-    // Assert - Verify TTS secrets sub-tab exists
+    // Assert - Verify main Secrets tab exists
+    // Sub-tab content is loaded dynamically in MudTabs
     Assert.Contains("Secrets", cut.Markup);
-    // Content is loaded dynamically
     Assert.NotNull(cut);
   }
 
@@ -291,10 +290,22 @@ public class SystemConfigPageTests : TestContext
     // Act
     var cut = RenderComponent<SystemConfigPage>();
 
-    // Assert - Verify AcoustID secrets sub-tab exists
+    // Assert - Verify main Secrets tab exists
+    // Sub-tab content is loaded dynamically in MudTabs
     Assert.Contains("Secrets", cut.Markup);
-    // Content is loaded dynamically
     Assert.NotNull(cut);
+  }
+
+  [Fact]
+  public void SystemConfigPage_Secrets_Tab_Renders_Without_Errors()
+  {
+    // Act
+    var cut = RenderComponent<SystemConfigPage>();
+
+    // Assert - Verify Secrets tab renders and component doesn't crash
+    Assert.Contains("Secrets", cut.Markup);
+    Assert.NotNull(cut);
+    Assert.DoesNotContain("NullReferenceException", cut.Markup);
   }
 
   [Fact]

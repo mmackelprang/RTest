@@ -890,10 +890,6 @@
               <MudItem xs="12">
                 <MudTextField T="string" @bind-Value="_ttsSecrets.AzureRegion" Label="Azure Region"
                               Variant="Variant.Outlined" 
-                              InputType="@(_showAzureRegion ? InputType.Text : InputType.Password)"
-                              Adornment="Adornment.End"
-                              AdornmentIcon="@(_showAzureRegion ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
-                              OnAdornmentClick="@(() => _showAzureRegion = !_showAzureRegion)"
                               HelperText="Azure region (e.g., eastus, westus2)" />
               </MudItem>
               <MudItem xs="12">
@@ -1000,7 +996,6 @@
   private bool _showSpotifyRefreshToken = false;
   private bool _showGoogleApiKey = false;
   private bool _showAzureApiKey = false;
-  private bool _showAzureRegion = false;
   private bool _showAcoustIdApiKey = false;
 
   // Output configuration individual fields (for binding)
@@ -1840,46 +1835,50 @@
       var secret = await ConfigApi.GetConfigurationAsync<T>(section);
       if (secret == null)
       {
+        // Create empty in-memory object without persisting until user explicitly saves
         secret = new T();
-        Logger.LogInformation("Secret section {Section} not found, creating with empty values", section);
-        await ConfigApi.UpdateConfigurationAsync(section, secret);
+        Logger.LogInformation("Secret section {Section} not found, creating empty in-memory object", section);
       }
       return secret;
     }
     catch (Exception ex)
     {
-      Logger.LogWarning(ex, "Failed to load or create secret {Section}, using default", section);
+      Logger.LogWarning(ex, "Failed to load secret {Section}, using default", section);
       return new T();
     }
   }
 
-  private async Task SaveSpotifySecretsAsync()
+  /// <summary>
+  /// Generic method to save secrets and hide visibility toggles after successful save
+  /// </summary>
+  private async Task SaveSecretsAsync<T>(string section, T? secrets, string displayName, params Action[] hideVisibilityToggles) where T : class
   {
     _isSaving = true;
     try
     {
-      if (_spotifySecrets == null) return;
+      if (secrets == null) return;
       
-      var success = await ConfigApi.UpdateConfigurationAsync("spotify", _spotifySecrets);
+      var success = await ConfigApi.UpdateConfigurationAsync(section, secrets);
       if (success)
       {
-        Logger.LogInformation("Spotify secrets updated successfully");
-        Snackbar.Add("Spotify secrets saved and encrypted successfully", Severity.Success);
-        // Hide secrets after save
-        _showSpotifyClientId = false;
-        _showSpotifyClientSecret = false;
-        _showSpotifyRefreshToken = false;
+        Logger.LogInformation("{DisplayName} secrets updated successfully", displayName);
+        Snackbar.Add($"{displayName} secrets saved and encrypted successfully", Severity.Success);
+        // Hide all visibility toggles
+        foreach (var hideToggle in hideVisibilityToggles)
+        {
+          hideToggle?.Invoke();
+        }
         StateHasChanged();
       }
       else
       {
-        Snackbar.Add("Failed to save Spotify secrets", Severity.Error);
+        Snackbar.Add($"Failed to save {displayName} secrets", Severity.Error);
       }
     }
     catch (Exception ex)
     {
-      Logger.LogError(ex, "Error saving Spotify secrets");
-      Snackbar.Add($"Error saving Spotify secrets: {ex.Message}", Severity.Error);
+      Logger.LogError(ex, "Error saving {DisplayName} secrets", displayName);
+      Snackbar.Add($"Error saving {displayName} secrets: {ex.Message}", Severity.Error);
     }
     finally
     {
@@ -1887,11 +1886,14 @@
     }
   }
 
-  private async Task ClearSpotifySecretsAsync()
+  /// <summary>
+  /// Generic method to clear secrets with confirmation dialog
+  /// </summary>
+  private async Task ClearSecretsAsync<T>(string section, T? secrets, string displayName, Action clearFields) where T : class
   {
     bool? result = await DialogService.ShowMessageBox(
       "Confirm Clear Secrets",
-      "Are you sure you want to clear all Spotify secrets? This action cannot be undone.",
+      $"Are you sure you want to clear all {displayName} secrets? This action cannot be undone.",
       yesText: "Clear", 
       cancelText: "Cancel");
 
@@ -1899,188 +1901,119 @@
     {
       _isSaving = true;
       try
+      {
+        if (secrets != null)
+        {
+          clearFields?.Invoke();
+          
+          var success = await ConfigApi.UpdateConfigurationAsync(section, secrets);
+          if (success)
+          {
+            Logger.LogInformation("{DisplayName} secrets cleared successfully", displayName);
+            Snackbar.Add($"{displayName} secrets cleared successfully", Severity.Success);
+            StateHasChanged();
+          }
+          else
+          {
+            Snackbar.Add($"Failed to clear {displayName} secrets", Severity.Error);
+          }
+        }
+      }
+      catch (Exception ex)
+      {
+        Logger.LogError(ex, "Error clearing {DisplayName} secrets", displayName);
+        Snackbar.Add($"Error clearing {displayName} secrets: {ex.Message}", Severity.Error);
+      }
+      finally
+      {
+        _isSaving = false;
+      }
+    }
+  }
+
+  private async Task SaveSpotifySecretsAsync()
+  {
+    await SaveSecretsAsync(
+      "spotify", 
+      _spotifySecrets, 
+      "Spotify",
+      () => _showSpotifyClientId = false,
+      () => _showSpotifyClientSecret = false,
+      () => _showSpotifyRefreshToken = false
+    );
+  }
+
+  private async Task ClearSpotifySecretsAsync()
+  {
+    await ClearSecretsAsync(
+      "spotify",
+      _spotifySecrets,
+      "Spotify",
+      () =>
       {
         if (_spotifySecrets != null)
         {
           _spotifySecrets.ClientID = "";
           _spotifySecrets.ClientSecret = "";
           _spotifySecrets.RefreshToken = "";
-          
-          var success = await ConfigApi.UpdateConfigurationAsync("spotify", _spotifySecrets);
-          if (success)
-          {
-            Logger.LogInformation("Spotify secrets cleared successfully");
-            Snackbar.Add("Spotify secrets cleared successfully", Severity.Success);
-            StateHasChanged();
-          }
-          else
-          {
-            Snackbar.Add("Failed to clear Spotify secrets", Severity.Error);
-          }
         }
       }
-      catch (Exception ex)
-      {
-        Logger.LogError(ex, "Error clearing Spotify secrets");
-        Snackbar.Add($"Error clearing Spotify secrets: {ex.Message}", Severity.Error);
-      }
-      finally
-      {
-        _isSaving = false;
-      }
-    }
+    );
   }
 
   private async Task SaveTTSSecretsAsync()
   {
-    _isSaving = true;
-    try
-    {
-      if (_ttsSecrets == null) return;
-      
-      var success = await ConfigApi.UpdateConfigurationAsync("tts", _ttsSecrets);
-      if (success)
-      {
-        Logger.LogInformation("TTS secrets updated successfully");
-        Snackbar.Add("TTS secrets saved and encrypted successfully", Severity.Success);
-        // Hide secrets after save
-        _showGoogleApiKey = false;
-        _showAzureApiKey = false;
-        _showAzureRegion = false;
-        StateHasChanged();
-      }
-      else
-      {
-        Snackbar.Add("Failed to save TTS secrets", Severity.Error);
-      }
-    }
-    catch (Exception ex)
-    {
-      Logger.LogError(ex, "Error saving TTS secrets");
-      Snackbar.Add($"Error saving TTS secrets: {ex.Message}", Severity.Error);
-    }
-    finally
-    {
-      _isSaving = false;
-    }
+    await SaveSecretsAsync(
+      "tts",
+      _ttsSecrets,
+      "TTS",
+      () => _showGoogleApiKey = false,
+      () => _showAzureApiKey = false
+    );
   }
 
   private async Task ClearTTSSecretsAsync()
   {
-    bool? result = await DialogService.ShowMessageBox(
-      "Confirm Clear Secrets",
-      "Are you sure you want to clear all TTS secrets? This action cannot be undone.",
-      yesText: "Clear", 
-      cancelText: "Cancel");
-
-    if (result == true)
-    {
-      _isSaving = true;
-      try
+    await ClearSecretsAsync(
+      "tts",
+      _ttsSecrets,
+      "TTS",
+      () =>
       {
         if (_ttsSecrets != null)
         {
           _ttsSecrets.GoogleAPIKey = "";
           _ttsSecrets.AzureAPIKey = "";
           _ttsSecrets.AzureRegion = "";
-          
-          var success = await ConfigApi.UpdateConfigurationAsync("tts", _ttsSecrets);
-          if (success)
-          {
-            Logger.LogInformation("TTS secrets cleared successfully");
-            Snackbar.Add("TTS secrets cleared successfully", Severity.Success);
-            StateHasChanged();
-          }
-          else
-          {
-            Snackbar.Add("Failed to clear TTS secrets", Severity.Error);
-          }
         }
       }
-      catch (Exception ex)
-      {
-        Logger.LogError(ex, "Error clearing TTS secrets");
-        Snackbar.Add($"Error clearing TTS secrets: {ex.Message}", Severity.Error);
-      }
-      finally
-      {
-        _isSaving = false;
-      }
-    }
+    );
   }
 
   private async Task SaveAcoustIdSecretAsync()
   {
-    _isSaving = true;
-    try
-    {
-      if (_acoustIdSecret == null) return;
-      
-      var success = await ConfigApi.UpdateConfigurationAsync("acoustid", _acoustIdSecret);
-      if (success)
-      {
-        Logger.LogInformation("AcoustID secret updated successfully");
-        Snackbar.Add("AcoustID secret saved and encrypted successfully", Severity.Success);
-        // Hide secret after save
-        _showAcoustIdApiKey = false;
-        StateHasChanged();
-      }
-      else
-      {
-        Snackbar.Add("Failed to save AcoustID secret", Severity.Error);
-      }
-    }
-    catch (Exception ex)
-    {
-      Logger.LogError(ex, "Error saving AcoustID secret");
-      Snackbar.Add($"Error saving AcoustID secret: {ex.Message}", Severity.Error);
-    }
-    finally
-    {
-      _isSaving = false;
-    }
+    await SaveSecretsAsync(
+      "acoustid",
+      _acoustIdSecret,
+      "AcoustID",
+      () => _showAcoustIdApiKey = false
+    );
   }
 
   private async Task ClearAcoustIdSecretAsync()
   {
-    bool? result = await DialogService.ShowMessageBox(
-      "Confirm Clear Secret",
-      "Are you sure you want to clear the AcoustID secret? This action cannot be undone.",
-      yesText: "Clear", 
-      cancelText: "Cancel");
-
-    if (result == true)
-    {
-      _isSaving = true;
-      try
+    await ClearSecretsAsync(
+      "acoustid",
+      _acoustIdSecret,
+      "AcoustID",
+      () =>
       {
         if (_acoustIdSecret != null)
         {
           _acoustIdSecret.ApiKey = "";
-          
-          var success = await ConfigApi.UpdateConfigurationAsync("acoustid", _acoustIdSecret);
-          if (success)
-          {
-            Logger.LogInformation("AcoustID secret cleared successfully");
-            Snackbar.Add("AcoustID secret cleared successfully", Severity.Success);
-            StateHasChanged();
-          }
-          else
-          {
-            Snackbar.Add("Failed to clear AcoustID secret", Severity.Error);
-          }
         }
       }
-      catch (Exception ex)
-      {
-        Logger.LogError(ex, "Error clearing AcoustID secret");
-        Snackbar.Add($"Error clearing AcoustID secret: {ex.Message}", Severity.Error);
-      }
-      finally
-      {
-        _isSaving = false;
-      }
-    }
+    );
   }
 
   public void Dispose()
