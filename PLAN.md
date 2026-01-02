@@ -31,7 +31,7 @@ A modern audio command center hosted on a Raspberry Pi 5, encased in a vintage c
 ## Project Overview
 
 ### Reference Documentation
-- `/PROJECTPLAN.md` - High-level project overview
+- `/archive/PROJECTPLAN.md` - High-level project overview
 - `/design/CONFIGURATION.md` - Configuration infrastructure design
 - `/design/AUDIO.md` - Audio implementation specification
 - `/design/AUDIO_ARCHITECTURE.md` - SoundFlow audio architecture
@@ -181,7 +181,7 @@ Create a new .NET 8 solution for the Radio Console project with SoundFlow integr
 
 ### Context
 Reference the following design documents:
-- `/PROJECTPLAN.md` - Project overview
+- `/archive/PROJECTPLAN.md` - Project overview
 - `/design/CONFIGURATION.md` - Configuration infrastructure
 - `/design/AUDIO_ARCHITECTURE.md` - Audio system architecture
 
