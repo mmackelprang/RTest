@@ -426,4 +426,396 @@ public class ConfigurationController : ControllerBase
       return StatusCode(500, new { error = "Failed to update configuration" });
     }
   }
+
+  // ========== Phase 5: Configuration Store Management Endpoints ==========
+
+  /// <summary>
+  /// Gets metadata about the current configuration store.
+  /// </summary>
+  /// <param name="storeType">Store type to query (json or sqlite). Defaults to current store.</param>
+  /// <returns>Store metadata including type, location, size, and entry count.</returns>
+  [HttpGet("store-info")]
+  [ProducesResponseType(typeof(ConfigurationStoreInfoDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+  [ProducesResponseType(StatusCodes.Status501NotImplemented)]
+  public async Task<ActionResult<ConfigurationStoreInfoDto>> GetStoreInfo([FromQuery] string? storeType = null)
+  {
+    try
+    {
+      if (_configurationManager == null)
+      {
+        return StatusCode(501, new { error = "Configuration manager not available" });
+      }
+
+      // Determine which store to query
+      var targetStoreType = _configurationManager.CurrentStoreType;
+      if (!string.IsNullOrEmpty(storeType))
+      {
+        targetStoreType = storeType.ToLowerInvariant() == "sqlite" 
+          ? Radio.Infrastructure.Configuration.Models.ConfigurationStoreType.Sqlite 
+          : Radio.Infrastructure.Configuration.Models.ConfigurationStoreType.Json;
+      }
+
+      // List all stores and find the one matching our criteria
+      var stores = await _configurationManager.ListStoresAsync();
+      var targetStore = stores.FirstOrDefault(s => s.StoreType == targetStoreType);
+
+      if (targetStore == null)
+      {
+        return NotFound(new { error = $"No {targetStoreType} store found" });
+      }
+
+      var storeInfo = new ConfigurationStoreInfoDto
+      {
+        StoreType = targetStoreType.ToString(),
+        Location = targetStore.Path,
+        SizeBytes = targetStore.SizeBytes,
+        LastModified = targetStore.LastModifiedAt.DateTime,
+        EntryCount = targetStore.EntryCount
+      };
+
+      return Ok(storeInfo);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error getting store info");
+      return StatusCode(500, new { error = "Failed to get store info", details = ex.Message });
+    }
+  }
+
+  /// <summary>
+  /// Compares configuration between JSON and SQLite stores.
+  /// </summary>
+  /// <returns>Comparison results showing differences between stores.</returns>
+  [HttpGet("compare")]
+  [ProducesResponseType(typeof(ConfigurationComparisonDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+  [ProducesResponseType(StatusCodes.Status501NotImplemented)]
+  public async Task<ActionResult<ConfigurationComparisonDto>> CompareStores()
+  {
+    try
+    {
+      if (_configurationManager == null)
+      {
+        return StatusCode(501, new { error = "Configuration manager not available" });
+      }
+
+      var stores = await _configurationManager.ListStoresAsync();
+      var jsonStore = stores.FirstOrDefault(s => s.StoreType == Radio.Infrastructure.Configuration.Models.ConfigurationStoreType.Json);
+      var sqliteStore = stores.FirstOrDefault(s => s.StoreType == Radio.Infrastructure.Configuration.Models.ConfigurationStoreType.Sqlite);
+
+      if (jsonStore == null || sqliteStore == null)
+      {
+        return BadRequest(new { error = "Both JSON and SQLite stores must exist for comparison" });
+      }
+
+      // Get all entries from both stores
+      var jsonStoreInstance = await _configurationManager.GetStoreAsync("config");
+      var sqliteStoreInstance = await _configurationManager.GetStoreAsync("sqlite");
+
+      var jsonEntries = await jsonStoreInstance.GetAllEntriesAsync(Radio.Infrastructure.Configuration.Models.ConfigurationReadMode.Raw);
+      var sqliteEntries = await sqliteStoreInstance.GetAllEntriesAsync(Radio.Infrastructure.Configuration.Models.ConfigurationReadMode.Raw);
+
+      // Build dictionaries for comparison
+      var jsonDict = jsonEntries.ToDictionary(e => e.Key, e => e.Value);
+      var sqliteDict = sqliteEntries.ToDictionary(e => e.Key, e => e.Value);
+
+      var allKeys = jsonDict.Keys.Union(sqliteDict.Keys).OrderBy(k => k).ToList();
+      var differences = new List<ConfigurationDifferenceDto>();
+
+      foreach (var key in allKeys)
+      {
+        var inJson = jsonDict.TryGetValue(key, out var jsonValue);
+        var inSqlite = sqliteDict.TryGetValue(key, out var sqliteValue);
+
+        string status;
+        if (inJson && !inSqlite)
+        {
+          status = "OnlyInJson";
+        }
+        else if (!inJson && inSqlite)
+        {
+          status = "OnlyInSqlite";
+        }
+        else if (jsonValue != sqliteValue)
+        {
+          status = "Different";
+        }
+        else
+        {
+          status = "Same";
+        }
+
+        differences.Add(new ConfigurationDifferenceDto
+        {
+          Key = key,
+          JsonValue = inJson ? jsonValue : null,
+          SqliteValue = inSqlite ? sqliteValue : null,
+          Status = status
+        });
+      }
+
+      var comparison = new ConfigurationComparisonDto
+      {
+        JsonEntryCount = jsonDict.Count,
+        SqliteEntryCount = sqliteDict.Count,
+        Differences = differences
+      };
+
+      return Ok(comparison);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error comparing stores");
+      return StatusCode(500, new { error = "Failed to compare stores", details = ex.Message });
+    }
+  }
+
+  /// <summary>
+  /// Reconciles configuration by copying values between stores.
+  /// </summary>
+  /// <param name="request">Reconciliation request with source, target, and keys to copy.</param>
+  /// <returns>Success message with count of reconciled keys.</returns>
+  [HttpPost("reconcile")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+  [ProducesResponseType(StatusCodes.Status501NotImplemented)]
+  public async Task<IActionResult> ReconcileStores([FromBody] ReconcileConfigurationRequestDto request)
+  {
+    try
+    {
+      if (_configurationManager == null)
+      {
+        return StatusCode(501, new { error = "Configuration manager not available" });
+      }
+
+      if (request.Keys == null || request.Keys.Count == 0)
+      {
+        return BadRequest(new { error = "No keys specified for reconciliation" });
+      }
+
+      // Validate store names
+      var sourceStoreId = request.SourceStore.ToLowerInvariant() == "json" ? "config" : "sqlite";
+      var targetStoreId = request.TargetStore.ToLowerInvariant() == "json" ? "config" : "sqlite";
+
+      if (sourceStoreId == targetStoreId)
+      {
+        return BadRequest(new { error = "Source and target stores must be different" });
+      }
+
+      // Get stores
+      var sourceStore = await _configurationManager.GetStoreAsync(sourceStoreId);
+      var targetStore = await _configurationManager.GetStoreAsync(targetStoreId);
+
+      int copiedCount = 0;
+      var errors = new List<string>();
+
+      foreach (var key in request.Keys)
+      {
+        try
+        {
+          var entry = await sourceStore.GetEntryAsync(key, Radio.Infrastructure.Configuration.Models.ConfigurationReadMode.Raw);
+          if (entry != null)
+          {
+            await targetStore.SetEntryAsync(key, entry.Value);
+            copiedCount++;
+          }
+          else
+          {
+            errors.Add($"Key '{key}' not found in source store");
+          }
+        }
+        catch (Exception ex)
+        {
+          errors.Add($"Failed to copy key '{key}': {ex.Message}");
+          _logger.LogError(ex, "Failed to copy key {Key} during reconciliation", key);
+        }
+      }
+
+      await targetStore.SaveAsync();
+
+      _logger.LogInformation(
+        "Reconciled {Count} keys from {Source} to {Target}",
+        copiedCount, request.SourceStore, request.TargetStore);
+
+      return Ok(new
+      {
+        message = "Reconciliation completed",
+        copiedCount,
+        totalRequested = request.Keys.Count,
+        errors = errors.Count > 0 ? errors : null
+      });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error reconciling stores");
+      return StatusCode(500, new { error = "Failed to reconcile stores", details = ex.Message });
+    }
+  }
+
+  /// <summary>
+  /// Exports configuration as a downloadable file.
+  /// </summary>
+  /// <param name="format">Export format (json or radiobak). Default is json.</param>
+  /// <param name="storeType">Store type to export (json or sqlite). Default is current store.</param>
+  /// <returns>File download.</returns>
+  [HttpGet("export")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+  [ProducesResponseType(StatusCodes.Status501NotImplemented)]
+  public async Task<IActionResult> ExportConfiguration([FromQuery] string format = "json", [FromQuery] string? storeType = null)
+  {
+    try
+    {
+      if (_configurationManager == null)
+      {
+        return StatusCode(501, new { error = "Configuration manager not available" });
+      }
+
+      // Determine which store to export
+      var storeId = "config"; // Default to JSON
+      if (!string.IsNullOrEmpty(storeType) && storeType.ToLowerInvariant() == "sqlite")
+      {
+        storeId = "sqlite";
+      }
+
+      var store = await _configurationManager.GetStoreAsync(storeId);
+      var entries = await store.GetAllEntriesAsync(Radio.Infrastructure.Configuration.Models.ConfigurationReadMode.Raw);
+
+      if (format.ToLowerInvariant() == "radiobak")
+      {
+        // Create a backup using the backup service
+        var backup = await _configurationManager.Backup.CreateBackupAsync(
+          storeId, 
+          store.StoreType, 
+          $"Manual export at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}");
+
+        // Export backup to memory stream
+        var memoryStream = new MemoryStream();
+        await _configurationManager.Backup.ExportBackupAsync(backup.BackupId, memoryStream);
+        memoryStream.Position = 0;
+
+        var fileName = $"radio-config-{DateTime.UtcNow:yyyyMMdd-HHmmss}.radiobak";
+        return File(memoryStream, "application/octet-stream", fileName);
+      }
+      else
+      {
+        // Export as JSON
+        var config = new Dictionary<string, string>();
+        foreach (var entry in entries)
+        {
+          config[entry.Key] = entry.Value;
+        }
+
+        var json = System.Text.Json.JsonSerializer.Serialize(config, new System.Text.Json.JsonSerializerOptions
+        {
+          WriteIndented = true
+        });
+
+        var bytes = System.Text.Encoding.UTF8.GetBytes(json);
+        var fileName = $"radio-config-{DateTime.UtcNow:yyyyMMdd-HHmmss}.json";
+        
+        return File(bytes, "application/json", fileName);
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error exporting configuration");
+      return StatusCode(500, new { error = "Failed to export configuration", details = ex.Message });
+    }
+  }
+
+  /// <summary>
+  /// Imports configuration from an uploaded file.
+  /// </summary>
+  /// <param name="file">Configuration file to import (.json or .radiobak).</param>
+  /// <param name="targetStore">Target store (json or sqlite). Default is current store.</param>
+  /// <param name="overwrite">Whether to overwrite existing values. Default is true.</param>
+  /// <returns>Import result with count of imported keys.</returns>
+  [HttpPost("import")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+  [ProducesResponseType(StatusCodes.Status501NotImplemented)]
+  public async Task<IActionResult> ImportConfiguration(IFormFile file, [FromQuery] string? targetStore = null, [FromQuery] bool overwrite = true)
+  {
+    try
+    {
+      if (_configurationManager == null)
+      {
+        return StatusCode(501, new { error = "Configuration manager not available" });
+      }
+
+      if (file == null || file.Length == 0)
+      {
+        return BadRequest(new { error = "No file uploaded" });
+      }
+
+      var fileName = file.FileName.ToLowerInvariant();
+      var storeId = targetStore?.ToLowerInvariant() == "sqlite" ? "sqlite" : "config";
+
+      if (fileName.EndsWith(".radiobak"))
+      {
+        // Import backup file
+        using var stream = file.OpenReadStream();
+        var backup = await _configurationManager.Backup.ImportBackupAsync(stream);
+        await _configurationManager.Backup.RestoreBackupAsync(backup.BackupId, overwrite);
+
+        _logger.LogInformation("Imported backup: {BackupId}", backup.BackupId);
+
+        return Ok(new
+        {
+          message = "Backup imported and restored successfully",
+          backupId = backup.BackupId
+        });
+      }
+      else if (fileName.EndsWith(".json"))
+      {
+        // Import JSON file
+        using var stream = file.OpenReadStream();
+        using var reader = new StreamReader(stream);
+        var json = await reader.ReadToEndAsync();
+
+        var config = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+        if (config == null)
+        {
+          return BadRequest(new { error = "Invalid JSON format" });
+        }
+
+        var store = await _configurationManager.GetStoreAsync(storeId);
+        int importedCount = 0;
+
+        foreach (var kvp in config)
+        {
+          if (overwrite || !await store.ExistsAsync(kvp.Key))
+          {
+            await store.SetEntryAsync(kvp.Key, kvp.Value);
+            importedCount++;
+          }
+        }
+
+        await store.SaveAsync();
+
+        _logger.LogInformation("Imported {Count} configuration entries from JSON", importedCount);
+
+        return Ok(new
+        {
+          message = "Configuration imported successfully",
+          importedCount,
+          totalInFile = config.Count,
+          overwrite
+        });
+      }
+      else
+      {
+        return BadRequest(new { error = "Invalid file format. Only .json and .radiobak files are supported." });
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error importing configuration");
+      return StatusCode(500, new { error = "Failed to import configuration", details = ex.Message });
+    }
+  }
 }
