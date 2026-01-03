@@ -268,7 +268,8 @@ public record SpotifyAlbumDto(
   string Name,
   string Artist,
   string? ImageUrl,
-  int TotalTracks
+  int TotalTracks,
+  string Uri
 );
 
 public record SpotifyArtistDto(

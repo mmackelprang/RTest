@@ -15,16 +15,19 @@ public class QueueController : ControllerBase
 {
   private readonly ILogger<QueueController> _logger;
   private readonly IAudioEngine _audioEngine;
+  private readonly IAudioManager? _audioManager;
 
   /// <summary>
   /// Initializes a new instance of the QueueController.
   /// </summary>
   public QueueController(
     ILogger<QueueController> logger,
-    IAudioEngine audioEngine)
+    IAudioEngine audioEngine,
+    IAudioManager? audioManager = null)
   {
     _logger = logger;
     _audioEngine = audioEngine;
+    _audioManager = audioManager;
   }
 
   /// <summary>
@@ -281,7 +284,7 @@ public class QueueController : ControllerBase
   /// <returns>An error ActionResult if validation fails, otherwise null.</returns>
   private ActionResult? TryGetQueueSource(out IPlayQueue? queueSource, out IAudioSource? primarySource)
   {
-    primarySource = _audioEngine.GetActivePrimaryAudioSource();
+    primarySource = _audioManager?.ActiveSource ?? _audioEngine.GetActivePrimaryAudioSource();
 
     if (primarySource == null)
     {

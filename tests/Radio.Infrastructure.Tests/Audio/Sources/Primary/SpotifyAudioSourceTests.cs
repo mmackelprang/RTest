@@ -17,6 +17,7 @@ public class SpotifyAudioSourceTests
   private readonly Mock<ILogger<SpotifyAudioSource>> _loggerMock;
   private readonly Mock<IOptionsMonitor<SpotifySecrets>> _secretsMock;
   private readonly Mock<IOptionsMonitor<SpotifyPreferences>> _preferencesMock;
+  private readonly Mock<IOptionsMonitor<DeviceOptions>> _deviceOptionsMock;
   private readonly SpotifySecrets _secrets;
   private readonly SpotifyPreferences _preferences;
 
@@ -44,6 +45,9 @@ public class SpotifyAudioSourceTests
 
     _preferencesMock = new Mock<IOptionsMonitor<SpotifyPreferences>>();
     _preferencesMock.Setup(o => o.CurrentValue).Returns(_preferences);
+
+    _deviceOptionsMock = new Mock<IOptionsMonitor<DeviceOptions>>();
+    _deviceOptionsMock.Setup(o => o.CurrentValue).Returns(new DeviceOptions());
   }
 
   private SpotifyAudioSource CreateSource()
@@ -51,7 +55,10 @@ public class SpotifyAudioSourceTests
     return new SpotifyAudioSource(
       _loggerMock.Object,
       _secretsMock.Object,
-      _preferencesMock.Object);
+      _preferencesMock.Object,
+      _deviceOptionsMock.Object,
+      null,
+      null);
   }
 
   [Fact]

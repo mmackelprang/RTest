@@ -407,8 +407,9 @@ public class RadioControllerTests : IClassFixture<WebApplicationFactory<Program>
   [Fact]
   public async Task CreatePreset_WithoutName_UsesDefaultName()
   {
-    // Arrange - Use very unique frequency
-    var uniqueFreq = 700 + (DateTime.Now.Millisecond % 100); // Range: 700-799 kHz
+    // Arrange - Use random frequency to avoid collisions
+    var random = new Random();
+    var uniqueFreq = random.Next(530, 1700); // AM Range
     var request = new CreateRadioPresetRequest
     {
       Band = "AM",
@@ -418,11 +419,10 @@ public class RadioControllerTests : IClassFixture<WebApplicationFactory<Program>
     // Act
     var response = await _client.PostAsJsonAsync("/api/radio/presets", request);
 
-    // Assert
-    if (response.StatusCode == HttpStatusCode.Conflict)
+    // Assert - retry with different values if conflict
+    for (var retry = 0; retry < 5 && response.StatusCode == HttpStatusCode.Conflict; retry++)
     {
-      // If we got a conflict, try one more time with a different frequency
-      uniqueFreq += 100;
+      uniqueFreq = random.Next(530, 1700);
       request = request with { Frequency = uniqueFreq };
       response = await _client.PostAsJsonAsync("/api/radio/presets", request);
     }

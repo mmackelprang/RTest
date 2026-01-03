@@ -1,7 +1,11 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using Radio.API.Models;
+using Radio.Core.Interfaces.External;
 
 namespace Radio.API.Tests.Controllers;
 
@@ -303,8 +307,21 @@ public class SpotifyControllerTests : IClassFixture<WebApplicationFactory<Progra
   [Fact]
   public async Task GetAuthenticationStatus_ReturnsStatus()
   {
+    // Arrange
+    var mockAuthService = new Mock<ISpotifyAuthService>();
+    mockAuthService.Setup(s => s.GetAuthenticationStatusAsync(It.IsAny<CancellationToken>()))
+        .ReturnsAsync(new SpotifyAuthStatus { IsAuthenticated = false });
+
+    var client = _factory.WithWebHostBuilder(builder =>
+    {
+      builder.ConfigureTestServices(services =>
+      {
+        services.AddSingleton(mockAuthService.Object);
+      });
+    }).CreateClient();
+
     // Act
-    var response = await _client.GetAsync("/api/spotify/auth/status");
+    var response = await client.GetAsync("/api/spotify/auth/status");
 
     // Assert
     Assert.Equal(HttpStatusCode.OK, response.StatusCode);

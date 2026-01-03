@@ -20,7 +20,8 @@
       "Bash(dir:*)",
       "Bash(timeout 20 dotnet run:*)",
       "Bash(timeout 25 dotnet run:*)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "Bash(netstat:*)"
     ]
   }
 }

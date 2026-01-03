@@ -16,7 +16,9 @@ public class SoundFlowPlaybackService : IDisposable
 {
   private readonly ILogger<SoundFlowPlaybackService> _logger;
   private readonly SoundFlowAudioEngine _audioEngine;
+  private readonly IVisualizerService? _visualizerService;
   private readonly Dictionary<string, SoundPlayer> _activePlayers = new();
+  private readonly Dictionary<string, VisualizationTapModifier> _visualizationTaps = new();
   private readonly object _playersLock = new();
   private bool _disposed;
 
@@ -25,10 +27,17 @@ public class SoundFlowPlaybackService : IDisposable
   /// </summary>
   public SoundFlowPlaybackService(
     ILogger<SoundFlowPlaybackService> logger,
-    SoundFlowAudioEngine audioEngine)
+    SoundFlowAudioEngine audioEngine,
+    IVisualizerService? visualizerService = null)
   {
     _logger = logger;
     _audioEngine = audioEngine;
+    _visualizerService = visualizerService;
+
+    if (_visualizerService != null)
+    {
+      _logger.LogInformation("SoundFlowPlaybackService initialized with visualization tap support");
+    }
   }
 
   /// <summary>
@@ -106,6 +115,23 @@ public class SoundFlowPlaybackService : IDisposable
       soundPlayer.Volume = volume;
       _logger.LogDebug("PlayFileAsync: SoundPlayer created, Volume: {Volume}", volume);
 
+      // Add visualization tap if visualizer service is available
+      VisualizationTapModifier? tapModifier = null;
+      if (_visualizerService != null)
+      {
+        try
+        {
+          tapModifier = new VisualizationTapModifier(_visualizerService, format);
+          soundPlayer.AddModifier(tapModifier);
+          _logger.LogDebug("PlayFileAsync: Added visualization tap modifier");
+        }
+        catch (Exception ex)
+        {
+          _logger.LogWarning(ex, "PlayFileAsync: Failed to add visualization tap modifier");
+          tapModifier = null;
+        }
+      }
+
       // Add to the playback device's mixer
       _logger.LogDebug("PlayFileAsync: Adding to mixer...");
       playbackDevice.MasterMixer.AddComponent(soundPlayer);
@@ -116,10 +142,14 @@ public class SoundFlowPlaybackService : IDisposable
       soundPlayer.Play();
       _logger.LogDebug("PlayFileAsync: Playback started, State: {State}", soundPlayer.State);
 
-      // Track the player
+      // Track the player and tap
       lock (_playersLock)
       {
         _activePlayers[sourceId] = soundPlayer;
+        if (tapModifier != null)
+        {
+          _visualizationTaps[sourceId] = tapModifier;
+        }
       }
 
       _logger.LogInformation("Started playback for source {SourceId}: {FilePath}", sourceId, filePath);
@@ -221,16 +251,37 @@ public class SoundFlowPlaybackService : IDisposable
       var soundPlayer = new SoundPlayer(engine, format, dataProvider);
       soundPlayer.Volume = volume;
 
+      // Add visualization tap if visualizer service is available
+      VisualizationTapModifier? tapModifier = null;
+      if (_visualizerService != null)
+      {
+        try
+        {
+          tapModifier = new VisualizationTapModifier(_visualizerService, format);
+          soundPlayer.AddModifier(tapModifier);
+          _logger.LogDebug("PlayStreamAsync: Added visualization tap modifier");
+        }
+        catch (Exception ex)
+        {
+          _logger.LogWarning(ex, "PlayStreamAsync: Failed to add visualization tap modifier");
+          tapModifier = null;
+        }
+      }
+
       // Add to the playback device's mixer
       playbackDevice.MasterMixer.AddComponent(soundPlayer);
 
       // Start playback
       soundPlayer.Play();
 
-      // Track the player
+      // Track the player and tap
       lock (_playersLock)
       {
         _activePlayers[sourceId] = soundPlayer;
+        if (tapModifier != null)
+        {
+          _visualizationTaps[sourceId] = tapModifier;
+        }
       }
 
       _logger.LogInformation("Started stream playback for source {SourceId}", sourceId);
@@ -280,16 +331,37 @@ public class SoundFlowPlaybackService : IDisposable
       var soundPlayer = new SoundPlayer(engine, format, dataProvider);
       soundPlayer.Volume = volume;
 
+      // Add visualization tap if visualizer service is available
+      VisualizationTapModifier? tapModifier = null;
+      if (_visualizerService != null)
+      {
+        try
+        {
+          tapModifier = new VisualizationTapModifier(_visualizerService, format);
+          soundPlayer.AddModifier(tapModifier);
+          _logger.LogDebug("PlayDataProviderAsync: Added visualization tap modifier");
+        }
+        catch (Exception ex)
+        {
+          _logger.LogWarning(ex, "PlayDataProviderAsync: Failed to add visualization tap modifier");
+          tapModifier = null;
+        }
+      }
+
       // Add to the playback device's mixer
       playbackDevice.MasterMixer.AddComponent(soundPlayer);
 
       // Start playback
       soundPlayer.Play();
 
-      // Track the player
+      // Track the player and tap
       lock (_playersLock)
       {
         _activePlayers[sourceId] = soundPlayer;
+        if (tapModifier != null)
+        {
+          _visualizationTaps[sourceId] = tapModifier;
+        }
       }
 
       _logger.LogInformation("Started data provider playback for source {SourceId}", sourceId);
@@ -312,11 +384,16 @@ public class SoundFlowPlaybackService : IDisposable
     ThrowIfDisposed();
 
     SoundPlayer? player = null;
+    VisualizationTapModifier? tapModifier = null;
     lock (_playersLock)
     {
       if (_activePlayers.TryGetValue(sourceId, out player))
       {
         _activePlayers.Remove(sourceId);
+      }
+      if (_visualizationTaps.TryGetValue(sourceId, out tapModifier))
+      {
+        _visualizationTaps.Remove(sourceId);
       }
     }
 
@@ -324,6 +401,9 @@ public class SoundFlowPlaybackService : IDisposable
     {
       try
       {
+        // Flush any remaining visualization data
+        tapModifier?.Flush();
+
         player.Stop();
 
         var playbackDevice = _audioEngine.GetPlaybackDevice();
@@ -463,6 +543,20 @@ public class SoundFlowPlaybackService : IDisposable
     // Stop all first, then set disposed
     lock (_playersLock)
     {
+      // Flush and clear visualization taps
+      foreach (var tap in _visualizationTaps.Values)
+      {
+        try
+        {
+          tap.Flush();
+        }
+        catch
+        {
+          // Ignore flush errors
+        }
+      }
+      _visualizationTaps.Clear();
+
       foreach (var player in _activePlayers.Values)
       {
         try

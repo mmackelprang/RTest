@@ -98,6 +98,11 @@ public class SourcesApiService
     {
       return await _httpClient.GetFromJsonAsync<AudioSourceDto>("/api/sources/primary", JsonOptions, cancellationToken);
     }
+    catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+    {
+      // Expected when no primary source is active
+      return null;
+    }
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to get primary source");

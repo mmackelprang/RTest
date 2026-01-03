@@ -92,7 +92,11 @@ public class SpotifyController : ControllerBase
       // Map playlists
       if (searchResult.Playlists?.Items != null)
       {
-        result.Playlists = searchResult.Playlists.Items.Select(MapPlaylist).ToList();
+        result.Playlists = searchResult.Playlists.Items
+          .Where(p => p != null)
+          .Select(MapPlaylist)
+          .Where(p => !string.IsNullOrEmpty(p.Id)) // Filter out empty DTOs from null inputs
+          .ToList();
       }
 
       // Map artists
@@ -113,6 +117,11 @@ public class SpotifyController : ControllerBase
         query, result.Tracks.Count, result.Albums.Count, result.Playlists.Count, result.Artists.Count);
 
       return Ok(result);
+    }
+    catch (APIException ex)
+    {
+      _logger.LogError(ex, "Spotify API error searching for query '{Query}'", query);
+      return StatusCode(502, new { error = "Spotify API error", details = ex.Message, code = ex.Response?.StatusCode });
     }
     catch (Exception ex)
     {
@@ -147,6 +156,7 @@ public class SpotifyController : ControllerBase
 
       var categoriesResponse = await client.Browse.GetCategories();
       var categories = categoriesResponse.Categories?.Items?
+        .Where(c => c != null)
         .Select(MapCategory).ToList() ?? new List<CategoryDto>();
 
       _logger.LogInformation("Retrieved {CategoryCount} browse categories from Spotify", categories.Count);
@@ -193,7 +203,10 @@ public class SpotifyController : ControllerBase
 
       var playlistsResponse = await client.Browse.GetCategoryPlaylists(id);
       var playlists = playlistsResponse.Playlists?.Items?
-        .Select(MapPlaylist).ToList() ?? new List<SpotifyPlaylistDto>();
+        .Where(p => p != null)
+        .Select(MapPlaylist)
+        .Where(p => !string.IsNullOrEmpty(p.Id))
+        .ToList() ?? new List<SpotifyPlaylistDto>();
 
       _logger.LogInformation("Retrieved {PlaylistCount} playlists from category {CategoryId}", playlists.Count, id);
 
@@ -237,7 +250,10 @@ public class SpotifyController : ControllerBase
 
       var playlistsResponse = await client.Playlists.CurrentUsers();
       var playlists = playlistsResponse.Items?
-        .Select(MapPlaylist).ToList() ?? new List<SpotifyPlaylistDto>();
+        .Where(p => p != null)
+        .Select(MapPlaylist)
+        .Where(p => !string.IsNullOrEmpty(p.Id))
+        .ToList() ?? new List<SpotifyPlaylistDto>();
 
       _logger.LogInformation("Retrieved {PlaylistCount} user playlists", playlists.Count);
 
@@ -465,6 +481,11 @@ public class SpotifyController : ControllerBase
 
   private SpotifyPlaylistDto MapPlaylist(dynamic playlist)
   {
+    if (playlist == null)
+    {
+      return new SpotifyPlaylistDto();
+    }
+
     // Cast Images to IEnumerable since LINQ extension methods don't work with dynamic
     var images = playlist.Images as IEnumerable<SpotifyAPI.Web.Image>;
     return new SpotifyPlaylistDto

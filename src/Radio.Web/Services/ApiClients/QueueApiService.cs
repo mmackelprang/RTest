@@ -24,6 +24,16 @@ public class QueueApiService
     {
       return await _httpClient.GetFromJsonAsync<List<QueueItemDto>>("/api/queue", cancellationToken);
     }
+    catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+    {
+      // Expected when no primary source is active
+      return null;
+    }
+    catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.BadRequest)
+    {
+      // Expected when active source does not support queue
+      return null;
+    }
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to get queue");

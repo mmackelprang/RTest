@@ -437,6 +437,8 @@ public class AudioManager : IAudioManager
       logger,
       _spotifySecrets,
       _spotifyPreferences,
+      _deviceOptions,
+      _deviceManager,
       _metricsCollector);
   }
 

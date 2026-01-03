@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Radio.API.Models;
 using Radio.Core.Configuration;
+using Radio.Infrastructure.Configuration.Exceptions;
 using RadioConfigurationManager = Radio.Infrastructure.Configuration.Abstractions.IConfigurationManager;
 
 namespace Radio.API.Controllers;
@@ -257,6 +258,11 @@ public class ConfigurationController : ControllerBase
       catch (DirectoryNotFoundException)
       {
         // Store doesn't exist
+        return NotFound(new { error = $"Configuration section '{section}' not found" });
+      }
+      catch (ConfigurationStoreException)
+      {
+        // Store doesn't exist or is invalid
         return NotFound(new { error = $"Configuration section '{section}' not found" });
       }
     }

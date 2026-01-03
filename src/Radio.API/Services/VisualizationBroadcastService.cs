@@ -47,12 +47,24 @@ public class VisualizationBroadcastService : BackgroundService
 
     var frameDelay = TimeSpan.FromMilliseconds(1000.0 / TargetFrameRate);
 
+    var lastLogTime = DateTime.MinValue;
     while (!stoppingToken.IsCancellationRequested)
     {
       try
       {
         if (IsEnabled && _visualizerService.IsActive)
         {
+          // Log periodically to confirm broadcasting is happening
+          var now = DateTime.UtcNow;
+          if ((now - lastLogTime).TotalSeconds >= 5)
+          {
+            var spectrum = _visualizerService.GetSpectrumData();
+            var level = _visualizerService.GetLevelData();
+            var maxMag = spectrum.Magnitudes?.Length > 0 ? spectrum.Magnitudes.Max() : 0;
+            Console.WriteLine($"[VisualizationBroadcast] Broadcasting - MaxMagnitude: {maxMag:F4}, LeftPeak: {level.LeftPeak:F4}, RightPeak: {level.RightPeak:F4}");
+            lastLogTime = now;
+          }
+
           await BroadcastVisualizationDataAsync(stoppingToken);
         }
 

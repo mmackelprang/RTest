@@ -58,27 +58,28 @@ public class AudioVisualizationHubService : IAsyncDisposable
         .Build();
 
       // Register event handlers for broadcast events
-      _hubConnection.On<SpectrumDataDto>("SpectrumData", async (data) =>
+      // Event names must match what VisualizationBroadcastService sends
+      _hubConnection.On<SpectrumDataDto>("ReceiveSpectrum", async (data) =>
       {
-        _logger.LogTrace("Received SpectrumData event");
+        _logger.LogTrace("Received ReceiveSpectrum event");
         await InvokeEventHandlersAsync(OnSpectrumData, data, "OnSpectrumData");
       });
 
-      _hubConnection.On<LevelDataDto>("LevelData", async (data) =>
+      _hubConnection.On<LevelDataDto>("ReceiveLevels", async (data) =>
       {
-        _logger.LogTrace("Received LevelData event");
+        _logger.LogTrace("Received ReceiveLevels event");
         await InvokeEventHandlersAsync(OnLevelData, data, "OnLevelData");
       });
 
-      _hubConnection.On<WaveformDataDto>("WaveformData", async (data) =>
+      _hubConnection.On<WaveformDataDto>("ReceiveWaveform", async (data) =>
       {
-        _logger.LogTrace("Received WaveformData event");
+        _logger.LogTrace("Received ReceiveWaveform event");
         await InvokeEventHandlersAsync(OnWaveformData, data, "OnWaveformData");
       });
 
-      _hubConnection.On<VisualizationDataDto>("VisualizationData", async (data) =>
+      _hubConnection.On<VisualizationDataDto>("ReceiveVisualization", async (data) =>
       {
-        _logger.LogTrace("Received VisualizationData event");
+        _logger.LogTrace("Received ReceiveVisualization event");
         await InvokeEventHandlersAsync(OnVisualizationData, data, "OnVisualizationData");
       });
 

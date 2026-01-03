@@ -1,7 +1,7 @@
 // Audio Visualizer JavaScript Interop
 // Provides high-performance canvas rendering for audio visualizations
 
-window.visualizer = {
+export const visualizer = {
   canvases: {},
   animationFrames: {},
 

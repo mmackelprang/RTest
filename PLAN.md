@@ -1708,13 +1708,13 @@ Create deployment infrastructure for Raspberry Pi 5.
 | 0 | 🟢 Completed | 2025-11-25 | 2025-11-25 | Solution structure, CI/CD, placeholder interfaces created |
 | 1 | 🟢 Completed | 2025-11-25 | 2025-11-25 | Configuration infrastructure with JSON/SQLite stores, secrets management, backup/restore |
 | 2 | 🟢 Completed | 2025-11-26 | 2025-11-26 | Core Audio Engine with SoundFlow/MiniAudio, device enumeration, master mixer, tapped output stream |
-| 3 | ⚪ Not Started | - | - | |
+| 3 | 🟡 In Progress | 2025-12-19 | - | Spotify source implementation, Radio tuner integration |
 | 4 | 🟢 Completed | 2025-11-26 | 2025-11-26 | Event audio sources: IEventAudioSource, ITTSFactory, TTS engines (eSpeak/Google/Azure), AudioFileEventSource |
 | 5 | 🟢 Completed | 2025-11-26 | 2025-11-26 | Ducking & Priority: IDuckingService, fade policies (Smooth/Quick/Instant), priority queue, UAT tests |
 | 6 | 🟢 Completed | 2025-11-28 | 2025-11-28 | Audio outputs: IAudioOutput, LocalAudioOutput, GoogleCastOutput, HttpStreamOutput, 66 tests |
 | 7 | 🟢 Completed | 2025-12-02 | 2025-12-02 | Visualization: IVisualizerService, SpectrumAnalyzer (FFT), LevelMeter (VU), WaveformAnalyzer, 91 unit tests |
 | 8 | 🟢 Completed | 2025-12-02 | 2025-12-02 | API & SignalR: REST controllers, AudioVisualizationHub, Audio stream middleware, Swagger docs, 34 tests |
-| 9 | ⚪ Not Started | - | - | |
+| 9 | 🟡 In Progress | 2025-12-19 | - | Web UI implementation, Spotify page, Touch interactions |
 | 10 | ⚪ Not Started | - | - | |
 | 11 | ⚪ Not Started | - | - | |
 | 12 | ⚪ Not Started | - | - | |
