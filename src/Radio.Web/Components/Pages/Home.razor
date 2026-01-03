@@ -3,6 +3,7 @@
 @inject AudioApiService AudioApi
 @inject AudioStateHubService HubService
 @inject ConfigurationApiService ConfigApi
+@inject DevicesApiService DevicesApi
 @inject ILogger<Home> Logger
 @implements IAsyncDisposable
 
@@ -119,6 +120,24 @@
       <span style="min-width: 20px; text-align: center; color: var(--text-secondary);">R</span>
     </div>
   </div>
+
+  <!-- Audio Output Selection -->
+  @if (_outputDevices != null && _outputDevices.Any())
+  {
+    <div style="margin-top: 24px; width: 100%; max-width: 500px;">
+      <MudSelect T="string" 
+                 Label="Audio Output" 
+                 @bind-Value="_selectedOutputDevice" 
+                 ValueChanged="OnOutputDeviceChanged"
+                 Variant="Variant.Outlined" 
+                 AnchorOrigin="Origin.BottomCenter">
+        @foreach (var device in _outputDevices)
+        {
+          <MudSelectItem T="string" Value="@device.Id">@device.Name</MudSelectItem>
+        }
+      </MudSelect>
+    </div>
+  }
 </div>
 
 @code {
@@ -137,6 +156,8 @@
   private string? _duration = null;
   private double _progressPercent = 0.0;
   private System.Threading.Timer? _timer;
+  private List<AudioDeviceDto> _outputDevices = new();
+  private string? _selectedOutputDevice = null;
 
   protected override async Task OnInitializedAsync()
   {
@@ -147,6 +168,10 @@
       // Load user preferences first
       await LoadPreferencesAsync();
       Logger.LogDebug("Preferences loaded");
+
+      // Load available output devices
+      await LoadOutputDevicesAsync();
+      Logger.LogDebug("Output devices loaded");
 
       // Subscribe to SignalR events for real-time updates
       HubService.PlaybackStateChanged += OnPlaybackStateChanged;
@@ -366,6 +391,12 @@
             _balance = balance;
           }
         }
+
+        // Load selected output device
+        if (prefs.TryGetValue("outputDevice", out var outputDeviceObj))
+        {
+          _selectedOutputDevice = outputDeviceObj?.ToString();
+        }
       }
       else
       {
@@ -378,6 +409,68 @@
     {
       // Fail silently, use defaults
       Logger.LogWarning(ex, "Failed to load playback preferences");
+    }
+  }
+
+  /// <summary>
+  /// Load available output devices from API
+  /// </summary>
+  private async Task LoadOutputDevicesAsync()
+  {
+    try
+    {
+      var devices = await DevicesApi.GetOutputDevicesAsync();
+      if (devices != null)
+      {
+        _outputDevices = devices;
+        
+        // If no device is selected, try to get the current default
+        if (string.IsNullOrEmpty(_selectedOutputDevice))
+        {
+          var currentDevice = await DevicesApi.GetCurrentOutputDeviceAsync();
+          if (currentDevice != null)
+          {
+            _selectedOutputDevice = currentDevice.Id;
+          }
+          else
+          {
+            // Fall back to the first device
+            _selectedOutputDevice = _outputDevices.FirstOrDefault()?.Id;
+          }
+        }
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to load output devices");
+    }
+  }
+
+  /// <summary>
+  /// Handle output device selection change
+  /// </summary>
+  private async Task OnOutputDeviceChanged(string deviceId)
+  {
+    try
+    {
+      _selectedOutputDevice = deviceId;
+      
+      // Set the device via API
+      var success = await DevicesApi.SetOutputDeviceAsync(deviceId);
+      if (success)
+      {
+        // Save the preference
+        await SavePreferenceAsync("outputDevice", deviceId);
+        Logger.LogInformation("Output device changed to {DeviceId}", deviceId);
+      }
+      else
+      {
+        Logger.LogWarning("Failed to set output device to {DeviceId}", deviceId);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error changing output device");
     }
   }
 

@@ -358,6 +358,36 @@
             _selectedFilters = filtersStr.Split(',').ToList();
           }
         }
+
+        // Load last search query
+        if (prefs.TryGetValue("lastSearchQuery", out var queryObj) && queryObj != null)
+        {
+          var query = queryObj.ToString();
+          if (!string.IsNullOrEmpty(query))
+          {
+            _searchQuery = query;
+          }
+        }
+
+        // Load last search results
+        if (prefs.TryGetValue("lastSearchResults", out var resultsObj) && resultsObj != null)
+        {
+          var resultsJson = resultsObj.ToString();
+          if (!string.IsNullOrEmpty(resultsJson))
+          {
+            try
+            {
+              _searchResults = System.Text.Json.JsonSerializer.Deserialize<SpotifySearchResultsDto>(
+                resultsJson,
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+              );
+            }
+            catch (Exception ex)
+            {
+              Logger.LogWarning(ex, "Failed to deserialize last search results");
+            }
+          }
+        }
       }
       else
       {
@@ -483,6 +513,9 @@
         : _selectedFilters;
       
       _searchResults = await SpotifyApi.SearchAsync(_searchQuery, types);
+      
+      // Save the search query and results for next session
+      await SaveLastSearchAsync();
     }
     catch (Exception)
     {
@@ -491,6 +524,26 @@
     finally
     {
       _isSearching = false;
+    }
+  }
+
+  private async Task SaveLastSearchAsync()
+  {
+    try
+    {
+      // Save search query
+      await ConfigApi.UpdateConfigurationAsync("ui.spotify", "lastSearchQuery", _searchQuery);
+      
+      // Save search results (serialize to JSON)
+      if (_searchResults != null)
+      {
+        var resultsJson = System.Text.Json.JsonSerializer.Serialize(_searchResults);
+        await ConfigApi.UpdateConfigurationAsync("ui.spotify", "lastSearchResults", resultsJson);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to save last search state");
     }
   }
 
