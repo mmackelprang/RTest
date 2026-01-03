@@ -90,6 +90,15 @@ public static class AudioServiceExtensions
     services.AddSingleton<DuckingService>();
     services.AddSingleton<IDuckingService>(sp => sp.GetRequiredService<DuckingService>());
 
+    // Register queue persistence service (singleton)
+    services.AddSingleton<QueuePersistenceService>(sp =>
+    {
+      var logger = sp.GetRequiredService<ILogger<QueuePersistenceService>>();
+      var configurationManager = sp.GetService<IConfigurationManager>();
+      return new QueuePersistenceService(logger, configurationManager);
+    });
+    services.AddSingleton<IQueuePersistenceService>(sp => sp.GetRequiredService<QueuePersistenceService>());
+
     // Register radio factory (singleton for device management)
     services.AddSingleton<RadioFactory>();
     services.AddSingleton<IRadioFactory>(sp => sp.GetRequiredService<RadioFactory>());

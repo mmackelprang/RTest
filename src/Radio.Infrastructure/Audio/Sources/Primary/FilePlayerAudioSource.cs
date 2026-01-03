@@ -25,6 +25,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private readonly IOptionsMonitor<FilePlayerPreferences> _preferences;
   private readonly BackgroundIdentificationService? _identificationService;
   private readonly SoundFlowPlaybackService? _playbackService;
+  private readonly IQueuePersistenceService? _queuePersistenceService;
   private readonly string _rootDir;
   private readonly Dictionary<string, object> _metadata = new();
   private Queue<string> _playlist = new();
@@ -51,6 +52,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <param name="identificationService">Optional fingerprinting service for track identification.</param>
   /// <param name="metricsCollector">Optional metrics collector for tracking playback metrics.</param>
   /// <param name="playbackService">Optional SoundFlow playback service for audio output.</param>
+  /// <param name="queuePersistenceService">Optional queue persistence service for saving/restoring queue state.</param>
   public FilePlayerAudioSource(
     ILogger<FilePlayerAudioSource> logger,
     IOptionsMonitor<FilePlayerOptions> options,
@@ -58,7 +60,8 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     string rootDir = "",
     BackgroundIdentificationService? identificationService = null,
     IMetricsCollector? metricsCollector = null,
-    SoundFlowPlaybackService? playbackService = null)
+    SoundFlowPlaybackService? playbackService = null,
+    IQueuePersistenceService? queuePersistenceService = null)
     : base(logger, metricsCollector)
   {
     _options = options;
@@ -66,6 +69,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     _rootDir = rootDir;
     _identificationService = identificationService;
     _playbackService = playbackService;
+    _queuePersistenceService = queuePersistenceService;
 
     // Subscribe to track identification events if service is available
     if (_identificationService != null)
@@ -523,17 +527,105 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   {
     await base.InitializeAsync(cancellationToken);
 
-    // Restore last played file if available
-    var prefs = _preferences.CurrentValue;
-    if (!string.IsNullOrEmpty(prefs.LastSongPlayed) && File.Exists(prefs.LastSongPlayed))
+    // Try to restore saved queue state first
+    await RestoreQueueStateAsync(cancellationToken);
+
+    // If no saved queue, restore last played file if available (legacy behavior)
+    if (_playlist.Count == 0)
     {
-      Logger.LogDebug("Restoring last played file: {File}", prefs.LastSongPlayed);
-      _currentFile = prefs.LastSongPlayed;
-      _position = TimeSpan.FromMilliseconds(prefs.SongPositionMs);
-      UpdateMetadataFromFile(_currentFile);
+      var prefs = _preferences.CurrentValue;
+      if (!string.IsNullOrEmpty(prefs.LastSongPlayed) && File.Exists(prefs.LastSongPlayed))
+      {
+        Logger.LogDebug("Restoring last played file: {File}", prefs.LastSongPlayed);
+        _currentFile = prefs.LastSongPlayed;
+        _position = TimeSpan.FromMilliseconds(prefs.SongPositionMs);
+        UpdateMetadataFromFile(_currentFile);
+      }
     }
 
     State = AudioSourceState.Ready;
+  }
+
+  /// <summary>
+  /// Restores the queue state from persistent storage.
+  /// </summary>
+  private async Task RestoreQueueStateAsync(CancellationToken cancellationToken = default)
+  {
+    if (_queuePersistenceService == null)
+    {
+      Logger.LogDebug("Queue persistence service not available, skipping queue restore");
+      return;
+    }
+
+    try
+    {
+      var savedState = await _queuePersistenceService.LoadQueueStateAsync("FilePlayer", cancellationToken);
+      if (savedState == null || savedState.QueueItems.Count == 0)
+      {
+        Logger.LogDebug("No saved queue state found");
+        return;
+      }
+
+      // Validate that files still exist
+      var validFiles = savedState.QueueItems
+        .Where(f => File.Exists(f))
+        .ToList();
+
+      if (validFiles.Count == 0)
+      {
+        Logger.LogWarning("No valid files in saved queue state");
+        return;
+      }
+
+      // Restore the queue
+      _originalOrder = new List<string>(validFiles);
+      _playlist = new Queue<string>(validFiles);
+      _currentIndex = Math.Max(0, Math.Min(savedState.CurrentIndex, validFiles.Count - 1));
+
+      // Load the current file if index is valid
+      if (_currentIndex >= 0 && _currentIndex < validFiles.Count)
+      {
+        _currentFile = validFiles[_currentIndex];
+        UpdateMetadataFromFile(_currentFile);
+      }
+
+      Logger.LogInformation("Restored queue with {Count} files, current index: {Index}", 
+        validFiles.Count, _currentIndex);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to restore queue state");
+    }
+  }
+
+  /// <summary>
+  /// Saves the current queue state to persistent storage.
+  /// </summary>
+  private async Task SaveQueueStateAsync(CancellationToken cancellationToken = default)
+  {
+    if (_queuePersistenceService == null)
+    {
+      return;
+    }
+
+    try
+    {
+      var queueState = new QueueState
+      {
+        SourceType = "FilePlayer",
+        QueueItems = _playlist.ToList(),
+        CurrentIndex = _currentIndex,
+        IsShuffleEnabled = IsShuffleEnabled,
+        RepeatMode = RepeatMode,
+        SavedAt = DateTime.UtcNow
+      };
+
+      await _queuePersistenceService.SaveQueueStateAsync("FilePlayer", queueState, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to save queue state");
+    }
   }
 
   /// <inheritdoc/>
@@ -849,6 +941,9 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       AffectedItem = CreateQueueItem(fullPath, actualIndex, false)
     });
 
+    // Save queue state
+    await SaveQueueStateAsync(cancellationToken);
+
     await Task.CompletedTask;
   }
 
@@ -941,6 +1036,9 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       AffectedItem = removedItem
     });
 
+    // Save queue state
+    await SaveQueueStateAsync(cancellationToken);
+
     await Task.CompletedTask;
   }
 
@@ -966,6 +1064,9 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     {
       ChangeType = QueueChangeType.Cleared
     });
+
+    // Save queue state (or clear it)
+    await SaveQueueStateAsync(cancellationToken);
   }
 
   /// <inheritdoc/>
@@ -1028,6 +1129,9 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       AffectedIndex = toIndex,
       AffectedItem = movedItem
     });
+
+    // Save queue state
+    await SaveQueueStateAsync(cancellationToken);
 
     await Task.CompletedTask;
   }
@@ -1341,6 +1445,9 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       AffectedIndex = _currentIndex,
       AffectedItem = CreateQueueItem(_currentFile, _currentIndex, true)
     });
+
+    // Save queue state after current file changes
+    await SaveQueueStateAsync(cancellationToken);
 
     await Task.CompletedTask;
   }
