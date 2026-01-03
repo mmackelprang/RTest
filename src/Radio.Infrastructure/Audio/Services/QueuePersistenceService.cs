@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Configuration.Abstractions;
+using Radio.Infrastructure.Configuration.Models;
 
 namespace Radio.Infrastructure.Audio.Services;
 
@@ -76,7 +77,7 @@ public class QueuePersistenceService : IQueuePersistenceService
       var storeId = GetStoreId(sourceType);
       
       // Load from configuration
-      var json = await _configurationManager.GetValueAsync<string>(storeId, "state", cancellationToken: cancellationToken);
+      var json = await _configurationManager.GetValueAsync<string>(storeId, "state", ConfigurationReadMode.Resolved, cancellationToken);
       
       if (string.IsNullOrEmpty(json))
       {

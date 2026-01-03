@@ -94,7 +94,7 @@ public static class AudioServiceExtensions
     services.AddSingleton<QueuePersistenceService>(sp =>
     {
       var logger = sp.GetRequiredService<ILogger<QueuePersistenceService>>();
-      var configurationManager = sp.GetService<IConfigurationManager>();
+      var configurationManager = sp.GetService<Radio.Infrastructure.Configuration.Abstractions.IConfigurationManager>();
       return new QueuePersistenceService(logger, configurationManager);
     });
     services.AddSingleton<IQueuePersistenceService>(sp => sp.GetRequiredService<QueuePersistenceService>());
