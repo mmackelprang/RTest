@@ -4,6 +4,7 @@
 @inject AudioStateHubService HubService
 @inject ConfigurationApiService ConfigApi
 @inject ILogger<Home> Logger
+@inject ISnackbar Snackbar
 @implements IAsyncDisposable
 
 <PageTitle>Now Playing - Radio Console</PageTitle>
@@ -300,14 +301,56 @@
 
   private async Task HandleShuffleAsync()
   {
-    await AudioApi.SetShuffleAsync(!_isShuffleEnabled);
-    await RefreshPlaybackStateAsync();
+    try
+    {
+      var result = await AudioApi.SetShuffleAsync(!_isShuffleEnabled);
+      if (result != null)
+      {
+        await RefreshPlaybackStateAsync();
+        Snackbar.Add($"Shuffle {(_isShuffleEnabled ? "enabled" : "disabled")}", Severity.Success);
+      }
+      else
+      {
+        Snackbar.Add("Failed to toggle shuffle", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error in HandleShuffleAsync");
+      Snackbar.Add("Error toggling shuffle", Severity.Error);
+    }
   }
 
   private async Task HandleRepeatAsync()
   {
-    await AudioApi.SetRepeatAsync(_repeatMode);
-    await RefreshPlaybackStateAsync();
+    try
+    {
+      // Cycle through repeat modes: Off -> All -> One -> Off
+      var nextMode = _repeatMode switch
+      {
+        "Off" => "All",
+        "All" => "One",
+        "One" => "Off",
+        _ => "Off"
+      };
+      
+      Logger.LogDebug("HandleRepeatAsync: Current={Current}, Next={Next}", _repeatMode, nextMode);
+      var result = await AudioApi.SetRepeatAsync(nextMode);
+      if (result != null)
+      {
+        await RefreshPlaybackStateAsync();
+        Snackbar.Add($"Repeat: {_repeatMode}", Severity.Success);
+      }
+      else
+      {
+        Snackbar.Add("Failed to set repeat mode", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error in HandleRepeatAsync");
+      Snackbar.Add("Error setting repeat mode", Severity.Error);
+    }
   }
 
   private async Task HandleMuteAsync()
