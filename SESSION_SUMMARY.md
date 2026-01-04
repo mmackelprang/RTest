@@ -163,6 +163,31 @@ This session focused on implementing the remaining tasks from the DEBUG_AND_FIX_
 **Files Modified:**
 - `src/Radio.Core/Configuration/AudioPreferences.cs`
 
+#### Phase 9.2: Custom Path Entry ✅ Complete
+**Status:** ✅ Complete  
+**Changes:**
+- Added custom path entry UI to FileBrowserPage:
+  - Text field for manual path entry with helper text
+  - Support for UNC paths (\\\\server\\share), Windows drives (C:\\Music), Unix paths (/mnt/nas)
+  - Large 60px "Go" button for touch-friendly interaction
+  - Enter key support for quick navigation
+- Implemented recent paths feature:
+  - Stores last 10 paths accessed
+  - Displays as clickable chips below input field
+  - Persisted to configuration preferences
+  - Shows truncated path names for better display
+- Path validation and normalization:
+  - `IsValidPath()` - validates UNC, Windows absolute, and Unix paths
+  - `NormalizePath()` - handles both Windows and Unix path separators
+  - Platform-aware path handling
+- Methods added:
+  - `NavigateToCustomPathAsync()` - handles custom path navigation
+  - `NavigateToRecentPath()` - quick navigation from recent paths
+  - `TruncatePath()` - truncates long paths for display
+
+**Files Modified:**
+- `src/Radio.Web/Components/Pages/FileBrowserPage.razor`
+
 ---
 
 ## Remaining Work
@@ -200,12 +225,14 @@ This session focused on implementing the remaining tasks from the DEBUG_AND_FIX_
   - Verify with actual hardware
 
 #### Phase 9: File Browser Network & Drive Access
-- [ ] **Task 9.1:** Add Drive/Share Selection
+- [x] **Task 9.1:** Add Drive/Share Selection ✅ Already Implemented
   - List available drives on Windows/Linux
   - Browse network shares (UNC paths)
-- [ ] **Task 9.2:** Custom Path Entry
+- [x] **Task 9.2:** Custom Path Entry ✅ COMPLETED
   - Add text input for manual path entry
   - Support UNC, URLs, and various path formats
+  - Recent paths feature with quick access chips
+  - Path validation and normalization
 - [ ] **Task 9.3:** Virtual Keyboard Integration
   - Add touch-friendly virtual keyboard
   - Position overlay at bottom of screen
@@ -332,5 +359,5 @@ This session focused on implementing the remaining tasks from the DEBUG_AND_FIX_
 
 ---
 
-**Total Progress:** 8 out of 12 phases substantially complete (66.7%)  
+**Total Progress:** 8.25 out of 12 phases substantially complete (68.75%)  
 **Estimated Remaining Work:** 2-3 more sessions to complete all remaining tasks
