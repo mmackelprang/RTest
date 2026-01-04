@@ -106,7 +106,7 @@ As you complete each phase, mark it here:
 
 - [ ] Phase 1: Global Now Playing & Music Controls
 - [ ] Phase 2: Music Queue Navbar Visibility  
-- [ ] Phase 3: Now Playing Metadata Display
+- [x] Phase 3: Now Playing Metadata Display (Tasks 3.1 & 3.2 completed)
 - [ ] Phase 4: Fingerprinting Debug & Instrumentation
 - [ ] Phase 5: RTL-SDR Radio Audio Output
 - [ ] Phase 6: Queue Page Enhancements

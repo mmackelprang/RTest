@@ -15,13 +15,16 @@
       <div style="text-align: center;">
         <!-- Album Art or Generic Icon -->
         <div style="margin-bottom: 24px;">
-          @if (string.IsNullOrEmpty(_albumArtUrl))
+          @if (string.IsNullOrEmpty(_albumArtUrl) || _albumArtUrl == "/images/default-album-art.png")
           {
             <MudIcon Icon="@Icons.Material.Filled.MusicNote" Style="font-size: 200px; color: var(--text-secondary);" />
           }
           else
           {
-            <img src="@_albumArtUrl" alt="Album Art" style="width: 400px; height: 400px; object-fit: cover; border-radius: 8px;" />
+            <img src="@_albumArtUrl" 
+                 alt="Album Art" 
+                 style="width: 400px; height: 400px; object-fit: cover; border-radius: 8px;" 
+                 @onerror="OnAlbumArtError" />
           }
         </div>
         
@@ -231,20 +234,31 @@
           }
         }
       }
+      else
+      {
+        Logger.LogWarning("RefreshPlaybackStateAsync: GetPlaybackStateAsync returned null");
+      }
 
       var nowPlaying = await AudioApi.GetNowPlayingAsync();
       if (nowPlaying != null)
       {
+        Logger.LogDebug("RefreshPlaybackStateAsync: Updating metadata - Title={Title}, Artist={Artist}, Album={Album}, AlbumArt={AlbumArt}", 
+          nowPlaying.Title, nowPlaying.Artist, nowPlaying.Album, nowPlaying.AlbumArtUrl);
+        
         _title = nowPlaying.Title;
         _artist = nowPlaying.Artist;
         _album = nowPlaying.Album;
         _albumArtUrl = nowPlaying.AlbumArtUrl;
         _source = nowPlaying.SourceName; // Use SourceName instead of Source
       }
+      else
+      {
+        Logger.LogWarning("RefreshPlaybackStateAsync: GetNowPlayingAsync returned null");
+      }
     }
-    catch (Exception)
+    catch (Exception ex)
     {
-      // Silently fail to avoid disrupting UI updates
+      Logger.LogError(ex, "Error in RefreshPlaybackStateAsync");
     }
   }
 
@@ -336,6 +350,13 @@
   {
     _balance = newBalance;
     _ = HandleBalanceChangeAsync(newBalance); // Fire and forget
+  }
+
+  private void OnAlbumArtError()
+  {
+    Logger.LogWarning("Album art failed to load: {Url}", _albumArtUrl);
+    // Fall back to showing no album art
+    _albumArtUrl = null;
   }
 
   /// <summary>
