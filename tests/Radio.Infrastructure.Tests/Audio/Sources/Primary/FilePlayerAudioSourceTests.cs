@@ -1199,4 +1199,155 @@ public class FilePlayerAudioSourceTests : IDisposable
   }
 
   #endregion
+
+  #region Queue Persistence Tests
+
+  [Fact]
+  public async Task InitializeAsync_RestoresQueueFromPreferences()
+  {
+    // Arrange
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    CreateTestFile("song3.mp3");
+
+    var fullPath1 = Path.Combine(_testDir, "song1.mp3");
+    var fullPath2 = Path.Combine(_testDir, "song2.mp3");
+    var fullPath3 = Path.Combine(_testDir, "song3.mp3");
+
+    _preferences.QueueItems = new List<string> { fullPath1, fullPath2, fullPath3 };
+    _preferences.CurrentQueueIndex = 0; // Start at first item
+    _preferences.SongPositionMs = 30000;
+
+    var source = CreateSource();
+
+    // Act
+    await source.InitializeAsync();
+
+    // Assert
+    Assert.Equal(AudioSourceState.Ready, source.State);
+    Assert.Equal(0, source.CurrentIndex);
+    Assert.Equal(fullPath1, source.CurrentFile);
+    // After restore, remaining queue items should be available
+    Assert.True(source.QueueItems.Count >= 2);
+  }
+
+  [Fact]
+  public async Task InitializeAsync_FiltersNonExistentFiles_FromPersistedQueue()
+  {
+    // Arrange
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    // song3.mp3 doesn't exist
+
+    var fullPath1 = Path.Combine(_testDir, "song1.mp3");
+    var fullPath2 = Path.Combine(_testDir, "song2.mp3");
+    var fullPath3 = Path.Combine(_testDir, "song3.mp3");
+
+    _preferences.QueueItems = new List<string> { fullPath1, fullPath2, fullPath3 };
+    _preferences.CurrentQueueIndex = 0;
+
+    var source = CreateSource();
+
+    // Act
+    await source.InitializeAsync();
+
+    // Assert
+    var queue = await source.GetQueueAsync();
+    Assert.Equal(2, queue.Count); // Only 2 valid files
+    Assert.All(queue, item => Assert.True(File.Exists(item.Id)));
+  }
+
+  [Fact]
+  public async Task InitializeAsync_HandlesEmptyPersistedQueue()
+  {
+    // Arrange
+    _preferences.QueueItems = new List<string>();
+    _preferences.CurrentQueueIndex = -1;
+
+    var source = CreateSource();
+
+    // Act
+    await source.InitializeAsync();
+
+    // Assert
+    Assert.Equal(AudioSourceState.Ready, source.State);
+    var queue = await source.GetQueueAsync();
+    Assert.Empty(queue);
+  }
+
+  [Fact]
+  public async Task AddToQueueAsync_SavesQueueStateToPreferences()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    await source.LoadFileAsync("song1.mp3");
+
+    // Act
+    await source.AddToQueueAsync("song2.mp3");
+
+    // Assert
+    Assert.NotNull(_preferences.QueueItems);
+    Assert.True(_preferences.QueueItems.Count >= 2);
+  }
+
+  [Fact]
+  public async Task RemoveFromQueueAsync_UpdatesPersistedQueueState()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    CreateTestFile("song3.mp3");
+    await source.LoadDirectoryAsync("");
+    
+    var initialQueueCount = _preferences.QueueItems.Count;
+
+    // Act
+    await source.RemoveFromQueueAsync(1);
+
+    // Assert
+    Assert.NotNull(_preferences.QueueItems);
+    Assert.Equal(initialQueueCount - 1, _preferences.QueueItems.Count);
+  }
+
+  [Fact]
+  public async Task ClearQueueAsync_ClearsPersistedQueueState()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    await source.LoadDirectoryAsync("");
+
+    // Act
+    await source.ClearQueueAsync();
+
+    // Assert
+    Assert.NotNull(_preferences.QueueItems);
+    Assert.Empty(_preferences.QueueItems);
+    Assert.Equal(-1, _preferences.CurrentQueueIndex);
+  }
+
+  [Fact]
+  public async Task MoveQueueItemAsync_UpdatesPersistedQueueState()
+  {
+    // Arrange
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    CreateTestFile("song3.mp3");
+    await source.LoadDirectoryAsync("");
+
+    // Act
+    await source.MoveQueueItemAsync(0, 2);
+
+    // Assert - queue state should be saved after move
+    Assert.NotNull(_preferences.QueueItems);
+    Assert.True(_preferences.QueueItems.Count > 0);
+    Assert.True(_preferences.CurrentQueueIndex >= 0);
+  }
+
+  #endregion
 }
