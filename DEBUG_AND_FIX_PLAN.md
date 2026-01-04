@@ -373,6 +373,9 @@ The queue page needs several UX improvements: multi-select file dialog, duplicat
 - Same file can be added multiple times
 - Queue doesn't auto-advance when track finishes
 - Only FilePlayer songs supported (need Spotify too)
+- Queue should be persisted on shutdown and restored on startup.
+- The last search performed in Spotify should persist the search and all found items should be displayed the next time Spotify search is displayed.
+- The last selected audio input, audio output, volume, etc. should be persisted when selected by the user and should be restored next time the Web UI is started.
 
 ### Tasks
 
