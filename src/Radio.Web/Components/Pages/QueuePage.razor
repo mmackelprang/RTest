@@ -19,20 +19,28 @@
       <MudButton Variant="Variant.Filled" 
                  Color="Color.Primary" 
                  OnClick="OpenFileSelectionDialogAsync"
-                 StartIcon="@Icons.Material.Filled.Add">
+                 StartIcon="@Icons.Material.Filled.Add"
+                 Size="Size.Large"
+                 Style="min-width: 60px; min-height: 60px; font-size: 1.1rem;">
         Add Files
       </MudButton>
       @if (_canReorderQueue && _queueItems.Any())
       {
-        <MudButton Size="Size.Small" 
+        <MudButton Size="Size.Large" 
                    Variant="@(_isDragEnabled ? Variant.Filled : Variant.Outlined)"
                    Color="@(_isDragEnabled ? Color.Success : Color.Default)" 
                    StartIcon="@Icons.Material.Filled.DragIndicator" 
-                   OnClick="@(() => { _isDragEnabled = !_isDragEnabled; StateHasChanged(); })">
+                   OnClick="@(() => { _isDragEnabled = !_isDragEnabled; StateHasChanged(); })"
+                   Style="min-width: 60px; min-height: 60px; font-size: 1.1rem;">
           @(_isDragEnabled ? "Drag Enabled" : "Enable Drag")
         </MudButton>
       }
-      <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="HandleClearQueueAsync" Disabled="@(!_queueItems.Any())">
+      <MudButton Variant="Variant.Filled" 
+                 Color="Color.Error" 
+                 OnClick="HandleClearQueueAsync" 
+                 Disabled="@(!_queueItems.Any())"
+                 Size="Size.Large"
+                 Style="min-width: 60px; min-height: 60px; font-size: 1.1rem;">
         Clear All
       </MudButton>
     </div>
@@ -58,31 +66,39 @@
   {
     <!-- Drag-and-Drop Queue -->
     <MudList T="string" Class="queue-drop-container" Style="height: calc(100% - 80px); overflow-y: auto;">
+      @if (_queueItems.Count == 1)
+      {
+        <!-- Single item - give it special prominence -->
+        <div style="padding: 24px; text-align: center;">
+          <MudText Typo="Typo.body2" Color="Color.Secondary" Style="margin-bottom: 16px;">1 track in queue</MudText>
+        </div>
+      }
       @foreach (var item in _queueItems)
       {
         <MudListItem T="string" @key="item.Index">
           <MudPaper Class="queue-item-draggable" 
                     Elevation="2" 
-                    Style="@GetItemStyle(item)"
+                    Style="@GetItemStyle(item, enhancedPadding: true)"
                     draggable="true"
                     @ondragstart="@(() => OnDragStart(item))"
                     @ondragover:preventDefault
                     @ondrop="@(() => OnDrop(item))">
-            <div style="display: grid; grid-template-columns: 60px 1fr 250px 200px 80px 80px; align-items: center; gap: 8px; padding: 8px;">
+            <div style="display: grid; grid-template-columns: 72px 1fr 250px 200px 80px 80px; align-items: center; gap: 12px; padding: 16px;">
               <div style="display: flex; align-items: center; justify-content: center;">
-                <MudIcon Icon="@Icons.Material.Filled.DragIndicator" Size="Size.Small" Style="cursor: grab;" />
+                <MudIcon Icon="@Icons.Material.Filled.DragIndicator" Size="Size.Large" Style="cursor: grab;" />
               </div>
-              <div @onclick="@(() => HandleJumpToAsync(item.Index))" style="cursor: pointer; font-weight: @(item.IsCurrent ? "600" : "400"); color: @(item.IsCurrent ? "var(--mud-palette-primary)" : "inherit");">
+              <div @onclick="@(() => HandleJumpToAsync(item.Index))" style="cursor: pointer; font-weight: @(item.IsCurrent ? "600" : "400"); color: @(item.IsCurrent ? "var(--mud-palette-primary)" : "inherit"); font-size: 1.1rem;">
                 @item.Title
               </div>
-              <div>@item.Artist</div>
-              <div>@item.Album</div>
-              <div>@item.Duration</div>
+              <div style="font-size: 1rem;">@item.Artist</div>
+              <div style="font-size: 1rem;">@item.Album</div>
+              <div style="font-size: 1rem;">@item.Duration</div>
               <div>
                 <MudIconButton Icon="@Icons.Material.Filled.Delete" 
-                               Size="Size.Small" 
+                               Size="Size.Large"
                                OnClick="@(() => HandleRemoveAsync(item.Index))" 
-                               title="Remove" />
+                               title="Remove"
+                               Style="width: 60px; height: 60px;" />
               </div>
             </div>
           </MudPaper>
@@ -92,31 +108,39 @@
   }
   else
   {
-    <!-- Queue Table (Normal Mode) -->
-    <MudTable Items="@_queueItems" Hover="true" Dense="true" FixedHeader="true" Height="calc(100% - 80px)" Style="overflow-y: auto;">
+    <!-- Queue Table (Normal Mode) - Enhanced for touch -->
+    @if (_queueItems.Count == 1)
+    {
+      <!-- Single item - give it special prominence -->
+      <div style="padding: 24px 0 16px 0; text-align: center;">
+        <MudText Typo="Typo.body2" Color="Color.Secondary">1 track in queue</MudText>
+      </div>
+    }
+    <MudTable Items="@_queueItems" Hover="true" Dense="false" FixedHeader="true" Height="calc(100% - 80px)" Style="overflow-y: auto;">
       <HeaderContent>
-        <MudTh Style="width: 60px;">#</MudTh>
-        <MudTh>Title</MudTh>
-        <MudTh Style="width: 250px;">Artist</MudTh>
-        <MudTh Style="width: 200px;">Album</MudTh>
-        <MudTh Style="width: 80px;">Duration</MudTh>
-        <MudTh Style="width: 80px;">Actions</MudTh>
+        <MudTh Style="width: 60px; font-size: 1rem;">#</MudTh>
+        <MudTh Style="font-size: 1rem;">Title</MudTh>
+        <MudTh Style="width: 250px; font-size: 1rem;">Artist</MudTh>
+        <MudTh Style="width: 200px; font-size: 1rem;">Album</MudTh>
+        <MudTh Style="width: 100px; font-size: 1rem;">Duration</MudTh>
+        <MudTh Style="width: 100px; font-size: 1rem;">Actions</MudTh>
       </HeaderContent>
       <RowTemplate>
-        <MudTd Style="width: 60px;">@context.Index</MudTd>
-        <MudTd DataLabel="Title" Style="cursor: pointer;" @onclick="@(() => HandleJumpToAsync(context.Index))">
-          <div style="font-weight: @(context.IsCurrent ? "600" : "400"); color: @(context.IsCurrent ? "var(--mud-palette-primary)" : "inherit");">
+        <MudTd Style="width: 60px; min-height: 60px; font-size: 1rem;">@context.Index</MudTd>
+        <MudTd DataLabel="Title" Style="cursor: pointer; min-height: 60px; padding: 16px 8px;" @onclick="@(() => HandleJumpToAsync(context.Index))">
+          <div style="font-weight: @(context.IsCurrent ? "600" : "400"); color: @(context.IsCurrent ? "var(--mud-palette-primary)" : "inherit"); font-size: 1.1rem; line-height: 1.5;">
             @context.Title
           </div>
         </MudTd>
-        <MudTd DataLabel="Artist" Style="width: 250px;">@context.Artist</MudTd>
-        <MudTd DataLabel="Album" Style="width: 200px;">@context.Album</MudTd>
-        <MudTd DataLabel="Duration" Style="width: 80px;">@context.Duration</MudTd>
-        <MudTd DataLabel="Actions" Style="width: 80px;">
+        <MudTd DataLabel="Artist" Style="width: 250px; min-height: 60px; padding: 16px 8px; font-size: 1rem;">@context.Artist</MudTd>
+        <MudTd DataLabel="Album" Style="width: 200px; min-height: 60px; padding: 16px 8px; font-size: 1rem;">@context.Album</MudTd>
+        <MudTd DataLabel="Duration" Style="width: 100px; min-height: 60px; padding: 16px 8px; font-size: 1rem;">@context.Duration</MudTd>
+        <MudTd DataLabel="Actions" Style="width: 100px; min-height: 60px; padding: 16px 8px;">
           <MudIconButton Icon="@Icons.Material.Filled.Delete" 
-                         Size="Size.Small" 
+                         Size="Size.Large"
                          OnClick="@(() => HandleRemoveAsync(context.Index))" 
-                         title="Remove" />
+                         title="Remove"
+                         Style="width: 60px; height: 60px;" />
         </MudTd>
       </RowTemplate>
     </MudTable>
@@ -320,9 +344,10 @@
     }
   }
 
-  private string GetItemStyle(QueueItemDto item)
+  private string GetItemStyle(QueueItemDto item, bool enhancedPadding = false)
   {
-    var baseStyle = "min-height: 72px; cursor: pointer;";
+    var minHeight = enhancedPadding ? "min-height: 72px;" : "min-height: 60px;";
+    var baseStyle = $"{minHeight} cursor: pointer;";
     if (item.IsCurrent)
     {
       return baseStyle + " border-left: 4px solid var(--mud-palette-primary);";
