@@ -4,10 +4,14 @@
 @inject SystemApiService SystemApi
 @inject SourcesApiService SourcesApi
 @inject DevicesApiService DevicesApi
+@inject AudioApiService AudioApi
+@inject AudioStateHubService HubService
+@inject QueueApiService QueueApi
 @inject NavigationManager NavigationManager
 @inject ILogger<MainLayout> Logger
 @inject IDialogService DialogService
 @implements IDisposable
+@implements IAsyncDisposable
 
 <MudThemeProvider Theme="@_customTheme" IsDarkMode="true" />
 <MudPopoverProvider />
@@ -93,12 +97,84 @@
     </div>
     <MudSpacer />
     
+    <!-- NOW PLAYING WIDGET - Compact display between stats and nav -->
+    <div style="display: flex; align-items: center; gap: 12px; padding: 0 16px; border-left: 1px solid rgba(255,255,255,0.1); border-right: 1px solid rgba(255,255,255,0.1); max-width: 500px; cursor: pointer;" @onclick="NavigateToHome">
+      <!-- Album Art / Music Icon -->
+      <div style="width: 40px; height: 40px; flex-shrink: 0;">
+        @if (string.IsNullOrEmpty(_nowPlayingAlbumArt) || _nowPlayingAlbumArt == "/images/default-album-art.png")
+        {
+          <MudIcon Icon="@Icons.Material.Filled.MusicNote" Style="font-size: 40px; color: var(--mud-palette-text-secondary);" />
+        }
+        else
+        {
+          <img src="@_nowPlayingAlbumArt" alt="Album Art" style="width: 40px; height: 40px; object-fit: cover; border-radius: 4px;" />
+        }
+      </div>
+      
+      <!-- Track Info -->
+      <div style="flex: 1; min-width: 0; overflow: hidden;">
+        <div style="font-size: 14px; font-weight: 600; color: var(--mud-palette-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+          @(_nowPlayingTitle ?? "No Track")
+        </div>
+        <div style="font-size: 12px; color: var(--mud-palette-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+          @(_nowPlayingArtist ?? "--")
+        </div>
+      </div>
+      
+      <!-- Transport Controls -->
+      <div style="display: flex; align-items: center; gap: 4px;" @onclick:stopPropagation="true">
+        <MudIconButton Icon="@Icons.Material.Filled.SkipPrevious" 
+                       Color="Color.Default" 
+                       Size="Size.Small"
+                       Style="width: 48px; height: 48px;"
+                       OnClick="@HandlePreviousAsync"
+                       title="Previous" />
+        
+        <MudIconButton Icon="@(_isPlaying ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)" 
+                       Color="Color.Primary" 
+                       Size="Size.Medium"
+                       Style="width: 48px; height: 48px;"
+                       OnClick="@HandlePlayPauseAsync"
+                       title="@(_isPlaying ? "Pause" : "Play")" />
+        
+        <MudIconButton Icon="@Icons.Material.Filled.SkipNext" 
+                       Color="Color.Default" 
+                       Size="Size.Small"
+                       Style="width: 48px; height: 48px;"
+                       OnClick="@HandleNextAsync"
+                       title="Next" />
+      </div>
+      
+      <!-- Volume Control (compact) -->
+      <div style="width: 100px;" @onclick:stopPropagation="true">
+        <div style="display: flex; align-items: center; gap: 4px;">
+          <MudIconButton Icon="@(_isMuted ? Icons.Material.Filled.VolumeOff : Icons.Material.Filled.VolumeUp)" 
+                         Color="Color.Default" 
+                         Size="Size.Small"
+                         OnClick="@HandleMuteAsync"
+                         title="@(_isMuted ? "Unmute" : "Mute")" />
+          <MudSlider T="double" 
+                     Value="_volume" 
+                     ValueChanged="@OnVolumeChanged" 
+                     Min="0" 
+                     Max="1" 
+                     Step="0.01" 
+                     Size="Size.Small"
+                     Color="Color.Primary"
+                     Style="width: 60px;" />
+        </div>
+      </div>
+    </div>
+    <MudSpacer />
+    
     <!-- RIGHT: Navigation Icons (48px touch targets) -->
     <MudIconButton Icon="@Icons.Material.Filled.Home" Color="Color.Inherit" Href="/" Size="Size.Large" title="Home / Now Playing" />
-    @if (_showQueueNav)
-    {
-      <MudIconButton Icon="@Icons.Material.Filled.QueueMusic" Color="Color.Inherit" Href="/queue" Size="Size.Large" title="Queue" />
-    }
+    
+    <!-- Queue is always visible with badge showing count -->
+    <MudBadge Content="@_queueCount" Overlap="true" Color="@(_queueCount > 0 ? Color.Primary : Color.Default)" Visible="@(_queueCount > 0)">
+      <MudIconButton Icon="@Icons.Material.Filled.QueueMusic" Color="Color.Inherit" Href="/queue" Size="Size.Large" title="@(_queueCount > 0 ? $"Queue ({_queueCount} items)" : "Queue (empty)")" />
+    </MudBadge>
+    
     @if (_showSpotifyNav)
     {
       <MudIconButton Icon="@Icons.Material.Filled.Search" Color="Color.Inherit" Href="/spotify" Size="Size.Large" title="Spotify Search" />
@@ -138,10 +214,18 @@
   private string? _selectedOutputId = null;
 
   // Conditional navigation visibility
-  private bool _showQueueNav = false;
   private bool _showSpotifyNav = false;
   private bool _showRadioNav = false;
   private bool _showFilesNav = false;
+
+  // Now Playing state
+  private bool _isPlaying = false;
+  private bool _isMuted = false;
+  private double _volume = 0.75;
+  private string? _nowPlayingTitle = null;
+  private string? _nowPlayingArtist = null;
+  private string? _nowPlayingAlbumArt = null;
+  private int _queueCount = 0;
 
   private readonly MudTheme _customTheme = new()
   {
@@ -175,6 +259,16 @@
       // Load available sources and outputs
       await LoadSourcesAsync();
       await LoadOutputDevicesAsync();
+
+      // Subscribe to audio state updates
+      HubService.PlaybackStateChanged += OnPlaybackStateChanged;
+      HubService.NowPlayingChanged += OnNowPlayingChanged;
+      HubService.QueueChanged += OnQueueChanged;
+      Logger.LogDebug("MainLayout - Subscribed to audio state events");
+
+      // Load initial audio state
+      await RefreshAudioStateAsync();
+      await RefreshQueueCountAsync();
 
       // Update time immediately
       _currentTime = DateTime.Now.ToString("HH:mm:ss");
@@ -380,7 +474,7 @@
 
   private void UpdateNavigationVisibility(AudioSourceDto source)
   {
-    _showQueueNav = source.Type is "Spotify" or "FilePlayer" or "Queue";
+    // Queue is now always visible, no need to set _showQueueNav
     _showSpotifyNav = source.Type == "Spotify";
     _showRadioNav = source.Type == "Radio" || source.Type == "RTLSDRCore" || source.Type == "RF320";
     _showFilesNav = source.Type == "FilePlayer";
@@ -444,9 +538,155 @@
     }
   }
 
+  private async Task OnPlaybackStateChanged()
+  {
+    await RefreshAudioStateAsync();
+    await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task OnNowPlayingChanged()
+  {
+    await RefreshAudioStateAsync();
+    await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task OnQueueChanged()
+  {
+    await RefreshQueueCountAsync();
+    await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task RefreshAudioStateAsync()
+  {
+    try
+    {
+      var state = await AudioApi.GetPlaybackStateAsync();
+      if (state != null)
+      {
+        _isPlaying = state.IsPlaying;
+        _isMuted = state.IsMuted;
+        _volume = state.Volume;
+      }
+
+      var nowPlaying = await AudioApi.GetNowPlayingAsync();
+      if (nowPlaying != null)
+      {
+        _nowPlayingTitle = nowPlaying.Title;
+        _nowPlayingArtist = nowPlaying.Artist;
+        _nowPlayingAlbumArt = nowPlaying.AlbumArtUrl;
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error refreshing audio state in MainLayout");
+    }
+  }
+
+  private async Task RefreshQueueCountAsync()
+  {
+    try
+    {
+      var queue = await QueueApi.GetQueueAsync();
+      _queueCount = queue?.Count ?? 0;
+      Logger.LogDebug("MainLayout - Queue count updated: {Count}", _queueCount);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error refreshing queue count in MainLayout");
+    }
+  }
+
+  private async Task HandlePlayPauseAsync()
+  {
+    try
+    {
+      if (_isPlaying)
+      {
+        await AudioApi.UpdatePlaybackStateAsync(new UpdatePlaybackRequest("pause", null, null, null));
+      }
+      else
+      {
+        await AudioApi.StartAsync();
+      }
+      await RefreshAudioStateAsync();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error in HandlePlayPauseAsync");
+    }
+  }
+
+  private async Task HandleNextAsync()
+  {
+    try
+    {
+      await AudioApi.NextAsync();
+      await RefreshAudioStateAsync();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error in HandleNextAsync");
+    }
+  }
+
+  private async Task HandlePreviousAsync()
+  {
+    try
+    {
+      await AudioApi.PreviousAsync();
+      await RefreshAudioStateAsync();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error in HandlePreviousAsync");
+    }
+  }
+
+  private async Task HandleMuteAsync()
+  {
+    try
+    {
+      await AudioApi.ToggleMuteAsync(!_isMuted);
+      await RefreshAudioStateAsync();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error in HandleMuteAsync");
+    }
+  }
+
+  private async Task OnVolumeChanged(double newVolume)
+  {
+    try
+    {
+      _volume = newVolume;
+      await AudioApi.SetVolumeAsync((float)newVolume);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error in OnVolumeChanged");
+    }
+  }
+
+  private void NavigateToHome()
+  {
+    NavigationManager.NavigateTo("/");
+  }
+
   public void Dispose()
   {
     _timer?.Stop();
     _timer?.Dispose();
+  }
+
+  public async ValueTask DisposeAsync()
+  {
+    // Unsubscribe from events
+    HubService.PlaybackStateChanged -= OnPlaybackStateChanged;
+    HubService.NowPlayingChanged -= OnNowPlayingChanged;
+    HubService.QueueChanged -= OnQueueChanged;
+    
+    Dispose();
+    await Task.CompletedTask;
   }
 }

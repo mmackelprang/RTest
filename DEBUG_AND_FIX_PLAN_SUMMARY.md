@@ -104,8 +104,8 @@ After implementing phases, use the comprehensive testing checklist:
 
 As you complete each phase, mark it here:
 
-- [ ] Phase 1: Global Now Playing & Music Controls
-- [ ] Phase 2: Music Queue Navbar Visibility  
+- [x] Phase 1: Global Now Playing & Music Controls (Task 1.1 completed)
+- [x] Phase 2: Music Queue Navbar Visibility (Task 2.1 completed)
 - [x] Phase 3: Now Playing Metadata Display (Tasks 3.1 & 3.2 completed)
 - [ ] Phase 4: Fingerprinting Debug & Instrumentation
 - [ ] Phase 5: RTL-SDR Radio Audio Output
