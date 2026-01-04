@@ -1,10 +1,10 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
-using Radio.Core.Audio.Sources.Primary;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Infrastructure.Audio.Sources.Primary;
+using Radio.Infrastructure.Interfaces;
 using Xunit;
 
 namespace Radio.Infrastructure.Tests.Audio.Sources.Primary;
