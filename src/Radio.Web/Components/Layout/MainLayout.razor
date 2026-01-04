@@ -107,7 +107,10 @@
         }
         else
         {
-          <img src="@_nowPlayingAlbumArt" alt="Album Art" style="width: 40px; height: 40px; object-fit: cover; border-radius: 4px;" />
+          <img src="@_nowPlayingAlbumArt"
+               alt="Album Art"
+               style="width: 40px; height: 40px; object-fit: cover; border-radius: 4px;"
+               @onerror="@(() => _nowPlayingAlbumArt = null)" />
         }
       </div>
       
@@ -226,6 +229,11 @@
   private string? _nowPlayingArtist = null;
   private string? _nowPlayingAlbumArt = null;
   private int _queueCount = 0;
+  
+  // Volume debouncing
+  private System.Threading.Timer? _volumeDebounceTimer;
+  private double _pendingVolume;
+  private readonly object _volumeLock = new();
 
   private readonly MudTheme _customTheme = new()
   {
@@ -657,14 +665,26 @@
 
   private async Task OnVolumeChanged(double newVolume)
   {
-    try
+    // Update UI immediately but debounce API call
+    _volume = newVolume;
+    
+    lock (_volumeLock)
     {
-      _volume = newVolume;
-      await AudioApi.SetVolumeAsync((float)newVolume);
-    }
-    catch (Exception ex)
-    {
-      Logger.LogError(ex, "Error in OnVolumeChanged");
+      _pendingVolume = newVolume;
+      
+      // Cancel existing timer and start new one
+      _volumeDebounceTimer?.Dispose();
+      _volumeDebounceTimer = new System.Threading.Timer(async _ =>
+      {
+        try
+        {
+          await AudioApi.SetVolumeAsync((float)_pendingVolume);
+        }
+        catch (Exception ex)
+        {
+          Logger.LogError(ex, "Error in debounced volume change");
+        }
+      }, null, TimeSpan.FromMilliseconds(300), Timeout.InfiniteTimeSpan);
     }
   }
 
@@ -675,18 +695,19 @@
 
   public void Dispose()
   {
-    _timer?.Stop();
-    _timer?.Dispose();
-  }
-
-  public async ValueTask DisposeAsync()
-  {
-    // Unsubscribe from events
+    // Unsubscribe from events to prevent memory leaks
     HubService.PlaybackStateChanged -= OnPlaybackStateChanged;
     HubService.NowPlayingChanged -= OnNowPlayingChanged;
     HubService.QueueChanged -= OnQueueChanged;
-    
+
+    _timer?.Stop();
+    _timer?.Dispose();
+    _volumeDebounceTimer?.Dispose();
+  }
+
+  public ValueTask DisposeAsync()
+  {
     Dispose();
-    await Task.CompletedTask;
+    return ValueTask.CompletedTask;
   }
 }

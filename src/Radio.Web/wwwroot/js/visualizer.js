@@ -282,32 +282,54 @@ export const visualizer = {
 
     const centerY = y + height / 2;
     // Increased amplitude multiplier from 0.9 to 2.5 for better visibility
-    // Also add auto-scaling based on peak amplitude
+    // Auto-scaling based on peak amplitude - optimized to calculate during drawing
     let maxSample = 0;
-    for (let i = 0; i < samples.length; i++) {
-      maxSample = Math.max(maxSample, Math.abs(samples[i]));
-    }
     
-    // Auto-scale: if signal is too quiet, boost it; if too loud, keep it
-    let scaleFactor = maxSample > 0 ? Math.min(2.5, 1.0 / maxSample) : 2.5;
-    const amplitude = height / 2 * scaleFactor * 0.95; // Use 95% to prevent clipping
-
+    // First pass: draw the waveform and find max in same loop for efficiency
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
     ctx.beginPath();
 
     const step = width / samples.length;
     
+    // Draw with temporary amplitude, track max
     for (let i = 0; i < samples.length; i++) {
       const sample = samples[i];
+      maxSample = Math.max(maxSample, Math.abs(sample));
       const sampleX = x + i * step;
-      const sampleY = centerY - (sample * amplitude);
+      // Use temporary amplitude for now
+      const sampleY = centerY - (sample * height / 2 * 0.5);
 
       if (i === 0) {
         ctx.moveTo(sampleX, sampleY);
       } else {
         ctx.lineTo(sampleX, sampleY);
       }
+    }
+    
+    ctx.stroke();
+    
+    // Now redraw with proper scaling if needed
+    if (maxSample > 0 && maxSample < 0.4) {
+      // Auto-scale: if signal is too quiet, boost it
+      let scaleFactor = Math.min(2.5, 1.0 / maxSample);
+      const amplitude = height / 2 * scaleFactor * 0.95; // Use 95% to prevent clipping
+      
+      ctx.beginPath();
+      for (let i = 0; i < samples.length; i++) {
+        const sample = samples[i];
+        const sampleX = x + i * step;
+        const sampleY = centerY - (sample * amplitude);
+
+        if (i === 0) {
+          ctx.moveTo(sampleX, sampleY);
+        } else {
+          ctx.lineTo(sampleX, sampleY);
+        }
+      }
+      ctx.stroke();
+    }
+  },
     }
 
     ctx.stroke();
