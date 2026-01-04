@@ -28,6 +28,17 @@ public class AudioPreferences
   /// Gets or sets the master volume level (0-100).
   /// </summary>
   public int MasterVolume { get; set; } = 75;
+
+  /// <summary>
+  /// Gets or sets the audio balance (-100 to 100, where 0 is center).
+  /// </summary>
+  public int Balance { get; set; } = 0;
+
+  /// <summary>
+  /// Gets or sets the currently selected audio input device ID (for recording/vinyl sources).
+  /// Empty string means use default device.
+  /// </summary>
+  public string CurrentInput { get; set; } = "";
 }
 
 /// <summary>
@@ -59,6 +70,17 @@ public class SpotifyPreferences
   /// Gets or sets the repeat mode.
   /// </summary>
   public RepeatMode Repeat { get; set; } = RepeatMode.Off;
+
+  /// <summary>
+  /// Gets or sets the last Spotify search query.
+  /// Used to restore search results when returning to Spotify page.
+  /// </summary>
+  public string LastSearchQuery { get; set; } = "";
+
+  /// <summary>
+  /// Gets or sets the timestamp of the last search (for cache invalidation).
+  /// </summary>
+  public DateTime LastSearchTimestamp { get; set; } = DateTime.MinValue;
 }
 
 /// <summary>
@@ -90,6 +112,18 @@ public class FilePlayerPreferences
   /// Gets or sets the repeat mode.
   /// </summary>
   public RepeatMode Repeat { get; set; } = RepeatMode.Off;
+
+  /// <summary>
+  /// Gets or sets the persisted queue items (file paths in order).
+  /// Used to restore the queue on application restart.
+  /// </summary>
+  public List<string> QueueItems { get; set; } = new();
+
+  /// <summary>
+  /// Gets or sets the current index in the queue.
+  /// Used to restore playback position in the queue.
+  /// </summary>
+  public int CurrentQueueIndex { get; set; } = -1;
 }
 
 /// <summary>

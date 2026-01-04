@@ -5,9 +5,15 @@
 @inject AudioApiService AudioApi
 @inject QueueApiService QueueApi
 @inject ConfigurationApiService ConfigApi
+@inject IJSRuntime JSRuntime
+@inject ISnackbar Snackbar
 @inject ILogger<FileBrowserPage> Logger
+@implements IAsyncDisposable
 
 <PageTitle>File Browser - Radio Console</PageTitle>
+
+<!-- Include virtual keyboard CSS -->
+<link href="css/virtual-keyboard.css" rel="stylesheet" />
 
 <div class="file-browser-page" style="padding: 24px; height: 100%; display: flex; flex-direction: column;">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
@@ -76,6 +82,49 @@
       </MudSelect>
     </div>
   }
+  
+  <!-- Custom Path Entry -->
+  <div style="margin-bottom: 16px;">
+    <div style="display: flex; gap: 8px; align-items: flex-start;">
+      <MudTextField @bind-Value="_customPath" 
+                    id="custom-path-input"
+                    Label="Custom Path (e.g., \\server\share, /mnt/nas, C:\Music)" 
+                    Variant="Variant.Outlined" 
+                    HelperText="Enter a UNC path, network share, or local directory"
+                    OnKeyUp="@(async (e) => { if (e.Key == "Enter") await NavigateToCustomPathAsync(); })"
+                    Style="flex: 1;" />
+      <MudIconButton Icon="@Icons.Material.Filled.Keyboard" 
+                     Color="Color.Primary"
+                     Size="Size.Large"
+                     Style="min-width: 56px; min-height: 56px;"
+                     OnClick="ToggleVirtualKeyboard"
+                     title="Show/Hide Virtual Keyboard" />
+      <MudButton Variant="Variant.Filled" 
+                 Color="Color.Primary" 
+                 Size="Size.Large"
+                 Style="min-width: 80px; min-height: 56px;"
+                 OnClick="NavigateToCustomPathAsync"
+                 StartIcon="@Icons.Material.Filled.ArrowForward">
+        Go
+      </MudButton>
+    </div>
+    @if (_recentPaths.Any())
+    {
+      <div style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap;">
+        <MudText Typo="Typo.caption" Style="margin-right: 8px; align-self: center; color: var(--mud-palette-text-secondary);">Recent:</MudText>
+        @foreach (var path in _recentPaths.Take(5))
+        {
+          <MudChip T="string" 
+                   Size="Size.Small" 
+                   OnClick="@(async () => await NavigateToRecentPath(path))"
+                   Icon="@Icons.Material.Filled.History"
+                   Style="cursor: pointer;">
+            @TruncatePath(path, 40)
+          </MudChip>
+        }
+      </div>
+    }
+  </div>
   
   <!-- Breadcrumb Navigation -->
   <div style="margin-bottom: 16px;">
@@ -181,6 +230,9 @@
   private List<MudBlazor.BreadcrumbItem> _breadcrumbs = new();
   private List<DriveInfoDto>? _drives = null;
   private string _selectedDrive = "/";
+  private string _customPath = "";
+  private List<string> _recentPaths = new();
+  private IJSObjectReference? _keyboardModule;
 
   protected override async Task OnInitializedAsync()
   {
@@ -188,6 +240,56 @@
     await LoadPreferencesAsync();
     await LoadFilesAsync();
     UpdateBreadcrumbs();
+  }
+
+  protected override async Task OnAfterRenderAsync(bool firstRender)
+  {
+    if (firstRender)
+    {
+      try
+      {
+        _keyboardModule = await JSRuntime.InvokeAsync<IJSObjectReference>(
+          "import", "./js/virtual-keyboard.js");
+      }
+      catch (Exception ex)
+      {
+        Logger.LogError(ex, "Failed to load virtual keyboard module");
+      }
+    }
+  }
+
+  private async Task ToggleVirtualKeyboard()
+  {
+    if (_keyboardModule == null)
+    {
+      Logger.LogWarning("Virtual keyboard module not initialized");
+      return;
+    }
+
+    try
+    {
+      // Toggle the virtual keyboard for the custom path input using the JS module
+      await _keyboardModule.InvokeVoidAsync("toggleForInput", "#custom-path-input input");
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to toggle virtual keyboard");
+    }
+  }
+
+  public async ValueTask DisposeAsync()
+  {
+    if (_keyboardModule != null)
+    {
+      try
+      {
+        await _keyboardModule.DisposeAsync();
+      }
+      catch (Exception ex)
+      {
+        Logger.LogWarning(ex, "Error disposing keyboard module");
+      }
+    }
   }
 
   private async Task LoadPreferencesAsync()
@@ -208,12 +310,23 @@
         {
           _filterExtension = filterObj.ToString() ?? "*";
         }
+        
+        // Load recent paths
+        if (prefs.TryGetValue("recentPaths", out var recentObj) && recentObj != null)
+        {
+          var recentStr = recentObj.ToString();
+          if (!string.IsNullOrEmpty(recentStr))
+          {
+            _recentPaths = System.Text.Json.JsonSerializer.Deserialize<List<string>>(recentStr) ?? new List<string>();
+          }
+        }
       }
       else
       {
         // Save defaults
         await SavePreferenceAsync("lastPath", _currentPath);
         await SavePreferenceAsync("filterExtension", _filterExtension);
+        await SavePreferenceAsync("recentPaths", "[]");
       }
     }
     catch (Exception ex)
@@ -413,5 +526,128 @@
       len = len / 1024;
     }
     return $"{len:0.##} {sizes[order]}";
+  }
+  
+  private async Task NavigateToCustomPathAsync()
+  {
+    if (string.IsNullOrWhiteSpace(_customPath))
+    {
+      return;
+    }
+    
+    try
+    {
+      // Normalize the path
+      var normalizedPath = NormalizePath(_customPath.Trim());
+      
+      // Validate path format
+      if (!IsValidPath(normalizedPath))
+      {
+        Logger.LogWarning("Invalid path format: {Path}", _customPath);
+        Snackbar.Add("Invalid path format. Please enter a valid UNC path (\\\\server\\share), Windows path (C:\\Music), or Unix path (/mnt/nas).", Severity.Warning);
+        return;
+      }
+      
+      // Add to recent paths (don't duplicate)
+      if (!_recentPaths.Contains(normalizedPath))
+      {
+        _recentPaths.Insert(0, normalizedPath);
+        
+        // Keep only last 10 paths
+        if (_recentPaths.Count > 10)
+        {
+          _recentPaths = _recentPaths.Take(10).ToList();
+        }
+        
+        // Save recent paths
+        var json = System.Text.Json.JsonSerializer.Serialize(_recentPaths);
+        await SavePreferenceAsync("recentPaths", json);
+      }
+      
+      // Navigate to the path
+      _currentPath = normalizedPath;
+      _rootPath = normalizedPath;
+      _selectedDrive = normalizedPath;
+      UpdateBreadcrumbs();
+      await LoadFilesAsync();
+      await SavePreferenceAsync("lastPath", _currentPath);
+      
+      // Clear the input
+      _customPath = "";
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to navigate to custom path: {Path}", _customPath);
+    }
+  }
+  
+  private async Task NavigateToRecentPath(string path)
+  {
+    _customPath = path;
+    await NavigateToCustomPathAsync();
+  }
+  
+  private string NormalizePath(string path)
+  {
+    // Handle UNC paths (\\server\share)
+    if (path.StartsWith("\\\\") || path.StartsWith("//"))
+    {
+      return path.Replace("/", "\\"); // Normalize to Windows UNC format
+    }
+    
+    // Handle Windows paths (C:\, D:\, etc.)
+    if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && path.Length >= 2 && path[1] == ':')
+    {
+      return path.Replace("/", "\\");
+    }
+    
+    // Handle Unix paths
+    if (path.StartsWith("/"))
+    {
+      return path.Replace("\\", "/");
+    }
+    
+    // Default: assume Unix path
+    return path.Replace("\\", "/");
+  }
+  
+  private bool IsValidPath(string path)
+  {
+    if (string.IsNullOrWhiteSpace(path))
+    {
+      return false;
+    }
+    
+    // UNC path: \\server\share
+    if (path.StartsWith("\\\\") && path.Length > 3)
+    {
+      return true;
+    }
+    
+    // Windows absolute path: C:\, D:\, etc.
+    if (path.Length >= 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/'))
+    {
+      return true;
+    }
+    
+    // Unix absolute path: /path/to/dir
+    if (path.StartsWith("/"))
+    {
+      return true;
+    }
+    
+    return false;
+  }
+  
+  private string TruncatePath(string path, int maxLength)
+  {
+    if (path.Length <= maxLength)
+    {
+      return path;
+    }
+    
+    // Show first and last parts of path
+    var halfLength = (maxLength - 3) / 2;
+    return path.Substring(0, halfLength) + "..." + path.Substring(path.Length - halfLength);
   }
 }
