@@ -523,10 +523,55 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   {
     await base.InitializeAsync(cancellationToken);
 
-    // Restore last played file if available
+    // Restore queue and last played state from preferences
     var prefs = _preferences.CurrentValue;
-    if (!string.IsNullOrEmpty(prefs.LastSongPlayed) && File.Exists(prefs.LastSongPlayed))
+    
+    // Restore queue if it exists
+    if (prefs.QueueItems != null && prefs.QueueItems.Count > 0)
     {
+      Logger.LogInformation("Restoring queue with {Count} items from preferences", prefs.QueueItems.Count);
+      
+      // Filter to only existing files
+      var validFiles = prefs.QueueItems.Where(File.Exists).ToList();
+      
+      if (validFiles.Count > 0)
+      {
+        _originalOrder = new List<string>(validFiles);
+        _playlist = new Queue<string>(validFiles);
+        _currentIndex = Math.Max(0, Math.Min(prefs.CurrentQueueIndex, validFiles.Count - 1));
+        
+        // If there's a valid current index, set that as the current file
+        if (_currentIndex >= 0 && _currentIndex < validFiles.Count)
+        {
+          _currentFile = validFiles[_currentIndex];
+          
+          // Remove all items before current from playlist
+          for (int i = 0; i <= _currentIndex; i++)
+          {
+            if (_playlist.Count > 0 && _playlist.Peek() == validFiles[i])
+            {
+              _playlist.Dequeue();
+            }
+          }
+          
+          _position = TimeSpan.FromMilliseconds(prefs.SongPositionMs);
+          UpdateMetadataFromFile(_currentFile);
+          Logger.LogInformation("Restored queue position at index {Index}: {File}", _currentIndex, Path.GetFileName(_currentFile));
+        }
+        else if (_playlist.Count > 0)
+        {
+          // No valid current index, load first file from queue
+          await LoadCurrentFileAsync(cancellationToken);
+        }
+      }
+      else
+      {
+        Logger.LogWarning("Queue restoration skipped: no valid files found in saved queue");
+      }
+    }
+    else if (!string.IsNullOrEmpty(prefs.LastSongPlayed) && File.Exists(prefs.LastSongPlayed))
+    {
+      // Fallback to old behavior: restore just the last played file
       Logger.LogDebug("Restoring last played file: {File}", prefs.LastSongPlayed);
       _currentFile = prefs.LastSongPlayed;
       _position = TimeSpan.FromMilliseconds(prefs.SongPositionMs);
@@ -1243,11 +1288,34 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   }
 
   /// <summary>
-  /// Raises the QueueChanged event.
+  /// Raises the QueueChanged event and saves queue state to preferences.
   /// </summary>
   private void OnQueueChanged(QueueChangedEventArgs args)
   {
     QueueChanged?.Invoke(this, args);
+    SaveQueueStateToPreferences();
+  }
+
+  /// <summary>
+  /// Saves the current queue state to preferences for persistence.
+  /// </summary>
+  private void SaveQueueStateToPreferences()
+  {
+    try
+    {
+      // Get all tracks in order (current + queue)
+      var allTracks = GetAllTracksInOrder();
+      
+      // Update preferences with current queue state
+      _preferences.CurrentValue.QueueItems = allTracks;
+      _preferences.CurrentValue.CurrentQueueIndex = _currentIndex;
+      
+      Logger.LogDebug("Saved queue state: {Count} items, current index: {Index}", allTracks.Count, _currentIndex);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to save queue state to preferences");
+    }
   }
 
   private string GetFullPath(string path)
