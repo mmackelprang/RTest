@@ -37,6 +37,7 @@ public class AudioFileSelectionDialogTests : TestContext
     
     // Add HttpClient for API services
     Services.AddHttpClient<SourcesApiService>();
+    Services.AddHttpClient<QueueApiService>();
     
     // Add logger for the dialog
     Services.AddSingleton<ILogger<AudioFileSelectionDialog>>(
