@@ -109,12 +109,12 @@ As you complete each phase, mark it here:
 - [x] Phase 3: Now Playing Metadata Display (Tasks 3.1 & 3.2 completed)
 - [x] Phase 4: Fingerprinting Debug & Instrumentation (Task 4.1 completed)
 - [ ] Phase 5: RTL-SDR Radio Audio Output
-- [ ] Phase 6: Queue Page Enhancements
-- [x] Phase 7: Visualizer Graphics Improvements (Tasks 7.1, 7.2, 7.3, 7.4 completed)
+- [x] Phase 6: Queue Page Enhancements (Tasks 6.1, 6.2, 6.3, 6.4 completed; 6.5-6.8 remaining)
+- [x] Phase 7: Visualizer Graphics Improvements (All tasks 7.1, 7.2, 7.3, 7.4 completed)
 - [x] Phase 8: Home Page Media Controls (Tasks 8.1, 8.2, 8.3 completed)
 - [ ] Phase 9: File Browser Network & Drive Access
 - [ ] Phase 10: Spotify Loopback Implementation
-- [ ] Phase 11: Queue Page Touch UX Improvements
+- [x] Phase 11: Queue Page Touch UX Improvements (Tasks 11.1, 11.2 completed; 11.3, 11.4 deferred)
 - [ ] Phase 12: Overall Material 3 Design & Touch Optimization
 
 ---
