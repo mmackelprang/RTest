@@ -332,7 +332,12 @@
 
   private async Task OpenFileSelectionDialogAsync()
   {
-    var parameters = new DialogParameters();
+    var parameters = new DialogParameters
+    {
+      { "AllowMultiSelect", true },
+      { "AllowAddToQueue", true },
+      { "OnAddToQueue", EventCallback.Factory.Create<List<string>>(this, HandleAddFilesToQueueAsync) }
+    };
     var options = new DialogOptions
     {
       CloseButton = true,
@@ -340,29 +345,69 @@
       FullWidth = true
     };
 
-    var dialog = await DialogService.ShowAsync<Radio.Web.Components.Dialogs.AudioFileSelectionDialog>("Add File to Queue", parameters, options);
+    var dialog = await DialogService.ShowAsync<Radio.Web.Components.Dialogs.AudioFileSelectionDialog>("Add Files to Queue", parameters, options);
     var result = await dialog.Result;
 
-    if (result != null && !result.Canceled && result.Data is string selectedPath)
+    if (result != null && !result.Canceled)
     {
-      try
+      // Handle result - could be single string or List<string>
+      if (result.Data is List<string> selectedPaths)
       {
-        var success = await FileApi.AddFileToQueueAsync(selectedPath);
-        if (success)
+        await HandleAddFilesToQueueAsync(selectedPaths);
+      }
+      else if (result.Data is string selectedPath)
+      {
+        await HandleAddFilesToQueueAsync(new List<string> { selectedPath });
+      }
+    }
+  }
+
+  private async Task HandleAddFilesToQueueAsync(List<string> filePaths)
+  {
+    if (filePaths == null || !filePaths.Any())
+      return;
+
+    try
+    {
+      var addedCount = 0;
+      var failedCount = 0;
+
+      foreach (var path in filePaths)
+      {
+        try
         {
-          Snackbar.Add("File added to queue", Severity.Success);
-          await RefreshQueueAsync();
+          var success = await FileApi.AddFileToQueueAsync(path);
+          if (success)
+          {
+            addedCount++;
+          }
+          else
+          {
+            failedCount++;
+          }
         }
-        else
+        catch (Exception ex)
         {
-          Snackbar.Add("Failed to add file to queue", Severity.Error);
+          Logger.LogError(ex, "Failed to add file to queue: {Path}", path);
+          failedCount++;
         }
       }
-      catch (Exception ex)
+
+      if (addedCount > 0)
       {
-        Logger.LogError(ex, "Failed to add file to queue");
-        Snackbar.Add("Error adding file to queue", Severity.Error);
+        Snackbar.Add($"{addedCount} file{(addedCount != 1 ? "s" : "")} added to queue", Severity.Success);
+        await RefreshQueueAsync();
       }
+
+      if (failedCount > 0)
+      {
+        Snackbar.Add($"Failed to add {failedCount} file{(failedCount != 1 ? "s" : "")}", Severity.Warning);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error adding files to queue");
+      Snackbar.Add("Error adding files to queue", Severity.Error);
     }
   }
 
