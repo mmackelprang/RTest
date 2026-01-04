@@ -5,9 +5,14 @@
 @inject AudioApiService AudioApi
 @inject QueueApiService QueueApi
 @inject ConfigurationApiService ConfigApi
+@inject IJSRuntime JSRuntime
 @inject ILogger<FileBrowserPage> Logger
+@implements IAsyncDisposable
 
 <PageTitle>File Browser - Radio Console</PageTitle>
+
+<!-- Include virtual keyboard CSS -->
+<link href="css/virtual-keyboard.css" rel="stylesheet" />
 
 <div class="file-browser-page" style="padding: 24px; height: 100%; display: flex; flex-direction: column;">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
@@ -81,11 +86,18 @@
   <div style="margin-bottom: 16px;">
     <div style="display: flex; gap: 8px; align-items: flex-start;">
       <MudTextField @bind-Value="_customPath" 
+                    id="custom-path-input"
                     Label="Custom Path (e.g., \\server\share, /mnt/nas, C:\Music)" 
                     Variant="Variant.Outlined" 
                     HelperText="Enter a UNC path, network share, or local directory"
                     OnKeyUp="@(async (e) => { if (e.Key == "Enter") await NavigateToCustomPathAsync(); })"
                     Style="flex: 1;" />
+      <MudIconButton Icon="@Icons.Material.Filled.Keyboard" 
+                     Color="Color.Primary"
+                     Size="Size.Large"
+                     Style="min-width: 56px; min-height: 56px;"
+                     OnClick="ToggleVirtualKeyboard"
+                     title="Show/Hide Virtual Keyboard" />
       <MudButton Variant="Variant.Filled" 
                  Color="Color.Primary" 
                  Size="Size.Large"
@@ -219,6 +231,7 @@
   private string _selectedDrive = "/";
   private string _customPath = "";
   private List<string> _recentPaths = new();
+  private IJSObjectReference? _keyboardModule;
 
   protected override async Task OnInitializedAsync()
   {
@@ -226,6 +239,61 @@
     await LoadPreferencesAsync();
     await LoadFilesAsync();
     UpdateBreadcrumbs();
+  }
+
+  protected override async Task OnAfterRenderAsync(bool firstRender)
+  {
+    if (firstRender)
+    {
+      try
+      {
+        _keyboardModule = await JSRuntime.InvokeAsync<IJSObjectReference>(
+          "import", "./js/virtual-keyboard.js");
+      }
+      catch (Exception ex)
+      {
+        Logger.LogError(ex, "Failed to load virtual keyboard module");
+      }
+    }
+  }
+
+  private async Task ToggleVirtualKeyboard()
+  {
+    if (_keyboardModule == null)
+    {
+      Logger.LogWarning("Virtual keyboard module not initialized");
+      return;
+    }
+
+    try
+    {
+      // Find the input element by its container ID and toggle keyboard
+      await JSRuntime.InvokeVoidAsync("eval", @"
+        const input = document.querySelector('#custom-path-input input');
+        if (input && window.virtualKeyboard) {
+          window.virtualKeyboard.toggle(input);
+        }
+      ");
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to toggle virtual keyboard");
+    }
+  }
+
+  public async ValueTask DisposeAsync()
+  {
+    if (_keyboardModule != null)
+    {
+      try
+      {
+        await _keyboardModule.DisposeAsync();
+      }
+      catch (Exception ex)
+      {
+        Logger.LogWarning(ex, "Error disposing keyboard module");
+      }
+    }
   }
 
   private async Task LoadPreferencesAsync()
