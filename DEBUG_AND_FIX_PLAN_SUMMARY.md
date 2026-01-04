@@ -110,7 +110,7 @@ As you complete each phase, mark it here:
 - [x] Phase 4: Fingerprinting Debug & Instrumentation (Task 4.1 completed)
 - [ ] Phase 5: RTL-SDR Radio Audio Output
 - [ ] Phase 6: Queue Page Enhancements
-- [x] Phase 7: Visualizer Graphics Improvements (Tasks 7.1, 7.3, 7.4 completed)
+- [x] Phase 7: Visualizer Graphics Improvements (Tasks 7.1, 7.2, 7.3, 7.4 completed)
 - [x] Phase 8: Home Page Media Controls (Tasks 8.1, 8.2, 8.3 completed)
 - [ ] Phase 9: File Browser Network & Drive Access
 - [ ] Phase 10: Spotify Loopback Implementation
