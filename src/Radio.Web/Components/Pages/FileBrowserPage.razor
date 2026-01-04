@@ -77,6 +77,42 @@
     </div>
   }
   
+  <!-- Custom Path Entry -->
+  <div style="margin-bottom: 16px;">
+    <div style="display: flex; gap: 8px; align-items: flex-start;">
+      <MudTextField @bind-Value="_customPath" 
+                    Label="Custom Path (e.g., \\server\share, /mnt/nas, C:\Music)" 
+                    Variant="Variant.Outlined" 
+                    HelperText="Enter a UNC path, network share, or local directory"
+                    OnKeyUp="@(async (e) => { if (e.Key == "Enter") await NavigateToCustomPathAsync(); })"
+                    Style="flex: 1;" />
+      <MudButton Variant="Variant.Filled" 
+                 Color="Color.Primary" 
+                 Size="Size.Large"
+                 Style="min-width: 80px; min-height: 56px;"
+                 OnClick="NavigateToCustomPathAsync"
+                 StartIcon="@Icons.Material.Filled.ArrowForward">
+        Go
+      </MudButton>
+    </div>
+    @if (_recentPaths.Any())
+    {
+      <div style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap;">
+        <MudText Typo="Typo.caption" Style="margin-right: 8px; align-self: center; color: var(--mud-palette-text-secondary);">Recent:</MudText>
+        @foreach (var path in _recentPaths.Take(5))
+        {
+          <MudChip T="string" 
+                   Size="Size.Small" 
+                   OnClick="@(() => NavigateToRecentPath(path))"
+                   Icon="@Icons.Material.Filled.History"
+                   Style="cursor: pointer;">
+            @TruncatePath(path, 40)
+          </MudChip>
+        }
+      </div>
+    }
+  </div>
+  
   <!-- Breadcrumb Navigation -->
   <div style="margin-bottom: 16px;">
     <MudBreadcrumbs Items="@_breadcrumbs" Style="padding: 8px 0;">
@@ -181,6 +217,8 @@
   private List<MudBlazor.BreadcrumbItem> _breadcrumbs = new();
   private List<DriveInfoDto>? _drives = null;
   private string _selectedDrive = "/";
+  private string _customPath = "";
+  private List<string> _recentPaths = new();
 
   protected override async Task OnInitializedAsync()
   {
@@ -208,12 +246,23 @@
         {
           _filterExtension = filterObj.ToString() ?? "*";
         }
+        
+        // Load recent paths
+        if (prefs.TryGetValue("recentPaths", out var recentObj) && recentObj != null)
+        {
+          var recentStr = recentObj.ToString();
+          if (!string.IsNullOrEmpty(recentStr))
+          {
+            _recentPaths = System.Text.Json.JsonSerializer.Deserialize<List<string>>(recentStr) ?? new List<string>();
+          }
+        }
       }
       else
       {
         // Save defaults
         await SavePreferenceAsync("lastPath", _currentPath);
         await SavePreferenceAsync("filterExtension", _filterExtension);
+        await SavePreferenceAsync("recentPaths", "[]");
       }
     }
     catch (Exception ex)
@@ -413,5 +462,128 @@
       len = len / 1024;
     }
     return $"{len:0.##} {sizes[order]}";
+  }
+  
+  private async Task NavigateToCustomPathAsync()
+  {
+    if (string.IsNullOrWhiteSpace(_customPath))
+    {
+      return;
+    }
+    
+    try
+    {
+      // Normalize the path
+      var normalizedPath = NormalizePath(_customPath.Trim());
+      
+      // Validate path format
+      if (!IsValidPath(normalizedPath))
+      {
+        Logger.LogWarning("Invalid path format: {Path}", _customPath);
+        // TODO: Show error message to user
+        return;
+      }
+      
+      // Add to recent paths (don't duplicate)
+      if (!_recentPaths.Contains(normalizedPath))
+      {
+        _recentPaths.Insert(0, normalizedPath);
+        
+        // Keep only last 10 paths
+        if (_recentPaths.Count > 10)
+        {
+          _recentPaths = _recentPaths.Take(10).ToList();
+        }
+        
+        // Save recent paths
+        var json = System.Text.Json.JsonSerializer.Serialize(_recentPaths);
+        await SavePreferenceAsync("recentPaths", json);
+      }
+      
+      // Navigate to the path
+      _currentPath = normalizedPath;
+      _rootPath = normalizedPath;
+      _selectedDrive = normalizedPath;
+      UpdateBreadcrumbs();
+      await LoadFilesAsync();
+      await SavePreferenceAsync("lastPath", _currentPath);
+      
+      // Clear the input
+      _customPath = "";
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to navigate to custom path: {Path}", _customPath);
+    }
+  }
+  
+  private void NavigateToRecentPath(string path)
+  {
+    _customPath = path;
+    InvokeAsync(NavigateToCustomPathAsync);
+  }
+  
+  private string NormalizePath(string path)
+  {
+    // Handle UNC paths (\\server\share)
+    if (path.StartsWith("\\\\") || path.StartsWith("//"))
+    {
+      return path.Replace("/", "\\"); // Normalize to Windows UNC format
+    }
+    
+    // Handle Windows paths (C:\, D:\, etc.)
+    if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && path.Length >= 2 && path[1] == ':')
+    {
+      return path.Replace("/", "\\");
+    }
+    
+    // Handle Unix paths
+    if (path.StartsWith("/"))
+    {
+      return path.Replace("\\", "/");
+    }
+    
+    // Default: assume Unix path
+    return path.Replace("\\", "/");
+  }
+  
+  private bool IsValidPath(string path)
+  {
+    if (string.IsNullOrWhiteSpace(path))
+    {
+      return false;
+    }
+    
+    // UNC path: \\server\share
+    if (path.StartsWith("\\\\") && path.Length > 3)
+    {
+      return true;
+    }
+    
+    // Windows absolute path: C:\, D:\, etc.
+    if (path.Length >= 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/'))
+    {
+      return true;
+    }
+    
+    // Unix absolute path: /path/to/dir
+    if (path.StartsWith("/"))
+    {
+      return true;
+    }
+    
+    return false;
+  }
+  
+  private string TruncatePath(string path, int maxLength)
+  {
+    if (path.Length <= maxLength)
+    {
+      return path;
+    }
+    
+    // Show first and last parts of path
+    var halfLength = (maxLength - 3) / 2;
+    return path.Substring(0, halfLength) + "..." + path.Substring(path.Length - halfLength);
   }
 }
