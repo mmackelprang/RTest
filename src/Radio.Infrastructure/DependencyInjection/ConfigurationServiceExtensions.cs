@@ -62,6 +62,9 @@ public static class ConfigurationServiceExtensions
     // Register configuration manager
     services.AddSingleton<IRadioConfigurationManager, RadioConfigurationManager>();
 
+    // Register preferences persistence service as a background service
+    services.AddHostedService<PreferencesPersistenceService>();
+
     return services;
   }
 

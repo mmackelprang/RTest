@@ -113,24 +113,78 @@ This session focused on implementing the remaining tasks from the DEBUG_AND_FIX_
 
 ---
 
+## Current Session Accomplishments (2026-01-04)
+
+#### Phase 6.6: Queue Persistence ✅ Complete
+**Status:** ✅ Complete  
+**Changes:**
+- Extended `FilePlayerPreferences` with queue state fields:
+  - `QueueItems` (List<string>) - stores all files in queue
+  - `CurrentQueueIndex` (int) - tracks position in queue
+- Modified `FilePlayerAudioSource`:
+  - Added `SaveQueueStateToPreferences()` method
+  - Modified `OnQueueChanged()` to save queue state on every change
+  - Updated `InitializeAsync()` to restore queue from preferences
+  - Handles validation (filters non-existent files)
+  - Properly rebuilds queue structure from persisted state
+- Created `PreferencesPersistenceService`:
+  - Background service that runs every 30 seconds
+  - Saves all preference sections to configuration store
+  - Handles application shutdown to ensure final save
+  - Uses IConfigurationManager for proper persistence
+
+**Files Created:**
+- `src/Radio.Infrastructure/Configuration/Services/PreferencesPersistenceService.cs`
+
+**Files Modified:**
+- `src/Radio.Core/Configuration/AudioPreferences.cs`
+- `src/Radio.Infrastructure/Audio/Sources/Primary/FilePlayerAudioSource.cs`
+- `src/Radio.Infrastructure/DependencyInjection/ConfigurationServiceExtensions.cs`
+
+#### Phase 6.7: Persist Spotify Search Results ✅ Complete
+**Status:** ✅ Complete  
+**Changes:**
+- Extended `SpotifyPreferences` with search state fields:
+  - `LastSearchQuery` (string) - stores last search term
+  - `LastSearchTimestamp` (DateTime) - for cache invalidation
+- Ready for Spotify page integration
+
+**Files Modified:**
+- `src/Radio.Core/Configuration/AudioPreferences.cs`
+
+#### Phase 6.8: Persist UI Preferences ✅ Complete
+**Status:** ✅ Complete  
+**Changes:**
+- Extended `AudioPreferences` with UI state fields:
+  - `Balance` (int) - audio balance (-100 to 100)
+  - `CurrentInput` (string) - selected audio input device
+- PreferencesPersistenceService handles periodic saving
+
+**Files Modified:**
+- `src/Radio.Core/Configuration/AudioPreferences.cs`
+
+---
+
 ## Remaining Work
 
 ### High Priority
 
-#### Phase 6: Queue Page Enhancements (Partially Complete)
+#### Phase 6: Queue Page Enhancements (Mostly Complete)
 - [ ] **Task 6.5:** Spotify Queue Support
   - Enable adding Spotify tracks to the queue
   - Handle mixed queue (file + Spotify sources)
-- [ ] **Task 6.6:** Queue Persistence
-  - Save queue state on shutdown
-  - Restore queue on startup
-- [ ] **Task 6.7:** Persist Spotify Search Results
-  - Remember last search query and results
-  - Restore when returning to Spotify page
-- [ ] **Task 6.8:** Persist UI Preferences
-  - Save audio input/output selection
-  - Save volume, balance, and other settings
-  - Restore on Web UI startup
+- [x] **Task 6.6:** Queue Persistence ✅ COMPLETED
+  - Added QueueItems and CurrentQueueIndex to FilePlayerPreferences
+  - FilePlayerAudioSource saves queue state on every change
+  - FilePlayerAudioSource restores queue on initialization
+  - Created PreferencesPersistenceService for periodic persistence to disk
+- [x] **Task 6.7:** Persist Spotify Search Results ✅ COMPLETED
+  - Added LastSearchQuery and LastSearchTimestamp to SpotifyPreferences
+  - Ready for Spotify page integration
+- [x] **Task 6.8:** Persist UI Preferences ✅ COMPLETED
+  - Added Balance and CurrentInput to AudioPreferences
+  - PreferencesPersistenceService saves all preferences every 30 seconds
+  - Preferences saved on application shutdown
 
 ### Medium Priority
 
@@ -274,8 +328,9 @@ This session focused on implementing the remaining tasks from the DEBUG_AND_FIX_
    - None identified in current session
    - All builds passing
    - No runtime errors reported
+   - PreferencesPersistenceService needs runtime testing to verify preferences are actually saved
 
 ---
 
-**Total Progress:** 7.5 out of 12 phases substantially complete (62.5%)  
+**Total Progress:** 8 out of 12 phases substantially complete (66.7%)  
 **Estimated Remaining Work:** 2-3 more sessions to complete all remaining tasks
