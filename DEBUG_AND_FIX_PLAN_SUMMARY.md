@@ -112,7 +112,7 @@ As you complete each phase, mark it here:
 - [x] Phase 6: Queue Page Enhancements (Tasks 6.1, 6.2, 6.3, 6.4, 6.6, 6.7, 6.8 completed; 6.5 remaining)
 - [x] Phase 7: Visualizer Graphics Improvements (All tasks 7.1, 7.2, 7.3, 7.4 completed)
 - [x] Phase 8: Home Page Media Controls (Tasks 8.1, 8.2, 8.3 completed)
-- [ ] Phase 9: File Browser Network & Drive Access
+- [ ] Phase 9: File Browser Network & Drive Access (Task 9.1 completed)
 - [ ] Phase 10: Spotify Loopback Implementation
 - [x] Phase 11: Queue Page Touch UX Improvements (Tasks 11.1, 11.2 completed; 11.3, 11.4 deferred)
 - [ ] Phase 12: Overall Material 3 Design & Touch Optimization
