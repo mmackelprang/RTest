@@ -153,13 +153,15 @@ public class AudioApiService
   {
     try
     {
-      var response = await _httpClient.PostAsync("/api/audio/shuffle", null, cancellationToken);
+      _logger.LogDebug("Setting shuffle to {Enabled}", enabled);
+      var request = new { Enabled = enabled };
+      var response = await _httpClient.PostAsJsonAsync("/api/audio/shuffle", request, cancellationToken);
       response.EnsureSuccessStatusCode();
       return await response.Content.ReadFromJsonAsync<PlaybackStateDto>(cancellationToken: cancellationToken);
     }
     catch (Exception ex)
     {
-      _logger.LogError(ex, "Failed to toggle shuffle");
+      _logger.LogError(ex, "Failed to set shuffle to {Enabled}", enabled);
       return null;
     }
   }
@@ -168,13 +170,15 @@ public class AudioApiService
   {
     try
     {
-      var response = await _httpClient.PostAsync("/api/audio/repeat", null, cancellationToken);
+      _logger.LogDebug("Setting repeat mode to {Mode}", mode);
+      var request = new { Mode = mode };
+      var response = await _httpClient.PostAsJsonAsync("/api/audio/repeat", request, cancellationToken);
       response.EnsureSuccessStatusCode();
       return await response.Content.ReadFromJsonAsync<PlaybackStateDto>(cancellationToken: cancellationToken);
     }
     catch (Exception ex)
     {
-      _logger.LogError(ex, "Failed to set repeat mode");
+      _logger.LogError(ex, "Failed to set repeat mode to {Mode}", mode);
       return null;
     }
   }
@@ -183,7 +187,20 @@ public class AudioApiService
   {
     try
     {
-      return await _httpClient.GetFromJsonAsync<NowPlayingDto>("/api/audio/nowplaying", cancellationToken);
+      _logger.LogDebug("Fetching now playing info from /api/audio/nowplaying");
+      var result = await _httpClient.GetFromJsonAsync<NowPlayingDto>("/api/audio/nowplaying", cancellationToken);
+      
+      if (result != null)
+      {
+        _logger.LogDebug("Now playing received: Title={Title}, Artist={Artist}, Album={Album}, Source={Source}", 
+          result.Title, result.Artist, result.Album, result.SourceName);
+      }
+      else
+      {
+        _logger.LogWarning("Now playing returned null");
+      }
+      
+      return result;
     }
     catch (Exception ex)
     {

@@ -6,6 +6,8 @@ using Microsoft.Extensions.Configuration;
 using Radio.Web.Components.Pages;
 using Radio.Web.Services.ApiClients;
 using Radio.Web.Services.Hub;
+using MudBlazor;
+using Moq;
 
 namespace Radio.Web.Tests.Components.Pages;
 
@@ -32,6 +34,10 @@ public class HomePageTests : TestContext
     Services.AddSingleton<IConfiguration>(configuration);
     Services.AddSingleton(_loggerFactory);
     Services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
+    
+    // Add MudBlazor ISnackbar service (required by Home component)
+    var mockSnackbar = new Mock<ISnackbar>();
+    Services.AddSingleton<ISnackbar>(mockSnackbar.Object);
     
     // Add HttpClient for API services
     Services.AddHttpClient<AudioApiService>();
@@ -200,4 +206,3 @@ public class HomePageTests : TestContext
     Assert.True(true); // Component structure allows for source badge
   }
 }
-

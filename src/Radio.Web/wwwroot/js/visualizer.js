@@ -4,6 +4,7 @@
 export const visualizer = {
   canvases: {},
   animationFrames: {},
+  upsTracking: {}, // Track updates per second for each canvas
 
   // Initialize a canvas for visualization
   init: function (canvasId, width, height) {
@@ -29,6 +30,13 @@ export const visualizer = {
       height: height
     };
 
+    // Initialize UPS tracking for this canvas
+    this.upsTracking[canvasId] = {
+      timestamps: [],
+      currentUPS: 0,
+      lastUPSUpdate: Date.now()
+    };
+
     console.log(`Initialized canvas ${canvasId} (${width}x${height})`);
     return true;
   },
@@ -42,10 +50,58 @@ export const visualizer = {
     ctx.clearRect(0, 0, width, height);
   },
 
+  // Track update and calculate UPS
+  trackUpdate: function (canvasId) {
+    const tracking = this.upsTracking[canvasId];
+    if (!tracking) return;
+
+    const now = Date.now();
+    tracking.timestamps.push(now);
+
+    // Keep only last 60 timestamps (enough for 1 second of data at high rates)
+    if (tracking.timestamps.length > 60) {
+      tracking.timestamps.shift();
+    }
+
+    // Update UPS calculation every second
+    if (now - tracking.lastUPSUpdate >= 1000) {
+      // Calculate UPS from timestamps in the last second
+      const oneSecondAgo = now - 1000;
+      const recentTimestamps = tracking.timestamps.filter(t => t >= oneSecondAgo);
+      tracking.currentUPS = recentTimestamps.length;
+      tracking.lastUPSUpdate = now;
+    }
+  },
+
+  // Draw UPS indicator
+  drawUPSIndicator: function (ctx, width, height, ups) {
+    // Determine color based on performance
+    let color;
+    if (ups > 30) {
+      color = '#00ff00'; // Green
+    } else if (ups >= 15) {
+      color = '#ffff00'; // Yellow
+    } else {
+      color = '#ff0000'; // Red
+    }
+
+    // Draw in bottom-left corner
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillRect(5, height - 25, 120, 20);
+    
+    ctx.fillStyle = color;
+    ctx.font = '14px Inter, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(`Updates: ${ups}/sec`, 10, height - 10);
+  },
+
   // Draw VU meter
   drawVUMeter: function (canvasId, leftPeak, rightPeak, leftRms, rightRms, isClipping) {
     const canvasData = this.canvases[canvasId];
     if (!canvasData) return;
+    
+    // Track this update for UPS calculation
+    this.trackUpdate(canvasId);
     
     // Validate and clamp inputs
     leftPeak = Math.max(0, Math.min(1, leftPeak || 0));
@@ -70,6 +126,12 @@ export const visualizer = {
     
     // Draw right meter
     this.drawMeter(ctx, meterX + meterWidth + spacing, meterY, meterWidth, meterHeight, rightPeak, rightRms, isClipping, 'Right');
+    
+    // Draw UPS indicator
+    const tracking = this.upsTracking[canvasId];
+    if (tracking) {
+      this.drawUPSIndicator(ctx, width, height, tracking.currentUPS);
+    }
   },
 
   drawMeter: function (ctx, x, y, width, height, peak, rms, isClipping, label) {
@@ -86,41 +148,57 @@ export const visualizer = {
     const peakHeight = height * peak;
     const rmsHeight = height * rms;
 
-    // Draw RMS bar (dimmer)
-    const greenThreshold = height * 0.7;
-    const yellowThreshold = height * 0.9;
+    // Helper function to get rainbow color based on height percentage
+    const getRainbowColor = (percentage) => {
+      // 0-20%: Blue (#0000FF to #0080FF)
+      if (percentage < 0.2) {
+        const t = percentage / 0.2;
+        return `rgb(0, ${Math.floor(128 * t)}, 255)`;
+      }
+      // 20-40%: Cyan (#0080FF to #00FFFF)
+      else if (percentage < 0.4) {
+        const t = (percentage - 0.2) / 0.2;
+        return `rgb(0, ${Math.floor(128 + 127 * t)}, 255)`;
+      }
+      // 40-60%: Green (#00FFFF to #00FF00)
+      else if (percentage < 0.6) {
+        const t = (percentage - 0.4) / 0.2;
+        return `rgb(0, 255, ${Math.floor(255 * (1 - t))})`;
+      }
+      // 60-80%: Yellow (#00FF00 to #FFFF00)
+      else if (percentage < 0.8) {
+        const t = (percentage - 0.6) / 0.2;
+        return `rgb(${Math.floor(255 * t)}, 255, 0)`;
+      }
+      // 80-95%: Orange (#FFFF00 to #FF8000)
+      else if (percentage < 0.95) {
+        const t = (percentage - 0.8) / 0.15;
+        return `rgb(255, ${Math.floor(255 * (1 - t * 0.5))}, 0)`;
+      }
+      // 95-100%: Red (#FF8000 to #FF0000)
+      else {
+        const t = (percentage - 0.95) / 0.05;
+        return `rgb(255, ${Math.floor(128 * (1 - t))}, 0)`;
+      }
+    };
 
-    // Draw RMS gradient
+    // Draw RMS bar with rainbow gradient (dimmer)
+    ctx.globalAlpha = 0.5;
     for (let i = 0; i < rmsHeight; i++) {
       const currentY = y + height - i;
-      let color;
+      const percentage = i / height;
+      const color = getRainbowColor(percentage);
       
-      if (i < greenThreshold) {
-        color = '#00ff00'; // Green
-      } else if (i < yellowThreshold) {
-        color = '#ffff00'; // Yellow
-      } else {
-        color = '#ff0000'; // Red
-      }
-
       ctx.fillStyle = color;
-      ctx.globalAlpha = 0.5;
       ctx.fillRect(x + width * 0.1, currentY, width * 0.35, 1);
     }
 
-    // Draw peak bar (brighter)
+    // Draw peak bar with rainbow gradient (brighter)
     ctx.globalAlpha = 1.0;
     for (let i = 0; i < peakHeight; i++) {
       const currentY = y + height - i;
-      let color;
-      
-      if (i < greenThreshold) {
-        color = '#00ff00'; // Green
-      } else if (i < yellowThreshold) {
-        color = '#ffff00'; // Yellow
-      } else {
-        color = '#ff0000'; // Red
-      }
+      const percentage = i / height;
+      const color = getRainbowColor(percentage);
 
       ctx.fillStyle = color;
       ctx.fillRect(x + width * 0.55, currentY, width * 0.35, 1);
@@ -155,6 +233,9 @@ export const visualizer = {
     const canvasData = this.canvases[canvasId];
     if (!canvasData) return;
 
+    // Track this update for UPS calculation
+    this.trackUpdate(canvasId);
+
     const { ctx, width, height } = canvasData;
     
     // Clear canvas
@@ -188,30 +269,67 @@ export const visualizer = {
     ctx.textAlign = 'left';
     ctx.fillText('Left', 10, 20);
     ctx.fillText('Right', 10, channelHeight + 20);
+    
+    // Draw UPS indicator
+    const tracking = this.upsTracking[canvasId];
+    if (tracking) {
+      this.drawUPSIndicator(ctx, width, height, tracking.currentUPS);
+    }
   },
 
   drawWaveformChannel: function (ctx, samples, x, y, width, height, color) {
     if (!samples || samples.length === 0) return;
 
     const centerY = y + height / 2;
-    const amplitude = height / 2 * 0.9; // 90% of half height
-
+    // Increased amplitude multiplier from 0.9 to 2.5 for better visibility
+    // Auto-scaling based on peak amplitude - optimized to calculate during drawing
+    let maxSample = 0;
+    
+    // First pass: draw the waveform and find max in same loop for efficiency
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
     ctx.beginPath();
 
     const step = width / samples.length;
     
+    // Draw with temporary amplitude, track max
     for (let i = 0; i < samples.length; i++) {
       const sample = samples[i];
+      maxSample = Math.max(maxSample, Math.abs(sample));
       const sampleX = x + i * step;
-      const sampleY = centerY - (sample * amplitude);
+      // Use temporary amplitude for now
+      const sampleY = centerY - (sample * height / 2 * 0.5);
 
       if (i === 0) {
         ctx.moveTo(sampleX, sampleY);
       } else {
         ctx.lineTo(sampleX, sampleY);
       }
+    }
+    
+    ctx.stroke();
+    
+    // Now redraw with proper scaling if needed
+    if (maxSample > 0 && maxSample < 0.4) {
+      // Auto-scale: if signal is too quiet, boost it
+      let scaleFactor = Math.min(2.5, 1.0 / maxSample);
+      const amplitude = height / 2 * scaleFactor * 0.95; // Use 95% to prevent clipping
+      
+      ctx.beginPath();
+      for (let i = 0; i < samples.length; i++) {
+        const sample = samples[i];
+        const sampleX = x + i * step;
+        const sampleY = centerY - (sample * amplitude);
+
+        if (i === 0) {
+          ctx.moveTo(sampleX, sampleY);
+        } else {
+          ctx.lineTo(sampleX, sampleY);
+        }
+      }
+      ctx.stroke();
+    }
+  },
     }
 
     ctx.stroke();
@@ -221,6 +339,9 @@ export const visualizer = {
   drawSpectrum: function (canvasId, magnitudes, frequencies) {
     const canvasData = this.canvases[canvasId];
     if (!canvasData) return;
+
+    // Track this update for UPS calculation
+    this.trackUpdate(canvasId);
 
     const { ctx, width, height } = canvasData;
     
@@ -275,6 +396,12 @@ export const visualizer = {
         ctx.fillText(label, labelX, height - 5);
       }
     });
+    
+    // Draw UPS indicator
+    const tracking = this.upsTracking[canvasId];
+    if (tracking) {
+      this.drawUPSIndicator(ctx, width, height, tracking.currentUPS);
+    }
   },
 
   interpolateColor: function (color1, color2, t) {

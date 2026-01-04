@@ -141,7 +141,8 @@ public class AudioStateUpdateService : BackgroundService
       _lastNowPlaying = currentNowPlaying;
       await _hubContext.Clients.All
         .SendAsync("NowPlayingChanged", currentNowPlaying, cancellationToken);
-      _logger.LogDebug("Broadcast NowPlayingChanged");
+      _logger.LogDebug("Broadcast NowPlayingChanged: Title={Title}, Artist={Artist}, Album={Album}, Source={Source}", 
+        currentNowPlaying.Title, currentNowPlaying.Artist, currentNowPlaying.Album, currentNowPlaying.SourceName);
     }
   }
 
@@ -339,14 +340,30 @@ public class AudioStateUpdateService : BackgroundService
     }
 
     // Get metadata if available
-    if (activeSource is IPrimaryAudioSource primaryMeta && primaryMeta.Metadata != null)
+    if (activeSource is IPrimaryAudioSource primaryMeta)
     {
-      var metadataDto = primaryMeta.MapToNowPlaying();
-      dto.Title = metadataDto.Title;
-      dto.Artist = metadataDto.Artist;
-      dto.Album = metadataDto.Album;
-      dto.AlbumArtUrl = metadataDto.AlbumArtUrl;
-      dto.ExtendedMetadata = metadataDto.ExtendedMetadata;
+      _logger.LogDebug("Building NowPlaying for {SourceName}: HasMetadata={HasMetadata}, MetadataCount={Count}", 
+        primaryMeta.Name, primaryMeta.Metadata != null, primaryMeta.Metadata?.Count ?? 0);
+      
+      if (primaryMeta.Metadata != null && primaryMeta.Metadata.Count > 0)
+      {
+        // Log metadata keys for debugging
+        _logger.LogDebug("Metadata keys: {Keys}", string.Join(", ", primaryMeta.Metadata.Keys));
+        
+        var metadataDto = primaryMeta.MapToNowPlaying();
+        dto.Title = metadataDto.Title;
+        dto.Artist = metadataDto.Artist;
+        dto.Album = metadataDto.Album;
+        dto.AlbumArtUrl = metadataDto.AlbumArtUrl;
+        dto.ExtendedMetadata = metadataDto.ExtendedMetadata;
+        
+        _logger.LogDebug("Extracted metadata: Title={Title}, Artist={Artist}, Album={Album}", 
+          dto.Title, dto.Artist, dto.Album);
+      }
+      else
+      {
+        _logger.LogDebug("No metadata available for source {SourceName}", primaryMeta.Name);
+      }
     }
 
     return dto;
