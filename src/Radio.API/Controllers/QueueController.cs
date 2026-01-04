@@ -240,6 +240,37 @@ public class QueueController : ControllerBase
     }
   }
 
+  /// <summary>
+  /// Checks if a track identifier already exists in the queue.
+  /// </summary>
+  /// <param name="identifier">The track identifier to check.</param>
+  /// <returns>True if the track is in the queue, false otherwise.</returns>
+  [HttpGet("contains/{identifier}")]
+  [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+  public async Task<ActionResult<bool>> ContainsTrack(string identifier)
+  {
+    try
+    {
+      var result = TryGetQueueSource(out var queueSource);
+      if (result != null)
+      {
+        return result;
+      }
+
+      var queue = await queueSource!.GetQueueAsync();
+      var contains = queue.Any(item => item.Id == identifier);
+
+      return Ok(contains);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error checking if queue contains track");
+      return StatusCode(500, new { error = "Failed to check queue" });
+    }
+  }
+
   private static QueueItemDto MapToQueueItemDto(Radio.Core.Models.Audio.QueueItem queueItem)
   {
     return new QueueItemDto

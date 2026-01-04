@@ -27,7 +27,12 @@ export const visualizer = {
       canvas: canvas,
       ctx: ctx,
       width: width,
-      height: height
+      height: height,
+      // Dynamic VU meter scaling
+      recentPeaks: [],
+      scaleFactor: 1.0,
+      lastScaleUpdate: Date.now(),
+      targetScaleFactor: 1.0
     };
 
     // Initialize UPS tracking for this canvas
@@ -95,6 +100,46 @@ export const visualizer = {
     ctx.fillText(`Updates: ${ups}/sec`, 10, height - 10);
   },
 
+  // Update dynamic VU meter scaling
+  updateDynamicScaling: function (canvasData, maxPeak) {
+    const now = Date.now();
+    
+    // Add current peak to history (we keep roughly the last 8 seconds of peaks)
+    canvasData.recentPeaks.push({ value: maxPeak, time: now });
+    
+    // Remove peaks older than 8 seconds
+    const cutoffTime = now - 8000;
+    canvasData.recentPeaks = canvasData.recentPeaks.filter(p => p.time >= cutoffTime);
+    
+    // Hard cap on history size to avoid memory growth at extremely high update rates
+    const maxRecentPeaks = 600; // ~8 seconds at 75+ updates/sec; adjust if needed
+    if (canvasData.recentPeaks.length > maxRecentPeaks) {
+      const excess = canvasData.recentPeaks.length - maxRecentPeaks;
+      // Remove the oldest entries, keep the most recent ones
+      canvasData.recentPeaks.splice(0, excess);
+    }
+    
+    // Update scale factor every 2 seconds
+    if (now - canvasData.lastScaleUpdate >= 2000 && canvasData.recentPeaks.length > 0) {
+      // Calculate average maximum peak over the recent window
+      const avgMax = canvasData.recentPeaks.reduce((sum, p) => sum + p.value, 0) / canvasData.recentPeaks.length;
+      
+      // Target scale so average max reaches ~80% of display (but don't scale below 1.0)
+      if (avgMax > 0.1) { // Only scale if there's meaningful audio
+        canvasData.targetScaleFactor = Math.max(1.0, 0.8 / avgMax);
+      } else {
+        // Reset to 1.0 when audio is very quiet
+        canvasData.targetScaleFactor = 1.0;
+      }
+      
+      canvasData.lastScaleUpdate = now;
+    }
+    
+    // Smooth transition to target scale factor (ease-in-out)
+    const transitionSpeed = 0.05; // Slower = smoother
+    canvasData.scaleFactor += (canvasData.targetScaleFactor - canvasData.scaleFactor) * transitionSpeed;
+  },
+
   // Draw VU meter
   drawVUMeter: function (canvasId, leftPeak, rightPeak, leftRms, rightRms, isClipping) {
     const canvasData = this.canvases[canvasId];
@@ -108,6 +153,17 @@ export const visualizer = {
     rightPeak = Math.max(0, Math.min(1, rightPeak || 0));
     leftRms = Math.max(0, Math.min(1, leftRms || 0));
     rightRms = Math.max(0, Math.min(1, rightRms || 0));
+    
+    // Update dynamic scaling based on peak values
+    const maxPeak = Math.max(leftPeak, rightPeak);
+    this.updateDynamicScaling(canvasData, maxPeak);
+    
+    // Apply scale factor to peak and RMS values
+    const scaleFactor = canvasData.scaleFactor;
+    leftPeak = Math.min(1.0, leftPeak * scaleFactor);
+    rightPeak = Math.min(1.0, rightPeak * scaleFactor);
+    leftRms = Math.min(1.0, leftRms * scaleFactor);
+    rightRms = Math.min(1.0, rightRms * scaleFactor);
 
     const { ctx, width, height } = canvasData;
     
@@ -126,6 +182,17 @@ export const visualizer = {
     
     // Draw right meter
     this.drawMeter(ctx, meterX + meterWidth + spacing, meterY, meterWidth, meterHeight, rightPeak, rightRms, isClipping, 'Right');
+    
+    // Draw scale factor indicator (top-right corner)
+    if (scaleFactor > 1.01) { // Only show if scaled
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.fillRect(width - 85, 5, 80, 25);
+      
+      ctx.fillStyle = '#00d4ff';
+      ctx.font = '14px Inter, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(`×${scaleFactor.toFixed(2)}`, width - 10, 22);
+    }
     
     // Draw UPS indicator
     const tracking = this.upsTracking[canvasId];

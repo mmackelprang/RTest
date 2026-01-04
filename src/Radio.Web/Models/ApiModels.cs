@@ -203,6 +203,16 @@ public record FileItemDto(
   string? Album
 );
 
+public record DriveInfoDto(
+  string Name,
+  string Label,
+  string DriveType,
+  bool IsReady,
+  long TotalSize,
+  long AvailableSpace,
+  string? DriveFormat
+);
+
 // Play History API DTOs
 public record PlayHistoryListDto(
   int TotalCount,

@@ -358,6 +358,38 @@
             _selectedFilters = filtersStr.Split(',').ToList();
           }
         }
+        
+        // Load last search query
+        if (prefs.TryGetValue("lastSearchQuery", out var queryObj) && queryObj != null)
+        {
+          var query = queryObj.ToString();
+          if (!string.IsNullOrEmpty(query))
+          {
+            _searchQuery = query;
+          }
+        }
+        
+        // Load last search results (if query exists)
+        if (!string.IsNullOrEmpty(_searchQuery) && prefs.TryGetValue("lastSearchResults", out var resultsObj) && resultsObj != null)
+        {
+          try
+          {
+            var resultsJson = resultsObj.ToString();
+            if (!string.IsNullOrEmpty(resultsJson))
+            {
+              _searchResults = System.Text.Json.JsonSerializer.Deserialize<SpotifySearchResultsDto>(resultsJson, new System.Text.Json.JsonSerializerOptions
+              {
+                PropertyNameCaseInsensitive = true
+              });
+              Logger.LogInformation("Restored Spotify search: {Query} with {TrackCount} tracks", 
+                _searchQuery, _searchResults?.Tracks?.Count ?? 0);
+            }
+          }
+          catch (Exception ex)
+          {
+            Logger.LogWarning(ex, "Failed to deserialize saved search results");
+          }
+        }
       }
       else
       {
@@ -483,6 +515,9 @@
         : _selectedFilters;
       
       _searchResults = await SpotifyApi.SearchAsync(_searchQuery, types);
+      
+      // Save search query and results
+      await SaveSearchStateAsync();
     }
     catch (Exception)
     {
@@ -491,6 +526,45 @@
     finally
     {
       _isSearching = false;
+    }
+  }
+  
+  private async Task SaveSearchStateAsync()
+  {
+    try
+    {
+      var searchState = new Dictionary<string, object>();
+      
+      if (!string.IsNullOrEmpty(_searchQuery))
+      {
+        searchState["lastSearchQuery"] = _searchQuery;
+      }
+      
+      if (_searchResults != null)
+      {
+        var resultsJson = System.Text.Json.JsonSerializer.Serialize(_searchResults);
+        searchState["lastSearchResults"] = resultsJson;
+      }
+      
+      if (searchState.Any())
+      {
+        // Get existing preferences to merge with
+        var existingPrefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("ui.spotify") 
+                           ?? new Dictionary<string, object>();
+        
+        // Merge search state with existing preferences
+        foreach (var kvp in searchState)
+        {
+          existingPrefs[kvp.Key] = kvp.Value;
+        }
+        
+        await ConfigApi.UpdateConfigurationAsync("ui.spotify", existingPrefs);
+        Logger.LogDebug("Saved Spotify search state: {Query}", _searchQuery);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to save Spotify search state");
     }
   }
 

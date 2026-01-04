@@ -287,6 +287,80 @@ public class FilesController : ControllerBase
   }
 
   /// <summary>
+  /// Gets a list of available drives and their information.
+  /// </summary>
+  /// <returns>A list of available drives with their properties.</returns>
+  /// <response code="200">Returns the list of available drives.</response>
+  /// <response code="500">If an error occurs while enumerating drives.</response>
+  [HttpGet("drives")]
+  [ProducesResponseType(typeof(List<DriveInfoDto>), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+  public IActionResult GetDrives()
+  {
+    try
+    {
+      var drives = new List<DriveInfoDto>();
+
+      // Get all drives using System.IO.DriveInfo
+      foreach (var drive in System.IO.DriveInfo.GetDrives())
+      {
+        try
+        {
+          // Only include ready drives to avoid exceptions
+          if (!drive.IsReady)
+          {
+            drives.Add(new DriveInfoDto
+            {
+              Name = drive.Name,
+              Label = drive.Name,
+              DriveType = drive.DriveType.ToString(),
+              IsReady = false,
+              TotalSize = 0,
+              AvailableSpace = 0,
+              DriveFormat = null
+            });
+            continue;
+          }
+
+          drives.Add(new DriveInfoDto
+          {
+            Name = drive.Name,
+            Label = string.IsNullOrEmpty(drive.VolumeLabel) ? drive.Name : $"{drive.VolumeLabel} ({drive.Name})",
+            DriveType = drive.DriveType.ToString(),
+            IsReady = true,
+            TotalSize = drive.TotalSize,
+            AvailableSpace = drive.AvailableFreeSpace,
+            DriveFormat = drive.DriveFormat
+          });
+        }
+        catch (Exception ex)
+        {
+          _logger.LogWarning(ex, "Error reading drive info for {DriveName}", drive.Name);
+          // Add drive with minimal info
+          drives.Add(new DriveInfoDto
+          {
+            Name = drive.Name,
+            Label = drive.Name,
+            DriveType = "Unknown",
+            IsReady = false,
+            TotalSize = 0,
+            AvailableSpace = 0,
+            DriveFormat = null
+          });
+        }
+      }
+
+      _logger.LogInformation("Found {Count} drives", drives.Count);
+      return Ok(drives);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error enumerating drives");
+      return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to enumerate drives" });
+    }
+  }
+
+  /// <summary>
   /// Gets or activates the File Player audio source.
   /// Uses IAudioManager to create and switch to the FilePlayer source.
   /// </summary>

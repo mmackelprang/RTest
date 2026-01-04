@@ -110,4 +110,24 @@ public class QueueApiService
       return false;
     }
   }
+
+  public async Task<bool> ContainsTrackAsync(string identifier, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var encodedIdentifier = System.Net.WebUtility.UrlEncode(identifier);
+      var response = await _httpClient.GetFromJsonAsync<bool>($"/api/queue/contains/{encodedIdentifier}", cancellationToken);
+      return response;
+    }
+    catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound || ex.StatusCode == System.Net.HttpStatusCode.BadRequest)
+    {
+      // Queue not available or source doesn't support queue
+      return false;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to check if queue contains track");
+      return false;
+    }
+  }
 }

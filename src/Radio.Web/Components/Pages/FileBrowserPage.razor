@@ -1,5 +1,6 @@
 @page "/files"
 @rendermode InteractiveServer
+@using System.Runtime.InteropServices
 @inject FileApiService FileApi
 @inject AudioApiService AudioApi
 @inject QueueApiService QueueApi
@@ -29,8 +30,52 @@
                  title="Up">
         Up
       </MudButton>
+      <MudButton Variant="Variant.Outlined" 
+                 Color="Color.Default" 
+                 Size="Size.Small" 
+                 OnClick="LoadDrivesAsync"
+                 StartIcon="@Icons.Material.Filled.Refresh"
+                 title="Refresh Drives">
+        Refresh
+      </MudButton>
     </div>
   </div>
+  
+  <!-- Drive Selector -->
+  @if (_drives != null && _drives.Any())
+  {
+    <div style="margin-bottom: 16px;">
+      <MudSelect T="string" 
+                 Label="Drive / Location" 
+                 Variant="Variant.Outlined" 
+                 Value="@_selectedDrive" 
+                 ValueChanged="HandleDriveSelectionAsync"
+                 Dense="false"
+                 Style="width: 100%; max-width: 500px;">
+        @foreach (var drive in _drives)
+        {
+          <MudSelectItem T="string" Value="@drive.Name">
+            <div style="display: flex; align-items: center; gap: 12px; min-height: 48px;">
+              <MudIcon Icon="@GetDriveIcon(drive.DriveType)" Color="@(drive.IsReady ? Color.Primary : Color.Default)" />
+              <div style="flex: 1;">
+                <div style="font-weight: 500;">@drive.Label</div>
+                @if (drive.IsReady && drive.TotalSize > 0)
+                {
+                  <div style="font-size: 0.875rem; color: var(--mud-palette-text-secondary);">
+                    @FormatBytes(drive.AvailableSpace) free of @FormatBytes(drive.TotalSize)
+                  </div>
+                }
+                else if (!drive.IsReady)
+                {
+                  <div style="font-size: 0.875rem; color: var(--mud-palette-text-secondary);">Not ready</div>
+                }
+              </div>
+            </div>
+          </MudSelectItem>
+        }
+      </MudSelect>
+    </div>
+  }
   
   <!-- Breadcrumb Navigation -->
   <div style="margin-bottom: 16px;">
@@ -134,9 +179,12 @@
   private bool _isLoading = false;
   private List<FileItemDto> _fileItems = new();
   private List<MudBlazor.BreadcrumbItem> _breadcrumbs = new();
+  private List<DriveInfoDto>? _drives = null;
+  private string _selectedDrive = "/";
 
   protected override async Task OnInitializedAsync()
   {
+    await LoadDrivesAsync();
     await LoadPreferencesAsync();
     await LoadFilesAsync();
     UpdateBreadcrumbs();
@@ -300,5 +348,70 @@
     {
       // Silently fail
     }
+  }
+
+  private async Task LoadDrivesAsync()
+  {
+    try
+    {
+      _drives = await FileApi.GetDrivesAsync();
+      if (_drives != null && _drives.Any())
+      {
+        // Set selected drive based on current path or default to first drive
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+          // On Windows, extract drive letter from path (e.g., "C:\")
+          _selectedDrive = _currentPath.Length >= 2 && _currentPath[1] == ':'
+            ? _currentPath.Substring(0, 3) // "C:\"
+            : _drives.FirstOrDefault()?.Name ?? "/";
+        }
+        else
+        {
+          // On Linux, use root
+          _selectedDrive = "/";
+        }
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to load drives");
+    }
+  }
+
+  private async Task HandleDriveSelectionAsync(string driveName)
+  {
+    if (string.IsNullOrEmpty(driveName)) return;
+    
+    _selectedDrive = driveName;
+    _currentPath = driveName;
+    _rootPath = driveName;
+    UpdateBreadcrumbs();
+    await LoadFilesAsync();
+    await SavePreferenceAsync("lastPath", _currentPath);
+  }
+
+  private string GetDriveIcon(string driveType)
+  {
+    return driveType switch
+    {
+      "Fixed" => Icons.Material.Filled.Storage,
+      "Removable" => Icons.Material.Filled.Usb,
+      "Network" => Icons.Material.Filled.Cloud,
+      "CDRom" => Icons.Material.Filled.Album,
+      _ => Icons.Material.Filled.Folder
+    };
+  }
+
+  private string FormatBytes(long bytes)
+  {
+    string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+    double len = bytes;
+    int order = 0;
+    while (len >= 1024 && order < sizes.Length - 1)
+    {
+      order++;
+      len = len / 1024;
+    }
+    return $"{len:0.##} {sizes[order]}";
   }
 }

@@ -87,4 +87,17 @@ public class FileApiService
       return false;
     }
   }
+
+  public async Task<List<DriveInfoDto>?> GetDrivesAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      return await _httpClient.GetFromJsonAsync<List<DriveInfoDto>>("/api/files/drives", cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to get drives");
+      return null;
+    }
+  }
 }

@@ -1,12 +1,13 @@
 @using MudBlazor
 @inject SourcesApiService SourcesApi
+@inject QueueApiService QueueApi
 @inject ILogger<AudioFileSelectionDialog> Logger
 
 <MudDialog>
   <TitleContent>
     <MudText Typo="Typo.h6">
       <MudIcon Icon="@Icons.Material.Filled.AudioFile" Class="mr-2" />
-      Select Audio File
+      @(AllowMultiSelect ? "Select Audio Files" : "Select Audio File")
     </MudText>
   </TitleContent>
   <DialogContent>
@@ -38,6 +39,27 @@
         }
       }
     </div>
+
+    @* Multi-select controls *@
+    @if (AllowMultiSelect && _files != null && _files.Count > 0)
+    {
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 8px; background-color: rgba(var(--mud-palette-primary-rgb), 0.1); border-radius: 4px;">
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary" OnClick="SelectAllFiles">
+            Select All
+          </MudButton>
+          <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary" OnClick="DeselectAllFiles" Disabled="@(!SelectedFiles.Any())">
+            Deselect All
+          </MudButton>
+        </div>
+        @if (SelectedFiles.Any())
+        {
+          <MudText Typo="Typo.body2" Color="Color.Primary">
+            @SelectedFiles.Count selected (@FormatTotalDuration())
+          </MudText>
+        }
+      </div>
+    }
 
     @if (_isLoading)
     {
@@ -90,16 +112,21 @@
         {
           @foreach (var file in _files)
           {
+            var isSelected = AllowMultiSelect ? SelectedFiles.Contains(file) : SelectedFile == file;
             <MudListItem T="string"
-                         OnClick="@(() => SelectFile(file))"
-                         Style="@(SelectedFile == file ? "background-color: var(--mud-palette-action-default-hover);" : "")">
+                         OnClick="@(() => ToggleFileSelection(file))"
+                         Style="@(isSelected ? "background-color: var(--mud-palette-action-default-hover);" : "")">
               <div style="display: flex; align-items: center; gap: 16px; padding: 12px 0;">
+                @if (AllowMultiSelect)
+                {
+                  <MudCheckBox T="bool" Value="@isSelected" ReadOnly="true" Color="Color.Primary" />
+                }
                 <MudIcon Icon="@Icons.Material.Filled.MusicNote" Color="Color.Primary" Size="Size.Large" />
                 <div style="flex: 1; min-width: 0;">
                   <MudText Typo="Typo.body1" Style="font-weight: 500;">@file.FileName</MudText>
                   <MudText Typo="Typo.caption" Color="Color.Secondary">@FormatFileSize(file.FileSize)</MudText>
                 </div>
-                @if (SelectedFile == file)
+                @if (isSelected)
                 {
                   <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" />
                 }
@@ -113,8 +140,14 @@
   </DialogContent>
   <DialogActions>
     <MudButton OnClick="Cancel" Variant="Variant.Text">Cancel</MudButton>
-    <MudButton OnClick="Submit" Variant="Variant.Filled" Color="Color.Primary" Disabled="@(SelectedFile == null)">
-      Select
+    @if (AllowAddToQueue && (AllowMultiSelect ? SelectedFiles.Any() : SelectedFile != null))
+    {
+      <MudButton OnClick="AddToQueue" Variant="Variant.Outlined" Color="Color.Primary">
+        Add to Queue
+      </MudButton>
+    }
+    <MudButton OnClick="Submit" Variant="Variant.Filled" Color="Color.Primary" Disabled="@(AllowMultiSelect ? !SelectedFiles.Any() : SelectedFile == null)">
+      @(AllowMultiSelect && SelectedFiles.Count > 1 ? $"Select ({SelectedFiles.Count})" : "Select")
     </MudButton>
   </DialogActions>
 </MudDialog>
@@ -129,11 +162,21 @@
   [Parameter]
   public string? Subdirectory { get; set; }
 
+  [Parameter]
+  public bool AllowMultiSelect { get; set; } = false;
+
+  [Parameter]
+  public bool AllowAddToQueue { get; set; } = false;
+
+  [Parameter]
+  public EventCallback<List<string>> OnAddToQueue { get; set; }
+
   private List<string>? _directories;
   private List<NotificationSoundDto>? _files;
   private bool _isLoading = true;
   private string? _currentPath;
   private NotificationSoundDto? SelectedFile { get; set; }
+  private HashSet<NotificationSoundDto> SelectedFiles { get; set; } = new();
 
   protected override async Task OnInitializedAsync()
   {
@@ -160,7 +203,18 @@
       // Set initial selection if provided and we're at the right path
       if (!string.IsNullOrWhiteSpace(InitialSelection) && _files != null)
       {
-        SelectedFile = _files.FirstOrDefault(f => f.FilePath == InitialSelection);
+        var initialFile = _files.FirstOrDefault(f => f.FilePath == InitialSelection);
+        if (initialFile != null)
+        {
+          if (AllowMultiSelect)
+          {
+            SelectedFiles.Add(initialFile);
+          }
+          else
+          {
+            SelectedFile = initialFile;
+          }
+        }
       }
     }
     catch (Exception ex)
@@ -182,7 +236,9 @@
       ? folderName
       : $"{_currentPath}/{folderName}";
 
-    SelectedFile = null; // Clear selection when navigating
+    // Clear selection when navigating
+    SelectedFile = null;
+    SelectedFiles.Clear();
     await LoadContentsAsync();
   }
 
@@ -196,25 +252,96 @@
       ? string.Join("/", parts.Take(parts.Length - 1))
       : null;
 
-    SelectedFile = null; // Clear selection when navigating
+    // Clear selection when navigating
+    SelectedFile = null;
+    SelectedFiles.Clear();
     await LoadContentsAsync();
   }
 
   private async Task NavigateToPath(string? path)
   {
     _currentPath = path;
-    SelectedFile = null; // Clear selection when navigating
+    // Clear selection when navigating
+    SelectedFile = null;
+    SelectedFiles.Clear();
     await LoadContentsAsync();
   }
 
-  private void SelectFile(NotificationSoundDto file)
+  private void ToggleFileSelection(NotificationSoundDto file)
   {
-    SelectedFile = file;
+    if (AllowMultiSelect)
+    {
+      if (SelectedFiles.Contains(file))
+      {
+        SelectedFiles.Remove(file);
+      }
+      else
+      {
+        SelectedFiles.Add(file);
+      }
+    }
+    else
+    {
+      SelectedFile = file;
+    }
+  }
+
+  private void SelectAllFiles()
+  {
+    if (_files != null)
+    {
+      SelectedFiles = new HashSet<NotificationSoundDto>(_files);
+      StateHasChanged();
+    }
+  }
+
+  private void DeselectAllFiles()
+  {
+    SelectedFiles.Clear();
+    StateHasChanged();
+  }
+
+  private string FormatTotalDuration()
+  {
+    // Calculate total file size of selected files
+    var totalSize = SelectedFiles.Sum(f => f.FileSize);
+    return FormatFileSize(totalSize);
+  }
+
+  private async Task AddToQueue()
+  {
+    if (OnAddToQueue.HasDelegate)
+    {
+      var filePaths = AllowMultiSelect
+        ? SelectedFiles.Select(f => f.FilePath).ToList()
+        : SelectedFile != null ? new List<string> { SelectedFile.FilePath } : new List<string>();
+
+      await OnAddToQueue.InvokeAsync(filePaths);
+      
+      // Don't close dialog, just clear selection to allow adding more
+      if (AllowMultiSelect)
+      {
+        SelectedFiles.Clear();
+      }
+      else
+      {
+        SelectedFile = null;
+      }
+      StateHasChanged();
+    }
   }
 
   private void Submit()
   {
-    MudDialog.Close(DialogResult.Ok(SelectedFile?.FilePath));
+    if (AllowMultiSelect)
+    {
+      var filePaths = SelectedFiles.Select(f => f.FilePath).ToList();
+      MudDialog.Close(DialogResult.Ok(filePaths));
+    }
+    else
+    {
+      MudDialog.Close(DialogResult.Ok(SelectedFile?.FilePath));
+    }
   }
 
   private void Cancel()

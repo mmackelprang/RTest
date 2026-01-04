@@ -8,6 +8,7 @@
 @inject IDialogService DialogService
 @inject ILogger<QueuePage> Logger
 @inject ISnackbar Snackbar
+@inject Radio.Web.Services.QueuePersistenceService QueuePersistence
 @implements IAsyncDisposable
 
 <PageTitle>Queue - Radio Console</PageTitle>
@@ -19,20 +20,28 @@
       <MudButton Variant="Variant.Filled" 
                  Color="Color.Primary" 
                  OnClick="OpenFileSelectionDialogAsync"
-                 StartIcon="@Icons.Material.Filled.Add">
+                 StartIcon="@Icons.Material.Filled.Add"
+                 Size="Size.Large"
+                 Style="min-width: 60px; min-height: 60px; font-size: 1.1rem;">
         Add Files
       </MudButton>
       @if (_canReorderQueue && _queueItems.Any())
       {
-        <MudButton Size="Size.Small" 
+        <MudButton Size="Size.Large" 
                    Variant="@(_isDragEnabled ? Variant.Filled : Variant.Outlined)"
                    Color="@(_isDragEnabled ? Color.Success : Color.Default)" 
                    StartIcon="@Icons.Material.Filled.DragIndicator" 
-                   OnClick="@(() => { _isDragEnabled = !_isDragEnabled; StateHasChanged(); })">
+                   OnClick="@(() => { _isDragEnabled = !_isDragEnabled; StateHasChanged(); })"
+                   Style="min-width: 60px; min-height: 60px; font-size: 1.1rem;">
           @(_isDragEnabled ? "Drag Enabled" : "Enable Drag")
         </MudButton>
       }
-      <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="HandleClearQueueAsync" Disabled="@(!_queueItems.Any())">
+      <MudButton Variant="Variant.Filled" 
+                 Color="Color.Error" 
+                 OnClick="HandleClearQueueAsync" 
+                 Disabled="@(!_queueItems.Any())"
+                 Size="Size.Large"
+                 Style="min-width: 60px; min-height: 60px; font-size: 1.1rem;">
         Clear All
       </MudButton>
     </div>
@@ -58,31 +67,39 @@
   {
     <!-- Drag-and-Drop Queue -->
     <MudList T="string" Class="queue-drop-container" Style="height: calc(100% - 80px); overflow-y: auto;">
+      @if (_queueItems.Count == 1)
+      {
+        <!-- Single item - give it special prominence -->
+        <div style="padding: 24px; text-align: center;">
+          <MudText Typo="Typo.body2" Color="Color.Secondary" Style="margin-bottom: 16px;">1 track in queue</MudText>
+        </div>
+      }
       @foreach (var item in _queueItems)
       {
         <MudListItem T="string" @key="item.Index">
           <MudPaper Class="queue-item-draggable" 
                     Elevation="2" 
-                    Style="@GetItemStyle(item)"
+                    Style="@GetItemStyle(item, enhancedPadding: true)"
                     draggable="true"
                     @ondragstart="@(() => OnDragStart(item))"
                     @ondragover:preventDefault
                     @ondrop="@(() => OnDrop(item))">
-            <div style="display: grid; grid-template-columns: 60px 1fr 250px 200px 80px 80px; align-items: center; gap: 8px; padding: 8px;">
+            <div style="display: grid; grid-template-columns: 72px 1fr 250px 200px 80px 80px; align-items: center; gap: 12px; padding: 16px;">
               <div style="display: flex; align-items: center; justify-content: center;">
-                <MudIcon Icon="@Icons.Material.Filled.DragIndicator" Size="Size.Small" Style="cursor: grab;" />
+                <MudIcon Icon="@Icons.Material.Filled.DragIndicator" Size="Size.Large" Style="cursor: grab;" />
               </div>
-              <div @onclick="@(() => HandleJumpToAsync(item.Index))" style="cursor: pointer; font-weight: @(item.IsCurrent ? "600" : "400"); color: @(item.IsCurrent ? "var(--mud-palette-primary)" : "inherit");">
+              <div @onclick="@(() => HandleJumpToAsync(item.Index))" style="cursor: pointer; font-weight: @(item.IsCurrent ? "600" : "400"); color: @(item.IsCurrent ? "var(--mud-palette-primary)" : "inherit"); font-size: 1.1rem;">
                 @item.Title
               </div>
-              <div>@item.Artist</div>
-              <div>@item.Album</div>
-              <div>@item.Duration</div>
+              <div style="font-size: 1rem;">@item.Artist</div>
+              <div style="font-size: 1rem;">@item.Album</div>
+              <div style="font-size: 1rem;">@item.Duration</div>
               <div>
                 <MudIconButton Icon="@Icons.Material.Filled.Delete" 
-                               Size="Size.Small" 
+                               Size="Size.Large"
                                OnClick="@(() => HandleRemoveAsync(item.Index))" 
-                               title="Remove" />
+                               title="Remove"
+                               Style="width: 60px; height: 60px;" />
               </div>
             </div>
           </MudPaper>
@@ -92,31 +109,39 @@
   }
   else
   {
-    <!-- Queue Table (Normal Mode) -->
-    <MudTable Items="@_queueItems" Hover="true" Dense="true" FixedHeader="true" Height="calc(100% - 80px)" Style="overflow-y: auto;">
+    <!-- Queue Table (Normal Mode) - Enhanced for touch -->
+    @if (_queueItems.Count == 1)
+    {
+      <!-- Single item - give it special prominence -->
+      <div style="padding: 24px 0 16px 0; text-align: center;">
+        <MudText Typo="Typo.body2" Color="Color.Secondary">1 track in queue</MudText>
+      </div>
+    }
+    <MudTable Items="@_queueItems" Hover="true" Dense="false" FixedHeader="true" Height="calc(100% - 80px)" Style="overflow-y: auto;">
       <HeaderContent>
-        <MudTh Style="width: 60px;">#</MudTh>
-        <MudTh>Title</MudTh>
-        <MudTh Style="width: 250px;">Artist</MudTh>
-        <MudTh Style="width: 200px;">Album</MudTh>
-        <MudTh Style="width: 80px;">Duration</MudTh>
-        <MudTh Style="width: 80px;">Actions</MudTh>
+        <MudTh Style="width: 60px; font-size: 1rem;">#</MudTh>
+        <MudTh Style="font-size: 1rem;">Title</MudTh>
+        <MudTh Style="width: 250px; font-size: 1rem;">Artist</MudTh>
+        <MudTh Style="width: 200px; font-size: 1rem;">Album</MudTh>
+        <MudTh Style="width: 100px; font-size: 1rem;">Duration</MudTh>
+        <MudTh Style="width: 100px; font-size: 1rem;">Actions</MudTh>
       </HeaderContent>
       <RowTemplate>
-        <MudTd Style="width: 60px;">@context.Index</MudTd>
-        <MudTd DataLabel="Title" Style="cursor: pointer;" @onclick="@(() => HandleJumpToAsync(context.Index))">
-          <div style="font-weight: @(context.IsCurrent ? "600" : "400"); color: @(context.IsCurrent ? "var(--mud-palette-primary)" : "inherit");">
+        <MudTd Style="width: 60px; min-height: 60px; font-size: 1rem;">@context.Index</MudTd>
+        <MudTd DataLabel="Title" Style="cursor: pointer; min-height: 60px; padding: 16px 8px;" @onclick="@(() => HandleJumpToAsync(context.Index))">
+          <div style="font-weight: @(context.IsCurrent ? "600" : "400"); color: @(context.IsCurrent ? "var(--mud-palette-primary)" : "inherit"); font-size: 1.1rem; line-height: 1.5;">
             @context.Title
           </div>
         </MudTd>
-        <MudTd DataLabel="Artist" Style="width: 250px;">@context.Artist</MudTd>
-        <MudTd DataLabel="Album" Style="width: 200px;">@context.Album</MudTd>
-        <MudTd DataLabel="Duration" Style="width: 80px;">@context.Duration</MudTd>
-        <MudTd DataLabel="Actions" Style="width: 80px;">
+        <MudTd DataLabel="Artist" Style="width: 250px; min-height: 60px; padding: 16px 8px; font-size: 1rem;">@context.Artist</MudTd>
+        <MudTd DataLabel="Album" Style="width: 200px; min-height: 60px; padding: 16px 8px; font-size: 1rem;">@context.Album</MudTd>
+        <MudTd DataLabel="Duration" Style="width: 100px; min-height: 60px; padding: 16px 8px; font-size: 1rem;">@context.Duration</MudTd>
+        <MudTd DataLabel="Actions" Style="width: 100px; min-height: 60px; padding: 16px 8px;">
           <MudIconButton Icon="@Icons.Material.Filled.Delete" 
-                         Size="Size.Small" 
+                         Size="Size.Large"
                          OnClick="@(() => HandleRemoveAsync(context.Index))" 
-                         title="Remove" />
+                         title="Remove"
+                         Style="width: 60px; height: 60px;" />
         </MudTd>
       </RowTemplate>
     </MudTable>
@@ -128,6 +153,8 @@
   private bool _isDragEnabled = false;
   private bool _canReorderQueue = false;
   private QueueItemDto? _draggedItem = null;
+  private CancellationTokenSource? _queueSaveDebounceCts;
+  private static readonly TimeSpan QueueSaveDebounceDelay = TimeSpan.FromMilliseconds(500);
 
   protected override async Task OnInitializedAsync()
   {
@@ -204,9 +231,42 @@
     }
   }
 
+  private async Task ScheduleQueueSaveAsync()
+  {
+    // Cancel any pending save so only the latest queue state is persisted
+    _queueSaveDebounceCts?.Cancel();
+    _queueSaveDebounceCts?.Dispose();
+
+    _queueSaveDebounceCts = new CancellationTokenSource();
+    var cancellationToken = _queueSaveDebounceCts.Token;
+
+    try
+    {
+      // Wait for a short debounce period to batch rapid queue changes
+      await Task.Delay(QueueSaveDebounceDelay, cancellationToken);
+
+      if (!cancellationToken.IsCancellationRequested)
+      {
+        await QueuePersistence.SaveQueueStateAsync();
+      }
+    }
+    catch (TaskCanceledException)
+    {
+      // Expected when a new queue change occurs before the debounce delay elapses
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to auto-save queue state");
+    }
+  }
+
   private async Task OnQueueChanged()
   {
     await RefreshQueueAsync();
+    
+    // Auto-save queue state when it changes, using debouncing to avoid excessive I/O
+    _ = ScheduleQueueSaveAsync();
+    
     await InvokeAsync(StateHasChanged);
   }
 
@@ -320,9 +380,10 @@
     }
   }
 
-  private string GetItemStyle(QueueItemDto item)
+  private string GetItemStyle(QueueItemDto item, bool enhancedPadding = false)
   {
-    var baseStyle = "min-height: 72px; cursor: pointer;";
+    var minHeight = enhancedPadding ? "min-height: 72px;" : "min-height: 60px;";
+    var baseStyle = $"{minHeight} cursor: pointer;";
     if (item.IsCurrent)
     {
       return baseStyle + " border-left: 4px solid var(--mud-palette-primary);";
@@ -332,7 +393,12 @@
 
   private async Task OpenFileSelectionDialogAsync()
   {
-    var parameters = new DialogParameters();
+    var parameters = new DialogParameters
+    {
+      { "AllowMultiSelect", true },
+      { "AllowAddToQueue", true },
+      { "OnAddToQueue", EventCallback.Factory.Create<List<string>>(this, HandleAddFilesToQueueAsync) }
+    };
     var options = new DialogOptions
     {
       CloseButton = true,
@@ -340,35 +406,81 @@
       FullWidth = true
     };
 
-    var dialog = await DialogService.ShowAsync<Radio.Web.Components.Dialogs.AudioFileSelectionDialog>("Add File to Queue", parameters, options);
+    var dialog = await DialogService.ShowAsync<Radio.Web.Components.Dialogs.AudioFileSelectionDialog>("Add Files to Queue", parameters, options);
     var result = await dialog.Result;
 
-    if (result != null && !result.Canceled && result.Data is string selectedPath)
+    if (result != null && !result.Canceled)
     {
-      try
+      // Handle result - could be single string or List<string>
+      if (result.Data is List<string> selectedPaths)
       {
-        var success = await FileApi.AddFileToQueueAsync(selectedPath);
-        if (success)
+        await HandleAddFilesToQueueAsync(selectedPaths);
+      }
+      else if (result.Data is string selectedPath)
+      {
+        await HandleAddFilesToQueueAsync(new List<string> { selectedPath });
+      }
+    }
+  }
+
+  private async Task HandleAddFilesToQueueAsync(List<string> filePaths)
+  {
+    if (filePaths == null || !filePaths.Any())
+      return;
+
+    try
+    {
+      var addedCount = 0;
+      var failedCount = 0;
+
+      foreach (var path in filePaths)
+      {
+        try
         {
-          Snackbar.Add("File added to queue", Severity.Success);
-          await RefreshQueueAsync();
+          var success = await FileApi.AddFileToQueueAsync(path);
+          if (success)
+          {
+            addedCount++;
+          }
+          else
+          {
+            failedCount++;
+          }
         }
-        else
+        catch (Exception ex)
         {
-          Snackbar.Add("Failed to add file to queue", Severity.Error);
+          Logger.LogError(ex, "Failed to add file to queue: {Path}", path);
+          failedCount++;
         }
       }
-      catch (Exception ex)
+
+      if (addedCount > 0)
       {
-        Logger.LogError(ex, "Failed to add file to queue");
-        Snackbar.Add("Error adding file to queue", Severity.Error);
+        Snackbar.Add($"{addedCount} file{(addedCount != 1 ? "s" : "")} added to queue", Severity.Success);
+        await RefreshQueueAsync();
       }
+
+      if (failedCount > 0)
+      {
+        Snackbar.Add($"Failed to add {failedCount} file{(failedCount != 1 ? "s" : "")}", Severity.Warning);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error adding files to queue");
+      Snackbar.Add("Error adding files to queue", Severity.Error);
     }
   }
 
   public async ValueTask DisposeAsync()
   {
+    // Cancel and dispose the debounce cancellation token source
+    _queueSaveDebounceCts?.Cancel();
+    _queueSaveDebounceCts?.Dispose();
+    
     HubService.QueueChanged -= OnQueueChanged;
     HubService.SourceChanged -= OnSourceChanged;
+    
+    await Task.CompletedTask;
   }
 }

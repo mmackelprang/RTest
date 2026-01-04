@@ -226,3 +226,44 @@ public class QueueFilesResponseDto
   /// </summary>
   public List<string> FailedPaths { get; set; } = new();
 }
+
+/// <summary>
+/// DTO representing drive information.
+/// </summary>
+public class DriveInfoDto
+{
+  /// <summary>
+  /// Gets or sets the drive name (e.g., "C:\\" or "/").
+  /// </summary>
+  public required string Name { get; set; }
+
+  /// <summary>
+  /// Gets or sets the drive label for display (e.g., "Data (D:\\)").
+  /// </summary>
+  public required string Label { get; set; }
+
+  /// <summary>
+  /// Gets or sets the drive type (Fixed, Removable, Network, etc.).
+  /// </summary>
+  public required string DriveType { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether the drive is ready for access.
+  /// </summary>
+  public bool IsReady { get; set; }
+
+  /// <summary>
+  /// Gets or sets the total size of the drive in bytes.
+  /// </summary>
+  public long TotalSize { get; set; }
+
+  /// <summary>
+  /// Gets or sets the available free space in bytes.
+  /// </summary>
+  public long AvailableSpace { get; set; }
+
+  /// <summary>
+  /// Gets or sets the drive format (e.g., "NTFS", "ext4").
+  /// </summary>
+  public string? DriveFormat { get; set; }
+}
