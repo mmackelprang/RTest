@@ -6,6 +6,7 @@ using MudBlazor;
 using MudBlazor.Services;
 using NSubstitute;
 using Radio.Web.Components.Pages;
+using Radio.Web.Services;
 using Radio.Web.Services.ApiClients;
 using Radio.Web.Services.Hub;
 using Xunit;
@@ -48,6 +49,9 @@ public class QueuePageTests : TestContext
     // Add IDialogService mock
     var mockDialogService = Substitute.For<IDialogService>();
     Services.AddSingleton(mockDialogService);
+    
+    // Add QueuePersistenceService
+    Services.AddScoped<QueuePersistenceService>();
   }
 
   [Fact]

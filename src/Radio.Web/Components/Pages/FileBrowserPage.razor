@@ -361,14 +361,9 @@
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
           // On Windows, extract drive letter from path (e.g., "C:\")
-          if (_currentPath.Length >= 2 && _currentPath[1] == ':')
-          {
-            _selectedDrive = _currentPath.Substring(0, 3); // "C:\"
-          }
-          else
-          {
-            _selectedDrive = _drives.FirstOrDefault()?.Name ?? "/";
-          }
+          _selectedDrive = _currentPath.Length >= 2 && _currentPath[1] == ':'
+            ? _currentPath.Substring(0, 3) // "C:\"
+            : _drives.FirstOrDefault()?.Name ?? "/";
         }
         else
         {

@@ -153,6 +153,8 @@
   private bool _isDragEnabled = false;
   private bool _canReorderQueue = false;
   private QueueItemDto? _draggedItem = null;
+  private CancellationTokenSource? _queueSaveDebounceCts;
+  private static readonly TimeSpan QueueSaveDebounceDelay = TimeSpan.FromMilliseconds(500);
 
   protected override async Task OnInitializedAsync()
   {
@@ -229,12 +231,41 @@
     }
   }
 
+  private async Task ScheduleQueueSaveAsync()
+  {
+    // Cancel any pending save so only the latest queue state is persisted
+    _queueSaveDebounceCts?.Cancel();
+    _queueSaveDebounceCts?.Dispose();
+
+    _queueSaveDebounceCts = new CancellationTokenSource();
+    var cancellationToken = _queueSaveDebounceCts.Token;
+
+    try
+    {
+      // Wait for a short debounce period to batch rapid queue changes
+      await Task.Delay(QueueSaveDebounceDelay, cancellationToken);
+
+      if (!cancellationToken.IsCancellationRequested)
+      {
+        await QueuePersistence.SaveQueueStateAsync();
+      }
+    }
+    catch (TaskCanceledException)
+    {
+      // Expected when a new queue change occurs before the debounce delay elapses
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to auto-save queue state");
+    }
+  }
+
   private async Task OnQueueChanged()
   {
     await RefreshQueueAsync();
     
-    // Auto-save queue state when it changes
-    await QueuePersistence.SaveQueueStateAsync();
+    // Auto-save queue state when it changes, using debouncing to avoid excessive I/O
+    _ = ScheduleQueueSaveAsync();
     
     await InvokeAsync(StateHasChanged);
   }
@@ -443,7 +474,13 @@
 
   public async ValueTask DisposeAsync()
   {
+    // Cancel and dispose the debounce cancellation token source
+    _queueSaveDebounceCts?.Cancel();
+    _queueSaveDebounceCts?.Dispose();
+    
     HubService.QueueChanged -= OnQueueChanged;
     HubService.SourceChanged -= OnSourceChanged;
+    
+    await Task.CompletedTask;
   }
 }

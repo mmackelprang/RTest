@@ -72,13 +72,13 @@ public class QueuePersistenceService
     try
     {
       var queueData = await _configApi.GetConfigurationAsync<Dictionary<string, object>>(QueueStateSection, cancellationToken);
-      if (queueData == null || !queueData.ContainsKey("items"))
+      if (queueData == null || !queueData.TryGetValue("items", out var itemsObj))
       {
         _logger.LogDebug("No saved queue state found");
         return null;
       }
 
-      var itemsJson = queueData["items"].ToString();
+      var itemsJson = itemsObj?.ToString();
       if (string.IsNullOrEmpty(itemsJson))
       {
         return null;

@@ -104,12 +104,20 @@ export const visualizer = {
   updateDynamicScaling: function (canvasData, maxPeak) {
     const now = Date.now();
     
-    // Add current peak to history (keep last 5-10 seconds worth)
+    // Add current peak to history (we keep roughly the last 8 seconds of peaks)
     canvasData.recentPeaks.push({ value: maxPeak, time: now });
     
     // Remove peaks older than 8 seconds
     const cutoffTime = now - 8000;
     canvasData.recentPeaks = canvasData.recentPeaks.filter(p => p.time >= cutoffTime);
+    
+    // Hard cap on history size to avoid memory growth at extremely high update rates
+    const maxRecentPeaks = 600; // ~8 seconds at 75+ updates/sec; adjust if needed
+    if (canvasData.recentPeaks.length > maxRecentPeaks) {
+      const excess = canvasData.recentPeaks.length - maxRecentPeaks;
+      // Remove the oldest entries, keep the most recent ones
+      canvasData.recentPeaks.splice(0, excess);
+    }
     
     // Update scale factor every 2 seconds
     if (now - canvasData.lastScaleUpdate >= 2000 && canvasData.recentPeaks.length > 0) {

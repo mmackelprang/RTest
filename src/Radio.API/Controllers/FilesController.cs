@@ -356,7 +356,7 @@ public class FilesController : ControllerBase
     catch (Exception ex)
     {
       _logger.LogError(ex, "Error enumerating drives");
-      return StatusCode(500, new { error = "Failed to enumerate drives", details = ex.Message });
+      return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to enumerate drives" });
     }
   }
 

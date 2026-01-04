@@ -248,6 +248,7 @@ public class QueueController : ControllerBase
   [HttpGet("contains/{identifier}")]
   [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
   public async Task<ActionResult<bool>> ContainsTrack(string identifier)
   {
     try
