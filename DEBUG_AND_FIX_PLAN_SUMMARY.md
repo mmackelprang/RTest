@@ -115,11 +115,11 @@ As you complete each phase, mark it here:
 - [x] Phase 9: File Browser Network & Drive Access (Tasks 9.1, 9.2, 9.3 completed; 9.4 stretch goal deferred)
 - [x] Phase 10: Spotify Loopback Implementation (Implementation complete; hardware testing deferred)
 - [x] Phase 11: Queue Page Touch UX Improvements (Tasks 11.1, 11.2 completed; 11.3, 11.4 deferred)
-- [ ] Phase 12: Overall Material 3 Design & Touch Optimization (Lower priority)
+- [x] Phase 12: Overall Material 3 Design (Tasks 12.1, 12.2, 12.3, 12.4 completed; 12.5 deferred)
 
-**Completion Status: 10 out of 12 phases complete (83%)**
+**Completion Status: 11 out of 12 phases complete (92%)**
 
-**Note:** Phase 10 (Spotify Loopback) implementation is complete. Hardware-dependent testing (Phase 5 RTL-SDR and Phase 10 final validation) will be performed in local sessions with physical hardware.
+**Note:** Phase 10 (Spotify Loopback) implementation is complete. Hardware-dependent testing (Phase 5 RTL-SDR and Phase 10 final validation) will be performed in local sessions with physical hardware. Phase 12 (Material 3 Design) substantially complete with 4 of 5 tasks done (Task 12.5 Accessibility Review deferred).
 
 ---
 

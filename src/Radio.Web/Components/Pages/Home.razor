@@ -104,7 +104,9 @@
   <div style="margin-top: 32px; width: 100%; max-width: 500px;">
     <div style="display: flex; align-items: center; gap: 16px;">
       <MudIconButton Icon="@(_isMuted ? Icons.Material.Filled.VolumeOff : Icons.Material.Filled.VolumeUp)" 
-                     Color="Color.Default" 
+                     Color="Color.Default"
+                     Size="Size.Medium"
+                     Class="touch-button-icon"
                      OnClick="HandleMuteAsync"
                      title="@(_isMuted ? "Unmute" : "Mute")" />
       <MudSlider Value="_volume" ValueChanged="@((double v) => OnVolumeChanged(v))" Min="0" Max="1" Step="0.01" Style="flex: 1;" Color="Color.Primary">
