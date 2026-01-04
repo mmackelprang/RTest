@@ -40,20 +40,23 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
   {
     if (!IsActive)
     {
-      _logger.LogDebug("Audio engine not running, cannot capture samples");
+      _logger.LogDebug("Audio engine not running (state: {State}), cannot capture samples", _audioEngine.State);
       return null;
     }
 
-    _logger.LogDebug("Capturing {Duration}s of audio from SoundFlow output", duration.TotalSeconds);
+    _logger.LogInformation("Capturing {Duration}s of audio from SoundFlow output", duration.TotalSeconds);
+    var captureStartTime = DateTime.UtcNow;
 
     try
     {
       var stream = _audioEngine.GetMixedOutputStream();
       if (stream == null)
       {
-        _logger.LogWarning("Mixed output stream not available");
+        _logger.LogWarning("Mixed output stream not available from audio engine");
         return null;
       }
+
+      _logger.LogDebug("Retrieved mixed output stream from audio engine");
 
       // Get stream info (assume 48kHz stereo from TappedOutputStream)
       const int sampleRate = 48000;
@@ -62,17 +65,23 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
 
       var totalSamples = (int)(duration.TotalSeconds * sampleRate * channels);
       var bytesToRead = totalSamples * bytesPerSample;
+      _logger.LogDebug("Expecting to read {Bytes} bytes ({Samples} samples) for {Duration}s at {SampleRate}Hz {Channels}ch",
+        bytesToRead, totalSamples, duration.TotalSeconds, sampleRate, channels);
+      
       var buffer = new byte[bytesToRead];
       var bytesRead = 0;
 
       // Read samples over the duration with small intervals
       var readInterval = TimeSpan.FromMilliseconds(100);
       var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+      var readAttempts = 0;
 
       while (stopwatch.Elapsed < duration && bytesRead < bytesToRead && !ct.IsCancellationRequested)
       {
         var remaining = bytesToRead - bytesRead;
         var read = stream.Read(buffer, bytesRead, Math.Min(remaining, 4096));
+        readAttempts++;
+        
         if (read > 0)
         {
           bytesRead += read;
@@ -83,11 +92,16 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
         }
       }
 
+      var captureElapsed = (DateTime.UtcNow - captureStartTime).TotalMilliseconds;
+
       if (bytesRead == 0)
       {
-        _logger.LogWarning("No audio data captured");
+        _logger.LogWarning("No audio data captured after {Elapsed}ms and {Attempts} read attempts", captureElapsed, readAttempts);
         return null;
       }
+
+      _logger.LogDebug("Read {BytesRead} bytes in {Attempts} attempts over {Elapsed}ms", 
+        bytesRead, readAttempts, captureElapsed);
 
       // Convert bytes to float samples
       var sampleCount = bytesRead / bytesPerSample;
@@ -102,21 +116,22 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
         }
       }
 
-      _logger.LogDebug("Captured {Samples} samples ({Duration}s) from SoundFlow output",
-        sampleCount, (double)sampleCount / sampleRate / channels);
+      var actualDuration = (double)sampleCount / sampleRate / channels;
+      _logger.LogInformation("✓ Successfully captured {Samples} samples ({Duration:F2}s, {Percentage:F0}% of requested) in {Elapsed}ms",
+        sampleCount, actualDuration, (actualDuration / duration.TotalSeconds) * 100, captureElapsed);
 
       return new AudioSampleBuffer
       {
         Samples = samples,
         SampleRate = sampleRate,
         Channels = channels,
-        Duration = TimeSpan.FromSeconds((double)sampleCount / sampleRate / channels),
+        Duration = TimeSpan.FromSeconds(actualDuration),
         SourceName = SourceName
       };
     }
     catch (Exception ex)
     {
-      _logger.LogError(ex, "Error capturing audio samples");
+      _logger.LogError(ex, "Error capturing audio samples from SoundFlow output");
       return null;
     }
   }

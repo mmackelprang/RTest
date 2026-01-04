@@ -95,6 +95,9 @@ public sealed class BackgroundIdentificationService : BackgroundService
 
   private async Task IdentifyCurrentAudioAsync(CancellationToken ct)
   {
+    _logger.LogDebug("Starting identification cycle");
+    var cycleStartTime = DateTime.UtcNow;
+    
     // Resolve services from scope
     using var scope = _serviceProvider.CreateScope();
     var audioTap = scope.ServiceProvider.GetService<IAudioSampleProvider>();
@@ -104,7 +107,8 @@ public sealed class BackgroundIdentificationService : BackgroundService
 
     if (audioTap == null || fingerprintService == null || lookupService == null || historyRepo == null)
     {
-      _logger.LogWarning("Required services not available for fingerprinting");
+      _logger.LogWarning("Required services not available for fingerprinting. AudioTap={HasAudioTap}, FingerprintService={HasFingerprint}, LookupService={HasLookup}, HistoryRepo={HasHistory}",
+        audioTap != null, fingerprintService != null, lookupService != null, historyRepo != null);
       return;
     }
 
@@ -115,22 +119,41 @@ public sealed class BackgroundIdentificationService : BackgroundService
       return;
     }
 
+    _logger.LogDebug("Audio source active: {SourceType} - {SourceName}", audioTap.SourceType, audioTap.SourceName);
+
     // Capture audio samples
+    var captureStartTime = DateTime.UtcNow;
     var sampleDuration = TimeSpan.FromSeconds(_options.SampleDurationSeconds);
+    _logger.LogDebug("Attempting to capture {Duration}s of audio", sampleDuration.TotalSeconds);
+    
     var samples = await audioTap.CaptureAsync(sampleDuration, ct);
+    var captureElapsed = (DateTime.UtcNow - captureStartTime).TotalMilliseconds;
+    
     if (samples == null)
     {
-      _logger.LogDebug("No audio samples captured");
+      _logger.LogWarning("No audio samples captured after {Elapsed}ms", captureElapsed);
       return;
     }
 
+    _logger.LogInformation("Captured {SampleCount} audio samples in {Elapsed}ms", samples.Samples.Length, captureElapsed);
+
     // Generate fingerprint
+    var fingerprintStartTime = DateTime.UtcNow;
     var fingerprint = await fingerprintService.GenerateFingerprintAsync(samples, ct);
-    _logger.LogDebug("Generated fingerprint {Id} for {Duration}s of audio",
-      fingerprint.Id, fingerprint.DurationSeconds);
+    var fingerprintElapsed = (DateTime.UtcNow - fingerprintStartTime).TotalMilliseconds;
+    
+    _logger.LogInformation("Generated fingerprint {Id} for {Duration}s of audio in {Elapsed}ms",
+      fingerprint.Id, fingerprint.DurationSeconds, fingerprintElapsed);
 
     // Lookup metadata
+    var lookupStartTime = DateTime.UtcNow;
+    _logger.LogDebug("Looking up fingerprint via {LookupService}", lookupService.GetType().Name);
+    
     var result = await lookupService.LookupAsync(fingerprint, ct);
+    var lookupElapsed = (DateTime.UtcNow - lookupStartTime).TotalMilliseconds;
+    
+    _logger.LogInformation("Lookup completed in {Elapsed}ms. Match={IsMatch}, Confidence={Confidence}",
+      lookupElapsed, result?.IsMatch ?? false, result?.Confidence);
 
     // Check duplicate suppression
     if (result?.IsMatch == true && result.Metadata != null)
@@ -165,15 +188,19 @@ public sealed class BackgroundIdentificationService : BackgroundService
     // Raise event for UI updates
     if (result?.IsMatch == true && result.Metadata != null)
     {
-      _logger.LogInformation("Identified track: {Title} by {Artist} (confidence: {Confidence:P0})",
+      _logger.LogInformation("✓ Identified track: '{Title}' by '{Artist}' (confidence: {Confidence:P0})",
         result.Metadata.Title, result.Metadata.Artist, result.Confidence);
 
       TrackIdentified?.Invoke(this, new TrackIdentifiedEventArgs(result.Metadata, result.Confidence));
     }
     else
     {
-      _logger.LogDebug("Track not identified (fingerprint stored for manual tagging)");
+      _logger.LogInformation("✗ Track not identified (fingerprint stored for manual tagging)");
     }
+    
+    var totalElapsed = (DateTime.UtcNow - cycleStartTime).TotalMilliseconds;
+    _logger.LogInformation("Identification cycle completed in {Elapsed}ms (capture: {Capture}ms, fingerprint: {Fingerprint}ms, lookup: {Lookup}ms)",
+      totalElapsed, captureElapsed, fingerprintElapsed, lookupElapsed);
   }
 
   private bool IsDuplicateIdentification(string trackKey)
