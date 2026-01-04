@@ -798,6 +798,7 @@
     <MudTabPanel Text="Secrets" Icon="@Icons.Material.Filled.Lock">
       <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
         <strong>Security Notice:</strong> Secrets are sensitive credentials. Values are masked by default and encrypted server-side. Only enter secrets in secure environments.
+        Secrets must be explicitly saved using the "Save Secrets" button (not auto-saved).
       </MudAlert>
       
       <MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-2">
@@ -813,31 +814,34 @@
                 </MudAlert>
               </MudItem>
               <MudItem xs="12">
-                <MudTextField T="string" @bind-Value="_spotifySecrets.ClientID" Label="Client ID"
+                <MudTextField T="string" @bind-Value="_spotifySecrets.ClientID" Label="Client ID - ${secret:spotify_client_id}"
                               Variant="Variant.Outlined" 
                               InputType="@(_showSpotifyClientId ? InputType.Text : InputType.Password)"
                               Adornment="Adornment.End"
                               AdornmentIcon="@(_showSpotifyClientId ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
                               OnAdornmentClick="@(() => _showSpotifyClientId = !_showSpotifyClientId)"
-                              HelperText="Spotify application client identifier" />
+                              HelperText="Spotify application client identifier"
+                              Class="@(string.IsNullOrWhiteSpace(_spotifySecrets.ClientID) ? "secret-empty" : "secret-filled")" />
               </MudItem>
               <MudItem xs="12">
-                <MudTextField T="string" @bind-Value="_spotifySecrets.ClientSecret" Label="Client Secret"
+                <MudTextField T="string" @bind-Value="_spotifySecrets.ClientSecret" Label="Client Secret - ${secret:spotify_client_secret}"
                               Variant="Variant.Outlined" 
                               InputType="@(_showSpotifyClientSecret ? InputType.Text : InputType.Password)"
                               Adornment="Adornment.End"
                               AdornmentIcon="@(_showSpotifyClientSecret ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
                               OnAdornmentClick="@(() => _showSpotifyClientSecret = !_showSpotifyClientSecret)"
-                              HelperText="Spotify application client secret key" />
+                              HelperText="Spotify application client secret key"
+                              Class="@(string.IsNullOrWhiteSpace(_spotifySecrets.ClientSecret) ? "secret-empty" : "secret-filled")" />
               </MudItem>
               <MudItem xs="12">
-                <MudTextField T="string" @bind-Value="_spotifySecrets.RefreshToken" Label="Refresh Token"
+                <MudTextField T="string" @bind-Value="_spotifySecrets.RefreshToken" Label="Refresh Token - ${secret:spotify_refresh_token}"
                               Variant="Variant.Outlined" 
                               InputType="@(_showSpotifyRefreshToken ? InputType.Text : InputType.Password)"
                               Adornment="Adornment.End"
                               AdornmentIcon="@(_showSpotifyRefreshToken ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
                               OnAdornmentClick="@(() => _showSpotifyRefreshToken = !_showSpotifyRefreshToken)"
-                              HelperText="OAuth refresh token for user authorization" />
+                              HelperText="OAuth refresh token for user authorization"
+                              Class="@(string.IsNullOrWhiteSpace(_spotifySecrets.RefreshToken) ? "secret-empty" : "secret-filled")" />
               </MudItem>
               <MudItem xs="12">
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveSpotifySecretsAsync"
@@ -870,27 +874,30 @@
                 </MudAlert>
               </MudItem>
               <MudItem xs="12">
-                <MudTextField T="string" @bind-Value="_ttsSecrets.GoogleAPIKey" Label="Google API Key"
+                <MudTextField T="string" @bind-Value="_ttsSecrets.GoogleAPIKey" Label="Google API Key - ${secret:tts_google_api_key}"
                               Variant="Variant.Outlined" 
                               InputType="@(_showGoogleApiKey ? InputType.Text : InputType.Password)"
                               Adornment="Adornment.End"
                               AdornmentIcon="@(_showGoogleApiKey ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
                               OnAdornmentClick="@(() => _showGoogleApiKey = !_showGoogleApiKey)"
-                              HelperText="Google Cloud Text-to-Speech API key" />
+                              HelperText="Google Cloud Text-to-Speech API key"
+                              Class="@(string.IsNullOrWhiteSpace(_ttsSecrets.GoogleAPIKey) ? "secret-empty" : "secret-filled")" />
               </MudItem>
               <MudItem xs="12">
-                <MudTextField T="string" @bind-Value="_ttsSecrets.AzureAPIKey" Label="Azure API Key"
+                <MudTextField T="string" @bind-Value="_ttsSecrets.AzureAPIKey" Label="Azure API Key - ${secret:tts_azure_api_key}"
                               Variant="Variant.Outlined" 
                               InputType="@(_showAzureApiKey ? InputType.Text : InputType.Password)"
                               Adornment="Adornment.End"
                               AdornmentIcon="@(_showAzureApiKey ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
                               OnAdornmentClick="@(() => _showAzureApiKey = !_showAzureApiKey)"
-                              HelperText="Azure Cognitive Services Speech API key" />
+                              HelperText="Azure Cognitive Services Speech API key"
+                              Class="@(string.IsNullOrWhiteSpace(_ttsSecrets.AzureAPIKey) ? "secret-empty" : "secret-filled")" />
               </MudItem>
               <MudItem xs="12">
-                <MudTextField T="string" @bind-Value="_ttsSecrets.AzureRegion" Label="Azure Region"
+                <MudTextField T="string" @bind-Value="_ttsSecrets.AzureRegion" Label="Azure Region - ${secret:tts_azure_region}"
                               Variant="Variant.Outlined" 
-                              HelperText="Azure region (e.g., eastus, westus2)" />
+                              HelperText="Azure region (e.g., eastus, westus2)"
+                              Class="@(string.IsNullOrWhiteSpace(_ttsSecrets.AzureRegion) ? "secret-empty" : "secret-filled")" />
               </MudItem>
               <MudItem xs="12">
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveTTSSecretsAsync"
@@ -923,13 +930,14 @@
                 </MudAlert>
               </MudItem>
               <MudItem xs="12">
-                <MudTextField T="string" @bind-Value="_acoustIdSecret.ApiKey" Label="API Key"
+                <MudTextField T="string" @bind-Value="_acoustIdSecret.ApiKey" Label="API Key - ${secret:acoustid_api_key}"
                               Variant="Variant.Outlined" 
                               InputType="@(_showAcoustIdApiKey ? InputType.Text : InputType.Password)"
                               Adornment="Adornment.End"
                               AdornmentIcon="@(_showAcoustIdApiKey ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
                               OnAdornmentClick="@(() => _showAcoustIdApiKey = !_showAcoustIdApiKey)"
-                              HelperText="AcoustID application API key" />
+                              HelperText="AcoustID application API key"
+                              Class="@(string.IsNullOrWhiteSpace(_acoustIdSecret.ApiKey) ? "secret-empty" : "secret-filled")" />
               </MudItem>
               <MudItem xs="12">
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAcoustIdSecretAsync"
@@ -983,7 +991,10 @@
           }
           else
           {
-            <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+            <MudStack Row="true" AlignItems="AlignItems.Center">
+              <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+              <MudText Class="ml-2">Loading store information...</MudText>
+            </MudStack>
           }
         </MudPaper>
 
@@ -1213,7 +1224,18 @@
     await LoadNotificationSoundsAsync();
     
     // Load store info (Phase 5)
-    _storeInfo = await ConfigApi.GetStoreInfoAsync();
+    try
+    {
+      _storeInfo = await ConfigApi.GetStoreInfoAsync();
+      if (_storeInfo == null)
+      {
+        Logger.LogWarning("GetStoreInfoAsync returned null");
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to load store info");
+    }
 
     // Setup SignalR for real-time event source updates
     await InitializeSignalRAsync();
@@ -2383,3 +2405,22 @@
     _statsTimer?.Dispose();
   }
 }
+
+<style>
+  /* Secret field styling */
+  .secret-empty .mud-input-outlined .mud-input {
+    background-color: rgba(255, 193, 7, 0.08) !important; /* Subtle amber/warning background */
+  }
+
+  .secret-empty .mud-input-outlined fieldset {
+    border-color: rgba(255, 193, 7, 0.5) !important; /* Amber border for empty secrets */
+  }
+
+  .secret-filled .mud-input-outlined .mud-input {
+    background-color: rgba(76, 175, 80, 0.08) !important; /* Subtle green background */
+  }
+
+  .secret-filled .mud-input-outlined fieldset {
+    border-color: rgba(76, 175, 80, 0.5) !important; /* Green border for filled secrets */
+  }
+</style>

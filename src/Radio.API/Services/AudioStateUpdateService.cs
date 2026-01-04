@@ -234,6 +234,8 @@ public class AudioStateUpdateService : BackgroundService
   {
     if (previous == null || current == null) return true;
 
+    // Check if metadata changed (exclude Position which changes constantly during playback)
+    // Position changes are handled by PlaybackState updates
     return previous.SourceType != current.SourceType ||
            previous.SourceName != current.SourceName ||
            previous.IsPlaying != current.IsPlaying ||
@@ -242,8 +244,7 @@ public class AudioStateUpdateService : BackgroundService
            previous.Artist != current.Artist ||
            previous.Album != current.Album ||
            previous.AlbumArtUrl != current.AlbumArtUrl ||
-           previous.Position != current.Position ||
-           previous.Duration != current.Duration;
+           previous.Duration != current.Duration; // Duration can change on track change
   }
 
   private static bool HasQueueChanged(List<QueueItemDto>? previous, List<QueueItemDto>? current)

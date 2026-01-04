@@ -27,13 +27,21 @@ public record PlaybackStateDto(
 
 public record VolumeDto(float Volume, bool IsMuted);
 
-public record NowPlayingDto(
-  string? Title,
-  string? Artist,
-  string? Album,
-  string? AlbumArtUrl,
-  string? Source
-);
+public class NowPlayingDto
+{
+  public string SourceType { get; set; } = string.Empty;
+  public string SourceName { get; set; } = string.Empty;
+  public bool IsPlaying { get; set; }
+  public bool IsPaused { get; set; }
+  public string Title { get; set; } = "No Track";
+  public string Artist { get; set; } = "--";
+  public string Album { get; set; } = "--";
+  public string AlbumArtUrl { get; set; } = "/images/default-album-art.png";
+  public TimeSpan? Position { get; set; }
+  public TimeSpan? Duration { get; set; }
+  public double? ProgressPercentage { get; set; }
+  public Dictionary<string, object>? ExtendedMetadata { get; set; }
+}
 
 public record UpdatePlaybackRequest(
   string? Action,

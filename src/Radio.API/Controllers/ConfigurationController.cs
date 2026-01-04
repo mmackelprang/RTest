@@ -2,8 +2,9 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Radio.API.Models;
 using Radio.Core.Configuration;
+using Radio.Infrastructure.Configuration.Abstractions;
 using Radio.Infrastructure.Configuration.Exceptions;
-using RadioConfigurationManager = Radio.Infrastructure.Configuration.Abstractions.IConfigurationManager;
+using IRadioConfigurationManager = Radio.Infrastructure.Configuration.Abstractions.IConfigurationManager;
 
 namespace Radio.API.Controllers;
 
@@ -19,7 +20,7 @@ public class ConfigurationController : ControllerBase
   private readonly IOptionsMonitor<AudioOptions> _audioOptions;
   private readonly IOptionsMonitor<VisualizerOptions> _visualizerOptions;
   private readonly IOptionsMonitor<AudioOutputOptions> _outputOptions;
-  private readonly RadioConfigurationManager? _configurationManager;
+  private readonly IRadioConfigurationManager _configurationManager;
 
   /// <summary>
   /// Initializes a new instance of the ConfigurationController.
@@ -29,7 +30,7 @@ public class ConfigurationController : ControllerBase
     IOptionsMonitor<AudioOptions> audioOptions,
     IOptionsMonitor<VisualizerOptions> visualizerOptions,
     IOptionsMonitor<AudioOutputOptions> outputOptions,
-    RadioConfigurationManager? configurationManager = null)
+    IRadioConfigurationManager configurationManager)
   {
     _logger = logger;
     _audioOptions = audioOptions;
@@ -228,43 +229,54 @@ public class ConfigurationController : ControllerBase
 
     try
     {
-      if (_configurationManager == null)
-      {
-        return StatusCode(501, new { error = "Configuration manager not available" });
-      }
-
-      var storeId = section.ToLowerInvariant();
+      // Use the main configuration store (determined by CurrentStoreType)
+      var mainStoreId = _configurationManager.CurrentStoreType == Radio.Infrastructure.Configuration.Models.ConfigurationStoreType.Sqlite ? "sqlite" : "config";
       
-      // Try to get the store
+      // Try to get the store, create if it doesn't exist
+      IConfigurationStore store;
       try
       {
-        var store = await _configurationManager.GetStoreAsync(storeId);
-        var entries = await store.GetAllEntriesAsync();
-
-        // Build a dictionary from the entries
-        var result = new Dictionary<string, object?>();
-        foreach (var entry in entries)
-        {
-          result[entry.Key] = entry.Value;
-        }
-
-        return Ok(result);
+        store = await _configurationManager.GetStoreAsync(mainStoreId);
       }
       catch (FileNotFoundException)
       {
-        // Store doesn't exist
-        return NotFound(new { error = $"Configuration section '{section}' not found" });
+        // Store doesn't exist yet, create it
+        store = await _configurationManager.CreateStoreAsync(mainStoreId);
       }
       catch (DirectoryNotFoundException)
       {
-        // Store doesn't exist
-        return NotFound(new { error = $"Configuration section '{section}' not found" });
+        // Store doesn't exist yet, create it
+        store = await _configurationManager.CreateStoreAsync(mainStoreId);
       }
       catch (ConfigurationStoreException)
       {
-        // Store doesn't exist or is invalid
+        // Store doesn't exist yet, create it
+        store = await _configurationManager.CreateStoreAsync(mainStoreId);
+      }
+      
+      var entries = await store.GetAllEntriesAsync();
+
+      // Filter entries that match the section prefix
+      var sectionPrefix = $"{section.ToLowerInvariant()}:";
+      var result = new Dictionary<string, object?>();
+      
+      foreach (var entry in entries)
+      {
+        if (entry.Key.StartsWith(sectionPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+          // Remove the section prefix from the key
+          var keyWithoutPrefix = entry.Key.Substring(sectionPrefix.Length);
+          result[keyWithoutPrefix] = entry.Value;
+        }
+      }
+
+      // If no entries found, return NotFound
+      if (result.Count == 0)
+      {
         return NotFound(new { error = $"Configuration section '{section}' not found" });
       }
+
+      return Ok(result);
     }
     catch (Exception ex)
     {
@@ -283,7 +295,6 @@ public class ConfigurationController : ControllerBase
   [ProducesResponseType(StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
   [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-  [ProducesResponseType(StatusCodes.Status501NotImplemented)]
   public async Task<ActionResult> UpdateConfigurationSection(string section, [FromBody] Dictionary<string, object> data)
   {
     // Validate section name
@@ -320,17 +331,31 @@ public class ConfigurationController : ControllerBase
 
     try
     {
-      if (_configurationManager == null)
-      {
-        return StatusCode(501, new { error = "Configuration manager not available" });
-      }
-
-      var storeId = section.ToLowerInvariant();
+      // Use the main configuration store (determined by CurrentStoreType)
+      var mainStoreId = _configurationManager.CurrentStoreType == Radio.Infrastructure.Configuration.Models.ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+      var sectionPrefix = $"{section.ToLowerInvariant()}:";
       
-      // Set each key-value pair
+      // Set each key-value pair with the section prefix
       foreach (var kvp in data)
       {
-        await _configurationManager.SetValueAsync(storeId, kvp.Key, kvp.Value);
+        var fullKey = $"{sectionPrefix}{kvp.Key}";
+        
+        // Handle JsonElement values (from JSON deserialization)
+        string valueToStore;
+        if (kvp.Value is System.Text.Json.JsonElement jsonElement)
+        {
+          valueToStore = jsonElement.GetRawText();
+        }
+        else if (kvp.Value is string str)
+        {
+          valueToStore = str;
+        }
+        else
+        {
+          valueToStore = System.Text.Json.JsonSerializer.Serialize(kvp.Value);
+        }
+        
+        await _configurationManager.SetValueAsync(mainStoreId, fullKey, valueToStore);
       }
 
       _logger.LogInformation("Configuration section {Section} updated successfully with {Count} keys", section, data.Count);
@@ -363,7 +388,7 @@ public class ConfigurationController : ControllerBase
   [HttpPost]
   [ProducesResponseType(StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
-  [ProducesResponseType(StatusCodes.Status501NotImplemented)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
   public async Task<ActionResult> UpdateConfiguration([FromBody] UpdateConfigurationRequest request)
   {
     try
@@ -382,26 +407,13 @@ public class ConfigurationController : ControllerBase
         "Configuration update requested: {Section}:{Key} = {Value}",
         request.Section, request.Key, request.Value);
 
-      // Check if configuration manager is available
-      if (_configurationManager == null)
-      {
-        return StatusCode(501, new
-        {
-          message = "Configuration update requires IConfigurationManager integration",
-          section = request.Section,
-          key = request.Key,
-          value = request.Value,
-          note = "Configuration values are read-only at runtime without the managed configuration system"
-        });
-      }
-
-      // Update the configuration using the configuration manager
-      // The store ID typically corresponds to the section name
-      var storeId = request.Section.ToLowerInvariant();
+      // Use the main configuration store with namespaced keys
+      var mainStoreId = _configurationManager.CurrentStoreType == Radio.Infrastructure.Configuration.Models.ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+      var fullKey = $"{request.Section.ToLowerInvariant()}:{request.Key}";
       
       try
       {
-        await _configurationManager.SetValueAsync(storeId, request.Key, request.Value);
+        await _configurationManager.SetValueAsync(mainStoreId, fullKey, request.Value);
         
         _logger.LogInformation(
           "Configuration updated successfully: {Section}:{Key}",
@@ -442,17 +454,12 @@ public class ConfigurationController : ControllerBase
   /// <returns>Store metadata including type, location, size, and entry count.</returns>
   [HttpGet("store-info")]
   [ProducesResponseType(typeof(ConfigurationStoreInfoDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status404NotFound)]
   [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-  [ProducesResponseType(StatusCodes.Status501NotImplemented)]
   public async Task<ActionResult<ConfigurationStoreInfoDto>> GetStoreInfo([FromQuery] string? storeType = null)
   {
     try
     {
-      if (_configurationManager == null)
-      {
-        return StatusCode(501, new { error = "Configuration manager not available" });
-      }
-
       // Determine which store to query
       var targetStoreType = _configurationManager.CurrentStoreType;
       if (!string.IsNullOrEmpty(storeType))
@@ -462,23 +469,54 @@ public class ConfigurationController : ControllerBase
           : Radio.Infrastructure.Configuration.Models.ConfigurationStoreType.Json;
       }
 
-      // List all stores and find the one matching our criteria
-      var stores = await _configurationManager.ListStoresAsync();
-      var targetStore = stores.FirstOrDefault(s => s.StoreType == targetStoreType);
-
-      if (targetStore == null)
+      // Determine the main store ID
+      var mainStoreId = targetStoreType == Radio.Infrastructure.Configuration.Models.ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+      
+      // Get or create the store
+      IConfigurationStore store;
+      try
       {
-        return NotFound(new { error = $"No {targetStoreType} store found" });
+        store = await _configurationManager.GetStoreAsync(mainStoreId);
       }
-
+      catch (ConfigurationStoreException)
+      {
+        // Store doesn't exist, create it
+        _logger.LogInformation("Store {StoreId} not found, creating it", mainStoreId);
+        store = await _configurationManager.CreateStoreAsync(mainStoreId);
+      }
+      
+      // Get all entries to count them
+      var entries = await store.GetAllEntriesAsync();
+      
+      // Build the file path based on configuration
+      var basePath = Path.GetFullPath("./config"); // From appsettings
+      string filePath;
+      if (targetStoreType == Radio.Infrastructure.Configuration.Models.ConfigurationStoreType.Sqlite)
+      {
+        filePath = Path.Combine(basePath, "configuration.db");
+      }
+      else
+      {
+        filePath = Path.Combine(basePath, $"{mainStoreId}.json");
+      }
+      
+      // Build store info from the store object
       var storeInfo = new ConfigurationStoreInfoDto
       {
         StoreType = targetStoreType.ToString(),
-        Location = targetStore.Path,
-        SizeBytes = targetStore.SizeBytes,
-        LastModified = targetStore.LastModifiedAt.DateTime,
-        EntryCount = targetStore.EntryCount
+        Location = filePath,
+        SizeBytes = 0, // We'll calculate this if file exists
+        LastModified = DateTime.UtcNow,
+        EntryCount = entries.Count
       };
+      
+      // Try to get file info if it exists
+      if (System.IO.File.Exists(filePath))
+      {
+        var fileInfo = new FileInfo(filePath);
+        storeInfo.SizeBytes = fileInfo.Length;
+        storeInfo.LastModified = fileInfo.LastWriteTime;
+      }
 
       return Ok(storeInfo);
     }
@@ -495,29 +533,35 @@ public class ConfigurationController : ControllerBase
   /// <returns>Comparison results showing differences between stores.</returns>
   [HttpGet("compare")]
   [ProducesResponseType(typeof(ConfigurationComparisonDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
   [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-  [ProducesResponseType(StatusCodes.Status501NotImplemented)]
   public async Task<ActionResult<ConfigurationComparisonDto>> CompareStores()
   {
     try
     {
-      if (_configurationManager == null)
+      // Try to get both store types
+      IConfigurationStore jsonStoreInstance;
+      IConfigurationStore sqliteStoreInstance;
+      
+      try
       {
-        return StatusCode(501, new { error = "Configuration manager not available" });
+        jsonStoreInstance = await _configurationManager.GetStoreAsync("config");
       }
-
-      var stores = await _configurationManager.ListStoresAsync();
-      var jsonStore = stores.FirstOrDefault(s => s.StoreType == Radio.Infrastructure.Configuration.Models.ConfigurationStoreType.Json);
-      var sqliteStore = stores.FirstOrDefault(s => s.StoreType == Radio.Infrastructure.Configuration.Models.ConfigurationStoreType.Sqlite);
-
-      if (jsonStore == null || sqliteStore == null)
+      catch (ConfigurationStoreException)
       {
-        return BadRequest(new { error = "Both JSON and SQLite stores must exist for comparison" });
+        // JSON store doesn't exist, create an empty one for comparison
+        jsonStoreInstance = await _configurationManager.CreateStoreAsync("config");
       }
-
-      // Get all entries from both stores
-      var jsonStoreInstance = await _configurationManager.GetStoreAsync("config");
-      var sqliteStoreInstance = await _configurationManager.GetStoreAsync("sqlite");
+      
+      try
+      {
+        sqliteStoreInstance = await _configurationManager.GetStoreAsync("sqlite");
+      }
+      catch (ConfigurationStoreException)
+      {
+        // SQLite store doesn't exist, create an empty one for comparison
+        sqliteStoreInstance = await _configurationManager.CreateStoreAsync("sqlite");
+      }
 
       var jsonEntries = await jsonStoreInstance.GetAllEntriesAsync(Radio.Infrastructure.Configuration.Models.ConfigurationReadMode.Raw);
       var sqliteEntries = await sqliteStoreInstance.GetAllEntriesAsync(Radio.Infrastructure.Configuration.Models.ConfigurationReadMode.Raw);
@@ -533,6 +577,11 @@ public class ConfigurationController : ControllerBase
       {
         var inJson = jsonDict.TryGetValue(key, out var jsonValue);
         var inSqlite = sqliteDict.TryGetValue(key, out var sqliteValue);
+
+        // Mask secret values for display (check if key contains common secret identifiers)
+        bool isSecret = IsSecretKey(key);
+        string? displayJsonValue = inJson ? (isSecret ? MaskSecretValue(jsonValue) : jsonValue) : null;
+        string? displaySqliteValue = inSqlite ? (isSecret ? MaskSecretValue(sqliteValue) : sqliteValue) : null;
 
         string status;
         if (inJson && !inSqlite)
@@ -555,8 +604,8 @@ public class ConfigurationController : ControllerBase
         differences.Add(new ConfigurationDifferenceDto
         {
           Key = key,
-          JsonValue = inJson ? jsonValue : null,
-          SqliteValue = inSqlite ? sqliteValue : null,
+          JsonValue = displayJsonValue,
+          SqliteValue = displaySqliteValue,
           Status = status
         });
       }
@@ -586,16 +635,10 @@ public class ConfigurationController : ControllerBase
   [ProducesResponseType(StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
   [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-  [ProducesResponseType(StatusCodes.Status501NotImplemented)]
   public async Task<IActionResult> ReconcileStores([FromBody] ReconcileConfigurationRequestDto request)
   {
     try
     {
-      if (_configurationManager == null)
-      {
-        return StatusCode(501, new { error = "Configuration manager not available" });
-      }
-
       if (request.Keys == null || request.Keys.Count == 0)
       {
         return BadRequest(new { error = "No keys specified for reconciliation" });
@@ -610,9 +653,29 @@ public class ConfigurationController : ControllerBase
         return BadRequest(new { error = "Source and target stores must be different" });
       }
 
-      // Get stores
-      var sourceStore = await _configurationManager.GetStoreAsync(sourceStoreId);
-      var targetStore = await _configurationManager.GetStoreAsync(targetStoreId);
+      // Get or create stores
+      IConfigurationStore sourceStore;
+      IConfigurationStore targetStore;
+      
+      try
+      {
+        sourceStore = await _configurationManager.GetStoreAsync(sourceStoreId);
+      }
+      catch (ConfigurationStoreException)
+      {
+        return BadRequest(new { error = $"Source store '{request.SourceStore}' not found" });
+      }
+      
+      try
+      {
+        targetStore = await _configurationManager.GetStoreAsync(targetStoreId);
+      }
+      catch (ConfigurationStoreException)
+      {
+        // Target store doesn't exist, create it
+        _logger.LogInformation("Target store {StoreId} not found, creating it", targetStoreId);
+        targetStore = await _configurationManager.CreateStoreAsync(targetStoreId);
+      }
 
       int copiedCount = 0;
       var errors = new List<string>();
@@ -669,16 +732,10 @@ public class ConfigurationController : ControllerBase
   [HttpGet("export")]
   [ProducesResponseType(StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-  [ProducesResponseType(StatusCodes.Status501NotImplemented)]
   public async Task<IActionResult> ExportConfiguration([FromQuery] string format = "json", [FromQuery] string? storeType = null)
   {
     try
     {
-      if (_configurationManager == null)
-      {
-        return StatusCode(501, new { error = "Configuration manager not available" });
-      }
-
       // Determine which store to export
       var storeId = "config"; // Default to JSON
       if (!string.IsNullOrEmpty(storeType) && storeType.ToLowerInvariant() == "sqlite")
@@ -743,16 +800,10 @@ public class ConfigurationController : ControllerBase
   [ProducesResponseType(StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
   [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-  [ProducesResponseType(StatusCodes.Status501NotImplemented)]
   public async Task<IActionResult> ImportConfiguration(IFormFile file, [FromQuery] string? targetStore = null, [FromQuery] bool overwrite = true)
   {
     try
     {
-      if (_configurationManager == null)
-      {
-        return StatusCode(501, new { error = "Configuration manager not available" });
-      }
-
       if (file == null || file.Length == 0)
       {
         return BadRequest(new { error = "No file uploaded" });
@@ -823,5 +874,48 @@ public class ConfigurationController : ControllerBase
       _logger.LogError(ex, "Error importing configuration");
       return StatusCode(500, new { error = "Failed to import configuration", details = ex.Message });
     }
+  }
+
+  // ========== Helper Methods ==========
+
+  /// <summary>
+  /// Determines if a configuration key is likely to contain a secret value.
+  /// </summary>
+  private static bool IsSecretKey(string key)
+  {
+    var lowerKey = key.ToLowerInvariant();
+    return lowerKey.Contains("secret") ||
+           lowerKey.Contains("password") ||
+           lowerKey.Contains("apikey") ||
+           lowerKey.Contains("api_key") ||
+           lowerKey.Contains("token") ||
+           lowerKey.Contains("clientid") ||
+           lowerKey.Contains("client_id") ||
+           lowerKey.Contains("clientsecret") ||
+           lowerKey.Contains("client_secret") ||
+           lowerKey.Contains("refreshtoken") ||
+           lowerKey.Contains("refresh_token") ||
+           lowerKey.Contains("spotify:") ||
+           lowerKey.Contains("tts:") ||
+           lowerKey.Contains("acoustid:");
+  }
+
+  /// <summary>
+  /// Masks a secret value for display, showing a pattern indicator.
+  /// </summary>
+  private static string MaskSecretValue(string? value)
+  {
+    if (string.IsNullOrEmpty(value))
+      return string.Empty;
+    
+    // If it's already a secret tag (${secret:...}), return as-is
+    if (value.StartsWith("${secret:", StringComparison.OrdinalIgnoreCase) && value.EndsWith("}"))
+      return value;
+    
+    // Otherwise, mask the value showing only first/last 4 chars
+    if (value.Length <= 8)
+      return "********";
+    
+    return $"{value.Substring(0, 4)}...{value.Substring(value.Length - 4)}";
   }
 }
