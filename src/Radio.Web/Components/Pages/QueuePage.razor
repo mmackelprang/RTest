@@ -8,6 +8,7 @@
 @inject IDialogService DialogService
 @inject ILogger<QueuePage> Logger
 @inject ISnackbar Snackbar
+@inject Radio.Web.Services.QueuePersistenceService QueuePersistence
 @implements IAsyncDisposable
 
 <PageTitle>Queue - Radio Console</PageTitle>
@@ -231,6 +232,10 @@
   private async Task OnQueueChanged()
   {
     await RefreshQueueAsync();
+    
+    // Auto-save queue state when it changes
+    await QueuePersistence.SaveQueueStateAsync();
+    
     await InvokeAsync(StateHasChanged);
   }
 

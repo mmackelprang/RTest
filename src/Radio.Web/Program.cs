@@ -198,6 +198,9 @@ builder.Services.AddHttpClient<RadioApiService>(client =>
 builder.Services.AddSingleton<AudioStateHubService>();
 builder.Services.AddSingleton<AudioVisualizationHubService>();
 
+// Register application services
+builder.Services.AddScoped<Radio.Web.Services.QueuePersistenceService>();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.

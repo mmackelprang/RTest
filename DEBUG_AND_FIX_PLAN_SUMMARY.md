@@ -109,7 +109,7 @@ As you complete each phase, mark it here:
 - [x] Phase 3: Now Playing Metadata Display (Tasks 3.1 & 3.2 completed)
 - [x] Phase 4: Fingerprinting Debug & Instrumentation (Task 4.1 completed)
 - [ ] Phase 5: RTL-SDR Radio Audio Output
-- [x] Phase 6: Queue Page Enhancements (Tasks 6.1, 6.2, 6.3, 6.4 completed; 6.5-6.8 remaining)
+- [x] Phase 6: Queue Page Enhancements (Tasks 6.1, 6.2, 6.3, 6.4, 6.6 completed; 6.5, 6.7, 6.8 remaining)
 - [x] Phase 7: Visualizer Graphics Improvements (All tasks 7.1, 7.2, 7.3, 7.4 completed)
 - [x] Phase 8: Home Page Media Controls (Tasks 8.1, 8.2, 8.3 completed)
 - [ ] Phase 9: File Browser Network & Drive Access
