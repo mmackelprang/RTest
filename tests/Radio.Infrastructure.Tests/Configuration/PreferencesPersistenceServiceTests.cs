@@ -95,9 +95,7 @@ public class PreferencesPersistenceServiceTests : IDisposable
     // Act
     await service.StartAsync(CancellationToken.None);
 
-    // Assert
-    // Service should start without throwing
-    Assert.True(true);
+    // Assert - Service should start without throwing (no assertion needed)
   }
 
   [Fact]

@@ -51,12 +51,7 @@ public class PreferencesPersistenceService : BackgroundService
   {
     _logger.LogInformation("Preferences persistence service started");
 
-    // Register shutdown handler to save preferences one last time
-    _lifetime.ApplicationStopping.Register(() =>
-    {
-      _logger.LogInformation("Application stopping - saving preferences...");
-      SaveAllPreferencesAsync(CancellationToken.None).GetAwaiter().GetResult();
-    });
+    // Note: Final save is handled in StopAsync, no need for ApplicationStopping registration
 
     try
     {
@@ -126,18 +121,18 @@ public class PreferencesPersistenceService : BackgroundService
         store = await _configurationManager.CreateStoreAsync(mainStoreId);
       }
 
-      // Serialize preferences to key-value pairs
+      // Serialize preferences to key-value pairs, preserving JSON structure
       var json = JsonSerializer.Serialize(preferences);
-      var dict = JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+      var dict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
 
       if (dict != null)
       {
-        // Set each preference value with section prefix
+        // Set each preference value with section prefix, preserving JSON structure
         var entries = dict.Select(kvp => 
           new ConfigurationEntry
           {
             Key = $"{sectionName}:{kvp.Key}",
-            Value = kvp.Value?.ToString() ?? string.Empty
+            Value = kvp.Value.ValueKind == JsonValueKind.Null ? string.Empty : kvp.Value.ToString()
           }).ToList();
 
         await store.SetEntriesAsync(entries, cancellationToken);

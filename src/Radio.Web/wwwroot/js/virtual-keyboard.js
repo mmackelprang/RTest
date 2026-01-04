@@ -120,9 +120,17 @@ class VirtualKeyboard {
       }
     });
     
-    // Prevent keyboard from closing when clicking inside
+    // Prevent keyboard from closing when clicking inside, without blocking default focus/selection
     this.keyboardElement.addEventListener('mousedown', (e) => {
-      e.preventDefault();
+      const isButton = e.target.closest('button') !== null;
+      
+      // Always stop propagation so outer handlers (e.g. click-outside-to-close) don't see this
+      e.stopPropagation();
+      
+      // Only prevent default on non-interactive areas of the keyboard container
+      if (!isButton) {
+        e.preventDefault();
+      }
     });
   }
 
@@ -200,21 +208,23 @@ class VirtualKeyboard {
     this.capsLock = !this.capsLock;
     const shiftButton = this.keyboardElement.querySelector('[data-action="shift"]');
     
+    // NOTE: data-key holds the canonical key value (typically lowercase);
+    // we only change the displayed label (textContent) for shift/caps.
     if (this.capsLock) {
       shiftButton.classList.add('active');
-      // Update all letter keys to uppercase
+      // Update all letter keys to uppercase (case-insensitive detection)
       this.keyboardElement.querySelectorAll('.key[data-key]').forEach(key => {
         const keyValue = key.dataset.key;
-        if (keyValue && keyValue.length === 1 && keyValue.match(/[a-z]/)) {
+        if (keyValue && keyValue.length === 1 && /[a-z]/i.test(keyValue)) {
           key.textContent = keyValue.toUpperCase();
         }
       });
     } else {
       shiftButton.classList.remove('active');
-      // Restore lowercase
+      // Restore all letter keys to lowercase (case-insensitive detection)
       this.keyboardElement.querySelectorAll('.key[data-key]').forEach(key => {
         const keyValue = key.dataset.key;
-        if (keyValue && keyValue.length === 1 && keyValue.match(/[a-z]/i)) {
+        if (keyValue && keyValue.length === 1 && /[a-z]/i.test(keyValue)) {
           key.textContent = keyValue.toLowerCase();
         }
       });
@@ -291,5 +301,19 @@ window.virtualKeyboardInterop = {
   show: (element) => window.virtualKeyboard.show(element),
   hide: () => window.virtualKeyboard.hide(),
   toggle: (element) => window.virtualKeyboard.toggle(element),
-  isVisible: () => window.virtualKeyboard.isVisible
+  isVisible: () => window.virtualKeyboard.isVisible,
+  toggleForInput: (selector) => {
+    const input = document.querySelector(selector);
+    if (input && window.virtualKeyboard) {
+      window.virtualKeyboard.toggle(input);
+    }
+  }
 };
+
+// Export the toggleForInput function for ES module import
+export function toggleForInput(selector) {
+  const input = document.querySelector(selector);
+  if (input && window.virtualKeyboard) {
+    window.virtualKeyboard.toggle(input);
+  }
+}

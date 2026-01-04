@@ -1307,6 +1307,10 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       var allTracks = GetAllTracksInOrder();
       
       // Update preferences with current queue state
+      // NOTE: Directly mutating _preferences.CurrentValue is a limitation of the current design.
+      // Ideally, preferences should be updated through IConfigurationManager or a dedicated
+      // preferences service that properly handles serialization and change notification.
+      // The PreferencesPersistenceService periodically reads these values and persists them.
       _preferences.CurrentValue.QueueItems = allTracks;
       _preferences.CurrentValue.CurrentQueueIndex = _currentIndex;
       

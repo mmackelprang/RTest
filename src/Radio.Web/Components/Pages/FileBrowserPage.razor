@@ -6,6 +6,7 @@
 @inject QueueApiService QueueApi
 @inject ConfigurationApiService ConfigApi
 @inject IJSRuntime JSRuntime
+@inject ISnackbar Snackbar
 @inject ILogger<FileBrowserPage> Logger
 @implements IAsyncDisposable
 
@@ -115,7 +116,7 @@
         {
           <MudChip T="string" 
                    Size="Size.Small" 
-                   OnClick="@(() => NavigateToRecentPath(path))"
+                   OnClick="@(async () => await NavigateToRecentPath(path))"
                    Icon="@Icons.Material.Filled.History"
                    Style="cursor: pointer;">
             @TruncatePath(path, 40)
@@ -267,13 +268,8 @@
 
     try
     {
-      // Find the input element by its container ID and toggle keyboard
-      await JSRuntime.InvokeVoidAsync("eval", @"
-        const input = document.querySelector('#custom-path-input input');
-        if (input && window.virtualKeyboard) {
-          window.virtualKeyboard.toggle(input);
-        }
-      ");
+      // Toggle the virtual keyboard for the custom path input using the JS module
+      await _keyboardModule.InvokeVoidAsync("toggleForInput", "#custom-path-input input");
     }
     catch (Exception ex)
     {
@@ -548,7 +544,7 @@
       if (!IsValidPath(normalizedPath))
       {
         Logger.LogWarning("Invalid path format: {Path}", _customPath);
-        // TODO: Show error message to user
+        Snackbar.Add("Invalid path format. Please enter a valid UNC path (\\\\server\\share), Windows path (C:\\Music), or Unix path (/mnt/nas).", Severity.Warning);
         return;
       }
       
@@ -585,10 +581,10 @@
     }
   }
   
-  private void NavigateToRecentPath(string path)
+  private async Task NavigateToRecentPath(string path)
   {
     _customPath = path;
-    InvokeAsync(NavigateToCustomPathAsync);
+    await NavigateToCustomPathAsync();
   }
   
   private string NormalizePath(string path)
