@@ -7,7 +7,7 @@ This document summarizes the changes made to address the documentation gap for m
 ## 1. Documentation Updates
 
 ### Added Radio Configuration Section
-Added comprehensive documentation for the `Radio` configuration section to `design/SYSTEMCONFIGURATION.md` (lines 859-876).
+Added comprehensive documentation for the `Radio` configuration section to `design/SYSTEMCONFIGURATION.md` (lines 859-878).
 
 **Properties documented:**
 - DefaultDevice (string)
@@ -24,7 +24,7 @@ Added comprehensive documentation for the `Radio` configuration section to `desi
 - DefaultDeviceVolume (int)
 
 ### Updated Devices Configuration Section
-Updated the `Devices` section in `design/SYSTEMCONFIGURATION.md` (lines 733-751) to include Spotify device options:
+Updated the `Devices` section in `design/SYSTEMCONFIGURATION.md` (lines 733-749) to include Spotify device options:
 - Spotify.Mode (SpotifyMode enum: RemoteControl or Integrated)
 - Spotify.LibrespotPath (string: path to librespot executable)
 
@@ -40,10 +40,10 @@ Confirmed all 12 configuration sections from the issue are documented:
 | VisualizerOptions | Visualizer | Lines 783-800 | ✅ Complete |
 | FilePlayerOptions | FilePlayer | Lines 753-763 | ✅ Complete |
 | TTSOptions | TTS | Lines 766-780 | ✅ Complete |
-| DeviceOptions | Devices | Lines 733-751 | ✅ Complete |
+| DeviceOptions | Devices | Lines 733-749 | ✅ Complete |
 | DatabaseOptions | Database | Already documented | ✅ Complete |
 | AudioOutputOptions | AudioOutput | Lines 830-856 | ✅ Complete |
-| RadioOptions | Radio | Lines 859-876 | ✅ Added |
+| RadioOptions | Radio | Lines 859-878 | ✅ Added |
 | MetricsOptions | Metrics | Lines 532-548 | ✅ Complete |
 
 ## 2. LoopbackDeviceName Removal
