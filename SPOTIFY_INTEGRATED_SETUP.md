@@ -89,15 +89,31 @@ Librespot is the Spotify client that runs as a child process. You need to instal
 
 1. Download the latest release from [librespot releases](https://github.com/librespot-org/librespot/releases)
 
+   **Important Security Note:** Always verify the integrity of downloaded binaries before installation to prevent supply-chain attacks.
+
    ```bash
    # For ARM (Raspberry Pi)
+   # Download the binary and its checksum file
    wget https://github.com/librespot-org/librespot/releases/download/v0.4.2/librespot-linux-armhf-v0.4.2.tar.gz
+   wget https://github.com/librespot-org/librespot/releases/download/v0.4.2/SHA256SUMS
+   
+   # Verify the checksum before extracting
+   sha256sum -c SHA256SUMS --ignore-missing
+   # If the checksum matches, you'll see: librespot-linux-armhf-v0.4.2.tar.gz: OK
+   
+   # Extract and install only if checksum verification succeeds
    tar -xzvf librespot-linux-armhf-v0.4.2.tar.gz
    sudo mv librespot /usr/local/bin/
    sudo chmod +x /usr/local/bin/librespot
    
    # For x86_64 Linux
    wget https://github.com/librespot-org/librespot/releases/download/v0.4.2/librespot-linux-x86_64-v0.4.2.tar.gz
+   wget https://github.com/librespot-org/librespot/releases/download/v0.4.2/SHA256SUMS
+   
+   # Verify the checksum
+   sha256sum -c SHA256SUMS --ignore-missing
+   
+   # Extract and install only if checksum verification succeeds
    tar -xzvf librespot-linux-x86_64-v0.4.2.tar.gz
    sudo mv librespot /usr/local/bin/
    sudo chmod +x /usr/local/bin/librespot
@@ -111,6 +127,14 @@ Librespot is the Spotify client that runs as a child process. You need to instal
 #### Windows
 
 1. Download `librespot.exe` from [librespot releases](https://github.com/librespot-org/librespot/releases)
+
+   **Important Security Note:** Verify the file hash before executing. Download the SHA256SUMS file from the release page and compare hashes using PowerShell:
+   
+   ```powershell
+   # Calculate the hash of the downloaded file
+   Get-FileHash librespot.exe -Algorithm SHA256
+   # Compare with the hash in SHA256SUMS file
+   ```
 
 2. Extract to a permanent location (e.g., `C:\librespot\librespot.exe`)
 

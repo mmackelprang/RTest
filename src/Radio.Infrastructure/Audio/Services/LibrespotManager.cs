@@ -29,12 +29,13 @@ public class LibrespotManager : IAsyncDisposable
   
   // Configuration
   private string _deviceName = "Radio Console";
-  private int _bitrate = 320;
-  private bool _volumeNormalization = true;
+  private readonly int _bitrate = 320;
+  private readonly bool _volumeNormalization = true;
   
   // State
   private bool _isDisposed;
   private long _totalSamplesReceived;
+  private readonly SemaphoreSlim _refreshLock = new(1, 1);
 
   /// <summary>
   /// Gets a value indicating whether the librespot process is running.
@@ -135,7 +136,6 @@ public class LibrespotManager : IAsyncDisposable
       _spotifyClient = new SpotifyClient(config);
 
       // Get initial access token
-      var token = await _spotifyClient.UserProfile.Current(cancellationToken);
       var accessToken = await GetAccessTokenAsync(cancellationToken);
 
       // Start librespot process
@@ -143,7 +143,7 @@ public class LibrespotManager : IAsyncDisposable
 
       // Set up token refresh (every 50 minutes)
       _tokenRefreshTimer = new Timer(
-        async _ => await RefreshTokenAndRestartAsync(),
+        _ => SafeRefreshTokenAndRestart(),
         null,
         TimeSpan.FromMinutes(50),
         TimeSpan.FromMinutes(50)
@@ -201,17 +201,44 @@ public class LibrespotManager : IAsyncDisposable
             _librespotProcess.WaitForExit(2000);
           }
         }
-        catch
+        catch (Exception ex)
         {
+          _logger.LogWarning(ex, "Failed to gracefully shut down librespot process. Attempting force kill.");
           // If graceful fails, force kill
-          try { _librespotProcess.Kill(); } catch { }
+          try
+          {
+            _librespotProcess.Kill();
+          }
+          catch (Exception killEx)
+          {
+            _logger.LogError(killEx, "Failed to force kill librespot process during shutdown.");
+          }
         }
       }
 
       // Wait for audio read task to complete
       if (_audioReadTask != null)
       {
-        await Task.WhenAny(_audioReadTask, Task.Delay(2000));
+        var completedTask = await Task.WhenAny(_audioReadTask, Task.Delay(2000));
+        if (completedTask != _audioReadTask)
+        {
+          _logger.LogWarning("Audio read task did not complete within the 2 second timeout during librespot shutdown and may still be running in the background.");
+        }
+        else
+        {
+          try
+          {
+            await _audioReadTask;
+          }
+          catch (OperationCanceledException)
+          {
+            // Expected during shutdown when cancellation is requested.
+          }
+          catch (Exception ex)
+          {
+            _logger.LogError(ex, "Unexpected error while waiting for the audio read task to complete during librespot shutdown.");
+          }
+        }
       }
 
       // Cleanup
@@ -308,11 +335,20 @@ public class LibrespotManager : IAsyncDisposable
 
   private string BuildLibrespotArguments(string accessToken)
   {
+    // Use ProcessStartInfo.ArgumentList to avoid command injection issues
+    // Note: This method still returns a string for compatibility, but should be refactored
+    // to use ArgumentList directly in StartLibrespotProcessAsync
+    
     var args = new System.Text.StringBuilder();
-    args.Append($"--name \"{_deviceName}\" ");
+    
+    // Escape special characters to prevent command injection
+    var escapedDeviceName = _deviceName.Replace("\"", "\\\"");
+    var escapedAccessToken = accessToken.Replace("\"", "\\\"");
+    
+    args.Append($"--name \"{escapedDeviceName}\" ");
     args.Append($"--backend pipe ");
     args.Append($"--device - ");  // stdout
-    args.Append($"--access-token \"{accessToken}\" ");
+    args.Append($"--access-token \"{escapedAccessToken}\" ");
     args.Append($"--bitrate {_bitrate} ");
 
     if (_volumeNormalization)
@@ -351,7 +387,7 @@ public class LibrespotManager : IAsyncDisposable
           break;
         }
 
-        _totalSamplesReceived += bytesRead;
+        _totalSamplesReceived = Interlocked.Add(ref _totalSamplesReceived, bytesRead);
 
         var audioData = new byte[bytesRead];
         Buffer.BlockCopy(buffer, 0, audioData, 0, bytesRead);
@@ -386,8 +422,33 @@ public class LibrespotManager : IAsyncDisposable
     }
   }
 
+  private void SafeRefreshTokenAndRestart()
+  {
+    // Timer callback must be synchronous, so we fire and forget the async work
+    // with proper exception handling to prevent unobserved exceptions
+    _ = Task.Run(async () =>
+    {
+      try
+      {
+        await RefreshTokenAndRestartAsync();
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "Unhandled exception in token refresh timer callback");
+        SetState(DeviceState.Error);
+      }
+    });
+  }
+
   private async Task RefreshTokenAndRestartAsync()
   {
+    // Prevent concurrent refresh operations
+    if (!await _refreshLock.WaitAsync(0))
+    {
+      _logger.LogWarning("Token refresh already in progress, skipping");
+      return;
+    }
+
     try
     {
       Log("Refreshing access token...");
@@ -409,6 +470,10 @@ public class LibrespotManager : IAsyncDisposable
       Log($"Token refresh failed: {ex.Message}");
       _logger.LogError(ex, "Failed to refresh Spotify access token");
       SetState(DeviceState.Error);
+    }
+    finally
+    {
+      _refreshLock.Release();
     }
   }
 
@@ -503,6 +568,15 @@ public class LibrespotManager : IAsyncDisposable
     try
     {
       await StopDeviceAsync();
+      
+      // Dispose SpotifyClient if it implements IDisposable
+      if (_spotifyClient is IDisposable disposableClient)
+      {
+        disposableClient.Dispose();
+        _spotifyClient = null;
+      }
+      
+      _refreshLock?.Dispose();
     }
     catch (Exception ex)
     {

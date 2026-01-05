@@ -18,6 +18,7 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private readonly IOptionsMonitor<SpotifySecrets> _secrets;
   private readonly IOptionsMonitor<SpotifyPreferences> _preferences;
   private readonly IOptionsMonitor<DeviceOptions> _deviceOptions;
+  private readonly ILoggerFactory? _loggerFactory;
   private SpotifyClient? _client;
   private CurrentlyPlayingContext? _currentPlayback;
   private Dictionary<string, object> _metadata = new();
@@ -41,17 +42,20 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <param name="preferences">The Spotify preferences.</param>
   /// <param name="deviceOptions">The device configuration options.</param>
   /// <param name="metricsCollector">Optional metrics collector for tracking playback metrics.</param>
+  /// <param name="loggerFactory">Optional logger factory for creating typed loggers.</param>
   public SpotifyAudioSource(
     ILogger<SpotifyAudioSource> logger,
     IOptionsMonitor<SpotifySecrets> secrets,
     IOptionsMonitor<SpotifyPreferences> preferences,
     IOptionsMonitor<DeviceOptions> deviceOptions,
-    Radio.Core.Interfaces.IMetricsCollector? metricsCollector = null)
+    Radio.Core.Interfaces.IMetricsCollector? metricsCollector = null,
+    ILoggerFactory? loggerFactory = null)
     : base(logger, metricsCollector)
   {
     _secrets = secrets;
     _preferences = preferences;
     _deviceOptions = deviceOptions;
+    _loggerFactory = loggerFactory;
   }
 
   /// <inheritdoc/>
@@ -181,9 +185,13 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   {
     Logger.LogInformation("Initializing Spotify integrated mode with librespot");
 
+    // Create properly typed logger for LibrespotManager
+    var librespotLogger = _loggerFactory?.CreateLogger<LibrespotManager>() 
+      ?? throw new InvalidOperationException("LoggerFactory is required for Integrated mode");
+
     // Create and initialize the librespot manager
     _librespotManager = new LibrespotManager(
-      Logger as ILogger<LibrespotManager> ?? throw new InvalidOperationException("Logger type mismatch"),
+      librespotLogger,
       _secrets,
       _deviceOptions);
 
@@ -801,7 +809,6 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   {
     private readonly LibrespotManager _manager;
     private readonly Dictionary<string, object> _metadata = new();
-    private object? _soundComponent;
 
     public SpotifyIntegratedAudioSource(
       ILogger logger,
@@ -820,7 +827,9 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
     public override object GetSoundComponent()
     {
-      return _soundComponent ?? throw new InvalidOperationException("Audio source not initialized");
+      throw new NotImplementedException(
+        "Integrated Spotify sound component is not yet implemented. " +
+        "A custom SoundFlow data provider is required to read audio from LibrespotManager's buffer and feed it to the mixer.");
     }
 
     public override async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -832,12 +841,13 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
       _metadata[StandardMetadataKeys.Artist] = "Librespot";
       _metadata[StandardMetadataKeys.Album] = "Spotify";
       
-      // The sound component will be created from the librespot audio data
-      // For now, use a placeholder - in a full implementation, this would be a
-      // custom SoundFlow data provider that reads from the LibrespotManager's buffer
-      _soundComponent = new object(); // Placeholder
-      
-      State = AudioSourceState.Ready;
+      // TODO: Implement integrated Spotify SoundFlow sound component.
+      // The sound component should be created from the librespot audio data,
+      // likely via a custom SoundFlow data provider that reads from the
+      // LibrespotManager's buffer.
+      throw new NotImplementedException(
+        "Integrated Spotify sound component is not yet implemented. " +
+        "A custom SoundFlow data provider is required to read audio from LibrespotManager's buffer and feed it to the mixer.");
     }
 
     protected override Task PlayCoreAsync(CancellationToken cancellationToken)

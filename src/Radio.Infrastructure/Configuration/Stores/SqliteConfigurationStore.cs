@@ -1,85 +1,54 @@
-using System.Data;
-using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Logging;
-using Radio.Core.Configuration;
-
 namespace Radio.Infrastructure.Configuration.Stores;
 
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
+using Radio.Infrastructure.Configuration.Abstractions;
+using Radio.Infrastructure.Configuration.Models;
+
 /// <summary>
-/// SQLite-based implementation of configuration store
+/// SQLite database-based configuration store implementation.
 /// </summary>
-public class SqliteConfigurationStore : ConfigurationStore
+public sealed class SqliteConfigurationStore : ConfigurationStoreBase, IAsyncDisposable
 {
   private readonly string _connectionString;
   private readonly string _tableName;
+  private readonly SemaphoreSlim _lock = new(1, 1);
+
   private SqliteConnection? _connection;
-  private bool _isInitialized;
-  private readonly SemaphoreSlim _initLock = new(1, 1);
+  private bool _tableCreated;
+  private bool _disposed;
+
+  private readonly string _storeId;
+
+  /// <inheritdoc/>
+  public override string StoreId => _storeId;
+
+  /// <inheritdoc/>
+  public override ConfigurationStoreType StoreType => ConfigurationStoreType.Sqlite;
 
   /// <summary>
-  /// Initializes a new instance of the <see cref="SqliteConfigurationStore"/> class.
+  /// Initializes a new instance of the SqliteConfigurationStore class.
   /// </summary>
-  /// <param name="storeId">Unique identifier for this configuration store</param>
-  /// <param name="connectionString">SQLite connection string</param>
-  /// <param name="tableName">Name of the table to use for configuration storage</param>
-  /// <param name="logger">Logger instance</param>
   public SqliteConfigurationStore(
     string storeId,
     string connectionString,
-    string tableName,
+    ISecretsProvider secretsProvider,
     ILogger<SqliteConfigurationStore> logger)
-    : base(storeId, logger)
+    : base(secretsProvider, logger)
   {
+    _storeId = storeId ?? throw new ArgumentNullException(nameof(storeId));
     _connectionString = connectionString ?? throw new ArgumentNullException(nameof(connectionString));
-    _tableName = tableName ?? throw new ArgumentNullException(nameof(tableName));
-  }
 
-  /// <summary>
-  /// Ensures the store is initialized with a database connection and table
-  /// </summary>
-  private async Task EnsureInitializedAsync(CancellationToken ct = default)
-  {
-    if (_isInitialized)
-      return;
-
-    await _initLock.WaitAsync(ct);
-    try
-    {
-      if (_isInitialized)
-        return;
-
-      _connection = new SqliteConnection(_connectionString);
-      await _connection.OpenAsync(ct);
-
-      // Create table if it doesn't exist
-      var createTableSql = $@"
-        CREATE TABLE IF NOT EXISTS {_tableName} (
-          Key TEXT PRIMARY KEY,
-          Value TEXT NOT NULL,
-          Description TEXT,
-          LastModified TEXT NOT NULL
-        )";
-
-      await using var cmd = _connection.CreateCommand();
-      cmd.CommandText = createTableSql;
-      await cmd.ExecuteNonQueryAsync(ct);
-
-      _isInitialized = true;
-      Logger.LogDebug("Initialized SQLite configuration store {StoreId} with table {TableName}", StoreId, _tableName);
-    }
-    finally
-    {
-      _initLock.Release();
-    }
+    // Use storeId as table name (sanitized)
+    _tableName = $"Config_{SanitizeTableName(storeId)}";
   }
 
   /// <inheritdoc/>
-  public override async Task<ConfigurationEntry?> GetEntryAsync(string key, CancellationToken ct = default)
+  public override async Task<ConfigurationEntry?> GetEntryAsync(string key, ConfigurationReadMode mode = ConfigurationReadMode.Resolved, CancellationToken ct = default)
   {
     await EnsureInitializedAsync(ct);
 
-    var sql = $"SELECT Key, Value, Description, LastModified FROM {_tableName} WHERE Key = @Key";
-
+    var sql = $"SELECT Value, Description, LastModified FROM {_tableName} WHERE Key = @Key";
     await using var cmd = _connection!.CreateCommand();
     cmd.CommandText = sql;
     cmd.Parameters.AddWithValue("@Key", key);
@@ -87,67 +56,89 @@ public class SqliteConfigurationStore : ConfigurationStore
     await using var reader = await cmd.ExecuteReaderAsync(ct);
     if (await reader.ReadAsync(ct))
     {
-      return new ConfigurationEntry
-      {
-        Key = reader.GetString(0),
-        Value = reader.GetString(1),
-        Description = reader.IsDBNull(2) ? null : reader.GetString(2),
-        LastModified = DateTimeOffset.Parse(reader.GetString(3))
-      };
+      return await CreateEntryAsync(
+        key,
+        reader.GetString(0),
+        reader.IsDBNull(1) ? null : reader.GetString(1),
+        reader.IsDBNull(2) ? null : DateTimeOffset.Parse(reader.GetString(2)),
+        mode,
+        ct);
     }
-
     return null;
   }
 
   /// <inheritdoc/>
-  public override async Task<IEnumerable<ConfigurationEntry>> GetAllEntriesAsync(CancellationToken ct = default)
+  public override async Task<IReadOnlyList<ConfigurationEntry>> GetAllEntriesAsync(ConfigurationReadMode mode = ConfigurationReadMode.Resolved, CancellationToken ct = default)
   {
     await EnsureInitializedAsync(ct);
 
-    var sql = $"SELECT Key, Value, Description, LastModified FROM {_tableName}";
     var entries = new List<ConfigurationEntry>();
-
+    var sql = $"SELECT Key, Value, Description, LastModified FROM {_tableName}";
     await using var cmd = _connection!.CreateCommand();
     cmd.CommandText = sql;
 
     await using var reader = await cmd.ExecuteReaderAsync(ct);
     while (await reader.ReadAsync(ct))
     {
-      entries.Add(new ConfigurationEntry
-      {
-        Key = reader.GetString(0),
-        Value = reader.GetString(1),
-        Description = reader.IsDBNull(2) ? null : reader.GetString(2),
-        LastModified = DateTimeOffset.Parse(reader.GetString(3))
-      });
+      entries.Add(await CreateEntryAsync(
+        reader.GetString(0),
+        reader.GetString(1),
+        reader.IsDBNull(2) ? null : reader.GetString(2),
+        reader.IsDBNull(3) ? null : DateTimeOffset.Parse(reader.GetString(3)),
+        mode,
+        ct));
     }
-
     return entries;
   }
 
   /// <inheritdoc/>
-  public override async Task SetEntryAsync(ConfigurationEntry entry, CancellationToken ct = default)
+  public override async Task<IReadOnlyList<ConfigurationEntry>> GetEntriesBySectionAsync(string sectionPrefix, ConfigurationReadMode mode = ConfigurationReadMode.Resolved, CancellationToken ct = default)
+  {
+    await EnsureInitializedAsync(ct);
+
+    var prefix = NormalizeSectionPrefix(sectionPrefix);
+    var entries = new List<ConfigurationEntry>();
+
+    var sql = $"SELECT Key, Value, Description, LastModified FROM {_tableName} WHERE Key LIKE @Prefix";
+    await using var cmd = _connection!.CreateCommand();
+    cmd.CommandText = sql;
+    cmd.Parameters.AddWithValue("@Prefix", $"{prefix}%");
+
+    await using var reader = await cmd.ExecuteReaderAsync(ct);
+    while (await reader.ReadAsync(ct))
+    {
+      entries.Add(await CreateEntryAsync(
+        reader.GetString(0),
+        reader.GetString(1),
+        reader.IsDBNull(2) ? null : reader.GetString(2),
+        reader.IsDBNull(3) ? null : DateTimeOffset.Parse(reader.GetString(3)),
+        mode,
+        ct));
+    }
+    return entries;
+  }
+
+  /// <inheritdoc/>
+  public override async Task SetEntryAsync(string key, string value, CancellationToken ct = default)
   {
     await EnsureInitializedAsync(ct);
 
     var now = DateTimeOffset.UtcNow.ToString("O");
     var sql = $@"
-      INSERT INTO {_tableName} (Key, Value, Description, LastModified)
-      VALUES (@Key, @Value, @Description, @LastModified)
+      INSERT INTO {_tableName} (Key, Value, LastModified)
+      VALUES (@Key, @Value, @LastModified)
       ON CONFLICT(Key) DO UPDATE SET
         Value = @Value,
-        Description = @Description,
         LastModified = @LastModified";
 
     await using var cmd = _connection!.CreateCommand();
-    cmd.Parameters.AddWithValue("@Key", entry.Key);
-    cmd.Parameters.AddWithValue("@Value", entry.RawValue ?? entry.Value);
-    cmd.Parameters.AddWithValue("@Description", (object?)entry.Description ?? DBNull.Value);
+    cmd.CommandText = sql;
+    cmd.Parameters.AddWithValue("@Key", key);
+    cmd.Parameters.AddWithValue("@Value", value);
     cmd.Parameters.AddWithValue("@LastModified", now);
 
     await cmd.ExecuteNonQueryAsync(ct);
-
-    Logger.LogDebug("Set entry {Key} in store {StoreId}", entry.Key, StoreId);
+    Logger.LogDebug("Set entry {Key} in store {StoreId}", key, StoreId);
   }
 
   /// <inheritdoc/>
@@ -155,10 +146,7 @@ public class SqliteConfigurationStore : ConfigurationStore
   {
     await EnsureInitializedAsync(ct);
 
-    var existingTransaction = _connection!.Transaction;
-    var transactionOwner = existingTransaction == null;
-    
-    var transaction = existingTransaction ?? await _connection!.BeginTransactionAsync(ct);
+    await using var transaction = await _connection!.BeginTransactionAsync(ct);
     try
     {
       foreach (var entry in entries)
@@ -173,7 +161,6 @@ public class SqliteConfigurationStore : ConfigurationStore
             LastModified = @LastModified";
 
         await using var cmd = _connection.CreateCommand();
-        cmd.Transaction = transaction;
         cmd.CommandText = sql;
         cmd.Parameters.AddWithValue("@Key", entry.Key);
         cmd.Parameters.AddWithValue("@Value", entry.RawValue ?? entry.Value);
@@ -183,83 +170,137 @@ public class SqliteConfigurationStore : ConfigurationStore
         await cmd.ExecuteNonQueryAsync(ct);
       }
 
-      if (transactionOwner)
-      {
-        await transaction.CommitAsync(ct);
-      }
-      
+      await transaction.CommitAsync(ct);
       Logger.LogDebug("Set multiple entries in store {StoreId}", StoreId);
     }
     catch
     {
-      if (transactionOwner)
-      {
-        await transaction.RollbackAsync(ct);
-      }
+      await transaction.RollbackAsync(ct);
       throw;
-    }
-    finally
-    {
-      if (transactionOwner)
-      {
-        await transaction.DisposeAsync();
-      }
     }
   }
 
   /// <inheritdoc/>
-  public override async Task DeleteEntryAsync(string key, CancellationToken ct = default)
+  public override async Task<bool> DeleteEntryAsync(string key, CancellationToken ct = default)
   {
     await EnsureInitializedAsync(ct);
 
     var sql = $"DELETE FROM {_tableName} WHERE Key = @Key";
-
     await using var cmd = _connection!.CreateCommand();
     cmd.CommandText = sql;
     cmd.Parameters.AddWithValue("@Key", key);
 
-    await cmd.ExecuteNonQueryAsync(ct);
-
-    Logger.LogDebug("Deleted entry {Key} from store {StoreId}", key, StoreId);
+    var deleted = await cmd.ExecuteNonQueryAsync(ct);
+    if (deleted > 0)
+    {
+      Logger.LogDebug("Deleted entry {Key} from store {StoreId}", key, StoreId);
+      return true;
+    }
+    return false;
   }
 
   /// <inheritdoc/>
-  public override async Task ClearAsync(CancellationToken ct = default)
+  public override async Task<bool> ExistsAsync(string key, CancellationToken ct = default)
   {
     await EnsureInitializedAsync(ct);
 
-    var sql = $"DELETE FROM {_tableName}";
-
+    var sql = $"SELECT 1 FROM {_tableName} WHERE Key = @Key LIMIT 1";
     await using var cmd = _connection!.CreateCommand();
     cmd.CommandText = sql;
+    cmd.Parameters.AddWithValue("@Key", key);
 
-    await cmd.ExecuteNonQueryAsync(ct);
-
-    Logger.LogDebug("Cleared all entries from store {StoreId}", StoreId);
+    var result = await cmd.ExecuteScalarAsync(ct);
+    return result != null;
   }
 
   /// <inheritdoc/>
-  protected override void Dispose(bool disposing)
+  public override Task<bool> SaveAsync(CancellationToken ct = default)
   {
-    if (disposing)
+    // SQLite auto-commits, so nothing to do
+    return Task.FromResult(true);
+  }
+
+  /// <inheritdoc/>
+  public override async Task ReloadAsync(CancellationToken ct = default)
+  {
+    // Close and reopen connection to pick up any external changes
+    if (_connection != null)
     {
-      _connection?.Dispose();
-      _initLock.Dispose();
+      await _connection.CloseAsync();
+      await _connection.OpenAsync(ct);
+    }
+  }
+
+  private async Task EnsureInitializedAsync(CancellationToken ct)
+  {
+    if (_tableCreated && _connection?.State == System.Data.ConnectionState.Open)
+      return;
+
+    await _lock.WaitAsync(ct);
+    try
+    {
+      if (_tableCreated && _connection?.State == System.Data.ConnectionState.Open)
+        return;
+
+      await InitializeAsync(ct);
+    }
+    finally
+    {
+      _lock.Release();
+    }
+  }
+
+  private async Task InitializeAsync(CancellationToken ct)
+  {
+    // Ensure directory exists
+    var builder = new SqliteConnectionStringBuilder(_connectionString);
+    var dbPath = builder.DataSource;
+    var directory = Path.GetDirectoryName(dbPath);
+    if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+    {
+      Directory.CreateDirectory(directory);
     }
 
-    base.Dispose(disposing);
+    _connection = new SqliteConnection(_connectionString);
+    await _connection.OpenAsync(ct);
+
+    var createTableSql = $@"
+      CREATE TABLE IF NOT EXISTS {_tableName} (
+        Key TEXT PRIMARY KEY,
+        Value TEXT NOT NULL,
+        Description TEXT,
+        LastModified TEXT NOT NULL
+      )";
+
+    await using var cmd = _connection.CreateCommand();
+    cmd.CommandText = createTableSql;
+    await cmd.ExecuteNonQueryAsync(ct);
+
+    _tableCreated = true;
+    Logger.LogDebug("SQLite configuration store initialized: {StoreId}", StoreId);
+  }
+
+  private static string SanitizeTableName(string name)
+  {
+    // Only allow alphanumeric and underscore
+    return new string(name
+      .Replace("-", "_")
+      .Replace(".", "_")
+      .Where(c => char.IsLetterOrDigit(c) || c == '_')
+      .ToArray());
   }
 
   /// <inheritdoc/>
-  public override async ValueTask DisposeAsync()
+  public async ValueTask DisposeAsync()
   {
+    if (_disposed) return;
+
     if (_connection != null)
     {
       await _connection.DisposeAsync();
     }
 
-    _initLock.Dispose();
-
-    await base.DisposeAsync();
+    _lock.Dispose();
+    _disposed = true;
   }
 }
