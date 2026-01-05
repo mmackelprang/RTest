@@ -438,8 +438,8 @@ public class AudioManager : IAudioManager
       _spotifySecrets,
       _spotifyPreferences,
       _deviceOptions,
-      _deviceManager,
-      _metricsCollector);
+      _metricsCollector,
+      _loggerFactory);
   }
 
   /// <summary>

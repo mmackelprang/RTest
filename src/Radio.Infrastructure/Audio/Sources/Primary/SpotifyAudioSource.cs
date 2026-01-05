@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
+using Radio.Infrastructure.Audio.Services;
 using SpotifyAPI.Web;
 
 namespace Radio.Infrastructure.Audio.Sources.Primary;
@@ -10,14 +11,14 @@ namespace Radio.Infrastructure.Audio.Sources.Primary;
 /// <summary>
 /// Spotify audio source with dual mode support:
 /// - RemoteControl: Spotify Connect API (no audio data flows through app)
-/// - Loopback: Audio capture from Spotify client via loopback device (enables visualization)
+/// - Integrated: Managed librespot process with pipe audio capture (enables visualization)
 /// </summary>
 public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
 {
   private readonly IOptionsMonitor<SpotifySecrets> _secrets;
   private readonly IOptionsMonitor<SpotifyPreferences> _preferences;
   private readonly IOptionsMonitor<DeviceOptions> _deviceOptions;
-  private readonly IAudioDeviceManager? _deviceManager;
+  private readonly ILoggerFactory? _loggerFactory;
   private SpotifyClient? _client;
   private CurrentlyPlayingContext? _currentPlayback;
   private Dictionary<string, object> _metadata = new();
@@ -30,7 +31,8 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private readonly SemaphoreSlim _pollingLock = new(1, 1);
   private readonly object _queueLock = new(); // Protects _queueItems and _currentIndex
   private SpotifyMode _mode;
-  private USBAudioSourceBase? _loopbackSource;
+  private LibrespotManager? _librespotManager;
+  private SpotifyIntegratedAudioSource? _integratedSource;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="SpotifyAudioSource"/> class.
@@ -39,21 +41,21 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <param name="secrets">The Spotify secrets configuration.</param>
   /// <param name="preferences">The Spotify preferences.</param>
   /// <param name="deviceOptions">The device configuration options.</param>
-  /// <param name="deviceManager">Optional audio device manager (required for Loopback mode).</param>
   /// <param name="metricsCollector">Optional metrics collector for tracking playback metrics.</param>
+  /// <param name="loggerFactory">Optional logger factory for creating typed loggers.</param>
   public SpotifyAudioSource(
     ILogger<SpotifyAudioSource> logger,
     IOptionsMonitor<SpotifySecrets> secrets,
     IOptionsMonitor<SpotifyPreferences> preferences,
     IOptionsMonitor<DeviceOptions> deviceOptions,
-    IAudioDeviceManager? deviceManager = null,
-    Radio.Core.Interfaces.IMetricsCollector? metricsCollector = null)
+    Radio.Core.Interfaces.IMetricsCollector? metricsCollector = null,
+    ILoggerFactory? loggerFactory = null)
     : base(logger, metricsCollector)
   {
     _secrets = secrets;
     _preferences = preferences;
     _deviceOptions = deviceOptions;
-    _deviceManager = deviceManager;
+    _loggerFactory = loggerFactory;
   }
 
   /// <inheritdoc/>
@@ -145,10 +147,10 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <inheritdoc/>
   public override object GetSoundComponent()
   {
-    if (_mode == SpotifyMode.Loopback && _loopbackSource != null)
+    if (_mode == SpotifyMode.Integrated && _integratedSource != null)
     {
-      // Loopback mode: Return SoundFlow capture node (audio flows through mixer)
-      return _loopbackSource.GetSoundComponent();
+      // Integrated mode: Return SoundFlow audio source from librespot manager
+      return _integratedSource.GetSoundComponent();
     }
     else
     {
@@ -166,9 +168,9 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
     _mode = _deviceOptions.CurrentValue.Spotify?.Mode ?? SpotifyMode.RemoteControl;
     Logger.LogInformation("Initializing Spotify in {Mode} mode", _mode);
 
-    if (_mode == SpotifyMode.Loopback)
+    if (_mode == SpotifyMode.Integrated)
     {
-      await InitializeLoopbackModeAsync(cancellationToken);
+      await InitializeIntegratedModeAsync(cancellationToken);
     }
     else
     {
@@ -177,43 +179,37 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   }
 
   /// <summary>
-  /// Initializes Spotify in loopback mode with audio capture.
+  /// Initializes Spotify in integrated mode with managed librespot process.
   /// </summary>
-  private async Task InitializeLoopbackModeAsync(CancellationToken cancellationToken)
+  private async Task InitializeIntegratedModeAsync(CancellationToken cancellationToken)
   {
-    var loopbackDevice = _deviceOptions.CurrentValue.Spotify?.LoopbackDeviceName;
-    if (string.IsNullOrEmpty(loopbackDevice))
-    {
-      Logger.LogError("Loopback device not configured for Spotify");
-      State = AudioSourceState.Error;
-      throw new InvalidOperationException(
-        "Loopback device not configured for Spotify. " +
-        "Set Devices:Spotify:LoopbackDeviceName in configuration.");
-    }
+    Logger.LogInformation("Initializing Spotify integrated mode with librespot");
 
-    if (_deviceManager == null)
-    {
-      Logger.LogError("Audio device manager not available for loopback mode");
-      State = AudioSourceState.Error;
-      throw new InvalidOperationException(
-        "Audio device manager is required for Spotify loopback mode.");
-    }
+    // Create properly typed logger for LibrespotManager
+    var librespotLogger = _loggerFactory?.CreateLogger<LibrespotManager>() 
+      ?? throw new InvalidOperationException("LoggerFactory is required for Integrated mode");
 
-    Logger.LogInformation("Initializing Spotify loopback capture from device: {Device}", loopbackDevice);
+    // Create and initialize the librespot manager
+    _librespotManager = new LibrespotManager(
+      librespotLogger,
+      _secrets,
+      _deviceOptions);
 
-    // Create a specialized loopback capture source
-    _loopbackSource = new SpotifyLoopbackCaptureSource(
-      Logger, 
-      _deviceManager, 
-      loopbackDevice);
+    // Create the integrated audio source wrapper
+    _integratedSource = new SpotifyIntegratedAudioSource(
+      Logger,
+      _librespotManager);
 
-    await _loopbackSource.InitializeAsync(cancellationToken);
+    await _integratedSource.InitializeAsync(cancellationToken);
+
+    // Start the librespot device
+    await _librespotManager.StartDeviceAsync(cancellationToken: cancellationToken);
 
     // Initialize Spotify API for metadata and control
     await InitializeSpotifyAPIAsync(cancellationToken);
 
     State = AudioSourceState.Ready;
-    Logger.LogInformation("Spotify loopback mode initialized successfully");
+    Logger.LogInformation("Spotify integrated mode initialized successfully");
   }
 
   /// <summary>
@@ -291,14 +287,24 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <inheritdoc/>
   protected override async Task PlayCoreAsync(CancellationToken cancellationToken)
   {
-    if (_mode == SpotifyMode.Loopback)
+    if (_mode == SpotifyMode.Integrated)
     {
-      // Start capturing audio from loopback device
-      if (_loopbackSource == null)
+      // Integrated mode: librespot is already running, just ensure it's started
+      if (_librespotManager == null)
       {
-        throw new InvalidOperationException("Loopback source not initialized");
+        throw new InvalidOperationException("Librespot manager not initialized");
       }
-      await _loopbackSource.PlayAsync(cancellationToken);
+
+      if (!_librespotManager.IsRunning)
+      {
+        await _librespotManager.StartDeviceAsync(cancellationToken: cancellationToken);
+      }
+
+      // Start the integrated audio source
+      if (_integratedSource != null)
+      {
+        await _integratedSource.PlayAsync(cancellationToken);
+      }
 
       // Optionally send play command via API if authenticated
       if (_client != null && _isAuthenticated)
@@ -345,9 +351,9 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <inheritdoc/>
   protected override async Task PauseCoreAsync(CancellationToken cancellationToken)
   {
-    if (_mode == SpotifyMode.Loopback && _loopbackSource != null)
+    if (_mode == SpotifyMode.Integrated && _integratedSource != null)
     {
-      await _loopbackSource.PauseAsync(cancellationToken);
+      await _integratedSource.PauseAsync(cancellationToken);
     }
 
     if (_client == null) return;
@@ -373,9 +379,9 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <inheritdoc/>
   protected override async Task StopCoreAsync(CancellationToken cancellationToken)
   {
-    if (_mode == SpotifyMode.Loopback && _loopbackSource != null)
+    if (_mode == SpotifyMode.Integrated && _integratedSource != null)
     {
-      await _loopbackSource.StopAsync(cancellationToken);
+      await _integratedSource.StopAsync(cancellationToken);
     }
 
     if (_client == null) return;
@@ -771,11 +777,17 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
     _pollingLock.Dispose();
 
-    // Dispose loopback source if present
-    if (_loopbackSource != null)
+    // Dispose integrated source and manager if present
+    if (_integratedSource != null)
     {
-      await _loopbackSource.DisposeAsync();
-      _loopbackSource = null;
+      await _integratedSource.DisposeAsync();
+      _integratedSource = null;
+    }
+
+    if (_librespotManager != null)
+    {
+      await _librespotManager.DisposeAsync();
+      _librespotManager = null;
     }
 
     if (_client != null && _currentPlayback?.Item is FullTrack track)
@@ -791,28 +803,109 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   }
 
   /// <summary>
-  /// Internal helper class for capturing audio from loopback device.
+  /// Internal helper class for capturing audio from integrated librespot process.
   /// </summary>
-  private class SpotifyLoopbackCaptureSource : USBAudioSourceBase
+  private class SpotifyIntegratedAudioSource : PrimaryAudioSourceBase
   {
-    private readonly string _deviceName;
+    private readonly LibrespotManager _manager;
+    private readonly Dictionary<string, object> _metadata = new();
+    private LibrespotAudioDataProvider? _audioProvider;
 
-    public SpotifyLoopbackCaptureSource(
+    public SpotifyIntegratedAudioSource(
       ILogger logger,
-      IAudioDeviceManager deviceManager,
-      string deviceName)
-      : base(logger, deviceManager)
+      LibrespotManager manager)
+      : base(logger)
     {
-      _deviceName = deviceName;
+      _manager = manager;
     }
 
-    public override string Name => "Spotify (Loopback)";
+    public override string Name => "Spotify (Integrated)";
     public override AudioSourceType Type => AudioSourceType.Spotify;
+    public override TimeSpan? Duration => null; // Live stream has no duration
+    public override TimeSpan Position => TimeSpan.Zero; // Live stream position
+    public override bool IsSeekable => false; // Cannot seek live stream
+    public override IReadOnlyDictionary<string, object> Metadata => _metadata;
+
+    public override object GetSoundComponent()
+    {
+      // Return the SoundFlow audio data provider for librespot audio output
+      // This is wired up to the AudioDataReceived event from LibrespotManager
+      if (_audioProvider == null)
+      {
+        throw new InvalidOperationException(
+          "Audio provider not initialized. Call InitializeAsync before GetSoundComponent.");
+      }
+
+      return _audioProvider;
+    }
 
     public override async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-      SetDefaultMetadata("Spotify", "Spotify", _deviceName);
-      await InitializeUSBCaptureAsync(_deviceName, cancellationToken);
+      await base.InitializeAsync(cancellationToken);
+      
+      // Set default metadata
+      _metadata[StandardMetadataKeys.Title] = "Spotify (Integrated)";
+      _metadata[StandardMetadataKeys.Artist] = "Librespot";
+      _metadata[StandardMetadataKeys.Album] = "Spotify";
+      
+      // Create the audio data provider that bridges LibrespotManager to SoundFlow
+      _audioProvider = new LibrespotAudioDataProvider(_manager, Logger);
+      
+      State = AudioSourceState.Ready;
+      Logger.LogInformation("Spotify integrated audio source initialized with audio provider");
+    }
+
+    protected override Task PlayCoreAsync(CancellationToken cancellationToken)
+    {
+      State = AudioSourceState.Playing;
+      
+      // Start polling for audio data
+      _audioProvider?.StartPolling();
+      
+      return Task.CompletedTask;
+    }
+
+    protected override Task PauseCoreAsync(CancellationToken cancellationToken)
+    {
+      State = AudioSourceState.Paused;
+      
+      // Stop polling for audio data
+      _audioProvider?.StopPolling();
+      
+      return Task.CompletedTask;
+    }
+
+    protected override Task ResumeCoreAsync(CancellationToken cancellationToken)
+    {
+      State = AudioSourceState.Playing;
+      
+      // Resume polling for audio data
+      _audioProvider?.StartPolling();
+      
+      return Task.CompletedTask;
+    }
+
+    protected override Task StopCoreAsync(CancellationToken cancellationToken)
+    {
+      State = AudioSourceState.Stopped;
+      
+      // Stop polling for audio data
+      _audioProvider?.StopPolling();
+      
+      return Task.CompletedTask;
+    }
+
+    protected override Task SeekCoreAsync(TimeSpan position, CancellationToken cancellationToken)
+    {
+      throw new NotSupportedException("Cannot seek in integrated Spotify stream");
+    }
+
+    protected override async ValueTask DisposeAsyncCore()
+    {
+      _audioProvider?.Dispose();
+      _audioProvider = null;
+      
+      await base.DisposeAsyncCore();
     }
   }
 }

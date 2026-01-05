@@ -537,6 +537,7 @@ public class DeviceOptionsDto
   public RadioDeviceOptionsDto Radio { get; set; } = new();
   public VinylDeviceOptionsDto Vinyl { get; set; } = new();
   public CastDeviceOptionsDto Cast { get; set; } = new();
+  public SpotifyDeviceOptionsDto Spotify { get; set; } = new();
 }
 
 public class RadioDeviceOptionsDto
@@ -552,6 +553,12 @@ public class VinylDeviceOptionsDto
 public class CastDeviceOptionsDto
 {
   public string DefaultDevice { get; set; } = "";
+}
+
+public class SpotifyDeviceOptionsDto
+{
+  public string Mode { get; set; } = "Integrated";
+  public string LibrespotPath { get; set; } = "/usr/bin/librespot";
 }
 
 // Preferences DTOs (Phase 2)

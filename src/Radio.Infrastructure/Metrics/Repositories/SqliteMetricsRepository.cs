@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces;
 using Radio.Core.Metrics;
 using Radio.Infrastructure.Metrics.Data;
+using System.Data.Common;
 
 /// <summary>
 /// Repository for storing and retrieving metrics from SQLite.
@@ -14,6 +15,7 @@ public sealed class SqliteMetricsRepository : IMetricsReader
   private readonly ILogger<SqliteMetricsRepository> _logger;
   private readonly MetricsDbContext _dbContext;
   private readonly SemaphoreSlim _transactionLock = new(1, 1);
+  private SqliteTransaction? _currentTransaction;
 
   public SqliteMetricsRepository(
     ILogger<SqliteMetricsRepository> logger,
@@ -58,7 +60,14 @@ public sealed class SqliteMetricsRepository : IMetricsReader
     await _transactionLock.WaitAsync(ct);
     try
     {
-      await using var transaction = _dbContext.Connection.BeginTransaction();
+      var existingTransaction = _currentTransaction;
+      var transactionOwner = existingTransaction == null;
+      var transaction = existingTransaction ?? (await _dbContext.Connection.BeginTransactionAsync(ct) as SqliteTransaction)!;
+      if (transactionOwner)
+      {
+        _currentTransaction = transaction;
+      }
+
       try
       {
         foreach (var bucket in buckets)
@@ -89,15 +98,29 @@ public sealed class SqliteMetricsRepository : IMetricsReader
           await cmd.ExecuteNonQueryAsync(ct);
         }
 
-        await transaction.CommitAsync(ct);
-        _logger.LogDebug("Saved {Count} buckets for metric {Key} at {Resolution} resolution",
-          buckets.Count(), key, resolution);
+        if (transactionOwner)
+        {
+          await transaction.CommitAsync(ct);
+          _logger.LogDebug("Saved {Count} buckets for metric {Key} at {Resolution} resolution",
+            buckets.Count(), key, resolution);
+        }
       }
       catch (Exception ex)
       {
-        await transaction.RollbackAsync(ct);
+        if (transactionOwner)
+        {
+          await transaction.RollbackAsync(ct);
+        }
         _logger.LogError(ex, "Failed to save metric buckets for {Key}", key);
         throw;
+      }
+      finally
+      {
+        if (transactionOwner)
+        {
+          await transaction.DisposeAsync();
+          _currentTransaction = null;
+        }
       }
     }
     finally
@@ -291,7 +314,14 @@ public sealed class SqliteMetricsRepository : IMetricsReader
     await _transactionLock.WaitAsync(ct);
     try
     {
-      await using var transaction = _dbContext.Connection.BeginTransaction();
+      var existingTransaction = _currentTransaction;
+      var transactionOwner = existingTransaction == null;
+      var transaction = existingTransaction ?? (await _dbContext.Connection.BeginTransactionAsync(ct) as SqliteTransaction)!;
+      if (transactionOwner)
+      {
+        _currentTransaction = transaction;
+      }
+
       try
       {
         await using var cmd = _dbContext.Connection.CreateCommand();
@@ -325,15 +355,29 @@ public sealed class SqliteMetricsRepository : IMetricsReader
         cmd.CommandText = "DELETE FROM MetricData_Minute WHERE Timestamp < @Cutoff";
         var deleted = await cmd.ExecuteNonQueryAsync(ct);
 
-        await transaction.CommitAsync(ct);
-        _logger.LogInformation("Rolled up {Aggregated} minute records into hours, deleted {Deleted} old records",
-          aggregated, deleted);
+        if (transactionOwner)
+        {
+          await transaction.CommitAsync(ct);
+          _logger.LogInformation("Rolled up {Aggregated} minute records into hours, deleted {Deleted} old records",
+            aggregated, deleted);
+        }
       }
       catch (Exception ex)
       {
-        await transaction.RollbackAsync(ct);
+        if (transactionOwner)
+        {
+          await transaction.RollbackAsync(ct);
+        }
         _logger.LogError(ex, "Failed to rollup minute data to hours");
         throw;
+      }
+      finally
+      {
+        if (transactionOwner)
+        {
+          await transaction.DisposeAsync();
+          _currentTransaction = null;
+        }
       }
     }
     finally
@@ -353,7 +397,14 @@ public sealed class SqliteMetricsRepository : IMetricsReader
     await _transactionLock.WaitAsync(ct);
     try
     {
-      await using var transaction = _dbContext.Connection.BeginTransaction();
+      var existingTransaction = _currentTransaction;
+      var transactionOwner = existingTransaction == null;
+      var transaction = existingTransaction ?? (await _dbContext.Connection.BeginTransactionAsync(ct) as SqliteTransaction)!;
+      if (transactionOwner)
+      {
+        _currentTransaction = transaction;
+      }
+
       try
       {
         await using var cmd = _dbContext.Connection.CreateCommand();
@@ -387,15 +438,29 @@ public sealed class SqliteMetricsRepository : IMetricsReader
         cmd.CommandText = "DELETE FROM MetricData_Hour WHERE Timestamp < @Cutoff";
         var deleted = await cmd.ExecuteNonQueryAsync(ct);
 
-        await transaction.CommitAsync(ct);
-        _logger.LogInformation("Rolled up {Aggregated} hour records into days, deleted {Deleted} old records",
-          aggregated, deleted);
+        if (transactionOwner)
+        {
+          await transaction.CommitAsync(ct);
+          _logger.LogInformation("Rolled up {Aggregated} hour records into days, deleted {Deleted} old records",
+            aggregated, deleted);
+        }
       }
       catch (Exception ex)
       {
-        await transaction.RollbackAsync(ct);
+        if (transactionOwner)
+        {
+          await transaction.RollbackAsync(ct);
+        }
         _logger.LogError(ex, "Failed to rollup hour data to days");
         throw;
+      }
+      finally
+      {
+        if (transactionOwner)
+        {
+          await transaction.DisposeAsync();
+          _currentTransaction = null;
+        }
       }
     }
     finally
@@ -426,7 +491,14 @@ public sealed class SqliteMetricsRepository : IMetricsReader
     await _transactionLock.WaitAsync(ct);
     try
     {
-      await using var transaction = _dbContext.Connection.BeginTransaction();
+      var existingTransaction = _currentTransaction;
+      var transactionOwner = existingTransaction == null;
+      var transaction = existingTransaction ?? (await _dbContext.Connection.BeginTransactionAsync(ct) as SqliteTransaction)!;
+      if (transactionOwner)
+      {
+        _currentTransaction = transaction;
+      }
+
       try
       {
         await using var cmd = _dbContext.Connection.CreateCommand();
@@ -435,18 +507,33 @@ public sealed class SqliteMetricsRepository : IMetricsReader
         cmd.Parameters.AddWithValue("@Cutoff", cutoffUnix);
 
         var deleted = await cmd.ExecuteNonQueryAsync(ct);
-        await transaction.CommitAsync(ct);
-
-        if (deleted > 0)
+        
+        if (transactionOwner)
         {
-          _logger.LogInformation("Pruned {Count} old records from {Table}", deleted, tableName);
+          await transaction.CommitAsync(ct);
+
+          if (deleted > 0)
+          {
+            _logger.LogInformation("Pruned {Count} old records from {Table}", deleted, tableName);
+          }
         }
       }
       catch (Exception ex)
       {
-        await transaction.RollbackAsync(ct);
+        if (transactionOwner)
+        {
+          await transaction.RollbackAsync(ct);
+        }
         _logger.LogError(ex, "Failed to prune old data from {Table}", tableName);
         throw;
+      }
+      finally
+      {
+        if (transactionOwner)
+        {
+          await transaction.DisposeAsync();
+          _currentTransaction = null;
+        }
       }
     }
     finally
