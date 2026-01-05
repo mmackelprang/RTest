@@ -233,7 +233,18 @@ public sealed class MetricsDbContext : IAsyncDisposable
         // Close the connection first to ensure any pending transactions are handled
         if (_connection.State == System.Data.ConnectionState.Open)
         {
-          await _connection.CloseAsync();
+          // First, try to safely close. If there's a transaction issue, just dispose directly.
+          try
+          {
+            await _connection.CloseAsync();
+          }
+          catch (InvalidOperationException ex) when (ex.Message.Contains("transaction"))
+          {
+            // Transaction association issue during close - this can happen during test teardown
+            // when transactions are cleaned up in a different order than expected.
+            // Just log and continue to disposal.
+            _logger.LogDebug(ex, "Transaction issue during connection close, continuing with disposal");
+          }
         }
       }
       catch (Exception ex)
@@ -242,7 +253,14 @@ public sealed class MetricsDbContext : IAsyncDisposable
       }
       finally
       {
-        await _connection.DisposeAsync();
+        try
+        {
+          await _connection.DisposeAsync();
+        }
+        catch (Exception ex)
+        {
+          _logger.LogDebug(ex, "Error disposing database connection");
+        }
         _connection = null;
       }
     }

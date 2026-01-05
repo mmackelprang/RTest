@@ -26,6 +26,7 @@ public sealed class BufferedMetricsCollector : IMetricsCollector, IHostedService
   
   private Timer? _flushTimer;
   private bool _isRunning;
+  private bool _isDisposed;
 
   public BufferedMetricsCollector(
     ILogger<BufferedMetricsCollector> logger,
@@ -126,7 +127,7 @@ public sealed class BufferedMetricsCollector : IMetricsCollector, IHostedService
   /// </summary>
   private async Task FlushAsync(CancellationToken ct)
   {
-    if (_buffers.IsEmpty)
+    if (_buffers.IsEmpty || _isDisposed)
     {
       return;
     }
@@ -134,6 +135,12 @@ public sealed class BufferedMetricsCollector : IMetricsCollector, IHostedService
     await _flushLock.WaitAsync(ct);
     try
     {
+      // Check again after acquiring lock - might have been disposed while waiting
+      if (_isDisposed)
+      {
+        return;
+      }
+
       // Snapshot current buffers and create new ones
       var buffersToFlush = new List<MetricBuffer>();
       foreach (var kvp in _buffers)
@@ -181,6 +188,9 @@ public sealed class BufferedMetricsCollector : IMetricsCollector, IHostedService
 
   public async ValueTask DisposeAsync()
   {
+    _isDisposed = true;
+    _isRunning = false;
+
     if (_flushTimer != null)
     {
       await _flushTimer.DisposeAsync();

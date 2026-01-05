@@ -60,9 +60,34 @@ public sealed class SqliteMetricsRepository : IMetricsReader
     await _transactionLock.WaitAsync(ct);
     try
     {
+      // Check if connection is still open before proceeding
+      try
+      {
+        if (_dbContext.Connection.State != System.Data.ConnectionState.Open)
+        {
+          _logger.LogDebug("Database connection is not open, skipping save for {Key}", key);
+          return;
+        }
+      }
+      catch (ObjectDisposedException)
+      {
+        _logger.LogDebug("Database connection disposed, skipping save for {Key}", key);
+        return;
+      }
+
       var existingTransaction = _currentTransaction;
       var transactionOwner = existingTransaction == null;
-      var transaction = existingTransaction ?? (await _dbContext.Connection.BeginTransactionAsync(ct) as SqliteTransaction)!;
+      SqliteTransaction transaction;
+      try
+      {
+        transaction = existingTransaction ?? (await _dbContext.Connection.BeginTransactionAsync(ct) as SqliteTransaction)!;
+      }
+      catch (ObjectDisposedException)
+      {
+        _logger.LogDebug("Database connection disposed during transaction begin, skipping save for {Key}", key);
+        return;
+      }
+
       if (transactionOwner)
       {
         _currentTransaction = transaction;
@@ -105,11 +130,25 @@ public sealed class SqliteMetricsRepository : IMetricsReader
             buckets.Count(), key, resolution);
         }
       }
+      catch (ObjectDisposedException)
+      {
+        // Connection disposed during operation - log and skip
+        _logger.LogDebug("Database connection disposed during save operation for {Key}", key);
+        _currentTransaction = null;
+        return;
+      }
       catch (Exception ex)
       {
         if (transactionOwner)
         {
-          await transaction.RollbackAsync(ct);
+          try
+          {
+            await transaction.RollbackAsync(ct);
+          }
+          catch (ObjectDisposedException)
+          {
+            // Ignore - connection already disposed
+          }
         }
         _logger.LogError(ex, "Failed to save metric buckets for {Key}", key);
         throw;
@@ -118,7 +157,14 @@ public sealed class SqliteMetricsRepository : IMetricsReader
       {
         if (transactionOwner)
         {
-          await transaction.DisposeAsync();
+          try
+          {
+            await transaction.DisposeAsync();
+          }
+          catch (ObjectDisposedException)
+          {
+            // Ignore - already disposed
+          }
           _currentTransaction = null;
         }
       }

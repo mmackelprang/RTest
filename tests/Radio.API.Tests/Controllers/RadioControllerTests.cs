@@ -8,7 +8,7 @@ namespace Radio.API.Tests.Controllers;
 /// <summary>
 /// Integration tests for the RadioController.
 /// </summary>
-public class RadioControllerTests : IClassFixture<WebApplicationFactory<Program>>
+public class RadioControllerTests : IClassFixture<WebApplicationFactory<Program>>, IAsyncLifetime
 {
   private readonly WebApplicationFactory<Program> _factory;
   private readonly HttpClient _client;
@@ -18,6 +18,29 @@ public class RadioControllerTests : IClassFixture<WebApplicationFactory<Program>
     _factory = factory;
     _client = _factory.CreateClient();
   }
+
+  /// <summary>
+  /// Ensures there's room for new presets before each test runs.
+  /// </summary>
+  public async Task InitializeAsync()
+  {
+    // Get current presets and delete some if we're near the limit (max 50)
+    var response = await _client.GetAsync("/api/radio/presets");
+    if (response.IsSuccessStatusCode)
+    {
+      var presets = await response.Content.ReadFromJsonAsync<List<RadioPresetDto>>();
+      if (presets != null && presets.Count >= 45)
+      {
+        // Delete all presets to make room for tests
+        foreach (var preset in presets)
+        {
+          await _client.DeleteAsync($"/api/radio/presets/{preset.Id}");
+        }
+      }
+    }
+  }
+
+  public Task DisposeAsync() => Task.CompletedTask;
 
   [Fact]
   public async Task GetRadioState_WithNoActiveRadio_ReturnsBadRequest()

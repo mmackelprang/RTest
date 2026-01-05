@@ -21,7 +21,9 @@
       "Bash(timeout 20 dotnet run:*)",
       "Bash(timeout 25 dotnet run:*)",
       "Bash(timeout:*)",
-      "Bash(netstat:*)"
+      "Bash(netstat:*)",
+      "Bash(dotnet clean:*)",
+      "Bash(grep:*)"
     ]
   }
 }
