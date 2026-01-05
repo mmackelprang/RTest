@@ -15,6 +15,7 @@ public sealed class SqliteMetricsRepository : IMetricsReader
   private readonly ILogger<SqliteMetricsRepository> _logger;
   private readonly MetricsDbContext _dbContext;
   private readonly SemaphoreSlim _transactionLock = new(1, 1);
+  private SqliteTransaction? _currentTransaction;
 
   public SqliteMetricsRepository(
     ILogger<SqliteMetricsRepository> logger,
@@ -59,9 +60,13 @@ public sealed class SqliteMetricsRepository : IMetricsReader
     await _transactionLock.WaitAsync(ct);
     try
     {
-      var existingTransaction = _dbContext.Connection.Transaction;
+      var existingTransaction = _currentTransaction;
       var transactionOwner = existingTransaction == null;
       var transaction = existingTransaction ?? (await _dbContext.Connection.BeginTransactionAsync(ct) as SqliteTransaction)!;
+      if (transactionOwner)
+      {
+        _currentTransaction = transaction;
+      }
 
       try
       {
@@ -114,6 +119,7 @@ public sealed class SqliteMetricsRepository : IMetricsReader
         if (transactionOwner)
         {
           await transaction.DisposeAsync();
+          _currentTransaction = null;
         }
       }
     }
@@ -308,9 +314,13 @@ public sealed class SqliteMetricsRepository : IMetricsReader
     await _transactionLock.WaitAsync(ct);
     try
     {
-      var existingTransaction = _dbContext.Connection.Transaction;
+      var existingTransaction = _currentTransaction;
       var transactionOwner = existingTransaction == null;
       var transaction = existingTransaction ?? (await _dbContext.Connection.BeginTransactionAsync(ct) as SqliteTransaction)!;
+      if (transactionOwner)
+      {
+        _currentTransaction = transaction;
+      }
 
       try
       {
@@ -366,6 +376,7 @@ public sealed class SqliteMetricsRepository : IMetricsReader
         if (transactionOwner)
         {
           await transaction.DisposeAsync();
+          _currentTransaction = null;
         }
       }
     }
@@ -386,9 +397,13 @@ public sealed class SqliteMetricsRepository : IMetricsReader
     await _transactionLock.WaitAsync(ct);
     try
     {
-      var existingTransaction = _dbContext.Connection.Transaction;
+      var existingTransaction = _currentTransaction;
       var transactionOwner = existingTransaction == null;
       var transaction = existingTransaction ?? (await _dbContext.Connection.BeginTransactionAsync(ct) as SqliteTransaction)!;
+      if (transactionOwner)
+      {
+        _currentTransaction = transaction;
+      }
 
       try
       {
@@ -444,6 +459,7 @@ public sealed class SqliteMetricsRepository : IMetricsReader
         if (transactionOwner)
         {
           await transaction.DisposeAsync();
+          _currentTransaction = null;
         }
       }
     }
@@ -475,9 +491,13 @@ public sealed class SqliteMetricsRepository : IMetricsReader
     await _transactionLock.WaitAsync(ct);
     try
     {
-      var existingTransaction = _dbContext.Connection.Transaction;
+      var existingTransaction = _currentTransaction;
       var transactionOwner = existingTransaction == null;
       var transaction = existingTransaction ?? (await _dbContext.Connection.BeginTransactionAsync(ct) as SqliteTransaction)!;
+      if (transactionOwner)
+      {
+        _currentTransaction = transaction;
+      }
 
       try
       {
@@ -512,6 +532,7 @@ public sealed class SqliteMetricsRepository : IMetricsReader
         if (transactionOwner)
         {
           await transaction.DisposeAsync();
+          _currentTransaction = null;
         }
       }
     }

@@ -809,6 +809,7 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   {
     private readonly LibrespotManager _manager;
     private readonly Dictionary<string, object> _metadata = new();
+    private LibrespotAudioDataProvider? _audioProvider;
 
     public SpotifyIntegratedAudioSource(
       ILogger logger,
@@ -827,9 +828,15 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
     public override object GetSoundComponent()
     {
-      throw new NotImplementedException(
-        "Integrated Spotify sound component is not yet implemented. " +
-        "A custom SoundFlow data provider is required to read audio from LibrespotManager's buffer and feed it to the mixer.");
+      // Return the SoundFlow audio data provider for librespot audio output
+      // This is wired up to the AudioDataReceived event from LibrespotManager
+      if (_audioProvider == null)
+      {
+        throw new InvalidOperationException(
+          "Audio provider not initialized. Call InitializeAsync before GetSoundComponent.");
+      }
+
+      return _audioProvider;
     }
 
     public override async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -841,42 +848,64 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
       _metadata[StandardMetadataKeys.Artist] = "Librespot";
       _metadata[StandardMetadataKeys.Album] = "Spotify";
       
-      // TODO: Implement integrated Spotify SoundFlow sound component.
-      // The sound component should be created from the librespot audio data,
-      // likely via a custom SoundFlow data provider that reads from the
-      // LibrespotManager's buffer.
-      throw new NotImplementedException(
-        "Integrated Spotify sound component is not yet implemented. " +
-        "A custom SoundFlow data provider is required to read audio from LibrespotManager's buffer and feed it to the mixer.");
+      // Create the audio data provider that bridges LibrespotManager to SoundFlow
+      _audioProvider = new LibrespotAudioDataProvider(_manager, Logger);
+      
+      State = AudioSourceState.Ready;
+      Logger.LogInformation("Spotify integrated audio source initialized with audio provider");
     }
 
     protected override Task PlayCoreAsync(CancellationToken cancellationToken)
     {
       State = AudioSourceState.Playing;
+      
+      // Start polling for audio data
+      _audioProvider?.StartPolling();
+      
       return Task.CompletedTask;
     }
 
     protected override Task PauseCoreAsync(CancellationToken cancellationToken)
     {
       State = AudioSourceState.Paused;
+      
+      // Stop polling for audio data
+      _audioProvider?.StopPolling();
+      
       return Task.CompletedTask;
     }
 
     protected override Task ResumeCoreAsync(CancellationToken cancellationToken)
     {
       State = AudioSourceState.Playing;
+      
+      // Resume polling for audio data
+      _audioProvider?.StartPolling();
+      
       return Task.CompletedTask;
     }
 
     protected override Task StopCoreAsync(CancellationToken cancellationToken)
     {
       State = AudioSourceState.Stopped;
+      
+      // Stop polling for audio data
+      _audioProvider?.StopPolling();
+      
       return Task.CompletedTask;
     }
 
     protected override Task SeekCoreAsync(TimeSpan position, CancellationToken cancellationToken)
     {
       throw new NotSupportedException("Cannot seek in integrated Spotify stream");
+    }
+
+    protected override async ValueTask DisposeAsyncCore()
+    {
+      _audioProvider?.Dispose();
+      _audioProvider = null;
+      
+      await base.DisposeAsyncCore();
     }
   }
 }
