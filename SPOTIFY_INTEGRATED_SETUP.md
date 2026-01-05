@@ -8,12 +8,11 @@ This guide explains how to set up and configure Spotify in **Integrated Mode** f
 
 ### Spotify Integration Modes
 
-The Radio Console supports three Spotify integration modes:
+The Radio Console supports two Spotify integration modes:
 
 | Mode | Audio Flow | Visualization | Setup Complexity | Best For |
 |------|-----------|---------------|------------------|----------|
 | **RemoteControl** | External device | ❌ No | Low | Simple playback control |
-| **Loopback** | Via virtual audio device | ✅ Yes | Medium | Windows/existing setup |
 | **Integrated** | Managed librespot pipe | ✅ Yes | Medium | Linux/Raspberry Pi |
 
 **Integrated Mode** is recommended for:
@@ -56,7 +55,7 @@ If you have a helper script:
 
 1. Construct the authorization URL:
    ```
-   https://accounts.spotify.com/authorize?client_id=YOUR_CLIENT_ID&response_type=code&redirect_uri=http://localhost:8888/callback&scope=user-read-playback-state%20user-modify-playback-state%20user-read-currently-playing
+   https://accounts.spotify.com/authorize?client_id=YOUR_CLIENT_ID&response_type=code&redirect_uri=http://127.0.0.1:8888/callback&scope=user-read-playback-state%20user-modify-playback-state%20user-read-currently-playing
    ```
 
 2. Open the URL in a browser and authorize the application
@@ -69,7 +68,7 @@ If you have a helper script:
      -H "Content-Type: application/x-www-form-urlencoded" \
      -d "grant_type=authorization_code" \
      -d "code=YOUR_AUTH_CODE" \
-     -d "redirect_uri=http://localhost:8888/callback" \
+     -d "redirect_uri=http://127.0.0.1:8888/callback" \
      -d "client_id=YOUR_CLIENT_ID" \
      -d "client_secret=YOUR_CLIENT_SECRET"
    ```
@@ -362,20 +361,6 @@ For production Raspberry Pi deployments, configure the Radio Console as a system
 
 ---
 
-## Comparison: Loopback vs. Integrated
-
-| Feature | Loopback Mode | Integrated Mode |
-|---------|---------------|-----------------|
-| **Setup** | Requires virtual audio device | Just needs librespot binary |
-| **Audio Routing** | System loopback/virtual cable | Direct pipe (stdout) |
-| **OS Support** | Windows/Linux | Primarily Linux/Raspberry Pi |
-| **Dependencies** | VB-Cable/ALSA Loopback | Librespot only |
-| **Reliability** | Depends on system audio | Process-managed |
-| **Latency** | Slightly higher (system audio) | Lower (direct pipe) |
-| **Process Management** | External (manual) | Integrated (automatic) |
-
----
-
 ## Security Notes
 
 1. **Store Secrets Securely**: Use the encrypted secrets storage or environment variables
@@ -390,7 +375,6 @@ For production Raspberry Pi deployments, configure the Radio Console as a system
 - [Librespot GitHub Repository](https://github.com/librespot-org/librespot)
 - [Spotify Web API Documentation](https://developer.spotify.com/documentation/web-api/)
 - [Radio Console Configuration Guide](/design/SYSTEMCONFIGURATION.md)
-- [Spotify Loopback Mode Setup](/SPOTIFY_LOOPBACK_SETUP.md)
 
 ---
 
