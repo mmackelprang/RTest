@@ -1,5 +1,17 @@
 # Spotify Loopback Implementation Plan
 
+> **⚠️ OBSOLETE DOCUMENTATION**
+> 
+> This document describes the deprecated Loopback mode implementation. The Loopback mode has been **removed** as of January 2026 in favor of the **Integrated** mode, which uses librespot with direct audio pipe capture.
+> 
+> For current Spotify implementation, see:
+> - `SPOTIFY_INTEGRATED_IMPLEMENTATION_SUMMARY.md` - Current implementation details
+> - Configuration now uses `LibrespotPath` instead of `LoopbackDeviceName`
+> 
+> This document is preserved for historical reference only.
+
+---
+
 ## Overview
 
 Convert SpotifyAudioSource from **remote control** (Spotify Connect API) to **loopback audio capture** to enable visualization and unified audio processing through SoundFlow.
