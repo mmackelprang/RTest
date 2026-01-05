@@ -324,30 +324,21 @@
                 </MudAlert>
               </MudItem>
               
-              <MudItem xs="12" md="4">
+              <MudItem xs="12" md="6">
                 <MudSelect T="string" @bind-Value="_deviceOptions.Spotify.Mode" 
                            Label="Spotify Mode"
                            Variant="Variant.Outlined"
                            HelperText="Integration mode for Spotify">
                   <MudSelectItem Value="@("RemoteControl")">Remote Control (No visualization)</MudSelectItem>
-                  <MudSelectItem Value="@("Loopback")">Loopback (Requires virtual audio device)</MudSelectItem>
-                  <MudSelectItem Value="@("Integrated")">Integrated (Managed librespot)</MudSelectItem>
+                  <MudSelectItem Value="@("Integrated")">Integrated (Managed librespot with visualization)</MudSelectItem>
                 </MudSelect>
               </MudItem>
               
-              <MudItem xs="12" md="4">
-                <MudTextField T="string" @bind-Value="_deviceOptions.Spotify.LoopbackDeviceName" 
-                              Label="Loopback Device Name"
-                              Variant="Variant.Outlined"
-                              HelperText="Used for Loopback mode (e.g., 'CABLE Output')"
-                              Disabled="@(_deviceOptions.Spotify.Mode != "Loopback")" />
-              </MudItem>
-              
-              <MudItem xs="12" md="4">
+              <MudItem xs="12" md="6">
                 <MudTextField T="string" @bind-Value="_deviceOptions.Spotify.LibrespotPath" 
                               Label="Librespot Path"
                               Variant="Variant.Outlined"
-                              HelperText="Used for Integrated mode (e.g., '/usr/bin/librespot')"
+                              HelperText="Path to librespot executable (e.g., '/usr/bin/librespot')"
                               Disabled="@(_deviceOptions.Spotify.Mode != "Integrated")" />
               </MudItem>
 

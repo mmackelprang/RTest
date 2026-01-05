@@ -14,14 +14,6 @@ public enum SpotifyMode
   RemoteControl,
 
   /// <summary>
-  /// Loopback audio capture mode.
-  /// Captures audio from a Spotify client (raspotify/librespot) via loopback/virtual audio device.
-  /// Audio flows through the SoundFlow mixer enabling visualization and processing.
-  /// Requires external Spotify client and OS-level loopback configuration.
-  /// </summary>
-  Loopback,
-
-  /// <summary>
   /// Integrated librespot management mode.
   /// Manages librespot process internally and captures audio via pipe (stdout).
   /// Audio flows through the SoundFlow mixer enabling visualization and processing.

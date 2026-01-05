@@ -50,7 +50,6 @@ public class SpotifyAudioSourceTests
             _secretsMock.Object,
             _preferencesMock.Object,
             _deviceOptionsMock.Object,
-            null,
             null);
     }
 

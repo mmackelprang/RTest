@@ -75,18 +75,9 @@ public class SpotifyDeviceOptions
   /// <summary>
   /// Gets or sets the Spotify integration mode.
   /// RemoteControl: Uses Spotify Connect API (no audio data flows through app).
-  /// Loopback: Captures audio from Spotify client via virtual/loopback device.
   /// Integrated: Manages librespot process and captures audio via pipe.
   /// </summary>
-  public SpotifyMode Mode { get; set; } = SpotifyMode.Loopback;
-
-  /// <summary>
-  /// Gets or sets the loopback/virtual audio device name for audio capture.
-  /// Windows: "CABLE Output" (VB-Audio Virtual Cable), "Stereo Mix"
-  /// Linux: "hw:Loopback,0,0" (ALSA loopback)
-  /// Only used when Mode is Loopback.
-  /// </summary>
-  public string LoopbackDeviceName { get; set; } = "CABLE Output";
+  public SpotifyMode Mode { get; set; } = SpotifyMode.Integrated;
 
   /// <summary>
   /// Gets or sets the path to the librespot executable.

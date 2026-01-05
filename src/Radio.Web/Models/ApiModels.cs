@@ -557,8 +557,7 @@ public class CastDeviceOptionsDto
 
 public class SpotifyDeviceOptionsDto
 {
-  public string Mode { get; set; } = "Loopback";
-  public string LoopbackDeviceName { get; set; } = "CABLE Output";
+  public string Mode { get; set; } = "Integrated";
   public string LibrespotPath { get; set; } = "/usr/bin/librespot";
 }
 
