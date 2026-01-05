@@ -741,6 +741,12 @@ When the file sink is configured:
 | `Radio.USBPort` | `string` | `/dev/ttyUSB0` | USB port path for the radio device (Raddy RF320) |
 | `Vinyl.USBPort` | `string` | `/dev/ttyUSB1` | USB port path for the vinyl turntable device |
 | `Cast.DefaultDevice` | `string` | `""` | Default Chromecast device name |
+| `Spotify.Mode` | `SpotifyMode` | `Integrated` | Spotify integration mode (RemoteControl or Integrated) |
+| `Spotify.LibrespotPath` | `string` | `/usr/bin/librespot` | Path to the librespot executable (used when Mode is Integrated) |
+
+**Spotify Mode Options:**
+- **RemoteControl**: Uses Spotify Connect API (no audio data flows through app)
+- **Integrated**: Manages librespot process and captures audio via pipe
 
 ---
 
@@ -847,6 +853,29 @@ When the file sink is configured:
 | `HttpStream.BitsPerSample` | `int` | `16` | Bits per sample for the stream |
 | `HttpStream.MaxConcurrentClients` | `int` | `10` | Maximum number of concurrent clients |
 | `HttpStream.ClientBufferSize` | `int` | `65536` | Buffer size in bytes for each client |
+
+---
+
+### Radio
+
+**Section Name:** `Radio`  
+**Source File:** `src/Radio.Core/Configuration/RadioOptions.cs`  
+**Description:** Configuration options for radio functionality including default frequencies, scan settings, and device parameters.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `DefaultDevice` | `string` | `RTLSDRCore` | Default radio device type (RTLSDRCore or RF320) |
+| `DefaultFMFrequencyMHz` | `double` | `101.5` | Default FM frequency in MHz |
+| `DefaultAMFrequencyKHz` | `double` | `1000.0` | Default AM frequency in kHz |
+| `DefaultFMStepMHz` | `double` | `0.1` | Default FM frequency step in MHz (typical: 0.1 or 0.2) |
+| `DefaultAMStepKHz` | `double` | `10.0` | Default AM frequency step in kHz (typical: 9 or 10) |
+| `MinFMFrequencyMHz` | `double` | `87.5` | Minimum FM frequency in MHz |
+| `MaxFMFrequencyMHz` | `double` | `108.0` | Maximum FM frequency in MHz |
+| `MinAMFrequencyKHz` | `double` | `520.0` | Minimum AM frequency in kHz |
+| `MaxAMFrequencyKHz` | `double` | `1710.0` | Maximum AM frequency in kHz |
+| `ScanStopThreshold` | `int` | `50` | Signal strength threshold for scan stop (0-100) |
+| `ScanStepDelayMs` | `int` | `100` | Time to wait between frequency steps during scanning (milliseconds) |
+| `DefaultDeviceVolume` | `int` | `50` | Default device volume (0-100) |
 
 ---
 
