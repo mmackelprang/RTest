@@ -7,55 +7,55 @@
 /* ===== Touch Target Utility Classes ===== */
 
 .touch-target-small {
-  min-height: 48px !important;
-  min-width: 48px !important;
+  min-height: 48px;
+  min-width: 48px;
 }
 
 .touch-target-medium {
-  min-height: 60px !important;
-  min-width: 60px !important;
+  min-height: 60px;
+  min-width: 60px;
 }
 
 .touch-target-large {
-  min-height: 72px !important;
-  min-width: 72px !important;
+  min-height: 72px;
+  min-width: 72px;
 }
 
 /* ===== Button Touch Target Standards ===== */
 
 /* Primary action buttons (Play, Confirm, Submit) */
 .touch-button-primary {
-  min-height: 60px !important;
-  min-width: 60px !important;
-  padding: 12px 24px !important;
+  min-height: 60px;
+  min-width: 60px;
+  padding: 12px 24px;
 }
 
 /* Secondary action buttons (Cancel, Back) */
 .touch-button-secondary {
-  min-height: 48px !important;
-  min-width: 48px !important;
-  padding: 8px 16px !important;
+  min-height: 48px;
+  min-width: 48px;
+  padding: 8px 16px;
 }
 
 /* Icon buttons */
 .touch-button-icon {
-  min-height: 48px !important;
-  min-width: 48px !important;
-  padding: 12px !important;
+  min-height: 48px;
+  min-width: 48px;
+  padding: 12px;
 }
 
 /* Icon buttons - large (primary actions) */
 .touch-button-icon-large {
-  min-height: 60px !important;
-  min-width: 60px !important;
-  padding: 16px !important;
+  min-height: 60px;
+  min-width: 60px;
+  padding: 16px;
 }
 
 /* ===== List Item Touch Targets ===== */
 
 .touch-list-item {
-  min-height: 60px !important;
-  padding: 12px 16px !important;
+  min-height: 60px;
+  padding: 12px 16px;
 }
 
 .touch-list-item-compact {

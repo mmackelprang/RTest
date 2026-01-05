@@ -17,10 +17,8 @@
   - `.touch-target-large` (72px for primary)
   - Button, list, and form control standards
 - Applied to pages:
-  - Home.razor: Mute button upgraded to Size.Medium
-  - SpotifyPage.razor: All buttons upgraded from Size.Small to Size.Medium
-  - Search results, browse, logout buttons enhanced
-- Page-specific optimizations for Home, Spotify, Radio, System Config
+  - Home.razor: Mute button upgraded to Size.Medium + touch-button-icon class
+- Page-specific optimizations defined for Home, Spotify, Radio, System Config
 - Responsive adjustments for 576px height displays
 - Accessibility focus indicators (3px outline, 2px offset)
 

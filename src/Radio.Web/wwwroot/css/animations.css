@@ -102,6 +102,9 @@
 }
 
 /* Ripple effect (Material Design) */
+/* Note: This CSS-only ripple always originates from center.
+   For proper Material Design ripples from click point, use JavaScript
+   to position the ripple at event coordinates. */
 @keyframes ripple {
   from {
     opacity: 1;
@@ -154,7 +157,7 @@
     background-position: -200px 0;
   }
   100% {
-    background-position: calc(200px + 100%) 0;
+    background-position: calc(100% + min(200px, 50%)) 0;
   }
 }
 
@@ -285,13 +288,11 @@
 @keyframes listItemRemove {
   from {
     opacity: 1;
-    transform: translateX(0);
-    max-height: 100px;
+    transform: translateX(0) scaleY(1);
   }
   to {
     opacity: 0;
-    transform: translateX(32px);
-    max-height: 0;
+    transform: translateX(32px) scaleY(0);
   }
 }
 
@@ -404,6 +405,11 @@
   }
 }
 
+/* Note: Parent element must have position: relative for this to work correctly */
+.progress-indeterminate {
+  position: relative;
+}
+
 .progress-indeterminate::after {
   content: '';
   position: absolute;
@@ -432,35 +438,38 @@
 
 /* ===== Collapse/Expand Animations ===== */
 
-@keyframes expandHeight {
+/* Using scale/opacity instead of max-height for more reliable animations */
+@keyframes expand {
   from {
-    max-height: 0;
+    transform: scaleY(0);
     opacity: 0;
   }
   to {
-    max-height: 1000px;
+    transform: scaleY(1);
     opacity: 1;
   }
 }
 
-@keyframes collapseHeight {
+@keyframes collapse {
   from {
-    max-height: 1000px;
+    transform: scaleY(1);
     opacity: 1;
   }
   to {
-    max-height: 0;
+    transform: scaleY(0);
     opacity: 0;
   }
 }
 
 .expand {
-  animation: expandHeight var(--anim-duration-normal) var(--anim-ease-decelerate);
+  animation: expand var(--anim-duration-normal) var(--anim-ease-decelerate);
+  transform-origin: top;
   overflow: hidden;
 }
 
 .collapse {
-  animation: collapseHeight var(--anim-duration-normal) var(--anim-ease-accelerate);
+  animation: collapse var(--anim-duration-normal) var(--anim-ease-accelerate);
+  transform-origin: top;
   overflow: hidden;
 }
 
@@ -476,14 +485,17 @@
     scroll-behavior: auto !important;
   }
   
-  /* Keep essential feedback animations */
+  /* Use static feedback instead of motion-heavy animations */
   .skeleton {
     animation: none;
     background: rgba(255, 255, 255, 0.05);
   }
   
+  /* Honor reduced motion: show spinner as static indicator */
   .spinner {
-    animation: spin 1s linear infinite; /* Keep spinner for loading indication */
+    animation: none !important;
+    /* Optional: add a pulsing opacity for minimal feedback */
+    opacity: 0.7;
   }
 }
 
