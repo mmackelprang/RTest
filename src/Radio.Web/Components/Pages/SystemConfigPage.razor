@@ -315,6 +315,42 @@
                               Variant="Variant.Outlined"
                               HelperText="Default Chromecast device name (optional)" />
               </MudItem>
+              
+              <!-- Spotify Configuration -->
+              <MudItem xs="12">
+                <MudText Typo="Typo.h6" Class="mt-2">Spotify Integration</MudText>
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">
+                  Configure how Spotify integrates with the audio system. See SPOTIFY_INTEGRATED_SETUP.md for detailed setup instructions.
+                </MudAlert>
+              </MudItem>
+              
+              <MudItem xs="12" md="4">
+                <MudSelect T="string" @bind-Value="_deviceOptions.Spotify.Mode" 
+                           Label="Spotify Mode"
+                           Variant="Variant.Outlined"
+                           HelperText="Integration mode for Spotify">
+                  <MudSelectItem Value="@("RemoteControl")">Remote Control (No visualization)</MudSelectItem>
+                  <MudSelectItem Value="@("Loopback")">Loopback (Requires virtual audio device)</MudSelectItem>
+                  <MudSelectItem Value="@("Integrated")">Integrated (Managed librespot)</MudSelectItem>
+                </MudSelect>
+              </MudItem>
+              
+              <MudItem xs="12" md="4">
+                <MudTextField T="string" @bind-Value="_deviceOptions.Spotify.LoopbackDeviceName" 
+                              Label="Loopback Device Name"
+                              Variant="Variant.Outlined"
+                              HelperText="Used for Loopback mode (e.g., 'CABLE Output')"
+                              Disabled="@(_deviceOptions.Spotify.Mode != "Loopback")" />
+              </MudItem>
+              
+              <MudItem xs="12" md="4">
+                <MudTextField T="string" @bind-Value="_deviceOptions.Spotify.LibrespotPath" 
+                              Label="Librespot Path"
+                              Variant="Variant.Outlined"
+                              HelperText="Used for Integrated mode (e.g., '/usr/bin/librespot')"
+                              Disabled="@(_deviceOptions.Spotify.Mode != "Integrated")" />
+              </MudItem>
+
               <MudItem xs="12">
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveDeviceOptionsAsync"
                            StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">

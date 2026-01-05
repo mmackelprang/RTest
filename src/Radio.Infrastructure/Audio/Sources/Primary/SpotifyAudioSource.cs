@@ -3,14 +3,16 @@ using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
+using Radio.Infrastructure.Audio.Services;
 using SpotifyAPI.Web;
 
 namespace Radio.Infrastructure.Audio.Sources.Primary;
 
 /// <summary>
-/// Spotify audio source with dual mode support:
+/// Spotify audio source with triple mode support:
 /// - RemoteControl: Spotify Connect API (no audio data flows through app)
 /// - Loopback: Audio capture from Spotify client via loopback device (enables visualization)
+/// - Integrated: Managed librespot process with pipe audio capture (enables visualization)
 /// </summary>
 public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
 {
@@ -31,6 +33,8 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private readonly object _queueLock = new(); // Protects _queueItems and _currentIndex
   private SpotifyMode _mode;
   private USBAudioSourceBase? _loopbackSource;
+  private LibrespotManager? _librespotManager;
+  private SpotifyIntegratedAudioSource? _integratedSource;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="SpotifyAudioSource"/> class.
@@ -150,6 +154,11 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
       // Loopback mode: Return SoundFlow capture node (audio flows through mixer)
       return _loopbackSource.GetSoundComponent();
     }
+    else if (_mode == SpotifyMode.Integrated && _integratedSource != null)
+    {
+      // Integrated mode: Return SoundFlow audio source from librespot manager
+      return _integratedSource.GetSoundComponent();
+    }
     else
     {
       // Remote control mode: Spotify uses its own playback mechanism
@@ -170,10 +179,44 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
     {
       await InitializeLoopbackModeAsync(cancellationToken);
     }
+    else if (_mode == SpotifyMode.Integrated)
+    {
+      await InitializeIntegratedModeAsync(cancellationToken);
+    }
     else
     {
       await InitializeRemoteControlModeAsync(cancellationToken);
     }
+  }
+
+  /// <summary>
+  /// Initializes Spotify in integrated mode with managed librespot process.
+  /// </summary>
+  private async Task InitializeIntegratedModeAsync(CancellationToken cancellationToken)
+  {
+    Logger.LogInformation("Initializing Spotify integrated mode with librespot");
+
+    // Create and initialize the librespot manager
+    _librespotManager = new LibrespotManager(
+      Logger as ILogger<LibrespotManager> ?? throw new InvalidOperationException("Logger type mismatch"),
+      _secrets,
+      _deviceOptions);
+
+    // Create the integrated audio source wrapper
+    _integratedSource = new SpotifyIntegratedAudioSource(
+      Logger,
+      _librespotManager);
+
+    await _integratedSource.InitializeAsync(cancellationToken);
+
+    // Start the librespot device
+    await _librespotManager.StartDeviceAsync(cancellationToken: cancellationToken);
+
+    // Initialize Spotify API for metadata and control
+    await InitializeSpotifyAPIAsync(cancellationToken);
+
+    State = AudioSourceState.Ready;
+    Logger.LogInformation("Spotify integrated mode initialized successfully");
   }
 
   /// <summary>
@@ -313,6 +356,38 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
         }
       }
     }
+    else if (_mode == SpotifyMode.Integrated)
+    {
+      // Integrated mode: librespot is already running, just ensure it's started
+      if (_librespotManager == null)
+      {
+        throw new InvalidOperationException("Librespot manager not initialized");
+      }
+
+      if (!_librespotManager.IsRunning)
+      {
+        await _librespotManager.StartDeviceAsync(cancellationToken: cancellationToken);
+      }
+
+      // Start the integrated audio source
+      if (_integratedSource != null)
+      {
+        await _integratedSource.PlayAsync(cancellationToken);
+      }
+
+      // Optionally send play command via API if authenticated
+      if (_client != null && _isAuthenticated)
+      {
+        try
+        {
+          await _client.Player.ResumePlayback(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+          Logger.LogWarning(ex, "Failed to send play command to Spotify API");
+        }
+      }
+    }
     else
     {
       // Remote control mode: use API only
@@ -349,6 +424,10 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
     {
       await _loopbackSource.PauseAsync(cancellationToken);
     }
+    else if (_mode == SpotifyMode.Integrated && _integratedSource != null)
+    {
+      await _integratedSource.PauseAsync(cancellationToken);
+    }
 
     if (_client == null) return;
 
@@ -376,6 +455,10 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
     if (_mode == SpotifyMode.Loopback && _loopbackSource != null)
     {
       await _loopbackSource.StopAsync(cancellationToken);
+    }
+    else if (_mode == SpotifyMode.Integrated && _integratedSource != null)
+    {
+      await _integratedSource.StopAsync(cancellationToken);
     }
 
     if (_client == null) return;
@@ -778,6 +861,19 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
       _loopbackSource = null;
     }
 
+    // Dispose integrated source and manager if present
+    if (_integratedSource != null)
+    {
+      await _integratedSource.DisposeAsync();
+      _integratedSource = null;
+    }
+
+    if (_librespotManager != null)
+    {
+      await _librespotManager.DisposeAsync();
+      _librespotManager = null;
+    }
+
     if (_client != null && _currentPlayback?.Item is FullTrack track)
     {
       // Save state for next session
@@ -813,6 +909,79 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
     {
       SetDefaultMetadata("Spotify", "Spotify", _deviceName);
       await InitializeUSBCaptureAsync(_deviceName, cancellationToken);
+    }
+  }
+
+  /// <summary>
+  /// Internal helper class for capturing audio from integrated librespot process.
+  /// </summary>
+  private class SpotifyIntegratedAudioSource : PrimaryAudioSourceBase
+  {
+    private readonly LibrespotManager _manager;
+    private readonly Dictionary<string, object> _metadata = new();
+    private object? _soundComponent;
+
+    public SpotifyIntegratedAudioSource(
+      ILogger logger,
+      LibrespotManager manager)
+      : base(logger)
+    {
+      _manager = manager;
+    }
+
+    public override string Name => "Spotify (Integrated)";
+    public override AudioSourceType Type => AudioSourceType.Spotify;
+    public override TimeSpan? Duration => null; // Live stream has no duration
+    public override TimeSpan Position => TimeSpan.Zero; // Live stream position
+    public override bool IsSeekable => false; // Cannot seek live stream
+    public override IReadOnlyDictionary<string, object> Metadata => _metadata;
+
+    public override object GetSoundComponent()
+    {
+      return _soundComponent ?? throw new InvalidOperationException("Audio source not initialized");
+    }
+
+    public override async Task InitializeAsync(CancellationToken cancellationToken = default)
+    {
+      await base.InitializeAsync(cancellationToken);
+      
+      SetDefaultMetadata("Spotify", "Spotify (Integrated)", "Librespot");
+      
+      // The sound component will be created from the librespot audio data
+      // For now, use a placeholder - in a full implementation, this would be a
+      // custom SoundFlow data provider that reads from the LibrespotManager's buffer
+      _soundComponent = new object(); // Placeholder
+      
+      State = AudioSourceState.Ready;
+    }
+
+    protected override Task PlayCoreAsync(CancellationToken cancellationToken)
+    {
+      State = AudioSourceState.Playing;
+      return Task.CompletedTask;
+    }
+
+    protected override Task PauseCoreAsync(CancellationToken cancellationToken)
+    {
+      State = AudioSourceState.Paused;
+      return Task.CompletedTask;
+    }
+
+    protected override Task ResumeCoreAsync(CancellationToken cancellationToken)
+    {
+      State = AudioSourceState.Playing;
+      return Task.CompletedTask;
+    }
+
+    protected override Task StopCoreAsync(CancellationToken cancellationToken)
+    {
+      State = AudioSourceState.Stopped;
+      return Task.CompletedTask;
+    }
+
+    protected override Task SeekCoreAsync(TimeSpan position, CancellationToken cancellationToken)
+    {
+      throw new NotSupportedException("Cannot seek in integrated Spotify stream");
     }
   }
 }
