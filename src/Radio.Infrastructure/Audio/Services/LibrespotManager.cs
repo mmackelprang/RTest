@@ -419,24 +419,22 @@ public class LibrespotManager : IAsyncDisposable
       throw new InvalidOperationException("Spotify client not initialized");
     }
 
-    // The SpotifyClient handles token refresh automatically via the authenticator
-    // We can get a fresh token by making an API call
     try
     {
-      var user = await _spotifyClient.UserProfile.Current(cancellationToken);
-      // Access the internal token - this is a bit of a hack but necessary
-      // The authenticator should have refreshed the token if needed
       var secrets = _secrets.CurrentValue;
       
-      // Create a temporary client to get a fresh token
-      var authenticator = new AuthorizationCodeAuthenticator(
-        secrets.ClientID,
-        secrets.ClientSecret,
-        new AuthorizationCodeTokenResponse { RefreshToken = secrets.RefreshToken }
+      // Use the OAuthClient to refresh the token
+      var authClient = new OAuthClient();
+      var tokenResponse = await authClient.RequestToken(
+        new AuthorizationCodeRefreshRequest(
+          secrets.ClientID,
+          secrets.ClientSecret,
+          secrets.RefreshToken
+        ),
+        cancellationToken
       );
 
-      var token = await authenticator.GetToken(cancellationToken);
-      return token ?? throw new InvalidOperationException("Failed to get access token");
+      return tokenResponse.AccessToken;
     }
     catch (Exception ex)
     {

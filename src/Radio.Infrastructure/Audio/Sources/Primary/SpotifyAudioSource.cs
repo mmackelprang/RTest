@@ -945,7 +945,10 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
     {
       await base.InitializeAsync(cancellationToken);
       
-      SetDefaultMetadata("Spotify", "Spotify (Integrated)", "Librespot");
+      // Set default metadata
+      _metadata[StandardMetadataKeys.Title] = "Spotify (Integrated)";
+      _metadata[StandardMetadataKeys.Artist] = "Librespot";
+      _metadata[StandardMetadataKeys.Album] = "Spotify";
       
       // The sound component will be created from the librespot audio data
       // For now, use a placeholder - in a full implementation, this would be a
