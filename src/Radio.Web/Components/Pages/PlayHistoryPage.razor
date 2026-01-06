@@ -27,7 +27,7 @@
                    Clearable="true">
           <MudSelectItem Value="@("All")">All Sources</MudSelectItem>
           <MudSelectItem Value="@("Spotify")">Spotify</MudSelectItem>
-          <MudSelectItem Value="@("FilePlayer")">File Player</MudSelectItem>
+          <MudSelectItem Value="@("File")">File Player</MudSelectItem>
           <MudSelectItem Value="@("Radio")">Radio</MudSelectItem>
         </MudSelect>
       </MudItem>
@@ -377,7 +377,7 @@
       {
         result = await HistoryApi.GetHistoryByDateAsync(_selectedDate.Value, _pageSize, offset);
       }
-      else if (_sourceFilter != "All")
+      else if (!string.Equals(_sourceFilter, "All", StringComparison.OrdinalIgnoreCase))
       {
         result = await HistoryApi.GetHistoryBySourceAsync(_sourceFilter, _pageSize, offset);
       }

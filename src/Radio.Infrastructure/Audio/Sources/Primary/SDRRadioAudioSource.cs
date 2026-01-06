@@ -5,6 +5,7 @@ using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
+using Radio.Infrastructure.Audio.SoundFlow;
 using RTLSDRCore;
 using RTLSDRCore.Enums;
 
@@ -20,6 +21,7 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   private readonly RadioReceiver _radioReceiver;
   private readonly IOptionsMonitor<RadioOptions> _radioOptions;
   private readonly BackgroundIdentificationService? _identificationService;
+  private readonly SoundFlowPlaybackService? _playbackService;
   private readonly Dictionary<string, object> _metadata = new();
   private Frequency _frequencyStep;
   private int _deviceVolume;
@@ -27,7 +29,8 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   private ScanDirection? _scanDirection;
   private Task? _scanTask;
   private CancellationTokenSource? _scanCts;
-  private SDRAudioDataProvider? _audioProvider;
+  private BufferedSoundGenerator<float>? _soundGenerator;
+  private string? _playbackId;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="SDRRadioAudioSource"/> class.
@@ -37,17 +40,20 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// <param name="radioOptions">Radio configuration options.</param>
   /// <param name="metricsCollector">Optional metrics collector for tracking radio operations.</param>
   /// <param name="identificationService">Optional fingerprinting service for track identification.</param>
+  /// <param name="playbackService">Optional SoundFlow playback service for audio output.</param>
   public SDRRadioAudioSource(
     ILogger<SDRRadioAudioSource> logger,
     RadioReceiver radioReceiver,
     IOptionsMonitor<RadioOptions> radioOptions,
     IMetricsCollector? metricsCollector = null,
-    BackgroundIdentificationService? identificationService = null)
+    BackgroundIdentificationService? identificationService = null,
+    SoundFlowPlaybackService? playbackService = null)
     : base(logger, metricsCollector)
   {
     _radioReceiver = radioReceiver ?? throw new ArgumentNullException(nameof(radioReceiver));
     _radioOptions = radioOptions ?? throw new ArgumentNullException(nameof(radioOptions));
     _identificationService = identificationService;
+    _playbackService = playbackService;
 
     // Initialize from configuration
     var options = _radioOptions.CurrentValue;
@@ -67,6 +73,15 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
 
     // Initialize metadata
     SetDefaultMetadata();
+  }
+
+  /// <summary>
+  /// Handles audio data events from the RTL-SDR receiver.
+  /// Delegates samples to the buffered sound generator.
+  /// </summary>
+  private void OnAudioDataAvailable(object? sender, AudioDataEventArgs e)
+  {
+    _soundGenerator?.AddSamples(e.Samples);
   }
 
   #region IAudioSource Properties
@@ -92,13 +107,11 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// <inheritdoc/>
   public override object GetSoundComponent()
   {
-    // Return the SoundFlow audio data provider for SDR audio output
-    // This is wired up to the AudioDataAvailable event from RadioReceiver
-    if (_audioProvider == null)
-    {
-      _audioProvider = new SDRAudioDataProvider(_radioReceiver, Logger);
-    }
-    return _audioProvider;
+    // Return the SDR sound generator for SoundFlow integration
+    // This directly generates audio samples from RTLSDRCore's push-based audio
+    // Note: The generator is created in PlayCoreAsync when we have access to the audio engine
+    return _soundGenerator ?? throw new InvalidOperationException(
+      "SDR sound generator not initialized. Call PlayAsync first.");
   }
 
   #endregion
@@ -617,8 +630,52 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// <inheritdoc/>
   protected override async Task PlayCoreAsync(CancellationToken cancellationToken = default)
   {
-    // Playback is handled by RadioReceiver startup
+    // Start the RTL-SDR receiver first
     await StartupAsync(cancellationToken);
+
+    // Generate a playback ID for this session
+    _playbackId = $"sdr-radio-{Guid.NewGuid():N}";
+
+    // Use SoundFlow playback service to route audio to output
+    if (_playbackService != null)
+    {
+      var engine = _playbackService.GetUnderlyingEngine();
+      if (engine == null)
+      {
+        Logger.LogError("SoundFlow audio engine not available - SDR audio output will not work");
+        return;
+      }
+
+      var format = _playbackService.GetAudioFormat();
+
+      // Create the sound generator with proper engine and format context
+      if (_soundGenerator == null)
+      {
+        _soundGenerator = new BufferedSoundGenerator<float>(engine, format, Logger);
+        _radioReceiver.AudioDataAvailable += OnAudioDataAvailable;
+      }
+
+      // Use PlayComponentAsync for raw PCM audio (not PlayStreamAsync which expects encoded audio)
+      var success = await _playbackService.PlayComponentAsync(
+        _playbackId,
+        _soundGenerator,
+        Volume,
+        cancellationToken);
+
+      if (!success)
+      {
+        Logger.LogError("Failed to start SoundFlow playback for SDR radio");
+        // Continue anyway - radio is still receiving, just no audio output via SoundFlow
+      }
+      else
+      {
+        Logger.LogInformation("SDR audio routed through SoundFlow playback service via BufferedSoundGenerator");
+      }
+    }
+    else
+    {
+      Logger.LogWarning("SoundFlowPlaybackService not available - SDR audio output may not work");
+    }
   }
 
   /// <inheritdoc/>
@@ -638,18 +695,27 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   }
 
   /// <inheritdoc/>
-  protected override Task StopCoreAsync(CancellationToken cancellationToken = default)
+  protected override async Task StopCoreAsync(CancellationToken cancellationToken = default)
   {
-    return ShutdownAsync(cancellationToken);
+    // Stop SoundFlow playback first
+    if (_playbackService != null && _playbackId != null)
+    {
+      await _playbackService.StopAsync(_playbackId, cancellationToken);
+      _playbackId = null;
+    }
+
+    // Then shutdown the radio receiver
+    await ShutdownAsync(cancellationToken);
   }
 
   /// <inheritdoc/>
-  protected override ValueTask DisposeAsyncCore()
+  protected override async ValueTask DisposeAsyncCore()
   {
     // Unsubscribe from RTLSDRCore events
     _radioReceiver.FrequencyChanged -= OnRTLSDRFrequencyChanged;
     _radioReceiver.SignalStrengthUpdated -= OnRTLSDRSignalStrengthUpdated;
     _radioReceiver.StateChanged -= OnRTLSDRStateChanged;
+    _radioReceiver.AudioDataAvailable -= OnAudioDataAvailable;
 
     // Unsubscribe from fingerprinting events
     if (_identificationService != null)
@@ -657,13 +723,22 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
       _identificationService.TrackIdentified -= OnTrackIdentified;
     }
 
-    // Dispose audio provider
-    _audioProvider?.Dispose();
+    // Stop SoundFlow playback (this will also dispose the component)
+    if (_playbackService != null && _playbackId != null)
+    {
+      await _playbackService.StopAsync(_playbackId);
+      _playbackId = null;
+      _soundGenerator = null; // Disposed by StopAsync
+    }
+    else
+    {
+      // Manually dispose if not managed by playback service
+      _soundGenerator?.Dispose();
+      _soundGenerator = null;
+    }
 
     // Clean up scan resources
     _scanCts?.Dispose();
-
-    return ValueTask.CompletedTask;
   }
 
   #endregion

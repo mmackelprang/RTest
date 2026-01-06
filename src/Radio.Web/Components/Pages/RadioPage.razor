@@ -28,10 +28,23 @@
         </MudText>
         
         <!-- Band and Info -->
-        <div style="display: flex; justify-content: center; gap: 32px; margin-bottom: 16px;">
-          <MudText Typo="Typo.h5" Style="color: oklch(0.7 0.15 195);">
-            @_radioState.Band
-          </MudText>
+        <div style="display: flex; justify-content: center; gap: 32px; margin-bottom: 16px; align-items: center;">
+          @if (_availableBands.Any())
+          {
+             <MudSelect T="string" Value="@_radioState.Band" ValueChanged="@(async (string b) => await HandleBandChangeAsync(b))" Label="Band" Variant="Variant.Outlined" Margin="Margin.Dense" Style="color: oklch(0.7 0.15 195); width: 200px;">
+                @foreach (var band in _availableBands)
+                {
+                    <MudSelectItem Value="@band.Type">@band.Name</MudSelectItem>
+                }
+            </MudSelect>
+          }
+          else
+          {
+            <MudText Typo="Typo.h5" Style="color: oklch(0.7 0.15 195);">
+              @_radioState.Band
+            </MudText>
+          }
+
           @if (_radioState.SignalStrength.HasValue)
           {
             <MudText Typo="Typo.h5" Style="color: oklch(0.7 0.15 195);">
@@ -259,6 +272,7 @@
 @code {
   private RadioStateDto? _radioState = null;
   private List<RadioPresetDto>? _presets = null;
+  private IEnumerable<Radio.Core.Models.RadioBandModel> _availableBands = Enumerable.Empty<Radio.Core.Models.RadioBandModel>();
   
   // Frequency dialog
   private bool _isFrequencyDialogOpen = false;
@@ -274,12 +288,25 @@
     await LoadPreferencesAsync();
     await LoadRadioStateAsync();
     await LoadPresetsAsync();
+    await LoadBandsAsync();
     
     // Subscribe to SignalR radio state changes
     HubService.RadioStateChanged += HandleRadioStateChanged;
     await HubService.StartAsync();
   }
   
+  private async Task LoadBandsAsync()
+  {
+    try
+    {
+      _availableBands = await RadioApi.GetBandsAsync();
+    }
+    catch (Exception)
+    {
+      // Silently fail
+    }
+  }
+
   private async Task LoadPreferencesAsync()
   {
     try
@@ -546,6 +573,14 @@
   private double GetMinFrequency()
   {
     if (_radioState == null) return 0;
+    
+    var band = _availableBands.FirstOrDefault(b => b.Type == _radioState.Band);
+    if (band != null)
+    {
+        if (band.Type == "AM") return band.MinFrequencyHz / 1000.0;
+        return band.MinFrequencyHz / 1000000.0;
+    }
+
     return _radioState.Band switch
     {
       "AM" => 520,         // AM: 520-1710 kHz (Medium Wave)
@@ -561,6 +596,14 @@
   private double GetMaxFrequency()
   {
     if (_radioState == null) return 1000;
+
+    var band = _availableBands.FirstOrDefault(b => b.Type == _radioState.Band);
+    if (band != null)
+    {
+        if (band.Type == "AM") return band.MaxFrequencyHz / 1000.0;
+        return band.MaxFrequencyHz / 1000000.0;
+    }
+
     return _radioState.Band switch
     {
       "AM" => 1710,        // AM: 520-1710 kHz (Medium Wave)

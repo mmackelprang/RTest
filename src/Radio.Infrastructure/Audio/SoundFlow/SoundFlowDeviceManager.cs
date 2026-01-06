@@ -1,6 +1,10 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Radio.Core.Configuration;
 using Radio.Core.Exceptions;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Configuration.Abstractions;
+using Radio.Infrastructure.Configuration.Models;
 using SoundFlow.Backends.MiniAudio;
 
 namespace Radio.Infrastructure.Audio.SoundFlow;
@@ -12,6 +16,8 @@ namespace Radio.Infrastructure.Audio.SoundFlow;
 public class SoundFlowDeviceManager : IAudioDeviceManager
 {
   private readonly ILogger<SoundFlowDeviceManager> _logger;
+  private readonly IConfigurationManager _configurationManager;
+  private readonly IOptionsMonitor<AudioPreferences> _audioPreferences;
   private readonly Dictionary<string, string> _usbPortReservations = new();
   private readonly object _reservationLock = new();
   private readonly object _devicesLock = new();
@@ -27,14 +33,37 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
   /// Initializes a new instance of the <see cref="SoundFlowDeviceManager"/> class.
   /// </summary>
   /// <param name="logger">The logger instance.</param>
-  public SoundFlowDeviceManager(ILogger<SoundFlowDeviceManager> logger)
+  /// <param name="configurationManager">The configuration manager.</param>
+  /// <param name="audioPreferences">The audio preferences.</param>
+  public SoundFlowDeviceManager(
+    ILogger<SoundFlowDeviceManager> logger,
+    IConfigurationManager configurationManager,
+    IOptionsMonitor<AudioPreferences> audioPreferences)
   {
     _logger = logger;
+    _configurationManager = configurationManager;
+    _audioPreferences = audioPreferences;
 
     // Initialize device cache immediately
     var (outputDevices, inputDevices) = EnumerateDevices();
     _cachedOutputDevices = outputDevices;
     _cachedInputDevices = inputDevices;
+
+    // Restore selected output device from preferences
+    var savedOutput = _audioPreferences.CurrentValue.CurrentOutput;
+    if (!string.IsNullOrEmpty(savedOutput))
+    {
+      var device = _cachedOutputDevices.Find(d => d.Id == savedOutput);
+      if (device != null)
+      {
+        _selectedOutputDeviceId = savedOutput;
+        _logger.LogInformation("Restored saved output device: {DeviceId}", savedOutput);
+      }
+      else
+      {
+        _logger.LogWarning("Saved output device {DeviceId} not found", savedOutput);
+      }
+    }
 
     _logger.LogInformation(
       "SoundFlowDeviceManager initialized with {OutputCount} output and {InputCount} input devices",
@@ -75,7 +104,7 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
   }
 
   /// <inheritdoc/>
-  public Task SetOutputDeviceAsync(string deviceId, CancellationToken cancellationToken = default)
+  public async Task SetOutputDeviceAsync(string deviceId, CancellationToken cancellationToken = default)
   {
     ArgumentException.ThrowIfNullOrEmpty(deviceId);
 
@@ -92,7 +121,20 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
         device.Id, device.Name);
     }
 
-    return Task.CompletedTask;
+    // Persist the selection
+    try
+    {
+      var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+      await _configurationManager.SetValueAsync(
+        storeId,
+        "AudioPreferences:CurrentOutput",
+        deviceId,
+        cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to persist output device selection: {DeviceId}", deviceId);
+    }
   }
 
   /// <inheritdoc/>

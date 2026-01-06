@@ -174,7 +174,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
     {
       Id = Guid.NewGuid().ToString(),
       TrackMetadataId = result?.Metadata?.Id,
-      FingerprintId = fingerprint.Id,
+      FingerprintId = result?.FingerprintId ?? fingerprint.Id,
       PlayedAt = DateTime.UtcNow,
       Source = audioTap.SourceType,
       SourceDetails = audioTap.SourceName,

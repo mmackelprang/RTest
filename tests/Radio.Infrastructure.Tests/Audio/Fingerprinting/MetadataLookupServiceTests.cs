@@ -71,22 +71,35 @@ public class MetadataLookupServiceTests
     Assert.Equal(cachedMetadata, result.Metadata);
 
     _cacheMock.Verify(c => c.UpdateLastMatchedAsync(cached.Id, It.IsAny<CancellationToken>()), Times.Once);
+    Assert.Equal(cached.Id, result.FingerprintId);
   }
 
   [Fact]
-  public async Task LookupAsync_WithNoCache_NoApiKey_StoresAndReturnsNull()
+  public async Task LookupAsync_WithNoCache_NoApiKey_StoresAndReturnsNoMatch()
   {
     // Arrange
     var fingerprint = CreateTestFingerprint();
+    var storedFingerprint = new CachedFingerprint 
+    { 
+      Id = "stored-id",
+      ChromaprintHash = fingerprint.ChromaprintHash,
+      DurationSeconds = fingerprint.DurationSeconds,
+      CreatedAt = DateTime.UtcNow
+    };
 
     _cacheMock.Setup(c => c.FindByHashAsync(fingerprint.ChromaprintHash, It.IsAny<CancellationToken>()))
       .ReturnsAsync((CachedFingerprint?)null);
+    
+    _cacheMock.Setup(c => c.StoreAsync(fingerprint, null, It.IsAny<CancellationToken>()))
+      .ReturnsAsync(storedFingerprint);
 
     // Act
     var result = await _service.LookupAsync(fingerprint);
 
     // Assert
-    Assert.Null(result);
+    Assert.NotNull(result);
+    Assert.False(result.IsMatch);
+    Assert.Equal("stored-id", result.FingerprintId);
     _cacheMock.Verify(c => c.StoreAsync(fingerprint, null, It.IsAny<CancellationToken>()), Times.Once);
   }
 
@@ -111,15 +124,27 @@ public class MetadataLookupServiceTests
       CreatedAt = DateTime.UtcNow,
       Metadata = null // No metadata
     };
+    var storedFingerprint = new CachedFingerprint 
+    { 
+      Id = "stored-id",
+      ChromaprintHash = fingerprint.ChromaprintHash,
+      DurationSeconds = fingerprint.DurationSeconds,
+      CreatedAt = DateTime.UtcNow
+    };
 
     _cacheMock.Setup(c => c.FindByHashAsync(fingerprint.ChromaprintHash, It.IsAny<CancellationToken>()))
       .ReturnsAsync(cached);
+      
+    _cacheMock.Setup(c => c.StoreAsync(fingerprint, null, It.IsAny<CancellationToken>()))
+      .ReturnsAsync(storedFingerprint);
 
     // Act
     var result = await _service.LookupAsync(fingerprint);
 
     // Assert
-    Assert.Null(result);
+    Assert.NotNull(result);
+    Assert.False(result.IsMatch);
+    Assert.Equal("stored-id", result.FingerprintId);
     _cacheMock.Verify(c => c.StoreAsync(fingerprint, null, It.IsAny<CancellationToken>()), Times.Once);
   }
 

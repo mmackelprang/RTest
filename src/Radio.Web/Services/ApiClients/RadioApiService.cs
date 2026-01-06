@@ -18,6 +18,19 @@ public class RadioApiService
     _logger = logger;
   }
 
+  public async Task<IEnumerable<Radio.Core.Models.RadioBandModel>> GetBandsAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      return await _httpClient.GetFromJsonAsync<IEnumerable<Radio.Core.Models.RadioBandModel>>("/api/RadioBands", cancellationToken) ?? Enumerable.Empty<Radio.Core.Models.RadioBandModel>();
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to get radio bands");
+      return Enumerable.Empty<Radio.Core.Models.RadioBandModel>();
+    }
+  }
+
   public async Task<RadioStateDto?> GetStateAsync(CancellationToken cancellationToken = default)
   {
     try

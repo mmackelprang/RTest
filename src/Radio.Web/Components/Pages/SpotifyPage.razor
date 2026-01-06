@@ -353,6 +353,11 @@
         if (prefs.TryGetValue("filters", out var filtersObj) && filtersObj != null)
         {
           var filtersStr = filtersObj.ToString();
+          if (filtersObj is System.Text.Json.JsonElement fElement && fElement.ValueKind == System.Text.Json.JsonValueKind.String)
+          {
+             filtersStr = fElement.GetString();
+          }
+
           if (!string.IsNullOrEmpty(filtersStr))
           {
             _selectedFilters = filtersStr.Split(',').ToList();
@@ -363,6 +368,11 @@
         if (prefs.TryGetValue("lastSearchQuery", out var queryObj) && queryObj != null)
         {
           var query = queryObj.ToString();
+          if (queryObj is System.Text.Json.JsonElement qElement && qElement.ValueKind == System.Text.Json.JsonValueKind.String)
+          {
+             query = qElement.GetString();
+          }
+          
           if (!string.IsNullOrEmpty(query))
           {
             _searchQuery = query;
@@ -375,6 +385,11 @@
           try
           {
             var resultsJson = resultsObj.ToString();
+            if (resultsObj is System.Text.Json.JsonElement rElement && rElement.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+               resultsJson = rElement.GetString();
+            }
+
             if (!string.IsNullOrEmpty(resultsJson))
             {
               _searchResults = System.Text.Json.JsonSerializer.Deserialize<SpotifySearchResultsDto>(resultsJson, new System.Text.Json.JsonSerializerOptions

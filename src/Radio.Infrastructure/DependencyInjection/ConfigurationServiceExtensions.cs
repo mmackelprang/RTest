@@ -80,4 +80,17 @@ public static class ConfigurationServiceExtensions
   {
     return services.AddManagedConfiguration(configuration, useSqliteSecrets: true);
   }
+
+  /// <summary>
+  /// Adds secret resolution for the specified options type.
+  /// </summary>
+  /// <typeparam name="TOptions">The options type.</typeparam>
+  /// <param name="services">The service collection.</param>
+  /// <returns>The service collection for chaining.</returns>
+  public static IServiceCollection AddSecretResolution<TOptions>(this IServiceCollection services)
+    where TOptions : class
+  {
+    services.ConfigureOptions<Radio.Infrastructure.Configuration.Options.SecretResolvingPostConfigureOptions<TOptions>>();
+    return services;
+  }
 }

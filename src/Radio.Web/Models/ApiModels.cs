@@ -264,12 +264,27 @@ public record SpotifyAuthStatusDto(
   DateTime? ExpiresAt
 );
 
-public record SpotifySearchResultsDto(
-  List<SpotifyTrackDto>? Tracks,
-  List<SpotifyAlbumDto>? Albums,
-  List<SpotifyArtistDto>? Artists,
-  List<SpotifyPlaylistDto>? Playlists
-);
+public class SpotifySearchResultsDto
+{
+    public List<SpotifyTrackDto>? Tracks { get; set; }
+    public List<SpotifyAlbumDto>? Albums { get; set; }
+    public List<SpotifyArtistDto>? Artists { get; set; }
+    public List<SpotifyPlaylistDto>? Playlists { get; set; }
+
+    public SpotifySearchResultsDto() { }
+
+    public SpotifySearchResultsDto(
+        List<SpotifyTrackDto>? tracks,
+        List<SpotifyAlbumDto>? albums,
+        List<SpotifyArtistDto>? artists,
+        List<SpotifyPlaylistDto>? playlists)
+    {
+        Tracks = tracks;
+        Albums = albums;
+        Artists = artists;
+        Playlists = playlists;
+    }
+}
 
 public record SpotifyTrackDto(
   string Id,

@@ -61,6 +61,7 @@ public sealed class MetadataLookupService : IMetadataLookupService
       {
         IsMatch = true,
         Confidence = 1.0,
+        FingerprintId = cached.Id,
         Metadata = cached.Metadata,
         Source = LookupSource.Cache
       };
@@ -70,16 +71,28 @@ public sealed class MetadataLookupService : IMetadataLookupService
     if (string.IsNullOrEmpty(_options.AcoustId.ApiKey))
     {
       _logger.LogDebug("No AcoustID API key configured, storing fingerprint for manual tagging");
-      await _cache.StoreAsync(fingerprint, null, ct);
-      return null;
+      var stored = await _cache.StoreAsync(fingerprint, null, ct);
+      return new MetadataLookupResult
+      {
+        IsMatch = false,
+        Confidence = 0.0,
+        FingerprintId = stored.Id,
+        Source = LookupSource.Manual
+      };
     }
 
     // Step 3: Query AcoustID API
     if (_acoustIdClient == null)
     {
       _logger.LogWarning("AcoustID client not available, storing fingerprint for manual tagging");
-      await _cache.StoreAsync(fingerprint, null, ct);
-      return null;
+      var stored = await _cache.StoreAsync(fingerprint, null, ct);
+      return new MetadataLookupResult
+      {
+        IsMatch = false,
+        Confidence = 0.0,
+        FingerprintId = stored.Id,
+        Source = LookupSource.Manual
+      };
     }
 
     _logger.LogDebug("Querying AcoustID for fingerprint {Id}", fingerprint.Id);
@@ -91,8 +104,14 @@ public sealed class MetadataLookupService : IMetadataLookupService
     if (acoustIdResult == null || acoustIdResult.Recordings.Count == 0)
     {
       _logger.LogDebug("No AcoustID match found, storing fingerprint for manual tagging");
-      await _cache.StoreAsync(fingerprint, null, ct);
-      return null;
+      var stored = await _cache.StoreAsync(fingerprint, null, ct);
+      return new MetadataLookupResult
+      {
+        IsMatch = false,
+        Confidence = 0.0,
+        FingerprintId = stored.Id,
+        Source = LookupSource.Manual
+      };
     }
 
     // Get the best recording match
@@ -100,8 +119,14 @@ public sealed class MetadataLookupService : IMetadataLookupService
     if (bestRecording == null)
     {
       _logger.LogDebug("No recordings in AcoustID result");
-      await _cache.StoreAsync(fingerprint, null, ct);
-      return null;
+      var stored = await _cache.StoreAsync(fingerprint, null, ct);
+      return new MetadataLookupResult
+      {
+        IsMatch = false,
+        Confidence = 0.0,
+        FingerprintId = stored.Id,
+        Source = LookupSource.Manual
+      };
     }
 
     // Create track metadata from AcoustID result
@@ -122,7 +147,7 @@ public sealed class MetadataLookupService : IMetadataLookupService
       trackMetadata.Title, trackMetadata.Artist, acoustIdResult.Score);
 
     // Store the fingerprint with metadata
-    await _cache.StoreAsync(fingerprint, trackMetadata, ct);
+    var storedWithMeta = await _cache.StoreAsync(fingerprint, trackMetadata, ct);
 
     // Also store the track metadata in the repository
     await _metadataRepo.StoreAsync(trackMetadata, ct);
@@ -131,8 +156,11 @@ public sealed class MetadataLookupService : IMetadataLookupService
     {
       IsMatch = true,
       Confidence = acoustIdResult.Score,
+      FingerprintId = storedWithMeta.Id,
       Metadata = trackMetadata,
-      Source = LookupSource.AcoustID
+      Source = LookupSource.AcoustID,
+      AcoustId = acoustIdResult.Id,
+      MusicBrainzRecordingId = bestRecording.Id
     };
   }
 

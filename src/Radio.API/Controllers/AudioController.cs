@@ -144,7 +144,7 @@ public class AudioController : ControllerBase
       // Handle playback actions
       var primarySource = _audioEngine.GetActivePrimaryAudioSource();
 
-      switch (request.Action)
+      switch (request.Action ?? PlaybackAction.None)
       {
         case PlaybackAction.Play:
           if (primarySource is IPrimaryAudioSource playSource)
@@ -319,16 +319,20 @@ public class AudioController : ControllerBase
 
       if (primarySource is not IPrimaryAudioSource primary)
       {
+        _logger.LogWarning("Next track failed: No primary audio source is active. Active sources: {Sources}", 
+            string.Join(", ", _audioEngine.GetMasterMixer().GetActiveSources().Select(s => s.Name)));
         return BadRequest(new { error = "No primary audio source is active" });
       }
 
       if (!primary.SupportsNext)
       {
+        _logger.LogWarning("Next track failed: Active source {SourceName} ({SourceType}) does not support next track navigation", 
+            primary.Name, primary.Type);
         return BadRequest(new { error = "The active source does not support next track navigation" });
       }
 
       await primary.NextAsync();
-      _logger.LogInformation("Skipped to next track");
+      _logger.LogInformation("Skipped to next track on source {SourceName}", primary.Name);
 
       return GetPlaybackState();
     }
@@ -353,16 +357,18 @@ public class AudioController : ControllerBase
 
       if (primarySource is not IPrimaryAudioSource primary)
       {
+        _logger.LogWarning("Previous track failed: No primary audio source is active");
         return BadRequest(new { error = "No primary audio source is active" });
       }
 
       if (!primary.SupportsPrevious)
       {
+        _logger.LogWarning("Previous track failed: Active source {SourceName} does not support previous track", primary.Name);
         return BadRequest(new { error = "The active source does not support previous track navigation" });
       }
 
       await primary.PreviousAsync();
-      _logger.LogInformation("Went to previous track");
+      _logger.LogInformation("Went to previous track on source {SourceName}", primary.Name);
 
       return GetPlaybackState();
     }

@@ -7,7 +7,12 @@ using Radio.API.Streaming;
 using Radio.Infrastructure.DependencyInjection;
 using Serilog;
 
+
 var builder = WebApplication.CreateBuilder(args);
+
+// Add custom configuration source (config.json) which is managed by ConfigurationManager
+// This ensures that persistent settings saved by the app are loaded and reloaded on change
+builder.Configuration.AddJsonFile("config.json", optional: true, reloadOnChange: true);
 
 // Configure Serilog
 Log.Logger = new LoggerConfiguration()
@@ -17,7 +22,11 @@ Log.Logger = new LoggerConfiguration()
 builder.Host.UseSerilog();
 
 // Add services to the container.
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+    });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -64,23 +73,12 @@ builder.Services.AddCors(options =>
 // Add SignalR
 builder.Services.AddSignalR();
 
-// Add Metrics services
-builder.Services.AddMetrics(builder.Configuration);
-
-// Add Audio Infrastructure services
-builder.Services.AddSoundFlowAudio(builder.Configuration);
-
-// NOTE: RadioProtocol.Core has been removed and replaced by RTLSDRCore integration.
-// The AddRadioHardware method is no longer needed. See TASK_4_2_SUMMARY.md for details.
-
-// Add Fingerprinting services (for play history)
-builder.Services.AddFingerprinting(builder.Configuration);
-
-// Add Configuration Infrastructure services
 builder.Services.AddManagedConfiguration(builder.Configuration);
-
-// Add External Services (Spotify authentication, etc.)
+builder.Services.AddMetrics(builder.Configuration);
+builder.Services.AddFingerprinting(builder.Configuration);
+builder.Services.AddSoundFlowAudio(builder.Configuration);
 builder.Services.AddSpotifyServices();
+builder.Services.AddRadioServices();
 
 // Add the audio engine initialization service (must run first)
 builder.Services.AddHostedService<AudioEngineInitializationService>();
@@ -90,6 +88,10 @@ builder.Services.AddHostedService<VisualizationBroadcastService>();
 
 // Add the audio state update background service
 builder.Services.AddHostedService<AudioStateUpdateService>();
+
+builder.Services.PostConfigure<Microsoft.Extensions.Hosting.HostOptions>(_ => { });
+
+
 
 var app = builder.Build();
 

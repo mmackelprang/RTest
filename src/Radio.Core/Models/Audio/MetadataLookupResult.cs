@@ -11,6 +11,9 @@ public sealed record MetadataLookupResult
   /// <summary>Gets the confidence level of the match (0.0 to 1.0).</summary>
   public required double Confidence { get; init; }
 
+  /// <summary>Gets the ID of the fingerprint in the database.</summary>
+  public required string FingerprintId { get; init; }
+
   /// <summary>Gets the AcoustID identifier (optional).</summary>
   public string? AcoustId { get; init; }
 

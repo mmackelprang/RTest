@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces.Audio;
+using SoundFlow.Abstracts;
 using SoundFlow.Components;
 using SoundFlow.Enums;
 using SoundFlow.Interfaces;
@@ -18,6 +19,7 @@ public class SoundFlowPlaybackService : IDisposable
   private readonly SoundFlowAudioEngine _audioEngine;
   private readonly IVisualizerService? _visualizerService;
   private readonly Dictionary<string, SoundPlayer> _activePlayers = new();
+  private readonly Dictionary<string, SoundComponent> _activeComponents = new();
   private readonly Dictionary<string, VisualizationTapModifier> _visualizationTaps = new();
   private readonly object _playersLock = new();
   private bool _disposed;
@@ -39,6 +41,18 @@ public class SoundFlowPlaybackService : IDisposable
       _logger.LogInformation("SoundFlowPlaybackService initialized with visualization tap support");
     }
   }
+
+  /// <summary>
+  /// Gets the underlying SoundFlow audio engine.
+  /// Use this when creating custom SoundComponents that need engine context.
+  /// </summary>
+  public AudioEngine? GetUnderlyingEngine() => _audioEngine.GetUnderlyingEngine();
+
+  /// <summary>
+  /// Gets the audio format used by the playback service.
+  /// Use this when creating custom SoundComponents that need format information.
+  /// </summary>
+  public AudioFormat GetAudioFormat() => _audioEngine.GetAudioFormat();
 
   /// <summary>
   /// Plays an audio file through SoundFlow.
@@ -375,6 +389,60 @@ public class SoundFlowPlaybackService : IDisposable
   }
 
   /// <summary>
+  /// Plays audio from a SoundComponent directly through SoundFlow.
+  /// Use this for custom audio generators like SDR radio that provide raw PCM samples.
+  /// </summary>
+  /// <param name="sourceId">Unique identifier for this playback.</param>
+  /// <param name="component">The SoundComponent that generates audio.</param>
+  /// <param name="volume">Volume level (0.0 to 1.0).</param>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <returns>True if playback started successfully.</returns>
+  public async Task<bool> PlayComponentAsync(
+    string sourceId,
+    SoundComponent component,
+    float volume = 1.0f,
+    CancellationToken cancellationToken = default)
+  {
+    ThrowIfDisposed();
+
+    var playbackDevice = _audioEngine.GetPlaybackDevice();
+
+    if (playbackDevice == null)
+    {
+      _logger.LogWarning("Playback device not initialized");
+      return false;
+    }
+
+    try
+    {
+      // Stop any existing playback for this source
+      await StopAsync(sourceId, cancellationToken);
+
+      _logger.LogDebug("Starting component playback for source {SourceId}", sourceId);
+
+      // Set volume on the component
+      component.Volume = volume;
+
+      // Add to the playback device's mixer
+      playbackDevice.MasterMixer.AddComponent(component);
+
+      // Track the component
+      lock (_playersLock)
+      {
+        _activeComponents[sourceId] = component;
+      }
+
+      _logger.LogInformation("Started component playback for source {SourceId}", sourceId);
+      return true;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to start component playback for source {SourceId}", sourceId);
+      return false;
+    }
+  }
+
+  /// <summary>
   /// Stops playback for a specific source.
   /// </summary>
   /// <param name="sourceId">The source identifier.</param>
@@ -384,6 +452,7 @@ public class SoundFlowPlaybackService : IDisposable
     ThrowIfDisposed();
 
     SoundPlayer? player = null;
+    SoundComponent? component = null;
     VisualizationTapModifier? tapModifier = null;
     lock (_playersLock)
     {
@@ -391,11 +460,17 @@ public class SoundFlowPlaybackService : IDisposable
       {
         _activePlayers.Remove(sourceId);
       }
+      if (_activeComponents.TryGetValue(sourceId, out component))
+      {
+        _activeComponents.Remove(sourceId);
+      }
       if (_visualizationTaps.TryGetValue(sourceId, out tapModifier))
       {
         _visualizationTaps.Remove(sourceId);
       }
     }
+
+    var playbackDevice = _audioEngine.GetPlaybackDevice();
 
     if (player != null)
     {
@@ -405,16 +480,27 @@ public class SoundFlowPlaybackService : IDisposable
         tapModifier?.Flush();
 
         player.Stop();
-
-        var playbackDevice = _audioEngine.GetPlaybackDevice();
         playbackDevice?.MasterMixer.RemoveComponent(player);
-
         player.Dispose();
-        _logger.LogDebug("Stopped playback for source {SourceId}", sourceId);
+        _logger.LogDebug("Stopped player playback for source {SourceId}", sourceId);
       }
       catch (Exception ex)
       {
-        _logger.LogWarning(ex, "Error stopping playback for source {SourceId}", sourceId);
+        _logger.LogWarning(ex, "Error stopping player playback for source {SourceId}", sourceId);
+      }
+    }
+
+    if (component != null)
+    {
+      try
+      {
+        playbackDevice?.MasterMixer.RemoveComponent(component);
+        component.Dispose();
+        _logger.LogDebug("Stopped component playback for source {SourceId}", sourceId);
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Error stopping component playback for source {SourceId}", sourceId);
       }
     }
 
@@ -521,7 +607,7 @@ public class SoundFlowPlaybackService : IDisposable
     List<string> sourceIds;
     lock (_playersLock)
     {
-      sourceIds = _activePlayers.Keys.ToList();
+      sourceIds = _activePlayers.Keys.Concat(_activeComponents.Keys).Distinct().ToList();
     }
 
     foreach (var sourceId in sourceIds)
@@ -570,6 +656,19 @@ public class SoundFlowPlaybackService : IDisposable
         }
       }
       _activePlayers.Clear();
+
+      foreach (var component in _activeComponents.Values)
+      {
+        try
+        {
+          component.Dispose();
+        }
+        catch
+        {
+          // Ignore disposal errors
+        }
+      }
+      _activeComponents.Clear();
     }
 
     _disposed = true;

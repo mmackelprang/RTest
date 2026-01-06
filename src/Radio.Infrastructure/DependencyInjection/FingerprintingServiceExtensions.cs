@@ -26,6 +26,7 @@ public static class FingerprintingServiceExtensions
     // Bind configuration
     services.Configure<FingerprintingOptions>(
       configuration.GetSection(FingerprintingOptions.SectionName));
+    services.AddSecretResolution<FingerprintingOptions>();
 
     // Register database context as singleton (manages connection)
     services.AddSingleton<FingerprintDbContext>();
@@ -38,7 +39,7 @@ public static class FingerprintingServiceExtensions
     services.AddScoped<IAudioFileRepository, SqliteAudioFileRepository>();
 
     // Register fingerprint service
-    services.AddSingleton<IFingerprintService, MockFingerprintService>();
+    services.AddSingleton<IFingerprintService, ChromaprintFingerprintService>();
 
     // Register radio preset service (scoped to match repository)
     services.AddScoped<IRadioPresetService, RadioPresetService>();

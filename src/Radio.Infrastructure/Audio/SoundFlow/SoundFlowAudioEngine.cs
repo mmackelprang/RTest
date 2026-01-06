@@ -28,6 +28,7 @@ public class SoundFlowAudioEngine : IAudioEngine
   private AudioPlaybackDevice? _playbackDevice;
   private AudioFormat _audioFormat;
   private TappedOutputStream? _outputTap;
+  private FingerprintTapModifier? _fingerprintTap;
   private Timer? _hotPlugTimer;
   private AudioEngineState _state = AudioEngineState.Uninitialized;
   private bool _disposed;
@@ -145,6 +146,9 @@ public class SoundFlowAudioEngine : IAudioEngine
           _playbackDevice = _engine.InitializePlaybackDevice(deviceInfo, _audioFormat);
           _playbackDevice.Start();
           _logger.LogInformation("Playback device initialized and started: {DeviceName}", deviceInfo.Name);
+
+          // Add fingerprint tap modifier to capture mixed audio for fingerprinting/streaming
+          // This must be done AFTER output tap is created, so we defer it
         }
         catch (Exception ex)
         {
@@ -161,6 +165,14 @@ public class SoundFlowAudioEngine : IAudioEngine
         _options.SampleRate,
         _options.Channels,
         _options.OutputBufferSizeSeconds);
+
+      // Add fingerprint tap modifier to capture mixed audio for fingerprinting/streaming
+      if (_playbackDevice != null)
+      {
+        _fingerprintTap = new FingerprintTapModifier(this, _logger);
+        _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
+        _logger.LogInformation("Fingerprint tap modifier added to MasterMixer");
+      }
 
       // Refresh device list
       await _deviceManager.RefreshDevicesAsync(cancellationToken);
@@ -450,6 +462,13 @@ public class SoundFlowAudioEngine : IAudioEngine
 
     // Clear sources
     _masterMixer.ClearSources();
+
+    // Flush and cleanup fingerprint tap
+    if (_fingerprintTap != null)
+    {
+      _fingerprintTap.Flush();
+      _fingerprintTap = null;
+    }
 
     // Stop and dispose playback device
     if (_playbackDevice != null)

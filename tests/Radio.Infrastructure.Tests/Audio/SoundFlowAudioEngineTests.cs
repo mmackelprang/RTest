@@ -4,6 +4,8 @@ using Moq;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.SoundFlow;
+using Radio.Infrastructure.Configuration.Abstractions;
+using Radio.Infrastructure.Configuration.Models;
 
 namespace Radio.Infrastructure.Tests.Audio;
 
@@ -16,6 +18,8 @@ public class SoundFlowAudioEngineTests
   private readonly Mock<ILogger<SoundFlowMasterMixer>> _mixerLoggerMock;
   private readonly Mock<ILogger<SoundFlowDeviceManager>> _deviceManagerLoggerMock;
   private readonly Mock<IOptions<AudioEngineOptions>> _optionsMock;
+  private readonly Mock<IConfigurationManager> _configManagerMock;
+  private readonly Mock<IOptionsMonitor<AudioPreferences>> _audioPreferencesMock;
   private readonly AudioEngineOptions _options;
   private readonly SoundFlowMasterMixer _masterMixer;
   private readonly SoundFlowDeviceManager _deviceManager;
@@ -25,6 +29,10 @@ public class SoundFlowAudioEngineTests
     _engineLoggerMock = new Mock<ILogger<SoundFlowAudioEngine>>();
     _mixerLoggerMock = new Mock<ILogger<SoundFlowMasterMixer>>();
     _deviceManagerLoggerMock = new Mock<ILogger<SoundFlowDeviceManager>>();
+    _configManagerMock = new Mock<IConfigurationManager>();
+    _audioPreferencesMock = new Mock<IOptionsMonitor<AudioPreferences>>();
+
+    _audioPreferencesMock.Setup(x => x.CurrentValue).Returns(new AudioPreferences());
 
     _options = new AudioEngineOptions
     {
@@ -40,7 +48,10 @@ public class SoundFlowAudioEngineTests
     _optionsMock.Setup(o => o.Value).Returns(_options);
 
     _masterMixer = new SoundFlowMasterMixer(_mixerLoggerMock.Object);
-    _deviceManager = new SoundFlowDeviceManager(_deviceManagerLoggerMock.Object);
+    _deviceManager = new SoundFlowDeviceManager(
+        _deviceManagerLoggerMock.Object,
+        _configManagerMock.Object,
+        _audioPreferencesMock.Object);
   }
 
   private SoundFlowAudioEngine CreateEngine()

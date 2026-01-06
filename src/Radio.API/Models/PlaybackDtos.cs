@@ -114,7 +114,7 @@ public class UpdatePlaybackRequest
   /// <summary>
   /// Gets or sets the action to perform.
   /// </summary>
-  public PlaybackAction Action { get; set; }
+  public PlaybackAction? Action { get; set; }
 
   /// <summary>
   /// Gets or sets the volume (0.0 to 1.0), if changing volume.

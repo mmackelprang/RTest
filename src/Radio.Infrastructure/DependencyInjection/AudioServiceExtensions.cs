@@ -41,6 +41,7 @@ public static class AudioServiceExtensions
     // Bind Spotify configuration
     services.Configure<SpotifySecrets>(
       configuration.GetSection(SpotifySecrets.SectionName));
+    services.AddSecretResolution<SpotifySecrets>();
     services.Configure<SpotifyPreferences>(
       configuration.GetSection(SpotifyPreferences.SectionName));
 

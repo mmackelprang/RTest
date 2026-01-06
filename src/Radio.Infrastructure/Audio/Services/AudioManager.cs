@@ -7,6 +7,7 @@ using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Sources.Primary;
 using Radio.Infrastructure.Configuration.Abstractions;
+using Radio.Infrastructure.Configuration.Models;
 
 namespace Radio.Infrastructure.Audio.Services;
 
@@ -386,9 +387,13 @@ public class AudioManager : IAudioManager
 
     try
     {
+      // Use the main configuration store ("config" or "sqlite") to ensure IOptionsMonitor picks up the change
+      // Key must match the section name defined in AudioPreferences
+      var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+      
       await _configurationManager.SetValueAsync(
-        "audiopreferences",
-        "CurrentSource",
+        storeId,
+        "AudioPreferences:CurrentSource",
         sourceType.ToString(),
         cancellationToken);
 
@@ -438,6 +443,7 @@ public class AudioManager : IAudioManager
       _spotifySecrets,
       _spotifyPreferences,
       _deviceOptions,
+      _playbackService,
       _metricsCollector,
       _loggerFactory);
   }

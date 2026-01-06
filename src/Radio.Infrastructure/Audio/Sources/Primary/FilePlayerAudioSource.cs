@@ -159,6 +159,11 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   {
     ThrowIfDisposed();
 
+    if (State == AudioSourceState.Playing || State == AudioSourceState.Paused)
+    {
+      await StopAsync(cancellationToken);
+    }
+
     var fullPath = GetFullPath(filePath);
     if (!File.Exists(fullPath))
     {
@@ -190,6 +195,11 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   public async Task LoadDirectoryAsync(string directoryPath, CancellationToken cancellationToken = default)
   {
     ThrowIfDisposed();
+
+    if (State == AudioSourceState.Playing || State == AudioSourceState.Paused)
+    {
+      await StopAsync(cancellationToken);
+    }
 
     var fullPath = GetFullPath(directoryPath);
     if (!Directory.Exists(fullPath))
@@ -232,6 +242,11 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   public async Task LoadPlaylistAsync(IEnumerable<string> files, CancellationToken cancellationToken = default)
   {
     ThrowIfDisposed();
+
+    if (State == AudioSourceState.Playing || State == AudioSourceState.Paused)
+    {
+      await StopAsync(cancellationToken);
+    }
 
     var validFiles = files
       .Select(GetFullPath)

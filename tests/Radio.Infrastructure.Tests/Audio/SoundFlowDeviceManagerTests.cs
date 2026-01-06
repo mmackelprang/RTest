@@ -1,8 +1,12 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
+using Radio.Core.Configuration;
 using Radio.Core.Exceptions;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.SoundFlow;
+using Radio.Infrastructure.Configuration.Abstractions;
+using Radio.Infrastructure.Configuration.Models;
 
 namespace Radio.Infrastructure.Tests.Audio;
 
@@ -12,12 +16,22 @@ namespace Radio.Infrastructure.Tests.Audio;
 public class SoundFlowDeviceManagerTests
 {
   private readonly Mock<ILogger<SoundFlowDeviceManager>> _loggerMock;
+  private readonly Mock<IConfigurationManager> _configManagerMock;
+  private readonly Mock<IOptionsMonitor<AudioPreferences>> _audioPreferencesMock;
   private readonly SoundFlowDeviceManager _deviceManager;
 
   public SoundFlowDeviceManagerTests()
   {
     _loggerMock = new Mock<ILogger<SoundFlowDeviceManager>>();
-    _deviceManager = new SoundFlowDeviceManager(_loggerMock.Object);
+    _configManagerMock = new Mock<IConfigurationManager>();
+    _audioPreferencesMock = new Mock<IOptionsMonitor<AudioPreferences>>();
+
+    _audioPreferencesMock.Setup(x => x.CurrentValue).Returns(new AudioPreferences());
+
+    _deviceManager = new SoundFlowDeviceManager(
+        _loggerMock.Object, 
+        _configManagerMock.Object, 
+        _audioPreferencesMock.Object);
   }
 
   [Fact]

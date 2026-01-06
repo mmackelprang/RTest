@@ -189,6 +189,12 @@ public class PlayHistoryController : ControllerBase
   {
     try
     {
+      // Handle "All" source by redirecting to GetRecent
+      if (string.Equals(source, "All", StringComparison.OrdinalIgnoreCase))
+      {
+        return await GetRecent(limit, offset);
+      }
+
       if (!Enum.TryParse<PlaySource>(source, true, out var playSource))
       {
         return BadRequest(new { error = $"Invalid source type: {source}" });

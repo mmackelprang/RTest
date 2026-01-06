@@ -13,7 +13,7 @@ public interface IMetadataLookupService
   /// </summary>
   /// <param name="fingerprint">The fingerprint to look up.</param>
   /// <param name="ct">Cancellation token.</param>
-  /// <returns>The lookup result, or null if no match found.</returns>
+  /// <returns>The lookup result containing match status and the valid fingerprint ID.</returns>
   Task<MetadataLookupResult?> LookupAsync(
     FingerprintData fingerprint,
     CancellationToken ct = default);

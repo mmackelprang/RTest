@@ -273,12 +273,12 @@
       if (_isPlaying)
       {
         Logger.LogDebug("Sending pause request to API");
-        await AudioApi.UpdatePlaybackStateAsync(new UpdatePlaybackRequest("pause", null, null, null));
+        await AudioApi.UpdatePlaybackStateAsync(new UpdatePlaybackRequest("Pause", null, null, null));
       }
       else
       {
         Logger.LogDebug("Sending start request to API");
-        await AudioApi.StartAsync();
+        await AudioApi.UpdatePlaybackStateAsync(new UpdatePlaybackRequest("Play", null, null, null));
       }
       await RefreshPlaybackStateAsync();
       Logger.LogInformation("HandlePlayPauseAsync completed successfully");

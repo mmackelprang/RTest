@@ -397,10 +397,6 @@ export const visualizer = {
       ctx.stroke();
     }
   },
-    }
-
-    ctx.stroke();
-  },
 
   // Draw spectrum analyzer
   drawSpectrum: function (canvasId, magnitudes, frequencies) {
