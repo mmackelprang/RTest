@@ -95,7 +95,9 @@ public sealed class MetadataLookupService : IMetadataLookupService
       };
     }
 
-    _logger.LogDebug("Querying AcoustID for fingerprint {Id}", fingerprint.Id);
+    _logger.LogInformation("Querying AcoustID for fingerprint {FingerprintId} (hash: {Hash})", 
+      fingerprint.Id, fingerprint.ChromaprintHash?.Substring(0, Math.Min(50, fingerprint.ChromaprintHash?.Length ?? 0)));
+    
     var acoustIdResult = await _acoustIdClient.LookupAsync(
       fingerprint.ChromaprintHash,
       fingerprint.DurationSeconds,
@@ -103,7 +105,7 @@ public sealed class MetadataLookupService : IMetadataLookupService
 
     if (acoustIdResult == null || acoustIdResult.Recordings.Count == 0)
     {
-      _logger.LogDebug("No AcoustID match found, storing fingerprint for manual tagging");
+      _logger.LogInformation("No AcoustID match found for fingerprint {FingerprintId}, storing for manual tagging", fingerprint.Id);
       var stored = await _cache.StoreAsync(fingerprint, null, ct);
       return new MetadataLookupResult
       {
@@ -118,7 +120,7 @@ public sealed class MetadataLookupService : IMetadataLookupService
     var bestRecording = acoustIdResult.Recordings.FirstOrDefault();
     if (bestRecording == null)
     {
-      _logger.LogDebug("No recordings in AcoustID result");
+      _logger.LogInformation("No recordings in AcoustID result for fingerprint {FingerprintId}", fingerprint.Id);
       var stored = await _cache.StoreAsync(fingerprint, null, ct);
       return new MetadataLookupResult
       {
@@ -128,6 +130,13 @@ public sealed class MetadataLookupService : IMetadataLookupService
         Source = LookupSource.Manual
       };
     }
+
+    _logger.LogInformation(
+      "Processing AcoustID recording: MusicBrainzRecordingId={RecordingId}, Title={Title}, Artists={Artists}, ReleaseGroups={ReleaseGroups}",
+      bestRecording.Id, 
+      bestRecording.Title, 
+      string.Join(", ", bestRecording.Artists),
+      bestRecording.ReleaseGroups.Count);
 
     // Create track metadata from AcoustID result
     var trackMetadata = new TrackMetadata
@@ -143,8 +152,9 @@ public sealed class MetadataLookupService : IMetadataLookupService
     };
 
     _logger.LogInformation(
-      "AcoustID match: {Title} by {Artist} (confidence: {Confidence:P0})",
-      trackMetadata.Title, trackMetadata.Artist, acoustIdResult.Score);
+      "Created track metadata from AcoustID: Title=\"{Title}\", Artist=\"{Artist}\", Album=\"{Album}\", MusicBrainzRecordingId={MusicBrainzId}, Confidence={Confidence:P0}",
+      trackMetadata.Title, trackMetadata.Artist, trackMetadata.Album ?? "(none)", 
+      trackMetadata.MusicBrainzRecordingId, acoustIdResult.Score);
 
     // Store the fingerprint with metadata
     var storedWithMeta = await _cache.StoreAsync(fingerprint, trackMetadata, ct);

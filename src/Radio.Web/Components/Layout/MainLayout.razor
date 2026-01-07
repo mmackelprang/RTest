@@ -74,27 +74,7 @@
     </div>
     <div style="width: 24px;"></div>
 
-    <!-- CENTER: System Stats with Icons -->
-    <div style="display: flex; align-items: center; gap: 20px; font-family: 'Inter', sans-serif; font-size: 14px; color: #BFBFC2;">
-      <MudTooltip Text="CPU Usage">
-        <div style="display: flex; align-items: center; gap: 4px;">
-          <MudIcon Icon="@Icons.Material.Filled.Memory" Size="Size.Small" />
-          <span>@_cpuUsage%</span>
-        </div>
-      </MudTooltip>
-      <MudTooltip Text="RAM Usage">
-        <div style="display: flex; align-items: center; gap: 4px;">
-          <MudIcon Icon="@Icons.Material.Filled.Storage" Size="Size.Small" />
-          <span>@_ramUsage MB</span>
-        </div>
-      </MudTooltip>
-      <MudTooltip Text="Thread Count">
-        <div style="display: flex; align-items: center; gap: 4px;">
-          <MudIcon Icon="@Icons.Material.Filled.AccountTree" Size="Size.Small" />
-          <span>@_threadCount</span>
-        </div>
-      </MudTooltip>
-    </div>
+    <!-- CENTER: Spacer to push navigation to the right -->
     <MudSpacer />
     
     <!-- NOW PLAYING WIDGET - Compact display between stats and nav -->
@@ -178,10 +158,9 @@
       <MudIconButton Icon="@Icons.Material.Filled.QueueMusic" Color="Color.Inherit" Href="/queue" Size="Size.Large" title="@(_queueCount > 0 ? $"Queue ({_queueCount} items)" : "Queue (empty)")" />
     </MudBadge>
     
-    @if (_showSpotifyNav)
-    {
-      <MudIconButton Icon="@Icons.Material.Filled.Search" Color="Color.Inherit" Href="/spotify" Size="Size.Large" title="Spotify Search" />
-    }
+    <!-- Spotify Search - Always visible -->
+    <MudIconButton Icon="@Icons.Material.Filled.Search" Color="Color.Inherit" Href="/spotify" Size="Size.Large" title="Spotify Search" />
+    
     @if (_showRadioNav)
     {
       <MudIconButton Icon="@Icons.Material.Filled.Radio" Color="Color.Inherit" Href="/radio" Size="Size.Large" title="Radio Controls" />
