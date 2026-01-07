@@ -306,10 +306,29 @@
     }
 
     var duration = (DateTime.Now - _touchStartTime).TotalMilliseconds;
+    
+    // Determine if this is an album URI (albums should clear queue like playlists)
+    bool isAlbum = uri.StartsWith("spotify:album:");
+    
     if (duration < 500) // Short press (< 500ms) -> Play
     {
-      if (isPlaylist) await HandlePlayPlaylistAsync(uri);
-      else await HandlePlayTrackAsync(uri);
+      if (isPlaylist || isAlbum) 
+      {
+        // Clear queue before playing playlist or album
+        await QueueApi.ClearQueueAsync();
+        if (isPlaylist)
+        {
+          await HandlePlayPlaylistAsync(uri);
+        }
+        else
+        {
+          await HandlePlayTrackAsync(uri); // Will play album URI
+        }
+      }
+      else 
+      {
+        await HandlePlayTrackAsync(uri);
+      }
     }
     else // Long press (> 500ms) -> Add to Queue
     {
@@ -588,10 +607,11 @@
     try
     {
       await SpotifyApi.PlayUriAsync(uri, null);
+      Logger.LogInformation("Playing Spotify track: {Uri}", uri);
     }
-    catch (Exception)
+    catch (Exception ex)
     {
-      // Silently fail
+      Logger.LogError(ex, "Failed to play track {Uri}", uri);
     }
   }
 
@@ -599,11 +619,19 @@
   {
     try
     {
-      await QueueApi.AddToQueueAsync(uri);
+      var success = await QueueApi.AddToQueueAsync(uri);
+      if (success)
+      {
+        Logger.LogInformation("Added Spotify track to queue: {Uri}", uri);
+      }
+      else
+      {
+        Logger.LogWarning("Failed to add track {Uri} to queue", uri);
+      }
     }
-    catch (Exception)
+    catch (Exception ex)
     {
-      // Silently fail
+      Logger.LogError(ex, "Error adding track {Uri} to queue", uri);
     }
   }
 
@@ -653,11 +681,15 @@
   {
     try
     {
+      // Clear the queue first, then play the playlist
+      // This will replace the current queue with the playlist tracks
+      await QueueApi.ClearQueueAsync();
       await SpotifyApi.PlayPlaylistAsync(playlistId);
+      Logger.LogInformation("Playing Spotify playlist: {PlaylistId} (queue cleared)", playlistId);
     }
-    catch (Exception)
+    catch (Exception ex)
     {
-      // Silently fail
+      Logger.LogError(ex, "Failed to play playlist {PlaylistId}", playlistId);
     }
   }
 
@@ -665,14 +697,14 @@
   {
     try
     {
-      // Note: Spotify API doesn't provide individual track URIs in playlist response
-      // As a workaround, we play the playlist which loads all tracks
-      // A full implementation would require fetching playlist tracks and adding each to queue
+      // To add a playlist to the queue, we need to play it
+      // The SpotifyAudioSource will populate the queue with playlist tracks
       await SpotifyApi.PlayPlaylistAsync(playlistId);
+      Logger.LogInformation("Added Spotify playlist to queue: {PlaylistId}", playlistId);
     }
-    catch (Exception)
+    catch (Exception ex)
     {
-      // Silently fail
+      Logger.LogError(ex, "Failed to add playlist {PlaylistId} to queue", playlistId);
     }
   }
 
