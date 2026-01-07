@@ -49,6 +49,7 @@ public class AudioManager : IAudioManager
 
   // State
   private IAudioSource? _activeSource;
+  private IAudioSource? _previousSource; // Track previous source for delayed cleanup
   private readonly Dictionary<AudioSourceType, IAudioSource> _sourceCache = new();
   private readonly SemaphoreSlim _switchLock = new(1, 1);
   private bool _initialized;
@@ -166,45 +167,46 @@ public class AudioManager : IAudioManager
         source.Name,
         source.Type);
 
-      // STOP current source completely if it's playing or paused
-      // Only one primary source should be active at a time
       var mixer = _audioEngine.GetMasterMixer();
+      var oldSource = _activeSource;
 
-      if (_activeSource != null && _activeSource != source)
+      // Determine if old source should keep playing during transition
+      bool shouldKeepOldSourcePlaying = oldSource != null && 
+                                         oldSource != source &&
+                                         (oldSource.State == AudioSourceState.Playing || 
+                                          oldSource.State == AudioSourceState.Paused);
+
+      if (shouldKeepOldSourcePlaying)
       {
-        if (_activeSource is IPrimaryAudioSource currentPrimary)
-        {
-          // Stop the source (not just pause) to ensure clean transition
-          if (_activeSource.State == AudioSourceState.Playing ||
-              _activeSource.State == AudioSourceState.Paused)
-          {
-            _logger.LogDebug("Stopping current source: {SourceName}", _activeSource.Name);
-            await currentPrimary.StopAsync(cancellationToken);
-          }
-        }
-
-        // Remove the old source from the mixer to prevent audio overlap
-        var activeSources = mixer.GetActiveSources();
-        if (activeSources.Contains(_activeSource))
-        {
-          _logger.LogDebug("Removing old source {SourceName} from mixer", _activeSource.Name);
-          mixer.RemoveSource(_activeSource);
-        }
+        _logger.LogInformation(
+          "Keeping old source {OldSource} playing during transition to {NewSource}",
+          oldSource!.Name, source.Name);
+        _previousSource = oldSource;
       }
 
       // Ensure the new source is in the mixer
       var currentActiveSources = mixer.GetActiveSources();
       if (!currentActiveSources.Contains(source))
       {
-        _logger.LogDebug("Adding source {SourceName} to mixer", source.Name);
+        _logger.LogInformation("Adding new source {SourceName} to mixer", source.Name);
         mixer.AddSource(source);
       }
 
-      // Update the active source reference
+      // Update the active source reference early so new source becomes "active"
       _activeSource = source;
 
-      // Start playback on the new source if it's ready and can auto-play
-      // Sources like FilePlayer and Spotify require content to be selected first
+      // Determine if new source can auto-play
+      var canAutoPlay = source.Type switch
+      {
+        AudioSourceType.Radio => true,      // Radio tunes to last frequency
+        AudioSourceType.Vinyl => true,      // Vinyl captures from USB input
+        AudioSourceType.GenericUSB => true, // Generic USB captures from input
+        AudioSourceType.FilePlayer => false, // Requires file to be loaded first
+        AudioSourceType.Spotify => false,   // Requires track/playlist selection
+        _ => false
+      };
+
+      // Start playback on the new source if it can auto-play
       if (source is IPrimaryAudioSource newPrimary)
       {
         if (source.State == AudioSourceState.Created)
@@ -212,30 +214,47 @@ public class AudioManager : IAudioManager
           _logger.LogDebug("Initializing source: {SourceName}", source.Name);
         }
 
-        // Only auto-play sources that can play immediately without content selection
-        // FilePlayer needs a file loaded, Spotify needs a track/playlist selected
-        var canAutoPlay = source.Type switch
-        {
-          AudioSourceType.Radio => true,      // Radio tunes to last frequency
-          AudioSourceType.Vinyl => true,      // Vinyl captures from USB input
-          AudioSourceType.GenericUSB => true, // Generic USB captures from input
-          AudioSourceType.FilePlayer => false, // Requires file to be loaded first
-          AudioSourceType.Spotify => false,   // Requires track/playlist selection
-          _ => false
-        };
-
         if (canAutoPlay && source.State != AudioSourceState.Playing)
         {
-          _logger.LogDebug("Starting playback on source: {SourceName}", source.Name);
+          _logger.LogInformation(
+            "Starting playback on new source: {SourceName} (old source will continue until new source is playing)",
+            source.Name);
           await newPrimary.PlayAsync(cancellationToken);
+          
+          // New source is now playing, stop the old source
+          if (shouldKeepOldSourcePlaying && oldSource is IPrimaryAudioSource oldPrimary)
+          {
+            _logger.LogInformation(
+              "New source {NewSource} is now playing, stopping old source {OldSource}",
+              source.Name, oldSource.Name);
+            await oldPrimary.StopAsync(cancellationToken);
+            
+            // Remove the old source from the mixer
+            if (mixer.GetActiveSources().Contains(oldSource))
+            {
+              _logger.LogDebug("Removing old source {SourceName} from mixer", oldSource.Name);
+              mixer.RemoveSource(oldSource);
+            }
+          }
         }
         else if (!canAutoPlay)
         {
-          _logger.LogDebug(
-            "Source {SourceName} requires content selection before playback",
+          _logger.LogInformation(
+            "Source {SourceName} requires content selection before playback. Old source will keep playing until new content starts.",
             source.Name);
+          
+          // For sources that don't auto-play, we'll keep the old source playing
+          // The old source will be stopped when the new source actually starts playing
+          // (this happens via the StateChanged event or when PlayAsync is called)
+          
+          // Don't stop or remove the old source yet - it will be cleaned up when
+          // the new source begins playing
         }
       }
+
+      // If we should stop the old source immediately (for non-auto-play sources that are switching)
+      // and the old source is still in the mixer, leave it there for now
+      // It will be removed when the new source starts playing
 
       // Persist the source selection
       await PersistSourcePreferenceAsync(source.Type, cancellationToken);
@@ -597,6 +616,39 @@ public class AudioManager : IAudioManager
     if (sender is not IAudioSource source)
     {
       return;
+    }
+
+    // Clean up previous source when active source starts playing
+    if (e.NewState == AudioSourceState.Playing && source == _activeSource && _previousSource != null)
+    {
+      _logger.LogInformation(
+        "Active source {ActiveSource} is now playing. Cleaning up previous source {PreviousSource}",
+        source.Name, _previousSource.Name);
+
+      try
+      {
+        var mixer = _audioEngine.GetMasterMixer();
+        
+        // Stop the previous source
+        if (_previousSource is IPrimaryAudioSource previousPrimary)
+        {
+          await previousPrimary.StopAsync();
+          _logger.LogInformation("Stopped previous source: {SourceName}", _previousSource.Name);
+        }
+
+        // Remove previous source from mixer
+        if (mixer.GetActiveSources().Contains(_previousSource))
+        {
+          mixer.RemoveSource(_previousSource);
+          _logger.LogInformation("Removed previous source {SourceName} from mixer", _previousSource.Name);
+        }
+
+        _previousSource = null;
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "Failed to clean up previous source");
+      }
     }
 
     // Only record when transitioning to Playing state
