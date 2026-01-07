@@ -115,8 +115,23 @@ public sealed class AcoustIdClient : IDisposable
 
       if (response?.Status != "ok" || response.Results == null || response.Results.Count == 0)
       {
-        _logger.LogDebug("AcoustID lookup returned no results");
+        _logger.LogInformation(
+          "AcoustID lookup returned no results. Status={Status}, ResultCount={ResultCount}",
+          response?.Status ?? "null", response?.Results?.Count ?? 0);
         return null;
+      }
+
+      // Log all results for debugging
+      _logger.LogInformation(
+        "AcoustID returned {ResultCount} result(s). MinimumConfidence={MinConfidence:P0}",
+        response.Results.Count, _options.MinimumConfidenceThreshold);
+
+      for (int i = 0; i < response.Results.Count && i < 5; i++)
+      {
+        var result = response.Results[i];
+        _logger.LogInformation(
+          "  Result #{Index}: Id={Id}, Score={Score:P0}, Recordings={RecordingCount}",
+          i + 1, result.Id, result.Score, result.Recordings?.Count ?? 0);
       }
 
       // Return the best match (highest score)
@@ -127,13 +142,16 @@ public sealed class AcoustIdClient : IDisposable
 
       if (bestResult == null)
       {
-        _logger.LogDebug("No AcoustID results with sufficient confidence");
+        _logger.LogInformation(
+          "No AcoustID results with sufficient confidence (>= {MinConfidence:P0}). Highest score was {HighestScore:P0}",
+          _options.MinimumConfidenceThreshold, 
+          response.Results.Max(r => r.Score));
         return null;
       }
 
       _logger.LogInformation(
-        "AcoustID match found: {Id} (score: {Score:P0})",
-        bestResult.Id, bestResult.Score);
+        "Selected AcoustID match: Id={Id}, Score={Score:P0}, Recordings={RecordingCount}",
+        bestResult.Id, bestResult.Score, bestResult.Recordings?.Count ?? 0);
 
       return new AcoustIdLookupResult
       {

@@ -295,23 +295,34 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <inheritdoc/>
   protected override async Task PlayCoreAsync(CancellationToken cancellationToken)
   {
+    Logger.LogInformation("SpotifyAudioSource.PlayCoreAsync - Mode: {Mode}, IsAuthenticated: {IsAuth}", _mode, _isAuthenticated);
+    
     if (_mode == SpotifyMode.Integrated)
     {
       // Integrated mode: librespot is already running, just ensure it's started
       if (_librespotManager == null)
       {
+        Logger.LogError("PlayCoreAsync failed: Librespot manager not initialized");
         throw new InvalidOperationException("Librespot manager not initialized");
       }
 
+      Logger.LogInformation("Integrated mode - Librespot running: {IsRunning}", _librespotManager.IsRunning);
+      
       if (!_librespotManager.IsRunning)
       {
+        Logger.LogInformation("Starting librespot device");
         await _librespotManager.StartDeviceAsync(cancellationToken: cancellationToken);
       }
 
       // Start the integrated audio source
       if (_integratedSource != null)
       {
+        Logger.LogInformation("Starting integrated audio source");
         await _integratedSource.PlayAsync(cancellationToken);
+      }
+      else
+      {
+        Logger.LogWarning("Integrated source is null, cannot start playback");
       }
 
       // Optionally send play command via API if authenticated
@@ -319,6 +330,7 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
       {
         try
         {
+          Logger.LogInformation("Sending resume playback command to Spotify API");
           await _client.Player.ResumePlayback(cancellationToken);
         }
         catch (Exception ex)
@@ -330,8 +342,11 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
     else
     {
       // Remote control mode: use API only
+      Logger.LogInformation("Remote control mode - using Spotify API");
+      
       if (_client == null)
       {
+        Logger.LogError("PlayCoreAsync failed: Spotify client not initialized");
         throw new InvalidOperationException("Spotify client not initialized");
       }
 
@@ -339,21 +354,32 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
       {
         // Get available devices
         var devices = await _client.Player.GetAvailableDevices(cancellationToken);
-        if (!devices.Devices.Any(d => d.IsActive))
+        Logger.LogInformation("Found {DeviceCount} Spotify device(s)", devices.Devices.Count);
+        
+        var activeDevice = devices.Devices.FirstOrDefault(d => d.IsActive);
+        if (activeDevice == null)
         {
-          Logger.LogWarning("No active Spotify device found. Please start a Spotify client.");
+          Logger.LogWarning("No active Spotify device found. Available devices: {Devices}", 
+            string.Join(", ", devices.Devices.Select(d => $"{d.Name} ({d.Type})")));
+        }
+        else
+        {
+          Logger.LogInformation("Active Spotify device: {DeviceName} ({DeviceType})", activeDevice.Name, activeDevice.Type);
         }
 
         // Resume playback
+        Logger.LogInformation("Sending resume playback command");
         await _client.Player.ResumePlayback(cancellationToken);
         await UpdatePlaybackStateAsync(cancellationToken);
       }
       catch (Exception ex)
       {
-        Logger.LogError(ex, "Failed to start Spotify playback");
+        Logger.LogError(ex, "Failed to start Spotify playback in remote control mode");
         throw;
       }
     }
+    
+    Logger.LogInformation("SpotifyAudioSource.PlayCoreAsync completed");
   }
 
   /// <inheritdoc/>

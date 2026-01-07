@@ -25,6 +25,7 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   private object? _soundComponent;
   private AudioCaptureDevice? _captureDevice;
   private MiniAudioEngine? _audioEngine;
+  private int _audioCaptureCallCount = 0;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="USBAudioSourceBase"/> class.
@@ -217,6 +218,15 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   /// <param name="capability">The device capability (should be Record for capture).</param>
   protected virtual void OnAudioCaptured(Span<float> samples, Capability capability)
   {
+    // Log audio capture statistics periodically (every 100th call to avoid log spam)
+    // Use Interlocked for thread-safe counter increment
+    if (System.Threading.Interlocked.Increment(ref _audioCaptureCallCount) % 100 == 0)
+    {
+      Logger.LogDebug(
+        "{SourceName} audio capture - Samples: {SampleCount}, Capability: {Capability}, State: {State}",
+        Name, samples.Length, capability, State);
+    }
+    
     // Default implementation does nothing
     // Derived classes can override to process audio samples
   }
@@ -245,10 +255,16 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   {
     if (_soundComponent == null)
     {
+      Logger.LogError("{SourceName} audio source not initialized - SoundComponent is null", Name);
       throw new InvalidOperationException($"{Name} audio source not initialized");
     }
 
-    Logger.LogInformation("Starting {SourceName} audio capture", Name);
+    Logger.LogInformation(
+      "Starting {SourceName} audio capture - Device: {Device}, USBPort: {USBPort}, State: {State}", 
+      Name, 
+      MetadataInternal.TryGetValue("Device", out var device) ? device : "unknown",
+      _reservedPort ?? "none",
+      State);
     return Task.CompletedTask;
   }
 

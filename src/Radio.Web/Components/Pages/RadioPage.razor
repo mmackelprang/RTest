@@ -92,19 +92,8 @@
                      title="Frequency Up" />
     </div>
     
-    <!-- Band Selector and Additional Controls -->
+    <!-- Band and Additional Controls -->
     <div style="display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; justify-content: center;">
-      <MudSelect T="string" Value="@_radioState.Band" ValueChanged="@HandleBandChangeAsync" 
-                 Label="Band" Variant="Variant.Outlined" Dense="true" 
-                 Style="min-width: 150px;">
-        <MudSelectItem Value="@("AM")">AM</MudSelectItem>
-        <MudSelectItem Value="@("FM")">FM</MudSelectItem>
-        <MudSelectItem Value="@("AIR")">Aircraft</MudSelectItem>
-        <MudSelectItem Value="@("SW")">Shortwave</MudSelectItem>
-        <MudSelectItem Value="@("WB")">Weather</MudSelectItem>
-        <MudSelectItem Value="@("VHF")">VHF</MudSelectItem>
-      </MudSelect>
-      
       <MudSelect T="string" Value="@_radioState.Step.ToString()" ValueChanged="@HandleStepChangeAsync" 
                  Label="Step Size" Variant="Variant.Outlined" Dense="true" 
                  Style="min-width: 150px;">
@@ -370,11 +359,13 @@
   {
     try
     {
-      await RadioApi.FrequencyUpAsync();
+      Logger.LogInformation("Calling FrequencyUpAsync");
+      var success = await RadioApi.FrequencyUpAsync();
+      Logger.LogInformation("FrequencyUpAsync result: {Success}", success);
     }
-    catch (Exception)
+    catch (Exception ex)
     {
-      // Silently fail
+      Logger.LogError(ex, "Error calling FrequencyUpAsync");
     }
   }
   
@@ -382,11 +373,13 @@
   {
     try
     {
-      await RadioApi.FrequencyDownAsync();
+      Logger.LogInformation("Calling FrequencyDownAsync");
+      var success = await RadioApi.FrequencyDownAsync();
+      Logger.LogInformation("FrequencyDownAsync result: {Success}", success);
     }
-    catch (Exception)
+    catch (Exception ex)
     {
-      // Silently fail
+      Logger.LogError(ex, "Error calling FrequencyDownAsync");
     }
   }
   
@@ -421,11 +414,13 @@
   {
     try
     {
-      await RadioApi.SetBandAsync(newBand);
+      Logger.LogInformation("Calling HandleBandChangeAsync with band: {Band}", newBand);
+      var success = await RadioApi.SetBandAsync(newBand);
+      Logger.LogInformation("SetBandAsync result: {Success}", success);
     }
-    catch (Exception)
+    catch (Exception ex)
     {
-      // Silently fail
+      Logger.LogError(ex, "Error calling HandleBandChangeAsync");
     }
   }
   
@@ -433,14 +428,20 @@
   {
     try
     {
+      Logger.LogInformation("Calling HandleStepChangeAsync with step: {Step}", newStep);
       if (double.TryParse(newStep, out var step))
       {
-        await RadioApi.SetStepAsync(step);
+        var success = await RadioApi.SetStepAsync(step);
+        Logger.LogInformation("SetStepAsync result: {Success}", success);
+      }
+      else
+      {
+        Logger.LogWarning("Failed to parse step value: {Step}", newStep);
       }
     }
-    catch (Exception)
+    catch (Exception ex)
     {
-      // Silently fail
+      Logger.LogError(ex, "Error calling HandleStepChangeAsync");
     }
   }
   
@@ -448,11 +449,13 @@
   {
     try
     {
-      await RadioApi.StartScanAsync(direction);
+      Logger.LogInformation("Calling StartScanAsync with direction: {Direction}", direction);
+      var success = await RadioApi.StartScanAsync(direction);
+      Logger.LogInformation("StartScanAsync result: {Success}", success);
     }
-    catch (Exception)
+    catch (Exception ex)
     {
-      // Silently fail
+      Logger.LogError(ex, "Error calling StartScanAsync");
     }
   }
   
@@ -460,11 +463,13 @@
   {
     try
     {
-      await RadioApi.StopScanAsync();
+      Logger.LogInformation("Calling StopScanAsync");
+      var success = await RadioApi.StopScanAsync();
+      Logger.LogInformation("StopScanAsync result: {Success}", success);
     }
-    catch (Exception)
+    catch (Exception ex)
     {
-      // Silently fail
+      Logger.LogError(ex, "Error calling StopScanAsync");
     }
   }
   
