@@ -219,7 +219,8 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   protected virtual void OnAudioCaptured(Span<float> samples, Capability capability)
   {
     // Log audio capture statistics periodically (every 100th call to avoid log spam)
-    if (_audioCaptureCallCount++ % 100 == 0)
+    // Use Interlocked for thread-safe counter increment
+    if (System.Threading.Interlocked.Increment(ref _audioCaptureCallCount) % 100 == 0)
     {
       Logger.LogDebug(
         "{SourceName} audio capture - Samples: {SampleCount}, Capability: {Capability}, State: {State}",

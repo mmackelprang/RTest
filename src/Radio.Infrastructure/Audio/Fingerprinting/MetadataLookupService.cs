@@ -95,12 +95,31 @@ public sealed class MetadataLookupService : IMetadataLookupService
       };
     }
 
+    // Ensure we have a valid chromaprint hash before querying AcoustID
+    if (string.IsNullOrWhiteSpace(fingerprint.ChromaprintHash))
+    {
+      _logger.LogWarning(
+        "Fingerprint {FingerprintId} has no chromaprint hash, storing for manual tagging",
+        fingerprint.Id);
+
+      var stored = await _cache.StoreAsync(fingerprint, null, ct);
+      return new MetadataLookupResult
+      {
+        IsMatch = false,
+        Confidence = 0.0,
+        FingerprintId = stored.Id,
+        Source = LookupSource.Manual
+      };
+    }
+
     _logger.LogInformation("Querying AcoustID for fingerprint {FingerprintId}", fingerprint.Id);
     if (_logger.IsEnabled(LogLevel.Debug))
     {
-      _logger.LogDebug(
-        "Fingerprint hash preview: {HashPreview}", 
-        fingerprint.ChromaprintHash?.Substring(0, Math.Min(50, fingerprint.ChromaprintHash?.Length ?? 0)));
+      var hashPreview = fingerprint.ChromaprintHash.Length <= 50
+        ? fingerprint.ChromaprintHash
+        : fingerprint.ChromaprintHash.Substring(0, 50);
+
+      _logger.LogDebug("Fingerprint hash preview: {HashPreview}", hashPreview);
     }
     
     var acoustIdResult = await _acoustIdClient.LookupAsync(

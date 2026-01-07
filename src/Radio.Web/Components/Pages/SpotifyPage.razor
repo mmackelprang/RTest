@@ -322,7 +322,8 @@
         }
         else
         {
-          await HandlePlayTrackAsync(uri); // Will play album URI
+          // HandlePlayTrackAsync accepts album URIs and will play the entire album
+          await HandlePlayTrackAsync(uri);
         }
       }
       else 

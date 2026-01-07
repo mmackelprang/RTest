@@ -217,44 +217,21 @@ public class AudioManager : IAudioManager
         if (canAutoPlay && source.State != AudioSourceState.Playing)
         {
           _logger.LogInformation(
-            "Starting playback on new source: {SourceName} (old source will continue until new source is playing)",
+            "Starting playback on new source: {SourceName}",
             source.Name);
           await newPrimary.PlayAsync(cancellationToken);
           
-          // New source is now playing, stop the old source
-          if (shouldKeepOldSourcePlaying && oldSource is IPrimaryAudioSource oldPrimary)
-          {
-            _logger.LogInformation(
-              "New source {NewSource} is now playing, stopping old source {OldSource}",
-              source.Name, oldSource.Name);
-            await oldPrimary.StopAsync(cancellationToken);
-            
-            // Remove the old source from the mixer
-            if (mixer.GetActiveSources().Contains(oldSource))
-            {
-              _logger.LogDebug("Removing old source {SourceName} from mixer", oldSource.Name);
-              mixer.RemoveSource(oldSource);
-            }
-          }
+          // Cleanup of the old source (stop + mixer removal) is handled centrally
+          // in the StateChanged event handler when the new source transitions to Playing.
+          // This avoids duplicate cleanup paths and potential race conditions.
         }
         else if (!canAutoPlay)
         {
           _logger.LogInformation(
             "Source {SourceName} requires content selection before playback. Old source will keep playing until new content starts.",
             source.Name);
-          
-          // For sources that don't auto-play, we'll keep the old source playing
-          // The old source will be stopped when the new source actually starts playing
-          // (this happens via the StateChanged event or when PlayAsync is called)
-          
-          // Don't stop or remove the old source yet - it will be cleaned up when
-          // the new source begins playing
         }
       }
-
-      // If we should stop the old source immediately (for non-auto-play sources that are switching)
-      // and the old source is still in the mixer, leave it there for now
-      // It will be removed when the new source starts playing
 
       // Persist the source selection
       await PersistSourcePreferenceAsync(source.Type, cancellationToken);
@@ -621,33 +598,47 @@ public class AudioManager : IAudioManager
     // Clean up previous source when active source starts playing
     if (e.NewState == AudioSourceState.Playing && source == _activeSource && _previousSource != null)
     {
-      _logger.LogInformation(
-        "Active source {ActiveSource} is now playing. Cleaning up previous source {PreviousSource}",
-        source.Name, _previousSource.Name);
-
+      await _switchLock.WaitAsync();
       try
       {
-        var mixer = _audioEngine.GetMasterMixer();
-        
-        // Stop the previous source
-        if (_previousSource is IPrimaryAudioSource previousPrimary)
+        // Double-check after acquiring lock (state may have changed)
+        if (source != _activeSource || _previousSource == null)
         {
-          await previousPrimary.StopAsync();
-          _logger.LogInformation("Stopped previous source: {SourceName}", _previousSource.Name);
+          return;
         }
 
-        // Remove previous source from mixer
-        if (mixer.GetActiveSources().Contains(_previousSource))
-        {
-          mixer.RemoveSource(_previousSource);
-          _logger.LogInformation("Removed previous source {SourceName} from mixer", _previousSource.Name);
-        }
+        _logger.LogInformation(
+          "Active source {ActiveSource} is now playing. Cleaning up previous source {PreviousSource}",
+          source.Name, _previousSource.Name);
 
-        _previousSource = null;
+        try
+        {
+          var mixer = _audioEngine.GetMasterMixer();
+          
+          // Stop the previous source
+          if (_previousSource is IPrimaryAudioSource previousPrimary)
+          {
+            await previousPrimary.StopAsync();
+            _logger.LogInformation("Stopped previous source: {SourceName}", _previousSource.Name);
+          }
+
+          // Remove previous source from mixer
+          if (mixer.GetActiveSources().Contains(_previousSource))
+          {
+            mixer.RemoveSource(_previousSource);
+            _logger.LogInformation("Removed previous source {SourceName} from mixer", _previousSource.Name);
+          }
+
+          _previousSource = null;
+        }
+        catch (Exception ex)
+        {
+          _logger.LogError(ex, "Failed to clean up previous source");
+        }
       }
-      catch (Exception ex)
+      finally
       {
-        _logger.LogError(ex, "Failed to clean up previous source");
+        _switchLock.Release();
       }
     }
 
