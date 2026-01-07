@@ -18,6 +18,19 @@ public class ChromaprintFingerprintService : IFingerprintService
         AudioSampleBuffer samples,
         CancellationToken ct = default)
     {
+        if (samples.Samples.Length == 0)
+        {
+            _logger.LogWarning("Cannot generate fingerprint from empty sample buffer");
+            return Task.FromResult(new FingerprintData
+            {
+                Id = Guid.NewGuid().ToString(),
+                ChromaprintHash = string.Empty,
+                DurationSeconds = 0,
+                GeneratedAt = DateTime.UtcNow,
+                SourcePath = samples.SourceName
+            });
+        }
+
         _logger.LogDebug("Generating fingerprint for {Duration}s of audio", samples.Duration.TotalSeconds);
 
         // Convert float[] samples to short[] PCM
@@ -31,21 +44,42 @@ public class ChromaprintFingerprintService : IFingerprintService
             pcmSamples[i] = (short)(sample * 32767);
         }
 
-        var context = new ChromaContext();
-        context.Start(samples.SampleRate, samples.Channels);
-        context.Feed(pcmSamples, pcmSamples.Length);
-        context.Finish();
-
-        string fingerprint = context.GetFingerprint();
-
-        return Task.FromResult(new FingerprintData
+        try 
         {
+            var context = new ChromaContext();
+            context.Start(samples.SampleRate, samples.Channels);
+            context.Feed(pcmSamples, pcmSamples.Length);
+            context.Finish();
+
+            string fingerprint = context.GetFingerprint();
+
+            return Task.FromResult(new FingerprintData
+            {
+                    Id = Guid.NewGuid().ToString(),
+                    ChromaprintHash = fingerprint,
+                    DurationSeconds = (int)samples.Duration.TotalSeconds,
+                    GeneratedAt = DateTime.UtcNow,
+                    SourcePath = samples.SourceName
+            });
+        }
+        catch (NullReferenceException ex)
+        {
+            // Catch specific AcoustID NRE
+            _logger.LogError(ex, "AcoustID Native Library Error: NullReferenceException during compression. Check native dependencies.");
+             return Task.FromResult(new FingerprintData
+            {
                 Id = Guid.NewGuid().ToString(),
-                ChromaprintHash = fingerprint,
+                ChromaprintHash = string.Empty, // Empty hash signals failure
                 DurationSeconds = (int)samples.Duration.TotalSeconds,
                 GeneratedAt = DateTime.UtcNow,
                 SourcePath = samples.SourceName
             });
+        }
+        catch (Exception ex)
+        {
+             _logger.LogError(ex, "Error generating fingerprint");
+             throw;
+        }
     }
 
     public Task<FingerprintData> GenerateFingerprintFromFileAsync(

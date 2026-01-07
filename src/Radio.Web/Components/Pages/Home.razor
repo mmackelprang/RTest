@@ -7,7 +7,7 @@
 @inject ISnackbar Snackbar
 @implements IAsyncDisposable
 
-<PageTitle>Now Playing - Radio Console</PageTitle>
+<PageTitle>Radio Console</PageTitle>
 
 <div class="home-page" style="padding: 24px; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;">
   <!-- Now Playing Display -->
@@ -139,6 +139,7 @@
   private string? _album = null;
   private string? _albumArtUrl = null;
   private string? _source = null;
+
   private string? _position = null;
   private string? _duration = null;
   private double _progressPercent = 0.0;
@@ -247,7 +248,7 @@
       var nowPlaying = await AudioApi.GetNowPlayingAsync();
       if (nowPlaying != null)
       {
-        Logger.LogDebug("RefreshPlaybackStateAsync: Updating metadata - Title={Title}, Artist={Artist}, Album={Album}, AlbumArt={AlbumArt}", 
+        Logger.LogDebug("RefreshPlaybackStateAsync: Updating metadata - Title={Title}, Artist={Artist}, Album={Album}, AlbumArt={AlbumArt}",
           nowPlaying.Title, nowPlaying.Artist, nowPlaying.Album, nowPlaying.AlbumArtUrl);
 
         _title = nowPlaying.Title;
@@ -276,13 +277,13 @@
        // Optimistic update
        _progressPercent = newPercent;
        // Format matching backend
-       _position = newTime.ToString(@"hh\:mm\:ss"); 
-       
+       _position = newTime.ToString(@"hh\:mm\:ss");
+
        await AudioApi.UpdatePlaybackStateAsync(new UpdatePlaybackRequest(
-           Action: "Seek", 
-           Volume: null, 
-           IsMuted: null, 
-           Balance: null, 
+           Action: "Seek",
+           Volume: null,
+           IsMuted: null,
+           Balance: null,
            SeekPosition: newTime
        ));
        await RefreshPlaybackStateAsync();

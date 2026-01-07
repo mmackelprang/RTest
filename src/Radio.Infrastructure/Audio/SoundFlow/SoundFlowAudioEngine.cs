@@ -360,6 +360,21 @@ public class SoundFlowAudioEngine : IAudioEngine
 
       // Initialize new playback device
       _playbackDevice = _engine.InitializePlaybackDevice(newDevice, _audioFormat);
+      
+      // Re-attach fingerprint tap if it exists
+      if (_fingerprintTap != null)
+      {
+          _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
+          _logger.LogInformation("Fingerprint tap re-attached to new playback device");
+      }
+      // If it didn't exist (e.g. started with no device), create it now
+      else
+      {
+          _fingerprintTap = new FingerprintTapModifier(this, _logger);
+          _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
+          _logger.LogInformation("Fingerprint tap created and attached to new playback device");
+      }
+
       _playbackDevice.Start();
 
       _logger.LogInformation("Successfully switched to playback device: {DeviceName}", newDevice.Name);
