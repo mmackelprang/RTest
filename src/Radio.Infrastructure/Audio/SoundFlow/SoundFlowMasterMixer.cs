@@ -18,6 +18,21 @@ public class SoundFlowMasterMixer : IMasterMixer
   private bool _isMuted;
 
   /// <summary>
+  /// Event fired when master volume changes.
+  /// </summary>
+  public event EventHandler<float>? MasterVolumeChanged;
+
+  /// <summary>
+  /// Event fired when balance changes.
+  /// </summary>
+  public event EventHandler<float>? BalanceChanged;
+
+  /// <summary>
+  /// Event fired when mute state changes.
+  /// </summary>
+  public event EventHandler<bool>? MuteStateChanged;
+
+  /// <summary>
   /// Initializes a new instance of the <see cref="SoundFlowMasterMixer"/> class.
   /// </summary>
   /// <param name="logger">The logger instance.</param>
@@ -37,6 +52,7 @@ public class SoundFlowMasterMixer : IMasterMixer
       {
         _masterVolume = clampedValue;
         _logger.LogDebug("Master volume set to {Volume:P0}", clampedValue);
+        MasterVolumeChanged?.Invoke(this, _masterVolume);
       }
     }
   }
@@ -52,6 +68,7 @@ public class SoundFlowMasterMixer : IMasterMixer
       {
         _balance = clampedValue;
         _logger.LogDebug("Balance set to {Balance:F2}", clampedValue);
+        BalanceChanged?.Invoke(this, _balance);
       }
     }
   }
@@ -66,6 +83,7 @@ public class SoundFlowMasterMixer : IMasterMixer
       {
         _isMuted = value;
         _logger.LogDebug("Mute state set to {IsMuted}", value);
+        MuteStateChanged?.Invoke(this, _isMuted);
       }
     }
   }

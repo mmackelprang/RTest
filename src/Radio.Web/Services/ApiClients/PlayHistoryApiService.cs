@@ -53,12 +53,28 @@ public class PlayHistoryApiService
   {
     try
     {
+      // For "All" source, use the base endpoint directly (more reliable)
+      if (string.Equals(source?.Trim(), "All", StringComparison.OrdinalIgnoreCase))
+      {
+        return await GetHistoryAsync(limit, offset, cancellationToken);
+      }
+
       var query = new List<string>();
       if (limit.HasValue) query.Add($"limit={limit}");
       if (offset.HasValue) query.Add($"offset={offset}");
       var queryString = query.Any() ? "?" + string.Join("&", query) : "";
 
-      return await _httpClient.GetFromJsonAsync<PlayHistoryListDto>($"/api/playhistory/source/{source}{queryString}", cancellationToken);
+      var response = await _httpClient.GetAsync($"/api/playhistory/source/{Uri.EscapeDataString(source ?? "")}{queryString}", cancellationToken);
+
+      // Handle 400 for invalid source types gracefully
+      if (response.StatusCode == System.Net.HttpStatusCode.BadRequest)
+      {
+        _logger.LogWarning("Invalid source type: {Source}", source);
+        return null;
+      }
+
+      response.EnsureSuccessStatusCode();
+      return await response.Content.ReadFromJsonAsync<PlayHistoryListDto>(cancellationToken);
     }
     catch (Exception ex)
     {

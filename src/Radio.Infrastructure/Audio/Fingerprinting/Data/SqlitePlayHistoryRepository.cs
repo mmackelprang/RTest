@@ -310,6 +310,80 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
   }
 
   /// <inheritdoc/>
+  public async Task<bool> UpdateAsync(PlayHistoryEntry entry, CancellationToken ct = default)
+  {
+    var conn = await _dbContext.GetConnectionAsync(ct);
+
+    var sql = """
+      UPDATE PlayHistory
+      SET TrackMetadataId = @TrackMetadataId,
+          FingerprintId = @FingerprintId,
+          MetadataSource = @MetadataSource,
+          SourceDetails = @SourceDetails,
+          Duration = @Duration,
+          IdentificationConfidence = @Confidence,
+          WasIdentified = @WasIdentified
+      WHERE Id = @Id
+      """;
+
+    await using var cmd = conn.CreateCommand();
+    cmd.CommandText = sql;
+    cmd.Parameters.AddWithValue("@Id", entry.Id);
+    cmd.Parameters.AddWithValue("@TrackMetadataId", (object?)entry.TrackMetadataId ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("@FingerprintId", (object?)entry.FingerprintId ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("@MetadataSource", entry.MetadataSource?.ToString() ?? (object)DBNull.Value);
+    cmd.Parameters.AddWithValue("@SourceDetails", (object?)entry.SourceDetails ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("@Duration", (object?)entry.DurationSeconds ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("@Confidence", (object?)entry.IdentificationConfidence ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("@WasIdentified", entry.WasIdentified ? 1 : 0);
+
+    var rowsAffected = await cmd.ExecuteNonQueryAsync(ct);
+    if (rowsAffected > 0)
+    {
+      _logger.LogDebug("Updated play history entry {Id}", entry.Id);
+    }
+
+    return rowsAffected > 0;
+  }
+
+  /// <inheritdoc/>
+  public async Task<PlayHistoryEntry?> GetRecentUnidentifiedAsync(
+    PlaySource source,
+    int withinMinutes = 5,
+    CancellationToken ct = default)
+  {
+    var conn = await _dbContext.GetConnectionAsync(ct);
+
+    var cutoffTime = DateTime.UtcNow.AddMinutes(-withinMinutes);
+
+    var sql = """
+      SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.Source, h.MetadataSource, h.SourceDetails,
+             h.Duration, h.IdentificationConfidence, h.WasIdentified,
+             m.Title, m.Artist, m.Album, m.AlbumArtist, m.CoverArtUrl
+      FROM PlayHistory h
+      LEFT JOIN TrackMetadata m ON h.TrackMetadataId = m.Id
+      WHERE h.Source = @Source
+        AND h.WasIdentified = 0
+        AND h.PlayedAt >= @CutoffTime
+      ORDER BY h.PlayedAt DESC
+      LIMIT 1
+      """;
+
+    await using var cmd = conn.CreateCommand();
+    cmd.CommandText = sql;
+    cmd.Parameters.AddWithValue("@Source", source.ToString());
+    cmd.Parameters.AddWithValue("@CutoffTime", cutoffTime.ToString("O"));
+
+    await using var reader = await cmd.ExecuteReaderAsync(ct);
+    if (!await reader.ReadAsync(ct))
+    {
+      return null;
+    }
+
+    return MapToPlayHistoryEntry(reader);
+  }
+
+  /// <inheritdoc/>
   public async Task<(IReadOnlyList<PlayHistoryEntry> Items, int TotalCount)> SearchAsync(
     string searchTerm,
     int? limit = null,

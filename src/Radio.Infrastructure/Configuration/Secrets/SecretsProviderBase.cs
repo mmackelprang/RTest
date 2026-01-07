@@ -78,6 +78,10 @@ public abstract class SecretsProviderBase : ISecretsProvider
       {
         result = result.Replace(tag.Tag, secret);
       }
+      else
+      {
+        _logger.LogWarning("Failed to resolve secret tag {Tag}", tag.Identifier);
+      }
     }
     return result;
   }

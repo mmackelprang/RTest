@@ -35,7 +35,17 @@ public class RadioApiService
   {
     try
     {
-      return await _httpClient.GetFromJsonAsync<RadioStateDto>("/api/radio/state", cancellationToken);
+      var response = await _httpClient.GetAsync("/api/radio/state", cancellationToken);
+
+      // 400 is expected when radio is not the active source - don't log as error
+      if (response.StatusCode == System.Net.HttpStatusCode.BadRequest)
+      {
+        _logger.LogDebug("Radio is not the active source");
+        return null;
+      }
+
+      response.EnsureSuccessStatusCode();
+      return await response.Content.ReadFromJsonAsync<RadioStateDto>(cancellationToken);
     }
     catch (Exception ex)
     {

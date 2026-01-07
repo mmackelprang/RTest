@@ -56,8 +56,30 @@ public sealed class AcoustIdClient : IDisposable
       return null;
     }
 
+    // Check for common configuration issues (e.g., API key stored with quotes)
+    if (apiKey.StartsWith('"') || apiKey.EndsWith('"') || apiKey.Contains("${secret:"))
+    {
+      _logger.LogError(
+        "AcoustID API key appears to be misconfigured (contains quotes or unresolved secret tag). " +
+        "Please re-save the API key in Settings > Secrets.");
+      return null;
+    }
+
     try
     {
+      // Validate inputs
+      if (string.IsNullOrWhiteSpace(fingerprint))
+      {
+        _logger.LogWarning("Empty fingerprint provided to AcoustID lookup");
+        return null;
+      }
+
+      if (duration <= 0)
+      {
+        _logger.LogWarning("Invalid duration {Duration} provided to AcoustID lookup", duration);
+        return null;
+      }
+
       // Use POST for fingerprint data because fingerprints can be very long
       // (potentially thousands of characters) and may exceed URL length limits
       var queryParams = new Dictionary<string, string>
@@ -70,10 +92,26 @@ public sealed class AcoustIdClient : IDisposable
 
       var baseUrl = _options.AcoustId.BaseUrl.TrimEnd('/');
       using var content = new FormUrlEncodedContent(queryParams);
-      using var httpResponse = await _httpClient.PostAsync($"{baseUrl}{LookupEndpoint}", content, ct);
-      httpResponse.EnsureSuccessStatusCode();
 
-      var response = await httpResponse.Content.ReadFromJsonAsync<AcoustIdResponse>(ct);
+      _logger.LogDebug(
+        "Sending AcoustID lookup request: duration={Duration}s, fingerprint length={FingerprintLength} chars",
+        duration, fingerprint.Length);
+
+      using var httpResponse = await _httpClient.PostAsync($"{baseUrl}{LookupEndpoint}", content, ct);
+
+      // Read response content for better error logging
+      var responseContent = await httpResponse.Content.ReadAsStringAsync(ct);
+
+      if (!httpResponse.IsSuccessStatusCode)
+      {
+        _logger.LogError(
+          "AcoustID API returned {StatusCode}: {Response}",
+          httpResponse.StatusCode, responseContent);
+        return null;
+      }
+
+      // Parse the already-read response content
+      var response = System.Text.Json.JsonSerializer.Deserialize<AcoustIdResponse>(responseContent);
 
       if (response?.Status != "ok" || response.Results == null || response.Results.Count == 0)
       {

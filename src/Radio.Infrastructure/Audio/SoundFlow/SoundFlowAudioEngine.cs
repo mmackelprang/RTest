@@ -60,6 +60,11 @@ public class SoundFlowAudioEngine : IAudioEngine
 
     // Subscribe to device manager events
     _deviceManager.DevicesChanged += OnDeviceManagerDevicesChanged;
+
+    // Subscribe to master mixer events to sync with playback device
+    _masterMixer.MasterVolumeChanged += OnMasterVolumeChanged;
+    _masterMixer.MuteStateChanged += OnMuteStateChanged;
+    // Balance requires custom handling, currently not synced to engine directly
   }
 
   /// <inheritdoc/>
@@ -144,6 +149,10 @@ public class SoundFlowAudioEngine : IAudioEngine
         {
           // Initialize the playback device with our format
           _playbackDevice = _engine.InitializePlaybackDevice(deviceInfo, _audioFormat);
+          
+          // Apply initial volume/mute state
+          _playbackDevice.MasterMixer.Volume = _masterMixer.GetEffectiveVolume();
+          
           _playbackDevice.Start();
           _logger.LogInformation("Playback device initialized and started: {DeviceName}", deviceInfo.Name);
 
@@ -435,6 +444,25 @@ public class SoundFlowAudioEngine : IAudioEngine
     DeviceChanged?.Invoke(this, e);
   }
 
+  private void OnMasterVolumeChanged(object? sender, float volume)
+  {
+    if (_playbackDevice != null)
+    {
+      // Apply volume if not muted. If muted, Volume should be 0, but IsMuted handles that.
+      // However, SoundFlow Mixer Volume is usually the gain.
+      // If we use _masterMixer.GetEffectiveVolume(), it handles mute logic.
+      _playbackDevice.MasterMixer.Volume = _masterMixer.GetEffectiveVolume();
+    }
+  }
+
+  private void OnMuteStateChanged(object? sender, bool isMuted)
+  {
+    if (_playbackDevice != null)
+    {
+       _playbackDevice.MasterMixer.Volume = _masterMixer.GetEffectiveVolume();
+    }
+  }
+
   private void ThrowIfDisposed()
   {
     ObjectDisposedException.ThrowIf(_disposed, this);
@@ -459,6 +487,10 @@ public class SoundFlowAudioEngine : IAudioEngine
 
     // Unsubscribe from device manager events
     _deviceManager.DevicesChanged -= OnDeviceManagerDevicesChanged;
+
+    // Unsubscribe from master mixer events
+    _masterMixer.MasterVolumeChanged -= OnMasterVolumeChanged;
+    _masterMixer.MuteStateChanged -= OnMuteStateChanged;
 
     // Clear sources
     _masterMixer.ClearSources();

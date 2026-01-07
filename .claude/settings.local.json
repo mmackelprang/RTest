@@ -27,7 +27,14 @@
       "Bash(tasklist:*)",
       "Bash(curl.exe:*)",
       "Bash(del /f \"D:\\\\prj\\\\rtest\\\\rtest\\\\src\\\\Radio.Infrastructure\\\\Audio\\\\SoundFlow\\\\SDRAudioStream.cs\")",
-      "Bash(wmic process:*)"
+      "Bash(wmic process:*)",
+      "Bash(if not exist \"D:\\\\prj\\\\rtest\\\\rtest\\\\tests\\\\Radio.IntegrationTests\\\\TestSupport\" mkdir \"D:\\\\prj\\\\rtest\\\\rtest\\\\tests\\\\Radio.IntegrationTests\\\\TestSupport\")",
+      "Bash(if not exist:*)",
+      "Bash(if not exist \"D:\\\\prj\\\\rtest\\\\rtest\\\\tests\\\\Radio.IntegrationTests\\\\Audio\" mkdir \"D:\\\\prj\\\\rtest\\\\rtest\\\\tests\\\\Radio.IntegrationTests\\\\Audio\")",
+      "Bash(if not exist \"D:\\\\prj\\\\rtest\\\\rtest\\\\tests\\\\Radio.IntegrationTests\\\\PlayHistory\" mkdir \"D:\\\\prj\\\\rtest\\\\rtest\\\\tests\\\\Radio.IntegrationTests\\\\PlayHistory\")",
+      "Bash(if not exist \"D:\\\\prj\\\\rtest\\\\rtest\\\\tests\\\\Radio.IntegrationTests\\\\Fingerprinting\" mkdir \"D:\\\\prj\\\\rtest\\\\rtest\\\\tests\\\\Radio.IntegrationTests\\\\Fingerprinting\")",
+      "Bash(if not exist \"D:\\\\prj\\\\rtest\\\\rtest\\\\tests\\\\Radio.IntegrationTests\\\\SignalR\" mkdir \"D:\\\\prj\\\\rtest\\\\rtest\\\\tests\\\\Radio.IntegrationTests\\\\SignalR\")",
+      "Bash(dotnet sln add:*)"
     ]
   }
 }

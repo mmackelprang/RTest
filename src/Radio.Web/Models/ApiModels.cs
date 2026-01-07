@@ -47,7 +47,8 @@ public record UpdatePlaybackRequest(
   string? Action,
   float? Volume,
   bool? IsMuted,
-  float? Balance
+  float? Balance,
+  TimeSpan? SeekPosition = null
 );
 
 // Queue API DTOs
@@ -664,3 +665,4 @@ public class ReconcileConfigurationRequestDto
   public string TargetStore { get; set; } = "";
   public List<string> Keys { get; set; } = new();
 }
+

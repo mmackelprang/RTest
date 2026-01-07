@@ -97,18 +97,17 @@ public sealed class BackgroundIdentificationService : BackgroundService
   {
     _logger.LogDebug("Starting identification cycle");
     var cycleStartTime = DateTime.UtcNow;
-    
+
     // Resolve services from scope
     using var scope = _serviceProvider.CreateScope();
     var audioTap = scope.ServiceProvider.GetService<IAudioSampleProvider>();
     var fingerprintService = scope.ServiceProvider.GetService<IFingerprintService>();
     var lookupService = scope.ServiceProvider.GetService<IMetadataLookupService>();
-    var historyRepo = scope.ServiceProvider.GetService<IPlayHistoryRepository>();
 
-    if (audioTap == null || fingerprintService == null || lookupService == null || historyRepo == null)
+    if (audioTap == null || fingerprintService == null || lookupService == null)
     {
-      _logger.LogWarning("Required services not available for fingerprinting. AudioTap={HasAudioTap}, FingerprintService={HasFingerprint}, LookupService={HasLookup}, HistoryRepo={HasHistory}",
-        audioTap != null, fingerprintService != null, lookupService != null, historyRepo != null);
+      _logger.LogWarning("Required services not available for fingerprinting. AudioTap={HasAudioTap}, FingerprintService={HasFingerprint}, LookupService={HasLookup}",
+        audioTap != null, fingerprintService != null, lookupService != null);
       return;
     }
 
@@ -169,23 +168,12 @@ public sealed class BackgroundIdentificationService : BackgroundService
       MarkAsRecentlyIdentified(trackKey);
     }
 
-    // Record to play history
-    var historyEntry = new PlayHistoryEntry
-    {
-      Id = Guid.NewGuid().ToString(),
-      TrackMetadataId = result?.Metadata?.Id,
-      FingerprintId = result?.FingerprintId ?? fingerprint.Id,
-      PlayedAt = DateTime.UtcNow,
-      Source = audioTap.SourceType,
-      SourceDetails = audioTap.SourceName,
-      DurationSeconds = fingerprint.DurationSeconds,
-      IdentificationConfidence = result?.Confidence,
-      WasIdentified = result?.IsMatch ?? false
-    };
+    // Note: Play history recording is now handled by AudioManager which:
+    // 1. Creates an entry when a track starts playing
+    // 2. Updates that entry when TrackIdentified event is raised
+    // This avoids duplicate entries and allows proper tracking from play start.
 
-    await historyRepo.RecordPlayAsync(historyEntry, ct);
-
-    // Raise event for UI updates
+    // Raise event for UI updates and play history updates
     if (result?.IsMatch == true && result.Metadata != null)
     {
       _logger.LogInformation("✓ Identified track: '{Title}' by '{Artist}' (confidence: {Confidence:P0})",
@@ -195,7 +183,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
     }
     else
     {
-      _logger.LogInformation("✗ Track not identified (fingerprint stored for manual tagging)");
+      _logger.LogDebug("Track not identified via fingerprinting");
     }
     
     var totalElapsed = (DateTime.UtcNow - cycleStartTime).TotalMilliseconds;

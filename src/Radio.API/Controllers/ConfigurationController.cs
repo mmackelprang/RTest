@@ -344,7 +344,17 @@ public class ConfigurationController : ControllerBase
         string valueToStore;
         if (kvp.Value is System.Text.Json.JsonElement jsonElement)
         {
-          valueToStore = jsonElement.GetRawText();
+          // For string values, use GetString() to extract the unquoted value
+          // GetRawText() returns the raw JSON which includes quotes for strings
+          if (jsonElement.ValueKind == System.Text.Json.JsonValueKind.String)
+          {
+            valueToStore = jsonElement.GetString() ?? "";
+          }
+          else
+          {
+            // For complex objects, arrays, numbers, booleans - use GetRawText()
+            valueToStore = jsonElement.GetRawText();
+          }
         }
         else if (kvp.Value is string str)
         {

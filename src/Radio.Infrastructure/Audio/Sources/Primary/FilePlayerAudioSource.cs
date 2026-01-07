@@ -7,6 +7,8 @@ using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.SoundFlow;
+using Radio.Infrastructure.Configuration.Abstractions;
+using Radio.Infrastructure.Configuration.Models;
 using SoundFlow.Backends.MiniAudio;
 using SoundFlow.Interfaces;
 using SoundFlow.Metadata;
@@ -25,6 +27,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private readonly IOptionsMonitor<FilePlayerPreferences> _preferences;
   private readonly BackgroundIdentificationService? _identificationService;
   private readonly SoundFlowPlaybackService? _playbackService;
+  private readonly IConfigurationManager? _configurationManager;
   private readonly string _rootDir;
   private readonly Dictionary<string, object> _metadata = new();
   private Queue<string> _playlist = new();
@@ -51,6 +54,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <param name="identificationService">Optional fingerprinting service for track identification.</param>
   /// <param name="metricsCollector">Optional metrics collector for tracking playback metrics.</param>
   /// <param name="playbackService">Optional SoundFlow playback service for audio output.</param>
+  /// <param name="configurationManager">Optional configuration manager for queue persistence.</param>
   public FilePlayerAudioSource(
     ILogger<FilePlayerAudioSource> logger,
     IOptionsMonitor<FilePlayerOptions> options,
@@ -58,7 +62,8 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     string rootDir = "",
     BackgroundIdentificationService? identificationService = null,
     IMetricsCollector? metricsCollector = null,
-    SoundFlowPlaybackService? playbackService = null)
+    SoundFlowPlaybackService? playbackService = null,
+    IConfigurationManager? configurationManager = null)
     : base(logger, metricsCollector)
   {
     _options = options;
@@ -66,6 +71,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     _rootDir = rootDir;
     _identificationService = identificationService;
     _playbackService = playbackService;
+    _configurationManager = configurationManager;
 
     // Subscribe to track identification events if service is available
     if (_identificationService != null)
@@ -619,6 +625,21 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       }
     }
 
+    // Stop any existing playback before starting new playback
+    // This prevents multiple audio streams playing simultaneously
+    if (_playbackService != null && !string.IsNullOrEmpty(_playbackId))
+    {
+      Logger.LogDebug("Stopping existing playback before starting new playback: {PlaybackId}", _playbackId);
+      await _playbackService.StopAsync(_playbackId, cancellationToken);
+    }
+
+    // Cancel any existing playback monitoring
+    if (_playbackCts != null)
+    {
+      await _playbackCts.CancelAsync();
+      _playbackCts.Dispose();
+    }
+
     // Generate playback ID for this session
     _playbackId = $"file-player-{Guid.NewGuid():N}";
     _playbackCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -655,40 +676,35 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   {
     try
     {
-      // Wait for the duration of the track
-      if (_duration > TimeSpan.Zero)
+      var interval = TimeSpan.FromSeconds(1);
+
+      while (!cancellationToken.IsCancellationRequested)
       {
-        await Task.Delay(_duration, cancellationToken);
-      }
-      else
-      {
-        // Fallback: wait and check periodically
-        while (!cancellationToken.IsCancellationRequested)
+        if (State == AudioSourceState.Playing)
         {
-          // Combine if statements for clarity
-          if (_playbackService != null &&
-              _playbackId != null &&
-              !_playbackService.IsPlaying(_playbackId))
+          if (_duration > TimeSpan.Zero)
+          {
+            _position = _position.Add(interval);
+            if (_position >= _duration)
+            {
+              break;
+            }
+          }
+          else if (_playbackService != null && _playbackId != null && !_playbackService.IsPlaying(_playbackId))
           {
             break;
           }
-          await Task.Delay(500, cancellationToken);
         }
+        await Task.Delay(interval, cancellationToken);
       }
 
       if (!cancellationToken.IsCancellationRequested)
       {
-        // Playback completed naturally
         State = AudioSourceState.Stopped;
         OnPlaybackCompleted(PlaybackCompletionReason.EndOfContent);
 
-        // Auto-advance to next track if queue is not empty
-        // Use CancellationToken.None because auto-advance should proceed even if the
-        // original playback token was cancelled (the song completed naturally)
-        if (_playlist.Count > 0)
-        {
-          await NextAsync(CancellationToken.None);
-        }
+        // Always attempt to play next - NextAsync handles queue/repeat logic
+        await NextAsync(CancellationToken.None);
       }
     }
     catch (OperationCanceledException)
@@ -1320,20 +1336,68 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     {
       // Get all tracks in order (current + queue)
       var allTracks = GetAllTracksInOrder();
-      
-      // Update preferences with current queue state
-      // NOTE: Directly mutating _preferences.CurrentValue is a limitation of the current design.
-      // Ideally, preferences should be updated through IConfigurationManager or a dedicated
-      // preferences service that properly handles serialization and change notification.
-      // The PreferencesPersistenceService periodically reads these values and persists them.
-      _preferences.CurrentValue.QueueItems = allTracks;
-      _preferences.CurrentValue.CurrentQueueIndex = _currentIndex;
-      
+
+      // Save queue state using IConfigurationManager if available
+      // This ensures proper persistence rather than relying on mutating IOptionsMonitor snapshots
+      if (_configurationManager != null)
+      {
+        // Fire-and-forget async save to avoid blocking
+        _ = SaveQueueStateAsync(allTracks, _currentIndex);
+      }
+      else
+      {
+        // Fallback: Try to mutate preferences snapshot (may not persist reliably)
+        _preferences.CurrentValue.QueueItems = allTracks;
+        _preferences.CurrentValue.CurrentQueueIndex = _currentIndex;
+      }
+
       Logger.LogDebug("Saved queue state: {Count} items, current index: {Index}", allTracks.Count, _currentIndex);
     }
     catch (Exception ex)
     {
       Logger.LogWarning(ex, "Failed to save queue state to preferences");
+    }
+  }
+
+  /// <summary>
+  /// Asynchronously saves queue state to configuration store.
+  /// </summary>
+  private async Task SaveQueueStateAsync(List<string> queueItems, int currentIndex)
+  {
+    if (_configurationManager == null) return;
+
+    try
+    {
+      var mainStoreId = _configurationManager.CurrentStoreType ==
+        Configuration.Models.ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+
+      IConfigurationStore store;
+      try
+      {
+        store = await _configurationManager.GetStoreAsync(mainStoreId);
+      }
+      catch
+      {
+        store = await _configurationManager.CreateStoreAsync(mainStoreId);
+      }
+
+      // Serialize queue items as JSON array
+      var queueJson = System.Text.Json.JsonSerializer.Serialize(queueItems);
+
+      var entries = new List<ConfigurationEntry>
+      {
+        new() { Key = $"{FilePlayerPreferences.SectionName}:QueueItems", Value = queueJson },
+        new() { Key = $"{FilePlayerPreferences.SectionName}:CurrentQueueIndex", Value = currentIndex.ToString() }
+      };
+
+      await store.SetEntriesAsync(entries);
+      await store.SaveAsync();
+
+      Logger.LogTrace("Queue state persisted to configuration store: {Count} items", queueItems.Count);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to save queue state to configuration store");
     }
   }
 

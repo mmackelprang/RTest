@@ -16,6 +16,7 @@ public class AudioController : ControllerBase
 {
   private readonly ILogger<AudioController> _logger;
   private readonly IAudioEngine _audioEngine;
+  private readonly IAudioManager? _audioManager;
   private readonly IDuckingService _duckingService;
 
   /// <summary>
@@ -24,10 +25,12 @@ public class AudioController : ControllerBase
   public AudioController(
     ILogger<AudioController> logger,
     IAudioEngine audioEngine,
-    IDuckingService duckingService)
+    IDuckingService duckingService,
+    IAudioManager? audioManager = null)
   {
     _logger = logger;
     _audioEngine = audioEngine;
+    _audioManager = audioManager;
     _duckingService = duckingService;
   }
 
@@ -42,7 +45,10 @@ public class AudioController : ControllerBase
     try
     {
       var mixer = _audioEngine.GetMasterMixer();
-      var primarySource = _audioEngine.GetActivePrimaryAudioSource();
+      // Prefer AudioManager's tracked active source over the extension method.
+      // The extension method just returns the first primary source in the mixer,
+      // which may not be the source the user actually switched to.
+      var primarySource = _audioManager?.ActiveSource ?? _audioEngine.GetActivePrimaryAudioSource();
 
       var state = new PlaybackStateDto
       {
@@ -142,7 +148,7 @@ public class AudioController : ControllerBase
       }
 
       // Handle playback actions
-      var primarySource = _audioEngine.GetActivePrimaryAudioSource();
+      var primarySource = _audioManager?.ActiveSource ?? _audioEngine.GetActivePrimaryAudioSource();
 
       switch (request.Action ?? PlaybackAction.None)
       {
@@ -315,7 +321,7 @@ public class AudioController : ControllerBase
   {
     try
     {
-      var primarySource = _audioEngine.GetActivePrimaryAudioSource();
+      var primarySource = _audioManager?.ActiveSource ?? _audioEngine.GetActivePrimaryAudioSource();
 
       if (primarySource is not IPrimaryAudioSource primary)
       {
@@ -353,7 +359,7 @@ public class AudioController : ControllerBase
   {
     try
     {
-      var primarySource = _audioEngine.GetActivePrimaryAudioSource();
+      var primarySource = _audioManager?.ActiveSource ?? _audioEngine.GetActivePrimaryAudioSource();
 
       if (primarySource is not IPrimaryAudioSource primary)
       {
@@ -390,7 +396,7 @@ public class AudioController : ControllerBase
   {
     try
     {
-      var primarySource = _audioEngine.GetActivePrimaryAudioSource();
+      var primarySource = _audioManager?.ActiveSource ?? _audioEngine.GetActivePrimaryAudioSource();
 
       if (primarySource is not IPrimaryAudioSource primary)
       {
@@ -426,7 +432,7 @@ public class AudioController : ControllerBase
     try
     {
       var mixer = _audioEngine.GetMasterMixer();
-      var primarySource = _audioEngine.GetActivePrimaryAudioSource();
+      var primarySource = _audioManager?.ActiveSource ?? _audioEngine.GetActivePrimaryAudioSource();
 
       if (primarySource is not IPrimaryAudioSource primary)
       {
@@ -467,7 +473,7 @@ public class AudioController : ControllerBase
   {
     try
     {
-      var primarySource = _audioEngine.GetActivePrimaryAudioSource();
+      var primarySource = _audioManager?.ActiveSource ?? _audioEngine.GetActivePrimaryAudioSource();
 
       var nowPlaying = new NowPlayingDto();
 

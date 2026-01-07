@@ -87,6 +87,28 @@ public interface IPlayHistoryRepository
   Task<bool> DeleteAsync(string id, CancellationToken ct = default);
 
   /// <summary>
+  /// Updates an existing play history entry with new metadata.
+  /// Used when fingerprinting identifies a track after playback started.
+  /// </summary>
+  /// <param name="entry">The updated history entry.</param>
+  /// <param name="ct">Cancellation token.</param>
+  /// <returns>True if updated, false if not found.</returns>
+  Task<bool> UpdateAsync(PlayHistoryEntry entry, CancellationToken ct = default);
+
+  /// <summary>
+  /// Gets the most recent unidentified play history entry for a source.
+  /// Used to find entries that can be updated with fingerprinting results.
+  /// </summary>
+  /// <param name="source">The audio source type.</param>
+  /// <param name="withinMinutes">Time window to look back.</param>
+  /// <param name="ct">Cancellation token.</param>
+  /// <returns>The most recent unidentified entry, or null if not found.</returns>
+  Task<PlayHistoryEntry?> GetRecentUnidentifiedAsync(
+    PlaySource source,
+    int withinMinutes = 5,
+    CancellationToken ct = default);
+
+  /// <summary>
   /// Searches play history entries by title, artist, or album.
   /// </summary>
   /// <param name="searchTerm">The search term to match against title, artist, or album.</param>
