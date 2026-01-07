@@ -95,8 +95,13 @@ public sealed class MetadataLookupService : IMetadataLookupService
       };
     }
 
-    _logger.LogInformation("Querying AcoustID for fingerprint {FingerprintId} (hash: {Hash})", 
-      fingerprint.Id, fingerprint.ChromaprintHash?.Substring(0, Math.Min(50, fingerprint.ChromaprintHash?.Length ?? 0)));
+    _logger.LogInformation("Querying AcoustID for fingerprint {FingerprintId}", fingerprint.Id);
+    if (_logger.IsEnabled(LogLevel.Debug))
+    {
+      _logger.LogDebug(
+        "Fingerprint hash preview: {HashPreview}", 
+        fingerprint.ChromaprintHash?.Substring(0, Math.Min(50, fingerprint.ChromaprintHash?.Length ?? 0)));
+    }
     
     var acoustIdResult = await _acoustIdClient.LookupAsync(
       fingerprint.ChromaprintHash,

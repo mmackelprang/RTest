@@ -25,6 +25,7 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   private object? _soundComponent;
   private AudioCaptureDevice? _captureDevice;
   private MiniAudioEngine? _audioEngine;
+  private int _audioCaptureCallCount = 0;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="USBAudioSourceBase"/> class.
@@ -228,8 +229,6 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
     // Default implementation does nothing
     // Derived classes can override to process audio samples
   }
-  
-  private int _audioCaptureCallCount = 0;
 
   /// <summary>
   /// Cleans up the capture device and audio engine.
