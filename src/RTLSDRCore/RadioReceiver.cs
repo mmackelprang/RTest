@@ -433,7 +433,7 @@ namespace RTLSDRCore
                     _currentBand = band;
                     _currentModulation = band.DefaultModulation;
 
-                    var newFrequency = specificFrequency ?? band.CenterFrequencyHz;
+                    var newFrequency = specificFrequency ?? _currentFrequencyHz;
                     newFrequency = band.ClampFrequency(newFrequency);
 
                     if (_state == ReceiverState.Running || _state == ReceiverState.Scanning)

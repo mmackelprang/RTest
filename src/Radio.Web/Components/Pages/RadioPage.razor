@@ -97,9 +97,13 @@
       <MudSelect T="string" Value="@_radioState.Step.ToString()" ValueChanged="@HandleStepChangeAsync" 
                  Label="Step Size" Variant="Variant.Outlined" Dense="true" 
                  Style="min-width: 150px;">
-        <MudSelectItem Value="@("0.1")">0.1 MHz</MudSelectItem>
-        <MudSelectItem Value="@("0.2")">0.2 MHz</MudSelectItem>
-        <MudSelectItem Value="@("1.0")">1.0 MHz</MudSelectItem>
+        <MudSelectItem Value="@("0.001")">0.001 MHz (1 kHz)</MudSelectItem>
+        <MudSelectItem Value="@("0.009")">0.009 MHz (9 kHz)</MudSelectItem>
+        <MudSelectItem Value="@("0.01")">0.01 MHz (10 kHz)</MudSelectItem>
+        <MudSelectItem Value="@("0.025")">0.025 MHz (25 kHz)</MudSelectItem>
+        <MudSelectItem Value="@("0.1")">0.1 MHz (100 kHz)</MudSelectItem>
+        <MudSelectItem Value="@("0.2")">0.2 MHz (200 kHz)</MudSelectItem>
+        <MudSelectItem Value="@("1.0")">1.0 MHz (1 MHz)</MudSelectItem>
       </MudSelect>
       
       @if (_radioState.IsScanning)
@@ -415,8 +419,25 @@
     try
     {
       Logger.LogInformation("Calling HandleBandChangeAsync with band: {Band}", newBand);
+      
+      // Optimistic update
+      if (_radioState != null)
+      {
+         _radioState = _radioState with { Band = newBand };
+         // Also update visible frequency limits immediately if possible, but bands have different ranges
+         // so current frequency might be invalid. The API will handle clamping.
+         // We'll trust the eventual state update for frequency.
+      }
+      
       var success = await RadioApi.SetBandAsync(newBand);
       Logger.LogInformation("SetBandAsync result: {Success}", success);
+      
+      // Trigger a reload to get the clamped frequency and step immediately
+      if (success)
+      {
+          await LoadRadioStateAsync();
+          await InvokeAsync(StateHasChanged);
+      }
     }
     catch (Exception ex)
     {
@@ -431,6 +452,12 @@
       Logger.LogInformation("Calling HandleStepChangeAsync with step: {Step}", newStep);
       if (double.TryParse(newStep, out var step))
       {
+        // Optimistic update
+        if (_radioState != null)
+        {
+            _radioState = _radioState with { Step = step };
+        }
+        
         var success = await RadioApi.SetStepAsync(step);
         Logger.LogInformation("SetStepAsync result: {Success}", success);
       }
@@ -562,16 +589,16 @@
   
   private string FormatFrequency(double frequency, string band)
   {
-    // AM band uses kHz (no decimal), all others use MHz (one decimal)
+    // AM band uses kHz (no decimal), all others use MHz (3 decimals)
     return band switch
     {
-      "AM" => frequency.ToString("0"),        // AM: kHz format (e.g., "1010")
-      "FM" => frequency.ToString("0.0"),      // FM: MHz format (e.g., "101.5")
-      "AIR" => frequency.ToString("0.000"),   // Aircraft: MHz format with 3 decimals (e.g., "121.500")
-      "SW" => frequency.ToString("0.000"),    // Shortwave: MHz format with 3 decimals (e.g., "7.200")
-      "WB" => frequency.ToString("0.000"),    // Weather: MHz format with 3 decimals (e.g., "162.400")
-      "VHF" => frequency.ToString("0.000"),   // VHF: MHz format with 3 decimals (e.g., "156.800")
-      _ => frequency.ToString("0.000")        // Default: 3 decimals for unknown bands
+      "AM" => $"{frequency:0} kHz",           // AM: kHz format (e.g., "1010 kHz")
+      "FM" => $"{frequency:0.000} MHz",       // FM: MHz format (e.g., "101.500 MHz")
+      "AIR" => $"{frequency:0.000} MHz",      // Aircraft: MHz format
+      "SW" => $"{frequency:0.000} MHz",       // Shortwave: MHz format
+      "WB" => $"{frequency:0.000} MHz",       // Weather: MHz format
+      "VHF" => $"{frequency:0.000} MHz",      // VHF: MHz format
+      _ => $"{frequency:0.000} MHz"           // Default: MHz format
     };
   }
   

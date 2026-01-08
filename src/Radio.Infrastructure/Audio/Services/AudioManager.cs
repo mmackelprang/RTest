@@ -607,6 +607,14 @@ public class AudioManager : IAudioManager
           return;
         }
 
+        // Guard: Prevent cleaning up the active source if it was also tracked as previous
+        if (_previousSource == _activeSource || _previousSource.Id == _activeSource.Id)
+        {
+          _logger.LogInformation("Active source and previous source are the same. Skipping cleanup.");
+          _previousSource = null;
+          return;
+        }
+
         _logger.LogInformation(
           "Active source {ActiveSource} is now playing. Cleaning up previous source {PreviousSource}",
           source.Name, _previousSource.Name);

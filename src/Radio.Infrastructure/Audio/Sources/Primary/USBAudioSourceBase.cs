@@ -265,13 +265,36 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
       MetadataInternal.TryGetValue("Device", out var device) ? device : "unknown",
       _reservedPort ?? "none",
       State);
+
+    try
+    {
+      _captureDevice?.Start();
+    }
+    catch (Exception ex)
+    {
+       Logger.LogError(ex, "Failed to start audio capture device for {SourceName}", Name);
+       throw;
+    }
+
     return Task.CompletedTask;
   }
 
   /// <inheritdoc/>
   protected override Task PauseCoreAsync(CancellationToken cancellationToken)
   {
-    Logger.LogInformation("Pausing {SourceName} audio (muting)", Name);
+    Logger.LogInformation("Pausing {SourceName} audio (stopping capture)", Name);
+    
+    // For live inputs, pause implies stopping the capture stream to release resources
+    // or simply stopping data flow.
+    try
+    {
+      _captureDevice?.Stop();
+    }
+    catch (Exception ex)
+    {
+       Logger.LogWarning(ex, "Failed to stop audio capture device during pause for {SourceName}", Name);
+    }
+
     return Task.CompletedTask;
   }
 
@@ -279,13 +302,23 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   protected override Task ResumeCoreAsync(CancellationToken cancellationToken)
   {
     Logger.LogInformation("Resuming {SourceName} audio", Name);
-    return Task.CompletedTask;
+    return PlayCoreAsync(cancellationToken);
   }
 
   /// <inheritdoc/>
   protected override Task StopCoreAsync(CancellationToken cancellationToken)
   {
     Logger.LogInformation("Stopping {SourceName} audio capture", Name);
+    
+    try
+    {
+      _captureDevice?.Stop();
+    }
+    catch (Exception ex)
+    {
+       Logger.LogWarning(ex, "Failed to stop audio capture device for {SourceName}", Name);
+    }
+
     return Task.CompletedTask;
   }
 

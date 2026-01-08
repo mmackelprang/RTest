@@ -100,9 +100,9 @@ if (-not $NoShutdown) {
     Write-Host "Shutting down application..." -ForegroundColor Yellow
     try {
         Invoke-RestMethod -Uri "http://localhost:5000/api/system/shutdown" -Method Post -TimeoutSec 5
-        Write-Host "✓ Shutdown initiated" -ForegroundColor Green
+        Write-Host "[OK] Shutdown initiated" -ForegroundColor Green
     } catch {
-        Write-Host "⚠ Could not shutdown application (may already be stopped)" -ForegroundColor Yellow
+        Write-Host "WARNING: Could not shutdown application (may already be stopped)" -ForegroundColor Yellow
     }
 }
 

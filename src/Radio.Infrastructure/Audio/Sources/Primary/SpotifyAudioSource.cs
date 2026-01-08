@@ -487,6 +487,7 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
       try
       {
         await _client!.Player.ResumePlayback(request, cancellationToken);
+        Logger.LogInformation("Successfully sent ResumePlayback command for URI: {Uri}", uri);
       }
       catch (APIException ex) when (ex.Message.Contains("No active device found") || ex.Response?.StatusCode == System.Net.HttpStatusCode.NotFound)
       {
@@ -497,7 +498,7 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
         {
           request.DeviceId = deviceId;
           await _client!.Player.ResumePlayback(request, cancellationToken);
-          Logger.LogInformation("Activated Spotify device: {DeviceId}", deviceId);
+          Logger.LogInformation("Activated Spotify device and resumed playback: {DeviceId}", deviceId);
         }
         else
         {
@@ -506,6 +507,7 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
       }
 
       State = AudioSourceState.Playing;
+      Logger.LogInformation("Spotify audio source state transitioned to Playing");
       await UpdatePlaybackStateAsync(cancellationToken);
     }
     catch (Exception ex)
@@ -751,8 +753,11 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <inheritdoc/>
   public Task ClearQueueAsync(CancellationToken cancellationToken = default)
   {
-    // Spotify API doesn't support clearing the queue
-    throw new NotSupportedException("Spotify API does not support clearing the queue.");
+    // Spotify API doesn't support clearing the queue.
+    // We log a warning and return success to allow bulk operations (like Play Album)
+    // that attempt to clear the queue first to succeed.
+    Logger.LogWarning("Spotify API does not support clearing the queue. Ignoring request.");
+    return Task.CompletedTask;
   }
 
   /// <inheritdoc/>
@@ -888,14 +893,15 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
   /// <summary>
   /// Internal helper class for capturing audio from integrated librespot process.
+  /// Uses a pull-based model where SoundFlow drives the timing by requesting audio
+  /// when needed, creating natural backpressure to rate-limit librespot.
   /// </summary>
   private class SpotifyIntegratedAudioSource : PrimaryAudioSourceBase
   {
     private readonly LibrespotManager _manager;
     private readonly SoundFlow.SoundFlowPlaybackService? _playbackService;
     private readonly Dictionary<string, object> _metadata = new();
-    private LibrespotAudioDataProvider? _audioProvider;
-    private BufferedSoundGenerator<short>? _soundGenerator;
+    private LibrespotSoundComponent? _soundComponent;
     private string? _playbackId;
 
     public SpotifyIntegratedAudioSource(
@@ -906,6 +912,10 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
     {
       _manager = manager;
       _playbackService = playbackService;
+
+      // Disable LibrespotManager's internal push-based reading
+      // We'll use pull-based reading via LibrespotSoundComponent instead
+      _manager.EnableInternalAudioReading = false;
     }
 
     public override string Name => "Spotify (Integrated)";
@@ -917,146 +927,114 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
     public override object GetSoundComponent()
     {
-      if (_soundGenerator != null) return _soundGenerator;
+      if (_soundComponent != null) return _soundComponent;
 
-      // Fallback for non-SoundFlow usage (though this path is largely legacy now)
-      if (_audioProvider == null)
-      {
-         throw new InvalidOperationException(
-          "Audio provider not initialized. Call InitializeAsync before GetSoundComponent.");
-      }
-      return _audioProvider;
+      throw new InvalidOperationException(
+        "Sound component not initialized. Call InitializeAsync and PlayAsync before GetSoundComponent.");
     }
 
     public override async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
       await base.InitializeAsync(cancellationToken);
-      
+
       // Set default metadata
       _metadata[StandardMetadataKeys.Title] = "Spotify (Integrated)";
       _metadata[StandardMetadataKeys.Artist] = "Librespot";
       _metadata[StandardMetadataKeys.Album] = "Spotify";
-      
-      // Create the audio data provider that bridges LibrespotManager to SoundFlow
-      _audioProvider = new LibrespotAudioDataProvider(_manager, Logger);
 
-      // If we have the playback service, initialize the SoundGenerator
-      if (_playbackService != null)
-      {
-         var engine = _playbackService.GetUnderlyingEngine();
-         if (engine != null)
-         {
-              var format = _playbackService.GetAudioFormat();
-              _soundGenerator = new BufferedSoundGenerator<short>(engine, format, Logger);
-              // We need to wire up the audio provider to the sound generator
-              // But LibrespotAudioDataProvider outputs byte[], and BufferedSoundGenerator<short> needs short[]
-              // LibrespotAudioDataProvider is designed to be polled or event driven?
-              // The LibrespotManager emits AudioDataReceived.
-              
-              // We can hook into the LibrespotManager event directly here or use the provider.
-              // Let's hook the generator directly to the manager's event for efficiency,
-              // mimicking how SDRRadioAudioSource does it.
-              
-              _manager.AudioDataReceived += OnAudioDataReceived;
-         }
-      }
-      
+      // Note: We don't create the sound component here because we need the pipe stream
+      // from LibrespotManager, which isn't available until the process starts.
+      // The component is created in PlayCoreAsync after librespot is running.
+
       State = AudioSourceState.Ready;
-      Logger.LogInformation("Spotify integrated audio source initialized with audio provider");
-    }
-
-    private void OnAudioDataReceived(object? sender, AudioDataEventArgs e) {
-        if (_soundGenerator == null) return;
-        
-        // Convert byte[] to short[]
-        // Librespot is 16-bit signed, little-endian, stereo (interleaved)
-        // e.AudioData is the raw bytes.
-        
-        var byteSpan = new ReadOnlySpan<byte>(e.AudioData);
-        var shortCount = byteSpan.Length / 2;
-        var shortSpan = MemoryMarshal.Cast<byte, short>(byteSpan);
-        
-        // We need to pass a ReadOnlySpan<short>
-        _soundGenerator.AddSamples(shortSpan);
+      Logger.LogInformation("Spotify integrated audio source initialized (pull-based mode)");
     }
 
     protected override async Task PlayCoreAsync(CancellationToken cancellationToken)
     {
       State = AudioSourceState.Playing;
-      
-      // Start polling for audio data (legacy support if soundgenerator not used)
-      _audioProvider?.StartPolling();
 
-      // Ensure SoundFlow playback if service is available
-      if (_playbackService != null && _soundGenerator != null)
+      // Create LibrespotSoundComponent using the pipe stream from LibrespotManager
+      if (_soundComponent == null && _playbackService != null)
       {
-           _playbackId = $"spotify-integrated-{Guid.NewGuid():N}";
-           var success = await _playbackService.PlayComponentAsync(
-                _playbackId,
-                _soundGenerator,
-                1.0f, // Volume handled by source base class? No, integrated source doesn't expose volume separately properly yet, assuming 1.0
-                cancellationToken);
-           
-           if (success) {
-               Logger.LogInformation("Spotify integrated audio routed through SoundFlow");
-           } else {
-               Logger.LogError("Failed to verify Spotify SoundFlow playback");
-           }
+        var pipeStream = _manager.GetAudioStream();
+        if (pipeStream == null)
+        {
+          Logger.LogError("Librespot pipe stream not available - is librespot running?");
+          return;
+        }
+
+        var engine = _playbackService.GetUnderlyingEngine();
+        if (engine == null)
+        {
+          Logger.LogError("SoundFlow audio engine not available");
+          return;
+        }
+
+        var format = _playbackService.GetAudioFormat();
+
+        // Create the pull-based component that reads from the pipe on-demand
+        // This creates natural backpressure: SoundFlow requests audio at playback rate,
+        // we read from pipe at that rate, pipe fills up, librespot blocks on write
+        _soundComponent = new LibrespotSoundComponent(engine, format, pipeStream, Logger);
+        Logger.LogInformation("Created LibrespotSoundComponent for pull-based audio (44.1kHz -> {OutputRate}Hz)",
+          format.SampleRate);
       }
-      
-      return;
+
+      // Start SoundFlow playback
+      if (_playbackService != null && _soundComponent != null)
+      {
+        _playbackId = $"spotify-integrated-{Guid.NewGuid():N}";
+        var success = await _playbackService.PlayComponentAsync(
+          _playbackId,
+          _soundComponent,
+          1.0f,
+          cancellationToken);
+
+        if (success)
+        {
+          Logger.LogInformation("Spotify integrated audio routed through SoundFlow (pull-based)");
+        }
+        else
+        {
+          Logger.LogError("Failed to start Spotify SoundFlow playback");
+        }
+      }
     }
 
-    protected override async Task PauseCoreAsync(CancellationToken cancellationToken)
+    protected override Task PauseCoreAsync(CancellationToken cancellationToken)
     {
       State = AudioSourceState.Paused;
-      
-      // Stop polling for audio data
-      _audioProvider?.StopPolling();
-
-      // Mute/Pause soundflow logic
-      // Ideally we'd pause the playback service stream, but for now we might just let it run silence or rely on the source mute.
-      // But PlayComponentAsync starts a fresh playback. 
-      // SoundFlow `PauseAsync` should be called if we had an ID.
-      // But this integrated source is a sub-class and doesn't fully own the lifecycle in the same way SDR does at the top level?
-      // Wait, SDRRadioAudioSource uses `_playbackService.StopAsync`.
-      
-      // We should probably do similar if we want to release the mixer slot.
-      // For now, let's just leave the component active but stop feeding it data (which happens because Librespot pauses).
-      // However, if we want to stop the mixer from processing silence, we could remove it.
-      
-      // Kept simple: Librespot stops sending data, buffer drains, silence ensues.
-      
-      return;
+      // LibrespotSoundComponent will continue reading but the mixer won't consume
+      // In practice, Spotify itself handles pause and stops sending audio
+      return Task.CompletedTask;
     }
 
-    protected override async Task ResumeCoreAsync(CancellationToken cancellationToken)
+    protected override Task ResumeCoreAsync(CancellationToken cancellationToken)
     {
       State = AudioSourceState.Playing;
-      
-      // Resume polling for audio data
-      _audioProvider?.StartPolling();
-      
-      // If we killed the playback in Pause, we'd need to restart it here.
-      // Since we didn't, we are good.
-      
-      return;
+      // Resume is handled by Spotify sending audio again
+      return Task.CompletedTask;
     }
 
     protected override async Task StopCoreAsync(CancellationToken cancellationToken)
     {
       State = AudioSourceState.Stopped;
-      
-      // Stop polling for audio data
-      _audioProvider?.StopPolling();
 
-      if (_playbackService != null && _playbackId != null) 
+      // Stop SoundFlow playback (this removes from mixer)
+      if (_playbackService != null && _playbackId != null)
       {
-          await _playbackService.StopAsync(_playbackId, cancellationToken);
-          _playbackId = null;
+        await _playbackService.StopAsync(_playbackId, cancellationToken);
+        _playbackId = null;
       }
-      
-      return;
+
+      // Stop and dispose the sound component
+      if (_soundComponent != null)
+      {
+        _soundComponent.Stop();
+        _soundComponent.Dispose();
+        _soundComponent = null;
+      }
     }
 
     protected override Task SeekCoreAsync(TimeSpan position, CancellationToken cancellationToken)
@@ -1066,19 +1044,19 @@ public class SpotifyAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
     protected override async ValueTask DisposeAsyncCore()
     {
-      if (_manager != null)
+      if (_playbackService != null && _playbackId != null)
       {
-         _manager.AudioDataReceived -= OnAudioDataReceived;
+        await _playbackService.StopAsync(_playbackId);
+        _playbackId = null;
       }
 
-      _audioProvider?.Dispose();
-      _audioProvider = null;
-
-      if (_playbackService != null && _playbackId != null) 
+      if (_soundComponent != null)
       {
-           await _playbackService.StopAsync(_playbackId);
+        _soundComponent.Stop();
+        _soundComponent.Dispose();
+        _soundComponent = null;
       }
-      
+
       await base.DisposeAsyncCore();
     }
   }

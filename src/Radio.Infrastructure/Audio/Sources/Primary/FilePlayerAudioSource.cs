@@ -644,7 +644,10 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     _playbackId = $"file-player-{Guid.NewGuid():N}";
     _playbackCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-    Logger.LogInformation("Playing file: {File}", _currentFile);
+    var fileName = Path.GetFileName(_currentFile);
+    Logger.LogInformation(
+      "🎵 FILE PLAYER: Starting playback - \"{FileName}\" (Duration: {Duration}, Volume: {Volume:P0})",
+      fileName, _duration, Volume);
 
     // Use SoundFlow playback service if available
     if (_playbackService != null)
@@ -658,17 +661,21 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
       if (!success)
       {
-        Logger.LogError("Failed to start SoundFlow playback for {File}", _currentFile);
+        Logger.LogError("🎵 FILE PLAYER: Failed to start SoundFlow playback for \"{FileName}\"", fileName);
         State = AudioSourceState.Error;
         return;
       }
+
+      Logger.LogInformation(
+        "🎵 FILE PLAYER AUDIO FLOW STARTED: \"{FileName}\" routed to SoundFlow (PlaybackId={PlaybackId})",
+        fileName, _playbackId);
 
       // Start playback monitoring task
       _playbackMonitorTask = MonitorPlaybackAsync(_playbackCts.Token);
     }
     else
     {
-      Logger.LogDebug("SoundFlow playback service not available, playback simulation only");
+      Logger.LogWarning("🎵 FILE PLAYER: SoundFlow playback service not available, playback simulation only");
     }
   }
 
@@ -746,7 +753,10 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <inheritdoc/>
   protected override async Task StopCoreAsync(CancellationToken cancellationToken)
   {
-    Logger.LogDebug("Stopping file playback");
+    var fileName = _currentFile != null ? Path.GetFileName(_currentFile) : "unknown";
+    Logger.LogInformation(
+      "🎵 FILE PLAYER AUDIO FLOW STOPPING: \"{FileName}\" (PlaybackId={PlaybackId}, Position={Position})",
+      fileName, _playbackId ?? "none", _position);
 
     // Cancel playback monitoring
     _playbackCts?.Cancel();
@@ -755,6 +765,9 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     if (_playbackService != null && _playbackId != null)
     {
       await _playbackService.StopAsync(_playbackId, cancellationToken);
+      Logger.LogInformation(
+        "🎵 FILE PLAYER AUDIO FLOW STOPPED: \"{FileName}\" removed from SoundFlow",
+        fileName);
       _playbackId = null;
     }
 

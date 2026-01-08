@@ -285,6 +285,25 @@ public class LibrespotManager : IAsyncDisposable
     return _audioBuffer.TryDequeue(out audioData);
   }
 
+  /// <summary>
+  /// Gets or sets whether the internal audio reading loop is enabled.
+  /// When disabled, consumers should use GetAudioStream() to read audio directly.
+  /// This allows for pull-based audio consumption with proper backpressure.
+  /// Default is true for backward compatibility.
+  /// </summary>
+  public bool EnableInternalAudioReading { get; set; } = true;
+
+  /// <summary>
+  /// Gets the raw audio stream from librespot's stdout.
+  /// Use this for pull-based audio consumption instead of the event-based approach.
+  /// The stream outputs raw PCM: 16-bit signed stereo @ 44.1kHz.
+  /// </summary>
+  /// <returns>The audio stream, or null if the process is not running.</returns>
+  public Stream? GetAudioStream()
+  {
+    return _librespotProcess?.StandardOutput?.BaseStream;
+  }
+
   private async Task StartLibrespotProcessAsync(string accessToken, CancellationToken cancellationToken)
   {
     var librespotPath = _deviceOptions.CurrentValue.Spotify?.LibrespotPath;
@@ -329,8 +348,17 @@ public class LibrespotManager : IAsyncDisposable
 
     Log($"Librespot process started (PID: {_librespotProcess.Id})");
 
-    // Start reading audio stream
-    _audioReadTask = Task.Run(() => ReadAudioStreamAsync(_cts.Token), _cts.Token);
+    // Start reading audio stream (only if internal reading is enabled)
+    // When disabled, consumers use GetAudioStream() for pull-based reading with proper backpressure
+    if (EnableInternalAudioReading)
+    {
+      _audioReadTask = Task.Run(() => ReadAudioStreamAsync(_cts.Token), _cts.Token);
+      Log("Internal audio reading enabled (push mode)");
+    }
+    else
+    {
+      Log("Internal audio reading disabled (pull mode via GetAudioStream)");
+    }
   }
 
   private string BuildLibrespotArguments(string accessToken)
@@ -372,8 +400,17 @@ public class LibrespotManager : IAsyncDisposable
     }
 
     // Librespot outputs raw PCM data: 16-bit signed stereo @ 44.1kHz
-    // Buffer size: 8192 bytes = 2048 samples = ~23ms of audio at 44.1kHz stereo
+    // Buffer size: 8192 bytes = 2048 frames (4 bytes per frame: 2 channels * 2 bytes)
+    // Duration per chunk: 2048 frames / 44100 Hz = ~46.4ms
+    const int SampleRate = 44100;
+    const int Channels = 2;
+    const int BytesPerSample = 2;
+    const int BytesPerFrame = Channels * BytesPerSample;
     var buffer = new byte[8192];
+
+    // Rate limiting: track how much audio time we've processed vs wall clock time
+    var startTime = DateTime.UtcNow;
+    long totalFramesProcessed = 0;
 
     try
     {
@@ -392,7 +429,7 @@ public class LibrespotManager : IAsyncDisposable
         var audioData = new byte[bytesRead];
         Buffer.BlockCopy(buffer, 0, audioData, 0, bytesRead);
 
-        // Queue the audio data
+        // Queue the audio data (for polling consumers)
         if (_audioBuffer.Count < _maxBufferChunks)
         {
           _audioBuffer.Enqueue(audioData);
@@ -407,6 +444,28 @@ public class LibrespotManager : IAsyncDisposable
 
         // Raise event for subscribers
         AudioDataReceived?.Invoke(this, new AudioDataEventArgs(audioData));
+
+        // Rate limiting: librespot in pipe mode outputs as fast as it can decode.
+        // We need to pace the read loop to approximately real-time to prevent
+        // dumping the entire song instantly.
+        int framesInChunk = bytesRead / BytesPerFrame;
+        totalFramesProcessed += framesInChunk;
+
+        // Calculate how far ahead we are compared to real-time
+        var elapsedTime = DateTime.UtcNow - startTime;
+        var audioTime = TimeSpan.FromSeconds((double)totalFramesProcessed / SampleRate);
+        var aheadBy = audioTime - elapsedTime;
+
+        // If we're more than 100ms ahead, sleep to catch up
+        // This allows some buffering but prevents running too far ahead
+        if (aheadBy.TotalMilliseconds > 100)
+        {
+          var sleepTime = (int)(aheadBy.TotalMilliseconds - 50); // Keep 50ms buffer
+          if (sleepTime > 0)
+          {
+            await Task.Delay(sleepTime, ct);
+          }
+        }
       }
     }
     catch (OperationCanceledException)

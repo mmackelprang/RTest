@@ -226,7 +226,7 @@ public record PlayHistoryEntryDto(
   string Source,
   string? MetadataSource,
   string? SourceDetails,
-  int DurationSeconds,
+  int? DurationSeconds,
   double? IdentificationConfidence,
   bool WasIdentified,
   PlayHistoryTrackDto? Track

@@ -166,7 +166,11 @@ public class SoundFlowPlaybackService : IDisposable
         }
       }
 
-      _logger.LogInformation("Started playback for source {SourceId}: {FilePath}", sourceId, filePath);
+      var fileName = Path.GetFileName(filePath);
+      _logger.LogInformation(
+        "🔊 AUDIO ROUTING COMPLETE: File '{FileName}' now connected to audio output " +
+        "(SourceId={SourceId}, SampleRate={SampleRate}Hz, Channels={Channels}, Volume={Volume:P0})",
+        fileName, sourceId, format.SampleRate, format.Channels, volume);
       return true;
     }
     catch (FileNotFoundException ex)
@@ -424,6 +428,10 @@ public class SoundFlowPlaybackService : IDisposable
       component.Volume = volume;
 
       // Add to the playback device's mixer
+      _logger.LogInformation(
+        "🔊 AUDIO ROUTING: Adding component '{ComponentName}' to SoundFlow mixer (SourceId={SourceId}, Volume={Volume:P0})",
+        component.Name ?? component.GetType().Name, sourceId, volume);
+
       playbackDevice.MasterMixer.AddComponent(component);
 
       // Track the component
@@ -432,7 +440,9 @@ public class SoundFlowPlaybackService : IDisposable
         _activeComponents[sourceId] = component;
       }
 
-      _logger.LogInformation("Started component playback for source {SourceId}", sourceId);
+      _logger.LogInformation(
+        "🔊 AUDIO ROUTING COMPLETE: Component '{ComponentName}' now connected to audio output (SourceId={SourceId})",
+        component.Name ?? component.GetType().Name, sourceId);
       return true;
     }
     catch (Exception ex)
@@ -476,13 +486,19 @@ public class SoundFlowPlaybackService : IDisposable
     {
       try
       {
+        _logger.LogInformation(
+          "🔇 AUDIO ROUTING: Removing player from SoundFlow mixer (SourceId={SourceId})",
+          sourceId);
+
         // Flush any remaining visualization data
         tapModifier?.Flush();
 
         player.Stop();
         playbackDevice?.MasterMixer.RemoveComponent(player);
         player.Dispose();
-        _logger.LogDebug("Stopped player playback for source {SourceId}", sourceId);
+        _logger.LogInformation(
+          "🔇 AUDIO ROUTING REMOVED: Player disconnected from audio output (SourceId={SourceId})",
+          sourceId);
       }
       catch (Exception ex)
       {
@@ -494,9 +510,16 @@ public class SoundFlowPlaybackService : IDisposable
     {
       try
       {
+        var componentName = component.Name ?? component.GetType().Name;
+        _logger.LogInformation(
+          "🔇 AUDIO ROUTING: Removing component '{ComponentName}' from SoundFlow mixer (SourceId={SourceId})",
+          componentName, sourceId);
+
         playbackDevice?.MasterMixer.RemoveComponent(component);
         component.Dispose();
-        _logger.LogDebug("Stopped component playback for source {SourceId}", sourceId);
+        _logger.LogInformation(
+          "🔇 AUDIO ROUTING REMOVED: Component '{ComponentName}' disconnected from audio output (SourceId={SourceId})",
+          componentName, sourceId);
       }
       catch (Exception ex)
       {

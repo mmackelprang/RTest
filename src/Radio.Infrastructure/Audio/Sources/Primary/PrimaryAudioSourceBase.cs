@@ -55,7 +55,7 @@ public abstract class PrimaryAudioSourceBase : IPrimaryAudioSource
       if (_state == value) return;
       var previousState = _state;
       _state = value;
-      _logger.LogDebug("Audio source {Id} state changed from {PreviousState} to {NewState}",
+      _logger.LogInformation("Audio source {Id} state changed from {PreviousState} to {NewState}",
         Id, previousState, value);
       OnStateChanged(previousState, value);
     }

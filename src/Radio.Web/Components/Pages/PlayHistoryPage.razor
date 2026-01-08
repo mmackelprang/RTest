@@ -520,9 +520,10 @@
     };
   }
 
-  private string FormatDuration(int seconds)
+  private string FormatDuration(int? seconds)
   {
-    var ts = TimeSpan.FromSeconds(seconds);
+    if (!seconds.HasValue || seconds.Value <= 0) return "--:--";
+    var ts = TimeSpan.FromSeconds(seconds.Value);
     if (ts.TotalHours >= 1)
     {
       return $"{(int)ts.TotalHours}:{ts.Minutes:D2}:{ts.Seconds:D2}";

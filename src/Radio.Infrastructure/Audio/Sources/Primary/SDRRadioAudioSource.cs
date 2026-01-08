@@ -75,13 +75,30 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     SetDefaultMetadata();
   }
 
+  // Track if we've logged the first audio data received (to avoid spamming logs)
+  private bool _hasLoggedFirstAudioData;
+  private long _totalSamplesReceived;
+
   /// <summary>
   /// Handles audio data events from the RTL-SDR receiver.
   /// Delegates samples to the buffered sound generator.
   /// </summary>
   private void OnAudioDataAvailable(object? sender, AudioDataEventArgs e)
   {
-    _soundGenerator?.AddSamples(e.Samples);
+    if (_soundGenerator == null) return;
+
+    _soundGenerator.AddSamples(e.Samples);
+    _totalSamplesReceived += e.Samples.Length;
+
+    // Log first audio data received
+    if (!_hasLoggedFirstAudioData)
+    {
+      _hasLoggedFirstAudioData = true;
+      Logger.LogInformation(
+        "📻 SDR RADIO AUDIO FLOW STARTED: First audio data received from RTL-SDR " +
+        "(Frequency: {Frequency}, Band: {Band}, {SampleCount} samples)",
+        CurrentFrequency.ToDisplayString(), CurrentBand, e.Samples.Length);
+    }
   }
 
   #region IAudioSource Properties
@@ -285,6 +302,8 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     {
       throw new ArgumentException($"Failed to set band to {band}", nameof(band));
     }
+
+    _frequencyStep = new Frequency(_radioReceiver.CurrentBand.DefaultStepHz); // Update step size to band default
 
     // Track band change metric
     MetricsCollector?.Increment("radio.band_changes", 1.0, new Dictionary<string, string>
@@ -574,30 +593,16 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// </summary>
   private static RadioBand MapBandFromRTLSDR(RTLSDRCore.Models.RadioBand rtlBand)
   {
-    // Map based on frequency range or band name
-    if (rtlBand.MinFrequencyHz >= 88_000_000 && rtlBand.MaxFrequencyHz <= 108_000_000)
+    return rtlBand.Type switch
     {
-      return RadioBand.FM;
-    }
-    else if (rtlBand.MinFrequencyHz >= 530_000 && rtlBand.MaxFrequencyHz <= 1_700_000)
-    {
-      return RadioBand.AM;
-    }
-    else if (rtlBand.MinFrequencyHz >= 162_400_000 && rtlBand.MaxFrequencyHz <= 162_550_000)
-    {
-      return RadioBand.WB; // Weather Band
-    }
-    else if (rtlBand.MinFrequencyHz >= 118_000_000 && rtlBand.MaxFrequencyHz <= 137_000_000)
-    {
-      return RadioBand.VHF; // Airband/VHF
-    }
-    else if (rtlBand.MinFrequencyHz >= 1_800_000 && rtlBand.MaxFrequencyHz <= 30_000_000)
-    {
-      return RadioBand.SW; // Shortwave
-    }
-
-    // Default to FM if no match
-    return RadioBand.FM;
+      RTLSDRCore.Enums.BandType.FM => RadioBand.FM,
+      RTLSDRCore.Enums.BandType.AM => RadioBand.AM,
+      RTLSDRCore.Enums.BandType.Weather => RadioBand.WB,
+      RTLSDRCore.Enums.BandType.Aircraft => RadioBand.AIR,
+      RTLSDRCore.Enums.BandType.Shortwave => RadioBand.SW,
+      RTLSDRCore.Enums.BandType.VHF => RadioBand.VHF,
+      _ => RadioBand.FM
+    };
   }
 
   /// <summary>
@@ -610,7 +615,8 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
       RadioBand.FM => RTLSDRCore.Enums.BandType.FM,
       RadioBand.AM => RTLSDRCore.Enums.BandType.AM,
       RadioBand.WB => RTLSDRCore.Enums.BandType.Weather,
-      RadioBand.VHF => RTLSDRCore.Enums.BandType.Aircraft,
+      RadioBand.AIR => RTLSDRCore.Enums.BandType.Aircraft,
+      RadioBand.VHF => RTLSDRCore.Enums.BandType.VHF,
       RadioBand.SW => RTLSDRCore.Enums.BandType.Shortwave,
       _ => throw new ArgumentException($"Unsupported band: {band}", nameof(band))
     };
@@ -630,8 +636,16 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// <inheritdoc/>
   protected override async Task PlayCoreAsync(CancellationToken cancellationToken = default)
   {
+    Logger.LogInformation("📻 SDR RADIO: Starting playback (Frequency: {Frequency}, Band: {Band})",
+      CurrentFrequency.ToDisplayString(), CurrentBand);
+
+    // Reset audio flow tracking
+    _hasLoggedFirstAudioData = false;
+    _totalSamplesReceived = 0;
+
     // Start the RTL-SDR receiver first
     await StartupAsync(cancellationToken);
+    Logger.LogDebug("📻 SDR RADIO: RTL-SDR receiver started, IsRunning={IsRunning}", IsRunning);
 
     // Generate a playback ID for this session
     _playbackId = $"sdr-radio-{Guid.NewGuid():N}";
@@ -642,17 +656,20 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
       var engine = _playbackService.GetUnderlyingEngine();
       if (engine == null)
       {
-        Logger.LogError("SoundFlow audio engine not available - SDR audio output will not work");
+        Logger.LogError("📻 SDR RADIO: SoundFlow audio engine not available - SDR audio output will not work");
         return;
       }
 
       var format = _playbackService.GetAudioFormat();
+      Logger.LogDebug("📻 SDR RADIO: SoundFlow format - SampleRate={SampleRate}, Channels={Channels}",
+        format.SampleRate, format.Channels);
 
       // Create the sound generator with proper engine and format context
       if (_soundGenerator == null)
       {
         _soundGenerator = new BufferedSoundGenerator<float>(engine, format, Logger);
         _radioReceiver.AudioDataAvailable += OnAudioDataAvailable;
+        Logger.LogDebug("📻 SDR RADIO: Created BufferedSoundGenerator and subscribed to AudioDataAvailable");
       }
 
       // Use PlayComponentAsync for raw PCM audio (not PlayStreamAsync which expects encoded audio)
@@ -664,17 +681,19 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
 
       if (!success)
       {
-        Logger.LogError("Failed to start SoundFlow playback for SDR radio");
-        // Continue anyway - radio is still receiving, just no audio output via SoundFlow
+        Logger.LogError("📻 SDR RADIO: Failed to add sound component to SoundFlow mixer");
       }
       else
       {
-        Logger.LogInformation("SDR audio routed through SoundFlow playback service via BufferedSoundGenerator");
+        Logger.LogInformation(
+          "📻 SDR RADIO: Audio pipeline ready - waiting for audio data from RTL-SDR " +
+          "(PlaybackId={PlaybackId}, Volume={Volume:P0})",
+          _playbackId, Volume);
       }
     }
     else
     {
-      Logger.LogWarning("SoundFlowPlaybackService not available - SDR audio output may not work");
+      Logger.LogWarning("📻 SDR RADIO: SoundFlowPlaybackService not available - SDR audio output may not work");
     }
   }
 
@@ -697,11 +716,21 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// <inheritdoc/>
   protected override async Task StopCoreAsync(CancellationToken cancellationToken = default)
   {
-    // Stop SoundFlow playback first
+    Logger.LogInformation(
+      "📻 SDR RADIO AUDIO FLOW STOPPED: Stopping playback " +
+      "(Frequency: {Frequency}, Band: {Band}, TotalSamplesProcessed: {Samples})",
+      CurrentFrequency.ToDisplayString(), CurrentBand, _totalSamplesReceived);
+
+    // Unsubscribe from audio events before stopping
+    _radioReceiver.AudioDataAvailable -= OnAudioDataAvailable;
+
+    // Stop SoundFlow playback first (this disposes the sound generator)
     if (_playbackService != null && _playbackId != null)
     {
+      Logger.LogDebug("📻 SDR RADIO: Removing from SoundFlow mixer (PlaybackId={PlaybackId})", _playbackId);
       await _playbackService.StopAsync(_playbackId, cancellationToken);
       _playbackId = null;
+      _soundGenerator = null; // Clear reference - generator was disposed by StopAsync
     }
 
     // Then shutdown the radio receiver
