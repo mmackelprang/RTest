@@ -2,9 +2,11 @@ using Microsoft.AspNetCore.Mvc;
 using Radio.API.Extensions;
 using Radio.API.Mappers;
 using Radio.API.Models;
+using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
+using Microsoft.Extensions.Options;
 
 namespace Radio.API.Controllers;
 
@@ -19,6 +21,8 @@ public class SourcesController : ControllerBase
   private readonly ILogger<SourcesController> _logger;
   private readonly IAudioEngine _audioEngine;
   private readonly IAudioManager? _audioManager;
+  private readonly IBluetoothService? _bluetoothService;
+  private readonly IOptionsMonitor<BluetoothOptions>? _bluetoothOptions;
   private readonly ITTSFactory? _ttsFactory;
   private readonly AudioFileEventSourceFactory? _fileEventFactory;
   private readonly IDuckingService? _duckingService;
@@ -31,6 +35,8 @@ public class SourcesController : ControllerBase
     ILogger<SourcesController> logger,
     IAudioEngine audioEngine,
     IAudioManager? audioManager = null,
+    IBluetoothService? bluetoothService = null,
+    IOptionsMonitor<BluetoothOptions>? bluetoothOptions = null,
     ITTSFactory? ttsFactory = null,
     AudioFileEventSourceFactory? fileEventFactory = null,
     IDuckingService? duckingService = null,
@@ -39,6 +45,8 @@ public class SourcesController : ControllerBase
     _logger = logger;
     _audioEngine = audioEngine;
     _audioManager = audioManager;
+    _bluetoothService = bluetoothService;
+    _bluetoothOptions = bluetoothOptions;
     _ttsFactory = ttsFactory;
     _fileEventFactory = fileEventFactory;
     _duckingService = duckingService;
@@ -60,6 +68,18 @@ public class SourcesController : ControllerBase
       // Prefer AudioManager's tracked active source
       var primarySource = _audioManager?.ActiveSource ?? _audioEngine.GetActivePrimaryAudioSource();
 
+      var activePrimary = primarySource as IPrimaryAudioSource;
+      var bluetoothMetadata = activePrimary?.Metadata;
+      var bluetoothDevice = bluetoothMetadata != null && bluetoothMetadata.TryGetValue("Device", out var device)
+        ? new BluetoothDeviceDto
+        {
+          Name = device?.ToString() ?? "Bluetooth Device",
+          Address = bluetoothMetadata.TryGetValue("DeviceAddress", out var addr) ? addr?.ToString() ?? string.Empty : string.Empty,
+          IsConnected = true,
+          IsPaired = true
+        }
+        : null;
+
       var result = new AvailableSourcesDto
       {
         PrimarySources =
@@ -67,10 +87,28 @@ public class SourcesController : ControllerBase
           AudioSourceType.Radio.ToString(),
           AudioSourceType.Vinyl.ToString(),
           AudioSourceType.FilePlayer.ToString(),
-          AudioSourceType.GenericUSB.ToString()
+          AudioSourceType.GenericUSB.ToString(),
+          AudioSourceType.Bluetooth.ToString()
         ],
         ActiveSourceType = primarySource?.Type.ToString(),
-        ActiveSources = activeSources.Select(s => s.MapToDto()).ToList()
+        ActiveSources = activeSources.Select(s => s.MapToDto()).ToList(),
+        BluetoothDevices = bluetoothDevice != null ? new List<BluetoothDeviceDto> { bluetoothDevice } : new List<BluetoothDeviceDto>(),
+        DiscoveredBluetoothDevices = _bluetoothService?.DiscoveredDevices?.Select(d => new BluetoothDeviceDto
+        {
+          Name = d.Name,
+          Address = d.Address,
+          IsConnected = d.IsConnected,
+          IsPaired = d.IsPaired,
+          LastConnected = d.LastConnected
+        }).ToList() ?? new List<BluetoothDeviceDto>(),
+        Bluetooth = _bluetoothOptions != null ? new BluetoothSourceInfoDto
+        {
+          IsDiscovering = _bluetoothService?.IsDiscovering ?? false,
+          AutoSwitchOnConnect = _bluetoothOptions.CurrentValue.AutoSwitchOnConnect,
+          RequirePairing = _bluetoothOptions.CurrentValue.RequirePairing,
+          DeviceName = _bluetoothOptions.CurrentValue.DeviceName,
+          AudioQuality = _bluetoothOptions.CurrentValue.AudioQuality.ToString()
+        } : null
       };
 
       return Ok(result);

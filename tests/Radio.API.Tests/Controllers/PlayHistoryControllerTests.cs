@@ -120,8 +120,8 @@ public class PlayHistoryControllerTests : IClassFixture<WebApplicationFactory<Pr
     var uniqueTitle = $"Test Song {Guid.NewGuid()}";
     var request = new RecordPlayRequest
     {
-      Source = "Spotify",
-      MetadataSource = "Spotify",
+      Source = "Radio",
+      MetadataSource = "Fingerprinting",
       Title = uniqueTitle,
       Artist = "Test Artist",
       Album = "Test Album"
@@ -135,8 +135,8 @@ public class PlayHistoryControllerTests : IClassFixture<WebApplicationFactory<Pr
 
     var entry = await response.Content.ReadFromJsonAsync<PlayHistoryEntryDto>();
     Assert.NotNull(entry);
-    Assert.Equal("Spotify", entry.Source);
-    Assert.Equal("Spotify", entry.MetadataSource);
+    Assert.Equal("Radio", entry.Source);
+    Assert.Equal("Fingerprinting", entry.MetadataSource);
     Assert.True(entry.WasIdentified);
   }
 
@@ -215,8 +215,8 @@ public class PlayHistoryControllerTests : IClassFixture<WebApplicationFactory<Pr
     var uniqueTitle = $"Unique Song {Guid.NewGuid()}";
     var request = new RecordPlayRequest
     {
-      Source = "Spotify",
-      MetadataSource = "Spotify",
+      Source = "Vinyl",
+      MetadataSource = "Fingerprinting",
       Title = uniqueTitle,
       Artist = "Test Artist"
     };

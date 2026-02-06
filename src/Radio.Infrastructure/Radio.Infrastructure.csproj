@@ -9,6 +9,7 @@
     <InternalsVisibleTo Include="Radio.Infrastructure.Tests" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="InTheHand.Net.Bluetooth" Version="4.2.2" />
     <PackageReference Include="SoundFlow" Version="1.*" />
     <PackageReference Include="SharpCaster" Version="1.1.18" />
     <PackageReference Include="Serilog" Version="4.*" />
@@ -17,6 +18,7 @@
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="8.0.0" />
+    <PackageReference Include="Tmds.DBus" Version="0.90.2" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Radio.Core\Radio.Core.csproj" />

@@ -1,3 +1,5 @@
+using Radio.Core.Interfaces.Audio;
+
 namespace Radio.API.Models;
 
 /// <summary>
@@ -95,6 +97,21 @@ public class AvailableSourcesDto
   public List<string> PrimarySources { get; set; } = [];
 
   /// <summary>
+  /// Gets or sets the available Bluetooth devices.
+  /// </summary>
+  public List<BluetoothDeviceDto> BluetoothDevices { get; set; } = [];
+
+  /// <summary>
+  /// Gets or sets the discovered Bluetooth devices (during discovery).
+  /// </summary>
+  public List<BluetoothDeviceDto> DiscoveredBluetoothDevices { get; set; } = [];
+
+  /// <summary>
+  /// Gets or sets Bluetooth configuration metadata.
+  /// </summary>
+  public BluetoothSourceInfoDto? Bluetooth { get; set; }
+
+  /// <summary>
   /// Gets or sets the currently active source type.
   /// </summary>
   public string? ActiveSourceType { get; set; }
@@ -103,6 +120,27 @@ public class AvailableSourcesDto
   /// Gets or sets the active sources in the mixer.
   /// </summary>
   public List<AudioSourceDto> ActiveSources { get; set; } = [];
+}
+
+public class BluetoothSourceInfoDto
+{
+  public bool IsDiscovering { get; set; }
+  public bool AutoSwitchOnConnect { get; set; }
+  public bool RequirePairing { get; set; }
+  public string DeviceName { get; set; } = string.Empty;
+  public string AudioQuality { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Bluetooth device DTO.
+/// </summary>
+public class BluetoothDeviceDto
+{
+  public string Address { get; set; } = string.Empty;
+  public string Name { get; set; } = string.Empty;
+  public bool IsPaired { get; set; }
+  public bool IsConnected { get; set; }
+  public DateTime? LastConnected { get; set; }
 }
 
 /// <summary>

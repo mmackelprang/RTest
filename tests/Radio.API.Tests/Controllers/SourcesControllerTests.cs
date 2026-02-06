@@ -31,11 +31,11 @@ public class SourcesControllerTests : IClassFixture<WebApplicationFactory<Progra
     Assert.NotNull(sources);
     Assert.NotNull(sources.PrimarySources);
     Assert.NotEmpty(sources.PrimarySources);
-    Assert.Contains("Spotify", sources.PrimarySources);
     Assert.Contains("Radio", sources.PrimarySources);
     Assert.Contains("Vinyl", sources.PrimarySources);
     Assert.Contains("FilePlayer", sources.PrimarySources);
     Assert.Contains("GenericUSB", sources.PrimarySources);
+    Assert.Contains("Bluetooth", sources.PrimarySources);
   }
 
   [Fact]
@@ -119,9 +119,9 @@ public class SourcesControllerTests : IClassFixture<WebApplicationFactory<Progra
   }
 
   [Fact]
-  public async Task SelectSource_WithUnconfiguredSource_ReturnsAppropriateResponse()
+  public async Task SelectSource_WithRemovedSource_ReturnsBadRequest()
   {
-    // Arrange - Spotify requires credentials which may or may not be configured in tests
+    // Arrange - Spotify was removed, so it should be treated as an invalid source
     var request = new SelectSourceRequest
     {
       SourceType = "Spotify"
@@ -130,26 +130,8 @@ public class SourcesControllerTests : IClassFixture<WebApplicationFactory<Progra
     // Act
     var response = await _client.PostAsJsonAsync("/api/sources", request);
 
-    // Assert - Returns either:
-    // - 500 if Spotify credentials are not configured
-    // - 200 if Spotify is properly configured and source was created
-    // - 501 if source type is not yet implemented
-    var validResponses = new[]
-    {
-      System.Net.HttpStatusCode.OK,
-      System.Net.HttpStatusCode.InternalServerError,
-      System.Net.HttpStatusCode.NotImplemented
-    };
-    Assert.Contains(response.StatusCode, validResponses);
-
-    // If we got an error, verify it contains meaningful information
-    if (!response.IsSuccessStatusCode)
-    {
-      var content = await response.Content.ReadAsStringAsync();
-      Assert.True(
-        content.Contains("Spotify") || content.Contains("source") || content.Contains("configured"),
-        $"Expected error message about Spotify/source/configuration, got: {content}");
-    }
+    // Assert - Should return BadRequest since Spotify is no longer a valid source type
+    Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
   }
 
   [Fact]

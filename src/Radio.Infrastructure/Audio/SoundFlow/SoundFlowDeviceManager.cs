@@ -396,6 +396,36 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
   }
 
   /// <summary>
+  /// Finds a capture device by name fuzzy matching.
+  /// </summary>
+  public object? FindCaptureDeviceByName(string namePart)
+  {
+    if (string.IsNullOrWhiteSpace(namePart))
+    {
+        return null;
+    }
+
+    try
+    {
+      using var engine = new MiniAudioEngine();
+      var devices = engine.CaptureDevices;
+      // Look for fuzzy match
+      // MiniAudio DeviceInfo is a struct and default value has null/empty Name usually
+      var match = devices.FirstOrDefault(d => d.Name != null && d.Name.Contains(namePart, StringComparison.OrdinalIgnoreCase));
+      
+      if (match.Name != null)
+      {
+         return match.Name;
+      }
+    }
+    catch (Exception ex)
+    {
+       _logger.LogWarning(ex, "Error searching for capture device {NamePart}", namePart);
+    }
+    return null;
+  }
+
+  /// <summary>
   /// Attempts to extract a USB port identifier from a device name.
   /// </summary>
   private static string? ExtractUSBPort(string deviceName)

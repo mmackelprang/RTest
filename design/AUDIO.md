@@ -44,6 +44,12 @@ This document provides a complete specification and phased implementation plan f
 │  │  │(MixerNode)  │(Priority)    │(FFT/Levels)  │ (HTTP/Cast)          │  │  │
 │  │  └─────────────┴─────────────┴──────────────┴──────────────────────┘  │  │
 │  ├───────────────────────────────────────────────────────────────────────┤  │
+│  │                      Device Integration                               │  │
+│  │  ┌───────────────┬──────────────────┬──────────────┬───────────────┐  │  │
+│  │  │BluetoothSvc   │RadioFactory      │TTSFactory    │LocalOutput    │  │  │
+│  │  │(BlueZ/Win32)  │(RTLSDR/RF320)    │(Event Svc)   │(ALSA/WASAPI)  │  │  │
+│  │  └───────────────┴──────────────────┴──────────────┴───────────────┘  │  │
+│  ├───────────────────────────────────────────────────────────────────────┤  │
 │  │                    Configuration Infrastructure                        │  │
 │  │           (From design/CONFIGURATION.md - SQLite/JSON)                 │  │
 │  └───────────────────────────────────────────────────────────────────────┘  │
@@ -58,9 +64,9 @@ This document provides a complete specification and phased implementation plan f
 │  ┌────────────────────────────────────────────────────────────────┐ │
 │  │              Primary Audio Source (One Active)                  │ │
 │  │  ┌──────────┬──────────┬──────────┬──────────┬──────────────┐  │ │
-│  │  │ Spotify  │ Radio    │ Vinyl    │ File     │ Generic USB  │  │ │
-│  │  │ (Stream) │ (RF320)  │ (USB)    │ Player   │ (SoundFlow)  │  │ │
-│  │  └──────────┴──────────┴──────────┴──────────┴──────────────┘  │ │
+│  │  │ Spotify  │ Radio    │ Vinyl    │ File     │ Generic USB  │ Bluetooth  │ │
+│  │  │ (Stream) │ (RF320)  │ (USB)    │ Player   │ (SoundFlow)  │ (A2DP)     │ │
+│  │  └──────────┴──────────┴──────────┴──────────┴──────────────┴────────────┘ │
 │  └────────────────────────────────────────────────────────────────┘ │
 │  ┌────────────────────────────────────────────────────────────────┐ │
 │  │          Event Sources (Ephemeral, Interrupt Primary)          │ │
@@ -1028,16 +1034,17 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
 ---
 
 ## Phase 3: Primary Audio Sources
-**Duration:** 7-10 days  
-**Risk Level:** Medium  
-**Priority:** High  
+**Duration:** 7-10 days
+**Risk Level:** Medium
+**Priority:** High
 **Dependencies:** Phase 2
 
 ### Objectives
 1. Implement base primary audio source interface
 2. Create Spotify integration with SpotifyAPI-NET
 3. Implement USB audio sources (Radio, Vinyl, Generic)
-4. Create File Player with directory support
+4. Implement Bluetooth audio input (A2DP Sink)
+5. Create File Player with directory support
 
 ### Agent Prompt
 
@@ -1053,6 +1060,7 @@ Primary sources are mutually exclusive - only one can be active at a time:
 - **Raddy RF320 Radio**: USB audio input
 - **Vinyl Turntable**: USB audio input
 - **Audio File Player**: Local files/directories
+- **Bluetooth**: A2DP Audio Sink (Phone/Tablet input)
 - **Generic USB**: User-selected USB audio device
 
 ### Files to Create
@@ -1407,6 +1415,88 @@ public class GenericUSBAudioSource : IPrimaryAudioSource
 }
 ```
 
+#### 8. src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs
+
+```csharp
+namespace Radio.Infrastructure.Audio.Sources.Primary;
+
+/// <summary>
+/// Bluetooth audio source acting as an A2DP sink.
+/// </summary>
+public class BluetoothAudioSource : IPrimaryAudioSource
+{
+  private readonly ILogger<BluetoothAudioSource> _logger;
+  private readonly IBluetoothService _bluetoothService;
+  private readonly IOptionsMonitor<BluetoothPreferences> _preferences;
+
+  public AudioSourceType Type => AudioSourceType.Bluetooth;
+  public AudioSourceCategory Category => AudioSourceCategory.Primary;
+  public bool IsSeekable => false; // Live stream
+
+  public async Task InitializeAsync(CancellationToken ct = default)
+  {
+    // Initialize the platform-specific Bluetooth service
+    // On Linux: Connects to BlueZ via DBus
+    // On Windows: Starts Polling Discovery via 32feet
+    await _bluetoothService.InitializeAsync(ct);
+  }
+
+  public async Task PlayAsync(CancellationToken ct = default)
+  {
+     // Identify the OS audio capture device associated with the connected Bluetooth device
+     var captureDeviceId = await _bluetoothService.GetAudioCaptureDeviceAsync(ct);
+     
+     // Connect SoundFlow to that capture device
+     // Start mixing
+  }
+}
+```
+
+#### 8. Bluetooth Audio Architecture
+
+The Bluetooth implementation enables the Radio Console to act as a Bluetooth speaker (A2DP Sink).
+
+**Architecture:**
+```
+Bluetooth Device (Phone/Tablet)
+    ↓ [A2DP Stream]
+Platform Service (IBluetoothService)
+    ├── Linux: BlueZ via DBus (Tmds.DBus)
+    └── Windows: Win32 API (32feet.NET / InTheHand)
+          ↓ [PCM Audio via OS Loopback/Input]
+BluetoothAudioSource (IPrimaryAudioSource)
+    ↓ [SoundFlow AudioCaptureDevice]
+SoundFlow Mixer
+```
+
+**Feature Support Matrix:**
+
+| Feature | Linux (BlueZ) | Windows (Win32) |
+|---------|---------------|-----------------|
+| Discovery | ✅ Yes | ✅ Yes (Polling) |
+| Pairing | ✅ Yes | ✅ Yes |
+| A2DP Sink | ✅ Yes (PulseAudio/PipeWire) | ✅ Yes (OS Managed) |
+| Metadata (AVRCP) | ✅ Yes (Artist/Title/Status) | ⚠️ Basic (Device Name only) |
+| Playback Control | ✅ Yes (Pause/Resume) | ⚠️ Basic (Mute only) |
+
+**Platform Setup (Linux/Raspberry Pi):**
+```bash
+# Install dependencies
+sudo apt-get install bluez pulseaudio-module-bluetooth libasound2-dev
+
+# Configure BlueZ for A2DP Sink (in /etc/bluetooth/main.conf)
+# Class = 0x200414 (Audio Sink)
+# ControllerMode = bredr
+
+# Restart Bluetooth
+sudo systemctl restart bluetooth
+```
+
+**Platform Setup (Windows):**
+- Enable Bluetooth in Windows Settings.
+- Pair device normally; Windows handles the A2DP profile automatically.
+- The application detects the corresponding Audio Input Endpoint.
+
 ### Unit Tests Required
 
 1. **SpotifyAudioSourceTests.cs**
@@ -1425,12 +1515,18 @@ public class GenericUSBAudioSource : IPrimaryAudioSource
    - Test shuffle/repeat modes
    - Test seek operations
 
+4. **BluetoothAudioSourceTests.cs** (Integration)
+   - Test device connection/disconnection handling
+   - Test metadata updates from connected devices
+   - Test AVRCP integration (metadata tracking, playback status)
+
 ### Success Criteria
 - [ ] All primary sources initialize correctly
 - [ ] USB port conflicts are detected and reported
 - [ ] Preferences auto-save on state changes
 - [ ] Only one primary source active at a time
 - [ ] File player supports all specified audio formats
+- [ ] Bluetooth device discovery and audio capture works on target platform
 ```
 
 ---

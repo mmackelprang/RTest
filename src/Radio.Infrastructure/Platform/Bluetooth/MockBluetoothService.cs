@@ -1,0 +1,118 @@
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+using Radio.Core.Interfaces.Audio;
+
+namespace Radio.Infrastructure.Platform.Bluetooth;
+
+public sealed class MockBluetoothService : IBluetoothService
+{
+        private readonly ILogger _logger;
+        
+        public MockBluetoothService(ILogger<MockBluetoothService> logger)
+        {
+            _logger = logger;
+        }
+
+        public bool IsAvailable => true;
+        public BluetoothAdapterState State { get; private set; } = BluetoothAdapterState.On;
+        public IReadOnlyList<BluetoothDeviceInfo> PairedDevices => new List<BluetoothDeviceInfo>
+        {
+            new BluetoothDeviceInfo { Name = "Mock Speaker", Address = "00:11:22:33:44:55", IsPaired = true, IsConnected = false },
+            new BluetoothDeviceInfo { Name = "Mock Phone", Address = "AA:BB:CC:DD:EE:FF", IsPaired = true, IsConnected = true }
+        };
+        
+        public IReadOnlyList<BluetoothDeviceInfo> DiscoveredDevices => new List<BluetoothDeviceInfo>();
+        public bool IsDiscovering { get; private set; }
+        public BluetoothDeviceInfo? ConnectedDevice { get; set; }
+
+        // Suppress "event never used" warning for mocks
+#pragma warning disable 67
+        public event EventHandler<BluetoothAdapterStateChangedEventArgs>? StateChanged;
+        public event EventHandler<BluetoothDeviceConnectedEventArgs>? DeviceConnected;
+        public event EventHandler<BluetoothDeviceDisconnectedEventArgs>? DeviceDisconnected;
+        public event EventHandler<BluetoothDeviceDiscoveredEventArgs>? DeviceDiscovered;
+#pragma warning restore 67
+        public event EventHandler<BluetoothPlaybackMetadata>? MetadataChanged;
+        public event EventHandler<BluetoothPlaybackStatus>? PlaybackStatusChanged;
+        public event EventHandler<TimeSpan>? PositionChanged { add { } remove { } }
+
+        public Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default)
+        {
+            State = BluetoothAdapterState.On;
+            return Task.FromResult(true);
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken = default)
+        {
+            State = BluetoothAdapterState.Off;
+            return Task.CompletedTask;
+        }
+
+        public Task StartDiscoveryAsync(CancellationToken cancellationToken = default)
+        {
+            IsDiscovering = true;
+            return Task.CompletedTask;
+        }
+
+        public Task StopDiscoveryAsync()
+        {
+            IsDiscovering = false;
+            return Task.CompletedTask;
+        }
+
+        public Task<bool> PairDeviceAsync(string deviceAddress, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(true);
+        }
+
+        public Task<bool> UnpairDeviceAsync(string deviceAddress, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(true);
+        }
+
+        public Task<bool> AcceptConnectionAsync(string deviceAddress, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(true);
+        }
+
+        public Task DisconnectAsync(CancellationToken cancellationToken = default)
+        {
+            ConnectedDevice = null;
+            return Task.CompletedTask;
+        }
+
+        public Task<object?> GetAudioCaptureDeviceAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<object?>("mock-capture-endpoint");
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            return ValueTask.CompletedTask;
+        }
+        
+        // Mock helper to simulate metadata
+        public void SimulateMetadataChange(string title, string artist)
+        {
+            MetadataChanged?.Invoke(this, new BluetoothPlaybackMetadata 
+            { 
+               Title = title, 
+               Artist = artist,
+               Album = "Mock Album"
+            });
+        }
+
+        public void SimulatePlaybackStatusChange(BluetoothPlaybackStatus status)
+        {
+            PlaybackStatusChanged?.Invoke(this, status);
+        }
+
+        public void SimulateConnection(BluetoothDeviceInfo device)
+        {
+            ConnectedDevice = device;
+            DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = device });
+    }
+}

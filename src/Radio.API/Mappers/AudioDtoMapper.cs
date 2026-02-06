@@ -29,7 +29,7 @@ public static class AudioDtoMapper
       
       // Determine source characteristics based on type
       IsRadio = source.Type == AudioSourceType.Radio,
-      IsStreaming = false, // No streaming sources currently available
+      IsStreaming = source.Type is AudioSourceType.Bluetooth or AudioSourceType.Radio,
       
       // Build capabilities dictionary
       Capabilities = new Dictionary<string, bool>()
@@ -39,6 +39,15 @@ public static class AudioDtoMapper
     {
       dto.IsSeekable = primary.IsSeekable;
       dto.Metadata = primary.Metadata.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+
+      // Bluetooth metadata enrichment
+      if (source.Type == AudioSourceType.Bluetooth)
+      {
+        dto.Metadata["Source"] = "Bluetooth";
+        dto.Metadata["Device"] = primary.Metadata.TryGetValue("Device", out var device)
+          ? device ?? "Bluetooth Device"
+          : "Bluetooth Device";
+      }
 
       // Check if source implements IPlayQueue interface
       dto.HasQueue = source is IPlayQueue;

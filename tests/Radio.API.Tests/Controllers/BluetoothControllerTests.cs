@@ -1,0 +1,83 @@
+using System.Net;
+using System.Net.Http.Json;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Moq;
+using Radio.API.Models;
+using Radio.Core.Interfaces.Audio;
+
+namespace Radio.API.Tests.Controllers;
+
+public class BluetoothControllerTests : IClassFixture<WebApplicationFactory<Program>>
+{
+  private readonly WebApplicationFactory<Program> _factory;
+  private readonly HttpClient _client;
+
+  public BluetoothControllerTests(WebApplicationFactory<Program> factory)
+  {
+    _factory = factory;
+    _client = _factory.CreateClient();
+  }
+
+  [Fact]
+  public async Task GetStatus_ReturnsOk()
+  {
+    var response = await _client.GetAsync("/api/bluetooth/status");
+    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+  }
+
+  [Fact]
+  public async Task Start_ReturnsOkOrBadRequestWhenUnavailable()
+  {
+    var response = await _client.PostAsJsonAsync("/api/bluetooth/start", new BluetoothStartRequest());
+    Assert.True(response.StatusCode == HttpStatusCode.OK || response.StatusCode == HttpStatusCode.BadRequest);
+  }
+
+  [Fact]
+  public async Task Stop_ReturnsOk()
+  {
+    var response = await _client.PostAsync("/api/bluetooth/stop", null);
+    Assert.True(response.StatusCode == HttpStatusCode.OK || response.StatusCode == HttpStatusCode.Accepted);
+  }
+
+  [Fact]
+  public async Task DiscoveryStart_ReturnsAccepted()
+  {
+    var response = await _client.PostAsync("/api/bluetooth/discovery/start", null);
+    Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+  }
+
+  [Fact]
+  public async Task DiscoveryStop_ReturnsAccepted()
+  {
+    var response = await _client.PostAsync("/api/bluetooth/discovery/stop", null);
+    Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+  }
+
+  [Fact]
+  public async Task Pair_WithMissingAddress_ReturnsBadRequest()
+  {
+    var response = await _client.PostAsJsonAsync("/api/bluetooth/pair", new BluetoothDeviceRequest { DeviceAddress = string.Empty });
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+  }
+
+  [Fact]
+  public async Task Unpair_WithMissingAddress_ReturnsBadRequest()
+  {
+    var response = await _client.PostAsJsonAsync("/api/bluetooth/unpair", new BluetoothDeviceRequest { DeviceAddress = string.Empty });
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+  }
+
+  [Fact]
+  public async Task Accept_WithMissingAddress_ReturnsBadRequest()
+  {
+    var response = await _client.PostAsJsonAsync("/api/bluetooth/accept", new BluetoothDeviceRequest { DeviceAddress = string.Empty });
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+  }
+
+  [Fact]
+  public async Task Disconnect_ReturnsOk()
+  {
+    var response = await _client.PostAsync("/api/bluetooth/disconnect", null);
+    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+  }
+}

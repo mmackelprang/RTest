@@ -54,5 +54,8 @@ public enum PlaySource
   File,
 
   /// <summary>Generic USB audio source.</summary>
-  GenericUSB
+  GenericUSB,
+
+  /// <summary>Bluetooth audio source.</summary>
+  Bluetooth
 }

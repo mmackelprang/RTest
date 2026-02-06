@@ -65,6 +65,9 @@ public enum AudioSourceType
   /// <summary>Generic USB audio input.</summary>
   GenericUSB,
 
+  /// <summary>Bluetooth A2DP sink input.</summary>
+  Bluetooth,
+
   /// <summary>Text-to-speech event audio.</summary>
   TTS,
 

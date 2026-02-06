@@ -18,13 +18,15 @@ namespace Radio.Infrastructure.Audio.Services;
 /// Central coordinator for audio sources and playback.
 /// Manages source lifecycle, switching, and mixer integration.
 /// </summary>
-public class AudioManager : IAudioManager
+public class AudioManager : IAudioManager, IAsyncDisposable
 {
   private readonly ILogger<AudioManager> _logger;
   private readonly ILoggerFactory _loggerFactory;
   private readonly IAudioEngine _audioEngine;
   private readonly IAudioDeviceManager _deviceManager;
   private readonly IRadioFactory _radioFactory;
+  private readonly IBluetoothService _bluetoothService;
+  private readonly IOptionsMonitor<BluetoothOptions> _bluetoothOptions;
 
   // Options for source creation
   private readonly IOptionsMonitor<FilePlayerOptions> _filePlayerOptions;
@@ -61,6 +63,8 @@ public class AudioManager : IAudioManager
     IAudioEngine audioEngine,
     IAudioDeviceManager deviceManager,
     IRadioFactory radioFactory,
+    IBluetoothService bluetoothService,
+    IOptionsMonitor<BluetoothOptions> bluetoothOptions,
     IOptionsMonitor<FilePlayerOptions> filePlayerOptions,
     IOptionsMonitor<FilePlayerPreferences> filePlayerPreferences,
     IOptionsMonitor<DeviceOptions> deviceOptions,
@@ -78,6 +82,8 @@ public class AudioManager : IAudioManager
     _audioEngine = audioEngine;
     _deviceManager = deviceManager;
     _radioFactory = radioFactory;
+    _bluetoothService = bluetoothService;
+    _bluetoothOptions = bluetoothOptions;
     _filePlayerOptions = filePlayerOptions;
     _filePlayerPreferences = filePlayerPreferences;
     _deviceOptions = deviceOptions;
@@ -89,6 +95,8 @@ public class AudioManager : IAudioManager
     _configurationManager = configurationManager;
     _playbackService = playbackService;
     _serviceScopeFactory = serviceScopeFactory;
+
+    _bluetoothService.DeviceConnected += OnBluetoothDeviceConnected;
 
     // Subscribe to track identification events for updating play history
     if (_identificationService != null)
@@ -141,6 +149,13 @@ public class AudioManager : IAudioManager
     if (!_audioEngine.IsReady)
     {
       await _audioEngine.InitializeAsync(cancellationToken);
+    }
+
+    // Pre-warm Bluetooth if enabled on startup
+    if (_bluetoothOptions.CurrentValue.EnableOnStartup)
+    {
+      _logger.LogInformation("Pre-initializing Bluetooth source (EnableOnStartup=true)");
+      await GetOrCreateSourceAsync(AudioSourceType.Bluetooth, switchToSource: false, cancellationToken);
     }
 
     _initialized = true;
@@ -283,6 +298,12 @@ public class AudioManager : IAudioManager
 
     _logger.LogInformation("Creating new source for type: {SourceType}", sourceType);
 
+    if (sourceType == AudioSourceType.Bluetooth && !_bluetoothService.IsAvailable)
+    {
+      _logger.LogWarning("Bluetooth service not available; cannot create Bluetooth source");
+      return null;
+    }
+
     IAudioSource? source = null;
     try
     {
@@ -292,6 +313,7 @@ public class AudioManager : IAudioManager
         AudioSourceType.FilePlayer => CreateFilePlayerSource(),
         AudioSourceType.Vinyl => CreateVinylSource(),
         AudioSourceType.GenericUSB => CreateGenericUSBSource(),
+        AudioSourceType.Bluetooth => CreateBluetoothSource(),
         _ => null
       };
     }
@@ -430,6 +452,20 @@ public class AudioManager : IAudioManager
     {
       _logger.LogWarning(ex, "Failed to persist source preference for {SourceType}", sourceType);
     }
+  }
+
+  /// <summary>
+  /// Creates a Bluetooth audio source.
+  /// </summary>
+  private IAudioSource CreateBluetoothSource()
+  {
+    var logger = _loggerFactory.CreateLogger<BluetoothAudioSource>();
+    return new BluetoothAudioSource(
+      logger,
+      _deviceManager,
+      _bluetoothService,
+      _identificationService,
+      _metricsCollector);
   }
 
   /// <summary>
@@ -584,6 +620,7 @@ public class AudioManager : IAudioManager
         {
           _logger.LogError(ex, "Failed to clean up previous source");
         }
+      
       }
       finally
       {
@@ -747,6 +784,7 @@ public class AudioManager : IAudioManager
       AudioSourceType.Vinyl => PlaySource.Vinyl,
       AudioSourceType.FilePlayer => PlaySource.File,
       AudioSourceType.GenericUSB => PlaySource.GenericUSB,
+      AudioSourceType.Bluetooth => PlaySource.Bluetooth,
       _ => PlaySource.File
     };
   }
@@ -760,7 +798,7 @@ public class AudioManager : IAudioManager
     {
       return;
     }
-
+ 
     try
     {
       using var scope = _serviceScopeFactory.CreateScope();
@@ -770,12 +808,12 @@ public class AudioManager : IAudioManager
         _logger.LogDebug("IPlayHistoryRepository not available, skipping play history update");
         return;
       }
-
+ 
       var playSource = MapSourceTypeToPlaySource(_activeSource.Type);
-
+ 
       // Try to find a recent unidentified entry for this source to update
       var existingEntry = await playHistoryRepository.GetRecentUnidentifiedAsync(playSource, 5);
-
+ 
       if (existingEntry != null)
       {
         // Update the existing entry with fingerprinting data
@@ -788,7 +826,7 @@ public class AudioManager : IAudioManager
           WasIdentified = true,
           Track = e.Track
         };
-
+ 
         await playHistoryRepository.UpdateAsync(updatedEntry);
         _logger.LogInformation(
           "Updated play history entry {EntryId} with fingerprinting data: '{Title}' by '{Artist}' (confidence: {Confidence:P0})",
@@ -802,6 +840,38 @@ public class AudioManager : IAudioManager
     catch (Exception ex)
     {
       _logger.LogWarning(ex, "Failed to update play history with fingerprinting data");
+    }
+  }
+ 
+  /// <summary>
+  /// Auto-switch to Bluetooth when a device connects if enabled.
+  /// </summary>
+  private async void OnBluetoothDeviceConnected(object? sender, BluetoothDeviceConnectedEventArgs e)
+  {
+    try
+    {
+      if (!_bluetoothOptions.CurrentValue.AutoSwitchOnConnect)
+      {
+        return;
+      }
+
+      if (!_bluetoothService.IsAvailable)
+      {
+        _logger.LogWarning("Bluetooth auto-switch skipped; adapter not available");
+        return;
+      }
+
+      if (_activeSource?.Type == AudioSourceType.Bluetooth)
+      {
+        _logger.LogDebug("Bluetooth device connected but Bluetooth is already the active source; skipping switch");
+        return;
+      }
+
+      await GetOrCreateSourceAsync(AudioSourceType.Bluetooth, switchToSource: true);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to auto-switch to Bluetooth after device connect {Device}", e.Device.Address);
     }
   }
 
@@ -822,6 +892,9 @@ public class AudioManager : IAudioManager
     {
       _identificationService.TrackIdentified -= OnTrackIdentified;
     }
+
+    // Unsubscribe Bluetooth events
+    _bluetoothService.DeviceConnected -= OnBluetoothDeviceConnected;
 
     // Stop current playback (don't call StopAsync as it checks disposed flag)
     try
@@ -852,6 +925,15 @@ public class AudioManager : IAudioManager
 
     _sourceCache.Clear();
     _switchLock.Dispose();
+
+    try
+    {
+      await _bluetoothService.DisposeAsync();
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Error disposing Bluetooth service");
+    }
 
     _logger.LogInformation("AudioManager disposed");
   }

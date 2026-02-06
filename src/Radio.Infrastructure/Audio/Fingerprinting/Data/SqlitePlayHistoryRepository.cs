@@ -196,7 +196,8 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     {
       while (await reader.ReadAsync(ct))
       {
-        var source = Enum.Parse<PlaySource>(reader.GetString(0));
+        if (!Enum.TryParse<PlaySource>(reader.GetString(0), out var source))
+          continue; // Skip rows with removed source types (e.g., Spotify)
         // SQLite COUNT returns 64-bit integer, guard for NULL
         playsBySource[source] = reader.IsDBNull(1) ? 0 : Convert.ToInt32(reader.GetInt64(1));
       }
@@ -495,7 +496,8 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
       FingerprintId = reader.IsDBNull(reader.GetOrdinal("FingerprintId"))
         ? null : reader.GetString(reader.GetOrdinal("FingerprintId")),
       PlayedAt = DateTime.Parse(reader.GetString(reader.GetOrdinal("PlayedAt"))),
-      Source = Enum.Parse<PlaySource>(reader.GetString(reader.GetOrdinal("Source"))),
+      Source = Enum.TryParse<PlaySource>(reader.GetString(reader.GetOrdinal("Source")), out var parsedPlaySource)
+        ? parsedPlaySource : PlaySource.File,
       MetadataSource = metadataSource,
       SourceDetails = reader.IsDBNull(reader.GetOrdinal("SourceDetails"))
         ? null : reader.GetString(reader.GetOrdinal("SourceDetails")),

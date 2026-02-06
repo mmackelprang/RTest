@@ -4,6 +4,7 @@ using Radio.API.Mappers;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
+using System.Linq;
 
 namespace Radio.API.Services;
 
@@ -17,6 +18,7 @@ public class AudioStateUpdateService : BackgroundService
   private readonly ILogger<AudioStateUpdateService> _logger;
   private readonly IHubContext<AudioStateHub> _hubContext;
   private readonly IAudioManager? _audioManager;
+  private readonly IBluetoothService? _bluetoothService;
 
   /// <summary>
   /// Gets or sets the update interval in milliseconds (default: 500ms).
@@ -49,11 +51,24 @@ public class AudioStateUpdateService : BackgroundService
     // Try to get IAudioManager, but don't fail if it's not available
     // This allows the service to start even if audio infrastructure isn't fully initialized
     _audioManager = serviceProvider.GetService<IAudioManager>();
+    _bluetoothService = serviceProvider.GetService<IBluetoothService>();
     
     if (_audioManager == null)
     {
-      _logger.LogWarning("IAudioManager not available - AudioStateUpdateService will not broadcast updates");
+      _logger.LogWarning("IAudioManager not available - AudioStateUpdateService will not broadcast playback updates");
       IsEnabled = false;
+    }
+
+    if (_bluetoothService != null)
+    {
+      _bluetoothService.StateChanged += OnBluetoothStateChanged;
+      _bluetoothService.DeviceConnected += OnBluetoothDeviceConnected;
+      _bluetoothService.DeviceDisconnected += OnBluetoothDeviceDisconnected;
+      _bluetoothService.DeviceDiscovered += OnBluetoothDeviceDiscovered;
+    }
+    else
+    {
+      _logger.LogWarning("IBluetoothService not available - Bluetooth SignalR updates disabled");
     }
   }
 
@@ -211,8 +226,11 @@ public class AudioStateUpdateService : BackgroundService
   // State comparison methods
   private static bool HasPlaybackStateChanged(PlaybackStateDto? previous, PlaybackStateDto? current)
   {
-    if (previous == null || current == null) return true;
-    
+    if (previous == null || current == null)
+    {
+      return true;
+    }
+
     return previous.IsPlaying != current.IsPlaying ||
            previous.IsPaused != current.IsPaused ||
            previous.Volume != current.Volume ||
@@ -231,7 +249,10 @@ public class AudioStateUpdateService : BackgroundService
 
   private static bool HasNowPlayingChanged(NowPlayingDto? previous, NowPlayingDto? current)
   {
-    if (previous == null || current == null) return true;
+    if (previous == null || current == null)
+    {
+      return true;
+    }
 
     // Check if metadata changed (exclude Position which changes constantly during playback)
     // Position changes are handled by PlaybackState updates
@@ -248,8 +269,14 @@ public class AudioStateUpdateService : BackgroundService
 
   private static bool HasQueueChanged(List<QueueItemDto>? previous, List<QueueItemDto>? current)
   {
-    if (previous == null || current == null) return true;
-    if (previous.Count != current.Count) return true;
+    if (previous == null || current == null)
+    {
+      return true;
+    }
+    if (previous.Count != current.Count)
+    {
+      return true;
+    }
 
     // Check if items are the same (by ID and order)
     for (int i = 0; i < previous.Count; i++)
@@ -267,7 +294,10 @@ public class AudioStateUpdateService : BackgroundService
 
   private static bool HasRadioStateChanged(RadioStateDto? previous, RadioStateDto? current)
   {
-    if (previous == null || current == null) return true;
+    if (previous == null || current == null)
+    {
+      return true;
+    }
 
     return Math.Abs(previous.Frequency - current.Frequency) > 0.001 ||
            previous.Band != current.Band ||
@@ -282,7 +312,10 @@ public class AudioStateUpdateService : BackgroundService
 
   private static bool HasVolumeChanged(VolumeDto? previous, VolumeDto? current)
   {
-    if (previous == null || current == null) return true;
+    if (previous == null || current == null)
+    {
+      return true;
+    }
 
     return Math.Abs(previous.Volume - current.Volume) > 0.001f ||
            previous.IsMuted != current.IsMuted ||
@@ -396,5 +429,101 @@ public class AudioStateUpdateService : BackgroundService
       IsScanning = radioControls.IsScanning,
       ScanDirection = radioControls.ScanDirection?.ToString()
     };
+  }
+
+  private BluetoothStatusDto BuildBluetoothStatusDto()
+  {
+    return new BluetoothStatusDto
+    {
+      IsAvailable = _bluetoothService?.IsAvailable ?? false,
+      State = _bluetoothService?.State.ToString() ?? BluetoothAdapterState.Unknown.ToString(),
+      ConnectedDevice = _bluetoothService?.ConnectedDevice != null ? MapDevice(_bluetoothService.ConnectedDevice) : null,
+      PairedDevices = _bluetoothService?.PairedDevices.Select(MapDevice).ToList() ?? [],
+      DiscoveredDevices = _bluetoothService?.DiscoveredDevices.Select(MapDevice).ToList() ?? [],
+      IsDiscovering = _bluetoothService?.IsDiscovering ?? false
+    };
+  }
+
+  private static BluetoothDeviceDto MapDevice(BluetoothDeviceInfo device)
+  {
+    return new BluetoothDeviceDto
+    {
+      Address = device.Address,
+      Name = device.Name,
+      IsPaired = device.IsPaired,
+      IsConnected = device.IsConnected,
+      LastConnected = device.LastConnected
+    };
+  }
+
+  private async void OnBluetoothStateChanged(object? sender, BluetoothAdapterStateChangedEventArgs e)
+  {
+    try
+    {
+      var status = BuildBluetoothStatusDto();
+      await _hubContext.Clients.Group("Bluetooth").SendAsync("BluetoothStateChanged", status);
+      _logger.LogDebug("Broadcast BluetoothStateChanged: {State}", status.State);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error broadcasting Bluetooth state change");
+    }
+  }
+
+  private async void OnBluetoothDeviceConnected(object? sender, BluetoothDeviceConnectedEventArgs e)
+  {
+    try
+    {
+      var dto = MapDevice(e.Device);
+      await _hubContext.Clients.Group("Bluetooth").SendAsync("BluetoothDeviceConnected", dto);
+      await _hubContext.Clients.Group("Bluetooth").SendAsync("BluetoothStateChanged", BuildBluetoothStatusDto());
+      _logger.LogDebug("Broadcast BluetoothDeviceConnected: {Device}", dto.Name);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error broadcasting Bluetooth device connection");
+    }
+  }
+
+  private async void OnBluetoothDeviceDisconnected(object? sender, BluetoothDeviceDisconnectedEventArgs e)
+  {
+    try
+    {
+      var dto = MapDevice(e.Device);
+      await _hubContext.Clients.Group("Bluetooth").SendAsync("BluetoothDeviceDisconnected", dto);
+      await _hubContext.Clients.Group("Bluetooth").SendAsync("BluetoothStateChanged", BuildBluetoothStatusDto());
+      _logger.LogDebug("Broadcast BluetoothDeviceDisconnected: {Device}", dto.Name);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error broadcasting Bluetooth device disconnection");
+    }
+  }
+
+  private async void OnBluetoothDeviceDiscovered(object? sender, BluetoothDeviceDiscoveredEventArgs e)
+  {
+    try
+    {
+      var dto = MapDevice(e.Device);
+      await _hubContext.Clients.Group("Bluetooth").SendAsync("BluetoothDeviceDiscovered", dto);
+      _logger.LogDebug("Broadcast BluetoothDeviceDiscovered: {Device}", dto.Name);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error broadcasting Bluetooth device discovery");
+    }
+  }
+
+  public override void Dispose()
+  {
+    if (_bluetoothService != null)
+    {
+      _bluetoothService.StateChanged -= OnBluetoothStateChanged;
+      _bluetoothService.DeviceConnected -= OnBluetoothDeviceConnected;
+      _bluetoothService.DeviceDisconnected -= OnBluetoothDeviceDisconnected;
+      _bluetoothService.DeviceDiscovered -= OnBluetoothDeviceDiscovered;
+    }
+
+    base.Dispose();
   }
 }

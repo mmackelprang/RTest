@@ -42,6 +42,12 @@ public static class AudioServiceExtensions
     services.Configure<FilePlayerPreferences>(
       configuration.GetSection(FilePlayerPreferences.SectionName));
 
+    // Bind Bluetooth options/preferences
+    services.Configure<BluetoothOptions>(
+      configuration.GetSection(BluetoothOptions.SectionName));
+    services.Configure<BluetoothPreferences>(
+      configuration.GetSection(BluetoothPreferences.SectionName));
+
     // Bind Device options (for Vinyl, USB, etc.)
     services.Configure<DeviceOptions>(
       configuration.GetSection(DeviceOptions.SectionName));
@@ -87,6 +93,15 @@ public static class AudioServiceExtensions
     // Register radio factory (singleton for device management)
     services.AddSingleton<RadioFactory>();
     services.AddSingleton<IRadioFactory>(sp => sp.GetRequiredService<RadioFactory>());
+
+    // Register Bluetooth service factory + service
+    services.AddSingleton<IBluetoothService>(sp =>
+    {
+      var logger = sp.GetRequiredService<ILoggerFactory>();
+      var options = sp.GetRequiredService<IOptions<BluetoothOptions>>();
+      var deviceManager = sp.GetRequiredService<IAudioDeviceManager>() as SoundFlowDeviceManager;
+      return Platform.Bluetooth.BluetoothServiceFactory.Create(sp, options, logger, deviceManager);
+    });
 
     // Register audio manager (singleton to maintain state)
     services.AddSingleton<AudioManager>();
