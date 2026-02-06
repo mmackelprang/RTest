@@ -13,7 +13,6 @@ public class AudioSourceTests
     // Verify all expected audio source types exist
     var types = Enum.GetValues<AudioSourceType>();
 
-    Assert.Contains(AudioSourceType.Spotify, types);
     Assert.Contains(AudioSourceType.Radio, types);
     Assert.Contains(AudioSourceType.Vinyl, types);
     Assert.Contains(AudioSourceType.FilePlayer, types);

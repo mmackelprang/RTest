@@ -53,9 +53,6 @@ public enum PlaySource
   /// <summary>Local audio file source.</summary>
   File,
 
-  /// <summary>Spotify streaming source.</summary>
-  Spotify,
-
   /// <summary>Generic USB audio source.</summary>
   GenericUSB
 }

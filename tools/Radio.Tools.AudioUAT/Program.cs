@@ -22,7 +22,6 @@ using Radio.Tools.AudioUAT.Phases.Phase9;
 using Radio.Tools.AudioUAT.Phases.Phase10;
 using Radio.Tools.AudioUAT.Phases.Phase12;
 using Radio.Tools.AudioUAT.Phases.Phase13;
-using Radio.Tools.AudioUAT.Phases.Phase14;
 using Radio.Tools.AudioUAT.Phases.Phase15;
 using Radio.Tools.AudioUAT.Results;
 using Radio.Tools.AudioUAT.Services;
@@ -111,10 +110,9 @@ var host = Host.CreateDefaultBuilder(args)
     services.AddSingleton<FingerprintingTests>();
     services.AddSingleton<BackupRestoreTests>();
 
-    // Register API Integration tests (Phase 12-14)
+    // Register API Integration tests (Phase 12-13)
     services.AddSingleton<FilePlayerApiTests>();
     services.AddSingleton<RadioApiTests>();
-    services.AddSingleton<SpotifyApiTests>();
 
     // Register Phase 15 E2E tests
     services.AddSingleton<AudioPlaybackApiTests>();
@@ -173,7 +171,6 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
   var phase10Tests = services.GetRequiredService<BackupRestoreTests>();
   var phase12Tests = services.GetRequiredService<FilePlayerApiTests>();
   var phase13Tests = services.GetRequiredService<RadioApiTests>();
-  var phase14Tests = services.GetRequiredService<SpotifyApiTests>();
   var phase15AudioTests = services.GetRequiredService<AudioPlaybackApiTests>();
   var phase15QueueTests = services.GetRequiredService<QueueManagementApiTests>();
   var phase15SourceTests = services.GetRequiredService<SourceManagementApiTests>();
@@ -234,10 +231,6 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
     {
       testsToRun.AddRange(phase13Tests.GetAllTests());
     }
-    if (runAll || phaseStr == "14")
-    {
-      testsToRun.AddRange(phase14Tests.GetAllTests());
-    }
     if (runAll || phaseStr == "15")
     {
       testsToRun.AddRange(phase15AudioTests.GetAllTests());
@@ -265,7 +258,6 @@ static async Task<int> RunAutomatedTests(string[] args, IServiceProvider service
         .Concat(phase10Tests.GetAllTests())
         .Concat(phase12Tests.GetAllTests())
         .Concat(phase13Tests.GetAllTests())
-        .Concat(phase14Tests.GetAllTests())
         .Concat(phase15AudioTests.GetAllTests())
         .Concat(phase15QueueTests.GetAllTests())
         .Concat(phase15SourceTests.GetAllTests())
@@ -336,7 +328,6 @@ static async Task RunInteractiveMode(IServiceProvider services)
   var phase10Tests = services.GetRequiredService<BackupRestoreTests>();
   var phase12Tests = services.GetRequiredService<FilePlayerApiTests>();
   var phase13Tests = services.GetRequiredService<RadioApiTests>();
-  var phase14Tests = services.GetRequiredService<SpotifyApiTests>();
 
   ConsoleUI.WriteWelcomeBanner();
 
@@ -369,7 +360,6 @@ static async Task RunInteractiveMode(IServiceProvider services)
       "Phase 10: Database Backup & Restore Tests",
       "Phase 12: FilePlayer API Tests",
       "Phase 13: Radio API Tests",
-      "Phase 14: Spotify API Tests",
       "View Test Results",
       "Export Results to JSON",
       "Clear Results",
@@ -420,10 +410,6 @@ static async Task RunInteractiveMode(IServiceProvider services)
 
       case "Phase 13: Radio API Tests":
         await RunPhase13Menu(services, runner, phase13Tests);
-        break;
-
-      case "Phase 14: Spotify API Tests":
-        await RunPhase14Menu(services, runner, phase14Tests);
         break;
 
       case "View Test Results":
@@ -1837,133 +1823,3 @@ static async Task RunPhase13Menu(IServiceProvider services, TestRunner runner, R
   }
 }
 
-static async Task RunPhase14Menu(IServiceProvider services, TestRunner runner, SpotifyApiTests tests)
-{
-  var exit = false;
-  while (!exit)
-  {
-    AnsiConsole.Clear();
-
-    var rule = new Rule("[cyan]Phase 14: Spotify API Tests[/]")
-    {
-      Justification = Justify.Center
-    };
-    AnsiConsole.Write(rule);
-    AnsiConsole.WriteLine();
-
-    AnsiConsole.MarkupLine("[yellow]Note: These tests require Spotify to be configured and authenticated.[/]");
-    AnsiConsole.WriteLine();
-
-    var allTests = tests.GetAllTests();
-    var menuItems = new List<string>
-    {
-      "Run All Phase 14 Tests",
-      "---",
-      "[SOURCE TESTS]",
-    };
-
-    foreach (var test in allTests.Where(t => t.TestId is "SPOT-001" or "SPOT-005"))
-    {
-      menuItems.Add($"[{test.TestId}] {test.TestName}");
-    }
-
-    menuItems.Add("---");
-    menuItems.Add("[SEARCH TESTS]");
-    foreach (var test in allTests.Where(t => t.TestId is "SPOT-002" or "SPOT-003" or "SPOT-004"))
-    {
-      menuItems.Add($"[{test.TestId}] {test.TestName}");
-    }
-
-    menuItems.Add("---");
-    menuItems.Add("[PLAYBACK CONTROL TESTS]");
-    foreach (var test in allTests.Where(t => t.TestId is "SPOT-006" or "SPOT-007" or "SPOT-008" or "SPOT-009"))
-    {
-      menuItems.Add($"[{test.TestId}] {test.TestName}");
-    }
-
-    menuItems.Add("---");
-    menuItems.Add("[AUDIO CONTROL TESTS]");
-    foreach (var test in allTests.Where(t => t.TestId is "SPOT-010" or "SPOT-011"))
-    {
-      menuItems.Add($"[{test.TestId}] {test.TestName}");
-    }
-
-    menuItems.Add("---");
-    menuItems.Add("[METADATA TESTS]");
-    foreach (var test in allTests.Where(t => t.TestId == "SPOT-012"))
-    {
-      menuItems.Add($"[{test.TestId}] {test.TestName}");
-    }
-
-    menuItems.Add("---");
-    menuItems.Add("Return to Main Menu");
-
-    var choice = ConsoleUI.ShowMenu("[bold]Select Test[/]", menuItems.ToArray());
-
-    if (choice == "Return to Main Menu")
-    {
-      exit = true;
-      continue;
-    }
-
-    if (choice.StartsWith("---") || choice.StartsWith("[SOURCE") || choice.StartsWith("[SEARCH") ||
-        choice.StartsWith("[PLAYBACK") || choice.StartsWith("[AUDIO") || choice.StartsWith("[METADATA"))
-    {
-      continue;
-    }
-
-    if (choice == "Run All Phase 14 Tests")
-    {
-      AnsiConsole.Clear();
-      ConsoleUI.WriteHeader("Running All Phase 14 Tests");
-
-      await AnsiConsole.Progress()
-        .StartAsync(async ctx =>
-        {
-          var task = ctx.AddTask("Running tests...", maxValue: allTests.Count);
-
-          foreach (var test in allTests)
-          {
-            task.Description = $"Running {test.TestId}...";
-            await runner.RunTestAsync(test);
-            task.Increment(1);
-          }
-        });
-
-      var resultsManager = services.GetRequiredService<TestResultsManager>();
-      ConsoleUI.DisplayTestResults(resultsManager.GetResultsForPhase(14));
-      ConsoleUI.DisplaySummary(resultsManager.GetSummaryForPhase(14));
-      ConsoleUI.PressAnyKeyToContinue();
-    }
-    else
-    {
-      var testIdMatch = System.Text.RegularExpressions.Regex.Match(choice, @"\[([^\]]+)\]");
-      if (testIdMatch.Success)
-      {
-        var testId = testIdMatch.Groups[1].Value;
-        var test = allTests.FirstOrDefault(t => t.TestId == testId);
-        if (test != null)
-        {
-          AnsiConsole.Clear();
-          var result = await runner.RunTestAsync(test);
-
-          AnsiConsole.WriteLine();
-          if (result.Passed)
-          {
-            ConsoleUI.WriteSuccess($"Test {test.TestId} PASSED");
-          }
-          else if (result.Skipped)
-          {
-            ConsoleUI.WriteWarning($"Test {test.TestId} SKIPPED: {result.Message}");
-          }
-          else
-          {
-            ConsoleUI.WriteError($"Test {test.TestId} FAILED: {result.Message}");
-          }
-
-          ConsoleUI.PressAnyKeyToContinue();
-        }
-      }
-    }
-  }
-}

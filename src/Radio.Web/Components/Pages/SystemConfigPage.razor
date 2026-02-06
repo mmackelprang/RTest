@@ -117,7 +117,6 @@
                 <MudSelect T="string" @bind-Value="_audioConfig.DefaultSource" Label="Default Source"
                            Variant="Variant.Outlined" HelperText="Primary audio source on startup">
                   <MudSelectItem Value="@("Radio")">Radio</MudSelectItem>
-                  <MudSelectItem Value="@("Spotify")">Spotify</MudSelectItem>
                   <MudSelectItem Value="@("FilePlayer")">File Player</MudSelectItem>
                   <MudSelectItem Value="@("Vinyl")">Vinyl</MudSelectItem>
                 </MudSelect>
@@ -316,32 +315,6 @@
                               HelperText="Default Chromecast device name (optional)" />
               </MudItem>
               
-              <!-- Spotify Configuration -->
-              <MudItem xs="12">
-                <MudText Typo="Typo.h6" Class="mt-2">Spotify Integration</MudText>
-                <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">
-                  Configure how Spotify integrates with the audio system. See SPOTIFY_INTEGRATED_SETUP.md for detailed setup instructions.
-                </MudAlert>
-              </MudItem>
-              
-              <MudItem xs="12" md="6">
-                <MudSelect T="string" @bind-Value="_deviceOptions.Spotify.Mode" 
-                           Label="Spotify Mode"
-                           Variant="Variant.Outlined"
-                           HelperText="Integration mode for Spotify">
-                  <MudSelectItem Value="@("RemoteControl")">Remote Control (No visualization)</MudSelectItem>
-                  <MudSelectItem Value="@("Integrated")">Integrated (Managed librespot with visualization)</MudSelectItem>
-                </MudSelect>
-              </MudItem>
-              
-              <MudItem xs="12" md="6">
-                <MudTextField T="string" @bind-Value="_deviceOptions.Spotify.LibrespotPath" 
-                              Label="Librespot Path"
-                              Variant="Variant.Outlined"
-                              HelperText="Path to librespot executable (e.g., '/usr/bin/librespot')"
-                              Disabled="@(_deviceOptions.Spotify.Mode != "Integrated")" />
-              </MudItem>
-
               <MudItem xs="12">
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveDeviceOptionsAsync"
                            StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">
@@ -647,53 +620,6 @@
           }
         </MudTabPanel>
 
-        <!-- Spotify Preferences -->
-        <MudTabPanel Text="Spotify">
-          @if (_spotifyPreferences != null)
-          {
-            <MudGrid Spacing="2">
-              <MudItem xs="12">
-                <MudAlert Severity="Severity.Info" Dense="true">
-                  Spotify preferences store the last played track and playback state.
-                </MudAlert>
-              </MudItem>
-              <MudItem xs="12">
-                <MudTextField T="string" @bind-Value="_spotifyPreferences.LastSongPlayed" Label="Last Song Played (URI)"
-                              Variant="Variant.Outlined" ReadOnly="true"
-                              HelperText="Spotify URI of last played track (read-only)" />
-              </MudItem>
-              <MudItem xs="12" md="4">
-                <MudNumericField T="long" @bind-Value="_spotifyPreferences.SongPositionMs" Label="Position (ms)"
-                                 Variant="Variant.Outlined" Min="0"
-                                 HelperText="Last playback position in milliseconds" />
-              </MudItem>
-              <MudItem xs="12" md="4">
-                <MudCheckBox T="bool" @bind-Value="_spotifyPreferences.Shuffle" Label="Shuffle" Color="Color.Primary" />
-              </MudItem>
-              <MudItem xs="12" md="4">
-                <MudSelect T="string" @bind-Value="_spotifyPreferences.Repeat" Label="Repeat Mode"
-                           Variant="Variant.Outlined">
-                  <MudSelectItem Value="@("Off")">Off</MudSelectItem>
-                  <MudSelectItem Value="@("One")">One</MudSelectItem>
-                  <MudSelectItem Value="@("All")">All</MudSelectItem>
-                </MudSelect>
-              </MudItem>
-              <MudItem xs="12">
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveSpotifyPreferencesAsync"
-                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">
-                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
-                  Save Spotify Preferences
-                </MudButton>
-              </MudItem>
-            </MudGrid>
-          }
-          else
-          {
-            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
-            <MudText Class="ml-2">Loading Spotify preferences...</MudText>
-          }
-        </MudTabPanel>
-
         <!-- File Player Preferences -->
         <MudTabPanel Text="File Player">
           @if (_filePlayerPreferences != null)
@@ -830,66 +756,6 @@
       
       <MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-2">
         
-        <!-- Spotify Secrets -->
-        <MudTabPanel Text="Spotify">
-          @if (_spotifySecrets != null)
-          {
-            <MudGrid Spacing="2">
-              <MudItem xs="12">
-                <MudAlert Severity="Severity.Info" Dense="true">
-                  Spotify API credentials for authentication. Get these from <a href="https://developer.spotify.com/dashboard" target="_blank">Spotify Developer Dashboard</a>.
-                </MudAlert>
-              </MudItem>
-              <MudItem xs="12">
-                <MudTextField T="string" @bind-Value="_spotifySecrets.ClientID" Label="Client ID - ${secret:spotify_client_id}"
-                              Variant="Variant.Outlined" 
-                              InputType="@(_showSpotifyClientId ? InputType.Text : InputType.Password)"
-                              Adornment="Adornment.End"
-                              AdornmentIcon="@(_showSpotifyClientId ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
-                              OnAdornmentClick="@(() => _showSpotifyClientId = !_showSpotifyClientId)"
-                              HelperText="Spotify application client identifier"
-                              Class="@(string.IsNullOrWhiteSpace(_spotifySecrets.ClientID) ? "secret-empty" : "secret-filled")" />
-              </MudItem>
-              <MudItem xs="12">
-                <MudTextField T="string" @bind-Value="_spotifySecrets.ClientSecret" Label="Client Secret - ${secret:spotify_client_secret}"
-                              Variant="Variant.Outlined" 
-                              InputType="@(_showSpotifyClientSecret ? InputType.Text : InputType.Password)"
-                              Adornment="Adornment.End"
-                              AdornmentIcon="@(_showSpotifyClientSecret ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
-                              OnAdornmentClick="@(() => _showSpotifyClientSecret = !_showSpotifyClientSecret)"
-                              HelperText="Spotify application client secret key"
-                              Class="@(string.IsNullOrWhiteSpace(_spotifySecrets.ClientSecret) ? "secret-empty" : "secret-filled")" />
-              </MudItem>
-              <MudItem xs="12">
-                <MudTextField T="string" @bind-Value="_spotifySecrets.RefreshToken" Label="Refresh Token - ${secret:spotify_refresh_token}"
-                              Variant="Variant.Outlined" 
-                              InputType="@(_showSpotifyRefreshToken ? InputType.Text : InputType.Password)"
-                              Adornment="Adornment.End"
-                              AdornmentIcon="@(_showSpotifyRefreshToken ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
-                              OnAdornmentClick="@(() => _showSpotifyRefreshToken = !_showSpotifyRefreshToken)"
-                              HelperText="OAuth refresh token for user authorization"
-                              Class="@(string.IsNullOrWhiteSpace(_spotifySecrets.RefreshToken) ? "secret-empty" : "secret-filled")" />
-              </MudItem>
-              <MudItem xs="12">
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveSpotifySecretsAsync"
-                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving" Class="mr-2">
-                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
-                  Save Secrets
-                </MudButton>
-                <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="ClearSpotifySecretsAsync"
-                           StartIcon="@Icons.Material.Filled.DeleteForever" Disabled="@_isSaving">
-                  Clear All
-                </MudButton>
-              </MudItem>
-            </MudGrid>
-          }
-          else
-          {
-            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
-            <MudText Class="ml-2">Loading Spotify secrets...</MudText>
-          }
-        </MudTabPanel>
-
         <!-- TTS Secrets -->
         <MudTabPanel Text="TTS Services">
           @if (_ttsSecrets != null)
@@ -1178,20 +1044,15 @@
 
   // Preferences
   private AudioPreferencesDto? _audioPreferences;
-  private SpotifyPreferencesDto? _spotifyPreferences;
   private FilePlayerPreferencesDto? _filePlayerPreferences;
   private RadioPreferencesDto? _radioPreferences;
   private GenericSourcePreferencesDto? _genericSourcePreferences;
 
   // Secrets
-  private SpotifySecretsDto? _spotifySecrets;
   private TTSSecretsDto? _ttsSecrets;
   private AcoustIdSecretDto? _acoustIdSecret;
   
   // Secrets visibility toggles
-  private bool _showSpotifyClientId = false;
-  private bool _showSpotifyClientSecret = false;
-  private bool _showSpotifyRefreshToken = false;
   private bool _showGoogleApiKey = false;
   private bool _showAzureApiKey = false;
   private bool _showAcoustIdApiKey = false;
@@ -1856,7 +1717,6 @@
     {
       // Load or create preferences with default values
       _audioPreferences = await LoadOrCreatePreferenceAsync<AudioPreferencesDto>("audiopreferences");
-      _spotifyPreferences = await LoadOrCreatePreferenceAsync<SpotifyPreferencesDto>("spotifypreferences");
       _filePlayerPreferences = await LoadOrCreatePreferenceAsync<FilePlayerPreferencesDto>("fileplayerpreferences");
       _radioPreferences = await LoadOrCreatePreferenceAsync<RadioPreferencesDto>("radiopreferences");
       _genericSourcePreferences = await LoadOrCreatePreferenceAsync<GenericSourcePreferencesDto>("genericsourcepreferences");
@@ -1909,34 +1769,6 @@
     catch (Exception ex)
     {
       Snackbar.Add($"Error saving audio preferences: {ex.Message}", Severity.Error);
-    }
-    finally
-    {
-      _isSaving = false;
-    }
-  }
-
-  private async Task SaveSpotifyPreferencesAsync()
-  {
-    _isSaving = true;
-    try
-    {
-      if (_spotifyPreferences == null) return;
-      
-      var success = await ConfigApi.UpdateConfigurationAsync("spotifypreferences", _spotifyPreferences);
-      if (success)
-      {
-        Snackbar.Add("Spotify preferences saved successfully", Severity.Success);
-        StateHasChanged();
-      }
-      else
-      {
-        Snackbar.Add("Failed to save Spotify preferences", Severity.Error);
-      }
-    }
-    catch (Exception ex)
-    {
-      Snackbar.Add($"Error saving Spotify preferences: {ex.Message}", Severity.Error);
     }
     finally
     {
@@ -2035,7 +1867,6 @@
     try
     {
       // Load or create secrets with default values (empty)
-      _spotifySecrets = await LoadOrCreateSecretAsync<SpotifySecretsDto>("spotify");
       _ttsSecrets = await LoadOrCreateSecretAsync<TTSSecretsDto>("tts");
       _acoustIdSecret = await LoadOrCreateSecretAsync<AcoustIdSecretDto>("acoustid");
     }
@@ -2147,36 +1978,6 @@
         _isSaving = false;
       }
     }
-  }
-
-  private async Task SaveSpotifySecretsAsync()
-  {
-    await SaveSecretsAsync(
-      "spotify", 
-      _spotifySecrets, 
-      "Spotify",
-      () => _showSpotifyClientId = false,
-      () => _showSpotifyClientSecret = false,
-      () => _showSpotifyRefreshToken = false
-    );
-  }
-
-  private async Task ClearSpotifySecretsAsync()
-  {
-    await ClearSecretsAsync(
-      "spotify",
-      _spotifySecrets,
-      "Spotify",
-      () =>
-      {
-        if (_spotifySecrets != null)
-        {
-          _spotifySecrets.ClientID = "";
-          _spotifySecrets.ClientSecret = "";
-          _spotifySecrets.RefreshToken = "";
-        }
-      }
-    );
   }
 
   private async Task SaveTTSSecretsAsync()

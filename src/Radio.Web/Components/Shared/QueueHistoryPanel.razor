@@ -1,0 +1,286 @@
+@rendermode InteractiveServer
+@using Radio.Web.Services.ApiClients
+@inject QueueApiService QueueApi
+@inject PlayHistoryApiService HistoryApi
+@inject AudioStateHubService HubService
+@inject AudioApiService AudioApi
+@inject FileApiService FileApi
+@inject IDialogService DialogService
+@inject ILogger<QueueHistoryPanel> Logger
+@inject ISnackbar Snackbar
+@inject Radio.Web.Services.QueuePersistenceService QueuePersistence
+@implements IAsyncDisposable
+
+<div style="height: 100%; display: flex; flex-direction: column; padding: 0;">
+  <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="true"
+           @bind-ActivePanelIndex="_activeTab"
+           Style="height: 100%; display: flex; flex-direction: column;">
+    <MudTabPanel Text="Queue" Icon="@Icons.Material.Filled.QueueMusic"
+                 BadgeData="@(_queueItems.Count > 0 ? _queueItems.Count.ToString() : null)"
+                 BadgeColor="Color.Primary"
+                 Style="flex: 1; overflow: hidden; display: flex; flex-direction: column;">
+      <div style="height: 100%; display: flex; flex-direction: column;">
+        <!-- Queue Header -->
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px;">
+          <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">@_queueItems.Count tracks</MudText>
+          <div style="display: flex; gap: 8px;">
+            <MudIconButton Icon="@Icons.Material.Filled.Add"
+                           Color="Color.Primary"
+                           Size="Size.Small"
+                           OnClick="OpenFileSelectionDialogAsync"
+                           title="Add Files" />
+            <MudIconButton Icon="@Icons.Material.Filled.DeleteSweep"
+                           Color="Color.Error"
+                           Size="Size.Small"
+                           Disabled="@(!_queueItems.Any())"
+                           OnClick="HandleClearQueueAsync"
+                           title="Clear All" />
+          </div>
+        </div>
+
+        <!-- Queue List -->
+        @if (!_queueItems.Any())
+        {
+          <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-secondary);">
+            <MudIcon Icon="@Icons.Material.Filled.QueueMusic" Style="font-size: 64px; opacity: 0.5; margin-bottom: 8px;" />
+            <MudText Typo="Typo.body2">No tracks in queue</MudText>
+          </div>
+        }
+        else
+        {
+          <div style="flex: 1; overflow-y: auto;">
+            @foreach (var item in _queueItems)
+            {
+              <div style="display: flex; align-items: center; gap: 8px; padding: 6px 12px; cursor: pointer; border-left: 3px solid @(item.IsCurrent ? "var(--mud-palette-primary)" : "transparent");"
+                   @onclick="@(() => HandleJumpToAsync(item.Index))">
+                <div style="flex: 1; min-width: 0;">
+                  <div style="font-size: 14px; font-weight: @(item.IsCurrent ? "600" : "400"); color: @(item.IsCurrent ? "var(--mud-palette-primary)" : "inherit"); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    @item.Title
+                  </div>
+                  <div style="font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    @item.Artist @if (!string.IsNullOrEmpty(item.Duration)) { <text> - @item.Duration</text> }
+                  </div>
+                </div>
+                <div @onclick:stopPropagation="true">
+                  <MudIconButton Icon="@Icons.Material.Filled.Close"
+                                 Size="Size.Small"
+                                 Color="Color.Default"
+                                 OnClick="@(() => HandleRemoveAsync(item.Index))"
+                                 title="Remove" />
+                </div>
+              </div>
+            }
+          </div>
+        }
+      </div>
+    </MudTabPanel>
+
+    <MudTabPanel Text="History" Icon="@Icons.Material.Filled.History"
+                 Style="flex: 1; overflow: hidden; display: flex; flex-direction: column;">
+      <div style="height: 100%; display: flex; flex-direction: column;">
+        <!-- History Header -->
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px;">
+          <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Recent Plays</MudText>
+          <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                         Color="Color.Default"
+                         Size="Size.Small"
+                         OnClick="RefreshHistoryAsync"
+                         title="Refresh" />
+        </div>
+
+        <!-- History List -->
+        @if (_isLoadingHistory)
+        {
+          <div style="flex: 1; display: flex; align-items: center; justify-content: center;">
+            <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Small" />
+          </div>
+        }
+        else if (_historyItems.Any())
+        {
+          <div style="flex: 1; overflow-y: auto;">
+            @foreach (var item in _historyItems)
+            {
+              <div style="display: flex; align-items: center; gap: 8px; padding: 6px 12px;">
+                <div style="flex: 1; min-width: 0;">
+                  <div style="font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    @(item.Title ?? "Unknown")
+                  </div>
+                  <div style="font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    @(item.Artist ?? "--") - @item.PlayedAt.ToString("HH:mm")
+                  </div>
+                </div>
+                <MudChip T="string" Size="Size.Small" Color="@GetSourceColor(item.Source)" Style="font-size: 10px;">
+                  @item.Source
+                </MudChip>
+              </div>
+            }
+          </div>
+        }
+        else
+        {
+          <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-secondary);">
+            <MudIcon Icon="@Icons.Material.Filled.History" Style="font-size: 64px; opacity: 0.5; margin-bottom: 8px;" />
+            <MudText Typo="Typo.body2">No history yet</MudText>
+          </div>
+        }
+      </div>
+    </MudTabPanel>
+  </MudTabs>
+</div>
+
+@code {
+  private int _activeTab;
+  private List<QueueItemDto> _queueItems = new();
+  private List<PlayHistoryEntryDto> _historyItems = new();
+  private bool _isLoadingHistory;
+
+  protected override async Task OnInitializedAsync()
+  {
+    HubService.QueueChanged += OnQueueChanged;
+
+    await RefreshQueueAsync();
+    await RefreshHistoryAsync();
+  }
+
+  private async Task OnQueueChanged()
+  {
+    await RefreshQueueAsync();
+    _ = ScheduleQueueSaveAsync();
+    await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task RefreshQueueAsync()
+  {
+    try
+    {
+      var queue = await QueueApi.GetQueueAsync();
+      if (queue != null) _queueItems = queue;
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to refresh queue");
+    }
+  }
+
+  private async Task RefreshHistoryAsync()
+  {
+    try
+    {
+      _isLoadingHistory = true;
+      StateHasChanged();
+
+      var result = await HistoryApi.GetHistoryAsync(limit: 50);
+      _historyItems = result?.Items ?? new();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to refresh history");
+    }
+    finally
+    {
+      _isLoadingHistory = false;
+      StateHasChanged();
+    }
+  }
+
+  private async Task HandleJumpToAsync(int index)
+  {
+    try { await QueueApi.JumpToPositionAsync(index); }
+    catch (Exception ex) { Logger.LogWarning(ex, "Failed to jump to queue position"); }
+  }
+
+  private async Task HandleRemoveAsync(int index)
+  {
+    try
+    {
+      var success = await QueueApi.RemoveFromQueueAsync(index);
+      if (success) await RefreshQueueAsync();
+    }
+    catch (Exception ex) { Logger.LogWarning(ex, "Failed to remove queue item"); }
+  }
+
+  private async Task HandleClearQueueAsync()
+  {
+    try
+    {
+      var success = await QueueApi.ClearQueueAsync();
+      if (success) _queueItems.Clear();
+    }
+    catch (Exception ex) { Logger.LogWarning(ex, "Failed to clear queue"); }
+  }
+
+  private async Task OpenFileSelectionDialogAsync()
+  {
+    var parameters = new DialogParameters
+    {
+      { "AllowMultiSelect", true },
+      { "AllowAddToQueue", true },
+      { "OnAddToQueue", EventCallback.Factory.Create<List<string>>(this, HandleAddFilesToQueueAsync) }
+    };
+    var options = new DialogOptions
+    {
+      CloseButton = true,
+      MaxWidth = MaxWidth.Medium,
+      FullWidth = true
+    };
+
+    var dialog = await DialogService.ShowAsync<Radio.Web.Components.Dialogs.AudioFileSelectionDialog>("Add Files to Queue", parameters, options);
+    var result = await dialog.Result;
+
+    if (result != null && !result.Canceled)
+    {
+      if (result.Data is List<string> selectedPaths)
+        await HandleAddFilesToQueueAsync(selectedPaths);
+      else if (result.Data is string selectedPath)
+        await HandleAddFilesToQueueAsync(new List<string> { selectedPath });
+    }
+  }
+
+  private async Task HandleAddFilesToQueueAsync(List<string> filePaths)
+  {
+    if (filePaths == null || !filePaths.Any()) return;
+
+    var addedCount = 0;
+    foreach (var path in filePaths)
+    {
+      try
+      {
+        if (await FileApi.AddFileToQueueAsync(path)) addedCount++;
+      }
+      catch (Exception ex) { Logger.LogError(ex, "Failed to add file to queue: {Path}", path); }
+    }
+
+    if (addedCount > 0)
+    {
+      Snackbar.Add($"{addedCount} file{(addedCount != 1 ? "s" : "")} added", Severity.Success);
+      await RefreshQueueAsync();
+    }
+  }
+
+  private async Task ScheduleQueueSaveAsync()
+  {
+    try
+    {
+      await Task.Delay(500);
+      await QueuePersistence.SaveQueueStateAsync();
+    }
+    catch (Exception ex) { Logger.LogWarning(ex, "Failed to auto-save queue state"); }
+  }
+
+  private static Color GetSourceColor(string source)
+  {
+    return source switch
+    {
+      "Spotify" => Color.Success,
+      "FilePlayer" => Color.Info,
+      "Radio" => Color.Warning,
+      _ => Color.Default
+    };
+  }
+
+  public async ValueTask DisposeAsync()
+  {
+    HubService.QueueChanged -= OnQueueChanged;
+    await Task.CompletedTask;
+  }
+}

@@ -78,6 +78,8 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   // Track if we've logged the first audio data received (to avoid spamming logs)
   private bool _hasLoggedFirstAudioData;
   private long _totalSamplesReceived;
+  private long _silentCallbackCount;
+  private Timer? _diagnosticTimer;
 
   /// <summary>
   /// Handles audio data events from the RTL-SDR receiver.
@@ -89,6 +91,32 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
 
     _soundGenerator.AddSamples(e.Samples);
     _totalSamplesReceived += e.Samples.Length;
+
+    // Silence detection: warn if all samples are zero
+    bool allSilent = true;
+    for (int i = 0; i < e.Samples.Length; i++)
+    {
+      if (Math.Abs(e.Samples[i]) > float.Epsilon)
+      {
+        allSilent = false;
+        break;
+      }
+    }
+
+    if (allSilent && e.Samples.Length > 0)
+    {
+      _silentCallbackCount++;
+      if (_silentCallbackCount % 100 == 1) // Log every 100th silent callback
+      {
+        Logger.LogWarning(
+          "📻 SDR RADIO: Silent audio data received ({SampleCount} zero samples, silent callbacks: {SilentCount})",
+          e.Samples.Length, _silentCallbackCount);
+      }
+    }
+    else
+    {
+      _silentCallbackCount = 0;
+    }
 
     // Log first audio data received
     if (!_hasLoggedFirstAudioData)
@@ -564,6 +592,31 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
 
   #endregion
 
+  #region Diagnostics
+
+  /// <summary>
+  /// Periodic callback that logs SDR pipeline diagnostic information.
+  /// </summary>
+  private void LogPipelineDiagnostics(object? state)
+  {
+    var generatorDiag = _soundGenerator?.GetDiagnostics();
+    Logger.LogInformation(
+      "📻 SDR RADIO DIAGNOSTICS: TotalSamplesReceived={Received}, " +
+      "GeneratorPresent={GeneratorPresent}, ReceiverRunning={ReceiverRunning}, " +
+      "BufferReceived={BufReceived}, BufferOutput={BufOutput}, " +
+      "BufferDropped={BufDropped}, BufferCount={BufCount}/{BufCapacity}",
+      _totalSamplesReceived,
+      _soundGenerator != null,
+      _radioReceiver.IsRunning,
+      generatorDiag?.TotalReceived ?? 0,
+      generatorDiag?.TotalOutput ?? 0,
+      generatorDiag?.TotalDropped ?? 0,
+      generatorDiag?.BufferCount ?? 0,
+      generatorDiag?.BufferCapacity ?? 0);
+  }
+
+  #endregion
+
   #region Helper Methods
 
   /// <summary>
@@ -689,6 +742,10 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
           "📻 SDR RADIO: Audio pipeline ready - waiting for audio data from RTL-SDR " +
           "(PlaybackId={PlaybackId}, Volume={Volume:P0})",
           _playbackId, Volume);
+
+        // Start periodic diagnostic logging
+        _diagnosticTimer = new Timer(LogPipelineDiagnostics, null,
+          TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
       }
     }
     else
@@ -721,6 +778,10 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
       "(Frequency: {Frequency}, Band: {Band}, TotalSamplesProcessed: {Samples})",
       CurrentFrequency.ToDisplayString(), CurrentBand, _totalSamplesReceived);
 
+    // Stop diagnostic timer
+    _diagnosticTimer?.Dispose();
+    _diagnosticTimer = null;
+
     // Unsubscribe from audio events before stopping
     _radioReceiver.AudioDataAvailable -= OnAudioDataAvailable;
 
@@ -740,6 +801,10 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// <inheritdoc/>
   protected override async ValueTask DisposeAsyncCore()
   {
+    // Stop diagnostic timer
+    _diagnosticTimer?.Dispose();
+    _diagnosticTimer = null;
+
     // Unsubscribe from RTLSDRCore events
     _radioReceiver.FrequencyChanged -= OnRTLSDRFrequencyChanged;
     _radioReceiver.SignalStrengthUpdated -= OnRTLSDRSignalStrengthUpdated;

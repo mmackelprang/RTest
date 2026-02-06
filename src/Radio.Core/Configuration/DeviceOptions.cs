@@ -1,7 +1,5 @@
 namespace Radio.Core.Configuration;
 
-using Radio.Core.Models.Audio;
-
 /// <summary>
 /// Configuration options for audio device settings.
 /// Loaded from the 'Devices' configuration section.
@@ -28,10 +26,6 @@ public class DeviceOptions
   /// </summary>
   public CastDeviceOptions Cast { get; set; } = new();
 
-  /// <summary>
-  /// Gets or sets the Spotify device options.
-  /// </summary>
-  public SpotifyDeviceOptions Spotify { get; set; } = new();
 }
 
 /// <summary>
@@ -67,22 +61,3 @@ public class CastDeviceOptions
   public string DefaultDevice { get; set; } = "";
 }
 
-/// <summary>
-/// Configuration options for Spotify audio integration.
-/// </summary>
-public class SpotifyDeviceOptions
-{
-  /// <summary>
-  /// Gets or sets the Spotify integration mode.
-  /// RemoteControl: Uses Spotify Connect API (no audio data flows through app).
-  /// Integrated: Manages librespot process and captures audio via pipe.
-  /// </summary>
-  public SpotifyMode Mode { get; set; } = SpotifyMode.Integrated;
-
-  /// <summary>
-  /// Gets or sets the path to the librespot executable.
-  /// Used when Mode is Integrated.
-  /// Example: "/usr/bin/librespot" (Linux) or "C:\\librespot\\librespot.exe" (Windows)
-  /// </summary>
-  public string LibrespotPath { get; set; } = "/usr/bin/librespot";
-}

@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
@@ -91,9 +93,9 @@ public class HttpStreamOutput : AudioOutputBase
       var prefix = $"http://+:{_options.Port}{_options.EndpointPath}/";
       _httpListener.Prefixes.Add(prefix);
 
-      // Build the stream URL
-      var hostName = Dns.GetHostName();
-      StreamUrl = $"http://{hostName}:{_options.Port}{_options.EndpointPath}";
+      // Build the stream URL using actual LAN IP (Chromecast needs a routable IP, not a hostname)
+      var host = GetLocalIPAddress() ?? Dns.GetHostName();
+      StreamUrl = $"http://{host}:{_options.Port}{_options.EndpointPath}";
 
       State = AudioOutputState.Ready;
       _logger.LogInformation(
@@ -354,6 +356,32 @@ public class HttpStreamOutput : AudioOutputBase
 
       ClientDisconnected?.Invoke(this, new HttpStreamClientEventArgs { Client = client.ToInfo() });
     }
+  }
+
+  /// <summary>
+  /// Gets the local LAN IP address by scanning network interfaces.
+  /// </summary>
+  private static string? GetLocalIPAddress()
+  {
+    foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+    {
+      if (ni.OperationalStatus != OperationalStatus.Up)
+        continue;
+      if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+        continue;
+
+      var props = ni.GetIPProperties();
+      foreach (var addr in props.UnicastAddresses)
+      {
+        if (addr.Address.AddressFamily == AddressFamily.InterNetwork &&
+            !IPAddress.IsLoopback(addr.Address))
+        {
+          return addr.Address.ToString();
+        }
+      }
+    }
+
+    return null;
   }
 
   private static byte[] CreateWavHeader(int sampleRate, int channels, int bitsPerSample)

@@ -167,18 +167,6 @@ builder.Services.AddHttpClient<PlayHistoryApiService>(client =>
   return handler;
 });
 
-builder.Services.AddHttpClient<SpotifyApiService>(client =>
-{
-  client.BaseAddress = new Uri(apiBaseUrl);
-  client.Timeout = TimeSpan.FromSeconds(30);
-})
-.ConfigurePrimaryHttpMessageHandler(() =>
-{
-  var handler = new HttpClientHandler();
-  ConfigureHttpClientHandler(handler);
-  return handler;
-});
-
 builder.Services.AddHttpClient<RadioApiService>(client =>
 {
   client.BaseAddress = new Uri(apiBaseUrl);

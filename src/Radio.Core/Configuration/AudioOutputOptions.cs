@@ -84,6 +84,16 @@ public class GoogleCastOutputOptions
   /// Gets or sets the reconnect delay in seconds.
   /// </summary>
   public int ReconnectDelaySeconds { get; set; } = 5;
+
+  /// <summary>
+  /// Gets or sets the file path for caching discovered Cast devices.
+  /// </summary>
+  public string CacheFilePath { get; set; } = "./data/config/cast-devices.json";
+
+  /// <summary>
+  /// Gets or sets how many days before a cached device is considered stale and removed.
+  /// </summary>
+  public int CacheExpirationDays { get; set; } = 14;
 }
 
 /// <summary>

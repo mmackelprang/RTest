@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
+using Radio.Core.Configuration;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Xunit;
@@ -14,7 +16,8 @@ public class ChromaprintFingerprintServiceTests
     public ChromaprintFingerprintServiceTests()
     {
         _loggerMock = new Mock<ILogger<ChromaprintFingerprintService>>();
-        _service = new ChromaprintFingerprintService(_loggerMock.Object);
+        var options = Options.Create(new FingerprintingOptions());
+        _service = new ChromaprintFingerprintService(_loggerMock.Object, options);
     }
 
     [Fact]

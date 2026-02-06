@@ -258,88 +258,6 @@ public record PlayHistoryStatsDto(
   List<TrackPlayCountDto> TopTracks
 );
 
-// Spotify API DTOs
-public record SpotifyAuthStatusDto(
-  bool IsAuthenticated,
-  string? Username,
-  DateTime? ExpiresAt
-);
-
-public class SpotifySearchResultsDto
-{
-    public List<SpotifyTrackDto>? Tracks { get; set; }
-    public List<SpotifyAlbumDto>? Albums { get; set; }
-    public List<SpotifyArtistDto>? Artists { get; set; }
-    public List<SpotifyPlaylistDto>? Playlists { get; set; }
-
-    public SpotifySearchResultsDto() { }
-
-    public SpotifySearchResultsDto(
-        List<SpotifyTrackDto>? tracks,
-        List<SpotifyAlbumDto>? albums,
-        List<SpotifyArtistDto>? artists,
-        List<SpotifyPlaylistDto>? playlists)
-    {
-        Tracks = tracks;
-        Albums = albums;
-        Artists = artists;
-        Playlists = playlists;
-    }
-}
-
-public record SpotifyTrackDto(
-  string Id,
-  string Name,
-  string Artist,
-  string Album,
-  string? AlbumArtUrl,
-  int DurationMs,
-  string Uri
-);
-
-public record SpotifyAlbumDto(
-  string Id,
-  string Name,
-  string Artist,
-  string? ImageUrl,
-  int TotalTracks,
-  string Uri
-);
-
-public record SpotifyArtistDto(
-  string Id,
-  string Name,
-  string? ImageUrl,
-  int Followers
-);
-
-public record SpotifyPlaylistDto(
-  string Id,
-  string Name,
-  string? Description,
-  string? ImageUrl,
-  int TotalTracks
-);
-
-public record SpotifyCategoryDto(
-  string Id,
-  string Name,
-  string? IconUrl
-);
-
-public record SpotifyUserDto(
-  string Id,
-  string DisplayName,
-  string? Email,
-  string? ImageUrl
-);
-
-public record SpotifyAuthUrlDto(
-  string Url,
-  string State,
-  string CodeVerifier
-);
-
 // Radio API DTOs
 public record RadioStateDto(
   double Frequency,
@@ -553,7 +471,6 @@ public class DeviceOptionsDto
   public RadioDeviceOptionsDto Radio { get; set; } = new();
   public VinylDeviceOptionsDto Vinyl { get; set; } = new();
   public CastDeviceOptionsDto Cast { get; set; } = new();
-  public SpotifyDeviceOptionsDto Spotify { get; set; } = new();
 }
 
 public class RadioDeviceOptionsDto
@@ -571,26 +488,12 @@ public class CastDeviceOptionsDto
   public string DefaultDevice { get; set; } = "";
 }
 
-public class SpotifyDeviceOptionsDto
-{
-  public string Mode { get; set; } = "Integrated";
-  public string LibrespotPath { get; set; } = "/usr/bin/librespot";
-}
-
 // Preferences DTOs (Phase 2)
 public class AudioPreferencesDto
 {
-  public string CurrentSource { get; set; } = "Spotify";
+  public string CurrentSource { get; set; } = "Radio";
   public string CurrentOutput { get; set; } = "";
   public int MasterVolume { get; set; } = 75;
-}
-
-public class SpotifyPreferencesDto
-{
-  public string LastSongPlayed { get; set; } = "";
-  public long SongPositionMs { get; set; } = 0;
-  public bool Shuffle { get; set; } = false;
-  public string Repeat { get; set; } = "Off";
 }
 
 public class FilePlayerPreferencesDto
@@ -614,13 +517,6 @@ public class GenericSourcePreferencesDto
 }
 
 // Secrets DTOs
-public class SpotifySecretsDto
-{
-  public string ClientID { get; set; } = "";
-  public string ClientSecret { get; set; } = "";
-  public string RefreshToken { get; set; } = "";
-}
-
 public class TTSSecretsDto
 {
   public string GoogleAPIKey { get; set; } = "";

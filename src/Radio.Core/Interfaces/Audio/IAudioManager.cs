@@ -64,4 +64,9 @@ public interface IAudioManager : IAsyncDisposable
   /// Gets or sets whether master audio is muted.
   /// </summary>
   bool IsMuted { get; set; }
+
+  /// <summary>
+  /// Gets or sets the stereo balance (-1.0 = full left, 0.0 = center, 1.0 = full right).
+  /// </summary>
+  float Balance { get; set; }
 }

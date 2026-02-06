@@ -1,0 +1,392 @@
+@rendermode InteractiveServer
+@inject AudioApiService AudioApi
+@inject AudioStateHubService HubService
+@inject ConfigurationApiService ConfigApi
+@inject ILogger<NowPlayingPanel> Logger
+@inject ISnackbar Snackbar
+@implements IAsyncDisposable
+
+<div style="height: 100%; display: flex; flex-direction: column; padding: 12px; overflow-y: auto;">
+  <!-- Album Art -->
+  <div style="text-align: center; margin-bottom: 8px;">
+    @if (string.IsNullOrEmpty(_albumArtUrl) || _albumArtUrl == "/images/default-album-art.png")
+    {
+      <MudIcon Icon="@Icons.Material.Filled.MusicNote" Style="font-size: 140px; color: var(--text-secondary);" />
+    }
+    else
+    {
+      <img src="@_albumArtUrl"
+           alt="Album Art"
+           style="width: 180px; height: 180px; object-fit: contain; border-radius: 8px;"
+           @onerror="OnAlbumArtError" />
+    }
+  </div>
+
+  <!-- Track Info -->
+  <div style="text-align: center; margin-bottom: 8px;">
+    <MudText Typo="Typo.h5" Style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+      @(_title ?? "No Track Playing")
+    </MudText>
+    <MudText Typo="Typo.body1" Style="color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+      @(_artist ?? "--")
+    </MudText>
+    <MudText Typo="Typo.body2" Style="color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+      @(_album ?? "--")
+    </MudText>
+    @if (!string.IsNullOrEmpty(_source))
+    {
+      <MudChip T="string" Color="Color.Primary" Size="Size.Small" Style="margin-top: 4px;">@_source</MudChip>
+    }
+  </div>
+
+  <!-- Transport Controls -->
+  <div style="display: flex; gap: 8px; align-items: center; justify-content: center; margin-bottom: 8px;">
+    <MudIconButton Icon="@Icons.Material.Filled.Shuffle"
+                   Color="@(_isShuffleEnabled ? Color.Primary : Color.Default)"
+                   Size="Size.Medium"
+                   OnClick="HandleShuffleAsync"
+                   title="Shuffle" />
+    <MudIconButton Icon="@Icons.Material.Filled.SkipPrevious"
+                   Color="Color.Default"
+                   Size="Size.Medium"
+                   OnClick="HandlePreviousAsync"
+                   title="Previous" />
+    <MudIconButton Icon="@(_isPlaying ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)"
+                   Color="Color.Primary"
+                   Size="Size.Large"
+                   Style="min-width: 56px; min-height: 56px;"
+                   OnClick="HandlePlayPauseAsync"
+                   title="@(_isPlaying ? "Pause" : "Play")" />
+    <MudIconButton Icon="@Icons.Material.Filled.SkipNext"
+                   Color="Color.Default"
+                   Size="Size.Medium"
+                   OnClick="HandleNextAsync"
+                   title="Next" />
+    <MudIconButton Icon="@Icons.Material.Filled.Repeat"
+                   Color="@(_repeatMode != "Off" ? Color.Primary : Color.Default)"
+                   Size="Size.Medium"
+                   OnClick="HandleRepeatAsync"
+                   title="@($"Repeat: {_repeatMode}")" />
+  </div>
+
+  <!-- Progress Bar -->
+  @if (!string.IsNullOrEmpty(_position) && !string.IsNullOrEmpty(_duration))
+  {
+    <div style="margin-bottom: 8px;">
+      <MudSlider Value="@_progressPercent"
+                 ValueChanged="@((double v) => HandleSeekAsync(v))"
+                 Min="0" Max="100" Step="0.1"
+                 Color="Color.Primary" Size="Size.Small" />
+      <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); margin-top: -4px;">
+        <span>@_position</span>
+        <span>@_duration</span>
+      </div>
+    </div>
+  }
+
+  <!-- Volume -->
+  <div style="margin-bottom: 4px;">
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <MudIconButton Icon="@(_isMuted ? Icons.Material.Filled.VolumeOff : Icons.Material.Filled.VolumeUp)"
+                     Color="Color.Default"
+                     Size="Size.Small"
+                     OnClick="HandleMuteAsync"
+                     title="@(_isMuted ? "Unmute" : "Mute")" />
+      <MudSlider Value="_volume"
+                 ValueChanged="@((double v) => OnVolumeChanged(v))"
+                 Min="0" Max="1" Step="0.01"
+                 Style="flex: 1;"
+                 Color="Color.Primary"
+                 Size="Size.Small">
+        @((_volume * 100).ToString("F0"))%
+      </MudSlider>
+    </div>
+  </div>
+
+  <!-- Balance -->
+  <div>
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <span style="font-size: 12px; color: var(--text-secondary);">L</span>
+      <MudSlider Value="_balance"
+                 ValueChanged="@((double b) => OnBalanceChanged(b))"
+                 Min="-1" Max="1" Step="0.01"
+                 Style="flex: 1;"
+                 Color="Color.Primary"
+                 Size="Size.Small">
+        @(_balance == 0 ? "Center" : _balance < 0 ? $"L {(-_balance * 100):F0}%" : $"R {(_balance * 100):F0}%")
+      </MudSlider>
+      <span style="font-size: 12px; color: var(--text-secondary);">R</span>
+    </div>
+  </div>
+</div>
+
+@code {
+  private bool _isPlaying;
+  private bool _isMuted;
+  private bool _isShuffleEnabled;
+  private string _repeatMode = "Off";
+  private double _volume = 0.75;
+  private double _balance;
+  private string? _title;
+  private string? _artist;
+  private string? _album;
+  private string? _albumArtUrl;
+  private string? _source;
+  private string? _position;
+  private string? _duration;
+  private double _progressPercent;
+  private double _totalDurationSeconds;
+  private System.Threading.Timer? _timer;
+
+  protected override async Task OnInitializedAsync()
+  {
+    try
+    {
+      await LoadPreferencesAsync();
+
+      HubService.PlaybackStateChanged += OnPlaybackStateChanged;
+      HubService.NowPlayingChanged += OnNowPlayingChanged;
+      HubService.VolumeChanged += OnVolumeChangedEvent;
+
+      await RefreshPlaybackStateAsync();
+
+      _timer = new System.Threading.Timer(TimerCallback, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error initializing NowPlayingPanel");
+    }
+  }
+
+  private async void TimerCallback(object? state)
+  {
+    try
+    {
+      await RefreshPlaybackStateAsync();
+      await InvokeAsync(StateHasChanged);
+    }
+    catch (ObjectDisposedException) { }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Error in NowPlayingPanel timer callback");
+    }
+  }
+
+  private async Task OnPlaybackStateChanged()
+  {
+    await RefreshPlaybackStateAsync();
+    await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task OnNowPlayingChanged()
+  {
+    await RefreshPlaybackStateAsync();
+    await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task OnVolumeChangedEvent()
+  {
+    await RefreshPlaybackStateAsync();
+    await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task RefreshPlaybackStateAsync()
+  {
+    try
+    {
+      var state = await AudioApi.GetPlaybackStateAsync();
+      if (state != null)
+      {
+        _isPlaying = state.IsPlaying;
+        _isMuted = state.IsMuted;
+        _isShuffleEnabled = state.IsShuffleEnabled;
+        _repeatMode = state.RepeatMode;
+        _volume = state.Volume;
+        _balance = state.Balance;
+        _position = state.Position;
+        _duration = state.Duration;
+
+        if (!string.IsNullOrEmpty(_position) && !string.IsNullOrEmpty(_duration))
+        {
+          if (TimeSpan.TryParse(_position, out var pos) && TimeSpan.TryParse(_duration, out var dur) && dur.TotalSeconds > 0)
+          {
+            _totalDurationSeconds = dur.TotalSeconds;
+            _progressPercent = (pos.TotalSeconds / dur.TotalSeconds) * 100.0;
+          }
+        }
+      }
+
+      var nowPlaying = await AudioApi.GetNowPlayingAsync();
+      if (nowPlaying != null)
+      {
+        _title = nowPlaying.Title;
+        _artist = nowPlaying.Artist;
+        _album = nowPlaying.Album;
+        _albumArtUrl = nowPlaying.AlbumArtUrl;
+        _source = nowPlaying.SourceName;
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error refreshing playback state in NowPlayingPanel");
+    }
+  }
+
+  private async Task HandleSeekAsync(double newPercent)
+  {
+    if (_totalDurationSeconds > 0)
+    {
+      var seconds = (newPercent / 100.0) * _totalDurationSeconds;
+      var newTime = TimeSpan.FromSeconds(seconds);
+      _progressPercent = newPercent;
+      _position = newTime.ToString(@"hh\:mm\:ss");
+      await AudioApi.UpdatePlaybackStateAsync(new UpdatePlaybackRequest(
+        Action: "Seek", Volume: null, IsMuted: null, Balance: null, SeekPosition: newTime));
+      await RefreshPlaybackStateAsync();
+    }
+  }
+
+  private async Task HandlePlayPauseAsync()
+  {
+    try
+    {
+      if (_isPlaying)
+        await AudioApi.UpdatePlaybackStateAsync(new UpdatePlaybackRequest("Pause", null, null, null));
+      else
+        await AudioApi.UpdatePlaybackStateAsync(new UpdatePlaybackRequest("Play", null, null, null));
+      await RefreshPlaybackStateAsync();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error in HandlePlayPauseAsync");
+    }
+  }
+
+  private async Task HandleNextAsync()
+  {
+    await AudioApi.NextAsync();
+    await RefreshPlaybackStateAsync();
+  }
+
+  private async Task HandlePreviousAsync()
+  {
+    await AudioApi.PreviousAsync();
+    await RefreshPlaybackStateAsync();
+  }
+
+  private async Task HandleShuffleAsync()
+  {
+    try
+    {
+      var result = await AudioApi.SetShuffleAsync(!_isShuffleEnabled);
+      if (result != null) await RefreshPlaybackStateAsync();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error toggling shuffle");
+    }
+  }
+
+  private async Task HandleRepeatAsync()
+  {
+    try
+    {
+      var nextMode = _repeatMode switch
+      {
+        "Off" => "All",
+        "All" => "One",
+        "One" => "Off",
+        _ => "Off"
+      };
+      var result = await AudioApi.SetRepeatAsync(nextMode);
+      if (result != null) await RefreshPlaybackStateAsync();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error setting repeat mode");
+    }
+  }
+
+  private async Task HandleMuteAsync()
+  {
+    await AudioApi.ToggleMuteAsync(!_isMuted);
+    await RefreshPlaybackStateAsync();
+  }
+
+  private void OnVolumeChanged(double newVolume)
+  {
+    _volume = newVolume;
+    _ = HandleVolumeChangeAsync(newVolume);
+  }
+
+  private async Task HandleVolumeChangeAsync(double newVolume)
+  {
+    try
+    {
+      await AudioApi.SetVolumeAsync((float)newVolume);
+      await SavePreferenceAsync("volume", newVolume);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error changing volume");
+    }
+  }
+
+  private void OnBalanceChanged(double newBalance)
+  {
+    _balance = newBalance;
+    _ = HandleBalanceChangeAsync(newBalance);
+  }
+
+  private async Task HandleBalanceChangeAsync(double newBalance)
+  {
+    await AudioApi.UpdatePlaybackStateAsync(new UpdatePlaybackRequest(null, null, null, (float)newBalance));
+    await SavePreferenceAsync("balance", newBalance);
+  }
+
+  private void OnAlbumArtError()
+  {
+    _albumArtUrl = null;
+    StateHasChanged();
+  }
+
+  private async Task LoadPreferencesAsync()
+  {
+    try
+    {
+      var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("ui.playback");
+      if (prefs != null)
+      {
+        if (prefs.TryGetValue("volume", out var volumeObj) && double.TryParse(volumeObj?.ToString(), out var volume))
+          _volume = volume;
+        if (prefs.TryGetValue("balance", out var balanceObj) && double.TryParse(balanceObj?.ToString(), out var balance))
+          _balance = balance;
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to load playback preferences");
+    }
+  }
+
+  private async Task SavePreferenceAsync(string key, object value)
+  {
+    try
+    {
+      await ConfigApi.UpdateConfigurationAsync("ui.playback", key, value);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to save preference {Key}", key);
+    }
+  }
+
+  public async ValueTask DisposeAsync()
+  {
+    HubService.PlaybackStateChanged -= OnPlaybackStateChanged;
+    HubService.NowPlayingChanged -= OnNowPlayingChanged;
+    HubService.VolumeChanged -= OnVolumeChangedEvent;
+    _timer?.Dispose();
+    await Task.CompletedTask;
+  }
+}

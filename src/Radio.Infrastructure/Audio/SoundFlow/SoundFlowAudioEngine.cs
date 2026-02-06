@@ -29,6 +29,7 @@ public class SoundFlowAudioEngine : IAudioEngine
   private AudioFormat _audioFormat;
   private TappedOutputStream? _outputTap;
   private FingerprintTapModifier? _fingerprintTap;
+  private BalanceModifier? _balanceModifier;
   private Timer? _hotPlugTimer;
   private AudioEngineState _state = AudioEngineState.Uninitialized;
   private bool _disposed;
@@ -175,9 +176,15 @@ public class SoundFlowAudioEngine : IAudioEngine
         _options.Channels,
         _options.OutputBufferSizeSeconds);
 
-      // Add fingerprint tap modifier to capture mixed audio for fingerprinting/streaming
+      // Add modifiers to capture mixed audio for fingerprinting/streaming
       if (_playbackDevice != null)
       {
+        // Add balance modifier first (before fingerprint tap)
+        _balanceModifier = new BalanceModifier(_masterMixer);
+        _playbackDevice.MasterMixer.AddModifier(_balanceModifier);
+        _logger.LogInformation("Balance modifier added to MasterMixer");
+
+        // Add fingerprint tap modifier after balance
         _fingerprintTap = new FingerprintTapModifier(this, _logger);
         _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
         _logger.LogInformation("Fingerprint tap modifier added to MasterMixer");
@@ -360,7 +367,20 @@ public class SoundFlowAudioEngine : IAudioEngine
 
       // Initialize new playback device
       _playbackDevice = _engine.InitializePlaybackDevice(newDevice, _audioFormat);
-      
+
+      // Re-attach balance modifier (before fingerprint tap)
+      if (_balanceModifier != null)
+      {
+          _playbackDevice.MasterMixer.AddModifier(_balanceModifier);
+          _logger.LogInformation("Balance modifier re-attached to new playback device");
+      }
+      else
+      {
+          _balanceModifier = new BalanceModifier(_masterMixer);
+          _playbackDevice.MasterMixer.AddModifier(_balanceModifier);
+          _logger.LogInformation("Balance modifier created and attached to new playback device");
+      }
+
       // Re-attach fingerprint tap if it exists
       if (_fingerprintTap != null)
       {
@@ -426,6 +446,22 @@ public class SoundFlowAudioEngine : IAudioEngine
   public void WriteToOutputTap(Span<float> samples, int count)
   {
     _outputTap?.WriteFromEngine(samples, count);
+  }
+
+  /// <summary>
+  /// Gets diagnostic information about the audio pipeline state.
+  /// </summary>
+  public PipelineDiagnostics GetPipelineDiagnostics()
+  {
+    return new PipelineDiagnostics
+    {
+      EngineState = State.ToString(),
+      PlaybackDeviceActive = _playbackDevice != null,
+      ModifierCount = _fingerprintTap != null ? 1 : 0,
+      OutputTapAvailableBytes = _outputTap?.Length ?? 0,
+      FingerprintTapTotalSamples = _fingerprintTap?.TotalSamplesProcessed ?? 0,
+      FingerprintTapLastProcessedTime = _fingerprintTap?.LastProcessedTime
+    };
   }
 
   private void CheckForDeviceChanges(object? state)
@@ -548,4 +584,17 @@ public class SoundFlowAudioEngine : IAudioEngine
 
     _logger.LogInformation("Audio engine disposed");
   }
+}
+
+/// <summary>
+/// Diagnostic snapshot of the audio pipeline state.
+/// </summary>
+public struct PipelineDiagnostics
+{
+  public string EngineState { get; set; }
+  public bool PlaybackDeviceActive { get; set; }
+  public int ModifierCount { get; set; }
+  public long OutputTapAvailableBytes { get; set; }
+  public long FingerprintTapTotalSamples { get; set; }
+  public DateTime? FingerprintTapLastProcessedTime { get; set; }
 }

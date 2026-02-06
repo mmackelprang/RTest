@@ -64,7 +64,6 @@ public class SourcesController : ControllerBase
       {
         PrimarySources =
         [
-          AudioSourceType.Spotify.ToString(),
           AudioSourceType.Radio.ToString(),
           AudioSourceType.Vinyl.ToString(),
           AudioSourceType.FilePlayer.ToString(),

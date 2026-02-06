@@ -18,7 +18,6 @@ public class PreferencesPersistenceServiceTests : IDisposable
   private readonly Mock<ILogger<PreferencesPersistenceService>> _loggerMock;
   private readonly Mock<IOptionsMonitor<AudioPreferences>> _audioPrefsMock;
   private readonly Mock<IOptionsMonitor<FilePlayerPreferences>> _filePlayerPrefsMock;
-  private readonly Mock<IOptionsMonitor<SpotifyPreferences>> _spotifyPrefsMock;
   private readonly Mock<IOptionsMonitor<TTSPreferences>> _ttsPrefsMock;
   private readonly Mock<IOptionsMonitor<RadioPreferences>> _radioPrefsMock;
   private readonly Mock<IOptionsMonitor<GenericSourcePreferences>> _genericPrefsMock;
@@ -32,7 +31,6 @@ public class PreferencesPersistenceServiceTests : IDisposable
     _loggerMock = new Mock<ILogger<PreferencesPersistenceService>>();
     _audioPrefsMock = new Mock<IOptionsMonitor<AudioPreferences>>();
     _filePlayerPrefsMock = new Mock<IOptionsMonitor<FilePlayerPreferences>>();
-    _spotifyPrefsMock = new Mock<IOptionsMonitor<SpotifyPreferences>>();
     _ttsPrefsMock = new Mock<IOptionsMonitor<TTSPreferences>>();
     _radioPrefsMock = new Mock<IOptionsMonitor<RadioPreferences>>();
     _genericPrefsMock = new Mock<IOptionsMonitor<GenericSourcePreferences>>();
@@ -44,7 +42,6 @@ public class PreferencesPersistenceServiceTests : IDisposable
     // Setup default preferences
     _audioPrefsMock.Setup(o => o.CurrentValue).Returns(new AudioPreferences());
     _filePlayerPrefsMock.Setup(o => o.CurrentValue).Returns(new FilePlayerPreferences());
-    _spotifyPrefsMock.Setup(o => o.CurrentValue).Returns(new SpotifyPreferences());
     _ttsPrefsMock.Setup(o => o.CurrentValue).Returns(new TTSPreferences());
     _radioPrefsMock.Setup(o => o.CurrentValue).Returns(new RadioPreferences());
     _genericPrefsMock.Setup(o => o.CurrentValue).Returns(new GenericSourcePreferences());
@@ -78,7 +75,6 @@ public class PreferencesPersistenceServiceTests : IDisposable
       _loggerMock.Object,
       _audioPrefsMock.Object,
       _filePlayerPrefsMock.Object,
-      _spotifyPrefsMock.Object,
       _ttsPrefsMock.Object,
       _radioPrefsMock.Object,
       _genericPrefsMock.Object,
@@ -183,32 +179,6 @@ public class PreferencesPersistenceServiceTests : IDisposable
     _storeMock.Verify(s => s.SetEntriesAsync(
       It.Is<IEnumerable<ConfigurationEntry>>(entries =>
         entries.Any(e => e.Key.StartsWith("FilePlayerPreferences:"))),
-      It.IsAny<CancellationToken>()), Times.AtLeastOnce);
-  }
-
-  [Fact]
-  public async Task SavePreferences_SerializesSpotifyPreferences()
-  {
-    // Arrange
-    var spotifyPrefs = new SpotifyPreferences
-    {
-      LastSearchQuery = "test query",
-      LastSearchTimestamp = DateTime.UtcNow,
-      Shuffle = false,
-      Repeat = RepeatMode.One
-    };
-    _spotifyPrefsMock.Setup(o => o.CurrentValue).Returns(spotifyPrefs);
-
-    var service = CreateService();
-    await service.StartAsync(CancellationToken.None);
-
-    // Act
-    await service.StopAsync(CancellationToken.None);
-
-    // Assert
-    _storeMock.Verify(s => s.SetEntriesAsync(
-      It.Is<IEnumerable<ConfigurationEntry>>(entries =>
-        entries.Any(e => e.Key.StartsWith("SpotifyPreferences:"))),
       It.IsAny<CancellationToken>()), Times.AtLeastOnce);
   }
 

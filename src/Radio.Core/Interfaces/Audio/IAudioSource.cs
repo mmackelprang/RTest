@@ -53,9 +53,6 @@ public interface IAudioSource : IAsyncDisposable
 /// </summary>
 public enum AudioSourceType
 {
-  /// <summary>Spotify streaming audio.</summary>
-  Spotify,
-
   /// <summary>Radio USB input (Raddy RF320).</summary>
   Radio,
 

@@ -18,7 +18,7 @@ public enum BufferOverflowStrategy
 
     /// <summary>
     /// Block the adding thread until space is available.
-    /// Suitable for file playback (e.g., Spotify) to provide backpressure to the source.
+    /// Suitable for file playback to provide backpressure to the source.
     /// </summary>
     Block
 }
@@ -26,7 +26,7 @@ public enum BufferOverflowStrategy
 /// <summary>
 /// A generic SoundFlow audio component that buffers audio samples from an external source
 /// and outputs them to the SoundFlow mixer.
-/// Supports float (SDR) and short (Spotify/Librespot) sample types.
+/// Supports float (SDR) and short sample types.
 /// </summary>
 /// <typeparam name="T">The sample type (float or short).</typeparam>
 public class BufferedSoundGenerator<T> : SoundComponent where T : struct
@@ -145,6 +145,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                 {
                     var sample = _sampleBuffer.Dequeue();
                     buffer[samplesWritten++] = (float)(object)sample;
+                    _totalSamplesOutput++;
                 }
             }
             else if (typeof(T) == typeof(short))
@@ -187,9 +188,9 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             }
             
             // Don't log if completely idle (no received samples ever)
-            if (_totalSamplesReceived > 0) 
+            if (_totalSamplesReceived > 0)
             {
-                _logger.LogDebug(
+                _logger.LogInformation(
                     "Buffered audio ({Type}): received={Received}, output={Output}, dropped={Dropped}, buffered={Buffered}",
                     typeof(T).Name, _totalSamplesReceived, _totalSamplesOutput, _totalSamplesDropped, currentBuffer);
                 _lastLogTime = now;
@@ -213,6 +214,24 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             }
         }
         _logger.LogDebug("Audio buffer cleared");
+    }
+
+    /// <summary>
+    /// Gets diagnostic information about the buffer state.
+    /// </summary>
+    public BufferDiagnostics GetDiagnostics()
+    {
+        lock (_bufferLock)
+        {
+            return new BufferDiagnostics
+            {
+                TotalReceived = _totalSamplesReceived,
+                TotalOutput = _totalSamplesOutput,
+                TotalDropped = _totalSamplesDropped,
+                BufferCount = _sampleBuffer.Count,
+                BufferCapacity = _maxBufferSamples
+            };
+        }
     }
 
     protected override void Dispose(bool disposing)
@@ -243,4 +262,16 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
 
         base.Dispose(disposing);
     }
+}
+
+/// <summary>
+/// Diagnostic snapshot of buffer state for a BufferedSoundGenerator.
+/// </summary>
+public struct BufferDiagnostics
+{
+    public long TotalReceived { get; set; }
+    public long TotalOutput { get; set; }
+    public long TotalDropped { get; set; }
+    public int BufferCount { get; set; }
+    public int BufferCapacity { get; set; }
 }

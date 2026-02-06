@@ -14,7 +14,7 @@ public class AudioOptions
   /// <summary>
   /// Gets or sets the default primary audio source name.
   /// </summary>
-  public string DefaultSource { get; set; } = "Spotify";
+  public string DefaultSource { get; set; } = "Radio";
 
   /// <summary>
   /// Gets or sets the volume percentage when primary source is ducked (0-100).

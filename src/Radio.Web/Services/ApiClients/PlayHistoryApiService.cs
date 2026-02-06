@@ -27,7 +27,15 @@ public class PlayHistoryApiService
       if (offset.HasValue) query.Add($"offset={offset}");
       var queryString = query.Any() ? "?" + string.Join("&", query) : "";
       
-      return await _httpClient.GetFromJsonAsync<PlayHistoryListDto>($"/api/playhistory{queryString}", cancellationToken);
+      var result = await _httpClient.GetFromJsonAsync<PlayHistoryListDto>($"/api/playhistory{queryString}", cancellationToken);
+      _logger.LogDebug("Play history API returned {Count} entries", result?.Items?.Count ?? 0);
+      return result;
+    }
+    catch (HttpRequestException ex)
+    {
+      _logger.LogError(ex, "Failed to get play history (HTTP error, BaseAddress={BaseAddress})",
+        _httpClient.BaseAddress);
+      return null;
     }
     catch (Exception ex)
     {

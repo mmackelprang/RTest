@@ -233,25 +233,25 @@ public class EndToEndFingerprintingIntegrationTests : IAsyncLifetime
       WasIdentified = true,
       MetadataSource = MetadataSource.Fingerprinting
     };
-    var spotifyEntry = new PlayHistoryEntry
+    var vinylEntry = new PlayHistoryEntry
     {
       Id = Guid.NewGuid().ToString(),
       PlayedAt = DateTime.UtcNow.AddMinutes(-10),
-      Source = PlaySource.Spotify,
-      SourceDetails = "Spotify: Test",
+      Source = PlaySource.Vinyl,
+      SourceDetails = "Vinyl: Test",
       WasIdentified = true,
-      MetadataSource = MetadataSource.Spotify
+      MetadataSource = MetadataSource.Manual
     };
 
     // Act
     await _historyRepository.RecordPlayAsync(fileEntry);
     await _historyRepository.RecordPlayAsync(radioEntry);
-    await _historyRepository.RecordPlayAsync(spotifyEntry);
+    await _historyRepository.RecordPlayAsync(vinylEntry);
 
     // Assert - Each source is tracked separately
     var fileResults = await _historyRepository.GetBySourceAsync(PlaySource.File, 10);
     var radioResults = await _historyRepository.GetBySourceAsync(PlaySource.Radio, 10);
-    var spotifyResults = await _historyRepository.GetBySourceAsync(PlaySource.Spotify, 10);
+    var vinylResults = await _historyRepository.GetBySourceAsync(PlaySource.Vinyl, 10);
 
     Assert.Single(fileResults);
     Assert.Equal(MetadataSource.FileTag, fileResults[0].MetadataSource);
@@ -259,8 +259,8 @@ public class EndToEndFingerprintingIntegrationTests : IAsyncLifetime
     Assert.Single(radioResults);
     Assert.Equal(MetadataSource.Fingerprinting, radioResults[0].MetadataSource);
 
-    Assert.Single(spotifyResults);
-    Assert.Equal(MetadataSource.Spotify, spotifyResults[0].MetadataSource);
+    Assert.Single(vinylResults);
+    Assert.Equal(MetadataSource.Manual, vinylResults[0].MetadataSource);
   }
 
   [Fact]

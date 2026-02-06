@@ -375,7 +375,6 @@ public class FingerprintingConfigurationIntegrationTests : IAsyncLifetime
       MetadataSource.AcoustID,
       MetadataSource.Manual,
       MetadataSource.FileTag,
-      MetadataSource.Spotify,
       MetadataSource.Fingerprinting
     };
 

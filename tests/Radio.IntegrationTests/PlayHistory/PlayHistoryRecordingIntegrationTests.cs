@@ -105,7 +105,7 @@ public class PlayHistoryRecordingIntegrationTests : IAsyncLifetime
       Title = "Test Song",
       Artist = "Test Artist",
       Album = "Test Album",
-      Source = MetadataSource.Spotify,
+      Source = MetadataSource.FileTag,
       CreatedAt = DateTime.UtcNow,
       UpdatedAt = DateTime.UtcNow
     };
@@ -117,9 +117,9 @@ public class PlayHistoryRecordingIntegrationTests : IAsyncLifetime
       Id = Guid.NewGuid().ToString(),
       TrackMetadataId = metadata.Id,
       PlayedAt = DateTime.UtcNow,
-      Source = PlaySource.Spotify,
-      MetadataSource = MetadataSource.Spotify,
-      SourceDetails = "Spotify: Test Song - Test Artist",
+      Source = PlaySource.File,
+      MetadataSource = MetadataSource.FileTag,
+      SourceDetails = "File: Test Song - Test Artist",
       WasIdentified = true,
       IdentificationConfidence = 1.0
     };
@@ -130,7 +130,7 @@ public class PlayHistoryRecordingIntegrationTests : IAsyncLifetime
     // Assert
     var recorded = await _repository.GetByIdAsync(entry.Id);
     Assert.NotNull(recorded);
-    Assert.Equal(MetadataSource.Spotify, recorded.MetadataSource);
+    Assert.Equal(MetadataSource.FileTag, recorded.MetadataSource);
     Assert.Equal(metadata.Id, recorded.TrackMetadataId);
     Assert.True(recorded.WasIdentified);
   }
@@ -243,19 +243,19 @@ public class PlayHistoryRecordingIntegrationTests : IAsyncLifetime
     };
     await _repository.RecordPlayAsync(radioEntry);
 
-    var spotifyEntry = new PlayHistoryEntry
+    var vinylEntry = new PlayHistoryEntry
     {
       Id = Guid.NewGuid().ToString(),
       PlayedAt = DateTime.UtcNow,
-      Source = PlaySource.Spotify,
+      Source = PlaySource.Vinyl,
       WasIdentified = true
     };
-    await _repository.RecordPlayAsync(spotifyEntry);
+    await _repository.RecordPlayAsync(vinylEntry);
 
     // Act
     var fileResults = await _repository.GetBySourceAsync(PlaySource.File, 10);
     var radioResults = await _repository.GetBySourceAsync(PlaySource.Radio, 10);
-    var spotifyResults = await _repository.GetBySourceAsync(PlaySource.Spotify, 10);
+    var vinylResults = await _repository.GetBySourceAsync(PlaySource.Vinyl, 10);
 
     // Assert
     Assert.Single(fileResults);
@@ -264,8 +264,8 @@ public class PlayHistoryRecordingIntegrationTests : IAsyncLifetime
     Assert.Single(radioResults);
     Assert.Equal(radioEntry.Id, radioResults[0].Id);
 
-    Assert.Single(spotifyResults);
-    Assert.Equal(spotifyEntry.Id, spotifyResults[0].Id);
+    Assert.Single(vinylResults);
+    Assert.Equal(vinylEntry.Id, vinylResults[0].Id);
   }
 
   [Fact]
@@ -379,7 +379,7 @@ public class PlayHistoryRecordingIntegrationTests : IAsyncLifetime
     {
       Id = Guid.NewGuid().ToString(),
       PlayedAt = DateTime.UtcNow.AddHours(-3),
-      Source = PlaySource.Spotify,
+      Source = PlaySource.Vinyl,
       WasIdentified = true
     });
 
@@ -400,7 +400,7 @@ public class PlayHistoryRecordingIntegrationTests : IAsyncLifetime
     Assert.Equal(2, stats.UnidentifiedPlays);
     Assert.Equal(2, stats.PlaysBySource[PlaySource.File]);
     Assert.Equal(1, stats.PlaysBySource[PlaySource.Radio]);
-    Assert.Equal(1, stats.PlaysBySource[PlaySource.Spotify]);
+    Assert.Equal(1, stats.PlaysBySource[PlaySource.Vinyl]);
   }
 
   [Fact]

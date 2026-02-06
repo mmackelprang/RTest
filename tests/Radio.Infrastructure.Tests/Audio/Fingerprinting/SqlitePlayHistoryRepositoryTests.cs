@@ -96,7 +96,7 @@ public class SqlitePlayHistoryRepositoryTests : IAsyncLifetime
     // Arrange
     var entry = CreateTestHistoryEntry() with
     {
-      MetadataSource = MetadataSource.Spotify
+      MetadataSource = MetadataSource.Manual
     };
 
     // Act
@@ -105,7 +105,7 @@ public class SqlitePlayHistoryRepositoryTests : IAsyncLifetime
     // Assert
     var recorded = await _repository.GetByIdAsync(entry.Id);
     Assert.NotNull(recorded);
-    Assert.Equal(MetadataSource.Spotify, recorded.MetadataSource);
+    Assert.Equal(MetadataSource.Manual, recorded.MetadataSource);
   }
 
   [Fact]
@@ -196,7 +196,7 @@ public class SqlitePlayHistoryRepositoryTests : IAsyncLifetime
     var vinylEntry1 = CreateTestHistoryEntry() with { Source = PlaySource.Vinyl };
     var vinylEntry2 = CreateTestHistoryEntry() with { Source = PlaySource.Vinyl };
     var radioEntry = CreateTestHistoryEntry() with { Source = PlaySource.Radio };
-    var spotifyEntry = CreateTestHistoryEntry() with { Source = PlaySource.Spotify };
+    var spotifyEntry = CreateTestHistoryEntry() with { Source = PlaySource.Vinyl };
 
     await _repository.RecordPlayAsync(vinylEntry1);
     await _repository.RecordPlayAsync(vinylEntry2);
@@ -206,14 +206,14 @@ public class SqlitePlayHistoryRepositoryTests : IAsyncLifetime
     // Act
     var vinylResults = await _repository.GetBySourceAsync(PlaySource.Vinyl, 10);
     var radioResults = await _repository.GetBySourceAsync(PlaySource.Radio, 10);
-    var spotifyResults = await _repository.GetBySourceAsync(PlaySource.Spotify, 10);
+    var spotifyResults = await _repository.GetBySourceAsync(PlaySource.Vinyl, 10);
 
     // Assert
     Assert.Equal(2, vinylResults.Count);
     Assert.All(vinylResults, e => Assert.Equal(PlaySource.Vinyl, e.Source));
     Assert.Single(radioResults);
     Assert.Single(spotifyResults);
-    Assert.Equal(PlaySource.Spotify, spotifyResults[0].Source);
+    Assert.Equal(PlaySource.Vinyl, spotifyResults[0].Source);
   }
 
   [Fact]
@@ -225,7 +225,7 @@ public class SqlitePlayHistoryRepositoryTests : IAsyncLifetime
       Id = Guid.NewGuid().ToString(),
       Title = "Test Song",
       Artist = "Test Artist",
-      Source = MetadataSource.Spotify,
+      Source = MetadataSource.Manual,
       CreatedAt = DateTime.UtcNow,
       UpdatedAt = DateTime.UtcNow
     };
@@ -254,7 +254,7 @@ public class SqlitePlayHistoryRepositoryTests : IAsyncLifetime
       Id = Guid.NewGuid().ToString(),
       Title = "Old Song",
       Artist = "Old Artist",
-      Source = MetadataSource.Spotify,
+      Source = MetadataSource.Manual,
       CreatedAt = DateTime.UtcNow,
       UpdatedAt = DateTime.UtcNow
     };

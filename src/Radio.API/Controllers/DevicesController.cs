@@ -1,3 +1,6 @@
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using Microsoft.AspNetCore.Mvc;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
@@ -350,7 +353,29 @@ public class DevicesController : ControllerBase
 
       await _castOutput.ConnectAsync(deviceInfo, cancellationToken);
 
-      _logger.LogInformation("Connected to Cast device: {Name}", request.Name);
+      // Wire the HTTP audio stream so the Chromecast has something to play
+      if (_httpOutput != null)
+      {
+        // Ensure HTTP stream output is initialized and started
+        if (_httpOutput.State == AudioOutputState.Created)
+        {
+          await _httpOutput.InitializeAsync(cancellationToken);
+        }
+        if (_httpOutput.State == AudioOutputState.Ready || _httpOutput.State == AudioOutputState.Stopped)
+        {
+          await _httpOutput.StartAsync(cancellationToken);
+        }
+
+        // Resolve the actual LAN IP (Chromecast needs a routable IP, not a hostname)
+        var streamUrl = GetRoutableStreamUrl(_httpOutput.StreamUrl, _httpOutput.Port);
+        _castOutput.SetStreamUrl(streamUrl);
+        _logger.LogInformation("Set Cast stream URL to {StreamUrl}", streamUrl);
+      }
+
+      // Start audio playback on the Cast device
+      await _castOutput.StartAsync(cancellationToken);
+
+      _logger.LogInformation("Connected to Cast device: {Name}, audio streaming started", request.Name);
       return Ok(new { message = "Connected to Cast device", device = request.Name });
     }
     catch (Exception ex)
@@ -494,6 +519,51 @@ public class DevicesController : ControllerBase
       _logger.LogError(ex, "Error checking USB port");
       return StatusCode(500, new { error = "Failed to check USB port" });
     }
+  }
+
+  /// <summary>
+  /// Replaces the hostname in a stream URL with the local LAN IP address.
+  /// Chromecast devices need a routable IP, not a hostname.
+  /// </summary>
+  private string GetRoutableStreamUrl(string streamUrl, int port)
+  {
+    var localIp = GetLocalIPAddress();
+    if (localIp != null)
+    {
+      // Build URL with routable IP
+      var uri = new Uri(streamUrl);
+      return $"http://{localIp}:{port}{uri.PathAndQuery}";
+    }
+
+    // Fall back to the original URL
+    _logger.LogWarning("Could not resolve local LAN IP, using original stream URL");
+    return streamUrl;
+  }
+
+  /// <summary>
+  /// Gets the local LAN IP address by scanning network interfaces.
+  /// </summary>
+  private static string? GetLocalIPAddress()
+  {
+    foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+    {
+      if (ni.OperationalStatus != OperationalStatus.Up)
+        continue;
+      if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+        continue;
+
+      var props = ni.GetIPProperties();
+      foreach (var addr in props.UnicastAddresses)
+      {
+        if (addr.Address.AddressFamily == AddressFamily.InterNetwork &&
+            !IPAddress.IsLoopback(addr.Address))
+        {
+          return addr.Address.ToString();
+        }
+      }
+    }
+
+    return null;
   }
 
   private static AudioDeviceDto MapToDeviceDto(AudioDeviceInfo device)

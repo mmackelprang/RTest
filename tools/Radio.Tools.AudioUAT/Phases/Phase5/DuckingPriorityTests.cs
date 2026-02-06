@@ -96,7 +96,7 @@ public class PriorityAssignmentTest : IPhaseTest
       // Simulate priority assignments
       var sources = new[]
       {
-        ("Music", AudioSourceType.Spotify, 3, "Primary"),
+        ("Music", AudioSourceType.FilePlayer, 3, "Primary"),
         ("TTS Announcement", AudioSourceType.TTS, 9, "Event"),
         ("Radio", AudioSourceType.Radio, 3, "Primary"),
         ("Doorbell", AudioSourceType.AudioFileEvent, 8, "Event"),

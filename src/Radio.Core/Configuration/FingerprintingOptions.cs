@@ -33,6 +33,14 @@ public sealed class FingerprintingOptions
   /// SQLite database path for fingerprint cache.
   /// </summary>
   public string DatabasePath { get; set; } = "./data/fingerprints.db";
+
+  /// <summary>
+  /// Path to the fpcalc binary (native Chromaprint fingerprint calculator).
+  /// If empty, searches PATH and common installation locations.
+  /// On Linux: install via 'apt install libchromaprint-tools'
+  /// On Windows: download from https://acoustid.org/chromaprint
+  /// </summary>
+  public string FpcalcPath { get; set; } = string.Empty;
 }
 
 /// <summary>

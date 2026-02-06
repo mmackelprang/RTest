@@ -1,3 +1,5 @@
+using System.Net.Sockets;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
@@ -109,6 +111,8 @@ public class GoogleCastOutput : AudioOutputBase
 
   /// <summary>
   /// Discovers available Chromecast devices on the network.
+  /// Merges live mDNS results with a persistent cache so previously seen
+  /// devices remain available even if they are temporarily offline.
   /// </summary>
   /// <param name="cancellationToken">Cancellation token.</param>
   /// <returns>A list of discovered Chromecast devices.</returns>
@@ -121,10 +125,8 @@ public class GoogleCastOutput : AudioOutputBase
       "Starting Chromecast device discovery (timeout: {Timeout}s)",
       _options.DiscoveryTimeoutSeconds);
 
-    var devices = new List<ChromecastDeviceInfo>();
-
-    // Clear previous cache
-    _discoveredReceivers.Clear();
+    // Load persistent cache first
+    var cachedDevices = await LoadCacheAsync();
 
     try
     {
@@ -133,7 +135,6 @@ public class GoogleCastOutput : AudioOutputBase
 
       foreach (var device in discoveredDevices)
       {
-        // Generate a stable ID from the device URI
         var deviceId = device.DeviceUri.ToString();
 
         var deviceInfo = new ChromecastDeviceInfo
@@ -145,9 +146,14 @@ public class GoogleCastOutput : AudioOutputBase
           Model = device.Model ?? "Unknown"
         };
 
-        devices.Add(deviceInfo);
+        // Update or add to cache
+        cachedDevices[deviceId] = new CachedCastDevice
+        {
+          Device = deviceInfo,
+          LastSeen = DateTime.UtcNow
+        };
 
-        // Cache the original receiver for later connection
+        // Keep the live receiver for connection
         _discoveredReceivers[deviceId] = device;
 
         DeviceDiscovered?.Invoke(this, new ChromecastDeviceDiscoveredEventArgs { Device = deviceInfo });
@@ -157,14 +163,79 @@ public class GoogleCastOutput : AudioOutputBase
           deviceInfo.FriendlyName, deviceInfo.IpAddress, deviceInfo.Port);
       }
 
-      _logger.LogInformation("Discovered {Count} Chromecast device(s)", devices.Count);
+      _logger.LogInformation("Discovered {Count} Chromecast device(s) via mDNS, {CacheCount} total cached",
+        discoveredDevices.Count(), cachedDevices.Count);
     }
     catch (Exception ex)
     {
       _logger.LogWarning(ex, "Error during Chromecast device discovery");
     }
 
-    return devices;
+    // Remove stale entries
+    var expirationCutoff = DateTime.UtcNow.AddDays(-_options.CacheExpirationDays);
+    var staleKeys = cachedDevices
+      .Where(kv => kv.Value.LastSeen < expirationCutoff)
+      .Select(kv => kv.Key)
+      .ToList();
+    foreach (var key in staleKeys)
+    {
+      cachedDevices.Remove(key);
+      _discoveredReceivers.Remove(key);
+    }
+
+    // Save merged cache
+    await SaveCacheAsync(cachedDevices);
+
+    return cachedDevices.Values.Select(c => c.Device).ToList();
+  }
+
+  /// <summary>
+  /// Loads the persistent device cache from disk.
+  /// </summary>
+  private async Task<Dictionary<string, CachedCastDevice>> LoadCacheAsync()
+  {
+    try
+    {
+      if (File.Exists(_options.CacheFilePath))
+      {
+        var json = await File.ReadAllTextAsync(_options.CacheFilePath);
+        var cached = JsonSerializer.Deserialize<Dictionary<string, CachedCastDevice>>(json);
+        if (cached != null)
+        {
+          _logger.LogDebug("Loaded {Count} cached Cast devices", cached.Count);
+          return cached;
+        }
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to load Cast device cache");
+    }
+
+    return new Dictionary<string, CachedCastDevice>();
+  }
+
+  /// <summary>
+  /// Saves the device cache to disk.
+  /// </summary>
+  private async Task SaveCacheAsync(Dictionary<string, CachedCastDevice> cache)
+  {
+    try
+    {
+      var directory = Path.GetDirectoryName(_options.CacheFilePath);
+      if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+      {
+        Directory.CreateDirectory(directory);
+      }
+
+      var json = JsonSerializer.Serialize(cache, new JsonSerializerOptions { WriteIndented = true });
+      await File.WriteAllTextAsync(_options.CacheFilePath, json);
+      _logger.LogDebug("Saved {Count} Cast devices to cache", cache.Count);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to save Cast device cache");
+    }
   }
 
   /// <summary>
@@ -195,9 +266,25 @@ public class GoogleCastOutput : AudioOutputBase
       // Try to get the cached receiver from discovery (preferred - uses original SharpCaster object)
       if (!_discoveredReceivers.TryGetValue(device.Id, out _connectedReceiver))
       {
-        // Fallback: Create ChromecastReceiver from device info
-        // Note: The URI scheme doesn't matter for TCP connection, just host:port
-        _logger.LogDebug("Creating new ChromecastReceiver from device info (not from cache)");
+        // Device is from persistent cache, not live discovery.
+        // Verify reachability with a TCP connect check before attempting full connection.
+        _logger.LogDebug("Device from cache, verifying reachability at {IP}:{Port}",
+          device.IpAddress, device.Port);
+
+        using var tcpCheck = new TcpClient();
+        try
+        {
+          using var tcpCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+          await tcpCheck.ConnectAsync(device.IpAddress, device.Port, tcpCts.Token);
+        }
+        catch (Exception tcpEx)
+        {
+          throw new InvalidOperationException(
+            $"Cast device '{device.FriendlyName}' at {device.IpAddress}:{device.Port} is not reachable",
+            tcpEx);
+        }
+
+        _logger.LogDebug("TCP check passed, creating ChromecastReceiver from cache");
         var uri = new Uri($"cast://{device.IpAddress}:{device.Port}");
         _connectedReceiver = new ChromecastReceiver
         {
@@ -208,7 +295,7 @@ public class GoogleCastOutput : AudioOutputBase
       }
       else
       {
-        _logger.LogDebug("Using cached ChromecastReceiver from discovery");
+        _logger.LogDebug("Using live ChromecastReceiver from discovery");
       }
 
       if (_client == null)
@@ -521,4 +608,20 @@ public class ChromecastDisconnectedEventArgs : EventArgs
   /// Gets the reason for disconnection.
   /// </summary>
   public string? Reason { get; init; }
+}
+
+/// <summary>
+/// A cached Cast device entry with a last-seen timestamp.
+/// </summary>
+public class CachedCastDevice
+{
+  /// <summary>
+  /// Gets or sets the device info.
+  /// </summary>
+  public required ChromecastDeviceInfo Device { get; set; }
+
+  /// <summary>
+  /// Gets or sets when the device was last seen on the network.
+  /// </summary>
+  public DateTime LastSeen { get; set; }
 }

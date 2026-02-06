@@ -68,7 +68,23 @@ public static class FingerprintingServiceExtensions
     });
 
     // Register metadata lookup service as scoped (uses repositories)
-    services.AddScoped<IMetadataLookupService, MetadataLookupService>();
+    services.AddScoped<IMetadataLookupService>(sp =>
+    {
+      var httpClient = new HttpClient
+      {
+        Timeout = TimeSpan.FromSeconds(
+          configuration.GetSection(FingerprintingOptions.SectionName)
+            .Get<FingerprintingOptions>()?.MusicBrainz.TimeoutSeconds ?? 10)
+      };
+
+      return new MetadataLookupService(
+        sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<MetadataLookupService>>(),
+        sp.GetRequiredService<IFingerprintCacheRepository>(),
+        sp.GetRequiredService<ITrackMetadataRepository>(),
+        sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<FingerprintingOptions>>(),
+        httpClient,
+        sp.GetService<AcoustIdClient>());
+    });
 
     // Register audio tap as scoped
     services.AddScoped<IAudioSampleProvider, SoundFlowAudioTap>();

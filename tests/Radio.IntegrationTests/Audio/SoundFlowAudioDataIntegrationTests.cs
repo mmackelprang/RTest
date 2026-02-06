@@ -49,12 +49,12 @@ public class SoundFlowAudioDataIntegrationTests
   {
     // Arrange
     var provider = new MockAudioSampleProvider();
-    provider.SetActive(true, "Spotify: Test Song", PlaySource.Spotify);
+    provider.SetActive(true, "Radio: Test Song", PlaySource.Radio);
 
     // Assert
     Assert.True(provider.IsActive);
-    Assert.Equal("Spotify: Test Song", provider.SourceName);
-    Assert.Equal(PlaySource.Spotify, provider.SourceType);
+    Assert.Equal("Radio: Test Song", provider.SourceName);
+    Assert.Equal(PlaySource.Radio, provider.SourceType);
   }
 
   [Fact]

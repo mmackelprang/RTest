@@ -17,7 +17,6 @@ public class PreferencesPersistenceService : BackgroundService
   private readonly ILogger<PreferencesPersistenceService> _logger;
   private readonly IOptionsMonitor<AudioPreferences> _audioPreferences;
   private readonly IOptionsMonitor<FilePlayerPreferences> _filePlayerPreferences;
-  private readonly IOptionsMonitor<SpotifyPreferences> _spotifyPreferences;
   private readonly IOptionsMonitor<TTSPreferences> _ttsPreferences;
   private readonly IOptionsMonitor<RadioPreferences> _radioPreferences;
   private readonly IOptionsMonitor<GenericSourcePreferences> _genericSourcePreferences;
@@ -29,7 +28,6 @@ public class PreferencesPersistenceService : BackgroundService
     ILogger<PreferencesPersistenceService> logger,
     IOptionsMonitor<AudioPreferences> audioPreferences,
     IOptionsMonitor<FilePlayerPreferences> filePlayerPreferences,
-    IOptionsMonitor<SpotifyPreferences> spotifyPreferences,
     IOptionsMonitor<TTSPreferences> ttsPreferences,
     IOptionsMonitor<RadioPreferences> radioPreferences,
     IOptionsMonitor<GenericSourcePreferences> genericSourcePreferences,
@@ -39,7 +37,6 @@ public class PreferencesPersistenceService : BackgroundService
     _logger = logger;
     _audioPreferences = audioPreferences;
     _filePlayerPreferences = filePlayerPreferences;
-    _spotifyPreferences = spotifyPreferences;
     _ttsPreferences = ttsPreferences;
     _radioPreferences = radioPreferences;
     _genericSourcePreferences = genericSourcePreferences;
@@ -86,7 +83,6 @@ public class PreferencesPersistenceService : BackgroundService
       {
         SavePreferenceSectionAsync(AudioPreferences.SectionName, _audioPreferences.CurrentValue, cancellationToken),
         SavePreferenceSectionAsync(FilePlayerPreferences.SectionName, _filePlayerPreferences.CurrentValue, cancellationToken),
-        SavePreferenceSectionAsync(SpotifyPreferences.SectionName, _spotifyPreferences.CurrentValue, cancellationToken),
         SavePreferenceSectionAsync(TTSPreferences.SectionName, _ttsPreferences.CurrentValue, cancellationToken),
         SavePreferenceSectionAsync(RadioPreferences.SectionName, _radioPreferences.CurrentValue, cancellationToken),
         SavePreferenceSectionAsync(GenericSourcePreferences.SectionName, _genericSourcePreferences.CurrentValue, cancellationToken)

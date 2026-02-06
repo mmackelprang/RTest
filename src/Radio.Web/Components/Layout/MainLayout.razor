@@ -158,9 +158,6 @@
       <MudIconButton Icon="@Icons.Material.Filled.QueueMusic" Color="Color.Inherit" Href="/queue" Size="Size.Large" title="@(_queueCount > 0 ? $"Queue ({_queueCount} items)" : "Queue (empty)")" />
     </MudBadge>
     
-    <!-- Spotify Search - Always visible -->
-    <MudIconButton Icon="@Icons.Material.Filled.Search" Color="Color.Inherit" Href="/spotify" Size="Size.Large" title="Spotify Search" />
-    
     @if (_showRadioNav)
     {
       <MudIconButton Icon="@Icons.Material.Filled.Radio" Color="Color.Inherit" Href="/radio" Size="Size.Large" title="Radio Controls" />
@@ -196,7 +193,6 @@
   private string? _selectedOutputId = null;
 
   // Conditional navigation visibility
-  private bool _showSpotifyNav = false;
   private bool _showRadioNav = false;
   private bool _showFilesNav = false;
 
@@ -462,7 +458,6 @@
   private void UpdateNavigationVisibility(AudioSourceDto source)
   {
     // Queue is now always visible, no need to set _showQueueNav
-    _showSpotifyNav = source.Type == "Spotify";
     _showRadioNav = source.Type == "Radio" || source.Type == "RTLSDRCore" || source.Type == "RF320";
     _showFilesNav = source.Type == "FilePlayer";
   }

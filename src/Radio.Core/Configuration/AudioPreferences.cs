@@ -16,7 +16,7 @@ public class AudioPreferences
   /// <summary>
   /// Gets or sets the currently selected audio source.
   /// </summary>
-  public string CurrentSource { get; set; } = "Spotify";
+  public string CurrentSource { get; set; } = "Radio";
 
   /// <summary>
   /// Gets or sets the currently selected audio output device ID.
@@ -39,48 +39,6 @@ public class AudioPreferences
   /// Empty string means use default device.
   /// </summary>
   public string CurrentInput { get; set; } = "";
-}
-
-/// <summary>
-/// User preferences for Spotify playback.
-/// </summary>
-public class SpotifyPreferences
-{
-  /// <summary>
-  /// The configuration section name.
-  /// </summary>
-  public const string SectionName = "SpotifyPreferences";
-
-  /// <summary>
-  /// Gets or sets the URI of the last song played.
-  /// </summary>
-  public string LastSongPlayed { get; set; } = "";
-
-  /// <summary>
-  /// Gets or sets the last song position in milliseconds.
-  /// </summary>
-  public long SongPositionMs { get; set; } = 0;
-
-  /// <summary>
-  /// Gets or sets whether shuffle mode is enabled.
-  /// </summary>
-  public bool Shuffle { get; set; } = false;
-
-  /// <summary>
-  /// Gets or sets the repeat mode.
-  /// </summary>
-  public RepeatMode Repeat { get; set; } = RepeatMode.Off;
-
-  /// <summary>
-  /// Gets or sets the last Spotify search query.
-  /// Used to restore search results when returning to Spotify page.
-  /// </summary>
-  public string LastSearchQuery { get; set; } = "";
-
-  /// <summary>
-  /// Gets or sets the timestamp of the last search (for cache invalidation).
-  /// </summary>
-  public DateTime LastSearchTimestamp { get; set; } = DateTime.MinValue;
 }
 
 /// <summary>

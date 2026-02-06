@@ -39,7 +39,8 @@ public class MetadataLookupServiceTests
       _loggerMock.Object,
       _cacheMock.Object,
       _metadataRepoMock.Object,
-      _optionsMock.Object);
+      _optionsMock.Object,
+      new HttpClient());
   }
 
   [Fact]

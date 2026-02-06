@@ -11,7 +11,6 @@ using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Sources.Primary;
 using Radio.Infrastructure.Configuration.Abstractions;
 using Radio.Infrastructure.Configuration.Models;
-using SecretTagModel = Radio.Infrastructure.Configuration.Models.SecretTag;
 
 namespace Radio.Infrastructure.Audio.Services;
 
@@ -28,8 +27,6 @@ public class AudioManager : IAudioManager
   private readonly IRadioFactory _radioFactory;
 
   // Options for source creation
-  private readonly IOptionsMonitor<SpotifySecrets> _spotifySecrets;
-  private readonly IOptionsMonitor<SpotifyPreferences> _spotifyPreferences;
   private readonly IOptionsMonitor<FilePlayerOptions> _filePlayerOptions;
   private readonly IOptionsMonitor<FilePlayerPreferences> _filePlayerPreferences;
   private readonly IOptionsMonitor<DeviceOptions> _deviceOptions;
@@ -64,8 +61,6 @@ public class AudioManager : IAudioManager
     IAudioEngine audioEngine,
     IAudioDeviceManager deviceManager,
     IRadioFactory radioFactory,
-    IOptionsMonitor<SpotifySecrets> spotifySecrets,
-    IOptionsMonitor<SpotifyPreferences> spotifyPreferences,
     IOptionsMonitor<FilePlayerOptions> filePlayerOptions,
     IOptionsMonitor<FilePlayerPreferences> filePlayerPreferences,
     IOptionsMonitor<DeviceOptions> deviceOptions,
@@ -83,8 +78,6 @@ public class AudioManager : IAudioManager
     _audioEngine = audioEngine;
     _deviceManager = deviceManager;
     _radioFactory = radioFactory;
-    _spotifySecrets = spotifySecrets;
-    _spotifyPreferences = spotifyPreferences;
     _filePlayerOptions = filePlayerOptions;
     _filePlayerPreferences = filePlayerPreferences;
     _deviceOptions = deviceOptions;
@@ -125,6 +118,13 @@ public class AudioManager : IAudioManager
   {
     get => _audioEngine.GetMasterMixer().IsMuted;
     set => _audioEngine.GetMasterMixer().IsMuted = value;
+  }
+
+  /// <inheritdoc/>
+  public float Balance
+  {
+    get => _audioEngine.GetMasterMixer().Balance;
+    set => _audioEngine.GetMasterMixer().Balance = value;
   }
 
   /// <inheritdoc/>
@@ -202,7 +202,6 @@ public class AudioManager : IAudioManager
         AudioSourceType.Vinyl => true,      // Vinyl captures from USB input
         AudioSourceType.GenericUSB => true, // Generic USB captures from input
         AudioSourceType.FilePlayer => false, // Requires file to be loaded first
-        AudioSourceType.Spotify => false,   // Requires track/playlist selection
         _ => false
       };
 
@@ -290,7 +289,6 @@ public class AudioManager : IAudioManager
       source = sourceType switch
       {
         AudioSourceType.Radio => CreateRadioSource(),
-        AudioSourceType.Spotify => CreateSpotifySource(),
         AudioSourceType.FilePlayer => CreateFilePlayerSource(),
         AudioSourceType.Vinyl => CreateVinylSource(),
         AudioSourceType.GenericUSB => CreateGenericUSBSource(),
@@ -445,67 +443,6 @@ public class AudioManager : IAudioManager
   }
 
   /// <summary>
-  /// Creates a Spotify audio source.
-  /// </summary>
-  /// <exception cref="InvalidOperationException">Thrown if Spotify credentials are not configured.</exception>
-  private IAudioSource CreateSpotifySource()
-  {
-    var secrets = _spotifySecrets.CurrentValue;
-
-    // Validate Spotify configuration
-    if (string.IsNullOrWhiteSpace(secrets.ClientID) ||
-        string.IsNullOrWhiteSpace(secrets.ClientSecret))
-    {
-      throw new InvalidOperationException(
-        "Spotify is not configured. Please configure ClientId and ClientSecret in the SpotifySecrets section.");
-    }
-
-    if (string.IsNullOrWhiteSpace(secrets.RefreshToken))
-    {
-      throw new InvalidOperationException(
-        "Spotify authentication required. Please complete the Spotify OAuth flow to obtain a refresh token.");
-    }
-
-    // Check if secrets contain unresolved secret tags (meaning the actual secrets weren't stored)
-    if (SecretTagModel.ContainsTag(secrets.ClientID))
-    {
-      _logger.LogError(
-        "Spotify ClientID contains an unresolved secret tag. " +
-        "The actual secret value must be stored using the Secrets Management UI or API.");
-      throw new InvalidOperationException(
-        "Spotify ClientID secret not found. Please store the actual Client ID value using Settings > Secrets in the Web UI.");
-    }
-
-    if (SecretTagModel.ContainsTag(secrets.ClientSecret))
-    {
-      _logger.LogError(
-        "Spotify ClientSecret contains an unresolved secret tag. " +
-        "The actual secret value must be stored using the Secrets Management UI or API.");
-      throw new InvalidOperationException(
-        "Spotify ClientSecret secret not found. Please store the actual Client Secret value using Settings > Secrets in the Web UI.");
-    }
-
-    if (SecretTagModel.ContainsTag(secrets.RefreshToken))
-    {
-      _logger.LogError(
-        "Spotify RefreshToken contains an unresolved secret tag. " +
-        "The actual secret value must be stored using the Secrets Management UI or API.");
-      throw new InvalidOperationException(
-        "Spotify RefreshToken secret not found. Please store the actual Refresh Token value using Settings > Secrets in the Web UI.");
-    }
-
-    var logger = _loggerFactory.CreateLogger<SpotifyAudioSource>();
-    return new SpotifyAudioSource(
-      logger,
-      _spotifySecrets,
-      _spotifyPreferences,
-      _deviceOptions,
-      _playbackService,
-      _metricsCollector,
-      _loggerFactory);
-  }
-
-  /// <summary>
   /// Creates a file player audio source.
   /// </summary>
   private IAudioSource CreateFilePlayerSource()
@@ -595,6 +532,10 @@ public class AudioManager : IAudioManager
       return;
     }
 
+    _logger.LogInformation(
+      "Source state changed: {SourceName} ({SourceType}) {OldState} -> {NewState}, IsActiveSource={IsActive}",
+      source.Name, source.Type, e.PreviousState, e.NewState, source == _activeSource);
+
     // Clean up previous source when active source starts playing
     if (e.NewState == AudioSourceState.Playing && source == _activeSource && _previousSource != null)
     {
@@ -662,6 +603,9 @@ public class AudioManager : IAudioManager
       return;
     }
 
+    _logger.LogInformation(
+      "Source {SourceName} transitioned to Playing, recording play history",
+      source.Name);
     await RecordPlayStartAsync(source);
   }
 
@@ -672,6 +616,7 @@ public class AudioManager : IAudioManager
   {
     if (_serviceScopeFactory == null)
     {
+      _logger.LogWarning("IServiceScopeFactory is null, cannot record play history");
       return;
     }
 
@@ -681,7 +626,7 @@ public class AudioManager : IAudioManager
       var playHistoryRepository = scope.ServiceProvider.GetService<IPlayHistoryRepository>();
       if (playHistoryRepository == null)
       {
-        _logger.LogDebug("IPlayHistoryRepository not available, skipping play history recording");
+        _logger.LogWarning("IPlayHistoryRepository not available in DI scope, skipping play history recording");
         return;
       }
 
@@ -717,9 +662,9 @@ public class AudioManager : IAudioManager
       await playHistoryRepository.RecordPlayAsync(entry);
       _currentPlayHistoryEntryId = entryId;
 
-      _logger.LogDebug(
-        "Recorded play history entry {EntryId} for source {SourceName} (identified: {WasIdentified})",
-        entryId, source.Name, entry.WasIdentified);
+      _logger.LogInformation(
+        "Recorded play history entry {EntryId} for source {SourceName} (identified: {WasIdentified}, source: {PlaySource})",
+        entryId, source.Name, entry.WasIdentified, playSource);
     }
     catch (Exception ex)
     {
@@ -771,7 +716,6 @@ public class AudioManager : IAudioManager
     // Determine metadata source based on source type
     var metadataSource = source.Type switch
     {
-      AudioSourceType.Spotify => MetadataSource.Spotify,
       AudioSourceType.FilePlayer => MetadataSource.FileTag,
       _ => MetadataSource.Manual
     };
@@ -799,7 +743,6 @@ public class AudioManager : IAudioManager
   {
     return sourceType switch
     {
-      AudioSourceType.Spotify => PlaySource.Spotify,
       AudioSourceType.Radio => PlaySource.Radio,
       AudioSourceType.Vinyl => PlaySource.Vinyl,
       AudioSourceType.FilePlayer => PlaySource.File,

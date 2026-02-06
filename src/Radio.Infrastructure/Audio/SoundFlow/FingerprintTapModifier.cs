@@ -22,6 +22,7 @@ public class FingerprintTapModifier : SoundModifier
   private readonly object _lock = new();
   private long _totalSamplesProcessed;
   private DateTime _lastLogTime = DateTime.MinValue;
+  private DateTime _lastProcessedTime = DateTime.MinValue;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="FingerprintTapModifier"/> class.
@@ -48,6 +49,7 @@ public class FingerprintTapModifier : SoundModifier
     lock (_lock)
     {
       _totalSamplesProcessed++;
+      _lastProcessedTime = DateTime.UtcNow;
 
       if (_bufferIndex < _bufferSize)
       {
@@ -130,4 +132,9 @@ public class FingerprintTapModifier : SoundModifier
   /// Gets the total number of samples processed by this modifier.
   /// </summary>
   public long TotalSamplesProcessed => _totalSamplesProcessed;
+
+  /// <summary>
+  /// Gets the timestamp of the last sample processed by this modifier.
+  /// </summary>
+  public DateTime LastProcessedTime => _lastProcessedTime;
 }

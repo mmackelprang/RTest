@@ -1,0 +1,237 @@
+@rendermode InteractiveServer
+@inject AudioVisualizationHubService VisualizationHub
+@inject IJSRuntime JS
+@inject ILogger<VisualizerPanel> Logger
+@inject ConfigurationApiService ConfigApi
+@implements IAsyncDisposable
+
+<div style="height: 100%; display: flex; flex-direction: column; padding: 8px;">
+  <!-- Mode Selector -->
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+    <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Visualizer</MudText>
+    <div style="display: flex; align-items: center; gap: 8px;">
+      @if (!VisualizationHub.IsConnected)
+      {
+        <MudChip T="string" Color="Color.Warning" Size="Size.Small">Disconnected</MudChip>
+      }
+      <MudButtonGroup Color="Color.Primary" Variant="Variant.Outlined" Size="Size.Small">
+        <MudButton OnClick="@(() => SelectMode(VisualizationMode.VUMeter))"
+                   Variant="@(_currentMode == VisualizationMode.VUMeter ? Variant.Filled : Variant.Outlined)">
+          VU
+        </MudButton>
+        <MudButton OnClick="@(() => SelectMode(VisualizationMode.Waveform))"
+                   Variant="@(_currentMode == VisualizationMode.Waveform ? Variant.Filled : Variant.Outlined)">
+          Wave
+        </MudButton>
+        <MudButton OnClick="@(() => SelectMode(VisualizationMode.Spectrum))"
+                   Variant="@(_currentMode == VisualizationMode.Spectrum ? Variant.Filled : Variant.Outlined)">
+          Spectrum
+        </MudButton>
+      </MudButtonGroup>
+    </div>
+  </div>
+
+  <!-- Canvas -->
+  <MudPaper Elevation="2" Style="flex: 1; background-color: #1a1a1a; min-height: 200px; padding: 4px;">
+    <canvas id="visualizer-panel-canvas" style="width: 100%; height: 100%; display: block;"></canvas>
+  </MudPaper>
+</div>
+
+@code {
+  private enum VisualizationMode
+  {
+    VUMeter,
+    Waveform,
+    Spectrum
+  }
+
+  private VisualizationMode _currentMode = VisualizationMode.VUMeter;
+  private bool _isInitialized;
+  private bool _isDisposed;
+  private IJSObjectReference? _jsModule;
+
+  protected override async Task OnInitializedAsync()
+  {
+    try
+    {
+      await LoadPreferencesAsync();
+
+      if (!VisualizationHub.IsConnected)
+        await VisualizationHub.StartAsync();
+
+      await SubscribeToCurrentMode();
+
+      VisualizationHub.OnLevelData += HandleLevelData;
+      VisualizationHub.OnWaveformData += HandleWaveformData;
+      VisualizationHub.OnSpectrumData += HandleSpectrumData;
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error initializing VisualizerPanel");
+    }
+  }
+
+  protected override async Task OnAfterRenderAsync(bool firstRender)
+  {
+    if (firstRender)
+    {
+      try
+      {
+        _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/visualizer.js");
+
+        var success = await _jsModule.InvokeAsync<bool>("visualizer.init", "visualizer-panel-canvas", 650, 400);
+        if (success)
+        {
+          _isInitialized = true;
+          await RequestInitialData();
+        }
+      }
+      catch (Exception ex)
+      {
+        Logger.LogError(ex, "Error initializing visualizer canvas");
+      }
+    }
+  }
+
+  private async Task SelectMode(VisualizationMode mode)
+  {
+    if (_currentMode == mode) return;
+
+    await UnsubscribeFromCurrentMode();
+    _currentMode = mode;
+    await SubscribeToCurrentMode();
+
+    if (_isInitialized && _jsModule != null)
+    {
+      try { await _jsModule.InvokeVoidAsync("visualizer.clear", "visualizer-panel-canvas"); }
+      catch (Exception ex) { Logger.LogError(ex, "Error clearing canvas"); }
+    }
+
+    await RequestInitialData();
+    await SavePreferenceAsync("defaultMode", _currentMode.ToString());
+    StateHasChanged();
+  }
+
+  private async Task SubscribeToCurrentMode()
+  {
+    try
+    {
+      switch (_currentMode)
+      {
+        case VisualizationMode.VUMeter: await VisualizationHub.SubscribeToLevelsAsync(); break;
+        case VisualizationMode.Waveform: await VisualizationHub.SubscribeToWaveformAsync(); break;
+        case VisualizationMode.Spectrum: await VisualizationHub.SubscribeToSpectrumAsync(); break;
+      }
+    }
+    catch (Exception ex) { Logger.LogError(ex, "Error subscribing to {Mode}", _currentMode); }
+  }
+
+  private async Task UnsubscribeFromCurrentMode()
+  {
+    try
+    {
+      switch (_currentMode)
+      {
+        case VisualizationMode.VUMeter: await VisualizationHub.UnsubscribeFromLevelsAsync(); break;
+        case VisualizationMode.Waveform: await VisualizationHub.UnsubscribeFromWaveformAsync(); break;
+        case VisualizationMode.Spectrum: await VisualizationHub.UnsubscribeFromSpectrumAsync(); break;
+      }
+    }
+    catch (Exception ex) { Logger.LogError(ex, "Error unsubscribing from {Mode}", _currentMode); }
+  }
+
+  private async Task RequestInitialData()
+  {
+    try
+    {
+      switch (_currentMode)
+      {
+        case VisualizationMode.VUMeter:
+          var levels = await VisualizationHub.GetLevelsAsync();
+          if (levels != null) await HandleLevelData(levels);
+          break;
+        case VisualizationMode.Waveform:
+          var waveform = await VisualizationHub.GetWaveformAsync();
+          if (waveform != null) await HandleWaveformData(waveform);
+          break;
+        case VisualizationMode.Spectrum:
+          var spectrum = await VisualizationHub.GetSpectrumAsync();
+          if (spectrum != null) await HandleSpectrumData(spectrum);
+          break;
+      }
+    }
+    catch (Exception ex) { Logger.LogError(ex, "Error requesting initial visualization data"); }
+  }
+
+  private async Task HandleLevelData(LevelDataDto data)
+  {
+    if (_isDisposed || !_isInitialized || _jsModule == null || _currentMode != VisualizationMode.VUMeter) return;
+    try
+    {
+      await _jsModule.InvokeVoidAsync("visualizer.drawVUMeter",
+        "visualizer-panel-canvas", data.LeftPeak, data.RightPeak, data.LeftRms, data.RightRms, data.IsClipping);
+    }
+    catch (Exception ex) { Logger.LogError(ex, "Error drawing VU meter"); }
+  }
+
+  private async Task HandleWaveformData(WaveformDataDto data)
+  {
+    if (_isDisposed || !_isInitialized || _jsModule == null || _currentMode != VisualizationMode.Waveform) return;
+    try
+    {
+      await _jsModule.InvokeVoidAsync("visualizer.drawWaveform",
+        "visualizer-panel-canvas", data.LeftSamples, data.RightSamples);
+    }
+    catch (Exception ex) { Logger.LogError(ex, "Error drawing waveform"); }
+  }
+
+  private async Task HandleSpectrumData(SpectrumDataDto data)
+  {
+    if (_isDisposed || !_isInitialized || _jsModule == null || _currentMode != VisualizationMode.Spectrum) return;
+    try
+    {
+      await _jsModule.InvokeVoidAsync("visualizer.drawSpectrum",
+        "visualizer-panel-canvas", data.Magnitudes, data.Frequencies);
+    }
+    catch (Exception ex) { Logger.LogError(ex, "Error drawing spectrum"); }
+  }
+
+  private async Task LoadPreferencesAsync()
+  {
+    try
+    {
+      var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("ui.visualizer");
+      if (prefs != null && prefs.TryGetValue("defaultMode", out var modeObj) && modeObj != null)
+      {
+        if (Enum.TryParse<VisualizationMode>(modeObj.ToString(), out var mode))
+          _currentMode = mode;
+      }
+    }
+    catch (Exception ex) { Logger.LogWarning(ex, "Failed to load visualizer preferences"); }
+  }
+
+  private async Task SavePreferenceAsync(string key, object value)
+  {
+    try { await ConfigApi.UpdateConfigurationAsync("ui.visualizer", key, value); }
+    catch (Exception ex) { Logger.LogWarning(ex, "Failed to save visualizer preference {Key}", key); }
+  }
+
+  public async ValueTask DisposeAsync()
+  {
+    _isDisposed = true;
+
+    VisualizationHub.OnLevelData -= HandleLevelData;
+    VisualizationHub.OnWaveformData -= HandleWaveformData;
+    VisualizationHub.OnSpectrumData -= HandleSpectrumData;
+
+    await UnsubscribeFromCurrentMode();
+
+    if (_jsModule != null)
+    {
+      try { await _jsModule.InvokeVoidAsync("visualizer.dispose", "visualizer-panel-canvas"); }
+      catch { /* ignore */ }
+      try { await _jsModule.DisposeAsync(); }
+      catch { /* ignore */ }
+    }
+  }
+}

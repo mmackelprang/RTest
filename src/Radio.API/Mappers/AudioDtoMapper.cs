@@ -29,7 +29,7 @@ public static class AudioDtoMapper
       
       // Determine source characteristics based on type
       IsRadio = source.Type == AudioSourceType.Radio,
-      IsStreaming = source.Type == AudioSourceType.Spotify, // Spotify is the only guaranteed streaming source
+      IsStreaming = false, // No streaming sources currently available
       
       // Build capabilities dictionary
       Capabilities = new Dictionary<string, bool>()

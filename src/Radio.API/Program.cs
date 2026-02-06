@@ -77,7 +77,6 @@ builder.Services.AddManagedConfiguration(builder.Configuration);
 builder.Services.AddMetrics(builder.Configuration);
 builder.Services.AddFingerprinting(builder.Configuration);
 builder.Services.AddSoundFlowAudio(builder.Configuration);
-builder.Services.AddSpotifyServices();
 builder.Services.AddRadioServices();
 
 // Add the audio engine initialization service (must run first)

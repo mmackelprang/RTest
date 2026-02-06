@@ -85,7 +85,7 @@ public sealed class AcoustIdClient : IDisposable
       var queryParams = new Dictionary<string, string>
       {
         ["client"] = apiKey,
-        ["meta"] = "recordings+releasegroups+compress",
+        ["meta"] = "recordings releasegroups compress",
         ["duration"] = duration.ToString(),
         ["fingerprint"] = fingerprint
       };
@@ -166,7 +166,8 @@ public sealed class AcoustIdClient : IDisposable
           {
             Id = rg.Id ?? string.Empty,
             Title = rg.Title,
-            Type = rg.Type
+            Type = rg.Type,
+            SecondaryTypes = rg.SecondaryTypes ?? new List<string>()
           }).ToList() ?? new List<AcoustIdReleaseGroup>()
         }).ToList() ?? new List<AcoustIdRecording>()
       };
@@ -265,9 +266,9 @@ public class AcoustIdRecordingDto
   [JsonPropertyName("title")]
   public string? Title { get; set; }
 
-  /// <summary>Duration in seconds.</summary>
+  /// <summary>Duration in seconds (decimal from AcoustID API).</summary>
   [JsonPropertyName("duration")]
-  public int? Duration { get; set; }
+  public double? Duration { get; set; }
 
   /// <summary>List of artists.</summary>
   [JsonPropertyName("artists")]
@@ -308,6 +309,10 @@ public class AcoustIdReleaseGroupDto
   /// <summary>Release group type (Album, Single, EP, etc.).</summary>
   [JsonPropertyName("type")]
   public string? Type { get; set; }
+
+  /// <summary>Secondary types (e.g., "Compilation", "Live", "Soundtrack").</summary>
+  [JsonPropertyName("secondarytypes")]
+  public List<string>? SecondaryTypes { get; set; }
 }
 
 #endregion
@@ -360,6 +365,9 @@ public class AcoustIdReleaseGroup
 
   /// <summary>Release group type (Album, Single, EP, etc.).</summary>
   public string? Type { get; init; }
+
+  /// <summary>Secondary types (e.g., "Compilation", "Live", "Soundtrack").</summary>
+  public List<string> SecondaryTypes { get; init; } = new();
 }
 
 #endregion

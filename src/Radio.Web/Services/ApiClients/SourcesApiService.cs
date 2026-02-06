@@ -71,7 +71,6 @@ public class SourcesApiService
 
   private static string GetSourceDisplayName(string sourceType) => sourceType switch
   {
-    "Spotify" => "Spotify",
     "Radio" => "FM/AM Radio",
     "Vinyl" => "Vinyl (Phono)",
     "FilePlayer" => "File Player",

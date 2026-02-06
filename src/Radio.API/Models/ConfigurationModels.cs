@@ -29,7 +29,7 @@ public class AudioConfigurationDto
   /// <summary>
   /// Gets or sets the default source.
   /// </summary>
-  public string DefaultSource { get; set; } = "Spotify";
+  public string DefaultSource { get; set; } = "Radio";
 
   /// <summary>
   /// Gets or sets the ducking percentage.
@@ -264,7 +264,7 @@ public class AudioPreferencesDto
   /// <summary>
   /// Gets or sets the currently selected audio source.
   /// </summary>
-  public string CurrentSource { get; set; } = "Spotify";
+  public string CurrentSource { get; set; } = "Radio";
 
   /// <summary>
   /// Gets or sets the currently selected audio output device ID.
@@ -275,32 +275,6 @@ public class AudioPreferencesDto
   /// Gets or sets the master volume level (0-100).
   /// </summary>
   public int MasterVolume { get; set; } = 75;
-}
-
-/// <summary>
-/// User preferences for Spotify playback.
-/// </summary>
-public class SpotifyPreferencesDto
-{
-  /// <summary>
-  /// Gets or sets the URI of the last song played.
-  /// </summary>
-  public string LastSongPlayed { get; set; } = "";
-
-  /// <summary>
-  /// Gets or sets the last song position in milliseconds.
-  /// </summary>
-  public long SongPositionMs { get; set; } = 0;
-
-  /// <summary>
-  /// Gets or sets whether shuffle mode is enabled.
-  /// </summary>
-  public bool Shuffle { get; set; } = false;
-
-  /// <summary>
-  /// Gets or sets the repeat mode (Off, One, All).
-  /// </summary>
-  public string Repeat { get; set; } = "Off";
 }
 
 /// <summary>
@@ -359,27 +333,6 @@ public class GenericSourcePreferencesDto
   /// Gets or sets the USB port for the generic source.
   /// </summary>
   public string USBPort { get; set; } = "";
-}
-
-/// <summary>
-/// Spotify API credentials (secrets).
-/// </summary>
-public class SpotifySecretsDto
-{
-  /// <summary>
-  /// Gets or sets the Spotify Client ID.
-  /// </summary>
-  public string ClientID { get; set; } = "";
-
-  /// <summary>
-  /// Gets or sets the Spotify Client Secret.
-  /// </summary>
-  public string ClientSecret { get; set; } = "";
-
-  /// <summary>
-  /// Gets or sets the Spotify Refresh Token.
-  /// </summary>
-  public string RefreshToken { get; set; } = "";
 }
 
 /// <summary>

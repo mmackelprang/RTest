@@ -51,7 +51,7 @@ public class DuckingServiceTests
     var mock = new Mock<IAudioSource>();
     mock.Setup(x => x.Id).Returns(id ?? Guid.NewGuid().ToString("N"));
     mock.Setup(x => x.Category).Returns(AudioSourceCategory.Primary);
-    mock.Setup(x => x.Type).Returns(AudioSourceType.Spotify);
+    mock.Setup(x => x.Type).Returns(AudioSourceType.Radio);
     return mock;
   }
 
