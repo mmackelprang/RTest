@@ -71,7 +71,7 @@ Allows the Radio Console system to act as a **Bluetooth speaker** that phones, t
 | 8 | Testing | 4-5 days | Unit, integration, platform tests |
 | 9 | Documentation | 2-3 days | User guides, API docs, setup guides |
 
-**Total Time**: 5-7 weeks
+**Total Time**: 24-35 days (≈3.5-5 weeks)
 
 ## Technical Stack
 

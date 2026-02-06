@@ -50,8 +50,8 @@ BluetoothServiceFactory
 #### Tasks:
 
 1. **Update Core Enums** (`src/Radio.Core/Interfaces/Audio/IAudioSource.cs`)
-   - Add `Bluetooth` to `AudioSourceType` enum
-   - Position: After `GenericUSB`, before `TTS`
+   - Add `Bluetooth` to `AudioSourceType` enum, maintaining logical grouping of primary audio sources
+   - Resulting order should be: `Spotify`, `Radio`, `Vinyl`, `FilePlayer`, `GenericUSB`, `Bluetooth`, `TTS`, `AudioFileEvent`
 
 2. **Create Configuration Classes** (`src/Radio.Core/Configuration/`)
    
@@ -140,7 +140,19 @@ BluetoothServiceFactory
      /// <summary>Disconnect current device</summary>
      Task DisconnectAsync(CancellationToken cancellationToken = default);
      
-     /// <summary>Get audio capture device for Bluetooth input</summary>
+     /// <summary>
+     /// Gets the audio capture device representing the Bluetooth input stream.
+     /// </summary>
+     /// <remarks>
+     /// The returned object is a SoundFlow-compatible audio capture device instance
+     /// that can be passed directly into the SoundFlow audio pipeline on each
+     /// supported platform.
+     /// </remarks>
+     /// <returns>
+     /// A task that resolves to a SoundFlow-compatible audio capture device instance
+     /// (for example, a platform-specific implementation of the SoundFlow audio
+     /// capture device type), or <c>null</c> if no Bluetooth input is available.
+     /// </returns>
      Task<object?> GetAudioCaptureDeviceAsync(CancellationToken cancellationToken = default);
      
      /// <summary>Event raised when adapter state changes</summary>
@@ -301,9 +313,92 @@ public static class BluetoothServiceFactory
     }
     else
     {
-      logger.LogWarning("Bluetooth not supported on this platform");
-      return new NullBluetoothService(); // No-op implementation
+      logger.LogWarning("Bluetooth not supported on this platform; using NullBluetoothService.");
+      return new NullBluetoothService(logger); // No-op implementation
     }
+  }
+}
+
+/// <summary>
+/// No-op Bluetooth service used on unsupported platforms (e.g., macOS).
+/// Implements IBluetoothService with safe defaults and warning logs.
+/// </summary>
+public sealed class NullBluetoothService : IBluetoothService
+{
+  private readonly ILogger _logger;
+
+  public NullBluetoothService(ILogger logger)
+  {
+    _logger = logger;
+  }
+
+  public bool IsAvailable => false;
+  public BluetoothAdapterState State => BluetoothAdapterState.Unknown;
+  public IReadOnlyList<BluetoothDeviceInfo> PairedDevices => Array.Empty<BluetoothDeviceInfo>();
+  public BluetoothDeviceInfo? ConnectedDevice => null;
+
+  public event EventHandler<BluetoothAdapterStateChangedEventArgs>? StateChanged { add { } remove { } }
+  public event EventHandler<BluetoothDeviceConnectedEventArgs>? DeviceConnected { add { } remove { } }
+  public event EventHandler<BluetoothDeviceDisconnectedEventArgs>? DeviceDisconnected { add { } remove { } }
+  public event EventHandler<BluetoothDeviceDiscoveredEventArgs>? DeviceDiscovered { add { } remove { } }
+
+  public Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default)
+  {
+    _logger.LogWarning("StartAsync called on NullBluetoothService; Bluetooth is not supported on this platform.");
+    return Task.FromResult(false);
+  }
+
+  public Task StopAsync(CancellationToken cancellationToken = default)
+  {
+    _logger.LogWarning("StopAsync called on NullBluetoothService; Bluetooth is not supported on this platform.");
+    return Task.CompletedTask;
+  }
+
+  public Task StartDiscoveryAsync(CancellationToken cancellationToken = default)
+  {
+    _logger.LogWarning("StartDiscoveryAsync called on NullBluetoothService; Bluetooth is not supported on this platform.");
+    return Task.CompletedTask;
+  }
+
+  public Task StopDiscoveryAsync()
+  {
+    _logger.LogWarning("StopDiscoveryAsync called on NullBluetoothService; Bluetooth is not supported on this platform.");
+    return Task.CompletedTask;
+  }
+
+  public Task<bool> PairDeviceAsync(string deviceAddress, CancellationToken cancellationToken = default)
+  {
+    _logger.LogWarning("PairDeviceAsync called on NullBluetoothService; Bluetooth is not supported on this platform.");
+    return Task.FromResult(false);
+  }
+
+  public Task<bool> UnpairDeviceAsync(string deviceAddress, CancellationToken cancellationToken = default)
+  {
+    _logger.LogWarning("UnpairDeviceAsync called on NullBluetoothService; Bluetooth is not supported on this platform.");
+    return Task.FromResult(false);
+  }
+
+  public Task<bool> AcceptConnectionAsync(string deviceAddress, CancellationToken cancellationToken = default)
+  {
+    _logger.LogWarning("AcceptConnectionAsync called on NullBluetoothService; Bluetooth is not supported on this platform.");
+    return Task.FromResult(false);
+  }
+
+  public Task DisconnectAsync(CancellationToken cancellationToken = default)
+  {
+    _logger.LogWarning("DisconnectAsync called on NullBluetoothService; Bluetooth is not supported on this platform.");
+    return Task.CompletedTask;
+  }
+
+  public Task<object?> GetAudioCaptureDeviceAsync(CancellationToken cancellationToken = default)
+  {
+    _logger.LogWarning("GetAudioCaptureDeviceAsync called on NullBluetoothService; Bluetooth is not supported on this platform.");
+    return Task.FromResult<object?>(null);
+  }
+
+  public ValueTask DisposeAsync()
+  {
+    return ValueTask.CompletedTask;
   }
 }
 ```
@@ -326,11 +421,13 @@ public static class BluetoothServiceFactory
 
 1. **Create `BluetoothAudioSource.cs`** (`src/Radio.Infrastructure/Audio/Sources/Primary/`)
    
-   **Extends**: `PrimaryAudioSourceBase` (not `USBAudioSourceBase` since Bluetooth is network-based)
+   **Extends**: `USBAudioSourceBase` (Bluetooth audio is captured via OS audio endpoints/loopback similar to USB sources)
+   
+   **Note**: While Bluetooth is network-based at the protocol level, the audio capture mechanism uses OS audio endpoints (PulseAudio loopback on Linux, Windows audio endpoints) similar to USB audio devices. `USBAudioSourceBase` provides useful functionality for device enumeration and audio capture that `BluetoothAudioSource` can benefit from. The USB port reservation mechanism won't be used, but the audio capture pipeline is identical.
    
    **Key Features**:
    ```csharp
-   public class BluetoothAudioSource : PrimaryAudioSourceBase
+   public class BluetoothAudioSource : USBAudioSourceBase
    {
      private readonly IBluetoothService _bluetoothService;
      private readonly BackgroundIdentificationService? _identificationService;
@@ -352,9 +449,20 @@ public static class BluetoothServiceFactory
      public override bool SupportsShuffle => false;
      public override bool SupportsRepeat => false;
      
+     // Pause behavior:
+     // - Initial implementation: when the user presses Pause in the Radio Console UI
+     //   while Bluetooth is the active source, playback is paused/muted in the local
+     //   audio pipeline only. No AVRCP command is sent; the phone/tablet may continue
+     //   playing, but its audio is not rendered by the console until playback resumes.
+     // - Future enhancement (TODO): extend IBluetoothService to support AVRCP transport
+     //   controls and, when available, have Pause also send an AVRCP "pause" command to
+     //   the connected device in addition to pausing the local audio pipeline.
+     //
+     // The Play/Pause control should remain visible in the UI so Bluetooth behaves
+     // consistently with other primary sources; BluetoothAudioSource is responsible for
+     // implementing the local pause semantics described above.
      protected override async Task PlayCoreAsync(...)
      protected override async Task StopCoreAsync(...)
-     // Pause not applicable for live Bluetooth stream
    }
    ```
 
@@ -372,6 +480,7 @@ public static class BluetoothServiceFactory
    - Subscribe to `BackgroundIdentificationService.TrackIdentified`
    - Update metadata with identified track info
    - Same pattern as `VinylAudioSource` and `SDRRadioAudioSource`
+   - **Note**: Bluetooth audio streaming from phones may include metadata (via AVRCP or similar protocols). Consider optional metadata extraction from Bluetooth protocols in Phase 2 implementations (TODO), which could supplement or reduce reliance on fingerprinting for track identification.
 
 5. **Error Handling**:
    - Handle Bluetooth disconnections gracefully
@@ -385,6 +494,7 @@ public static class BluetoothServiceFactory
    Metadata["DeviceAddress"] = connectedDevice.Address;
    Metadata["ConnectionTime"] = DateTime.UtcNow;
    // Fingerprinting adds: Title, Artist, Album, AlbumArtUrl
+   // TODO: Future enhancement - extract metadata from AVRCP if available
    ```
 
 **Deliverables**:
@@ -445,7 +555,9 @@ public static class BluetoothServiceFactory
 
 5. **Update DI Registration** (`src/Radio.Infrastructure/DependencyInjection/AudioServiceExtensions.cs`)
    ```csharp
-   public static IServiceCollection AddSoundFlowAudio(this IServiceCollection services)
+   public static IServiceCollection AddSoundFlowAudio(
+     this IServiceCollection services,
+     IConfiguration configuration)
    {
      // ... existing registrations
      
@@ -457,12 +569,12 @@ public static class BluetoothServiceFactory
        return BluetoothServiceFactory.Create(logger, options);
      });
      
-     // Configuration
-     services.Configure<BluetoothOptions>(
-       services.BuildServiceProvider()
-         .GetRequiredService<IConfiguration>()
-         .GetSection("Bluetooth"));
-     services.Configure<BluetoothPreferences>(...);
+     // Configuration - use IOptionsMonitor for live reloading
+     services.Configure<BluetoothOptions>(configuration.GetSection("Bluetooth"));
+     services.Configure<BluetoothPreferences>(configuration.GetSection("BluetoothPreferences"));
+     
+     // Note: BluetoothOptions and BluetoothPreferences support live configuration updates
+     // via IOptionsMonitor<T> pattern, allowing dynamic reconfiguration without restart
      
      return services;
    }
@@ -621,8 +733,9 @@ public static class BluetoothServiceFactory
 
 4. **Configuration Validation**
    - Device name: 1-248 characters (Bluetooth spec)
-   - Device name: Valid UTF-8, no special control characters
+   - Device name: Valid UTF-8, properly handle special characters including apostrophes (e.g., "Grandpa's Radio")
    - Audio quality: Valid enum value
+   - Note: Ensure Bluetooth device name validation properly handles apostrophes and special characters in UTF-8 encoding, as some Bluetooth stacks may have restrictions on certain characters
 
 5. **Migration Support**
    - Handle missing Bluetooth section gracefully
@@ -638,7 +751,7 @@ public static class BluetoothServiceFactory
 
 ### Phase 7: Visualization & Fingerprinting Verification (1-2 days)
 
-**Objective**: Verify full integration with existing audio pipeline features.
+**Objective**: Verify full integration with existing audio pipeline features and add UAT tests.
 
 #### Tasks:
 
@@ -656,6 +769,14 @@ public static class BluetoothServiceFactory
    - Verify track identification updates metadata
    - Check metadata appears in API responses
    - Verify play history records identified tracks
+
+3. **AudioUAT Testing**
+   - Add Bluetooth source tests to `Radio.Tools.AudioUAT`
+   - Test Bluetooth source initialization
+   - Test device connection and disconnection
+   - Test audio playback through Bluetooth
+   - Test source switching to/from Bluetooth
+   - Run smoke test of AudioUAT as part of checkoff
 
 3. **Output Testing**
    - Route Bluetooth audio to local speakers
@@ -701,6 +822,8 @@ public static class BluetoothServiceFactory
 - Audio source lifecycle
 - API endpoint logic
 - Error handling
+- Target: >80% code coverage for all new code
+- Note: All tests use xUnit (established testing framework). If Bluetooth management UI is added in the Web layer (Blazor), corresponding bUnit tests must be created for those components.
 
 **Mocking Strategy**:
 - Mock `IBluetoothService` for audio source tests
@@ -769,10 +892,11 @@ public static class BluetoothServiceFactory
 #### 9.1: Design Documentation
 
 **Update `/design/AUDIO.md`**:
-- Add "Bluetooth Audio Source" section
+- Add "Bluetooth Audio Source" section (consolidate into existing design document to avoid documentation sprawl)
 - Document architecture and components
 - Explain platform-specific implementations
 - Include sequence diagrams
+- Document Bluetooth setup and configuration (consolidated section)
 
 **Update `/design/CONFIGURATION.md`**:
 - Add `BluetoothOptions` reference
@@ -784,36 +908,37 @@ public static class BluetoothServiceFactory
 - Include request/response examples
 - Document SignalR events
 
-#### 9.2: Setup Guides
+**Note**: Following the project's preference for consolidated documentation over documentation sprawl, Bluetooth setup guides and architecture details should be added as sections within existing design documents (`AUDIO.md`, `CONFIGURATION.md`) rather than creating separate `BLUETOOTH_SETUP.md` or `BLUETOOTH_ARCHITECTURE.md` files.
 
-**Create `/design/BLUETOOTH_SETUP.md`**:
+#### 9.2: Setup Information (to be added to `/design/AUDIO.md`)
 
-**Contents**:
-1. **Raspberry Pi Setup**
-   ```bash
-   # Install BlueZ
-   sudo apt-get update
-   sudo apt-get install bluez pulseaudio-module-bluetooth
-   
-   # Configure BlueZ for A2DP sink
-   sudo nano /etc/bluetooth/main.conf
-   # Add: Class = 0x200414 (Audio sink)
-   
-   # Restart BlueZ
-   sudo systemctl restart bluetooth
-   
-   # Make device discoverable
-   bluetoothctl
-   > discoverable on
-   > pairable on
-   > agent NoInputNoOutput
-   > default-agent
-   ```
+**Raspberry Pi Setup**:
+```bash
+# Install BlueZ
+sudo apt-get update
+sudo apt-get install bluez pulseaudio-module-bluetooth
 
-2. **Windows Setup**
-   - Enable Bluetooth in Windows Settings
-   - Ensure Bluetooth drivers are up-to-date
-   - Configure application permissions
+# Configure BlueZ for A2DP sink
+sudo nano /etc/bluetooth/main.conf
+# Add: Class = 0x200414 (Audio sink)
+
+# Restart BlueZ
+sudo systemctl restart bluetooth
+
+# Make device discoverable
+bluetoothctl
+> discoverable on
+> pairable on
+> agent NoInputNoOutput
+> default-agent
+```
+
+**Note**: The BlueZ configuration requires root privileges and manual system configuration. The application should document whether it needs elevated privileges for initial setup, or if there's a way to configure BlueZ programmatically via D-Bus. Consider including a setup script or installation guide that handles these system-level configurations.
+
+**Windows Setup**:
+- Enable Bluetooth in Windows Settings
+- Ensure Bluetooth drivers are up-to-date
+- Configure application permissions
 
 3. **Configuration**
    - Setting device name
@@ -859,23 +984,18 @@ public static class BluetoothServiceFactory
 
 #### 9.4: Developer Documentation
 
-**Create `/design/BLUETOOTH_ARCHITECTURE.md`**:
-- Detailed component architecture
-- Platform abstraction explanation
-- Audio routing diagrams
-- Extension points for future enhancements
+**Note**: Architecture details should be consolidated into `/design/AUDIO.md` to avoid documentation sprawl, following the project's preference for fewer, more comprehensive documents.
 
 **Code Comments**:
 - XML documentation on all public APIs
 - Internal implementation comments
 - Complex algorithm explanations
+- Mark deferred work with clear TODO comments for discoverability
 
 **Deliverables**:
-- Updated `/design/AUDIO.md`
+- Updated `/design/AUDIO.md` (with Bluetooth architecture and setup sections)
 - Updated `/design/CONFIGURATION.md`
 - Updated `/design/API_REFERENCE.md`
-- New `/design/BLUETOOTH_SETUP.md`
-- New `/design/BLUETOOTH_ARCHITECTURE.md`
 - Updated `/README.md`
 - User quick start guide
 
@@ -934,7 +1054,33 @@ public static class BluetoothServiceFactory
 2. **Device Trust**: Maintain list of trusted devices
 3. **Auto-Accept**: Configurable to prevent unauthorized connections
 4. **Data Privacy**: No audio recording or transmission beyond local network
-5. **DoS Prevention**: Limit connection attempts
+5. **DoS Prevention & Rate Limiting**:
+   - Implement per-device and global rate limiting for pairing/connection attempts:
+     - Per-device: e.g., `MaxPairingAttemptsPerDevicePerMinute` (default: 5)
+     - Global: e.g., `MaxPairingAttemptsGlobalPerMinute` (default: 30)
+   - Enforce a maximum number of concurrent connections:
+     - e.g., `MaxConcurrentBluetoothConnections` (default: 1 primary audio device)
+   - Temporary backoff:
+     - When a device exceeds per-device limits, block pairing/connection attempts from that device for a cooldown window
+     - e.g., `PairingCooldownMinutesPerDevice` (default: 10)
+   - Blacklisting:
+     - If a device repeatedly exceeds limits over a longer window, add it to a blacklist and refuse further connections until explicitly removed
+     - Track violation counts per device (e.g., MAC address / unique ID) and persist with existing JSON/SQLite persistence
+     - Example thresholds:
+       - `MaxDosViolationsBeforeBlacklist` (default: 3)
+       - `BlacklistDurationHours` (default: 24; 0 = permanent until manual removal)
+   - Configuration:
+     - All above limits should be configurable via application configuration (e.g., `appsettings.json`):
+       - `Bluetooth.Security.MaxPairingAttemptsPerDevicePerMinute`
+       - `Bluetooth.Security.MaxPairingAttemptsGlobalPerMinute`
+       - `Bluetooth.Security.MaxConcurrentBluetoothConnections`
+       - `Bluetooth.Security.PairingCooldownMinutesPerDevice`
+       - `Bluetooth.Security.MaxDosViolationsBeforeBlacklist`
+       - `Bluetooth.Security.BlacklistDurationHours`
+     - The Bluetooth connection management services (Linux/Windows) must read these values via DI-provided configuration and enforce them consistently.
+   - Monitoring & logging:
+     - Log rate-limit hits and blacklist events via Serilog with structured properties (device ID, counts, timestamps) to support diagnostics
+     - Consider exposing aggregated counters via metrics (e.g., for future observability tooling)
 
 ## Dependencies
 
@@ -997,9 +1143,11 @@ sudo apt-get install \
 | 8. Testing | 4-5 days | Phase 7 |
 | 9. Documentation | 2-3 days | Phase 8 |
 
-**Total Estimated Duration**: 24-35 days (5-7 weeks)
+**Total Estimated Duration**: 24-35 days (≈3.5-5 weeks)
 
 **Critical Path**: Phases 1 → 2 → 3 → 4 → 8
+
+**Progress Tracking**: Update PROJECT_STATUS.md to reflect Bluetooth implementation phases in progress, completed, and planned future phases.
 
 ## Success Criteria
 
@@ -1025,14 +1173,16 @@ sudo apt-get install \
 
 ## Future Enhancements (Out of Scope)
 
-1. **AVRCP Support**: Media controls from phone (play/pause/skip)
-2. **Multiple Simultaneous Connections**: Support 2+ devices at once
-3. **Codec Selection**: Manual codec preference (AAC, aptX)
-4. **Bluetooth Source**: Transmit audio to Bluetooth speakers (inverse of this project)
-5. **Hands-Free Profile**: Phone call support (HFP)
-6. **UI Enhancements**: Blazor pages for Bluetooth management
-7. **Automatic Device Switching**: Priority-based device selection
-8. **Connection History**: Log of past connections with statistics
+**Note**: If any of these features are partially implemented or scaffolded during the main implementation, they must be marked with clear TODO comments for easy discoverability, and these should be noted in followup documentation.
+
+1. **AVRCP Support**: Media controls from phone (play/pause/skip) - TODO if scaffolded
+2. **Multiple Simultaneous Connections**: Support 2+ devices at once - TODO if scaffolded
+3. **Codec Selection**: Manual codec preference (AAC, aptX) - TODO if scaffolded
+4. **Bluetooth Source**: Transmit audio to Bluetooth speakers (inverse of this project) - TODO if scaffolded
+5. **Hands-Free Profile**: Phone call support (HFP) - TODO if scaffolded
+6. **UI Enhancements**: Blazor pages for Bluetooth management - TODO if scaffolded
+7. **Automatic Device Switching**: Priority-based device selection - TODO if scaffolded
+8. **Connection History**: Log of past connections with statistics - TODO if scaffolded
 
 ## Conclusion
 
