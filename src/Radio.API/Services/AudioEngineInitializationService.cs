@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Configuration.Models;
+using IAppConfigurationManager = Radio.Infrastructure.Configuration.Abstractions.IConfigurationManager;
 
 namespace Radio.API.Services;
 
@@ -16,6 +18,7 @@ public class AudioEngineInitializationService : IHostedService
   private readonly IAudioManager? _audioManager;
   private readonly IOptionsMonitor<AudioPreferences> _audioPreferences;
   private readonly IMasterMixer _masterMixer;
+  private readonly IAppConfigurationManager? _configManager;
 
   /// <summary>
   /// Initializes a new instance of the AudioEngineInitializationService.
@@ -33,9 +36,10 @@ public class AudioEngineInitializationService : IHostedService
     _deviceManager = deviceManager;
     _audioPreferences = audioPreferences;
     _masterMixer = masterMixer;
-    
+
     // Try to get IAudioManager (optional)
     _audioManager = serviceProvider.GetService<IAudioManager>();
+    _configManager = serviceProvider.GetService<IAppConfigurationManager>();
   }
 
   /// <summary>
@@ -96,13 +100,37 @@ public class AudioEngineInitializationService : IHostedService
     try
     {
       var prefs = _audioPreferences.CurrentValue;
-      
+
+      // Try reading persisted output device from the config store first,
+      // since IOptionsMonitor reads from appsettings.json which doesn't
+      // get updated when the user changes the output device at runtime.
+      string? persistedOutput = null;
+      if (_configManager != null)
+      {
+        try
+        {
+          var storeId = _configManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+          persistedOutput = await _configManager.GetValueAsync<string>(storeId, "AudioPreferences:CurrentOutput", ct: cancellationToken);
+          if (!string.IsNullOrEmpty(persistedOutput))
+          {
+            _logger.LogInformation("Found persisted output device preference: {DeviceId}", persistedOutput);
+          }
+        }
+        catch (Exception ex)
+        {
+          _logger.LogDebug(ex, "Could not read persisted output device preference from config store");
+        }
+      }
+
+      // Prefer persisted value from config store, fall back to IOptionsMonitor
+      var preferredOutputId = !string.IsNullOrEmpty(persistedOutput) ? persistedOutput : prefs.CurrentOutput;
+
       // Set output device
       string? outputToUse = null;
-      if (!string.IsNullOrEmpty(prefs.CurrentOutput))
+      if (!string.IsNullOrEmpty(preferredOutputId))
       {
         // Try to use the preferred output
-        var preferredOutput = outputDevices.FirstOrDefault(d => d.Id == prefs.CurrentOutput);
+        var preferredOutput = outputDevices.FirstOrDefault(d => d.Id == preferredOutputId);
         if (preferredOutput != null)
         {
           outputToUse = preferredOutput.Id;
@@ -110,7 +138,7 @@ public class AudioEngineInitializationService : IHostedService
         }
         else
         {
-          _logger.LogWarning("Preferred output device {OutputId} not found, using default", prefs.CurrentOutput);
+          _logger.LogWarning("Preferred output device {OutputId} not found, using default", preferredOutputId);
         }
       }
       

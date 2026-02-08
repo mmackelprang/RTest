@@ -32,6 +32,7 @@ public class SoundFlowAudioEngine : IAudioEngine
   private BalanceModifier? _balanceModifier;
   private Timer? _hotPlugTimer;
   private AudioEngineState _state = AudioEngineState.Uninitialized;
+  private int _currentDeviceIndex = -1;
   private bool _disposed;
   private readonly object _stateLock = new();
 
@@ -150,10 +151,11 @@ public class SoundFlowAudioEngine : IAudioEngine
         {
           // Initialize the playback device with our format
           _playbackDevice = _engine.InitializePlaybackDevice(deviceInfo, _audioFormat);
-          
+          _currentDeviceIndex = 0;
+
           // Apply initial volume/mute state
           _playbackDevice.MasterMixer.Volume = _masterMixer.GetEffectiveVolume();
-          
+
           _playbackDevice.Start();
           _logger.LogInformation("Playback device initialized and started: {DeviceName}", deviceInfo.Name);
 
@@ -306,6 +308,20 @@ public class SoundFlowAudioEngine : IAudioEngine
     return _outputTap;
   }
 
+  /// <inheritdoc/>
+  public Stream CreateStreamReader(string readerId)
+  {
+    ThrowIfDisposed();
+
+    if (_outputTap == null)
+    {
+      throw new InvalidOperationException(
+        "Audio engine not initialized. Call InitializeAsync first.");
+    }
+
+    return _outputTap.CreateReader(readerId);
+  }
+
   /// <summary>
   /// Gets the audio device manager.
   /// </summary>
@@ -352,6 +368,15 @@ public class SoundFlowAudioEngine : IAudioEngine
     }
 
     var newDevice = playbackDevices[deviceIndex];
+
+    // Skip if already on the requested device
+    if (deviceIndex == _currentDeviceIndex && _playbackDevice != null)
+    {
+      _logger.LogDebug("Already on playback device index {Index} ({DeviceName}), skipping switch",
+        deviceIndex, newDevice.Name);
+      return true;
+    }
+
     _logger.LogInformation("Switching playback device to: {DeviceName} (index {Index})",
       newDevice.Name, deviceIndex);
 
@@ -367,32 +392,36 @@ public class SoundFlowAudioEngine : IAudioEngine
 
       // Initialize new playback device
       _playbackDevice = _engine.InitializePlaybackDevice(newDevice, _audioFormat);
+      _currentDeviceIndex = deviceIndex;
+
+      // Apply current volume/mute state
+      _playbackDevice.MasterMixer.Volume = _masterMixer.GetEffectiveVolume();
 
       // Re-attach balance modifier (before fingerprint tap)
       if (_balanceModifier != null)
       {
-          _playbackDevice.MasterMixer.AddModifier(_balanceModifier);
-          _logger.LogInformation("Balance modifier re-attached to new playback device");
+        _playbackDevice.MasterMixer.AddModifier(_balanceModifier);
+        _logger.LogInformation("Balance modifier re-attached to new playback device");
       }
       else
       {
-          _balanceModifier = new BalanceModifier(_masterMixer);
-          _playbackDevice.MasterMixer.AddModifier(_balanceModifier);
-          _logger.LogInformation("Balance modifier created and attached to new playback device");
+        _balanceModifier = new BalanceModifier(_masterMixer);
+        _playbackDevice.MasterMixer.AddModifier(_balanceModifier);
+        _logger.LogInformation("Balance modifier created and attached to new playback device");
       }
 
       // Re-attach fingerprint tap if it exists
       if (_fingerprintTap != null)
       {
-          _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
-          _logger.LogInformation("Fingerprint tap re-attached to new playback device");
+        _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
+        _logger.LogInformation("Fingerprint tap re-attached to new playback device");
       }
       // If it didn't exist (e.g. started with no device), create it now
       else
       {
-          _fingerprintTap = new FingerprintTapModifier(this, _logger);
-          _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
-          _logger.LogInformation("Fingerprint tap created and attached to new playback device");
+        _fingerprintTap = new FingerprintTapModifier(this, _logger);
+        _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
+        _logger.LogInformation("Fingerprint tap created and attached to new playback device");
       }
 
       _playbackDevice.Start();
@@ -403,6 +432,7 @@ public class SoundFlowAudioEngine : IAudioEngine
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to switch to playback device: {DeviceName}", newDevice.Name);
+      _currentDeviceIndex = -1;
       return false;
     }
   }
@@ -458,10 +488,18 @@ public class SoundFlowAudioEngine : IAudioEngine
       EngineState = State.ToString(),
       PlaybackDeviceActive = _playbackDevice != null,
       ModifierCount = _fingerprintTap != null ? 1 : 0,
-      OutputTapAvailableBytes = _outputTap?.Length ?? 0,
+      OutputTapAvailableBytes = 0,
       FingerprintTapTotalSamples = _fingerprintTap?.TotalSamplesProcessed ?? 0,
       FingerprintTapLastProcessedTime = _fingerprintTap?.LastProcessedTime
     };
+  }
+
+  /// <summary>
+  /// Gets diagnostic information from the output tap stream.
+  /// </summary>
+  public OutputTapDiagnostics? GetOutputTapDiagnostics()
+  {
+    return _outputTap?.GetDiagnostics();
   }
 
   private void CheckForDeviceChanges(object? state)

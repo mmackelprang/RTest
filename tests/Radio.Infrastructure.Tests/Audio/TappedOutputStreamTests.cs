@@ -37,6 +37,20 @@ public class TappedOutputStreamTests
     return (int)property.GetValue(stream)!;
   }
 
+  private static int GetAvailableForReader(Stream stream, string readerId)
+  {
+    var type = stream.GetType();
+    var method = type.GetMethod("GetAvailableForReader")!;
+    return (int)method.Invoke(stream, [readerId])!;
+  }
+
+  private static Stream CreateReader(Stream stream, string readerId)
+  {
+    var type = stream.GetType();
+    var method = type.GetMethod("CreateReader")!;
+    return (Stream)method.Invoke(stream, [readerId])!;
+  }
+
   private static int GetSampleRate(Stream stream)
   {
     var type = stream.GetType();
@@ -66,7 +80,7 @@ public class TappedOutputStreamTests
   }
 
   [Fact]
-  public void Available_ReturnsZeroWhenEmpty()
+  public void Available_ReturnsZeroWithNoReaders()
   {
     // Arrange
     var stream = CreateTappedOutputStream();
@@ -74,77 +88,82 @@ public class TappedOutputStreamTests
     // Act
     var available = GetAvailable(stream);
 
-    // Assert
+    // Assert - legacy Available always returns 0
     Assert.Equal(0, available);
   }
 
   [Fact]
-  public void WriteFromEngine_IncreasesAvailableBytes()
+  public void WriteFromEngine_IncreasesAvailableBytesForReader()
   {
     // Arrange
     var stream = CreateTappedOutputStream();
+    var reader = CreateReader(stream, "test-reader");
     var samples = new float[] { 0.5f, -0.5f, 0.25f, -0.25f };
 
     // Act
     InvokeWriteFromEngine(stream, samples);
-    var available = GetAvailable(stream);
+    var available = GetAvailableForReader(stream, "test-reader");
 
     // Assert - each float sample becomes 2 bytes (16-bit PCM)
     Assert.Equal(samples.Length * 2, available);
   }
 
   [Fact]
-  public void Read_ReturnsWrittenData()
+  public void Reader_ReturnsWrittenData()
   {
     // Arrange
     var stream = CreateTappedOutputStream();
+    var reader = CreateReader(stream, "test-reader");
     var samples = new float[] { 0.5f, -0.5f };
     InvokeWriteFromEngine(stream, samples);
     var buffer = new byte[4];
 
     // Act
-    var bytesRead = stream.Read(buffer, 0, buffer.Length);
+    var bytesRead = reader.Read(buffer, 0, buffer.Length);
 
     // Assert
     Assert.Equal(4, bytesRead);
-    Assert.Equal(0, GetAvailable(stream));
+    Assert.Equal(0, GetAvailableForReader(stream, "test-reader"));
   }
 
   [Fact]
-  public void Read_ReturnsZeroWhenEmpty()
+  public void Reader_ReturnsZeroWhenEmpty()
   {
     // Arrange
     var stream = CreateTappedOutputStream();
+    var reader = CreateReader(stream, "test-reader");
     var buffer = new byte[10];
 
     // Act
-    var bytesRead = stream.Read(buffer, 0, buffer.Length);
+    var bytesRead = reader.Read(buffer, 0, buffer.Length);
 
     // Assert
     Assert.Equal(0, bytesRead);
   }
 
   [Fact]
-  public void Read_ReturnsPartialDataWhenNotEnoughAvailable()
+  public void Reader_ReturnsPartialDataWhenNotEnoughAvailable()
   {
     // Arrange
     var stream = CreateTappedOutputStream();
+    var reader = CreateReader(stream, "test-reader");
     var samples = new float[] { 0.5f }; // 2 bytes
     InvokeWriteFromEngine(stream, samples);
     var buffer = new byte[10];
 
     // Act
-    var bytesRead = stream.Read(buffer, 0, buffer.Length);
+    var bytesRead = reader.Read(buffer, 0, buffer.Length);
 
     // Assert
     Assert.Equal(2, bytesRead);
   }
 
   [Fact]
-  public void Clear_ResetsBuffer()
+  public void Clear_ResetsBufferForAllReaders()
   {
     // Arrange
     var stream = CreateTappedOutputStream();
+    var reader = CreateReader(stream, "test-reader");
     var samples = new float[] { 0.5f, -0.5f, 0.25f, -0.25f };
     InvokeWriteFromEngine(stream, samples);
 
@@ -152,7 +171,7 @@ public class TappedOutputStreamTests
     InvokeClear(stream);
 
     // Assert
-    Assert.Equal(0, GetAvailable(stream));
+    Assert.Equal(0, GetAvailableForReader(stream, "test-reader"));
   }
 
   [Fact]
@@ -160,6 +179,7 @@ public class TappedOutputStreamTests
   {
     // Arrange
     var stream = CreateTappedOutputStream();
+    var reader = CreateReader(stream, "test-reader");
     // Values outside -1 to 1 should be clamped
     var samples = new float[] { 2.0f, -2.0f };
 
@@ -167,7 +187,7 @@ public class TappedOutputStreamTests
     InvokeWriteFromEngine(stream, samples);
 
     // Assert
-    Assert.Equal(4, GetAvailable(stream));
+    Assert.Equal(4, GetAvailableForReader(stream, "test-reader"));
   }
 
   [Fact]
@@ -176,6 +196,7 @@ public class TappedOutputStreamTests
     // Arrange - small buffer for testing wraparound
     // Buffer size = 1000 * 1 * 2 * 1 = 2000 bytes for 1 second
     var stream = CreateTappedOutputStream(1000, 1, 1);
+    var reader = CreateReader(stream, "test-reader");
 
     // Generate samples that will fill most of the buffer
     var samples = new float[500]; // 500 * 2 = 1000 bytes
@@ -189,13 +210,13 @@ public class TappedOutputStreamTests
     {
       InvokeWriteFromEngine(stream, samples);
       var buffer = new byte[1000];
-      var bytesRead = stream.Read(buffer, 0, buffer.Length);
+      var bytesRead = reader.Read(buffer, 0, buffer.Length);
       Assert.Equal(1000, bytesRead);
     }
 
     // Assert - buffer should still work after wraparound
     InvokeWriteFromEngine(stream, samples);
-    Assert.Equal(1000, GetAvailable(stream));
+    Assert.Equal(1000, GetAvailableForReader(stream, "test-reader"));
   }
 
   [Fact]
@@ -258,5 +279,93 @@ public class TappedOutputStreamTests
 
     // Act & Assert - should not throw
     stream.Flush();
+  }
+
+  [Fact]
+  public void MultipleReaders_ReceiveAllWrittenData()
+  {
+    // Arrange
+    var stream = CreateTappedOutputStream();
+    var reader1 = CreateReader(stream, "reader-1");
+    var reader2 = CreateReader(stream, "reader-2");
+
+    var samples = new float[] { 0.5f, -0.5f, 0.25f, -0.25f };
+    InvokeWriteFromEngine(stream, samples);
+
+    // Act
+    var buffer1 = new byte[8];
+    var buffer2 = new byte[8];
+    var bytesRead1 = reader1.Read(buffer1, 0, buffer1.Length);
+    var bytesRead2 = reader2.Read(buffer2, 0, buffer2.Length);
+
+    // Assert - both readers get the same data
+    Assert.Equal(8, bytesRead1);
+    Assert.Equal(8, bytesRead2);
+    Assert.Equal(buffer1, buffer2);
+  }
+
+  [Fact]
+  public void MultipleReaders_IndependentPositions()
+  {
+    // Arrange
+    var stream = CreateTappedOutputStream();
+    var reader1 = CreateReader(stream, "reader-1");
+    var reader2 = CreateReader(stream, "reader-2");
+
+    var samples = new float[] { 0.5f, -0.5f, 0.25f, -0.25f };
+    InvokeWriteFromEngine(stream, samples);
+
+    // Act - reader1 reads half, reader2 reads all
+    var buffer1 = new byte[4];
+    var buffer2 = new byte[8];
+    var bytesRead1 = reader1.Read(buffer1, 0, buffer1.Length);
+    var bytesRead2 = reader2.Read(buffer2, 0, buffer2.Length);
+
+    // Assert
+    Assert.Equal(4, bytesRead1);
+    Assert.Equal(8, bytesRead2);
+
+    // reader1 still has 4 bytes available, reader2 has 0
+    Assert.Equal(4, GetAvailableForReader(stream, "reader-1"));
+    Assert.Equal(0, GetAvailableForReader(stream, "reader-2"));
+  }
+
+  [Fact]
+  public void Reader_DisposeRemovesTracking()
+  {
+    // Arrange
+    var stream = CreateTappedOutputStream();
+    var reader = CreateReader(stream, "disposable-reader");
+    var samples = new float[] { 0.5f };
+    InvokeWriteFromEngine(stream, samples);
+
+    // Act
+    reader.Dispose();
+
+    // Assert - reader position should be removed
+    Assert.Equal(0, GetAvailableForReader(stream, "disposable-reader"));
+  }
+
+  [Fact]
+  public void Reader_OnlyReceivesDataWrittenAfterCreation()
+  {
+    // Arrange
+    var stream = CreateTappedOutputStream();
+    var samplesBeforeReader = new float[] { 1.0f, -1.0f };
+    InvokeWriteFromEngine(stream, samplesBeforeReader);
+
+    // Create reader AFTER data was written
+    var reader = CreateReader(stream, "late-reader");
+
+    // Write new data
+    var samplesAfterReader = new float[] { 0.5f };
+    InvokeWriteFromEngine(stream, samplesAfterReader);
+
+    // Act
+    var buffer = new byte[10];
+    var bytesRead = reader.Read(buffer, 0, buffer.Length);
+
+    // Assert - only gets data written after reader was created
+    Assert.Equal(2, bytesRead); // 1 sample * 2 bytes
   }
 }

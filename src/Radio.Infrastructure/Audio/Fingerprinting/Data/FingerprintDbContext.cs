@@ -166,6 +166,39 @@ public sealed class FingerprintDbContext : IAsyncDisposable
         ScannedAt TEXT NOT NULL
       );
 
+      -- Cast device cache table
+      CREATE TABLE IF NOT EXISTS CastDeviceCache (
+        Id TEXT PRIMARY KEY,
+        FriendlyName TEXT NOT NULL,
+        IpAddress TEXT NOT NULL,
+        Port INTEGER NOT NULL,
+        Model TEXT NOT NULL,
+        LastSeenAt TEXT NOT NULL
+      );
+
+      -- Playlists table
+      CREATE TABLE IF NOT EXISTS Playlists (
+        Id TEXT PRIMARY KEY,
+        Name TEXT NOT NULL,
+        Description TEXT,
+        CreatedAt TEXT NOT NULL,
+        ModifiedAt TEXT NOT NULL,
+        ItemCount INTEGER NOT NULL DEFAULT 0
+      );
+
+      -- Playlist items table
+      CREATE TABLE IF NOT EXISTS PlaylistItems (
+        Id TEXT PRIMARY KEY,
+        PlaylistId TEXT NOT NULL,
+        Position INTEGER NOT NULL,
+        FilePath TEXT NOT NULL,
+        Title TEXT,
+        Artist TEXT,
+        Album TEXT,
+        DurationMs INTEGER,
+        FOREIGN KEY (PlaylistId) REFERENCES Playlists(Id)
+      );
+
       -- Indexes for performance
       CREATE INDEX IF NOT EXISTS IX_FingerprintCache_ChromaprintHash 
         ON FingerprintCache(ChromaprintHash);
@@ -187,6 +220,8 @@ public sealed class FingerprintDbContext : IAsyncDisposable
         ON RadioPresets(Band, Frequency);
       CREATE INDEX IF NOT EXISTS IX_AudioFiles_Path
         ON AudioFiles(Path);
+      CREATE INDEX IF NOT EXISTS IX_PlaylistItems_PlaylistId
+        ON PlaylistItems(PlaylistId);
       """;
 
     using var cmd = _connection!.CreateCommand();

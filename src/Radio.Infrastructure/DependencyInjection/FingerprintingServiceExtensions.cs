@@ -1,9 +1,11 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Radio.Core.Configuration;
+using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Fingerprinting.Data;
+using Radio.Infrastructure.Audio.Playlists;
 using Radio.Infrastructure.Audio.Services;
 
 namespace Radio.Infrastructure.DependencyInjection;
@@ -37,6 +39,7 @@ public static class FingerprintingServiceExtensions
     services.AddScoped<IPlayHistoryRepository, SqlitePlayHistoryRepository>();
     services.AddScoped<IRadioPresetRepository, SqliteRadioPresetRepository>();
     services.AddScoped<IAudioFileRepository, SqliteAudioFileRepository>();
+    services.AddScoped<IPlaylistRepository, SqlitePlaylistRepository>();
 
     // Register fingerprint service
     services.AddSingleton<IFingerprintService, ChromaprintFingerprintService>();

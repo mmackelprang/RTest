@@ -187,15 +187,9 @@ public class AudioApiService
   {
     try
     {
-      _logger.LogDebug("Fetching now playing info from /api/audio/nowplaying");
       var result = await _httpClient.GetFromJsonAsync<NowPlayingDto>("/api/audio/nowplaying", cancellationToken);
-      
-      if (result != null)
-      {
-        _logger.LogDebug("Now playing received: Title={Title}, Artist={Artist}, Album={Album}, Source={Source}", 
-          result.Title, result.Artist, result.Album, result.SourceName);
-      }
-      else
+
+      if (result == null)
       {
         _logger.LogWarning("Now playing returned null");
       }

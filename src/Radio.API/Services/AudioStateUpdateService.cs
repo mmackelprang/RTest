@@ -301,10 +301,9 @@ public class AudioStateUpdateService : BackgroundService
 
     return Math.Abs(previous.Frequency - current.Frequency) > 0.001 ||
            previous.Band != current.Band ||
-           Math.Abs(previous.FrequencyStep - current.FrequencyStep) > 0.001 ||
+           Math.Abs(previous.Step - current.Step) > 0.001 ||
            previous.SignalStrength != current.SignalStrength ||
-           previous.IsStereo != current.IsStereo ||
-           previous.EqualizerMode != current.EqualizerMode ||
+           previous.Equalizer != current.Equalizer ||
            previous.DeviceVolume != current.DeviceVolume ||
            previous.IsScanning != current.IsScanning ||
            previous.ScanDirection != current.ScanDirection;
@@ -408,26 +407,36 @@ public class AudioStateUpdateService : BackgroundService
       Title = item.Title,
       Artist = item.Artist,
       Album = item.Album,
-      Duration = item.Duration,
+      Duration = FormatDuration(item.Duration),
       AlbumArtUrl = item.AlbumArtUrl,
       Index = item.Index,
       IsCurrent = item.IsCurrent
     };
   }
 
+  private static string? FormatDuration(TimeSpan? duration)
+  {
+    if (duration == null) return null;
+    var ts = duration.Value;
+    return ts.TotalHours >= 1
+      ? $"{(int)ts.TotalHours}:{ts.Minutes:D2}:{ts.Seconds:D2}"
+      : $"{ts.Minutes}:{ts.Seconds:D2}";
+  }
+
   private static RadioStateDto MapToRadioStateDto(IRadioControl radioControls)
   {
     return new RadioStateDto
     {
-      Frequency = radioControls.CurrentFrequency.Hertz, // Convert to Hz for API
+      Frequency = radioControls.CurrentFrequency.Hertz,
       Band = radioControls.CurrentBand.ToString(),
-      FrequencyStep = radioControls.FrequencyStep.Hertz, // Convert to Hz for API
+      Step = radioControls.FrequencyStep.Hertz,
       SignalStrength = radioControls.SignalStrength,
-      IsStereo = radioControls.IsStereo,
-      EqualizerMode = radioControls.EqualizerMode.ToString(),
+      Equalizer = radioControls.EqualizerMode.ToString(),
       DeviceVolume = radioControls.DeviceVolume,
       IsScanning = radioControls.IsScanning,
-      ScanDirection = radioControls.ScanDirection?.ToString()
+      ScanDirection = radioControls.ScanDirection?.ToString(),
+      AutoGain = radioControls.AutoGainEnabled,
+      Gain = (int?)radioControls.Gain,
     };
   }
 

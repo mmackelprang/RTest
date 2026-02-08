@@ -7,36 +7,38 @@
 @implements IAsyncDisposable
 
 <div style="height: 100%; display: flex; flex-direction: column; padding: 12px; overflow-y: auto;">
-  <!-- Album Art -->
-  <div style="text-align: center; margin-bottom: 8px;">
-    @if (string.IsNullOrEmpty(_albumArtUrl) || _albumArtUrl == "/images/default-album-art.png")
+  <!-- Track Info with Album Art Background -->
+  <div style="position: relative; border-radius: 12px; overflow: hidden; margin-bottom: 8px; min-height: 200px; display: flex; align-items: flex-end;">
+    @if (_hasValidAlbumArt)
     {
-      <MudIcon Icon="@Icons.Material.Filled.MusicNote" Style="font-size: 140px; color: var(--text-secondary);" />
+      <div style="position: absolute; inset: 0; background-image: url('@_albumArtUrl'); background-size: cover; background-position: center;"></div>
+      <div style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.4) 50%, rgba(0,0,0,0.15) 100%);"></div>
+      <img src="@_albumArtUrl" alt="" crossorigin="anonymous" referrerpolicy="no-referrer"
+           style="display: none;" @onerror="OnAlbumArtError" />
     }
     else
     {
-      <img src="@_albumArtUrl"
-           alt="Album Art"
-           style="width: 180px; height: 180px; object-fit: contain; border-radius: 8px;"
-           @onerror="OnAlbumArtError" />
+      <div style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(var(--mud-palette-primary-rgb), 0.3) 0%, transparent 100%);"></div>
     }
-  </div>
-
-  <!-- Track Info -->
-  <div style="text-align: center; margin-bottom: 8px;">
-    <MudText Typo="Typo.h5" Style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-      @(_title ?? "No Track Playing")
-    </MudText>
-    <MudText Typo="Typo.body1" Style="color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-      @(_artist ?? "--")
-    </MudText>
-    <MudText Typo="Typo.body2" Style="color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-      @(_album ?? "--")
-    </MudText>
-    @if (!string.IsNullOrEmpty(_source))
-    {
-      <MudChip T="string" Color="Color.Primary" Size="Size.Small" Style="margin-top: 4px;">@_source</MudChip>
-    }
+    <div style="position: relative; z-index: 1; width: 100%; padding: 16px; text-align: center;">
+      @if (!_hasValidAlbumArt)
+      {
+        <MudIcon Icon="@Icons.Material.Filled.MusicNote" Style="font-size: 80px; color: rgba(255,255,255,0.3); margin-bottom: 8px;" />
+      }
+      <MudText Typo="Typo.h5" Style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: white; text-shadow: 0 1px 4px rgba(0,0,0,0.6);">
+        @(_title ?? "No Track Playing")
+      </MudText>
+      <MudText Typo="Typo.body1" Style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgba(255,255,255,0.85); text-shadow: 0 1px 3px rgba(0,0,0,0.5);">
+        @(_artist ?? "--")
+      </MudText>
+      <MudText Typo="Typo.body2" Style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgba(255,255,255,0.7); text-shadow: 0 1px 3px rgba(0,0,0,0.5);">
+        @(_album ?? "--")
+      </MudText>
+      @if (!string.IsNullOrEmpty(_source))
+      {
+        <MudChip T="string" Color="Color.Primary" Size="Size.Small" Style="margin-top: 4px;">@_source</MudChip>
+      }
+    </div>
   </div>
 
   <!-- Transport Controls -->
@@ -131,12 +133,18 @@
   private string? _artist;
   private string? _album;
   private string? _albumArtUrl;
+  private bool _albumArtFailed;
   private string? _source;
   private string? _position;
   private string? _duration;
   private double _progressPercent;
   private double _totalDurationSeconds;
   private System.Threading.Timer? _timer;
+
+  private bool _hasValidAlbumArt =>
+    !_albumArtFailed
+    && !string.IsNullOrEmpty(_albumArtUrl)
+    && _albumArtUrl != "/images/default-album-art.png";
 
   protected override async Task OnInitializedAsync()
   {
@@ -203,16 +211,31 @@
         _repeatMode = state.RepeatMode;
         _volume = state.Volume;
         _balance = state.Balance;
-        _position = state.Position;
-        _duration = state.Duration;
-
-        if (!string.IsNullOrEmpty(_position) && !string.IsNullOrEmpty(_duration))
+        if (!string.IsNullOrEmpty(state.Position) && !string.IsNullOrEmpty(state.Duration))
         {
-          if (TimeSpan.TryParse(_position, out var pos) && TimeSpan.TryParse(_duration, out var dur) && dur.TotalSeconds > 0)
+          if (TimeSpan.TryParse(state.Position, out var pos) && TimeSpan.TryParse(state.Duration, out var dur) && dur.TotalSeconds > 0)
           {
             _totalDurationSeconds = dur.TotalSeconds;
             _progressPercent = (pos.TotalSeconds / dur.TotalSeconds) * 100.0;
+
+            // Format without fractional seconds: "h:mm:ss" or "m:ss"
+            _position = pos.TotalHours >= 1
+              ? pos.ToString(@"h\:mm\:ss")
+              : pos.ToString(@"m\:ss");
+            _duration = dur.TotalHours >= 1
+              ? dur.ToString(@"h\:mm\:ss")
+              : dur.ToString(@"m\:ss");
           }
+          else
+          {
+            _position = state.Position;
+            _duration = state.Duration;
+          }
+        }
+        else
+        {
+          _position = state.Position;
+          _duration = state.Duration;
         }
       }
 
@@ -222,6 +245,8 @@
         _title = nowPlaying.Title;
         _artist = nowPlaying.Artist;
         _album = nowPlaying.Album;
+        if (_albumArtUrl != nowPlaying.AlbumArtUrl)
+          _albumArtFailed = false;
         _albumArtUrl = nowPlaying.AlbumArtUrl;
         _source = nowPlaying.SourceName;
       }
@@ -239,7 +264,9 @@
       var seconds = (newPercent / 100.0) * _totalDurationSeconds;
       var newTime = TimeSpan.FromSeconds(seconds);
       _progressPercent = newPercent;
-      _position = newTime.ToString(@"hh\:mm\:ss");
+      _position = newTime.TotalHours >= 1
+        ? newTime.ToString(@"h\:mm\:ss")
+        : newTime.ToString(@"m\:ss");
       await AudioApi.UpdatePlaybackStateAsync(new UpdatePlaybackRequest(
         Action: "Seek", Volume: null, IsMuted: null, Balance: null, SeekPosition: newTime));
       await RefreshPlaybackStateAsync();
@@ -346,7 +373,7 @@
 
   private void OnAlbumArtError()
   {
-    _albumArtUrl = null;
+    _albumArtFailed = true;
     StateHasChanged();
   }
 

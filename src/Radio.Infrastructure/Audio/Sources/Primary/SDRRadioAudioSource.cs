@@ -554,9 +554,15 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     _metadata[StandardMetadataKeys.Album] = track.Album ?? StandardMetadataKeys.DefaultAlbum;
     
     // Use CoverArtUrl from fingerprinting if available, otherwise use default
-    _metadata[StandardMetadataKeys.AlbumArtUrl] = !string.IsNullOrEmpty(track.CoverArtUrl)
-      ? track.CoverArtUrl
-      : StandardMetadataKeys.DefaultAlbumArtUrl;
+    if (!string.IsNullOrEmpty(track.CoverArtUrl))
+    {
+      _metadata[StandardMetadataKeys.AlbumArtUrl] = track.CoverArtUrl;
+      Logger.LogInformation("Album art URL set for '{Title}': {Url}", track.Title, track.CoverArtUrl);
+    }
+    else
+    {
+      _metadata[StandardMetadataKeys.AlbumArtUrl] = StandardMetadataKeys.DefaultAlbumArtUrl;
+    }
 
     // Add optional metadata if available
     if (track.Genre != null)
@@ -600,7 +606,7 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   private void LogPipelineDiagnostics(object? state)
   {
     var generatorDiag = _soundGenerator?.GetDiagnostics();
-    Logger.LogInformation(
+    Logger.LogDebug(
       "📻 SDR RADIO DIAGNOSTICS: TotalSamplesReceived={Received}, " +
       "GeneratorPresent={GeneratorPresent}, ReceiverRunning={ReceiverRunning}, " +
       "BufferReceived={BufReceived}, BufferOutput={BufOutput}, " +

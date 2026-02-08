@@ -59,7 +59,23 @@
       "Bash(\"D:/prj/RTest/RTest/tools/fpcalc/fpcalc.exe\" -json -length 120 \"D:/prj/RTest/RTest/src/Radio.API/media/audio/music/02 We''re Ready.mp3\")",
       "Bash(\"D:/prj/RTest/RTest/tools/fpcalc/fpcalc.exe\" -json \"D:/prj/RTest/RTest/src/Radio.API/media/audio/music/02 We''re Ready.mp3\")",
       "Bash(__NEW_LINE_c9a1a10edd141617__ echo \"\")",
-      "Bash(python -m json.tool:*)"
+      "Bash(python -m json.tool:*)",
+      "WebFetch(domain:inthehand.github.io)",
+      "Bash(git -C \"D:\\\\prj\\\\RTest\\\\RTest\" diff src/Radio.API/Controllers/DevicesController.cs)",
+      "Bash(git -C \"D:\\\\prj\\\\RTest\\\\RTest\" diff --stat)",
+      "Bash(git -C \"D:\\\\prj\\\\RTest\\\\RTest\" diff src/Radio.Infrastructure/Audio/Services/AudioManager.cs)",
+      "Bash(git -C \"D:\\\\prj\\\\RTest\\\\RTest\" diff src/Radio.Infrastructure/Audio/Outputs/HttpStreamOutput.cs)",
+      "Bash(npx:*)",
+      "Bash(claude mcp add:*)",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_run_code",
+      "Bash(wc:*)",
+      "Bash(perl:*)",
+      "Bash(PYTHONIOENCODING=utf-8 python3:*)"
     ]
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "playwright"
+  ]
 }

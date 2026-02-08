@@ -269,7 +269,7 @@ public class SoundFlowAudioEngineTests
     // Arrange
     var engine = CreateEngine();
     await engine.InitializeAsync();
-    var stream = engine.GetMixedOutputStream();
+    using var reader = engine.CreateStreamReader("test-reader");
     var samples = new float[] { 0.5f, -0.5f, 0.25f, -0.25f };
 
     // Act
@@ -277,7 +277,7 @@ public class SoundFlowAudioEngineTests
 
     // Assert
     var buffer = new byte[8]; // 4 samples * 2 bytes each
-    var bytesRead = stream.Read(buffer, 0, buffer.Length);
+    var bytesRead = reader.Read(buffer, 0, buffer.Length);
     Assert.Equal(8, bytesRead);
   }
 

@@ -30,6 +30,11 @@ public class MockAudioSampleProvider : IAudioSampleProvider
   public PlaySource SourceType => _sourceType;
 
   /// <summary>
+  /// Gets or sets the source file path for file-based sources.
+  /// </summary>
+  public string? SourceFilePath { get; set; }
+
+  /// <summary>
   /// Sets the mock source as active and configures its properties.
   /// </summary>
   public void SetActive(bool active, string? sourceName = null, PlaySource? sourceType = null)

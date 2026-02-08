@@ -185,6 +185,15 @@ public class LocalAudioOutput : AudioOutputBase
       device.Name, deviceId);
   }
 
+  /// <summary>
+  /// Updates the tracked device ID without calling the device manager.
+  /// Used when the preference has already been persisted elsewhere.
+  /// </summary>
+  public void UpdateDeviceId(string deviceId)
+  {
+    _currentDeviceId = deviceId;
+  }
+
   /// <inheritdoc />
   public override ValueTask DisposeAsync()
   {

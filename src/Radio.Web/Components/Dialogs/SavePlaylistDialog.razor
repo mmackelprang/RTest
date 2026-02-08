@@ -1,0 +1,79 @@
+@inject PlaylistApiService PlaylistApi
+@inject ISnackbar Snackbar
+@inject ILogger<SavePlaylistDialog> Logger
+
+<MudDialog>
+  <TitleContent>
+    <MudText Typo="Typo.h6">
+      <MudIcon Icon="@Icons.Material.Filled.PlaylistAdd" Class="mr-2" Style="vertical-align: middle;" />
+      Save Playlist
+    </MudText>
+  </TitleContent>
+  <DialogContent>
+    <MudTextField @bind-Value="_name"
+                  Label="Playlist Name"
+                  Variant="Variant.Outlined"
+                  Required="true"
+                  RequiredError="Name is required"
+                  Immediate="true"
+                  Style="margin-bottom: 16px;" />
+    <MudTextField @bind-Value="_description"
+                  Label="Description (optional)"
+                  Variant="Variant.Outlined"
+                  Lines="2" />
+  </DialogContent>
+  <DialogActions>
+    <MudButton OnClick="Cancel">Cancel</MudButton>
+    <MudButton Color="Color.Primary"
+               Variant="Variant.Filled"
+               OnClick="SaveAsync"
+               Disabled="@(string.IsNullOrWhiteSpace(_name) || _saving)">
+      @if (_saving)
+      {
+        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+      }
+      Save
+    </MudButton>
+  </DialogActions>
+</MudDialog>
+
+@code {
+  [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+
+  private string _name = "";
+  private string _description = "";
+  private bool _saving = false;
+
+  private void Cancel() => MudDialog.Cancel();
+
+  private async Task SaveAsync()
+  {
+    if (string.IsNullOrWhiteSpace(_name)) return;
+
+    _saving = true;
+    try
+    {
+      var result = await PlaylistApi.CreateAsync(_name.Trim(),
+        string.IsNullOrWhiteSpace(_description) ? null : _description.Trim());
+
+      if (result != null)
+      {
+        Snackbar.Add($"Playlist '{result.Name}' saved ({result.ItemCount} tracks)", Severity.Success);
+        MudDialog.Close(DialogResult.Ok(result));
+      }
+      else
+      {
+        Snackbar.Add("Failed to save playlist", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to save playlist");
+      Snackbar.Add("Error saving playlist", Severity.Error);
+    }
+    finally
+    {
+      _saving = false;
+    }
+  }
+}

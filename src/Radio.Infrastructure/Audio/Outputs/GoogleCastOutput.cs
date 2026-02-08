@@ -19,6 +19,7 @@ public class GoogleCastOutput : AudioOutputBase
 {
   private readonly ILogger<GoogleCastOutput> _logger;
   private readonly GoogleCastOutputOptions _options;
+  private readonly CastDeviceCacheRepository? _cacheRepository;
   private ChromecastClient? _client;
   private ChromecastReceiver? _connectedReceiver;
   private string? _streamUrl;
@@ -57,15 +58,18 @@ public class GoogleCastOutput : AudioOutputBase
   /// </summary>
   /// <param name="logger">The logger instance.</param>
   /// <param name="options">The Google Cast output options.</param>
+  /// <param name="cacheRepository">Optional SQLite-backed cache repository.</param>
   public GoogleCastOutput(
     ILogger<GoogleCastOutput> logger,
-    IOptions<AudioOutputOptions> options)
+    IOptions<AudioOutputOptions> options,
+    CastDeviceCacheRepository? cacheRepository = null)
     : base("cast-output", "Google Cast Output",
         options?.Value?.GoogleCast?.DefaultVolume ?? 0.7f,
         options?.Value?.GoogleCast?.Enabled ?? false)
   {
     _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     _options = options?.Value?.GoogleCast ?? throw new ArgumentNullException(nameof(options));
+    _cacheRepository = cacheRepository;
   }
 
   /// <inheritdoc />
@@ -83,7 +87,7 @@ public class GoogleCastOutput : AudioOutputBase
   }
 
   /// <inheritdoc />
-  public override Task InitializeAsync(CancellationToken cancellationToken = default)
+  public override async Task InitializeAsync(CancellationToken cancellationToken = default)
   {
     ValidateCanInitialize();
 
@@ -93,8 +97,16 @@ public class GoogleCastOutput : AudioOutputBase
     {
       _logger.LogInformation("Initializing Google Cast output");
 
-      // Create the ChromecastClient
+      // Dispose old client if reinitializing after error
+      if (_client != null)
+      {
+        try { await _client.DisconnectAsync(); } catch { }
+      }
+
+      // Create a fresh ChromecastClient
       _client = new ChromecastClient();
+      _connectedReceiver = null;
+      ConnectedDevice = null;
 
       State = AudioOutputState.Ready;
       _logger.LogInformation("Google Cast output initialized");
@@ -105,8 +117,6 @@ public class GoogleCastOutput : AudioOutputBase
       State = AudioOutputState.Error;
       throw;
     }
-
-    return Task.CompletedTask;
   }
 
   /// <summary>
@@ -125,7 +135,7 @@ public class GoogleCastOutput : AudioOutputBase
       "Starting Chromecast device discovery (timeout: {Timeout}s)",
       _options.DiscoveryTimeoutSeconds);
 
-    // Load persistent cache first
+    // Load persistent cache first (SQLite if available, fallback to JSON)
     var cachedDevices = await LoadCacheAsync();
 
     try
@@ -135,12 +145,18 @@ public class GoogleCastOutput : AudioOutputBase
 
       foreach (var device in discoveredDevices)
       {
+        if (device?.DeviceUri == null)
+        {
+          _logger.LogDebug("Skipping discovered device with null DeviceUri");
+          continue;
+        }
+
         var deviceId = device.DeviceUri.ToString();
 
         var deviceInfo = new ChromecastDeviceInfo
         {
           Id = deviceId,
-          FriendlyName = device.Name,
+          FriendlyName = device.Name ?? "Unknown",
           IpAddress = device.DeviceUri.Host,
           Port = device.DeviceUri.Port,
           Model = device.Model ?? "Unknown"
@@ -190,19 +206,54 @@ public class GoogleCastOutput : AudioOutputBase
   }
 
   /// <summary>
-  /// Loads the persistent device cache from disk.
+  /// Loads the persistent device cache. Uses SQLite if available, falling back to JSON.
+  /// Migrates JSON data to SQLite on first load.
   /// </summary>
   private async Task<Dictionary<string, CachedCastDevice>> LoadCacheAsync()
   {
+    // Try SQLite first
+    if (_cacheRepository != null)
+    {
+      var sqliteCache = await _cacheRepository.GetAllAsync();
+
+      // One-time migration: if JSON file exists and SQLite is empty, import from JSON
+      if (sqliteCache.Count == 0 && !string.IsNullOrEmpty(_options.CacheFilePath) &&
+          File.Exists(_options.CacheFilePath))
+      {
+        try
+        {
+          var json = await File.ReadAllTextAsync(_options.CacheFilePath);
+          var jsonCache = JsonSerializer.Deserialize<Dictionary<string, CachedCastDevice>>(json);
+          if (jsonCache != null && jsonCache.Count > 0)
+          {
+            _logger.LogInformation("Migrating {Count} Cast devices from JSON to SQLite", jsonCache.Count);
+            await _cacheRepository.SaveAllAsync(jsonCache);
+            sqliteCache = jsonCache;
+
+            // Remove the old JSON file after successful migration
+            File.Delete(_options.CacheFilePath);
+            _logger.LogInformation("Deleted old JSON cache file: {Path}", _options.CacheFilePath);
+          }
+        }
+        catch (Exception ex)
+        {
+          _logger.LogWarning(ex, "Failed to migrate Cast device cache from JSON to SQLite");
+        }
+      }
+
+      return sqliteCache;
+    }
+
+    // Fallback to JSON file
     try
     {
-      if (File.Exists(_options.CacheFilePath))
+      if (!string.IsNullOrEmpty(_options.CacheFilePath) && File.Exists(_options.CacheFilePath))
       {
         var json = await File.ReadAllTextAsync(_options.CacheFilePath);
         var cached = JsonSerializer.Deserialize<Dictionary<string, CachedCastDevice>>(json);
         if (cached != null)
         {
-          _logger.LogDebug("Loaded {Count} cached Cast devices", cached.Count);
+          _logger.LogDebug("Loaded {Count} cached Cast devices from JSON", cached.Count);
           return cached;
         }
       }
@@ -216,10 +267,19 @@ public class GoogleCastOutput : AudioOutputBase
   }
 
   /// <summary>
-  /// Saves the device cache to disk.
+  /// Saves the device cache. Uses SQLite if available, falling back to JSON.
   /// </summary>
   private async Task SaveCacheAsync(Dictionary<string, CachedCastDevice> cache)
   {
+    if (_cacheRepository != null)
+    {
+      await _cacheRepository.SaveAllAsync(cache);
+      var expirationCutoff = DateTime.UtcNow.AddDays(-_options.CacheExpirationDays);
+      await _cacheRepository.RemoveStaleAsync(expirationCutoff);
+      return;
+    }
+
+    // Fallback to JSON file
     try
     {
       var directory = Path.GetDirectoryName(_options.CacheFilePath);
@@ -229,8 +289,8 @@ public class GoogleCastOutput : AudioOutputBase
       }
 
       var json = JsonSerializer.Serialize(cache, new JsonSerializerOptions { WriteIndented = true });
-      await File.WriteAllTextAsync(_options.CacheFilePath, json);
-      _logger.LogDebug("Saved {Count} Cast devices to cache", cache.Count);
+      await File.WriteAllTextAsync(_options.CacheFilePath!, json);
+      _logger.LogDebug("Saved {Count} Cast devices to JSON cache", cache.Count);
     }
     catch (Exception ex)
     {
@@ -248,6 +308,13 @@ public class GoogleCastOutput : AudioOutputBase
   {
     ThrowIfDisposed();
     ArgumentNullException.ThrowIfNull(device);
+
+    // Recover from Error state by reinitializing
+    if (State == AudioOutputState.Error)
+    {
+      _logger.LogInformation("Recovering from Error state before connecting");
+      await InitializeAsync(cancellationToken);
+    }
 
     if (State != AudioOutputState.Ready && State != AudioOutputState.Stopped)
     {
@@ -376,7 +443,9 @@ public class GoogleCastOutput : AudioOutputBase
 
     if (_connectedReceiver == null)
     {
-      throw new InvalidOperationException("No Chromecast device connected. Connect to a device first.");
+      _logger.LogInformation("No Chromecast device connected yet — output ready, waiting for device connection");
+      State = AudioOutputState.Ready;
+      return;
     }
 
     try
@@ -393,6 +462,10 @@ public class GoogleCastOutput : AudioOutputBase
         // Load media if we have a stream URL
         if (!string.IsNullOrEmpty(_streamUrl))
         {
+          _logger.LogInformation(
+            "Cast: Loading media URL {StreamUrl} (type: audio/wav, stream: Live)",
+            _streamUrl);
+
           var media = new Media
           {
             ContentUrl = _streamUrl,
@@ -404,7 +477,16 @@ public class GoogleCastOutput : AudioOutputBase
           if (mediaChannel != null)
           {
             await mediaChannel.LoadAsync(media);
+            _logger.LogInformation("Cast: Media loaded successfully on {Device}", ConnectedDevice?.FriendlyName);
           }
+          else
+          {
+            _logger.LogWarning("Cast: MediaChannel is null — cannot load media");
+          }
+        }
+        else
+        {
+          _logger.LogWarning("Cast: No stream URL set — Chromecast will not receive audio");
         }
       }
 
@@ -440,7 +522,19 @@ public class GoogleCastOutput : AudioOutputBase
         var mediaChannel = _client.GetChannel<IMediaChannel>();
         if (mediaChannel != null)
         {
-          await mediaChannel.StopAsync();
+          try
+          {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await mediaChannel.StopAsync().WaitAsync(cts.Token);
+          }
+          catch (TimeoutException)
+          {
+            _logger.LogWarning("Timed out stopping Cast media — device may be unreachable");
+          }
+          catch (OperationCanceledException)
+          {
+            _logger.LogWarning("Cast media stop cancelled — device may be unreachable");
+          }
         }
       }
 
@@ -452,8 +546,7 @@ public class GoogleCastOutput : AudioOutputBase
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to stop Google Cast output");
-      State = AudioOutputState.Error;
-      throw;
+      State = AudioOutputState.Stopped;
     }
   }
 

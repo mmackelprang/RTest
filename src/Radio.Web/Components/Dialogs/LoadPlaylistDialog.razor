@@ -1,0 +1,157 @@
+@inject PlaylistApiService PlaylistApi
+@inject ISnackbar Snackbar
+@inject ILogger<LoadPlaylistDialog> Logger
+
+<MudDialog>
+  <TitleContent>
+    <MudText Typo="Typo.h6">
+      <MudIcon Icon="@Icons.Material.Filled.PlaylistPlay" Class="mr-2" Style="vertical-align: middle;" />
+      Load Playlist
+    </MudText>
+  </TitleContent>
+  <DialogContent>
+    @if (_loading)
+    {
+      <div style="display: flex; justify-content: center; padding: 32px;">
+        <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+      </div>
+    }
+    else if (_playlists == null || _playlists.Count == 0)
+    {
+      <div style="text-align: center; padding: 32px;">
+        <MudIcon Icon="@Icons.Material.Filled.PlaylistRemove" Style="font-size: 64px; opacity: 0.5;" />
+        <MudText Typo="Typo.body1" Style="margin-top: 16px;">No saved playlists</MudText>
+        <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+          Save the current queue as a playlist first
+        </MudText>
+      </div>
+    }
+    else
+    {
+      <MudList T="string" Dense="false">
+        @foreach (var playlist in _playlists)
+        {
+          <MudListItem T="string" Style="min-height: 64px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+              <div style="flex: 1;">
+                <MudText Typo="Typo.body1" Style="font-weight: 500;">@playlist.Name</MudText>
+                <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">
+                  @playlist.ItemCount tracks
+                  @if (!string.IsNullOrEmpty(playlist.Description))
+                  {
+                    @($" - {playlist.Description}")
+                  }
+                </MudText>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           Size="Size.Small"
+                           OnClick="@(() => LoadPlaylistAsync(playlist))"
+                           Disabled="@_actionInProgress">
+                  Load
+                </MudButton>
+                <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                               Color="Color.Error"
+                               Size="Size.Small"
+                               OnClick="@(() => DeletePlaylistAsync(playlist))"
+                               Disabled="@_actionInProgress"
+                               title="Delete" />
+              </div>
+            </div>
+          </MudListItem>
+          <MudDivider />
+        }
+      </MudList>
+    }
+  </DialogContent>
+  <DialogActions>
+    <MudButton OnClick="Cancel">Close</MudButton>
+  </DialogActions>
+</MudDialog>
+
+@code {
+  [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+
+  private List<Radio.Web.Models.PlaylistSummaryDto>? _playlists;
+  private bool _loading = true;
+  private bool _actionInProgress = false;
+
+  protected override async Task OnInitializedAsync()
+  {
+    await LoadPlaylistsAsync();
+  }
+
+  private async Task LoadPlaylistsAsync()
+  {
+    _loading = true;
+    try
+    {
+      _playlists = await PlaylistApi.GetAllAsync();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to load playlists");
+    }
+    finally
+    {
+      _loading = false;
+    }
+  }
+
+  private void Cancel() => MudDialog.Cancel();
+
+  private async Task LoadPlaylistAsync(Radio.Web.Models.PlaylistSummaryDto playlist)
+  {
+    _actionInProgress = true;
+    try
+    {
+      var success = await PlaylistApi.LoadAsync(playlist.Id);
+      if (success)
+      {
+        Snackbar.Add($"Loaded '{playlist.Name}' ({playlist.ItemCount} tracks)", Severity.Success);
+        MudDialog.Close(DialogResult.Ok(playlist));
+      }
+      else
+      {
+        Snackbar.Add("Failed to load playlist", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to load playlist {Id}", playlist.Id);
+      Snackbar.Add("Error loading playlist", Severity.Error);
+    }
+    finally
+    {
+      _actionInProgress = false;
+    }
+  }
+
+  private async Task DeletePlaylistAsync(Radio.Web.Models.PlaylistSummaryDto playlist)
+  {
+    _actionInProgress = true;
+    try
+    {
+      var success = await PlaylistApi.DeleteAsync(playlist.Id);
+      if (success)
+      {
+        Snackbar.Add($"Deleted '{playlist.Name}'", Severity.Info);
+        _playlists?.Remove(playlist);
+      }
+      else
+      {
+        Snackbar.Add("Failed to delete playlist", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to delete playlist {Id}", playlist.Id);
+      Snackbar.Add("Error deleting playlist", Severity.Error);
+    }
+    finally
+    {
+      _actionInProgress = false;
+    }
+  }
+}

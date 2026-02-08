@@ -403,6 +403,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
       WHERE m.Title LIKE @Search COLLATE NOCASE
          OR m.Artist LIKE @Search COLLATE NOCASE
          OR m.Album LIKE @Search COLLATE NOCASE
+         OR h.SourceDetails LIKE @Search COLLATE NOCASE
       """;
 
     await using var countCmd = conn.CreateCommand();
@@ -421,6 +422,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
       WHERE m.Title LIKE @Search COLLATE NOCASE
          OR m.Artist LIKE @Search COLLATE NOCASE
          OR m.Album LIKE @Search COLLATE NOCASE
+         OR h.SourceDetails LIKE @Search COLLATE NOCASE
       ORDER BY h.PlayedAt DESC
       LIMIT @Limit OFFSET @Offset
       """;

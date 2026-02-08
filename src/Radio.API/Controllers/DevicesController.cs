@@ -150,21 +150,52 @@ public class DevicesController : ControllerBase
         await DeactivateOutputAsync(_castOutput, "Google Cast");
         await DeactivateOutputAsync(_httpOutput, "HTTP Stream");
 
-        // Switch the actual SoundFlow playback device
+        // Validate the device exists before responding
         if (_audioEngine != null)
         {
           var deviceIndex = _audioEngine.GetDeviceIndexById(deviceId);
-          if (deviceIndex >= 0)
+          if (deviceIndex < 0)
           {
-            var success = _audioEngine.SwitchPlaybackDevice(deviceIndex);
-            if (!success)
-            {
-              _logger.LogWarning("Failed to switch SoundFlow playback device to {DeviceId}", deviceId);
-            }
+            _logger.LogDebug("Device {DeviceId} is not a local playback device, skipping engine switch", deviceId);
           }
           else
           {
-            _logger.LogDebug("Device {DeviceId} is not a local playback device, skipping engine switch", deviceId);
+            // Persist preference and respond BEFORE the native switch.
+            // SwitchPlaybackDevice calls native MiniAudio Stop/Dispose/Init/Start
+            // which can tear down the HTTP socket before the response is sent.
+            await _deviceManager.SetOutputDeviceAsync(deviceId);
+
+            if (_localOutput != null)
+            {
+              _localOutput.UpdateDeviceId(deviceId);
+            }
+
+            _logger.LogInformation("Output device preference saved to {DeviceId}, starting native switch...", deviceId);
+
+            // Fire-and-forget the native device switch on the thread pool
+            var capturedIndex = deviceIndex;
+            var capturedDeviceId = deviceId;
+            _ = Task.Run(async () =>
+            {
+              try
+              {
+                var success = _audioEngine.SwitchPlaybackDevice(capturedIndex);
+                if (!success)
+                {
+                  _logger.LogWarning("Failed to switch SoundFlow playback device to {DeviceId}", capturedDeviceId);
+                }
+                else
+                {
+                  _logger.LogInformation("Native playback device switch to {DeviceId} completed", capturedDeviceId);
+                }
+              }
+              catch (Exception ex)
+              {
+                _logger.LogError(ex, "Error during native playback device switch to {DeviceId}", capturedDeviceId);
+              }
+            });
+
+            return Ok(new { message = "Output device set", deviceId = deviceId });
           }
         }
 
@@ -209,6 +240,12 @@ public class DevicesController : ControllerBase
 
     try
     {
+      if (output.State == AudioOutputState.Error)
+      {
+        _logger.LogInformation("Recovering {Name} output from Error state", name);
+        await output.InitializeAsync();
+      }
+
       if (output.State == AudioOutputState.Created)
       {
         await output.InitializeAsync();
@@ -238,7 +275,7 @@ public class DevicesController : ControllerBase
 
     try
     {
-      if (output.State == AudioOutputState.Streaming)
+      if (output.State == AudioOutputState.Streaming || output.State == AudioOutputState.Error)
       {
         await output.StopAsync();
         _logger.LogInformation("{Name} output deactivated", name);
@@ -248,6 +285,51 @@ public class DevicesController : ControllerBase
     {
       _logger.LogWarning(ex, "Failed to deactivate {Name} output", name);
     }
+  }
+
+  /// <summary>
+  /// Gets diagnostic information about the Cast audio pipeline.
+  /// </summary>
+  [HttpGet("cast/diagnostics")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  public IActionResult GetCastDiagnostics()
+  {
+    var tapDiag = _audioEngine?.GetOutputTapDiagnostics();
+    var pipelineDiag = _audioEngine?.GetPipelineDiagnostics();
+
+    return Ok(new
+    {
+      fingerprintTap = new
+      {
+        totalSamplesProcessed = pipelineDiag?.FingerprintTapTotalSamples ?? 0,
+        lastProcessedTime = pipelineDiag?.FingerprintTapLastProcessedTime,
+      },
+      outputTap = tapDiag.HasValue ? new
+      {
+        totalBytesWritten = tapDiag.Value.TotalBytesWritten,
+        totalWriteCalls = tapDiag.Value.TotalWriteCalls,
+        lastWriteTime = tapDiag.Value.LastWriteTime,
+        activeReaderCount = tapDiag.Value.ActiveReaderCount,
+        bufferSize = tapDiag.Value.BufferSize,
+      } : null,
+      httpStream = new
+      {
+        state = _httpOutput?.State.ToString(),
+        streamUrl = _httpOutput?.StreamUrl,
+        connectedClients = _httpOutput?.ConnectedClientCount ?? 0,
+      },
+      cast = new
+      {
+        state = _castOutput?.State.ToString(),
+        connectedDevice = _castOutput?.ConnectedDevice?.FriendlyName,
+      },
+      engine = new
+      {
+        state = pipelineDiag?.EngineState,
+        playbackDeviceActive = pipelineDiag?.PlaybackDeviceActive ?? false,
+        modifierCount = pipelineDiag?.ModifierCount ?? 0,
+      }
+    });
   }
 
   /// <summary>
@@ -356,6 +438,13 @@ public class DevicesController : ControllerBase
       // Wire the HTTP audio stream so the Chromecast has something to play
       if (_httpOutput != null)
       {
+        // Recover HTTP output from Error state
+        if (_httpOutput.State == AudioOutputState.Error)
+        {
+          _logger.LogInformation("HTTP stream output in Error state, reinitializing");
+          await _httpOutput.InitializeAsync(cancellationToken);
+        }
+
         // Ensure HTTP stream output is initialized and started
         if (_httpOutput.State == AudioOutputState.Created)
         {
@@ -366,10 +455,20 @@ public class DevicesController : ControllerBase
           await _httpOutput.StartAsync(cancellationToken);
         }
 
+        if (_httpOutput.State != AudioOutputState.Streaming)
+        {
+          _logger.LogWarning("HTTP stream output is not streaming (state: {State}), Cast will have no audio",
+            _httpOutput.State);
+        }
+
         // Resolve the actual LAN IP (Chromecast needs a routable IP, not a hostname)
         var streamUrl = GetRoutableStreamUrl(_httpOutput.StreamUrl, _httpOutput.Port);
         _castOutput.SetStreamUrl(streamUrl);
         _logger.LogInformation("Set Cast stream URL to {StreamUrl}", streamUrl);
+      }
+      else
+      {
+        _logger.LogWarning("HTTP stream output not available — Cast device will have no audio source");
       }
 
       // Start audio playback on the Cast device
@@ -548,9 +647,14 @@ public class DevicesController : ControllerBase
     foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
     {
       if (ni.OperationalStatus != OperationalStatus.Up)
+      {
         continue;
+      }
+
       if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+      {
         continue;
+      }
 
       var props = ni.GetIPProperties();
       foreach (var addr in props.UnicastAddresses)

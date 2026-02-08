@@ -271,7 +271,28 @@ namespace RTLSDRCore
 
             if (_device.IsOpen)
             {
-                _device.SetFrequency(frequencyHz);
+                // Stop streaming before tuning to prevent USB pipe stalls,
+                // unless already stopped (e.g., by SetBand which stops before calling this)
+                var wasStreaming = _device.IsStreaming;
+                if (wasStreaming)
+                {
+                    _device.StopStreaming();
+                }
+
+                var success = _device.SetFrequency(frequencyHz);
+
+                if (wasStreaming)
+                {
+                    if (!_device.StartStreaming())
+                    {
+                        Logger.Error("Failed to restart streaming after frequency change");
+                    }
+                }
+
+                if (!success)
+                {
+                    Logger.Warning("SetFrequency to {Frequency} returned false", RadioBand.FormatFrequency(frequencyHz));
+                }
             }
 
             if (oldFrequency != frequencyHz)
@@ -428,7 +449,16 @@ namespace RTLSDRCore
                 try
                 {
                     var band = BandPresets.GetBand(bandType);
-                    Logger.Information("Switching to {Band}", band.Name);
+                    var wasStreaming = _device.IsStreaming;
+
+                    Logger.Information("Switching to {Band}{Pause}", band.Name,
+                        wasStreaming ? " (pausing stream)" : "");
+
+                    // Stop streaming before tuning to avoid USB pipe stalls
+                    if (wasStreaming)
+                    {
+                        _device.StopStreaming();
+                    }
 
                     _currentBand = band;
                     _currentModulation = band.DefaultModulation;
@@ -442,6 +472,19 @@ namespace RTLSDRCore
                     }
 
                     SetFrequencyInternal(newFrequency);
+
+                    // Restart streaming
+                    if (wasStreaming)
+                    {
+                        if (!_device.StartStreaming())
+                        {
+                            Logger.Error("Failed to restart streaming after band change");
+                            SetState(ReceiverState.Error);
+                            return false;
+                        }
+                        Logger.Debug("Streaming resumed after band change");
+                    }
+
                     return true;
                 }
                 catch (Exception ex)

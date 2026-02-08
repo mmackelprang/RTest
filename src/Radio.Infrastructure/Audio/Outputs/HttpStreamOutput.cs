@@ -24,6 +24,7 @@ public class HttpStreamOutput : AudioOutputBase
   private CancellationTokenSource? _serverCts;
   private Task? _serverTask;
   private readonly ConcurrentDictionary<string, HttpStreamClient> _connectedClients = new();
+  private DateTime _lastZeroBytesWarning = DateTime.MinValue;
 
   /// <inheritdoc />
   protected override ILogger Logger => _logger;
@@ -138,6 +139,12 @@ public class HttpStreamOutput : AudioOutputBase
       _logger.LogInformation(
         "HTTP stream server started. Stream URL: {StreamUrl}",
         StreamUrl);
+    }
+    catch (HttpListenerException ex) when (ex.ErrorCode == 5) // Access Denied
+    {
+      _logger.LogError(ex, "Access denied starting HTTP stream server. This usually means the URL is not reserved for non-admin users. To fix this, run this command as Administrator: netsh http add urlacl url=http://+:{Port}{Path}/ user=Everyone", _options.Port, _options.EndpointPath);
+      State = AudioOutputState.Error;
+      throw;
     }
     catch (Exception ex)
     {
@@ -298,9 +305,12 @@ public class HttpStreamOutput : AudioOutputBase
         await context.Response.OutputStream.WriteAsync(header, cancellationToken);
       }
 
-      // Stream audio data to the client
-      var audioStream = _audioEngine.GetMixedOutputStream();
+      // Create an independent stream reader for this client so multiple
+      // clients (and fingerprinting) don't compete for the same read position
+      using var audioStream = _audioEngine.CreateStreamReader($"http-client-{clientId}");
       var buffer = new byte[_options.ClientBufferSize];
+      var firstDataSent = false;
+      var zeroBytesSince = DateTime.UtcNow;
 
       while (!cancellationToken.IsCancellationRequested && client.IsConnected)
       {
@@ -308,9 +318,28 @@ public class HttpStreamOutput : AudioOutputBase
 
         if (bytesRead == 0)
         {
-          // No data available, wait a bit
+          // Warn if no data for > 5 seconds (throttled to every 5s)
+          var now = DateTime.UtcNow;
+          if ((now - zeroBytesSince).TotalSeconds > 5 &&
+              (now - _lastZeroBytesWarning).TotalSeconds > 5)
+          {
+            _logger.LogWarning(
+              "HttpStream: 0 bytes available for client {ClientId} for {Seconds:F1}s — output tap may not be receiving data",
+              clientId, (now - zeroBytesSince).TotalSeconds);
+            _lastZeroBytesWarning = now;
+          }
           await Task.Delay(10, cancellationToken);
           continue;
+        }
+
+        zeroBytesSince = DateTime.UtcNow;
+
+        if (!firstDataSent)
+        {
+          firstDataSent = true;
+          _logger.LogInformation(
+            "HttpStream: First {Bytes} bytes sent to client {ClientId}",
+            bytesRead, clientId);
         }
 
         try
@@ -366,9 +395,14 @@ public class HttpStreamOutput : AudioOutputBase
     foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
     {
       if (ni.OperationalStatus != OperationalStatus.Up)
+      {
         continue;
+      }
+
       if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+      {
         continue;
+      }
 
       var props = ni.GetIPProperties();
       foreach (var addr in props.UnicastAddresses)

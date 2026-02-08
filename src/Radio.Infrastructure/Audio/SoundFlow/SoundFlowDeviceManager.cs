@@ -214,7 +214,7 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
       RaiseDeviceChangeEvents(previousOutputDevices, outputDevices);
       RaiseDeviceChangeEvents(previousInputDevices, inputDevices);
 
-      _logger.LogInformation(
+      _logger.LogDebug(
         "Device refresh complete. Found {OutputCount} output and {InputCount} input devices",
         outputDevices.Count, inputDevices.Count);
     }
@@ -350,7 +350,7 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
         IsUSBDevice = false
       });
 
-      _logger.LogInformation("Device enumeration complete: {OutputCount} output, {InputCount} input devices",
+      _logger.LogDebug("Device enumeration complete: {OutputCount} output, {InputCount} input devices",
         outputDevices.Count, inputDevices.Count);
     }
     catch (Exception ex)

@@ -55,15 +55,15 @@
               <MudTd DataLabel="Status">
                 @if (context.IsActive)
                 {
-                  <MudChip T="string" Size="Size.Small" Color="Color.Success">Active</MudChip>
+                  <MudChip T="string" Size="Size.Small" Color="Color.Success" Icon="@Icons.Material.Filled.CheckCircle">Active</MudChip>
                 }
                 else if (context.IsDefault)
                 {
-                  <MudChip T="string" Size="Size.Small" Color="Color.Primary">Default</MudChip>
+                  <MudChip T="string" Size="Size.Small" Color="Color.Primary" Icon="@Icons.Material.Filled.Star">Default</MudChip>
                 }
                 else
                 {
-                  <MudChip T="string" Size="Size.Small" Color="Color.Default">Available</MudChip>
+                  <MudChip T="string" Size="Size.Small" Color="Color.Default" Icon="@Icons.Material.Filled.Circle">Available</MudChip>
                 }
               </MudTd>
               <MudTd DataLabel="Actions">
@@ -116,15 +116,15 @@
               <MudTd DataLabel="Status">
                 @if (context.IsActive)
                 {
-                  <MudChip T="string" Size="Size.Small" Color="Color.Success">Active</MudChip>
+                  <MudChip T="string" Size="Size.Small" Color="Color.Success" Icon="@Icons.Material.Filled.CheckCircle">Active</MudChip>
                 }
                 else if (context.IsDefault)
                 {
-                  <MudChip T="string" Size="Size.Small" Color="Color.Primary">Default</MudChip>
+                  <MudChip T="string" Size="Size.Small" Color="Color.Primary" Icon="@Icons.Material.Filled.Star">Default</MudChip>
                 }
                 else
                 {
-                  <MudChip T="string" Size="Size.Small" Color="Color.Default">Available</MudChip>
+                  <MudChip T="string" Size="Size.Small" Color="Color.Default" Icon="@Icons.Material.Filled.Circle">Available</MudChip>
                 }
               </MudTd>
             </RowTemplate>
@@ -165,7 +165,7 @@
                 }
                 else
                 {
-                  <MudChip T="string" Size="Size.Small" Color="Color.Success">Available</MudChip>
+                  <MudChip T="string" Size="Size.Small" Color="Color.Success" Icon="@Icons.Material.Filled.CheckCircle">Available</MudChip>
                 }
               </MudTd>
               <MudTd DataLabel="Reserved By">@(context.ReservedBy ?? "-")</MudTd>

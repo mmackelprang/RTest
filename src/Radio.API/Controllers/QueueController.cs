@@ -279,11 +279,20 @@ public class QueueController : ControllerBase
       Title = queueItem.Title,
       Artist = queueItem.Artist,
       Album = queueItem.Album,
-      Duration = queueItem.Duration,
+      Duration = FormatDuration(queueItem.Duration),
       AlbumArtUrl = queueItem.AlbumArtUrl,
       Index = queueItem.Index,
       IsCurrent = queueItem.IsCurrent
     };
+  }
+
+  private static string? FormatDuration(TimeSpan? duration)
+  {
+    if (duration == null) return null;
+    var ts = duration.Value;
+    return ts.TotalHours >= 1
+      ? $"{(int)ts.TotalHours}:{ts.Minutes:D2}:{ts.Seconds:D2}"
+      : $"{ts.Minutes}:{ts.Seconds:D2}";
   }
 
   private static AudioSourceDto MapToAudioSourceDto(IAudioSource source)

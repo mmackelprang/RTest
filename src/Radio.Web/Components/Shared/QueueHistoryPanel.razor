@@ -9,6 +9,7 @@
 @inject ILogger<QueueHistoryPanel> Logger
 @inject ISnackbar Snackbar
 @inject Radio.Web.Services.QueuePersistenceService QueuePersistence
+@inject PlaylistApiService PlaylistApi
 @implements IAsyncDisposable
 
 <div style="height: 100%; display: flex; flex-direction: column; padding: 0;">
@@ -29,6 +30,12 @@
                            Size="Size.Small"
                            OnClick="OpenFileSelectionDialogAsync"
                            title="Add Files" />
+            <MudIconButton Icon="@Icons.Material.Filled.Save"
+                           Color="Color.Primary"
+                           Size="Size.Small"
+                           Disabled="@(!_queueItems.Any())"
+                           OnClick="OpenSavePlaylistDialogAsync"
+                           title="Save as Playlist" />
             <MudIconButton Icon="@Icons.Material.Filled.DeleteSweep"
                            Color="Color.Error"
                            Size="Size.Small"
@@ -207,6 +214,12 @@
       if (success) _queueItems.Clear();
     }
     catch (Exception ex) { Logger.LogWarning(ex, "Failed to clear queue"); }
+  }
+
+  private async Task OpenSavePlaylistDialogAsync()
+  {
+    var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Small, FullWidth = true };
+    await DialogService.ShowAsync<Radio.Web.Components.Dialogs.SavePlaylistDialog>("Save Playlist", options);
   }
 
   private async Task OpenFileSelectionDialogAsync()

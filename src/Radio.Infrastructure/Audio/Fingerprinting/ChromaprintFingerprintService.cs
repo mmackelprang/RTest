@@ -54,12 +54,14 @@ public class ChromaprintFingerprintService : IFingerprintService
       "Generating fingerprint for {Duration}s of audio ({SampleRate}Hz, {Channels}ch)",
       samples.Duration.TotalSeconds, samples.SampleRate, samples.Channels);
 
-    // Write PCM samples to a temp file as signed 16-bit little-endian
-    var tempFile = Path.Combine(Path.GetTempPath(), $"fpcalc_{Guid.NewGuid():N}.raw");
+    // Write PCM samples to a WAV file so fpcalc can decode it reliably.
+    // Raw PCM with -format/-rate/-channels flags is unreliable across fpcalc versions.
+    var tempFile = Path.Combine(Path.GetTempPath(), $"fpcalc_{Guid.NewGuid():N}.wav");
     try
     {
       // Convert float samples to s16le bytes
-      var byteBuffer = new byte[samples.Samples.Length * 2];
+      var pcmDataLength = samples.Samples.Length * 2;
+      var byteBuffer = new byte[pcmDataLength];
       for (int i = 0; i < samples.Samples.Length; i++)
       {
         float sample = Math.Clamp(samples.Samples[i], -1.0f, 1.0f);
@@ -68,12 +70,10 @@ public class ChromaprintFingerprintService : IFingerprintService
         byteBuffer[i * 2 + 1] = (byte)((pcm >> 8) & 0xFF);
       }
 
-      await File.WriteAllBytesAsync(tempFile, byteBuffer, ct);
+      await WriteWavFileAsync(tempFile, byteBuffer, samples.SampleRate, samples.Channels, ct);
 
-      // Call fpcalc with raw PCM format
-      var result = await RunFpcalcAsync(
-        $"-format s16le -rate {samples.SampleRate} -channels {samples.Channels} -json \"{tempFile}\"",
-        ct);
+      // Call fpcalc on the WAV file — same as GenerateFingerprintFromFileAsync
+      var result = await RunFpcalcAsync($"-json \"{tempFile}\"", ct);
 
       if (result == null)
       {
@@ -135,6 +135,45 @@ public class ChromaprintFingerprintService : IFingerprintService
       GeneratedAt = DateTime.UtcNow,
       SourcePath = filePath
     };
+  }
+
+  /// <summary>
+  /// Writes a standard 44-byte RIFF WAV header followed by s16le PCM data.
+  /// This ensures fpcalc/FFmpeg decodes the audio correctly regardless of version.
+  /// </summary>
+  private static async Task WriteWavFileAsync(
+    string path, byte[] pcmData, int sampleRate, int channels, CancellationToken ct)
+  {
+    const int bitsPerSample = 16;
+    int byteRate = sampleRate * channels * (bitsPerSample / 8);
+    short blockAlign = (short)(channels * (bitsPerSample / 8));
+    int dataSize = pcmData.Length;
+    int fileSize = 36 + dataSize; // RIFF chunk size = file size - 8
+
+    using var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 4096, useAsync: true);
+    var header = new byte[44];
+
+    // RIFF header
+    header[0] = (byte)'R'; header[1] = (byte)'I'; header[2] = (byte)'F'; header[3] = (byte)'F';
+    BitConverter.TryWriteBytes(header.AsSpan(4), fileSize);
+    header[8] = (byte)'W'; header[9] = (byte)'A'; header[10] = (byte)'V'; header[11] = (byte)'E';
+
+    // fmt sub-chunk
+    header[12] = (byte)'f'; header[13] = (byte)'m'; header[14] = (byte)'t'; header[15] = (byte)' ';
+    BitConverter.TryWriteBytes(header.AsSpan(16), 16); // sub-chunk size
+    BitConverter.TryWriteBytes(header.AsSpan(20), (short)1); // PCM format
+    BitConverter.TryWriteBytes(header.AsSpan(22), (short)channels);
+    BitConverter.TryWriteBytes(header.AsSpan(24), sampleRate);
+    BitConverter.TryWriteBytes(header.AsSpan(28), byteRate);
+    BitConverter.TryWriteBytes(header.AsSpan(32), blockAlign);
+    BitConverter.TryWriteBytes(header.AsSpan(34), (short)bitsPerSample);
+
+    // data sub-chunk
+    header[36] = (byte)'d'; header[37] = (byte)'a'; header[38] = (byte)'t'; header[39] = (byte)'a';
+    BitConverter.TryWriteBytes(header.AsSpan(40), dataSize);
+
+    await fs.WriteAsync(header, ct);
+    await fs.WriteAsync(pcmData, ct);
   }
 
   private async Task<FpcalcResult?> RunFpcalcAsync(string arguments, CancellationToken ct)
@@ -221,26 +260,36 @@ public class ChromaprintFingerprintService : IFingerprintService
     string[] searchPaths;
     if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
     {
+      string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+      // Search recursively up a few levels to find tools dir in typical manufacturing/dev layout
       searchPaths =
       [
-        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fpcalcName),
-        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tools", fpcalcName),
+        Path.Combine(baseDir, fpcalcName),
+        Path.Combine(baseDir, "tools", fpcalcName),
+        // Normalize paths to resolve relative segments
+        Path.GetFullPath(Path.Combine(baseDir, "../../../../tools/fpcalc", fpcalcName)),
+        Path.GetFullPath(Path.Combine(baseDir, "../../../../../tools/fpcalc", fpcalcName)),
       ];
     }
     else
     {
+      string baseDir = AppDomain.CurrentDomain.BaseDirectory;
       searchPaths =
       [
-        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fpcalcName),
+        Path.Combine(baseDir, fpcalcName),
         "/usr/bin/fpcalc",
         "/usr/local/bin/fpcalc",
+        // Look up directory tree for linux dev environments
+        Path.GetFullPath(Path.Combine(baseDir, "../../../../tools/fpcalc", fpcalcName)),
       ];
     }
 
     foreach (var path in searchPaths)
     {
       if (File.Exists(path))
+      {
         return path;
+      }
     }
 
     _logger.LogWarning(

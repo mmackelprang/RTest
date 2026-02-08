@@ -39,7 +39,7 @@ public class AudioVisualizationHubService : IAsyncDisposable
     {
       if (_hubConnection != null)
       {
-        _logger.LogWarning("Hub connection already initialized");
+        _logger.LogDebug("Hub connection already initialized");
         return;
       }
 

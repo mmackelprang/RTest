@@ -1661,6 +1661,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
         !string.IsNullOrEmpty(track.CoverArtUrl))
     {
       _metadata[StandardMetadataKeys.AlbumArtUrl] = track.CoverArtUrl;
+      Logger.LogInformation("Album art URL set for '{Title}': {Url}", track.Title, track.CoverArtUrl);
     }
 
     // Add optional metadata if not already present

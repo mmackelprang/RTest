@@ -8,7 +8,7 @@ public class RadioStateDto
   /// <summary>
   /// Gets or sets the current frequency in Hertz (Hz).
   /// </summary>
-  public long Frequency { get; set; }
+  public double Frequency { get; set; }
 
   /// <summary>
   /// Gets or sets the current band (AM, FM, etc.).
@@ -18,27 +18,22 @@ public class RadioStateDto
   /// <summary>
   /// Gets or sets the frequency step size in Hertz (Hz).
   /// </summary>
-  public long FrequencyStep { get; set; }
+  public double Step { get; set; }
 
   /// <summary>
   /// Gets or sets the signal strength as a percentage (0-100).
   /// </summary>
-  public int SignalStrength { get; set; }
-
-  /// <summary>
-  /// Gets or sets a value indicating whether the radio is receiving a stereo signal.
-  /// </summary>
-  public bool IsStereo { get; set; }
+  public int? SignalStrength { get; set; }
 
   /// <summary>
   /// Gets or sets the current equalizer mode.
   /// </summary>
-  public string EqualizerMode { get; set; } = string.Empty;
+  public string? Equalizer { get; set; }
 
   /// <summary>
   /// Gets or sets the device-specific volume (0-100).
   /// </summary>
-  public int DeviceVolume { get; set; }
+  public int? DeviceVolume { get; set; }
 
   /// <summary>
   /// Gets or sets a value indicating whether the radio is currently scanning.
@@ -53,17 +48,12 @@ public class RadioStateDto
   /// <summary>
   /// Gets or sets a value indicating whether automatic gain control is enabled.
   /// </summary>
-  public bool AutoGainEnabled { get; set; }
+  public bool AutoGain { get; set; }
 
   /// <summary>
-  /// Gets or sets the manual gain value in dB (only effective when AutoGainEnabled is false).
+  /// Gets or sets the manual gain value in dB (only effective when AutoGain is false).
   /// </summary>
-  public float Gain { get; set; }
-
-  /// <summary>
-  /// Gets or sets a value indicating whether the radio receiver is running.
-  /// </summary>
-  public bool IsRunning { get; set; }
+  public int? Gain { get; set; }
 }
 
 /// <summary>

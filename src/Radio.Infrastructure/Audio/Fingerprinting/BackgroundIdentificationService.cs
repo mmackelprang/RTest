@@ -120,29 +120,53 @@ public sealed class BackgroundIdentificationService : BackgroundService
 
     _logger.LogDebug("Audio source active: {SourceType} - {SourceName}", audioTap.SourceType, audioTap.SourceName);
 
-    // Capture audio samples
-    var captureStartTime = DateTime.UtcNow;
-    var sampleDuration = TimeSpan.FromSeconds(_options.SampleDurationSeconds);
-    _logger.LogDebug("Attempting to capture {Duration}s of audio", sampleDuration.TotalSeconds);
-    
-    var samples = await audioTap.CaptureAsync(sampleDuration, ct);
-    var captureElapsed = (DateTime.UtcNow - captureStartTime).TotalMilliseconds;
-    
-    if (samples == null)
+    FingerprintData fingerprint;
+
+    // For file-based sources, fingerprint the actual file to get correct track duration.
+    // AcoustID requires duration within ~3s of the real track length to match.
+    var sourceFilePath = audioTap.SourceFilePath;
+    if (!string.IsNullOrEmpty(sourceFilePath))
     {
-      _logger.LogWarning("No audio samples captured after {Elapsed}ms", captureElapsed);
-      return;
+      _logger.LogDebug("File source detected, fingerprinting file directly: {FilePath}", sourceFilePath);
+      var fingerprintStartTime = DateTime.UtcNow;
+      fingerprint = await fingerprintService.GenerateFingerprintFromFileAsync(sourceFilePath, ct);
+      var fingerprintElapsed = (DateTime.UtcNow - fingerprintStartTime).TotalMilliseconds;
+
+      if (string.IsNullOrEmpty(fingerprint.ChromaprintHash))
+      {
+        _logger.LogWarning("Failed to generate fingerprint from file: {FilePath}", sourceFilePath);
+        return;
+      }
+
+      _logger.LogDebug("Generated fingerprint {Id} from file (duration={Duration}s) in {Elapsed}ms",
+        fingerprint.Id, fingerprint.DurationSeconds, fingerprintElapsed);
     }
+    else
+    {
+      // For non-file sources (radio, vinyl, Bluetooth), capture from the output tap.
+      // Note: AcoustID matching may be limited since we can't determine the full track duration.
+      var captureStartTime = DateTime.UtcNow;
+      var sampleDuration = TimeSpan.FromSeconds(_options.SampleDurationSeconds);
+      _logger.LogDebug("Attempting to capture {Duration}s of audio", sampleDuration.TotalSeconds);
 
-    _logger.LogInformation("Captured {SampleCount} audio samples in {Elapsed}ms", samples.Samples.Length, captureElapsed);
+      var samples = await audioTap.CaptureAsync(sampleDuration, ct);
+      var captureElapsed = (DateTime.UtcNow - captureStartTime).TotalMilliseconds;
 
-    // Generate fingerprint
-    var fingerprintStartTime = DateTime.UtcNow;
-    var fingerprint = await fingerprintService.GenerateFingerprintAsync(samples, ct);
-    var fingerprintElapsed = (DateTime.UtcNow - fingerprintStartTime).TotalMilliseconds;
-    
-    _logger.LogInformation("Generated fingerprint {Id} for {Duration}s of audio in {Elapsed}ms",
-      fingerprint.Id, fingerprint.DurationSeconds, fingerprintElapsed);
+      if (samples == null)
+      {
+        _logger.LogWarning("No audio samples captured after {Elapsed}ms", captureElapsed);
+        return;
+      }
+
+      _logger.LogDebug("Captured {SampleCount} audio samples in {Elapsed}ms", samples.Samples.Length, captureElapsed);
+
+      var fingerprintStartTime = DateTime.UtcNow;
+      fingerprint = await fingerprintService.GenerateFingerprintAsync(samples, ct);
+      var fingerprintElapsed = (DateTime.UtcNow - fingerprintStartTime).TotalMilliseconds;
+
+      _logger.LogDebug("Generated fingerprint {Id} for {Duration}s of audio in {Elapsed}ms",
+        fingerprint.Id, fingerprint.DurationSeconds, fingerprintElapsed);
+    }
 
     // Lookup metadata
     var lookupStartTime = DateTime.UtcNow;
@@ -151,7 +175,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
     var result = await lookupService.LookupAsync(fingerprint, ct);
     var lookupElapsed = (DateTime.UtcNow - lookupStartTime).TotalMilliseconds;
     
-    _logger.LogInformation("Lookup completed in {Elapsed}ms. Match={IsMatch}, Confidence={Confidence}",
+    _logger.LogDebug("Lookup completed in {Elapsed}ms. Match={IsMatch}, Confidence={Confidence}",
       lookupElapsed, result?.IsMatch ?? false, result?.Confidence);
 
     // Check duplicate suppression
@@ -187,8 +211,8 @@ public sealed class BackgroundIdentificationService : BackgroundService
     }
     
     var totalElapsed = (DateTime.UtcNow - cycleStartTime).TotalMilliseconds;
-    _logger.LogInformation("Identification cycle completed in {Elapsed}ms (capture: {Capture}ms, fingerprint: {Fingerprint}ms, lookup: {Lookup}ms)",
-      totalElapsed, captureElapsed, fingerprintElapsed, lookupElapsed);
+    _logger.LogDebug("Identification cycle completed in {TotalElapsed}ms (lookup: {Lookup}ms)",
+      totalElapsed, lookupElapsed);
   }
 
   private bool IsDuplicateIdentification(string trackKey)

@@ -57,7 +57,7 @@ public class SourcesApiService
         State = available.ActiveSourceType == sourceType ? "Active" : "Available"
       }).ToList();
 
-      _logger.LogInformation("Returning {Count} sources: {Names}",
+      _logger.LogDebug("Returning {Count} sources: {Names}",
         sources.Count, string.Join(", ", sources.Select(s => s.Name)));
 
       return sources;

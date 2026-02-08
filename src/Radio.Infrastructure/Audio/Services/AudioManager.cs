@@ -51,6 +51,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   private IAudioSource? _previousSource; // Track previous source for delayed cleanup
   private readonly Dictionary<AudioSourceType, IAudioSource> _sourceCache = new();
   private readonly SemaphoreSlim _switchLock = new(1, 1);
+  private readonly SemaphoreSlim _createLock = new(1, 1);
   private bool _initialized;
   private bool _disposed;
 
@@ -283,81 +284,102 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   {
     ObjectDisposedException.ThrowIf(_disposed, this);
 
-    // Check cache first
+    // Check cache first (fast path, no lock)
     if (_sourceCache.TryGetValue(sourceType, out var cachedSource))
     {
       _logger.LogDebug("Returning cached source for type: {SourceType}", sourceType);
-      
+
       if (switchToSource && cachedSource != _activeSource)
       {
         await SwitchSourceAsync(cachedSource, cancellationToken);
       }
-      
+
       return cachedSource;
     }
 
-    _logger.LogInformation("Creating new source for type: {SourceType}", sourceType);
-
-    if (sourceType == AudioSourceType.Bluetooth && !_bluetoothService.IsAvailable)
-    {
-      _logger.LogWarning("Bluetooth service not available; cannot create Bluetooth source");
-      return null;
-    }
-
+    // Serialize source creation to prevent duplicate instances (e.g., two Radio
+    // requests arriving simultaneously, both trying to open the RTL-SDR device)
     IAudioSource? source = null;
+    await _createLock.WaitAsync(cancellationToken);
     try
     {
-      source = sourceType switch
+      // Double-check cache after acquiring lock
+      if (_sourceCache.TryGetValue(sourceType, out cachedSource))
       {
-        AudioSourceType.Radio => CreateRadioSource(),
-        AudioSourceType.FilePlayer => CreateFilePlayerSource(),
-        AudioSourceType.Vinyl => CreateVinylSource(),
-        AudioSourceType.GenericUSB => CreateGenericUSBSource(),
-        AudioSourceType.Bluetooth => CreateBluetoothSource(),
-        _ => null
-      };
-    }
-    catch (Exception ex)
-    {
-      _logger.LogError(ex, "Failed to create source for type: {SourceType}", sourceType);
-      return null;
-    }
+        _logger.LogDebug("Returning cached source for type (after lock): {SourceType}", sourceType);
+        if (switchToSource && cachedSource != _activeSource)
+        {
+          await SwitchSourceAsync(cachedSource, cancellationToken);
+        }
+        return cachedSource;
+      }
 
-    if (source == null)
-    {
-      _logger.LogWarning("Source type {SourceType} is not supported", sourceType);
-      return null;
-    }
+      _logger.LogInformation("Creating new source for type: {SourceType}", sourceType);
 
-    // Initialize the source before adding to mixer
-    if (source is IPrimaryAudioSource primarySource)
-    {
-      _logger.LogDebug("Initializing source: {SourceName}", source.Name);
-      await primarySource.InitializeAsync(cancellationToken);
-
-      if (source.State == AudioSourceState.Error)
+      if (sourceType == AudioSourceType.Bluetooth && !_bluetoothService.IsAvailable)
       {
-        _logger.LogWarning("Source {SourceName} failed to initialize", source.Name);
+        _logger.LogWarning("Bluetooth service not available; cannot create Bluetooth source");
         return null;
       }
+
+      try
+      {
+        source = sourceType switch
+        {
+          AudioSourceType.Radio => CreateRadioSource(),
+          AudioSourceType.FilePlayer => CreateFilePlayerSource(),
+          AudioSourceType.Vinyl => CreateVinylSource(),
+          AudioSourceType.GenericUSB => CreateGenericUSBSource(),
+          AudioSourceType.Bluetooth => CreateBluetoothSource(),
+          _ => null
+        };
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "Failed to create source for type: {SourceType}", sourceType);
+        return null;
+      }
+
+      if (source == null)
+      {
+        _logger.LogWarning("Source type {SourceType} is not supported", sourceType);
+        return null;
+      }
+
+      // Initialize the source before adding to mixer
+      if (source is IPrimaryAudioSource primarySource)
+      {
+        _logger.LogDebug("Initializing source: {SourceName}", source.Name);
+        await primarySource.InitializeAsync(cancellationToken);
+
+        if (source.State == AudioSourceState.Error)
+        {
+          _logger.LogWarning("Source {SourceName} failed to initialize", source.Name);
+          return null;
+        }
+      }
+
+      // Cache the source for reuse
+      _sourceCache[sourceType] = source;
+
+      // Subscribe to state changes for play history tracking
+      SubscribeToSourceStateChanges(source);
+
+      // Add to mixer
+      var mixer = _audioEngine.GetMasterMixer();
+      mixer.AddSource(source);
+
+      _logger.LogInformation(
+        "Created and registered source: {SourceName} ({SourceType})",
+        source.Name, source.Type);
+    }
+    finally
+    {
+      _createLock.Release();
     }
 
-    // Cache the source for reuse
-    _sourceCache[sourceType] = source;
-
-    // Subscribe to state changes for play history tracking
-    SubscribeToSourceStateChanges(source);
-
-    // Add to mixer
-    var mixer = _audioEngine.GetMasterMixer();
-    mixer.AddSource(source);
-
-    _logger.LogInformation(
-      "Created and registered source: {SourceName} ({SourceType})",
-      source.Name, source.Type);
-
-    // Switch to the source if requested
-    if (switchToSource)
+    // Switch to the source if requested (outside _createLock to avoid deadlock with _switchLock)
+    if (switchToSource && source != null)
     {
       await SwitchSourceAsync(source, cancellationToken);
     }
@@ -671,29 +693,46 @@ public class AudioManager : IAudioManager, IAsyncDisposable
       var metadata = GetSourceMetadata(source);
 
       // Build source details including basic metadata for display
-      // We don't set TrackMetadataId because that requires the metadata to be saved
-      // to the TrackMetadata table first. The fingerprinting service will update
-      // the entry with a proper TrackMetadataId after identification.
-      var sourceDetails = source.Name;
-      if (metadata != null)
+      var sourceDetails = $"{metadata.Title} - {metadata.Artist}";
+
+      // Get duration from source metadata if available
+      int? durationSeconds = null;
+      if (source is IPrimaryAudioSource ps && ps.Metadata != null &&
+          ps.Metadata.TryGetValue(StandardMetadataKeys.Duration, out var durObj))
       {
-        sourceDetails = $"{metadata.Title} - {metadata.Artist}";
+        if (durObj is TimeSpan ts)
+          durationSeconds = (int)ts.TotalSeconds;
+        else if (double.TryParse(durObj?.ToString(), out var durVal))
+          durationSeconds = (int)durVal;
+      }
+
+      // Persist the track metadata so the play history entry can reference it
+      string? trackMetadataId = null;
+      var metadataRepository = scope.ServiceProvider.GetService<ITrackMetadataRepository>();
+      if (metadataRepository != null)
+      {
+        await metadataRepository.StoreAsync(metadata);
+        trackMetadataId = metadata.Id;
+      }
+      else
+      {
+        _logger.LogWarning("ITrackMetadataRepository not available, play history entry will lack track metadata");
       }
 
       var entryId = Guid.NewGuid().ToString();
       var entry = new PlayHistoryEntry
       {
         Id = entryId,
-        TrackMetadataId = null, // Don't set FK - metadata isn't saved to TrackMetadata table yet
+        TrackMetadataId = trackMetadataId,
         FingerprintId = null,
         PlayedAt = DateTime.UtcNow,
         Source = playSource,
-        MetadataSource = metadata?.Source,
+        MetadataSource = metadata.Source,
         SourceDetails = sourceDetails,
-        DurationSeconds = null,
+        DurationSeconds = durationSeconds,
         IdentificationConfidence = null,
-        WasIdentified = metadata != null,
-        Track = metadata // Navigation property for in-memory use, not stored
+        WasIdentified = trackMetadataId != null,
+        Track = metadata
       };
 
       await playHistoryRepository.RecordPlayAsync(entry);
@@ -710,44 +749,65 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   }
 
   /// <summary>
-  /// Gets metadata from the source if available.
+  /// Gets metadata from the source. Always returns a TrackMetadata with at least
+  /// a meaningful title and artist, using source-specific fallbacks.
   /// </summary>
-  private TrackMetadata? GetSourceMetadata(IAudioSource source)
+  private TrackMetadata GetSourceMetadata(IAudioSource source)
   {
+    string? title = null;
+    string? artist = null;
+    string? album = null;
+    string? coverArt = null;
+
     // Try to get metadata from the source's Metadata dictionary
-    if (source is not IPrimaryAudioSource primarySource)
+    if (source is IPrimaryAudioSource primarySource)
     {
-      return null;
+      var metadata = primarySource.Metadata;
+      if (metadata != null && metadata.Count > 0)
+      {
+        title = metadata.TryGetValue(StandardMetadataKeys.Title, out var titleObj)
+          ? titleObj?.ToString() : null;
+        artist = metadata.TryGetValue(StandardMetadataKeys.Artist, out var artistObj)
+          ? artistObj?.ToString() : null;
+        album = metadata.TryGetValue(StandardMetadataKeys.Album, out var albumObj)
+          ? albumObj?.ToString() : null;
+        coverArt = metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var coverObj)
+          ? coverObj?.ToString() : null;
+      }
     }
 
-    var metadata = primarySource.Metadata;
-    if (metadata == null || metadata.Count == 0)
+    // Strip default placeholders so we can apply better fallbacks
+    if (title == StandardMetadataKeys.DefaultTitle) title = null;
+    if (artist == StandardMetadataKeys.DefaultArtist) artist = null;
+    if (album == StandardMetadataKeys.DefaultAlbum) album = null;
+    if (coverArt == StandardMetadataKeys.DefaultAlbumArtUrl) coverArt = null;
+
+    // Source-specific fallbacks for title
+    if (string.IsNullOrWhiteSpace(title))
     {
-      return null;
+      title = source.Type switch
+      {
+        AudioSourceType.Radio => GetRadioTitle(source),
+        AudioSourceType.FilePlayer => GetFilePlayerTitle(source),
+        AudioSourceType.Vinyl => "Vinyl",
+        AudioSourceType.GenericUSB => "USB Audio",
+        AudioSourceType.Bluetooth => "Bluetooth Audio",
+        _ => source.Name
+      };
     }
 
-    // Get values from metadata dictionary
-    var title = metadata.TryGetValue(StandardMetadataKeys.Title, out var titleObj)
-      ? titleObj?.ToString() : null;
-    var artist = metadata.TryGetValue(StandardMetadataKeys.Artist, out var artistObj)
-      ? artistObj?.ToString() : null;
-    var album = metadata.TryGetValue(StandardMetadataKeys.Album, out var albumObj)
-      ? albumObj?.ToString() : null;
-    var coverArt = metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var coverObj)
-      ? coverObj?.ToString() : null;
-
-    // Don't create metadata if we only have defaults
-    if (string.IsNullOrWhiteSpace(title) || title == StandardMetadataKeys.DefaultTitle)
+    // Source-specific fallbacks for artist
+    if (string.IsNullOrWhiteSpace(artist))
     {
-      // For file player, try to use the filename
-      if (source is FilePlayerAudioSource filePlayer && !string.IsNullOrEmpty(filePlayer.CurrentFile))
+      artist = source.Type switch
       {
-        title = System.IO.Path.GetFileNameWithoutExtension(filePlayer.CurrentFile);
-      }
-      else
-      {
-        return null;
-      }
+        AudioSourceType.Radio => "Radio",
+        AudioSourceType.FilePlayer => "File Player",
+        AudioSourceType.Vinyl => "Vinyl",
+        AudioSourceType.GenericUSB => "USB Input",
+        AudioSourceType.Bluetooth => "Bluetooth",
+        _ => source.Type.ToString()
+      };
     }
 
     // Determine metadata source based on source type
@@ -760,17 +820,37 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     return new TrackMetadata
     {
       Id = Guid.NewGuid().ToString(),
-      Title = title ?? "Unknown",
-      Artist = string.IsNullOrWhiteSpace(artist) || artist == StandardMetadataKeys.DefaultArtist
-        ? "Unknown" : artist,
-      Album = string.IsNullOrWhiteSpace(album) || album == StandardMetadataKeys.DefaultAlbum
-        ? null : album,
-      CoverArtUrl = string.IsNullOrWhiteSpace(coverArt) || coverArt == StandardMetadataKeys.DefaultAlbumArtUrl
-        ? null : coverArt,
+      Title = title,
+      Artist = artist,
+      Album = string.IsNullOrWhiteSpace(album) ? null : album,
+      CoverArtUrl = string.IsNullOrWhiteSpace(coverArt) ? null : coverArt,
       Source = metadataSource,
       CreatedAt = DateTime.UtcNow,
       UpdatedAt = DateTime.UtcNow
     };
+  }
+
+  /// <summary>
+  /// Gets a descriptive title for radio sources using frequency info.
+  /// </summary>
+  private static string GetRadioTitle(IAudioSource source)
+  {
+    if (source is IPrimaryAudioSource primary && primary.Metadata != null)
+    {
+      if (primary.Metadata.TryGetValue("Frequency", out var freq) && freq != null)
+        return freq.ToString()!;
+    }
+    return "Radio";
+  }
+
+  /// <summary>
+  /// Gets a title for file player sources using the current filename.
+  /// </summary>
+  private static string GetFilePlayerTitle(IAudioSource source)
+  {
+    if (source is FilePlayerAudioSource filePlayer && !string.IsNullOrEmpty(filePlayer.CurrentFile))
+      return System.IO.Path.GetFileNameWithoutExtension(filePlayer.CurrentFile);
+    return "File Player";
   }
 
   /// <summary>
@@ -925,6 +1005,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
 
     _sourceCache.Clear();
     _switchLock.Dispose();
+    _createLock.Dispose();
 
     try
     {

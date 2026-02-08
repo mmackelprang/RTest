@@ -61,7 +61,8 @@ public class VisualizationBroadcastService : BackgroundService
             var spectrum = _visualizerService.GetSpectrumData();
             var level = _visualizerService.GetLevelData();
             var maxMag = spectrum.Magnitudes?.Length > 0 ? spectrum.Magnitudes.Max() : 0;
-            Console.WriteLine($"[VisualizationBroadcast] Broadcasting - MaxMagnitude: {maxMag:F4}, LeftPeak: {level.LeftPeak:F4}, RightPeak: {level.RightPeak:F4}");
+            _logger.LogDebug("VisualizationBroadcast: MaxMagnitude={MaxMag:F4}, LeftPeak={Left:F4}, RightPeak={Right:F4}",
+              maxMag, level.LeftPeak, level.RightPeak);
             lastLogTime = now;
           }
 

@@ -237,7 +237,7 @@
   {
     try
     {
-      Logger.LogInformation("MainLayout.OnInitializedAsync - Starting initialization");
+      Logger.LogDebug("MainLayout.OnInitializedAsync - Starting initialization");
 
       // Load available sources and outputs
       await LoadSourcesAsync();
@@ -255,14 +255,14 @@
 
       // Update time immediately
       _currentTime = DateTime.Now.ToString("HH:mm:ss");
-      Logger.LogInformation("MainLayout - Initial time set to {Time}", _currentTime);
+      Logger.LogDebug("MainLayout - Initial time set to {Time}", _currentTime);
 
       // Start the clock timer using System.Timers.Timer (works reliably in Blazor Server)
       _timer = new System.Timers.Timer(1000);
       _timer.Elapsed += OnTimerElapsed;
       _timer.AutoReset = true;
       _timer.Start();
-      Logger.LogInformation("MainLayout - Timer started, initialization complete");
+      Logger.LogDebug("MainLayout - Timer started, initialization complete");
     }
     catch (Exception ex)
     {
@@ -311,12 +311,12 @@
   {
     try
     {
-      Logger.LogInformation("Loading audio sources...");
+      Logger.LogDebug("Loading audio sources...");
       var sources = await SourcesApi.GetSourcesAsync();
 
       if (sources != null && sources.Count > 0)
       {
-        Logger.LogInformation("Loaded {Count} audio sources: {Sources}",
+        Logger.LogDebug("Loaded {Count} audio sources: {Sources}",
           sources.Count, string.Join(", ", sources.Select(s => s.Name)));
         _availableSources = sources;
 
@@ -326,8 +326,20 @@
           var primary = await SourcesApi.GetPrimarySourceAsync();
           if (primary != null)
           {
-            _selectedSourceId = primary.Id;
-            UpdateNavigationVisibility(primary);
+            // Match by type since the API returns UUID-based IDs that don't match
+            // the dropdown items which use sourceType.ToLowerInvariant() as IDs
+            var matchingSource = _availableSources.FirstOrDefault(s =>
+              s.Type.Equals(primary.Type, StringComparison.OrdinalIgnoreCase));
+            if (matchingSource != null)
+            {
+              _selectedSourceId = matchingSource.Id;
+              UpdateNavigationVisibility(matchingSource);
+            }
+            else
+            {
+              _selectedSourceId = primary.Type.ToLowerInvariant();
+              UpdateNavigationVisibility(primary);
+            }
             return;
           }
         }
@@ -337,7 +349,7 @@
         }
 
         // No primary source active - auto-select Radio as the default source
-        Logger.LogInformation("No active primary source, auto-selecting Radio as default");
+        Logger.LogDebug("No active primary source, auto-selecting Radio as default");
         var radioSource = sources.FirstOrDefault(s => s.Type.Equals("Radio", StringComparison.OrdinalIgnoreCase));
         if (radioSource != null)
         {
@@ -346,7 +358,7 @@
           {
             _selectedSourceId = radioSource.Id;
             UpdateNavigationVisibility(radioSource);
-            Logger.LogInformation("Auto-selected Radio source: {SourceType}", radioSource.Type);
+            Logger.LogDebug("Auto-selected Radio source: {SourceType}", radioSource.Type);
             return;
           }
           Logger.LogWarning("Failed to auto-select Radio source");
@@ -374,12 +386,12 @@
   {
     try
     {
-      Logger.LogInformation("Loading audio output devices...");
+      Logger.LogDebug("Loading audio output devices...");
       var outputs = await DevicesApi.GetOutputDevicesAsync();
 
       if (outputs != null && outputs.Count > 0)
       {
-        Logger.LogInformation("Loaded {Count} output devices: {Devices}",
+        Logger.LogDebug("Loaded {Count} output devices: {Devices}",
           outputs.Count, string.Join(", ", outputs.Select(d => d.Name)));
         _availableOutputs = outputs;
 

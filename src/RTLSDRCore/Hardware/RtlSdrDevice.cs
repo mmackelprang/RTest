@@ -186,6 +186,30 @@ namespace RTLSDRCore.Hardware
                 {
                     Logger.Error("Failed to set frequency to {Frequency}: error {Error}",
                         RadioBand.FormatFrequency(frequencyHz), result);
+
+                    // LIBUSB_ERROR_PIPE (-9) means USB endpoint stalled — attempt recovery
+                    if (result == -9)
+                    {
+                        Logger.Warning("USB pipe stalled (error -9), attempting buffer reset recovery");
+                        try
+                        {
+                            NativeMethods.rtlsdr_reset_buffer(_deviceHandle);
+                            // Retry once after reset
+                            result = NativeMethods.rtlsdr_set_center_freq(_deviceHandle, (uint)frequencyHz);
+                            if (result == 0)
+                            {
+                                Logger.Information("Recovered from USB pipe stall, frequency set to {Frequency}",
+                                    RadioBand.FormatFrequency(frequencyHz));
+                                return true;
+                            }
+                            Logger.Error("Retry after buffer reset also failed with error {Error}", result);
+                        }
+                        catch (Exception resetEx)
+                        {
+                            Logger.Error(resetEx, "Exception during USB pipe stall recovery");
+                        }
+                    }
+
                     return false;
                 }
 

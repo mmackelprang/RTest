@@ -32,8 +32,15 @@
   </div>
 
   <!-- Canvas -->
-  <MudPaper Elevation="2" Style="flex: 1; background-color: #1a1a1a; min-height: 200px; padding: 4px;">
+  <MudPaper Elevation="2" Style="flex: 1; background-color: #1a1a1a; min-height: 200px; padding: 4px; position: relative;">
     <canvas id="visualizer-panel-canvas" style="width: 100%; height: 100%; display: block;"></canvas>
+    @if (_isInitialized && !_hasReceivedData)
+    {
+      <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; opacity: 0.6;">
+        <MudIcon Icon="@Icons.Material.Filled.GraphicEq" Style="font-size: 48px; margin-bottom: 8px;" />
+        <MudText Typo="Typo.body2">Waiting for audio data...</MudText>
+      </div>
+    }
   </MudPaper>
 </div>
 
@@ -48,6 +55,7 @@
   private VisualizationMode _currentMode = VisualizationMode.VUMeter;
   private bool _isInitialized;
   private bool _isDisposed;
+  private bool _hasReceivedData;
   private IJSObjectReference? _jsModule;
 
   protected override async Task OnInitializedAsync()
@@ -166,6 +174,7 @@
   private async Task HandleLevelData(LevelDataDto data)
   {
     if (_isDisposed || !_isInitialized || _jsModule == null || _currentMode != VisualizationMode.VUMeter) return;
+    _hasReceivedData = true;
     try
     {
       await _jsModule.InvokeVoidAsync("visualizer.drawVUMeter",
@@ -177,6 +186,7 @@
   private async Task HandleWaveformData(WaveformDataDto data)
   {
     if (_isDisposed || !_isInitialized || _jsModule == null || _currentMode != VisualizationMode.Waveform) return;
+    _hasReceivedData = true;
     try
     {
       await _jsModule.InvokeVoidAsync("visualizer.drawWaveform",
@@ -188,6 +198,7 @@
   private async Task HandleSpectrumData(SpectrumDataDto data)
   {
     if (_isDisposed || !_isInitialized || _jsModule == null || _currentMode != VisualizationMode.Spectrum) return;
+    _hasReceivedData = true;
     try
     {
       await _jsModule.InvokeVoidAsync("visualizer.drawSpectrum",

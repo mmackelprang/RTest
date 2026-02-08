@@ -562,3 +562,28 @@ public class ReconcileConfigurationRequestDto
   public List<string> Keys { get; set; } = new();
 }
 
+// Playlist DTOs
+public class PlaylistSummaryDto
+{
+  public string Id { get; set; } = string.Empty;
+  public string Name { get; set; } = string.Empty;
+  public string? Description { get; set; }
+  public int ItemCount { get; set; }
+  public string CreatedAt { get; set; } = string.Empty;
+  public string ModifiedAt { get; set; } = string.Empty;
+}
+
+public class PlaylistDetailDto : PlaylistSummaryDto
+{
+  public List<PlaylistItemDto> Items { get; set; } = new();
+}
+
+public class PlaylistItemDto
+{
+  public string FilePath { get; set; } = string.Empty;
+  public string? Title { get; set; }
+  public string? Artist { get; set; }
+  public string? Album { get; set; }
+  public int? DurationMs { get; set; }
+}
+

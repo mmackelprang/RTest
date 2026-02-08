@@ -308,7 +308,10 @@
         // Load saved filter preference
         if (prefs.TryGetValue("filterExtension", out var filterObj) && filterObj != null)
         {
-          _filterExtension = filterObj.ToString() ?? "*";
+          var filter = filterObj.ToString() ?? "*";
+          // Validate against known extensions to guard against double-encoded values
+          var validFilters = new HashSet<string> { "*", ".mp3", ".flac", ".wav", ".ogg", ".m4a" };
+          _filterExtension = validFilters.Contains(filter) ? filter : "*";
         }
         
         // Load recent paths

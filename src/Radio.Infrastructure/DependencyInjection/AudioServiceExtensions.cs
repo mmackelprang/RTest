@@ -213,6 +213,9 @@ public static class AudioServiceExtensions
     services.AddSingleton<LocalAudioOutput>();
     services.AddSingleton<IAudioOutput>(sp => sp.GetRequiredService<LocalAudioOutput>());
 
+    // Register Cast device cache repository (singleton - shares FingerprintDbContext)
+    services.AddSingleton<CastDeviceCacheRepository>();
+
     // Register Google Cast Output (singleton - optional external output)
     services.AddSingleton<GoogleCastOutput>();
 

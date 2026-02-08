@@ -21,6 +21,7 @@ public class FingerprintTapModifier : SoundModifier
   private int _bufferIndex;
   private readonly object _lock = new();
   private long _totalSamplesProcessed;
+  private bool _loggedFirstBatch;
   private DateTime _lastLogTime = DateTime.MinValue;
   private DateTime _lastProcessedTime = DateTime.MinValue;
 
@@ -68,8 +69,18 @@ public class FingerprintTapModifier : SoundModifier
           // Write to the output tap for fingerprinting/streaming
           _audioEngine.WriteToOutputTap(samplesForTap);
 
-          // Log periodically (every 10 seconds)
           var now = DateTime.UtcNow;
+
+          // Log first batch at Information level for diagnostics
+          if (!_loggedFirstBatch)
+          {
+            _loggedFirstBatch = true;
+            _logger?.LogInformation(
+              "FingerprintTap: First {BufferSize} samples written to output tap (total processed: {TotalSamples})",
+              _bufferSize, _totalSamplesProcessed);
+          }
+
+          // Log periodically (every 10 seconds)
           if ((now - _lastLogTime).TotalSeconds >= 10)
           {
             _logger?.LogDebug(

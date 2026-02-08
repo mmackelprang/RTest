@@ -41,6 +41,14 @@ public interface IAudioEngine : IAsyncDisposable
   Stream GetMixedOutputStream();
 
   /// <summary>
+  /// Creates an independent stream reader with its own read cursor.
+  /// Multiple readers can consume the same audio data without interfering.
+  /// </summary>
+  /// <param name="readerId">A unique identifier for this reader.</param>
+  /// <returns>A stream with an independent read position.</returns>
+  Stream CreateStreamReader(string readerId);
+
+  /// <summary>
   /// Gets the current state of the audio engine.
   /// </summary>
   AudioEngineState State { get; }

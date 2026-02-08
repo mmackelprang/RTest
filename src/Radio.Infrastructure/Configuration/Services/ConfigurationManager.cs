@@ -70,7 +70,7 @@ public sealed class ConfigurationManager : IConfigurationManager
   {
     var store = await _storeFactory.CreateStoreAsync(storeId, CurrentStoreType, ct);
     await store.SaveAsync(ct);
-    _logger.LogInformation("Created configuration store: {StoreId}", storeId);
+    _logger.LogDebug("Created configuration store: {StoreId}", storeId);
     return store;
   }
 

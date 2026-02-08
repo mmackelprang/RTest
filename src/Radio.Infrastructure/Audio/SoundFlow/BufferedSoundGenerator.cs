@@ -112,7 +112,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                         _sampleBuffer.Dequeue();
                         _totalSamplesDropped++;
                         if (_totalSamplesDropped % 1000 == 0) // throttling log
-                           _logger.LogWarning("BufferedSoundGenerator forced to drop sample in Block mode. Buffer full.");
+                           _logger.LogDebug("BufferedSoundGenerator forced to drop sample in Block mode. Buffer full.");
                     }
                 }
                 _sampleBuffer.Enqueue(sample);
@@ -190,7 +190,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             // Don't log if completely idle (no received samples ever)
             if (_totalSamplesReceived > 0)
             {
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "Buffered audio ({Type}): received={Received}, output={Output}, dropped={Dropped}, buffered={Buffered}",
                     typeof(T).Name, _totalSamplesReceived, _totalSamplesOutput, _totalSamplesDropped, currentBuffer);
                 _lastLogTime = now;

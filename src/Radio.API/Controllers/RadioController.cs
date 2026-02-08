@@ -571,18 +571,16 @@ public class RadioController : ControllerBase
   {
     return new RadioStateDto
     {
-      Frequency = radioSource.CurrentFrequency.Hertz, // Convert to Hz for API
+      Frequency = radioSource.CurrentFrequency.Hertz,
       Band = radioSource.CurrentBand.ToString(),
-      FrequencyStep = radioSource.FrequencyStep.Hertz, // Convert to Hz for API
+      Step = radioSource.FrequencyStep.Hertz,
       SignalStrength = radioSource.SignalStrength,
-      IsStereo = radioSource.IsStereo,
-      EqualizerMode = radioSource.EqualizerMode.ToString(),
+      Equalizer = radioSource.EqualizerMode.ToString(),
       DeviceVolume = radioSource.DeviceVolume,
       IsScanning = radioSource.IsScanning,
       ScanDirection = radioSource.ScanDirection?.ToString(),
-      AutoGainEnabled = radioSource.AutoGainEnabled,
-      Gain = radioSource.Gain,
-      IsRunning = radioSource.IsRunning
+      AutoGain = radioSource.AutoGainEnabled,
+      Gain = (int?)radioSource.Gain,
     };
   }
 

@@ -196,24 +196,24 @@ public class SqlitePlayHistoryRepositoryTests : IAsyncLifetime
     var vinylEntry1 = CreateTestHistoryEntry() with { Source = PlaySource.Vinyl };
     var vinylEntry2 = CreateTestHistoryEntry() with { Source = PlaySource.Vinyl };
     var radioEntry = CreateTestHistoryEntry() with { Source = PlaySource.Radio };
-    var spotifyEntry = CreateTestHistoryEntry() with { Source = PlaySource.Vinyl };
+    var fileEntry = CreateTestHistoryEntry() with { Source = PlaySource.File };
 
     await _repository.RecordPlayAsync(vinylEntry1);
     await _repository.RecordPlayAsync(vinylEntry2);
     await _repository.RecordPlayAsync(radioEntry);
-    await _repository.RecordPlayAsync(spotifyEntry);
+    await _repository.RecordPlayAsync(fileEntry);
 
     // Act
     var vinylResults = await _repository.GetBySourceAsync(PlaySource.Vinyl, 10);
     var radioResults = await _repository.GetBySourceAsync(PlaySource.Radio, 10);
-    var spotifyResults = await _repository.GetBySourceAsync(PlaySource.Vinyl, 10);
+    var fileResults = await _repository.GetBySourceAsync(PlaySource.File, 10);
 
     // Assert
     Assert.Equal(2, vinylResults.Count);
     Assert.All(vinylResults, e => Assert.Equal(PlaySource.Vinyl, e.Source));
     Assert.Single(radioResults);
-    Assert.Single(spotifyResults);
-    Assert.Equal(PlaySource.Vinyl, spotifyResults[0].Source);
+    Assert.Single(fileResults);
+    Assert.Equal(PlaySource.File, fileResults[0].Source);
   }
 
   [Fact]

@@ -26,9 +26,11 @@
                    ValueChanged="@(async (string val) => await SetSourceFilterAsync(val))"
                    Clearable="true">
           <MudSelectItem Value="@("All")">All Sources</MudSelectItem>
-          <MudSelectItem Value="@("Spotify")">Spotify</MudSelectItem>
           <MudSelectItem Value="@("File")">File Player</MudSelectItem>
           <MudSelectItem Value="@("Radio")">Radio</MudSelectItem>
+          <MudSelectItem Value="@("GenericUSB")">USB Audio</MudSelectItem>
+          <MudSelectItem Value="@("Vinyl")">Vinyl</MudSelectItem>
+          <MudSelectItem Value="@("Bluetooth")">Bluetooth</MudSelectItem>
         </MudSelect>
       </MudItem>
       <MudItem xs="12" sm="6" md="3">
@@ -312,30 +314,11 @@
     await LoadDataAsync();
   }
 
-  private async Task LoadPreferencesAsync()
+  private Task LoadPreferencesAsync()
   {
-    try
-    {
-      var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("ui.history");
-      if (prefs != null)
-      {
-        // Load saved source filter preference
-        if (prefs.TryGetValue("sourceFilter", out var filterObj) && filterObj != null)
-        {
-          var filterValue = filterObj.ToString()?.Trim();
-          _sourceFilter = string.IsNullOrWhiteSpace(filterValue) ? "All" : filterValue;
-        }
-      }
-      else
-      {
-        // Save default filter
-        await SavePreferenceAsync("sourceFilter", _sourceFilter);
-      }
-    }
-    catch (Exception ex)
-    {
-      Logger.LogWarning(ex, "Failed to load preferences for Play History page");
-    }
+    // Always start with "All" to avoid confusion from persisted filters
+    _sourceFilter = "All";
+    return Task.CompletedTask;
   }
 
   private async Task SavePreferenceAsync(string key, object value)
@@ -513,9 +496,11 @@
   {
     return source switch
     {
-      "Spotify" => Color.Success,
-      "FilePlayer" => Color.Info,
+      "File" => Color.Info,
       "Radio" => Color.Warning,
+      "GenericUSB" => Color.Tertiary,
+      "Vinyl" => Color.Success,
+      "Bluetooth" => Color.Secondary,
       _ => Color.Default
     };
   }

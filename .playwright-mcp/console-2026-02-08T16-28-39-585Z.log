@@ -1,0 +1,17 @@
+[    6849ms] Unexpected token 'export'
+[    6855ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://localhost:5003/favicon.ico:0
+[   52763ms] Unexpected token 'export'
+[   56420ms] Unexpected token 'export'
+[   59114ms] Unexpected token 'export'
+[   61818ms] Unexpected token 'export'
+[   64527ms] Unexpected token 'export'
+[   67189ms] Unexpected token 'export'
+[   69869ms] Unexpected token 'export'
+[   72546ms] Unexpected token 'export'
+[ 7496472ms] [ERROR] [2026-02-08T18:33:36.057Z] Error: Connection disconnected with error 'Error: WebSocket closed with status code: 1006 (no reason given).'. @ https://localhost:5003/_framework/blazor.web.js:0
+[ 7501827ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://localhost:5003/_blazor/negotiate?negotiateVersion=1:0
+[ 7501827ms] [WARNING] [2026-02-08T18:33:41.411Z] Warning: Error from HTTP request. TypeError: Failed to fetch. @ https://localhost:5003/_framework/blazor.web.js:0
+[ 7501827ms] [ERROR] [2026-02-08T18:33:41.411Z] Error: Failed to complete negotiation with the server: TypeError: Failed to fetch @ https://localhost:5003/_framework/blazor.web.js:0
+[ 7501827ms] [ERROR] [2026-02-08T18:33:41.411Z] Error: Failed to start the connection: Error: Failed to complete negotiation with the server: TypeError: Failed to fetch @ https://localhost:5003/_framework/blazor.web.js:0
+[ 7501827ms] [ERROR] [2026-02-08T18:33:41.412Z] Error: Error: Failed to complete negotiation with the server: TypeError: Failed to fetch @ https://localhost:5003/_framework/blazor.web.js:0
+[ 7501827ms] [ERROR] [2026-02-08T18:33:41.412Z] Error: Error: Failed to complete negotiation with the server: TypeError: Failed to fetch @ https://localhost:5003/_framework/blazor.web.js:0

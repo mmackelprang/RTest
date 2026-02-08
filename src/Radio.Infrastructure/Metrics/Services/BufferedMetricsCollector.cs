@@ -174,7 +174,7 @@ public sealed class BufferedMetricsCollector : IMetricsCollector, IHostedService
         }
       }
 
-      _logger.LogInformation("Flushed {Count} metrics to database", buffersToFlush.Count);
+      _logger.LogDebug("Flushed {Count} metrics to database", buffersToFlush.Count);
     }
     catch (Exception ex)
     {

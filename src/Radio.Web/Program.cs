@@ -95,6 +95,18 @@ builder.Services.AddHttpClient<QueueApiService>(client =>
   return handler;
 });
 
+builder.Services.AddHttpClient<PlaylistApiService>(client =>
+{
+  client.BaseAddress = new Uri(apiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(30);
+})
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
+});
+
 builder.Services.AddHttpClient<SourcesApiService>(client =>
 {
   client.BaseAddress = new Uri(apiBaseUrl);

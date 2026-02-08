@@ -19,18 +19,15 @@ internal sealed class WindowsBluetoothService : IBluetoothService
     private readonly BluetoothOptions _options;
     private readonly Radio.Infrastructure.Audio.SoundFlow.SoundFlowDeviceManager? _deviceManager;
     private BluetoothClient _client;
-    // Suppressing unused warning for _radio as it might be needed for specific Win32 interactions later
-    #pragma warning disable CS0169
     private BluetoothRadio? _radio;
-    #pragma warning restore CS0169
     private readonly Timer _stateTimer;
 
-    // InTheHand.Net doesn't have robust event-driven discovery in the same way, 
+    // InTheHand.Net doesn't have robust event-driven discovery in the same way,
     // often relies on polling or blocking calls. We'll simulate async discovery.
     private CancellationTokenSource? _discoveryCts;
 
     public WindowsBluetoothService(
-        ILogger logger, 
+        ILogger logger,
         IOptions<BluetoothOptions> options,
         Radio.Infrastructure.Audio.SoundFlow.SoundFlowDeviceManager? deviceManager = null)
     {
@@ -38,12 +35,27 @@ internal sealed class WindowsBluetoothService : IBluetoothService
         _options = options.Value;
         _deviceManager = deviceManager;
         _client = new BluetoothClient();
-        
+
+        // Try to get the primary radio at construction time
+        try
+        {
+            _radio = BluetoothRadio.Default;
+            if (_radio != null)
+            {
+                _logger.LogInformation("Bluetooth radio found: {Name}, Mode: {Mode}",
+                    _radio.Name, _radio.Mode);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to get primary Bluetooth radio");
+        }
+
         // Poll for state changes
         _stateTimer = new Timer(CheckState, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2));
     }
 
-    public bool IsAvailable => true; // Assume true on Windows; IsSupported/PrimaryRadio might not be static in 4.x
+    public bool IsAvailable => _radio != null;
 
     public BluetoothAdapterState State { get; private set; } = BluetoothAdapterState.Unknown;
 
@@ -53,7 +65,6 @@ internal sealed class WindowsBluetoothService : IBluetoothService
         {
             try
             {
-                // In 4.x check if client exposes paired devices directly or query via discover
                     return _client.PairedDevices.Select(MapDevice).ToList();
             }
             catch (Exception ex)
@@ -90,17 +101,37 @@ internal sealed class WindowsBluetoothService : IBluetoothService
 
     private void CheckState(object? state)
     {
-        // In 4.x getting PrimaryRadio requires context usually, but there is a static method in some versions.
-        // Simplified check:
-            try 
+        try
+        {
+            if (_radio != null)
             {
-            // Just assume ON if no exception for now as 32feet API varies by version
-            UpdateState(BluetoothAdapterState.On);
-            } 
-            catch 
-            {
-            UpdateState(BluetoothAdapterState.Off);
+                var mode = _radio.Mode;
+                var adapterState = mode switch
+                {
+                    RadioMode.PowerOff => BluetoothAdapterState.Off,
+                    _ => BluetoothAdapterState.On
+                };
+                UpdateState(adapterState);
             }
+            else
+            {
+                // Try to re-acquire radio (may have been plugged in)
+                _radio = BluetoothRadio.Default;
+                if (_radio != null)
+                {
+                    _logger.LogInformation("Bluetooth radio became available: {Name}", _radio.Name);
+                    UpdateState(BluetoothAdapterState.On);
+                }
+                else
+                {
+                    UpdateState(BluetoothAdapterState.Off);
+                }
+            }
+        }
+        catch
+        {
+            UpdateState(BluetoothAdapterState.Off);
+        }
     }
 
     private void UpdateState(BluetoothAdapterState newState)
@@ -109,23 +140,55 @@ internal sealed class WindowsBluetoothService : IBluetoothService
         {
             var oldState = State;
             State = newState;
-            StateChanged?.Invoke(this, new BluetoothAdapterStateChangedEventArgs 
-            { 
-                PreviousState = oldState, 
-                NewState = newState 
+            StateChanged?.Invoke(this, new BluetoothAdapterStateChangedEventArgs
+            {
+                PreviousState = oldState,
+                NewState = newState
             });
         }
     }
 
     public Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default)
     {
-        // Windows manages radio state
-        return Task.FromResult(true);
+        try
+        {
+            if (_radio == null)
+            {
+                _radio = BluetoothRadio.Default;
+            }
+
+            if (_radio == null)
+            {
+                _logger.LogWarning("No Bluetooth radio available to set discoverable");
+                return Task.FromResult(false);
+            }
+
+            _radio.Mode = RadioMode.Discoverable;
+            _logger.LogInformation("Bluetooth radio set to Discoverable mode (device name: {Name})", deviceName);
+            return Task.FromResult(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to set Bluetooth radio to Discoverable mode");
+            return Task.FromResult(false);
+        }
     }
 
     public Task StopAsync(CancellationToken cancellationToken = default)
     {
-        // Cannot programmatically turn off Bluetooth radio on Windows easily/reliably via this library
+        try
+        {
+            if (_radio != null)
+            {
+                _radio.Mode = RadioMode.Connectable;
+                _logger.LogInformation("Bluetooth radio set to Connectable mode (no longer discoverable)");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to set Bluetooth radio to Connectable mode");
+        }
+
         return Task.CompletedTask;
     }
 
@@ -138,14 +201,13 @@ internal sealed class WindowsBluetoothService : IBluetoothService
         IsDiscovering = true;
         _discoveryCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        _ = Task.Run(async () => 
+        _ = Task.Run(async () =>
         {
             try
             {
-                // 4.x DiscoverDevicesAsync method check
                 while (!_discoveryCts.Token.IsCancellationRequested)
                 {
-                    var devices = _client.DiscoverDevices(); // Sync block or minimal params
+                    var devices = _client.DiscoverDevices();
                     foreach (var d in devices)
                     {
                         var info = MapDevice(d);
@@ -219,16 +281,14 @@ internal sealed class WindowsBluetoothService : IBluetoothService
         }
 
         // Attempt to find capture device matching connected bluetooth device name
-        // Often "Bluetooth Something" or just the device name
         var deviceName = ConnectedDevice.Name;
         var captureId = _deviceManager.FindCaptureDeviceByName(deviceName);
-        
+
         if (captureId != null)
         {
-            // Return just the ID string for now (matches SoundFlowDeviceManager.FindCaptureDeviceByName return type)
             return Task.FromResult<object?>(captureId);
         }
-        
+
         return Task.FromResult<object?>(null);
     }
 
@@ -240,7 +300,6 @@ internal sealed class WindowsBluetoothService : IBluetoothService
             Name = device.DeviceName,
             IsPaired = device.Authenticated,
             IsConnected = device.Connected,
-            // LastSeen property has availability issues across 32feet versions
             LastConnected = DateTime.UtcNow
         };
     }
@@ -249,13 +308,27 @@ internal sealed class WindowsBluetoothService : IBluetoothService
     {
         _stateTimer?.Dispose();
         _discoveryCts?.Cancel();
+
+        // Restore connectable mode on shutdown
+        try
+        {
+            if (_radio != null && _radio.Mode == RadioMode.Discoverable)
+            {
+                _radio.Mode = RadioMode.Connectable;
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup
+        }
+
         try
         {
             _client?.Dispose();
         }
         catch
         {
-            // InTheHand.Net can throw NullReferenceException during dispose if not fully initialized (common in test environments)
+            // InTheHand.Net can throw NullReferenceException during dispose if not fully initialized
         }
     }
 }

@@ -26,9 +26,9 @@ public class QueueItemDto
   public string Album { get; set; } = string.Empty;
 
   /// <summary>
-  /// Gets or sets the duration of the track, if available.
+  /// Gets or sets the formatted duration of the track (e.g., "3:01", "1:02:30").
   /// </summary>
-  public TimeSpan? Duration { get; set; }
+  public string? Duration { get; set; }
 
   /// <summary>
   /// Gets or sets the URL to the album art, if available.
