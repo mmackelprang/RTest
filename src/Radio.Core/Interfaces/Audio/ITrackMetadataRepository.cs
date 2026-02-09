@@ -56,4 +56,12 @@ public interface ITrackMetadataRepository
     string query,
     int limit = 20,
     CancellationToken ct = default);
+
+  /// <summary>
+  /// Updates the cover art URL for existing track metadata.
+  /// </summary>
+  /// <param name="id">The metadata ID.</param>
+  /// <param name="coverArtUrl">The new cover art URL.</param>
+  /// <param name="ct">Cancellation token.</param>
+  Task UpdateCoverArtUrlAsync(string id, string coverArtUrl, CancellationToken ct = default);
 }

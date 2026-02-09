@@ -68,15 +68,37 @@ public sealed class MetadataLookupService : IMetadataLookupService
     if (cached?.Metadata != null)
     {
       await _cache.UpdateLastMatchedAsync(cached.Id, ct);
-      _logger.LogDebug("Found cached metadata for fingerprint: {Title} by {Artist}",
-        cached.Metadata.Title, cached.Metadata.Artist);
+      _logger.LogDebug("Found cached metadata for fingerprint: {Title} by {Artist} (CoverArtUrl={CoverArtUrl})",
+        cached.Metadata.Title, cached.Metadata.Artist, cached.Metadata.CoverArtUrl ?? "(none)");
+
+      // Re-enrich cover art if missing from cache but we have a MusicBrainz release ID
+      var metadata = cached.Metadata;
+      if (string.IsNullOrEmpty(metadata.CoverArtUrl) && !string.IsNullOrEmpty(metadata.MusicBrainzReleaseId))
+      {
+        _logger.LogInformation("Cached metadata for '{Title}' missing cover art, fetching from Cover Art Archive (release {ReleaseId})",
+          metadata.Title, metadata.MusicBrainzReleaseId);
+        try
+        {
+          var coverArtUrl = await GetCoverArtUrlAsync(metadata.MusicBrainzReleaseId, ct);
+          if (!string.IsNullOrEmpty(coverArtUrl))
+          {
+            metadata = metadata with { CoverArtUrl = coverArtUrl, UpdatedAt = DateTime.UtcNow };
+            await _metadataRepo.UpdateCoverArtUrlAsync(metadata.Id, coverArtUrl, ct);
+            _logger.LogInformation("Cover art URL updated for '{Title}': {Url}", metadata.Title, coverArtUrl);
+          }
+        }
+        catch (Exception ex)
+        {
+          _logger.LogDebug(ex, "Failed to re-enrich cover art for cached metadata");
+        }
+      }
 
       return new MetadataLookupResult
       {
         IsMatch = true,
         Confidence = 1.0,
         FingerprintId = cached.Id,
-        Metadata = cached.Metadata,
+        Metadata = metadata,
         Source = LookupSource.Cache
       };
     }

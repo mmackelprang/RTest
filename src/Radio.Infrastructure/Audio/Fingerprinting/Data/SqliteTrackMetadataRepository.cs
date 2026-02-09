@@ -198,6 +198,27 @@ public sealed class SqliteTrackMetadataRepository : ITrackMetadataRepository
     return results;
   }
 
+  /// <inheritdoc/>
+  public async Task UpdateCoverArtUrlAsync(string id, string coverArtUrl, CancellationToken ct = default)
+  {
+    var conn = await _dbContext.GetConnectionAsync(ct);
+
+    var sql = """
+      UPDATE TrackMetadata
+      SET CoverArtUrl = @CoverArtUrl, UpdatedAt = @UpdatedAt
+      WHERE Id = @Id
+      """;
+
+    await using var cmd = conn.CreateCommand();
+    cmd.CommandText = sql;
+    cmd.Parameters.AddWithValue("@Id", id);
+    cmd.Parameters.AddWithValue("@CoverArtUrl", coverArtUrl);
+    cmd.Parameters.AddWithValue("@UpdatedAt", DateTime.UtcNow.ToString("O"));
+
+    await cmd.ExecuteNonQueryAsync(ct);
+    _logger.LogDebug("Updated cover art URL for metadata {Id}", id);
+  }
+
   private static TrackMetadata MapToTrackMetadata(Microsoft.Data.Sqlite.SqliteDataReader reader)
   {
     return new TrackMetadata

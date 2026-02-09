@@ -1618,20 +1618,32 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// </summary>
   private void OnTrackIdentified(object? sender, TrackIdentifiedEventArgs e)
   {
-    // Only update metadata if this is the active source and metadata is incomplete
+    // Only update metadata if this is the active source
     if (State != AudioSourceState.Playing && State != AudioSourceState.Paused)
     {
       return;
     }
 
-    // Check if current file needs fingerprinting lookup
-    if (!_metadata.ContainsKey("NeedsFingerprintingLookup") || 
+    var track = e.Track;
+
+    // Always update album art from fingerprinting if still using default.
+    // SoundFlow's metadata reader doesn't extract embedded album art, so this
+    // is the only path for file sources to get cover art (via Cover Art Archive).
+    if (_metadata.ContainsKey(StandardMetadataKeys.AlbumArtUrl) &&
+        _metadata[StandardMetadataKeys.AlbumArtUrl].Equals(StandardMetadataKeys.DefaultAlbumArtUrl) &&
+        !string.IsNullOrEmpty(track.CoverArtUrl))
+    {
+      _metadata[StandardMetadataKeys.AlbumArtUrl] = track.CoverArtUrl;
+      Logger.LogInformation("Album art URL set for '{Title}': {Url}", track.Title, track.CoverArtUrl);
+    }
+
+    // Check if current file needs full fingerprinting metadata lookup (incomplete tags)
+    if (!_metadata.ContainsKey("NeedsFingerprintingLookup") ||
         !(_metadata["NeedsFingerprintingLookup"] is bool needsLookup && needsLookup))
     {
       return;
     }
 
-    var track = e.Track;
     Logger.LogInformation(
       "Updating FilePlayer metadata from fingerprinting: {Title} by {Artist} (confidence: {Confidence:P0})",
       track.Title, track.Artist, e.Confidence);
@@ -1642,7 +1654,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       _metadata[StandardMetadataKeys.Artist] = track.Artist;
     }
 
-    if (_metadata[StandardMetadataKeys.Album].Equals(StandardMetadataKeys.DefaultAlbum) && 
+    if (_metadata[StandardMetadataKeys.Album].Equals(StandardMetadataKeys.DefaultAlbum) &&
         !string.IsNullOrEmpty(track.Album))
     {
       _metadata[StandardMetadataKeys.Album] = track.Album;
@@ -1654,14 +1666,6 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     if (currentTitle.Equals(filename, StringComparison.OrdinalIgnoreCase))
     {
       _metadata[StandardMetadataKeys.Title] = track.Title;
-    }
-
-    // Add album art if using default
-    if (_metadata[StandardMetadataKeys.AlbumArtUrl].Equals(StandardMetadataKeys.DefaultAlbumArtUrl) &&
-        !string.IsNullOrEmpty(track.CoverArtUrl))
-    {
-      _metadata[StandardMetadataKeys.AlbumArtUrl] = track.CoverArtUrl;
-      Logger.LogInformation("Album art URL set for '{Title}': {Url}", track.Title, track.CoverArtUrl);
     }
 
     // Add optional metadata if not already present

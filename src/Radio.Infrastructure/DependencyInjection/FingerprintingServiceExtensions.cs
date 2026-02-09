@@ -92,8 +92,11 @@ public static class FingerprintingServiceExtensions
     // Register audio tap as scoped
     services.AddScoped<IAudioSampleProvider, SoundFlowAudioTap>();
 
-    // Register background identification service
-    services.AddHostedService<BackgroundIdentificationService>();
+    // Register background identification service as singleton so other components
+    // (AudioManager, FilePlayerAudioSource, etc.) can subscribe to TrackIdentified events.
+    // AddHostedService alone only registers as IHostedService, not as the concrete type.
+    services.AddSingleton<BackgroundIdentificationService>();
+    services.AddHostedService(sp => sp.GetRequiredService<BackgroundIdentificationService>());
 
     return services;
   }

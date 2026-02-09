@@ -200,8 +200,10 @@ public sealed class BackgroundIdentificationService : BackgroundService
     // Raise event for UI updates and play history updates
     if (result?.IsMatch == true && result.Metadata != null)
     {
-      _logger.LogInformation("✓ Identified track: '{Title}' by '{Artist}' (confidence: {Confidence:P0})",
-        result.Metadata.Title, result.Metadata.Artist, result.Confidence);
+      _logger.LogInformation(
+        "✓ Identified track: '{Title}' by '{Artist}' (confidence: {Confidence:P0}, source: {Source}, coverArt: {CoverArtUrl})",
+        result.Metadata.Title, result.Metadata.Artist, result.Confidence,
+        result.Source, result.Metadata.CoverArtUrl ?? "(none)");
 
       TrackIdentified?.Invoke(this, new TrackIdentifiedEventArgs(result.Metadata, result.Confidence));
     }
