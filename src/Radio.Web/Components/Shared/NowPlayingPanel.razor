@@ -13,7 +13,7 @@
     {
       <div style="position: absolute; inset: 0; background-image: url('@_albumArtUrl'); background-size: cover; background-position: center;"></div>
       <div style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.4) 50%, rgba(0,0,0,0.15) 100%);"></div>
-      <img src="@_albumArtUrl" alt="" crossorigin="anonymous" referrerpolicy="no-referrer"
+      <img src="@_albumArtUrl" alt="" referrerpolicy="no-referrer"
            style="display: none;" @onerror="OnAlbumArtError" />
     }
     else
@@ -246,7 +246,10 @@
         _artist = nowPlaying.Artist;
         _album = nowPlaying.Album;
         if (_albumArtUrl != nowPlaying.AlbumArtUrl)
+        {
+          Logger.LogInformation("Album art URL changed: {OldUrl} → {NewUrl}", _albumArtUrl, nowPlaying.AlbumArtUrl);
           _albumArtFailed = false;
+        }
         _albumArtUrl = nowPlaying.AlbumArtUrl;
         _source = nowPlaying.SourceName;
       }
@@ -373,6 +376,7 @@
 
   private void OnAlbumArtError()
   {
+    Logger.LogWarning("Album art image failed to load: {Url}", _albumArtUrl);
     _albumArtFailed = true;
     StateHasChanged();
   }

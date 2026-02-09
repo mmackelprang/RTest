@@ -392,10 +392,20 @@ public class GoogleCastOutput : AudioOutputBase
         // Verify reachability with a TCP connect check before attempting full connection.
         var connectPort = await FindReachablePortAsync(device, cancellationToken);
 
-        _logger.LogDebug("TCP check passed on port {Port}, creating ChromecastReceiver from cache", connectPort);
+        var deviceUri = new Uri($"https://{device.IpAddress}:{connectPort}");
+        _logger.LogInformation("TCP check passed, creating ChromecastReceiver from cache: {Uri}", deviceUri);
+
+        // Create a fresh ChromecastClient for cached connections to avoid stale socket state
+        if (_client != null)
+        {
+          try { await _client.DisconnectAsync(); } catch { }
+        }
+        _client = new ChromecastClient();
+
         _connectedReceiver = new ChromecastReceiver
         {
-          DeviceUri = new Uri($"https://{device.IpAddress}:{connectPort}"),
+          DeviceUri = deviceUri,
+          Port = connectPort,
           Name = device.FriendlyName,
           Model = device.Model
         };
@@ -406,6 +416,7 @@ public class GoogleCastOutput : AudioOutputBase
         throw new InvalidOperationException("Client not initialized. Call InitializeAsync first.");
       }
 
+      _logger.LogDebug("Calling ConnectChromecast with URI: {Uri}", _connectedReceiver.DeviceUri);
       await _client.ConnectChromecast(_connectedReceiver);
 
       ConnectedDevice = device;

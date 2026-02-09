@@ -169,7 +169,8 @@ public class SoundFlowAudioEngine : IAudioEngine
       }
       else
       {
-        _logger.LogWarning("No playback devices found. Audio output will not be available.");
+        _logger.LogError("No playback devices found! Audio playback will fail until a device becomes available. " +
+          "Check that an audio output device is connected and the OS audio service is running.");
       }
 
       // Create output tap for streaming
@@ -335,10 +336,81 @@ public class SoundFlowAudioEngine : IAudioEngine
   internal MiniAudioEngine? GetUnderlyingEngine() => _engine;
 
   /// <summary>
-  /// Gets the initialized playback device.
+  /// Gets the initialized playback device. If the device is null but the engine
+  /// is initialized, attempts to recover by re-enumerating and initializing a device.
   /// </summary>
-  /// <returns>The playback device, or null if not initialized.</returns>
-  internal AudioPlaybackDevice? GetPlaybackDevice() => _playbackDevice;
+  /// <returns>The playback device, or null if not initialized and recovery failed.</returns>
+  internal AudioPlaybackDevice? GetPlaybackDevice()
+  {
+    if (_playbackDevice != null)
+      return _playbackDevice;
+
+    // Attempt lazy recovery if engine is running but device is missing
+    if (_engine != null && (State == AudioEngineState.Ready || State == AudioEngineState.Running))
+    {
+      _logger.LogWarning("Playback device is null but engine is {State} — attempting recovery", State);
+      TryRecoverPlaybackDevice();
+    }
+
+    return _playbackDevice;
+  }
+
+  /// <summary>
+  /// Attempts to recover a missing playback device by re-enumerating
+  /// audio devices and initializing the first available one.
+  /// Called automatically by <see cref="GetPlaybackDevice"/> when the device is null.
+  /// </summary>
+  private void TryRecoverPlaybackDevice()
+  {
+    try
+    {
+      _engine!.UpdateAudioDevicesInfo();
+      var playbackDevices = _engine.PlaybackDevices;
+      _logger.LogInformation("Recovery: Found {Count} playback devices", playbackDevices.Length);
+
+      if (playbackDevices.Length == 0)
+      {
+        _logger.LogError("Recovery failed: no playback devices available");
+        return;
+      }
+
+      var deviceInfo = playbackDevices[0];
+      _logger.LogInformation("Recovery: Initializing playback device: {Name}", deviceInfo.Name);
+
+      _playbackDevice = _engine.InitializePlaybackDevice(deviceInfo, _audioFormat);
+      _currentDeviceIndex = 0;
+
+      _playbackDevice.MasterMixer.Volume = _masterMixer.GetEffectiveVolume();
+      _playbackDevice.Start();
+
+      // Re-attach modifiers
+      if (_balanceModifier != null)
+      {
+        _playbackDevice.MasterMixer.AddModifier(_balanceModifier);
+      }
+      else
+      {
+        _balanceModifier = new BalanceModifier(_masterMixer);
+        _playbackDevice.MasterMixer.AddModifier(_balanceModifier);
+      }
+
+      if (_fingerprintTap != null)
+      {
+        _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
+      }
+      else
+      {
+        _fingerprintTap = new FingerprintTapModifier(this, _logger);
+        _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
+      }
+
+      _logger.LogInformation("Recovery successful: playback device {Name} initialized with modifiers", deviceInfo.Name);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Recovery failed: could not initialize playback device");
+    }
+  }
 
   /// <summary>
   /// Gets the audio format used by the engine.

@@ -14,7 +14,7 @@
     {
       <div style="display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 32px;">
         <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
-        <MudText Typo="Typo.body2" Color="Color.Secondary">Discovering Cast devices...</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Loading devices...</MudText>
       </div>
     }
     else if (_error != null)
@@ -25,7 +25,7 @@
         Retry Discovery
       </MudButton>
     }
-    else if (_devices == null || _devices.Count == 0)
+    else if ((_devices == null || _devices.Count == 0) && !_isScanning)
     {
       <MudAlert Severity="Severity.Info" Class="mb-4">
         No Cast devices found on your network. Make sure your Chromecast or Cast-enabled device is powered on and connected to the same network.
@@ -37,31 +37,78 @@
     }
     else
     {
-      <MudList T="CastDeviceDto" Dense="false" Style="max-height: 300px; overflow-y: auto;">
-        @foreach (var device in _devices)
-        {
-          var isSelected = _selectedDevice?.Id == device.Id;
-          <MudListItem T="CastDeviceDto"
-                       OnClick="@(() => SelectDevice(device))"
-                       Style="@(isSelected ? "background-color: var(--mud-palette-action-default-hover);" : "")">
-            <div style="display: flex; align-items: center; gap: 16px; padding: 12px 0;">
-              <MudIcon Icon="@GetDeviceIcon(device)" Color="@(isSelected ? Color.Primary : Color.Default)" Size="Size.Large" />
-              <div style="flex: 1; min-width: 0;">
-                <MudText Typo="Typo.body1" Style="font-weight: 500;">@device.Name</MudText>
-                <MudText Typo="Typo.caption" Color="Color.Secondary">@device.Model - @device.IpAddress</MudText>
+      @if (_isScanning)
+      {
+        <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-2" />
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-2">
+          Scanning for new devices...
+        </MudText>
+      }
+
+      @if (_devices != null && _devices.Count > 0)
+      {
+        <MudList T="CastDeviceDto" Dense="false" Style="max-height: 300px; overflow-y: auto;">
+          @foreach (var device in _devices)
+          {
+            var isSelected = _selectedDevice?.Id == device.Id;
+            var isDefault = _defaultDevice?.Id == device.Id;
+            var isLive = _discoveredDeviceIds.Contains(device.Id);
+            <MudListItem T="CastDeviceDto"
+                         OnClick="@(() => SelectDevice(device))"
+                         Style="@(isSelected ? "background-color: var(--mud-palette-action-default-hover);" : "")">
+              <div style="display: flex; align-items: center; gap: 16px; padding: 12px 0;">
+                <MudIcon Icon="@GetDeviceIcon(device)" Color="@(isSelected ? Color.Primary : Color.Default)" Size="Size.Large" />
+                <div style="flex: 1; min-width: 0;">
+                  <div style="display: flex; align-items: center; gap: 4px;">
+                    @if (isDefault)
+                    {
+                      <MudIcon Icon="@Icons.Material.Filled.Star" Color="Color.Warning" Size="Size.Small" />
+                    }
+                    <MudText Typo="Typo.body1" Style="font-weight: 500;">@device.Name</MudText>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@device.Model - @device.IpAddress</MudText>
+                    @if (_scanCompleted)
+                    {
+                      @if (isLive)
+                      {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Success"
+                                 Icon="@Icons.Material.Filled.Wifi" Style="height: 20px; font-size: 0.7rem;">
+                          Live
+                        </MudChip>
+                      }
+                      else
+                      {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default"
+                                 Icon="@Icons.Material.Filled.Cached" Style="height: 20px; font-size: 0.7rem;">
+                          Cached
+                        </MudChip>
+                      }
+                    }
+                  </div>
+                </div>
+                @if (isSelected)
+                {
+                  <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" />
+                }
               </div>
-              @if (isSelected)
-              {
-                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" />
-              }
-            </div>
-          </MudListItem>
-          <MudDivider />
-        }
-      </MudList>
-      <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="RefreshDevicesAsync" Class="mt-2" Size="Size.Small">
+            </MudListItem>
+            <MudDivider />
+          }
+        </MudList>
+      }
+      else if (_isScanning)
+      {
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 32px;">
+          <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+          <MudText Typo="Typo.body2" Color="Color.Secondary">Searching for Cast devices...</MudText>
+        </div>
+      }
+
+      <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="RefreshDevicesAsync"
+                 Class="mt-2" Size="Size.Small" Disabled="@_isScanning">
         <MudIcon Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" Class="mr-1" />
-        Refresh List
+        Scan Again
       </MudButton>
     }
 
@@ -96,38 +143,72 @@
 
   private List<CastDeviceDto>? _devices;
   private CastDeviceDto? _selectedDevice;
+  private CastDeviceDto? _defaultDevice;
+  private HashSet<string> _discoveredDeviceIds = new();
   private bool _isLoading = true;
+  private bool _isScanning;
+  private bool _scanCompleted;
   private bool _isConnecting;
   private string? _error;
 
   protected override async Task OnInitializedAsync()
   {
-    await DiscoverDevicesAsync();
-  }
-
-  private async Task DiscoverDevicesAsync()
-  {
-    _isLoading = true;
-    _error = null;
-    StateHasChanged();
-
+    // Phase 1: Instant cache load (< 100ms)
     try
     {
-      _devices = await DevicesApi.DiscoverCastDevicesAsync();
-      if (_devices == null)
-      {
-        _error = "Failed to connect to the Cast discovery service. Please check that the API server is running.";
-      }
-      // Empty list is OK - just means no devices found (UI handles this separately)
+      var cachedTask = DevicesApi.GetCachedCastDevicesAsync();
+      var defaultTask = DevicesApi.GetDefaultCastDeviceAsync();
+      await Task.WhenAll(cachedTask, defaultTask);
+
+      _devices = await cachedTask ?? new();
+      _defaultDevice = await defaultTask;
     }
     catch (Exception ex)
     {
-      Logger.LogError(ex, "Error discovering Cast devices");
-      _error = "An error occurred while searching for Cast devices.";
+      Logger.LogWarning(ex, "Failed to load cached Cast devices");
+      _devices = new();
     }
     finally
     {
       _isLoading = false;
+      StateHasChanged();
+    }
+
+    // Phase 2: Background mDNS discovery (10-15s)
+    await ScanForDevicesAsync();
+  }
+
+  private async Task ScanForDevicesAsync()
+  {
+    _isScanning = true;
+    StateHasChanged();
+
+    try
+    {
+      var discovered = await DevicesApi.DiscoverCastDevicesAsync();
+      if (discovered != null)
+      {
+        _discoveredDeviceIds = discovered.Select(d => d.Id).ToHashSet();
+
+        // Merge: live devices first, then append cached-only devices
+        var merged = new List<CastDeviceDto>(discovered);
+        foreach (var cached in _devices ?? [])
+        {
+          if (!_discoveredDeviceIds.Contains(cached.Id))
+            merged.Add(cached);
+        }
+        _devices = merged;
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Background Cast discovery failed");
+      // Keep cached devices — don't show error, discovery is best-effort
+    }
+    finally
+    {
+      _isScanning = false;
+      _scanCompleted = true;
       StateHasChanged();
     }
   }
@@ -135,7 +216,7 @@
   private async Task RefreshDevicesAsync()
   {
     _selectedDevice = null;
-    await DiscoverDevicesAsync();
+    await ScanForDevicesAsync();
   }
 
   private void SelectDevice(CastDeviceDto device)

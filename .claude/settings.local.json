@@ -86,7 +86,9 @@
       "mcp__playwright__browser_evaluate",
       "Bash(ilspycmd:*)",
       "WebFetch(domain:www.nuget.org)",
-      "WebFetch(domain:www.hackitu.de)"
+      "WebFetch(domain:www.hackitu.de)",
+      "Skill(planning-with-files:planning-with-files)",
+      "Bash(dotnet ildasm --help:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

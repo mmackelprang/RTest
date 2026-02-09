@@ -49,7 +49,7 @@
                  Label="Audio Output" Variant="Variant.Text" Dense="true"
                  AnchorOrigin="Origin.BottomCenter" TransformOrigin="Origin.TopCenter"
                  Style="min-width: 200px; border-bottom: 1px solid rgba(255,255,255,0.3);"
-                 Underline="true">
+                 Underline="true" Disabled="@_isCastConnecting">
         @if (_availableOutputs.Count == 0)
         {
           <MudSelectItem Value="@string.Empty" Disabled="true">No outputs available</MudSelectItem>
@@ -64,7 +64,11 @@
           </MudSelectItem>
         }
       </MudSelect>
-      @if (_selectedOutputId == "google-cast")
+      @if (_isCastConnecting)
+      {
+        <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+      }
+      else if (_selectedOutputId == "google-cast")
       {
         <MudTooltip Text="Select Cast Device">
           <MudIconButton Icon="@Icons.Material.Filled.Settings" Color="Color.Inherit"
@@ -191,6 +195,8 @@
   private List<AudioDeviceDto> _availableOutputs = new();
   private string? _selectedSourceId = null;
   private string? _selectedOutputId = null;
+  private CastDeviceDto? _defaultCastDevice;
+  private bool _isCastConnecting;
 
   // Conditional navigation visibility
   private bool _showRadioNav = false;
@@ -387,13 +393,19 @@
     try
     {
       Logger.LogDebug("Loading audio output devices...");
-      var outputs = await DevicesApi.GetOutputDevicesAsync();
+      var outputsTask = DevicesApi.GetOutputDevicesAsync();
+      var defaultCastTask = DevicesApi.GetDefaultCastDeviceAsync();
+      await Task.WhenAll(outputsTask, defaultCastTask);
+
+      var outputs = await outputsTask;
+      _defaultCastDevice = await defaultCastTask;
 
       if (outputs != null && outputs.Count > 0)
       {
         Logger.LogDebug("Loaded {Count} output devices: {Devices}",
           outputs.Count, string.Join(", ", outputs.Select(d => d.Name)));
         _availableOutputs = outputs;
+        UpdateCastOutputDisplayName();
 
         // Try to get current output device
         try
@@ -425,6 +437,17 @@
     }
   }
 
+  private void UpdateCastOutputDisplayName()
+  {
+    var castOutput = _availableOutputs.FirstOrDefault(o =>
+      o.Id.Equals("google-cast", StringComparison.OrdinalIgnoreCase));
+    if (castOutput == null) return;
+
+    castOutput.Name = _defaultCastDevice != null
+      ? _defaultCastDevice.Name
+      : "Google Cast";
+  }
+
   private async Task HandleSourceChangeAsync(string newSourceId)
   {
     if (string.IsNullOrEmpty(newSourceId) || newSourceId == _selectedSourceId) return;
@@ -452,6 +475,13 @@
   {
     if (string.IsNullOrEmpty(newOutputId) || newOutputId == _selectedOutputId) return;
 
+    // When selecting Google Cast with a default device, auto-connect
+    if (newOutputId == "google-cast" && _defaultCastDevice != null)
+    {
+      await AutoConnectCastDeviceAsync(newOutputId);
+      return;
+    }
+
     try
     {
       var success = await DevicesApi.SetOutputDeviceAsync(newOutputId);
@@ -464,6 +494,57 @@
     catch (Exception ex)
     {
       Logger.LogError(ex, "Failed to switch audio output");
+    }
+  }
+
+  private async Task AutoConnectCastDeviceAsync(string outputId)
+  {
+    _isCastConnecting = true;
+    _selectedOutputId = outputId;
+    StateHasChanged();
+
+    try
+    {
+      // Switch to the Cast output first
+      var outputSuccess = await DevicesApi.SetOutputDeviceAsync(outputId);
+      if (!outputSuccess)
+      {
+        Logger.LogWarning("Failed to switch to Cast output");
+        return;
+      }
+
+      // Try to connect to the default Cast device
+      Logger.LogInformation("Auto-connecting to default Cast device: {DeviceName}", _defaultCastDevice!.Name);
+      var connectSuccess = await DevicesApi.ConnectToCastDeviceAsync(_defaultCastDevice);
+
+      if (connectSuccess)
+      {
+        Logger.LogInformation("Auto-connected to Cast device: {DeviceName}", _defaultCastDevice.Name);
+      }
+      else
+      {
+        // Device not reachable — clear default and open dialog for manual selection
+        Logger.LogWarning("Failed to auto-connect to {DeviceName}, clearing default", _defaultCastDevice.Name);
+        await DevicesApi.ClearDefaultCastDeviceAsync();
+        _defaultCastDevice = null;
+        UpdateCastOutputDisplayName();
+        StateHasChanged();
+        await OpenCastDeviceDialog();
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error auto-connecting to Cast device");
+      await DevicesApi.ClearDefaultCastDeviceAsync();
+      _defaultCastDevice = null;
+      UpdateCastOutputDisplayName();
+      StateHasChanged();
+      await OpenCastDeviceDialog();
+    }
+    finally
+    {
+      _isCastConnecting = false;
+      StateHasChanged();
     }
   }
 
@@ -511,6 +592,12 @@
     if (result is { Canceled: false, Data: CastDeviceDto selectedDevice })
     {
       Logger.LogInformation("Selected Cast device: {DeviceName}", selectedDevice.Name);
+
+      // Save as default and update dropdown display
+      await DevicesApi.SetDefaultCastDeviceAsync(selectedDevice);
+      _defaultCastDevice = selectedDevice;
+      UpdateCastOutputDisplayName();
+      StateHasChanged();
     }
   }
 

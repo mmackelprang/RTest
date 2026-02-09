@@ -159,8 +159,8 @@ public class AudioStateUpdateService : BackgroundService
       _lastNowPlaying = currentNowPlaying;
       await _hubContext.Clients.All
         .SendAsync("NowPlayingChanged", currentNowPlaying, cancellationToken);
-      _logger.LogDebug("Broadcast NowPlayingChanged: Title={Title}, Artist={Artist}, Album={Album}, Source={Source}",
-        currentNowPlaying.Title, currentNowPlaying.Artist, currentNowPlaying.Album, currentNowPlaying.SourceName);
+      _logger.LogInformation("Broadcast NowPlayingChanged: Title={Title}, Artist={Artist}, Album={Album}, AlbumArt={AlbumArtUrl}, Source={Source}",
+        currentNowPlaying.Title, currentNowPlaying.Artist, currentNowPlaying.Album, currentNowPlaying.AlbumArtUrl, currentNowPlaying.SourceName);
 
       // Push metadata to Cast device if connected and streaming
       await PushMetadataToCastAsync(currentNowPlaying, cancellationToken);
