@@ -2,10 +2,15 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Radio.API.Models;
+using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Outputs;
 using Radio.Infrastructure.Audio.SoundFlow;
+using Radio.Infrastructure.Configuration.Models;
+using IRadioConfigurationManager = Radio.Infrastructure.Configuration.Abstractions.IConfigurationManager;
 
 namespace Radio.API.Controllers;
 
@@ -19,10 +24,13 @@ public class DevicesController : ControllerBase
 {
   private readonly ILogger<DevicesController> _logger;
   private readonly IAudioDeviceManager _deviceManager;
+  private readonly IAudioManager? _audioManager;
   private readonly SoundFlowAudioEngine? _audioEngine;
   private readonly LocalAudioOutput? _localOutput;
   private readonly GoogleCastOutput? _castOutput;
   private readonly HttpStreamOutput? _httpOutput;
+  private readonly IRadioConfigurationManager _configurationManager;
+  private readonly IOptionsMonitor<AudioPreferences> _audioPreferences;
 
   /// <summary>
   /// Initializes a new instance of the DevicesController.
@@ -30,6 +38,9 @@ public class DevicesController : ControllerBase
   public DevicesController(
     ILogger<DevicesController> logger,
     IAudioDeviceManager deviceManager,
+    IRadioConfigurationManager configurationManager,
+    IOptionsMonitor<AudioPreferences> audioPreferences,
+    IAudioManager? audioManager = null,
     SoundFlowAudioEngine? audioEngine = null,
     LocalAudioOutput? localOutput = null,
     GoogleCastOutput? castOutput = null,
@@ -37,6 +48,9 @@ public class DevicesController : ControllerBase
   {
     _logger = logger;
     _deviceManager = deviceManager;
+    _configurationManager = configurationManager;
+    _audioPreferences = audioPreferences;
+    _audioManager = audioManager;
     _audioEngine = audioEngine;
     _localOutput = localOutput;
     _castOutput = castOutput;
@@ -139,10 +153,13 @@ public class DevicesController : ControllerBase
       }
       else if (deviceId == "google-cast")
       {
-        // Activate Cast output, deactivate HTTP (Cast uses HTTP stream internally)
+        // Activate Cast output AND HTTP stream — Cast streams audio via HTTP
         await ActivateOutputAsync(_castOutput, "Google Cast");
-        await DeactivateOutputAsync(_httpOutput, "HTTP Stream");
-        // Local output stays active as the source
+        await ActivateOutputAsync(_httpOutput, "HTTP Stream");
+        // Local output stays active as the audio source for the engine
+
+        // Auto-connect to default Cast device if one is saved
+        await TryAutoConnectDefaultCastDeviceAsync();
       }
       else
       {
@@ -333,6 +350,39 @@ public class DevicesController : ControllerBase
   }
 
   /// <summary>
+  /// Tests Cast playback with a known public audio URL.
+  /// If this works but our stream doesn't, the issue is with our HTTP stream format.
+  /// If this also fails, the issue is with the Cast device or connection.
+  /// </summary>
+  [HttpPost("cast/test-audio")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  public async Task<IActionResult> TestCastAudio([FromQuery] string? url = null)
+  {
+    if (_castOutput == null)
+      return BadRequest("Cast output not available");
+
+    // Use a known-working public MP3 sample if no URL provided
+    var testUrl = url ?? "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3";
+    var contentType = testUrl.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) ? "audio/wav"
+      : testUrl.EndsWith(".flac", StringComparison.OrdinalIgnoreCase) ? "audio/flac"
+      : "audio/mpeg";
+
+    _logger.LogInformation("Cast test: Loading public audio URL {Url} (type: {ContentType})", testUrl, contentType);
+
+    try
+    {
+      var result = await _castOutput.TestPlayUrlAsync(testUrl, contentType);
+      return Ok(result);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Cast test failed");
+      return Ok(new { success = false, error = ex.Message });
+    }
+  }
+
+  /// <summary>
   /// Discovers available Google Cast devices on the network.
   /// </summary>
   /// <returns>List of available Cast devices.</returns>
@@ -433,11 +483,11 @@ public class DevicesController : ControllerBase
         Model = request.Model ?? "Unknown"
       };
 
-      await _castOutput.ConnectAsync(deviceInfo, cancellationToken);
-
-      // Wire the HTTP audio stream so the Chromecast has something to play
+      // Wire the HTTP audio stream BEFORE connecting so auto-restart uses the correct URL
       if (_httpOutput != null)
       {
+        _logger.LogInformation("HTTP stream output state before wiring: {State}", _httpOutput.State);
+
         // Recover HTTP output from Error state
         if (_httpOutput.State == AudioOutputState.Error)
         {
@@ -460,19 +510,45 @@ public class DevicesController : ControllerBase
           _logger.LogWarning("HTTP stream output is not streaming (state: {State}), Cast will have no audio",
             _httpOutput.State);
         }
+        else
+        {
+          _logger.LogInformation("HTTP stream output confirmed streaming on port {Port}", _httpOutput.Port);
+        }
 
-        // Resolve the actual LAN IP (Chromecast needs a routable IP, not a hostname)
-        var streamUrl = GetRoutableStreamUrl(_httpOutput.StreamUrl, _httpOutput.Port);
+        // Use the MP3 endpoint — Cast requires MP3 for progressive HTTP streaming
+        // (Chrome's audio element in the Default Media Receiver can't handle chunked WAV)
+        var streamUrl = GetRoutableStreamUrl(_httpOutput.Mp3StreamUrl, _httpOutput.Port, request.IpAddress);
         _castOutput.SetStreamUrl(streamUrl);
-        _logger.LogInformation("Set Cast stream URL to {StreamUrl}", streamUrl);
+        _logger.LogInformation("Set Cast stream URL to {StreamUrl} (MP3, 192kbps)", streamUrl);
+
+        // Log output tap diagnostics to verify audio data is flowing
+        var tapDiag = _audioEngine?.GetOutputTapDiagnostics();
+        if (tapDiag.HasValue)
+        {
+          _logger.LogInformation(
+            "Output tap: {WriteCalls} writes, {Bytes} bytes written, last write {LastWrite}",
+            tapDiag.Value.TotalWriteCalls, tapDiag.Value.TotalBytesWritten, tapDiag.Value.LastWriteTime);
+        }
       }
       else
       {
         _logger.LogWarning("HTTP stream output not available — Cast device will have no audio source");
       }
 
-      // Start audio playback on the Cast device
-      await _castOutput.StartAsync(cancellationToken);
+      // Push current now-playing metadata before connecting so it's included in the initial media load
+      PushCurrentMetadataToCast();
+
+      await _castOutput.ConnectAsync(deviceInfo, cancellationToken);
+
+      // ConnectAsync auto-restarts if it was previously streaming.
+      // Only start manually if not already streaming.
+      if (_castOutput.State != AudioOutputState.Streaming)
+      {
+        await _castOutput.StartAsync(cancellationToken);
+      }
+
+      // Save as default Cast device for auto-connect
+      await SaveDefaultCastDeviceAsync(request.DeviceId, request.Name ?? "Cast Device");
 
       _logger.LogInformation("Connected to Cast device: {Name}, audio streaming started", request.Name);
       return Ok(new { message = "Connected to Cast device", device = request.Name });
@@ -481,6 +557,146 @@ public class DevicesController : ControllerBase
     {
       _logger.LogError(ex, "Error connecting to Cast device: {Name}", request.Name);
       return StatusCode(500, new { error = "Failed to connect to Cast device", details = ex.Message });
+    }
+  }
+
+  /// <summary>
+  /// Gets cached Google Cast devices without running mDNS discovery.
+  /// Returns instantly from the SQLite cache.
+  /// </summary>
+  [HttpGet("cast/cached")]
+  [ProducesResponseType(typeof(List<CastDeviceDto>), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+  public async Task<IActionResult> GetCachedCastDevices(CancellationToken cancellationToken)
+  {
+    if (_castOutput == null)
+    {
+      return StatusCode(503, new { error = "Google Cast output not available" });
+    }
+
+    try
+    {
+      var devices = await _castOutput.GetCachedDevicesAsync(cancellationToken);
+      var result = devices.Select(d => new CastDeviceDto
+      {
+        Id = d.Id,
+        Name = d.FriendlyName,
+        IpAddress = d.IpAddress,
+        Port = d.Port,
+        Model = d.Model
+      }).ToList();
+
+      _logger.LogDebug("Returning {Count} cached Cast devices", result.Count);
+      return Ok(result);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error getting cached Cast devices");
+      return StatusCode(500, new { error = "Failed to get cached Cast devices" });
+    }
+  }
+
+  /// <summary>
+  /// Gets the default Cast device preference.
+  /// </summary>
+  [HttpGet("cast/default")]
+  [ProducesResponseType(typeof(CastDeviceDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status404NotFound)]
+  public async Task<IActionResult> GetDefaultCastDevice(CancellationToken cancellationToken)
+  {
+    var prefs = _audioPreferences.CurrentValue;
+    if (string.IsNullOrEmpty(prefs.DefaultCastDeviceId))
+    {
+      return NotFound(new { error = "No default Cast device set" });
+    }
+
+    // Try to find the device in cache for full details
+    if (_castOutput != null)
+    {
+      try
+      {
+        var cached = await _castOutput.GetCachedDevicesAsync(cancellationToken);
+        var device = cached.FirstOrDefault(d => d.Id == prefs.DefaultCastDeviceId);
+        if (device != null)
+        {
+          return Ok(new CastDeviceDto
+          {
+            Id = device.Id,
+            Name = device.FriendlyName,
+            IpAddress = device.IpAddress,
+            Port = device.Port,
+            Model = device.Model
+          });
+        }
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Failed to look up default Cast device in cache");
+      }
+    }
+
+    // Return minimal info from preferences
+    return Ok(new CastDeviceDto
+    {
+      Id = prefs.DefaultCastDeviceId,
+      Name = prefs.DefaultCastDeviceName,
+      IpAddress = "",
+      Port = 8009,
+      Model = ""
+    });
+  }
+
+  /// <summary>
+  /// Sets the default Cast device preference.
+  /// </summary>
+  [HttpPost("cast/default")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  public async Task<IActionResult> SetDefaultCastDevice(
+    [FromBody] CastDeviceDto device,
+    CancellationToken cancellationToken)
+  {
+    if (string.IsNullOrWhiteSpace(device.Id))
+    {
+      return BadRequest(new { error = "Device ID is required" });
+    }
+
+    try
+    {
+      await SaveDefaultCastDeviceAsync(device.Id, device.Name);
+
+      // Refresh device list so the name updates
+      await _deviceManager.RefreshDevicesAsync(cancellationToken);
+
+      return Ok(new { message = "Default Cast device set", deviceName = device.Name });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error setting default Cast device");
+      return StatusCode(500, new { error = "Failed to set default Cast device" });
+    }
+  }
+
+  /// <summary>
+  /// Clears the default Cast device preference.
+  /// </summary>
+  [HttpDelete("cast/default")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  public async Task<IActionResult> ClearDefaultCastDevice(CancellationToken cancellationToken)
+  {
+    try
+    {
+      await SaveDefaultCastDeviceAsync("", "");
+
+      // Refresh device list so the name reverts to "Google Cast"
+      await _deviceManager.RefreshDevicesAsync(cancellationToken);
+
+      return Ok(new { message = "Default Cast device cleared" });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error clearing default Cast device");
+      return StatusCode(500, new { error = "Failed to clear default Cast device" });
     }
   }
 
@@ -621,53 +837,209 @@ public class DevicesController : ControllerBase
   }
 
   /// <summary>
+  /// Persists the default Cast device ID and name to the configuration store.
+  /// </summary>
+  private async Task SaveDefaultCastDeviceAsync(string deviceId, string deviceName)
+  {
+    try
+    {
+      var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+      await _configurationManager.SetValueAsync(storeId, "AudioPreferences:DefaultCastDeviceId", deviceId);
+      await _configurationManager.SetValueAsync(storeId, "AudioPreferences:DefaultCastDeviceName", deviceName);
+      _logger.LogInformation("Saved default Cast device: {Name} ({Id})", deviceName, deviceId);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to persist default Cast device preference");
+    }
+  }
+
+  /// <summary>
+  /// Attempts to auto-connect to the saved default Cast device from cache.
+  /// Runs as fire-and-forget so it doesn't block the SetOutputDevice response.
+  /// </summary>
+  private Task TryAutoConnectDefaultCastDeviceAsync()
+  {
+    var prefs = _audioPreferences.CurrentValue;
+    if (string.IsNullOrEmpty(prefs.DefaultCastDeviceId) || _castOutput == null)
+    {
+      return Task.CompletedTask;
+    }
+
+    _logger.LogInformation("Auto-connecting to default Cast device: {Name} ({Id})",
+      prefs.DefaultCastDeviceName, prefs.DefaultCastDeviceId);
+
+    // Fire-and-forget — don't block the output switch response
+    _ = Task.Run(async () =>
+    {
+      try
+      {
+        var cached = await _castOutput.GetCachedDevicesAsync();
+        var device = cached.FirstOrDefault(d => d.Id == prefs.DefaultCastDeviceId);
+        if (device == null)
+        {
+          _logger.LogWarning("Default Cast device {Id} not found in cache, skipping auto-connect",
+            prefs.DefaultCastDeviceId);
+          return;
+        }
+
+        // Ensure Cast output is initialized
+        if (_castOutput.State == AudioOutputState.Created)
+        {
+          await _castOutput.InitializeAsync();
+        }
+
+        // Push current now-playing metadata before connecting
+        PushCurrentMetadataToCast();
+
+        await _castOutput.ConnectAsync(device);
+
+        // Wire the HTTP audio stream
+        if (_httpOutput != null)
+        {
+          if (_httpOutput.State == AudioOutputState.Error)
+            await _httpOutput.InitializeAsync();
+          if (_httpOutput.State == AudioOutputState.Created)
+            await _httpOutput.InitializeAsync();
+          if (_httpOutput.State == AudioOutputState.Ready || _httpOutput.State == AudioOutputState.Stopped)
+            await _httpOutput.StartAsync();
+
+          if (_httpOutput.State == AudioOutputState.Streaming)
+          {
+            var streamUrl = GetRoutableStreamUrl(_httpOutput.Mp3StreamUrl, _httpOutput.Port, device.IpAddress);
+            _castOutput.SetStreamUrl(streamUrl);
+          }
+        }
+
+        await _castOutput.StartAsync();
+        _logger.LogInformation("Auto-connected to default Cast device: {Name}", device.FriendlyName);
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Failed to auto-connect to default Cast device");
+      }
+    });
+
+    return Task.CompletedTask;
+  }
+
+  /// <summary>
   /// Replaces the hostname in a stream URL with the local LAN IP address.
   /// Chromecast devices need a routable IP, not a hostname.
   /// </summary>
-  private string GetRoutableStreamUrl(string streamUrl, int port)
+  private string GetRoutableStreamUrl(string streamUrl, int port, string? targetDeviceIp = null)
   {
-    var localIp = GetLocalIPAddress();
+    var localIp = GetLocalIPAddress(targetDeviceIp);
     if (localIp != null)
     {
-      // Build URL with routable IP
       var uri = new Uri(streamUrl);
-      return $"http://{localIp}:{port}{uri.PathAndQuery}";
+      var routableUrl = $"http://{localIp}:{port}{uri.PathAndQuery}";
+      _logger.LogInformation("Resolved routable stream URL: {Url} (target device: {Target})", routableUrl, targetDeviceIp);
+      return routableUrl;
     }
 
-    // Fall back to the original URL
     _logger.LogWarning("Could not resolve local LAN IP, using original stream URL");
     return streamUrl;
   }
 
   /// <summary>
-  /// Gets the local LAN IP address by scanning network interfaces.
+  /// Gets the local LAN IP address that can reach the target device.
+  /// Prefers an IP on the same subnet as the target. Filters out virtual adapters (Hyper-V, WSL, Docker).
   /// </summary>
-  private static string? GetLocalIPAddress()
+  private string? GetLocalIPAddress(string? targetDeviceIp = null)
   {
+    IPAddress? targetIp = null;
+    if (!string.IsNullOrEmpty(targetDeviceIp))
+    {
+      IPAddress.TryParse(targetDeviceIp, out targetIp);
+    }
+
+    string? fallbackIp = null;
+
     foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
     {
       if (ni.OperationalStatus != OperationalStatus.Up)
-      {
         continue;
-      }
-
       if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
-      {
         continue;
-      }
+
+      // Skip virtual adapters (Hyper-V, WSL, Docker, VPN tunnels)
+      var desc = ni.Description.ToLowerInvariant();
+      var name = ni.Name.ToLowerInvariant();
+      if (desc.Contains("hyper-v") || desc.Contains("virtual") ||
+          name.Contains("vethernet") || name.Contains("wsl") ||
+          desc.Contains("docker") || desc.Contains("vmware") ||
+          desc.Contains("virtualbox"))
+        continue;
 
       var props = ni.GetIPProperties();
       foreach (var addr in props.UnicastAddresses)
       {
-        if (addr.Address.AddressFamily == AddressFamily.InterNetwork &&
-            !IPAddress.IsLoopback(addr.Address))
+        if (addr.Address.AddressFamily != AddressFamily.InterNetwork ||
+            IPAddress.IsLoopback(addr.Address))
+          continue;
+
+        // If we have a target IP, check if this interface is on the same subnet
+        if (targetIp != null && addr.IPv4Mask != null)
         {
-          return addr.Address.ToString();
+          var localBytes = addr.Address.GetAddressBytes();
+          var maskBytes = addr.IPv4Mask.GetAddressBytes();
+          var targetBytes = targetIp.GetAddressBytes();
+
+          bool sameSubnet = true;
+          for (int i = 0; i < 4; i++)
+          {
+            if ((localBytes[i] & maskBytes[i]) != (targetBytes[i] & maskBytes[i]))
+            {
+              sameSubnet = false;
+              break;
+            }
+          }
+
+          if (sameSubnet)
+          {
+            _logger.LogDebug("Found same-subnet IP {Ip} on {Interface} for target {Target}",
+              addr.Address, ni.Name, targetDeviceIp);
+            return addr.Address.ToString();
+          }
         }
+
+        // Track first non-virtual IP as fallback
+        fallbackIp ??= addr.Address.ToString();
       }
     }
 
-    return null;
+    if (fallbackIp != null)
+    {
+      _logger.LogDebug("No same-subnet match found, using fallback IP {Ip}", fallbackIp);
+    }
+
+    return fallbackIp;
+  }
+
+  /// <summary>
+  /// Reads current now-playing metadata from the active audio source and
+  /// pushes it to the Cast output so it's available for media loading.
+  /// </summary>
+  private void PushCurrentMetadataToCast()
+  {
+    if (_castOutput == null || _audioManager?.ActiveSource is not IPrimaryAudioSource primary)
+    {
+      return;
+    }
+
+    var metadata = primary.Metadata;
+    if (metadata == null || metadata.Count == 0)
+    {
+      return;
+    }
+
+    var title = metadata.TryGetValue(StandardMetadataKeys.Title, out var t) ? t as string : null;
+    var artist = metadata.TryGetValue(StandardMetadataKeys.Artist, out var a) ? a as string : null;
+    var album = metadata.TryGetValue(StandardMetadataKeys.Album, out var al) ? al as string : null;
+    var albumArtUrl = metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var art) ? art as string : null;
+
+    _castOutput.SetNowPlayingMetadata(title, artist, album, albumArtUrl);
   }
 
   private static AudioDeviceDto MapToDeviceDto(AudioDeviceInfo device)

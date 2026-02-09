@@ -146,12 +146,14 @@ public class GoogleCastOutputTests
   }
 
   [Fact]
-  public async Task StartAsync_ThrowsWhenNotConnected()
+  public async Task StartAsync_SetsReadyState_WhenNotConnected()
   {
     var output = CreateOutput();
     await output.InitializeAsync();
 
-    await Assert.ThrowsAsync<InvalidOperationException>(() => output.StartAsync());
+    await output.StartAsync();
+
+    Assert.Equal(AudioOutputState.Ready, output.State);
   }
 
   [Fact]

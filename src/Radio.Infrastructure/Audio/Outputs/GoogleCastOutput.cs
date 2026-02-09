@@ -1,3 +1,4 @@
+using System.Net.Http;
 using System.Net.Sockets;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
@@ -5,7 +6,7 @@ using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Sharpcaster;
-using Sharpcaster.Interfaces;
+using Sharpcaster.Channels;
 using Sharpcaster.Models;
 using Sharpcaster.Models.Media;
 
@@ -25,7 +26,10 @@ public class GoogleCastOutput : AudioOutputBase
   private string? _streamUrl;
 
   // Cache discovered receivers to use the original objects for connection
+  // Indexed by device ID (DeviceUri.ToString()) and also by IP address for fallback matching
   private readonly Dictionary<string, ChromecastReceiver> _discoveredReceivers = new();
+  private readonly Dictionary<string, ChromecastReceiver> _discoveredReceiversByIp = new();
+  private CastNowPlayingMetadata? _nowPlayingMetadata;
 
   /// <inheritdoc />
   protected override ILogger Logger => _logger;
@@ -120,6 +124,34 @@ public class GoogleCastOutput : AudioOutputBase
   }
 
   /// <summary>
+  /// Returns cached Cast devices without running mDNS discovery.
+  /// Fast — no network I/O. Removes stale entries before returning.
+  /// </summary>
+  /// <param name="ct">Cancellation token.</param>
+  /// <returns>A list of cached Chromecast devices.</returns>
+  public async Task<IReadOnlyList<ChromecastDeviceInfo>> GetCachedDevicesAsync(
+    CancellationToken ct = default)
+  {
+    ThrowIfDisposed();
+
+    var cachedDevices = await LoadCacheAsync();
+
+    // Remove stale entries
+    var expirationCutoff = DateTime.UtcNow.AddDays(-_options.CacheExpirationDays);
+    var staleKeys = cachedDevices
+      .Where(kv => kv.Value.LastSeen < expirationCutoff)
+      .Select(kv => kv.Key)
+      .ToList();
+    foreach (var key in staleKeys)
+    {
+      cachedDevices.Remove(key);
+    }
+
+    _logger.LogDebug("Returning {Count} cached Cast devices", cachedDevices.Count);
+    return cachedDevices.Values.Select(c => c.Device).ToList();
+  }
+
+  /// <summary>
   /// Discovers available Chromecast devices on the network.
   /// Merges live mDNS results with a persistent cache so previously seen
   /// devices remain available even if they are temporarily offline.
@@ -140,8 +172,8 @@ public class GoogleCastOutput : AudioOutputBase
 
     try
     {
-      IChromecastLocator locator = new MdnsChromecastLocator();
-      var discoveredDevices = await locator.FindReceiversAsync(cancellationToken);
+      ChromecastLocator locator = new ChromecastLocator();
+      var discoveredDevices = await locator.FindReceiversAsync(TimeSpan.FromSeconds(10));
 
       foreach (var device in discoveredDevices)
       {
@@ -169,8 +201,9 @@ public class GoogleCastOutput : AudioOutputBase
           LastSeen = DateTime.UtcNow
         };
 
-        // Keep the live receiver for connection
+        // Keep the live receiver for connection (indexed by ID and by IP for fallback)
         _discoveredReceivers[deviceId] = device;
+        _discoveredReceiversByIp[deviceInfo.IpAddress] = device;
 
         DeviceDiscovered?.Invoke(this, new ChromecastDeviceDiscoveredEventArgs { Device = deviceInfo });
 
@@ -195,6 +228,10 @@ public class GoogleCastOutput : AudioOutputBase
       .ToList();
     foreach (var key in staleKeys)
     {
+      if (cachedDevices.TryGetValue(key, out var stale))
+      {
+        _discoveredReceiversByIp.Remove(stale.Device.IpAddress);
+      }
       cachedDevices.Remove(key);
       _discoveredReceivers.Remove(key);
     }
@@ -223,7 +260,7 @@ public class GoogleCastOutput : AudioOutputBase
         try
         {
           var json = await File.ReadAllTextAsync(_options.CacheFilePath);
-          var jsonCache = JsonSerializer.Deserialize<Dictionary<string, CachedCastDevice>>(json);
+          var jsonCache = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, CachedCastDevice>>(json);
           if (jsonCache != null && jsonCache.Count > 0)
           {
             _logger.LogInformation("Migrating {Count} Cast devices from JSON to SQLite", jsonCache.Count);
@@ -250,7 +287,7 @@ public class GoogleCastOutput : AudioOutputBase
       if (!string.IsNullOrEmpty(_options.CacheFilePath) && File.Exists(_options.CacheFilePath))
       {
         var json = await File.ReadAllTextAsync(_options.CacheFilePath);
-        var cached = JsonSerializer.Deserialize<Dictionary<string, CachedCastDevice>>(json);
+        var cached = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, CachedCastDevice>>(json);
         if (cached != null)
         {
           _logger.LogDebug("Loaded {Count} cached Cast devices from JSON", cached.Count);
@@ -288,7 +325,7 @@ public class GoogleCastOutput : AudioOutputBase
         Directory.CreateDirectory(directory);
       }
 
-      var json = JsonSerializer.Serialize(cache, new JsonSerializerOptions { WriteIndented = true });
+      var json = System.Text.Json.JsonSerializer.Serialize(cache, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
       await File.WriteAllTextAsync(_options.CacheFilePath!, json);
       _logger.LogDebug("Saved {Count} Cast devices to JSON cache", cache.Count);
     }
@@ -316,6 +353,14 @@ public class GoogleCastOutput : AudioOutputBase
       await InitializeAsync(cancellationToken);
     }
 
+    // Stop streaming before switching to a new device, and remember to restart after
+    var wasStreaming = State == AudioOutputState.Streaming;
+    if (wasStreaming)
+    {
+      _logger.LogInformation("Stopping current Cast stream before connecting to new device");
+      await StopAsync(cancellationToken);
+    }
+
     if (State != AudioOutputState.Ready && State != AudioOutputState.Stopped)
     {
       throw new InvalidOperationException(
@@ -330,39 +375,30 @@ public class GoogleCastOutput : AudioOutputBase
         "Connecting to Chromecast: {Name} at {IP}:{Port}",
         device.FriendlyName, device.IpAddress, device.Port);
 
-      // Try to get the cached receiver from discovery (preferred - uses original SharpCaster object)
-      if (!_discoveredReceivers.TryGetValue(device.Id, out _connectedReceiver))
+      // Try to get the live receiver from discovery (preferred - uses original SharpCaster object)
+      // First try by exact ID, then by IP address (IDs can differ due to URI normalization)
+      if (_discoveredReceivers.TryGetValue(device.Id, out _connectedReceiver))
       {
-        // Device is from persistent cache, not live discovery.
-        // Verify reachability with a TCP connect check before attempting full connection.
-        _logger.LogDebug("Device from cache, verifying reachability at {IP}:{Port}",
-          device.IpAddress, device.Port);
-
-        using var tcpCheck = new TcpClient();
-        try
-        {
-          using var tcpCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-          await tcpCheck.ConnectAsync(device.IpAddress, device.Port, tcpCts.Token);
-        }
-        catch (Exception tcpEx)
-        {
-          throw new InvalidOperationException(
-            $"Cast device '{device.FriendlyName}' at {device.IpAddress}:{device.Port} is not reachable",
-            tcpEx);
-        }
-
-        _logger.LogDebug("TCP check passed, creating ChromecastReceiver from cache");
-        var uri = new Uri($"cast://{device.IpAddress}:{device.Port}");
-        _connectedReceiver = new ChromecastReceiver
-        {
-          DeviceUri = uri,
-          Name = device.FriendlyName,
-          Model = device.Model
-        };
+        _logger.LogDebug("Using live ChromecastReceiver from discovery (matched by ID)");
+      }
+      else if (_discoveredReceiversByIp.TryGetValue(device.IpAddress, out _connectedReceiver))
+      {
+        _logger.LogInformation("Live ChromecastReceiver matched by IP {IP} (ID mismatch: cached={CachedId}, live={LiveId})",
+          device.IpAddress, device.Id, _connectedReceiver.DeviceUri);
       }
       else
       {
-        _logger.LogDebug("Using live ChromecastReceiver from discovery");
+        // Device is from persistent cache, not live discovery.
+        // Verify reachability with a TCP connect check before attempting full connection.
+        var connectPort = await FindReachablePortAsync(device, cancellationToken);
+
+        _logger.LogDebug("TCP check passed on port {Port}, creating ChromecastReceiver from cache", connectPort);
+        _connectedReceiver = new ChromecastReceiver
+        {
+          DeviceUri = new Uri($"https://{device.IpAddress}:{connectPort}"),
+          Name = device.FriendlyName,
+          Model = device.Model
+        };
       }
 
       if (_client == null)
@@ -382,6 +418,13 @@ public class GoogleCastOutput : AudioOutputBase
         device.FriendlyName);
 
       State = AudioOutputState.Ready;
+
+      // Resume streaming if we auto-stopped to switch devices
+      if (wasStreaming)
+      {
+        _logger.LogInformation("Restarting Cast stream after device switch");
+        await StartAsync(cancellationToken);
+      }
     }
     catch (Exception ex)
     {
@@ -458,30 +501,77 @@ public class GoogleCastOutput : AudioOutputBase
       {
         // Launch default media receiver
         await _client.LaunchApplicationAsync("CC1AD845");
+        _logger.LogInformation("Cast: Media receiver launched on {Device}", ConnectedDevice?.FriendlyName);
+
+        // Allow media receiver to fully initialize before sending commands
+        await Task.Delay(500, cancellationToken);
 
         // Load media if we have a stream URL
         if (!string.IsNullOrEmpty(_streamUrl))
         {
           _logger.LogInformation(
-            "Cast: Loading media URL {StreamUrl} (type: audio/wav, stream: Live)",
-            _streamUrl);
+            "Cast: Loading media URL {StreamUrl} (type: audio/mpeg, stream: Buffered, metadata: {HasMetadata})",
+            _streamUrl, _nowPlayingMetadata != null);
 
-          var media = new Media
+          var media = BuildMedia();
+
+          // Debug: log the media object to verify serialization
+          try
           {
-            ContentUrl = _streamUrl,
-            ContentType = "audio/wav",
-            StreamType = StreamType.Live
-          };
+            var debugJson = JsonSerializer.Serialize(media, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
+            _logger.LogInformation("Cast: Media payload: {Json}", debugJson);
+          }
+          catch (Exception jsonEx)
+          {
+            _logger.LogDebug(jsonEx, "Cast: Could not serialize media for debug logging");
+          }
 
-          var mediaChannel = _client.GetChannel<IMediaChannel>();
+          var mediaChannel = _client.GetChannel<MediaChannel>();
           if (mediaChannel != null)
           {
-            await mediaChannel.LoadAsync(media);
-            _logger.LogInformation("Cast: Media loaded successfully on {Device}", ConnectedDevice?.FriendlyName);
+            // Subscribe to status changes to monitor device transitions
+            mediaChannel.StatusChanged += (_, status) =>
+            {
+              _logger.LogInformation(
+                "Cast: StatusChanged event — PlayerState: {State}, IdleReason: {IdleReason}, MediaSessionId: {SessionId}",
+                status?.PlayerState, status?.IdleReason, status?.MediaSessionId);
+            };
+
+            // Start loading with a short initial timeout so the API can respond quickly.
+            // SharpCaster's LoadAsync has an internal 30s timeout (DoNotReturnOnLoading).
+            // We give it 5s — if it hasn't completed, we let it continue in the background.
+            var loadTask = mediaChannel.LoadAsync(media, true);
+            try
+            {
+              var status = await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
+              _logger.LogInformation(
+                "Cast: Media load response — PlayerState: {State}, IdleReason: {IdleReason}, MediaSessionId: {SessionId}",
+                status?.PlayerState, status?.IdleReason, status?.MediaSessionId);
+            }
+            catch (TimeoutException)
+            {
+              _logger.LogInformation("Cast: Media load in progress (5s initial timeout passed) — continuing in background");
+              _ = MonitorBackgroundLoadAsync(loadTask);
+            }
           }
           else
           {
             _logger.LogWarning("Cast: MediaChannel is null — cannot load media");
+          }
+
+          // Sync volume to Cast device to ensure it's audible
+          try
+          {
+            var receiverChannel = _client.GetChannel<ReceiverChannel>();
+            if (receiverChannel != null)
+            {
+              await receiverChannel.SetVolume(Volume);
+              _logger.LogInformation("Cast: Volume synced to {Volume:P0}", Volume);
+            }
+          }
+          catch (Exception volEx)
+          {
+            _logger.LogWarning(volEx, "Cast: Failed to sync volume after media load");
           }
         }
         else
@@ -519,7 +609,7 @@ public class GoogleCastOutput : AudioOutputBase
       // Stop media playback on the Chromecast
       if (_client != null)
       {
-        var mediaChannel = _client.GetChannel<IMediaChannel>();
+        var mediaChannel = _client.GetChannel<MediaChannel>();
         if (mediaChannel != null)
         {
           try
@@ -534,6 +624,20 @@ public class GoogleCastOutput : AudioOutputBase
           catch (OperationCanceledException)
           {
             _logger.LogWarning("Cast media stop cancelled — device may be unreachable");
+          }
+          catch (System.Reflection.TargetInvocationException tie)
+            when (tie.InnerException?.Message.Contains("INVALID_MEDIA_SESSION_ID") == true)
+          {
+            _logger.LogDebug("Cast media session already ended, ignoring stop error");
+          }
+          catch (InvalidOperationException ioe)
+            when (ioe.Message.Contains("INVALID_MEDIA_SESSION_ID"))
+          {
+            _logger.LogDebug("Cast media session already ended, ignoring stop error");
+          }
+          catch (ArgumentNullException)
+          {
+            _logger.LogDebug("Cast: No active media session to stop (MediaSessionId is null)");
           }
         }
       }
@@ -561,6 +665,253 @@ public class GoogleCastOutput : AudioOutputBase
     _logger.LogDebug("Stream URL set to: {Url}", streamUrl);
   }
 
+  /// <summary>
+  /// Sets now-playing metadata that will be sent to the Cast device.
+  /// The metadata is included when loading media and can be updated mid-stream
+  /// via <see cref="UpdateNowPlayingMetadataAsync"/>.
+  /// </summary>
+  public void SetNowPlayingMetadata(string? title, string? artist, string? album, string? albumArtUrl)
+  {
+    _nowPlayingMetadata = new CastNowPlayingMetadata(title, artist, album, albumArtUrl);
+    _logger.LogDebug("Cast now-playing metadata set: {Title} - {Artist} [{Album}]", title, artist, album);
+  }
+
+  /// <summary>
+  /// Tests Cast playback with an arbitrary URL to diagnose audio issues.
+  /// Re-launches the receiver app and loads the URL fresh.
+  /// </summary>
+  public async Task<object> TestPlayUrlAsync(string url, string contentType)
+  {
+    if (_client == null)
+      return new { success = false, error = "Not connected to a Cast device" };
+
+    try
+    {
+      // Re-launch the media receiver app to get a clean session
+      _logger.LogInformation("Cast test: Launching media receiver app");
+      await _client.LaunchApplicationAsync("CC1AD845");
+      await Task.Delay(500);
+
+      var media = new Media
+      {
+        ContentId = url,
+        ContentUrl = url,
+        ContentType = contentType,
+        StreamType = StreamType.Buffered
+      };
+
+      var payload = JsonSerializer.Serialize(media);
+      _logger.LogInformation("Cast test: Payload = {Payload}", payload);
+
+      var mediaChannel = _client.GetChannel<MediaChannel>();
+      if (mediaChannel == null)
+        return new { success = false, error = "MediaChannel not available" };
+
+      var loadStatus = await mediaChannel.LoadAsync(media, true);
+      _logger.LogInformation(
+        "Cast test: Load response — PlayerState: {State}, IdleReason: {Reason}, MediaSessionId: {Id}",
+        loadStatus?.PlayerState, loadStatus?.IdleReason, loadStatus?.MediaSessionId);
+
+      // Wait for playback to start
+      await Task.Delay(3000);
+      var finalStatus = await mediaChannel.GetMediaStatusAsync().WaitAsync(TimeSpan.FromSeconds(5));
+      _logger.LogInformation(
+        "Cast test: Final status (3s) — PlayerState: {State}, IdleReason: {Reason}",
+        finalStatus?.PlayerState, finalStatus?.IdleReason);
+
+      return new
+      {
+        success = finalStatus?.PlayerState is PlayerStateType.Playing or PlayerStateType.Buffering,
+        loadState = loadStatus?.PlayerState.ToString(),
+        finalState = finalStatus?.PlayerState.ToString(),
+        finalIdleReason = finalStatus?.IdleReason,
+        url,
+        contentType,
+        payload
+      };
+    }
+    catch (Exception ex)
+    {
+      return new { success = false, error = ex.Message, url };
+    }
+  }
+
+  /// <summary>
+  /// Updates now-playing metadata on the Cast device by reloading media.
+  /// Only effective when the output is connected and streaming.
+  /// For live streams, the Cast device reconnects to the same URL seamlessly.
+  /// </summary>
+  public async Task UpdateNowPlayingMetadataAsync(
+    string? title, string? artist, string? album, string? albumArtUrl,
+    CancellationToken cancellationToken = default)
+  {
+    _nowPlayingMetadata = new CastNowPlayingMetadata(title, artist, album, albumArtUrl);
+
+    if (State != AudioOutputState.Streaming || _client == null || string.IsNullOrEmpty(_streamUrl))
+    {
+      _logger.LogDebug("Cast not streaming, metadata stored for next load");
+      return;
+    }
+
+    try
+    {
+      var media = BuildMedia();
+      var mediaChannel = _client.GetChannel<MediaChannel>();
+      if (mediaChannel != null)
+      {
+        MediaStatus? status = null;
+        try
+        {
+          status = await mediaChannel.LoadAsync(media, true);
+        }
+        catch (TimeoutException)
+        {
+          _logger.LogDebug("Cast: Metadata LoadAsync timed out — device may still be processing");
+        }
+        _logger.LogInformation(
+          "Cast metadata updated: {Title} - {Artist} (PlayerState: {State}, IdleReason: {IdleReason})",
+          title, artist, status?.PlayerState, status?.IdleReason);
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to update Cast now-playing metadata");
+    }
+  }
+
+  /// <summary>
+  /// Standard Google Cast protocol port.
+  /// </summary>
+  private const int StandardCastPort = 8009;
+
+  /// <summary>
+  /// Finds a reachable TCP port on a cached Cast device.
+  /// Tries the cached port first, then falls back to the standard Cast port (8009).
+  /// </summary>
+  private async Task<int> FindReachablePortAsync(ChromecastDeviceInfo device, CancellationToken ct)
+  {
+    // Always try the standard Cast protocol port (8009) first.
+    // Port 443 on Google Home devices is HTTPS management, not Cast protocol —
+    // it accepts TCP but times out on Cast protocol messages.
+    var portsToTry = device.Port == StandardCastPort
+      ? new[] { StandardCastPort }
+      : new[] { StandardCastPort, device.Port };
+
+    foreach (var port in portsToTry)
+    {
+      _logger.LogDebug("Verifying Cast device reachability at {IP}:{Port}", device.IpAddress, port);
+      using var tcpCheck = new TcpClient();
+      try
+      {
+        using var tcpCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        tcpCts.CancelAfter(TimeSpan.FromSeconds(3));
+        await tcpCheck.ConnectAsync(device.IpAddress, port, tcpCts.Token);
+        if (port != device.Port)
+        {
+          _logger.LogInformation(
+            "Cast device '{Name}': using standard port {Port} instead of discovered port {DiscoveredPort}",
+            device.FriendlyName, port, device.Port);
+        }
+        return port;
+      }
+      catch
+      {
+        _logger.LogDebug("TCP check failed on {IP}:{Port}", device.IpAddress, port);
+      }
+    }
+
+    throw new InvalidOperationException(
+      $"Cast device '{device.FriendlyName}' at {device.IpAddress} is not reachable (tried ports {string.Join(", ", portsToTry)})");
+  }
+
+  /// <summary>
+  /// Builds a Media object with the current stream URL and now-playing metadata.
+  /// </summary>
+  private Media BuildMedia()
+  {
+    var media = new Media
+    {
+      ContentId = _streamUrl,
+      ContentUrl = _streamUrl,
+      ContentType = "audio/mpeg",
+      StreamType = StreamType.Buffered
+    };
+
+    if (_nowPlayingMetadata != null)
+    {
+      var metadata = new MediaMetadata
+      {
+        MetadataType = MetadataType.Music,
+        Title = _nowPlayingMetadata.Title ?? "",
+        SubTitle = _nowPlayingMetadata.Artist ?? ""
+      };
+
+      // Add album art if we have a valid absolute URL
+      if (!string.IsNullOrEmpty(_nowPlayingMetadata.AlbumArtUrl) &&
+          _nowPlayingMetadata.AlbumArtUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+      {
+        metadata.Images = new[]
+        {
+          new Image { Url = _nowPlayingMetadata.AlbumArtUrl }
+        };
+      }
+
+      media.Metadata = metadata;
+    }
+
+    return media;
+  }
+
+  /// <summary>
+  /// Monitors a background LoadAsync task and runs connectivity diagnostics on failure.
+  /// </summary>
+  private async Task MonitorBackgroundLoadAsync(Task<MediaStatus?> loadTask)
+  {
+    try
+    {
+      var status = await loadTask;
+      _logger.LogInformation(
+        "Cast: Background load completed — PlayerState: {State}, IdleReason: {IdleReason}",
+        status?.PlayerState, status?.IdleReason);
+    }
+    catch (TimeoutException)
+    {
+      _logger.LogWarning("Cast: LoadAsync timed out (30s) — Cast device never reached PLAYING state");
+      await DiagnoseStreamConnectivityAsync();
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Cast: Background load failed");
+      await DiagnoseStreamConnectivityAsync();
+    }
+  }
+
+  /// <summary>
+  /// Self-tests the stream URL from this machine to diagnose Cast connectivity issues.
+  /// If the URL is reachable locally but Cast can't play it, the issue is likely a firewall.
+  /// </summary>
+  private async Task DiagnoseStreamConnectivityAsync()
+  {
+    if (string.IsNullOrEmpty(_streamUrl)) return;
+
+    try
+    {
+      using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+      var response = await httpClient.GetAsync(_streamUrl, HttpCompletionOption.ResponseHeadersRead);
+      _logger.LogWarning(
+        "Cast: Stream URL {Url} IS reachable from this machine (HTTP {Status}) but the Cast device cannot reach it. " +
+        "This is almost certainly a FIREWALL issue. Fix with: " +
+        "netsh advfirewall firewall add rule name=\"Radio Console Stream\" dir=in action=allow protocol=TCP localport=8080",
+        _streamUrl, (int)response.StatusCode);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(
+        "Cast: Stream URL {Url} is NOT reachable even from this machine: {Error}. Is the HTTP stream server running?",
+        _streamUrl, ex.Message);
+    }
+  }
+
   private async Task SetCastVolumeAsync(float volume)
   {
     if (_client == null || _connectedReceiver == null || State != AudioOutputState.Streaming)
@@ -570,7 +921,7 @@ public class GoogleCastOutput : AudioOutputBase
 
     try
     {
-      var receiverChannel = _client.GetChannel<IReceiverChannel>();
+      var receiverChannel = _client.GetChannel<ReceiverChannel>();
       if (receiverChannel != null)
       {
         await receiverChannel.SetVolume(volume);
@@ -592,7 +943,7 @@ public class GoogleCastOutput : AudioOutputBase
 
     try
     {
-      var receiverChannel = _client.GetChannel<IReceiverChannel>();
+      var receiverChannel = _client.GetChannel<ReceiverChannel>();
       if (receiverChannel != null)
       {
         await receiverChannel.SetMute(mute);
@@ -702,6 +1053,15 @@ public class ChromecastDisconnectedEventArgs : EventArgs
   /// </summary>
   public string? Reason { get; init; }
 }
+
+/// <summary>
+/// Now-playing metadata to display on Cast devices (Google Home app).
+/// </summary>
+/// <param name="Title">Track title.</param>
+/// <param name="Artist">Artist name.</param>
+/// <param name="Album">Album name.</param>
+/// <param name="AlbumArtUrl">Absolute URL to album art image.</param>
+public record CastNowPlayingMetadata(string? Title, string? Artist, string? Album, string? AlbumArtUrl);
 
 /// <summary>
 /// A cached Cast device entry with a last-seen timestamp.

@@ -120,6 +120,93 @@ public class DevicesApiService
   }
 
   /// <summary>
+  /// Gets cached Google Cast devices (no mDNS discovery, instant).
+  /// </summary>
+  public async Task<List<CastDeviceDto>?> GetCachedCastDevicesAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var response = await _httpClient.GetAsync("/api/devices/cast/cached", cancellationToken);
+
+      if (response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
+      {
+        _logger.LogWarning("Google Cast output is not available (503)");
+        return new List<CastDeviceDto>();
+      }
+
+      if (!response.IsSuccessStatusCode)
+      {
+        _logger.LogWarning("Failed to get cached Cast devices: {StatusCode}", response.StatusCode);
+        return null;
+      }
+
+      return await response.Content.ReadFromJsonAsync<List<CastDeviceDto>>(JsonOptions, cancellationToken)
+        ?? new List<CastDeviceDto>();
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to get cached Cast devices");
+      return null;
+    }
+  }
+
+  /// <summary>
+  /// Gets the default Cast device preference.
+  /// </summary>
+  public async Task<CastDeviceDto?> GetDefaultCastDeviceAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var response = await _httpClient.GetAsync("/api/devices/cast/default", cancellationToken);
+      if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        return null;
+      if (!response.IsSuccessStatusCode)
+        return null;
+
+      return await response.Content.ReadFromJsonAsync<CastDeviceDto>(JsonOptions, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to get default Cast device");
+      return null;
+    }
+  }
+
+  /// <summary>
+  /// Sets a Cast device as the default for auto-connect.
+  /// </summary>
+  public async Task<bool> SetDefaultCastDeviceAsync(CastDeviceDto device, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var response = await _httpClient.PostAsJsonAsync("/api/devices/cast/default", device, cancellationToken);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to set default Cast device");
+      return false;
+    }
+  }
+
+  /// <summary>
+  /// Clears the default Cast device preference.
+  /// </summary>
+  public async Task<bool> ClearDefaultCastDeviceAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var response = await _httpClient.DeleteAsync("/api/devices/cast/default", cancellationToken);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to clear default Cast device");
+      return false;
+    }
+  }
+
+  /// <summary>
   /// Discovers available Google Cast devices on the network.
   /// </summary>
   public async Task<List<CastDeviceDto>?> DiscoverCastDevicesAsync(CancellationToken cancellationToken = default)

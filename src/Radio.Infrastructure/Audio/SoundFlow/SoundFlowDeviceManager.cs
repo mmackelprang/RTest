@@ -261,10 +261,23 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
     }
   }
 
+  /// <summary>
+  /// Gets the display name for the Google Cast virtual output device.
+  /// Shows the default device name if one is configured.
+  /// </summary>
+  private string GetCastDisplayName()
+  {
+    var prefs = _audioPreferences.CurrentValue;
+    return string.IsNullOrEmpty(prefs.DefaultCastDeviceName)
+      ? "Google Cast"
+      : $"Cast ({prefs.DefaultCastDeviceName})";
+  }
+
   private (List<AudioDeviceInfo> output, List<AudioDeviceInfo> input) EnumerateDevices()
   {
     var outputDevices = new List<AudioDeviceInfo>();
     var inputDevices = new List<AudioDeviceInfo>();
+    var castName = GetCastDisplayName();
 
     try
     {
@@ -342,7 +355,7 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
       outputDevices.Add(new AudioDeviceInfo
       {
         Id = "google-cast",
-        Name = "Google Cast",
+        Name = castName,
         Type = AudioDeviceType.Output,
         IsDefault = false,
         MaxChannels = 2,
@@ -383,7 +396,7 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
       outputDevices.Add(new AudioDeviceInfo
       {
         Id = "google-cast",
-        Name = "Google Cast",
+        Name = castName,
         Type = AudioDeviceType.Output,
         IsDefault = false,
         MaxChannels = 2,

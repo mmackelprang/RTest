@@ -4,6 +4,7 @@ using Radio.API.Mappers;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
+using Radio.Infrastructure.Audio.Outputs;
 using System.Linq;
 
 namespace Radio.API.Services;
@@ -19,6 +20,7 @@ public class AudioStateUpdateService : BackgroundService
   private readonly IHubContext<AudioStateHub> _hubContext;
   private readonly IAudioManager? _audioManager;
   private readonly IBluetoothService? _bluetoothService;
+  private readonly GoogleCastOutput? _castOutput;
 
   /// <summary>
   /// Gets or sets the update interval in milliseconds (default: 500ms).
@@ -52,6 +54,7 @@ public class AudioStateUpdateService : BackgroundService
     // This allows the service to start even if audio infrastructure isn't fully initialized
     _audioManager = serviceProvider.GetService<IAudioManager>();
     _bluetoothService = serviceProvider.GetService<IBluetoothService>();
+    _castOutput = serviceProvider.GetService<GoogleCastOutput>();
     
     if (_audioManager == null)
     {
@@ -156,8 +159,36 @@ public class AudioStateUpdateService : BackgroundService
       _lastNowPlaying = currentNowPlaying;
       await _hubContext.Clients.All
         .SendAsync("NowPlayingChanged", currentNowPlaying, cancellationToken);
-      _logger.LogDebug("Broadcast NowPlayingChanged: Title={Title}, Artist={Artist}, Album={Album}, Source={Source}", 
+      _logger.LogDebug("Broadcast NowPlayingChanged: Title={Title}, Artist={Artist}, Album={Album}, Source={Source}",
         currentNowPlaying.Title, currentNowPlaying.Artist, currentNowPlaying.Album, currentNowPlaying.SourceName);
+
+      // Push metadata to Cast device if connected and streaming
+      await PushMetadataToCastAsync(currentNowPlaying, cancellationToken);
+    }
+  }
+
+  /// <summary>
+  /// Pushes current now-playing metadata to Google Cast device for display in Google Home.
+  /// </summary>
+  private async Task PushMetadataToCastAsync(NowPlayingDto nowPlaying, CancellationToken cancellationToken)
+  {
+    if (_castOutput == null || _castOutput.State != AudioOutputState.Streaming)
+    {
+      return;
+    }
+
+    try
+    {
+      await _castOutput.UpdateNowPlayingMetadataAsync(
+        nowPlaying.Title,
+        nowPlaying.Artist,
+        nowPlaying.Album,
+        nowPlaying.AlbumArtUrl,
+        cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Failed to push metadata to Cast device");
     }
   }
 

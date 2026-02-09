@@ -71,7 +71,22 @@
       "mcp__playwright__browser_run_code",
       "Bash(wc:*)",
       "Bash(perl:*)",
-      "Bash(PYTHONIOENCODING=utf-8 python3:*)"
+      "Bash(PYTHONIOENCODING=utf-8 python3:*)",
+      "Bash(git log:*)",
+      "WebFetch(domain:developers.google.com)",
+      "Bash(cat:*)",
+      "Bash(dotnet script eval:*)",
+      "Bash(D:)",
+      "Bash(powershell:*)",
+      "Bash(echo:*)",
+      "Bash(xxd:*)",
+      "Bash(/tmp/inspect_sharpcaster.csx:*)",
+      "Bash(dotnet script:*)",
+      "mcp__playwright__browser_network_requests",
+      "mcp__playwright__browser_evaluate",
+      "Bash(ilspycmd:*)",
+      "WebFetch(domain:www.nuget.org)",
+      "WebFetch(domain:www.hackitu.de)"
     ]
   },
   "enableAllProjectMcpServers": true,

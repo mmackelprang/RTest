@@ -4,6 +4,8 @@ using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using NAudio.Lame;
+using NAudio.Wave;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 
@@ -43,9 +45,21 @@ public class HttpStreamOutput : AudioOutputBase
   public event EventHandler<HttpStreamClientEventArgs>? ClientDisconnected;
 
   /// <summary>
-  /// Gets the stream URL for clients to connect to.
+  /// Gets the WAV stream URL for clients to connect to.
   /// </summary>
   public string StreamUrl { get; private set; } = "";
+
+  /// <summary>
+  /// Gets the raw PCM stream URL (WAV format) for general clients.
+  /// </summary>
+  public string RawStreamUrl { get; private set; } = "";
+
+  /// <summary>
+  /// Gets the MP3-encoded stream URL for Cast devices.
+  /// Cast devices require MP3 for progressive HTTP live streaming
+  /// because Chrome's audio element can't handle chunked WAV.
+  /// </summary>
+  public string Mp3StreamUrl { get; private set; } = "";
 
   /// <summary>
   /// Gets the number of currently connected clients.
@@ -89,14 +103,17 @@ public class HttpStreamOutput : AudioOutputBase
         "Initializing HTTP stream output on port {Port}",
         _options.Port);
 
-      // Create the HTTP listener
+      // Create the HTTP listener — single prefix covers both WAV and raw L16 sub-paths
       _httpListener = new HttpListener();
       var prefix = $"http://+:{_options.Port}{_options.EndpointPath}/";
       _httpListener.Prefixes.Add(prefix);
 
-      // Build the stream URL using actual LAN IP (Chromecast needs a routable IP, not a hostname)
+      // Build the stream URLs using actual LAN IP (Chromecast needs a routable IP, not a hostname)
+      // Raw L16 endpoint is a sub-path so it's covered by the same URL reservation
       var host = GetLocalIPAddress() ?? Dns.GetHostName();
       StreamUrl = $"http://{host}:{_options.Port}{_options.EndpointPath}";
+      RawStreamUrl = $"http://{host}:{_options.Port}{_options.EndpointPath}/raw";
+      Mp3StreamUrl = $"http://{host}:{_options.Port}{_options.EndpointPath}/mp3";
 
       State = AudioOutputState.Ready;
       _logger.LogInformation(
@@ -142,7 +159,7 @@ public class HttpStreamOutput : AudioOutputBase
     }
     catch (HttpListenerException ex) when (ex.ErrorCode == 5) // Access Denied
     {
-      _logger.LogError(ex, "Access denied starting HTTP stream server. This usually means the URL is not reserved for non-admin users. To fix this, run this command as Administrator: netsh http add urlacl url=http://+:{Port}{Path}/ user=Everyone", _options.Port, _options.EndpointPath);
+      _logger.LogError(ex, "Access denied starting HTTP stream server. Run as Administrator: netsh http add urlacl url=http://+:{Port}{Path}/ user=Everyone", _options.Port, _options.EndpointPath);
       State = AudioOutputState.Error;
       throw;
     }
@@ -278,25 +295,63 @@ public class HttpStreamOutput : AudioOutputBase
   {
     var clientId = Guid.NewGuid().ToString("N");
     var remoteEndpoint = context.Request.RemoteEndPoint?.ToString() ?? "unknown";
-
-    var client = new HttpStreamClient(clientId, remoteEndpoint, context.Response);
+    var httpMethod = context.Request.HttpMethod;
+    var requestPath = context.Request.Url?.AbsolutePath ?? "";
+    var userAgent = context.Request.UserAgent ?? "unknown";
 
     _logger.LogInformation(
-      "Client connected: {ClientId} from {Endpoint}",
-      clientId, remoteEndpoint);
+      "HTTP request: {Method} {Path} from {Endpoint} (UA: {UserAgent})",
+      httpMethod, requestPath, remoteEndpoint, userAgent);
+
+    // Add CORS headers — required for Google Cast Default Media Receiver
+    // which runs in Chrome and enforces cross-origin restrictions
+    context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+    context.Response.Headers.Add("Access-Control-Allow-Methods", "GET, OPTIONS");
+    context.Response.Headers.Add("Access-Control-Allow-Headers", "Content-Type, Range");
+
+    // Handle CORS preflight requests
+    if (httpMethod == "OPTIONS")
+    {
+      context.Response.StatusCode = 204;
+      context.Response.Close();
+      return;
+    }
+
+    var client = new HttpStreamClient(clientId, remoteEndpoint, context.Response);
 
     _connectedClients.TryAdd(clientId, client);
     ClientConnected?.Invoke(this, new HttpStreamClientEventArgs { Client = client.ToInfo() });
 
     try
     {
-      // Set up the response headers
-      context.Response.ContentType = _options.ContentType;
-      context.Response.SendChunked = true;
-      context.Response.KeepAlive = true;
+      // Detect endpoint type from URL path
+      var isMp3Endpoint = requestPath.EndsWith("/mp3", StringComparison.OrdinalIgnoreCase);
+      var isCastEndpoint = requestPath.EndsWith("/raw", StringComparison.OrdinalIgnoreCase);
 
-      // Write WAV header if using WAV format
-      if (_options.ContentType == "audio/wav")
+      // Set up the response headers
+      if (isMp3Endpoint)
+      {
+        // MP3 endpoint for Google Cast: frame-based format that supports
+        // progressive HTTP streaming (unlike WAV which needs content-length).
+        context.Response.ContentType = "audio/mpeg";
+        context.Response.SendChunked = true;
+        context.Response.KeepAlive = true;
+      }
+      else if (isCastEndpoint)
+      {
+        context.Response.ContentType = "audio/wav";
+        context.Response.SendChunked = true;
+        context.Response.KeepAlive = true;
+      }
+      else
+      {
+        context.Response.ContentType = _options.ContentType;
+        context.Response.SendChunked = true;
+        context.Response.KeepAlive = true;
+      }
+
+      // Write WAV header for WAV endpoints (not MP3 — LAME writes its own framing)
+      if (!isMp3Endpoint && (isCastEndpoint || _options.ContentType == "audio/wav"))
       {
         var header = CreateWavHeader(
           _options.SampleRate,
@@ -305,55 +360,96 @@ public class HttpStreamOutput : AudioOutputBase
         await context.Response.OutputStream.WriteAsync(header, cancellationToken);
       }
 
-      // Create an independent stream reader for this client so multiple
-      // clients (and fingerprinting) don't compete for the same read position
-      using var audioStream = _audioEngine.CreateStreamReader($"http-client-{clientId}");
-      var buffer = new byte[_options.ClientBufferSize];
-      var firstDataSent = false;
-      var zeroBytesSince = DateTime.UtcNow;
-
-      while (!cancellationToken.IsCancellationRequested && client.IsConnected)
+      // Create MP3 encoder for the Cast MP3 endpoint
+      LameMP3FileWriter? mp3Writer = null;
+      if (isMp3Endpoint)
       {
-        var bytesRead = await audioStream.ReadAsync(buffer, cancellationToken);
-
-        if (bytesRead == 0)
-        {
-          // Warn if no data for > 5 seconds (throttled to every 5s)
-          var now = DateTime.UtcNow;
-          if ((now - zeroBytesSince).TotalSeconds > 5 &&
-              (now - _lastZeroBytesWarning).TotalSeconds > 5)
-          {
-            _logger.LogWarning(
-              "HttpStream: 0 bytes available for client {ClientId} for {Seconds:F1}s — output tap may not be receiving data",
-              clientId, (now - zeroBytesSince).TotalSeconds);
-            _lastZeroBytesWarning = now;
-          }
-          await Task.Delay(10, cancellationToken);
-          continue;
-        }
-
-        zeroBytesSince = DateTime.UtcNow;
-
-        if (!firstDataSent)
-        {
-          firstDataSent = true;
-          _logger.LogInformation(
-            "HttpStream: First {Bytes} bytes sent to client {ClientId}",
-            bytesRead, clientId);
-        }
-
         try
         {
-          await context.Response.OutputStream.WriteAsync(
-            buffer.AsMemory(0, bytesRead),
-            cancellationToken);
-
-          client.AddBytesSent(bytesRead);
+          var waveFormat = new WaveFormat(_options.SampleRate, _options.BitsPerSample, _options.Channels);
+          mp3Writer = new LameMP3FileWriter(context.Response.OutputStream, waveFormat, 192);
+          _logger.LogInformation(
+            "MP3 encoder started (192 kbps CBR, {SampleRate}Hz, {Channels}ch) for client {ClientId}",
+            _options.SampleRate, _options.Channels, clientId);
         }
-        catch (HttpListenerException)
+        catch (Exception ex) when (ex is DllNotFoundException or TypeInitializationException)
         {
-          // Client disconnected
-          break;
+          _logger.LogError(ex,
+            "LAME MP3 encoder not available. Install libmp3lame: apt install libmp3lame-dev (Linux) or ensure LAME DLLs are present (Windows).");
+          context.Response.StatusCode = 500;
+          context.Response.Close();
+          return;
+        }
+      }
+
+      try
+      {
+        // Create an independent stream reader for this client so multiple
+        // clients (and fingerprinting) don't compete for the same read position
+        using var audioStream = _audioEngine.CreateStreamReader($"http-client-{clientId}");
+        var buffer = new byte[_options.ClientBufferSize];
+        var firstDataSent = false;
+        var zeroBytesSince = DateTime.UtcNow;
+
+        while (!cancellationToken.IsCancellationRequested && client.IsConnected)
+        {
+          var bytesRead = await audioStream.ReadAsync(buffer, cancellationToken);
+
+          if (bytesRead == 0)
+          {
+            // Warn if no data for > 5 seconds (throttled to every 5s)
+            var now = DateTime.UtcNow;
+            if ((now - zeroBytesSince).TotalSeconds > 5 &&
+                (now - _lastZeroBytesWarning).TotalSeconds > 5)
+            {
+              _logger.LogWarning(
+                "HttpStream: 0 bytes available for client {ClientId} for {Seconds:F1}s — output tap may not be receiving data",
+                clientId, (now - zeroBytesSince).TotalSeconds);
+              _lastZeroBytesWarning = now;
+            }
+            await Task.Delay(10, cancellationToken);
+            continue;
+          }
+
+          zeroBytesSince = DateTime.UtcNow;
+
+          if (!firstDataSent)
+          {
+            firstDataSent = true;
+            _logger.LogInformation(
+              "HttpStream: First {Bytes} bytes sent to client {ClientId} (MP3: {IsMp3})",
+              bytesRead, clientId, mp3Writer != null);
+          }
+
+          try
+          {
+            if (mp3Writer != null)
+            {
+              // Feed PCM data through LAME encoder — writes MP3 frames to output stream
+              mp3Writer.Write(buffer, 0, bytesRead);
+            }
+            else
+            {
+              await context.Response.OutputStream.WriteAsync(
+                buffer.AsMemory(0, bytesRead),
+                cancellationToken);
+            }
+
+            client.AddBytesSent(bytesRead);
+          }
+          catch (HttpListenerException)
+          {
+            // Client disconnected
+            break;
+          }
+        }
+      }
+      finally
+      {
+        if (mp3Writer != null)
+        {
+          try { mp3Writer.Dispose(); }
+          catch { /* Dispose may fail on non-seekable stream (VBR tag write) */ }
         }
       }
     }
@@ -389,33 +485,43 @@ public class HttpStreamOutput : AudioOutputBase
 
   /// <summary>
   /// Gets the local LAN IP address by scanning network interfaces.
+  /// Filters out virtual adapters (Hyper-V, WSL, Docker) to prefer real LAN IPs.
   /// </summary>
   private static string? GetLocalIPAddress()
   {
+    string? fallbackIp = null;
+
     foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
     {
       if (ni.OperationalStatus != OperationalStatus.Up)
-      {
         continue;
-      }
-
       if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
-      {
         continue;
-      }
+
+      // Skip virtual adapters (Hyper-V, WSL, Docker, VPN tunnels)
+      var desc = ni.Description.ToLowerInvariant();
+      var name = ni.Name.ToLowerInvariant();
+      var isVirtual = desc.Contains("hyper-v") || desc.Contains("virtual") ||
+                      name.Contains("vethernet") || name.Contains("wsl") ||
+                      desc.Contains("docker") || desc.Contains("vmware") ||
+                      desc.Contains("virtualbox");
 
       var props = ni.GetIPProperties();
       foreach (var addr in props.UnicastAddresses)
       {
-        if (addr.Address.AddressFamily == AddressFamily.InterNetwork &&
-            !IPAddress.IsLoopback(addr.Address))
-        {
+        if (addr.Address.AddressFamily != AddressFamily.InterNetwork ||
+            IPAddress.IsLoopback(addr.Address))
+          continue;
+
+        if (!isVirtual)
           return addr.Address.ToString();
-        }
+
+        // Track virtual IP as last resort
+        fallbackIp ??= addr.Address.ToString();
       }
     }
 
-    return null;
+    return fallbackIp;
   }
 
   private static byte[] CreateWavHeader(int sampleRate, int channels, int bitsPerSample)

@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Radio.Web.Models;
 
@@ -14,7 +15,8 @@ public class ConfigurationApiService
   private readonly ILogger<ConfigurationApiService> _logger;
   private static readonly JsonSerializerOptions JsonOptions = new()
   {
-    PropertyNameCaseInsensitive = true
+    PropertyNameCaseInsensitive = true,
+    NumberHandling = JsonNumberHandling.AllowReadingFromString
   };
 
   public ConfigurationApiService(HttpClient httpClient, ILogger<ConfigurationApiService> logger)

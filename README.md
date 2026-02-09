@@ -565,6 +565,9 @@ audio.play();
 
 - .NET 8.0 SDK or later
 - For Raspberry Pi deployment: Raspberry Pi OS with .NET runtime
+- LAME MP3 encoder (for Google Cast audio streaming):
+  - **Windows**: Included automatically via NAudio.Lame NuGet package
+  - **Linux (Raspberry Pi)**: `sudo apt install libmp3lame-dev`
 
 ### Building
 
@@ -587,6 +590,40 @@ dotnet run --project src/Radio.API
 
 # Run the Web UI
 dotnet run --project src/Radio.Web
+```
+
+### Network Setup (Required for Google Cast)
+
+The HTTP stream server and API require network port permissions. These commands must be run once in an **elevated / Administrator** shell before first use.
+
+#### Windows
+
+```powershell
+# Allow the HTTP stream server to bind to port 8080 on all interfaces
+netsh http add urlacl url=http://+:8080/stream/audio/ user=Everyone
+
+# Allow the API/Web server to bind to port 5000
+netsh http add urlacl url=http://+:5000/ user=Everyone
+
+# Open firewall for Cast devices to reach the HTTP audio stream
+netsh advfirewall firewall add rule name="Radio Console Stream" dir=in action=allow protocol=TCP localport=8080
+
+# Open firewall for the API (needed if accessing Web UI from other devices)
+netsh advfirewall firewall add rule name="Radio Console API" dir=in action=allow protocol=TCP localport=5000
+```
+
+#### Linux (Raspberry Pi)
+
+```bash
+# Allow non-root binding to low ports (if using port < 1024)
+# Not needed for port 5000/8080
+
+# Open firewall (if ufw is enabled)
+sudo ufw allow 8080/tcp comment "Radio Console audio stream"
+sudo ufw allow 5000/tcp comment "Radio Console API"
+
+# Install LAME for MP3 Cast streaming
+sudo apt install libmp3lame-dev
 ```
 
 ## Design Documents

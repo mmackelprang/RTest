@@ -39,6 +39,18 @@ public class AudioPreferences
   /// Empty string means use default device.
   /// </summary>
   public string CurrentInput { get; set; } = "";
+
+  /// <summary>
+  /// Gets or sets the default Google Cast device ID.
+  /// When set, auto-connects to this device when Cast output is selected.
+  /// </summary>
+  public string DefaultCastDeviceId { get; set; } = "";
+
+  /// <summary>
+  /// Gets or sets the friendly name of the default Cast device.
+  /// Stored alongside ID to avoid DB lookups during device enumeration.
+  /// </summary>
+  public string DefaultCastDeviceName { get; set; } = "";
 }
 
 /// <summary>

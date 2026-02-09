@@ -11,8 +11,9 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="InTheHand.Net.Bluetooth" Version="4.2.2" />
+    <PackageReference Include="NAudio.Lame" Version="2.1.0" />
     <PackageReference Include="SoundFlow" Version="1.*" />
-    <PackageReference Include="SharpCaster" Version="1.1.18" />
+    <PackageReference Include="SharpCaster" Version="3.0.0" />
     <PackageReference Include="Serilog" Version="4.*" />
     <PackageReference Include="Serilog.Extensions.Logging" Version="8.*" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="8.0.0" />

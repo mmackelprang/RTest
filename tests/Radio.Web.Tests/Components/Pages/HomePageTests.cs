@@ -53,6 +53,7 @@ public class HomePageTests : TestContext
     Services.AddHttpClient<QueueApiService>();
     Services.AddHttpClient<PlayHistoryApiService>();
     Services.AddHttpClient<FileApiService>();
+    Services.AddHttpClient<PlaylistApiService>();
 
     // SignalR hub services
     Services.AddSingleton(sp =>

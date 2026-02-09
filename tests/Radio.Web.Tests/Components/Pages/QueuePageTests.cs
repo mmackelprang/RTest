@@ -33,6 +33,7 @@ public class QueuePageTests : TestContext
     Services.AddHttpClient<AudioApiService>();
     Services.AddHttpClient<ConfigurationApiService>();
     Services.AddHttpClient<FileApiService>();
+    Services.AddHttpClient<PlaylistApiService>();
     
     // Add SignalR hub service
     Services.AddSingleton(sp => 

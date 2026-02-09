@@ -81,6 +81,96 @@
       </MudStack>
     </MudPaper>
 
+    @* Google Cast Devices Section *@
+    <MudPaper Elevation="2" Class="pa-4">
+      <MudStack Spacing="2">
+        <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+          <MudText Typo="Typo.h5">Google Cast Devices</MudText>
+          <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                     OnClick="ScanForCastDevicesAsync" StartIcon="@Icons.Material.Filled.Search"
+                     Disabled="@isDiscoveringCast">
+            @if (isDiscoveringCast)
+            {
+              <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+              <span>Scanning...</span>
+            }
+            else
+            {
+              <span>Scan for New Devices</span>
+            }
+          </MudButton>
+        </MudStack>
+
+        @if (isLoadingCast)
+        {
+          <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (castDevices == null || !castDevices.Any())
+        {
+          <MudAlert Severity="Severity.Info">No cached Cast devices. Click "Scan for New Devices" to discover devices on your network.</MudAlert>
+        }
+        else
+        {
+          <MudTable Items="@castDevices" Hover="true" Striped="true" Dense="true">
+            <HeaderContent>
+              <MudTh>Name</MudTh>
+              <MudTh>IP Address</MudTh>
+              <MudTh>Model</MudTh>
+              <MudTh>Default</MudTh>
+              <MudTh>Actions</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+              <MudTd DataLabel="Name">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                  <MudIcon Icon="@Icons.Material.Filled.Cast" Size="Size.Small" />
+                  <MudText>@context.Name</MudText>
+                </MudStack>
+              </MudTd>
+              <MudTd DataLabel="IP Address">@context.IpAddress:@context.Port</MudTd>
+              <MudTd DataLabel="Model">@context.Model</MudTd>
+              <MudTd DataLabel="Default">
+                @if (defaultCastDeviceId == context.Id)
+                {
+                  <MudIcon Icon="@Icons.Material.Filled.Star" Color="Color.Warning" Size="Size.Small" title="Default Device" />
+                }
+              </MudTd>
+              <MudTd DataLabel="Actions">
+                <MudStack Row="true" Spacing="1">
+                  <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
+                             OnClick="@(() => ConnectCastDeviceAsync(context))"
+                             Disabled="@connectingCastDeviceId.Equals(context.Id)">
+                    @if (connectingCastDeviceId == context.Id)
+                    {
+                      <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                      <span>Connecting</span>
+                    }
+                    else
+                    {
+                      <span>Connect</span>
+                    }
+                  </MudButton>
+                  @if (defaultCastDeviceId != context.Id)
+                  {
+                    <MudButton Variant="Variant.Text" Color="Color.Secondary" Size="Size.Small"
+                               OnClick="@(() => SetDefaultCastDeviceAsync(context))">
+                      Set Default
+                    </MudButton>
+                  }
+                  else
+                  {
+                    <MudButton Variant="Variant.Text" Color="Color.Default" Size="Size.Small"
+                               OnClick="ClearDefaultCastDeviceAsync">
+                      Clear Default
+                    </MudButton>
+                  }
+                </MudStack>
+              </MudTd>
+            </RowTemplate>
+          </MudTable>
+        }
+      </MudStack>
+    </MudPaper>
+
     @* Input Devices Section *@
     <MudPaper Elevation="2" Class="pa-4">
       <MudStack Spacing="2">
@@ -190,16 +280,24 @@
   private List<AudioDeviceDto>? outputDevices;
   private List<AudioDeviceDto>? inputDevices;
   private List<UsbPortDto>? usbPorts;
-  
+  private List<CastDeviceDto>? castDevices;
+
   private bool isLoadingOutput = false;
   private bool isLoadingInput = false;
   private bool isLoadingUsb = false;
-  
+  private bool isLoadingCast = false;
+  private bool isDiscoveringCast = false;
+  private string connectingCastDeviceId = "";
+  private string defaultCastDeviceId = "";
+
   private DateTime? lastRefreshTime;
 
   protected override async Task OnInitializedAsync()
   {
     await LoadAllDevicesAsync();
+
+    // Auto-start mDNS discovery in the background to refresh cached devices
+    _ = BackgroundDiscoverCastDevicesAsync();
   }
 
   private async Task LoadAllDevicesAsync()
@@ -210,24 +308,31 @@
       isLoadingOutput = true;
       isLoadingInput = true;
       isLoadingUsb = true;
+      isLoadingCast = true;
       StateHasChanged();
 
       // Load all devices in parallel for better performance
       var outputTask = DevicesApi.GetOutputDevicesAsync();
       var inputTask = DevicesApi.GetInputDevicesAsync();
       var usbTask = DevicesApi.GetUsbPortsAsync();
+      var castTask = DevicesApi.GetCachedCastDevicesAsync();
+      var defaultCastTask = DevicesApi.GetDefaultCastDeviceAsync();
 
-      await Task.WhenAll(outputTask, inputTask, usbTask);
+      await Task.WhenAll(outputTask, inputTask, usbTask, castTask, defaultCastTask);
 
       // Assign results
       outputDevices = await outputTask;
       inputDevices = await inputTask;
       usbPorts = await usbTask;
+      castDevices = await castTask;
+      var defaultCast = await defaultCastTask;
+      defaultCastDeviceId = defaultCast?.Id ?? "";
 
       // Clear loading flags
       isLoadingOutput = false;
       isLoadingInput = false;
       isLoadingUsb = false;
+      isLoadingCast = false;
 
       lastRefreshTime = DateTime.Now;
       StateHasChanged();
@@ -241,6 +346,7 @@
       isLoadingOutput = false;
       isLoadingInput = false;
       isLoadingUsb = false;
+      isLoadingCast = false;
       StateHasChanged();
     }
   }
@@ -277,13 +383,13 @@
     try
     {
       Logger.LogInformation("Setting default output device: {DeviceId}", deviceId);
-      
+
       var success = await DevicesApi.SetOutputDeviceAsync(deviceId);
-      
+
       if (success)
       {
         Snackbar.Add("Default output device updated", Severity.Success);
-        
+
         // Reload output devices to reflect the change
         isLoadingOutput = true;
         StateHasChanged();
@@ -302,6 +408,155 @@
       Snackbar.Add("Error setting default output device", Severity.Error);
       isLoadingOutput = false;
       StateHasChanged();
+    }
+  }
+
+  /// <summary>
+  /// Runs mDNS discovery in the background on page load.
+  /// Updates the Cast device list when complete without blocking the UI.
+  /// </summary>
+  private async Task BackgroundDiscoverCastDevicesAsync()
+  {
+    try
+    {
+      isDiscoveringCast = true;
+      await InvokeAsync(StateHasChanged);
+
+      var devices = await DevicesApi.DiscoverCastDevicesAsync();
+
+      if (devices != null)
+      {
+        castDevices = devices;
+        Logger.LogInformation("Background Cast discovery found {Count} device(s)", devices.Count);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Background Cast device discovery failed");
+    }
+    finally
+    {
+      isDiscoveringCast = false;
+      await InvokeAsync(StateHasChanged);
+    }
+  }
+
+  private async Task ScanForCastDevicesAsync()
+  {
+    try
+    {
+      isDiscoveringCast = true;
+      StateHasChanged();
+
+      Logger.LogInformation("Scanning for Cast devices (mDNS discovery)...");
+      var devices = await DevicesApi.DiscoverCastDevicesAsync();
+
+      if (devices != null)
+      {
+        castDevices = devices;
+        Snackbar.Add($"Found {devices.Count} Cast device(s)", Severity.Success);
+      }
+      else
+      {
+        Snackbar.Add("Cast device scan failed", Severity.Warning);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error scanning for Cast devices");
+      Snackbar.Add("Error scanning for Cast devices", Severity.Error);
+    }
+    finally
+    {
+      isDiscoveringCast = false;
+      StateHasChanged();
+    }
+  }
+
+  private async Task ConnectCastDeviceAsync(CastDeviceDto device)
+  {
+    try
+    {
+      connectingCastDeviceId = device.Id;
+      StateHasChanged();
+
+      Logger.LogInformation("Connecting to Cast device: {Name}", device.Name);
+      var success = await DevicesApi.ConnectToCastDeviceAsync(device);
+
+      if (success)
+      {
+        Snackbar.Add($"Connected to {device.Name}", Severity.Success);
+        defaultCastDeviceId = device.Id;
+
+        // Refresh output devices to reflect updated Cast name
+        outputDevices = await DevicesApi.GetOutputDevicesAsync();
+      }
+      else
+      {
+        Snackbar.Add($"Failed to connect to {device.Name}", Severity.Warning);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error connecting to Cast device: {Name}", device.Name);
+      Snackbar.Add($"Error connecting to {device.Name}", Severity.Error);
+    }
+    finally
+    {
+      connectingCastDeviceId = "";
+      StateHasChanged();
+    }
+  }
+
+  private async Task SetDefaultCastDeviceAsync(CastDeviceDto device)
+  {
+    try
+    {
+      var success = await DevicesApi.SetDefaultCastDeviceAsync(device);
+      if (success)
+      {
+        defaultCastDeviceId = device.Id;
+        Snackbar.Add($"Default Cast device set to {device.Name}", Severity.Success);
+
+        // Refresh output devices to reflect updated Cast name
+        outputDevices = await DevicesApi.GetOutputDevicesAsync();
+        StateHasChanged();
+      }
+      else
+      {
+        Snackbar.Add("Failed to set default Cast device", Severity.Warning);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error setting default Cast device");
+      Snackbar.Add("Error setting default Cast device", Severity.Error);
+    }
+  }
+
+  private async Task ClearDefaultCastDeviceAsync()
+  {
+    try
+    {
+      var success = await DevicesApi.ClearDefaultCastDeviceAsync();
+      if (success)
+      {
+        defaultCastDeviceId = "";
+        Snackbar.Add("Default Cast device cleared", Severity.Success);
+
+        // Refresh output devices to reflect reverted Cast name
+        outputDevices = await DevicesApi.GetOutputDevicesAsync();
+        StateHasChanged();
+      }
+      else
+      {
+        Snackbar.Add("Failed to clear default Cast device", Severity.Warning);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error clearing default Cast device");
+      Snackbar.Add("Error clearing default Cast device", Severity.Error);
     }
   }
 }
