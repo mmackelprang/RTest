@@ -1,46 +1,77 @@
 # Findings & Decisions
 
-## Current State of TTS Voice System
+## Implementation Status Assessment: ~85% Structurally Complete, Audio Pipeline Non-Functional
 
-### Google Voices — Hardcoded (17 voices)
-- `TTSFactory.GetGoogleVoicesAsync()` (line 491) returns a static `List<TTSVoiceInfo>` with 10 US + 7 UK voices
-- No API call to Google Cloud TTS voice listing endpoint
-- Google Cloud TTS has a REST endpoint: `GET /v1/voices?key={key}&languageCode=en`
+### CRITICAL BUG: Audio Capture Pipeline Broken on Both Platforms
 
-### Azure Voices — Dynamic with In-Memory Cache (24h)
-- `TTSFactory.GetAzureVoicesAsync()` (line 527) calls Azure REST API
-- Uses `SemaphoreSlim` + `_cachedAzureVoices` field + `_azureVoiceCacheExpiry`
-- Filters to `en-*` locales
-- Falls back to 5 default voices on error
-
-### eSpeak Voices — Dynamic via Process
-- `TTSFactory.GetESpeakVoicesAsync()` (line 429) shells out to `espeak-ng --voices`
-- No caching — runs process each time
-- Falls back to 3 default voices on error
-
-### Web UI Voice Selection
-- Google engine: shows `MudSelect` dropdown populated from API
-- Other engines: shows plain text input for manual voice name entry
-- No favorites mechanism exists
-
-### API Endpoints
-- `GET /api/sources/events/tts/voices?engine=Google` — returns `List<TTSVoiceInfoDto>`
-- `GET /api/sources/events/tts/engines` — returns `List<TTSEngineInfoDto>`
-
-### TTSVoiceInfo Record (Core)
+**BluetoothAudioSource.InitializeAsync()** (line 57-77) does:
 ```csharp
-public record TTSVoiceInfo
-{
-  public string Id { get; init; } = "";
-  public string Name { get; init; } = "";
-  public string Language { get; init; } = "";
-  public TTSVoiceGender Gender { get; init; }
-}
+var capture = await _bluetoothService.GetAudioCaptureDeviceAsync(ct);
+if (capture is AudioCaptureDevice audioCapture) { SoundComponent = audioCapture; }
+else { State = AudioSourceState.Error; }
 ```
 
-### Database Pattern
-- FingerprintDbContext: Singleton, manages shared SQLite connection to fingerprints.db
-- Repositories: Scoped, get connection via `_dbContext.GetConnectionAsync()`
-- Tables created in `CreateTablesAsync()` with `CREATE TABLE IF NOT EXISTS`
-- UPSERT via `ON CONFLICT(...) DO UPDATE SET`
-- Data mapping via `SqliteDataReader` with `GetOrdinal()`
+**Neither platform returns an AudioCaptureDevice:**
+- **Linux**: Returns `null` (TODO comment, no implementation)
+- **Windows**: `FindCaptureDeviceByName()` returns a `string` (device name), NOT an `AudioCaptureDevice`
+  - The `is AudioCaptureDevice` check always fails → source always goes to Error state
+
+**Root cause:** `SoundFlowDeviceManager.FindCaptureDeviceByName()` returns `match.Name` (string) not an `AudioCaptureDevice` instance. The method needs to create/return an actual SoundFlow `AudioCaptureDevice` from the found device info.
+
+### Windows Bluetooth Service Issues
+1. **GetAudioCaptureDeviceAsync** returns wrong type (string vs AudioCaptureDevice)
+2. **No AVRCP/metadata support** — no media player events, no track info from connected device
+3. **InTheHand.Net** is a Bluetooth Classic library — it handles pairing/discovery but NOT A2DP sink role or audio capture directly
+4. **Windows doesn't easily support A2DP Sink** (acting as a speaker) — Windows typically acts as A2DP Source (sends audio TO speakers). The "Bluetooth speaker" scenario requires the phone to stream audio, which Windows receives via its standard audio endpoint system, not via InTheHand.
+
+### Linux Bluetooth Service Issues
+1. **GetAudioCaptureDeviceAsync** returns null (unimplemented)
+2. **Pairing/Unpairing** are stubs (return false)
+3. **DisconnectAsync** is a no-op
+4. **D-Bus metadata watcher** is partially implemented but untested
+5. **SoundFlowDeviceManager not injected** — constructor only takes logger + options
+
+### BluetoothAudioSource Issues
+1. Calls `_bluetoothService.StartAsync(Name, ct)` with `Name` = "Bluetooth Audio" instead of the configured device name from BluetoothOptions
+2. Doesn't subscribe to `DeviceConnected`/`DeviceDisconnected` events
+3. No `NeedsFingerprintingLookup` flag (unlike FilePlayer/SDR sources)
+4. Missing album art URL in metadata propagation
+
+### What IS Working
+- IBluetoothService interface design (comprehensive, includes MetadataChanged events)
+- BluetoothOptions/Preferences config classes
+- BluetoothController (all endpoints implemented)
+- BluetoothDtos
+- DI registration (factory pattern with platform detection)
+- AudioManager integration (factory, auto-switch on connect, cleanup)
+- MockBluetoothService (for testing)
+- Test structure (unit + integration tests exist)
+
+### Web UI Status
+- **No Bluetooth management page exists** — only PlayHistoryPage references "Bluetooth" (for source type display)
+- DeviceManagementPage handles Cast/USB devices but not Bluetooth
+
+### Metadata Pipeline
+- IBluetoothService has MetadataChanged, PlaybackStatusChanged, PositionChanged events
+- BluetoothPlaybackMetadata class has: Title, Artist, Album, Duration (NO AlbumArtUrl)
+- BluetoothAudioSource subscribes to MetadataChanged → updates StandardMetadataKeys
+- Linux has partial D-Bus media player property watcher (MPRIS/BlueZ MediaPlayer1)
+- Windows has NO metadata support at all
+
+### HFP Compatibility Assessment
+- Current architecture cleanly separates A2DP from other profiles
+- IBluetoothService is profile-agnostic (methods are about device management, not audio-specific)
+- Future HFP would be a separate service or extend IBluetoothService
+- No blockers for future RotaryPhone HFP integration
+
+### Key Architectural Decision: How Audio Capture Works
+On both platforms, when a phone connects via Bluetooth and streams audio:
+- **Linux**: BlueZ + PulseAudio/PipeWire creates an audio source automatically. We need to find and capture from it.
+- **Windows**: Windows audio system creates a virtual audio endpoint for the Bluetooth device. We capture from it via standard audio APIs (MiniAudio/SoundFlow).
+
+In both cases, the approach is:
+1. Platform service finds the OS audio device corresponding to the Bluetooth connection
+2. Create a SoundFlow `AudioCaptureDevice` from that OS device
+3. Return it to BluetoothAudioSource for pipeline integration
+
+This is similar to how USB audio sources work — hence why BluetoothAudioSource extends USBAudioSourceBase.

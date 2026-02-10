@@ -100,7 +100,8 @@ public static class AudioServiceExtensions
       var logger = sp.GetRequiredService<ILoggerFactory>();
       var options = sp.GetRequiredService<IOptions<BluetoothOptions>>();
       var deviceManager = sp.GetRequiredService<IAudioDeviceManager>() as SoundFlowDeviceManager;
-      return Platform.Bluetooth.BluetoothServiceFactory.Create(sp, options, logger, deviceManager);
+      var metricsCollector = sp.GetService<IMetricsCollector>();
+      return Platform.Bluetooth.BluetoothServiceFactory.Create(sp, options, logger, deviceManager, metricsCollector);
     });
 
     // Register audio manager (singleton to maintain state)

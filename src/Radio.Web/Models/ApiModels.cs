@@ -589,3 +589,22 @@ public class PlaylistItemDto
   public int? DurationMs { get; set; }
 }
 
+// Bluetooth DTOs
+public class BluetoothStatusDto
+{
+  public bool IsAvailable { get; set; }
+  public string State { get; set; } = string.Empty;
+  public bool IsDiscovering { get; set; }
+  public BluetoothDeviceDto? ConnectedDevice { get; set; }
+  public List<BluetoothDeviceDto> PairedDevices { get; set; } = [];
+  public List<BluetoothDeviceDto> DiscoveredDevices { get; set; } = [];
+}
+
+public class BluetoothDeviceDto
+{
+  public string Address { get; set; } = string.Empty;
+  public string Name { get; set; } = string.Empty;
+  public bool IsPaired { get; set; }
+  public bool IsConnected { get; set; }
+  public DateTime? LastConnected { get; set; }
+}

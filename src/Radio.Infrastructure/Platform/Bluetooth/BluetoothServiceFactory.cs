@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 
 namespace Radio.Infrastructure.Platform.Bluetooth;
@@ -10,10 +11,11 @@ namespace Radio.Infrastructure.Platform.Bluetooth;
 public static class BluetoothServiceFactory
 {
   public static IBluetoothService Create(
-      IServiceProvider serviceProvider, 
-      IOptions<BluetoothOptions> options, 
+      IServiceProvider serviceProvider,
+      IOptions<BluetoothOptions> options,
       ILoggerFactory loggerFactory,
-      Radio.Infrastructure.Audio.SoundFlow.SoundFlowDeviceManager? deviceManager)
+      Radio.Infrastructure.Audio.SoundFlow.SoundFlowDeviceManager? deviceManager,
+      IMetricsCollector? metricsCollector = null)
   {
       if (!options.Value.Enabled)
       {
@@ -22,11 +24,11 @@ public static class BluetoothServiceFactory
 
       if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
       {
-          return new LinuxBluetoothService(loggerFactory.CreateLogger<LinuxBluetoothService>(), options);
+          return new LinuxBluetoothService(loggerFactory.CreateLogger<LinuxBluetoothService>(), options, deviceManager, metricsCollector);
       }
       else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
       {
-          return new WindowsBluetoothService(loggerFactory.CreateLogger<WindowsBluetoothService>(), options, deviceManager);
+          return new WindowsBluetoothService(loggerFactory.CreateLogger<WindowsBluetoothService>(), options, deviceManager, metricsCollector);
       }
       else
       {

@@ -16,7 +16,7 @@ public enum BluetoothPlaybackStatus
 }
 
 /// <summary>
-/// Metadata for the currently playing track.
+/// Metadata for the currently playing track from AVRCP or platform media APIs.
 /// </summary>
 public class BluetoothPlaybackMetadata
 {
@@ -24,6 +24,7 @@ public class BluetoothPlaybackMetadata
   public string Artist { get; init; } = string.Empty;
   public string Album { get; init; } = string.Empty;
   public TimeSpan Duration { get; init; } = TimeSpan.Zero;
+  public string? AlbumArtUrl { get; init; }
 }
 
 public interface IBluetoothService : IAsyncDisposable

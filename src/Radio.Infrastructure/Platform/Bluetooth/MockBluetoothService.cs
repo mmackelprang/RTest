@@ -114,5 +114,11 @@ public sealed class MockBluetoothService : IBluetoothService
         {
             ConnectedDevice = device;
             DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = device });
-    }
+        }
+
+        public void SimulateDisconnection(BluetoothDeviceInfo device)
+        {
+            ConnectedDevice = null;
+            DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs { Device = device });
+        }
 }

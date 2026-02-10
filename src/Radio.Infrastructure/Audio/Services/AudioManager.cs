@@ -486,6 +486,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
       logger,
       _deviceManager,
       _bluetoothService,
+      _bluetoothOptions,
       _identificationService,
       _metricsCollector);
   }

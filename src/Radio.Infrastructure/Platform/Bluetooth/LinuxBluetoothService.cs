@@ -6,7 +6,11 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
+using SoundFlow.Backends.MiniAudio;
+using SoundFlow.Enums;
+using SoundFlow.Structs;
 using Tmds.DBus;
 
 namespace Radio.Infrastructure.Platform.Bluetooth
@@ -15,22 +19,32 @@ namespace Radio.Infrastructure.Platform.Bluetooth
     {
         private readonly ILogger _logger;
         private readonly BluetoothOptions _options;
+        private readonly Radio.Infrastructure.Audio.SoundFlow.SoundFlowDeviceManager? _deviceManager;
+        private readonly IMetricsCollector? _metricsCollector;
         private Connection? _connection;
         private Linux.IObjectManager? _objectManager;
         private Linux.IAdapter1? _adapter;
         private IDisposable? _discoveryWatcher;
-        
+        private MiniAudioEngine? _captureEngine;
+        private DateTime? _connectionStartTime;
+
         // Player tracking
         private Linux.IMediaPlayer1? _mediaPlayer;
         private IDisposable? _playerPropertiesWatcher;
-        
+
         // Maps object path to device info
         private readonly Dictionary<ObjectPath, BluetoothDeviceInfo> _deviceCache = new();
-        
-        public LinuxBluetoothService(ILogger logger, IOptions<BluetoothOptions> options)
+
+        public LinuxBluetoothService(
+            ILogger logger,
+            IOptions<BluetoothOptions> options,
+            Radio.Infrastructure.Audio.SoundFlow.SoundFlowDeviceManager? deviceManager = null,
+            IMetricsCollector? metricsCollector = null)
         {
             _logger = logger;
             _options = options.Value;
+            _deviceManager = deviceManager;
+            _metricsCollector = metricsCollector;
         }
 
         public bool IsAvailable => _connection != null && _adapter != null;
@@ -71,8 +85,8 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         }
 
         public event EventHandler<BluetoothAdapterStateChangedEventArgs>? StateChanged;
-        public event EventHandler<BluetoothDeviceConnectedEventArgs>? DeviceConnected { add { } remove { } }
-        public event EventHandler<BluetoothDeviceDisconnectedEventArgs>? DeviceDisconnected { add { } remove { } }
+        public event EventHandler<BluetoothDeviceConnectedEventArgs>? DeviceConnected;
+        public event EventHandler<BluetoothDeviceDisconnectedEventArgs>? DeviceDisconnected;
         public event EventHandler<BluetoothDeviceDiscoveredEventArgs>? DeviceDiscovered;
         public event EventHandler<BluetoothPlaybackMetadata>? MetadataChanged;
         public event EventHandler<BluetoothPlaybackStatus>? PlaybackStatusChanged;
@@ -150,6 +164,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             {
                 await _adapter.StartDiscoveryAsync();
                 IsDiscovering = true;
+                _metricsCollector?.Increment("bluetooth.discovery_sessions");
                 
                 // Watch for new devices
                 _discoveryWatcher = await _objectManager.WatchInterfacesAddedAsync(OnInterfaceAdded);
@@ -184,18 +199,106 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             {
                 var props = change.interfaces[Linux.BluezConstants.DeviceInterface];
                 var device = ParseDevice(change.objectPath, props);
-                
+
                 lock (_deviceCache)
                 {
                     _deviceCache[change.objectPath] = device;
                 }
-                
+
                 DeviceDiscovered?.Invoke(this, new BluetoothDeviceDiscoveredEventArgs { Device = device });
+
+                if (device.IsConnected)
+                {
+                    _connectionStartTime = DateTime.UtcNow;
+                    _metricsCollector?.Increment("bluetooth.devices_connected_total");
+                    _metricsCollector?.Gauge("bluetooth.active_connections", 1);
+                    _logger.LogInformation("Bluetooth device connected: {DeviceName} ({Address})",
+                        device.Name, device.Address);
+                    DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = device });
+                }
+
+                // Watch property changes on this device for connect/disconnect tracking
+                _ = WatchDevicePropertiesAsync(change.objectPath);
             }
 
             if (change.interfaces.ContainsKey(Linux.BluezConstants.MediaPlayerInterface))
             {
                 _ = AttachMediaPlayerAsync(change.objectPath);
+            }
+        }
+
+        private async Task WatchDevicePropertiesAsync(ObjectPath devicePath)
+        {
+            if (_connection == null) return;
+
+            try
+            {
+                var device = _connection.CreateProxy<Linux.IDevice1>(
+                    Linux.BluezConstants.ServiceName, devicePath);
+
+                await device.WatchPropertiesAsync(changes =>
+                {
+                    foreach (var prop in changes.Changed)
+                    {
+                        if (prop.Key == "Connected" && prop.Value is bool connected)
+                        {
+                            BluetoothDeviceInfo? deviceInfo;
+                            lock (_deviceCache)
+                            {
+                                _deviceCache.TryGetValue(devicePath, out deviceInfo);
+                            }
+
+                            if (deviceInfo == null) return;
+
+                            // Update cache with new connection state
+                            var updatedDevice = new BluetoothDeviceInfo
+                            {
+                                Address = deviceInfo.Address,
+                                Name = deviceInfo.Name,
+                                IsPaired = deviceInfo.IsPaired,
+                                IsConnected = connected
+                            };
+
+                            lock (_deviceCache)
+                            {
+                                _deviceCache[devicePath] = updatedDevice;
+                            }
+
+                            if (connected)
+                            {
+                                _connectionStartTime = DateTime.UtcNow;
+                                _metricsCollector?.Increment("bluetooth.devices_connected_total");
+                                _metricsCollector?.Gauge("bluetooth.active_connections", 1);
+                                _logger.LogInformation("Bluetooth device connected: {DeviceName} ({Address})",
+                                    updatedDevice.Name, updatedDevice.Address);
+                                DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = updatedDevice });
+                            }
+                            else
+                            {
+                                RecordDisconnectionMetrics();
+                                _logger.LogInformation("Bluetooth device disconnected: {DeviceName} ({Address})",
+                                    updatedDevice.Name, updatedDevice.Address);
+                                DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs { Device = updatedDevice });
+                            }
+                        }
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to watch device properties at {Path}", devicePath);
+            }
+        }
+
+        private void RecordDisconnectionMetrics()
+        {
+            _metricsCollector?.Increment("bluetooth.devices_disconnected_total");
+            _metricsCollector?.Gauge("bluetooth.active_connections", 0);
+            if (_connectionStartTime.HasValue)
+            {
+                var duration = (DateTime.UtcNow - _connectionStartTime.Value).TotalSeconds;
+                _metricsCollector?.Gauge("bluetooth.connection_duration_seconds", duration);
+                _connectionStartTime = null;
             }
         }
 
@@ -212,12 +315,68 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
         public async Task<bool> PairDeviceAsync(string deviceAddress, CancellationToken cancellationToken = default)
         {
-            return await Task.FromResult(false);
+            if (_connection == null || _objectManager == null)
+            {
+                _logger.LogWarning("Cannot pair: Bluetooth service not started");
+                return false;
+            }
+
+            try
+            {
+                var devicePath = FindDevicePath(deviceAddress);
+                if (devicePath == null)
+                {
+                    _logger.LogWarning("Device {Address} not found for pairing", deviceAddress);
+                    return false;
+                }
+
+                var device = _connection.CreateProxy<Linux.IDevice1>(
+                    Linux.BluezConstants.ServiceName, devicePath.Value);
+                await device.PairAsync();
+                _metricsCollector?.Increment("bluetooth.pair_attempts", 1.0,
+                    new Dictionary<string, string> { { "result", "success" } });
+                _logger.LogInformation("Paired with device {Address}", deviceAddress);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _metricsCollector?.Increment("bluetooth.pair_attempts", 1.0,
+                    new Dictionary<string, string> { { "result", "failure" } });
+                _logger.LogError(ex, "Failed to pair with device {Address}", deviceAddress);
+                return false;
+            }
         }
 
         public async Task<bool> UnpairDeviceAsync(string deviceAddress, CancellationToken cancellationToken = default)
         {
-            return await Task.FromResult(false);
+            if (_connection == null || _adapter == null)
+            {
+                _logger.LogWarning("Cannot unpair: Bluetooth service not started");
+                return false;
+            }
+
+            try
+            {
+                var devicePath = FindDevicePath(deviceAddress);
+                if (devicePath == null)
+                {
+                    _logger.LogWarning("Device {Address} not found for unpairing", deviceAddress);
+                    return false;
+                }
+
+                await _adapter.RemoveDeviceAsync(devicePath.Value);
+                lock (_deviceCache)
+                {
+                    _deviceCache.Remove(devicePath.Value);
+                }
+                _logger.LogInformation("Unpaired device {Address}", deviceAddress);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to unpair device {Address}", deviceAddress);
+                return false;
+            }
         }
 
         public Task<bool> AcceptConnectionAsync(string deviceAddress, CancellationToken cancellationToken = default)
@@ -228,18 +387,134 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
         public async Task DisconnectAsync(CancellationToken cancellationToken = default)
         {
-             // Disconnect currently connected device
-             await Task.CompletedTask;
+            var connected = ConnectedDevice;
+            if (connected == null || _connection == null)
+            {
+                return;
+            }
+
+            try
+            {
+                var devicePath = FindDevicePath(connected.Address);
+                if (devicePath != null)
+                {
+                    var device = _connection.CreateProxy<Linux.IDevice1>(
+                        Linux.BluezConstants.ServiceName, devicePath.Value);
+                    await device.DisconnectAsync();
+                    _logger.LogInformation("Disconnected device {DeviceName} ({Address})",
+                        connected.Name, connected.Address);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to disconnect device {Address}", connected.Address);
+            }
+        }
+
+        private ObjectPath? FindDevicePath(string deviceAddress)
+        {
+            var normalizedAddress = deviceAddress.Replace(":", "_").ToUpperInvariant();
+            lock (_deviceCache)
+            {
+                foreach (var kvp in _deviceCache)
+                {
+                    if (kvp.Value.Address.Replace(":", "_").Equals(normalizedAddress, StringComparison.OrdinalIgnoreCase)
+                        || kvp.Value.Address.Equals(deviceAddress, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return kvp.Key;
+                    }
+                }
+            }
+            return null;
         }
 
         public Task<object?> GetAudioCaptureDeviceAsync(CancellationToken cancellationToken = default)
         {
-            // In a real Linux PipeWire setup, we'd find the monitor source for the bluetooth device
-            // Here we return a capture device that might be "bluez_output.*.monitor"
-            // For now, we simulate finding the correct device based on connected device name if available
-            // but SoundFlowDeviceManager helper isn't directly accessible here without injection.
-            // Simplified: return null or a known test loopback.
-            // TODO: Inject SoundFlowDeviceManager or similar factory to finding capture devices
+            // Cleanup previous capture engine if any
+            _captureEngine?.Dispose();
+            _captureEngine = null;
+
+            var connected = ConnectedDevice;
+            if (connected == null)
+            {
+                _logger.LogWarning("No connected Bluetooth device — cannot create audio capture");
+                return Task.FromResult<object?>(null);
+            }
+
+            try
+            {
+                _captureEngine = new MiniAudioEngine();
+                var captureDevices = _captureEngine.CaptureDevices;
+
+                _logger.LogInformation(
+                    "Searching for Bluetooth audio capture device among {Count} capture devices (connected: {DeviceName})",
+                    captureDevices.Length, connected.Name);
+
+                // On Linux with PulseAudio/PipeWire, Bluetooth audio devices appear as:
+                //   "bluez_output.<mac_address>.monitor" or "bluez_sink.<mac_address>.monitor"
+                //   or by the connected device name
+                DeviceInfo? targetDevice = null;
+
+                // Strategy 1: Match by "bluez" prefix (PulseAudio/PipeWire Bluetooth source)
+                foreach (var device in captureDevices)
+                {
+                    if (device.Name != null && device.Name.Contains("bluez", StringComparison.OrdinalIgnoreCase))
+                    {
+                        targetDevice = device;
+                        break;
+                    }
+                }
+
+                // Strategy 2: Match by connected device name
+                if (targetDevice == null)
+                {
+                    foreach (var device in captureDevices)
+                    {
+                        if (device.Name != null && device.Name.Contains(connected.Name, StringComparison.OrdinalIgnoreCase))
+                        {
+                            targetDevice = device;
+                            break;
+                        }
+                    }
+                }
+
+                // Strategy 3: Match by "bluetooth" keyword
+                if (targetDevice == null)
+                {
+                    foreach (var device in captureDevices)
+                    {
+                        if (device.Name != null && device.Name.Contains("bluetooth", StringComparison.OrdinalIgnoreCase))
+                        {
+                            targetDevice = device;
+                            break;
+                        }
+                    }
+                }
+
+                if (targetDevice != null)
+                {
+                    var format = _options.AudioQuality == BluetoothAudioQuality.High
+                        ? new AudioFormat { SampleRate = 48000, Channels = 2, Format = SampleFormat.F32 }
+                        : AudioFormat.Cd;
+
+                    var captureDevice = _captureEngine.InitializeCaptureDevice(targetDevice, format);
+                    _logger.LogInformation(
+                        "Created Bluetooth audio capture device: {DeviceName}", targetDevice.Value.Name);
+                    return Task.FromResult<object?>(captureDevice);
+                }
+
+                _logger.LogWarning("No Bluetooth audio capture device found on this system");
+                _captureEngine.Dispose();
+                _captureEngine = null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to create Bluetooth audio capture device");
+                _metricsCollector?.Increment("bluetooth.audio_capture_errors");
+                _captureEngine?.Dispose();
+                _captureEngine = null;
+            }
+
             return Task.FromResult<object?>(null);
         }
 
@@ -247,6 +522,8 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         {
             _playerPropertiesWatcher?.Dispose();
             _discoveryWatcher?.Dispose();
+            _captureEngine?.Dispose();
+            _captureEngine = null;
             await StopAsync();
             _connection?.Dispose();
         }
@@ -353,15 +630,28 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         private void UpdateMetadata(IDictionary<string, object> track)
         {
             if (track == null) return;
-            
+
+            // MPRIS/BlueZ exposes album art via "ArtUrl" or "mpris:artUrl"
+            var artUrl = GetString(track, "ArtUrl");
+            if (string.IsNullOrEmpty(artUrl))
+            {
+                artUrl = GetString(track, "mpris:artUrl");
+            }
+
             var meta = new BluetoothPlaybackMetadata
             {
                 Title = GetString(track, "Title"),
                 Artist = GetString(track, "Artist"),
                 Album = GetString(track, "Album"),
-                Duration = track.ContainsKey("Duration") ? TimeSpan.FromMilliseconds(Convert.ToUInt32(track["Duration"])) : TimeSpan.Zero
+                Duration = track.ContainsKey("Duration")
+                    ? TimeSpan.FromMilliseconds(Convert.ToUInt32(track["Duration"]))
+                    : TimeSpan.Zero,
+                AlbumArtUrl = string.IsNullOrEmpty(artUrl) ? null : artUrl
             };
-            
+
+            _logger.LogDebug("AVRCP metadata: {Title} by {Artist} (album: {Album}, art: {HasArt})",
+                meta.Title, meta.Artist, meta.Album, !string.IsNullOrEmpty(meta.AlbumArtUrl));
+
             MetadataChanged?.Invoke(this, meta);
         }
 

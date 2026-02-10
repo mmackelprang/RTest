@@ -6,6 +6,7 @@ using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Configuration.Abstractions;
 using Radio.Infrastructure.Configuration.Models;
 using SoundFlow.Backends.MiniAudio;
+using SoundFlow.Structs;
 
 namespace Radio.Infrastructure.Audio.SoundFlow;
 
@@ -410,30 +411,31 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
 
   /// <summary>
   /// Finds a capture device by name fuzzy matching.
+  /// Returns the MiniAudio DeviceInfo struct if found, or null.
   /// </summary>
-  public object? FindCaptureDeviceByName(string namePart)
+  public DeviceInfo? FindCaptureDeviceByName(string namePart)
   {
     if (string.IsNullOrWhiteSpace(namePart))
     {
-        return null;
+      return null;
     }
 
     try
     {
       using var engine = new MiniAudioEngine();
       var devices = engine.CaptureDevices;
-      // Look for fuzzy match
-      // MiniAudio DeviceInfo is a struct and default value has null/empty Name usually
-      var match = devices.FirstOrDefault(d => d.Name != null && d.Name.Contains(namePart, StringComparison.OrdinalIgnoreCase));
-      
+      var match = devices.FirstOrDefault(d =>
+        d.Name != null && d.Name.Contains(namePart, StringComparison.OrdinalIgnoreCase));
+
       if (match.Name != null)
       {
-         return match.Name;
+        _logger.LogDebug("Found capture device matching '{NamePart}': {DeviceName}", namePart, match.Name);
+        return match;
       }
     }
     catch (Exception ex)
     {
-       _logger.LogWarning(ex, "Error searching for capture device {NamePart}", namePart);
+      _logger.LogWarning(ex, "Error searching for capture device {NamePart}", namePart);
     }
     return null;
   }

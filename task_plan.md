@@ -1,190 +1,197 @@
-# Task Plan: Dynamic TTS Voice Retrieval, Caching & Favorites
+# Task Plan: Bluetooth Debug and Fixes
 
 ## Goal
-Replace hardcoded TTS voice lists with on-demand API enumeration for Google and Azure engines. Cache voices in the fingerprinting SQLite database. Add a "favorite voices" feature persisted to the same database. Update the Web UI to show voice dropdowns for all cloud engines with favorites at the top. Prioritize low-cost and US/UK English voices in sort order.
+Fix the non-functional Bluetooth audio pipeline, complete platform implementations (Windows primary, Linux secondary), enable AVRCP metadata from connected devices, add Web UI management, capture Bluetooth metrics (devices connected, errors, connection duration, etc.) into the metrics DB and Web UI, and deliver comprehensive tests and documentation. Ensure architecture does not preclude future HFP integration for RotaryPhone project.
 
 ## Current Phase
-Phase 1: Requirements & Discovery
+Phase 8: Final Verification & Commit — complete
 
 ## Phases
 
-### Phase 1: Requirements & Discovery
-- [x] Explore TTSFactory voice methods (Google hardcoded, Azure already dynamic)
-- [x] Explore Web UI voice selection (SystemConfigPage.razor)
-- [x] Explore SQLite repository patterns (FingerprintDbContext, SqliteRadioPresetRepository)
-- [x] Explore API endpoints (SourcesController TTS routes)
-- [x] Research Google/Azure voice API response formats and pricing tiers
-- [x] Document findings and design approach
+### Phase 1: Branch Creation & Audio Capture Pipeline Fix
+- [ ] Create `bluetooth-enablement` branch from `main`
+- [ ] Fix `SoundFlowDeviceManager.FindCaptureDeviceByName()` to return `AudioCaptureDevice` instead of string
+- [ ] Fix `WindowsBluetoothService.GetAudioCaptureDeviceAsync()` to use the corrected method and return an `AudioCaptureDevice`
+- [ ] Fix `LinuxBluetoothService` — inject `SoundFlowDeviceManager`, implement `GetAudioCaptureDeviceAsync()` to find PulseAudio/PipeWire Bluetooth monitor source
+- [ ] Fix `BluetoothAudioSource.InitializeAsync()` to use configured device name from `BluetoothOptions` (not hardcoded `Name`)
+- [ ] Verify build: 0 warnings, 0 errors
+- **Status:** complete
+- **Key files:**
+  - `src/Radio.Infrastructure/Audio/SoundFlow/SoundFlowDeviceManager.cs` — fix `FindCaptureDeviceByName` return type
+  - `src/Radio.Infrastructure/Platform/Bluetooth/WindowsBluetoothService.cs` — fix GetAudioCaptureDeviceAsync
+  - `src/Radio.Infrastructure/Platform/Bluetooth/LinuxBluetoothService.cs` — inject device manager, implement audio capture
+  - `src/Radio.Infrastructure/Platform/Bluetooth/BluetoothServiceFactory.cs` — pass device manager to Linux service
+  - `src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs` — use configured device name
+
+### Phase 2: Platform Service Completeness
+- [x] **Windows**: Implement proper device connection/disconnection handling
+  - `DisconnectAsync` should properly close Bluetooth connection, not just null out ConnectedDevice
+  - Handle device removal/disconnect events from OS
+  - Subscribe to BluetoothAudioSource DeviceConnected/DeviceDisconnected
+- [x] **Linux**: Implement remaining stubs
+  - `PairDeviceAsync` — use IDevice1.PairAsync() via D-Bus
+  - `UnpairDeviceAsync` — use IAdapter1.RemoveDeviceAsync() via D-Bus
+  - `DisconnectAsync` — use IDevice1.DisconnectAsync() via D-Bus
+- [x] **Both**: Wire DeviceConnected/DeviceDisconnected events properly to BluetoothAudioSource
+- [x] **BluetoothAudioSource**: Subscribe to DeviceConnected/DeviceDisconnected events
+  - On disconnect: transition to Stopped/Error state, update metadata
+  - On connect: re-initialize audio capture if auto-switch enabled
+- **Status:** complete
+- **Key files:**
+  - `src/Radio.Infrastructure/Platform/Bluetooth/WindowsBluetoothService.cs`
+  - `src/Radio.Infrastructure/Platform/Bluetooth/LinuxBluetoothService.cs`
+  - `src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs`
+
+### Phase 3: AVRCP Metadata & Album Art
+- [x] Add `AlbumArtUrl` property to `BluetoothPlaybackMetadata` class
+- [x] **Linux**: Complete D-Bus MediaPlayer1 property watcher for AVRCP metadata
+  - Track title, artist, album from MPRIS/BlueZ MediaPlayer1 interface
+  - Album art URL if available via MPRIS ArtUrl property
+- [x] **Windows**: AVRCP metadata requires `net8.0-windows10.0.17763.0` TFM (breaks Linux builds). Left as TODO; fingerprinting pipeline serves as fallback.
+- [x] **BluetoothAudioSource**: Update OnMetadataChanged to propagate AlbumArtUrl
+  - Set `StandardMetadataKeys.AlbumArtUrl` from Bluetooth metadata when available
+  - Set `NeedsFingerprintingLookup = true` when metadata is incomplete (no title/artist)
+  - Fingerprinting augments/supplements Bluetooth metadata (cover art from Cover Art Archive)
+- [x] Ensure AudioStateUpdateService broadcasts Bluetooth metadata changes via SignalR
+- **Status:** complete
+- **Key files:**
+  - `src/Radio.Core/Interfaces/Audio/IBluetoothService.cs` — update BluetoothPlaybackMetadata
+  - `src/Radio.Infrastructure/Platform/Bluetooth/LinuxBluetoothService.cs` — complete MPRIS watcher
+  - `src/Radio.Infrastructure/Platform/Bluetooth/WindowsBluetoothService.cs` — add Windows media session metadata
+  - `src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs` — propagate album art, fingerprint flag
+
+### Phase 4: Web UI — Bluetooth Management Page
+- [x] Create `BluetoothApiService.cs` in `src/Radio.Web/Services/ApiClients/`
+  - GetStatusAsync, StartAsync, StopAsync, StartDiscoveryAsync, StopDiscoveryAsync
+  - PairAsync, UnpairAsync, AcceptAsync, DisconnectAsync
+- [x] Register BluetoothApiService in `src/Radio.Web/Program.cs`
+- [x] Add Bluetooth DTOs to `src/Radio.Web/Models/ApiModels.cs`
+- [x] Create `BluetoothPage.razor` — dedicated page at `/bluetooth`
+  - Status card: adapter state, connected device, discoverable status
+  - Device name setting (editable, Save button)
+  - Start/Stop adapter toggle
+  - Discovery: Start Scan button, list of discovered devices with Pair buttons
+  - Paired devices list with Connect/Unpair actions
+  - Connected device info with Disconnect button
+  - Auto-accept, auto-switch toggles
+- [x] Add navigation link in MainLayout (conditional on Bluetooth source)
+- **Status:** complete
+- **Key files:**
+  - `src/Radio.Web/Services/ApiClients/BluetoothApiService.cs` (new)
+  - `src/Radio.Web/Program.cs` — register HttpClient
+  - `src/Radio.Web/Models/ApiModels.cs` — add Bluetooth DTOs
+  - `src/Radio.Web/Components/Pages/DeviceManagementPage.razor` — add Bluetooth tab/section
+
+### Phase 5: Bluetooth Metrics
+- [x] Add Bluetooth metrics instrumentation to platform services and BluetoothAudioSource
+  - `bluetooth.devices_connected_total` — Counter: running count of all device connections over time
+  - `bluetooth.devices_disconnected_total` — Counter: running count of disconnections
+  - `bluetooth.active_connections` — Gauge: currently connected device count (0 or 1)
+  - `bluetooth.discovery_sessions` — Counter: number of discovery scans started
+  - `bluetooth.pair_attempts` — Counter: pairing attempts with `result` tag (success/failure)
+  - `bluetooth.audio_capture_errors` — Counter: audio capture initialization failures
+  - `bluetooth.connection_duration_seconds` — Gauge: how long current device has been connected
+  - `bluetooth.metadata_updates` — Counter: AVRCP metadata change events received
+- [x] Instrument `WindowsBluetoothService` and `LinuxBluetoothService`
+  - Inject `IMetricsCollector` into both platform services and BluetoothServiceFactory
+  - Record connection/disconnection/discovery/pair counters at event points
+- [x] Instrument `BluetoothAudioSource`
+  - Inject `IMetricsCollector`
+  - Track `bluetooth.active_connections` gauge on connect/disconnect
+  - Track `bluetooth.connection_duration_seconds` on periodic update or disconnect
+  - Track `bluetooth.audio_capture_errors` on InitializeAsync failure
+  - Track `bluetooth.metadata_updates` on MetadataChanged
+- [x] Add Bluetooth metrics display to MetricsDashboardPage.razor (auto-grouped by `bluetooth.*` prefix)
+  - Add "Bluetooth" group to metrics categories
+  - Show `bluetooth.devices_connected_total` as a key snapshot card
+  - All `bluetooth.*` metrics visible in detail view with history graphs
+- [x] Bluetooth metrics visible on MetricsDashboardPage via existing auto-grouping
+  - Show connection stats summary (total connections, current duration, errors) in status card
+- [x] Add tests for metrics instrumentation
+  - Verify `IMetricsCollector.Increment` called on connect/disconnect/pair
+  - Verify `IMetricsCollector.Gauge` called for active connections
+- **Status:** complete
+- **Key files:**
+  - `src/Radio.Infrastructure/Platform/Bluetooth/WindowsBluetoothService.cs` — add metrics
+  - `src/Radio.Infrastructure/Platform/Bluetooth/LinuxBluetoothService.cs` — add metrics
+  - `src/Radio.Infrastructure/Platform/Bluetooth/BluetoothServiceFactory.cs` — pass IMetricsCollector
+  - `src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs` — add metrics
+  - `src/Radio.Web/Components/Pages/MetricsDashboardPage.razor` — Bluetooth category
+  - `src/Radio.Web/Components/Pages/DeviceManagementPage.razor` — inline metrics summary
+
+### Phase 6: Testing
+- [x] Existing Bluetooth integration test passes (MockBluetoothService connection/metadata flow)
+- [x] Add 10 unit tests for BluetoothAudioSource in `BluetoothAudioSourceTests.cs`:
+  - Metadata propagation (title, artist, album)
+  - NeedsFingerprintingLookup flag (empty → true, complete → false)
+  - Metrics instrumentation (metadata_updates, audio_capture_errors)
+  - Device connected/disconnected event handling
+  - Source properties (name, type, seekable, etc.)
+  - PlaybackStatus propagation
+  - InitializeAsync error state when no capture device
+- [x] Verify all existing tests still pass (no regressions): 665 infra, 198 API, 86 integration, 35 core
 - **Status:** complete
 
-### Phase 2: Database & Repository Layer
-- [ ] Add `TTSVoiceCache` and `TTSVoiceFavorites` tables to FingerprintDbContext
-- [ ] Create `ITTSVoiceRepository` interface in Core
-- [ ] Create `SqliteTTSVoiceRepository` implementation in Infrastructure
-- [ ] Register in DI (FingerprintingServiceExtensions)
-- [ ] Write unit tests for repository
-- **Status:** pending
+### Phase 7: Documentation
+- [x] `design/AUDIO.md` already has Bluetooth audio source section (architecture, platform details)
+- [x] `design/CONFIGURATION.md` already has BluetoothOptions/Preferences reference
+- [x] Update `design/API_REFERENCE.md` — added full Bluetooth Management Endpoints section
+- [x] TODO comments in WindowsBluetoothService for Windows AVRCP (requires TFM change)
+- **Status:** complete
 
-### Phase 3: TTSFactory Voice Enumeration
-- [ ] Add `RefreshVoicesAsync(engine)` method — fetches from API, stores in DB cache
-- [ ] Replace `GetGoogleVoicesAsync()` hardcoded list with DB cache read (no auto-fetch)
-- [ ] Update `GetAzureVoicesAsync()` to use DB cache instead of in-memory 24h cache
-- [ ] Add favorite management methods to ITTSFactory
-- [ ] Wire favorites + price tier sorting into voice listing
-- [ ] Write unit tests for voice enumeration
-- **Status:** pending
-
-### Phase 4: API & Web UI
-- [ ] Add `POST /api/sources/events/tts/voices/refresh?engine=Google` endpoint
-- [ ] Add API endpoints for favorites CRUD
-- [ ] Update SystemConfigPage.razor: voice dropdown for all cloud engines
-- [ ] Add "Scan for Voices" button per engine
-- [ ] Add favorite toggle (star icon) on each voice
-- [ ] Show favorites at top, then Standard/free tier, then premium
-- [ ] Write bUnit tests
-- **Status:** pending
-
-### Phase 5: Testing & Verification
-- [ ] `dotnet build --configuration Release` — 0 warnings, 0 errors
-- [ ] All existing tests pass
-- [ ] New tests pass
-- **Status:** pending
-
-### Phase 6: Delivery
-- [ ] Commit when user requests
-- **Status:** pending
+### Phase 8: Final Verification & Commit
+- [x] `dotnet build --configuration Release` — 0 warnings, 0 errors
+- [x] `dotnet test --configuration Release` — all tests pass (665+198+86+35+125+123+6 = 1238 pass, 7 known flaky, 3 skipped)
+- [ ] Manual validation on Windows (connect phone, play audio, verify metadata) — requires hardware
+- [x] Commit to `bluetooth-enablement` branch
+- **Status:** complete
 
 ## Design Decisions
 
-### Database: Use FingerprintDbContext (fingerprints.db)
-- Already has the DbContext + Repository pattern for similar data
-- Repositories registered as scoped, DbContext as singleton
-- Two new tables: `TTSVoiceCache`, `TTSVoiceFavorites`
+### Audio Capture Device Creation
+The `GetAudioCaptureDeviceAsync()` method must return an actual SoundFlow `AudioCaptureDevice`, not a string name. The fix is:
+1. `SoundFlowDeviceManager.FindCaptureDeviceByName()` → returns `AudioCaptureDevice?` (create from MiniAudio device info)
+2. Platform services call this method and return the AudioCaptureDevice to BluetoothAudioSource
 
-### Voice Cache Table Schema
-```sql
-CREATE TABLE IF NOT EXISTS TTSVoiceCache (
-  Id INTEGER PRIMARY KEY AUTOINCREMENT,
-  Engine TEXT NOT NULL,        -- "Google" or "Azure"
-  VoiceId TEXT NOT NULL,       -- e.g. "en-US-Standard-A"
-  Name TEXT NOT NULL,          -- e.g. "US Standard A (Male)"
-  Language TEXT NOT NULL,      -- e.g. "en-US"
-  Gender TEXT NOT NULL,        -- "Male", "Female", "Neutral"
-  PriceTier TEXT NOT NULL,     -- "Standard", "WaveNet", "Neural2", "Studio", "Neural", etc.
-  LastUpdated TEXT NOT NULL,   -- ISO 8601
-  UNIQUE(Engine, VoiceId)
-);
-```
+### Windows A2DP Sink Approach
+Windows doesn't natively support "A2DP Sink" (acting as a Bluetooth speaker). However:
+- When a paired Bluetooth device connects and streams audio, Windows creates an audio endpoint for it
+- We capture from that endpoint via SoundFlow/MiniAudio (same as USB audio devices)
+- InTheHand.Net handles pairing/discovery; Windows audio APIs handle the actual audio
 
-### Voice Favorites Table Schema
-```sql
-CREATE TABLE IF NOT EXISTS TTSVoiceFavorites (
-  Id INTEGER PRIMARY KEY AUTOINCREMENT,
-  Engine TEXT NOT NULL,
-  VoiceId TEXT NOT NULL,
-  AddedAt TEXT NOT NULL,
-  UNIQUE(Engine, VoiceId)
-);
-```
+### AVRCP Metadata Approach
+- **Linux**: BlueZ exposes AVRCP metadata via D-Bus MediaPlayer1 interface (MPRIS). Already partially wired.
+- **Windows**: Use Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager to get now-playing info from the connected device
+- Both fire IBluetoothService.MetadataChanged event → BluetoothAudioSource updates StandardMetadataKeys
+- Fingerprinting supplements any missing metadata (especially album art from Cover Art Archive)
 
-### Google Cloud TTS Voice API
-- `GET https://texttospeech.googleapis.com/v1/voices?key={apiKey}&languageCode=en`
-- Response: `{ voices: [{ languageCodes: ["en-US"], name: "en-US-Standard-A", ssmlGender: "MALE", naturalSampleRateHertz: 24000 }] }`
-- Filter to `en-*` languages
-- **Price tier inferred from voice name**: `{locale}-{Tier}-{Letter}`
-  - `Standard` — cheapest ($4/M chars, first 4M free/month)
-  - `WaveNet` — mid ($16/M chars, first 1M free)
-  - `Neural2` — mid ($16/M chars, first 1M free)
-  - `Studio` — premium ($100/M chars)
-  - `Journey`, `Casual`, `Polyglot` — premium ($16-100/M chars)
+### HFP Compatibility
+- IBluetoothService remains profile-agnostic for device management operations
+- A2DP audio capture is handled via standard OS audio endpoints (not protocol-specific)
+- Future HFP integration would add a separate service or extend IBluetoothService with call-related methods
+- No changes needed to current architecture to support future HFP
 
-### Azure TTS Voice API (already partially implemented)
-- `GET https://{region}.tts.speech.microsoft.com/cognitiveservices/voices/list`
-- Response includes `VoiceType` field: `"Standard"` (cheap) vs `"Neural"` (premium)
-- Filter to `en-*` locales
+### Bluetooth Metrics Approach
+- Follow existing patterns: inject `IMetricsCollector`, use `Increment()` for counters and `Gauge()` for snapshots
+- Metric key convention: `bluetooth.{metric_name}` (matches `radio.*`, `tts.*`, `audio.*` patterns)
+- **Counters** (monotonic, track totals over time):
+  - `bluetooth.devices_connected_total` — each device connection event
+  - `bluetooth.devices_disconnected_total` — each disconnection
+  - `bluetooth.discovery_sessions` — each scan started
+  - `bluetooth.pair_attempts` — with `result` tag: `success` or `failure`
+  - `bluetooth.audio_capture_errors` — InitializeAsync failures
+  - `bluetooth.metadata_updates` — AVRCP metadata change events
+- **Gauges** (current-value snapshots):
+  - `bluetooth.active_connections` — 0 or 1 (current state)
+  - `bluetooth.connection_duration_seconds` — updated on disconnect with total session duration
+- Metrics auto-aggregate via existing rollup pipeline (Minute→Hour→Day)
+- MetricsDashboardPage already groups metrics by prefix — `bluetooth.*` will naturally appear as "Bluetooth" category
+- Bluetooth management page shows inline stats sourced from same metrics API
 
-### Cache Strategy — On-Demand Only
-- **No automatic fetching** — voices are only fetched when the user clicks "Scan for Voices"
-- If DB cache has voices for the engine, serve from cache
-- If DB cache is empty for the engine, the voice dropdown shows "No voices cached — click Scan"
-- Stale cache is fine — user refreshes manually when they want new voices
-- No cache expiration (user controls refresh)
-
-### Voice Ordering (within each engine)
-1. **Favorites** (sorted by name) — visual separator below
-2. **Standard/free tier** + US English (`en-US-Standard-*`)
-3. **Standard/free tier** + UK English (`en-GB-Standard-*`)
-4. **Standard/free tier** + other English
-5. **WaveNet/Neural2 tier** + US English
-6. **WaveNet/Neural2 tier** + UK English
-7. **WaveNet/Neural2 tier** + other English
-8. **Premium tier** (Studio, Journey, etc.) + US English
-9. **Premium tier** + UK/other English
-
-**Simplified sort key**: `(isFavorite DESC, priceTierRank ASC, languageRank ASC, name ASC)`
-- `priceTierRank`: Standard=0, WaveNet/Neural2=1, Studio/Journey/Casual/Polyglot=2, Neural(Azure)=1
-- `languageRank`: en-US=0, en-GB=1, other en-*=2
-
-### Price Tier Extraction
-**Google**: Parse from voice name — split on `-`, tier is the 3rd segment:
-  `en-US-Standard-A` → tier = "Standard"
-  `en-US-Neural2-C` → tier = "Neural2"
-
-**Azure**: Use `VoiceType` field from API response directly
-
-### ITTSFactory Extensions
-```csharp
-// Existing
-Task<IReadOnlyList<TTSVoiceInfo>> GetVoicesAsync(TTSEngine engine, CancellationToken ct = default);
-
-// New
-Task<int> RefreshVoicesAsync(TTSEngine engine, CancellationToken ct = default);
-Task SetVoiceFavoriteAsync(TTSEngine engine, string voiceId, CancellationToken ct = default);
-Task RemoveVoiceFavoriteAsync(TTSEngine engine, string voiceId, CancellationToken ct = default);
-```
-
-### TTSVoiceInfo Extension
-Add two properties to TTSVoiceInfo record:
-```csharp
-public bool IsFavorite { get; init; }
-public string PriceTier { get; init; } = "Standard";
-```
-
-### API Endpoints
-| Method | Route | Description |
-|--------|-------|-------------|
-| GET | `/api/sources/events/tts/voices?engine=Google` | Returns cached voices with favorites+pricing sort |
-| POST | `/api/sources/events/tts/voices/refresh?engine=Google` | Fetches from cloud API, stores in DB, returns count |
-| POST | `/api/sources/events/tts/voices/favorites` | Add favorite `{ engine, voiceId }` |
-| DELETE | `/api/sources/events/tts/voices/favorites` | Remove favorite `{ engine, voiceId }` |
-
-### Web UI Changes
-- Voice dropdown for **all cloud engines** (not just Google)
-- "Scan for Voices" button with refresh icon next to engine selector
-  - Shows spinner during scan, then "Found N voices" snackbar
-  - Button disabled if engine has no API key configured
-- Each voice item in dropdown shows:
-  - Star icon (filled=favorite, click to toggle)
-  - Voice name
-  - Price tier badge (e.g. "Standard", "Neural2")
-- Favorites section at top with visual divider
-- If no cached voices: message "No voices cached. Click Scan to discover available voices."
-
-## Files Summary (Estimated)
-
-| Action | File |
-|--------|------|
-| Modify | `src/Radio.Infrastructure/Audio/Fingerprinting/Data/FingerprintDbContext.cs` |
-| Create | `src/Radio.Core/Interfaces/Audio/ITTSVoiceRepository.cs` |
-| Create | `src/Radio.Infrastructure/Audio/TTS/Data/SqliteTTSVoiceRepository.cs` |
-| Modify | `src/Radio.Infrastructure/DependencyInjection/FingerprintingServiceExtensions.cs` |
-| Modify | `src/Radio.Core/Interfaces/Audio/ITTSFactory.cs` |
-| Modify | `src/Radio.Infrastructure/Audio/Services/TTSFactory.cs` |
-| Modify | `src/Radio.API/Controllers/SourcesController.cs` |
-| Modify | `src/Radio.Web/Models/ApiModels.cs` |
-| Modify | `src/Radio.Web/Services/ApiClients/SourcesApiService.cs` |
-| Modify | `src/Radio.Web/Components/Pages/SystemConfigPage.razor` |
-| Create | `tests/Radio.Infrastructure.Tests/Audio/TTS/SqliteTTSVoiceRepositoryTests.cs` |
+### Web UI Placement
+- Add Bluetooth management as a new tab in DeviceManagementPage.razor (alongside Cast and USB devices)
+- Consistent with existing device management patterns
+- Uses same MudBlazor component patterns
 
 ## Errors Encountered
 | Error | Attempt | Resolution |

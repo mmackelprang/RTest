@@ -191,6 +191,18 @@ builder.Services.AddHttpClient<RadioApiService>(client =>
   return handler;
 });
 
+builder.Services.AddHttpClient<BluetoothApiService>(client =>
+{
+  client.BaseAddress = new Uri(apiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(30);
+})
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
+});
+
 builder.Services.AddHttpClient<SecretsApiService>(client =>
 {
   client.BaseAddress = new Uri(apiBaseUrl);

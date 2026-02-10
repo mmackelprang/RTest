@@ -9,7 +9,11 @@ using InTheHand.Net.Sockets;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
+using SoundFlow.Backends.MiniAudio;
+using SoundFlow.Enums;
+using SoundFlow.Structs;
 
 namespace Radio.Infrastructure.Platform.Bluetooth;
 
@@ -18,9 +22,12 @@ internal sealed class WindowsBluetoothService : IBluetoothService
     private readonly ILogger _logger;
     private readonly BluetoothOptions _options;
     private readonly Radio.Infrastructure.Audio.SoundFlow.SoundFlowDeviceManager? _deviceManager;
+    private readonly IMetricsCollector? _metricsCollector;
     private BluetoothClient _client;
     private BluetoothRadio? _radio;
     private readonly Timer _stateTimer;
+    private MiniAudioEngine? _captureEngine;
+    private DateTime? _connectionStartTime;
 
     // InTheHand.Net doesn't have robust event-driven discovery in the same way,
     // often relies on polling or blocking calls. We'll simulate async discovery.
@@ -29,11 +36,13 @@ internal sealed class WindowsBluetoothService : IBluetoothService
     public WindowsBluetoothService(
         ILogger logger,
         IOptions<BluetoothOptions> options,
-        Radio.Infrastructure.Audio.SoundFlow.SoundFlowDeviceManager? deviceManager = null)
+        Radio.Infrastructure.Audio.SoundFlow.SoundFlowDeviceManager? deviceManager = null,
+        IMetricsCollector? metricsCollector = null)
     {
         _logger = logger;
         _options = options.Value;
         _deviceManager = deviceManager;
+        _metricsCollector = metricsCollector;
         _client = new BluetoothClient();
 
         // Try to get the primary radio at construction time
@@ -89,15 +98,20 @@ internal sealed class WindowsBluetoothService : IBluetoothService
 
     public bool IsDiscovering { get; private set; }
 
-    public Radio.Core.Interfaces.Audio.BluetoothDeviceInfo? ConnectedDevice { get; private set; } // Tracking manually for now
+    public Radio.Core.Interfaces.Audio.BluetoothDeviceInfo? ConnectedDevice { get; private set; }
 
     public event EventHandler<BluetoothAdapterStateChangedEventArgs>? StateChanged;
-    public event EventHandler<BluetoothDeviceConnectedEventArgs>? DeviceConnected { add { } remove { } }
-    public event EventHandler<BluetoothDeviceDisconnectedEventArgs>? DeviceDisconnected { add { } remove { } }
+    public event EventHandler<BluetoothDeviceConnectedEventArgs>? DeviceConnected;
+    public event EventHandler<BluetoothDeviceDisconnectedEventArgs>? DeviceDisconnected;
     public event EventHandler<BluetoothDeviceDiscoveredEventArgs>? DeviceDiscovered;
-    public event EventHandler<BluetoothPlaybackMetadata>? MetadataChanged { add { } remove { } }
-    public event EventHandler<BluetoothPlaybackStatus>? PlaybackStatusChanged { add { } remove { } }
-    public event EventHandler<TimeSpan>? PositionChanged { add { } remove { } }
+    // TODO: Windows AVRCP metadata via Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager
+    // Requires net8.0-windows10.0.17763.0 TFM or conditional compilation.
+    // Fingerprinting pipeline serves as fallback for track identification.
+#pragma warning disable CS0067
+    public event EventHandler<BluetoothPlaybackMetadata>? MetadataChanged;
+    public event EventHandler<BluetoothPlaybackStatus>? PlaybackStatusChanged;
+    public event EventHandler<TimeSpan>? PositionChanged;
+#pragma warning restore CS0067
 
     private void CheckState(object? state)
     {
@@ -112,6 +126,9 @@ internal sealed class WindowsBluetoothService : IBluetoothService
                     _ => BluetoothAdapterState.On
                 };
                 UpdateState(adapterState);
+
+                // Check for device connection changes by polling paired devices
+                CheckForConnectionChanges();
             }
             else
             {
@@ -131,6 +148,58 @@ internal sealed class WindowsBluetoothService : IBluetoothService
         catch
         {
             UpdateState(BluetoothAdapterState.Off);
+        }
+    }
+
+    private void CheckForConnectionChanges()
+    {
+        try
+        {
+            var paired = _client.PairedDevices;
+            var connectedNow = paired.FirstOrDefault(d => d.Connected);
+
+            if (connectedNow != null && ConnectedDevice == null)
+            {
+                // New connection detected
+                var device = MapDevice(connectedNow);
+                ConnectedDevice = device;
+                _connectionStartTime = DateTime.UtcNow;
+                _logger.LogInformation("Bluetooth device connected: {DeviceName} ({Address})",
+                    device.Name, device.Address);
+                _metricsCollector?.Increment("bluetooth.devices_connected_total");
+                _metricsCollector?.Gauge("bluetooth.active_connections", 1);
+                DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = device });
+            }
+            else if (connectedNow == null && ConnectedDevice != null)
+            {
+                // Disconnection detected
+                var device = ConnectedDevice;
+                ConnectedDevice = null;
+                RecordDisconnectionMetrics();
+                _logger.LogInformation("Bluetooth device disconnected: {DeviceName} ({Address})",
+                    device.Name, device.Address);
+                DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs { Device = device });
+            }
+            else if (connectedNow != null && ConnectedDevice != null
+                     && connectedNow.DeviceAddress.ToString() != ConnectedDevice.Address)
+            {
+                // Different device connected — fire disconnect for old, connect for new
+                var oldDevice = ConnectedDevice;
+                var newDevice = MapDevice(connectedNow);
+
+                ConnectedDevice = newDevice;
+                RecordDisconnectionMetrics();
+                _connectionStartTime = DateTime.UtcNow;
+                _metricsCollector?.Increment("bluetooth.devices_connected_total");
+                _logger.LogInformation("Bluetooth device switched from {OldDevice} to {NewDevice}",
+                    oldDevice.Name, newDevice.Name);
+                DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs { Device = oldDevice });
+                DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = newDevice });
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Error checking for Bluetooth connection changes");
         }
     }
 
@@ -199,6 +268,7 @@ internal sealed class WindowsBluetoothService : IBluetoothService
             return;
         }
         IsDiscovering = true;
+        _metricsCollector?.Increment("bluetooth.discovery_sessions");
         _discoveryCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
         _ = Task.Run(async () =>
@@ -246,8 +316,13 @@ internal sealed class WindowsBluetoothService : IBluetoothService
     {
         if (BluetoothAddress.TryParse(deviceAddress, out var address))
         {
-            return Task.FromResult(BluetoothSecurity.PairRequest(address, null));
+            var result = BluetoothSecurity.PairRequest(address, null);
+            var resultTag = new Dictionary<string, string> { { "result", result ? "success" : "failure" } };
+            _metricsCollector?.Increment("bluetooth.pair_attempts", 1.0, resultTag);
+            return Task.FromResult(result);
         }
+        _metricsCollector?.Increment("bluetooth.pair_attempts", 1.0,
+            new Dictionary<string, string> { { "result", "failure" } });
         return Task.FromResult(false);
     }
 
@@ -269,27 +344,124 @@ internal sealed class WindowsBluetoothService : IBluetoothService
 
     public Task DisconnectAsync(CancellationToken cancellationToken = default)
     {
-        ConnectedDevice = null;
+        var device = ConnectedDevice;
+        if (device != null)
+        {
+            ConnectedDevice = null;
+            RecordDisconnectionMetrics();
+            _logger.LogInformation("Disconnected Bluetooth device: {DeviceName} ({Address})",
+                device.Name, device.Address);
+            DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs { Device = device });
+
+            // Dispose and recreate client to drop active connections
+            try
+            {
+                _client?.Dispose();
+                _client = new BluetoothClient();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error recreating Bluetooth client after disconnect");
+                _client = new BluetoothClient();
+            }
+        }
+
         return Task.CompletedTask;
     }
 
     public Task<object?> GetAudioCaptureDeviceAsync(CancellationToken cancellationToken = default)
     {
-            if (ConnectedDevice == null || _deviceManager == null)
+        // Cleanup previous capture engine if any
+        _captureEngine?.Dispose();
+        _captureEngine = null;
+
+        if (ConnectedDevice == null)
         {
+            _logger.LogWarning("No connected Bluetooth device — cannot create audio capture");
             return Task.FromResult<object?>(null);
         }
 
-        // Attempt to find capture device matching connected bluetooth device name
-        var deviceName = ConnectedDevice.Name;
-        var captureId = _deviceManager.FindCaptureDeviceByName(deviceName);
-
-        if (captureId != null)
+        try
         {
-            return Task.FromResult<object?>(captureId);
+            _captureEngine = new MiniAudioEngine();
+            var captureDevices = _captureEngine.CaptureDevices;
+            var deviceName = ConnectedDevice.Name;
+
+            _logger.LogInformation(
+                "Searching for Bluetooth audio capture device matching '{DeviceName}' among {Count} capture devices",
+                deviceName, captureDevices.Length);
+
+            // Strategy 1: Match by connected device name
+            DeviceInfo? targetDevice = null;
+            foreach (var device in captureDevices)
+            {
+                if (device.Name != null && device.Name.Contains(deviceName, StringComparison.OrdinalIgnoreCase))
+                {
+                    targetDevice = device;
+                    break;
+                }
+            }
+
+            // Strategy 2: Search for "bluetooth" keyword in device name
+            if (targetDevice == null)
+            {
+                foreach (var device in captureDevices)
+                {
+                    if (device.Name != null && device.Name.Contains("bluetooth", StringComparison.OrdinalIgnoreCase))
+                    {
+                        targetDevice = device;
+                        break;
+                    }
+                }
+            }
+
+            // Strategy 3: Use first available capture device
+            if (targetDevice == null && captureDevices.Length > 0)
+            {
+                _logger.LogWarning(
+                    "No Bluetooth-specific capture device found, using first available: {DeviceName}",
+                    captureDevices[0].Name);
+                targetDevice = captureDevices[0];
+            }
+
+            if (targetDevice != null)
+            {
+                var format = _options.AudioQuality == BluetoothAudioQuality.High
+                    ? new AudioFormat { SampleRate = 48000, Channels = 2, Format = SampleFormat.F32 }
+                    : AudioFormat.Cd;
+
+                var captureDevice = _captureEngine.InitializeCaptureDevice(targetDevice, format);
+                _logger.LogInformation(
+                    "Created Bluetooth audio capture device: {DeviceName} ({Quality})",
+                    targetDevice.Value.Name, _options.AudioQuality);
+                return Task.FromResult<object?>(captureDevice);
+            }
+
+            _logger.LogWarning("No audio capture devices available");
+            _captureEngine.Dispose();
+            _captureEngine = null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to create Bluetooth audio capture device");
+            _metricsCollector?.Increment("bluetooth.audio_capture_errors");
+            _captureEngine?.Dispose();
+            _captureEngine = null;
         }
 
         return Task.FromResult<object?>(null);
+    }
+
+    private void RecordDisconnectionMetrics()
+    {
+        _metricsCollector?.Increment("bluetooth.devices_disconnected_total");
+        _metricsCollector?.Gauge("bluetooth.active_connections", 0);
+        if (_connectionStartTime.HasValue)
+        {
+            var duration = (DateTime.UtcNow - _connectionStartTime.Value).TotalSeconds;
+            _metricsCollector?.Gauge("bluetooth.connection_duration_seconds", duration);
+            _connectionStartTime = null;
+        }
     }
 
     private Radio.Core.Interfaces.Audio.BluetoothDeviceInfo MapDevice(InTheHand.Net.Sockets.BluetoothDeviceInfo device)
@@ -308,6 +480,10 @@ internal sealed class WindowsBluetoothService : IBluetoothService
     {
         _stateTimer?.Dispose();
         _discoveryCts?.Cancel();
+
+        // Dispose audio capture engine
+        _captureEngine?.Dispose();
+        _captureEngine = null;
 
         // Restore connectable mode on shutdown
         try
