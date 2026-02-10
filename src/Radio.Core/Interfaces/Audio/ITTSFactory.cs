@@ -24,13 +24,40 @@ public interface ITTSFactory
     CancellationToken cancellationToken = default);
 
   /// <summary>
-  /// Gets the available voices for a specific TTS engine.
+  /// Gets the available voices for a specific TTS engine from the local cache.
+  /// Returns an empty list if no voices have been cached yet.
   /// </summary>
   /// <param name="engine">The TTS engine to query.</param>
   /// <param name="cancellationToken">Cancellation token.</param>
-  /// <returns>A list of available voices for the engine.</returns>
+  /// <returns>A list of available voices for the engine, sorted by favorites then price tier.</returns>
   Task<IReadOnlyList<TTSVoiceInfo>> GetVoicesAsync(
     TTSEngine engine,
+    CancellationToken cancellationToken = default);
+
+  /// <summary>
+  /// Fetches voices from the cloud API and stores them in the local cache.
+  /// </summary>
+  /// <param name="engine">The TTS engine to refresh voices for.</param>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <returns>The number of voices discovered and cached.</returns>
+  Task<int> RefreshVoicesAsync(
+    TTSEngine engine,
+    CancellationToken cancellationToken = default);
+
+  /// <summary>
+  /// Marks a voice as a favorite.
+  /// </summary>
+  Task SetVoiceFavoriteAsync(
+    TTSEngine engine,
+    string voiceId,
+    CancellationToken cancellationToken = default);
+
+  /// <summary>
+  /// Removes a voice from favorites.
+  /// </summary>
+  Task RemoveVoiceFavoriteAsync(
+    TTSEngine engine,
+    string voiceId,
     CancellationToken cancellationToken = default);
 }
 
@@ -130,6 +157,16 @@ public record TTSVoiceInfo
   /// Gets the voice gender.
   /// </summary>
   public required TTSVoiceGender Gender { get; init; }
+
+  /// <summary>
+  /// Gets whether this voice is a user favorite.
+  /// </summary>
+  public bool IsFavorite { get; init; }
+
+  /// <summary>
+  /// Gets the pricing tier (e.g., "Standard", "WaveNet", "Neural2", "Studio", "Neural").
+  /// </summary>
+  public string PriceTier { get; init; } = "Standard";
 }
 
 /// <summary>

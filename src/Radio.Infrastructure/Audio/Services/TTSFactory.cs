@@ -21,24 +21,20 @@ public class TTSFactory : ITTSFactory, IDisposable
   private readonly IOptionsMonitor<TTSSecrets> _secrets;
   private readonly IMetricsCollector? _metricsCollector;
   private readonly SoundFlowPlaybackService? _playbackService;
+  private readonly ITTSVoiceRepository? _voiceRepository;
   private IReadOnlyList<TTSEngineInfo>? _cachedEngines;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="TTSFactory"/> class.
   /// </summary>
-  /// <param name="logger">The factory logger.</param>
-  /// <param name="ttsSourceLogger">The TTS source logger.</param>
-  /// <param name="options">The TTS options.</param>
-  /// <param name="secrets">The TTS secrets (API keys).</param>
-  /// <param name="metricsCollector">Optional metrics collector for tracking TTS operations.</param>
-  /// <param name="playbackService">Optional playback service for audio output.</param>
   public TTSFactory(
     ILogger<TTSFactory> logger,
     ILogger<TTSEventSource> ttsSourceLogger,
     IOptionsMonitor<TTSOptions> options,
     IOptionsMonitor<TTSSecrets> secrets,
     IMetricsCollector? metricsCollector = null,
-    SoundFlowPlaybackService? playbackService = null)
+    SoundFlowPlaybackService? playbackService = null,
+    ITTSVoiceRepository? voiceRepository = null)
   {
     _logger = logger;
     _ttsSourceLogger = ttsSourceLogger;
@@ -46,6 +42,7 @@ public class TTSFactory : ITTSFactory, IDisposable
     _secrets = secrets;
     _metricsCollector = metricsCollector;
     _playbackService = playbackService;
+    _voiceRepository = voiceRepository;
   }
 
   /// <inheritdoc/>
@@ -120,17 +117,90 @@ public class TTSFactory : ITTSFactory, IDisposable
   }
 
   /// <inheritdoc/>
-  public Task<IReadOnlyList<TTSVoiceInfo>> GetVoicesAsync(
+  public async Task<IReadOnlyList<TTSVoiceInfo>> GetVoicesAsync(
     TTSEngine engine,
     CancellationToken cancellationToken = default)
   {
-    return engine switch
+    if (engine == TTSEngine.ESpeak)
+      return await GetESpeakVoicesAsync(cancellationToken);
+
+    // For cloud engines, return cached voices from DB (sorted by favorites + price tier)
+    if (_voiceRepository != null)
     {
-      TTSEngine.ESpeak => GetESpeakVoicesAsync(cancellationToken),
-      TTSEngine.Google => GetGoogleVoicesAsync(cancellationToken),
-      TTSEngine.Azure => GetAzureVoicesAsync(cancellationToken),
-      _ => throw new NotSupportedException($"TTS engine '{engine}' is not supported")
+      var cached = await _voiceRepository.GetCachedVoicesAsync(engine, cancellationToken);
+      if (cached.Count > 0)
+        return SortVoices(cached);
+    }
+
+    // No cache — return empty list (user must click "Scan for Voices")
+    return Array.Empty<TTSVoiceInfo>();
+  }
+
+  /// <inheritdoc/>
+  public async Task<int> RefreshVoicesAsync(
+    TTSEngine engine,
+    CancellationToken cancellationToken = default)
+  {
+    if (_voiceRepository == null)
+      throw new InvalidOperationException("Voice repository not available");
+
+    var voices = engine switch
+    {
+      TTSEngine.Google => await FetchGoogleVoicesAsync(cancellationToken),
+      TTSEngine.Azure => await FetchAzureVoicesAsync(cancellationToken),
+      _ => throw new NotSupportedException($"Voice refresh not supported for engine '{engine}'")
     };
+
+    await _voiceRepository.ReplaceCachedVoicesAsync(engine, voices, cancellationToken);
+    _logger.LogInformation("Refreshed {Count} voices for {Engine}", voices.Count, engine);
+    return voices.Count;
+  }
+
+  /// <inheritdoc/>
+  public async Task SetVoiceFavoriteAsync(
+    TTSEngine engine, string voiceId, CancellationToken cancellationToken = default)
+  {
+    if (_voiceRepository == null)
+      throw new InvalidOperationException("Voice repository not available");
+    await _voiceRepository.AddFavoriteAsync(engine, voiceId, cancellationToken);
+  }
+
+  /// <inheritdoc/>
+  public async Task RemoveVoiceFavoriteAsync(
+    TTSEngine engine, string voiceId, CancellationToken cancellationToken = default)
+  {
+    if (_voiceRepository == null)
+      throw new InvalidOperationException("Voice repository not available");
+    await _voiceRepository.RemoveFavoriteAsync(engine, voiceId, cancellationToken);
+  }
+
+  /// <summary>
+  /// Sorts voices: favorites first, then by price tier (cheap first), then by language (US > UK > other).
+  /// </summary>
+  private static IReadOnlyList<TTSVoiceInfo> SortVoices(IReadOnlyList<TTSVoiceInfo> voices)
+  {
+    return voices
+      .OrderByDescending(v => v.IsFavorite)
+      .ThenBy(v => GetPriceTierRank(v.PriceTier))
+      .ThenBy(v => GetLanguageRank(v.Language))
+      .ThenBy(v => v.Name)
+      .ToList();
+  }
+
+  private static int GetPriceTierRank(string priceTier) => priceTier switch
+  {
+    "Standard" => 0,
+    "WaveNet" => 1,
+    "Neural2" => 1,
+    "Neural" => 1,
+    _ => 2 // Studio, Journey, Casual, Polyglot, etc.
+  };
+
+  private static int GetLanguageRank(string language)
+  {
+    if (language.StartsWith("en-US", StringComparison.OrdinalIgnoreCase)) return 0;
+    if (language.StartsWith("en-GB", StringComparison.OrdinalIgnoreCase)) return 1;
+    return 2;
   }
 
   private static TTSEngine ParseEngine(string engineName)
@@ -292,10 +362,11 @@ public class TTSFactory : ITTSFactory, IDisposable
     float pitch,
     CancellationToken cancellationToken)
   {
-    var secrets = _secrets.CurrentValue;
-    if (string.IsNullOrEmpty(secrets.GoogleAPIKey))
+    var apiKey = _secrets.CurrentValue.GoogleAPIKey;
+    if (string.IsNullOrEmpty(apiKey) || apiKey.Contains("${secret:"))
     {
-      throw new InvalidOperationException("Google TTS API key is not configured");
+      throw new InvalidOperationException(
+        "Google TTS API key is not configured. Set it via the System Configuration → Secrets → TTS Services page.");
     }
 
     _logger.LogDebug("Generating Google TTS audio for voice: {Voice}", voice);
@@ -303,7 +374,7 @@ public class TTSFactory : ITTSFactory, IDisposable
     using var httpClient = new HttpClient();
 
     // Google Cloud Text-to-Speech REST API
-    var endpoint = $"https://texttospeech.googleapis.com/v1/text:synthesize?key={secrets.GoogleAPIKey}";
+    var endpoint = $"https://texttospeech.googleapis.com/v1/text:synthesize?key={apiKey}";
 
     // Parse voice to extract language code and voice name
     // Voice format is typically like "en-US-Standard-A"
@@ -487,141 +558,149 @@ public class TTSFactory : ITTSFactory, IDisposable
     return voices.AsReadOnly();
   }
 
-  private Task<IReadOnlyList<TTSVoiceInfo>> GetGoogleVoicesAsync(CancellationToken cancellationToken)
+  /// <summary>
+  /// Fetches English voices from Google Cloud TTS API.
+  /// </summary>
+  private async Task<List<TTSVoiceInfo>> FetchGoogleVoicesAsync(CancellationToken cancellationToken)
   {
-    // Google Cloud TTS voices - validated list for en-US and en-GB
-    var voices = new List<TTSVoiceInfo>
+    var apiKey = _secrets.CurrentValue.GoogleAPIKey;
+    if (string.IsNullOrEmpty(apiKey) || apiKey.Contains("${secret:"))
+      throw new InvalidOperationException(
+        "Google TTS API key is not configured. Set it via System Configuration → Secrets.");
+
+    using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+
+    // Fetch all English voices (languageCode=en returns en-US, en-GB, en-AU, etc.)
+    var url = $"https://texttospeech.googleapis.com/v1/voices?key={apiKey}&languageCode=en";
+    var response = await httpClient.GetAsync(url, cancellationToken);
+
+    if (!response.IsSuccessStatusCode)
     {
-      // US English voices
-      new() { Id = "en-US-Standard-A", Name = "US Standard A (Male)", Language = "en-US", Gender = TTSVoiceGender.Male },
-      new() { Id = "en-US-Standard-B", Name = "US Standard B (Male)", Language = "en-US", Gender = TTSVoiceGender.Male },
-      new() { Id = "en-US-Standard-C", Name = "US Standard C (Female)", Language = "en-US", Gender = TTSVoiceGender.Female },
-      new() { Id = "en-US-Standard-D", Name = "US Standard D (Male)", Language = "en-US", Gender = TTSVoiceGender.Male },
-      new() { Id = "en-US-Standard-E", Name = "US Standard E (Female)", Language = "en-US", Gender = TTSVoiceGender.Female },
-      new() { Id = "en-US-Standard-F", Name = "US Standard F (Female)", Language = "en-US", Gender = TTSVoiceGender.Female },
-      new() { Id = "en-US-Standard-G", Name = "US Standard G (Female)", Language = "en-US", Gender = TTSVoiceGender.Female },
-      new() { Id = "en-US-Standard-H", Name = "US Standard H (Female)", Language = "en-US", Gender = TTSVoiceGender.Female },
-      new() { Id = "en-US-Standard-I", Name = "US Standard I (Male)", Language = "en-US", Gender = TTSVoiceGender.Male },
-      new() { Id = "en-US-Standard-J", Name = "US Standard J (Male)", Language = "en-US", Gender = TTSVoiceGender.Male },
-      
-      // UK English voices
-      new() { Id = "en-GB-Standard-A", Name = "UK Standard A (Female)", Language = "en-GB", Gender = TTSVoiceGender.Female },
-      new() { Id = "en-GB-Standard-B", Name = "UK Standard B (Male)", Language = "en-GB", Gender = TTSVoiceGender.Male },
-      new() { Id = "en-GB-Standard-C", Name = "UK Standard C (Female)", Language = "en-GB", Gender = TTSVoiceGender.Female },
-      new() { Id = "en-GB-Standard-D", Name = "UK Standard D (Male)", Language = "en-GB", Gender = TTSVoiceGender.Male },
-      new() { Id = "en-GB-Standard-F", Name = "UK Standard F (Female)", Language = "en-GB", Gender = TTSVoiceGender.Female },
-      new() { Id = "en-GB-Standard-N", Name = "UK Standard N (Female)", Language = "en-GB", Gender = TTSVoiceGender.Female },
-      new() { Id = "en-GB-Standard-O", Name = "UK Standard O (Male)", Language = "en-GB", Gender = TTSVoiceGender.Male }
-    };
-
-    return Task.FromResult<IReadOnlyList<TTSVoiceInfo>>(voices.AsReadOnly());
-  }
-
-  // Azure voice cache
-  private IReadOnlyList<TTSVoiceInfo>? _cachedAzureVoices;
-  private DateTime _azureVoiceCacheExpiry = DateTime.MinValue;
-  private readonly TimeSpan _azureVoiceCacheDuration = TimeSpan.FromHours(24);
-  private readonly SemaphoreSlim _azureVoiceCacheLock = new(1, 1);
-
-  private async Task<IReadOnlyList<TTSVoiceInfo>> GetAzureVoicesAsync(CancellationToken cancellationToken)
-  {
-    // Check cache first
-    if (_cachedAzureVoices != null && DateTime.UtcNow < _azureVoiceCacheExpiry)
-    {
-      return _cachedAzureVoices;
+      var error = await response.Content.ReadAsStringAsync(cancellationToken);
+      _logger.LogError("Google TTS voices API error: {Status} - {Error}", response.StatusCode, error);
+      throw new InvalidOperationException($"Google TTS voices API error: {response.StatusCode}");
     }
 
-    await _azureVoiceCacheLock.WaitAsync(cancellationToken);
-    try
+    var json = await response.Content.ReadAsStringAsync(cancellationToken);
+    using var doc = System.Text.Json.JsonDocument.Parse(json);
+
+    var voices = new List<TTSVoiceInfo>();
+
+    if (doc.RootElement.TryGetProperty("voices", out var voicesArray))
     {
-      // Double-check after acquiring lock
-      if (_cachedAzureVoices != null && DateTime.UtcNow < _azureVoiceCacheExpiry)
+      foreach (var v in voicesArray.EnumerateArray())
       {
-        return _cachedAzureVoices;
-      }
+        var name = v.GetProperty("name").GetString() ?? "unknown";
 
-      var apiKey = _secrets.CurrentValue.AzureAPIKey;
-      var region = _secrets.CurrentValue.AzureRegion;
+        // Language codes array — use the first one
+        var langCodes = v.GetProperty("languageCodes");
+        var language = langCodes.GetArrayLength() > 0
+          ? langCodes[0].GetString() ?? "en-US"
+          : "en-US";
 
-      if (string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(region))
-      {
-        _logger.LogDebug("Azure Speech credentials not configured, returning default voices");
-        return GetDefaultAzureVoices();
-      }
-
-      try
-      {
-        // Call Azure Cognitive Services REST API to list voices
-        // Note: HttpClient is created directly in a using block rather than using IHttpClientFactory
-        // because this API call is cached for 24 hours and made very infrequently.
-        // The using pattern ensures proper disposal after each call.
-        using var httpClient = new HttpClient();
-        httpClient.Timeout = TimeSpan.FromSeconds(10);
-        httpClient.DefaultRequestHeaders.Add("Ocp-Apim-Subscription-Key", apiKey);
-
-        var url = $"https://{region}.tts.speech.microsoft.com/cognitiveservices/voices/list";
-        var response = await httpClient.GetAsync(url, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var json = await response.Content.ReadAsStringAsync(cancellationToken);
-        var voiceData = System.Text.Json.JsonSerializer.Deserialize<List<AzureVoiceDto>>(json);
-
-        if (voiceData != null && voiceData.Count > 0)
+        // SSML gender
+        var ssmlGender = v.TryGetProperty("ssmlGender", out var genderProp)
+          ? genderProp.GetString() ?? "NEUTRAL"
+          : "NEUTRAL";
+        var gender = ssmlGender switch
         {
-          var voices = voiceData
-            .Where(v => v.Locale?.StartsWith("en-") == true) // Filter to English voices
-            .Select(v => new TTSVoiceInfo
-            {
-              Id = v.ShortName ?? v.Name ?? "unknown",
-              Name = v.LocalName ?? v.DisplayName ?? v.Name ?? "Unknown",
-              Language = v.Locale ?? "en-US",
-              Gender = v.Gender?.Equals("Male", StringComparison.OrdinalIgnoreCase) == true
-                ? TTSVoiceGender.Male
-                : TTSVoiceGender.Female
-            })
-            .ToList();
+          "MALE" => TTSVoiceGender.Male,
+          "FEMALE" => TTSVoiceGender.Female,
+          _ => TTSVoiceGender.Neutral
+        };
 
-          _cachedAzureVoices = voices.AsReadOnly();
-          _azureVoiceCacheExpiry = DateTime.UtcNow.Add(_azureVoiceCacheDuration);
+        // Extract price tier from voice name pattern: en-US-{Tier}-{Letter}
+        var priceTier = ExtractGooglePriceTier(name);
 
-          _logger.LogInformation(
-            "Retrieved {Count} Azure voices (cached for {Hours} hours)",
-            voices.Count, _azureVoiceCacheDuration.TotalHours);
-
-          return _cachedAzureVoices;
-        }
-
-        _logger.LogWarning("Azure Voice API returned empty voice list, using defaults");
-        return GetDefaultAzureVoices();
-      }
-      catch (HttpRequestException ex)
-      {
-        _logger.LogWarning(ex, "Failed to query Azure Voice API, using default voices");
-        return GetDefaultAzureVoices();
-      }
-      catch (TaskCanceledException ex) when (ex.CancellationToken != cancellationToken)
-      {
-        _logger.LogWarning("Azure Voice API request timed out, using default voices");
-        return GetDefaultAzureVoices();
+        voices.Add(new TTSVoiceInfo
+        {
+          Id = name,
+          Name = $"{language.Replace("en-", "")} {priceTier} ({name.Split('-').LastOrDefault() ?? ""}) - {ssmlGender.ToLowerInvariant()}",
+          Language = language,
+          Gender = gender,
+          PriceTier = priceTier
+        });
       }
     }
-    finally
-    {
-      _azureVoiceCacheLock.Release();
-    }
+
+    _logger.LogInformation("Fetched {Count} Google TTS voices", voices.Count);
+    return voices;
   }
 
-  private IReadOnlyList<TTSVoiceInfo> GetDefaultAzureVoices()
+  /// <summary>
+  /// Extracts price tier from a Google voice name (e.g., "en-US-Standard-A" → "Standard").
+  /// </summary>
+  private static string ExtractGooglePriceTier(string voiceName)
   {
-    var voices = new List<TTSVoiceInfo>
+    // Voice name format: {locale}-{Tier}-{Letter} or {locale}-{Tier}{Variant}-{Letter}
+    var parts = voiceName.Split('-');
+    if (parts.Length >= 3)
     {
-      new() { Id = "en-US-JennyNeural", Name = "Jenny (US)", Language = "en-US", Gender = TTSVoiceGender.Female },
-      new() { Id = "en-US-GuyNeural", Name = "Guy (US)", Language = "en-US", Gender = TTSVoiceGender.Male },
-      new() { Id = "en-US-AriaNeural", Name = "Aria (US)", Language = "en-US", Gender = TTSVoiceGender.Female },
-      new() { Id = "en-GB-SoniaNeural", Name = "Sonia (UK)", Language = "en-GB", Gender = TTSVoiceGender.Female },
-      new() { Id = "en-GB-RyanNeural", Name = "Ryan (UK)", Language = "en-GB", Gender = TTSVoiceGender.Male }
-    };
-    return voices.AsReadOnly();
+      // The tier is the third segment (index 2) for names like en-US-Standard-A
+      // or en-US-Neural2-A
+      return parts[2] switch
+      {
+        "Standard" => "Standard",
+        "WaveNet" => "WaveNet",
+        "Neural2" => "Neural2",
+        "Studio" => "Studio",
+        "Polyglot" => "Polyglot",
+        "News" => "News",
+        "Casual" => "Casual",
+        "Journey" => "Journey",
+        _ => parts[2] // Preserve unknown tiers as-is
+      };
+    }
+    return "Standard";
+  }
+
+  /// <summary>
+  /// Fetches English voices from Azure Cognitive Services Speech API.
+  /// </summary>
+  private async Task<List<TTSVoiceInfo>> FetchAzureVoicesAsync(CancellationToken cancellationToken)
+  {
+    var secrets = _secrets.CurrentValue;
+    if (string.IsNullOrEmpty(secrets.AzureAPIKey) || string.IsNullOrEmpty(secrets.AzureRegion))
+      throw new InvalidOperationException(
+        "Azure TTS API key or region is not configured. Set them via System Configuration → Secrets.");
+
+    using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+    httpClient.DefaultRequestHeaders.Add("Ocp-Apim-Subscription-Key", secrets.AzureAPIKey);
+
+    var url = $"https://{secrets.AzureRegion}.tts.speech.microsoft.com/cognitiveservices/voices/list";
+    var response = await httpClient.GetAsync(url, cancellationToken);
+
+    if (!response.IsSuccessStatusCode)
+    {
+      var error = await response.Content.ReadAsStringAsync(cancellationToken);
+      _logger.LogError("Azure TTS voices API error: {Status} - {Error}", response.StatusCode, error);
+      throw new InvalidOperationException($"Azure TTS voices API error: {response.StatusCode}");
+    }
+
+    var json = await response.Content.ReadAsStringAsync(cancellationToken);
+    var voiceData = System.Text.Json.JsonSerializer.Deserialize<List<AzureVoiceDto>>(json);
+
+    var voices = new List<TTSVoiceInfo>();
+
+    if (voiceData != null)
+    {
+      voices = voiceData
+        .Where(v => v.Locale?.StartsWith("en-") == true)
+        .Select(v => new TTSVoiceInfo
+        {
+          Id = v.ShortName ?? v.Name ?? "unknown",
+          Name = v.LocalName ?? v.DisplayName ?? v.Name ?? "Unknown",
+          Language = v.Locale ?? "en-US",
+          Gender = v.Gender?.Equals("Male", StringComparison.OrdinalIgnoreCase) == true
+            ? TTSVoiceGender.Male
+            : TTSVoiceGender.Female,
+          PriceTier = v.VoiceType ?? "Standard"
+        })
+        .ToList();
+    }
+
+    _logger.LogInformation("Fetched {Count} Azure TTS voices", voices.Count);
+    return voices;
   }
 
   /// <summary>
@@ -635,6 +714,7 @@ public class TTSFactory : ITTSFactory, IDisposable
     public string? ShortName { get; set; }
     public string? Gender { get; set; }
     public string? Locale { get; set; }
+    public string? VoiceType { get; set; }
   }
 
   private static TimeSpan EstimateWavDuration(long bytes)
@@ -695,7 +775,6 @@ public class TTSFactory : ITTSFactory, IDisposable
   /// </summary>
   public void Dispose()
   {
-    _azureVoiceCacheLock.Dispose();
     GC.SuppressFinalize(this);
   }
 }

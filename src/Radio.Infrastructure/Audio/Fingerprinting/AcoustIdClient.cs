@@ -15,7 +15,7 @@ public sealed class AcoustIdClient : IDisposable
 
   private readonly HttpClient _httpClient;
   private readonly ILogger<AcoustIdClient> _logger;
-  private readonly FingerprintingOptions _options;
+  private readonly IOptionsMonitor<FingerprintingOptions> _optionsMonitor;
   private readonly bool _ownsHttpClient;
 
   /// <summary>
@@ -23,17 +23,17 @@ public sealed class AcoustIdClient : IDisposable
   /// </summary>
   /// <param name="httpClient">The HTTP client.</param>
   /// <param name="logger">The logger instance.</param>
-  /// <param name="options">The fingerprinting options.</param>
+  /// <param name="optionsMonitor">The fingerprinting options monitor (re-evaluates on each access for secret resolution).</param>
   /// <param name="ownsHttpClient">Whether this instance owns (and should dispose) the HttpClient.</param>
   public AcoustIdClient(
     HttpClient httpClient,
     ILogger<AcoustIdClient> logger,
-    IOptions<FingerprintingOptions> options,
+    IOptionsMonitor<FingerprintingOptions> optionsMonitor,
     bool ownsHttpClient = true)
   {
     _httpClient = httpClient;
     _logger = logger;
-    _options = options.Value;
+    _optionsMonitor = optionsMonitor;
     _ownsHttpClient = ownsHttpClient;
   }
 
@@ -49,7 +49,8 @@ public sealed class AcoustIdClient : IDisposable
     int duration,
     CancellationToken ct = default)
   {
-    var apiKey = _options.AcoustId.ApiKey;
+    var options = _optionsMonitor.CurrentValue;
+    var apiKey = options.AcoustId.ApiKey;
     if (string.IsNullOrEmpty(apiKey))
     {
       _logger.LogWarning("AcoustID API key not configured");
@@ -90,7 +91,7 @@ public sealed class AcoustIdClient : IDisposable
         ["fingerprint"] = fingerprint
       };
 
-      var baseUrl = _options.AcoustId.BaseUrl.TrimEnd('/');
+      var baseUrl = options.AcoustId.BaseUrl.TrimEnd('/');
       using var content = new FormUrlEncodedContent(queryParams);
 
       _logger.LogDebug(
@@ -124,7 +125,7 @@ public sealed class AcoustIdClient : IDisposable
       // Log all results for debugging
       _logger.LogInformation(
         "AcoustID returned {ResultCount} result(s). MinimumConfidence={MinConfidence:P0}",
-        response.Results.Count, _options.MinimumConfidenceThreshold);
+        response.Results.Count, options.MinimumConfidenceThreshold);
 
       for (int i = 0; i < response.Results.Count && i < 5; i++)
       {
@@ -136,7 +137,7 @@ public sealed class AcoustIdClient : IDisposable
 
       // Return the best match (highest score)
       var bestResult = response.Results
-        .Where(r => r.Score >= _options.MinimumConfidenceThreshold)
+        .Where(r => r.Score >= options.MinimumConfidenceThreshold)
         .OrderByDescending(r => r.Score)
         .FirstOrDefault();
 
@@ -144,7 +145,7 @@ public sealed class AcoustIdClient : IDisposable
       {
         _logger.LogInformation(
           "No AcoustID results with sufficient confidence (>= {MinConfidence:P0}). Highest score was {HighestScore:P0}",
-          _options.MinimumConfidenceThreshold, 
+          options.MinimumConfidenceThreshold, 
           response.Results.Max(r => r.Score));
         return null;
       }

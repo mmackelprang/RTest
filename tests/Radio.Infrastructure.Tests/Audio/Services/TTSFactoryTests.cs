@@ -158,29 +158,39 @@ public class TTSFactoryTests
   }
 
   [Fact]
-  public async Task GetVoicesAsync_ReturnsVoicesForGoogle()
+  public async Task GetVoicesAsync_ReturnsEmptyForCloudEngine_WhenNoCachedVoices()
   {
     var factory = CreateFactory();
 
-    var voices = await factory.GetVoicesAsync(TTSEngine.Google);
+    var googleVoices = await factory.GetVoicesAsync(TTSEngine.Google);
+    var azureVoices = await factory.GetVoicesAsync(TTSEngine.Azure);
 
-    Assert.NotEmpty(voices);
-    Assert.All(voices, v =>
-    {
-      Assert.NotNull(v.Id);
-      Assert.NotNull(v.Name);
-      Assert.NotNull(v.Language);
-    });
+    Assert.Empty(googleVoices);
+    Assert.Empty(azureVoices);
   }
 
   [Fact]
-  public async Task GetVoicesAsync_ReturnsVoicesForAzure()
+  public async Task GetVoicesAsync_ReturnsCachedVoices_WhenRepositoryHasData()
   {
-    var factory = CreateFactory();
+    var voiceRepoMock = new Mock<ITTSVoiceRepository>();
+    var cachedVoices = new List<TTSVoiceInfo>
+    {
+      new() { Id = "en-US-Standard-A", Name = "US Standard A", Language = "en-US", Gender = TTSVoiceGender.Male, PriceTier = "Standard" },
+      new() { Id = "en-GB-Standard-B", Name = "UK Standard B", Language = "en-GB", Gender = TTSVoiceGender.Male, PriceTier = "Standard" }
+    };
+    voiceRepoMock.Setup(r => r.GetCachedVoicesAsync(TTSEngine.Google, It.IsAny<CancellationToken>()))
+      .ReturnsAsync(cachedVoices);
 
-    var voices = await factory.GetVoicesAsync(TTSEngine.Azure);
+    var factory = new TTSFactory(
+      _loggerMock.Object,
+      _ttsSourceLoggerMock.Object,
+      _optionsMock.Object,
+      _secretsMock.Object,
+      voiceRepository: voiceRepoMock.Object);
 
-    Assert.NotEmpty(voices);
+    var voices = await factory.GetVoicesAsync(TTSEngine.Google);
+
+    Assert.Equal(2, voices.Count);
     Assert.All(voices, v =>
     {
       Assert.NotNull(v.Id);

@@ -37,6 +37,14 @@ public sealed class DatabasePathResolver
   }
 
   /// <summary>
+  /// Gets the resolved secrets database path.
+  /// </summary>
+  public string GetSecretsDatabasePath()
+  {
+    return Path.GetFullPath(_databaseOptions.GetSecretsDatabasePath());
+  }
+
+  /// <summary>
   /// Gets the resolved backup directory path.
   /// </summary>
   public string GetBackupPath()
@@ -52,7 +60,8 @@ public sealed class DatabasePathResolver
     return new[]
     {
       GetConfigurationDatabasePath(),
-      GetFingerprintingDatabasePath()
+      GetFingerprintingDatabasePath(),
+      GetSecretsDatabasePath()
     };
   }
 }

@@ -39,6 +39,7 @@ public class SystemConfigPageTests : TestContext
     // Add HttpClient for API services
     Services.AddHttpClient<SystemApiService>();
     Services.AddHttpClient<ConfigurationApiService>();
+    Services.AddHttpClient<SecretsApiService>();
     Services.AddHttpClient<SourcesApiService>();
     
     // Add AudioStateHubService

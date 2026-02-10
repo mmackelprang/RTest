@@ -161,9 +161,10 @@ public static class AudioServiceExtensions
     services.Configure<TTSOptions>(
       configuration.GetSection(TTSOptions.SectionName));
 
-    // Bind TTS secrets (from secrets store)
+    // Bind TTS secrets (from secrets store) and resolve ${secret:...} tags
     services.Configure<TTSSecrets>(
       configuration.GetSection(TTSSecrets.SectionName));
+    services.AddSecretResolution<TTSSecrets>();
 
     // Bind TTS preferences
     services.Configure<TTSPreferences>(

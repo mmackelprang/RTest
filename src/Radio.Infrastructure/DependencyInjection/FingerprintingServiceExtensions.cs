@@ -40,6 +40,7 @@ public static class FingerprintingServiceExtensions
     services.AddScoped<IRadioPresetRepository, SqliteRadioPresetRepository>();
     services.AddScoped<IAudioFileRepository, SqliteAudioFileRepository>();
     services.AddScoped<IPlaylistRepository, SqlitePlaylistRepository>();
+    services.AddSingleton<ITTSVoiceRepository, SqliteTTSVoiceRepository>();
 
     // Register fingerprint service
     services.AddSingleton<IFingerprintService, ChromaprintFingerprintService>();
@@ -66,7 +67,7 @@ public static class FingerprintingServiceExtensions
       return new AcoustIdClient(
         httpClient,
         sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<AcoustIdClient>>(),
-        sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<FingerprintingOptions>>(),
+        sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<FingerprintingOptions>>(),
         ownsHttpClient: true); // HttpClient is created here, so client owns it
     });
 

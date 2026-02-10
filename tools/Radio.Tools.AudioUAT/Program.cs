@@ -90,7 +90,7 @@ var host = Host.CreateDefaultBuilder(args)
     services.AddFingerprinting(configuration);
 
     // Register Configuration and Metrics services for Phase 10 (Backup/Restore)
-    services.AddManagedConfiguration(configuration, useSqliteSecrets: true);
+    services.AddManagedConfiguration(configuration);
     services.AddMetrics(configuration);
 
     // Register API client for API-based tests

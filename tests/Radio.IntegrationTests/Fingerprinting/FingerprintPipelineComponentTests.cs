@@ -52,7 +52,7 @@ public class FingerprintPipelineComponentTests : IAsyncLifetime
       OperatingSystem.IsWindows() ? "fpcalc.exe" : "fpcalc");
     Assert.True(File.Exists(_fpcalcPath), $"fpcalc not found at: {_fpcalcPath}");
 
-    var options = Options.Create(new FingerprintingOptions
+    var fingerprintingOptions = new FingerprintingOptions
     {
       Enabled = true,
       SampleDurationSeconds = 15,
@@ -72,7 +72,10 @@ public class FingerprintPipelineComponentTests : IAsyncLifetime
         ContactEmail = "mark@mackelprang.com",
         TimeoutSeconds = 15
       }
-    });
+    };
+    var options = Options.Create(fingerprintingOptions);
+    var optionsMonitor = new Moq.Mock<IOptionsMonitor<FingerprintingOptions>>();
+    optionsMonitor.Setup(m => m.CurrentValue).Returns(fingerprintingOptions);
 
     _fingerprintService = new ChromaprintFingerprintService(
       NullLogger<ChromaprintFingerprintService>.Instance, options);
@@ -80,7 +83,7 @@ public class FingerprintPipelineComponentTests : IAsyncLifetime
     var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
     httpClient.DefaultRequestHeaders.Add("User-Agent", "RadioConsole/1.0");
     _acoustIdClient = new AcoustIdClient(
-      httpClient, NullLogger<AcoustIdClient>.Instance, options);
+      httpClient, NullLogger<AcoustIdClient>.Instance, optionsMonitor.Object);
 
     return Task.CompletedTask;
   }

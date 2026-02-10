@@ -3,10 +3,12 @@ namespace Radio.Infrastructure.DependencyInjection;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Infrastructure.Configuration.Abstractions;
 using Radio.Infrastructure.Configuration.Backup;
 using Radio.Infrastructure.Configuration.Models;
+using Radio.Infrastructure.Configuration.Options;
 using Radio.Infrastructure.Configuration.Secrets;
 using Radio.Infrastructure.Configuration.Services;
 using Radio.Infrastructure.Configuration.Stores;
@@ -21,15 +23,14 @@ public static class ConfigurationServiceExtensions
 {
   /// <summary>
   /// Adds the managed configuration infrastructure to the service collection.
+  /// Registers a composite secrets provider (SQLite primary + JSON fallback).
   /// </summary>
   /// <param name="services">The service collection.</param>
   /// <param name="configuration">The configuration instance.</param>
-  /// <param name="useSqliteSecrets">If true, uses SQLite secrets provider; otherwise uses JSON.</param>
   /// <returns>The service collection for chaining.</returns>
   public static IServiceCollection AddManagedConfiguration(
     this IServiceCollection services,
-    IConfiguration configuration,
-    bool useSqliteSecrets = false)
+    IConfiguration configuration)
   {
     // Bind unified database options
     services.Configure<DatabaseOptions>(
@@ -46,11 +47,15 @@ public static class ConfigurationServiceExtensions
     services.AddDataProtection()
       .SetApplicationName("Radio.Configuration");
 
-    // Register secrets provider based on parameter
-    if (useSqliteSecrets)
-      services.AddSingleton<ISecretsProvider, SqliteSecretsProvider>();
-    else
-      services.AddSingleton<ISecretsProvider, JsonSecretsProvider>();
+    // Register secret change notification source (signals IOptionsMonitor to re-evaluate)
+    services.AddSingleton<SecretChangeTokenSource>();
+
+    // Register both concrete secrets providers as singletons
+    services.AddSingleton<SqliteSecretsProvider>();
+    services.AddSingleton<JsonSecretsProvider>();
+
+    // Register CompositeSecretsProvider as ISecretsProvider (SQLite primary + JSON fallback)
+    services.AddSingleton<ISecretsProvider, CompositeSecretsProvider>();
 
     // Register store factory
     services.AddSingleton<IConfigurationStoreFactory, ConfigurationStoreFactory>();
@@ -69,19 +74,6 @@ public static class ConfigurationServiceExtensions
   }
 
   /// <summary>
-  /// Adds the managed configuration infrastructure with SQLite secrets provider.
-  /// </summary>
-  /// <param name="services">The service collection.</param>
-  /// <param name="configuration">The configuration instance.</param>
-  /// <returns>The service collection for chaining.</returns>
-  public static IServiceCollection AddManagedConfigurationWithSqliteSecrets(
-    this IServiceCollection services,
-    IConfiguration configuration)
-  {
-    return services.AddManagedConfiguration(configuration, useSqliteSecrets: true);
-  }
-
-  /// <summary>
   /// Adds secret resolution for the specified options type.
   /// </summary>
   /// <typeparam name="TOptions">The options type.</typeparam>
@@ -90,7 +82,12 @@ public static class ConfigurationServiceExtensions
   public static IServiceCollection AddSecretResolution<TOptions>(this IServiceCollection services)
     where TOptions : class
   {
-    services.ConfigureOptions<Radio.Infrastructure.Configuration.Options.SecretResolvingPostConfigureOptions<TOptions>>();
+    services.ConfigureOptions<SecretResolvingPostConfigureOptions<TOptions>>();
+
+    // Register change token source so IOptionsMonitor invalidates when secrets change
+    services.AddSingleton<IOptionsChangeTokenSource<TOptions>>(sp =>
+      new SecretOptionsChangeTokenSource<TOptions>(sp.GetRequiredService<SecretChangeTokenSource>()));
+
     return services;
   }
 }

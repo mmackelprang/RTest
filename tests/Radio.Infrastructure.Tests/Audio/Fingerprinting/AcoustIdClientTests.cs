@@ -13,20 +13,23 @@ namespace Radio.Infrastructure.Tests.Audio.Fingerprinting
     {
         private readonly Mock<HttpMessageHandler> _handlerMock;
         private readonly Mock<ILogger<AcoustIdClient>> _loggerMock;
-        private readonly IOptions<FingerprintingOptions> _options;
+        private readonly IOptionsMonitor<FingerprintingOptions> _optionsMonitor;
 
         public AcoustIdClientTests()
         {
             _handlerMock = new Mock<HttpMessageHandler>();
             _loggerMock = new Mock<ILogger<AcoustIdClient>>();
-            _options = Options.Create(new FingerprintingOptions
+            var fingerprintingOptions = new FingerprintingOptions
             {
                 AcoustId = new AcoustIdOptions
                 {
                     ApiKey = "test_api_key",
                     BaseUrl = "https://api.acoustid.org/v2/"
                 }
-            });
+            };
+            var monitorMock = new Mock<IOptionsMonitor<FingerprintingOptions>>();
+            monitorMock.Setup(m => m.CurrentValue).Returns(fingerprintingOptions);
+            _optionsMonitor = monitorMock.Object;
         }
 
         [Fact]
@@ -48,7 +51,7 @@ namespace Radio.Infrastructure.Tests.Audio.Fingerprinting
                 });
 
             var httpClient = new HttpClient(_handlerMock.Object);
-            using var client = new AcoustIdClient(httpClient, _loggerMock.Object, _options);
+            using var client = new AcoustIdClient(httpClient, _loggerMock.Object, _optionsMonitor);
 
             // Act
             var result = await client.LookupAsync("valid_fingerprint", 120);
@@ -90,7 +93,7 @@ namespace Radio.Infrastructure.Tests.Audio.Fingerprinting
                 });
 
             var httpClient = new HttpClient(_handlerMock.Object);
-            using var client = new AcoustIdClient(httpClient, _loggerMock.Object, _options);
+            using var client = new AcoustIdClient(httpClient, _loggerMock.Object, _optionsMonitor);
 
             // Act
             await client.LookupAsync("test_fingerprint", 60);

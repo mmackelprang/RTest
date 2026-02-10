@@ -266,7 +266,8 @@ public class ConfigurationController : ControllerBase
         {
           // Remove the section prefix from the key
           var keyWithoutPrefix = entry.Key.Substring(sectionPrefix.Length);
-          result[keyWithoutPrefix] = entry.Value;
+          // Parse string values to proper JSON types so the client can deserialize correctly
+          result[keyWithoutPrefix] = ParseConfigValue(entry.Value);
         }
       }
 
@@ -388,6 +389,21 @@ public class ConfigurationController : ControllerBase
 
     // Allow alphanumeric, hyphens, underscores, and dots
     return System.Text.RegularExpressions.Regex.IsMatch(section, @"^[a-zA-Z0-9_\-\.]+$");
+  }
+
+  /// <summary>
+  /// Parses a string config value to its proper JSON type (bool, long, double, or string).
+  /// The configuration store persists all values as strings, but clients expect proper types.
+  /// </summary>
+  private static object? ParseConfigValue(string value)
+  {
+    if (bool.TryParse(value, out var boolVal))
+      return boolVal;
+    if (long.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var longVal))
+      return longVal;
+    if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var doubleVal))
+      return doubleVal;
+    return value;
   }
 
   /// <summary>

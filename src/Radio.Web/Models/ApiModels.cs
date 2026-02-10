@@ -424,7 +424,9 @@ public record TTSVoiceInfoDto(
   string Id,
   string Name,
   string Language,
-  string Gender
+  string Gender,
+  bool IsFavorite = false,
+  string PriceTier = "Standard"
 );
 
 public record PlayTTSRequest(

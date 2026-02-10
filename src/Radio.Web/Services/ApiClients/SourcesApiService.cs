@@ -185,6 +185,53 @@ public class SourcesApiService
     }
   }
 
+  public async Task<int> RefreshTTSVoicesAsync(string engine, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var url = $"/api/sources/events/tts/voices/refresh?engine={Uri.EscapeDataString(engine)}";
+      var response = await _httpClient.PostAsync(url, null, cancellationToken);
+      response.EnsureSuccessStatusCode();
+      var json = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(cancellationToken: cancellationToken);
+      return json.GetProperty("count").GetInt32();
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to refresh TTS voices for engine {Engine}", engine);
+      return 0;
+    }
+  }
+
+  public async Task<bool> SetTTSVoiceFavoriteAsync(string engine, string voiceId, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var url = $"/api/sources/events/tts/voices/favorite?engine={Uri.EscapeDataString(engine)}&voiceId={Uri.EscapeDataString(voiceId)}";
+      var response = await _httpClient.PostAsync(url, null, cancellationToken);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to set TTS voice favorite {VoiceId} for {Engine}", voiceId, engine);
+      return false;
+    }
+  }
+
+  public async Task<bool> RemoveTTSVoiceFavoriteAsync(string engine, string voiceId, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var url = $"/api/sources/events/tts/voices/favorite?engine={Uri.EscapeDataString(engine)}&voiceId={Uri.EscapeDataString(voiceId)}";
+      var response = await _httpClient.DeleteAsync(url, cancellationToken);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to remove TTS voice favorite {VoiceId} for {Engine}", voiceId, engine);
+      return false;
+    }
+  }
+
   public async Task<List<string>?> GetSoundDirectoriesAsync(string? subdirectory = null, CancellationToken cancellationToken = default)
   {
     try

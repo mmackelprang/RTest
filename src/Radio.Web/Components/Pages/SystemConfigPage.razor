@@ -3,6 +3,7 @@
 @using Radio.Web.Models
 @inject SystemApiService SystemApi
 @inject ConfigurationApiService ConfigApi
+@inject SecretsApiService SecretsApi
 @inject SourcesApiService SourcesApi
 @inject AudioStateHubService HubService
 @inject ISnackbar Snackbar
@@ -441,20 +442,45 @@
                 }
               </MudSelect>
 
-              @if (_selectedTTSEngine == "Google" && _googleVoices != null && _googleVoices.Count > 0)
+              @if (_selectedTTSEngine is "Google" or "Azure")
               {
-                <MudSelect @bind-Value="_ttsVoice" Label="Voice" Variant="Variant.Outlined" Class="mt-3">
-                  @foreach (var voice in _googleVoices)
-                  {
-                    <MudSelectItem Value="@voice.Id">
-                      @voice.Name
-                    </MudSelectItem>
-                  }
-                </MudSelect>
+                @if (_cloudVoices != null && _cloudVoices.Count > 0)
+                {
+                  <MudSelect @bind-Value="_ttsVoice" Label="Voice" Variant="Variant.Outlined" Class="mt-3">
+                    @foreach (var voice in _cloudVoices)
+                    {
+                      <MudSelectItem Value="@voice.Id">
+                        @(voice.IsFavorite ? "* " : "")@voice.Name (@voice.PriceTier)
+                      </MudSelectItem>
+                    }
+                  </MudSelect>
+                  <MudStack Row="true" Spacing="1" Class="mt-2" AlignItems="AlignItems.Center">
+                    <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh"
+                               OnClick="ScanForVoicesAsync" Disabled="_scanningVoices">
+                      @(_scanningVoices ? "Scanning..." : "Scan for Voices")
+                    </MudButton>
+                    @if (!string.IsNullOrEmpty(_ttsVoice))
+                    {
+                      var isFav = _cloudVoices.Any(v => v.Id == _ttsVoice && v.IsFavorite);
+                      <MudIconButton Icon="@(isFav ? Icons.Material.Filled.Star : Icons.Material.Outlined.StarBorder)"
+                                     Color="@(isFav ? Color.Warning : Color.Default)" Size="Size.Small"
+                                     OnClick="ToggleVoiceFavoriteAsync" />
+                    }
+                  </MudStack>
+                }
+                else
+                {
+                  <MudTextField @bind-Value="_ttsVoice" Label="Voice (Optional)" Variant="Variant.Outlined" Class="mt-3"
+                                HelperText="Click 'Scan for Voices' to discover available voices" />
+                  <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Search"
+                             OnClick="ScanForVoicesAsync" Disabled="_scanningVoices" Class="mt-2">
+                    @(_scanningVoices ? "Scanning..." : "Scan for Voices")
+                  </MudButton>
+                }
               }
               else
               {
-                <MudTextField @bind-Value="_ttsVoice" Label="Voice (Optional)" Variant="Variant.Outlined" Class="mt-3" 
+                <MudTextField @bind-Value="_ttsVoice" Label="Voice (Optional)" Variant="Variant.Outlined" Class="mt-3"
                               HelperText="e.g., 'en', 'en-US-Standard-A'" />
               }
 
@@ -1105,7 +1131,8 @@
 
   // TTS
   private List<TTSEngineInfoDto>? _ttsEngines;
-  private List<TTSVoiceInfoDto>? _googleVoices;
+  private List<TTSVoiceInfoDto>? _cloudVoices;
+  private bool _scanningVoices;
   private string _ttsText = string.Empty;
   private string _selectedTTSEngine = "ESpeak";
   private string _ttsVoice = "en";
@@ -1292,11 +1319,11 @@
       if (_ttsEngines != null && _ttsEngines.Any(e => e.IsAvailable))
       {
         _selectedTTSEngine = _ttsEngines.First(e => e.IsAvailable).Engine;
-        
-        // Load voices if Google is selected
-        if (_selectedTTSEngine == "Google")
+
+        // Load cached voices for cloud engines
+        if (_selectedTTSEngine is "Google" or "Azure")
         {
-          await LoadGoogleVoicesAsync();
+          await LoadCloudVoicesAsync();
         }
       }
     }
@@ -1309,36 +1336,90 @@
   private async Task OnTTSEngineChangedAsync(string engine)
   {
     _selectedTTSEngine = engine;
-    
-    // Load Google voices when Google engine is selected
-    if (engine == "Google")
+
+    if (engine is "Google" or "Azure")
     {
-      await LoadGoogleVoicesAsync();
+      await LoadCloudVoicesAsync();
     }
     else
     {
-      _googleVoices = null;
+      _cloudVoices = null;
+      _ttsVoice = "en";
     }
-    
+
     StateHasChanged();
   }
 
-  private async Task LoadGoogleVoicesAsync()
+  private async Task LoadCloudVoicesAsync()
   {
     try
     {
-      _googleVoices = await SourcesApi.GetTTSVoicesAsync("Google");
-      
+      _cloudVoices = await SourcesApi.GetTTSVoicesAsync(_selectedTTSEngine);
+
       // Set default voice if available
-      if (_googleVoices != null && _googleVoices.Count > 0)
+      if (_cloudVoices != null && _cloudVoices.Count > 0)
       {
-        _ttsVoice = _googleVoices[0].Id;
+        _ttsVoice = _cloudVoices[0].Id;
       }
     }
     catch (Exception ex)
     {
-      Logger.LogWarning(ex, "Failed to load Google TTS voices for engine {Engine}", "Google");
-      // Silently fail - voice dropdown will not be shown
+      Logger.LogWarning(ex, "Failed to load TTS voices for engine {Engine}", _selectedTTSEngine);
+    }
+  }
+
+  private async Task ScanForVoicesAsync()
+  {
+    try
+    {
+      _scanningVoices = true;
+      StateHasChanged();
+
+      var count = await SourcesApi.RefreshTTSVoicesAsync(_selectedTTSEngine);
+      if (count > 0)
+      {
+        Snackbar.Add($"Found {count} voices for {_selectedTTSEngine}", Severity.Success);
+        await LoadCloudVoicesAsync();
+      }
+      else
+      {
+        Snackbar.Add("No voices found. Check your API key configuration.", Severity.Warning);
+      }
+    }
+    catch (Exception ex)
+    {
+      Snackbar.Add($"Error scanning voices: {ex.Message}", Severity.Error);
+    }
+    finally
+    {
+      _scanningVoices = false;
+      StateHasChanged();
+    }
+  }
+
+  private async Task ToggleVoiceFavoriteAsync()
+  {
+    if (string.IsNullOrEmpty(_ttsVoice) || _cloudVoices == null) return;
+
+    var voice = _cloudVoices.FirstOrDefault(v => v.Id == _ttsVoice);
+    if (voice == null) return;
+
+    bool success;
+    if (voice.IsFavorite)
+    {
+      success = await SourcesApi.RemoveTTSVoiceFavoriteAsync(_selectedTTSEngine, _ttsVoice);
+    }
+    else
+    {
+      success = await SourcesApi.SetTTSVoiceFavoriteAsync(_selectedTTSEngine, _ttsVoice);
+    }
+
+    if (success)
+    {
+      await LoadCloudVoicesAsync();
+      // Preserve the selected voice
+      _ttsVoice = voice.Id;
+      StateHasChanged();
     }
   }
 
@@ -1898,14 +1979,8 @@
   {
     try
     {
-      var secret = await ConfigApi.GetConfigurationAsync<T>(section);
-      if (secret == null)
-      {
-        // Create empty in-memory object without persisting until user explicitly saves
-        secret = new T();
-        Logger.LogInformation("Secret section {Section} not found, creating empty in-memory object", section);
-      }
-      return secret;
+      var secret = await SecretsApi.GetSecretsAsync<T>(section);
+      return secret ?? new T();
     }
     catch (Exception ex)
     {
@@ -1923,8 +1998,8 @@
     try
     {
       if (secrets == null) return;
-      
-      var success = await ConfigApi.UpdateConfigurationAsync(section, secrets);
+
+      var success = await SecretsApi.SaveSecretsAsync(section, secrets);
       if (success)
       {
         Logger.LogInformation("{DisplayName} secrets updated successfully", displayName);
@@ -1960,7 +2035,7 @@
     bool? result = await DialogService.ShowMessageBox(
       "Confirm Clear Secrets",
       $"Are you sure you want to clear all {displayName} secrets? This action cannot be undone.",
-      yesText: "Clear", 
+      yesText: "Clear",
       cancelText: "Cancel");
 
     if (result == true)
@@ -1971,8 +2046,8 @@
         if (secrets != null)
         {
           clearFields?.Invoke();
-          
-          var success = await ConfigApi.UpdateConfigurationAsync(section, secrets);
+
+          var success = await SecretsApi.ClearSecretsAsync(section);
           if (success)
           {
             Logger.LogInformation("{DisplayName} secrets cleared successfully", displayName);

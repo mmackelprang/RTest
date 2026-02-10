@@ -88,7 +88,11 @@
       "WebFetch(domain:www.nuget.org)",
       "WebFetch(domain:www.hackitu.de)",
       "Skill(planning-with-files:planning-with-files)",
-      "Bash(dotnet ildasm --help:*)"
+      "Bash(dotnet ildasm --help:*)",
+      "Bash(dotnet tool run sqlite3:*)",
+      "Bash(sqlite3:*)",
+      "Bash(cmd /c \"dir /s /b D:\\\\prj\\\\RTest\\\\RTest\\\\data\\\\*.db\")",
+      "WebFetch(domain:docs.cloud.google.com)"
     ]
   },
   "enableAllProjectMcpServers": true,

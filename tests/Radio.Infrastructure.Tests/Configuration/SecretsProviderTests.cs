@@ -31,8 +31,8 @@ public class SecretsProviderTests : IDisposable
     var databaseOptions = Options.Create(new Radio.Core.Configuration.DatabaseOptions
     {
       RootPath = _testDirectory,
-      ConfigurationSubdirectory = "",
-      ConfigurationFileName = "secrets.db"
+      SecretsSubdirectory = "",
+      SecretsFileName = "secrets.db"
     });
     _pathResolver = new Radio.Core.Configuration.DatabasePathResolver(databaseOptions);
 

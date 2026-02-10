@@ -37,7 +37,7 @@ public sealed class SqliteSecretsProvider : SecretsProviderBase, IAsyncDisposabl
     _pathResolver = pathResolver;
     _logger = logger;
 
-    var dbPath = _pathResolver.GetConfigurationDatabasePath();
+    var dbPath = _pathResolver.GetSecretsDatabasePath();
     _connectionString = $"Data Source={dbPath}";
   }
 

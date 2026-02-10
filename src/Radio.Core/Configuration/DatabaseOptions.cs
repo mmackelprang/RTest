@@ -43,6 +43,18 @@ public sealed class DatabaseOptions
   public string FingerprintingFileName { get; set; } = "fingerprints.db";
 
   /// <summary>
+  /// Subdirectory within RootPath for secrets database.
+  /// Default: secrets (results in ./data/secrets/secrets.db)
+  /// </summary>
+  public string SecretsSubdirectory { get; set; } = "secrets";
+
+  /// <summary>
+  /// Filename for the secrets database.
+  /// Default: secrets.db
+  /// </summary>
+  public string SecretsFileName { get; set; } = "secrets.db";
+
+  /// <summary>
   /// Subdirectory within RootPath for database backups.
   /// Default: backups (results in ./data/backups)
   /// </summary>
@@ -72,6 +84,14 @@ public sealed class DatabaseOptions
   }
 
   /// <summary>
+  /// Gets the full path to the secrets database.
+  /// </summary>
+  public string GetSecretsDatabasePath()
+  {
+    return Path.Combine(RootPath, SecretsSubdirectory, SecretsFileName);
+  }
+
+  /// <summary>
   /// Gets the full path to the backup directory.
   /// </summary>
   public string GetBackupPath()
@@ -87,7 +107,8 @@ public sealed class DatabaseOptions
     return new[]
     {
       GetConfigurationDatabasePath(),
-      GetFingerprintingDatabasePath()
+      GetFingerprintingDatabasePath(),
+      GetSecretsDatabasePath()
     };
   }
 }

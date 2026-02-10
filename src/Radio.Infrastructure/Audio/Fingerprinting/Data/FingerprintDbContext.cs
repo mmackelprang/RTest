@@ -199,6 +199,28 @@ public sealed class FingerprintDbContext : IAsyncDisposable
         FOREIGN KEY (PlaylistId) REFERENCES Playlists(Id)
       );
 
+      -- TTS voice cache table
+      CREATE TABLE IF NOT EXISTS TTSVoiceCache (
+        Id INTEGER PRIMARY KEY AUTOINCREMENT,
+        Engine TEXT NOT NULL,
+        VoiceId TEXT NOT NULL,
+        Name TEXT NOT NULL,
+        Language TEXT NOT NULL,
+        Gender TEXT NOT NULL,
+        PriceTier TEXT NOT NULL,
+        LastUpdated TEXT NOT NULL,
+        UNIQUE(Engine, VoiceId)
+      );
+
+      -- TTS voice favorites table
+      CREATE TABLE IF NOT EXISTS TTSVoiceFavorites (
+        Id INTEGER PRIMARY KEY AUTOINCREMENT,
+        Engine TEXT NOT NULL,
+        VoiceId TEXT NOT NULL,
+        AddedAt TEXT NOT NULL,
+        UNIQUE(Engine, VoiceId)
+      );
+
       -- Indexes for performance
       CREATE INDEX IF NOT EXISTS IX_FingerprintCache_ChromaprintHash 
         ON FingerprintCache(ChromaprintHash);
@@ -222,6 +244,10 @@ public sealed class FingerprintDbContext : IAsyncDisposable
         ON AudioFiles(Path);
       CREATE INDEX IF NOT EXISTS IX_PlaylistItems_PlaylistId
         ON PlaylistItems(PlaylistId);
+      CREATE INDEX IF NOT EXISTS IX_TTSVoiceCache_Engine
+        ON TTSVoiceCache(Engine);
+      CREATE INDEX IF NOT EXISTS IX_TTSVoiceFavorites_Engine
+        ON TTSVoiceFavorites(Engine);
       """;
 
     using var cmd = _connection!.CreateCommand();

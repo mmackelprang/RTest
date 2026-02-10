@@ -172,8 +172,8 @@ public class SecretsConfigurationIntegrationTests : IDisposable
     var databaseOptions = Options.Create(new Radio.Core.Configuration.DatabaseOptions
     {
       RootPath = TempDirectory,
-      ConfigurationSubdirectory = "",
-      ConfigurationFileName = "test-secrets.db"
+      SecretsSubdirectory = "",
+      SecretsFileName = "test-secrets.db"
     });
     var pathResolver = new Radio.Core.Configuration.DatabasePathResolver(databaseOptions);
     var dataProtection = DataProtectionProvider.Create("IntegrationTests");
@@ -193,7 +193,7 @@ public class SecretsConfigurationIntegrationTests : IDisposable
     Assert.Equal(secretValue, retrieved);
 
     // Verify the database file exists
-    var dbPath = pathResolver.GetConfigurationDatabasePath();
+    var dbPath = pathResolver.GetSecretsDatabasePath();
     Assert.True(File.Exists(dbPath), "SQLite database file should exist");
   }
 

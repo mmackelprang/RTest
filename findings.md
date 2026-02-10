@@ -1,57 +1,46 @@
 # Findings & Decisions
 
-## Album Art Pipeline Investigation
+## Current State of TTS Voice System
 
-### Root Cause: FilePlayerAudioSource NeedsFingerprintingLookup Guard
+### Google Voices — Hardcoded (17 voices)
+- `TTSFactory.GetGoogleVoicesAsync()` (line 491) returns a static `List<TTSVoiceInfo>` with 10 US + 7 UK voices
+- No API call to Google Cloud TTS voice listing endpoint
+- Google Cloud TTS has a REST endpoint: `GET /v1/voices?key={key}&languageCode=en`
 
-**The album art update in `OnTrackIdentified()` was gated behind the `NeedsFingerprintingLookup` flag.**
+### Azure Voices — Dynamic with In-Memory Cache (24h)
+- `TTSFactory.GetAzureVoicesAsync()` (line 527) calls Azure REST API
+- Uses `SemaphoreSlim` + `_cachedAzureVoices` field + `_azureVoiceCacheExpiry`
+- Filters to `en-*` locales
+- Falls back to 5 default voices on error
 
-In `UpdateMetadataFromFile()` (line 1587-1595):
+### eSpeak Voices — Dynamic via Process
+- `TTSFactory.GetESpeakVoicesAsync()` (line 429) shells out to `espeak-ng --voices`
+- No caching — runs process each time
+- Falls back to 3 default voices on error
+
+### Web UI Voice Selection
+- Google engine: shows `MudSelect` dropdown populated from API
+- Other engines: shows plain text input for manual voice name entry
+- No favorites mechanism exists
+
+### API Endpoints
+- `GET /api/sources/events/tts/voices?engine=Google` — returns `List<TTSVoiceInfoDto>`
+- `GET /api/sources/events/tts/engines` — returns `List<TTSEngineInfoDto>`
+
+### TTSVoiceInfo Record (Core)
 ```csharp
-bool hasIncompleteMetadata =
-  _metadata[StandardMetadataKeys.Artist].Equals(StandardMetadataKeys.DefaultArtist) ||
-  _metadata[StandardMetadataKeys.Album].Equals(StandardMetadataKeys.DefaultAlbum);
+public record TTSVoiceInfo
+{
+  public string Id { get; init; } = "";
+  public string Name { get; init; } = "";
+  public string Language { get; init; } = "";
+  public TTSVoiceGender Gender { get; init; }
+}
 ```
 
-- Files with complete ID3 tags (artist + album) → `NeedsFingerprintingLookup` never set
-- `OnTrackIdentified()` early-returns at the guard → album art never applied
-- SoundFlow's `SoundMetadataReader` does NOT extract embedded album art
-- So `AlbumArtUrl` is ALWAYS the default for file sources, but the guard prevents the update
-
-### Why It Worked for SDR/USB Sources
-- `SDRRadioAudioSource.OnTrackIdentified()` has NO `NeedsFingerprintingLookup` guard
-- `USBAudioSourceBase.OnTrackIdentified()` has NO `NeedsFingerprintingLookup` guard
-- Both always update album art from fingerprinting
-
-### Fix Applied
-Moved the album art update BEFORE the `NeedsFingerprintingLookup` guard in `FilePlayerAudioSource.OnTrackIdentified()`:
-- Album art is now always updated from fingerprinting when current art is the default
-- Title/artist/album updates still require `NeedsFingerprintingLookup` (files with incomplete tags)
-- This matches the behavior of SDR and USB sources
-
-### Pipeline Verification (All Links Working)
-1. ✅ MetadataLookupService → AcoustID → MusicBrainz → Cover Art Archive
-2. ✅ Cover Art Archive returns thumbnail URLs (confirmed by `CoverArt=True` in logs)
-3. ✅ TrackMetadata.CoverArtUrl populated
-4. ✅ BackgroundIdentificationService fires TrackIdentified event
-5. ❌ **FilePlayerAudioSource.OnTrackIdentified() — early return (FIXED)**
-6. ✅ AudioStateUpdateService detects change, broadcasts via SignalR
-7. ✅ AudioStateUpdateService pushes to Cast via PushMetadataToCastAsync()
-8. ✅ NowPlayingPanel renders cover art as CSS background-image
-9. ✅ GoogleCastOutput.BuildMedia() includes Images[] for http:// URLs
-
-### Cast Metadata Flow
-- `AudioStateUpdateService.PushMetadataToCastAsync()` sends `AlbumArtUrl` to Cast
-- `GoogleCastOutput.BuildMedia()` validates URL starts with "http" before including
-- Cover Art Archive URLs (`https://coverartarchive.org/...`) pass validation
-- LoadAsync reloads media with updated metadata
-
-## Key Files
-| File | Purpose |
-|------|---------|
-| `src/Radio.Infrastructure/Audio/Sources/Primary/FilePlayerAudioSource.cs` | **FIXED** — album art update moved before NeedsFingerprintingLookup guard |
-| `src/Radio.Infrastructure/Audio/Fingerprinting/MetadataLookupService.cs` | Cover Art Archive lookup (working correctly) |
-| `src/Radio.Infrastructure/Audio/Fingerprinting/BackgroundIdentificationService.cs` | Fires TrackIdentified event (working correctly) |
-| `src/Radio.API/Services/AudioStateUpdateService.cs` | Broadcasts metadata + pushes to Cast (working correctly) |
-| `src/Radio.Web/Components/Shared/NowPlayingPanel.razor` | Renders album art as background-image (working correctly) |
-| `src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs` | Cast media metadata with album art (working correctly) |
+### Database Pattern
+- FingerprintDbContext: Singleton, manages shared SQLite connection to fingerprints.db
+- Repositories: Scoped, get connection via `_dbContext.GetConnectionAsync()`
+- Tables created in `CreateTablesAsync()` with `CREATE TABLE IF NOT EXISTS`
+- UPSERT via `ON CONFLICT(...) DO UPDATE SET`
+- Data mapping via `SqliteDataReader` with `GetOrdinal()`

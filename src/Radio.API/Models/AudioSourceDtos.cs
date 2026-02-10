@@ -324,6 +324,16 @@ public class TTSVoiceInfoDto
   /// Gets or sets the voice gender (Male, Female, Neutral).
   /// </summary>
   public string Gender { get; set; } = string.Empty;
+
+  /// <summary>
+  /// Gets or sets whether this voice is a user favorite.
+  /// </summary>
+  public bool IsFavorite { get; set; }
+
+  /// <summary>
+  /// Gets or sets the pricing tier (e.g., "Standard", "WaveNet", "Neural").
+  /// </summary>
+  public string PriceTier { get; set; } = "Standard";
 }
 
 /// <summary>

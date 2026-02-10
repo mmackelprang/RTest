@@ -391,7 +391,9 @@ public class SourcesController : ControllerBase
         Id = v.Id,
         Name = v.Name,
         Language = v.Language,
-        Gender = v.Gender.ToString()
+        Gender = v.Gender.ToString(),
+        IsFavorite = v.IsFavorite,
+        PriceTier = v.PriceTier
       }).ToList();
 
       return Ok(voiceDtos);
@@ -400,6 +402,92 @@ public class SourcesController : ControllerBase
     {
       _logger.LogError(ex, "Error getting TTS voices for engine {Engine}", engine);
       return StatusCode(500, new { error = "Failed to get TTS voices" });
+    }
+  }
+
+  /// <summary>
+  /// Refreshes the voice cache for a TTS engine by fetching from the cloud API.
+  /// </summary>
+  [HttpPost("events/tts/voices/refresh")]
+  [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+  public async Task<IActionResult> RefreshTTSVoices(
+    [FromQuery] string engine,
+    CancellationToken cancellationToken)
+  {
+    try
+    {
+      if (_ttsFactory == null)
+        return StatusCode(501, new { error = "TTS factory not available" });
+
+      if (!Enum.TryParse<TTSEngine>(engine, ignoreCase: true, out var ttsEngine))
+        return BadRequest(new { error = $"Invalid engine: {engine}. Valid values are: Google, Azure" });
+
+      if (ttsEngine == TTSEngine.ESpeak)
+        return BadRequest(new { error = "Voice refresh is not supported for eSpeak" });
+
+      var count = await _ttsFactory.RefreshVoicesAsync(ttsEngine, cancellationToken);
+      return Ok(new { count });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error refreshing TTS voices for engine {Engine}", engine);
+      return StatusCode(500, new { error = ex.Message });
+    }
+  }
+
+  /// <summary>
+  /// Marks a voice as a favorite.
+  /// </summary>
+  [HttpPost("events/tts/voices/favorite")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  public async Task<IActionResult> SetTTSVoiceFavorite(
+    [FromQuery] string engine,
+    [FromQuery] string voiceId,
+    CancellationToken cancellationToken)
+  {
+    try
+    {
+      if (_ttsFactory == null)
+        return StatusCode(501, new { error = "TTS factory not available" });
+
+      if (!Enum.TryParse<TTSEngine>(engine, ignoreCase: true, out var ttsEngine))
+        return BadRequest(new { error = $"Invalid engine: {engine}" });
+
+      await _ttsFactory.SetVoiceFavoriteAsync(ttsEngine, voiceId, cancellationToken);
+      return Ok();
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error setting TTS voice favorite {VoiceId} for {Engine}", voiceId, engine);
+      return StatusCode(500, new { error = ex.Message });
+    }
+  }
+
+  /// <summary>
+  /// Removes a voice from favorites.
+  /// </summary>
+  [HttpDelete("events/tts/voices/favorite")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  public async Task<IActionResult> RemoveTTSVoiceFavorite(
+    [FromQuery] string engine,
+    [FromQuery] string voiceId,
+    CancellationToken cancellationToken)
+  {
+    try
+    {
+      if (_ttsFactory == null)
+        return StatusCode(501, new { error = "TTS factory not available" });
+
+      if (!Enum.TryParse<TTSEngine>(engine, ignoreCase: true, out var ttsEngine))
+        return BadRequest(new { error = $"Invalid engine: {engine}" });
+
+      await _ttsFactory.RemoveVoiceFavoriteAsync(ttsEngine, voiceId, cancellationToken);
+      return Ok();
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error removing TTS voice favorite {VoiceId} for {Engine}", voiceId, engine);
+      return StatusCode(500, new { error = ex.Message });
     }
   }
 

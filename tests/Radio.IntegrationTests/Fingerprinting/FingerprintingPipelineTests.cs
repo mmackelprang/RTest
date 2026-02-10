@@ -89,6 +89,8 @@ public class FingerprintingPipelineTests : IAsyncLifetime
       }
     };
     var optionsWrapper = Options.Create(options);
+    var optionsMonitor = new Moq.Mock<IOptionsMonitor<FingerprintingOptions>>();
+    optionsMonitor.Setup(m => m.CurrentValue).Returns(options);
 
     // Create real services
     _fingerprintService = new ChromaprintFingerprintService(
@@ -103,7 +105,7 @@ public class FingerprintingPipelineTests : IAsyncLifetime
     _acoustIdClient = new AcoustIdClient(
       acoustIdHttpClient,
       NullLogger<AcoustIdClient>.Instance,
-      optionsWrapper);
+      optionsMonitor.Object);
 
     var musicBrainzHttpClient = new HttpClient
     {
