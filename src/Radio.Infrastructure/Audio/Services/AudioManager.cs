@@ -217,6 +217,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
         AudioSourceType.Radio => true,      // Radio tunes to last frequency
         AudioSourceType.Vinyl => true,      // Vinyl captures from USB input
         AudioSourceType.GenericUSB => true, // Generic USB captures from input
+        AudioSourceType.Bluetooth => true,  // Bluetooth is a live source (A2DP sink)
         AudioSourceType.FilePlayer => false, // Requires file to be loaded first
         _ => false
       };

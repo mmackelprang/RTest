@@ -47,6 +47,12 @@ public interface IBluetoothService : IAsyncDisposable
   /// <summary>Gets the currently connected device.</summary>
   BluetoothDeviceInfo? ConnectedDevice { get; }
 
+  /// <summary>
+  /// Gets whether the platform manages audio routing directly (e.g., Windows AudioPlaybackConnection
+  /// routes to system speakers). When true, no SoundFlow capture device is needed.
+  /// </summary>
+  bool IsAudioManagedByPlatform { get; }
+
   /// <summary>Start Bluetooth adapter and make device discoverable.</summary>
   Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default);
 

@@ -61,6 +61,14 @@ namespace Radio.Infrastructure.Platform.Bluetooth.Linux
         Task SetAsync(string prop, object val);
     }
 
+    [DBusInterface("org.bluez.AgentManager1")]
+    public interface IAgentManager1 : IDBusObject
+    {
+        Task RegisterAgentAsync(ObjectPath agent, string capability);
+        Task UnregisterAgentAsync(ObjectPath agent);
+        Task RequestDefaultAgentAsync(ObjectPath agent);
+    }
+
     // Helper for property changes
     public static class BluezConstants
     {
@@ -70,5 +78,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth.Linux
         public const string MediaControlInterface = "org.bluez.MediaControl1";
         public const string MediaTransportInterface = "org.bluez.MediaTransport1";
         public const string MediaPlayerInterface = "org.bluez.MediaPlayer1";
+        public const string AgentManagerInterface = "org.bluez.AgentManager1";
+        public const string AgentPath = "/radio/bluetooth/agent";
     }
 }

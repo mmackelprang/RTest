@@ -589,6 +589,83 @@ public class PlaylistItemDto
   public int? DurationMs { get; set; }
 }
 
+// ========== Configuration Section DTOs ==========
+
+public class BluetoothConfigDto
+{
+  public string DeviceName { get; set; } = "Radio Console";
+  public bool AutoAcceptConnections { get; set; } = true;
+  public bool RequirePairing { get; set; }
+  public bool Enabled { get; set; } = true;
+  public bool EnableOnStartup { get; set; } = true;
+  public bool AutoSwitchOnConnect { get; set; } = true;
+  public string AudioQuality { get; set; } = "High";
+}
+
+public class RadioConfigDto
+{
+  public string DefaultDevice { get; set; } = "RTLSDRCore";
+  public double DefaultFMFrequencyMHz { get; set; } = 101.5;
+  public double DefaultAMFrequencyKHz { get; set; } = 1000.0;
+  public double DefaultFMStepMHz { get; set; } = 0.1;
+  public double DefaultAMStepKHz { get; set; } = 10.0;
+  public double MinFMFrequencyMHz { get; set; } = 87.5;
+  public double MaxFMFrequencyMHz { get; set; } = 108.0;
+  public double MinAMFrequencyKHz { get; set; } = 520.0;
+  public double MaxAMFrequencyKHz { get; set; } = 1710.0;
+  public int ScanStopThreshold { get; set; } = 50;
+  public int ScanStepDelayMs { get; set; } = 100;
+  public int DefaultDeviceVolume { get; set; } = 50;
+}
+
+public class FilePlayerConfigDto
+{
+  public string RootDirectory { get; set; } = "media/audio";
+  public string SupportedExtensions { get; set; } = ".mp3,.flac,.wav,.ogg,.aac,.m4a,.wma";
+}
+
+public class FingerprintingConfigDto
+{
+  public bool Enabled { get; set; } = true;
+  public int SampleDurationSeconds { get; set; } = 15;
+  public int IdentificationIntervalSeconds { get; set; } = 30;
+  public double MinimumConfidenceThreshold { get; set; } = 0.5;
+  public int DuplicateSuppressionMinutes { get; set; } = 5;
+  public string FpcalcPath { get; set; } = string.Empty;
+  public string DatabasePath { get; set; } = "./data/fingerprints.db";
+}
+
+public class TTSConfigDto
+{
+  public string DefaultEngine { get; set; } = "ESpeak";
+  public string DefaultVoice { get; set; } = "en";
+  public float DefaultPitch { get; set; } = 1.0f;
+  public float DefaultSpeed { get; set; } = 1.0f;
+  public string ESpeakPath { get; set; } = "espeak-ng";
+  public int GenerationTimeoutSeconds { get; set; } = 30;
+}
+
+public class MetricsConfigDto
+{
+  public bool Enabled { get; set; } = true;
+  public int FlushIntervalSeconds { get; set; } = 60;
+  public string DatabasePath { get; set; } = "./data/metrics.db";
+  public int RetentionMinuteData { get; set; } = 120;
+  public int RetentionHourData { get; set; } = 48;
+  public int RetentionDayData { get; set; } = 365;
+  public int RollupIntervalMinutes { get; set; } = 60;
+}
+
+public class AudioEngineConfigDto
+{
+  public int SampleRate { get; set; } = 48000;
+  public int Channels { get; set; } = 2;
+  public int BufferSize { get; set; } = 1024;
+  public int HotPlugIntervalSeconds { get; set; } = 5;
+  public int OutputBufferSizeSeconds { get; set; } = 5;
+  public bool EnableHotPlugDetection { get; set; } = true;
+}
+
 // Bluetooth DTOs
 public class BluetoothStatusDto
 {

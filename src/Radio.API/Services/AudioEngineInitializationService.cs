@@ -19,6 +19,8 @@ public class AudioEngineInitializationService : IHostedService
   private readonly IOptionsMonitor<AudioPreferences> _audioPreferences;
   private readonly IMasterMixer _masterMixer;
   private readonly IAppConfigurationManager? _configManager;
+  private readonly IOptions<BluetoothOptions> _bluetoothOptions;
+  private readonly IBluetoothService? _bluetoothService;
 
   /// <summary>
   /// Initializes a new instance of the AudioEngineInitializationService.
@@ -29,6 +31,7 @@ public class AudioEngineInitializationService : IHostedService
     IAudioDeviceManager deviceManager,
     IOptionsMonitor<AudioPreferences> audioPreferences,
     IMasterMixer masterMixer,
+    IOptions<BluetoothOptions> bluetoothOptions,
     IServiceProvider serviceProvider)
   {
     _logger = logger;
@@ -36,10 +39,12 @@ public class AudioEngineInitializationService : IHostedService
     _deviceManager = deviceManager;
     _audioPreferences = audioPreferences;
     _masterMixer = masterMixer;
+    _bluetoothOptions = bluetoothOptions;
 
     // Try to get IAudioManager (optional)
     _audioManager = serviceProvider.GetService<IAudioManager>();
     _configManager = serviceProvider.GetService<IAppConfigurationManager>();
+    _bluetoothService = serviceProvider.GetService<IBluetoothService>();
   }
 
   /// <summary>
@@ -81,6 +86,9 @@ public class AudioEngineInitializationService : IHostedService
       
       // Apply startup audio preferences
       await ApplyStartupPreferencesAsync(outputDevices, cancellationToken);
+
+      // Enable Bluetooth discoverability on startup if configured
+      await EnableBluetoothOnStartupAsync(cancellationToken);
     }
     catch (Exception ex)
     {
@@ -183,6 +191,50 @@ public class AudioEngineInitializationService : IHostedService
     catch (Exception ex)
     {
       _logger.LogWarning(ex, "Failed to apply startup preferences");
+    }
+  }
+
+  /// <summary>
+  /// Enables Bluetooth discoverability on startup if configured.
+  /// On Windows, the adapter will start but A2DP sink (acting as a speaker)
+  /// is not natively supported — phones can see the device but cannot stream audio.
+  /// This works on the target Linux/Raspberry Pi platform where BlueZ supports A2DP sink.
+  /// </summary>
+  private async Task EnableBluetoothOnStartupAsync(CancellationToken cancellationToken)
+  {
+    try
+    {
+      var opts = _bluetoothOptions.Value;
+      if (!opts.Enabled || !opts.EnableOnStartup)
+      {
+        _logger.LogDebug("Bluetooth auto-start disabled (Enabled={Enabled}, EnableOnStartup={EnableOnStartup})",
+          opts.Enabled, opts.EnableOnStartup);
+        return;
+      }
+
+      if (_bluetoothService == null)
+      {
+        _logger.LogDebug("Bluetooth service not available, skipping auto-start");
+        return;
+      }
+
+      var deviceName = opts.DeviceName;
+      _logger.LogInformation("Enabling Bluetooth on startup as '{DeviceName}'...", deviceName);
+      var success = await _bluetoothService.StartAsync(deviceName, cancellationToken);
+
+      if (success)
+      {
+        _logger.LogInformation("Bluetooth started successfully, device is discoverable as '{DeviceName}'", deviceName);
+      }
+      else
+      {
+        _logger.LogWarning("Bluetooth StartAsync returned false — adapter may not be available");
+      }
+    }
+    catch (Exception ex)
+    {
+      // Bluetooth failure must not block application startup
+      _logger.LogWarning(ex, "Failed to enable Bluetooth on startup — continuing without Bluetooth");
     }
   }
 

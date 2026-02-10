@@ -34,6 +34,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
         // Maps object path to device info
         private readonly Dictionary<ObjectPath, BluetoothDeviceInfo> _deviceCache = new();
+        private Linux.BluezAgent? _agent;
 
         public LinuxBluetoothService(
             ILogger logger,
@@ -73,6 +74,9 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         }
 
         public bool IsDiscovering { get; private set; }
+
+        public bool IsAudioManagedByPlatform => false;
+
         public BluetoothDeviceInfo? ConnectedDevice
         {
             get
@@ -128,6 +132,11 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 
                 await _adapter.SetAsync("Discoverable", true);
                 await _adapter.SetAsync("Pairable", true);
+
+                // Register a BlueZ Agent to handle pairing requests automatically.
+                // Without an agent, pairing fails with "incorrect PIN or passkey" because
+                // BlueZ has no one to delegate the pairing decision to.
+                await RegisterAgentAsync();
 
                 State = BluetoothAdapterState.On;
                 StateChanged?.Invoke(this, new BluetoothAdapterStateChangedEventArgs { NewState = State });
@@ -524,8 +533,54 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             _discoveryWatcher?.Dispose();
             _captureEngine?.Dispose();
             _captureEngine = null;
+            await UnregisterAgentAsync();
             await StopAsync();
             _connection?.Dispose();
+        }
+
+        private async Task RegisterAgentAsync()
+        {
+            if (_connection == null) return;
+
+            try
+            {
+                _agent = new Linux.BluezAgent(_logger, _options.AutoAcceptConnections);
+
+                // Export the agent object on D-Bus so BlueZ can call its methods
+                await _connection.RegisterObjectAsync(_agent);
+
+                var agentManager = _connection.CreateProxy<Linux.IAgentManager1>(
+                    Linux.BluezConstants.ServiceName, "/org/bluez");
+
+                // "NoInputNoOutput" capability enables Just Works pairing (no PIN prompt)
+                await agentManager.RegisterAgentAsync(_agent.ObjectPath, "NoInputNoOutput");
+                await agentManager.RequestDefaultAgentAsync(_agent.ObjectPath);
+
+                _logger.LogInformation("Bluetooth pairing agent registered (auto-accept: {AutoAccept})",
+                    _options.AutoAcceptConnections);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to register Bluetooth pairing agent — pairing may require manual acceptance");
+            }
+        }
+
+        private async Task UnregisterAgentAsync()
+        {
+            if (_connection == null || _agent == null) return;
+
+            try
+            {
+                var agentManager = _connection.CreateProxy<Linux.IAgentManager1>(
+                    Linux.BluezConstants.ServiceName, "/org/bluez");
+                await agentManager.UnregisterAgentAsync(_agent.ObjectPath);
+                _connection.UnregisterObject(_agent);
+                _agent = null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to unregister Bluetooth agent (may already be unregistered)");
+            }
         }
 
         private async Task CheckForMediaPlayersAsync()

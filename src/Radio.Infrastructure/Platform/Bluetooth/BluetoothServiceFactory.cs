@@ -22,6 +22,11 @@ public static class BluetoothServiceFactory
           return new NullBluetoothService();
       }
 
+#if WINDOWS_TARGET
+      // Windows TFM: only WindowsBluetoothService is compiled
+      return new WindowsBluetoothService(loggerFactory.CreateLogger<WindowsBluetoothService>(), options, deviceManager, metricsCollector);
+#else
+      // net8.0 TFM: select by runtime OS detection
       if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
       {
           return new LinuxBluetoothService(loggerFactory.CreateLogger<LinuxBluetoothService>(), options, deviceManager, metricsCollector);
@@ -35,6 +40,7 @@ public static class BluetoothServiceFactory
           // Fallback or platform specific implementation
           return new NullBluetoothService();
       }
+#endif
   }
 }
 
@@ -51,6 +57,8 @@ internal sealed class NullBluetoothService : IBluetoothService
   public bool IsDiscovering => false;
 
   public BluetoothDeviceInfo? ConnectedDevice => null;
+
+  public bool IsAudioManagedByPlatform => false;
 
   public event EventHandler<BluetoothAdapterStateChangedEventArgs>? StateChanged { add { } remove { } }
   public event EventHandler<BluetoothDeviceConnectedEventArgs>? DeviceConnected { add { } remove { } }

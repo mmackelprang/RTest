@@ -162,4 +162,46 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
 
     Assert.Equal("Playing", _source.Metadata["PlaybackStatus"]);
   }
+
+  [Fact]
+  public async Task InitializeAsync_WhenPlatformManagesAudio_SetsReadyWithoutCapture()
+  {
+    // Create a mock IBluetoothService that reports IsAudioManagedByPlatform = true
+    var platformBtMock = new Mock<IBluetoothService>();
+    platformBtMock.Setup(b => b.IsAudioManagedByPlatform).Returns(true);
+    platformBtMock.Setup(b => b.StartAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync(true);
+    platformBtMock.Setup(b => b.ConnectedDevice).Returns(new BluetoothDeviceInfo
+    {
+      Address = "11:22:33:44:55:66",
+      Name = "Test Phone",
+      IsPaired = true,
+      IsConnected = true
+    });
+
+    var source = new BluetoothAudioSource(
+      _loggerMock.Object,
+      _deviceManagerMock.Object,
+      platformBtMock.Object,
+      _options,
+      identificationService: null,
+      metricsCollector: _metricsMock.Object);
+
+    await source.InitializeAsync(CancellationToken.None);
+
+    Assert.Equal(AudioSourceState.Ready, source.State);
+    Assert.Equal("Test Phone", source.Metadata[StandardMetadataKeys.Title]);
+    Assert.True(source.NeedsFingerprintingLookup);
+
+    // GetAudioCaptureDeviceAsync should NOT have been called
+    platformBtMock.Verify(b => b.GetAudioCaptureDeviceAsync(It.IsAny<CancellationToken>()), Times.Never);
+
+    await source.DisposeAsync();
+  }
+
+  [Fact]
+  public void MockBluetoothService_IsAudioManagedByPlatform_ReturnsFalse()
+  {
+    Assert.False(_mockBluetooth.IsAudioManagedByPlatform);
+  }
 }

@@ -315,24 +315,24 @@
                 </MudAlert>
               </MudItem>
               <MudItem xs="12" md="6">
-                <MudTextField T="string" @bind-Value="_deviceOptions.Radio.USBPort" 
+                <MudTextField T="string" @bind-Value="_deviceOptions.Radio.USBPort"
                               Label="Radio USB Port"
                               Variant="Variant.Outlined"
                               HelperText="USB port for Raddy RF320 radio (e.g., /dev/ttyUSB0 on Linux, COM3 on Windows)" />
               </MudItem>
               <MudItem xs="12" md="6">
-                <MudTextField T="string" @bind-Value="_deviceOptions.Vinyl.USBPort" 
+                <MudTextField T="string" @bind-Value="_deviceOptions.Vinyl.USBPort"
                               Label="Vinyl USB Port"
                               Variant="Variant.Outlined"
                               HelperText="USB port for vinyl turntable (e.g., /dev/ttyUSB1 on Linux, COM4 on Windows)" />
               </MudItem>
               <MudItem xs="12" md="6">
-                <MudTextField T="string" @bind-Value="_deviceOptions.Cast.DefaultDevice" 
+                <MudTextField T="string" @bind-Value="_deviceOptions.Cast.DefaultDevice"
                               Label="Default Cast Device"
                               Variant="Variant.Outlined"
                               HelperText="Default Chromecast device name (optional)" />
               </MudItem>
-              
+
               <MudItem xs="12">
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveDeviceOptionsAsync"
                            StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">
@@ -348,6 +348,403 @@
             <MudText Class="ml-2">Loading device configuration...</MudText>
           }
         </MudTabPanel>
+
+        <!-- Audio Engine Configuration -->
+        <MudTabPanel Text="Audio Engine">
+          @if (_audioEngineConfig != null)
+          {
+            <MudGrid Spacing="2">
+              <MudItem xs="12">
+                <MudAlert Severity="Severity.Warning" Dense="true">
+                  Changes to audio engine settings require an application restart to take effect.
+                </MudAlert>
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudSelect T="int" @bind-Value="_audioEngineConfig.SampleRate" Label="Sample Rate (Hz)"
+                           Variant="Variant.Outlined" HelperText="Audio sample rate">
+                  <MudSelectItem Value="22050">22050</MudSelectItem>
+                  <MudSelectItem Value="44100">44100</MudSelectItem>
+                  <MudSelectItem Value="48000">48000</MudSelectItem>
+                  <MudSelectItem Value="96000">96000</MudSelectItem>
+                </MudSelect>
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudSelect T="int" @bind-Value="_audioEngineConfig.Channels" Label="Channels"
+                           Variant="Variant.Outlined" HelperText="Audio channel count">
+                  <MudSelectItem Value="1">1 (Mono)</MudSelectItem>
+                  <MudSelectItem Value="2">2 (Stereo)</MudSelectItem>
+                </MudSelect>
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudSelect T="int" @bind-Value="_audioEngineConfig.BufferSize" Label="Buffer Size (samples)"
+                           Variant="Variant.Outlined" HelperText="Audio buffer size">
+                  <MudSelectItem Value="256">256</MudSelectItem>
+                  <MudSelectItem Value="512">512</MudSelectItem>
+                  <MudSelectItem Value="1024">1024</MudSelectItem>
+                  <MudSelectItem Value="2048">2048</MudSelectItem>
+                  <MudSelectItem Value="4096">4096</MudSelectItem>
+                </MudSelect>
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudNumericField T="int" @bind-Value="_audioEngineConfig.HotPlugIntervalSeconds" Label="Hot Plug Interval (s)"
+                                 Variant="Variant.Outlined" Min="1" Max="60"
+                                 HelperText="Device detection interval" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudNumericField T="int" @bind-Value="_audioEngineConfig.OutputBufferSizeSeconds" Label="Output Buffer (s)"
+                                 Variant="Variant.Outlined" Min="1" Max="30"
+                                 HelperText="Output buffer size in seconds" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudCheckBox T="bool" @bind-Value="_audioEngineConfig.EnableHotPlugDetection" Label="Enable Hot Plug Detection"
+                             Color="Color.Primary" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAudioEngineConfigAsync"
+                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save Audio Engine Settings
+                </MudButton>
+              </MudItem>
+            </MudGrid>
+          }
+          else
+          {
+            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+            <MudText Class="ml-2">Loading audio engine configuration...</MudText>
+          }
+        </MudTabPanel>
+
+        <!-- Radio Configuration -->
+        <MudTabPanel Text="Radio">
+          @if (_radioConfig != null)
+          {
+            <MudGrid Spacing="2">
+              <MudItem xs="12" md="4">
+                <MudSelect T="string" @bind-Value="_radioConfig.DefaultDevice" Label="Default Radio Device"
+                           Variant="Variant.Outlined" HelperText="Radio hardware backend">
+                  <MudSelectItem Value="@("RTLSDRCore")">RTL-SDR</MudSelectItem>
+                  <MudSelectItem Value="@("RF320")">Raddy RF320</MudSelectItem>
+                </MudSelect>
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudNumericField T="double" @bind-Value="_radioConfig.DefaultFMFrequencyMHz" Label="Default FM Frequency (MHz)"
+                                 Variant="Variant.Outlined" Min="87.5" Max="108.0" Step="0.1"
+                                 HelperText="Startup FM frequency" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudNumericField T="double" @bind-Value="_radioConfig.DefaultAMFrequencyKHz" Label="Default AM Frequency (kHz)"
+                                 Variant="Variant.Outlined" Min="520" Max="1710" Step="10.0"
+                                 HelperText="Startup AM frequency" />
+              </MudItem>
+              <MudItem xs="12" md="3">
+                <MudNumericField T="double" @bind-Value="_radioConfig.DefaultFMStepMHz" Label="FM Step (MHz)"
+                                 Variant="Variant.Outlined" Min="0.05" Max="1.0" Step="0.05"
+                                 HelperText="FM tuning step size" />
+              </MudItem>
+              <MudItem xs="12" md="3">
+                <MudNumericField T="double" @bind-Value="_radioConfig.DefaultAMStepKHz" Label="AM Step (kHz)"
+                                 Variant="Variant.Outlined" Min="1" Max="50" Step="1.0"
+                                 HelperText="AM tuning step size" />
+              </MudItem>
+              <MudItem xs="12" md="3">
+                <MudNumericField T="double" @bind-Value="_radioConfig.MinFMFrequencyMHz" Label="Min FM (MHz)"
+                                 Variant="Variant.Outlined" Min="50" Max="200" Step="0.5" />
+              </MudItem>
+              <MudItem xs="12" md="3">
+                <MudNumericField T="double" @bind-Value="_radioConfig.MaxFMFrequencyMHz" Label="Max FM (MHz)"
+                                 Variant="Variant.Outlined" Min="50" Max="200" Step="0.5" />
+              </MudItem>
+              <MudItem xs="12" md="3">
+                <MudNumericField T="double" @bind-Value="_radioConfig.MinAMFrequencyKHz" Label="Min AM (kHz)"
+                                 Variant="Variant.Outlined" Min="100" Max="2000" Step="10.0" />
+              </MudItem>
+              <MudItem xs="12" md="3">
+                <MudNumericField T="double" @bind-Value="_radioConfig.MaxAMFrequencyKHz" Label="Max AM (kHz)"
+                                 Variant="Variant.Outlined" Min="100" Max="2000" Step="10.0" />
+              </MudItem>
+              <MudItem xs="12" md="3">
+                <MudNumericField T="int" @bind-Value="_radioConfig.ScanStopThreshold" Label="Scan Stop Threshold"
+                                 Variant="Variant.Outlined" Min="0" Max="200"
+                                 HelperText="Signal strength to stop scan" />
+              </MudItem>
+              <MudItem xs="12" md="3">
+                <MudNumericField T="int" @bind-Value="_radioConfig.ScanStepDelayMs" Label="Scan Step Delay (ms)"
+                                 Variant="Variant.Outlined" Min="10" Max="1000"
+                                 HelperText="Delay between scan steps" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudNumericField T="int" @bind-Value="_radioConfig.DefaultDeviceVolume" Label="Default Device Volume"
+                                 Variant="Variant.Outlined" Min="0" Max="100"
+                                 HelperText="Radio hardware volume (0-100)" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveRadioConfigAsync"
+                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save Radio Settings
+                </MudButton>
+              </MudItem>
+            </MudGrid>
+          }
+          else
+          {
+            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+            <MudText Class="ml-2">Loading radio configuration...</MudText>
+          }
+        </MudTabPanel>
+
+        <!-- Bluetooth Configuration -->
+        <MudTabPanel Text="Bluetooth">
+          @if (_bluetoothConfig != null)
+          {
+            <MudGrid Spacing="2">
+              <MudItem xs="12">
+                <MudAlert Severity="Severity.Info" Dense="true">
+                  Bluetooth A2DP sink allows phones to stream audio to this device. Note: On Windows, the adapter starts but A2DP sink is not natively supported. This feature works on the target Linux/Raspberry Pi platform where BlueZ supports A2DP sink.
+                </MudAlert>
+              </MudItem>
+              <MudItem xs="12" md="6">
+                <MudTextField T="string" @bind-Value="_bluetoothConfig.DeviceName" Label="Device Name"
+                              Variant="Variant.Outlined"
+                              HelperText="Name visible to Bluetooth scanners" />
+              </MudItem>
+              <MudItem xs="12" md="6">
+                <MudSelect T="string" @bind-Value="_bluetoothConfig.AudioQuality" Label="Audio Quality"
+                           Variant="Variant.Outlined" HelperText="Bluetooth audio quality">
+                  <MudSelectItem Value="@("Standard")">Standard (44.1 kHz)</MudSelectItem>
+                  <MudSelectItem Value="@("High")">High (48 kHz)</MudSelectItem>
+                </MudSelect>
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudCheckBox T="bool" @bind-Value="_bluetoothConfig.Enabled" Label="Enabled" Color="Color.Primary" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudCheckBox T="bool" @bind-Value="_bluetoothConfig.EnableOnStartup" Label="Enable on Startup" Color="Color.Primary" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudCheckBox T="bool" @bind-Value="_bluetoothConfig.AutoSwitchOnConnect" Label="Auto-Switch on Connect" Color="Color.Primary" />
+              </MudItem>
+              <MudItem xs="12" md="6">
+                <MudCheckBox T="bool" @bind-Value="_bluetoothConfig.AutoAcceptConnections" Label="Auto-Accept Connections" Color="Color.Primary" />
+              </MudItem>
+              <MudItem xs="12" md="6">
+                <MudCheckBox T="bool" @bind-Value="_bluetoothConfig.RequirePairing" Label="Require Pairing" Color="Color.Primary" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveBluetoothConfigAsync"
+                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save Bluetooth Settings
+                </MudButton>
+              </MudItem>
+            </MudGrid>
+          }
+          else
+          {
+            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+            <MudText Class="ml-2">Loading Bluetooth configuration...</MudText>
+          }
+        </MudTabPanel>
+
+        <!-- File Player Configuration -->
+        <MudTabPanel Text="File Player">
+          @if (_filePlayerConfig != null)
+          {
+            <MudGrid Spacing="2">
+              <MudItem xs="12" md="6">
+                <MudTextField T="string" @bind-Value="_filePlayerConfig.RootDirectory" Label="Root Directory"
+                              Variant="Variant.Outlined"
+                              HelperText="Root path for music library" />
+              </MudItem>
+              <MudItem xs="12" md="6">
+                <MudTextField T="string" @bind-Value="_filePlayerConfig.SupportedExtensions" Label="Supported Extensions"
+                              Variant="Variant.Outlined"
+                              HelperText="Comma-separated file extensions (e.g., .mp3,.flac,.wav)" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveFilePlayerConfigAsync"
+                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save File Player Settings
+                </MudButton>
+              </MudItem>
+            </MudGrid>
+          }
+          else
+          {
+            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+            <MudText Class="ml-2">Loading file player configuration...</MudText>
+          }
+        </MudTabPanel>
+
+        <!-- TTS Configuration -->
+        <MudTabPanel Text="TTS">
+          @if (_ttsConfig != null)
+          {
+            <MudGrid Spacing="2">
+              <MudItem xs="12" md="4">
+                <MudSelect T="string" @bind-Value="_ttsConfig.DefaultEngine" Label="Default Engine"
+                           Variant="Variant.Outlined" HelperText="Text-to-speech engine">
+                  <MudSelectItem Value="@("ESpeak")">ESpeak (Offline)</MudSelectItem>
+                  <MudSelectItem Value="@("Google")">Google Cloud TTS</MudSelectItem>
+                  <MudSelectItem Value="@("Azure")">Azure Cognitive Services</MudSelectItem>
+                </MudSelect>
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudTextField T="string" @bind-Value="_ttsConfig.DefaultVoice" Label="Default Voice"
+                              Variant="Variant.Outlined"
+                              HelperText="Voice ID (e.g., 'en' for ESpeak)" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudTextField T="string" @bind-Value="_ttsConfig.ESpeakPath" Label="ESpeak Path"
+                              Variant="Variant.Outlined"
+                              HelperText="Path to espeak-ng binary" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudNumericField T="float" @bind-Value="_ttsConfig.DefaultPitch" Label="Default Pitch"
+                                 Variant="Variant.Outlined" Min="0.5f" Max="2.0f" Step="0.1f"
+                                 HelperText="1.0 = normal pitch" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudNumericField T="float" @bind-Value="_ttsConfig.DefaultSpeed" Label="Default Speed"
+                                 Variant="Variant.Outlined" Min="0.5f" Max="2.0f" Step="0.1f"
+                                 HelperText="1.0 = normal speed" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudNumericField T="int" @bind-Value="_ttsConfig.GenerationTimeoutSeconds" Label="Generation Timeout (s)"
+                                 Variant="Variant.Outlined" Min="5" Max="120"
+                                 HelperText="Max time for TTS generation" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveTTSConfigAsync"
+                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save TTS Settings
+                </MudButton>
+              </MudItem>
+            </MudGrid>
+          }
+          else
+          {
+            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+            <MudText Class="ml-2">Loading TTS configuration...</MudText>
+          }
+        </MudTabPanel>
+
+        <!-- Fingerprinting Configuration -->
+        <MudTabPanel Text="Fingerprinting">
+          @if (_fingerprintingConfig != null)
+          {
+            <MudGrid Spacing="2">
+              <MudItem xs="12">
+                <MudAlert Severity="Severity.Info" Dense="true">
+                  AcoustID and MusicBrainz API keys are managed in the Secrets tab.
+                </MudAlert>
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudCheckBox T="bool" @bind-Value="_fingerprintingConfig.Enabled" Label="Enabled" Color="Color.Primary" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudNumericField T="int" @bind-Value="_fingerprintingConfig.SampleDurationSeconds" Label="Sample Duration (s)"
+                                 Variant="Variant.Outlined" Min="5" Max="60"
+                                 HelperText="Audio sample length for fingerprinting" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudNumericField T="int" @bind-Value="_fingerprintingConfig.IdentificationIntervalSeconds" Label="Identification Interval (s)"
+                                 Variant="Variant.Outlined" Min="10" Max="300"
+                                 HelperText="Time between identification attempts" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudNumericField T="double" @bind-Value="_fingerprintingConfig.MinimumConfidenceThreshold" Label="Min Confidence"
+                                 Variant="Variant.Outlined" Min="0.0" Max="1.0" Step="0.05"
+                                 HelperText="0.0 - 1.0 confidence threshold" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudNumericField T="int" @bind-Value="_fingerprintingConfig.DuplicateSuppressionMinutes" Label="Duplicate Suppression (min)"
+                                 Variant="Variant.Outlined" Min="1" Max="60"
+                                 HelperText="Ignore re-identification within this window" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudTextField T="string" @bind-Value="_fingerprintingConfig.FpcalcPath" Label="fpcalc Path"
+                              Variant="Variant.Outlined"
+                              HelperText="Path to fpcalc binary (blank = auto-detect)" />
+              </MudItem>
+              <MudItem xs="12" md="6">
+                <MudTextField T="string" @bind-Value="_fingerprintingConfig.DatabasePath" Label="Database Path"
+                              Variant="Variant.Outlined"
+                              HelperText="Path to fingerprinting database" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveFingerprintingConfigAsync"
+                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save Fingerprinting Settings
+                </MudButton>
+              </MudItem>
+            </MudGrid>
+          }
+          else
+          {
+            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+            <MudText Class="ml-2">Loading fingerprinting configuration...</MudText>
+          }
+        </MudTabPanel>
+
+        <!-- Metrics Configuration -->
+        <MudTabPanel Text="Metrics">
+          @if (_metricsConfig != null)
+          {
+            <MudGrid Spacing="2">
+              <MudItem xs="12" md="4">
+                <MudCheckBox T="bool" @bind-Value="_metricsConfig.Enabled" Label="Enabled" Color="Color.Primary" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudNumericField T="int" @bind-Value="_metricsConfig.FlushIntervalSeconds" Label="Flush Interval (s)"
+                                 Variant="Variant.Outlined" Min="10" Max="600"
+                                 HelperText="How often metrics are flushed to DB" />
+              </MudItem>
+              <MudItem xs="12" md="4">
+                <MudTextField T="string" @bind-Value="_metricsConfig.DatabasePath" Label="Database Path"
+                              Variant="Variant.Outlined"
+                              HelperText="Path to metrics database" />
+              </MudItem>
+              <MudItem xs="12" md="3">
+                <MudNumericField T="int" @bind-Value="_metricsConfig.RetentionMinuteData" Label="Retention: Minutes"
+                                 Variant="Variant.Outlined" Min="1" Max="10080"
+                                 HelperText="Minute-level data retention (minutes)" />
+              </MudItem>
+              <MudItem xs="12" md="3">
+                <MudNumericField T="int" @bind-Value="_metricsConfig.RetentionHourData" Label="Retention: Hours"
+                                 Variant="Variant.Outlined" Min="1" Max="8760"
+                                 HelperText="Hour-level data retention (hours)" />
+              </MudItem>
+              <MudItem xs="12" md="3">
+                <MudNumericField T="int" @bind-Value="_metricsConfig.RetentionDayData" Label="Retention: Days"
+                                 Variant="Variant.Outlined" Min="1" Max="3650"
+                                 HelperText="Day-level data retention (days)" />
+              </MudItem>
+              <MudItem xs="12" md="3">
+                <MudNumericField T="int" @bind-Value="_metricsConfig.RollupIntervalMinutes" Label="Rollup Interval (min)"
+                                 Variant="Variant.Outlined" Min="1" Max="1440"
+                                 HelperText="How often rollups are computed" />
+              </MudItem>
+              <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveMetricsConfigAsync"
+                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save Metrics Settings
+                </MudButton>
+              </MudItem>
+            </MudGrid>
+          }
+          else
+          {
+            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+            <MudText Class="ml-2">Loading metrics configuration...</MudText>
+          }
+        </MudTabPanel>
+
       </MudTabs>
     </MudTabPanel>
 
@@ -1083,6 +1480,13 @@
   private VisualizerConfigurationDto? _visualizerConfig;
   private OutputConfigurationDto? _outputConfig;
   private DeviceOptionsDto? _deviceOptions;
+  private BluetoothConfigDto? _bluetoothConfig;
+  private RadioConfigDto? _radioConfig;
+  private FilePlayerConfigDto? _filePlayerConfig;
+  private FingerprintingConfigDto? _fingerprintingConfig;
+  private TTSConfigDto? _ttsConfig;
+  private MetricsConfigDto? _metricsConfig;
+  private AudioEngineConfigDto? _audioEngineConfig;
   private bool _isSaving = false;
 
   // Preferences
@@ -1244,6 +1648,15 @@
       // Load device options, create default if not found
       var deviceOptions = await ConfigApi.GetConfigurationAsync<DeviceOptionsDto>("devices");
       _deviceOptions = deviceOptions ?? new DeviceOptionsDto();
+
+      // Load additional configuration sections
+      _bluetoothConfig = await ConfigApi.GetConfigurationAsync<BluetoothConfigDto>("bluetooth") ?? new();
+      _radioConfig = await ConfigApi.GetConfigurationAsync<RadioConfigDto>("radio") ?? new();
+      _filePlayerConfig = await ConfigApi.GetConfigurationAsync<FilePlayerConfigDto>("fileplayer") ?? new();
+      _fingerprintingConfig = await ConfigApi.GetConfigurationAsync<FingerprintingConfigDto>("fingerprinting") ?? new();
+      _ttsConfig = await ConfigApi.GetConfigurationAsync<TTSConfigDto>("tts") ?? new();
+      _metricsConfig = await ConfigApi.GetConfigurationAsync<MetricsConfigDto>("metrics") ?? new();
+      _audioEngineConfig = await ConfigApi.GetConfigurationAsync<AudioEngineConfigDto>("audioengine") ?? new();
 
       // Populate output config individual fields for binding
       if (_outputConfig != null)
@@ -1807,6 +2220,104 @@
     {
       _isSaving = false;
     }
+  }
+
+  private async Task SaveBluetoothConfigAsync()
+  {
+    if (_bluetoothConfig == null) return;
+    _isSaving = true;
+    try
+    {
+      var success = await ConfigApi.UpdateConfigurationAsync("bluetooth", _bluetoothConfig);
+      Snackbar.Add(success ? "Bluetooth configuration saved successfully" : "Failed to save Bluetooth configuration",
+        success ? Severity.Success : Severity.Error);
+    }
+    catch (Exception ex) { Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error); }
+    finally { _isSaving = false; }
+  }
+
+  private async Task SaveRadioConfigAsync()
+  {
+    if (_radioConfig == null) return;
+    _isSaving = true;
+    try
+    {
+      var success = await ConfigApi.UpdateConfigurationAsync("radio", _radioConfig);
+      Snackbar.Add(success ? "Radio configuration saved successfully" : "Failed to save Radio configuration",
+        success ? Severity.Success : Severity.Error);
+    }
+    catch (Exception ex) { Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error); }
+    finally { _isSaving = false; }
+  }
+
+  private async Task SaveFilePlayerConfigAsync()
+  {
+    if (_filePlayerConfig == null) return;
+    _isSaving = true;
+    try
+    {
+      var success = await ConfigApi.UpdateConfigurationAsync("fileplayer", _filePlayerConfig);
+      Snackbar.Add(success ? "File Player configuration saved successfully" : "Failed to save File Player configuration",
+        success ? Severity.Success : Severity.Error);
+    }
+    catch (Exception ex) { Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error); }
+    finally { _isSaving = false; }
+  }
+
+  private async Task SaveFingerprintingConfigAsync()
+  {
+    if (_fingerprintingConfig == null) return;
+    _isSaving = true;
+    try
+    {
+      var success = await ConfigApi.UpdateConfigurationAsync("fingerprinting", _fingerprintingConfig);
+      Snackbar.Add(success ? "Fingerprinting configuration saved successfully" : "Failed to save Fingerprinting configuration",
+        success ? Severity.Success : Severity.Error);
+    }
+    catch (Exception ex) { Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error); }
+    finally { _isSaving = false; }
+  }
+
+  private async Task SaveTTSConfigAsync()
+  {
+    if (_ttsConfig == null) return;
+    _isSaving = true;
+    try
+    {
+      var success = await ConfigApi.UpdateConfigurationAsync("tts", _ttsConfig);
+      Snackbar.Add(success ? "TTS configuration saved successfully" : "Failed to save TTS configuration",
+        success ? Severity.Success : Severity.Error);
+    }
+    catch (Exception ex) { Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error); }
+    finally { _isSaving = false; }
+  }
+
+  private async Task SaveMetricsConfigAsync()
+  {
+    if (_metricsConfig == null) return;
+    _isSaving = true;
+    try
+    {
+      var success = await ConfigApi.UpdateConfigurationAsync("metrics", _metricsConfig);
+      Snackbar.Add(success ? "Metrics configuration saved successfully" : "Failed to save Metrics configuration",
+        success ? Severity.Success : Severity.Error);
+    }
+    catch (Exception ex) { Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error); }
+    finally { _isSaving = false; }
+  }
+
+  private async Task SaveAudioEngineConfigAsync()
+  {
+    if (_audioEngineConfig == null) return;
+    _isSaving = true;
+    try
+    {
+      var success = await ConfigApi.UpdateConfigurationAsync("audioengine", _audioEngineConfig);
+      Snackbar.Add(success ? "Audio Engine configuration saved successfully" : "Failed to save Audio Engine configuration",
+        success ? Severity.Success : Severity.Error);
+    }
+    catch (Exception ex) { Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error); }
+    finally { _isSaving = false; }
   }
 
   private async Task LoadPreferencesAsync()

@@ -28,6 +28,8 @@ public sealed class MockBluetoothService : IBluetoothService
         public bool IsDiscovering { get; private set; }
         public BluetoothDeviceInfo? ConnectedDevice { get; set; }
 
+        public bool IsAudioManagedByPlatform => false;
+
         // Suppress "event never used" warning for mocks
 #pragma warning disable 67
         public event EventHandler<BluetoothAdapterStateChangedEventArgs>? StateChanged;

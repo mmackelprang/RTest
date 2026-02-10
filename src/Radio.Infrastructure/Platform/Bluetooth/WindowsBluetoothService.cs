@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using InTheHand.Net;
@@ -28,10 +29,106 @@ internal sealed class WindowsBluetoothService : IBluetoothService
     private readonly Timer _stateTimer;
     private MiniAudioEngine? _captureEngine;
     private DateTime? _connectionStartTime;
+    private IntPtr _authCallbackHandle;
+    private PfnAuthenticationCallbackEx? _authCallbackDelegate; // prevent GC collection
+
+#if WINDOWS_TARGET
+    private Windows.WindowsA2dpSinkManager? _a2dpSinkManager;
+    private Windows.WindowsMediaSessionWatcher? _mediaSessionWatcher;
+#endif
+
+    // Connection stability: require device to be connected for 2 consecutive polls
+    // before firing DeviceConnected. Prevents spurious events from transient connections.
+    private string? _pendingConnectionAddress;
+    private int _pendingConnectionPolls;
+    private const int RequiredStablePolls = 2;
+
+    // Reconnect cooldown: after a disconnect, suppress reconnect events for the same
+    // device for a cooldown period to prevent rapid connect/disconnect cycling.
+    private string? _lastDisconnectedAddress;
+    private DateTime _lastDisconnectTime;
+    private static readonly TimeSpan ReconnectCooldown = TimeSpan.FromSeconds(60);
 
     // InTheHand.Net doesn't have robust event-driven discovery in the same way,
     // often relies on polling or blocking calls. We'll simulate async discovery.
     private CancellationTokenSource? _discoveryCts;
+
+    // ========== Native Bluetooth Authentication P/Invoke ==========
+    // Windows Bluetooth API for intercepting pairing requests. Without this,
+    // Windows shows a system toast notification that users may miss, causing
+    // "incorrect PIN or passkey" errors on the phone side.
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct BLUETOOTH_DEVICE_INFO
+    {
+      public int dwSize;
+      public ulong Address;
+      public uint ulClassofDevice;
+      [MarshalAs(UnmanagedType.Bool)]
+      public bool fConnected;
+      [MarshalAs(UnmanagedType.Bool)]
+      public bool fRemembered;
+      [MarshalAs(UnmanagedType.Bool)]
+      public bool fAuthenticated;
+      public SYSTEMTIME stLastSeen;
+      public SYSTEMTIME stLastUsed;
+      [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 248)]
+      public string szName;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SYSTEMTIME
+    {
+      public ushort wYear, wMonth, wDayOfWeek, wDay;
+      public ushort wHour, wMinute, wSecond, wMilliseconds;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BLUETOOTH_AUTHENTICATION_CALLBACK_PARAMS
+    {
+      public BLUETOOTH_DEVICE_INFO deviceInfo;
+      public int authenticationMethod;
+      public int ioCapability;
+      public int authenticationRequirements;
+      public uint Numeric_Value_Passkey;
+    }
+
+    private delegate bool PfnAuthenticationCallbackEx(
+      IntPtr pvParam, ref BLUETOOTH_AUTHENTICATION_CALLBACK_PARAMS pAuthCallbackParams);
+
+    [DllImport("BluetoothAPIs.dll", SetLastError = true)]
+    private static extern uint BluetoothRegisterForAuthenticationEx(
+      ref BLUETOOTH_DEVICE_INFO pbtdi,
+      out IntPtr phRegHandle,
+      PfnAuthenticationCallbackEx pfnCallbackEx,
+      IntPtr pvParam);
+
+    [DllImport("BluetoothAPIs.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool BluetoothUnregisterAuthentication(IntPtr hRegHandle);
+
+    [DllImport("BluetoothAPIs.dll", SetLastError = true)]
+    private static extern uint BluetoothSendAuthenticationResponseEx(
+      IntPtr hRadio,
+      ref BLUETOOTH_AUTHENTICATE_RESPONSE pAuthResponse);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BLUETOOTH_AUTHENTICATE_RESPONSE
+    {
+      public ulong bthAddressRemote;
+      public int authMethod;
+
+      // Union: we use Numeric_Value_Passkey for SSP confirmation
+      public uint Numeric_Value_Passkey;
+      [MarshalAs(UnmanagedType.Bool)]
+      public bool bNegativeResponse;
+    }
+
+    private const int BLUETOOTH_AUTHENTICATION_METHOD_LEGACY = 0x1;
+    private const int BLUETOOTH_AUTHENTICATION_METHOD_OOB = 0x2;
+    private const int BLUETOOTH_AUTHENTICATION_METHOD_NUMERIC_COMPARISON = 0x3;
+    private const int BLUETOOTH_AUTHENTICATION_METHOD_PASSKEY_NOTIFICATION = 0x4;
+    private const int BLUETOOTH_AUTHENTICATION_METHOD_PASSKEY = 0x5;
 
     public WindowsBluetoothService(
         ILogger logger,
@@ -100,18 +197,31 @@ internal sealed class WindowsBluetoothService : IBluetoothService
 
     public Radio.Core.Interfaces.Audio.BluetoothDeviceInfo? ConnectedDevice { get; private set; }
 
+#if WINDOWS_TARGET
+    // True when A2DP sink manager is initialized — platform routes audio to system speakers,
+    // no SoundFlow capture device will exist. Don't wait for IsConnected: the DeviceWatcher
+    // may not have matched a device yet at source init time.
+    public bool IsAudioManagedByPlatform => _a2dpSinkManager != null;
+#else
+    public bool IsAudioManagedByPlatform => false;
+#endif
+
     public event EventHandler<BluetoothAdapterStateChangedEventArgs>? StateChanged;
     public event EventHandler<BluetoothDeviceConnectedEventArgs>? DeviceConnected;
     public event EventHandler<BluetoothDeviceDisconnectedEventArgs>? DeviceDisconnected;
     public event EventHandler<BluetoothDeviceDiscoveredEventArgs>? DeviceDiscovered;
-    // TODO: Windows AVRCP metadata via Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager
-    // Requires net8.0-windows10.0.17763.0 TFM or conditional compilation.
-    // Fingerprinting pipeline serves as fallback for track identification.
-#pragma warning disable CS0067
+
+#if WINDOWS_TARGET
+    // Under WINDOWS_TARGET, these events are wired from WindowsMediaSessionWatcher.
     public event EventHandler<BluetoothPlaybackMetadata>? MetadataChanged;
     public event EventHandler<BluetoothPlaybackStatus>? PlaybackStatusChanged;
     public event EventHandler<TimeSpan>? PositionChanged;
-#pragma warning restore CS0067
+#else
+    // Under net8.0 (no WinRT), suppress CS0067 — events are never raised on this TFM.
+    public event EventHandler<BluetoothPlaybackMetadata>? MetadataChanged { add { } remove { } }
+    public event EventHandler<BluetoothPlaybackStatus>? PlaybackStatusChanged { add { } remove { } }
+    public event EventHandler<TimeSpan>? PositionChanged { add { } remove { } }
+#endif
 
     private void CheckState(object? state)
     {
@@ -160,25 +270,67 @@ internal sealed class WindowsBluetoothService : IBluetoothService
 
             if (connectedNow != null && ConnectedDevice == null)
             {
-                // New connection detected
+                var address = connectedNow.DeviceAddress.ToString();
+
+                // Reconnect cooldown: suppress rapid reconnect cycles for the same device.
+                if (_lastDisconnectedAddress == address
+                    && (DateTime.UtcNow - _lastDisconnectTime) < ReconnectCooldown)
+                {
+                    return; // Still in cooldown — ignore this connection
+                }
+
+                // Connection stability: require the device to appear connected for
+                // multiple consecutive polls before firing the event. This filters
+                // out transient/bouncing connections.
+                if (_pendingConnectionAddress == address)
+                {
+                    _pendingConnectionPolls++;
+                }
+                else
+                {
+                    _pendingConnectionAddress = address;
+                    _pendingConnectionPolls = 1;
+                }
+
+                if (_pendingConnectionPolls < RequiredStablePolls)
+                {
+                    return; // Not stable yet — wait for more polls
+                }
+
+                // Connection is stable — fire the event
                 var device = MapDevice(connectedNow);
                 ConnectedDevice = device;
+                _pendingConnectionAddress = null;
+                _pendingConnectionPolls = 0;
                 _connectionStartTime = DateTime.UtcNow;
                 _logger.LogInformation("Bluetooth device connected: {DeviceName} ({Address})",
                     device.Name, device.Address);
                 _metricsCollector?.Increment("bluetooth.devices_connected_total");
                 _metricsCollector?.Gauge("bluetooth.active_connections", 1);
                 DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = device });
+                // A2DP sink connection is handled automatically by the DeviceWatcher in
+                // WindowsA2dpSinkManager — it watches for AudioPlaybackConnection devices
+                // and opens connections using the correct PnP device ID (not MAC address).
             }
             else if (connectedNow == null && ConnectedDevice != null)
             {
                 // Disconnection detected
                 var device = ConnectedDevice;
                 ConnectedDevice = null;
+                _pendingConnectionAddress = null;
+                _pendingConnectionPolls = 0;
+                _lastDisconnectedAddress = device.Address;
+                _lastDisconnectTime = DateTime.UtcNow;
                 RecordDisconnectionMetrics();
                 _logger.LogInformation("Bluetooth device disconnected: {DeviceName} ({Address})",
                     device.Name, device.Address);
                 DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs { Device = device });
+            }
+            else if (connectedNow == null)
+            {
+                // No device connected and no tracked device — reset pending state
+                _pendingConnectionAddress = null;
+                _pendingConnectionPolls = 0;
             }
             else if (connectedNow != null && ConnectedDevice != null
                      && connectedNow.DeviceAddress.ToString() != ConnectedDevice.Address)
@@ -217,29 +369,184 @@ internal sealed class WindowsBluetoothService : IBluetoothService
         }
     }
 
-    public Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default)
+    public async Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default)
     {
+        if (_radio == null)
+        {
+            _radio = BluetoothRadio.Default;
+        }
+
+        if (_radio == null)
+        {
+            _logger.LogWarning("No Bluetooth radio available");
+            return false;
+        }
+
+        // Set discoverable mode — non-fatal if it fails. On Windows under the
+        // Windows TFM, InTheHand's WindowsBluetoothRadio.set_Mode can throw NRE
+        // if the underlying WinRT radio handle is not fully initialized. The phone
+        // discovers the PC through Windows Bluetooth Settings regardless.
         try
         {
-            if (_radio == null)
-            {
-                _radio = BluetoothRadio.Default;
-            }
-
-            if (_radio == null)
-            {
-                _logger.LogWarning("No Bluetooth radio available to set discoverable");
-                return Task.FromResult(false);
-            }
-
             _radio.Mode = RadioMode.Discoverable;
-            _logger.LogInformation("Bluetooth radio set to Discoverable mode (device name: {Name})", deviceName);
-            return Task.FromResult(true);
+            _logger.LogInformation(
+                "Bluetooth discoverable as '{ComputerName}' (Windows computer name). " +
+                "Requested name '{RequestedName}' can only be set on Linux/Raspberry Pi",
+                _radio.Name, deviceName);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to set Bluetooth radio to Discoverable mode");
-            return Task.FromResult(false);
+            _logger.LogWarning(ex, "Failed to set Bluetooth radio to Discoverable mode — " +
+                "continuing with A2DP/SMTC setup (phone can still connect via Windows Settings)");
+        }
+
+        // Register native authentication callback to auto-accept incoming pairing requests.
+        // Without this, Windows shows a system toast notification that users may miss,
+        // causing "incorrect PIN or passkey" errors on the phone side.
+        if (_options.AutoAcceptConnections && _authCallbackHandle == IntPtr.Zero)
+        {
+            RegisterAuthenticationCallback();
+        }
+
+#if WINDOWS_TARGET
+        // Initialize A2DP sink manager (AudioPlaybackConnection)
+        if (_options.EnableA2dpSink)
+        {
+            try
+            {
+                _a2dpSinkManager = new Windows.WindowsA2dpSinkManager(_logger);
+                _a2dpSinkManager.A2dpConnected += (_, id) =>
+                    _logger.LogInformation("A2DP sink connected: {DeviceId}", id);
+                _a2dpSinkManager.A2dpDisconnected += (_, id) =>
+                    _logger.LogInformation("A2DP sink disconnected: {DeviceId}", id);
+                _a2dpSinkManager.Start();
+                _logger.LogInformation("A2DP sink manager initialized (AudioPlaybackConnection)");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to initialize A2DP sink manager — phone audio will not route to speakers");
+            }
+        }
+
+        // Initialize SMTC media session watcher for track metadata
+        if (_options.EnableMediaSessionMonitoring)
+        {
+            try
+            {
+                _mediaSessionWatcher = new Windows.WindowsMediaSessionWatcher(_logger);
+                _mediaSessionWatcher.MetadataChanged += (s, e) => MetadataChanged?.Invoke(this, e);
+                _mediaSessionWatcher.PlaybackStatusChanged += (s, e) => PlaybackStatusChanged?.Invoke(this, e);
+                _mediaSessionWatcher.PositionChanged += (s, e) => PositionChanged?.Invoke(this, e);
+                await _mediaSessionWatcher.StartAsync();
+                _logger.LogInformation("SMTC media session watcher initialized");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to initialize SMTC media session watcher — metadata will use fingerprinting fallback");
+            }
+        }
+#endif
+
+        return true;
+    }
+
+    private void RegisterAuthenticationCallback()
+    {
+        try
+        {
+            // Register for ALL devices (zeroed BLUETOOTH_DEVICE_INFO = wildcard)
+            var deviceInfo = new BLUETOOTH_DEVICE_INFO
+            {
+                dwSize = Marshal.SizeOf<BLUETOOTH_DEVICE_INFO>()
+            };
+
+            // Keep a reference to the delegate to prevent garbage collection
+            _authCallbackDelegate = OnAuthenticationCallback;
+
+            var result = BluetoothRegisterForAuthenticationEx(
+                ref deviceInfo, out _authCallbackHandle, _authCallbackDelegate, IntPtr.Zero);
+
+            if (result == 0) // ERROR_SUCCESS
+            {
+                _logger.LogInformation("Bluetooth authentication callback registered (auto-accept enabled)");
+            }
+            else
+            {
+                _logger.LogWarning("Failed to register Bluetooth authentication callback (error code: {ErrorCode})", result);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to register Bluetooth authentication callback");
+        }
+    }
+
+    private void UnregisterAuthenticationCallback()
+    {
+        if (_authCallbackHandle != IntPtr.Zero)
+        {
+            try
+            {
+                BluetoothUnregisterAuthentication(_authCallbackHandle);
+                _authCallbackHandle = IntPtr.Zero;
+                _authCallbackDelegate = null;
+                _logger.LogDebug("Bluetooth authentication callback unregistered");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Error unregistering Bluetooth authentication callback");
+            }
+        }
+    }
+
+    private bool OnAuthenticationCallback(IntPtr pvParam, ref BLUETOOTH_AUTHENTICATION_CALLBACK_PARAMS authParams)
+    {
+        var deviceName = authParams.deviceInfo.szName ?? "Unknown";
+        var authMethod = authParams.authenticationMethod;
+
+        _logger.LogInformation(
+            "Bluetooth pairing request from '{DeviceName}' (method: {Method}, passkey: {Passkey})",
+            deviceName, authMethod, authParams.Numeric_Value_Passkey);
+
+        if (!_options.AutoAcceptConnections)
+        {
+            _logger.LogInformation("Rejecting Bluetooth pairing from '{DeviceName}' (auto-accept disabled)", deviceName);
+            return false;
+        }
+
+        try
+        {
+            var response = new BLUETOOTH_AUTHENTICATE_RESPONSE
+            {
+                bthAddressRemote = authParams.deviceInfo.Address,
+                authMethod = authMethod,
+                bNegativeResponse = false
+            };
+
+            // For numeric comparison / SSP, echo back the passkey to confirm
+            if (authMethod == BLUETOOTH_AUTHENTICATION_METHOD_NUMERIC_COMPARISON
+                || authMethod == BLUETOOTH_AUTHENTICATION_METHOD_PASSKEY)
+            {
+                response.Numeric_Value_Passkey = authParams.Numeric_Value_Passkey;
+            }
+
+            var result = BluetoothSendAuthenticationResponseEx(IntPtr.Zero, ref response);
+            if (result == 0)
+            {
+                _logger.LogInformation("Auto-accepted Bluetooth pairing from '{DeviceName}'", deviceName);
+                return true;
+            }
+            else
+            {
+                _logger.LogWarning("BluetoothSendAuthenticationResponseEx failed (error: {Error}) for '{DeviceName}'",
+                    result, deviceName);
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error sending Bluetooth authentication response for '{DeviceName}'", deviceName);
+            return false;
         }
     }
 
@@ -371,6 +678,15 @@ internal sealed class WindowsBluetoothService : IBluetoothService
 
     public Task<object?> GetAudioCaptureDeviceAsync(CancellationToken cancellationToken = default)
     {
+#if WINDOWS_TARGET
+        // When A2DP sink manager is initialized, audio routes to system speakers — no capture device needed.
+        if (_a2dpSinkManager != null)
+        {
+            _logger.LogInformation("A2DP sink manager active — audio managed by platform, no capture device needed");
+            return Task.FromResult<object?>(null);
+        }
+#endif
+
         // Cleanup previous capture engine if any
         _captureEngine?.Dispose();
         _captureEngine = null;
@@ -387,9 +703,22 @@ internal sealed class WindowsBluetoothService : IBluetoothService
             var captureDevices = _captureEngine.CaptureDevices;
             var deviceName = ConnectedDevice.Name;
 
+            // Log all available capture devices for diagnostics
             _logger.LogInformation(
-                "Searching for Bluetooth audio capture device matching '{DeviceName}' among {Count} capture devices",
+                "Searching for Bluetooth audio capture device matching '{DeviceName}' among {Count} capture devices:",
                 deviceName, captureDevices.Length);
+            foreach (var device in captureDevices)
+            {
+                _logger.LogInformation("  Capture device: '{CaptureDeviceName}'", device.Name);
+            }
+
+            if (captureDevices.Length == 0)
+            {
+                _logger.LogWarning("No audio capture devices available on this system");
+                _captureEngine.Dispose();
+                _captureEngine = null;
+                return Task.FromResult<object?>(null);
+            }
 
             // Strategy 1: Match by connected device name
             DeviceInfo? targetDevice = null;
@@ -415,15 +744,6 @@ internal sealed class WindowsBluetoothService : IBluetoothService
                 }
             }
 
-            // Strategy 3: Use first available capture device
-            if (targetDevice == null && captureDevices.Length > 0)
-            {
-                _logger.LogWarning(
-                    "No Bluetooth-specific capture device found, using first available: {DeviceName}",
-                    captureDevices[0].Name);
-                targetDevice = captureDevices[0];
-            }
-
             if (targetDevice != null)
             {
                 var format = _options.AudioQuality == BluetoothAudioQuality.High
@@ -437,7 +757,12 @@ internal sealed class WindowsBluetoothService : IBluetoothService
                 return Task.FromResult<object?>(captureDevice);
             }
 
-            _logger.LogWarning("No audio capture devices available");
+            // No Bluetooth-specific capture device found.
+            _logger.LogWarning(
+                "No Bluetooth audio capture device found. " +
+                "None of the {Count} capture device(s) match '{DeviceName}' or contain 'bluetooth'. " +
+                "This works on Linux/Raspberry Pi with BlueZ",
+                captureDevices.Length, deviceName);
             _captureEngine.Dispose();
             _captureEngine = null;
         }
@@ -480,6 +805,17 @@ internal sealed class WindowsBluetoothService : IBluetoothService
     {
         _stateTimer?.Dispose();
         _discoveryCts?.Cancel();
+
+        // Unregister native authentication callback
+        UnregisterAuthenticationCallback();
+
+#if WINDOWS_TARGET
+        // Dispose A2DP sink manager and media session watcher
+        _a2dpSinkManager?.Dispose();
+        _a2dpSinkManager = null;
+        _mediaSessionWatcher?.Dispose();
+        _mediaSessionWatcher = null;
+#endif
 
         // Dispose audio capture engine
         _captureEngine?.Dispose();

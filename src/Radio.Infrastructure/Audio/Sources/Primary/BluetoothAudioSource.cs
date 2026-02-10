@@ -69,6 +69,25 @@ public class BluetoothAudioSource : USBAudioSourceBase
     Logger.LogInformation("Starting Bluetooth adapter as '{DeviceName}'", deviceName);
     await _bluetoothService.StartAsync(deviceName, cancellationToken);
 
+    // When the platform manages audio routing directly (e.g., Windows AudioPlaybackConnection),
+    // no SoundFlow capture device is needed — audio goes to system speakers.
+    // Metadata still flows via SMTC events on Windows.
+    if (_bluetoothService.IsAudioManagedByPlatform)
+    {
+      Logger.LogInformation("BluetoothAudioSource: platform manages audio routing, skipping capture device");
+      var connected = _bluetoothService.ConnectedDevice;
+      var connectedName = connected?.Name ?? "Bluetooth Device";
+      MetadataInternal[StandardMetadataKeys.Title] = connectedName;
+      MetadataInternal["Device"] = connectedName;
+      if (!string.IsNullOrWhiteSpace(connected?.Address))
+      {
+        MetadataInternal["DeviceAddress"] = connected!.Address;
+      }
+      NeedsFingerprintingLookup = true;
+      State = AudioSourceState.Ready;
+      return;
+    }
+
     // Obtain platform audio capture device
     var capture = await _bluetoothService.GetAudioCaptureDeviceAsync(cancellationToken);
     if (capture is AudioCaptureDevice audioCapture)
@@ -98,6 +117,13 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
   protected override async Task PlayCoreAsync(CancellationToken cancellationToken)
   {
+    // Platform manages audio routing — nothing to start locally
+    if (_bluetoothService.IsAudioManagedByPlatform)
+    {
+      Logger.LogDebug("BluetoothAudioSource: PlayCore — platform manages audio, no capture device to start");
+      return;
+    }
+
     if (SoundComponent == null)
     {
       await InitializeAsync(cancellationToken);
@@ -157,18 +183,55 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
   private void OnDeviceConnected(object? sender, BluetoothDeviceConnectedEventArgs e)
   {
-    Logger.LogInformation("Bluetooth device connected: {DeviceName} ({Address})",
-      e.Device.Name, e.Device.Address);
+    Logger.LogDebug("BluetoothAudioSource: device connected event for {DeviceName}", e.Device.Name);
     MetadataInternal[StandardMetadataKeys.Title] = e.Device.Name;
     MetadataInternal["Device"] = e.Device.Name;
     MetadataInternal["DeviceAddress"] = e.Device.Address;
     NeedsFingerprintingLookup = true;
+
+    // Attempt to acquire audio capture device now that a device is connected
+    _ = TryAcquireAudioCaptureAsync();
+  }
+
+  private async Task TryAcquireAudioCaptureAsync()
+  {
+    try
+    {
+      // Platform manages audio directly — no capture device needed
+      if (_bluetoothService.IsAudioManagedByPlatform)
+      {
+        State = AudioSourceState.Ready;
+        Logger.LogDebug("BluetoothAudioSource: platform manages audio, source set to Ready");
+        return;
+      }
+
+      if (SoundComponent != null)
+      {
+        Logger.LogDebug("BluetoothAudioSource: capture device already acquired, skipping");
+        return;
+      }
+
+      var capture = await _bluetoothService.GetAudioCaptureDeviceAsync();
+      if (capture is AudioCaptureDevice audioCapture)
+      {
+        SoundComponent = audioCapture;
+        State = AudioSourceState.Ready;
+        Logger.LogInformation("BluetoothAudioSource: audio capture device acquired after device connected");
+      }
+      else
+      {
+        Logger.LogDebug("BluetoothAudioSource: no audio capture device available for connected device");
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "BluetoothAudioSource: failed to acquire audio capture device on connect");
+    }
   }
 
   private void OnDeviceDisconnected(object? sender, BluetoothDeviceDisconnectedEventArgs e)
   {
-    Logger.LogInformation("Bluetooth device disconnected: {DeviceName} ({Address})",
-      e.Device.Name, e.Device.Address);
+    Logger.LogDebug("BluetoothAudioSource: device disconnected event for {DeviceName}", e.Device.Name);
     NeedsFingerprintingLookup = false;
 
     if (State == AudioSourceState.Playing || State == AudioSourceState.Paused)
@@ -206,5 +269,23 @@ public class BluetoothAudioSource : USBAudioSourceBase
   {
     MetadataInternal["PlaybackStatus"] = e.ToString();
     Logger.LogDebug("Bluetooth playback status: {Status}", e);
+
+    // On platform-managed path, mirror the phone's playback state so the UI
+    // accurately reflects whether the phone is playing or paused.
+    if (_bluetoothService.IsAudioManagedByPlatform)
+    {
+      switch (e)
+      {
+        case BluetoothPlaybackStatus.Playing when State == AudioSourceState.Ready || State == AudioSourceState.Paused:
+          State = AudioSourceState.Playing;
+          break;
+        case BluetoothPlaybackStatus.Paused when State == AudioSourceState.Playing:
+          State = AudioSourceState.Paused;
+          break;
+        case BluetoothPlaybackStatus.Stopped when State == AudioSourceState.Playing || State == AudioSourceState.Paused:
+          State = AudioSourceState.Stopped;
+          break;
+      }
+    }
   }
 }
