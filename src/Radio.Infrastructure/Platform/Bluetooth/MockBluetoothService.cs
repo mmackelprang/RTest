@@ -40,6 +40,9 @@ public sealed class MockBluetoothService : IBluetoothService
         public event EventHandler<BluetoothPlaybackMetadata>? MetadataChanged;
         public event EventHandler<BluetoothPlaybackStatus>? PlaybackStatusChanged;
         public event EventHandler<TimeSpan>? PositionChanged { add { } remove { } }
+        public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged { add { } remove { } }
+        public float? DeviceVolume => null;
+        public Task SetDeviceVolumeAsync(float volume) => Task.CompletedTask;
 
         public Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default)
         {

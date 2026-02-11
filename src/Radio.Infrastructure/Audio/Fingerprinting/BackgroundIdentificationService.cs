@@ -19,8 +19,11 @@ public sealed class BackgroundIdentificationService : BackgroundService
   private readonly IServiceProvider _serviceProvider;
   private readonly FingerprintingOptions _options;
 
-  // Track recent identifications for duplicate suppression
-  private readonly ConcurrentDictionary<string, DateTime> _recentIdentifications = new();
+  // Track recent identifications for duplicate suppression (key → (timestamp, confidence))
+  private readonly ConcurrentDictionary<string, (DateTime Timestamp, double Confidence)> _recentIdentifications = new();
+
+  // On-demand identification trigger — cancels the current delay to identify immediately
+  private CancellationTokenSource? _delayCts;
 
   /// <summary>
   /// Event raised when a track is identified.
@@ -41,6 +44,23 @@ public sealed class BackgroundIdentificationService : BackgroundService
     _logger = logger;
     _serviceProvider = serviceProvider;
     _options = options.Value;
+  }
+
+  /// <summary>
+  /// Requests an immediate identification cycle, bypassing the normal interval wait.
+  /// Called by sources when a track changes or new incomplete metadata is received.
+  /// </summary>
+  public void RequestImmediateIdentification()
+  {
+    _logger.LogDebug("Immediate identification requested");
+    try
+    {
+      _delayCts?.Cancel();
+    }
+    catch (ObjectDisposedException)
+    {
+      // Timer already disposed, ignore
+    }
   }
 
   /// <inheritdoc/>
@@ -80,9 +100,17 @@ public sealed class BackgroundIdentificationService : BackgroundService
 
       try
       {
+        using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        _delayCts = delayCts;
         await Task.Delay(
           TimeSpan.FromSeconds(_options.IdentificationIntervalSeconds),
-          stoppingToken);
+          delayCts.Token);
+        _delayCts = null;
+      }
+      catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+      {
+        _logger.LogDebug("Identification interval interrupted by immediate request");
+        _delayCts = null;
       }
       catch (OperationCanceledException)
       {
@@ -115,6 +143,13 @@ public sealed class BackgroundIdentificationService : BackgroundService
     if (!audioTap.IsActive)
     {
       _logger.LogDebug("Audio source not active, skipping identification");
+      return;
+    }
+
+    // Check if the active source needs fingerprinting (complete metadata → skip)
+    if (!audioTap.NeedsFingerprintingLookup)
+    {
+      _logger.LogDebug("Active source has complete metadata, skipping identification cycle");
       return;
     }
 
@@ -189,7 +224,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
         return;
       }
 
-      MarkAsRecentlyIdentified(trackKey);
+      MarkAsRecentlyIdentified(trackKey, result.Confidence);
     }
 
     // Note: Play history recording is now handled by AudioManager which:
@@ -219,25 +254,32 @@ public sealed class BackgroundIdentificationService : BackgroundService
 
   private bool IsDuplicateIdentification(string trackKey)
   {
-    if (_recentIdentifications.TryGetValue(trackKey, out var lastIdentified))
+    if (_recentIdentifications.TryGetValue(trackKey, out var entry))
     {
-      var elapsed = DateTime.UtcNow - lastIdentified;
-      return elapsed.TotalMinutes < _options.DuplicateSuppressionMinutes;
+      var elapsed = DateTime.UtcNow - entry.Timestamp;
+      // High-confidence matches get a longer suppression window
+      var suppressionMinutes = entry.Confidence > 0.9
+        ? _options.HighConfidenceDuplicateSuppressionMinutes
+        : _options.DuplicateSuppressionMinutes;
+      return elapsed.TotalMinutes < suppressionMinutes;
     }
 
     return false;
   }
 
-  private void MarkAsRecentlyIdentified(string trackKey)
+  private void MarkAsRecentlyIdentified(string trackKey, double confidence)
   {
-    _recentIdentifications[trackKey] = DateTime.UtcNow;
+    _recentIdentifications[trackKey] = (DateTime.UtcNow, confidence);
   }
 
   private void CleanupRecentIdentifications()
   {
-    var cutoff = DateTime.UtcNow.AddMinutes(-_options.DuplicateSuppressionMinutes * 2);
+    var maxSuppression = Math.Max(
+      _options.DuplicateSuppressionMinutes,
+      _options.HighConfidenceDuplicateSuppressionMinutes);
+    var cutoff = DateTime.UtcNow.AddMinutes(-maxSuppression * 2);
     var keysToRemove = _recentIdentifications
-      .Where(kvp => kvp.Value < cutoff)
+      .Where(kvp => kvp.Value.Timestamp < cutoff)
       .Select(kvp => kvp.Key)
       .ToList();
 

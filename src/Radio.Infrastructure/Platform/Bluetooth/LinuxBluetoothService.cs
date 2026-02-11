@@ -95,6 +95,18 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         public event EventHandler<BluetoothPlaybackMetadata>? MetadataChanged;
         public event EventHandler<BluetoothPlaybackStatus>? PlaybackStatusChanged;
         public event EventHandler<TimeSpan>? PositionChanged;
+#pragma warning disable CS0067 // VolumeChanged will be wired when BlueZ MediaTransport1.Volume monitoring is implemented
+        public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged;
+#pragma warning restore CS0067
+        public float? DeviceVolume { get; private set; }
+
+        public Task SetDeviceVolumeAsync(float volume)
+        {
+            // BlueZ MediaTransport1.Volume (0-127) could be set via D-Bus here.
+            // Requires finding the MediaTransport1 object for the connected device.
+            _logger.LogDebug("SetDeviceVolumeAsync not yet implemented for Linux BT");
+            return Task.CompletedTask;
+        }
 
         public async Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default)
         {

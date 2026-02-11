@@ -65,16 +65,16 @@ public class VisualizationTapModifier : SoundModifier
           var now = DateTime.UtcNow;
           if ((now - _lastLogTime).TotalSeconds >= 5)
           {
-            Console.WriteLine($"[VisualizationTap] Sending {_bufferSize} samples to visualizer (total: {_totalSamplesProcessed})");
+//            Console.WriteLine($"[VisualizationTap] Sending {_bufferSize} samples to visualizer (total: {_totalSamplesProcessed})");
             _lastLogTime = now;
           }
 
           // Process samples synchronously to ensure they reach the visualizer
           _visualizerService.ProcessSamples(samplesForVisualizer);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-          Console.WriteLine($"[VisualizationTap] Error: {ex.Message}");
+          // Ignore visualization errors — best-effort tap
         }
 
         _bufferIndex = 0;

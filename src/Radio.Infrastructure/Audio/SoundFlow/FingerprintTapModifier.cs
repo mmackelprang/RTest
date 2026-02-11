@@ -30,7 +30,7 @@ public class FingerprintTapModifier : SoundModifier
   /// </summary>
   /// <param name="audioEngine">The audio engine to write samples to.</param>
   /// <param name="logger">Optional logger for diagnostic output.</param>
-  /// <param name="bufferSize">Size of the sample buffer before writing to tap (default: 4096).</param>
+  /// <param name="bufferSize">Size of the sample buffer before writing to tap (default: 4096). Smaller values reduce latency but increase lock contention and GC pressure in the audio callback.</param>
   public FingerprintTapModifier(
     SoundFlowAudioEngine audioEngine,
     ILogger? logger = null,
@@ -47,10 +47,11 @@ public class FingerprintTapModifier : SoundModifier
   /// <inheritdoc/>
   public override float ProcessSample(float sample, int channel)
   {
+    // Hot path: called 96,000 times/second for stereo 48kHz.
+    // Minimize work inside the lock — no DateTime, no allocations.
     lock (_lock)
     {
       _totalSamplesProcessed++;
-      _lastProcessedTime = DateTime.UtcNow;
 
       if (_bufferIndex < _bufferSize)
       {
@@ -60,6 +61,8 @@ public class FingerprintTapModifier : SoundModifier
       // When buffer is full, write to output tap and reset
       if (_bufferIndex >= _bufferSize)
       {
+        _lastProcessedTime = DateTime.UtcNow;
+
         try
         {
           // Create a copy to write to the tap
@@ -68,8 +71,6 @@ public class FingerprintTapModifier : SoundModifier
 
           // Write to the output tap for fingerprinting/streaming
           _audioEngine.WriteToOutputTap(samplesForTap);
-
-          var now = DateTime.UtcNow;
 
           // Log first batch at Information level for diagnostics
           if (!_loggedFirstBatch)
@@ -81,12 +82,12 @@ public class FingerprintTapModifier : SoundModifier
           }
 
           // Log periodically (every 10 seconds)
-          if ((now - _lastLogTime).TotalSeconds >= 10)
+          if ((_lastProcessedTime - _lastLogTime).TotalSeconds >= 10)
           {
             _logger?.LogDebug(
               "FingerprintTap: {TotalSamples} samples processed, writing {BufferSize} to tap",
               _totalSamplesProcessed, _bufferSize);
-            _lastLogTime = now;
+            _lastLogTime = _lastProcessedTime;
           }
         }
         catch (Exception ex)

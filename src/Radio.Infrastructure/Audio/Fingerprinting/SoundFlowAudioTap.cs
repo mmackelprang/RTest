@@ -65,6 +65,31 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
   }
 
   /// <inheritdoc/>
+  public bool NeedsFingerprintingLookup
+  {
+    get
+    {
+      var source = _audioManager.ActiveSource;
+      if (source == null) return false;
+
+      // Bluetooth has a direct property
+      if (source is BluetoothAudioSource btSource)
+        return btSource.NeedsFingerprintingLookup;
+
+      // FilePlayer uses metadata dictionary
+      if (source is FilePlayerAudioSource fileSource)
+      {
+        if (fileSource.Metadata?.TryGetValue("NeedsFingerprintingLookup", out var val) == true)
+          return val is bool b && b;
+        return true; // Default: needs fingerprinting if flag not set
+      }
+
+      // Radio, Vinyl, USB always need fingerprinting
+      return true;
+    }
+  }
+
+  /// <inheritdoc/>
   public bool IsActive
   {
     get

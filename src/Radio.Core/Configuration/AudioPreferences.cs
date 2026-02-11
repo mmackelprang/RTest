@@ -30,6 +30,11 @@ public class AudioPreferences
   public int MasterVolume { get; set; } = 75;
 
   /// <summary>
+  /// Gets or sets whether audio is muted.
+  /// </summary>
+  public bool IsMuted { get; set; } = false;
+
+  /// <summary>
   /// Gets or sets the audio balance (-100 to 100, where 0 is center).
   /// </summary>
   public int Balance { get; set; } = 0;

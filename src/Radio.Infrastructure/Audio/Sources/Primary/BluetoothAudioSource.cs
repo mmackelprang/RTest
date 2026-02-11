@@ -334,6 +334,11 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
     // If metadata is incomplete (no title or artist), request fingerprinting
     NeedsFingerprintingLookup = string.IsNullOrEmpty(e.Title) || string.IsNullOrEmpty(e.Artist);
+
+    if (NeedsFingerprintingLookup)
+    {
+      _identificationService?.RequestImmediateIdentification();
+    }
   }
 
   private void OnPlaybackStatusChanged(object? sender, BluetoothPlaybackStatus e)

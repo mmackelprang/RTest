@@ -76,6 +76,9 @@ internal sealed class NullBluetoothService : IBluetoothService
   public event EventHandler<BluetoothPlaybackMetadata>? MetadataChanged { add { } remove { } }
   public event EventHandler<BluetoothPlaybackStatus>? PlaybackStatusChanged { add { } remove { } }
   public event EventHandler<TimeSpan>? PositionChanged { add { } remove { } }
+  public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged { add { } remove { } }
+  public float? DeviceVolume => null;
+  public Task SetDeviceVolumeAsync(float volume) => Task.CompletedTask;
 
   public Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default)
   {

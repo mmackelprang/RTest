@@ -53,7 +53,7 @@ internal sealed class WindowsBluetoothService : IBluetoothService
     // device for a cooldown period to prevent rapid connect/disconnect cycling.
     private string? _lastDisconnectedAddress;
     private DateTime _lastDisconnectTime;
-    private static readonly TimeSpan ReconnectCooldown = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan ReconnectCooldown = TimeSpan.FromSeconds(10);
 
     // InTheHand.Net doesn't have robust event-driven discovery in the same way,
     // often relies on polling or blocking calls. We'll simulate async discovery.
@@ -226,12 +226,28 @@ internal sealed class WindowsBluetoothService : IBluetoothService
     public event EventHandler<BluetoothPlaybackMetadata>? MetadataChanged;
     public event EventHandler<BluetoothPlaybackStatus>? PlaybackStatusChanged;
     public event EventHandler<TimeSpan>? PositionChanged;
+#pragma warning disable CS0067 // VolumeChanged will be wired when AVRCP volume monitoring is implemented
+    public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged;
+#pragma warning restore CS0067
+    public float? DeviceVolume { get; private set; }
 #else
     // Under net8.0 (no WinRT), suppress CS0067 — events are never raised on this TFM.
     public event EventHandler<BluetoothPlaybackMetadata>? MetadataChanged { add { } remove { } }
     public event EventHandler<BluetoothPlaybackStatus>? PlaybackStatusChanged { add { } remove { } }
     public event EventHandler<TimeSpan>? PositionChanged { add { } remove { } }
+    public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged { add { } remove { } }
+    public float? DeviceVolume => null;
 #endif
+
+    public Task SetDeviceVolumeAsync(float volume)
+    {
+      // AVRCP absolute volume set is not yet implemented for Windows.
+      // Windows maps AVRCP volume to the audio endpoint volume, which is
+      // managed by the OS. Setting it programmatically requires identifying
+      // the specific Bluetooth audio endpoint via NAudio/CoreAudioApi.
+      _logger.LogDebug("SetDeviceVolumeAsync not yet implemented for Windows BT");
+      return Task.CompletedTask;
+    }
 
     private void CheckState(object? state)
     {
@@ -300,6 +316,32 @@ internal sealed class WindowsBluetoothService : IBluetoothService
                 {
                     _pendingConnectionAddress = address;
                     _pendingConnectionPolls = 1;
+
+#if WINDOWS_TARGET
+                    // On FIRST detection (before stability confirmed), immediately try
+                    // A2DP connection using DIRECT address resolution. The phone may
+                    // disconnect within 2-4 seconds if A2DP isn't established quickly.
+                    // Direct address bypasses DeviceWatcher/FindAllAsync which may
+                    // return 0 AudioPlaybackConnection devices for some phones.
+                    if (_a2dpSinkManager != null && !_a2dpSinkManager.IsConnected)
+                    {
+                        var macAddress = ulong.Parse(connectedNow.DeviceAddress.ToString(), System.Globalization.NumberStyles.HexNumber);
+                        _logger.LogInformation(
+                          "BT device detected on first poll — triggering direct A2DP connection for {Address} (MAC: {Mac:X12})",
+                          address, macAddress);
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                await _a2dpSinkManager.TryConnectByAddressAsync(macAddress);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Direct A2DP connection failed for {Address}", address);
+                            }
+                        });
+                    }
+#endif
                 }
 
                 if (_pendingConnectionPolls < RequiredStablePolls)
@@ -318,9 +360,25 @@ internal sealed class WindowsBluetoothService : IBluetoothService
                 _metricsCollector?.Increment("bluetooth.devices_connected_total");
                 _metricsCollector?.Gauge("bluetooth.active_connections", 1);
                 DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = device });
-                // A2DP sink connection is handled automatically by the DeviceWatcher in
-                // WindowsA2dpSinkManager — it watches for AudioPlaybackConnection devices
-                // and opens connections using the correct PnP device ID (not MAC address).
+#if WINDOWS_TARGET
+                // After stability confirmed, try A2DP again if first-poll attempt didn't succeed.
+                // Uses direct address resolution (bypasses DeviceWatcher which may return 0 devices).
+                if (_a2dpSinkManager != null && !_a2dpSinkManager.IsConnected)
+                {
+                    var macAddress = ulong.Parse(connectedNow.DeviceAddress.ToString(), System.Globalization.NumberStyles.HexNumber);
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await _a2dpSinkManager.TryConnectByAddressAsync(macAddress);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "A2DP connection by address failed after stability confirmed");
+                        }
+                    });
+                }
+#endif
             }
             else if (connectedNow == null && ConnectedDevice != null)
             {

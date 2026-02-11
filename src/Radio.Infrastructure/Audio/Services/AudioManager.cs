@@ -46,6 +46,10 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   // Play history tracking
   private string? _currentPlayHistoryEntryId;
 
+  // Volume persistence debounce
+  private Timer? _volumePersistTimer;
+  private readonly object _volumePersistLock = new();
+
   // State
   private IAudioSource? _activeSource;
   private IAudioSource? _previousSource; // Track previous source for delayed cleanup
@@ -119,21 +123,33 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   public float MasterVolume
   {
     get => _audioEngine.GetMasterMixer().MasterVolume;
-    set => _audioEngine.GetMasterMixer().MasterVolume = value;
+    set
+    {
+      _audioEngine.GetMasterMixer().MasterVolume = value;
+      ScheduleVolumePersist();
+    }
   }
 
   /// <inheritdoc/>
   public bool IsMuted
   {
     get => _audioEngine.GetMasterMixer().IsMuted;
-    set => _audioEngine.GetMasterMixer().IsMuted = value;
+    set
+    {
+      _audioEngine.GetMasterMixer().IsMuted = value;
+      ScheduleVolumePersist();
+    }
   }
 
   /// <inheritdoc/>
   public float Balance
   {
     get => _audioEngine.GetMasterMixer().Balance;
-    set => _audioEngine.GetMasterMixer().Balance = value;
+    set
+    {
+      _audioEngine.GetMasterMixer().Balance = value;
+      ScheduleVolumePersist();
+    }
   }
 
   /// <inheritdoc/>
@@ -151,6 +167,9 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     {
       await _audioEngine.InitializeAsync(cancellationToken);
     }
+
+    // Restore volume/mute/balance from persisted preferences
+    RestoreVolumePreferences();
 
     // Pre-warm Bluetooth if enabled on startup
     if (_bluetoothOptions.CurrentValue.EnableOnStartup)
@@ -474,6 +493,76 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     catch (Exception ex)
     {
       _logger.LogWarning(ex, "Failed to persist source preference for {SourceType}", sourceType);
+    }
+  }
+
+  /// <summary>
+  /// Schedules a debounced persistence of volume/mute/balance preferences.
+  /// Waits 500ms after the last change before writing, to avoid SQLite churn during slider drags.
+  /// </summary>
+  private void ScheduleVolumePersist()
+  {
+    if (_configurationManager == null) return;
+
+    lock (_volumePersistLock)
+    {
+      _volumePersistTimer?.Dispose();
+      _volumePersistTimer = new Timer(
+        _ => _ = PersistVolumePreferencesAsync(),
+        null,
+        TimeSpan.FromMilliseconds(500),
+        Timeout.InfiniteTimeSpan);
+    }
+  }
+
+  /// <summary>
+  /// Persists current volume, mute, and balance to the configuration store.
+  /// </summary>
+  private async Task PersistVolumePreferencesAsync()
+  {
+    if (_configurationManager == null) return;
+
+    try
+    {
+      var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+      var volume = (int)Math.Round(MasterVolume * 100);
+      var balance = (int)Math.Round(Balance * 100);
+
+      await _configurationManager.SetValueAsync(storeId, "AudioPreferences:MasterVolume", volume.ToString());
+      await _configurationManager.SetValueAsync(storeId, "AudioPreferences:IsMuted", IsMuted.ToString());
+      await _configurationManager.SetValueAsync(storeId, "AudioPreferences:Balance", balance.ToString());
+
+      _logger.LogDebug("Persisted volume preferences: Volume={Volume}%, Muted={Muted}, Balance={Balance}%",
+        volume, IsMuted, balance);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to persist volume preferences");
+    }
+  }
+
+  /// <summary>
+  /// Restores volume, mute, and balance from persisted preferences.
+  /// Sets the mixer directly to avoid triggering re-persistence.
+  /// </summary>
+  private void RestoreVolumePreferences()
+  {
+    var prefs = _audioPreferences.CurrentValue;
+
+    try
+    {
+      var mixer = _audioEngine.GetMasterMixer();
+      mixer.MasterVolume = prefs.MasterVolume / 100f;
+      mixer.IsMuted = prefs.IsMuted;
+      mixer.Balance = prefs.Balance / 100f;
+
+      _logger.LogInformation(
+        "Restored volume preferences: Volume={Volume}%, Muted={Muted}, Balance={Balance}%",
+        prefs.MasterVolume, prefs.IsMuted, prefs.Balance);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to restore volume preferences");
     }
   }
 
@@ -1007,6 +1096,14 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     }
 
     _sourceCache.Clear();
+
+    // Dispose volume persistence timer
+    lock (_volumePersistLock)
+    {
+      _volumePersistTimer?.Dispose();
+      _volumePersistTimer = null;
+    }
+
     _switchLock.Dispose();
     _createLock.Dispose();
 

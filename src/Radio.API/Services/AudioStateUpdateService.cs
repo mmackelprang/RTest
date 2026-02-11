@@ -80,6 +80,13 @@ public class AudioStateUpdateService : BackgroundService
     {
       _logger.LogWarning("IBluetoothService not available - Bluetooth SignalR updates disabled");
     }
+
+    // Subscribe to Cast device volume changes for bidirectional sync
+    if (_castOutput != null)
+    {
+      _castOutput.CastVolumeChanged += OnCastVolumeChanged;
+      _logger.LogInformation("Subscribed to Cast volume changes for bidirectional sync");
+    }
   }
 
   /// <summary>
@@ -645,6 +652,39 @@ public class AudioStateUpdateService : BackgroundService
     }
   }
 
+  /// <summary>
+  /// Handles external Cast device volume/mute changes.
+  /// Updates IAudioManager so the console and UI stay in sync.
+  /// </summary>
+  private void OnCastVolumeChanged(object? sender, CastVolumeChangedEventArgs e)
+  {
+    if (_audioManager == null) return;
+
+    try
+    {
+      // Update master volume and mute to match the Cast device
+      if (Math.Abs(_audioManager.MasterVolume - e.Volume) > 0.01f)
+      {
+        _audioManager.MasterVolume = e.Volume;
+        _logger.LogInformation(
+          "Synced volume from Cast device: {Volume:P0} (initial: {IsInitial})",
+          e.Volume, e.IsInitialSync);
+      }
+
+      if (_audioManager.IsMuted != e.IsMuted)
+      {
+        _audioManager.IsMuted = e.IsMuted;
+        _logger.LogInformation(
+          "Synced mute from Cast device: {Muted} (initial: {IsInitial})",
+          e.IsMuted, e.IsInitialSync);
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Error syncing Cast device volume to AudioManager");
+    }
+  }
+
   private async void OnBluetoothDeviceDiscovered(object? sender, BluetoothDeviceDiscoveredEventArgs e)
   {
     try
@@ -667,6 +707,11 @@ public class AudioStateUpdateService : BackgroundService
       _bluetoothService.DeviceConnected -= OnBluetoothDeviceConnected;
       _bluetoothService.DeviceDisconnected -= OnBluetoothDeviceDisconnected;
       _bluetoothService.DeviceDiscovered -= OnBluetoothDeviceDiscovered;
+    }
+
+    if (_castOutput != null)
+    {
+      _castOutput.CastVolumeChanged -= OnCastVolumeChanged;
     }
 
     base.Dispose();

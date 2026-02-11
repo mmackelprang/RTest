@@ -1610,6 +1610,13 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       _metadata[StandardMetadataKeys.Duration] = _duration;
       _metadata["NeedsFingerprintingLookup"] = true;
     }
+
+    // Request immediate identification if this track needs fingerprinting
+    if (_metadata.TryGetValue("NeedsFingerprintingLookup", out var needsLookup)
+        && needsLookup is true)
+    {
+      _identificationService?.RequestImmediateIdentification();
+    }
   }
 
   /// <summary>
