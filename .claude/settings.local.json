@@ -109,7 +109,14 @@
       "Bash(python:*)",
       "Bash(Select-String -Pattern \"Failed|FAILED\")",
       "Bash(Select-Object -First 10)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(git add:*)",
+      "Bash(Get-ChildItem -Path \"D:\\\\prj\\\\RTest\\\\RTest\\\\src\\\\Radio.API\\\\bin\\\\Release\" -Recurse -Filter \"radio-*\" -ErrorAction SilentlyContinue)",
+      "Bash(Select-Object FullName)",
+      "Bash(Get-ChildItem -Path \"D:\\\\prj\\\\RTest\\\\RTest\\\\src\\\\Radio.API\\\\bin\\\\Release\" -Recurse -Directory -Filter \"logs\" -ErrorAction SilentlyContinue)",
+      "Bash(Get-ChildItem -Path \"D:\\\\prj\\\\RTest\\\\RTest\\\\logs\" -ErrorAction SilentlyContinue)",
+      "Bash(ffprobe:*)",
+      "Bash(git status:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
