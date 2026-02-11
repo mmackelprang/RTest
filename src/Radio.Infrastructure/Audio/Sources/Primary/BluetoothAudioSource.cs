@@ -5,6 +5,9 @@ using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
+using Radio.Infrastructure.Audio.SoundFlow;
+using Radio.Infrastructure.Platform.Bluetooth;
+using SoundFlow.Abstracts;
 using SoundFlow.Abstracts.Devices;
 
 namespace Radio.Infrastructure.Audio.Sources.Primary;
@@ -18,6 +21,8 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private readonly IBluetoothService _bluetoothService;
   private readonly BackgroundIdentificationService? _identificationService;
   private readonly IOptionsMonitor<BluetoothOptions> _options;
+  private readonly SoundFlowPlaybackService? _playbackService;
+  private string? _playbackId;
 
   /// <summary>
   /// When true, the fingerprinting pipeline will attempt to identify the current track.
@@ -31,12 +36,14 @@ public class BluetoothAudioSource : USBAudioSourceBase
     IBluetoothService bluetoothService,
     IOptionsMonitor<BluetoothOptions> options,
     BackgroundIdentificationService? identificationService = null,
-    Radio.Core.Interfaces.IMetricsCollector? metricsCollector = null)
+    Radio.Core.Interfaces.IMetricsCollector? metricsCollector = null,
+    SoundFlowPlaybackService? playbackService = null)
     : base(logger, deviceManager, identificationService, metricsCollector)
   {
     _bluetoothService = bluetoothService;
     _identificationService = identificationService;
     _options = options;
+    _playbackService = playbackService;
     SetDefaultMetadata("Bluetooth", "Bluetooth", "Bluetooth Device");
 
     _bluetoothService.MetadataChanged += OnMetadataChanged;
@@ -88,24 +95,23 @@ public class BluetoothAudioSource : USBAudioSourceBase
       return;
     }
 
-    // Obtain platform audio capture device
+    // Obtain platform audio capture device (may be AudioCaptureDevice or BufferedSoundGenerator)
     var capture = await _bluetoothService.GetAudioCaptureDeviceAsync(cancellationToken);
     if (capture is AudioCaptureDevice audioCapture)
     {
       SoundComponent = audioCapture;
-
-      var connected = _bluetoothService.ConnectedDevice;
-      var connectedName = connected?.Name ?? "Bluetooth Device";
-      MetadataInternal[StandardMetadataKeys.Title] = connectedName;
-      MetadataInternal["Device"] = connectedName;
-      if (!string.IsNullOrWhiteSpace(connected?.Address))
-      {
-        MetadataInternal["DeviceAddress"] = connected!.Address;
-      }
-
-      // No AVRCP metadata yet — request fingerprinting
+      SetConnectedDeviceMetadata();
       NeedsFingerprintingLookup = true;
       State = AudioSourceState.Ready;
+    }
+    else if (capture is SoundComponent soundComponent)
+    {
+      // WASAPI loopback capture returns a BufferedSoundGenerator<float>
+      SoundComponent = soundComponent;
+      SetConnectedDeviceMetadata();
+      NeedsFingerprintingLookup = true;
+      State = AudioSourceState.Ready;
+      Logger.LogInformation("BluetoothAudioSource: using WASAPI loopback capture via SoundFlow pipeline");
     }
     else
     {
@@ -133,6 +139,28 @@ public class BluetoothAudioSource : USBAudioSourceBase
     {
       captureDevice.Start();
     }
+    else if (SoundComponent is BufferedSoundGenerator<float> generator && _playbackService != null)
+    {
+      // WASAPI loopback capture path: register generator with SoundFlow mixer
+      _playbackId = $"bt-loopback-{Guid.NewGuid():N}";
+      var success = await _playbackService.PlayComponentAsync(
+        _playbackId, generator, Volume, cancellationToken);
+
+      if (success)
+      {
+        Logger.LogInformation("BluetoothAudioSource: WASAPI loopback generator added to mixer (PlaybackId={PlaybackId})", _playbackId);
+
+        // Start the loopback capture (with endpoint muting logic)
+        if (_bluetoothService is WindowsBluetoothService winBt)
+        {
+          winBt.StartLoopbackCapture();
+        }
+      }
+      else
+      {
+        Logger.LogError("BluetoothAudioSource: Failed to add loopback generator to SoundFlow mixer");
+      }
+    }
   }
 
   protected override Task PauseCoreAsync(CancellationToken cancellationToken)
@@ -141,6 +169,9 @@ public class BluetoothAudioSource : USBAudioSourceBase
     {
       captureDevice.Stop(); // Local pause; does not send AVRCP
     }
+    // For loopback capture, we don't stop the capture on pause —
+    // the phone's audio keeps flowing, we just don't change mixer state.
+    // Pausing the source's state is enough for the UI.
     return Task.CompletedTask;
   }
 
@@ -150,6 +181,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     {
       captureDevice.Start();
     }
+    // Loopback capture continues running — resume is a no-op for mixer
     return Task.CompletedTask;
   }
 
@@ -158,6 +190,18 @@ public class BluetoothAudioSource : USBAudioSourceBase
     if (SoundComponent is AudioCaptureDevice captureDevice)
     {
       captureDevice.Stop();
+    }
+    else if (_playbackId != null && _playbackService != null)
+    {
+      // Stop loopback capture first, then remove from mixer
+      if (_bluetoothService is WindowsBluetoothService winBt)
+      {
+        winBt.StopLoopbackCapture();
+      }
+
+      await _playbackService.StopAsync(_playbackId, cancellationToken);
+      _playbackId = null;
+      Logger.LogInformation("BluetoothAudioSource: loopback capture stopped and generator removed from mixer");
     }
 
     await _bluetoothService.StopAsync(cancellationToken);
@@ -169,6 +213,15 @@ public class BluetoothAudioSource : USBAudioSourceBase
     {
       captureDevice.Dispose();
     }
+    else if (_playbackId != null && _playbackService != null)
+    {
+      if (_bluetoothService is WindowsBluetoothService winBt)
+      {
+        winBt.StopLoopbackCapture();
+      }
+      await _playbackService.StopAsync(_playbackId);
+      _playbackId = null;
+    }
 
     _bluetoothService.MetadataChanged -= OnMetadataChanged;
     _bluetoothService.PlaybackStatusChanged -= OnPlaybackStatusChanged;
@@ -179,6 +232,18 @@ public class BluetoothAudioSource : USBAudioSourceBase
     await _bluetoothService.DisposeAsync();
 
     await base.DisposeAsyncCore();
+  }
+
+  private void SetConnectedDeviceMetadata()
+  {
+    var connected = _bluetoothService.ConnectedDevice;
+    var connectedName = connected?.Name ?? "Bluetooth Device";
+    MetadataInternal[StandardMetadataKeys.Title] = connectedName;
+    MetadataInternal["Device"] = connectedName;
+    if (!string.IsNullOrWhiteSpace(connected?.Address))
+    {
+      MetadataInternal["DeviceAddress"] = connected!.Address;
+    }
   }
 
   private void OnDeviceConnected(object? sender, BluetoothDeviceConnectedEventArgs e)
@@ -217,6 +282,12 @@ public class BluetoothAudioSource : USBAudioSourceBase
         SoundComponent = audioCapture;
         State = AudioSourceState.Ready;
         Logger.LogInformation("BluetoothAudioSource: audio capture device acquired after device connected");
+      }
+      else if (capture is SoundComponent soundComponent)
+      {
+        SoundComponent = soundComponent;
+        State = AudioSourceState.Ready;
+        Logger.LogInformation("BluetoothAudioSource: WASAPI loopback generator acquired after device connected");
       }
       else
       {
@@ -270,22 +341,19 @@ public class BluetoothAudioSource : USBAudioSourceBase
     MetadataInternal["PlaybackStatus"] = e.ToString();
     Logger.LogDebug("Bluetooth playback status: {Status}", e);
 
-    // On platform-managed path, mirror the phone's playback state so the UI
-    // accurately reflects whether the phone is playing or paused.
-    if (_bluetoothService.IsAudioManagedByPlatform)
+    // Mirror the phone's playback state so the UI accurately reflects
+    // whether the phone is playing or paused (drives play history + state updates).
+    switch (e)
     {
-      switch (e)
-      {
-        case BluetoothPlaybackStatus.Playing when State == AudioSourceState.Ready || State == AudioSourceState.Paused:
-          State = AudioSourceState.Playing;
-          break;
-        case BluetoothPlaybackStatus.Paused when State == AudioSourceState.Playing:
-          State = AudioSourceState.Paused;
-          break;
-        case BluetoothPlaybackStatus.Stopped when State == AudioSourceState.Playing || State == AudioSourceState.Paused:
-          State = AudioSourceState.Stopped;
-          break;
-      }
+      case BluetoothPlaybackStatus.Playing when State == AudioSourceState.Ready || State == AudioSourceState.Paused:
+        State = AudioSourceState.Playing;
+        break;
+      case BluetoothPlaybackStatus.Paused when State == AudioSourceState.Playing:
+        State = AudioSourceState.Paused;
+        break;
+      case BluetoothPlaybackStatus.Stopped when State == AudioSourceState.Playing || State == AudioSourceState.Paused:
+        State = AudioSourceState.Stopped;
+        break;
     }
   }
 }

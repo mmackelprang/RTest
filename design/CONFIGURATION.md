@@ -894,6 +894,7 @@ The following configuration items were added as part of the Bluetooth audio sour
 | `AudioQuality` | Enum | High | Audio stream quality preference (Standard/High) |
 | `EnableA2dpSink` | bool | true | Enable Windows AudioPlaybackConnection for A2DP sink (requires build 19041+ and MSIX identity) |
 | `EnableMediaSessionMonitoring` | bool | true | Enable Windows SMTC monitoring for AVRCP-equivalent track metadata |
+| `EnableLoopbackCapture` | bool | true | Enable WASAPI loopback capture to route BT audio through SoundFlow (Cast, viz, modifiers). Windows only. |
 
 ### BluetoothPreferences
 **Location**: `src/Radio.Core/Configuration/BluetoothPreferences.cs`

@@ -1,6 +1,7 @@
 using System.Runtime.Versioning;
 using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio;
 using Windows.Media.Control;
 using Windows.Storage.Streams;
 
@@ -15,6 +16,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth.Windows;
 internal sealed class WindowsMediaSessionWatcher : IDisposable
 {
   private readonly ILogger _logger;
+  private readonly AlbumArtCacheService? _albumArtCache;
   private GlobalSystemMediaTransportControlsSessionManager? _sessionManager;
   private GlobalSystemMediaTransportControlsSession? _currentSession;
   private bool _disposed;
@@ -28,9 +30,10 @@ internal sealed class WindowsMediaSessionWatcher : IDisposable
   /// <summary>Fired when playback position changes.</summary>
   public event EventHandler<TimeSpan>? PositionChanged;
 
-  public WindowsMediaSessionWatcher(ILogger logger)
+  public WindowsMediaSessionWatcher(ILogger logger, AlbumArtCacheService? albumArtCache = null)
   {
     _logger = logger;
+    _albumArtCache = albumArtCache;
   }
 
   /// <summary>
@@ -129,7 +132,7 @@ internal sealed class WindowsMediaSessionWatcher : IDisposable
       string? albumArtUrl = null;
       if (props.Thumbnail != null)
       {
-        albumArtUrl = await SaveThumbnailToDataUriAsync(props.Thumbnail);
+        albumArtUrl = await SaveThumbnailAsync(props.Thumbnail);
       }
 
       var duration = TimeSpan.Zero;
@@ -209,7 +212,7 @@ internal sealed class WindowsMediaSessionWatcher : IDisposable
     }
   }
 
-  private async Task<string?> SaveThumbnailToDataUriAsync(IRandomAccessStreamReference thumbnail)
+  private async Task<string?> SaveThumbnailAsync(IRandomAccessStreamReference thumbnail)
   {
     try
     {
@@ -223,10 +226,15 @@ internal sealed class WindowsMediaSessionWatcher : IDisposable
         return null;
 
       // Detect MIME type from magic bytes
-      var mime = bytes.Length >= 3 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E
-        ? "image/png"
-        : "image/jpeg";
+      var mime = AlbumArtCacheService.DetectMimeFromBytes(bytes) ?? "image/jpeg";
 
+      // Prefer file cache (produces HTTP URL for Cast devices)
+      if (_albumArtCache != null)
+      {
+        return await _albumArtCache.SaveAsync(bytes, mime);
+      }
+
+      // Fallback: base64 data URI (no cache service available)
       return $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
     }
     catch (Exception ex)

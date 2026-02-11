@@ -1,3 +1,6 @@
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using Microsoft.AspNetCore.SignalR;
 using Radio.API.Hubs;
 using Radio.API.Mappers;
@@ -5,7 +8,6 @@ using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Outputs;
-using System.Linq;
 
 namespace Radio.API.Services;
 
@@ -21,6 +23,7 @@ public class AudioStateUpdateService : BackgroundService
   private readonly IAudioManager? _audioManager;
   private readonly IBluetoothService? _bluetoothService;
   private readonly GoogleCastOutput? _castOutput;
+  private string? _apiBaseUrl;
 
   /// <summary>
   /// Gets or sets the update interval in milliseconds (default: 500ms).
@@ -45,16 +48,20 @@ public class AudioStateUpdateService : BackgroundService
   public AudioStateUpdateService(
     ILogger<AudioStateUpdateService> logger,
     IHubContext<AudioStateHub> hubContext,
-    IServiceProvider serviceProvider)
+    IServiceProvider serviceProvider,
+    IConfiguration configuration)
   {
     _logger = logger;
     _hubContext = hubContext;
-    
+
     // Try to get IAudioManager, but don't fail if it's not available
     // This allows the service to start even if audio infrastructure isn't fully initialized
     _audioManager = serviceProvider.GetService<IAudioManager>();
     _bluetoothService = serviceProvider.GetService<IBluetoothService>();
     _castOutput = serviceProvider.GetService<GoogleCastOutput>();
+
+    // Resolve API base URL for making relative album art URLs absolute (needed by Cast devices)
+    ResolveApiBaseUrl(configuration);
     
     if (_audioManager == null)
     {
@@ -179,17 +186,115 @@ public class AudioStateUpdateService : BackgroundService
 
     try
     {
+      // Cast devices need absolute HTTP URLs for album art — resolve relative paths
+      var albumArtUrl = ResolveAlbumArtUrl(nowPlaying.AlbumArtUrl);
+
       await _castOutput.UpdateNowPlayingMetadataAsync(
         nowPlaying.Title,
         nowPlaying.Artist,
         nowPlaying.Album,
-        nowPlaying.AlbumArtUrl,
+        albumArtUrl,
         cancellationToken);
     }
     catch (Exception ex)
     {
       _logger.LogDebug(ex, "Failed to push metadata to Cast device");
     }
+  }
+
+  /// <summary>
+  /// Resolves a relative album art URL to an absolute URL for Cast devices.
+  /// Relative paths like /api/albumart/abc123.jpg become http://{lanIp}:{port}/api/albumart/abc123.jpg.
+  /// </summary>
+  private string? ResolveAlbumArtUrl(string? albumArtUrl)
+  {
+    if (string.IsNullOrEmpty(albumArtUrl))
+      return albumArtUrl;
+
+    // Already absolute or data URI — return as-is
+    if (albumArtUrl.StartsWith("http://") || albumArtUrl.StartsWith("https://") || albumArtUrl.StartsWith("data:"))
+      return albumArtUrl;
+
+    // Relative path (e.g., /api/albumart/abc123.jpg) — prepend API base URL
+    if (_apiBaseUrl != null && albumArtUrl.StartsWith("/"))
+      return _apiBaseUrl + albumArtUrl;
+
+    return albumArtUrl;
+  }
+
+  /// <summary>
+  /// Resolves the API base URL (http://{lanIp}:{port}) for constructing absolute URLs.
+  /// </summary>
+  private void ResolveApiBaseUrl(IConfiguration configuration)
+  {
+    try
+    {
+      // Try Urls from configuration first, then Kestrel endpoints
+      var urls = configuration["Urls"] ?? configuration["ASPNETCORE_URLS"];
+      int port = 5000; // default
+      if (!string.IsNullOrEmpty(urls))
+      {
+        // Parse first HTTP URL to extract port
+        var firstUrl = urls.Split(';').FirstOrDefault(u => u.StartsWith("http://"));
+        if (firstUrl != null && Uri.TryCreate(firstUrl, UriKind.Absolute, out var uri))
+        {
+          port = uri.Port;
+        }
+      }
+
+      var lanIp = GetLocalIPAddress();
+      if (lanIp != null)
+      {
+        _apiBaseUrl = $"http://{lanIp}:{port}";
+        _logger.LogInformation("Resolved API base URL for Cast album art: {BaseUrl}", _apiBaseUrl);
+      }
+      else
+      {
+        _logger.LogWarning("Could not resolve LAN IP for Cast album art URLs");
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Error resolving API base URL");
+    }
+  }
+
+  /// <summary>
+  /// Gets the local LAN IP address. Filters out virtual adapters (Hyper-V, WSL, Docker).
+  /// </summary>
+  private static string? GetLocalIPAddress()
+  {
+    string? fallbackIp = null;
+
+    foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+    {
+      if (ni.OperationalStatus != OperationalStatus.Up)
+        continue;
+      if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+        continue;
+
+      var desc = ni.Description.ToLowerInvariant();
+      var name = ni.Name.ToLowerInvariant();
+      var isVirtual = desc.Contains("hyper-v") || desc.Contains("virtual") ||
+                      name.Contains("vethernet") || name.Contains("wsl") ||
+                      desc.Contains("docker") || desc.Contains("vmware") ||
+                      desc.Contains("virtualbox");
+
+      var props = ni.GetIPProperties();
+      foreach (var addr in props.UnicastAddresses)
+      {
+        if (addr.Address.AddressFamily != AddressFamily.InterNetwork ||
+            IPAddress.IsLoopback(addr.Address))
+          continue;
+
+        if (!isVirtual)
+          return addr.Address.ToString();
+
+        fallbackIp ??= addr.Address.ToString();
+      }
+    }
+
+    return fallbackIp;
   }
 
   private async Task CheckQueueAsync(IAudioSource? activeSource, CancellationToken cancellationToken)
@@ -402,22 +507,22 @@ public class AudioStateUpdateService : BackgroundService
     // Get metadata if available
     if (activeSource is IPrimaryAudioSource primaryMeta)
     {
-      _logger.LogDebug("Building NowPlaying for {SourceName}: HasMetadata={HasMetadata}, MetadataCount={Count}", 
+      _logger.LogDebug("Building NowPlaying for {SourceName}: HasMetadata={HasMetadata}, MetadataCount={Count}",
         primaryMeta.Name, primaryMeta.Metadata != null, primaryMeta.Metadata?.Count ?? 0);
-      
+
       if (primaryMeta.Metadata != null && primaryMeta.Metadata.Count > 0)
       {
         // Log metadata keys for debugging
         _logger.LogDebug("Metadata keys: {Keys}", string.Join(", ", primaryMeta.Metadata.Keys));
-        
+
         var metadataDto = primaryMeta.MapToNowPlaying();
         dto.Title = metadataDto.Title;
         dto.Artist = metadataDto.Artist;
         dto.Album = metadataDto.Album;
         dto.AlbumArtUrl = metadataDto.AlbumArtUrl;
         dto.ExtendedMetadata = metadataDto.ExtendedMetadata;
-        
-        _logger.LogDebug("Extracted metadata: Title={Title}, Artist={Artist}, Album={Album}", 
+
+        _logger.LogDebug("Extracted metadata: Title={Title}, Artist={Artist}, Album={Album}",
           dto.Title, dto.Artist, dto.Album);
       }
       else

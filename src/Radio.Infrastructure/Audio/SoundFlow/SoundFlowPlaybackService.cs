@@ -427,6 +427,23 @@ public class SoundFlowPlaybackService : IDisposable
       // Set volume on the component
       component.Volume = volume;
 
+      // Add visualization tap if visualizer service is available
+      VisualizationTapModifier? tapModifier = null;
+      if (_visualizerService != null)
+      {
+        try
+        {
+          tapModifier = new VisualizationTapModifier(_visualizerService, component.Format);
+          component.AddModifier(tapModifier);
+          _logger.LogDebug("PlayComponentAsync: Added visualization tap modifier to {ComponentName}", component.Name ?? component.GetType().Name);
+        }
+        catch (Exception ex)
+        {
+          _logger.LogWarning(ex, "PlayComponentAsync: Failed to add visualization tap modifier");
+          tapModifier = null;
+        }
+      }
+
       // Add to the playback device's mixer
       _logger.LogInformation(
         "🔊 AUDIO ROUTING: Adding component '{ComponentName}' to SoundFlow mixer (SourceId={SourceId}, Volume={Volume:P0})",
@@ -434,10 +451,14 @@ public class SoundFlowPlaybackService : IDisposable
 
       playbackDevice.MasterMixer.AddComponent(component);
 
-      // Track the component
+      // Track the component and tap
       lock (_playersLock)
       {
         _activeComponents[sourceId] = component;
+        if (tapModifier != null)
+        {
+          _visualizationTaps[sourceId] = tapModifier;
+        }
       }
 
       _logger.LogInformation(
@@ -514,6 +535,9 @@ public class SoundFlowPlaybackService : IDisposable
         _logger.LogInformation(
           "🔇 AUDIO ROUTING: Removing component '{ComponentName}' from SoundFlow mixer (SourceId={SourceId})",
           componentName, sourceId);
+
+        // Flush any remaining visualization data
+        tapModifier?.Flush();
 
         playbackDevice?.MasterMixer.RemoveComponent(component);
         component.Dispose();

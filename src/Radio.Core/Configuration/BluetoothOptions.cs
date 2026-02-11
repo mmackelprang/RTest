@@ -41,6 +41,14 @@ public class BluetoothOptions
   /// Provides track title, artist, album, duration, and album art from connected devices.
   /// </summary>
   public bool EnableMediaSessionMonitoring { get; set; } = true;
+
+  /// <summary>
+  /// Enable WASAPI loopback capture to route Bluetooth audio through SoundFlow pipeline.
+  /// Windows only. When enabled, BT audio goes through SoundFlow for Cast, visualization,
+  /// modifiers, and output device selection. When false, platform manages audio directly
+  /// (no Cast/viz for BT audio).
+  /// </summary>
+  public bool EnableLoopbackCapture { get; set; } = true;
 }
 
 /// <summary>

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio;
 using Radio.Infrastructure.Audio.Factories;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Outputs;
@@ -103,6 +104,9 @@ public static class AudioServiceExtensions
       var metricsCollector = sp.GetService<IMetricsCollector>();
       return Platform.Bluetooth.BluetoothServiceFactory.Create(sp, options, logger, deviceManager, metricsCollector);
     });
+
+    // Register album art cache service (singleton for disk-backed image cache)
+    services.AddSingleton<AlbumArtCacheService>();
 
     // Register audio manager (singleton to maintain state)
     services.AddSingleton<AudioManager>();

@@ -12,6 +12,8 @@ using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio;
+using Radio.Infrastructure.Audio.SoundFlow;
 using SoundFlow.Backends.MiniAudio;
 using SoundFlow.Enums;
 using SoundFlow.Structs;
@@ -24,6 +26,8 @@ internal sealed class WindowsBluetoothService : IBluetoothService
     private readonly BluetoothOptions _options;
     private readonly Radio.Infrastructure.Audio.SoundFlow.SoundFlowDeviceManager? _deviceManager;
     private readonly IMetricsCollector? _metricsCollector;
+    private readonly SoundFlowPlaybackService? _playbackService;
+    private readonly AlbumArtCacheService? _albumArtCache;
     private BluetoothClient _client;
     private BluetoothRadio? _radio;
     private readonly Timer _stateTimer;
@@ -35,6 +39,8 @@ internal sealed class WindowsBluetoothService : IBluetoothService
 #if WINDOWS_TARGET
     private Windows.WindowsA2dpSinkManager? _a2dpSinkManager;
     private Windows.WindowsMediaSessionWatcher? _mediaSessionWatcher;
+    private Windows.WasapiLoopbackCaptureSource? _loopbackCapture;
+    private BufferedSoundGenerator<float>? _loopbackGenerator;
 #endif
 
     // Connection stability: require device to be connected for 2 consecutive polls
@@ -134,12 +140,16 @@ internal sealed class WindowsBluetoothService : IBluetoothService
         ILogger logger,
         IOptions<BluetoothOptions> options,
         Radio.Infrastructure.Audio.SoundFlow.SoundFlowDeviceManager? deviceManager = null,
-        IMetricsCollector? metricsCollector = null)
+        IMetricsCollector? metricsCollector = null,
+        SoundFlowPlaybackService? playbackService = null,
+        AlbumArtCacheService? albumArtCache = null)
     {
         _logger = logger;
         _options = options.Value;
         _deviceManager = deviceManager;
         _metricsCollector = metricsCollector;
+        _playbackService = playbackService;
+        _albumArtCache = albumArtCache;
         _client = new BluetoothClient();
 
         // Try to get the primary radio at construction time
@@ -198,10 +208,10 @@ internal sealed class WindowsBluetoothService : IBluetoothService
     public Radio.Core.Interfaces.Audio.BluetoothDeviceInfo? ConnectedDevice { get; private set; }
 
 #if WINDOWS_TARGET
-    // True when A2DP sink manager is initialized — platform routes audio to system speakers,
-    // no SoundFlow capture device will exist. Don't wait for IsConnected: the DeviceWatcher
-    // may not have matched a device yet at source init time.
-    public bool IsAudioManagedByPlatform => _a2dpSinkManager != null;
+    // Platform manages audio ONLY when A2DP sink is active but loopback capture is disabled.
+    // When loopback capture is enabled, audio goes through SoundFlow (we capture it via WASAPI).
+    public bool IsAudioManagedByPlatform =>
+      _a2dpSinkManager != null && !_options.EnableLoopbackCapture;
 #else
     public bool IsAudioManagedByPlatform => false;
 #endif
@@ -433,7 +443,7 @@ internal sealed class WindowsBluetoothService : IBluetoothService
         {
             try
             {
-                _mediaSessionWatcher = new Windows.WindowsMediaSessionWatcher(_logger);
+                _mediaSessionWatcher = new Windows.WindowsMediaSessionWatcher(_logger, _albumArtCache);
                 _mediaSessionWatcher.MetadataChanged += (s, e) => MetadataChanged?.Invoke(this, e);
                 _mediaSessionWatcher.PlaybackStatusChanged += (s, e) => PlaybackStatusChanged?.Invoke(this, e);
                 _mediaSessionWatcher.PositionChanged += (s, e) => PositionChanged?.Invoke(this, e);
@@ -679,10 +689,40 @@ internal sealed class WindowsBluetoothService : IBluetoothService
     public Task<object?> GetAudioCaptureDeviceAsync(CancellationToken cancellationToken = default)
     {
 #if WINDOWS_TARGET
-        // When A2DP sink manager is initialized, audio routes to system speakers — no capture device needed.
-        if (_a2dpSinkManager != null)
+        // When A2DP sink + loopback capture are both enabled, return a BufferedSoundGenerator
+        // that will receive audio from WASAPI loopback capture
+        if (_a2dpSinkManager != null && _options.EnableLoopbackCapture && _playbackService != null)
         {
-            _logger.LogInformation("A2DP sink manager active — audio managed by platform, no capture device needed");
+            try
+            {
+                var engine = _playbackService.GetUnderlyingEngine();
+                if (engine == null)
+                {
+                    _logger.LogWarning("SoundFlow engine not available for loopback capture");
+                    return Task.FromResult<object?>(null);
+                }
+
+                var format = _playbackService.GetAudioFormat();
+                _loopbackCapture = new Windows.WasapiLoopbackCaptureSource(_logger);
+                _loopbackGenerator = _loopbackCapture.CreateGenerator(engine, format, _logger);
+
+                _logger.LogInformation(
+                  "WASAPI loopback capture device created — BT audio will route through SoundFlow pipeline");
+                return Task.FromResult<object?>(_loopbackGenerator);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to create WASAPI loopback capture — falling back to platform-managed audio");
+                _loopbackCapture?.Dispose();
+                _loopbackCapture = null;
+                _loopbackGenerator = null;
+            }
+        }
+
+        // When A2DP sink is active but loopback disabled — platform manages audio
+        if (_a2dpSinkManager != null && !_options.EnableLoopbackCapture)
+        {
+            _logger.LogInformation("A2DP sink manager active (loopback disabled) — audio managed by platform");
             return Task.FromResult<object?>(null);
         }
 #endif
@@ -777,6 +817,50 @@ internal sealed class WindowsBluetoothService : IBluetoothService
         return Task.FromResult<object?>(null);
     }
 
+    /// <summary>
+    /// Starts WASAPI loopback capture. Call after registering the generator with the mixer.
+    /// </summary>
+    internal void StartLoopbackCapture()
+    {
+#if WINDOWS_TARGET
+        if (_loopbackCapture == null || _loopbackGenerator == null)
+        {
+            _logger.LogDebug("StartLoopbackCapture: no loopback capture/generator available");
+            return;
+        }
+
+        // Double-play detection: check if SoundFlow output is the same as Windows default
+        var soundFlowOutputId = _deviceManager?.GetSelectedOutputDeviceId();
+        var isSameDevice = _loopbackCapture.IsSameDeviceAsDefault(soundFlowOutputId);
+        var shouldMute = !isSameDevice;
+
+        if (isSameDevice)
+        {
+            _logger.LogInformation(
+              "WASAPI loopback: SoundFlow output is same as Windows default — " +
+              "NOT muting endpoint (AudioPlaybackConnection handles local output, SoundFlow handles Cast/viz)");
+        }
+        else
+        {
+            _logger.LogInformation(
+              "WASAPI loopback: SoundFlow output differs from Windows default — " +
+              "muting default endpoint, SoundFlow handles all output");
+        }
+
+        _loopbackCapture.StartCapture(_loopbackGenerator, shouldMute);
+#endif
+    }
+
+    /// <summary>
+    /// Stops WASAPI loopback capture and restores endpoint state.
+    /// </summary>
+    internal void StopLoopbackCapture()
+    {
+#if WINDOWS_TARGET
+        _loopbackCapture?.StopCapture();
+#endif
+    }
+
     private void RecordDisconnectionMetrics()
     {
         _metricsCollector?.Increment("bluetooth.devices_disconnected_total");
@@ -810,6 +894,11 @@ internal sealed class WindowsBluetoothService : IBluetoothService
         UnregisterAuthenticationCallback();
 
 #if WINDOWS_TARGET
+        // Dispose loopback capture (restores endpoint mute state)
+        _loopbackCapture?.Dispose();
+        _loopbackCapture = null;
+        _loopbackGenerator = null;
+
         // Dispose A2DP sink manager and media session watcher
         _a2dpSinkManager?.Dispose();
         _a2dpSinkManager = null;

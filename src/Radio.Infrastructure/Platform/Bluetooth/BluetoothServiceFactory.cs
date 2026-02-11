@@ -5,6 +5,8 @@ using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio;
+using Radio.Infrastructure.Audio.SoundFlow;
 
 namespace Radio.Infrastructure.Platform.Bluetooth;
 
@@ -22,9 +24,14 @@ public static class BluetoothServiceFactory
           return new NullBluetoothService();
       }
 
+      var playbackService = serviceProvider.GetService<SoundFlowPlaybackService>();
+      var albumArtCache = serviceProvider.GetService<AlbumArtCacheService>();
+
 #if WINDOWS_TARGET
       // Windows TFM: only WindowsBluetoothService is compiled
-      return new WindowsBluetoothService(loggerFactory.CreateLogger<WindowsBluetoothService>(), options, deviceManager, metricsCollector);
+      return new WindowsBluetoothService(
+        loggerFactory.CreateLogger<WindowsBluetoothService>(), options, deviceManager,
+        metricsCollector, playbackService, albumArtCache);
 #else
       // net8.0 TFM: select by runtime OS detection
       if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
@@ -33,7 +40,9 @@ public static class BluetoothServiceFactory
       }
       else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
       {
-          return new WindowsBluetoothService(loggerFactory.CreateLogger<WindowsBluetoothService>(), options, deviceManager, metricsCollector);
+          return new WindowsBluetoothService(
+            loggerFactory.CreateLogger<WindowsBluetoothService>(), options, deviceManager,
+            metricsCollector, playbackService, albumArtCache);
       }
       else
       {
