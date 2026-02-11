@@ -29,6 +29,26 @@ public class BluetoothOptions
 
   /// <summary>Audio quality settings.</summary>
   public BluetoothAudioQuality AudioQuality { get; set; } = BluetoothAudioQuality.High;
+
+  /// <summary>
+  /// Enable Windows AudioPlaybackConnection for A2DP sink (receive audio from phone).
+  /// Requires Windows 10 2004+ (build 19041) and MSIX sparse package identity.
+  /// </summary>
+  public bool EnableA2dpSink { get; set; } = true;
+
+  /// <summary>
+  /// Enable Windows SMTC (System Media Transport Controls) monitoring for AVRCP-equivalent metadata.
+  /// Provides track title, artist, album, duration, and album art from connected devices.
+  /// </summary>
+  public bool EnableMediaSessionMonitoring { get; set; } = true;
+
+  /// <summary>
+  /// Enable WASAPI loopback capture to route Bluetooth audio through SoundFlow pipeline.
+  /// Windows only. When enabled, BT audio goes through SoundFlow for Cast, visualization,
+  /// modifiers, and output device selection. When false, platform manages audio directly
+  /// (no Cast/viz for BT audio).
+  /// </summary>
+  public bool EnableLoopbackCapture { get; set; } = true;
 }
 
 /// <summary>

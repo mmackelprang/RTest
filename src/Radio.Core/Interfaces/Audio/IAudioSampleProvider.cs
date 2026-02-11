@@ -37,4 +37,12 @@ public interface IAudioSampleProvider
   /// over tap-based capture, since AcoustID requires accurate track duration.
   /// </summary>
   string? SourceFilePath { get; }
+
+  /// <summary>
+  /// Gets whether the active source needs fingerprinting identification.
+  /// Returns false when the source already has complete metadata (e.g., file with tags,
+  /// Bluetooth with complete AVRCP data). Returns true for sources without metadata
+  /// (radio, vinyl, USB) or sources with incomplete metadata.
+  /// </summary>
+  bool NeedsFingerprintingLookup { get; }
 }

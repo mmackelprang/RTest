@@ -28,6 +28,8 @@ public sealed class MockBluetoothService : IBluetoothService
         public bool IsDiscovering { get; private set; }
         public BluetoothDeviceInfo? ConnectedDevice { get; set; }
 
+        public bool IsAudioManagedByPlatform => false;
+
         // Suppress "event never used" warning for mocks
 #pragma warning disable 67
         public event EventHandler<BluetoothAdapterStateChangedEventArgs>? StateChanged;
@@ -38,6 +40,9 @@ public sealed class MockBluetoothService : IBluetoothService
         public event EventHandler<BluetoothPlaybackMetadata>? MetadataChanged;
         public event EventHandler<BluetoothPlaybackStatus>? PlaybackStatusChanged;
         public event EventHandler<TimeSpan>? PositionChanged { add { } remove { } }
+        public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged { add { } remove { } }
+        public float? DeviceVolume => null;
+        public Task SetDeviceVolumeAsync(float volume) => Task.CompletedTask;
 
         public Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default)
         {
@@ -114,5 +119,11 @@ public sealed class MockBluetoothService : IBluetoothService
         {
             ConnectedDevice = device;
             DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = device });
-    }
+        }
+
+        public void SimulateDisconnection(BluetoothDeviceInfo device)
+        {
+            ConnectedDevice = null;
+            DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs { Device = device });
+        }
 }

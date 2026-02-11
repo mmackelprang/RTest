@@ -1456,46 +1456,106 @@ public class BluetoothAudioSource : IPrimaryAudioSource
 
 The Bluetooth implementation enables the Radio Console to act as a Bluetooth speaker (A2DP Sink).
 
-**Architecture:**
+**Windows Audio Flow:**
 ```
-Bluetooth Device (Phone/Tablet)
+Phone/Tablet
     ↓ [A2DP Stream]
-Platform Service (IBluetoothService)
-    ├── Linux: BlueZ via DBus (Tmds.DBus)
-    └── Windows: Win32 API (32feet.NET / InTheHand)
-          ↓ [PCM Audio via OS Loopback/Input]
-BluetoothAudioSource (IPrimaryAudioSource)
-    ↓ [SoundFlow AudioCaptureDevice]
-SoundFlow Mixer
+AudioPlaybackConnection (WinRT, build 19041+)
+    ↓ [PCM routed by OS]
+System Default Speakers          WindowsMediaSessionWatcher (SMTC)
+    (audio playback)                  ↓ [Title, Artist, Album, Art, Duration]
+                                 BluetoothAudioSource metadata events
 ```
+On Windows, `AudioPlaybackConnection` routes phone audio directly to the system default
+speakers — SoundFlow is not involved in audio capture. Track metadata comes from
+`GlobalSystemMediaTransportControlsSessionManager` (SMTC), which provides AVRCP-equivalent
+data. MSIX sparse package identity is required (`packaging/register-identity.ps1`);
+without it, the A2DP connection drops after ~5 seconds.
+
+**Linux Audio Flow (Target Platform):**
+```
+Phone/Tablet
+    ↓ [A2DP Stream]
+BlueZ + PipeWire/PulseAudio
+    ↓ [bluez_sink.XX_XX_XX.monitor capture device]
+SoundFlow AudioCaptureDevice
+    ↓ [PCM samples]
+MasterMixer → Modifiers → PlaybackDevice
+    (full pipeline: balance, visualization, fingerprinting)
+```
+On Linux (Raspberry Pi), BlueZ creates a capture device that SoundFlow reads from,
+enabling the full audio pipeline including modifiers, visualization, and fingerprinting.
+AVRCP metadata comes directly from BlueZ MediaPlayer1 D-Bus interface.
 
 **Feature Support Matrix:**
 
-| Feature | Linux (BlueZ) | Windows (Win32) |
-|---------|---------------|-----------------|
-| Discovery | ✅ Yes | ✅ Yes (Polling) |
-| Pairing | ✅ Yes | ✅ Yes |
-| A2DP Sink | ✅ Yes (PulseAudio/PipeWire) | ✅ Yes (OS Managed) |
-| Metadata (AVRCP) | ✅ Yes (Artist/Title/Status) | ⚠️ Basic (Device Name only) |
-| Playback Control | ✅ Yes (Pause/Resume) | ⚠️ Basic (Mute only) |
+| Feature | Linux (BlueZ) | Windows (WinRT + Win32) |
+|---------|---------------|-------------------------|
+| Discovery | ✅ D-Bus watcher | ✅ InTheHand polling |
+| Pairing | ✅ BluezAgent (auto-accept) | ✅ P/Invoke auth callback |
+| A2DP Sink | ✅ PipeWire/PulseAudio capture | ✅ AudioPlaybackConnection |
+| Audio Pipeline | ✅ Full SoundFlow pipeline | ⚠️ OS speakers only (no SoundFlow) |
+| Metadata (AVRCP) | ✅ BlueZ MediaPlayer1 | ✅ SMTC (Title/Artist/Album/Art/Duration) |
+| Playback Status | ✅ BlueZ Status property | ✅ SMTC PlaybackInfo |
+| Position Tracking | ✅ BlueZ Position property | ✅ SMTC TimelineProperties |
+| Album Art | ✅ MPRIS ArtUrl | ✅ SMTC Thumbnail (saved to temp file) |
+| MSIX Identity | N/A | Required for AudioPlaybackConnection |
 
-**Platform Setup (Linux/Raspberry Pi):**
-```bash
-# Install dependencies
-sudo apt-get install bluez pulseaudio-module-bluetooth libasound2-dev
+---
 
-# Configure BlueZ for A2DP Sink (in /etc/bluetooth/main.conf)
-# Class = 0x200414 (Audio Sink)
-# ControllerMode = bredr
+### Platform Setup
 
-# Restart Bluetooth
-sudo systemctl restart bluetooth
-```
+#### Windows Setup
 
-**Platform Setup (Windows):**
-- Enable Bluetooth in Windows Settings.
-- Pair device normally; Windows handles the A2DP profile automatically.
-- The application detects the corresponding Audio Input Endpoint.
+1. **Requirements:** Windows 10 2004+ (build 19041), Bluetooth adapter
+2. **MSIX package identity registration** (one-time, requires Administrator):
+   ```powershell
+   cd packaging
+   .\register-identity.ps1
+   # Verify:
+   Get-AppxPackage -Name 'RadioConsole.GrandpasRadio'
+   ```
+3. Enable Bluetooth in Windows Settings
+4. In `appsettings.json`, set:
+   ```json
+   "Bluetooth": {
+     "Enabled": true,
+     "EnableA2dpSink": true,
+     "EnableMediaSessionMonitoring": true
+   }
+   ```
+5. Start the application — the Bluetooth adapter becomes discoverable
+6. Pair phone → audio streams to PC speakers, track metadata appears in UI
+
+#### Raspberry Pi Setup
+
+1. **Install dependencies:**
+   ```bash
+   sudo apt-get install bluez bluez-tools pulseaudio pulseaudio-module-bluetooth
+   # OR for PipeWire (recommended for Raspberry Pi OS Bookworm+):
+   sudo apt-get install bluez bluez-tools pipewire pipewire-pulse libspa-0.2-bluetooth
+   ```
+2. **Configure BlueZ A2DP Sink** in `/etc/bluetooth/main.conf`:
+   ```ini
+   [General]
+   Class = 0x200414        # Audio Sink device class
+   ControllerMode = bredr   # Classic Bluetooth (not BLE)
+   Name = Radio Console     # Visible name (overridden by app config)
+   DiscoverableTimeout = 0  # Always discoverable
+
+   [Policy]
+   AutoEnable = true
+   ```
+3. **Enable and restart Bluetooth:**
+   ```bash
+   sudo systemctl enable bluetooth
+   sudo systemctl restart bluetooth
+   ```
+4. **Configure PulseAudio/PipeWire Bluetooth module:**
+   - PulseAudio: ensure `module-bluetooth-discover` is loaded in `/etc/pulse/default.pa`
+   - PipeWire: ensure `bluez5` SPA plugin is enabled (default on Bookworm+)
+5. In `appsettings.json`, set `Bluetooth:Enabled = true`
+6. Run the application — BlueZ agent auto-accepts pairing, audio flows through SoundFlow pipeline
 
 ### Unit Tests Required
 

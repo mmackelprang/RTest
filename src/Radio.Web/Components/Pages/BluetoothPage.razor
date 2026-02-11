@@ -1,0 +1,483 @@
+@page "/bluetooth"
+@using Radio.Web.Services.ApiClients
+@using Radio.Web.Models
+@inject BluetoothApiService BluetoothApi
+@inject ISnackbar Snackbar
+@inject ILogger<BluetoothPage> Logger
+
+<PageTitle>Bluetooth - Radio Console</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.False" Class="pa-4">
+  <MudStack Spacing="3">
+
+    @* Header *@
+    <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+      <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+        <MudIcon Icon="@Icons.Material.Filled.Bluetooth" Size="Size.Large" />
+        <MudText Typo="Typo.h4">Bluetooth</MudText>
+      </MudStack>
+      <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                 OnClick="RefreshStatusAsync" StartIcon="@Icons.Material.Filled.Refresh">
+        Refresh
+      </MudButton>
+    </MudStack>
+
+    @if (_isLoading)
+    {
+      <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else if (_status == null)
+    {
+      <MudAlert Severity="Severity.Warning">
+        Unable to reach the Bluetooth API. Make sure the API server is running.
+      </MudAlert>
+    }
+    else
+    {
+      @* Adapter Status Card *@
+      <MudPaper Elevation="2" Class="pa-4">
+        <MudStack Spacing="2">
+          <MudText Typo="Typo.h6">Adapter Status</MudText>
+
+          <MudStack Row="true" Spacing="4" AlignItems="AlignItems.Center">
+            <MudStack Spacing="0">
+              <MudText Typo="Typo.caption" Color="Color.Secondary">Available</MudText>
+              <MudChip T="string" Size="Size.Small"
+                       Color="@(_status.IsAvailable ? Color.Success : Color.Error)"
+                       Icon="@(_status.IsAvailable ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Cancel)">
+                @(_status.IsAvailable ? "Yes" : "No")
+              </MudChip>
+            </MudStack>
+
+            <MudStack Spacing="0">
+              <MudText Typo="Typo.caption" Color="Color.Secondary">State</MudText>
+              <MudChip T="string" Size="Size.Small" Color="@GetStateColor(_status.State)">
+                @_status.State
+              </MudChip>
+            </MudStack>
+
+            <MudStack Spacing="0">
+              <MudText Typo="Typo.caption" Color="Color.Secondary">Discovery</MudText>
+              <MudChip T="string" Size="Size.Small"
+                       Color="@(_status.IsDiscovering ? Color.Info : Color.Default)">
+                @(_status.IsDiscovering ? "Scanning..." : "Idle")
+              </MudChip>
+            </MudStack>
+
+            <MudSpacer />
+
+            @* Adapter Controls *@
+            @if (_status.IsAvailable && _status.State == "On")
+            {
+              <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small"
+                         OnClick="StopAdapterAsync" StartIcon="@Icons.Material.Filled.BluetoothDisabled">
+                Disable
+              </MudButton>
+            }
+            else if (_status.IsAvailable)
+            {
+              <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                         OnClick="StartAdapterAsync" StartIcon="@Icons.Material.Filled.Bluetooth">
+                Enable
+              </MudButton>
+            }
+          </MudStack>
+        </MudStack>
+      </MudPaper>
+
+      @* Connected Device Card *@
+      <MudPaper Elevation="2" Class="pa-4">
+        <MudStack Spacing="2">
+          <MudText Typo="Typo.h6">Connected Device</MudText>
+
+          @if (_status.ConnectedDevice != null)
+          {
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3">
+              <MudIcon Icon="@Icons.Material.Filled.BluetoothConnected" Color="Color.Success" Size="Size.Large" />
+              <MudStack Spacing="0">
+                <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">@_status.ConnectedDevice.Name</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@_status.ConnectedDevice.Address</MudText>
+              </MudStack>
+              <MudSpacer />
+              <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
+                         OnClick="DisconnectAsync" StartIcon="@Icons.Material.Filled.LinkOff"
+                         Disabled="@_isDisconnecting">
+                @if (_isDisconnecting)
+                {
+                  <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                  <span>Disconnecting</span>
+                }
+                else
+                {
+                  <span>Disconnect</span>
+                }
+              </MudButton>
+            </MudStack>
+          }
+          else
+          {
+            <MudAlert Severity="Severity.Info" Dense="true">
+              No device connected. Pair a device below, or connect a previously paired device.
+            </MudAlert>
+          }
+        </MudStack>
+      </MudPaper>
+
+      @* Paired Devices *@
+      <MudPaper Elevation="2" Class="pa-4">
+        <MudStack Spacing="2">
+          <MudText Typo="Typo.h6">Paired Devices</MudText>
+
+          @if (_status.PairedDevices.Count == 0)
+          {
+            <MudAlert Severity="Severity.Info" Dense="true">No paired devices. Use Discovery below to find and pair devices.</MudAlert>
+          }
+          else
+          {
+            <MudTable Items="@_status.PairedDevices" Hover="true" Striped="true" Dense="true">
+              <HeaderContent>
+                <MudTh>Name</MudTh>
+                <MudTh>Address</MudTh>
+                <MudTh>Status</MudTh>
+                <MudTh>Actions</MudTh>
+              </HeaderContent>
+              <RowTemplate>
+                <MudTd DataLabel="Name">
+                  <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                    <MudIcon Icon="@Icons.Material.Filled.BluetoothConnected" Size="Size.Small"
+                             Color="@(context.IsConnected ? Color.Success : Color.Default)" />
+                    <MudText>@context.Name</MudText>
+                  </MudStack>
+                </MudTd>
+                <MudTd DataLabel="Address">
+                  <MudText Typo="Typo.body2" Style="font-family: monospace;">@context.Address</MudText>
+                </MudTd>
+                <MudTd DataLabel="Status">
+                  @if (context.IsConnected)
+                  {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Success">Connected</MudChip>
+                  }
+                  else
+                  {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Default">Paired</MudChip>
+                  }
+                </MudTd>
+                <MudTd DataLabel="Actions">
+                  <MudStack Row="true" Spacing="1">
+                    @if (!context.IsConnected)
+                    {
+                      <MudButton Variant="Variant.Text" Color="Color.Error" Size="Size.Small"
+                                 OnClick="@(() => UnpairAsync(context.Address))">
+                        Unpair
+                      </MudButton>
+                    }
+                  </MudStack>
+                </MudTd>
+              </RowTemplate>
+            </MudTable>
+          }
+        </MudStack>
+      </MudPaper>
+
+      @* Discovery Section *@
+      <MudPaper Elevation="2" Class="pa-4">
+        <MudStack Spacing="2">
+          <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+            <MudText Typo="Typo.h6">Device Discovery</MudText>
+            @if (_status.IsDiscovering)
+            {
+              <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small"
+                         OnClick="StopDiscoveryAsync" StartIcon="@Icons.Material.Filled.Stop">
+                Stop Scan
+              </MudButton>
+            }
+            else
+            {
+              <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                         OnClick="StartDiscoveryAsync" StartIcon="@Icons.Material.Filled.Search"
+                         Disabled="@(!_status.IsAvailable)">
+                Start Scan
+              </MudButton>
+            }
+          </MudStack>
+
+          @if (_status.IsDiscovering)
+          {
+            <MudProgressLinear Indeterminate="true" Color="Color.Info" />
+          }
+
+          @if (_status.DiscoveredDevices.Count == 0)
+          {
+            <MudAlert Severity="Severity.Info" Dense="true">
+              @if (_status.IsDiscovering)
+              {
+                <span>Scanning for nearby Bluetooth devices...</span>
+              }
+              else
+              {
+                <span>No devices discovered. Click "Start Scan" to search for nearby devices.</span>
+              }
+            </MudAlert>
+          }
+          else
+          {
+            <MudTable Items="@_status.DiscoveredDevices" Hover="true" Striped="true" Dense="true">
+              <HeaderContent>
+                <MudTh>Name</MudTh>
+                <MudTh>Address</MudTh>
+                <MudTh>Actions</MudTh>
+              </HeaderContent>
+              <RowTemplate>
+                <MudTd DataLabel="Name">
+                  <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                    <MudIcon Icon="@Icons.Material.Filled.BluetoothSearching" Size="Size.Small" />
+                    <MudText>@(string.IsNullOrEmpty(context.Name) ? "(Unknown)" : context.Name)</MudText>
+                  </MudStack>
+                </MudTd>
+                <MudTd DataLabel="Address">
+                  <MudText Typo="Typo.body2" Style="font-family: monospace;">@context.Address</MudText>
+                </MudTd>
+                <MudTd DataLabel="Actions">
+                  @if (context.IsPaired)
+                  {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Success">Already Paired</MudChip>
+                  }
+                  else
+                  {
+                    <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
+                               OnClick="@(() => PairAsync(context.Address))"
+                               Disabled="@(_pairingAddress == context.Address)">
+                      @if (_pairingAddress == context.Address)
+                      {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                        <span>Pairing...</span>
+                      }
+                      else
+                      {
+                        <span>Pair</span>
+                      }
+                    </MudButton>
+                  }
+                </MudTd>
+              </RowTemplate>
+            </MudTable>
+          }
+        </MudStack>
+      </MudPaper>
+    }
+
+  </MudStack>
+</MudContainer>
+
+@code {
+  private BluetoothStatusDto? _status;
+  private bool _isLoading = true;
+  private bool _isDisconnecting;
+  private string? _pairingAddress;
+
+  protected override async Task OnInitializedAsync()
+  {
+    await RefreshStatusAsync();
+  }
+
+  private async Task RefreshStatusAsync()
+  {
+    try
+    {
+      _isLoading = true;
+      StateHasChanged();
+
+      _status = await BluetoothApi.GetStatusAsync();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error loading Bluetooth status");
+      Snackbar.Add("Error loading Bluetooth status", Severity.Error);
+    }
+    finally
+    {
+      _isLoading = false;
+      StateHasChanged();
+    }
+  }
+
+  private async Task StartAdapterAsync()
+  {
+    try
+    {
+      var success = await BluetoothApi.StartAsync();
+      if (success)
+      {
+        Snackbar.Add("Bluetooth adapter enabled", Severity.Success);
+        await RefreshStatusAsync();
+      }
+      else
+      {
+        Snackbar.Add("Failed to enable Bluetooth adapter", Severity.Warning);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error enabling Bluetooth adapter");
+      Snackbar.Add("Error enabling Bluetooth adapter", Severity.Error);
+    }
+  }
+
+  private async Task StopAdapterAsync()
+  {
+    try
+    {
+      var success = await BluetoothApi.StopAsync();
+      if (success)
+      {
+        Snackbar.Add("Bluetooth adapter disabled", Severity.Success);
+        await RefreshStatusAsync();
+      }
+      else
+      {
+        Snackbar.Add("Failed to disable Bluetooth adapter", Severity.Warning);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error disabling Bluetooth adapter");
+      Snackbar.Add("Error disabling Bluetooth adapter", Severity.Error);
+    }
+  }
+
+  private async Task StartDiscoveryAsync()
+  {
+    try
+    {
+      var success = await BluetoothApi.StartDiscoveryAsync();
+      if (success)
+      {
+        Snackbar.Add("Discovery started — scanning for devices", Severity.Info);
+        await RefreshStatusAsync();
+      }
+      else
+      {
+        Snackbar.Add("Failed to start discovery", Severity.Warning);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error starting Bluetooth discovery");
+      Snackbar.Add("Error starting discovery", Severity.Error);
+    }
+  }
+
+  private async Task StopDiscoveryAsync()
+  {
+    try
+    {
+      var success = await BluetoothApi.StopDiscoveryAsync();
+      if (success)
+      {
+        Snackbar.Add("Discovery stopped", Severity.Info);
+        await RefreshStatusAsync();
+      }
+      else
+      {
+        Snackbar.Add("Failed to stop discovery", Severity.Warning);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error stopping Bluetooth discovery");
+      Snackbar.Add("Error stopping discovery", Severity.Error);
+    }
+  }
+
+  private async Task PairAsync(string address)
+  {
+    try
+    {
+      _pairingAddress = address;
+      StateHasChanged();
+
+      var success = await BluetoothApi.PairAsync(address);
+      if (success)
+      {
+        Snackbar.Add("Device paired successfully", Severity.Success);
+        await RefreshStatusAsync();
+      }
+      else
+      {
+        Snackbar.Add("Failed to pair device", Severity.Warning);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error pairing Bluetooth device {Address}", address);
+      Snackbar.Add("Error pairing device", Severity.Error);
+    }
+    finally
+    {
+      _pairingAddress = null;
+      StateHasChanged();
+    }
+  }
+
+  private async Task UnpairAsync(string address)
+  {
+    try
+    {
+      var success = await BluetoothApi.UnpairAsync(address);
+      if (success)
+      {
+        Snackbar.Add("Device unpaired", Severity.Success);
+        await RefreshStatusAsync();
+      }
+      else
+      {
+        Snackbar.Add("Failed to unpair device", Severity.Warning);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error unpairing Bluetooth device {Address}", address);
+      Snackbar.Add("Error unpairing device", Severity.Error);
+    }
+  }
+
+  private async Task DisconnectAsync()
+  {
+    try
+    {
+      _isDisconnecting = true;
+      StateHasChanged();
+
+      var success = await BluetoothApi.DisconnectAsync();
+      if (success)
+      {
+        Snackbar.Add("Device disconnected", Severity.Success);
+        await RefreshStatusAsync();
+      }
+      else
+      {
+        Snackbar.Add("Failed to disconnect device", Severity.Warning);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error disconnecting Bluetooth device");
+      Snackbar.Add("Error disconnecting device", Severity.Error);
+    }
+    finally
+    {
+      _isDisconnecting = false;
+      StateHasChanged();
+    }
+  }
+
+  private static Color GetStateColor(string state)
+  {
+    return state switch
+    {
+      "On" => Color.Success,
+      "Off" => Color.Error,
+      _ => Color.Default
+    };
+  }
+}

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MSIX Sparse Package Manifest for Radio Console.
+  Required for AudioPlaybackConnection (A2DP Sink) on Windows 10 2004+.
+  Desktop apps without package identity lose the A2DP connection after ~5 seconds.
+
+  Registration: Run packaging/register-identity.ps1 as Administrator (one-time).
+  Unregistration: Run packaging/unregister-identity.ps1 as Administrator.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  IgnorableNamespaces="uap rescap uap10">
+
+  <Identity
+    Name="RadioConsole.GrandpasRadio"
+    Publisher="CN=RadioConsole"
+    Version="1.0.0.0"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>Grandpa's Radio Console</DisplayName>
+    <PublisherDisplayName>Radio Console</PublisherDisplayName>
+    <Description>Modern audio command center with Bluetooth A2DP sink support</Description>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.22621.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <Application Id="RadioConsole" Executable="Radio.API.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="Grandpa's Radio Console"
+        Description="Radio Console Application"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <Capability Name="internetClient" />
+    <rescap:Capability Name="runFullTrust" />
+    <DeviceCapability Name="bluetooth" />
+  </Capabilities>
+</Package>

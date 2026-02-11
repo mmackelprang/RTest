@@ -35,6 +35,11 @@ public class MockAudioSampleProvider : IAudioSampleProvider
   public string? SourceFilePath { get; set; }
 
   /// <summary>
+  /// Gets or sets whether the source needs fingerprinting identification.
+  /// </summary>
+  public bool NeedsFingerprintingLookup { get; set; } = true;
+
+  /// <summary>
   /// Sets the mock source as active and configures its properties.
   /// </summary>
   public void SetActive(bool active, string? sourceName = null, PlaySource? sourceType = null)

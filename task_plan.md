@@ -1,190 +1,163 @@
-# Task Plan: Dynamic TTS Voice Retrieval, Caching & Favorites
+# Task Plan: UI Fixes & UAT Prep
 
 ## Goal
-Replace hardcoded TTS voice lists with on-demand API enumeration for Google and Azure engines. Cache voices in the fingerprinting SQLite database. Add a "favorite voices" feature persisted to the same database. Update the Web UI to show voice dropdowns for all cloud engines with favorites at the top. Prioritize low-cost and US/UK English voices in sort order.
+Fix Web UI issues, improve Material 3 compliance and touch-friendliness, clean up dead code/logging, fix play history display, simplify navigation by merging/removing redundant pages, enhance metrics with filtering and sparklines, verify device defaults and store management, and create deployment scripts for Raspberry Pi and x64 Debian.
 
 ## Current Phase
-Phase 1: Requirements & Discovery
+Phase 0: Planning
 
 ## Phases
 
-### Phase 1: Requirements & Discovery
-- [x] Explore TTSFactory voice methods (Google hardcoded, Azure already dynamic)
-- [x] Explore Web UI voice selection (SystemConfigPage.razor)
-- [x] Explore SQLite repository patterns (FingerprintDbContext, SqliteRadioPresetRepository)
-- [x] Explore API endpoints (SourcesController TTS routes)
-- [x] Research Google/Azure voice API response formats and pricing tiers
-- [x] Document findings and design approach
-- **Status:** complete
-
-### Phase 2: Database & Repository Layer
-- [ ] Add `TTSVoiceCache` and `TTSVoiceFavorites` tables to FingerprintDbContext
-- [ ] Create `ITTSVoiceRepository` interface in Core
-- [ ] Create `SqliteTTSVoiceRepository` implementation in Infrastructure
-- [ ] Register in DI (FingerprintingServiceExtensions)
-- [ ] Write unit tests for repository
+### Phase 1: Quick Fixes & Dead Code Cleanup
+- [ ] Remove commented-out `Console.WriteLine` and unused timing variables from `VisualizationTapModifier.cs` (lines 64-70)
+- [ ] Remove balance control from `NowPlayingPanel.razor` (lines 108-122) — balance stays "centered" permanently
+- [ ] Set balance to 0.0 in `AudioManager.RestoreVolumePreferences()` to ensure centered on startup regardless of stored value
+- [ ] Fix source color mapping in `QueueHistoryPanel.razor` (lines 283-292): remove "Spotify", change "FilePlayer" to "File", add "Bluetooth" → Color.Secondary, add "Vinyl" → Color.Success
 - **Status:** pending
+- **Key files:**
+  - `src/Radio.Infrastructure/Audio/SoundFlow/VisualizationTapModifier.cs`
+  - `src/Radio.Web/Components/Shared/NowPlayingPanel.razor`
+  - `src/Radio.Web/Components/Shared/QueueHistoryPanel.razor`
+  - `src/Radio.Infrastructure/Audio/Services/AudioManager.cs`
 
-### Phase 3: TTSFactory Voice Enumeration
-- [ ] Add `RefreshVoicesAsync(engine)` method — fetches from API, stores in DB cache
-- [ ] Replace `GetGoogleVoicesAsync()` hardcoded list with DB cache read (no auto-fetch)
-- [ ] Update `GetAzureVoicesAsync()` to use DB cache instead of in-memory 24h cache
-- [ ] Add favorite management methods to ITTSFactory
-- [ ] Wire favorites + price tier sorting into voice listing
-- [ ] Write unit tests for voice enumeration
+### Phase 2: Title Bar — Mute & Volume Only
+- [ ] Strip mini-player from `MainLayout.razor` (lines 84-154): remove album art, track title/artist, transport controls (prev/pause/next)
+- [ ] Keep only mute button + volume slider in the title bar center section
+- [ ] Wire mute/volume to match NowPlayingPanel behavior exactly: same API calls (`AudioApi.SetVolumeAsync`, `AudioApi.ToggleMuteAsync`), same SignalR event subscriptions (`PlaybackStateChanged` → refresh volume/mute state)
+- [ ] Ensure bidirectional sync: volume change in title bar reflects in NowPlayingPanel and vice versa (already happens via SignalR, but verify)
+- [ ] Increase touch target size for mute button to 48dp minimum (M3 compliance)
 - **Status:** pending
+- **Key files:**
+  - `src/Radio.Web/Components/Layout/MainLayout.razor` (lines 84-154, 732-768)
 
-### Phase 4: API & Web UI
-- [ ] Add `POST /api/sources/events/tts/voices/refresh?engine=Google` endpoint
-- [ ] Add API endpoints for favorites CRUD
-- [ ] Update SystemConfigPage.razor: voice dropdown for all cloud engines
-- [ ] Add "Scan for Voices" button per engine
-- [ ] Add favorite toggle (star icon) on each voice
-- [ ] Show favorites at top, then Standard/free tier, then premium
-- [ ] Write bUnit tests
+### Phase 3: Play History Display Fix
+- [ ] Fix `QueueHistoryPanel.razor` Recent Plays to display: **Song Name**, **Artist**, **Song Length** (duration), **Source chip** (device type)
+- [ ] Investigate why Bluetooth entries show stream URL instead of song metadata — trace `PlayHistoryEntryDto.Track?.Title` for BT source entries. Root cause is likely `AudioStateUpdateService` recording the stream URL as the title when no AVRCP metadata is available
+- [ ] Fix play history recording to use AVRCP metadata (Title/Artist) when available, fall back to source type name ("Bluetooth Audio") instead of stream URL
+- [ ] Update `PlayHistoryEntryDto` display in QueueHistoryPanel: line 1 = Title (bold), line 2 = "Artist · Duration", right side = Source chip
+- [ ] Fix full PlayHistoryPage source color mapping to match QueueHistoryPanel fixes
 - **Status:** pending
+- **Key files:**
+  - `src/Radio.Web/Components/Shared/QueueHistoryPanel.razor`
+  - `src/Radio.Web/Components/Pages/PlayHistoryPage.razor`
+  - `src/Radio.API/Services/AudioStateUpdateService.cs` (play history recording)
+  - `src/Radio.Web/Models/ApiModels.cs` (PlayHistoryEntryDto)
 
-### Phase 5: Testing & Verification
-- [ ] `dotnet build --configuration Release` — 0 warnings, 0 errors
-- [ ] All existing tests pass
-- [ ] New tests pass
+### Phase 4: Merge Files into Queue & Remove Redundant Pages
+- [ ] **Queue Page Enhancement**: Add a tabbed or collapsible file browser section to `QueuePage.razor` — import the file browsing functionality from `FileBrowserPage.razor` (drive selector, breadcrumb nav, custom path, search/filter, virtual keyboard)
+- [ ] Layout: Queue list on top (or left), file browser on bottom (or right) with a toggle/tab
+- [ ] Migrate all `FileBrowserPage.razor` state management, API calls, and UI into `QueuePage.razor`
+- [ ] **Remove Files page**: Delete `FileBrowserPage.razor`, remove `/files` route, remove `_showFilesNav` conditional and folder icon from `MainLayout.razor`
+- [ ] **Remove Visualizer page**: Delete `VisualizerPage.razor`, remove `/visualizer` route and icon from `MainLayout.razor` (embedded visualizer on Home is sufficient)
+- [ ] Update "Add Files to Queue" button to trigger inline file browser instead of dialog
+- [ ] Verify all file browser API service calls still work from new location
 - **Status:** pending
+- **Key files:**
+  - `src/Radio.Web/Components/Pages/QueuePage.razor`
+  - `src/Radio.Web/Components/Pages/FileBrowserPage.razor` (source, then DELETE)
+  - `src/Radio.Web/Components/Pages/VisualizerPage.razor` (DELETE)
+  - `src/Radio.Web/Components/Layout/MainLayout.razor` (nav cleanup)
 
-### Phase 6: Delivery
-- [ ] Commit when user requests
+### Phase 5: Metrics Page — Filtering & Sparklines
+- [ ] Add category filter chips (API, Audio, Bluetooth, Library, Radio, System, TTS, UI, WebSocket) at the top — filter grid to selected category
+- [ ] Fix "Memory Usage Mb" formatting bug — the `FormatMetricValue` method (line 333-350) incorrectly applies percentage format to MB values. Add specific handling for "memory" metrics.
+- [ ] Add sparklines to each metric card: small inline SVG or canvas showing the last N data points. Use the existing `MetricsApi.GetMetricAggregateAsync()` to fetch time-series data for each visible metric.
+- [ ] Consider using MudBlazor `MudSparkLine` component if available, or a lightweight canvas-based sparkline
+- [ ] Improve card visual hierarchy: larger values, better category labels, M3 tonal card backgrounds
+- **Status:** pending
+- **Key files:**
+  - `src/Radio.Web/Components/Pages/MetricsDashboardPage.razor`
+  - `src/Radio.Web/Services/ApiClients/MetricsApiService.cs`
+
+### Phase 6: Device Defaults & Store Management Verification
+- [ ] **Device defaults on startup**: Trace the startup code path to verify that persisted default output device and Cast device are actually used when the app starts. Check `AudioManager.InitializeAsync()` and `AudioEngineInitializationService`.
+- [ ] **Input device default**: Add "Set as Default" action to input devices on DeviceManagementPage (currently read-only)
+- [ ] **Store Management verification**: Test JSON export, DB backup export, and DB backup import with the current multi-database architecture (configuration.db, secrets.db, fingerprints.db, metrics.db). Ensure the Store Management UI handles or at least acknowledges all databases.
+- [ ] Document any gaps in store management (e.g., does export include secrets.db? fingerprints.db?)
+- **Status:** pending
+- **Key files:**
+  - `src/Radio.Web/Components/Pages/DeviceManagementPage.razor`
+  - `src/Radio.Web/Components/Pages/SystemConfigPage.razor` (Tab 7: Store Management)
+  - `src/Radio.API/Services/AudioEngineInitializationService.cs`
+  - `src/Radio.Infrastructure/Audio/Services/AudioManager.cs`
+
+### Phase 7: Material 3 Theme Polish
+- [ ] **MudBlazor theme**: Update `MudThemeProvider` palette for M3 dark theme — surface tonal elevation (surface = #1C1B1F, surfaceContainer = #211F26, etc.), primary seed color, on-surface text colors
+- [ ] **Touch targets**: Audit all interactive elements (buttons, sliders, icons) and ensure minimum 48dp touch targets. Add padding where needed.
+- [ ] **Button variants**: Replace text-only action buttons with M3 filled-tonal buttons for primary actions, outlined for secondary
+- [ ] **App bar**: Increase title bar height from 60px to 64dp (M3 standard). Ensure nav icons have proper padding.
+- [ ] **Chips**: Update source type chips to use M3 tonal chip style (filled with secondary-container color)
+- [ ] **Elevation**: Apply M3 surface tint to MudPaper components — higher elevation = lighter tint
+- **Status:** pending
+- **Key files:**
+  - `src/Radio.Web/Components/Layout/MainLayout.razor` (theme provider)
+  - `src/Radio.Web/wwwroot/css/` (global styles)
+  - All Razor components with inline styles
+
+### Phase 8: Deployment Scripts (Raspberry Pi & Debian x64)
+- [ ] Create `deploy/raspberry-pi/setup.sh`:
+  - Install .NET 8 runtime (ARM64)
+  - Install system dependencies: `libmp3lame-dev`, `libasound2-dev`, `avahi-daemon` (mDNS for Cast discovery), `bluez` (Bluetooth), `pulseaudio` or `pipewire`
+  - Download/extract fpcalc ARM64 binary to `tools/fpcalc/`
+  - Create systemd service files for Radio.API and Radio.Web
+  - Configure `netsh`-equivalent port permissions (iptables/firewall rules)
+  - Create data directories (`./data/config`, `./data/metrics`, `./data/fingerprints`, `./data/secrets`, `./data/albumart`, `./data/backups`)
+  - Set up HTTP URL reservation (Kestrel doesn't need this on Linux, but firewall rules)
+  - Build and publish self-contained for `linux-arm64`
+- [ ] Create `deploy/debian-x64/setup.sh`:
+  - Same as RPi but targeting `linux-x64` runtime
+  - Install .NET 8 runtime (x64)
+  - Same system dependencies
+  - fpcalc x64 binary
+  - systemd service files
+- [ ] Create `deploy/DEPLOYMENT.md`:
+  - Prerequisites (hardware, OS, network)
+  - Step-by-step instructions for both platforms
+  - Configuration (appsettings.json customization for each environment)
+  - Troubleshooting (common issues: port conflicts, audio devices, Bluetooth pairing, Cast discovery)
+  - How to update/upgrade
+- [ ] Create `deploy/common/radio-api.service` and `radio-web.service` (systemd unit files)
+- [ ] Create `deploy/common/publish.sh` — cross-compile helper (builds for target platform from Windows dev box)
+- **Status:** pending
+- **Key files (all new):**
+  - `deploy/raspberry-pi/setup.sh`
+  - `deploy/debian-x64/setup.sh`
+  - `deploy/common/radio-api.service`
+  - `deploy/common/radio-web.service`
+  - `deploy/common/publish.sh`
+  - `deploy/DEPLOYMENT.md`
+
+### Phase 9: Build Verification & Test
+- [ ] `dotnet build --configuration Release` — 0 warnings
+- [ ] `dotnet test --configuration Release` — all tests pass
+- [ ] Manual smoke test: Home page, play history, queue with file browser, metrics, devices, system/store management
+- [ ] Test deployment scripts on actual Raspberry Pi (if available) or in Docker ARM64 emulation
 - **Status:** pending
 
 ## Design Decisions
 
-### Database: Use FingerprintDbContext (fingerprints.db)
-- Already has the DbContext + Repository pattern for similar data
-- Repositories registered as scoped, DbContext as singleton
-- Two new tables: `TTSVoiceCache`, `TTSVoiceFavorites`
+### Balance Control Removal
+Rather than hiding the balance control behind a settings menu, we permanently remove it from the Now Playing panel. Balance is always centered (0.0). The `BalanceModifier` remains in the audio pipeline but is never exposed in the UI. If balance control is needed in the future, it can be re-added to a Settings/Audio page.
 
-### Voice Cache Table Schema
-```sql
-CREATE TABLE IF NOT EXISTS TTSVoiceCache (
-  Id INTEGER PRIMARY KEY AUTOINCREMENT,
-  Engine TEXT NOT NULL,        -- "Google" or "Azure"
-  VoiceId TEXT NOT NULL,       -- e.g. "en-US-Standard-A"
-  Name TEXT NOT NULL,          -- e.g. "US Standard A (Male)"
-  Language TEXT NOT NULL,      -- e.g. "en-US"
-  Gender TEXT NOT NULL,        -- "Male", "Female", "Neutral"
-  PriceTier TEXT NOT NULL,     -- "Standard", "WaveNet", "Neural2", "Studio", "Neural", etc.
-  LastUpdated TEXT NOT NULL,   -- ISO 8601
-  UNIQUE(Engine, VoiceId)
-);
-```
+### Title Bar Simplification
+The title bar serves as a persistent quick-access control. With the full Now Playing panel always visible on the home page, the title bar doesn't need duplicate transport controls or track info. Mute + volume is the most-used quick control and keeps the bar clean.
 
-### Voice Favorites Table Schema
-```sql
-CREATE TABLE IF NOT EXISTS TTSVoiceFavorites (
-  Id INTEGER PRIMARY KEY AUTOINCREMENT,
-  Engine TEXT NOT NULL,
-  VoiceId TEXT NOT NULL,
-  AddedAt TEXT NOT NULL,
-  UNIQUE(Engine, VoiceId)
-);
-```
+### Queue/Files Merge Strategy
+The Queue page becomes the single destination for both queue management and file browsing. Use a two-section layout:
+- **Top**: Current queue (existing functionality)
+- **Bottom**: File browser (migrated from FileBrowserPage) with a collapsible section or tab
 
-### Google Cloud TTS Voice API
-- `GET https://texttospeech.googleapis.com/v1/voices?key={apiKey}&languageCode=en`
-- Response: `{ voices: [{ languageCodes: ["en-US"], name: "en-US-Standard-A", ssmlGender: "MALE", naturalSampleRateHertz: 24000 }] }`
-- Filter to `en-*` languages
-- **Price tier inferred from voice name**: `{locale}-{Tier}-{Letter}`
-  - `Standard` — cheapest ($4/M chars, first 4M free/month)
-  - `WaveNet` — mid ($16/M chars, first 1M free)
-  - `Neural2` — mid ($16/M chars, first 1M free)
-  - `Studio` — premium ($100/M chars)
-  - `Journey`, `Casual`, `Polyglot` — premium ($16-100/M chars)
+This eliminates the confusing conditional Files nav icon and gives users a unified experience.
 
-### Azure TTS Voice API (already partially implemented)
-- `GET https://{region}.tts.speech.microsoft.com/cognitiveservices/voices/list`
-- Response includes `VoiceType` field: `"Standard"` (cheap) vs `"Neural"` (premium)
-- Filter to `en-*` locales
+### Material 3 Approach
+MudBlazor v6+ supports custom theming. We'll define a M3-compliant dark theme palette using the MudBlazor `MudTheme` API rather than custom CSS where possible. The primary color will shift from pure cyan to a M3-harmonized teal/cyan seed color with proper tonal palette generation.
 
-### Cache Strategy — On-Demand Only
-- **No automatic fetching** — voices are only fetched when the user clicks "Scan for Voices"
-- If DB cache has voices for the engine, serve from cache
-- If DB cache is empty for the engine, the voice dropdown shows "No voices cached — click Scan"
-- Stale cache is fine — user refreshes manually when they want new voices
-- No cache expiration (user controls refresh)
-
-### Voice Ordering (within each engine)
-1. **Favorites** (sorted by name) — visual separator below
-2. **Standard/free tier** + US English (`en-US-Standard-*`)
-3. **Standard/free tier** + UK English (`en-GB-Standard-*`)
-4. **Standard/free tier** + other English
-5. **WaveNet/Neural2 tier** + US English
-6. **WaveNet/Neural2 tier** + UK English
-7. **WaveNet/Neural2 tier** + other English
-8. **Premium tier** (Studio, Journey, etc.) + US English
-9. **Premium tier** + UK/other English
-
-**Simplified sort key**: `(isFavorite DESC, priceTierRank ASC, languageRank ASC, name ASC)`
-- `priceTierRank`: Standard=0, WaveNet/Neural2=1, Studio/Journey/Casual/Polyglot=2, Neural(Azure)=1
-- `languageRank`: en-US=0, en-GB=1, other en-*=2
-
-### Price Tier Extraction
-**Google**: Parse from voice name — split on `-`, tier is the 3rd segment:
-  `en-US-Standard-A` → tier = "Standard"
-  `en-US-Neural2-C` → tier = "Neural2"
-
-**Azure**: Use `VoiceType` field from API response directly
-
-### ITTSFactory Extensions
-```csharp
-// Existing
-Task<IReadOnlyList<TTSVoiceInfo>> GetVoicesAsync(TTSEngine engine, CancellationToken ct = default);
-
-// New
-Task<int> RefreshVoicesAsync(TTSEngine engine, CancellationToken ct = default);
-Task SetVoiceFavoriteAsync(TTSEngine engine, string voiceId, CancellationToken ct = default);
-Task RemoveVoiceFavoriteAsync(TTSEngine engine, string voiceId, CancellationToken ct = default);
-```
-
-### TTSVoiceInfo Extension
-Add two properties to TTSVoiceInfo record:
-```csharp
-public bool IsFavorite { get; init; }
-public string PriceTier { get; init; } = "Standard";
-```
-
-### API Endpoints
-| Method | Route | Description |
-|--------|-------|-------------|
-| GET | `/api/sources/events/tts/voices?engine=Google` | Returns cached voices with favorites+pricing sort |
-| POST | `/api/sources/events/tts/voices/refresh?engine=Google` | Fetches from cloud API, stores in DB, returns count |
-| POST | `/api/sources/events/tts/voices/favorites` | Add favorite `{ engine, voiceId }` |
-| DELETE | `/api/sources/events/tts/voices/favorites` | Remove favorite `{ engine, voiceId }` |
-
-### Web UI Changes
-- Voice dropdown for **all cloud engines** (not just Google)
-- "Scan for Voices" button with refresh icon next to engine selector
-  - Shows spinner during scan, then "Found N voices" snackbar
-  - Button disabled if engine has no API key configured
-- Each voice item in dropdown shows:
-  - Star icon (filled=favorite, click to toggle)
-  - Voice name
-  - Price tier badge (e.g. "Standard", "Neural2")
-- Favorites section at top with visual divider
-- If no cached voices: message "No voices cached. Click Scan to discover available voices."
-
-## Files Summary (Estimated)
-
-| Action | File |
-|--------|------|
-| Modify | `src/Radio.Infrastructure/Audio/Fingerprinting/Data/FingerprintDbContext.cs` |
-| Create | `src/Radio.Core/Interfaces/Audio/ITTSVoiceRepository.cs` |
-| Create | `src/Radio.Infrastructure/Audio/TTS/Data/SqliteTTSVoiceRepository.cs` |
-| Modify | `src/Radio.Infrastructure/DependencyInjection/FingerprintingServiceExtensions.cs` |
-| Modify | `src/Radio.Core/Interfaces/Audio/ITTSFactory.cs` |
-| Modify | `src/Radio.Infrastructure/Audio/Services/TTSFactory.cs` |
-| Modify | `src/Radio.API/Controllers/SourcesController.cs` |
-| Modify | `src/Radio.Web/Models/ApiModels.cs` |
-| Modify | `src/Radio.Web/Services/ApiClients/SourcesApiService.cs` |
-| Modify | `src/Radio.Web/Components/Pages/SystemConfigPage.razor` |
-| Create | `tests/Radio.Infrastructure.Tests/Audio/TTS/SqliteTTSVoiceRepositoryTests.cs` |
+### Deployment Architecture
+Both RPi and Debian deployments use:
+- Self-contained .NET 8 publish (no runtime install needed on target — simplifies deployment)
+- systemd for process management (auto-restart, logging)
+- Single `setup.sh` that handles all dependencies and configuration
+- `publish.sh` on the dev box for cross-compilation
 
 ## Errors Encountered
 | Error | Attempt | Resolution |

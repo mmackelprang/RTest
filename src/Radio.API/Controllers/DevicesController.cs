@@ -68,7 +68,8 @@ public class DevicesController : ControllerBase
     try
     {
       var devices = await _deviceManager.GetOutputDevicesAsync();
-      return Ok(devices.Select(MapToDeviceDto).ToList());
+      var activeId = _deviceManager.GetSelectedOutputDeviceId();
+      return Ok(devices.Select(d => MapToDeviceDto(d, d.Id == activeId)).ToList());
     }
     catch (Exception ex)
     {
@@ -88,12 +89,43 @@ public class DevicesController : ControllerBase
     try
     {
       var devices = await _deviceManager.GetInputDevicesAsync();
-      return Ok(devices.Select(MapToDeviceDto).ToList());
+      var activeInputId = _deviceManager.GetSelectedInputDeviceId();
+      return Ok(devices.Select(d => MapToDeviceDto(d, d.Id == activeInputId)).ToList());
     }
     catch (Exception ex)
     {
       _logger.LogError(ex, "Error getting input devices");
       return StatusCode(500, new { error = "Failed to get input devices" });
+    }
+  }
+
+  /// <summary>
+  /// Sets the preferred input device.
+  /// </summary>
+  /// <param name="request">The device selection request.</param>
+  /// <returns>Success or error response.</returns>
+  [HttpPost("input")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status404NotFound)]
+  public async Task<IActionResult> SetInputDevice([FromBody] SetOutputDeviceRequest request)
+  {
+    try
+    {
+      if (string.IsNullOrWhiteSpace(request.DeviceId))
+        return BadRequest(new { error = "DeviceId is required" });
+
+      await _deviceManager.SetInputDeviceAsync(request.DeviceId);
+      return Ok(new { message = $"Input device set to {request.DeviceId}" });
+    }
+    catch (InvalidOperationException ex)
+    {
+      return NotFound(new { error = ex.Message });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error setting input device");
+      return StatusCode(500, new { error = "Failed to set input device" });
     }
   }
 
@@ -113,7 +145,8 @@ public class DevicesController : ControllerBase
       {
         return NotFound(new { error = "No default output device found" });
       }
-      return Ok(MapToDeviceDto(device));
+      var activeId = _deviceManager.GetSelectedOutputDeviceId();
+      return Ok(MapToDeviceDto(device, device.Id == activeId));
     }
     catch (Exception ex)
     {
@@ -1042,7 +1075,7 @@ public class DevicesController : ControllerBase
     _castOutput.SetNowPlayingMetadata(title, artist, album, albumArtUrl);
   }
 
-  private static AudioDeviceDto MapToDeviceDto(AudioDeviceInfo device)
+  private static AudioDeviceDto MapToDeviceDto(AudioDeviceInfo device, bool isActive = false)
   {
     return new AudioDeviceDto
     {
@@ -1050,6 +1083,7 @@ public class DevicesController : ControllerBase
       Name = device.Name,
       Type = device.Type.ToString(),
       IsDefault = device.IsDefault,
+      IsActive = isActive,
       IsUSBDevice = device.IsUSBDevice,
       USBPort = device.USBPort,
       MaxChannels = device.MaxChannels,

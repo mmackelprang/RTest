@@ -336,6 +336,9 @@ public class HttpStreamOutput : AudioOutputBase
         context.Response.ContentType = "audio/mpeg";
         context.Response.SendChunked = true;
         context.Response.KeepAlive = true;
+        // Signal to Chrome that this is a live stream: no seeking, no caching
+        context.Response.Headers.Add("Accept-Ranges", "none");
+        context.Response.Headers.Add("Cache-Control", "no-cache, no-store");
       }
       else if (isCastEndpoint)
       {
@@ -427,6 +430,9 @@ public class HttpStreamOutput : AudioOutputBase
             {
               // Feed PCM data through LAME encoder — writes MP3 frames to output stream
               mp3Writer.Write(buffer, 0, bytesRead);
+              // Flush encoder output promptly for live streaming — prevents LAME from
+              // buffering multiple frames before delivery, which causes Cast stalls
+              mp3Writer.Flush();
             }
             else
             {

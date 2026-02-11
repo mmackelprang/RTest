@@ -1,0 +1,151 @@
+{
+  "version": 1,
+  "lastModified": "2026-02-11T18:44:17.3418972+00:00",
+  "entries": {
+    "AudioPreferences:CurrentOutput": {
+      "value": "",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3392926+00:00"
+    },
+    "AudioPreferences:CurrentSource": {
+      "value": "Radio",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3392915+00:00"
+    },
+    "AudioPreferences:MasterVolume": {
+      "value": "75",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3392927+00:00"
+    },
+    "AudioPreferences:IsMuted": {
+      "value": "False",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3392928+00:00"
+    },
+    "AudioPreferences:Balance": {
+      "value": "0",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3392931+00:00"
+    },
+    "AudioPreferences:CurrentInput": {
+      "value": "",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3392932+00:00"
+    },
+    "AudioPreferences:DefaultCastDeviceId": {
+      "value": "",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3392933+00:00"
+    },
+    "AudioPreferences:DefaultCastDeviceName": {
+      "value": "",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3392934+00:00"
+    },
+    "FilePlayerPreferences:LastSongPlayed": {
+      "value": "",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3400994+00:00"
+    },
+    "FilePlayerPreferences:SongPositionMs": {
+      "value": "0",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3400997+00:00"
+    },
+    "FilePlayerPreferences:Shuffle": {
+      "value": "False",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3400998+00:00"
+    },
+    "FilePlayerPreferences:Repeat": {
+      "value": "0",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3400999+00:00"
+    },
+    "FilePlayerPreferences:QueueItems": {
+      "value": "[]",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3400999+00:00"
+    },
+    "FilePlayerPreferences:CurrentQueueIndex": {
+      "value": "-1",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3401+00:00"
+    },
+    "TTS:LastEngine": {
+      "value": "ESpeak",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3407328+00:00"
+    },
+    "TTS:LastVoice": {
+      "value": "en",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3407331+00:00"
+    },
+    "TTS:LastPitch": {
+      "value": "1",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3407332+00:00"
+    },
+    "TTS:LastSpeed": {
+      "value": "1",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3407332+00:00"
+    },
+    "Radio:LastBand": {
+      "value": "FM",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3413389+00:00"
+    },
+    "Radio:LastFrequency": {
+      "value": "101.5",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3413393+00:00"
+    },
+    "Radio:LastFrequencyStep": {
+      "value": "0.1",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3413393+00:00"
+    },
+    "Radio:LastDeviceVolume": {
+      "value": "50",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3413394+00:00"
+    },
+    "Radio:LastEqualizerMode": {
+      "value": "Off",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3413394+00:00"
+    },
+    "Radio:LastDeviceType": {
+      "value": "RTLSDRCore",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3413395+00:00"
+    },
+    "GenericSourcePreferences:USBPort": {
+      "value": "",
+      "description": null,
+      "lastModified": "2026-02-11T18:44:17.3418925+00:00"
+    },
+    "ui.visualizer:defaultMode": {
+      "value": "Spectrum",
+      "description": null,
+      "lastModified": "2026-02-11T18:32:15.064446+00:00"
+    },
+    "ui.filebrowser:lastPath": {
+      "value": "d:\\prj\\RTest\\RTest\\Media\\music",
+      "description": null,
+      "lastModified": "2026-02-11T18:37:55.9523494+00:00"
+    },
+    "ui.filebrowser:filterExtension": {
+      "value": "*",
+      "description": null,
+      "lastModified": "2026-02-11T18:37:55.9532105+00:00"
+    },
+    "ui.filebrowser:recentPaths": {
+      "value": "[\u0022d:\\\\prj\\\\RTest\\\\RTest\\\\Media\\\\music\u0022,\u0022d:\\\\prj\\\\RTest\\\\RTest\u0022]",
+      "description": null,
+      "lastModified": "2026-02-11T18:37:55.9538811+00:00"
+    }
+  }
+}

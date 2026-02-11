@@ -130,25 +130,25 @@ public class QueuePageTests : TestContext
   }
 
   [Fact]
-  public void QueuePage_HasAddFilesButton()
+  public void QueuePage_HasBrowseFilesButton()
   {
     // Act
     var cut = RenderComponent<QueuePage>();
 
-    // Assert - Should have "Add Files" button
-    Assert.Contains("Add Files", cut.Markup);
+    // Assert - Should have "Browse Files" toggle button
+    Assert.Contains("Browse Files", cut.Markup);
   }
 
   [Fact]
-  public void QueuePage_EmptyState_HasAddFilesToQueueButton()
+  public void QueuePage_EmptyState_HasBrowseFilesButton()
   {
     // Act
     var cut = RenderComponent<QueuePage>();
 
-    // Assert - Empty state should have large "Add Files to Queue" button
+    // Assert - Empty state should have "Browse Files" button
     cut.WaitForAssertion(() =>
     {
-      Assert.Contains("Add Files to Queue", cut.Markup);
+      Assert.Contains("Browse Files", cut.Markup);
     }, TimeSpan.FromSeconds(2));
   }
 }

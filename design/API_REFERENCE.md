@@ -1658,6 +1658,127 @@ Selects a radio device type (framework in place for future AudioManager integrat
 
 ---
 
+## Bluetooth Management Endpoints
+
+Base path: `/api/bluetooth`
+
+Manage Bluetooth adapter, device discovery, pairing, and connections.
+
+### GET /api/bluetooth/status
+
+Gets current Bluetooth adapter status, connected device, paired and discovered devices.
+
+**Response:** 200 OK
+
+```json
+{
+  "isAvailable": true,
+  "state": "On",
+  "isDiscovering": false,
+  "connectedDevice": {
+    "address": "00:11:22:33:44:55",
+    "name": "My Speaker",
+    "isPaired": true,
+    "isConnected": true,
+    "lastConnected": "2026-02-10T10:30:00Z"
+  },
+  "pairedDevices": [...],
+  "discoveredDevices": [...]
+}
+```
+
+### POST /api/bluetooth/start
+
+Enables the Bluetooth adapter and sets it to discoverable mode.
+
+**Request Body:**
+```json
+{
+  "deviceName": "Radio Console"
+}
+```
+
+**Response:** 200 OK with `BluetoothStatusDto`
+
+**Error Responses:**
+- `400 Bad Request` - Bluetooth not available on this platform
+- `500 Internal Server Error` - Failed to start adapter
+
+### POST /api/bluetooth/stop
+
+Disables the Bluetooth adapter (sets to connectable, non-discoverable mode).
+
+**Response:** 200 OK with `BluetoothStatusDto`
+
+### POST /api/bluetooth/discovery/start
+
+Starts scanning for nearby Bluetooth devices.
+
+**Response:** 202 Accepted
+
+### POST /api/bluetooth/discovery/stop
+
+Stops the active device discovery scan.
+
+**Response:** 202 Accepted
+
+### POST /api/bluetooth/pair
+
+Initiates pairing with a discovered device.
+
+**Request Body:**
+```json
+{
+  "deviceAddress": "00:11:22:33:44:55"
+}
+```
+
+**Response:** 200 OK with `BluetoothStatusDto`
+
+**Error Responses:**
+- `400 Bad Request` - DeviceAddress is required
+- `500 Internal Server Error` - Failed to pair device
+
+### POST /api/bluetooth/unpair
+
+Removes pairing with a previously paired device.
+
+**Request Body:**
+```json
+{
+  "deviceAddress": "00:11:22:33:44:55"
+}
+```
+
+**Response:** 200 OK with `BluetoothStatusDto`
+
+### POST /api/bluetooth/accept
+
+Accepts an incoming Bluetooth connection from a device.
+
+**Request Body:**
+```json
+{
+  "deviceAddress": "00:11:22:33:44:55"
+}
+```
+
+**Response:** 200 OK with `BluetoothStatusDto`
+
+### POST /api/bluetooth/disconnect
+
+Disconnects the currently connected Bluetooth device.
+
+**Response:** 200 OK with `BluetoothStatusDto`
+
+**Notes:**
+- A2DP audio capture is managed internally by `BluetoothAudioSource`
+- AVRCP metadata (track title, artist, album) is delivered via `MetadataChanged` events on Linux (MPRIS/BlueZ)
+- Windows AVRCP requires `net8.0-windows10.0.17763.0` TFM; fingerprinting pipeline serves as fallback
+- Bluetooth metrics (`bluetooth.*`) are automatically recorded for connections, disconnections, discovery, pairing, and audio capture errors
+
+---
+
 ## Sources Management Endpoints
 
 Base path: `/api/sources`

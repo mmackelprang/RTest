@@ -15,6 +15,7 @@ public class AudioEngineInitializationServiceTests
   private readonly Mock<IServiceProvider> _serviceProviderMock;
   private readonly Mock<IOptionsMonitor<AudioPreferences>> _audioPreferencesMock;
   private readonly Mock<IMasterMixer> _masterMixerMock;
+  private readonly Mock<IOptions<BluetoothOptions>> _bluetoothOptionsMock;
 
   public AudioEngineInitializationServiceTests()
   {
@@ -24,6 +25,7 @@ public class AudioEngineInitializationServiceTests
     _serviceProviderMock = new Mock<IServiceProvider>();
     _audioPreferencesMock = new Mock<IOptionsMonitor<AudioPreferences>>();
     _masterMixerMock = new Mock<IMasterMixer>();
+    _bluetoothOptionsMock = new Mock<IOptions<BluetoothOptions>>();
 
     // Setup default audio preferences
     _audioPreferencesMock
@@ -34,6 +36,11 @@ public class AudioEngineInitializationServiceTests
         CurrentOutput = "",
         MasterVolume = 75
       });
+
+    // Setup default Bluetooth options (disabled for tests)
+    _bluetoothOptionsMock
+      .Setup(x => x.Value)
+      .Returns(new BluetoothOptions { Enabled = false, EnableOnStartup = false });
   }
 
   private AudioEngineInitializationService CreateService(IAudioManager? audioManager = null)
@@ -48,6 +55,7 @@ public class AudioEngineInitializationServiceTests
       _deviceManagerMock.Object,
       _audioPreferencesMock.Object,
       _masterMixerMock.Object,
+      _bluetoothOptionsMock.Object,
       _serviceProviderMock.Object);
   }
 

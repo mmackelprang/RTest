@@ -25,11 +25,26 @@ public interface IPlayQueue
   int Count { get; }
 
   /// <summary>
-  /// Retrieves the current playback queue.
+  /// Retrieves the current playback queue (upcoming items only).
   /// </summary>
   /// <param name="cancellationToken">Cancellation token.</param>
   /// <returns>A task representing the async operation that returns the queue items.</returns>
   Task<IReadOnlyList<QueueItem>> GetQueueAsync(CancellationToken cancellationToken = default);
+
+  /// <summary>
+  /// Returns the full playlist: played + current + upcoming, with state annotations.
+  /// </summary>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <returns>All items in playlist order with their current state.</returns>
+  Task<IReadOnlyList<QueueItem>> GetFullPlaylistAsync(CancellationToken cancellationToken = default);
+
+  /// <summary>
+  /// Jumps to a position in the full playlist (including already-played tracks).
+  /// Rebuilds played history and upcoming queue so that the target becomes the current track.
+  /// </summary>
+  /// <param name="index">Zero-based index in the full playlist.</param>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  Task JumpToFullPlaylistIndexAsync(int index, CancellationToken cancellationToken = default);
 
   /// <summary>
   /// Adds a track to the queue.

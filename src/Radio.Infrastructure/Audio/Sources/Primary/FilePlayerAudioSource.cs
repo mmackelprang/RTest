@@ -6,6 +6,7 @@ using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
+using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Infrastructure.Configuration.Abstractions;
 using Radio.Infrastructure.Configuration.Models;
@@ -30,10 +31,12 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private readonly IConfigurationManager? _configurationManager;
   private readonly string _rootDir;
   private readonly Dictionary<string, object> _metadata = new();
+  private readonly HashSet<string> _errorFiles = new();
   private Queue<string> _playlist = new();
   private List<string> _originalOrder = new(); // Store original order for shuffle toggle
   private List<string> _playedHistory = new(); // Track played songs for Previous
   private string? _currentFile;
+  private int _consecutiveSkipCount;
   private ISoundDataProvider? _dataProvider;
   private FileStream? _fileStream;
   private MiniAudioEngine? _audioEngine;
@@ -185,6 +188,8 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     _playlist.Enqueue(fullPath);
     _originalOrder = new List<string> { fullPath };
     _playedHistory.Clear();
+    _errorFiles.Clear();
+    _consecutiveSkipCount = 0;
     _currentIndex = -1; // Will be set when LoadCurrentFileAsync is called
     await LoadCurrentFileAsync(cancellationToken);
 
@@ -233,6 +238,8 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
     _playlist = new Queue<string>(audioFiles);
     _playedHistory.Clear();
+    _errorFiles.Clear();
+    _consecutiveSkipCount = 0;
     _currentIndex = -1; // Will be set when LoadCurrentFileAsync is called
     await LoadCurrentFileAsync(cancellationToken);
 
@@ -274,6 +281,8 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
     _playlist = new Queue<string>(validFiles);
     _playedHistory.Clear();
+    _errorFiles.Clear();
+    _consecutiveSkipCount = 0;
     _currentIndex = -1; // Will be set when LoadCurrentFileAsync is called
     await LoadCurrentFileAsync(cancellationToken);
 
@@ -662,9 +671,13 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       if (!success)
       {
         Logger.LogError("🎵 FILE PLAYER: Failed to start SoundFlow playback for \"{FileName}\"", fileName);
-        State = AudioSourceState.Error;
+        _errorFiles.Add(GetFullPath(_currentFile));
+        await AutoSkipToNextAsync(cancellationToken);
         return;
       }
+
+      // Successful playback start — reset consecutive skip counter
+      _consecutiveSkipCount = 0;
 
       Logger.LogInformation(
         "🎵 FILE PLAYER AUDIO FLOW STARTED: \"{FileName}\" routed to SoundFlow (PlaybackId={PlaybackId})",
@@ -884,6 +897,82 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   }
 
   /// <inheritdoc/>
+  public Task<IReadOnlyList<QueueItem>> GetFullPlaylistAsync(CancellationToken cancellationToken = default)
+  {
+    ThrowIfDisposed();
+    return Task.FromResult<IReadOnlyList<QueueItem>>(GetFullPlaylistInternal());
+  }
+
+  /// <inheritdoc/>
+  public async Task JumpToFullPlaylistIndexAsync(int index, CancellationToken cancellationToken = default)
+  {
+    ThrowIfDisposed();
+
+    var fullList = GetFullPlaylistInOrder();
+    if (index < 0 || index >= fullList.Count)
+    {
+      throw new ArgumentOutOfRangeException(nameof(index), "Index is out of range in the full playlist");
+    }
+
+    var targetFile = fullList[index];
+
+    // Don't jump to error files
+    if (_errorFiles.Contains(targetFile))
+    {
+      Logger.LogWarning("Cannot jump to error file: {File}", Path.GetFileName(targetFile));
+      return;
+    }
+
+    Logger.LogInformation("Jumping to full playlist index {Index}: {Track}", index, Path.GetFileName(targetFile));
+
+    // Rebuild played history = everything before target
+    _playedHistory = fullList.Take(index).ToList();
+
+    // Current = target
+    _currentFile = targetFile;
+    _currentIndex = 0; // Operational index within the upcoming queue
+    _position = TimeSpan.Zero;
+
+    // Rebuild upcoming queue = everything after target
+    _playlist = new Queue<string>(fullList.Skip(index + 1));
+
+    // Load the file
+    CleanupDataProvider();
+
+    try
+    {
+      _audioEngine ??= new MiniAudioEngine();
+      _fileStream = File.OpenRead(_currentFile);
+      _dataProvider = new ChunkedDataProvider(_audioEngine, _fileStream);
+      Logger.LogDebug("Loaded file with SoundFlow: {File}", _currentFile);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "SoundFlow could not decode file: {File}", _currentFile);
+      _errorFiles.Add(_currentFile);
+      _fileStream?.Dispose();
+      _fileStream = null;
+      _dataProvider = null;
+    }
+
+    UpdateMetadataFromFile(_currentFile);
+
+    // Start playback
+    if (State != AudioSourceState.Playing)
+    {
+      State = AudioSourceState.Playing;
+    }
+    await PlayCoreAsync(cancellationToken);
+
+    // Raise QueueChanged event
+    OnQueueChanged(new QueueChangedEventArgs
+    {
+      ChangeType = QueueChangeType.CurrentChanged,
+      AffectedIndex = index
+    });
+  }
+
+  /// <inheritdoc/>
   public async Task AddToQueueAsync(string trackIdentifier, int? position = null, CancellationToken cancellationToken = default)
   {
     ThrowIfDisposed();
@@ -1047,6 +1136,8 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     _playlist.Clear();
     _originalOrder.Clear();
     _playedHistory.Clear();
+    _errorFiles.Clear();
+    _consecutiveSkipCount = 0;
     _currentFile = null;
     _currentIndex = -1;
 
@@ -1239,6 +1330,73 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   }
 
   /// <summary>
+  /// Gets the full playlist in order: played + current + upcoming.
+  /// </summary>
+  private List<string> GetFullPlaylistInOrder()
+  {
+    var fullList = new List<string>(_playedHistory);
+    if (_currentFile != null)
+    {
+      fullList.Add(_currentFile);
+    }
+    fullList.AddRange(_playlist);
+    return fullList;
+  }
+
+  /// <summary>
+  /// Builds the full playlist with state annotations for each item.
+  /// </summary>
+  private List<QueueItem> GetFullPlaylistInternal()
+  {
+    var items = new List<QueueItem>();
+    var fullPlaylistIndex = 0;
+
+    // Played items
+    foreach (var file in _playedHistory)
+    {
+      var state = _errorFiles.Contains(file) ? QueueItemState.Error : QueueItemState.Played;
+      items.Add(CreateQueueItemWithState(file, fullPlaylistIndex, state));
+      fullPlaylistIndex++;
+    }
+
+    // Current item
+    if (_currentFile != null)
+    {
+      var state = _errorFiles.Contains(_currentFile) ? QueueItemState.Error : QueueItemState.Current;
+      items.Add(CreateQueueItemWithState(_currentFile, fullPlaylistIndex, state));
+      fullPlaylistIndex++;
+    }
+
+    // Upcoming items
+    foreach (var file in _playlist)
+    {
+      var state = _errorFiles.Contains(file) ? QueueItemState.Error : QueueItemState.Upcoming;
+      items.Add(CreateQueueItemWithState(file, fullPlaylistIndex, state));
+      fullPlaylistIndex++;
+    }
+
+    return items;
+  }
+
+  /// <summary>
+  /// Auto-skips to the next track when playback fails, with infinite-loop protection.
+  /// </summary>
+  private async Task AutoSkipToNextAsync(CancellationToken cancellationToken)
+  {
+    _consecutiveSkipCount++;
+
+    if (_consecutiveSkipCount > _originalOrder.Count)
+    {
+      Logger.LogError("Auto-skip limit reached ({Count} consecutive failures) — stopping playback", _consecutiveSkipCount);
+      State = AudioSourceState.Error;
+      return;
+    }
+
+    Logger.LogWarning("Auto-skipping unplayable file (consecutive skip #{Count})", _consecutiveSkipCount);
+    await NextAsync(cancellationToken);
+  }
+
+  /// <summary>
   /// Rebuilds the queue from a list of tracks, setting the current file at the specified index.
   /// </summary>
   private void RebuildQueueFromList(List<string> allTracks, int currentIndex)
@@ -1291,8 +1449,10 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       if (result.IsSuccess && result.Value != null)
       {
         var formatInfo = result.Value;
-        
-        if (formatInfo.Duration != TimeSpan.Zero)
+
+        // Use TagLib for accurate duration (SoundFlow miscalculates VBR MP3s)
+        duration = AccurateDurationReader.GetDuration(filePath, Logger);
+        if (duration == null && formatInfo.Duration != TimeSpan.Zero)
         {
           duration = formatInfo.Duration;
         }
@@ -1327,7 +1487,68 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       Album = album,
       Duration = duration,
       Index = index,
-      IsCurrent = isCurrent
+      IsCurrent = isCurrent,
+      State = isCurrent ? QueueItemState.Current : QueueItemState.Upcoming,
+      FullPlaylistIndex = index
+    };
+  }
+
+  /// <summary>
+  /// Creates a QueueItem with an explicit state and full playlist index.
+  /// </summary>
+  private QueueItem CreateQueueItemWithState(string filePath, int fullPlaylistIndex, QueueItemState state)
+  {
+    var title = Path.GetFileNameWithoutExtension(filePath);
+    var artist = "--";
+    var album = "--";
+    TimeSpan? duration = null;
+
+    try
+    {
+      var result = SoundMetadataReader.Read(filePath);
+      if (result.IsSuccess && result.Value != null)
+      {
+        var formatInfo = result.Value;
+
+        duration = AccurateDurationReader.GetDuration(filePath, Logger);
+        if (duration == null && formatInfo.Duration != TimeSpan.Zero)
+        {
+          duration = formatInfo.Duration;
+        }
+
+        if (formatInfo.Tags != null)
+        {
+          if (!string.IsNullOrEmpty(formatInfo.Tags.Title))
+          {
+            title = formatInfo.Tags.Title;
+          }
+          if (!string.IsNullOrEmpty(formatInfo.Tags.Artist))
+          {
+            artist = formatInfo.Tags.Artist;
+          }
+          if (!string.IsNullOrEmpty(formatInfo.Tags.Album))
+          {
+            album = formatInfo.Tags.Album;
+          }
+        }
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "Failed to read metadata for {File}, using defaults", filePath);
+    }
+
+    return new QueueItem
+    {
+      Id = filePath,
+      Title = title,
+      Artist = artist,
+      Album = album,
+      Duration = duration,
+      Index = fullPlaylistIndex, // For operational compatibility
+      IsCurrent = state == QueueItemState.Current,
+      State = state,
+      FullPlaylistIndex = fullPlaylistIndex
     };
   }
 
@@ -1483,6 +1704,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       // SoundFlow couldn't decode the file - this could happen with unsupported formats
       // or during testing with dummy files. Log and continue without a data provider.
       Logger.LogWarning(ex, "SoundFlow could not decode file: {File}. Using basic file info only.", _currentFile);
+      _errorFiles.Add(_currentFile);
       _fileStream?.Dispose();
       _fileStream = null;
       _dataProvider = null;
@@ -1532,8 +1754,13 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       {
         var formatInfo = result.Value;
 
-        // Get duration from Duration property
-        if (formatInfo.Duration != TimeSpan.Zero)
+        // Use TagLib for accurate duration (SoundFlow miscalculates VBR MP3s)
+        var accurateDuration = AccurateDurationReader.GetDuration(filePath, Logger);
+        if (accurateDuration != null)
+        {
+          _duration = accurateDuration.Value;
+        }
+        else if (formatInfo.Duration != TimeSpan.Zero)
         {
           _duration = formatInfo.Duration;
         }
@@ -1609,6 +1836,13 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       _duration = TimeSpan.Zero;
       _metadata[StandardMetadataKeys.Duration] = _duration;
       _metadata["NeedsFingerprintingLookup"] = true;
+    }
+
+    // Request immediate identification if this track needs fingerprinting
+    if (_metadata.TryGetValue("NeedsFingerprintingLookup", out var needsLookup)
+        && needsLookup is true)
+    {
+      _identificationService?.RequestImmediateIdentification();
     }
   }
 

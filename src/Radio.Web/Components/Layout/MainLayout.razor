@@ -19,8 +19,8 @@
 <MudSnackbarProvider />
 
 <div class="layout-container" style="width: 1920px; height: 576px; overflow: hidden;">
-  <!-- Top Navigation Bar - 60px height -->
-  <MudAppBar Fixed="true" Elevation="1" Style="height: 60px;">
+  <!-- Top Navigation Bar - 64px height (M3 standard) -->
+  <MudAppBar Fixed="true" Elevation="2" Style="height: 64px;">
     <!-- LEFT: Date/Time Display (fixed width to prevent layout shift) -->
     <div style="font-size: 22px; width: 100px; font-family: 'JetBrains Mono', 'Consolas', 'Courier New', monospace; font-weight: 500; color: #F2F2F2; letter-spacing: 1px;">
       @_currentTime
@@ -81,76 +81,24 @@
     <!-- CENTER: Spacer to push navigation to the right -->
     <MudSpacer />
     
-    <!-- NOW PLAYING WIDGET - Compact display between stats and nav -->
-    <div style="display: flex; align-items: center; gap: 12px; padding: 0 16px; border-left: 1px solid rgba(255,255,255,0.1); border-right: 1px solid rgba(255,255,255,0.1); max-width: 500px; cursor: pointer;" @onclick="NavigateToHome">
-      <!-- Album Art / Music Icon -->
-      <div style="width: 40px; height: 40px; flex-shrink: 0;">
-        @if (string.IsNullOrEmpty(_nowPlayingAlbumArt) || _nowPlayingAlbumArt == "/images/default-album-art.png")
-        {
-          <MudIcon Icon="@Icons.Material.Filled.MusicNote" Style="font-size: 40px; color: var(--mud-palette-text-secondary);" />
-        }
-        else
-        {
-          <img src="@_nowPlayingAlbumArt"
-               alt="Album Art"
-               style="width: 40px; height: 40px; object-fit: cover; border-radius: 4px;"
-               @onerror="@(() => _nowPlayingAlbumArt = null)" />
-        }
-      </div>
-      
-      <!-- Track Info -->
-      <div style="flex: 1; min-width: 0; overflow: hidden;">
-        <div style="font-size: 14px; font-weight: 600; color: var(--mud-palette-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-          @(_nowPlayingTitle ?? "No Track")
-        </div>
-        <div style="font-size: 12px; color: var(--mud-palette-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-          @(_nowPlayingArtist ?? "--")
-        </div>
-      </div>
-      
-      <!-- Transport Controls -->
-      <div style="display: flex; align-items: center; gap: 4px;" @onclick:stopPropagation="true">
-        <MudIconButton Icon="@Icons.Material.Filled.SkipPrevious" 
-                       Color="Color.Default" 
-                       Size="Size.Small"
-                       Style="width: 48px; height: 48px;"
-                       OnClick="@HandlePreviousAsync"
-                       title="Previous" />
-        
-        <MudIconButton Icon="@(_isPlaying ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)" 
-                       Color="Color.Primary" 
-                       Size="Size.Medium"
-                       Style="width: 48px; height: 48px;"
-                       OnClick="@HandlePlayPauseAsync"
-                       title="@(_isPlaying ? "Pause" : "Play")" />
-        
-        <MudIconButton Icon="@Icons.Material.Filled.SkipNext" 
-                       Color="Color.Default" 
-                       Size="Size.Small"
-                       Style="width: 48px; height: 48px;"
-                       OnClick="@HandleNextAsync"
-                       title="Next" />
-      </div>
-      
-      <!-- Volume Control (compact) -->
-      <div style="width: 100px;" @onclick:stopPropagation="true">
-        <div style="display: flex; align-items: center; gap: 4px;">
-          <MudIconButton Icon="@(_isMuted ? Icons.Material.Filled.VolumeOff : Icons.Material.Filled.VolumeUp)" 
-                         Color="Color.Default" 
-                         Size="Size.Small"
-                         OnClick="@HandleMuteAsync"
-                         title="@(_isMuted ? "Unmute" : "Mute")" />
-          <MudSlider T="double" 
-                     Value="_volume" 
-                     ValueChanged="@OnVolumeChanged" 
-                     Min="0" 
-                     Max="1" 
-                     Step="0.01" 
+    <!-- Volume Control -->
+    <div style="display: flex; align-items: center; gap: 4px; padding: 0 16px;">
+      <MudIconButton Icon="@(_isMuted ? Icons.Material.Filled.VolumeOff : Icons.Material.Filled.VolumeUp)"
+                     Color="Color.Default"
                      Size="Size.Small"
-                     Color="Color.Primary"
-                     Style="width: 60px;" />
-        </div>
-      </div>
+                     Style="min-width: 48px; min-height: 48px;"
+                     OnClick="@HandleMuteAsync"
+                     title="@(_isMuted ? "Unmute" : "Mute")" />
+      <MudSlider T="double"
+                 Value="_volume"
+                 ValueChanged="@OnVolumeChanged"
+                 Min="0" Max="1" Step="0.01"
+                 Size="Size.Small"
+                 Color="Color.Primary"
+                 Style="width: 120px;" />
+      <span style="font-size: 12px; color: var(--mud-palette-text-secondary); min-width: 32px; text-align: right;">
+        @((_volume * 100).ToString("F0"))%
+      </span>
     </div>
     <MudSpacer />
     
@@ -166,19 +114,18 @@
     {
       <MudIconButton Icon="@Icons.Material.Filled.Radio" Color="Color.Inherit" Href="/radio" Size="Size.Large" title="Radio Controls" />
     }
-    @if (_showFilesNav)
+    @if (_showBluetoothNav)
     {
-      <MudIconButton Icon="@Icons.Material.Filled.Folder" Color="Color.Inherit" Href="/files" Size="Size.Large" title="File Browser" />
+      <MudIconButton Icon="@Icons.Material.Filled.Bluetooth" Color="Color.Inherit" Href="/bluetooth" Size="Size.Large" title="Bluetooth" />
     }
-    <MudIconButton Icon="@Icons.Material.Filled.ShowChart" Color="Color.Inherit" Href="/visualizer" Size="Size.Large" title="Visualizer" />
     <MudIconButton Icon="@Icons.Material.Filled.Dashboard" Color="Color.Inherit" Href="/metrics" Size="Size.Large" title="Metrics" />
     <MudIconButton Icon="@Icons.Material.Filled.History" Color="Color.Inherit" Href="/history" Size="Size.Large" title="Play History" />
     <MudIconButton Icon="@Icons.Material.Filled.Devices" Color="Color.Inherit" Href="/devices" Size="Size.Large" title="Device Management" />
     <MudIconButton Icon="@Icons.Material.Filled.Settings" Color="Color.Inherit" Href="/system" Size="Size.Large" title="System Config" />
   </MudAppBar>
   
-  <!-- Main Content Area - 516px height (576 - 60) -->
-  <div class="content-area" style="height: 516px; margin-top: 60px; overflow-y: auto; position: relative;">
+  <!-- Main Content Area - 512px height (576 - 64) -->
+  <div class="content-area" style="height: 512px; margin-top: 64px; overflow-y: auto; position: relative;">
     <div class="page-transition">
       @Body
     </div>
@@ -200,15 +147,11 @@
 
   // Conditional navigation visibility
   private bool _showRadioNav = false;
-  private bool _showFilesNav = false;
+  private bool _showBluetoothNav = false;
 
-  // Now Playing state
-  private bool _isPlaying = false;
+  // Audio state for title bar volume control
   private bool _isMuted = false;
   private double _volume = 0.75;
-  private string? _nowPlayingTitle = null;
-  private string? _nowPlayingArtist = null;
-  private string? _nowPlayingAlbumArt = null;
   private int _queueCount = 0;
   
   // Volume debouncing
@@ -223,19 +166,31 @@
       Primary = "#5CD4E8",
       Secondary = "#404045",
       Background = "#2D2D30",
-      Surface = "#404045",
+      Surface = "#353538",
       AppbarBackground = "#1E1E20",
     },
     PaletteDark = new PaletteDark()
     {
       Primary = "#5CD4E8",
-      Secondary = "#404045",
-      Background = "#2D2D30",
-      Surface = "#404045",
-      AppbarBackground = "#1E1E20",
-      TextPrimary = "#F2F2F2",
-      TextSecondary = "#BFBFC2",
+      PrimaryContrastText = "#003544",
+      Secondary = "#4A4A4F",
+      SecondaryContrastText = "#F2F2F2",
       Tertiary = "#8C8C8F",
+      Background = "#1C1B1F",
+      Surface = "#2B2930",
+      AppbarBackground = "#1E1E20",
+      DrawerBackground = "#211F26",
+      TextPrimary = "#E6E1E5",
+      TextSecondary = "#CAC4D0",
+      ActionDefault = "#CAC4D0",
+      ActionDisabled = "#49454F",
+      ActionDisabledBackground = "#1C1B1F",
+      Divider = "#49454F",
+      LinesDefault = "#49454F",
+      Error = "#F2B8B5",
+      Warning = "#FFB74D",
+      Info = "#5CD4E8",
+      Success = "#81C784",
     }
   };
 
@@ -550,9 +505,8 @@
 
   private void UpdateNavigationVisibility(AudioSourceDto source)
   {
-    // Queue is now always visible, no need to set _showQueueNav
     _showRadioNav = source.Type == "Radio" || source.Type == "RTLSDRCore" || source.Type == "RF320";
-    _showFilesNav = source.Type == "FilePlayer";
+    _showBluetoothNav = source.Type == "Bluetooth";
   }
 
   private static string GetOutputIcon(AudioDeviceDto device)
@@ -644,17 +598,8 @@
       var state = await AudioApi.GetPlaybackStateAsync();
       if (state != null)
       {
-        _isPlaying = state.IsPlaying;
         _isMuted = state.IsMuted;
         _volume = state.Volume;
-      }
-
-      var nowPlaying = await AudioApi.GetNowPlayingAsync();
-      if (nowPlaying != null)
-      {
-        _nowPlayingTitle = nowPlaying.Title;
-        _nowPlayingArtist = nowPlaying.Artist;
-        _nowPlayingAlbumArt = nowPlaying.AlbumArtUrl;
       }
     }
     catch (Exception ex)
@@ -674,52 +619,6 @@
     catch (Exception ex)
     {
       Logger.LogError(ex, "Error refreshing queue count in MainLayout");
-    }
-  }
-
-  private async Task HandlePlayPauseAsync()
-  {
-    try
-    {
-      if (_isPlaying)
-      {
-        await AudioApi.UpdatePlaybackStateAsync(new UpdatePlaybackRequest("pause", null, null, null));
-      }
-      else
-      {
-        await AudioApi.StartAsync();
-      }
-      await RefreshAudioStateAsync();
-    }
-    catch (Exception ex)
-    {
-      Logger.LogError(ex, "Error in HandlePlayPauseAsync");
-    }
-  }
-
-  private async Task HandleNextAsync()
-  {
-    try
-    {
-      await AudioApi.NextAsync();
-      await RefreshAudioStateAsync();
-    }
-    catch (Exception ex)
-    {
-      Logger.LogError(ex, "Error in HandleNextAsync");
-    }
-  }
-
-  private async Task HandlePreviousAsync()
-  {
-    try
-    {
-      await AudioApi.PreviousAsync();
-      await RefreshAudioStateAsync();
-    }
-    catch (Exception ex)
-    {
-      Logger.LogError(ex, "Error in HandlePreviousAsync");
     }
   }
 
@@ -759,11 +658,6 @@
         }
       }, null, TimeSpan.FromMilliseconds(300), Timeout.InfiniteTimeSpan);
     }
-  }
-
-  private void NavigateToHome()
-  {
-    NavigationManager.NavigateTo("/");
   }
 
   public void Dispose()

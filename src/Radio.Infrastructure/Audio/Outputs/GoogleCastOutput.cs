@@ -8,6 +8,7 @@ using Radio.Core.Interfaces.Audio;
 using Sharpcaster;
 using Sharpcaster.Channels;
 using Sharpcaster.Models;
+using Sharpcaster.Models.ChromecastStatus;
 using Sharpcaster.Models.Media;
 
 namespace Radio.Infrastructure.Audio.Outputs;
@@ -31,6 +32,11 @@ public class GoogleCastOutput : AudioOutputBase
   private readonly Dictionary<string, ChromecastReceiver> _discoveredReceiversByIp = new();
   private CastNowPlayingMetadata? _nowPlayingMetadata;
 
+  // Volume sync: track locally-initiated volume changes to filter out echo events
+  private float _lastSetVolume = -1f;
+  private bool _lastSetMute;
+  private bool _suppressNextVolumeEvent;
+
   /// <inheritdoc />
   protected override ILogger Logger => _logger;
 
@@ -51,6 +57,13 @@ public class GoogleCastOutput : AudioOutputBase
   /// Event raised when disconnected from a Chromecast device.
   /// </summary>
   public event EventHandler<ChromecastDisconnectedEventArgs>? Disconnected;
+
+  /// <summary>
+  /// Event raised when the Cast device volume or mute state changes externally
+  /// (e.g., via Google Home app, voice command, or physical controls).
+  /// Not fired for changes initiated by this application.
+  /// </summary>
+  public event EventHandler<CastVolumeChangedEventArgs>? CastVolumeChanged;
 
   /// <summary>
   /// Gets the currently connected Chromecast device information.
@@ -419,6 +432,12 @@ public class GoogleCastOutput : AudioOutputBase
       _logger.LogDebug("Calling ConnectChromecast with URI: {Uri}", _connectedReceiver.DeviceUri);
       await _client.ConnectChromecast(_connectedReceiver);
 
+      // Subscribe to receiver status changes for bidirectional volume sync
+      SubscribeToReceiverStatus();
+
+      // Read initial device volume
+      await SyncInitialVolumeAsync();
+
       ConnectedDevice = device;
       Name = $"Cast: {device.FriendlyName}";
 
@@ -463,6 +482,8 @@ public class GoogleCastOutput : AudioOutputBase
     try
     {
       _logger.LogInformation("Disconnecting from Chromecast: {Name}", ConnectedDevice?.FriendlyName);
+
+      UnsubscribeFromReceiverStatus();
 
       if (_client != null)
       {
@@ -521,7 +542,7 @@ public class GoogleCastOutput : AudioOutputBase
         if (!string.IsNullOrEmpty(_streamUrl))
         {
           _logger.LogInformation(
-            "Cast: Loading media URL {StreamUrl} (type: audio/mpeg, stream: Buffered, metadata: {HasMetadata})",
+            "Cast: Loading media URL {StreamUrl} (type: audio/mpeg, stream: Live, metadata: {HasMetadata})",
             _streamUrl, _nowPlayingMetadata != null);
 
           var media = BuildMedia();
@@ -845,7 +866,7 @@ public class GoogleCastOutput : AudioOutputBase
       ContentId = _streamUrl,
       ContentUrl = _streamUrl,
       ContentType = "audio/mpeg",
-      StreamType = StreamType.Buffered
+      StreamType = StreamType.Live
     };
 
     if (_nowPlayingMetadata != null)
@@ -923,6 +944,116 @@ public class GoogleCastOutput : AudioOutputBase
     }
   }
 
+  /// <summary>
+  /// Subscribes to ReceiverChannel status events for bidirectional volume sync.
+  /// </summary>
+  private void SubscribeToReceiverStatus()
+  {
+    if (_client == null) return;
+
+    var receiverChannel = _client.GetChannel<ReceiverChannel>();
+    if (receiverChannel != null)
+    {
+      receiverChannel.ReceiverStatusChanged += OnReceiverStatusChanged;
+      _logger.LogDebug("Subscribed to Cast receiver status changes for volume sync");
+    }
+  }
+
+  /// <summary>
+  /// Unsubscribes from ReceiverChannel status events.
+  /// </summary>
+  private void UnsubscribeFromReceiverStatus()
+  {
+    if (_client == null) return;
+
+    var receiverChannel = _client.GetChannel<ReceiverChannel>();
+    if (receiverChannel != null)
+    {
+      receiverChannel.ReceiverStatusChanged -= OnReceiverStatusChanged;
+    }
+  }
+
+  /// <summary>
+  /// Reads the initial device volume after connecting and syncs our local state.
+  /// </summary>
+  private async Task SyncInitialVolumeAsync()
+  {
+    if (_client == null) return;
+
+    try
+    {
+      var receiverChannel = _client.GetChannel<ReceiverChannel>();
+      if (receiverChannel != null)
+      {
+        var status = await receiverChannel.GetChromecastStatusAsync();
+        if (status?.Volume?.Level != null)
+        {
+          var deviceVolume = (float)status.Volume.Level.Value;
+          var deviceMuted = status.Volume.Muted ?? false;
+          _lastSetVolume = deviceVolume;
+          _lastSetMute = deviceMuted;
+
+          _logger.LogInformation(
+            "Cast device initial volume: {Volume:P0}, Muted: {Muted}",
+            deviceVolume, deviceMuted);
+
+          // Fire event so AudioManager can sync its state to the device's actual volume
+          CastVolumeChanged?.Invoke(this, new CastVolumeChangedEventArgs
+          {
+            Volume = deviceVolume,
+            IsMuted = deviceMuted,
+            IsInitialSync = true
+          });
+        }
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Could not read initial Cast device volume — will sync on first status update");
+    }
+  }
+
+  /// <summary>
+  /// Handles ReceiverStatusChanged events from SharpCaster.
+  /// Detects external volume/mute changes and fires <see cref="CastVolumeChanged"/>.
+  /// </summary>
+  private void OnReceiverStatusChanged(object? sender, ChromecastStatus status)
+  {
+    if (status.Volume == null) return;
+
+    var deviceVolume = (float)(status.Volume.Level ?? 0);
+    var deviceMuted = status.Volume.Muted ?? false;
+
+    // Filter out echo events from our own SetVolume/SetMute calls
+    if (_suppressNextVolumeEvent)
+    {
+      _suppressNextVolumeEvent = false;
+      _lastSetVolume = deviceVolume;
+      _lastSetMute = deviceMuted;
+      return;
+    }
+
+    // Check if volume actually changed from what we last set
+    var volumeChanged = Math.Abs(deviceVolume - _lastSetVolume) > 0.01f;
+    var muteChanged = deviceMuted != _lastSetMute;
+
+    if (!volumeChanged && !muteChanged) return;
+
+    _lastSetVolume = deviceVolume;
+    _lastSetMute = deviceMuted;
+
+    _logger.LogInformation(
+      "Cast device volume changed externally: {Volume:P0}, Muted: {Muted}",
+      deviceVolume, deviceMuted);
+
+    CastVolumeChanged?.Invoke(this, new CastVolumeChangedEventArgs
+    {
+      Volume = deviceVolume,
+      IsMuted = deviceMuted,
+      IsInitialSync = false
+    });
+  }
+
   private async Task SetCastVolumeAsync(float volume)
   {
     if (_client == null || _connectedReceiver == null || State != AudioOutputState.Streaming)
@@ -935,12 +1066,15 @@ public class GoogleCastOutput : AudioOutputBase
       var receiverChannel = _client.GetChannel<ReceiverChannel>();
       if (receiverChannel != null)
       {
+        _suppressNextVolumeEvent = true;
+        _lastSetVolume = volume;
         await receiverChannel.SetVolume(volume);
         _logger.LogDebug("Chromecast volume set to {Volume:P0}", volume);
       }
     }
     catch (Exception ex)
     {
+      _suppressNextVolumeEvent = false;
       _logger.LogWarning(ex, "Failed to set Chromecast volume");
     }
   }
@@ -957,12 +1091,15 @@ public class GoogleCastOutput : AudioOutputBase
       var receiverChannel = _client.GetChannel<ReceiverChannel>();
       if (receiverChannel != null)
       {
+        _suppressNextVolumeEvent = true;
+        _lastSetMute = mute;
         await receiverChannel.SetMute(mute);
         _logger.LogDebug("Chromecast mute set to {Mute}", mute);
       }
     }
     catch (Exception ex)
     {
+      _suppressNextVolumeEvent = false;
       _logger.LogWarning(ex, "Failed to set Chromecast mute state");
     }
   }
@@ -1063,6 +1200,27 @@ public class ChromecastDisconnectedEventArgs : EventArgs
   /// Gets the reason for disconnection.
   /// </summary>
   public string? Reason { get; init; }
+}
+
+/// <summary>
+/// Event arguments for Cast device volume changes (external).
+/// </summary>
+public class CastVolumeChangedEventArgs : EventArgs
+{
+  /// <summary>
+  /// Gets the new volume level (0.0 to 1.0).
+  /// </summary>
+  public required float Volume { get; init; }
+
+  /// <summary>
+  /// Gets whether the device is muted.
+  /// </summary>
+  public required bool IsMuted { get; init; }
+
+  /// <summary>
+  /// Gets whether this is the initial sync after connecting (not an external change).
+  /// </summary>
+  public bool IsInitialSync { get; init; }
 }
 
 /// <summary>

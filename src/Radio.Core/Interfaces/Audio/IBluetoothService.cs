@@ -16,7 +16,7 @@ public enum BluetoothPlaybackStatus
 }
 
 /// <summary>
-/// Metadata for the currently playing track.
+/// Metadata for the currently playing track from AVRCP or platform media APIs.
 /// </summary>
 public class BluetoothPlaybackMetadata
 {
@@ -24,6 +24,7 @@ public class BluetoothPlaybackMetadata
   public string Artist { get; init; } = string.Empty;
   public string Album { get; init; } = string.Empty;
   public TimeSpan Duration { get; init; } = TimeSpan.Zero;
+  public string? AlbumArtUrl { get; init; }
 }
 
 public interface IBluetoothService : IAsyncDisposable
@@ -45,6 +46,12 @@ public interface IBluetoothService : IAsyncDisposable
 
   /// <summary>Gets the currently connected device.</summary>
   BluetoothDeviceInfo? ConnectedDevice { get; }
+
+  /// <summary>
+  /// Gets whether the platform manages audio routing directly (e.g., Windows AudioPlaybackConnection
+  /// routes to system speakers). When true, no SoundFlow capture device is needed.
+  /// </summary>
+  bool IsAudioManagedByPlatform { get; }
 
   /// <summary>Start Bluetooth adapter and make device discoverable.</summary>
   Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default);
@@ -96,6 +103,23 @@ public interface IBluetoothService : IAsyncDisposable
 
   /// <summary>Event raised when playback position changes.</summary>
   event EventHandler<TimeSpan>? PositionChanged;
+
+  /// <summary>
+  /// Event raised when the Bluetooth device's AVRCP volume changes.
+  /// Volume is normalized to 0.0-1.0 range.
+  /// </summary>
+  event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged;
+
+  /// <summary>
+  /// Gets the current Bluetooth device volume (0.0-1.0), or null if not available.
+  /// </summary>
+  float? DeviceVolume { get; }
+
+  /// <summary>
+  /// Sets the Bluetooth device volume via AVRCP absolute volume.
+  /// </summary>
+  /// <param name="volume">Volume level (0.0 to 1.0).</param>
+  Task SetDeviceVolumeAsync(float volume);
 }
 
 /// <summary>Bluetooth adapter states.</summary>
@@ -142,4 +166,11 @@ public class BluetoothDeviceDisconnectedEventArgs : EventArgs
 public class BluetoothDeviceDiscoveredEventArgs : EventArgs
 {
   public required BluetoothDeviceInfo Device { get; init; }
+}
+
+/// <summary>Bluetooth device volume changed args.</summary>
+public class BluetoothVolumeChangedEventArgs : EventArgs
+{
+  /// <summary>Normalized volume (0.0 to 1.0).</summary>
+  public required float Volume { get; init; }
 }

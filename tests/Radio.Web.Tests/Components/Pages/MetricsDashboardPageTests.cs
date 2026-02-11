@@ -92,10 +92,10 @@ public class MetricsDashboardPageTests : TestContext
     // Act
     var cut = RenderMetricsDashboard();
 
-    // Assert - Check for time range buttons
-    Assert.Contains("Last Hour", cut.Markup);
-    Assert.Contains("Last 24 Hours", cut.Markup);
-    Assert.Contains("Last 7 Days", cut.Markup);
+    // Assert - Check for time range buttons (compact labels)
+    Assert.Contains(">1h<", cut.Markup);
+    Assert.Contains(">24h<", cut.Markup);
+    Assert.Contains(">7d<", cut.Markup);
   }
 
   [Fact]

@@ -1,0 +1,2103 @@
+Build started 2/10/2026 2:42:50 PM.
+     1>Project "D:\prj\RTest\RTest\tests\Radio.API.Tests\Radio.API.Tests.csproj" on node 1 (Restore target(s)).
+     1>_GetAllRestoreProjectPathItems:
+         Determining projects to restore...
+     1>Project "D:\prj\RTest\RTest\tests\Radio.API.Tests\Radio.API.Tests.csproj" (1) is building "D:\prj\RTest\RTest\src\Radio.Infrastructure\Radio.Infrastructure.csproj" (4:8) on node 2 (_GenerateProjectRestoreGraph target(s)).
+   4:8>Project "D:\prj\RTest\RTest\src\Radio.Infrastructure\Radio.Infrastructure.csproj" (4:8) is building "D:\prj\RTest\RTest\src\Radio.Infrastructure\Radio.Infrastructure.csproj" (4:11) on node 2 (_GenerateProjectRestoreGraphPerFramework target(s)).
+     4>AddPrunePackageReferences:
+         Loaded prune package data from framework packages
+     4>Done Building Project "D:\prj\RTest\RTest\src\Radio.Infrastructure\Radio.Infrastructure.csproj" (_GenerateProjectRestoreGraphPerFramework target(s)).
+   4:8>Project "D:\prj\RTest\RTest\src\Radio.Infrastructure\Radio.Infrastructure.csproj" (4:8) is building "D:\prj\RTest\RTest\src\Radio.Infrastructure\Radio.Infrastructure.csproj" (4:12) on node 2 (_GenerateProjectRestoreGraphPerFramework target(s)).
+     4>AddPrunePackageReferences:
+         Loaded prune package data from framework packages
+     4>Done Building Project "D:\prj\RTest\RTest\src\Radio.Infrastructure\Radio.Infrastructure.csproj" (_GenerateProjectRestoreGraphPerFramework target(s)).
+     4>Done Building Project "D:\prj\RTest\RTest\src\Radio.Infrastructure\Radio.Infrastructure.csproj" (_GenerateProjectRestoreGraph target(s)).
+     1>Restore:
+         X.509 certificate chain validation will use the default trust store selected by .NET for code signing.
+         X.509 certificate chain validation will use the default trust store selected by .NET for timestamping.
+         Assets file has not changed. Skipping assets file writing. Path: D:\prj\RTest\RTest\src\Radio.Infrastructure\obj\project.assets.json
+         Assets file has not changed. Skipping assets file writing. Path: D:\prj\RTest\RTest\src\Radio.Core\obj\project.assets.json
+         Assets file has not changed. Skipping assets file writing. Path: D:\prj\RTest\RTest\src\Radio.API\obj\project.assets.json
+         Assets file has not changed. Skipping assets file writing. Path: D:\prj\RTest\RTest\src\RTLSDRCore\obj\project.assets.json
+         Restored D:\prj\RTest\RTest\src\Radio.API\Radio.API.csproj (in 36 ms).
+         Restored D:\prj\RTest\RTest\src\Radio.Core\Radio.Core.csproj (in 35 ms).
+         Restored D:\prj\RTest\RTest\src\Radio.Infrastructure\Radio.Infrastructure.csproj (in 36 ms).
+         Restored D:\prj\RTest\RTest\src\RTLSDRCore\RTLSDRCore.csproj (in 35 ms).
+         Assets file has not changed. Skipping assets file writing. Path: D:\prj\RTest\RTest\tests\Radio.API.Tests\obj\project.assets.json
+         Restored D:\prj\RTest\RTest\tests\Radio.API.Tests\Radio.API.Tests.csproj (in 37 ms).
+         
+         NuGet Config files used:
+             C:\Users\mark\AppData\Roaming\NuGet\NuGet.Config
+             C:\Program Files (x86)\NuGet\Config\Microsoft.VisualStudio.FallbackLocation.config
+             C:\Program Files (x86)\NuGet\Config\Microsoft.VisualStudio.Offline.config
+         
+         Feeds used:
+             https://api.nuget.org/v3/index.json
+             C:\Program Files (x86)\Microsoft SDKs\NuGetPackages\
+             C:\Program Files\dotnet\library-packs
+         All projects are up-to-date for restore.
+     1>Done Building Project "D:\prj\RTest\RTest\tests\Radio.API.Tests\Radio.API.Tests.csproj" (Restore target(s)).
+   1:7>Project "D:\prj\RTest\RTest\tests\Radio.API.Tests\Radio.API.Tests.csproj" on node 1 (VSTest target(s)).
+     1>BuildProject:
+         Build started, please wait...
+   1:7>Project "D:\prj\RTest\RTest\tests\Radio.API.Tests\Radio.API.Tests.csproj" (1:7) is building "D:\prj\RTest\RTest\tests\Radio.API.Tests\Radio.API.Tests.csproj" (1:8) on node 1 (default targets).
+   1:8>Project "D:\prj\RTest\RTest\tests\Radio.API.Tests\Radio.API.Tests.csproj" (1:8) is building "D:\prj\RTest\RTest\src\Radio.Core\Radio.Core.csproj" (3:7) on node 1 (default targets).
+     3>GenerateTargetFrameworkMonikerAttribute:
+       Skipping target "GenerateTargetFrameworkMonikerAttribute" because all output files are up-to-date with respect to the input files.
+   1:8>Project "D:\prj\RTest\RTest\tests\Radio.API.Tests\Radio.API.Tests.csproj" (1:8) is building "D:\prj\RTest\RTest\src\RTLSDRCore\RTLSDRCore.csproj" (5:6) on node 3 (default targets).
+     5>GenerateTargetFrameworkMonikerAttribute:
+       Skipping target "GenerateTargetFrameworkMonikerAttribute" because all output files are up-to-date with respect to the input files.
+     3>CoreGenerateAssemblyInfo:
+       Skipping target "CoreGenerateAssemblyInfo" because all output files are up-to-date with respect to the input files.
+       _GenerateSourceLinkFile:
+         Source Link file 'obj\Release\net8.0\Radio.Core.sourcelink.json' is up-to-date.
+       CoreCompile:
+       Skipping target "CoreCompile" because all output files are up-to-date with respect to the input files.
+     5>CoreGenerateAssemblyInfo:
+       Skipping target "CoreGenerateAssemblyInfo" because all output files are up-to-date with respect to the input files.
+     3>GenerateBuildDependencyFile:
+       Skipping target "GenerateBuildDependencyFile" because all output files are up-to-date with respect to the input files.
+       CopyFilesToOutputDirectory:
+         Radio.Core -> D:\prj\RTest\RTest\src\Radio.Core\bin\Release\net8.0\Radio.Core.dll
+     3>Done Building Project "D:\prj\RTest\RTest\src\Radio.Core\Radio.Core.csproj" (default targets).
+     5>_GenerateSourceLinkFile:
+         Source Link file 'obj\Release\net8.0\RTLSDRCore.sourcelink.json' is up-to-date.
+       CoreCompile:
+       Skipping target "CoreCompile" because all output files are up-to-date with respect to the input files.
+       GenerateBuildDependencyFile:
+       Skipping target "GenerateBuildDependencyFile" because all output files are up-to-date with respect to the input files.
+       CopyFilesToOutputDirectory:
+         RTLSDRCore -> D:\prj\RTest\RTest\src\RTLSDRCore\bin\Release\net8.0\RTLSDRCore.dll
+     5>Done Building Project "D:\prj\RTest\RTest\src\RTLSDRCore\RTLSDRCore.csproj" (default targets).
+   1:8>Project "D:\prj\RTest\RTest\tests\Radio.API.Tests\Radio.API.Tests.csproj" (1:8) is building "D:\prj\RTest\RTest\src\Radio.API\Radio.API.csproj" (2:6) on node 2 (default targets).
+   2:6>Project "D:\prj\RTest\RTest\src\Radio.API\Radio.API.csproj" (2:6) is building "D:\prj\RTest\RTest\src\Radio.Infrastructure\Radio.Infrastructure.csproj" (4:17) on node 2 (default targets).
+     4>GenerateTargetFrameworkMonikerAttribute:
+       Skipping target "GenerateTargetFrameworkMonikerAttribute" because all output files are up-to-date with respect to the input files.
+       CoreGenerateAssemblyInfo:
+       Skipping target "CoreGenerateAssemblyInfo" because all output files are up-to-date with respect to the input files.
+       _GenerateSourceLinkFile:
+         Source Link file 'obj\Release\net8.0-windows10.0.19041.0\Radio.Infrastructure.sourcelink.json' is up-to-date.
+       CoreCompile:
+       Skipping target "CoreCompile" because all output files are up-to-date with respect to the input files.
+       _CopyOutOfDateSourceItemsToOutputDirectory:
+       Skipping target "_CopyOutOfDateSourceItemsToOutputDirectory" because all output files are up-to-date with respect to the input files.
+       GenerateBuildDependencyFile:
+       Skipping target "GenerateBuildDependencyFile" because all output files are up-to-date with respect to the input files.
+       CopyFilesToOutputDirectory:
+         Radio.Infrastructure -> D:\prj\RTest\RTest\src\Radio.Infrastructure\bin\Release\net8.0-windows10.0.19041.0\Radio.Infrastructure.dll
+     4>Done Building Project "D:\prj\RTest\RTest\src\Radio.Infrastructure\Radio.Infrastructure.csproj" (default targets).
+     2>GenerateTargetFrameworkMonikerAttribute:
+       Skipping target "GenerateTargetFrameworkMonikerAttribute" because all output files are up-to-date with respect to the input files.
+       CoreGenerateAssemblyInfo:
+       Skipping target "CoreGenerateAssemblyInfo" because all output files are up-to-date with respect to the input files.
+       _DiscoverMvcApplicationParts:
+       Skipping target "_DiscoverMvcApplicationParts" because all output files are up-to-date with respect to the input files.
+       _GenerateSourceLinkFile:
+         Source Link file 'obj\Release\net8.0-windows10.0.19041.0\Radio.API.sourcelink.json' is up-to-date.
+       CoreCompile:
+       Skipping target "CoreCompile" because all output files are up-to-date with respect to the input files.
+       _CreateAppHost:
+       Skipping target "_CreateAppHost" because all output files are up-to-date with respect to the input files.
+       _ProcessScopedCssFiles:
+       Skipping target "_ProcessScopedCssFiles" because it has no outputs.
+       _ProcessScopedCssFiles:
+       Skipping target "_ProcessScopedCssFiles" because it has no outputs.
+       _BuildCopyStaticWebAssetsPreserveNewest:
+       Skipping target "_BuildCopyStaticWebAssetsPreserveNewest" because it has no outputs.
+       _CopyOutOfDateSourceItemsToOutputDirectory:
+       Skipping target "_CopyOutOfDateSourceItemsToOutputDirectory" because all output files are up-to-date with respect to the input files.
+       GenerateBuildDependencyFile:
+       Skipping target "GenerateBuildDependencyFile" because all output files are up-to-date with respect to the input files.
+       GenerateBuildRuntimeConfigurationFiles:
+       Skipping target "GenerateBuildRuntimeConfigurationFiles" because all output files are up-to-date with respect to the input files.
+       CopyFilesToOutputDirectory:
+         Radio.API -> D:\prj\RTest\RTest\src\Radio.API\bin\Release\net8.0-windows10.0.19041.0\Radio.API.dll
+     2>Done Building Project "D:\prj\RTest\RTest\src\Radio.API\Radio.API.csproj" (default targets).
+     1>GenerateTargetFrameworkMonikerAttribute:
+       Skipping target "GenerateTargetFrameworkMonikerAttribute" because all output files are up-to-date with respect to the input files.
+       CoreGenerateAssemblyInfo:
+       Skipping target "CoreGenerateAssemblyInfo" because all output files are up-to-date with respect to the input files.
+       _GenerateSourceLinkFile:
+         Source Link file 'obj\Release\net8.0-windows10.0.19041.0\Radio.API.Tests.sourcelink.json' is up-to-date.
+       CoreCompile:
+       Skipping target "CoreCompile" because all output files are up-to-date with respect to the input files.
+       _CopyOutOfDateSourceItemsToOutputDirectory:
+       Building target "_CopyOutOfDateSourceItemsToOutputDirectory" partially, because some output files are out of date with respect to their input files.
+         Copying file from "D:\prj\RTest\RTest\tests\Radio.API.Tests\obj\Release\net8.0-windows10.0.19041.0\MvcTestingAppManifest.json" to "D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\MvcTestingAppManifest.json".
+       GenerateBuildDependencyFile:
+       Skipping target "GenerateBuildDependencyFile" because all output files are up-to-date with respect to the input files.
+       GenerateBuildRuntimeConfigurationFiles:
+       Skipping target "GenerateBuildRuntimeConfigurationFiles" because all output files are up-to-date with respect to the input files.
+       CopyFilesToOutputDirectory:
+         Radio.API.Tests -> D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\Radio.API.Tests.dll
+       _MvcCopyDependencyFiles:
+         Copying file from "D:\prj\RTest\RTest\src\Radio.API\bin\Release\net8.0-windows10.0.19041.0\Radio.API.deps.json" to "D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\Radio.API.deps.json".
+         Copying file from "D:\prj\RTest\RTest\src\Radio.Core\bin\Release\net8.0\Radio.Core.deps.json" to "D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\Radio.Core.deps.json".
+         Copying file from "D:\prj\RTest\RTest\src\Radio.Infrastructure\bin\Release\net8.0-windows10.0.19041.0\Radio.Infrastructure.deps.json" to "D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\Radio.Infrastructure.deps.json".
+         Copying file from "D:\prj\RTest\RTest\src\RTLSDRCore\bin\Release\net8.0\RTLSDRCore.deps.json" to "D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\RTLSDRCore.deps.json".
+     1>Done Building Project "D:\prj\RTest\RTest\tests\Radio.API.Tests\Radio.API.Tests.csproj" (default targets).
+     1>BuildProject:
+         Build completed.
+         
+Test run for D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\Radio.API.Tests.dll (.NETCoreApp,Version=v8.0)
+VSTest version 18.0.1 (x64)
+
+Starting test execution, please wait...
+A total of 1 test files matched the specified pattern.
+[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.5.3.1+6b60a9e56a (64-bit .NET 8.0.23)
+[xUnit.net 00:00:00.04]   Discovering: Radio.API.Tests
+[xUnit.net 00:00:00.07]   Discovered:  Radio.API.Tests
+[xUnit.net 00:00:00.07]   Starting:    Radio.API.Tests
+  Passed Radio.API.Tests.ApiTests.PlaceholderTest_ApiProjectConfigured [2 ms]
+  Passed Radio.API.Tests.Controllers.MetricsControllerTests.RecordUIEvent_WithTooLongEventName_ReturnsBadRequest [37 ms]
+  Passed Radio.API.Tests.Middleware.ApiMetricsMiddlewareTests.InvokeAsync_IncrementsApiRequestsTotal [41 ms]
+  Passed Radio.API.Tests.Controllers.MetricsControllerTests.RecordUIEvent_WithSpecialCharacters_NormalizesCorrectly [4 ms]
+  Passed Radio.API.Tests.Middleware.ApiMetricsMiddlewareTests.InvokeAsync_MultipleRequests_TracksEachRequest [1 ms]
+  Passed Radio.API.Tests.Controllers.BluetoothControllerUnitTests.GetStatus_WhenPairedDevicesNull_ReturnsEmptyList [43 ms]
+  Passed Radio.API.Tests.Hubs.AudioStateHubMetricsTests.OnDisconnectedAsync_WithException_StillUpdatesMetric [44 ms]
+  Passed Radio.API.Tests.Hubs.AudioVisualizationHubMetricsTests.OnConnectedAsync_IncrementsConnectedClients [44 ms]
+  Passed Radio.API.Tests.Controllers.BluetoothControllerUnitTests.Start_WhenUnavailable_ReturnsBadRequest [1 ms]
+  Passed Radio.API.Tests.Hubs.AudioStateHubMetricsTests.MultipleConnections_TracksCorrectCount [< 1 ms]
+  Passed Radio.API.Tests.Middleware.ApiMetricsMiddlewareTests.InvokeAsync_WithoutMetricsCollector_StillCallsNext [1 ms]
+  Passed Radio.API.Tests.Hubs.AudioVisualizationHubMetricsTests.MultipleConnections_TracksCorrectCount [< 1 ms]
+  Passed Radio.API.Tests.Hubs.AudioStateHubMetricsTests.OnConnectedAsync_IncrementsConnectedClients [< 1 ms]
+  Passed Radio.API.Tests.Middleware.ApiMetricsMiddlewareTests.InvokeAsync_CallsNextMiddleware [< 1 ms]
+  Passed Radio.API.Tests.Hubs.AudioVisualizationHubMetricsTests.NullMetricsCollector_DoesNotThrow [< 1 ms]
+  Passed Radio.API.Tests.Hubs.AudioStateHubMetricsTests.OnDisconnectedAsync_DecrementsConnectedClients [< 1 ms]
+  Passed Radio.API.Tests.Hubs.AudioVisualizationHubMetricsTests.OnDisconnectedAsync_WithException_StillUpdatesMetric [< 1 ms]
+  Passed Radio.API.Tests.Hubs.AudioVisualizationHubMetricsTests.OnDisconnectedAsync_DecrementsConnectedClients [< 1 ms]
+  Passed Radio.API.Tests.Controllers.BluetoothControllerUnitTests.Unpair_WhenServiceFails_Returns500 [3 ms]
+  Passed Radio.API.Tests.Controllers.MetricsControllerTests.GetSnapshots_WithValidKeys_ReturnsData [5 ms]
+  Passed Radio.API.Tests.Controllers.MetricsControllerTests.RecordUIEvent_WithNullRequest_ReturnsBadRequest [< 1 ms]
+  Passed Radio.API.Tests.Controllers.MetricsControllerTests.RecordUIEvent_WithTooLongTagValue_ReturnsBadRequest [< 1 ms]
+  Passed Radio.API.Tests.Controllers.MetricsControllerTests.RecordUIEvent_WithoutMetricsCollector_StillSucceeds [< 1 ms]
+  Passed Radio.API.Tests.Controllers.MetricsControllerTests.RecordUIEvent_WithTooManyTags_ReturnsBadRequest [< 1 ms]
+  Passed Radio.API.Tests.Controllers.MetricsControllerTests.RecordUIEvent_WithNoTags_RecordsMetricWithoutTags [< 1 ms]
+  Passed Radio.API.Tests.Controllers.BluetoothControllerUnitTests.Disconnect_CallsService_ReturnsOk [< 1 ms]
+  Passed Radio.API.Tests.Controllers.MetricsControllerTests.RecordUIEvent_WithValidEvent_RecordsMetric [1 ms]
+  Passed Radio.API.Tests.Controllers.BluetoothControllerUnitTests.GetStatus_ReturnsMappedStatus [2 ms]
+  Passed Radio.API.Tests.Controllers.BluetoothControllerUnitTests.Stop_CallsService_ReturnsOk [< 1 ms]
+  Passed Radio.API.Tests.Services.AudioEngineInitializationServiceTests.StartAsync_CancellationToken_IsPassedToMethods [52 ms]
+  Passed Radio.API.Tests.Controllers.BluetoothControllerUnitTests.Pair_WhenServiceFails_Returns500 [< 1 ms]
+  Passed Radio.API.Tests.Controllers.MetricsControllerTests.GetAggregate_WithValidKey_ReturnsValue [2 ms]
+  Passed Radio.API.Tests.Controllers.AudioControllerDebugTests.Next_WithValidSource_CallsNextAsync [53 ms]
+  Passed Radio.API.Tests.Controllers.MetricsControllerTests.RecordUIEvent_NormalizesEventName [< 1 ms]
+  Passed Radio.API.Tests.Controllers.MetricsControllerTests.RecordUIEvent_WithEmptyEventName_ReturnsBadRequest [< 1 ms]
+  Passed Radio.API.Tests.Controllers.BluetoothControllerUnitTests.Accept_WhenServiceFails_Returns500 [< 1 ms]
+  Passed Radio.API.Tests.Controllers.AudioControllerDebugTests.Next_WithNoActivePrimarySource_ReturnsBadRequest [< 1 ms]
+  Passed Radio.API.Tests.Controllers.BluetoothControllerUnitTests.Start_WhenAvailable_Success [< 1 ms]
+  Passed Radio.API.Tests.Controllers.AudioControllerDebugTests.Next_WithActiveSourceNotSupportingNext_ReturnsBadRequest [< 1 ms]
+  Passed Radio.API.Tests.Controllers.BluetoothControllerUnitTests.Start_WhenServiceFails_Returns500 [< 1 ms]
+  Passed Radio.API.Tests.Controllers.MetricsControllerTests.GetHistory_WithValidParams_ReturnsData [1 ms]
+  Passed Radio.API.Tests.Controllers.BluetoothControllerUnitTests.Pair_WhenServiceSucceeds_ReturnsOk [< 1 ms]
+  Passed Radio.API.Tests.Controllers.BluetoothControllerUnitTests.DiscoveryStart_ReturnsAccepted [7 ms]
+  Passed Radio.API.Tests.Controllers.BluetoothControllerUnitTests.Pair_WithMissingAddress_ReturnsBadRequest [< 1 ms]
+������������������������������������������������������������������ͻ
+�            RADIO CONSOLE API - Starting Up                       �
+������������������������������������������������������������������ͼ
+  Log files: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+������������������������������������������������������������������ͻ
+������������������������������������������������������������������ͻ
+�            RADIO CONSOLE API - Starting Up                       �
+������������������������������������������������������������������ͼ
+������������������������������������������������������������������ͻ
+  Log files: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+�            RADIO CONSOLE API - Starting Up                       �
+������������������������������������������������������������������ͼ
+  Log files: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+������������������������������������������������������������������ͻ
+�            RADIO CONSOLE API - Starting Up                       �
+������������������������������������������������������������������ͼ
+  Log files: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+  Environment: Development
+������������������������������������������������������������������ͻ
+�            RADIO CONSOLE API - Starting Up                       �
+������������������������������������������������������������������ͼ
+  Log files: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+������������������������������������������������������������������ͻ
+�            RADIO CONSOLE API - Starting Up                       �
+������������������������������������������������������������������ͼ
+  Environment: Development
+  Log files: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+  Environment: Development
+������������������������������������������������������������������ͻ
+�            RADIO CONSOLE API - Starting Up                       �
+������������������������������������������������������������������ͼ
+  Log files: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+������������������������������������������������������������������ͻ
+�            RADIO CONSOLE API - Starting Up                       �
+������������������������������������������������������������������ͼ
+  Environment: Development
+  Log files: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+  Environment: Development
+������������������������������������������������������������������ͻ
+�            RADIO CONSOLE API - Starting Up                       �
+������������������������������������������������������������������ͼ
+  Log files: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+�            RADIO CONSOLE API - Starting Up                       �
+  Environment: Development
+������������������������������������������������������������������ͼ
+  Log files: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+  Environment: Development
+������������������������������������������������������������������ͻ
+�            RADIO CONSOLE API - Starting Up                       �
+������������������������������������������������������������������ͼ
+  Log files: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+  Environment: Development
+  Environment: Development
+  Environment: Development
+������������������������������������������������������������������ͻ
+�            RADIO CONSOLE API - Starting Up                       �
+������������������������������������������������������������������ͼ
+  Log files: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+  Environment: Development
+  Environment: Development
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF]   RADIO CONSOLE API - Application Starting
+[14:42:52 INF]   RADIO CONSOLE API - Application Starting
+[14:42:52 INF]   RADIO CONSOLE API - Application Starting
+[14:42:52 INF]   RADIO CONSOLE API - Application Starting
+[14:42:52 INF]   RADIO CONSOLE API - Application Starting
+[14:42:52 INF]   RADIO CONSOLE API - Application Starting
+[14:42:52 INF]   RADIO CONSOLE API - Application Starting
+[14:42:52 INF]   RADIO CONSOLE API - Application Starting
+[14:42:52 INF]   RADIO CONSOLE API - Application Starting
+[14:42:52 INF]   RADIO CONSOLE API - Application Starting
+[14:42:52 INF]   RADIO CONSOLE API - Application Starting
+[14:42:52 INF]   RADIO CONSOLE API - Application Starting
+[14:42:52 INF]   Started at: 2026-02-10 14:42:52.936
+[14:42:52 INF]   Started at: 2026-02-10 14:42:52.936
+[14:42:52 INF]   Started at: 2026-02-10 14:42:52.936
+[14:42:52 INF]   Started at: 2026-02-10 14:42:52.936
+[14:42:52 INF]   Started at: 2026-02-10 14:42:52.935
+[14:42:52 INF]   Started at: 2026-02-10 14:42:52.936
+[14:42:52 INF]   Started at: 2026-02-10 14:42:52.936
+[14:42:52 INF]   Started at: 2026-02-10 14:42:52.936
+[14:42:52 INF]   Started at: 2026-02-10 14:42:52.935
+[14:42:52 INF]   Started at: 2026-02-10 14:42:52.936
+[14:42:52 INF]   Started at: 2026-02-10 14:42:52.935
+[14:42:52 INF]   Started at: 2026-02-10 14:42:52.936
+[14:42:52 INF]   Environment: Development
+[14:42:52 INF]   Environment: Development
+[14:42:52 INF]   Environment: Development
+[14:42:52 INF]   Log directory: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+[14:42:52 INF]   Environment: Development
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF]   Log directory: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+[14:42:52 INF] Swagger UI available at /swagger
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF]   Environment: Development
+[14:42:52 INF] SignalR hubs available at /hubs/visualization and /hubs/audio
+[14:42:52 INF] Swagger UI available at /swagger
+[14:42:52 INF]   Log directory: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+[14:42:52 INF] Audio stream available at /stream/audio
+[14:42:52 INF] SignalR hubs available at /hubs/visualization and /hubs/audio
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF] Audio stream available at /stream/audio
+[14:42:52 INF] Swagger UI available at /swagger
+[14:42:52 INF] SignalR hubs available at /hubs/visualization and /hubs/audio
+[14:42:52 INF]   Environment: Development
+[14:42:52 INF]   Environment: Development
+[14:42:52 INF]   Log directory: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+[14:42:52 INF]   Log directory: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+[14:42:52 INF]   Environment: Development
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF]   Log directory: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+[14:42:52 INF] Swagger UI available at /swagger
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF] SignalR hubs available at /hubs/visualization and /hubs/audio
+[14:42:52 INF] Swagger UI available at /swagger
+[14:42:52 INF]   Environment: Development
+[14:42:52 INF]   Environment: Development
+[14:42:52 INF]   Environment: Development
+[14:42:52 INF]   Log directory: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF]   Log directory: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+[14:42:52 INF]   Log directory: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+[14:42:52 INF] Swagger UI available at /swagger
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF] Swagger UI available at /swagger
+[14:42:52 INF] SignalR hubs available at /hubs/visualization and /hubs/audio
+[14:42:52 INF] Swagger UI available at /swagger
+[14:42:52 INF] SignalR hubs available at /hubs/visualization and /hubs/audio
+[14:42:52 INF] Audio stream available at /stream/audio
+[14:42:52 INF] Audio stream available at /stream/audio
+[14:42:52 INF] SignalR hubs available at /hubs/visualization and /hubs/audio
+[14:42:52 INF] Audio stream available at /stream/audio
+[14:42:52 INF] Audio stream available at /stream/audio
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF] Swagger UI available at /swagger
+[14:42:52 INF]   Environment: Development
+[14:42:52 INF] Audio stream available at /stream/audio
+[14:42:52 INF]   Log directory: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF] SignalR hubs available at /hubs/visualization and /hubs/audio
+[14:42:52 INF]   Log directory: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF]   Log directory: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+[14:42:52 INF] Swagger UI available at /swagger
+[14:42:52 INF] SignalR hubs available at /hubs/visualization and /hubs/audio
+[14:42:52 INF] ��������������������������������������������������������������������
+[14:42:52 INF] SignalR hubs available at /hubs/visualization and /hubs/audio
+[14:42:52 INF] Swagger UI available at /swagger
+[14:42:52 INF] Audio stream available at /stream/audio
+[14:42:52 INF] SignalR hubs available at /hubs/visualization and /hubs/audio
+[14:42:52 INF] Audio stream available at /stream/audio
+[14:42:52 INF] Audio stream available at /stream/audio
+[14:42:52 INF] Audio stream available at /stream/audio
+[14:42:52 INF] Swagger UI available at /swagger
+[14:42:52 INF] SignalR hubs available at /hubs/visualization and /hubs/audio
+[14:42:52 INF] Audio stream available at /stream/audio
+[14:42:53 WRN] Failed to resolve secret tag acoustid_api_key
+[14:42:53 WRN] Failed to resolve secret tag acoustid_api_key
+[14:42:53 WRN] Failed to resolve secret tag acoustid_api_key
+[14:42:53 WRN] Failed to resolve secret tag acoustid_api_key
+[14:42:53 WRN] Failed to resolve secret tag acoustid_api_key
+[14:42:53 WRN] Failed to resolve secret tag acoustid_api_key
+[14:42:53 WRN] Failed to resolve secret tag acoustid_api_key
+[14:42:53 WRN] Failed to resolve secret tag acoustid_api_key
+[14:42:53 WRN] Failed to resolve secret tag acoustid_api_key
+[14:42:53 WRN] Failed to resolve secret tag acoustid_api_key
+[14:42:53 WRN] Failed to resolve secret tag acoustid_api_key
+[14:42:53 WRN] Failed to resolve secret tag acoustid_api_key
+[14:42:53 INF] SoundFlowDeviceManager initialized with 3 output and 1 input devices
+[14:42:53 INF] SoundFlowDeviceManager initialized with 3 output and 1 input devices
+[14:42:53 INF] SoundFlowDeviceManager initialized with 3 output and 1 input devices
+[14:42:53 INF] SoundFlowDeviceManager initialized with 3 output and 1 input devices
+[14:42:53 INF] SoundFlowDeviceManager initialized with 3 output and 1 input devices
+[14:42:53 INF] SoundFlowDeviceManager initialized with 3 output and 1 input devices
+[14:42:53 INF] SoundFlowDeviceManager initialized with 3 output and 1 input devices
+[14:42:53 INF] SoundFlowDeviceManager initialized with 3 output and 1 input devices
+[14:42:53 INF] SoundFlowDeviceManager initialized with 3 output and 1 input devices
+[14:42:53 INF] SoundFlowDeviceManager initialized with 3 output and 1 input devices
+[14:42:53 INF] SoundFlowDeviceManager initialized with 3 output and 1 input devices
+[14:42:53 INF] SoundFlowDeviceManager initialized with 3 output and 1 input devices
+[14:42:53 INF] VisualizerService initialized (FFTSize: 2048, SampleRate: 48000, WaveformSamples: 512)
+[14:42:53 INF] VisualizerService initialized (FFTSize: 2048, SampleRate: 48000, WaveformSamples: 512)
+[14:42:53 INF] VisualizerService initialized (FFTSize: 2048, SampleRate: 48000, WaveformSamples: 512)
+[14:42:53 INF] VisualizerService initialized (FFTSize: 2048, SampleRate: 48000, WaveformSamples: 512)
+[14:42:53 INF] VisualizerService initialized (FFTSize: 2048, SampleRate: 48000, WaveformSamples: 512)
+[14:42:53 INF] VisualizerService initialized (FFTSize: 2048, SampleRate: 48000, WaveformSamples: 512)
+[14:42:53 INF] VisualizerService initialized (FFTSize: 2048, SampleRate: 48000, WaveformSamples: 512)
+[14:42:53 INF] VisualizerService initialized (FFTSize: 2048, SampleRate: 48000, WaveformSamples: 512)
+[14:42:53 INF] VisualizerService initialized (FFTSize: 2048, SampleRate: 48000, WaveformSamples: 512)
+[14:42:53 INF] VisualizerService initialized (FFTSize: 2048, SampleRate: 48000, WaveformSamples: 512)
+[14:42:53 INF] VisualizerService initialized (FFTSize: 2048, SampleRate: 48000, WaveformSamples: 512)
+[14:42:53 INF] VisualizerService initialized (FFTSize: 2048, SampleRate: 48000, WaveformSamples: 512)
+[14:42:53 INF] SoundFlowPlaybackService initialized with visualization tap support
+[14:42:53 INF] SoundFlowPlaybackService initialized with visualization tap support
+[14:42:53 INF] SoundFlowPlaybackService initialized with visualization tap support
+[14:42:53 INF] SoundFlowPlaybackService initialized with visualization tap support
+[14:42:53 INF] SoundFlowPlaybackService initialized with visualization tap support
+[14:42:53 INF] SoundFlowPlaybackService initialized with visualization tap support
+[14:42:53 INF] SoundFlowPlaybackService initialized with visualization tap support
+[14:42:53 INF] SoundFlowPlaybackService initialized with visualization tap support
+[14:42:53 INF] SoundFlowPlaybackService initialized with visualization tap support
+[14:42:53 INF] SoundFlowPlaybackService initialized with visualization tap support
+[14:42:53 INF] SoundFlowPlaybackService initialized with visualization tap support
+[14:42:53 INF] SoundFlowPlaybackService initialized with visualization tap support
+[14:42:53 INF] Bluetooth radio found: MARKSDEVBOX - Top, Mode: Connectable
+[14:42:53 INF] Bluetooth radio found: MARKSDEVBOX - Top, Mode: Connectable
+[14:42:53 INF] Bluetooth radio found: MARKSDEVBOX - Top, Mode: Connectable
+[14:42:53 INF] Bluetooth radio found: MARKSDEVBOX - Top, Mode: Connectable
+[14:42:53 INF] Bluetooth radio found: MARKSDEVBOX - Top, Mode: Connectable
+[14:42:53 INF] Bluetooth radio found: MARKSDEVBOX - Top, Mode: Connectable
+[14:42:53 INF] Bluetooth radio found: MARKSDEVBOX - Top, Mode: Connectable
+[14:42:53 INF] Bluetooth radio found: MARKSDEVBOX - Top, Mode: Connectable
+[14:42:53 INF] Bluetooth radio found: MARKSDEVBOX - Top, Mode: Connectable
+[14:42:53 INF] Bluetooth radio found: MARKSDEVBOX - Top, Mode: Connectable
+[14:42:53 INF] Bluetooth radio found: MARKSDEVBOX - Top, Mode: Connectable
+[14:42:53 INF] Bluetooth radio found: MARKSDEVBOX - Top, Mode: Connectable
+[14:42:53 INF] Preferences persistence service started
+[14:42:53 INF] Preferences persistence service started
+[14:42:53 INF] Preferences persistence service started
+[14:42:53 INF] Preferences persistence service started
+[14:42:53 INF] Preferences persistence service started
+[14:42:53 INF] Preferences persistence service started
+[14:42:53 INF] Preferences persistence service started
+[14:42:53 INF] Preferences persistence service started
+[14:42:53 INF] Preferences persistence service started
+[14:42:53 INF] Preferences persistence service started
+[14:42:53 INF] Preferences persistence service started
+[14:42:53 INF] Preferences persistence service started
+[14:42:53 INF] Starting metrics collector service
+[14:42:53 INF] Starting metrics collector service
+[14:42:53 INF] Starting metrics collector service
+[14:42:53 INF] Starting metrics collector service
+[14:42:53 INF] Starting metrics collector service
+[14:42:53 INF] Starting metrics collector service
+[14:42:53 INF] Starting metrics collector service
+[14:42:53 INF] Starting metrics collector service
+[14:42:53 INF] Starting metrics collector service
+[14:42:53 INF] Starting metrics collector service
+[14:42:53 INF] Starting metrics collector service
+[14:42:53 INF] Starting metrics collector service
+[14:42:53 INF] Metrics database initialized at D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\data\config\configuration.db
+[14:42:53 INF] Metrics collector started. Flushing every 60 seconds
+[14:42:53 INF] Metrics rollup service started. Running every 60 minutes
+[14:42:53 INF] System monitor service started. Collecting metrics every 00:05:00
+[14:42:53 INF] Background identification service started (interval: 30s, sample duration: 15s)
+[14:42:53 INF] Initializing audio engine...
+[14:42:53 INF] Audio engine state changed from Uninitialized to Initializing
+[14:42:53 INF] Initializing SoundFlow audio engine (SampleRate: 48000, Channels: 2, BufferSize: 1024)
+[14:42:53 INF] Found 1 playback devices after UpdateAudioDevicesInfo
+[14:42:53 INF] Initializing playback device: Realtek Digital Output (Realtek USB Audio)
+[14:42:53 INF] Playback device initialized and started: Realtek Digital Output (Realtek USB Audio)
+[14:42:53 INF] Balance modifier added to MasterMixer
+[14:42:53 INF] Fingerprint tap modifier added to MasterMixer
+[14:42:53 INF] FingerprintTap: First 4096 samples written to output tap (total processed: 4096)
+[14:42:53 INF] Metrics database initialized at D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\data\config\configuration.db
+[14:42:53 INF] Metrics database initialized at D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\data\config\configuration.db
+[14:42:53 INF] Metrics collector started. Flushing every 60 seconds
+[14:42:53 INF] Metrics collector started. Flushing every 60 seconds
+[14:42:53 INF] Metrics rollup service started. Running every 60 minutes
+[14:42:53 INF] Metrics rollup service started. Running every 60 minutes
+[14:42:53 INF] System monitor service started. Collecting metrics every 00:05:00
+[14:42:53 INF] System monitor service started. Collecting metrics every 00:05:00
+[14:42:53 INF] Background identification service started (interval: 30s, sample duration: 15s)
+[14:42:53 INF] Background identification service started (interval: 30s, sample duration: 15s)
+[14:42:53 INF] Initializing audio engine...
+[14:42:53 INF] Initializing audio engine...
+[14:42:53 INF] Audio engine state changed from Uninitialized to Initializing
+[14:42:53 INF] Audio engine state changed from Uninitialized to Initializing
+[14:42:53 INF] Initializing SoundFlow audio engine (SampleRate: 48000, Channels: 2, BufferSize: 1024)
+[14:42:53 INF] Initializing SoundFlow audio engine (SampleRate: 48000, Channels: 2, BufferSize: 1024)
+[14:42:53 INF] Audio engine state changed from Initializing to Ready
+[14:42:53 INF] SoundFlow audio engine initialized successfully
+[14:42:53 INF] Starting audio engine
+[14:42:53 INF] Audio engine state changed from Ready to Running
+[14:42:53 INF] Audio engine started
+[14:42:53 INF] Audio engine initialized and started successfully
+[14:42:53 INF] Found 3 output devices and 1 input devices
+[14:42:53 INF] Output device: Realtek Digital Output (Realtek USB Audio) (ID: playback-0, Default: True)
+[14:42:53 INF] Output device: HTTP Audio Stream (ID: http-stream, Default: False)
+[14:42:53 INF] Output device: Google Cast (ID: google-cast, Default: False)
+[14:42:53 INF] Input device: Desktop Microphone (Microsoftr LifeCam Cinema(TM)) (ID: capture-0)
+[14:42:53 INF] Metrics database initialized at D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\data\config\configuration.db
+[14:42:53 INF] Metrics collector started. Flushing every 60 seconds
+[14:42:53 INF] Metrics rollup service started. Running every 60 minutes
+[14:42:53 INF] System monitor service started. Collecting metrics every 00:05:00
+[14:42:53 INF] Background identification service started (interval: 30s, sample duration: 15s)
+[14:42:53 INF] Initializing audio engine...
+[14:42:53 INF] Audio engine state changed from Uninitialized to Initializing
+[14:42:53 INF] Initializing SoundFlow audio engine (SampleRate: 48000, Channels: 2, BufferSize: 1024)
+[14:42:53 INF] Using default output device: Realtek Digital Output (Realtek USB Audio)
+[14:42:53 INF] Selected output device: playback-0 (Realtek Digital Output (Realtek USB Audio))
+[14:42:53 INF] Found 1 playback devices after UpdateAudioDevicesInfo
+[14:42:53 INF] Initializing playback device: Realtek Digital Output (Realtek USB Audio)
+[14:42:53 INF] Found 1 playback devices after UpdateAudioDevicesInfo
+[14:42:53 INF] Initializing playback device: Realtek Digital Output (Realtek USB Audio)
+[14:42:53 INF] Found 1 playback devices after UpdateAudioDevicesInfo
+[14:42:53 INF] Initializing playback device: Realtek Digital Output (Realtek USB Audio)
+[14:42:53 INF] Output device set successfully
+[14:42:53 INF] Startup audio source: FilePlayer (from preferences)
+[14:42:53 INF] Audio startup configuration applied. Source activation deferred to UI.
+[14:42:53 INF] Enabling Bluetooth on startup as 'Radio Console Dev'...
+[14:42:53 WRN] Failed to set Bluetooth radio to Discoverable mode
+System.NullReferenceException: Object reference not set to an instance of an object.
+   at InTheHand.Net.Bluetooth.WindowsBluetoothRadio.set_Mode(RadioMode value)
+   at InTheHand.Net.Bluetooth.BluetoothRadio.set_Mode(RadioMode value)
+   at Radio.Infrastructure.Platform.Bluetooth.WindowsBluetoothService.StartAsync(String deviceName, CancellationToken cancellationToken) in D:\prj\RTest\RTest\src\Radio.Infrastructure\Platform\Bluetooth\WindowsBluetoothService.cs:line 389
+[14:42:53 WRN] Bluetooth StartAsync returned false - adapter may not be available
+[14:42:53 INF] VisualizationBroadcastService starting with target frame rate: 30 fps
+[14:42:53 INF] AudioStateUpdateService starting with update interval: 500ms
+[14:42:53 INF] Broadcast NowPlayingChanged: Title=No Track, Artist=--, Album=--, AlbumArt=/images/default-album-art.png, Source=No Source
+[14:42:53 INF] Playback device initialized and started: Realtek Digital Output (Realtek USB Audio)
+[14:42:53 INF] Balance modifier added to MasterMixer
+[14:42:53 INF] Fingerprint tap modifier added to MasterMixer
+[14:42:53 INF] FingerprintTap: First 4096 samples written to output tap (total processed: 4096)
+[14:42:53 INF] Audio engine state changed from Initializing to Ready
+[14:42:53 INF] SoundFlow audio engine initialized successfully
+[14:42:53 INF] Starting audio engine
+[14:42:53 INF] Audio engine state changed from Ready to Running
+[14:42:53 INF] Audio engine started
+[14:42:53 INF] Audio engine initialized and started successfully
+[14:42:53 INF] Found 3 output devices and 1 input devices
+[14:42:53 INF] Output device: Realtek Digital Output (Realtek USB Audio) (ID: playback-0, Default: True)
+[14:42:53 INF] Output device: HTTP Audio Stream (ID: http-stream, Default: False)
+[14:42:53 INF] Output device: Google Cast (ID: google-cast, Default: False)
+[14:42:53 INF] Input device: Desktop Microphone (Microsoftr LifeCam Cinema(TM)) (ID: capture-0)
+[14:42:53 INF] Found persisted output device preference: playback-0
+[14:42:53 INF] Using preferred output device: Realtek Digital Output (Realtek USB Audio)
+[14:42:53 INF] Selected output device: playback-0 (Realtek Digital Output (Realtek USB Audio))
+[14:42:53 INF] Playback device initialized and started: Realtek Digital Output (Realtek USB Audio)
+[14:42:53 INF] Balance modifier added to MasterMixer
+[14:42:53 INF] Fingerprint tap modifier added to MasterMixer
+[14:42:53 INF] FingerprintTap: First 4096 samples written to output tap (total processed: 4096)
+[14:42:53 INF] Playback device initialized and started: Realtek Digital Output (Realtek USB Audio)
+[14:42:53 INF] Balance modifier added to MasterMixer
+[14:42:53 INF] Fingerprint tap modifier added to MasterMixer
+[14:42:53 INF] Audio engine state changed from Initializing to Ready
+[14:42:53 INF] SoundFlow audio engine initialized successfully
+[14:42:53 INF] Starting audio engine
+[14:42:53 INF] Audio engine state changed from Ready to Running
+[14:42:53 INF] Audio engine started
+[14:42:53 INF] Audio engine initialized and started successfully
+[14:42:53 INF] Found 3 output devices and 1 input devices
+[14:42:53 INF] Output device: Realtek Digital Output (Realtek USB Audio) (ID: playback-0, Default: True)
+[14:42:53 INF] Output device: HTTP Audio Stream (ID: http-stream, Default: False)
+[14:42:53 INF] Output device: Google Cast (ID: google-cast, Default: False)
+[14:42:53 INF] Input device: Desktop Microphone (Microsoftr LifeCam Cinema(TM)) (ID: capture-0)
+[14:42:53 INF] Audio engine state changed from Initializing to Ready
+[14:42:53 INF] SoundFlow audio engine initialized successfully
+[14:42:53 INF] Starting audio engine
+[14:42:53 INF] Audio engine state changed from Ready to Running
+[14:42:53 INF] Audio engine started
+[14:42:53 INF] Audio engine initialized and started successfully
+[14:42:53 INF] Found 3 output devices and 1 input devices
+[14:42:53 INF] Output device: Realtek Digital Output (Realtek USB Audio) (ID: playback-0, Default: True)
+[14:42:53 INF] Output device: HTTP Audio Stream (ID: http-stream, Default: False)
+[14:42:53 INF] Output device: Google Cast (ID: google-cast, Default: False)
+[14:42:53 INF] Input device: Desktop Microphone (Microsoftr LifeCam Cinema(TM)) (ID: capture-0)
+[14:42:53 INF] FingerprintTap: First 4096 samples written to output tap (total processed: 4096)
+  Passed Radio.API.Tests.Services.AudioEngineInitializationServiceTests.StartAsync_DoesNotThrowOnAudioEngineFailure [11 ms]
+  Passed Radio.API.Tests.Controllers.BluetoothControllerUnitTests.DiscoveryStop_ReturnsAccepted [< 1 ms]
+  Passed Radio.API.Tests.Services.AudioEngineInitializationServiceTests.StopAsync_DoesNotThrowOnError [2 ms]
+  Passed Radio.API.Tests.Services.AudioEngineInitializationServiceTests.StartAsync_InitializesAndStartsAudioEngine [1 ms]
+  Passed Radio.API.Tests.Services.AudioEngineInitializationServiceTests.StopAsync_StopsAudioEngineWhenRunning [< 1 ms]
+  Passed Radio.API.Tests.Services.AudioEngineInitializationServiceTests.StopAsync_DoesNotStopAudioEngineWhenNotRunning [< 1 ms]
+  Passed Radio.API.Tests.Services.AudioEngineInitializationServiceTests.StartAsync_EnumeratesDevices [1 ms]
+  Passed Radio.API.Tests.Services.AudioEngineInitializationServiceTests.StartAsync_LogsDeviceDetails [2 ms]
+  Passed Radio.API.Tests.Services.AudioEngineInitializationServiceTests.StartAsync_AppliesAudioPreferences [1 ms]
+  Passed Radio.API.Tests.Controllers.BluetoothControllerTests.Pair_WithMissingAddress_ReturnsBadRequest [908 ms]
+[14:42:53 WRN] Failed to set Bluetooth radio to Discoverable mode
+System.NullReferenceException: Object reference not set to an instance of an object.
+   at InTheHand.Net.Bluetooth.WindowsBluetoothRadio.set_Mode(RadioMode value)
+   at InTheHand.Net.Bluetooth.BluetoothRadio.set_Mode(RadioMode value)
+   at Radio.Infrastructure.Platform.Bluetooth.WindowsBluetoothService.StartAsync(String deviceName, CancellationToken cancellationToken) in D:\prj\RTest\RTest\src\Radio.Infrastructure\Platform\Bluetooth\WindowsBluetoothService.cs:line 389
+[14:42:53 ERR] HTTP POST /api/bluetooth/start responded 500 in 3.4490 ms
+[14:42:53 INF] Output device set successfully
+[14:42:53 INF] Startup audio source: FilePlayer (from preferences)
+[14:42:53 INF] Audio startup configuration applied. Source activation deferred to UI.
+[14:42:53 INF] Enabling Bluetooth on startup as 'Radio Console Dev'...
+[14:42:53 WRN] Failed to set Bluetooth radio to Discoverable mode
+System.NullReferenceException: Object reference not set to an instance of an object.
+   at InTheHand.Net.Bluetooth.WindowsBluetoothRadio.set_Mode(RadioMode value)
+   at InTheHand.Net.Bluetooth.BluetoothRadio.set_Mode(RadioMode value)
+   at Radio.Infrastructure.Platform.Bluetooth.WindowsBluetoothService.StartAsync(String deviceName, CancellationToken cancellationToken) in D:\prj\RTest\RTest\src\Radio.Infrastructure\Platform\Bluetooth\WindowsBluetoothService.cs:line 389
+[14:42:53 WRN] Bluetooth StartAsync returned false - adapter may not be available
+[14:42:53 INF] VisualizationBroadcastService starting with target frame rate: 30 fps
+[14:42:53 INF] AudioStateUpdateService starting with update interval: 500ms
+[14:42:53 INF] Broadcast NowPlayingChanged: Title=No Track, Artist=--, Album=--, AlbumArt=/images/default-album-art.png, Source=No Source
+[xUnit.net 00:00:01.02]       Assert.True() Failure
+[xUnit.net 00:00:01.02]       Expected: True
+[xUnit.net 00:00:01.02]       Actual:   False
+[xUnit.net 00:00:01.02]       Stack Trace:
+[xUnit.net 00:00:01.02]         D:\prj\RTest\RTest\tests\Radio.API.Tests\Controllers\BluetoothControllerTests.cs(32,0): at Radio.API.Tests.Controllers.BluetoothControllerTests.Start_ReturnsOkOrBadRequestWhenUnavailable()
+[xUnit.net 00:00:01.02]         --- End of stack trace from previous location ---
+[14:42:53 INF] Metrics database initialized at D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\data\config\configuration.db
+[14:42:53 INF] Metrics database initialized at D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\data\config\configuration.db
+[14:42:53 INF] Metrics collector started. Flushing every 60 seconds
+[14:42:53 INF] Metrics collector started. Flushing every 60 seconds
+[14:42:53 INF] Metrics rollup service started. Running every 60 minutes
+[14:42:53 INF] Metrics rollup service started. Running every 60 minutes
+[14:42:53 INF] System monitor service started. Collecting metrics every 00:05:00
+[14:42:53 INF] System monitor service started. Collecting metrics every 00:05:00
+[14:42:53 INF] Background identification service started (interval: 30s, sample duration: 15s)
+[14:42:53 INF] Background identification service started (interval: 30s, sample duration: 15s)
+[14:42:53 INF] Initializing audio engine...
+[14:42:53 INF] Initializing audio engine...
+[14:42:53 INF] Audio engine state changed from Uninitialized to Initializing
+[14:42:53 INF] Audio engine state changed from Uninitialized to Initializing
+[14:42:53 INF] Initializing SoundFlow audio engine (SampleRate: 48000, Channels: 2, BufferSize: 1024)
+[14:42:53 INF] Initializing SoundFlow audio engine (SampleRate: 48000, Channels: 2, BufferSize: 1024)
+[14:42:53 INF] Metrics database initialized at D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\data\config\configuration.db
+[14:42:53 INF] Metrics collector started. Flushing every 60 seconds
+[14:42:53 INF] Metrics rollup service started. Running every 60 minutes
+[14:42:53 INF] System monitor service started. Collecting metrics every 00:05:00
+[14:42:53 INF] Background identification service started (interval: 30s, sample duration: 15s)
+[14:42:53 INF] Initializing audio engine...
+[14:42:53 INF] Audio engine state changed from Uninitialized to Initializing
+[14:42:53 INF] Initializing SoundFlow audio engine (SampleRate: 48000, Channels: 2, BufferSize: 1024)
+[14:42:53 INF] Found 1 playback devices after UpdateAudioDevicesInfo
+[14:42:53 INF] Initializing playback device: Realtek Digital Output (Realtek USB Audio)
+[14:42:53 INF] Found 1 playback devices after UpdateAudioDevicesInfo
+[14:42:53 INF] Initializing playback device: Realtek Digital Output (Realtek USB Audio)
+[14:42:53 INF] Found 1 playback devices after UpdateAudioDevicesInfo
+[14:42:53 INF] Initializing playback device: Realtek Digital Output (Realtek USB Audio)
+[14:42:53 WRN] Failed to set Bluetooth radio to Connectable mode
+System.NullReferenceException: Object reference not set to an instance of an object.
+   at InTheHand.Net.Bluetooth.WindowsBluetoothRadio.set_Mode(RadioMode value)
+   at InTheHand.Net.Bluetooth.BluetoothRadio.set_Mode(RadioMode value)
+   at Radio.Infrastructure.Platform.Bluetooth.WindowsBluetoothService.StopAsync(CancellationToken cancellationToken) in D:\prj\RTest\RTest\src\Radio.Infrastructure\Platform\Bluetooth\WindowsBluetoothService.cs:line 558
+[14:42:53 INF] Playback device initialized and started: Realtek Digital Output (Realtek USB Audio)
+[14:42:53 INF] Balance modifier added to MasterMixer
+[14:42:53 INF] Fingerprint tap modifier added to MasterMixer
+[14:42:53 INF] Audio engine state changed from Initializing to Ready
+[14:42:53 INF] SoundFlow audio engine initialized successfully
+[14:42:53 INF] Starting audio engine
+[14:42:53 INF] Audio engine state changed from Ready to Running
+[14:42:53 INF] Audio engine started
+[14:42:53 INF] Audio engine initialized and started successfully
+[14:42:53 INF] Found 3 output devices and 1 input devices
+[14:42:53 INF] Output device: Realtek Digital Output (Realtek USB Audio) (ID: playback-0, Default: True)
+[14:42:53 INF] Output device: HTTP Audio Stream (ID: http-stream, Default: False)
+[14:42:53 INF] Output device: Google Cast (ID: google-cast, Default: False)
+[14:42:53 INF] Input device: Desktop Microphone (Microsoftr LifeCam Cinema(TM)) (ID: capture-0)
+[14:42:53 INF] Found persisted output device preference: playback-0
+[14:42:53 INF] Using preferred output device: Realtek Digital Output (Realtek USB Audio)
+[14:42:53 INF] Selected output device: playback-0 (Realtek Digital Output (Realtek USB Audio))
+  Passed Radio.API.Tests.Controllers.BluetoothControllerTests.DiscoveryStop_ReturnsAccepted [5 ms]
+  Failed Radio.API.Tests.Controllers.BluetoothControllerTests.Start_ReturnsOkOrBadRequestWhenUnavailable [7 ms]
+  Error Message:
+   Assert.True() Failure
+Expected: True
+Actual:   False
+  Stack Trace:
+     at Radio.API.Tests.Controllers.BluetoothControllerTests.Start_ReturnsOkOrBadRequestWhenUnavailable() in D:\prj\RTest\RTest\tests\Radio.API.Tests\Controllers\BluetoothControllerTests.cs:line 32
+--- End of stack trace from previous location ---
+  Passed Radio.API.Tests.Controllers.SecretsControllerTests.ListTags_ReturnsOk [940 ms]
+  Passed Radio.API.Tests.Controllers.BluetoothControllerTests.GetStatus_ReturnsOk [50 ms]
+  Passed Radio.API.Tests.Controllers.BluetoothControllerTests.Accept_WithMissingAddress_ReturnsBadRequest [3 ms]
+  Passed Radio.API.Tests.Controllers.BluetoothControllerTests.DiscoveryStart_ReturnsAccepted [2 ms]
+  Passed Radio.API.Tests.Controllers.BluetoothControllerTests.Stop_ReturnsOk [22 ms]
+  Passed Radio.API.Tests.Controllers.BluetoothControllerTests.Unpair_WithMissingAddress_ReturnsBadRequest [2 ms]
+[14:42:53 INF] Playback device initialized and started: Realtek Digital Output (Realtek USB Audio)
+[14:42:53 INF] Balance modifier added to MasterMixer
+[14:42:53 INF] Fingerprint tap modifier added to MasterMixer
+[14:42:53 INF] Playback device initialized and started: Realtek Digital Output (Realtek USB Audio)
+[14:42:53 INF] Balance modifier added to MasterMixer
+[14:42:53 INF] Fingerprint tap modifier added to MasterMixer
+[14:42:53 INF] Audio engine state changed from Initializing to Ready
+[14:42:53 INF] SoundFlow audio engine initialized successfully
+[14:42:53 INF] Starting audio engine
+[14:42:53 INF] Audio engine state changed from Ready to Running
+[14:42:53 INF] Audio engine started
+[14:42:53 INF] Audio engine initialized and started successfully
+[14:42:53 INF] Found 3 output devices and 1 input devices
+[14:42:53 INF] Output device: Realtek Digital Output (Realtek USB Audio) (ID: playback-0, Default: True)
+[14:42:53 INF] Output device: HTTP Audio Stream (ID: http-stream, Default: False)
+[14:42:53 INF] Output device: Google Cast (ID: google-cast, Default: False)
+[14:42:53 INF] Input device: Desktop Microphone (Microsoftr LifeCam Cinema(TM)) (ID: capture-0)
+[14:42:53 INF] Audio engine state changed from Initializing to Ready
+[14:42:53 INF] SoundFlow audio engine initialized successfully
+[14:42:53 INF] Starting audio engine
+[14:42:53 INF] Audio engine state changed from Ready to Running
+[14:42:53 INF] Audio engine started
+[14:42:53 INF] Audio engine initialized and started successfully
+[14:42:53 INF] Found 3 output devices and 1 input devices
+[14:42:53 INF] Output device: Realtek Digital Output (Realtek USB Audio) (ID: playback-0, Default: True)
+[14:42:53 INF] Output device: HTTP Audio Stream (ID: http-stream, Default: False)
+[14:42:53 INF] Output device: Google Cast (ID: google-cast, Default: False)
+[14:42:53 INF] Input device: Desktop Microphone (Microsoftr LifeCam Cinema(TM)) (ID: capture-0)
+[14:42:53 INF] AudioStateUpdateService stopped
+[14:42:53 INF] VisualizationBroadcastService stopped
+[14:42:53 INF] Stopping audio engine...
+[14:42:53 INF] Audio engine state changed from Running to Stopping
+[14:42:53 INF] Stopping audio engine
+[14:42:53 INF] Cleared all sources from mixer
+[14:42:53 INF] Audio engine state changed from Stopping to Ready
+[14:42:53 INF] Audio engine stopped
+[14:42:53 INF] Audio engine stopped successfully
+[14:42:53 INF] Stopping audio engine...
+[14:42:53 INF] Audio engine stopped successfully
+[14:42:53 INF] Stopping metrics collector service
+[14:42:53 INF] FingerprintTap: First 4096 samples written to output tap (total processed: 4096)
+[14:42:53 INF] FingerprintTap: First 4096 samples written to output tap (total processed: 4096)
+[14:42:53 INF] FingerprintTap: First 4096 samples written to output tap (total processed: 4096)
+[14:42:53 INF] Secret stored with tag: tts_google_api_key
+[14:42:53 INF] Section 'tts': stored 1 secrets
+[14:42:53 INF] Output device set successfully
+[14:42:53 INF] Startup audio source: FilePlayer (from preferences)
+[14:42:53 INF] Audio startup configuration applied. Source activation deferred to UI.
+[14:42:53 INF] Enabling Bluetooth on startup as 'Radio Console Dev'...
+[14:42:53 WRN] Failed to set Bluetooth radio to Discoverable mode
+System.NullReferenceException: Object reference not set to an instance of an object.
+   at InTheHand.Net.Bluetooth.WindowsBluetoothRadio.set_Mode(RadioMode value)
+   at InTheHand.Net.Bluetooth.BluetoothRadio.set_Mode(RadioMode value)
+   at Radio.Infrastructure.Platform.Bluetooth.WindowsBluetoothService.StartAsync(String deviceName, CancellationToken cancellationToken) in D:\prj\RTest\RTest\src\Radio.Infrastructure\Platform\Bluetooth\WindowsBluetoothService.cs:line 389
+[14:42:53 WRN] Bluetooth StartAsync returned false - adapter may not be available
+[14:42:53 INF] VisualizationBroadcastService starting with target frame rate: 30 fps
+[14:42:53 INF] AudioStateUpdateService starting with update interval: 500ms
+[14:42:53 INF] Broadcast NowPlayingChanged: Title=No Track, Artist=--, Album=--, AlbumArt=/images/default-album-art.png, Source=No Source
+[14:42:53 INF] Found persisted output device preference: playback-0
+[14:42:53 INF] Using preferred output device: Realtek Digital Output (Realtek USB Audio)
+[14:42:53 INF] Selected output device: playback-0 (Realtek Digital Output (Realtek USB Audio))
+[14:42:53 INF] AudioStateUpdateService stopped
+[14:42:53 INF] VisualizationBroadcastService stopped
+[14:42:53 INF] Stopping audio engine...
+[14:42:53 INF] Audio engine state changed from Running to Stopping
+[14:42:53 INF] Stopping audio engine
+[14:42:53 INF] Cleared all sources from mixer
+[14:42:53 INF] Audio engine state changed from Stopping to Ready
+[14:42:53 INF] Audio engine stopped
+[14:42:53 INF] Audio engine stopped successfully
+[14:42:53 INF] Stopping audio engine...
+[14:42:53 INF] Audio engine stopped successfully
+[14:42:53 INF] Stopping metrics collector service
+  Passed Radio.API.Tests.Controllers.BluetoothControllerTests.Disconnect_ReturnsOk [21 ms]
+  Passed Radio.API.Tests.Controllers.QueueControllerTests.ClearQueue_WithNoActiveSource_ReturnsNotFound [1 s]
+  Passed Radio.API.Tests.Controllers.SecretsControllerTests.PostSectionSecrets_StoresAndRetrieves_TtsSecrets [300 ms]
+  Passed Radio.API.Tests.Controllers.QueueControllerTests.MoveQueueItem_WithNoActiveSource_ReturnsNotFound [6 ms]
+  Passed Radio.API.Tests.Controllers.QueueControllerTests.GetQueue_WithNoActiveSource_ReturnsNotFound [2 ms]
+  Passed Radio.API.Tests.Controllers.QueueControllerTests.RemoveFromQueue_WithNoActiveSource_ReturnsNotFound [2 ms]
+  Passed Radio.API.Tests.Controllers.QueueControllerTests.JumpToIndex_WithNoActiveSource_ReturnsNotFound [2 ms]
+  Passed Radio.API.Tests.Controllers.QueueControllerTests.AddToQueue_WithNoActiveSource_ReturnsNotFound [5 ms]
+  Passed Radio.API.Tests.Controllers.SecretsControllerTests.GetSectionSecrets_ReturnsOk_ForValidSection [184 ms]
+[14:42:54 INF] Metrics collector stopped
+[14:42:54 INF] Preferences persistence service is stopping - saving final state
+[14:42:54 INF] Found persisted output device preference: playback-0
+[14:42:54 INF] Metrics database initialized at D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\data\config\configuration.db
+[14:42:54 INF] Metrics database initialized at D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\data\config\configuration.db
+[14:42:54 INF] Using preferred output device: Realtek Digital Output (Realtek USB Audio)
+[14:42:54 INF] Metrics collector started. Flushing every 60 seconds
+[14:42:54 INF] Selected output device: playback-0 (Realtek Digital Output (Realtek USB Audio))
+[14:42:54 INF] Metrics rollup service started. Running every 60 minutes
+[14:42:54 INF] Metrics collector started. Flushing every 60 seconds
+[14:42:54 INF] System monitor service started. Collecting metrics every 00:05:00
+[14:42:54 INF] Metrics rollup service started. Running every 60 minutes
+[14:42:54 INF] Background identification service started (interval: 30s, sample duration: 15s)
+[14:42:54 INF] System monitor service started. Collecting metrics every 00:05:00
+[14:42:54 INF] Initializing audio engine...
+[14:42:54 INF] Background identification service started (interval: 30s, sample duration: 15s)
+[14:42:54 INF] Audio engine state changed from Uninitialized to Initializing
+[14:42:54 INF] Initializing audio engine...
+[14:42:54 INF] Initializing SoundFlow audio engine (SampleRate: 48000, Channels: 2, BufferSize: 1024)
+[14:42:54 INF] Audio engine state changed from Uninitialized to Initializing
+[14:42:54 INF] Initializing SoundFlow audio engine (SampleRate: 48000, Channels: 2, BufferSize: 1024)
+[14:42:54 INF] Found 1 playback devices after UpdateAudioDevicesInfo
+[14:42:54 INF] Found 1 playback devices after UpdateAudioDevicesInfo
+[14:42:54 INF] Initializing playback device: Realtek Digital Output (Realtek USB Audio)
+[14:42:54 INF] Initializing playback device: Realtek Digital Output (Realtek USB Audio)
+[14:42:54 INF] Secret stored with tag: tts_google_api_key
+[14:42:54 INF] Section 'tts': stored 1 secrets
+[14:42:54 INF] Playback device initialized and started: Realtek Digital Output (Realtek USB Audio)
+[14:42:54 INF] Balance modifier added to MasterMixer
+[14:42:54 INF] Fingerprint tap modifier added to MasterMixer
+[14:42:54 INF] Playback device initialized and started: Realtek Digital Output (Realtek USB Audio)
+[14:42:54 INF] Balance modifier added to MasterMixer
+[14:42:54 INF] Fingerprint tap modifier added to MasterMixer
+[14:42:54 INF] Audio engine state changed from Initializing to Ready
+[14:42:54 INF] SoundFlow audio engine initialized successfully
+[14:42:54 INF] Starting audio engine
+[14:42:54 INF] Audio engine state changed from Ready to Running
+[14:42:54 INF] Audio engine started
+[14:42:54 INF] Audio engine initialized and started successfully
+[14:42:54 INF] Found 3 output devices and 1 input devices
+[14:42:54 INF] Output device: Realtek Digital Output (Realtek USB Audio) (ID: playback-0, Default: True)
+[14:42:54 INF] Output device: HTTP Audio Stream (ID: http-stream, Default: False)
+[14:42:54 INF] Output device: Google Cast (ID: google-cast, Default: False)
+[14:42:54 INF] Input device: Desktop Microphone (Microsoftr LifeCam Cinema(TM)) (ID: capture-0)
+[14:42:54 INF] Audio engine state changed from Initializing to Ready
+[14:42:54 INF] SoundFlow audio engine initialized successfully
+[14:42:54 INF] Starting audio engine
+[14:42:54 INF] Audio engine state changed from Ready to Running
+[14:42:54 INF] Audio engine started
+[14:42:54 INF] Audio engine initialized and started successfully
+[14:42:54 INF] Found 3 output devices and 1 input devices
+[14:42:54 INF] Output device: Realtek Digital Output (Realtek USB Audio) (ID: playback-0, Default: True)
+[14:42:54 INF] Output device: HTTP Audio Stream (ID: http-stream, Default: False)
+[14:42:54 INF] Output device: Google Cast (ID: google-cast, Default: False)
+[14:42:54 INF] Input device: Desktop Microphone (Microsoftr LifeCam Cinema(TM)) (ID: capture-0)
+[14:42:54 INF] FingerprintTap: First 4096 samples written to output tap (total processed: 4096)
+[14:42:54 INF] FingerprintTap: First 4096 samples written to output tap (total processed: 4096)
+[14:42:54 INF] Output device set successfully
+[14:42:54 INF] Startup audio source: FilePlayer (from preferences)
+[14:42:54 INF] Audio startup configuration applied. Source activation deferred to UI.
+[14:42:54 INF] Enabling Bluetooth on startup as 'Radio Console Dev'...
+[14:42:54 WRN] Failed to set Bluetooth radio to Discoverable mode
+System.NullReferenceException: Object reference not set to an instance of an object.
+   at InTheHand.Net.Bluetooth.WindowsBluetoothRadio.set_Mode(RadioMode value)
+   at InTheHand.Net.Bluetooth.BluetoothRadio.set_Mode(RadioMode value)
+   at Radio.Infrastructure.Platform.Bluetooth.WindowsBluetoothService.StartAsync(String deviceName, CancellationToken cancellationToken) in D:\prj\RTest\RTest\src\Radio.Infrastructure\Platform\Bluetooth\WindowsBluetoothService.cs:line 389
+[14:42:54 WRN] Bluetooth StartAsync returned false - adapter may not be available
+[14:42:54 INF] VisualizationBroadcastService starting with target frame rate: 30 fps
+[14:42:54 INF] AudioStateUpdateService starting with update interval: 500ms
+[14:42:54 INF] Broadcast NowPlayingChanged: Title=No Track, Artist=--, Album=--, AlbumArt=/images/default-album-art.png, Source=No Source
+[14:42:54 INF] Log retrieval requested with level=warning, limit=100, maxAge=60. Returned 79 logs.
+[14:42:54 INF] Found persisted output device preference: playback-0
+[14:42:54 INF] Using preferred output device: Realtek Digital Output (Realtek USB Audio)
+[14:42:54 INF] Selected output device: playback-0 (Realtek Digital Output (Realtek USB Audio))
+[14:42:54 INF] Output device set successfully
+[14:42:54 INF] Startup audio source: FilePlayer (from preferences)
+[14:42:54 INF] Audio startup configuration applied. Source activation deferred to UI.
+[14:42:54 INF] Enabling Bluetooth on startup as 'Radio Console Dev'...
+[14:42:54 WRN] Failed to set Bluetooth radio to Discoverable mode
+System.NullReferenceException: Object reference not set to an instance of an object.
+   at InTheHand.Net.Bluetooth.WindowsBluetoothRadio.set_Mode(RadioMode value)
+   at InTheHand.Net.Bluetooth.BluetoothRadio.set_Mode(RadioMode value)
+   at Radio.Infrastructure.Platform.Bluetooth.WindowsBluetoothService.StartAsync(String deviceName, CancellationToken cancellationToken) in D:\prj\RTest\RTest\src\Radio.Infrastructure\Platform\Bluetooth\WindowsBluetoothService.cs:line 389
+[14:42:54 WRN] Bluetooth StartAsync returned false - adapter may not be available
+[14:42:54 INF] VisualizationBroadcastService starting with target frame rate: 30 fps
+[14:42:54 INF] AudioStateUpdateService starting with update interval: 500ms
+[14:42:54 INF] Broadcast NowPlayingChanged: Title=No Track, Artist=--, Album=--, AlbumArt=/images/default-album-art.png, Source=No Source
+[14:42:54 INF] Metrics database initialized at D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\data\config\configuration.db
+[14:42:54 INF] Found persisted output device preference: playback-0
+[14:42:54 INF] Metrics collector started. Flushing every 60 seconds
+[14:42:54 INF] Using preferred output device: Realtek Digital Output (Realtek USB Audio)
+[14:42:54 INF] Metrics rollup service started. Running every 60 minutes
+[14:42:54 INF] System monitor service started. Collecting metrics every 00:05:00
+[14:42:54 INF] Selected output device: playback-0 (Realtek Digital Output (Realtek USB Audio))
+[14:42:54 INF] Background identification service started (interval: 30s, sample duration: 15s)
+[14:42:54 INF] Initializing audio engine...
+[14:42:54 INF] Audio engine state changed from Uninitialized to Initializing
+[14:42:54 INF] Initializing SoundFlow audio engine (SampleRate: 48000, Channels: 2, BufferSize: 1024)
+[14:42:54 INF] Source selection requested: Radio
+[14:42:54 INF] Source Radio not in mixer, attempting to create
+[14:42:54 INF] Creating new source for type: Radio
+[14:42:54 INF] Found 1 playback devices after UpdateAudioDevicesInfo
+[14:42:54 INF] Initializing playback device: Realtek Digital Output (Realtek USB Audio)
+[14:42:54 INF] Found 1 RTL-SDR device(s)
+[14:42:54 INF] Secret stored with tag: acoustid_api_key
+[14:42:54 INF] Section 'acoustid': stored 1 secrets
+[14:42:54 INF] Playback device initialized and started: Realtek Digital Output (Realtek USB Audio)
+[14:42:54 INF] Balance modifier added to MasterMixer
+[14:42:54 INF] Fingerprint tap modifier added to MasterMixer
+[14:42:54 INF] Audio engine state changed from Initializing to Ready
+[14:42:54 INF] SoundFlow audio engine initialized successfully
+[14:42:54 INF] Starting audio engine
+[14:42:54 INF] Audio engine state changed from Ready to Running
+[14:42:54 INF] Audio engine started
+[14:42:54 INF] Audio engine initialized and started successfully
+[14:42:54 INF] Found 3 output devices and 1 input devices
+[14:42:54 INF] Output device: Realtek Digital Output (Realtek USB Audio) (ID: playback-0, Default: True)
+[14:42:54 INF] Output device: HTTP Audio Stream (ID: http-stream, Default: False)
+[14:42:54 INF] Output device: Google Cast (ID: google-cast, Default: False)
+[14:42:54 INF] Input device: Desktop Microphone (Microsoftr LifeCam Cinema(TM)) (ID: capture-0)
+[14:42:54 INF] Log retrieval requested with level=info, limit=5, maxAge=null. Returned 5 logs.
+  Passed Radio.API.Tests.Controllers.SystemControllerTests.GetSystemLogs_WithMaxAge_ReturnsOk [1 s]
+  Passed Radio.API.Tests.Controllers.SecretsControllerTests.GetSectionSecrets_MasksValues_ByDefault [273 ms]
+  Passed Radio.API.Tests.Controllers.SecretsControllerTests.GetSectionSecrets_ReturnsBadRequest_ForUnknownSection [1 ms]
+  Passed Radio.API.Tests.Controllers.SystemControllerTests.GetSystemStats_ReturnsOk [137 ms]
+  Passed Radio.API.Tests.Controllers.SystemControllerTests.GetSystemStats_ReturnsValidData [13 ms]
+  Passed Radio.API.Tests.Controllers.SystemControllerTests.GetSystemLogs_WithInvalidLevel_ReturnsBadRequest [1 ms]
+  Passed Radio.API.Tests.Controllers.SystemControllerTests.GetSystemLogs_RespectsSizeLimit [4 ms]
+  Passed Radio.API.Tests.Controllers.SystemControllerTests.GetSystemLogs_WithInvalidLimit_ReturnsBadRequest [< 1 ms]
+[14:42:54 INF] Log retrieval requested with level=info, limit=10, maxAge=null. Returned 10 logs.
+[14:42:54 INF] Found 2 SDR devices (cache expires in 30s)
+[14:42:54 INF] Default radio device: RTLSDRCore
+[14:42:54 INF] Creating radio source for device type: RTLSDRCore
+[14:42:54 INF] Found 1 RTL-SDR device(s)
+[14:42:54 INF] Log retrieval requested with level=error, limit=100, maxAge=null. Returned 6 logs.
+[14:42:54 INF] Log retrieval requested with level=warning, limit=100, maxAge=null. Returned 81 logs.
+[14:42:54 INF] Log retrieval requested with level=error, limit=100, maxAge=null. Returned 6 logs.
+[14:42:54 INF] Log retrieval requested with level=warning, limit=100, maxAge=null. Returned 81 logs.
+[14:42:54 INF] FingerprintTap: First 4096 samples written to output tap (total processed: 4096)
+[14:42:54 INF] Found RTL-SDR device: Generic RTL2832U OEM
+[14:42:54 INF] Creating device: Generic RTL2832U OEM (Type: RTLSDR)
+[14:42:54 INF] Log retrieval requested with level=warning, limit=50, maxAge=null. Returned 50 logs.
+[14:42:54 INF] AudioStateUpdateService stopped
+[14:42:54 INF] VisualizationBroadcastService stopped
+[14:42:54 INF] Stopping audio engine...
+[14:42:54 INF] Audio engine state changed from Running to Stopping
+[14:42:54 INF] Stopping audio engine
+[14:42:54 INF] Cleared all sources from mixer
+[14:42:54 INF] Audio engine state changed from Stopping to Ready
+[14:42:54 INF] Audio engine stopped
+[14:42:54 INF] Audio engine stopped successfully
+[14:42:54 INF] Stopping audio engine...
+[14:42:54 INF] Audio engine stopped successfully
+[14:42:54 INF] Stopping metrics collector service
+[14:42:54 INF] Metrics collector stopped
+[14:42:54 INF] Preferences persistence service is stopping - saving final state
+[14:42:54 INF] RadioReceiver created with device: Generic RTL2832U OEM
+[14:42:54 INF] Successfully created RTL-SDR radio source
+[14:42:54 INF] Added audio source Radio-31e6db3c5e78422a8d51a8c1298fc34f (SDR Radio (RTL-SDR)) to mixer
+[14:42:54 INF] Created and registered source: SDR Radio (RTL-SDR) (Radio)
+[14:42:54 INF] Switching from source none to SDR Radio (RTL-SDR) (Radio)
+[14:42:54 INF] Starting playback on new source: SDR Radio (RTL-SDR)
+[14:42:54 INF] ?? SDR RADIO: Starting playback (Frequency: 97.8 MHz, Band: FM)
+[14:42:54 INF] Starting receiver on FM Broadcast at 97.750 MHz
+[14:42:54 INF] Secret deleted: acoustid_api_key
+[14:42:54 INF] Section 'acoustid': deleted 1 secrets
+  Passed Radio.API.Tests.Controllers.SystemControllerTests.GetSystemLogs_ReturnsValidStructure [8 ms]
+  Passed Radio.API.Tests.Controllers.SystemControllerTests.GetSystemLogs_WithTooLargeLimit_ReturnsBadRequest [< 1 ms]
+  Passed Radio.API.Tests.Controllers.SystemControllerTests.GetSystemLogs_FiltersErrorOnly [16 ms]
+  Passed Radio.API.Tests.Controllers.SystemControllerTests.GetSystemLogs_WithDefaults_ReturnsOk [7 ms]
+  Passed Radio.API.Tests.Controllers.SystemControllerTests.GetSystemLogs_WithLevelFilter_ReturnsOk [6 ms]
+  Passed Radio.API.Tests.Controllers.SystemControllerTests.GetSystemLogs_FiltersWarningAndAbove [7 ms]
+  Passed Radio.API.Tests.Controllers.SystemControllerTests.GetSystemLogs_WithLimit_ReturnsOk [19 ms]
+  Passed Radio.API.Tests.Controllers.SecretsControllerTests.DeleteSectionSecrets_ReturnsOk [284 ms]
+  Passed Radio.API.Tests.Controllers.SecretsControllerTests.DeleteSectionSecrets_ReturnsBadRequest_ForUnknownSection [< 1 ms]
+[14:42:54 INF] AudioStateUpdateService stopped
+[14:42:54 INF] VisualizationBroadcastService stopped
+[14:42:54 INF] Stopping audio engine...
+[14:42:54 INF] Audio engine state changed from Running to Stopping
+[14:42:54 INF] Stopping audio engine
+[14:42:54 INF] Cleared all sources from mixer
+[14:42:54 INF] Audio engine state changed from Stopping to Ready
+[14:42:54 INF] Audio engine stopped
+[14:42:54 INF] Audio engine stopped successfully
+[14:42:54 INF] Stopping audio engine...
+[14:42:54 INF] Audio engine stopped successfully
+[14:42:54 INF] Stopping metrics collector service
+[14:42:54 INF] Using default output device: Realtek Digital Output (Realtek USB Audio)
+[14:42:54 INF] Using default output device: Realtek Digital Output (Realtek USB Audio)
+[14:42:54 INF] Selected output device: playback-0 (Realtek Digital Output (Realtek USB Audio))
+[14:42:54 INF] Selected output device: playback-0 (Realtek Digital Output (Realtek USB Audio))
+[14:42:54 INF] Output device set successfully
+[14:42:54 INF] Startup audio source: FilePlayer (from preferences)
+[14:42:54 INF] Audio startup configuration applied. Source activation deferred to UI.
+[14:42:54 INF] Enabling Bluetooth on startup as 'Radio Console Dev'...
+[14:42:54 WRN] Failed to set Bluetooth radio to Discoverable mode
+System.NullReferenceException: Object reference not set to an instance of an object.
+   at InTheHand.Net.Bluetooth.WindowsBluetoothRadio.set_Mode(RadioMode value)
+   at InTheHand.Net.Bluetooth.BluetoothRadio.set_Mode(RadioMode value)
+   at Radio.Infrastructure.Platform.Bluetooth.WindowsBluetoothService.StartAsync(String deviceName, CancellationToken cancellationToken) in D:\prj\RTest\RTest\src\Radio.Infrastructure\Platform\Bluetooth\WindowsBluetoothService.cs:line 389
+[14:42:54 WRN] Bluetooth StartAsync returned false - adapter may not be available
+[14:42:54 INF] VisualizationBroadcastService starting with target frame rate: 30 fps
+[14:42:54 INF] AudioStateUpdateService starting with update interval: 500ms
+[14:42:54 INF] Broadcast NowPlayingChanged: Title=No Track, Artist=--, Album=--, AlbumArt=/images/default-album-art.png, Source=No Source
+[14:42:54 WRN] Next track failed: No primary audio source is active. Active sources: 
+[14:42:54 INF] Metrics database initialized at D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\data\config\configuration.db
+[14:42:54 INF] Metrics collector started. Flushing every 60 seconds
+[14:42:54 INF] Metrics rollup service started. Running every 60 minutes
+[14:42:54 INF] System monitor service started. Collecting metrics every 00:05:00
+[14:42:54 INF] Background identification service started (interval: 30s, sample duration: 15s)
+[14:42:54 INF] Initializing audio engine...
+[14:42:54 INF] Audio engine state changed from Uninitialized to Initializing
+[14:42:54 INF] Initializing SoundFlow audio engine (SampleRate: 48000, Channels: 2, BufferSize: 1024)
+[14:42:54 INF] Found 1 playback devices after UpdateAudioDevicesInfo
+[14:42:54 INF] Initializing playback device: Realtek Digital Output (Realtek USB Audio)
+[14:42:54 INF] Mute toggled to True
+[14:42:54 INF] Volume set to 0.5
+  Passed Radio.API.Tests.Controllers.SecretsControllerTests.PostSectionSecrets_ReturnsBadRequest_ForUnknownSection [< 1 ms]
+  Passed Radio.API.Tests.Controllers.AudioControllerTests.Next_WithNoActiveSource_ReturnsBadRequest [2 s]
+  Passed Radio.API.Tests.Controllers.AudioControllerTests.GetNowPlaying_WithNoActiveSource_ReturnsValidDefaults [8 ms]
+  Passed Radio.API.Tests.Controllers.AudioControllerTests.GetPlaybackState_ReturnsOk [8 ms]
+  Passed Radio.API.Tests.Controllers.AudioControllerTests.GetNowPlaying_ReturnsExpectedStructure [< 1 ms]
+  Passed Radio.API.Tests.Controllers.AudioControllerTests.ToggleMute_ReturnsOk [2 ms]
+  Passed Radio.API.Tests.Controllers.AudioControllerTests.GetPlaybackState_IncludesNewUICapabilityHints [< 1 ms]
+  Passed Radio.API.Tests.Controllers.AudioControllerTests.SetRepeatMode_WithNoActiveSource_ReturnsBadRequest [4 ms]
+  Passed Radio.API.Tests.Controllers.AudioControllerTests.SetVolume_WithValidValue_ReturnsOk [2 ms]
+[14:42:54 INF] Playback device initialized and started: Realtek Digital Output (Realtek USB Audio)
+[14:42:54 INF] Balance modifier added to MasterMixer
+[14:42:54 INF] Fingerprint tap modifier added to MasterMixer
+[14:42:54 INF] Volume set to 0.7
+[14:42:54 INF] Audio engine state changed from Initializing to Ready
+[14:42:54 INF] SoundFlow audio engine initialized successfully
+[14:42:54 INF] Starting audio engine
+[14:42:54 INF] Audio engine state changed from Ready to Running
+[14:42:54 INF] Audio engine started
+[14:42:54 INF] Audio engine initialized and started successfully
+[14:42:54 INF] Found 3 output devices and 1 input devices
+[14:42:54 INF] Output device: Realtek Digital Output (Realtek USB Audio) (ID: playback-0, Default: True)
+[14:42:54 INF] Output device: HTTP Audio Stream (ID: http-stream, Default: False)
+[14:42:54 INF] Output device: Google Cast (ID: google-cast, Default: False)
+[14:42:54 INF] Input device: Desktop Microphone (Microsoftr LifeCam Cinema(TM)) (ID: capture-0)
+[14:42:54 INF] Audio engine started
+[14:42:54 WRN] Previous track failed: No primary audio source is active
+[14:42:54 INF] Audio engine state changed from Running to Stopping
+[14:42:54 INF] Stopping audio engine
+[14:42:54 INF] Cleared all sources from mixer
+[14:42:54 INF] Audio engine state changed from Stopping to Ready
+[14:42:54 INF] Audio engine stopped
+[14:42:54 INF] Audio engine stopped
+  Passed Radio.API.Tests.Controllers.AudioControllerTests.SetShuffle_WithNoActiveSource_ReturnsBadRequest [3 ms]
+  Passed Radio.API.Tests.Controllers.AudioControllerTests.GetNowPlaying_AlwaysReturnsNonNullStrings [< 1 ms]
+  Passed Radio.API.Tests.Controllers.AudioControllerTests.UpdatePlaybackState_WithVolumeChange_UpdatesVolume [12 ms]
+  Passed Radio.API.Tests.Controllers.AudioControllerTests.StartEngine_ReturnsOk [3 ms]
+  Passed Radio.API.Tests.Controllers.AudioControllerTests.Previous_WithNoActiveSource_ReturnsBadRequest [2 ms]
+  Passed Radio.API.Tests.Controllers.AudioControllerTests.StopEngine_ReturnsOk [2 ms]
+  Passed Radio.API.Tests.Controllers.AudioControllerTests.GetPlaybackState_IncludesNavigationCapabilities [< 1 ms]
+  Passed Radio.API.Tests.Controllers.AudioControllerTests.GetVolume_ReturnsVolumeInfo [2 ms]
+  Passed Radio.API.Tests.Controllers.AudioControllerTests.SetVolume_WithInvalidValue_ReturnsBadRequest [< 1 ms]
+[14:42:54 INF] AudioStateUpdateService stopped
+[14:42:54 INF] VisualizationBroadcastService stopped
+[14:42:54 INF] Stopping audio engine...
+[14:42:54 INF] Audio engine stopped successfully
+[14:42:54 INF] Stopping audio engine...
+[14:42:54 INF] Audio engine stopped successfully
+[14:42:54 INF] Stopping metrics collector service
+[14:42:54 INF] Metrics collector stopped
+[14:42:54 INF] Preferences persistence service is stopping - saving final state
+[14:42:54 INF] FingerprintTap: First 4096 samples written to output tap (total processed: 4096)
+[14:42:54 INF] Broadcast NowPlayingChanged: Title=SDR Radio, Artist=RTL-SDR, Album=FM, AlbumArt=/images/default-album-art.png, Source=SDR Radio (RTL-SDR)
+[14:42:55 INF] Opened RTL-SDR device 0: Generic RTL2832U OEM
+[14:42:55 INF] Preferences persistence service stopped
+[14:42:55 INF] Stopping metrics collector service
+[14:42:55 INF] Metrics collector stopped
+[14:42:55 INF] Preferences persistence service is stopping - saving final state
+[14:42:55 INF] GoogleCast output state changed from Created to Disposed
+[14:42:55 INF] GoogleCast output disposed
+[14:42:55 INF] Disposing AudioManager
+[14:42:55 INF] AudioManager disposed
+[14:42:55 INF] VisualizerService disposed
+[14:42:55 INF] Audio engine state changed from Ready to Disposed
+[14:42:55 INF] Disposing audio engine
+[14:42:55 INF] Cleared all sources from mixer
+[14:42:55 INF] Audio engine disposed
+[14:42:55 INF] Starting RTL-SDR sample streaming
+[14:42:55 INF] Receiver started successfully
+[14:42:55 INF] ?? AUDIO ROUTING: Adding component 'Buffered Generator (Single)' to SoundFlow mixer (SourceId=sdr-radio-338b8380de3944f5a9a4695fa43b7b0c, Volume=100 %)
+[14:42:55 INF] ?? AUDIO ROUTING COMPLETE: Component 'Buffered Generator (Single)' now connected to audio output (SourceId=sdr-radio-338b8380de3944f5a9a4695fa43b7b0c)
+[14:42:55 INF] ?? SDR RADIO: Audio pipeline ready - waiting for audio data from RTL-SDR (PlaybackId=sdr-radio-338b8380de3944f5a9a4695fa43b7b0c, Volume=100 %)
+[14:42:55 INF] Audio source Radio-31e6db3c5e78422a8d51a8c1298fc34f state changed from Created to Playing
+[14:42:55 INF] Source state changed: SDR Radio (RTL-SDR) (Radio) Created -> Playing, IsActiveSource=True
+[14:42:55 INF] Source SDR Radio (RTL-SDR) transitioned to Playing, recording play history
+[14:42:55 INF] Connected to fingerprint database: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\data\fingerprints\fingerprints.db
+[14:42:55 INF] Using default output device: Realtek Digital Output (Realtek USB Audio)
+[14:42:55 INF] Selected output device: playback-0 (Realtek Digital Output (Realtek USB Audio))
+[14:42:55 INF] ?? SDR RADIO AUDIO FLOW STARTED: First audio data received from RTL-SDR (Frequency: 97.8 MHz, Band: FM, 327 samples)
+[14:42:55 INF] Metrics collector stopped
+[14:42:55 INF] Preferences persistence service is stopping - saving final state
+[14:42:55 INF] Recorded play history entry b80c7e27-84ff-4180-8716-26cf12868bc0 for source SDR Radio (RTL-SDR) (identified: True, source: Radio)
+[14:42:55 INF] Broadcast NowPlayingChanged: Title=SDR Radio, Artist=RTL-SDR, Album=FM, AlbumArt=/images/default-album-art.png, Source=SDR Radio (RTL-SDR)
+[14:42:56 INF] Stopping metrics collector service
+[14:42:56 INF] Metrics collector stopped
+[14:42:56 INF] Preferences persistence service is stopping - saving final state
+[14:42:56 INF] Preferences persistence service stopped
+[14:42:56 INF] GoogleCast output state changed from Created to Disposed
+[14:42:56 INF] GoogleCast output disposed
+[14:42:56 INF] Disposing AudioManager
+[14:42:56 INF] AudioManager disposed
+[14:42:56 INF] VisualizerService disposed
+[14:42:56 INF] Audio engine state changed from Ready to Disposed
+[14:42:56 INF] Disposing audio engine
+[14:42:56 INF] Cleared all sources from mixer
+[14:42:56 INF] Audio engine disposed
+  Passed Radio.API.Tests.Controllers.AudioControllerTests.SetRepeatMode_WithInvalidMode_ReturnsBadRequest [< 1 ms]
+[14:42:56 INF] Metrics database initialized at D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\data\config\configuration.db
+[14:42:56 INF] Metrics collector started. Flushing every 60 seconds
+[14:42:56 INF] Metrics rollup service started. Running every 60 minutes
+[14:42:56 INF] System monitor service started. Collecting metrics every 00:05:00
+[14:42:56 INF] Background identification service started (interval: 30s, sample duration: 15s)
+[14:42:56 INF] Initializing audio engine...
+[14:42:56 INF] Audio engine state changed from Uninitialized to Initializing
+[14:42:56 INF] Initializing SoundFlow audio engine (SampleRate: 48000, Channels: 2, BufferSize: 1024)
+[14:42:56 INF] Found 1 playback devices after UpdateAudioDevicesInfo
+[14:42:56 INF] Initializing playback device: Realtek Digital Output (Realtek USB Audio)
+[14:42:56 INF] Playback device initialized and started: Realtek Digital Output (Realtek USB Audio)
+[14:42:56 INF] Balance modifier added to MasterMixer
+[14:42:56 INF] Fingerprint tap modifier added to MasterMixer
+[14:42:56 INF] Audio engine state changed from Initializing to Ready
+[14:42:56 INF] SoundFlow audio engine initialized successfully
+[14:42:56 INF] Starting audio engine
+[14:42:56 INF] Audio engine state changed from Ready to Running
+[14:42:56 INF] Audio engine started
+[14:42:56 INF] Audio engine initialized and started successfully
+[14:42:56 INF] Found 3 output devices and 1 input devices
+[14:42:56 INF] Output device: Realtek Digital Output (Realtek USB Audio) (ID: playback-0, Default: True)
+[14:42:56 INF] Output device: HTTP Audio Stream (ID: http-stream, Default: False)
+[14:42:56 INF] Output device: Google Cast (ID: google-cast, Default: False)
+[14:42:56 INF] Input device: Desktop Microphone (Microsoftr LifeCam Cinema(TM)) (ID: capture-0)
+[14:42:56 INF] FingerprintTap: First 4096 samples written to output tap (total processed: 4096)
+[14:42:56 INF] Using default output device: Realtek Digital Output (Realtek USB Audio)
+[14:42:56 INF] Selected output device: playback-0 (Realtek Digital Output (Realtek USB Audio))
+[14:42:56 INF] Output device set successfully
+[14:42:56 INF] Startup audio source: FilePlayer (from preferences)
+[14:42:56 INF] Audio startup configuration applied. Source activation deferred to UI.
+[14:42:56 INF] Enabling Bluetooth on startup as 'Radio Console Dev'...
+[14:42:56 WRN] Failed to set Bluetooth radio to Discoverable mode
+System.NullReferenceException: Object reference not set to an instance of an object.
+   at InTheHand.Net.Bluetooth.WindowsBluetoothRadio.set_Mode(RadioMode value)
+   at InTheHand.Net.Bluetooth.BluetoothRadio.set_Mode(RadioMode value)
+   at Radio.Infrastructure.Platform.Bluetooth.WindowsBluetoothService.StartAsync(String deviceName, CancellationToken cancellationToken) in D:\prj\RTest\RTest\src\Radio.Infrastructure\Platform\Bluetooth\WindowsBluetoothService.cs:line 389
+[14:42:56 WRN] Bluetooth StartAsync returned false - adapter may not be available
+[14:42:56 INF] VisualizationBroadcastService starting with target frame rate: 30 fps
+[14:42:56 INF] AudioStateUpdateService starting with update interval: 500ms
+[14:42:56 INF] Broadcast NowPlayingChanged: Title=No Track, Artist=--, Album=--, AlbumArt=/images/default-album-art.png, Source=No Source
+[14:42:56 INF] Connected to fingerprint database: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\data\fingerprints\fingerprints.db
+[14:42:56 INF] Found 1 RTL-SDR device(s)
+[14:42:56 INF] Found 2 SDR devices (cache expires in 30s)
+[14:42:56 INF] Available radio devices: RTLSDRCore, RF320
+[14:42:56 INF] Available radio devices: RTLSDRCore, RF320
+[14:42:56 INF] Available radio devices: RTLSDRCore, RF320
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.StopScan_WithNoActiveRadio_ReturnsBadRequest [4 s]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.SetBand_WithNoActiveRadio_ReturnsBadRequest [3 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.SetFrequency_WithNoActiveRadio_ReturnsBadRequest [3 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.DeviceCapabilities_RF320_HasExpectedFeatures [19 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.StepFrequencyUp_WithNoActiveRadio_ReturnsBadRequest [2 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.SetEqualizerMode_WithInvalidMode_ReturnsBadRequest [3 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.SelectDevice_WithEmptyDeviceType_ReturnsBadRequest [3 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.SelectDevice_WithValidDeviceType_ReturnsDeviceInfo [1 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.GetAvailableDevices_ReturnsDeviceList [< 1 ms]
+[14:42:56 INF] Available radio devices: RTLSDRCore, RF320
+[14:42:56 INF] Metrics collector stopped
+[14:42:56 INF] Preferences persistence service is stopping - saving final state
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.GetAvailableDevices_ReturnsDevicesWithCapabilities [< 1 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.TogglePowerState_WithNoActiveRadio_ReturnsBadRequest [2 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.SelectDevice_WithInvalidDeviceType_ReturnsBadRequest [< 1 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.SetDeviceVolume_WithNoActiveRadio_ReturnsBadRequest [3 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.SetFrequencyStep_WithNoActiveRadio_ReturnsBadRequest [3 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.GetPowerState_WithNoActiveRadio_ReturnsBadRequest [2 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.CreatePreset_WithNegativeFrequency_ReturnsBadRequest [4 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.CreatePreset_WithZeroFrequency_ReturnsBadRequest [< 1 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.StartScan_WithNoActiveRadio_ReturnsBadRequest [3 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.CreatePreset_WithInvalidBand_ReturnsBadRequest [1 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.GetPresets_ReturnsEmptyList [< 1 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.Startup_WithNoActiveRadio_ReturnsBadRequest [3 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.DeletePreset_WithNonexistentId_ReturnsNotFound [10 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.GetRadioState_WithNoActiveRadio_ReturnsBadRequest [1 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.SetAutoGain_WithNoActiveRadio_ReturnsBadRequest [2 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.SetDeviceVolume_WithNegativeVolume_ReturnsBadRequest [< 1 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.CreatePreset_WithoutName_UsesDefaultName [174 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.SetEqualizerMode_WithNoActiveRadio_ReturnsBadRequest [< 1 ms]
+[14:42:56 INF] Available radio devices: RTLSDRCore, RF320
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.DeviceCapabilities_RTLSDRCore_HasExpectedFeatures [< 1 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.StepFrequencyDown_WithNoActiveRadio_ReturnsBadRequest [2 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.Shutdown_WithNoActiveRadio_ReturnsBadRequest [2 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.SetBand_WithInvalidBand_ReturnsBadRequest [< 1 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.StartScan_WithInvalidDirection_ReturnsBadRequest [< 1 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.GetCurrentDevice_WithNoActiveRadio_ReturnsBadRequest [1 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.SetGain_WithNoActiveRadio_ReturnsBadRequest [2 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.CreatePreset_WithValidData_ReturnsCreated [143 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.SetDeviceVolume_WithInvalidVolume_ReturnsBadRequest [< 1 ms]
+[14:42:57 INF] Default radio device: RTLSDRCore
+[14:42:57 INF] AudioStateUpdateService stopped
+[14:42:57 INF] VisualizationBroadcastService stopped
+[14:42:57 INF] Stopping audio engine...
+[14:42:57 INF] Audio engine state changed from Running to Stopping
+[14:42:57 INF] Stopping audio engine
+[14:42:57 INF] Cleared all sources from mixer
+[14:42:57 INF] Audio engine state changed from Stopping to Ready
+[14:42:57 INF] Audio engine stopped
+[14:42:57 INF] Audio engine stopped successfully
+[14:42:57 INF] Stopping audio engine...
+[14:42:57 INF] Audio engine stopped successfully
+[14:42:57 INF] Stopping metrics collector service
+[14:42:57 INF] Stopping metrics collector service
+[14:42:57 INF] Preferences persistence service stopped
+[14:42:57 INF] Metrics collector stopped
+[14:42:57 INF] Preferences persistence service is stopping - saving final state
+[14:42:57 INF] GoogleCast output state changed from Created to Disposed
+[14:42:57 INF] GoogleCast output disposed
+[14:42:57 INF] Disposing AudioManager
+[14:42:57 INF] AudioManager disposed
+[14:42:57 INF] VisualizerService disposed
+[14:42:57 INF] Audio engine state changed from Ready to Disposed
+[14:42:57 INF] Disposing audio engine
+[14:42:57 INF] Cleared all sources from mixer
+[14:42:57 INF] Audio engine disposed
+[14:42:58 INF] Using default output device: Realtek Digital Output (Realtek USB Audio)
+[14:42:58 INF] Selected output device: playback-0 (Realtek Digital Output (Realtek USB Audio))
+[14:42:58 INF] Output device set successfully
+[14:42:58 INF] Startup audio source: FilePlayer (from preferences)
+[14:42:58 INF] Audio startup configuration applied. Source activation deferred to UI.
+[14:42:58 INF] Enabling Bluetooth on startup as 'Radio Console Dev'...
+[14:42:58 WRN] Failed to set Bluetooth radio to Discoverable mode
+System.NullReferenceException: Object reference not set to an instance of an object.
+   at InTheHand.Net.Bluetooth.WindowsBluetoothRadio.set_Mode(RadioMode value)
+   at InTheHand.Net.Bluetooth.BluetoothRadio.set_Mode(RadioMode value)
+   at Radio.Infrastructure.Platform.Bluetooth.WindowsBluetoothService.StartAsync(String deviceName, CancellationToken cancellationToken) in D:\prj\RTest\RTest\src\Radio.Infrastructure\Platform\Bluetooth\WindowsBluetoothService.cs:line 389
+[14:42:58 WRN] Bluetooth StartAsync returned false - adapter may not be available
+[14:42:58 INF] VisualizationBroadcastService starting with target frame rate: 30 fps
+[14:42:58 INF] AudioStateUpdateService starting with update interval: 500ms
+[14:42:58 INF] Broadcast NowPlayingChanged: Title=No Track, Artist=--, Album=--, AlbumArt=/images/default-album-art.png, Source=No Source
+[14:42:58 INF] AudioStateUpdateService stopped
+[14:42:58 INF] VisualizationBroadcastService stopped
+[14:42:58 INF] Stopping audio engine...
+[14:42:58 INF] Audio engine state changed from Running to Stopping
+[14:42:58 INF] Stopping audio engine
+[14:42:58 INF] Cleared all sources from mixer
+[14:42:58 INF] Audio engine state changed from Stopping to Ready
+[14:42:58 INF] Audio engine stopped
+[14:42:58 INF] Audio engine stopped successfully
+[14:42:58 INF] Stopping audio engine...
+[14:42:58 INF] Audio engine stopped successfully
+[14:42:58 INF] Stopping metrics collector service
+[14:42:58 INF] Output device set successfully
+[14:42:58 INF] Startup audio source: FilePlayer (from preferences)
+[14:42:58 INF] Audio startup configuration applied. Source activation deferred to UI.
+[14:42:58 INF] Enabling Bluetooth on startup as 'Radio Console Dev'...
+[14:42:58 WRN] Failed to set Bluetooth radio to Discoverable mode
+System.NullReferenceException: Object reference not set to an instance of an object.
+   at InTheHand.Net.Bluetooth.WindowsBluetoothRadio.set_Mode(RadioMode value)
+   at InTheHand.Net.Bluetooth.BluetoothRadio.set_Mode(RadioMode value)
+   at Radio.Infrastructure.Platform.Bluetooth.WindowsBluetoothService.StartAsync(String deviceName, CancellationToken cancellationToken) in D:\prj\RTest\RTest\src\Radio.Infrastructure\Platform\Bluetooth\WindowsBluetoothService.cs:line 389
+[14:42:58 WRN] Bluetooth StartAsync returned false - adapter may not be available
+[14:42:58 INF] VisualizationBroadcastService starting with target frame rate: 30 fps
+[14:42:58 INF] AudioStateUpdateService starting with update interval: 500ms
+[14:42:58 INF] Broadcast NowPlayingChanged: Title=No Track, Artist=--, Album=--, AlbumArt=/images/default-album-art.png, Source=No Source
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.GetDefaultDevice_ReturnsDeviceInfo [1 ms]
+  Passed Radio.API.Tests.Controllers.RadioControllerTests.CreateAndDeletePreset_WorksCorrectly [290 ms]
+  Passed Radio.API.Tests.ApiTests.ApiApplication_ReturnsNotFoundForUnknownRoute [5 s]
+  Passed Radio.API.Tests.ApiTests.ApiApplication_StartsSuccessfully [19 ms]
+  Passed Radio.API.Tests.Controllers.ConfigurationControllerTests.UpdateConfiguration_WithEmptyKey_ReturnsBadRequest [5 s]
+  Passed Radio.API.Tests.Controllers.ConfigurationControllerTests.GetOutputConfiguration_ReturnsOutputSettings [6 ms]
+  Passed Radio.API.Tests.Controllers.ConfigurationControllerTests.GetAudioConfiguration_ReturnsAudioSettings [4 ms]
+  Passed Radio.API.Tests.Controllers.ConfigurationControllerTests.UpdateConfiguration_WithEmptySection_ReturnsBadRequest [< 1 ms]
+[14:42:58 INF] Stopping metrics collector service
+[14:42:58 INF] Metrics collector stopped
+[14:42:58 INF] Preferences persistence service stopped
+[14:42:58 INF] Preferences persistence service is stopping - saving final state
+[14:42:58 INF] GoogleCast output state changed from Created to Disposed
+[14:42:58 INF] GoogleCast output disposed
+[14:42:58 INF] Disposing AudioManager
+[14:42:58 INF] AudioManager disposed
+[14:42:58 INF] VisualizerService disposed
+[14:42:58 INF] Audio engine state changed from Ready to Disposed
+[14:42:58 INF] Disposing audio engine
+[14:42:58 INF] Cleared all sources from mixer
+[14:42:58 INF] Audio engine disposed
+[14:42:59 INF] AudioStateUpdateService stopped
+[14:42:59 INF] VisualizationBroadcastService stopped
+[14:42:59 INF] Stopping audio engine...
+[14:42:59 INF] Audio engine state changed from Running to Stopping
+[14:42:59 INF] Stopping audio engine
+[14:42:59 INF] Cleared all sources from mixer
+[14:42:59 INF] Audio engine state changed from Stopping to Ready
+[14:42:59 INF] Audio engine stopped
+[14:42:59 INF] Audio engine stopped successfully
+[14:42:59 INF] Stopping audio engine...
+[14:42:59 INF] Audio engine stopped successfully
+[14:42:59 INF] Background identification service stopped
+[14:42:59 INF] Stopping metrics collector service
+[14:42:59 INF] Metrics collector stopped
+[14:42:59 INF] Preferences persistence service is stopping - saving final state
+[14:42:59 INF] Preferences persistence service stopped
+[14:42:59 INF] Stopping metrics collector service
+[14:42:59 INF] Metrics collector stopped
+[14:42:59 INF] Preferences persistence service is stopping - saving final state
+[14:42:59 INF] GoogleCast output state changed from Created to Disposed
+[14:42:59 INF] GoogleCast output disposed
+[14:42:59 INF] Disposing AudioManager
+[14:42:59 INF] AudioManager disposed
+[14:42:59 INF] VisualizerService disposed
+[14:42:59 INF] Audio engine state changed from Ready to Disposed
+[14:42:59 INF] Disposing audio engine
+[14:42:59 INF] Cleared all sources from mixer
+[14:42:59 INF] Audio engine disposed
+  Passed Radio.API.Tests.Controllers.ConfigurationControllerTests.UpdateConfiguration_WithValidRequest_ReturnsOkOrNotImplemented [1 s]
+  Passed Radio.API.Tests.Controllers.ConfigurationControllerTests.GetConfiguration_ReturnsFullConfiguration [4 ms]
+  Passed Radio.API.Tests.Controllers.ConfigurationControllerTests.GetVisualizerConfiguration_ReturnsVisualizerSettings [1 ms]
+[14:43:00 INF] Output device set successfully
+[14:43:00 INF] Startup audio source: FilePlayer (from preferences)
+[14:43:00 INF] Audio startup configuration applied. Source activation deferred to UI.
+[14:43:00 INF] Enabling Bluetooth on startup as 'Radio Console Dev'...
+[14:43:00 WRN] Failed to set Bluetooth radio to Discoverable mode
+System.NullReferenceException: Object reference not set to an instance of an object.
+   at InTheHand.Net.Bluetooth.WindowsBluetoothRadio.set_Mode(RadioMode value)
+   at InTheHand.Net.Bluetooth.BluetoothRadio.set_Mode(RadioMode value)
+   at Radio.Infrastructure.Platform.Bluetooth.WindowsBluetoothService.StartAsync(String deviceName, CancellationToken cancellationToken) in D:\prj\RTest\RTest\src\Radio.Infrastructure\Platform\Bluetooth\WindowsBluetoothService.cs:line 389
+[14:43:00 WRN] Bluetooth StartAsync returned false - adapter may not be available
+[14:43:00 INF] VisualizationBroadcastService starting with target frame rate: 30 fps
+[14:43:00 INF] AudioStateUpdateService starting with update interval: 500ms
+[14:43:00 INF] Broadcast NowPlayingChanged: Title=No Track, Artist=--, Album=--, AlbumArt=/images/default-album-art.png, Source=No Source
+[14:43:00 INF] Connected to fingerprint database: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\data\fingerprints\fingerprints.db
+[14:43:00 INF] Metrics collector stopped
+[14:43:00 INF] Preferences persistence service is stopping - saving final state
+  Passed Radio.API.Tests.Controllers.PlayHistoryControllerTests.GetBySource_WithValidSource_ReturnsOk [7 s]
+  Passed Radio.API.Tests.Controllers.PlayHistoryControllerTests.RecordPlay_WithInvalidSource_ReturnsBadRequest [5 ms]
+  Passed Radio.API.Tests.Controllers.PlayHistoryControllerTests.GetById_WithNonExistentId_ReturnsNotFound [5 ms]
+  Passed Radio.API.Tests.Controllers.PlayHistoryControllerTests.GetStatistics_ReturnsOk [9 ms]
+  Passed Radio.API.Tests.Controllers.PlayHistoryControllerTests.GetRecent_WithCount_ReturnsLimitedEntries [6 ms]
+  Passed Radio.API.Tests.Controllers.PlayHistoryControllerTests.RecordAndRetrievePlay_RoundTripWorks [262 ms]
+  Passed Radio.API.Tests.Controllers.PlayHistoryControllerTests.GetRecent_ReturnsOk [1 ms]
+  Passed Radio.API.Tests.Controllers.PlayHistoryControllerTests.GetToday_ReturnsOk [3 ms]
+  Passed Radio.API.Tests.Controllers.PlayHistoryControllerTests.RecordAndDeletePlay_Works [365 ms]
+[14:43:01 INF] Preferences persistence service stopped
+[14:43:01 INF] Stopping metrics collector service
+[14:43:01 INF] Metrics collector stopped
+[14:43:01 INF] Preferences persistence service is stopping - saving final state
+[14:43:01 INF] GoogleCast output state changed from Created to Disposed
+[14:43:01 INF] GoogleCast output disposed
+[14:43:01 INF] Disposing AudioManager
+[14:43:01 INF] AudioManager disposed
+[14:43:01 INF] VisualizerService disposed
+[14:43:01 INF] Audio engine state changed from Ready to Disposed
+[14:43:01 INF] Disposing audio engine
+[14:43:01 INF] Cleared all sources from mixer
+[14:43:01 INF] Audio engine disposed
+[14:43:02 INF] AudioStateUpdateService stopped
+[14:43:02 INF] VisualizationBroadcastService stopped
+[14:43:02 INF] Stopping audio engine...
+[14:43:02 INF] Audio engine state changed from Running to Stopping
+[14:43:02 INF] Stopping audio engine
+[14:43:02 INF] Cleared all sources from mixer
+[14:43:02 INF] Audio engine state changed from Stopping to Ready
+[14:43:02 INF] Audio engine stopped
+[14:43:02 INF] Audio engine stopped successfully
+[14:43:02 INF] Stopping audio engine...
+[14:43:02 INF] Audio engine stopped successfully
+[14:43:02 INF] Background identification service stopped
+[14:43:02 INF] Stopping metrics collector service
+[14:43:02 INF] Output device set successfully
+[14:43:02 INF] Startup audio source: FilePlayer (from preferences)
+[14:43:02 INF] Audio startup configuration applied. Source activation deferred to UI.
+[14:43:02 INF] Enabling Bluetooth on startup as 'Radio Console Dev'...
+[14:43:02 WRN] Failed to set Bluetooth radio to Discoverable mode
+System.NullReferenceException: Object reference not set to an instance of an object.
+   at InTheHand.Net.Bluetooth.WindowsBluetoothRadio.set_Mode(RadioMode value)
+   at InTheHand.Net.Bluetooth.BluetoothRadio.set_Mode(RadioMode value)
+   at Radio.Infrastructure.Platform.Bluetooth.WindowsBluetoothService.StartAsync(String deviceName, CancellationToken cancellationToken) in D:\prj\RTest\RTest\src\Radio.Infrastructure\Platform\Bluetooth\WindowsBluetoothService.cs:line 389
+[14:43:02 WRN] Bluetooth StartAsync returned false - adapter may not be available
+[14:43:02 INF] VisualizationBroadcastService starting with target frame rate: 30 fps
+[14:43:02 INF] AudioStateUpdateService starting with update interval: 500ms
+[14:43:02 INF] Broadcast NowPlayingChanged: Title=No Track, Artist=--, Album=--, AlbumArt=/images/default-album-art.png, Source=No Source
+  Passed Radio.API.Tests.Controllers.PlayHistoryControllerTests.RecordPlay_DuplicateWithinTimeWindow_ReturnsConflict [444 ms]
+  Passed Radio.API.Tests.Controllers.PlayHistoryControllerTests.RecordPlay_WithFingerprintingMetadata_ReturnsCreated [357 ms]
+  Passed Radio.API.Tests.Controllers.PlayHistoryControllerTests.RecordPlay_WithValidRequest_ReturnsCreated [263 ms]
+  Passed Radio.API.Tests.Controllers.PlayHistoryControllerTests.GetByDateRange_ReturnsOk [4 ms]
+  Passed Radio.API.Tests.Controllers.PlayHistoryControllerTests.RecordPlay_WithFileTagMetadata_ReturnsCreated [253 ms]
+  Passed Radio.API.Tests.Controllers.PlayHistoryControllerTests.Delete_WithNonExistentId_ReturnsNotFound [< 1 ms]
+  Passed Radio.API.Tests.Controllers.PlayHistoryControllerTests.GetBySource_WithInvalidSource_ReturnsBadRequest [< 1 ms]
+  Passed Radio.API.Tests.Controllers.DevicesControllerTests.GetDefaultOutputDevice_ReturnsDeviceOrNotFound [9 s]
+  Passed Radio.API.Tests.Controllers.DevicesControllerTests.GetUSBReservations_ReturnsReservationInfo [3 ms]
+[14:43:02 INF] AudioStateUpdateService stopped
+[14:43:02 INF] VisualizationBroadcastService stopped
+[14:43:02 INF] Stopping audio engine...
+[14:43:02 INF] Audio engine state changed from Running to Stopping
+[14:43:02 INF] Stopping audio engine
+[14:43:02 INF] Cleared all sources from mixer
+[14:43:02 INF] Audio engine state changed from Stopping to Ready
+[14:43:02 INF] Audio engine stopped
+[14:43:02 INF] Audio engine stopped successfully
+[14:43:02 INF] Stopping audio engine...
+[14:43:02 INF] Audio engine stopped successfully
+[14:43:02 INF] Background identification service stopped
+[14:43:02 INF] Stopping metrics collector service
+[14:43:02 INF] Metrics collector stopped
+[14:43:02 INF] Preferences persistence service is stopping - saving final state
+[14:43:03 INF] Stopping metrics collector service
+[14:43:03 INF] Preferences persistence service stopped
+[14:43:03 INF] Metrics collector stopped
+[14:43:03 INF] Preferences persistence service is stopping - saving final state
+[14:43:03 INF] GoogleCast output state changed from Created to Disposed
+[14:43:03 INF] GoogleCast output disposed
+[14:43:03 INF] Disposing AudioManager
+[14:43:03 INF] AudioManager disposed
+[14:43:03 INF] VisualizerService disposed
+[14:43:03 INF] Audio engine state changed from Ready to Disposed
+[14:43:03 INF] Disposing audio engine
+[14:43:03 INF] Cleared all sources from mixer
+[14:43:03 INF] Audio engine disposed
+  Passed Radio.API.Tests.Controllers.DevicesControllerTests.CheckUSBPort_WithoutPort_ReturnsBadRequest [7 ms]
+  Passed Radio.API.Tests.Controllers.DevicesControllerTests.GetOutputDevices_ReturnsDeviceList [4 ms]
+  Passed Radio.API.Tests.Controllers.DevicesControllerTests.GetInputDevices_ReturnsDeviceList [2 ms]
+  Passed Radio.API.Tests.Controllers.DevicesControllerTests.SetOutputDevice_WithEmptyDeviceId_ReturnsBadRequest [3 ms]
+  Passed Radio.API.Tests.Controllers.DevicesControllerTests.RefreshDevices_ReturnsOk [7 ms]
+  Passed Radio.API.Tests.Controllers.DevicesControllerTests.SetOutputDevice_WithUnknownDevice_ReturnsNotFound [1 ms]
+  Passed Radio.API.Tests.Controllers.DevicesControllerTests.CheckUSBPort_WithPort_ReturnsStatus [1 ms]
+[14:43:03 INF] Successfully switched to source: SDR Radio (RTL-SDR) (Radio)
+[14:43:03 INF] Successfully switched to source: Radio
+[14:43:04 WRN] Notification sounds directory does not exist: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\media\audio
+[14:43:04 INF] Output device set successfully
+[14:43:04 INF] Startup audio source: FilePlayer (from preferences)
+[14:43:04 INF] Audio startup configuration applied. Source activation deferred to UI.
+[14:43:04 INF] Enabling Bluetooth on startup as 'Radio Console Dev'...
+[14:43:04 WRN] Failed to set Bluetooth radio to Discoverable mode
+System.NullReferenceException: Object reference not set to an instance of an object.
+   at InTheHand.Net.Bluetooth.WindowsBluetoothRadio.set_Mode(RadioMode value)
+   at InTheHand.Net.Bluetooth.BluetoothRadio.set_Mode(RadioMode value)
+   at Radio.Infrastructure.Platform.Bluetooth.WindowsBluetoothService.StartAsync(String deviceName, CancellationToken cancellationToken) in D:\prj\RTest\RTest\src\Radio.Infrastructure\Platform\Bluetooth\WindowsBluetoothService.cs:line 389
+[14:43:04 WRN] Bluetooth StartAsync returned false - adapter may not be available
+[14:43:04 INF] VisualizationBroadcastService starting with target frame rate: 30 fps
+[14:43:04 INF] AudioStateUpdateService starting with update interval: 500ms
+[14:43:04 INF] Broadcast NowPlayingChanged: Title=No Track, Artist=--, Album=--, AlbumArt=/images/default-album-art.png, Source=No Source
+[14:43:04 WRN] Failed to resolve secret tag tts_azure_api_key
+  Passed Radio.API.Tests.Controllers.SourcesControllerTests.SelectSource_WithRadio_ReturnsSuccess [11 s]
+  Passed Radio.API.Tests.Controllers.SourcesControllerTests.PlayFileEvent_WithEmptyFilePath_ReturnsBadRequest [5 ms]
+  Passed Radio.API.Tests.Controllers.SourcesControllerTests.SelectSource_WithEmptySourceType_ReturnsBadRequest [1 ms]
+  Passed Radio.API.Tests.Controllers.SourcesControllerTests.GetNotificationSounds_ReturnsFileList [3 ms]
+  Passed Radio.API.Tests.Controllers.SourcesControllerTests.PlayTTSEvent_WithEmptyText_ReturnsBadRequest [4 ms]
+  Passed Radio.API.Tests.Controllers.FilesControllerTests.GetFiles_WithRecursive_ReturnsFileList [11 s]
+  Passed Radio.API.Tests.Controllers.SourcesControllerTests.GetTTSEngines_ReturnsEngineList [143 ms]
+  Passed Radio.API.Tests.Controllers.SourcesControllerTests.GetPrimarySource_ReturnsExpectedResponse [1 ms]
+������������������������������������������������������������������ͻ
+�            RADIO CONSOLE API - Starting Up                       �
+������������������������������������������������������������������ͼ
+  Log files: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+  Environment: Development
+[14:43:04 INF] ��������������������������������������������������������������������
+[14:43:04 INF]   RADIO CONSOLE API - Application Starting
+[14:43:04 INF]   Started at: 2026-02-10 14:43:04.162
+[14:43:04 INF]   Environment: Development
+[14:43:04 INF]   Log directory: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+[14:43:04 INF] ��������������������������������������������������������������������
+[14:43:04 INF] Swagger UI available at /swagger
+[14:43:04 INF] SignalR hubs available at /hubs/visualization and /hubs/audio
+[14:43:04 INF] Audio stream available at /stream/audio
+[14:43:04 WRN] Failed to resolve secret tag acoustid_api_key
+[14:43:04 INF] AudioStateUpdateService stopped
+[14:43:04 INF] VisualizationBroadcastService stopped
+[14:43:04 INF] Stopping audio engine...
+[14:43:04 INF] Audio engine state changed from Running to Stopping
+[14:43:04 INF] Stopping audio engine
+[14:43:04 INF] Cleared all sources from mixer
+[14:43:04 INF] Audio engine state changed from Stopping to Ready
+[14:43:04 INF] Audio engine stopped
+[14:43:04 INF] Audio engine stopped successfully
+[14:43:04 INF] Stopping audio engine...
+[14:43:04 INF] Audio engine stopped successfully
+[14:43:04 WRN] No audio samples captured after 5858.7996ms
+[14:43:04 INF] Background identification service stopped
+[14:43:04 INF] Stopping metrics collector service
+[14:43:04 INF] SoundFlowDeviceManager initialized with 3 output and 1 input devices
+[14:43:04 INF] VisualizerService initialized (FFTSize: 2048, SampleRate: 48000, WaveformSamples: 512)
+[14:43:04 INF] SoundFlowPlaybackService initialized with visualization tap support
+[14:43:04 INF] Bluetooth radio found: MARKSDEVBOX - Top, Mode: Connectable
+[14:43:04 INF] Preferences persistence service started
+[14:43:04 INF] Starting metrics collector service
+[14:43:04 INF] Metrics database initialized at D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\data\config\configuration.db
+[14:43:04 INF] Metrics collector started. Flushing every 60 seconds
+[14:43:04 INF] Metrics rollup service started. Running every 60 minutes
+[14:43:04 INF] System monitor service started. Collecting metrics every 00:05:00
+[14:43:04 INF] Background identification service started (interval: 30s, sample duration: 15s)
+[14:43:04 INF] Initializing audio engine...
+[14:43:04 INF] Audio engine state changed from Uninitialized to Initializing
+[14:43:04 INF] Initializing SoundFlow audio engine (SampleRate: 48000, Channels: 2, BufferSize: 1024)
+[14:43:04 INF] Found 1 playback devices after UpdateAudioDevicesInfo
+[14:43:04 INF] Initializing playback device: Realtek Digital Output (Realtek USB Audio)
+[14:43:04 INF] Playback device initialized and started: Realtek Digital Output (Realtek USB Audio)
+[14:43:04 INF] Balance modifier added to MasterMixer
+[14:43:04 INF] Fingerprint tap modifier added to MasterMixer
+[14:43:04 INF] Audio engine state changed from Initializing to Ready
+[14:43:04 INF] SoundFlow audio engine initialized successfully
+[14:43:04 INF] Starting audio engine
+[14:43:04 INF] Audio engine state changed from Ready to Running
+[14:43:04 INF] Audio engine started
+[14:43:04 INF] Audio engine initialized and started successfully
+[14:43:04 INF] Found 3 output devices and 1 input devices
+[14:43:04 INF] Output device: Realtek Digital Output (Realtek USB Audio) (ID: playback-0, Default: True)
+[14:43:04 INF] Output device: HTTP Audio Stream (ID: http-stream, Default: False)
+[14:43:04 INF] Output device: Google Cast (ID: google-cast, Default: False)
+[14:43:04 INF] Input device: Desktop Microphone (Microsoftr LifeCam Cinema(TM)) (ID: capture-0)
+[14:43:04 INF] FingerprintTap: First 4096 samples written to output tap (total processed: 4096)
+[14:43:04 INF] Metrics collector stopped
+[14:43:04 INF] Preferences persistence service is stopping - saving final state
+[14:43:04 INF] Stopping metrics collector service
+[14:43:04 INF] Metrics collector stopped
+[14:43:04 INF] Preferences persistence service stopped
+[14:43:04 INF] Preferences persistence service is stopping - saving final state
+[14:43:04 INF] GoogleCast output state changed from Created to Disposed
+[14:43:04 INF] GoogleCast output disposed
+[14:43:04 INF] Disposing AudioManager
+[14:43:04 INF] ?? SDR RADIO AUDIO FLOW STOPPED: Stopping playback (Frequency: 97.8 MHz, Band: FM, TotalSamplesProcessed: 390380)
+[14:43:04 INF] ?? AUDIO ROUTING: Removing component 'Buffered Generator (Single)' from SoundFlow mixer (SourceId=sdr-radio-338b8380de3944f5a9a4695fa43b7b0c)
+[14:43:04 INF] BufferedSoundGenerator disposed. Total samples: received=390380, output=390052, dropped=0
+[14:43:04 INF] ?? AUDIO ROUTING REMOVED: Component 'Buffered Generator (Single)' disconnected from audio output (SourceId=sdr-radio-338b8380de3944f5a9a4695fa43b7b0c)
+[14:43:04 INF] Shutting down receiver
+[14:43:04 INF] Stopping RTL-SDR sample streaming
+[14:43:04 INF] Closed RTL-SDR device 0
+[14:43:04 INF] Receiver shutdown complete
+[14:43:04 INF] Audio source Radio-31e6db3c5e78422a8d51a8c1298fc34f state changed from Playing to Stopped
+[14:43:04 INF] Source state changed: SDR Radio (RTL-SDR) (Radio) Playing -> Stopped, IsActiveSource=True
+[14:43:04 INF] Audio source Radio-31e6db3c5e78422a8d51a8c1298fc34f state changed from Stopped to Disposed
+[14:43:04 INF] AudioManager disposed
+[14:43:04 INF] VisualizerService disposed
+[14:43:04 INF] Audio engine state changed from Ready to Disposed
+[14:43:04 INF] Disposing audio engine
+[14:43:04 INF] Cleared all sources from mixer
+[14:43:04 INF] Audio engine disposed
+[14:43:05 INF] Metrics collector stopped
+[14:43:05 INF] Preferences persistence service is stopping - saving final state
+  Passed Radio.API.Tests.Controllers.SourcesControllerTests.GetSources_ReturnsAvailableSources [6 ms]
+  Passed Radio.API.Tests.Controllers.SourcesControllerTests.GetEventSources_ReturnsEmptyOrSourceList [1 ms]
+  Passed Radio.API.Tests.Controllers.SourcesControllerTests.SelectSource_WithRemovedSource_ReturnsBadRequest [< 1 ms]
+  Passed Radio.API.Tests.Controllers.SourcesControllerTests.GetActiveSources_ReturnsEmptyOrSourceList [1 ms]
+  Passed Radio.API.Tests.Controllers.SourcesControllerTests.SelectSource_WithInvalidSourceType_ReturnsBadRequest [< 1 ms]
+[14:43:05 INF] Stopping metrics collector service
+[14:43:05 INF] Preferences persistence service stopped
+[14:43:05 INF] Metrics collector stopped
+[14:43:05 INF] Preferences persistence service is stopping - saving final state
+[14:43:05 INF] GoogleCast output state changed from Created to Disposed
+[14:43:05 INF] GoogleCast output disposed
+[14:43:05 INF] Disposing AudioManager
+[14:43:05 INF] AudioManager disposed
+[14:43:05 INF] VisualizerService disposed
+[14:43:05 INF] Audio engine state changed from Ready to Disposed
+[14:43:05 INF] Disposing audio engine
+[14:43:05 INF] Cleared all sources from mixer
+[14:43:05 INF] Audio engine disposed
+[14:43:06 INF] Using default output device: Realtek Digital Output (Realtek USB Audio)
+[14:43:06 INF] Selected output device: playback-0 (Realtek Digital Output (Realtek USB Audio))
+[14:43:06 INF] Output device set successfully
+[14:43:06 INF] Startup audio source: FilePlayer (from preferences)
+[14:43:06 INF] Audio startup configuration applied. Source activation deferred to UI.
+[14:43:06 INF] Enabling Bluetooth on startup as 'Radio Console Dev'...
+[14:43:06 WRN] Failed to set Bluetooth radio to Discoverable mode
+System.NullReferenceException: Object reference not set to an instance of an object.
+   at InTheHand.Net.Bluetooth.WindowsBluetoothRadio.set_Mode(RadioMode value)
+   at InTheHand.Net.Bluetooth.BluetoothRadio.set_Mode(RadioMode value)
+   at Radio.Infrastructure.Platform.Bluetooth.WindowsBluetoothService.StartAsync(String deviceName, CancellationToken cancellationToken) in D:\prj\RTest\RTest\src\Radio.Infrastructure\Platform\Bluetooth\WindowsBluetoothService.cs:line 389
+[14:43:06 WRN] Bluetooth StartAsync returned false - adapter may not be available
+[14:43:06 INF] VisualizationBroadcastService starting with target frame rate: 30 fps
+[14:43:06 INF] AudioStateUpdateService starting with update interval: 500ms
+[14:43:06 INF] Broadcast NowPlayingChanged: Title=No Track, Artist=--, Album=--, AlbumArt=/images/default-album-art.png, Source=No Source
+������������������������������������������������������������������ͻ
+�            RADIO CONSOLE API - Starting Up                       �
+������������������������������������������������������������������ͼ
+  Log files: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+  Environment: Development
+[14:43:06 INF] ��������������������������������������������������������������������
+[14:43:06 INF]   RADIO CONSOLE API - Application Starting
+[14:43:06 INF]   Started at: 2026-02-10 14:43:06.383
+[14:43:06 INF]   Environment: Development
+[14:43:06 INF]   Log directory: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+[14:43:06 INF] ��������������������������������������������������������������������
+[14:43:06 INF] Swagger UI available at /swagger
+[14:43:06 INF] SignalR hubs available at /hubs/visualization and /hubs/audio
+[14:43:06 INF] Audio stream available at /stream/audio
+[14:43:06 WRN] Failed to resolve secret tag acoustid_api_key
+[14:43:06 INF] SoundFlowDeviceManager initialized with 3 output and 1 input devices
+[14:43:06 INF] VisualizerService initialized (FFTSize: 2048, SampleRate: 48000, WaveformSamples: 512)
+[14:43:06 INF] SoundFlowPlaybackService initialized with visualization tap support
+[14:43:06 INF] Bluetooth radio found: MARKSDEVBOX - Top, Mode: Connectable
+[14:43:06 INF] Preferences persistence service started
+[14:43:06 INF] Starting metrics collector service
+[14:43:06 INF] Metrics database initialized at D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\data\config\configuration.db
+[14:43:06 INF] Metrics collector started. Flushing every 60 seconds
+[14:43:06 INF] Metrics rollup service started. Running every 60 minutes
+[14:43:06 INF] System monitor service started. Collecting metrics every 00:05:00
+[14:43:06 INF] Background identification service started (interval: 30s, sample duration: 15s)
+[14:43:06 INF] Initializing audio engine...
+[14:43:06 INF] Audio engine state changed from Uninitialized to Initializing
+[14:43:06 INF] Initializing SoundFlow audio engine (SampleRate: 48000, Channels: 2, BufferSize: 1024)
+[14:43:06 INF] Found 1 playback devices after UpdateAudioDevicesInfo
+[14:43:06 INF] Initializing playback device: Realtek Digital Output (Realtek USB Audio)
+[14:43:06 INF] Playback device initialized and started: Realtek Digital Output (Realtek USB Audio)
+[14:43:06 INF] Balance modifier added to MasterMixer
+[14:43:06 INF] Fingerprint tap modifier added to MasterMixer
+[14:43:06 INF] Audio engine state changed from Initializing to Ready
+[14:43:06 INF] SoundFlow audio engine initialized successfully
+[14:43:06 INF] Starting audio engine
+[14:43:06 INF] Audio engine state changed from Ready to Running
+[14:43:06 INF] Audio engine started
+[14:43:06 INF] Audio engine initialized and started successfully
+[14:43:06 INF] Found 3 output devices and 1 input devices
+[14:43:06 INF] Output device: Realtek Digital Output (Realtek USB Audio) (ID: playback-0, Default: True)
+[14:43:06 INF] Output device: HTTP Audio Stream (ID: http-stream, Default: False)
+[14:43:06 INF] Output device: Google Cast (ID: google-cast, Default: False)
+[14:43:06 INF] Input device: Desktop Microphone (Microsoftr LifeCam Cinema(TM)) (ID: capture-0)
+[14:43:06 INF] Found persisted output device preference: playback-0
+[14:43:06 INF] Using preferred output device: Realtek Digital Output (Realtek USB Audio)
+[14:43:06 INF] Selected output device: playback-0 (Realtek Digital Output (Realtek USB Audio))
+[14:43:06 INF] FingerprintTap: First 4096 samples written to output tap (total processed: 4096)
+[14:43:06 INF] Output device set successfully
+[14:43:06 INF] Startup audio source: FilePlayer (from preferences)
+[14:43:06 INF] Audio startup configuration applied. Source activation deferred to UI.
+[14:43:06 INF] Enabling Bluetooth on startup as 'Radio Console Dev'...
+[14:43:06 WRN] Failed to set Bluetooth radio to Discoverable mode
+System.NullReferenceException: Object reference not set to an instance of an object.
+   at InTheHand.Net.Bluetooth.WindowsBluetoothRadio.set_Mode(RadioMode value)
+   at InTheHand.Net.Bluetooth.BluetoothRadio.set_Mode(RadioMode value)
+   at Radio.Infrastructure.Platform.Bluetooth.WindowsBluetoothService.StartAsync(String deviceName, CancellationToken cancellationToken) in D:\prj\RTest\RTest\src\Radio.Infrastructure\Platform\Bluetooth\WindowsBluetoothService.cs:line 389
+[14:43:06 WRN] Bluetooth StartAsync returned false - adapter may not be available
+[14:43:06 INF] VisualizationBroadcastService starting with target frame rate: 30 fps
+[14:43:06 INF] AudioStateUpdateService starting with update interval: 500ms
+[14:43:06 INF] Broadcast NowPlayingChanged: Title=No Track, Artist=--, Album=--, AlbumArt=/images/default-album-art.png, Source=No Source
+[14:43:06 INF] Adding 2 files to queue
+[14:43:06 INF] Creating new source for type: FilePlayer
+[14:43:06 INF] Audio source FilePlayer-da4dec3c875b483fb6c16e3cee264eab state changed from Created to Initializing
+[14:43:06 INF] Audio source FilePlayer-da4dec3c875b483fb6c16e3cee264eab state changed from Initializing to Ready
+[14:43:06 INF] Added audio source FilePlayer-da4dec3c875b483fb6c16e3cee264eab (File Player) to mixer
+[14:43:06 INF] Created and registered source: File Player (FilePlayer)
+[14:43:06 INF] Switching from source none to File Player (FilePlayer)
+[14:43:06 INF] Source File Player requires content selection before playback. Old source will keep playing until new content starts.
+[14:43:06 INF] Successfully switched to source: File Player (FilePlayer)
+[14:43:06 INF] Activated File Player source via AudioManager
+[14:43:06 ERR] Error adding file to queue: test1.mp3
+System.IO.FileNotFoundException: Audio file not found: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\media\audio\test1.mp3
+File name: 'D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\media\audio\test1.mp3'
+   at Radio.Infrastructure.Audio.Sources.Primary.FilePlayerAudioSource.AddToQueueAsync(String trackIdentifier, Nullable`1 position, CancellationToken cancellationToken) in D:\prj\RTest\RTest\src\Radio.Infrastructure\Audio\Sources\Primary\FilePlayerAudioSource.cs:line 894
+   at Radio.API.Controllers.FilesController.QueueFiles(QueueFilesRequestDto request, CancellationToken cancellationToken) in D:\prj\RTest\RTest\src\Radio.API\Controllers\FilesController.cs:line 260
+[14:43:06 WRN] Skipping file (not found or not supported): test2.mp3
+[14:43:06 INF] Added 0 files to queue, 2 failed
+������������������������������������������������������������������ͻ
+�            RADIO CONSOLE API - Starting Up                       �
+������������������������������������������������������������������ͼ
+  Log files: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+  Environment: Development
+[14:43:06 INF] ��������������������������������������������������������������������
+[14:43:06 INF]   RADIO CONSOLE API - Application Starting
+[14:43:06 INF]   Started at: 2026-02-10 14:43:06.653
+[14:43:06 INF]   Environment: Development
+[14:43:06 INF]   Log directory: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+[14:43:06 INF] ��������������������������������������������������������������������
+[14:43:06 INF] Swagger UI available at /swagger
+[14:43:06 INF] SignalR hubs available at /hubs/visualization and /hubs/audio
+[14:43:06 INF] Audio stream available at /stream/audio
+[14:43:06 WRN] Failed to resolve secret tag acoustid_api_key
+[14:43:06 INF] SoundFlowDeviceManager initialized with 3 output and 1 input devices
+[14:43:06 INF] VisualizerService initialized (FFTSize: 2048, SampleRate: 48000, WaveformSamples: 512)
+[14:43:06 INF] SoundFlowPlaybackService initialized with visualization tap support
+[14:43:06 INF] Bluetooth radio found: MARKSDEVBOX - Top, Mode: Connectable
+[14:43:06 INF] Preferences persistence service started
+[14:43:06 INF] Starting metrics collector service
+[14:43:06 INF] Metrics database initialized at D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\data\config\configuration.db
+[14:43:06 INF] Metrics collector started. Flushing every 60 seconds
+[14:43:06 INF] Metrics rollup service started. Running every 60 minutes
+[14:43:06 INF] System monitor service started. Collecting metrics every 00:05:00
+[14:43:06 INF] Background identification service started (interval: 30s, sample duration: 15s)
+[14:43:06 INF] Initializing audio engine...
+[14:43:06 INF] Audio engine state changed from Uninitialized to Initializing
+[14:43:06 INF] Initializing SoundFlow audio engine (SampleRate: 48000, Channels: 2, BufferSize: 1024)
+[14:43:06 INF] Found 1 playback devices after UpdateAudioDevicesInfo
+[14:43:06 INF] Initializing playback device: Realtek Digital Output (Realtek USB Audio)
+[14:43:06 INF] Playback device initialized and started: Realtek Digital Output (Realtek USB Audio)
+[14:43:06 INF] Balance modifier added to MasterMixer
+[14:43:06 INF] Fingerprint tap modifier added to MasterMixer
+[14:43:06 INF] Audio engine state changed from Initializing to Ready
+[14:43:06 INF] SoundFlow audio engine initialized successfully
+[14:43:06 INF] Starting audio engine
+[14:43:06 INF] Audio engine state changed from Ready to Running
+[14:43:06 INF] Audio engine started
+[14:43:06 INF] Audio engine initialized and started successfully
+[14:43:06 INF] Found 3 output devices and 1 input devices
+[14:43:06 INF] Output device: Realtek Digital Output (Realtek USB Audio) (ID: playback-0, Default: True)
+[14:43:06 INF] Output device: HTTP Audio Stream (ID: http-stream, Default: False)
+[14:43:06 INF] Output device: Google Cast (ID: google-cast, Default: False)
+[14:43:06 INF] Input device: Desktop Microphone (Microsoftr LifeCam Cinema(TM)) (ID: capture-0)
+[14:43:06 INF] Metrics collector stopped
+[14:43:06 INF] Preferences persistence service is stopping - saving final state
+[14:43:06 INF] FingerprintTap: First 4096 samples written to output tap (total processed: 4096)
+[14:43:07 INF] Broadcast NowPlayingChanged: Title=No Track, Artist=--, Album=--, AlbumArt=/images/default-album-art.png, Source=File Player
+  Passed Radio.API.Tests.Controllers.FilesControllerTests.GetFiles_WithoutParameters_ReturnsFileList [2 s]
+  Passed Radio.API.Tests.Controllers.FilesControllerTests.QueueFiles_ActivatesFilePlayer_ReturnsSuccess [254 ms]
+[14:43:07 INF] Stopping metrics collector service
+[14:43:07 INF] Preferences persistence service stopped
+[14:43:07 INF] Metrics collector stopped
+[14:43:07 INF] Preferences persistence service is stopping - saving final state
+[14:43:07 INF] GoogleCast output state changed from Created to Disposed
+[14:43:07 INF] GoogleCast output disposed
+[14:43:07 INF] Disposing AudioManager
+[14:43:07 INF] AudioManager disposed
+[14:43:07 INF] VisualizerService disposed
+[14:43:07 INF] Audio engine state changed from Ready to Disposed
+[14:43:07 INF] Disposing audio engine
+[14:43:07 INF] Cleared all sources from mixer
+[14:43:07 INF] Audio engine disposed
+[14:43:08 INF] Stopping metrics collector service
+[14:43:08 INF] Preferences persistence service stopped
+[14:43:08 INF] Metrics collector stopped
+[14:43:08 INF] Preferences persistence service is stopping - saving final state
+[14:43:08 INF] GoogleCast output state changed from Created to Disposed
+[14:43:08 INF] GoogleCast output disposed
+[14:43:08 INF] Disposing AudioManager
+[14:43:08 INF] AudioManager disposed
+[14:43:08 INF] VisualizerService disposed
+[14:43:08 INF] Audio engine state changed from Ready to Disposed
+[14:43:08 INF] Disposing audio engine
+[14:43:08 INF] Cleared all sources from mixer
+[14:43:08 INF] Audio engine disposed
+[14:43:08 INF] Using default output device: Realtek Digital Output (Realtek USB Audio)
+[14:43:08 INF] Selected output device: playback-0 (Realtek Digital Output (Realtek USB Audio))
+[14:43:08 INF] Output device set successfully
+[14:43:08 INF] Startup audio source: FilePlayer (from preferences)
+[14:43:08 INF] Audio startup configuration applied. Source activation deferred to UI.
+[14:43:08 INF] Enabling Bluetooth on startup as 'Radio Console Dev'...
+[14:43:08 WRN] Failed to set Bluetooth radio to Discoverable mode
+System.NullReferenceException: Object reference not set to an instance of an object.
+   at InTheHand.Net.Bluetooth.WindowsBluetoothRadio.set_Mode(RadioMode value)
+   at InTheHand.Net.Bluetooth.BluetoothRadio.set_Mode(RadioMode value)
+   at Radio.Infrastructure.Platform.Bluetooth.WindowsBluetoothService.StartAsync(String deviceName, CancellationToken cancellationToken) in D:\prj\RTest\RTest\src\Radio.Infrastructure\Platform\Bluetooth\WindowsBluetoothService.cs:line 389
+[14:43:08 WRN] Bluetooth StartAsync returned false - adapter may not be available
+[14:43:08 INF] VisualizationBroadcastService starting with target frame rate: 30 fps
+[14:43:08 INF] AudioStateUpdateService starting with update interval: 500ms
+[14:43:08 INF] Broadcast NowPlayingChanged: Title=No Track, Artist=--, Album=--, AlbumArt=/images/default-album-art.png, Source=No Source
+[14:43:08 INF] Creating new source for type: FilePlayer
+[14:43:08 INF] Added audio source FilePlayer-aecf2050eb994d3baaa189cb443b39fc (File Player) to mixer
+[14:43:08 INF] Created and registered source: File Player (FilePlayer)
+[14:43:08 INF] Switching from source none to File Player (FilePlayer)
+[14:43:08 INF] Source File Player requires content selection before playback. Old source will keep playing until new content starts.
+[14:43:08 INF] Successfully switched to source: File Player (FilePlayer)
+  Passed Radio.API.Tests.Controllers.FilesControllerTests.PlayFile_FileNotActive_ReturnsError [2 s]
+������������������������������������������������������������������ͻ
+�            RADIO CONSOLE API - Starting Up                       �
+������������������������������������������������������������������ͼ
+  Log files: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+  Environment: Development
+[14:43:08 INF] ��������������������������������������������������������������������
+[14:43:08 INF]   RADIO CONSOLE API - Application Starting
+[14:43:08 INF]   Started at: 2026-02-10 14:43:08.950
+[14:43:08 INF]   Environment: Development
+[14:43:08 INF]   Log directory: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+[14:43:08 INF] ��������������������������������������������������������������������
+[14:43:08 INF] Swagger UI available at /swagger
+[14:43:08 INF] SignalR hubs available at /hubs/visualization and /hubs/audio
+[14:43:08 INF] Audio stream available at /stream/audio
+[14:43:08 WRN] Failed to resolve secret tag acoustid_api_key
+[14:43:08 INF] SoundFlowDeviceManager initialized with 3 output and 1 input devices
+[14:43:08 INF] VisualizerService initialized (FFTSize: 2048, SampleRate: 48000, WaveformSamples: 512)
+[14:43:08 INF] SoundFlowPlaybackService initialized with visualization tap support
+[14:43:08 INF] Bluetooth radio found: MARKSDEVBOX - Top, Mode: Connectable
+[14:43:08 INF] Preferences persistence service started
+[14:43:08 INF] Starting metrics collector service
+[14:43:08 INF] Metrics database initialized at D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\data\config\configuration.db
+[14:43:08 INF] Metrics collector started. Flushing every 60 seconds
+[14:43:08 INF] Metrics rollup service started. Running every 60 minutes
+[14:43:08 INF] System monitor service started. Collecting metrics every 00:05:00
+[14:43:08 INF] Background identification service started (interval: 30s, sample duration: 15s)
+[14:43:08 INF] Initializing audio engine...
+[14:43:08 INF] Audio engine state changed from Uninitialized to Initializing
+[14:43:08 INF] Initializing SoundFlow audio engine (SampleRate: 48000, Channels: 2, BufferSize: 1024)
+[14:43:08 INF] Found 1 playback devices after UpdateAudioDevicesInfo
+[14:43:08 INF] Initializing playback device: Realtek Digital Output (Realtek USB Audio)
+[14:43:08 INF] Playback device initialized and started: Realtek Digital Output (Realtek USB Audio)
+[14:43:08 INF] Balance modifier added to MasterMixer
+[14:43:08 INF] Fingerprint tap modifier added to MasterMixer
+[14:43:08 INF] Audio engine state changed from Initializing to Ready
+[14:43:08 INF] SoundFlow audio engine initialized successfully
+[14:43:08 INF] Starting audio engine
+[14:43:08 INF] Audio engine state changed from Ready to Running
+[14:43:08 INF] Audio engine started
+[14:43:08 INF] Audio engine initialized and started successfully
+[14:43:08 INF] Found 3 output devices and 1 input devices
+[14:43:08 INF] Output device: Realtek Digital Output (Realtek USB Audio) (ID: playback-0, Default: True)
+[14:43:08 INF] Output device: HTTP Audio Stream (ID: http-stream, Default: False)
+[14:43:08 INF] Output device: Google Cast (ID: google-cast, Default: False)
+[14:43:08 INF] Input device: Desktop Microphone (Microsoftr LifeCam Cinema(TM)) (ID: capture-0)
+[14:43:08 INF] Found persisted output device preference: playback-0
+[14:43:08 INF] Using preferred output device: Realtek Digital Output (Realtek USB Audio)
+[14:43:08 INF] Selected output device: playback-0 (Realtek Digital Output (Realtek USB Audio))
+[14:43:09 INF] FingerprintTap: First 4096 samples written to output tap (total processed: 4096)
+[14:43:09 INF] Output device set successfully
+[14:43:09 INF] Startup audio source: FilePlayer (from preferences)
+[14:43:09 INF] Audio startup configuration applied. Source activation deferred to UI.
+[14:43:09 INF] Enabling Bluetooth on startup as 'Radio Console Dev'...
+[14:43:09 WRN] Failed to set Bluetooth radio to Discoverable mode
+System.NullReferenceException: Object reference not set to an instance of an object.
+   at InTheHand.Net.Bluetooth.WindowsBluetoothRadio.set_Mode(RadioMode value)
+   at InTheHand.Net.Bluetooth.BluetoothRadio.set_Mode(RadioMode value)
+   at Radio.Infrastructure.Platform.Bluetooth.WindowsBluetoothService.StartAsync(String deviceName, CancellationToken cancellationToken) in D:\prj\RTest\RTest\src\Radio.Infrastructure\Platform\Bluetooth\WindowsBluetoothService.cs:line 389
+[14:43:09 WRN] Bluetooth StartAsync returned false - adapter may not be available
+[14:43:09 INF] VisualizationBroadcastService starting with target frame rate: 30 fps
+[14:43:09 INF] AudioStateUpdateService starting with update interval: 500ms
+[14:43:09 INF] Broadcast NowPlayingChanged: Title=No Track, Artist=--, Album=--, AlbumArt=/images/default-album-art.png, Source=No Source
+[14:43:09 INF] Listing files from path: music, recursive: False
+[14:43:09 INF] Found 4 items (2 directories, 2 files)
+������������������������������������������������������������������ͻ
+�            RADIO CONSOLE API - Starting Up                       �
+������������������������������������������������������������������ͼ
+  Log files: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+  Environment: Development
+[14:43:09 INF] ��������������������������������������������������������������������
+[14:43:09 INF]   RADIO CONSOLE API - Application Starting
+[14:43:09 INF]   Started at: 2026-02-10 14:43:09.113
+[14:43:09 INF]   Environment: Development
+[14:43:09 INF]   Log directory: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+[14:43:09 INF] ��������������������������������������������������������������������
+[14:43:09 INF] Swagger UI available at /swagger
+[14:43:09 INF] SignalR hubs available at /hubs/visualization and /hubs/audio
+[14:43:09 INF] Audio stream available at /stream/audio
+[14:43:09 WRN] Failed to resolve secret tag acoustid_api_key
+[14:43:09 INF] SoundFlowDeviceManager initialized with 3 output and 1 input devices
+[14:43:09 INF] VisualizerService initialized (FFTSize: 2048, SampleRate: 48000, WaveformSamples: 512)
+[14:43:09 INF] SoundFlowPlaybackService initialized with visualization tap support
+[14:43:09 INF] Bluetooth radio found: MARKSDEVBOX - Top, Mode: Connectable
+[14:43:09 INF] Preferences persistence service started
+[14:43:09 INF] Starting metrics collector service
+[14:43:09 INF] Metrics database initialized at D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\data\config\configuration.db
+[14:43:09 INF] Metrics collector started. Flushing every 60 seconds
+[14:43:09 INF] Metrics rollup service started. Running every 60 minutes
+[14:43:09 INF] System monitor service started. Collecting metrics every 00:05:00
+[14:43:09 INF] Background identification service started (interval: 30s, sample duration: 15s)
+[14:43:09 INF] Initializing audio engine...
+[14:43:09 INF] Audio engine state changed from Uninitialized to Initializing
+[14:43:09 INF] Initializing SoundFlow audio engine (SampleRate: 48000, Channels: 2, BufferSize: 1024)
+[14:43:09 INF] Found 1 playback devices after UpdateAudioDevicesInfo
+[14:43:09 INF] Initializing playback device: Realtek Digital Output (Realtek USB Audio)
+[14:43:09 INF] Playback device initialized and started: Realtek Digital Output (Realtek USB Audio)
+[14:43:09 INF] Balance modifier added to MasterMixer
+[14:43:09 INF] Fingerprint tap modifier added to MasterMixer
+[14:43:09 INF] Audio engine state changed from Initializing to Ready
+[14:43:09 INF] SoundFlow audio engine initialized successfully
+[14:43:09 INF] Starting audio engine
+[14:43:09 INF] Audio engine state changed from Ready to Running
+[14:43:09 INF] Audio engine started
+[14:43:09 INF] Audio engine initialized and started successfully
+[14:43:09 INF] Found 3 output devices and 1 input devices
+[14:43:09 INF] Output device: Realtek Digital Output (Realtek USB Audio) (ID: playback-0, Default: True)
+[14:43:09 INF] Output device: HTTP Audio Stream (ID: http-stream, Default: False)
+[14:43:09 INF] Output device: Google Cast (ID: google-cast, Default: False)
+[14:43:09 INF] Input device: Desktop Microphone (Microsoftr LifeCam Cinema(TM)) (ID: capture-0)
+[14:43:09 INF] Found persisted output device preference: playback-0
+[14:43:09 INF] Using preferred output device: Realtek Digital Output (Realtek USB Audio)
+[14:43:09 INF] Selected output device: playback-0 (Realtek Digital Output (Realtek USB Audio))
+[14:43:09 INF] Using fpcalc at: D:\prj\RTest\RTest\tools\fpcalc\fpcalc.exe
+[14:43:09 INF] FingerprintTap: First 4096 samples written to output tap (total processed: 4096)
+[14:43:09 INF] Output device set successfully
+[14:43:09 INF] Startup audio source: FilePlayer (from preferences)
+[14:43:09 INF] Audio startup configuration applied. Source activation deferred to UI.
+[14:43:09 INF] Enabling Bluetooth on startup as 'Radio Console Dev'...
+[14:43:09 WRN] Failed to set Bluetooth radio to Discoverable mode
+System.NullReferenceException: Object reference not set to an instance of an object.
+   at InTheHand.Net.Bluetooth.WindowsBluetoothRadio.set_Mode(RadioMode value)
+   at InTheHand.Net.Bluetooth.BluetoothRadio.set_Mode(RadioMode value)
+   at Radio.Infrastructure.Platform.Bluetooth.WindowsBluetoothService.StartAsync(String deviceName, CancellationToken cancellationToken) in D:\prj\RTest\RTest\src\Radio.Infrastructure\Platform\Bluetooth\WindowsBluetoothService.cs:line 389
+[14:43:09 WRN] Bluetooth StartAsync returned false - adapter may not be available
+[14:43:09 INF] VisualizationBroadcastService starting with target frame rate: 30 fps
+[14:43:09 INF] AudioStateUpdateService starting with update interval: 500ms
+[14:43:09 INF] Broadcast NowPlayingChanged: Title=No Track, Artist=--, Album=--, AlbumArt=/images/default-album-art.png, Source=No Source
+������������������������������������������������������������������ͻ
+�            RADIO CONSOLE API - Starting Up                       �
+������������������������������������������������������������������ͼ
+  Log files: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+  Environment: Development
+[14:43:09 INF] ��������������������������������������������������������������������
+[14:43:09 INF]   RADIO CONSOLE API - Application Starting
+[14:43:09 INF]   Started at: 2026-02-10 14:43:09.284
+[14:43:09 INF]   Environment: Development
+[14:43:09 INF]   Log directory: D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\logs
+[14:43:09 INF] ��������������������������������������������������������������������
+[14:43:09 INF] Swagger UI available at /swagger
+[14:43:09 INF] SignalR hubs available at /hubs/visualization and /hubs/audio
+[14:43:09 INF] Audio stream available at /stream/audio
+[14:43:09 WRN] Failed to resolve secret tag acoustid_api_key
+[14:43:09 INF] SoundFlowDeviceManager initialized with 3 output and 1 input devices
+[14:43:09 INF] VisualizerService initialized (FFTSize: 2048, SampleRate: 48000, WaveformSamples: 512)
+[14:43:09 INF] SoundFlowPlaybackService initialized with visualization tap support
+[14:43:09 INF] Bluetooth radio found: MARKSDEVBOX - Top, Mode: Connectable
+[14:43:09 INF] Preferences persistence service started
+[14:43:09 INF] Starting metrics collector service
+[14:43:09 INF] Metrics database initialized at D:\prj\RTest\RTest\tests\Radio.API.Tests\bin\Release\net8.0-windows10.0.19041.0\data\config\configuration.db
+[14:43:09 INF] Metrics collector started. Flushing every 60 seconds
+[14:43:09 INF] Metrics rollup service started. Running every 60 minutes
+[14:43:09 INF] System monitor service started. Collecting metrics every 00:05:00
+[14:43:09 INF] Background identification service started (interval: 30s, sample duration: 15s)
+[14:43:09 INF] Initializing audio engine...
+[14:43:09 INF] Audio engine state changed from Uninitialized to Initializing
+[14:43:09 INF] Initializing SoundFlow audio engine (SampleRate: 48000, Channels: 2, BufferSize: 1024)
+[14:43:09 INF] Found 1 playback devices after UpdateAudioDevicesInfo
+[14:43:09 INF] Initializing playback device: Realtek Digital Output (Realtek USB Audio)
+[14:43:09 INF] Playback device initialized and started: Realtek Digital Output (Realtek USB Audio)
+[14:43:09 INF] Balance modifier added to MasterMixer
+[14:43:09 INF] Fingerprint tap modifier added to MasterMixer
+[14:43:09 INF] Audio engine state changed from Initializing to Ready
+[14:43:09 INF] SoundFlow audio engine initialized successfully
+[14:43:09 INF] Starting audio engine
+[14:43:09 INF] Audio engine state changed from Ready to Running
+[14:43:09 INF] Audio engine started
+[14:43:09 INF] Audio engine initialized and started successfully
+[14:43:09 INF] Found 3 output devices and 1 input devices
+[14:43:09 INF] Output device: Realtek Digital Output (Realtek USB Audio) (ID: playback-0, Default: True)
+[14:43:09 INF] Output device: HTTP Audio Stream (ID: http-stream, Default: False)
+[14:43:09 INF] Output device: Google Cast (ID: google-cast, Default: False)
+[14:43:09 INF] Input device: Desktop Microphone (Microsoftr LifeCam Cinema(TM)) (ID: capture-0)
+[14:43:09 INF] Found persisted output device preference: playback-0
+[14:43:09 INF] Using preferred output device: Realtek Digital Output (Realtek USB Audio)
+[14:43:09 INF] Selected output device: playback-0 (Realtek Digital Output (Realtek USB Audio))
+[14:43:09 INF] Broadcast NowPlayingChanged: Title=No Track, Artist=--, Album=--, AlbumArt=/images/default-album-art.png, Source=File Player
+[14:43:09 INF] FingerprintTap: First 4096 samples written to output tap (total processed: 4096)
+[14:43:09 INF] Output device set successfully
+[14:43:09 INF] Startup audio source: FilePlayer (from preferences)
+[14:43:09 INF] Audio startup configuration applied. Source activation deferred to UI.
+[14:43:09 INF] Enabling Bluetooth on startup as 'Radio Console Dev'...
+[14:43:09 WRN] Failed to set Bluetooth radio to Discoverable mode
+System.NullReferenceException: Object reference not set to an instance of an object.
+   at InTheHand.Net.Bluetooth.WindowsBluetoothRadio.set_Mode(RadioMode value)
+   at InTheHand.Net.Bluetooth.BluetoothRadio.set_Mode(RadioMode value)
+   at Radio.Infrastructure.Platform.Bluetooth.WindowsBluetoothService.StartAsync(String deviceName, CancellationToken cancellationToken) in D:\prj\RTest\RTest\src\Radio.Infrastructure\Platform\Bluetooth\WindowsBluetoothService.cs:line 389
+[14:43:09 WRN] Bluetooth StartAsync returned false - adapter may not be available
+[14:43:09 INF] VisualizationBroadcastService starting with target frame rate: 30 fps
+[14:43:09 INF] AudioStateUpdateService starting with update interval: 500ms
+[14:43:09 INF] Broadcast NowPlayingChanged: Title=No Track, Artist=--, Album=--, AlbumArt=/images/default-album-art.png, Source=No Source
+[14:43:09 INF] AudioStateUpdateService stopped
+[14:43:09 INF] VisualizationBroadcastService stopped
+[14:43:09 INF] Stopping audio engine...
+[14:43:09 INF] Audio engine state changed from Running to Stopping
+[14:43:09 INF] Stopping audio engine
+[14:43:09 INF] Cleared all sources from mixer
+[14:43:09 INF] Audio engine state changed from Stopping to Ready
+[14:43:09 INF] Audio engine stopped
+[14:43:09 INF] Audio engine stopped successfully
+[14:43:09 INF] Stopping audio engine...
+[14:43:09 INF] Audio engine stopped successfully
+[14:43:09 INF] Background identification service stopped
+[14:43:09 INF] Stopping metrics collector service
+[14:43:09 INF] Metrics collector stopped
+[14:43:09 INF] Preferences persistence service is stopping - saving final state
+[14:43:09 INF] Stopping metrics collector service
+[14:43:09 INF] Preferences persistence service stopped
+[14:43:09 INF] Metrics collector stopped
+[14:43:09 INF] Preferences persistence service is stopping - saving final state
+[14:43:09 INF] GoogleCast output state changed from Created to Disposed
+[14:43:09 INF] GoogleCast output disposed
+[14:43:09 INF] Disposing AudioManager
+[14:43:09 INF] AudioManager disposed
+[14:43:09 INF] VisualizerService disposed
+[14:43:09 INF] Audio engine state changed from Ready to Disposed
+[14:43:09 INF] Disposing audio engine
+[14:43:09 INF] Cleared all sources from mixer
+[14:43:10 INF] Audio engine disposed
+[14:43:10 INF] AudioStateUpdateService stopped
+[14:43:10 INF] VisualizationBroadcastService stopped
+[14:43:10 INF] Stopping audio engine...
+[14:43:10 INF] Audio engine state changed from Running to Stopping
+[14:43:10 INF] Stopping audio engine
+[14:43:10 INF] Cleared all sources from mixer
+[14:43:10 INF] Audio engine state changed from Stopping to Ready
+[14:43:10 INF] Audio engine stopped
+[14:43:10 INF] Audio engine stopped successfully
+[14:43:10 INF] Stopping audio engine...
+[14:43:10 INF] Audio engine stopped successfully
+[14:43:10 INF] Background identification service stopped
+[14:43:10 INF] Stopping metrics collector service
+  Passed Radio.API.Tests.Controllers.FilesControllerTests.GetFiles_WithPath_ReturnsFileList [171 ms]
+  Passed Radio.API.Tests.Controllers.FilesControllerTests.PlayFile_EmptyPath_ReturnsBadRequest [157 ms]
+  Passed Radio.API.Tests.Controllers.FilesControllerTests.QueueFiles_EmptyPaths_ReturnsBadRequest [175 ms]
+[14:43:10 INF] Metrics collector stopped
+[14:43:10 INF] Preferences persistence service is stopping - saving final state
+[14:43:10 INF] Stopping metrics collector service
+[14:43:10 INF] Preferences persistence service stopped
+[14:43:10 INF] Metrics collector stopped
+[14:43:10 INF] Preferences persistence service is stopping - saving final state
+[14:43:10 INF] GoogleCast output state changed from Created to Disposed
+[14:43:10 INF] GoogleCast output disposed
+[14:43:10 INF] Disposing AudioManager
+[14:43:10 INF] AudioManager disposed
+[14:43:10 INF] VisualizerService disposed
+[14:43:10 INF] Audio engine state changed from Ready to Disposed
+[14:43:10 INF] Disposing audio engine
+[14:43:10 INF] Cleared all sources from mixer
+[14:43:11 INF] Audio engine disposed
+[14:43:11 INF] AudioStateUpdateService stopped
+[14:43:11 INF] VisualizationBroadcastService stopped
+[14:43:11 INF] Stopping audio engine...
+[14:43:11 INF] Audio engine state changed from Running to Stopping
+[14:43:11 INF] Stopping audio engine
+[14:43:11 INF] Cleared all sources from mixer
+[14:43:11 INF] Audio engine state changed from Stopping to Ready
+[14:43:11 INF] Audio engine stopped
+[14:43:11 INF] Audio engine stopped successfully
+[14:43:11 INF] Stopping audio engine...
+[14:43:11 INF] Audio engine stopped successfully
+[14:43:11 INF] Stopping metrics collector service
+[14:43:11 INF] Metrics collector stopped
+[14:43:11 INF] Preferences persistence service is stopping - saving final state
+[14:43:11 INF] Stopping metrics collector service
+[14:43:11 INF] Preferences persistence service stopped
+[14:43:11 INF] Metrics collector stopped
+[14:43:11 INF] Preferences persistence service is stopping - saving final state
+[14:43:11 INF] GoogleCast output state changed from Created to Disposed
+[14:43:11 INF] GoogleCast output disposed
+[14:43:11 INF] Disposing AudioManager
+[14:43:11 INF] Audio source FilePlayer-da4dec3c875b483fb6c16e3cee264eab state changed from Ready to Disposed
+[14:43:11 INF] AudioManager disposed
+[14:43:11 INF] VisualizerService disposed
+[14:43:11 INF] Audio engine state changed from Ready to Disposed
+[14:43:11 INF] Disposing audio engine
+[14:43:11 INF] Cleared all sources from mixer
+[14:43:12 INF] Audio engine disposed
+[14:43:12 INF] AudioStateUpdateService stopped
+[14:43:12 INF] VisualizationBroadcastService stopped
+[14:43:12 INF] Stopping audio engine...
+[14:43:12 INF] Audio engine state changed from Running to Stopping
+[14:43:12 INF] Stopping audio engine
+[14:43:12 INF] Cleared all sources from mixer
+[14:43:12 INF] Audio engine state changed from Stopping to Ready
+[14:43:12 INF] Audio engine stopped
+[14:43:12 INF] Audio engine stopped successfully
+[14:43:12 INF] Stopping audio engine...
+[14:43:12 INF] Audio engine stopped successfully
+[14:43:12 INF] Background identification service stopped
+[14:43:12 INF] Stopping metrics collector service
+[14:43:12 INF] Metrics collector stopped
+[14:43:12 INF] Preferences persistence service is stopping - saving final state
+[14:43:12 INF] Stopping metrics collector service
+[14:43:12 INF] Preferences persistence service stopped
+[14:43:12 INF] Metrics collector stopped
+[14:43:12 INF] Preferences persistence service is stopping - saving final state
+[14:43:12 INF] GoogleCast output state changed from Created to Disposed
+[14:43:12 INF] GoogleCast output disposed
+[14:43:12 INF] Disposing AudioManager
+[14:43:12 INF] AudioManager disposed
+[14:43:12 INF] VisualizerService disposed
+[14:43:12 INF] Audio engine state changed from Ready to Disposed
+[14:43:12 INF] Disposing audio engine
+[14:43:12 INF] Cleared all sources from mixer
+[14:43:12 INF] Audio engine disposed
+[14:43:13 INF] AudioStateUpdateService stopped
+[14:43:13 INF] VisualizationBroadcastService stopped
+[14:43:13 INF] Stopping audio engine...
+[14:43:13 INF] Audio engine state changed from Running to Stopping
+[14:43:13 INF] Stopping audio engine
+[14:43:13 INF] Cleared all sources from mixer
+[14:43:13 INF] Audio engine state changed from Stopping to Ready
+[14:43:13 INF] Audio engine stopped
+[14:43:13 INF] Audio engine stopped successfully
+[14:43:13 INF] Stopping audio engine...
+[14:43:13 INF] Audio engine stopped successfully
+[14:43:13 INF] Stopping metrics collector service
+[14:43:13 INF] Metrics collector stopped
+[14:43:13 INF] Preferences persistence service is stopping - saving final state
+[14:43:13 INF] Stopping metrics collector service
+[14:43:13 INF] Metrics collector stopped
+[14:43:13 INF] Preferences persistence service is stopping - saving final state
+[14:43:13 INF] Preferences persistence service stopped
+[14:43:13 INF] GoogleCast output state changed from Created to Disposed
+[14:43:13 INF] GoogleCast output disposed
+[14:43:13 INF] Disposing AudioManager
+[14:43:13 INF] AudioManager disposed
+[14:43:13 INF] VisualizerService disposed
+[14:43:13 INF] Audio engine state changed from Ready to Disposed
+[14:43:13 INF] Disposing audio engine
+[14:43:13 INF] Cleared all sources from mixer
+[14:43:14 INF] Audio engine disposed
+[14:43:14 INF] AudioStateUpdateService stopped
+[14:43:14 INF] VisualizationBroadcastService stopped
+[14:43:14 INF] Stopping audio engine...
+[14:43:14 INF] Audio engine state changed from Running to Stopping
+[14:43:14 INF] Stopping audio engine
+[14:43:14 INF] Cleared all sources from mixer
+[14:43:14 INF] Audio engine state changed from Stopping to Ready
+[14:43:14 INF] Audio engine stopped
+[14:43:14 INF] Audio engine stopped successfully
+[14:43:14 INF] Stopping audio engine...
+[14:43:14 INF] Audio engine stopped successfully
+[14:43:14 INF] Background identification service stopped
+[14:43:14 INF] Stopping metrics collector service
+[14:43:14 INF] Metrics collector stopped
+[14:43:14 INF] Preferences persistence service is stopping - saving final state
+[14:43:15 INF] Stopping metrics collector service
+[14:43:15 INF] Preferences persistence service stopped
+[14:43:15 INF] Metrics collector stopped
+[14:43:15 INF] Preferences persistence service is stopping - saving final state
+[14:43:15 INF] GoogleCast output state changed from Created to Disposed
+[14:43:15 INF] GoogleCast output disposed
+[14:43:15 INF] Disposing AudioManager
+[14:43:15 INF] AudioManager disposed
+[14:43:15 INF] VisualizerService disposed
+[14:43:15 INF] Audio engine state changed from Ready to Disposed
+[14:43:15 INF] Disposing audio engine
+[14:43:15 INF] Cleared all sources from mixer
+[14:43:15 INF] Audio engine disposed
+[14:43:15 INF] AudioStateUpdateService stopped
+[14:43:15 INF] VisualizationBroadcastService stopped
+[14:43:15 INF] Stopping audio engine...
+[14:43:15 INF] Audio engine state changed from Running to Stopping
+[14:43:15 INF] Stopping audio engine
+[14:43:15 INF] Cleared all sources from mixer
+[14:43:15 INF] Audio engine state changed from Stopping to Ready
+[14:43:15 INF] Audio engine stopped
+[14:43:15 INF] Audio engine stopped successfully
+[14:43:15 INF] Stopping audio engine...
+[14:43:15 INF] Audio engine stopped successfully
+[14:43:15 INF] Background identification service stopped
+[14:43:15 INF] Stopping metrics collector service
+[14:43:15 INF] Metrics collector stopped
+[14:43:15 INF] Preferences persistence service is stopping - saving final state
+[14:43:15 INF] Stopping metrics collector service
+[14:43:15 INF] Preferences persistence service stopped
+[14:43:15 INF] Metrics collector stopped
+[14:43:15 INF] Preferences persistence service is stopping - saving final state
+[14:43:15 INF] GoogleCast output state changed from Created to Disposed
+[14:43:15 INF] GoogleCast output disposed
+[14:43:15 INF] Disposing AudioManager
+[14:43:15 INF] AudioManager disposed
+[14:43:15 INF] VisualizerService disposed
+[14:43:15 INF] Audio engine state changed from Ready to Disposed
+[14:43:15 INF] Disposing audio engine
+[14:43:15 INF] Cleared all sources from mixer
+[14:43:16 INF] Audio engine disposed
+[xUnit.net 00:00:23.93]   Finished:    Radio.API.Tests
+Found Rafael Micro R820T tuner
+rtlsdr_demod_write_reg failed with -9
+r82xx_write: i2c wr failed=-9 reg=06 len=1
+
+Total tests: 198
+     Passed: 197
+     Failed: 1
+ Total time: 24.1996 Seconds
+       _VSTestConsole:
+         MSB4181: The "VSTestTask" task returned false but did not log an error.
+     1>Done Building Project "D:\prj\RTest\RTest\tests\Radio.API.Tests\Radio.API.Tests.csproj" (VSTest target(s)) -- FAILED.
+
+Build FAILED.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:26.29

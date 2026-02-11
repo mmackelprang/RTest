@@ -191,6 +191,18 @@ builder.Services.AddHttpClient<RadioApiService>(client =>
   return handler;
 });
 
+builder.Services.AddHttpClient<BluetoothApiService>(client =>
+{
+  client.BaseAddress = new Uri(apiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(30);
+})
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
+});
+
 builder.Services.AddHttpClient<SecretsApiService>(client =>
 {
   client.BaseAddress = new Uri(apiBaseUrl);
@@ -203,8 +215,19 @@ builder.Services.AddHttpClient<SecretsApiService>(client =>
   return handler;
 });
 
-// All 12 API client services are now registered!
-// Total: 86 REST endpoints implemented
+builder.Services.AddHttpClient("AlbumArtProxy", client =>
+{
+  client.BaseAddress = new Uri(apiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(10);
+})
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
+});
+
+// All 13 API client services are now registered!
 
 // Register SignalR hub services as singletons (Phase 1 Task 1.3, Phase 10)
 builder.Services.AddSingleton<AudioStateHubService>();
@@ -226,6 +249,36 @@ app.UseHttpsRedirection();
 
 app.UseStaticFiles();
 app.UseAntiforgery();
+
+// Proxy album art requests to the API server.
+// Album art URLs from SignalR are relative (/api/albumart/{file}) and resolve against
+// the Web server origin. The API server owns the file cache, so we proxy to it.
+app.MapGet("/api/albumart/{filename}", async (string filename, IHttpClientFactory httpClientFactory) =>
+{
+  // Sanitize: prevent path traversal
+  if (string.IsNullOrWhiteSpace(filename) ||
+      filename.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+      filename.Contains("..") || filename.Contains('/') || filename.Contains('\\'))
+  {
+    return Results.NotFound();
+  }
+
+  try
+  {
+    var client = httpClientFactory.CreateClient("AlbumArtProxy");
+    var response = await client.GetAsync($"/api/albumart/{filename}");
+    if (!response.IsSuccessStatusCode)
+      return Results.NotFound();
+
+    var bytes = await response.Content.ReadAsByteArrayAsync();
+    var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+    return Results.File(bytes, contentType);
+  }
+  catch
+  {
+    return Results.NotFound();
+  }
+});
 
 app.MapRazorComponents<Radio.Web.Components.App>()
   .AddInteractiveServerRenderMode();

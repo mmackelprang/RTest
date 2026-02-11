@@ -6,6 +6,7 @@ using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Configuration.Abstractions;
 using Radio.Infrastructure.Configuration.Models;
 using SoundFlow.Backends.MiniAudio;
+using SoundFlow.Structs;
 
 namespace Radio.Infrastructure.Audio.SoundFlow;
 
@@ -25,6 +26,7 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
   private List<AudioDeviceInfo> _cachedOutputDevices = [];
   private List<AudioDeviceInfo> _cachedInputDevices = [];
   private string? _selectedOutputDeviceId;
+  private string? _selectedInputDeviceId;
 
   /// <inheritdoc/>
   public event EventHandler<AudioDeviceChangedEventArgs>? DevicesChanged;
@@ -62,6 +64,22 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
       else
       {
         _logger.LogWarning("Saved output device {DeviceId} not found", savedOutput);
+      }
+    }
+
+    // Restore selected input device from preferences
+    var savedInput = _audioPreferences.CurrentValue.CurrentInput;
+    if (!string.IsNullOrEmpty(savedInput))
+    {
+      var inputDevice = _cachedInputDevices.Find(d => d.Id == savedInput);
+      if (inputDevice != null)
+      {
+        _selectedInputDeviceId = savedInput;
+        _logger.LogInformation("Restored saved input device: {DeviceId}", savedInput);
+      }
+      else
+      {
+        _logger.LogWarning("Saved input device {DeviceId} not found", savedInput);
       }
     }
 
@@ -227,11 +245,43 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
     return Task.CompletedTask;
   }
 
-  /// <summary>
-  /// Gets the currently selected output device ID.
-  /// </summary>
-  /// <returns>The selected device ID, or null if using default.</returns>
+  /// <inheritdoc/>
   public string? GetSelectedOutputDeviceId() => _selectedOutputDeviceId;
+
+  /// <inheritdoc/>
+  public string? GetSelectedInputDeviceId() => _selectedInputDeviceId;
+
+  /// <summary>
+  /// Sets the preferred input device and persists the selection.
+  /// </summary>
+  public async Task SetInputDeviceAsync(string deviceId, CancellationToken cancellationToken = default)
+  {
+    ArgumentException.ThrowIfNullOrEmpty(deviceId);
+
+    lock (_devicesLock)
+    {
+      var device = _cachedInputDevices.Find(d => d.Id == deviceId);
+      if (device == null)
+        throw new InvalidOperationException($"Input device '{deviceId}' not found");
+
+      _selectedInputDeviceId = deviceId;
+      _logger.LogInformation("Selected input device: {DeviceId} ({DeviceName})", device.Id, device.Name);
+    }
+
+    try
+    {
+      var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+      await _configurationManager.SetValueAsync(
+        storeId,
+        "AudioPreferences:CurrentInput",
+        deviceId,
+        cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to persist input device selection: {DeviceId}", deviceId);
+    }
+  }
 
   /// <summary>
   /// Gets all USB port reservations.
@@ -410,30 +460,31 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
 
   /// <summary>
   /// Finds a capture device by name fuzzy matching.
+  /// Returns the MiniAudio DeviceInfo struct if found, or null.
   /// </summary>
-  public object? FindCaptureDeviceByName(string namePart)
+  public DeviceInfo? FindCaptureDeviceByName(string namePart)
   {
     if (string.IsNullOrWhiteSpace(namePart))
     {
-        return null;
+      return null;
     }
 
     try
     {
       using var engine = new MiniAudioEngine();
       var devices = engine.CaptureDevices;
-      // Look for fuzzy match
-      // MiniAudio DeviceInfo is a struct and default value has null/empty Name usually
-      var match = devices.FirstOrDefault(d => d.Name != null && d.Name.Contains(namePart, StringComparison.OrdinalIgnoreCase));
-      
+      var match = devices.FirstOrDefault(d =>
+        d.Name != null && d.Name.Contains(namePart, StringComparison.OrdinalIgnoreCase));
+
       if (match.Name != null)
       {
-         return match.Name;
+        _logger.LogDebug("Found capture device matching '{NamePart}': {DeviceName}", namePart, match.Name);
+        return match;
       }
     }
     catch (Exception ex)
     {
-       _logger.LogWarning(ex, "Error searching for capture device {NamePart}", namePart);
+      _logger.LogWarning(ex, "Error searching for capture device {NamePart}", namePart);
     }
     return null;
   }

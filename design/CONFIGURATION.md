@@ -892,6 +892,9 @@ The following configuration items were added as part of the Bluetooth audio sour
 | `EnableOnStartup` | bool | true | Whether to start the Bluetooth service when the application starts |
 | `AutoSwitchOnConnect` | bool | true | Whether to switch to Bluetooth source when a device connects |
 | `AudioQuality` | Enum | High | Audio stream quality preference (Standard/High) |
+| `EnableA2dpSink` | bool | true | Enable Windows AudioPlaybackConnection for A2DP sink (requires build 19041+ and MSIX identity) |
+| `EnableMediaSessionMonitoring` | bool | true | Enable Windows SMTC monitoring for AVRCP-equivalent track metadata |
+| `EnableLoopbackCapture` | bool | true | Enable WASAPI loopback capture to route BT audio through SoundFlow (Cast, viz, modifiers). Windows only. |
 
 ### BluetoothPreferences
 **Location**: `src/Radio.Core/Configuration/BluetoothPreferences.cs`
@@ -901,3 +904,101 @@ The following configuration items were added as part of the Bluetooth audio sour
 | `LastConnectedDevice` | string? | null | MAC address of the last connected device |
 | `PairedDevices` | List<string> | [] | List of MAC addresses for paired devices |
 | `TrustedDevices` | List<string> | [] | List of MAC addresses for trusted devices (auto-connect) |
+
+---
+
+## Web UI Configuration Sections
+
+The System Configuration page (`/system` > Configuration tab) exposes all major configuration sections through a tabbed interface. Each section loads from and saves to the configuration store via the API.
+
+| Tab | API Section | Options Class | Description |
+|-----|-------------|---------------|-------------|
+| Audio | `audio` | `AudioOptions` | Ducking, default source |
+| Audio Engine | `audioengine` | `AudioEngineOptions` | Sample rate, buffer size, channels (restart required) |
+| Radio | `radio` | `RadioOptions` | Frequencies, bands, scan settings, device volume |
+| Bluetooth | `bluetooth` | `BluetoothOptions` | Device name, auto-start, pairing, audio quality |
+| File Player | `fileplayer` | `FilePlayerOptions` | Root directory, supported extensions |
+| TTS | `tts` | `TTSOptions` | Default engine/voice, pitch, speed, timeout |
+| Fingerprinting | `fingerprinting` | `FingerprintingOptions` | Intervals, thresholds, fpcalc path (API keys in Secrets tab) |
+| Metrics | `metrics` | `MetricsOptions` | Flush interval, retention periods, rollup |
+| Visualizer | `visualizer` | `VisualizerOptions` | FFT size, smoothing, peak hold |
+| Output | `output` | `OutputOptions` | Local, HTTP stream, Google Cast output settings |
+| Devices | `devices` | `DeviceOptions` | USB port paths for hardware devices |
+
+### RadioOptions
+**Location**: `src/Radio.Core/Configuration/RadioOptions.cs`
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `DefaultDevice` | string | "RTLSDRCore" | Radio hardware backend ("RTLSDRCore" or "RF320") |
+| `DefaultFMFrequencyMHz` | double | 101.5 | Startup FM frequency |
+| `DefaultAMFrequencyKHz` | double | 1000.0 | Startup AM frequency |
+| `DefaultFMStepMHz` | double | 0.1 | FM tuning step size |
+| `DefaultAMStepKHz` | double | 10.0 | AM tuning step size |
+| `MinFMFrequencyMHz` | double | 87.5 | Lower FM band limit |
+| `MaxFMFrequencyMHz` | double | 108.0 | Upper FM band limit |
+| `MinAMFrequencyKHz` | double | 520.0 | Lower AM band limit |
+| `MaxAMFrequencyKHz` | double | 1710.0 | Upper AM band limit |
+| `ScanStopThreshold` | int | 50 | Signal strength to stop scan |
+| `ScanStepDelayMs` | int | 100 | Delay between scan steps |
+| `DefaultDeviceVolume` | int | 50 | Radio hardware volume (0-100) |
+
+### FilePlayerOptions
+**Location**: `src/Radio.Core/Configuration/FilePlayerOptions.cs`
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `RootDirectory` | string | "media/audio" | Root path for music library |
+| `SupportedExtensions` | string[] | [".mp3",".flac",".wav",".ogg",".aac",".m4a",".wma"] | File extensions to include |
+
+### FingerprintingOptions
+**Location**: `src/Radio.Core/Configuration/FingerprintingOptions.cs`
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `Enabled` | bool | true | Enable audio fingerprinting |
+| `SampleDurationSeconds` | int | 15 | Audio sample length for fingerprinting |
+| `IdentificationIntervalSeconds` | int | 30 | Time between identification attempts |
+| `MinimumConfidenceThreshold` | double | 0.5 | Minimum match confidence (0.0-1.0) |
+| `DuplicateSuppressionMinutes` | int | 5 | Ignore re-identification within this window |
+| `FpcalcPath` | string | "" | Path to fpcalc binary (blank = auto-detect) |
+| `DatabasePath` | string | "./data/fingerprints.db" | Path to fingerprinting database |
+| `AcoustId` | AcoustIdOptions | (nested) | AcoustID API settings (key in Secrets) |
+| `MusicBrainz` | MusicBrainzOptions | (nested) | MusicBrainz API settings |
+
+### TTSOptions
+**Location**: `src/Radio.Core/Configuration/TTSOptions.cs`
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `DefaultEngine` | string | "ESpeak" | TTS engine ("ESpeak", "Google", "Azure") |
+| `DefaultVoice` | string | "en" | Default voice ID |
+| `DefaultPitch` | float | 1.0 | Default pitch (0.5-2.0) |
+| `DefaultSpeed` | float | 1.0 | Default speed (0.5-2.0) |
+| `ESpeakPath` | string | "espeak-ng" | Path to espeak-ng binary |
+| `GenerationTimeoutSeconds` | int | 30 | Max time for TTS generation |
+
+### MetricsOptions
+**Location**: `src/Radio.Core/Configuration/MetricsOptions.cs`
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `Enabled` | bool | true | Enable metrics collection |
+| `FlushIntervalSeconds` | int | 60 | How often metrics are flushed to DB |
+| `DatabasePath` | string | "./data/metrics.db" | Path to metrics database |
+| `RetentionMinuteData` | int | 120 | Minute-level data retention (minutes) |
+| `RetentionHourData` | int | 48 | Hour-level data retention (hours) |
+| `RetentionDayData` | int | 365 | Day-level data retention (days) |
+| `RollupIntervalMinutes` | int | 60 | How often rollups are computed |
+
+### AudioEngineOptions
+**Location**: `src/Radio.Core/Configuration/AudioEngineOptions.cs`
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `SampleRate` | int | 48000 | Audio sample rate (Hz) |
+| `Channels` | int | 2 | Audio channel count |
+| `BufferSize` | int | 1024 | Audio buffer size (samples) |
+| `HotPlugIntervalSeconds` | int | 5 | Device detection interval |
+| `OutputBufferSizeSeconds` | int | 5 | Output buffer size in seconds |
+| `EnableHotPlugDetection` | bool | true | Enable audio device hot-plug detection |

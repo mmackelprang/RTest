@@ -23,6 +23,9 @@ public sealed class FingerprintingOptions
   /// <summary>Minutes to suppress duplicate identifications of the same track.</summary>
   public int DuplicateSuppressionMinutes { get; set; } = 5;
 
+  /// <summary>Minutes to suppress duplicate identifications for high-confidence matches (score > 0.9).</summary>
+  public int HighConfidenceDuplicateSuppressionMinutes { get; set; } = 30;
+
   /// <summary>AcoustID API configuration.</summary>
   public AcoustIdOptions AcoustId { get; set; } = new();
 
