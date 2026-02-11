@@ -26,6 +26,7 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
   private List<AudioDeviceInfo> _cachedOutputDevices = [];
   private List<AudioDeviceInfo> _cachedInputDevices = [];
   private string? _selectedOutputDeviceId;
+  private string? _selectedInputDeviceId;
 
   /// <inheritdoc/>
   public event EventHandler<AudioDeviceChangedEventArgs>? DevicesChanged;
@@ -63,6 +64,22 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
       else
       {
         _logger.LogWarning("Saved output device {DeviceId} not found", savedOutput);
+      }
+    }
+
+    // Restore selected input device from preferences
+    var savedInput = _audioPreferences.CurrentValue.CurrentInput;
+    if (!string.IsNullOrEmpty(savedInput))
+    {
+      var inputDevice = _cachedInputDevices.Find(d => d.Id == savedInput);
+      if (inputDevice != null)
+      {
+        _selectedInputDeviceId = savedInput;
+        _logger.LogInformation("Restored saved input device: {DeviceId}", savedInput);
+      }
+      else
+      {
+        _logger.LogWarning("Saved input device {DeviceId} not found", savedInput);
       }
     }
 
@@ -228,11 +245,43 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
     return Task.CompletedTask;
   }
 
-  /// <summary>
-  /// Gets the currently selected output device ID.
-  /// </summary>
-  /// <returns>The selected device ID, or null if using default.</returns>
+  /// <inheritdoc/>
   public string? GetSelectedOutputDeviceId() => _selectedOutputDeviceId;
+
+  /// <inheritdoc/>
+  public string? GetSelectedInputDeviceId() => _selectedInputDeviceId;
+
+  /// <summary>
+  /// Sets the preferred input device and persists the selection.
+  /// </summary>
+  public async Task SetInputDeviceAsync(string deviceId, CancellationToken cancellationToken = default)
+  {
+    ArgumentException.ThrowIfNullOrEmpty(deviceId);
+
+    lock (_devicesLock)
+    {
+      var device = _cachedInputDevices.Find(d => d.Id == deviceId);
+      if (device == null)
+        throw new InvalidOperationException($"Input device '{deviceId}' not found");
+
+      _selectedInputDeviceId = deviceId;
+      _logger.LogInformation("Selected input device: {DeviceId} ({DeviceName})", device.Id, device.Name);
+    }
+
+    try
+    {
+      var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+      await _configurationManager.SetValueAsync(
+        storeId,
+        "AudioPreferences:CurrentInput",
+        deviceId,
+        cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to persist input device selection: {DeviceId}", deviceId);
+    }
+  }
 
   /// <summary>
   /// Gets all USB port reservations.

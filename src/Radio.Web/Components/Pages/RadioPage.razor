@@ -380,13 +380,18 @@
       Logger.LogDebug("Calling FrequencyUpAsync");
       var success = await RadioApi.FrequencyUpAsync();
       Logger.LogDebug("FrequencyUpAsync result: {Success}", success);
+      if (success)
+      {
+        await LoadRadioStateAsync();
+        await InvokeAsync(StateHasChanged);
+      }
     }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Error calling FrequencyUpAsync");
     }
   }
-  
+
   private async Task FrequencyDownAsync()
   {
     try
@@ -394,6 +399,11 @@
       Logger.LogDebug("Calling FrequencyDownAsync");
       var success = await RadioApi.FrequencyDownAsync();
       Logger.LogDebug("FrequencyDownAsync result: {Success}", success);
+      if (success)
+      {
+        await LoadRadioStateAsync();
+        await InvokeAsync(StateHasChanged);
+      }
     }
     catch (Exception ex)
     {
@@ -426,8 +436,13 @@
       var frequencyHz = _radioState?.Band == "AM"
         ? _newFrequency * 1_000.0       // kHz → Hz
         : _newFrequency * 1_000_000.0;  // MHz → Hz
-      await RadioApi.SetFrequencyAsync(frequencyHz);
+      var success = await RadioApi.SetFrequencyAsync(frequencyHz);
       _isFrequencyDialogOpen = false;
+      if (success)
+      {
+        await LoadRadioStateAsync();
+        await InvokeAsync(StateHasChanged);
+      }
     }
     catch (Exception)
     {
@@ -501,13 +516,18 @@
       Logger.LogDebug("Calling StartScanAsync with direction: {Direction}", direction);
       var success = await RadioApi.StartScanAsync(direction);
       Logger.LogDebug("StartScanAsync result: {Success}", success);
+      if (success)
+      {
+        await LoadRadioStateAsync();
+        await InvokeAsync(StateHasChanged);
+      }
     }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Error calling StartScanAsync");
     }
   }
-  
+
   private async Task StopScanAsync()
   {
     try
@@ -515,6 +535,11 @@
       Logger.LogDebug("Calling StopScanAsync");
       var success = await RadioApi.StopScanAsync();
       Logger.LogDebug("StopScanAsync result: {Success}", success);
+      if (success)
+      {
+        await LoadRadioStateAsync();
+        await InvokeAsync(StateHasChanged);
+      }
     }
     catch (Exception ex)
     {
@@ -561,7 +586,12 @@
   {
     try
     {
-      await RadioApi.LoadPresetAsync(slot);
+      var success = await RadioApi.LoadPresetAsync(slot);
+      if (success)
+      {
+        await LoadRadioStateAsync();
+        await InvokeAsync(StateHasChanged);
+      }
     }
     catch (Exception)
     {
@@ -589,19 +619,29 @@
   {
     try
     {
-      await RadioApi.SetAutoGainAsync(enabled);
+      var success = await RadioApi.SetAutoGainAsync(enabled);
+      if (success)
+      {
+        await LoadRadioStateAsync();
+        await InvokeAsync(StateHasChanged);
+      }
     }
     catch (Exception)
     {
       // Silently fail
     }
   }
-  
+
   private async Task HandleGainChangedAsync(int gain)
   {
     try
     {
-      await RadioApi.SetGainAsync(gain);
+      var success = await RadioApi.SetGainAsync(gain);
+      if (success)
+      {
+        await LoadRadioStateAsync();
+        await InvokeAsync(StateHasChanged);
+      }
     }
     catch (Exception)
     {

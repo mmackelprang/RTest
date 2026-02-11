@@ -44,6 +44,16 @@ public class QueueItemDto
   /// Gets or sets a value indicating whether this is the currently playing item.
   /// </summary>
   public bool IsCurrent { get; set; }
+
+  /// <summary>
+  /// Gets or sets the state of this item (Upcoming, Current, Played, Error).
+  /// </summary>
+  public string State { get; set; } = "Upcoming";
+
+  /// <summary>
+  /// Gets or sets the index in the full playlist (played + current + upcoming).
+  /// </summary>
+  public int FullPlaylistIndex { get; set; }
 }
 
 /// <summary>

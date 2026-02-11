@@ -116,7 +116,11 @@
       "Bash(Get-ChildItem -Path \"D:\\\\prj\\\\RTest\\\\RTest\\\\src\\\\Radio.API\\\\bin\\\\Release\" -Recurse -Directory -Filter \"logs\" -ErrorAction SilentlyContinue)",
       "Bash(Get-ChildItem -Path \"D:\\\\prj\\\\RTest\\\\RTest\\\\logs\" -ErrorAction SilentlyContinue)",
       "Bash(ffprobe:*)",
-      "Bash(git status:*)"
+      "Bash(git status:*)",
+      "Bash(test:*)",
+      "mcp__playwright__browser_wait_for",
+      "mcp__playwright__browser_take_screenshot",
+      "mcp__playwright__browser_click"
     ]
   },
   "enableAllProjectMcpServers": true,

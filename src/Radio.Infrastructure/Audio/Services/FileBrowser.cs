@@ -389,8 +389,9 @@ public class FileBrowser : IFileBrowser
         var formatInfo = result.Value;
         var tags = formatInfo.Tags;
 
-        TimeSpan? duration = null;
-        if (formatInfo.Duration != TimeSpan.Zero)
+        // Use TagLib for accurate duration (SoundFlow miscalculates VBR MP3s)
+        TimeSpan? duration = AccurateDurationReader.GetDuration(filePath, _logger);
+        if (duration == null && formatInfo.Duration != TimeSpan.Zero)
         {
           duration = formatInfo.Duration;
         }

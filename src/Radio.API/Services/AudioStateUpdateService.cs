@@ -311,7 +311,9 @@ public class AudioStateUpdateService : BackgroundService
       return;
     }
 
-    var currentQueue = playQueue.QueueItems
+    // Use full playlist so UI always gets played + current + upcoming with state
+    var fullPlaylist = await playQueue.GetFullPlaylistAsync(cancellationToken);
+    var currentQueue = fullPlaylist
       .Select(MapToQueueItemDto)
       .ToList();
 
@@ -421,12 +423,13 @@ public class AudioStateUpdateService : BackgroundService
       return true;
     }
 
-    // Check if items are the same (by ID and order)
+    // Check if items are the same (by ID, order, and state)
     for (int i = 0; i < previous.Count; i++)
     {
       if (previous[i].Id != current[i].Id ||
           previous[i].Index != current[i].Index ||
-          previous[i].IsCurrent != current[i].IsCurrent)
+          previous[i].IsCurrent != current[i].IsCurrent ||
+          previous[i].State != current[i].State)
       {
         return true;
       }
@@ -553,7 +556,9 @@ public class AudioStateUpdateService : BackgroundService
       Duration = FormatDuration(item.Duration),
       AlbumArtUrl = item.AlbumArtUrl,
       Index = item.Index,
-      IsCurrent = item.IsCurrent
+      IsCurrent = item.IsCurrent,
+      State = item.State.ToString(),
+      FullPlaylistIndex = item.FullPlaylistIndex
     };
   }
 

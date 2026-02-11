@@ -241,6 +241,73 @@ public class QueueController : ControllerBase
   }
 
   /// <summary>
+  /// Gets the full playlist (played + current + upcoming) with state annotations.
+  /// </summary>
+  /// <returns>The full playlist items with state.</returns>
+  [HttpGet("full")]
+  [ProducesResponseType(typeof(List<QueueItemDto>), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status404NotFound)]
+  public async Task<ActionResult<List<QueueItemDto>>> GetFullPlaylist()
+  {
+    try
+    {
+      var result = TryGetQueueSource(out var queueSource);
+      if (result != null)
+      {
+        return result;
+      }
+
+      var fullPlaylist = await queueSource!.GetFullPlaylistAsync();
+      var dtos = fullPlaylist.Select(MapToQueueItemDto).ToList();
+
+      return Ok(dtos);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error getting full playlist");
+      return StatusCode(500, new { error = "Failed to get full playlist" });
+    }
+  }
+
+  /// <summary>
+  /// Jumps to a position in the full playlist (including already-played tracks).
+  /// </summary>
+  /// <param name="index">The zero-based index in the full playlist.</param>
+  /// <returns>The updated playback state.</returns>
+  [HttpPost("jump-playlist/{index}")]
+  [ProducesResponseType(typeof(PlaybackStateDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status404NotFound)]
+  public async Task<ActionResult<PlaybackStateDto>> JumpToFullPlaylistIndex(int index)
+  {
+    try
+    {
+      var result = TryGetQueueSource(out var queueSource, out var primarySource);
+      if (result != null)
+      {
+        return result;
+      }
+
+      await queueSource!.JumpToFullPlaylistIndexAsync(index);
+      _logger.LogInformation("Jumped to full playlist index: {Index}", index);
+
+      var state = BuildPlaybackStateDto(primarySource!);
+      return Ok(state);
+    }
+    catch (ArgumentOutOfRangeException ex)
+    {
+      _logger.LogWarning(ex, "Invalid index for full playlist jump: {Index}", index);
+      return BadRequest(new { error = $"Invalid index: {index}" });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error jumping to full playlist index");
+      return StatusCode(500, new { error = "Failed to jump to full playlist index" });
+    }
+  }
+
+  /// <summary>
   /// Checks if a track identifier already exists in the queue.
   /// </summary>
   /// <param name="identifier">The track identifier to check.</param>
@@ -282,7 +349,9 @@ public class QueueController : ControllerBase
       Duration = FormatDuration(queueItem.Duration),
       AlbumArtUrl = queueItem.AlbumArtUrl,
       Index = queueItem.Index,
-      IsCurrent = queueItem.IsCurrent
+      IsCurrent = queueItem.IsCurrent,
+      State = queueItem.State.ToString(),
+      FullPlaylistIndex = queueItem.FullPlaylistIndex
     };
   }
 

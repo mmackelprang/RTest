@@ -48,39 +48,47 @@ public static class FingerprintingServiceExtensions
     // Register radio preset service (scoped to match repository)
     services.AddScoped<IRadioPresetService, RadioPresetService>();
 
-    // Register AcoustID client as scoped
-    // Note: HttpClient is created directly rather than using IHttpClientFactory due to
-    // package version constraints. This is acceptable because:
-    // 1. AcoustID lookups are infrequent (once per fingerprint, rate-limited to 3/sec)
-    // 2. The client is scoped, so HttpClient instances are tied to request lifetime
-    // 3. Adding IHttpClientFactory would require upgrading Microsoft.Extensions packages
+    // Read fingerprinting options for HTTP client configuration
+    var fpOptions = configuration.GetSection(FingerprintingOptions.SectionName)
+      .Get<FingerprintingOptions>();
+
+    // Register named HTTP clients via IHttpClientFactory for connection pooling.
+    // This prevents socket exhaustion and SSL reset errors from creating new connections
+    // per scoped resolve (MusicBrainz enforces 1 req/sec and resets rapid new connections).
+    services.AddHttpClient("AcoustId", client =>
+    {
+      client.Timeout = TimeSpan.FromSeconds(fpOptions?.AcoustId.TimeoutSeconds ?? 10);
+      client.DefaultRequestHeaders.Add("User-Agent", "RadioConsole/1.0");
+    });
+
+    var mb = fpOptions?.MusicBrainz;
+    services.AddHttpClient("MusicBrainz", client =>
+    {
+      client.Timeout = TimeSpan.FromSeconds(mb?.TimeoutSeconds ?? 10);
+      if (!string.IsNullOrEmpty(mb?.ApplicationName))
+      {
+        client.DefaultRequestHeaders.UserAgent.ParseAdd(
+          $"{mb.ApplicationName}/{mb.ApplicationVersion} ({mb.ContactEmail})");
+      }
+    });
+
+    // Register AcoustID client as scoped (uses IHttpClientFactory for connection pooling)
     services.AddScoped<AcoustIdClient>(sp =>
     {
-      var httpClient = new HttpClient
-      {
-        Timeout = TimeSpan.FromSeconds(
-          configuration.GetSection(FingerprintingOptions.SectionName)
-            .Get<FingerprintingOptions>()?.AcoustId.TimeoutSeconds ?? 10)
-      };
-      httpClient.DefaultRequestHeaders.Add("User-Agent", "RadioConsole/1.0");
-      
+      var factory = sp.GetRequiredService<IHttpClientFactory>();
+      var httpClient = factory.CreateClient("AcoustId");
       return new AcoustIdClient(
         httpClient,
         sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<AcoustIdClient>>(),
         sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<FingerprintingOptions>>(),
-        ownsHttpClient: true); // HttpClient is created here, so client owns it
+        ownsHttpClient: false); // IHttpClientFactory manages the handler lifetime
     });
 
-    // Register metadata lookup service as scoped (uses repositories)
+    // Register metadata lookup service as scoped (uses IHttpClientFactory for connection pooling)
     services.AddScoped<IMetadataLookupService>(sp =>
     {
-      var httpClient = new HttpClient
-      {
-        Timeout = TimeSpan.FromSeconds(
-          configuration.GetSection(FingerprintingOptions.SectionName)
-            .Get<FingerprintingOptions>()?.MusicBrainz.TimeoutSeconds ?? 10)
-      };
-
+      var factory = sp.GetRequiredService<IHttpClientFactory>();
+      var httpClient = factory.CreateClient("MusicBrainz");
       return new MetadataLookupService(
         sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<MetadataLookupService>>(),
         sp.GetRequiredService<IFingerprintCacheRepository>(),

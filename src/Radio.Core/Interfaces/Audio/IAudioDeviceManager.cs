@@ -64,6 +64,23 @@ public interface IAudioDeviceManager
   Task RefreshDevicesAsync(CancellationToken cancellationToken = default);
 
   /// <summary>
+  /// Gets the currently selected output device ID, or null if using system default.
+  /// </summary>
+  string? GetSelectedOutputDeviceId();
+
+  /// <summary>
+  /// Gets the currently selected input device ID, or null if using system default.
+  /// </summary>
+  string? GetSelectedInputDeviceId();
+
+  /// <summary>
+  /// Sets the preferred input device.
+  /// </summary>
+  /// <param name="deviceId">The device ID to set as input.</param>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  Task SetInputDeviceAsync(string deviceId, CancellationToken cancellationToken = default);
+
+  /// <summary>
   /// Event raised when devices are added or removed.
   /// </summary>
   event EventHandler<AudioDeviceChangedEventArgs>? DevicesChanged;

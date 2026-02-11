@@ -7,17 +7,17 @@
 
 <PageTitle>Metrics Dashboard</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.ExtraLarge" Style="height: 516px; padding: 16px;">
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Style="height: 512px; padding: 16px; overflow-y: auto;">
   <MudStack Spacing="3">
-    
-    <!-- Header with Refresh Button -->
+
+    <!-- Header -->
     <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
       <MudText Typo="Typo.h5">Metrics Dashboard</MudText>
       <MudStack Row="true" Spacing="2">
         <MudButtonGroup Variant="Variant.Outlined" Color="Color.Primary">
-          <MudButton Variant="@(_timeRange == "1h" ? Variant.Filled : Variant.Outlined)" OnClick="@(async () => await SetTimeRangeAsync("1h"))">Last Hour</MudButton>
-          <MudButton Variant="@(_timeRange == "24h" ? Variant.Filled : Variant.Outlined)" OnClick="@(async () => await SetTimeRangeAsync("24h"))">Last 24 Hours</MudButton>
-          <MudButton Variant="@(_timeRange == "7d" ? Variant.Filled : Variant.Outlined)" OnClick="@(async () => await SetTimeRangeAsync("7d"))">Last 7 Days</MudButton>
+          <MudButton Variant="@(_timeRange == "1h" ? Variant.Filled : Variant.Outlined)" OnClick="@(async () => await SetTimeRangeAsync("1h"))">1h</MudButton>
+          <MudButton Variant="@(_timeRange == "24h" ? Variant.Filled : Variant.Outlined)" OnClick="@(async () => await SetTimeRangeAsync("24h"))">24h</MudButton>
+          <MudButton Variant="@(_timeRange == "7d" ? Variant.Filled : Variant.Outlined)" OnClick="@(async () => await SetTimeRangeAsync("7d"))">7d</MudButton>
         </MudButtonGroup>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAllDataAsync" StartIcon="@Icons.Material.Filled.Refresh">
           Refresh
@@ -30,24 +30,48 @@
       <MudProgressLinear Color="Color.Primary" Indeterminate="true" />
     }
 
-    <!-- Key Gauges Row -->
+    <!-- Category Filter Chips -->
+    @if (_categories.Count > 0)
+    {
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <MudChip T="string" Color="@(_selectedCategory == null ? Color.Primary : Color.Default)"
+                 Variant="@(_selectedCategory == null ? Variant.Filled : Variant.Outlined)"
+                 OnClick="@(() => { _selectedCategory = null; StateHasChanged(); })">All</MudChip>
+        @foreach (var cat in _categories)
+        {
+          <MudChip T="string" Color="@(_selectedCategory == cat ? Color.Primary : Color.Default)"
+                   Variant="@(_selectedCategory == cat ? Variant.Filled : Variant.Outlined)"
+                   OnClick="@(() => { _selectedCategory = cat; StateHasChanged(); })">
+            @cat (@GetCategoryCount(cat))
+          </MudChip>
+        }
+      </div>
+    }
+
+    <!-- Metric Cards Grid -->
     <MudGrid Spacing="2">
       @if (_snapshots != null && _snapshots.Count > 0)
       {
-        @foreach (var snapshot in _snapshots.OrderBy(s => GetMetricCategory(s.Key)).ThenBy(s => s.Key))
+        @foreach (var snapshot in GetFilteredMetrics())
         {
           <MudItem xs="6" sm="4" md="3">
-            <MudCard Elevation="2">
-              <MudCardContent>
-                <MudText Typo="Typo.caption" Color="Color.Secondary">
-                  @GetMetricCategory(snapshot.Key).ToUpper()
+            <MudCard Elevation="2" Style="cursor: pointer;" @onclick="@(() => ViewMetricDetailsAsync(snapshot.Key))">
+              <MudCardContent Style="padding: 12px;">
+                <MudText Typo="Typo.overline" Color="Color.Secondary" Style="letter-spacing: 1px;">
+                  @GetMetricCategory(snapshot.Key)
                 </MudText>
-                <MudText Typo="Typo.body2" Style="font-weight: 500;">
+                <MudText Typo="Typo.body2" Style="font-weight: 500; margin-bottom: 4px;">
                   @GetMetricLabel(snapshot.Key)
                 </MudText>
-                <MudText Typo="Typo.h4" Color="Color.Primary" Style="margin-top: 8px;">
+                <MudText Typo="Typo.h5" Color="Color.Primary">
                   @FormatMetricValue(snapshot.Value, snapshot.Key)
                 </MudText>
+                @if (_sparklineData.TryGetValue(snapshot.Key, out var points) && points.Count > 1)
+                {
+                  <div style="margin-top: 4px; height: 24px;">
+                    @((MarkupString)RenderSparkline(points, 200, 24))
+                  </div>
+                }
               </MudCardContent>
             </MudCard>
           </MudItem>
@@ -61,53 +85,13 @@
       }
     </MudGrid>
 
-    <!-- Available Metrics List -->
-    @if (_availableMetrics != null && _availableMetrics.Count > 0)
-    {
-      <MudExpansionPanels MultiExpansion="false">
-        <MudExpansionPanel Text="Available Metrics">
-          <MudStack Spacing="1">
-            @foreach (var category in _availableMetrics.GroupBy(m => GetMetricCategory(m)).OrderBy(g => g.Key))
-            {
-              <MudText Typo="Typo.h6" Color="Color.Primary">@category.Key</MudText>
-              <MudSimpleTable Dense="true" Hover="true" Style="margin-bottom: 16px;">
-                <tbody>
-                  @foreach (var metric in category.OrderBy(m => m))
-                  {
-                    <tr>
-                      <td><MudText Typo="Typo.body2">@metric</MudText></td>
-                      <td>
-                        @if (_snapshots != null && _snapshots.ContainsKey(metric))
-                        {
-                          <MudText Typo="Typo.body2" Color="Color.Info">@FormatMetricValue(_snapshots[metric], metric)</MudText>
-                        }
-                        else
-                        {
-                          <MudText Typo="Typo.caption" Color="Color.Default">N/A</MudText>
-                        }
-                      </td>
-                      <td style="width: 200px;">
-                        <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => ViewMetricDetailsAsync(metric))">
-                          View Details
-                        </MudButton>
-                      </td>
-                    </tr>
-                  }
-                </tbody>
-              </MudSimpleTable>
-            }
-          </MudStack>
-        </MudExpansionPanel>
-      </MudExpansionPanels>
-    }
-
-    <!-- Aggregate Statistics -->
+    <!-- Aggregate Statistics Detail -->
     @if (_selectedMetricAggregate != null && !string.IsNullOrEmpty(_selectedMetric))
     {
       <MudCard Elevation="2">
         <MudCardHeader>
           <CardHeaderContent>
-            <MudText Typo="Typo.h6">Aggregate Statistics: @_selectedMetric</MudText>
+            <MudText Typo="Typo.h6">@_selectedMetric</MudText>
           </CardHeaderContent>
           <CardHeaderActions>
             <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Default" OnClick="@(() => _selectedMetric = null)" />
@@ -118,10 +102,6 @@
             <MudItem xs="4" md="2">
               <MudText Typo="Typo.caption">Count</MudText>
               <MudText Typo="Typo.h6">@_selectedMetricAggregate.Count</MudText>
-            </MudItem>
-            <MudItem xs="4" md="2">
-              <MudText Typo="Typo.caption">Sum</MudText>
-              <MudText Typo="Typo.h6">@_selectedMetricAggregate.Sum.ToString("F2")</MudText>
             </MudItem>
             <MudItem xs="4" md="2">
               <MudText Typo="Typo.caption">Average</MudText>
@@ -139,6 +119,10 @@
               <MudText Typo="Typo.caption">Std Dev</MudText>
               <MudText Typo="Typo.h6">@_selectedMetricAggregate.StdDev.ToString("F2")</MudText>
             </MudItem>
+            <MudItem xs="4" md="2">
+              <MudText Typo="Typo.caption">Sum</MudText>
+              <MudText Typo="Typo.h6">@_selectedMetricAggregate.Sum.ToString("F2")</MudText>
+            </MudItem>
           </MudGrid>
         </MudCardContent>
       </MudCard>
@@ -151,27 +135,25 @@
   private string _timeRange = "1h";
   private bool _loading = false;
   private System.Threading.Timer? _refreshTimer;
-  
-  // Metrics data
+
   private List<string>? _availableMetrics;
   private Dictionary<string, double>? _snapshots;
   private string? _selectedMetric;
   private MetricAggregateDto? _selectedMetricAggregate;
+  private string? _selectedCategory;
+  private List<string> _categories = new();
+  private Dictionary<string, List<double>> _sparklineData = new();
 
   protected override async Task OnInitializedAsync()
   {
     await LoadPreferencesAsync();
     await LoadAllDataAsync();
-    
-    // Refresh every 10 seconds
+
     _refreshTimer = new System.Threading.Timer(async _ =>
     {
       await LoadSnapshotsAsync();
       await InvokeAsync(StateHasChanged);
     }, null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
-    
-    // Track page view
-    _ = TrackPageViewAsync();
   }
 
   private async Task LoadPreferencesAsync()
@@ -181,46 +163,26 @@
       var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("ui.metrics");
       if (prefs != null)
       {
-        // Load saved time range preference
-        if (prefs.TryGetValue("timeRange", out var timeRangeObj) && timeRangeObj != null)
-        {
-          _timeRange = timeRangeObj.ToString() ?? "1h";
-        }
-      }
-      else
-      {
-        // Save default time range
-        await SavePreferenceAsync("timeRange", _timeRange);
+        if (prefs.TryGetValue("timeRange", out var trObj) && trObj != null)
+          _timeRange = trObj.ToString() ?? "1h";
       }
     }
-    catch (Exception ex)
-    {
-      Logger.LogWarning(ex, "Failed to load preferences for Metrics Dashboard page");
-    }
+    catch (Exception ex) { Logger.LogWarning(ex, "Failed to load metrics preferences"); }
   }
 
   private async Task SavePreferenceAsync(string key, object value)
   {
-    try
-    {
-      await ConfigApi.UpdateConfigurationAsync("ui.metrics", key, value);
-    }
-    catch (Exception ex)
-    {
-      Logger.LogWarning(ex, "Failed to save preference {Key}", key);
-    }
+    try { await ConfigApi.UpdateConfigurationAsync("ui.metrics", key, value); }
+    catch (Exception ex) { Logger.LogWarning(ex, "Failed to save preference {Key}", key); }
   }
 
   private async Task SetTimeRangeAsync(string timeRange)
   {
     _timeRange = timeRange;
     await SavePreferenceAsync("timeRange", timeRange);
-    
-    // If a metric is currently selected, refresh its details to reflect the new time range
+    await LoadSparklineDataAsync();
     if (!string.IsNullOrWhiteSpace(_selectedMetric))
-    {
       await ViewMetricDetailsAsync(_selectedMetric);
-    }
   }
 
   private async Task LoadAllDataAsync()
@@ -228,26 +190,18 @@
     _loading = true;
     try
     {
-      // Must load keys first, then snapshots (snapshots depends on keys)
       await LoadAvailableMetricsAsync();
       await LoadSnapshotsAsync();
+      UpdateCategories();
+      await LoadSparklineDataAsync();
     }
-    finally
-    {
-      _loading = false;
-    }
+    finally { _loading = false; }
   }
 
   private async Task LoadAvailableMetricsAsync()
   {
-    try
-    {
-      _availableMetrics = await MetricsApi.GetMetricKeysAsync();
-    }
-    catch (Exception)
-    {
-      // Silently fail
-    }
+    try { _availableMetrics = await MetricsApi.GetMetricKeysAsync(); }
+    catch { }
   }
 
   private async Task LoadSnapshotsAsync()
@@ -255,15 +209,69 @@
     try
     {
       if (_availableMetrics != null && _availableMetrics.Count > 0)
-      {
-        // Get snapshots for all available metrics
         _snapshots = await MetricsApi.GetMetricSnapshotsAsync(_availableMetrics);
-      }
     }
-    catch (Exception)
+    catch { }
+  }
+
+  private async Task LoadSparklineDataAsync()
+  {
+    if (_availableMetrics == null || _snapshots == null) return;
+
+    var (start, end) = GetTimeRangeFromSelection();
+    var resolution = _timeRange switch
     {
-      // Silently fail
+      "1h" => "Minute",
+      "24h" => "Hour",
+      "7d" => "Hour",
+      _ => "Minute"
+    };
+
+    // Load sparkline data in parallel for visible metrics (max 20 to avoid overload)
+    var metricsToLoad = _snapshots.Keys.Take(20).ToList();
+    var tasks = metricsToLoad.Select(async key =>
+    {
+      try
+      {
+        var history = await MetricsApi.GetMetricHistoryAsync(key, start, end, resolution);
+        if (history != null && history.Count > 1)
+          return (key, points: history.Select(h => h.Value).ToList());
+      }
+      catch { }
+      return (key, points: (List<double>?)null);
+    });
+
+    var results = await Task.WhenAll(tasks);
+    _sparklineData.Clear();
+    foreach (var (key, points) in results)
+    {
+      if (points != null)
+        _sparklineData[key] = points;
     }
+  }
+
+  private void UpdateCategories()
+  {
+    if (_snapshots == null) return;
+    _categories = _snapshots.Keys
+      .Select(GetMetricCategory)
+      .Distinct()
+      .OrderBy(c => c)
+      .ToList();
+  }
+
+  private int GetCategoryCount(string category)
+  {
+    return _snapshots?.Keys.Count(k => GetMetricCategory(k) == category) ?? 0;
+  }
+
+  private IEnumerable<KeyValuePair<string, double>> GetFilteredMetrics()
+  {
+    if (_snapshots == null) return Enumerable.Empty<KeyValuePair<string, double>>();
+    var metrics = _snapshots.AsEnumerable();
+    if (_selectedCategory != null)
+      metrics = metrics.Where(m => GetMetricCategory(m.Key) == _selectedCategory);
+    return metrics.OrderBy(m => GetMetricCategory(m.Key)).ThenBy(m => m.Key);
   }
 
   private async Task ViewMetricDetailsAsync(string metricKey)
@@ -274,23 +282,11 @@
     {
       var (start, end) = GetTimeRangeFromSelection();
       _selectedMetricAggregate = await MetricsApi.GetMetricAggregateAsync(metricKey, start, end);
-      
       if (_selectedMetricAggregate == null)
-      {
-        Snackbar.Add($"No data available for {metricKey} in the selected time range", Severity.Warning);
-      }
+        Snackbar.Add($"No data available for {metricKey}", Severity.Warning);
     }
-    catch (Exception)
-    {
-      Snackbar.Add($"Failed to load details for {metricKey}", Severity.Error);
-    }
-    finally
-    {
-      _loading = false;
-    }
-    
-    // Track metric view event
-    await TrackMetricViewAsync(metricKey);
+    catch { Snackbar.Add($"Failed to load details for {metricKey}", Severity.Error); }
+    finally { _loading = false; }
   }
 
   private (DateTime start, DateTime end) GetTimeRangeFromSelection()
@@ -306,78 +302,76 @@
     return (start, end);
   }
 
-  private string GetMetricCategory(string metricKey)
+  private static string GetMetricCategory(string metricKey)
   {
-    if (string.IsNullOrEmpty(metricKey))
-      return "Other";
-    
+    if (string.IsNullOrEmpty(metricKey)) return "Other";
     var parts = metricKey.Split('.');
     return parts.Length > 0 ? parts[0] : "Other";
   }
 
-  private string GetMetricLabel(string metricKey)
+  private static string GetMetricLabel(string metricKey)
   {
-    if (string.IsNullOrEmpty(metricKey))
-      return metricKey;
-    
+    if (string.IsNullOrEmpty(metricKey)) return metricKey;
     var parts = metricKey.Split('.');
     if (parts.Length > 1)
     {
       var label = string.Join(" ", parts.Skip(1));
-      // Convert snake_case to Title Case
       return System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(label.Replace('_', ' '));
     }
     return metricKey;
   }
 
-  private string FormatMetricValue(double value, string metricKey)
+  private static string FormatMetricValue(double value, string metricKey)
   {
-    // Format based on metric type
-    if (metricKey.Contains("percent") || metricKey.Contains("usage"))
+    var key = metricKey.ToLowerInvariant();
+
+    // Memory/bytes always in MB — check before generic "usage" pattern
+    if (key.Contains("memory") || key.Contains("bytes") || key.Contains("_mb"))
+      return $"{value:F1} MB";
+
+    // Percentage metrics
+    if (key.Contains("percent") || key.Contains("_ratio"))
       return $"{value:F1}%";
-    
-    if (metricKey.Contains("bytes") || metricKey.Contains("mb") || metricKey.Contains("memory"))
-      return $"{value:F0} MB";
-    
-    if (metricKey.Contains("seconds") || metricKey.Contains("duration") || metricKey.Contains("time"))
+
+    // CPU usage is a percentage
+    if (key.Contains("cpu") && key.Contains("usage"))
+      return $"{value:F1}%";
+
+    // Time/duration metrics
+    if (key.Contains("seconds") || key.Contains("duration") || key.Contains("latency") || key.Contains("_time"))
       return $"{value:F1}s";
-    
+
     // Default: whole numbers for counters, decimals for gauges
     if (value >= 100 || value == Math.Floor(value))
       return $"{value:F0}";
-    
+
     return $"{value:F2}";
   }
 
-  private async Task TrackPageViewAsync()
+  private static string RenderSparkline(List<double> points, int width, int height)
   {
-    try
-    {
-      await MetricsApi.RecordUIEventAsync("metrics_page_viewed", new Dictionary<string, string>
-      {
-        { "screen", "metrics_dashboard" }
-      });
-    }
-    catch (Exception)
-    {
-      // Silently fail - don't disrupt user experience
-    }
-  }
+    if (points.Count < 2) return "";
 
-  private async Task TrackMetricViewAsync(string metricKey)
-  {
-    try
+    var min = points.Min();
+    var max = points.Max();
+    var range = max - min;
+    if (range == 0) range = 1; // Avoid division by zero for flat lines
+
+    var stepX = (double)width / (points.Count - 1);
+    var padding = 1;
+    var usableHeight = height - padding * 2;
+
+    var pathPoints = new System.Text.StringBuilder();
+    for (int i = 0; i < points.Count; i++)
     {
-      await MetricsApi.RecordUIEventAsync("metric_details_viewed", new Dictionary<string, string>
-      {
-        { "metric", metricKey },
-        { "time_range", _timeRange }
-      });
+      var x = i * stepX;
+      var y = padding + usableHeight - ((points[i] - min) / range) * usableHeight;
+      pathPoints.Append(i == 0 ? $"M{x:F1},{y:F1}" : $" L{x:F1},{y:F1}");
     }
-    catch (Exception)
-    {
-      // Silently fail
-    }
+
+    return $"<svg viewBox=\"0 0 {width} {height}\" preserveAspectRatio=\"none\" style=\"width:100%;height:100%;\">" +
+           $"<path d=\"{pathPoints}\" fill=\"none\" stroke=\"#5CD4E8\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>" +
+           "</svg>";
   }
 
   public void Dispose()

@@ -30,26 +30,32 @@
 
 /* Root CSS Variables - Material 3 Dark Theme with LED Aesthetic */
 :root {
-  /* Background Colors */
-  --background-primary: oklch(0.2 0.01 240);  /* Deep charcoal */
-  --background-secondary: oklch(0.25 0.02 240);  /* Dark slate */
-  --background-tertiary: oklch(0.15 0.01 240);  /* Darker charcoal */
-  
+  /* M3 Surface Tonal Elevation (dark theme) */
+  --background-primary: #1C1B1F;    /* M3 surface */
+  --background-secondary: #2B2930;  /* M3 surface-container */
+  --background-tertiary: #141316;   /* M3 surface-dim */
+  --surface-container-low: #211F26;
+  --surface-container: #2B2930;
+  --surface-container-high: #36343B;
+  --surface-container-highest: #484649;
+
   /* Primary Colors */
-  --color-primary: oklch(0.75 0.15 195);  /* Electric cyan */
-  --color-primary-dark: oklch(0.65 0.15 195);
-  --color-primary-light: oklch(0.85 0.15 195);
-  
+  --color-primary: #5CD4E8;         /* Electric cyan */
+  --color-primary-dark: #3DA8B8;
+  --color-primary-light: #8CE4F2;
+  --color-primary-container: #004D58;
+  --color-on-primary-container: #9EEFFF;
+
   /* LED Colors */
   --led-amber: oklch(0.8 0.18 75);  /* Amber LED */
-  --led-cyan: oklch(0.7 0.15 195);  /* Cyan LED */
-  --led-green: oklch(0.75 0.18 140);  /* Green LED */
-  --led-red: oklch(0.65 0.20 25);  /* Red LED */
-  
-  /* Text Colors */
-  --text-primary: oklch(0.95 0.01 240);  /* Near white */
-  --text-secondary: oklch(0.75 0.02 240);  /* Light gray */
-  --text-tertiary: oklch(0.55 0.02 240);  /* Medium gray */
+  --led-cyan: #5CD4E8;              /* Cyan LED */
+  --led-green: #81C784;             /* Green LED */
+  --led-red: #F2B8B5;              /* Red LED */
+
+  /* Text Colors (M3 dark theme) */
+  --text-primary: #E6E1E5;          /* M3 on-surface */
+  --text-secondary: #CAC4D0;        /* M3 on-surface-variant */
+  --text-tertiary: #938F99;          /* M3 outline */
   
   /* Touch Targets */
   --touch-target-min: 48px;
@@ -65,8 +71,8 @@
   /* Fixed Dimensions */
   --viewport-width: 1920px;
   --viewport-height: 576px;
-  --nav-bar-height: 60px;
-  --content-height: 516px;
+  --nav-bar-height: 64px;
+  --content-height: 512px;
 }
 
 /* Global Styles */
@@ -122,12 +128,50 @@ button, .mud-button-root, .mud-icon-button {
   color: var(--color-primary) !important;
 }
 
+/* M3 Surface Tonal Elevation — higher elevation = lighter surface */
 .mud-paper {
-  background-color: var(--background-secondary) !important;
+  background-color: var(--surface-container) !important;
+}
+
+.mud-paper.mud-elevation-0 {
+  background-color: var(--background-primary) !important;
+}
+
+.mud-paper.mud-elevation-1 {
+  background-color: var(--surface-container-low) !important;
+}
+
+.mud-paper.mud-elevation-2 {
+  background-color: var(--surface-container) !important;
+}
+
+.mud-paper.mud-elevation-3,
+.mud-paper.mud-elevation-4 {
+  background-color: var(--surface-container-high) !important;
+}
+
+.mud-card {
+  background-color: var(--surface-container) !important;
 }
 
 .mud-appbar {
   background-color: var(--background-tertiary) !important;
+}
+
+/* M3 Chip Tonal Style */
+.mud-chip.mud-chip-filled {
+  font-weight: 500;
+}
+
+/* M3 Divider */
+.mud-divider {
+  border-color: var(--text-tertiary) !important;
+  opacity: 0.3;
+}
+
+/* M3 Tab Indicator */
+.mud-tab.mud-tab-active {
+  color: var(--color-primary) !important;
 }
 
 /* Page Transitions */

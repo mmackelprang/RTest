@@ -63,6 +63,21 @@ public class DevicesApiService
     }
   }
 
+  public async Task<bool> SetInputDeviceAsync(string deviceId, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var request = new { DeviceId = deviceId };
+      var response = await _httpClient.PostAsJsonAsync("/api/devices/input", request, cancellationToken);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to set input device");
+      return false;
+    }
+  }
+
   public async Task<bool> SetOutputDeviceAsync(string deviceId, CancellationToken cancellationToken = default)
   {
     try

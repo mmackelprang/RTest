@@ -1,6 +1,24 @@
 namespace Radio.Core.Models.Audio;
 
 /// <summary>
+/// State of a queue item in the full playlist view.
+/// </summary>
+public enum QueueItemState
+{
+  /// <summary>Track has not been played yet.</summary>
+  Upcoming,
+
+  /// <summary>Track is currently playing.</summary>
+  Current,
+
+  /// <summary>Track has already been played.</summary>
+  Played,
+
+  /// <summary>Track failed to decode or play.</summary>
+  Error
+}
+
+/// <summary>
 /// Represents an item in a playback queue.
 /// </summary>
 public sealed record QueueItem
@@ -44,6 +62,16 @@ public sealed record QueueItem
   /// Gets a value indicating whether this is the currently playing item.
   /// </summary>
   public bool IsCurrent { get; init; }
+
+  /// <summary>
+  /// Gets the state of this item in the full playlist view.
+  /// </summary>
+  public QueueItemState State { get; init; } = QueueItemState.Upcoming;
+
+  /// <summary>
+  /// Gets the index in the full playlist (played + current + upcoming).
+  /// </summary>
+  public int FullPlaylistIndex { get; init; }
 }
 
 /// <summary>

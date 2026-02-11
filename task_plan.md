@@ -1,127 +1,163 @@
-# Task Plan: Audio Latency Research & Fixes
+# Task Plan: UI Fixes & UAT Prep
 
 ## Goal
-Reduce Google Cast audio latency (currently ~25s from play to heard), implement bidirectional volume sync for Cast and Bluetooth, persist volume preferences, create a detailed AUDIO-DATAFLOW.md pipeline analysis, and optimize the fingerprinting pipeline to reduce unnecessary API calls.
+Fix Web UI issues, improve Material 3 compliance and touch-friendliness, clean up dead code/logging, fix play history display, simplify navigation by merging/removing redundant pages, enhance metrics with filtering and sparklines, verify device defaults and store management, and create deployment scripts for Raspberry Pi and x64 Debian.
 
 ## Current Phase
-Phase 7: Testing & Verification — automated complete, manual pending
+Phase 0: Planning
 
 ## Phases
 
-### Phase 1: Deep-Dive Pipeline Analysis & AUDIO-DATAFLOW.md
-- [x] Create `design/AUDIO-DATAFLOW.md` documenting every step of the audio pipeline from source to Cast playback
-- [x] For each step, document: buffer sizes, duration impact, encoding overhead, configuration options
-- [x] Document latency sources with measured/estimated timing
-- [x] Document options for reducing latency at each step with effort vs. improvement tradeoffs
-- [x] Address specific questions: MP3 necessity, adaptive chunks, alternative Cast libraries, PoC tools
-- [x] Add fingerprinting pipeline analysis section to the same document
-- **Status:** complete
-- **Key files:**
-  - `design/AUDIO-DATAFLOW.md` (new) — comprehensive pipeline analysis
-  - Referenced sources: GoogleCastOutput.cs, HttpStreamOutput.cs, SoundFlowAudioEngine.cs, FingerprintTapModifier.cs, TappedOutputStream.cs, SoundFlowPlaybackService.cs
-
-### Phase 2: Bidirectional Cast Volume Sync
-- [ ] Read Cast device volume on connect via ReceiverChannel status
-- [ ] Subscribe to Cast device volume change events (SharpCaster status updates)
-- [ ] When Cast volume changes externally → update IAudioManager.MasterVolume
-- [ ] When IAudioManager.MasterVolume changes → push to Cast device (already partially working via SetCastVolumeAsync)
-- [ ] Verify existing one-way sync works correctly (app → Cast)
-- [ ] Handle edge cases: mute sync, volume during media load, multiple outputs
-- [ ] Tests for bidirectional sync
+### Phase 1: Quick Fixes & Dead Code Cleanup
+- [ ] Remove commented-out `Console.WriteLine` and unused timing variables from `VisualizationTapModifier.cs` (lines 64-70)
+- [ ] Remove balance control from `NowPlayingPanel.razor` (lines 108-122) — balance stays "centered" permanently
+- [ ] Set balance to 0.0 in `AudioManager.RestoreVolumePreferences()` to ensure centered on startup regardless of stored value
+- [ ] Fix source color mapping in `QueueHistoryPanel.razor` (lines 283-292): remove "Spotify", change "FilePlayer" to "File", add "Bluetooth" → Color.Secondary, add "Vinyl" → Color.Success
 - **Status:** pending
 - **Key files:**
-  - `src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs` — volume read/subscribe
-  - `src/Radio.Infrastructure/Audio/Services/AudioManager.cs` — volume integration
-  - `src/Radio.Core/Interfaces/Audio/IAudioManager.cs` — any interface changes
+  - `src/Radio.Infrastructure/Audio/SoundFlow/VisualizationTapModifier.cs`
+  - `src/Radio.Web/Components/Shared/NowPlayingPanel.razor`
+  - `src/Radio.Web/Components/Shared/QueueHistoryPanel.razor`
+  - `src/Radio.Infrastructure/Audio/Services/AudioManager.cs`
 
-### Phase 3: Bidirectional Bluetooth Volume Sync
-- [ ] Research Windows AVRCP absolute volume support (requires WinRT APIs under Windows TFM)
-- [ ] Research Linux BlueZ AVRCP volume via D-Bus (org.bluez.MediaControl1 or MediaTransport1)
-- [ ] Implement volume read from BT device on connect
-- [ ] Implement volume push to BT device on IAudioManager.MasterVolume change
-- [ ] Handle BT device volume change events → update IAudioManager.MasterVolume
-- [ ] Tests for BT volume sync
+### Phase 2: Title Bar — Mute & Volume Only
+- [ ] Strip mini-player from `MainLayout.razor` (lines 84-154): remove album art, track title/artist, transport controls (prev/pause/next)
+- [ ] Keep only mute button + volume slider in the title bar center section
+- [ ] Wire mute/volume to match NowPlayingPanel behavior exactly: same API calls (`AudioApi.SetVolumeAsync`, `AudioApi.ToggleMuteAsync`), same SignalR event subscriptions (`PlaybackStateChanged` → refresh volume/mute state)
+- [ ] Ensure bidirectional sync: volume change in title bar reflects in NowPlayingPanel and vice versa (already happens via SignalR, but verify)
+- [ ] Increase touch target size for mute button to 48dp minimum (M3 compliance)
 - **Status:** pending
 - **Key files:**
-  - `src/Radio.Infrastructure/Platform/Bluetooth/WindowsBluetoothService.cs`
-  - `src/Radio.Infrastructure/Platform/Bluetooth/LinuxBluetoothService.cs`
-  - `src/Radio.Core/Interfaces/Audio/IBluetoothService.cs` — volume events/methods
+  - `src/Radio.Web/Components/Layout/MainLayout.razor` (lines 84-154, 732-768)
 
-### Phase 4: Volume Preference Persistence
-- [x] Extended `AudioPreferences` with `IsMuted` property (MasterVolume and Balance already existed)
-- [x] Persist volume/mute/balance on change to configuration store via `IConfigurationManager.SetValueAsync()`
-- [x] Restore volume/mute/balance on app startup in `AudioManager.InitializeAsync()` via `RestoreVolumePreferences()`
-- [x] Debounce persistence with 500ms `Timer` in `ScheduleVolumePersist()` — avoids SQLite churn during slider drags
-- [x] Sets mixer directly during restore to avoid re-triggering persistence
-- [ ] Tests for persistence and restore (covered by existing AudioManager tests + manual verification)
-- **Status:** complete
+### Phase 3: Play History Display Fix
+- [ ] Fix `QueueHistoryPanel.razor` Recent Plays to display: **Song Name**, **Artist**, **Song Length** (duration), **Source chip** (device type)
+- [ ] Investigate why Bluetooth entries show stream URL instead of song metadata — trace `PlayHistoryEntryDto.Track?.Title` for BT source entries. Root cause is likely `AudioStateUpdateService` recording the stream URL as the title when no AVRCP metadata is available
+- [ ] Fix play history recording to use AVRCP metadata (Title/Artist) when available, fall back to source type name ("Bluetooth Audio") instead of stream URL
+- [ ] Update `PlayHistoryEntryDto` display in QueueHistoryPanel: line 1 = Title (bold), line 2 = "Artist · Duration", right side = Source chip
+- [ ] Fix full PlayHistoryPage source color mapping to match QueueHistoryPanel fixes
+- **Status:** pending
 - **Key files:**
-  - `src/Radio.Core/Configuration/AudioPreferences.cs` — added `IsMuted` property
-  - `src/Radio.Infrastructure/Audio/Services/AudioManager.cs` — `ScheduleVolumePersist()`, `PersistVolumePreferencesAsync()`, `RestoreVolumePreferences()`
+  - `src/Radio.Web/Components/Shared/QueueHistoryPanel.razor`
+  - `src/Radio.Web/Components/Pages/PlayHistoryPage.razor`
+  - `src/Radio.API/Services/AudioStateUpdateService.cs` (play history recording)
+  - `src/Radio.Web/Models/ApiModels.cs` (PlayHistoryEntryDto)
 
-### Phase 5: Fingerprinting Optimization
-- [x] **Skip identification for already-identified tracks**: Added `NeedsFingerprintingLookup` to `IAudioSampleProvider`, implemented in `SoundFlowAudioTap` checking FilePlayer metadata dict and BT source property. BackgroundIdentificationService skips cycle when false.
-- [x] **Track-change-aware scheduling**: Added `RequestImmediateIdentification()` to BackgroundIdentificationService (cancels delay CTS). FilePlayer calls it in `UpdateMetadataFromFile` when NeedsFingerprintingLookup is true. BT calls it in `OnMetadataChanged` when metadata incomplete.
-- [x] **Source-aware strategy**: Radio/Vinyl/USB return `NeedsFingerprintingLookup=true` always. FilePlayer returns based on metadata dict. BT returns based on AVRCP completeness.
-- [x] **Reduce redundant MusicBrainz calls**: Already implemented — `GetMusicBrainzMetadataAsync` checks `FindByMusicBrainzIdAsync(recordingId)` before API call.
-- [x] **Extended duplicate suppression**: High-confidence matches (>0.9) get `HighConfidenceDuplicateSuppressionMinutes` (default 30min vs 5min). Tuple-based tracking `(DateTime, double Confidence)`.
-- **Status:** complete
+### Phase 4: Merge Files into Queue & Remove Redundant Pages
+- [ ] **Queue Page Enhancement**: Add a tabbed or collapsible file browser section to `QueuePage.razor` — import the file browsing functionality from `FileBrowserPage.razor` (drive selector, breadcrumb nav, custom path, search/filter, virtual keyboard)
+- [ ] Layout: Queue list on top (or left), file browser on bottom (or right) with a toggle/tab
+- [ ] Migrate all `FileBrowserPage.razor` state management, API calls, and UI into `QueuePage.razor`
+- [ ] **Remove Files page**: Delete `FileBrowserPage.razor`, remove `/files` route, remove `_showFilesNav` conditional and folder icon from `MainLayout.razor`
+- [ ] **Remove Visualizer page**: Delete `VisualizerPage.razor`, remove `/visualizer` route and icon from `MainLayout.razor` (embedded visualizer on Home is sufficient)
+- [ ] Update "Add Files to Queue" button to trigger inline file browser instead of dialog
+- [ ] Verify all file browser API service calls still work from new location
+- **Status:** pending
 - **Key files:**
-  - `src/Radio.Core/Interfaces/Audio/IAudioSampleProvider.cs` — added `NeedsFingerprintingLookup`
-  - `src/Radio.Core/Configuration/FingerprintingOptions.cs` — added `HighConfidenceDuplicateSuppressionMinutes`
-  - `src/Radio.Infrastructure/Audio/Fingerprinting/BackgroundIdentificationService.cs` — skip logic, on-demand trigger, confidence-aware suppression
-  - `src/Radio.Infrastructure/Audio/Fingerprinting/SoundFlowAudioTap.cs` — implemented `NeedsFingerprintingLookup`
-  - `src/Radio.Infrastructure/Audio/Sources/Primary/FilePlayerAudioSource.cs` — calls `RequestImmediateIdentification()`
-  - `src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs` — calls `RequestImmediateIdentification()`
+  - `src/Radio.Web/Components/Pages/QueuePage.razor`
+  - `src/Radio.Web/Components/Pages/FileBrowserPage.razor` (source, then DELETE)
+  - `src/Radio.Web/Components/Pages/VisualizerPage.razor` (DELETE)
+  - `src/Radio.Web/Components/Layout/MainLayout.razor` (nav cleanup)
 
-### Phase 6: Cast Latency Reduction (Implementation)
-- [x] **StreamType.Live** (Priority 1, ~5-15s improvement): Changed `StreamType.Buffered` → `StreamType.Live` in `BuildMedia()` — tells Chrome to start playback sooner
-- [x] **Reduce post-launch delay** (Priority 3, ~300ms improvement): Reduced from 500ms → 200ms in `StartAsync()`
-- [x] **Reduce FingerprintTap batch size** (Priority 4, ~64ms improvement): Default reduced from 4096 → 1024 samples
-- [x] **Reduce HTTP client buffer** (Priority 5, ~256ms improvement): Changed `ClientBufferSize` from 65536 → 16384 in appsettings.json
-- [x] All tests passing, 0 warnings
-- **Status:** complete
-- **Expected combined improvement:** ~6-16s reduction (from ~25s to ~9-19s), primarily from StreamType.Live
+### Phase 5: Metrics Page — Filtering & Sparklines
+- [ ] Add category filter chips (API, Audio, Bluetooth, Library, Radio, System, TTS, UI, WebSocket) at the top — filter grid to selected category
+- [ ] Fix "Memory Usage Mb" formatting bug — the `FormatMetricValue` method (line 333-350) incorrectly applies percentage format to MB values. Add specific handling for "memory" metrics.
+- [ ] Add sparklines to each metric card: small inline SVG or canvas showing the last N data points. Use the existing `MetricsApi.GetMetricAggregateAsync()` to fetch time-series data for each visible metric.
+- [ ] Consider using MudBlazor `MudSparkLine` component if available, or a lightweight canvas-based sparkline
+- [ ] Improve card visual hierarchy: larger values, better category labels, M3 tonal card backgrounds
+- **Status:** pending
 - **Key files:**
-  - `src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs` — StreamType.Live, reduced delay
-  - `src/Radio.Infrastructure/Audio/SoundFlow/FingerprintTapModifier.cs` — batch size 4096→1024
-  - `src/Radio.API/appsettings.json` — ClientBufferSize 65536→16384
+  - `src/Radio.Web/Components/Pages/MetricsDashboardPage.razor`
+  - `src/Radio.Web/Services/ApiClients/MetricsApiService.cs`
 
-### Phase 7: Testing & Verification
-- [x] `dotnet build --configuration Release` — 0 warnings, 0 errors ✓
-- [x] `dotnet test --configuration Release` — all tests pass ✓ (1 CoverArtArchive network failure — external API, unrelated)
-- [ ] Manual: Cast latency measurement (before vs. after)
-- [ ] Manual: Volume sync Cast ↔ Console
-- [ ] Manual: Volume sync Bluetooth ↔ Console
-- [ ] Manual: Volume persists across app restart
-- [ ] Manual: Fingerprinting skips for known tracks
-- **Status:** automated verification complete, manual verification pending
+### Phase 6: Device Defaults & Store Management Verification
+- [ ] **Device defaults on startup**: Trace the startup code path to verify that persisted default output device and Cast device are actually used when the app starts. Check `AudioManager.InitializeAsync()` and `AudioEngineInitializationService`.
+- [ ] **Input device default**: Add "Set as Default" action to input devices on DeviceManagementPage (currently read-only)
+- [ ] **Store Management verification**: Test JSON export, DB backup export, and DB backup import with the current multi-database architecture (configuration.db, secrets.db, fingerprints.db, metrics.db). Ensure the Store Management UI handles or at least acknowledges all databases.
+- [ ] Document any gaps in store management (e.g., does export include secrets.db? fingerprints.db?)
+- **Status:** pending
+- **Key files:**
+  - `src/Radio.Web/Components/Pages/DeviceManagementPage.razor`
+  - `src/Radio.Web/Components/Pages/SystemConfigPage.razor` (Tab 7: Store Management)
+  - `src/Radio.API/Services/AudioEngineInitializationService.cs`
+  - `src/Radio.Infrastructure/Audio/Services/AudioManager.cs`
+
+### Phase 7: Material 3 Theme Polish
+- [ ] **MudBlazor theme**: Update `MudThemeProvider` palette for M3 dark theme — surface tonal elevation (surface = #1C1B1F, surfaceContainer = #211F26, etc.), primary seed color, on-surface text colors
+- [ ] **Touch targets**: Audit all interactive elements (buttons, sliders, icons) and ensure minimum 48dp touch targets. Add padding where needed.
+- [ ] **Button variants**: Replace text-only action buttons with M3 filled-tonal buttons for primary actions, outlined for secondary
+- [ ] **App bar**: Increase title bar height from 60px to 64dp (M3 standard). Ensure nav icons have proper padding.
+- [ ] **Chips**: Update source type chips to use M3 tonal chip style (filled with secondary-container color)
+- [ ] **Elevation**: Apply M3 surface tint to MudPaper components — higher elevation = lighter tint
+- **Status:** pending
+- **Key files:**
+  - `src/Radio.Web/Components/Layout/MainLayout.razor` (theme provider)
+  - `src/Radio.Web/wwwroot/css/` (global styles)
+  - All Razor components with inline styles
+
+### Phase 8: Deployment Scripts (Raspberry Pi & Debian x64)
+- [ ] Create `deploy/raspberry-pi/setup.sh`:
+  - Install .NET 8 runtime (ARM64)
+  - Install system dependencies: `libmp3lame-dev`, `libasound2-dev`, `avahi-daemon` (mDNS for Cast discovery), `bluez` (Bluetooth), `pulseaudio` or `pipewire`
+  - Download/extract fpcalc ARM64 binary to `tools/fpcalc/`
+  - Create systemd service files for Radio.API and Radio.Web
+  - Configure `netsh`-equivalent port permissions (iptables/firewall rules)
+  - Create data directories (`./data/config`, `./data/metrics`, `./data/fingerprints`, `./data/secrets`, `./data/albumart`, `./data/backups`)
+  - Set up HTTP URL reservation (Kestrel doesn't need this on Linux, but firewall rules)
+  - Build and publish self-contained for `linux-arm64`
+- [ ] Create `deploy/debian-x64/setup.sh`:
+  - Same as RPi but targeting `linux-x64` runtime
+  - Install .NET 8 runtime (x64)
+  - Same system dependencies
+  - fpcalc x64 binary
+  - systemd service files
+- [ ] Create `deploy/DEPLOYMENT.md`:
+  - Prerequisites (hardware, OS, network)
+  - Step-by-step instructions for both platforms
+  - Configuration (appsettings.json customization for each environment)
+  - Troubleshooting (common issues: port conflicts, audio devices, Bluetooth pairing, Cast discovery)
+  - How to update/upgrade
+- [ ] Create `deploy/common/radio-api.service` and `radio-web.service` (systemd unit files)
+- [ ] Create `deploy/common/publish.sh` — cross-compile helper (builds for target platform from Windows dev box)
+- **Status:** pending
+- **Key files (all new):**
+  - `deploy/raspberry-pi/setup.sh`
+  - `deploy/debian-x64/setup.sh`
+  - `deploy/common/radio-api.service`
+  - `deploy/common/radio-web.service`
+  - `deploy/common/publish.sh`
+  - `deploy/DEPLOYMENT.md`
+
+### Phase 9: Build Verification & Test
+- [ ] `dotnet build --configuration Release` — 0 warnings
+- [ ] `dotnet test --configuration Release` — all tests pass
+- [ ] Manual smoke test: Home page, play history, queue with file browser, metrics, devices, system/store management
+- [ ] Test deployment scripts on actual Raspberry Pi (if available) or in Docker ARM64 emulation
+- **Status:** pending
 
 ## Design Decisions
 
-### Cast Latency Pipeline (Current Measured ~25s)
-Estimated breakdown from research:
-| Stage | Estimated Latency | Notes |
-|-------|------------------|-------|
-| SoundFlow buffer | ~21ms | 1024 samples at 48kHz |
-| FingerprintTap batching | ~85ms | 4096 samples accumulated |
-| TappedOutputStream | ~0ms (ring) | Write-through, no pre-fill delay |
-| HTTP client buffer | ~341ms | 65536 bytes at 192kB/s PCM rate |
-| MP3 encoding | ~50ms | NAudio.Lame frame encoding |
-| Cast LoadAsync | ~500ms-5s | App launch + media load |
-| Cast device buffering | ~5-15s | Chrome `<audio>` progressive buffer |
-| **Total estimated** | **~6-21s** | Gap suggests Cast buffering is dominant |
+### Balance Control Removal
+Rather than hiding the balance control behind a settings menu, we permanently remove it from the Now Playing panel. Balance is always centered (0.0). The `BalanceModifier` remains in the audio pipeline but is never exposed in the UI. If balance control is needed in the future, it can be re-added to a Settings/Audio page.
 
-The 25s observed is likely: LoadAsync overhead (~5s) + Cast device progressive buffering (~15-20s). The Default Media Receiver is a Chrome browser instance that buffers aggressively before starting playback.
+### Title Bar Simplification
+The title bar serves as a persistent quick-access control. With the full Now Playing panel always visible on the home page, the title bar doesn't need duplicate transport controls or track info. Mute + volume is the most-used quick control and keeps the bar clean.
 
-### Volume Persistence Pattern
-Follow existing `AudioPreferences` pattern in AudioManager. Debounce saves to avoid SQLite churn during slider drags. Restore on `InitializeAsync()`.
+### Queue/Files Merge Strategy
+The Queue page becomes the single destination for both queue management and file browsing. Use a two-section layout:
+- **Top**: Current queue (existing functionality)
+- **Bottom**: File browser (migrated from FileBrowserPage) with a collapsible section or tab
 
-### Fingerprinting Optimization Strategy
-Three source categories:
-1. **File-based** (FilePlayer): Identify once per track change, skip if tags complete
-2. **Metadata-aware** (Bluetooth): Identify when AVRCP metadata is incomplete, skip when complete
-3. **Continuous** (Radio, Vinyl, USB): Keep 30s interval, no track-break detection possible
+This eliminates the confusing conditional Files nav icon and gives users a unified experience.
+
+### Material 3 Approach
+MudBlazor v6+ supports custom theming. We'll define a M3-compliant dark theme palette using the MudBlazor `MudTheme` API rather than custom CSS where possible. The primary color will shift from pure cyan to a M3-harmonized teal/cyan seed color with proper tonal palette generation.
+
+### Deployment Architecture
+Both RPi and Debian deployments use:
+- Self-contained .NET 8 publish (no runtime install needed on target — simplifies deployment)
+- systemd for process management (auto-restart, logging)
+- Single `setup.sh` that handles all dependencies and configuration
+- `publish.sh` on the dev box for cross-compilation
 
 ## Errors Encountered
 | Error | Attempt | Resolution |

@@ -17,8 +17,6 @@ public class VisualizationTapModifier : SoundModifier
   private readonly int _bufferSize;
   private int _bufferIndex;
   private readonly object _lock = new();
-  private int _totalSamplesProcessed;
-  private DateTime _lastLogTime = DateTime.MinValue;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="VisualizationTapModifier"/> class.
@@ -45,8 +43,6 @@ public class VisualizationTapModifier : SoundModifier
     // Collect samples in the buffer
     lock (_lock)
     {
-      _totalSamplesProcessed++;
-
       if (_bufferIndex < _bufferSize)
       {
         _sampleBuffer[_bufferIndex++] = sample;
@@ -60,14 +56,6 @@ public class VisualizationTapModifier : SoundModifier
           // Create a copy to avoid issues with the lock
           var samplesForVisualizer = new float[_bufferSize];
           Array.Copy(_sampleBuffer, samplesForVisualizer, _bufferSize);
-
-          // Log periodically (every 5 seconds)
-          var now = DateTime.UtcNow;
-          if ((now - _lastLogTime).TotalSeconds >= 5)
-          {
-//            Console.WriteLine($"[VisualizationTap] Sending {_bufferSize} samples to visualizer (total: {_totalSamplesProcessed})");
-            _lastLogTime = now;
-          }
 
           // Process samples synchronously to ensure they reach the visualizer
           _visualizerService.ProcessSamples(samplesForVisualizer);

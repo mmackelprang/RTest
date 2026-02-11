@@ -15,15 +15,24 @@
 <div style="height: 100%; display: flex; flex-direction: column; padding: 0;">
   <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="true"
            @bind-ActivePanelIndex="_activeTab"
-           Style="height: 100%; display: flex; flex-direction: column;">
+           Style="height: 100%; display: flex; flex-direction: column; min-height: 0;">
     <MudTabPanel Text="Queue" Icon="@Icons.Material.Filled.QueueMusic"
                  BadgeData="@(_queueItems.Count > 0 ? _queueItems.Count.ToString() : null)"
                  BadgeColor="Color.Primary"
-                 Style="flex: 1; overflow: hidden; display: flex; flex-direction: column;">
-      <div style="height: 100%; display: flex; flex-direction: column;">
+                 Style="flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0;">
+      <div style="height: 100%; display: flex; flex-direction: column; min-height: 0;">
         <!-- Queue Header -->
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px;">
-          <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">@_queueItems.Count tracks</MudText>
+          <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">
+            @if (_playedCount > 0)
+            {
+              @($"{_playedCount}/{_queueItems.Count} played")
+            }
+            else
+            {
+              @($"{_queueItems.Count} tracks")
+            }
+          </MudText>
           <div style="display: flex; gap: 8px;">
             <MudIconButton Icon="@Icons.Material.Filled.Add"
                            Color="Color.Primary"
@@ -55,26 +64,66 @@
         }
         else
         {
-          <div style="flex: 1; overflow-y: auto;">
+          <div id="queue-scroll-container" style="flex: 1; overflow-y: auto; min-height: 0;">
             @foreach (var item in _queueItems)
             {
-              <div style="display: flex; align-items: center; gap: 8px; padding: 6px 12px; cursor: pointer; border-left: 3px solid @(item.IsCurrent ? "var(--mud-palette-primary)" : "transparent");"
-                   @onclick="@(() => HandleJumpToAsync(item.Index))">
+              var itemState = item.State ?? "Upcoming";
+              var isError = itemState == "Error";
+              var isCurrent = itemState == "Current";
+              var isPlayed = itemState == "Played";
+              var isClickable = !isError;
+
+              <div style="display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+                          cursor: @(isClickable ? "pointer" : "not-allowed");
+                          border-left: 3px solid @(isCurrent ? "var(--mud-palette-primary)" : isError ? "var(--mud-palette-error)" : "transparent");
+                          background: @(isCurrent ? "rgba(var(--mud-palette-primary-rgb), 0.08)" : "transparent");
+                          opacity: @(isError ? "0.4" : isPlayed ? "0.6" : "1");"
+                   @onclick="@(() => HandleItemClickAsync(item))">
+                <!-- State icon -->
+                <div style="width: 24px; text-align: center; flex-shrink: 0;">
+                  @if (isCurrent)
+                  {
+                    <MudIcon Icon="@Icons.Material.Filled.PlayArrow" Color="Color.Primary" Size="Size.Small" />
+                  }
+                  else if (isPlayed)
+                  {
+                    <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Style="color: var(--text-secondary);" />
+                  }
+                  else if (isError)
+                  {
+                    <MudIcon Icon="@Icons.Material.Filled.Error" Color="Color.Error" Size="Size.Small" />
+                  }
+                  else
+                  {
+                    <MudText Typo="Typo.caption" Style="color: var(--text-secondary);">@(item.FullPlaylistIndex + 1)</MudText>
+                  }
+                </div>
+
+                <!-- Track info -->
                 <div style="flex: 1; min-width: 0;">
-                  <div style="font-size: 14px; font-weight: @(item.IsCurrent ? "600" : "400"); color: @(item.IsCurrent ? "var(--mud-palette-primary)" : "inherit"); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  <div style="font-size: 14px;
+                              font-weight: @(isCurrent ? "600" : "400");
+                              color: @(isCurrent ? "var(--mud-palette-primary)" : isError ? "var(--mud-palette-error)" : "inherit");
+                              white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+                              @(isError ? "text-decoration: line-through;" : "")">
                     @item.Title
                   </div>
                   <div style="font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                     @item.Artist @if (!string.IsNullOrEmpty(item.Duration)) { <text> - @item.Duration</text> }
                   </div>
                 </div>
-                <div @onclick:stopPropagation="true">
-                  <MudIconButton Icon="@Icons.Material.Filled.Close"
-                                 Size="Size.Small"
-                                 Color="Color.Default"
-                                 OnClick="@(() => HandleRemoveAsync(item.Index))"
-                                 title="Remove" />
-                </div>
+
+                <!-- Remove button (only for upcoming items) -->
+                @if (itemState == "Upcoming")
+                {
+                  <div @onclick:stopPropagation="true">
+                    <MudIconButton Icon="@Icons.Material.Filled.Close"
+                                   Size="Size.Small"
+                                   Color="Color.Default"
+                                   OnClick="@(() => HandleRemoveAsync(item.Index))"
+                                   title="Remove" />
+                  </div>
+                }
               </div>
             }
           </div>
@@ -83,8 +132,8 @@
     </MudTabPanel>
 
     <MudTabPanel Text="History" Icon="@Icons.Material.Filled.History"
-                 Style="flex: 1; overflow: hidden; display: flex; flex-direction: column;">
-      <div style="height: 100%; display: flex; flex-direction: column;">
+                 Style="flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0;">
+      <div style="height: 100%; display: flex; flex-direction: column; min-height: 0;">
         <!-- History Header -->
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px;">
           <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Recent Plays</MudText>
@@ -104,16 +153,16 @@
         }
         else if (_historyItems.Any())
         {
-          <div style="flex: 1; overflow-y: auto;">
+          <div style="flex: 1; overflow-y: auto; min-height: 0;">
             @foreach (var item in _historyItems)
             {
               <div style="display: flex; align-items: center; gap: 8px; padding: 6px 12px;">
                 <div style="flex: 1; min-width: 0;">
-                  <div style="font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  <div style="font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                     @(item.Title ?? "Unknown")
                   </div>
                   <div style="font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    @(item.Artist ?? "--") - @item.PlayedAt.ToString("HH:mm")
+                    @(item.Artist ?? "--")@if (item.DurationSeconds.HasValue) { <text> · @FormatDuration(item.DurationSeconds)</text> }
                   </div>
                 </div>
                 <MudChip T="string" Size="Size.Small" Color="@GetSourceColor(item.Source)" Style="font-size: 10px;">
@@ -140,6 +189,7 @@
   private List<QueueItemDto> _queueItems = new();
   private List<PlayHistoryEntryDto> _historyItems = new();
   private bool _isLoadingHistory;
+  private int _playedCount;
 
   protected override async Task OnInitializedAsync()
   {
@@ -160,8 +210,19 @@
   {
     try
     {
-      var queue = await QueueApi.GetQueueAsync();
-      if (queue != null) _queueItems = queue;
+      // Try full playlist first, fall back to regular queue
+      var fullPlaylist = await QueueApi.GetFullPlaylistAsync();
+      if (fullPlaylist != null)
+      {
+        _queueItems = fullPlaylist;
+      }
+      else
+      {
+        var queue = await QueueApi.GetQueueAsync();
+        if (queue != null) _queueItems = queue;
+      }
+
+      _playedCount = _queueItems.Count(i => i.State == "Played");
     }
     catch (Exception ex)
     {
@@ -190,10 +251,19 @@
     }
   }
 
-  private async Task HandleJumpToAsync(int index)
+  private async Task HandleItemClickAsync(QueueItemDto item)
   {
-    try { await QueueApi.JumpToPositionAsync(index); }
-    catch (Exception ex) { Logger.LogWarning(ex, "Failed to jump to queue position"); }
+    var state = item.State ?? "Upcoming";
+    if (state == "Error") return; // Don't click error items
+
+    try
+    {
+      await QueueApi.JumpToFullPlaylistPositionAsync(item.FullPlaylistIndex);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to jump to playlist position");
+    }
   }
 
   private async Task HandleRemoveAsync(int index)
@@ -280,13 +350,23 @@
     catch (Exception ex) { Logger.LogWarning(ex, "Failed to auto-save queue state"); }
   }
 
+  private static string FormatDuration(int? seconds)
+  {
+    if (seconds == null || seconds <= 0) return "";
+    var ts = TimeSpan.FromSeconds(seconds.Value);
+    return ts.TotalHours >= 1
+      ? ts.ToString(@"h\:mm\:ss")
+      : ts.ToString(@"m\:ss");
+  }
+
   private static Color GetSourceColor(string source)
   {
     return source switch
     {
-      "Spotify" => Color.Success,
-      "FilePlayer" => Color.Info,
+      "File" => Color.Info,
       "Radio" => Color.Warning,
+      "Bluetooth" => Color.Secondary,
+      "Vinyl" => Color.Success,
       _ => Color.Default
     };
   }

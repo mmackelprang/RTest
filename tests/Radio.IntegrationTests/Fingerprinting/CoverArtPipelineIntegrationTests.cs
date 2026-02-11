@@ -175,6 +175,8 @@ public class CoverArtPipelineIntegrationTests : IDisposable
     var mockMetadataRepo = new InMemoryTrackMetadataRepo();
 
     var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+    httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(
+      "RadioConsole/1.0.0 (mark@mackelprang.com)");
     var service = new MetadataLookupService(
       NullLogger<MetadataLookupService>.Instance,
       mockCache,

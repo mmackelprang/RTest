@@ -21,6 +21,12 @@ public sealed class MetadataLookupService : IMetadataLookupService
   private readonly AcoustIdClient? _acoustIdClient;
   private readonly HttpClient _httpClient;
 
+  // Rate limiter: MusicBrainz enforces 1 request/second for anonymous clients
+  private static readonly SemaphoreSlim _musicBrainzThrottle = new(1, 1);
+  private static DateTime _lastMusicBrainzRequest = DateTime.MinValue;
+  private const int MaxRetries = 2;
+  private static readonly TimeSpan RetryBaseDelay = TimeSpan.FromSeconds(2);
+
   /// <summary>
   /// Initializes a new instance of the <see cref="MetadataLookupService"/> class.
   /// </summary>
@@ -44,14 +50,6 @@ public sealed class MetadataLookupService : IMetadataLookupService
     _options = options.Value;
     _httpClient = httpClient;
     _acoustIdClient = acoustIdClient;
-
-    // Set User-Agent for MusicBrainz API compliance
-    var mb = _options.MusicBrainz;
-    if (!string.IsNullOrEmpty(mb.ApplicationName))
-    {
-      _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(
-        $"{mb.ApplicationName}/{mb.ApplicationVersion} ({mb.ContactEmail})");
-    }
   }
 
   /// <inheritdoc/>
@@ -338,15 +336,8 @@ public sealed class MetadataLookupService : IMetadataLookupService
 
     try
     {
-      using var response = await _httpClient.GetAsync(url, ct);
-      if (!response.IsSuccessStatusCode)
-      {
-        _logger.LogWarning("MusicBrainz API returned {StatusCode} for recording {RecordingId}",
-          response.StatusCode, recordingId);
-        return null;
-      }
-
-      var json = await response.Content.ReadAsStringAsync(ct);
+      var json = await SendMusicBrainzRequestAsync(url, ct);
+      if (json == null) return null;
       var recording = JsonSerializer.Deserialize<MusicBrainzRecording>(json);
       if (recording == null)
       {
@@ -421,6 +412,61 @@ public sealed class MetadataLookupService : IMetadataLookupService
       _logger.LogWarning(ex, "Error querying MusicBrainz for recording {RecordingId}", recordingId);
       return null;
     }
+  }
+
+  /// <summary>
+  /// Sends a rate-limited, retryable request to MusicBrainz.
+  /// Enforces 1 request/second and retries on transient failures (SSL resets, timeouts).
+  /// </summary>
+  private async Task<string?> SendMusicBrainzRequestAsync(string url, CancellationToken ct)
+  {
+    for (int attempt = 0; attempt <= MaxRetries; attempt++)
+    {
+      await _musicBrainzThrottle.WaitAsync(ct);
+      try
+      {
+        // Enforce minimum 1.1s between requests (MusicBrainz rate limit)
+        var elapsed = DateTime.UtcNow - _lastMusicBrainzRequest;
+        var minInterval = TimeSpan.FromMilliseconds(1100);
+        if (elapsed < minInterval)
+        {
+          await Task.Delay(minInterval - elapsed, ct);
+        }
+
+        using var response = await _httpClient.GetAsync(url, ct);
+        _lastMusicBrainzRequest = DateTime.UtcNow;
+
+        if (response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable ||
+            response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+        {
+          _logger.LogWarning("MusicBrainz rate limited ({StatusCode}), retrying after delay", response.StatusCode);
+          await Task.Delay(RetryBaseDelay * (attempt + 1), ct);
+          continue;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+          _logger.LogWarning("MusicBrainz API returned {StatusCode} for {Url}", response.StatusCode, url);
+          return null;
+        }
+
+        return await response.Content.ReadAsStringAsync(ct);
+      }
+      catch (HttpRequestException ex) when (attempt < MaxRetries)
+      {
+        _logger.LogWarning("MusicBrainz request failed (attempt {Attempt}/{MaxRetries}): {Message}",
+          attempt + 1, MaxRetries + 1, ex.Message);
+        _lastMusicBrainzRequest = DateTime.UtcNow;
+        await Task.Delay(RetryBaseDelay * (attempt + 1), ct);
+      }
+      finally
+      {
+        _musicBrainzThrottle.Release();
+      }
+    }
+
+    _logger.LogWarning("MusicBrainz request failed after {MaxRetries} retries: {Url}", MaxRetries + 1, url);
+    return null;
   }
 
   /// <summary>

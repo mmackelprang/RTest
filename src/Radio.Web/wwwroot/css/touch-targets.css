@@ -152,17 +152,6 @@
   min-width: 48px !important;
 }
 
-/* Spotify Page - Search Results */
-.spotify-result-item {
-  min-height: 60px !important;
-  padding: 12px 16px !important;
-  cursor: pointer;
-}
-
-.spotify-result-item:hover {
-  background-color: rgba(255, 255, 255, 0.05);
-}
-
 /* Radio Page - Frequency Controls */
 .radio-frequency-button {
   min-height: 60px !important;

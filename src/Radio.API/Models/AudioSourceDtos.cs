@@ -169,6 +169,11 @@ public class AudioDeviceDto
   public bool IsDefault { get; set; }
 
   /// <summary>
+  /// Gets or sets whether this device is currently active (playing audio).
+  /// </summary>
+  public bool IsActive { get; set; }
+
+  /// <summary>
   /// Gets or sets whether this is a USB device.
   /// </summary>
   public bool IsUSBDevice { get; set; }

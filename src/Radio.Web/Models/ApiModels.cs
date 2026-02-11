@@ -58,7 +58,9 @@ public record QueueItemDto(
   string? Artist,
   string? Album,
   string? Duration,
-  bool IsCurrent
+  bool IsCurrent,
+  string State = "Upcoming",
+  int FullPlaylistIndex = 0
 );
 
 // Sources API DTOs

@@ -554,7 +554,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
       var mixer = _audioEngine.GetMasterMixer();
       mixer.MasterVolume = prefs.MasterVolume / 100f;
       mixer.IsMuted = prefs.IsMuted;
-      mixer.Balance = prefs.Balance / 100f;
+      mixer.Balance = 0f; // Always centered — balance control removed from UI
 
       _logger.LogInformation(
         "Restored volume preferences: Volume={Volume}%, Muted={Muted}, Balance={Balance}%",

@@ -41,6 +41,41 @@ public class QueueApiService
     }
   }
 
+  public async Task<List<QueueItemDto>?> GetFullPlaylistAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      return await _httpClient.GetFromJsonAsync<List<QueueItemDto>>("/api/queue/full", cancellationToken);
+    }
+    catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+    {
+      return null;
+    }
+    catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.BadRequest)
+    {
+      return null;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to get full playlist");
+      return null;
+    }
+  }
+
+  public async Task<bool> JumpToFullPlaylistPositionAsync(int index, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var response = await _httpClient.PostAsync($"/api/queue/jump-playlist/{index}", null, cancellationToken);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to jump to full playlist position");
+      return false;
+    }
+  }
+
   public async Task<bool> AddToQueueAsync(string itemId, CancellationToken cancellationToken = default)
   {
     try

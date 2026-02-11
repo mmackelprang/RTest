@@ -149,14 +149,13 @@ public class HomePageTests : TestContext
   }
 
   [Fact]
-  public void Home_Contains_Balance_Control()
+  public void Home_Contains_Volume_Slider()
   {
     var cut = RenderComponent<Home>();
 
     var markup = cut.Markup;
-    // Balance slider has L and R labels
-    Assert.Contains(">L<", markup);
-    Assert.Contains(">R<", markup);
+    // NowPlayingPanel has a volume slider (balance removed)
+    Assert.Contains("mud-slider", markup, StringComparison.OrdinalIgnoreCase);
   }
 
   [Fact]

@@ -191,6 +191,7 @@
               <MudTh>Name</MudTh>
               <MudTh>Type</MudTh>
               <MudTh>Status</MudTh>
+              <MudTh>Actions</MudTh>
             </HeaderContent>
             <RowTemplate>
               <MudTd DataLabel="Name">
@@ -215,6 +216,15 @@
                 else
                 {
                   <MudChip T="string" Size="Size.Small" Color="Color.Default" Icon="@Icons.Material.Filled.Circle">Available</MudChip>
+                }
+              </MudTd>
+              <MudTd DataLabel="Actions">
+                @if (!context.IsActive)
+                {
+                  <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
+                             OnClick="@(() => SetDefaultInputAsync(context.Id))">
+                    Set as Default
+                  </MudButton>
                 }
               </MudTd>
             </RowTemplate>
@@ -375,6 +385,35 @@
     {
       Logger.LogError(ex, "Error refreshing devices");
       Snackbar.Add("Error refreshing devices", Severity.Error);
+    }
+  }
+
+  private async Task SetDefaultInputAsync(string deviceId)
+  {
+    try
+    {
+      Logger.LogInformation("Setting default input device: {DeviceId}", deviceId);
+      var success = await DevicesApi.SetInputDeviceAsync(deviceId);
+      if (success)
+      {
+        Snackbar.Add("Default input device updated", Severity.Success);
+        isLoadingInput = true;
+        StateHasChanged();
+        inputDevices = await DevicesApi.GetInputDevicesAsync();
+        isLoadingInput = false;
+        StateHasChanged();
+      }
+      else
+      {
+        Snackbar.Add("Failed to set default input device", Severity.Warning);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error setting default input device");
+      Snackbar.Add("Error setting default input device", Severity.Error);
+      isLoadingInput = false;
+      StateHasChanged();
     }
   }
 
