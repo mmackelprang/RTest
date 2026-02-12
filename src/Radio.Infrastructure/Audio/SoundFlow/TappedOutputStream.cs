@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Radio.Core.Interfaces;
 
 namespace Radio.Infrastructure.Audio.SoundFlow;
 
@@ -14,6 +15,7 @@ internal sealed class TappedOutputStream : Stream
   private readonly int _sampleRate;
   private readonly int _channels;
   private readonly int _bytesPerSample;
+  private readonly IMetricsCollector? _metricsCollector;
   private int _writePosition;
   private readonly object _lock = new();
   private bool _disposed;
@@ -22,6 +24,10 @@ internal sealed class TappedOutputStream : Stream
   private long _totalBytesWritten;
   private long _totalWriteCalls;
   private DateTime _lastWriteTime;
+
+  // Metrics tracking
+  private DateTime _lastMetricsTime = DateTime.MinValue;
+  private long _lastMetricsBytesWritten;
 
   // Per-reader tracking: each reader has its own read position
   private readonly ConcurrentDictionary<string, int> _readerPositions = new();
@@ -32,11 +38,14 @@ internal sealed class TappedOutputStream : Stream
   /// <param name="sampleRate">The sample rate in Hz.</param>
   /// <param name="channels">The number of audio channels.</param>
   /// <param name="bufferSizeSeconds">The buffer size in seconds.</param>
-  public TappedOutputStream(int sampleRate = 48000, int channels = 2, int bufferSizeSeconds = 5)
+  /// <param name="metricsCollector">Optional metrics collector for pipeline metrics.</param>
+  public TappedOutputStream(int sampleRate = 48000, int channels = 2, int bufferSizeSeconds = 5,
+    IMetricsCollector? metricsCollector = null)
   {
     _sampleRate = sampleRate;
     _channels = channels;
     _bytesPerSample = 2; // 16-bit PCM
+    _metricsCollector = metricsCollector;
 
     // Calculate buffer size: sampleRate * channels * bytesPerSample * seconds
     _bufferSize = sampleRate * channels * _bytesPerSample * bufferSizeSeconds;
@@ -164,6 +173,8 @@ internal sealed class TappedOutputStream : Stream
         _writePosition = (_writePosition + 1) % _bufferSize;
       }
     }
+
+    ReportMetrics();
   }
 
   /// <summary>
@@ -196,6 +207,26 @@ internal sealed class TappedOutputStream : Stream
         _writePosition = (_writePosition + 1) % _bufferSize;
       }
     }
+
+    ReportMetrics();
+  }
+
+  private void ReportMetrics()
+  {
+    if (_metricsCollector == null) return;
+
+    var now = DateTime.UtcNow;
+    if ((now - _lastMetricsTime).TotalSeconds < 10) return;
+
+    var elapsed = _lastMetricsTime == DateTime.MinValue ? 10.0 : (now - _lastMetricsTime).TotalSeconds;
+    var bytesWrittenSinceLast = _totalBytesWritten - _lastMetricsBytesWritten;
+    var writeRate = bytesWrittenSinceLast / elapsed;
+
+    _metricsCollector.Gauge("audio.stream.ring_buffer_write_rate", writeRate);
+    _metricsCollector.Gauge("audio.stream.active_readers", _readerPositions.Count);
+
+    _lastMetricsTime = now;
+    _lastMetricsBytesWritten = _totalBytesWritten;
   }
 
   /// <summary>

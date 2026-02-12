@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 
@@ -20,6 +21,7 @@ public sealed class MetadataLookupService : IMetadataLookupService
   private readonly FingerprintingOptions _options;
   private readonly AcoustIdClient? _acoustIdClient;
   private readonly HttpClient _httpClient;
+  private readonly IMetricsCollector? _metricsCollector;
 
   // Rate limiter: MusicBrainz enforces 1 request/second for anonymous clients
   private static readonly SemaphoreSlim _musicBrainzThrottle = new(1, 1);
@@ -36,13 +38,15 @@ public sealed class MetadataLookupService : IMetadataLookupService
   /// <param name="options">The fingerprinting options.</param>
   /// <param name="httpClient">HTTP client for MusicBrainz and Cover Art Archive API calls.</param>
   /// <param name="acoustIdClient">Optional AcoustID client for API lookups.</param>
+  /// <param name="metricsCollector">Optional metrics collector for fingerprint lookup metrics.</param>
   public MetadataLookupService(
     ILogger<MetadataLookupService> logger,
     IFingerprintCacheRepository cache,
     ITrackMetadataRepository metadataRepo,
     IOptions<FingerprintingOptions> options,
     HttpClient httpClient,
-    AcoustIdClient? acoustIdClient = null)
+    AcoustIdClient? acoustIdClient = null,
+    IMetricsCollector? metricsCollector = null)
   {
     _logger = logger;
     _cache = cache;
@@ -50,6 +54,7 @@ public sealed class MetadataLookupService : IMetadataLookupService
     _options = options.Value;
     _httpClient = httpClient;
     _acoustIdClient = acoustIdClient;
+    _metricsCollector = metricsCollector;
   }
 
   /// <inheritdoc/>
@@ -91,6 +96,9 @@ public sealed class MetadataLookupService : IMetadataLookupService
         }
       }
 
+      _metricsCollector?.Increment("audio.fingerprint.lookups", 1,
+        new Dictionary<string, string> { ["result"] = "cache_hit" });
+
       return new MetadataLookupResult
       {
         IsMatch = true,
@@ -105,6 +113,8 @@ public sealed class MetadataLookupService : IMetadataLookupService
     if (string.IsNullOrEmpty(_options.AcoustId.ApiKey))
     {
       _logger.LogDebug("No AcoustID API key configured, storing fingerprint for manual tagging");
+      _metricsCollector?.Increment("audio.fingerprint.lookups", 1,
+        new Dictionary<string, string> { ["result"] = "no_api_key" });
       var stored = await _cache.StoreAsync(fingerprint, null, ct);
       return new MetadataLookupResult
       {
@@ -119,6 +129,8 @@ public sealed class MetadataLookupService : IMetadataLookupService
     if (_acoustIdClient == null)
     {
       _logger.LogWarning("AcoustID client not available, storing fingerprint for manual tagging");
+      _metricsCollector?.Increment("audio.fingerprint.lookups", 1,
+        new Dictionary<string, string> { ["result"] = "no_client" });
       var stored = await _cache.StoreAsync(fingerprint, null, ct);
       return new MetadataLookupResult
       {
@@ -135,6 +147,8 @@ public sealed class MetadataLookupService : IMetadataLookupService
       _logger.LogWarning(
         "Fingerprint {FingerprintId} has no chromaprint hash, storing for manual tagging",
         fingerprint.Id);
+      _metricsCollector?.Increment("audio.fingerprint.lookups", 1,
+        new Dictionary<string, string> { ["result"] = "no_hash" });
 
       var stored = await _cache.StoreAsync(fingerprint, null, ct);
       return new MetadataLookupResult
@@ -164,6 +178,8 @@ public sealed class MetadataLookupService : IMetadataLookupService
     if (acoustIdResult == null || acoustIdResult.Recordings.Count == 0)
     {
       _logger.LogInformation("No AcoustID match found for fingerprint {FingerprintId}, storing for manual tagging", fingerprint.Id);
+      _metricsCollector?.Increment("audio.fingerprint.lookups", 1,
+        new Dictionary<string, string> { ["result"] = "no_match" });
       var stored = await _cache.StoreAsync(fingerprint, null, ct);
       return new MetadataLookupResult
       {
@@ -179,6 +195,8 @@ public sealed class MetadataLookupService : IMetadataLookupService
     if (bestRecording == null)
     {
       _logger.LogInformation("No recordings in AcoustID result for fingerprint {FingerprintId}", fingerprint.Id);
+      _metricsCollector?.Increment("audio.fingerprint.lookups", 1,
+        new Dictionary<string, string> { ["result"] = "no_match" });
       var stored = await _cache.StoreAsync(fingerprint, null, ct);
       return new MetadataLookupResult
       {
@@ -242,13 +260,23 @@ public sealed class MetadataLookupService : IMetadataLookupService
             UpdatedAt = DateTime.UtcNow
           };
 
+          _metricsCollector?.Increment("audio.fingerprint.musicbrainz_enrichments", 1,
+            new Dictionary<string, string> { ["result"] = "success" });
+
           _logger.LogInformation(
             "Enriched metadata from MusicBrainz: Album=\"{Album}\", Year={Year}, CoverArt={HasCoverArt}",
             trackMetadata.Album, trackMetadata.ReleaseYear, trackMetadata.CoverArtUrl != null);
         }
+        else
+        {
+          _metricsCollector?.Increment("audio.fingerprint.musicbrainz_enrichments", 1,
+            new Dictionary<string, string> { ["result"] = "no_data" });
+        }
       }
       catch (Exception ex)
       {
+        _metricsCollector?.Increment("audio.fingerprint.musicbrainz_enrichments", 1,
+          new Dictionary<string, string> { ["result"] = "error" });
         _logger.LogWarning(ex, "MusicBrainz enrichment failed for recording {RecordingId}, using AcoustID data only",
           bestRecording.Id);
       }
@@ -259,6 +287,10 @@ public sealed class MetadataLookupService : IMetadataLookupService
 
     // Also store the track metadata in the repository
     await _metadataRepo.StoreAsync(trackMetadata, ct);
+
+    _metricsCollector?.Increment("audio.fingerprint.lookups", 1,
+      new Dictionary<string, string> { ["result"] = "match" });
+    _metricsCollector?.Gauge("audio.fingerprint.confidence", acoustIdResult.Score);
 
     return new MetadataLookupResult
     {

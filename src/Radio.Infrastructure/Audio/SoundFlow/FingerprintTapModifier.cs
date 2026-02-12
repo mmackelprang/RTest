@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Radio.Core.Interfaces;
 using SoundFlow.Abstracts;
 
 namespace Radio.Infrastructure.Audio.SoundFlow;
@@ -16,11 +17,16 @@ public class FingerprintTapModifier : SoundModifier
 {
   private readonly SoundFlowAudioEngine _audioEngine;
   private readonly ILogger? _logger;
+  private readonly IMetricsCollector? _metricsCollector;
   private readonly float[] _sampleBuffer;
   private readonly int _bufferSize;
   private int _bufferIndex;
   private readonly object _lock = new();
   private long _totalSamplesProcessed;
+  private long _batchCount;
+  private long _writeErrorCount;
+  private long _lastReportedBatches;
+  private long _lastReportedErrors;
   private bool _loggedFirstBatch;
   private DateTime _lastLogTime = DateTime.MinValue;
   private DateTime _lastProcessedTime = DateTime.MinValue;
@@ -31,13 +37,16 @@ public class FingerprintTapModifier : SoundModifier
   /// <param name="audioEngine">The audio engine to write samples to.</param>
   /// <param name="logger">Optional logger for diagnostic output.</param>
   /// <param name="bufferSize">Size of the sample buffer before writing to tap (default: 4096). Smaller values reduce latency but increase lock contention and GC pressure in the audio callback.</param>
+  /// <param name="metricsCollector">Optional metrics collector for pipeline metrics.</param>
   public FingerprintTapModifier(
     SoundFlowAudioEngine audioEngine,
     ILogger? logger = null,
-    int bufferSize = 4096)
+    int bufferSize = 4096,
+    IMetricsCollector? metricsCollector = null)
   {
     _audioEngine = audioEngine ?? throw new ArgumentNullException(nameof(audioEngine));
     _logger = logger;
+    _metricsCollector = metricsCollector;
     _bufferSize = bufferSize;
     _sampleBuffer = new float[bufferSize];
     _bufferIndex = 0;
@@ -71,6 +80,7 @@ public class FingerprintTapModifier : SoundModifier
 
           // Write to the output tap for fingerprinting/streaming
           _audioEngine.WriteToOutputTap(samplesForTap);
+          _batchCount++;
 
           // Log first batch at Information level for diagnostics
           if (!_loggedFirstBatch)
@@ -88,10 +98,29 @@ public class FingerprintTapModifier : SoundModifier
               "FingerprintTap: {TotalSamples} samples processed, writing {BufferSize} to tap",
               _totalSamplesProcessed, _bufferSize);
             _lastLogTime = _lastProcessedTime;
+
+            // Report metrics
+            if (_metricsCollector != null)
+            {
+              var batchDelta = _batchCount - _lastReportedBatches;
+              if (batchDelta > 0)
+              {
+                _metricsCollector.Increment("audio.tap.batches_written", batchDelta);
+                _lastReportedBatches = _batchCount;
+              }
+
+              var errorDelta = _writeErrorCount - _lastReportedErrors;
+              if (errorDelta > 0)
+              {
+                _metricsCollector.Increment("audio.tap.write_errors", errorDelta);
+                _lastReportedErrors = _writeErrorCount;
+              }
+            }
           }
         }
         catch (Exception ex)
         {
+          _writeErrorCount++;
           _logger?.LogWarning(ex, "Error writing samples to output tap");
         }
 

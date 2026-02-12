@@ -762,7 +762,7 @@ internal sealed class WindowsBluetoothService : IBluetoothService
 
                 var format = _playbackService.GetAudioFormat();
                 _loopbackCapture = new Windows.WasapiLoopbackCaptureSource(_logger);
-                _loopbackGenerator = _loopbackCapture.CreateGenerator(engine, format, _logger);
+                _loopbackGenerator = _loopbackCapture.CreateGenerator(engine, format, _logger, _metricsCollector);
 
                 _logger.LogInformation(
                   "WASAPI loopback capture device created — BT audio will route through SoundFlow pipeline");

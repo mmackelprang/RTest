@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using SoundFlow.Abstracts;
 using SoundFlow.Abstracts.Devices;
@@ -23,6 +24,7 @@ public class SoundFlowAudioEngine : IAudioEngine
   private readonly AudioEngineOptions _options;
   private readonly SoundFlowMasterMixer _masterMixer;
   private readonly SoundFlowDeviceManager _deviceManager;
+  private readonly IMetricsCollector? _metricsCollector;
 
   private MiniAudioEngine? _engine;
   private AudioPlaybackDevice? _playbackDevice;
@@ -49,16 +51,19 @@ public class SoundFlowAudioEngine : IAudioEngine
   /// <param name="options">The audio engine options.</param>
   /// <param name="masterMixer">The master mixer instance.</param>
   /// <param name="deviceManager">The device manager instance.</param>
+  /// <param name="metricsCollector">Optional metrics collector for pipeline metrics.</param>
   public SoundFlowAudioEngine(
     ILogger<SoundFlowAudioEngine> logger,
     IOptions<AudioEngineOptions> options,
     SoundFlowMasterMixer masterMixer,
-    SoundFlowDeviceManager deviceManager)
+    SoundFlowDeviceManager deviceManager,
+    IMetricsCollector? metricsCollector = null)
   {
     _logger = logger;
     _options = options.Value;
     _masterMixer = masterMixer;
     _deviceManager = deviceManager;
+    _metricsCollector = metricsCollector;
 
     // Subscribe to device manager events
     _deviceManager.DevicesChanged += OnDeviceManagerDevicesChanged;
@@ -177,7 +182,8 @@ public class SoundFlowAudioEngine : IAudioEngine
       _outputTap = new TappedOutputStream(
         _options.SampleRate,
         _options.Channels,
-        _options.OutputBufferSizeSeconds);
+        _options.OutputBufferSizeSeconds,
+        _metricsCollector);
 
       // Add modifiers to capture mixed audio for fingerprinting/streaming
       if (_playbackDevice != null)
@@ -188,7 +194,7 @@ public class SoundFlowAudioEngine : IAudioEngine
         _logger.LogInformation("Balance modifier added to MasterMixer");
 
         // Add fingerprint tap modifier after balance
-        _fingerprintTap = new FingerprintTapModifier(this, _logger);
+        _fingerprintTap = new FingerprintTapModifier(this, _logger, metricsCollector: _metricsCollector);
         _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
         _logger.LogInformation("Fingerprint tap modifier added to MasterMixer");
       }
@@ -212,6 +218,7 @@ public class SoundFlowAudioEngine : IAudioEngine
       }
 
       State = AudioEngineState.Ready;
+      _metricsCollector?.Gauge("audio.engine.buffer_size_samples", _options.BufferSize);
       _logger.LogInformation("SoundFlow audio engine initialized successfully");
     }
     catch (Exception ex)
@@ -400,7 +407,7 @@ public class SoundFlowAudioEngine : IAudioEngine
       }
       else
       {
-        _fingerprintTap = new FingerprintTapModifier(this, _logger);
+        _fingerprintTap = new FingerprintTapModifier(this, _logger, metricsCollector: _metricsCollector);
         _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
       }
 
@@ -491,7 +498,7 @@ public class SoundFlowAudioEngine : IAudioEngine
       // If it didn't exist (e.g. started with no device), create it now
       else
       {
-        _fingerprintTap = new FingerprintTapModifier(this, _logger);
+        _fingerprintTap = new FingerprintTapModifier(this, _logger, metricsCollector: _metricsCollector);
         _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
         _logger.LogInformation("Fingerprint tap created and attached to new playback device");
       }

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Radio.Core.Interfaces;
 using SoundFlow.Abstracts;
 using SoundFlow.Structs;
 using System.Runtime.InteropServices;
@@ -32,6 +33,7 @@ public enum BufferOverflowStrategy
 public class BufferedSoundGenerator<T> : SoundComponent where T : struct
 {
     private readonly ILogger _logger;
+    private readonly IMetricsCollector? _metricsCollector;
     private readonly object _bufferLock = new();
     private readonly Queue<T> _sampleBuffer = new();
     private readonly int _maxBufferSamples;
@@ -40,6 +42,9 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     private long _totalSamplesReceived;
     private long _totalSamplesDropped;
     private long _totalSamplesOutput;
+    private long _underrunCount;
+    private long _lastReportedDropped;
+    private long _lastReportedUnderruns;
     private DateTime _lastLogTime = DateTime.MinValue;
 
     /// <summary>
@@ -50,15 +55,18 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     /// <param name="logger">Logger for diagnostic output.</param>
     /// <param name="maxBufferSeconds">Maximum seconds of audio to buffer (default: 2).</param>
     /// <param name="overflowStrategy">Strategy for buffer overflow (default: DropOldest).</param>
+    /// <param name="metricsCollector">Optional metrics collector for pipeline metrics.</param>
     public BufferedSoundGenerator(
         AudioEngine engine,
         AudioFormat format,
         ILogger logger,
         float maxBufferSeconds = 2.0f,
-        BufferOverflowStrategy overflowStrategy = BufferOverflowStrategy.DropOldest)
+        BufferOverflowStrategy overflowStrategy = BufferOverflowStrategy.DropOldest,
+        IMetricsCollector? metricsCollector = null)
         : base(engine, format)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _metricsCollector = metricsCollector;
         _overflowStrategy = overflowStrategy;
 
         // Calculate max buffer based on output format
@@ -171,6 +179,12 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         if (samplesWritten < buffer.Length)
         {
             buffer.Slice(samplesWritten).Fill(0);
+
+            // Count underruns (requested data but buffer was empty, after first data received)
+            if (_totalSamplesReceived > 0)
+            {
+                _underrunCount++;
+            }
         }
 
         LogStats();
@@ -186,7 +200,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             {
                 currentBuffer = _sampleBuffer.Count;
             }
-            
+
             // Don't log if completely idle (no received samples ever)
             if (_totalSamplesReceived > 0)
             {
@@ -194,6 +208,28 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                     "Buffered audio ({Type}): received={Received}, output={Output}, dropped={Dropped}, buffered={Buffered}",
                     typeof(T).Name, _totalSamplesReceived, _totalSamplesOutput, _totalSamplesDropped, currentBuffer);
                 _lastLogTime = now;
+
+                // Report metrics (outside lock — reads of long fields are safe for approximate values)
+                if (_metricsCollector != null)
+                {
+                    var tags = new Dictionary<string, string> { ["type"] = typeof(T).Name };
+                    var fillPercent = (double)currentBuffer / _maxBufferSamples * 100.0;
+                    _metricsCollector.Gauge("audio.buffer.fill_percent", fillPercent, tags);
+
+                    var droppedDelta = _totalSamplesDropped - _lastReportedDropped;
+                    if (droppedDelta > 0)
+                    {
+                        _metricsCollector.Increment("audio.buffer.samples_dropped", droppedDelta, tags);
+                        _lastReportedDropped = _totalSamplesDropped;
+                    }
+
+                    var underrunDelta = _underrunCount - _lastReportedUnderruns;
+                    if (underrunDelta > 0)
+                    {
+                        _metricsCollector.Increment("audio.buffer.underruns", underrunDelta, tags);
+                        _lastReportedUnderruns = _underrunCount;
+                    }
+                }
             }
         }
     }

@@ -2,6 +2,7 @@ using System.Runtime.Versioning;
 using Microsoft.Extensions.Logging;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
+using Radio.Core.Interfaces;
 using Radio.Infrastructure.Audio.SoundFlow;
 using SoundFlow.Abstracts;
 using SoundFlow.Structs;
@@ -36,9 +37,10 @@ internal sealed class WasapiLoopbackCaptureSource : IDisposable
   /// Creates a BufferedSoundGenerator configured for the SoundFlow pipeline.
   /// Call this before StartCapture to get the component to register with the mixer.
   /// </summary>
-  public BufferedSoundGenerator<float> CreateGenerator(AudioEngine engine, AudioFormat format, ILogger generatorLogger)
+  public BufferedSoundGenerator<float> CreateGenerator(AudioEngine engine, AudioFormat format, ILogger generatorLogger,
+    IMetricsCollector? metricsCollector = null)
   {
-    return new BufferedSoundGenerator<float>(engine, format, generatorLogger);
+    return new BufferedSoundGenerator<float>(engine, format, generatorLogger, metricsCollector: metricsCollector);
   }
 
   /// <summary>

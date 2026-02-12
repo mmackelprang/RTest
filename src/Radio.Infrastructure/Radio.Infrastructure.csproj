@@ -25,7 +25,7 @@
   <!-- Common packages -->
   <ItemGroup>
     <PackageReference Include="InTheHand.Net.Bluetooth" Version="4.2.2" />
-    <PackageReference Include="NAudio.Lame" Version="2.1.0" />
+    <PackageReference Include="NAudio.Lame.CrossPlatform" Version="2.2.1" />
     <PackageReference Include="SoundFlow" Version="1.*" />
     <PackageReference Include="SharpCaster" Version="3.0.0" />
     <PackageReference Include="Serilog" Version="4.*" />

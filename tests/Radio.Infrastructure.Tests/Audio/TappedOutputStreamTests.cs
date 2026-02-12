@@ -13,7 +13,7 @@ public class TappedOutputStreamTests
     // Use reflection to access the internal TappedOutputStream class
     var assembly = typeof(Radio.Infrastructure.DependencyInjection.AudioServiceExtensions).Assembly;
     var type = assembly.GetType("Radio.Infrastructure.Audio.SoundFlow.TappedOutputStream")!;
-    return (Stream)Activator.CreateInstance(type, sampleRate, channels, bufferSizeSeconds)!;
+    return (Stream)Activator.CreateInstance(type, sampleRate, channels, bufferSizeSeconds, null)!;
   }
 
   private static void InvokeWriteFromEngine(Stream stream, float[] samples)
