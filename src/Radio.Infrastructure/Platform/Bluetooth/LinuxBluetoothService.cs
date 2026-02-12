@@ -30,10 +30,12 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
         // Player tracking
         private Linux.IMediaPlayer1? _mediaPlayer;
+        private ObjectPath? _mediaPlayerPath;
         private IDisposable? _playerPropertiesWatcher;
 
         // Maps object path to device info
         private readonly Dictionary<ObjectPath, BluetoothDeviceInfo> _deviceCache = new();
+        private readonly HashSet<ObjectPath> _watchedDevicePaths = new();
         private Linux.BluezAgent? _agent;
 
         public LinuxBluetoothService(
@@ -193,11 +195,12 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 await _adapter.StartDiscoveryAsync();
                 IsDiscovering = true;
                 _metricsCollector?.Increment("bluetooth.discovery_sessions");
-                
-                // Watch for new devices
-                _discoveryWatcher = await _objectManager.WatchInterfacesAddedAsync(OnInterfaceAdded);
 
-                // Also scan for existing players if any
+                // InterfacesAdded watcher is already set up in StartAsync — no need to
+                // create a duplicate here (the old one would leak, and both would fire
+                // events causing duplicate DeviceConnected/AttachMediaPlayer calls).
+
+                // Scan for existing players that appeared before discovery started
                 await CheckForMediaPlayersAsync();
             }
             catch (Exception ex)
@@ -303,6 +306,16 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         private async Task WatchDevicePropertiesAsync(ObjectPath devicePath)
         {
             if (_connection == null) return;
+
+            // Prevent duplicate watchers — each fires DeviceConnected independently
+            lock (_watchedDevicePaths)
+            {
+                if (!_watchedDevicePaths.Add(devicePath))
+                {
+                    _logger.LogDebug("Already watching device properties at {Path}, skipping", devicePath);
+                    return;
+                }
+            }
 
             try
             {
@@ -720,8 +733,16 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             try
             {
                 if (_connection == null) return;
-                
+
+                // Skip if already attached to this exact player
+                if (_mediaPlayerPath == objectPath && _mediaPlayer != null)
+                {
+                    _logger.LogDebug("Already attached to media player at {Path}, skipping", objectPath);
+                    return;
+                }
+
                 _playerPropertiesWatcher?.Dispose();
+                _mediaPlayerPath = objectPath;
                 _mediaPlayer = _connection.CreateProxy<Linux.IMediaPlayer1>(Linux.BluezConstants.ServiceName, objectPath);
                 
                 _playerPropertiesWatcher = await _mediaPlayer.WatchPropertiesAsync(OnPlayerPropertiesChanged);
