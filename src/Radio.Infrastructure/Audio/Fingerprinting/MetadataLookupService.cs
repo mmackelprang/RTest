@@ -502,6 +502,55 @@ public sealed class MetadataLookupService : IMetadataLookupService
   }
 
   /// <summary>
+  /// Searches MusicBrainz by title/artist text and returns a cover art URL if found.
+  /// Used by Bluetooth source when AVRCP provides metadata but not album art.
+  /// </summary>
+  public async Task<string?> SearchCoverArtByTextAsync(
+    string title, string artist, string? album = null, CancellationToken ct = default)
+  {
+    if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(artist))
+      return null;
+
+    try
+    {
+      // Build MusicBrainz recording search query
+      var query = $"recording:\"{Uri.EscapeDataString(title)}\" AND artist:\"{Uri.EscapeDataString(artist)}\"";
+      if (!string.IsNullOrWhiteSpace(album))
+        query += $" AND release:\"{Uri.EscapeDataString(album)}\"";
+
+      var mb = _options.MusicBrainz;
+      var url = $"{mb.BaseUrl}/recording?query={query}&fmt=json&limit=1";
+
+      _logger.LogDebug("Searching MusicBrainz for cover art: {Title} by {Artist}", title, artist);
+
+      var json = await SendMusicBrainzRequestAsync(url, ct);
+      if (json == null) return null;
+
+      var searchResult = JsonSerializer.Deserialize<MusicBrainzSearchResult>(json);
+      var recording = searchResult?.Recordings?.FirstOrDefault();
+      var releaseId = recording?.Releases?.FirstOrDefault()?.Id;
+
+      if (string.IsNullOrEmpty(releaseId))
+      {
+        _logger.LogDebug("No MusicBrainz release found for '{Title}' by '{Artist}'", title, artist);
+        return null;
+      }
+
+      var coverArtUrl = await GetCoverArtUrlAsync(releaseId, ct);
+      if (!string.IsNullOrEmpty(coverArtUrl))
+      {
+        _logger.LogInformation("Found cover art for '{Title}' by '{Artist}': {Url}", title, artist, coverArtUrl);
+      }
+      return coverArtUrl;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Cover art text search failed for '{Title}' by '{Artist}'", title, artist);
+      return null;
+    }
+  }
+
+  /// <summary>
   /// Queries the Cover Art Archive for a release's front cover image URL.
   /// Uses a separate HttpClient to avoid sending the MusicBrainz User-Agent to archive.org.
   /// </summary>
@@ -556,6 +605,12 @@ public sealed class MetadataLookupService : IMetadataLookupService
 }
 
 #region MusicBrainz Response DTOs
+
+internal sealed class MusicBrainzSearchResult
+{
+  [JsonPropertyName("recordings")]
+  public List<MusicBrainzRecording>? Recordings { get; set; }
+}
 
 internal sealed class MusicBrainzRecording
 {

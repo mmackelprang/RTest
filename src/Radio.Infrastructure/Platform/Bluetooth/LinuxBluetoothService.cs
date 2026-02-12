@@ -37,6 +37,8 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         private readonly Dictionary<ObjectPath, BluetoothDeviceInfo> _deviceCache = new();
         private readonly HashSet<ObjectPath> _watchedDevicePaths = new();
         private readonly SemaphoreSlim _captureDeviceLock = new(1, 1);
+        private readonly object _mediaPlayerLock = new();
+        private bool _started;
         private Linux.BluezAgent? _agent;
 
         public LinuxBluetoothService(
@@ -113,6 +115,13 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
         public async Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default)
         {
+            if (_started)
+            {
+                _logger.LogDebug("Bluetooth service already started, skipping duplicate StartAsync call");
+                return IsAvailable;
+            }
+            _started = true;
+
             try
             {
                 _connection = new Connection(Address.System);
@@ -754,15 +763,19 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             {
                 if (_connection == null) return;
 
-                // Skip if already attached to this exact player
-                if (_mediaPlayerPath == objectPath && _mediaPlayer != null)
+                // Thread-safe dedup — multiple concurrent InterfacesAdded callbacks
+                // can race into this method for the same player path
+                lock (_mediaPlayerLock)
                 {
-                    _logger.LogDebug("Already attached to media player at {Path}, skipping", objectPath);
-                    return;
-                }
+                    if (_mediaPlayerPath == objectPath && _mediaPlayer != null)
+                    {
+                        _logger.LogDebug("Already attached to media player at {Path}, skipping", objectPath);
+                        return;
+                    }
 
-                _playerPropertiesWatcher?.Dispose();
-                _mediaPlayerPath = objectPath;
+                    _playerPropertiesWatcher?.Dispose();
+                    _mediaPlayerPath = objectPath;
+                }
                 _mediaPlayer = _connection.CreateProxy<Linux.IMediaPlayer1>(Linux.BluezConstants.ServiceName, objectPath);
                 
                 _playerPropertiesWatcher = await _mediaPlayer.WatchPropertiesAsync(OnPlayerPropertiesChanged);

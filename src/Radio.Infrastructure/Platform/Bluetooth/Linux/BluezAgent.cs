@@ -18,6 +18,7 @@ internal sealed class BluezAgent : IAgent1
 {
   private readonly ILogger _logger;
   private readonly bool _autoAccept;
+  private readonly HashSet<string> _authorizedServices = new();
 
   public ObjectPath ObjectPath => new(BluezConstants.AgentPath);
 
@@ -81,7 +82,16 @@ internal sealed class BluezAgent : IAgent1
   {
     if (_autoAccept)
     {
-      _logger.LogInformation("Auto-authorizing Bluetooth service {UUID} for {Device}", uuid, device);
+      // Log first authorization per service at Info, subsequent repeats at Debug
+      // to avoid flooding the log when BlueZ retries A2DP connections
+      var key = $"{device}:{uuid}";
+      bool isFirst;
+      lock (_authorizedServices) { isFirst = _authorizedServices.Add(key); }
+
+      if (isFirst)
+        _logger.LogInformation("Auto-authorizing Bluetooth service {UUID} for {Device}", uuid, device);
+      else
+        _logger.LogDebug("Re-authorizing Bluetooth service {UUID} for {Device}", uuid, device);
       return Task.CompletedTask;
     }
 

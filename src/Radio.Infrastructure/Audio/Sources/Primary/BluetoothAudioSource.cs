@@ -20,9 +20,11 @@ public class BluetoothAudioSource : USBAudioSourceBase
 {
   private readonly IBluetoothService _bluetoothService;
   private readonly BackgroundIdentificationService? _identificationService;
+  private readonly MetadataLookupService? _metadataLookupService;
   private readonly IOptionsMonitor<BluetoothOptions> _options;
   private readonly SoundFlowPlaybackService? _playbackService;
   private string? _playbackId;
+  private string? _lastCoverArtLookupKey;
 
   /// <summary>
   /// When true, the fingerprinting pipeline will attempt to identify the current track.
@@ -37,11 +39,13 @@ public class BluetoothAudioSource : USBAudioSourceBase
     IOptionsMonitor<BluetoothOptions> options,
     BackgroundIdentificationService? identificationService = null,
     Radio.Core.Interfaces.IMetricsCollector? metricsCollector = null,
-    SoundFlowPlaybackService? playbackService = null)
+    SoundFlowPlaybackService? playbackService = null,
+    MetadataLookupService? metadataLookupService = null)
     : base(logger, deviceManager, identificationService, metricsCollector)
   {
     _bluetoothService = bluetoothService;
     _identificationService = identificationService;
+    _metadataLookupService = metadataLookupService;
     _options = options;
     _playbackService = playbackService;
     SetDefaultMetadata("Bluetooth", "Bluetooth", "Bluetooth Device");
@@ -340,6 +344,33 @@ public class BluetoothAudioSource : USBAudioSourceBase
     if (NeedsFingerprintingLookup)
     {
       _identificationService?.RequestImmediateIdentification();
+    }
+    else if (string.IsNullOrEmpty(e.AlbumArtUrl) && _metadataLookupService != null)
+    {
+      // AVRCP rarely provides album art — look it up via MusicBrainz text search
+      var lookupKey = $"{e.Title}|{e.Artist}";
+      if (lookupKey != _lastCoverArtLookupKey)
+      {
+        _lastCoverArtLookupKey = lookupKey;
+        _ = LookupCoverArtAsync(e.Title, e.Artist, e.Album);
+      }
+    }
+  }
+
+  private async Task LookupCoverArtAsync(string title, string artist, string? album)
+  {
+    try
+    {
+      var coverArtUrl = await _metadataLookupService!.SearchCoverArtByTextAsync(
+        title, artist, album);
+      if (!string.IsNullOrEmpty(coverArtUrl))
+      {
+        MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = coverArtUrl;
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "Cover art lookup failed for '{Title}' by '{Artist}'", title, artist);
     }
   }
 
