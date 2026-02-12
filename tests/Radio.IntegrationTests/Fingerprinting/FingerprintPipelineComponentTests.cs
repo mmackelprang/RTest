@@ -36,6 +36,7 @@ public class FingerprintPipelineComponentTests : IAsyncLifetime
     "src", "Radio.API", "media", "audio", "music", "02 We're Ready.mp3");
 
   private string _fpcalcPath = null!;
+  private bool _fpcalcAvailable;
   private ChromaprintFingerprintService _fingerprintService = null!;
   private AcoustIdClient _acoustIdClient = null!;
 
@@ -46,11 +47,15 @@ public class FingerprintPipelineComponentTests : IAsyncLifetime
     Directory.CreateDirectory(_tempDirectory);
   }
 
+  private void RequireFpcalc() => Skip.IfNot(_fpcalcAvailable, $"fpcalc not found at: {_fpcalcPath}");
+
   public Task InitializeAsync()
   {
     _fpcalcPath = Path.Combine(SolutionRoot, "tools", "fpcalc",
       OperatingSystem.IsWindows() ? "fpcalc.exe" : "fpcalc");
-    Assert.True(File.Exists(_fpcalcPath), $"fpcalc not found at: {_fpcalcPath}");
+    _fpcalcAvailable = File.Exists(_fpcalcPath);
+    if (!_fpcalcAvailable)
+      return Task.CompletedTask;
 
     var fingerprintingOptions = new FingerprintingOptions
     {
@@ -219,9 +224,10 @@ public class FingerprintPipelineComponentTests : IAsyncLifetime
   /// If this fails, the float→s16le→WAV conversion in ChromaprintFingerprintService
   /// is producing different audio than the original WAV.
   /// </summary>
-  [Fact]
+  [SkippableFact]
   public async Task Stage2_WavGeneration_SameData_ProducesIdenticalFingerprint()
   {
+    RequireFpcalc();
     // Create a reference WAV file (chirp has rich spectral content for fingerprinting)
     var referenceWav = TestAudioFileGenerator.CreateChirpFile(
       _tempDirectory, "reference.wav", TimeSpan.FromSeconds(20));
@@ -272,9 +278,10 @@ public class FingerprintPipelineComponentTests : IAsyncLifetime
   /// Compares with direct WAV fingerprinting to verify the ring buffer roundtrip
   /// doesn't corrupt the fingerprint.
   /// </summary>
-  [Fact]
+  [SkippableFact]
   public async Task Stage3_Pipeline_ThroughTappedOutputStream_ProducesIdenticalFingerprint()
   {
+    RequireFpcalc();
     var referenceWav = TestAudioFileGenerator.CreateChirpFile(
       _tempDirectory, "pipeline_test.wav", TimeSpan.FromSeconds(20));
 
@@ -352,10 +359,11 @@ public class FingerprintPipelineComponentTests : IAsyncLifetime
   /// Tests whether a 15-second fingerprint from the start of the song matches AcoustID.
   /// If this fails, the capture duration is too short for reliable matching.
   /// </summary>
-  [Fact]
+  [SkippableFact]
   public async Task Stage4_ShortDuration_WereReady_MatchesAcoustId()
   {
-    Assert.True(File.Exists(WereReadyMp3), $"MP3 not found: {WereReadyMp3}");
+    RequireFpcalc();
+    Skip.IfNot(File.Exists(WereReadyMp3), $"Test MP3 not found: {WereReadyMp3}");
 
     // Full-length fingerprint (reference)
     var fullResult = await RunFpcalcDirectAsync($"-json \"{WereReadyMp3}\"");
@@ -395,10 +403,11 @@ public class FingerprintPipelineComponentTests : IAsyncLifetime
   /// Converts MP3→WAV via ffmpeg, then simulates: WAV→float→TappedOutputStream→readback→fingerprint→AcoustID.
   /// This is the closest we can get to testing the live pipeline without audio hardware.
   /// </summary>
-  [Fact]
+  [SkippableFact]
   public async Task Stage5_FullPipeline_WereReady_SimulatedCapture_MatchesAcoustId()
   {
-    Assert.True(File.Exists(WereReadyMp3), $"MP3 not found: {WereReadyMp3}");
+    RequireFpcalc();
+    Skip.IfNot(File.Exists(WereReadyMp3), $"Test MP3 not found: {WereReadyMp3}");
 
     // Step 1: Convert MP3 to 48kHz stereo WAV using ffmpeg
     var wavPath = Path.Combine(_tempDirectory, "were_ready_48k.wav");
@@ -549,13 +558,14 @@ public class FingerprintPipelineComponentTests : IAsyncLifetime
   /// on the source file, which gives fpcalc the correct track duration.
   /// This is what BackgroundIdentificationService now does for file-based sources.
   /// </summary>
-  [Fact]
+  [SkippableFact]
   [Trait("Category", "Integration")]
   public async Task Stage6_FileBasedFingerprint_WereReady_MatchesAcoustId()
   {
+    RequireFpcalc();
     if (!File.Exists(WereReadyMp3))
     {
-      _output.WriteLine($"SKIP: Test MP3 not found at {WereReadyMp3}");
+      Skip.If(true, $"Test MP3 not found at {WereReadyMp3}");
       return;
     }
 

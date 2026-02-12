@@ -34,6 +34,7 @@ public class FingerprintingPipelineTests : IAsyncLifetime
   private ChromaprintFingerprintService _fingerprintService = null!;
   private AcoustIdClient _acoustIdClient = null!;
   private MetadataLookupService _lookupService = null!;
+  private bool _fpcalcAvailable;
 
   public FingerprintingPipelineTests(ITestOutputHelper output)
   {
@@ -41,6 +42,8 @@ public class FingerprintingPipelineTests : IAsyncLifetime
     _tempDirectory = Path.Combine(Path.GetTempPath(), $"FingerprintPipelineTests_{Guid.NewGuid():N}");
     Directory.CreateDirectory(_tempDirectory);
   }
+
+  private void RequireFpcalc() => Skip.IfNot(_fpcalcAvailable, "fpcalc not found — skipping");
 
   public async Task InitializeAsync()
   {
@@ -64,7 +67,9 @@ public class FingerprintingPipelineTests : IAsyncLifetime
     // Configure with real AcoustID API key and MusicBrainz settings
     var fpcalcPath = Path.Combine(SolutionRoot, "tools", "fpcalc",
       OperatingSystem.IsWindows() ? "fpcalc.exe" : "fpcalc");
-    Assert.True(File.Exists(fpcalcPath), $"fpcalc not found at: {fpcalcPath}");
+    _fpcalcAvailable = File.Exists(fpcalcPath);
+    if (!_fpcalcAvailable)
+      return;
     _output.WriteLine($"Using fpcalc at: {fpcalcPath}");
 
     var options = new FingerprintingOptions
@@ -134,10 +139,11 @@ public class FingerprintingPipelineTests : IAsyncLifetime
     catch (IOException) { }
   }
 
-  [Fact]
+  [SkippableFact]
   public async Task GenerateFingerprint_WereReady_ProducesValidFingerprint()
   {
-    Assert.True(File.Exists(WereReadyMp3), $"MP3 file not found: {WereReadyMp3}");
+    RequireFpcalc();
+    Skip.IfNot(File.Exists(WereReadyMp3), $"Test MP3 not found: {WereReadyMp3}");
 
     // Generate fingerprint using fpcalc (same service as production pipeline)
     var fingerprint = await _fingerprintService.GenerateFingerprintFromFileAsync(WereReadyMp3);
@@ -152,10 +158,11 @@ public class FingerprintingPipelineTests : IAsyncLifetime
       $"Duration should be > 10s, got {fingerprint.DurationSeconds}s");
   }
 
-  [Fact]
+  [SkippableFact]
   public async Task LookupMetadata_WereReady_IdentifiesCorrectly()
   {
-    Assert.True(File.Exists(WereReadyMp3), $"MP3 file not found: {WereReadyMp3}");
+    RequireFpcalc();
+    Skip.IfNot(File.Exists(WereReadyMp3), $"Test MP3 not found: {WereReadyMp3}");
 
     // Step 1: Generate fingerprint from MP3 file (fpcalc handles decoding)
     var fingerprint = await _fingerprintService.GenerateFingerprintFromFileAsync(WereReadyMp3);
@@ -198,10 +205,11 @@ public class FingerprintingPipelineTests : IAsyncLifetime
       _output.WriteLine("Cover art URL not available (Cover Art Archive may be unavailable)");
   }
 
-  [Fact]
+  [SkippableFact]
   public async Task LookupMetadata_BabyItsColdOutside_IdentifiesCorrectly()
   {
-    Assert.True(File.Exists(BabyItsColdOutsideMp3), $"MP3 file not found: {BabyItsColdOutsideMp3}");
+    RequireFpcalc();
+    Skip.IfNot(File.Exists(BabyItsColdOutsideMp3), $"Test MP3 not found: {BabyItsColdOutsideMp3}");
 
     // Step 1: Generate fingerprint from MP3 file (fpcalc handles decoding)
     var fingerprint = await _fingerprintService.GenerateFingerprintFromFileAsync(BabyItsColdOutsideMp3);
