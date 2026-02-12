@@ -35,7 +35,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
         // Maps object path to device info
         private readonly Dictionary<ObjectPath, BluetoothDeviceInfo> _deviceCache = new();
-        private readonly HashSet<ObjectPath> _watchedDevicePaths = new();
+        private readonly SemaphoreSlim _captureDeviceLock = new(1, 1);
         private Linux.BluezAgent? _agent;
 
         public LinuxBluetoothService(
@@ -516,10 +516,6 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
         public async Task<object?> GetAudioCaptureDeviceAsync(CancellationToken cancellationToken = default)
         {
-            // Cleanup previous capture engine if any
-            _captureEngine?.Dispose();
-            _captureEngine = null;
-
             var connected = ConnectedDevice;
             if (connected == null)
             {
@@ -527,10 +523,35 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 return null;
             }
 
+            // Prevent concurrent calls — multiple DeviceConnected events fire simultaneously
+            // and MiniAudioEngine is not safe to instantiate concurrently.
+            if (!await _captureDeviceLock.WaitAsync(0, cancellationToken))
+            {
+                _logger.LogDebug("Capture device search already in progress, skipping duplicate call");
+                return null;
+            }
+
+            try
+            {
+                return await SearchForCaptureDeviceAsync(connected, cancellationToken);
+            }
+            finally
+            {
+                _captureDeviceLock.Release();
+            }
+        }
+
+        private async Task<object?> SearchForCaptureDeviceAsync(
+            BluetoothDeviceInfo connected, CancellationToken cancellationToken)
+        {
+            // Cleanup previous capture engine
+            _captureEngine?.Dispose();
+            _captureEngine = null;
+
             // PulseAudio/PipeWire takes time to create the Bluetooth capture device
-            // after A2DP connection is established. Poll with retries.
-            const int maxRetries = 15;
-            const int retryDelayMs = 500;
+            // after A2DP is authorized. Poll with retries.
+            const int maxRetries = 20;
+            const int retryDelayMs = 1000;
 
             for (var attempt = 1; attempt <= maxRetries; attempt++)
             {
@@ -545,63 +566,29 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
                 try
                 {
+                    // Create a fresh engine each attempt to re-enumerate devices.
+                    // PipeWire may add the bluez source between enumerations.
                     _captureEngine?.Dispose();
                     _captureEngine = new MiniAudioEngine();
                     var captureDevices = _captureEngine.CaptureDevices;
 
+                    _logger.LogDebug(
+                        "Capture device search attempt {Attempt}/{Max}: {Count} devices",
+                        attempt, maxRetries, captureDevices.Length);
+
                     if (attempt == 1)
                     {
-                        _logger.LogInformation(
-                            "Searching for Bluetooth audio capture device among {Count} capture devices (connected: {DeviceName})",
-                            captureDevices.Length, connected.Name);
-
-                        // Log all available capture devices for diagnostics
                         for (var i = 0; i < captureDevices.Length; i++)
                         {
-                            _logger.LogInformation("  Capture device [{Index}]: {Name}", i, captureDevices[i].Name ?? "(null)");
+                            _logger.LogInformation("  Capture device [{Index}]: {Name}",
+                                i, captureDevices[i].Name ?? "(null)");
                         }
                     }
 
                     // On Linux with PulseAudio/PipeWire, Bluetooth audio devices appear as:
                     //   "bluez_output.<mac_address>.monitor" or "bluez_sink.<mac_address>.monitor"
                     //   or by the connected device name
-                    DeviceInfo? targetDevice = null;
-
-                    // Strategy 1: Match by "bluez" prefix (PulseAudio/PipeWire Bluetooth source)
-                    foreach (var device in captureDevices)
-                    {
-                        if (device.Name != null && device.Name.Contains("bluez", StringComparison.OrdinalIgnoreCase))
-                        {
-                            targetDevice = device;
-                            break;
-                        }
-                    }
-
-                    // Strategy 2: Match by connected device name
-                    if (targetDevice == null)
-                    {
-                        foreach (var device in captureDevices)
-                        {
-                            if (device.Name != null && device.Name.Contains(connected.Name, StringComparison.OrdinalIgnoreCase))
-                            {
-                                targetDevice = device;
-                                break;
-                            }
-                        }
-                    }
-
-                    // Strategy 3: Match by "bluetooth" keyword
-                    if (targetDevice == null)
-                    {
-                        foreach (var device in captureDevices)
-                        {
-                            if (device.Name != null && device.Name.Contains("bluetooth", StringComparison.OrdinalIgnoreCase))
-                            {
-                                targetDevice = device;
-                                break;
-                            }
-                        }
-                    }
+                    var targetDevice = FindBluetoothCaptureDevice(captureDevices, connected.Name);
 
                     if (targetDevice != null)
                     {
@@ -611,18 +598,26 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
                         var captureDevice = _captureEngine.InitializeCaptureDevice(targetDevice, format);
                         _logger.LogInformation(
-                            "Created Bluetooth audio capture device: {DeviceName} (attempt {Attempt})",
-                            targetDevice.Value.Name, attempt);
+                            "Created Bluetooth audio capture device: {DeviceName} (attempt {Attempt}/{Max})",
+                            targetDevice.Value.Name, attempt, maxRetries);
                         return captureDevice;
                     }
 
+                    // Log new devices that appear on subsequent attempts
+                    if (attempt > 1 && captureDevices.Length > 1)
+                    {
+                        for (var i = 0; i < captureDevices.Length; i++)
+                        {
+                            _logger.LogDebug("  Capture device [{Index}]: {Name}",
+                                i, captureDevices[i].Name ?? "(null)");
+                        }
+                    }
+
+                    _captureEngine.Dispose();
+                    _captureEngine = null;
+
                     if (attempt < maxRetries)
                     {
-                        _logger.LogDebug(
-                            "Bluetooth capture device not yet available, retrying ({Attempt}/{Max})...",
-                            attempt, maxRetries);
-                        _captureEngine.Dispose();
-                        _captureEngine = null;
                         await Task.Delay(retryDelayMs, cancellationToken);
                     }
                 }
@@ -643,10 +638,34 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 }
             }
 
-            _logger.LogWarning("No Bluetooth audio capture device found after {MaxRetries} attempts", maxRetries);
+            _logger.LogWarning("No Bluetooth audio capture device found after {MaxRetries}s", maxRetries);
             _metricsCollector?.Increment("bluetooth.audio_capture_errors");
-            _captureEngine?.Dispose();
-            _captureEngine = null;
+            return null;
+        }
+
+        private static DeviceInfo? FindBluetoothCaptureDevice(DeviceInfo[] devices, string connectedName)
+        {
+            // Strategy 1: Match by "bluez" prefix (PipeWire Bluetooth source)
+            foreach (var device in devices)
+            {
+                if (device.Name != null && device.Name.Contains("bluez", StringComparison.OrdinalIgnoreCase))
+                    return device;
+            }
+
+            // Strategy 2: Match by connected device name
+            foreach (var device in devices)
+            {
+                if (device.Name != null && device.Name.Contains(connectedName, StringComparison.OrdinalIgnoreCase))
+                    return device;
+            }
+
+            // Strategy 3: Match by "bluetooth" keyword
+            foreach (var device in devices)
+            {
+                if (device.Name != null && device.Name.Contains("bluetooth", StringComparison.OrdinalIgnoreCase))
+                    return device;
+            }
+
             return null;
         }
 
