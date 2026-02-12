@@ -112,7 +112,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         {
             try
             {
-                _connection = Connection.System;
+                _connection = new Connection(Address.System);
                 await _connection.ConnectAsync();
                 
                 _objectManager = _connection.CreateProxy<Linux.IObjectManager>(Linux.BluezConstants.ServiceName, "/");
