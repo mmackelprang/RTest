@@ -29,22 +29,6 @@ public class CustomWebApplicationFactory<TProgram> : WebApplicationFactory<TProg
       {
         services.Remove(desc);
       }
-
-      // Additionally remove specific long-running services by type name if present.
-      // This is defensive: remove things like MetricsCollector, BufferedMetricsCollector,
-      // BackgroundIdentificationService, etc., which may have IHostedService registrations
-      // or other disposable resources that interact with SQLite during disposal.
-      var suspicious = services
-        .Where(d => d.ServiceType != null && d.ServiceType.FullName != null &&
-          (d.ServiceType.FullName.Contains("Metrics", System.StringComparison.OrdinalIgnoreCase)
-           || d.ServiceType.FullName.Contains("Identification", System.StringComparison.OrdinalIgnoreCase)
-           || d.ServiceType.FullName.Contains("Fingerprint", System.StringComparison.OrdinalIgnoreCase)))
-        .ToList();
-
-      foreach (var desc in suspicious)
-      {
-        services.Remove(desc);
-      }
     });
   }
 }

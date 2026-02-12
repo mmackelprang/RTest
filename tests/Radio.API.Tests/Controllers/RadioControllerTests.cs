@@ -1,6 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
-using Microsoft.AspNetCore.Mvc.Testing;
+using Radio.API.Tests.TestSupport;
 using Radio.API.Models;
 
 namespace Radio.API.Tests.Controllers;
@@ -8,12 +8,12 @@ namespace Radio.API.Tests.Controllers;
 /// <summary>
 /// Integration tests for the RadioController.
 /// </summary>
-public class RadioControllerTests : IClassFixture<WebApplicationFactory<Program>>, IAsyncLifetime
+public class RadioControllerTests : IClassFixture<CustomWebApplicationFactory<Program>>, IAsyncLifetime
 {
-  private readonly WebApplicationFactory<Program> _factory;
+  private readonly CustomWebApplicationFactory<Program> _factory;
   private readonly HttpClient _client;
 
-  public RadioControllerTests(WebApplicationFactory<Program> factory)
+  public RadioControllerTests(CustomWebApplicationFactory<Program> factory)
   {
     _factory = factory;
     _client = _factory.CreateClient();

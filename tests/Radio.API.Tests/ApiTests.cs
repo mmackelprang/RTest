@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc.Testing;
+using Radio.API.Tests.TestSupport;
 
 namespace Radio.API.Tests;
 
@@ -6,11 +6,11 @@ namespace Radio.API.Tests;
 /// Integration tests for Radio.API project.
 /// Tests the API startup and basic endpoint functionality.
 /// </summary>
-public class ApiTests : IClassFixture<WebApplicationFactory<Program>>
+public class ApiTests : IClassFixture<CustomWebApplicationFactory<Program>>
 {
-  private readonly WebApplicationFactory<Program> _factory;
+  private readonly CustomWebApplicationFactory<Program> _factory;
 
-  public ApiTests(WebApplicationFactory<Program> factory)
+  public ApiTests(CustomWebApplicationFactory<Program> factory)
   {
     _factory = factory;
   }
@@ -21,15 +21,12 @@ public class ApiTests : IClassFixture<WebApplicationFactory<Program>>
     // Arrange
     var client = _factory.CreateClient();
 
-    // Act - try to access the swagger endpoint (should redirect or be available in development)
-    // This verifies the application starts without exceptions
-    var response = await client.GetAsync("/swagger/index.html");
+    // Act - hit a known API endpoint to verify the application starts without exceptions
+    var response = await client.GetAsync("/api/audio");
 
-    // Assert - We expect either success (200) or redirect (3xx) depending on environment
-    // The main thing is that the app didn't crash on startup
-    Assert.True(
-      response.IsSuccessStatusCode || (int)response.StatusCode >= 300 && (int)response.StatusCode < 400,
-      $"Expected success or redirect, but got {response.StatusCode}");
+    // Assert - the main thing is that the app didn't crash on startup
+    Assert.True(response.IsSuccessStatusCode,
+      $"Expected success, but got {response.StatusCode}");
   }
 
   [Fact]

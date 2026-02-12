@@ -1,6 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
-using Microsoft.AspNetCore.Mvc.Testing;
+using Radio.API.Tests.TestSupport;
 using Radio.API.Models;
 
 namespace Radio.API.Tests.Controllers;
@@ -8,12 +8,12 @@ namespace Radio.API.Tests.Controllers;
 /// <summary>
 /// Integration tests for the PlayHistoryController.
 /// </summary>
-public class PlayHistoryControllerTests : IClassFixture<WebApplicationFactory<Program>>
+public class PlayHistoryControllerTests : IClassFixture<CustomWebApplicationFactory<Program>>
 {
-  private readonly WebApplicationFactory<Program> _factory;
+  private readonly CustomWebApplicationFactory<Program> _factory;
   private readonly HttpClient _client;
 
-  public PlayHistoryControllerTests(WebApplicationFactory<Program> factory)
+  public PlayHistoryControllerTests(CustomWebApplicationFactory<Program> factory)
   {
     _factory = factory;
     _client = _factory.CreateClient();

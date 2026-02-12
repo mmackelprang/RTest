@@ -1,6 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
-using Microsoft.AspNetCore.Mvc.Testing;
+using Radio.API.Tests.TestSupport;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Radio.API.Models;
@@ -13,14 +13,13 @@ namespace Radio.API.Tests.Controllers;
 /// <summary>
 /// Integration tests for FilesController.
 /// </summary>
-public class FilesControllerTests : IClassFixture<WebApplicationFactory<Program>>
+public class FilesControllerTests : IClassFixture<CustomWebApplicationFactory<Program>>
 {
-  private readonly WebApplicationFactory<Program> _factory;
   private readonly HttpClient _client;
 
-  public FilesControllerTests(WebApplicationFactory<Program> factory)
+  public FilesControllerTests(CustomWebApplicationFactory<Program> factory)
   {
-    _factory = factory.WithWebHostBuilder(builder =>
+    var customFactory = factory.WithWebHostBuilder(builder =>
     {
       builder.ConfigureServices(services =>
       {
@@ -45,7 +44,7 @@ public class FilesControllerTests : IClassFixture<WebApplicationFactory<Program>
       });
     });
 
-    _client = _factory.CreateClient();
+    _client = customFactory.CreateClient();
   }
 
   [Fact]

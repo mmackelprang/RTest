@@ -1,17 +1,17 @@
 using System.Net;
 using System.Net.Http.Json;
-using Microsoft.AspNetCore.Mvc.Testing;
+using Radio.API.Tests.TestSupport;
 
 namespace Radio.API.Tests.Controllers;
 
 /// <summary>
 /// Integration tests for the SecretsController.
 /// </summary>
-public class SecretsControllerTests : IClassFixture<WebApplicationFactory<Program>>
+public class SecretsControllerTests : IClassFixture<CustomWebApplicationFactory<Program>>
 {
   private readonly HttpClient _client;
 
-  public SecretsControllerTests(WebApplicationFactory<Program> factory)
+  public SecretsControllerTests(CustomWebApplicationFactory<Program> factory)
   {
     _client = factory.CreateClient();
   }

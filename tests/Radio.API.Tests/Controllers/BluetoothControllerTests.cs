@@ -1,18 +1,18 @@
 using System.Net;
 using System.Net.Http.Json;
-using Microsoft.AspNetCore.Mvc.Testing;
+using Radio.API.Tests.TestSupport;
 using Moq;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
 
 namespace Radio.API.Tests.Controllers;
 
-public class BluetoothControllerTests : IClassFixture<WebApplicationFactory<Program>>
+public class BluetoothControllerTests : IClassFixture<CustomWebApplicationFactory<Program>>
 {
-  private readonly WebApplicationFactory<Program> _factory;
+  private readonly CustomWebApplicationFactory<Program> _factory;
   private readonly HttpClient _client;
 
-  public BluetoothControllerTests(WebApplicationFactory<Program> factory)
+  public BluetoothControllerTests(CustomWebApplicationFactory<Program> factory)
   {
     _factory = factory;
     _client = _factory.CreateClient();
