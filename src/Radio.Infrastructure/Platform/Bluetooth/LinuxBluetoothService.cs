@@ -35,6 +35,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
         // Maps object path to device info
         private readonly Dictionary<ObjectPath, BluetoothDeviceInfo> _deviceCache = new();
+        private readonly HashSet<ObjectPath> _watchedDevicePaths = new();
         private readonly SemaphoreSlim _captureDeviceLock = new(1, 1);
         private Linux.BluezAgent? _agent;
 
