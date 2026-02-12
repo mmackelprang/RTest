@@ -33,6 +33,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private readonly string _rootDir;
   private readonly Dictionary<string, object> _metadata = new();
   private readonly HashSet<string> _errorFiles = new();
+  private readonly object _playlistLock = new();
   private Queue<string> _playlist = new();
   private List<string> _originalOrder = new(); // Store original order for shuffle toggle
   private List<string> _playedHistory = new(); // Track played songs for Previous
@@ -314,9 +315,12 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     }
 
     // Add current file to history before moving to next
-    if (_currentFile != null && !_playedHistory.Contains(_currentFile))
+    lock (_playlistLock)
     {
-      _playedHistory.Add(_currentFile);
+      if (_currentFile != null && !_playedHistory.Contains(_currentFile))
+      {
+        _playedHistory.Add(_currentFile);
+      }
     }
 
     // Track skip metric if this was user-initiated
@@ -326,7 +330,13 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     }
 
     // Check if playlist has more tracks
-    if (_playlist.Count > 0)
+    bool hasMoreTracks;
+    lock (_playlistLock)
+    {
+      hasMoreTracks = _playlist.Count > 0;
+    }
+
+    if (hasMoreTracks)
     {
       await LoadCurrentFileAsync(cancellationToken);
 
@@ -349,8 +359,11 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
         files = ShuffleList(files);
       }
 
-      _playlist = new Queue<string>(files);
-      _playedHistory.Clear();
+      lock (_playlistLock)
+      {
+        _playlist = new Queue<string>(files);
+        _playedHistory.Clear();
+      }
       await LoadCurrentFileAsync(cancellationToken);
 
       if (State == AudioSourceState.Playing)
@@ -383,21 +396,33 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     }
 
     // Go to previous track in history
-    if (_playedHistory.Count > 0)
+    string? previousFile;
+    lock (_playlistLock)
     {
-      var previousFile = _playedHistory[^1];
-      _playedHistory.RemoveAt(_playedHistory.Count - 1);
-
-      // Put current file back at front of playlist if it exists
-      if (_currentFile != null)
+      if (_playedHistory.Count > 0)
       {
-        var tempList = _playlist.ToList();
-        tempList.Insert(0, _currentFile);
-        _playlist = new Queue<string>(tempList);
-      }
+        previousFile = _playedHistory[^1];
+        _playedHistory.RemoveAt(_playedHistory.Count - 1);
 
-      // Load previous file
-      _currentFile = previousFile;
+        // Put current file back at front of playlist if it exists
+        if (_currentFile != null)
+        {
+          var tempList = _playlist.ToList();
+          tempList.Insert(0, _currentFile);
+          _playlist = new Queue<string>(tempList);
+        }
+
+        // Load previous file
+        _currentFile = previousFile;
+      }
+      else
+      {
+        previousFile = null;
+      }
+    }
+
+    if (previousFile != null)
+    {
       _position = TimeSpan.Zero;
       CleanupDataProvider();
 
@@ -405,19 +430,19 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       try
       {
         _audioEngine ??= new MiniAudioEngine();
-        _fileStream = File.OpenRead(_currentFile);
+        _fileStream = File.OpenRead(previousFile);
         _dataProvider = new ChunkedDataProvider(_audioEngine, _fileStream);
-        Logger.LogDebug("Loaded previous file with SoundFlow: {File}", _currentFile);
+        Logger.LogDebug("Loaded previous file with SoundFlow: {File}", previousFile);
       }
       catch (Exception ex)
       {
-        Logger.LogWarning(ex, "SoundFlow could not decode previous file: {File}", _currentFile);
+        Logger.LogWarning(ex, "SoundFlow could not decode previous file: {File}", previousFile);
         _fileStream?.Dispose();
         _fileStream = null;
         _dataProvider = null;
       }
 
-      UpdateMetadataFromFile(_currentFile);
+      UpdateMetadataFromFile(previousFile);
 
       if (State == AudioSourceState.Playing)
       {
@@ -435,7 +460,10 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
       // Go to last track in original order
       var lastFile = _originalOrder[^1];
-      _currentFile = lastFile;
+      lock (_playlistLock)
+      {
+        _currentFile = lastFile;
+      }
       _position = TimeSpan.Zero;
       CleanupDataProvider();
 
@@ -1324,13 +1352,16 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// </summary>
   private List<string> GetAllTracksInOrder()
   {
-    var allTracks = new List<string>();
-    if (_currentFile != null)
+    lock (_playlistLock)
     {
-      allTracks.Add(_currentFile);
+      var allTracks = new List<string>();
+      if (_currentFile != null)
+      {
+        allTracks.Add(_currentFile);
+      }
+      allTracks.AddRange(_playlist);
+      return allTracks;
     }
-    allTracks.AddRange(_playlist);
-    return allTracks;
   }
 
   /// <summary>
@@ -1338,13 +1369,16 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// </summary>
   private List<string> GetFullPlaylistInOrder()
   {
-    var fullList = new List<string>(_playedHistory);
-    if (_currentFile != null)
+    lock (_playlistLock)
     {
-      fullList.Add(_currentFile);
+      var fullList = new List<string>(_playedHistory);
+      if (_currentFile != null)
+      {
+        fullList.Add(_currentFile);
+      }
+      fullList.AddRange(_playlist);
+      return fullList;
     }
-    fullList.AddRange(_playlist);
-    return fullList;
   }
 
   /// <summary>
@@ -1352,29 +1386,43 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// </summary>
   private List<QueueItem> GetFullPlaylistInternal()
   {
+    // Snapshot collections under lock to avoid concurrent modification from skip/next
+    string[] playedSnapshot;
+    string? currentSnapshot;
+    string[] playlistSnapshot;
+    HashSet<string> errorSnapshot;
+
+    lock (_playlistLock)
+    {
+      playedSnapshot = _playedHistory.ToArray();
+      currentSnapshot = _currentFile;
+      playlistSnapshot = _playlist.ToArray();
+      errorSnapshot = new HashSet<string>(_errorFiles);
+    }
+
     var items = new List<QueueItem>();
     var fullPlaylistIndex = 0;
 
     // Played items
-    foreach (var file in _playedHistory)
+    foreach (var file in playedSnapshot)
     {
-      var state = _errorFiles.Contains(file) ? QueueItemState.Error : QueueItemState.Played;
+      var state = errorSnapshot.Contains(file) ? QueueItemState.Error : QueueItemState.Played;
       items.Add(CreateQueueItemWithState(file, fullPlaylistIndex, state));
       fullPlaylistIndex++;
     }
 
     // Current item
-    if (_currentFile != null)
+    if (currentSnapshot != null)
     {
-      var state = _errorFiles.Contains(_currentFile) ? QueueItemState.Error : QueueItemState.Current;
-      items.Add(CreateQueueItemWithState(_currentFile, fullPlaylistIndex, state));
+      var state = errorSnapshot.Contains(currentSnapshot) ? QueueItemState.Error : QueueItemState.Current;
+      items.Add(CreateQueueItemWithState(currentSnapshot, fullPlaylistIndex, state));
       fullPlaylistIndex++;
     }
 
     // Upcoming items
-    foreach (var file in _playlist)
+    foreach (var file in playlistSnapshot)
     {
-      var state = _errorFiles.Contains(file) ? QueueItemState.Error : QueueItemState.Upcoming;
+      var state = errorSnapshot.Contains(file) ? QueueItemState.Error : QueueItemState.Upcoming;
       items.Add(CreateQueueItemWithState(file, fullPlaylistIndex, state));
       fullPlaylistIndex++;
     }
@@ -1671,22 +1719,30 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
   private async Task LoadCurrentFileAsync(CancellationToken cancellationToken)
   {
-    if (_playlist.Count == 0)
+    string? fileToLoad;
+    lock (_playlistLock)
     {
-      _currentFile = null;
-      _currentIndex = -1;
+      if (_playlist.Count == 0)
+      {
+        _currentFile = null;
+        _currentIndex = -1;
+        fileToLoad = null;
+      }
+      else
+      {
+        _currentFile = _playlist.Dequeue();
+        _currentIndex = 0;
+        fileToLoad = _currentFile;
+      }
+    }
+
+    if (fileToLoad == null)
+    {
       OnPlaybackCompleted(PlaybackCompletionReason.EndOfContent);
       return;
     }
 
-    _currentFile = _playlist.Dequeue();
     _position = TimeSpan.Zero;
-
-    // Update current index - it should be 0 since we're loading the front of the queue
-    // But we need to account for the overall position in the original order
-    var allTracks = new List<string> { _currentFile };
-    allTracks.AddRange(_playlist);
-    _currentIndex = 0;
 
     // Clean up previous data provider
     CleanupDataProvider();
@@ -1698,26 +1754,26 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
       // Create a data provider from the file using SoundFlow
       // Note: We keep the FileStream open (stored as field) because ChunkedDataProvider needs it
-      _fileStream = File.OpenRead(_currentFile);
+      _fileStream = File.OpenRead(fileToLoad);
       _dataProvider = new ChunkedDataProvider(_audioEngine, _fileStream);
 
-      Logger.LogDebug("Loaded file with SoundFlow: {File}", _currentFile);
+      Logger.LogDebug("Loaded file with SoundFlow: {File}", fileToLoad);
     }
     catch (Exception ex)
     {
       // SoundFlow couldn't decode the file - this could happen with unsupported formats
       // or during testing with dummy files. Log and continue without a data provider.
-      Logger.LogWarning(ex, "SoundFlow could not decode file: {File}. Using basic file info only.", _currentFile);
-      _errorFiles.Add(_currentFile);
+      Logger.LogWarning(ex, "SoundFlow could not decode file: {File}. Using basic file info only.", fileToLoad);
+      lock (_playlistLock) { _errorFiles.Add(fileToLoad); }
       _fileStream?.Dispose();
       _fileStream = null;
       _dataProvider = null;
     }
 
     // Read metadata from the file (this uses SoundMetadataReader which is separate from decoding)
-    UpdateMetadataFromFile(_currentFile);
+    UpdateMetadataFromFile(fileToLoad);
 
-    Logger.LogDebug("Loaded file: {File}", _currentFile);
+    Logger.LogDebug("Loaded file: {File}", fileToLoad);
 
     if (State == AudioSourceState.Created)
     {
@@ -1729,7 +1785,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     {
       ChangeType = QueueChangeType.CurrentChanged,
       AffectedIndex = _currentIndex,
-      AffectedItem = CreateQueueItem(_currentFile, _currentIndex, true)
+      AffectedItem = CreateQueueItem(fileToLoad, _currentIndex, true)
     });
 
     await Task.CompletedTask;

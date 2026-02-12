@@ -130,7 +130,7 @@ public class WasapiLoopbackTests : IAsyncDisposable
   }
 
   [Fact]
-  public async Task InitializeAsync_WhenNullCaptureDevice_SetsErrorState()
+  public async Task InitializeAsync_WhenNullCaptureDevice_SetsReadyState()
   {
     var btMock = new Mock<IBluetoothService>();
     btMock.Setup(b => b.IsAudioManagedByPlatform).Returns(false);
@@ -149,8 +149,8 @@ public class WasapiLoopbackTests : IAsyncDisposable
 
     await source.InitializeAsync(CancellationToken.None);
 
-    Assert.Equal(AudioSourceState.Error, source.State);
-    _metricsMock.Verify(m => m.Increment("bluetooth.audio_capture_errors", 1.0, null), Times.Once);
+    // Now goes to Ready (waiting for device) instead of Error
+    Assert.Equal(AudioSourceState.Ready, source.State);
 
     await source.DisposeAsync();
   }
