@@ -380,15 +380,22 @@ public class TTSFactory : ITTSFactory, IDisposable
     // Voice format is typically like "en-US-Standard-A"
     var languageCode = voice.Contains('-') ? string.Join("-", voice.Split('-').Take(2)) : "en-US";
 
-    var requestBody = new
+    // Newer voice types (Journey, Studio, Casual, Chirp3, etc.) require a modelName
+    var modelName = GetGoogleModelName(voice);
+
+    var voiceParams = new Dictionary<string, object>
     {
-      input = new { text },
-      voice = new
-      {
-        languageCode,
-        name = voice
-      },
-      audioConfig = new
+      ["languageCode"] = languageCode,
+      ["name"] = voice
+    };
+    if (modelName != null)
+      voiceParams["modelName"] = modelName;
+
+    var requestBody = new Dictionary<string, object>
+    {
+      ["input"] = new { text },
+      ["voice"] = voiceParams,
+      ["audioConfig"] = new
       {
         audioEncoding = "LINEAR16",
         speakingRate = speed,
@@ -652,6 +659,35 @@ public class TTSFactory : ITTSFactory, IDisposable
       };
     }
     return "Standard";
+  }
+
+  /// <summary>
+  /// Returns the model name required by newer Google TTS voices, or null if not needed.
+  /// Voices like Journey, Studio, Casual, and Chirp3 require a modelName in the API request.
+  /// Standard, WaveNet, and Neural2 voices do not.
+  /// </summary>
+  private static string? GetGoogleModelName(string voiceName)
+  {
+    var parts = voiceName.Split('-');
+    if (parts.Length < 3) return null;
+
+    // The voice type is the 3rd segment: en-US-{Type}-{Variant}
+    var voiceType = parts[2];
+    return voiceType switch
+    {
+      // Classic voices — no model name required
+      "Standard" or "WaveNet" or "Wavenet" or "Neural2" => null,
+
+      // Newer voices — require modelName in the API request
+      "Journey" => "journey",
+      "Studio" => "studio",
+      "Casual" => "casual",
+      "Polyglot" => "polyglot",
+      "News" => "news",
+      "Chirp3" => "chirp3",
+
+      _ => null
+    };
   }
 
   /// <summary>
