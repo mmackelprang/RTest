@@ -1,6 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
-using Microsoft.AspNetCore.Mvc.Testing;
+using Radio.API.Tests.TestSupport;
 using Radio.API.Models;
 
 namespace Radio.API.Tests.Controllers;
@@ -8,12 +8,12 @@ namespace Radio.API.Tests.Controllers;
 /// <summary>
 /// Integration tests for the QueueController.
 /// </summary>
-public class QueueControllerTests : IClassFixture<WebApplicationFactory<Program>>
+public class QueueControllerTests : IClassFixture<CustomWebApplicationFactory<Program>>
 {
-  private readonly WebApplicationFactory<Program> _factory;
+  private readonly CustomWebApplicationFactory<Program> _factory;
   private readonly HttpClient _client;
 
-  public QueueControllerTests(WebApplicationFactory<Program> factory)
+  public QueueControllerTests(CustomWebApplicationFactory<Program> factory)
   {
     _factory = factory;
     _client = _factory.CreateClient();
