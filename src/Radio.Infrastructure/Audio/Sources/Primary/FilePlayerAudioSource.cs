@@ -29,6 +29,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private readonly BackgroundIdentificationService? _identificationService;
   private readonly SoundFlowPlaybackService? _playbackService;
   private readonly IConfigurationManager? _configurationManager;
+  private readonly AlbumArtCacheService? _albumArtCache;
   private readonly string _rootDir;
   private readonly Dictionary<string, object> _metadata = new();
   private readonly HashSet<string> _errorFiles = new();
@@ -58,6 +59,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <param name="metricsCollector">Optional metrics collector for tracking playback metrics.</param>
   /// <param name="playbackService">Optional SoundFlow playback service for audio output.</param>
   /// <param name="configurationManager">Optional configuration manager for queue persistence.</param>
+  /// <param name="albumArtCache">Optional album art cache for extracting embedded cover art.</param>
   public FilePlayerAudioSource(
     ILogger<FilePlayerAudioSource> logger,
     IOptionsMonitor<FilePlayerOptions> options,
@@ -66,7 +68,8 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     BackgroundIdentificationService? identificationService = null,
     IMetricsCollector? metricsCollector = null,
     SoundFlowPlaybackService? playbackService = null,
-    IConfigurationManager? configurationManager = null)
+    IConfigurationManager? configurationManager = null,
+    AlbumArtCacheService? albumArtCache = null)
     : base(logger, metricsCollector)
   {
     _options = options;
@@ -75,6 +78,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     _identificationService = identificationService;
     _playbackService = playbackService;
     _configurationManager = configurationManager;
+    _albumArtCache = albumArtCache;
 
     // Subscribe to track identification events if service is available
     if (_identificationService != null)
@@ -1774,6 +1778,9 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
         _metadata["Channels"] = formatInfo.ChannelCount;
         _metadata["BitRate"] = formatInfo.Bitrate;
 
+        // Extract embedded album art via TagLib (SoundFlow doesn't read pictures)
+        ExtractEmbeddedAlbumArt(filePath);
+
         // Get tags (Title, Artist, Album, etc.) - override defaults if available
         if (formatInfo.Tags != null)
         {
@@ -1847,6 +1854,43 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   }
 
   /// <summary>
+  /// Extracts embedded album art from audio file metadata using TagLib.
+  /// Saves to the album art cache and sets AlbumArtUrl if found.
+  /// </summary>
+  private void ExtractEmbeddedAlbumArt(string filePath)
+  {
+    if (_albumArtCache == null)
+      return;
+
+    try
+    {
+      using var tagFile = TagLib.File.Create(filePath);
+      var pictures = tagFile.Tag.Pictures;
+      if (pictures == null || pictures.Length == 0)
+        return;
+
+      // Prefer FrontCover, fall back to first picture
+      var picture = pictures.FirstOrDefault(p => p.Type == TagLib.PictureType.FrontCover)
+                    ?? pictures[0];
+
+      var data = picture.Data?.Data;
+      if (data == null || data.Length == 0)
+        return;
+
+      var mime = !string.IsNullOrEmpty(picture.MimeType) ? picture.MimeType : "image/jpeg";
+      var cachedUrl = _albumArtCache.Save(data, mime);
+      _metadata[StandardMetadataKeys.AlbumArtUrl] = cachedUrl;
+
+      Logger.LogDebug("Extracted embedded album art from {File}: {Url} ({Bytes} bytes)",
+        Path.GetFileName(filePath), cachedUrl, data.Length);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "Failed to extract embedded album art from {File}", filePath);
+    }
+  }
+
+  /// <summary>
   /// Handles the TrackIdentified event from the fingerprinting service.
   /// Updates metadata with identified track information when file tags are incomplete.
   /// </summary>
@@ -1860,9 +1904,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
     var track = e.Track;
 
-    // Always update album art from fingerprinting if still using default.
-    // SoundFlow's metadata reader doesn't extract embedded album art, so this
-    // is the only path for file sources to get cover art (via Cover Art Archive).
+    // Update album art from fingerprinting if still using default (no embedded art found).
     if (_metadata.ContainsKey(StandardMetadataKeys.AlbumArtUrl) &&
         _metadata[StandardMetadataKeys.AlbumArtUrl].Equals(StandardMetadataKeys.DefaultAlbumArtUrl) &&
         !string.IsNullOrEmpty(track.CoverArtUrl))

@@ -42,6 +42,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   private readonly Configuration.Abstractions.IConfigurationManager? _configurationManager;
   private readonly SoundFlow.SoundFlowPlaybackService? _playbackService;
   private readonly IServiceScopeFactory? _serviceScopeFactory;
+  private readonly AlbumArtCacheService? _albumArtCache;
 
   // Play history tracking
   private string? _currentPlayHistoryEntryId;
@@ -80,7 +81,8 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     IMetricsCollector? metricsCollector = null,
     Configuration.Abstractions.IConfigurationManager? configurationManager = null,
     SoundFlow.SoundFlowPlaybackService? playbackService = null,
-    IServiceScopeFactory? serviceScopeFactory = null)
+    IServiceScopeFactory? serviceScopeFactory = null,
+    AlbumArtCacheService? albumArtCache = null)
   {
     _logger = logger;
     _loggerFactory = loggerFactory;
@@ -100,6 +102,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     _configurationManager = configurationManager;
     _playbackService = playbackService;
     _serviceScopeFactory = serviceScopeFactory;
+    _albumArtCache = albumArtCache;
 
     _bluetoothService.DeviceConnected += OnBluetoothDeviceConnected;
 
@@ -610,7 +613,8 @@ public class AudioManager : IAudioManager, IAsyncDisposable
       _identificationService,
       _metricsCollector,
       _playbackService,
-      _configurationManager);
+      _configurationManager,
+      _albumArtCache);
   }
 
   /// <summary>

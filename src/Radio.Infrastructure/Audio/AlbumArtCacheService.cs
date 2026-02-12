@@ -70,6 +70,39 @@ public sealed class AlbumArtCacheService : IDisposable
   }
 
   /// <summary>
+  /// Saves image bytes to the cache synchronously. Returns the relative URL path (/api/albumart/{hash}.{ext}).
+  /// Content-addressed: identical images produce the same filename (dedup).
+  /// </summary>
+  public string Save(byte[] imageData, string mimeType)
+  {
+    var ext = GetExtensionFromMime(mimeType);
+    var hash = ComputeHash(imageData);
+    var filename = $"{hash}.{ext}";
+    var filePath = Path.Combine(_cacheDir, filename);
+
+    _writeLock.Wait();
+    try
+    {
+      if (File.Exists(filePath))
+      {
+        File.SetLastWriteTimeUtc(filePath, DateTime.UtcNow);
+        _logger.LogDebug("Album art cache hit (refreshed TTL): {Filename}", filename);
+      }
+      else
+      {
+        File.WriteAllBytes(filePath, imageData);
+        _logger.LogDebug("Album art cached: {Filename} ({Bytes} bytes)", filename, imageData.Length);
+      }
+    }
+    finally
+    {
+      _writeLock.Release();
+    }
+
+    return $"/api/albumart/{filename}";
+  }
+
+  /// <summary>
   /// Downloads an image from a URL and caches it. Returns the relative URL path or null on failure.
   /// </summary>
   public async Task<string?> SaveFromUrlAsync(string url)
