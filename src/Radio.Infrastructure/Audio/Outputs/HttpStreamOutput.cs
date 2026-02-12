@@ -454,6 +454,11 @@ public class HttpStreamOutput : AudioOutputBase
             // Client disconnected
             break;
           }
+          catch (InvalidOperationException)
+          {
+            // Output stream closed or encoder disposed — Cast client disconnected mid-encode
+            break;
+          }
         }
       }
       finally
