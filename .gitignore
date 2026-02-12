@@ -10,6 +10,9 @@
 *.db
 !src/**/Data/
 
+# Runtime data generated under src projects (albumart, fingerprints, secrets, config DBs)
+src/**/data/
+
 # NuGet
 *.nupkg
 **/[Pp]ackages/*

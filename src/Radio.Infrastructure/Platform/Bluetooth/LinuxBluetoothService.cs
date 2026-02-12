@@ -655,21 +655,31 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
         private static DeviceInfo? FindBluetoothCaptureDevice(DeviceInfo[] devices, string connectedName)
         {
-            // Strategy 1: Match by "bluez" prefix (PipeWire Bluetooth source)
+            // Strategy 1: Match the bt_capture null sink monitor.
+            // PipeWire config creates a virtual null sink called "bt_capture" and
+            // WirePlumber routes bluez_input streams to it. The monitor source
+            // (bt_capture.monitor) appears as a capture device in PulseAudio/MiniAudio.
+            foreach (var device in devices)
+            {
+                if (device.Name != null && device.Name.Contains("bt_capture", StringComparison.OrdinalIgnoreCase))
+                    return device;
+            }
+
+            // Strategy 2: Match by "bluez" prefix (direct PipeWire Bluetooth source)
             foreach (var device in devices)
             {
                 if (device.Name != null && device.Name.Contains("bluez", StringComparison.OrdinalIgnoreCase))
                     return device;
             }
 
-            // Strategy 2: Match by connected device name
+            // Strategy 3: Match by connected device name
             foreach (var device in devices)
             {
                 if (device.Name != null && device.Name.Contains(connectedName, StringComparison.OrdinalIgnoreCase))
                     return device;
             }
 
-            // Strategy 3: Match by "bluetooth" keyword
+            // Strategy 4: Match by "bluetooth" keyword
             foreach (var device in devices)
             {
                 if (device.Name != null && device.Name.Contains("bluetooth", StringComparison.OrdinalIgnoreCase))

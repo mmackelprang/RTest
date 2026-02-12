@@ -1,58 +1,93 @@
 # Radio Console Deployment Guide
 
+## Overview
+
+**Grandpa Anderson's Console Radio Remade** — a modern audio command center for Raspberry Pi
+that restores vintage console radio functionality with Bluetooth A2DP audio reception,
+internet radio (RTL-SDR), Spotify, Google Cast, audio fingerprinting, and a Blazor Server UI.
+
+**Target platform:** Raspberry Pi 5 (ARM64, Raspberry Pi OS Bookworm 64-bit)
+**Stack:** .NET 8, ASP.NET Core, Blazor Server, SoundFlow (MiniAudio), PipeWire, BlueZ 5
+
 ## Prerequisites
 
 ### Hardware
-- **Raspberry Pi 5** (ARM64) with 4GB+ RAM, or any **Debian/Ubuntu x64** machine
-- Audio output: USB DAC, HDMI, or 3.5mm jack
-- Optional: USB Bluetooth adapter (for A2DP sink), USB RTL-SDR dongle (for radio)
-- Network connection (for Google Cast discovery, TTS, fingerprinting)
+
+| Component | Required? | Purpose |
+|---|---|---|
+| Raspberry Pi 5 (4GB+) | Yes | Application host |
+| Audio output (3.5mm, USB DAC, or HDMI) | Yes | Audio playback |
+| Network connection (Ethernet or WiFi) | Yes | Google Cast discovery, API access, fingerprinting |
+| USB RTL-SDR dongle | Optional | FM/AM radio reception via SDR |
+| USB Bluetooth adapter | Optional | Only if built-in BT is insufficient |
+| 12.5" x 3.75" touchscreen (1920x576) | Optional | Designed display; any browser works too |
 
 ### Software
-- Raspberry Pi OS Bookworm (64-bit) or Debian 12 / Ubuntu 22.04+
-- Root/sudo access for initial setup
 
-### Display (for touchscreen UI)
-- 12.5" x 3.75" touchscreen at 1920x576 resolution (designed for this specific display)
-- Or any browser at http://host:5000 for remote access
+- Raspberry Pi OS **Bookworm** (64-bit) — other Debian 12+ distros should work
+- Root/sudo access for initial setup
+- Internet access during setup (for package installation)
+
+## Architecture: Audio Pipeline
+
+```
+Phone (A2DP) ──► BlueZ ──► PipeWire bluez_input
+                                    │
+                    ┌───────────────┘
+                    ▼
+              bt_capture          (PipeWire null sink)
+                    │
+              bt_capture.monitor  (PulseAudio capture source)
+                    │
+              MiniAudio capture   (SoundFlow AudioCaptureDevice)
+                    │
+              SoundFlow Mixer ──► Visualization (FFT/Levels)
+                    │             Fingerprinting (fpcalc → AcoustID)
+                    │             Volume/Balance control
+                    ▼
+              ALSA output         (headphones / USB DAC)
+              HTTP stream         (for Google Cast)
+```
+
+Other audio sources (Radio/SDR, Spotify, File Player, TTS) feed directly into the
+SoundFlow mixer without the null sink intermediary.
 
 ## Quick Start
 
-### 1. Build on Development Machine
+### 1. Run Setup on the Pi
 
 ```bash
-# From the repository root
-cd deploy/common
+# Clone the repository (or copy the deploy directory)
+git clone https://github.com/youruser/RTest.git ~/RTest
+cd ~/RTest
 
-# Build for Raspberry Pi
-./publish.sh arm64
-
-# Or build for Debian x64
-./publish.sh x64
-
-# Or build for both
-./publish.sh all
+# Run the setup script
+sudo deploy/raspberry-pi/setup.sh
 ```
 
-Output goes to `publish/linux-arm64/` or `publish/linux-x64/`.
+The setup script installs all system dependencies, creates the application user,
+configures PipeWire/WirePlumber for Bluetooth A2DP sink, and installs the systemd service.
 
-### 2. Run Setup on Target
+### 2. Build and Deploy from Windows
+
+```powershell
+# One-command build and deploy from your Windows dev machine
+.\deploy\Deploy-ToPi.ps1 -PiHost piradio -PiUser mmack
+
+# Or with log tailing
+.\deploy\Deploy-ToPi.ps1 -PiHost piradio -PiUser mmack -Logs
+```
+
+Or build manually:
 
 ```bash
-# Copy setup script and published files to the target
-scp -r deploy/raspberry-pi/setup.sh pi@piradio:~/
-scp -r publish/linux-arm64/* pi@piradio:/tmp/radio-console/
+# From the repository root (on dev machine)
+cd deploy/common
+./publish.sh arm64
 
-# SSH into the target
-ssh pi@piradio
-
-# Run setup
-sudo ~/setup.sh
-
-# Copy application files
-sudo cp -r /tmp/radio-console/* /opt/radio-console/
-sudo chown -R radio:radio /opt/radio-console
-sudo chmod +x /opt/radio-console/Radio.API
+# Copy to Pi
+rsync -avz --exclude='data' --exclude='logs' publish/linux-arm64/ mmack@piradio:/opt/radio-console/
+ssh mmack@piradio "sudo chown -R radio:radio /opt/radio-console && sudo chmod +x /opt/radio-console/Radio.API"
 ```
 
 ### 3. Start the Service
@@ -66,55 +101,298 @@ sudo systemctl status radio-console
 
 Open a browser to `http://piradio:5000`
 
+## System Dependencies
+
+The `setup.sh` script installs these automatically. Listed here for reference and
+manual setup.
+
+### Core Audio
+
+| Package | Purpose |
+|---|---|
+| `pipewire` | Audio server (replaces PulseAudio) |
+| `pipewire-pulse` | PulseAudio compatibility layer |
+| `wireplumber` | PipeWire session/policy manager |
+| `libspa-0.2-bluetooth` | PipeWire Bluetooth codec plugins (SBC, LDAC, aptX, opus) |
+| `libasound2-dev` | ALSA audio library (SoundFlow/MiniAudio dependency) |
+| `libmp3lame-dev` | LAME MP3 encoder (HTTP streaming to Google Cast) |
+
+### Bluetooth
+
+| Package | Purpose |
+|---|---|
+| `bluez` | BlueZ Bluetooth stack (v5.82+) |
+
+PipeWire+WirePlumber handle the Bluetooth audio profile integration through
+`libspa-0.2-bluetooth`. No separate `pulseaudio-module-bluetooth` is needed.
+
+### RTL-SDR Radio (optional)
+
+| Package | Purpose |
+|---|---|
+| `librtlsdr-dev` | RTL-SDR native library (P/Invoke target for `RtlSdrDevice.cs`) |
+| `rtl-sdr` | CLI tools (`rtl_test`, `rtl_fm`) for diagnostics |
+
+The DVB kernel driver conflicts with the RTL-SDR userspace driver. The setup script
+blacklists it:
+
+```bash
+echo "blacklist dvb_usb_rtl28xxu" | sudo tee /etc/modprobe.d/blacklist-rtl.conf
+sudo modprobe -r dvb_usb_rtl28xxu
+```
+
+### Audio Fingerprinting
+
+| Package | Purpose |
+|---|---|
+| `libchromaprint-tools` | `fpcalc` binary for Chromaprint audio fingerprinting |
+
+The app shells out to `fpcalc` to generate audio fingerprints, then queries the
+AcoustID API to identify tracks. Path configured in `appsettings.json`:
+
+```json
+{
+  "Fingerprinting": {
+    "FpcalcPath": "/usr/bin/fpcalc"
+  }
+}
+```
+
+An AcoustID API key is required. Register at https://acoustid.org/new-application
+and set the key via the System Config page or API:
+
+```bash
+curl -X POST http://piradio:5000/api/configuration/secrets \
+  -H "Content-Type: application/json" \
+  -d '{"key": "Fingerprinting:AcoustId:ApiKey", "value": "your-api-key"}'
+```
+
+### Network Discovery
+
+| Package | Purpose |
+|---|---|
+| `avahi-daemon` | mDNS/DNS-SD for Google Cast device discovery |
+| `avahi-utils` | `avahi-browse` CLI for diagnostics |
+
+### .NET Runtime
+
+| Package | Purpose |
+|---|---|
+| `aspnetcore-runtime-8.0` | ASP.NET Core runtime (if not using self-contained publish) |
+
+Self-contained publishes bundle the runtime, so this is only needed for
+framework-dependent deployments (`Deploy-ToPi.ps1 -Quick`).
+
+## Bluetooth A2DP Sink Configuration
+
+The Pi needs three config files to act as a Bluetooth audio receiver. The setup
+script installs these automatically; this section explains what they do.
+
+### 1. WirePlumber: Enable A2DP Sink Role + Disable Seat Monitoring
+
+**File:** `~/.config/wireplumber/wireplumber.conf.d/50-bluez-a2dp-sink.conf`
+
+```
+wireplumber.profiles = {
+    main = {
+        monitor.bluez.seat-monitoring = disabled
+    }
+}
+
+monitor.bluez.properties = {
+    bluez5.roles = [ a2dp_sink, a2dp_source ]
+    bluez5.enable-sbc-xq = true
+    bluez5.hfphsp-backend = "native"
+}
+```
+
+This config does two things:
+
+1. **Disables seat monitoring.** WirePlumber's `bluez.lua` monitor has a logind-based
+   seat monitoring feature that only creates the BlueZ monitor when the seat state is
+   "active". On Raspberry Pi OS, LightDM crash-cycles cause logind to report "online"
+   (not "active"), which prevents the BlueZ monitor from initializing — no Audio Sink
+   UUID, no A2DP, no Bluetooth audio. Disabling seat monitoring ensures the BlueZ
+   monitor starts unconditionally regardless of seat/display manager state.
+
+2. **Registers A2DP sink + source roles.** Tells WirePlumber's BlueZ SPA plugin to
+   register both **sink** (receive audio from phones) and **source** (send audio to
+   speakers) A2DP roles. Without this, the Pi only acts as a source and phones can't
+   stream audio to it.
+
+After applying, verify with `bluetoothctl show` — you should see:
+```
+UUID: Audio Sink    (0000110b-...)
+UUID: Audio Source  (0000110a-...)
+```
+
+### 2. PipeWire: Virtual Null Sink for BT Capture
+
+**File:** `~/.config/pipewire/pipewire.conf.d/bt-capture-sink.conf`
+
+```
+context.objects = [
+    {
+        factory = adapter
+        args = {
+            factory.name    = support.null-audio-sink
+            node.name       = "bt_capture"
+            node.description = "Bluetooth Audio Capture"
+            media.class     = Audio/Sink
+            object.linger   = true
+            audio.position  = [ FL FR ]
+            audio.rate      = 48000
+            monitor.channel-volumes = true
+            monitor.passthrough     = true
+            priority.session = 0
+            priority.driver  = 0
+            node.passive     = true
+        }
+    }
+]
+```
+
+Creates a persistent virtual audio sink called `bt_capture`. Its monitor source
+(`bt_capture.monitor`) appears as a PulseAudio capture device that MiniAudio/SoundFlow
+can read from.
+
+**Why a null sink?** When a phone streams A2DP audio to the Pi, PipeWire creates a
+`bluez_input` stream and routes it directly to the default audio output. This bypasses
+our application entirely — no visualization, no fingerprinting, no volume control.
+The null sink intercepts BT audio so it flows through our app's pipeline instead.
+
+### 3. WirePlumber: Route BT Input to Null Sink
+
+**File:** `~/.config/wireplumber/wireplumber.conf.d/51-bt-capture-routing.conf`
+
+```
+monitor.bluez.rules = [
+    {
+        matches = [
+            {
+                node.name = "~bluez_input.*"
+            }
+        ]
+        actions = {
+            update-props = {
+                node.target = "bt_capture"
+            }
+        }
+    }
+]
+```
+
+Routes all `bluez_input.*` streams (A2DP audio from connected phones) to the
+`bt_capture` null sink instead of the default hardware output. The application
+captures from `bt_capture.monitor`, processes through SoundFlow, and outputs to
+the real hardware sink.
+
+**Important:** The WirePlumber property is `node.target` (not `target.node`). The
+`find-defined-target` linking policy checks `node.target` in node properties for
+string-based node name matching. Using the wrong property silently fails.
+
+### 4. WirePlumber Seat Monitoring (Background)
+
+WirePlumber's BlueZ monitor (`bluez.lua`) has a logind-based seat monitoring
+feature. When enabled, it only creates the BlueZ audio monitor when the desktop
+session's seat state is "active". On Raspberry Pi OS with LightDM, logind D-Bus
+activation timeouts cause LightDM to crash-cycle, which makes the seat state
+oscillate between "online" and "active". This causes WirePlumber to repeatedly
+destroy and recreate the BlueZ monitor, resulting in A2DP endpoint cycling and
+Bluetooth connections dropping every ~50 seconds.
+
+The fix is `monitor.bluez.seat-monitoring = disabled` in the WirePlumber profile
+(included in `50-bluez-a2dp-sink.conf` above). This makes the BlueZ monitor start
+unconditionally, regardless of seat state or display manager health. LightDM can
+remain enabled and running normally.
+
+### Verifying BT Audio Setup
+
+After setup, restart PipeWire/WirePlumber:
+
+```bash
+systemctl --user restart pipewire wireplumber
+```
+
+Check the null sink exists:
+
+```bash
+wpctl status
+# Should show under Sinks:
+#   32. Bluetooth Audio Capture  [vol: 1.00]
+
+pactl list short sources
+# Should show:
+#   bt_capture.monitor  PipeWire  float32le 2ch 48000Hz
+```
+
+Check A2DP UUIDs (may take ~30 seconds after WirePlumber starts):
+
+```bash
+bluetoothctl show | grep "Audio"
+# Audio Sink    (0000110b-...)  ← Pi can RECEIVE audio
+# Audio Source  (0000110a-...)  ← Pi can SEND audio
+```
+
 ## Configuration
 
 ### appsettings.Production.json
 
-The application reads configuration from `appsettings.json` and `appsettings.Production.json` (if present). Key settings:
+Create this file in the application directory for production-specific overrides:
 
 ```json
 {
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
   "Kestrel": {
     "Endpoints": {
       "Http": { "Url": "http://0.0.0.0:5000" }
     }
   },
-  "Database": {
-    "Configuration": "./data/config/configuration.db",
-    "Metrics": "./data/metrics/metrics.db",
-    "Fingerprints": "./data/fingerprints/fingerprints.db",
-    "Secrets": "./data/secrets/secrets.db"
-  },
-  "Audio": {
-    "DefaultSource": "Radio",
-    "SampleRate": 48000,
-    "Channels": 2,
-    "BufferSize": 4096
+  "Fingerprinting": {
+    "FpcalcPath": "/usr/bin/fpcalc"
   }
 }
 ```
 
 ### Data Directories
 
-All persistent data is stored under `./data/`:
+All persistent data is stored under `./data/` (relative to the application directory):
 
 | Directory | Purpose |
 |---|---|
-| `data/config/` | Configuration database (SQLite) |
+| `data/config/` | Configuration database (SQLite) — audio preferences, radio presets |
 | `data/metrics/` | Performance metrics database |
-| `data/fingerprints/` | Audio fingerprint cache, TTS voice cache |
-| `data/secrets/` | Encrypted secrets database |
-| `data/albumart/` | Cached album art files (content-addressed) |
-| `data/backups/` | Configuration backups |
-| `logs/` | Application logs |
+| `data/fingerprints/` | Audio fingerprint cache, track metadata, play history |
+| `data/secrets/` | Encrypted secrets database (API keys) |
+| `data/albumart/` | Cached album art files (content-addressed SHA256) |
+| `data/backups/` | Timestamped database backups |
+| `logs/` | Application logs (daily rotation) |
 
-### Port Configuration
+### Ports
 
 | Port | Service |
 |---|---|
-| 5000 | HTTP (Web UI + API + SignalR) |
+| 5000 | HTTP — Web UI, REST API, SignalR hubs |
 
-To change the port, edit `ASPNETCORE_URLS` in the systemd service file or `appsettings.Production.json`.
+### Secrets
+
+API keys are stored encrypted in `data/secrets/secrets.db`. Set them via the
+System Config page or API:
+
+| Secret | Purpose | Registration |
+|---|---|---|
+| `Fingerprinting:AcoustId:ApiKey` | Audio fingerprint identification | https://acoustid.org/new-application |
+| `Spotify:ClientId` | Spotify playback | https://developer.spotify.com |
+| `Spotify:ClientSecret` | Spotify playback | (same) |
+| `TTS:GoogleApiKey` | Google Cloud TTS | https://console.cloud.google.com |
+
+Secrets are encrypted with a machine-specific key. If migrating from another machine,
+re-enter secrets on the Pi — they won't decrypt across machines.
 
 ## Service Management
 
@@ -138,259 +416,96 @@ sudo systemctl enable radio-console
 sudo systemctl disable radio-console
 ```
 
-## Migrating Data to the Pi
+## Development Workflow
 
-When moving from a development machine to the Pi (or between Pi installs), you need to
-migrate the SQLite databases and secrets. The deploy script intentionally **never overwrites**
-the `data/` directory, so migration is a one-time manual step.
-
-### What to Migrate
-
-| File | Contains | Required? |
-|---|---|---|
-| `data/config/configuration.db` | Audio preferences, radio presets, file player state, queue, all config sections | Yes — without it the app starts with defaults |
-| `data/secrets/secrets.db` | Encrypted API keys (AcoustID, Google TTS, Azure TTS) | Yes — fingerprinting and cloud TTS won't work without keys |
-| `data/fingerprints/fingerprints.db` | Fingerprint cache, track metadata, play history, TTS voice cache, playlists | Optional — rebuilds over time, but play history is lost |
-| `data/albumart/` | Cached album art JPEGs (content-addressed) | Optional — re-downloaded on demand |
-| `data/metrics/metrics.db` | Performance metrics history | Optional — only needed if you want historical graphs |
-
-### Migration Steps
+### Recommended: Build on Windows, Deploy via SCP
 
 ```powershell
-# 1. Stop the service on the Pi (if running)
-ssh pi@piradio "sudo systemctl stop radio-console 2>/dev/null; true"
-
-# 2. Ensure data directories exist on the Pi
-ssh pi@piradio "sudo mkdir -p /opt/radio-console/data/{config,secrets,fingerprints,albumart,metrics,backups} && sudo chown -R radio:radio /opt/radio-console/data"
-
-# 3. Copy databases from your dev machine to the Pi
-scp data/config/configuration.db pi@piradio:/tmp/config.db
-scp data/secrets/secrets.db pi@piradio:/tmp/secrets.db
-scp data/fingerprints/fingerprints.db pi@piradio:/tmp/fingerprints.db
-
-# 4. Move into place with correct ownership
-ssh pi@piradio @"
-  sudo cp /tmp/config.db /opt/radio-console/data/config/configuration.db
-  sudo cp /tmp/secrets.db /opt/radio-console/data/secrets/secrets.db
-  sudo cp /tmp/fingerprints.db /opt/radio-console/data/fingerprints/fingerprints.db
-  sudo chown -R radio:radio /opt/radio-console/data
-  rm -f /tmp/config.db /tmp/secrets.db /tmp/fingerprints.db
-"@
-
-# 5. Start the service
-ssh pi@piradio "sudo systemctl start radio-console"
-```
-
-### Secrets and Encryption
-
-The secrets database (`secrets.db`) stores API keys encrypted with a machine-specific key.
-If the encryption key is machine-bound (derived from machine ID), secrets encrypted on your
-Windows dev machine **won't decrypt on the Pi**. In that case, re-enter secrets via the
-System Config page (`http://piradio:5000/system-config`) after migration, or use the API:
-
-```bash
-# Set AcoustID API key on the Pi
-curl -X PUT http://piradio:5000/api/configuration/secrets/Fingerprinting:AcoustId:ApiKey \
-  -H "Content-Type: application/json" \
-  -d '"your-api-key-here"'
-```
-
-### Backing Up Pi Data
-
-```bash
-# Create a timestamped backup of all Pi databases
-ssh pi@piradio "sudo tar czf /tmp/radio-backup-\$(date +%Y%m%d).tar.gz -C /opt/radio-console data/"
-scp pi@piradio:/tmp/radio-backup-*.tar.gz ./backups/
-```
-
-### Configuration Differences Between Dev and Pi
-
-Some settings may need adjustment for the Pi environment:
-
-| Setting | Windows Dev | Pi |
-|---|---|---|
-| Audio device | Windows default output | ALSA/PulseAudio device |
-| File player root | `C:\Music` or similar | `/home/pi/music` or mounted USB |
-| RTL-SDR device | May not be connected | `/dev/swradio0` or USB dongle |
-| Bluetooth | Windows BT stack | BlueZ/PulseAudio |
-| fpcalc path | `tools\fpcalc\fpcalc.exe` | `/usr/bin/fpcalc` or `tools/fpcalc/fpcalc` |
-
-After migrating `configuration.db`, review these settings in the System Config page
-and update paths/devices as needed for the Pi hardware.
-
-## Development Workflow: Building and Testing on the Pi
-
-### Overview
-
-The recommended workflow is: **develop on Windows, cross-compile, push directly to Pi via SCP**.
-This is faster than git-pull-and-build-on-Pi because the Pi 5's ARM64 CPU is significantly
-slower at .NET compilation than a desktop machine, and self-contained publishes avoid needing
-the .NET SDK installed on the Pi at all.
-
-### Workflow Comparison
-
-| Approach | Build time | Requires SDK on Pi | Iteration speed |
-|---|---|---|---|
-| **SCP deploy script (recommended)** | ~10s on dev PC | No | Fastest — one command |
-| Git pull + `dotnet build` on Pi | ~60-90s on Pi 5 | Yes (.NET 8 SDK) | Slow, needs SDK |
-| Git pull + pre-built artifacts | ~10s on dev PC | No | Medium — two steps |
-
-### Option A: Direct Deploy from Windows (Recommended)
-
-Use `Deploy-ToPi.ps1` for single-command build-and-deploy from PowerShell:
-
-```powershell
-# Build, push, and restart in one command (defaults to piradio host)
+# Single command build + deploy + restart
 .\deploy\Deploy-ToPi.ps1
 
-# Deploy without restarting (for inspecting the build first)
+# Deploy without restarting
 .\deploy\Deploy-ToPi.ps1 -NoRestart
 
-# Deploy and tail logs immediately
+# Deploy and tail logs
 .\deploy\Deploy-ToPi.ps1 -Logs
 
-# Quick mode: framework-dependent (smaller, needs .NET runtime on Pi)
+# Framework-dependent (smaller, needs .NET runtime on Pi)
 .\deploy\Deploy-ToPi.ps1 -Quick
 
 # Override Pi host/user
 .\deploy\Deploy-ToPi.ps1 -PiHost 192.168.86.44 -PiUser mmack
 ```
 
-Default settings (override via parameters or environment variables):
-- `PI_HOST` = `piradio` (resolves to `piradio.lan` / `192.168.86.44`)
-- `PI_USER` = `pi`
-- `PI_PATH` = `/opt/radio-console`
+### Alternative: Git Pull + dotnet run on Pi
 
-What the script does:
-1. Cross-compiles for `linux-arm64` with `dotnet publish`
-2. Stops the service on the Pi via SSH
-3. Uses `rsync` (if available) or `scp` to sync files (preserves `data/` and `logs/`)
-4. Fixes ownership/permissions on the Pi
-5. Restarts the service and checks health
-6. Optionally tails `journalctl` so you see startup output
-
-A `deploy-to-pi.sh` bash script is also available for Linux/macOS/WSL development.
-
-**SSH key setup** (do this once so you're not prompted for passwords):
-
-```powershell
-# Generate key if you don't have one
-ssh-keygen -t ed25519
-
-# Copy to Pi (from PowerShell)
-type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh pi@piradio "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"
-```
-
-### Option B: Git Pull on Pi
-
-If you prefer using Git as the transfer mechanism (useful if you want the Pi to have
-the full repo for debugging):
+Useful for quick debugging when the .NET SDK is installed on the Pi:
 
 ```bash
-# One-time setup on the Pi
-sudo apt install -y dotnet-sdk-8.0
-cd ~ && git clone https://github.com/youruser/RTest.git
-cd RTest
-
-# Each iteration
+ssh mmack@piradio
+cd ~/RTest
 git pull
-dotnet build --configuration Release
 dotnet run --project src/Radio.API
 ```
 
-This is slower but gives you the ability to edit and test small fixes directly on the Pi.
-Build times are ~60-90 seconds on Pi 5 vs ~10 seconds on a modern desktop.
+Build time: ~60-90s on Pi 5 vs ~10s on Windows desktop.
 
-### Option C: Hybrid — Git Pull Pre-Built Artifacts
+### SSH Key Setup (one-time)
 
-Build on Windows and commit the publish output to a separate branch or use GitHub Actions
-to produce artifacts. This works but adds complexity and bloats the repo.
-
-### Running Tests on the Pi
-
-Some tests require real hardware (audio devices, Bluetooth, RTL-SDR) that only exist on
-the Pi. To run tests:
-
-```bash
-# Run all tests (requires .NET SDK on Pi)
-dotnet test --configuration Release --verbosity normal
-
-# Run only integration tests (most likely to differ on Pi)
-dotnet test tests/Radio.IntegrationTests --configuration Release --verbosity normal
-
-# Run a specific test
-dotnet test --filter "FullyQualifiedName~BluetoothServiceTests" --configuration Release
-
-# Run tests without building (if you built recently)
-dotnet test --configuration Release --no-build
+```powershell
+ssh-keygen -t ed25519
+type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh mmack@piradio "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"
 ```
 
-**Tests that behave differently on Pi:**
-- Audio device enumeration — real ALSA/PulseAudio devices instead of mock
-- Bluetooth A2DP sink — requires BlueZ and a BT adapter
-- RTL-SDR radio tests — require a plugged-in USB dongle
-- Google Cast discovery — requires mDNS on the local network
-- Audio fingerprinting — `fpcalc` binary must match the ARM64 platform
+### Tail Logs While Developing
 
-**Hardware-dependent tests are skipped** by default when the required device isn't present
-(check for `[Fact(Skip = ...)]` or `Assert.Skip` patterns).
-
-### Quick Iteration Tips
-
-**Tail logs on Pi while developing on Windows** (keep a terminal open):
+Keep a terminal open:
 
 ```bash
-ssh pi@piradio "journalctl -u radio-console -f"
+ssh mmack@piradio "journalctl -u radio-console -f"
 ```
 
-**Run the app manually** (instead of via systemd) for faster iteration and console output:
+### Run Manually (instead of systemd)
 
 ```bash
-ssh pi@piradio
 sudo systemctl stop radio-console
 cd /opt/radio-console
 sudo -u radio ./Radio.API
 # Ctrl+C to stop, re-deploy, repeat
 ```
 
-**Test a single component** without full deploy — publish just the DLL:
+## Migrating Data to the Pi
 
-```bash
-# Faster than full self-contained publish for quick checks
-dotnet publish src/Radio.API -c Release -r linux-arm64 --no-self-contained -o publish/quick
-rsync -avz publish/quick/ pi@piradio:/opt/radio-console/
+### What to Migrate
+
+| File | Contains | Required? |
+|---|---|---|
+| `data/config/configuration.db` | Audio prefs, radio presets, config | Yes |
+| `data/secrets/secrets.db` | Encrypted API keys | Re-enter on Pi instead |
+| `data/fingerprints/fingerprints.db` | Fingerprint cache, play history | Optional |
+| `data/albumart/` | Cached album art | Optional |
+| `data/metrics/metrics.db` | Performance metrics | Optional |
+
+### Migration Steps
+
+```powershell
+# Stop the service on Pi
+ssh mmack@piradio "sudo systemctl stop radio-console 2>/dev/null; true"
+
+# Ensure data dirs exist
+ssh mmack@piradio "sudo mkdir -p /opt/radio-console/data/{config,secrets,fingerprints,albumart,metrics,backups} && sudo chown -R radio:radio /opt/radio-console/data"
+
+# Copy databases
+scp data/config/configuration.db mmack@piradio:/tmp/config.db
+ssh mmack@piradio "sudo cp /tmp/config.db /opt/radio-console/data/config/configuration.db && sudo chown radio:radio /opt/radio-console/data/config/configuration.db && rm /tmp/config.db"
+
+# Start the service
+ssh mmack@piradio "sudo systemctl start radio-console"
 ```
 
-Note: `--no-self-contained` requires the .NET 8 runtime on the Pi (`sudo apt install dotnet-runtime-8.0`),
-but the transfer is much smaller (~20MB vs ~100MB).
-
-## Updating (Production)
-
-For production updates (when the Pi is deployed as the radio appliance):
-
-```bash
-# Single-command deploy
-./deploy/deploy-to-pi.sh
-
-# Or manual steps:
-cd deploy/common && ./publish.sh arm64
-ssh pi@piradio "sudo systemctl stop radio-console"
-rsync -avz --exclude='data' --exclude='logs' publish/linux-arm64/ pi@piradio:/opt/radio-console/
-ssh pi@piradio "sudo chown -R radio:radio /opt/radio-console && sudo chmod +x /opt/radio-console/Radio.API"
-ssh pi@piradio "sudo systemctl start radio-console"
-```
+Secrets are machine-specific — re-enter API keys on the Pi via the System Config page.
 
 ## Troubleshooting
-
-### Application won't start
-
-```bash
-# Check logs for startup errors
-sudo journalctl -u radio-console -n 50
-
-# Run manually to see console output
-sudo -u radio /opt/radio-console/Radio.API
-```
 
 ### No audio output
 
@@ -398,96 +513,139 @@ sudo -u radio /opt/radio-console/Radio.API
 # List audio devices
 aplay -l
 
-# Check PulseAudio is running
-pulseaudio --check && echo "Running" || echo "Not running"
+# Check PipeWire is running
+systemctl --user status pipewire pipewire-pulse wireplumber
 
-# Start PulseAudio for the radio user
-sudo -u radio pulseaudio --start
-
-# Test audio output
+# Test audio
 speaker-test -t wav -c 2
+
+# Check default sink
+wpctl status
 ```
 
 ### Bluetooth not working
 
 ```bash
-# Check Bluetooth service
-sudo systemctl status bluetooth
+# Check adapter status
+bluetoothctl show
 
-# Scan for devices
-bluetoothctl scan on
+# Power on if needed
+bluetoothctl power on
 
-# Check the radio user is in bluetooth group
-groups radio
+# Check A2DP UUIDs (wait ~30s after WirePlumber starts)
+bluetoothctl show | grep "Audio"
+
+# List paired devices
+bluetoothctl devices
+
+# Check BlueZ logs
+journalctl -u bluetooth -f
+```
+
+### BT connects but no audio through app
+
+```bash
+# Verify bt_capture null sink exists
+wpctl status | grep -A5 Sinks
+pactl list short sources | grep bt_capture
+
+# When BT audio is playing, check routing
+wpctl status | grep -A10 Streams
+# Should show: bluez_input.* → bt_capture (not headphones)
+
+# Check app sees the capture device (in app logs)
+journalctl -u radio-console | grep -i "capture device"
+```
+
+### BT connection drops
+
+```bash
+# Check if WirePlumber is cycling (endpoints unregister/re-register)
+journalctl -u bluetooth -f | grep "Endpoint"
+# If endpoints register/unregister every ~50s, seat monitoring may be active.
+# Verify it's disabled:
+#   Check 50-bluez-a2dp-sink.conf has monitor.bluez.seat-monitoring = disabled
+
+# Check seat state (should be irrelevant if seat monitoring is disabled)
+loginctl show-seat seat0 -p ActiveState
+
+# Remove stale/offline paired devices that cause reconnect loops
+bluetoothctl devices
+bluetoothctl remove <address-of-offline-device>
+
+# Check interference: only one A2DP connection at a time
 ```
 
 ### Google Cast devices not found
 
 ```bash
-# Check Avahi/mDNS is running
+# Check Avahi/mDNS
 sudo systemctl status avahi-daemon
-
-# Test mDNS discovery
 avahi-browse -a -t
 
-# Check firewall isn't blocking mDNS (port 5353/UDP)
+# Check firewall (port 5353/UDP for mDNS)
 sudo iptables -L -n | grep 5353
 ```
 
 ### Audio fingerprinting not working
 
 ```bash
-# Check fpcalc is available
+# Check fpcalc
+fpcalc -version
+# or
 /opt/radio-console/tools/fpcalc/fpcalc -version
 
-# Or use system fpcalc
-which fpcalc && fpcalc -version
+# Test with a file
+fpcalc -length 15 /path/to/audio.mp3
 
-# Test with a sample file
-fpcalc -length 15 /path/to/audio/file.mp3
+# Check AcoustID API key is set
+curl http://piradio:5000/api/configuration/secrets
 ```
 
 ### RTL-SDR radio not working
 
 ```bash
-# Check USB device is detected
+# Check USB device
 lsusb | grep -i rtl
 
-# Install RTL-SDR tools if needed
-sudo apt install rtl-sdr
+# Check kernel driver blacklist
+cat /etc/modprobe.d/blacklist-rtl.conf
 
 # Test RTL-SDR
 rtl_test -t
-
-# Blacklist kernel DVB driver (conflicts with RTL-SDR)
-echo "blacklist dvb_usb_rtl28xxu" | sudo tee /etc/modprobe.d/blacklist-rtl.conf
-sudo modprobe -r dvb_usb_rtl28xxu
 ```
 
 ### Database issues
 
 ```bash
-# Check database files exist and are writable
+# Check database files
 ls -la /opt/radio-console/data/*/
 
-# Backup all databases
-cp /opt/radio-console/data/config/configuration.db /opt/radio-console/data/backups/
-cp /opt/radio-console/data/fingerprints/fingerprints.db /opt/radio-console/data/backups/
-
 # Reset configuration (start fresh)
+sudo systemctl stop radio-console
 rm /opt/radio-console/data/config/configuration.db
-sudo systemctl restart radio-console
+sudo systemctl start radio-console
 ```
 
 ### Permission issues
 
 ```bash
-# Fix ownership
 sudo chown -R radio:radio /opt/radio-console
-
-# Fix executable permission
 sudo chmod +x /opt/radio-console/Radio.API
-
-# Check SELinux/AppArmor (if enabled)
-sudo aa-status 2>/dev/null || sudo sestatus 2>/dev/null
 ```
+
+## Native Dependencies Summary
+
+| Category | Package / Binary | apt Package | Purpose |
+|---|---|---|---|
+| Audio engine | libminiudio (bundled) | `libasound2-dev` | SoundFlow audio I/O via ALSA |
+| MP3 encoding | libmp3lame | `libmp3lame-dev` | HTTP streaming to Google Cast |
+| Audio server | PipeWire | `pipewire pipewire-pulse wireplumber` | Audio routing, BT audio |
+| BT codecs | SPA bluez5 | `libspa-0.2-bluetooth` | SBC, LDAC, aptX, opus BT codecs |
+| Bluetooth | BlueZ | `bluez` | BT stack, A2DP, AVRCP |
+| Fingerprinting | fpcalc | `libchromaprint-tools` | Audio fingerprint generation |
+| SDR radio | librtlsdr | `librtlsdr-dev` | RTL-SDR USB dongle driver |
+| Cast discovery | Avahi | `avahi-daemon avahi-utils` | mDNS for Google Cast |
+| D-Bus | libdbus | (system default) | BlueZ IPC via Tmds.DBus |
+| SQLite | sqlite3 | (bundled in .NET) | Config, metrics, fingerprint DBs |
+| .NET runtime | aspnetcore 8.0 | Self-contained or `aspnetcore-runtime-8.0` | Application runtime |
