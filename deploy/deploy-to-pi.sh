@@ -17,7 +17,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-PI_HOST="${PI_HOST:-raspberry-pi.local}"
+PI_HOST="${PI_HOST:-piradio}"
 PI_USER="${PI_USER:-pi}"
 PI_PATH="${PI_PATH:-/opt/radio-console}"
 
