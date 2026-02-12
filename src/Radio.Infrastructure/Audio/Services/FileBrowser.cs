@@ -60,8 +60,17 @@ public class FileBrowser : IFileBrowser
 
     if (!Directory.Exists(basePath))
     {
-      _logger.LogWarning("Directory not found: {Path}", basePath);
-      return Array.Empty<AudioFileInfo>();
+      // Auto-create the root media directory if it doesn't exist yet
+      if (path == null)
+      {
+        _logger.LogInformation("Creating media directory: {Path}", basePath);
+        Directory.CreateDirectory(basePath);
+      }
+      else
+      {
+        _logger.LogWarning("Directory not found: {Path}", basePath);
+        return Array.Empty<AudioFileInfo>();
+      }
     }
 
     var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;

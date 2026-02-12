@@ -333,20 +333,18 @@ public class FilesController : ControllerBase
             DriveFormat = drive.DriveFormat
           });
         }
+        catch (UnauthorizedAccessException)
+        {
+          // Linux FUSE mounts (e.g. /run/user/*/doc) throw when reading stats — skip silently
+          _logger.LogDebug("Skipping inaccessible drive {DriveName}", drive.Name);
+        }
+        catch (IOException)
+        {
+          _logger.LogDebug("Skipping unavailable drive {DriveName}", drive.Name);
+        }
         catch (Exception ex)
         {
           _logger.LogWarning(ex, "Error reading drive info for {DriveName}", drive.Name);
-          // Add drive with minimal info
-          drives.Add(new DriveInfoDto
-          {
-            Name = drive.Name,
-            Label = drive.Name,
-            DriveType = "Unknown",
-            IsReady = false,
-            TotalSize = 0,
-            AvailableSpace = 0,
-            DriveFormat = null
-          });
         }
       }
 
