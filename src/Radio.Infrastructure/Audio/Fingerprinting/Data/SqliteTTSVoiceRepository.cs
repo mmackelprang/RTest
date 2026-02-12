@@ -72,7 +72,7 @@ public sealed class SqliteTTSVoiceRepository : ITTSVoiceRepository
     CancellationToken ct = default)
   {
     var conn = await _dbContext.GetConnectionAsync(ct);
-    using var transaction = conn.BeginTransaction();
+    await using var transaction = conn.BeginTransaction();
 
     try
     {
@@ -105,12 +105,12 @@ public sealed class SqliteTTSVoiceRepository : ITTSVoiceRepository
         await insertCmd.ExecuteNonQueryAsync(ct);
       }
 
-      transaction.Commit();
+      await transaction.CommitAsync(ct);
       _logger.LogInformation("Replaced cached voices for engine {Engine} with {Count} voices", engine, voices.Count);
     }
     catch
     {
-      transaction.Rollback();
+      await transaction.RollbackAsync(ct);
       throw;
     }
   }
