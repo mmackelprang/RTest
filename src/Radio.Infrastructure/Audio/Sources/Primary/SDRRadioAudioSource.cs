@@ -726,7 +726,7 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
       // Create the sound generator with proper engine and format context
       if (_soundGenerator == null)
       {
-        _soundGenerator = new BufferedSoundGenerator<float>(engine, format, Logger);
+        _soundGenerator = new BufferedSoundGenerator<float>(engine, format, Logger, metricsCollector: MetricsCollector);
         _radioReceiver.AudioDataAvailable += OnAudioDataAvailable;
         Logger.LogDebug("📻 SDR RADIO: Created BufferedSoundGenerator and subscribed to AudioDataAvailable");
       }

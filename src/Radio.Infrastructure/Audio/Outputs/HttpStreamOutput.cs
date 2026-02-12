@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using NAudio.Lame;
 using NAudio.Wave;
 using Radio.Core.Configuration;
+using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 
 namespace Radio.Infrastructure.Audio.Outputs;
@@ -21,6 +22,7 @@ public class HttpStreamOutput : AudioOutputBase
   private readonly ILogger<HttpStreamOutput> _logger;
   private readonly HttpStreamOutputOptions _options;
   private readonly IAudioEngine _audioEngine;
+  private readonly IMetricsCollector? _metricsCollector;
 
   private HttpListener? _httpListener;
   private CancellationTokenSource? _serverCts;
@@ -77,10 +79,12 @@ public class HttpStreamOutput : AudioOutputBase
   /// <param name="logger">The logger instance.</param>
   /// <param name="options">The HTTP stream output options.</param>
   /// <param name="audioEngine">The audio engine for getting the mixed output stream.</param>
+  /// <param name="metricsCollector">Optional metrics collector for pipeline metrics.</param>
   public HttpStreamOutput(
     ILogger<HttpStreamOutput> logger,
     IOptions<AudioOutputOptions> options,
-    IAudioEngine audioEngine)
+    IAudioEngine audioEngine,
+    IMetricsCollector? metricsCollector = null)
     : base("http-stream", $"HTTP Stream :{options?.Value?.HttpStream?.Port ?? 8080}",
         1.0f, // HTTP streams typically pass through at full volume
         options?.Value?.HttpStream?.Enabled ?? true)
@@ -88,6 +92,7 @@ public class HttpStreamOutput : AudioOutputBase
     _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     _options = options?.Value?.HttpStream ?? throw new ArgumentNullException(nameof(options));
     _audioEngine = audioEngine ?? throw new ArgumentNullException(nameof(audioEngine));
+    _metricsCollector = metricsCollector;
   }
 
   /// <inheritdoc />
@@ -320,6 +325,7 @@ public class HttpStreamOutput : AudioOutputBase
     var client = new HttpStreamClient(clientId, remoteEndpoint, context.Response);
 
     _connectedClients.TryAdd(clientId, client);
+    _metricsCollector?.Gauge("audio.stream.client_count", _connectedClients.Count);
     ClientConnected?.Invoke(this, new HttpStreamClientEventArgs { Client = client.ToInfo() });
 
     try
@@ -375,7 +381,7 @@ public class HttpStreamOutput : AudioOutputBase
             "MP3 encoder started (192 kbps CBR, {SampleRate}Hz, {Channels}ch) for client {ClientId}",
             _options.SampleRate, _options.Channels, clientId);
         }
-        catch (Exception ex) when (ex is DllNotFoundException or TypeInitializationException)
+        catch (Exception ex) when (ex is DllNotFoundException or TypeInitializationException or FileLoadException)
         {
           _logger.LogError(ex,
             "LAME MP3 encoder not available. Install libmp3lame: apt install libmp3lame-dev (Linux) or ensure LAME DLLs are present (Windows).");
@@ -471,6 +477,15 @@ public class HttpStreamOutput : AudioOutputBase
     {
       client.Disconnect();
       _connectedClients.TryRemove(clientId, out _);
+
+      // Report disconnect metrics
+      _metricsCollector?.Gauge("audio.stream.client_count", _connectedClients.Count);
+      if (client.BytesSent > 0)
+      {
+        var formatTag = requestPath.EndsWith("/mp3", StringComparison.OrdinalIgnoreCase) ? "mp3" : "wav";
+        _metricsCollector?.Increment("audio.stream.bytes_sent", client.BytesSent,
+          new Dictionary<string, string> { ["format"] = formatTag });
+      }
 
       try
       {
