@@ -115,9 +115,11 @@ public class BluetoothAudioSource : USBAudioSourceBase
     }
     else
     {
-      Logger.LogWarning("BluetoothAudioSource: capture device not available (no connected device or no audio endpoint)");
-      MetricsCollector?.Increment("bluetooth.audio_capture_errors");
-      State = AudioSourceState.Error;
+      // No device connected yet — go to Ready state and wait for OnDeviceConnected
+      // to acquire the capture device. This is the normal flow when the user activates
+      // the Bluetooth source before pairing their phone.
+      Logger.LogInformation("BluetoothAudioSource: waiting for Bluetooth device connection");
+      State = AudioSourceState.Ready;
     }
   }
 
@@ -291,12 +293,12 @@ public class BluetoothAudioSource : USBAudioSourceBase
       }
       else
       {
-        Logger.LogDebug("BluetoothAudioSource: no audio capture device available for connected device");
+        Logger.LogWarning("BluetoothAudioSource: no audio capture device available after retries");
       }
     }
     catch (Exception ex)
     {
-      Logger.LogDebug(ex, "BluetoothAudioSource: failed to acquire audio capture device on connect");
+      Logger.LogWarning(ex, "BluetoothAudioSource: failed to acquire audio capture device on connect");
     }
   }
 

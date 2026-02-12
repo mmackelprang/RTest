@@ -5,6 +5,7 @@ using Radio.Core.Configuration;
 using Radio.Infrastructure.Configuration.Abstractions;
 using Radio.Infrastructure.Configuration.Models;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Radio.Infrastructure.Configuration.Services;
 
@@ -23,6 +24,10 @@ public class PreferencesPersistenceService : BackgroundService
   private readonly IConfigurationManager _configurationManager;
   private readonly IHostApplicationLifetime _lifetime;
   private readonly TimeSpan _savePeriod = TimeSpan.FromSeconds(30); // Save every 30 seconds
+  private static readonly JsonSerializerOptions _serializerOptions = new()
+  {
+    Converters = { new JsonStringEnumConverter() }
+  };
 
   public PreferencesPersistenceService(
     ILogger<PreferencesPersistenceService> logger,
@@ -118,7 +123,8 @@ public class PreferencesPersistenceService : BackgroundService
       }
 
       // Serialize preferences to key-value pairs, preserving JSON structure
-      var json = JsonSerializer.Serialize(preferences);
+      // Use JsonStringEnumConverter so enums are stored as names (e.g. "Off") not integers (e.g. 0)
+      var json = JsonSerializer.Serialize(preferences, _serializerOptions);
       var dict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
 
       if (dict != null)

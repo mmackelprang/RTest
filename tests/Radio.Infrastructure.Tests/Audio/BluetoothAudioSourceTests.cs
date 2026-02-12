@@ -125,22 +125,22 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   }
 
   [Fact]
-  public async Task InitializeAsync_WhenNoCaptureDevice_SetsErrorState()
+  public async Task InitializeAsync_WhenNoCaptureDevice_SetsReadyState()
   {
     // MockBluetoothService returns "mock-capture-endpoint" (string, not AudioCaptureDevice)
-    // so InitializeAsync should fail the `is AudioCaptureDevice` check
+    // InitializeAsync should set Ready state (waiting for device to connect)
 
     await _source.InitializeAsync(CancellationToken.None);
 
-    Assert.Equal(AudioSourceState.Error, _source.State);
+    Assert.Equal(AudioSourceState.Ready, _source.State);
   }
 
   [Fact]
-  public async Task InitializeAsync_WhenNoCaptureDevice_RecordsMetric()
+  public async Task InitializeAsync_WhenNoCaptureDevice_DoesNotRecordErrorMetric()
   {
     await _source.InitializeAsync(CancellationToken.None);
 
-    _metricsMock.Verify(m => m.Increment("bluetooth.audio_capture_errors", 1.0, null), Times.Once);
+    _metricsMock.Verify(m => m.Increment("bluetooth.audio_capture_errors", 1.0, null), Times.Never);
   }
 
   [Fact]
