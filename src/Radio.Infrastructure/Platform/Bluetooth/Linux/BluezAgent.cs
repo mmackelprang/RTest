@@ -11,9 +11,10 @@ namespace Radio.Infrastructure.Platform.Bluetooth.Linux;
 /// Registered on D-Bus so BlueZ delegates pairing decisions to this agent instead of
 /// prompting via the default agent (which doesn't exist in a headless environment).
 /// Uses "NoInputNoOutput" capability to enable "Just Works" pairing (no PIN required).
+/// Must implement IAgent1 (not just IDBusObject) so Tmds.DBus exposes all methods
+/// on D-Bus — BlueZ calls AuthorizeService to approve A2DP/HFP profiles.
 /// </summary>
-[DBusInterface("org.bluez.Agent1")]
-internal sealed class BluezAgent : IDBusObject
+internal sealed class BluezAgent : IAgent1
 {
   private readonly ILogger _logger;
   private readonly bool _autoAccept;

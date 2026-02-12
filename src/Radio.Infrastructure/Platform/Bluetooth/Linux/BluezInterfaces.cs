@@ -69,6 +69,20 @@ namespace Radio.Infrastructure.Platform.Bluetooth.Linux
         Task RequestDefaultAgentAsync(ObjectPath agent);
     }
 
+    [DBusInterface("org.bluez.Agent1")]
+    public interface IAgent1 : IDBusObject
+    {
+        Task ReleaseAsync();
+        Task<string> RequestPinCodeAsync(ObjectPath device);
+        Task DisplayPinCodeAsync(ObjectPath device, string pincode);
+        Task<uint> RequestPasskeyAsync(ObjectPath device);
+        Task DisplayPasskeyAsync(ObjectPath device, uint passkey, ushort entered);
+        Task RequestConfirmationAsync(ObjectPath device, uint passkey);
+        Task RequestAuthorizationAsync(ObjectPath device);
+        Task AuthorizeServiceAsync(ObjectPath device, string uuid);
+        Task CancelAsync();
+    }
+
     // Helper for property changes
     public static class BluezConstants
     {

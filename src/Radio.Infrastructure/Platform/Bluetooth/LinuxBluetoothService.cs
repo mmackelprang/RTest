@@ -541,6 +541,12 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                         _logger.LogInformation(
                             "Searching for Bluetooth audio capture device among {Count} capture devices (connected: {DeviceName})",
                             captureDevices.Length, connected.Name);
+
+                        // Log all available capture devices for diagnostics
+                        for (var i = 0; i < captureDevices.Length; i++)
+                        {
+                            _logger.LogInformation("  Capture device [{Index}]: {Name}", i, captureDevices[i].Name ?? "(null)");
+                        }
                     }
 
                     // On Linux with PulseAudio/PipeWire, Bluetooth audio devices appear as:
