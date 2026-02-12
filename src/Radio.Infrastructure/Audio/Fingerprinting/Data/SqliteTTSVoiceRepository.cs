@@ -5,19 +5,13 @@ using Radio.Core.Interfaces.Audio;
 namespace Radio.Infrastructure.Audio.Fingerprinting.Data;
 
 /// <summary>
-/// SQLite implementation of the TTS voice repository.
-/// Manages voice cache and favorites for Text-to-Speech engines.
+/// SQLite implementation of the TTS voice cache and favorites repository.
 /// </summary>
 public sealed class SqliteTTSVoiceRepository : ITTSVoiceRepository
 {
   private readonly ILogger<SqliteTTSVoiceRepository> _logger;
   private readonly FingerprintDbContext _dbContext;
 
-  /// <summary>
-  /// Initializes a new instance of the <see cref="SqliteTTSVoiceRepository"/> class.
-  /// </summary>
-  /// <param name="logger">The logger instance.</param>
-  /// <param name="dbContext">The database context.</param>
   public SqliteTTSVoiceRepository(
     ILogger<SqliteTTSVoiceRepository> logger,
     FingerprintDbContext dbContext)
@@ -31,19 +25,21 @@ public sealed class SqliteTTSVoiceRepository : ITTSVoiceRepository
     TTSEngine engine, CancellationToken ct = default)
   {
     var conn = await _dbContext.GetConnectionAsync(ct);
+    var engineStr = engine.ToString();
 
+    // LEFT JOIN with favorites to get IsFavorite flag in one query
     var sql = """
-      SELECT v.VoiceId, v.Name, v.Language, v.Gender, v.PriceTier,
-             CASE WHEN f.VoiceId IS NOT NULL THEN 1 ELSE 0 END AS IsFavorite
-      FROM TTSVoiceCache v
-      LEFT JOIN TTSVoiceFavorites f ON v.Engine = f.Engine AND v.VoiceId = f.VoiceId
-      WHERE v.Engine = @Engine
-      ORDER BY IsFavorite DESC, v.PriceTier, v.Name
+      SELECT c.VoiceId, c.Name, c.Language, c.Gender, c.PriceTier,
+             CASE WHEN f.Id IS NOT NULL THEN 1 ELSE 0 END AS IsFavorite
+      FROM TTSVoiceCache c
+      LEFT JOIN TTSVoiceFavorites f ON c.Engine = f.Engine AND c.VoiceId = f.VoiceId
+      WHERE c.Engine = @Engine
+      ORDER BY c.Name
       """;
 
     await using var cmd = conn.CreateCommand();
     cmd.CommandText = sql;
-    cmd.Parameters.AddWithValue("@Engine", engine.ToString());
+    cmd.Parameters.AddWithValue("@Engine", engineStr);
 
     var voices = new List<TTSVoiceInfo>();
     await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -55,13 +51,13 @@ public sealed class SqliteTTSVoiceRepository : ITTSVoiceRepository
         Id = reader.GetString(0),
         Name = reader.GetString(1),
         Language = reader.GetString(2),
-        Gender = Enum.Parse<TTSVoiceGender>(reader.GetString(3)),
+        Gender = Enum.TryParse<TTSVoiceGender>(reader.GetString(3), out var g) ? g : TTSVoiceGender.Neutral,
         PriceTier = reader.GetString(4),
         IsFavorite = reader.GetInt32(5) == 1
       });
     }
 
-    _logger.LogDebug("Retrieved {Count} cached voices for engine {Engine}", voices.Count, engine);
+    _logger.LogDebug("Retrieved {Count} cached voices for {Engine}", voices.Count, engine);
     return voices;
   }
 
@@ -72,41 +68,40 @@ public sealed class SqliteTTSVoiceRepository : ITTSVoiceRepository
     CancellationToken ct = default)
   {
     var conn = await _dbContext.GetConnectionAsync(ct);
-    await using var transaction = conn.BeginTransaction();
+    var engineStr = engine.ToString();
+    var now = DateTime.UtcNow.ToString("O");
 
+    await using var transaction = await conn.BeginTransactionAsync(ct);
     try
     {
-      // Delete existing cached voices for this engine
-      await using (var deleteCmd = conn.CreateCommand())
-      {
-        deleteCmd.Transaction = transaction;
-        deleteCmd.CommandText = "DELETE FROM TTSVoiceCache WHERE Engine = @Engine";
-        deleteCmd.Parameters.AddWithValue("@Engine", engine.ToString());
-        await deleteCmd.ExecuteNonQueryAsync(ct);
-      }
+      // Delete existing cache for this engine
+      await using var deleteCmd = conn.CreateCommand();
+      deleteCmd.CommandText = "DELETE FROM TTSVoiceCache WHERE Engine = @Engine";
+      deleteCmd.Parameters.AddWithValue("@Engine", engineStr);
+      deleteCmd.Transaction = (SqliteTransaction)transaction;
+      await deleteCmd.ExecuteNonQueryAsync(ct);
 
       // Insert new voices
-      var now = DateTime.UtcNow.ToString("O");
       foreach (var voice in voices)
       {
         await using var insertCmd = conn.CreateCommand();
-        insertCmd.Transaction = transaction;
         insertCmd.CommandText = """
           INSERT INTO TTSVoiceCache (Engine, VoiceId, Name, Language, Gender, PriceTier, LastUpdated)
           VALUES (@Engine, @VoiceId, @Name, @Language, @Gender, @PriceTier, @LastUpdated)
           """;
-        insertCmd.Parameters.AddWithValue("@Engine", engine.ToString());
+        insertCmd.Parameters.AddWithValue("@Engine", engineStr);
         insertCmd.Parameters.AddWithValue("@VoiceId", voice.Id);
         insertCmd.Parameters.AddWithValue("@Name", voice.Name);
         insertCmd.Parameters.AddWithValue("@Language", voice.Language);
         insertCmd.Parameters.AddWithValue("@Gender", voice.Gender.ToString());
         insertCmd.Parameters.AddWithValue("@PriceTier", voice.PriceTier);
         insertCmd.Parameters.AddWithValue("@LastUpdated", now);
+        insertCmd.Transaction = (SqliteTransaction)transaction;
         await insertCmd.ExecuteNonQueryAsync(ct);
       }
 
       await transaction.CommitAsync(ct);
-      _logger.LogInformation("Replaced cached voices for engine {Engine} with {Count} voices", engine, voices.Count);
+      _logger.LogInformation("Cached {Count} voices for {Engine}", voices.Count, engine);
     }
     catch
     {
@@ -131,12 +126,9 @@ public sealed class SqliteTTSVoiceRepository : ITTSVoiceRepository
     cmd.Parameters.AddWithValue("@Engine", engine.ToString());
     cmd.Parameters.AddWithValue("@VoiceId", voiceId);
     cmd.Parameters.AddWithValue("@AddedAt", DateTime.UtcNow.ToString("O"));
+    await cmd.ExecuteNonQueryAsync(ct);
 
-    var rowsAffected = await cmd.ExecuteNonQueryAsync(ct);
-    if (rowsAffected > 0)
-    {
-      _logger.LogDebug("Added voice {VoiceId} to favorites for engine {Engine}", voiceId, engine);
-    }
+    _logger.LogDebug("Added favorite voice {VoiceId} for {Engine}", voiceId, engine);
   }
 
   /// <inheritdoc/>
@@ -145,21 +137,15 @@ public sealed class SqliteTTSVoiceRepository : ITTSVoiceRepository
   {
     var conn = await _dbContext.GetConnectionAsync(ct);
 
-    var sql = """
-      DELETE FROM TTSVoiceFavorites
-      WHERE Engine = @Engine AND VoiceId = @VoiceId
-      """;
+    var sql = "DELETE FROM TTSVoiceFavorites WHERE Engine = @Engine AND VoiceId = @VoiceId";
 
     await using var cmd = conn.CreateCommand();
     cmd.CommandText = sql;
     cmd.Parameters.AddWithValue("@Engine", engine.ToString());
     cmd.Parameters.AddWithValue("@VoiceId", voiceId);
+    await cmd.ExecuteNonQueryAsync(ct);
 
-    var rowsAffected = await cmd.ExecuteNonQueryAsync(ct);
-    if (rowsAffected > 0)
-    {
-      _logger.LogDebug("Removed voice {VoiceId} from favorites for engine {Engine}", voiceId, engine);
-    }
+    _logger.LogDebug("Removed favorite voice {VoiceId} for {Engine}", voiceId, engine);
   }
 
   /// <inheritdoc/>
@@ -168,25 +154,20 @@ public sealed class SqliteTTSVoiceRepository : ITTSVoiceRepository
   {
     var conn = await _dbContext.GetConnectionAsync(ct);
 
-    var sql = """
-      SELECT VoiceId
-      FROM TTSVoiceFavorites
-      WHERE Engine = @Engine
-      """;
+    var sql = "SELECT VoiceId FROM TTSVoiceFavorites WHERE Engine = @Engine";
 
     await using var cmd = conn.CreateCommand();
     cmd.CommandText = sql;
     cmd.Parameters.AddWithValue("@Engine", engine.ToString());
 
-    var favoriteIds = new HashSet<string>();
+    var favorites = new HashSet<string>();
     await using var reader = await cmd.ExecuteReaderAsync(ct);
 
     while (await reader.ReadAsync(ct))
     {
-      favoriteIds.Add(reader.GetString(0));
+      favorites.Add(reader.GetString(0));
     }
 
-    _logger.LogDebug("Retrieved {Count} favorite voice IDs for engine {Engine}", favoriteIds.Count, engine);
-    return favoriteIds;
+    return favorites;
   }
 }
