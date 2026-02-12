@@ -138,21 +138,156 @@ sudo systemctl enable radio-console
 sudo systemctl disable radio-console
 ```
 
-## Updating
+## Development Workflow: Building and Testing on the Pi
+
+### Overview
+
+The recommended workflow is: **develop on Windows, cross-compile, push directly to Pi via SCP**.
+This is faster than git-pull-and-build-on-Pi because the Pi 5's ARM64 CPU is significantly
+slower at .NET compilation than a desktop machine, and self-contained publishes avoid needing
+the .NET SDK installed on the Pi at all.
+
+### Workflow Comparison
+
+| Approach | Build time | Requires SDK on Pi | Iteration speed |
+|---|---|---|---|
+| **SCP deploy script (recommended)** | ~10s on dev PC | No | Fastest — one command |
+| Git pull + `dotnet build` on Pi | ~60-90s on Pi 5 | Yes (.NET 8 SDK) | Slow, needs SDK |
+| Git pull + pre-built artifacts | ~10s on dev PC | No | Medium — two steps |
+
+### Option A: Direct SCP Deploy (Recommended)
+
+Use the `deploy-to-pi.sh` script for single-command build-and-deploy:
 
 ```bash
-# 1. Build new version on dev machine
+# First time: set your Pi's IP (or add to ~/.bashrc)
+export PI_HOST=192.168.1.100
+export PI_USER=pi
+
+# Build, push, and restart in one command
+./deploy/deploy-to-pi.sh
+
+# Deploy without restarting (for inspecting the build first)
+./deploy/deploy-to-pi.sh --no-restart
+
+# Deploy and tail logs immediately
+./deploy/deploy-to-pi.sh --logs
+```
+
+What the script does:
+1. Cross-compiles for `linux-arm64` with `dotnet publish`
+2. Stops the service on the Pi via SSH
+3. Uses `rsync` over SSH to sync only changed files (preserves `data/` and `logs/`)
+4. Fixes ownership/permissions
+5. Restarts the service
+6. Optionally tails `journalctl` so you see startup output
+
+**SSH key setup** (do this once so you're not prompted for passwords):
+
+```bash
+# Generate key if you don't have one
+ssh-keygen -t ed25519
+
+# Copy to Pi
+ssh-copy-id pi@192.168.1.100
+```
+
+### Option B: Git Pull on Pi
+
+If you prefer using Git as the transfer mechanism (useful if you want the Pi to have
+the full repo for debugging):
+
+```bash
+# One-time setup on the Pi
+sudo apt install -y dotnet-sdk-8.0
+cd ~ && git clone https://github.com/youruser/RTest.git
+cd RTest
+
+# Each iteration
+git pull
+dotnet build --configuration Release
+dotnet run --project src/Radio.API
+```
+
+This is slower but gives you the ability to edit and test small fixes directly on the Pi.
+Build times are ~60-90 seconds on Pi 5 vs ~10 seconds on a modern desktop.
+
+### Option C: Hybrid — Git Pull Pre-Built Artifacts
+
+Build on Windows and commit the publish output to a separate branch or use GitHub Actions
+to produce artifacts. This works but adds complexity and bloats the repo.
+
+### Running Tests on the Pi
+
+Some tests require real hardware (audio devices, Bluetooth, RTL-SDR) that only exist on
+the Pi. To run tests:
+
+```bash
+# Run all tests (requires .NET SDK on Pi)
+dotnet test --configuration Release --verbosity normal
+
+# Run only integration tests (most likely to differ on Pi)
+dotnet test tests/Radio.IntegrationTests --configuration Release --verbosity normal
+
+# Run a specific test
+dotnet test --filter "FullyQualifiedName~BluetoothServiceTests" --configuration Release
+
+# Run tests without building (if you built recently)
+dotnet test --configuration Release --no-build
+```
+
+**Tests that behave differently on Pi:**
+- Audio device enumeration — real ALSA/PulseAudio devices instead of mock
+- Bluetooth A2DP sink — requires BlueZ and a BT adapter
+- RTL-SDR radio tests — require a plugged-in USB dongle
+- Google Cast discovery — requires mDNS on the local network
+- Audio fingerprinting — `fpcalc` binary must match the ARM64 platform
+
+**Hardware-dependent tests are skipped** by default when the required device isn't present
+(check for `[Fact(Skip = ...)]` or `Assert.Skip` patterns).
+
+### Quick Iteration Tips
+
+**Tail logs on Pi while developing on Windows** (keep a terminal open):
+
+```bash
+ssh pi@192.168.1.100 "journalctl -u radio-console -f"
+```
+
+**Run the app manually** (instead of via systemd) for faster iteration and console output:
+
+```bash
+ssh pi@192.168.1.100
+sudo systemctl stop radio-console
+cd /opt/radio-console
+sudo -u radio ./Radio.API
+# Ctrl+C to stop, re-deploy, repeat
+```
+
+**Test a single component** without full deploy — publish just the DLL:
+
+```bash
+# Faster than full self-contained publish for quick checks
+dotnet publish src/Radio.API -c Release -r linux-arm64 --no-self-contained -o publish/quick
+rsync -avz publish/quick/ pi@192.168.1.100:/opt/radio-console/
+```
+
+Note: `--no-self-contained` requires the .NET 8 runtime on the Pi (`sudo apt install dotnet-runtime-8.0`),
+but the transfer is much smaller (~20MB vs ~100MB).
+
+## Updating (Production)
+
+For production updates (when the Pi is deployed as the radio appliance):
+
+```bash
+# Single-command deploy
+./deploy/deploy-to-pi.sh
+
+# Or manual steps:
 cd deploy/common && ./publish.sh arm64
-
-# 2. Stop the service on target
 ssh pi@<ip> "sudo systemctl stop radio-console"
-
-# 3. Copy new files (preserves data directories)
-scp -r publish/linux-arm64/* pi@<ip>:/tmp/radio-update/
-ssh pi@<ip> "sudo rsync -av --exclude='data' --exclude='logs' /tmp/radio-update/ /opt/radio-console/"
+rsync -avz --exclude='data' --exclude='logs' publish/linux-arm64/ pi@<ip>:/opt/radio-console/
 ssh pi@<ip> "sudo chown -R radio:radio /opt/radio-console && sudo chmod +x /opt/radio-console/Radio.API"
-
-# 4. Start the service
 ssh pi@<ip> "sudo systemctl start radio-console"
 ```
 
