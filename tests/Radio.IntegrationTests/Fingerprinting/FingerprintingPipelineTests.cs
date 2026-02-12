@@ -166,45 +166,53 @@ public class FingerprintingPipelineTests : IAsyncLifetime
     RequireExternalNetwork();
     Skip.IfNot(File.Exists(WereReadyMp3), $"Test MP3 not found: {WereReadyMp3}");
 
-    // Step 1: Generate fingerprint from MP3 file (fpcalc handles decoding)
-    var fingerprint = await _fingerprintService.GenerateFingerprintFromFileAsync(WereReadyMp3);
-    _output.WriteLine($"Fingerprint: hash length={fingerprint.ChromaprintHash?.Length ?? 0}, " +
-      $"duration={fingerprint.DurationSeconds}s");
-    Assert.False(string.IsNullOrEmpty(fingerprint.ChromaprintHash),
-      "Fingerprint hash should not be empty");
+    try
+    {
+      // Step 1: Generate fingerprint from MP3 file (fpcalc handles decoding)
+      var fingerprint = await _fingerprintService.GenerateFingerprintFromFileAsync(WereReadyMp3);
+      _output.WriteLine($"Fingerprint: hash length={fingerprint.ChromaprintHash?.Length ?? 0}, " +
+        $"duration={fingerprint.DurationSeconds}s");
+      Assert.False(string.IsNullOrEmpty(fingerprint.ChromaprintHash),
+        "Fingerprint hash should not be empty");
 
-    // Step 2: Full pipeline lookup (AcoustID -> MusicBrainz -> Cover Art)
-    var result = await _lookupService.LookupAsync(fingerprint);
+      // Step 2: Full pipeline lookup (AcoustID -> MusicBrainz -> Cover Art)
+      var result = await _lookupService.LookupAsync(fingerprint);
 
-    // Validate identification
-    Assert.NotNull(result);
-    _output.WriteLine($"Lookup result: IsMatch={result.IsMatch}, Confidence={result.Confidence:P0}, " +
-      $"Source={result.Source}");
-    if (result.Metadata != null)
-      _output.WriteLine($"Metadata: Title=\"{result.Metadata.Title}\", " +
-        $"Artist=\"{result.Metadata.Artist}\", Album=\"{result.Metadata.Album}\"");
-    if (!string.IsNullOrEmpty(result.MusicBrainzRecordingId))
-      _output.WriteLine($"MusicBrainz Recording ID: {result.MusicBrainzRecordingId}");
+      // Validate identification
+      Assert.NotNull(result);
+      _output.WriteLine($"Lookup result: IsMatch={result.IsMatch}, Confidence={result.Confidence:P0}, " +
+        $"Source={result.Source}");
+      if (result.Metadata != null)
+        _output.WriteLine($"Metadata: Title=\"{result.Metadata.Title}\", " +
+          $"Artist=\"{result.Metadata.Artist}\", Album=\"{result.Metadata.Album}\"");
+      if (!string.IsNullOrEmpty(result.MusicBrainzRecordingId))
+        _output.WriteLine($"MusicBrainz Recording ID: {result.MusicBrainzRecordingId}");
 
-    Assert.True(result.IsMatch, "Should identify the track");
-    Assert.True(result.Confidence >= 0.5, $"Confidence {result.Confidence} should be >= 0.5");
+      Assert.True(result.IsMatch, "Should identify the track");
+      Assert.True(result.Confidence >= 0.5, $"Confidence {result.Confidence} should be >= 0.5");
 
-    // Validate metadata
-    Assert.NotNull(result.Metadata);
-    Assert.Contains("Ready", result.Metadata.Title, StringComparison.OrdinalIgnoreCase);
-    Assert.Contains("Boston", result.Metadata.Artist, StringComparison.OrdinalIgnoreCase);
+      // Validate metadata
+      Assert.NotNull(result.Metadata);
+      Assert.Contains("Ready", result.Metadata.Title, StringComparison.OrdinalIgnoreCase);
+      Assert.Contains("Boston", result.Metadata.Artist, StringComparison.OrdinalIgnoreCase);
 
-    // MusicBrainz enrichment should provide album info
-    Assert.False(string.IsNullOrEmpty(result.Metadata.Album),
-      "Album should be populated from MusicBrainz");
-    Assert.Contains("Third Stage", result.Metadata.Album, StringComparison.OrdinalIgnoreCase);
+      // MusicBrainz enrichment should provide album info
+      Assert.False(string.IsNullOrEmpty(result.Metadata.Album),
+        "Album should be populated from MusicBrainz");
+      Assert.Contains("Third Stage", result.Metadata.Album, StringComparison.OrdinalIgnoreCase);
 
-    // Cover art - log result but don't fail test since Cover Art Archive/archive.org
-    // may return 401 or be temporarily unavailable
-    if (!string.IsNullOrEmpty(result.Metadata.CoverArtUrl))
-      _output.WriteLine($"Cover art URL: {result.Metadata.CoverArtUrl}");
-    else
-      _output.WriteLine("Cover art URL not available (Cover Art Archive may be unavailable)");
+      // Cover art - log result but don't fail test since Cover Art Archive/archive.org
+      // may return 401 or be temporarily unavailable
+      if (!string.IsNullOrEmpty(result.Metadata.CoverArtUrl))
+        _output.WriteLine($"Cover art URL: {result.Metadata.CoverArtUrl}");
+      else
+        _output.WriteLine("Cover art URL not available (Cover Art Archive may be unavailable)");
+    }
+    catch (HttpRequestException ex)
+    {
+      _output.WriteLine($"External service unavailable: {ex.Message}");
+      Skip.If(true, $"External service unavailable: {ex.Message}");
+    }
   }
 
   [SkippableFact]
@@ -214,32 +222,40 @@ public class FingerprintingPipelineTests : IAsyncLifetime
     RequireExternalNetwork();
     Skip.IfNot(File.Exists(BabyItsColdOutsideMp3), $"Test MP3 not found: {BabyItsColdOutsideMp3}");
 
-    // Step 1: Generate fingerprint from MP3 file (fpcalc handles decoding)
-    var fingerprint = await _fingerprintService.GenerateFingerprintFromFileAsync(BabyItsColdOutsideMp3);
-    _output.WriteLine($"Fingerprint: hash length={fingerprint.ChromaprintHash?.Length ?? 0}, " +
-      $"duration={fingerprint.DurationSeconds}s");
-    if (!string.IsNullOrEmpty(fingerprint.ChromaprintHash))
-      _output.WriteLine($"Hash preview: {fingerprint.ChromaprintHash[..Math.Min(80, fingerprint.ChromaprintHash.Length)]}...");
-    Assert.False(string.IsNullOrEmpty(fingerprint.ChromaprintHash),
-      "Fingerprint hash should not be empty");
+    try
+    {
+      // Step 1: Generate fingerprint from MP3 file (fpcalc handles decoding)
+      var fingerprint = await _fingerprintService.GenerateFingerprintFromFileAsync(BabyItsColdOutsideMp3);
+      _output.WriteLine($"Fingerprint: hash length={fingerprint.ChromaprintHash?.Length ?? 0}, " +
+        $"duration={fingerprint.DurationSeconds}s");
+      if (!string.IsNullOrEmpty(fingerprint.ChromaprintHash))
+        _output.WriteLine($"Hash preview: {fingerprint.ChromaprintHash[..Math.Min(80, fingerprint.ChromaprintHash.Length)]}...");
+      Assert.False(string.IsNullOrEmpty(fingerprint.ChromaprintHash),
+        "Fingerprint hash should not be empty");
 
-    // Step 2: Full pipeline lookup
-    var result = await _lookupService.LookupAsync(fingerprint);
+      // Step 2: Full pipeline lookup
+      var result = await _lookupService.LookupAsync(fingerprint);
 
-    // Validate identification
-    Assert.NotNull(result);
-    _output.WriteLine($"Lookup result: IsMatch={result.IsMatch}, Confidence={result.Confidence}, " +
-      $"Source={result.Source}");
-    if (result.Metadata != null)
-      _output.WriteLine($"Metadata: Title=\"{result.Metadata.Title}\", " +
-        $"Artist=\"{result.Metadata.Artist}\", Album=\"{result.Metadata.Album}\"");
+      // Validate identification
+      Assert.NotNull(result);
+      _output.WriteLine($"Lookup result: IsMatch={result.IsMatch}, Confidence={result.Confidence}, " +
+        $"Source={result.Source}");
+      if (result.Metadata != null)
+        _output.WriteLine($"Metadata: Title=\"{result.Metadata.Title}\", " +
+          $"Artist=\"{result.Metadata.Artist}\", Album=\"{result.Metadata.Album}\"");
 
-    Assert.True(result.IsMatch, "Should identify the track");
-    Assert.True(result.Confidence >= 0.5, $"Confidence {result.Confidence} should be >= 0.5");
+      Assert.True(result.IsMatch, "Should identify the track");
+      Assert.True(result.Confidence >= 0.5, $"Confidence {result.Confidence} should be >= 0.5");
 
-    // Validate metadata
-    Assert.NotNull(result.Metadata);
-    Assert.Contains("Dean Martin", result.Metadata.Artist, StringComparison.OrdinalIgnoreCase);
+      // Validate metadata
+      Assert.NotNull(result.Metadata);
+      Assert.Contains("Dean Martin", result.Metadata.Artist, StringComparison.OrdinalIgnoreCase);
+    }
+    catch (HttpRequestException ex)
+    {
+      _output.WriteLine($"External service unavailable: {ex.Message}");
+      Skip.If(true, $"External service unavailable: {ex.Message}");
+    }
   }
 
   private static string FindSolutionRoot()

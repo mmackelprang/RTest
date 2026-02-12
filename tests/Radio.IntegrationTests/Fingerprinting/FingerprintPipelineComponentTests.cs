@@ -367,33 +367,41 @@ public class FingerprintPipelineComponentTests : IAsyncLifetime
     RequireExternalNetwork();
     Skip.IfNot(File.Exists(WereReadyMp3), $"Test MP3 not found: {WereReadyMp3}");
 
-    // Full-length fingerprint (reference)
-    var fullResult = await RunFpcalcDirectAsync($"-json \"{WereReadyMp3}\"");
-    Assert.NotNull(fullResult);
-    _output.WriteLine($"Full fingerprint: duration={fullResult.Value.duration:F1}s, hash length={fullResult.Value.hash.Length}");
+    try
+    {
+      // Full-length fingerprint (reference)
+      var fullResult = await RunFpcalcDirectAsync($"-json \"{WereReadyMp3}\"");
+      Assert.NotNull(fullResult);
+      _output.WriteLine($"Full fingerprint: duration={fullResult.Value.duration:F1}s, hash length={fullResult.Value.hash.Length}");
 
-    // Short (15s) fingerprint
-    var shortResult = await RunFpcalcDirectAsync($"-length 15 -json \"{WereReadyMp3}\"");
-    Assert.NotNull(shortResult);
-    _output.WriteLine($"Short (15s) fingerprint: duration={shortResult.Value.duration:F1}s, hash length={shortResult.Value.hash.Length}");
+      // Short (15s) fingerprint
+      var shortResult = await RunFpcalcDirectAsync($"-length 15 -json \"{WereReadyMp3}\"");
+      Assert.NotNull(shortResult);
+      _output.WriteLine($"Short (15s) fingerprint: duration={shortResult.Value.duration:F1}s, hash length={shortResult.Value.hash.Length}");
 
-    // Lookup full via AcoustID
-    _output.WriteLine("\n--- Full-length AcoustID lookup ---");
-    var fullLookup = await _acoustIdClient.LookupAsync(fullResult.Value.hash, (int)fullResult.Value.duration);
-    LogAcoustIdResult("Full", fullLookup);
-    Assert.NotNull(fullLookup);
+      // Lookup full via AcoustID
+      _output.WriteLine("\n--- Full-length AcoustID lookup ---");
+      var fullLookup = await _acoustIdClient.LookupAsync(fullResult.Value.hash, (int)fullResult.Value.duration);
+      LogAcoustIdResult("Full", fullLookup);
+      Assert.NotNull(fullLookup);
 
-    // Lookup short via AcoustID
-    _output.WriteLine("--- Short (15s) AcoustID lookup ---");
-    var shortLookup = await _acoustIdClient.LookupAsync(shortResult.Value.hash, (int)shortResult.Value.duration);
-    LogAcoustIdResult("Short", shortLookup);
+      // Lookup short via AcoustID
+      _output.WriteLine("--- Short (15s) AcoustID lookup ---");
+      var shortLookup = await _acoustIdClient.LookupAsync(shortResult.Value.hash, (int)shortResult.Value.duration);
+      LogAcoustIdResult("Short", shortLookup);
 
-    if (shortLookup == null)
-      _output.WriteLine("*** 15-SECOND FINGERPRINT IS TOO SHORT FOR ACOUSTID TO MATCH ***");
-    else
-      _output.WriteLine("15-second fingerprint matches AcoustID — duration is NOT the issue");
+      if (shortLookup == null)
+        _output.WriteLine("*** 15-SECOND FINGERPRINT IS TOO SHORT FOR ACOUSTID TO MATCH ***");
+      else
+        _output.WriteLine("15-second fingerprint matches AcoustID — duration is NOT the issue");
 
-    Assert.NotNull(shortLookup);
+      Assert.NotNull(shortLookup);
+    }
+    catch (HttpRequestException ex)
+    {
+      _output.WriteLine($"AcoustID service unavailable: {ex.Message}");
+      Skip.If(true, $"External service unavailable: {ex.Message}");
+    }
   }
 
   #endregion
@@ -503,53 +511,61 @@ public class FingerprintPipelineComponentTests : IAsyncLifetime
     _output.WriteLine($"Duration match: {pipelineFp.DurationSeconds == (int)shortRefResult.Value.duration}");
 
     // Step 8: Query AcoustID with each fingerprint (with delays to avoid rate limiting)
-    _output.WriteLine("\n=== AcoustID Lookups (1s delay between calls) ===");
-
-    // First: known-good reference to confirm API is working
-    _output.WriteLine("--- fpcalc 15s reference (duration={0}) ---", (int)shortRefResult.Value.duration);
-    var shortRefLookup = await _acoustIdClient.LookupAsync(shortRefResult.Value.hash, (int)shortRefResult.Value.duration);
-    LogAcoustIdResult("fpcalc-15s", shortRefLookup);
-
-    await Task.Delay(1500); // Rate limit protection
-
-    // Second: pipeline fingerprint with SAME duration as reference
-    _output.WriteLine("--- Pipeline fingerprint with ref duration (duration={0}) ---", (int)shortRefResult.Value.duration);
-    var pipelineWithRefDuration = await _acoustIdClient.LookupAsync(pipelineFp.ChromaprintHash, (int)shortRefResult.Value.duration);
-    LogAcoustIdResult("Pipeline-refDur", pipelineWithRefDuration);
-
-    await Task.Delay(1500);
-
-    // Third: pipeline fingerprint with ITS OWN duration
-    _output.WriteLine("--- Pipeline fingerprint with own duration (duration={0}) ---", pipelineFp.DurationSeconds);
-    var pipelineLookup = await _acoustIdClient.LookupAsync(pipelineFp.ChromaprintHash, pipelineFp.DurationSeconds);
-    LogAcoustIdResult("Pipeline-ownDur", pipelineLookup);
-
-    await Task.Delay(1500);
-
-    // Fourth: full reference
-    _output.WriteLine("--- fpcalc full reference (duration={0}) ---", (int)fullRefResult.Value.duration);
-    var fullRefLookup = await _acoustIdClient.LookupAsync(fullRefResult.Value.hash, (int)fullRefResult.Value.duration);
-    LogAcoustIdResult("fpcalc-full", fullRefLookup);
-
-    // Duration tolerance tests — find what duration range AcoustID accepts
-    _output.WriteLine("\n=== Duration Tolerance Tests ===");
-    int[] testDurations = [0, 30, 60, 120, 180, 200, 220, 240, 260, 300];
-    foreach (var dur in testDurations)
+    try
     {
+      _output.WriteLine("\n=== AcoustID Lookups (1s delay between calls) ===");
+
+      // First: known-good reference to confirm API is working
+      _output.WriteLine("--- fpcalc 15s reference (duration={0}) ---", (int)shortRefResult.Value.duration);
+      var shortRefLookup = await _acoustIdClient.LookupAsync(shortRefResult.Value.hash, (int)shortRefResult.Value.duration);
+      LogAcoustIdResult("fpcalc-15s", shortRefLookup);
+
+      await Task.Delay(1500); // Rate limit protection
+
+      // Second: pipeline fingerprint with SAME duration as reference
+      _output.WriteLine("--- Pipeline fingerprint with ref duration (duration={0}) ---", (int)shortRefResult.Value.duration);
+      var pipelineWithRefDuration = await _acoustIdClient.LookupAsync(pipelineFp.ChromaprintHash, (int)shortRefResult.Value.duration);
+      LogAcoustIdResult("Pipeline-refDur", pipelineWithRefDuration);
+
       await Task.Delay(1500);
-      _output.WriteLine($"--- duration={dur} ---");
-      var result = await _acoustIdClient.LookupAsync(pipelineFp.ChromaprintHash, dur);
-      LogAcoustIdResult($"dur-{dur}", result);
+
+      // Third: pipeline fingerprint with ITS OWN duration
+      _output.WriteLine("--- Pipeline fingerprint with own duration (duration={0}) ---", pipelineFp.DurationSeconds);
+      var pipelineLookup = await _acoustIdClient.LookupAsync(pipelineFp.ChromaprintHash, pipelineFp.DurationSeconds);
+      LogAcoustIdResult("Pipeline-ownDur", pipelineLookup);
+
+      await Task.Delay(1500);
+
+      // Fourth: full reference
+      _output.WriteLine("--- fpcalc full reference (duration={0}) ---", (int)fullRefResult.Value.duration);
+      var fullRefLookup = await _acoustIdClient.LookupAsync(fullRefResult.Value.hash, (int)fullRefResult.Value.duration);
+      LogAcoustIdResult("fpcalc-full", fullRefLookup);
+
+      // Duration tolerance tests — find what duration range AcoustID accepts
+      _output.WriteLine("\n=== Duration Tolerance Tests ===");
+      int[] testDurations = [0, 30, 60, 120, 180, 200, 220, 240, 260, 300];
+      foreach (var dur in testDurations)
+      {
+        await Task.Delay(1500);
+        _output.WriteLine($"--- duration={dur} ---");
+        var result = await _acoustIdClient.LookupAsync(pipelineFp.ChromaprintHash, dur);
+        LogAcoustIdResult($"dur-{dur}", result);
+      }
+
+      // Summary
+      _output.WriteLine("\n=== DIAGNOSIS ===");
+      _output.WriteLine("Root cause: fpcalc reports WAV segment duration ({0}s), not full track duration ({1}s)",
+        pipelineFp.DurationSeconds, (int)shortRefResult.Value.duration);
+      _output.WriteLine("Pipeline fingerprint is IDENTICAL to reference — duration param is the only issue.");
+
+      // The test passes if pipeline + correct duration works (proving fingerprint quality)
+      Assert.NotNull(pipelineWithRefDuration);
     }
-
-    // Summary
-    _output.WriteLine("\n=== DIAGNOSIS ===");
-    _output.WriteLine("Root cause: fpcalc reports WAV segment duration ({0}s), not full track duration ({1}s)",
-      pipelineFp.DurationSeconds, (int)shortRefResult.Value.duration);
-    _output.WriteLine("Pipeline fingerprint is IDENTICAL to reference — duration param is the only issue.");
-
-    // The test passes if pipeline + correct duration works (proving fingerprint quality)
-    Assert.NotNull(pipelineWithRefDuration);
+    catch (HttpRequestException ex)
+    {
+      _output.WriteLine($"AcoustID service unavailable: {ex.Message}");
+      Skip.If(true, $"External service unavailable: {ex.Message}");
+    }
   }
 
   #endregion
@@ -573,30 +589,38 @@ public class FingerprintPipelineComponentTests : IAsyncLifetime
       return;
     }
 
-    // Step 1: Fingerprint the actual MP3 file (what the fixed pipeline does)
-    _output.WriteLine("=== File-Based Fingerprinting (The Fix) ===");
-    var fingerprint = await _fingerprintService.GenerateFingerprintFromFileAsync(WereReadyMp3);
+    try
+    {
+      // Step 1: Fingerprint the actual MP3 file (what the fixed pipeline does)
+      _output.WriteLine("=== File-Based Fingerprinting (The Fix) ===");
+      var fingerprint = await _fingerprintService.GenerateFingerprintFromFileAsync(WereReadyMp3);
 
-    Assert.False(string.IsNullOrEmpty(fingerprint.ChromaprintHash), "Fingerprint hash should not be empty");
-    _output.WriteLine($"Fingerprint: duration={fingerprint.DurationSeconds}s, hash={fingerprint.ChromaprintHash.Length} chars");
+      Assert.False(string.IsNullOrEmpty(fingerprint.ChromaprintHash), "Fingerprint hash should not be empty");
+      _output.WriteLine($"Fingerprint: duration={fingerprint.DurationSeconds}s, hash={fingerprint.ChromaprintHash.Length} chars");
 
-    // Step 2: Verify duration is the full track duration, not a short segment
-    Assert.True(fingerprint.DurationSeconds > 100,
-      $"Duration should be full track length (>100s), got {fingerprint.DurationSeconds}s");
-    _output.WriteLine($"Duration={fingerprint.DurationSeconds}s (full track length ✓)");
+      // Step 2: Verify duration is the full track duration, not a short segment
+      Assert.True(fingerprint.DurationSeconds > 100,
+        $"Duration should be full track length (>100s), got {fingerprint.DurationSeconds}s");
+      _output.WriteLine($"Duration={fingerprint.DurationSeconds}s (full track length ✓)");
 
-    // Step 3: Look up via AcoustID — this should now match
-    var result = await _acoustIdClient.LookupAsync(fingerprint.ChromaprintHash, fingerprint.DurationSeconds);
-    LogAcoustIdResult("File-based", result);
+      // Step 3: Look up via AcoustID — this should now match
+      var result = await _acoustIdClient.LookupAsync(fingerprint.ChromaprintHash, fingerprint.DurationSeconds);
+      LogAcoustIdResult("File-based", result);
 
-    Assert.NotNull(result);
-    Assert.True(result.Recordings.Count > 0, "Should have at least one recording");
+      Assert.NotNull(result);
+      Assert.True(result.Recordings.Count > 0, "Should have at least one recording");
 
-    var hasBoston = result.Recordings.Any(r =>
-      r.Artists.Any(a => a.Contains("Boston", StringComparison.OrdinalIgnoreCase)));
-    Assert.True(hasBoston, "Should identify 'We're Ready' by Boston");
+      var hasBoston = result.Recordings.Any(r =>
+        r.Artists.Any(a => a.Contains("Boston", StringComparison.OrdinalIgnoreCase)));
+      Assert.True(hasBoston, "Should identify 'We're Ready' by Boston");
 
-    _output.WriteLine("File-based fingerprinting WORKS — this is what the fixed pipeline uses for file sources.");
+      _output.WriteLine("File-based fingerprinting WORKS — this is what the fixed pipeline uses for file sources.");
+    }
+    catch (HttpRequestException ex)
+    {
+      _output.WriteLine($"AcoustID service unavailable: {ex.Message}");
+      Skip.If(true, $"External service unavailable: {ex.Message}");
+    }
   }
 
   #endregion

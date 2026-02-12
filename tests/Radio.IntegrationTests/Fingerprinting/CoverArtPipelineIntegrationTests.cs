@@ -63,92 +63,101 @@ public class CoverArtPipelineIntegrationTests : IDisposable
   public async Task CoverArtArchive_ReturnsValidUrl_ForKnownRecording()
   {
     NetworkAvailabilityHelper.RequireExternalNetwork();
-    // Step 1: Query MusicBrainz for recording → extract release ID
-    _output.WriteLine($"=== Step 1: MusicBrainz lookup for '{KnownTitle}' ===");
-    var url = $"https://musicbrainz.org/ws/2/recording/{KnownRecordingId}?inc=artists+releases+release-groups&fmt=json";
 
-    using var mbResponse = await _musicBrainzClient.GetAsync(url);
-    Assert.True(mbResponse.IsSuccessStatusCode,
-      $"MusicBrainz returned {mbResponse.StatusCode} for recording {KnownRecordingId}");
+    try
+    {
+      // Step 1: Query MusicBrainz for recording → extract release ID
+      _output.WriteLine($"=== Step 1: MusicBrainz lookup for '{KnownTitle}' ===");
+      var url = $"https://musicbrainz.org/ws/2/recording/{KnownRecordingId}?inc=artists+releases+release-groups&fmt=json";
 
-    var mbJson = await mbResponse.Content.ReadAsStringAsync();
-    var recording = JsonSerializer.Deserialize<MbRecording>(mbJson);
-    Assert.NotNull(recording);
-    _output.WriteLine($"  Title: {recording.Title}");
-    _output.WriteLine($"  Releases: {recording.Releases?.Count ?? 0}");
+      using var mbResponse = await _musicBrainzClient.GetAsync(url);
+      Assert.True(mbResponse.IsSuccessStatusCode,
+        $"MusicBrainz returned {mbResponse.StatusCode} for recording {KnownRecordingId}");
 
-    // Find best non-compilation album release (same logic as MetadataLookupService)
-    var bestRelease = recording.Releases?
-      .OrderByDescending(r =>
+      var mbJson = await mbResponse.Content.ReadAsStringAsync();
+      var recording = JsonSerializer.Deserialize<MbRecording>(mbJson);
+      Assert.NotNull(recording);
+      _output.WriteLine($"  Title: {recording.Title}");
+      _output.WriteLine($"  Releases: {recording.Releases?.Count ?? 0}");
+
+      // Find best non-compilation album release (same logic as MetadataLookupService)
+      var bestRelease = recording.Releases?
+        .OrderByDescending(r =>
+        {
+          var rg = r.ReleaseGroup;
+          if (rg == null) return 0;
+          bool isAlbum = string.Equals(rg.PrimaryType, "Album", StringComparison.OrdinalIgnoreCase);
+          bool isCompilation = rg.SecondaryTypes?.Any(st =>
+            string.Equals(st, "Compilation", StringComparison.OrdinalIgnoreCase)) == true;
+          return isAlbum && !isCompilation ? 2 : isAlbum ? 1 : 0;
+        })
+        .FirstOrDefault();
+
+      Assert.NotNull(bestRelease);
+      Assert.False(string.IsNullOrEmpty(bestRelease.Id), "Release ID should not be empty");
+      _output.WriteLine($"  Best release: '{bestRelease.Title}' (ID: {bestRelease.Id})");
+      _output.WriteLine($"  Release group: '{bestRelease.ReleaseGroup?.Title}' (type: {bestRelease.ReleaseGroup?.PrimaryType})");
+
+      // Step 2: Query Cover Art Archive for the release
+      _output.WriteLine($"\n=== Step 2: Cover Art Archive lookup for release {bestRelease.Id} ===");
+      var coverArtUrl = $"https://coverartarchive.org/release/{bestRelease.Id}";
+
+      using var caResponse = await _coverArtClient.GetAsync(coverArtUrl);
+      _output.WriteLine($"  Response: {caResponse.StatusCode}");
+
+      if (!caResponse.IsSuccessStatusCode)
       {
-        var rg = r.ReleaseGroup;
-        if (rg == null) return 0;
-        bool isAlbum = string.Equals(rg.PrimaryType, "Album", StringComparison.OrdinalIgnoreCase);
-        bool isCompilation = rg.SecondaryTypes?.Any(st =>
-          string.Equals(st, "Compilation", StringComparison.OrdinalIgnoreCase)) == true;
-        return isAlbum && !isCompilation ? 2 : isAlbum ? 1 : 0;
-      })
-      .FirstOrDefault();
+        _output.WriteLine($"  *** Cover Art Archive returned {caResponse.StatusCode} — no cover art available ***");
+        _output.WriteLine($"  This means the release {bestRelease.Id} has no cover art uploaded.");
+        Assert.Fail($"Cover Art Archive returned {caResponse.StatusCode} for release {bestRelease.Id}");
+      }
 
-    Assert.NotNull(bestRelease);
-    Assert.False(string.IsNullOrEmpty(bestRelease.Id), "Release ID should not be empty");
-    _output.WriteLine($"  Best release: '{bestRelease.Title}' (ID: {bestRelease.Id})");
-    _output.WriteLine($"  Release group: '{bestRelease.ReleaseGroup?.Title}' (type: {bestRelease.ReleaseGroup?.PrimaryType})");
+      var caJson = await caResponse.Content.ReadAsStringAsync();
+      var coverArt = JsonSerializer.Deserialize<CaResponse>(caJson);
+      Assert.NotNull(coverArt?.Images);
+      Assert.NotEmpty(coverArt.Images);
+      _output.WriteLine($"  Images: {coverArt.Images.Count}");
 
-    // Step 2: Query Cover Art Archive for the release
-    _output.WriteLine($"\n=== Step 2: Cover Art Archive lookup for release {bestRelease.Id} ===");
-    var coverArtUrl = $"https://coverartarchive.org/release/{bestRelease.Id}";
+      // Find front cover
+      var frontImage = coverArt.Images.FirstOrDefault(i => i.Front == true);
+      if (frontImage == null)
+      {
+        _output.WriteLine("  No front cover found, using first image");
+        frontImage = coverArt.Images.First();
+      }
 
-    using var caResponse = await _coverArtClient.GetAsync(coverArtUrl);
-    _output.WriteLine($"  Response: {caResponse.StatusCode}");
+      _output.WriteLine($"  Front: {frontImage.Front}");
+      _output.WriteLine($"  Image URL: {frontImage.Image}");
+      _output.WriteLine($"  Thumbnail (small): {frontImage.Thumbnails?.Small}");
+      _output.WriteLine($"  Thumbnail (large): {frontImage.Thumbnails?.Large}");
+      _output.WriteLine($"  Thumbnail (250): {frontImage.Thumbnails?.Size250}");
+      _output.WriteLine($"  Thumbnail (500): {frontImage.Thumbnails?.Size500}");
 
-    if (!caResponse.IsSuccessStatusCode)
-    {
-      _output.WriteLine($"  *** Cover Art Archive returned {caResponse.StatusCode} — no cover art available ***");
-      _output.WriteLine($"  This means the release {bestRelease.Id} has no cover art uploaded.");
-      Assert.Fail($"Cover Art Archive returned {caResponse.StatusCode} for release {bestRelease.Id}");
+      // Get the URL that MetadataLookupService would use
+      var selectedUrl = frontImage.Thumbnails?.Small
+        ?? frontImage.Thumbnails?.Large
+        ?? frontImage.Image;
+
+      Assert.False(string.IsNullOrEmpty(selectedUrl), "Cover art URL should not be empty");
+      _output.WriteLine($"\n  Selected URL (what MetadataLookupService returns): {selectedUrl}");
+
+      // Step 3: Verify the URL is accessible
+      _output.WriteLine($"\n=== Step 3: Verify URL is accessible ===");
+      using var imgResponse = await _coverArtClient.GetAsync(selectedUrl);
+      _output.WriteLine($"  Response: {imgResponse.StatusCode}");
+      _output.WriteLine($"  Content-Type: {imgResponse.Content.Headers.ContentType}");
+      _output.WriteLine($"  Content-Length: {imgResponse.Content.Headers.ContentLength}");
+
+      Assert.True(imgResponse.IsSuccessStatusCode,
+        $"Cover art URL returned {imgResponse.StatusCode}: {selectedUrl}");
+
+      _output.WriteLine("\n=== PASS: Cover Art Archive pipeline works end-to-end ===");
     }
-
-    var caJson = await caResponse.Content.ReadAsStringAsync();
-    var coverArt = JsonSerializer.Deserialize<CaResponse>(caJson);
-    Assert.NotNull(coverArt?.Images);
-    Assert.NotEmpty(coverArt.Images);
-    _output.WriteLine($"  Images: {coverArt.Images.Count}");
-
-    // Find front cover
-    var frontImage = coverArt.Images.FirstOrDefault(i => i.Front == true);
-    if (frontImage == null)
+    catch (HttpRequestException ex)
     {
-      _output.WriteLine("  No front cover found, using first image");
-      frontImage = coverArt.Images.First();
+      _output.WriteLine($"External service unavailable: {ex.Message}");
+      Skip.If(true, $"External service unavailable (SSL/connection error): {ex.Message}");
     }
-
-    _output.WriteLine($"  Front: {frontImage.Front}");
-    _output.WriteLine($"  Image URL: {frontImage.Image}");
-    _output.WriteLine($"  Thumbnail (small): {frontImage.Thumbnails?.Small}");
-    _output.WriteLine($"  Thumbnail (large): {frontImage.Thumbnails?.Large}");
-    _output.WriteLine($"  Thumbnail (250): {frontImage.Thumbnails?.Size250}");
-    _output.WriteLine($"  Thumbnail (500): {frontImage.Thumbnails?.Size500}");
-
-    // Get the URL that MetadataLookupService would use
-    var selectedUrl = frontImage.Thumbnails?.Small
-      ?? frontImage.Thumbnails?.Large
-      ?? frontImage.Image;
-
-    Assert.False(string.IsNullOrEmpty(selectedUrl), "Cover art URL should not be empty");
-    _output.WriteLine($"\n  Selected URL (what MetadataLookupService returns): {selectedUrl}");
-
-    // Step 3: Verify the URL is accessible
-    _output.WriteLine($"\n=== Step 3: Verify URL is accessible ===");
-    using var imgResponse = await _coverArtClient.GetAsync(selectedUrl);
-    _output.WriteLine($"  Response: {imgResponse.StatusCode}");
-    _output.WriteLine($"  Content-Type: {imgResponse.Content.Headers.ContentType}");
-    _output.WriteLine($"  Content-Length: {imgResponse.Content.Headers.ContentLength}");
-
-    Assert.True(imgResponse.IsSuccessStatusCode,
-      $"Cover art URL returned {imgResponse.StatusCode}: {selectedUrl}");
-
-    _output.WriteLine("\n=== PASS: Cover Art Archive pipeline works end-to-end ===");
   }
 
   /// <summary>
@@ -159,54 +168,63 @@ public class CoverArtPipelineIntegrationTests : IDisposable
   public async Task MetadataLookupService_GetMusicBrainzMetadata_PopulatesCoverArtUrl()
   {
     NetworkAvailabilityHelper.RequireExternalNetwork();
-    // Create MetadataLookupService with real HTTP client
-    var options = Options.Create(new FingerprintingOptions
+
+    try
     {
-      Enabled = true,
-      MusicBrainz = new MusicBrainzOptions
+      // Create MetadataLookupService with real HTTP client
+      var options = Options.Create(new FingerprintingOptions
       {
-        BaseUrl = "https://musicbrainz.org/ws/2",
-        ApplicationName = "RadioConsole",
-        ApplicationVersion = "1.0.0",
-        ContactEmail = "mark@mackelprang.com",
-        TimeoutSeconds = 15
-      }
-    });
+        Enabled = true,
+        MusicBrainz = new MusicBrainzOptions
+        {
+          BaseUrl = "https://musicbrainz.org/ws/2",
+          ApplicationName = "RadioConsole",
+          ApplicationVersion = "1.0.0",
+          ContactEmail = "mark@mackelprang.com",
+          TimeoutSeconds = 15
+        }
+      });
 
-    // We need to mock the cache and metadata repos since they require SQLite
-    var mockCache = new InMemoryFingerprintCache();
-    var mockMetadataRepo = new InMemoryTrackMetadataRepo();
+      // We need to mock the cache and metadata repos since they require SQLite
+      var mockCache = new InMemoryFingerprintCache();
+      var mockMetadataRepo = new InMemoryTrackMetadataRepo();
 
-    var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-    httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(
-      "RadioConsole/1.0.0 (mark@mackelprang.com)");
-    var service = new MetadataLookupService(
-      NullLogger<MetadataLookupService>.Instance,
-      mockCache,
-      mockMetadataRepo,
-      options,
-      httpClient);
+      var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+      httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(
+        "RadioConsole/1.0.0 (mark@mackelprang.com)");
+      var service = new MetadataLookupService(
+        NullLogger<MetadataLookupService>.Instance,
+        mockCache,
+        mockMetadataRepo,
+        options,
+        httpClient);
 
-    // Call GetMusicBrainzMetadataAsync directly
-    _output.WriteLine($"Querying MusicBrainz for recording {KnownRecordingId} ('{KnownTitle}')");
-    var metadata = await service.GetMusicBrainzMetadataAsync(KnownRecordingId);
+      // Call GetMusicBrainzMetadataAsync directly
+      _output.WriteLine($"Querying MusicBrainz for recording {KnownRecordingId} ('{KnownTitle}')");
+      var metadata = await service.GetMusicBrainzMetadataAsync(KnownRecordingId);
 
-    Assert.NotNull(metadata);
-    _output.WriteLine($"  Title: {metadata.Title}");
-    _output.WriteLine($"  Artist: {metadata.Artist}");
-    _output.WriteLine($"  Album: {metadata.Album}");
-    _output.WriteLine($"  ReleaseYear: {metadata.ReleaseYear}");
-    _output.WriteLine($"  MusicBrainzReleaseId: {metadata.MusicBrainzReleaseId}");
-    _output.WriteLine($"  CoverArtUrl: {metadata.CoverArtUrl ?? "(null)"}");
+      Assert.NotNull(metadata);
+      _output.WriteLine($"  Title: {metadata.Title}");
+      _output.WriteLine($"  Artist: {metadata.Artist}");
+      _output.WriteLine($"  Album: {metadata.Album}");
+      _output.WriteLine($"  ReleaseYear: {metadata.ReleaseYear}");
+      _output.WriteLine($"  MusicBrainzReleaseId: {metadata.MusicBrainzReleaseId}");
+      _output.WriteLine($"  CoverArtUrl: {metadata.CoverArtUrl ?? "(null)"}");
 
-    Assert.False(string.IsNullOrEmpty(metadata.CoverArtUrl),
-      $"CoverArtUrl should be populated for '{KnownTitle}' by '{KnownArtist}'. " +
-      $"MusicBrainzReleaseId={metadata.MusicBrainzReleaseId}");
+      Assert.False(string.IsNullOrEmpty(metadata.CoverArtUrl),
+        $"CoverArtUrl should be populated for '{KnownTitle}' by '{KnownArtist}'. " +
+        $"MusicBrainzReleaseId={metadata.MusicBrainzReleaseId}");
 
-    Assert.StartsWith("http", metadata.CoverArtUrl);
-    _output.WriteLine($"\n=== PASS: MetadataLookupService returns CoverArtUrl for '{KnownTitle}' ===");
+      Assert.StartsWith("http", metadata.CoverArtUrl);
+      _output.WriteLine($"\n=== PASS: MetadataLookupService returns CoverArtUrl for '{KnownTitle}' ===");
 
-    httpClient.Dispose();
+      httpClient.Dispose();
+    }
+    catch (HttpRequestException ex)
+    {
+      _output.WriteLine($"External service unavailable: {ex.Message}");
+      Skip.If(true, $"External service unavailable (SSL/connection error): {ex.Message}");
+    }
   }
 
   #region DTOs for direct API testing
