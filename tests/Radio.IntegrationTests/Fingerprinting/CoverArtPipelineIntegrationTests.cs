@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
+using Radio.IntegrationTests.TestSupport;
 using Xunit.Abstractions;
 
 namespace Radio.IntegrationTests.Fingerprinting;
@@ -58,9 +59,10 @@ public class CoverArtPipelineIntegrationTests : IDisposable
   /// and that Cover Art Archive returns a valid front cover URL.
   /// This is the exact same path MetadataLookupService.GetMusicBrainzMetadataAsync() takes.
   /// </summary>
-  [Fact]
+  [SkippableFact]
   public async Task CoverArtArchive_ReturnsValidUrl_ForKnownRecording()
   {
+    NetworkAvailabilityHelper.RequireExternalNetwork();
     // Step 1: Query MusicBrainz for recording → extract release ID
     _output.WriteLine($"=== Step 1: MusicBrainz lookup for '{KnownTitle}' ===");
     var url = $"https://musicbrainz.org/ws/2/recording/{KnownRecordingId}?inc=artists+releases+release-groups&fmt=json";
@@ -153,9 +155,10 @@ public class CoverArtPipelineIntegrationTests : IDisposable
   /// Tests the full MetadataLookupService pipeline with a real MusicBrainz recording ID.
   /// Uses the actual service code path to verify CoverArtUrl is populated.
   /// </summary>
-  [Fact]
+  [SkippableFact]
   public async Task MetadataLookupService_GetMusicBrainzMetadata_PopulatesCoverArtUrl()
   {
+    NetworkAvailabilityHelper.RequireExternalNetwork();
     // Create MetadataLookupService with real HTTP client
     var options = Options.Create(new FingerprintingOptions
     {

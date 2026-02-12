@@ -9,6 +9,7 @@ using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.IntegrationTests.TestSupport;
 using Xunit.Abstractions;
+using static Radio.IntegrationTests.TestSupport.NetworkAvailabilityHelper;
 
 namespace Radio.IntegrationTests.Fingerprinting;
 
@@ -363,6 +364,7 @@ public class FingerprintPipelineComponentTests : IAsyncLifetime
   public async Task Stage4_ShortDuration_WereReady_MatchesAcoustId()
   {
     RequireFpcalc();
+    RequireExternalNetwork();
     Skip.IfNot(File.Exists(WereReadyMp3), $"Test MP3 not found: {WereReadyMp3}");
 
     // Full-length fingerprint (reference)
@@ -407,6 +409,7 @@ public class FingerprintPipelineComponentTests : IAsyncLifetime
   public async Task Stage5_FullPipeline_WereReady_SimulatedCapture_MatchesAcoustId()
   {
     RequireFpcalc();
+    RequireExternalNetwork();
     Skip.IfNot(File.Exists(WereReadyMp3), $"Test MP3 not found: {WereReadyMp3}");
 
     // Step 1: Convert MP3 to 48kHz stereo WAV using ffmpeg
@@ -563,6 +566,7 @@ public class FingerprintPipelineComponentTests : IAsyncLifetime
   public async Task Stage6_FileBasedFingerprint_WereReady_MatchesAcoustId()
   {
     RequireFpcalc();
+    RequireExternalNetwork();
     if (!File.Exists(WereReadyMp3))
     {
       Skip.If(true, $"Test MP3 not found at {WereReadyMp3}");

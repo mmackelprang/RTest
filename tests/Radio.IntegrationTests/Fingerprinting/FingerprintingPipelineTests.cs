@@ -7,6 +7,7 @@ using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Fingerprinting.Data;
 using Radio.IntegrationTests.TestSupport;
 using Xunit.Abstractions;
+using static Radio.IntegrationTests.TestSupport.NetworkAvailabilityHelper;
 
 namespace Radio.IntegrationTests.Fingerprinting;
 
@@ -162,6 +163,7 @@ public class FingerprintingPipelineTests : IAsyncLifetime
   public async Task LookupMetadata_WereReady_IdentifiesCorrectly()
   {
     RequireFpcalc();
+    RequireExternalNetwork();
     Skip.IfNot(File.Exists(WereReadyMp3), $"Test MP3 not found: {WereReadyMp3}");
 
     // Step 1: Generate fingerprint from MP3 file (fpcalc handles decoding)
@@ -209,6 +211,7 @@ public class FingerprintingPipelineTests : IAsyncLifetime
   public async Task LookupMetadata_BabyItsColdOutside_IdentifiesCorrectly()
   {
     RequireFpcalc();
+    RequireExternalNetwork();
     Skip.IfNot(File.Exists(BabyItsColdOutsideMp3), $"Test MP3 not found: {BabyItsColdOutsideMp3}");
 
     // Step 1: Generate fingerprint from MP3 file (fpcalc handles decoding)
