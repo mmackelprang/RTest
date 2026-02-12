@@ -40,11 +40,11 @@ Output goes to `publish/linux-arm64/` or `publish/linux-x64/`.
 
 ```bash
 # Copy setup script and published files to the target
-scp -r deploy/raspberry-pi/setup.sh pi@<ip>:~/
-scp -r publish/linux-arm64/* pi@<ip>:/tmp/radio-console/
+scp -r deploy/raspberry-pi/setup.sh pi@piradio:~/
+scp -r publish/linux-arm64/* pi@piradio:/tmp/radio-console/
 
 # SSH into the target
-ssh pi@<ip>
+ssh pi@piradio
 
 # Run setup
 sudo ~/setup.sh
@@ -64,7 +64,7 @@ sudo systemctl status radio-console
 
 ### 4. Access the UI
 
-Open a browser to `http://<target-ip>:5000`
+Open a browser to `http://piradio:5000`
 
 ## Configuration
 
@@ -138,6 +138,86 @@ sudo systemctl enable radio-console
 sudo systemctl disable radio-console
 ```
 
+## Migrating Data to the Pi
+
+When moving from a development machine to the Pi (or between Pi installs), you need to
+migrate the SQLite databases and secrets. The deploy script intentionally **never overwrites**
+the `data/` directory, so migration is a one-time manual step.
+
+### What to Migrate
+
+| File | Contains | Required? |
+|---|---|---|
+| `data/config/configuration.db` | Audio preferences, radio presets, file player state, queue, all config sections | Yes — without it the app starts with defaults |
+| `data/secrets/secrets.db` | Encrypted API keys (AcoustID, Google TTS, Azure TTS) | Yes — fingerprinting and cloud TTS won't work without keys |
+| `data/fingerprints/fingerprints.db` | Fingerprint cache, track metadata, play history, TTS voice cache, playlists | Optional — rebuilds over time, but play history is lost |
+| `data/albumart/` | Cached album art JPEGs (content-addressed) | Optional — re-downloaded on demand |
+| `data/metrics/metrics.db` | Performance metrics history | Optional — only needed if you want historical graphs |
+
+### Migration Steps
+
+```powershell
+# 1. Stop the service on the Pi (if running)
+ssh pi@piradio "sudo systemctl stop radio-console 2>/dev/null; true"
+
+# 2. Ensure data directories exist on the Pi
+ssh pi@piradio "sudo mkdir -p /opt/radio-console/data/{config,secrets,fingerprints,albumart,metrics,backups} && sudo chown -R radio:radio /opt/radio-console/data"
+
+# 3. Copy databases from your dev machine to the Pi
+scp data/config/configuration.db pi@piradio:/tmp/config.db
+scp data/secrets/secrets.db pi@piradio:/tmp/secrets.db
+scp data/fingerprints/fingerprints.db pi@piradio:/tmp/fingerprints.db
+
+# 4. Move into place with correct ownership
+ssh pi@piradio @"
+  sudo cp /tmp/config.db /opt/radio-console/data/config/configuration.db
+  sudo cp /tmp/secrets.db /opt/radio-console/data/secrets/secrets.db
+  sudo cp /tmp/fingerprints.db /opt/radio-console/data/fingerprints/fingerprints.db
+  sudo chown -R radio:radio /opt/radio-console/data
+  rm -f /tmp/config.db /tmp/secrets.db /tmp/fingerprints.db
+"@
+
+# 5. Start the service
+ssh pi@piradio "sudo systemctl start radio-console"
+```
+
+### Secrets and Encryption
+
+The secrets database (`secrets.db`) stores API keys encrypted with a machine-specific key.
+If the encryption key is machine-bound (derived from machine ID), secrets encrypted on your
+Windows dev machine **won't decrypt on the Pi**. In that case, re-enter secrets via the
+System Config page (`http://piradio:5000/system-config`) after migration, or use the API:
+
+```bash
+# Set AcoustID API key on the Pi
+curl -X PUT http://piradio:5000/api/configuration/secrets/Fingerprinting:AcoustId:ApiKey \
+  -H "Content-Type: application/json" \
+  -d '"your-api-key-here"'
+```
+
+### Backing Up Pi Data
+
+```bash
+# Create a timestamped backup of all Pi databases
+ssh pi@piradio "sudo tar czf /tmp/radio-backup-\$(date +%Y%m%d).tar.gz -C /opt/radio-console data/"
+scp pi@piradio:/tmp/radio-backup-*.tar.gz ./backups/
+```
+
+### Configuration Differences Between Dev and Pi
+
+Some settings may need adjustment for the Pi environment:
+
+| Setting | Windows Dev | Pi |
+|---|---|---|
+| Audio device | Windows default output | ALSA/PulseAudio device |
+| File player root | `C:\Music` or similar | `/home/pi/music` or mounted USB |
+| RTL-SDR device | May not be connected | `/dev/swradio0` or USB dongle |
+| Bluetooth | Windows BT stack | BlueZ/PulseAudio |
+| fpcalc path | `tools\fpcalc\fpcalc.exe` | `/usr/bin/fpcalc` or `tools/fpcalc/fpcalc` |
+
+After migrating `configuration.db`, review these settings in the System Config page
+and update paths/devices as needed for the Pi hardware.
+
 ## Development Workflow: Building and Testing on the Pi
 
 ### Overview
@@ -155,41 +235,50 @@ the .NET SDK installed on the Pi at all.
 | Git pull + `dotnet build` on Pi | ~60-90s on Pi 5 | Yes (.NET 8 SDK) | Slow, needs SDK |
 | Git pull + pre-built artifacts | ~10s on dev PC | No | Medium — two steps |
 
-### Option A: Direct SCP Deploy (Recommended)
+### Option A: Direct Deploy from Windows (Recommended)
 
-Use the `deploy-to-pi.sh` script for single-command build-and-deploy:
+Use `Deploy-ToPi.ps1` for single-command build-and-deploy from PowerShell:
 
-```bash
-# First time: set your Pi's IP (or add to ~/.bashrc)
-export PI_HOST=192.168.1.100
-export PI_USER=pi
-
-# Build, push, and restart in one command
-./deploy/deploy-to-pi.sh
+```powershell
+# Build, push, and restart in one command (defaults to piradio host)
+.\deploy\Deploy-ToPi.ps1
 
 # Deploy without restarting (for inspecting the build first)
-./deploy/deploy-to-pi.sh --no-restart
+.\deploy\Deploy-ToPi.ps1 -NoRestart
 
 # Deploy and tail logs immediately
-./deploy/deploy-to-pi.sh --logs
+.\deploy\Deploy-ToPi.ps1 -Logs
+
+# Quick mode: framework-dependent (smaller, needs .NET runtime on Pi)
+.\deploy\Deploy-ToPi.ps1 -Quick
+
+# Override Pi host/user
+.\deploy\Deploy-ToPi.ps1 -PiHost 192.168.86.44 -PiUser mmack
 ```
+
+Default settings (override via parameters or environment variables):
+- `PI_HOST` = `piradio` (resolves to `piradio.lan` / `192.168.86.44`)
+- `PI_USER` = `pi`
+- `PI_PATH` = `/opt/radio-console`
 
 What the script does:
 1. Cross-compiles for `linux-arm64` with `dotnet publish`
 2. Stops the service on the Pi via SSH
-3. Uses `rsync` over SSH to sync only changed files (preserves `data/` and `logs/`)
-4. Fixes ownership/permissions
-5. Restarts the service
+3. Uses `rsync` (if available) or `scp` to sync files (preserves `data/` and `logs/`)
+4. Fixes ownership/permissions on the Pi
+5. Restarts the service and checks health
 6. Optionally tails `journalctl` so you see startup output
+
+A `deploy-to-pi.sh` bash script is also available for Linux/macOS/WSL development.
 
 **SSH key setup** (do this once so you're not prompted for passwords):
 
-```bash
+```powershell
 # Generate key if you don't have one
 ssh-keygen -t ed25519
 
-# Copy to Pi
-ssh-copy-id pi@192.168.1.100
+# Copy to Pi (from PowerShell)
+type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh pi@piradio "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"
 ```
 
 ### Option B: Git Pull on Pi
@@ -251,13 +340,13 @@ dotnet test --configuration Release --no-build
 **Tail logs on Pi while developing on Windows** (keep a terminal open):
 
 ```bash
-ssh pi@192.168.1.100 "journalctl -u radio-console -f"
+ssh pi@piradio "journalctl -u radio-console -f"
 ```
 
 **Run the app manually** (instead of via systemd) for faster iteration and console output:
 
 ```bash
-ssh pi@192.168.1.100
+ssh pi@piradio
 sudo systemctl stop radio-console
 cd /opt/radio-console
 sudo -u radio ./Radio.API
@@ -269,7 +358,7 @@ sudo -u radio ./Radio.API
 ```bash
 # Faster than full self-contained publish for quick checks
 dotnet publish src/Radio.API -c Release -r linux-arm64 --no-self-contained -o publish/quick
-rsync -avz publish/quick/ pi@192.168.1.100:/opt/radio-console/
+rsync -avz publish/quick/ pi@piradio:/opt/radio-console/
 ```
 
 Note: `--no-self-contained` requires the .NET 8 runtime on the Pi (`sudo apt install dotnet-runtime-8.0`),
@@ -285,10 +374,10 @@ For production updates (when the Pi is deployed as the radio appliance):
 
 # Or manual steps:
 cd deploy/common && ./publish.sh arm64
-ssh pi@<ip> "sudo systemctl stop radio-console"
-rsync -avz --exclude='data' --exclude='logs' publish/linux-arm64/ pi@<ip>:/opt/radio-console/
-ssh pi@<ip> "sudo chown -R radio:radio /opt/radio-console && sudo chmod +x /opt/radio-console/Radio.API"
-ssh pi@<ip> "sudo systemctl start radio-console"
+ssh pi@piradio "sudo systemctl stop radio-console"
+rsync -avz --exclude='data' --exclude='logs' publish/linux-arm64/ pi@piradio:/opt/radio-console/
+ssh pi@piradio "sudo chown -R radio:radio /opt/radio-console && sudo chmod +x /opt/radio-console/Radio.API"
+ssh pi@piradio "sudo systemctl start radio-console"
 ```
 
 ## Troubleshooting
