@@ -9,26 +9,28 @@ internet radio (RTL-SDR), Spotify, Google Cast, audio fingerprinting, and a Blaz
 **Target platform:** Raspberry Pi 5 (ARM64, Raspberry Pi OS Bookworm 64-bit)
 **Stack:** .NET 8, ASP.NET Core, Blazor Server, SoundFlow (MiniAudio), PipeWire, BlueZ 5
 
-## Prerequisites
+## Architecture
 
-### Hardware
+The application runs as two separate systemd services:
 
-| Component | Required? | Purpose |
+```
+/opt/radio-console/
+  api/              ← Radio.API binaries (audio engine, REST, SignalR)
+  web/              ← Radio.Web binaries (Blazor Server UI)
+  data/             ← Shared data (config, metrics, fingerprints, secrets, albumart, backups)
+  logs/             ← Shared logs
+  tools/            ← fpcalc, etc.
+```
+
+| Service | Port | Purpose |
 |---|---|---|
-| Raspberry Pi 5 (4GB+) | Yes | Application host |
-| Audio output (3.5mm, USB DAC, or HDMI) | Yes | Audio playback |
-| Network connection (Ethernet or WiFi) | Yes | Google Cast discovery, API access, fingerprinting |
-| USB RTL-SDR dongle | Optional | FM/AM radio reception via SDR |
-| USB Bluetooth adapter | Optional | Only if built-in BT is insufficient |
-| 12.5" x 3.75" touchscreen (1920x576) | Optional | Designed display; any browser works too |
+| `radio-api.service` | 5000 | REST API, SignalR hubs, audio engine, Bluetooth, Cast |
+| `radio-web.service` | 5002 | Blazor Server UI, depends on radio-api |
 
-### Software
+`radio-web` has `Requires=radio-api.service` — stopping the API automatically stops the Web UI.
+Both services use `WorkingDirectory=/opt/radio-console` so relative paths (`./data`, `logs/`) resolve to the shared directories.
 
-- Raspberry Pi OS **Bookworm** (64-bit) — other Debian 12+ distros should work
-- Root/sudo access for initial setup
-- Internet access during setup (for package installation)
-
-## Architecture: Audio Pipeline
+### Audio Pipeline
 
 ```
 Phone (A2DP) ──► BlueZ ──► PipeWire bluez_input
@@ -52,6 +54,25 @@ Phone (A2DP) ──► BlueZ ──► PipeWire bluez_input
 Other audio sources (Radio/SDR, Spotify, File Player, TTS) feed directly into the
 SoundFlow mixer without the null sink intermediary.
 
+## Prerequisites
+
+### Hardware
+
+| Component | Required? | Purpose |
+|---|---|---|
+| Raspberry Pi 5 (4GB+) | Yes | Application host |
+| Audio output (3.5mm, USB DAC, or HDMI) | Yes | Audio playback |
+| Network connection (Ethernet or WiFi) | Yes | Google Cast discovery, API access, fingerprinting |
+| USB RTL-SDR dongle | Optional | FM/AM radio reception via SDR |
+| USB Bluetooth adapter | Optional | Only if built-in BT is insufficient |
+| 12.5" x 3.75" touchscreen (1920x576) | Optional | Designed display; any browser works too |
+
+### Software
+
+- Raspberry Pi OS **Bookworm** (64-bit) — other Debian 12+ distros should work
+- Root/sudo access for initial setup
+- Internet access during setup (for package installation)
+
 ## Quick Start
 
 ### 1. Run Setup on the Pi
@@ -66,7 +87,7 @@ sudo deploy/raspberry-pi/setup.sh
 ```
 
 The setup script installs all system dependencies, creates the application user,
-configures PipeWire/WirePlumber for Bluetooth A2DP sink, and installs the systemd service.
+configures PipeWire/WirePlumber for Bluetooth A2DP sink, and installs both systemd services.
 
 ### 2. Build and Deploy from Windows
 
@@ -86,20 +107,34 @@ cd deploy/common
 ./publish.sh arm64
 
 # Copy to Pi
-rsync -avz --exclude='data' --exclude='logs' publish/linux-arm64/ mmack@piradio:/opt/radio-console/
-ssh mmack@piradio "sudo chown -R radio:radio /opt/radio-console && sudo chmod +x /opt/radio-console/Radio.API"
+rsync -avz --delete publish/linux-arm64/api/ mmack@piradio:/opt/radio-console/api/
+rsync -avz --delete publish/linux-arm64/web/ mmack@piradio:/opt/radio-console/web/
+ssh mmack@piradio "sudo chown -R radio:radio /opt/radio-console && sudo chmod +x /opt/radio-console/api/Radio.API /opt/radio-console/web/Radio.Web"
 ```
 
-### 3. Start the Service
+### 3. Start the Services
 
 ```bash
-sudo systemctl start radio-console
-sudo systemctl status radio-console
+sudo systemctl start radio-api radio-web
+sudo systemctl status radio-api radio-web
 ```
 
-### 4. Access the UI
+### 4. Access
 
-Open a browser to `http://piradio:5000`
+- **API:** `http://piradio:5000` (Swagger at `/swagger`)
+- **Web UI:** `http://piradio:5002`
+
+## Cross-Compilation Note
+
+Radio.Infrastructure multi-targets (`net8.0` and `net8.0-windows10.0.19041.0`). When
+cross-compiling from Windows for Linux, you **must** pass `-f net8.0` to override the
+conditional Windows TFM:
+
+```bash
+dotnet publish ... --runtime linux-arm64 -f net8.0
+```
+
+The deploy scripts handle this automatically.
 
 ## System Dependencies
 
@@ -344,7 +379,11 @@ bluetoothctl show | grep "Audio"
 
 ### appsettings.Production.json
 
-Create this file in the application directory for production-specific overrides:
+Both services read `appsettings.Production.json` from their respective binary directories.
+The API settings are the primary configuration; the Web settings mainly configure the
+API connection URL.
+
+**API** (`/opt/radio-console/api/appsettings.Production.json`):
 
 ```json
 {
@@ -365,9 +404,28 @@ Create this file in the application directory for production-specific overrides:
 }
 ```
 
+**Web** (`/opt/radio-console/web/appsettings.Production.json`):
+
+```json
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "Kestrel": {
+    "Endpoints": {
+      "Http": { "Url": "http://0.0.0.0:5002" }
+    }
+  },
+  "ApiBaseUrl": "http://localhost:5000"
+}
+```
+
 ### Data Directories
 
-All persistent data is stored under `./data/` (relative to the application directory):
+All persistent data is stored under `./data/` (relative to the working directory `/opt/radio-console`):
 
 | Directory | Purpose |
 |---|---|
@@ -383,7 +441,8 @@ All persistent data is stored under `./data/` (relative to the application direc
 
 | Port | Service |
 |---|---|
-| 5000 | HTTP — Web UI, REST API, SignalR hubs |
+| 5000 | Radio.API — REST API, SignalR hubs, audio stream |
+| 5002 | Radio.Web — Blazor Server UI |
 
 ### Secrets
 
@@ -403,31 +462,38 @@ re-enter secrets on the Pi — they won't decrypt across machines.
 ## Service Management
 
 ```bash
-# Start/stop/restart
-sudo systemctl start radio-console
-sudo systemctl stop radio-console
-sudo systemctl restart radio-console
+# Start/stop/restart both services
+sudo systemctl start radio-api radio-web
+sudo systemctl stop radio-web radio-api
+sudo systemctl restart radio-api radio-web
 
 # View status
-sudo systemctl status radio-console
+sudo systemctl status radio-api radio-web
 
-# View logs (live)
-sudo journalctl -u radio-console -f
+# View logs (live, both services interleaved)
+sudo journalctl -u radio-api -u radio-web -f
+
+# View logs for a single service
+sudo journalctl -u radio-api -f
+sudo journalctl -u radio-web -f
 
 # View recent logs
-sudo journalctl -u radio-console --since "1 hour ago"
+sudo journalctl -u radio-api -u radio-web --since "1 hour ago"
 
 # Enable/disable auto-start on boot
-sudo systemctl enable radio-console
-sudo systemctl disable radio-console
+sudo systemctl enable radio-api radio-web
+sudo systemctl disable radio-web radio-api
 ```
+
+**Note:** When stopping, stop `radio-web` first (or let systemd handle it — stopping
+`radio-api` automatically stops `radio-web` due to the `Requires=` dependency).
 
 ## Development Workflow
 
 ### Recommended: Build on Windows, Deploy via SCP
 
 ```powershell
-# Single command build + deploy + restart
+# Single command build + deploy + restart (both services)
 .\deploy\Deploy-ToPi.ps1
 
 # Deploy without restarting
@@ -450,8 +516,15 @@ Useful for quick debugging when the .NET SDK is installed on the Pi:
 ```bash
 ssh mmack@piradio
 cd ~/RTest
-git pull
+
+# Stop services first
+sudo systemctl stop radio-web radio-api
+
+# Run API
 dotnet run --project src/Radio.API
+
+# In another terminal, run Web
+dotnet run --project src/Radio.Web
 ```
 
 Build time: ~60-90s on Pi 5 vs ~10s on Windows desktop.
@@ -468,16 +541,20 @@ type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh mmack@piradio "mkdir -p ~/.ssh &
 Keep a terminal open:
 
 ```bash
-ssh mmack@piradio "journalctl -u radio-console -f"
+ssh mmack@piradio "journalctl -u radio-api -u radio-web -f"
 ```
 
 ### Run Manually (instead of systemd)
 
 ```bash
-sudo systemctl stop radio-console
+sudo systemctl stop radio-web radio-api
 cd /opt/radio-console
-sudo -u radio ./Radio.API
-# Ctrl+C to stop, re-deploy, repeat
+
+# Terminal 1: API
+sudo -u radio ./api/Radio.API
+
+# Terminal 2: Web
+sudo -u radio ASPNETCORE_URLS=http://0.0.0.0:5002 ApiBaseUrl=http://localhost:5000 ./web/Radio.Web
 ```
 
 ## Migrating Data to the Pi
@@ -495,8 +572,8 @@ sudo -u radio ./Radio.API
 ### Migration Steps
 
 ```powershell
-# Stop the service on Pi
-ssh mmack@piradio "sudo systemctl stop radio-console 2>/dev/null; true"
+# Stop the services on Pi
+ssh mmack@piradio "sudo systemctl stop radio-web radio-api 2>/dev/null; true"
 
 # Ensure data dirs exist
 ssh mmack@piradio "sudo mkdir -p /opt/radio-console/data/{config,secrets,fingerprints,albumart,metrics,backups} && sudo chown -R radio:radio /opt/radio-console/data"
@@ -505,8 +582,8 @@ ssh mmack@piradio "sudo mkdir -p /opt/radio-console/data/{config,secrets,fingerp
 scp data/config/configuration.db mmack@piradio:/tmp/config.db
 ssh mmack@piradio "sudo cp /tmp/config.db /opt/radio-console/data/config/configuration.db && sudo chown radio:radio /opt/radio-console/data/config/configuration.db && rm /tmp/config.db"
 
-# Start the service
-ssh mmack@piradio "sudo systemctl start radio-console"
+# Start the services
+ssh mmack@piradio "sudo systemctl start radio-api radio-web"
 ```
 
 Secrets are machine-specific — re-enter API keys on the Pi via the System Config page.
@@ -560,7 +637,7 @@ wpctl status | grep -A10 Streams
 # Should show: bluez_input.* → bt_capture (not headphones)
 
 # Check app sees the capture device (in app logs)
-journalctl -u radio-console | grep -i "capture device"
+journalctl -u radio-api | grep -i "capture device"
 ```
 
 ### BT connection drops
@@ -628,16 +705,30 @@ rtl_test -t
 ls -la /opt/radio-console/data/*/
 
 # Reset configuration (start fresh)
-sudo systemctl stop radio-console
+sudo systemctl stop radio-web radio-api
 rm /opt/radio-console/data/config/configuration.db
-sudo systemctl start radio-console
+sudo systemctl start radio-api radio-web
 ```
 
 ### Permission issues
 
 ```bash
 sudo chown -R radio:radio /opt/radio-console
-sudo chmod +x /opt/radio-console/Radio.API
+sudo chmod +x /opt/radio-console/api/Radio.API /opt/radio-console/web/Radio.Web
+```
+
+### Web UI can't connect to API
+
+```bash
+# Check API is running
+curl http://localhost:5000/api/audio
+
+# Check Web service environment
+systemctl show radio-web | grep Environment
+# Should include ApiBaseUrl=http://localhost:5000
+
+# Check Web logs
+journalctl -u radio-web -n 20
 ```
 
 ## Native Dependencies Summary

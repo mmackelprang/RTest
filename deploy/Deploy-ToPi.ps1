@@ -3,11 +3,11 @@
   One-command build and deploy to Raspberry Pi from Windows.
 
 .DESCRIPTION
-  Cross-compiles for linux-arm64, syncs to the Pi via SCP/SSH, and restarts
-  the radio-console service. Uses rsync over SSH for incremental transfers.
+  Cross-compiles Radio.API and Radio.Web for linux-arm64, syncs to the Pi via
+  SCP/SSH, and restarts both services. Uses rsync over SSH for incremental transfers.
 
 .PARAMETER NoRestart
-  Deploy without restarting the service.
+  Deploy without restarting the services.
 
 .PARAMETER Logs
   Tail journalctl after restart.
@@ -36,36 +36,36 @@ param(
   [switch]$Logs,
   [switch]$Quick,
   [string]$PiHost = ($env:PI_HOST ?? "piradio"),
-  [string]$PiUser = ($env:PI_USER ?? "pi"),
+  [string]$PiUser = ($env:PI_USER ?? "mmack"),
   [string]$PiPath = ($env:PI_PATH ?? "/opt/radio-console")
 )
 
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = (Resolve-Path "$PSScriptRoot\..").Path
-$PublishDir = Join-Path $RepoRoot "publish\linux-arm64"
+$ApiPublishDir = Join-Path $RepoRoot "publish\linux-arm64\api"
+$WebPublishDir = Join-Path $RepoRoot "publish\linux-arm64\web"
 $SshTarget = "${PiUser}@${PiHost}"
 
 Write-Host "=== Radio Console Deploy ===" -ForegroundColor Cyan
 Write-Host "Target: ${SshTarget}:${PiPath}"
 Write-Host ""
 
-# --- Step 1: Build ---
+# --- Step 1: Build both projects ---
 Write-Host "[1/4] Building for linux-arm64..." -ForegroundColor Yellow
 
-$publishArgs = @(
-  "publish", "$RepoRoot\src\Radio.API\Radio.API.csproj",
+$commonArgs = @(
   "--configuration", "Release",
   "--runtime", "linux-arm64",
-  "--output", $PublishDir,
+  "-f", "net8.0",
   "-v", "quiet"
 )
 
 if ($Quick) {
-  $publishArgs += "--no-self-contained"
+  $commonArgs += "--no-self-contained"
   Write-Host "  (framework-dependent - .NET runtime required on Pi)" -ForegroundColor DarkGray
 } else {
-  $publishArgs += @(
+  $commonArgs += @(
     "--self-contained", "true",
     "-p:PublishSingleFile=true",
     "-p:PublishTrimmed=false",
@@ -73,19 +73,35 @@ if ($Quick) {
   )
 }
 
-dotnet @publishArgs
+# Restore for net8.0 (Windows conditional TFM means assets are built for windows TFM by default)
+Write-Host "  Restoring for net8.0 / linux-arm64..." -ForegroundColor DarkGray
+dotnet restore "$RepoRoot\src\Radio.API\Radio.API.csproj" --runtime linux-arm64 -p:TargetFramework=net8.0 -v quiet
+dotnet restore "$RepoRoot\src\Radio.Web\Radio.Web.csproj" --runtime linux-arm64 -p:TargetFramework=net8.0 -v quiet
+
+# Publish Radio.API
+Write-Host "  Publishing Radio.API..." -ForegroundColor DarkGray
+dotnet publish "$RepoRoot\src\Radio.API\Radio.API.csproj" --no-restore --output $ApiPublishDir @commonArgs
 if ($LASTEXITCODE -ne 0) {
-  Write-Host "Build failed!" -ForegroundColor Red
+  Write-Host "API build failed!" -ForegroundColor Red
   exit 1
 }
 
-$size = "{0:N1} MB" -f ((Get-ChildItem $PublishDir -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB)
-Write-Host "  Build complete ($size)" -ForegroundColor Green
+# Publish Radio.Web
+Write-Host "  Publishing Radio.Web..." -ForegroundColor DarkGray
+dotnet publish "$RepoRoot\src\Radio.Web\Radio.Web.csproj" --no-restore --output $WebPublishDir @commonArgs
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "Web build failed!" -ForegroundColor Red
+  exit 1
+}
 
-# --- Step 2: Stop service ---
+$apiSize = "{0:N1} MB" -f ((Get-ChildItem $ApiPublishDir -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB)
+$webSize = "{0:N1} MB" -f ((Get-ChildItem $WebPublishDir -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB)
+Write-Host "  Build complete (API: $apiSize, Web: $webSize)" -ForegroundColor Green
+
+# --- Step 2: Stop services ---
 if (-not $NoRestart) {
-  Write-Host "[2/4] Stopping service on Pi..." -ForegroundColor Yellow
-  ssh $SshTarget "sudo systemctl stop radio-console 2>/dev/null; true"
+  Write-Host "[2/4] Stopping services on Pi..." -ForegroundColor Yellow
+  ssh $SshTarget "sudo systemctl stop radio-web 2>/dev/null; sudo systemctl stop radio-api 2>/dev/null; true"
 } else {
   Write-Host "[2/4] Skipping service stop (--NoRestart)" -ForegroundColor DarkGray
 }
@@ -93,9 +109,7 @@ if (-not $NoRestart) {
 # --- Step 3: Sync files ---
 Write-Host "[3/4] Syncing files to Pi..." -ForegroundColor Yellow
 
-# Use scp to copy to a temp dir, then rsync locally on the Pi to preserve data/logs.
-# This avoids needing rsync on Windows (not always available).
-# First, check if rsync is available locally (Git Bash, WSL, etc.)
+# Check if rsync is available locally (Git Bash, WSL, etc.)
 $useRsync = $false
 try {
   $null = Get-Command rsync -ErrorAction Stop
@@ -104,31 +118,37 @@ try {
   # rsync not available, fall back to scp
 }
 
+# Sync API
+Write-Host "  Syncing API..." -ForegroundColor DarkGray
 if ($useRsync) {
-  # rsync available (e.g., via Git for Windows, MSYS2, or WSL)
-  rsync -avz --delete `
-    --exclude='data' `
-    --exclude='logs' `
-    --exclude='appsettings.Production.json' `
-    "${PublishDir}/" "${SshTarget}:/tmp/radio-deploy/"
+  rsync -avz --delete "${ApiPublishDir}/" "${SshTarget}:/tmp/radio-deploy-api/"
 } else {
-  # Fallback: scp entire directory
-  Write-Host "  (rsync not found, using scp - slower for incremental updates)" -ForegroundColor DarkGray
-  scp -r "${PublishDir}\*" "${SshTarget}:/tmp/radio-deploy/"
+  Write-Host "  (rsync not found, using scp)" -ForegroundColor DarkGray
+  ssh $SshTarget "rm -rf /tmp/radio-deploy-api && mkdir -p /tmp/radio-deploy-api"
+  scp -r $ApiPublishDir "${SshTarget}:/tmp/radio-deploy-api-tmp"
+  ssh $SshTarget "mv /tmp/radio-deploy-api-tmp/* /tmp/radio-deploy-api/ 2>/dev/null; mv /tmp/radio-deploy-api-tmp/.[!.]* /tmp/radio-deploy-api/ 2>/dev/null; rm -rf /tmp/radio-deploy-api-tmp"
+}
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "API sync failed!" -ForegroundColor Red
+  exit 1
 }
 
+# Sync Web
+Write-Host "  Syncing Web..." -ForegroundColor DarkGray
+if ($useRsync) {
+  rsync -avz --delete "${WebPublishDir}/" "${SshTarget}:/tmp/radio-deploy-web/"
+} else {
+  ssh $SshTarget "rm -rf /tmp/radio-deploy-web && mkdir -p /tmp/radio-deploy-web"
+  scp -r $WebPublishDir "${SshTarget}:/tmp/radio-deploy-web-tmp"
+  ssh $SshTarget "mv /tmp/radio-deploy-web-tmp/* /tmp/radio-deploy-web/ 2>/dev/null; mv /tmp/radio-deploy-web-tmp/.[!.]* /tmp/radio-deploy-web/ 2>/dev/null; rm -rf /tmp/radio-deploy-web-tmp"
+}
 if ($LASTEXITCODE -ne 0) {
-  Write-Host "File sync failed!" -ForegroundColor Red
+  Write-Host "Web sync failed!" -ForegroundColor Red
   exit 1
 }
 
 # Move files into place on the Pi, preserving data and logs
-ssh $SshTarget @"
-  sudo rsync -a --exclude='data' --exclude='logs' --exclude='appsettings.Production.json' /tmp/radio-deploy/ $PiPath/ &&
-  sudo chown -R radio:radio $PiPath &&
-  sudo chmod +x $PiPath/Radio.API &&
-  rm -rf /tmp/radio-deploy
-"@
+ssh $SshTarget "sudo mkdir -p $PiPath/api $PiPath/web $PiPath/data $PiPath/logs && sudo rsync -a --delete /tmp/radio-deploy-api/ $PiPath/api/ && sudo rsync -a --delete /tmp/radio-deploy-web/ $PiPath/web/ && sudo chown -R radio:radio $PiPath && sudo chmod +x $PiPath/api/Radio.API $PiPath/web/Radio.Web && rm -rf /tmp/radio-deploy-api /tmp/radio-deploy-web"
 
 if ($LASTEXITCODE -ne 0) {
   Write-Host "Remote file move failed!" -ForegroundColor Red
@@ -139,30 +159,35 @@ Write-Host "  Files synced" -ForegroundColor Green
 
 # --- Step 4: Restart ---
 if (-not $NoRestart) {
-  Write-Host "[4/4] Starting service..." -ForegroundColor Yellow
-  ssh $SshTarget "sudo systemctl start radio-console"
-  Start-Sleep -Seconds 1
+  Write-Host "[4/4] Starting services..." -ForegroundColor Yellow
+  ssh $SshTarget "sudo systemctl daemon-reload && sudo systemctl start radio-api && sudo systemctl start radio-web"
+  Start-Sleep -Seconds 2
 
-  $status = ssh $SshTarget "systemctl is-active radio-console 2>/dev/null"
-  if ($status -eq "active") {
+  $apiStatus = ssh $SshTarget "systemctl is-active radio-api 2>/dev/null"
+  $webStatus = ssh $SshTarget "systemctl is-active radio-web 2>/dev/null"
+
+  if ($apiStatus -eq "active" -and $webStatus -eq "active") {
     Write-Host ""
     Write-Host "=== Deploy successful ===" -ForegroundColor Green
-    Write-Host "UI: http://${PiHost}:5000"
+    Write-Host "API: http://${PiHost}:5000"
+    Write-Host "Web: http://${PiHost}:5002"
   } else {
     Write-Host ""
-    Write-Host "=== WARNING: Service may have failed to start ===" -ForegroundColor Red
-    Write-Host "Check: ssh $SshTarget 'journalctl -u radio-console -n 20'"
+    Write-Host "=== WARNING: One or more services may have failed ===" -ForegroundColor Red
+    Write-Host "  radio-api: $apiStatus"
+    Write-Host "  radio-web: $webStatus"
+    Write-Host "Check: ssh $SshTarget 'journalctl -u radio-api -u radio-web -n 20'"
   }
 } else {
   Write-Host "[4/4] Skipping restart (--NoRestart)" -ForegroundColor DarkGray
   Write-Host ""
-  Write-Host "=== Deploy complete (service not restarted) ===" -ForegroundColor Green
-  Write-Host "Start manually: ssh $SshTarget 'sudo systemctl start radio-console'"
+  Write-Host "=== Deploy complete (services not restarted) ===" -ForegroundColor Green
+  Write-Host "Start manually: ssh $SshTarget 'sudo systemctl start radio-api radio-web'"
 }
 
 # --- Optional: tail logs ---
 if ($Logs) {
   Write-Host ""
   Write-Host "--- Tailing logs (Ctrl+C to stop) ---" -ForegroundColor Cyan
-  ssh $SshTarget "journalctl -u radio-console -f"
+  ssh $SshTarget "journalctl -u radio-api -u radio-web -f"
 }

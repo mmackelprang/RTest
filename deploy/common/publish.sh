@@ -1,6 +1,6 @@
 #!/bin/bash
 # publish.sh — Cross-compile helper for Radio Console
-# Builds self-contained deployments for target platforms from any dev box.
+# Builds self-contained deployments of both Radio.API and Radio.Web for target platforms.
 #
 # Usage:
 #   ./publish.sh arm64    # Raspberry Pi (linux-arm64)
@@ -23,34 +23,52 @@ publish_for_rid() {
 
   rm -rf "$OUTPUT"
 
+  # Publish Radio.API
+  echo ""
+  echo "--- Radio.API ---"
   dotnet publish "$REPO_ROOT/src/Radio.API/Radio.API.csproj" \
     --configuration Release \
     --runtime "$RID" \
+    -f net8.0 \
     --self-contained true \
-    --output "$OUTPUT" \
+    --output "$OUTPUT/api" \
+    -p:PublishSingleFile=true \
+    -p:PublishTrimmed=false \
+    -p:IncludeNativeLibrariesForSelfExtract=true
+
+  # Publish Radio.Web
+  echo ""
+  echo "--- Radio.Web ---"
+  dotnet publish "$REPO_ROOT/src/Radio.Web/Radio.Web.csproj" \
+    --configuration Release \
+    --runtime "$RID" \
+    -f net8.0 \
+    --self-contained true \
+    --output "$OUTPUT/web" \
     -p:PublishSingleFile=true \
     -p:PublishTrimmed=false \
     -p:IncludeNativeLibrariesForSelfExtract=true
 
   # Copy tools
   if [ -d "$REPO_ROOT/tools/fpcalc" ]; then
-    mkdir -p "$OUTPUT/tools/fpcalc"
-    cp -r "$REPO_ROOT/tools/fpcalc/"* "$OUTPUT/tools/fpcalc/" 2>/dev/null || true
+    mkdir -p "$OUTPUT/api/tools/fpcalc"
+    cp -r "$REPO_ROOT/tools/fpcalc/"* "$OUTPUT/api/tools/fpcalc/" 2>/dev/null || true
   fi
 
   # Copy deploy scripts
   mkdir -p "$OUTPUT/deploy"
-  cp "$SCRIPT_DIR/radio-console.service" "$OUTPUT/deploy/"
+  cp "$SCRIPT_DIR/radio-api.service" "$OUTPUT/deploy/"
+  cp "$SCRIPT_DIR/radio-web.service" "$OUTPUT/deploy/"
   cp "$SCRIPT_DIR/../DEPLOYMENT.md" "$OUTPUT/deploy/" 2>/dev/null || true
 
-  # Create data directories
+  # Create shared data directories
   mkdir -p "$OUTPUT/data/config" "$OUTPUT/data/metrics" "$OUTPUT/data/fingerprints" \
            "$OUTPUT/data/secrets" "$OUTPUT/data/albumart" "$OUTPUT/data/backups" \
            "$OUTPUT/logs"
 
-  # Copy default appsettings
-  if [ ! -f "$OUTPUT/appsettings.Production.json" ]; then
-    cat > "$OUTPUT/appsettings.Production.json" << 'APPSETTINGS'
+  # Create default appsettings.Production.json for API
+  if [ ! -f "$OUTPUT/api/appsettings.Production.json" ]; then
+    cat > "$OUTPUT/api/appsettings.Production.json" << 'APPSETTINGS'
 {
   "Logging": {
     "LogLevel": {
@@ -69,9 +87,33 @@ publish_for_rid() {
 APPSETTINGS
   fi
 
-  local SIZE=$(du -sh "$OUTPUT" | cut -f1)
+  # Create default appsettings.Production.json for Web
+  if [ ! -f "$OUTPUT/web/appsettings.Production.json" ]; then
+    cat > "$OUTPUT/web/appsettings.Production.json" << 'APPSETTINGS'
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "Kestrel": {
+    "Endpoints": {
+      "Http": {
+        "Url": "http://0.0.0.0:5002"
+      }
+    }
+  },
+  "ApiBaseUrl": "http://localhost:5000"
+}
+APPSETTINGS
+  fi
+
+  local API_SIZE=$(du -sh "$OUTPUT/api" | cut -f1)
+  local WEB_SIZE=$(du -sh "$OUTPUT/web" | cut -f1)
   echo ""
-  echo "Published $RID to $OUTPUT ($SIZE)"
+  echo "Published $RID — API: $API_SIZE, Web: $WEB_SIZE"
+  echo "  Output: $OUTPUT"
   echo ""
 }
 

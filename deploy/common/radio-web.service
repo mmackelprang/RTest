@@ -1,0 +1,32 @@
+[Unit]
+Description=Radio Console Web UI (Blazor Server)
+After=network.target radio-api.service
+Requires=radio-api.service
+
+[Service]
+Type=simple
+User=radio
+Group=radio
+WorkingDirectory=/opt/radio-console
+ExecStart=/opt/radio-console/web/Radio.Web
+Restart=always
+RestartSec=10
+KillSignal=SIGINT
+SyslogIdentifier=radio-web
+TimeoutStopSec=30
+
+# Environment
+Environment=ASPNETCORE_URLS=http://0.0.0.0:5002
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=DOTNET_EnableDiagnostics=0
+Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/opt/radio-console/web/.bundle
+Environment=ApiBaseUrl=http://localhost:5000
+
+# Security hardening
+ProtectSystem=strict
+ReadWritePaths=/opt/radio-console/logs /opt/radio-console/web
+ProtectHome=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

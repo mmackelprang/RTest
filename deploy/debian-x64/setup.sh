@@ -67,7 +67,8 @@ fi
 # ---- 4. Create Application Directory ----
 echo ""
 echo "[4/7] Creating application directory..."
-mkdir -p "$APP_DIR"
+mkdir -p "$APP_DIR/api"
+mkdir -p "$APP_DIR/web"
 mkdir -p "$APP_DIR/data/config"
 mkdir -p "$APP_DIR/data/metrics"
 mkdir -p "$APP_DIR/data/fingerprints"
@@ -95,18 +96,28 @@ else
   echo "fpcalc already available"
 fi
 
-# ---- 6. Install systemd Service ----
+# ---- 6. Install systemd Services ----
 echo ""
-echo "[6/7] Installing systemd service..."
+echo "[6/7] Installing systemd services..."
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SERVICE_SRC="$SCRIPT_DIR/../common/radio-console.service"
 
-if [ -f "$SERVICE_SRC" ]; then
-  cp "$SERVICE_SRC" /etc/systemd/system/radio-console.service
+# Migrate from old single-service if present
+if systemctl is-enabled radio-console.service &>/dev/null; then
+  echo "  Migrating from old radio-console.service..."
+  systemctl stop radio-console.service 2>/dev/null || true
+  systemctl disable radio-console.service 2>/dev/null || true
+  rm -f /etc/systemd/system/radio-console.service
+  echo "  Old radio-console.service removed"
+fi
+
+# Install radio-api.service
+API_SERVICE_SRC="$SCRIPT_DIR/../common/radio-api.service"
+if [ -f "$API_SERVICE_SRC" ]; then
+  cp "$API_SERVICE_SRC" /etc/systemd/system/radio-api.service
 else
-  cat > /etc/systemd/system/radio-console.service << 'EOF'
+  cat > /etc/systemd/system/radio-api.service << 'EOF'
 [Unit]
-Description=Radio Console Application
+Description=Radio Console API (audio engine, REST, SignalR)
 After=network.target sound.target bluetooth.target avahi-daemon.service
 Wants=avahi-daemon.service
 
@@ -115,18 +126,54 @@ Type=notify
 User=radio
 Group=audio
 WorkingDirectory=/opt/radio-console
-ExecStart=/opt/radio-console/Radio.API
+ExecStart=/opt/radio-console/api/Radio.API
 Restart=always
 RestartSec=10
 KillSignal=SIGINT
-SyslogIdentifier=radio-console
+SyslogIdentifier=radio-api
 TimeoutStopSec=30
 Environment=ASPNETCORE_URLS=http://0.0.0.0:5000
 Environment=ASPNETCORE_ENVIRONMENT=Production
 Environment=DOTNET_EnableDiagnostics=0
 SupplementaryGroups=bluetooth pulse-access
 ProtectSystem=strict
-ReadWritePaths=/opt/radio-console/data /opt/radio-console/logs
+ReadWritePaths=/opt/radio-console/data /opt/radio-console/logs /opt/radio-console/api
+ProtectHome=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+fi
+
+# Install radio-web.service
+WEB_SERVICE_SRC="$SCRIPT_DIR/../common/radio-web.service"
+if [ -f "$WEB_SERVICE_SRC" ]; then
+  cp "$WEB_SERVICE_SRC" /etc/systemd/system/radio-web.service
+else
+  cat > /etc/systemd/system/radio-web.service << 'EOF'
+[Unit]
+Description=Radio Console Web UI (Blazor Server)
+After=network.target radio-api.service
+Requires=radio-api.service
+
+[Service]
+Type=notify
+User=radio
+Group=radio
+WorkingDirectory=/opt/radio-console
+ExecStart=/opt/radio-console/web/Radio.Web
+Restart=always
+RestartSec=10
+KillSignal=SIGINT
+SyslogIdentifier=radio-web
+TimeoutStopSec=30
+Environment=ASPNETCORE_URLS=http://0.0.0.0:5002
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=DOTNET_EnableDiagnostics=0
+Environment=ApiBaseUrl=http://localhost:5000
+ProtectSystem=strict
+ReadWritePaths=/opt/radio-console/logs /opt/radio-console/web
 ProtectHome=true
 NoNewPrivileges=true
 
@@ -136,8 +183,9 @@ EOF
 fi
 
 systemctl daemon-reload
-systemctl enable radio-console.service
-echo "Service installed and enabled"
+systemctl enable radio-api.service
+systemctl enable radio-web.service
+echo "Services installed and enabled (radio-api, radio-web)"
 
 # ---- 7. Configure Audio & Bluetooth ----
 echo ""
@@ -159,18 +207,21 @@ echo "========================================="
 echo ""
 echo "Next steps:"
 echo "  1. Copy your published application to $APP_DIR/"
-echo "     scp -r publish/linux-x64/* user@<ip>:$APP_DIR/"
+echo "     scp -r publish/linux-x64/api/* user@<ip>:$APP_DIR/api/"
+echo "     scp -r publish/linux-x64/web/* user@<ip>:$APP_DIR/web/"
 echo ""
 echo "  2. Set permissions:"
 echo "     sudo chown -R $APP_USER:$APP_USER $APP_DIR"
-echo "     sudo chmod +x $APP_DIR/Radio.API"
+echo "     sudo chmod +x $APP_DIR/api/Radio.API $APP_DIR/web/Radio.Web"
 echo ""
-echo "  3. Start the service:"
-echo "     sudo systemctl start radio-console"
+echo "  3. Start the services:"
+echo "     sudo systemctl start radio-api radio-web"
 echo ""
 echo "  4. Check status:"
-echo "     sudo systemctl status radio-console"
-echo "     sudo journalctl -u radio-console -f"
+echo "     sudo systemctl status radio-api radio-web"
+echo "     sudo journalctl -u radio-api -u radio-web -f"
 echo ""
-echo "  5. Access the UI at: http://<host-ip>:5000"
+echo "  5. Access:"
+echo "     API: http://<host-ip>:5000"
+echo "     Web: http://<host-ip>:5002"
 echo ""
