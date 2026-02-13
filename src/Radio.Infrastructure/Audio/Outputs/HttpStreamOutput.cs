@@ -441,9 +441,10 @@ public class HttpStreamOutput : AudioOutputBase
             {
               // Feed PCM data through LAME encoder — writes MP3 frames to output stream
               mp3Writer.Write(buffer, 0, bytesRead);
-              // Flush encoder output promptly for live streaming — prevents LAME from
-              // buffering multiple frames before delivery, which causes Cast stalls
-              mp3Writer.Flush();
+              // Only flush the underlying HTTP output stream, NOT the LAME encoder.
+              // mp3Writer.Flush() calls lame_encode_flush() which can signal end-of-stream
+              // to Chrome's media receiver, causing it to disconnect after the first chunk.
+              context.Response.OutputStream.Flush();
             }
             else
             {
@@ -454,19 +455,23 @@ public class HttpStreamOutput : AudioOutputBase
 
             client.AddBytesSent(bytesRead);
           }
-          catch (HttpListenerException)
+          catch (HttpListenerException ex)
           {
-            // Client disconnected
-            _logger.LogDebug("HttpStream: Client {ClientId} disconnected (HttpListenerException)", clientId);
+            _logger.LogWarning("HttpStream: Client {ClientId} disconnected (HttpListenerException: {Message})",
+              clientId, ex.Message);
             break;
           }
           catch (InvalidOperationException ex)
           {
-            // Output stream closed or encoder disposed — Cast client disconnected mid-encode
-            _logger.LogDebug(ex, "HttpStream: Output stream closed for client {ClientId}", clientId);
+            _logger.LogWarning("HttpStream: Output stream closed for client {ClientId}: {Message}",
+              clientId, ex.Message);
             break;
           }
         }
+
+        _logger.LogInformation(
+          "HttpStream: Write loop ended for client {ClientId} (cancelled: {Cancelled}, connected: {Connected}, bytes: {Bytes})",
+          clientId, cancellationToken.IsCancellationRequested, client.IsConnected, client.BytesSent);
       }
       finally
       {

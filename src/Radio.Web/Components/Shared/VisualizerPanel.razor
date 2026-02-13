@@ -174,11 +174,13 @@
   private async Task HandleLevelData(LevelDataDto data)
   {
     if (_isDisposed || !_isInitialized || _jsModule == null || _currentMode != VisualizationMode.VUMeter) return;
+    var wasFirst = !_hasReceivedData;
     _hasReceivedData = true;
     try
     {
       await _jsModule.InvokeVoidAsync("visualizer.drawVUMeter",
         "visualizer-panel-canvas", data.LeftPeak, data.RightPeak, data.LeftRms, data.RightRms, data.IsClipping);
+      if (wasFirst) await InvokeAsync(StateHasChanged);
     }
     catch (Exception ex) { Logger.LogError(ex, "Error drawing VU meter"); }
   }
@@ -186,11 +188,13 @@
   private async Task HandleWaveformData(WaveformDataDto data)
   {
     if (_isDisposed || !_isInitialized || _jsModule == null || _currentMode != VisualizationMode.Waveform) return;
+    var wasFirst = !_hasReceivedData;
     _hasReceivedData = true;
     try
     {
       await _jsModule.InvokeVoidAsync("visualizer.drawWaveform",
         "visualizer-panel-canvas", data.LeftSamples, data.RightSamples);
+      if (wasFirst) await InvokeAsync(StateHasChanged);
     }
     catch (Exception ex) { Logger.LogError(ex, "Error drawing waveform"); }
   }
@@ -198,11 +202,13 @@
   private async Task HandleSpectrumData(SpectrumDataDto data)
   {
     if (_isDisposed || !_isInitialized || _jsModule == null || _currentMode != VisualizationMode.Spectrum) return;
+    var wasFirst = !_hasReceivedData;
     _hasReceivedData = true;
     try
     {
       await _jsModule.InvokeVoidAsync("visualizer.drawSpectrum",
         "visualizer-panel-canvas", data.Magnitudes, data.Frequencies);
+      if (wasFirst) await InvokeAsync(StateHasChanged);
     }
     catch (Exception ex) { Logger.LogError(ex, "Error drawing spectrum"); }
   }
