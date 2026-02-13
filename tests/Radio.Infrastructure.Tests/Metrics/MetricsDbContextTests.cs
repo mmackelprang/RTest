@@ -67,7 +67,7 @@ public class MetricsDbContextTests : IAsyncLifetime
       "test.counter",
       0,
       "count",
-      CancellationToken.None);
+      ct: CancellationToken.None);
 
     // Assert
     Assert.True(id > 0);
@@ -82,14 +82,14 @@ public class MetricsDbContextTests : IAsyncLifetime
       key,
       1,
       "MB",
-      CancellationToken.None);
+      ct: CancellationToken.None);
 
     // Act
     var id2 = await _dbContext.GetOrCreateMetricDefinitionIdAsync(
       key,
       1,
       "MB",
-      CancellationToken.None);
+      ct: CancellationToken.None);
 
     // Assert
     Assert.Equal(id1, id2);
