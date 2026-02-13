@@ -394,11 +394,14 @@ public class HttpStreamOutput : AudioOutputBase
       try
       {
         // Create an independent stream reader for this client so multiple
-        // clients (and fingerprinting) don't compete for the same read position
+        // clients (and fingerprinting) don't compete for the same read position.
+        // The reader starts with a 1-second lag behind the write position,
+        // giving Cast devices an immediate burst of audio data.
         using var audioStream = _audioEngine.CreateStreamReader($"http-client-{clientId}");
         var buffer = new byte[_options.ClientBufferSize];
         var firstDataSent = false;
         var zeroBytesSince = DateTime.UtcNow;
+        var consecutiveZeroReads = 0;
 
         while (!cancellationToken.IsCancellationRequested && client.IsConnected)
         {
@@ -406,6 +409,7 @@ public class HttpStreamOutput : AudioOutputBase
 
           if (bytesRead == 0)
           {
+            consecutiveZeroReads++;
             // Warn if no data for > 5 seconds (throttled to every 5s)
             var now = DateTime.UtcNow;
             if ((now - zeroBytesSince).TotalSeconds > 5 &&
@@ -420,6 +424,7 @@ public class HttpStreamOutput : AudioOutputBase
             continue;
           }
 
+          consecutiveZeroReads = 0;
           zeroBytesSince = DateTime.UtcNow;
 
           if (!firstDataSent)
@@ -452,11 +457,13 @@ public class HttpStreamOutput : AudioOutputBase
           catch (HttpListenerException)
           {
             // Client disconnected
+            _logger.LogDebug("HttpStream: Client {ClientId} disconnected (HttpListenerException)", clientId);
             break;
           }
-          catch (InvalidOperationException)
+          catch (InvalidOperationException ex)
           {
             // Output stream closed or encoder disposed — Cast client disconnected mid-encode
+            _logger.LogDebug(ex, "HttpStream: Output stream closed for client {ClientId}", clientId);
             break;
           }
         }
