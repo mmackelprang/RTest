@@ -249,6 +249,18 @@ internal sealed class WindowsBluetoothService : IBluetoothService
       return Task.CompletedTask;
     }
 
+    public Task NextTrackAsync(CancellationToken cancellationToken = default)
+    {
+      _logger.LogDebug("NextTrackAsync not yet implemented for Windows BT");
+      return Task.CompletedTask;
+    }
+
+    public Task PreviousTrackAsync(CancellationToken cancellationToken = default)
+    {
+      _logger.LogDebug("PreviousTrackAsync not yet implemented for Windows BT");
+      return Task.CompletedTask;
+    }
+
     private void CheckState(object? state)
     {
         try

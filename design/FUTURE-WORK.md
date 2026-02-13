@@ -6,121 +6,39 @@ This document catalogs features that have been designed at the interface level b
 
 ---
 
-## 1. Bluetooth AVRCP Volume Sync
+## 1. Bluetooth AVRCP Volume Sync — Windows
 
-**Status:** Interface defined, stubs in place, consumer not wired
+**Status:** Linux fully implemented; Windows still stubbed
 **Added:** 2026-02-11 (Phase 3 of audio-latency-research-and-fixes)
-**Priority:** Medium — Cast volume sync is functional; BT volume is a nice-to-have
+**Updated:** 2026-02-12 — Linux implementation complete
+**Priority:** Low — Linux (Pi target) is done; Windows is dev-only
 
-### What Exists
+### What's Implemented (Linux)
 
-| Layer | File | What's There |
-|-------|------|-------------|
-| Interface | `Radio.Core/Interfaces/Audio/IBluetoothService.cs` | `VolumeChanged` event, `DeviceVolume` property, `SetDeviceVolumeAsync()` method, `BluetoothVolumeChangedEventArgs` class |
-| Windows stub | `Radio.Infrastructure/Platform/Bluetooth/WindowsBluetoothService.cs:229-250` | Event declared (CS0067 suppressed), `DeviceVolume` property (null), `SetDeviceVolumeAsync` logs debug and returns |
-| Linux stub | `Radio.Infrastructure/Platform/Bluetooth/LinuxBluetoothService.cs:98-109` | Same pattern — event, null property, no-op method |
-| Mock/Null | `MockBluetoothService.cs`, `BluetoothServiceFactory.cs` (NullBluetoothService) | Empty event handlers, null DeviceVolume, no-op SetDeviceVolumeAsync |
-| Consumer | `Radio.API/Services/AudioStateUpdateService.cs` | **Not wired** — only Cast volume sync was connected to AudioManager. BT volume events are not subscribed. |
+Bidirectional AVRCP volume sync via BlueZ `MediaTransport1` D-Bus interface:
+- `LinuxBluetoothService.AttachMediaTransportAsync()` — attaches to `MediaTransport1` when A2DP transport appears
+- `OnTransportPropertiesChanged()` — fires `VolumeChanged` event when phone volume changes
+- `SetDeviceVolumeAsync()` — sets BlueZ volume (0-127) via D-Bus property
+- `AudioStateUpdateService` — subscribes to `VolumeChanged`, syncs to `MasterVolume`, and pushes console volume changes back to the BT device
 
 ### What's Needed — Windows
 
-Windows maps AVRCP absolute volume to the Bluetooth audio endpoint's system volume. The OS manages this transparently, so the approach is to monitor/control the endpoint volume directly.
+Windows stub (`WindowsBluetoothService`) still needs implementation using NAudio CoreAudioApi:
 
-**Read volume on connect:**
 ```csharp
 // NAudio CoreAudioApi — find the BT audio endpoint
 using NAudio.CoreAudioApi;
 var enumerator = new MMDeviceEnumerator();
-// Enumerate active render endpoints, find the one matching the BT device
-// (match by device friendly name or device ID containing the BT address)
 var btEndpoint = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)
     .FirstOrDefault(d => d.FriendlyName.Contains(btDeviceName));
 float volume = btEndpoint.AudioEndpointVolume.MasterVolumeLevelScalar; // 0.0-1.0
 ```
 
-**Set volume:**
-```csharp
-btEndpoint.AudioEndpointVolume.MasterVolumeLevelScalar = volume; // 0.0-1.0
-```
-
-**Watch for changes (external volume knob on phone/headphones):**
-```csharp
-// NAudio AudioEndpointVolumeCallback
-btEndpoint.AudioEndpointVolume.OnVolumeNotification += data =>
-{
-    // data.MasterVolume is 0.0-1.0, data.Muted is bool
-    VolumeChanged?.Invoke(this, new BluetoothVolumeChangedEventArgs { Volume = data.MasterVolume });
-};
-```
-
 **Gotchas:**
 - Must be under `#if WINDOWS_TARGET` — NAudio.CoreAudioApi requires Windows
-- The BT endpoint may not appear immediately after `AudioPlaybackConnection.Open()` — may need a short poll/delay
-- If WASAPI loopback is active and the default endpoint is muted, the endpoint volume callbacks still fire but the actual audio is captured pre-mute
-- `MMDeviceEnumerator` is COM — must be created on an STA thread or use `Task.Run` with marshalling
-- The endpoint may change if the user switches BT codecs (SBC→AAC) — watch `DeviceStateChanged`
-
-### What's Needed — Linux (Raspberry Pi Target)
-
-BlueZ exposes AVRCP volume via D-Bus on the `org.bluez.MediaTransport1` interface.
-
-**Read volume on connect:**
-```csharp
-// Using Tmds.DBus — find the MediaTransport1 object for the connected device
-// Path pattern: /org/bluez/hci0/dev_XX_XX_XX_XX_XX_XX/fdN
-var transport = Connection.System.CreateProxy<IMediaTransport1>(
-    "org.bluez", transportPath);
-byte volume = await transport.GetVolumeAsync(); // 0-127
-float normalized = volume / 127f; // → 0.0-1.0
-```
-
-**Set volume:**
-```csharp
-await transport.SetVolumeAsync((byte)(volume * 127)); // 0.0-1.0 → 0-127
-```
-
-**Watch for changes:**
-```csharp
-// Subscribe to PropertiesChanged on the MediaTransport1 interface
-await transport.WatchPropertiesAsync(changes =>
-{
-    if (changes.TryGetValue("Volume", out var vol))
-    {
-        var newVolume = (byte)vol / 127f;
-        VolumeChanged?.Invoke(this, new BluetoothVolumeChangedEventArgs { Volume = newVolume });
-    }
-});
-```
-
-**Gotchas:**
-- `MediaTransport1` only appears when A2DP transport is active (audio is streaming) — not just "connected"
-- The transport path is dynamic (`/org/bluez/hci0/dev_.../fd0`, `fd1`, etc.) — must enumerate or watch `InterfacesAdded`
-- Volume property may not exist if the remote device doesn't support AVRCP absolute volume (older devices)
-- `Tmds.DBus` is only in the `net8.0` TFM ItemGroup — this code must be excluded from the Windows TFM via `Compile Remove`
-- BlueZ volume (0-127) maps to AVRCP absolute volume; not all headphones support set (some are read-only)
-
-### Wiring the Consumer
-
-When either platform raises `VolumeChanged`, it needs to reach `IAudioManager.MasterVolume`. The Cast volume sync pattern in `AudioStateUpdateService` shows how:
-
-```csharp
-// In AudioStateUpdateService constructor (or similar coordinator):
-_bluetoothService.VolumeChanged += OnBluetoothVolumeChanged;
-
-private void OnBluetoothVolumeChanged(object? sender, BluetoothVolumeChangedEventArgs e)
-{
-    if (_audioManager == null) return;
-    if (Math.Abs(_audioManager.MasterVolume - e.Volume) > 0.01f)
-        _audioManager.MasterVolume = e.Volume;
-}
-```
-
-The reverse direction (app volume → BT device) should be triggered when `MasterVolume` changes and the active source is Bluetooth:
-```csharp
-// When MasterVolume changes and active output is BT:
-if (_audioManager.ActiveSource?.Type == AudioSourceType.Bluetooth)
-    await _bluetoothService.SetDeviceVolumeAsync(_audioManager.MasterVolume);
-```
+- The BT endpoint may not appear immediately after `AudioPlaybackConnection.Open()`
+- `MMDeviceEnumerator` is COM — must be created on an STA thread
+- The endpoint may change if the user switches BT codecs (SBC→AAC)
 
 ---
 

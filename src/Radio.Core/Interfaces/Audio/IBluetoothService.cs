@@ -120,6 +120,12 @@ public interface IBluetoothService : IAsyncDisposable
   /// </summary>
   /// <param name="volume">Volume level (0.0 to 1.0).</param>
   Task SetDeviceVolumeAsync(float volume);
+
+  /// <summary>Skip to next track via AVRCP.</summary>
+  Task NextTrackAsync(CancellationToken cancellationToken = default);
+
+  /// <summary>Go to previous track via AVRCP.</summary>
+  Task PreviousTrackAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>Bluetooth adapter states.</summary>

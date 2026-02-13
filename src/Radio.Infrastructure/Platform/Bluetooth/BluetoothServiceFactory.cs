@@ -79,6 +79,8 @@ internal sealed class NullBluetoothService : IBluetoothService
   public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged { add { } remove { } }
   public float? DeviceVolume => null;
   public Task SetDeviceVolumeAsync(float volume) => Task.CompletedTask;
+  public Task NextTrackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+  public Task PreviousTrackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
   public Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default)
   {

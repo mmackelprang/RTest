@@ -61,6 +61,14 @@ namespace Radio.Infrastructure.Platform.Bluetooth.Linux
         Task SetAsync(string prop, object val);
     }
 
+    [DBusInterface("org.bluez.MediaTransport1")]
+    public interface IMediaTransport1 : IDBusObject
+    {
+        Task<IDisposable> WatchPropertiesAsync(Action<PropertyChanges> handler);
+        Task<T> GetAsync<T>(string prop);
+        Task SetAsync(string prop, object val);
+    }
+
     [DBusInterface("org.bluez.AgentManager1")]
     public interface IAgentManager1 : IDBusObject
     {

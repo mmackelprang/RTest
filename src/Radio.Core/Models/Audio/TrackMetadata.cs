@@ -72,5 +72,8 @@ public enum MetadataSource
   FileTag,
 
   /// <summary>Metadata obtained from fingerprinting service.</summary>
-  Fingerprinting
+  Fingerprinting,
+
+  /// <summary>Metadata obtained from Bluetooth AVRCP (track info from phone).</summary>
+  Avrcp
 }

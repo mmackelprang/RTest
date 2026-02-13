@@ -787,27 +787,84 @@ public class GoogleCastOutput : AudioOutputBase
 
     try
     {
-      var media = BuildMedia();
-      var mediaChannel = _client.GetChannel<MediaChannel>();
-      if (mediaChannel != null)
-      {
-        MediaStatus? status = null;
-        try
-        {
-          status = await mediaChannel.LoadAsync(media, true);
-        }
-        catch (TimeoutException)
-        {
-          _logger.LogDebug("Cast: Metadata LoadAsync timed out — device may still be processing");
-        }
-        _logger.LogInformation(
-          "Cast metadata updated: {Title} - {Artist} (PlayerState: {State}, IdleReason: {IdleReason})",
-          title, artist, status?.PlayerState, status?.IdleReason);
-      }
+      await LoadMediaWithRecoveryAsync(cancellationToken);
+      _logger.LogInformation(
+        "Cast metadata updated: {Title} - {Artist}", title, artist);
     }
     catch (Exception ex)
     {
       _logger.LogWarning(ex, "Failed to update Cast now-playing metadata");
+    }
+  }
+
+  /// <summary>
+  /// Attempts to load media on the Cast device. If the session has expired
+  /// (CC1AD845 app closed after idle), relaunches the app and retries once.
+  /// </summary>
+  private async Task LoadMediaWithRecoveryAsync(CancellationToken cancellationToken)
+  {
+    var media = BuildMedia();
+    var mediaChannel = _client!.GetChannel<MediaChannel>();
+    if (mediaChannel == null) return;
+
+    try
+    {
+      await mediaChannel.LoadAsync(media, true).WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+    }
+    catch (Exception ex) when (IsCastSessionExpired(ex))
+    {
+      _logger.LogInformation("Cast session expired — relaunching media receiver");
+      await RelaunchMediaReceiverAsync(cancellationToken);
+
+      // Retry load after relaunch
+      mediaChannel = _client.GetChannel<MediaChannel>();
+      if (mediaChannel != null)
+      {
+        try
+        {
+          await mediaChannel.LoadAsync(media, true).WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+          _logger.LogInformation("Cast: Media loaded successfully after session recovery");
+        }
+        catch (TimeoutException)
+        {
+          _logger.LogDebug("Cast: Recovered LoadAsync timed out — device may still be processing");
+        }
+      }
+    }
+    catch (TimeoutException)
+    {
+      _logger.LogDebug("Cast: Metadata LoadAsync timed out — device may still be processing");
+    }
+  }
+
+  /// <summary>
+  /// Determines whether an exception indicates the Cast session has expired.
+  /// </summary>
+  private static bool IsCastSessionExpired(Exception ex)
+  {
+    var message = ex is System.Reflection.TargetInvocationException tie
+      ? tie.InnerException?.Message ?? ex.Message
+      : ex.Message;
+
+    return message.Contains("INVALID_MEDIA_SESSION_ID", StringComparison.OrdinalIgnoreCase)
+        || message.Contains("No running applications", StringComparison.OrdinalIgnoreCase)
+        || message.Contains("session not found", StringComparison.OrdinalIgnoreCase);
+  }
+
+  /// <summary>
+  /// Relaunches the CC1AD845 default media receiver after an idle timeout.
+  /// </summary>
+  private async Task RelaunchMediaReceiverAsync(CancellationToken cancellationToken)
+  {
+    try
+    {
+      await _client!.LaunchApplicationAsync("CC1AD845");
+      await Task.Delay(500, cancellationToken);
+      _logger.LogInformation("Cast: Media receiver relaunched after idle recovery");
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Cast: Failed to relaunch media receiver");
     }
   }
 

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Core.Events;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
@@ -23,12 +24,16 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private readonly IBluetoothService _bluetoothService;
   private readonly BackgroundIdentificationService? _identificationService;
   private readonly MetadataLookupService? _metadataLookupService;
+  private readonly AlbumArtCacheService? _albumArtCache;
   private readonly IOptionsMonitor<BluetoothOptions> _options;
   private readonly SoundFlowPlaybackService? _playbackService;
   private string? _playbackId;
   private string? _lastCoverArtLookupKey;
   private AudioCaptureDevice? _captureDevice;
   private BufferedSoundGenerator<float>? _captureGenerator;
+  private TimeSpan _btPosition;
+  private TimeSpan? _btDuration;
+  private bool _hasMediaPlayer;
 
   /// <summary>
   /// When true, the fingerprinting pipeline will attempt to identify the current track.
@@ -44,36 +49,41 @@ public class BluetoothAudioSource : USBAudioSourceBase
     BackgroundIdentificationService? identificationService = null,
     Radio.Core.Interfaces.IMetricsCollector? metricsCollector = null,
     SoundFlowPlaybackService? playbackService = null,
-    MetadataLookupService? metadataLookupService = null)
+    MetadataLookupService? metadataLookupService = null,
+    AlbumArtCacheService? albumArtCache = null)
     : base(logger, deviceManager, identificationService, metricsCollector)
   {
     _bluetoothService = bluetoothService;
     _identificationService = identificationService;
     _metadataLookupService = metadataLookupService;
+    _albumArtCache = albumArtCache;
     _options = options;
     _playbackService = playbackService;
     SetDefaultMetadata("Bluetooth", "Bluetooth", "Bluetooth Device");
 
     _bluetoothService.MetadataChanged += OnMetadataChanged;
     _bluetoothService.PlaybackStatusChanged += OnPlaybackStatusChanged;
+    _bluetoothService.PositionChanged += OnPositionChanged;
     _bluetoothService.DeviceConnected += OnDeviceConnected;
     _bluetoothService.DeviceDisconnected += OnDeviceDisconnected;
+
+    if (_identificationService != null)
+      _identificationService.TrackIdentified += OnTrackIdentified;
   }
 
   public override string Name => "Bluetooth Audio";
   public override AudioSourceType Type => AudioSourceType.Bluetooth;
 
-  public override bool SupportsNext => false;
-  public override bool SupportsPrevious => false;
+  public override bool SupportsNext => _hasMediaPlayer;
+  public override bool SupportsPrevious => _hasMediaPlayer;
   public override bool SupportsShuffle => false;
   public override bool SupportsRepeat => false;
 
   /// <summary>Bluetooth is a live stream; not seekable.</summary>
   public override bool IsSeekable => false;
 
-  // We rely on metadata events rather than polling for these
-  public override TimeSpan? Duration => null;
-  public override TimeSpan Position => TimeSpan.Zero;
+  public override TimeSpan? Duration => _btDuration;
+  public override TimeSpan Position => _btPosition;
 
   public override async Task InitializeAsync(CancellationToken cancellationToken = default)
   {
@@ -241,6 +251,16 @@ public class BluetoothAudioSource : USBAudioSourceBase
     await _bluetoothService.StopAsync(cancellationToken);
   }
 
+  public override async Task NextAsync(CancellationToken cancellationToken = default)
+  {
+    await _bluetoothService.NextTrackAsync(cancellationToken);
+  }
+
+  public override async Task PreviousAsync(CancellationToken cancellationToken = default)
+  {
+    await _bluetoothService.PreviousTrackAsync(cancellationToken);
+  }
+
   protected override async ValueTask DisposeAsyncCore()
   {
     if (_captureDevice != null)
@@ -264,8 +284,12 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
     _bluetoothService.MetadataChanged -= OnMetadataChanged;
     _bluetoothService.PlaybackStatusChanged -= OnPlaybackStatusChanged;
+    _bluetoothService.PositionChanged -= OnPositionChanged;
     _bluetoothService.DeviceConnected -= OnDeviceConnected;
     _bluetoothService.DeviceDisconnected -= OnDeviceDisconnected;
+
+    if (_identificationService != null)
+      _identificationService.TrackIdentified -= OnTrackIdentified;
 
     await _bluetoothService.StopAsync();
     await _bluetoothService.DisposeAsync();
@@ -343,6 +367,9 @@ public class BluetoothAudioSource : USBAudioSourceBase
   {
     Logger.LogDebug("BluetoothAudioSource: device disconnected event for {DeviceName}", e.Device.Name);
     NeedsFingerprintingLookup = false;
+    _hasMediaPlayer = false;
+    _btPosition = TimeSpan.Zero;
+    _btDuration = null;
 
     if (State == AudioSourceState.Playing || State == AudioSourceState.Paused)
     {
@@ -351,9 +378,18 @@ public class BluetoothAudioSource : USBAudioSourceBase
     }
   }
 
+  private void OnPositionChanged(object? sender, TimeSpan position)
+  {
+    _btPosition = position;
+  }
+
   private void OnMetadataChanged(object? sender, BluetoothPlaybackMetadata e)
   {
     if (e == null) return;
+
+    // AVRCP metadata arriving means a media player is attached — enable next/prev
+    _hasMediaPlayer = true;
+    _btPosition = TimeSpan.Zero;
 
     MetricsCollector?.Increment("bluetooth.metadata_updates");
     MetadataInternal[StandardMetadataKeys.Title] = e.Title;
@@ -362,7 +398,12 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
     if (e.Duration > TimeSpan.Zero)
     {
+      _btDuration = e.Duration;
       MetadataInternal[StandardMetadataKeys.Duration] = e.Duration.ToString();
+    }
+    else
+    {
+      _btDuration = null;
     }
 
     // Propagate album art URL from AVRCP if available
@@ -390,15 +431,44 @@ public class BluetoothAudioSource : USBAudioSourceBase
     }
   }
 
+  private void OnTrackIdentified(object? sender, TrackIdentifiedEventArgs e)
+  {
+    // After fingerprinting identifies a track, stop re-fingerprinting
+    // until new AVRCP metadata arrives (OnMetadataChanged resets the flag)
+    if (NeedsFingerprintingLookup)
+    {
+      NeedsFingerprintingLookup = false;
+      Logger.LogDebug(
+        "Track identified via fingerprinting: '{Title}' by '{Artist}' — skipping further fingerprinting",
+        e.Track.Title, e.Track.Artist);
+    }
+  }
+
   private async Task LookupCoverArtAsync(string title, string artist, string? album)
   {
     try
     {
+      Logger.LogDebug("Looking up cover art for '{Title}' by '{Artist}' (Album: '{Album}')", title, artist, album);
       var coverArtUrl = await _metadataLookupService!.SearchCoverArtByTextAsync(
         title, artist, album);
       if (!string.IsNullOrEmpty(coverArtUrl))
       {
+        // Cache the external URL locally so the Web UI can serve it via /api/albumart/
+        if (_albumArtCache != null)
+        {
+          var localUrl = await _albumArtCache.SaveFromUrlAsync(coverArtUrl);
+          if (!string.IsNullOrEmpty(localUrl))
+          {
+            coverArtUrl = localUrl;
+          }
+        }
+
         MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = coverArtUrl;
+        Logger.LogInformation("Cover art found for '{Title}' by '{Artist}': {Url}", title, artist, coverArtUrl);
+      }
+      else
+      {
+        Logger.LogDebug("No cover art found for '{Title}' by '{Artist}'", title, artist);
       }
     }
     catch (Exception ex)
