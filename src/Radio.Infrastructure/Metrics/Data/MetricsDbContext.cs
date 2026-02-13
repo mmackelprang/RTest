@@ -120,6 +120,7 @@ public sealed class MetricsDbContext : IAsyncDisposable
     string key,
     int type,
     string? unit,
+    SqliteTransaction? transaction = null,
     CancellationToken ct = default)
   {
     // Check cache first
@@ -130,6 +131,7 @@ public sealed class MetricsDbContext : IAsyncDisposable
 
     // Query database
     await using var cmd = Connection.CreateCommand();
+    cmd.Transaction = transaction;
     cmd.CommandText = "SELECT Id FROM MetricDefinitions WHERE Key = @Key";
     cmd.Parameters.AddWithValue("@Key", key);
 

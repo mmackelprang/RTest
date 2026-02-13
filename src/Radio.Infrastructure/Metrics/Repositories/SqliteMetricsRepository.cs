@@ -42,12 +42,6 @@ public sealed class SqliteMetricsRepository : IMetricsReader
       return;
     }
 
-    var metricId = await _dbContext.GetOrCreateMetricDefinitionIdAsync(
-      key,
-      (int)metricType,
-      unit,
-      ct);
-
     var tableName = resolution switch
     {
       MetricResolution.Minute => "MetricData_Minute",
@@ -95,6 +89,18 @@ public sealed class SqliteMetricsRepository : IMetricsReader
 
       try
       {
+        // Resolve metric definition inside the transaction lock and pass the
+        // transaction so the command is associated with the same connection/
+        // transaction pair.  Previously this was called outside the lock, which
+        // caused "transaction not associated with this command" errors when a
+        // concurrent flush had already begun a transaction on the shared
+        // connection.
+        var metricId = await _dbContext.GetOrCreateMetricDefinitionIdAsync(
+          key,
+          (int)metricType,
+          unit,
+          transaction,
+          ct);
         foreach (var bucket in buckets)
         {
           await using var cmd = _dbContext.Connection.CreateCommand();
