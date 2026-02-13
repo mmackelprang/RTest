@@ -70,7 +70,18 @@ public static class AudioServiceExtensions
     services.AddSingleton<IAudioDeviceManager>(sp => sp.GetRequiredService<SoundFlowDeviceManager>());
 
     // Register the audio engine (singleton for single audio context)
-    services.AddSingleton<SoundFlowAudioEngine>();
+    // Note: IMetricsCollector and IVisualizerService are optional — use explicit factory
+    // since MS DI's default activation can skip optional constructor parameters.
+    services.AddSingleton<SoundFlowAudioEngine>(sp =>
+    {
+      var logger = sp.GetRequiredService<ILogger<SoundFlowAudioEngine>>();
+      var options = sp.GetRequiredService<IOptions<AudioEngineOptions>>();
+      var masterMixer = sp.GetRequiredService<SoundFlowMasterMixer>();
+      var deviceManager = sp.GetRequiredService<SoundFlowDeviceManager>();
+      var metricsCollector = sp.GetService<IMetricsCollector>();
+      var visualizerService = sp.GetService<IVisualizerService>();
+      return new SoundFlowAudioEngine(logger, options, masterMixer, deviceManager, metricsCollector, visualizerService);
+    });
     services.AddSingleton<IAudioEngine>(sp => sp.GetRequiredService<SoundFlowAudioEngine>());
 
     // Register the playback service (singleton for managing SoundFlow players)
@@ -109,7 +120,28 @@ public static class AudioServiceExtensions
     services.AddSingleton<AlbumArtCacheService>();
 
     // Register audio manager (singleton to maintain state)
-    services.AddSingleton<AudioManager>();
+    // Use explicit factory to ensure all optional services are resolved.
+    services.AddSingleton<AudioManager>(sp => new AudioManager(
+      sp.GetRequiredService<ILogger<AudioManager>>(),
+      sp.GetRequiredService<ILoggerFactory>(),
+      sp.GetRequiredService<IAudioEngine>(),
+      sp.GetRequiredService<IAudioDeviceManager>(),
+      sp.GetRequiredService<IRadioFactory>(),
+      sp.GetRequiredService<IBluetoothService>(),
+      sp.GetRequiredService<IOptionsMonitor<BluetoothOptions>>(),
+      sp.GetRequiredService<IOptionsMonitor<FilePlayerOptions>>(),
+      sp.GetRequiredService<IOptionsMonitor<FilePlayerPreferences>>(),
+      sp.GetRequiredService<IOptionsMonitor<DeviceOptions>>(),
+      sp.GetRequiredService<IOptionsMonitor<GenericSourcePreferences>>(),
+      sp.GetRequiredService<IOptionsMonitor<AudioPreferences>>(),
+      sp.GetRequiredService<IConfiguration>(),
+      sp.GetService<BackgroundIdentificationService>(),
+      sp.GetService<IMetricsCollector>(),
+      sp.GetService<Configuration.Abstractions.IConfigurationManager>(),
+      sp.GetService<SoundFlowPlaybackService>(),
+      sp.GetService<IServiceScopeFactory>(),
+      sp.GetService<AlbumArtCacheService>(),
+      sp.GetService<MetadataLookupService>()));
     services.AddSingleton<IAudioManager>(sp => sp.GetRequiredService<AudioManager>());
 
     // Register event audio source services
