@@ -96,6 +96,23 @@ public sealed class MetricsDbContext : IAsyncDisposable
   }
 
   /// <summary>
+  /// Creates an independent read-only connection for concurrent query use.
+  /// Each caller gets its own connection to avoid contention on the shared write connection.
+  /// </summary>
+  public SqliteConnection CreateReadConnection()
+  {
+    if (!_isInitialized)
+    {
+      throw new InvalidOperationException("MetricsDbContext is not initialized. Call InitializeAsync first.");
+    }
+
+    var dbPath = _pathResolver.GetConfigurationDatabasePath();
+    var conn = new SqliteConnection($"Data Source={dbPath};Mode=ReadOnly");
+    conn.Open();
+    return conn;
+  }
+
+  /// <summary>
   /// Gets or creates a metric definition ID.
   /// Uses an in-memory cache to avoid repeated database lookups.
   /// </summary>

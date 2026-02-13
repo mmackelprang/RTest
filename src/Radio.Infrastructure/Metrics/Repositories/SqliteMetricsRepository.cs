@@ -195,9 +195,11 @@ public sealed class SqliteMetricsRepository : IMetricsReader
     var startUnix = start.ToUnixTimeSeconds();
     var endUnix = end.ToUnixTimeSeconds();
 
-    await using var cmd = _dbContext.Connection.CreateCommand();
+    // Use independent read connection to avoid contention on the shared write connection
+    await using var readConn = _dbContext.CreateReadConnection();
+    await using var cmd = readConn.CreateCommand();
     cmd.CommandText = $@"
-      SELECT 
+      SELECT
         md.Key,
         m.Timestamp,
         m.ValueSum,
@@ -267,8 +269,9 @@ public sealed class SqliteMetricsRepository : IMetricsReader
   /// <inheritdoc/>
   public async Task<double?> GetAggregateAsync(string key, CancellationToken ct = default)
   {
-    // Query across all resolutions and sum/aggregate
-    await using var cmd = _dbContext.Connection.CreateCommand();
+    // Use independent read connection to avoid contention on the shared write connection
+    await using var readConn = _dbContext.CreateReadConnection();
+    await using var cmd = readConn.CreateCommand();
     
     // First, get the metric type to determine aggregation strategy
     cmd.CommandText = "SELECT Type FROM MetricDefinitions WHERE Key = @Key";
@@ -335,7 +338,9 @@ public sealed class SqliteMetricsRepository : IMetricsReader
   /// <inheritdoc/>
   public async Task<IReadOnlyList<string>> ListMetricKeysAsync(CancellationToken ct = default)
   {
-    await using var cmd = _dbContext.Connection.CreateCommand();
+    // Use independent read connection to avoid contention on the shared write connection
+    await using var readConn = _dbContext.CreateReadConnection();
+    await using var cmd = readConn.CreateCommand();
     cmd.CommandText = "SELECT Key FROM MetricDefinitions ORDER BY Key";
 
     var keys = new List<string>();
