@@ -1,5 +1,7 @@
+using System.Net.Sockets;
 using MudBlazor;
 using MudBlazor.Services;
+using Radio.Web.Services;
 using Radio.Web.Services.ApiClients;
 using Radio.Web.Services.Hub;
 using Serilog;
@@ -10,6 +12,20 @@ Log.Logger = new LoggerConfiguration()
   .MinimumLevel.Override("Microsoft", Serilog.Events.LogEventLevel.Information)
   .MinimumLevel.Override("Microsoft.AspNetCore", Serilog.Events.LogEventLevel.Warning)
   .MinimumLevel.Override("System.Net.Http.HttpClient", Serilog.Events.LogEventLevel.Warning)
+  // Suppress individual "Connection refused" stack traces from API service catch blocks.
+  // The ApiConnectionLoggingHandler provides a single throttled WARNING instead.
+  .Filter.ByExcluding(logEvent =>
+  {
+    if (logEvent.Exception is not HttpRequestException httpEx) return false;
+    var inner = httpEx.InnerException;
+    while (inner != null)
+    {
+      if (inner is SocketException { SocketErrorCode: SocketError.ConnectionRefused })
+        return true;
+      inner = inner.InnerException;
+    }
+    return false;
+  })
   .Enrich.FromLogContext()
   .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}")
   .WriteTo.File(
@@ -49,6 +65,9 @@ builder.Services.AddMudServices(config =>
 // Register API client services with retry policies (Phase 1 Task 1.2)
 var apiBaseUrl = builder.Configuration["ApiBaseUrl"] ?? "http://localhost:5000";
 
+// Throttle connection-refused log spam (logs once per 10s instead of every failed call)
+builder.Services.AddTransient<ApiConnectionLoggingHandler>();
+
 // Configure HttpClientHandler to bypass SSL validation in development
 void ConfigureHttpClientHandler(HttpMessageHandler handler)
 {
@@ -64,6 +83,7 @@ builder.Services.AddHttpClient<AudioApiService>(client =>
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
 })
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
 .ConfigurePrimaryHttpMessageHandler(() =>
 {
   var handler = new HttpClientHandler();
@@ -76,6 +96,7 @@ builder.Services.AddHttpClient<SystemApiService>(client =>
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
 })
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
 .ConfigurePrimaryHttpMessageHandler(() =>
 {
   var handler = new HttpClientHandler();
@@ -88,6 +109,7 @@ builder.Services.AddHttpClient<QueueApiService>(client =>
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
 })
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
 .ConfigurePrimaryHttpMessageHandler(() =>
 {
   var handler = new HttpClientHandler();
@@ -100,6 +122,7 @@ builder.Services.AddHttpClient<PlaylistApiService>(client =>
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
 })
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
 .ConfigurePrimaryHttpMessageHandler(() =>
 {
   var handler = new HttpClientHandler();
@@ -112,6 +135,7 @@ builder.Services.AddHttpClient<SourcesApiService>(client =>
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
 })
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
 .ConfigurePrimaryHttpMessageHandler(() =>
 {
   var handler = new HttpClientHandler();
@@ -124,6 +148,7 @@ builder.Services.AddHttpClient<ConfigurationApiService>(client =>
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
 })
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
 .ConfigurePrimaryHttpMessageHandler(() =>
 {
   var handler = new HttpClientHandler();
@@ -136,6 +161,7 @@ builder.Services.AddHttpClient<DevicesApiService>(client =>
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
 })
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
 .ConfigurePrimaryHttpMessageHandler(() =>
 {
   var handler = new HttpClientHandler();
@@ -148,6 +174,7 @@ builder.Services.AddHttpClient<MetricsApiService>(client =>
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
 })
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
 .ConfigurePrimaryHttpMessageHandler(() =>
 {
   var handler = new HttpClientHandler();
@@ -160,6 +187,7 @@ builder.Services.AddHttpClient<FileApiService>(client =>
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
 })
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
 .ConfigurePrimaryHttpMessageHandler(() =>
 {
   var handler = new HttpClientHandler();
@@ -172,6 +200,7 @@ builder.Services.AddHttpClient<PlayHistoryApiService>(client =>
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
 })
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
 .ConfigurePrimaryHttpMessageHandler(() =>
 {
   var handler = new HttpClientHandler();
@@ -184,6 +213,7 @@ builder.Services.AddHttpClient<RadioApiService>(client =>
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
 })
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
 .ConfigurePrimaryHttpMessageHandler(() =>
 {
   var handler = new HttpClientHandler();
@@ -196,6 +226,7 @@ builder.Services.AddHttpClient<BluetoothApiService>(client =>
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
 })
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
 .ConfigurePrimaryHttpMessageHandler(() =>
 {
   var handler = new HttpClientHandler();
@@ -208,6 +239,7 @@ builder.Services.AddHttpClient<SecretsApiService>(client =>
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
 })
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
 .ConfigurePrimaryHttpMessageHandler(() =>
 {
   var handler = new HttpClientHandler();
@@ -220,6 +252,7 @@ builder.Services.AddHttpClient("AlbumArtProxy", client =>
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(10);
 })
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
 .ConfigurePrimaryHttpMessageHandler(() =>
 {
   var handler = new HttpClientHandler();
