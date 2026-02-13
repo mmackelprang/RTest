@@ -166,8 +166,9 @@ public record MetricHistoryDto(
   DateTime Timestamp,
   double Value,
   int Count,
-  double Min,
-  double Max,
+  double? Min,
+  double? Max,
+  double? Last,
   Dictionary<string, string>? Tags
 );
 

@@ -108,6 +108,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     _metadataLookupService = metadataLookupService;
 
     _bluetoothService.DeviceConnected += OnBluetoothDeviceConnected;
+    _bluetoothService.MetadataChanged += OnBluetoothMetadataChanged;
 
     // Subscribe to track identification events for updating play history
     if (_identificationService != null)
@@ -586,7 +587,8 @@ public class AudioManager : IAudioManager, IAsyncDisposable
       _identificationService,
       _metricsCollector,
       _playbackService,
-      _metadataLookupService);
+      _metadataLookupService,
+      _albumArtCache);
   }
 
   /// <summary>
@@ -1024,6 +1026,73 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   }
  
   /// <summary>
+  /// Updates the current play history entry when real AVRCP metadata arrives.
+  /// This fixes entries that were recorded with the device name as title before
+  /// the phone sent actual track metadata.
+  /// </summary>
+  private async void OnBluetoothMetadataChanged(object? sender, BluetoothPlaybackMetadata e)
+  {
+    // Only update if we have real metadata and the active source is Bluetooth
+    if (e == null || string.IsNullOrEmpty(e.Title) || string.IsNullOrEmpty(e.Artist))
+      return;
+    if (_activeSource?.Type != AudioSourceType.Bluetooth)
+      return;
+    if (string.IsNullOrEmpty(_currentPlayHistoryEntryId) || _serviceScopeFactory == null)
+      return;
+
+    try
+    {
+      using var scope = _serviceScopeFactory.CreateScope();
+      var playHistoryRepository = scope.ServiceProvider.GetService<IPlayHistoryRepository>();
+      if (playHistoryRepository == null) return;
+
+      var entry = await playHistoryRepository.GetByIdAsync(_currentPlayHistoryEntryId);
+      if (entry == null) return;
+
+      // Only update if the entry looks like it has a device name as title
+      // (i.e., track metadata wasn't available when the entry was recorded)
+      var existingTitle = entry.Track?.Title;
+      if (existingTitle == e.Title && entry.Track?.Artist == e.Artist)
+        return; // Already up to date
+
+      var metadataRepository = scope.ServiceProvider.GetService<ITrackMetadataRepository>();
+      var metadata = new TrackMetadata
+      {
+        Id = entry.TrackMetadataId ?? Guid.NewGuid().ToString(),
+        Title = e.Title,
+        Artist = e.Artist,
+        Album = e.Album,
+        Source = MetadataSource.Avrcp,
+        CreatedAt = DateTime.UtcNow,
+        UpdatedAt = DateTime.UtcNow
+      };
+
+      if (metadataRepository != null)
+      {
+        await metadataRepository.StoreAsync(metadata);
+      }
+
+      var updatedEntry = entry with
+      {
+        TrackMetadataId = metadata.Id,
+        MetadataSource = MetadataSource.Avrcp,
+        SourceDetails = $"{e.Title} - {e.Artist}",
+        WasIdentified = true,
+        Track = metadata
+      };
+
+      await playHistoryRepository.UpdateAsync(updatedEntry);
+      _logger.LogInformation(
+        "Updated play history entry {EntryId} with AVRCP metadata: '{Title}' by '{Artist}'",
+        entry.Id, e.Title, e.Artist);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Failed to update play history with AVRCP metadata");
+    }
+  }
+
+  /// <summary>
   /// Auto-switch to Bluetooth when a device connects if enabled.
   /// </summary>
   private async void OnBluetoothDeviceConnected(object? sender, BluetoothDeviceConnectedEventArgs e)
@@ -1075,6 +1144,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
 
     // Unsubscribe Bluetooth events
     _bluetoothService.DeviceConnected -= OnBluetoothDeviceConnected;
+    _bluetoothService.MetadataChanged -= OnBluetoothMetadataChanged;
 
     // Stop current playback (don't call StopAsync as it checks disposed flag)
     try

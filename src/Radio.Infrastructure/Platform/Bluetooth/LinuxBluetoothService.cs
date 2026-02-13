@@ -33,6 +33,11 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         private ObjectPath? _mediaPlayerPath;
         private IDisposable? _playerPropertiesWatcher;
 
+        // Media transport (AVRCP volume)
+        private Linux.IMediaTransport1? _mediaTransport;
+        private ObjectPath? _mediaTransportPath;
+        private IDisposable? _transportPropertiesWatcher;
+
         // Maps object path to device info
         private readonly Dictionary<ObjectPath, BluetoothDeviceInfo> _deviceCache = new();
         private readonly HashSet<ObjectPath> _watchedDevicePaths = new();
@@ -100,17 +105,64 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         public event EventHandler<BluetoothPlaybackMetadata>? MetadataChanged;
         public event EventHandler<BluetoothPlaybackStatus>? PlaybackStatusChanged;
         public event EventHandler<TimeSpan>? PositionChanged;
-#pragma warning disable CS0067 // VolumeChanged will be wired when BlueZ MediaTransport1.Volume monitoring is implemented
         public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged;
-#pragma warning restore CS0067
         public float? DeviceVolume { get; private set; }
 
-        public Task SetDeviceVolumeAsync(float volume)
+        public async Task SetDeviceVolumeAsync(float volume)
         {
-            // BlueZ MediaTransport1.Volume (0-127) could be set via D-Bus here.
-            // Requires finding the MediaTransport1 object for the connected device.
-            _logger.LogDebug("SetDeviceVolumeAsync not yet implemented for Linux BT");
-            return Task.CompletedTask;
+            if (_mediaTransport == null)
+            {
+                _logger.LogDebug("No media transport attached, cannot set BT volume");
+                return;
+            }
+
+            try
+            {
+                var bluezVolume = (ushort)Math.Clamp((int)(volume * 127f), 0, 127);
+                await _mediaTransport.SetAsync("Volume", bluezVolume);
+                DeviceVolume = volume;
+                _logger.LogDebug("Set BT AVRCP volume to {Volume:P0} (BlueZ: {Raw}/127)", volume, bluezVolume);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to set BT AVRCP volume via MediaTransport1");
+            }
+        }
+
+        public async Task NextTrackAsync(CancellationToken cancellationToken = default)
+        {
+            if (_mediaPlayer == null)
+            {
+                _logger.LogDebug("No MPRIS media player attached, cannot skip to next track");
+                return;
+            }
+            try
+            {
+                await _mediaPlayer.NextAsync();
+                _logger.LogInformation("AVRCP: Sent Next command");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to send AVRCP Next command");
+            }
+        }
+
+        public async Task PreviousTrackAsync(CancellationToken cancellationToken = default)
+        {
+            if (_mediaPlayer == null)
+            {
+                _logger.LogDebug("No MPRIS media player attached, cannot go to previous track");
+                return;
+            }
+            try
+            {
+                await _mediaPlayer.PreviousAsync();
+                _logger.LogInformation("AVRCP: Sent Previous command");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to send AVRCP Previous command");
+            }
         }
 
         public async Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default)
@@ -311,6 +363,11 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             {
                 _ = AttachMediaPlayerAsync(change.objectPath);
             }
+
+            if (change.interfaces.ContainsKey(Linux.BluezConstants.MediaTransportInterface))
+            {
+                _ = AttachMediaTransportAsync(change.objectPath);
+            }
         }
 
         private async Task WatchDevicePropertiesAsync(ObjectPath devicePath)
@@ -372,6 +429,13 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                             else
                             {
                                 RecordDisconnectionMetrics();
+                                // Clean up media transport on disconnect
+                                _transportPropertiesWatcher?.Dispose();
+                                _transportPropertiesWatcher = null;
+                                _mediaTransport = null;
+                                _mediaTransportPath = null;
+                                DeviceVolume = null;
+
                                 _logger.LogInformation("Bluetooth device disconnected: {DeviceName} ({Address})",
                                     updatedDevice.Name, updatedDevice.Address);
                                 DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs { Device = updatedDevice });
@@ -692,6 +756,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         public async ValueTask DisposeAsync()
         {
             _playerPropertiesWatcher?.Dispose();
+            _transportPropertiesWatcher?.Dispose();
             _discoveryWatcher?.Dispose();
             _captureEngine?.Dispose();
             _captureEngine = null;
@@ -753,17 +818,20 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 var objects = await _objectManager.GetManagedObjectsAsync();
                 foreach (var obj in objects)
                 {
-                    if (obj.Value.ContainsKey(Linux.BluezConstants.MediaPlayerInterface))
+                    if (obj.Value.ContainsKey(Linux.BluezConstants.MediaPlayerInterface) && _mediaPlayer == null)
                     {
                         await AttachMediaPlayerAsync(obj.Key);
-                        // For now we just attach the first one we find
-                        break; 
+                    }
+
+                    if (obj.Value.ContainsKey(Linux.BluezConstants.MediaTransportInterface) && _mediaTransport == null)
+                    {
+                        await AttachMediaTransportAsync(obj.Key);
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to check for existing media players");
+                _logger.LogWarning(ex, "Failed to check for existing media players/transports");
             }
         }
 
@@ -810,6 +878,60 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Failed to attach media player at {objectPath}");
+            }
+        }
+
+        private async Task AttachMediaTransportAsync(ObjectPath objectPath)
+        {
+            try
+            {
+                if (_connection == null) return;
+
+                if (_mediaTransportPath == objectPath && _mediaTransport != null)
+                {
+                    _logger.LogDebug("Already attached to media transport at {Path}", objectPath);
+                    return;
+                }
+
+                _transportPropertiesWatcher?.Dispose();
+                _mediaTransportPath = objectPath;
+                _mediaTransport = _connection.CreateProxy<Linux.IMediaTransport1>(
+                    Linux.BluezConstants.ServiceName, objectPath);
+
+                _transportPropertiesWatcher = await _mediaTransport.WatchPropertiesAsync(OnTransportPropertiesChanged);
+
+                // Read initial volume
+                try
+                {
+                    var volume = await _mediaTransport.GetAsync<ushort>("Volume");
+                    var normalized = volume / 127f;
+                    DeviceVolume = normalized;
+                    _logger.LogDebug("Initial BT transport volume: {Raw}/127 ({Normalized:P0})", volume, normalized);
+                }
+                catch
+                {
+                    // Volume property might not be available
+                }
+
+                _logger.LogInformation("Attached to MediaTransport1 at {Path}", objectPath);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to attach media transport at {Path}", objectPath);
+            }
+        }
+
+        private void OnTransportPropertiesChanged(PropertyChanges changes)
+        {
+            foreach (var prop in changes.Changed)
+            {
+                if (prop.Key == "Volume" && prop.Value is ushort volume)
+                {
+                    var normalized = volume / 127f;
+                    DeviceVolume = normalized;
+                    VolumeChanged?.Invoke(this, new BluetoothVolumeChangedEventArgs { Volume = normalized });
+                    _logger.LogDebug("BT AVRCP volume changed: {Raw}/127 ({Normalized:P0})", volume, normalized);
+                }
             }
         }
 

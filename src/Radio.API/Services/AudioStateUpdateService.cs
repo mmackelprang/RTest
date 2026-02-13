@@ -75,6 +75,7 @@ public class AudioStateUpdateService : BackgroundService
       _bluetoothService.DeviceConnected += OnBluetoothDeviceConnected;
       _bluetoothService.DeviceDisconnected += OnBluetoothDeviceDisconnected;
       _bluetoothService.DeviceDiscovered += OnBluetoothDeviceDiscovered;
+      _bluetoothService.VolumeChanged += OnBluetoothVolumeChanged;
     }
     else
     {
@@ -365,6 +366,9 @@ public class AudioStateUpdateService : BackgroundService
       await _hubContext.Clients.All
         .SendAsync("VolumeChanged", currentVolume, cancellationToken);
       _logger.LogDebug("Broadcast VolumeChanged: {Volume}, Muted: {IsMuted}", currentVolume.Volume, currentVolume.IsMuted);
+
+      // Push volume to BT device (reverse sync: console → phone)
+      await PushVolumeToBtDeviceAsync(currentVolume.Volume, cancellationToken);
     }
   }
 
@@ -690,6 +694,56 @@ public class AudioStateUpdateService : BackgroundService
     }
   }
 
+  /// <summary>
+  /// Pushes master volume to the BT device when BT is the active source.
+  /// Only sends if the device volume differs from the target (avoids feedback loops).
+  /// </summary>
+  private async Task PushVolumeToBtDeviceAsync(float volume, CancellationToken cancellationToken)
+  {
+    if (_bluetoothService == null || _audioManager?.ActiveSource?.Type != AudioSourceType.Bluetooth)
+      return;
+
+    // Avoid feedback loop: don't push if device already reports this volume
+    var deviceVolume = _bluetoothService.DeviceVolume;
+    if (deviceVolume.HasValue && Math.Abs(deviceVolume.Value - volume) < 0.02f)
+      return;
+
+    try
+    {
+      await _bluetoothService.SetDeviceVolumeAsync(volume);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Failed to push volume to BT device");
+    }
+  }
+
+  /// <summary>
+  /// Handles Bluetooth AVRCP volume changes.
+  /// Updates IAudioManager so the console and UI stay in sync with the phone's volume.
+  /// </summary>
+  private void OnBluetoothVolumeChanged(object? sender, BluetoothVolumeChangedEventArgs e)
+  {
+    if (_audioManager == null) return;
+
+    try
+    {
+      // Only sync BT volume when the active source is Bluetooth
+      if (_audioManager.ActiveSource?.Type != AudioSourceType.Bluetooth)
+        return;
+
+      if (Math.Abs(_audioManager.MasterVolume - e.Volume) > 0.01f)
+      {
+        _audioManager.MasterVolume = e.Volume;
+        _logger.LogInformation("Synced volume from BT AVRCP device: {Volume:P0}", e.Volume);
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Error syncing BT AVRCP volume to AudioManager");
+    }
+  }
+
   private async void OnBluetoothDeviceDiscovered(object? sender, BluetoothDeviceDiscoveredEventArgs e)
   {
     try
@@ -712,6 +766,7 @@ public class AudioStateUpdateService : BackgroundService
       _bluetoothService.DeviceConnected -= OnBluetoothDeviceConnected;
       _bluetoothService.DeviceDisconnected -= OnBluetoothDeviceDisconnected;
       _bluetoothService.DeviceDiscovered -= OnBluetoothDeviceDiscovered;
+      _bluetoothService.VolumeChanged -= OnBluetoothVolumeChanged;
     }
 
     if (_castOutput != null)
