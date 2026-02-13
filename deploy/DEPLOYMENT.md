@@ -201,12 +201,13 @@ wireplumber.profiles = {
 
 monitor.bluez.properties = {
     bluez5.roles = [ a2dp_sink, a2dp_source ]
+    bluez5.codecs = [ sbc, sbc_xq ]
     bluez5.enable-sbc-xq = true
     bluez5.hfphsp-backend = "native"
 }
 ```
 
-This config does two things:
+This config does three things:
 
 1. **Disables seat monitoring.** WirePlumber's `bluez.lua` monitor has a logind-based
    seat monitoring feature that only creates the BlueZ monitor when the seat state is
@@ -219,6 +220,11 @@ This config does two things:
    register both **sink** (receive audio from phones) and **source** (send audio to
    speakers) A2DP roles. Without this, the Pi only acts as a source and phones can't
    stream audio to it.
+
+3. **Pins codecs to SBC/SBC-XQ.** Without codec pinning, phones may negotiate
+   vendor-specific codecs (AAC, LDAC, aptX) that complete AVDTP negotiation but leave
+   the transport stuck in "idle" state — AVDTP START is rejected with "Bad State (49)".
+   Pinning to SBC avoids this and provides reliable A2DP streaming.
 
 After applying, verify with `bluetoothctl show` — you should see:
 ```

@@ -165,6 +165,7 @@ wireplumber.profiles = {
 
 monitor.bluez.properties = {
     bluez5.roles = [ a2dp_sink, a2dp_source ]
+    bluez5.codecs = [ sbc, sbc_xq ]
     bluez5.enable-sbc-xq = true
     bluez5.hfphsp-backend = "native"
 }

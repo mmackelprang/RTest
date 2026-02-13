@@ -26,11 +26,14 @@ public class SoundFlowAudioEngine : IAudioEngine
   private readonly SoundFlowDeviceManager _deviceManager;
   private readonly IMetricsCollector? _metricsCollector;
 
+  private readonly IVisualizerService? _visualizerService;
+
   private MiniAudioEngine? _engine;
   private AudioPlaybackDevice? _playbackDevice;
   private AudioFormat _audioFormat;
   private TappedOutputStream? _outputTap;
   private FingerprintTapModifier? _fingerprintTap;
+  private VisualizationTapModifier? _visualizationTap;
   private BalanceModifier? _balanceModifier;
   private Timer? _hotPlugTimer;
   private AudioEngineState _state = AudioEngineState.Uninitialized;
@@ -52,18 +55,21 @@ public class SoundFlowAudioEngine : IAudioEngine
   /// <param name="masterMixer">The master mixer instance.</param>
   /// <param name="deviceManager">The device manager instance.</param>
   /// <param name="metricsCollector">Optional metrics collector for pipeline metrics.</param>
+  /// <param name="visualizerService">Optional visualizer service for real-time audio visualization.</param>
   public SoundFlowAudioEngine(
     ILogger<SoundFlowAudioEngine> logger,
     IOptions<AudioEngineOptions> options,
     SoundFlowMasterMixer masterMixer,
     SoundFlowDeviceManager deviceManager,
-    IMetricsCollector? metricsCollector = null)
+    IMetricsCollector? metricsCollector = null,
+    IVisualizerService? visualizerService = null)
   {
     _logger = logger;
     _options = options.Value;
     _masterMixer = masterMixer;
     _deviceManager = deviceManager;
     _metricsCollector = metricsCollector;
+    _visualizerService = visualizerService;
 
     // Subscribe to device manager events
     _deviceManager.DevicesChanged += OnDeviceManagerDevicesChanged;
@@ -197,6 +203,14 @@ public class SoundFlowAudioEngine : IAudioEngine
         _fingerprintTap = new FingerprintTapModifier(this, _logger, metricsCollector: _metricsCollector);
         _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
         _logger.LogInformation("Fingerprint tap modifier added to MasterMixer");
+
+        // Add visualization tap modifier for real-time spectrum/level/waveform data
+        if (_visualizerService != null)
+        {
+          _visualizationTap = new VisualizationTapModifier(_visualizerService, _audioFormat);
+          _playbackDevice.MasterMixer.AddModifier(_visualizationTap);
+          _logger.LogInformation("Visualization tap modifier added to MasterMixer");
+        }
       }
 
       // Refresh device list
@@ -501,6 +515,19 @@ public class SoundFlowAudioEngine : IAudioEngine
         _fingerprintTap = new FingerprintTapModifier(this, _logger, metricsCollector: _metricsCollector);
         _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
         _logger.LogInformation("Fingerprint tap created and attached to new playback device");
+      }
+
+      // Re-attach visualization tap
+      if (_visualizationTap != null)
+      {
+        _playbackDevice.MasterMixer.AddModifier(_visualizationTap);
+        _logger.LogInformation("Visualization tap re-attached to new playback device");
+      }
+      else if (_visualizerService != null)
+      {
+        _visualizationTap = new VisualizationTapModifier(_visualizerService, _audioFormat);
+        _playbackDevice.MasterMixer.AddModifier(_visualizationTap);
+        _logger.LogInformation("Visualization tap created and attached to new playback device");
       }
 
       _playbackDevice.Start();
