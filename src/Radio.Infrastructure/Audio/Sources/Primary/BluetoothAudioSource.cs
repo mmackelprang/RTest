@@ -9,6 +9,8 @@ using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Infrastructure.Platform.Bluetooth;
 using SoundFlow.Abstracts;
 using SoundFlow.Abstracts.Devices;
+using SoundFlow.Components;
+using SoundFlow.Enums;
 
 namespace Radio.Infrastructure.Audio.Sources.Primary;
 
@@ -25,6 +27,8 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private readonly SoundFlowPlaybackService? _playbackService;
   private string? _playbackId;
   private string? _lastCoverArtLookupKey;
+  private AudioCaptureDevice? _captureDevice;
+  private BufferedSoundGenerator<float>? _captureGenerator;
 
   /// <summary>
   /// When true, the fingerprinting pipeline will attempt to identify the current track.
@@ -103,7 +107,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     var capture = await _bluetoothService.GetAudioCaptureDeviceAsync(cancellationToken);
     if (capture is AudioCaptureDevice audioCapture)
     {
-      SoundComponent = audioCapture;
+      _captureDevice = audioCapture;
       SetConnectedDeviceMetadata();
       NeedsFingerprintingLookup = true;
       State = AudioSourceState.Ready;
@@ -136,14 +140,46 @@ public class BluetoothAudioSource : USBAudioSourceBase
       return;
     }
 
-    if (SoundComponent == null)
+    if (_captureDevice == null && SoundComponent == null)
     {
       await InitializeAsync(cancellationToken);
     }
 
-    if (SoundComponent is AudioCaptureDevice captureDevice)
+    if (_captureDevice != null && _playbackService != null)
     {
-      captureDevice.Start();
+      // Linux capture path: bridge AudioCaptureDevice → BufferedSoundGenerator → mixer
+      var engine = _playbackService.GetUnderlyingEngine();
+      var format = _playbackService.GetAudioFormat();
+
+      if (engine == null)
+      {
+        Logger.LogError("BluetoothAudioSource: SoundFlow engine not available — cannot create capture bridge");
+        _captureDevice.Start();
+        return;
+      }
+
+      _captureGenerator = new BufferedSoundGenerator<float>(engine, format, Logger, metricsCollector: MetricsCollector);
+      _captureDevice.OnAudioProcessed += OnCaptureAudioProcessed;
+      _captureDevice.Start();
+
+      _playbackId = $"bt-capture-{Guid.NewGuid():N}";
+      var success = await _playbackService.PlayComponentAsync(
+        _playbackId, _captureGenerator, Volume, cancellationToken);
+
+      if (success)
+      {
+        Logger.LogInformation("BluetoothAudioSource: capture bridge active — AudioCaptureDevice → BufferedSoundGenerator → mixer (PlaybackId={PlaybackId})", _playbackId);
+      }
+      else
+      {
+        Logger.LogError("BluetoothAudioSource: failed to register capture generator with mixer");
+      }
+    }
+    else if (_captureDevice != null)
+    {
+      // Fallback: no playback service, just start capture (audio won't reach speakers)
+      _captureDevice.Start();
+      Logger.LogWarning("BluetoothAudioSource: no playback service — capture started but audio won't reach mixer");
     }
     else if (SoundComponent is BufferedSoundGenerator<float> generator && _playbackService != null)
     {
@@ -171,33 +207,25 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
   protected override Task PauseCoreAsync(CancellationToken cancellationToken)
   {
-    if (SoundComponent is AudioCaptureDevice captureDevice)
-    {
-      captureDevice.Stop(); // Local pause; does not send AVRCP
-    }
-    // For loopback capture, we don't stop the capture on pause —
-    // the phone's audio keeps flowing, we just don't change mixer state.
-    // Pausing the source's state is enough for the UI.
+    _captureDevice?.Stop();
     return Task.CompletedTask;
   }
 
   protected override Task ResumeCoreAsync(CancellationToken cancellationToken)
   {
-    if (SoundComponent is AudioCaptureDevice captureDevice)
-    {
-      captureDevice.Start();
-    }
-    // Loopback capture continues running — resume is a no-op for mixer
+    _captureDevice?.Start();
     return Task.CompletedTask;
   }
 
   protected override async Task StopCoreAsync(CancellationToken cancellationToken)
   {
-    if (SoundComponent is AudioCaptureDevice captureDevice)
+    if (_captureDevice != null)
     {
-      captureDevice.Stop();
+      _captureDevice.OnAudioProcessed -= OnCaptureAudioProcessed;
+      _captureDevice.Stop();
     }
-    else if (_playbackId != null && _playbackService != null)
+
+    if (_playbackId != null && _playbackService != null)
     {
       // Stop loopback capture first, then remove from mixer
       if (_bluetoothService is WindowsBluetoothService winBt)
@@ -215,11 +243,14 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
   protected override async ValueTask DisposeAsyncCore()
   {
-    if (SoundComponent is AudioCaptureDevice captureDevice)
+    if (_captureDevice != null)
     {
-      captureDevice.Dispose();
+      _captureDevice.OnAudioProcessed -= OnCaptureAudioProcessed;
+      _captureDevice.Dispose();
+      _captureDevice = null;
     }
-    else if (_playbackId != null && _playbackService != null)
+
+    if (_playbackId != null && _playbackService != null)
     {
       if (_bluetoothService is WindowsBluetoothService winBt)
       {
@@ -228,6 +259,8 @@ public class BluetoothAudioSource : USBAudioSourceBase
       await _playbackService.StopAsync(_playbackId);
       _playbackId = null;
     }
+
+    _captureGenerator = null;
 
     _bluetoothService.MetadataChanged -= OnMetadataChanged;
     _bluetoothService.PlaybackStatusChanged -= OnPlaybackStatusChanged;
@@ -276,7 +309,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
         return;
       }
 
-      if (SoundComponent != null)
+      if (_captureDevice != null || SoundComponent != null)
       {
         Logger.LogDebug("BluetoothAudioSource: capture device already acquired, skipping");
         return;
@@ -285,7 +318,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
       var capture = await _bluetoothService.GetAudioCaptureDeviceAsync();
       if (capture is AudioCaptureDevice audioCapture)
       {
-        SoundComponent = audioCapture;
+        _captureDevice = audioCapture;
         State = AudioSourceState.Ready;
         Logger.LogInformation("BluetoothAudioSource: audio capture device acquired after device connected");
       }
@@ -372,6 +405,15 @@ public class BluetoothAudioSource : USBAudioSourceBase
     {
       Logger.LogDebug(ex, "Cover art lookup failed for '{Title}' by '{Artist}'", title, artist);
     }
+  }
+
+  /// <summary>
+  /// Forwards captured audio samples from AudioCaptureDevice to the BufferedSoundGenerator
+  /// so they flow through the SoundFlow playback mixer.
+  /// </summary>
+  private void OnCaptureAudioProcessed(Span<float> samples, Capability capability)
+  {
+    _captureGenerator?.AddSamples(samples);
   }
 
   private void OnPlaybackStatusChanged(object? sender, BluetoothPlaybackStatus e)
