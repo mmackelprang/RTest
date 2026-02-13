@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
@@ -23,7 +24,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
 {
   private readonly IBluetoothService _bluetoothService;
   private readonly BackgroundIdentificationService? _identificationService;
-  private readonly MetadataLookupService? _metadataLookupService;
+  private readonly IServiceScopeFactory? _serviceScopeFactory;
   private readonly AlbumArtCacheService? _albumArtCache;
   private readonly IOptionsMonitor<BluetoothOptions> _options;
   private readonly SoundFlowPlaybackService? _playbackService;
@@ -49,13 +50,13 @@ public class BluetoothAudioSource : USBAudioSourceBase
     BackgroundIdentificationService? identificationService = null,
     Radio.Core.Interfaces.IMetricsCollector? metricsCollector = null,
     SoundFlowPlaybackService? playbackService = null,
-    MetadataLookupService? metadataLookupService = null,
+    IServiceScopeFactory? serviceScopeFactory = null,
     AlbumArtCacheService? albumArtCache = null)
     : base(logger, deviceManager, identificationService, metricsCollector)
   {
     _bluetoothService = bluetoothService;
     _identificationService = identificationService;
-    _metadataLookupService = metadataLookupService;
+    _serviceScopeFactory = serviceScopeFactory;
     _albumArtCache = albumArtCache;
     _options = options;
     _playbackService = playbackService;
@@ -419,7 +420,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     {
       _identificationService?.RequestImmediateIdentification();
     }
-    else if (string.IsNullOrEmpty(e.AlbumArtUrl) && _metadataLookupService != null)
+    else if (string.IsNullOrEmpty(e.AlbumArtUrl) && _serviceScopeFactory != null)
     {
       // AVRCP rarely provides album art — look it up via MusicBrainz text search
       var lookupKey = $"{e.Title}|{e.Artist}";
@@ -448,9 +449,19 @@ public class BluetoothAudioSource : USBAudioSourceBase
   {
     try
     {
-      Logger.LogDebug("Looking up cover art for '{Title}' by '{Artist}' (Album: '{Album}')", title, artist, album);
-      var coverArtUrl = await _metadataLookupService!.SearchCoverArtByTextAsync(
-        title, artist, album);
+      Logger.LogInformation("Looking up cover art for '{Title}' by '{Artist}' (Album: '{Album}')", title, artist, album);
+
+      // Resolve IMetadataLookupService from a scope (it's registered as scoped,
+      // but BluetoothAudioSource is a long-lived singleton-created instance)
+      using var scope = _serviceScopeFactory!.CreateScope();
+      var lookupService = scope.ServiceProvider.GetService<IMetadataLookupService>();
+      if (lookupService == null)
+      {
+        Logger.LogWarning("IMetadataLookupService not available — cannot look up cover art");
+        return;
+      }
+
+      var coverArtUrl = await lookupService.SearchCoverArtByTextAsync(title, artist, album);
       if (!string.IsNullOrEmpty(coverArtUrl))
       {
         // Cache the external URL locally so the Web UI can serve it via /api/albumart/
@@ -468,12 +479,12 @@ public class BluetoothAudioSource : USBAudioSourceBase
       }
       else
       {
-        Logger.LogDebug("No cover art found for '{Title}' by '{Artist}'", title, artist);
+        Logger.LogInformation("No cover art found for '{Title}' by '{Artist}'", title, artist);
       }
     }
     catch (Exception ex)
     {
-      Logger.LogDebug(ex, "Cover art lookup failed for '{Title}' by '{Artist}'", title, artist);
+      Logger.LogWarning(ex, "Cover art lookup failed for '{Title}' by '{Artist}'", title, artist);
     }
   }
 

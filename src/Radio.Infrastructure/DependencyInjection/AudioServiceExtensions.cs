@@ -140,8 +140,7 @@ public static class AudioServiceExtensions
       sp.GetService<Configuration.Abstractions.IConfigurationManager>(),
       sp.GetService<SoundFlowPlaybackService>(),
       sp.GetService<IServiceScopeFactory>(),
-      sp.GetService<AlbumArtCacheService>(),
-      sp.GetService<MetadataLookupService>()));
+      sp.GetService<AlbumArtCacheService>()));
     services.AddSingleton<IAudioManager>(sp => sp.GetRequiredService<AudioManager>());
 
     // Register event audio source services

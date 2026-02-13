@@ -27,4 +27,17 @@ public interface IMetadataLookupService
   Task<TrackMetadata?> GetMusicBrainzMetadataAsync(
     string recordingId,
     CancellationToken ct = default);
+
+  /// <summary>
+  /// Searches for cover art by track title, artist, and optional album name
+  /// using MusicBrainz text search and the Cover Art Archive.
+  /// </summary>
+  /// <param name="title">The track title.</param>
+  /// <param name="artist">The artist name.</param>
+  /// <param name="album">Optional album name for more precise matching.</param>
+  /// <param name="ct">Cancellation token.</param>
+  /// <returns>The cover art URL, or null if not found.</returns>
+  Task<string?> SearchCoverArtByTextAsync(
+    string title, string artist, string? album = null,
+    CancellationToken ct = default);
 }
