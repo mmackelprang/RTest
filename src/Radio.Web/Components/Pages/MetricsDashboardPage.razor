@@ -101,27 +101,27 @@
           <MudGrid>
             <MudItem xs="4" md="2">
               <MudText Typo="Typo.caption">Count</MudText>
-              <MudText Typo="Typo.h6">@_selectedMetricAggregate.Count</MudText>
+              <MudText Typo="Typo.h6">@FormatScaled(_selectedMetricAggregate.Count)</MudText>
             </MudItem>
             <MudItem xs="4" md="2">
               <MudText Typo="Typo.caption">Average</MudText>
-              <MudText Typo="Typo.h6">@_selectedMetricAggregate.Average.ToString("F2")</MudText>
+              <MudText Typo="Typo.h6">@FormatMetricValue(_selectedMetricAggregate.Average, _selectedMetric!)</MudText>
             </MudItem>
             <MudItem xs="4" md="2">
               <MudText Typo="Typo.caption">Min</MudText>
-              <MudText Typo="Typo.h6">@_selectedMetricAggregate.Min.ToString("F2")</MudText>
+              <MudText Typo="Typo.h6">@FormatMetricValue(_selectedMetricAggregate.Min, _selectedMetric!)</MudText>
             </MudItem>
             <MudItem xs="4" md="2">
               <MudText Typo="Typo.caption">Max</MudText>
-              <MudText Typo="Typo.h6">@_selectedMetricAggregate.Max.ToString("F2")</MudText>
+              <MudText Typo="Typo.h6">@FormatMetricValue(_selectedMetricAggregate.Max, _selectedMetric!)</MudText>
             </MudItem>
             <MudItem xs="4" md="2">
               <MudText Typo="Typo.caption">Std Dev</MudText>
-              <MudText Typo="Typo.h6">@_selectedMetricAggregate.StdDev.ToString("F2")</MudText>
+              <MudText Typo="Typo.h6">@FormatMetricValue(_selectedMetricAggregate.StdDev, _selectedMetric!)</MudText>
             </MudItem>
             <MudItem xs="4" md="2">
               <MudText Typo="Typo.caption">Sum</MudText>
-              <MudText Typo="Typo.h6">@_selectedMetricAggregate.Sum.ToString("F2")</MudText>
+              <MudText Typo="Typo.h6">@FormatMetricValue(_selectedMetricAggregate.Sum, _selectedMetric!)</MudText>
             </MudItem>
           </MudGrid>
         </MudCardContent>
@@ -325,9 +325,9 @@
   {
     var key = metricKey.ToLowerInvariant();
 
-    // Memory/bytes always in MB — check before generic "usage" pattern
-    if (key.Contains("memory") || key.Contains("bytes") || key.Contains("_mb"))
-      return $"{value:F1} MB";
+    // Byte-based metrics (already reported in MB) — use binary scale KB/MB/GB/TB
+    if (key.Contains("memory") || key.Contains("bytes") || key.Contains("_mb") || key.Contains("file_size"))
+      return FormatBytes(value * 1024 * 1024); // Convert MB to bytes for uniform scaling
 
     // Percentage metrics
     if (key.Contains("percent") || key.Contains("_ratio"))
@@ -339,13 +339,50 @@
 
     // Time/duration metrics
     if (key.Contains("seconds") || key.Contains("duration") || key.Contains("latency") || key.Contains("_time"))
-      return $"{value:F1}s";
+      return FormatDuration(value, key);
 
-    // Default: whole numbers for counters, decimals for gauges
-    if (value >= 100 || value == Math.Floor(value))
-      return $"{value:F0}";
+    // Default: auto-scale with K/M/G/T
+    return FormatScaled(value);
+  }
 
-    return $"{value:F2}";
+  private static string FormatBytes(double bytes)
+  {
+    var abs = Math.Abs(bytes);
+    if (abs < 1024)
+      return $"{bytes:F3} B";
+    if (abs < 1024 * 1024)
+      return $"{bytes / 1024:F3} KB";
+    if (abs < 1024L * 1024 * 1024)
+      return $"{bytes / (1024 * 1024):F3} MB";
+    if (abs < 1024L * 1024 * 1024 * 1024)
+      return $"{bytes / (1024L * 1024 * 1024):F3} GB";
+    return $"{bytes / (1024L * 1024 * 1024 * 1024):F3} TB";
+  }
+
+  private static string FormatScaled(double value)
+  {
+    var abs = Math.Abs(value);
+    if (abs < 10000)
+    {
+      // Small values: whole numbers for integers, 2 decimals otherwise
+      if (value == Math.Floor(value))
+        return $"{value:F0}";
+      return $"{value:F2}";
+    }
+    if (abs < 1_000_000)
+      return $"{value / 1_000:F3} K";
+    if (abs < 1_000_000_000)
+      return $"{value / 1_000_000:F3} M";
+    if (abs < 1_000_000_000_000)
+      return $"{value / 1_000_000_000:F3} G";
+    return $"{value / 1_000_000_000_000:F3} T";
+  }
+
+  private static string FormatDuration(double value, string key)
+  {
+    if (key.Contains("_ms") || key.Contains("latency_ms") || key.Contains("duration_ms"))
+      return $"{value:F1} ms";
+    return $"{value:F1} s";
   }
 
   private static string RenderSparkline(List<double> points, int width, int height)
