@@ -1,6 +1,10 @@
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.Outputs;
 using Radio.Infrastructure.Configuration.Models;
 using IAppConfigurationManager = Radio.Infrastructure.Configuration.Abstractions.IConfigurationManager;
 
@@ -21,6 +25,8 @@ public class AudioEngineInitializationService : IHostedService
   private readonly IAppConfigurationManager? _configManager;
   private readonly IOptions<BluetoothOptions> _bluetoothOptions;
   private readonly IBluetoothService? _bluetoothService;
+  private readonly GoogleCastOutput? _castOutput;
+  private readonly HttpStreamOutput? _httpOutput;
 
   /// <summary>
   /// Initializes a new instance of the AudioEngineInitializationService.
@@ -45,6 +51,8 @@ public class AudioEngineInitializationService : IHostedService
     _audioManager = serviceProvider.GetService<IAudioManager>();
     _configManager = serviceProvider.GetService<IAppConfigurationManager>();
     _bluetoothService = serviceProvider.GetService<IBluetoothService>();
+    _castOutput = serviceProvider.GetService<GoogleCastOutput>();
+    _httpOutput = serviceProvider.GetService<HttpStreamOutput>();
   }
 
   /// <summary>
@@ -133,45 +141,56 @@ public class AudioEngineInitializationService : IHostedService
       // Prefer persisted value from config store, fall back to IOptionsMonitor
       var preferredOutputId = !string.IsNullOrEmpty(persistedOutput) ? persistedOutput : prefs.CurrentOutput;
 
-      // Set output device
-      string? outputToUse = null;
-      if (!string.IsNullOrEmpty(preferredOutputId))
+      // Handle virtual outputs (google-cast, http-stream)
+      if (preferredOutputId == "google-cast")
       {
-        // Try to use the preferred output
-        var preferredOutput = outputDevices.FirstOrDefault(d => d.Id == preferredOutputId);
-        if (preferredOutput != null)
-        {
-          outputToUse = preferredOutput.Id;
-          _logger.LogInformation("Using preferred output device: {DeviceName}", preferredOutput.Name);
-        }
-        else
-        {
-          _logger.LogWarning("Preferred output device {OutputId} not found, using default", preferredOutputId);
-        }
+        _logger.LogInformation("Restoring Google Cast output from startup preferences");
+        await ActivateVirtualOutputsForCastAsync(cancellationToken);
       }
-      
-      // If no preferred output or it wasn't found, use the default
-      if (outputToUse == null)
+      else if (preferredOutputId == "http-stream")
       {
-        var defaultOutput = outputDevices.FirstOrDefault(d => d.IsDefault);
-        if (defaultOutput != null)
-        {
-          outputToUse = defaultOutput.Id;
-          _logger.LogInformation("Using default output device: {DeviceName}", defaultOutput.Name);
-        }
+        _logger.LogInformation("Restoring HTTP Stream output from startup preferences");
+        await ActivateOutputAsync(_httpOutput, "HTTP Stream");
       }
-      
-      // Apply the output device
-      if (outputToUse != null)
+      else
       {
-        try
+        // Physical output device
+        string? outputToUse = null;
+        if (!string.IsNullOrEmpty(preferredOutputId))
         {
-          await _deviceManager.SetOutputDeviceAsync(outputToUse, cancellationToken);
-          _logger.LogInformation("Output device set successfully");
+          var preferredOutput = outputDevices.FirstOrDefault(d => d.Id == preferredOutputId);
+          if (preferredOutput != null)
+          {
+            outputToUse = preferredOutput.Id;
+            _logger.LogInformation("Using preferred output device: {DeviceName}", preferredOutput.Name);
+          }
+          else
+          {
+            _logger.LogWarning("Preferred output device {OutputId} not found, using default", preferredOutputId);
+          }
         }
-        catch (Exception ex)
+
+        if (outputToUse == null)
         {
-          _logger.LogWarning(ex, "Failed to set output device");
+          var defaultOutput = outputDevices.FirstOrDefault(d => d.IsDefault);
+          if (defaultOutput != null)
+          {
+            outputToUse = defaultOutput.Id;
+            _logger.LogInformation("Using default output device: {DeviceName}", defaultOutput.Name);
+          }
+        }
+
+        if (outputToUse != null)
+        {
+          try
+          {
+            await _deviceManager.SetOutputDeviceAsync(outputToUse, cancellationToken);
+            _logger.LogInformation("Output device set successfully");
+          }
+          catch (Exception ex)
+          {
+            _logger.LogWarning(ex, "Failed to set output device");
+          }
         }
       }
       
@@ -236,6 +255,161 @@ public class AudioEngineInitializationService : IHostedService
       // Bluetooth failure must not block application startup
       _logger.LogWarning(ex, "Failed to enable Bluetooth on startup — continuing without Bluetooth");
     }
+  }
+
+  /// <summary>
+  /// Activates Cast and HTTP Stream outputs, then auto-connects to the default Cast device.
+  /// </summary>
+  private async Task ActivateVirtualOutputsForCastAsync(CancellationToken cancellationToken)
+  {
+    await ActivateOutputAsync(_httpOutput, "HTTP Stream");
+    await ActivateOutputAsync(_castOutput, "Google Cast");
+
+    // Auto-connect to saved default Cast device
+    var prefs = _audioPreferences.CurrentValue;
+    if (string.IsNullOrEmpty(prefs.DefaultCastDeviceId) || _castOutput == null)
+    {
+      _logger.LogInformation("No default Cast device configured, Cast output activated but not connected");
+      return;
+    }
+
+    _logger.LogInformation("Auto-connecting to default Cast device on startup: {Name} ({Id})",
+      prefs.DefaultCastDeviceName, prefs.DefaultCastDeviceId);
+
+    // Run auto-connect in background so it doesn't block startup
+    _ = Task.Run(async () =>
+    {
+      try
+      {
+        // Give the Cast discovery a moment to populate cache
+        await Task.Delay(3000, cancellationToken);
+
+        var cached = await _castOutput.GetCachedDevicesAsync(cancellationToken);
+        var device = cached.FirstOrDefault(d => d.Id == prefs.DefaultCastDeviceId);
+        if (device == null)
+        {
+          _logger.LogWarning("Default Cast device {Id} not found in cache after startup, skipping auto-connect",
+            prefs.DefaultCastDeviceId);
+          return;
+        }
+
+        if (_castOutput.State == AudioOutputState.Created)
+          await _castOutput.InitializeAsync(cancellationToken);
+
+        await _castOutput.ConnectAsync(device, cancellationToken);
+
+        // Wire the HTTP audio stream
+        if (_httpOutput?.State == AudioOutputState.Streaming)
+        {
+          var streamUrl = GetRoutableStreamUrl(_httpOutput.Mp3StreamUrl, _httpOutput.Port, device.IpAddress);
+          _castOutput.SetStreamUrl(streamUrl);
+        }
+
+        await _castOutput.StartAsync(cancellationToken);
+        _logger.LogInformation("Startup: Auto-connected to Cast device: {Name}", device.FriendlyName);
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Failed to auto-connect to Cast device on startup");
+      }
+    }, cancellationToken);
+  }
+
+  /// <summary>
+  /// Activates an audio output (initialize + start) if available.
+  /// </summary>
+  private async Task ActivateOutputAsync(IAudioOutput? output, string name)
+  {
+    if (output == null)
+    {
+      _logger.LogDebug("{Name} output not available", name);
+      return;
+    }
+
+    try
+    {
+      if (output.State == AudioOutputState.Error)
+        await output.InitializeAsync();
+      if (output.State == AudioOutputState.Created)
+        await output.InitializeAsync();
+      if (output.State == AudioOutputState.Ready || output.State == AudioOutputState.Stopped)
+      {
+        await output.StartAsync();
+        _logger.LogInformation("{Name} output activated on startup", name);
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to activate {Name} output on startup", name);
+    }
+  }
+
+  /// <summary>
+  /// Resolves the stream URL to use the local LAN IP (Cast devices need a routable address).
+  /// </summary>
+  private string GetRoutableStreamUrl(string streamUrl, int port, string? targetDeviceIp)
+  {
+    try
+    {
+      var localIp = GetLocalIPAddress(targetDeviceIp);
+      if (localIp != null)
+      {
+        var uri = new Uri(streamUrl);
+        return $"http://{localIp}:{port}{uri.PathAndQuery}";
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Could not resolve routable stream URL");
+    }
+    return streamUrl;
+  }
+
+  /// <summary>
+  /// Gets the local LAN IP address, preferring one on the same subnet as the target.
+  /// </summary>
+  private static string? GetLocalIPAddress(string? targetDeviceIp)
+  {
+    IPAddress? targetIp = null;
+    if (!string.IsNullOrEmpty(targetDeviceIp))
+      IPAddress.TryParse(targetDeviceIp, out targetIp);
+
+    string? fallbackIp = null;
+    foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+    {
+      if (ni.OperationalStatus != OperationalStatus.Up) continue;
+      if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+
+      var desc = ni.Description.ToLowerInvariant();
+      var name = ni.Name.ToLowerInvariant();
+      if (desc.Contains("hyper-v") || desc.Contains("virtual") ||
+          name.Contains("vethernet") || name.Contains("wsl") ||
+          name.Contains("docker") || name.Contains("br-"))
+        continue;
+
+      foreach (var addr in ni.GetIPProperties().UnicastAddresses)
+      {
+        if (addr.Address.AddressFamily != AddressFamily.InterNetwork) continue;
+        if (IPAddress.IsLoopback(addr.Address)) continue;
+
+        if (targetIp != null && addr.IPv4Mask != null)
+        {
+          var localBytes = addr.Address.GetAddressBytes();
+          var maskBytes = addr.IPv4Mask.GetAddressBytes();
+          var targetBytes = targetIp.GetAddressBytes();
+          bool sameSubnet = true;
+          for (int i = 0; i < 4; i++)
+          {
+            if ((localBytes[i] & maskBytes[i]) != (targetBytes[i] & maskBytes[i]))
+            { sameSubnet = false; break; }
+          }
+          if (sameSubnet) return addr.Address.ToString();
+        }
+
+        fallbackIp ??= addr.Address.ToString();
+      }
+    }
+    return fallbackIp;
   }
 
   /// <summary>
