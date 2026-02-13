@@ -535,61 +535,26 @@ public class GoogleCastOutput : AudioOutputBase
         await _client.LaunchApplicationAsync("CC1AD845");
         _logger.LogInformation("Cast: Media receiver launched on {Device}", ConnectedDevice?.FriendlyName);
 
-        // Allow media receiver to fully initialize before sending commands
-        await Task.Delay(500, cancellationToken);
+        // Allow media receiver to fully initialize before sending commands.
+        // 500ms is insufficient — Cast devices need 2-3s to fully initialize CC1AD845.
+        await Task.Delay(2000, cancellationToken);
+
+        // Subscribe to status changes to monitor device transitions
+        var mediaChannel = _client.GetChannel<MediaChannel>();
+        if (mediaChannel != null)
+        {
+          mediaChannel.StatusChanged += (_, status) =>
+          {
+            _logger.LogInformation(
+              "Cast: StatusChanged event — PlayerState: {State}, IdleReason: {IdleReason}, MediaSessionId: {SessionId}",
+              status?.PlayerState, status?.IdleReason, status?.MediaSessionId);
+          };
+        }
 
         // Load media if we have a stream URL
         if (!string.IsNullOrEmpty(_streamUrl))
         {
-          _logger.LogInformation(
-            "Cast: Loading media URL {StreamUrl} (type: audio/mpeg, stream: Live, metadata: {HasMetadata})",
-            _streamUrl, _nowPlayingMetadata != null);
-
-          var media = BuildMedia();
-
-          // Debug: log the media object to verify serialization
-          try
-          {
-            var debugJson = JsonSerializer.Serialize(media, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
-            _logger.LogInformation("Cast: Media payload: {Json}", debugJson);
-          }
-          catch (Exception jsonEx)
-          {
-            _logger.LogDebug(jsonEx, "Cast: Could not serialize media for debug logging");
-          }
-
-          var mediaChannel = _client.GetChannel<MediaChannel>();
-          if (mediaChannel != null)
-          {
-            // Subscribe to status changes to monitor device transitions
-            mediaChannel.StatusChanged += (_, status) =>
-            {
-              _logger.LogInformation(
-                "Cast: StatusChanged event — PlayerState: {State}, IdleReason: {IdleReason}, MediaSessionId: {SessionId}",
-                status?.PlayerState, status?.IdleReason, status?.MediaSessionId);
-            };
-
-            // Start loading with a short initial timeout so the API can respond quickly.
-            // SharpCaster's LoadAsync has an internal 30s timeout (DoNotReturnOnLoading).
-            // We give it 5s — if it hasn't completed, we let it continue in the background.
-            var loadTask = mediaChannel.LoadAsync(media, true);
-            try
-            {
-              var status = await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
-              _logger.LogInformation(
-                "Cast: Media load response — PlayerState: {State}, IdleReason: {IdleReason}, MediaSessionId: {SessionId}",
-                status?.PlayerState, status?.IdleReason, status?.MediaSessionId);
-            }
-            catch (TimeoutException)
-            {
-              _logger.LogInformation("Cast: Media load in progress (5s initial timeout passed) — continuing in background");
-              _ = MonitorBackgroundLoadAsync(loadTask);
-            }
-          }
-          else
-          {
-            _logger.LogWarning("Cast: MediaChannel is null — cannot load media");
-          }
+          await LoadMediaOnCastAsync(mediaChannel, cancellationToken);
 
           // Sync volume to Cast device to ensure it's audible
           try
@@ -911,6 +876,63 @@ public class GoogleCastOutput : AudioOutputBase
 
     throw new InvalidOperationException(
       $"Cast device '{device.FriendlyName}' at {device.IpAddress} is not reachable (tried ports {string.Join(", ", portsToTry)})");
+  }
+
+  /// <summary>
+  /// Loads media on the Cast device with retry logic. The first load after
+  /// LaunchApplicationAsync often fails silently (CC1AD845 not yet ready).
+  /// If the first load results in FINISHED/Idle quickly, we retry once.
+  /// </summary>
+  private async Task LoadMediaOnCastAsync(MediaChannel? mediaChannel, CancellationToken cancellationToken)
+  {
+    if (mediaChannel == null)
+    {
+      _logger.LogWarning("Cast: MediaChannel is null — cannot load media");
+      return;
+    }
+
+    _logger.LogInformation(
+      "Cast: Loading media URL {StreamUrl} (type: audio/mpeg, stream: Live, metadata: {HasMetadata})",
+      _streamUrl, _nowPlayingMetadata != null);
+
+    var media = BuildMedia();
+
+    // First attempt
+    MediaStatus? status = null;
+    try
+    {
+      status = await mediaChannel.LoadAsync(media, true).WaitAsync(TimeSpan.FromSeconds(8), cancellationToken);
+      _logger.LogInformation(
+        "Cast: Media load response — PlayerState: {State}, IdleReason: {IdleReason}, MediaSessionId: {SessionId}",
+        status?.PlayerState, status?.IdleReason, status?.MediaSessionId);
+    }
+    catch (TimeoutException)
+    {
+      _logger.LogInformation("Cast: Media load timed out (8s) — continuing in background");
+    }
+
+    // If the load immediately resulted in Idle/FINISHED or didn't start playing,
+    // wait and retry — CC1AD845 may not have been fully initialized
+    if (status?.PlayerState is PlayerStateType.Idle ||
+        status?.IdleReason is "FINISHED" or "ERROR" or "CANCELLED")
+    {
+      _logger.LogInformation("Cast: First load resulted in {State}/{Reason} — retrying after 3s delay",
+        status?.PlayerState, status?.IdleReason);
+      await Task.Delay(3000, cancellationToken);
+
+      try
+      {
+        media = BuildMedia(); // Rebuild in case metadata changed
+        status = await mediaChannel.LoadAsync(media, true).WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+        _logger.LogInformation(
+          "Cast: Retry load response — PlayerState: {State}, IdleReason: {IdleReason}, MediaSessionId: {SessionId}",
+          status?.PlayerState, status?.IdleReason, status?.MediaSessionId);
+      }
+      catch (TimeoutException)
+      {
+        _logger.LogInformation("Cast: Retry load timed out — Cast device may still be processing");
+      }
+    }
   }
 
   /// <summary>
