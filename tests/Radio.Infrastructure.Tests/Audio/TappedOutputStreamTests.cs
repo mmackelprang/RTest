@@ -44,11 +44,11 @@ public class TappedOutputStreamTests
     return (int)method.Invoke(stream, [readerId])!;
   }
 
-  private static Stream CreateReader(Stream stream, string readerId)
+  private static Stream CreateReader(Stream stream, string readerId, int lagBytes = 0)
   {
     var type = stream.GetType();
     var method = type.GetMethod("CreateReader")!;
-    return (Stream)method.Invoke(stream, [readerId])!;
+    return (Stream)method.Invoke(stream, [readerId, lagBytes])!;
   }
 
   private static int GetSampleRate(Stream stream)
@@ -354,7 +354,7 @@ public class TappedOutputStreamTests
     var samplesBeforeReader = new float[] { 1.0f, -1.0f };
     InvokeWriteFromEngine(stream, samplesBeforeReader);
 
-    // Create reader AFTER data was written
+    // Create reader AFTER data was written (no lag)
     var reader = CreateReader(stream, "late-reader");
 
     // Write new data
@@ -367,5 +367,66 @@ public class TappedOutputStreamTests
 
     // Assert - only gets data written after reader was created
     Assert.Equal(2, bytesRead); // 1 sample * 2 bytes
+  }
+
+  [Fact]
+  public void Reader_WithLag_GetsHistoricalData()
+  {
+    // Arrange
+    var stream = CreateTappedOutputStream(1000, 1, 1); // 1kHz, mono, 1s buffer = 2000 bytes
+    var samples = new float[100]; // 200 bytes of PCM
+    for (var i = 0; i < samples.Length; i++)
+      samples[i] = 0.5f;
+    InvokeWriteFromEngine(stream, samples);
+
+    // Create reader with 100-byte lag — should start behind write position
+    var reader = CreateReader(stream, "lag-reader", lagBytes: 100);
+
+    // Act
+    var buffer = new byte[200];
+    var bytesRead = reader.Read(buffer, 0, buffer.Length);
+
+    // Assert — reader should get 100 bytes of historical data immediately
+    Assert.Equal(100, bytesRead);
+  }
+
+  [Fact]
+  public void Reader_WithLag_ClampedToTotalBytesWritten()
+  {
+    // Arrange
+    var stream = CreateTappedOutputStream(1000, 1, 1);
+    var samples = new float[10]; // 20 bytes of PCM
+    for (var i = 0; i < samples.Length; i++)
+      samples[i] = 0.5f;
+    InvokeWriteFromEngine(stream, samples);
+
+    // Create reader requesting more lag than what's been written
+    var reader = CreateReader(stream, "lag-reader", lagBytes: 1000);
+
+    // Act
+    var buffer = new byte[200];
+    var bytesRead = reader.Read(buffer, 0, buffer.Length);
+
+    // Assert — lag clamped to 20 bytes (total written)
+    Assert.Equal(20, bytesRead);
+  }
+
+  [Fact]
+  public void Reader_WithZeroLag_BehavesLikeDefault()
+  {
+    // Arrange
+    var stream = CreateTappedOutputStream();
+    var samplesBeforeReader = new float[] { 1.0f, -1.0f };
+    InvokeWriteFromEngine(stream, samplesBeforeReader);
+
+    // Create reader with explicit zero lag
+    var reader = CreateReader(stream, "no-lag-reader", lagBytes: 0);
+
+    // Act
+    var buffer = new byte[10];
+    var bytesRead = reader.Read(buffer, 0, buffer.Length);
+
+    // Assert — no historical data, same as default
+    Assert.Equal(0, bytesRead);
   }
 }

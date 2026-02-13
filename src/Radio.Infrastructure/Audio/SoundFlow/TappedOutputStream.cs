@@ -97,13 +97,27 @@ internal sealed class TappedOutputStream : Stream
   /// Each reader receives all data written after creation, independent of other readers.
   /// </summary>
   /// <param name="readerId">A unique identifier for this reader.</param>
+  /// <param name="lagBytes">Number of bytes to start behind the write position,
+  /// giving the reader immediate access to recently written audio data.
+  /// Clamped to the lesser of total bytes written and buffer capacity.
+  /// Use 0 (default) for real-time only (no historical data).</param>
   /// <returns>A <see cref="TappedOutputStreamReader"/> with an independent read position.</returns>
-  public TappedOutputStreamReader CreateReader(string readerId)
+  public TappedOutputStreamReader CreateReader(string readerId, int lagBytes = 0)
   {
     lock (_lock)
     {
-      // Start reading from current write position (only new data)
-      _readerPositions[readerId] = _writePosition;
+      if (lagBytes > 0)
+      {
+        // Clamp lag to what's actually available in the ring buffer
+        var maxLag = (int)Math.Min(_totalBytesWritten, _bufferSize - 1);
+        var actualLag = Math.Min(lagBytes, maxLag);
+        _readerPositions[readerId] = (_writePosition - actualLag + _bufferSize) % _bufferSize;
+      }
+      else
+      {
+        // Start reading from current write position (only new data)
+        _readerPositions[readerId] = _writePosition;
+      }
     }
     return new TappedOutputStreamReader(this, readerId);
   }

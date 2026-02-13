@@ -199,8 +199,10 @@ public class SoundFlowAudioEngine : IAudioEngine
         _playbackDevice.MasterMixer.AddModifier(_balanceModifier);
         _logger.LogInformation("Balance modifier added to MasterMixer");
 
-        // Add fingerprint tap modifier after balance
-        _fingerprintTap = new FingerprintTapModifier(this, _logger, metricsCollector: _metricsCollector);
+        // Add fingerprint tap modifier after balance.
+        // Use 2048-sample buffer (~21ms at 48kHz stereo) instead of default 4096 (~42ms)
+        // to reduce latency for HTTP streaming to Cast devices.
+        _fingerprintTap = new FingerprintTapModifier(this, _logger, bufferSize: 2048, metricsCollector: _metricsCollector);
         _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
         _logger.LogInformation("Fingerprint tap modifier added to MasterMixer");
 
@@ -341,7 +343,12 @@ public class SoundFlowAudioEngine : IAudioEngine
         "Audio engine not initialized. Call InitializeAsync first.");
     }
 
-    return _outputTap.CreateReader(readerId);
+    // Start the reader 1 second behind the write position so Cast/HTTP clients
+    // get an immediate burst of audio data instead of waiting for new writes.
+    // Without this lag, Cast devices timeout before the first FingerprintTapModifier
+    // batch arrives (~42ms) and the LAME encoder produces its first MP3 frames.
+    var lagBytes = _options.SampleRate * _options.Channels * 2; // 1 second of 16-bit PCM
+    return _outputTap.CreateReader(readerId, lagBytes);
   }
 
   /// <summary>
