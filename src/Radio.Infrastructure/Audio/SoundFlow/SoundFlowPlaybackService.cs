@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces.Audio;
 using SoundFlow.Abstracts;
+using SoundFlow.Abstracts.Devices;
 using SoundFlow.Components;
 using SoundFlow.Enums;
 using SoundFlow.Interfaces;
@@ -35,6 +36,9 @@ public class SoundFlowPlaybackService : IDisposable
     _logger = logger;
     _audioEngine = audioEngine;
     _visualizerService = visualizerService;
+
+    // Re-attach active components/players when the playback device changes
+    _audioEngine.PlaybackDeviceSwitched += OnPlaybackDeviceSwitched;
 
     if (_visualizerService != null)
     {
@@ -474,6 +478,57 @@ public class SoundFlowPlaybackService : IDisposable
   }
 
   /// <summary>
+  /// Re-attaches all active players and components to the new playback device's mixer.
+  /// Called when the audio engine switches to a different output device.
+  /// </summary>
+  private void OnPlaybackDeviceSwitched(object? sender, AudioPlaybackDevice newDevice)
+  {
+    lock (_playersLock)
+    {
+      var playerCount = _activePlayers.Count;
+      var componentCount = _activeComponents.Count;
+
+      if (playerCount == 0 && componentCount == 0)
+      {
+        _logger.LogDebug("PlaybackDeviceSwitched: No active players or components to re-attach");
+        return;
+      }
+
+      _logger.LogInformation(
+        "PlaybackDeviceSwitched: Re-attaching {PlayerCount} players and {ComponentCount} components to new device",
+        playerCount, componentCount);
+
+      foreach (var (sourceId, player) in _activePlayers)
+      {
+        try
+        {
+          newDevice.MasterMixer.AddComponent(player);
+          _logger.LogInformation("Re-attached player to new device (SourceId={SourceId})", sourceId);
+        }
+        catch (Exception ex)
+        {
+          _logger.LogError(ex, "Failed to re-attach player (SourceId={SourceId})", sourceId);
+        }
+      }
+
+      foreach (var (sourceId, component) in _activeComponents)
+      {
+        try
+        {
+          newDevice.MasterMixer.AddComponent(component);
+          _logger.LogInformation(
+            "Re-attached component '{ComponentName}' to new device (SourceId={SourceId})",
+            component.Name ?? component.GetType().Name, sourceId);
+        }
+        catch (Exception ex)
+        {
+          _logger.LogError(ex, "Failed to re-attach component (SourceId={SourceId})", sourceId);
+        }
+      }
+    }
+  }
+
+  /// <summary>
   /// Stops playback for a specific source.
   /// </summary>
   /// <param name="sourceId">The source identifier.</param>
@@ -672,6 +727,8 @@ public class SoundFlowPlaybackService : IDisposable
   public void Dispose()
   {
     if (_disposed) return;
+
+    _audioEngine.PlaybackDeviceSwitched -= OnPlaybackDeviceSwitched;
 
     // Stop all first, then set disposed
     lock (_playersLock)

@@ -5,6 +5,9 @@
 [Ll]og/
 [Ll]ogs/
 
+# Publish output (deploy artifacts)
+publish/
+
 # Data files (runtime databases, not source code)
 /data/
 *.db

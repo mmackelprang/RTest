@@ -1,6 +1,9 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -8,6 +11,7 @@ using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.SoundFlow;
 using SoundFlow.Backends.MiniAudio;
 using SoundFlow.Enums;
 using SoundFlow.Structs;
@@ -19,13 +23,17 @@ namespace Radio.Infrastructure.Platform.Bluetooth
     {
         private readonly ILogger _logger;
         private readonly BluetoothOptions _options;
-        private readonly Radio.Infrastructure.Audio.SoundFlow.SoundFlowDeviceManager? _deviceManager;
+        private readonly SoundFlowDeviceManager? _deviceManager;
+        private readonly SoundFlowPlaybackService? _playbackService;
         private readonly IMetricsCollector? _metricsCollector;
         private Connection? _connection;
         private Linux.IObjectManager? _objectManager;
         private Linux.IAdapter1? _adapter;
         private IDisposable? _discoveryWatcher;
         private MiniAudioEngine? _captureEngine;
+        private Process? _captureProcess;
+        private CancellationTokenSource? _captureCts;
+        private object? _activeGenerator;
         private DateTime? _connectionStartTime;
 
         // Player tracking
@@ -49,13 +57,15 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         public LinuxBluetoothService(
             ILogger logger,
             IOptions<BluetoothOptions> options,
-            Radio.Infrastructure.Audio.SoundFlow.SoundFlowDeviceManager? deviceManager = null,
-            IMetricsCollector? metricsCollector = null)
+            SoundFlowDeviceManager? deviceManager = null,
+            IMetricsCollector? metricsCollector = null,
+            SoundFlowPlaybackService? playbackService = null)
         {
             _logger = logger;
             _options = options.Value;
             _deviceManager = deviceManager;
             _metricsCollector = metricsCollector;
+            _playbackService = playbackService;
         }
 
         public bool IsAvailable => _connection != null && _adapter != null;
@@ -235,6 +245,10 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
         public async Task StopAsync(CancellationToken cancellationToken = default)
         {
+            StopCaptureSubprocess();
+            _captureEngine?.Dispose();
+            _captureEngine = null;
+
             if (_adapter != null)
             {
                 try
@@ -429,6 +443,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                             else
                             {
                                 RecordDisconnectionMetrics();
+                                StopCaptureSubprocess();
                                 // Clean up media transport on disconnect
                                 _transportPropertiesWatcher?.Dispose();
                                 _transportPropertiesWatcher = null;
@@ -597,16 +612,31 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 return null;
             }
 
-            // Prevent concurrent calls — multiple DeviceConnected events fire simultaneously
-            // and MiniAudioEngine is not safe to instantiate concurrently.
-            if (!await _captureDeviceLock.WaitAsync(0, cancellationToken))
+            // If capture subprocess is already running, return cached generator
+            if (_captureProcess != null && !_captureProcess.HasExited && _activeGenerator != null)
             {
-                _logger.LogDebug("Capture device search already in progress, skipping duplicate call");
+                _logger.LogDebug("Returning existing capture generator (PID {Pid})", _captureProcess.Id);
+                return _activeGenerator;
+            }
+
+            // Wait for any concurrent search to complete (with timeout instead of zero-wait).
+            // Multiple callers race here: TryAcquireAudioCaptureAsync (from DeviceConnected event)
+            // and InitializeAsync (from auto-switch). Second caller should wait and get cached result.
+            if (!await _captureDeviceLock.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken))
+            {
+                _logger.LogWarning("Timeout waiting for capture device lock");
                 return null;
             }
 
             try
             {
+                // Re-check after acquiring lock — another caller may have completed
+                if (_captureProcess != null && !_captureProcess.HasExited && _activeGenerator != null)
+                {
+                    _logger.LogDebug("Capture already active after lock wait (PID {Pid})", _captureProcess.Id);
+                    return _activeGenerator;
+                }
+
                 return await SearchForCaptureDeviceAsync(connected, cancellationToken);
             }
             finally
@@ -618,12 +648,30 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         private async Task<object?> SearchForCaptureDeviceAsync(
             BluetoothDeviceInfo connected, CancellationToken cancellationToken)
         {
-            // Cleanup previous capture engine
+            // Cleanup previous capture
+            StopCaptureSubprocess();
             _captureEngine?.Dispose();
             _captureEngine = null;
 
-            // PulseAudio/PipeWire takes time to create the Bluetooth capture device
-            // after A2DP is authorized. Poll with retries.
+            if (_playbackService == null)
+            {
+                _logger.LogError("SoundFlowPlaybackService not available — cannot create BT capture bridge");
+                return null;
+            }
+
+            var engine = _playbackService.GetUnderlyingEngine();
+            var format = _playbackService.GetAudioFormat();
+            if (engine == null)
+            {
+                _logger.LogError("SoundFlow engine not available — cannot create BT capture bridge");
+                return null;
+            }
+
+            // Use arecord subprocess to capture from the bt_capture ALSA device.
+            // MiniAudio's ALSA capture thread doesn't work reliably with the ALSA
+            // pulse plugin (callbacks stall), but arecord's synchronous reads work.
+            // The bt_capture PCM is defined in .asoundrc and routes through the ALSA
+            // pulse plugin to PipeWire-Pulse TCP (port 4713) → bt_capture.monitor.
             const int maxRetries = 20;
             const int retryDelayMs = 1000;
 
@@ -631,7 +679,6 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                // Re-check connection — phone may have disconnected during polling
                 if (ConnectedDevice == null)
                 {
                     _logger.LogWarning("Bluetooth device disconnected during capture device polling");
@@ -640,81 +687,141 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
                 try
                 {
-                    // Create a fresh engine each attempt to re-enumerate devices.
-                    // PipeWire may add the bluez source between enumerations.
-                    _captureEngine?.Dispose();
-                    _captureEngine = new MiniAudioEngine();
-                    var captureDevices = _captureEngine.CaptureDevices;
+                    // Start arecord capture directly. If bt_capture isn't ready
+                    // yet (PipeWire hasn't created the bluez source), arecord will
+                    // exit quickly and we retry.
+                    var generator = new BufferedSoundGenerator<float>(
+                        engine, format, _logger, maxBufferSeconds: 2.0f,
+                        metricsCollector: _metricsCollector);
 
-                    _logger.LogDebug(
-                        "Capture device search attempt {Attempt}/{Max}: {Count} devices",
-                        attempt, maxRetries, captureDevices.Length);
+                    StartCaptureSubprocess(generator, format);
 
-                    if (attempt == 1)
+                    // Give arecord a moment to connect and verify it's running
+                    await Task.Delay(500, cancellationToken);
+
+                    if (_captureProcess != null && !_captureProcess.HasExited)
                     {
-                        for (var i = 0; i < captureDevices.Length; i++)
-                        {
-                            _logger.LogInformation("  Capture device [{Index}]: {Name}",
-                                i, captureDevices[i].Name ?? "(null)");
-                        }
-                    }
-
-                    // On Linux with PulseAudio/PipeWire, Bluetooth audio devices appear as:
-                    //   "bluez_output.<mac_address>.monitor" or "bluez_sink.<mac_address>.monitor"
-                    //   or by the connected device name
-                    var targetDevice = FindBluetoothCaptureDevice(captureDevices, connected.Name);
-
-                    if (targetDevice != null)
-                    {
-                        var format = _options.AudioQuality == BluetoothAudioQuality.High
-                            ? new AudioFormat { SampleRate = 48000, Channels = 2, Format = SampleFormat.F32 }
-                            : AudioFormat.Cd;
-
-                        var captureDevice = _captureEngine.InitializeCaptureDevice(targetDevice, format);
                         _logger.LogInformation(
-                            "Created Bluetooth audio capture device: {DeviceName} (attempt {Attempt}/{Max})",
-                            targetDevice.Value.Name, attempt, maxRetries);
-                        return captureDevice;
+                            "arecord capture subprocess running (attempt {Attempt}/{Max}, PID {Pid})",
+                            attempt, maxRetries, _captureProcess.Id);
+                        _activeGenerator = generator;
+                        return generator;
                     }
 
-                    // Log new devices that appear on subsequent attempts
-                    if (attempt > 1 && captureDevices.Length > 1)
-                    {
-                        for (var i = 0; i < captureDevices.Length; i++)
-                        {
-                            _logger.LogDebug("  Capture device [{Index}]: {Name}",
-                                i, captureDevices[i].Name ?? "(null)");
-                        }
-                    }
-
-                    _captureEngine.Dispose();
-                    _captureEngine = null;
-
-                    if (attempt < maxRetries)
-                    {
-                        await Task.Delay(retryDelayMs, cancellationToken);
-                    }
+                    // arecord exited immediately — bt_capture not ready yet
+                    _logger.LogDebug("arecord exited early (attempt {Attempt}/{Max})", attempt, maxRetries);
+                    StopCaptureSubprocess();
                 }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
+                catch (OperationCanceledException) { throw; }
                 catch (Exception ex)
                 {
-                    _logger.LogDebug(ex, "Capture device search attempt {Attempt} failed", attempt);
-                    _captureEngine?.Dispose();
-                    _captureEngine = null;
+                    _logger.LogDebug(ex, "bt_capture test attempt {Attempt} failed", attempt);
+                }
 
-                    if (attempt < maxRetries)
-                    {
-                        await Task.Delay(retryDelayMs, cancellationToken);
-                    }
+                if (attempt < maxRetries)
+                {
+                    await Task.Delay(retryDelayMs, cancellationToken);
                 }
             }
 
-            _logger.LogWarning("No Bluetooth audio capture device found after {MaxRetries}s", maxRetries);
+            _logger.LogWarning("bt_capture device not accessible after {MaxRetries}s", maxRetries);
             _metricsCollector?.Increment("bluetooth.audio_capture_errors");
             return null;
+        }
+
+        private void StartCaptureSubprocess(BufferedSoundGenerator<float> generator, AudioFormat format)
+        {
+            StopCaptureSubprocess();
+
+            _captureCts = new CancellationTokenSource();
+            var ct = _captureCts.Token;
+
+            _captureProcess = Process.Start(new ProcessStartInfo
+            {
+                FileName = "arecord",
+                Arguments = "-D bt_capture -f S16_LE -r 48000 -c 2 -t raw -",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                Environment = { ["HOME"] = "/opt/radio-console" }
+            });
+
+            if (_captureProcess == null)
+            {
+                _logger.LogError("Failed to start arecord subprocess");
+                return;
+            }
+
+            _logger.LogInformation("Started arecord capture subprocess (PID {Pid})", _captureProcess.Id);
+
+            // Background task to read S16_LE data and feed float samples to generator
+            _ = Task.Run(async () =>
+            {
+                const int readBufferSize = 48000 * 2 * 2 / 10; // ~100ms of S16 stereo at 48kHz
+                var buffer = new byte[readBufferSize];
+                var stream = _captureProcess.StandardOutput.BaseStream;
+
+                try
+                {
+                    while (!ct.IsCancellationRequested)
+                    {
+                        var bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, ct);
+                        if (bytesRead == 0) break; // EOF — process exited
+
+                        // Convert S16_LE samples to float [-1.0, 1.0]
+                        var sampleCount = bytesRead / 2; // 2 bytes per S16 sample
+                        var floatSamples = ArrayPool<float>.Shared.Rent(sampleCount);
+                        try
+                        {
+                            var shorts = MemoryMarshal.Cast<byte, short>(buffer.AsSpan(0, bytesRead));
+                            for (var i = 0; i < shorts.Length; i++)
+                            {
+                                floatSamples[i] = shorts[i] / 32768f;
+                            }
+
+                            generator.AddSamples(floatSamples.AsSpan(0, sampleCount));
+                        }
+                        finally
+                        {
+                            ArrayPool<float>.Shared.Return(floatSamples);
+                        }
+                    }
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "arecord capture feed loop ended");
+                }
+
+                _logger.LogInformation("arecord capture subprocess feed loop stopped");
+            }, ct);
+        }
+
+        private void StopCaptureSubprocess()
+        {
+            _captureCts?.Cancel();
+            _captureCts?.Dispose();
+            _captureCts = null;
+            _activeGenerator = null;
+
+            if (_captureProcess != null)
+            {
+                try
+                {
+                    if (!_captureProcess.HasExited)
+                    {
+                        _captureProcess.Kill();
+                        _captureProcess.WaitForExit(2000);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Error stopping arecord subprocess");
+                }
+                _captureProcess.Dispose();
+                _captureProcess = null;
+            }
         }
 
         private static DeviceInfo? FindBluetoothCaptureDevice(DeviceInfo[] devices, string connectedName)

@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 
@@ -23,6 +24,10 @@ public class AudioStateHubService : IAsyncDisposable
   public event Func<Task>? RadioStateChanged;
   public event Func<Task>? VolumeChanged;
   public event Func<Task>? SourceChanged;
+
+  // Throttle disconnect log messages to avoid spam when API is down
+  private static DateTime _lastDisconnectLogUtc = DateTime.MinValue;
+  private static readonly TimeSpan DisconnectLogInterval = TimeSpan.FromSeconds(10);
 
   public bool IsConnected => _hubConnection?.State == HubConnectionState.Connected;
   public HubConnectionState ConnectionState => _hubConnection?.State ?? HubConnectionState.Disconnected;
@@ -101,27 +106,39 @@ public class AudioStateHubService : IAsyncDisposable
           await SourceChanged.Invoke();
       });
 
-      // Connection lifecycle events
-      _hubConnection.Closed += async (error) =>
+      // Connection lifecycle events — throttled to avoid log spam when API is down
+      _hubConnection.Closed += (error) =>
       {
-        if (error != null)
-          _logger.LogError(error, "SignalR connection closed with error");
+        if (error != null && IsConnectionRefused(error))
+        {
+          // Throttle connection-refused spam — the ApiConnectionLoggingHandler logs these
+          var now = DateTime.UtcNow;
+          if (now - _lastDisconnectLogUtc >= DisconnectLogInterval)
+          {
+            _lastDisconnectLogUtc = now;
+            _logger.LogWarning("Audio hub connection lost — API unavailable");
+          }
+        }
+        else if (error != null)
+          _logger.LogWarning(error, "Audio hub connection closed with error");
         else
-          _logger.LogInformation("SignalR connection closed");
+          _logger.LogInformation("Audio hub connection closed");
 
-        await Task.CompletedTask;
+        return Task.CompletedTask;
       };
 
-      _hubConnection.Reconnecting += async (error) =>
+      _hubConnection.Reconnecting += (error) =>
       {
-        _logger.LogWarning(error, "SignalR connection lost, attempting to reconnect...");
-        await Task.CompletedTask;
+        if (error == null || !IsConnectionRefused(error))
+          _logger.LogWarning(error, "Audio hub reconnecting...");
+        return Task.CompletedTask;
       };
 
-      _hubConnection.Reconnected += async (connectionId) =>
+      _hubConnection.Reconnected += (connectionId) =>
       {
-        _logger.LogInformation("SignalR reconnected successfully. ConnectionId: {ConnectionId}", connectionId);
-        await Task.CompletedTask;
+        _lastDisconnectLogUtc = DateTime.MinValue; // Reset throttle
+        _logger.LogInformation("Audio hub reconnected. ConnectionId: {ConnectionId}", connectionId);
+        return Task.CompletedTask;
       };
 
       // Start the connection
@@ -176,6 +193,18 @@ public class AudioStateHubService : IAsyncDisposable
 
     _connectionLock.Dispose();
     GC.SuppressFinalize(this);
+  }
+
+  private static bool IsConnectionRefused(Exception ex)
+  {
+    var current = ex;
+    while (current != null)
+    {
+      if (current is SocketException { SocketErrorCode: SocketError.ConnectionRefused })
+        return true;
+      current = current.InnerException;
+    }
+    return false;
   }
 
   /// <summary>

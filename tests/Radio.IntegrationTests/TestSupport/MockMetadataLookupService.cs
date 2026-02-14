@@ -121,4 +121,10 @@ public class MockMetadataLookupService : IMetadataLookupService
     // Return default or configured metadata
     return Task.FromResult<TrackMetadata?>(_defaultMetadata ?? CreateTestMetadata());
   }
+
+  public Task<string?> SearchCoverArtByTextAsync(
+    string title, string artist, string? album = null, CancellationToken ct = default)
+  {
+    return Task.FromResult<string?>(null);
+  }
 }

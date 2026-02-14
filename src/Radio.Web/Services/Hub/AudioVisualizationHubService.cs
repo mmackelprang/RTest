@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -22,6 +23,10 @@ public class AudioVisualizationHubService : IAsyncDisposable
   public event Func<LevelDataDto, Task>? OnLevelData;
   public event Func<WaveformDataDto, Task>? OnWaveformData;
   public event Func<VisualizationDataDto, Task>? OnVisualizationData;
+
+  // Throttle disconnect log messages to avoid spam when API is down
+  private static DateTime _lastDisconnectLogUtc = DateTime.MinValue;
+  private static readonly TimeSpan DisconnectLogInterval = TimeSpan.FromSeconds(10);
 
   public bool IsConnected => _hubConnection?.State == HubConnectionState.Connected;
   public HubConnectionState ConnectionState => _hubConnection?.State ?? HubConnectionState.Disconnected;
@@ -83,21 +88,34 @@ public class AudioVisualizationHubService : IAsyncDisposable
         await InvokeEventHandlersAsync(OnVisualizationData, data, "OnVisualizationData");
       });
 
+      // Connection lifecycle events — throttled to avoid log spam when API is down
       _hubConnection.Reconnecting += exception =>
       {
-        _logger.LogWarning(exception, "Hub connection reconnecting");
+        if (exception == null || !IsConnectionRefused(exception))
+          _logger.LogWarning(exception, "Visualization hub reconnecting");
         return Task.CompletedTask;
       };
 
       _hubConnection.Reconnected += connectionId =>
       {
-        _logger.LogInformation("Hub connection reconnected with ID: {ConnectionId}", connectionId);
+        _lastDisconnectLogUtc = DateTime.MinValue; // Reset throttle
+        _logger.LogInformation("Visualization hub reconnected with ID: {ConnectionId}", connectionId);
         return Task.CompletedTask;
       };
 
       _hubConnection.Closed += exception =>
       {
-        _logger.LogWarning(exception, "Hub connection closed");
+        if (exception != null && IsConnectionRefused(exception))
+        {
+          var now = DateTime.UtcNow;
+          if (now - _lastDisconnectLogUtc >= DisconnectLogInterval)
+          {
+            _lastDisconnectLogUtc = now;
+            _logger.LogWarning("Visualization hub connection lost — API unavailable");
+          }
+        }
+        else
+          _logger.LogWarning(exception, "Visualization hub connection closed");
         return Task.CompletedTask;
       };
 
@@ -323,6 +341,18 @@ public class AudioVisualizationHubService : IAsyncDisposable
         _logger.LogError(ex, "Exception in {EventName} event handler", eventName);
       }
     }
+  }
+
+  private static bool IsConnectionRefused(Exception ex)
+  {
+    var current = ex;
+    while (current != null)
+    {
+      if (current is SocketException { SocketErrorCode: SocketError.ConnectionRefused })
+        return true;
+      current = current.InnerException;
+    }
+    return false;
   }
 
   // Custom retry policy for automatic reconnection

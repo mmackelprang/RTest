@@ -345,12 +345,15 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
       {
         var device = playbackDevices[i];
         var isDefault = i == 0; // First device is typically the default
-        var isUsb = device.Name.Contains("USB", StringComparison.OrdinalIgnoreCase);
+        var deviceName = string.IsNullOrWhiteSpace(device.Name)
+          ? "Default Audio Output"
+          : device.Name;
+        var isUsb = deviceName.Contains("USB", StringComparison.OrdinalIgnoreCase);
 
         outputDevices.Add(new AudioDeviceInfo
         {
           Id = $"playback-{i}",
-          Name = device.Name,
+          Name = deviceName,
           Type = AudioDeviceType.Output,
           IsDefault = isDefault,
           MaxChannels = 2,
@@ -371,12 +374,15 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
       {
         var device = captureDevices[i];
         var isDefault = i == 0; // First device is typically the default
-        var isUsb = device.Name.Contains("USB", StringComparison.OrdinalIgnoreCase);
+        var deviceName = string.IsNullOrWhiteSpace(device.Name)
+          ? "Default Audio Input"
+          : device.Name;
+        var isUsb = deviceName.Contains("USB", StringComparison.OrdinalIgnoreCase);
 
         inputDevices.Add(new AudioDeviceInfo
         {
           Id = $"capture-{i}",
-          Name = device.Name,
+          Name = deviceName,
           Type = AudioDeviceType.Input,
           IsDefault = isDefault,
           MaxChannels = 2,
