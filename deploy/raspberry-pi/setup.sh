@@ -40,6 +40,7 @@ apt-get install -y \
   pipewire-pulse \
   wireplumber \
   libspa-0.2-bluetooth \
+  libasound2-plugins \
   libgdiplus \
   curl \
   wget \
@@ -93,6 +94,37 @@ mkdir -p "$APP_DIR/logs"
 mkdir -p "$APP_DIR/tools/fpcalc"
 
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
+
+# Create ALSA config to bypass PulseAudio/PipeWire redirect.
+# PipeWire runs as the login user and doesn't allow cross-user connections.
+# The radio system user needs direct ALSA hardware access for audio output.
+if [ ! -f "$APP_DIR/.asoundrc" ]; then
+  cat > "$APP_DIR/.asoundrc" << 'ALSAEOF'
+# Radio Console: direct ALSA hardware access (bypass PipeWire/PulseAudio)
+pcm.!default {
+    type hw
+    card 0
+}
+ctl.!default {
+    type hw
+    card 0
+}
+
+# Bluetooth audio capture via PipeWire-Pulse TCP.
+# Routes through ALSA pulse plugin to access bt_capture.monitor source.
+pcm.bt_capture {
+    type pulse
+    server tcp:localhost:4713
+    device bt_capture.monitor
+    hint {
+        show on
+        description "Bluetooth Audio Capture (bt_capture)"
+    }
+}
+ALSAEOF
+  chown "$APP_USER:$APP_USER" "$APP_DIR/.asoundrc"
+  echo "Created .asoundrc for direct ALSA + BT capture access"
+fi
 
 # ---- 6. Install fpcalc (Chromaprint) ----
 echo ""
@@ -194,6 +226,26 @@ monitor.bluez.rules = [
 WPEOF2
 fi
 
+# PipeWire-Pulse: Enable TCP access for the radio system user.
+# The radio user can't connect to PipeWire's Unix socket (peer UID check),
+# so we enable TCP on localhost:4713 for cross-user audio device access.
+PULSE_CONF_DIR="$LOGIN_HOME/.config/pipewire/pipewire-pulse.conf.d"
+mkdir -p "$PULSE_CONF_DIR"
+
+if [ -f "$SCRIPT_DIR/pipewire-pulse/tcp-access.conf" ]; then
+  cp "$SCRIPT_DIR/pipewire-pulse/tcp-access.conf" "$PULSE_CONF_DIR/tcp-access.conf"
+else
+  cat > "$PULSE_CONF_DIR/tcp-access.conf" << 'PTEOF'
+# Allow cross-user access to PipeWire-Pulse via TCP.
+pulse.properties = {
+    server.address = [
+        "unix:native"
+        "tcp:4713"
+    ]
+}
+PTEOF
+fi
+
 chown -R "$LOGIN_USER:$LOGIN_USER" "$LOGIN_HOME/.config/pipewire" "$LOGIN_HOME/.config/wireplumber"
 echo "PipeWire/WirePlumber Bluetooth configs installed for user $LOGIN_USER"
 
@@ -235,9 +287,13 @@ TimeoutStopSec=30
 Environment=ASPNETCORE_URLS=http://0.0.0.0:5000
 Environment=ASPNETCORE_ENVIRONMENT=Production
 Environment=DOTNET_EnableDiagnostics=0
+Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/opt/radio-console/api/.bundle
+Environment=ASPNETCORE_CONTENTROOT=/opt/radio-console/api
+Environment=HOME=/opt/radio-console
 SupplementaryGroups=bluetooth pulse-access
 ProtectSystem=strict
-ReadWritePaths=/opt/radio-console/data /opt/radio-console/logs /opt/radio-console/api
+ReadWritePaths=/opt/radio-console
+PrivateTmp=true
 ProtectHome=true
 NoNewPrivileges=true
 
@@ -258,7 +314,7 @@ After=network.target radio-api.service
 Requires=radio-api.service
 
 [Service]
-Type=notify
+Type=simple
 User=radio
 Group=radio
 WorkingDirectory=/opt/radio-console
@@ -271,9 +327,12 @@ TimeoutStopSec=30
 Environment=ASPNETCORE_URLS=http://0.0.0.0:5002
 Environment=ASPNETCORE_ENVIRONMENT=Production
 Environment=DOTNET_EnableDiagnostics=0
+Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/opt/radio-console/web/.bundle
+Environment=ASPNETCORE_CONTENTROOT=/opt/radio-console/web
 Environment=ApiBaseUrl=http://localhost:5000
 ProtectSystem=strict
 ReadWritePaths=/opt/radio-console/logs /opt/radio-console/web
+PrivateTmp=true
 ProtectHome=true
 NoNewPrivileges=true
 
@@ -291,9 +350,13 @@ echo "Services installed and enabled (radio-api, radio-web)"
 echo ""
 echo "[9/9] Enabling system services..."
 
-# Enable Bluetooth service
+# Enable Bluetooth service with auto-power-on after reboot
 systemctl enable bluetooth.service
 systemctl start bluetooth.service 2>/dev/null || true
+if ! grep -q '^AutoEnable=true' /etc/bluetooth/main.conf 2>/dev/null; then
+  sed -i 's/^#AutoEnable=true/AutoEnable=true/' /etc/bluetooth/main.conf 2>/dev/null || true
+  echo "Enabled AutoEnable in /etc/bluetooth/main.conf"
+fi
 
 # Enable Avahi (mDNS for Cast device discovery)
 systemctl enable avahi-daemon.service

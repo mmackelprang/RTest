@@ -96,8 +96,9 @@ public abstract class SecretsProviderBase : ISecretsProvider
 
   /// <summary>
   /// Decrypts cipher text using Data Protection.
+  /// Returns null if decryption fails (e.g. key ring mismatch after migrating between machines).
   /// </summary>
-  protected string Decrypt(string cipherText)
+  protected string? Decrypt(string cipherText)
   {
     try
     {
@@ -105,8 +106,8 @@ public abstract class SecretsProviderBase : ISecretsProvider
     }
     catch (Exception ex)
     {
-      _logger.LogError(ex, "Failed to decrypt secret");
-      throw new InvalidOperationException("Failed to decrypt secret", ex);
+      _logger.LogWarning(ex, "Failed to decrypt secret (key ring mismatch? secrets may need to be re-entered)");
+      return null;
     }
   }
 }

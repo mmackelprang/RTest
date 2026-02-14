@@ -214,6 +214,12 @@ public class BluetoothAudioSource : USBAudioSourceBase
         Logger.LogError("BluetoothAudioSource: Failed to add loopback generator to SoundFlow mixer");
       }
     }
+    else
+    {
+      Logger.LogWarning(
+        "BluetoothAudioSource: PlayCoreAsync — no capture path matched (captureDevice={HasCapture}, soundComponent={HasComponent}, playbackService={HasPlayback})",
+        _captureDevice != null, SoundComponent != null, _playbackService != null);
+    }
   }
 
   protected override Task PauseCoreAsync(CancellationToken cancellationToken)

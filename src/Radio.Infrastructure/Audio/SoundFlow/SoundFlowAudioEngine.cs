@@ -48,6 +48,13 @@ public class SoundFlowAudioEngine : IAudioEngine
   public event EventHandler<AudioDeviceChangedEventArgs>? DeviceChanged;
 
   /// <summary>
+  /// Raised after a playback device switch completes, so that services holding
+  /// active SoundComponents can re-attach them to the new device's mixer.
+  /// The sender is this engine; the argument is the new <see cref="AudioPlaybackDevice"/>.
+  /// </summary>
+  internal event EventHandler<AudioPlaybackDevice>? PlaybackDeviceSwitched;
+
+  /// <summary>
   /// Initializes a new instance of the <see cref="SoundFlowAudioEngine"/> class.
   /// </summary>
   /// <param name="logger">The logger instance.</param>
@@ -540,6 +547,18 @@ public class SoundFlowAudioEngine : IAudioEngine
       _playbackDevice.Start();
 
       _logger.LogInformation("Successfully switched to playback device: {DeviceName}", newDevice.Name);
+
+      // Notify services (e.g. SoundFlowPlaybackService) to re-attach active
+      // source components to the new device's mixer.
+      try
+      {
+        PlaybackDeviceSwitched?.Invoke(this, _playbackDevice);
+      }
+      catch (Exception evtEx)
+      {
+        _logger.LogError(evtEx, "Error in PlaybackDeviceSwitched handler");
+      }
+
       return true;
     }
     catch (Exception ex)

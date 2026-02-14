@@ -20,6 +20,7 @@ Environment=ASPNETCORE_URLS=http://0.0.0.0:5000
 Environment=ASPNETCORE_ENVIRONMENT=Production
 Environment=DOTNET_EnableDiagnostics=0
 Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/opt/radio-console/api/.bundle
+Environment=ASPNETCORE_CONTENTROOT=/opt/radio-console/api
 Environment=HOME=/opt/radio-console
 
 # Audio access
@@ -28,6 +29,7 @@ SupplementaryGroups=bluetooth pulse-access
 # Security hardening
 ProtectSystem=strict
 ReadWritePaths=/opt/radio-console
+PrivateTmp=true
 ProtectHome=true
 NoNewPrivileges=true
 

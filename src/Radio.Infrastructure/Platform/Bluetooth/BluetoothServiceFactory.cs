@@ -36,7 +36,7 @@ public static class BluetoothServiceFactory
       // net8.0 TFM: select by runtime OS detection
       if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
       {
-          return new LinuxBluetoothService(loggerFactory.CreateLogger<LinuxBluetoothService>(), options, deviceManager, metricsCollector);
+          return new LinuxBluetoothService(loggerFactory.CreateLogger<LinuxBluetoothService>(), options, deviceManager, metricsCollector, playbackService);
       }
       else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
       {

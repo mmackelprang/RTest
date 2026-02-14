@@ -20,11 +20,13 @@ Environment=ASPNETCORE_URLS=http://0.0.0.0:5002
 Environment=ASPNETCORE_ENVIRONMENT=Production
 Environment=DOTNET_EnableDiagnostics=0
 Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/opt/radio-console/web/.bundle
+Environment=ASPNETCORE_CONTENTROOT=/opt/radio-console/web
 Environment=ApiBaseUrl=http://localhost:5000
 
 # Security hardening
 ProtectSystem=strict
 ReadWritePaths=/opt/radio-console/logs /opt/radio-console/web
+PrivateTmp=true
 ProtectHome=true
 NoNewPrivileges=true
 
