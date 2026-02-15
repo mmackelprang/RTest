@@ -155,8 +155,16 @@ public class AudioController : ControllerBase
         case PlaybackAction.Play:
           if (primarySource is IPrimaryAudioSource playSource)
           {
-            await playSource.PlayAsync();
-            _logger.LogInformation("Started playback");
+            if (playSource.State == AudioSourceState.Paused)
+            {
+              await playSource.ResumeAsync();
+              _logger.LogInformation("Resumed playback from paused state");
+            }
+            else
+            {
+              await playSource.PlayAsync();
+              _logger.LogInformation("Started playback");
+            }
           }
           else if (_audioEngine.State != AudioEngineState.Running)
           {

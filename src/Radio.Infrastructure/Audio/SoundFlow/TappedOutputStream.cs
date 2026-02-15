@@ -133,6 +133,8 @@ internal sealed class TappedOutputStream : Stream
 
   /// <summary>
   /// Reads data for a specific reader, advancing only that reader's position.
+  /// When no data is available, returns PCM silence to keep HTTP streams alive
+  /// during source pause (prevents Cast device timeout/disconnect).
   /// </summary>
   internal int ReadForReader(string readerId, byte[] buffer, int offset, int count)
   {
@@ -145,6 +147,19 @@ internal sealed class TappedOutputStream : Stream
         return 0;
 
       var available = (_writePosition - readPos + _bufferSize) % _bufferSize;
+
+      if (available == 0)
+      {
+        // No new audio data — return silence (zeroed PCM) to keep HTTP streams
+        // alive during source pause. The reader position is NOT advanced so
+        // real audio data will be read immediately when the source resumes.
+        // Limit to ~21ms of audio per call (1024 stereo 16-bit samples = 4096 bytes)
+        // to approximate real-time rate.
+        var silenceBytes = Math.Min(count, 4096);
+        Array.Clear(buffer, offset, silenceBytes);
+        return silenceBytes;
+      }
+
       var toRead = Math.Min(count, available);
 
       for (var i = 0; i < toRead; i++)
@@ -367,6 +382,35 @@ internal sealed class TappedOutputStreamReader : Stream
     if (_disposed)
       throw new ObjectDisposedException(nameof(TappedOutputStreamReader));
     return _parent.ReadForReader(_readerId, buffer, offset, count);
+  }
+
+  /// <inheritdoc/>
+  /// <remarks>
+  /// Paces silence reads to approximate real-time rate. Without this,
+  /// callers spin a tight loop when no audio data is available because
+  /// <see cref="TappedOutputStream.ReadForReader"/> returns non-zero
+  /// silence bytes instead of 0.
+  /// </remarks>
+  public override async Task<int> ReadAsync(
+    byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+  {
+    if (_disposed)
+      throw new ObjectDisposedException(nameof(TappedOutputStreamReader));
+
+    var available = _parent.GetAvailableForReader(_readerId);
+    var bytesRead = _parent.ReadForReader(_readerId, buffer, offset, count);
+
+    if (available == 0 && bytesRead > 0)
+    {
+      // Silence was emitted — pace to approximate real-time to prevent
+      // tight-loop spinning that causes high CPU and bandwidth waste.
+      // At 48kHz stereo 16-bit: 192,000 bytes/sec → 192 bytes/ms
+      var bytesPerMs = _parent.SampleRate * _parent.Channels * 2 / 1000;
+      var delayMs = bytesPerMs > 0 ? bytesRead / bytesPerMs : 20;
+      await Task.Delay(Math.Max(1, delayMs), cancellationToken);
+    }
+
+    return bytesRead;
   }
 
   /// <inheritdoc/>

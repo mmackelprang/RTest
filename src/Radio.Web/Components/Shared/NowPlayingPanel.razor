@@ -75,14 +75,28 @@
   @if (!string.IsNullOrEmpty(_position) && !string.IsNullOrEmpty(_duration))
   {
     <div style="margin-bottom: 8px;">
-      <MudSlider Value="@_progressPercent"
-                 ValueChanged="@((double v) => HandleSeekAsync(v))"
-                 Min="0" Max="100" Step="0.1"
-                 Color="Color.Primary" Size="Size.Small" />
+      @if (_canSeek)
+      {
+        <MudSlider Value="@_progressPercent"
+                   ValueChanged="@((double v) => HandleSeekAsync(v))"
+                   Min="0" Max="100" Step="0.1"
+                   Color="Color.Primary" Size="Size.Small" />
+      }
+      else
+      {
+        <MudProgressLinear Value="@_progressPercent" Color="Color.Primary" Size="Size.Small"
+                           Style="margin: 8px 0;" />
+      }
       <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); margin-top: -4px;">
         <span>@_position</span>
         <span>@_duration</span>
       </div>
+    </div>
+  }
+  else if (!string.IsNullOrEmpty(_position) && _position != "0:00")
+  {
+    <div style="margin-bottom: 8px; text-align: center; font-size: 12px; color: var(--text-secondary);">
+      <span>@_position</span>
     </div>
   }
 
@@ -121,6 +135,7 @@
   private string? _source;
   private string? _position;
   private string? _duration;
+  private bool _canSeek;
   private double _progressPercent;
   private double _totalDurationSeconds;
   private System.Threading.Timer? _timer;
@@ -194,31 +209,36 @@
         _isShuffleEnabled = state.IsShuffleEnabled;
         _repeatMode = state.RepeatMode;
         _volume = state.Volume;
-        if (!string.IsNullOrEmpty(state.Position) && !string.IsNullOrEmpty(state.Duration))
-        {
-          if (TimeSpan.TryParse(state.Position, out var pos) && TimeSpan.TryParse(state.Duration, out var dur) && dur.TotalSeconds > 0)
-          {
-            _totalDurationSeconds = dur.TotalSeconds;
-            _progressPercent = (pos.TotalSeconds / dur.TotalSeconds) * 100.0;
+        _canSeek = state.CanSeek;
 
-            // Format without fractional seconds: "h:mm:ss" or "m:ss"
-            _position = pos.TotalHours >= 1
-              ? pos.ToString(@"h\:mm\:ss")
-              : pos.ToString(@"m\:ss");
-            _duration = dur.TotalHours >= 1
-              ? dur.ToString(@"h\:mm\:ss")
-              : dur.ToString(@"m\:ss");
-          }
-          else
-          {
-            _position = state.Position;
-            _duration = state.Duration;
-          }
+        // Parse position and duration
+        var posSeconds = 0.0;
+        if (!string.IsNullOrEmpty(state.Position) && TimeSpan.TryParse(state.Position, out var pos))
+        {
+          posSeconds = pos.TotalSeconds;
+          _position = pos.TotalHours >= 1
+            ? pos.ToString(@"h\:mm\:ss")
+            : pos.ToString(@"m\:ss");
         }
         else
         {
-          _position = state.Position;
-          _duration = state.Duration;
+          _position = null;
+        }
+
+        // Parse duration (may be null for live/streaming sources like BT)
+        if (!string.IsNullOrEmpty(state.Duration) && TimeSpan.TryParse(state.Duration, out var dur) && dur.TotalSeconds > 0)
+        {
+          _totalDurationSeconds = dur.TotalSeconds;
+          _progressPercent = posSeconds > 0 ? (posSeconds / dur.TotalSeconds) * 100.0 : 0;
+          _duration = dur.TotalHours >= 1
+            ? dur.ToString(@"h\:mm\:ss")
+            : dur.ToString(@"m\:ss");
+        }
+        else
+        {
+          _duration = null;
+          _totalDurationSeconds = 0;
+          _progressPercent = 0;
         }
       }
 

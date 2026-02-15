@@ -143,17 +143,18 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         {
             if (_mediaPlayer == null)
             {
-                _logger.LogDebug("No MPRIS media player attached, cannot skip to next track");
+                _logger.LogWarning("No MPRIS media player attached, cannot skip to next track. " +
+                    "MediaPlayer D-Bus interface not found — phone may not expose AVRCP controller");
                 return;
             }
             try
             {
                 await _mediaPlayer.NextAsync();
-                _logger.LogInformation("AVRCP: Sent Next command");
+                _logger.LogInformation("AVRCP: Sent Next command via D-Bus ({Path})", _mediaPlayerPath);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to send AVRCP Next command");
+                _logger.LogWarning(ex, "Failed to send AVRCP Next command via D-Bus ({Path})", _mediaPlayerPath);
             }
         }
 
@@ -161,17 +162,18 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         {
             if (_mediaPlayer == null)
             {
-                _logger.LogDebug("No MPRIS media player attached, cannot go to previous track");
+                _logger.LogWarning("No MPRIS media player attached, cannot go to previous track. " +
+                    "MediaPlayer D-Bus interface not found — phone may not expose AVRCP controller");
                 return;
             }
             try
             {
                 await _mediaPlayer.PreviousAsync();
-                _logger.LogInformation("AVRCP: Sent Previous command");
+                _logger.LogInformation("AVRCP: Sent Previous command via D-Bus ({Path})", _mediaPlayerPath);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to send AVRCP Previous command");
+                _logger.LogWarning(ex, "Failed to send AVRCP Previous command via D-Bus ({Path})", _mediaPlayerPath);
             }
         }
 

@@ -39,6 +39,7 @@ public class SoundFlowAudioEngine : IAudioEngine
   private AudioEngineState _state = AudioEngineState.Uninitialized;
   private int _currentDeviceIndex = -1;
   private bool _disposed;
+  private bool _localOutputMuted;
   private readonly object _stateLock = new();
 
   /// <inheritdoc/>
@@ -125,6 +126,17 @@ public class SoundFlowAudioEngine : IAudioEngine
   public bool IsReady => State == AudioEngineState.Ready || State == AudioEngineState.Running;
 
   /// <inheritdoc/>
+  public bool IsLocalOutputMuted => _localOutputMuted;
+
+  /// <inheritdoc/>
+  public void SetLocalOutputMuted(bool muted)
+  {
+    _localOutputMuted = muted;
+    UpdatePlaybackDeviceVolume();
+    _logger.LogInformation("Local output {State}", muted ? "muted (casting to external device)" : "unmuted");
+  }
+
+  /// <inheritdoc/>
   public async Task InitializeAsync(CancellationToken cancellationToken = default)
   {
     ThrowIfDisposed();
@@ -172,7 +184,7 @@ public class SoundFlowAudioEngine : IAudioEngine
           _currentDeviceIndex = 0;
 
           // Apply initial volume/mute state
-          _playbackDevice.MasterMixer.Volume = _masterMixer.GetEffectiveVolume();
+          _playbackDevice.MasterMixer.Volume = _localOutputMuted ? 0f : _masterMixer.GetEffectiveVolume();
 
           _playbackDevice.Start();
           _logger.LogInformation("Playback device initialized and started: {DeviceName}", deviceInfo.Name);
@@ -415,7 +427,7 @@ public class SoundFlowAudioEngine : IAudioEngine
       _playbackDevice = _engine.InitializePlaybackDevice(deviceInfo, _audioFormat);
       _currentDeviceIndex = 0;
 
-      _playbackDevice.MasterMixer.Volume = _masterMixer.GetEffectiveVolume();
+      _playbackDevice.MasterMixer.Volume = _localOutputMuted ? 0f : _masterMixer.GetEffectiveVolume();
       _playbackDevice.Start();
 
       // Re-attach modifiers
@@ -502,7 +514,7 @@ public class SoundFlowAudioEngine : IAudioEngine
       _currentDeviceIndex = deviceIndex;
 
       // Apply current volume/mute state
-      _playbackDevice.MasterMixer.Volume = _masterMixer.GetEffectiveVolume();
+      _playbackDevice.MasterMixer.Volume = _localOutputMuted ? 0f : _masterMixer.GetEffectiveVolume();
 
       // Re-attach balance modifier (before fingerprint tap)
       if (_balanceModifier != null)
@@ -667,20 +679,22 @@ public class SoundFlowAudioEngine : IAudioEngine
 
   private void OnMasterVolumeChanged(object? sender, float volume)
   {
-    if (_playbackDevice != null)
-    {
-      // Apply volume if not muted. If muted, Volume should be 0, but IsMuted handles that.
-      // However, SoundFlow Mixer Volume is usually the gain.
-      // If we use _masterMixer.GetEffectiveVolume(), it handles mute logic.
-      _playbackDevice.MasterMixer.Volume = _masterMixer.GetEffectiveVolume();
-    }
+    UpdatePlaybackDeviceVolume();
   }
 
   private void OnMuteStateChanged(object? sender, bool isMuted)
   {
+    UpdatePlaybackDeviceVolume();
+  }
+
+  private void UpdatePlaybackDeviceVolume()
+  {
     if (_playbackDevice != null)
     {
-       _playbackDevice.MasterMixer.Volume = _masterMixer.GetEffectiveVolume();
+      // When local output is muted (e.g. casting), set device volume to 0.
+      // SoundFlow applies Volume AFTER modifiers, so audio taps (HTTP streaming,
+      // visualization, fingerprinting) still receive full-volume audio.
+      _playbackDevice.MasterMixer.Volume = _localOutputMuted ? 0f : _masterMixer.GetEffectiveVolume();
     }
   }
 

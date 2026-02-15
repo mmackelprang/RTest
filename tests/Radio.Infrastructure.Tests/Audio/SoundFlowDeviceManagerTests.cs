@@ -29,9 +29,10 @@ public class SoundFlowDeviceManagerTests
     _audioPreferencesMock.Setup(x => x.CurrentValue).Returns(new AudioPreferences());
 
     _deviceManager = new SoundFlowDeviceManager(
-        _loggerMock.Object, 
-        _configManagerMock.Object, 
-        _audioPreferencesMock.Object);
+        _loggerMock.Object,
+        _configManagerMock.Object,
+        _audioPreferencesMock.Object,
+        Options.Create(new AudioOutputOptions()));
   }
 
   [Fact]

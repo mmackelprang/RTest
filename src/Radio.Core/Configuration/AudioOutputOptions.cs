@@ -25,6 +25,47 @@ public class AudioOutputOptions
   /// Gets or sets the HTTP stream output options.
   /// </summary>
   public HttpStreamOutputOptions HttpStream { get; set; } = new();
+
+  /// <summary>
+  /// Gets or sets device display options (filtering, friendly names).
+  /// </summary>
+  public DeviceDisplayOptions DeviceDisplay { get; set; } = new();
+}
+
+/// <summary>
+/// Configuration for device list filtering and friendly name mapping.
+/// </summary>
+public class DeviceDisplayOptions
+{
+  /// <summary>
+  /// Regex patterns for device names to hide from the UI.
+  /// Matched against the raw device name (case-insensitive).
+  /// Default: hides PulseAudio monitor devices.
+  /// </summary>
+  public List<string> HiddenDevicePatterns { get; set; } = ["^Monitor of "];
+
+  /// <summary>
+  /// Ordered list of device name mappings. The first matching entry
+  /// (case-insensitive substring) wins. List ordering is guaranteed,
+  /// unlike Dictionary enumeration.
+  /// </summary>
+  public List<DeviceNameMapping> FriendlyNames { get; set; } = [];
+}
+
+/// <summary>
+/// Maps a raw device name substring to a friendly display name.
+/// </summary>
+public class DeviceNameMapping
+{
+  /// <summary>
+  /// Substring to match against raw device names (case-insensitive).
+  /// </summary>
+  public string Pattern { get; set; } = "";
+
+  /// <summary>
+  /// Display name to show when the pattern matches.
+  /// </summary>
+  public string FriendlyName { get; set; } = "";
 }
 
 /// <summary>
