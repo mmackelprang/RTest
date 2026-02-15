@@ -1069,10 +1069,10 @@ public class AudioDeviceConflictException : Exception
 
 ## Phase 3: Primary Audio Sources
 
-**Duration:** 7-10 days  
-**Risk Level:** Medium  
-**Priority:** High  
-**Status:** ⚪ Not Started  
+**Duration:** 7-10 days
+**Risk Level:** Medium
+**Priority:** High
+**Status:** 🟢 Completed
 **Dependencies:** Phase 2
 
 ### Objectives
@@ -1082,13 +1082,14 @@ public class AudioDeviceConflictException : Exception
 4. Create File Player with directory support
 
 ### Deliverables
-- [ ] `IAudioSource` and `IPrimaryAudioSource` interfaces
-- [ ] Spotify audio source with authentication
-- [ ] Radio USB audio source (Raddy RF320)
-- [ ] Vinyl USB audio source
-- [ ] File Player with playlist support
-- [ ] Generic USB audio source
-- [ ] Unit tests for all sources
+- [x] `IAudioSource` and `IPrimaryAudioSource` interfaces
+- [x] Spotify audio source with Librespot native streaming + SpotifyAPI-NET browse/search
+- [x] Radio USB audio source (Raddy RF320) + RTL-SDR software-defined radio
+- [x] Vinyl USB audio source
+- [x] File Player with playlist, shuffle, repeat, fingerprinting
+- [x] Generic USB audio source
+- [x] Bluetooth A2DP audio source (Linux BlueZ D-Bus + Windows WinRT)
+- [x] Unit tests for all sources
 
 ### Audio Sources Overview
 
@@ -1490,10 +1491,10 @@ Create REST API and real-time SignalR integration.
 
 ## Phase 9: Blazor UI Components
 
-**Duration:** 7-10 days  
-**Risk Level:** Medium  
-**Priority:** High  
-**Status:** ⚪ Not Started  
+**Duration:** 7-10 days
+**Risk Level:** Medium
+**Priority:** High
+**Status:** 🟢 Completed
 **Dependencies:** Phase 8
 
 ### Objectives
@@ -1503,15 +1504,17 @@ Create REST API and real-time SignalR integration.
 4. Create configuration management UI
 
 ### Deliverables
-- [ ] Main layout with navigation bar
-- [ ] Source selector component
-- [ ] Volume/transport controls
-- [ ] Now playing display
-- [ ] Spectrum visualizer (Canvas)
-- [ ] VU meter display
-- [ ] Playlist grid
-- [ ] Configuration manager
-- [ ] Touch-friendly dialogs
+- [x] Main layout with navigation bar (MudBlazor Material 3)
+- [x] Source selector component
+- [x] Volume/transport controls
+- [x] Now playing display with album art, progress bar, metadata
+- [x] Spectrum visualizer (Canvas FFT + waveform + level meters)
+- [x] VU meter display
+- [x] Queue panel with drag-drop reordering
+- [x] Configuration manager with secrets editing
+- [x] Touch-friendly dialogs
+- [x] 12 pages: Home, Radio, Bluetooth, Devices, Queue, PlayHistory, Metrics, SystemConfig, Spotify, Files, Events, Diagnostics
+- [x] 120+ bUnit tests
 
 ### Coding Assistant Prompt
 
@@ -1544,10 +1547,10 @@ Create Blazor Server components for the touchscreen interface. Reference `/desig
 
 ## Phase 10: Testing & Quality Assurance
 
-**Duration:** 5-7 days  
-**Risk Level:** Low  
-**Priority:** Critical  
-**Status:** ⚪ Not Started  
+**Duration:** 5-7 days
+**Risk Level:** Low
+**Priority:** Critical
+**Status:** 🟡 Substantially Complete
 **Dependencies:** All Previous Phases
 
 ### Objectives
@@ -1557,10 +1560,10 @@ Create Blazor Server components for the touchscreen interface. Reference `/desig
 4. Security and performance testing
 
 ### Deliverables
-- [ ] Unit tests for all components
-- [ ] Integration tests for API
-- [ ] E2E tests for UI
-- [ ] Performance benchmarks
+- [x] Unit tests for all components (1,257 tests across 7 projects)
+- [x] Integration tests for API (86+ integration tests)
+- [ ] E2E tests for UI (Playwright infrastructure exists, 0 tests written)
+- [x] Performance benchmarks (audio pipeline metrics, Cast latency testing)
 - [ ] Security audit results
 - [ ] Test coverage report
 
@@ -1606,10 +1609,10 @@ tests/
 
 ## Phase 11: Documentation
 
-**Duration:** 3-4 days  
-**Risk Level:** Low  
-**Priority:** Medium  
-**Status:** ⚪ Not Started  
+**Duration:** 3-4 days
+**Risk Level:** Low
+**Priority:** Medium
+**Status:** 🟡 Partially Complete
 **Dependencies:** All Previous Phases
 
 ### Objectives
@@ -1619,12 +1622,14 @@ tests/
 4. Document architecture decisions
 
 ### Deliverables
-- [ ] API documentation (OpenAPI/Swagger)
+- [x] API documentation (OpenAPI/Swagger at /swagger)
 - [ ] User manual
-- [ ] Deployment guide
-- [ ] Architecture decision records
+- [x] Deployment guide (`deploy/DEPLOYMENT.md`)
+- [x] Architecture decision records (`design/DECISION-LOG.md` — 21 ADRs)
 - [ ] Configuration reference
 - [ ] Troubleshooting guide
+- [x] Work log (`design/WORK-LOG.md`)
+- [x] Future work catalog (`design/FUTURE-WORK.md`)
 
 ### Coding Assistant Prompt
 
@@ -1653,10 +1658,10 @@ docs/
 
 ## Phase 12: Deployment & Optimization
 
-**Duration:** 3-5 days  
-**Risk Level:** Medium  
-**Priority:** High  
-**Status:** ⚪ Not Started  
+**Duration:** 3-5 days
+**Risk Level:** Medium
+**Priority:** High
+**Status:** 🟡 Substantially Complete
 **Dependencies:** All Previous Phases
 
 ### Objectives
@@ -1666,11 +1671,13 @@ docs/
 4. Configure production logging
 
 ### Deliverables
-- [ ] setup-pi.sh deployment script
-- [ ] systemd service file
-- [ ] Production appsettings.json
-- [ ] Performance optimizations
-- [ ] Monitoring setup
+- [x] setup-pi.sh deployment script (`deploy/raspberry-pi/setup.sh`)
+- [x] systemd service files (`radio-api.service` + `radio-web.service` — dual-service architecture)
+- [x] Production appsettings.json
+- [x] Performance optimizations (audio buffer tuning, Cast streaming)
+- [x] Monitoring setup (pipeline metrics, Serilog structured logging)
+- [x] Cross-compilation scripts (Windows → Linux ARM64 via `Deploy-ToPi.ps1`)
+- [ ] Kiosk mode (Chromium fullscreen — deferred until Pi validation complete)
 
 ### Coding Assistant Prompt
 
@@ -1705,19 +1712,33 @@ Create deployment infrastructure for Raspberry Pi 5.
 
 | Phase | Status | Started | Completed | Notes |
 |-------|--------|---------|-----------|-------|
-| 0 | 🟢 Completed | 2025-11-25 | 2025-11-25 | Solution structure, CI/CD, placeholder interfaces created |
-| 1 | 🟢 Completed | 2025-11-25 | 2025-11-25 | Configuration infrastructure with JSON/SQLite stores, secrets management, backup/restore |
-| 2 | 🟢 Completed | 2025-11-26 | 2025-11-26 | Core Audio Engine with SoundFlow/MiniAudio, device enumeration, master mixer, tapped output stream |
-| 3 | 🟡 In Progress | 2025-12-19 | - | Spotify source implementation, Radio tuner integration |
-| 4 | 🟢 Completed | 2025-11-26 | 2025-11-26 | Event audio sources: IEventAudioSource, ITTSFactory, TTS engines (eSpeak/Google/Azure), AudioFileEventSource |
-| 5 | 🟢 Completed | 2025-11-26 | 2025-11-26 | Ducking & Priority: IDuckingService, fade policies (Smooth/Quick/Instant), priority queue, UAT tests |
-| 6 | 🟢 Completed | 2025-11-28 | 2025-11-28 | Audio outputs: IAudioOutput, LocalAudioOutput, GoogleCastOutput, HttpStreamOutput, 66 tests |
-| 7 | 🟢 Completed | 2025-12-02 | 2025-12-02 | Visualization: IVisualizerService, SpectrumAnalyzer (FFT), LevelMeter (VU), WaveformAnalyzer, 91 unit tests |
-| 8 | 🟢 Completed | 2025-12-02 | 2025-12-02 | API & SignalR: REST controllers, AudioVisualizationHub, Audio stream middleware, Swagger docs, 34 tests |
-| 9 | 🟡 In Progress | 2025-12-19 | - | Web UI implementation, Spotify page, Touch interactions |
-| 10 | ⚪ Not Started | - | - | |
-| 11 | ⚪ Not Started | - | - | |
-| 12 | ⚪ Not Started | - | - | |
+| 0 | 🟢 Completed | 2025-11-25 | 2025-11-25 | Solution structure, CI/CD, placeholder interfaces |
+| 1 | 🟢 Completed | 2025-11-25 | 2025-11-25 | Configuration: JSON/SQLite stores, secrets, backup/restore |
+| 2 | 🟢 Completed | 2025-11-26 | 2025-11-26 | Core Audio Engine: SoundFlow/MiniAudio, devices, mixer, tapped output |
+| 3 | 🟢 Completed | 2025-11-26 | 2026-02-10 | Sources: Spotify, Radio (RF320+SDR), Vinyl, FilePlayer, BT A2DP, Generic USB |
+| 4 | 🟢 Completed | 2025-11-26 | 2025-11-26 | Event Sources: TTS (eSpeak/Google/Azure), AudioFileEvent |
+| 5 | 🟢 Completed | 2025-11-26 | 2025-11-26 | Ducking & Priority: fade policies, priority queue |
+| 6 | 🟢 Completed | 2025-11-28 | 2025-11-28 | Outputs: Local, GoogleCast, HTTP Stream |
+| 7 | 🟢 Completed | 2025-12-02 | 2025-12-02 | Visualization: FFT Spectrum, VU Meters, Waveform |
+| 8 | 🟢 Completed | 2025-12-02 | 2025-12-05 | API: 16 controllers, 126+ endpoints, SignalR hubs |
+| 9 | 🟢 Completed | 2025-12-09 | 2025-12-30 | Blazor UI: 12 pages, MudBlazor M3, 120+ bUnit tests |
+| 10 | 🟡 Substantially Complete | 2025-12-03 | - | 1,257 tests, 7 projects. E2E tests not yet written |
+| 11 | 🟡 Partially Complete | 2026-02-15 | - | Decision log, work log, deployment guide. No user manual |
+| 12 | 🟡 Substantially Complete | 2026-02-13 | - | Dual-service systemd, Pi deploy scripts. Kiosk mode deferred |
+
+### Post-Plan Features (Added After Phase 9)
+
+| Feature | Completed | PRs |
+|---------|-----------|-----|
+| RTL-SDR Software-Defined Radio | 2025-12-09 | #103, #105, #107 |
+| Play History & Analytics | 2025-12-19 | #129+ |
+| Database Integration & Spotify | 2025-12-31 | #142-164 |
+| Audio Fingerprinting (fpcalc + AcoustID) | 2026-02-06 | #171-172 |
+| Bluetooth A2DP Audio Pipeline | 2026-02-10 | #174, #176 |
+| Google Cast Streaming Fixes | 2026-02-13 | #194, #195 |
+| Dual-Service Deployment | 2026-02-13 | #196 |
+| Pi Hardware Debugging (16 PRs) | 2026-02-12 | #178-193 |
+| Audio Output UX & Cast Bugs | 2026-02-15 | #197, #198 |
 
 ### Status Legend
 - ⚪ Not Started
@@ -1738,5 +1759,5 @@ As each phase is completed:
 
 ---
 
-*Last Updated: 2025-12-02*
-*Next Review: After Phase 9 Completion*
+*Last Updated: 2026-02-15*
+*See also: `design/WORK-LOG.md`, `design/DECISION-LOG.md`, `design/FUTURE-WORK.md`*

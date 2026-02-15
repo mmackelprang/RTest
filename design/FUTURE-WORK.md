@@ -111,29 +111,7 @@ No further action needed unless a new radio hardware type is added.
 
 ---
 
-## 5. SoundFlow Metadata Gaps (FileBrowser)
-
-**Status:** Library limitation — SoundFlow's `SoundTags` doesn't expose all ID3 fields
-**Added:** 2026-02-11
-**Priority:** Low — FilePlayerAudioSource reads these via `SoundMetadataReader` which does expose them
-
-### What Exists
-
-| File | What's There |
-|------|-------------|
-| `Radio.Infrastructure/Audio/Services/FileBrowser.cs:403-405` | Returns `null` for track number, genre, and year with TODO comments |
-
-### Context
-
-`FileBrowser.GetFileMetadataAsync()` uses `SoundFlow.Providers.SoundMetadataReader.Read()` and accesses `formatInfo.Tags`. The `SoundTags` type exposes `Title`, `Artist`, `Album` but not `TrackNumber`, `Genre`, or `Year`.
-
-However, `FilePlayerAudioSource.UpdateMetadataFromFile()` (line 1530) also uses `SoundMetadataReader.Read()` and DOES get `Tags.Genre`, `Tags.Year`, `Tags.TrackNumber` from `formatInfo.Tags`. This suggests the API may have been updated, or FileBrowser is using an older pattern.
-
-**Resolution:** Check if `formatInfo.Tags.Genre`, `formatInfo.Tags.Year`, and `formatInfo.Tags.TrackNumber` are available in the current SoundFlow version and update FileBrowser accordingly. This may already work — the TODOs may be stale.
-
----
-
-## 6. Kiosk Mode (Fullscreen Browser)
+## 5. Kiosk Mode (Fullscreen Browser)
 
 **Status:** Deferred — infrastructure ready (dual-service deployment), UI not yet validated on Pi
 **Added:** 2026-02-13

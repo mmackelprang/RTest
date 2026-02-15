@@ -1,164 +1,142 @@
-# Task Plan: UI Fixes & UAT Prep
+# Task Plan: Project Completion & Polish
 
 ## Goal
-Fix Web UI issues, improve Material 3 compliance and touch-friendliness, clean up dead code/logging, fix play history display, simplify navigation by merging/removing redundant pages, enhance metrics with filtering and sparklines, verify device defaults and store management, and create deployment scripts for Raspberry Pi and x64 Debian.
+Reconcile all project documents, complete remaining verification, fix known issues, and polish for "done" state.
 
 ## Current Phase
-Phase 0: Planning
+Phase 8 — Documentation & Polish (reconciliation complete, ready for decisions)
 
-## Phases
+---
 
-### Phase 1: Quick Fixes & Dead Code Cleanup
-- [ ] Remove commented-out `Console.WriteLine` and unused timing variables from `VisualizationTapModifier.cs` (lines 64-70)
-- [ ] Remove balance control from `NowPlayingPanel.razor` (lines 108-122) — balance stays "centered" permanently
-- [ ] Set balance to 0.0 in `AudioManager.RestoreVolumePreferences()` to ensure centered on startup regardless of stored value
-- [ ] Fix source color mapping in `QueueHistoryPanel.razor` (lines 283-292): remove "Spotify", change "FilePlayer" to "File", add "Bluetooth" → Color.Secondary, add "Vinyl" → Color.Success
-- **Status:** pending
-- **Key files:**
-  - `src/Radio.Infrastructure/Audio/SoundFlow/VisualizationTapModifier.cs`
-  - `src/Radio.Web/Components/Shared/NowPlayingPanel.razor`
-  - `src/Radio.Web/Components/Shared/QueueHistoryPanel.razor`
-  - `src/Radio.Infrastructure/Audio/Services/AudioManager.cs`
+## Completed Phases (Original PLAN.md Phases 0-9)
 
-### Phase 2: Title Bar — Mute & Volume Only
-- [ ] Strip mini-player from `MainLayout.razor` (lines 84-154): remove album art, track title/artist, transport controls (prev/pause/next)
-- [ ] Keep only mute button + volume slider in the title bar center section
-- [ ] Wire mute/volume to match NowPlayingPanel behavior exactly: same API calls (`AudioApi.SetVolumeAsync`, `AudioApi.ToggleMuteAsync`), same SignalR event subscriptions (`PlaybackStateChanged` → refresh volume/mute state)
-- [ ] Ensure bidirectional sync: volume change in title bar reflects in NowPlayingPanel and vice versa (already happens via SignalR, but verify)
-- [ ] Increase touch target size for mute button to 48dp minimum (M3 compliance)
-- **Status:** pending
-- **Key files:**
-  - `src/Radio.Web/Components/Layout/MainLayout.razor` (lines 84-154, 732-768)
+All core development phases are **COMPLETE**:
+- Phase 0-2: Setup, Configuration, Core Audio Engine
+- Phase 3: Primary Sources — Spotify, Radio (RF320 + SDR), Vinyl, File Player, Bluetooth A2DP, Generic USB
+- Phase 4-5: Event Sources (TTS, Audio File), Ducking & Priority
+- Phase 6: Audio Outputs — Local, Google Cast, HTTP Stream
+- Phase 7: Visualization — FFT Spectrum, VU Meters, Waveform
+- Phase 8: API — 16 controllers, 126+ endpoints, SignalR hubs
+- Phase 9: Blazor UI — 12 pages, MudBlazor Material 3, shared components
 
-### Phase 3: Play History Display Fix
-- [ ] Fix `QueueHistoryPanel.razor` Recent Plays to display: **Song Name**, **Artist**, **Song Length** (duration), **Source chip** (device type)
-- [ ] Investigate why Bluetooth entries show stream URL instead of song metadata — trace `PlayHistoryEntryDto.Track?.Title` for BT source entries. Root cause is likely `AudioStateUpdateService` recording the stream URL as the title when no AVRCP metadata is available
-- [ ] Fix play history recording to use AVRCP metadata (Title/Artist) when available, fall back to source type name ("Bluetooth Audio") instead of stream URL
-- [ ] Update `PlayHistoryEntryDto` display in QueueHistoryPanel: line 1 = Title (bold), line 2 = "Artist · Duration", right side = Source chip
-- [ ] Fix full PlayHistoryPage source color mapping to match QueueHistoryPanel fixes
-- **Status:** pending
-- **Key files:**
-  - `src/Radio.Web/Components/Shared/QueueHistoryPanel.razor`
-  - `src/Radio.Web/Components/Pages/PlayHistoryPage.razor`
-  - `src/Radio.API/Services/AudioStateUpdateService.cs` (play history recording)
-  - `src/Radio.Web/Models/ApiModels.cs` (PlayHistoryEntryDto)
+## Completed Phases (Post-Plan Work)
 
-### Phase 4: Merge Files into Queue & Remove Redundant Pages
-- [ ] **Queue Page Enhancement**: Add a tabbed or collapsible file browser section to `QueuePage.razor` — import the file browsing functionality from `FileBrowserPage.razor` (drive selector, breadcrumb nav, custom path, search/filter, virtual keyboard)
-- [ ] Layout: Queue list on top (or left), file browser on bottom (or right) with a toggle/tab
-- [ ] Migrate all `FileBrowserPage.razor` state management, API calls, and UI into `QueuePage.razor`
-- [ ] **Remove Files page**: Delete `FileBrowserPage.razor`, remove `/files` route, remove `_showFilesNav` conditional and folder icon from `MainLayout.razor`
-- [ ] **Remove Visualizer page**: Delete `VisualizerPage.razor`, remove `/visualizer` route and icon from `MainLayout.razor` (embedded visualizer on Home is sufficient)
-- [ ] Update "Add Files to Queue" button to trigger inline file browser instead of dialog
-- [ ] Verify all file browser API service calls still work from new location
-- **Status:** pending
-- **Key files:**
-  - `src/Radio.Web/Components/Pages/QueuePage.razor`
-  - `src/Radio.Web/Components/Pages/FileBrowserPage.razor` (source, then DELETE)
-  - `src/Radio.Web/Components/Pages/VisualizerPage.razor` (DELETE)
-  - `src/Radio.Web/Components/Layout/MainLayout.razor` (nav cleanup)
+- **RTL-SDR Radio** — Full SDR source with tuning, scanning, AGC, presets
+- **Audio Fingerprinting** — Native fpcalc, AcoustID, auto-skip, MusicBrainz
+- **Bluetooth A2DP** — Linux BlueZ D-Bus + Windows WinRT, AVRCP metadata/volume/controls, album art
+- **Google Cast Fixes** — StreamType.Live, LAME flush fix, pause/resume, local mute, idle recovery
+- **Dual-Service Deployment** — radio-api + radio-web systemd services, Pi scripts
+- **Play History & Analytics** — Tracking, search, MusicBrainz enrichment
+- **Device UX** — Filtering, friendly names, Cast auto-connect
+- **Pi Hardware Testing** — 16 debugging PRs (#178-198), confirmed audio pipeline working
 
-### Phase 5: Metrics Page — Filtering & Sparklines
-- [ ] Add category filter chips (API, Audio, Bluetooth, Library, Radio, System, TTS, UI, WebSocket) at the top — filter grid to selected category
-- [ ] Fix "Memory Usage Mb" formatting bug — the `FormatMetricValue` method (line 333-350) incorrectly applies percentage format to MB values. Add specific handling for "memory" metrics.
-- [ ] Add sparklines to each metric card: small inline SVG or canvas showing the last N data points. Use the existing `MetricsApi.GetMetricAggregateAsync()` to fetch time-series data for each visible metric.
-- [ ] Consider using MudBlazor `MudSparkLine` component if available, or a lightweight canvas-based sparkline
-- [ ] Improve card visual hierarchy: larger values, better category labels, M3 tonal card backgrounds
-- **Status:** pending
-- **Key files:**
-  - `src/Radio.Web/Components/Pages/MetricsDashboardPage.razor`
-  - `src/Radio.Web/Services/ApiClients/MetricsApiService.cs`
+## Completed Phases (task_plan.md Phases 1-7)
 
-### Phase 6: Device Defaults & Store Management Verification
-- [ ] **Device defaults on startup**: Trace the startup code path to verify that persisted default output device and Cast device are actually used when the app starts. Check `AudioManager.InitializeAsync()` and `AudioEngineInitializationService`.
-- [ ] **Input device default**: Add "Set as Default" action to input devices on DeviceManagementPage (currently read-only)
-- [ ] **Store Management verification**: Test JSON export, DB backup export, and DB backup import with the current multi-database architecture (configuration.db, secrets.db, fingerprints.db, metrics.db). Ensure the Store Management UI handles or at least acknowledges all databases.
-- [ ] Document any gaps in store management (e.g., does export include secrets.db? fingerprints.db?)
-- **Status:** pending
-- **Key files:**
-  - `src/Radio.Web/Components/Pages/DeviceManagementPage.razor`
-  - `src/Radio.Web/Components/Pages/SystemConfigPage.razor` (Tab 7: Store Management)
-  - `src/Radio.API/Services/AudioEngineInitializationService.cs`
-  - `src/Radio.Infrastructure/Audio/Services/AudioManager.cs`
+- Phase 1: Quick Bug Fixes ✅
+- Phase 2: BT UX Improvements ✅
+- Phase 3: Volume Control Unification ✅
+- Phase 4: Cast Latency Reduction ✅
+- Phase 5: Pi Verification (partial — see Phase 9) ✅
+- Phase 6: Bugs from Pi Testing ✅
+- Phase 7: Audio Output UX & Cast Bugs ✅ (PR #198)
 
-### Phase 7: Material 3 Theme Polish
-- [ ] **MudBlazor theme**: Update `MudThemeProvider` palette for M3 dark theme — surface tonal elevation (surface = #1C1B1F, surfaceContainer = #211F26, etc.), primary seed color, on-surface text colors
-- [ ] **Touch targets**: Audit all interactive elements (buttons, sliders, icons) and ensure minimum 48dp touch targets. Add padding where needed.
-- [ ] **Button variants**: Replace text-only action buttons with M3 filled-tonal buttons for primary actions, outlined for secondary
-- [ ] **App bar**: Increase title bar height from 60px to 64dp (M3 standard). Ensure nav icons have proper padding.
-- [ ] **Chips**: Update source type chips to use M3 tonal chip style (filled with secondary-container color)
-- [ ] **Elevation**: Apply M3 surface tint to MudPaper components — higher elevation = lighter tint
-- **Status:** pending
-- **Key files:**
-  - `src/Radio.Web/Components/Layout/MainLayout.razor` (theme provider)
-  - `src/Radio.Web/wwwroot/css/` (global styles)
-  - All Razor components with inline styles
+---
 
-### Phase 8: Deployment Scripts (Raspberry Pi & Debian x64)
-- [ ] Create `deploy/raspberry-pi/setup.sh`:
-  - Install .NET 8 runtime (ARM64)
-  - Install system dependencies: `libmp3lame-dev`, `libasound2-dev`, `avahi-daemon` (mDNS for Cast discovery), `bluez` (Bluetooth), `pulseaudio` or `pipewire`
-  - Download/extract fpcalc ARM64 binary to `tools/fpcalc/`
-  - Create systemd service files for Radio.API and Radio.Web
-  - Configure `netsh`-equivalent port permissions (iptables/firewall rules)
-  - Create data directories (`./data/config`, `./data/metrics`, `./data/fingerprints`, `./data/secrets`, `./data/albumart`, `./data/backups`)
-  - Set up HTTP URL reservation (Kestrel doesn't need this on Linux, but firewall rules)
-  - Build and publish self-contained for `linux-arm64`
-- [ ] Create `deploy/debian-x64/setup.sh`:
-  - Same as RPi but targeting `linux-x64` runtime
-  - Install .NET 8 runtime (x64)
-  - Same system dependencies
-  - fpcalc x64 binary
-  - systemd service files
-- [ ] Create `deploy/DEPLOYMENT.md`:
-  - Prerequisites (hardware, OS, network)
-  - Step-by-step instructions for both platforms
-  - Configuration (appsettings.json customization for each environment)
-  - Troubleshooting (common issues: port conflicts, audio devices, Bluetooth pairing, Cast discovery)
-  - How to update/upgrade
-- [ ] Create `deploy/common/radio-api.service` and `radio-web.service` (systemd unit files)
-- [ ] Create `deploy/common/publish.sh` — cross-compile helper (builds for target platform from Windows dev box)
-- **Status:** pending
-- **Key files (all new):**
-  - `deploy/raspberry-pi/setup.sh`
-  - `deploy/debian-x64/setup.sh`
-  - `deploy/common/radio-api.service`
-  - `deploy/common/radio-web.service`
-  - `deploy/common/publish.sh`
-  - `deploy/DEPLOYMENT.md`
+## Phase 8: Documentation & Polish 🆕
 
-### Phase 9: Build Verification & Test
-- [ ] `dotnet build --configuration Release` — 0 warnings
-- [ ] `dotnet test --configuration Release` — all tests pass
-- [ ] Manual smoke test: Home page, play history, queue with file browser, metrics, devices, system/store management
-- [ ] Test deployment scripts on actual Raspberry Pi (if available) or in Docker ARM64 emulation
-- **Status:** pending
+### 8.1 Update PLAN.md
+- [ ] Mark Phases 3, 9 as Completed
+- [ ] Mark Phases 10-12 with actual status (substantially complete)
+- [ ] Add post-plan features section (BT, SDR, Fingerprinting, Cast, Deployment)
+- [ ] Update Progress Tracking table with dates
+- [ ] Update "Last Updated" date
+
+### 8.2 Update CLAUDE.md
+- [ ] Fix "Phase 9 - pending" → completed
+- [ ] Add Bluetooth A2DP to solution structure
+- [ ] Add dual-service deployment info
+- [ ] Add deploy commands
+
+### 8.3 Update README.md
+- [ ] Add post-plan features (BT, SDR, Fingerprinting, Cast)
+- [ ] Fix "All 13 phases finished!" — Phases 10-12 are partial
+- [ ] Add deployment architecture section
+- [ ] Update test counts
+
+### 8.4 Investigate FileBrowser metadata TODO
+- [ ] Check if `formatInfo.Tags.Genre/Year/TrackNumber` work in current SoundFlow version
+- [ ] If so, fix FileBrowser.cs and remove the stale TODO
+- [ ] If not, leave documented in FUTURE-WORK.md
+
+---
+
+## Phase 9: Pi Verification (Remaining) 🔄
+
+These require physical Pi hardware and can't be done from Windows dev:
+
+### 9.1 Verify PR #198 fixes on Pi
+- [ ] Deploy PR #198 to Pi
+- [ ] Cast pause/resume — fixed, verify on Pi
+- [ ] BT progress bar — fixed, verify on Pi
+- [ ] Device filtering — verify hidden devices don't appear
+- [ ] Local mute when casting — verify silence on local, audio on Cast
+
+### 9.2 Original verification items (from Phase 5.2)
+- [ ] Restart preference restore (playback-12 auto-selected on reboot)
+- [ ] Volume persistence across restart
+- [ ] Fingerprint skip after identification
+- [ ] Cast latency measurement
+- [ ] Sample drop rate after fixes (was 81%)
+
+### 9.3 Untested features
+- [ ] Album art proxy (Web port 5002 → API port 5000)
+- [ ] BT next/previous — depends on phone AVRCP support
+
+---
+
+## Phase 10: Final Polish (Optional)
+
+### 10.1 Kiosk Mode
+- Priority: Medium — needed for final console radio experience
+- Deferred until Pi verification complete
+- Implementation plan in FUTURE-WORK.md
+
+### 10.2 E2E Tests
+- Priority: Low — 1,257 unit/integration tests exist
+- Playwright infrastructure in Radio.Web.E2ETests
+- Write 5-10 critical path E2E tests
+
+### 10.3 Low-Priority Deferred Items
+- TTS audio cache
+- Windows AVRCP volume sync (dev-only)
+- Radio device switching API
+
+---
+
+## Deferred (not in scope)
+- RF320 software control — permanent hardware limitation
+- Direct pipe Cast architecture — current HTTP streaming works
+- ALSA device enumeration noise — cosmetic
+
+---
 
 ## Design Decisions
-
-### Balance Control Removal
-Rather than hiding the balance control behind a settings menu, we permanently remove it from the Now Playing panel. Balance is always centered (0.0). The `BalanceModifier` remains in the audio pipeline but is never exposed in the UI. If balance control is needed in the future, it can be re-added to a Settings/Audio page.
-
-### Title Bar Simplification
-The title bar serves as a persistent quick-access control. With the full Now Playing panel always visible on the home page, the title bar doesn't need duplicate transport controls or track info. Mute + volume is the most-used quick control and keeps the bar clean.
-
-### Queue/Files Merge Strategy
-The Queue page becomes the single destination for both queue management and file browsing. Use a two-section layout:
-- **Top**: Current queue (existing functionality)
-- **Bottom**: File browser (migrated from FileBrowserPage) with a collapsible section or tab
-
-This eliminates the confusing conditional Files nav icon and gives users a unified experience.
-
-### Material 3 Approach
-MudBlazor v6+ supports custom theming. We'll define a M3-compliant dark theme palette using the MudBlazor `MudTheme` API rather than custom CSS where possible. The primary color will shift from pure cyan to a M3-harmonized teal/cyan seed color with proper tonal palette generation.
-
-### Deployment Architecture
-Both RPi and Debian deployments use:
-- Self-contained .NET 8 publish (no runtime install needed on target — simplifies deployment)
-- systemd for process management (auto-restart, logging)
-- Single `setup.sh` that handles all dependencies and configuration
-- `publish.sh` on the dev box for cross-compilation
+| Decision | Rationale |
+|----------|-----------|
+| Group by similarity, not priority | Reduces context switching |
+| arecord subprocess for BT capture | MiniAudio ALSA capture stalls with PipeWire pulse plugin |
+| PlaybackDeviceSwitched event | Decouples engine from playback service |
+| Device visibility in config store | User-configurable per deployment |
+| Ordered List for FriendlyNames | Dictionary enumeration order not guaranteed |
+| ReadAsync pacing for silence | Prevents tight-loop CPU spin when no audio data |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |-------|---------|------------|
+| Race condition: zero-timeout semaphore | Two handlers contend | 30s timeout + generator cache |
+| Device switch orphans generators | Modifiers-only re-attach | PlaybackDeviceSwitched event |
+| Serilog Warning default | Audio logs silenced | Override `Radio: Information` |
+| MiniAudio defaults to null sink | playback-0 = Discard | Persist preference to config store |
+| Silence spinning in TappedOutputStream | ReadForReader returns non-zero | ReadAsync override with pacing |
+| FriendlyNames non-deterministic order | Dictionary enumeration | Changed to List<DeviceNameMapping> |
+| Missing DI registration | Action overload missing AudioOutputOptions | Added Configure<AudioOutputOptions> |

@@ -13,13 +13,31 @@ This project restores the original function (Radio/Vinyl) while adding modern ca
 | 0 - Project Setup | ✅ Completed | Solution structure, CI/CD pipeline |
 | 1 - Configuration | ✅ Completed | JSON/SQLite stores, secrets management, backup/restore |
 | 2 - Core Audio | ✅ Completed | SoundFlow integration, audio engine, device manager, master mixer |
-| 3 - Audio Sources | ✅ Completed | Spotify, Radio, Vinyl, File Player, Bluetooth (A2DP) |
+| 3 - Audio Sources | ✅ Completed | Spotify, Radio (RF320 + RTL-SDR), Vinyl, File Player, Bluetooth A2DP, Generic USB |
 | 4 - Event Sources | ✅ Completed | TTS (eSpeak/Google/Azure), Audio File Events |
 | 5 - Ducking | ✅ Completed | Priority-based audio ducking with configurable fade policies |
-| 6 - Outputs | ✅ Completed | Local audio, Chromecast (SharpCaster), HTTP streaming |
+| 6 - Outputs | ✅ Completed | Local audio, Google Cast (SharpCaster), HTTP MP3 streaming |
 | 7 - Visualization | ✅ Completed | Spectrum analyzer (FFT), VU meters, waveform display |
-| 8 - API | ✅ Completed | REST controllers, SignalR hub, audio streaming, Swagger |
-| 9 - UI | ✅ Completed | Blazor Web UI (100% complete - All 13 phases finished!) 🎉 |
+| 8 - API | ✅ Completed | 16 REST controllers, 126+ endpoints, 2 SignalR hubs, Swagger |
+| 9 - UI | ✅ Completed | 12-page Blazor Server UI, MudBlazor Material 3, shared components |
+| 10 - Testing | ✅ Substantially Complete | 1,257 unit/integration tests across 7 projects (E2E pending) |
+| 11 - Documentation | 🔄 In Progress | Design docs, decision log, work log (user manual pending) |
+| 12 - Deployment | ✅ Substantially Complete | Dual-service systemd, Pi deploy scripts, tested on hardware |
+
+### Post-Plan Features
+
+These major features were developed after the original plan and represent significant additions:
+
+| Feature | Description |
+|---------|-------------|
+| RTL-SDR Software-Defined Radio | Full SDR source with frequency tuning, band switching, scanning, AGC, presets |
+| Audio Fingerprinting | Native fpcalc, AcoustID lookup, auto-skip duplicate tracks, MusicBrainz metadata |
+| Bluetooth A2DP Audio Input | Linux BlueZ D-Bus + Windows WinRT, AVRCP metadata/volume/controls, album art cache |
+| Google Cast Improvements | StreamType.Live for infinite streams, LAME flush fix, pause/resume, idle recovery |
+| Play History & Analytics | Track play history, search, MusicBrainz enrichment |
+| Device Filtering & Friendly Names | Regex-based hidden patterns, ordered friendly name mappings |
+| Local Output Muting for Cast | Mute local speakers while casting (SoundFlow modifier-based) |
+| Dual-Service Deployment | Separate radio-api + radio-web systemd services, Pi deployment scripts |
 
 ## Technical Architecture
 
@@ -40,50 +58,37 @@ This project restores the original function (Radio/Vinyl) while adding modern ca
 ```
 RadioConsole/
 ├── src/
-│   ├── Radio.Core/          # Core interfaces, models, and domain logic
-│   │   ├── Interfaces/Audio/  # IAudioEngine, IAudioDeviceManager, IDuckingService, IVisualizerService, etc.
-│   │   ├── Configuration/     # AudioEngineOptions, AudioOptions, TTSOptions, VisualizerOptions
-│   │   └── Exceptions/        # AudioDeviceConflictException
-│   ├── Radio.Infrastructure/ # Audio management, configuration, external integrations
-│   │   ├── Audio/SoundFlow/   # SoundFlow audio engine implementation (Phase 2)
-│   │   │   ├── SoundFlowAudioEngine.cs
-│   │   │   ├── SoundFlowMasterMixer.cs
-│   │   │   ├── SoundFlowDeviceManager.cs
-│   │   │   └── TappedOutputStream.cs
-│   │   ├── Audio/Sources/Events/  # Event audio sources (Phase 4)
-│   │   │   ├── EventAudioSourceBase.cs
-│   │   │   ├── TTSEventSource.cs
-│   │   │   └── AudioFileEventSource.cs
-│   │   ├── Audio/Services/    # Audio services (Phase 4, 5)
-│   │   │   ├── TTSFactory.cs
-│   │   │   ├── AudioFileEventSourceFactory.cs
-│   │   │   └── DuckingService.cs    # Phase 5 - Ducking & Priority
-│   │   ├── Audio/Visualization/  # Audio visualization (Phase 7)
-│   │   │   ├── VisualizerService.cs  # Main visualizer service
-│   │   │   ├── SpectrumAnalyzer.cs   # FFT-based spectrum analysis
-│   │   │   ├── LevelMeter.cs         # Peak/RMS level metering
-│   │   │   └── WaveformAnalyzer.cs   # Time-domain waveform buffer
-│   │   ├── Configuration/     # Configuration infrastructure (Phase 1)
-│   │   │   ├── Abstractions/  # IConfigurationStore, ISecretsProvider, etc.
-│   │   │   ├── Models/        # ConfigurationEntry, SecretTag, BackupMetadata
-│   │   │   ├── Stores/        # JsonConfigurationStore, SqliteConfigurationStore
-│   │   │   ├── Secrets/       # JsonSecretsProvider, SqliteSecretsProvider
-│   │   │   ├── Backup/        # ConfigurationBackupService
-│   │   │   └── Services/      # ConfigurationManager
+│   ├── Radio.Core/              # Core interfaces, models, events (no dependencies)
+│   ├── Radio.Infrastructure/    # Audio engine, config stores, external integrations
+│   │   ├── Audio/
+│   │   │   ├── SoundFlow/       # Audio engine, mixer, device manager, tapped output
+│   │   │   ├── Sources/         # Primary (Radio, Spotify, File, Vinyl, BT, USB) + Event (TTS, AudioFile)
+│   │   │   ├── Services/        # FileBrowser, TTSFactory, DuckingService, AudioManager
+│   │   │   ├── Outputs/         # Local, GoogleCast, HttpStream
+│   │   │   ├── Visualization/   # Spectrum, LevelMeter, Waveform
+│   │   │   └── Fingerprinting/  # AcoustID, fpcalc, MusicBrainz, auto-skip
+│   │   ├── Platform/Bluetooth/  # Linux (BlueZ D-Bus) + Windows (WinRT)
+│   │   ├── Configuration/       # Stores (JSON/SQLite), secrets, backup
 │   │   └── DependencyInjection/ # Service registration extensions
-│   ├── Radio.API/           # REST API and SignalR hubs
-│   └── Radio.Web/           # Blazor Server UI
+│   ├── Radio.API/               # 16 REST controllers, 2 SignalR hubs, middleware
+│   └── Radio.Web/               # 12-page Blazor Server UI (MudBlazor Material 3)
 ├── tests/
-│   ├── Radio.Core.Tests/
-│   ├── Radio.Infrastructure.Tests/
-│   │   ├── Configuration/   # Tests for configuration infrastructure
-│   │   └── Audio/           # Tests for audio engine, event sources, and visualization
-│   └── Radio.API.Tests/
+│   ├── Radio.Core.Tests/           # 35 tests
+│   ├── Radio.Infrastructure.Tests/ # 689 tests
+│   ├── Radio.API.Tests/            # 202 tests
+│   ├── Radio.Web.Tests/            # 130 tests
+│   ├── Radio.IntegrationTests/     # 86 tests
+│   ├── RTLSDRCore.Tests/           # 125 tests
+│   └── Radio.Web.E2ETests/         # Playwright infrastructure (tests pending)
 ├── tools/
-│   ├── Radio.Tools.AudioUAT/  # Audio UAT testing tool with Phase 2, 3, 4 tests
-│   └── Radio.Tools.ConfigurationManager/  # Configuration management tool
-├── design/                   # Design documents
-└── scripts/                  # Deployment and utility scripts
+│   ├── Radio.Tools.AudioUAT/              # Audio UAT testing tool
+│   └── Radio.Tools.ConfigurationManager/  # Configuration management CLI
+├── design/                  # Architecture docs, decision log, work log
+├── deploy/                  # Deployment scripts and systemd service files
+│   ├── common/              # Shared service files (radio-api, radio-web)
+│   ├── raspberry-pi/        # Pi-specific setup scripts
+│   └── debian-x64/          # x64 Linux setup scripts
+└── RaddyRF320BT/            # Git submodule for vintage radio protocol
 ```
 
 ## Configuration System
@@ -120,8 +125,6 @@ This places all databases under a consistent directory structure:
 - Metrics: `./data/metrics/metrics.db`
 - Fingerprinting: `./data/fingerprints/fingerprints.db`
 - Backups: `./data/backups/`
-
-**Note**: Legacy configuration paths are still supported for backward compatibility.
 
 ### Unified Database Backup
 
@@ -184,7 +187,9 @@ The audio system (Phase 2) provides:
   - **RTLSDRCore (SDR Radio)**: Software-defined radio with full frequency control, band switching, scanning, gain control, and power management via RTL-SDR USB dongle
   - **RF320 (Bluetooth/USB)**: Limited software control, Bluetooth for commands, USB for audio output
 - **Vinyl**: USB turntable input
-- **File Player**: MP3, FLAC, WAV, OGG playback with playlist support
+- **File Player**: MP3, FLAC, WAV, OGG, AAC, M4A, WMA playback with playlist support and audio fingerprinting
+- **Bluetooth A2DP**: Receive audio from phones/tablets via A2DP with AVRCP metadata, volume sync, and album art
+- **Generic USB**: Capture audio from any USB audio device
 
 ### Radio Device Factory
 
@@ -626,14 +631,54 @@ sudo ufw allow 5000/tcp comment "Radio Console API"
 sudo apt install libmp3lame-dev
 ```
 
+## Deployment Architecture
+
+The project deploys as two separate systemd services on Raspberry Pi:
+
+```
+/opt/radio-console/
+├── api/                    ← Radio.API binaries (port 5000)
+├── web/                    ← Radio.Web binaries (port 5002)
+├── data/                   ← Shared data (config, metrics, fingerprints, albumart)
+├── logs/                   ← Shared log files
+└── appsettings.Production.json
+```
+
+| Service | Port | Role |
+|---------|------|------|
+| `radio-api.service` | 5000 | REST API, SignalR hubs, audio engine, all hardware I/O |
+| `radio-web.service` | 5002 | Blazor Server UI, proxies to API |
+
+Deploy from Windows:
+```powershell
+./deploy/Deploy-ToPi.ps1 -PiHost piradio -PiUser pi
+```
+
+## Testing
+
+1,257 automated tests across 7 projects:
+
+```bash
+# Run all tests
+dotnet test --configuration Release --verbosity normal
+
+# Run a specific test project
+dotnet test tests/Radio.Infrastructure.Tests --configuration Release
+
+# Run a single test
+dotnet test --filter "FullyQualifiedName~TestClassName.TestMethodName"
+```
+
 ## Design Documents
 
-- [Project Plan](archive/PROJECTPLAN.md) - High-level project overview
-- [Development Plan](PLAN.md) - Detailed development phases
+- [Development Plan](PLAN.md) - Detailed development phases and progress
 - [Audio Architecture](design/AUDIO.md) - Audio system design
 - [Configuration](design/CONFIGURATION.md) - Configuration infrastructure
 - [Database Configuration](design/DATABASE_CONFIGURATION.md) - Unified database paths and backup system
 - [Web UI](design/WEBUI.md) - UI design specifications
+- [Decision Log](design/DECISION-LOG.md) - Architectural decision records
+- [Work Log](design/WORK-LOG.md) - Development session history
+- [Future Work](design/FUTURE-WORK.md) - Deferred features and stubs
 
 ## License
 

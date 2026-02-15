@@ -410,9 +410,9 @@ public class FileBrowser : IFileBrowser
           string.IsNullOrWhiteSpace(tags?.Artist) ? null : tags.Artist,
           string.IsNullOrWhiteSpace(tags?.Album) ? null : tags.Album,
           duration,
-          null, // TODO: SoundFlow SoundTags doesn't currently expose track number - consider enhancement
-          null, // TODO: SoundFlow SoundTags doesn't currently expose genre - consider enhancement
-          null // TODO: SoundFlow SoundTags doesn't currently expose year - consider enhancement
+          (int?)tags?.TrackNumber,
+          string.IsNullOrWhiteSpace(tags?.Genre) ? null : tags.Genre,
+          (int?)tags?.Year
         );
       }, cancellationToken);
     }

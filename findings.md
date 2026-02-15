@@ -1,68 +1,125 @@
 # Findings & Decisions
 
-## UI Review — Material 3 Compliance Issues
+## Session: 2026-02-15 — Project Reconciliation
 
-### Home Page (Now Playing + Queue/History + Visualizer)
-- **Balance slider** takes permanent space in NowPlayingPanel even though we'll always center it — REMOVE
-- **Dark theme is all black/dark gray** — M3 prefers surface tonal elevation (slightly tinted dark surfaces, not pure black). Current `#1a1a1a` backgrounds lack M3 surface tint.
-- **Accent color is cyan (#00BCD4)** — not a standard M3 tonal palette. M3 uses a primary/secondary/tertiary color system derived from a seed color.
-- **Source chip** (e.g., "SDR Radio (RTL-SDR)") uses a bright green pill — should use M3 tonal chip style
-- **Transport controls** are bare icons with no touch target padding — M3 minimum 48dp touch targets
-- **Volume slider** has no visible track fill color differentiation — M3 sliders show filled portion in primary color
-- **Three-panel layout** doesn't adapt to narrow screens — no responsive breakpoints
+### Document Staleness Assessment
 
-### Title Bar Mini-Player
-- Contains album art (40x40), track title/artist, transport controls (prev/pause/next), AND volume — too crowded
-- User requests: **ONLY mute + volume control** in the title bar
-- Current title bar height is 60px — tight for touch. M3 top app bar standard is 64dp
-- Navigation icons are icon-only with no labels — fine for desktop but M3 recommends bottom navigation on mobile/touch
+| Document | Last Updated | Staleness |
+|----------|-------------|-----------|
+| PLAN.md | 2025-12-02 | **Very stale** — Phase 3 "In Progress", Phase 9 "Not Started", Phases 10-12 "Not Started" |
+| README.md | ~2026-01 | Slightly stale — says "All 13 phases finished!" but Phases 10-12 only partial |
+| CLAUDE.md | ~2025-12 | Stale — says "Phase 9 - pending", missing BT/Cast/deployment info |
+| FUTURE-WORK.md | 2026-02-13 | **Current** — accurately reflects 6 deferred items |
+| WORK-LOG.md | 2026-02-15 | **Current** — comprehensive session history |
+| DECISION-LOG.md | 2026-02-15 | **Current** — 21 ADRs documented |
+| task_plan.md | 2026-02-14 | Stale — Phase 7 shown as "NEW" but all items completed |
 
-### Play History (QueueHistoryPanel)
-- **Bluetooth entries show stream URL** (`192.168.86.55:8080/stream/audio/mp3`) instead of song name — data issue from play history recording
-- Some entries show "Bluetooth Device" or "Pixel 8 Pro" as title — should show actual song name
-- **Source color mapping is outdated**: still has "Spotify", uses "FilePlayer" instead of "File", missing "Bluetooth"
-- **No duration shown** — user wants Song Name, Artist, Song Length
-- **No date grouping** — entries just listed chronologically with HH:mm time only
+### Features Built But Not In Original PLAN.md
 
-### Queue Page
-- Empty state is good (centered icon + helpful text)
-- **No file browser integration** — user must go to separate Files page. User wants this merged.
-- Buttons use MudBlazor default styling — could better match M3 filled/tonal button variants
+These were developed after the plan was written (2025-12-02) and represent significant additions:
 
-### Metrics Page
-- **No component filtering** — all metrics shown in a flat grid with no way to filter by category
-- **No sparklines** — just current snapshot values, no trend visualization
-- **"Memory Usage Mb" shows "254.6%"** — formatting bug (applies % format to MB value)
-- Category labels (API, AUDIO, BLUETOOTH, etc.) are tiny uppercase — hard to scan
-- Cards are all same visual weight — no hierarchy between important and secondary metrics
+1. **RTL-SDR Software-Defined Radio** (PR #103, Dec 2025) — Full SDR source with frequency tuning, scanning, AGC, band selection. 27K LOC.
+2. **Audio Fingerprinting** (PR #171-172, Feb 2026) — Native fpcalc, AcoustID lookup, auto-skip, MusicBrainz metadata.
+3. **Bluetooth A2DP Audio Input** (PR #174-197, Feb 2026) — Full pipeline: Linux BlueZ D-Bus, Windows WinRT, AVRCP metadata/volume/next/prev, album art cache.
+4. **Dual-Service Deployment** (PR #196, Feb 2026) — Separate radio-api + radio-web systemd services, Pi deployment scripts.
+5. **Play History & Analytics** (PR #129+, Dec 2025) — Play history tracking, search, MusicBrainz enrichment.
+6. **Google Cast Improvements** (PR #194+, Feb 2026) — StreamType.Live, LAME flush fix, reader lag burst, idle recovery, pause/resume.
+7. **Device Filtering & Friendly Names** (PR #198, Feb 2026) — Regex-based hidden patterns, ordered friendly name mappings.
+8. **Local Output Muting for Cast** (PR #198, Feb 2026) — Confirmed via SoundFlow decompilation that modifiers run before volume.
 
-### Devices Page
-- Default device persistence exists for output and Cast
-- **Input devices have no "Set as Default" action** — read-only, should allow selection
-- Cast device table is functional but action buttons could be more M3 (filled tonal vs text buttons)
+### Actual Phase Completion Status
 
-### System Config Page
-- 7 tabs, very long page (~2857 lines) — functional but dense
-- **Store Management** (Tab 7) has JSON export, DB backup, import — needs verification with new databases (secrets.db, fingerprints.db, albumart/)
+| Original Phase | PLAN.md Says | Reality |
+|---------------|-------------|---------|
+| 0 Setup | Completed | Completed |
+| 1 Configuration | Completed | Completed |
+| 2 Core Audio | Completed | Completed |
+| 3 Primary Sources | In Progress | **Completed** — all 6 source types + SDR + BT |
+| 4 Event Sources | Completed | Completed |
+| 5 Ducking | Completed | Completed |
+| 6 Outputs | Completed | Completed + Cast improvements |
+| 7 Visualization | Completed | Completed |
+| 8 API & SignalR | Completed | Completed — 16 controllers, 126+ endpoints |
+| 9 Blazor UI | Not Started | **Completed** — 12 pages, shared components, MudBlazor M3 |
+| 10 Testing | Not Started | **Substantially complete** — 1,189 tests, 7 projects, 0 E2E |
+| 11 Documentation | Not Started | **Partially complete** — design docs, WORK-LOG, DECISION-LOG, no user guide |
+| 12 Deployment | Not Started | **Substantially complete** — dual-service, Pi scripts, tested on hardware |
 
-### Global Material 3 Observations
-1. **Color system**: Current cyan accent on pure black is high-contrast but not M3-aligned. M3 uses surface-tint (primary color blended into surfaces at different elevations).
-2. **Typography**: MudBlazor defaults to Roboto which is fine for M3, but heading scales don't match M3 type scale.
-3. **Touch targets**: Many buttons/icons are 40px or smaller — M3 minimum is 48dp.
-4. **Elevation**: M3 dark theme uses tonal surface elevation (lighter = higher), not uniform dark backgrounds.
-5. **Button variants**: Many actions use text buttons where M3 would use filled-tonal or outlined.
-6. **No bottom navigation**: Touch-first interfaces (Pi with touchscreen) need bottom nav bar, not top icon row.
+### Test Coverage
 
-## Visualization Tap Logging
-- `Console.WriteLine` in VisualizationTapModifier.cs line 68 is **already commented out** but the dead code (timing variables, commented line) should be fully removed.
+| Project | Tests |
+|---------|-------|
+| Radio.Infrastructure.Tests | ~689 |
+| Radio.API.Tests | 202 |
+| Radio.Web.Tests | ~120 |
+| RTLSDRCore.Tests | ~125 |
+| Radio.IntegrationTests | ~86 |
+| Radio.Core.Tests | 35 |
+| Radio.Web.E2ETests | 0 (infrastructure exists) |
+| **Total** | **~1,257** |
 
-## Volume/Balance/EQ Persistence
-- **Volume**: Already persisted via debounced `ScheduleVolumePersist()` in AudioManager (500ms debounce, stores 0-100 int)
-- **Balance**: Already persisted in same mechanism
-- **EQ**: `RadioPreferences.LastEqualizerMode` schema exists but implementation is stub-only. No SoundFlow ParametricEqualizer wired yet.
+### Known TODOs in Codebase
 
-## Deployment
-- **No deployment scripts** exist for Raspberry Pi or Debian
-- Only existing scripts are MSIX sparse package registration (Windows A2DP)
-- CI/CD pipeline exists for Ubuntu but no ARM64/RPi config
-- README mentions libmp3lame-dev requirement but no detailed guide
+1. `FileBrowser.cs:413-415` — SoundFlow metadata gaps (genre/year/track#) — possibly stale
+2. `TTSFactory.cs:91` — TTS cache not implemented — documented in FUTURE-WORK.md
+3. `RadioController.cs:845` — Device switching not implemented — documented in FUTURE-WORK.md
+
+Zero `NotImplementedException` instances in src/.
+
+### Remaining Work Categories
+
+**A. Documentation Updates (PLAN.md, README.md, CLAUDE.md):**
+- PLAN.md needs phases 3, 9-12 status updated + post-plan features added
+- README.md needs post-plan features, realistic phase status
+- CLAUDE.md needs Phase 9 fix, BT/Cast/deployment mentions
+
+**B. Pi Verification (from task_plan.md Phase 5.2):**
+- Restart preference restore
+- Volume persistence across restart
+- Fingerprint skip after identification
+- Cast latency measurement
+- Sample drop rate after fixes
+
+**C. Known Bugs (awaiting Pi re-test after PR #198):**
+- Cast pause/resume — fixed, needs verification
+- BT progress bar — fixed, needs verification
+- BT next/previous — logging improved, depends on phone AVRCP
+- Device filtering — implemented, needs Pi verification
+- Album art proxy (Web 5002 → API 5000) — untested
+
+**D. Deferred Features (FUTURE-WORK.md):**
+- Kiosk mode — medium priority, infrastructure ready
+- TTS cache — low priority
+- Windows AVRCP volume — low priority (dev-only)
+- Radio device switching — low priority
+- FileBrowser metadata gaps — low priority, possibly stale
+
+**E. Testing Gaps:**
+- E2E tests — 0 written (Playwright infrastructure exists)
+- No coverage report generated
+
+---
+
+## Previous Session Findings
+
+### Session: 2026-02-14 — Pi Hardware Testing
+
+(see previous entries preserved below)
+
+#### Root Causes Found on Pi
+
+- Race condition in BT audio capture — two handlers, 0-timeout semaphore → 30s timeout + cache fix
+- Device switch orphans source components → PlaybackDeviceSwitched event fix
+- MiniAudio default device = null sink → preference persistence fix
+
+#### Pi Audio Configuration
+- Card 0 = bcm2835 Headphones (3.5mm jack)
+- ALSA volume: -6.64 dB (90%), not muted
+- `.asoundrc`: `pcm.!default` → `hw:0`
+
+### Session: 2026-02-13 — Cast Audio & BT Fixes
+
+- Cast audio: LAME Flush() killed HTTP chunked response
+- Metrics transaction crash: SQLite connection mismatch
+- BT album art: scoped service resolved via IServiceScopeFactory
+- BT capture bridge: BufferSamples → AddSamples
