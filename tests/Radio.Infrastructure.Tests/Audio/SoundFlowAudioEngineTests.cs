@@ -51,7 +51,8 @@ public class SoundFlowAudioEngineTests
     _deviceManager = new SoundFlowDeviceManager(
         _deviceManagerLoggerMock.Object,
         _configManagerMock.Object,
-        _audioPreferencesMock.Object);
+        _audioPreferencesMock.Object,
+        Options.Create(new AudioOutputOptions()));
   }
 
   private SoundFlowAudioEngine CreateEngine()

@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
@@ -19,6 +20,8 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
   private readonly ILogger<SoundFlowDeviceManager> _logger;
   private readonly IConfigurationManager _configurationManager;
   private readonly IOptionsMonitor<AudioPreferences> _audioPreferences;
+  private readonly DeviceDisplayOptions _displayOptions;
+  private readonly List<Regex> _hiddenPatterns;
   private readonly Dictionary<string, string> _usbPortReservations = new();
   private readonly object _reservationLock = new();
   private readonly object _devicesLock = new();
@@ -37,14 +40,38 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
   /// <param name="logger">The logger instance.</param>
   /// <param name="configurationManager">The configuration manager.</param>
   /// <param name="audioPreferences">The audio preferences.</param>
+  /// <param name="audioOutputOptions">The audio output options (includes device display config).</param>
   public SoundFlowDeviceManager(
     ILogger<SoundFlowDeviceManager> logger,
     IConfigurationManager configurationManager,
-    IOptionsMonitor<AudioPreferences> audioPreferences)
+    IOptionsMonitor<AudioPreferences> audioPreferences,
+    IOptions<AudioOutputOptions> audioOutputOptions)
   {
     _logger = logger;
     _configurationManager = configurationManager;
     _audioPreferences = audioPreferences;
+    _displayOptions = audioOutputOptions.Value.DeviceDisplay;
+
+    // Pre-compile hidden device patterns
+    _hiddenPatterns = _displayOptions.HiddenDevicePatterns
+      .Select(p =>
+      {
+        try { return new Regex(p, RegexOptions.IgnoreCase | RegexOptions.Compiled); }
+        catch (Exception ex)
+        {
+          _logger.LogWarning("Invalid hidden device pattern '{Pattern}': {Error}", p, ex.Message);
+          return null;
+        }
+      })
+      .Where(r => r != null)
+      .Cast<Regex>()
+      .ToList();
+
+    if (_hiddenPatterns.Count > 0)
+      _logger.LogInformation("Device filtering: {Count} hidden pattern(s) active", _hiddenPatterns.Count);
+
+    if (_displayOptions.FriendlyNames.Count > 0)
+      _logger.LogInformation("Device friendly names: {Count} mapping(s) configured", _displayOptions.FriendlyNames.Count);
 
     // Initialize device cache immediately
     var (outputDevices, inputDevices) = EnumerateDevices();
@@ -323,6 +350,21 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
       : $"Cast ({prefs.DefaultCastDeviceName})";
   }
 
+  private bool IsDeviceHidden(string deviceName)
+  {
+    return _hiddenPatterns.Any(p => p.IsMatch(deviceName));
+  }
+
+  private string ApplyFriendlyName(string rawName)
+  {
+    foreach (var (pattern, friendlyName) in _displayOptions.FriendlyNames)
+    {
+      if (rawName.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+        return friendlyName;
+    }
+    return rawName;
+  }
+
   private (List<AudioDeviceInfo> output, List<AudioDeviceInfo> input) EnumerateDevices()
   {
     var outputDevices = new List<AudioDeviceInfo>();
@@ -344,26 +386,34 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
       for (int i = 0; i < playbackDevices.Length; i++)
       {
         var device = playbackDevices[i];
-        var isDefault = i == 0; // First device is typically the default
-        var deviceName = string.IsNullOrWhiteSpace(device.Name)
+        var rawName = string.IsNullOrWhiteSpace(device.Name)
           ? "Default Audio Output"
           : device.Name;
-        var isUsb = deviceName.Contains("USB", StringComparison.OrdinalIgnoreCase);
+
+        if (IsDeviceHidden(rawName))
+        {
+          _logger.LogDebug("  Output device {Index}: {Name} — hidden by filter", i, rawName);
+          continue;
+        }
+
+        var isDefault = outputDevices.Count == 0; // First non-hidden device is default
+        var displayName = ApplyFriendlyName(rawName);
+        var isUsb = rawName.Contains("USB", StringComparison.OrdinalIgnoreCase);
 
         outputDevices.Add(new AudioDeviceInfo
         {
           Id = $"playback-{i}",
-          Name = deviceName,
+          Name = displayName,
           Type = AudioDeviceType.Output,
           IsDefault = isDefault,
           MaxChannels = 2,
           SupportedSampleRates = [44100, 48000, 96000],
           IsUSBDevice = isUsb,
-          USBPort = isUsb ? ExtractUSBPort(device.Name) : null
+          USBPort = isUsb ? ExtractUSBPort(rawName) : null
         });
 
-        _logger.LogDebug("  Output device {Index}: {Name} (Default: {IsDefault}, USB: {IsUSB})",
-          i, device.Name, isDefault, isUsb);
+        _logger.LogDebug("  Output device {Index}: {RawName} → {DisplayName} (Default: {IsDefault}, USB: {IsUSB})",
+          i, rawName, displayName, isDefault, isUsb);
       }
 
       // Enumerate capture (input) devices
@@ -373,26 +423,34 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
       for (int i = 0; i < captureDevices.Length; i++)
       {
         var device = captureDevices[i];
-        var isDefault = i == 0; // First device is typically the default
-        var deviceName = string.IsNullOrWhiteSpace(device.Name)
+        var rawName = string.IsNullOrWhiteSpace(device.Name)
           ? "Default Audio Input"
           : device.Name;
-        var isUsb = deviceName.Contains("USB", StringComparison.OrdinalIgnoreCase);
+
+        if (IsDeviceHidden(rawName))
+        {
+          _logger.LogDebug("  Input device {Index}: {Name} — hidden by filter", i, rawName);
+          continue;
+        }
+
+        var isDefault = inputDevices.Count == 0; // First non-hidden device is default
+        var displayName = ApplyFriendlyName(rawName);
+        var isUsb = rawName.Contains("USB", StringComparison.OrdinalIgnoreCase);
 
         inputDevices.Add(new AudioDeviceInfo
         {
           Id = $"capture-{i}",
-          Name = deviceName,
+          Name = displayName,
           Type = AudioDeviceType.Input,
           IsDefault = isDefault,
           MaxChannels = 2,
           SupportedSampleRates = [44100, 48000],
           IsUSBDevice = isUsb,
-          USBPort = isUsb ? ExtractUSBPort(device.Name) : null
+          USBPort = isUsb ? ExtractUSBPort(rawName) : null
         });
 
-        _logger.LogDebug("  Input device {Index}: {Name} (Default: {IsDefault}, USB: {IsUSB})",
-          i, device.Name, isDefault, isUsb);
+        _logger.LogDebug("  Input device {Index}: {RawName} → {DisplayName} (Default: {IsDefault}, USB: {IsUSB})",
+          i, rawName, displayName, isDefault, isUsb);
       }
 
       // Always add virtual outputs for Google Cast and HTTP Stream
@@ -502,7 +560,7 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
   {
     // Common patterns: "USB Audio Device", "hw:1,0", "plughw:1,0"
     // Try to extract card number as USB port identifier
-    var match = System.Text.RegularExpressions.Regex.Match(deviceName, @"hw:(\d+)|card\s*(\d+)|USB-(\d+)");
+    var match = Regex.Match(deviceName, @"hw:(\d+)|card\s*(\d+)|USB-(\d+)");
     if (match.Success)
     {
       var cardNum = match.Groups[1].Success ? match.Groups[1].Value :

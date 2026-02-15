@@ -182,14 +182,18 @@ public class DevicesController : ControllerBase
         // Activate HTTP stream output, deactivate others
         await ActivateOutputAsync(_httpOutput, "HTTP Stream");
         await DeactivateOutputAsync(_castOutput, "Google Cast");
-        // Local output stays active as the source
+
+        // Unmute local speakers when switching away from Cast
+        _audioEngine?.SetLocalOutputMuted(false);
       }
       else if (deviceId == "google-cast")
       {
         // Activate Cast output AND HTTP stream — Cast streams audio via HTTP
         await ActivateOutputAsync(_castOutput, "Google Cast");
         await ActivateOutputAsync(_httpOutput, "HTTP Stream");
-        // Local output stays active as the audio source for the engine
+
+        // Mute local speakers — audio pipeline continues for HTTP/Cast streaming
+        _audioEngine?.SetLocalOutputMuted(true);
 
         // Auto-connect to default Cast device if one is saved
         await TryAutoConnectDefaultCastDeviceAsync();
@@ -199,6 +203,9 @@ public class DevicesController : ControllerBase
         // Local audio device - switch the local output device
         await DeactivateOutputAsync(_castOutput, "Google Cast");
         await DeactivateOutputAsync(_httpOutput, "HTTP Stream");
+
+        // Unmute local speakers when switching back from Cast
+        _audioEngine?.SetLocalOutputMuted(false);
 
         // Validate the device exists before responding
         if (_audioEngine != null)

@@ -25,6 +25,31 @@ public class AudioOutputOptions
   /// Gets or sets the HTTP stream output options.
   /// </summary>
   public HttpStreamOutputOptions HttpStream { get; set; } = new();
+
+  /// <summary>
+  /// Gets or sets device display options (filtering, friendly names).
+  /// </summary>
+  public DeviceDisplayOptions DeviceDisplay { get; set; } = new();
+}
+
+/// <summary>
+/// Configuration for device list filtering and friendly name mapping.
+/// </summary>
+public class DeviceDisplayOptions
+{
+  /// <summary>
+  /// Regex patterns for device names to hide from the UI.
+  /// Matched against the raw device name (case-insensitive).
+  /// Default: hides PulseAudio monitor devices.
+  /// </summary>
+  public List<string> HiddenDevicePatterns { get; set; } = ["^Monitor of "];
+
+  /// <summary>
+  /// Maps raw device name substrings to friendly display names.
+  /// The first matching entry (case-insensitive substring) wins.
+  /// Example: { "Realtek": "Built-in Speakers", "USB Audio": "USB Sound Card" }
+  /// </summary>
+  public Dictionary<string, string> FriendlyNames { get; set; } = new();
 }
 
 /// <summary>

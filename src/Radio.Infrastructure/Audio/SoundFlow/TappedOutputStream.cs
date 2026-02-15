@@ -133,6 +133,8 @@ internal sealed class TappedOutputStream : Stream
 
   /// <summary>
   /// Reads data for a specific reader, advancing only that reader's position.
+  /// When no data is available, returns PCM silence to keep HTTP streams alive
+  /// during source pause (prevents Cast device timeout/disconnect).
   /// </summary>
   internal int ReadForReader(string readerId, byte[] buffer, int offset, int count)
   {
@@ -145,6 +147,19 @@ internal sealed class TappedOutputStream : Stream
         return 0;
 
       var available = (_writePosition - readPos + _bufferSize) % _bufferSize;
+
+      if (available == 0)
+      {
+        // No new audio data — return silence (zeroed PCM) to keep HTTP streams
+        // alive during source pause. The reader position is NOT advanced so
+        // real audio data will be read immediately when the source resumes.
+        // Limit to ~21ms of audio per call (1024 stereo 16-bit samples = 4096 bytes)
+        // to approximate real-time rate.
+        var silenceBytes = Math.Min(count, 4096);
+        Array.Clear(buffer, offset, silenceBytes);
+        return silenceBytes;
+      }
+
       var toRead = Math.Min(count, available);
 
       for (var i = 0; i < toRead; i++)

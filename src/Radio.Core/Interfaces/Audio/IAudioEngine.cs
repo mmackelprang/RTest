@@ -67,6 +67,19 @@ public interface IAudioEngine : IAsyncDisposable
   /// Event raised when an audio device is added or removed (hot-plug).
   /// </summary>
   event EventHandler<AudioDeviceChangedEventArgs>? DeviceChanged;
+
+  /// <summary>
+  /// Gets whether the local playback device is muted (e.g. when casting to an external device).
+  /// </summary>
+  bool IsLocalOutputMuted { get; }
+
+  /// <summary>
+  /// Mutes or unmutes the local playback device independently of the master volume.
+  /// Used to silence local speakers when audio is being streamed to an external device (e.g. Cast).
+  /// The audio pipeline (including taps for HTTP streaming) continues to process audio normally.
+  /// </summary>
+  /// <param name="muted">True to mute local output, false to restore volume.</param>
+  void SetLocalOutputMuted(bool muted);
 }
 
 /// <summary>

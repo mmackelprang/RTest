@@ -127,18 +127,21 @@ public class TappedOutputStreamTests
   }
 
   [Fact]
-  public void Reader_ReturnsZeroWhenEmpty()
+  public void Reader_ReturnsSilenceWhenEmpty()
   {
     // Arrange
     var stream = CreateTappedOutputStream();
     var reader = CreateReader(stream, "test-reader");
     var buffer = new byte[10];
+    // Fill with non-zero to verify silence (zeros) is written
+    Array.Fill<byte>(buffer, 0xFF);
 
     // Act
     var bytesRead = reader.Read(buffer, 0, buffer.Length);
 
-    // Assert
-    Assert.Equal(0, bytesRead);
+    // Assert — returns silence (zeroed PCM) to keep HTTP streams alive
+    Assert.Equal(10, bytesRead);
+    Assert.All(buffer, b => Assert.Equal(0, b));
   }
 
   [Fact]
@@ -426,7 +429,8 @@ public class TappedOutputStreamTests
     var buffer = new byte[10];
     var bytesRead = reader.Read(buffer, 0, buffer.Length);
 
-    // Assert — no historical data, same as default
-    Assert.Equal(0, bytesRead);
+    // Assert — no historical data; returns silence to keep streams alive
+    Assert.Equal(10, bytesRead);
+    Assert.All(buffer, b => Assert.Equal(0, b));
   }
 }
