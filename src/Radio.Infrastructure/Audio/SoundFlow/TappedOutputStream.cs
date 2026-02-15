@@ -385,6 +385,35 @@ internal sealed class TappedOutputStreamReader : Stream
   }
 
   /// <inheritdoc/>
+  /// <remarks>
+  /// Paces silence reads to approximate real-time rate. Without this,
+  /// callers spin a tight loop when no audio data is available because
+  /// <see cref="TappedOutputStream.ReadForReader"/> returns non-zero
+  /// silence bytes instead of 0.
+  /// </remarks>
+  public override async Task<int> ReadAsync(
+    byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+  {
+    if (_disposed)
+      throw new ObjectDisposedException(nameof(TappedOutputStreamReader));
+
+    var available = _parent.GetAvailableForReader(_readerId);
+    var bytesRead = _parent.ReadForReader(_readerId, buffer, offset, count);
+
+    if (available == 0 && bytesRead > 0)
+    {
+      // Silence was emitted — pace to approximate real-time to prevent
+      // tight-loop spinning that causes high CPU and bandwidth waste.
+      // At 48kHz stereo 16-bit: 192,000 bytes/sec → 192 bytes/ms
+      var bytesPerMs = _parent.SampleRate * _parent.Channels * 2 / 1000;
+      var delayMs = bytesPerMs > 0 ? bytesRead / bytesPerMs : 20;
+      await Task.Delay(Math.Max(1, delayMs), cancellationToken);
+    }
+
+    return bytesRead;
+  }
+
+  /// <inheritdoc/>
   public override bool CanRead => true;
 
   /// <inheritdoc/>

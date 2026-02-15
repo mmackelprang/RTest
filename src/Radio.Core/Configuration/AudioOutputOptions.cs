@@ -45,11 +45,27 @@ public class DeviceDisplayOptions
   public List<string> HiddenDevicePatterns { get; set; } = ["^Monitor of "];
 
   /// <summary>
-  /// Maps raw device name substrings to friendly display names.
-  /// The first matching entry (case-insensitive substring) wins.
-  /// Example: { "Realtek": "Built-in Speakers", "USB Audio": "USB Sound Card" }
+  /// Ordered list of device name mappings. The first matching entry
+  /// (case-insensitive substring) wins. List ordering is guaranteed,
+  /// unlike Dictionary enumeration.
   /// </summary>
-  public Dictionary<string, string> FriendlyNames { get; set; } = new();
+  public List<DeviceNameMapping> FriendlyNames { get; set; } = [];
+}
+
+/// <summary>
+/// Maps a raw device name substring to a friendly display name.
+/// </summary>
+public class DeviceNameMapping
+{
+  /// <summary>
+  /// Substring to match against raw device names (case-insensitive).
+  /// </summary>
+  public string Pattern { get; set; } = "";
+
+  /// <summary>
+  /// Display name to show when the pattern matches.
+  /// </summary>
+  public string FriendlyName { get; set; } = "";
 }
 
 /// <summary>

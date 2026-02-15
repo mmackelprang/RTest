@@ -357,10 +357,11 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
 
   private string ApplyFriendlyName(string rawName)
   {
-    foreach (var (pattern, friendlyName) in _displayOptions.FriendlyNames)
+    foreach (var mapping in _displayOptions.FriendlyNames)
     {
-      if (rawName.Contains(pattern, StringComparison.OrdinalIgnoreCase))
-        return friendlyName;
+      if (!string.IsNullOrEmpty(mapping.Pattern) &&
+          rawName.Contains(mapping.Pattern, StringComparison.OrdinalIgnoreCase))
+        return mapping.FriendlyName;
     }
     return rawName;
   }
