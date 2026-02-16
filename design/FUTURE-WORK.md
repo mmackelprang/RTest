@@ -207,29 +207,89 @@ The Default Media Receiver (CC1AD845) has a hardcoded 10-15 second audio prefill
 - `disableIdleTimeout: true` — keeps receiver alive for continuous streams
 - `StreamType.LIVE` already enforced by our sender code
 
-### What's Needed — Registration & Hosting
+### Step-by-Step Setup
 
-1. **Host `receiver.html` on HTTPS** — Google Cast requires the receiver URL to be HTTPS. Options:
-   - GitHub Pages (free, simplest): push `deploy/cast-receiver/receiver.html` to a `gh-pages` branch
-   - Firebase Hosting (free tier): `firebase init hosting` + `firebase deploy`
-   - Any static HTTPS host
+#### Step 1: Host `receiver.html` on HTTPS
 
-2. **Register a Custom Receiver** at [Google Cast SDK Console](https://cast.google.com/publish/):
-   - Sign in with a Google account
-   - Click "Add New Application" → "Custom Receiver"
-   - Set the receiver URL to the hosted HTTPS URL of `receiver.html`
-   - Note the **Application ID** assigned by Google (e.g., `A1B2C3D4`)
+Google Cast requires the receiver URL to be served over HTTPS. The simplest free option is GitHub Pages:
 
-3. **Configure the Application ID** in `appsettings.json`:
-   ```json
-   "GoogleCast": {
-     "ApplicationId": "A1B2C3D4"
-   }
-   ```
+1. In your GitHub repo, go to **Settings → Pages**
+2. Under "Source", select **Deploy from a branch**
+3. Choose the `main` branch and `/deploy/cast-receiver` folder (or push `receiver.html` to a `docs/` folder on `main` if your repo structure requires it)
+4. Click **Save** — GitHub will deploy to `https://<username>.github.io/<repo>/receiver.html`
+5. Verify the URL loads in a browser — you should see a dark page with "Radio Console" text
 
-4. **Enable test devices** (during development): In the Cast SDK Console, register your Chromecast device's serial number as a test device. Unpublished apps only work on registered test devices.
+Alternative: If GitHub Pages doesn't suit your setup, any static HTTPS host works (Firebase Hosting free tier, Netlify, Cloudflare Pages, etc.).
 
-5. **Publish** (optional): Once tested, publish the app in the Cast SDK Console to make it work on all Chromecast devices without serial number registration.
+#### Step 2: Create a Google Cast Developer Account
+
+1. Go to the [Google Cast SDK Developer Console](https://cast.google.com/publish/)
+2. Sign in with your Google account
+3. Pay the **one-time $5 registration fee** (non-refundable)
+4. **Important**: The email address cannot be changed after account creation — use the account you want to own this long-term
+
+#### Step 3: Register the Custom Receiver Application
+
+1. From the Developer Console, click **Add New Application**
+2. Select **Custom Receiver**
+3. Fill in the form:
+   - **Name**: `Radio Console` (displayed briefly while the receiver loads on Cast devices)
+   - **URL**: Your HTTPS receiver URL from Step 1 (e.g., `https://yourname.github.io/RTest/receiver.html`)
+   - **Relay casting**: Leave **disabled** (not needed for local network streaming)
+   - **Audio-only devices**: **Enable** — this allows Cast to audio-only devices like speakers and smart displays in audio mode
+4. Click **Save**
+5. **Copy the Application ID** shown (e.g., `A1B2C3D4`) — you'll need this for configuration
+
+#### Step 4: Register Your Cast Device for Testing
+
+Unpublished apps only work on devices whose serial numbers are registered in the console.
+
+1. In the Developer Console, click **Add New Device**
+2. Find your Chromecast's serial number:
+   - **Chromecast/Chromecast Audio**: Printed on the back of the device, or:
+     - Open the Google Home app → tap your device → tap the gear icon → scroll to "Cast firmware version" area where serial is shown
+   - **Android TV / Google TV**: Settings → System → About → Status → Serial number (use the **Cast serial number**, not hardware serial)
+   - **Smart speakers/displays**: Open the Google Home app → tap your device → gear icon → scroll to serial number
+3. Enter the **serial number** and a **description** (e.g., "Living Room Chromecast")
+4. Click **OK**
+5. **Wait 15 minutes** for registration to propagate
+6. **Reboot your Cast device** — unplug power, wait 10 seconds, plug back in
+7. The device status in the console should change to **"Ready for Testing"**
+
+#### Step 5: Configure Radio Console to Use the Custom Receiver
+
+Update `appsettings.json` (or the Pi's deployed config) with your new Application ID:
+
+```json
+"AudioOutput": {
+  "GoogleCast": {
+    "ApplicationId": "A1B2C3D4"
+  }
+}
+```
+
+Replace `A1B2C3D4` with the actual ID from Step 3. Then restart the Radio.API service.
+
+#### Step 6: Verify It Works
+
+1. Start Radio.API and Radio.Web
+2. Open the Web UI → go to the Cast/Output section
+3. Select your Cast device and connect
+4. Play any audio source — audio should start on the Cast device within **1-3 seconds** instead of the 10-15 second delay with the default receiver
+5. If something goes wrong, revert `ApplicationId` to `"CC1AD845"` to fall back to the default media receiver
+
+#### Step 7: Publish (Optional)
+
+Once tested and working, you can publish so the app works on **all** Cast devices without serial number registration:
+
+1. In the Developer Console, click **Edit** on your application
+2. Fill in the required listing details:
+   - **Category**: Music & Audio
+   - **Title**: `Radio Console` (≤50 chars)
+   - **Description**: `Low-latency audio streaming for Radio Console` (≤80 chars)
+   - **Icon**: Upload a 512×512 PNG icon
+3. Click **Save**, then **Publish**
+4. The app becomes available to all Cast devices worldwide (takes a few minutes to propagate)
 
 ### Gotchas
 
