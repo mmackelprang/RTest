@@ -22,6 +22,10 @@ public sealed class BackgroundIdentificationService : BackgroundService
   // Track recent identifications for duplicate suppression (key → (timestamp, confidence))
   private readonly ConcurrentDictionary<string, (DateTime Timestamp, double Confidence)> _recentIdentifications = new();
 
+  // Song change detection: track last identified track to detect transitions
+  private (string TrackKey, TrackMetadata Track, DateTime IdentifiedAt)? _lastIdentification;
+  private DateTime _lastSongChangeAt = DateTime.MinValue;
+
   // On-demand identification trigger — cancels the current delay to identify immediately
   private CancellationTokenSource? _delayCts;
 
@@ -29,6 +33,11 @@ public sealed class BackgroundIdentificationService : BackgroundService
   /// Event raised when a track is identified.
   /// </summary>
   public event EventHandler<TrackIdentifiedEventArgs>? TrackIdentified;
+
+  /// <summary>
+  /// Event raised when a song change is detected (different track identified than previous).
+  /// </summary>
+  public event EventHandler<SongChangedEventArgs>? SongChanged;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="BackgroundIdentificationService"/> class.
@@ -225,12 +234,10 @@ public sealed class BackgroundIdentificationService : BackgroundService
       }
 
       MarkAsRecentlyIdentified(trackKey, result.Confidence);
-    }
 
-    // Note: Play history recording is now handled by AudioManager which:
-    // 1. Creates an entry when a track starts playing
-    // 2. Updates that entry when TrackIdentified event is raised
-    // This avoids duplicate entries and allows proper tracking from play start.
+      // Song change detection: compare with last identification
+      DetectSongChange(trackKey, result.Metadata, result.Confidence);
+    }
 
     // Raise event for UI updates and play history updates
     if (result?.IsMatch == true && result.Metadata != null)
@@ -250,6 +257,61 @@ public sealed class BackgroundIdentificationService : BackgroundService
     var totalElapsed = (DateTime.UtcNow - cycleStartTime).TotalMilliseconds;
     _logger.LogDebug("Identification cycle completed in {TotalElapsed}ms (lookup: {Lookup}ms)",
       totalElapsed, lookupElapsed);
+  }
+
+  /// <summary>
+  /// Resets the song change detection state.
+  /// Call when the audio source changes to prevent false song-change events.
+  /// </summary>
+  public void ResetSongChangeState()
+  {
+    _lastIdentification = null;
+    _lastSongChangeAt = DateTime.MinValue;
+    _logger.LogDebug("Song change detection state reset");
+  }
+
+  private void DetectSongChange(string trackKey, TrackMetadata newTrack, double confidence)
+  {
+    var now = DateTime.UtcNow;
+
+    if (_lastIdentification == null)
+    {
+      // First identification — record it, no song change event
+      _lastIdentification = (trackKey, newTrack, now);
+      _logger.LogDebug("First identification recorded: '{Title}' by '{Artist}'",
+        newTrack.Title, newTrack.Artist);
+      return;
+    }
+
+    // Same track — update timestamp, no song change
+    if (trackKey == _lastIdentification.Value.TrackKey)
+    {
+      _lastIdentification = (_lastIdentification.Value.TrackKey, _lastIdentification.Value.Track, now);
+      return;
+    }
+
+    // Different track detected — check minimum interval to prevent rapid-fire events
+    var secondsSinceLastChange = (now - _lastSongChangeAt).TotalSeconds;
+    if (secondsSinceLastChange < _options.MinimumSecondsBetweenSongChanges)
+    {
+      _logger.LogDebug(
+        "Song change suppressed (only {Seconds:F0}s since last change, minimum is {Min}s): '{OldTitle}' → '{NewTitle}'",
+        secondsSinceLastChange, _options.MinimumSecondsBetweenSongChanges,
+        _lastIdentification.Value.Track.Title, newTrack.Title);
+      return;
+    }
+
+    // Song change confirmed!
+    var previousTrack = _lastIdentification.Value.Track;
+    _lastIdentification = (trackKey, newTrack, now);
+    _lastSongChangeAt = now;
+
+    _logger.LogInformation(
+      "♫ Song change detected: '{OldTitle}' by '{OldArtist}' → '{NewTitle}' by '{NewArtist}' (confidence: {Confidence:P0})",
+      previousTrack.Title, previousTrack.Artist,
+      newTrack.Title, newTrack.Artist, confidence);
+
+    SongChanged?.Invoke(this, new SongChangedEventArgs(previousTrack, newTrack, confidence));
   }
 
   private bool IsDuplicateIdentification(string trackKey)

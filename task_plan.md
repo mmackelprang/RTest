@@ -1,105 +1,208 @@
-# Task Plan: Project Completion & Polish
+# Task Plan: Architecture Review & Final Integrations
 
 ## Goal
-Reconcile all project documents, complete remaining verification, fix known issues, and polish for "done" state.
+Clean up the codebase (remove Spotify, reduce Cast latency), prepare the fingerprinting/history subsystems for continuous audio sources, then manually integrate Phonograph, RTL-SDR, and Generic USB sources one at a time.
 
 ## Current Phase
-Phase 10 — Final Polish
+Phase 11 — Architecture Cleanup & Integration Prep
 
 ---
 
-## Completed Phases (Original PLAN.md Phases 0-9)
+## Completed Phases (summary)
 
-All core development phases are **COMPLETE**:
-- Phase 0-2: Setup, Configuration, Core Audio Engine
-- Phase 3: Primary Sources — Spotify, Radio (RF320 + SDR), Vinyl, File Player, Bluetooth A2DP, Generic USB
-- Phase 4-5: Event Sources (TTS, Audio File), Ducking & Priority
-- Phase 6: Audio Outputs — Local, Google Cast, HTTP Stream
-- Phase 7: Visualization — FFT Spectrum, VU Meters, Waveform
-- Phase 8: API — 16 controllers, 126+ endpoints, SignalR hubs
-- Phase 9: Blazor UI — 12 pages, MudBlazor Material 3, shared components
-
-## Completed Phases (Post-Plan Work)
-
-- **RTL-SDR Radio** — Full SDR source with tuning, scanning, AGC, presets
-- **Audio Fingerprinting** — Native fpcalc, AcoustID, auto-skip, MusicBrainz
-- **Bluetooth A2DP** — Linux BlueZ D-Bus + Windows WinRT, AVRCP metadata/volume/controls, album art
-- **Google Cast Fixes** — StreamType.Live, LAME flush fix, pause/resume, local mute, idle recovery
-- **Dual-Service Deployment** — radio-api + radio-web systemd services, Pi scripts
-- **Play History & Analytics** — Tracking, search, MusicBrainz enrichment
-- **Device UX** — Filtering, friendly names, Cast auto-connect
-- **Pi Hardware Testing** — 16 debugging PRs (#178-198), confirmed audio pipeline working
-
-## Completed Phases (task_plan.md Phases 1-7)
-
-- Phase 1: Quick Bug Fixes ✅
-- Phase 2: BT UX Improvements ✅
-- Phase 3: Volume Control Unification ✅
-- Phase 4: Cast Latency Reduction ✅
-- Phase 5: Pi Verification (partial — see Phase 9) ✅
-- Phase 6: Bugs from Pi Testing ✅
-- Phase 7: Audio Output UX & Cast Bugs ✅ (PR #198)
+All prior phases (0-10) are **COMPLETE**. See git history for details:
+- Phases 0-9: Full system build (audio engine, sources, outputs, API, UI)
+- Post-plan: RTL-SDR, fingerprinting, BT A2DP, Cast fixes, deployment, Pi testing
+- Phases 1-10 (task_plan): Bug fixes, BT UX, volume, Cast, Pi verification, docs, E2E tests
 
 ---
 
-## Phase 8: Documentation & Polish ✅
+## Phase 11: Architecture Cleanup & Integration Prep 🔄
 
-- [x] 8.1 Update PLAN.md — phases, post-plan features, progress table
-- [x] 8.2 Update CLAUDE.md — complete rewrite with current state
-- [x] 8.3 Update README.md — status table, post-plan features, deployment, test counts
-- [x] 8.4 FileBrowser metadata — fixed stale TODOs (uint? → int? cast), removed FUTURE-WORK item #5
-- [x] 8.5 Root folder cleanup — moved 30 old docs/screenshots to /archive, removed artifacts
+### 11.1 Remove Spotify Code
+**Priority:** High — removes ~2,500 lines of dead code before any new work
+
+**Delete entire directories/files:**
+- [ ] `SpotifyLoopback/` directory (Program.cs, SmartSpotifyDevice.cs, AudioDeviceManager.cs, LibrespotManager.cs, README.md)
+- [ ] `scripts/Setup-SpotifyLoopback.ps1`
+- [ ] `scripts/Test-SpotifyLoopback.ps1`
+- [ ] `scripts/Quick-SpotifyCheck.ps1`
+- [ ] `scripts/setup-spotify-loopback.sh`
+- [ ] `scripts/test-spotify-loopback.bat`
+- [ ] `scripts/appsettings.Development.Spotify.json`
+- [ ] `src/Radio.API/appsettings.Development.Spotify.json`
+- [ ] `src/Radio.API/appsettings.Production.Spotify.json`
+- [ ] `publish/api/appsettings.Development.Spotify.json`
+- [ ] `archive/SPOTIFY_INTEGRATED_SETUP.md`
+- [ ] `archive/SPOTIFY_INTEGRATED_IMPLEMENTATION_SUMMARY.md`
+- [ ] `archive/SPOTIFY_PLAYBACK_FIX_SUMMARY.md`
+- [ ] `archive/SPOTIFY_QUEUE_FIX_SUMMARY.md`
+
+**Clean references from mixed files:**
+- [ ] `src/Radio.API/appsettings.json` — Remove `Devices.Spotify` section and `Spotify` section
+- [ ] `src/Radio.API/Controllers/ConfigurationController.cs` — Remove `"spotify:"` secret masking
+- [ ] `README.md` — Replace "Spotify" with "Bluetooth" in overview
+- [ ] `CLAUDE.md` — Same update
+- [ ] `design/AUDIO.md` — Remove Spotify sections, SpotifySecrets, SpotifyPreferences
+- [ ] Doc comments in API DTOs (NowPlayingDto, PlayHistoryModels, AudioSourceDtos) — remove "Spotify" examples
+- [ ] `PLAN.md` — Update phase descriptions
+
+**Delete dead DI code:**
+- [ ] `src/Radio.Infrastructure/DependencyInjection/ExternalServiceExtensions.cs` (empty file)
+
+**Verification:** `dotnet build --configuration Release` (0 warnings), `dotnet test` (all pass)
+
+### 11.2 Cast Latency Reduction
+**Priority:** High — currently 25 seconds, goal is <10 seconds
+
+**Root cause analysis (see findings.md for full detail):**
+The 25-second delay breaks down as:
+- 2s CC1AD845 initialization delay (hardcoded)
+- 8s first LoadAsync timeout (often fails on cold start)
+- 3s retry delay
+- 2s second LoadAsync
+- 5-8s Cast device internal MP3 buffering
+- 2s ring buffer accumulation
+
+**Implementation plan:**
+
+A. **Pre-stream the HTTP endpoint before Cast connects** (biggest win)
+- Start HttpStreamOutput and begin accumulating MP3 data BEFORE calling LoadAsync
+- When Cast's HTTP GET arrives, the server already has a buffer of MP3 frames to burst
+- This eliminates the ~5-8s Cast prefill wait since data is immediately available
+
+B. **Reduce connection ceremony delays:**
+- [ ] GoogleCastOutput.cs:540 — Reduce CC1AD845 delay from 2000ms to 1000ms
+- [ ] GoogleCastOutput.cs:921 — Reduce retry delay from 3000ms to 1000ms
+- [ ] GoogleCastOutput.cs:904 — Reduce first LoadAsync timeout from 8s to 5s
+- [ ] Add readiness probe: poll ReceiverChannel status before first LoadAsync
+
+C. **Implement MP3 pre-buffer for Cast:**
+- [ ] In HttpStreamOutput, when Cast client connects on `/stream/audio/mp3`:
+  - Maintain a rolling 3-second MP3 pre-buffer (FIFO of recent MP3 frames)
+  - On new client connect, immediately write the pre-buffer before switching to real-time
+  - This gives Cast ~3s of audio instantly, drastically reducing time-to-first-audio
+
+D. **Reduce ring buffer overhead:**
+- [ ] Reduce `OutputBufferSizeSeconds` from 2.0 to 1.0 in appsettings.json
+- [ ] Reduce `StreamReaderLagSeconds` from 0.5 to 0.2
+- [ ] These are safe — fingerprinting captures its own 15s independently
+
+**Expected result:** Connection ceremony ~4s + Cast prefill ~3-4s = **7-8 seconds total**
+
+### 11.3 Continuous Source Fingerprinting (Song Change Detection)
+**Priority:** High — required before Phonograph/SDR/USB integration
+
+**Problem:** Current system creates ONE play history entry per source session. For continuous sources (vinyl, radio, USB), different songs play back-to-back with no discrete events. Only fingerprinting can detect the boundary.
+
+**Design: Fingerprint-driven song change detection**
+
+The `BackgroundIdentificationService` already runs every 30s and identifies tracks. Extend it to:
+
+1. **Track last identification per source:**
+   ```csharp
+   private (string TrackKey, DateTime IdentifiedAt)? _lastIdentification;
+   ```
+
+2. **Detect song transitions:**
+   - When a new fingerprint resolves to a DIFFERENT `{title}|{artist}` than `_lastIdentification`:
+     - Raise a new `SongChanged` event (distinct from `TrackIdentified`)
+     - Include both old and new track metadata
+   - Update `_lastIdentification`
+
+3. **AudioManager handles `SongChanged`:**
+   - Finalize the current play history entry (set end timestamp, duration)
+   - Create a NEW play history entry for the new song
+   - Update `_currentPlayHistoryEntryId`
+   - Emit metrics: `fingerprint.song_change_detected`
+
+4. **PlayHistoryEntry changes:**
+   - [ ] Add `EndedAt` (DateTime?) field — marks when song ended
+   - [ ] Add `DurationSeconds` (int?) field — calculated from PlayedAt to EndedAt
+   - [ ] Update `IPlayHistoryRepository.FinalizeEntryAsync(id, endedAt)` method
+
+5. **Configuration:**
+   - [ ] Add `MinimumSecondsBetweenSongChanges` (default: 20) to `FingerprintingOptions`
+   - [ ] Prevents rapid-fire entry creation from noisy fingerprints at song boundaries
+
+**Verification:** Unit tests for song change detection, integration test for entry creation
+
+### 11.4 Minor Architecture Cleanup
+**Priority:** Low — nice-to-have improvements, only if time permits
+
+- [ ] Extract `PlayHistoryTracker` from AudioManager (reduce god-class tendency)
+- [ ] Review AudioManager constructor (18 params) — consider bundling optional deps
+- [ ] Remove any remaining TODO comments that reference completed work
 
 ---
 
-## Phase 9: Pi Verification ✅
+## Phase 12: Phonograph Integration (Manual, on Pi)
+**Status:** Pending Phase 11
 
-### 9.1 Verify PR #198 fixes on Pi ✅
-- [x] Deploy to Pi
-- [x] Cast pause/resume — position freezes on pause, advances on resume
-- [x] Device filtering — 17 raw → 7 clean devices with friendly names
-- [x] Local mute when casting — Cast streams while local muted (modifierCount=1)
-- [x] Cast auto-recovery on track skip (INTERRUPTED → Buffering → Playing)
-- [ ] BT progress bar — no BT device connected, deferred to manual test
+### 12.1 Hardware Connection
+- [ ] Connect USB turntable to Pi
+- [ ] Verify device appears in `arecord -l` / ALSA device list
+- [ ] Configure `Devices.Vinyl.USBPort` in appsettings.Production.json
+- [ ] Deploy updated config
 
-### 9.2 Original verification items ✅
-- [x] Volume persistence across restart — **BUG FIXED** (3 issues: API bypass, periodic overwrite, path mismatch)
-- [x] Mute persistence across restart — **FIXED** (same root cause)
-- [x] Fingerprint identification — 100% confidence, cache working
-- [x] Play history recording — 21 entries, metadata + cover art
-- [x] File playback pipeline — queue, play, pause, resume, next all working
-- [ ] Cast latency measurement — Cast streams, no precision measurement tool
-- [ ] Sample drop rate — would need extended monitoring
+### 12.2 Audio Pipeline Verification
+- [ ] Switch to Vinyl source via API
+- [ ] Verify capture device found and audio flowing
+- [ ] Verify audio plays through local speakers
+- [ ] Verify audio streams to Cast device
+- [ ] Check visualization (FFT, levels) shows activity
 
-### 9.3 Untested features ✅
-- [x] Album art proxy (Web 5002 → API 5000) — HTTP 200 both paths
-- [ ] BT next/previous — depends on phone AVRCP, deferred to manual test
+### 12.3 Fingerprinting Verification
+- [ ] Play a known record
+- [ ] Verify fingerprinting identifies tracks (15s sample + AcoustID lookup)
+- [ ] Verify song change detection creates new play history entries
+- [ ] Verify album art appears in UI
+- [ ] Test edge case: needle lift between songs (silence → should not create entry)
 
----
-
-## Phase 10: Final Polish (Optional) 🔄
-
-### 10.1 Kiosk Mode
-- Priority: Medium — needed for final console radio experience
-- Deferred until Pi verification complete
-- Full implementation plan in FUTURE-WORK.md (item #5)
-
-### 10.2 E2E Tests ✅
-- 33 E2E tests across 5 test classes (Home, Navigation, Radio, Queue, Devices, History)
-- Covers: page loading, element presence, navigation, file browser toggle, empty states
-- Soft-skip when server unavailable (safe for CI)
-
-### 10.3 Low-Priority Deferred Items
-- TTS audio cache
-- Windows AVRCP volume sync (dev-only)
-- Radio device switching API
+### 12.4 Bug Fixes
+- [ ] Address any issues found during testing
 
 ---
 
-## Deferred (not in scope)
-- RF320 software control — permanent hardware limitation
-- Direct pipe Cast architecture — current HTTP streaming works
-- ALSA device enumeration noise — cosmetic
+## Phase 13: RTL-SDR Radio Validation (Manual, on Pi)
+**Status:** Pending Phase 12
+
+### 13.1 Hardware Connection
+- [ ] Connect RTL-SDR USB dongle to Pi
+- [ ] Verify device appears and RTL-SDR libraries can access it
+- [ ] Configure radio presets for local FM stations
+
+### 13.2 Audio Pipeline Verification
+- [ ] Switch to Radio source via API
+- [ ] Tune to a known FM station
+- [ ] Verify audio plays through local speakers and Cast
+- [ ] Verify visualization shows activity
+
+### 13.3 Fingerprinting & History
+- [ ] Verify continuous fingerprinting identifies songs on FM radio
+- [ ] Verify song change detection works (new entries for new songs)
+- [ ] Verify duplicate suppression prevents re-identifying same song repeatedly
+
+### 13.4 SDR-Specific Features
+- [ ] Frequency scanning
+- [ ] AGC behavior
+- [ ] Band switching (FM/AM/SW)
+- [ ] Preset save/load
+
+---
+
+## Phase 14: Generic USB Audio Validation (Manual, on Pi)
+**Status:** Pending Phase 13
+
+### 14.1 Hardware Connection
+- [ ] Connect second USB audio device to Pi
+- [ ] Verify device appears in device list
+- [ ] Select via GenericUSB source API
+
+### 14.2 Audio Pipeline Verification
+- [ ] Verify capture and playback
+- [ ] Verify Cast streaming
+- [ ] Verify fingerprinting and song change detection
 
 ---
 
@@ -112,6 +215,9 @@ All core development phases are **COMPLETE**:
 | Device visibility in config store | User-configurable per deployment |
 | Ordered List for FriendlyNames | Dictionary enumeration order not guaranteed |
 | ReadAsync pacing for silence | Prevents tight-loop CPU spin when no audio data |
+| Fingerprint-driven song change | Only reliable signal for continuous audio sources |
+| MP3 pre-buffer for Cast | Gives Cast immediate audio data, reducing time-to-first-audio |
+| Remove Spotify before integration | Clean slate, removes dead code confusion |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |

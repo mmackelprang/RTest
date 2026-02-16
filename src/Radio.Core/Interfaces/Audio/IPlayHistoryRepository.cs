@@ -109,6 +109,17 @@ public interface IPlayHistoryRepository
     CancellationToken ct = default);
 
   /// <summary>
+  /// Finalizes a play history entry by setting its end timestamp.
+  /// Calculates DurationSeconds from PlayedAt to endedAt.
+  /// Used by song change detection to close out a previous entry.
+  /// </summary>
+  /// <param name="id">The history entry ID to finalize.</param>
+  /// <param name="endedAt">When the song stopped playing.</param>
+  /// <param name="ct">Cancellation token.</param>
+  /// <returns>True if finalized, false if not found.</returns>
+  Task<bool> FinalizeEntryAsync(string id, DateTime endedAt, CancellationToken ct = default);
+
+  /// <summary>
   /// Searches play history entries by title, artist, or album.
   /// </summary>
   /// <param name="searchTerm">The search term to match against title, artist, or album.</param>

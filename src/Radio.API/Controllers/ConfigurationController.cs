@@ -921,7 +921,6 @@ public class ConfigurationController : ControllerBase
            lowerKey.Contains("client_secret") ||
            lowerKey.Contains("refreshtoken") ||
            lowerKey.Contains("refresh_token") ||
-           lowerKey.Contains("spotify:") ||
            lowerKey.Contains("tts:") ||
            lowerKey.Contains("acoustid:");
   }

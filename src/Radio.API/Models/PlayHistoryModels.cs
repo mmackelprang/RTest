@@ -11,10 +11,13 @@ public class PlayHistoryEntryDto
   /// <summary>Gets or sets when the track was played.</summary>
   public DateTime PlayedAt { get; set; }
 
-  /// <summary>Gets or sets the audio source type (Vinyl, Radio, File, Spotify).</summary>
+  /// <summary>Gets or sets when the track stopped playing (null if still playing or unknown).</summary>
+  public DateTime? EndedAt { get; set; }
+
+  /// <summary>Gets or sets the audio source type (Vinyl, Radio, File, Bluetooth).</summary>
   public string Source { get; set; } = string.Empty;
 
-  /// <summary>Gets or sets the metadata source (Spotify, FileTag, Fingerprinting).</summary>
+  /// <summary>Gets or sets the metadata source (FileTag, Fingerprinting, AVRCP).</summary>
   public string? MetadataSource { get; set; }
 
   /// <summary>Gets or sets additional source details.</summary>

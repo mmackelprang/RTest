@@ -4,7 +4,7 @@ Grandpa Anderson's Console Radio Remade - A modern audio command center hosted o
 
 ## Overview
 
-This project restores the original function (Radio/Vinyl) while adding modern capabilities (Spotify, Streaming, Smart Home Events, and Chromecast Audio).
+This project restores the original function (Radio/Vinyl) while adding modern capabilities (Bluetooth A2DP, Streaming, Smart Home Events, and Chromecast Audio).
 
 ## Current Status
 
@@ -13,7 +13,7 @@ This project restores the original function (Radio/Vinyl) while adding modern ca
 | 0 - Project Setup | ✅ Completed | Solution structure, CI/CD pipeline |
 | 1 - Configuration | ✅ Completed | JSON/SQLite stores, secrets management, backup/restore |
 | 2 - Core Audio | ✅ Completed | SoundFlow integration, audio engine, device manager, master mixer |
-| 3 - Audio Sources | ✅ Completed | Spotify, Radio (RF320 + RTL-SDR), Vinyl, File Player, Bluetooth A2DP, Generic USB |
+| 3 - Audio Sources | ✅ Completed | Radio (RF320 + RTL-SDR), Vinyl, File Player, Bluetooth A2DP, Generic USB |
 | 4 - Event Sources | ✅ Completed | TTS (eSpeak/Google/Azure), Audio File Events |
 | 5 - Ducking | ✅ Completed | Priority-based audio ducking with configurable fade policies |
 | 6 - Outputs | ✅ Completed | Local audio, Google Cast (SharpCaster), HTTP MP3 streaming |
@@ -62,7 +62,7 @@ RadioConsole/
 │   ├── Radio.Infrastructure/    # Audio engine, config stores, external integrations
 │   │   ├── Audio/
 │   │   │   ├── SoundFlow/       # Audio engine, mixer, device manager, tapped output
-│   │   │   ├── Sources/         # Primary (Radio, Spotify, File, Vinyl, BT, USB) + Event (TTS, AudioFile)
+│   │   │   ├── Sources/         # Primary (Radio, File, Vinyl, BT, USB) + Event (TTS, AudioFile)
 │   │   │   ├── Services/        # FileBrowser, TTSFactory, DuckingService, AudioManager
 │   │   │   ├── Outputs/         # Local, GoogleCast, HttpStream
 │   │   │   ├── Visualization/   # Spectrum, LevelMeter, Waveform
@@ -182,7 +182,6 @@ The audio system (Phase 2) provides:
 
 ### Primary Audio Sources
 
-- **Spotify**: Full integration with playback control, search, browse, and playlists
 - **Radio**: Two device types supported via radio factory (`IRadioFactory`)
   - **RTLSDRCore (SDR Radio)**: Software-defined radio with full frequency control, band switching, scanning, gain control, and power management via RTL-SDR USB dongle
   - **RF320 (Bluetooth/USB)**: Limited software control, Bluetooth for commands, USB for audio output

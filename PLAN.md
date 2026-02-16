@@ -2,7 +2,7 @@
 
 ## Project: Grandpa Anderson's Console Radio Remade
 
-A modern audio command center hosted on a Raspberry Pi 5, encased in a vintage console radio cabinet. The software restores the original function (Radio/Vinyl) while adding modern capabilities (Spotify, Streaming, Smart Home Events, and Chromecast Audio).
+A modern audio command center hosted on a Raspberry Pi 5, encased in a vintage console radio cabinet. The software restores the original function (Radio/Vinyl) while adding modern capabilities (Bluetooth A2DP, Streaming, Smart Home Events, and Chromecast Audio).
 
 ---
 

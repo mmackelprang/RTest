@@ -20,10 +20,13 @@ public sealed record PlayHistoryEntry
   /// <summary>Gets when this track was played.</summary>
   public required DateTime PlayedAt { get; init; }
 
+  /// <summary>Gets when this track stopped playing (set by song change detection).</summary>
+  public DateTime? EndedAt { get; init; }
+
   /// <summary>Gets the audio source type.</summary>
   public required PlaySource Source { get; init; }
 
-  /// <summary>Gets the source of track metadata (Spotify, FileTag, Fingerprinting, etc.).</summary>
+  /// <summary>Gets the source of track metadata (FileTag, Fingerprinting, AVRCP, etc.).</summary>
   public MetadataSource? MetadataSource { get; init; }
 
   /// <summary>Gets additional source details (e.g., station name, file path).</summary>

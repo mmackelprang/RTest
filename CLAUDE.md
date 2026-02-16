@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Grandpa Anderson's Console Radio Remade** - A modern audio command center restoring vintage console radio functionality with modern capabilities (Spotify, streaming, smart home events, Chromecast audio, Bluetooth A2DP).
+**Grandpa Anderson's Console Radio Remade** - A modern audio command center restoring vintage console radio functionality with modern capabilities (Bluetooth A2DP, streaming, smart home events, Chromecast audio).
 
 **Target Platform:** Raspberry Pi 5 (Linux) with Windows development support
 **Stack:** .NET 8+, ASP.NET Core, Blazor Server, SoundFlow audio engine, SQLite/JSON config
@@ -41,7 +41,7 @@ RadioConsole.sln
 ├── src/Radio.Core           # Domain interfaces, models, events (no dependencies)
 ├── src/Radio.Infrastructure # Audio engine, config stores, BT, Cast, sources, outputs
 │   ├── Audio/SoundFlow/     # Engine, mixer, device manager, tapped output stream
-│   ├── Audio/Sources/       # Primary (Spotify, Radio, BT, File, Vinyl, USB) + Event (TTS, AudioFile)
+│   ├── Audio/Sources/       # Primary (Radio, BT, File, Vinyl, USB) + Event (TTS, AudioFile)
 │   ├── Audio/Outputs/       # Local, GoogleCast, HttpStream
 │   ├── Audio/Fingerprinting/# fpcalc + AcoustID integration
 │   ├── Platform/Bluetooth/  # Linux (BlueZ D-Bus) + Windows (WinRT)
@@ -59,7 +59,7 @@ RadioConsole.sln
 
 **Layered Architecture:**
 - **Core** - Pure domain (interfaces: IAudioEngine, IAudioSource, IConfigurationStore, IBluetoothService, etc.)
-- **Infrastructure** - SoundFlow wrapper, device management, outputs (Local/Cast/HTTP), sources (Radio/SDR/Spotify/File/BT/TTS), Bluetooth (Linux BlueZ + Windows WinRT)
+- **Infrastructure** - SoundFlow wrapper, device management, outputs (Local/Cast/HTTP), sources (Radio/SDR/File/BT/TTS), Bluetooth (Linux BlueZ + Windows WinRT)
 - **API** - REST endpoints under `/api/*`, SignalR hubs at `/hubs/visualization` and `/hubs/audio`
 - **Web** - Blazor Server UI, 12 pages, shared components, SignalR client
 
@@ -72,7 +72,7 @@ RadioConsole.sln
 
 **Audio Pipeline:**
 ```
-Sources (Radio/SDR/Spotify/File/BT/TTS) → Master Mixer → Modifiers (Balance, FingerprintTap, Viz)
+Sources (Radio/SDR/File/BT/TTS) → Master Mixer → Modifiers (Balance, FingerprintTap, Viz)
                                                 ↓
                                      Playback Device (local speakers)
                                      TappedOutputStream → HTTP Stream → Google Cast

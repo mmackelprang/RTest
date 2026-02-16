@@ -7,7 +7,7 @@ namespace Radio.API.Models;
 public class NowPlayingDto
 {
   /// <summary>
-  /// Gets or sets the type of the audio source (e.g., "Spotify", "Radio", "FilePlayer").
+  /// Gets or sets the type of the audio source (e.g., "Radio", "FilePlayer", "Bluetooth").
   /// </summary>
   public string SourceType { get; set; } = string.Empty;
 

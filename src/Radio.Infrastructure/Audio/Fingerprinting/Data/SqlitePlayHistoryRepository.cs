@@ -31,8 +31,8 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     var conn = await _dbContext.GetConnectionAsync(ct);
 
     var sql = """
-      INSERT INTO PlayHistory (Id, TrackMetadataId, FingerprintId, PlayedAt, Source, MetadataSource, SourceDetails, Duration, IdentificationConfidence, WasIdentified)
-      VALUES (@Id, @TrackMetadataId, @FingerprintId, @PlayedAt, @Source, @MetadataSource, @SourceDetails, @Duration, @Confidence, @WasIdentified)
+      INSERT INTO PlayHistory (Id, TrackMetadataId, FingerprintId, PlayedAt, EndedAt, Source, MetadataSource, SourceDetails, Duration, IdentificationConfidence, WasIdentified)
+      VALUES (@Id, @TrackMetadataId, @FingerprintId, @PlayedAt, @EndedAt, @Source, @MetadataSource, @SourceDetails, @Duration, @Confidence, @WasIdentified)
       """;
 
     await using var cmd = conn.CreateCommand();
@@ -41,6 +41,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     cmd.Parameters.AddWithValue("@TrackMetadataId", (object?)entry.TrackMetadataId ?? DBNull.Value);
     cmd.Parameters.AddWithValue("@FingerprintId", (object?)entry.FingerprintId ?? DBNull.Value);
     cmd.Parameters.AddWithValue("@PlayedAt", entry.PlayedAt.ToString("O"));
+    cmd.Parameters.AddWithValue("@EndedAt", entry.EndedAt.HasValue ? entry.EndedAt.Value.ToString("O") : (object)DBNull.Value);
     cmd.Parameters.AddWithValue("@Source", entry.Source.ToString());
     cmd.Parameters.AddWithValue("@MetadataSource", entry.MetadataSource?.ToString() ?? (object)DBNull.Value);
     cmd.Parameters.AddWithValue("@SourceDetails", (object?)entry.SourceDetails ?? DBNull.Value);
@@ -60,7 +61,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     var conn = await _dbContext.GetConnectionAsync(ct);
 
     var sql = """
-      SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.Source, h.MetadataSource, h.SourceDetails,
+      SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.EndedAt, h.Source, h.MetadataSource, h.SourceDetails,
              h.Duration, h.IdentificationConfidence, h.WasIdentified,
              m.Title, m.Artist, m.Album, m.AlbumArtist, m.CoverArtUrl
       FROM PlayHistory h
@@ -85,7 +86,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     var conn = await _dbContext.GetConnectionAsync(ct);
 
     var sql = """
-      SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.Source, h.MetadataSource, h.SourceDetails,
+      SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.EndedAt, h.Source, h.MetadataSource, h.SourceDetails,
              h.Duration, h.IdentificationConfidence, h.WasIdentified,
              m.Title, m.Artist, m.Album, m.AlbumArtist, m.CoverArtUrl
       FROM PlayHistory h
@@ -111,7 +112,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     var conn = await _dbContext.GetConnectionAsync(ct);
 
     var sql = """
-      SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.Source, h.MetadataSource, h.SourceDetails,
+      SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.EndedAt, h.Source, h.MetadataSource, h.SourceDetails,
              h.Duration, h.IdentificationConfidence, h.WasIdentified,
              m.Title, m.Artist, m.Album, m.AlbumArtist, m.CoverArtUrl
       FROM PlayHistory h
@@ -197,7 +198,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
       while (await reader.ReadAsync(ct))
       {
         if (!Enum.TryParse<PlaySource>(reader.GetString(0), out var source))
-          continue; // Skip rows with removed source types (e.g., Spotify)
+          continue; // Skip rows with unknown source types
         // SQLite COUNT returns 64-bit integer, guard for NULL
         playsBySource[source] = reader.IsDBNull(1) ? 0 : Convert.ToInt32(reader.GetInt64(1));
       }
@@ -271,7 +272,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     var conn = await _dbContext.GetConnectionAsync(ct);
 
     var sql = """
-      SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.Source, h.MetadataSource, h.SourceDetails,
+      SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.EndedAt, h.Source, h.MetadataSource, h.SourceDetails,
              h.Duration, h.IdentificationConfidence, h.WasIdentified,
              m.Title, m.Artist, m.Album, m.AlbumArtist, m.CoverArtUrl
       FROM PlayHistory h
@@ -319,6 +320,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
       UPDATE PlayHistory
       SET TrackMetadataId = @TrackMetadataId,
           FingerprintId = @FingerprintId,
+          EndedAt = @EndedAt,
           MetadataSource = @MetadataSource,
           SourceDetails = @SourceDetails,
           Duration = @Duration,
@@ -332,6 +334,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     cmd.Parameters.AddWithValue("@Id", entry.Id);
     cmd.Parameters.AddWithValue("@TrackMetadataId", (object?)entry.TrackMetadataId ?? DBNull.Value);
     cmd.Parameters.AddWithValue("@FingerprintId", (object?)entry.FingerprintId ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("@EndedAt", entry.EndedAt.HasValue ? entry.EndedAt.Value.ToString("O") : (object)DBNull.Value);
     cmd.Parameters.AddWithValue("@MetadataSource", entry.MetadataSource?.ToString() ?? (object)DBNull.Value);
     cmd.Parameters.AddWithValue("@SourceDetails", (object?)entry.SourceDetails ?? DBNull.Value);
     cmd.Parameters.AddWithValue("@Duration", (object?)entry.DurationSeconds ?? DBNull.Value);
@@ -358,7 +361,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     var cutoffTime = DateTime.UtcNow.AddMinutes(-withinMinutes);
 
     var sql = """
-      SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.Source, h.MetadataSource, h.SourceDetails,
+      SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.EndedAt, h.Source, h.MetadataSource, h.SourceDetails,
              h.Duration, h.IdentificationConfidence, h.WasIdentified,
              m.Title, m.Artist, m.Album, m.AlbumArtist, m.CoverArtUrl
       FROM PlayHistory h
@@ -382,6 +385,33 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     }
 
     return MapToPlayHistoryEntry(reader);
+  }
+
+  /// <inheritdoc/>
+  public async Task<bool> FinalizeEntryAsync(string id, DateTime endedAt, CancellationToken ct = default)
+  {
+    var conn = await _dbContext.GetConnectionAsync(ct);
+
+    // Set EndedAt and calculate DurationSeconds from PlayedAt to endedAt
+    var sql = """
+      UPDATE PlayHistory
+      SET EndedAt = @EndedAt,
+          Duration = CAST((julianday(@EndedAt) - julianday(PlayedAt)) * 86400 AS INTEGER)
+      WHERE Id = @Id
+      """;
+
+    await using var cmd = conn.CreateCommand();
+    cmd.CommandText = sql;
+    cmd.Parameters.AddWithValue("@Id", id);
+    cmd.Parameters.AddWithValue("@EndedAt", endedAt.ToString("O"));
+
+    var rowsAffected = await cmd.ExecuteNonQueryAsync(ct);
+    if (rowsAffected > 0)
+    {
+      _logger.LogDebug("Finalized play history entry {Id} (ended at {EndedAt})", id, endedAt);
+    }
+
+    return rowsAffected > 0;
   }
 
   /// <inheritdoc/>
@@ -414,7 +444,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
 
     // Get items with pagination
     var itemsSql = """
-      SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.Source, h.MetadataSource, h.SourceDetails,
+      SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.EndedAt, h.Source, h.MetadataSource, h.SourceDetails,
              h.Duration, h.IdentificationConfidence, h.WasIdentified,
              m.Title, m.Artist, m.Album, m.AlbumArtist, m.CoverArtUrl
       FROM PlayHistory h
@@ -490,6 +520,9 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
       }
     }
 
+    var endedAtOrdinal = reader.GetOrdinal("EndedAt");
+    DateTime? endedAt = reader.IsDBNull(endedAtOrdinal) ? null : DateTime.Parse(reader.GetString(endedAtOrdinal));
+
     return new PlayHistoryEntry
     {
       Id = reader.GetString(reader.GetOrdinal("Id")),
@@ -498,6 +531,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
       FingerprintId = reader.IsDBNull(reader.GetOrdinal("FingerprintId"))
         ? null : reader.GetString(reader.GetOrdinal("FingerprintId")),
       PlayedAt = DateTime.Parse(reader.GetString(reader.GetOrdinal("PlayedAt"))),
+      EndedAt = endedAt,
       Source = Enum.TryParse<PlaySource>(reader.GetString(reader.GetOrdinal("Source")), out var parsedPlaySource)
         ? parsedPlaySource : PlaySource.File,
       MetadataSource = metadataSource,

@@ -119,6 +119,14 @@ public class GoogleCastOutputOptions
   public bool Enabled { get; set; } = false;
 
   /// <summary>
+  /// Gets or sets the Cast Application ID.
+  /// Default is "CC1AD845" (Google's Default Media Receiver).
+  /// Set to a custom receiver app ID for low-latency streaming
+  /// (see deploy/cast-receiver/receiver.html).
+  /// </summary>
+  public string ApplicationId { get; set; } = "CC1AD845";
+
+  /// <summary>
   /// Gets or sets the discovery timeout in seconds.
   /// </summary>
   public int DiscoveryTimeoutSeconds { get; set; } = 10;

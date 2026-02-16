@@ -226,6 +226,7 @@ public record PlayHistoryListDto(
 public record PlayHistoryEntryDto(
   string Id,
   DateTime PlayedAt,
+  DateTime? EndedAt,
   string Source,
   string? MetadataSource,
   string? SourceDetails,

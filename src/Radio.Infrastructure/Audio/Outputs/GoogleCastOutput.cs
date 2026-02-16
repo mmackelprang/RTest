@@ -531,13 +531,13 @@ public class GoogleCastOutput : AudioOutputBase
       // Launch the default media receiver application
       if (_client != null)
       {
-        // Launch default media receiver
-        await _client.LaunchApplicationAsync("CC1AD845");
+        // Launch media receiver (default CC1AD845 or custom low-latency receiver)
+        await _client.LaunchApplicationAsync(_options.ApplicationId);
         _logger.LogInformation("Cast: Media receiver launched on {Device}", ConnectedDevice?.FriendlyName);
 
         // Allow media receiver to fully initialize before sending commands.
-        // 500ms is insufficient — Cast devices need 2-3s to fully initialize CC1AD845.
-        await Task.Delay(2000, cancellationToken);
+        // Reduced from 2000ms — 1s is sufficient if we retry on first load failure.
+        await Task.Delay(1000, cancellationToken);
 
         // Subscribe to status changes to monitor device transitions
         var mediaChannel = _client.GetChannel<MediaChannel>();
@@ -686,7 +686,7 @@ public class GoogleCastOutput : AudioOutputBase
     {
       // Re-launch the media receiver app to get a clean session
       _logger.LogInformation("Cast test: Launching media receiver app");
-      await _client.LaunchApplicationAsync("CC1AD845");
+      await _client.LaunchApplicationAsync(_options.ApplicationId);
       await Task.Delay(500);
 
       var media = new Media
@@ -764,7 +764,7 @@ public class GoogleCastOutput : AudioOutputBase
 
   /// <summary>
   /// Attempts to load media on the Cast device. If the session has expired
-  /// (CC1AD845 app closed after idle), relaunches the app and retries once.
+  /// (receiver app closed after idle), relaunches the app and retries once.
   /// </summary>
   private async Task LoadMediaWithRecoveryAsync(CancellationToken cancellationToken)
   {
@@ -817,13 +817,13 @@ public class GoogleCastOutput : AudioOutputBase
   }
 
   /// <summary>
-  /// Relaunches the CC1AD845 default media receiver after an idle timeout.
+  /// Relaunches the media receiver after an idle timeout.
   /// </summary>
   private async Task RelaunchMediaReceiverAsync(CancellationToken cancellationToken)
   {
     try
     {
-      await _client!.LaunchApplicationAsync("CC1AD845");
+      await _client!.LaunchApplicationAsync(_options.ApplicationId);
       await Task.Delay(500, cancellationToken);
       _logger.LogInformation("Cast: Media receiver relaunched after idle recovery");
     }
@@ -880,7 +880,7 @@ public class GoogleCastOutput : AudioOutputBase
 
   /// <summary>
   /// Loads media on the Cast device with retry logic. The first load after
-  /// LaunchApplicationAsync often fails silently (CC1AD845 not yet ready).
+  /// LaunchApplicationAsync often fails silently (receiver not yet ready).
   /// If the first load results in FINISHED/Idle quickly, we retry once.
   /// </summary>
   private async Task LoadMediaOnCastAsync(MediaChannel? mediaChannel, CancellationToken cancellationToken)
@@ -901,24 +901,24 @@ public class GoogleCastOutput : AudioOutputBase
     MediaStatus? status = null;
     try
     {
-      status = await mediaChannel.LoadAsync(media, true).WaitAsync(TimeSpan.FromSeconds(8), cancellationToken);
+      status = await mediaChannel.LoadAsync(media, true).WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
       _logger.LogInformation(
         "Cast: Media load response — PlayerState: {State}, IdleReason: {IdleReason}, MediaSessionId: {SessionId}",
         status?.PlayerState, status?.IdleReason, status?.MediaSessionId);
     }
     catch (TimeoutException)
     {
-      _logger.LogInformation("Cast: Media load timed out (8s) — continuing in background");
+      _logger.LogInformation("Cast: Media load timed out (5s) — continuing in background");
     }
 
     // If the load immediately resulted in Idle/FINISHED or didn't start playing,
-    // wait and retry — CC1AD845 may not have been fully initialized
+    // wait and retry — receiver may not have been fully initialized
     if (status?.PlayerState is PlayerStateType.Idle ||
         status?.IdleReason is "FINISHED" or "ERROR" or "CANCELLED")
     {
-      _logger.LogInformation("Cast: First load resulted in {State}/{Reason} — retrying after 3s delay",
+      _logger.LogInformation("Cast: First load resulted in {State}/{Reason} — retrying after 1s delay",
         status?.PlayerState, status?.IdleReason);
-      await Task.Delay(3000, cancellationToken);
+      await Task.Delay(1000, cancellationToken);
 
       try
       {

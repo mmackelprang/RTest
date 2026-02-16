@@ -127,6 +127,7 @@ public sealed class FingerprintDbContext : IAsyncDisposable
         TrackMetadataId TEXT,
         FingerprintId TEXT,
         PlayedAt TEXT NOT NULL,
+        EndedAt TEXT,
         Source TEXT NOT NULL,
         MetadataSource TEXT,
         SourceDetails TEXT,
@@ -272,6 +273,21 @@ public sealed class FingerprintDbContext : IAsyncDisposable
       alterCmd.CommandText = alterSql;
       await alterCmd.ExecuteNonQueryAsync(ct);
       _logger.LogInformation("Added MetadataSource column to PlayHistory table");
+    }
+
+    // Add EndedAt column for song change detection (tracks when a song stopped playing)
+    var checkEndedAtSql = "SELECT COUNT(*) FROM pragma_table_info('PlayHistory') WHERE name='EndedAt'";
+    using var checkEndedAtCmd = _connection!.CreateCommand();
+    checkEndedAtCmd.CommandText = checkEndedAtSql;
+    var endedAtExists = Convert.ToInt32(await checkEndedAtCmd.ExecuteScalarAsync(ct)) > 0;
+
+    if (!endedAtExists)
+    {
+      var alterEndedAtSql = "ALTER TABLE PlayHistory ADD COLUMN EndedAt TEXT";
+      using var alterEndedAtCmd = _connection.CreateCommand();
+      alterEndedAtCmd.CommandText = alterEndedAtSql;
+      await alterEndedAtCmd.ExecuteNonQueryAsync(ct);
+      _logger.LogInformation("Added EndedAt column to PlayHistory table");
     }
   }
 

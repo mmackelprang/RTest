@@ -262,7 +262,7 @@ public class SystemConfigPageTests : TestContext
   }
 
   [Fact]
-  public void SystemConfigPage_Secrets_Tab_Has_Spotify_SubTab()
+  public void SystemConfigPage_Secrets_Tab_Has_SubTabs()
   {
     // Act
     var cut = RenderComponent<SystemConfigPage>();

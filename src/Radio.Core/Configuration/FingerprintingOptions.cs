@@ -26,6 +26,12 @@ public sealed class FingerprintingOptions
   /// <summary>Minutes to suppress duplicate identifications for high-confidence matches (score > 0.9).</summary>
   public int HighConfidenceDuplicateSuppressionMinutes { get; set; } = 30;
 
+  /// <summary>
+  /// Minimum seconds between song change events.
+  /// Prevents rapid-fire entry creation from noisy fingerprints at song boundaries.
+  /// </summary>
+  public int MinimumSecondsBetweenSongChanges { get; set; } = 20;
+
   /// <summary>AcoustID API configuration.</summary>
   public AcoustIdOptions AcoustId { get; set; } = new();
 

@@ -370,6 +370,79 @@ public class SqlitePlayHistoryRepositoryTests : IAsyncLifetime
     Assert.Null(result);
   }
 
+  [Fact]
+  public async Task FinalizeEntryAsync_SetsEndedAtAndDuration()
+  {
+    // Arrange
+    var playedAt = DateTime.UtcNow.AddMinutes(-5);
+    var entry = CreateTestHistoryEntry() with
+    {
+      PlayedAt = playedAt,
+      DurationSeconds = null
+    };
+    await _repository.RecordPlayAsync(entry);
+
+    var endedAt = DateTime.UtcNow;
+
+    // Act
+    var result = await _repository.FinalizeEntryAsync(entry.Id, endedAt);
+
+    // Assert
+    Assert.True(result);
+    var finalized = await _repository.GetByIdAsync(entry.Id);
+    Assert.NotNull(finalized);
+    Assert.NotNull(finalized.EndedAt);
+    Assert.NotNull(finalized.DurationSeconds);
+    // Duration should be approximately 5 minutes (300 seconds)
+    Assert.InRange(finalized.DurationSeconds.Value, 295, 305);
+  }
+
+  [Fact]
+  public async Task FinalizeEntryAsync_NonExistingId_ReturnsFalse()
+  {
+    // Act
+    var result = await _repository.FinalizeEntryAsync("nonexistent-id", DateTime.UtcNow);
+
+    // Assert
+    Assert.False(result);
+  }
+
+  [Fact]
+  public async Task RecordPlayAsync_WithEndedAt_PersistsCorrectly()
+  {
+    // Arrange
+    var endedAt = DateTime.UtcNow.AddMinutes(3);
+    var entry = CreateTestHistoryEntry() with
+    {
+      EndedAt = endedAt
+    };
+
+    // Act
+    await _repository.RecordPlayAsync(entry);
+
+    // Assert
+    var recorded = await _repository.GetByIdAsync(entry.Id);
+    Assert.NotNull(recorded);
+    Assert.NotNull(recorded.EndedAt);
+    // Compare UTC values within 1 second tolerance (datetime serialization precision)
+    Assert.InRange((recorded.EndedAt.Value.ToUniversalTime() - endedAt).TotalSeconds, -1, 1);
+  }
+
+  [Fact]
+  public async Task RecordPlayAsync_WithoutEndedAt_PersistsNull()
+  {
+    // Arrange
+    var entry = CreateTestHistoryEntry();
+
+    // Act
+    await _repository.RecordPlayAsync(entry);
+
+    // Assert
+    var recorded = await _repository.GetByIdAsync(entry.Id);
+    Assert.NotNull(recorded);
+    Assert.Null(recorded.EndedAt);
+  }
+
   private static PlayHistoryEntry CreateTestHistoryEntry()
   {
     return new PlayHistoryEntry

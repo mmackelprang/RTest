@@ -227,17 +227,6 @@
   font-weight: 400 !important;
 }
 
-/* Spotify Page - Search Results */
-.spotify-track-name {
-  font-size: 1.1rem !important;
-  font-weight: 600 !important;
-}
-
-.spotify-track-artist {
-  font-size: 1rem !important;
-  font-weight: 400 !important;
-}
-
 /* System Config - Form Labels */
 .config-label {
   font-size: 1rem !important;

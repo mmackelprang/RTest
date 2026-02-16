@@ -111,6 +111,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     if (_identificationService != null)
     {
       _identificationService.TrackIdentified += OnTrackIdentified;
+      _identificationService.SongChanged += OnSongChanged;
     }
   }
 
@@ -233,6 +234,9 @@ public class AudioManager : IAudioManager, IAsyncDisposable
 
       // Update the active source reference early so new source becomes "active"
       _activeSource = source;
+
+      // Reset song change detection state for the new source
+      _identificationService?.ResetSongChangeState();
 
       // Determine if new source can auto-play
       var canAutoPlay = source.Type switch
@@ -1055,6 +1059,75 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   }
  
   /// <summary>
+  /// Handles song change events from fingerprinting to create new play history entries.
+  /// Finalizes the previous entry and creates a new one for the new song.
+  /// </summary>
+  private async void OnSongChanged(object? sender, SongChangedEventArgs e)
+  {
+    if (_serviceScopeFactory == null || _activeSource == null)
+      return;
+
+    try
+    {
+      using var scope = _serviceScopeFactory.CreateScope();
+      var playHistoryRepository = scope.ServiceProvider.GetService<IPlayHistoryRepository>();
+      var metadataRepository = scope.ServiceProvider.GetService<ITrackMetadataRepository>();
+      if (playHistoryRepository == null)
+      {
+        _logger.LogDebug("IPlayHistoryRepository not available, skipping song change handling");
+        return;
+      }
+
+      var playSource = MapSourceTypeToPlaySource(_activeSource.Type);
+
+      // Finalize the previous play history entry
+      if (!string.IsNullOrEmpty(_currentPlayHistoryEntryId))
+      {
+        await playHistoryRepository.FinalizeEntryAsync(_currentPlayHistoryEntryId, e.DetectedAt);
+        _logger.LogInformation(
+          "Finalized play history entry {EntryId} (song ended at {EndedAt})",
+          _currentPlayHistoryEntryId, e.DetectedAt);
+      }
+
+      // Store the new track metadata
+      if (metadataRepository != null)
+      {
+        await metadataRepository.StoreAsync(e.NewTrack);
+      }
+
+      // Create a new play history entry for the new song
+      var entryId = Guid.NewGuid().ToString();
+      var entry = new PlayHistoryEntry
+      {
+        Id = entryId,
+        TrackMetadataId = e.NewTrack.Id,
+        FingerprintId = e.NewTrack.FingerprintId,
+        PlayedAt = e.DetectedAt,
+        Source = playSource,
+        MetadataSource = MetadataSource.Fingerprinting,
+        SourceDetails = $"{e.NewTrack.Title} - {e.NewTrack.Artist}",
+        DurationSeconds = null, // Will be set when this entry is finalized
+        IdentificationConfidence = e.Confidence,
+        WasIdentified = true,
+        Track = e.NewTrack
+      };
+
+      await playHistoryRepository.RecordPlayAsync(entry);
+      _currentPlayHistoryEntryId = entryId;
+
+      _logger.LogInformation(
+        "Created new play history entry {EntryId} for song change: '{Title}' by '{Artist}' (confidence: {Confidence:P0})",
+        entryId, e.NewTrack.Title, e.NewTrack.Artist, e.Confidence);
+
+      _metricsCollector?.Increment("fingerprint.song_change_detected");
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to handle song change event");
+    }
+  }
+
+  /// <summary>
   /// Updates the current play history entry when real AVRCP metadata arrives.
   /// This fixes entries that were recorded with the device name as title before
   /// the phone sent actual track metadata.
@@ -1169,6 +1242,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     if (_identificationService != null)
     {
       _identificationService.TrackIdentified -= OnTrackIdentified;
+      _identificationService.SongChanged -= OnSongChanged;
     }
 
     // Unsubscribe Bluetooth events

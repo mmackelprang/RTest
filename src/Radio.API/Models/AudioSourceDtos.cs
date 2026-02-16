@@ -54,7 +54,7 @@ public class AudioSourceDto
   public bool IsRadio { get; set; }
 
   /// <summary>
-  /// Gets or sets whether this source is a streaming source (e.g., Spotify, internet radio).
+  /// Gets or sets whether this source is a streaming source (e.g., internet radio, Bluetooth).
   /// </summary>
   public bool IsStreaming { get; set; }
 

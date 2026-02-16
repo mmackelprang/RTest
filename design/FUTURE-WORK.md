@@ -180,3 +180,61 @@ apt install unclutter
 - If using X11 (default on Pi OS Bookworm desktop), ensure LightDM auto-login is configured in `/etc/lightdm/lightdm.conf` under `[Seat:*]`.
 - The 1920x576 ultrawide touchscreen may need custom display configuration via `xrandr` or `/boot/config.txt` HDMI settings.
 - Consider adding a health-check loop that restarts Chromium if it crashes or if the Web UI becomes unresponsive.
+
+---
+
+## 6. Google Cast Custom Web Receiver — Low-Latency Streaming
+
+**Status:** Receiver HTML created, not yet registered with Google
+**Added:** 2026-02-16 (Phase 11.2 Cast latency reduction)
+**Priority:** Medium — eliminates 10-15s Cast buffering delay; code-side changes already reduce ceremony from ~15s to ~8s
+
+### What Exists
+
+| File | What's There |
+|------|-------------|
+| `deploy/cast-receiver/receiver.html` | Complete CAF Custom Web Receiver with low-latency buffer config |
+| `Radio.Core/Configuration/AudioOutputOptions.cs` | `GoogleCastOutputOptions.ApplicationId` — configurable app ID (default: `CC1AD845`) |
+| `Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs` | Uses `_options.ApplicationId` for all `LaunchApplicationAsync()` calls |
+| `Radio.API/appsettings.json` | `AudioOutput.GoogleCast.ApplicationId` setting |
+
+### How the Custom Receiver Reduces Latency
+
+The Default Media Receiver (CC1AD845) has a hardcoded 10-15 second audio prefill buffer. For live radio streams, this creates unacceptable delay. The custom receiver uses CAF (Cast Application Framework) with:
+
+- `initialPlaybackWatermark = 0.2` — start playback after just 200ms of buffered audio (vs 10-15s default)
+- `resumePlaybackWatermark = 0.5` — resume after rebuffer with only 500ms
+- `disableIdleTimeout: true` — keeps receiver alive for continuous streams
+- `StreamType.LIVE` already enforced by our sender code
+
+### What's Needed — Registration & Hosting
+
+1. **Host `receiver.html` on HTTPS** — Google Cast requires the receiver URL to be HTTPS. Options:
+   - GitHub Pages (free, simplest): push `deploy/cast-receiver/receiver.html` to a `gh-pages` branch
+   - Firebase Hosting (free tier): `firebase init hosting` + `firebase deploy`
+   - Any static HTTPS host
+
+2. **Register a Custom Receiver** at [Google Cast SDK Console](https://cast.google.com/publish/):
+   - Sign in with a Google account
+   - Click "Add New Application" → "Custom Receiver"
+   - Set the receiver URL to the hosted HTTPS URL of `receiver.html`
+   - Note the **Application ID** assigned by Google (e.g., `A1B2C3D4`)
+
+3. **Configure the Application ID** in `appsettings.json`:
+   ```json
+   "GoogleCast": {
+     "ApplicationId": "A1B2C3D4"
+   }
+   ```
+
+4. **Enable test devices** (during development): In the Cast SDK Console, register your Chromecast device's serial number as a test device. Unpublished apps only work on registered test devices.
+
+5. **Publish** (optional): Once tested, publish the app in the Cast SDK Console to make it work on all Chromecast devices without serial number registration.
+
+### Gotchas
+
+- **HTTPS required**: Cast receivers must be served over HTTPS. `http://` URLs are rejected by the Cast SDK.
+- **Test device registration**: Unpublished custom receivers only work on devices registered in the Cast SDK Console. After registering, **reboot the Chromecast** for the change to take effect.
+- **Registration propagation**: New app IDs can take 5-15 minutes to propagate to Cast devices after registration.
+- **CAF v3 only**: The receiver uses CAF v3 (`cast_receiver_framework.js`). Do not use the deprecated v2 receiver SDK.
+- **Fallback**: If the custom receiver has issues, revert `ApplicationId` to `"CC1AD845"` to use the default media receiver (with higher latency).

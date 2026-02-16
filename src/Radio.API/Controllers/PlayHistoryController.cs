@@ -175,7 +175,7 @@ public class PlayHistoryController : ControllerBase
   /// <summary>
   /// Gets play history entries by source type.
   /// </summary>
-  /// <param name="source">The source type (Vinyl, Radio, File, Spotify).</param>
+  /// <param name="source">The source type (Vinyl, Radio, File, Bluetooth).</param>
   /// <param name="limit">Number of entries to retrieve (default 20, max 100).</param>
   /// <param name="offset">Number of entries to skip.</param>
   /// <returns>A list of play history entries for the specified source.</returns>
@@ -348,7 +348,7 @@ public class PlayHistoryController : ControllerBase
 
   /// <summary>
   /// Records a play history entry.
-  /// Priority: Spotify and File metadata are prioritized over Fingerprinting.
+  /// Priority: File and AVRCP metadata are prioritized over Fingerprinting.
   /// Duplicate entries within 5 minutes for the same track are prevented.
   /// </summary>
   /// <param name="request">The play recording request.</param>
@@ -476,6 +476,7 @@ public class PlayHistoryController : ControllerBase
     {
       Id = entry.Id,
       PlayedAt = entry.PlayedAt,
+      EndedAt = entry.EndedAt,
       Source = entry.Source.ToString(),
       MetadataSource = entry.MetadataSource?.ToString(),
       SourceDetails = entry.SourceDetails,
