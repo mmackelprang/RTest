@@ -547,22 +547,54 @@ public class AudioManager : IAudioManager, IAsyncDisposable
 
   /// <summary>
   /// Restores volume, mute, and balance from persisted preferences.
+  /// Reads from the config store directly (SQLite) since IOptionsMonitor only reflects appsettings.json defaults.
   /// Sets the mixer directly to avoid triggering re-persistence.
   /// </summary>
   private void RestoreVolumePreferences()
   {
-    var prefs = _audioPreferences.CurrentValue;
-
     try
     {
       var mixer = _audioEngine.GetMasterMixer();
-      mixer.MasterVolume = prefs.MasterVolume / 100f;
-      mixer.IsMuted = prefs.IsMuted;
+
+      // Try to read from config store (SQLite) first — this has the actual persisted runtime values
+      int volumePercent = _audioPreferences.CurrentValue.MasterVolume;
+      bool isMuted = _audioPreferences.CurrentValue.IsMuted;
+
+      if (_configurationManager != null)
+      {
+        try
+        {
+          var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+          _logger.LogDebug("Reading volume from config store '{StoreId}'", storeId);
+          var store = _configurationManager.GetStoreAsync(storeId).GetAwaiter().GetResult();
+
+          var volEntry = store.GetEntryAsync("AudioPreferences:MasterVolume").GetAwaiter().GetResult();
+          _logger.LogDebug("Config store volume entry: {Entry}", volEntry?.Value ?? "null");
+          if (volEntry != null && int.TryParse(volEntry.Value, out var storedVol))
+            volumePercent = storedVol;
+
+          var muteEntry = store.GetEntryAsync("AudioPreferences:IsMuted").GetAwaiter().GetResult();
+          _logger.LogDebug("Config store mute entry: {Entry}", muteEntry?.Value ?? "null");
+          if (muteEntry != null && bool.TryParse(muteEntry.Value, out var storedMuted))
+            isMuted = storedMuted;
+        }
+        catch (Exception ex)
+        {
+          _logger.LogWarning(ex, "Could not read volume from config store, using defaults");
+        }
+      }
+      else
+      {
+        _logger.LogWarning("No configuration manager available, cannot restore persisted volume");
+      }
+
+      mixer.MasterVolume = volumePercent / 100f;
+      mixer.IsMuted = isMuted;
       mixer.Balance = 0f; // Always centered — balance control removed from UI
 
       _logger.LogInformation(
-        "Restored volume preferences: Volume={Volume}%, Muted={Muted}, Balance={Balance}%",
-        prefs.MasterVolume, prefs.IsMuted, prefs.Balance);
+        "Restored volume preferences: Volume={Volume}%, Muted={Muted}",
+        volumePercent, isMuted);
     }
     catch (Exception ex)
     {

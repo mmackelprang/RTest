@@ -106,8 +106,8 @@ public sealed class ConfigurationStoreFactory : IConfigurationStoreFactory
     }
     else
     {
-      // For SQLite, check if the database file exists
-      var dbPath = Path.Combine(basePath, _options.SqliteFileName);
+      // For SQLite, use the same path resolver as CreateSqliteStore
+      var dbPath = _pathResolver.GetConfigurationDatabasePath();
       return Task.FromResult(File.Exists(dbPath));
     }
   }

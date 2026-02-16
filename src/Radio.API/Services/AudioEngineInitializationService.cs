@@ -92,8 +92,14 @@ public class AudioEngineInitializationService : IHostedService
           device.Name, device.Id);
       }
       
-      // Apply startup audio preferences
+      // Apply startup audio preferences (output device, source)
       await ApplyStartupPreferencesAsync(outputDevices, cancellationToken);
+
+      // Initialize AudioManager (restores volume/mute/balance from config store)
+      if (_audioManager != null)
+      {
+        await _audioManager.InitializeAsync(cancellationToken);
+      }
 
       // Enable Bluetooth discoverability on startup if configured
       await EnableBluetoothOnStartupAsync(cancellationToken);

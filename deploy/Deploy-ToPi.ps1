@@ -147,8 +147,19 @@ if ($LASTEXITCODE -ne 0) {
   exit 1
 }
 
-# Move files into place on the Pi, preserving data and logs
-ssh $SshTarget "sudo mkdir -p $PiPath/api $PiPath/web $PiPath/data $PiPath/logs && sudo rsync -a --delete /tmp/radio-deploy-api/ $PiPath/api/ && sudo rsync -a --delete /tmp/radio-deploy-web/ $PiPath/web/ && sudo chown -R radio:radio $PiPath && sudo chmod +x $PiPath/api/Radio.API $PiPath/web/Radio.Web && rm -rf /tmp/radio-deploy-api /tmp/radio-deploy-web"
+# Move files into place on the Pi, preserving data, logs, and Production config
+ssh $SshTarget "sudo mkdir -p $PiPath/api $PiPath/web $PiPath/data $PiPath/logs && sudo rsync -a --delete --exclude='appsettings.Production.json' /tmp/radio-deploy-api/ $PiPath/api/ && sudo rsync -a --delete --exclude='appsettings.Production.json' /tmp/radio-deploy-web/ $PiPath/web/ && sudo chown -R radio:radio $PiPath && sudo chmod +x $PiPath/api/Radio.API $PiPath/web/Radio.Web && rm -rf /tmp/radio-deploy-api /tmp/radio-deploy-web"
+
+# Deploy Pi-specific Production config if not already present
+$piConfigPath = Join-Path $RepoRoot "deploy\raspberry-pi\appsettings.Production.json"
+if (Test-Path $piConfigPath) {
+  ssh $SshTarget "test -f $PiPath/api/appsettings.Production.json" 2>$null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "  Deploying Production config..." -ForegroundColor DarkGray
+    scp $piConfigPath "${SshTarget}:/tmp/appsettings.Production.json"
+    ssh $SshTarget "sudo cp /tmp/appsettings.Production.json $PiPath/api/ && sudo cp /tmp/appsettings.Production.json $PiPath/web/ && sudo chown radio:radio $PiPath/api/appsettings.Production.json $PiPath/web/appsettings.Production.json && rm /tmp/appsettings.Production.json"
+  }
+}
 
 if ($LASTEXITCODE -ne 0) {
   Write-Host "Remote file move failed!" -ForegroundColor Red
