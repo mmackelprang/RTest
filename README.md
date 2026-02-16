@@ -20,7 +20,7 @@ This project restores the original function (Radio/Vinyl) while adding modern ca
 | 7 - Visualization | ✅ Completed | Spectrum analyzer (FFT), VU meters, waveform display |
 | 8 - API | ✅ Completed | 16 REST controllers, 126+ endpoints, 2 SignalR hubs, Swagger |
 | 9 - UI | ✅ Completed | 12-page Blazor Server UI, MudBlazor Material 3, shared components |
-| 10 - Testing | ✅ Substantially Complete | 1,257 unit/integration tests across 7 projects (E2E pending) |
+| 10 - Testing | ✅ Substantially Complete | 1,290 tests across 7 projects (unit, integration, E2E) |
 | 11 - Documentation | 🔄 In Progress | Design docs, decision log, work log (user manual pending) |
 | 12 - Deployment | ✅ Substantially Complete | Dual-service systemd, Pi deploy scripts, tested on hardware |
 
@@ -656,7 +656,7 @@ Deploy from Windows:
 
 ## Testing
 
-1,257 automated tests across 7 projects:
+1,290 automated tests across 7 projects:
 
 ```bash
 # Run all tests

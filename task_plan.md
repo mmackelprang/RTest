@@ -4,7 +4,7 @@
 Reconcile all project documents, complete remaining verification, fix known issues, and polish for "done" state.
 
 ## Current Phase
-Phase 8 — Documentation & Polish (reconciliation complete, ready for decisions)
+Phase 9 — Pi Verification (requires hardware) / Phase 10 — Final Polish
 
 ---
 
@@ -42,31 +42,13 @@ All core development phases are **COMPLETE**:
 
 ---
 
-## Phase 8: Documentation & Polish 🆕
+## Phase 8: Documentation & Polish ✅
 
-### 8.1 Update PLAN.md
-- [ ] Mark Phases 3, 9 as Completed
-- [ ] Mark Phases 10-12 with actual status (substantially complete)
-- [ ] Add post-plan features section (BT, SDR, Fingerprinting, Cast, Deployment)
-- [ ] Update Progress Tracking table with dates
-- [ ] Update "Last Updated" date
-
-### 8.2 Update CLAUDE.md
-- [ ] Fix "Phase 9 - pending" → completed
-- [ ] Add Bluetooth A2DP to solution structure
-- [ ] Add dual-service deployment info
-- [ ] Add deploy commands
-
-### 8.3 Update README.md
-- [ ] Add post-plan features (BT, SDR, Fingerprinting, Cast)
-- [ ] Fix "All 13 phases finished!" — Phases 10-12 are partial
-- [ ] Add deployment architecture section
-- [ ] Update test counts
-
-### 8.4 Investigate FileBrowser metadata TODO
-- [ ] Check if `formatInfo.Tags.Genre/Year/TrackNumber` work in current SoundFlow version
-- [ ] If so, fix FileBrowser.cs and remove the stale TODO
-- [ ] If not, leave documented in FUTURE-WORK.md
+- [x] 8.1 Update PLAN.md — phases, post-plan features, progress table
+- [x] 8.2 Update CLAUDE.md — complete rewrite with current state
+- [x] 8.3 Update README.md — status table, post-plan features, deployment, test counts
+- [x] 8.4 FileBrowser metadata — fixed stale TODOs (uint? → int? cast), removed FUTURE-WORK item #5
+- [x] 8.5 Root folder cleanup — moved 30 old docs/screenshots to /archive, removed artifacts
 
 ---
 
@@ -94,17 +76,17 @@ These require physical Pi hardware and can't be done from Windows dev:
 
 ---
 
-## Phase 10: Final Polish (Optional)
+## Phase 10: Final Polish (Optional) 🔄
 
 ### 10.1 Kiosk Mode
 - Priority: Medium — needed for final console radio experience
 - Deferred until Pi verification complete
-- Implementation plan in FUTURE-WORK.md
+- Full implementation plan in FUTURE-WORK.md (item #5)
 
-### 10.2 E2E Tests
-- Priority: Low — 1,257 unit/integration tests exist
-- Playwright infrastructure in Radio.Web.E2ETests
-- Write 5-10 critical path E2E tests
+### 10.2 E2E Tests ✅
+- 33 E2E tests across 5 test classes (Home, Navigation, Radio, Queue, Devices, History)
+- Covers: page loading, element presence, navigation, file browser toggle, empty states
+- Soft-skip when server unavailable (safe for CI)
 
 ### 10.3 Low-Priority Deferred Items
 - TTS audio cache
