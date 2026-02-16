@@ -138,4 +138,66 @@ public class DevicesControllerTests : IClassFixture<CustomWebApplicationFactory<
     // Assert
     Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
   }
+
+  [Fact]
+  public async Task GetDeviceDisplay_ReturnsDeviceList()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/devices/display");
+
+    // Assert
+    Assert.True(response.IsSuccessStatusCode, $"Expected success, got {response.StatusCode}");
+
+    var devices = await response.Content.ReadFromJsonAsync<List<DeviceDisplayInfoDto>>();
+    Assert.NotNull(devices);
+  }
+
+  [Fact]
+  public async Task SetDeviceVisibility_WithEmptyRawName_ReturnsBadRequest()
+  {
+    // Arrange
+    var request = new SetDeviceVisibilityRequest { RawName = "", Visible = false };
+
+    // Act
+    var response = await _client.PutAsJsonAsync("/api/devices/display/visibility", request);
+
+    // Assert
+    Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+  }
+
+  [Fact]
+  public async Task SetDeviceFriendlyName_WithEmptyRawName_ReturnsBadRequest()
+  {
+    // Arrange
+    var request = new SetDeviceFriendlyNameRequest { RawName = "", FriendlyName = "Test" };
+
+    // Act
+    var response = await _client.PutAsJsonAsync("/api/devices/display/name", request);
+
+    // Assert
+    Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+  }
+
+  [Fact]
+  public async Task SetDeviceFriendlyName_WithEmptyFriendlyName_ReturnsBadRequest()
+  {
+    // Arrange
+    var request = new SetDeviceFriendlyNameRequest { RawName = "TestDevice", FriendlyName = "" };
+
+    // Act
+    var response = await _client.PutAsJsonAsync("/api/devices/display/name", request);
+
+    // Assert
+    Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+  }
+
+  [Fact]
+  public async Task ClearDeviceFriendlyName_WithoutRawName_ReturnsBadRequest()
+  {
+    // Act
+    var response = await _client.DeleteAsync("/api/devices/display/name");
+
+    // Assert
+    Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+  }
 }

@@ -47,12 +47,15 @@ public class SoundFlowAudioEngineTests
     _optionsMock = new Mock<IOptions<AudioEngineOptions>>();
     _optionsMock.Setup(o => o.Value).Returns(_options);
 
+    var audioOutputOptionsMock = new Mock<IOptionsMonitor<AudioOutputOptions>>();
+    audioOutputOptionsMock.Setup(x => x.CurrentValue).Returns(new AudioOutputOptions());
+
     _masterMixer = new SoundFlowMasterMixer(_mixerLoggerMock.Object);
     _deviceManager = new SoundFlowDeviceManager(
         _deviceManagerLoggerMock.Object,
         _configManagerMock.Object,
         _audioPreferencesMock.Object,
-        Options.Create(new AudioOutputOptions()));
+        audioOutputOptionsMock.Object);
   }
 
   private SoundFlowAudioEngine CreateEngine()

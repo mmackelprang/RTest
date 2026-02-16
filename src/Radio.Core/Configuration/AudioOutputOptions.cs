@@ -50,6 +50,24 @@ public class DeviceDisplayOptions
   /// unlike Dictionary enumeration.
   /// </summary>
   public List<DeviceNameMapping> FriendlyNames { get; set; } = [];
+
+  /// <summary>
+  /// Raw device names explicitly hidden by the user.
+  /// Takes precedence over regex patterns (checked first).
+  /// </summary>
+  public List<string> HiddenDeviceNames { get; set; } = [];
+
+  /// <summary>
+  /// Raw device names explicitly shown by the user.
+  /// Overrides regex HiddenDevicePatterns matches (force-show).
+  /// </summary>
+  public List<string> VisibleDeviceNames { get; set; } = [];
+
+  /// <summary>
+  /// Per-device friendly name overrides keyed by raw device name.
+  /// Takes precedence over substring FriendlyNames mappings.
+  /// </summary>
+  public Dictionary<string, string> DeviceFriendlyNames { get; set; } = new();
 }
 
 /// <summary>

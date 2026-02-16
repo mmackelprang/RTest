@@ -147,13 +147,23 @@ public class DeviceManagementPageTests : TestContext
 
     // Assert - Page structure is valid
     var markup = cut.Markup;
-    
+
     // Should contain MudBlazor components
     Assert.Contains("mud-", markup);
-    
+
     // Should have the three main sections
     Assert.Contains("Output Devices", markup);
     Assert.Contains("Input Devices", markup);
     Assert.Contains("USB Port Reservations", markup);
+  }
+
+  [Fact]
+  public void DeviceManagementPage_ShowsDisplaySettingsSection()
+  {
+    // Act
+    var cut = RenderComponent<DeviceManagementPage>();
+
+    // Assert - Device Display Settings section present
+    Assert.Contains("Device Display Settings", cut.Markup);
   }
 }

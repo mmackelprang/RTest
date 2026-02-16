@@ -20,8 +20,9 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
   private readonly ILogger<SoundFlowDeviceManager> _logger;
   private readonly IConfigurationManager _configurationManager;
   private readonly IOptionsMonitor<AudioPreferences> _audioPreferences;
-  private readonly DeviceDisplayOptions _displayOptions;
-  private readonly List<Regex> _hiddenPatterns;
+  private readonly IOptionsMonitor<AudioOutputOptions> _audioOutputOptionsMonitor;
+  private DeviceDisplayOptions _displayOptions;
+  private List<Regex> _hiddenPatterns;
   private readonly Dictionary<string, string> _usbPortReservations = new();
   private readonly object _reservationLock = new();
   private readonly object _devicesLock = new();
@@ -40,38 +41,26 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
   /// <param name="logger">The logger instance.</param>
   /// <param name="configurationManager">The configuration manager.</param>
   /// <param name="audioPreferences">The audio preferences.</param>
-  /// <param name="audioOutputOptions">The audio output options (includes device display config).</param>
+  /// <param name="audioOutputOptions">The audio output options monitor (includes device display config).</param>
   public SoundFlowDeviceManager(
     ILogger<SoundFlowDeviceManager> logger,
     IConfigurationManager configurationManager,
     IOptionsMonitor<AudioPreferences> audioPreferences,
-    IOptions<AudioOutputOptions> audioOutputOptions)
+    IOptionsMonitor<AudioOutputOptions> audioOutputOptions)
   {
     _logger = logger;
     _configurationManager = configurationManager;
     _audioPreferences = audioPreferences;
-    _displayOptions = audioOutputOptions.Value.DeviceDisplay;
+    _audioOutputOptionsMonitor = audioOutputOptions;
+    _displayOptions = audioOutputOptions.CurrentValue.DeviceDisplay;
+    _hiddenPatterns = CompileHiddenPatterns(_displayOptions);
 
-    // Pre-compile hidden device patterns
-    _hiddenPatterns = _displayOptions.HiddenDevicePatterns
-      .Select(p =>
-      {
-        try { return new Regex(p, RegexOptions.IgnoreCase | RegexOptions.Compiled); }
-        catch (Exception ex)
-        {
-          _logger.LogWarning("Invalid hidden device pattern '{Pattern}': {Error}", p, ex.Message);
-          return null;
-        }
-      })
-      .Where(r => r != null)
-      .Cast<Regex>()
-      .ToList();
-
-    if (_hiddenPatterns.Count > 0)
-      _logger.LogInformation("Device filtering: {Count} hidden pattern(s) active", _hiddenPatterns.Count);
-
-    if (_displayOptions.FriendlyNames.Count > 0)
-      _logger.LogInformation("Device friendly names: {Count} mapping(s) configured", _displayOptions.FriendlyNames.Count);
+    // Subscribe to config changes for runtime refresh
+    _audioOutputOptionsMonitor.OnChange(opts =>
+    {
+      _logger.LogInformation("Audio output options changed, reloading display settings");
+      ReloadDisplaySettings(opts.DeviceDisplay);
+    });
 
     // Initialize device cache immediately
     var (outputDevices, inputDevices) = EnumerateDevices();
@@ -352,11 +341,24 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
 
   private bool IsDeviceHidden(string deviceName)
   {
+    // Per-device name overrides take precedence
+    if (_displayOptions.HiddenDeviceNames.Contains(deviceName, StringComparer.OrdinalIgnoreCase))
+      return true;
+    if (_displayOptions.VisibleDeviceNames.Contains(deviceName, StringComparer.OrdinalIgnoreCase))
+      return false;
+
+    // Fall back to regex patterns
     return _hiddenPatterns.Any(p => p.IsMatch(deviceName));
   }
 
   private string ApplyFriendlyName(string rawName)
   {
+    // Per-device name overrides take precedence
+    if (_displayOptions.DeviceFriendlyNames.TryGetValue(rawName, out var overrideName) &&
+        !string.IsNullOrEmpty(overrideName))
+      return overrideName;
+
+    // Fall back to substring match
     foreach (var mapping in _displayOptions.FriendlyNames)
     {
       if (!string.IsNullOrEmpty(mapping.Pattern) &&
@@ -405,6 +407,7 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
         {
           Id = $"playback-{i}",
           Name = displayName,
+          RawName = rawName,
           Type = AudioDeviceType.Output,
           IsDefault = isDefault,
           MaxChannels = 2,
@@ -442,6 +445,7 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
         {
           Id = $"capture-{i}",
           Name = displayName,
+          RawName = rawName,
           Type = AudioDeviceType.Input,
           IsDefault = isDefault,
           MaxChannels = 2,
@@ -521,6 +525,122 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
     }
 
     return (outputDevices, inputDevices);
+  }
+
+  /// <summary>
+  /// Gets all output devices (including hidden) with display metadata.
+  /// Used by the Device Display Settings UI.
+  /// </summary>
+  public Task<IReadOnlyList<DeviceDisplayInfo>> GetAllDevicesWithDisplayInfoAsync(
+    CancellationToken cancellationToken = default)
+  {
+    var result = new List<DeviceDisplayInfo>();
+    var castName = GetCastDisplayName();
+
+    try
+    {
+      using var tempEngine = new MiniAudioEngine();
+
+      var playbackDevices = tempEngine.PlaybackDevices;
+      for (int i = 0; i < playbackDevices.Length; i++)
+      {
+        var device = playbackDevices[i];
+        var rawName = string.IsNullOrWhiteSpace(device.Name)
+          ? "Default Audio Output"
+          : device.Name;
+        var isHidden = IsDeviceHidden(rawName);
+        var displayName = ApplyFriendlyName(rawName);
+        var isUsb = rawName.Contains("USB", StringComparison.OrdinalIgnoreCase);
+        var friendlyOverride = _displayOptions.DeviceFriendlyNames.TryGetValue(rawName, out var fn) ? fn : null;
+
+        result.Add(new DeviceDisplayInfo
+        {
+          DeviceId = $"playback-{i}",
+          RawName = rawName,
+          DisplayName = displayName,
+          IsHidden = isHidden,
+          FriendlyNameOverride = friendlyOverride,
+          Type = AudioDeviceType.Output,
+          IsDefault = result.Count(r => r.Type == AudioDeviceType.Output && !r.IsHidden) == 0 && !isHidden,
+          IsUSBDevice = isUsb
+        });
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to enumerate devices for display info");
+      result.Add(new DeviceDisplayInfo
+      {
+        DeviceId = "default",
+        RawName = "Default Audio Output",
+        DisplayName = "Default Audio Output",
+        IsHidden = false,
+        Type = AudioDeviceType.Output,
+        IsDefault = true,
+        IsUSBDevice = false
+      });
+    }
+
+    return Task.FromResult<IReadOnlyList<DeviceDisplayInfo>>(result.AsReadOnly());
+  }
+
+  /// <summary>
+  /// Reloads display settings from the current options and re-enumerates devices.
+  /// Call this after persisting config changes that may not trigger IOptionsMonitor.OnChange
+  /// (e.g., SQLite config store updates).
+  /// </summary>
+  public void ReloadDisplaySettings()
+  {
+    ReloadDisplaySettings(_audioOutputOptionsMonitor.CurrentValue.DeviceDisplay);
+  }
+
+  private void ReloadDisplaySettings(DeviceDisplayOptions newOptions)
+  {
+    _displayOptions = newOptions;
+    _hiddenPatterns = CompileHiddenPatterns(_displayOptions);
+    _logger.LogInformation(
+      "Display settings reloaded: {HiddenPatterns} patterns, {HiddenNames} hidden names, {VisibleNames} visible overrides, {FriendlyNames} friendly names",
+      _hiddenPatterns.Count, _displayOptions.HiddenDeviceNames.Count,
+      _displayOptions.VisibleDeviceNames.Count, _displayOptions.DeviceFriendlyNames.Count);
+
+    // Re-enumerate devices to apply new display settings
+    try
+    {
+      var (outputDevices, inputDevices) = EnumerateDevices();
+      lock (_devicesLock)
+      {
+        _cachedOutputDevices = outputDevices;
+        _cachedInputDevices = inputDevices;
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to re-enumerate devices after display settings reload");
+    }
+  }
+
+  private List<Regex> CompileHiddenPatterns(DeviceDisplayOptions options)
+  {
+    var patterns = options.HiddenDevicePatterns
+      .Select(p =>
+      {
+        try { return new Regex(p, RegexOptions.IgnoreCase | RegexOptions.Compiled); }
+        catch (Exception ex)
+        {
+          _logger.LogWarning("Invalid hidden device pattern '{Pattern}': {Error}", p, ex.Message);
+          return null;
+        }
+      })
+      .Where(r => r != null)
+      .Cast<Regex>()
+      .ToList();
+
+    if (patterns.Count > 0)
+      _logger.LogInformation("Device filtering: {Count} hidden pattern(s) active", patterns.Count);
+    if (options.FriendlyNames.Count > 0)
+      _logger.LogInformation("Device friendly names: {Count} mapping(s) configured", options.FriendlyNames.Count);
+
+    return patterns;
   }
 
   /// <summary>
@@ -614,4 +734,20 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
   {
     DevicesChanged?.Invoke(this, e);
   }
+}
+
+/// <summary>
+/// Display metadata for a device, including hidden/visible state and friendly name overrides.
+/// Used by the Device Display Settings UI.
+/// </summary>
+public record DeviceDisplayInfo
+{
+  public required string DeviceId { get; init; }
+  public required string RawName { get; init; }
+  public required string DisplayName { get; init; }
+  public bool IsHidden { get; init; }
+  public string? FriendlyNameOverride { get; init; }
+  public required AudioDeviceType Type { get; init; }
+  public bool IsDefault { get; init; }
+  public bool IsUSBDevice { get; init; }
 }

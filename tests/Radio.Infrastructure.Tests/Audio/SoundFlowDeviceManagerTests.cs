@@ -18,6 +18,7 @@ public class SoundFlowDeviceManagerTests
   private readonly Mock<ILogger<SoundFlowDeviceManager>> _loggerMock;
   private readonly Mock<IConfigurationManager> _configManagerMock;
   private readonly Mock<IOptionsMonitor<AudioPreferences>> _audioPreferencesMock;
+  private readonly Mock<IOptionsMonitor<AudioOutputOptions>> _audioOutputOptionsMock;
   private readonly SoundFlowDeviceManager _deviceManager;
 
   public SoundFlowDeviceManagerTests()
@@ -25,14 +26,16 @@ public class SoundFlowDeviceManagerTests
     _loggerMock = new Mock<ILogger<SoundFlowDeviceManager>>();
     _configManagerMock = new Mock<IConfigurationManager>();
     _audioPreferencesMock = new Mock<IOptionsMonitor<AudioPreferences>>();
+    _audioOutputOptionsMock = new Mock<IOptionsMonitor<AudioOutputOptions>>();
 
     _audioPreferencesMock.Setup(x => x.CurrentValue).Returns(new AudioPreferences());
+    _audioOutputOptionsMock.Setup(x => x.CurrentValue).Returns(new AudioOutputOptions());
 
     _deviceManager = new SoundFlowDeviceManager(
         _loggerMock.Object,
         _configManagerMock.Object,
         _audioPreferencesMock.Object,
-        Options.Create(new AudioOutputOptions()));
+        _audioOutputOptionsMock.Object);
   }
 
   [Fact]

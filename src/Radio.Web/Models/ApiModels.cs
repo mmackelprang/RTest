@@ -450,6 +450,34 @@ public record NotificationSoundDto(
   long FileSize
 );
 
+// Device Display DTOs
+public class DeviceDisplayInfoDto
+{
+  [JsonPropertyName("id")]
+  public string Id { get; set; } = string.Empty;
+
+  [JsonPropertyName("rawName")]
+  public string RawName { get; set; } = string.Empty;
+
+  [JsonPropertyName("displayName")]
+  public string DisplayName { get; set; } = string.Empty;
+
+  [JsonPropertyName("isHidden")]
+  public bool IsHidden { get; set; }
+
+  [JsonPropertyName("friendlyNameOverride")]
+  public string? FriendlyNameOverride { get; set; }
+
+  [JsonPropertyName("type")]
+  public string Type { get; set; } = string.Empty;
+
+  [JsonPropertyName("isDefault")]
+  public bool IsDefault { get; set; }
+
+  [JsonPropertyName("isUSBDevice")]
+  public bool IsUSBDevice { get; set; }
+}
+
 // Cast Device DTOs
 public record CastDeviceDto(
   string Id,

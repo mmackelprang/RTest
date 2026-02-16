@@ -19,6 +19,71 @@
       </MudButton>
     </MudStack>
 
+    @* Device Display Settings Section *@
+    <MudPaper Elevation="2" Class="pa-4">
+      <MudStack Spacing="2">
+        <MudText Typo="Typo.h5">Device Display Settings</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+          Control which output devices appear in the taskbar dropdown and set friendly names.
+        </MudText>
+
+        @if (isLoadingDisplay)
+        {
+          <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (displaySettings == null || !displaySettings.Any())
+        {
+          <MudAlert Severity="Severity.Info">No devices found. Click Refresh to scan for devices.</MudAlert>
+        }
+        else
+        {
+          <MudTable Items="@displaySettings" Hover="true" Striped="true" Dense="true">
+            <HeaderContent>
+              <MudTh>Visible</MudTh>
+              <MudTh>Device Name</MudTh>
+              <MudTh>Friendly Name</MudTh>
+              <MudTh Style="width: 50px"></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+              <MudTd DataLabel="Visible">
+                <MudIconButton Icon="@(context.IsHidden ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                               Color="@(context.IsHidden ? Color.Default : Color.Success)"
+                               Size="Size.Small"
+                               title="@(context.IsHidden ? "Hidden — click to show" : "Visible — click to hide")"
+                               OnClick="@(() => ToggleDeviceVisibilityAsync(context))" />
+              </MudTd>
+              <MudTd DataLabel="Device Name">
+                <MudText Style="@(context.IsHidden ? "text-decoration: line-through; opacity: 0.5;" : "")">
+                  @context.RawName
+                </MudText>
+              </MudTd>
+              <MudTd DataLabel="Friendly Name">
+                <MudTextField T="string"
+                              Value="@(GetFriendlyNameEditValue(context))"
+                              ValueChanged="@(val => OnFriendlyNameChanged(context, val))"
+                              Variant="Variant.Outlined"
+                              Margin="Margin.Dense"
+                              Placeholder="@context.DisplayName"
+                              Disabled="@context.IsHidden"
+                              Immediate="false"
+                              Style="@(context.IsHidden ? "opacity: 0.5;" : "")" />
+              </MudTd>
+              <MudTd>
+                @if (!string.IsNullOrEmpty(context.FriendlyNameOverride))
+                {
+                  <MudIconButton Icon="@Icons.Material.Filled.Clear"
+                                 Color="Color.Default"
+                                 Size="Size.Small"
+                                 title="Clear friendly name"
+                                 OnClick="@(() => ClearFriendlyNameAsync(context))" />
+                }
+              </MudTd>
+            </RowTemplate>
+          </MudTable>
+        }
+      </MudStack>
+    </MudPaper>
+
     @* Output Devices Section *@
     <MudPaper Elevation="2" Class="pa-4">
       <MudStack Spacing="2">
@@ -291,11 +356,13 @@
   private List<AudioDeviceDto>? inputDevices;
   private List<UsbPortDto>? usbPorts;
   private List<CastDeviceDto>? castDevices;
+  private List<DeviceDisplayInfoDto>? displaySettings;
 
   private bool isLoadingOutput = false;
   private bool isLoadingInput = false;
   private bool isLoadingUsb = false;
   private bool isLoadingCast = false;
+  private bool isLoadingDisplay = false;
   private bool isDiscoveringCast = false;
   private string connectingCastDeviceId = "";
   private string defaultCastDeviceId = "";
@@ -319,6 +386,7 @@
       isLoadingInput = true;
       isLoadingUsb = true;
       isLoadingCast = true;
+      isLoadingDisplay = true;
       StateHasChanged();
 
       // Load all devices in parallel for better performance
@@ -327,14 +395,16 @@
       var usbTask = DevicesApi.GetUsbPortsAsync();
       var castTask = DevicesApi.GetCachedCastDevicesAsync();
       var defaultCastTask = DevicesApi.GetDefaultCastDeviceAsync();
+      var displayTask = DevicesApi.GetDeviceDisplaySettingsAsync();
 
-      await Task.WhenAll(outputTask, inputTask, usbTask, castTask, defaultCastTask);
+      await Task.WhenAll(outputTask, inputTask, usbTask, castTask, defaultCastTask, displayTask);
 
       // Assign results
       outputDevices = await outputTask;
       inputDevices = await inputTask;
       usbPorts = await usbTask;
       castDevices = await castTask;
+      displaySettings = await displayTask;
       var defaultCast = await defaultCastTask;
       defaultCastDeviceId = defaultCast?.Id ?? "";
 
@@ -343,6 +413,7 @@
       isLoadingInput = false;
       isLoadingUsb = false;
       isLoadingCast = false;
+      isLoadingDisplay = false;
 
       lastRefreshTime = DateTime.Now;
       StateHasChanged();
@@ -357,6 +428,7 @@
       isLoadingInput = false;
       isLoadingUsb = false;
       isLoadingCast = false;
+      isLoadingDisplay = false;
       StateHasChanged();
     }
   }
@@ -597,5 +669,99 @@
       Logger.LogError(ex, "Error clearing default Cast device");
       Snackbar.Add("Error clearing default Cast device", Severity.Error);
     }
+  }
+
+  private string GetFriendlyNameEditValue(DeviceDisplayInfoDto device)
+  {
+    return device.FriendlyNameOverride ?? "";
+  }
+
+  private async Task OnFriendlyNameChanged(DeviceDisplayInfoDto device, string newValue)
+  {
+    if (string.IsNullOrWhiteSpace(newValue))
+    {
+      // If cleared, remove the override
+      if (!string.IsNullOrEmpty(device.FriendlyNameOverride))
+      {
+        await ClearFriendlyNameAsync(device);
+      }
+      return;
+    }
+
+    // Don't update if value hasn't changed
+    if (newValue == device.FriendlyNameOverride)
+      return;
+
+    try
+    {
+      var success = await DevicesApi.SetDeviceFriendlyNameAsync(device.RawName, newValue);
+      if (success)
+      {
+        Snackbar.Add($"Friendly name set for {device.RawName}", Severity.Success);
+        await ReloadDisplayAndOutputDevicesAsync();
+      }
+      else
+      {
+        Snackbar.Add("Failed to set friendly name", Severity.Warning);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error setting friendly name");
+      Snackbar.Add("Error setting friendly name", Severity.Error);
+    }
+  }
+
+  private async Task ToggleDeviceVisibilityAsync(DeviceDisplayInfoDto device)
+  {
+    try
+    {
+      var newVisible = device.IsHidden; // Toggle: hidden → visible, visible → hidden
+      var success = await DevicesApi.SetDeviceVisibilityAsync(device.RawName, newVisible);
+      if (success)
+      {
+        var action = newVisible ? "shown" : "hidden";
+        Snackbar.Add($"Device {action}: {device.RawName}", Severity.Success);
+        await ReloadDisplayAndOutputDevicesAsync();
+      }
+      else
+      {
+        Snackbar.Add("Failed to update device visibility", Severity.Warning);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error toggling device visibility");
+      Snackbar.Add("Error toggling device visibility", Severity.Error);
+    }
+  }
+
+  private async Task ClearFriendlyNameAsync(DeviceDisplayInfoDto device)
+  {
+    try
+    {
+      var success = await DevicesApi.ClearDeviceFriendlyNameAsync(device.RawName);
+      if (success)
+      {
+        Snackbar.Add($"Friendly name cleared for {device.RawName}", Severity.Success);
+        await ReloadDisplayAndOutputDevicesAsync();
+      }
+      else
+      {
+        Snackbar.Add("Failed to clear friendly name", Severity.Warning);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error clearing friendly name");
+      Snackbar.Add("Error clearing friendly name", Severity.Error);
+    }
+  }
+
+  private async Task ReloadDisplayAndOutputDevicesAsync()
+  {
+    displaySettings = await DevicesApi.GetDeviceDisplaySettingsAsync();
+    outputDevices = await DevicesApi.GetOutputDevicesAsync();
+    StateHasChanged();
   }
 }

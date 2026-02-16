@@ -135,6 +135,76 @@ public class DevicesApiService
   }
 
   /// <summary>
+  /// Gets all output devices (including hidden) with display settings.
+  /// </summary>
+  public async Task<List<DeviceDisplayInfoDto>?> GetDeviceDisplaySettingsAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      return await _httpClient.GetFromJsonAsync<List<DeviceDisplayInfoDto>>("/api/devices/display", JsonOptions, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to get device display settings");
+      return null;
+    }
+  }
+
+  /// <summary>
+  /// Sets visibility for a specific device by raw name.
+  /// </summary>
+  public async Task<bool> SetDeviceVisibilityAsync(string rawName, bool visible, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var request = new { RawName = rawName, Visible = visible };
+      var response = await _httpClient.PutAsJsonAsync("/api/devices/display/visibility", request, cancellationToken);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to set device visibility");
+      return false;
+    }
+  }
+
+  /// <summary>
+  /// Sets a friendly name for a specific device.
+  /// </summary>
+  public async Task<bool> SetDeviceFriendlyNameAsync(string rawName, string friendlyName, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var request = new { RawName = rawName, FriendlyName = friendlyName };
+      var response = await _httpClient.PutAsJsonAsync("/api/devices/display/name", request, cancellationToken);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to set device friendly name");
+      return false;
+    }
+  }
+
+  /// <summary>
+  /// Clears a friendly name override for a specific device.
+  /// </summary>
+  public async Task<bool> ClearDeviceFriendlyNameAsync(string rawName, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var response = await _httpClient.DeleteAsync(
+        $"/api/devices/display/name?rawName={Uri.EscapeDataString(rawName)}", cancellationToken);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to clear device friendly name");
+      return false;
+    }
+  }
+
+  /// <summary>
   /// Gets cached Google Cast devices (no mDNS discovery, instant).
   /// </summary>
   public async Task<List<CastDeviceDto>?> GetCachedCastDevicesAsync(CancellationToken cancellationToken = default)

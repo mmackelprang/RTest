@@ -439,6 +439,39 @@ public class CastDeviceDto
 }
 
 /// <summary>
+/// Display metadata for a device, including hidden/visible state and friendly name overrides.
+/// </summary>
+public class DeviceDisplayInfoDto
+{
+  public string Id { get; set; } = string.Empty;
+  public string RawName { get; set; } = string.Empty;
+  public string DisplayName { get; set; } = string.Empty;
+  public bool IsHidden { get; set; }
+  public string? FriendlyNameOverride { get; set; }
+  public string Type { get; set; } = string.Empty;
+  public bool IsDefault { get; set; }
+  public bool IsUSBDevice { get; set; }
+}
+
+/// <summary>
+/// Request to set device visibility.
+/// </summary>
+public class SetDeviceVisibilityRequest
+{
+  public string RawName { get; set; } = string.Empty;
+  public bool Visible { get; set; }
+}
+
+/// <summary>
+/// Request to set a device friendly name.
+/// </summary>
+public class SetDeviceFriendlyNameRequest
+{
+  public string RawName { get; set; } = string.Empty;
+  public string FriendlyName { get; set; } = string.Empty;
+}
+
+/// <summary>
 /// Request to connect to a Cast device.
 /// </summary>
 public class ConnectCastDeviceRequest

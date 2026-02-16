@@ -135,6 +135,13 @@ public record AudioDeviceInfo
   /// Gets whether this is a USB audio device.
   /// </summary>
   public bool IsUSBDevice { get; init; }
+
+  /// <summary>
+  /// Gets the raw (unmodified) device name from the audio backend.
+  /// Null for virtual devices like Cast or HTTP Stream.
+  /// Used as the stable key for per-device display overrides.
+  /// </summary>
+  public string? RawName { get; init; }
 }
 
 /// <summary>

@@ -169,7 +169,7 @@ public static class AudioServiceExtensions
     services.Configure(configureOptions);
 
     // Register default AudioOutputOptions so SoundFlowDeviceManager can resolve
-    // IOptions<AudioOutputOptions> (device display filtering/friendly names).
+    // IOptionsMonitor<AudioOutputOptions> (device display filtering/friendly names, runtime refresh).
     services.Configure<AudioOutputOptions>(_ => { });
 
     // Register the master mixer (singleton to maintain state)

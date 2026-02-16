@@ -741,6 +741,174 @@ public class DevicesController : ControllerBase
   }
 
   /// <summary>
+  /// Gets all output devices (including hidden) with display settings.
+  /// Used by the Device Display Settings UI.
+  /// </summary>
+  [HttpGet("display")]
+  [ProducesResponseType(typeof(List<DeviceDisplayInfoDto>), StatusCodes.Status200OK)]
+  public async Task<IActionResult> GetDeviceDisplaySettings(CancellationToken cancellationToken)
+  {
+    try
+    {
+      if (_deviceManager is not SoundFlowDeviceManager sfDeviceManager)
+        return StatusCode(500, new { error = "Device manager does not support display settings" });
+
+      var devices = await sfDeviceManager.GetAllDevicesWithDisplayInfoAsync(cancellationToken);
+      var result = devices.Select(d => new DeviceDisplayInfoDto
+      {
+        Id = d.DeviceId,
+        RawName = d.RawName,
+        DisplayName = d.DisplayName,
+        IsHidden = d.IsHidden,
+        FriendlyNameOverride = d.FriendlyNameOverride,
+        Type = d.Type.ToString(),
+        IsDefault = d.IsDefault,
+        IsUSBDevice = d.IsUSBDevice
+      }).ToList();
+
+      return Ok(result);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error getting device display settings");
+      return StatusCode(500, new { error = "Failed to get device display settings" });
+    }
+  }
+
+  /// <summary>
+  /// Sets visibility for a specific device by raw name.
+  /// </summary>
+  [HttpPut("display/visibility")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  public async Task<IActionResult> SetDeviceVisibility(
+    [FromBody] SetDeviceVisibilityRequest request,
+    CancellationToken cancellationToken)
+  {
+    if (string.IsNullOrWhiteSpace(request.RawName))
+      return BadRequest(new { error = "RawName is required" });
+
+    try
+    {
+      var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+
+      // Read current lists
+      var hiddenNames = await _configurationManager.GetValueAsync<List<string>>(
+        storeId, "AudioOutput:DeviceDisplay:HiddenDeviceNames", ct: cancellationToken) ?? [];
+      var visibleNames = await _configurationManager.GetValueAsync<List<string>>(
+        storeId, "AudioOutput:DeviceDisplay:VisibleDeviceNames", ct: cancellationToken) ?? [];
+
+      if (request.Visible)
+      {
+        // Remove from hidden, add to visible
+        hiddenNames.Remove(request.RawName);
+        if (!visibleNames.Contains(request.RawName, StringComparer.OrdinalIgnoreCase))
+          visibleNames.Add(request.RawName);
+      }
+      else
+      {
+        // Add to hidden, remove from visible
+        visibleNames.Remove(request.RawName);
+        if (!hiddenNames.Contains(request.RawName, StringComparer.OrdinalIgnoreCase))
+          hiddenNames.Add(request.RawName);
+      }
+
+      await _configurationManager.SetValueAsync(storeId, "AudioOutput:DeviceDisplay:HiddenDeviceNames", hiddenNames, cancellationToken);
+      await _configurationManager.SetValueAsync(storeId, "AudioOutput:DeviceDisplay:VisibleDeviceNames", visibleNames, cancellationToken);
+
+      // Trigger display settings reload
+      if (_deviceManager is SoundFlowDeviceManager sfDeviceManager)
+        sfDeviceManager.ReloadDisplaySettings();
+
+      _logger.LogInformation("Device visibility set: {RawName} = {Visible}", request.RawName, request.Visible);
+      return Ok(new { message = "Device visibility updated", rawName = request.RawName, visible = request.Visible });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error setting device visibility");
+      return StatusCode(500, new { error = "Failed to set device visibility" });
+    }
+  }
+
+  /// <summary>
+  /// Sets a friendly name for a specific device by raw name.
+  /// </summary>
+  [HttpPut("display/name")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  public async Task<IActionResult> SetDeviceFriendlyName(
+    [FromBody] SetDeviceFriendlyNameRequest request,
+    CancellationToken cancellationToken)
+  {
+    if (string.IsNullOrWhiteSpace(request.RawName))
+      return BadRequest(new { error = "RawName is required" });
+    if (string.IsNullOrWhiteSpace(request.FriendlyName))
+      return BadRequest(new { error = "FriendlyName is required" });
+
+    try
+    {
+      var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+
+      var friendlyNames = await _configurationManager.GetValueAsync<Dictionary<string, string>>(
+        storeId, "AudioOutput:DeviceDisplay:DeviceFriendlyNames", ct: cancellationToken)
+        ?? new Dictionary<string, string>();
+
+      friendlyNames[request.RawName] = request.FriendlyName;
+
+      await _configurationManager.SetValueAsync(storeId, "AudioOutput:DeviceDisplay:DeviceFriendlyNames", friendlyNames, cancellationToken);
+
+      if (_deviceManager is SoundFlowDeviceManager sfDeviceManager)
+        sfDeviceManager.ReloadDisplaySettings();
+
+      _logger.LogInformation("Device friendly name set: {RawName} = {FriendlyName}", request.RawName, request.FriendlyName);
+      return Ok(new { message = "Device friendly name updated", rawName = request.RawName, friendlyName = request.FriendlyName });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error setting device friendly name");
+      return StatusCode(500, new { error = "Failed to set device friendly name" });
+    }
+  }
+
+  /// <summary>
+  /// Clears a friendly name override for a specific device.
+  /// </summary>
+  [HttpDelete("display/name")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  public async Task<IActionResult> ClearDeviceFriendlyName(
+    [FromQuery] string rawName,
+    CancellationToken cancellationToken)
+  {
+    if (string.IsNullOrWhiteSpace(rawName))
+      return BadRequest(new { error = "rawName query parameter is required" });
+
+    try
+    {
+      var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+
+      var friendlyNames = await _configurationManager.GetValueAsync<Dictionary<string, string>>(
+        storeId, "AudioOutput:DeviceDisplay:DeviceFriendlyNames", ct: cancellationToken)
+        ?? new Dictionary<string, string>();
+
+      friendlyNames.Remove(rawName);
+
+      await _configurationManager.SetValueAsync(storeId, "AudioOutput:DeviceDisplay:DeviceFriendlyNames", friendlyNames, cancellationToken);
+
+      if (_deviceManager is SoundFlowDeviceManager sfDeviceManager)
+        sfDeviceManager.ReloadDisplaySettings();
+
+      _logger.LogInformation("Device friendly name cleared: {RawName}", rawName);
+      return Ok(new { message = "Device friendly name cleared", rawName });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error clearing device friendly name");
+      return StatusCode(500, new { error = "Failed to clear device friendly name" });
+    }
+  }
+
+  /// <summary>
   /// Refreshes the device list.
   /// </summary>
   /// <returns>Success or error response.</returns>
