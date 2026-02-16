@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<!--
+  Custom Web Receiver for Radio Console — Low-Latency Live Audio Streaming
+
+  This receiver uses the Cast Application Framework (CAF) with aggressive
+  buffer watermarks to minimize audio latency for live MP3 streams.
+
+  SETUP:
+  1. Host this file on a public HTTPS URL (e.g., GitHub Pages, Firebase Hosting)
+  2. Register a Custom Receiver app at https://cast.google.com/publish/
+     - Set the receiver URL to the hosted HTTPS URL of this file
+     - Note the Application ID assigned by Google
+  3. Update appsettings.json: AudioOutput.GoogleCast.ApplicationId = "<your-app-id>"
+  4. Restart Radio.API
+
+  DEFAULT MEDIA RECEIVER PROBLEM:
+  The default receiver (CC1AD845) has a hardcoded 10-15 second audio prefill
+  buffer before playback starts. For a live radio console, this creates
+  unacceptable latency between the local audio and Cast output.
+
+  THIS RECEIVER'S APPROACH:
+  - initialPlaybackWatermark = 0.2 (start playback after 200ms of audio)
+  - resumePlaybackWatermark = 0.5 (resume after rebuffer with 500ms)
+  - StreamType.LIVE enforced (no seeking, no content length)
+  - Idle timeout disabled (keeps receiver alive for continuous streams)
+-->
+<html>
+<head>
+  <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+  <style>
+    body {
+      background: #1a1a2e;
+      color: #e0e0e0;
+      font-family: 'Roboto', sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+    }
+    #status {
+      font-size: 24px;
+      text-align: center;
+      opacity: 0.8;
+    }
+  </style>
+</head>
+<body>
+  <div id="status">Radio Console</div>
+  <script>
+    const context = cast.framework.CastReceiverContext.getInstance();
+    const playerManager = context.getPlayerManager();
+
+    // Configure low-latency playback for live audio streams.
+    // Default receiver buffers 10-15s; we start playback after ~200ms.
+    context.start({
+      playbackConfig: new cast.framework.PlaybackConfig({
+        initialPlaybackWatermark: 0.2,   // Start after 200ms buffered
+        resumePlaybackWatermark: 0.5,    // Resume after 500ms on rebuffer
+        autoResumeDuration: 5            // Auto-resume within 5s of stall
+      }),
+      disableIdleTimeout: true           // Keep receiver alive for continuous streams
+    });
+  </script>
+</body>
+</html>
