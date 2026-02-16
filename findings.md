@@ -100,6 +100,44 @@ Zero `NotImplementedException` instances in src/.
 
 ---
 
+## Session: 2026-02-15 — Phase 9 Pi Verification
+
+### Bugs Found & Fixed
+
+**Volume/Mute Persistence (3 bugs, 1 root cause chain):**
+
+1. **AudioController bypasses AudioManager** — `POST /api/audio` sets `mixer.MasterVolume` directly, bypassing `AudioManager.MasterVolume` setter which triggers `ScheduleVolumePersist()`. Fix: Route through AudioManager when available.
+
+2. **PreferencesPersistenceService overwrites runtime values** — Every 30s, reads stale `IOptionsMonitor<AudioPreferences>` (from appsettings.json defaults) and writes to SQLite, overwriting AudioManager's correctly persisted values. Fix: Removed AudioPreferences from periodic save; AudioManager handles its own persistence with debounced writes.
+
+3. **ConfigurationStoreFactory.StoreExistsAsync path mismatch** — `StoreExistsAsync()` uses `Path.Combine(_options.BasePath, _options.SqliteFileName)` → `./config/configuration.db`, but `CreateSqliteStore()` uses `_pathResolver.GetConfigurationDatabasePath()` → `./data/config/configuration.db`. Store lookup always fails, falling back to defaults. Fix: Use `_pathResolver` in `StoreExistsAsync` too.
+
+4. **AudioManager.InitializeAsync() never called on startup** — `AudioEngineInitializationService` had `_audioManager` but never called `InitializeAsync()`, so `RestoreVolumePreferences()` never ran. Fix: Call `_audioManager.InitializeAsync()` in startup sequence.
+
+**Deploy Script:**
+
+5. **`rsync --delete` wipes appsettings.Production.json** — Deploy script uses `--delete` flag which removes Pi-specific config. Fix: Added `--exclude='appsettings.Production.json'` and auto-deploy from `deploy/raspberry-pi/` if missing.
+
+### Pi Verification Results
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Device filtering | ✅ | 17 → 7 devices with friendly names |
+| Cast pause/resume | ✅ | Position freezes/advances correctly |
+| Cast auto-recovery | ✅ | INTERRUPTED → Buffering → Playing on track skip |
+| Local mute while casting | ✅ | Cast streams, modifier active (modifierCount=1) |
+| Volume persistence | ✅ | Set 0.42 → restart → restored 0.42 |
+| Mute persistence | ✅ | Set True → restart → restored True |
+| Fingerprint ID | ✅ | blink-182 "All the Small Things" 100% from cache |
+| Play history | ✅ | 21 entries with metadata + cover art |
+| Album art proxy | ✅ | Web 5002 → API 5000 both HTTP 200 |
+| File playback | ✅ | Queue, play, pause, resume, next all working |
+| BT next/previous | Deferred | No BT device connected during test |
+| BT progress bar | Deferred | No BT device connected during test |
+| Cast latency | Deferred | No precision measurement tool |
+
+---
+
 ## Previous Session Findings
 
 ### Session: 2026-02-14 — Pi Hardware Testing

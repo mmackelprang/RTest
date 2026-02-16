@@ -84,9 +84,12 @@ public class PreferencesPersistenceService : BackgroundService
   {
     try
     {
+      // Note: AudioPreferences (volume/mute/balance) are NOT saved here.
+      // AudioManager handles volume persistence with its own debounced writes directly
+      // to the config store. Saving IOptionsMonitor<AudioPreferences> here would overwrite
+      // the correct runtime values with stale defaults from appsettings.json.
       var tasks = new List<Task>
       {
-        SavePreferenceSectionAsync(AudioPreferences.SectionName, _audioPreferences.CurrentValue, cancellationToken),
         SavePreferenceSectionAsync(FilePlayerPreferences.SectionName, _filePlayerPreferences.CurrentValue, cancellationToken),
         SavePreferenceSectionAsync(TTSPreferences.SectionName, _ttsPreferences.CurrentValue, cancellationToken),
         SavePreferenceSectionAsync(RadioPreferences.SectionName, _radioPreferences.CurrentValue, cancellationToken),

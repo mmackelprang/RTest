@@ -118,14 +118,17 @@ public class AudioController : ControllerBase
     {
       var mixer = _audioEngine.GetMasterMixer();
 
-      // Validate and update volume if specified
+      // Validate and update volume if specified (route through AudioManager for persistence)
       if (request.Volume.HasValue)
       {
         if (request.Volume.Value < 0f || request.Volume.Value > 1f)
         {
           return BadRequest(new { error = "Volume must be between 0 and 1" });
         }
-        mixer.MasterVolume = request.Volume.Value;
+        if (_audioManager != null)
+          _audioManager.MasterVolume = request.Volume.Value;
+        else
+          mixer.MasterVolume = request.Volume.Value;
         _logger.LogInformation("Volume set to {Volume}", mixer.MasterVolume);
       }
 
@@ -136,14 +139,20 @@ public class AudioController : ControllerBase
         {
           return BadRequest(new { error = "Balance must be between -1 and 1" });
         }
-        mixer.Balance = request.Balance.Value;
+        if (_audioManager != null)
+          _audioManager.Balance = request.Balance.Value;
+        else
+          mixer.Balance = request.Balance.Value;
         _logger.LogInformation("Balance set to {Balance}", mixer.Balance);
       }
 
       // Update mute state if specified
       if (request.IsMuted.HasValue)
       {
-        mixer.IsMuted = request.IsMuted.Value;
+        if (_audioManager != null)
+          _audioManager.IsMuted = request.IsMuted.Value;
+        else
+          mixer.IsMuted = request.IsMuted.Value;
         _logger.LogInformation("Mute set to {IsMuted}", mixer.IsMuted);
       }
 
@@ -299,7 +308,10 @@ public class AudioController : ControllerBase
     }
 
     var mixer = _audioEngine.GetMasterMixer();
-    mixer.MasterVolume = volume;
+    if (_audioManager != null)
+      _audioManager.MasterVolume = volume;
+    else
+      mixer.MasterVolume = volume;
     _logger.LogInformation("Volume set to {Volume}", volume);
 
     return Ok(new { volume = mixer.MasterVolume });
@@ -313,7 +325,11 @@ public class AudioController : ControllerBase
   public ActionResult ToggleMute()
   {
     var mixer = _audioEngine.GetMasterMixer();
-    mixer.IsMuted = !mixer.IsMuted;
+    var newMuted = !mixer.IsMuted;
+    if (_audioManager != null)
+      _audioManager.IsMuted = newMuted;
+    else
+      mixer.IsMuted = newMuted;
     _logger.LogInformation("Mute toggled to {IsMuted}", mixer.IsMuted);
 
     return Ok(new { isMuted = mixer.IsMuted });

@@ -130,9 +130,10 @@ public class PreferencesPersistenceServiceTests : IDisposable
   }
 
   [Fact]
-  public async Task SavePreferences_SerializesAudioPreferences()
+  public async Task SavePreferences_DoesNotSerializeAudioPreferences()
   {
-    // Arrange
+    // AudioPreferences (volume/mute/balance) are persisted by AudioManager directly,
+    // not by the periodic PreferencesPersistenceService, to avoid overwriting runtime values.
     var audioPrefs = new AudioPreferences
     {
       CurrentSource = "FilePlayer",
@@ -149,11 +150,11 @@ public class PreferencesPersistenceServiceTests : IDisposable
     // Act
     await service.StopAsync(CancellationToken.None);
 
-    // Assert
+    // Assert — AudioPreferences should NOT be saved by this service
     _storeMock.Verify(s => s.SetEntriesAsync(
       It.Is<IEnumerable<ConfigurationEntry>>(entries =>
         entries.Any(e => e.Key.StartsWith("AudioPreferences:"))),
-      It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+      It.IsAny<CancellationToken>()), Times.Never);
   }
 
   [Fact]
