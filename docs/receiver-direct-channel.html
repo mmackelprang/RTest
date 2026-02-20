@@ -1,31 +1,21 @@
 <!DOCTYPE html>
 <!--
-  Direct Channel Cast Receiver for Radio Console
-  ================================================
-  Custom CAF (Cast Application Framework) receiver that receives audio data
-  directly over the Cast protocol's custom message bus, bypassing HTTP entirely.
+  Direct Channel Cast Receiver for Radio Console (v4)
+  ====================================================
+  Custom CAF receiver that receives audio data directly over the Cast
+  protocol's custom message bus, bypassing HTTP streaming entirely.
 
-  How it works:
-  1. The sender (Radio Console API) launches this receiver on the Cast device
-  2. Audio chunks arrive as JSON messages on a custom namespace:
-     { "type": "audio", "data": "<base64-encoded-WAV>", "seq": N }
-  3. Each chunk is a self-contained WAV file (44-byte header + PCM data)
-  4. Chunks are accumulated into batches and played via <audio> elements
-  5. Double-buffered: while one batch plays, the next accumulates
+  Audio routing on Cast devices (especially speakers like Google Home Mini)
+  MUST go through the CAF PlayerManager. Neither Web Audio API
+  (AudioContext.destination) nor raw <audio> elements route to the
+  physical speaker. Only media loaded through the PlayerManager pipeline
+  reaches the hardware audio output.
 
-  NOTE: Web Audio API (AudioContext.destination) does NOT route to the
-  physical speaker on Google Home Mini / smart speakers. We MUST use
-  <audio> elements which go through the Cast media pipeline.
-
-  Requirements:
-  - Register this HTML as a Custom Receiver Application on the Google Cast SDK
-    Developer Console: https://cast.google.com/publish/
-  - Set the registered App ID in appsettings.json: AudioOutput:GoogleCast:ApplicationId
-  - Set StreamingMode to "DirectChannel" in appsettings.json
-
-  Audio parameters (must match sender):
-  - 48kHz sample rate, 16-bit, stereo
-  - Default chunk size: 100ms (~19.2KB PCM, ~25.7KB Base64)
+  Strategy:
+  1. Receive PCM audio chunks via custom Cast message bus
+  2. Accumulate chunks into WAV blobs (~2 seconds each)
+  3. Load each WAV blob through PlayerManager (the standard Cast media path)
+  4. Use LOAD interceptor + queue for gapless batch transitions
 -->
 <html>
 <head>
@@ -34,12 +24,12 @@
   <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
 </head>
 <body>
-  <audio id="playerA" preload="auto"></audio>
-  <audio id="playerB" preload="auto"></audio>
+  <!-- cast-media-player is REQUIRED for PlayerManager audio routing on speakers -->
+  <cast-media-player></cast-media-player>
 
-  <div id="status" style="color: #ccc; font-family: monospace; padding: 20px;">
-    Radio Console — Direct Channel Receiver v3<br>
-    <span id="info">Waiting for audio...</span>
+  <div id="status" style="color: #ccc; font-family: monospace; padding: 20px; position: absolute; top: 0; left: 0; z-index: 100;">
+    Radio Console — Direct Channel Receiver v4<br>
+    <span id="info">Initializing...</span>
   </div>
 
   <script>
@@ -47,41 +37,33 @@
 
     // Configuration
     const NAMESPACE = 'urn:x-cast:com.radioconsole.audio';
-    const BATCH_CHUNKS = 20;  // Accumulate 20 x 100ms = 2 seconds per batch
+    const BATCH_CHUNKS = 20;  // 20 x 100ms = 2 seconds per batch
     const SAMPLE_RATE = 48000;
     const CHANNELS = 2;
     const BITS_PER_SAMPLE = 16;
     const BYTES_PER_SAMPLE = BITS_PER_SAMPLE / 8;
     const WAV_HEADER_SIZE = 44;
 
-    // Double-buffer state
-    const playerA = document.getElementById('playerA');
-    const playerB = document.getElementById('playerB');
-    let activePlayer = null;    // Currently playing <audio> element
-    let nextPlayer = playerA;   // Next player to load a batch into
-    let blobUrlA = null;
-    let blobUrlB = null;
+    // CAF receiver and player manager
+    const context = cast.framework.CastReceiverContext.getInstance();
+    const playerManager = context.getPlayerManager();
 
     // PCM accumulation buffer
-    let pcmChunks = [];         // Array of Uint8Array (raw PCM, no WAV headers)
+    let pcmChunks = [];
     let totalPcmBytes = 0;
+
+    // Batch queue — WAV blob URLs ready to play
+    const batchQueue = [];
+    let isPlaying = false;
 
     // Stats
     let chunksReceived = 0;
+    let batchesCreated = 0;
     let batchesPlayed = 0;
     let lastSeq = -1;
 
-    // CAF receiver context
-    const context = cast.framework.CastReceiverContext.getInstance();
+    // --- WAV encoding ---
 
-    const options = new cast.framework.CastReceiverOptions();
-    options.disableIdleTimeout = true;
-    options.customNamespaces = {};
-    options.customNamespaces[NAMESPACE] = cast.framework.system.MessageType.JSON;
-
-    /**
-     * Build a complete WAV file from accumulated PCM chunks.
-     */
     function buildWav(chunks, totalBytes) {
       const blockAlign = CHANNELS * BYTES_PER_SAMPLE;
       const byteRate = SAMPLE_RATE * blockAlign;
@@ -91,26 +73,22 @@
       const view = new DataView(wav);
       const bytes = new Uint8Array(wav);
 
-      // RIFF header
       bytes.set([0x52, 0x49, 0x46, 0x46], 0); // "RIFF"
       view.setUint32(4, fileSize, true);
       bytes.set([0x57, 0x41, 0x56, 0x45], 8); // "WAVE"
 
-      // fmt sub-chunk
       bytes.set([0x66, 0x6D, 0x74, 0x20], 12); // "fmt "
-      view.setUint32(16, 16, true);              // Sub-chunk size
-      view.setUint16(20, 1, true);               // PCM format
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);               // PCM
       view.setUint16(22, CHANNELS, true);
       view.setUint32(24, SAMPLE_RATE, true);
       view.setUint32(28, byteRate, true);
       view.setUint16(32, blockAlign, true);
       view.setUint16(34, BITS_PER_SAMPLE, true);
 
-      // data sub-chunk
       bytes.set([0x64, 0x61, 0x74, 0x61], 36); // "data"
       view.setUint32(40, totalBytes, true);
 
-      // Copy PCM data
       let offset = WAV_HEADER_SIZE;
       for (const chunk of chunks) {
         bytes.set(chunk, offset);
@@ -120,13 +98,9 @@
       return new Blob([wav], { type: 'audio/wav' });
     }
 
-    /**
-     * Extract raw PCM data (skip 44-byte WAV header) from a Base64-encoded WAV chunk.
-     */
     function extractPcm(base64Data) {
       const binaryStr = atob(base64Data);
       const len = binaryStr.length;
-      // Skip WAV header, copy only PCM data
       const pcm = new Uint8Array(len - WAV_HEADER_SIZE);
       for (let i = WAV_HEADER_SIZE; i < len; i++) {
         pcm[i - WAV_HEADER_SIZE] = binaryStr.charCodeAt(i);
@@ -134,128 +108,135 @@
       return pcm;
     }
 
-    /**
-     * Load accumulated PCM chunks into the next <audio> player as a WAV blob.
-     */
-    function loadBatch() {
+    // --- Batch management ---
+
+    function createBatch() {
       if (pcmChunks.length === 0) return;
 
       const wavBlob = buildWav(pcmChunks, totalPcmBytes);
       const url = URL.createObjectURL(wavBlob);
+      batchesCreated++;
 
-      // Revoke the old blob URL for this player to avoid memory leaks
-      if (nextPlayer === playerA && blobUrlA) URL.revokeObjectURL(blobUrlA);
-      if (nextPlayer === playerB && blobUrlB) URL.revokeObjectURL(blobUrlB);
-
-      if (nextPlayer === playerA) blobUrlA = url;
-      else blobUrlB = url;
-
-      const player = nextPlayer;
-      player.src = url;
-      player.load();
-
-      const batchSize = pcmChunks.length;
       const batchDuration = (totalPcmBytes / (SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE)).toFixed(2);
+      console.log(`Batch ${batchesCreated}: created ${pcmChunks.length} chunks (${batchDuration}s), queue: ${batchQueue.length}`);
 
-      console.log(`Batch ${batchesPlayed + 1}: loaded ${batchSize} chunks (${batchDuration}s) into ${player.id}`);
-
-      // Reset accumulation
+      batchQueue.push(url);
       pcmChunks = [];
       totalPcmBytes = 0;
 
-      // If nothing is currently playing, start this batch immediately
-      if (!activePlayer || activePlayer.paused || activePlayer.ended) {
-        playNext(player);
+      // If not currently playing, start playback
+      if (!isPlaying) {
+        playNextBatch();
       }
     }
 
-    /**
-     * Start playing from the given <audio> element.
-     */
-    function playNext(player) {
-      activePlayer = player;
-      nextPlayer = (player === playerA) ? playerB : playerA;
+    function playNextBatch() {
+      if (batchQueue.length === 0) {
+        isPlaying = false;
+        console.log('Queue empty — waiting for more chunks');
+        updateStatus('Buffering...');
+        return;
+      }
+
+      const url = batchQueue.shift();
+      isPlaying = true;
       batchesPlayed++;
 
-      const playPromise = player.play();
-      if (playPromise) {
-        playPromise.then(() => {
-          console.log(`Batch ${batchesPlayed}: playing on ${player.id}`);
-          updateStatus(`Playing — batch ${batchesPlayed}, chunks received: ${chunksReceived}`);
-        }).catch(err => {
-          console.error(`Failed to play batch ${batchesPlayed} on ${player.id}:`, err);
-        });
-      }
+      console.log(`Playing batch ${batchesPlayed} via PlayerManager, queue remaining: ${batchQueue.length}`);
+      updateStatus(`Playing — batch ${batchesPlayed}, chunks: ${chunksReceived}`);
+
+      // Use PlayerManager.load() to play through the proper Cast audio pipeline
+      const mediaInfo = new cast.framework.messages.MediaInformation();
+      mediaInfo.contentUrl = url;
+      mediaInfo.contentId = url;
+      mediaInfo.contentType = 'audio/wav';
+      mediaInfo.streamType = cast.framework.messages.StreamType.BUFFERED;
+
+      const loadRequest = new cast.framework.messages.LoadRequestData();
+      loadRequest.media = mediaInfo;
+      loadRequest.autoplay = true;
+
+      playerManager.load(loadRequest).then(() => {
+        console.log(`Batch ${batchesPlayed}: loaded and playing`);
+      }).catch(err => {
+        console.error(`Batch ${batchesPlayed}: load failed:`, err);
+        // Revoke failed URL and try next batch
+        URL.revokeObjectURL(url);
+        playNextBatch();
+      });
     }
 
-    // When the active player finishes, check if the next batch is ready
-    playerA.addEventListener('ended', () => {
-      console.log('playerA ended');
-      if (nextPlayer === playerA && playerA.src && !playerA.ended) {
-        // playerA has a new batch loaded, play it
-        playNext(playerA);
-      } else if (playerB.src && playerB.readyState >= 2) {
-        playNext(playerB);
-      } else {
-        console.log('Buffer underrun — waiting for next batch');
-        activePlayer = null;
-        updateStatus('Buffering...');
+    // When current media ends, play the next batch
+    playerManager.addEventListener(
+      cast.framework.events.EventType.MEDIA_FINISHED,
+      (event) => {
+        console.log(`Media finished (batch ${batchesPlayed})`);
+        playNextBatch();
       }
-    });
+    );
 
-    playerB.addEventListener('ended', () => {
-      console.log('playerB ended');
-      if (nextPlayer === playerB && playerB.src && !playerB.ended) {
-        playNext(playerB);
-      } else if (playerA.src && playerA.readyState >= 2) {
-        playNext(playerA);
-      } else {
-        console.log('Buffer underrun — waiting for next batch');
-        activePlayer = null;
-        updateStatus('Buffering...');
+    // Also listen for errors
+    playerManager.addEventListener(
+      cast.framework.events.EventType.ERROR,
+      (event) => {
+        console.error('PlayerManager error:', event.detailedErrorCode, event.error);
       }
-    });
+    );
 
-    // Listen for audio chunks on our custom namespace
+    // Intercept external LOAD requests — we don't want the sender's
+    // MediaChannel to interfere with our programmatic loads
+    playerManager.setMessageInterceptor(
+      cast.framework.messages.MessageType.LOAD,
+      (loadRequest) => {
+        // If this is our internal Blob URL load, allow it through
+        if (loadRequest.media && loadRequest.media.contentUrl &&
+            loadRequest.media.contentUrl.startsWith('blob:')) {
+          return loadRequest;
+        }
+        // Block external load requests
+        console.log('Blocked external LOAD request');
+        return null;
+      }
+    );
+
+    // --- Custom message listener ---
+
     context.addCustomMessageListener(NAMESPACE, (event) => {
       const msg = event.data;
 
       if (msg.type === 'audio' && msg.data) {
         chunksReceived++;
 
-        // Detect sequence gaps
         if (lastSeq >= 0 && msg.seq !== lastSeq + 1) {
           console.warn(`Sequence gap: expected ${lastSeq + 1}, got ${msg.seq}`);
         }
         lastSeq = msg.seq;
 
-        // Extract raw PCM and accumulate
         const pcm = extractPcm(msg.data);
         pcmChunks.push(pcm);
         totalPcmBytes += pcm.length;
 
-        // Log first few chunks
         if (chunksReceived <= 3) {
-          console.log(`Chunk ${msg.seq}: received ${pcm.length} bytes PCM, ` +
-            `accumulated ${pcmChunks.length}/${BATCH_CHUNKS}`);
+          console.log(`Chunk ${msg.seq}: ${pcm.length} bytes PCM, accumulated ${pcmChunks.length}/${BATCH_CHUNKS}`);
         }
 
-        // When we have a full batch, load it into the next player
         if (pcmChunks.length >= BATCH_CHUNKS) {
-          loadBatch();
+          createBatch();
         }
 
         if (chunksReceived % 100 === 0) {
-          console.log(`Stats: ${chunksReceived} chunks received, ${batchesPlayed} batches played`);
+          console.log(`Stats: ${chunksReceived} chunks, ${batchesCreated} batches created, ${batchesPlayed} played, queue: ${batchQueue.length}`);
         }
       } else if (msg.type === 'stop') {
         console.log('Received stop command');
-        playerA.pause(); playerA.src = '';
-        playerB.pause(); playerB.src = '';
-        activePlayer = null;
+        playerManager.stop();
+        batchQueue.forEach(url => URL.revokeObjectURL(url));
+        batchQueue.length = 0;
         pcmChunks = [];
         totalPcmBytes = 0;
+        isPlaying = false;
         chunksReceived = 0;
+        batchesCreated = 0;
         batchesPlayed = 0;
         lastSeq = -1;
         updateStatus('Stopped');
@@ -263,9 +244,11 @@
         context.sendCustomMessage(NAMESPACE, event.senderId, {
           type: 'pong',
           chunksReceived,
+          batchesCreated,
           batchesPlayed,
-          activePlayer: activePlayer ? activePlayer.id : 'none',
-          paused: activePlayer ? activePlayer.paused : true
+          queueLength: batchQueue.length,
+          isPlaying,
+          playerState: playerManager.getPlayerState()
         });
       }
     });
@@ -275,10 +258,10 @@
       if (el) el.textContent = text;
     }
 
-    // --- Startup test tone via <audio> element ---
-    // Generate a 1-second 440Hz WAV and play it to verify audio routing.
-    function playTestToneViaAudioElement() {
-      console.log('Playing test tone via <audio> element...');
+    // --- Startup test tone ---
+    // Generate a 1-second 440Hz WAV and play through PlayerManager
+    function playTestTone() {
+      console.log('Playing test tone via PlayerManager...');
       const duration = 1.0;
       const numSamples = SAMPLE_RATE * duration;
       const pcmBytes = numSamples * CHANNELS * BYTES_PER_SAMPLE;
@@ -289,34 +272,43 @@
         const t = i / SAMPLE_RATE;
         const sample = Math.sin(2 * Math.PI * 440 * t) * 0.3;
         const intSample = Math.max(-32768, Math.min(32767, Math.round(sample * 32767)));
-        // Write same sample to both channels (mono tone)
         pcmView.setInt16((i * CHANNELS) * BYTES_PER_SAMPLE, intSample, true);
         pcmView.setInt16((i * CHANNELS + 1) * BYTES_PER_SAMPLE, intSample, true);
       }
 
       const wavBlob = buildWav([pcmData], pcmBytes);
       const url = URL.createObjectURL(wavBlob);
-      const testAudio = new Audio(url);
-      testAudio.play().then(() => {
-        console.log('Test tone playing');
+
+      const mediaInfo = new cast.framework.messages.MediaInformation();
+      mediaInfo.contentUrl = url;
+      mediaInfo.contentId = url;
+      mediaInfo.contentType = 'audio/wav';
+      mediaInfo.streamType = cast.framework.messages.StreamType.BUFFERED;
+
+      const loadRequest = new cast.framework.messages.LoadRequestData();
+      loadRequest.media = mediaInfo;
+      loadRequest.autoplay = true;
+
+      playerManager.load(loadRequest).then(() => {
+        console.log('Test tone loaded and playing via PlayerManager');
         updateStatus('Test tone playing...');
       }).catch(err => {
-        console.error('Test tone failed:', err);
-        updateStatus('Test tone FAILED: ' + err.message);
-      });
-      testAudio.addEventListener('ended', () => {
-        console.log('Test tone finished');
-        URL.revokeObjectURL(url);
-        updateStatus('Test tone done — waiting for audio chunks...');
+        console.error('Test tone load failed:', err);
+        updateStatus('Test tone FAILED: ' + (err.message || err));
       });
     }
 
-    // Start the receiver
-    context.start(options);
-    console.log('Direct Channel receiver v3 started, listening on', NAMESPACE);
+    // --- Receiver options and start ---
+    const options = new cast.framework.CastReceiverOptions();
+    options.disableIdleTimeout = true;
+    options.customNamespaces = {};
+    options.customNamespaces[NAMESPACE] = cast.framework.system.MessageType.JSON;
 
-    // Play test tone after short delay to let receiver initialize
-    setTimeout(() => playTestToneViaAudioElement(), 1000);
+    context.start(options);
+    console.log('Direct Channel receiver v4 started, listening on', NAMESPACE);
+
+    // Play test tone after receiver initializes
+    setTimeout(() => playTestTone(), 1500);
   </script>
 </body>
 </html>
