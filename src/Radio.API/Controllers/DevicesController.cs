@@ -382,6 +382,16 @@ public class DevicesController : ControllerBase
       {
         state = _castOutput?.State.ToString(),
         connectedDevice = _castOutput?.ConnectedDevice?.FriendlyName,
+        directChannel = _castOutput?.DirectStreaming != null ? new
+        {
+          isStreaming = _castOutput.DirectStreaming.IsStreaming,
+          totalChunksSent = _castOutput.DirectStreaming.TotalChunksSent,
+          totalBytesSent = _castOutput.DirectStreaming.TotalBytesSent,
+          sendErrors = _castOutput.DirectStreaming.SendErrors,
+          lastChunkTime = _castOutput.DirectStreaming.LastChunkTime,
+          lastRttMs = _castOutput.DirectStreaming.LastRttMs,
+          lastPongJson = _castOutput.DirectStreaming.LastPongJson,
+        } : null,
       },
       engine = new
       {

@@ -542,13 +542,15 @@ public class GoogleCastOutput : AudioOutputBase
 
     try
     {
+      var startTimer = System.Diagnostics.Stopwatch.StartNew();
       _logger.LogInformation("Starting Google Cast output (mode: {Mode})", _options.StreamingMode);
 
       if (_client != null)
       {
         // Launch the receiver application (default CC1AD845 or custom receiver)
         var launchStatus = await _client.LaunchApplicationAsync(_options.ApplicationId);
-        _logger.LogInformation("Cast: Receiver launched on {Device}", ConnectedDevice?.FriendlyName);
+        _logger.LogInformation("Cast: Receiver launched on {Device} ({LaunchMs}ms)",
+          ConnectedDevice?.FriendlyName, startTimer.ElapsedMilliseconds);
 
         // Allow receiver to start initializing before sending commands
         await Task.Delay(250, cancellationToken);
@@ -567,8 +569,8 @@ public class GoogleCastOutput : AudioOutputBase
       IsEnabledInternal = true;
       State = AudioOutputState.Streaming;
 
-      _logger.LogInformation("Google Cast output started streaming to {Name} (mode: {Mode})",
-        ConnectedDevice?.FriendlyName, _options.StreamingMode);
+      _logger.LogInformation("Google Cast output started streaming to {Name} (mode: {Mode}, setupMs: {SetupMs})",
+        ConnectedDevice?.FriendlyName, _options.StreamingMode, startTimer.ElapsedMilliseconds);
     }
     catch (Exception ex)
     {
@@ -756,6 +758,12 @@ public class GoogleCastOutput : AudioOutputBase
     _streamUrl = streamUrl;
     _logger.LogDebug("Stream URL set to: {Url}", streamUrl);
   }
+
+  /// <summary>
+  /// Gets the active DirectChannel streaming service, if any.
+  /// Used for diagnostics and latency measurement.
+  /// </summary>
+  public DirectCastStreamingService? DirectStreaming => _directStreaming;
 
   /// <summary>
   /// Sets the audio engine reference for DirectChannel streaming mode.
