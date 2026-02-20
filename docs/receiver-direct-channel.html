@@ -65,6 +65,12 @@
     const options = new cast.framework.CastReceiverOptions();
     options.disableIdleTimeout = true;
 
+    // CRITICAL: Declare custom namespaces in options. CAF v3 requires explicit
+    // namespace registration — without this, addCustomMessageListener silently
+    // receives nothing because the framework drops messages on unknown namespaces.
+    options.customNamespaces = {};
+    options.customNamespaces[NAMESPACE] = cast.framework.system.MessageType.JSON;
+
     // Listen for audio chunks on our custom namespace
     context.addCustomMessageListener(NAMESPACE, (event) => {
       const msg = event.data;
