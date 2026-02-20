@@ -31,6 +31,7 @@ public class DevicesController : ControllerBase
   private readonly HttpStreamOutput? _httpOutput;
   private readonly IRadioConfigurationManager _configurationManager;
   private readonly IOptionsMonitor<AudioPreferences> _audioPreferences;
+  private readonly IOptions<AudioOutputOptions> _audioOutputOptions;
 
   /// <summary>
   /// Initializes a new instance of the DevicesController.
@@ -40,6 +41,7 @@ public class DevicesController : ControllerBase
     IAudioDeviceManager deviceManager,
     IRadioConfigurationManager configurationManager,
     IOptionsMonitor<AudioPreferences> audioPreferences,
+    IOptions<AudioOutputOptions> audioOutputOptions,
     IAudioManager? audioManager = null,
     SoundFlowAudioEngine? audioEngine = null,
     LocalAudioOutput? localOutput = null,
@@ -50,6 +52,7 @@ public class DevicesController : ControllerBase
     _deviceManager = deviceManager;
     _configurationManager = configurationManager;
     _audioPreferences = audioPreferences;
+    _audioOutputOptions = audioOutputOptions;
     _audioManager = audioManager;
     _audioEngine = audioEngine;
     _localOutput = localOutput;
@@ -523,9 +526,27 @@ public class DevicesController : ControllerBase
         Model = request.Model ?? "Unknown"
       };
 
-      // Wire the HTTP audio stream BEFORE connecting so auto-restart uses the correct URL
-      if (_httpOutput != null)
+      // Wire audio source based on streaming mode
+      var castOptions = _audioOutputOptions.Value.GoogleCast;
+      var isDirectChannel = string.Equals(castOptions.StreamingMode, "DirectChannel", StringComparison.OrdinalIgnoreCase);
+
+      if (isDirectChannel)
       {
+        // DirectChannel mode: audio engine sends PCM chunks directly over Cast protocol.
+        // No HTTP stream needed — wire the audio engine to the Cast output instead.
+        if (_audioEngine != null)
+        {
+          _castOutput.SetAudioEngine(_audioEngine);
+          _logger.LogInformation("Cast: DirectChannel mode — audio engine wired, bypassing HTTP stream");
+        }
+        else
+        {
+          _logger.LogWarning("Cast: DirectChannel mode but audio engine not available — Cast will have no audio");
+        }
+      }
+      else if (_httpOutput != null)
+      {
+        // HttpMp3 mode: wire the HTTP audio stream BEFORE connecting so auto-restart uses the correct URL
         _logger.LogInformation("HTTP stream output state before wiring: {State}", _httpOutput.State);
 
         // Recover HTTP output from Error state
@@ -1102,9 +1123,22 @@ public class DevicesController : ControllerBase
 
         await _castOutput.ConnectAsync(device);
 
-        // Wire the HTTP audio stream
-        if (_httpOutput != null)
+        // Wire audio source based on streaming mode
+        var autoConnectOptions = _audioOutputOptions.Value.GoogleCast;
+        var autoConnectDirectChannel = string.Equals(
+          autoConnectOptions.StreamingMode, "DirectChannel", StringComparison.OrdinalIgnoreCase);
+
+        if (autoConnectDirectChannel)
         {
+          // DirectChannel mode — wire audio engine instead of HTTP stream
+          if (_audioEngine != null)
+          {
+            _castOutput.SetAudioEngine(_audioEngine);
+          }
+        }
+        else if (_httpOutput != null)
+        {
+          // HttpMp3 mode — wire the HTTP audio stream
           if (_httpOutput.State == AudioOutputState.Error)
             await _httpOutput.InitializeAsync();
           if (_httpOutput.State == AudioOutputState.Created)
@@ -1120,7 +1154,8 @@ public class DevicesController : ControllerBase
         }
 
         await _castOutput.StartAsync();
-        _logger.LogInformation("Auto-connected to default Cast device: {Name}", device.FriendlyName);
+        _logger.LogInformation("Auto-connected to default Cast device: {Name} (mode: {Mode})",
+          device.FriendlyName, autoConnectOptions.StreamingMode);
       }
       catch (Exception ex)
       {

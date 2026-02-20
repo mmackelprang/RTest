@@ -161,6 +161,32 @@ public class GoogleCastOutputOptions
   /// Gets or sets how many days before a cached device is considered stale and removed.
   /// </summary>
   public int CacheExpirationDays { get; set; } = 14;
+
+  /// <summary>
+  /// Gets or sets the streaming mode for Cast audio.
+  /// "HttpMp3" (default): audio flows via HTTP MP3 stream that the Cast device fetches.
+  /// "DirectChannel": audio chunks are sent directly over the Cast protocol's custom
+  /// message bus as Base64-encoded WAV, bypassing HTTP entirely.
+  /// DirectChannel is experimental and requires a custom receiver app.
+  /// </summary>
+  public string StreamingMode { get; set; } = "HttpMp3";
+
+  /// <summary>
+  /// Gets or sets the chunk size in milliseconds for DirectChannel streaming.
+  /// Smaller values reduce latency but increase message rate.
+  /// Valid range: 50-200ms. At 48kHz stereo 16-bit (192KB/s PCM):
+  ///   50ms  = ~9.6KB PCM, ~12.9KB Base64, 20 msgs/sec
+  ///   100ms = ~19.2KB PCM, ~25.7KB Base64, 10 msgs/sec
+  ///   200ms = ~38.4KB PCM, ~51.3KB Base64, 5 msgs/sec
+  /// All sizes fit within the Cast protocol's 64KB message limit.
+  /// </summary>
+  public int DirectChannelChunkSizeMs { get; set; } = 100;
+
+  /// <summary>
+  /// Gets or sets the Cast custom namespace for DirectChannel audio streaming.
+  /// The receiver app must listen on this same namespace.
+  /// </summary>
+  public string DirectChannelNamespace { get; set; } = "urn:x-cast:com.radioconsole.audio";
 }
 
 /// <summary>

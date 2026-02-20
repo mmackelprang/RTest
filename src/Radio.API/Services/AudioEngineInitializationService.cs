@@ -24,6 +24,7 @@ public class AudioEngineInitializationService : IHostedService
   private readonly IMasterMixer _masterMixer;
   private readonly IAppConfigurationManager? _configManager;
   private readonly IOptions<BluetoothOptions> _bluetoothOptions;
+  private readonly IOptions<AudioOutputOptions> _audioOutputOptions;
   private readonly IBluetoothService? _bluetoothService;
   private readonly GoogleCastOutput? _castOutput;
   private readonly HttpStreamOutput? _httpOutput;
@@ -38,6 +39,7 @@ public class AudioEngineInitializationService : IHostedService
     IOptionsMonitor<AudioPreferences> audioPreferences,
     IMasterMixer masterMixer,
     IOptions<BluetoothOptions> bluetoothOptions,
+    IOptions<AudioOutputOptions> audioOutputOptions,
     IServiceProvider serviceProvider)
   {
     _logger = logger;
@@ -46,6 +48,7 @@ public class AudioEngineInitializationService : IHostedService
     _audioPreferences = audioPreferences;
     _masterMixer = masterMixer;
     _bluetoothOptions = bluetoothOptions;
+    _audioOutputOptions = audioOutputOptions;
 
     // Try to get IAudioManager (optional)
     _audioManager = serviceProvider.GetService<IAudioManager>();
@@ -268,8 +271,29 @@ public class AudioEngineInitializationService : IHostedService
   /// </summary>
   private async Task ActivateVirtualOutputsForCastAsync(CancellationToken cancellationToken)
   {
-    await ActivateOutputAsync(_httpOutput, "HTTP Stream");
+    var castOptions = _audioOutputOptions.Value.GoogleCast;
+    var isDirectChannel = string.Equals(castOptions.StreamingMode, "DirectChannel", StringComparison.OrdinalIgnoreCase);
+
+    // DirectChannel mode bypasses HTTP — audio is sent directly over the Cast protocol.
+    // Only start the HTTP stream for the standard HttpMp3 mode.
+    if (!isDirectChannel)
+    {
+      await ActivateOutputAsync(_httpOutput, "HTTP Stream");
+    }
+    else
+    {
+      _logger.LogInformation("DirectChannel mode: skipping HTTP stream activation");
+    }
+
     await ActivateOutputAsync(_castOutput, "Google Cast");
+
+    // In DirectChannel mode, wire the audio engine so GoogleCastOutput can
+    // create a stream reader for sending PCM data over the Cast message bus.
+    if (isDirectChannel && _castOutput != null)
+    {
+      _castOutput.SetAudioEngine(_audioEngine);
+      _logger.LogInformation("DirectChannel mode: audio engine wired to Cast output");
+    }
 
     // Auto-connect to saved default Cast device
     var prefs = _audioPreferences.CurrentValue;
@@ -304,15 +328,16 @@ public class AudioEngineInitializationService : IHostedService
 
         await _castOutput.ConnectAsync(device, cancellationToken);
 
-        // Wire the HTTP audio stream
-        if (_httpOutput?.State == AudioOutputState.Streaming)
+        // Wire the HTTP audio stream (HttpMp3 mode only)
+        if (!isDirectChannel && _httpOutput?.State == AudioOutputState.Streaming)
         {
           var streamUrl = GetRoutableStreamUrl(_httpOutput.Mp3StreamUrl, _httpOutput.Port, device.IpAddress);
           _castOutput.SetStreamUrl(streamUrl);
         }
 
         await _castOutput.StartAsync(cancellationToken);
-        _logger.LogInformation("Startup: Auto-connected to Cast device: {Name}", device.FriendlyName);
+        _logger.LogInformation("Startup: Auto-connected to Cast device: {Name} (mode: {Mode})",
+          device.FriendlyName, castOptions.StreamingMode);
       }
       catch (Exception ex)
       {
