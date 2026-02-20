@@ -29,6 +29,32 @@
 
     console.log('[RadioConsole] Custom receiver starting');
 
+    // === MIXED CONTENT TEST ===
+    // Test whether ws:// connections work from this HTTPS-served receiver.
+    // If Chrome blocks it (mixed content), no TCP connection reaches the server.
+    // The server runs a TCP listener on port 9999 to detect connection attempts.
+    (function() {
+      var testUrl = 'ws://192.168.86.44:9999/ws-mixed-content-test';
+      console.log('[WS-TEST] Attempting WebSocket connection to: ' + testUrl);
+      try {
+        var ws = new WebSocket(testUrl);
+        ws.onopen = function() {
+          console.log('[WS-TEST] SUCCESS — WebSocket connected! Mixed content NOT blocked.');
+          ws.send('mixed-content-test-ok');
+          ws.close();
+        };
+        ws.onerror = function(e) {
+          console.log('[WS-TEST] ERROR — WebSocket failed. Likely mixed content blocked.', e);
+        };
+        ws.onclose = function(e) {
+          console.log('[WS-TEST] CLOSED — code=' + e.code + ' reason=' + e.reason + ' wasClean=' + e.wasClean);
+        };
+      } catch(e) {
+        console.log('[WS-TEST] EXCEPTION — WebSocket blocked at construction:', e.message);
+      }
+    })();
+    // === END TEST ===
+
     // Intercept LOAD requests to enforce LIVE stream type
     playerManager.setMessageInterceptor(
       cast.framework.messages.MessageType.LOAD,
