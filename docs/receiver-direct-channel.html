@@ -205,6 +205,26 @@
       if (el) el.textContent = text;
     }
 
+    /**
+     * Play a 1-second 440Hz test tone through Web Audio API.
+     * If you hear this on the Cast device, AudioContext.destination works.
+     */
+    function playTestTone() {
+      console.log('Playing test tone (440Hz, 1s) via Web Audio API...');
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.frequency.value = 440;
+      gain.gain.value = 0.3;
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(audioCtx.currentTime);
+      osc.stop(audioCtx.currentTime + 1.0);
+      osc.onended = () => {
+        console.log('Test tone finished');
+        updateStatus('Test tone done — waiting for audio chunks...');
+      };
+    }
+
     // Start the receiver
     context.start(options);
     console.log('Direct Channel receiver started, listening on', NAMESPACE);
@@ -216,6 +236,17 @@
     audioCtx.onstatechange = () => {
       console.log('AudioContext state changed to:', audioCtx.state);
     };
+
+    // Resume AudioContext and play test tone after a short delay
+    // Cast devices may need explicit resume before any audio output
+    setTimeout(async () => {
+      if (audioCtx.state === 'suspended') {
+        console.log('AudioContext suspended, attempting resume...');
+        await audioCtx.resume();
+        console.log('AudioContext resumed, state:', audioCtx.state);
+      }
+      playTestTone();
+    }, 500);
   </script>
 </body>
 </html>
