@@ -238,4 +238,12 @@ public class HttpStreamOutputOptions
   /// Gets or sets the buffer size in bytes for each client.
   /// </summary>
   public int ClientBufferSize { get; set; } = 65536;
+
+  /// <summary>
+  /// Gets or sets the MP3 encoder bitrate in kbps for the Cast MP3 stream.
+  /// Higher bitrates improve bass quality and reduce LAME encoder startup
+  /// artifacts (the bit reservoir fills faster at higher rates).
+  /// Default: 320kbps. Valid range: 128-320.
+  /// </summary>
+  public int Mp3Bitrate { get; set; } = 320;
 }

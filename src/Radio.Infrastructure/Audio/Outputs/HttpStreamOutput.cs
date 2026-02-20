@@ -376,10 +376,11 @@ public class HttpStreamOutput : AudioOutputBase
         try
         {
           var waveFormat = new WaveFormat(_options.SampleRate, _options.BitsPerSample, _options.Channels);
-          mp3Writer = new LameMP3FileWriter(context.Response.OutputStream, waveFormat, 192);
+          var bitrate = Math.Clamp(_options.Mp3Bitrate, 128, 320);
+          mp3Writer = new LameMP3FileWriter(context.Response.OutputStream, waveFormat, bitrate);
           _logger.LogInformation(
-            "MP3 encoder started (192 kbps CBR, {SampleRate}Hz, {Channels}ch) for client {ClientId}",
-            _options.SampleRate, _options.Channels, clientId);
+            "MP3 encoder started ({Bitrate} kbps CBR, {SampleRate}Hz, {Channels}ch) for client {ClientId}",
+            bitrate, _options.SampleRate, _options.Channels, clientId);
         }
         catch (Exception ex) when (ex is DllNotFoundException or TypeInitializationException or FileLoadException)
         {
