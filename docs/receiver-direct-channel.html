@@ -1,26 +1,20 @@
 <!DOCTYPE html>
 <!--
-  Direct Channel Cast Receiver for Radio Console (v6 — Data URI)
-  ==============================================================
+  Direct Channel Cast Receiver for Radio Console (v7 — Web Audio API)
+  ===================================================================
   Custom CAF receiver that receives MP3 audio data directly over the
-  Cast protocol's custom message bus and plays it using PlayerManager
-  with MP3 data URIs.
+  Cast protocol's custom message bus and plays them using Web Audio API.
 
-  v5 used MSE (Media Source Extensions) with a SourceBuffer, but MSE
-  may not work reliably on audio-only Cast devices (Google Home Mini).
-  The blob URL approach also requires PlayerManager to load a URL with
-  no initial data, which may fail.
+  Previous approaches that FAILED on Google Home Mini:
+  - v5 MSE (SourceBuffer removed from parent MediaSource crash)
+  - v6 Data URI (PlayerManager says PLAYING but video element stays paused)
 
-  v6 strategy (diagnostic fallback):
+  v7 strategy: bypass PlayerManager entirely, use Web Audio API directly.
   1. Sender encodes PCM to MP3 via persistent LAME encoder (320kbps CBR)
   2. Sender sends Base64-encoded MP3 frames over the custom message bus
-  3. Receiver accumulates chunks into batches (~2 seconds each)
-  4. Each batch is loaded via PlayerManager as a data:audio/mpeg;base64 URI
-  5. Pre-loads next batch during current playback to minimize gaps
-
-  This approach is known to work on all Cast devices but has ~50ms gaps
-  at batch transitions. It serves as a diagnostic step to confirm the
-  Cast channel works before optimizing for gapless playback.
+  3. Receiver decodes each MP3 chunk via AudioContext.decodeAudioData()
+  4. Schedules playback via AudioBufferSourceNode.start(nextPlayTime)
+  5. Gapless: each chunk is scheduled to start exactly when the previous ends
 -->
 <html>
 <head>
@@ -29,10 +23,11 @@
   <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
 </head>
 <body>
+  <!-- Keep cast-media-player for CAF compatibility but we won't use it for audio -->
   <cast-media-player></cast-media-player>
 
   <div id="status" style="color: #ccc; font-family: monospace; padding: 20px; position: absolute; top: 0; left: 0; z-index: 100;">
-    Radio Console — Direct Channel Receiver v6 (Data URI)<br>
+    Radio Console — Direct Channel Receiver v7 (Web Audio API)<br>
     <span id="info">Initializing...</span>
   </div>
 
@@ -41,144 +36,119 @@
 
     // Configuration
     const NAMESPACE = 'urn:x-cast:com.radioconsole.audio';
-    const BATCH_DURATION_MS = 2000;  // Accumulate ~2 seconds of MP3 per batch
-    const CHUNK_INTERVAL_MS = 100;   // Sender sends every 100ms
-    const CHUNKS_PER_BATCH = Math.ceil(BATCH_DURATION_MS / CHUNK_INTERVAL_MS);
+    const BUFFER_BEFORE_PLAY = 3;  // Wait for N chunks before starting playback
 
-    // CAF
+    // CAF — we still need the receiver context for the custom message bus
     const context = cast.framework.CastReceiverContext.getInstance();
-    const playerManager = context.getPlayerManager();
 
-    // --- Batch accumulation state ---
-    let currentBatchChunks = [];  // Base64 MP3 strings for current batch
-    let nextBatchChunks = [];     // Pre-accumulated for next batch
-    let batchesPlayed = 0;
+    // --- Web Audio API ---
+    let audioCtx = null;
+    let nextPlayTime = 0;       // When the next chunk should start playing
     let isPlaying = false;
-    let preloadReady = false;
+    let chunksScheduled = 0;    // Total chunks decoded and scheduled
 
     // --- Stats ---
     let chunksReceived = 0;
     let bytesReceived = 0;
     let lastSeq = -1;
-    let loadErrors = 0;
-
-    // --- PlayerManager event listeners ---
-
-    playerManager.addEventListener(
-      cast.framework.events.EventType.ERROR,
-      (event) => {
-        console.error('PlayerManager error:', event.detailedErrorCode, event.error);
-        loadErrors++;
-      }
-    );
-
-    playerManager.addEventListener(
-      cast.framework.events.EventType.MEDIA_FINISHED,
-      (event) => {
-        console.log('PlayerManager: MEDIA_FINISHED, preloadReady:', preloadReady, 'nextBatch:', nextBatchChunks.length);
-        // Current batch finished — if next batch is ready, play it immediately
-        if (nextBatchChunks.length > 0) {
-          playBatch(nextBatchChunks);
-          nextBatchChunks = [];
-          preloadReady = false;
-        } else {
-          isPlaying = false;
-          updateStatus('Buffering next batch...');
-        }
-      }
-    );
-
-    playerManager.addEventListener(
-      cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
-      (event) => {
-        console.log('PlayerManager: Load complete, state:', playerManager.getPlayerState());
-      }
-    );
-
-    playerManager.addEventListener(
-      cast.framework.events.EventType.PLAYING,
-      (event) => {
-        console.log('PlayerManager: Playing');
-      }
-    );
-
-    // Allow all LOAD requests through
-    playerManager.setMessageInterceptor(
-      cast.framework.messages.MessageType.LOAD,
-      (loadRequest) => {
-        console.log('LOAD interceptor: data URI length',
-          loadRequest.media?.contentUrl?.length || 0);
-        return loadRequest;
-      }
-    );
+    let decodeErrors = 0;
+    let pendingChunks = [];     // Chunks buffered before playback starts
 
     /**
-     * Merges an array of Base64 MP3 chunk strings into a single Base64 string
-     * by decoding each, concatenating the raw bytes, and re-encoding.
+     * Ensures AudioContext is initialized. Must be called after user gesture
+     * or in response to a Cast message (which counts as activation).
      */
-    function mergeBase64Chunks(chunks) {
-      // Decode all chunks to binary
-      let totalLen = 0;
-      const decoded = [];
-      for (const chunk of chunks) {
-        const bin = atob(chunk);
-        decoded.push(bin);
-        totalLen += bin.length;
-      }
+    function ensureAudioContext() {
+      if (audioCtx) return;
+      try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        console.log('AudioContext created, sampleRate:', audioCtx.sampleRate, 'state:', audioCtx.state);
 
-      // Concatenate into single Uint8Array
-      const merged = new Uint8Array(totalLen);
-      let offset = 0;
-      for (const bin of decoded) {
-        for (let i = 0; i < bin.length; i++) {
-          merged[offset++] = bin.charCodeAt(i);
+        // Resume if suspended (autoplay policy)
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume().then(() => {
+            console.log('AudioContext resumed, state:', audioCtx.state);
+          });
         }
+      } catch (e) {
+        console.error('Failed to create AudioContext:', e);
       }
-
-      // Re-encode as Base64
-      let base64 = '';
-      const CHUNK_SIZE = 8192;
-      for (let i = 0; i < merged.length; i += CHUNK_SIZE) {
-        const slice = merged.subarray(i, Math.min(i + CHUNK_SIZE, merged.length));
-        base64 += String.fromCharCode.apply(null, slice);
-      }
-      return btoa(base64);
     }
 
     /**
-     * Plays a batch of accumulated MP3 chunks via PlayerManager data URI.
+     * Decodes a Base64 MP3 chunk and schedules it for playback.
      */
-    function playBatch(chunks) {
-      if (chunks.length === 0) return;
+    async function decodeAndSchedule(base64Data) {
+      if (!audioCtx) return;
 
-      const mergedBase64 = mergeBase64Chunks(chunks);
-      const dataUri = 'data:audio/mpeg;base64,' + mergedBase64;
+      // Decode Base64 to ArrayBuffer
+      const binaryStr = atob(base64Data);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
 
-      batchesPlayed++;
-      isPlaying = true;
+      try {
+        const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
 
-      console.log(`Playing batch ${batchesPlayed}: ${chunks.length} chunks, ` +
-        `${(mergedBase64.length * 0.75 / 1024).toFixed(0)}KB MP3`);
+        // Create source node
+        const source = audioCtx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(audioCtx.destination);
 
-      const mediaInfo = new cast.framework.messages.MediaInformation();
-      mediaInfo.contentUrl = dataUri;
-      mediaInfo.contentId = `batch-${batchesPlayed}`;
-      mediaInfo.contentType = 'audio/mpeg';
-      mediaInfo.streamType = cast.framework.messages.StreamType.BUFFERED;
+        // Schedule playback
+        const now = audioCtx.currentTime;
 
-      const loadRequest = new cast.framework.messages.LoadRequestData();
-      loadRequest.media = mediaInfo;
-      loadRequest.autoplay = true;
+        if (!isPlaying || nextPlayTime <= now) {
+          // First chunk or we've fallen behind — start from a small offset
+          nextPlayTime = now + 0.02; // 20ms from now to avoid glitches
+          if (chunksScheduled > 0 && nextPlayTime > now + 0.1) {
+            console.log('Playback reset — was', (nextPlayTime - now).toFixed(3), 's ahead');
+          }
+        }
 
-      playerManager.load(loadRequest).then(() => {
-        console.log(`Batch ${batchesPlayed} loaded successfully`);
-        updateStatus(`Playing batch ${batchesPlayed} — ${chunksReceived} total chunks`);
-      }).catch(err => {
-        console.error(`Batch ${batchesPlayed} load failed:`, err);
-        loadErrors++;
-        isPlaying = false;
-        updateStatus('Load failed: ' + (err.message || JSON.stringify(err)));
-      });
+        source.start(nextPlayTime);
+        nextPlayTime += audioBuffer.duration;
+        chunksScheduled++;
+        isPlaying = true;
+
+        // Log first few scheduled chunks
+        if (chunksScheduled <= 5) {
+          console.log(`Scheduled chunk ${chunksScheduled}: ` +
+            `duration=${audioBuffer.duration.toFixed(3)}s, ` +
+            `scheduled at ${(nextPlayTime - audioBuffer.duration).toFixed(3)}s, ` +
+            `buffer ahead: ${(nextPlayTime - now).toFixed(3)}s`);
+        }
+
+        // Periodic stats (every 50 chunks ≈ 5 seconds at 100ms chunks)
+        if (chunksScheduled % 50 === 0) {
+          const bufferAhead = nextPlayTime - audioCtx.currentTime;
+          console.log(`Audio stats: ${chunksScheduled} scheduled, ` +
+            `buffer ahead: ${bufferAhead.toFixed(2)}s, ` +
+            `ctx time: ${audioCtx.currentTime.toFixed(2)}s, ` +
+            `decode errors: ${decodeErrors}`);
+          updateStatus(`Playing — ${chunksScheduled} chunks, ${bufferAhead.toFixed(1)}s buffer`);
+        }
+      } catch (e) {
+        decodeErrors++;
+        if (decodeErrors <= 5 || decodeErrors % 100 === 0) {
+          console.error(`Decode error #${decodeErrors}:`, e.message || e);
+        }
+      }
+    }
+
+    /**
+     * Processes buffered chunks — called once we have enough to start.
+     */
+    function startPlayback() {
+      ensureAudioContext();
+      console.log(`Starting playback with ${pendingChunks.length} buffered chunks`);
+      updateStatus('Starting playback...');
+
+      for (const chunk of pendingChunks) {
+        decodeAndSchedule(chunk);
+      }
+      pendingChunks = [];
     }
 
     // --- Custom message listener ---
@@ -202,55 +172,56 @@
           console.log(`Chunk ${msg.seq}: ${dataLen} bytes MP3`);
         }
 
-        if (!isPlaying) {
-          // Not currently playing — accumulate into current batch
-          currentBatchChunks.push(msg.data);
+        if (!isPlaying && pendingChunks !== null) {
+          // Buffer initial chunks before starting
+          pendingChunks.push(msg.data);
+          updateStatus(`Buffering... ${pendingChunks.length}/${BUFFER_BEFORE_PLAY}`);
 
-          // When we have enough chunks for a batch, play it
-          if (currentBatchChunks.length >= CHUNKS_PER_BATCH) {
-            playBatch(currentBatchChunks);
-            currentBatchChunks = [];
+          if (pendingChunks.length >= BUFFER_BEFORE_PLAY) {
+            startPlayback();
           }
         } else {
-          // Currently playing — accumulate into next batch
-          nextBatchChunks.push(msg.data);
+          // Already playing — decode and schedule immediately
+          decodeAndSchedule(msg.data);
         }
 
         // Periodic stats (every 100 chunks ≈ 10 seconds)
         if (chunksReceived % 100 === 0) {
-          console.log(`Stats: ${chunksReceived} chunks, ${(bytesReceived / 1024).toFixed(0)}KB, ` +
-            `${batchesPlayed} batches, ${loadErrors} errors, ` +
-            `current: ${currentBatchChunks.length}, next: ${nextBatchChunks.length}, ` +
-            `state: ${playerManager.getPlayerState()}`);
-          updateStatus(`${batchesPlayed} batches, ${chunksReceived} chunks`);
+          const bufferAhead = audioCtx ? (nextPlayTime - audioCtx.currentTime) : 0;
+          console.log(`Stats: ${chunksReceived} received, ${chunksScheduled} scheduled, ` +
+            `${(bytesReceived / 1024).toFixed(0)}KB, ` +
+            `buffer: ${bufferAhead.toFixed(2)}s, errors: ${decodeErrors}`);
         }
 
       } else if (msg.type === 'stop') {
         console.log('Received stop command');
-        playerManager.stop();
-        currentBatchChunks = [];
-        nextBatchChunks = [];
+        if (audioCtx) {
+          audioCtx.close();
+          audioCtx = null;
+        }
         isPlaying = false;
-        preloadReady = false;
-        batchesPlayed = 0;
+        nextPlayTime = 0;
+        chunksScheduled = 0;
+        pendingChunks = [];
         chunksReceived = 0;
         bytesReceived = 0;
         lastSeq = -1;
-        loadErrors = 0;
+        decodeErrors = 0;
         updateStatus('Stopped — ready for new stream');
 
       } else if (msg.type === 'ping') {
+        const bufferAhead = audioCtx ? (nextPlayTime - audioCtx.currentTime) : 0;
         context.sendCustomMessage(NAMESPACE, event.senderId, {
           type: 'pong',
-          version: 6,
+          version: 7,
           chunksReceived,
           bytesReceived,
-          batchesPlayed,
-          loadErrors,
-          currentBatchSize: currentBatchChunks.length,
-          nextBatchSize: nextBatchChunks.length,
+          chunksScheduled,
+          decodeErrors,
           isPlaying,
-          playerState: playerManager.getPlayerState()
+          bufferAhead: bufferAhead.toFixed(2),
+          audioCtxState: audioCtx ? audioCtx.state : 'none',
+          audioCtxTime: audioCtx ? audioCtx.currentTime.toFixed(2) : '0'
         });
       }
     });
@@ -267,7 +238,7 @@
     options.customNamespaces[NAMESPACE] = cast.framework.system.MessageType.JSON;
 
     context.start(options);
-    console.log('Direct Channel receiver v6 (Data URI) started, listening on', NAMESPACE);
+    console.log('Direct Channel receiver v7 (Web Audio API) started, listening on', NAMESPACE);
     updateStatus('Waiting for audio chunks...');
   </script>
 </body>
