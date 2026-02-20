@@ -1,5 +1,53 @@
 # Progress Log
 
+## Session: 2026-02-19 — Cast Polish, Log Hygiene, Ubuntu Setup
+
+### Pre-planning work:
+- Continued Cast latency optimization from previous session
+- Increased `maxAheadSeconds` 3→10 and `lagSeconds` 3→5 in HttpStreamOutput
+- Increased metadata debounce 1.5s→3s in GoogleCastOutput
+- Added `lagSeconds` parameter to `IAudioEngine.CreateStreamReader`
+- Verified on Pi: zero rebuffering after initial play (previously 18s gap)
+- Committed and pushed: `fix: Increase Cast buffer depth and initial burst to eliminate rebuffering`
+
+### Research completed:
+- Read `Google-Cast-Latency-Discussion.md` — WebSocket + Web Audio API approach
+- Confirmed WAV cannot work with standard Cast media loading (chunked encoding issue)
+- Analyzed ALSA log noise: ~192 lines/min from MiniAudio backend probing
+- Profiled new Ubuntu x64 machine: Intel N100, Ubuntu 24.04, .NET 8 SDK installed
+- Reviewed deploy scripts and setup scripts for x64 adaptation
+
+### Planning:
+- Updated task_plan.md with Phases A-D
+- Updated findings.md with Cast analysis, ALSA analysis, Ubuntu profile
+- Feature branch rule saved to MEMORY.md
+
+### Phase A status: COMPLETE
+- [x] A.1: WebSocket analysis complete — defer to FUTURE-WORK.md
+- [x] A.1b: Mixed content testing — ws:// BLOCKED, wss:// (self-signed) BLOCKED
+- [x] A.1c: Documented WebSocket approach in FUTURE-WORK.md section 7
+- [x] A.1d: Reverted test commits from main, pushed cleanup
+- [x] A.2: Documented pre-loaded sounds approach in FUTURE-WORK.md section 8
+
+### Phase B status: COMPLETE
+- [x] Initial approach (StandardErrorPriority) failed — noise comes through stdout, not stderr
+- [x] Created `SystemdConsoleFormatter` — prefixes Serilog lines with `<N>` syslog priority
+- [x] Service file: `SyslogLevelPrefix=true` + `SyslogLevel=debug`
+- [x] Verified on Ubuntu: `journalctl -p info` shows ONLY app logs, zero ALSA noise
+
+### Phase C status: COMPLETE
+- [x] C.2: Deploy script parameterized — `Deploy-ToLinux.ps1` with `-Runtime` param
+- [x] C.2: `Deploy-ToPi.ps1` converted to thin wrapper
+- [x] C.2: Production config template for debian-x64
+- [x] C.3: Setup script run on Ubuntu — all packages, radio user, fpcalc, services installed
+- [x] C.4: Application deployed and running on `radio:5000` / `radio:5002`
+- [x] C.4: API responds (200 on /api/audio), Web UI loads (200)
+- [x] C.4: ALSA log filtering verified working
+
+### Phase D status: Deferred
+
+---
+
 ## Session: 2026-02-16 — Architecture Review & Integration Planning
 
 ### Research completed:
@@ -39,59 +87,15 @@
 - Added `EndedAt` column migration in `FingerprintDbContext`
 - Updated all 6 SELECT queries, INSERT, UPDATE, and mapper to include EndedAt
 - Created `SongChangedEventArgs` event class
-- Added song change detection to `BackgroundIdentificationService`:
-  - Tracks `_lastIdentification` (trackKey, metadata, timestamp)
-  - Compares each new identification with previous
-  - Respects `MinimumSecondsBetweenSongChanges` (default: 20s) to prevent rapid-fire events
-  - `ResetSongChangeState()` for source changes
-- `AudioManager.OnSongChanged` handler:
-  - Finalizes previous play history entry (sets EndedAt)
-  - Creates new entry for newly-identified song
-  - Resets song change state on source switch
-- Added `EndedAt` to API DTO (`PlayHistoryEntryDto`) and Web DTO
-- Updated controller mapping
+- Added song change detection to `BackgroundIdentificationService`
+- `AudioManager.OnSongChanged` handler
 - Added 8 new tests (4 repository + 4 song change detection)
 - Build: 0 warnings, all 1313 tests pass
 
 ---
 
 ## Session: 2026-02-13 — Cast Audio & BT Fixes
-
-### Pre-planning fixes completed:
-- PR #192 (merged): BT capture bridge, DI factories, visualization tap, codec pinning, album art fix
-- PR #193 (merged): Metrics transaction/connection mismatch fix
-- PR #194 (merged): Cast audio — reader lag, LAME Flush fix, reduced tap latency
-
-### Planning phase:
-- Wrote 5-phase plan (see task_plan.md)
-- Phases 1-4 implemented and tested (1266 tests pass, 0 warnings)
-
-### Phase 1-4 Implementation:
-- All code changes committed as PR #195 (merged)
-
----
+(see git history for full content)
 
 ## Session: 2026-02-14 — Pi Hardware Testing
-
-### Dual-service deployment:
-- PR #196: Split radio-console.service into radio-api + radio-web
-- PipeWire/WirePlumber BT A2DP sink config
-- ALSA direct hardware access for radio system user
-
-### Pi debugging — BT audio pipeline:
-1. Discovered arecord subprocess runs and captures real audio data (strace confirmed non-zero 24KB writes)
-2. Found Serilog `Default: Warning` was hiding all audio pipeline logs — added `Radio: Information` override
-3. Identified race condition in `GetAudioCaptureDeviceAsync` — two concurrent handlers with 0-timeout semaphore
-4. Fixed with 30s timeout + `_activeGenerator` cache
-5. Discovered `SwitchPlaybackDevice` bug — orphans source components after device switch
-6. Fixed with `PlaybackDeviceSwitched` event + subscriber re-attachment in `SoundFlowPlaybackService`
-7. Set device to playback-12 (bcm2835 Headphones), confirmed audio plays through soundbar
-8. All fixes committed as PR #197
-
-### Verified on Pi:
-- [x] BT connect → arecord → generator → mixer → playback in <1 second
-- [x] AVRCP metadata flowing (title/artist)
-- [x] AVRCP volume sync (68% from phone)
-- [x] Play history updated with real track info
-- [x] Audio output to soundbar via 3.5mm jack
-- [x] Device preference saved to config store
+(see git history for full content)

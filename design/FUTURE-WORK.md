@@ -193,7 +193,7 @@ apt install unclutter
 
 | File | What's There |
 |------|-------------|
-| `deploy/cast-receiver/receiver.html` | Complete CAF Custom Web Receiver with low-latency buffer config |
+| `docs/receiver.html` | Complete CAF Custom Web Receiver with low-latency buffer config (deployed via GitHub Pages) |
 | `Radio.Core/Configuration/AudioOutputOptions.cs` | `GoogleCastOutputOptions.ApplicationId` — configurable app ID (default: `CC1AD845`) |
 | `Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs` | Uses `_options.ApplicationId` for all `LaunchApplicationAsync()` calls |
 | `Radio.API/appsettings.json` | `AudioOutput.GoogleCast.ApplicationId` setting |
@@ -298,3 +298,110 @@ Once tested and working, you can publish so the app works on **all** Cast device
 - **Registration propagation**: New app IDs can take 5-15 minutes to propagate to Cast devices after registration.
 - **CAF v3 only**: The receiver uses CAF v3 (`cast_receiver_framework.js`). Do not use the deprecated v2 receiver SDK.
 - **Fallback**: If the custom receiver has issues, revert `ApplicationId` to `"CC1AD845"` to use the default media receiver (with higher latency).
+
+---
+
+## 7. Google Cast — WebSocket + Web Audio API (Sub-500ms Latency)
+
+**Status:** Researched & tested — blocked by mixed content policy
+**Added:** 2026-02-19
+**Priority:** Low — current MP3 approach (~3-10s latency) is acceptable for music; this only matters for intercom/doorbell use cases
+
+### Concept
+
+Replace the standard CAF media pipeline (`<audio>` element) with a fully custom receiver that:
+1. Connects back to the C# app via WebSocket
+2. Receives PCM audio chunks wrapped in 44-byte WAV headers
+3. Decodes via `AudioContext.decodeAudioData()`
+4. Schedules playback via `BufferSource.start()` with a tiny jitter buffer (~100ms)
+
+This bypasses Chrome's 10-20s buffering entirely, achieving sub-500ms theoretical latency.
+
+### What Would Be Needed
+
+**C# Server Side:**
+- WebSocket server (e.g., Fleck or `System.Net.WebSockets`) on a LAN port
+- Audio capture in small chunks (50-100ms) from the existing `TappedOutputStream`
+- Each chunk wrapped in a 44-byte WAV header (RIFF + fmt + data)
+- Custom Cast namespace messages to send the WebSocket URL to the receiver
+
+**Custom Receiver (JavaScript):**
+- `AudioContext` + `decodeAudioData()` for chunk decoding
+- Jitter buffer with scheduled playback via `BufferSource.start()`
+- WebSocket reconnection logic
+- No CAF media player — fully custom audio pipeline
+
+### Why It's Blocked
+
+**Mixed content policy** prevents the HTTPS-served receiver from connecting to local LAN servers:
+
+| Protocol | Result | Notes |
+|----------|--------|-------|
+| `ws://` (plain WebSocket) | **BLOCKED** | Chrome 92 on Cast devices enforces mixed content. No TCP connection attempted. |
+| `wss://` (self-signed cert) | **BLOCKED** | Chrome rejects self-signed certs from HTTPS context. No TLS handshake attempted. |
+
+Both were tested on 2026-02-19 with a TCP/TLS listener on the Pi (port 9999) — zero connections received in 120s for each test.
+
+### Possible Workarounds
+
+1. **Trusted CA certificate** — Use Let's Encrypt with a real domain (e.g., via DuckDNS) pointing to the LAN IP. The receiver would connect to `wss://radio.duckdns.org:8080/audio`. Requires: domain registration, cert renewal automation, DNS configuration.
+
+2. **Cast custom message channel** — Route audio data through the Cast SDK's custom namespace messaging (`urn:x-cast:com.radioconsole.audio`). This stays within the Cast protocol and avoids mixed content entirely. Downsides: message size limits, higher overhead, unknown latency characteristics for binary audio data.
+
+3. **HTTP-served receiver** — Google Cast technically requires HTTPS for registered receivers, but some older Chromecast firmware may accept HTTP. Not reliable and not future-proof.
+
+### Current Approach (For Reference)
+
+The existing HTTP MP3 streaming approach achieves ~3-10s latency:
+- Server delivers MP3 at ~1.1x real-time via throttled HTTP progressive download
+- Custom receiver (`docs/receiver.html`) forces `play()` after 3s buffer
+- `maxAheadSeconds=10` provides deep buffer for stable playback
+- `lagSeconds=5` gives initial burst on connection
+
+This is adequate for music playback and significantly simpler than the WebSocket approach.
+
+---
+
+## 8. Google Cast — Pre-loaded Event Sounds (Zero-Latency Alerts)
+
+**Status:** Not implemented — documented for future use
+**Added:** 2026-02-19
+**Priority:** Low — only relevant if TTS/alert sounds need instant Cast playback
+
+### Concept
+
+Pre-load static audio files (doorbell, phone ring, TTS announcements) on the Cast receiver at startup. When the C# app needs to play an alert, it sends a lightweight JSON message via the Cast custom namespace — the receiver plays the pre-loaded audio instantly (no buffering, no streaming).
+
+### What Would Be Needed
+
+**Custom Receiver Changes:**
+```javascript
+// Pre-load sounds into browser memory
+const sounds = {
+  doorbell: new Audio('https://your-server.com/sounds/doorbell.mp3'),
+  alert: new Audio('https://your-server.com/sounds/alert.mp3')
+};
+Object.values(sounds).forEach(s => s.load());
+
+// Listen for custom namespace messages
+const NAMESPACE = 'urn:x-cast:com.radioconsole.alerts';
+context.addCustomMessageListener(NAMESPACE, (event) => {
+  const msg = JSON.parse(event.data);
+  if (sounds[msg.sound]) {
+    sounds[msg.sound].currentTime = 0;
+    sounds[msg.sound].play();
+  }
+});
+```
+
+**C# Sender Changes:**
+- Add a custom namespace channel to the Cast connection
+- Send JSON trigger messages: `{"sound": "doorbell"}`
+- Sound files must be hosted on HTTPS (same server as receiver, or any HTTPS CDN)
+
+### Gotchas
+
+- Sound files must be served over HTTPS (same mixed content restriction)
+- Pre-loading too many large files increases receiver startup time
+- `new Audio()` + `.load()` may not work on all Cast device types (smart speakers vs Chromecast)
+- The existing `AudioFileEventSource` in our pipeline handles event sounds locally — this would be an additional output path specifically for Cast devices

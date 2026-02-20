@@ -1,138 +1,103 @@
 # Findings & Decisions
 
-## Session: 2026-02-16 — Architecture Review & Integration Prep
+## Session: 2026-02-19 — Cast Polish, Log Hygiene, Ubuntu Setup
 
-### 1. Audio Source Class Hierarchy
+### 1. Google Cast Latency Discussion Analysis
 
+**Document reviewed:** `Google-Cast-Latency-Discussion.md`
+
+Two approaches described:
+1. **WebSocket + Web Audio API** — Custom receiver connects back to C# app via WebSocket, receives PCM chunks wrapped in WAV headers (44 bytes + PCM data), decodes via `AudioContext.decodeAudioData()`, and schedules playback via `BufferSource.start()`. Claims sub-500ms latency.
+
+2. **Pre-loaded Event Sounds** — Receiver pre-loads static audio files into memory, C# app sends custom namespace messages to trigger instant playback.
+
+**Our current approach vs WebSocket:**
+
+| Aspect | Current (HTTP MP3) | WebSocket + Web Audio |
+|--------|-------------------|----------------------|
+| Latency | ~3-10s | Sub-500ms (claimed) |
+| Complexity | Moderate (LAME encoding, throttle) | High (WebSocket server, AudioContext scheduling, chunk management) |
+| Receiver | CAF standard receiver (minor customization) | Fully custom receiver (no CAF media player) |
+| Protocol | HTTP progressive download | WebSocket binary frames |
+| Audio format | MP3 (frame-based, streaming-friendly) | PCM wrapped in WAV headers (per-chunk) |
+| Buffering | Chrome controls buffering | App controls buffering (jitter buffer) |
+| Error recovery | Chrome handles reconnection | Must implement reconnection logic |
+
+**Key clarification on WAV:**
+- The discussion mentions WAV works, but specifically via `decodeAudioData()` in JavaScript, NOT via Chrome's `<audio>` element
+- `decodeAudioData()` accepts any decodable format (WAV, MP3, OGG, etc.) and produces raw PCM
+- This is a fundamentally different path than loading media into `<audio>` tag
+- Our existing `/stream/audio` WAV endpoint uses chunked transfer encoding with `int.MaxValue` in the WAV header — Chrome's `<audio>` element rejects this
+
+**Verdict:** Current MP3 approach is correct for standard Cast. WebSocket approach is valid but high-effort for marginal benefit in our use case (music playback, not intercom). Document in FUTURE-WORK.md.
+
+### 1b. WebSocket Mixed Content Testing (2026-02-19)
+
+Tested whether the HTTPS-served Cast receiver can connect back to the C# app via WebSocket:
+
+| Test | Protocol | Target | Result |
+|------|----------|--------|--------|
+| 1 | `ws://` (plain) | `ws://192.168.86.44:9999/ws-mixed-content-test` | **BLOCKED** — No TCP connection in 120s |
+| 2 | `wss://` (self-signed cert) | `wss://192.168.86.44:9999/wss-self-signed-test` | **BLOCKED** — No TLS handshake in 120s |
+
+**Method:** TCP/TLS listener on Pi port 9999, WebSocket probe in `docs/receiver.html` triggered on Cast device load. Both tests showed zero incoming connections.
+
+**Conclusion:** The WebSocket approach from `Google-Cast-Latency-Discussion.md` is **not viable** with a standard HTTPS-served receiver. Chrome on Cast devices (Chrome 92+) enforces strict mixed content policy — even `wss://` with self-signed certs is rejected without attempting connection. Documented in `design/FUTURE-WORK.md` section 7 with workaround options.
+
+### 2. ALSA Log Noise Analysis
+
+**Volume:** Every 5 seconds, MiniAudio probes unused audio backends. Each probe produces ~16 lines of stderr:
 ```
-IAudioSource (interface)
-└── IPrimaryAudioSource (interface)
-    └── PrimaryAudioSourceBase (abstract)        ~380 lines
-        ├── USBAudioSourceBase (abstract)         ~416 lines
-        │   ├── VinylAudioSource                   ~57 lines (thin wrapper)
-        │   ├── GenericUSBAudioSource             ~141 lines
-        │   └── RadioAudioSource                   (RF320 serial)
-        ├── SDRRadioAudioSource                    (RTL-SDR)
-        ├── FilePlayerAudioSource                  (file playback)
-        └── BluetoothAudioSource                   (BT A2DP)
-
-IEventAudioSource (interface)
-└── EventAudioSourceBase (abstract)
-    ├── TTSEventSource
-    └── AudioFileEventSource
+Cannot connect to server socket err = No such file or directory  (JACK)
+Cannot connect to server request channel                        (JACK)
+jack server is not running or cannot be started                 (JACK)
+JackShmReadWritePtr::~JackShmReadWritePtr - Init not done...   (JACK x2)
+ALSA lib pcm_oss.c:404: Cannot open device /dev/dsp            (OSS)
+ALSA lib pulse.c:242: PulseAudio: Unable to connect             (PulseAudio)
+ALSA lib pcm_dmix.c:1000: unable to open slave                 (dmix x2)
 ```
+That's **~192 lines per minute** of pure noise.
 
-**Key finding:** `USBAudioSourceBase` already extracts common USB capture logic. Vinyl is a 57-line thin wrapper. GenericUSB adds device selection. The hierarchy is already well-factored for USB input sources.
+**Source:** These come from C libraries (libasound2, libjack) writing to stderr/fd2. Not from .NET/Serilog. Serilog writes structured logs to stdout which journald captures at info priority.
 
-### 2. Spotify Code Inventory (for removal)
+**Solution options ranked:**
+1. ~~`StandardErrorPriority=debug`~~ — FAILED: noise comes through stdout, not stderr
+2. **Syslog level prefix (IMPLEMENTED)** — `SystemdConsoleFormatter` prefixes Serilog lines with `<N>`, combined with `SyslogLevelPrefix=true` + `SyslogLevel=debug` in service file. Unprefixed C library noise defaults to debug. Verified working.
+3. **ALSA config** (`defaults.namehint.!pulse = off`) — partial, only suppresses some probing
+4. **MiniAudio backend filtering** — SoundFlow may not expose this API
+5. **`StandardError=null`** — aggressive, loses ALL stderr (not recommended)
 
-**Spotify-only files to DELETE entirely:**
-- `SpotifyLoopback/` directory (4 .cs files + README.md)
-- `scripts/Setup-SpotifyLoopback.ps1`
-- `scripts/Test-SpotifyLoopback.ps1`
-- `scripts/Quick-SpotifyCheck.ps1`
-- `scripts/setup-spotify-loopback.sh`
-- `scripts/test-spotify-loopback.bat`
-- `scripts/appsettings.Development.Spotify.json`
-- `src/Radio.API/appsettings.Development.Spotify.json`
-- `src/Radio.API/appsettings.Production.Spotify.json`
-- `archive/SPOTIFY_INTEGRATED_SETUP.md`
-- `archive/SPOTIFY_INTEGRATED_IMPLEMENTATION_SUMMARY.md`
-- `archive/SPOTIFY_PLAYBACK_FIX_SUMMARY.md`
-- `archive/SPOTIFY_QUEUE_FIX_SUMMARY.md`
-- `publish/api/appsettings.Development.Spotify.json`
+### 3. Ubuntu x64 Machine Profile
 
-**Mixed files needing Spotify references removed:**
-- `src/Radio.API/appsettings.json` — Remove `Devices.Spotify` (lines 49-52) and `Spotify` section (lines 158-162)
-- `src/Radio.API/Controllers/ConfigurationController.cs` — Remove `"spotify:"` secret masking check
-- `README.md` — Update project overview to remove Spotify mention
-- `CLAUDE.md` — Update overview
-- `PLAN.md` — Update phase descriptions
-- `design/AUDIO.md` — Remove Spotify references throughout
-- Various doc comment references (NowPlayingDto, PlayHistoryModels, AudioSourceDtos)
+**Host:** `mmack@radio`
+- **CPU:** Intel N100 (4 cores, x86_64)
+- **RAM:** 3.6 GB
+- **Storage:** 116GB NVMe (98GB free)
+- **OS:** Ubuntu 24.04.4 LTS (kernel 6.17.0-14)
+- **.NET:** SDK 8.0.124 + 10.0.103 already installed
+- **Audio:** PulseAudio (standard Ubuntu desktop setup)
 
-**IMPORTANT:** `AudioSourceType` enum does NOT include Spotify — it was never implemented as a source type. No `SpotifyAudioSource` class exists in src/. The `PlaySource` enum may have had Spotify but was already removed (code comment confirms: "Skip rows with removed source types (e.g., Spotify)").
+**Deployment differences from Pi:**
 
-### 3. Cast Buffering Analysis (25-second delay)
+| Aspect | Raspberry Pi | Ubuntu x64 |
+|--------|-------------|------------|
+| Architecture | ARM64 | x86_64 |
+| .NET RID | linux-arm64 | linux-x64 |
+| Audio stack | PipeWire + WirePlumber | PulseAudio |
+| BT routing | Complex (null sink, TCP, WirePlumber rules) | Standard (pulseaudio-module-bluetooth) |
+| SSH target | `mmack@piradio` | `mmack@radio` |
+| Setup script | `deploy/raspberry-pi/setup.sh` | `deploy/debian-x64/setup.sh` |
 
-**Buffer chain from source to Cast device:**
-
-| Stage | Buffer Size | Duration | Cumulative |
-|-------|------------|----------|------------|
-| FingerprintTapModifier | 2048 samples | ~21ms | 21ms |
-| TappedOutputStream ring buffer | 2 seconds config | 2,000ms | 2,021ms |
-| StreamReaderLag prefill | 0.5 seconds | 500ms | (included in ring) |
-| LAME MP3 frame | 1152 samples | ~24ms | 2,045ms |
-| HTTP chunked write | immediate | ~0ms | 2,045ms |
-
-**Explicit delays in Cast connection path:**
-
-| Location | Delay | Purpose |
-|----------|-------|---------|
-| GoogleCastOutput.cs:540 | `Task.Delay(2000)` | CC1AD845 initialization wait |
-| GoogleCastOutput.cs:921 | `Task.Delay(3000)` | Retry after first load fails |
-| GoogleCastOutput.cs:690 | `Task.Delay(500)` | Reconnect delay |
-| GoogleCastOutput.cs:713 | `Task.Delay(3000)` | Idle recovery delay |
-| GoogleCastOutput.cs:827 | `Task.Delay(500)` | Stop delay |
-
-**Root cause breakdown of ~25s:**
-1. LaunchApplicationAsync + 2s delay = ~3s
-2. First LoadAsync attempt (often fails) + 8s timeout = ~8s worst case
-3. 3s retry delay = 3s
-4. Second LoadAsync = ~2s
-5. Cast device internal buffering before playing = ~5-8s
-6. Ring buffer accumulation = ~2s
-7. **Total: ~23-26s** — matches observation
-
-**Key insight:** The Cast device itself needs several seconds of MP3 data before it starts playback. Chrome's media player buffers data before rendering. We can't eliminate that, but we CAN:
-1. Reduce connection ceremony delays
-2. Pre-fill the HTTP stream with data before LoadAsync
-3. Use a "burst" mode that writes data faster than real-time initially
-
-### 4. Fingerprinting & Play History for Continuous Sources
-
-**Current behavior:**
-- Fingerprinting runs every 30s, captures 15s samples
-- `AudioManager.RecordPlayStartAsync()` creates ONE entry when source starts Playing
-- `AudioManager.OnTrackIdentified()` updates the CURRENT entry (finds most recent unidentified)
-- **Problem:** For continuous sources (Vinyl, Radio, USB), only ONE history entry per session
-
-**What needs to change for continuous sources:**
-1. When fingerprinting identifies a DIFFERENT track than the current one → create a NEW play history entry
-2. Track "last identified fingerprint hash" per source to detect transitions
-3. Close/finalize the previous entry with an end timestamp
-4. Create the new entry with the newly identified metadata
-
-**Current duplicate suppression:**
-- 5 minutes for normal matches, 30 minutes for high-confidence (>0.9)
-- Keyed on `{title}|{artist}`
-- A genuinely different song passes suppression naturally
-
-### 5. Dead Code Found
-
-- `ExternalServiceExtensions.cs` — Empty file, can delete
-- `SpotifyLoopback/` — Entire directory is dead code
-- Various Spotify config/scripts — Dead code
-
-### 6. Architecture Improvement Opportunities
-
-**A. AudioManager constructor bloat:** 18 parameters (6 optional). Consider:
-- Extract a `AudioManagerOptions` record to bundle related options
-- Or accept `IServiceProvider` for optional deps (trade-off: service locator)
-
-**B. Play history recording is scattered:**
-- `RecordPlayStartAsync` in AudioManager
-- `OnTrackIdentified` handler in AudioManager
-- `OnBluetoothMetadataChanged` handler in AudioManager
-- Could extract a `PlayHistoryTracker` service
-
-**C. Source creation in AudioManager.GetOrCreateSourceAsync:**
-- Large switch statement creating sources inline
-- Could move to a `IAudioSourceFactory` with registered creators
+**Deploy script changes needed:**
+- `Deploy-ToPi.ps1` hardcodes `linux-arm64` — needs `-Runtime` parameter
+- Production config will differ (different audio device card numbers, etc.)
 
 ---
 
 ## Previous Sessions (preserved)
+
+### Session: 2026-02-16 — Architecture Review & Integration Prep
+(see git history for full content)
 
 ### Session: 2026-02-15 — Project Reconciliation
 (see git history for full content)
