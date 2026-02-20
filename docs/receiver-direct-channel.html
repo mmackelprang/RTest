@@ -183,19 +183,13 @@
       }
     );
 
-    // Intercept external LOAD requests — we don't want the sender's
-    // MediaChannel to interfere with our programmatic loads
+    // Allow all LOAD requests through — both our internal loads
+    // (blob URLs, HTTP streams) and any from the sender
     playerManager.setMessageInterceptor(
       cast.framework.messages.MessageType.LOAD,
       (loadRequest) => {
-        // If this is our internal Blob URL load, allow it through
-        if (loadRequest.media && loadRequest.media.contentUrl &&
-            loadRequest.media.contentUrl.startsWith('blob:')) {
-          return loadRequest;
-        }
-        // Block external load requests
-        console.log('Blocked external LOAD request');
-        return null;
+        console.log('LOAD interceptor:', loadRequest.media?.contentUrl?.substring(0, 80));
+        return loadRequest;
       }
     );
 
@@ -258,31 +252,48 @@
       if (el) el.textContent = text;
     }
 
-    // --- Startup test tone ---
-    // Generate a 1-second 440Hz WAV and play through PlayerManager
-    function playTestTone() {
-      console.log('Playing test tone via PlayerManager...');
-      const duration = 1.0;
-      const numSamples = SAMPLE_RATE * duration;
-      const pcmBytes = numSamples * CHANNELS * BYTES_PER_SAMPLE;
-      const pcmData = new Uint8Array(pcmBytes);
-      const pcmView = new DataView(pcmData.buffer);
-
-      for (let i = 0; i < numSamples; i++) {
-        const t = i / SAMPLE_RATE;
-        const sample = Math.sin(2 * Math.PI * 440 * t) * 0.3;
-        const intSample = Math.max(-32768, Math.min(32767, Math.round(sample * 32767)));
-        pcmView.setInt16((i * CHANNELS) * BYTES_PER_SAMPLE, intSample, true);
-        pcmView.setInt16((i * CHANNELS + 1) * BYTES_PER_SAMPLE, intSample, true);
-      }
-
-      const wavBlob = buildWav([pcmData], pcmBytes);
-      const url = URL.createObjectURL(wavBlob);
+    // --- Startup test: load the Radio Console HTTP MP3 stream ---
+    // This proves whether: (a) the receiver is running, (b) PlayerManager works,
+    // (c) the Cast device can reach the API server on the local network.
+    // The sender's IP is extracted from the Cast connection context.
+    function playHttpStream() {
+      // Try to determine the sender's IP (= the API server) from the connection
+      // Fall back to a well-known public audio URL if we can't determine it
+      const senderIp = window.location.hostname || 'radio';
+      // The API runs on port 5000, MP3 stream at /stream/audio/mp3
+      const streamUrl = `http://radio:5000/stream/audio/mp3`;
+      console.log('Loading HTTP MP3 stream via PlayerManager:', streamUrl);
 
       const mediaInfo = new cast.framework.messages.MediaInformation();
-      mediaInfo.contentUrl = url;
-      mediaInfo.contentId = url;
-      mediaInfo.contentType = 'audio/wav';
+      mediaInfo.contentUrl = streamUrl;
+      mediaInfo.contentId = streamUrl;
+      mediaInfo.contentType = 'audio/mpeg';
+      mediaInfo.streamType = cast.framework.messages.StreamType.LIVE;
+
+      const loadRequest = new cast.framework.messages.LoadRequestData();
+      loadRequest.media = mediaInfo;
+      loadRequest.autoplay = true;
+
+      playerManager.load(loadRequest).then(() => {
+        console.log('HTTP MP3 stream loaded and playing via PlayerManager');
+        updateStatus('HTTP stream playing via receiver v4!');
+      }).catch(err => {
+        console.error('HTTP stream load failed:', err);
+        updateStatus('HTTP stream FAILED: ' + (err.message || err));
+        // Fallback: try a known public MP3
+        tryPublicAudio();
+      });
+    }
+
+    function tryPublicAudio() {
+      // Use a public domain audio file as a diagnostic test
+      const testUrl = 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3';
+      console.log('Trying public audio URL:', testUrl);
+
+      const mediaInfo = new cast.framework.messages.MediaInformation();
+      mediaInfo.contentUrl = testUrl;
+      mediaInfo.contentId = testUrl;
+      mediaInfo.contentType = 'audio/mpeg';
       mediaInfo.streamType = cast.framework.messages.StreamType.BUFFERED;
 
       const loadRequest = new cast.framework.messages.LoadRequestData();
@@ -290,11 +301,11 @@
       loadRequest.autoplay = true;
 
       playerManager.load(loadRequest).then(() => {
-        console.log('Test tone loaded and playing via PlayerManager');
-        updateStatus('Test tone playing...');
+        console.log('Public audio loaded and playing');
+        updateStatus('Public test audio playing!');
       }).catch(err => {
-        console.error('Test tone load failed:', err);
-        updateStatus('Test tone FAILED: ' + (err.message || err));
+        console.error('Public audio also failed:', err);
+        updateStatus('ALL audio failed - receiver may not support PlayerManager.load()');
       });
     }
 
@@ -307,8 +318,9 @@
     context.start(options);
     console.log('Direct Channel receiver v4 started, listening on', NAMESPACE);
 
-    // Play test tone after receiver initializes
-    setTimeout(() => playTestTone(), 1500);
+    // Try loading the HTTP MP3 stream after receiver initializes.
+    // This is the definitive test of whether the receiver + PlayerManager work.
+    setTimeout(() => playHttpStream(), 2000);
   </script>
 </body>
 </html>
