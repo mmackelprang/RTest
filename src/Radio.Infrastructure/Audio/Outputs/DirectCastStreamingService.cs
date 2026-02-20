@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Radio.Core.Configuration;
+using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.SoundFlow;
 
@@ -40,6 +41,7 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
   private readonly IAudioEngine _audioEngine;
   private readonly DirectCastAudioChannel _channel;
   private readonly GoogleCastOutputOptions _options;
+  private readonly IMetricsCollector? _metricsCollector;
 
   private string? _transportId;
   private Stream? _streamReader;
@@ -59,6 +61,9 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
   private long _lastPingSentMs;
   private long _lastRttMs;
   private string? _lastPongJson;
+
+  // Silence tracking for metrics
+  private long _silenceChunks;
 
   /// <summary>
   /// Gets the total number of audio chunks sent to the Cast device.
@@ -92,16 +97,19 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
   /// <param name="audioEngine">Audio engine for creating stream readers.</param>
   /// <param name="channel">The custom Cast channel for sending audio messages.</param>
   /// <param name="options">Google Cast output configuration.</param>
+  /// <param name="metricsCollector">Optional metrics collector for recording streaming metrics.</param>
   public DirectCastStreamingService(
     ILogger logger,
     IAudioEngine audioEngine,
     DirectCastAudioChannel channel,
-    GoogleCastOutputOptions options)
+    GoogleCastOutputOptions options,
+    IMetricsCollector? metricsCollector = null)
   {
     _logger = logger;
     _audioEngine = audioEngine;
     _channel = channel;
     _options = options;
+    _metricsCollector = metricsCollector;
   }
 
   /// <summary>
@@ -352,6 +360,9 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
             if (pcmBuffer[i] != 0) isSilence = false;
           }
 
+          if (isSilence)
+            Interlocked.Increment(ref _silenceChunks);
+
           if (chunksSinceStart <= 10 || isSilence != _lastChunkWasSilence)
           {
             _logger.LogInformation(
@@ -392,6 +403,9 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
               "DirectCast: Sent {Chunks} chunks ({MB:F1} MB), seq {Seq}, " +
               "rate: {Rate:F1}/sec, {Errors} errors",
               _totalChunksSent, _totalBytesSent / 1_000_000.0, seq, rate, _sendErrors);
+
+            // Record metrics for the Web UI dashboard
+            ReportMetrics(rate);
           }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -423,6 +437,22 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
     }
 
     _logger.LogInformation("DirectCast: Streaming loop ended");
+  }
+
+  /// <summary>
+  /// Records DirectChannel streaming metrics to the metrics collector.
+  /// Called every ~10 seconds from the streaming loop.
+  /// </summary>
+  private void ReportMetrics(double chunkRate)
+  {
+    if (_metricsCollector == null) return;
+
+    _metricsCollector.Gauge("audio.cast.direct.chunk_rate", chunkRate);
+    _metricsCollector.Gauge("audio.cast.direct.chunks_sent", _totalChunksSent);
+    _metricsCollector.Gauge("audio.cast.direct.bytes_sent_mb", _totalBytesSent / 1_000_000.0);
+    _metricsCollector.Gauge("audio.cast.direct.send_errors", _sendErrors);
+    _metricsCollector.Gauge("audio.cast.direct.silence_percent",
+      _totalChunksSent > 0 ? _silenceChunks * 100.0 / _totalChunksSent : 0);
   }
 
   /// <inheritdoc />
