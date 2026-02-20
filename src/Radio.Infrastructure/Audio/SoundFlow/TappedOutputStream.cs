@@ -384,6 +384,11 @@ internal sealed class TappedOutputStreamReader : Stream
   /// </summary>
   public string ReaderId => _readerId;
 
+  /// <summary>
+  /// Gets the number of bytes available to read for this reader.
+  /// </summary>
+  public int Available => _parent.GetAvailableForReader(_readerId);
+
   /// <inheritdoc/>
   public override int Read(byte[] buffer, int offset, int count)
   {

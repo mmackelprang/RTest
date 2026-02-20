@@ -4,6 +4,7 @@ using NAudio.Lame;
 using NAudio.Wave;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.SoundFlow;
 
 namespace Radio.Infrastructure.Audio.Outputs;
 
@@ -134,12 +135,43 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
     _totalBytesSent = 0;
     _sendErrors = 0;
 
-    // Create a stream reader with minimal lag for lowest latency.
-    // The reader's built-in real-time pacing prevents tight-loop spinning.
-    _streamReader = _audioEngine.CreateStreamReader("direct-cast", lagSeconds: 0.05);
+    // Log output tap diagnostics to help debug data flow issues
+    if (_audioEngine is SoundFlowAudioEngine sfEngine)
+    {
+      var tapDiag = sfEngine.GetOutputTapDiagnostics();
+      if (tapDiag.HasValue)
+      {
+        _logger.LogInformation(
+          "DirectCast: Output tap state — {WriteCalls} writes, {Bytes} bytes, " +
+          "writePos: {WritePos}, readers: {Readers}, lastWrite: {LastWrite}",
+          tapDiag.Value.TotalWriteCalls, tapDiag.Value.TotalBytesWritten,
+          tapDiag.Value.WritePosition, tapDiag.Value.ActiveReaderCount,
+          tapDiag.Value.LastWriteTime);
+      }
+      else
+      {
+        _logger.LogWarning("DirectCast: Output tap diagnostics not available (tap is null)!");
+      }
+    }
+
+    // Use 1 second of lag to ensure the reader starts with real audio data.
+    // The reader starts behind the write position by this amount, giving it
+    // immediate access to recently-written audio. With too-small lag (e.g. 50ms),
+    // the reader can start at the write position with no data available, and
+    // then receive silence indefinitely because silence reads don't advance
+    // the read pointer.
+    _streamReader = _audioEngine.CreateStreamReader("direct-cast", lagSeconds: 1.0);
+
+    // Log initial reader state
+    if (_streamReader is TappedOutputStreamReader tapReader)
+    {
+      _logger.LogInformation(
+        "DirectCast: Reader created — id: {ReaderId}, initialAvailable: {Available} bytes",
+        tapReader.ReaderId, tapReader.Available);
+    }
 
     _logger.LogInformation(
-      "DirectCast: Starting streaming — chunk size {ChunkMs}ms, namespace {Namespace}",
+      "DirectCast: Starting streaming — chunk size {ChunkMs}ms, namespace {Namespace}, lag: 1.0s",
       _options.DirectChannelChunkSizeMs, _options.DirectChannelNamespace);
 
     _streamingTask = Task.Run(() => StreamingLoopAsync(_cts.Token));
@@ -239,10 +271,12 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
       {
         // Read a full chunk of PCM audio
         var totalRead = 0;
+        var readCalls = 0;
         while (totalRead < chunkBytes && !ct.IsCancellationRequested)
         {
           var bytesRead = await _streamReader!.ReadAsync(
             pcmBuffer, totalRead, chunkBytes - totalRead, ct);
+          readCalls++;
           if (bytesRead == 0)
           {
             // Reader returned 0 — engine may be shutting down
@@ -250,6 +284,17 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
             continue;
           }
           totalRead += bytesRead;
+
+          // Detailed per-read diagnostics for first 5 chunks
+          if (chunksSinceStart < 5 && _streamReader is TappedOutputStreamReader tapReader)
+          {
+            var hasNonZero = false;
+            for (var b = totalRead - bytesRead; b < totalRead && !hasNonZero; b++)
+              if (pcmBuffer[b] != 0) hasNonZero = true;
+            _logger.LogInformation(
+              "DirectCast: Read #{Call}: {BytesRead} bytes, nonZero: {NonZero}, availAfter: {Avail}, totalSoFar: {Total}/{Target}",
+              readCalls, bytesRead, hasNonZero, tapReader.Available, totalRead, chunkBytes);
+          }
         }
 
         if (ct.IsCancellationRequested) break;
