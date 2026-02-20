@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<!--
+  Direct Channel Cast Receiver for Radio Console
+  ================================================
+  Custom CAF (Cast Application Framework) receiver that receives audio data
+  directly over the Cast protocol's custom message bus, bypassing HTTP entirely.
+
+  How it works:
+  1. The sender (Radio Console API) launches this receiver on the Cast device
+  2. Audio chunks arrive as JSON messages on a custom namespace:
+     { "type": "audio", "data": "<base64-encoded-WAV>", "seq": N }
+  3. Each chunk is a self-contained WAV file (44-byte header + PCM data)
+  4. Web Audio API decodes each chunk and schedules it for gapless playback
+  5. Chunks are queued and played sequentially using AudioBufferSourceNode.start(time)
+
+  Requirements:
+  - Register this HTML as a Custom Receiver Application on the Google Cast SDK
+    Developer Console: https://cast.google.com/publish/
+  - Set the registered App ID in appsettings.json: AudioOutput:GoogleCast:ApplicationId
+  - Set StreamingMode to "DirectChannel" in appsettings.json
+
+  Audio parameters (must match sender):
+  - 48kHz sample rate, 16-bit, stereo
+  - Default chunk size: 100ms (~19.2KB PCM, ~25.7KB Base64)
+
+  See also: design/direct-cast-channel.md for full architecture documentation.
+-->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Radio Console Direct Channel Receiver</title>
+  <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+</head>
+<body>
+  <!-- No <cast-media-player> element — we handle audio entirely via Web Audio API -->
+  <div id="status" style="color: #ccc; font-family: monospace; padding: 20px;">
+    Radio Console — Direct Channel Receiver<br>
+    <span id="info">Waiting for audio...</span>
+  </div>
+
+  <script>
+    'use strict';
+
+    // Configuration — namespace must match sender's DirectChannelNamespace setting
+    const NAMESPACE = 'urn:x-cast:com.radioconsole.audio';
+
+    // Web Audio API context for decoding and scheduling audio playback
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+      sampleRate: 48000
+    });
+
+    // Playback scheduling state
+    let nextPlayTime = 0;       // When to schedule the next buffer (in audioCtx.currentTime units)
+    let chunksReceived = 0;     // Total chunks received (for logging)
+    let chunksPlayed = 0;       // Total chunks decoded and scheduled
+    let lastSeq = -1;           // Last sequence number received (for gap detection)
+
+    // Buffer queue — holds decoded AudioBuffers waiting to be scheduled.
+    // Decoding is async, so chunks may arrive faster than they can be decoded.
+    const pendingQueue = [];
+    let isProcessingQueue = false;
+
+    // CAF receiver context
+    const context = cast.framework.CastReceiverContext.getInstance();
+
+    // Disable idle timeout — there's no media session, so the default 5-minute
+    // idle timeout would shut down the receiver. Audio arrives via messages, not media.
+    const options = new cast.framework.CastReceiverOptions();
+    options.disableIdleTimeout = true;
+
+    // Listen for audio chunks on our custom namespace
+    context.addCustomMessageListener(NAMESPACE, (event) => {
+      const msg = event.data;
+
+      if (msg.type === 'audio' && msg.data) {
+        chunksReceived++;
+
+        // Detect sequence gaps
+        if (lastSeq >= 0 && msg.seq !== lastSeq + 1) {
+          console.warn(`Sequence gap: expected ${lastSeq + 1}, got ${msg.seq}`);
+        }
+        lastSeq = msg.seq;
+
+        // Decode Base64 → ArrayBuffer → AudioBuffer
+        decodeAndSchedule(msg.data, msg.seq);
+      } else if (msg.type === 'stop') {
+        console.log('Received stop command');
+        nextPlayTime = 0;
+        chunksPlayed = 0;
+        lastSeq = -1;
+        updateStatus('Stopped');
+      } else if (msg.type === 'ping') {
+        // Respond with status for diagnostics
+        context.sendCustomMessage(NAMESPACE, event.senderId, {
+          type: 'pong',
+          chunksReceived: chunksReceived,
+          chunksPlayed: chunksPlayed,
+          currentTime: audioCtx.currentTime,
+          nextPlayTime: nextPlayTime,
+          state: audioCtx.state
+        });
+      }
+    });
+
+    /**
+     * Decodes a Base64-encoded WAV chunk and queues it for gapless playback.
+     *
+     * @param {string} base64Data - Base64-encoded WAV file (header + PCM)
+     * @param {number} seq - Sequence number for logging
+     */
+    function decodeAndSchedule(base64Data, seq) {
+      // Decode Base64 to ArrayBuffer
+      const binaryStr = atob(base64Data);
+      const len = binaryStr.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+
+      // Queue for decoding — decodeAudioData is async and we need ordering
+      pendingQueue.push({ buffer: bytes.buffer, seq: seq });
+      processQueue();
+    }
+
+    /**
+     * Processes the pending decode queue sequentially to maintain chunk ordering.
+     * Each chunk is decoded and immediately scheduled for playback.
+     */
+    async function processQueue() {
+      if (isProcessingQueue) return;
+      isProcessingQueue = true;
+
+      while (pendingQueue.length > 0) {
+        const item = pendingQueue.shift();
+        try {
+          // Resume AudioContext if suspended (Chrome autoplay policy)
+          if (audioCtx.state === 'suspended') {
+            await audioCtx.resume();
+            console.log('AudioContext resumed');
+          }
+
+          const audioBuffer = await audioCtx.decodeAudioData(item.buffer);
+          scheduleBuffer(audioBuffer);
+
+          if (chunksPlayed % 50 === 0) {
+            console.log(`Chunk ${item.seq}: decoded ${audioBuffer.duration.toFixed(3)}s, ` +
+              `scheduled at ${nextPlayTime.toFixed(3)}s, current: ${audioCtx.currentTime.toFixed(3)}s, ` +
+              `ahead: ${(nextPlayTime - audioCtx.currentTime).toFixed(3)}s`);
+          }
+        } catch (err) {
+          console.error(`Failed to decode chunk ${item.seq}:`, err);
+        }
+      }
+
+      isProcessingQueue = false;
+    }
+
+    /**
+     * Schedules an AudioBuffer for gapless playback.
+     *
+     * Buffers are scheduled at precise times using AudioBufferSourceNode.start(time).
+     * Each buffer's start time is exactly after the previous buffer ends, ensuring
+     * seamless audio without gaps or overlaps.
+     *
+     * If playback falls too far behind (buffer underrun), the schedule resets
+     * to play from "now" to recover quickly.
+     *
+     * @param {AudioBuffer} audioBuffer - Decoded audio buffer to schedule
+     */
+    function scheduleBuffer(audioBuffer) {
+      const now = audioCtx.currentTime;
+      const bufferDuration = audioBuffer.duration;
+
+      // Reset schedule if we've fallen behind or this is the first chunk.
+      // Add a small initial buffer (50ms) to absorb jitter.
+      if (nextPlayTime < now) {
+        if (chunksPlayed > 0) {
+          console.warn(`Buffer underrun: nextPlayTime ${nextPlayTime.toFixed(3)} < now ${now.toFixed(3)}, resetting`);
+        }
+        nextPlayTime = now + 0.05; // 50ms initial buffer
+      }
+
+      // Create and schedule the source node
+      const source = audioCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioCtx.destination);
+      source.start(nextPlayTime);
+
+      // Advance schedule for the next chunk
+      nextPlayTime += bufferDuration;
+      chunksPlayed++;
+
+      updateStatus(`Playing — chunk ${chunksPlayed}, ahead: ${(nextPlayTime - now).toFixed(1)}s`);
+    }
+
+    /**
+     * Updates the on-screen status text (visible if receiver has a display).
+     * @param {string} text - Status message
+     */
+    function updateStatus(text) {
+      const el = document.getElementById('info');
+      if (el) el.textContent = text;
+    }
+
+    // Start the receiver
+    context.start(options);
+    console.log('Direct Channel receiver started, listening on', NAMESPACE);
+  </script>
+</body>
+</html>

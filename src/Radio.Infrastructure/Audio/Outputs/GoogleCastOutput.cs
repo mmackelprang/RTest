@@ -26,6 +26,11 @@ public class GoogleCastOutput : AudioOutputBase
   private ChromecastReceiver? _connectedReceiver;
   private string? _streamUrl;
 
+  // Direct Channel streaming (experimental)
+  private IAudioEngine? _audioEngine;
+  private DirectCastStreamingService? _directStreaming;
+  private DirectCastAudioChannel? _directChannel;
+
   // Cache discovered receivers to use the original objects for connection
   // Indexed by device ID (DeviceUri.ToString()) and also by IP address for fallback matching
   private readonly Dictionary<string, ChromecastReceiver> _discoveredReceivers = new();
@@ -75,6 +80,12 @@ public class GoogleCastOutput : AudioOutputBase
   /// Gets the currently connected Chromecast device information.
   /// </summary>
   public ChromecastDeviceInfo? ConnectedDevice { get; private set; }
+
+  /// <summary>
+  /// Gets the Google Cast output options for external inspection (e.g., by controllers
+  /// to determine the streaming mode).
+  /// </summary>
+  public GoogleCastOutputOptions Options => _options;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="GoogleCastOutput"/> class.
@@ -531,68 +542,136 @@ public class GoogleCastOutput : AudioOutputBase
 
     try
     {
-      _logger.LogInformation("Starting Google Cast output");
+      _logger.LogInformation("Starting Google Cast output (mode: {Mode})", _options.StreamingMode);
 
-      // Start streaming to the connected Chromecast
-      // Launch the default media receiver application
       if (_client != null)
       {
-        // Launch media receiver (default CC1AD845 or custom low-latency receiver)
-        await _client.LaunchApplicationAsync(_options.ApplicationId);
-        _logger.LogInformation("Cast: Media receiver launched on {Device}", ConnectedDevice?.FriendlyName);
+        // Launch the receiver application (default CC1AD845 or custom receiver)
+        var launchStatus = await _client.LaunchApplicationAsync(_options.ApplicationId);
+        _logger.LogInformation("Cast: Receiver launched on {Device}", ConnectedDevice?.FriendlyName);
 
-        // Allow media receiver to start initializing before sending commands.
-        // Short delay is sufficient because LoadMediaOnCastAsync retries on failure.
+        // Allow receiver to start initializing before sending commands
         await Task.Delay(250, cancellationToken);
 
-        // Subscribe to status changes to monitor device transitions
-        var mediaChannel = _client.GetChannel<MediaChannel>();
-        if (mediaChannel != null)
+        // Branch on streaming mode
+        if (string.Equals(_options.StreamingMode, "DirectChannel", StringComparison.OrdinalIgnoreCase))
         {
-          mediaChannel.StatusChanged += (_, status) =>
-          {
-            _logger.LogInformation(
-              "Cast: StatusChanged event — PlayerState: {State}, IdleReason: {IdleReason}, MediaSessionId: {SessionId}",
-              status?.PlayerState, status?.IdleReason, status?.MediaSessionId);
-          };
-        }
-
-        // Load media if we have a stream URL
-        if (!string.IsNullOrEmpty(_streamUrl))
-        {
-          await LoadMediaOnCastAsync(mediaChannel, cancellationToken);
-
-          // Sync volume to Cast device to ensure it's audible
-          try
-          {
-            var receiverChannel = _client.GetChannel<ReceiverChannel>();
-            if (receiverChannel != null)
-            {
-              await receiverChannel.SetVolume(Volume);
-              _logger.LogInformation("Cast: Volume synced to {Volume:P0}", Volume);
-            }
-          }
-          catch (Exception volEx)
-          {
-            _logger.LogWarning(volEx, "Cast: Failed to sync volume after media load");
-          }
+          await StartDirectChannelAsync(launchStatus, cancellationToken);
         }
         else
         {
-          _logger.LogWarning("Cast: No stream URL set — Chromecast will not receive audio");
+          await StartHttpMp3Async(cancellationToken);
         }
       }
 
       IsEnabledInternal = true;
       State = AudioOutputState.Streaming;
 
-      _logger.LogInformation("Google Cast output started streaming to {Name}", ConnectedDevice?.FriendlyName);
+      _logger.LogInformation("Google Cast output started streaming to {Name} (mode: {Mode})",
+        ConnectedDevice?.FriendlyName, _options.StreamingMode);
     }
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to start Google Cast output");
       State = AudioOutputState.Error;
       throw;
+    }
+  }
+
+  /// <summary>
+  /// Starts the DirectChannel streaming mode: sends Base64-encoded WAV chunks
+  /// directly over a custom Cast message bus, bypassing HTTP entirely.
+  /// </summary>
+  private async Task StartDirectChannelAsync(
+    Sharpcaster.Models.ChromecastStatus.ChromecastStatus? launchStatus,
+    CancellationToken cancellationToken)
+  {
+    if (_audioEngine == null)
+    {
+      _logger.LogWarning("Cast: DirectChannel mode requires audio engine — call SetAudioEngine() first. Falling back to HttpMp3.");
+      await StartHttpMp3Async(cancellationToken);
+      return;
+    }
+
+    // Extract the transport ID from the launched application status.
+    // This is the destination address for all custom messages to the receiver.
+    var transportId = launchStatus?.Application?.TransportId;
+    if (string.IsNullOrEmpty(transportId))
+    {
+      _logger.LogWarning("Cast: Could not get transport ID from launch status — falling back to HttpMp3");
+      await StartHttpMp3Async(cancellationToken);
+      return;
+    }
+
+    _logger.LogInformation(
+      "Cast: Starting DirectChannel streaming — transport: {TransportId}, namespace: {Namespace}, chunk: {ChunkMs}ms",
+      transportId, _options.DirectChannelNamespace, _options.DirectChannelChunkSizeMs);
+
+    // Create the custom audio channel and wire it to the client.
+    // ChromecastChannel.Client is a public setter used internally for sending.
+    // Note: without RegisterChannel (not available in SharpCaster v3.0.0),
+    // the channel can send but won't receive messages from the receiver.
+    // This is acceptable — audio flows sender→receiver; diagnostics use logs.
+    _directChannel = new DirectCastAudioChannel(_options.DirectChannelNamespace, _logger);
+    _directChannel.Client = _client!;
+
+    // Create the streaming service and start sending audio
+    _directStreaming = new DirectCastStreamingService(
+      _logger, _audioEngine, _directChannel, _options);
+    _directStreaming.SetTransportId(transportId);
+    _directStreaming.Start();
+
+    // Sync volume to Cast device
+    await SyncVolumeAfterStartAsync();
+  }
+
+  /// <summary>
+  /// Starts the standard HttpMp3 streaming mode: the Cast device fetches audio
+  /// from an HTTP MP3 stream endpoint.
+  /// </summary>
+  private async Task StartHttpMp3Async(CancellationToken cancellationToken)
+  {
+    // Subscribe to status changes to monitor device transitions
+    var mediaChannel = _client!.GetChannel<MediaChannel>();
+    if (mediaChannel != null)
+    {
+      mediaChannel.StatusChanged += (_, status) =>
+      {
+        _logger.LogInformation(
+          "Cast: StatusChanged event — PlayerState: {State}, IdleReason: {IdleReason}, MediaSessionId: {SessionId}",
+          status?.PlayerState, status?.IdleReason, status?.MediaSessionId);
+      };
+    }
+
+    // Load media if we have a stream URL
+    if (!string.IsNullOrEmpty(_streamUrl))
+    {
+      await LoadMediaOnCastAsync(mediaChannel, cancellationToken);
+      await SyncVolumeAfterStartAsync();
+    }
+    else
+    {
+      _logger.LogWarning("Cast: No stream URL set — Chromecast will not receive audio");
+    }
+  }
+
+  /// <summary>
+  /// Syncs the volume level to the Cast device after starting playback.
+  /// </summary>
+  private async Task SyncVolumeAfterStartAsync()
+  {
+    try
+    {
+      var receiverChannel = _client!.GetChannel<ReceiverChannel>();
+      if (receiverChannel != null)
+      {
+        await receiverChannel.SetVolume(Volume);
+        _logger.LogInformation("Cast: Volume synced to {Volume:P0}", Volume);
+      }
+    }
+    catch (Exception volEx)
+    {
+      _logger.LogWarning(volEx, "Cast: Failed to sync volume after start");
     }
   }
 
@@ -608,6 +687,16 @@ public class GoogleCastOutput : AudioOutputBase
     {
       State = AudioOutputState.Stopping;
       _logger.LogInformation("Stopping Google Cast output");
+
+      // Stop DirectChannel streaming if active
+      if (_directStreaming != null)
+      {
+        await _directStreaming.StopAsync();
+        await _directStreaming.DisposeAsync();
+        _directStreaming = null;
+        _directChannel = null;
+        _logger.LogInformation("DirectChannel streaming stopped");
+      }
 
       // Stop media playback on the Chromecast
       if (_client != null)
@@ -666,6 +755,19 @@ public class GoogleCastOutput : AudioOutputBase
   {
     _streamUrl = streamUrl;
     _logger.LogDebug("Stream URL set to: {Url}", streamUrl);
+  }
+
+  /// <summary>
+  /// Sets the audio engine reference for DirectChannel streaming mode.
+  /// When set, the DirectCastStreamingService can create a stream reader
+  /// to read PCM audio directly from the engine's output tap.
+  /// Only required when <see cref="GoogleCastOutputOptions.StreamingMode"/> is "DirectChannel".
+  /// </summary>
+  /// <param name="audioEngine">The audio engine instance.</param>
+  public void SetAudioEngine(IAudioEngine audioEngine)
+  {
+    _audioEngine = audioEngine;
+    _logger.LogInformation("Cast: Audio engine set for DirectChannel streaming");
   }
 
   /// <summary>
@@ -1242,6 +1344,13 @@ public class GoogleCastOutput : AudioOutputBase
       {
         _logger.LogWarning(ex, "Error during disconnect in dispose");
       }
+    }
+
+    if (_directStreaming != null)
+    {
+      await _directStreaming.DisposeAsync();
+      _directStreaming = null;
+      _directChannel = null;
     }
 
     lock (_debounceLock)
