@@ -5,18 +5,13 @@
   This receiver uses the Cast Application Framework (CAF) to stream live
   MP3 audio with minimal buffering delay.
 
-  SETUP:
-  1. Host this file on a public HTTPS URL (e.g., GitHub Pages)
-  2. Register a Custom Receiver app at https://cast.google.com/publish/
-  3. Update appsettings.json: AudioOutput.GoogleCast.ApplicationId = "<your-app-id>"
-  4. Restart Radio.API
-
-  DEFAULT MEDIA RECEIVER PROBLEM:
-  The default receiver (CC1AD845) has a ~20s audio prefill buffer before
-  playback starts. This custom receiver reduces that to ~2-5 seconds using:
-  - autoResumeDuration = 1 (start playback after 1s of buffered audio)
-  - LOAD interceptor to enforce StreamType.LIVE
-  - Idle timeout disabled (keeps receiver alive for continuous streams)
+  APPROACH:
+  Chrome's native <video>/<audio> element buffers ~20s before starting playback
+  on infinite streams. We bypass this by:
+  1. Intercepting LOAD to enforce StreamType.LIVE
+  2. Monitoring the media element's buffer via 'progress' events
+  3. Force-calling play() as soon as ~1s of audio is buffered
+  This reduces startup latency from ~20s to ~2-3s.
 -->
 <html>
 <head>
@@ -32,12 +27,9 @@
     const context = cast.framework.CastReceiverContext.getInstance();
     const playerManager = context.getPlayerManager();
 
-    // Log receiver lifecycle for remote debugging
     console.log('[RadioConsole] Custom receiver starting');
 
-    // Intercept LOAD requests to enforce LIVE stream type.
-    // Prevents the player from trying to determine content length
-    // or buffering the entire stream before playback.
+    // Intercept LOAD requests to enforce LIVE stream type
     playerManager.setMessageInterceptor(
       cast.framework.messages.MessageType.LOAD,
       request => {
@@ -49,6 +41,47 @@
         if (request.media) {
           request.media.streamType = cast.framework.messages.StreamType.LIVE;
         }
+
+        // After CAF sets up the media element, force early playback.
+        // Chrome normally buffers ~20s before starting; we force play() after ~1s.
+        setTimeout(function() {
+          var cmp = document.querySelector('cast-media-player');
+          var sr = cmp && cmp.shadowRoot;
+          var media = sr && (sr.querySelector('video') || sr.querySelector('audio'));
+          if (media) {
+            console.log('[RadioConsole] Found media element:', media.tagName,
+              'readyState:', media.readyState, 'paused:', media.paused);
+
+            var forcePlayAttempts = 0;
+            var forcePlayInterval = setInterval(function() {
+              forcePlayAttempts++;
+              var bufferedEnd = media.buffered.length > 0 ? media.buffered.end(0) : 0;
+              console.log('[RadioConsole] Buffer check #' + forcePlayAttempts +
+                ': buffered=' + bufferedEnd.toFixed(2) + 's, readyState=' + media.readyState +
+                ', paused=' + media.paused + ', currentTime=' + media.currentTime.toFixed(2));
+
+              // Force play as soon as we have >= 1 second of buffered audio
+              if (bufferedEnd >= 1.0 && media.paused) {
+                console.log('[RadioConsole] Forcing play() at ' + bufferedEnd.toFixed(2) + 's buffered');
+                media.play().then(function() {
+                  console.log('[RadioConsole] Force play() succeeded!');
+                }).catch(function(e) {
+                  console.error('[RadioConsole] Force play() failed:', e.message);
+                });
+                clearInterval(forcePlayInterval);
+              }
+
+              // Give up after 30 attempts (15 seconds)
+              if (forcePlayAttempts >= 30) {
+                console.log('[RadioConsole] Giving up on force play, letting CAF handle it');
+                clearInterval(forcePlayInterval);
+              }
+            }, 500);
+          } else {
+            console.warn('[RadioConsole] Could not find media element in shadow DOM');
+          }
+        }, 500);
+
         return request;
       }
     );
@@ -56,31 +89,25 @@
     // Log player state changes for debugging
     playerManager.addEventListener(
       cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
-      () => console.log('[RadioConsole] Player load complete — playback should start')
+      function() { console.log('[RadioConsole] Player load complete'); }
     );
     playerManager.addEventListener(
       cast.framework.events.EventType.BUFFERING,
-      event => console.log('[RadioConsole] Buffering:', event.isBuffering)
+      function(event) { console.log('[RadioConsole] Buffering:', event.isBuffering); }
     );
     playerManager.addEventListener(
       cast.framework.events.EventType.ERROR,
-      event => console.error('[RadioConsole] Player error:', JSON.stringify(event))
+      function(event) { console.error('[RadioConsole] Player error:', JSON.stringify(event)); }
     );
 
-    // Configure low-latency playback.
-    // PlaybackConfig constructor takes no arguments — set properties individually.
-    const playbackConfig = new cast.framework.PlaybackConfig();
-    playbackConfig.autoResumeDuration = 1;   // Resume/start playback after 1s of buffered audio
-    playbackConfig.autoPauseDuration = 0.5;  // Pause to buffer when less than 0.5s remains
-
-    console.log('[RadioConsole] PlaybackConfig:', JSON.stringify({
-      autoResumeDuration: playbackConfig.autoResumeDuration,
-      autoPauseDuration: playbackConfig.autoPauseDuration
-    }));
+    // PlaybackConfig — these control Shaka/CAF resume behavior
+    var playbackConfig = new cast.framework.PlaybackConfig();
+    playbackConfig.autoResumeDuration = 1;
+    playbackConfig.autoPauseDuration = 0.5;
 
     context.start({
       playbackConfig: playbackConfig,
-      disableIdleTimeout: true  // Keep receiver alive for continuous streams
+      disableIdleTimeout: true
     });
 
     console.log('[RadioConsole] Receiver context started');
