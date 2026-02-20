@@ -4,6 +4,7 @@ using Radio.API.Hubs;
 using Radio.API.Middleware;
 using Radio.API.Services;
 using Radio.API.Streaming;
+using Radio.API.Logging;
 using Radio.Infrastructure.DependencyInjection;
 using Serilog;
 
@@ -14,9 +15,15 @@ var builder = WebApplication.CreateBuilder(args);
 // This ensures that persistent settings saved by the app are loaded and reloaded on change
 builder.Configuration.AddJsonFile("config.json", optional: true, reloadOnChange: true);
 
-// Configure Serilog
+// Configure Serilog with systemd-compatible console formatter.
+// The SystemdConsoleFormatter prefixes each log line with <N> syslog priority
+// (e.g., <6> for info, <4> for warning). When SyslogLevelPrefix=true is set
+// in the systemd service file, journald assigns proper priority levels.
+// ALSA/JACK C library noise (written directly to stdout without a prefix)
+// gets the default priority, allowing filtering with `journalctl -p info`.
 Log.Logger = new LoggerConfiguration()
   .ReadFrom.Configuration(builder.Configuration)
+  .WriteTo.Console(new SystemdConsoleFormatter())
   .CreateLogger();
 
 builder.Host.UseSerilog();

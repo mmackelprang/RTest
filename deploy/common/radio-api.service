@@ -15,13 +15,16 @@ KillSignal=SIGINT
 SyslogIdentifier=radio-api
 TimeoutStopSec=30
 
-# Logging — demote C library stderr (ALSA/JACK/PulseAudio probe noise) to debug level.
-# Application logs go to stdout via Serilog and remain at info/notice priority.
+# Logging — Serilog prefixes app log lines with <N> syslog priority (e.g. <6>=info).
+# SyslogLevelPrefix=true tells journald to parse these prefixes for priority assignment.
+# C library noise (ALSA/JACK/PulseAudio) written to stdout WITHOUT a prefix defaults
+# to StandardOutputPriority=debug, so it's filtered by `journalctl -p info`.
 # View clean logs: journalctl -u radio-api -p info
 # View everything:  journalctl -u radio-api -p debug
 StandardOutput=journal
 StandardError=journal
-StandardErrorPriority=debug
+SyslogLevelPrefix=true
+SyslogLevel=debug
 
 # Environment
 Environment=ASPNETCORE_URLS=http://0.0.0.0:5000
