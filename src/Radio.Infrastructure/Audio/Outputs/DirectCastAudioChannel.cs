@@ -35,7 +35,7 @@ public class DirectCastAudioChannel : ChromecastChannel
   /// <param name="ns">The custom namespace URI (e.g., "urn:x-cast:com.radioconsole.audio").</param>
   /// <param name="logger">Logger instance.</param>
   public DirectCastAudioChannel(string ns, ILogger logger)
-    : base(ns, logger)
+    : base(ns, logger, useBaseNamespace: false)
   {
     _logger = logger;
   }
