@@ -29,17 +29,20 @@
 - [x] A.1d: Reverted test commits from main, pushed cleanup
 - [x] A.2: Documented pre-loaded sounds approach in FUTURE-WORK.md section 8
 
-### Phase B status: COMPLETE (service file updated)
-- [x] Added `StandardErrorPriority=debug` to `radio-api.service`
-- Will take effect on next deployment to both Pi and Ubuntu
+### Phase B status: COMPLETE
+- [x] Initial approach (StandardErrorPriority) failed — noise comes through stdout, not stderr
+- [x] Created `SystemdConsoleFormatter` — prefixes Serilog lines with `<N>` syslog priority
+- [x] Service file: `SyslogLevelPrefix=true` + `SyslogLevel=debug`
+- [x] Verified on Ubuntu: `journalctl -p info` shows ONLY app logs, zero ALSA noise
 
-### Phase C status: In progress (blocked on sudo)
+### Phase C status: COMPLETE
 - [x] C.2: Deploy script parameterized — `Deploy-ToLinux.ps1` with `-Runtime` param
 - [x] C.2: `Deploy-ToPi.ps1` converted to thin wrapper
 - [x] C.2: Production config template for debian-x64
-- [x] C.3: Setup files copied to Ubuntu machine at `/tmp/radio-deploy/`
-- [ ] C.3: User needs to run `sudo /tmp/radio-deploy/debian-x64/setup.sh` manually (password required)
-- [ ] C.4: Deploy application (after setup completes)
+- [x] C.3: Setup script run on Ubuntu — all packages, radio user, fpcalc, services installed
+- [x] C.4: Application deployed and running on `radio:5000` / `radio:5002`
+- [x] C.4: API responds (200 on /api/audio), Web UI loads (200)
+- [x] C.4: ALSA log filtering verified working
 
 ### Phase D status: Deferred
 

@@ -61,10 +61,11 @@ That's **~192 lines per minute** of pure noise.
 **Source:** These come from C libraries (libasound2, libjack) writing to stderr/fd2. Not from .NET/Serilog. Serilog writes structured logs to stdout which journald captures at info priority.
 
 **Solution options ranked:**
-1. **`StandardErrorPriority=debug`** in systemd service (RECOMMENDED) — demotes stderr to debug level, `journalctl -p info` filters it out. Zero code changes.
-2. **ALSA config** (`defaults.namehint.!pulse = off`) — partial, only suppresses some probing
-3. **MiniAudio backend filtering** — SoundFlow may not expose this API
-4. **`StandardError=null`** — aggressive, loses ALL stderr (not recommended)
+1. ~~`StandardErrorPriority=debug`~~ — FAILED: noise comes through stdout, not stderr
+2. **Syslog level prefix (IMPLEMENTED)** — `SystemdConsoleFormatter` prefixes Serilog lines with `<N>`, combined with `SyslogLevelPrefix=true` + `SyslogLevel=debug` in service file. Unprefixed C library noise defaults to debug. Verified working.
+3. **ALSA config** (`defaults.namehint.!pulse = off`) — partial, only suppresses some probing
+4. **MiniAudio backend filtering** — SoundFlow may not expose this API
+5. **`StandardError=null`** — aggressive, loses ALL stderr (not recommended)
 
 ### 3. Ubuntu x64 Machine Profile
 
