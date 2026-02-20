@@ -1,7 +1,5 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
-using NAudio.Lame;
-using NAudio.Wave;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.SoundFlow;
@@ -216,8 +214,9 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
   }
 
   /// <summary>
-  /// Main streaming loop. Reads PCM audio, encodes as MP3 via LAME, and sends
-  /// over the Cast channel at a rate determined by the chunk size.
+  /// Main streaming loop. Reads raw PCM audio and sends it directly over the
+  /// Cast channel. The receiver converts Int16LE samples to Float32 and plays
+  /// via Web Audio API — no encode/decode step means zero gap at chunk boundaries.
   /// </summary>
   private async Task StreamingLoopAsync(CancellationToken ct)
   {
@@ -232,32 +231,10 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
 
     var pcmBuffer = new byte[chunkBytes];
 
-    // Set up persistent MP3 encoder. Using LAME with CBR maintains a consistent
-    // bit reservoir across chunks for stable quality. The receiver uses MSE
-    // (MediaSource Extensions) to continuously append these MP3 frames.
-    const int mp3Bitrate = 320;
-    var mp3Buffer = new MemoryStream();
-    var waveFormat = new WaveFormat(sampleRate, bitsPerSample, channels);
-    LameMP3FileWriter? mp3Writer = null;
-    long mp3ReadPos = 0;
-
-    try
-    {
-      mp3Writer = new LameMP3FileWriter(mp3Buffer, waveFormat, mp3Bitrate);
-    }
-    catch (Exception ex) when (ex is DllNotFoundException or TypeInitializationException or FileLoadException)
-    {
-      _logger.LogError(ex,
-        "DirectCast: LAME MP3 encoder not available. " +
-        "Install libmp3lame: apt install libmp3lame-dev (Linux) or ensure LAME DLLs are present (Windows).");
-      mp3Buffer.Dispose();
-      return;
-    }
-
     _logger.LogInformation(
       "DirectCast: Streaming loop started — {ChunkMs}ms chunks = {ChunkBytes} bytes PCM, " +
-      "MP3 {Bitrate}kbps CBR, {MsgsPerSec} msgs/sec target",
-      chunkMs, chunkBytes, mp3Bitrate, 1000 / chunkMs);
+      "raw Int16LE (no MP3), {MsgsPerSec} msgs/sec target, ~{Base64KB:F1}KB Base64/msg",
+      chunkMs, chunkBytes, 1000 / chunkMs, chunkBytes * 4.0 / 3 / 1024);
 
     // Real-time pacing: the TappedOutputStreamReader may return buffered data
     // much faster than real-time (ring buffer backlog). Use a stopwatch to
@@ -300,8 +277,6 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
         if (ct.IsCancellationRequested) break;
 
         // Real-time pacing: wait until it's time to send this chunk.
-        // This prevents flooding the Cast device when the reader returns
-        // buffered data faster than real-time.
         chunksSinceStart++;
         var expectedElapsed = TimeSpan.FromMilliseconds(chunksSinceStart * chunkMs);
         var actualElapsed = pacingTimer.Elapsed;
@@ -311,8 +286,7 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
           await Task.Delay(delay, ct);
         }
 
-        // Detect silence transitions: log when audio data starts/stops being silence.
-        // This helps diagnose whether the audio engine is producing real audio data.
+        // Detect silence transitions
         {
           var isSilence = true;
           for (var i = 0; i < totalRead && isSilence; i++)
@@ -320,7 +294,6 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
             if (pcmBuffer[i] != 0) isSilence = false;
           }
 
-          // Log first 10 chunks unconditionally and any silence<->audio transitions
           if (chunksSinceStart <= 10 || isSilence != _lastChunkWasSilence)
           {
             _logger.LogInformation(
@@ -330,37 +303,18 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
           _lastChunkWasSilence = isSilence;
         }
 
-        // Encode PCM to MP3 via persistent LAME encoder
-        mp3Writer.Write(pcmBuffer, 0, totalRead);
-
-        // Extract only the new MP3 bytes written since last read
-        var currentPos = mp3Buffer.Position;
-        var newMp3Bytes = (int)(currentPos - mp3ReadPos);
-        if (newMp3Bytes <= 0)
-        {
-          // LAME buffered internally, no output frames yet (rare for 100ms chunks)
-          continue;
-        }
-
-        var mp3Data = mp3Buffer.GetBuffer().AsSpan((int)mp3ReadPos, newMp3Bytes).ToArray();
-        mp3ReadPos = currentPos;
-
-        // Compact the MemoryStream periodically to prevent unbounded growth.
-        // At 320kbps CBR, ~40KB/sec. 1MB threshold ≈ 25 seconds of data.
-        if (currentPos > 1_000_000)
-        {
-          mp3Buffer.SetLength(0);
-          mp3ReadPos = 0;
-        }
-
-        // Base64-encode and build JSON message
-        var base64 = Convert.ToBase64String(mp3Data);
+        // Send raw PCM directly — no MP3 encoding.
+        // The receiver converts Int16LE to Float32 and plays via Web Audio API.
+        var base64 = Convert.ToBase64String(pcmBuffer, 0, totalRead);
         var seq = Interlocked.Increment(ref _sequenceNumber);
         var message = JsonSerializer.Serialize(new
         {
           type = "audio",
           data = base64,
-          seq
+          seq,
+          fmt = "pcm",
+          sr = sampleRate,
+          ch = channels
         });
 
         // Send over the Cast channel
@@ -389,7 +343,6 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
         {
           Interlocked.Increment(ref _sendErrors);
 
-          // Log periodically to avoid spam on persistent errors
           if (_sendErrors <= 3 || _sendErrors % 50 == 0)
           {
             _logger.LogWarning(ex,
@@ -397,7 +350,6 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
               seq, _sendErrors);
           }
 
-          // Back off briefly on errors to avoid tight-loop retries
           await Task.Delay(100, ct);
         }
       }
@@ -409,14 +361,6 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
     catch (Exception ex)
     {
       _logger.LogError(ex, "DirectCast: Streaming loop terminated unexpectedly");
-    }
-    finally
-    {
-      // Dispose LAME encoder — Dispose() calls lame_encode_flush() which writes
-      // end-of-stream data into mp3Buffer. Harmless since we've stopped sending.
-      try { mp3Writer?.Dispose(); }
-      catch { /* Dispose may throw on non-seekable stream scenarios */ }
-      mp3Buffer.Dispose();
     }
 
     _logger.LogInformation("DirectCast: Streaming loop ended");
