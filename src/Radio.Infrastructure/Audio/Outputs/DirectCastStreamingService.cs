@@ -55,6 +55,11 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
   private DateTime _lastChunkTime;
   private bool _lastChunkWasSilence = true;
 
+  // Latency measurement
+  private long _lastPingSentMs;
+  private long _lastRttMs;
+  private string? _lastPongJson;
+
   /// <summary>
   /// Gets the total number of audio chunks sent to the Cast device.
   /// </summary>
@@ -108,6 +113,59 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
   {
     _transportId = transportId;
     _logger.LogInformation("DirectCast: Transport ID set to {TransportId}", transportId);
+  }
+
+  /// <summary>
+  /// Sends a ping to the receiver to measure round-trip time and collect latency stats.
+  /// The receiver replies with a pong containing latency metrics.
+  /// </summary>
+  /// <returns>True if the ping was sent successfully.</returns>
+  public async Task<bool> SendPingAsync()
+  {
+    if (string.IsNullOrEmpty(_transportId))
+      return false;
+
+    try
+    {
+      _lastPingSentMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+      var message = JsonSerializer.Serialize(new
+      {
+        type = "ping",
+        ts = _lastPingSentMs
+      });
+      await _channel.SendMessageAsync(message, _transportId);
+      return true;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "DirectCast: Failed to send ping");
+      return false;
+    }
+  }
+
+  /// <summary>
+  /// Gets the last round-trip time from a ping/pong exchange.
+  /// </summary>
+  public long LastRttMs => _lastRttMs;
+
+  /// <summary>
+  /// Gets the last raw pong JSON for inspection.
+  /// </summary>
+  public string? LastPongJson => _lastPongJson;
+
+  /// <summary>
+  /// Called when a pong message is received from the receiver.
+  /// </summary>
+  internal void HandlePong(string pongJson)
+  {
+    _lastPongJson = pongJson;
+    var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    if (_lastPingSentMs > 0)
+    {
+      _lastRttMs = now - _lastPingSentMs;
+      _logger.LogInformation("DirectCast: Pong received — RTT {Rtt}ms, payload: {Pong}",
+        _lastRttMs, pongJson);
+    }
   }
 
   /// <summary>
@@ -314,7 +372,8 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
           seq,
           fmt = "pcm",
           sr = sampleRate,
-          ch = channels
+          ch = channels,
+          ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
         });
 
         // Send over the Cast channel
