@@ -42,11 +42,11 @@ param(
   [switch]$Logs,
   [switch]$Quick,
   [Alias("PiHost")]
-  [string]$TargetHost = ($env:PI_HOST ?? "piradio"),
+  [string]$TargetHost = $(if ($env:PI_HOST) { $env:PI_HOST } else { "piradio" }),
   [Alias("PiUser")]
-  [string]$TargetUser = ($env:PI_USER ?? "mmack"),
+  [string]$TargetUser = $(if ($env:PI_USER) { $env:PI_USER } else { "mmack" }),
   [Alias("PiPath")]
-  [string]$TargetPath = ($env:PI_PATH ?? "/opt/radio-console"),
+  [string]$TargetPath = $(if ($env:PI_PATH) { $env:PI_PATH } else { "/opt/radio-console" }),
   [ValidateSet("linux-arm64", "linux-x64")]
   [string]$Runtime = "linux-arm64"
 )
