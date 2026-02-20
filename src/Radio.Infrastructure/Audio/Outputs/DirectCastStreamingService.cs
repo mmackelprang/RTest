@@ -46,6 +46,7 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
   private long _totalBytesSent;
   private long _sendErrors;
   private DateTime _lastChunkTime;
+  private bool _lastChunkWasSilence = true;
 
   /// <summary>
   /// Gets the total number of audio chunks sent to the Cast device.
@@ -196,13 +197,18 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
       "{MsgsPerSec} msgs/sec target",
       chunkMs, chunkBytes, 1000 / chunkMs);
 
+    // Real-time pacing: the TappedOutputStreamReader may return buffered data
+    // much faster than real-time (ring buffer backlog). Use a stopwatch to
+    // enforce that we never send faster than one chunk per chunkMs.
+    var pacingTimer = System.Diagnostics.Stopwatch.StartNew();
+    var chunkInterval = TimeSpan.FromMilliseconds(chunkMs);
+    long chunksSinceStart = 0;
+
     try
     {
       while (!ct.IsCancellationRequested)
       {
-        // Read a full chunk of PCM audio.
-        // TappedOutputStreamReader.ReadAsync paces itself to real-time when no
-        // data is available, so this naturally throttles to the correct rate.
+        // Read a full chunk of PCM audio
         var totalRead = 0;
         while (totalRead < chunkBytes && !ct.IsCancellationRequested)
         {
@@ -218,6 +224,37 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
         }
 
         if (ct.IsCancellationRequested) break;
+
+        // Real-time pacing: wait until it's time to send this chunk.
+        // This prevents flooding the Cast device when the reader returns
+        // buffered data faster than real-time.
+        chunksSinceStart++;
+        var expectedElapsed = TimeSpan.FromMilliseconds(chunksSinceStart * chunkMs);
+        var actualElapsed = pacingTimer.Elapsed;
+        if (expectedElapsed > actualElapsed)
+        {
+          var delay = expectedElapsed - actualElapsed;
+          await Task.Delay(delay, ct);
+        }
+
+        // Detect silence transitions: log when audio data starts/stops being silence.
+        // This helps diagnose whether the audio engine is producing real audio data.
+        {
+          var isSilence = true;
+          for (var i = 0; i < totalRead && isSilence; i++)
+          {
+            if (pcmBuffer[i] != 0) isSilence = false;
+          }
+
+          // Log first 10 chunks unconditionally and any silence<->audio transitions
+          if (chunksSinceStart <= 10 || isSilence != _lastChunkWasSilence)
+          {
+            _logger.LogInformation(
+              "DirectCast: Chunk {Seq} — {BytesRead} bytes, silence: {IsSilence}",
+              chunksSinceStart, totalRead, isSilence);
+          }
+          _lastChunkWasSilence = isSilence;
+        }
 
         // Wrap PCM in WAV header for self-contained decoding on receiver
         var wavChunk = WavChunkEncoder.Encode(pcmBuffer, totalRead, sampleRate, channels, bitsPerSample);
@@ -240,12 +277,14 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
           Interlocked.Add(ref _totalBytesSent, message.Length);
           _lastChunkTime = DateTime.UtcNow;
 
-          // Periodic diagnostics
+          // Periodic diagnostics (every 100 chunks = ~10 seconds at 100ms)
           if (_totalChunksSent % 100 == 0)
           {
+            var rate = _totalChunksSent / pacingTimer.Elapsed.TotalSeconds;
             _logger.LogDebug(
-              "DirectCast: Sent {Chunks} chunks ({MB:F1} MB), seq {Seq}, {Errors} errors",
-              _totalChunksSent, _totalBytesSent / 1_000_000.0, seq, _sendErrors);
+              "DirectCast: Sent {Chunks} chunks ({MB:F1} MB), seq {Seq}, " +
+              "rate: {Rate:F1}/sec, {Errors} errors",
+              _totalChunksSent, _totalBytesSent / 1_000_000.0, seq, rate, _sendErrors);
           }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

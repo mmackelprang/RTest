@@ -173,24 +173,42 @@ public class SoundFlowAudioEngine : IAudioEngine
 
       if (playbackDevices.Length > 0)
       {
-        // Use the first (default) playback device
+        // Find the best playback device, skipping null/discard devices.
+        // MiniAudio often lists a null backend "Discard all samples" device at
+        // index 0, which silently drops all audio. We prefer a real device.
+        var deviceIndex = 0;
         var deviceInfo = playbackDevices[0];
-        _logger.LogInformation("Initializing playback device: {DeviceName}", deviceInfo.Name);
+        for (int i = 0; i < playbackDevices.Length; i++)
+        {
+          var name = playbackDevices[i].Name ?? "";
+          if (name.Contains("Discard all samples", StringComparison.OrdinalIgnoreCase) ||
+              name.Contains("generate zero samples", StringComparison.OrdinalIgnoreCase))
+          {
+            _logger.LogDebug("Skipping null device at index {Index}: {Name}", i, name);
+            continue;
+          }
+          deviceIndex = i;
+          deviceInfo = playbackDevices[i];
+          break;
+        }
+        _logger.LogInformation("Initializing playback device: {DeviceName} (index {Index} of {Total})",
+          deviceInfo.Name, deviceIndex, playbackDevices.Length);
 
         try
         {
           // Initialize the playback device with our format
           _playbackDevice = _engine.InitializePlaybackDevice(deviceInfo, _audioFormat);
-          _currentDeviceIndex = 0;
+          _currentDeviceIndex = deviceIndex;
 
           // Apply initial volume/mute state
           _playbackDevice.MasterMixer.Volume = _localOutputMuted ? 0f : _masterMixer.GetEffectiveVolume();
 
-          _playbackDevice.Start();
-          _logger.LogInformation("Playback device initialized and started: {DeviceName}", deviceInfo.Name);
-
-          // Add fingerprint tap modifier to capture mixed audio for fingerprinting/streaming
-          // This must be done AFTER output tap is created, so we defer it
+          // NOTE: Do NOT call _playbackDevice.Start() here.
+          // Modifiers must be attached BEFORE starting the device, otherwise
+          // SoundFlow's audio callback may not process them correctly.
+          // Start() is called below after modifiers are added. This matches
+          // the order used in SwitchPlaybackDevice().
+          _logger.LogInformation("Playback device initialized: {DeviceName} (will start after modifiers attached)", deviceInfo.Name);
         }
         catch (Exception ex)
         {
@@ -232,6 +250,12 @@ public class SoundFlowAudioEngine : IAudioEngine
           _playbackDevice.MasterMixer.AddModifier(_visualizationTap);
           _logger.LogInformation("Visualization tap modifier added to MasterMixer");
         }
+
+        // Start the playback device AFTER all modifiers are attached.
+        // SoundFlow's audio callback must see the full modifier chain from
+        // the first callback invocation, otherwise modifiers receive silence.
+        _playbackDevice.Start();
+        _logger.LogInformation("Playback device started with all modifiers attached");
       }
 
       // Refresh device list
@@ -632,7 +656,9 @@ public class SoundFlowAudioEngine : IAudioEngine
     {
       EngineState = State.ToString(),
       PlaybackDeviceActive = _playbackDevice != null,
-      ModifierCount = _fingerprintTap != null ? 1 : 0,
+      ModifierCount = (_balanceModifier != null ? 1 : 0)
+        + (_fingerprintTap != null ? 1 : 0)
+        + (_visualizationTap != null ? 1 : 0),
       OutputTapAvailableBytes = 0,
       FingerprintTapTotalSamples = _fingerprintTap?.TotalSamplesProcessed ?? 0,
       FingerprintTapLastProcessedTime = _fingerprintTap?.LastProcessedTime
