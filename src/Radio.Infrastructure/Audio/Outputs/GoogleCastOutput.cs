@@ -32,6 +32,12 @@ public class GoogleCastOutput : AudioOutputBase
   private readonly Dictionary<string, ChromecastReceiver> _discoveredReceiversByIp = new();
   private CastNowPlayingMetadata? _nowPlayingMetadata;
 
+  // Metadata update debounce: when metadata changes rapidly (source switch
+  // → "No Track" → actual track → fingerprint ID), coalesce into a single
+  // Cast media reload to avoid garbled audio from rapid reconnections.
+  private CancellationTokenSource? _metadataDebouncesCts;
+  private readonly object _debounceLock = new();
+
   // Volume sync: track locally-initiated volume changes to filter out echo events
   private float _lastSetVolume = -1f;
   private bool _lastSetMute;
@@ -535,9 +541,9 @@ public class GoogleCastOutput : AudioOutputBase
         await _client.LaunchApplicationAsync(_options.ApplicationId);
         _logger.LogInformation("Cast: Media receiver launched on {Device}", ConnectedDevice?.FriendlyName);
 
-        // Allow media receiver to fully initialize before sending commands.
-        // Reduced from 2000ms — 1s is sufficient if we retry on first load failure.
-        await Task.Delay(1000, cancellationToken);
+        // Allow media receiver to start initializing before sending commands.
+        // Short delay is sufficient because LoadMediaOnCastAsync retries on failure.
+        await Task.Delay(250, cancellationToken);
 
         // Subscribe to status changes to monitor device transitions
         var mediaChannel = _client.GetChannel<MediaChannel>();
@@ -735,8 +741,10 @@ public class GoogleCastOutput : AudioOutputBase
 
   /// <summary>
   /// Updates now-playing metadata on the Cast device by reloading media.
-  /// Only effective when the output is connected and streaming.
-  /// For live streams, the Cast device reconnects to the same URL seamlessly.
+  /// Uses debouncing to coalesce rapid metadata changes (e.g., source switch
+  /// → "No Track" → actual track → fingerprint identification) into a single
+  /// Cast media reload. Without debouncing, each change triggers a full stream
+  /// reconnection, causing garbled audio during the first few seconds.
   /// </summary>
   public async Task UpdateNowPlayingMetadataAsync(
     string? title, string? artist, string? album, string? albumArtUrl,
@@ -750,16 +758,47 @@ public class GoogleCastOutput : AudioOutputBase
       return;
     }
 
-    try
+    // Debounce: cancel any pending metadata reload and schedule a new one.
+    // This ensures rapid changes coalesce into a single Cast media reload.
+    lock (_debounceLock)
     {
-      await LoadMediaWithRecoveryAsync(cancellationToken);
-      _logger.LogInformation(
-        "Cast metadata updated: {Title} - {Artist}", title, artist);
+      _metadataDebouncesCts?.Cancel();
+      _metadataDebouncesCts?.Dispose();
+      _metadataDebouncesCts = new CancellationTokenSource();
     }
-    catch (Exception ex)
+
+    var debounceCts = _metadataDebouncesCts;
+    var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+      debounceCts?.Token ?? CancellationToken.None, cancellationToken);
+
+    _logger.LogDebug("Cast metadata update debounced: {Title} - {Artist}", title, artist);
+
+    // Fire-and-forget the delayed reload so we don't block the caller
+    _ = Task.Run(async () =>
     {
-      _logger.LogWarning(ex, "Failed to update Cast now-playing metadata");
-    }
+      try
+      {
+        // Wait for metadata to stabilize — if another update comes
+        // within this window, this task gets cancelled via debounceCts
+        await Task.Delay(1500, linkedCts.Token);
+
+        await LoadMediaWithRecoveryAsync(cancellationToken);
+        _logger.LogInformation(
+          "Cast metadata updated: {Title} - {Artist}", title, artist);
+      }
+      catch (OperationCanceledException)
+      {
+        // Debounced away — a newer update superseded this one
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Failed to update Cast now-playing metadata");
+      }
+      finally
+      {
+        linkedCts.Dispose();
+      }
+    }, CancellationToken.None);
   }
 
   /// <summary>
@@ -1201,6 +1240,13 @@ public class GoogleCastOutput : AudioOutputBase
       {
         _logger.LogWarning(ex, "Error during disconnect in dispose");
       }
+    }
+
+    lock (_debounceLock)
+    {
+      _metadataDebouncesCts?.Cancel();
+      _metadataDebouncesCts?.Dispose();
+      _metadataDebouncesCts = null;
     }
 
     if (_client != null)

@@ -11,7 +11,7 @@
   1. Intercepting LOAD to enforce StreamType.LIVE
   2. Monitoring the media element's buffer via 'progress' events
   3. Force-calling play() as soon as ~1s of audio is buffered
-  This reduces startup latency from ~20s to ~2-3s.
+  This reduces startup latency from ~20s to ~4-5s.
 -->
 <html>
 <head>
@@ -43,7 +43,10 @@
         }
 
         // After CAF sets up the media element, force early playback.
-        // Chrome normally buffers ~20s before starting; we force play() after ~1s.
+        // Chrome normally buffers ~20s before starting; we force play() after
+        // building a sufficient buffer. The server delivers at ~1.1x real-time,
+        // so we need enough buffer to avoid rebuffering during initial playback.
+        // 3s buffer = ~3s latency but smooth audio from the start.
         setTimeout(function() {
           var cmp = document.querySelector('cast-media-player');
           var sr = cmp && cmp.shadowRoot;
@@ -60,8 +63,10 @@
                 ': buffered=' + bufferedEnd.toFixed(2) + 's, readyState=' + media.readyState +
                 ', paused=' + media.paused + ', currentTime=' + media.currentTime.toFixed(2));
 
-              // Force play as soon as we have >= 1 second of buffered audio
-              if (bufferedEnd >= 1.0 && media.paused) {
+              // Force play once we have >= 3 seconds of buffered audio.
+              // This provides enough cushion for smooth playback since the
+              // server delivers data at only ~1.1x real-time rate.
+              if (bufferedEnd >= 3.0 && media.paused) {
                 console.log('[RadioConsole] Forcing play() at ' + bufferedEnd.toFixed(2) + 's buffered');
                 media.play().then(function() {
                   console.log('[RadioConsole] Force play() succeeded!');
@@ -71,16 +76,12 @@
                 clearInterval(forcePlayInterval);
               }
 
-              // Give up after 30 attempts (15 seconds)
-              if (forcePlayAttempts >= 30) {
+              // Give up after 60 attempts (30 seconds)
+              if (forcePlayAttempts >= 60) {
                 console.log('[RadioConsole] Giving up on force play, letting CAF handle it');
                 clearInterval(forcePlayInterval);
               }
             }, 500);
-          } else {
-            console.warn('[RadioConsole] Could not find media element in shadow DOM');
-          }
-        }, 500);
 
         return request;
       }
