@@ -15,6 +15,14 @@ KillSignal=SIGINT
 SyslogIdentifier=radio-api
 TimeoutStopSec=30
 
+# Logging — demote C library stderr (ALSA/JACK/PulseAudio probe noise) to debug level.
+# Application logs go to stdout via Serilog and remain at info/notice priority.
+# View clean logs: journalctl -u radio-api -p info
+# View everything:  journalctl -u radio-api -p debug
+StandardOutput=journal
+StandardError=journal
+StandardErrorPriority=debug
+
 # Environment
 Environment=ASPNETCORE_URLS=http://0.0.0.0:5000
 Environment=ASPNETCORE_ENVIRONMENT=Production
