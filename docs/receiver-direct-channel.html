@@ -1,21 +1,27 @@
 <!DOCTYPE html>
 <!--
-  Direct Channel Cast Receiver for Radio Console (v4)
-  ====================================================
-  Custom CAF receiver that receives audio data directly over the Cast
-  protocol's custom message bus, bypassing HTTP streaming entirely.
+  Direct Channel Cast Receiver for Radio Console (v5 — MSE)
+  ==========================================================
+  Custom CAF receiver that receives MP3 audio data directly over the
+  Cast protocol's custom message bus and plays it using Media Source
+  Extensions (MSE) for gapless continuous playback.
 
-  Audio routing on Cast devices (especially speakers like Google Home Mini)
-  MUST go through the CAF PlayerManager. Neither Web Audio API
-  (AudioContext.destination) nor raw <audio> elements route to the
-  physical speaker. Only media loaded through the PlayerManager pipeline
-  reaches the hardware audio output.
+  Previous versions (v4) accumulated PCM chunks into 2-second WAV
+  batches and loaded each through PlayerManager.load(). This caused
+  audible dropouts at every batch transition because there's inherently
+  a gap between MEDIA_FINISHED and the next load() completing.
 
-  Strategy:
-  1. Receive PCM audio chunks via custom Cast message bus
-  2. Accumulate chunks into WAV blobs (~2 seconds each)
-  3. Load each WAV blob through PlayerManager (the standard Cast media path)
-  4. Use LOAD interceptor + queue for gapless batch transitions
+  v5 strategy:
+  1. Sender encodes PCM to MP3 via persistent LAME encoder (320kbps CBR)
+  2. Sender sends Base64-encoded MP3 frames over the custom message bus
+  3. Receiver creates a MediaSource with audio/mpeg SourceBuffer
+  4. Receiver loads the MSE blob URL through PlayerManager as LIVE stream
+  5. Each incoming MP3 chunk is decoded from Base64 and appended to the
+     SourceBuffer — continuous, gapless playback with no batch transitions
+
+  Audio routing: MSE blob URL → PlayerManager.load() → cast-media-player
+  This ensures audio reaches the physical speaker on all Cast devices,
+  including smart speakers where Web Audio API doesn't route to hardware.
 -->
 <html>
 <head>
@@ -28,7 +34,7 @@
   <cast-media-player></cast-media-player>
 
   <div id="status" style="color: #ccc; font-family: monospace; padding: 20px; position: absolute; top: 0; left: 0; z-index: 100;">
-    Radio Console — Direct Channel Receiver v4<br>
+    Radio Console — Direct Channel Receiver v5 (MSE)<br>
     <span id="info">Initializing...</span>
   </div>
 
@@ -37,145 +43,197 @@
 
     // Configuration
     const NAMESPACE = 'urn:x-cast:com.radioconsole.audio';
-    const BATCH_CHUNKS = 20;  // 20 x 100ms = 2 seconds per batch
-    const SAMPLE_RATE = 48000;
-    const CHANNELS = 2;
-    const BITS_PER_SAMPLE = 16;
-    const BYTES_PER_SAMPLE = BITS_PER_SAMPLE / 8;
-    const WAV_HEADER_SIZE = 44;
+    const PREBUFFER_CHUNKS = 5;  // Buffer ~500ms of MP3 data before starting playback
 
     // CAF receiver and player manager
     const context = cast.framework.CastReceiverContext.getInstance();
     const playerManager = context.getPlayerManager();
 
-    // PCM accumulation buffer
-    let pcmChunks = [];
-    let totalPcmBytes = 0;
+    // --- MSE state ---
+    let mediaSource = null;
+    let sourceBuffer = null;
+    const pendingBuffers = [];
+    let mseReady = false;
+    let blobUrl = null;
 
-    // Batch queue — WAV blob URLs ready to play
-    const batchQueue = [];
-    let isPlaying = false;
+    // --- Playback state ---
+    let playerLoaded = false;
+    let loadAttempted = false;
 
-    // Stats
+    // --- Stats ---
     let chunksReceived = 0;
-    let batchesCreated = 0;
-    let batchesPlayed = 0;
+    let bytesAppended = 0;
     let lastSeq = -1;
+    let appendErrors = 0;
 
-    // --- WAV encoding ---
+    // --- MSE Setup ---
 
-    function buildWav(chunks, totalBytes) {
-      const blockAlign = CHANNELS * BYTES_PER_SAMPLE;
-      const byteRate = SAMPLE_RATE * blockAlign;
-      const fileSize = WAV_HEADER_SIZE + totalBytes - 8;
+    function initMSE() {
+      mediaSource = new MediaSource();
+      blobUrl = URL.createObjectURL(mediaSource);
 
-      const wav = new ArrayBuffer(WAV_HEADER_SIZE + totalBytes);
-      const view = new DataView(wav);
-      const bytes = new Uint8Array(wav);
+      mediaSource.addEventListener('sourceopen', () => {
+        console.log('MSE: MediaSource opened');
+        try {
+          // Use 'sequence' mode: timestamps are generated automatically from
+          // append order, which is correct for our continuous MP3 stream.
+          sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
+          sourceBuffer.mode = 'sequence';
 
-      bytes.set([0x52, 0x49, 0x46, 0x46], 0); // "RIFF"
-      view.setUint32(4, fileSize, true);
-      bytes.set([0x57, 0x41, 0x56, 0x45], 8); // "WAVE"
+          sourceBuffer.addEventListener('updateend', () => {
+            // After each successful append, flush any queued buffers
+            flushPendingBuffers();
+            // Periodically trim old data to prevent memory growth
+            trimOldData();
+          });
 
-      bytes.set([0x66, 0x6D, 0x74, 0x20], 12); // "fmt "
-      view.setUint32(16, 16, true);
-      view.setUint16(20, 1, true);               // PCM
-      view.setUint16(22, CHANNELS, true);
-      view.setUint32(24, SAMPLE_RATE, true);
-      view.setUint32(28, byteRate, true);
-      view.setUint16(32, blockAlign, true);
-      view.setUint16(34, BITS_PER_SAMPLE, true);
+          sourceBuffer.addEventListener('error', (e) => {
+            appendErrors++;
+            console.error('MSE: SourceBuffer error:', e);
+          });
 
-      bytes.set([0x64, 0x61, 0x74, 0x61], 36); // "data"
-      view.setUint32(40, totalBytes, true);
+          mseReady = true;
+          console.log('MSE: SourceBuffer ready (audio/mpeg, sequence mode), flushing',
+            pendingBuffers.length, 'pending chunks');
+          flushPendingBuffers();
+        } catch (e) {
+          console.error('MSE: Failed to add SourceBuffer:', e);
+          updateStatus('MSE error: ' + e.message);
+        }
+      });
 
-      let offset = WAV_HEADER_SIZE;
-      for (const chunk of chunks) {
-        bytes.set(chunk, offset);
-        offset += chunk.length;
-      }
+      mediaSource.addEventListener('sourceclose', () => {
+        console.log('MSE: MediaSource closed');
+        mseReady = false;
+      });
 
-      return new Blob([wav], { type: 'audio/wav' });
+      mediaSource.addEventListener('sourceended', () => {
+        console.log('MSE: MediaSource ended');
+      });
+
+      console.log('MSE: Initialized, blob URL ready');
     }
 
-    function extractPcm(base64Data) {
+    /**
+     * Decodes Base64 MP3 data and appends it to the MSE SourceBuffer.
+     * If the SourceBuffer is busy (updating), queues the data for later.
+     */
+    function appendMp3Data(base64Data) {
+      // Decode Base64 to Uint8Array
       const binaryStr = atob(base64Data);
-      const len = binaryStr.length;
-      const pcm = new Uint8Array(len - WAV_HEADER_SIZE);
-      for (let i = WAV_HEADER_SIZE; i < len; i++) {
-        pcm[i - WAV_HEADER_SIZE] = binaryStr.charCodeAt(i);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
       }
-      return pcm;
-    }
 
-    // --- Batch management ---
-
-    function createBatch() {
-      if (pcmChunks.length === 0) return;
-
-      const wavBlob = buildWav(pcmChunks, totalPcmBytes);
-      const url = URL.createObjectURL(wavBlob);
-      batchesCreated++;
-
-      const batchDuration = (totalPcmBytes / (SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE)).toFixed(2);
-      console.log(`Batch ${batchesCreated}: created ${pcmChunks.length} chunks (${batchDuration}s), queue: ${batchQueue.length}`);
-
-      batchQueue.push(url);
-      pcmChunks = [];
-      totalPcmBytes = 0;
-
-      // If not currently playing, start playback
-      if (!isPlaying) {
-        playNextBatch();
+      if (mseReady && sourceBuffer && !sourceBuffer.updating) {
+        try {
+          sourceBuffer.appendBuffer(bytes);
+          bytesAppended += bytes.length;
+        } catch (e) {
+          if (e.name === 'QuotaExceededError') {
+            console.warn('MSE: QuotaExceededError — trimming buffer and queuing');
+            pendingBuffers.push(bytes);
+            trimOldData();
+          } else {
+            appendErrors++;
+            console.error('MSE: appendBuffer failed:', e.name, e.message);
+          }
+        }
+      } else {
+        // SourceBuffer busy or not ready yet — queue for later
+        pendingBuffers.push(bytes);
       }
     }
 
-    function playNextBatch() {
-      if (batchQueue.length === 0) {
-        isPlaying = false;
-        console.log('Queue empty — waiting for more chunks');
-        updateStatus('Buffering...');
-        return;
+    /**
+     * Flushes pending buffers into the SourceBuffer.
+     * Merges multiple pending buffers into a single append for efficiency.
+     */
+    function flushPendingBuffers() {
+      if (!mseReady || !sourceBuffer || sourceBuffer.updating) return;
+      if (pendingBuffers.length === 0) return;
+
+      // Merge all pending buffers into one contiguous array
+      let totalLen = 0;
+      for (const buf of pendingBuffers) totalLen += buf.length;
+
+      let data;
+      if (pendingBuffers.length === 1) {
+        data = pendingBuffers[0];
+      } else {
+        data = new Uint8Array(totalLen);
+        let offset = 0;
+        for (const buf of pendingBuffers) {
+          data.set(buf, offset);
+          offset += buf.length;
+        }
       }
+      pendingBuffers.length = 0;
 
-      const url = batchQueue.shift();
-      isPlaying = true;
-      batchesPlayed++;
+      try {
+        sourceBuffer.appendBuffer(data);
+        bytesAppended += data.length;
+      } catch (e) {
+        appendErrors++;
+        console.error('MSE: Flush append failed:', e.name, e.message);
+      }
+    }
 
-      console.log(`Playing batch ${batchesPlayed} via PlayerManager, queue remaining: ${batchQueue.length}`);
-      updateStatus(`Playing — batch ${batchesPlayed}, chunks: ${chunksReceived}`);
+    /**
+     * Trims old buffered data to prevent memory growth.
+     * Keeps the most recent 15 seconds of audio.
+     */
+    function trimOldData() {
+      if (!sourceBuffer || sourceBuffer.updating) return;
+      try {
+        if (sourceBuffer.buffered.length > 0) {
+          const start = sourceBuffer.buffered.start(0);
+          const end = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1);
+          // Keep 15 seconds, trim anything older
+          if (end - start > 30) {
+            sourceBuffer.remove(start, end - 15);
+          }
+        }
+      } catch (e) {
+        // Ignore trim errors — non-critical
+      }
+    }
 
-      // Use PlayerManager.load() to play through the proper Cast audio pipeline
+    /**
+     * Loads the MSE blob URL through PlayerManager as a LIVE stream.
+     * This is called after prebuffering enough chunks to ensure smooth start.
+     */
+    function startPlayback() {
+      if (loadAttempted) return;
+      loadAttempted = true;
+
+      console.log('Starting playback via PlayerManager with MSE blob URL');
+
       const mediaInfo = new cast.framework.messages.MediaInformation();
-      mediaInfo.contentUrl = url;
-      mediaInfo.contentId = url;
-      mediaInfo.contentType = 'audio/wav';
-      mediaInfo.streamType = cast.framework.messages.StreamType.BUFFERED;
+      mediaInfo.contentUrl = blobUrl;
+      mediaInfo.contentId = 'direct-channel-mse';
+      mediaInfo.contentType = 'audio/mpeg';
+      mediaInfo.streamType = cast.framework.messages.StreamType.LIVE;
 
       const loadRequest = new cast.framework.messages.LoadRequestData();
       loadRequest.media = mediaInfo;
       loadRequest.autoplay = true;
 
       playerManager.load(loadRequest).then(() => {
-        console.log(`Batch ${batchesPlayed}: loaded and playing`);
+        console.log('PlayerManager: MSE LIVE stream loaded successfully');
+        playerLoaded = true;
+        updateStatus('Playing — MSE gapless stream');
       }).catch(err => {
-        console.error(`Batch ${batchesPlayed}: load failed:`, err);
-        // Revoke failed URL and try next batch
-        URL.revokeObjectURL(url);
-        playNextBatch();
+        console.error('PlayerManager: MSE load failed:', err);
+        updateStatus('MSE load failed: ' + (err.message || JSON.stringify(err)));
+        playerLoaded = false;
+        loadAttempted = false; // Allow retry
       });
     }
 
-    // When current media ends, play the next batch
-    playerManager.addEventListener(
-      cast.framework.events.EventType.MEDIA_FINISHED,
-      (event) => {
-        console.log(`Media finished (batch ${batchesPlayed})`);
-        playNextBatch();
-      }
-    );
+    // --- PlayerManager event listeners ---
 
-    // Also listen for errors
     playerManager.addEventListener(
       cast.framework.events.EventType.ERROR,
       (event) => {
@@ -183,8 +241,29 @@
       }
     );
 
-    // Allow all LOAD requests through — both our internal loads
-    // (blob URLs, HTTP streams) and any from the sender
+    playerManager.addEventListener(
+      cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
+      (event) => {
+        console.log('PlayerManager: Load complete, state:', playerManager.getPlayerState());
+      }
+    );
+
+    playerManager.addEventListener(
+      cast.framework.events.EventType.BUFFERING,
+      (event) => {
+        console.log('PlayerManager: Buffering');
+        updateStatus('Buffering...');
+      }
+    );
+
+    playerManager.addEventListener(
+      cast.framework.events.EventType.PLAYING,
+      (event) => {
+        console.log('PlayerManager: Playing');
+      }
+    );
+
+    // Allow all LOAD requests through
     playerManager.setMessageInterceptor(
       cast.framework.messages.MessageType.LOAD,
       (loadRequest) => {
@@ -201,47 +280,87 @@
       if (msg.type === 'audio' && msg.data) {
         chunksReceived++;
 
+        // Sequence gap detection
         if (lastSeq >= 0 && msg.seq !== lastSeq + 1) {
           console.warn(`Sequence gap: expected ${lastSeq + 1}, got ${msg.seq}`);
         }
         lastSeq = msg.seq;
 
-        const pcm = extractPcm(msg.data);
-        pcmChunks.push(pcm);
-        totalPcmBytes += pcm.length;
+        // Append MP3 data to MSE SourceBuffer
+        appendMp3Data(msg.data);
 
+        // Start playback after prebuffering enough chunks
+        if (!loadAttempted && chunksReceived >= PREBUFFER_CHUNKS) {
+          startPlayback();
+        }
+
+        // Log first few chunks for diagnostics
         if (chunksReceived <= 3) {
-          console.log(`Chunk ${msg.seq}: ${pcm.length} bytes PCM, accumulated ${pcmChunks.length}/${BATCH_CHUNKS}`);
+          const dataLen = atob(msg.data).length;
+          console.log(`Chunk ${msg.seq}: ${dataLen} bytes MP3, pending: ${pendingBuffers.length}, mseReady: ${mseReady}`);
         }
 
-        if (pcmChunks.length >= BATCH_CHUNKS) {
-          createBatch();
-        }
-
+        // Periodic stats (every 100 chunks ≈ 10 seconds at 100ms chunks)
         if (chunksReceived % 100 === 0) {
-          console.log(`Stats: ${chunksReceived} chunks, ${batchesCreated} batches created, ${batchesPlayed} played, queue: ${batchQueue.length}`);
+          let bufferInfo = 'no buffer';
+          if (sourceBuffer && sourceBuffer.buffered.length > 0) {
+            const start = sourceBuffer.buffered.start(0);
+            const end = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1);
+            bufferInfo = `${start.toFixed(1)}s — ${end.toFixed(1)}s (${(end - start).toFixed(1)}s)`;
+          }
+          console.log(`Stats: ${chunksReceived} chunks, ${(bytesAppended / 1024).toFixed(0)}KB appended, ` +
+            `${appendErrors} errors, buffer: ${bufferInfo}, pending: ${pendingBuffers.length}, ` +
+            `state: ${playerManager.getPlayerState()}`);
+          updateStatus(`Playing — ${chunksReceived} chunks, buffer: ${bufferInfo}`);
         }
+
       } else if (msg.type === 'stop') {
         console.log('Received stop command');
         playerManager.stop();
-        batchQueue.forEach(url => URL.revokeObjectURL(url));
-        batchQueue.length = 0;
-        pcmChunks = [];
-        totalPcmBytes = 0;
-        isPlaying = false;
+
+        // Clean up MSE state
+        if (mediaSource && mediaSource.readyState === 'open') {
+          try { mediaSource.endOfStream(); } catch (e) { /* ignore */ }
+        }
+        if (blobUrl) {
+          URL.revokeObjectURL(blobUrl);
+        }
+
+        // Reset all state
+        mseReady = false;
+        sourceBuffer = null;
+        mediaSource = null;
+        blobUrl = null;
+        pendingBuffers.length = 0;
+        playerLoaded = false;
+        loadAttempted = false;
         chunksReceived = 0;
-        batchesCreated = 0;
-        batchesPlayed = 0;
+        bytesAppended = 0;
         lastSeq = -1;
-        updateStatus('Stopped');
+        appendErrors = 0;
+
+        // Re-initialize MSE for next streaming session
+        initMSE();
+        updateStatus('Stopped — ready for new stream');
+
       } else if (msg.type === 'ping') {
+        let bufferRange = null;
+        if (sourceBuffer && sourceBuffer.buffered.length > 0) {
+          bufferRange = {
+            start: sourceBuffer.buffered.start(0),
+            end: sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1)
+          };
+        }
         context.sendCustomMessage(NAMESPACE, event.senderId, {
           type: 'pong',
+          version: 5,
           chunksReceived,
-          batchesCreated,
-          batchesPlayed,
-          queueLength: batchQueue.length,
-          isPlaying,
+          bytesAppended,
+          appendErrors,
+          pendingBuffers: pendingBuffers.length,
+          mseReady,
+          playerLoaded,
+          bufferRange,
           playerState: playerManager.getPlayerState()
         });
       }
@@ -252,63 +371,6 @@
       if (el) el.textContent = text;
     }
 
-    // --- Startup test: load the Radio Console HTTP MP3 stream ---
-    // This proves whether: (a) the receiver is running, (b) PlayerManager works,
-    // (c) the Cast device can reach the API server on the local network.
-    // The sender's IP is extracted from the Cast connection context.
-    function playHttpStream() {
-      // Try to determine the sender's IP (= the API server) from the connection
-      // Fall back to a well-known public audio URL if we can't determine it
-      const senderIp = window.location.hostname || 'radio';
-      // The API runs on port 5000, MP3 stream at /stream/audio/mp3
-      const streamUrl = `http://radio:5000/stream/audio/mp3`;
-      console.log('Loading HTTP MP3 stream via PlayerManager:', streamUrl);
-
-      const mediaInfo = new cast.framework.messages.MediaInformation();
-      mediaInfo.contentUrl = streamUrl;
-      mediaInfo.contentId = streamUrl;
-      mediaInfo.contentType = 'audio/mpeg';
-      mediaInfo.streamType = cast.framework.messages.StreamType.LIVE;
-
-      const loadRequest = new cast.framework.messages.LoadRequestData();
-      loadRequest.media = mediaInfo;
-      loadRequest.autoplay = true;
-
-      playerManager.load(loadRequest).then(() => {
-        console.log('HTTP MP3 stream loaded and playing via PlayerManager');
-        updateStatus('HTTP stream playing via receiver v4!');
-      }).catch(err => {
-        console.error('HTTP stream load failed:', err);
-        updateStatus('HTTP stream FAILED: ' + (err.message || err));
-        // Fallback: try a known public MP3
-        tryPublicAudio();
-      });
-    }
-
-    function tryPublicAudio() {
-      // Use a public domain audio file as a diagnostic test
-      const testUrl = 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3';
-      console.log('Trying public audio URL:', testUrl);
-
-      const mediaInfo = new cast.framework.messages.MediaInformation();
-      mediaInfo.contentUrl = testUrl;
-      mediaInfo.contentId = testUrl;
-      mediaInfo.contentType = 'audio/mpeg';
-      mediaInfo.streamType = cast.framework.messages.StreamType.BUFFERED;
-
-      const loadRequest = new cast.framework.messages.LoadRequestData();
-      loadRequest.media = mediaInfo;
-      loadRequest.autoplay = true;
-
-      playerManager.load(loadRequest).then(() => {
-        console.log('Public audio loaded and playing');
-        updateStatus('Public test audio playing!');
-      }).catch(err => {
-        console.error('Public audio also failed:', err);
-        updateStatus('ALL audio failed - receiver may not support PlayerManager.load()');
-      });
-    }
-
     // --- Receiver options and start ---
     const options = new cast.framework.CastReceiverOptions();
     options.disableIdleTimeout = true;
@@ -316,11 +378,11 @@
     options.customNamespaces[NAMESPACE] = cast.framework.system.MessageType.JSON;
 
     context.start(options);
-    console.log('Direct Channel receiver v4 started, listening on', NAMESPACE);
+    console.log('Direct Channel receiver v5 (MSE) started, listening on', NAMESPACE);
 
-    // Try loading the HTTP MP3 stream after receiver initializes.
-    // This is the definitive test of whether the receiver + PlayerManager work.
-    setTimeout(() => playHttpStream(), 2000);
+    // Initialize MSE — sourceopen fires when PlayerManager attaches the blob URL
+    initMSE();
+    updateStatus('Waiting for audio chunks...');
   </script>
 </body>
 </html>
