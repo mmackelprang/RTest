@@ -108,9 +108,17 @@ internal sealed class TappedOutputStream : Stream
     {
       if (lagBytes > 0)
       {
-        // Clamp lag to what's actually available in the ring buffer
-        var maxLag = (int)Math.Min(_totalBytesWritten, _bufferSize - 1);
+        // Clamp lag to what's actually available in the ring buffer.
+        // CRITICAL: align to sample frame boundary (channels * bytesPerSample)
+        // to prevent byte-shift corruption. Without alignment, the reader may
+        // start mid-sample (e.g., at the high byte of a 16-bit sample),
+        // causing downstream consumers (LAME MP3 encoder) to interpret
+        // [L_high, R_low] as one sample instead of [L_low, L_high] — producing
+        // white noise instead of audio.
+        var frameSize = _channels * _bytesPerSample;
+        var maxLag = (int)Math.Min(_totalBytesWritten, _bufferSize - frameSize);
         var actualLag = Math.Min(lagBytes, maxLag);
+        actualLag = actualLag / frameSize * frameSize; // Round down to frame boundary
         _readerPositions[readerId] = (_writePosition - actualLag + _bufferSize) % _bufferSize;
       }
       else
