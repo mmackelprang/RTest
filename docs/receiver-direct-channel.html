@@ -57,11 +57,6 @@
     let chunksPlayed = 0;       // Total chunks decoded and scheduled
     let lastSeq = -1;           // Last sequence number received (for gap detection)
 
-    // Buffer queue — holds decoded AudioBuffers waiting to be scheduled.
-    // Decoding is async, so chunks may arrive faster than they can be decoded.
-    const pendingQueue = [];
-    let isProcessingQueue = false;
-
     // CAF receiver context
     const context = cast.framework.CastReceiverContext.getInstance();
 
@@ -105,56 +100,62 @@
     });
 
     /**
-     * Decodes a Base64-encoded WAV chunk and queues it for gapless playback.
+     * Decodes a Base64-encoded WAV chunk and schedules it for gapless playback.
+     * Uses manual WAV parsing instead of decodeAudioData() for maximum
+     * compatibility with Cast device Chromium environments.
      *
      * @param {string} base64Data - Base64-encoded WAV file (header + PCM)
      * @param {number} seq - Sequence number for logging
      */
     function decodeAndSchedule(base64Data, seq) {
-      // Decode Base64 to ArrayBuffer
-      const binaryStr = atob(base64Data);
-      const len = binaryStr.length;
-      const bytes = new Uint8Array(len);
-      for (let i = 0; i < len; i++) {
-        bytes[i] = binaryStr.charCodeAt(i);
-      }
-
-      // Queue for decoding — decodeAudioData is async and we need ordering
-      pendingQueue.push({ buffer: bytes.buffer, seq: seq });
-      processQueue();
-    }
-
-    /**
-     * Processes the pending decode queue sequentially to maintain chunk ordering.
-     * Each chunk is decoded and immediately scheduled for playback.
-     */
-    async function processQueue() {
-      if (isProcessingQueue) return;
-      isProcessingQueue = true;
-
-      while (pendingQueue.length > 0) {
-        const item = pendingQueue.shift();
-        try {
-          // Resume AudioContext if suspended (Chrome autoplay policy)
-          if (audioCtx.state === 'suspended') {
-            await audioCtx.resume();
-            console.log('AudioContext resumed');
-          }
-
-          const audioBuffer = await audioCtx.decodeAudioData(item.buffer);
-          scheduleBuffer(audioBuffer);
-
-          if (chunksPlayed % 50 === 0) {
-            console.log(`Chunk ${item.seq}: decoded ${audioBuffer.duration.toFixed(3)}s, ` +
-              `scheduled at ${nextPlayTime.toFixed(3)}s, current: ${audioCtx.currentTime.toFixed(3)}s, ` +
-              `ahead: ${(nextPlayTime - audioCtx.currentTime).toFixed(3)}s`);
-          }
-        } catch (err) {
-          console.error(`Failed to decode chunk ${item.seq}:`, err);
+      try {
+        // Resume AudioContext if suspended (Chrome autoplay policy)
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume().then(() => console.log('AudioContext resumed'));
         }
-      }
 
-      isProcessingQueue = false;
+        // Decode Base64 to Uint8Array
+        const binaryStr = atob(base64Data);
+        const len = binaryStr.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryStr.charCodeAt(i);
+        }
+
+        // Parse WAV header manually (44 bytes)
+        // Byte offsets: 22=channels(2), 24=sampleRate(4), 34=bitsPerSample(2), 40=dataSize(4)
+        const view = new DataView(bytes.buffer);
+        const channels = view.getUint16(22, true);
+        const sampleRate = view.getUint32(24, true);
+        const bitsPerSample = view.getUint16(34, true);
+        const dataSize = view.getUint32(40, true);
+        const headerSize = 44;
+
+        // Convert 16-bit PCM to Float32 (-1.0 to +1.0)
+        const samplesPerChannel = dataSize / (channels * (bitsPerSample / 8));
+        const audioBuffer = audioCtx.createBuffer(channels, samplesPerChannel, sampleRate);
+
+        for (let ch = 0; ch < channels; ch++) {
+          const channelData = audioBuffer.getChannelData(ch);
+          for (let i = 0; i < samplesPerChannel; i++) {
+            // Interleaved 16-bit little-endian: sample[i] has ch0 then ch1
+            const byteOffset = headerSize + (i * channels + ch) * 2;
+            const sample = view.getInt16(byteOffset, true);
+            channelData[i] = sample / 32768.0;
+          }
+        }
+
+        scheduleBuffer(audioBuffer);
+
+        if (chunksPlayed <= 5 || chunksPlayed % 50 === 0) {
+          console.log(`Chunk ${seq}: ${samplesPerChannel} samples, ${audioBuffer.duration.toFixed(3)}s, ` +
+            `scheduled at ${nextPlayTime.toFixed(3)}s, current: ${audioCtx.currentTime.toFixed(3)}s, ` +
+            `ahead: ${(nextPlayTime - audioCtx.currentTime).toFixed(3)}s, ` +
+            `audioCtx.state: ${audioCtx.state}`);
+        }
+      } catch (err) {
+        console.error(`Failed to process chunk ${seq}:`, err);
+      }
     }
 
     /**
@@ -207,6 +208,14 @@
     // Start the receiver
     context.start(options);
     console.log('Direct Channel receiver started, listening on', NAMESPACE);
+    console.log('AudioContext state:', audioCtx.state, 'sampleRate:', audioCtx.sampleRate);
+    console.log('AudioContext destination:', audioCtx.destination.channelCount, 'channels,',
+      'maxChannelCount:', audioCtx.destination.maxChannelCount);
+
+    // Monitor AudioContext state changes
+    audioCtx.onstatechange = () => {
+      console.log('AudioContext state changed to:', audioCtx.state);
+    };
   </script>
 </body>
 </html>
