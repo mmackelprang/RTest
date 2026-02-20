@@ -208,13 +208,14 @@ In `appsettings.json` under `AudioOutput.GoogleCast`:
 
 ### Setting Up the Custom Receiver
 
-1. Go to the [Google Cast SDK Developer Console](https://cast.google.com/publish/)
-2. Register a new **Custom Receiver** application
-3. Set the receiver URL to where `docs/receiver-direct-channel.html` is hosted
-   (e.g., GitHub Pages, a local web server, or any HTTPS URL)
-4. Copy the assigned **Application ID**
-5. Set `ApplicationId` in `appsettings.json` to this ID
-6. Set `StreamingMode` to `"DirectChannel"`
+See **[docs/direct-channel-setup-guide.md](../docs/direct-channel-setup-guide.md)**
+for complete step-by-step instructions including:
+- Hosting the receiver HTML over HTTPS
+- Registering the app on the Google Cast Developer Console
+- Registering Cast devices for development
+- Configuring Radio Console
+- Verifying the pipeline end-to-end
+- Troubleshooting common issues
 
 ## SharpCaster Integration Notes
 
