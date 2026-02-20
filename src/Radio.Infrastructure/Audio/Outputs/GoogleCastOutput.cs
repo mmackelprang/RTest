@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Sharpcaster;
 using Sharpcaster.Channels;
@@ -22,6 +23,7 @@ public class GoogleCastOutput : AudioOutputBase
   private readonly ILogger<GoogleCastOutput> _logger;
   private readonly GoogleCastOutputOptions _options;
   private readonly CastDeviceCacheRepository? _cacheRepository;
+  private readonly IMetricsCollector? _metricsCollector;
   private ChromecastClient? _client;
   private ChromecastReceiver? _connectedReceiver;
   private string? _streamUrl;
@@ -93,10 +95,12 @@ public class GoogleCastOutput : AudioOutputBase
   /// <param name="logger">The logger instance.</param>
   /// <param name="options">The Google Cast output options.</param>
   /// <param name="cacheRepository">Optional SQLite-backed cache repository.</param>
+  /// <param name="metricsCollector">Optional metrics collector for streaming metrics.</param>
   public GoogleCastOutput(
     ILogger<GoogleCastOutput> logger,
     IOptions<AudioOutputOptions> options,
-    CastDeviceCacheRepository? cacheRepository = null)
+    CastDeviceCacheRepository? cacheRepository = null,
+    IMetricsCollector? metricsCollector = null)
     : base("cast-output", "Google Cast Output",
         options?.Value?.GoogleCast?.DefaultVolume ?? 0.7f,
         options?.Value?.GoogleCast?.Enabled ?? false)
@@ -104,6 +108,7 @@ public class GoogleCastOutput : AudioOutputBase
     _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     _options = options?.Value?.GoogleCast ?? throw new ArgumentNullException(nameof(options));
     _cacheRepository = cacheRepository;
+    _metricsCollector = metricsCollector;
   }
 
   /// <inheritdoc />
@@ -619,7 +624,7 @@ public class GoogleCastOutput : AudioOutputBase
 
     // Create the streaming service and start sending audio
     _directStreaming = new DirectCastStreamingService(
-      _logger, _audioEngine, _directChannel, _options);
+      _logger, _audioEngine, _directChannel, _options, _metricsCollector);
     _directStreaming.SetTransportId(transportId);
     _directStreaming.Start();
 
