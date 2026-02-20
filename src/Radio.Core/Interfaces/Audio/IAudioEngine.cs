@@ -45,8 +45,11 @@ public interface IAudioEngine : IAsyncDisposable
   /// Multiple readers can consume the same audio data without interfering.
   /// </summary>
   /// <param name="readerId">A unique identifier for this reader.</param>
+  /// <param name="lagSeconds">Optional lag in seconds behind the write position.
+  /// When specified, overrides the default <c>StreamReaderLagSeconds</c> from options.
+  /// Use larger values for Cast clients that need an initial burst of pre-buffered data.</param>
   /// <returns>A stream with an independent read position.</returns>
-  Stream CreateStreamReader(string readerId);
+  Stream CreateStreamReader(string readerId, double? lagSeconds = null);
 
   /// <summary>
   /// Gets the current state of the audio engine.

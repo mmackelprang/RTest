@@ -779,8 +779,10 @@ public class GoogleCastOutput : AudioOutputBase
       try
       {
         // Wait for metadata to stabilize — if another update comes
-        // within this window, this task gets cancelled via debounceCts
-        await Task.Delay(1500, linkedCts.Token);
+        // within this window, this task gets cancelled via debounceCts.
+        // 3s covers the typical gap between source switch ("No Track")
+        // and actual track metadata being available (~2s).
+        await Task.Delay(3000, linkedCts.Token);
 
         await LoadMediaWithRecoveryAsync(cancellationToken);
         _logger.LogInformation(

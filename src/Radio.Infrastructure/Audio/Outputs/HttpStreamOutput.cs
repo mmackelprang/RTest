@@ -395,9 +395,12 @@ public class HttpStreamOutput : AudioOutputBase
       {
         // Create an independent stream reader for this client so multiple
         // clients (and fingerprinting) don't compete for the same read position.
-        // The reader starts with a 1-second lag behind the write position,
-        // giving Cast devices an immediate burst of audio data.
-        using var audioStream = _audioEngine.CreateStreamReader($"http-client-{clientId}");
+        // MP3 (Cast) clients get a 5-second lag to provide an immediate burst
+        // of pre-buffered audio. Combined with maxAheadSeconds=10, the server
+        // delivers the burst + continues at >1x until 10s ahead, giving the
+        // Cast device a deep enough buffer for stable playback.
+        var lagSeconds = isMp3Endpoint ? 5.0 : (double?)null;
+        using var audioStream = _audioEngine.CreateStreamReader($"http-client-{clientId}", lagSeconds);
         var buffer = new byte[_options.ClientBufferSize];
         var firstDataSent = false;
         var zeroBytesSince = DateTime.UtcNow;
@@ -410,9 +413,11 @@ public class HttpStreamOutput : AudioOutputBase
         var sendStartTime = DateTime.UtcNow;
         var totalPcmBytesSent = 0L;
         var pcmBytesPerSecond = _options.SampleRate * _options.Channels * (_options.BitsPerSample / 8);
-        // Allow Cast devices to build a small buffer for resilience against
-        // network jitter, but not so much that latency becomes noticeable.
-        const double maxAheadSeconds = 3.0;
+        // Allow Cast devices to build a substantial buffer for stable playback.
+        // Latency is determined by the receiver's force-play threshold (3s),
+        // not by this cap. A deeper server-side buffer (10s) prevents Chrome
+        // from rebuffering after initial playback starts.
+        const double maxAheadSeconds = 10.0;
 
         while (!cancellationToken.IsCancellationRequested && client.IsConnected)
         {

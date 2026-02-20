@@ -352,7 +352,7 @@ public class SoundFlowAudioEngine : IAudioEngine
   }
 
   /// <inheritdoc/>
-  public Stream CreateStreamReader(string readerId)
+  public Stream CreateStreamReader(string readerId, double? lagSeconds = null)
   {
     ThrowIfDisposed();
 
@@ -366,7 +366,8 @@ public class SoundFlowAudioEngine : IAudioEngine
     // get an immediate burst of audio data instead of waiting for new writes.
     // Without this lag, Cast devices timeout before the first FingerprintTapModifier
     // batch arrives (~42ms) and the LAME encoder produces its first MP3 frames.
-    var lagBytes = (int)(_options.SampleRate * _options.Channels * 2 * _options.StreamReaderLagSeconds);
+    var lag = lagSeconds ?? _options.StreamReaderLagSeconds;
+    var lagBytes = (int)(_options.SampleRate * _options.Channels * 2 * lag);
     return _outputTap.CreateReader(readerId, lagBytes);
   }
 
