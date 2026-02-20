@@ -403,6 +403,17 @@ public class HttpStreamOutput : AudioOutputBase
         var zeroBytesSince = DateTime.UtcNow;
         var consecutiveZeroReads = 0;
 
+        // Real-time pacing for MP3 streams: track total audio duration sent
+        // vs elapsed wall-clock time to prevent Cast device buffer bloat.
+        // Without throttling, the ring buffer reader + silence fill delivers
+        // data at 2-3x real-time, causing Chrome to buffer ~20s ahead.
+        var sendStartTime = DateTime.UtcNow;
+        var totalPcmBytesSent = 0L;
+        var pcmBytesPerSecond = _options.SampleRate * _options.Channels * (_options.BitsPerSample / 8);
+        // Allow Cast devices to build a small buffer for resilience against
+        // network jitter, but not so much that latency becomes noticeable.
+        const double maxAheadSeconds = 3.0;
+
         while (!cancellationToken.IsCancellationRequested && client.IsConnected)
         {
           var bytesRead = await audioStream.ReadAsync(buffer, cancellationToken);
@@ -445,6 +456,22 @@ public class HttpStreamOutput : AudioOutputBase
               // mp3Writer.Flush() calls lame_encode_flush() which can signal end-of-stream
               // to Chrome's media receiver, causing it to disconnect after the first chunk.
               context.Response.OutputStream.Flush();
+
+              // Throttle MP3 delivery to approximate real-time rate.
+              // The ring buffer reader returns both real audio data and silence
+              // fill (to keep streams alive during source pauses), which together
+              // exceed real-time rate. Without throttling, Cast devices accumulate
+              // ~20s of buffer, adding massive latency.
+              totalPcmBytesSent += bytesRead;
+              var elapsedSec = (DateTime.UtcNow - sendStartTime).TotalSeconds;
+              var sentAudioSec = (double)totalPcmBytesSent / pcmBytesPerSecond;
+              var aheadSec = sentAudioSec - elapsedSec;
+
+              if (aheadSec > maxAheadSeconds)
+              {
+                var delayMs = (int)((aheadSec - maxAheadSeconds) * 1000);
+                await Task.Delay(delayMs, cancellationToken);
+              }
             }
             else
             {
