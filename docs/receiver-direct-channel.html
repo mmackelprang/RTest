@@ -1,20 +1,22 @@
 <!DOCTYPE html>
 <!--
-  Direct Channel Cast Receiver for Radio Console (v7 — Web Audio API)
-  ===================================================================
-  Custom CAF receiver that receives MP3 audio data directly over the
-  Cast protocol's custom message bus and plays them using Web Audio API.
+  Direct Channel Cast Receiver for Radio Console (v8 — Raw PCM)
+  ==============================================================
+  Custom CAF receiver that receives raw PCM audio data directly over the
+  Cast protocol's custom message bus and plays it using Web Audio API.
 
-  Previous approaches that FAILED on Google Home Mini:
-  - v5 MSE (SourceBuffer removed from parent MediaSource crash)
-  - v6 Data URI (PlayerManager says PLAYING but video element stays paused)
+  Previous approaches:
+  - v5 MSE: SourceBuffer crash on Google Home Mini
+  - v6 Data URI: PlayerManager reports PLAYING but video element stays paused
+  - v7 Web Audio + MP3: Works! But audible gaps at chunk boundaries due to
+    MP3 encoder/decoder warmup delay per-chunk
 
-  v7 strategy: bypass PlayerManager entirely, use Web Audio API directly.
-  1. Sender encodes PCM to MP3 via persistent LAME encoder (320kbps CBR)
-  2. Sender sends Base64-encoded MP3 frames over the custom message bus
-  3. Receiver decodes each MP3 chunk via AudioContext.decodeAudioData()
-  4. Schedules playback via AudioBufferSourceNode.start(nextPlayTime)
-  5. Gapless: each chunk is scheduled to start exactly when the previous ends
+  v8 strategy: send raw Int16LE PCM, no encoding at all.
+  1. Sender reads 48kHz/16-bit/stereo PCM from the audio engine ring buffer
+  2. Sender Base64-encodes raw PCM bytes (no MP3 encoding)
+  3. Receiver decodes Base64, converts Int16LE → Float32 in JS
+  4. Creates AudioBuffer directly and schedules via AudioBufferSourceNode
+  5. Zero encode/decode overhead = zero gaps at chunk boundaries
 -->
 <html>
 <head>
@@ -23,11 +25,10 @@
   <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
 </head>
 <body>
-  <!-- Keep cast-media-player for CAF compatibility but we won't use it for audio -->
   <cast-media-player></cast-media-player>
 
   <div id="status" style="color: #ccc; font-family: monospace; padding: 20px; position: absolute; top: 0; left: 0; z-index: 100;">
-    Radio Console — Direct Channel Receiver v7 (Web Audio API)<br>
+    Radio Console — Direct Channel Receiver v8 (Raw PCM)<br>
     <span id="info">Initializing...</span>
   </div>
 
@@ -43,28 +44,32 @@
 
     // --- Web Audio API ---
     let audioCtx = null;
-    let nextPlayTime = 0;       // When the next chunk should start playing
+    let nextPlayTime = 0;
     let isPlaying = false;
-    let chunksScheduled = 0;    // Total chunks decoded and scheduled
+    let chunksScheduled = 0;
+
+    // --- PCM format (updated from first audio message) ---
+    let pcmSampleRate = 48000;
+    let pcmChannels = 2;
 
     // --- Stats ---
     let chunksReceived = 0;
     let bytesReceived = 0;
     let lastSeq = -1;
     let decodeErrors = 0;
-    let pendingChunks = [];     // Chunks buffered before playback starts
+    let pendingChunks = [];
 
     /**
-     * Ensures AudioContext is initialized. Must be called after user gesture
-     * or in response to a Cast message (which counts as activation).
+     * Ensures AudioContext is initialized.
      */
     function ensureAudioContext() {
       if (audioCtx) return;
       try {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+          sampleRate: pcmSampleRate
+        });
         console.log('AudioContext created, sampleRate:', audioCtx.sampleRate, 'state:', audioCtx.state);
 
-        // Resume if suspended (autoplay policy)
         if (audioCtx.state === 'suspended') {
           audioCtx.resume().then(() => {
             console.log('AudioContext resumed, state:', audioCtx.state);
@@ -76,35 +81,52 @@
     }
 
     /**
-     * Decodes a Base64 MP3 chunk and schedules it for playback.
+     * Converts raw Int16LE PCM bytes to an AudioBuffer and schedules playback.
+     * No decodeAudioData() needed — direct sample conversion eliminates all
+     * encode/decode gaps.
      */
-    async function decodeAndSchedule(base64Data) {
+    function scheduleChunk(base64Data) {
       if (!audioCtx) return;
 
-      // Decode Base64 to ArrayBuffer
-      const binaryStr = atob(base64Data);
-      const bytes = new Uint8Array(binaryStr.length);
-      for (let i = 0; i < binaryStr.length; i++) {
-        bytes[i] = binaryStr.charCodeAt(i);
-      }
-
       try {
-        const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
+        // Decode Base64 to bytes
+        const binaryStr = atob(base64Data);
+        const bytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++) {
+          bytes[i] = binaryStr.charCodeAt(i);
+        }
 
-        // Create source node
+        // Convert Int16LE pairs to Float32 samples
+        // Input: [L_low, L_high, R_low, R_high, ...] (interleaved stereo)
+        const numSamples = bytes.length / 2; // Total samples across all channels
+        const samplesPerChannel = numSamples / pcmChannels;
+
+        // Create AudioBuffer
+        const audioBuffer = audioCtx.createBuffer(
+          pcmChannels, samplesPerChannel, pcmSampleRate);
+
+        // De-interleave and convert Int16 → Float32
+        const view = new DataView(bytes.buffer);
+        for (let ch = 0; ch < pcmChannels; ch++) {
+          const channelData = audioBuffer.getChannelData(ch);
+          for (let i = 0; i < samplesPerChannel; i++) {
+            // Interleaved: sample[i] for channel[ch] is at offset (i * channels + ch) * 2
+            const byteOffset = (i * pcmChannels + ch) * 2;
+            const int16 = view.getInt16(byteOffset, true); // little-endian
+            channelData[i] = int16 / 32768.0;
+          }
+        }
+
+        // Create source node and schedule
         const source = audioCtx.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioCtx.destination);
 
-        // Schedule playback
         const now = audioCtx.currentTime;
 
         if (!isPlaying || nextPlayTime <= now) {
-          // First chunk or we've fallen behind — start from a small offset
-          nextPlayTime = now + 0.02; // 20ms from now to avoid glitches
-          if (chunksScheduled > 0 && nextPlayTime > now + 0.1) {
-            console.log('Playback reset — was', (nextPlayTime - now).toFixed(3), 's ahead');
-          }
+          // First chunk or fallen behind — start from small offset
+          nextPlayTime = now + 0.02;
         }
 
         source.start(nextPlayTime);
@@ -114,25 +136,26 @@
 
         // Log first few scheduled chunks
         if (chunksScheduled <= 5) {
-          console.log(`Scheduled chunk ${chunksScheduled}: ` +
-            `duration=${audioBuffer.duration.toFixed(3)}s, ` +
-            `scheduled at ${(nextPlayTime - audioBuffer.duration).toFixed(3)}s, ` +
-            `buffer ahead: ${(nextPlayTime - now).toFixed(3)}s`);
+          console.log('Scheduled chunk ' + chunksScheduled + ': ' +
+            'duration=' + audioBuffer.duration.toFixed(3) + 's, ' +
+            'samples=' + samplesPerChannel + ', ' +
+            'buffer ahead: ' + (nextPlayTime - now).toFixed(3) + 's');
         }
 
-        // Periodic stats (every 50 chunks ≈ 5 seconds at 100ms chunks)
+        // Periodic stats
         if (chunksScheduled % 50 === 0) {
           const bufferAhead = nextPlayTime - audioCtx.currentTime;
-          console.log(`Audio stats: ${chunksScheduled} scheduled, ` +
-            `buffer ahead: ${bufferAhead.toFixed(2)}s, ` +
-            `ctx time: ${audioCtx.currentTime.toFixed(2)}s, ` +
-            `decode errors: ${decodeErrors}`);
-          updateStatus(`Playing — ${chunksScheduled} chunks, ${bufferAhead.toFixed(1)}s buffer`);
+          console.log('Audio stats: ' + chunksScheduled + ' scheduled, ' +
+            'buffer ahead: ' + bufferAhead.toFixed(2) + 's, ' +
+            'ctx time: ' + audioCtx.currentTime.toFixed(2) + 's, ' +
+            'errors: ' + decodeErrors);
+          updateStatus('Playing — ' + chunksScheduled + ' chunks, ' +
+            bufferAhead.toFixed(1) + 's buffer');
         }
       } catch (e) {
         decodeErrors++;
         if (decodeErrors <= 5 || decodeErrors % 100 === 0) {
-          console.error(`Decode error #${decodeErrors}:`, e.message || e);
+          console.error('Schedule error #' + decodeErrors + ':', e.message || e);
         }
       }
     }
@@ -142,11 +165,11 @@
      */
     function startPlayback() {
       ensureAudioContext();
-      console.log(`Starting playback with ${pendingChunks.length} buffered chunks`);
+      console.log('Starting playback with ' + pendingChunks.length + ' buffered chunks');
       updateStatus('Starting playback...');
 
       for (const chunk of pendingChunks) {
-        decodeAndSchedule(chunk);
+        scheduleChunk(chunk);
       }
       pendingChunks = [];
     }
@@ -160,37 +183,43 @@
         chunksReceived++;
         bytesReceived += atob(msg.data).length;
 
+        // Update PCM format from message metadata (if provided)
+        if (msg.sr) pcmSampleRate = msg.sr;
+        if (msg.ch) pcmChannels = msg.ch;
+
         // Sequence gap detection
         if (lastSeq >= 0 && msg.seq !== lastSeq + 1) {
-          console.warn(`Sequence gap: expected ${lastSeq + 1}, got ${msg.seq}`);
+          console.warn('Sequence gap: expected ' + (lastSeq + 1) + ', got ' + msg.seq);
         }
         lastSeq = msg.seq;
 
         // Log first few chunks
         if (chunksReceived <= 3) {
           const dataLen = atob(msg.data).length;
-          console.log(`Chunk ${msg.seq}: ${dataLen} bytes MP3`);
+          console.log('Chunk ' + msg.seq + ': ' + dataLen + ' bytes ' +
+            (msg.fmt || 'unknown') + ' (' + pcmSampleRate + 'Hz, ' + pcmChannels + 'ch)');
         }
 
         if (!isPlaying && pendingChunks !== null) {
           // Buffer initial chunks before starting
           pendingChunks.push(msg.data);
-          updateStatus(`Buffering... ${pendingChunks.length}/${BUFFER_BEFORE_PLAY}`);
+          updateStatus('Buffering... ' + pendingChunks.length + '/' + BUFFER_BEFORE_PLAY);
 
           if (pendingChunks.length >= BUFFER_BEFORE_PLAY) {
             startPlayback();
           }
         } else {
-          // Already playing — decode and schedule immediately
-          decodeAndSchedule(msg.data);
+          // Already playing — schedule immediately
+          scheduleChunk(msg.data);
         }
 
-        // Periodic stats (every 100 chunks ≈ 10 seconds)
+        // Periodic stats
         if (chunksReceived % 100 === 0) {
           const bufferAhead = audioCtx ? (nextPlayTime - audioCtx.currentTime) : 0;
-          console.log(`Stats: ${chunksReceived} received, ${chunksScheduled} scheduled, ` +
-            `${(bytesReceived / 1024).toFixed(0)}KB, ` +
-            `buffer: ${bufferAhead.toFixed(2)}s, errors: ${decodeErrors}`);
+          console.log('Stats: ' + chunksReceived + ' received, ' +
+            chunksScheduled + ' scheduled, ' +
+            (bytesReceived / 1024).toFixed(0) + 'KB, ' +
+            'buffer: ' + bufferAhead.toFixed(2) + 's, errors: ' + decodeErrors);
         }
 
       } else if (msg.type === 'stop') {
@@ -213,7 +242,7 @@
         const bufferAhead = audioCtx ? (nextPlayTime - audioCtx.currentTime) : 0;
         context.sendCustomMessage(NAMESPACE, event.senderId, {
           type: 'pong',
-          version: 7,
+          version: 8,
           chunksReceived,
           bytesReceived,
           chunksScheduled,
@@ -238,7 +267,7 @@
     options.customNamespaces[NAMESPACE] = cast.framework.system.MessageType.JSON;
 
     context.start(options);
-    console.log('Direct Channel receiver v7 (Web Audio API) started, listening on', NAMESPACE);
+    console.log('Direct Channel receiver v8 (Raw PCM) started, listening on', NAMESPACE);
     updateStatus('Waiting for audio chunks...');
   </script>
 </body>
