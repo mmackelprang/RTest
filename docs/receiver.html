@@ -34,10 +34,8 @@
     // If Chrome blocks it (mixed content), no TCP connection reaches the server.
     // The server runs a TCP listener on port 9999 to detect connection attempts.
     (function() {
-      // Test 1: ws:// — CONFIRMED BLOCKED by mixed content (Chrome 92)
-      // Test 2: wss:// with self-signed cert — testing now
-      var testUrl = 'wss://192.168.86.44:9999/wss-self-signed-test';
-      console.log('[WS-TEST] Attempting WSS (self-signed cert) to: ' + testUrl);
+      var testUrl = 'ws://192.168.86.44:9999/ws-mixed-content-test';
+      console.log('[WS-TEST] Attempting WebSocket connection to: ' + testUrl);
       try {
         var ws = new WebSocket(testUrl);
         ws.onopen = function() {
