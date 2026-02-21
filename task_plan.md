@@ -1,206 +1,162 @@
-# Task Plan: Session 2026-02-19 — Cast Polish, Log Hygiene, Ubuntu Target Setup
+# Task Plan: Next Session — Media Setup, Dual Output Bug, Architecture Cleanup
 
 ## Goal
-Evaluate Cast latency improvements from discussion, suppress ALSA log noise, and prepare the new x64 Ubuntu machine as the final deployment target for Grandpa's Radio.
+Complete Ubuntu x64 setup (media + fingerprinting), fix the dual audio output bug where audio plays on both local speakers and Cast simultaneously, and begin architecture cleanup.
 
 ## Current Phase
-Phase A — Cast Design Evaluation & Quick Fixes (this session)
+Phase A — Ubuntu Media & Data Setup
 
 ---
 
-## Completed Phases (summary)
+## Completed (prior sessions)
 
-All prior phases (0-11.3) are **COMPLETE**. See git history for details:
-- Phases 0-10: Full system build (audio engine, sources, outputs, API, UI)
-- Phase 11.1: Spotify removal
-- Phase 11.2: Cast latency reduction (custom receiver, throttling, debounce, buffer depth)
-- Phase 11.3: Continuous source fingerprinting (song change detection)
-
----
-
-## Phase A: Cast Design Evaluation ✅
-
-### A.1 Evaluate WebSocket + Web Audio API Approach
-**Priority:** Research — informs future Cast architecture
-
-**Context from `Google-Cast-Latency-Discussion.md`:**
-The discussion describes a fundamentally different approach to Cast audio:
-- **Current approach:** HTTP progressive MP3 stream → Chrome `<audio>` element (via CAF)
-  - Latency: ~3-10s (after our recent fixes)
-  - Advantage: Simple, uses standard Cast media playback
-- **WebSocket approach:** WebSocket + Web Audio API (`AudioContext.decodeAudioData`)
-  - Latency: Sub-500ms theoretically
-  - Disadvantage: Complex, requires full custom receiver rewrite
-
-**Key insight from the discussion:**
-> PCM WAV format "should" work with `decodeAudioData()` — but this is via WebSocket,
-> NOT via Chrome's `<audio>` element. The `<audio>` element still can't handle chunked WAV.
-
-**WAV via standard Cast (tested/confirmed):**
-- ❌ Our `/stream/audio` WAV endpoint returns `200 audio/wav` but uses chunked transfer encoding
-- ❌ WAV requires Content-Length (seekable file format), incompatible with infinite live streams
-- ❌ Chrome's `<audio>` element cannot play chunked WAV streams
-- ✅ MP3 is frame-based and inherently supports progressive streaming
-- **Conclusion: MP3 remains the correct choice for standard Cast media loading**
-
-**WebSocket approach evaluation:**
-- Would replace CAF's `<audio>` element with raw `AudioContext` playback
-- Each PCM chunk wrapped in a 44-byte WAV header, sent via WebSocket
-- Receiver decodes with `decodeAudioData()` and schedules via `BufferSource.start()`
-- Requires: WebSocket server in C#, complete receiver rewrite, chunk scheduling logic
-- **Verdict: Document as future option in FUTURE-WORK.md, don't implement now**
-  - Current ~3-10s latency is acceptable for music playback
-  - Sub-500ms latency only matters for intercom/doorbell use cases
-  - Significant complexity vs marginal benefit for current use case
-
-**Tasks:**
-- [x] Read and analyze the discussion document
-- [x] Test WAV endpoint accessibility (200 OK, audio/wav)
-- [x] Confirm WAV cannot work with standard Cast media loading
-- [x] Document WebSocket approach in `design/FUTURE-WORK.md`
-- [x] Test mixed content (ws:// and wss://) — both BLOCKED by Chrome on Cast
-- [x] Revert test commits from main, clean up receiver.html
-
-### A.2 Pre-loaded Event Sounds (from discussion)
-**Priority:** Low — document for future
-
-The discussion also describes pre-loading sound files on the receiver for instant playback via custom namespace messages. This maps well to our TTS/AudioFile event sources.
-
-**Tasks:**
-- [x] Document pre-loaded sounds approach in `design/FUTURE-WORK.md`
+All prior phases are **COMPLETE**. See git history and previous plan for details:
+- Phases 0–11.3: Full system build (audio engine, sources, outputs, API, UI, song change detection)
+- Phase A (prev): Cast design evaluation (WebSocket, pre-loaded sounds)
+- Phase B (prev): ALSA log noise suppression (SystemdConsoleFormatter + syslog levels)
+- Phase C (prev): Ubuntu x64 target setup (deploy script, setup script, app deployed, Cast verified)
+- Cast drift testing: v10 receiver drift protection (PR #217), ping endpoint + channel registration (PR #218)
+- Cast latency verified: Transit avg 87ms, buffer-ahead steady 3.0s, no drift, no stutter
 
 ---
 
-## Phase B: ALSA Log Noise Suppression ✅ (service file updated, deploy pending)
+## Phase A: Ubuntu Media & Data Setup ⏸️
 
-### B.1 Systemd Service — Stderr Priority Demotion
-**Priority:** High — logs are currently 99% noise
-
-**Problem:** MiniAudio probes JACK, PulseAudio, OSS, and ALSA dmix backends every ~5 seconds.
-This produces ~16 lines of stderr per probe cycle, completely drowning real application logs.
-
-**Root cause:** These messages come from C libraries (libasound, libjack) writing to stderr.
-They're NOT from our application's Serilog logging. Systemd captures both stderr and stdout
-and mixes them in the journal at the same priority level.
-
-**Fix:** Add `StandardErrorPriority=debug` to the systemd service file. This demotes
-all C library stderr messages to debug level, while application logs (via Serilog → stdout)
-remain at info/notice level.
+### A.1 Copy Test Media Files
+**Priority:** High — needed for playback and fingerprinting verification
 
 **Tasks:**
-- [x] Update `deploy/common/radio-api.service`:
-  - Add `StandardOutput=journal`
-  - Add `StandardError=journal`
-  - Add `StandardErrorPriority=debug` (demotes ALSA noise to debug level)
-- [ ] Deploy updated service file to Pi and verify:
-  - `journalctl -u radio-api -p info -f` shows only app logs
-  - `journalctl -u radio-api -p debug -f` shows everything (if needed)
-- [ ] Apply same fix to new Ubuntu machine service file (will happen automatically via C.3 setup)
+- [ ] Identify test media files on Pi or local machine
+- [ ] Copy media files to Ubuntu at `/opt/radio-console/media/audio/`
+- [ ] Verify file browser API endpoint lists the files
 
-**Verification:**
-```bash
-# Should show ONLY application logs (no ALSA/JACK noise):
-journalctl -u radio-api -p info --since "1 minute ago"
-
-# Should show everything including ALSA noise (for debugging):
-journalctl -u radio-api -p debug --since "1 minute ago"
-```
-
----
-
-## Phase C: Ubuntu x64 Target Setup 🔄 (script ready, manual sudo required)
-
-### C.1 Machine Profile
-**Host:** `mmack@radio`
-**Specs:** Intel N100 (4 cores), 3.6GB RAM, 116GB NVMe, Ubuntu 24.04 LTS
-**.NET:** 8.0 SDK already installed (also has .NET 10 SDK)
-
-### C.2 Parameterize Deploy Script
-**Priority:** High — needed before any deployment
-
-Current `Deploy-ToPi.ps1` hardcodes `linux-arm64`. Need to support both targets.
-
-**Tasks:**
-- [x] Add `-Runtime` parameter (default: `linux-arm64`, validates: `linux-arm64`/`linux-x64`)
-- [x] Add `-TargetHost` alias for `-PiHost` (backward compat via `[Alias]`)
-- [x] Update publish directories to use dynamic RID: `publish/$Runtime/{api,web}`
-- [x] Update restore commands to use dynamic RID
-- [x] Created `Deploy-ToLinux.ps1` as main script, `Deploy-ToPi.ps1` is thin wrapper
-- [x] Add Production config deployment for x64 (`deploy/debian-x64/appsettings.Production.json`)
-
-### C.3 Run Setup Script on Ubuntu Machine
+### A.2 Verify File Playback
 **Priority:** High
 
-The `deploy/debian-x64/setup.sh` already exists and handles:
-- System packages (libasound2-dev, libmp3lame-dev, bluez, pulseaudio, avahi)
-- Application user creation (radio)
-- Directory structure (/opt/radio-console/*)
-- ALSA config (.asoundrc)
-- fpcalc installation
-- systemd service installation
+**Tasks:**
+- [ ] Start file playback via API on Ubuntu
+- [ ] Verify audio output works (local speakers)
+- [ ] Verify Cast output works with file playback
+
+### A.3 Verify Fingerprinting
+**Priority:** Medium
 
 **Tasks:**
-- [x] Copy setup script + service files to Ubuntu machine (`/tmp/radio-deploy/`)
-- [ ] Run setup script via SSH (requires sudo password — user must run manually)
-- [ ] Verify all packages installed correctly
-- [ ] Verify `radio` user created with correct groups
-- [ ] Verify systemd services installed and enabled
-- [ ] ALSA log suppression already included in service file (Phase B fix)
-- [ ] Check audio devices: `aplay -l`, `arecord -l`
-- [ ] Check Bluetooth status: `bluetoothctl show`
-
-### C.4 Deploy Application
-**Priority:** High — follows C.2 + C.3
-
-**Tasks:**
-- [ ] Build for linux-x64 using updated deploy script
-- [ ] Deploy to `mmack@radio:/opt/radio-console`
-- [ ] Create `appsettings.Production.json` for Ubuntu target
-- [ ] Start services and verify:
-  - [ ] radio-api starts and initializes audio engine
-  - [ ] radio-web starts and connects to API
-  - [ ] API responds at `http://radio:5000/swagger`
-  - [ ] Web UI loads at `http://radio:5002`
-  - [ ] Cast device discovery works
-  - [ ] Audio output works (local speakers)
-- [ ] Update MEMORY.md with new machine SSH info
-
-### C.5 Media & Data Setup
-**Priority:** Medium — needed for testing
-
-**Tasks:**
-- [ ] Copy test media files to `/opt/radio-console/media/audio/`
-- [ ] Verify file playback works
-- [ ] Verify fingerprinting works (fpcalc + AcoustID)
+- [ ] Confirm `fpcalc` is installed and working on Ubuntu (`fpcalc --version`)
+- [ ] Trigger fingerprint identification on a playing file
+- [ ] Verify AcoustID lookup returns correct results
+- [ ] Check fingerprint database entries in SQLite
 
 ---
 
-## Phase D: Remaining from Previous Plan (deferred)
+## Phase B: Dual Audio Output Bug Fix 🔄
 
-### D.1 Phase 11.4 — Minor Architecture Cleanup
-- [ ] Extract `PlayHistoryTracker` from AudioManager
-- [ ] Review AudioManager constructor (18 params)
-- [ ] Remove completed TODO comments
+### B.1 Root Cause Analysis
+**Priority:** High — audio should only play on the selected output
 
-### D.2 Phases 12-14 — Hardware Integrations (on new Ubuntu machine)
-- Phase 12: Phonograph (USB turntable)
-- Phase 13: RTL-SDR Radio
-- Phase 14: Generic USB Audio
-These will be done on the new Ubuntu x64 machine once it's set up.
+**Problem:** When Cast connects, audio plays on BOTH local speakers AND Cast device simultaneously.
+This is because the audio pipeline continues feeding the local playback device even when Cast is active.
+
+**Key files to investigate:**
+- `src/Radio.API/Controllers/DevicesController.cs` — output switching logic (Cast connect handler)
+- `src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs` — Cast startup/shutdown
+- `src/Radio.Infrastructure/Audio/Outputs/LocalAudioOutput.cs` — local output muting
+- `src/Radio.Infrastructure/Audio/Outputs/HttpStreamOutput.cs` — HTTP stream activation
+- `src/Radio.Infrastructure/Audio/SoundFlow/SoundFlowAudioEngine.cs` — engine output management
+- `src/Radio.Infrastructure/Audio/AudioManager.cs` — output orchestration
+
+**Current behavior (from DevicesController Cast connect):**
+1. `ActivateOutputAsync(_castOutput)` — starts Cast
+2. `ActivateOutputAsync(_httpOutput)` — starts HTTP stream (needed for HttpMp3 mode)
+3. `_audioEngine.SetLocalOutputMuted(true)` — mutes local output
+
+**Expected behavior:**
+- **DirectChannel mode**: Only Cast output active, local muted, HTTP stream NOT needed
+- **HttpMp3 mode**: Cast + HTTP stream active, local muted
+- **Local mode**: Only local output active, Cast and HTTP stream stopped
+
+**Tasks:**
+- [ ] Read and trace the full output switching flow
+- [ ] Determine if `SetLocalOutputMuted(true)` actually silences local speakers (or just sets a flag)
+- [ ] Check if DirectChannel mode still needs HTTP stream active
+- [ ] Implement proper output exclusivity — when Cast connects, fully stop local output (not just mute)
+- [ ] When Cast disconnects, restore local output
+- [ ] Add tests for output switching behavior
+
+### B.2 Verify Fix
+**Tasks:**
+- [ ] Build and run all tests
+- [ ] Deploy to Ubuntu
+- [ ] Start playback → connect Cast → verify ONLY Cast plays
+- [ ] Disconnect Cast → verify local speakers resume
+- [ ] Test both DirectChannel and HttpMp3 modes
 
 ---
+
+## Phase C: Architecture Cleanup ⏸️
+
+### C.1 Extract PlayHistoryTracker from AudioManager
+**Priority:** Medium — AudioManager has too many responsibilities
+
+AudioManager's constructor currently takes 18 parameters. PlayHistory tracking can be extracted
+into a dedicated service that subscribes to audio events.
+
+**Tasks:**
+- [ ] Create `PlayHistoryTracker` class that handles play history recording
+- [ ] Move play history logic out of AudioManager
+- [ ] Wire up via DI
+- [ ] Verify all play history tests still pass
+
+### C.2 Review AudioManager Constructor
+**Priority:** Low — depends on C.1
+
+**Tasks:**
+- [ ] After C.1, review remaining constructor parameters
+- [ ] Identify any other responsibilities that could be extracted
+- [ ] Remove completed TODO comments from codebase
+
+---
+
+## Phase D: Hardware Integrations (on Ubuntu) ⏸️
+
+### D.1 Phonograph (USB Turntable)
+- [ ] Connect USB turntable to Ubuntu
+- [ ] Verify USB audio device appears in device list
+- [ ] Test VinylAudioSource playback
+
+### D.2 RTL-SDR Radio
+- [ ] Connect RTL-SDR dongle to Ubuntu
+- [ ] Install rtl_fm and dependencies
+- [ ] Test SDR audio source
+
+### D.3 Generic USB Audio
+- [ ] Test generic USB audio input
+- [ ] Verify hot-plug detection
+
+---
+
+## Known Issues (carry-forward)
+
+| Issue | Status | Notes |
+|-------|--------|-------|
+| Dual audio output (local + Cast) | **Phase B** | Audio plays on both outputs simultaneously |
+| Pong not received via SharpCaster | Deferred | Channel registration works but pong never arrives; CDP workaround reliable |
+| Receiver double-counts messages | Cosmetic | 20/sec vs sender 10/sec after CDP reload; doesn't affect audio |
+| Album art proxy untested | Deferred | Web port 5002 → API port 5000 |
+| BT play history recording | Needs verification | Fix committed, untested on hardware |
+| BT visualization data | Needs verification | Fix committed, untested on hardware |
 
 ## Design Decisions
 | Decision | Rationale |
 |----------|-----------|
 | Keep MP3 for Cast streaming | WAV requires Content-Length, incompatible with live streams |
-| Defer WebSocket Cast approach | Sub-500ms latency not needed for music; significant complexity |
+| DirectChannel for primary Cast | Raw PCM → Base64 → JSON eliminates MP3 encode/decode gaps |
 | StandardErrorPriority=debug | Cleanest way to suppress C library noise without losing it |
 | Parameterize deploy script | Single script for both Pi (arm64) and Ubuntu (x64) targets |
-| Ubuntu uses PulseAudio | Simpler than Pi's PipeWire stack; standard for desktop Ubuntu |
+| Use appsettings.Production.json | Deploy script overwrites appsettings.json; Production file survives deploys |
+| CDP for Cast metrics | SharpCaster pong unreliable; Chrome DevTools Protocol reads receiver globals directly |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |-------|---------|------------|
-| Cast 18s rebuffering | maxAheadSeconds=3 too tight | Increased to 10, lag to 5s |
-| WAV chunked to Cast | Chrome can't handle chunked WAV | Confirmed MP3 is correct |
+| (none yet) | | |

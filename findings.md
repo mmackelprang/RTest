@@ -1,5 +1,49 @@
 # Findings & Decisions
 
+## Session: Next — Media Setup, Dual Output Bug, Architecture Cleanup
+
+### 1. Dual Audio Output Bug — Preliminary Analysis
+
+**Problem:** When Cast connects, audio plays on BOTH local speakers AND Cast device.
+
+**Root cause (from code review):**
+In `DevicesController.cs`, the Cast connect handler:
+1. Calls `ActivateOutputAsync(_castOutput)` — starts Cast
+2. Calls `ActivateOutputAsync(_httpOutput)` — starts HTTP stream
+3. Calls `_audioEngine.SetLocalOutputMuted(true)` — mutes local
+
+The mute call may only set a flag without actually stopping the audio pipeline from feeding
+the local playback device. The audio mixer continues sending samples to all attached outputs.
+
+**Key question:** Does `SetLocalOutputMuted(true)` actually silence the SoundFlow playback device,
+or does the audio pipeline continue rendering to the local device regardless?
+
+**DirectChannel mode doesn't need HTTP stream** — it sends raw PCM directly via Cast namespace.
+The HTTP stream output is only needed for HttpMp3 mode.
+
+---
+
+## Session: 2026-02-20 — Cast Drift Testing & Ping Endpoint
+
+### Cast Latency Results (Ubuntu x64 → Office speaker)
+- Transit delay: avg 87ms, min 53ms, max 1676ms
+- Buffer-ahead: steady at 3.0s cap (drift protection working)
+- Audio quality: clean, constant ~3s delay, no drift, no stutter
+- Receiver v10 drops ~1 chunk/43s to maintain cap
+
+### SharpCaster Channel Registration
+- No public `RegisterChannel()` in SharpCaster v3.0.0
+- Channels property is private `IEnumerable<IChromecastChannel>` backed by array
+- Reflection-based injection works (replace array with new one including custom channel)
+- Channel registered (7 total), pings sent, but **pong still not received**
+- Root cause unknown — may be deeper Cast SDK routing issue
+
+### CDP Workaround
+Chrome DevTools Protocol at `http://<cast-ip>:9222/json` provides reliable metrics access.
+`Runtime.evaluate` reads receiver JavaScript globals directly. More reliable than SharpCaster messaging.
+
+---
+
 ## Session: 2026-02-19 — Cast Polish, Log Hygiene, Ubuntu Setup
 
 ### 1. Google Cast Latency Discussion Analysis
