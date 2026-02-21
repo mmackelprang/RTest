@@ -403,6 +403,54 @@ public class DevicesController : ControllerBase
   }
 
   /// <summary>
+  /// Sends a ping to the DirectChannel Cast receiver and returns the pong response
+  /// with latency metrics (transit delay, buffer-ahead, chunks dropped, etc.).
+  /// </summary>
+  [HttpPost("cast/ping")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  public async Task<IActionResult> PingCastReceiver()
+  {
+    if (_castOutput?.DirectStreaming == null)
+      return BadRequest("DirectChannel streaming not active");
+
+    // Capture current state before sending ping
+    var previousPong = _castOutput.DirectStreaming.LastPongJson;
+
+    _logger.LogInformation("Cast ping: sending ping (previous pong: {HasPrev})",
+      previousPong != null);
+
+    var sent = await _castOutput.DirectStreaming.SendPingAsync();
+    if (!sent)
+      return BadRequest("Failed to send ping — no active transport");
+
+    _logger.LogInformation("Cast ping: ping sent, waiting for pong...");
+
+    // Wait up to 2s for a NEW pong response
+    for (int i = 0; i < 20; i++)
+    {
+      await Task.Delay(100);
+      var currentPong = _castOutput.DirectStreaming.LastPongJson;
+      if (currentPong != null && !ReferenceEquals(currentPong, previousPong))
+      {
+        _logger.LogInformation("Cast ping: pong received after {Ms}ms", (i + 1) * 100);
+        break;
+      }
+    }
+
+    var rtt = _castOutput.DirectStreaming.LastRttMs;
+    var pong = _castOutput.DirectStreaming.LastPongJson;
+    _logger.LogInformation("Cast ping: result — RTT={Rtt}ms, hasPong={Has}",
+      rtt, pong != null);
+
+    return Ok(new
+    {
+      rttMs = rtt,
+      pong
+    });
+  }
+
+  /// <summary>
   /// Tests Cast playback with a known public audio URL.
   /// If this works but our stream doesn't, the issue is with our HTTP stream format.
   /// If this also fails, the issue is with the Cast device or connection.

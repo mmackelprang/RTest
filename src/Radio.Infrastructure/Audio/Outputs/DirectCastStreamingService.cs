@@ -110,6 +110,31 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
     _channel = channel;
     _options = options;
     _metricsCollector = metricsCollector;
+
+    // Subscribe to incoming messages from the receiver (pong, status, etc.)
+    _channel.MessageReceived += OnChannelMessageReceived;
+  }
+
+  private void OnChannelMessageReceived(object? sender, string messagePayload)
+  {
+    try
+    {
+      using var doc = JsonDocument.Parse(messagePayload);
+      var type = doc.RootElement.GetProperty("type").GetString();
+      if (type == "pong")
+      {
+        HandlePong(messagePayload);
+      }
+      else
+      {
+        _logger.LogDebug("DirectCast: Received message type '{Type}'", type);
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "DirectCast: Failed to parse incoming message: {Payload}",
+        messagePayload.Length > 200 ? messagePayload[..200] + "..." : messagePayload);
+    }
   }
 
   /// <summary>
@@ -461,6 +486,7 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
     if (_disposed) return;
     _disposed = true;
 
+    _channel.MessageReceived -= OnChannelMessageReceived;
     await StopAsync();
   }
 }

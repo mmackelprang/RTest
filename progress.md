@@ -1,5 +1,35 @@
 # Progress Log
 
+## Session: 2026-02-20 — Cast Drift Testing & Ping Endpoint
+
+### Context:
+- Resumed from crashed session on `feature/cast-latency-measurement` branch
+- v10 receiver (drift protection) was uncommitted — recovered and committed
+
+### Completed:
+- [x] Committed v10 receiver drift protection (buffer-ahead cap at 3s, drops ~1 chunk/43s)
+- [x] Pushed and created PR #217, merged to main as `1c2b03e`
+- [x] GitHub Pages confirmed serving v10 receiver
+- [x] Created `feature/cast-drift-testing` branch
+- [x] Deployed to Pi, verified DirectChannel streaming works (116 chunks, 0 errors)
+- [x] Discovered Pi config had `StreamingMode: "HttpMp3"` — fixed to `DirectChannel`
+- [x] Added `POST /api/devices/cast/ping` endpoint to DevicesController (triggers ping/pong, returns RTT + pong JSON with latency metrics)
+- [x] Deployed ping endpoint to Pi
+
+### In progress — switching to Ubuntu x64:
+- [ ] Deploy to Ubuntu x64 (`mmack@radio`) — needs `Deploy-ToLinux.ps1 -TargetHost radio -Runtime linux-x64`
+- [ ] Set Ubuntu config to `StreamingMode: DirectChannel`, `ApplicationId: 567E3DBA`
+- [ ] Start playback + Cast connect on Ubuntu
+- [ ] Use ping endpoint to get v10 metrics (transit delay, buffer-ahead, chunksDropped, RTT)
+- [ ] Run for several minutes to verify drift protection drops ~1 chunk/43s
+- [ ] Verify audio quality is clean (no audible artifacts)
+
+### Key finding:
+- Connect endpoint ignores `streamingMode` in request body — reads from `appsettings.json` config only
+- Pi config was stale (HttpMp3) — must update config AND restart service
+
+---
+
 ## Session: 2026-02-19 — Cast Polish, Log Hygiene, Ubuntu Setup
 
 ### Pre-planning work:
