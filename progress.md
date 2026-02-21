@@ -1,5 +1,15 @@
 # Progress Log
 
+## Next Session — Media Setup, Dual Output Bug, Architecture Cleanup
+
+### Plan:
+- Phase A: Ubuntu media & data setup (copy files, test playback + fingerprinting)
+- Phase B: Fix dual audio output bug (local + Cast playing simultaneously)
+- Phase C: Architecture cleanup (extract PlayHistoryTracker, review AudioManager)
+- Phase D: Hardware integrations (deferred, on Ubuntu)
+
+### Status: Not started
+
 ## Session: 2026-02-20 — Cast Drift Testing & Ping Endpoint
 
 ### Context:
@@ -16,17 +26,22 @@
 - [x] Added `POST /api/devices/cast/ping` endpoint to DevicesController (triggers ping/pong, returns RTT + pong JSON with latency metrics)
 - [x] Deployed ping endpoint to Pi
 
-### In progress — switching to Ubuntu x64:
-- [ ] Deploy to Ubuntu x64 (`mmack@radio`) — needs `Deploy-ToLinux.ps1 -TargetHost radio -Runtime linux-x64`
-- [ ] Set Ubuntu config to `StreamingMode: DirectChannel`, `ApplicationId: 567E3DBA`
-- [ ] Start playback + Cast connect on Ubuntu
-- [ ] Use ping endpoint to get v10 metrics (transit delay, buffer-ahead, chunksDropped, RTT)
-- [ ] Run for several minutes to verify drift protection drops ~1 chunk/43s
-- [ ] Verify audio quality is clean (no audible artifacts)
+### Ubuntu x64 testing: COMPLETE
+- [x] Deployed to Ubuntu x64 (`mmack@radio`) with `Deploy-ToLinux.ps1 -TargetHost radio -Runtime linux-x64`
+- [x] Set Ubuntu config to `StreamingMode: DirectChannel`, `ApplicationId: 567E3DBA`
+- [x] Start playback + Cast connect on Ubuntu
+- [x] Got v10 metrics via CDP (transit delay avg 87ms, buffer-ahead 3.0s steady)
+- [x] Drift protection verified working — buffer-ahead constant at 3.0s cap
+- [x] Audio quality confirmed clean — constant ~3s delay, no drift, no stutter
 
-### Key finding:
+### Key findings:
 - Connect endpoint ignores `streamingMode` in request body — reads from `appsettings.json` config only
 - Pi config was stale (HttpMp3) — must update config AND restart service
+- Deploy script overwrites appsettings.json — use appsettings.Production.json for per-machine overrides
+- SharpCaster channel registration via reflection works (array replacement), but pong messages still not received — needs deeper investigation
+- Receiver double-counts messages (20/sec vs sender 10/sec) — cosmetic, doesn't affect audio
+- CDP (Chrome DevTools Protocol) works reliably for reading receiver metrics as a workaround
+- **Audio plays on BOTH local output AND Cast** — this is a bug for normal use, but useful for testing latency
 
 ---
 
