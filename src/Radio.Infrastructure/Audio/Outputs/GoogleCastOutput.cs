@@ -615,12 +615,13 @@ public class GoogleCastOutput : AudioOutputBase
       transportId, _options.DirectChannelNamespace, _options.DirectChannelChunkSizeMs);
 
     // Create the custom audio channel and wire it to the client.
-    // ChromecastChannel.Client is a public setter used internally for sending.
-    // Note: without RegisterChannel (not available in SharpCaster v3.0.0),
-    // the channel can send but won't receive messages from the receiver.
-    // This is acceptable — audio flows sender→receiver; diagnostics use logs.
     _directChannel = new DirectCastAudioChannel(_options.DirectChannelNamespace, _logger);
     _directChannel.Client = _client!;
+
+    // Register the channel with SharpCaster's internal channel list so incoming
+    // messages on our namespace get routed to OnMessageReceived. SharpCaster v3.0.0
+    // has no public RegisterChannel API, so we inject via reflection.
+    RegisterCustomChannel(_client!, _directChannel);
 
     // Create the streaming service and start sending audio
     _directStreaming = new DirectCastStreamingService(
@@ -679,6 +680,62 @@ public class GoogleCastOutput : AudioOutputBase
     catch (Exception volEx)
     {
       _logger.LogWarning(volEx, "Cast: Failed to sync volume after start");
+    }
+  }
+
+  /// <summary>
+  /// Registers a custom channel with SharpCaster's internal channel list via reflection.
+  /// SharpCaster v3.0.0 has no public API for this, but the Channels property is a
+  /// List&lt;IChromecastChannel&gt; that we can append to.
+  /// </summary>
+  private void RegisterCustomChannel(ChromecastClient client, DirectCastAudioChannel channel)
+  {
+    try
+    {
+      // SharpCaster stores channels as IEnumerable<IChromecastChannel> backed by an array.
+      // We need to replace it with a new array that includes our custom channel.
+      var prop = client.GetType().GetProperty("Channels",
+        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+      if (prop == null)
+      {
+        _logger.LogWarning("Cast: Could not find Channels property on ChromecastClient");
+        return;
+      }
+
+      var existing = prop.GetValue(client) as System.Collections.IEnumerable;
+      if (existing == null)
+      {
+        _logger.LogWarning("Cast: Channels property is null");
+        return;
+      }
+
+      // Build a new list from existing channels + our custom one
+      var newList = new List<object>();
+      foreach (var ch in existing)
+        newList.Add(ch);
+      newList.Add(channel);
+
+      // Convert to array of the interface type
+      var interfaceType = prop.PropertyType.GetGenericArguments().FirstOrDefault();
+      if (interfaceType != null)
+      {
+        var arr = Array.CreateInstance(interfaceType, newList.Count);
+        for (int i = 0; i < newList.Count; i++)
+          arr.SetValue(newList[i], i);
+        prop.SetValue(client, arr);
+      }
+      else
+      {
+        // Fallback: set as List
+        prop.SetValue(client, newList);
+      }
+
+      _logger.LogInformation("Cast: Registered custom channel for namespace {Ns} (total channels: {Count})",
+        channel.Namespace, newList.Count);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Cast: Failed to register custom channel via reflection");
     }
   }
 
