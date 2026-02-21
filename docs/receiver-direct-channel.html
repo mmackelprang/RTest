@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  Direct Channel Cast Receiver for Radio Console (v9 — Raw PCM + Latency)
+  Direct Channel Cast Receiver for Radio Console (v10 — Drift Protection)
   ========================================================================
   Custom CAF receiver that receives raw PCM audio data directly over the
   Cast protocol's custom message bus and plays it using Web Audio API.
@@ -11,12 +11,15 @@
   - v7 Web Audio + MP3: Works! But audible gaps at chunk boundaries due to
     MP3 encoder/decoder warmup delay per-chunk
   - v8 Raw PCM: Works great! Zero encode/decode overhead.
+  - v9 Latency: Added transit delay, buffer-ahead, ping/pong metrics.
 
-  v9 additions: Latency measurement support.
-  - Sender includes `ts` (Unix epoch ms) in each audio message
-  - Receiver tracks transit delay (Date.now() - msg.ts) and schedule-ahead time
-  - Ping/pong includes latency stats and supports RTT calculation
-  - All v8 audio functionality unchanged
+  v10 additions: Buffer-ahead drift protection.
+  - Sender paces with Stopwatch (wall clock), AudioContext uses hardware clock.
+    These drift at ~2.3ms/sec, causing unbounded buffer growth.
+  - Fix: cap buffer-ahead at MAX_BUFFER_AHEAD. When exceeded, drop the chunk
+    and let the buffer drain. At 2.3ms/sec drift with a 3s cap, this means
+    one dropped 100ms chunk every ~43 seconds — imperceptible for music.
+  - All v9 latency metrics preserved.
 -->
 <html>
 <head>
@@ -28,7 +31,7 @@
   <cast-media-player></cast-media-player>
 
   <div id="status" style="color: #ccc; font-family: monospace; padding: 20px; position: absolute; top: 0; left: 0; z-index: 100;">
-    Radio Console — Direct Channel Receiver v9 (Raw PCM + Latency)<br>
+    Radio Console — Direct Channel Receiver v10 (Drift Protection)<br>
     <span id="info">Initializing...</span>
   </div>
 
@@ -38,6 +41,7 @@
     // Configuration
     const NAMESPACE = 'urn:x-cast:com.radioconsole.audio';
     const BUFFER_BEFORE_PLAY = 3;  // Wait for N chunks before starting playback
+    const MAX_BUFFER_AHEAD = 3.0;  // Max seconds of buffer-ahead before dropping chunks
 
     // CAF — we still need the receiver context for the custom message bus
     const context = cast.framework.CastReceiverContext.getInstance();
@@ -57,6 +61,7 @@
     let bytesReceived = 0;
     let lastSeq = -1;
     let decodeErrors = 0;
+    let chunksDropped = 0;  // Chunks dropped due to drift protection
     let pendingChunks = [];
 
     // --- Latency tracking ---
@@ -133,17 +138,32 @@
           }
         }
 
-        // Create source node and schedule
-        const source = audioCtx.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(audioCtx.destination);
-
         const now = audioCtx.currentTime;
 
         if (!isPlaying || nextPlayTime <= now) {
           // First chunk or fallen behind — start from small offset
           nextPlayTime = now + 0.02;
         }
+
+        // Drift protection: if buffer-ahead exceeds the cap, drop this chunk
+        // and let the buffer drain back. The sender's wall clock and the
+        // AudioContext hardware clock drift at ~2.3ms/sec, so without this
+        // the buffer grows unboundedly.
+        const bufferAhead = nextPlayTime - now;
+        if (bufferAhead > MAX_BUFFER_AHEAD) {
+          chunksDropped++;
+          if (chunksDropped <= 5 || chunksDropped % 100 === 0) {
+            console.log('Drift protection: dropping chunk, buffer ahead ' +
+              bufferAhead.toFixed(3) + 's > ' + MAX_BUFFER_AHEAD + 's cap ' +
+              '(dropped ' + chunksDropped + ' total)');
+          }
+          return;
+        }
+
+        // Create source node and schedule
+        const source = audioCtx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(audioCtx.destination);
 
         source.start(nextPlayTime);
         nextPlayTime += audioBuffer.duration;
@@ -160,13 +180,13 @@
 
         // Periodic stats
         if (chunksScheduled % 50 === 0) {
-          const bufferAhead = nextPlayTime - audioCtx.currentTime;
+          const ba = nextPlayTime - audioCtx.currentTime;
           console.log('Audio stats: ' + chunksScheduled + ' scheduled, ' +
-            'buffer ahead: ' + bufferAhead.toFixed(2) + 's, ' +
+            'buffer ahead: ' + ba.toFixed(2) + 's, ' +
             'ctx time: ' + audioCtx.currentTime.toFixed(2) + 's, ' +
-            'errors: ' + decodeErrors);
+            'errors: ' + decodeErrors + ', dropped: ' + chunksDropped);
           updateStatus('Playing — ' + chunksScheduled + ' chunks, ' +
-            bufferAhead.toFixed(1) + 's buffer');
+            ba.toFixed(1) + 's buffer');
         }
       } catch (e) {
         decodeErrors++;
@@ -253,6 +273,7 @@
             chunksScheduled + ' scheduled, ' +
             (bytesReceived / 1024).toFixed(0) + 'KB, ' +
             'buffer: ' + bufferAhead.toFixed(2) + 's, errors: ' + decodeErrors +
+            ', dropped: ' + chunksDropped +
             ', transit avg/min/max: ' + avgTransit + '/' +
             (latencyMin === Infinity ? '?' : latencyMin) + '/' +
             (latencyMax === -Infinity ? '?' : latencyMax) + 'ms');
@@ -272,6 +293,7 @@
         bytesReceived = 0;
         lastSeq = -1;
         decodeErrors = 0;
+        chunksDropped = 0;
         latencySum = 0;
         latencyCount = 0;
         latencyMin = Infinity;
@@ -287,10 +309,11 @@
         const avgTransit = latencyCount > 0 ? Math.round(latencySum / latencyCount) : null;
         context.sendCustomMessage(NAMESPACE, event.senderId, {
           type: 'pong',
-          version: 9,
+          version: 10,
           chunksReceived,
           bytesReceived,
           chunksScheduled,
+          chunksDropped,
           decodeErrors,
           isPlaying,
           bufferAhead: bufferAhead.toFixed(2),
@@ -328,7 +351,7 @@
     options.customNamespaces[NAMESPACE] = cast.framework.system.MessageType.JSON;
 
     context.start(options);
-    console.log('Direct Channel receiver v9 (Raw PCM + Latency) started, listening on', NAMESPACE);
+    console.log('Direct Channel receiver v10 (Drift Protection) started, listening on', NAMESPACE);
     updateStatus('Waiting for audio chunks...');
   </script>
 </body>
