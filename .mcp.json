@@ -10,6 +10,17 @@
         "@playwright/mcp@latest"
       ],
       "env": {}
+    },
+    "ssh-mcp": {
+      "type": "stdio",
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "@iflow-mcp/ssh-mcp-sessions"
+      ],
+      "env": {}
     }
   }
 }
