@@ -666,16 +666,63 @@ public class DevicesController : ControllerBase
         await _castOutput.StartAsync(cancellationToken);
       }
 
+      // Mute local speakers — audio pipeline continues for Cast streaming
+      _audioEngine?.SetLocalOutputMuted(true);
+
       // Save as default Cast device for auto-connect
       await SaveDefaultCastDeviceAsync(request.DeviceId, request.Name ?? "Cast Device");
 
-      _logger.LogInformation("Connected to Cast device: {Name}, audio streaming started", request.Name);
+      _logger.LogInformation("Connected to Cast device: {Name}, audio streaming started (local output muted)", request.Name);
       return Ok(new { message = "Connected to Cast device", device = request.Name });
     }
     catch (Exception ex)
     {
       _logger.LogError(ex, "Error connecting to Cast device: {Name}", request.Name);
       return StatusCode(500, new { error = "Failed to connect to Cast device", details = ex.Message });
+    }
+  }
+
+  /// <summary>
+  /// Disconnects from the currently connected Google Cast device.
+  /// Unmutes local speakers so audio resumes from the local output.
+  /// </summary>
+  /// <returns>Success or error response.</returns>
+  [HttpPost("cast/disconnect")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+  public async Task<IActionResult> DisconnectFromCastDevice(CancellationToken cancellationToken)
+  {
+    if (_castOutput == null)
+    {
+      return StatusCode(503, new { error = "Google Cast output not available" });
+    }
+
+    try
+    {
+      var deviceName = _castOutput.ConnectedDevice?.FriendlyName ?? "Cast Device";
+      _logger.LogInformation("Disconnecting from Cast device: {Name}", deviceName);
+
+      await _castOutput.StopAsync(cancellationToken);
+      await _castOutput.DisconnectAsync(cancellationToken);
+
+      // Stop HTTP stream if it was active (used by HttpMp3 mode)
+      if (_httpOutput?.State == AudioOutputState.Streaming)
+      {
+        await _httpOutput.StopAsync(cancellationToken);
+      }
+
+      // Unmute local speakers so audio resumes locally
+      _audioEngine?.SetLocalOutputMuted(false);
+
+      _logger.LogInformation("Disconnected from Cast device: {Name}, local output unmuted", deviceName);
+      return Ok(new { message = "Disconnected from Cast device", device = deviceName });
+    }
+    catch (Exception ex)
+    {
+      // Even if disconnect fails, unmute local so user isn't stuck with no audio
+      _audioEngine?.SetLocalOutputMuted(false);
+      _logger.LogError(ex, "Error disconnecting from Cast device");
+      return StatusCode(500, new { error = "Failed to disconnect from Cast device", details = ex.Message });
     }
   }
 
@@ -1212,7 +1259,11 @@ public class DevicesController : ControllerBase
         }
 
         await _castOutput.StartAsync();
-        _logger.LogInformation("Auto-connected to default Cast device: {Name} (mode: {Mode})",
+
+        // Mute local speakers — audio pipeline continues for Cast streaming
+        _audioEngine?.SetLocalOutputMuted(true);
+
+        _logger.LogInformation("Auto-connected to default Cast device: {Name} (mode: {Mode}, local output muted)",
           device.FriendlyName, autoConnectOptions.StreamingMode);
       }
       catch (Exception ex)
