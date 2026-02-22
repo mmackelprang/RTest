@@ -44,8 +44,8 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   private readonly IServiceScopeFactory? _serviceScopeFactory;
   private readonly AlbumArtCacheService? _albumArtCache;
 
-  // Play history tracking
-  private string? _currentPlayHistoryEntryId;
+  // Play history tracking (extracted to PlayHistoryTracker)
+  private readonly PlayHistoryTracker? _playHistoryTracker;
 
   // Volume persistence debounce
   private Timer? _volumePersistTimer;
@@ -82,7 +82,8 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     Configuration.Abstractions.IConfigurationManager? configurationManager = null,
     SoundFlow.SoundFlowPlaybackService? playbackService = null,
     IServiceScopeFactory? serviceScopeFactory = null,
-    AlbumArtCacheService? albumArtCache = null)
+    AlbumArtCacheService? albumArtCache = null,
+    PlayHistoryTracker? playHistoryTracker = null)
   {
     _logger = logger;
     _loggerFactory = loggerFactory;
@@ -103,16 +104,9 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     _playbackService = playbackService;
     _serviceScopeFactory = serviceScopeFactory;
     _albumArtCache = albumArtCache;
+    _playHistoryTracker = playHistoryTracker;
 
     _bluetoothService.DeviceConnected += OnBluetoothDeviceConnected;
-    _bluetoothService.MetadataChanged += OnBluetoothMetadataChanged;
-
-    // Subscribe to track identification events for updating play history
-    if (_identificationService != null)
-    {
-      _identificationService.TrackIdentified += OnTrackIdentified;
-      _identificationService.SongChanged += OnSongChanged;
-    }
   }
 
   /// <inheritdoc/>
@@ -700,11 +694,13 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   }
 
   /// <summary>
-  /// Subscribes to state changes for the given source to track play history.
+  /// Subscribes to state changes for the given source for source cleanup
+  /// and delegates play history tracking to PlayHistoryTracker.
   /// </summary>
   private void SubscribeToSourceStateChanges(IAudioSource source)
   {
     source.StateChanged += OnSourceStateChanged;
+    _playHistoryTracker?.SubscribeToSource(source);
   }
 
   /// <summary>
@@ -713,17 +709,17 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   private void UnsubscribeFromSourceStateChanges(IAudioSource source)
   {
     source.StateChanged -= OnSourceStateChanged;
+    _playHistoryTracker?.UnsubscribeFromSource(source);
   }
 
   /// <summary>
-  /// Handles source state changes to record play history when playback starts.
+  /// Handles source state changes for previous source cleanup when a new source starts playing.
+  /// Play history recording is handled separately by PlayHistoryTracker.
   /// </summary>
   private async void OnSourceStateChanged(object? sender, AudioSourceStateChangedEventArgs e)
   {
     if (sender is not IAudioSource source)
-    {
       return;
-    }
 
     _logger.LogInformation(
       "Source state changed: {SourceName} ({SourceType}) {OldState} -> {NewState}, IsActiveSource={IsActive}",
@@ -737,9 +733,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
       {
         // Double-check after acquiring lock (state may have changed)
         if (source != _activeSource || _previousSource == null)
-        {
           return;
-        }
 
         // Guard: Prevent cleaning up the active source if it was also tracked as previous
         if (_previousSource == _activeSource || _previousSource.Id == _activeSource.Id)
@@ -756,7 +750,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
         try
         {
           var mixer = _audioEngine.GetMasterMixer();
-          
+
           // Stop the previous source
           if (_previousSource is IPrimaryAudioSource previousPrimary)
           {
@@ -777,420 +771,11 @@ public class AudioManager : IAudioManager, IAsyncDisposable
         {
           _logger.LogError(ex, "Failed to clean up previous source");
         }
-      
       }
       finally
       {
         _switchLock.Release();
       }
-    }
-
-    // Only record when transitioning to Playing state
-    if (e.NewState != AudioSourceState.Playing)
-    {
-      return;
-    }
-
-    // Only track primary sources that are the active source
-    if (source != _activeSource)
-    {
-      return;
-    }
-
-    _logger.LogInformation(
-      "Source {SourceName} transitioned to Playing, recording play history",
-      source.Name);
-    await RecordPlayStartAsync(source);
-  }
-
-  /// <summary>
-  /// Records a play history entry when a track starts playing.
-  /// </summary>
-  private async Task RecordPlayStartAsync(IAudioSource source)
-  {
-    if (_serviceScopeFactory == null)
-    {
-      _logger.LogWarning("IServiceScopeFactory is null, cannot record play history");
-      return;
-    }
-
-    try
-    {
-      using var scope = _serviceScopeFactory.CreateScope();
-      var playHistoryRepository = scope.ServiceProvider.GetService<IPlayHistoryRepository>();
-      if (playHistoryRepository == null)
-      {
-        _logger.LogWarning("IPlayHistoryRepository not available in DI scope, skipping play history recording");
-        return;
-      }
-
-      var playSource = MapSourceTypeToPlaySource(source.Type);
-      var metadata = GetSourceMetadata(source);
-
-      // Build source details including basic metadata for display
-      var sourceDetails = $"{metadata.Title} - {metadata.Artist}";
-
-      // Get duration from source metadata if available
-      int? durationSeconds = null;
-      if (source is IPrimaryAudioSource ps && ps.Metadata != null &&
-          ps.Metadata.TryGetValue(StandardMetadataKeys.Duration, out var durObj))
-      {
-        if (durObj is TimeSpan ts)
-          durationSeconds = (int)ts.TotalSeconds;
-        else if (double.TryParse(durObj?.ToString(), out var durVal))
-          durationSeconds = (int)durVal;
-      }
-
-      // Persist the track metadata so the play history entry can reference it
-      string? trackMetadataId = null;
-      var metadataRepository = scope.ServiceProvider.GetService<ITrackMetadataRepository>();
-      if (metadataRepository != null)
-      {
-        await metadataRepository.StoreAsync(metadata);
-        trackMetadataId = metadata.Id;
-      }
-      else
-      {
-        _logger.LogWarning("ITrackMetadataRepository not available, play history entry will lack track metadata");
-      }
-
-      var entryId = Guid.NewGuid().ToString();
-      var entry = new PlayHistoryEntry
-      {
-        Id = entryId,
-        TrackMetadataId = trackMetadataId,
-        FingerprintId = null,
-        PlayedAt = DateTime.UtcNow,
-        Source = playSource,
-        MetadataSource = metadata.Source,
-        SourceDetails = sourceDetails,
-        DurationSeconds = durationSeconds,
-        IdentificationConfidence = null,
-        WasIdentified = trackMetadataId != null,
-        Track = metadata
-      };
-
-      await playHistoryRepository.RecordPlayAsync(entry);
-      _currentPlayHistoryEntryId = entryId;
-
-      _logger.LogInformation(
-        "Recorded play history entry {EntryId} for source {SourceName} (identified: {WasIdentified}, source: {PlaySource})",
-        entryId, source.Name, entry.WasIdentified, playSource);
-    }
-    catch (Exception ex)
-    {
-      _logger.LogWarning(ex, "Failed to record play history for source {SourceName}", source.Name);
-    }
-  }
-
-  /// <summary>
-  /// Gets metadata from the source. Always returns a TrackMetadata with at least
-  /// a meaningful title and artist, using source-specific fallbacks.
-  /// </summary>
-  private TrackMetadata GetSourceMetadata(IAudioSource source)
-  {
-    string? title = null;
-    string? artist = null;
-    string? album = null;
-    string? coverArt = null;
-
-    // Try to get metadata from the source's Metadata dictionary
-    if (source is IPrimaryAudioSource primarySource)
-    {
-      var metadata = primarySource.Metadata;
-      if (metadata != null && metadata.Count > 0)
-      {
-        title = metadata.TryGetValue(StandardMetadataKeys.Title, out var titleObj)
-          ? titleObj?.ToString() : null;
-        artist = metadata.TryGetValue(StandardMetadataKeys.Artist, out var artistObj)
-          ? artistObj?.ToString() : null;
-        album = metadata.TryGetValue(StandardMetadataKeys.Album, out var albumObj)
-          ? albumObj?.ToString() : null;
-        coverArt = metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var coverObj)
-          ? coverObj?.ToString() : null;
-      }
-    }
-
-    // Strip default placeholders so we can apply better fallbacks
-    if (title == StandardMetadataKeys.DefaultTitle) title = null;
-    if (artist == StandardMetadataKeys.DefaultArtist) artist = null;
-    if (album == StandardMetadataKeys.DefaultAlbum) album = null;
-    if (coverArt == StandardMetadataKeys.DefaultAlbumArtUrl) coverArt = null;
-
-    // Source-specific fallbacks for title
-    if (string.IsNullOrWhiteSpace(title))
-    {
-      title = source.Type switch
-      {
-        AudioSourceType.Radio => GetRadioTitle(source),
-        AudioSourceType.FilePlayer => GetFilePlayerTitle(source),
-        AudioSourceType.Vinyl => "Vinyl",
-        AudioSourceType.GenericUSB => "USB Audio",
-        AudioSourceType.Bluetooth => "Bluetooth Audio",
-        _ => source.Name
-      };
-    }
-
-    // Source-specific fallbacks for artist
-    if (string.IsNullOrWhiteSpace(artist))
-    {
-      artist = source.Type switch
-      {
-        AudioSourceType.Radio => "Radio",
-        AudioSourceType.FilePlayer => "File Player",
-        AudioSourceType.Vinyl => "Vinyl",
-        AudioSourceType.GenericUSB => "USB Input",
-        AudioSourceType.Bluetooth => "Bluetooth",
-        _ => source.Type.ToString()
-      };
-    }
-
-    // Determine metadata source based on source type
-    var metadataSource = source.Type switch
-    {
-      AudioSourceType.FilePlayer => MetadataSource.FileTag,
-      _ => MetadataSource.Manual
-    };
-
-    return new TrackMetadata
-    {
-      Id = Guid.NewGuid().ToString(),
-      Title = title,
-      Artist = artist,
-      Album = string.IsNullOrWhiteSpace(album) ? null : album,
-      CoverArtUrl = string.IsNullOrWhiteSpace(coverArt) ? null : coverArt,
-      Source = metadataSource,
-      CreatedAt = DateTime.UtcNow,
-      UpdatedAt = DateTime.UtcNow
-    };
-  }
-
-  /// <summary>
-  /// Gets a descriptive title for radio sources using frequency info.
-  /// </summary>
-  private static string GetRadioTitle(IAudioSource source)
-  {
-    if (source is IPrimaryAudioSource primary && primary.Metadata != null)
-    {
-      if (primary.Metadata.TryGetValue("Frequency", out var freq) && freq != null)
-        return freq.ToString()!;
-    }
-    return "Radio";
-  }
-
-  /// <summary>
-  /// Gets a title for file player sources using the current filename.
-  /// </summary>
-  private static string GetFilePlayerTitle(IAudioSource source)
-  {
-    if (source is FilePlayerAudioSource filePlayer && !string.IsNullOrEmpty(filePlayer.CurrentFile))
-      return System.IO.Path.GetFileNameWithoutExtension(filePlayer.CurrentFile);
-    return "File Player";
-  }
-
-  /// <summary>
-  /// Maps AudioSourceType to PlaySource enum.
-  /// </summary>
-  private static PlaySource MapSourceTypeToPlaySource(AudioSourceType sourceType)
-  {
-    return sourceType switch
-    {
-      AudioSourceType.Radio => PlaySource.Radio,
-      AudioSourceType.Vinyl => PlaySource.Vinyl,
-      AudioSourceType.FilePlayer => PlaySource.File,
-      AudioSourceType.GenericUSB => PlaySource.GenericUSB,
-      AudioSourceType.Bluetooth => PlaySource.Bluetooth,
-      _ => PlaySource.File
-    };
-  }
-
-  /// <summary>
-  /// Handles track identification events to update play history with metadata.
-  /// </summary>
-  private async void OnTrackIdentified(object? sender, TrackIdentifiedEventArgs e)
-  {
-    if (_serviceScopeFactory == null || _activeSource == null)
-    {
-      return;
-    }
- 
-    try
-    {
-      using var scope = _serviceScopeFactory.CreateScope();
-      var playHistoryRepository = scope.ServiceProvider.GetService<IPlayHistoryRepository>();
-      if (playHistoryRepository == null)
-      {
-        _logger.LogDebug("IPlayHistoryRepository not available, skipping play history update");
-        return;
-      }
- 
-      var playSource = MapSourceTypeToPlaySource(_activeSource.Type);
- 
-      // Try to find a recent unidentified entry for this source to update
-      var existingEntry = await playHistoryRepository.GetRecentUnidentifiedAsync(playSource, 5);
- 
-      if (existingEntry != null)
-      {
-        // Update the existing entry with fingerprinting data
-        var updatedEntry = existingEntry with
-        {
-          TrackMetadataId = e.Track.Id,
-          FingerprintId = e.Track.FingerprintId,
-          MetadataSource = MetadataSource.Fingerprinting,
-          IdentificationConfidence = e.Confidence,
-          WasIdentified = true,
-          Track = e.Track
-        };
- 
-        await playHistoryRepository.UpdateAsync(updatedEntry);
-        _logger.LogInformation(
-          "Updated play history entry {EntryId} with fingerprinting data: '{Title}' by '{Artist}' (confidence: {Confidence:P0})",
-          existingEntry.Id, e.Track.Title, e.Track.Artist, e.Confidence);
-      }
-      else
-      {
-        _logger.LogDebug("No recent unidentified entry found to update with fingerprinting data");
-      }
-    }
-    catch (Exception ex)
-    {
-      _logger.LogWarning(ex, "Failed to update play history with fingerprinting data");
-    }
-  }
- 
-  /// <summary>
-  /// Handles song change events from fingerprinting to create new play history entries.
-  /// Finalizes the previous entry and creates a new one for the new song.
-  /// </summary>
-  private async void OnSongChanged(object? sender, SongChangedEventArgs e)
-  {
-    if (_serviceScopeFactory == null || _activeSource == null)
-      return;
-
-    try
-    {
-      using var scope = _serviceScopeFactory.CreateScope();
-      var playHistoryRepository = scope.ServiceProvider.GetService<IPlayHistoryRepository>();
-      var metadataRepository = scope.ServiceProvider.GetService<ITrackMetadataRepository>();
-      if (playHistoryRepository == null)
-      {
-        _logger.LogDebug("IPlayHistoryRepository not available, skipping song change handling");
-        return;
-      }
-
-      var playSource = MapSourceTypeToPlaySource(_activeSource.Type);
-
-      // Finalize the previous play history entry
-      if (!string.IsNullOrEmpty(_currentPlayHistoryEntryId))
-      {
-        await playHistoryRepository.FinalizeEntryAsync(_currentPlayHistoryEntryId, e.DetectedAt);
-        _logger.LogInformation(
-          "Finalized play history entry {EntryId} (song ended at {EndedAt})",
-          _currentPlayHistoryEntryId, e.DetectedAt);
-      }
-
-      // Store the new track metadata
-      if (metadataRepository != null)
-      {
-        await metadataRepository.StoreAsync(e.NewTrack);
-      }
-
-      // Create a new play history entry for the new song
-      var entryId = Guid.NewGuid().ToString();
-      var entry = new PlayHistoryEntry
-      {
-        Id = entryId,
-        TrackMetadataId = e.NewTrack.Id,
-        FingerprintId = e.NewTrack.FingerprintId,
-        PlayedAt = e.DetectedAt,
-        Source = playSource,
-        MetadataSource = MetadataSource.Fingerprinting,
-        SourceDetails = $"{e.NewTrack.Title} - {e.NewTrack.Artist}",
-        DurationSeconds = null, // Will be set when this entry is finalized
-        IdentificationConfidence = e.Confidence,
-        WasIdentified = true,
-        Track = e.NewTrack
-      };
-
-      await playHistoryRepository.RecordPlayAsync(entry);
-      _currentPlayHistoryEntryId = entryId;
-
-      _logger.LogInformation(
-        "Created new play history entry {EntryId} for song change: '{Title}' by '{Artist}' (confidence: {Confidence:P0})",
-        entryId, e.NewTrack.Title, e.NewTrack.Artist, e.Confidence);
-
-      _metricsCollector?.Increment("fingerprint.song_change_detected");
-    }
-    catch (Exception ex)
-    {
-      _logger.LogWarning(ex, "Failed to handle song change event");
-    }
-  }
-
-  /// <summary>
-  /// Updates the current play history entry when real AVRCP metadata arrives.
-  /// This fixes entries that were recorded with the device name as title before
-  /// the phone sent actual track metadata.
-  /// </summary>
-  private async void OnBluetoothMetadataChanged(object? sender, BluetoothPlaybackMetadata e)
-  {
-    // Only update if we have real metadata and the active source is Bluetooth
-    if (e == null || string.IsNullOrEmpty(e.Title) || string.IsNullOrEmpty(e.Artist))
-      return;
-    if (_activeSource?.Type != AudioSourceType.Bluetooth)
-      return;
-    if (string.IsNullOrEmpty(_currentPlayHistoryEntryId) || _serviceScopeFactory == null)
-      return;
-
-    try
-    {
-      using var scope = _serviceScopeFactory.CreateScope();
-      var playHistoryRepository = scope.ServiceProvider.GetService<IPlayHistoryRepository>();
-      if (playHistoryRepository == null) return;
-
-      var entry = await playHistoryRepository.GetByIdAsync(_currentPlayHistoryEntryId);
-      if (entry == null) return;
-
-      // Only update if the entry looks like it has a device name as title
-      // (i.e., track metadata wasn't available when the entry was recorded)
-      var existingTitle = entry.Track?.Title;
-      if (existingTitle == e.Title && entry.Track?.Artist == e.Artist)
-        return; // Already up to date
-
-      var metadataRepository = scope.ServiceProvider.GetService<ITrackMetadataRepository>();
-      var metadata = new TrackMetadata
-      {
-        Id = entry.TrackMetadataId ?? Guid.NewGuid().ToString(),
-        Title = e.Title,
-        Artist = e.Artist,
-        Album = e.Album,
-        Source = MetadataSource.Avrcp,
-        CreatedAt = DateTime.UtcNow,
-        UpdatedAt = DateTime.UtcNow
-      };
-
-      if (metadataRepository != null)
-      {
-        await metadataRepository.StoreAsync(metadata);
-      }
-
-      var updatedEntry = entry with
-      {
-        TrackMetadataId = metadata.Id,
-        MetadataSource = MetadataSource.Avrcp,
-        SourceDetails = $"{e.Title} - {e.Artist}",
-        WasIdentified = true,
-        Track = metadata
-      };
-
-      await playHistoryRepository.UpdateAsync(updatedEntry);
-      _logger.LogInformation(
-        "Updated play history entry {EntryId} with AVRCP metadata: '{Title}' by '{Artist}'",
-        entry.Id, e.Title, e.Artist);
-    }
-    catch (Exception ex)
-    {
-      _logger.LogDebug(ex, "Failed to update play history with AVRCP metadata");
     }
   }
 
@@ -1238,16 +823,11 @@ public class AudioManager : IAudioManager, IAsyncDisposable
 
     _logger.LogInformation("Disposing AudioManager");
 
-    // Unsubscribe from track identification events
-    if (_identificationService != null)
-    {
-      _identificationService.TrackIdentified -= OnTrackIdentified;
-      _identificationService.SongChanged -= OnSongChanged;
-    }
+    // Dispose play history tracker (unsubscribes from identification + BT metadata events)
+    _playHistoryTracker?.Dispose();
 
     // Unsubscribe Bluetooth events
     _bluetoothService.DeviceConnected -= OnBluetoothDeviceConnected;
-    _bluetoothService.MetadataChanged -= OnBluetoothMetadataChanged;
 
     // Stop current playback (don't call StopAsync as it checks disposed flag)
     try
