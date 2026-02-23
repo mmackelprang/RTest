@@ -89,7 +89,16 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   {
     if (_soundGenerator == null) return;
 
-    _soundGenerator.AddSamples(e.Samples);
+    // RTL-SDR outputs mono audio; the playback engine expects interleaved stereo.
+    // Duplicate each mono sample to both L and R channels.
+    var stereo = new float[e.Samples.Length * 2];
+    for (int i = 0; i < e.Samples.Length; i++)
+    {
+      stereo[i * 2] = e.Samples[i];     // Left
+      stereo[i * 2 + 1] = e.Samples[i]; // Right
+    }
+
+    _soundGenerator.AddSamples(stereo);
     _totalSamplesReceived += e.Samples.Length;
 
     // Silence detection: warn if all samples are zero
