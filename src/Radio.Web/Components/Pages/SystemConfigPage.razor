@@ -317,15 +317,15 @@
               </MudItem>
               <MudItem xs="12" md="6">
                 <MudTextField T="string" @bind-Value="_deviceOptions.Radio.USBPort"
-                              Label="Radio Audio Device"
+                              Label="Radio USB Audio (RF320 only)"
                               Variant="Variant.Outlined"
-                              HelperText="USB audio device name pattern for radio (e.g., AB13X)" />
+                              HelperText="Leave empty if using RTL-SDR. Only set for RF320 USB audio capture." />
               </MudItem>
               <MudItem xs="12" md="6">
                 <MudTextField T="string" @bind-Value="_deviceOptions.Vinyl.USBPort"
                               Label="Vinyl Audio Device"
                               Variant="Variant.Outlined"
-                              HelperText="USB audio device name pattern for turntable" />
+                              HelperText="USB audio device name pattern for turntable (e.g., USB Microphone)" />
               </MudItem>
               <MudItem xs="12" md="6">
                 <MudTextField T="string" @bind-Value="_deviceOptions.Cast.DefaultDevice"
@@ -1165,9 +1165,9 @@
                 </MudAlert>
               </MudItem>
               <MudItem xs="12">
-                <MudTextField T="string" @bind-Value="_genericSourcePreferences.USBPort" Label="USB Port"
+                <MudTextField T="string" @bind-Value="_genericSourcePreferences.USBPort" Label="Generic USB Audio Device"
                               Variant="Variant.Outlined"
-                              HelperText="USB port for generic source (e.g., /dev/ttyUSB2)" />
+                              HelperText="USB audio device name pattern (e.g., AB13X)" />
               </MudItem>
               <MudItem xs="12">
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveGenericSourcePreferencesAsync"

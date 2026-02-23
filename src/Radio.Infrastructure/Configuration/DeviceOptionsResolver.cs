@@ -90,13 +90,54 @@ public class DeviceOptionsResolver
   }
 
   /// <summary>
+  /// Gets the Generic USB port, reading from config store first.
+  /// GenericSourcePreferences is a flat object, so the key is "genericsourcepreferences:USBPort".
+  /// </summary>
+  public async Task<string> GetGenericUSBPortAsync(CancellationToken ct = default)
+  {
+    if (_configManager == null)
+    {
+      return "";
+    }
+
+    try
+    {
+      var storeId = _configManager.CurrentStoreType == ConfigurationStoreType.Sqlite
+        ? "sqlite" : "config";
+      var value = await _configManager.GetValueAsync<string>(storeId, "genericsourcepreferences:USBPort", ct: ct);
+      if (!string.IsNullOrWhiteSpace(value))
+      {
+        return value;
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to read GenericUSB port from config store");
+    }
+
+    return "";
+  }
+
+  /// <summary>
   /// Reads a nested object from the config store, where the value is stored as
   /// serialized JSON (e.g., key "devices:Radio" → value '{"usbPort":"AB13X"}').
+  /// Tries the exact key first, then a lowercase variant, since the config controller
+  /// preserves the casing from the JSON payload.
   /// </summary>
   private async Task<T?> ResolveNestedAsync<T>(string storeId, string key, CancellationToken ct)
     where T : class
   {
+    // Try exact key first (e.g., "devices:Radio"), then lowercase (e.g., "devices:radio")
     var raw = await _configManager!.GetValueAsync<string>(storeId, key, ct: ct);
+    if (string.IsNullOrWhiteSpace(raw))
+    {
+      var lowerKey = key.ToLowerInvariant();
+      if (lowerKey != key)
+      {
+        raw = await _configManager.GetValueAsync<string>(storeId, lowerKey, ct: ct);
+      }
+    }
+
     if (string.IsNullOrWhiteSpace(raw))
     {
       return null;
@@ -104,7 +145,6 @@ public class DeviceOptionsResolver
 
     try
     {
-      // The config store stores nested objects as JSON strings
       return JsonSerializer.Deserialize<T>(raw, JsonOptions);
     }
     catch (JsonException ex)
