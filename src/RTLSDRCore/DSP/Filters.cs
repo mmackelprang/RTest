@@ -258,6 +258,171 @@ namespace RTLSDRCore.DSP
     }
 
     /// <summary>
+    /// Audio decimator that operates on float samples with multi-stage decimation.
+    /// Uses multiple stages to avoid the problem of very low normalized cutoff
+    /// frequencies that require impractically many filter taps.
+    /// </summary>
+    public class AudioDecimator
+    {
+        private readonly List<DecimationStage> _stages = new();
+        private readonly int _totalFactor;
+
+        /// <summary>
+        /// Gets the total decimation factor across all stages.
+        /// </summary>
+        public int Factor => _totalFactor;
+
+        /// <summary>
+        /// Gets the input sample rate.
+        /// </summary>
+        public int InputSampleRate { get; }
+
+        /// <summary>
+        /// Gets the output sample rate.
+        /// </summary>
+        public int OutputSampleRate { get; }
+
+        /// <summary>
+        /// Creates a new multi-stage audio decimator.
+        /// </summary>
+        /// <param name="inputSampleRate">Input sample rate in Hz.</param>
+        /// <param name="outputSampleRate">Desired output sample rate in Hz.</param>
+        public AudioDecimator(int inputSampleRate, int outputSampleRate)
+        {
+            if (outputSampleRate <= 0)
+                throw new ArgumentException("Output sample rate must be positive", nameof(outputSampleRate));
+            if (inputSampleRate < outputSampleRate)
+                throw new ArgumentException("Input sample rate must be >= output sample rate", nameof(inputSampleRate));
+
+            InputSampleRate = inputSampleRate;
+            OutputSampleRate = outputSampleRate;
+            _totalFactor = inputSampleRate / outputSampleRate;
+
+            // Factor the total decimation into stages where each stage has a
+            // reasonable decimation factor (max ~10) so the anti-alias filter
+            // has a practical normalized cutoff frequency.
+            var remaining = _totalFactor;
+            var currentRate = inputSampleRate;
+
+            foreach (var factor in FactorizeDecimation(remaining))
+            {
+                var nextRate = currentRate / factor;
+                // Anti-alias cutoff at 90% of the output Nyquist for this stage
+                var cutoff = nextRate / 2.0f * 0.9f;
+                // Scale taps with decimation factor: higher factors need more taps.
+                // Minimum 63, with ~15 taps per unit of decimation factor for good
+                // stopband attenuation.
+                var taps = Math.Max(63, factor * 15) | 1; // ensure odd
+                _stages.Add(new DecimationStage(
+                    new LowPassFilter(currentRate, cutoff, taps), factor));
+                currentRate = nextRate;
+            }
+        }
+
+        /// <summary>
+        /// Decimates float audio samples.
+        /// </summary>
+        /// <param name="input">Input audio samples.</param>
+        /// <param name="output">Output buffer.</param>
+        /// <returns>Number of output samples written.</returns>
+        public int Decimate(ReadOnlySpan<float> input, Span<float> output)
+        {
+            if (_stages.Count == 0)
+            {
+                var count = Math.Min(input.Length, output.Length);
+                input.Slice(0, count).CopyTo(output);
+                return count;
+            }
+
+            // Process through each stage sequentially
+            var current = input.ToArray();
+
+            foreach (var stage in _stages)
+            {
+                var stageOutput = new float[current.Length / stage.Factor + 1];
+                var outputIndex = 0;
+
+                for (var i = 0; i < current.Length && outputIndex < stageOutput.Length; i++)
+                {
+                    var filtered = stage.Filter.Process(current[i]);
+                    stage.Counter++;
+                    if (stage.Counter >= stage.Factor)
+                    {
+                        stageOutput[outputIndex++] = filtered;
+                        stage.Counter = 0;
+                    }
+                }
+
+                current = new float[outputIndex];
+                Array.Copy(stageOutput, current, outputIndex);
+            }
+
+            var resultCount = Math.Min(current.Length, output.Length);
+            current.AsSpan(0, resultCount).CopyTo(output);
+            return resultCount;
+        }
+
+        /// <summary>
+        /// Resets all stages.
+        /// </summary>
+        public void Reset()
+        {
+            foreach (var stage in _stages)
+            {
+                stage.Filter.Reset();
+                stage.Counter = 0;
+            }
+        }
+
+        /// <summary>
+        /// Breaks a large decimation factor into a sequence of smaller factors
+        /// (each &lt;= 10) for multi-stage decimation.
+        /// </summary>
+        private static List<int> FactorizeDecimation(int totalFactor)
+        {
+            var factors = new List<int>();
+            var remaining = totalFactor;
+
+            while (remaining > 10)
+            {
+                // Find the largest factor <= 10 that divides remaining
+                var bestFactor = 2;
+                for (var f = 10; f >= 2; f--)
+                {
+                    if (remaining % f == 0)
+                    {
+                        bestFactor = f;
+                        break;
+                    }
+                }
+
+                factors.Add(bestFactor);
+                remaining /= bestFactor;
+            }
+
+            if (remaining > 1)
+            {
+                factors.Add(remaining);
+            }
+
+            return factors;
+        }
+
+        private class DecimationStage
+        {
+            public LowPassFilter Filter { get; }
+            public int Factor { get; }
+            public int Counter { get; set; }
+
+            public DecimationStage(LowPassFilter filter, int factor)
+            {
+                Filter = filter;
+                Factor = factor;
+            }
+        }
+    }
+
+    /// <summary>
     /// Automatic Gain Control (AGC)
     /// </summary>
     public class AgcProcessor

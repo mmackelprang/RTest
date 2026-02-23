@@ -24,7 +24,7 @@ namespace RTLSDRCore
 
         private IDemodulator _demodulator;
         private AgcProcessor _agc;
-        private Decimator? _decimator;
+        private AudioDecimator? _audioDecimator;
         private LowPassFilter? _audioFilter;
 
         private AudioFormat _audioFormat = AudioFormat.Default;
@@ -650,11 +650,14 @@ namespace RTLSDRCore
             _demodulator.SampleRate = DefaultSdrSampleRate;
             _demodulator.Bandwidth = _currentBand.DefaultBandwidthHz;
 
-            // Calculate decimation factor
-            var decimationFactor = DefaultSdrSampleRate / DefaultAudioSampleRate;
-            _decimator = new Decimator(DefaultSdrSampleRate, decimationFactor);
+            // Use multi-stage audio decimator for proper anti-alias filtering.
+            // A single 50:1 decimation with 63-tap FIR has a normalized cutoff of
+            // ~0.9% which is far too narrow for the filter to work — causing massive
+            // aliasing (audible as buzzing/noise). Multi-stage breaks this into
+            // manageable steps (e.g., 10:1 then 5:1) where each filter is effective.
+            _audioDecimator = new AudioDecimator(DefaultSdrSampleRate, DefaultAudioSampleRate);
 
-            // Audio filter
+            // Audio low-pass filter to remove residual high-frequency noise after decimation
             _audioFilter = new LowPassFilter(DefaultAudioSampleRate, 15_000);
 
             _agc.Reset();
@@ -697,27 +700,22 @@ namespace RTLSDRCore
             var audioSamples = new float[samples.Length];
             var demodCount = _demodulator.Demodulate(samples, audioSamples);
 
-            // Decimate to audio rate
-            if (_decimator != null)
+            // Decimate to audio rate using multi-stage audio decimator
+            if (_audioDecimator != null)
             {
-                var decimatedIq = new IqSample[demodCount / _decimator.Factor + 1];
-                // For audio, wrap float samples back to IQ for decimation (only I channel used)
-                var tempIq = new IqSample[demodCount];
-                for (var i = 0; i < demodCount; i++)
-                {
-                    tempIq[i] = new IqSample(audioSamples[i], 0);
-                }
+                var decimatedAudio = new float[demodCount / _audioDecimator.Factor + 1];
+                var decimatedCount = _audioDecimator.Decimate(
+                    audioSamples.AsSpan(0, demodCount), decimatedAudio);
+                audioSamples = new float[decimatedCount];
+                Array.Copy(decimatedAudio, audioSamples, decimatedCount);
+            }
 
-                var decimatedCount = _decimator.Decimate(tempIq, decimatedIq);
-
-                // Extract audio from decimated samples
-                var decimatedAudio = new float[decimatedCount];
-                for (var i = 0; i < decimatedCount; i++)
-                {
-                    decimatedAudio[i] = decimatedIq[i].I;
-                }
-
-                audioSamples = decimatedAudio;
+            // Apply audio low-pass filter to remove residual high-frequency noise
+            if (_audioFilter != null)
+            {
+                var filtered = new float[audioSamples.Length];
+                _audioFilter.Process(audioSamples, filtered);
+                audioSamples = filtered;
             }
 
             // Apply AGC
