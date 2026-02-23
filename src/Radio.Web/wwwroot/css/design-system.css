@@ -982,12 +982,10 @@ button, .mud-button-root { min-width: var(--touch-compact); min-height: var(--to
 
 /* ─── §20  Bottom-Sheet Dialogs ───────────────────────────────────────────── */
 
+.bottom-sheet-backdrop { background: rgba(0, 0, 0, 0.6) !important; }
+
+.mud-dialog-bottom-center .mud-dialog,
 .mud-dialog-container .bottom-sheet .mud-dialog {
-  position: fixed !important;
-  bottom: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  top: auto !important;
   max-height: 420px;
   border-radius: 16px 16px 0 0 !important;
   margin: 0 !important;

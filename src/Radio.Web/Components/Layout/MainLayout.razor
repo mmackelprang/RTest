@@ -571,8 +571,10 @@
     var options = new DialogOptions
     {
       CloseButton = true,
-      MaxWidth = MaxWidth.Small,
+      MaxWidth = MaxWidth.False,
       FullWidth = true,
+      BackgroundClass = "bottom-sheet-backdrop",
+      Position = DialogPosition.BottomCenter,
       BackdropClick = true
     };
 

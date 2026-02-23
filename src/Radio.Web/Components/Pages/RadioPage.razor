@@ -8,101 +8,106 @@
 
 <PageTitle>Radio - Radio Console</PageTitle>
 
-<div class="radio-page" style="padding: 24px; height: 100%; display: flex; flex-direction: column;">
-  <MudText Typo="Typo.h4" Style="margin-bottom: 24px;">Radio Control</MudText>
-  
+<div style="height: 100%; display: flex; gap: 2px; overflow: hidden;">
   @if (_radioState == null)
   {
-    <div style="display: flex; justify-content: center; align-items: center; height: 100%;">
+    <div style="flex: 1; display: flex; justify-content: center; align-items: center;">
       <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
     </div>
   }
   else
   {
-    <!-- Band Pills -->
-    @if (_availableBands.Any())
-    {
-      <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
-        @foreach (var band in _availableBands)
-        {
-          <MudButton Variant="@(band.Type == _radioState.Band ? Variant.Filled : Variant.Outlined)"
-                     Color="Color.Primary"
-                     Size="Size.Small"
-                     OnClick="@(async () => await HandleBandChangeAsync(band.Type))">
-            @band.Name
-          </MudButton>
-        }
-      </div>
-    }
+    <!-- Left: Instrument Panel (tuner display + controls) -->
+    <div class="panel surface-raised" style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; gap: 16px;">
+      <!-- Band selector: pill-style toggle group -->
+      @if (_availableBands.Any())
+      {
+        <div class="route-group" style="padding: 4px 8px;">
+          @foreach (var band in _availableBands)
+          {
+            <div class="route-toggle @(band.Type == _radioState.Band ? "route-active" : "")"
+                 style="width: auto; padding: 0 16px; height: 40px; border-radius: 20px; font-size: 15px; font-weight: 600;"
+                 @onclick="@(async () => await HandleBandChangeAsync(band.Type))">
+              @band.Name
+            </div>
+          }
+        </div>
+      }
 
-    <!-- Radio Display Card -->
-    <MudCard Elevation="2" Style="margin-bottom: 16px; padding: 24px; background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);">
-      <!-- Frequency + controls row -->
-      <div style="display: flex; justify-content: center; align-items: center; gap: 12px; margin-bottom: 12px;">
-        <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowLeft"
-                       Color="Color.Primary"
-                       Size="Size.Large"
-                       Style="min-width: 48px; min-height: 48px;"
-                       OnClick="FrequencyDownAsync"
-                       title="Frequency Down" />
-
-        <MudText Typo="Typo.h2" Style="font-size: 56px; color: oklch(0.85 0.2 75); letter-spacing: 4px; font-weight: 600; min-width: 280px; text-align: center;">
+      <!-- DSEG Frequency Display -->
+      <div style="text-align: center;">
+        <div class="display-frequency" @onclick="OpenFrequencyDialog" style="cursor: pointer;" title="Click to set frequency">
           @FormatFrequency(_radioState.Frequency, _radioState.Band)
-        </MudText>
-
-        <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowRight"
-                       Color="Color.Primary"
-                       Size="Size.Large"
-                       Style="min-width: 48px; min-height: 48px;"
-                       OnClick="FrequencyUpAsync"
-                       title="Frequency Up" />
-
-        <MudButton Variant="Variant.Outlined"
-                   Color="Color.Primary"
-                   Size="Size.Small"
-                   OnClick="OpenFrequencyDialog"
-                   title="Set Frequency">
-          SET
-        </MudButton>
+        </div>
+        <div style="font-size: 14px; color: var(--text-low); margin-top: 4px; font-family: var(--font-mono);">
+          Step: @FormatStep(_radioState.Step, _radioState.Band)
+        </div>
       </div>
 
-      <!-- Signal strength bar -->
+      <!-- Signal strength: segmented bar -->
       @if (_radioState.SignalStrength.HasValue)
       {
-        <div style="max-width: 400px; margin: 0 auto 8px auto;">
+        <div style="width: 400px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-            <MudText Typo="Typo.caption" Style="color: oklch(0.6 0.12 195);">Signal</MudText>
-            <MudText Typo="Typo.caption" Style="color: oklch(0.6 0.12 195);">@_radioState.SignalStrength%</MudText>
+            <span style="font-size: 13px; color: var(--text-medium); text-transform: uppercase; letter-spacing: 0.05em;">Signal</span>
+            <span style="font-size: 13px; color: var(--text-medium); font-family: var(--font-mono);">@_radioState.SignalStrength%</span>
           </div>
-          <MudProgressLinear Color="Color.Primary"
-                             Value="@((double)(_radioState.SignalStrength ?? 0))"
-                             Style="height: 6px; border-radius: 3px;" />
+          <div style="display: flex; gap: 2px; height: 8px;">
+            @for (int i = 0; i < 20; i++)
+            {
+              var filled = (_radioState.SignalStrength ?? 0) >= (i + 1) * 5;
+              var barColor = i < 12 ? "var(--signal-green)" : i < 17 ? "var(--signal-amber)" : "var(--signal-red)";
+              <div style="flex: 1; border-radius: 2px; background: @(filled ? barColor : "var(--surface-separator)"); transition: background 100ms ease;"></div>
+            }
+          </div>
         </div>
       }
 
       <!-- Scanning indicator -->
       @if (_radioState.IsScanning)
       {
-        <div style="text-align: center;">
-          <MudText Typo="Typo.body1" Style="color: oklch(0.85 0.2 75); animation: blink 1s infinite;">
-            SCANNING @_radioState.ScanDirection
-          </MudText>
+        <div style="font-size: 16px; color: var(--signal-amber); animation: blink 1s infinite; letter-spacing: 2px; font-family: var(--font-mono);">
+          SCANNING @_radioState.ScanDirection
         </div>
       }
 
-      <!-- Step info -->
-      <div style="text-align: center;">
-        <MudText Typo="Typo.caption" Style="color: oklch(0.6 0.12 195);">
-          Step: @FormatStep(_radioState.Step, _radioState.Band)
-        </MudText>
+      <!-- Tuning + Scan Controls -->
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowLeft"
+                       Color="Color.Primary" Size="Size.Large"
+                       Style="min-width: 56px; min-height: 56px;"
+                       OnClick="FrequencyDownAsync" title="Frequency Down" />
+        @if (_radioState.IsScanning)
+        {
+          <MudButton Variant="Variant.Filled" Color="Color.Error"
+                     Style="min-width: 120px; min-height: 48px; font-size: 16px;"
+                     OnClick="StopScanAsync" StartIcon="@Icons.Material.Filled.Stop">
+            Stop
+          </MudButton>
+        }
+        else
+        {
+          <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                     Style="min-width: 100px; min-height: 48px; font-size: 15px;"
+                     OnClick="@(() => StartScanAsync("down"))" StartIcon="@Icons.Material.Filled.Search">
+            Scan ◀
+          </MudButton>
+          <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                     Style="min-width: 100px; min-height: 48px; font-size: 15px;"
+                     OnClick="@(() => StartScanAsync("up"))" EndIcon="@Icons.Material.Filled.Search">
+            ▶ Scan
+          </MudButton>
+        }
+        <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowRight"
+                       Color="Color.Primary" Size="Size.Large"
+                       Style="min-width: 56px; min-height: 56px;"
+                       OnClick="FrequencyUpAsync" title="Frequency Up" />
       </div>
-    </MudCard>
 
-    <!-- Step + Scan Controls Row -->
-    <div style="display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; justify-content: center; align-items: center;">
+      <!-- Step size selector -->
       <MudSelect T="string" Value="@_radioState.Step.ToString("0")" ValueChanged="@HandleStepChangeAsync"
                  Label="Step Size" Variant="Variant.Outlined" Dense="true"
-                 Style="min-width: 140px; max-width: 160px;">
+                 Style="min-width: 160px; max-width: 180px;">
         <MudSelectItem Value="@("1000")">1 kHz</MudSelectItem>
         <MudSelectItem Value="@("9000")">9 kHz</MudSelectItem>
         <MudSelectItem Value="@("10000")">10 kHz</MudSelectItem>
@@ -112,111 +117,66 @@
         <MudSelectItem Value="@("1000000")">1 MHz</MudSelectItem>
       </MudSelect>
 
-      @if (_radioState.IsScanning)
+      <!-- SDR Controls (if applicable) -->
+      @if (_radioState.Gain.HasValue)
       {
-        <MudButton Variant="Variant.Filled"
-                   Color="Color.Error"
-                   Size="Size.Small"
-                   OnClick="StopScanAsync"
-                   StartIcon="@Icons.Material.Filled.Stop">
-          Stop Scan
-        </MudButton>
-      }
-      else
-      {
-        <MudButton Variant="Variant.Outlined"
-                   Color="Color.Primary"
-                   Size="Size.Small"
-                   OnClick="@(() => StartScanAsync("up"))"
-                   StartIcon="@Icons.Material.Filled.Search">
-          Scan Up
-        </MudButton>
-        <MudButton Variant="Variant.Outlined"
-                   Color="Color.Primary"
-                   Size="Size.Small"
-                   OnClick="@(() => StartScanAsync("down"))"
-                   StartIcon="@Icons.Material.Filled.Search">
-          Scan Down
-        </MudButton>
+        <div style="display: flex; gap: 16px; align-items: center; width: 400px;">
+          <MudSwitch T="bool" Value="@_radioState.AutoGain" ValueChanged="@HandleAutoGainChangedAsync"
+                     Label="AGC" Color="Color.Primary" />
+          @if (!_radioState.AutoGain && _radioState.Gain.HasValue)
+          {
+            <MudSlider T="int" Value="@_radioState.Gain.Value" ValueChanged="@HandleGainChangedAsync"
+                       Min="0" Max="50" Step="1" Color="Color.Primary" Style="flex: 1;">
+              Gain: @_radioState.Gain dB
+            </MudSlider>
+          }
+        </div>
       }
     </div>
-    
-    <!-- Presets Section -->
-    <MudCard Elevation="1" Style="padding: 16px;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-        <MudText Typo="Typo.h6">Presets</MudText>
-        <MudButton Variant="Variant.Filled" 
-                   Color="Color.Primary" 
-                   Size="Size.Small"
-                   OnClick="OpenSavePresetDialog"
-                   StartIcon="@Icons.Material.Filled.Save">
+
+    <!-- Right: Presets Panel -->
+    <div class="panel surface-raised" style="width: 480px; flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden;">
+      <div class="panel-header">
+        <span>Presets</span>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                   OnClick="OpenSavePresetDialog" StartIcon="@Icons.Material.Filled.Save">
           Save Current
         </MudButton>
       </div>
-      
-      @if (_presets == null || !_presets.Any())
-      {
-        <div style="text-align: center; padding: 32px; color: var(--text-secondary);">
-          <MudIcon Icon="@Icons.Material.Filled.Radio" Style="font-size: 64px; opacity: 0.5; margin-bottom: 16px;" />
-          <MudText Typo="Typo.body1">No presets saved yet</MudText>
-          <MudText Typo="Typo.body2">Save the current station to create a preset</MudText>
-        </div>
-      }
-      else
-      {
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px;">
-          @foreach (var preset in _presets.OrderBy(p => p.Slot))
-          {
-            <MudCard Outlined="true" Style="cursor: pointer;">
-              <MudCardContent Style="padding: 12px;" @onclick="@(() => LoadPresetAsync(preset.Slot))">
-                <MudText Typo="Typo.body1" Style="font-weight: 600;">@preset.Name</MudText>
-                <MudText Typo="Typo.body2" Style="color: var(--text-secondary);">
-                  @preset.Band - @FormatFrequency(preset.Frequency, preset.Band)
-                </MudText>
-              </MudCardContent>
-              <MudCardActions Style="padding: 8px; justify-content: flex-end;">
-                <MudIconButton Icon="@Icons.Material.Filled.Delete" 
-                               Color="Color.Error" 
-                               Size="Size.Small"
-                               OnClick="@(() => DeletePresetAsync(preset.Slot))"
-                               title="Delete" />
-              </MudCardActions>
-            </MudCard>
-          }
-        </div>
-      }
-    </MudCard>
-    
-    <!-- SDR Controls (if applicable) -->
-    @if (_radioState.Gain.HasValue)
-    {
-      <MudCard Elevation="1" Style="padding: 16px; margin-top: 16px;">
-        <MudText Typo="Typo.h6" Style="margin-bottom: 16px;">SDR Controls</MudText>
-        
-        <div style="display: flex; gap: 24px; align-items: center; flex-wrap: wrap;">
-          <MudSwitch T="bool" 
-                     Value="@_radioState.AutoGain" 
-                     ValueChanged="@HandleAutoGainChangedAsync"
-                     Label="Auto Gain (AGC)" 
-                     Color="Color.Primary" />
-          
-          @if (!_radioState.AutoGain && _radioState.Gain.HasValue)
-          {
-            <div style="flex: 1; min-width: 200px;">
-              <MudSlider T="int" 
-                         Value="@_radioState.Gain.Value" 
-                         ValueChanged="@HandleGainChangedAsync"
-                         Min="0" 
-                         Max="50" 
-                         Step="1"
-                         Color="Color.Primary">
-                Gain: @_radioState.Gain dB
-              </MudSlider>
-            </div>
-          }
-        </div>
-      </MudCard>
-    }
+
+      <div style="flex: 1; overflow-y: auto; padding: 12px;">
+        @if (_presets == null || !_presets.Any())
+        {
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-low);">
+            <MudIcon Icon="@Icons.Material.Filled.Radio" Style="font-size: 80px; opacity: 0.4; margin-bottom: 12px;" />
+            <span style="font-size: 16px;">No presets saved yet</span>
+            <span style="font-size: 14px; color: var(--text-low); margin-top: 4px;">Save the current station to create a preset</span>
+          </div>
+        }
+        else
+        {
+          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+            @foreach (var preset in _presets.OrderBy(p => p.Slot))
+            {
+              <div class="list-item-touch" style="flex-direction: column; align-items: stretch; padding: 12px; border-radius: 8px; border: 1px solid var(--surface-separator); cursor: pointer;"
+                   @onclick="@(() => LoadPresetAsync(preset.Slot))">
+                <div style="font-size: 16px; font-weight: 600; color: var(--text-high);">@preset.Name</div>
+                <div style="font-size: 14px; color: var(--signal-amber); font-family: var(--font-mono);">
+                  @FormatFrequency(preset.Frequency, preset.Band)
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+                  <span style="font-size: 13px; color: var(--text-low);">@preset.Band</span>
+                  <div @onclick:stopPropagation="true">
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                   OnClick="@(() => DeletePresetAsync(preset.Slot))" title="Delete" />
+                  </div>
+                </div>
+              </div>
+            }
+          </div>
+        }
+      </div>
+    </div>
   }
 </div>
 

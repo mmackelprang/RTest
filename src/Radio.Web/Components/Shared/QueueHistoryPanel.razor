@@ -288,7 +288,15 @@
 
   private async Task OpenSavePlaylistDialogAsync()
   {
-    var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Small, FullWidth = true };
+    var options = new DialogOptions
+    {
+      CloseButton = true,
+      MaxWidth = MaxWidth.False,
+      FullWidth = true,
+      BackgroundClass = "bottom-sheet-backdrop",
+      Position = DialogPosition.BottomCenter,
+      BackdropClick = true
+    };
     await DialogService.ShowAsync<Radio.Web.Components.Dialogs.SavePlaylistDialog>("Save Playlist", options);
   }
 
@@ -303,8 +311,11 @@
     var options = new DialogOptions
     {
       CloseButton = true,
-      MaxWidth = MaxWidth.Medium,
-      FullWidth = true
+      MaxWidth = MaxWidth.False,
+      FullWidth = true,
+      BackgroundClass = "bottom-sheet-backdrop",
+      Position = DialogPosition.BottomCenter,
+      BackdropClick = true
     };
 
     var dialog = await DialogService.ShowAsync<Radio.Web.Components.Dialogs.AudioFileSelectionDialog>("Add Files to Queue", parameters, options);

@@ -53,13 +53,27 @@ public class QueuePageTests : TestContext
     
     // Add QueuePersistenceService
     Services.AddScoped<QueuePersistenceService>();
+
+    // Add MudBlazor services (needed for MudTextField, MudSelect in always-visible file browser)
+    Services.AddMudServices();
+
+    // Setup JSInterop mocks for MudBlazor components
+    JSInterop.Mode = JSRuntimeMode.Loose;
+  }
+
+  private IRenderedComponent<QueuePage> RenderQueuePage()
+  {
+    ComponentFactories.AddStub<MudBlazor.MudPopoverProvider>();
+    ComponentFactories.AddStub<MudBlazor.MudTextField<string>>();
+    ComponentFactories.AddStub<MudBlazor.MudSelect<string>>();
+    return RenderComponent<QueuePage>();
   }
 
   [Fact]
   public void QueuePage_RendersWithoutErrors()
   {
     // Act
-    var cut = RenderComponent<QueuePage>();
+    var cut = RenderQueuePage();
 
     // Assert
     Assert.NotNull(cut);
@@ -70,7 +84,7 @@ public class QueuePageTests : TestContext
   public void QueuePage_ShowsEmptyState_Initially()
   {
     // Act
-    var cut = RenderComponent<QueuePage>();
+    var cut = RenderQueuePage();
 
     // Assert - Should show empty state when API returns no data
     cut.WaitForAssertion(() =>
@@ -83,9 +97,9 @@ public class QueuePageTests : TestContext
   public void QueuePage_HasClearAllButton()
   {
     // Act
-    var cut = RenderComponent<QueuePage>();
+    var cut = RenderQueuePage();
 
-    // Assert
+    // Assert - Clear All is now an icon button with title attribute
     Assert.Contains("Clear All", cut.Markup);
   }
 
@@ -93,7 +107,7 @@ public class QueuePageTests : TestContext
   public void QueuePage_ShowsTableStructure()
   {
     // Act
-    var cut = RenderComponent<QueuePage>();
+    var cut = RenderQueuePage();
 
     // Assert - MudTable or table headers should be present
     var markup = cut.Markup;
@@ -105,7 +119,7 @@ public class QueuePageTests : TestContext
   public void QueuePage_HasQueueIcon_InEmptyState()
   {
     // Act
-    var cut = RenderComponent<QueuePage>();
+    var cut = RenderQueuePage();
 
     // Assert - Empty state should have icon
     cut.WaitForAssertion(() =>
@@ -119,7 +133,7 @@ public class QueuePageTests : TestContext
   public void QueuePage_InitializesSignalRSubscription()
   {
     // Act
-    var cut = RenderComponent<QueuePage>();
+    var cut = RenderQueuePage();
 
     // Assert - Component should initialize successfully with SignalR subscription
     Assert.NotNull(cut);
@@ -130,25 +144,25 @@ public class QueuePageTests : TestContext
   }
 
   [Fact]
-  public void QueuePage_HasBrowseFilesButton()
+  public void QueuePage_HasFileBrowserPanel()
   {
     // Act
-    var cut = RenderComponent<QueuePage>();
+    var cut = RenderQueuePage();
 
-    // Assert - Should have "Browse Files" toggle button
-    Assert.Contains("Browse Files", cut.Markup);
+    // Assert - File browser is always visible with header
+    Assert.Contains("File Browser", cut.Markup);
   }
 
   [Fact]
-  public void QueuePage_EmptyState_HasBrowseFilesButton()
+  public void QueuePage_EmptyState_ShowsBrowseHint()
   {
     // Act
-    var cut = RenderComponent<QueuePage>();
+    var cut = RenderQueuePage();
 
-    // Assert - Empty state should have "Browse Files" button
+    // Assert - Empty state hints to browse files on the left
     cut.WaitForAssertion(() =>
     {
-      Assert.Contains("Browse Files", cut.Markup);
+      Assert.Contains("Browse files on the left", cut.Markup);
     }, TimeSpan.FromSeconds(2));
   }
 }

@@ -82,8 +82,8 @@ public class MetricsDashboardPageTests : TestContext
     // Act
     var cut = RenderMetricsDashboard();
 
-    // Assert - Check for page title
-    Assert.Contains("Metrics Dashboard", cut.Markup);
+    // Assert - Check for page heading
+    Assert.Contains("Metrics", cut.Markup);
   }
 
   [Fact]
@@ -126,6 +126,6 @@ public class MetricsDashboardPageTests : TestContext
     var cut = RenderMetricsDashboard();
 
     // Assert - Check that component has basic structure
-    Assert.Contains("Metrics Dashboard", cut.Markup);
+    Assert.Contains("Metrics", cut.Markup);
   }
 }

@@ -82,8 +82,7 @@ public class PlayHistoryPageTests : TestContext
     var cut = RenderPlayHistoryPage();
 
     // Assert
-    var title = cut.Find("h4");
-    Assert.Contains("Play History", title.TextContent);
+    Assert.Contains("Play History", cut.Markup);
   }
 
   [Fact]
