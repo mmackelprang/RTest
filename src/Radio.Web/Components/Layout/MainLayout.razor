@@ -19,113 +19,87 @@
 <MudSnackbarProvider />
 
 <div class="layout-container" style="width: 1920px; height: 576px; overflow: hidden;">
-  <!-- Top Navigation Bar - 64px height (M3 standard) -->
-  <MudAppBar Fixed="true" Elevation="2" Style="height: 64px;">
-    <!-- LEFT: Date/Time Display (fixed width to prevent layout shift) -->
-    <div style="font-size: 22px; width: 100px; font-family: 'JetBrains Mono', 'Consolas', 'Courier New', monospace; font-weight: 500; color: #F2F2F2; letter-spacing: 1px;">
-      @_currentTime
-    </div>
+  <!-- Top Bar — Command Surface -->
+  <div class="topbar">
+    <!-- Clock: DSEG amber LED -->
+    <div class="display-clock">@_currentTime</div>
 
-    <!-- Audio Source Selector - Material 3 Style -->
-    <MudSpacer />
-    <MudSelect T="string" Value="@_selectedSourceId" ValueChanged="@HandleSourceChangeAsync"
-               Label="Audio Source" Variant="Variant.Text" Dense="true"
-               AnchorOrigin="Origin.BottomCenter" TransformOrigin="Origin.TopCenter"
-               Style="min-width: 180px; margin-right: 16px; border-bottom: 1px solid rgba(255,255,255,0.3);"
-               Underline="true">
-      @if (_availableSources.Count == 0)
-      {
-        <MudSelectItem Value="@string.Empty" Disabled="true">No sources available</MudSelectItem>
-      }
+    <div class="topbar-separator"></div>
+
+    <!-- Source Routing: Icon toggle group -->
+    <div class="route-group">
+      <span class="route-label">IN</span>
       @foreach (var source in _availableSources)
       {
-        <MudSelectItem Value="@source.Id">@source.Name</MudSelectItem>
-      }
-    </MudSelect>
-
-    <!-- Audio Output Selector - Material 3 Style -->
-    <div style="display: flex; align-items: center; gap: 4px;">
-      <MudSelect T="string" Value="@_selectedOutputId" ValueChanged="@HandleOutputChangeAsync"
-                 Label="Audio Output" Variant="Variant.Text" Dense="true"
-                 AnchorOrigin="Origin.BottomCenter" TransformOrigin="Origin.TopCenter"
-                 Style="min-width: 200px; border-bottom: 1px solid rgba(255,255,255,0.3);"
-                 Underline="true" Disabled="@_isCastConnecting">
-        @if (_availableOutputs.Count == 0)
-        {
-          <MudSelectItem Value="@string.Empty" Disabled="true">No outputs available</MudSelectItem>
-        }
-        @foreach (var output in _availableOutputs)
-        {
-          <MudSelectItem Value="@output.Id">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <MudIcon Icon="@GetOutputIcon(output)" Size="Size.Small" />
-              @output.Name
-            </div>
-          </MudSelectItem>
-        }
-      </MudSelect>
-      @if (_isCastConnecting)
-      {
-        <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
-      }
-      else if (_selectedOutputId == "google-cast")
-      {
-        <MudTooltip Text="Select Cast Device">
-          <MudIconButton Icon="@Icons.Material.Filled.Settings" Color="Color.Inherit"
-                         Size="Size.Small" OnClick="@OpenCastDeviceDialog" />
-        </MudTooltip>
+        <div class="route-toggle @(source.Id == _selectedSourceId ? "route-active" : "") @(!IsSourceAvailable(source) ? "route-disabled" : "")"
+             data-source="@GetSourceDataAttr(source.Type)"
+             @onclick="@(() => HandleSourceToggleAsync(source))"
+             title="@source.Name">
+          <MudIcon Icon="@GetSourceIcon(source.Type)" Size="Size.Small" />
+        </div>
       }
     </div>
-    <div style="width: 24px;"></div>
 
-    <!-- CENTER: Spacer to push navigation to the right -->
-    <MudSpacer />
-    
+    <div class="topbar-separator"></div>
+
+    <!-- Output Routing: Icon toggle group -->
+    <div class="route-group">
+      <span class="route-label">OUT</span>
+      @foreach (var output in _availableOutputs)
+      {
+        <div class="route-toggle @(output.Id == _selectedOutputId ? "route-active" : "")"
+             @onclick="@(() => HandleOutputChangeAsync(output.Id))"
+             title="@output.Name"
+             style="position: relative;">
+          <MudIcon Icon="@GetOutputIcon(output)" Size="Size.Small" />
+          @if (output.Id == "google-cast" && _isCastConnecting)
+          {
+            <div class="cast-connecting" style="position:absolute; inset:0; border-radius:inherit; border: 2px solid var(--accent-primary);"></div>
+          }
+        </div>
+      }
+      @if (_selectedOutputId == "google-cast" && _defaultCastDevice != null)
+      {
+        <span style="font-size: 11px; color: var(--text-low); max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+          @_defaultCastDevice.Name
+        </span>
+      }
+      @if (_selectedOutputId == "google-cast")
+      {
+        <div class="route-toggle" @onclick="@OpenCastDeviceDialog" title="Select Cast Device">
+          <MudIcon Icon="@Icons.Material.Filled.Settings" Size="Size.Small" />
+        </div>
+      }
+    </div>
+
+    <div class="topbar-separator"></div>
+
     <!-- Volume Control -->
-    <div style="display: flex; align-items: center; gap: 4px; padding: 0 16px;">
+    <div class="volume-control">
       <MudIconButton Icon="@(_isMuted ? Icons.Material.Filled.VolumeOff : Icons.Material.Filled.VolumeUp)"
-                     Color="Color.Default"
-                     Size="Size.Small"
-                     Style="min-width: 48px; min-height: 48px;"
-                     OnClick="@HandleMuteAsync"
-                     title="@(_isMuted ? "Unmute" : "Mute")" />
-      <MudSlider T="double"
-                 Value="_volume"
-                 ValueChanged="@OnVolumeChanged"
-                 Min="0" Max="1" Step="0.01"
-                 Size="Size.Small"
-                 Color="Color.Primary"
-                 Style="width: 120px;" />
-      <span style="font-size: 12px; color: var(--mud-palette-text-secondary); min-width: 32px; text-align: right;">
-        @((_volume * 100).ToString("F0"))%
-      </span>
+                     Color="Color.Default" Size="Size.Small"
+                     Style="min-width:44px; min-height:44px;"
+                     OnClick="@HandleMuteAsync" />
+      <MudSlider T="double" Value="_volume" ValueChanged="@OnVolumeChanged"
+                 Min="0" Max="1" Step="0.01" Size="Size.Small"
+                 Color="Color.Primary" Style="width: 160px;" />
+      <span class="volume-label">@((_volume * 100).ToString("F0"))%</span>
     </div>
-    <MudSpacer />
-    
-    <!-- RIGHT: Navigation Icons (48px touch targets) -->
-    <MudIconButton Icon="@Icons.Material.Filled.Home" Color="Color.Inherit" Href="/" Size="Size.Large" title="Home / Now Playing" />
-    
-    <!-- Queue is always visible with badge showing count -->
-    <MudBadge Content="@_queueCount" Overlap="true" Color="@(_queueCount > 0 ? Color.Primary : Color.Default)" Visible="@(_queueCount > 0)">
-      <MudIconButton Icon="@Icons.Material.Filled.QueueMusic" Color="Color.Inherit" Href="/queue" Size="Size.Large" title="@(_queueCount > 0 ? $"Queue ({_queueCount} items)" : "Queue (empty)")" />
-    </MudBadge>
-    
-    @if (_showRadioNav)
-    {
-      <MudIconButton Icon="@Icons.Material.Filled.Radio" Color="Color.Inherit" Href="/radio" Size="Size.Large" title="Radio Controls" />
-    }
-    @if (_showBluetoothNav)
-    {
-      <MudIconButton Icon="@Icons.Material.Filled.Bluetooth" Color="Color.Inherit" Href="/bluetooth" Size="Size.Large" title="Bluetooth" />
-    }
-    <MudIconButton Icon="@Icons.Material.Filled.Dashboard" Color="Color.Inherit" Href="/metrics" Size="Size.Large" title="Metrics" />
-    <MudIconButton Icon="@Icons.Material.Filled.History" Color="Color.Inherit" Href="/history" Size="Size.Large" title="Play History" />
-    <MudIconButton Icon="@Icons.Material.Filled.Devices" Color="Color.Inherit" Href="/devices" Size="Size.Large" title="Device Management" />
-    <MudIconButton Icon="@Icons.Material.Filled.Settings" Color="Color.Inherit" Href="/system" Size="Size.Large" title="System Config" />
-  </MudAppBar>
-  
-  <!-- Main Content Area - 512px height (576 - 64) -->
-  <div class="content-area" style="height: 512px; margin-top: 64px; overflow-y: auto; position: relative;">
+
+    <!-- Navigation Icons (right-aligned) -->
+    <div class="topbar-nav">
+      <MudIconButton Icon="@Icons.Material.Filled.Home" Class="@NavClass("/")" Href="/" Size="Size.Medium" title="Home" />
+      <MudBadge Content="@_queueCount" Overlap="true" Color="Color.Primary" Visible="@(_queueCount > 0)">
+        <MudIconButton Icon="@Icons.Material.Filled.QueueMusic" Class="@NavClass("/queue")" Href="/queue" Size="Size.Medium" title="Queue" />
+      </MudBadge>
+      <MudIconButton Icon="@Icons.Material.Filled.Dashboard" Class="@NavClass("/metrics")" Href="/metrics" Size="Size.Medium" title="Metrics" />
+      <MudIconButton Icon="@Icons.Material.Filled.History" Class="@NavClass("/history")" Href="/history" Size="Size.Medium" title="History" />
+      <MudIconButton Icon="@Icons.Material.Filled.Settings" Class="@NavClass("/system")" Href="/system" Size="Size.Medium" title="Settings" />
+    </div>
+  </div>
+
+  <!-- Main Content Area — 524px (576 - 52) -->
+  <div class="content-area">
     <div class="page-transition">
       @Body
     </div>
@@ -133,7 +107,7 @@
 </div>
 
 @code {
-  private string _currentTime = DateTime.Now.ToString("HH:mm:ss");
+  private string _currentTime = DateTime.Now.ToString("HH:mm");
   private string _cpuUsage = "0";
   private string _ramUsage = "0";
   private string _threadCount = "0";
@@ -144,10 +118,6 @@
   private string? _selectedOutputId = null;
   private CastDeviceDto? _defaultCastDevice;
   private bool _isCastConnecting;
-
-  // Conditional navigation visibility
-  private bool _showRadioNav = false;
-  private bool _showBluetoothNav = false;
 
   // Audio state for title bar volume control
   private bool _isMuted = false;
@@ -219,7 +189,7 @@
       await RefreshQueueCountAsync();
 
       // Update time immediately
-      _currentTime = DateTime.Now.ToString("HH:mm:ss");
+      _currentTime = DateTime.Now.ToString("HH:mm");
       Logger.LogDebug("MainLayout - Initial time set to {Time}", _currentTime);
 
       // Start the clock timer using System.Timers.Timer (works reliably in Blazor Server)
@@ -238,7 +208,7 @@
 
   private void OnTimerElapsed(object? sender, System.Timers.ElapsedEventArgs e)
   {
-    _currentTime = DateTime.Now.ToString("HH:mm:ss");
+    _currentTime = DateTime.Now.ToString("HH:mm");
 
     try
     {
@@ -298,12 +268,11 @@
             if (matchingSource != null)
             {
               _selectedSourceId = matchingSource.Id;
-              UpdateNavigationVisibility(matchingSource);
+  
             }
             else
             {
               _selectedSourceId = primary.Type.ToLowerInvariant();
-              UpdateNavigationVisibility(primary);
             }
             return;
           }
@@ -322,7 +291,6 @@
           if (success)
           {
             _selectedSourceId = radioSource.Id;
-            UpdateNavigationVisibility(radioSource);
             Logger.LogDebug("Auto-selected Radio source: {SourceType}", radioSource.Type);
             return;
           }
@@ -333,7 +301,6 @@
         if (sources.Count > 0)
         {
           _selectedSourceId = sources[0].Id;
-          UpdateNavigationVisibility(sources[0]);
         }
       }
       else
@@ -420,7 +387,6 @@
       if (success)
       {
         _selectedSourceId = newSourceId;
-        UpdateNavigationVisibility(source);
         Logger.LogInformation("Switched to source: {SourceType}", source.Type);
       }
     }
@@ -507,10 +473,76 @@
     }
   }
 
-  private void UpdateNavigationVisibility(AudioSourceDto source)
+  // Source icon mapping
+  private static string GetSourceIcon(string sourceType) => sourceType switch
   {
-    _showRadioNav = source.Type == "Radio" || source.Type == "RTLSDRCore" || source.Type == "RF320";
-    _showBluetoothNav = source.Type == "Bluetooth";
+    "Vinyl" => Icons.Material.Filled.Album,
+    "FilePlayer" => Icons.Material.Filled.AudioFile,
+    "Radio" or "RTLSDRCore" or "RF320" => Icons.Material.Filled.Radio,
+    "Bluetooth" => Icons.Material.Filled.Bluetooth,
+    "GenericUSB" => Icons.Material.Filled.Usb,
+    _ => Icons.Material.Filled.MusicNote
+  };
+
+  // Data attribute for source-specific CSS coloring
+  private static string GetSourceDataAttr(string sourceType) => sourceType switch
+  {
+    "Vinyl" => "vinyl",
+    "FilePlayer" => "file",
+    "Radio" or "RTLSDRCore" or "RF320" => "radio",
+    "Bluetooth" => "bluetooth",
+    "GenericUSB" => "usb",
+    _ => "file"
+  };
+
+  // Source availability check
+  private static bool IsSourceAvailable(AudioSourceDto source) =>
+    source.State != "Unavailable" && source.State != "Error";
+
+  // Active page detection for nav highlighting
+  private bool IsCurrentPage(string path)
+  {
+    var uri = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+    if (string.IsNullOrEmpty(uri) && path == "/") return true;
+    return $"/{uri}".StartsWith(path, StringComparison.OrdinalIgnoreCase);
+  }
+
+  private string NavClass(string path) =>
+    IsCurrentPage(path) ? "nav-icon nav-active" : "nav-icon";
+
+  // Combined source toggle: switch source AND navigate for Radio/Bluetooth
+  private async Task HandleSourceToggleAsync(AudioSourceDto source)
+  {
+    if (!IsSourceAvailable(source)) return;
+    if (source.Id == _selectedSourceId)
+    {
+      // Already selected — if it's Radio or BT, navigate to their page
+      NavigateToSourcePage(source.Type);
+      return;
+    }
+
+    await HandleSourceChangeAsync(source.Id);
+
+    // Auto-navigate to source-specific pages
+    NavigateToSourcePage(source.Type);
+  }
+
+  private void NavigateToSourcePage(string sourceType)
+  {
+    switch (sourceType)
+    {
+      case "Radio":
+      case "RTLSDRCore":
+      case "RF320":
+        NavigationManager.NavigateTo("/radio");
+        break;
+      case "Bluetooth":
+        NavigationManager.NavigateTo("/bluetooth");
+        break;
+      default:
+        NavigationManager.NavigateTo("/");
+        break;
+    }
   }
 
   private static string GetOutputIcon(AudioDeviceDto device)
