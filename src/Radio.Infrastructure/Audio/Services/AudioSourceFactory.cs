@@ -175,19 +175,19 @@ public class AudioSourceFactory : IAudioSourceFactory
 
   private IAudioSource CreateGenericUSBSource()
   {
-    // Check config store first, then fall back to IOptionsMonitor
-    var usbPort = GetGenericUSBPort();
-    if (string.IsNullOrWhiteSpace(usbPort))
+    var resolvedUSBPort = GetGenericUSBPort();
+    if (string.IsNullOrWhiteSpace(resolvedUSBPort))
     {
       throw new InvalidOperationException(
-        "Generic USB source is not configured. Please configure the USB port in System > Configuration > Devices.");
+        "Generic USB source is not configured. Please configure the USB port in System > Configuration > Generic Source.");
     }
 
     var logger = _loggerFactory.CreateLogger<GenericUSBAudioSource>();
     return new GenericUSBAudioSource(
       logger,
       _genericSourcePreferences,
-      _deviceManager);
+      _deviceManager,
+      resolvedUSBPort);
   }
 
   /// <summary>
