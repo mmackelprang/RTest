@@ -7,48 +7,57 @@
 
 <PageTitle>Metrics Dashboard</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.ExtraLarge" Style="height: 512px; padding: 16px; overflow-y: auto;">
-  <MudStack Spacing="3">
+<div style="height: 100%; display: flex; gap: 2px; overflow: hidden;">
+  <!-- Left: Filters & Controls -->
+  <div class="panel surface-raised" style="width: 300px; flex-shrink: 0; overflow-y: auto; padding: 16px;">
+    <MudStack Spacing="3">
+      <MudText Typo="Typo.h6">Metrics</MudText>
 
-    <!-- Header -->
-    <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
-      <MudText Typo="Typo.h5">Metrics Dashboard</MudText>
-      <MudStack Row="true" Spacing="2">
-        <MudButtonGroup Variant="Variant.Outlined" Color="Color.Primary">
-          <MudButton Variant="@(_timeRange == "1h" ? Variant.Filled : Variant.Outlined)" OnClick="@(async () => await SetTimeRangeAsync("1h"))">1h</MudButton>
-          <MudButton Variant="@(_timeRange == "24h" ? Variant.Filled : Variant.Outlined)" OnClick="@(async () => await SetTimeRangeAsync("24h"))">24h</MudButton>
-          <MudButton Variant="@(_timeRange == "7d" ? Variant.Filled : Variant.Outlined)" OnClick="@(async () => await SetTimeRangeAsync("7d"))">7d</MudButton>
-        </MudButtonGroup>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAllDataAsync" StartIcon="@Icons.Material.Filled.Refresh">
-          Refresh
-        </MudButton>
-      </MudStack>
-    </MudStack>
-
-    @if (_loading)
-    {
-      <MudProgressLinear Color="Color.Primary" Indeterminate="true" />
-    }
-
-    <!-- Category Filter Chips -->
-    @if (_categories.Count > 0)
-    {
-      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-        <MudChip T="string" Color="@(_selectedCategory == null ? Color.Primary : Color.Default)"
-                 Variant="@(_selectedCategory == null ? Variant.Filled : Variant.Outlined)"
-                 OnClick="@(() => { _selectedCategory = null; StateHasChanged(); })">All</MudChip>
-        @foreach (var cat in _categories)
-        {
-          <MudChip T="string" Color="@(_selectedCategory == cat ? Color.Primary : Color.Default)"
-                   Variant="@(_selectedCategory == cat ? Variant.Filled : Variant.Outlined)"
-                   OnClick="@(() => { _selectedCategory = cat; StateHasChanged(); })">
-            @cat (@GetCategoryCount(cat))
-          </MudChip>
-        }
+      <div class="route-group" style="padding: 4px 8px; flex-wrap: wrap;">
+        <div class="route-toggle @(_timeRange == "1h" ? "route-active" : "")"
+             style="width: auto; padding: 0 12px; height: 36px; border-radius: 16px; font-size: 14px; font-weight: 600;"
+             @onclick="@(async () => await SetTimeRangeAsync("1h"))">1h</div>
+        <div class="route-toggle @(_timeRange == "24h" ? "route-active" : "")"
+             style="width: auto; padding: 0 12px; height: 36px; border-radius: 16px; font-size: 14px; font-weight: 600;"
+             @onclick="@(async () => await SetTimeRangeAsync("24h"))">24h</div>
+        <div class="route-toggle @(_timeRange == "7d" ? "route-active" : "")"
+             style="width: auto; padding: 0 12px; height: 36px; border-radius: 16px; font-size: 14px; font-weight: 600;"
+             @onclick="@(async () => await SetTimeRangeAsync("7d"))">7d</div>
       </div>
-    }
 
-    <!-- Metric Cards Grid -->
+      <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                 OnClick="LoadAllDataAsync" StartIcon="@Icons.Material.Filled.Refresh">
+        Refresh
+      </MudButton>
+
+      @if (_loading)
+      {
+        <MudProgressLinear Color="Color.Primary" Indeterminate="true" />
+      }
+
+      <!-- Category Filter Chips -->
+      @if (_categories.Count > 0)
+      {
+        <MudText Typo="Typo.caption" Style="color: var(--text-medium); text-transform: uppercase; letter-spacing: 0.05em;">Categories</MudText>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+          <MudChip T="string" Color="@(_selectedCategory == null ? Color.Primary : Color.Default)"
+                   Variant="@(_selectedCategory == null ? Variant.Filled : Variant.Outlined)"
+                   OnClick="@(() => { _selectedCategory = null; StateHasChanged(); })" Size="Size.Small">All</MudChip>
+          @foreach (var cat in _categories)
+          {
+            <MudChip T="string" Color="@(_selectedCategory == cat ? Color.Primary : Color.Default)"
+                     Variant="@(_selectedCategory == cat ? Variant.Filled : Variant.Outlined)"
+                     OnClick="@(() => { _selectedCategory = cat; StateHasChanged(); })" Size="Size.Small">
+              @cat (@GetCategoryCount(cat))
+            </MudChip>
+          }
+        </div>
+      }
+    </MudStack>
+  </div>
+
+  <!-- Right: Metric Cards + Detail -->
+  <div class="panel surface-raised" style="flex: 1; overflow-y: auto; padding: 16px;">
     <MudGrid Spacing="2">
       @if (_snapshots != null && _snapshots.Count > 0)
       {
@@ -128,8 +137,8 @@
       </MudCard>
     }
 
-  </MudStack>
-</MudContainer>
+  </div>
+</div>
 
 @code {
   private string _timeRange = "1h";

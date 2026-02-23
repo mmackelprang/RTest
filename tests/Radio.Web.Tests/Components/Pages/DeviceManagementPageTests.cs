@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Configuration;
+using MudBlazor;
 using MudBlazor.Services;
 using Radio.Web.Components.Pages;
 using Radio.Web.Services.ApiClients;
@@ -10,8 +11,8 @@ using Radio.Web.Services.ApiClients;
 namespace Radio.Web.Tests.Components.Pages;
 
 /// <summary>
-/// bUnit tests for the DeviceManagementPage component
-/// Tests device list rendering, default device selection, and USB reservations display
+/// bUnit tests for the DeviceManagementPage component.
+/// Uses vertical MudTabs layout — only the active tab panel content is rendered.
 /// </summary>
 public class DeviceManagementPageTests : TestContext
 {
@@ -20,8 +21,7 @@ public class DeviceManagementPageTests : TestContext
   public DeviceManagementPageTests()
   {
     _loggerFactory = new NullLoggerFactory();
-    
-    // Set up minimal dependencies with in-memory configuration
+
     var configuration = new ConfigurationBuilder()
       .AddInMemoryCollection(new Dictionary<string, string?>
       {
@@ -31,11 +31,9 @@ public class DeviceManagementPageTests : TestContext
 
     Services.AddSingleton<IConfiguration>(configuration);
     Services.AddSingleton(_loggerFactory);
-    
-    // Add MudBlazor services (required for ISnackbar injection)
     Services.AddMudServices();
-    
-    // Add HttpClient for DevicesApiService
+    JSInterop.Mode = JSRuntimeMode.Loose;
+    ComponentFactories.AddStub<MudPopoverProvider>();
     Services.AddHttpClient<DevicesApiService>();
   }
 
@@ -51,65 +49,56 @@ public class DeviceManagementPageTests : TestContext
   [Fact]
   public void DeviceManagementPage_Renders_Successfully()
   {
-    // Act
     var cut = RenderComponent<DeviceManagementPage>();
 
-    // Assert - Component renders without throwing
     Assert.NotNull(cut);
-    Assert.Contains("Device Management", cut.Markup);
+    // Active tab (Display) shows its content
+    Assert.Contains("Device Display Settings", cut.Markup);
   }
 
   [Fact]
-  public void DeviceManagementPage_Contains_Output_Devices_Section()
+  public void DeviceManagementPage_Contains_Output_Devices_Tab()
   {
-    // Act
     var cut = RenderComponent<DeviceManagementPage>();
 
-    // Assert - Output devices section present
-    Assert.Contains("Output Devices", cut.Markup);
+    // Tab label is rendered even when inactive
+    Assert.Contains("Outputs", cut.Markup);
   }
 
   [Fact]
-  public void DeviceManagementPage_Contains_Input_Devices_Section()
+  public void DeviceManagementPage_Contains_Input_Devices_Tab()
   {
-    // Act
     var cut = RenderComponent<DeviceManagementPage>();
 
-    // Assert - Input devices section present
-    Assert.Contains("Input Devices", cut.Markup);
+    Assert.Contains("Inputs", cut.Markup);
   }
 
   [Fact]
-  public void DeviceManagementPage_Contains_USB_Reservations_Section()
+  public void DeviceManagementPage_Contains_USB_Reservations_Tab()
   {
-    // Act
     var cut = RenderComponent<DeviceManagementPage>();
 
-    // Assert - USB reservations section present
-    Assert.Contains("USB Port Reservations", cut.Markup);
+    Assert.Contains("USB Ports", cut.Markup);
   }
 
   [Fact]
   public void DeviceManagementPage_Has_Refresh_Button()
   {
-    // Act
     var cut = RenderComponent<DeviceManagementPage>();
 
-    // Assert - Refresh button exists
-    Assert.Contains("Refresh Devices", cut.Markup);
+    // Refresh button on the active Display tab
+    Assert.Contains("Refresh", cut.Markup);
   }
 
   [Fact]
   public void DeviceManagementPage_Shows_Empty_State_When_No_Devices()
   {
-    // Act
     var cut = RenderComponent<DeviceManagementPage>();
 
-    // Assert - Should show info about no devices found
-    // Initially before API response, will show loading or empty state
+    // Display tab shows empty state or loading indicator when API hasn't responded
     var markup = cut.Markup;
     Assert.True(
-      markup.Contains("No output devices found") || markup.Contains("Loading") || markup.Contains("mud-progress"),
+      markup.Contains("No devices found") || markup.Contains("mud-progress"),
       "Should show empty state or loading indicator"
     );
   }
@@ -117,53 +106,40 @@ public class DeviceManagementPageTests : TestContext
   [Fact]
   public void DeviceManagementPage_Uses_MudBlazor_Components()
   {
-    // Act
     var cut = RenderComponent<DeviceManagementPage>();
 
-    // Assert - Uses MudBlazor components
-    Assert.Contains("mud-container", cut.Markup);
+    Assert.Contains("mud-tabs", cut.Markup);
     Assert.Contains("mud-button", cut.Markup);
-    Assert.Contains("mud-paper", cut.Markup);
   }
 
   [Fact]
-  public void DeviceManagementPage_Has_Three_Main_Sections()
+  public void DeviceManagementPage_Has_Five_Tab_Sections()
   {
-    // Act
     var cut = RenderComponent<DeviceManagementPage>();
 
-    // Assert - All three sections present
     var markup = cut.Markup;
-    Assert.Contains("Output Devices", markup);
-    Assert.Contains("Input Devices", markup);
-    Assert.Contains("USB Port Reservations", markup);
+    Assert.Contains("Display", markup);
+    Assert.Contains("Outputs", markup);
+    Assert.Contains("Cast", markup);
+    Assert.Contains("Inputs", markup);
+    Assert.Contains("USB Ports", markup);
   }
 
   [Fact]
   public void DeviceManagementPage_Structure_Is_Valid()
   {
-    // Act
     var cut = RenderComponent<DeviceManagementPage>();
 
-    // Assert - Page structure is valid
     var markup = cut.Markup;
-
-    // Should contain MudBlazor components
-    Assert.Contains("mud-", markup);
-
-    // Should have the three main sections
-    Assert.Contains("Output Devices", markup);
-    Assert.Contains("Input Devices", markup);
-    Assert.Contains("USB Port Reservations", markup);
+    Assert.Contains("mud-tabs", markup);
+    Assert.Contains("display: flex", markup);
   }
 
   [Fact]
   public void DeviceManagementPage_ShowsDisplaySettingsSection()
   {
-    // Act
     var cut = RenderComponent<DeviceManagementPage>();
 
-    // Assert - Device Display Settings section present
     Assert.Contains("Device Display Settings", cut.Markup);
   }
 }

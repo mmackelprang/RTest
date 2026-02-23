@@ -23,6 +23,7 @@ public class RadioAudioSource : USBAudioSourceBase, Radio.Core.Interfaces.Audio.
   private readonly IOptionsMonitor<DeviceOptions> _deviceOptions;
   private readonly IOptionsMonitor<RadioOptions> _radioOptions;
   private readonly ILogger<RadioAudioSource> _logger;
+  private readonly string? _resolvedUSBPort;
 
   // Default state values (cannot be changed programmatically on RF320)
   private Frequency _frequencyStep;
@@ -36,17 +37,20 @@ public class RadioAudioSource : USBAudioSourceBase, Radio.Core.Interfaces.Audio.
   /// <param name="radioOptions">The radio options configuration.</param>
   /// <param name="deviceManager">The audio device manager.</param>
   /// <param name="identificationService">Optional fingerprinting service for track identification.</param>
+  /// <param name="resolvedUSBPort">USB port resolved from config store, overrides IOptionsMonitor value.</param>
   public RadioAudioSource(
     ILogger<RadioAudioSource> logger,
     IOptionsMonitor<DeviceOptions> deviceOptions,
     IOptionsMonitor<RadioOptions> radioOptions,
     IAudioDeviceManager deviceManager,
-    BackgroundIdentificationService? identificationService = null)
+    BackgroundIdentificationService? identificationService = null,
+    string? resolvedUSBPort = null)
     : base(logger, deviceManager, identificationService)
   {
     _deviceOptions = deviceOptions;
     _radioOptions = radioOptions;
     _logger = logger;
+    _resolvedUSBPort = resolvedUSBPort;
 
     // Initialize from configuration
     var options = _radioOptions.CurrentValue;
@@ -62,13 +66,16 @@ public class RadioAudioSource : USBAudioSourceBase, Radio.Core.Interfaces.Audio.
 
   /// <summary>
   /// Gets the USB port path for the radio device.
+  /// Prefers the resolved config store value over IOptionsMonitor.
   /// </summary>
-  public string USBPort => _deviceOptions.CurrentValue.Radio.USBPort;
+  public string USBPort => !string.IsNullOrWhiteSpace(_resolvedUSBPort)
+    ? _resolvedUSBPort
+    : _deviceOptions.CurrentValue.Radio.USBPort;
 
   /// <inheritdoc/>
   public override async Task InitializeAsync(CancellationToken cancellationToken = default)
   {
-    var usbPort = _deviceOptions.CurrentValue.Radio.USBPort;
+    var usbPort = USBPort;
 
     // Set standard metadata with defaults for Radio source
     SetDefaultMetadata("Radio", "Radio", "Raddy RF320");

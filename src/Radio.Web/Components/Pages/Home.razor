@@ -3,19 +3,19 @@
 
 <PageTitle>Radio Console</PageTitle>
 
-<div style="height: 100%; display: flex; gap: 0; overflow: hidden;">
-  <!-- Left: Now Playing (~480px) -->
-  <MudPaper Elevation="2" Style="width: 480px; flex-shrink: 0; height: 100%; overflow: hidden;">
+<div style="height: 100%; display: flex; gap: 2px; overflow: hidden;">
+  <!-- Left: Now Playing (520px) -->
+  <div class="panel" style="width: 520px; flex-shrink: 0;">
     <Radio.Web.Components.Shared.NowPlayingPanel />
-  </MudPaper>
+  </div>
 
-  <!-- Center: Queue / History (flex fill) -->
-  <MudPaper Elevation="2" Style="flex: 1; height: 100%; overflow: hidden;">
+  <!-- Center: Queue / History (flex fill ~688px) -->
+  <div class="panel surface-raised" style="flex: 1;">
     <Radio.Web.Components.Shared.QueueHistoryPanel />
-  </MudPaper>
+  </div>
 
-  <!-- Right: Visualizer (~670px) -->
-  <MudPaper Elevation="2" Style="width: 670px; flex-shrink: 0; height: 100%; overflow: hidden;">
+  <!-- Right: Visualizer (710px) -->
+  <div class="panel" style="width: 710px; flex-shrink: 0;">
     <Radio.Web.Components.Shared.VisualizerPanel />
-  </MudPaper>
+  </div>
 </div>

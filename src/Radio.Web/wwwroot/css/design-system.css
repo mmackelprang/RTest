@@ -1,0 +1,1189 @@
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * RADIO CONSOLE — Command Surface Design System
+ * ═══════════════════════════════════════════════════════════════════════════════
+ *
+ * Aesthetic: Professional broadcast console / recording studio rack mount
+ * Viewport: 1920×576px fixed kiosk display, touch-first
+ * Framework: Blazor Server + MudBlazor 8.x
+ *
+ * Replaces: custom-theme.css, typography.css, touch-targets.css, animations.css
+ */
+
+
+/* ─── §1  DSEG LED Font Declarations ──────────────────────────────────────── */
+
+@font-face {
+  font-family: 'DSEG14Classic-Bold';
+  src: url('../fonts/DSEG14Classic-Bold.woff2') format('woff2'),
+       url('../fonts/DSEG14Classic-Bold.woff') format('woff'),
+       url('../fonts/DSEG14Classic-Bold.ttf') format('truetype');
+  font-weight: bold;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'DSEG14Classic-Regular';
+  src: url('../fonts/DSEG14Classic-Regular.woff2') format('woff2'),
+       url('../fonts/DSEG14Classic-Regular.woff') format('woff'),
+       url('../fonts/DSEG14Classic-Regular.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'DSEG14Classic-Light';
+  src: url('../fonts/DSEG14Classic-Light.woff2') format('woff2'),
+       url('../fonts/DSEG14Classic-Light.woff') format('woff'),
+       url('../fonts/DSEG14Classic-Light.ttf') format('truetype');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+
+/* ─── §2  CSS Custom Properties ───────────────────────────────────────────── */
+
+:root {
+  /* ── Primary Surfaces ── */
+  --surface-base:           #0D0D0F;
+  --surface-raised:         #141416;
+  --surface-inset:          #0A0A0C;
+  --surface-overlay:        #1A1A1D;
+  --surface-separator:      #1F1F22;
+
+  /* ── Accent: Electric Cyan ── */
+  --accent-primary:         #5CD4E8;
+  --accent-hover:           #7EDDF0;
+  --accent-glow:            rgba(92, 212, 232, 0.15);
+  --accent-glow-strong:     rgba(92, 212, 232, 0.30);
+  --accent-dim:             rgba(92, 212, 232, 0.06);
+  --accent-surface:         rgba(92, 212, 232, 0.08);
+
+  /* ── Source-Specific Accent Colors ── */
+  --source-vinyl:           #A78BFA;
+  --source-file:            #5CD4E8;
+  --source-radio:           #F0A830;
+  --source-bluetooth:       #60A5FA;
+  --source-usb:             #4ADE80;
+
+  /* ── Signal Colors ── */
+  --signal-amber:           #F0A830;
+  --signal-amber-glow:      rgba(240, 168, 48, 0.25);
+  --signal-green:           #4ADE80;
+  --signal-red:             #F87171;
+  --signal-blue:            #60A5FA;
+
+  /* ── Text Hierarchy ── */
+  --text-high:              #F0EFF4;
+  --text-medium:            #9CA3AF;
+  --text-low:               #4B5563;
+  --text-inverse:           #0D0D0F;
+
+  /* ── Typography Stacks ── */
+  --font-led:       'DSEG14Classic-Bold', 'JetBrains Mono', 'Consolas', monospace;
+  --font-led-light: 'DSEG14Classic-Regular', 'JetBrains Mono', 'Consolas', monospace;
+  --font-mono:      'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+  --font-body:      'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  /* ── Fixed Dimensions ── */
+  --viewport-width:         1920px;
+  --viewport-height:        576px;
+  --topbar-height:          52px;
+  --content-height:         524px;
+
+  /* ── Touch Targets ── */
+  --touch-min:              48px;
+  --touch-preferred:        56px;
+  --touch-compact:          44px;
+
+  /* ── Spacing Scale ── */
+  --sp-1:  4px;
+  --sp-2:  8px;
+  --sp-3:  12px;
+  --sp-4:  16px;
+  --sp-5:  20px;
+  --sp-6:  24px;
+  --sp-8:  32px;
+
+  /* ── Timing & Easing ── */
+  --anim-duration-instant:  0ms;
+  --anim-duration-fast:     100ms;
+  --anim-duration-normal:   200ms;
+  --anim-duration-slow:     300ms;
+  --anim-duration-slower:   400ms;
+  --anim-ease-standard:     cubic-bezier(0.4, 0.0, 0.2, 1);
+  --anim-ease-decelerate:   cubic-bezier(0.0, 0.0, 0.2, 1);
+  --anim-ease-accelerate:   cubic-bezier(0.4, 0.0, 1, 1);
+  --anim-ease-emphasized:   cubic-bezier(0.2, 0.0, 0, 1);
+}
+
+
+/* ─── §3  Base Reset & Global Styles ──────────────────────────────────────── */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0;
+  width: var(--viewport-width);
+  height: var(--viewport-height);
+  overflow: hidden;
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.5;
+  background-color: var(--surface-base);
+  color: var(--text-high);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+#app {
+  width: 100%;
+  height: 100%;
+}
+
+
+/* ─── §4  Surface System ──────────────────────────────────────────────────── */
+
+.surface-base    { background: var(--surface-base); }
+.surface-raised  { background: var(--surface-raised); border: 1px solid var(--surface-separator); }
+.surface-inset   { background: var(--surface-inset); }
+.surface-overlay { background: var(--surface-overlay); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+
+
+/* ─── §5  Top Bar ─────────────────────────────────────────────────────────── */
+
+.topbar {
+  height: var(--topbar-height);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 16px;
+  background: var(--surface-base);
+  border-bottom: 1px solid var(--surface-separator);
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 1100;
+}
+
+.topbar-clock {
+  font-family: var(--font-led);
+  font-size: 20px;
+  color: var(--signal-amber);
+  text-shadow: 0 0 8px var(--signal-amber-glow);
+  min-width: 80px;
+  letter-spacing: 2px;
+}
+
+.topbar-zone {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.topbar-separator {
+  width: 1px;
+  height: 28px;
+  background: var(--surface-separator);
+  margin: 0 4px;
+}
+
+.topbar-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+
+/* ─── §6  Route Toggle Group (Source / Output Icons) ──────────────────────── */
+
+.route-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--surface-inset);
+  border-radius: 24px;
+  padding: 3px 6px;
+  border: 1px solid var(--surface-separator);
+}
+
+.route-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-low);
+  letter-spacing: 0.08em;
+  padding: 0 6px;
+  font-family: var(--font-mono);
+}
+
+.route-toggle {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 100ms ease, box-shadow 100ms ease, color 100ms ease;
+  color: var(--text-medium);
+  border: none;
+  background: transparent;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.route-toggle:hover:not(.route-disabled) {
+  background: var(--accent-dim);
+  color: var(--text-high);
+}
+
+.route-toggle:active:not(.route-disabled) {
+  transform: scale(0.93);
+  transition: transform 60ms ease;
+}
+
+.route-toggle.route-active {
+  background: var(--accent-surface);
+  color: var(--accent-primary);
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.route-toggle.route-active::after {
+  content: '';
+  position: absolute;
+  bottom: 2px;
+  left: 25%;
+  right: 25%;
+  height: 2px;
+  background: var(--accent-primary);
+  border-radius: 1px;
+  box-shadow: 0 0 6px var(--accent-glow);
+}
+
+/* Per-source active colors via data attribute */
+.route-toggle.route-active[data-source="vinyl"] {
+  color: var(--source-vinyl);
+  box-shadow: 0 0 12px rgba(167, 139, 250, 0.2);
+}
+.route-toggle.route-active[data-source="vinyl"]::after {
+  background: var(--source-vinyl);
+  box-shadow: 0 0 6px rgba(167, 139, 250, 0.3);
+}
+
+.route-toggle.route-active[data-source="file"] {
+  color: var(--source-file);
+}
+
+.route-toggle.route-active[data-source="radio"] {
+  color: var(--source-radio);
+  box-shadow: 0 0 12px rgba(240, 168, 48, 0.2);
+}
+.route-toggle.route-active[data-source="radio"]::after {
+  background: var(--source-radio);
+  box-shadow: 0 0 6px rgba(240, 168, 48, 0.3);
+}
+
+.route-toggle.route-active[data-source="bluetooth"] {
+  color: var(--source-bluetooth);
+  box-shadow: 0 0 12px rgba(96, 165, 250, 0.2);
+}
+.route-toggle.route-active[data-source="bluetooth"]::after {
+  background: var(--source-bluetooth);
+  box-shadow: 0 0 6px rgba(96, 165, 250, 0.3);
+}
+
+.route-toggle.route-active[data-source="usb"] {
+  color: var(--source-usb);
+  box-shadow: 0 0 12px rgba(74, 222, 128, 0.2);
+}
+.route-toggle.route-active[data-source="usb"]::after {
+  background: var(--source-usb);
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.3);
+}
+
+.route-disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+
+/* ─── §7  Navigation Icons ────────────────────────────────────────────────── */
+
+.nav-icon {
+  position: relative;
+  width: 44px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-medium);
+  cursor: pointer;
+  transition: color 100ms ease, background 100ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.nav-icon:hover {
+  color: var(--text-high);
+  background: var(--accent-dim);
+}
+
+.nav-icon:active {
+  transform: scale(0.93);
+}
+
+.nav-icon.nav-active {
+  color: var(--accent-primary);
+}
+
+.nav-icon.nav-active::after {
+  content: '';
+  position: absolute;
+  bottom: 4px;
+  left: 25%;
+  right: 25%;
+  height: 2px;
+  background: var(--accent-primary);
+  border-radius: 1px;
+  box-shadow: 0 0 6px var(--accent-glow);
+  animation: fadeIn 200ms ease-out;
+}
+
+
+/* ─── §8  Volume Control ──────────────────────────────────────────────────── */
+
+.volume-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+}
+
+.volume-control .mud-slider { width: 160px; }
+
+.volume-label {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-medium);
+  min-width: 36px;
+  text-align: right;
+}
+
+
+/* ─── §9  Content Area & Panel Layout ─────────────────────────────────────── */
+
+.content-area {
+  height: var(--content-height);
+  margin-top: var(--topbar-height);
+  overflow: hidden;
+  position: relative;
+}
+
+.panel {
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--surface-separator);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+
+.panel-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+}
+
+
+/* ─── §10  List Items (Touch-Optimized) ───────────────────────────────────── */
+
+.list-item-touch {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  min-height: 56px;
+  cursor: pointer;
+  transition: background 80ms ease;
+  border-left: 3px solid transparent;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.list-item-touch:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.list-item-touch:active {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.list-item-touch.list-item-active {
+  border-left-color: var(--accent-primary);
+  background: var(--accent-surface);
+}
+
+.list-item-title {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-high);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.list-item-subtitle {
+  font-size: 14px;
+  color: var(--text-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.list-item-meta {
+  font-size: 13px;
+  font-family: var(--font-mono);
+  color: var(--text-low);
+  white-space: nowrap;
+}
+
+
+/* ─── §11  Transport Controls ─────────────────────────────────────────────── */
+
+.transport-group {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.transport-btn {
+  min-width: 48px;
+  min-height: 48px;
+  border-radius: 50%;
+  transition: transform 80ms ease, box-shadow 80ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.transport-btn:active {
+  transform: scale(0.92);
+}
+
+.transport-btn-primary {
+  min-width: 56px;
+  min-height: 56px;
+  box-shadow: 0 0 0 0 transparent;
+  transition: transform 80ms ease, box-shadow 200ms ease;
+}
+
+.transport-btn-primary:active {
+  transform: scale(0.90);
+  box-shadow: 0 0 20px 4px var(--accent-glow);
+}
+
+
+/* ─── §12  LED Display Classes ────────────────────────────────────────────── */
+
+.display-led {
+  font-family: var(--font-led);
+  color: var(--signal-amber);
+  text-shadow: 0 0 8px var(--signal-amber-glow);
+  letter-spacing: 2px;
+}
+
+.display-frequency {
+  font-family: var(--font-led);
+  font-size: 52px;
+  color: var(--signal-amber);
+  text-shadow:
+    0 0 12px var(--signal-amber-glow),
+    0 0 40px rgba(240, 168, 48, 0.10);
+  letter-spacing: 4px;
+  line-height: 1;
+}
+
+/* Ghosted "all segments on" background for DSEG (classic LCD look) */
+.display-frequency-ghost {
+  position: relative;
+}
+.display-frequency-ghost::before {
+  content: attr(data-ghost);
+  position: absolute;
+  inset: 0;
+  font-family: var(--font-led);
+  font-size: inherit;
+  letter-spacing: inherit;
+  color: rgba(240, 168, 48, 0.06);
+  pointer-events: none;
+}
+
+.display-clock {
+  font-family: var(--font-led);
+  font-size: 20px;
+  color: var(--signal-amber);
+  text-shadow: 0 0 8px var(--signal-amber-glow);
+  letter-spacing: 2px;
+}
+
+
+/* ─── §13  Now Playing Panel ──────────────────────────────────────────────── */
+
+.now-playing-art-bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  filter: blur(40px) brightness(0.25) saturate(1.4);
+  transform: scale(1.15);
+  animation: kenBurns 25s ease-in-out infinite alternate;
+}
+
+.now-playing-gradient {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(13, 13, 15, 0.5) 0%,
+    rgba(13, 13, 15, 0.2) 40%,
+    rgba(13, 13, 15, 0.7) 80%,
+    rgba(13, 13, 15, 0.95) 100%
+  );
+}
+
+.now-playing-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-high);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+
+.now-playing-artist {
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--text-medium);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.now-playing-album {
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--text-low);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.now-playing-transport {
+  background: rgba(13, 13, 15, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid var(--surface-separator);
+  padding: 8px 16px;
+}
+
+.now-playing-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 4px;
+}
+
+.now-playing-time {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-medium);
+  min-width: 48px;
+}
+
+
+/* ─── §14  Playing Indicator (Equalizer Bars) ─────────────────────────────── */
+
+.now-playing-bars {
+  display: flex;
+  gap: 2px;
+  align-items: flex-end;
+  height: 16px;
+}
+
+.now-playing-bars span {
+  width: 3px;
+  border-radius: 1px;
+  background: var(--accent-primary);
+  animation: eqBounce 0.8s ease-in-out infinite alternate;
+}
+
+.now-playing-bars span:nth-child(1) { height: 60%; animation-delay: 0s; }
+.now-playing-bars span:nth-child(2) { height: 100%; animation-delay: 0.2s; }
+.now-playing-bars span:nth-child(3) { height: 40%; animation-delay: 0.4s; }
+
+@keyframes eqBounce {
+  0%   { transform: scaleY(0.3); }
+  100% { transform: scaleY(1.0); }
+}
+
+
+/* ─── §15  Empty States ───────────────────────────────────────────────────── */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px 16px;
+  text-align: center;
+  height: 100%;
+}
+
+.empty-state-icon {
+  font-size: 64px !important;
+  color: var(--text-low);
+  opacity: 0.5;
+}
+
+.empty-state-text {
+  font-size: 16px;
+  color: var(--text-medium);
+}
+
+
+/* ─── §16  Keyframe Animations ────────────────────────────────────────────── */
+
+/* Page transitions */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+@keyframes slideIn {
+  from { transform: translateX(20px); opacity: 0; }
+  to   { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes slideInUp {
+  from { opacity: 0; transform: translateY(32px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInDown {
+  from { opacity: 0; transform: translateY(-32px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Ken Burns for album art backgrounds */
+@keyframes kenBurns {
+  0%   { transform: scale(1.15) translate(0, 0); }
+  100% { transform: scale(1.22) translate(-1.5%, -1%); }
+}
+
+/* Ambient pulse for waiting states */
+@keyframes ambientPulse {
+  0%, 100% { opacity: 0.3; }
+  50%      { opacity: 0.6; }
+}
+
+.ambient-pulse {
+  animation: ambientPulse 2.5s ease-in-out infinite;
+}
+
+/* Touch feedback ripple */
+@keyframes touchPulse {
+  0%   { box-shadow: 0 0 0 0 var(--accent-glow-strong); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* Cast connecting pulse */
+@keyframes castPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+
+.cast-connecting {
+  animation: castPulse 1.5s ease-in-out infinite;
+}
+
+/* Skeleton shimmer */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Loading spinner */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* Pulse */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+
+/* Button press */
+@keyframes buttonPress {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(0.95); }
+  100% { transform: scale(1); }
+}
+
+/* Checkmark stroke reveal */
+@keyframes checkmark {
+  0%   { stroke-dashoffset: 50; }
+  100% { stroke-dashoffset: 0; }
+}
+
+/* Shake for errors */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-8px); }
+  20%, 40%, 60%, 80% { transform: translateX(8px); }
+}
+
+/* List item add/remove */
+@keyframes listItemAdd {
+  from { opacity: 0; transform: translateX(-32px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes listItemRemove {
+  from { opacity: 1; transform: translateX(0) scaleY(1); }
+  to   { opacity: 0; transform: translateX(32px) scaleY(0); }
+}
+
+/* Dialog enter */
+@keyframes dialogSlideUp {
+  from { opacity: 0; transform: translateY(32px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Album art rotation */
+@keyframes albumRotate {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* Track change crossfade */
+@keyframes trackChange {
+  0%   { opacity: 1; transform: translateY(0); }
+  50%  { opacity: 0; transform: translateY(-16px); }
+  51%  { opacity: 0; transform: translateY(16px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* Snackbar slide */
+@keyframes snackbarSlideIn {
+  from { opacity: 0; transform: translateY(100%); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes snackbarSlideOut {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(100%); }
+}
+
+/* Collapse/expand */
+@keyframes expand {
+  from { transform: scaleY(0); opacity: 0; }
+  to   { transform: scaleY(1); opacity: 1; }
+}
+
+@keyframes collapse {
+  from { transform: scaleY(1); opacity: 1; }
+  to   { transform: scaleY(0); opacity: 0; }
+}
+
+/* Bottom-sheet slide up */
+@keyframes sheetSlideUp {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+
+/* ─── §17  Animation Utility Classes ──────────────────────────────────────── */
+
+.page-transition {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.page-transition > * {
+  backface-visibility: hidden;
+  transform: translateZ(0);
+  will-change: transform, opacity;
+}
+
+.page-transition-enter { animation: fadeIn var(--anim-duration-normal) var(--anim-ease-standard); }
+.page-transition-exit  { animation: fadeOut var(--anim-duration-normal) var(--anim-ease-standard); }
+
+.skeleton-loading {
+  background: linear-gradient(90deg,
+    var(--surface-raised) 0%,
+    var(--surface-overlay) 50%,
+    var(--surface-raised) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+.skeleton-text { height: 16px; margin: 8px 0; border-radius: 4px; }
+.skeleton-heading { height: 24px; margin: 12px 0; width: 60%; border-radius: 4px; }
+.skeleton-circle { width: 48px; height: 48px; border-radius: 50%; }
+.skeleton-card { height: 120px; border-radius: 8px; }
+
+.spinner        { animation: spin 1s linear infinite; }
+.pulse          { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+.shake          { animation: shake var(--anim-duration-slower) var(--anim-ease-standard); }
+.album-rotating { animation: albumRotate 3s linear infinite; }
+.track-change   { animation: trackChange var(--anim-duration-slower) var(--anim-ease-emphasized); }
+
+.list-item-add    { animation: listItemAdd var(--anim-duration-normal) var(--anim-ease-decelerate); }
+.list-item-remove { animation: listItemRemove var(--anim-duration-normal) var(--anim-ease-accelerate); }
+.dialog-enter     { animation: dialogSlideUp var(--anim-duration-slow) var(--anim-ease-emphasized); }
+.snackbar-enter   { animation: snackbarSlideIn var(--anim-duration-normal) var(--anim-ease-emphasized); }
+.snackbar-exit    { animation: snackbarSlideOut var(--anim-duration-normal) var(--anim-ease-standard); }
+
+.expand   { animation: expand var(--anim-duration-normal) var(--anim-ease-decelerate); transform-origin: top; overflow: hidden; }
+.collapse { animation: collapse var(--anim-duration-normal) var(--anim-ease-accelerate); transform-origin: top; overflow: hidden; }
+
+.btn-press:active { animation: buttonPress var(--anim-duration-fast) var(--anim-ease-standard); }
+
+.transition-standard { transition: all var(--anim-duration-normal) var(--anim-ease-standard); }
+.transition-fast     { transition: all var(--anim-duration-fast) var(--anim-ease-standard); }
+.transition-slow     { transition: all var(--anim-duration-slow) var(--anim-ease-standard); }
+.transition-none     { transition: none !important; }
+
+.interactive-hover {
+  transition: background-color var(--anim-duration-fast) var(--anim-ease-standard),
+              transform var(--anim-duration-fast) var(--anim-ease-standard);
+}
+.interactive-hover:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.interactive-active:active {
+  transform: scale(0.95);
+  transition: transform var(--anim-duration-fast) var(--anim-ease-standard);
+}
+
+/* Global touch feedback for MudBlazor interactive elements */
+.mud-button-root:active,
+.mud-icon-button:active,
+.mud-chip:active,
+.mud-tab:active,
+.mud-list-item:active {
+  transform: scale(0.93);
+  transition: transform 60ms ease;
+}
+
+.checkmark-icon {
+  stroke-dasharray: 50;
+  stroke-dashoffset: 50;
+  animation: checkmark var(--anim-duration-slow) var(--anim-ease-emphasized) forwards;
+}
+
+.card-hover {
+  transition: transform var(--anim-duration-fast) var(--anim-ease-standard),
+              box-shadow var(--anim-duration-fast) var(--anim-ease-standard);
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+
+/* ─── §18  MudBlazor Overrides ────────────────────────────────────────────── */
+
+/* AppBar — seamless command surface header */
+.mud-appbar {
+  background: var(--surface-base) !important;
+  box-shadow: none !important;
+  border-bottom: 1px solid var(--surface-separator);
+}
+
+/* Paper — flat panels with subtle borders, no elevation shadows */
+.mud-paper {
+  background: var(--surface-raised) !important;
+  box-shadow: none !important;
+  border: 1px solid var(--surface-separator);
+  border-radius: 8px;
+}
+
+.mud-paper.mud-elevation-0 {
+  background: var(--surface-base) !important;
+  border: none;
+}
+
+/* Cards */
+.mud-card {
+  background: var(--surface-raised) !important;
+  box-shadow: none !important;
+  border: 1px solid var(--surface-separator);
+  border-radius: 8px;
+}
+
+/* Tabs */
+.mud-tabs .mud-tab { min-height: 44px; font-size: 15px; }
+.mud-tab.mud-tab-active { color: var(--accent-primary) !important; }
+
+/* Vertical tabs — left-align text, scrollable panels */
+.mud-tabs-vertical .mud-tab { justify-content: flex-start !important; text-align: left; }
+.mud-tabs-vertical .mud-tab-content { justify-content: flex-start; }
+.mud-tabs-vertical > .mud-tabs-panels { overflow-y: auto; }
+.mud-tabs-vertical > .mud-tabs-header { overflow: hidden; }
+
+/* Switches — normalize thumb to fit track */
+.mud-switch .mud-switch-thumb { width: 20px; height: 20px; }
+.mud-switch .mud-switch-track { width: 36px; height: 20px; border-radius: 10px; }
+.mud-switch .mud-switch-button { width: 36px; height: 20px; }
+
+/* Chips */
+.mud-chip { border-radius: 16px; font-size: 13px; }
+
+/* Dialogs */
+.mud-dialog-container .mud-dialog {
+  background: var(--surface-overlay) !important;
+  border: 1px solid var(--surface-separator);
+}
+
+/* Divider */
+.mud-divider {
+  border-color: var(--surface-separator) !important;
+  opacity: 1;
+}
+
+/* Enforce minimum text sizes for readability at viewing distance */
+.mud-typography-body1 { font-size: 16px !important; }
+.mud-typography-body2 { font-size: 15px !important; }
+.mud-typography-caption { font-size: 13px !important; }
+
+/* Touch target enforcement on MudBlazor components */
+button, .mud-button-root { min-width: var(--touch-compact); min-height: var(--touch-compact); }
+.mud-icon-button { min-width: var(--touch-compact); min-height: var(--touch-compact); }
+.mud-table-row { min-height: 56px; }
+
+
+/* ─── §19  Scrollbar Styling ──────────────────────────────────────────────── */
+
+/* Hide all scrollbars by default — kiosk touch UI */
+* { scrollbar-width: none; }
+*::-webkit-scrollbar { display: none; }
+
+/* Show thin scrollbars only on explicitly scrollable containers */
+.scrollable,
+.mud-tabs-vertical > .mud-tabs-panels,
+.mud-table-container {
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-separator) transparent;
+}
+.scrollable::-webkit-scrollbar,
+.mud-tabs-vertical > .mud-tabs-panels::-webkit-scrollbar,
+.mud-table-container::-webkit-scrollbar { display: block; width: 6px; }
+.scrollable::-webkit-scrollbar-track,
+.mud-tabs-vertical > .mud-tabs-panels::-webkit-scrollbar-track,
+.mud-table-container::-webkit-scrollbar-track { background: transparent; }
+.scrollable::-webkit-scrollbar-thumb,
+.mud-tabs-vertical > .mud-tabs-panels::-webkit-scrollbar-thumb,
+.mud-table-container::-webkit-scrollbar-thumb { background: var(--surface-separator); border-radius: 3px; }
+.scrollable::-webkit-scrollbar-thumb:hover,
+.mud-tabs-vertical > .mud-tabs-panels::-webkit-scrollbar-thumb:hover,
+.mud-table-container::-webkit-scrollbar-thumb:hover { background: var(--text-low); }
+
+
+/* ─── §20  Bottom-Sheet Dialogs ───────────────────────────────────────────── */
+
+.bottom-sheet-backdrop { background: rgba(0, 0, 0, 0.6) !important; }
+
+.mud-dialog-bottom-center .mud-dialog,
+.mud-dialog-container .bottom-sheet .mud-dialog {
+  max-height: 420px;
+  border-radius: 16px 16px 0 0 !important;
+  margin: 0 !important;
+  max-width: 100% !important;
+  width: 100% !important;
+  animation: sheetSlideUp 250ms var(--anim-ease-emphasized);
+}
+
+
+/* ─── §21  Queue Drag-and-Drop ────────────────────────────────────────────── */
+
+.queue-drop-container {
+  background-color: var(--surface-raised);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.queue-drop-zone { min-height: 100px; }
+
+.queue-item-draggable {
+  background-color: var(--surface-base);
+  margin-bottom: 4px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  cursor: grab;
+  touch-action: none;
+}
+
+.queue-item-draggable:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.queue-item-draggable:active { cursor: grabbing; }
+
+.queue-item-dragging {
+  background-color: var(--surface-base);
+  opacity: 0.9;
+  transform: rotate(2deg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+
+/* ─── §22  Typography Scale ───────────────────────────────────────────────── */
+
+/* Page-specific typography utilities */
+.text-display     { font-size: 48px; font-weight: 700; line-height: 1.1; }
+.text-h1          { font-size: 40px; font-weight: 700; line-height: 1.15; }
+.text-h2          { font-size: 32px; font-weight: 600; line-height: 1.2; }
+.text-h3          { font-size: 24px; font-weight: 600; line-height: 1.25; }
+.text-h4          { font-size: 20px; font-weight: 600; line-height: 1.3; }
+.text-h5          { font-size: 18px; font-weight: 600; line-height: 1.35; }
+.text-body        { font-size: 16px; font-weight: 400; line-height: 1.5; }
+.text-body-sm     { font-size: 15px; font-weight: 400; line-height: 1.5; }
+.text-caption     { font-size: 13px; font-weight: 400; line-height: 1.4; color: var(--text-medium); }
+.text-overline    { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-low); }
+.text-mono        { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* Text truncation */
+.text-truncate {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.text-truncate-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+
+/* ─── §23  Touch Target Enforcement ───────────────────────────────────────── */
+
+.touch-target      { min-width: var(--touch-min);       min-height: var(--touch-min); }
+.touch-target-lg   { min-width: var(--touch-preferred);  min-height: var(--touch-preferred); }
+.touch-target-sm   { min-width: var(--touch-compact);    min-height: var(--touch-compact); }
+
+.touch-list-item {
+  min-height: 56px;
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+}
+
+/* Focus-visible outline for keyboard/a11y navigation */
+*:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+
+/* ─── §24  Utility Classes ────────────────────────────────────────────────── */
+
+.full-height { height: 100%; }
+.full-width  { width: 100%; }
+
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.no-select {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+}
+
+.gap-1 { gap: var(--sp-1); }
+.gap-2 { gap: var(--sp-2); }
+.gap-3 { gap: var(--sp-3); }
+.gap-4 { gap: var(--sp-4); }
+
+
+/* ─── §25  Kiosk Hardening ────────────────────────────────────────────────── */
+
+body {
+  -webkit-touch-callout: none;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+
+/* ─── §26  Accessibility: Reduced Motion ──────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .skeleton-loading {
+    animation: none;
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .spinner {
+    animation: none !important;
+    opacity: 0.7;
+  }
+
+  .now-playing-art-bg {
+    animation: none;
+  }
+
+  .now-playing-bars span {
+    animation: none;
+  }
+}

@@ -942,9 +942,8 @@ public class DevicesController : ControllerBase
       await _configurationManager.SetValueAsync(storeId, "AudioOutput:DeviceDisplay:HiddenDeviceNames", hiddenNames, cancellationToken);
       await _configurationManager.SetValueAsync(storeId, "AudioOutput:DeviceDisplay:VisibleDeviceNames", visibleNames, cancellationToken);
 
-      // Trigger display settings reload
-      if (_deviceManager is SoundFlowDeviceManager sfDeviceManager)
-        sfDeviceManager.ReloadDisplaySettings();
+      // Reload display settings with freshly-persisted data (IOptionsMonitor may be stale)
+      await ReloadDisplaySettingsFromStoreAsync(storeId, cancellationToken);
 
       _logger.LogInformation("Device visibility set: {RawName} = {Visible}", request.RawName, request.Visible);
       return Ok(new { message = "Device visibility updated", rawName = request.RawName, visible = request.Visible });
@@ -983,8 +982,7 @@ public class DevicesController : ControllerBase
 
       await _configurationManager.SetValueAsync(storeId, "AudioOutput:DeviceDisplay:DeviceFriendlyNames", friendlyNames, cancellationToken);
 
-      if (_deviceManager is SoundFlowDeviceManager sfDeviceManager)
-        sfDeviceManager.ReloadDisplaySettings();
+      await ReloadDisplaySettingsFromStoreAsync(storeId, cancellationToken);
 
       _logger.LogInformation("Device friendly name set: {RawName} = {FriendlyName}", request.RawName, request.FriendlyName);
       return Ok(new { message = "Device friendly name updated", rawName = request.RawName, friendlyName = request.FriendlyName });
@@ -1021,8 +1019,7 @@ public class DevicesController : ControllerBase
 
       await _configurationManager.SetValueAsync(storeId, "AudioOutput:DeviceDisplay:DeviceFriendlyNames", friendlyNames, cancellationToken);
 
-      if (_deviceManager is SoundFlowDeviceManager sfDeviceManager)
-        sfDeviceManager.ReloadDisplaySettings();
+      await ReloadDisplaySettingsFromStoreAsync(storeId, cancellationToken);
 
       _logger.LogInformation("Device friendly name cleared: {RawName}", rawName);
       return Ok(new { message = "Device friendly name cleared", rawName });
@@ -1032,6 +1029,38 @@ public class DevicesController : ControllerBase
       _logger.LogError(ex, "Error clearing device friendly name");
       return StatusCode(500, new { error = "Failed to clear device friendly name" });
     }
+  }
+
+  /// <summary>
+  /// Reads display settings directly from the config store and passes them to SoundFlowDeviceManager.
+  /// Bypasses IOptionsMonitor which may not yet reflect the just-persisted changes.
+  /// </summary>
+  private async Task ReloadDisplaySettingsFromStoreAsync(string storeId, CancellationToken cancellationToken)
+  {
+    if (_deviceManager is not SoundFlowDeviceManager sfDeviceManager)
+      return;
+
+    var hiddenNames = await _configurationManager.GetValueAsync<List<string>>(
+      storeId, "AudioOutput:DeviceDisplay:HiddenDeviceNames", ct: cancellationToken) ?? [];
+    var visibleNames = await _configurationManager.GetValueAsync<List<string>>(
+      storeId, "AudioOutput:DeviceDisplay:VisibleDeviceNames", ct: cancellationToken) ?? [];
+    var friendlyNames = await _configurationManager.GetValueAsync<Dictionary<string, string>>(
+      storeId, "AudioOutput:DeviceDisplay:DeviceFriendlyNames", ct: cancellationToken) ?? new();
+    var hiddenPatterns = await _configurationManager.GetValueAsync<List<string>>(
+      storeId, "AudioOutput:DeviceDisplay:HiddenDevicePatterns", ct: cancellationToken);
+
+    var options = new DeviceDisplayOptions
+    {
+      HiddenDeviceNames = hiddenNames,
+      VisibleDeviceNames = visibleNames,
+      DeviceFriendlyNames = friendlyNames,
+    };
+
+    // Preserve hidden patterns from existing config if not overridden in store
+    if (hiddenPatterns != null)
+      options.HiddenDevicePatterns = hiddenPatterns;
+
+    sfDeviceManager.ReloadDisplaySettings(options);
   }
 
   /// <summary>

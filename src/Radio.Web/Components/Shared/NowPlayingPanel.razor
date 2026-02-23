@@ -6,119 +6,109 @@
 @inject ISnackbar Snackbar
 @implements IAsyncDisposable
 
-<div style="height: 100%; display: flex; flex-direction: column; padding: 12px; overflow-y: auto;">
-  <!-- Track Info with Album Art Background -->
-  <div style="position: relative; border-radius: 12px; overflow: hidden; margin-bottom: 8px; min-height: 200px; display: flex; align-items: flex-end;">
+<div style="height: 100%; display: flex; flex-direction: column; position: relative; overflow: hidden;">
+  <!-- Full-bleed album art background -->
+  @if (_hasValidAlbumArt)
+  {
+    <div style="position: absolute; inset: 0; background-image: url('@_albumArtUrl'); background-size: cover; background-position: center; filter: blur(20px) brightness(0.3); transform: scale(1.1); @(_isPlaying ? "animation: kenBurns 20s ease-in-out infinite alternate;" : "")"></div>
+    <img src="@_albumArtUrl" alt="" referrerpolicy="no-referrer"
+         style="display: none;" @onerror="OnAlbumArtError" />
+  }
+  else
+  {
+    <div style="position: absolute; inset: 0; background: var(--surface-inset);"></div>
+  }
+
+  <!-- Track info overlay — centered -->
+  <div style="position: relative; z-index: 1; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px 16px 0; text-align: center; min-height: 0;">
     @if (_hasValidAlbumArt)
     {
-      <div style="position: absolute; inset: 0; background-image: url('@_albumArtUrl'); background-size: cover; background-position: center;"></div>
-      <div style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.4) 50%, rgba(0,0,0,0.15) 100%);"></div>
-      <img src="@_albumArtUrl" alt="" referrerpolicy="no-referrer"
-           style="display: none;" @onerror="OnAlbumArtError" />
+      <img src="@_albumArtUrl" alt="Album Art" referrerpolicy="no-referrer"
+           style="width: 180px; height: 180px; border-radius: 8px; object-fit: cover; box-shadow: 0 8px 32px rgba(0,0,0,0.5); margin-bottom: 16px;" />
     }
     else
     {
-      <div style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(var(--mud-palette-primary-rgb), 0.3) 0%, transparent 100%);"></div>
+      <MudIcon Icon="@Icons.Material.Filled.MusicNote" Style="font-size: 96px; color: var(--text-low); margin-bottom: 16px;" />
     }
-    <div style="position: relative; z-index: 1; width: 100%; padding: 16px; text-align: center;">
-      @if (!_hasValidAlbumArt)
-      {
-        <MudIcon Icon="@Icons.Material.Filled.MusicNote" Style="font-size: 80px; color: rgba(255,255,255,0.3); margin-bottom: 8px;" />
-      }
-      <MudText Typo="Typo.h5" Style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: white; text-shadow: 0 1px 4px rgba(0,0,0,0.6);">
-        @(_title ?? "No Track Playing")
-      </MudText>
-      <MudText Typo="Typo.body1" Style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgba(255,255,255,0.85); text-shadow: 0 1px 3px rgba(0,0,0,0.5);">
-        @(_artist ?? "--")
-      </MudText>
-      <MudText Typo="Typo.body2" Style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgba(255,255,255,0.7); text-shadow: 0 1px 3px rgba(0,0,0,0.5);">
-        @(_album ?? "--")
-      </MudText>
-      @if (!string.IsNullOrEmpty(_source))
-      {
-        <MudChip T="string" Color="Color.Primary" Size="Size.Small" Style="margin-top: 4px;">@_source</MudChip>
-      }
+    <div style="font-size: 28px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; color: var(--text-high); text-shadow: 0 2px 8px rgba(0,0,0,0.6);">
+      @(_title ?? "No Track Playing")
     </div>
+    <div style="font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; color: rgba(255,255,255,0.85); text-shadow: 0 1px 4px rgba(0,0,0,0.5); margin-top: 4px;">
+      @(_artist ?? "--")
+    </div>
+    <div style="font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; color: rgba(255,255,255,0.65); text-shadow: 0 1px 3px rgba(0,0,0,0.5); margin-top: 2px;">
+      @(_album ?? "--")
+    </div>
+    @if (!string.IsNullOrEmpty(_source))
+    {
+      <MudChip T="string" Color="Color.Primary" Size="Size.Small" Style="margin-top: 8px;">@_source</MudChip>
+    }
   </div>
 
-  <!-- Transport Controls -->
-  <div style="display: flex; gap: 8px; align-items: center; justify-content: center; margin-bottom: 8px;">
-    <MudIconButton Icon="@Icons.Material.Filled.Shuffle"
-                   Color="@(_isShuffleEnabled ? Color.Primary : Color.Default)"
-                   Size="Size.Medium"
-                   OnClick="HandleShuffleAsync"
-                   title="Shuffle" />
-    <MudIconButton Icon="@Icons.Material.Filled.SkipPrevious"
-                   Color="Color.Default"
-                   Size="Size.Medium"
-                   OnClick="HandlePreviousAsync"
-                   title="Previous" />
-    <MudIconButton Icon="@(_isPlaying ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)"
-                   Color="Color.Primary"
-                   Size="Size.Large"
-                   Style="min-width: 56px; min-height: 56px;"
-                   OnClick="HandlePlayPauseAsync"
-                   title="@(_isPlaying ? "Pause" : "Play")" />
-    <MudIconButton Icon="@Icons.Material.Filled.SkipNext"
-                   Color="Color.Default"
-                   Size="Size.Medium"
-                   OnClick="HandleNextAsync"
-                   title="Next" />
-    <MudIconButton Icon="@Icons.Material.Filled.Repeat"
-                   Color="@(_repeatMode != "Off" ? Color.Primary : Color.Default)"
-                   Size="Size.Medium"
-                   OnClick="HandleRepeatAsync"
-                   title="@($"Repeat: {_repeatMode}")" />
-  </div>
-
-  <!-- Progress Bar -->
-  @if (!string.IsNullOrEmpty(_position) && !string.IsNullOrEmpty(_duration))
-  {
-    <div style="margin-bottom: 8px;">
-      @if (_canSeek)
-      {
-        <MudSlider Value="@_progressPercent"
-                   ValueChanged="@((double v) => HandleSeekAsync(v))"
-                   Min="0" Max="100" Step="0.1"
-                   Color="Color.Primary" Size="Size.Small" />
-      }
-      else
-      {
-        <MudProgressLinear Value="@_progressPercent" Color="Color.Primary" Size="Size.Small"
-                           Style="margin: 8px 0;" />
-      }
-      <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); margin-top: -4px;">
-        <span>@_position</span>
-        <span>@_duration</span>
+  <!-- Transport bar — anchored to bottom with glass effect -->
+  <div style="position: relative; z-index: 1; background: rgba(0,0,0,0.5); backdrop-filter: blur(12px); border-top: 1px solid var(--surface-separator); padding: 8px 16px 12px;">
+    <!-- Progress Bar (full width) -->
+    @if (!string.IsNullOrEmpty(_position) && !string.IsNullOrEmpty(_duration))
+    {
+      <div style="margin-bottom: 4px;">
+        @if (_canSeek)
+        {
+          <MudSlider Value="@_progressPercent"
+                     ValueChanged="@((double v) => HandleSeekAsync(v))"
+                     Min="0" Max="100" Step="0.1"
+                     Color="Color.Primary" Size="Size.Small" />
+        }
+        else
+        {
+          <MudProgressLinear Value="@_progressPercent" Color="Color.Primary" Size="Size.Small" />
+        }
+        <div style="display: flex; justify-content: space-between; font-size: 13px; color: var(--text-medium); margin-top: -2px; font-family: var(--font-mono);">
+          <span>@_position</span>
+          <span>@_duration</span>
+        </div>
       </div>
-    </div>
-  }
-  else if (!string.IsNullOrEmpty(_position) && _position != "0:00")
-  {
-    <div style="margin-bottom: 8px; text-align: center; font-size: 12px; color: var(--text-secondary);">
-      <span>@_position</span>
-    </div>
-  }
+    }
+    else if (!string.IsNullOrEmpty(_position) && _position != "0:00")
+    {
+      <div style="text-align: center; font-size: 13px; color: var(--text-medium); margin-bottom: 4px; font-family: var(--font-mono);">
+        <span>@_position</span>
+      </div>
+    }
 
-  <!-- Volume -->
-  <div style="margin-bottom: 4px;">
-    <div style="display: flex; align-items: center; gap: 8px;">
-      <MudIconButton Icon="@(_isMuted ? Icons.Material.Filled.VolumeOff : Icons.Material.Filled.VolumeUp)"
+    <!-- Transport Controls -->
+    <div class="transport-group">
+      <MudIconButton Icon="@Icons.Material.Filled.Shuffle"
+                     Color="@(_isShuffleEnabled ? Color.Primary : Color.Default)"
+                     Size="Size.Medium"
+                     Class="transport-btn"
+                     OnClick="HandleShuffleAsync"
+                     title="Shuffle" />
+      <MudIconButton Icon="@Icons.Material.Filled.SkipPrevious"
                      Color="Color.Default"
-                     Size="Size.Small"
-                     OnClick="HandleMuteAsync"
-                     title="@(_isMuted ? "Unmute" : "Mute")" />
-      <MudSlider Value="_volume"
-                 ValueChanged="@((double v) => OnVolumeChanged(v))"
-                 Min="0" Max="1" Step="0.01"
-                 Style="flex: 1;"
-                 Color="Color.Primary"
-                 Size="Size.Small">
-        @((_volume * 100).ToString("F0"))%
-      </MudSlider>
+                     Size="Size.Medium"
+                     Class="transport-btn"
+                     OnClick="HandlePreviousAsync"
+                     title="Previous" />
+      <MudIconButton Icon="@(_isPlaying ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)"
+                     Color="Color.Primary"
+                     Size="Size.Large"
+                     Class="transport-btn-primary"
+                     OnClick="HandlePlayPauseAsync"
+                     title="@(_isPlaying ? "Pause" : "Play")" />
+      <MudIconButton Icon="@Icons.Material.Filled.SkipNext"
+                     Color="Color.Default"
+                     Size="Size.Medium"
+                     Class="transport-btn"
+                     OnClick="HandleNextAsync"
+                     title="Next" />
+      <MudIconButton Icon="@Icons.Material.Filled.Repeat"
+                     Color="@(_repeatMode != "Off" ? Color.Primary : Color.Default)"
+                     Size="Size.Medium"
+                     Class="transport-btn"
+                     OnClick="HandleRepeatAsync"
+                     title="@($"Repeat: {_repeatMode}")" />
     </div>
   </div>
-
 </div>
 
 @code {

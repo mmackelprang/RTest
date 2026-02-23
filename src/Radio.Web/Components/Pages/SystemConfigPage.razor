@@ -14,8 +14,9 @@
 
 <PageTitle>System Configuration</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.ExtraLarge" Style="height: 512px; padding: 16px;">
-  <MudTabs Elevation="2" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-4" @bind-ActivePanelIndex="_activeTab">
+<div style="height: 100%; display: flex; overflow: hidden;">
+  <MudTabs Elevation="0" Rounded="false" Position="Position.Start" ApplyEffectsToContainer="true" PanelClass="pa-4" @bind-ActivePanelIndex="_activeTab"
+           Style="height: 100%; width: 100%;" Class="system-config-tabs">
     
     <!-- Tab 1: System Statistics -->
     <MudTabPanel Text="System Stats" Icon="@Icons.Material.Filled.Insights">
@@ -311,20 +312,20 @@
             <MudGrid Spacing="2">
               <MudItem xs="12">
                 <MudAlert Severity="Severity.Info" Dense="true">
-                  Configure USB port paths for hardware devices. Linux/Pi uses /dev/ttyUSB*, Windows uses COM ports.
+                  Enter a substring of the USB audio device name (case-insensitive). Run <code>aplay -l</code> on Linux to list device names.
                 </MudAlert>
               </MudItem>
               <MudItem xs="12" md="6">
                 <MudTextField T="string" @bind-Value="_deviceOptions.Radio.USBPort"
-                              Label="Radio USB Port"
+                              Label="Radio USB Audio (RF320 only)"
                               Variant="Variant.Outlined"
-                              HelperText="USB port for Raddy RF320 radio (e.g., /dev/ttyUSB0 on Linux, COM3 on Windows)" />
+                              HelperText="Leave empty if using RTL-SDR. Only set for RF320 USB audio capture." />
               </MudItem>
               <MudItem xs="12" md="6">
                 <MudTextField T="string" @bind-Value="_deviceOptions.Vinyl.USBPort"
-                              Label="Vinyl USB Port"
+                              Label="Vinyl Audio Device"
                               Variant="Variant.Outlined"
-                              HelperText="USB port for vinyl turntable (e.g., /dev/ttyUSB1 on Linux, COM4 on Windows)" />
+                              HelperText="USB audio device name pattern for turntable (e.g., USB Microphone)" />
               </MudItem>
               <MudItem xs="12" md="6">
                 <MudTextField T="string" @bind-Value="_deviceOptions.Cast.DefaultDevice"
@@ -1164,9 +1165,9 @@
                 </MudAlert>
               </MudItem>
               <MudItem xs="12">
-                <MudTextField T="string" @bind-Value="_genericSourcePreferences.USBPort" Label="USB Port"
+                <MudTextField T="string" @bind-Value="_genericSourcePreferences.USBPort" Label="Generic USB Audio Device"
                               Variant="Variant.Outlined"
-                              HelperText="USB port for generic source (e.g., /dev/ttyUSB2)" />
+                              HelperText="USB audio device name pattern (e.g., AB13X)" />
               </MudItem>
               <MudItem xs="12">
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveGenericSourcePreferencesAsync"
@@ -1459,7 +1460,7 @@
     </MudTabPanel>
 
   </MudTabs>
-</MudContainer>
+</div>
 
 @code {
   private int _activeTab = 0;
@@ -1894,12 +1895,15 @@
       { "Subdirectory", null }
     };
 
-    var options = new DialogOptions 
-    { 
-      MaxWidth = MaxWidth.Medium, 
+    var options = new DialogOptions
+    {
+      MaxWidth = MaxWidth.False,
       FullWidth = true,
       CloseButton = true,
-      CloseOnEscapeKey = true
+      CloseOnEscapeKey = true,
+      BackgroundClass = "bottom-sheet-backdrop",
+      Position = DialogPosition.BottomCenter,
+      BackdropClick = true
     };
 
     var dialog = await DialogService.ShowAsync<Radio.Web.Components.Dialogs.AudioFileSelectionDialog>("Select Audio File", parameters, options);

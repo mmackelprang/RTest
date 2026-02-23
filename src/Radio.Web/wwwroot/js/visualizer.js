@@ -83,11 +83,11 @@ export const visualizer = {
     // Determine color based on performance
     let color;
     if (ups > 30) {
-      color = '#00ff00'; // Green
+      color = '#4ADE80'; // Green
     } else if (ups >= 15) {
-      color = '#ffff00'; // Yellow
+      color = '#F0A830'; // Amber
     } else {
-      color = '#ff0000'; // Red
+      color = '#F87171'; // Red
     }
 
     // Draw in bottom-left corner
@@ -168,7 +168,7 @@ export const visualizer = {
     const { ctx, width, height } = canvasData;
     
     // Clear canvas
-    ctx.fillStyle = '#1a1a1a';
+    ctx.fillStyle = '#0A0A0C';
     ctx.fillRect(0, 0, width, height);
 
     const meterWidth = width * 0.45;
@@ -188,7 +188,7 @@ export const visualizer = {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
       ctx.fillRect(width - 85, 5, 80, 25);
       
-      ctx.fillStyle = '#00d4ff';
+      ctx.fillStyle = '#5CD4E8';
       ctx.font = '14px Inter, sans-serif';
       ctx.textAlign = 'right';
       ctx.fillText(`×${scaleFactor.toFixed(2)}`, width - 10, 22);
@@ -203,11 +203,11 @@ export const visualizer = {
 
   drawMeter: function (ctx, x, y, width, height, peak, rms, isClipping, label) {
     // Draw background
-    ctx.fillStyle = '#2a2a2a';
+    ctx.fillStyle = '#101012';
     ctx.fillRect(x, y, width, height);
 
     // Draw border
-    ctx.strokeStyle = '#444444';
+    ctx.strokeStyle = '#1F1F22';
     ctx.lineWidth = 2;
     ctx.strokeRect(x, y, width, height);
 
@@ -215,37 +215,28 @@ export const visualizer = {
     const peakHeight = height * peak;
     const rmsHeight = height * rms;
 
-    // Helper function to get rainbow color based on height percentage
-    const getRainbowColor = (percentage) => {
-      // 0-20%: Blue (#0000FF to #0080FF)
-      if (percentage < 0.2) {
-        const t = percentage / 0.2;
-        return `rgb(0, ${Math.floor(128 * t)}, 255)`;
+    // Helper function to get meter color based on height percentage
+    // Green (#4ADE80) → Amber (#F0A830) → Red (#F87171)
+    const getMeterColor = (percentage) => {
+      if (percentage < 0.6) {
+        // Green to Amber
+        const t = percentage / 0.6;
+        const r = Math.floor(74 + (240 - 74) * t);
+        const g = Math.floor(222 + (168 - 222) * t);
+        const b = Math.floor(128 + (48 - 128) * t);
+        return `rgb(${r}, ${g}, ${b})`;
       }
-      // 20-40%: Cyan (#0080FF to #00FFFF)
-      else if (percentage < 0.4) {
-        const t = (percentage - 0.2) / 0.2;
-        return `rgb(0, ${Math.floor(128 + 127 * t)}, 255)`;
+      else if (percentage < 0.85) {
+        // Amber to Red
+        const t = (percentage - 0.6) / 0.25;
+        const r = Math.floor(240 + (248 - 240) * t);
+        const g = Math.floor(168 + (113 - 168) * t);
+        const b = Math.floor(48 + (113 - 48) * t);
+        return `rgb(${r}, ${g}, ${b})`;
       }
-      // 40-60%: Green (#00FFFF to #00FF00)
-      else if (percentage < 0.6) {
-        const t = (percentage - 0.4) / 0.2;
-        return `rgb(0, 255, ${Math.floor(255 * (1 - t))})`;
-      }
-      // 60-80%: Yellow (#00FF00 to #FFFF00)
-      else if (percentage < 0.8) {
-        const t = (percentage - 0.6) / 0.2;
-        return `rgb(${Math.floor(255 * t)}, 255, 0)`;
-      }
-      // 80-95%: Orange (#FFFF00 to #FF8000)
-      else if (percentage < 0.95) {
-        const t = (percentage - 0.8) / 0.15;
-        return `rgb(255, ${Math.floor(255 * (1 - t * 0.5))}, 0)`;
-      }
-      // 95-100%: Red (#FF8000 to #FF0000)
       else {
-        const t = (percentage - 0.95) / 0.05;
-        return `rgb(255, ${Math.floor(128 * (1 - t))}, 0)`;
+        // Hot red
+        return `rgb(248, 113, 113)`;
       }
     };
 
@@ -254,7 +245,7 @@ export const visualizer = {
     for (let i = 0; i < rmsHeight; i++) {
       const currentY = y + height - i;
       const percentage = i / height;
-      const color = getRainbowColor(percentage);
+      const color = getMeterColor(percentage);
       
       ctx.fillStyle = color;
       ctx.fillRect(x + width * 0.1, currentY, width * 0.35, 1);
@@ -265,7 +256,7 @@ export const visualizer = {
     for (let i = 0; i < peakHeight; i++) {
       const currentY = y + height - i;
       const percentage = i / height;
-      const color = getRainbowColor(percentage);
+      const color = getMeterColor(percentage);
 
       ctx.fillStyle = color;
       ctx.fillRect(x + width * 0.55, currentY, width * 0.35, 1);
@@ -273,17 +264,17 @@ export const visualizer = {
 
     // Draw peak hold indicator
     const peakY = y + height - peakHeight;
-    ctx.fillStyle = isClipping ? '#ff0000' : '#ffffff';
+    ctx.fillStyle = isClipping ? '#F87171' : '#F0EFF4';
     ctx.fillRect(x + width * 0.1, peakY - 2, width * 0.8, 4);
 
     // Draw label
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = '#F0EFF4';
     ctx.font = '16px Inter, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(label, x + width / 2, y - 10);
 
     // Draw scale markers
-    ctx.fillStyle = '#666666';
+    ctx.fillStyle = '#4B5563';
     ctx.font = '10px Inter, sans-serif';
     ctx.textAlign = 'right';
     
@@ -306,19 +297,19 @@ export const visualizer = {
     const { ctx, width, height } = canvasData;
     
     // Clear canvas
-    ctx.fillStyle = '#1a1a1a';
+    ctx.fillStyle = '#0A0A0C';
     ctx.fillRect(0, 0, width, height);
 
     const channelHeight = height / 2;
     
     // Draw left channel
-    this.drawWaveformChannel(ctx, leftSamples, 0, 0, width, channelHeight, '#00d4ff');
+    this.drawWaveformChannel(ctx, leftSamples, 0, 0, width, channelHeight, '#5CD4E8');
     
     // Draw right channel
-    this.drawWaveformChannel(ctx, rightSamples, 0, channelHeight, width, channelHeight, '#00d4ff');
+    this.drawWaveformChannel(ctx, rightSamples, 0, channelHeight, width, channelHeight, '#5CD4E8');
 
     // Draw center line for each channel
-    ctx.strokeStyle = '#444444';
+    ctx.strokeStyle = '#1F1F22';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(0, channelHeight / 2);
@@ -331,7 +322,7 @@ export const visualizer = {
     ctx.stroke();
 
     // Draw labels
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = '#F0EFF4';
     ctx.font = '14px Inter, sans-serif';
     ctx.textAlign = 'left';
     ctx.fillText('Left', 10, 20);
@@ -409,7 +400,7 @@ export const visualizer = {
     const { ctx, width, height } = canvasData;
     
     // Clear canvas
-    ctx.fillStyle = '#1a1a1a';
+    ctx.fillStyle = '#0A0A0C';
     ctx.fillRect(0, 0, width, height);
 
     if (!magnitudes || magnitudes.length === 0) return;
@@ -424,16 +415,14 @@ export const visualizer = {
       const barX = i * barWidth;
       const barY = height - barHeight;
 
-      // Color gradient based on magnitude
+      // Color gradient based on magnitude: cyan → amber → red
       let color;
-      if (magnitude < 0.5) {
-        // Green to yellow
-        const t = magnitude * 2;
-        color = this.interpolateColor('#00ff00', '#ffff00', t);
+      if (magnitude < 0.6) {
+        const t = magnitude / 0.6;
+        color = this.interpolateColor('#5CD4E8', '#F0A830', t);
       } else {
-        // Yellow to red
-        const t = (magnitude - 0.5) * 2;
-        color = this.interpolateColor('#ffff00', '#ff0000', t);
+        const t = (magnitude - 0.6) / 0.4;
+        color = this.interpolateColor('#F0A830', '#F87171', t);
       }
 
       ctx.fillStyle = color;
@@ -441,7 +430,7 @@ export const visualizer = {
     }
 
     // Draw frequency labels
-    ctx.fillStyle = '#888888';
+    ctx.fillStyle = '#4B5563';
     ctx.font = '10px Inter, sans-serif';
     ctx.textAlign = 'center';
     

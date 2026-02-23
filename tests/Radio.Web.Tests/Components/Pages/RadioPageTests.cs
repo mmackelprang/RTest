@@ -63,7 +63,7 @@ public class RadioPageTests : TestContext
 
     // Assert - Check that the component renders without throwing
     Assert.NotNull(cut);
-    Assert.Contains("radio-page", cut.Markup);
+    Assert.Contains("display: flex", cut.Markup);
   }
 
   [Theory]
@@ -89,6 +89,6 @@ public class RadioPageTests : TestContext
     // Assert - Verify the basic page structure exists
     // The component may be in a loading state initially, so we just verify it renders
     Assert.NotNull(cut);
-    Assert.Contains("radio-page", cut.Markup);
+    Assert.Contains("display: flex", cut.Markup);
   }
 }

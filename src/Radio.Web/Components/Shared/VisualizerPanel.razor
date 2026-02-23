@@ -5,43 +5,42 @@
 @inject ConfigurationApiService ConfigApi
 @implements IAsyncDisposable
 
-<div style="height: 100%; display: flex; flex-direction: column; padding: 8px;">
-  <!-- Mode Selector -->
-  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-    <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Visualizer</MudText>
-    <div style="display: flex; align-items: center; gap: 8px;">
-      @if (!VisualizationHub.IsConnected)
-      {
-        <MudChip T="string" Color="Color.Warning" Size="Size.Small">Disconnected</MudChip>
-      }
-      <MudButtonGroup Color="Color.Primary" Variant="Variant.Outlined" Size="Size.Small">
-        <MudButton OnClick="@(() => SelectMode(VisualizationMode.VUMeter))"
-                   Variant="@(_currentMode == VisualizationMode.VUMeter ? Variant.Filled : Variant.Outlined)">
-          VU
-        </MudButton>
-        <MudButton OnClick="@(() => SelectMode(VisualizationMode.Waveform))"
-                   Variant="@(_currentMode == VisualizationMode.Waveform ? Variant.Filled : Variant.Outlined)">
-          Wave
-        </MudButton>
-        <MudButton OnClick="@(() => SelectMode(VisualizationMode.Spectrum))"
-                   Variant="@(_currentMode == VisualizationMode.Spectrum ? Variant.Filled : Variant.Outlined)">
-          Spectrum
-        </MudButton>
-      </MudButtonGroup>
+<div style="height: 100%; position: relative; background: var(--surface-inset); overflow: hidden;">
+  <!-- Floating mode selector pill -->
+  <div style="position: absolute; top: 8px; right: 8px; z-index: 2; display: flex; align-items: center; gap: 6px;">
+    @if (!VisualizationHub.IsConnected)
+    {
+      <MudChip T="string" Color="Color.Warning" Size="Size.Small" Style="font-size: 12px;">Disconnected</MudChip>
+    }
+    <div class="route-group" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(8px);">
+      <div class="route-toggle @(_currentMode == VisualizationMode.VUMeter ? "route-active" : "")"
+           style="width: 40px; height: 36px; border-radius: 16px; font-size: 13px; font-weight: 600;"
+           @onclick="@(() => SelectMode(VisualizationMode.VUMeter))">
+        VU
+      </div>
+      <div class="route-toggle @(_currentMode == VisualizationMode.Waveform ? "route-active" : "")"
+           style="width: 50px; height: 36px; border-radius: 16px; font-size: 13px; font-weight: 600;"
+           @onclick="@(() => SelectMode(VisualizationMode.Waveform))">
+        Wave
+      </div>
+      <div class="route-toggle @(_currentMode == VisualizationMode.Spectrum ? "route-active" : "")"
+           style="width: 70px; height: 36px; border-radius: 16px; font-size: 13px; font-weight: 600;"
+           @onclick="@(() => SelectMode(VisualizationMode.Spectrum))">
+        Spectrum
+      </div>
     </div>
   </div>
 
-  <!-- Canvas -->
-  <MudPaper Elevation="2" Style="flex: 1; background-color: #1a1a1a; min-height: 200px; padding: 4px; position: relative;">
-    <canvas id="visualizer-panel-canvas" style="width: 100%; height: 100%; display: block;"></canvas>
-    @if (_isInitialized && !_hasReceivedData)
-    {
-      <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; opacity: 0.6;">
-        <MudIcon Icon="@Icons.Material.Filled.GraphicEq" Style="font-size: 48px; margin-bottom: 8px;" />
-        <MudText Typo="Typo.body2">Waiting for audio data...</MudText>
-      </div>
-    }
-  </MudPaper>
+  <!-- Edge-to-edge canvas -->
+  <canvas id="visualizer-panel-canvas" style="width: 100%; height: 100%; display: block;"></canvas>
+
+  @if (_isInitialized && !_hasReceivedData)
+  {
+    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; animation: ambientPulse 3s ease-in-out infinite;">
+      <MudIcon Icon="@Icons.Material.Filled.GraphicEq" Style="font-size: 64px; color: var(--text-low); margin-bottom: 8px;" />
+      <div style="font-size: 16px; color: var(--text-low);">Waiting for audio data...</div>
+    </div>
+  }
 </div>
 
 @code {

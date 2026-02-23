@@ -12,6 +12,7 @@ namespace Radio.Infrastructure.Audio.Sources.Primary;
 public class GenericUSBAudioSource : USBAudioSourceBase
 {
   private readonly IOptionsMonitor<GenericSourcePreferences> _preferences;
+  private readonly string? _resolvedUSBPort;
   private string? _deviceId;
 
   /// <summary>
@@ -20,13 +21,16 @@ public class GenericUSBAudioSource : USBAudioSourceBase
   /// <param name="logger">The logger instance.</param>
   /// <param name="preferences">The generic source preferences.</param>
   /// <param name="deviceManager">The audio device manager.</param>
+  /// <param name="resolvedUSBPort">USB port resolved from config store, overrides IOptionsMonitor value.</param>
   public GenericUSBAudioSource(
     ILogger<GenericUSBAudioSource> logger,
     IOptionsMonitor<GenericSourcePreferences> preferences,
-    IAudioDeviceManager deviceManager)
+    IAudioDeviceManager deviceManager,
+    string? resolvedUSBPort = null)
     : base(logger, deviceManager)
   {
     _preferences = preferences;
+    _resolvedUSBPort = resolvedUSBPort;
   }
 
   /// <inheritdoc/>
@@ -106,11 +110,14 @@ public class GenericUSBAudioSource : USBAudioSourceBase
   /// <inheritdoc/>
   public override async Task InitializeAsync(CancellationToken cancellationToken = default)
   {
-    // Try to use saved USB port from preferences
-    var savedPort = _preferences.CurrentValue.USBPort;
+    // Prefer resolved config store value, then fall back to IOptionsMonitor
+    var savedPort = !string.IsNullOrWhiteSpace(_resolvedUSBPort)
+      ? _resolvedUSBPort
+      : _preferences.CurrentValue.USBPort;
+
     if (!string.IsNullOrEmpty(savedPort))
     {
-      Logger.LogDebug("Restoring saved USB port: {USBPort}", savedPort);
+      Logger.LogDebug("Initializing generic USB source with port: {USBPort}", savedPort);
       await InitializeWithPortAsync(savedPort, cancellationToken);
     }
     else

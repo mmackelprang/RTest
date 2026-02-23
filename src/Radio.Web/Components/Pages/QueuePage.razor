@@ -16,63 +16,19 @@
 
 <PageTitle>Queue - Radio Console</PageTitle>
 
-<div class="queue-page" style="padding: 24px; height: 100%; display: flex; flex-direction: column; overflow: hidden;">
-  <!-- Header -->
-  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-shrink: 0;">
-    <MudText Typo="Typo.h4">Queue</MudText>
-    <div style="display: flex; gap: 12px;">
-      <MudButton Variant="Variant.Filled"
-                 Color="Color.Primary"
-                 OnClick="@(() => { _showFileBrowser = !_showFileBrowser; StateHasChanged(); })"
-                 StartIcon="@(_showFileBrowser ? Icons.Material.Filled.QueueMusic : Icons.Material.Filled.FolderOpen)"
-                 Size="Size.Large"
-                 Style="min-width: 60px; min-height: 60px; font-size: 1.1rem;">
-        @(_showFileBrowser ? "Show Queue" : "Browse Files")
-      </MudButton>
-      <MudButton Variant="Variant.Filled"
-                 Color="Color.Primary"
-                 OnClick="OpenSavePlaylistDialogAsync"
-                 StartIcon="@Icons.Material.Filled.Save"
-                 Disabled="@(!_queueItems.Any())"
-                 Size="Size.Large"
-                 Style="min-width: 60px; min-height: 60px; font-size: 1.1rem;">
-        Save Playlist
-      </MudButton>
-      <MudButton Variant="Variant.Outlined"
-                 Color="Color.Primary"
-                 OnClick="OpenLoadPlaylistDialogAsync"
-                 StartIcon="@Icons.Material.Filled.PlaylistPlay"
-                 Size="Size.Large"
-                 Style="min-width: 60px; min-height: 60px; font-size: 1.1rem;">
-        Load Playlist
-      </MudButton>
-      @if (!_showFileBrowser && _canReorderQueue && _queueItems.Any())
-      {
-        <MudButton Size="Size.Large"
-                   Variant="@(_isDragEnabled ? Variant.Filled : Variant.Outlined)"
-                   Color="@(_isDragEnabled ? Color.Success : Color.Default)"
-                   StartIcon="@Icons.Material.Filled.DragIndicator"
-                   OnClick="@(() => { _isDragEnabled = !_isDragEnabled; StateHasChanged(); })"
-                   Style="min-width: 60px; min-height: 60px; font-size: 1.1rem;">
-          @(_isDragEnabled ? "Drag Enabled" : "Enable Drag")
+<div class="queue-page" style="height: 100%; display: flex; gap: 2px; overflow: hidden;">
+  <!-- Left: File Browser (always visible) -->
+  <div class="panel surface-raised" style="width: 50%; display: flex; flex-direction: column; overflow: hidden; padding: 12px;">
+    <div class="panel-header" style="padding: 8px 4px;">
+      <span>File Browser</span>
+      <div style="display: flex; gap: 4px;">
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                   OnClick="OpenLoadPlaylistDialogAsync" StartIcon="@Icons.Material.Filled.PlaylistPlay">
+          Load
         </MudButton>
-      }
-      @if (!_showFileBrowser)
-      {
-        <MudButton Variant="Variant.Outlined"
-                   Color="Color.Error"
-                   OnClick="HandleClearQueueAsync"
-                   Disabled="@(!_queueItems.Any())"
-                   Size="Size.Large"
-                   Style="min-width: 60px; min-height: 60px; font-size: 1.1rem;">
-          Clear All
-        </MudButton>
-      }
+      </div>
     </div>
-  </div>
-
-  @if (_showFileBrowser)
-  {
+  @{
     <!-- ═══════════════ FILE BROWSER SECTION ═══════════════ -->
     <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
       <!-- Navigation Bar -->
@@ -206,20 +162,33 @@
       }
     </div>
   }
-  else
-  {
-    <!-- ═══════════════ QUEUE SECTION ═══════════════ -->
+  </div>
+
+  <!-- Right: Queue List (always visible) -->
+  <div class="panel surface-raised" style="width: 50%; display: flex; flex-direction: column; overflow: hidden; padding: 12px;">
+    <div class="panel-header" style="padding: 8px 4px;">
+      <span>Queue (@_queueItems.Count tracks)</span>
+      <div style="display: flex; gap: 4px;">
+        <MudIconButton Icon="@Icons.Material.Filled.Save" Color="Color.Primary" Size="Size.Small"
+                       Disabled="@(!_queueItems.Any())" OnClick="OpenSavePlaylistDialogAsync" title="Save Playlist" />
+        @if (_canReorderQueue && _queueItems.Any())
+        {
+          <MudIconButton Icon="@Icons.Material.Filled.DragIndicator"
+                         Color="@(_isDragEnabled ? Color.Success : Color.Default)" Size="Size.Small"
+                         OnClick="@(() => { _isDragEnabled = !_isDragEnabled; StateHasChanged(); })"
+                         title="@(_isDragEnabled ? "Disable Drag" : "Enable Drag")" />
+        }
+        <MudIconButton Icon="@Icons.Material.Filled.DeleteSweep" Color="Color.Error" Size="Size.Small"
+                       Disabled="@(!_queueItems.Any())" OnClick="HandleClearQueueAsync" title="Clear All" />
+      </div>
+    </div>
+  @{
     @if (!_queueItems.Any())
     {
-      <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-secondary);">
-        <MudIcon Icon="@Icons.Material.Filled.QueueMusic" Style="font-size: 120px; margin-bottom: 16px; opacity: 0.5;" />
-        <MudText Typo="Typo.h5">No tracks in queue</MudText>
-        <MudText Typo="Typo.body1" Style="margin-top: 8px; margin-bottom: 24px;">Browse for audio files to add to the queue</MudText>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
-                   StartIcon="@Icons.Material.Filled.FolderOpen"
-                   OnClick="@(() => { _showFileBrowser = true; StateHasChanged(); })">
-          Browse Files
-        </MudButton>
+      <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-low);">
+        <MudIcon Icon="@Icons.Material.Filled.QueueMusic" Style="font-size: 80px; opacity: 0.4; margin-bottom: 12px;" />
+        <span style="font-size: 16px;">No tracks in queue</span>
+        <span style="font-size: 14px; color: var(--text-low); margin-top: 4px;">Browse files on the left to add tracks</span>
       </div>
     }
     else if (_isDragEnabled && _canReorderQueue)
@@ -276,7 +245,16 @@
           <MudTh Style="width: 100px; font-size: 1rem;">Actions</MudTh>
         </HeaderContent>
         <RowTemplate>
-          <MudTd Style="width: 60px; min-height: 60px; font-size: 1rem;">@context.Index</MudTd>
+          <MudTd Style="width: 60px; min-height: 60px; font-size: 1rem;">
+            @if (context.IsCurrent)
+            {
+              <div class="now-playing-bars"><span></span><span></span><span></span></div>
+            }
+            else
+            {
+              @context.Index
+            }
+          </MudTd>
           <MudTd DataLabel="Title" Style="cursor: pointer; min-height: 60px; padding: 16px 8px;" @onclick="@(() => HandleJumpToAsync(context.Index))">
             <div style="font-weight: @(context.IsCurrent ? "600" : "400"); color: @(context.IsCurrent ? "var(--mud-palette-primary)" : "inherit"); font-size: 1.1rem; line-height: 1.5;">
               @context.Title
@@ -296,6 +274,7 @@
       </MudTable>
     }
   }
+  </div>
 </div>
 
 @code {
@@ -308,7 +287,6 @@
   private static readonly TimeSpan QueueSaveDebounceDelay = TimeSpan.FromMilliseconds(500);
 
   // ─── File browser state ───
-  private bool _showFileBrowser = false;
   private string _browserPath = "/";
   private string _browserRootPath = "/";
   private string _browserSearchQuery = "";
@@ -476,13 +454,29 @@
 
   private async Task OpenSavePlaylistDialogAsync()
   {
-    var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Small, FullWidth = true };
+    var options = new DialogOptions
+    {
+      CloseButton = true,
+      MaxWidth = MaxWidth.False,
+      FullWidth = true,
+      BackgroundClass = "bottom-sheet-backdrop",
+      Position = DialogPosition.BottomCenter,
+      BackdropClick = true
+    };
     await DialogService.ShowAsync<Radio.Web.Components.Dialogs.SavePlaylistDialog>("Save Playlist", options);
   }
 
   private async Task OpenLoadPlaylistDialogAsync()
   {
-    var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Small, FullWidth = true };
+    var options = new DialogOptions
+    {
+      CloseButton = true,
+      MaxWidth = MaxWidth.False,
+      FullWidth = true,
+      BackgroundClass = "bottom-sheet-backdrop",
+      Position = DialogPosition.BottomCenter,
+      BackdropClick = true
+    };
     var dialog = await DialogService.ShowAsync<Radio.Web.Components.Dialogs.LoadPlaylistDialog>("Load Playlist", options);
     var result = await dialog.Result;
     if (result != null && !result.Canceled)

@@ -7,14 +7,14 @@
 
 <PageTitle>Bluetooth - Radio Console</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.False" Class="pa-4">
+<div style="height: 100%; display: flex; gap: 2px; overflow: hidden;">
+  <!-- Left: Adapter Status & Controls -->
+  <div class="panel surface-raised" style="width: 50%; overflow-y: auto; padding: 16px;">
   <MudStack Spacing="3">
-
-    @* Header *@
     <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
       <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
         <MudIcon Icon="@Icons.Material.Filled.Bluetooth" Size="Size.Large" />
-        <MudText Typo="Typo.h4">Bluetooth</MudText>
+        <MudText Typo="Typo.h5">Bluetooth</MudText>
       </MudStack>
       <MudButton Variant="Variant.Filled" Color="Color.Primary"
                  OnClick="RefreshStatusAsync" StartIcon="@Icons.Material.Filled.Refresh">
@@ -122,9 +122,19 @@
           }
         </MudStack>
       </MudPaper>
+    }
 
+  </MudStack>
+  </div>
+
+  <!-- Right: Paired Devices & Discovery -->
+  <div class="panel surface-raised" style="flex: 1; overflow-y: auto; padding: 16px;">
+  @if (_status != null)
+  {
+    <MudStack Spacing="3">
       @* Paired Devices *@
-      <MudPaper Elevation="2" Class="pa-4">
+      <MudPaper Elevation="0" Class="pa-4" Style="background: transparent; border: 1px solid var(--surface-separator);">
+
         <MudStack Spacing="2">
           <MudText Typo="Typo.h6">Paired Devices</MudText>
 
@@ -180,7 +190,7 @@
       </MudPaper>
 
       @* Discovery Section *@
-      <MudPaper Elevation="2" Class="pa-4">
+      <MudPaper Elevation="0" Class="pa-4" Style="background: transparent; border: 1px solid var(--surface-separator);">
         <MudStack Spacing="2">
           <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
             <MudText Typo="Typo.h6">Device Discovery</MudText>
@@ -264,10 +274,10 @@
           }
         </MudStack>
       </MudPaper>
-    }
-
-  </MudStack>
-</MudContainer>
+    </MudStack>
+  }
+  </div>
+</div>
 
 @code {
   private BluetoothStatusDto? _status;

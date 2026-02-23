@@ -15,6 +15,7 @@ namespace Radio.Infrastructure.Audio.Sources.Primary;
 public class VinylAudioSource : USBAudioSourceBase
 {
   private readonly IOptionsMonitor<DeviceOptions> _deviceOptions;
+  private readonly string? _resolvedUSBPort;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="VinylAudioSource"/> class.
@@ -23,14 +24,17 @@ public class VinylAudioSource : USBAudioSourceBase
   /// <param name="deviceOptions">The device options configuration.</param>
   /// <param name="deviceManager">The audio device manager.</param>
   /// <param name="identificationService">Optional fingerprinting service for track identification.</param>
+  /// <param name="resolvedUSBPort">USB port resolved from config store, overrides IOptionsMonitor value.</param>
   public VinylAudioSource(
     ILogger<VinylAudioSource> logger,
     IOptionsMonitor<DeviceOptions> deviceOptions,
     IAudioDeviceManager deviceManager,
-    BackgroundIdentificationService? identificationService = null)
+    BackgroundIdentificationService? identificationService = null,
+    string? resolvedUSBPort = null)
     : base(logger, deviceManager, identificationService)
   {
     _deviceOptions = deviceOptions;
+    _resolvedUSBPort = resolvedUSBPort;
   }
 
   /// <inheritdoc/>
@@ -41,13 +45,16 @@ public class VinylAudioSource : USBAudioSourceBase
 
   /// <summary>
   /// Gets the USB port path for the vinyl device.
+  /// Prefers the resolved config store value over IOptionsMonitor.
   /// </summary>
-  public string USBPort => _deviceOptions.CurrentValue.Vinyl.USBPort;
+  public string USBPort => !string.IsNullOrWhiteSpace(_resolvedUSBPort)
+    ? _resolvedUSBPort
+    : _deviceOptions.CurrentValue.Vinyl.USBPort;
 
   /// <inheritdoc/>
   public override async Task InitializeAsync(CancellationToken cancellationToken = default)
   {
-    var usbPort = _deviceOptions.CurrentValue.Vinyl.USBPort;
+    var usbPort = USBPort;
 
     // Set standard metadata with defaults for Vinyl source
     SetDefaultMetadata("Vinyl", "Vinyl", "Turntable");

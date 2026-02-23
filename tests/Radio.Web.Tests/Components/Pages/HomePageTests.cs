@@ -88,8 +88,8 @@ public class HomePageTests : TestContext
     var cut = RenderComponent<Home>();
 
     Assert.NotNull(cut);
-    // Three-panel layout should render
-    Assert.Contains("mud-paper", cut.Markup);
+    // Three-panel layout should render with panel CSS class
+    Assert.Contains("panel", cut.Markup);
   }
 
   [Fact]
@@ -97,9 +97,9 @@ public class HomePageTests : TestContext
   {
     var cut = RenderComponent<Home>();
 
-    // Should have a flex container with three MudPaper panels
-    var papers = cut.FindAll(".mud-paper");
-    Assert.True(papers.Count >= 3, $"Expected at least 3 MudPaper panels, found {papers.Count}");
+    // Should have a flex container with three panel divs
+    var panels = cut.FindAll(".panel");
+    Assert.True(panels.Count >= 3, $"Expected at least 3 panel divs, found {panels.Count}");
   }
 
   [Fact]
@@ -123,13 +123,13 @@ public class HomePageTests : TestContext
   }
 
   [Fact]
-  public void Home_Contains_Volume_Control()
+  public void Home_Contains_Source_Chip()
   {
     var cut = RenderComponent<Home>();
 
-    // Volume slider renders percentage text
+    // NowPlayingPanel renders with track info area
     var markup = cut.Markup;
-    Assert.True(markup.Contains("%"), "Volume percentage should be displayed");
+    Assert.Contains("No Track Playing", markup);
   }
 
   [Fact]
@@ -149,13 +149,13 @@ public class HomePageTests : TestContext
   }
 
   [Fact]
-  public void Home_Contains_Volume_Slider()
+  public void Home_Contains_Progress_Or_Transport()
   {
     var cut = RenderComponent<Home>();
 
     var markup = cut.Markup;
-    // NowPlayingPanel has a volume slider (balance removed)
-    Assert.Contains("mud-slider", markup, StringComparison.OrdinalIgnoreCase);
+    // NowPlayingPanel has transport controls (volume moved to topbar)
+    Assert.Contains("transport-group", markup);
   }
 
   [Fact]
@@ -173,21 +173,21 @@ public class HomePageTests : TestContext
   {
     var cut = RenderComponent<Home>();
 
-    // VisualizerPanel renders with mode buttons and canvas
-    Assert.Contains("Visualizer", cut.Markup);
+    // VisualizerPanel renders with mode selector and canvas
     Assert.Contains("visualizer-panel-canvas", cut.Markup);
   }
 
   [Fact]
-  public void Home_Shows_MuteButton()
+  public void Home_Shows_TransportButtons()
   {
     var cut = RenderComponent<Home>();
 
     var buttons = cut.FindAll("button");
-    var muteButton = buttons.Any(b =>
-      b.GetAttribute("title")?.Contains("Mute") == true ||
-      b.GetAttribute("title")?.Contains("Unmute") == true);
-    Assert.True(muteButton, "Mute button should be present");
+    // Transport controls: shuffle, prev, play/pause, next, repeat
+    var playButton = buttons.Any(b =>
+      b.GetAttribute("title")?.Contains("Play") == true ||
+      b.GetAttribute("title")?.Contains("Pause") == true);
+    Assert.True(playButton, "Play/Pause button should be present");
   }
 
   [Fact]

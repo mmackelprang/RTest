@@ -8,6 +8,7 @@ using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Sources.Primary;
+using Radio.Infrastructure.Configuration;
 using Radio.Infrastructure.Configuration.Abstractions;
 
 namespace Radio.Infrastructure.Audio.Services;
@@ -35,6 +36,7 @@ public class AudioSourceFactory : IAudioSourceFactory
   private readonly SoundFlow.SoundFlowPlaybackService? _playbackService;
   private readonly IServiceScopeFactory? _serviceScopeFactory;
   private readonly AlbumArtCacheService? _albumArtCache;
+  private readonly DeviceOptionsResolver? _deviceOptionsResolver;
 
   public AudioSourceFactory(
     ILogger<AudioSourceFactory> logger,
@@ -53,7 +55,8 @@ public class AudioSourceFactory : IAudioSourceFactory
     Configuration.Abstractions.IConfigurationManager? configurationManager = null,
     SoundFlow.SoundFlowPlaybackService? playbackService = null,
     IServiceScopeFactory? serviceScopeFactory = null,
-    AlbumArtCacheService? albumArtCache = null)
+    AlbumArtCacheService? albumArtCache = null,
+    DeviceOptionsResolver? deviceOptionsResolver = null)
   {
     _logger = logger;
     _loggerFactory = loggerFactory;
@@ -72,6 +75,7 @@ public class AudioSourceFactory : IAudioSourceFactory
     _playbackService = playbackService;
     _serviceScopeFactory = serviceScopeFactory;
     _albumArtCache = albumArtCache;
+    _deviceOptionsResolver = deviceOptionsResolver;
   }
 
   /// <inheritdoc/>
@@ -128,11 +132,12 @@ public class AudioSourceFactory : IAudioSourceFactory
 
   private IAudioSource CreateVinylSource()
   {
-    var vinylConfig = _deviceOptions.CurrentValue.Vinyl;
-    if (vinylConfig == null || string.IsNullOrWhiteSpace(vinylConfig.USBPort))
+    // Resolve USB port from config store first, fall back to IOptionsMonitor
+    var resolvedUSBPort = GetVinylUSBPort();
+    if (string.IsNullOrWhiteSpace(resolvedUSBPort))
     {
       throw new InvalidOperationException(
-        "Vinyl source is not configured. Please configure the USB port in DeviceOptions.Vinyl section.");
+        "Vinyl source is not configured. Please configure the USB port in System > Configuration > Devices.");
     }
 
     var logger = _loggerFactory.CreateLogger<VinylAudioSource>();
@@ -140,22 +145,72 @@ public class AudioSourceFactory : IAudioSourceFactory
       logger,
       _deviceOptions,
       _deviceManager,
-      _identificationService);
+      _identificationService,
+      resolvedUSBPort);
+  }
+
+  /// <summary>
+  /// Gets the Vinyl USB port from the config store (if available) or IOptionsMonitor.
+  /// </summary>
+  private string GetVinylUSBPort()
+  {
+    if (_deviceOptionsResolver != null)
+    {
+      try
+      {
+        var port = _deviceOptionsResolver.GetVinylUSBPortAsync().GetAwaiter().GetResult();
+        if (!string.IsNullOrWhiteSpace(port))
+        {
+          return port;
+        }
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Failed to read Vinyl USB port from config store, using appsettings fallback");
+      }
+    }
+
+    return _deviceOptions.CurrentValue.Vinyl?.USBPort ?? "";
   }
 
   private IAudioSource CreateGenericUSBSource()
   {
-    var prefs = _genericSourcePreferences.CurrentValue;
-    if (string.IsNullOrWhiteSpace(prefs.USBPort))
+    var resolvedUSBPort = GetGenericUSBPort();
+    if (string.IsNullOrWhiteSpace(resolvedUSBPort))
     {
       throw new InvalidOperationException(
-        "Generic USB source is not configured. Please configure the USB port in GenericSourcePreferences section.");
+        "Generic USB source is not configured. Please configure the USB port in System > Configuration > Generic Source.");
     }
 
     var logger = _loggerFactory.CreateLogger<GenericUSBAudioSource>();
     return new GenericUSBAudioSource(
       logger,
       _genericSourcePreferences,
-      _deviceManager);
+      _deviceManager,
+      resolvedUSBPort);
+  }
+
+  /// <summary>
+  /// Gets the Generic USB port from the config store (if available) or IOptionsMonitor.
+  /// </summary>
+  private string GetGenericUSBPort()
+  {
+    if (_deviceOptionsResolver != null)
+    {
+      try
+      {
+        var port = _deviceOptionsResolver.GetGenericUSBPortAsync().GetAwaiter().GetResult();
+        if (!string.IsNullOrWhiteSpace(port))
+        {
+          return port;
+        }
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Failed to read Generic USB port from config store, using appsettings fallback");
+      }
+    }
+
+    return _genericSourcePreferences.CurrentValue?.USBPort ?? "";
   }
 }
