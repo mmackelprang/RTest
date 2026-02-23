@@ -34,9 +34,11 @@ public class DeviceOptions
 public class RadioDeviceOptions
 {
   /// <summary>
-  /// Gets or sets the USB port path for the radio device.
+  /// Gets or sets the USB audio device name pattern for the radio.
+  /// Matched as a case-insensitive substring against SoundFlow capture device names.
+  /// Example: "AB13X" matches "AB13X USB Audio".
   /// </summary>
-  public string USBPort { get; set; } = "/dev/ttyUSB0";
+  public string USBPort { get; set; } = "";
 }
 
 /// <summary>
@@ -45,9 +47,10 @@ public class RadioDeviceOptions
 public class VinylDeviceOptions
 {
   /// <summary>
-  /// Gets or sets the USB port path for the vinyl device.
+  /// Gets or sets the USB audio device name pattern for the turntable.
+  /// Matched as a case-insensitive substring against SoundFlow capture device names.
   /// </summary>
-  public string USBPort { get; set; } = "/dev/ttyUSB1";
+  public string USBPort { get; set; } = "";
 }
 
 /// <summary>

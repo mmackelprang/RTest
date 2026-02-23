@@ -312,20 +312,20 @@
             <MudGrid Spacing="2">
               <MudItem xs="12">
                 <MudAlert Severity="Severity.Info" Dense="true">
-                  Configure USB port paths for hardware devices. Linux/Pi uses /dev/ttyUSB*, Windows uses COM ports.
+                  Enter a substring of the USB audio device name (case-insensitive). Run <code>aplay -l</code> on Linux to list device names.
                 </MudAlert>
               </MudItem>
               <MudItem xs="12" md="6">
                 <MudTextField T="string" @bind-Value="_deviceOptions.Radio.USBPort"
-                              Label="Radio USB Port"
+                              Label="Radio Audio Device"
                               Variant="Variant.Outlined"
-                              HelperText="USB port for Raddy RF320 radio (e.g., /dev/ttyUSB0 on Linux, COM3 on Windows)" />
+                              HelperText="USB audio device name pattern for radio (e.g., AB13X)" />
               </MudItem>
               <MudItem xs="12" md="6">
                 <MudTextField T="string" @bind-Value="_deviceOptions.Vinyl.USBPort"
-                              Label="Vinyl USB Port"
+                              Label="Vinyl Audio Device"
                               Variant="Variant.Outlined"
-                              HelperText="USB port for vinyl turntable (e.g., /dev/ttyUSB1 on Linux, COM4 on Windows)" />
+                              HelperText="USB audio device name pattern for turntable" />
               </MudItem>
               <MudItem xs="12" md="6">
                 <MudTextField T="string" @bind-Value="_deviceOptions.Cast.DefaultDevice"
