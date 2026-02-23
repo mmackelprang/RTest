@@ -245,7 +245,16 @@
           <MudTh Style="width: 100px; font-size: 1rem;">Actions</MudTh>
         </HeaderContent>
         <RowTemplate>
-          <MudTd Style="width: 60px; min-height: 60px; font-size: 1rem;">@context.Index</MudTd>
+          <MudTd Style="width: 60px; min-height: 60px; font-size: 1rem;">
+            @if (context.IsCurrent)
+            {
+              <div class="now-playing-bars"><span></span><span></span><span></span></div>
+            }
+            else
+            {
+              @context.Index
+            }
+          </MudTd>
           <MudTd DataLabel="Title" Style="cursor: pointer; min-height: 60px; padding: 16px 8px;" @onclick="@(() => HandleJumpToAsync(context.Index))">
             <div style="font-weight: @(context.IsCurrent ? "600" : "400"); color: @(context.IsCurrent ? "var(--mud-palette-primary)" : "inherit"); font-size: 1.1rem; line-height: 1.5;">
               @context.Title

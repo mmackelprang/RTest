@@ -860,6 +860,8 @@ html, body {
 
 .skeleton-text { height: 16px; margin: 8px 0; border-radius: 4px; }
 .skeleton-heading { height: 24px; margin: 12px 0; width: 60%; border-radius: 4px; }
+.skeleton-circle { width: 48px; height: 48px; border-radius: 50%; }
+.skeleton-card { height: 120px; border-radius: 8px; }
 
 .spinner        { animation: spin 1s linear infinite; }
 .pulse          { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
@@ -894,6 +896,16 @@ html, body {
 .interactive-active:active {
   transform: scale(0.95);
   transition: transform var(--anim-duration-fast) var(--anim-ease-standard);
+}
+
+/* Global touch feedback for MudBlazor interactive elements */
+.mud-button-root:active,
+.mud-icon-button:active,
+.mud-chip:active,
+.mud-tab:active,
+.mud-list-item:active {
+  transform: scale(0.93);
+  transition: transform 60ms ease;
 }
 
 .checkmark-icon {
