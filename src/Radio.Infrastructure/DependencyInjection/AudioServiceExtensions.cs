@@ -123,17 +123,21 @@ public static class AudioServiceExtensions
     services.AddSingleton<AudioSourceFactory>();
     services.AddSingleton<IAudioSourceFactory>(sp => sp.GetRequiredService<AudioSourceFactory>());
 
+    // Register audio preference persistence (debounced volume/source saves)
+    services.AddSingleton<AudioPreferencePersistence>(sp => new AudioPreferencePersistence(
+      sp.GetRequiredService<ILogger<AudioPreferencePersistence>>(),
+      sp.GetRequiredService<IAudioEngine>(),
+      sp.GetRequiredService<IOptionsMonitor<AudioPreferences>>(),
+      sp.GetService<Configuration.Abstractions.IConfigurationManager>()));
+
     // Register audio manager (singleton to maintain state)
     // Use explicit factory to ensure all optional services are resolved.
     services.AddSingleton<AudioManager>(sp => new AudioManager(
       sp.GetRequiredService<ILogger<AudioManager>>(),
       sp.GetRequiredService<IAudioEngine>(),
       sp.GetRequiredService<IAudioSourceFactory>(),
-      sp.GetRequiredService<IBluetoothService>(),
-      sp.GetRequiredService<IOptionsMonitor<BluetoothOptions>>(),
-      sp.GetRequiredService<IOptionsMonitor<AudioPreferences>>(),
       sp.GetService<BackgroundIdentificationService>(),
-      sp.GetService<Configuration.Abstractions.IConfigurationManager>(),
+      sp.GetRequiredService<AudioPreferencePersistence>(),
       sp.GetRequiredService<PlayHistoryTracker>()));
     services.AddSingleton<IAudioManager>(sp => sp.GetRequiredService<AudioManager>());
 
@@ -145,6 +149,13 @@ public static class AudioServiceExtensions
       sp.GetRequiredService<IBluetoothService>(),
       sp.GetService<BackgroundIdentificationService>(),
       sp.GetService<IMetricsCollector>()));
+
+    // Register Bluetooth auto-switch service (Func<> defers IAudioManager resolution)
+    services.AddSingleton<BluetoothAutoSwitchService>(sp => new BluetoothAutoSwitchService(
+      sp.GetRequiredService<ILogger<BluetoothAutoSwitchService>>(),
+      sp.GetRequiredService<IBluetoothService>(),
+      sp.GetRequiredService<IOptionsMonitor<BluetoothOptions>>(),
+      () => sp.GetRequiredService<IAudioManager>()));
 
     // Register event audio source services
     services.AddEventAudioSources(configuration);
