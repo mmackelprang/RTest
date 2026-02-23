@@ -22,8 +22,8 @@
                  Style="flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0;">
       <div style="height: 100%; display: flex; flex-direction: column; min-height: 0;">
         <!-- Queue Header -->
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px;">
-          <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">
+        <div class="panel-header">
+          <span>
             @if (_playedCount > 0)
             {
               @($"{_playedCount}/{_queueItems.Count} played")
@@ -32,8 +32,8 @@
             {
               @($"{_queueItems.Count} tracks")
             }
-          </MudText>
-          <div style="display: flex; gap: 8px;">
+          </span>
+          <div style="display: flex; gap: 4px;">
             <MudIconButton Icon="@Icons.Material.Filled.Add"
                            Color="Color.Primary"
                            Size="Size.Small"
@@ -57,9 +57,9 @@
         <!-- Queue List -->
         @if (!_queueItems.Any())
         {
-          <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-secondary);">
-            <MudIcon Icon="@Icons.Material.Filled.QueueMusic" Style="font-size: 64px; opacity: 0.5; margin-bottom: 8px;" />
-            <MudText Typo="Typo.body2">No tracks in queue</MudText>
+          <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-low);">
+            <MudIcon Icon="@Icons.Material.Filled.QueueMusic" Style="font-size: 80px; opacity: 0.4; margin-bottom: 12px;" />
+            <span style="font-size: 16px;">No tracks in queue</span>
           </div>
         }
         else
@@ -73,21 +73,21 @@
               var isPlayed = itemState == "Played";
               var isClickable = !isError;
 
-              <div style="display: flex; align-items: center; gap: 8px; padding: 6px 12px;
-                          cursor: @(isClickable ? "pointer" : "not-allowed");
-                          border-left: 3px solid @(isCurrent ? "var(--mud-palette-primary)" : isError ? "var(--mud-palette-error)" : "transparent");
-                          background: @(isCurrent ? "rgba(var(--mud-palette-primary-rgb), 0.08)" : "transparent");
+              <div class="list-item-touch @(isCurrent ? "list-item-active" : "")"
+                   style="cursor: @(isClickable ? "pointer" : "not-allowed");
                           opacity: @(isError ? "0.4" : isPlayed ? "0.6" : "1");"
                    @onclick="@(() => HandleItemClickAsync(item))">
                 <!-- State icon -->
                 <div style="width: 24px; text-align: center; flex-shrink: 0;">
                   @if (isCurrent)
                   {
-                    <MudIcon Icon="@Icons.Material.Filled.PlayArrow" Color="Color.Primary" Size="Size.Small" />
+                    <div class="now-playing-bars">
+                      <span></span><span></span><span></span>
+                    </div>
                   }
                   else if (isPlayed)
                   {
-                    <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Style="color: var(--text-secondary);" />
+                    <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Style="color: var(--text-low);" />
                   }
                   else if (isError)
                   {
@@ -95,21 +95,21 @@
                   }
                   else
                   {
-                    <MudText Typo="Typo.caption" Style="color: var(--text-secondary);">@(item.FullPlaylistIndex + 1)</MudText>
+                    <span style="font-size: 13px; color: var(--text-low); font-family: var(--font-mono);">@(item.FullPlaylistIndex + 1)</span>
                   }
                 </div>
 
                 <!-- Track info -->
                 <div style="flex: 1; min-width: 0;">
-                  <div style="font-size: 14px;
+                  <div style="font-size: 16px;
                               font-weight: @(isCurrent ? "600" : "400");
-                              color: @(isCurrent ? "var(--mud-palette-primary)" : isError ? "var(--mud-palette-error)" : "inherit");
+                              color: @(isCurrent ? "var(--accent-primary)" : isError ? "var(--signal-red)" : "var(--text-high)");
                               white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
                               @(isError ? "text-decoration: line-through;" : "")">
                     @item.Title
                   </div>
-                  <div style="font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    @item.Artist @if (!string.IsNullOrEmpty(item.Duration)) { <text> - @item.Duration</text> }
+                  <div style="font-size: 14px; color: var(--text-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    @item.Artist @if (!string.IsNullOrEmpty(item.Duration)) { <text> · @item.Duration</text> }
                   </div>
                 </div>
 
@@ -135,8 +135,8 @@
                  Style="flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0;">
       <div style="height: 100%; display: flex; flex-direction: column; min-height: 0;">
         <!-- History Header -->
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px;">
-          <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Recent Plays</MudText>
+        <div class="panel-header">
+          <span>Recent Plays</span>
           <MudIconButton Icon="@Icons.Material.Filled.Refresh"
                          Color="Color.Default"
                          Size="Size.Small"
@@ -156,16 +156,16 @@
           <div style="flex: 1; overflow-y: auto; min-height: 0;">
             @foreach (var item in _historyItems)
             {
-              <div style="display: flex; align-items: center; gap: 8px; padding: 6px 12px;">
+              <div class="list-item-touch">
                 <div style="flex: 1; min-width: 0;">
-                  <div style="font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  <div style="font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-high);">
                     @(item.Title ?? "Unknown")
                   </div>
-                  <div style="font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  <div style="font-size: 14px; color: var(--text-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                     @(item.Artist ?? "--")@if (item.DurationSeconds.HasValue) { <text> · @FormatDuration(item.DurationSeconds)</text> }
                   </div>
                 </div>
-                <MudChip T="string" Size="Size.Small" Color="@GetSourceColor(item.Source)" Style="font-size: 10px;">
+                <MudChip T="string" Size="Size.Small" Color="@GetSourceColor(item.Source)" Style="font-size: 13px;">
                   @item.Source
                 </MudChip>
               </div>
@@ -174,9 +174,9 @@
         }
         else
         {
-          <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-secondary);">
-            <MudIcon Icon="@Icons.Material.Filled.History" Style="font-size: 64px; opacity: 0.5; margin-bottom: 8px;" />
-            <MudText Typo="Typo.body2">No history yet</MudText>
+          <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-low);">
+            <MudIcon Icon="@Icons.Material.Filled.History" Style="font-size: 80px; opacity: 0.4; margin-bottom: 12px;" />
+            <span style="font-size: 16px;">No history yet</span>
           </div>
         }
       </div>
