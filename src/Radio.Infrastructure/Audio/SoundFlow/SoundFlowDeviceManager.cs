@@ -59,7 +59,7 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
     _audioOutputOptionsMonitor.OnChange(opts =>
     {
       _logger.LogInformation("Audio output options changed, reloading display settings");
-      ReloadDisplaySettings(opts.DeviceDisplay);
+      ReloadDisplaySettingsInternal(opts.DeviceDisplay);
     });
 
     // Initialize device cache immediately
@@ -591,10 +591,20 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
   /// </summary>
   public void ReloadDisplaySettings()
   {
-    ReloadDisplaySettings(_audioOutputOptionsMonitor.CurrentValue.DeviceDisplay);
+    ReloadDisplaySettingsInternal(_audioOutputOptionsMonitor.CurrentValue.DeviceDisplay);
   }
 
-  private void ReloadDisplaySettings(DeviceDisplayOptions newOptions)
+  /// <summary>
+  /// Reloads display settings using explicitly provided display options.
+  /// Use this when the caller has freshly-persisted data that IOptionsMonitor
+  /// may not yet reflect (e.g., after writing to SQLite config store).
+  /// </summary>
+  public void ReloadDisplaySettings(DeviceDisplayOptions options)
+  {
+    ReloadDisplaySettingsInternal(options);
+  }
+
+  private void ReloadDisplaySettingsInternal(DeviceDisplayOptions newOptions)
   {
     _displayOptions = newOptions;
     _hiddenPatterns = CompileHiddenPatterns(_displayOptions);
