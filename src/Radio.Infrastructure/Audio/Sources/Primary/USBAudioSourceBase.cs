@@ -194,8 +194,12 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
         targetDevice = captureDevices[0];
       }
 
-      // Initialize the capture device with standard CD quality audio format (44.1kHz stereo)
-      _captureDevice = _audioEngine.InitializeCaptureDevice(targetDevice, AudioFormat.Cd);
+      // Match the capture sample rate to the playback engine to avoid rate mismatch
+      // (44.1kHz capture into 48kHz playback causes ~8% silence padding = faint audio)
+      var captureFormat = _playbackService != null
+        ? _playbackService.GetAudioFormat()
+        : AudioFormat.Cd;
+      _captureDevice = _audioEngine.InitializeCaptureDevice(targetDevice, captureFormat);
 
       // Subscribe to audio capture events
       _captureDevice.OnAudioProcessed += OnAudioCaptured;
