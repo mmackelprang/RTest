@@ -4,6 +4,7 @@ using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
+using Radio.Infrastructure.Audio.SoundFlow;
 
 namespace Radio.Infrastructure.Audio.Sources.Primary;
 
@@ -38,14 +39,16 @@ public class RadioAudioSource : USBAudioSourceBase, Radio.Core.Interfaces.Audio.
   /// <param name="deviceManager">The audio device manager.</param>
   /// <param name="identificationService">Optional fingerprinting service for track identification.</param>
   /// <param name="resolvedUSBPort">USB port resolved from config store, overrides IOptionsMonitor value.</param>
+  /// <param name="playbackService">Optional SoundFlow playback service for routing captured audio to output.</param>
   public RadioAudioSource(
     ILogger<RadioAudioSource> logger,
     IOptionsMonitor<DeviceOptions> deviceOptions,
     IOptionsMonitor<RadioOptions> radioOptions,
     IAudioDeviceManager deviceManager,
     BackgroundIdentificationService? identificationService = null,
-    string? resolvedUSBPort = null)
-    : base(logger, deviceManager, identificationService)
+    string? resolvedUSBPort = null,
+    SoundFlowPlaybackService? playbackService = null)
+    : base(logger, deviceManager, identificationService, playbackService: playbackService)
   {
     _deviceOptions = deviceOptions;
     _radioOptions = radioOptions;

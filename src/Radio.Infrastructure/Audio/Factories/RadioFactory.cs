@@ -209,7 +209,8 @@ public class RadioFactory : IRadioFactory
         _radioOptions,
         _deviceManager,
         _identificationService,
-        resolvedUSBPort);
+        resolvedUSBPort,
+        _playbackService);
 
       _logger.LogInformation("Successfully created RF320 radio source with USB port: {USBPort}", resolvedUSBPort);
       return source;
