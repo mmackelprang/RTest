@@ -38,6 +38,12 @@
           <MudIcon Icon="@GetSourceIcon(source.Type)" Size="Size.Small" />
         </div>
       }
+      @if (IsBluetoothSourceSelected())
+      {
+        <div class="route-toggle" @onclick="@(() => NavigationManager.NavigateTo("/bluetooth"))" title="Bluetooth Settings">
+          <MudIcon Icon="@Icons.Material.Filled.SettingsBluetooth" Size="Size.Small" />
+        </div>
+      }
     </div>
 
     <div class="topbar-separator"></div>
@@ -499,6 +505,13 @@
   private static bool IsSourceAvailable(AudioSourceDto source) =>
     source.State != "Unavailable" && source.State != "Error";
 
+  private bool IsBluetoothSourceSelected()
+  {
+    if (_selectedSourceId == null) return false;
+    var source = _availableSources.FirstOrDefault(s => s.Id == _selectedSourceId);
+    return source?.Type == "Bluetooth";
+  }
+
   // Active page detection for nav highlighting
   private bool IsCurrentPage(string path)
   {
@@ -516,15 +529,15 @@
     if (!IsSourceAvailable(source)) return;
     if (source.Id == _selectedSourceId)
     {
-      // Already selected — if it's Radio or BT, navigate to their page
+      // Already selected — navigate to source-specific page for settings
       NavigateToSourcePage(source.Type);
       return;
     }
 
     await HandleSourceChangeAsync(source.Id);
 
-    // Auto-navigate to source-specific pages
-    NavigateToSourcePage(source.Type);
+    // Stay on current page so Now Playing remains visible.
+    // User can navigate to source-specific pages via nav icons or config buttons.
   }
 
   private void NavigateToSourcePage(string sourceType)

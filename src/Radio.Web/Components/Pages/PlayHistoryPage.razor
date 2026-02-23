@@ -11,8 +11,8 @@
 
 <div style="height: 100%; display: flex; gap: 2px; overflow: hidden;">
   <!-- Left: Filters & Statistics -->
-  <div class="panel surface-raised" style="width: 360px; flex-shrink: 0; overflow-y: auto; padding: 16px;">
-    <MudStack Spacing="3">
+  <div class="panel surface-raised" style="width: 360px; flex-shrink: 0; overflow: hidden; padding: 16px; display: flex; flex-direction: column;">
+    <MudStack Spacing="3" Style="overflow-y: auto; flex: 1;">
       <MudText Typo="Typo.h6">Play History</MudText>
 
       <MudDatePicker Label="Filter by Date" @bind-Date="_selectedDate" Clearable="true" />
@@ -82,9 +82,8 @@
   </div>
 
   <!-- Right: History List -->
-  <div class="panel surface-raised" style="flex: 1; overflow-y: auto; padding: 16px;">
-    <MudPaper Elevation="0" Style="background: transparent;">
-    <div class="d-flex justify-space-between align-center mb-3">
+  <div class="panel surface-raised" style="flex: 1; overflow: hidden; padding: 16px; display: flex; flex-direction: column;">
+    <div class="d-flex justify-space-between align-center mb-3" style="flex-shrink: 0;">
       <MudText Typo="Typo.h6">History (@(_historyData?.TotalCount ?? 0) items)</MudText>
       <div>
         <MudButton Color="Color.Info" 
@@ -116,12 +115,12 @@
     }
     else if (_historyData?.Items.Any() == true)
     {
-      <MudTable Items="@_historyData.Items" 
-                Hover="true" 
+      <MudTable Items="@_historyData.Items"
+                Hover="true"
                 Breakpoint="Breakpoint.Sm"
                 Dense="true"
                 FixedHeader="true"
-                Height="400px">
+                Style="flex: 1; overflow: auto;">
         <HeaderContent>
           <MudTh>Date/Time</MudTh>
           <MudTh>Title</MudTh>
@@ -172,7 +171,6 @@
         </MudText>
       </div>
     }
-  </MudPaper>
   </div>
 </div>
 

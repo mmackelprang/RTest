@@ -958,6 +958,15 @@ html, body {
 .mud-tabs .mud-tab { min-height: 44px; font-size: 15px; }
 .mud-tab.mud-tab-active { color: var(--accent-primary) !important; }
 
+/* Vertical tabs — left-align text */
+.mud-tabs-vertical .mud-tab { justify-content: flex-start !important; text-align: left; }
+.mud-tabs-vertical .mud-tab-content { justify-content: flex-start; }
+
+/* Switches — normalize thumb to fit track */
+.mud-switch .mud-switch-thumb { width: 20px; height: 20px; }
+.mud-switch .mud-switch-track { width: 36px; height: 20px; border-radius: 10px; }
+.mud-switch .mud-switch-button { width: 36px; height: 20px; }
+
 /* Chips */
 .mud-chip { border-radius: 16px; font-size: 13px; }
 
