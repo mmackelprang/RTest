@@ -1,13 +1,8 @@
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using Radio.Core.Configuration;
 using Radio.Core.Events;
-using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
-using Radio.Infrastructure.Configuration.Abstractions;
-using Radio.Infrastructure.Configuration.Models;
 
 namespace Radio.Infrastructure.Audio.Services;
 
@@ -20,18 +15,9 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   private readonly ILogger<AudioManager> _logger;
   private readonly IAudioEngine _audioEngine;
   private readonly IAudioSourceFactory _sourceFactory;
-  private readonly IBluetoothService _bluetoothService;
-  private readonly IOptionsMonitor<BluetoothOptions> _bluetoothOptions;
-  private readonly IOptionsMonitor<AudioPreferences> _audioPreferences;
   private readonly BackgroundIdentificationService? _identificationService;
-  private readonly Configuration.Abstractions.IConfigurationManager? _configurationManager;
-
-  // Play history tracking (extracted to PlayHistoryTracker)
+  private readonly AudioPreferencePersistence? _preferencePersistence;
   private readonly PlayHistoryTracker? _playHistoryTracker;
-
-  // Volume persistence debounce
-  private Timer? _volumePersistTimer;
-  private readonly object _volumePersistLock = new();
 
   // State
   private IAudioSource? _activeSource;
@@ -49,24 +35,16 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     ILogger<AudioManager> logger,
     IAudioEngine audioEngine,
     IAudioSourceFactory sourceFactory,
-    IBluetoothService bluetoothService,
-    IOptionsMonitor<BluetoothOptions> bluetoothOptions,
-    IOptionsMonitor<AudioPreferences> audioPreferences,
     BackgroundIdentificationService? identificationService = null,
-    Configuration.Abstractions.IConfigurationManager? configurationManager = null,
+    AudioPreferencePersistence? preferencePersistence = null,
     PlayHistoryTracker? playHistoryTracker = null)
   {
     _logger = logger;
     _audioEngine = audioEngine;
     _sourceFactory = sourceFactory;
-    _bluetoothService = bluetoothService;
-    _bluetoothOptions = bluetoothOptions;
-    _audioPreferences = audioPreferences;
     _identificationService = identificationService;
-    _configurationManager = configurationManager;
+    _preferencePersistence = preferencePersistence;
     _playHistoryTracker = playHistoryTracker;
-
-    _bluetoothService.DeviceConnected += OnBluetoothDeviceConnected;
   }
 
   /// <inheritdoc/>
@@ -82,7 +60,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     set
     {
       _audioEngine.GetMasterMixer().MasterVolume = value;
-      ScheduleVolumePersist();
+      _preferencePersistence?.ScheduleVolumePersist();
     }
   }
 
@@ -93,7 +71,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     set
     {
       _audioEngine.GetMasterMixer().IsMuted = value;
-      ScheduleVolumePersist();
+      _preferencePersistence?.ScheduleVolumePersist();
     }
   }
 
@@ -104,7 +82,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     set
     {
       _audioEngine.GetMasterMixer().Balance = value;
-      ScheduleVolumePersist();
+      _preferencePersistence?.ScheduleVolumePersist();
     }
   }
 
@@ -125,14 +103,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     }
 
     // Restore volume/mute/balance from persisted preferences
-    RestoreVolumePreferences();
-
-    // Pre-warm Bluetooth if enabled on startup
-    if (_bluetoothOptions.CurrentValue.EnableOnStartup)
-    {
-      _logger.LogInformation("Pre-initializing Bluetooth source (EnableOnStartup=true)");
-      await GetOrCreateSourceAsync(AudioSourceType.Bluetooth, switchToSource: false, cancellationToken);
-    }
+    _preferencePersistence?.RestoreVolumePreferences();
 
     _initialized = true;
     _logger.LogInformation("AudioManager initialized successfully");
@@ -162,9 +133,9 @@ public class AudioManager : IAudioManager, IAsyncDisposable
       var oldSource = _activeSource;
 
       // Determine if old source should keep playing during transition
-      bool shouldKeepOldSourcePlaying = oldSource != null && 
+      bool shouldKeepOldSourcePlaying = oldSource != null &&
                                          oldSource != source &&
-                                         (oldSource.State == AudioSourceState.Playing || 
+                                         (oldSource.State == AudioSourceState.Playing ||
                                           oldSource.State == AudioSourceState.Paused);
 
       if (shouldKeepOldSourcePlaying)
@@ -214,7 +185,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
             "Starting playback on new source: {SourceName}",
             source.Name);
           await newPrimary.PlayAsync(cancellationToken);
-          
+
           // Cleanup of the old source (stop + mixer removal) is handled centrally
           // in the StateChanged event handler when the new source transitions to Playing.
           // This avoids duplicate cleanup paths and potential race conditions.
@@ -228,7 +199,10 @@ public class AudioManager : IAudioManager, IAsyncDisposable
       }
 
       // Persist the source selection
-      await PersistSourcePreferenceAsync(source.Type, cancellationToken);
+      if (_preferencePersistence != null)
+      {
+        await _preferencePersistence.PersistSourcePreferenceAsync(source.Type, cancellationToken);
+      }
 
       _logger.LogInformation(
         "Successfully switched to source: {SourceName} ({SourceType})",
@@ -295,12 +269,6 @@ public class AudioManager : IAudioManager, IAsyncDisposable
 
       _logger.LogInformation("Creating new source for type: {SourceType}", sourceType);
 
-      if (sourceType == AudioSourceType.Bluetooth && !_bluetoothService.IsAvailable)
-      {
-        _logger.LogWarning("Bluetooth service not available; cannot create Bluetooth source");
-        return null;
-      }
-
       try
       {
         source = _sourceFactory.CreateSource(sourceType);
@@ -338,7 +306,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
       // Cache the source for reuse
       _sourceCache[sourceType] = source;
 
-      // Subscribe to state changes for play history tracking
+      // Subscribe to state changes for source cleanup and play history tracking
       SubscribeToSourceStateChanges(source);
 
       // Add to mixer
@@ -361,197 +329,6 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     }
 
     return source;
-  }
-
-  /// <summary>
-  /// Restores the last active audio source based on saved preferences.
-  /// Falls back to Radio if the preferred source is unavailable.
-  /// </summary>
-  /// <param name="cancellationToken">Cancellation token.</param>
-  public async Task RestoreLastSourceAsync(CancellationToken cancellationToken = default)
-  {
-    ObjectDisposedException.ThrowIf(_disposed, this);
-
-    var prefs = _audioPreferences.CurrentValue;
-    var lastSource = prefs.CurrentSource ?? "Radio";
-
-    _logger.LogInformation("Attempting to restore last source: {LastSource}", lastSource);
-
-    if (!Enum.TryParse<AudioSourceType>(lastSource, true, out var sourceType))
-    {
-      _logger.LogWarning("Invalid source type in preferences: {LastSource}, defaulting to Radio", lastSource);
-      sourceType = AudioSourceType.Radio;
-    }
-
-    try
-    {
-      var source = await GetOrCreateSourceAsync(sourceType, switchToSource: true, cancellationToken);
-      if (source == null)
-      {
-        throw new InvalidOperationException($"Failed to create source for type: {sourceType}");
-      }
-      _logger.LogInformation("Successfully restored source: {SourceType}", sourceType);
-    }
-    catch (Exception ex)
-    {
-      _logger.LogWarning(ex, "Failed to restore source {SourceType}, falling back to Radio", sourceType);
-
-      // Don't try to fallback to Radio if Radio was what failed
-      if (sourceType != AudioSourceType.Radio)
-      {
-        try
-        {
-          var radioSource = await GetOrCreateSourceAsync(AudioSourceType.Radio, switchToSource: true, cancellationToken);
-          if (radioSource == null)
-          {
-            throw new InvalidOperationException("Failed to create fallback Radio source");
-          }
-          _logger.LogInformation("Fell back to Radio source");
-        }
-        catch (Exception radioEx)
-        {
-          _logger.LogError(radioEx, "Failed to create fallback Radio source");
-          throw;
-        }
-      }
-      else
-      {
-        throw;
-      }
-    }
-  }
-
-  /// <summary>
-  /// Persists the current source selection to preferences.
-  /// </summary>
-  private async Task PersistSourcePreferenceAsync(AudioSourceType sourceType, CancellationToken cancellationToken)
-  {
-    if (_configurationManager == null)
-    {
-      _logger.LogDebug("ConfigurationManager not available, skipping preference persistence");
-      return;
-    }
-
-    try
-    {
-      // Use the main configuration store ("config" or "sqlite") to ensure IOptionsMonitor picks up the change
-      // Key must match the section name defined in AudioPreferences
-      var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
-      
-      await _configurationManager.SetValueAsync(
-        storeId,
-        "AudioPreferences:CurrentSource",
-        sourceType.ToString(),
-        cancellationToken);
-
-      _logger.LogDebug("Persisted source preference: {SourceType}", sourceType);
-    }
-    catch (Exception ex)
-    {
-      _logger.LogWarning(ex, "Failed to persist source preference for {SourceType}", sourceType);
-    }
-  }
-
-  /// <summary>
-  /// Schedules a debounced persistence of volume/mute/balance preferences.
-  /// Waits 500ms after the last change before writing, to avoid SQLite churn during slider drags.
-  /// </summary>
-  private void ScheduleVolumePersist()
-  {
-    if (_configurationManager == null) return;
-
-    lock (_volumePersistLock)
-    {
-      _volumePersistTimer?.Dispose();
-      _volumePersistTimer = new Timer(
-        _ => _ = PersistVolumePreferencesAsync(),
-        null,
-        TimeSpan.FromMilliseconds(500),
-        Timeout.InfiniteTimeSpan);
-    }
-  }
-
-  /// <summary>
-  /// Persists current volume, mute, and balance to the configuration store.
-  /// </summary>
-  private async Task PersistVolumePreferencesAsync()
-  {
-    if (_configurationManager == null) return;
-
-    try
-    {
-      var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
-      var volume = (int)Math.Round(MasterVolume * 100);
-      var balance = (int)Math.Round(Balance * 100);
-
-      await _configurationManager.SetValueAsync(storeId, "AudioPreferences:MasterVolume", volume.ToString());
-      await _configurationManager.SetValueAsync(storeId, "AudioPreferences:IsMuted", IsMuted.ToString());
-      await _configurationManager.SetValueAsync(storeId, "AudioPreferences:Balance", balance.ToString());
-
-      _logger.LogDebug("Persisted volume preferences: Volume={Volume}%, Muted={Muted}, Balance={Balance}%",
-        volume, IsMuted, balance);
-    }
-    catch (Exception ex)
-    {
-      _logger.LogWarning(ex, "Failed to persist volume preferences");
-    }
-  }
-
-  /// <summary>
-  /// Restores volume, mute, and balance from persisted preferences.
-  /// Reads from the config store directly (SQLite) since IOptionsMonitor only reflects appsettings.json defaults.
-  /// Sets the mixer directly to avoid triggering re-persistence.
-  /// </summary>
-  private void RestoreVolumePreferences()
-  {
-    try
-    {
-      var mixer = _audioEngine.GetMasterMixer();
-
-      // Try to read from config store (SQLite) first — this has the actual persisted runtime values
-      int volumePercent = _audioPreferences.CurrentValue.MasterVolume;
-      bool isMuted = _audioPreferences.CurrentValue.IsMuted;
-
-      if (_configurationManager != null)
-      {
-        try
-        {
-          var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
-          _logger.LogDebug("Reading volume from config store '{StoreId}'", storeId);
-          var store = _configurationManager.GetStoreAsync(storeId).GetAwaiter().GetResult();
-
-          var volEntry = store.GetEntryAsync("AudioPreferences:MasterVolume").GetAwaiter().GetResult();
-          _logger.LogDebug("Config store volume entry: {Entry}", volEntry?.Value ?? "null");
-          if (volEntry != null && int.TryParse(volEntry.Value, out var storedVol))
-            volumePercent = storedVol;
-
-          var muteEntry = store.GetEntryAsync("AudioPreferences:IsMuted").GetAwaiter().GetResult();
-          _logger.LogDebug("Config store mute entry: {Entry}", muteEntry?.Value ?? "null");
-          if (muteEntry != null && bool.TryParse(muteEntry.Value, out var storedMuted))
-            isMuted = storedMuted;
-        }
-        catch (Exception ex)
-        {
-          _logger.LogWarning(ex, "Could not read volume from config store, using defaults");
-        }
-      }
-      else
-      {
-        _logger.LogWarning("No configuration manager available, cannot restore persisted volume");
-      }
-
-      mixer.MasterVolume = volumePercent / 100f;
-      mixer.IsMuted = isMuted;
-      mixer.Balance = 0f; // Always centered — balance control removed from UI
-
-      _logger.LogInformation(
-        "Restored volume preferences: Volume={Volume}%, Muted={Muted}",
-        volumePercent, isMuted);
-    }
-    catch (Exception ex)
-    {
-      _logger.LogWarning(ex, "Failed to restore volume preferences");
-    }
   }
 
   /// <summary>
@@ -640,38 +417,6 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     }
   }
 
-  /// <summary>
-  /// Auto-switch to Bluetooth when a device connects if enabled.
-  /// </summary>
-  private async void OnBluetoothDeviceConnected(object? sender, BluetoothDeviceConnectedEventArgs e)
-  {
-    try
-    {
-      if (!_bluetoothOptions.CurrentValue.AutoSwitchOnConnect)
-      {
-        return;
-      }
-
-      if (!_bluetoothService.IsAvailable)
-      {
-        _logger.LogWarning("Bluetooth auto-switch skipped; adapter not available");
-        return;
-      }
-
-      if (_activeSource?.Type == AudioSourceType.Bluetooth)
-      {
-        _logger.LogDebug("Bluetooth device connected but Bluetooth is already the active source; skipping switch");
-        return;
-      }
-
-      await GetOrCreateSourceAsync(AudioSourceType.Bluetooth, switchToSource: true);
-    }
-    catch (Exception ex)
-    {
-      _logger.LogError(ex, "Failed to auto-switch to Bluetooth after device connect {Device}", e.Device.Address);
-    }
-  }
-
   /// <inheritdoc/>
   public async ValueTask DisposeAsync()
   {
@@ -686,9 +431,6 @@ public class AudioManager : IAudioManager, IAsyncDisposable
 
     // Dispose play history tracker (unsubscribes from identification + BT metadata events)
     _playHistoryTracker?.Dispose();
-
-    // Unsubscribe Bluetooth events
-    _bluetoothService.DeviceConnected -= OnBluetoothDeviceConnected;
 
     // Stop current playback (don't call StopAsync as it checks disposed flag)
     try
@@ -719,24 +461,11 @@ public class AudioManager : IAudioManager, IAsyncDisposable
 
     _sourceCache.Clear();
 
-    // Dispose volume persistence timer
-    lock (_volumePersistLock)
-    {
-      _volumePersistTimer?.Dispose();
-      _volumePersistTimer = null;
-    }
+    // Dispose preference persistence (timer cleanup)
+    _preferencePersistence?.Dispose();
 
     _switchLock.Dispose();
     _createLock.Dispose();
-
-    try
-    {
-      await _bluetoothService.DisposeAsync();
-    }
-    catch (Exception ex)
-    {
-      _logger.LogWarning(ex, "Error disposing Bluetooth service");
-    }
 
     _logger.LogInformation("AudioManager disposed");
   }

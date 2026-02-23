@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Outputs;
+using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Configuration.Models;
 using IAppConfigurationManager = Radio.Infrastructure.Configuration.Abstractions.IConfigurationManager;
 
@@ -26,6 +27,7 @@ public class AudioEngineInitializationService : IHostedService
   private readonly IOptions<BluetoothOptions> _bluetoothOptions;
   private readonly IOptions<AudioOutputOptions> _audioOutputOptions;
   private readonly IBluetoothService? _bluetoothService;
+  private readonly BluetoothAutoSwitchService? _bluetoothAutoSwitch;
   private readonly GoogleCastOutput? _castOutput;
   private readonly HttpStreamOutput? _httpOutput;
 
@@ -54,6 +56,7 @@ public class AudioEngineInitializationService : IHostedService
     _audioManager = serviceProvider.GetService<IAudioManager>();
     _configManager = serviceProvider.GetService<IAppConfigurationManager>();
     _bluetoothService = serviceProvider.GetService<IBluetoothService>();
+    _bluetoothAutoSwitch = serviceProvider.GetService<BluetoothAutoSwitchService>();
     _castOutput = serviceProvider.GetService<GoogleCastOutput>();
     _httpOutput = serviceProvider.GetService<HttpStreamOutput>();
   }
@@ -102,6 +105,12 @@ public class AudioEngineInitializationService : IHostedService
       if (_audioManager != null)
       {
         await _audioManager.InitializeAsync(cancellationToken);
+      }
+
+      // Pre-warm Bluetooth source if configured (creates source without switching to it)
+      if (_bluetoothAutoSwitch != null)
+      {
+        await _bluetoothAutoSwitch.PreWarmBluetoothAsync(cancellationToken);
       }
 
       // Enable Bluetooth discoverability on startup if configured
