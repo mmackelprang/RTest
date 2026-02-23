@@ -99,6 +99,7 @@
         <MudIconButton Icon="@Icons.Material.Filled.QueueMusic" Class="@NavClass("/queue")" Href="/queue" Size="Size.Medium" title="Queue" />
       </MudBadge>
       <MudIconButton Icon="@Icons.Material.Filled.Dashboard" Class="@NavClass("/metrics")" Href="/metrics" Size="Size.Medium" title="Metrics" />
+      <MudIconButton Icon="@Icons.Material.Filled.Devices" Class="@NavClass("/devices")" Href="/devices" Size="Size.Medium" title="Devices" />
       <MudIconButton Icon="@Icons.Material.Filled.History" Class="@NavClass("/history")" Href="/history" Size="Size.Medium" title="History" />
       <MudIconButton Icon="@Icons.Material.Filled.Settings" Class="@NavClass("/system")" Href="/system" Size="Size.Medium" title="Settings" />
     </div>
@@ -327,14 +328,35 @@
       Logger.LogDebug("Loading audio output devices...");
       var outputsTask = DevicesApi.GetOutputDevicesAsync();
       var defaultCastTask = DevicesApi.GetDefaultCastDeviceAsync();
-      await Task.WhenAll(outputsTask, defaultCastTask);
+      var displayTask = DevicesApi.GetDeviceDisplaySettingsAsync();
+      await Task.WhenAll(outputsTask, defaultCastTask, displayTask);
 
       var outputs = await outputsTask;
       _defaultCastDevice = await defaultCastTask;
+      var displaySettings = await displayTask;
 
       if (outputs != null && outputs.Count > 0)
       {
-        Logger.LogDebug("Loaded {Count} output devices: {Devices}",
+        // Filter out hidden devices using display settings
+        if (displaySettings != null)
+        {
+          var hiddenNames = displaySettings
+            .Where(d => d.IsHidden)
+            .Select(d => d.RawName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+          outputs = outputs.Where(o => !hiddenNames.Contains(o.Name)).ToList();
+
+          // Apply friendly names from display settings
+          foreach (var output in outputs)
+          {
+            var display = displaySettings.FirstOrDefault(d =>
+              d.RawName.Equals(output.Name, StringComparison.OrdinalIgnoreCase));
+            if (display?.FriendlyNameOverride != null)
+              output.Name = display.FriendlyNameOverride;
+          }
+        }
+
+        Logger.LogDebug("Loaded {Count} visible output devices: {Devices}",
           outputs.Count, string.Join(", ", outputs.Select(d => d.Name)));
         _availableOutputs = outputs;
         UpdateCastOutputDisplayName();

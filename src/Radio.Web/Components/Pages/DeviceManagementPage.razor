@@ -7,24 +7,20 @@
 
 <PageTitle>Device Management - Radio Console</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.False" Class="pa-4">
-  <MudStack Spacing="3">
-    
-    @* Header *@
-    <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
-      <MudText Typo="Typo.h4">Device Management</MudText>
-      <MudButton Variant="Variant.Filled" Color="Color.Primary" 
-                 OnClick="RefreshDevicesAsync" StartIcon="@Icons.Material.Filled.Refresh">
-        Refresh Devices
-      </MudButton>
-    </MudStack>
+<div style="height: 100%; display: flex; overflow: hidden;">
+  <MudTabs Elevation="0" Rounded="false" Position="Position.Start" ApplyEffectsToContainer="true" PanelClass="pa-4"
+           Style="height: 100%; width: 100%;" Class="system-config-tabs">
 
-    @* Device Display Settings Section *@
-    <MudPaper Elevation="2" Class="pa-4">
+    @* Display Settings Tab *@
+    <MudTabPanel Text="Display" Icon="@Icons.Material.Filled.Visibility">
       <MudStack Spacing="2">
-        <MudText Typo="Typo.h5">Device Display Settings</MudText>
+        <div class="d-flex justify-space-between align-center">
+          <MudText Typo="Typo.h6">Device Display Settings</MudText>
+          <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                     OnClick="RefreshDevicesAsync" StartIcon="@Icons.Material.Filled.Refresh">Refresh</MudButton>
+        </div>
         <MudText Typo="Typo.body2" Color="Color.Secondary">
-          Control which output devices appear in the taskbar dropdown and set friendly names.
+          Control which output devices appear in the taskbar and set friendly names.
         </MudText>
 
         @if (isLoadingDisplay)
@@ -82,12 +78,12 @@
           </MudTable>
         }
       </MudStack>
-    </MudPaper>
+    </MudTabPanel>
 
-    @* Output Devices Section *@
-    <MudPaper Elevation="2" Class="pa-4">
+    @* Output Devices Tab *@
+    <MudTabPanel Text="Outputs" Icon="@Icons.Material.Filled.SpeakerGroup">
       <MudStack Spacing="2">
-        <MudText Typo="Typo.h5">Output Devices</MudText>
+        <MudText Typo="Typo.h6">Output Devices</MudText>
         
         @if (isLoadingOutput)
         {
@@ -144,13 +140,13 @@
           </MudTable>
         }
       </MudStack>
-    </MudPaper>
+    </MudTabPanel>
 
-    @* Google Cast Devices Section *@
-    <MudPaper Elevation="2" Class="pa-4">
+    @* Google Cast Devices Tab *@
+    <MudTabPanel Text="Cast" Icon="@Icons.Material.Filled.Cast">
       <MudStack Spacing="2">
         <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
-          <MudText Typo="Typo.h5">Google Cast Devices</MudText>
+          <MudText Typo="Typo.h6">Google Cast Devices</MudText>
           <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
                      OnClick="ScanForCastDevicesAsync" StartIcon="@Icons.Material.Filled.Search"
                      Disabled="@isDiscoveringCast">
@@ -234,12 +230,12 @@
           </MudTable>
         }
       </MudStack>
-    </MudPaper>
+    </MudTabPanel>
 
-    @* Input Devices Section *@
-    <MudPaper Elevation="2" Class="pa-4">
+    @* Input Devices Tab *@
+    <MudTabPanel Text="Inputs" Icon="@Icons.Material.Filled.Mic">
       <MudStack Spacing="2">
-        <MudText Typo="Typo.h5">Input Devices</MudText>
+        <MudText Typo="Typo.h6">Input Devices</MudText>
         
         @if (isLoadingInput)
         {
@@ -296,12 +292,12 @@
           </MudTable>
         }
       </MudStack>
-    </MudPaper>
+    </MudTabPanel>
 
-    @* USB Port Reservations Section *@
-    <MudPaper Elevation="2" Class="pa-4">
+    @* USB Port Reservations Tab *@
+    <MudTabPanel Text="USB Ports" Icon="@Icons.Material.Filled.Usb">
       <MudStack Spacing="2">
-        <MudText Typo="Typo.h5">USB Port Reservations</MudText>
+        <MudText Typo="Typo.h6">USB Port Reservations</MudText>
         
         @if (isLoadingUsb)
         {
@@ -338,18 +334,10 @@
           </MudTable>
         }
       </MudStack>
-    </MudPaper>
+    </MudTabPanel>
 
-    @* Last Refresh Time *@
-    @if (lastRefreshTime.HasValue)
-    {
-      <MudText Typo="Typo.caption" Color="Color.Secondary">
-        Last refresh: @lastRefreshTime.Value.ToString("HH:mm:ss")
-      </MudText>
-    }
-
-  </MudStack>
-</MudContainer>
+  </MudTabs>
+</div>
 
 @code {
   private List<AudioDeviceDto>? outputDevices;
@@ -366,8 +354,6 @@
   private bool isDiscoveringCast = false;
   private string connectingCastDeviceId = "";
   private string defaultCastDeviceId = "";
-
-  private DateTime? lastRefreshTime;
 
   protected override async Task OnInitializedAsync()
   {
@@ -415,7 +401,7 @@
       isLoadingCast = false;
       isLoadingDisplay = false;
 
-      lastRefreshTime = DateTime.Now;
+
       StateHasChanged();
 
       Logger.LogInformation("Loaded all devices successfully");
