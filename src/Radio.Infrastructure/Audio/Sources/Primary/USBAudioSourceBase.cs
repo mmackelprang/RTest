@@ -4,6 +4,7 @@ using Radio.Core.Exceptions;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
+using Radio.Infrastructure.Audio.SoundFlow;
 using SoundFlow.Abstracts.Devices;
 using SoundFlow.Backends.MiniAudio;
 using SoundFlow.Enums;
@@ -15,17 +16,21 @@ namespace Radio.Infrastructure.Audio.Sources.Primary;
 /// Base class for USB audio sources that capture audio from USB audio input devices.
 /// Provides common functionality for USB port reservation, sound component management,
 /// live stream handling, and fingerprinting integration.
+/// Routes captured audio to the SoundFlow playback pipeline via a BufferedSoundGenerator.
 /// </summary>
 public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
 {
   private readonly IAudioDeviceManager _deviceManager;
   private readonly Dictionary<string, object> _metadata = new();
   private readonly BackgroundIdentificationService? _identificationService;
+  private readonly SoundFlowPlaybackService? _playbackService;
   private string? _reservedPort;
   private object? _soundComponent;
   private AudioCaptureDevice? _captureDevice;
   private MiniAudioEngine? _audioEngine;
   private int _audioCaptureCallCount = 0;
+  private BufferedSoundGenerator<float>? _soundGenerator;
+  private string? _playbackId;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="USBAudioSourceBase"/> class.
@@ -34,15 +39,18 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   /// <param name="deviceManager">The audio device manager.</param>
   /// <param name="identificationService">Optional fingerprinting service for track identification.</param>
   /// <param name="metricsCollector">Optional metrics collector for tracking playback metrics.</param>
+  /// <param name="playbackService">Optional SoundFlow playback service for routing captured audio to output.</param>
   protected USBAudioSourceBase(
-    ILogger logger, 
+    ILogger logger,
     IAudioDeviceManager deviceManager,
     BackgroundIdentificationService? identificationService = null,
-    Radio.Core.Interfaces.IMetricsCollector? metricsCollector = null)
+    Radio.Core.Interfaces.IMetricsCollector? metricsCollector = null,
+    SoundFlowPlaybackService? playbackService = null)
     : base(logger, metricsCollector)
   {
     _deviceManager = deviceManager;
     _identificationService = identificationService;
+    _playbackService = playbackService;
 
     // Subscribe to track identification events if service is available
     if (_identificationService != null)
@@ -212,7 +220,7 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
 
   /// <summary>
   /// Called when audio samples are captured from the USB device.
-  /// Override in derived classes to process the captured audio.
+  /// Feeds captured samples into the BufferedSoundGenerator for playback output.
   /// </summary>
   /// <param name="samples">The captured audio samples.</param>
   /// <param name="capability">The device capability (should be Record for capture).</param>
@@ -226,9 +234,9 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
         "{SourceName} audio capture - Samples: {SampleCount}, Capability: {Capability}, State: {State}",
         Name, samples.Length, capability, State);
     }
-    
-    // Default implementation does nothing
-    // Derived classes can override to process audio samples
+
+    // Route captured audio to the playback pipeline via the buffered generator
+    _soundGenerator?.AddSamples(samples);
   }
 
   /// <summary>
@@ -251,7 +259,7 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   }
 
   /// <inheritdoc/>
-  protected override Task PlayCoreAsync(CancellationToken cancellationToken)
+  protected override async Task PlayCoreAsync(CancellationToken cancellationToken)
   {
     if (_soundComponent == null)
     {
@@ -260,8 +268,8 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
     }
 
     Logger.LogInformation(
-      "Starting {SourceName} audio capture - Device: {Device}, USBPort: {USBPort}, State: {State}", 
-      Name, 
+      "Starting {SourceName} audio capture - Device: {Device}, USBPort: {USBPort}, State: {State}",
+      Name,
       MetadataInternal.TryGetValue("Device", out var device) ? device : "unknown",
       _reservedPort ?? "none",
       State);
@@ -272,11 +280,53 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
     }
     catch (Exception ex)
     {
-       Logger.LogError(ex, "Failed to start audio capture device for {SourceName}", Name);
-       throw;
+      Logger.LogError(ex, "Failed to start audio capture device for {SourceName}", Name);
+      throw;
     }
 
-    return Task.CompletedTask;
+    // Create a BufferedSoundGenerator to bridge captured audio to the SoundFlow playback pipeline
+    if (_playbackService != null)
+    {
+      var engine = _playbackService.GetUnderlyingEngine();
+      if (engine != null)
+      {
+        var format = _playbackService.GetAudioFormat();
+        _playbackId = $"usb-capture-{Id:N}";
+
+        if (_soundGenerator == null)
+        {
+          _soundGenerator = new BufferedSoundGenerator<float>(
+            engine, format, Logger, metricsCollector: MetricsCollector);
+        }
+
+        var success = await _playbackService.PlayComponentAsync(
+          _playbackId, _soundGenerator, Volume, cancellationToken);
+
+        if (success)
+        {
+          Logger.LogInformation(
+            "🔊 {SourceName} audio routed to playback output (PlaybackId={PlaybackId})",
+            Name, _playbackId);
+        }
+        else
+        {
+          Logger.LogError(
+            "Failed to route {SourceName} audio to playback output", Name);
+        }
+      }
+      else
+      {
+        Logger.LogWarning(
+          "{SourceName}: SoundFlow engine not available - captured audio will not play through speakers",
+          Name);
+      }
+    }
+    else
+    {
+      Logger.LogWarning(
+        "{SourceName}: SoundFlowPlaybackService not available - captured audio will not play through speakers",
+        Name);
+    }
   }
 
   /// <inheritdoc/>
@@ -306,20 +356,29 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   }
 
   /// <inheritdoc/>
-  protected override Task StopCoreAsync(CancellationToken cancellationToken)
+  protected override async Task StopCoreAsync(CancellationToken cancellationToken)
   {
     Logger.LogInformation("Stopping {SourceName} audio capture", Name);
-    
+
     try
     {
       _captureDevice?.Stop();
     }
     catch (Exception ex)
     {
-       Logger.LogWarning(ex, "Failed to stop audio capture device for {SourceName}", Name);
+      Logger.LogWarning(ex, "Failed to stop audio capture device for {SourceName}", Name);
     }
 
-    return Task.CompletedTask;
+    // Disconnect from the playback pipeline
+    if (_playbackService != null && _playbackId != null)
+    {
+      Logger.LogDebug(
+        "Removing {SourceName} from SoundFlow mixer (PlaybackId={PlaybackId})",
+        Name, _playbackId);
+      await _playbackService.StopAsync(_playbackId, cancellationToken);
+      _playbackId = null;
+      _soundGenerator = null; // Disposed by StopAsync
+    }
   }
 
   /// <summary>
@@ -406,6 +465,19 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
     if (_identificationService != null)
     {
       _identificationService.TrackIdentified -= OnTrackIdentified;
+    }
+
+    // Disconnect from the playback pipeline
+    if (_playbackService != null && _playbackId != null)
+    {
+      await _playbackService.StopAsync(_playbackId);
+      _playbackId = null;
+      _soundGenerator = null; // Disposed by StopAsync
+    }
+    else
+    {
+      _soundGenerator?.Dispose();
+      _soundGenerator = null;
     }
 
     CleanupCaptureDevice();

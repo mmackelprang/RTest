@@ -146,7 +146,8 @@ public class AudioSourceFactory : IAudioSourceFactory
       _deviceOptions,
       _deviceManager,
       _identificationService,
-      resolvedUSBPort);
+      resolvedUSBPort,
+      _playbackService);
   }
 
   /// <summary>
@@ -187,7 +188,8 @@ public class AudioSourceFactory : IAudioSourceFactory
       logger,
       _genericSourcePreferences,
       _deviceManager,
-      resolvedUSBPort);
+      resolvedUSBPort,
+      _playbackService);
   }
 
   /// <summary>
