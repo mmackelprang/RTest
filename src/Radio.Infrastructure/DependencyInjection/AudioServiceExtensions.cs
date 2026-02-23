@@ -12,6 +12,7 @@ using Radio.Infrastructure.Audio.Outputs;
 using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Infrastructure.Audio.Visualization;
+using Radio.Infrastructure.Configuration;
 using Radio.Infrastructure.Configuration.Abstractions;
 
 namespace Radio.Infrastructure.DependencyInjection;
@@ -101,6 +102,9 @@ public static class AudioServiceExtensions
     // Register the ducking service (singleton to maintain state)
     services.AddSingleton<DuckingService>();
     services.AddSingleton<IDuckingService>(sp => sp.GetRequiredService<DuckingService>());
+
+    // Register device options resolver (reads config store, falls back to IOptionsMonitor)
+    services.AddSingleton<DeviceOptionsResolver>();
 
     // Register radio factory (singleton for device management)
     services.AddSingleton<RadioFactory>();

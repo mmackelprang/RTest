@@ -7,6 +7,7 @@ using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Infrastructure.Audio.Sources.Primary;
+using Radio.Infrastructure.Configuration;
 using RTLSDRCore;
 using RTLSDRCore.Hardware;
 using RTLSDRCore.Models;
@@ -28,6 +29,7 @@ public class RadioFactory : IRadioFactory
   private readonly SoundFlowPlaybackService? _playbackService;
   private readonly IConfiguration _configuration;
   private readonly IMetricsCollector? _metricsCollector;
+  private readonly DeviceOptionsResolver? _deviceOptionsResolver;
 
   // Device enumeration cache
   private IReadOnlyList<DeviceInfo>? _cachedDevices;
@@ -59,6 +61,7 @@ public class RadioFactory : IRadioFactory
   /// <param name="identificationService">Optional fingerprinting service.</param>
   /// <param name="playbackService">Optional SoundFlow playback service for audio output.</param>
   /// <param name="metricsCollector">Optional metrics collector.</param>
+  /// <param name="deviceOptionsResolver">Optional resolver for config store device options.</param>
   public RadioFactory(
     ILogger<RadioFactory> logger,
     ILoggerFactory loggerFactory,
@@ -68,7 +71,8 @@ public class RadioFactory : IRadioFactory
     IConfiguration configuration,
     BackgroundIdentificationService? identificationService = null,
     SoundFlowPlaybackService? playbackService = null,
-    IMetricsCollector? metricsCollector = null)
+    IMetricsCollector? metricsCollector = null,
+    DeviceOptionsResolver? deviceOptionsResolver = null)
   {
     _logger = logger;
     _loggerFactory = loggerFactory;
@@ -79,6 +83,7 @@ public class RadioFactory : IRadioFactory
     _identificationService = identificationService;
     _playbackService = playbackService;
     _metricsCollector = metricsCollector;
+    _deviceOptionsResolver = deviceOptionsResolver;
   }
 
   /// <inheritdoc/>
@@ -197,14 +202,16 @@ public class RadioFactory : IRadioFactory
     try
     {
       var logger = _loggerFactory.CreateLogger<RadioAudioSource>();
+      var resolvedUSBPort = GetRadioUSBPort();
       var source = new RadioAudioSource(
         logger,
         _deviceOptions,
         _radioOptions,
         _deviceManager,
-        _identificationService);
+        _identificationService,
+        resolvedUSBPort);
 
-      _logger.LogInformation("Successfully created RF320 radio source");
+      _logger.LogInformation("Successfully created RF320 radio source with USB port: {USBPort}", resolvedUSBPort);
       return source;
     }
     catch (Exception ex)
@@ -297,13 +304,14 @@ public class RadioFactory : IRadioFactory
 
   /// <summary>
   /// Checks if RF320 device is available.
+  /// Reads from the config store first (so UI-saved values are picked up),
+  /// falling back to IOptionsMonitor (appsettings.json).
   /// </summary>
   private bool IsRF320Available()
   {
     try
     {
-      // RF320 is available if the USB port is configured and not in use
-      var usbPort = _deviceOptions.CurrentValue.Radio?.USBPort;
+      var usbPort = GetRadioUSBPort();
       if (string.IsNullOrWhiteSpace(usbPort))
       {
         return false;
@@ -315,5 +323,31 @@ public class RadioFactory : IRadioFactory
     {
       return false;
     }
+  }
+
+  /// <summary>
+  /// Gets the Radio USB port from the config store (if available) or IOptionsMonitor.
+  /// </summary>
+  internal string GetRadioUSBPort()
+  {
+    // Try config store first (synchronous wait — acceptable here since
+    // this is only called during source creation, not on hot paths)
+    if (_deviceOptionsResolver != null)
+    {
+      try
+      {
+        var port = _deviceOptionsResolver.GetRadioUSBPortAsync().GetAwaiter().GetResult();
+        if (!string.IsNullOrWhiteSpace(port))
+        {
+          return port;
+        }
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Failed to read Radio USB port from config store, using appsettings fallback");
+      }
+    }
+
+    return _deviceOptions.CurrentValue.Radio?.USBPort ?? "";
   }
 }
