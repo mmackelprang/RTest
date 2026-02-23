@@ -961,7 +961,8 @@ html, body {
 /* Vertical tabs — left-align text, scrollable panels */
 .mud-tabs-vertical .mud-tab { justify-content: flex-start !important; text-align: left; }
 .mud-tabs-vertical .mud-tab-content { justify-content: flex-start; }
-.mud-tabs-vertical .mud-tab-panel { overflow-y: auto; }
+.mud-tabs-vertical > .mud-tabs-panels { overflow-y: auto; }
+.mud-tabs-vertical > .mud-tabs-header { overflow: hidden; }
 
 /* Switches — normalize thumb to fit track */
 .mud-switch .mud-switch-thumb { width: 20px; height: 20px; }
@@ -996,10 +997,29 @@ button, .mud-button-root { min-width: var(--touch-compact); min-height: var(--to
 
 /* ─── §19  Scrollbar Styling ──────────────────────────────────────────────── */
 
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--surface-separator); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-low); }
+/* Hide all scrollbars by default — kiosk touch UI */
+* { scrollbar-width: none; }
+*::-webkit-scrollbar { display: none; }
+
+/* Show thin scrollbars only on explicitly scrollable containers */
+.scrollable,
+.mud-tabs-vertical > .mud-tabs-panels,
+.mud-table-container {
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-separator) transparent;
+}
+.scrollable::-webkit-scrollbar,
+.mud-tabs-vertical > .mud-tabs-panels::-webkit-scrollbar,
+.mud-table-container::-webkit-scrollbar { display: block; width: 6px; }
+.scrollable::-webkit-scrollbar-track,
+.mud-tabs-vertical > .mud-tabs-panels::-webkit-scrollbar-track,
+.mud-table-container::-webkit-scrollbar-track { background: transparent; }
+.scrollable::-webkit-scrollbar-thumb,
+.mud-tabs-vertical > .mud-tabs-panels::-webkit-scrollbar-thumb,
+.mud-table-container::-webkit-scrollbar-thumb { background: var(--surface-separator); border-radius: 3px; }
+.scrollable::-webkit-scrollbar-thumb:hover,
+.mud-tabs-vertical > .mud-tabs-panels::-webkit-scrollbar-thumb:hover,
+.mud-table-container::-webkit-scrollbar-thumb:hover { background: var(--text-low); }
 
 
 /* ─── §20  Bottom-Sheet Dialogs ───────────────────────────────────────────── */
