@@ -4,7 +4,7 @@
 Complete Ubuntu x64 setup (media + fingerprinting), fix the dual audio output bug where audio plays on both local speakers and Cast simultaneously, and begin architecture cleanup.
 
 ## Current Phase
-Phase A — Ubuntu Media & Data Setup
+Phase A — Ubuntu Media & Data Setup (Phases B and C complete)
 
 ---
 
@@ -17,6 +17,12 @@ All prior phases are **COMPLETE**. See git history and previous plan for details
 - Phase C (prev): Ubuntu x64 target setup (deploy script, setup script, app deployed, Cast verified)
 - Cast drift testing: v10 receiver drift protection (PR #217), ping endpoint + channel registration (PR #218)
 - Cast latency verified: Transit avg 87ms, buffer-ahead steady 3.0s, no drift, no stutter
+- Dual output bug fix: Cast connect now calls SetLocalOutputMuted(true), added disconnect endpoint (PR #220)
+- Architecture cleanup — AudioManager reduced from 18 params / ~1200 lines to 6 params / 472 lines:
+  - Extract PlayHistoryTracker (PR #221)
+  - Extract AudioSourceFactory (PR #222)
+  - Extract AudioPreferencePersistence + BluetoothAutoSwitchService, delete dead RestoreLastSourceAsync (PR #223)
+- Volume persistence verified on Ubuntu + Pi (survives service restarts)
 
 ---
 
@@ -49,71 +55,21 @@ All prior phases are **COMPLETE**. See git history and previous plan for details
 
 ---
 
-## Phase B: Dual Audio Output Bug Fix 🔄
+## Phase B: Dual Audio Output Bug Fix ✅
 
-### B.1 Root Cause Analysis
-**Priority:** High — audio should only play on the selected output
-
-**Problem:** When Cast connects, audio plays on BOTH local speakers AND Cast device simultaneously.
-This is because the audio pipeline continues feeding the local playback device even when Cast is active.
-
-**Key files to investigate:**
-- `src/Radio.API/Controllers/DevicesController.cs` — output switching logic (Cast connect handler)
-- `src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs` — Cast startup/shutdown
-- `src/Radio.Infrastructure/Audio/Outputs/LocalAudioOutput.cs` — local output muting
-- `src/Radio.Infrastructure/Audio/Outputs/HttpStreamOutput.cs` — HTTP stream activation
-- `src/Radio.Infrastructure/Audio/SoundFlow/SoundFlowAudioEngine.cs` — engine output management
-- `src/Radio.Infrastructure/Audio/AudioManager.cs` — output orchestration
-
-**Current behavior (from DevicesController Cast connect):**
-1. `ActivateOutputAsync(_castOutput)` — starts Cast
-2. `ActivateOutputAsync(_httpOutput)` — starts HTTP stream (needed for HttpMp3 mode)
-3. `_audioEngine.SetLocalOutputMuted(true)` — mutes local output
-
-**Expected behavior:**
-- **DirectChannel mode**: Only Cast output active, local muted, HTTP stream NOT needed
-- **HttpMp3 mode**: Cast + HTTP stream active, local muted
-- **Local mode**: Only local output active, Cast and HTTP stream stopped
-
-**Tasks:**
-- [ ] Read and trace the full output switching flow
-- [ ] Determine if `SetLocalOutputMuted(true)` actually silences local speakers (or just sets a flag)
-- [ ] Check if DirectChannel mode still needs HTTP stream active
-- [ ] Implement proper output exclusivity — when Cast connects, fully stop local output (not just mute)
-- [ ] When Cast disconnects, restore local output
-- [ ] Add tests for output switching behavior
-
-### B.2 Verify Fix
-**Tasks:**
-- [ ] Build and run all tests
-- [ ] Deploy to Ubuntu
-- [ ] Start playback → connect Cast → verify ONLY Cast plays
-- [ ] Disconnect Cast → verify local speakers resume
-- [ ] Test both DirectChannel and HttpMp3 modes
+Fixed in PR #220. Cast connect now calls `SetLocalOutputMuted(true)`, added `POST /api/devices/cast/disconnect` endpoint that restores local output.
 
 ---
 
-## Phase C: Architecture Cleanup ⏸️
+## Phase C: Architecture Cleanup ✅
 
-### C.1 Extract PlayHistoryTracker from AudioManager
-**Priority:** Medium — AudioManager has too many responsibilities
+Completed across PRs #221–#223. AudioManager reduced from 18 constructor params / ~1200 lines to 6 params / 472 lines.
 
-AudioManager's constructor currently takes 18 parameters. PlayHistory tracking can be extracted
-into a dedicated service that subscribes to audio events.
+- **PR #221**: Extracted `PlayHistoryTracker` — subscribes to source state changes, fingerprint identification, and BT AVRCP metadata
+- **PR #222**: Extracted `AudioSourceFactory` — encapsulates all source-creation dependencies
+- **PR #223**: Extracted `AudioPreferencePersistence` (debounced volume/source saves) and `BluetoothAutoSwitchService` (auto-switch on connect, startup pre-warm). Deleted dead `RestoreLastSourceAsync`. Removed redundant `_bluetoothService.DisposeAsync()` from AudioManager.
 
-**Tasks:**
-- [ ] Create `PlayHistoryTracker` class that handles play history recording
-- [ ] Move play history logic out of AudioManager
-- [ ] Wire up via DI
-- [ ] Verify all play history tests still pass
-
-### C.2 Review AudioManager Constructor
-**Priority:** Low — depends on C.1
-
-**Tasks:**
-- [ ] After C.1, review remaining constructor parameters
-- [ ] Identify any other responsibilities that could be extracted
-- [ ] Remove completed TODO comments from codebase
+AudioManager now has 6 constructor params: `ILogger`, `IAudioEngine`, `IAudioSourceFactory`, `BackgroundIdentificationService?`, `AudioPreferencePersistence?`, `PlayHistoryTracker?`
 
 ---
 
@@ -139,7 +95,8 @@ into a dedicated service that subscribes to audio events.
 
 | Issue | Status | Notes |
 |-------|--------|-------|
-| Dual audio output (local + Cast) | **Phase B** | Audio plays on both outputs simultaneously |
+| Dual audio output (local + Cast) | **Resolved** | Fixed in PR #220 |
+| Volume persistence | **Resolved** | Verified on Ubuntu + Pi (PR #223) |
 | Pong not received via SharpCaster | Deferred | Channel registration works but pong never arrives; CDP workaround reliable |
 | Receiver double-counts messages | Cosmetic | 20/sec vs sender 10/sec after CDP reload; doesn't affect audio |
 | Album art proxy untested | Deferred | Web port 5002 → API port 5000 |
