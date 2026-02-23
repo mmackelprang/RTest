@@ -119,28 +119,21 @@ public static class AudioServiceExtensions
     // Register album art cache service (singleton for disk-backed image cache)
     services.AddSingleton<AlbumArtCacheService>();
 
+    // Register audio source factory (encapsulates all source-creation dependencies)
+    services.AddSingleton<AudioSourceFactory>();
+    services.AddSingleton<IAudioSourceFactory>(sp => sp.GetRequiredService<AudioSourceFactory>());
+
     // Register audio manager (singleton to maintain state)
     // Use explicit factory to ensure all optional services are resolved.
     services.AddSingleton<AudioManager>(sp => new AudioManager(
       sp.GetRequiredService<ILogger<AudioManager>>(),
-      sp.GetRequiredService<ILoggerFactory>(),
       sp.GetRequiredService<IAudioEngine>(),
-      sp.GetRequiredService<IAudioDeviceManager>(),
-      sp.GetRequiredService<IRadioFactory>(),
+      sp.GetRequiredService<IAudioSourceFactory>(),
       sp.GetRequiredService<IBluetoothService>(),
       sp.GetRequiredService<IOptionsMonitor<BluetoothOptions>>(),
-      sp.GetRequiredService<IOptionsMonitor<FilePlayerOptions>>(),
-      sp.GetRequiredService<IOptionsMonitor<FilePlayerPreferences>>(),
-      sp.GetRequiredService<IOptionsMonitor<DeviceOptions>>(),
-      sp.GetRequiredService<IOptionsMonitor<GenericSourcePreferences>>(),
       sp.GetRequiredService<IOptionsMonitor<AudioPreferences>>(),
-      sp.GetRequiredService<IConfiguration>(),
       sp.GetService<BackgroundIdentificationService>(),
-      sp.GetService<IMetricsCollector>(),
       sp.GetService<Configuration.Abstractions.IConfigurationManager>(),
-      sp.GetService<SoundFlowPlaybackService>(),
-      sp.GetService<IServiceScopeFactory>(),
-      sp.GetService<AlbumArtCacheService>(),
       sp.GetRequiredService<PlayHistoryTracker>()));
     services.AddSingleton<IAudioManager>(sp => sp.GetRequiredService<AudioManager>());
 

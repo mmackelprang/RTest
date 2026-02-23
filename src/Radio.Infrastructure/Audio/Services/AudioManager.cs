@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
@@ -8,7 +6,6 @@ using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
-using Radio.Infrastructure.Audio.Sources.Primary;
 using Radio.Infrastructure.Configuration.Abstractions;
 using Radio.Infrastructure.Configuration.Models;
 
@@ -21,28 +18,13 @@ namespace Radio.Infrastructure.Audio.Services;
 public class AudioManager : IAudioManager, IAsyncDisposable
 {
   private readonly ILogger<AudioManager> _logger;
-  private readonly ILoggerFactory _loggerFactory;
   private readonly IAudioEngine _audioEngine;
-  private readonly IAudioDeviceManager _deviceManager;
-  private readonly IRadioFactory _radioFactory;
+  private readonly IAudioSourceFactory _sourceFactory;
   private readonly IBluetoothService _bluetoothService;
   private readonly IOptionsMonitor<BluetoothOptions> _bluetoothOptions;
-
-  // Options for source creation
-  private readonly IOptionsMonitor<FilePlayerOptions> _filePlayerOptions;
-  private readonly IOptionsMonitor<FilePlayerPreferences> _filePlayerPreferences;
-  private readonly IOptionsMonitor<DeviceOptions> _deviceOptions;
-  private readonly IOptionsMonitor<GenericSourcePreferences> _genericSourcePreferences;
   private readonly IOptionsMonitor<AudioPreferences> _audioPreferences;
-  private readonly IConfiguration _configuration;
-
-  // Optional services
   private readonly BackgroundIdentificationService? _identificationService;
-  private readonly IMetricsCollector? _metricsCollector;
   private readonly Configuration.Abstractions.IConfigurationManager? _configurationManager;
-  private readonly SoundFlow.SoundFlowPlaybackService? _playbackService;
-  private readonly IServiceScopeFactory? _serviceScopeFactory;
-  private readonly AlbumArtCacheService? _albumArtCache;
 
   // Play history tracking (extracted to PlayHistoryTracker)
   private readonly PlayHistoryTracker? _playHistoryTracker;
@@ -65,45 +47,23 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   /// </summary>
   public AudioManager(
     ILogger<AudioManager> logger,
-    ILoggerFactory loggerFactory,
     IAudioEngine audioEngine,
-    IAudioDeviceManager deviceManager,
-    IRadioFactory radioFactory,
+    IAudioSourceFactory sourceFactory,
     IBluetoothService bluetoothService,
     IOptionsMonitor<BluetoothOptions> bluetoothOptions,
-    IOptionsMonitor<FilePlayerOptions> filePlayerOptions,
-    IOptionsMonitor<FilePlayerPreferences> filePlayerPreferences,
-    IOptionsMonitor<DeviceOptions> deviceOptions,
-    IOptionsMonitor<GenericSourcePreferences> genericSourcePreferences,
     IOptionsMonitor<AudioPreferences> audioPreferences,
-    IConfiguration configuration,
     BackgroundIdentificationService? identificationService = null,
-    IMetricsCollector? metricsCollector = null,
     Configuration.Abstractions.IConfigurationManager? configurationManager = null,
-    SoundFlow.SoundFlowPlaybackService? playbackService = null,
-    IServiceScopeFactory? serviceScopeFactory = null,
-    AlbumArtCacheService? albumArtCache = null,
     PlayHistoryTracker? playHistoryTracker = null)
   {
     _logger = logger;
-    _loggerFactory = loggerFactory;
     _audioEngine = audioEngine;
-    _deviceManager = deviceManager;
-    _radioFactory = radioFactory;
+    _sourceFactory = sourceFactory;
     _bluetoothService = bluetoothService;
     _bluetoothOptions = bluetoothOptions;
-    _filePlayerOptions = filePlayerOptions;
-    _filePlayerPreferences = filePlayerPreferences;
-    _deviceOptions = deviceOptions;
-    _genericSourcePreferences = genericSourcePreferences;
     _audioPreferences = audioPreferences;
-    _configuration = configuration;
     _identificationService = identificationService;
-    _metricsCollector = metricsCollector;
     _configurationManager = configurationManager;
-    _playbackService = playbackService;
-    _serviceScopeFactory = serviceScopeFactory;
-    _albumArtCache = albumArtCache;
     _playHistoryTracker = playHistoryTracker;
 
     _bluetoothService.DeviceConnected += OnBluetoothDeviceConnected;
@@ -111,9 +71,6 @@ public class AudioManager : IAudioManager, IAsyncDisposable
 
   /// <inheritdoc/>
   public IAudioEngine Engine => _audioEngine;
-
-  /// <inheritdoc/>
-  public IAudioDeviceManager DeviceManager => _deviceManager;
 
   /// <inheritdoc/>
   public IAudioSource? ActiveSource => _activeSource;
@@ -346,15 +303,12 @@ public class AudioManager : IAudioManager, IAsyncDisposable
 
       try
       {
-        source = sourceType switch
-        {
-          AudioSourceType.Radio => CreateRadioSource(),
-          AudioSourceType.FilePlayer => CreateFilePlayerSource(),
-          AudioSourceType.Vinyl => CreateVinylSource(),
-          AudioSourceType.GenericUSB => CreateGenericUSBSource(),
-          AudioSourceType.Bluetooth => CreateBluetoothSource(),
-          _ => null
-        };
+        source = _sourceFactory.CreateSource(sourceType);
+      }
+      catch (ArgumentOutOfRangeException)
+      {
+        _logger.LogWarning("Source type {SourceType} is not supported", sourceType);
+        return null;
       }
       catch (Exception ex)
       {
@@ -598,99 +552,6 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     {
       _logger.LogWarning(ex, "Failed to restore volume preferences");
     }
-  }
-
-  /// <summary>
-  /// Creates a Bluetooth audio source.
-  /// </summary>
-  private IAudioSource CreateBluetoothSource()
-  {
-    var logger = _loggerFactory.CreateLogger<BluetoothAudioSource>();
-    return new BluetoothAudioSource(
-      logger,
-      _deviceManager,
-      _bluetoothService,
-      _bluetoothOptions,
-      _identificationService,
-      _metricsCollector,
-      _playbackService,
-      _serviceScopeFactory,
-      _albumArtCache);
-  }
-
-  /// <summary>
-  /// Creates a radio audio source using the RadioFactory.
-  /// </summary>
-  private IAudioSource CreateRadioSource()
-  {
-    var deviceType = _radioFactory.GetDefaultDeviceType();
-    _logger.LogDebug("Creating radio source with device type: {DeviceType}", deviceType);
-    return _radioFactory.CreateRadioSource(deviceType);
-  }
-
-  /// <summary>
-  /// Creates a file player audio source.
-  /// </summary>
-  private IAudioSource CreateFilePlayerSource()
-  {
-    // Use the same root directory logic as FileBrowser for consistency
-    // The FilePlayerOptions.RootDirectory is a subdirectory relative to this root
-    var rootDir = _configuration["RootDir"] ?? Directory.GetCurrentDirectory();
-
-    var logger = _loggerFactory.CreateLogger<FilePlayerAudioSource>();
-    return new FilePlayerAudioSource(
-      logger,
-      _filePlayerOptions,
-      _filePlayerPreferences,
-      rootDir,
-      _identificationService,
-      _metricsCollector,
-      _playbackService,
-      _configurationManager,
-      _albumArtCache);
-  }
-
-  /// <summary>
-  /// Creates a vinyl turntable audio source.
-  /// </summary>
-  /// <exception cref="InvalidOperationException">Thrown if vinyl USB port is not configured.</exception>
-  private IAudioSource CreateVinylSource()
-  {
-    var vinylConfig = _deviceOptions.CurrentValue.Vinyl;
-
-    if (vinylConfig == null || string.IsNullOrWhiteSpace(vinylConfig.USBPort))
-    {
-      throw new InvalidOperationException(
-        "Vinyl source is not configured. Please configure the USB port in DeviceOptions.Vinyl section.");
-    }
-
-    var logger = _loggerFactory.CreateLogger<VinylAudioSource>();
-    return new VinylAudioSource(
-      logger,
-      _deviceOptions,
-      _deviceManager,
-      _identificationService);
-  }
-
-  /// <summary>
-  /// Creates a generic USB audio source.
-  /// </summary>
-  /// <exception cref="InvalidOperationException">Thrown if generic USB port is not configured.</exception>
-  private IAudioSource CreateGenericUSBSource()
-  {
-    var prefs = _genericSourcePreferences.CurrentValue;
-
-    if (string.IsNullOrWhiteSpace(prefs.USBPort))
-    {
-      throw new InvalidOperationException(
-        "Generic USB source is not configured. Please configure the USB port in GenericSourcePreferences section.");
-    }
-
-    var logger = _loggerFactory.CreateLogger<GenericUSBAudioSource>();
-    return new GenericUSBAudioSource(
-      logger,
-      _genericSourcePreferences,
-      _deviceManager);
   }
 
   /// <summary>

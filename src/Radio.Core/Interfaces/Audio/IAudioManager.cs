@@ -12,11 +12,6 @@ public interface IAudioManager : IAsyncDisposable
   IAudioEngine Engine { get; }
 
   /// <summary>
-  /// Gets the audio device manager.
-  /// </summary>
-  IAudioDeviceManager DeviceManager { get; }
-
-  /// <summary>
   /// Gets the currently active primary audio source.
   /// </summary>
   IAudioSource? ActiveSource { get; }
