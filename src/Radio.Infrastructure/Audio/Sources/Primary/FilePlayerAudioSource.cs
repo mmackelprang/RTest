@@ -48,6 +48,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private string? _playbackId;
   private CancellationTokenSource? _playbackCts;
   private Task? _playbackMonitorTask;
+  private bool _trackEndedNaturally;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="FilePlayerAudioSource"/> class.
@@ -299,8 +300,9 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   {
     ThrowIfDisposed();
 
-    // Track skip metric if moving from a playing track
-    var wasSkipped = State == AudioSourceState.Playing && _currentFile != null;
+    // Track skip metric only for user-initiated skips (not auto-advance from end-of-track)
+    var wasSkipped = State == AudioSourceState.Playing && _currentFile != null && !_trackEndedNaturally;
+    _trackEndedNaturally = false;
 
     // Handle RepeatMode.One - replay current track
     if (_preferences.CurrentValue.Repeat == RepeatMode.One && _currentFile != null)
@@ -752,10 +754,13 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
       if (!cancellationToken.IsCancellationRequested)
       {
-        State = AudioSourceState.Stopped;
+        Logger.LogInformation("🎵 FILE PLAYER: Track ended naturally, auto-advancing to next");
+        _trackEndedNaturally = true;
         OnPlaybackCompleted(PlaybackCompletionReason.EndOfContent);
 
-        // Always attempt to play next - NextAsync handles queue/repeat logic
+        // Auto-advance to next track. Keep state as Playing so NextAsync sees it
+        // and starts playback of the next file. If no more tracks exist, NextAsync
+        // calls StopAsync which sets state to Stopped.
         await NextAsync(CancellationToken.None);
       }
     }
