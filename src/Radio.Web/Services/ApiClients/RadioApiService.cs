@@ -294,7 +294,7 @@ public class RadioApiService
   {
     try
     {
-      var response = await _httpClient.PostAsync($"/api/radio/presets/{id}", null, cancellationToken);
+      var response = await _httpClient.PostAsync($"/api/radio/presets/{id}/load", null, cancellationToken);
       return response.IsSuccessStatusCode;
     }
     catch (Exception ex)

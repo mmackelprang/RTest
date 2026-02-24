@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Radio.Core.Configuration;
+using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Configuration.Abstractions;
 using Radio.Infrastructure.Configuration.Models;
@@ -22,6 +23,7 @@ public class PreferencesPersistenceServiceTests : IDisposable
   private readonly Mock<IOptionsMonitor<RadioPreferences>> _radioPrefsMock;
   private readonly Mock<IOptionsMonitor<GenericSourcePreferences>> _genericPrefsMock;
   private readonly Mock<IConfigurationManager> _configManagerMock;
+  private readonly Mock<IAudioManager> _audioManagerMock;
   private readonly Mock<IHostApplicationLifetime> _lifetimeMock;
   private readonly Mock<IConfigurationStore> _storeMock;
   private readonly CancellationTokenSource _cts;
@@ -35,6 +37,7 @@ public class PreferencesPersistenceServiceTests : IDisposable
     _radioPrefsMock = new Mock<IOptionsMonitor<RadioPreferences>>();
     _genericPrefsMock = new Mock<IOptionsMonitor<GenericSourcePreferences>>();
     _configManagerMock = new Mock<IConfigurationManager>();
+    _audioManagerMock = new Mock<IAudioManager>();
     _lifetimeMock = new Mock<IHostApplicationLifetime>();
     _storeMock = new Mock<IConfigurationStore>();
     _cts = new CancellationTokenSource();
@@ -79,6 +82,7 @@ public class PreferencesPersistenceServiceTests : IDisposable
       _radioPrefsMock.Object,
       _genericPrefsMock.Object,
       _configManagerMock.Object,
+      _audioManagerMock.Object,
       _lifetimeMock.Object);
   }
 

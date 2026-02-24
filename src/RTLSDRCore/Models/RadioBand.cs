@@ -33,6 +33,11 @@ namespace RTLSDRCore.Models
         public long DefaultStepHz { get; set; }
 
         /// <summary>
+        /// Gets or sets the allowed step sizes for this band in Hz, sorted ascending
+        /// </summary>
+        public long[] AllowedStepSizes { get; set; } = Array.Empty<long>();
+
+        /// <summary>
         /// Gets or sets the default modulation type for this band
         /// </summary>
         public ModulationType DefaultModulation { get; set; }

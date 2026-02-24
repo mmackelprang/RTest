@@ -30,6 +30,7 @@ public class RadioFactory : IRadioFactory
   private readonly IConfiguration _configuration;
   private readonly IMetricsCollector? _metricsCollector;
   private readonly DeviceOptionsResolver? _deviceOptionsResolver;
+  private readonly Configuration.Abstractions.IConfigurationManager? _configurationManager;
 
   // Device enumeration cache
   private IReadOnlyList<DeviceInfo>? _cachedDevices;
@@ -62,6 +63,7 @@ public class RadioFactory : IRadioFactory
   /// <param name="playbackService">Optional SoundFlow playback service for audio output.</param>
   /// <param name="metricsCollector">Optional metrics collector.</param>
   /// <param name="deviceOptionsResolver">Optional resolver for config store device options.</param>
+  /// <param name="configurationManager">Optional configuration manager for preference restoration.</param>
   public RadioFactory(
     ILogger<RadioFactory> logger,
     ILoggerFactory loggerFactory,
@@ -72,7 +74,8 @@ public class RadioFactory : IRadioFactory
     BackgroundIdentificationService? identificationService = null,
     SoundFlowPlaybackService? playbackService = null,
     IMetricsCollector? metricsCollector = null,
-    DeviceOptionsResolver? deviceOptionsResolver = null)
+    DeviceOptionsResolver? deviceOptionsResolver = null,
+    Configuration.Abstractions.IConfigurationManager? configurationManager = null)
   {
     _logger = logger;
     _loggerFactory = loggerFactory;
@@ -84,6 +87,7 @@ public class RadioFactory : IRadioFactory
     _playbackService = playbackService;
     _metricsCollector = metricsCollector;
     _deviceOptionsResolver = deviceOptionsResolver;
+    _configurationManager = configurationManager;
   }
 
   /// <inheritdoc/>
@@ -182,7 +186,8 @@ public class RadioFactory : IRadioFactory
         _radioOptions,
         _metricsCollector,
         _identificationService,
-        _playbackService);
+        _playbackService,
+        _configurationManager);
 
       _logger.LogInformation("Successfully created RTL-SDR radio source");
       return source;

@@ -7,6 +7,7 @@ public class RadioBandModel
     public long MinFrequencyHz { get; set; }
     public long MaxFrequencyHz { get; set; }
     public long DefaultStepHz { get; set; }
+    public long[] AllowedStepSizes { get; set; } = Array.Empty<long>();
     public string DefaultModulation { get; set; } = string.Empty;
     public long DefaultBandwidthHz { get; set; }
     public string Description { get; set; } = string.Empty;

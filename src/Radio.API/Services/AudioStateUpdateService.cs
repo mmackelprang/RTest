@@ -174,7 +174,7 @@ public class AudioStateUpdateService : BackgroundService
       _lastNowPlaying = currentNowPlaying;
       await _hubContext.Clients.All
         .SendAsync("NowPlayingChanged", currentNowPlaying, cancellationToken);
-      _logger.LogInformation("Broadcast NowPlayingChanged: Title={Title}, Artist={Artist}, Album={Album}, AlbumArt={AlbumArtUrl}, Source={Source}",
+      _logger.LogDebug("Broadcast NowPlayingChanged: Title={Title}, Artist={Artist}, Album={Album}, AlbumArt={AlbumArtUrl}, Source={Source}",
         currentNowPlaying.Title, currentNowPlaying.Artist, currentNowPlaying.Album, currentNowPlaying.AlbumArtUrl, currentNowPlaying.SourceName);
 
       // Push metadata to Cast device if connected and streaming
@@ -449,10 +449,14 @@ public class AudioStateUpdateService : BackgroundService
       return true;
     }
 
+    // Use a tolerance for signal strength so minor fluctuations
+    // don't flood the Web UI with re-fetches that starve visualization.
+    var sigDelta = Math.Abs((previous.SignalStrength ?? 0) - (current.SignalStrength ?? 0));
+
     return Math.Abs(previous.Frequency - current.Frequency) > 0.001 ||
            previous.Band != current.Band ||
            Math.Abs(previous.Step - current.Step) > 0.001 ||
-           previous.SignalStrength != current.SignalStrength ||
+           sigDelta > 3 ||
            previous.Equalizer != current.Equalizer ||
            previous.DeviceVolume != current.DeviceVolume ||
            previous.IsScanning != current.IsScanning ||

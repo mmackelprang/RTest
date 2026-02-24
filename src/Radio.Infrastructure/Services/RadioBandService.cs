@@ -18,6 +18,7 @@ public class RadioBandService : IRadioBandService
                 MinFrequencyHz = b.MinFrequencyHz,
                 MaxFrequencyHz = b.MaxFrequencyHz,
                 DefaultStepHz = b.DefaultStepHz,
+                AllowedStepSizes = b.AllowedStepSizes,
                 DefaultModulation = b.DefaultModulation.ToString(),
                 DefaultBandwidthHz = b.DefaultBandwidthHz,
                 Description = b.Description

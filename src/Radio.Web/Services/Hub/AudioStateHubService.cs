@@ -78,14 +78,18 @@ public class AudioStateHubService : IAsyncDisposable
           await NowPlayingChanged.Invoke();
       });
 
-      _hubConnection.On("QueueChanged", async () =>
+      // Server sends QueueChanged with a list payload —
+      // accept and discard it so SignalR dispatches the message.
+      _hubConnection.On<object>("QueueChanged", async (_) =>
       {
         _logger.LogDebug("Received QueueChanged event");
         if (QueueChanged != null)
           await QueueChanged.Invoke();
       });
 
-      _hubConnection.On("RadioStateChanged", async () =>
+      // Server sends RadioStateChanged with a RadioStateDto payload —
+      // accept and discard it so SignalR dispatches the message.
+      _hubConnection.On<object>("RadioStateChanged", async (_) =>
       {
         _logger.LogDebug("Received RadioStateChanged event");
         if (RadioStateChanged != null)
@@ -134,16 +138,38 @@ public class AudioStateHubService : IAsyncDisposable
         return Task.CompletedTask;
       };
 
-      _hubConnection.Reconnected += (connectionId) =>
+      _hubConnection.Reconnected += async (connectionId) =>
       {
         _lastDisconnectLogUtc = DateTime.MinValue; // Reset throttle
         _logger.LogInformation("Audio hub reconnected. ConnectionId: {ConnectionId}", connectionId);
-        return Task.CompletedTask;
+
+        // Re-subscribe to group-based channels after reconnect
+        try
+        {
+          await _hubConnection.InvokeAsync("SubscribeToRadioState");
+          await _hubConnection.InvokeAsync("SubscribeToQueue");
+        }
+        catch (Exception ex)
+        {
+          _logger.LogWarning(ex, "Failed to re-subscribe to groups after reconnect");
+        }
       };
 
       // Start the connection
       await _hubConnection.StartAsync(cancellationToken);
       _logger.LogInformation("SignalR connection established successfully");
+
+      // Subscribe to group-based channels that require explicit opt-in
+      try
+      {
+        await _hubConnection.InvokeAsync("SubscribeToRadioState", cancellationToken);
+        await _hubConnection.InvokeAsync("SubscribeToQueue", cancellationToken);
+        _logger.LogInformation("Subscribed to RadioState and Queue groups");
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Failed to subscribe to SignalR groups");
+      }
     }
     catch (Exception ex)
     {

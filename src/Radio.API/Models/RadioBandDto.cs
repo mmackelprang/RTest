@@ -31,6 +31,11 @@ public class RadioBandDto
     public long DefaultStepHz { get; set; }
 
     /// <summary>
+    /// Allowed step sizes for this band in Hz, sorted ascending.
+    /// </summary>
+    public long[] AllowedStepSizes { get; set; } = Array.Empty<long>();
+
+    /// <summary>
     /// Default modulation type.
     /// </summary>
     public string DefaultModulation { get; set; } = string.Empty;

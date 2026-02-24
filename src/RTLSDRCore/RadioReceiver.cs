@@ -359,7 +359,7 @@ namespace RTLSDRCore
             }
 
             var direction = ascending ? "up" : "down";
-            Logger.Information("Starting scan {Direction} from {Frequency} (threshold={Threshold:F2}, dwell={Dwell}ms)",
+            Logger.Information("Starting continuous scan {Direction} from {Frequency} (threshold={Threshold:F2}, dwell={Dwell}ms)",
                 direction, RadioBand.FormatFrequency(_currentFrequencyHz), signalThreshold, dwellTimeMs);
 
             _scanCts = new CancellationTokenSource();
@@ -368,44 +368,61 @@ namespace RTLSDRCore
 
             try
             {
-                var limit = ascending ? _currentBand.MaxFrequencyHz : _currentBand.MinFrequencyHz;
+                // Track start frequency to detect full-sweep completion
+                var startFrequency = _currentFrequencyHz;
 
-                while (ascending
-                    ? _currentFrequencyHz + stepHz <= limit
-                    : _currentFrequencyHz - stepHz >= limit)
+                while (!_scanCts.Token.IsCancellationRequested)
                 {
-                    if (_scanCts.Token.IsCancellationRequested)
-                    {
-                        Logger.Information("Scan cancelled at {Frequency}",
-                            RadioBand.FormatFrequency(_currentFrequencyHz));
-                        SetState(ReceiverState.Running);
-                        _isScanning = false;
-                        return false;
-                    }
-
+                    // Calculate next frequency with band-edge wrap-around
                     var nextFreq = ascending
                         ? _currentFrequencyHz + stepHz
                         : _currentFrequencyHz - stepHz;
+
+                    if (ascending && nextFreq > _currentBand.MaxFrequencyHz)
+                    {
+                        nextFreq = _currentBand.MinFrequencyHz;
+                        Logger.Debug("Scan wrapped from upper to lower band edge");
+                    }
+                    else if (!ascending && nextFreq < _currentBand.MinFrequencyHz)
+                    {
+                        nextFreq = _currentBand.MaxFrequencyHz;
+                        Logger.Debug("Scan wrapped from lower to upper band edge");
+                    }
+
+                    // Full-sweep auto-stop: we've returned to where we started
+                    if (nextFreq == startFrequency ||
+                        (ascending && _currentFrequencyHz < startFrequency && nextFreq >= startFrequency) ||
+                        (!ascending && _currentFrequencyHz > startFrequency && nextFreq <= startFrequency))
+                    {
+                        Logger.Information("Scan completed full sweep, returning to start {Frequency}",
+                            RadioBand.FormatFrequency(startFrequency));
+                        break;
+                    }
+
                     SetFrequencyInternal(nextFreq);
 
                     // Dwell to allow USB reads and signal strength computation.
                     // At 240kHz SDR rate with 16384 IQ pairs per USB transfer,
                     // each transfer takes ~68ms. 150ms dwell ensures at least
                     // 2 full reads for a reliable signal strength measurement.
-                    Thread.Sleep(dwellTimeMs);
+                    // Use WaitHandle so the dwell is cancellable via _scanCts.
+                    if (_scanCts.Token.WaitHandle.WaitOne(dwellTimeMs))
+                        break; // Cancelled during dwell
 
                     if (_lastSignalStrength >= signalThreshold)
                     {
-                        Logger.Information("Signal found at {Frequency} (strength: {Strength:F3}, threshold: {Threshold:F2})",
+                        Logger.Information("Signal found at {Frequency} (strength: {Strength:F3}, threshold: {Threshold:F2}), pausing 2s",
                             RadioBand.FormatFrequency(_currentFrequencyHz), _lastSignalStrength, signalThreshold);
-                        SetState(ReceiverState.Running);
-                        _isScanning = false;
-                        return true;
+
+                        // Pause on signal for 2s so user can listen.
+                        // WaitHandle.WaitOne returns true if signaled (cancelled),
+                        // false on timeout — so scan resumes after the pause.
+                        if (_scanCts.Token.WaitHandle.WaitOne(2000))
+                            break; // User hit STOP during pause
                     }
                 }
 
-                Logger.Information("Scan reached {Direction} band limit at {Frequency}",
-                    ascending ? "upper" : "lower", RadioBand.FormatFrequency(_currentFrequencyHz));
+                Logger.Information("Scan stopped at {Frequency}", RadioBand.FormatFrequency(_currentFrequencyHz));
                 SetState(ReceiverState.Running);
                 _isScanning = false;
                 return false;

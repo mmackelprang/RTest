@@ -26,8 +26,9 @@
           @foreach (var band in _availableBands)
           {
             <div class="rcp-band-btn @(band.Type == _radioState.Band ? "rcp-band-active" : "")"
-                 @onclick="@(async () => await HandleBandChangeAsync(band.Type))">
-              @band.Name
+                 @onclick="@(async () => await HandleBandChangeAsync(band.Type))"
+                 title="@band.Name">
+              @band.Type
             </div>
           }
         </div>
@@ -42,7 +43,8 @@
              title="Click to set frequency">
           @FormatFrequency(_radioState.Frequency, _radioState.Band)
         </div>
-        <div class="rcp-step-label">
+        <div class="rcp-step-label rcp-step-clickable" @onclick="CycleStepSizeAsync"
+             title="Click to change step size">
           STEP @FormatStep(_radioState.Step, _radioState.Band)
         </div>
       </div>
@@ -166,33 +168,37 @@
 
 @if (_isFrequencyDialogOpen)
 {
-  <MudDialog>
-    <DialogContent>
+  <MudOverlay Visible="true" DarkBackground="true" OnClick="CloseFrequencyDialog" ZIndex="9999">
+    <MudPaper Class="pa-4" Style="min-width: 300px;" @onclick:stopPropagation="true">
+      <MudText Typo="Typo.h6" Class="mb-3">Set Frequency</MudText>
       <MudNumericField @bind-Value="_newFrequency"
                        Label="@(_radioState?.Band == "AM" ? "Frequency (kHz)" : "Frequency (MHz)")"
                        Variant="Variant.Outlined"
                        Min="@GetMinFrequency()" Max="@GetMaxFrequency()" Step="@GetDialogStep()"
                        Style="width: 100%;" />
-    </DialogContent>
-    <DialogActions>
-      <MudButton OnClick="CloseFrequencyDialog">Cancel</MudButton>
-      <MudButton Color="Color.Primary" OnClick="SetFrequencyAsync">Set</MudButton>
-    </DialogActions>
-  </MudDialog>
+      <div class="d-flex justify-end gap-2 mt-3">
+        <MudButton OnClick="CloseFrequencyDialog">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   OnClick="SetFrequencyAsync">Set</MudButton>
+      </div>
+    </MudPaper>
+  </MudOverlay>
 }
 
 @if (_isSavePresetDialogOpen)
 {
-  <MudDialog>
-    <DialogContent>
+  <MudOverlay Visible="true" DarkBackground="true" OnClick="CloseSavePresetDialog" ZIndex="9999">
+    <MudPaper Class="pa-4" Style="min-width: 300px;" @onclick:stopPropagation="true">
+      <MudText Typo="Typo.h6" Class="mb-3">Save Preset</MudText>
       <MudTextField @bind-Value="_presetName"
                     Label="Preset Name" Variant="Variant.Outlined" Style="width: 100%;" />
-    </DialogContent>
-    <DialogActions>
-      <MudButton OnClick="CloseSavePresetDialog">Cancel</MudButton>
-      <MudButton Color="Color.Warning" OnClick="SavePresetAsync">Save</MudButton>
-    </DialogActions>
-  </MudDialog>
+      <div class="d-flex justify-end gap-2 mt-3">
+        <MudButton OnClick="CloseSavePresetDialog">Cancel</MudButton>
+        <MudButton Color="Color.Warning" Variant="Variant.Filled"
+                   OnClick="SavePresetAsync">Save</MudButton>
+      </div>
+    </MudPaper>
+  </MudOverlay>
 }
 
 <style>
@@ -294,6 +300,19 @@
     color: var(--text-low);
     letter-spacing: 0.1em;
     margin-top: 4px;
+  }
+
+  .rcp-step-clickable {
+    cursor: pointer;
+    transition: color 120ms ease;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .rcp-step-clickable:hover {
+    color: var(--signal-amber);
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 
   /* ── Signal Meter ── */
@@ -425,6 +444,10 @@
     background: var(--surface-base);
     border-radius: 4px;
     border: 1px solid var(--surface-separator);
+  }
+
+  .rcp-sdr-controls .mud-switch {
+    align-items: center;
   }
 
   /* ── Presets Memory Bank ── */
@@ -745,6 +768,27 @@
         await LoadPresetsAsync();
     }
     catch { }
+  }
+
+  private async Task CycleStepSizeAsync()
+  {
+    if (_radioState == null) return;
+    var band = _availableBands.FirstOrDefault(b => b.Type == _radioState.Band);
+    if (band?.AllowedStepSizes == null || band.AllowedStepSizes.Length == 0) return;
+
+    var steps = band.AllowedStepSizes;
+    var currentIdx = Array.IndexOf(steps, (long)_radioState.Step);
+    var nextIdx = (currentIdx + 1) % steps.Length;
+
+    try
+    {
+      if (await RadioApi.SetStepAsync(steps[nextIdx]))
+      {
+        await LoadRadioStateAsync();
+        await InvokeAsync(StateHasChanged);
+      }
+    }
+    catch (Exception ex) { Logger.LogError(ex, "Error in CycleStepSizeAsync"); }
   }
 
   private string FormatFrequency(double frequencyHz, string band)

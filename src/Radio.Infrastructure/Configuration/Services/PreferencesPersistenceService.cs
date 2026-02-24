@@ -2,6 +2,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Core.Interfaces.Audio;
+using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Configuration.Abstractions;
 using Radio.Infrastructure.Configuration.Models;
 using System.Text.Json;
@@ -22,6 +24,7 @@ public class PreferencesPersistenceService : BackgroundService
   private readonly IOptionsMonitor<RadioPreferences> _radioPreferences;
   private readonly IOptionsMonitor<GenericSourcePreferences> _genericSourcePreferences;
   private readonly IConfigurationManager _configurationManager;
+  private readonly IAudioManager _audioManager;
   private readonly IHostApplicationLifetime _lifetime;
   private readonly TimeSpan _savePeriod = TimeSpan.FromSeconds(30); // Save every 30 seconds
   private static readonly JsonSerializerOptions _serializerOptions = new()
@@ -37,6 +40,7 @@ public class PreferencesPersistenceService : BackgroundService
     IOptionsMonitor<RadioPreferences> radioPreferences,
     IOptionsMonitor<GenericSourcePreferences> genericSourcePreferences,
     IConfigurationManager configurationManager,
+    IAudioManager audioManager,
     IHostApplicationLifetime lifetime)
   {
     _logger = logger;
@@ -46,6 +50,7 @@ public class PreferencesPersistenceService : BackgroundService
     _radioPreferences = radioPreferences;
     _genericSourcePreferences = genericSourcePreferences;
     _configurationManager = configurationManager;
+    _audioManager = audioManager;
     _lifetime = lifetime;
   }
 
@@ -92,7 +97,7 @@ public class PreferencesPersistenceService : BackgroundService
       {
         SavePreferenceSectionAsync(FilePlayerPreferences.SectionName, _filePlayerPreferences.CurrentValue, cancellationToken),
         SavePreferenceSectionAsync(TTSPreferences.SectionName, _ttsPreferences.CurrentValue, cancellationToken),
-        SavePreferenceSectionAsync(RadioPreferences.SectionName, _radioPreferences.CurrentValue, cancellationToken),
+        SaveRadioPreferencesFromLiveStateAsync(cancellationToken),
         SavePreferenceSectionAsync(GenericSourcePreferences.SectionName, _genericSourcePreferences.CurrentValue, cancellationToken)
       };
 
@@ -102,6 +107,46 @@ public class PreferencesPersistenceService : BackgroundService
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to save preferences");
+    }
+  }
+
+  /// <summary>
+  /// Saves radio preferences by reading live state from the active radio source.
+  /// If radio is not the active source, skips saving to avoid overwriting good persisted
+  /// values with stale IOptionsMonitor defaults (same issue as AudioPreferences — see comment above).
+  /// </summary>
+  private async Task SaveRadioPreferencesFromLiveStateAsync(CancellationToken cancellationToken)
+  {
+    try
+    {
+      var activeSource = _audioManager.ActiveSource;
+      if (activeSource is IRadioControl radioControl)
+      {
+        // Read live state from the actual radio hardware
+        var livePrefs = new RadioPreferences
+        {
+          LastBand = radioControl.CurrentBand.ToString(),
+          LastFrequency = radioControl.CurrentFrequency.Hertz,
+          LastFrequencyStep = radioControl.FrequencyStep.Hertz,
+          LastDeviceVolume = radioControl.DeviceVolume,
+          LastEqualizerMode = radioControl.EqualizerMode.ToString()
+        };
+
+        await SavePreferenceSectionAsync(RadioPreferences.SectionName, livePrefs, cancellationToken);
+        _logger.LogDebug(
+          "Saved live radio preferences: Band={Band}, Frequency={Frequency}Hz, Step={Step}Hz",
+          livePrefs.LastBand, livePrefs.LastFrequency, livePrefs.LastFrequencyStep);
+      }
+      else
+      {
+        // Radio is not active — skip saving to avoid overwriting persisted values with
+        // stale IOptionsMonitor defaults. The last-saved values remain in the config store.
+        _logger.LogTrace("Radio source not active, skipping radio preferences save");
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to save radio preferences from live state");
     }
   }
 
