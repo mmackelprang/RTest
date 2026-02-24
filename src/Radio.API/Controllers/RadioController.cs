@@ -581,6 +581,7 @@ public class RadioController : ControllerBase
       ScanDirection = radioSource.ScanDirection?.ToString(),
       AutoGain = radioSource.AutoGainEnabled,
       Gain = (int?)radioSource.Gain,
+      IsStereo = radioSource.IsStereo,
     };
   }
 

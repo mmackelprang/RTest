@@ -99,29 +99,39 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   {
     if (_soundGenerator == null) return;
 
-    var monoCount = e.SampleCount;
-    var stereoCount = monoCount * 2;
+    var sampleCount = e.SampleCount;
 
-    // Grow the pre-allocated stereo buffer if needed (rarely happens after first call)
-    if (_stereoBuffer.Length < stereoCount)
+    if (e.Format.Channels >= 2)
     {
-      _stereoBuffer = new float[stereoCount];
+      // Native stereo from receiver (WFM stereo decode) — already interleaved L,R.
+      // SampleCount is the interleaved count (L,R,L,R,...), pass through directly.
+      _soundGenerator.AddSamples(e.Samples.AsSpan(0, sampleCount));
+      _totalSamplesReceived += sampleCount / 2; // track mono-equivalent count
     }
-
-    // RTL-SDR outputs mono audio; the playback engine expects interleaved stereo.
-    // Duplicate each mono sample to both L and R channels.
-    for (int i = 0; i < monoCount; i++)
+    else
     {
-      _stereoBuffer[i * 2] = e.Samples[i];     // Left
-      _stereoBuffer[i * 2 + 1] = e.Samples[i]; // Right
-    }
+      // Mono audio — duplicate each sample to both L and R channels.
+      var stereoCount = sampleCount * 2;
 
-    _soundGenerator.AddSamples(_stereoBuffer.AsSpan(0, stereoCount));
-    _totalSamplesReceived += monoCount;
+      // Grow the pre-allocated stereo buffer if needed (rarely happens after first call)
+      if (_stereoBuffer.Length < stereoCount)
+      {
+        _stereoBuffer = new float[stereoCount];
+      }
+
+      for (int i = 0; i < sampleCount; i++)
+      {
+        _stereoBuffer[i * 2] = e.Samples[i];     // Left
+        _stereoBuffer[i * 2 + 1] = e.Samples[i]; // Right
+      }
+
+      _soundGenerator.AddSamples(_stereoBuffer.AsSpan(0, stereoCount));
+      _totalSamplesReceived += sampleCount;
+    }
 
     // Silence detection: warn if all samples are zero
     bool allSilent = true;
-    for (int i = 0; i < monoCount; i++)
+    for (int i = 0; i < sampleCount; i++)
     {
       if (Math.Abs(e.Samples[i]) > float.Epsilon)
       {
@@ -130,14 +140,14 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
       }
     }
 
-    if (allSilent && monoCount > 0)
+    if (allSilent && sampleCount > 0)
     {
       _silentCallbackCount++;
       if (_silentCallbackCount % 100 == 1)
       {
         Logger.LogWarning(
-          "📻 SDR RADIO: Silent audio data received ({SampleCount} zero samples, silent callbacks: {SilentCount})",
-          monoCount, _silentCallbackCount);
+          "SDR RADIO: Silent audio data received ({SampleCount} zero samples, silent callbacks: {SilentCount})",
+          sampleCount, _silentCallbackCount);
       }
     }
     else
@@ -150,9 +160,9 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     {
       _hasLoggedFirstAudioData = true;
       Logger.LogInformation(
-        "📻 SDR RADIO AUDIO FLOW STARTED: First audio data received from RTL-SDR " +
-        "(Frequency: {Frequency}, Band: {Band}, {SampleCount} samples)",
-        CurrentFrequency.ToDisplayString(), CurrentBand, monoCount);
+        "SDR RADIO AUDIO FLOW STARTED: First audio data received from RTL-SDR " +
+        "(Frequency: {Frequency}, Band: {Band}, {SampleCount} samples, {Channels}ch)",
+        CurrentFrequency.ToDisplayString(), CurrentBand, sampleCount, e.Format.Channels);
     }
   }
 
@@ -454,7 +464,7 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   public int SignalStrength => (int)(_radioReceiver.SignalStrength * 100);
 
   /// <inheritdoc/>
-  public bool IsStereo => _radioReceiver.CurrentModulation == ModulationType.WFM; // WFM can be stereo
+  public bool IsStereo => _radioReceiver.StereoDetected; // true when 19 kHz pilot detected
 
   /// <inheritdoc/>
   public Task<bool> GetPowerStateAsync(CancellationToken cancellationToken = default)

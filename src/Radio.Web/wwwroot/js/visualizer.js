@@ -302,11 +302,11 @@ export const visualizer = {
 
     const channelHeight = height / 2;
     
-    // Draw left channel
-    this.drawWaveformChannel(ctx, leftSamples, 0, 0, width, channelHeight, '#5CD4E8');
-    
-    // Draw right channel
-    this.drawWaveformChannel(ctx, rightSamples, 0, channelHeight, width, channelHeight, '#5CD4E8');
+    // Draw left channel (positive=cyan, negative=amber)
+    this.drawWaveformChannel(ctx, leftSamples, 0, 0, width, channelHeight, '#5CD4E8', '#F0A830');
+
+    // Draw right channel (positive=cyan, negative=amber)
+    this.drawWaveformChannel(ctx, rightSamples, 0, channelHeight, width, channelHeight, '#5CD4E8', '#F0A830');
 
     // Draw center line for each channel
     ctx.strokeStyle = '#1F1F22';
@@ -335,57 +335,47 @@ export const visualizer = {
     }
   },
 
-  drawWaveformChannel: function (ctx, samples, x, y, width, height, color) {
+  drawWaveformChannel: function (ctx, samples, x, y, width, height, colorPositive, colorNegative) {
     if (!samples || samples.length === 0) return;
 
     const centerY = y + height / 2;
-    // Increased amplitude multiplier from 0.9 to 2.5 for better visibility
-    // Auto-scaling based on peak amplitude - optimized to calculate during drawing
-    let maxSample = 0;
-    
-    // First pass: draw the waveform and find max in same loop for efficiency
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-
     const step = width / samples.length;
-    
-    // Draw with temporary amplitude, track max
-    for (let i = 0; i < samples.length; i++) {
-      const sample = samples[i];
-      maxSample = Math.max(maxSample, Math.abs(sample));
-      const sampleX = x + i * step;
-      // Use temporary amplitude for now
-      const sampleY = centerY - (sample * height / 2 * 0.5);
+    const halfHeight = height / 2;
 
-      if (i === 0) {
-        ctx.moveTo(sampleX, sampleY);
-      } else {
-        ctx.lineTo(sampleX, sampleY);
+    // Find peak amplitude for auto-scaling
+    let maxSample = 0;
+    for (let i = 0; i < samples.length; i++) {
+      maxSample = Math.max(maxSample, Math.abs(samples[i]));
+    }
+
+    // Auto-scale: boost quiet signals, cap at 2.5x
+    let amplitude = halfHeight * 0.95;
+    if (maxSample > 0 && maxSample < 0.4) {
+      amplitude = halfHeight * Math.min(2.5, 1.0 / maxSample) * 0.95;
+    }
+
+    // Draw vertical bars from center line to sample level
+    // Batch positive and negative samples separately to minimize style switches
+    const barWidth = Math.max(1, step);
+
+    // Positive samples (above center line) — accent cyan
+    ctx.fillStyle = colorPositive || '#5CD4E8';
+    for (let i = 0; i < samples.length; i++) {
+      if (samples[i] > 0) {
+        const sampleX = x + i * step;
+        const barHeight = samples[i] * amplitude;
+        ctx.fillRect(sampleX, centerY - barHeight, barWidth, barHeight);
       }
     }
-    
-    ctx.stroke();
-    
-    // Now redraw with proper scaling if needed
-    if (maxSample > 0 && maxSample < 0.4) {
-      // Auto-scale: if signal is too quiet, boost it
-      let scaleFactor = Math.min(2.5, 1.0 / maxSample);
-      const amplitude = height / 2 * scaleFactor * 0.95; // Use 95% to prevent clipping
-      
-      ctx.beginPath();
-      for (let i = 0; i < samples.length; i++) {
-        const sample = samples[i];
-        const sampleX = x + i * step;
-        const sampleY = centerY - (sample * amplitude);
 
-        if (i === 0) {
-          ctx.moveTo(sampleX, sampleY);
-        } else {
-          ctx.lineTo(sampleX, sampleY);
-        }
+    // Negative samples (below center line) — signal amber
+    ctx.fillStyle = colorNegative || '#F0A830';
+    for (let i = 0; i < samples.length; i++) {
+      if (samples[i] < 0) {
+        const sampleX = x + i * step;
+        const barHeight = -samples[i] * amplitude;
+        ctx.fillRect(sampleX, centerY, barWidth, barHeight);
       }
-      ctx.stroke();
     }
   },
 

@@ -380,7 +380,7 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
             var hasNonZero = false;
             for (var b = totalRead - bytesRead; b < totalRead && !hasNonZero; b++)
               if (pcmBuffer[b] != 0) hasNonZero = true;
-            _logger.LogInformation(
+            _logger.LogDebug(
               "DirectCast: Read #{Call}: {BytesRead} bytes, nonZero: {NonZero}, availAfter: {Avail}, totalSoFar: {Total}/{Target}",
               readCalls, bytesRead, hasNonZero, tapReader.Available, totalRead, chunkBytes);
           }
@@ -411,7 +411,7 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
 
           if (chunksSinceStart <= 10 || isSilence != _lastChunkWasSilence)
           {
-            _logger.LogInformation(
+            _logger.LogDebug(
               "DirectCast: Chunk {Seq} — {BytesRead} bytes PCM, silence: {IsSilence}",
               chunksSinceStart, totalRead, isSilence);
           }

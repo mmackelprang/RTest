@@ -281,7 +281,8 @@ public record RadioStateDto(
   int? Gain,
   bool AutoGain,
   string? Equalizer,
-  int? DeviceVolume
+  int? DeviceVolume,
+  bool IsStereo = false
 );
 
 public record RadioPowerStateDto(

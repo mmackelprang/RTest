@@ -181,6 +181,8 @@
         "visualizer-panel-canvas", data.LeftPeak, data.RightPeak, data.LeftRms, data.RightRms, data.IsClipping);
       if (wasFirst) await InvokeAsync(StateHasChanged);
     }
+    catch (TaskCanceledException) { }
+    catch (OperationCanceledException) { }
     catch (Exception ex) { Logger.LogError(ex, "Error drawing VU meter"); }
   }
 
@@ -195,6 +197,8 @@
         "visualizer-panel-canvas", data.LeftSamples, data.RightSamples);
       if (wasFirst) await InvokeAsync(StateHasChanged);
     }
+    catch (TaskCanceledException) { }
+    catch (OperationCanceledException) { }
     catch (Exception ex) { Logger.LogError(ex, "Error drawing waveform"); }
   }
 
@@ -209,6 +213,8 @@
         "visualizer-panel-canvas", data.Magnitudes, data.Frequencies);
       if (wasFirst) await InvokeAsync(StateHasChanged);
     }
+    catch (TaskCanceledException) { }
+    catch (OperationCanceledException) { }
     catch (Exception ex) { Logger.LogError(ex, "Error drawing spectrum"); }
   }
 
