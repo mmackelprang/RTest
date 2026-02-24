@@ -27,14 +27,19 @@ namespace RTLSDRCore
         private AgcProcessor _agc;
         private Decimator? _iqDecimator;
         private DeEmphasisFilter? _deEmphasis;
+        private DeEmphasisFilter? _deEmphasisRight; // second channel for stereo
         private AudioDecimator? _audioDecimator;
+        private AudioDecimator? _audioDecimatorRight; // second channel for stereo
+        private StereoFmDecoder? _stereoDecoder;
         private int _sdrSampleRate;
         private int _demodSampleRate;
 
         // Pre-allocated processing buffers to avoid GC pressure.
         // Sized in SetupSignalProcessing based on the expected USB chunk size.
         private float[] _demodBuffer = Array.Empty<float>();
+        private float[] _stereoDemodBuffer = Array.Empty<float>(); // interleaved L,R at demod rate
         private float[] _decimBuffer = Array.Empty<float>();
+        private float[] _decimBufferRight = Array.Empty<float>(); // right channel decimation
         private IqSample[] _iqDecimBuffer = Array.Empty<IqSample>();
         // Pre-allocated silence buffer delivered when squelch closes or muted.
         // Keeps the downstream BufferedSoundGenerator fed at a consistent rate
@@ -544,6 +549,12 @@ namespace RTLSDRCore
         /// <inheritdoc/>
         public ModulationType CurrentModulation => _currentModulation;
 
+        /// <summary>
+        /// Gets whether a stereo pilot tone (19 kHz) is currently detected.
+        /// True only for WFM when the stereo decoder has locked onto the pilot.
+        /// </summary>
+        public bool StereoDetected => _stereoDecoder?.StereoDetected ?? false;
+
         /// <inheritdoc/>
         public IReadOnlyList<RadioBand> GetAvailableBands() => BandPresets.AllBands;
 
@@ -702,30 +713,56 @@ namespace RTLSDRCore
             _demodulator.SampleRate = _demodSampleRate;
             _demodulator.Bandwidth = bandwidth;
 
-            // Step 5: De-emphasis filter (compensates FM pre-emphasis).
-            // This single-pole IIR is nearly free (1 multiply per sample)
-            // and also attenuates the 19kHz pilot tone and stereo subcarrier.
+            // Step 5: FM stereo decoder (WFM only).
+            // Must run BEFORE de-emphasis: the 19kHz pilot and 23-53kHz L-R subcarrier
+            // would be attenuated by de-emphasis, making stereo decode impossible.
+            if (_currentModulation == ModulationType.WFM)
+            {
+                _stereoDecoder = new StereoFmDecoder(_demodSampleRate);
+            }
+            else
+            {
+                _stereoDecoder = null;
+            }
+
+            // Step 6: De-emphasis filter (compensates FM pre-emphasis).
+            // For stereo WFM, we need two independent filters (one per channel)
+            // since de-emphasis is applied after stereo matrix decode.
             if (_currentModulation == ModulationType.WFM)
             {
                 _deEmphasis = new DeEmphasisFilter(_demodSampleRate, 75f);
+                _deEmphasisRight = new DeEmphasisFilter(_demodSampleRate, 75f);
             }
             else
             {
                 _deEmphasis = null;
+                _deEmphasisRight = null;
             }
 
-            // Step 6: Audio decimation (demod rate → 48 kHz)
-            // The AudioDecimator's built-in anti-alias filter handles
-            // rejection of content above 24kHz (Nyquist), so no separate
-            // audio LPF is needed.
+            // Step 7: Audio decimation (demod rate → 48 kHz)
+            // For stereo WFM, we need two independent decimators (one per channel).
             if (_demodSampleRate > DefaultAudioSampleRate)
             {
                 _audioDecimator = new AudioDecimator(_demodSampleRate, DefaultAudioSampleRate);
+                if (_stereoDecoder != null)
+                {
+                    _audioDecimatorRight = new AudioDecimator(_demodSampleRate, DefaultAudioSampleRate);
+                }
+                else
+                {
+                    _audioDecimatorRight = null;
+                }
             }
             else
             {
                 _audioDecimator = null;
+                _audioDecimatorRight = null;
             }
+
+            // WFM outputs interleaved stereo; all other modes output mono.
+            _audioFormat = _currentModulation == ModulationType.WFM
+                ? AudioFormat.Stereo
+                : AudioFormat.Default;
 
             // Pre-allocate processing buffers based on expected USB chunk size.
             // RTL-SDR reads 32768 bytes = 16384 IQ pairs per USB transfer.
@@ -740,25 +777,40 @@ namespace RTLSDRCore
                 _iqDecimBuffer = new IqSample[maxIqChunk / _iqDecimator.Factor + 1];
             }
 
+            // Stereo buffers: interleaved L,R at demod rate, plus right-channel decimation
+            if (_stereoDecoder != null)
+            {
+                _stereoDemodBuffer = new float[maxDemodSamples * 2]; // interleaved L,R
+                _decimBufferRight = new float[maxDemodSamples / (_audioDecimator?.Factor ?? 1) + 1];
+            }
+            else
+            {
+                _stereoDemodBuffer = Array.Empty<float>();
+                _decimBufferRight = Array.Empty<float>();
+            }
+
             _agc.Reset();
 
             // Pre-calculate expected audio output count for squelch silence delivery.
             // Each USB transfer is 16384 IQ pairs; after all decimation stages,
-            // we get this many audio samples. Pre-allocate silence buffer to avoid
-            // allocations during the real-time callback.
+            // we get this many audio samples. For stereo, multiply by 2 for interleaved L,R.
             var iqDecimFactor2 = _iqDecimator?.Factor ?? 1;
             var audioDecimFactor = _audioDecimator?.Factor ?? 1;
-            _expectedAudioOutputCount = maxIqChunk / iqDecimFactor2 / audioDecimFactor;
+            var monoOutputCount = maxIqChunk / iqDecimFactor2 / audioDecimFactor;
+            _expectedAudioOutputCount = _stereoDecoder != null
+                ? monoOutputCount * 2
+                : monoOutputCount;
             _squelchSilenceBuffer = new float[_expectedAudioOutputCount];
 
             Logger.Information(
                 "Signal processing: SDR={SdrRate} Hz → IQ decim {IqFactor}:1 → " +
-                "Demod={DemodRate} Hz → Audio decim {AudioFactor}:1 → {AudioRate} Hz, " +
-                "BW={Bandwidth} Hz, Modulation={Modulation}",
+                "Demod={DemodRate} Hz → {StereoMode} → Audio decim {AudioFactor}:1 → {AudioRate} Hz, " +
+                "BW={Bandwidth} Hz, Modulation={Modulation}, Format={Format}",
                 _sdrSampleRate, iqDecimFactor, _demodSampleRate,
+                _stereoDecoder != null ? "Stereo decode" : "Mono",
                 _demodSampleRate > DefaultAudioSampleRate
                     ? _demodSampleRate / DefaultAudioSampleRate : 1,
-                DefaultAudioSampleRate, bandwidth, _currentModulation);
+                DefaultAudioSampleRate, bandwidth, _currentModulation, _audioFormat);
         }
 
         /// <summary>
@@ -899,29 +951,112 @@ namespace RTLSDRCore
             }
             var demodCount = _demodulator.Demodulate(iqForDemod, _demodBuffer);
 
-            // 3. De-emphasis (single-pole IIR — trivially cheap)
-            if (_deEmphasis != null)
-            {
-                _deEmphasis.Process(_demodBuffer.AsSpan(0, demodCount));
-            }
-
-            // 4. Audio decimation (demod rate → 48 kHz, uses pre-allocated buffer)
             int outputCount;
             float[] outputSamples;
-            if (_audioDecimator != null)
+
+            if (_stereoDecoder != null)
             {
-                if (_decimBuffer.Length < demodCount / _audioDecimator.Factor + 1)
+                // === STEREO WFM PATH ===
+                // 3a. Stereo decode: composite MPX → interleaved L,R at demod rate.
+                // This MUST happen before de-emphasis: the 19kHz pilot and 38kHz
+                // subcarrier would be killed by the de-emphasis IIR.
+                if (_stereoDemodBuffer.Length < demodCount * 2)
                 {
-                    _decimBuffer = new float[demodCount / _audioDecimator.Factor + 1];
+                    _stereoDemodBuffer = new float[demodCount * 2];
                 }
-                outputCount = _audioDecimator.Decimate(
-                    _demodBuffer.AsSpan(0, demodCount), _decimBuffer);
-                outputSamples = _decimBuffer;
+                _stereoDecoder.Decode(
+                    _demodBuffer.AsSpan(0, demodCount),
+                    _stereoDemodBuffer.AsSpan(0, demodCount * 2));
+
+                // 3b. De-emphasis per channel: de-interleave → process → re-interleave.
+                // DeEmphasisFilter.Process works in-place on contiguous spans, so we
+                // process even-indexed (L) and odd-indexed (R) samples using temp views.
+                // To avoid allocation, work in-place by extracting channels, filtering,
+                // and interleaving back.
+                var leftSpan = _demodBuffer.AsSpan(0, demodCount);   // reuse demod buffer for left
+                if (_decimBufferRight.Length < demodCount)
+                {
+                    _decimBufferRight = new float[demodCount];
+                }
+                var rightSpan = _decimBufferRight.AsSpan(0, demodCount);
+
+                // De-interleave
+                for (var i = 0; i < demodCount; i++)
+                {
+                    leftSpan[i] = _stereoDemodBuffer[i * 2];
+                    rightSpan[i] = _stereoDemodBuffer[i * 2 + 1];
+                }
+
+                // Apply de-emphasis per channel
+                _deEmphasis?.Process(leftSpan);
+                _deEmphasisRight?.Process(rightSpan);
+
+                // 3c. Audio decimation per channel (demod rate → 48 kHz)
+                if (_audioDecimator != null && _audioDecimatorRight != null)
+                {
+                    var maxDecimOut = demodCount / _audioDecimator.Factor + 1;
+                    if (_decimBuffer.Length < maxDecimOut)
+                    {
+                        _decimBuffer = new float[maxDecimOut];
+                    }
+
+                    var leftDecimCount = _audioDecimator.Decimate(leftSpan, _decimBuffer);
+
+                    // We need a temp buffer for right decimation output
+                    var rightDecimBuf = new float[maxDecimOut]; // small, ~960 samples
+                    var rightDecimCount = _audioDecimatorRight.Decimate(rightSpan, rightDecimBuf);
+
+                    // 3d. Interleave decimated L,R into stereo output
+                    var stereoCount = Math.Min(leftDecimCount, rightDecimCount);
+                    if (_stereoDemodBuffer.Length < stereoCount * 2)
+                    {
+                        _stereoDemodBuffer = new float[stereoCount * 2];
+                    }
+                    for (var i = 0; i < stereoCount; i++)
+                    {
+                        _stereoDemodBuffer[i * 2] = _decimBuffer[i];
+                        _stereoDemodBuffer[i * 2 + 1] = rightDecimBuf[i];
+                    }
+                    outputCount = stereoCount * 2; // interleaved sample count
+                    outputSamples = _stereoDemodBuffer;
+                }
+                else
+                {
+                    // No decimation needed — re-interleave directly
+                    for (var i = 0; i < demodCount; i++)
+                    {
+                        _stereoDemodBuffer[i * 2] = leftSpan[i];
+                        _stereoDemodBuffer[i * 2 + 1] = rightSpan[i];
+                    }
+                    outputCount = demodCount * 2;
+                    outputSamples = _stereoDemodBuffer;
+                }
             }
             else
             {
-                outputCount = demodCount;
-                outputSamples = _demodBuffer;
+                // === MONO PATH (AM, NFM, etc.) ===
+                // 3. De-emphasis (single-pole IIR — trivially cheap)
+                if (_deEmphasis != null)
+                {
+                    _deEmphasis.Process(_demodBuffer.AsSpan(0, demodCount));
+                }
+
+                // 4. Audio decimation (demod rate → 48 kHz, uses pre-allocated buffer)
+                if (_audioDecimator != null)
+                {
+                    if (_decimBuffer.Length < demodCount / _audioDecimator.Factor + 1)
+                    {
+                        _decimBuffer = new float[demodCount / _audioDecimator.Factor + 1];
+                    }
+                    outputCount = _audioDecimator.Decimate(
+                        _demodBuffer.AsSpan(0, demodCount), _decimBuffer);
+                    outputSamples = _decimBuffer;
+                }
+                else
+                {
+                    outputCount = demodCount;
+                    outputSamples = _demodBuffer;
+                }
             }
 
             // 5. Apply volume and clamp

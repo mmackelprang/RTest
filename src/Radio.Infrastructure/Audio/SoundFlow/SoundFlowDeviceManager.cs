@@ -31,6 +31,7 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
   private List<AudioDeviceInfo> _cachedInputDevices = [];
   private string? _selectedOutputDeviceId;
   private string? _selectedInputDeviceId;
+  private MiniAudioEngine? _sharedEngine;
 
   /// <inheritdoc/>
   public event EventHandler<AudioDeviceChangedEventArgs>? DevicesChanged;
@@ -102,6 +103,19 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
     _logger.LogInformation(
       "SoundFlowDeviceManager initialized with {OutputCount} output and {InputCount} input devices",
       outputDevices.Count, inputDevices.Count);
+  }
+
+  /// <summary>
+  /// Sets the shared MiniAudioEngine reference for device enumeration.
+  /// When set, device enumeration reuses this engine instead of creating
+  /// temporary instances — avoiding native memory leaks in MiniAudio that
+  /// cause SIGSEGV after ~300+ create/dispose cycles (~28 minutes at 5s interval).
+  /// </summary>
+  internal void SetSharedEngine(MiniAudioEngine? engine)
+  {
+    _sharedEngine = engine;
+    _logger.LogDebug("Shared MiniAudioEngine reference {Action}",
+      engine != null ? "set" : "cleared");
   }
 
   /// <inheritdoc/>
@@ -376,52 +390,66 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
 
     try
     {
-      // Create a temporary MiniAudioEngine to enumerate devices
-      // This is disposed after enumeration
-      using var tempEngine = new MiniAudioEngine();
-
-      _logger.LogDebug("Enumerating audio devices using MiniAudio backend...");
-
-      // Enumerate playback (output) devices
-      var playbackDevices = tempEngine.PlaybackDevices;
-      _logger.LogDebug("Found {Count} playback devices from MiniAudio", playbackDevices.Length);
-
-      for (int i = 0; i < playbackDevices.Length; i++)
+      // Reuse the shared engine when available to avoid creating/disposing temporary
+      // MiniAudioEngine instances. Each native engine init probes JACK, PulseAudio, OSS,
+      // ALSA backends; after ~300+ create/dispose cycles the native allocator corrupts
+      // and triggers SIGSEGV. Only create a temporary engine during initial construction
+      // (before the shared engine is set by SoundFlowAudioEngine.InitializeAsync).
+      MiniAudioEngine? tempEngine = null;
+      var engine = _sharedEngine;
+      if (engine == null)
       {
-        var device = playbackDevices[i];
-        var rawName = string.IsNullOrWhiteSpace(device.Name)
-          ? "Default Audio Output"
-          : device.Name;
-
-        if (IsDeviceHidden(rawName))
-        {
-          _logger.LogDebug("  Output device {Index}: {Name} — hidden by filter", i, rawName);
-          continue;
-        }
-
-        var isDefault = outputDevices.Count == 0; // First non-hidden device is default
-        var displayName = ApplyFriendlyName(rawName);
-        var isUsb = rawName.Contains("USB", StringComparison.OrdinalIgnoreCase);
-
-        outputDevices.Add(new AudioDeviceInfo
-        {
-          Id = $"playback-{i}",
-          Name = displayName,
-          RawName = rawName,
-          Type = AudioDeviceType.Output,
-          IsDefault = isDefault,
-          MaxChannels = 2,
-          SupportedSampleRates = [44100, 48000, 96000],
-          IsUSBDevice = isUsb,
-          USBPort = isUsb ? ExtractUSBPort(rawName) : null
-        });
-
-        _logger.LogDebug("  Output device {Index}: {RawName} → {DisplayName} (Default: {IsDefault}, USB: {IsUSB})",
-          i, rawName, displayName, isDefault, isUsb);
+        _logger.LogDebug("No shared engine available, creating temporary engine for enumeration");
+        tempEngine = new MiniAudioEngine();
+        engine = tempEngine;
       }
 
-      // Enumerate capture (input) devices
-      var captureDevices = tempEngine.CaptureDevices;
+      try
+      {
+        engine.UpdateAudioDevicesInfo();
+
+        _logger.LogDebug("Enumerating audio devices using MiniAudio backend...");
+
+        // Enumerate playback (output) devices
+        var playbackDevices = engine.PlaybackDevices;
+        _logger.LogDebug("Found {Count} playback devices from MiniAudio", playbackDevices.Length);
+
+        for (int i = 0; i < playbackDevices.Length; i++)
+        {
+          var device = playbackDevices[i];
+          var rawName = string.IsNullOrWhiteSpace(device.Name)
+            ? "Default Audio Output"
+            : device.Name;
+
+          if (IsDeviceHidden(rawName))
+          {
+            _logger.LogDebug("  Output device {Index}: {Name} — hidden by filter", i, rawName);
+            continue;
+          }
+
+          var isDefault = outputDevices.Count == 0; // First non-hidden device is default
+          var displayName = ApplyFriendlyName(rawName);
+          var isUsb = rawName.Contains("USB", StringComparison.OrdinalIgnoreCase);
+
+          outputDevices.Add(new AudioDeviceInfo
+          {
+            Id = $"playback-{i}",
+            Name = displayName,
+            RawName = rawName,
+            Type = AudioDeviceType.Output,
+            IsDefault = isDefault,
+            MaxChannels = 2,
+            SupportedSampleRates = [44100, 48000, 96000],
+            IsUSBDevice = isUsb,
+            USBPort = isUsb ? ExtractUSBPort(rawName) : null
+          });
+
+          _logger.LogDebug("  Output device {Index}: {RawName} → {DisplayName} (Default: {IsDefault}, USB: {IsUSB})",
+            i, rawName, displayName, isDefault, isUsb);
+        }
+
+        // Enumerate capture (input) devices
+        var captureDevices = engine.CaptureDevices;
       _logger.LogDebug("Found {Count} capture devices from MiniAudio", captureDevices.Length);
 
       for (int i = 0; i < captureDevices.Length; i++)
@@ -484,6 +512,12 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
 
       _logger.LogDebug("Device enumeration complete: {OutputCount} output, {InputCount} input devices",
         outputDevices.Count, inputDevices.Count);
+      }
+      finally
+      {
+        // Only dispose the engine if we created a temporary one
+        tempEngine?.Dispose();
+      }
     }
     catch (Exception ex)
     {
@@ -539,31 +573,46 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
 
     try
     {
-      using var tempEngine = new MiniAudioEngine();
-
-      var playbackDevices = tempEngine.PlaybackDevices;
-      for (int i = 0; i < playbackDevices.Length; i++)
+      // Reuse shared engine to avoid native memory leak (see EnumerateDevices comment)
+      MiniAudioEngine? tempEngine = null;
+      var engine = _sharedEngine;
+      if (engine == null)
       {
-        var device = playbackDevices[i];
-        var rawName = string.IsNullOrWhiteSpace(device.Name)
-          ? "Default Audio Output"
-          : device.Name;
-        var isHidden = IsDeviceHidden(rawName);
-        var displayName = ApplyFriendlyName(rawName);
-        var isUsb = rawName.Contains("USB", StringComparison.OrdinalIgnoreCase);
-        var friendlyOverride = _displayOptions.DeviceFriendlyNames.TryGetValue(rawName, out var fn) ? fn : null;
+        tempEngine = new MiniAudioEngine();
+        engine = tempEngine;
+      }
 
-        result.Add(new DeviceDisplayInfo
+      try
+      {
+        engine.UpdateAudioDevicesInfo();
+        var playbackDevices = engine.PlaybackDevices;
+        for (int i = 0; i < playbackDevices.Length; i++)
         {
-          DeviceId = $"playback-{i}",
-          RawName = rawName,
-          DisplayName = displayName,
-          IsHidden = isHidden,
-          FriendlyNameOverride = friendlyOverride,
-          Type = AudioDeviceType.Output,
-          IsDefault = result.Count(r => r.Type == AudioDeviceType.Output && !r.IsHidden) == 0 && !isHidden,
-          IsUSBDevice = isUsb
-        });
+          var device = playbackDevices[i];
+          var rawName = string.IsNullOrWhiteSpace(device.Name)
+            ? "Default Audio Output"
+            : device.Name;
+          var isHidden = IsDeviceHidden(rawName);
+          var displayName = ApplyFriendlyName(rawName);
+          var isUsb = rawName.Contains("USB", StringComparison.OrdinalIgnoreCase);
+          var friendlyOverride = _displayOptions.DeviceFriendlyNames.TryGetValue(rawName, out var fn) ? fn : null;
+
+          result.Add(new DeviceDisplayInfo
+          {
+            DeviceId = $"playback-{i}",
+            RawName = rawName,
+            DisplayName = displayName,
+            IsHidden = isHidden,
+            FriendlyNameOverride = friendlyOverride,
+            Type = AudioDeviceType.Output,
+            IsDefault = result.Count(r => r.Type == AudioDeviceType.Output && !r.IsHidden) == 0 && !isHidden,
+            IsUSBDevice = isUsb
+          });
+        }
+      }
+      finally
+      {
+        tempEngine?.Dispose();
       }
     }
     catch (Exception ex)
@@ -718,9 +767,18 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
       return null;
     }
 
+    // Reuse shared engine to avoid native memory leak (see EnumerateDevices comment)
+    MiniAudioEngine? tempEngine = null;
+    var engine = _sharedEngine;
+    if (engine == null)
+    {
+      tempEngine = new MiniAudioEngine();
+      engine = tempEngine;
+    }
+
     try
     {
-      using var engine = new MiniAudioEngine();
+      engine.UpdateAudioDevicesInfo();
       var devices = engine.CaptureDevices;
       var match = devices.FirstOrDefault(d =>
         d.Name != null && d.Name.Contains(namePart, StringComparison.OrdinalIgnoreCase));
@@ -734,6 +792,10 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
     catch (Exception ex)
     {
       _logger.LogWarning(ex, "Error searching for capture device {NamePart}", namePart);
+    }
+    finally
+    {
+      tempEngine?.Dispose();
     }
     return null;
   }

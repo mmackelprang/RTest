@@ -19,29 +19,47 @@
     <div style="position: absolute; inset: 0; background: var(--surface-inset);"></div>
   }
 
-  <!-- Track info overlay — centered -->
-  <div style="position: relative; z-index: 1; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px 16px 0; text-align: center; min-height: 0;">
+  <!-- Album art — large, nearly panel-width -->
+  <div style="position: relative; z-index: 1; flex: 1; display: flex; align-items: center; justify-content: center; padding: 12px; min-height: 0;">
     @if (_hasValidAlbumArt)
     {
-      <img src="@_albumArtUrl" alt="Album Art" referrerpolicy="no-referrer"
-           style="width: 180px; height: 180px; border-radius: 8px; object-fit: cover; box-shadow: 0 8px 32px rgba(0,0,0,0.5); margin-bottom: 16px;" />
+      <div style="position: relative; width: 100%; max-width: 340px; aspect-ratio: 1; border-radius: 8px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.5);">
+        <img src="@_albumArtUrl" alt="Album Art" referrerpolicy="no-referrer"
+             style="width: 100%; height: 100%; object-fit: cover;" />
+        <!-- Metadata overlay on bottom of art -->
+        <div style="position: absolute; bottom: 0; left: 0; right: 0; padding: 12px 14px 10px; background: linear-gradient(transparent, rgba(0,0,0,0.85) 40%); text-align: left;">
+          <div style="font-size: 22px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #fff; text-shadow: 0 1px 6px rgba(0,0,0,0.8);">
+            @(_title ?? "No Track Playing")
+          </div>
+          <div style="font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgba(255,255,255,0.85); text-shadow: 0 1px 3px rgba(0,0,0,0.7); margin-top: 2px;">
+            @(_artist ?? "--")
+          </div>
+          @if (!string.IsNullOrEmpty(_album) && _album != "--")
+          {
+            <div style="font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgba(255,255,255,0.6); text-shadow: 0 1px 2px rgba(0,0,0,0.6); margin-top: 1px;">
+              @_album
+            </div>
+          }
+        </div>
+      </div>
     }
     else
     {
-      <MudIcon Icon="@Icons.Material.Filled.MusicNote" Style="font-size: 96px; color: var(--text-low); margin-bottom: 16px;" />
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;">
+        <MudIcon Icon="@Icons.Material.Filled.MusicNote" Style="font-size: 96px; color: var(--text-low); margin-bottom: 16px;" />
+        <div style="font-size: 28px; font-weight: 600; color: var(--text-high);">
+          @(_title ?? "No Track Playing")
+        </div>
+        <div style="font-size: 18px; color: var(--text-medium); margin-top: 4px;">
+          @(_artist ?? "--")
+        </div>
+      </div>
     }
-    <div style="font-size: 28px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; color: var(--text-high); text-shadow: 0 2px 8px rgba(0,0,0,0.6);">
-      @(_title ?? "No Track Playing")
-    </div>
-    <div style="font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; color: rgba(255,255,255,0.85); text-shadow: 0 1px 4px rgba(0,0,0,0.5); margin-top: 4px;">
-      @(_artist ?? "--")
-    </div>
-    <div style="font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; color: rgba(255,255,255,0.65); text-shadow: 0 1px 3px rgba(0,0,0,0.5); margin-top: 2px;">
-      @(_album ?? "--")
-    </div>
     @if (!string.IsNullOrEmpty(_source))
     {
-      <MudChip T="string" Color="Color.Primary" Size="Size.Small" Style="margin-top: 8px;">@_source</MudChip>
+      <div style="position: absolute; top: 16px; right: 16px;">
+        <MudChip T="string" Color="Color.Primary" Size="Size.Small">@_source</MudChip>
+      </div>
     }
   </div>
 
@@ -81,6 +99,7 @@
                      Color="@(_isShuffleEnabled ? Color.Primary : Color.Default)"
                      Size="Size.Medium"
                      Class="transport-btn"
+                     Style="@(_isShuffleEnabled ? "background: rgba(92,212,232,0.15); border: 1px solid rgba(92,212,232,0.4); border-radius: 8px;" : "")"
                      OnClick="HandleShuffleAsync"
                      title="Shuffle" />
       <MudIconButton Icon="@Icons.Material.Filled.SkipPrevious"
@@ -101,10 +120,11 @@
                      Class="transport-btn"
                      OnClick="HandleNextAsync"
                      title="Next" />
-      <MudIconButton Icon="@Icons.Material.Filled.Repeat"
+      <MudIconButton Icon="@(_repeatMode == "One" ? Icons.Material.Filled.RepeatOne : Icons.Material.Filled.Repeat)"
                      Color="@(_repeatMode != "Off" ? Color.Primary : Color.Default)"
                      Size="Size.Medium"
                      Class="transport-btn"
+                     Style="@(_repeatMode != "Off" ? "background: rgba(92,212,232,0.15); border: 1px solid rgba(92,212,232,0.4); border-radius: 8px;" : "")"
                      OnClick="HandleRepeatAsync"
                      title="@($"Repeat: {_repeatMode}")" />
     </div>
@@ -240,7 +260,7 @@
         _album = nowPlaying.Album;
         if (_albumArtUrl != nowPlaying.AlbumArtUrl)
         {
-          Logger.LogInformation("Album art URL changed: {OldUrl} → {NewUrl}", _albumArtUrl, nowPlaying.AlbumArtUrl);
+          Logger.LogDebug("Album art URL changed: {OldUrl} → {NewUrl}", _albumArtUrl, nowPlaying.AlbumArtUrl);
           _albumArtFailed = false;
         }
         _albumArtUrl = nowPlaying.AlbumArtUrl;

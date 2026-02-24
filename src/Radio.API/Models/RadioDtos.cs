@@ -54,6 +54,12 @@ public class RadioStateDto
   /// Gets or sets the manual gain value in dB (only effective when AutoGain is false).
   /// </summary>
   public int? Gain { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether the radio is receiving a stereo FM signal
+  /// (19 kHz pilot tone detected).
+  /// </summary>
+  public bool IsStereo { get; set; }
 }
 
 /// <summary>
