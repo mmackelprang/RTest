@@ -307,12 +307,17 @@ namespace RTLSDRCore.DSP
             foreach (var factor in FactorizeDecimation(remaining))
             {
                 var nextRate = currentRate / factor;
-                // Anti-alias cutoff at 90% of the output Nyquist for this stage
-                var cutoff = nextRate / 2.0f * 0.9f;
-                // Scale taps with decimation factor: higher factors need more taps.
-                // Minimum 63, with ~15 taps per unit of decimation factor for good
-                // stopband attenuation.
-                var taps = Math.Max(63, factor * 15) | 1; // ensure odd
+                // Anti-alias cutoff at 80% of the output Nyquist for this stage
+                var nyquist = nextRate / 2.0f;
+                var cutoff = nyquist * 0.8f;
+                // Calculate taps from the required transition bandwidth.
+                // For Hamming window: taps ≈ 3.3 / (transition_width / sample_rate)
+                // Transition band = Nyquist - cutoff (in Hz)
+                var transitionHz = nyquist - cutoff;
+                var normalizedTransition = transitionHz / currentRate;
+                var taps = (int)Math.Ceiling(3.3 / normalizedTransition);
+                taps = Math.Max(taps, 63);
+                taps |= 1; // ensure odd
                 _stages.Add(new DecimationStage(
                     new LowPassFilter(currentRate, cutoff, taps), factor));
                 currentRate = nextRate;

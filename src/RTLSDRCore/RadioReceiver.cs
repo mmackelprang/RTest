@@ -26,6 +26,7 @@ namespace RTLSDRCore
         private AgcProcessor _agc;
         private AudioDecimator? _audioDecimator;
         private LowPassFilter? _audioFilter;
+        private int _sdrSampleRate;
 
         private AudioFormat _audioFormat = AudioFormat.Default;
         private float _volume = 1.0f;
@@ -115,17 +116,18 @@ namespace RTLSDRCore
                         return false;
                     }
 
-                    // Configure device
-                    _device.SetSampleRate(DefaultSdrSampleRate);
+                    // Setup signal processing chain first (calculates the
+                    // appropriate SDR sample rate for the current modulation)
+                    SetupSignalProcessing();
+
+                    // Configure device with the modulation-appropriate sample rate
+                    _device.SetSampleRate(_sdrSampleRate);
                     _device.SetFrequency(_currentFrequencyHz);
                     _device.SetGainMode(_autoGain);
                     if (!_autoGain)
                     {
                         _device.SetGain(_manualGain);
                     }
-
-                    // Setup signal processing chain
-                    SetupSignalProcessing();
 
                     // Start streaming
                     if (!_device.StartStreaming())
@@ -469,6 +471,7 @@ namespace RTLSDRCore
                     if (_state == ReceiverState.Running || _state == ReceiverState.Scanning)
                     {
                         SetupSignalProcessing();
+                        _device.SetSampleRate(_sdrSampleRate);
                     }
 
                     SetFrequencyInternal(newFrequency);
@@ -646,21 +649,65 @@ namespace RTLSDRCore
 
         private void SetupSignalProcessing()
         {
+            var bandwidth = _currentBand.DefaultBandwidthHz;
+
+            // Choose SDR sample rate appropriate for the modulation type.
+            // Lower rates let the hardware RF filter handle channel selection,
+            // avoiding the need for (and problems with) software IQ filtering.
+            // The rate must be:
+            //  - ≥ 2× channel bandwidth (Nyquist)
+            //  - A multiple of the audio output rate (for clean decimation)
+            //  - Within the RTL-SDR's practical range (~225 kHz – 3.2 MHz)
+            _sdrSampleRate = CalculateSdrSampleRate(bandwidth);
+
+            Logger.Information(
+                "Signal processing: SDR={SdrRate} Hz, BW={Bandwidth} Hz, " +
+                "Modulation={Modulation}, AudioDecim={Factor}:1",
+                _sdrSampleRate, bandwidth, _currentModulation,
+                _sdrSampleRate / DefaultAudioSampleRate);
+
+            // Demodulation (operates at the SDR sample rate)
             _demodulator = DemodulatorFactory.Create(_currentModulation);
-            _demodulator.SampleRate = DefaultSdrSampleRate;
-            _demodulator.Bandwidth = _currentBand.DefaultBandwidthHz;
+            _demodulator.SampleRate = _sdrSampleRate;
+            _demodulator.Bandwidth = bandwidth;
 
-            // Use multi-stage audio decimator for proper anti-alias filtering.
-            // A single 50:1 decimation with 63-tap FIR has a normalized cutoff of
-            // ~0.9% which is far too narrow for the filter to work — causing massive
-            // aliasing (audible as buzzing/noise). Multi-stage breaks this into
-            // manageable steps (e.g., 10:1 then 5:1) where each filter is effective.
-            _audioDecimator = new AudioDecimator(DefaultSdrSampleRate, DefaultAudioSampleRate);
+            // Audio decimation (SDR rate → 48 kHz) using multi-stage decimator
+            if (_sdrSampleRate > DefaultAudioSampleRate)
+            {
+                _audioDecimator = new AudioDecimator(_sdrSampleRate, DefaultAudioSampleRate);
+            }
+            else
+            {
+                _audioDecimator = null;
+            }
 
-            // Audio low-pass filter to remove residual high-frequency noise after decimation
-            _audioFilter = new LowPassFilter(DefaultAudioSampleRate, 15_000);
+            // Skip the post-decimation audio LPF — the multi-stage decimation
+            // filters already handle anti-aliasing adequately.
+            _audioFilter = null;
 
             _agc.Reset();
+        }
+
+        /// <summary>
+        /// Calculates the optimal SDR sample rate for the given channel bandwidth.
+        /// Picks a multiple of the audio rate that provides enough oversampling
+        /// for the audio decimation filters to work cleanly.
+        /// </summary>
+        private static int CalculateSdrSampleRate(int channelBandwidthHz)
+        {
+            // Use ~5× bandwidth for comfortable filter margin.
+            // At 5× oversampling, the audio content occupies ~20% of the bandwidth,
+            // giving the decimation filter plenty of room for its transition band.
+            var minRate = channelBandwidthHz * 5;
+            const int minDeviceRate = 225_000; // RTL-SDR practical minimum
+            minRate = Math.Max(minRate, minDeviceRate);
+
+            // Find the smallest multiple of the audio rate that's ≥ minRate
+            var multiplier = (int)Math.Ceiling((double)minRate / DefaultAudioSampleRate);
+            var rate = multiplier * DefaultAudioSampleRate;
+
+            // Clamp to the RTL-SDR's supported range
+            return Math.Clamp(rate, minDeviceRate, 3_200_000);
         }
 
         private void OnSamplesAvailable(object? sender, IqSamplesEventArgs e)
@@ -683,7 +730,7 @@ namespace RTLSDRCore
 
         private void ProcessSamples(IqSample[] samples)
         {
-            // Calculate signal strength
+            // Calculate signal strength from raw IQ
             var signalPower = samples.Average(s => s.MagnitudeSquared);
             _lastSignalStrength = MathF.Sqrt(signalPower);
 
@@ -696,11 +743,11 @@ namespace RTLSDRCore
                 return;
             }
 
-            // Demodulate
+            // 1. FM demodulation (IQ → mono audio at SDR sample rate)
             var audioSamples = new float[samples.Length];
             var demodCount = _demodulator.Demodulate(samples, audioSamples);
 
-            // Decimate to audio rate using multi-stage audio decimator
+            // 2. Audio decimation (SDR rate → 48 kHz)
             if (_audioDecimator != null)
             {
                 var decimatedAudio = new float[demodCount / _audioDecimator.Factor + 1];
@@ -710,7 +757,7 @@ namespace RTLSDRCore
                 Array.Copy(decimatedAudio, audioSamples, decimatedCount);
             }
 
-            // Apply audio low-pass filter to remove residual high-frequency noise
+            // 3. Audio low-pass filter (remove residual HF noise)
             if (_audioFilter != null)
             {
                 var filtered = new float[audioSamples.Length];
@@ -718,18 +765,22 @@ namespace RTLSDRCore
                 audioSamples = filtered;
             }
 
-            // Apply AGC
-            var processedAudio = new float[audioSamples.Length];
-            _agc.Process(audioSamples, processedAudio);
-
-            // Apply volume
-            for (var i = 0; i < processedAudio.Length; i++)
+            // 4. Apply volume and clamp (FM demod gain already normalizes to ~[-1,1])
+            if (_volume != 1.0f)
             {
-                processedAudio[i] *= _volume;
+                for (var i = 0; i < audioSamples.Length; i++)
+                {
+                    audioSamples[i] *= _volume;
+                }
+            }
+
+            for (var i = 0; i < audioSamples.Length; i++)
+            {
+                audioSamples[i] = Math.Clamp(audioSamples[i], -1.0f, 1.0f);
             }
 
             // Notify listeners
-            AudioDataAvailable?.Invoke(this, new AudioDataEventArgs(processedAudio, _audioFormat));
+            AudioDataAvailable?.Invoke(this, new AudioDataEventArgs(audioSamples, _audioFormat));
         }
 
         private void SetState(ReceiverState newState)
