@@ -223,57 +223,76 @@ public class AudioController : ControllerBase
   }
 
   /// <summary>
-  /// Starts the audio engine.
+  /// Starts/resumes audio playback on the active source.
   /// </summary>
   [HttpPost("start")]
   [ProducesResponseType(StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-  public async Task<IActionResult> StartEngine()
+  public async Task<IActionResult> StartPlayback()
   {
     try
     {
+      // Ensure the engine is running
       if (_audioEngine.State == AudioEngineState.Uninitialized)
-      {
         await _audioEngine.InitializeAsync();
-      }
-
       if (_audioEngine.State == AudioEngineState.Ready)
-      {
         await _audioEngine.StartAsync();
+
+      // Resume the active source if it was stopped/paused
+      if (_audioManager?.ActiveSource is IPrimaryAudioSource primarySource)
+      {
+        if (primarySource.State == AudioSourceState.Stopped ||
+            primarySource.State == AudioSourceState.Ready)
+        {
+          await primarySource.PlayAsync();
+          _logger.LogInformation("Resumed playback on {Source}", primarySource.Name);
+        }
+        else if (primarySource.State == AudioSourceState.Paused)
+        {
+          await primarySource.ResumeAsync();
+          _logger.LogInformation("Resumed playback on {Source}", primarySource.Name);
+        }
       }
 
-      _logger.LogInformation("Audio engine started");
-      return Ok(new { message = "Audio engine started", state = _audioEngine.State.ToString() });
+      return Ok(new { message = "Audio playback started", state = _audioEngine.State.ToString() });
     }
     catch (Exception ex)
     {
-      _logger.LogError(ex, "Error starting audio engine");
-      return StatusCode(500, new { error = "Failed to start audio engine" });
+      _logger.LogError(ex, "Error starting audio playback");
+      return StatusCode(500, new { error = "Failed to start audio playback" });
     }
   }
 
   /// <summary>
-  /// Stops the audio engine.
+  /// Stops audio playback on the active source.
   /// </summary>
   [HttpPost("stop")]
   [ProducesResponseType(StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-  public async Task<IActionResult> StopEngine()
+  public async Task<IActionResult> StopPlayback()
   {
     try
     {
-      if (_audioEngine.State == AudioEngineState.Running)
+      // Stop the active source (capture device, file player, etc.)
+      if (_audioManager != null)
       {
+        await _audioManager.StopAsync();
+        _logger.LogInformation("Audio playback stopped via AudioManager");
+      }
+      else if (_audioEngine.State == AudioEngineState.Running)
+      {
+        // Fallback: stop the engine directly if no AudioManager
         await _audioEngine.StopAsync();
+        _logger.LogInformation("Audio engine stopped (no AudioManager)");
       }
 
-      _logger.LogInformation("Audio engine stopped");
-      return Ok(new { message = "Audio engine stopped", state = _audioEngine.State.ToString() });
+      var sourceState = _audioManager?.ActiveSource?.State.ToString() ?? "Stopped";
+      return Ok(new { message = "Audio playback stopped", state = sourceState });
     }
     catch (Exception ex)
     {
-      _logger.LogError(ex, "Error stopping audio engine");
-      return StatusCode(500, new { error = "Failed to stop audio engine" });
+      _logger.LogError(ex, "Error stopping audio playback");
+      return StatusCode(500, new { error = "Failed to stop audio playback" });
     }
   }
 
