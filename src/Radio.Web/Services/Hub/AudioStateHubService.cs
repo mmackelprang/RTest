@@ -160,8 +160,16 @@ public class AudioStateHubService : IAsyncDisposable
       _logger.LogInformation("SignalR connection established successfully");
 
       // Subscribe to group-based channels that require explicit opt-in
-      await _hubConnection.InvokeAsync("SubscribeToRadioState", cancellationToken);
-      await _hubConnection.InvokeAsync("SubscribeToQueue", cancellationToken);
+      try
+      {
+        await _hubConnection.InvokeAsync("SubscribeToRadioState", cancellationToken);
+        await _hubConnection.InvokeAsync("SubscribeToQueue", cancellationToken);
+        _logger.LogInformation("Subscribed to RadioState and Queue groups");
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Failed to subscribe to SignalR groups");
+      }
     }
     catch (Exception ex)
     {
