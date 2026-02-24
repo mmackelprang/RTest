@@ -722,14 +722,12 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     _hasLoggedFirstAudioData = false;
     _totalSamplesReceived = 0;
 
-    // Start the RTL-SDR receiver first
-    await StartupAsync(cancellationToken);
-    Logger.LogDebug("📻 SDR RADIO: RTL-SDR receiver started, IsRunning={IsRunning}", IsRunning);
-
     // Generate a playback ID for this session
     _playbackId = $"sdr-radio-{Guid.NewGuid():N}";
 
-    // Use SoundFlow playback service to route audio to output
+    // Set up the audio output pipeline BEFORE starting the receiver.
+    // This ensures the BufferedSoundGenerator is ready to accept samples
+    // from the very first USB callback, preventing data loss during startup.
     if (_playbackService != null)
     {
       var engine = _playbackService.GetUnderlyingEngine();
@@ -743,22 +741,27 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
       Logger.LogDebug("📻 SDR RADIO: SoundFlow format - SampleRate={SampleRate}, Channels={Channels}",
         format.SampleRate, format.Channels);
 
-      // Create the sound generator with proper engine and format context
+      // Create the sound generator and subscribe to audio events BEFORE
+      // starting the receiver, so no USB callbacks are missed.
       if (_soundGenerator == null)
       {
         _soundGenerator = new BufferedSoundGenerator<float>(engine, format, Logger, metricsCollector: MetricsCollector);
-
-        // Pre-fill with 0.5s of silence before the mixer starts consuming.
-        // This prevents underruns during startup (USB device init takes ~100ms)
-        // and provides a cushion against USB transfer jitter and clock drift
-        // between the RTL-SDR crystal oscillator and the system audio clock.
-        _soundGenerator.PreFillSilence(0.5f);
-
         _radioReceiver.AudioDataAvailable += OnAudioDataAvailable;
         Logger.LogDebug("📻 SDR RADIO: Created BufferedSoundGenerator and subscribed to AudioDataAvailable");
       }
 
-      // Use PlayComponentAsync for raw PCM audio (not PlayStreamAsync which expects encoded audio)
+      // Pre-fill with 1.0s of silence. The RTL-SDR USB device takes ~1s to
+      // start delivering data after Startup(). This cushion keeps the mixer
+      // fed during that gap and absorbs ongoing USB transfer jitter and
+      // clock drift between the RTL-SDR crystal and the system audio clock.
+      _soundGenerator.PreFillSilence(1.0f);
+
+      // Start the RTL-SDR receiver — USB callbacks begin arriving and
+      // accumulate in the buffer on top of the silence cushion.
+      await StartupAsync(cancellationToken);
+      Logger.LogDebug("📻 SDR RADIO: RTL-SDR receiver started, IsRunning={IsRunning}", IsRunning);
+
+      // Now add to mixer — consumption begins with a 1s head start.
       var success = await _playbackService.PlayComponentAsync(
         _playbackId,
         _soundGenerator,
@@ -784,6 +787,7 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     else
     {
       Logger.LogWarning("📻 SDR RADIO: SoundFlowPlaybackService not available - SDR audio output may not work");
+      await StartupAsync(cancellationToken);
     }
   }
 
