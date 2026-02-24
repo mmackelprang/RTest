@@ -313,23 +313,9 @@ namespace RTLSDRCore
 
             if (_device.IsOpen)
             {
-                // Stop streaming before tuning to prevent USB pipe stalls,
-                // unless already stopped (e.g., by SetBand which stops before calling this)
-                var wasStreaming = _device.IsStreaming;
-                if (wasStreaming)
-                {
-                    _device.StopStreaming();
-                }
-
+                // rtlsdr_set_center_freq is safe to call while streaming —
+                // no need to stop/restart the USB pipe for frequency changes.
                 var success = _device.SetFrequency(frequencyHz);
-
-                if (wasStreaming)
-                {
-                    if (!_device.StartStreaming())
-                    {
-                        Logger.Error("Failed to restart streaming after frequency change");
-                    }
-                }
 
                 if (!success)
                 {
@@ -354,72 +340,27 @@ namespace RTLSDRCore
         public bool IsScanning => _isScanning;
 
         /// <inheritdoc/>
-        public bool ScanFrequencyUp(long stepHz = 100_000, float signalThreshold = 0.3f, int dwellTimeMs = 100)
+        public bool ScanFrequencyUp(long stepHz = 100_000, float signalThreshold = 0.3f, int dwellTimeMs = 150)
         {
-            if (_state != ReceiverState.Running && _state != ReceiverState.Scanning)
-            {
-                throw new InvalidOperationException("Receiver must be started before scanning");
-            }
-
-            Logger.Information("Starting scan up from {Frequency}", RadioBand.FormatFrequency(_currentFrequencyHz));
-
-            _scanCts = new CancellationTokenSource();
-            _isScanning = true;
-            SetState(ReceiverState.Scanning);
-
-            try
-            {
-                while (_currentFrequencyHz + stepHz <= _currentBand.MaxFrequencyHz)
-                {
-                    if (_scanCts.Token.IsCancellationRequested)
-                    {
-                        Logger.Information("Scan cancelled");
-                        SetState(ReceiverState.Running);
-                        _isScanning = false;
-                        return false;
-                    }
-
-                    SetFrequencyInternal(_currentFrequencyHz + stepHz);
-                    Thread.Sleep(dwellTimeMs);
-
-                    if (_lastSignalStrength >= signalThreshold)
-                    {
-                        Logger.Information("Signal found at {Frequency} (strength: {Strength:P0})",
-                            RadioBand.FormatFrequency(_currentFrequencyHz), _lastSignalStrength);
-                        SetState(ReceiverState.Running);
-                        _isScanning = false;
-                        return true;
-                    }
-                }
-
-                Logger.Information("Scan reached upper band limit");
-                SetState(ReceiverState.Running);
-                _isScanning = false;
-                return false;
-            }
-            catch (Exception ex)
-            {
-                Logger.Error(ex, "Error during scan");
-                SetState(ReceiverState.Running);
-                _isScanning = false;
-                throw;
-            }
-            finally
-            {
-                _scanCts?.Dispose();
-                _scanCts = null;
-            }
+            return ScanInternal(stepHz, signalThreshold, dwellTimeMs, ascending: true);
         }
 
         /// <inheritdoc/>
-        public bool ScanFrequencyDown(long stepHz = 100_000, float signalThreshold = 0.3f, int dwellTimeMs = 100)
+        public bool ScanFrequencyDown(long stepHz = 100_000, float signalThreshold = 0.3f, int dwellTimeMs = 150)
+        {
+            return ScanInternal(stepHz, signalThreshold, dwellTimeMs, ascending: false);
+        }
+
+        private bool ScanInternal(long stepHz, float signalThreshold, int dwellTimeMs, bool ascending)
         {
             if (_state != ReceiverState.Running && _state != ReceiverState.Scanning)
             {
                 throw new InvalidOperationException("Receiver must be started before scanning");
             }
 
-            Logger.Information("Starting scan down from {Frequency}", RadioBand.FormatFrequency(_currentFrequencyHz));
+            var direction = ascending ? "up" : "down";
+            Logger.Information("Starting scan {Direction} from {Frequency} (threshold={Threshold:F2}, dwell={Dwell}ms)",
+                direction, RadioBand.FormatFrequency(_currentFrequencyHz), signalThreshold, dwellTimeMs);
 
             _scanCts = new CancellationTokenSource();
             _isScanning = true;
@@ -427,30 +368,44 @@ namespace RTLSDRCore
 
             try
             {
-                while (_currentFrequencyHz - stepHz >= _currentBand.MinFrequencyHz)
+                var limit = ascending ? _currentBand.MaxFrequencyHz : _currentBand.MinFrequencyHz;
+
+                while (ascending
+                    ? _currentFrequencyHz + stepHz <= limit
+                    : _currentFrequencyHz - stepHz >= limit)
                 {
                     if (_scanCts.Token.IsCancellationRequested)
                     {
-                        Logger.Information("Scan cancelled");
+                        Logger.Information("Scan cancelled at {Frequency}",
+                            RadioBand.FormatFrequency(_currentFrequencyHz));
                         SetState(ReceiverState.Running);
                         _isScanning = false;
                         return false;
                     }
 
-                    SetFrequencyInternal(_currentFrequencyHz - stepHz);
+                    var nextFreq = ascending
+                        ? _currentFrequencyHz + stepHz
+                        : _currentFrequencyHz - stepHz;
+                    SetFrequencyInternal(nextFreq);
+
+                    // Dwell to allow USB reads and signal strength computation.
+                    // At 240kHz SDR rate with 16384 IQ pairs per USB transfer,
+                    // each transfer takes ~68ms. 150ms dwell ensures at least
+                    // 2 full reads for a reliable signal strength measurement.
                     Thread.Sleep(dwellTimeMs);
 
                     if (_lastSignalStrength >= signalThreshold)
                     {
-                        Logger.Information("Signal found at {Frequency} (strength: {Strength:P0})",
-                            RadioBand.FormatFrequency(_currentFrequencyHz), _lastSignalStrength);
+                        Logger.Information("Signal found at {Frequency} (strength: {Strength:F3}, threshold: {Threshold:F2})",
+                            RadioBand.FormatFrequency(_currentFrequencyHz), _lastSignalStrength, signalThreshold);
                         SetState(ReceiverState.Running);
                         _isScanning = false;
                         return true;
                     }
                 }
 
-                Logger.Information("Scan reached lower band limit");
+                Logger.Information("Scan reached {Direction} band limit at {Frequency}",
+                    ascending ? "upper" : "lower", RadioBand.FormatFrequency(_currentFrequencyHz));
                 SetState(ReceiverState.Running);
                 _isScanning = false;
                 return false;

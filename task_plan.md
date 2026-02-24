@@ -1,10 +1,10 @@
-# Task Plan: Next Session — Media Setup, Dual Output Bug, Architecture Cleanup
+# Task Plan: Radio Console — Ongoing Development
 
 ## Goal
-Complete Ubuntu x64 setup (media + fingerprinting), fix the dual audio output bug where audio plays on both local speakers and Cast simultaneously, and begin architecture cleanup.
+Continue feature development, hardware integration testing, and bug fixes for the Radio Console project on Ubuntu x64 and Raspberry Pi targets.
 
 ## Current Phase
-Phase A — Ubuntu Media & Data Setup (Phases B and C complete)
+Phase E — Radio Scan Fix & UI Improvements
 
 ---
 
@@ -23,6 +23,9 @@ All prior phases are **COMPLETE**. See git history and previous plan for details
   - Extract AudioSourceFactory (PR #222)
   - Extract AudioPreferencePersistence + BluetoothAutoSwitchService, delete dead RestoreLastSourceAsync (PR #223)
 - Volume persistence verified on Ubuntu + Pi (survives service restarts)
+- Inline radio control panel with broadcast console styling (PR #228)
+- FM audio dropout fix — squelch silence delivery (PR #229)
+- FM audio dropout fix — async DSP processing + startup reorder (PR #230)
 
 ---
 
@@ -73,21 +76,54 @@ AudioManager now has 6 constructor params: `ILogger`, `IAudioEngine`, `IAudioSou
 
 ---
 
-## Phase D: Hardware Integrations (on Ubuntu) ⏸️
+## Phase D: Hardware Integrations (on Ubuntu) — Partial ✅
 
-### D.1 Phonograph (USB Turntable)
+### D.1 Phonograph (USB Turntable) ⏸️
 - [ ] Connect USB turntable to Ubuntu
 - [ ] Verify USB audio device appears in device list
 - [ ] Test VinylAudioSource playback
 
-### D.2 RTL-SDR Radio
-- [ ] Connect RTL-SDR dongle to Ubuntu
-- [ ] Install rtl_fm and dependencies
-- [ ] Test SDR audio source
+### D.2 RTL-SDR Radio ✅
+- [x] Connect RTL-SDR dongle to Ubuntu
+- [x] Test SDR audio source — FM playback working, zero-dropout audio
+- [x] Fix FM audio dropouts — squelch silence delivery (PR #229)
+- [x] Fix FM audio dropouts — async DSP queue decouples USB reads from processing (PR #230)
+- [x] Verified 5+ minutes continuous FM at 98 MHz with zero buffer underruns
 
-### D.3 Generic USB Audio
+### D.3 Generic USB Audio ⏸️
 - [ ] Test generic USB audio input
 - [ ] Verify hot-plug detection
+
+---
+
+## Phase D.5: Radio Control Panel UI ✅
+
+- **PR #228**: Inline radio control panel with broadcast console "Command Surface" styling
+  - Band selector, DSEG frequency display, signal strength bar, tuning/scan controls, AGC controls, presets sidebar
+  - Touch-first kiosk design (1920x576px fixed viewport)
+
+---
+
+## Phase E: Radio Scan Fix & UI Improvements ⏸️
+
+### E.1 Fix Scan Buttons
+**Priority:** High — scan buttons on RadioControlPanel don't work
+
+**Tasks:**
+- [ ] Investigate scan up/down button handlers in RadioControlPanel.razor
+- [ ] Trace through API endpoint (`POST /api/radio/scan`) to RadioReceiver scan logic
+- [ ] Identify why scan doesn't start or stops immediately
+- [ ] Fix scan implementation
+- [ ] Verify scan finds stations and stops on strong signals
+
+### E.2 Frequency Updates During Scan
+**Priority:** High — UI should show the frequency changing as the radio scans
+
+**Tasks:**
+- [ ] During scan, RadioReceiver should periodically report the current scan frequency
+- [ ] API/SignalR should push frequency updates to the UI in real-time
+- [ ] RadioControlPanel DSEG display should update live as the scan progresses
+- [ ] Scan should stop and hold on a station when signal strength exceeds squelch threshold
 
 ---
 
@@ -95,8 +131,11 @@ AudioManager now has 6 constructor params: `ILogger`, `IAudioEngine`, `IAudioSou
 
 | Issue | Status | Notes |
 |-------|--------|-------|
+| Scan buttons not working | **Active** | Scan up/down on RadioControlPanel non-functional |
+| Scan frequency not updating in UI | **Active** | UI should show frequency changing during scan |
 | Dual audio output (local + Cast) | **Resolved** | Fixed in PR #220 |
 | Volume persistence | **Resolved** | Verified on Ubuntu + Pi (PR #223) |
+| FM audio dropouts | **Resolved** | Async DSP queue + startup reorder (PRs #229, #230) |
 | Pong not received via SharpCaster | Deferred | Channel registration works but pong never arrives; CDP workaround reliable |
 | Receiver double-counts messages | Cosmetic | 20/sec vs sender 10/sec after CDP reload; doesn't affect audio |
 | Album art proxy untested | Deferred | Web port 5002 → API port 5000 |
@@ -106,6 +145,8 @@ AudioManager now has 6 constructor params: `ILogger`, `IAudioEngine`, `IAudioSou
 ## Design Decisions
 | Decision | Rationale |
 |----------|-----------|
+| Async DSP processing queue | USB read loop blocked by synchronous DSP caused 3.6% throughput deficit; BlockingCollection + dedicated thread eliminates it |
+| 1s pre-fill silence cushion | RTL-SDR USB device takes ~1s to start delivering data; pre-fill keeps mixer fed during startup |
 | Keep MP3 for Cast streaming | WAV requires Content-Length, incompatible with live streams |
 | DirectChannel for primary Cast | Raw PCM → Base64 → JSON eliminates MP3 encode/decode gaps |
 | StandardErrorPriority=debug | Cleanest way to suppress C library noise without losing it |
@@ -116,4 +157,5 @@ AudioManager now has 6 constructor params: `ILogger`, `IAudioEngine`, `IAudioSou
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |-------|---------|------------|
-| (none yet) | | |
+| FM audio chronic underruns (3.6% silence) | Pre-fill buffer only | Insufficient — buffer drained after ~24s due to synchronous DSP overhead |
+| FM audio chronic underruns (3.6% silence) | Async DSP queue + startup reorder | **Fixed** — zero underruns over 5+ min (PR #230) |
