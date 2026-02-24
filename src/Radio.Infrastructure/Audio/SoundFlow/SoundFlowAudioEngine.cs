@@ -158,6 +158,14 @@ public class SoundFlowAudioEngine : IAudioEngine
       // Initialize SoundFlow MiniAudioEngine
       _engine = new MiniAudioEngine();
 
+      // Share the engine with device manager so hot-plug detection reuses it
+      // instead of creating/disposing temporary engines (which leak native memory
+      // and cause SIGSEGV after ~300 cycles)
+      if (_deviceManager is SoundFlowDeviceManager sfDeviceManager)
+      {
+        sfDeviceManager.SetSharedEngine(_engine);
+      }
+
       // Create audio format for playback with explicit sample format
       _audioFormat = new AudioFormat
       {
@@ -784,6 +792,13 @@ public class SoundFlowAudioEngine : IAudioEngine
     {
       await _outputTap.DisposeAsync();
       _outputTap = null;
+    }
+
+    // Clear shared engine reference before disposing so device manager
+    // doesn't try to use a disposed engine
+    if (_deviceManager is SoundFlowDeviceManager sfDeviceManager)
+    {
+      sfDeviceManager.SetSharedEngine(null);
     }
 
     // Dispose the SoundFlow engine

@@ -26,9 +26,11 @@ public class AudioEngineOptions
   public int BufferSize { get; set; } = 1024;
 
   /// <summary>
-  /// Gets or sets the hot-plug detection interval in seconds. Default is 5.
+  /// Gets or sets the hot-plug detection interval in seconds. Default is 30.
+  /// Each poll calls MiniAudio's UpdateAudioDevicesInfo which probes all audio
+  /// backends (ALSA, PulseAudio, JACK, OSS). Lower values increase native churn.
   /// </summary>
-  public int HotPlugIntervalSeconds { get; set; } = 5;
+  public int HotPlugIntervalSeconds { get; set; } = 30;
 
   /// <summary>
   /// Gets or sets the ring buffer size for the output stream in seconds. Default is 2.
