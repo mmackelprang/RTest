@@ -243,13 +243,13 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
       }
     }
 
-    // Use 1 second of lag to ensure the reader starts with real audio data.
-    // The reader starts behind the write position by this amount, giving it
+    // Reader starts behind the write position by lagSeconds, giving it
     // immediate access to recently-written audio. With too-small lag (e.g. 50ms),
     // the reader can start at the write position with no data available, and
     // then receive silence indefinitely because silence reads don't advance
     // the read pointer.
-    _streamReader = _audioEngine.CreateStreamReader("direct-cast", lagSeconds: 1.0);
+    var lagSeconds = Math.Clamp(_options.DirectChannelReaderLagSeconds, 0.1f, 2.0f);
+    _streamReader = _audioEngine.CreateStreamReader("direct-cast", lagSeconds: lagSeconds);
 
     // Log initial reader state
     if (_streamReader is TappedOutputStreamReader tapReader)
@@ -260,8 +260,10 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
     }
 
     _logger.LogInformation(
-      "DirectCast: Starting streaming — chunk size {ChunkMs}ms, namespace {Namespace}, lag: 1.0s",
-      _options.DirectChannelChunkSizeMs, _options.DirectChannelNamespace);
+      "DirectCast: Starting streaming — chunk size {ChunkMs}ms, namespace {Namespace}, " +
+      "lag: {Lag}s, maxBufferAhead: {MaxBuf}s, bufferBeforePlay: {BufPlay}",
+      _options.DirectChannelChunkSizeMs, _options.DirectChannelNamespace,
+      lagSeconds, _options.DirectChannelMaxBufferAhead, _options.DirectChannelBufferBeforePlay);
 
     _streamingTask = Task.Run(() => StreamingLoopAsync(_cts.Token));
   }
@@ -326,6 +328,25 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
       "DirectCast: Streaming loop started — {ChunkMs}ms chunks = {ChunkBytes} bytes PCM, " +
       "raw Int16LE (no MP3), {MsgsPerSec} msgs/sec target, ~{Base64KB:F1}KB Base64/msg",
       chunkMs, chunkBytes, 1000 / chunkMs, chunkBytes * 4.0 / 3 / 1024);
+
+    // Send config message to receiver so it can adjust latency parameters
+    try
+    {
+      var configMsg = JsonSerializer.Serialize(new
+      {
+        type = "config",
+        maxBufferAhead = _options.DirectChannelMaxBufferAhead,
+        bufferBeforePlay = _options.DirectChannelBufferBeforePlay
+      });
+      await _channel.SendMessageAsync(configMsg, _transportId!);
+      _logger.LogInformation(
+        "DirectCast: Sent config to receiver — maxBufferAhead: {MaxBuf}, bufferBeforePlay: {BufPlay}",
+        _options.DirectChannelMaxBufferAhead, _options.DirectChannelBufferBeforePlay);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "DirectCast: Failed to send config message to receiver");
+    }
 
     // Real-time pacing: the TappedOutputStreamReader may return buffered data
     // much faster than real-time (ring buffer backlog). Use a stopwatch to
