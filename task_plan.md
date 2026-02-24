@@ -128,7 +128,7 @@ AudioManager now has 6 constructor params: `ILogger`, `IAudioEngine`, `IAudioSou
 | FM audio dropouts | **Resolved** | Async DSP queue + startup reorder (PRs #229, #230) |
 | Pong not received via SharpCaster | Deferred | Channel registration works but pong never arrives; CDP workaround reliable |
 | Receiver double-counts messages | Cosmetic | 20/sec vs sender 10/sec after CDP reload; doesn't affect audio |
-| Album art proxy untested | Deferred | Web port 5002 → API port 5000 |
+| Album art proxy | **Resolved** | Verified: Web :5002 proxies to API :5000, 200 OK, path traversal blocked |
 | BT play history recording | Needs verification | Fix committed, untested on hardware |
 | BT visualization data | Needs verification | Fix committed, untested on hardware |
 
