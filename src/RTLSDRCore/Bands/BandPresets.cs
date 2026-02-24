@@ -18,6 +18,7 @@ namespace RTLSDRCore.Bands
             MinFrequencyHz = 530_000,
             MaxFrequencyHz = 1_710_000,
             DefaultStepHz = 10_000,
+            AllowedStepSizes = new[] { 1_000L, 9_000L, 10_000L },
             DefaultModulation = ModulationType.AM,
             DefaultBandwidthHz = 10_000,
             Description = "AM radio stations"
@@ -33,6 +34,7 @@ namespace RTLSDRCore.Bands
             MinFrequencyHz = 87_500_000,
             MaxFrequencyHz = 108_000_000,
             DefaultStepHz = 100_000,
+            AllowedStepSizes = new[] { 50_000L, 100_000L, 200_000L },
             DefaultModulation = ModulationType.WFM,
             DefaultBandwidthHz = 200_000,
             Description = "FM radio stations"
@@ -48,6 +50,7 @@ namespace RTLSDRCore.Bands
             MinFrequencyHz = 1_600_000,
             MaxFrequencyHz = 30_000_000,
             DefaultStepHz = 5_000,
+            AllowedStepSizes = new[] { 1_000L, 2_500L, 5_000L },
             DefaultModulation = ModulationType.AM,
             DefaultBandwidthHz = 6_000,
             Description = "International broadcasts, amateur radio"
@@ -63,6 +66,7 @@ namespace RTLSDRCore.Bands
             MinFrequencyHz = 108_000_000,
             MaxFrequencyHz = 137_000_000,
             DefaultStepHz = 25_000,
+            AllowedStepSizes = new[] { 8_333L, 25_000L },
             DefaultModulation = ModulationType.AM,
             DefaultBandwidthHz = 8_333,
             Description = "Aviation communications"
@@ -78,6 +82,7 @@ namespace RTLSDRCore.Bands
             MinFrequencyHz = 162_400_000,
             MaxFrequencyHz = 162_550_000,
             DefaultStepHz = 25_000,
+            AllowedStepSizes = new[] { 5_000L, 25_000L },
             DefaultModulation = ModulationType.NFM,
             DefaultBandwidthHz = 12_500,
             Description = "NOAA Weather Radio"
@@ -93,6 +98,7 @@ namespace RTLSDRCore.Bands
             MinFrequencyHz = 30_000_000,
             MaxFrequencyHz = 300_000_000,
             DefaultStepHz = 12_500,
+            AllowedStepSizes = new[] { 5_000L, 7_500L, 12_500L, 15_000L, 25_000L },
             DefaultModulation = ModulationType.NFM,
             DefaultBandwidthHz = 12_500,
             Description = "Amateur radio, public safety"

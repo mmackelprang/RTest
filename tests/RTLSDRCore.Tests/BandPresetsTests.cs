@@ -132,6 +132,53 @@ public class BandPresetsTests
         Assert.Equal(expectedBand, band.Type);
     }
 
+    [Theory]
+    [InlineData(BandType.AM)]
+    [InlineData(BandType.FM)]
+    [InlineData(BandType.Shortwave)]
+    [InlineData(BandType.Aircraft)]
+    [InlineData(BandType.Weather)]
+    [InlineData(BandType.VHF)]
+    public void AllBands_HaveNonEmptyAllowedStepSizes(BandType bandType)
+    {
+        var band = BandPresets.GetBand(bandType);
+
+        Assert.NotNull(band.AllowedStepSizes);
+        Assert.NotEmpty(band.AllowedStepSizes);
+    }
+
+    [Theory]
+    [InlineData(BandType.AM)]
+    [InlineData(BandType.FM)]
+    [InlineData(BandType.Shortwave)]
+    [InlineData(BandType.Aircraft)]
+    [InlineData(BandType.Weather)]
+    [InlineData(BandType.VHF)]
+    public void AllBands_DefaultStepIsInAllowedStepSizes(BandType bandType)
+    {
+        var band = BandPresets.GetBand(bandType);
+
+        Assert.Contains(band.DefaultStepHz, band.AllowedStepSizes);
+    }
+
+    [Theory]
+    [InlineData(BandType.AM)]
+    [InlineData(BandType.FM)]
+    [InlineData(BandType.Shortwave)]
+    [InlineData(BandType.Aircraft)]
+    [InlineData(BandType.Weather)]
+    [InlineData(BandType.VHF)]
+    public void AllBands_AllowedStepSizesAreSortedAscending(BandType bandType)
+    {
+        var band = BandPresets.GetBand(bandType);
+
+        for (int i = 1; i < band.AllowedStepSizes.Length; i++)
+        {
+            Assert.True(band.AllowedStepSizes[i] > band.AllowedStepSizes[i - 1],
+                $"AllowedStepSizes for {bandType} not sorted: {band.AllowedStepSizes[i - 1]} >= {band.AllowedStepSizes[i]}");
+        }
+    }
+
     [Fact]
     public void FindBandForFrequency_NoMatchingBand_ReturnsNull()
     {

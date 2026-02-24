@@ -42,7 +42,8 @@
              title="Click to set frequency">
           @FormatFrequency(_radioState.Frequency, _radioState.Band)
         </div>
-        <div class="rcp-step-label">
+        <div class="rcp-step-label rcp-step-clickable" @onclick="CycleStepSizeAsync"
+             title="Click to change step size">
           STEP @FormatStep(_radioState.Step, _radioState.Band)
         </div>
       </div>
@@ -296,6 +297,19 @@
     margin-top: 4px;
   }
 
+  .rcp-step-clickable {
+    cursor: pointer;
+    transition: color 120ms ease;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .rcp-step-clickable:hover {
+    color: var(--signal-amber);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
   /* ── Signal Meter ── */
 
   .rcp-meter {
@@ -425,6 +439,10 @@
     background: var(--surface-base);
     border-radius: 4px;
     border: 1px solid var(--surface-separator);
+  }
+
+  .rcp-sdr-controls .mud-switch {
+    align-items: center;
   }
 
   /* ── Presets Memory Bank ── */
@@ -745,6 +763,27 @@
         await LoadPresetsAsync();
     }
     catch { }
+  }
+
+  private async Task CycleStepSizeAsync()
+  {
+    if (_radioState == null) return;
+    var band = _availableBands.FirstOrDefault(b => b.Type == _radioState.Band);
+    if (band?.AllowedStepSizes == null || band.AllowedStepSizes.Length == 0) return;
+
+    var steps = band.AllowedStepSizes;
+    var currentIdx = Array.IndexOf(steps, (long)_radioState.Step);
+    var nextIdx = (currentIdx + 1) % steps.Length;
+
+    try
+    {
+      if (await RadioApi.SetStepAsync(steps[nextIdx]))
+      {
+        await LoadRadioStateAsync();
+        await InvokeAsync(StateHasChanged);
+      }
+    }
+    catch (Exception ex) { Logger.LogError(ex, "Error in CycleStepSizeAsync"); }
   }
 
   private string FormatFrequency(double frequencyHz, string band)
