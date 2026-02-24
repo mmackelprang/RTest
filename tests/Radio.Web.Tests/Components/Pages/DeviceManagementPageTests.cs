@@ -35,6 +35,7 @@ public class DeviceManagementPageTests : TestContext
     JSInterop.Mode = JSRuntimeMode.Loose;
     ComponentFactories.AddStub<MudPopoverProvider>();
     Services.AddHttpClient<DevicesApiService>();
+    Services.AddScoped<Radio.Web.Services.DeviceDisplayStateService>();
   }
 
   protected override void Dispose(bool disposing)

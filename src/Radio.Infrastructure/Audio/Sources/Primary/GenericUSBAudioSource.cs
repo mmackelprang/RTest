@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Exceptions;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.SoundFlow;
 
 namespace Radio.Infrastructure.Audio.Sources.Primary;
@@ -23,14 +24,16 @@ public class GenericUSBAudioSource : USBAudioSourceBase
   /// <param name="preferences">The generic source preferences.</param>
   /// <param name="deviceManager">The audio device manager.</param>
   /// <param name="resolvedUSBPort">USB port resolved from config store, overrides IOptionsMonitor value.</param>
+  /// <param name="identificationService">Optional fingerprinting service for track identification.</param>
   /// <param name="playbackService">Optional SoundFlow playback service for routing captured audio to output.</param>
   public GenericUSBAudioSource(
     ILogger<GenericUSBAudioSource> logger,
     IOptionsMonitor<GenericSourcePreferences> preferences,
     IAudioDeviceManager deviceManager,
     string? resolvedUSBPort = null,
+    BackgroundIdentificationService? identificationService = null,
     SoundFlowPlaybackService? playbackService = null)
-    : base(logger, deviceManager, playbackService: playbackService)
+    : base(logger, deviceManager, identificationService, playbackService: playbackService)
   {
     _preferences = preferences;
     _resolvedUSBPort = resolvedUSBPort;

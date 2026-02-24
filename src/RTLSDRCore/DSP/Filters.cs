@@ -180,7 +180,9 @@ namespace RTLSDRCore.DSP
     }
 
     /// <summary>
-    /// Decimator for reducing sample rate
+    /// Decimator for reducing IQ sample rate with properly-sized anti-alias filter.
+    /// Calculates filter taps from the transition bandwidth to ensure adequate
+    /// stop-band attenuation for the given decimation factor.
     /// </summary>
     public class Decimator
     {
@@ -204,11 +206,12 @@ namespace RTLSDRCore.DSP
         public int OutputSampleRate => InputSampleRate / _factor;
 
         /// <summary>
-        /// Creates a new decimator
+        /// Creates a new decimator with automatically-calculated filter taps.
         /// </summary>
         /// <param name="inputSampleRate">Input sample rate in Hz</param>
         /// <param name="decimationFactor">Decimation factor (must be >= 1)</param>
-        public Decimator(int inputSampleRate, int decimationFactor)
+        /// <param name="cutoffHz">Optional cutoff frequency override. Defaults to 80% of output Nyquist.</param>
+        public Decimator(int inputSampleRate, int decimationFactor, float cutoffHz = 0)
         {
             if (decimationFactor < 1)
                 throw new ArgumentException("Decimation factor must be at least 1", nameof(decimationFactor));
@@ -216,9 +219,20 @@ namespace RTLSDRCore.DSP
             InputSampleRate = inputSampleRate;
             _factor = decimationFactor;
 
-            // Anti-aliasing filter at the output Nyquist frequency
-            var cutoff = inputSampleRate / (2.0f * decimationFactor) * 0.9f;
-            _antiAliasFilter = new IqLowPassFilter(inputSampleRate, cutoff);
+            // Anti-aliasing filter at 80% of the output Nyquist frequency
+            var outputNyquist = inputSampleRate / (2.0f * decimationFactor);
+            var cutoff = cutoffHz > 0 ? cutoffHz : outputNyquist * 0.8f;
+
+            // Calculate taps from transition bandwidth.
+            // For Hamming window: taps ≈ 3.3 / (transition_width / sample_rate)
+            var transitionHz = outputNyquist - cutoff;
+            if (transitionHz <= 0) transitionHz = outputNyquist * 0.2f;
+            var normalizedTransition = transitionHz / inputSampleRate;
+            var taps = (int)Math.Ceiling(3.3 / normalizedTransition);
+            taps = Math.Max(taps, 63);
+            taps |= 1; // ensure odd
+
+            _antiAliasFilter = new IqLowPassFilter(inputSampleRate, cutoff, taps);
         }
 
         /// <summary>
@@ -254,6 +268,247 @@ namespace RTLSDRCore.DSP
         {
             _antiAliasFilter.Reset();
             _counter = 0;
+        }
+    }
+
+    /// <summary>
+    /// Audio decimator that operates on float samples with multi-stage decimation.
+    /// Uses multiple stages to avoid the problem of very low normalized cutoff
+    /// frequencies that require impractically many filter taps.
+    /// </summary>
+    public class AudioDecimator
+    {
+        private readonly List<DecimationStage> _stages = new();
+        private readonly int _totalFactor;
+
+        /// <summary>
+        /// Gets the total decimation factor across all stages.
+        /// </summary>
+        public int Factor => _totalFactor;
+
+        /// <summary>
+        /// Gets the input sample rate.
+        /// </summary>
+        public int InputSampleRate { get; }
+
+        /// <summary>
+        /// Gets the output sample rate.
+        /// </summary>
+        public int OutputSampleRate { get; }
+
+        /// <summary>
+        /// Creates a new multi-stage audio decimator.
+        /// </summary>
+        /// <param name="inputSampleRate">Input sample rate in Hz.</param>
+        /// <param name="outputSampleRate">Desired output sample rate in Hz.</param>
+        public AudioDecimator(int inputSampleRate, int outputSampleRate)
+        {
+            if (outputSampleRate <= 0)
+                throw new ArgumentException("Output sample rate must be positive", nameof(outputSampleRate));
+            if (inputSampleRate < outputSampleRate)
+                throw new ArgumentException("Input sample rate must be >= output sample rate", nameof(inputSampleRate));
+
+            InputSampleRate = inputSampleRate;
+            OutputSampleRate = outputSampleRate;
+            _totalFactor = inputSampleRate / outputSampleRate;
+
+            // Factor the total decimation into stages where each stage has a
+            // reasonable decimation factor (max ~10) so the anti-alias filter
+            // has a practical normalized cutoff frequency.
+            var remaining = _totalFactor;
+            var currentRate = inputSampleRate;
+
+            foreach (var factor in FactorizeDecimation(remaining))
+            {
+                var nextRate = currentRate / factor;
+                // Anti-alias cutoff at 80% of the output Nyquist for this stage
+                var nyquist = nextRate / 2.0f;
+                var cutoff = nyquist * 0.8f;
+                // Calculate taps from the required transition bandwidth.
+                // For Hamming window: taps ≈ 3.3 / (transition_width / sample_rate)
+                // Transition band = Nyquist - cutoff (in Hz)
+                var transitionHz = nyquist - cutoff;
+                var normalizedTransition = transitionHz / currentRate;
+                var taps = (int)Math.Ceiling(3.3 / normalizedTransition);
+                taps = Math.Max(taps, 63);
+                taps |= 1; // ensure odd
+                _stages.Add(new DecimationStage(
+                    new LowPassFilter(currentRate, cutoff, taps), factor));
+                currentRate = nextRate;
+            }
+        }
+
+        /// <summary>
+        /// Decimates float audio samples.
+        /// </summary>
+        /// <param name="input">Input audio samples.</param>
+        /// <param name="output">Output buffer.</param>
+        /// <returns>Number of output samples written.</returns>
+        public int Decimate(ReadOnlySpan<float> input, Span<float> output)
+        {
+            if (_stages.Count == 0)
+            {
+                var count = Math.Min(input.Length, output.Length);
+                input.Slice(0, count).CopyTo(output);
+                return count;
+            }
+
+            // Fast path for single-stage (most common: e.g., 5:1)
+            // Avoids all intermediate allocations.
+            if (_stages.Count == 1)
+            {
+                var stage = _stages[0];
+                var outputIndex = 0;
+                var maxOutput = output.Length;
+
+                for (var i = 0; i < input.Length && outputIndex < maxOutput; i++)
+                {
+                    var filtered = stage.Filter.Process(input[i]);
+                    stage.Counter++;
+                    if (stage.Counter >= stage.Factor)
+                    {
+                        output[outputIndex++] = filtered;
+                        stage.Counter = 0;
+                    }
+                }
+
+                return outputIndex;
+            }
+
+            // Multi-stage path (allocates intermediate buffers)
+            var current = input.ToArray();
+
+            foreach (var stage in _stages)
+            {
+                var stageOutput = new float[current.Length / stage.Factor + 1];
+                var outputIndex = 0;
+
+                for (var i = 0; i < current.Length && outputIndex < stageOutput.Length; i++)
+                {
+                    var filtered = stage.Filter.Process(current[i]);
+                    stage.Counter++;
+                    if (stage.Counter >= stage.Factor)
+                    {
+                        stageOutput[outputIndex++] = filtered;
+                        stage.Counter = 0;
+                    }
+                }
+
+                current = new float[outputIndex];
+                Array.Copy(stageOutput, current, outputIndex);
+            }
+
+            var resultCount = Math.Min(current.Length, output.Length);
+            current.AsSpan(0, resultCount).CopyTo(output);
+            return resultCount;
+        }
+
+        /// <summary>
+        /// Resets all stages.
+        /// </summary>
+        public void Reset()
+        {
+            foreach (var stage in _stages)
+            {
+                stage.Filter.Reset();
+                stage.Counter = 0;
+            }
+        }
+
+        /// <summary>
+        /// Breaks a large decimation factor into a sequence of smaller factors
+        /// (each &lt;= 10) for multi-stage decimation.
+        /// </summary>
+        private static List<int> FactorizeDecimation(int totalFactor)
+        {
+            var factors = new List<int>();
+            var remaining = totalFactor;
+
+            while (remaining > 10)
+            {
+                // Find the largest factor <= 10 that divides remaining
+                var bestFactor = 2;
+                for (var f = 10; f >= 2; f--)
+                {
+                    if (remaining % f == 0)
+                    {
+                        bestFactor = f;
+                        break;
+                    }
+                }
+
+                factors.Add(bestFactor);
+                remaining /= bestFactor;
+            }
+
+            if (remaining > 1)
+            {
+                factors.Add(remaining);
+            }
+
+            return factors;
+        }
+
+        private class DecimationStage
+        {
+            public LowPassFilter Filter { get; }
+            public int Factor { get; }
+            public int Counter { get; set; }
+
+            public DecimationStage(LowPassFilter filter, int factor)
+            {
+                Filter = filter;
+                Factor = factor;
+            }
+        }
+    }
+
+    /// <summary>
+    /// FM de-emphasis filter. Compensates for the pre-emphasis applied during
+    /// FM broadcast transmission (high frequencies are boosted before transmission
+    /// and must be attenuated on receive). Without this filter, FM audio sounds
+    /// harsh/bright and the 19kHz stereo pilot + 38kHz subcarrier alias into
+    /// the audio band during decimation, causing an "underwater" effect.
+    ///
+    /// Implements a single-pole IIR low-pass: y[n] = (1-α)·x[n] + α·y[n-1]
+    /// where α = exp(-1/(τ·sampleRate)).
+    /// </summary>
+    public class DeEmphasisFilter
+    {
+        private readonly float _alpha;
+        private float _previous;
+
+        /// <summary>
+        /// Creates a de-emphasis filter with the specified time constant.
+        /// </summary>
+        /// <param name="sampleRate">Sample rate in Hz.</param>
+        /// <param name="timeConstantUs">Time constant in microseconds.
+        /// 75μs for North America/South Korea, 50μs for Europe/Japan.</param>
+        public DeEmphasisFilter(int sampleRate, float timeConstantUs = 75f)
+        {
+            var tau = timeConstantUs * 1e-6f;
+            _alpha = MathF.Exp(-1.0f / (tau * sampleRate));
+        }
+
+        /// <summary>
+        /// Processes samples through the de-emphasis filter in-place.
+        /// </summary>
+        public void Process(Span<float> samples)
+        {
+            var oneMinusAlpha = 1.0f - _alpha;
+            for (var i = 0; i < samples.Length; i++)
+            {
+                _previous = oneMinusAlpha * samples[i] + _alpha * _previous;
+                samples[i] = _previous;
+            }
+        }
+
+        /// <summary>
+        /// Resets the filter state.
+        /// </summary>
+        public void Reset()
+        {
+            _previous = 0;
         }
     }
 

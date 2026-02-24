@@ -419,14 +419,29 @@ public class SystemController : ControllerBase
     {
       if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
       {
-        var tempPath = "/sys/class/thermal/thermal_zone0/temp";
-        if (System.IO.File.Exists(tempPath))
+        // Try thermal zones 0-9. Some systems (Ubuntu on Intel N100) expose the
+        // CPU temperature at zone1+ or return a -273300 sentinel at zone0.
+        for (var i = 0; i < 10; i++)
         {
-          var tempStr = await System.IO.File.ReadAllTextAsync(tempPath);
-          if (int.TryParse(tempStr.Trim(), out var tempMilliC))
+          var tempPath = $"/sys/class/thermal/thermal_zone{i}/temp";
+          if (!System.IO.File.Exists(tempPath)) continue;
+
+          try
           {
-            var tempCelsius = tempMilliC / 1000.0;
-            return $"{tempCelsius:F1}°C";
+            var tempStr = await System.IO.File.ReadAllTextAsync(tempPath);
+            if (int.TryParse(tempStr.Trim(), out var tempMilliC))
+            {
+              var tempCelsius = tempMilliC / 1000.0;
+
+              // Skip sentinel values (absolute zero = sensor unavailable)
+              if (tempCelsius < -100 || tempCelsius > 150) continue;
+
+              return $"{tempCelsius:F1}°C";
+            }
+          }
+          catch (UnauthorizedAccessException)
+          {
+            // Skip zones we can't read
           }
         }
       }

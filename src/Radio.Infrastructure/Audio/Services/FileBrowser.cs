@@ -300,9 +300,14 @@ public class FileBrowser : IFileBrowser
   private string GetFullPath(string? relativePath)
   {
     var configuredPath = _options.CurrentValue.RootDirectory;
+
+    // If the configured path is absolute, use it directly (e.g., "/mnt/music", "/home/user/Music").
+    // Otherwise, combine it relative to the application root directory.
     var basePath = string.IsNullOrEmpty(configuredPath)
       ? _rootDir
-      : Path.Combine(_rootDir, configuredPath);
+      : Path.IsPathRooted(configuredPath)
+        ? configuredPath
+        : Path.Combine(_rootDir, configuredPath);
 
     if (string.IsNullOrEmpty(relativePath))
     {

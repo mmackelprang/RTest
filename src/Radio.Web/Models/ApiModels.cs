@@ -281,10 +281,11 @@ public record RadioPowerStateDto(
 );
 
 public record RadioPresetDto(
-  int Slot,
+  string Id,
   string Name,
   double Frequency,
-  string Band
+  string Band,
+  DateTimeOffset? CreatedAt = null
 );
 
 public record RadioDeviceDto(

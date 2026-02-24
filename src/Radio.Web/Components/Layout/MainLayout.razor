@@ -10,6 +10,7 @@
 @inject NavigationManager NavigationManager
 @inject ILogger<MainLayout> Logger
 @inject IDialogService DialogService
+@inject Radio.Web.Services.DeviceDisplayStateService DeviceDisplayState
 @implements IDisposable
 @implements IAsyncDisposable
 
@@ -189,6 +190,7 @@
       HubService.PlaybackStateChanged += OnPlaybackStateChanged;
       HubService.NowPlayingChanged += OnNowPlayingChanged;
       HubService.QueueChanged += OnQueueChanged;
+      DeviceDisplayState.DisplaySettingsChanged += OnDeviceDisplaySettingsChanged;
       Logger.LogDebug("MainLayout - Subscribed to audio state events");
 
       // Load initial audio state
@@ -664,6 +666,12 @@
     await InvokeAsync(StateHasChanged);
   }
 
+  private async Task OnDeviceDisplaySettingsChanged()
+  {
+    await LoadOutputDevicesAsync();
+    await InvokeAsync(StateHasChanged);
+  }
+
   private async Task RefreshAudioStateAsync()
   {
     try
@@ -739,6 +747,7 @@
     HubService.PlaybackStateChanged -= OnPlaybackStateChanged;
     HubService.NowPlayingChanged -= OnNowPlayingChanged;
     HubService.QueueChanged -= OnQueueChanged;
+    DeviceDisplayState.DisplaySettingsChanged -= OnDeviceDisplaySettingsChanged;
 
     _timer?.Stop();
     _timer?.Dispose();

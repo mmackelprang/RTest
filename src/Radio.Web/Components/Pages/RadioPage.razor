@@ -156,10 +156,10 @@
         else
         {
           <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
-            @foreach (var preset in _presets.OrderBy(p => p.Slot))
+            @foreach (var preset in _presets.OrderBy(p => p.CreatedAt))
             {
               <div class="list-item-touch" style="flex-direction: column; align-items: stretch; padding: 12px; border-radius: 8px; border: 1px solid var(--surface-separator); cursor: pointer;"
-                   @onclick="@(() => LoadPresetAsync(preset.Slot))">
+                   @onclick="@(() => LoadPresetAsync(preset.Id))">
                 <div style="font-size: 16px; font-weight: 600; color: var(--text-high);">@preset.Name</div>
                 <div style="font-size: 14px; color: var(--signal-amber); font-family: var(--font-mono);">
                   @FormatFrequency(preset.Frequency, preset.Band)
@@ -168,7 +168,7 @@
                   <span style="font-size: 13px; color: var(--text-low);">@preset.Band</span>
                   <div @onclick:stopPropagation="true">
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
-                                   OnClick="@(() => DeletePresetAsync(preset.Slot))" title="Delete" />
+                                   OnClick="@(() => DeletePresetAsync(preset.Id))" title="Delete" />
                   </div>
                 </div>
               </div>
@@ -205,17 +205,10 @@
   <!-- Save Preset Dialog -->
   <MudDialog>
     <DialogContent>
-      <MudTextField @bind-Value="_presetName" 
-                    Label="Preset Name" 
-                    Variant="Variant.Outlined" 
-                    Style="width: 100%; margin-bottom: 16px;" />
-      <MudNumericField @bind-Value="_presetSlot" 
-                       Label="Slot (1-50)" 
-                       Variant="Variant.Outlined" 
-                       Min="1" 
-                       Max="50" 
-                       Step="1"
-                       Style="width: 100%;" />
+      <MudTextField @bind-Value="_presetName"
+                    Label="Preset Name"
+                    Variant="Variant.Outlined"
+                    Style="width: 100%;" />
     </DialogContent>
     <DialogActions>
       <MudButton OnClick="CloseSavePresetDialog">Cancel</MudButton>
@@ -243,7 +236,6 @@
   // Save preset dialog
   private bool _isSavePresetDialogOpen = false;
   private string _presetName = "";
-  private int _presetSlot = 1;
   
   protected override async Task OnInitializedAsync()
   {
@@ -512,7 +504,6 @@
     if (_radioState != null)
     {
       _presetName = $"{_radioState.Band} - {FormatFrequency(_radioState.Frequency, _radioState.Band)}";
-      _presetSlot = (_presets?.Count ?? 0) + 1;
     }
     _isSavePresetDialogOpen = true;
   }
@@ -528,7 +519,7 @@
     {
       if (_radioState != null && !string.IsNullOrWhiteSpace(_presetName))
       {
-        var success = await RadioApi.SavePresetAsync(_presetSlot, _presetName, _radioState.Frequency, _radioState.Band);
+        var success = await RadioApi.SavePresetAsync(_presetName, _radioState.Frequency, _radioState.Band);
         if (success)
         {
           await LoadPresetsAsync();
@@ -541,12 +532,12 @@
       // Silently fail
     }
   }
-  
-  private async Task LoadPresetAsync(int slot)
+
+  private async Task LoadPresetAsync(string id)
   {
     try
     {
-      var success = await RadioApi.LoadPresetAsync(slot);
+      var success = await RadioApi.LoadPresetAsync(id);
       if (success)
       {
         await LoadRadioStateAsync();
@@ -558,12 +549,12 @@
       // Silently fail
     }
   }
-  
-  private async Task DeletePresetAsync(int slot)
+
+  private async Task DeletePresetAsync(string id)
   {
     try
     {
-      var success = await RadioApi.DeletePresetAsync(slot);
+      var success = await RadioApi.DeletePresetAsync(id);
       if (success)
       {
         await LoadPresetsAsync();

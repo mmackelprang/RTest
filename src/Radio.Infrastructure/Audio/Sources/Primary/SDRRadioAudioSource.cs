@@ -81,6 +81,9 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   private long _silentCallbackCount;
   private Timer? _diagnosticTimer;
 
+  // Pre-allocated stereo buffer for mono→stereo conversion (avoids per-callback allocation)
+  private float[] _stereoBuffer = Array.Empty<float>();
+
   /// <summary>
   /// Handles audio data events from the RTL-SDR receiver.
   /// Delegates samples to the buffered sound generator.
@@ -89,12 +92,29 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   {
     if (_soundGenerator == null) return;
 
-    _soundGenerator.AddSamples(e.Samples);
-    _totalSamplesReceived += e.Samples.Length;
+    var monoCount = e.SampleCount;
+    var stereoCount = monoCount * 2;
+
+    // Grow the pre-allocated stereo buffer if needed (rarely happens after first call)
+    if (_stereoBuffer.Length < stereoCount)
+    {
+      _stereoBuffer = new float[stereoCount];
+    }
+
+    // RTL-SDR outputs mono audio; the playback engine expects interleaved stereo.
+    // Duplicate each mono sample to both L and R channels.
+    for (int i = 0; i < monoCount; i++)
+    {
+      _stereoBuffer[i * 2] = e.Samples[i];     // Left
+      _stereoBuffer[i * 2 + 1] = e.Samples[i]; // Right
+    }
+
+    _soundGenerator.AddSamples(_stereoBuffer.AsSpan(0, stereoCount));
+    _totalSamplesReceived += monoCount;
 
     // Silence detection: warn if all samples are zero
     bool allSilent = true;
-    for (int i = 0; i < e.Samples.Length; i++)
+    for (int i = 0; i < monoCount; i++)
     {
       if (Math.Abs(e.Samples[i]) > float.Epsilon)
       {
@@ -103,14 +123,14 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
       }
     }
 
-    if (allSilent && e.Samples.Length > 0)
+    if (allSilent && monoCount > 0)
     {
       _silentCallbackCount++;
-      if (_silentCallbackCount % 100 == 1) // Log every 100th silent callback
+      if (_silentCallbackCount % 100 == 1)
       {
         Logger.LogWarning(
           "📻 SDR RADIO: Silent audio data received ({SampleCount} zero samples, silent callbacks: {SilentCount})",
-          e.Samples.Length, _silentCallbackCount);
+          monoCount, _silentCallbackCount);
       }
     }
     else
@@ -125,7 +145,7 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
       Logger.LogInformation(
         "📻 SDR RADIO AUDIO FLOW STARTED: First audio data received from RTL-SDR " +
         "(Frequency: {Frequency}, Band: {Band}, {SampleCount} samples)",
-        CurrentFrequency.ToDisplayString(), CurrentBand, e.Samples.Length);
+        CurrentFrequency.ToDisplayString(), CurrentBand, monoCount);
     }
   }
 

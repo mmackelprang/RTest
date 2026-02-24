@@ -276,11 +276,11 @@ public class RadioApiService
     }
   }
 
-  public async Task<bool> SavePresetAsync(int slot, string name, double frequency, string band, CancellationToken cancellationToken = default)
+  public async Task<bool> SavePresetAsync(string name, double frequency, string band, CancellationToken cancellationToken = default)
   {
     try
     {
-      var response = await _httpClient.PostAsJsonAsync("/api/radio/presets", new { slot, name, frequency, band }, cancellationToken);
+      var response = await _httpClient.PostAsJsonAsync("/api/radio/presets", new { name, frequency, band }, cancellationToken);
       return response.IsSuccessStatusCode;
     }
     catch (Exception ex)
@@ -290,11 +290,11 @@ public class RadioApiService
     }
   }
 
-  public async Task<bool> LoadPresetAsync(int slot, CancellationToken cancellationToken = default)
+  public async Task<bool> LoadPresetAsync(string id, CancellationToken cancellationToken = default)
   {
     try
     {
-      var response = await _httpClient.PostAsync($"/api/radio/presets/{slot}", null, cancellationToken);
+      var response = await _httpClient.PostAsync($"/api/radio/presets/{id}", null, cancellationToken);
       return response.IsSuccessStatusCode;
     }
     catch (Exception ex)
@@ -304,11 +304,11 @@ public class RadioApiService
     }
   }
 
-  public async Task<bool> DeletePresetAsync(int slot, CancellationToken cancellationToken = default)
+  public async Task<bool> DeletePresetAsync(string id, CancellationToken cancellationToken = default)
   {
     try
     {
-      var response = await _httpClient.DeleteAsync($"/api/radio/presets/{slot}", cancellationToken);
+      var response = await _httpClient.DeleteAsync($"/api/radio/presets/{id}", cancellationToken);
       return response.IsSuccessStatusCode;
     }
     catch (Exception ex)

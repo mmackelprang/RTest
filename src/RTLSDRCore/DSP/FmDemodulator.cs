@@ -13,8 +13,15 @@ namespace RTLSDRCore.DSP
         /// <inheritdoc/>
         public string Name => "FM";
 
+        private int _sampleRate = 2_400_000;
+        private float _maxDeviation = 75_000;
+
         /// <inheritdoc/>
-        public int SampleRate { get; set; } = 2_400_000;
+        public int SampleRate
+        {
+            get => _sampleRate;
+            set { _sampleRate = value; UpdateGain(); }
+        }
 
         /// <inheritdoc/>
         public int Bandwidth { get; set; } = 200_000;
@@ -22,7 +29,11 @@ namespace RTLSDRCore.DSP
         /// <summary>
         /// Gets or sets the maximum frequency deviation in Hz
         /// </summary>
-        public float MaxDeviation { get; set; } = 75_000;
+        public float MaxDeviation
+        {
+            get => _maxDeviation;
+            set { _maxDeviation = value; UpdateGain(); }
+        }
 
         /// <summary>
         /// Creates a new FM demodulator
@@ -35,7 +46,7 @@ namespace RTLSDRCore.DSP
         private void UpdateGain()
         {
             // Gain to normalize the output based on max deviation and sample rate
-            _gain = SampleRate / (2.0f * MathF.PI * MaxDeviation);
+            _gain = _sampleRate / (2.0f * MathF.PI * _maxDeviation);
         }
 
         /// <inheritdoc/>
