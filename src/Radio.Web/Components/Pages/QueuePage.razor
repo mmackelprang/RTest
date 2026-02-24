@@ -595,16 +595,34 @@
 
   private async Task HandleBrowserAddToQueueAsync(string path)
   {
+    Logger.LogInformation("HandleBrowserAddToQueueAsync called with path: {Path}", path);
     try
     {
-      var success = await FileApi.AddFileToQueueAsync(path);
+      using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+      Logger.LogInformation("Calling FileApi.AddFileToQueueAsync...");
+      var (success, error) = await FileApi.AddFileToQueueAsync(path, cts.Token);
+      Logger.LogInformation("FileApi.AddFileToQueueAsync returned: Success={Success}, Error={Error}", success, error);
       if (success)
       {
         Snackbar.Add("Added to queue", Severity.Success);
         await RefreshQueueAsync();
       }
+      else
+      {
+        Logger.LogWarning("Failed to add file to queue: {Path} — {Error}", path, error);
+        Snackbar.Add($"Failed to add: {error}", Severity.Error);
+      }
     }
-    catch { }
+    catch (OperationCanceledException)
+    {
+      Logger.LogError("Timeout adding file to queue: {Path}", path);
+      Snackbar.Add("Timed out adding to queue — is the API running?", Severity.Error);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error adding file to queue: {Path}", path);
+      Snackbar.Add("Failed to add to queue", Severity.Error);
+    }
   }
 
   private async Task LoadDrivesAsync()

@@ -335,19 +335,30 @@
     if (filePaths == null || !filePaths.Any()) return;
 
     var addedCount = 0;
+    var failedCount = 0;
     foreach (var path in filePaths)
     {
       try
       {
-        if (await FileApi.AddFileToQueueAsync(path)) addedCount++;
+        var (success, _) = await FileApi.AddFileToQueueAsync(path);
+        if (success) addedCount++;
+        else failedCount++;
       }
-      catch (Exception ex) { Logger.LogError(ex, "Failed to add file to queue: {Path}", path); }
+      catch (Exception ex)
+      {
+        failedCount++;
+        Logger.LogError(ex, "Failed to add file to queue: {Path}", path);
+      }
     }
 
     if (addedCount > 0)
     {
       Snackbar.Add($"{addedCount} file{(addedCount != 1 ? "s" : "")} added", Severity.Success);
       await RefreshQueueAsync();
+    }
+    if (failedCount > 0)
+    {
+      Snackbar.Add($"{failedCount} file{(failedCount != 1 ? "s" : "")} failed to add", Severity.Error);
     }
   }
 

@@ -13,17 +13,71 @@
   <link href="css/design-system.css" rel="stylesheet" />
   <link href="css/virtual-keyboard.css" rel="stylesheet" />
   <HeadOutlet @rendermode="new InteractiveServerRenderMode(prerender: false)" />
+  <style>
+    /* Blazor circuit reconnect dialog visibility —
+       the framework looks for id="components-reconnect-modal" and toggles these classes */
+    #components-reconnect-modal.components-reconnect-show { display: flex !important; }
+    #components-reconnect-modal.components-reconnect-hide { display: none !important; }
+    #components-reconnect-modal.components-reconnect-failed { display: flex !important; }
+    #components-reconnect-modal.components-reconnect-rejected { display: flex !important; }
+  </style>
 </head>
 
 <body oncontextmenu="return false">
   <Routes @rendermode="new InteractiveServerRenderMode(prerender: false)" />
 
-  <script src="_framework/blazor.web.js"></script>
+  <!-- Blazor circuit reconnection overlay — shown when SignalR drops.
+       ID MUST be "components-reconnect-modal" for the framework to auto-manage visibility. -->
+  <div id="components-reconnect-modal" style="display:none; position:fixed; inset:0; z-index:99999; background:rgba(13,13,15,0.92); align-items:center; justify-content:center; font-family:var(--font-mono,'JetBrains Mono',monospace); color:#9CA3AF;">
+    <div style="text-align:center; padding:32px;">
+      <div style="font-size:1.1rem; margin-bottom:12px; color:#F0EFF4;">Reconnecting...</div>
+      <div style="font-size:0.85rem;">Connection to server lost. Attempting to reconnect.</div>
+    </div>
+  </div>
+
+  <!-- Load framework with autostart disabled so we can configure reconnection -->
+  <script src="_framework/blazor.web.js" autostart="false"></script>
+  <!-- Load all JS dependencies BEFORE starting Blazor circuit.
+       In autostart mode Blazor waits for DOMContentLoaded (after all scripts).
+       With manual start we must ensure the same ordering. -->
   <script src="_content/MudBlazor/MudBlazor.min.js"></script>
   <script src="js/fileDownload.js"></script>
   <script src="js/pageTransitions.js"></script>
   <!-- visualizer.js uses ES module exports and is loaded via import() in VisualizerPanel -->
   <script src="js/idle-dimmer.js"></script>
+  <script>
+    // Start Blazor AFTER all JS dependencies are loaded.
+    // Configure reconnection for kiosk reliability.
+    Blazor.start({
+      circuit: {
+        reconnectionOptions: {
+          maxRetries: 30,
+          retryIntervalMilliseconds: 2000
+        },
+        configureSignalR: function (builder) {
+          builder.withServerTimeout(60000);
+          builder.withKeepAliveInterval(15000);
+        }
+      }
+    }).then(function() {
+      console.log('[Blazor] Circuit started successfully');
+    }).catch(function(err) {
+      console.error('[Blazor] Circuit start FAILED:', err);
+    });
+
+    // Force full page reload when circuit is permanently lost
+    // (after max retries exhausted or server-rejected reconnect)
+    (function() {
+      var observer = new MutationObserver(function(mutations) {
+        var dialog = document.getElementById('components-reconnect-modal');
+        if (dialog && dialog.classList.contains('components-reconnect-failed')) {
+          console.warn('[Blazor] Circuit permanently lost — reloading page');
+          setTimeout(function() { location.reload(); }, 1000);
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    })();
+  </script>
 </body>
 
 </html>

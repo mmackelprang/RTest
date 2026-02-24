@@ -46,17 +46,28 @@ public class FileApiService
     }
   }
 
-  public async Task<bool> AddFileToQueueAsync(string filePath, CancellationToken cancellationToken = default)
+  public async Task<(bool Success, string? Error)> AddFileToQueueAsync(string filePath, CancellationToken cancellationToken = default)
   {
     try
     {
       var response = await _httpClient.PostAsJsonAsync("/api/files/queue", new { Paths = new List<string> { filePath } }, cancellationToken);
-      return response.IsSuccessStatusCode;
+      if (!response.IsSuccessStatusCode)
+        return (false, $"Server returned {response.StatusCode}");
+
+      var result = await response.Content.ReadFromJsonAsync<QueueFilesResponseDto>(cancellationToken: cancellationToken);
+      if (result == null)
+        return (false, "Empty response from server");
+
+      if (result.AddedCount > 0)
+        return (true, null);
+
+      var failedPath = result.FailedPaths?.FirstOrDefault() ?? filePath;
+      return (false, $"File not found or not supported: {failedPath}");
     }
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to add file to queue {FilePath}", filePath);
-      return false;
+      return (false, ex.Message);
     }
   }
   
@@ -74,17 +85,27 @@ public class FileApiService
     }
   }
   
-  public async Task<bool> AddFilesToQueueAsync(List<string> filePaths, CancellationToken cancellationToken = default)
+  public async Task<(bool Success, int AddedCount, string? Error)> AddFilesToQueueAsync(List<string> filePaths, CancellationToken cancellationToken = default)
   {
     try
     {
       var response = await _httpClient.PostAsJsonAsync("/api/files/queue", new { Paths = filePaths }, cancellationToken);
-      return response.IsSuccessStatusCode;
+      if (!response.IsSuccessStatusCode)
+        return (false, 0, $"Server returned {response.StatusCode}");
+
+      var result = await response.Content.ReadFromJsonAsync<QueueFilesResponseDto>(cancellationToken: cancellationToken);
+      if (result == null)
+        return (false, 0, "Empty response from server");
+
+      if (result.AddedCount > 0)
+        return (true, result.AddedCount, result.FailedCount > 0 ? $"{result.FailedCount} files failed" : null);
+
+      return (false, 0, $"No files could be added ({result.FailedCount} failed)");
     }
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to add files to queue");
-      return false;
+      return (false, 0, ex.Message);
     }
   }
 
