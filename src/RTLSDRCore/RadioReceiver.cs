@@ -24,9 +24,17 @@ namespace RTLSDRCore
 
         private IDemodulator _demodulator;
         private AgcProcessor _agc;
+        private Decimator? _iqDecimator;
+        private DeEmphasisFilter? _deEmphasis;
         private AudioDecimator? _audioDecimator;
-        private LowPassFilter? _audioFilter;
         private int _sdrSampleRate;
+        private int _demodSampleRate;
+
+        // Pre-allocated processing buffers to avoid GC pressure.
+        // Sized in SetupSignalProcessing based on the expected USB chunk size.
+        private float[] _demodBuffer = Array.Empty<float>();
+        private float[] _decimBuffer = Array.Empty<float>();
+        private IqSample[] _iqDecimBuffer = Array.Empty<IqSample>();
 
         private AudioFormat _audioFormat = AudioFormat.Default;
         private float _volume = 1.0f;
@@ -504,9 +512,20 @@ namespace RTLSDRCore
             try
             {
                 _currentModulation = modulation;
-                _demodulator = DemodulatorFactory.Create(modulation);
-                _demodulator.SampleRate = DefaultSdrSampleRate;
-                _demodulator.Bandwidth = DemodulatorFactory.GetRecommendedBandwidth(modulation);
+
+                // Re-run full signal processing setup since modulation change
+                // affects bandwidth, demod rate, and filter configuration.
+                if (_state == ReceiverState.Running || _state == ReceiverState.Scanning)
+                {
+                    SetupSignalProcessing();
+                }
+                else
+                {
+                    _demodulator = DemodulatorFactory.Create(modulation);
+                    _demodulator.SampleRate = _demodSampleRate > 0
+                        ? _demodSampleRate : DefaultSdrSampleRate;
+                    _demodulator.Bandwidth = DemodulatorFactory.GetRecommendedBandwidth(modulation);
+                }
 
                 Logger.Debug("Modulation set to {Modulation}", modulation);
                 return true;
@@ -651,63 +670,118 @@ namespace RTLSDRCore
         {
             var bandwidth = _currentBand.DefaultBandwidthHz;
 
-            // Choose SDR sample rate appropriate for the modulation type.
-            // Lower rates let the hardware RF filter handle channel selection,
-            // avoiding the need for (and problems with) software IQ filtering.
-            // The rate must be:
-            //  - ≥ 2× channel bandwidth (Nyquist)
-            //  - A multiple of the audio output rate (for clean decimation)
-            //  - Within the RTL-SDR's practical range (~225 kHz – 3.2 MHz)
-            _sdrSampleRate = CalculateSdrSampleRate(bandwidth);
+            // Pipeline matches rtl_fm's proven approach:
+            //   SDR (high rate) → IQ decimate → FM demod → audio decimate → output
+            //
+            // The IQ decimation step is critical: it band-limits the signal to
+            // just the channel bandwidth BEFORE demodulation, preventing out-of-band
+            // noise from corrupting the FM discriminator output.
 
-            Logger.Information(
-                "Signal processing: SDR={SdrRate} Hz, BW={Bandwidth} Hz, " +
-                "Modulation={Modulation}, AudioDecim={Factor}:1",
-                _sdrSampleRate, bandwidth, _currentModulation,
-                _sdrSampleRate / DefaultAudioSampleRate);
+            // Steps 1-2: Calculate paired SDR and demod rates that divide cleanly
+            (_sdrSampleRate, _demodSampleRate) = CalculateRates(bandwidth);
 
-            // Demodulation (operates at the SDR sample rate)
+            // Step 3: IQ decimation (SDR rate → demod rate)
+            var iqDecimFactor = _sdrSampleRate / _demodSampleRate;
+            if (iqDecimFactor > 1)
+            {
+                // Cutoff at the channel half-bandwidth to select just the FM channel
+                var channelCutoff = bandwidth / 2.0f;
+                _iqDecimator = new Decimator(_sdrSampleRate, iqDecimFactor, channelCutoff);
+            }
+            else
+            {
+                _iqDecimator = null;
+            }
+
+            // Step 4: Demodulator operates at the intermediate rate
             _demodulator = DemodulatorFactory.Create(_currentModulation);
-            _demodulator.SampleRate = _sdrSampleRate;
+            _demodulator.SampleRate = _demodSampleRate;
             _demodulator.Bandwidth = bandwidth;
 
-            // Audio decimation (SDR rate → 48 kHz) using multi-stage decimator
-            if (_sdrSampleRate > DefaultAudioSampleRate)
+            // Step 5: De-emphasis filter (compensates FM pre-emphasis).
+            // This single-pole IIR is nearly free (1 multiply per sample)
+            // and also attenuates the 19kHz pilot tone and stereo subcarrier.
+            if (_currentModulation == ModulationType.WFM)
             {
-                _audioDecimator = new AudioDecimator(_sdrSampleRate, DefaultAudioSampleRate);
+                _deEmphasis = new DeEmphasisFilter(_demodSampleRate, 75f);
+            }
+            else
+            {
+                _deEmphasis = null;
+            }
+
+            // Step 6: Audio decimation (demod rate → 48 kHz)
+            // The AudioDecimator's built-in anti-alias filter handles
+            // rejection of content above 24kHz (Nyquist), so no separate
+            // audio LPF is needed.
+            if (_demodSampleRate > DefaultAudioSampleRate)
+            {
+                _audioDecimator = new AudioDecimator(_demodSampleRate, DefaultAudioSampleRate);
             }
             else
             {
                 _audioDecimator = null;
             }
 
-            // Skip the post-decimation audio LPF — the multi-stage decimation
-            // filters already handle anti-aliasing adequately.
-            _audioFilter = null;
+            // Pre-allocate processing buffers based on expected USB chunk size.
+            // RTL-SDR reads 32768 bytes = 16384 IQ pairs per USB transfer.
+            const int maxIqChunk = 16384;
+            var maxDemodSamples = _iqDecimator != null
+                ? maxIqChunk / _iqDecimator.Factor + 1
+                : maxIqChunk;
+            _demodBuffer = new float[maxDemodSamples];
+            _decimBuffer = new float[maxDemodSamples / (_audioDecimator?.Factor ?? 1) + 1];
+            if (_iqDecimator != null)
+            {
+                _iqDecimBuffer = new IqSample[maxIqChunk / _iqDecimator.Factor + 1];
+            }
 
             _agc.Reset();
+
+            Logger.Information(
+                "Signal processing: SDR={SdrRate} Hz → IQ decim {IqFactor}:1 → " +
+                "Demod={DemodRate} Hz → Audio decim {AudioFactor}:1 → {AudioRate} Hz, " +
+                "BW={Bandwidth} Hz, Modulation={Modulation}",
+                _sdrSampleRate, iqDecimFactor, _demodSampleRate,
+                _demodSampleRate > DefaultAudioSampleRate
+                    ? _demodSampleRate / DefaultAudioSampleRate : 1,
+                DefaultAudioSampleRate, bandwidth, _currentModulation);
         }
 
         /// <summary>
-        /// Calculates the optimal SDR sample rate for the given channel bandwidth.
-        /// Picks a multiple of the audio rate that provides enough oversampling
-        /// for the audio decimation filters to work cleanly.
+        /// Calculates the SDR capture rate and demod rate together to ensure
+        /// both divide cleanly (SDR → demod → audio are all integer ratios).
+        /// Returns (sdrRate, demodRate).
         /// </summary>
-        private static int CalculateSdrSampleRate(int channelBandwidthHz)
+        private static (int sdrRate, int demodRate) CalculateRates(int channelBandwidthHz)
         {
-            // Use ~5× bandwidth for comfortable filter margin.
-            // At 5× oversampling, the audio content occupies ~20% of the bandwidth,
-            // giving the decimation filter plenty of room for its transition band.
-            var minRate = channelBandwidthHz * 5;
-            const int minDeviceRate = 225_000; // RTL-SDR practical minimum
-            minRate = Math.Max(minRate, minDeviceRate);
+            // Strategy: set SDR rate as LOW as possible to minimize DSP work.
+            // The RTL-SDR supports rates down to ~225 kHz. For WFM (200kHz BW),
+            // a rate of 240kHz captures the full channel and divides cleanly
+            // into 48kHz audio (5:1). No IQ decimation needed = no heavy FIR.
+            //
+            // For narrow modes (NFM 12.5kHz), we need ≥ 25kHz but the RTL-SDR
+            // minimum is ~225kHz, so we pick 240kHz there too.
 
-            // Find the smallest multiple of the audio rate that's ≥ minRate
+            // Find smallest audio-rate multiple ≥ channel bandwidth
+            var minRate = Math.Max(channelBandwidthHz, DefaultAudioSampleRate * 2);
             var multiplier = (int)Math.Ceiling((double)minRate / DefaultAudioSampleRate);
-            var rate = multiplier * DefaultAudioSampleRate;
+            var demodRate = multiplier * DefaultAudioSampleRate;
 
-            // Clamp to the RTL-SDR's supported range
-            return Math.Clamp(rate, minDeviceRate, 3_200_000);
+            // SDR rate = demod rate (no IQ decimation), clamped to RTL-SDR min
+            // Note: rates below ~225kHz are unstable on RTL-SDR hardware
+            var sdrRate = Math.Max(demodRate, 225_000);
+
+            // If sdrRate != demodRate, we need IQ decimation.
+            // Try to keep them equal by rounding up demodRate.
+            if (sdrRate > demodRate)
+            {
+                multiplier = (int)Math.Ceiling((double)sdrRate / DefaultAudioSampleRate);
+                demodRate = multiplier * DefaultAudioSampleRate;
+                sdrRate = demodRate;
+            }
+
+            return (sdrRate, demodRate);
         }
 
         private void OnSamplesAvailable(object? sender, IqSamplesEventArgs e)
@@ -730,57 +804,81 @@ namespace RTLSDRCore
 
         private void ProcessSamples(IqSample[] samples)
         {
-            // Calculate signal strength from raw IQ
-            var signalPower = samples.Average(s => s.MagnitudeSquared);
-            _lastSignalStrength = MathF.Sqrt(signalPower);
+            // Calculate signal strength from a subset (avoid LINQ .Average allocation)
+            var sumPower = 0f;
+            var step = Math.Max(1, samples.Length / 256); // sample ~256 points
+            var count = 0;
+            for (var i = 0; i < samples.Length; i += step)
+            {
+                sumPower += samples[i].MagnitudeSquared;
+                count++;
+            }
+            _lastSignalStrength = MathF.Sqrt(sumPower / count);
 
             SignalStrengthUpdated?.Invoke(this, new SignalStrengthEventArgs(_lastSignalStrength));
 
             // Check squelch
-            var squelchOpen = _lastSignalStrength >= _squelchThreshold;
-            if (!squelchOpen || _isMuted)
+            if (_lastSignalStrength < _squelchThreshold || _isMuted)
             {
                 return;
             }
 
-            // 1. FM demodulation (IQ → mono audio at SDR sample rate)
-            var audioSamples = new float[samples.Length];
-            var demodCount = _demodulator.Demodulate(samples, audioSamples);
+            // 1. IQ channel filter + decimation (SDR rate → demod rate)
+            ReadOnlySpan<IqSample> iqForDemod;
+            if (_iqDecimator != null)
+            {
+                var iqCount = _iqDecimator.Decimate(samples, _iqDecimBuffer);
+                iqForDemod = _iqDecimBuffer.AsSpan(0, iqCount);
+            }
+            else
+            {
+                iqForDemod = samples;
+            }
 
-            // 2. Audio decimation (SDR rate → 48 kHz)
+            // 2. FM demodulation (uses pre-allocated buffer)
+            // Ensure buffer is large enough (handles unexpected chunk sizes)
+            if (_demodBuffer.Length < iqForDemod.Length)
+            {
+                _demodBuffer = new float[iqForDemod.Length];
+            }
+            var demodCount = _demodulator.Demodulate(iqForDemod, _demodBuffer);
+
+            // 3. De-emphasis (single-pole IIR — trivially cheap)
+            if (_deEmphasis != null)
+            {
+                _deEmphasis.Process(_demodBuffer.AsSpan(0, demodCount));
+            }
+
+            // 4. Audio decimation (demod rate → 48 kHz, uses pre-allocated buffer)
+            int outputCount;
+            float[] outputSamples;
             if (_audioDecimator != null)
             {
-                var decimatedAudio = new float[demodCount / _audioDecimator.Factor + 1];
-                var decimatedCount = _audioDecimator.Decimate(
-                    audioSamples.AsSpan(0, demodCount), decimatedAudio);
-                audioSamples = new float[decimatedCount];
-                Array.Copy(decimatedAudio, audioSamples, decimatedCount);
-            }
-
-            // 3. Audio low-pass filter (remove residual HF noise)
-            if (_audioFilter != null)
-            {
-                var filtered = new float[audioSamples.Length];
-                _audioFilter.Process(audioSamples, filtered);
-                audioSamples = filtered;
-            }
-
-            // 4. Apply volume and clamp (FM demod gain already normalizes to ~[-1,1])
-            if (_volume != 1.0f)
-            {
-                for (var i = 0; i < audioSamples.Length; i++)
+                if (_decimBuffer.Length < demodCount / _audioDecimator.Factor + 1)
                 {
-                    audioSamples[i] *= _volume;
+                    _decimBuffer = new float[demodCount / _audioDecimator.Factor + 1];
                 }
+                outputCount = _audioDecimator.Decimate(
+                    _demodBuffer.AsSpan(0, demodCount), _decimBuffer);
+                outputSamples = _decimBuffer;
             }
-
-            for (var i = 0; i < audioSamples.Length; i++)
+            else
             {
-                audioSamples[i] = Math.Clamp(audioSamples[i], -1.0f, 1.0f);
+                outputCount = demodCount;
+                outputSamples = _demodBuffer;
             }
 
-            // Notify listeners
-            AudioDataAvailable?.Invoke(this, new AudioDataEventArgs(audioSamples, _audioFormat));
+            // 5. Apply volume and clamp
+            for (var i = 0; i < outputCount; i++)
+            {
+                var s = outputSamples[i] * _volume;
+                outputSamples[i] = s > 1.0f ? 1.0f : s < -1.0f ? -1.0f : s;
+            }
+
+            // Pass the pre-allocated buffer directly — listeners must consume data
+            // synchronously during the event callback (buffer is reused next call).
+            AudioDataAvailable?.Invoke(this,
+                new AudioDataEventArgs(outputSamples, outputCount, _audioFormat));
         }
 
         private void SetState(ReceiverState newState)
@@ -806,14 +904,21 @@ namespace RTLSDRCore
     }
 
     /// <summary>
-    /// Event arguments for audio data
+    /// Event arguments for audio data.
+    /// IMPORTANT: The Samples buffer is reused between callbacks.
+    /// Listeners must consume data synchronously during the event — do not stash the reference.
     /// </summary>
     public class AudioDataEventArgs : EventArgs
     {
         /// <summary>
-        /// Gets the audio samples
+        /// Gets the audio samples buffer. Only the first <see cref="SampleCount"/> elements are valid.
         /// </summary>
         public float[] Samples { get; }
+
+        /// <summary>
+        /// Gets the number of valid samples in the buffer.
+        /// </summary>
+        public int SampleCount { get; }
 
         /// <summary>
         /// Gets the audio format
@@ -823,11 +928,13 @@ namespace RTLSDRCore
         /// <summary>
         /// Creates new audio data event args
         /// </summary>
-        /// <param name="samples">Audio samples</param>
+        /// <param name="samples">Audio samples buffer (may be larger than valid data)</param>
+        /// <param name="sampleCount">Number of valid samples</param>
         /// <param name="format">Audio format</param>
-        public AudioDataEventArgs(float[] samples, AudioFormat format)
+        public AudioDataEventArgs(float[] samples, int sampleCount, AudioFormat format)
         {
             Samples = samples;
+            SampleCount = sampleCount;
             Format = format;
         }
     }

@@ -180,7 +180,9 @@ namespace RTLSDRCore.DSP
     }
 
     /// <summary>
-    /// Decimator for reducing sample rate
+    /// Decimator for reducing IQ sample rate with properly-sized anti-alias filter.
+    /// Calculates filter taps from the transition bandwidth to ensure adequate
+    /// stop-band attenuation for the given decimation factor.
     /// </summary>
     public class Decimator
     {
@@ -204,11 +206,12 @@ namespace RTLSDRCore.DSP
         public int OutputSampleRate => InputSampleRate / _factor;
 
         /// <summary>
-        /// Creates a new decimator
+        /// Creates a new decimator with automatically-calculated filter taps.
         /// </summary>
         /// <param name="inputSampleRate">Input sample rate in Hz</param>
         /// <param name="decimationFactor">Decimation factor (must be >= 1)</param>
-        public Decimator(int inputSampleRate, int decimationFactor)
+        /// <param name="cutoffHz">Optional cutoff frequency override. Defaults to 80% of output Nyquist.</param>
+        public Decimator(int inputSampleRate, int decimationFactor, float cutoffHz = 0)
         {
             if (decimationFactor < 1)
                 throw new ArgumentException("Decimation factor must be at least 1", nameof(decimationFactor));
@@ -216,9 +219,20 @@ namespace RTLSDRCore.DSP
             InputSampleRate = inputSampleRate;
             _factor = decimationFactor;
 
-            // Anti-aliasing filter at the output Nyquist frequency
-            var cutoff = inputSampleRate / (2.0f * decimationFactor) * 0.9f;
-            _antiAliasFilter = new IqLowPassFilter(inputSampleRate, cutoff);
+            // Anti-aliasing filter at 80% of the output Nyquist frequency
+            var outputNyquist = inputSampleRate / (2.0f * decimationFactor);
+            var cutoff = cutoffHz > 0 ? cutoffHz : outputNyquist * 0.8f;
+
+            // Calculate taps from transition bandwidth.
+            // For Hamming window: taps ≈ 3.3 / (transition_width / sample_rate)
+            var transitionHz = outputNyquist - cutoff;
+            if (transitionHz <= 0) transitionHz = outputNyquist * 0.2f;
+            var normalizedTransition = transitionHz / inputSampleRate;
+            var taps = (int)Math.Ceiling(3.3 / normalizedTransition);
+            taps = Math.Max(taps, 63);
+            taps |= 1; // ensure odd
+
+            _antiAliasFilter = new IqLowPassFilter(inputSampleRate, cutoff, taps);
         }
 
         /// <summary>
@@ -339,7 +353,29 @@ namespace RTLSDRCore.DSP
                 return count;
             }
 
-            // Process through each stage sequentially
+            // Fast path for single-stage (most common: e.g., 5:1)
+            // Avoids all intermediate allocations.
+            if (_stages.Count == 1)
+            {
+                var stage = _stages[0];
+                var outputIndex = 0;
+                var maxOutput = output.Length;
+
+                for (var i = 0; i < input.Length && outputIndex < maxOutput; i++)
+                {
+                    var filtered = stage.Filter.Process(input[i]);
+                    stage.Counter++;
+                    if (stage.Counter >= stage.Factor)
+                    {
+                        output[outputIndex++] = filtered;
+                        stage.Counter = 0;
+                    }
+                }
+
+                return outputIndex;
+            }
+
+            // Multi-stage path (allocates intermediate buffers)
             var current = input.ToArray();
 
             foreach (var stage in _stages)
@@ -424,6 +460,55 @@ namespace RTLSDRCore.DSP
                 Filter = filter;
                 Factor = factor;
             }
+        }
+    }
+
+    /// <summary>
+    /// FM de-emphasis filter. Compensates for the pre-emphasis applied during
+    /// FM broadcast transmission (high frequencies are boosted before transmission
+    /// and must be attenuated on receive). Without this filter, FM audio sounds
+    /// harsh/bright and the 19kHz stereo pilot + 38kHz subcarrier alias into
+    /// the audio band during decimation, causing an "underwater" effect.
+    ///
+    /// Implements a single-pole IIR low-pass: y[n] = (1-α)·x[n] + α·y[n-1]
+    /// where α = exp(-1/(τ·sampleRate)).
+    /// </summary>
+    public class DeEmphasisFilter
+    {
+        private readonly float _alpha;
+        private float _previous;
+
+        /// <summary>
+        /// Creates a de-emphasis filter with the specified time constant.
+        /// </summary>
+        /// <param name="sampleRate">Sample rate in Hz.</param>
+        /// <param name="timeConstantUs">Time constant in microseconds.
+        /// 75μs for North America/South Korea, 50μs for Europe/Japan.</param>
+        public DeEmphasisFilter(int sampleRate, float timeConstantUs = 75f)
+        {
+            var tau = timeConstantUs * 1e-6f;
+            _alpha = MathF.Exp(-1.0f / (tau * sampleRate));
+        }
+
+        /// <summary>
+        /// Processes samples through the de-emphasis filter in-place.
+        /// </summary>
+        public void Process(Span<float> samples)
+        {
+            var oneMinusAlpha = 1.0f - _alpha;
+            for (var i = 0; i < samples.Length; i++)
+            {
+                _previous = oneMinusAlpha * samples[i] + _alpha * _previous;
+                samples[i] = _previous;
+            }
+        }
+
+        /// <summary>
+        /// Resets the filter state.
+        /// </summary>
+        public void Reset()
+        {
+            _previous = 0;
         }
     }
 

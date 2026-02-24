@@ -35,7 +35,10 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     private readonly ILogger _logger;
     private readonly IMetricsCollector? _metricsCollector;
     private readonly object _bufferLock = new();
-    private readonly Queue<T> _sampleBuffer = new();
+    private readonly T[] _ringBuffer;
+    private int _writePos;
+    private int _readPos;
+    private int _count;
     private readonly int _maxBufferSamples;
     private readonly BufferOverflowStrategy _overflowStrategy;
     private bool _isDisposed;
@@ -73,6 +76,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         // Note: This assumes input sample rate matches output sample rate.
         var samplesPerSecond = format.SampleRate * format.Channels;
         _maxBufferSamples = (int)(samplesPerSecond * maxBufferSeconds);
+        _ringBuffer = new T[_maxBufferSamples];
 
         Name = $"Buffered Generator ({typeof(T).Name})";
 
@@ -93,38 +97,37 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         {
             if (_overflowStrategy == BufferOverflowStrategy.Block)
             {
-                // If strategy is block, we wait until there is room.
-                while ((_sampleBuffer.Count + samples.Length > _maxBufferSamples) && !_isDisposed)
+                while ((_count + samples.Length > _maxBufferSamples) && !_isDisposed)
                 {
                     Monitor.Wait(_bufferLock);
                 }
-                
+
                 if (_isDisposed) return;
             }
 
             _totalSamplesReceived += samples.Length;
 
-            foreach (var sample in samples)
+            var toWrite = samples.Length;
+
+            // If incoming data exceeds free space, drop oldest samples
+            var freeSpace = _maxBufferSamples - _count;
+            if (toWrite > freeSpace)
             {
-                if (_sampleBuffer.Count >= _maxBufferSamples)
-                {
-                    if (_overflowStrategy == BufferOverflowStrategy.DropOldest)
-                    {
-                        _sampleBuffer.Dequeue();
-                        _totalSamplesDropped++;
-                    }
-                    else
-                    {
-                        // In Block mode, we normally shouldn't get here unless checks above failed (e.g. huge chunk)
-                        // Forced drop if absolutely necessary
-                        _sampleBuffer.Dequeue();
-                        _totalSamplesDropped++;
-                        if (_totalSamplesDropped % 1000 == 0) // throttling log
-                           _logger.LogDebug("BufferedSoundGenerator forced to drop sample in Block mode. Buffer full.");
-                    }
-                }
-                _sampleBuffer.Enqueue(sample);
+                var toDrop = toWrite - freeSpace;
+                _readPos = (_readPos + toDrop) % _maxBufferSamples;
+                _count -= toDrop;
+                _totalSamplesDropped += toDrop;
             }
+
+            // Bulk copy into ring buffer (handles wrap-around)
+            var firstChunk = Math.Min(toWrite, _maxBufferSamples - _writePos);
+            samples.Slice(0, firstChunk).CopyTo(_ringBuffer.AsSpan(_writePos, firstChunk));
+            if (firstChunk < toWrite)
+            {
+                samples.Slice(firstChunk).CopyTo(_ringBuffer.AsSpan(0, toWrite - firstChunk));
+            }
+            _writePos = (_writePos + toWrite) % _maxBufferSamples;
+            _count += toWrite;
         }
     }
 
@@ -143,33 +146,39 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
 
         lock (_bufferLock)
         {
-            // We need to fill 'buffer' with floats
-            // If T is float, we can copy directly
-            // If T is short, we need to convert
+            var toRead = Math.Min(buffer.Length, _count);
 
             if (typeof(T) == typeof(float))
             {
-                while (samplesWritten < buffer.Length && _sampleBuffer.Count > 0)
+                // Fast path: bulk copy from ring buffer (handles wrap-around)
+                // Reinterpret T[] as float[] since T is float at this branch
+                var floatRing = MemoryMarshal.Cast<T, float>(_ringBuffer.AsSpan());
+                var firstChunk = Math.Min(toRead, _maxBufferSamples - _readPos);
+                floatRing.Slice(_readPos, firstChunk).CopyTo(buffer.Slice(0, firstChunk));
+                if (firstChunk < toRead)
                 {
-                    var sample = _sampleBuffer.Dequeue();
-                    buffer[samplesWritten++] = (float)(object)sample;
-                    _totalSamplesOutput++;
+                    floatRing.Slice(0, toRead - firstChunk)
+                        .CopyTo(buffer.Slice(firstChunk, toRead - firstChunk));
                 }
+                samplesWritten = toRead;
             }
             else if (typeof(T) == typeof(short))
             {
-                 while (samplesWritten < buffer.Length && _sampleBuffer.Count > 0)
+                // Short → float conversion (per-sample, unavoidable)
+                for (var i = 0; i < toRead; i++)
                 {
-                    var sample = _sampleBuffer.Dequeue();
-                    short sVal = (short)(object)sample;
-                    // Convert short to float (-1.0 to 1.0)
-                    buffer[samplesWritten++] = sVal / 32768.0f;
-                    _totalSamplesOutput++;
+                    var idx = (_readPos + i) % _maxBufferSamples;
+                    short sVal = (short)(object)_ringBuffer[idx];
+                    buffer[i] = sVal / 32768.0f;
                 }
+                samplesWritten = toRead;
             }
-            
-            // If we consumed data, pulse any blocked producers
-            if (_overflowStrategy == BufferOverflowStrategy.Block && samplesWritten > 0)
+
+            _readPos = (_readPos + toRead) % _maxBufferSamples;
+            _count -= toRead;
+            _totalSamplesOutput += toRead;
+
+            if (_overflowStrategy == BufferOverflowStrategy.Block && toRead > 0)
             {
                 Monitor.PulseAll(_bufferLock);
             }
@@ -180,7 +189,6 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         {
             buffer.Slice(samplesWritten).Fill(0);
 
-            // Count underruns (requested data but buffer was empty, after first data received)
             if (_totalSamplesReceived > 0)
             {
                 _underrunCount++;
@@ -198,7 +206,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             int currentBuffer;
             lock (_bufferLock)
             {
-                currentBuffer = _sampleBuffer.Count;
+                currentBuffer = _count;
             }
 
             // Don't log if completely idle (no received samples ever)
@@ -241,11 +249,11 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     {
         lock (_bufferLock)
         {
-            _sampleBuffer.Clear();
+            _readPos = 0;
+            _writePos = 0;
+            _count = 0;
             if (_overflowStrategy == BufferOverflowStrategy.Block)
             {
-                // Waking up producers might let them fill it again, 
-                // but clearing is usually done for flush/seek.
                 Monitor.PulseAll(_bufferLock);
             }
         }
@@ -264,7 +272,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                 TotalReceived = _totalSamplesReceived,
                 TotalOutput = _totalSamplesOutput,
                 TotalDropped = _totalSamplesDropped,
-                BufferCount = _sampleBuffer.Count,
+                BufferCount = _count,
                 BufferCapacity = _maxBufferSamples
             };
         }
@@ -282,9 +290,11 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         {
             lock (_bufferLock)
             {
-                _isDisposed = true; // Set disposed flag INSIDE lock
-                _sampleBuffer.Clear();
-                Monitor.PulseAll(_bufferLock); // Wake up blocked producers
+                _isDisposed = true;
+                _readPos = 0;
+                _writePos = 0;
+                _count = 0;
+                Monitor.PulseAll(_bufferLock);
             }
 
             _logger.LogInformation(
