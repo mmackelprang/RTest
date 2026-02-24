@@ -48,6 +48,11 @@ builder.Services.AddRazorComponents()
     {
       options.DetailedErrors = true;
     }
+
+    // Keep disconnected circuits alive longer for kiosk reliability.
+    // Default is 3 minutes — extend to 10 minutes so brief network blips
+    // or deploy restarts can reconnect without losing circuit state.
+    options.DisconnectedCircuitRetentionPeriod = TimeSpan.FromMinutes(10);
   });
 
 // Add MudBlazor services

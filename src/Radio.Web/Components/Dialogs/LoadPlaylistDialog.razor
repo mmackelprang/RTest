@@ -104,9 +104,13 @@
   private async Task LoadPlaylistAsync(Radio.Web.Models.PlaylistSummaryDto playlist)
   {
     _actionInProgress = true;
+    Logger.LogInformation("LoadPlaylistAsync called for: {Name} (Id: {Id})", playlist.Name, playlist.Id);
     try
     {
-      var success = await PlaylistApi.LoadAsync(playlist.Id);
+      using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+      Logger.LogInformation("Calling PlaylistApi.LoadAsync...");
+      var success = await PlaylistApi.LoadAsync(playlist.Id, cts.Token);
+      Logger.LogInformation("PlaylistApi.LoadAsync returned: {Success}", success);
       if (success)
       {
         Snackbar.Add($"Loaded '{playlist.Name}' ({playlist.ItemCount} tracks)", Severity.Success);
@@ -116,6 +120,11 @@
       {
         Snackbar.Add("Failed to load playlist", Severity.Error);
       }
+    }
+    catch (OperationCanceledException)
+    {
+      Logger.LogError("Timeout loading playlist {Id}", playlist.Id);
+      Snackbar.Add("Timed out loading playlist — is the API running?", Severity.Error);
     }
     catch (Exception ex)
     {

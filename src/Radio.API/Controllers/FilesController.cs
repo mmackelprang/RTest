@@ -272,8 +272,10 @@ public class FilesController : ControllerBase
 
       return Ok(new QueueFilesResponseDto
       {
-        Success = true,
-        Message = $"Added {addedCount} file(s) to queue",
+        Success = addedCount > 0,
+        Message = addedCount > 0
+          ? $"Added {addedCount} file(s) to queue"
+          : $"Failed to add files to queue ({failedPaths.Count} not found or not supported)",
         AddedCount = addedCount,
         FailedCount = failedPaths.Count,
         FailedPaths = failedPaths

@@ -217,6 +217,14 @@ public record DriveInfoDto(
   string? DriveFormat
 );
 
+public record QueueFilesResponseDto(
+  bool Success,
+  string? Message,
+  int AddedCount,
+  int FailedCount,
+  List<string>? FailedPaths
+);
+
 // Play History API DTOs
 public record PlayHistoryListDto(
   int TotalCount,
