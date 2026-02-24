@@ -1,5 +1,8 @@
 @page "/"
 @rendermode InteractiveServer
+@inject Radio.Web.Services.RadioPanelToggleService RadioPanelToggle
+@inject AudioStateHubService HubService
+@implements IDisposable
 
 <PageTitle>Radio Console</PageTitle>
 
@@ -9,9 +12,16 @@
     <Radio.Web.Components.Shared.NowPlayingPanel />
   </div>
 
-  <!-- Center: Queue / History (flex fill ~688px) -->
+  <!-- Center: Queue/History OR Radio Controls (flex fill ~688px) -->
   <div class="panel surface-raised" style="flex: 1;">
-    <Radio.Web.Components.Shared.QueueHistoryPanel />
+    @if (RadioPanelToggle.IsRadioPanelVisible)
+    {
+      <Radio.Web.Components.Shared.RadioControlPanel />
+    }
+    else
+    {
+      <Radio.Web.Components.Shared.QueueHistoryPanel />
+    }
   </div>
 
   <!-- Right: Visualizer (710px) -->
@@ -19,3 +29,20 @@
     <Radio.Web.Components.Shared.VisualizerPanel />
   </div>
 </div>
+
+@code {
+  protected override void OnInitialized()
+  {
+    RadioPanelToggle.RadioPanelToggled += OnRadioPanelToggled;
+  }
+
+  private async Task OnRadioPanelToggled()
+  {
+    await InvokeAsync(StateHasChanged);
+  }
+
+  public void Dispose()
+  {
+    RadioPanelToggle.RadioPanelToggled -= OnRadioPanelToggled;
+  }
+}
