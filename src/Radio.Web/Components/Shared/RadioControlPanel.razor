@@ -168,33 +168,37 @@
 
 @if (_isFrequencyDialogOpen)
 {
-  <MudDialog>
-    <DialogContent>
+  <MudOverlay Visible="true" DarkBackground="true" OnClick="CloseFrequencyDialog" ZIndex="9999">
+    <MudPaper Class="pa-4" Style="min-width: 300px;" @onclick:stopPropagation="true">
+      <MudText Typo="Typo.h6" Class="mb-3">Set Frequency</MudText>
       <MudNumericField @bind-Value="_newFrequency"
                        Label="@(_radioState?.Band == "AM" ? "Frequency (kHz)" : "Frequency (MHz)")"
                        Variant="Variant.Outlined"
                        Min="@GetMinFrequency()" Max="@GetMaxFrequency()" Step="@GetDialogStep()"
                        Style="width: 100%;" />
-    </DialogContent>
-    <DialogActions>
-      <MudButton OnClick="CloseFrequencyDialog">Cancel</MudButton>
-      <MudButton Color="Color.Primary" OnClick="SetFrequencyAsync">Set</MudButton>
-    </DialogActions>
-  </MudDialog>
+      <div class="d-flex justify-end gap-2 mt-3">
+        <MudButton OnClick="CloseFrequencyDialog">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   OnClick="SetFrequencyAsync">Set</MudButton>
+      </div>
+    </MudPaper>
+  </MudOverlay>
 }
 
 @if (_isSavePresetDialogOpen)
 {
-  <MudDialog>
-    <DialogContent>
+  <MudOverlay Visible="true" DarkBackground="true" OnClick="CloseSavePresetDialog" ZIndex="9999">
+    <MudPaper Class="pa-4" Style="min-width: 300px;" @onclick:stopPropagation="true">
+      <MudText Typo="Typo.h6" Class="mb-3">Save Preset</MudText>
       <MudTextField @bind-Value="_presetName"
                     Label="Preset Name" Variant="Variant.Outlined" Style="width: 100%;" />
-    </DialogContent>
-    <DialogActions>
-      <MudButton OnClick="CloseSavePresetDialog">Cancel</MudButton>
-      <MudButton Color="Color.Warning" OnClick="SavePresetAsync">Save</MudButton>
-    </DialogActions>
-  </MudDialog>
+      <div class="d-flex justify-end gap-2 mt-3">
+        <MudButton OnClick="CloseSavePresetDialog">Cancel</MudButton>
+        <MudButton Color="Color.Warning" Variant="Variant.Filled"
+                   OnClick="SavePresetAsync">Save</MudButton>
+      </div>
+    </MudPaper>
+  </MudOverlay>
 }
 
 <style>
