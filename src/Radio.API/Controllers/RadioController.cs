@@ -688,6 +688,48 @@ public class RadioController : ControllerBase
     }
   }
 
+  /// <summary>
+  /// Loads a radio preset — sets the band and tunes to the saved frequency.
+  /// </summary>
+  /// <param name="id">The preset ID to load.</param>
+  /// <returns>The updated radio state.</returns>
+  /// <response code="200">Returns the updated radio state after tuning.</response>
+  /// <response code="400">If the radio is not the active source.</response>
+  /// <response code="404">If the preset was not found.</response>
+  [HttpPost("presets/{id}/load")]
+  [ProducesResponseType(typeof(RadioStateDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status404NotFound)]
+  public async Task<ActionResult<RadioStateDto>> LoadPreset(string id)
+  {
+    try
+    {
+      var preset = await _presetService.GetPresetByIdAsync(id);
+      if (preset == null)
+      {
+        return NotFound(new { error = $"Preset with ID '{id}' not found" });
+      }
+
+      var radioSource = GetActiveRadioSource();
+      if (radioSource == null)
+      {
+        return BadRequest(new { error = "Radio is not the active source" });
+      }
+
+      _logger.LogInformation("Loading preset '{Name}': {Band} {Frequency} Hz", preset.Name, preset.Band, preset.Frequency);
+
+      await radioSource.SetBandAsync(preset.Band);
+      await radioSource.SetFrequencyAsync(new Frequency((long)preset.Frequency));
+
+      return Ok(MapToRadioStateDto(radioSource));
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error loading radio preset {Id}", id);
+      return StatusCode(500, new { error = "Failed to load radio preset" });
+    }
+  }
+
   #region Device Factory Endpoints
 
   /// <summary>
