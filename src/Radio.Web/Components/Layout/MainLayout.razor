@@ -187,6 +187,9 @@
       await LoadSourcesAsync();
       await LoadOutputDevicesAsync();
 
+      // Start the SignalR hub connection (subscribes to RadioState/Queue groups)
+      await HubService.StartAsync();
+
       // Subscribe to audio state updates
       HubService.PlaybackStateChanged += OnPlaybackStateChanged;
       HubService.NowPlayingChanged += OnNowPlayingChanged;
