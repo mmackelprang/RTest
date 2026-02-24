@@ -35,6 +35,11 @@ namespace RTLSDRCore
         private float[] _demodBuffer = Array.Empty<float>();
         private float[] _decimBuffer = Array.Empty<float>();
         private IqSample[] _iqDecimBuffer = Array.Empty<IqSample>();
+        // Pre-allocated silence buffer delivered when squelch closes or muted.
+        // Keeps the downstream BufferedSoundGenerator fed at a consistent rate
+        // to prevent underruns (which appear as zero-filled gaps in the waveform).
+        private float[] _squelchSilenceBuffer = Array.Empty<float>();
+        private int _expectedAudioOutputCount;
 
         private AudioFormat _audioFormat = AudioFormat.Default;
         private float _volume = 1.0f;
@@ -738,6 +743,15 @@ namespace RTLSDRCore
 
             _agc.Reset();
 
+            // Pre-calculate expected audio output count for squelch silence delivery.
+            // Each USB transfer is 16384 IQ pairs; after all decimation stages,
+            // we get this many audio samples. Pre-allocate silence buffer to avoid
+            // allocations during the real-time callback.
+            var iqDecimFactor2 = _iqDecimator?.Factor ?? 1;
+            var audioDecimFactor = _audioDecimator?.Factor ?? 1;
+            _expectedAudioOutputCount = maxIqChunk / iqDecimFactor2 / audioDecimFactor;
+            _squelchSilenceBuffer = new float[_expectedAudioOutputCount];
+
             Logger.Information(
                 "Signal processing: SDR={SdrRate} Hz → IQ decim {IqFactor}:1 → " +
                 "Demod={DemodRate} Hz → Audio decim {AudioFactor}:1 → {AudioRate} Hz, " +
@@ -817,9 +831,19 @@ namespace RTLSDRCore
 
             SignalStrengthUpdated?.Invoke(this, new SignalStrengthEventArgs(_lastSignalStrength));
 
-            // Check squelch
+            // Check squelch — when closed or muted, deliver silence instead of nothing.
+            // Delivering nothing starves the downstream BufferedSoundGenerator, causing
+            // underruns that appear as zero-filled gaps in the audio output. By delivering
+            // a silence buffer of the expected size, the buffer stays fed and the mixer
+            // can cross-fade cleanly when the signal returns.
             if (_lastSignalStrength < _squelchThreshold || _isMuted)
             {
+                if (_expectedAudioOutputCount > 0 && AudioDataAvailable != null)
+                {
+                    // Silence buffer is pre-allocated and already zeroed
+                    AudioDataAvailable.Invoke(this,
+                        new AudioDataEventArgs(_squelchSilenceBuffer, _expectedAudioOutputCount, _audioFormat));
+                }
                 return;
             }
 
