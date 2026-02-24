@@ -122,20 +122,33 @@ public class RtlSdrPipelineTests : IDisposable
     }
   }
 
-  // ── Test 3: High squelch blocks audio ──
+  // ── Test 3: High squelch delivers silence (not real audio) ──
 
   [Fact]
-  public async Task RadioReceiver_SquelchBlocksAudio_WhenSignalWeak()
+  public async Task RadioReceiver_SquelchDeliversSilence_WhenSignalWeak()
   {
     _mockDevice = new MockSdrDevice();
     _mockDevice.SetNoiseFloor(0.001f); // Very low noise
 
     _receiver = new RadioReceiver(_mockDevice);
 
-    var audioFired = false;
+    var audioCallbackCount = 0;
+    var nonZeroSamplesReceived = false;
     float? reportedSignalStrength = null;
 
-    _receiver.AudioDataAvailable += (_, _) => audioFired = true;
+    _receiver.AudioDataAvailable += (_, e) =>
+    {
+      audioCallbackCount++;
+      // Check if any non-zero audio was delivered (should be all silence)
+      for (int i = 0; i < e.SampleCount; i++)
+      {
+        if (Math.Abs(e.Samples[i]) > float.Epsilon)
+        {
+          nonZeroSamplesReceived = true;
+          break;
+        }
+      }
+    };
     _receiver.SignalStrengthUpdated += (_, e) =>
     {
       reportedSignalStrength ??= e.Strength;
@@ -146,14 +159,18 @@ public class RtlSdrPipelineTests : IDisposable
     _receiver.SquelchThreshold = 0.5f; // High squelch — should block weak/no signal
     _receiver.Startup();
 
-    // Wait briefly to see if any audio leaks through
+    // Wait briefly — squelch now delivers silence instead of blocking callbacks
     await Task.Delay(2000);
 
-    _output.WriteLine($"Audio fired: {audioFired}");
+    _output.WriteLine($"Audio callbacks: {audioCallbackCount}");
+    _output.WriteLine($"Non-zero audio received: {nonZeroSamplesReceived}");
     _output.WriteLine($"Signal strength: {reportedSignalStrength?.ToString("F4") ?? "not reported"}");
     _output.WriteLine($"Squelch threshold: {_receiver.SquelchThreshold}");
 
-    Assert.False(audioFired, "Audio should be squelched on an empty frequency with high threshold");
+    // Squelch delivers silence (zero-filled buffers) to keep downstream buffer fed.
+    // Audio callbacks fire, but all samples should be zero.
+    Assert.True(audioCallbackCount > 0, "Squelch should still deliver silence callbacks");
+    Assert.False(nonZeroSamplesReceived, "Squelched audio should be all silence (zero samples)");
     Assert.True(reportedSignalStrength.HasValue, "Signal strength should still be reported even when squelched");
   }
 
