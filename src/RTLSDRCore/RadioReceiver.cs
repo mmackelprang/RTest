@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using RTLSDRCore.Bands;
 using RTLSDRCore.DSP;
 using RTLSDRCore.Enums;
@@ -52,6 +53,13 @@ namespace RTLSDRCore
         private CancellationTokenSource? _processingCts;
         private CancellationTokenSource? _scanCts;
         private bool _isScanning;
+
+        // Async processing queue: USB read thread enqueues IQ samples,
+        // a dedicated processing thread dequeues and runs DSP. This decouples
+        // USB timing from DSP processing overhead, preventing sample rate
+        // deficit caused by synchronous processing blocking the read loop.
+        private BlockingCollection<IqSample[]>? _processingQueue;
+        private Thread? _processingThread;
 
         // Sample rate configuration
         private const int DefaultSdrSampleRate = 2_400_000;
@@ -150,8 +158,18 @@ namespace RTLSDRCore
                         return false;
                     }
 
-                    // Start processing loop
+                    // Start async processing pipeline: USB read thread enqueues
+                    // IQ batches, dedicated processing thread runs DSP chain.
                     _processingCts = new CancellationTokenSource();
+                    _processingQueue = new BlockingCollection<IqSample[]>(
+                        new ConcurrentQueue<IqSample[]>(), boundedCapacity: 8);
+                    _processingThread = new Thread(ProcessingLoop)
+                    {
+                        Name = "RadioReceiver-DSP",
+                        IsBackground = true,
+                        Priority = ThreadPriority.AboveNormal
+                    };
+                    _processingThread.Start();
                     _device.SamplesAvailable += OnSamplesAvailable;
 
                     SetState(ReceiverState.Running);
@@ -183,6 +201,15 @@ namespace RTLSDRCore
 
                 _device.SamplesAvailable -= OnSamplesAvailable;
                 _processingCts?.Cancel();
+
+                // Signal the processing queue to complete, then wait for
+                // the processing thread to drain remaining items and exit.
+                _processingQueue?.CompleteAdding();
+                _processingThread?.Join(TimeSpan.FromSeconds(2));
+                _processingQueue?.Dispose();
+                _processingQueue = null;
+                _processingThread = null;
+
                 _processingCts?.Dispose();
                 _processingCts = null;
 
@@ -806,14 +833,47 @@ namespace RTLSDRCore
             if (_processingCts?.IsCancellationRequested == true)
                 return;
 
+            // Enqueue for async processing — returns immediately so the USB
+            // read loop can issue the next rtlsdr_read_sync without waiting
+            // for DSP processing to complete. If the queue is full (DSP can't
+            // keep up), we drop the batch rather than blocking USB reads.
             try
             {
-                ProcessSamples(e.Samples);
+                if (!(_processingQueue?.TryAdd(e.Samples) ?? false))
+                {
+                    Logger.Warning("DSP processing queue full — dropping IQ batch ({Samples} samples)",
+                        e.Samples.Length);
+                }
             }
-            catch (Exception ex)
+            catch (InvalidOperationException)
             {
-                Logger.Error(ex, "Error processing samples");
+                // Queue has been marked as complete (shutdown)
             }
+        }
+
+        private void ProcessingLoop()
+        {
+            Logger.Information("DSP processing thread started");
+            try
+            {
+                foreach (var samples in _processingQueue!.GetConsumingEnumerable(
+                             _processingCts?.Token ?? CancellationToken.None))
+                {
+                    try
+                    {
+                        ProcessSamples(samples);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Error(ex, "Error processing samples");
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Normal shutdown
+            }
+            Logger.Information("DSP processing thread stopped");
         }
 
         private void ProcessSamples(IqSample[] samples)
