@@ -26,8 +26,9 @@
           @foreach (var band in _availableBands)
           {
             <div class="rcp-band-btn @(band.Type == _radioState.Band ? "rcp-band-active" : "")"
-                 @onclick="@(async () => await HandleBandChangeAsync(band.Type))">
-              @band.Name
+                 @onclick="@(async () => await HandleBandChangeAsync(band.Type))"
+                 title="@band.Name">
+              @band.Type
             </div>
           }
         </div>
