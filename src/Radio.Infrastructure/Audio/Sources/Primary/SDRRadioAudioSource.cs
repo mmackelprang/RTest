@@ -6,6 +6,8 @@ using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.SoundFlow;
+using Radio.Infrastructure.Configuration.Abstractions;
+using Radio.Infrastructure.Configuration.Models;
 using RTLSDRCore;
 using RTLSDRCore.Enums;
 
@@ -22,6 +24,7 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   private readonly IOptionsMonitor<RadioOptions> _radioOptions;
   private readonly BackgroundIdentificationService? _identificationService;
   private readonly SoundFlowPlaybackService? _playbackService;
+  private readonly IConfigurationManager? _configurationManager;
   private readonly Dictionary<string, object> _metadata = new();
   private Frequency _frequencyStep;
   private int _deviceVolume;
@@ -31,6 +34,7 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   private CancellationTokenSource? _scanCts;
   private BufferedSoundGenerator<float>? _soundGenerator;
   private string? _playbackId;
+  private bool _hasRestoredPreferences;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="SDRRadioAudioSource"/> class.
@@ -41,19 +45,22 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// <param name="metricsCollector">Optional metrics collector for tracking radio operations.</param>
   /// <param name="identificationService">Optional fingerprinting service for track identification.</param>
   /// <param name="playbackService">Optional SoundFlow playback service for audio output.</param>
+  /// <param name="configurationManager">Optional configuration manager for restoring persisted preferences.</param>
   public SDRRadioAudioSource(
     ILogger<SDRRadioAudioSource> logger,
     RadioReceiver radioReceiver,
     IOptionsMonitor<RadioOptions> radioOptions,
     IMetricsCollector? metricsCollector = null,
     BackgroundIdentificationService? identificationService = null,
-    SoundFlowPlaybackService? playbackService = null)
+    SoundFlowPlaybackService? playbackService = null,
+    IConfigurationManager? configurationManager = null)
     : base(logger, metricsCollector)
   {
     _radioReceiver = radioReceiver ?? throw new ArgumentNullException(nameof(radioReceiver));
     _radioOptions = radioOptions ?? throw new ArgumentNullException(nameof(radioOptions));
     _identificationService = identificationService;
     _playbackService = playbackService;
+    _configurationManager = configurationManager;
 
     // Initialize from configuration
     var options = _radioOptions.CurrentValue;
@@ -643,6 +650,74 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
 
   #endregion
 
+  #region Preference Restoration
+
+  /// <summary>
+  /// Restores persisted radio preferences (band, frequency, step) from the config store.
+  /// Falls back to RadioOptions defaults if no persisted values exist.
+  /// Mirrors the pattern in AudioPreferencePersistence.RestoreVolumePreferences().
+  /// </summary>
+  private async Task RestorePersistedRadioPreferencesAsync(CancellationToken cancellationToken)
+  {
+    if (_configurationManager == null)
+    {
+      Logger.LogDebug("📻 SDR RADIO: No configuration manager available, using default preferences");
+      return;
+    }
+
+    try
+    {
+      var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+      var store = await _configurationManager.GetStoreAsync(storeId, cancellationToken);
+
+      // Read persisted values — stored as Hz by PreferencesPersistenceService
+      var bandEntry = await store.GetEntryAsync("Radio:LastBand", ct: cancellationToken);
+      var freqEntry = await store.GetEntryAsync("Radio:LastFrequency", ct: cancellationToken);
+      var stepEntry = await store.GetEntryAsync("Radio:LastFrequencyStep", ct: cancellationToken);
+
+      // If no persisted frequency exists, this is a fresh install — use defaults
+      if (freqEntry == null || string.IsNullOrEmpty(freqEntry.Value))
+      {
+        Logger.LogDebug("📻 SDR RADIO: No persisted radio preferences found, using defaults");
+        return;
+      }
+
+      // Restore band first (frequency ranges depend on band)
+      if (bandEntry != null && !string.IsNullOrEmpty(bandEntry.Value)
+          && Enum.TryParse<RadioBand>(bandEntry.Value, out var savedBand))
+      {
+        Logger.LogInformation("📻 SDR RADIO: Restoring persisted band: {Band}", savedBand);
+        await SetBandAsync(savedBand, cancellationToken);
+      }
+
+      // Restore frequency (stored as Hz)
+      if (double.TryParse(freqEntry.Value, out var savedFreqHz) && savedFreqHz > 0)
+      {
+        var savedFreq = new Frequency((long)savedFreqHz);
+        Logger.LogInformation("📻 SDR RADIO: Restoring persisted frequency: {Frequency}", savedFreq.ToDisplayString());
+        await SetFrequencyAsync(savedFreq, cancellationToken);
+      }
+
+      // Restore frequency step (stored as Hz)
+      if (stepEntry != null && !string.IsNullOrEmpty(stepEntry.Value)
+          && double.TryParse(stepEntry.Value, out var savedStepHz) && savedStepHz > 0)
+      {
+        _frequencyStep = new Frequency((long)savedStepHz);
+        Logger.LogDebug("📻 SDR RADIO: Restoring persisted frequency step: {Step}", _frequencyStep.ToDisplayString());
+      }
+
+      Logger.LogInformation(
+        "📻 SDR RADIO: Restored persisted preferences - Band={Band}, Frequency={Frequency}, Step={Step}",
+        CurrentBand, CurrentFrequency.ToDisplayString(), _frequencyStep.ToDisplayString());
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "📻 SDR RADIO: Failed to restore persisted preferences, using defaults");
+    }
+  }
+
+  #endregion
+
   #region Helper Methods
 
   /// <summary>
@@ -724,6 +799,14 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
 
     // Generate a playback ID for this session
     _playbackId = $"sdr-radio-{Guid.NewGuid():N}";
+
+    // On first play, restore persisted band/frequency/step from the config store.
+    // This runs once per source lifetime so subsequent play/resume cycles don't re-read.
+    if (!_hasRestoredPreferences)
+    {
+      _hasRestoredPreferences = true;
+      await RestorePersistedRadioPreferencesAsync(cancellationToken);
+    }
 
     // Set up the audio output pipeline BEFORE starting the receiver.
     // This ensures the BufferedSoundGenerator is ready to accept samples
