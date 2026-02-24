@@ -1,7 +1,9 @@
 @page "/devices"
+@using Radio.Web.Services
 @using Radio.Web.Services.ApiClients
 @using Radio.Web.Models
 @inject DevicesApiService DevicesApi
+@inject DeviceDisplayStateService DisplayState
 @inject ISnackbar Snackbar
 @inject ILogger<DeviceManagementPage> Logger
 
@@ -749,5 +751,8 @@
     displaySettings = await DevicesApi.GetDeviceDisplaySettingsAsync();
     outputDevices = await DevicesApi.GetOutputDevicesAsync();
     StateHasChanged();
+
+    // Notify other components (MainLayout) that display settings changed
+    await DisplayState.NotifyDisplaySettingsChangedAsync();
   }
 }

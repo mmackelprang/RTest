@@ -189,6 +189,7 @@ public class AudioSourceFactory : IAudioSourceFactory
       _genericSourcePreferences,
       _deviceManager,
       resolvedUSBPort,
+      _identificationService,
       _playbackService);
   }
 

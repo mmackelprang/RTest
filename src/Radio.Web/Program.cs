@@ -268,6 +268,7 @@ builder.Services.AddSingleton<AudioVisualizationHubService>();
 
 // Register application services
 builder.Services.AddScoped<Radio.Web.Services.QueuePersistenceService>();
+builder.Services.AddScoped<Radio.Web.Services.DeviceDisplayStateService>();
 
 var app = builder.Build();
 

@@ -214,16 +214,33 @@ public class PlaylistsController : ControllerBase
       // Clear current queue
       await playQueue.ClearQueueAsync(ct);
 
-      // Add each item from the playlist
+      // Add each item from the playlist, skipping files that no longer exist
+      var loaded = 0;
+      var skipped = 0;
       foreach (var item in items.OrderBy(i => i.Position))
       {
+        if (!System.IO.File.Exists(item.FilePath))
+        {
+          _logger.LogWarning("Playlist file not found, skipping: {FilePath}", item.FilePath);
+          skipped++;
+          continue;
+        }
+
         await playQueue.AddToQueueAsync(item.FilePath, cancellationToken: ct);
+        loaded++;
       }
 
-      _logger.LogInformation("Loaded playlist '{Name}' ({Count} items) into queue",
-        playlist.Name, items.Count);
+      _logger.LogInformation("Loaded playlist '{Name}': {Loaded} tracks loaded, {Skipped} skipped (missing)",
+        playlist.Name, loaded, skipped);
 
-      return Ok(new { message = $"Loaded {items.Count} tracks from '{playlist.Name}'" });
+      return Ok(new
+      {
+        message = skipped == 0
+          ? $"Loaded {loaded} tracks from '{playlist.Name}'"
+          : $"Loaded {loaded} tracks from '{playlist.Name}' ({skipped} files not found)",
+        loaded,
+        skipped
+      });
     }
     catch (Exception ex)
     {
