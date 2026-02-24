@@ -4,7 +4,7 @@
 Continue feature development, hardware integration testing, and bug fixes for the Radio Console project on Ubuntu x64 and Raspberry Pi targets.
 
 ## Current Phase
-Phase E — Radio Scan Fix & UI Improvements
+All planned phases complete. Remaining work: hardware-dependent items (D.1, D.3) and BT verification.
 
 ---
 
@@ -26,35 +26,29 @@ All prior phases are **COMPLETE**. See git history and previous plan for details
 - Inline radio control panel with broadcast console styling (PR #228)
 - FM audio dropout fix — squelch silence delivery (PR #229)
 - FM audio dropout fix — async DSP processing + startup reorder (PR #230)
+- Radio scan fix — no USB restart during frequency changes (PR #231)
+- Hidden devices persistence — load from config store on startup (PR #232)
+- Ubuntu media & data setup verified (Phase A)
 
 ---
 
-## Phase A: Ubuntu Media & Data Setup ⏸️
+## Phase A: Ubuntu Media & Data Setup ✅
 
-### A.1 Copy Test Media Files
-**Priority:** High — needed for playback and fingerprinting verification
+### A.1 Copy Test Media Files ✅
+- [x] 28 media files already present at `/opt/radio-console/media/audio/`
+- [x] File browser API (`GET /api/files`) lists all files with metadata (artist, album, duration)
 
-**Tasks:**
-- [ ] Identify test media files on Pi or local machine
-- [ ] Copy media files to Ubuntu at `/opt/radio-console/media/audio/`
-- [ ] Verify file browser API endpoint lists the files
+### A.2 Verify File Playback ✅
+- [x] `POST /api/files/play` starts playback — verified with "All The Small Things" (Blink-182) and "Here's To The Night" (Eve 6)
+- [x] Audio output working (local speakers)
+- [ ] Cast output with file playback — not retested this session (Cast verified previously with SDR)
 
-### A.2 Verify File Playback
-**Priority:** High
-
-**Tasks:**
-- [ ] Start file playback via API on Ubuntu
-- [ ] Verify audio output works (local speakers)
-- [ ] Verify Cast output works with file playback
-
-### A.3 Verify Fingerprinting
-**Priority:** Medium
-
-**Tasks:**
-- [ ] Confirm `fpcalc` is installed and working on Ubuntu (`fpcalc --version`)
-- [ ] Trigger fingerprint identification on a playing file
-- [ ] Verify AcoustID lookup returns correct results
-- [ ] Check fingerprint database entries in SQLite
+### A.3 Verify Fingerprinting ✅
+- [x] `fpcalc` v1.5.1 installed and working on Ubuntu
+- [x] Fingerprint identification working — "All the Small Things" identified at 100% confidence (from cache)
+- [x] AcoustID lookup working — "Here's To The Night" fingerprinted via AcoustID
+- [x] 358 fingerprint entries in SQLite `FingerprintCache` table
+- [x] Play history recording working — entries logged with metadata source (FileTag, Fingerprinting)
 
 ---
 
@@ -104,26 +98,21 @@ AudioManager now has 6 constructor params: `ILogger`, `IAudioEngine`, `IAudioSou
 
 ---
 
-## Phase E: Radio Scan Fix & UI Improvements ⏸️
+## Phase E: Radio Scan Fix & UI Improvements ✅
 
-### E.1 Fix Scan Buttons
-**Priority:** High — scan buttons on RadioControlPanel don't work
+### E.1 Fix Scan Buttons ✅ (PR #231)
+- [x] Root cause: `SetFrequencyInternal` stopped/restarted USB streaming per frequency step (~300ms overhead)
+- [x] Fix: removed USB stop/restart (`rtlsdr_set_center_freq` is safe while streaming), increased dwell to 150ms
+- [x] Verified: scan up from 88 MHz found 90.1 MHz, scan down from 107 MHz found 106.9 MHz
 
-**Tasks:**
-- [ ] Investigate scan up/down button handlers in RadioControlPanel.razor
-- [ ] Trace through API endpoint (`POST /api/radio/scan`) to RadioReceiver scan logic
-- [ ] Identify why scan doesn't start or stops immediately
-- [ ] Fix scan implementation
-- [ ] Verify scan finds stations and stops on strong signals
+### E.2 Frequency Updates During Scan ✅ (PR #231)
+- [x] `AudioStateUpdateService` polls every 500ms and broadcasts `RadioStateChanged` via SignalR when frequency changes
+- [x] RadioControlPanel DSEG display updates live during scan
+- [x] Scan stops and holds on station when signal strength exceeds threshold
 
-### E.2 Frequency Updates During Scan
-**Priority:** High — UI should show the frequency changing as the radio scans
-
-**Tasks:**
-- [ ] During scan, RadioReceiver should periodically report the current scan frequency
-- [ ] API/SignalR should push frequency updates to the UI in real-time
-- [ ] RadioControlPanel DSEG display should update live as the scan progresses
-- [ ] Scan should stop and hold on a station when signal strength exceeds squelch threshold
+### E.3 Hidden Devices Persistence ✅ (PR #232)
+- [x] Root cause: `SoundFlowDeviceManager` only loaded from `IOptionsMonitor` (appsettings.json), not SQLite config store
+- [x] Fix: `LoadDisplaySettingsFromStoreAsync()` called from `AudioEngineInitializationService.StartAsync`
 
 ---
 
@@ -131,8 +120,9 @@ AudioManager now has 6 constructor params: `ILogger`, `IAudioEngine`, `IAudioSou
 
 | Issue | Status | Notes |
 |-------|--------|-------|
-| Scan buttons not working | **Active** | Scan up/down on RadioControlPanel non-functional |
-| Scan frequency not updating in UI | **Active** | UI should show frequency changing during scan |
+| Scan buttons not working | **Resolved** | Fixed in PR #231 — no USB restart during freq changes |
+| Scan frequency not updating in UI | **Resolved** | Working via SignalR (PR #231) |
+| Hidden devices not persisting | **Resolved** | Load from config store on startup (PR #232) |
 | Dual audio output (local + Cast) | **Resolved** | Fixed in PR #220 |
 | Volume persistence | **Resolved** | Verified on Ubuntu + Pi (PR #223) |
 | FM audio dropouts | **Resolved** | Async DSP queue + startup reorder (PRs #229, #230) |
