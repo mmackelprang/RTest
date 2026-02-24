@@ -71,6 +71,12 @@ public class HomePageTests : TestContext
 
     // QueuePersistenceService
     Services.AddSingleton<QueuePersistenceService>();
+
+    // RadioPanelToggleService (used by Home.razor for radio panel toggle)
+    Services.AddScoped<RadioPanelToggleService>();
+
+    // RadioApiService (used by RadioControlPanel child component)
+    Services.AddHttpClient<RadioApiService>();
   }
 
   protected override void Dispose(bool disposing)

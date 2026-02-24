@@ -1,0 +1,804 @@
+@rendermode InteractiveServer
+@using Radio.Web.Services.ApiClients
+@inject RadioApiService RadioApi
+@inject AudioStateHubService HubService
+@inject ILogger<RadioControlPanel> Logger
+@implements IAsyncDisposable
+
+<div class="rcp-root">
+  @if (_radioState == null)
+  {
+    <div style="flex: 1; display: flex; justify-content: center; align-items: center;">
+      <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+    </div>
+  }
+  else
+  {
+    <!-- Tuner Module -->
+    <div class="rcp-tuner">
+      <!-- Module Label -->
+      <div class="rcp-module-label">TUNER</div>
+
+      <!-- Band selector -->
+      @if (_availableBands.Any())
+      {
+        <div class="rcp-band-group">
+          @foreach (var band in _availableBands)
+          {
+            <div class="rcp-band-btn @(band.Type == _radioState.Band ? "rcp-band-active" : "")"
+                 @onclick="@(async () => await HandleBandChangeAsync(band.Type))">
+              @band.Name
+            </div>
+          }
+        </div>
+      }
+
+      <!-- Frequency display -->
+      <div class="rcp-freq-well">
+        <div class="display-frequency display-frequency-ghost"
+             data-ghost="888.88 MHz"
+             @onclick="OpenFrequencyDialog"
+             style="cursor: pointer; font-size: 48px;"
+             title="Click to set frequency">
+          @FormatFrequency(_radioState.Frequency, _radioState.Band)
+        </div>
+        <div class="rcp-step-label">
+          STEP @FormatStep(_radioState.Step, _radioState.Band)
+        </div>
+      </div>
+
+      <!-- Signal strength meter -->
+      @if (_radioState.SignalStrength.HasValue)
+      {
+        <div class="rcp-meter">
+          <div class="rcp-meter-header">
+            <span>SIGNAL</span>
+            <span class="rcp-meter-value">@_radioState.SignalStrength%</span>
+          </div>
+          <div class="rcp-meter-bar">
+            @for (int i = 0; i < 20; i++)
+            {
+              var filled = (_radioState.SignalStrength ?? 0) >= (i + 1) * 5;
+              var segClass = i < 12 ? "seg-green" : i < 17 ? "seg-amber" : "seg-red";
+              <div class="rcp-meter-seg @(filled ? segClass : "seg-off")"></div>
+            }
+          </div>
+        </div>
+      }
+
+      <!-- Scanning indicator -->
+      @if (_radioState.IsScanning)
+      {
+        <div class="rcp-scanning">
+          SCANNING @_radioState.ScanDirection
+        </div>
+      }
+
+      <!-- Tuning + Scan Controls -->
+      <div class="rcp-controls">
+        <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowLeft"
+                       Color="Color.Default" Size="Size.Medium"
+                       Class="rcp-tune-btn"
+                       OnClick="FrequencyDownAsync" title="Frequency Down" />
+        @if (_radioState.IsScanning)
+        {
+          <MudButton Variant="Variant.Filled" Color="Color.Error"
+                     Class="rcp-scan-btn"
+                     OnClick="StopScanAsync" StartIcon="@Icons.Material.Filled.Stop">
+            STOP
+          </MudButton>
+        }
+        else
+        {
+          <MudButton Variant="Variant.Outlined" Color="Color.Default"
+                     Class="rcp-scan-btn"
+                     OnClick="@(() => StartScanAsync("down"))" StartIcon="@Icons.Material.Filled.Search">
+            SCAN ◀
+          </MudButton>
+          <MudButton Variant="Variant.Outlined" Color="Color.Default"
+                     Class="rcp-scan-btn"
+                     OnClick="@(() => StartScanAsync("up"))" EndIcon="@Icons.Material.Filled.Search">
+            ▶ SCAN
+          </MudButton>
+        }
+        <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowRight"
+                       Color="Color.Default" Size="Size.Medium"
+                       Class="rcp-tune-btn"
+                       OnClick="FrequencyUpAsync" title="Frequency Up" />
+      </div>
+
+      <!-- SDR Controls -->
+      @if (_radioState.Gain.HasValue)
+      {
+        <div class="rcp-sdr-controls">
+          <MudSwitch T="bool" Value="@_radioState.AutoGain" ValueChanged="@HandleAutoGainChangedAsync"
+                     Label="AGC" Color="Color.Warning" />
+          @if (!_radioState.AutoGain && _radioState.Gain.HasValue)
+          {
+            <MudSlider T="int" Value="@_radioState.Gain.Value" ValueChanged="@HandleGainChangedAsync"
+                       Min="0" Max="50" Step="1" Color="Color.Warning" Style="flex: 1;">
+              <span style="font-family: var(--font-mono); font-size: 12px; color: var(--signal-amber);">
+                GAIN @_radioState.Gain dB
+              </span>
+            </MudSlider>
+          }
+        </div>
+      }
+    </div>
+
+    <!-- Presets Memory Bank -->
+    <div class="rcp-presets">
+      <div class="rcp-presets-header">
+        <span>MEMORY</span>
+        <MudIconButton Icon="@Icons.Material.Filled.Save" Color="Color.Warning" Size="Size.Small"
+                       OnClick="OpenSavePresetDialog" title="Save Current" />
+      </div>
+
+      <div class="rcp-presets-list">
+        @if (_presets == null || !_presets.Any())
+        {
+          <div class="rcp-presets-empty">
+            <MudIcon Icon="@Icons.Material.Filled.Radio" Style="font-size: 40px; opacity: 0.3;" />
+            <span>NO PRESETS</span>
+          </div>
+        }
+        else
+        {
+          @foreach (var preset in _presets.OrderBy(p => p.CreatedAt))
+          {
+            <div class="rcp-preset-item" @onclick="@(() => LoadPresetAsync(preset.Id))">
+              <div class="rcp-preset-name">@preset.Name</div>
+              <div class="rcp-preset-freq">
+                @FormatFrequency(preset.Frequency, preset.Band)
+                <span class="rcp-preset-band">@preset.Band</span>
+              </div>
+              <div class="rcp-preset-delete" @onclick:stopPropagation="true">
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Error" Size="Size.Small"
+                               Style="padding: 2px; width: 24px; height: 24px;" OnClick="@(() => DeletePresetAsync(preset.Id))" />
+              </div>
+            </div>
+          }
+        }
+      </div>
+    </div>
+  }
+</div>
+
+@if (_isFrequencyDialogOpen)
+{
+  <MudDialog>
+    <DialogContent>
+      <MudNumericField @bind-Value="_newFrequency"
+                       Label="@(_radioState?.Band == "AM" ? "Frequency (kHz)" : "Frequency (MHz)")"
+                       Variant="Variant.Outlined"
+                       Min="@GetMinFrequency()" Max="@GetMaxFrequency()" Step="@GetDialogStep()"
+                       Style="width: 100%;" />
+    </DialogContent>
+    <DialogActions>
+      <MudButton OnClick="CloseFrequencyDialog">Cancel</MudButton>
+      <MudButton Color="Color.Primary" OnClick="SetFrequencyAsync">Set</MudButton>
+    </DialogActions>
+  </MudDialog>
+}
+
+@if (_isSavePresetDialogOpen)
+{
+  <MudDialog>
+    <DialogContent>
+      <MudTextField @bind-Value="_presetName"
+                    Label="Preset Name" Variant="Variant.Outlined" Style="width: 100%;" />
+    </DialogContent>
+    <DialogActions>
+      <MudButton OnClick="CloseSavePresetDialog">Cancel</MudButton>
+      <MudButton Color="Color.Warning" OnClick="SavePresetAsync">Save</MudButton>
+    </DialogActions>
+  </MudDialog>
+}
+
+<style>
+  /* ═══ Radio Control Panel — Tuner Module ═══ */
+
+  .rcp-root {
+    height: 100%;
+    display: flex;
+    overflow: hidden;
+    background: var(--surface-inset, #0A0A0C);
+    border: 1px solid var(--surface-separator);
+    border-radius: 4px;
+  }
+
+  /* ── Tuner Section ── */
+
+  .rcp-tuner {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 16px;
+    gap: 10px;
+    position: relative;
+    min-width: 0;
+  }
+
+  .rcp-module-label {
+    position: absolute;
+    top: 8px;
+    left: 12px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    color: var(--text-low);
+    text-transform: uppercase;
+    opacity: 0.6;
+  }
+
+  /* ── Band Selector ── */
+
+  .rcp-band-group {
+    display: flex;
+    gap: 3px;
+    padding: 3px;
+    background: var(--surface-base);
+    border-radius: 6px;
+    border: 1px solid var(--surface-separator);
+  }
+
+  .rcp-band-btn {
+    padding: 0 12px;
+    height: 30px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    color: var(--text-low);
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    transition: all 120ms ease;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .rcp-band-btn:hover {
+    color: var(--text-medium);
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .rcp-band-btn:active {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .rcp-band-active {
+    color: var(--signal-amber) !important;
+    background: rgba(240, 168, 48, 0.10) !important;
+    box-shadow: inset 0 0 0 1px rgba(240, 168, 48, 0.25);
+  }
+
+  /* ── Frequency Well ── */
+
+  .rcp-freq-well {
+    text-align: center;
+    padding: 8px 24px;
+    background: var(--surface-base);
+    border-radius: 6px;
+    border: 1px solid var(--surface-separator);
+    position: relative;
+  }
+
+  .rcp-step-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-low);
+    letter-spacing: 0.1em;
+    margin-top: 4px;
+  }
+
+  /* ── Signal Meter ── */
+
+  .rcp-meter {
+    width: 320px;
+  }
+
+  .rcp-meter-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 4px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    color: var(--text-low);
+    text-transform: uppercase;
+  }
+
+  .rcp-meter-value {
+    color: var(--text-medium);
+    font-size: 11px;
+    letter-spacing: 0.05em;
+  }
+
+  .rcp-meter-bar {
+    display: flex;
+    gap: 2px;
+    height: 10px;
+  }
+
+  .rcp-meter-seg {
+    flex: 1;
+    border-radius: 1px;
+    transition: all 80ms ease;
+  }
+
+  .seg-off {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .seg-green {
+    background: var(--signal-green);
+    box-shadow: 0 0 4px rgba(74, 222, 128, 0.3);
+  }
+
+  .seg-amber {
+    background: var(--signal-amber);
+    box-shadow: 0 0 4px var(--signal-amber-glow);
+  }
+
+  .seg-red {
+    background: var(--signal-red);
+    box-shadow: 0 0 4px rgba(248, 113, 113, 0.3);
+  }
+
+  /* ── Scanning Indicator ── */
+
+  .rcp-scanning {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--signal-amber);
+    letter-spacing: 0.15em;
+    text-shadow: 0 0 8px var(--signal-amber-glow);
+    animation: rcp-blink 0.8s infinite;
+  }
+
+  @@keyframes rcp-blink {
+    0%, 45% { opacity: 1; }
+    50%, 95% { opacity: 0.25; }
+  }
+
+  /* ── Tuning Controls ── */
+
+  .rcp-controls {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .rcp-tune-btn {
+    min-width: 48px !important;
+    min-height: 48px !important;
+    border: 1px solid var(--surface-separator) !important;
+    border-radius: 6px !important;
+    color: var(--signal-amber) !important;
+    background: var(--surface-base) !important;
+    transition: all 100ms ease !important;
+  }
+
+  .rcp-tune-btn:hover {
+    border-color: rgba(240, 168, 48, 0.3) !important;
+    background: rgba(240, 168, 48, 0.06) !important;
+  }
+
+  .rcp-tune-btn:active {
+    background: rgba(240, 168, 48, 0.12) !important;
+    transform: scale(0.96);
+  }
+
+  .rcp-scan-btn {
+    min-width: 88px !important;
+    min-height: 40px !important;
+    font-family: var(--font-mono) !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.08em !important;
+    border-color: var(--surface-separator) !important;
+    color: var(--text-medium) !important;
+  }
+
+  .rcp-scan-btn:hover {
+    border-color: var(--signal-amber) !important;
+    color: var(--signal-amber) !important;
+    background: rgba(240, 168, 48, 0.06) !important;
+  }
+
+  /* ── SDR Controls ── */
+
+  .rcp-sdr-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    width: 320px;
+    padding: 6px 12px;
+    background: var(--surface-base);
+    border-radius: 4px;
+    border: 1px solid var(--surface-separator);
+  }
+
+  /* ── Presets Memory Bank ── */
+
+  .rcp-presets {
+    width: 220px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-left: 1px solid var(--surface-separator);
+    background: var(--surface-raised);
+  }
+
+  .rcp-presets-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--surface-separator);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: var(--text-low);
+    flex-shrink: 0;
+  }
+
+  .rcp-presets-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px;
+  }
+
+  .rcp-presets-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 100%;
+    color: var(--text-low);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+  }
+
+  .rcp-preset-item {
+    position: relative;
+    padding: 8px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 100ms ease;
+    margin-bottom: 4px;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .rcp-preset-item:hover {
+    background: rgba(240, 168, 48, 0.04);
+    border-color: rgba(240, 168, 48, 0.15);
+  }
+
+  .rcp-preset-item:active {
+    background: rgba(240, 168, 48, 0.08);
+  }
+
+  .rcp-preset-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-high);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-right: 24px;
+  }
+
+  .rcp-preset-freq {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--signal-amber);
+    margin-top: 2px;
+    text-shadow: 0 0 6px rgba(240, 168, 48, 0.15);
+  }
+
+  .rcp-preset-band {
+    color: var(--text-low);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    margin-left: 4px;
+    text-shadow: none;
+  }
+
+  .rcp-preset-delete {
+    position: absolute;
+    top: 6px;
+    right: 4px;
+    opacity: 0;
+    transition: opacity 100ms ease;
+  }
+
+  .rcp-preset-item:hover .rcp-preset-delete {
+    opacity: 1;
+  }
+</style>
+
+@code {
+  private RadioStateDto? _radioState;
+  private List<RadioPresetDto>? _presets;
+  private IEnumerable<Radio.Core.Models.RadioBandModel> _availableBands = Enumerable.Empty<Radio.Core.Models.RadioBandModel>();
+
+  private bool _isFrequencyDialogOpen;
+  private double _newFrequency = 88.0;
+  private bool _isSavePresetDialogOpen;
+  private string _presetName = "";
+
+  protected override async Task OnInitializedAsync()
+  {
+    await LoadRadioStateAsync();
+    await LoadPresetsAsync();
+    await LoadBandsAsync();
+    HubService.RadioStateChanged += HandleRadioStateChanged;
+  }
+
+  private async Task LoadBandsAsync()
+  {
+    try { _availableBands = await RadioApi.GetBandsAsync(); }
+    catch { /* Silently fail */ }
+  }
+
+  private async Task LoadRadioStateAsync()
+  {
+    try { _radioState = await RadioApi.GetStateAsync(); }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to load radio state");
+      _radioState = null;
+    }
+  }
+
+  private async Task LoadPresetsAsync()
+  {
+    try { _presets = await RadioApi.GetPresetsAsync(); }
+    catch { /* Silently fail */ }
+  }
+
+  private async Task HandleRadioStateChanged()
+  {
+    await LoadRadioStateAsync();
+    await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task FrequencyUpAsync()
+  {
+    try
+    {
+      if (await RadioApi.FrequencyUpAsync())
+      {
+        await LoadRadioStateAsync();
+        await InvokeAsync(StateHasChanged);
+      }
+    }
+    catch (Exception ex) { Logger.LogError(ex, "Error in FrequencyUpAsync"); }
+  }
+
+  private async Task FrequencyDownAsync()
+  {
+    try
+    {
+      if (await RadioApi.FrequencyDownAsync())
+      {
+        await LoadRadioStateAsync();
+        await InvokeAsync(StateHasChanged);
+      }
+    }
+    catch (Exception ex) { Logger.LogError(ex, "Error in FrequencyDownAsync"); }
+  }
+
+  private async Task HandleBandChangeAsync(string newBand)
+  {
+    try
+    {
+      if (_radioState != null) _radioState = _radioState with { Band = newBand };
+      if (await RadioApi.SetBandAsync(newBand))
+      {
+        await LoadRadioStateAsync();
+        await InvokeAsync(StateHasChanged);
+      }
+    }
+    catch (Exception ex) { Logger.LogError(ex, "Error in HandleBandChangeAsync"); }
+  }
+
+  private async Task StartScanAsync(string direction)
+  {
+    try
+    {
+      if (await RadioApi.StartScanAsync(direction))
+      {
+        await LoadRadioStateAsync();
+        await InvokeAsync(StateHasChanged);
+      }
+    }
+    catch (Exception ex) { Logger.LogError(ex, "Error in StartScanAsync"); }
+  }
+
+  private async Task StopScanAsync()
+  {
+    try
+    {
+      if (await RadioApi.StopScanAsync())
+      {
+        await LoadRadioStateAsync();
+        await InvokeAsync(StateHasChanged);
+      }
+    }
+    catch (Exception ex) { Logger.LogError(ex, "Error in StopScanAsync"); }
+  }
+
+  private async Task HandleAutoGainChangedAsync(bool enabled)
+  {
+    try
+    {
+      if (await RadioApi.SetAutoGainAsync(enabled))
+      {
+        await LoadRadioStateAsync();
+        await InvokeAsync(StateHasChanged);
+      }
+    }
+    catch { }
+  }
+
+  private async Task HandleGainChangedAsync(int gain)
+  {
+    try
+    {
+      if (await RadioApi.SetGainAsync(gain))
+      {
+        await LoadRadioStateAsync();
+        await InvokeAsync(StateHasChanged);
+      }
+    }
+    catch { }
+  }
+
+  private void OpenFrequencyDialog()
+  {
+    if (_radioState != null)
+    {
+      _newFrequency = _radioState.Band == "AM"
+        ? _radioState.Frequency / 1_000.0
+        : _radioState.Frequency / 1_000_000.0;
+    }
+    _isFrequencyDialogOpen = true;
+  }
+
+  private void CloseFrequencyDialog() => _isFrequencyDialogOpen = false;
+
+  private async Task SetFrequencyAsync()
+  {
+    try
+    {
+      var frequencyHz = _radioState?.Band == "AM"
+        ? _newFrequency * 1_000.0
+        : _newFrequency * 1_000_000.0;
+      if (await RadioApi.SetFrequencyAsync(frequencyHz))
+      {
+        _isFrequencyDialogOpen = false;
+        await LoadRadioStateAsync();
+        await InvokeAsync(StateHasChanged);
+      }
+    }
+    catch { }
+  }
+
+  private void OpenSavePresetDialog()
+  {
+    if (_radioState != null)
+      _presetName = $"{_radioState.Band} - {FormatFrequency(_radioState.Frequency, _radioState.Band)}";
+    _isSavePresetDialogOpen = true;
+  }
+
+  private void CloseSavePresetDialog() => _isSavePresetDialogOpen = false;
+
+  private async Task SavePresetAsync()
+  {
+    try
+    {
+      if (_radioState != null && !string.IsNullOrWhiteSpace(_presetName))
+      {
+        if (await RadioApi.SavePresetAsync(_presetName, _radioState.Frequency, _radioState.Band))
+        {
+          await LoadPresetsAsync();
+          _isSavePresetDialogOpen = false;
+        }
+      }
+    }
+    catch { }
+  }
+
+  private async Task LoadPresetAsync(string id)
+  {
+    try
+    {
+      if (await RadioApi.LoadPresetAsync(id))
+      {
+        await LoadRadioStateAsync();
+        await InvokeAsync(StateHasChanged);
+      }
+    }
+    catch { }
+  }
+
+  private async Task DeletePresetAsync(string id)
+  {
+    try
+    {
+      if (await RadioApi.DeletePresetAsync(id))
+        await LoadPresetsAsync();
+    }
+    catch { }
+  }
+
+  private string FormatFrequency(double frequencyHz, string band)
+  {
+    return band switch
+    {
+      "AM" => $"{frequencyHz / 1_000.0:0} kHz",
+      _ => $"{frequencyHz / 1_000_000.0:0.00} MHz"
+    };
+  }
+
+  private string FormatStep(double stepHz, string band)
+  {
+    if (stepHz >= 1_000_000) return $"{stepHz / 1_000_000.0:0.###} MHz";
+    return $"{stepHz / 1_000.0:0.###} kHz";
+  }
+
+  private double GetDialogStep()
+  {
+    if (_radioState == null) return 0.1;
+    return _radioState.Band == "AM"
+      ? _radioState.Step / 1_000.0
+      : _radioState.Step / 1_000_000.0;
+  }
+
+  private double GetMinFrequency()
+  {
+    if (_radioState == null) return 0;
+    var band = _availableBands.FirstOrDefault(b => b.Type == _radioState.Band);
+    if (band != null)
+      return band.Type == "AM" ? band.MinFrequencyHz / 1000.0 : band.MinFrequencyHz / 1000000.0;
+    return _radioState.Band switch
+    {
+      "AM" => 520, "FM" => 87.5, "AIR" => 108.0, "SW" => 1.8,
+      "WB" => 162.400, "VHF" => 136.0, _ => 0
+    };
+  }
+
+  private double GetMaxFrequency()
+  {
+    if (_radioState == null) return 1000;
+    var band = _availableBands.FirstOrDefault(b => b.Type == _radioState.Band);
+    if (band != null)
+      return band.Type == "AM" ? band.MaxFrequencyHz / 1000.0 : band.MaxFrequencyHz / 1000000.0;
+    return _radioState.Band switch
+    {
+      "AM" => 1710, "FM" => 108.0, "AIR" => 137.0, "SW" => 30.0,
+      "WB" => 162.550, "VHF" => 174.0, _ => 1000
+    };
+  }
+
+  public async ValueTask DisposeAsync()
+  {
+    HubService.RadioStateChanged -= HandleRadioStateChanged;
+    await Task.CompletedTask;
+  }
+}

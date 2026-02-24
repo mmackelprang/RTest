@@ -11,6 +11,7 @@
 @inject ILogger<MainLayout> Logger
 @inject IDialogService DialogService
 @inject Radio.Web.Services.DeviceDisplayStateService DeviceDisplayState
+@inject Radio.Web.Services.RadioPanelToggleService RadioPanelToggle
 @implements IDisposable
 @implements IAsyncDisposable
 
@@ -190,6 +191,7 @@
       HubService.PlaybackStateChanged += OnPlaybackStateChanged;
       HubService.NowPlayingChanged += OnNowPlayingChanged;
       HubService.QueueChanged += OnQueueChanged;
+      HubService.SourceChanged += OnSourceChanged;
       DeviceDisplayState.DisplaySettingsChanged += OnDeviceDisplaySettingsChanged;
       Logger.LogDebug("MainLayout - Subscribed to audio state events");
 
@@ -553,16 +555,38 @@
     if (!IsSourceAvailable(source)) return;
     if (source.Id == _selectedSourceId)
     {
-      // Already selected — navigate to source-specific page for settings
+      // Already selected — toggle inline panel or navigate
+      if (IsRadioSource(source.Type))
+      {
+        // Toggle radio control panel in the Home page center area
+        var currentPath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+        if (!string.IsNullOrEmpty(currentPath))
+        {
+          // Not on Home page — navigate there first, panel will auto-show
+          RadioPanelToggle.IsRadioPanelVisible = true;
+          NavigationManager.NavigateTo("/");
+        }
+        else
+        {
+          await RadioPanelToggle.ToggleRadioPanelAsync();
+        }
+        return;
+      }
       NavigateToSourcePage(source.Type);
       return;
     }
 
-    await HandleSourceChangeAsync(source.Id);
+    // Hide radio panel when switching away from Radio
+    if (!IsRadioSource(source.Type))
+    {
+      await RadioPanelToggle.HideRadioPanelAsync();
+    }
 
-    // Stay on current page so Now Playing remains visible.
-    // User can navigate to source-specific pages via nav icons or config buttons.
+    await HandleSourceChangeAsync(source.Id);
   }
+
+  private static bool IsRadioSource(string sourceType) =>
+    sourceType is "Radio" or "RTLSDRCore" or "RF320";
 
   private void NavigateToSourcePage(string sourceType)
   {
@@ -666,6 +690,18 @@
     await InvokeAsync(StateHasChanged);
   }
 
+  private async Task OnSourceChanged()
+  {
+    // Refresh selected source and hide radio panel if source changed away from Radio
+    await LoadSourcesAsync();
+    var activeSource = _availableSources.FirstOrDefault(s => s.Id == _selectedSourceId);
+    if (activeSource != null && !IsRadioSource(activeSource.Type))
+    {
+      await RadioPanelToggle.HideRadioPanelAsync();
+    }
+    await InvokeAsync(StateHasChanged);
+  }
+
   private async Task OnDeviceDisplaySettingsChanged()
   {
     await LoadOutputDevicesAsync();
@@ -747,6 +783,7 @@
     HubService.PlaybackStateChanged -= OnPlaybackStateChanged;
     HubService.NowPlayingChanged -= OnNowPlayingChanged;
     HubService.QueueChanged -= OnQueueChanged;
+    HubService.SourceChanged -= OnSourceChanged;
     DeviceDisplayState.DisplaySettingsChanged -= OnDeviceDisplaySettingsChanged;
 
     _timer?.Stop();
