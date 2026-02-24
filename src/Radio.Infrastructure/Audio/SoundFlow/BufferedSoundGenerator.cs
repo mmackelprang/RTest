@@ -49,6 +49,9 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     private long _lastReportedDropped;
     private long _lastReportedUnderruns;
     private DateTime _lastLogTime = DateTime.MinValue;
+    private DateTime _lastUnderrunLogTime = DateTime.MinValue;
+    private long _underrunSamplesSinceLastLog;
+    private int _underrunCountSinceLastLog;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BufferedSoundGenerator{T}"/> class.
@@ -184,14 +187,35 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             }
         }
 
-        // Fill remainder with silence
+        // Fill remainder with silence on underrun
         if (samplesWritten < buffer.Length)
         {
+            var deficit = buffer.Length - samplesWritten;
             buffer.Slice(samplesWritten).Fill(0);
 
             if (_totalSamplesReceived > 0)
             {
                 _underrunCount++;
+                _underrunSamplesSinceLastLog += deficit;
+                _underrunCountSinceLastLog++;
+
+                // Log underrun bursts: throttled to once per second to avoid log spam
+                // while still revealing the pattern of when underruns occur.
+                var now = DateTime.UtcNow;
+                if ((now - _lastUnderrunLogTime).TotalSeconds >= 1.0)
+                {
+                    int buffered;
+                    lock (_bufferLock) { buffered = _count; }
+                    _logger.LogWarning(
+                        "⚠️ Buffer underrun ({Type}): {Count} underruns, {Deficit} zero samples in last {Interval:F1}s " +
+                        "(buffer: {Buffered}/{Capacity}, total underruns: {TotalUnderruns})",
+                        typeof(T).Name, _underrunCountSinceLastLog, _underrunSamplesSinceLastLog,
+                        (now - _lastUnderrunLogTime).TotalSeconds,
+                        buffered, _maxBufferSamples, _underrunCount);
+                    _underrunSamplesSinceLastLog = 0;
+                    _underrunCountSinceLastLog = 0;
+                    _lastUnderrunLogTime = now;
+                }
             }
         }
 
@@ -240,6 +264,30 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Pre-fills the buffer with silence to provide a cushion for the mixer.
+    /// Call this BEFORE adding the generator to the mixer to prevent startup underruns.
+    /// Also protects against brief producer stalls (USB jitter, GC pauses).
+    /// </summary>
+    /// <param name="seconds">Seconds of silence to pre-fill (default: 0.5).</param>
+    public void PreFillSilence(float seconds = 0.5f)
+    {
+        var samplesToFill = (int)(Format.SampleRate * Format.Channels * seconds);
+        samplesToFill = Math.Min(samplesToFill, _maxBufferSamples / 2); // Never exceed half capacity
+
+        lock (_bufferLock)
+        {
+            // Fill ring buffer with zeros (silence)
+            // Since the ring buffer is already zero-initialized, we just advance the write pointer
+            _writePos = samplesToFill % _maxBufferSamples;
+            _count = samplesToFill;
+        }
+
+        _logger.LogInformation(
+            "Pre-filled buffer with {Samples} samples ({Seconds:F2}s) of silence as startup cushion",
+            samplesToFill, seconds);
     }
 
     /// <summary>

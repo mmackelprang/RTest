@@ -747,6 +747,13 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
       if (_soundGenerator == null)
       {
         _soundGenerator = new BufferedSoundGenerator<float>(engine, format, Logger, metricsCollector: MetricsCollector);
+
+        // Pre-fill with 0.5s of silence before the mixer starts consuming.
+        // This prevents underruns during startup (USB device init takes ~100ms)
+        // and provides a cushion against USB transfer jitter and clock drift
+        // between the RTL-SDR crystal oscillator and the system audio clock.
+        _soundGenerator.PreFillSilence(0.5f);
+
         _radioReceiver.AudioDataAvailable += OnAudioDataAvailable;
         Logger.LogDebug("📻 SDR RADIO: Created BufferedSoundGenerator and subscribed to AudioDataAvailable");
       }
