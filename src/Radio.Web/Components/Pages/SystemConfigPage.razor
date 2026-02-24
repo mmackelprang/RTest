@@ -289,6 +289,24 @@
                                      HelperText="0.0 - 1.0" />
                   </MudItem>
                 </MudGrid>
+                <MudText Typo="Typo.subtitle2" Class="mt-3 mb-1">DirectChannel Latency Tuning</MudText>
+                <MudGrid Spacing="2">
+                  <MudItem xs="12" md="4">
+                    <MudNumericField T="float" @bind-Value="_castMaxBufferAhead" Label="Max Buffer Ahead (s)"
+                                     Variant="Variant.Outlined" Min="1.0f" Max="5.0f" Step="0.5f"
+                                     HelperText="Drift protection cap. Lower = less latency (1.0-5.0)" />
+                  </MudItem>
+                  <MudItem xs="12" md="4">
+                    <MudNumericField T="int" @bind-Value="_castBufferBeforePlay" Label="Buffer Before Play (chunks)"
+                                     Variant="Variant.Outlined" Min="1" Max="10"
+                                     HelperText="Chunks buffered before playback starts (1-10)" />
+                  </MudItem>
+                  <MudItem xs="12" md="4">
+                    <MudNumericField T="float" @bind-Value="_castReaderLagSeconds" Label="Reader Lag (s)"
+                                     Variant="Variant.Outlined" Min="0.1f" Max="2.0f" Step="0.1f"
+                                     HelperText="Stream reader lag behind write position (0.1-2.0)" />
+                  </MudItem>
+                </MudGrid>
               </MudExpansionPanel>
             </MudExpansionPanels>
 
@@ -1522,6 +1540,9 @@
   private bool _castEnabled;
   private int _castDiscoveryTimeout;
   private float _castDefaultVolume;
+  private float _castMaxBufferAhead;
+  private int _castBufferBeforePlay;
+  private float _castReaderLagSeconds;
 
   // Logs
   private string _logLevel = "warning";
@@ -1672,6 +1693,9 @@
         _castEnabled = _outputConfig.GoogleCast?.Enabled ?? false;
         _castDiscoveryTimeout = _outputConfig.GoogleCast?.DiscoveryTimeoutSeconds ?? 10;
         _castDefaultVolume = _outputConfig.GoogleCast?.DefaultVolume ?? 0.7f;
+        _castMaxBufferAhead = _outputConfig.GoogleCast?.DirectChannelMaxBufferAhead ?? 3.0f;
+        _castBufferBeforePlay = _outputConfig.GoogleCast?.DirectChannelBufferBeforePlay ?? 3;
+        _castReaderLagSeconds = _outputConfig.GoogleCast?.DirectChannelReaderLagSeconds ?? 1.0f;
       }
     }
     catch (Exception ex)
@@ -2167,7 +2191,10 @@
         {
           Enabled = _castEnabled,
           DiscoveryTimeoutSeconds = _castDiscoveryTimeout,
-          DefaultVolume = _castDefaultVolume
+          DefaultVolume = _castDefaultVolume,
+          DirectChannelMaxBufferAhead = _castMaxBufferAhead,
+          DirectChannelBufferBeforePlay = _castBufferBeforePlay,
+          DirectChannelReaderLagSeconds = _castReaderLagSeconds
         }
       };
 

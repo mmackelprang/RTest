@@ -175,6 +175,21 @@ public class GoogleCastSettingsDto
   /// Gets or sets the default volume.
   /// </summary>
   public float DefaultVolume { get; set; } = 0.7f;
+
+  /// <summary>
+  /// Gets or sets the max seconds of buffer-ahead before drift protection drops chunks.
+  /// </summary>
+  public float DirectChannelMaxBufferAhead { get; set; } = 3.0f;
+
+  /// <summary>
+  /// Gets or sets the number of chunks to buffer before starting playback.
+  /// </summary>
+  public int DirectChannelBufferBeforePlay { get; set; } = 3;
+
+  /// <summary>
+  /// Gets or sets the seconds of reader lag behind the write position.
+  /// </summary>
+  public float DirectChannelReaderLagSeconds { get; set; } = 1.0f;
 }
 
 /// <summary>

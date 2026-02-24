@@ -342,6 +342,9 @@ public class GoogleCastSettingsDto
   public bool Enabled { get; set; }
   public int DiscoveryTimeoutSeconds { get; set; }
   public float DefaultVolume { get; set; }
+  public float DirectChannelMaxBufferAhead { get; set; } = 3.0f;
+  public int DirectChannelBufferBeforePlay { get; set; } = 3;
+  public float DirectChannelReaderLagSeconds { get; set; } = 1.0f;
 }
 
 // System API DTOs

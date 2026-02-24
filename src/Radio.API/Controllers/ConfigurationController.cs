@@ -91,7 +91,10 @@ public class ConfigurationController : ControllerBase
           {
             Enabled = output.GoogleCast.Enabled,
             DiscoveryTimeoutSeconds = output.GoogleCast.DiscoveryTimeoutSeconds,
-            DefaultVolume = output.GoogleCast.DefaultVolume
+            DefaultVolume = output.GoogleCast.DefaultVolume,
+            DirectChannelMaxBufferAhead = output.GoogleCast.DirectChannelMaxBufferAhead,
+            DirectChannelBufferBeforePlay = output.GoogleCast.DirectChannelBufferBeforePlay,
+            DirectChannelReaderLagSeconds = output.GoogleCast.DirectChannelReaderLagSeconds
           }
         }
       };
@@ -193,7 +196,10 @@ public class ConfigurationController : ControllerBase
         {
           Enabled = output.GoogleCast.Enabled,
           DiscoveryTimeoutSeconds = output.GoogleCast.DiscoveryTimeoutSeconds,
-          DefaultVolume = output.GoogleCast.DefaultVolume
+          DefaultVolume = output.GoogleCast.DefaultVolume,
+          DirectChannelMaxBufferAhead = output.GoogleCast.DirectChannelMaxBufferAhead,
+          DirectChannelBufferBeforePlay = output.GoogleCast.DirectChannelBufferBeforePlay,
+          DirectChannelReaderLagSeconds = output.GoogleCast.DirectChannelReaderLagSeconds
         }
       });
     }

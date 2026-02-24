@@ -187,6 +187,27 @@ public class GoogleCastOutputOptions
   /// The receiver app must listen on this same namespace.
   /// </summary>
   public string DirectChannelNamespace { get; set; } = "urn:x-cast:com.radioconsole.audio";
+
+  /// <summary>
+  /// Gets or sets the maximum seconds of buffer-ahead before drift protection drops chunks.
+  /// Lower values reduce latency but cause more frequent chunk drops.
+  /// Default: 3.0. Valid range: 1.0-5.0.
+  /// </summary>
+  public float DirectChannelMaxBufferAhead { get; set; } = 3.0f;
+
+  /// <summary>
+  /// Gets or sets the number of chunks to buffer before starting playback.
+  /// Lower values reduce startup latency but increase risk of initial stutter.
+  /// Default: 3. Valid range: 1-10.
+  /// </summary>
+  public int DirectChannelBufferBeforePlay { get; set; } = 3;
+
+  /// <summary>
+  /// Gets or sets the seconds of reader lag behind the write position.
+  /// Lower values reduce latency but provide less cushion for jitter.
+  /// Default: 1.0. Valid range: 0.1-2.0.
+  /// </summary>
+  public float DirectChannelReaderLagSeconds { get; set; } = 1.0f;
 }
 
 /// <summary>

@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  Direct Channel Cast Receiver for Radio Console (v10 — Drift Protection)
+  Direct Channel Cast Receiver for Radio Console (v11 — Configurable Latency)
   ========================================================================
   Custom CAF receiver that receives raw PCM audio data directly over the
   Cast protocol's custom message bus and plays it using Web Audio API.
@@ -13,13 +13,11 @@
   - v8 Raw PCM: Works great! Zero encode/decode overhead.
   - v9 Latency: Added transit delay, buffer-ahead, ping/pong metrics.
 
-  v10 additions: Buffer-ahead drift protection.
-  - Sender paces with Stopwatch (wall clock), AudioContext uses hardware clock.
-    These drift at ~2.3ms/sec, causing unbounded buffer growth.
-  - Fix: cap buffer-ahead at MAX_BUFFER_AHEAD. When exceeded, drop the chunk
-    and let the buffer drain. At 2.3ms/sec drift with a 3s cap, this means
-    one dropped 100ms chunk every ~43 seconds — imperceptible for music.
-  - All v9 latency metrics preserved.
+  v10: Buffer-ahead drift protection.
+  v11 additions: Configurable latency parameters.
+  - BUFFER_BEFORE_PLAY and MAX_BUFFER_AHEAD are now mutable defaults that can
+    be overridden by a 'config' message from the sender at connect time.
+  - Allows tuning latency from the Configuration UI without redeploying.
 -->
 <html>
 <head>
@@ -31,7 +29,7 @@
   <cast-media-player></cast-media-player>
 
   <div id="status" style="color: #ccc; font-family: monospace; padding: 20px; position: absolute; top: 0; left: 0; z-index: 100;">
-    Radio Console — Direct Channel Receiver v10 (Drift Protection)<br>
+    Radio Console — Direct Channel Receiver v11 (Configurable Latency)<br>
     <span id="info">Initializing...</span>
   </div>
 
@@ -40,8 +38,8 @@
 
     // Configuration
     const NAMESPACE = 'urn:x-cast:com.radioconsole.audio';
-    const BUFFER_BEFORE_PLAY = 3;  // Wait for N chunks before starting playback
-    const MAX_BUFFER_AHEAD = 3.0;  // Max seconds of buffer-ahead before dropping chunks
+    let BUFFER_BEFORE_PLAY = 3;  // Wait for N chunks before starting playback (mutable via config msg)
+    let MAX_BUFFER_AHEAD = 3.0;  // Max seconds of buffer-ahead before dropping chunks (mutable via config msg)
 
     // CAF — we still need the receiver context for the custom message bus
     const context = cast.framework.CastReceiverContext.getInstance();
@@ -303,13 +301,20 @@
         firstChunkPlayTime = 0;
         updateStatus('Stopped — ready for new stream');
 
+      } else if (msg.type === 'config') {
+        if (msg.maxBufferAhead != null) MAX_BUFFER_AHEAD = msg.maxBufferAhead;
+        if (msg.bufferBeforePlay != null) BUFFER_BEFORE_PLAY = msg.bufferBeforePlay;
+        console.log('Config updated: MAX_BUFFER_AHEAD=' + MAX_BUFFER_AHEAD +
+          ', BUFFER_BEFORE_PLAY=' + BUFFER_BEFORE_PLAY);
+        updateStatus('Config: buffer=' + MAX_BUFFER_AHEAD + 's, startChunks=' + BUFFER_BEFORE_PLAY);
+
       } else if (msg.type === 'ping') {
         const now = Date.now();
         const bufferAhead = audioCtx ? (nextPlayTime - audioCtx.currentTime) : 0;
         const avgTransit = latencyCount > 0 ? Math.round(latencySum / latencyCount) : null;
         context.sendCustomMessage(NAMESPACE, event.senderId, {
           type: 'pong',
-          version: 10,
+          version: 11,
           chunksReceived,
           bytesReceived,
           chunksScheduled,
@@ -351,7 +356,7 @@
     options.customNamespaces[NAMESPACE] = cast.framework.system.MessageType.JSON;
 
     context.start(options);
-    console.log('Direct Channel receiver v10 (Drift Protection) started, listening on', NAMESPACE);
+    console.log('Direct Channel receiver v11 (Configurable Latency) started, listening on', NAMESPACE);
     updateStatus('Waiting for audio chunks...');
   </script>
 </body>
