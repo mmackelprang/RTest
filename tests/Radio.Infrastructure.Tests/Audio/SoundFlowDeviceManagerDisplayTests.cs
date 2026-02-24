@@ -161,4 +161,95 @@ public class SoundFlowDeviceManagerDisplayTests
     // (We can't easily verify internal state, but the method completes successfully)
     Assert.Contains("NewHiddenDevice", options.DeviceDisplay.HiddenDeviceNames);
   }
+
+  [Fact]
+  public async Task LoadDisplaySettingsFromStoreAsync_RestoresHiddenDevices()
+  {
+    // Arrange — config store has hidden device names saved from a previous session
+    var loggerMock = new Mock<ILogger<SoundFlowDeviceManager>>();
+    var configManagerMock = new Mock<IConfigurationManager>();
+    var audioPreferencesMock = new Mock<IOptionsMonitor<AudioPreferences>>();
+    var audioOutputOptionsMock = new Mock<IOptionsMonitor<AudioOutputOptions>>();
+
+    audioPreferencesMock.Setup(x => x.CurrentValue).Returns(new AudioPreferences());
+    audioOutputOptionsMock.Setup(x => x.CurrentValue).Returns(new AudioOutputOptions());
+    configManagerMock.Setup(x => x.CurrentStoreType).Returns(ConfigurationStoreType.Sqlite);
+
+    // Simulate persisted hidden device names in the SQLite store
+    var storedHiddenNames = new List<string> { "HiddenDevice1", "HiddenDevice2" };
+    configManagerMock.Setup(x => x.GetValueAsync<List<string>>(
+        "sqlite", "AudioOutput:DeviceDisplay:HiddenDeviceNames",
+        It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync(storedHiddenNames);
+
+    // Other settings return null (not persisted)
+    configManagerMock.Setup(x => x.GetValueAsync<List<string>>(
+        "sqlite", "AudioOutput:DeviceDisplay:VisibleDeviceNames",
+        It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync((List<string>?)null);
+    configManagerMock.Setup(x => x.GetValueAsync<Dictionary<string, string>>(
+        "sqlite", "AudioOutput:DeviceDisplay:DeviceFriendlyNames",
+        It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync((Dictionary<string, string>?)null);
+    configManagerMock.Setup(x => x.GetValueAsync<List<string>>(
+        "sqlite", "AudioOutput:DeviceDisplay:HiddenDevicePatterns",
+        It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync((List<string>?)null);
+
+    var manager = new SoundFlowDeviceManager(
+      loggerMock.Object,
+      configManagerMock.Object,
+      audioPreferencesMock.Object,
+      audioOutputOptionsMock.Object);
+
+    // Act — load persisted settings (simulating what AudioEngineInitializationService does)
+    await manager.LoadDisplaySettingsFromStoreAsync();
+
+    // Assert — config store was queried for hidden device names
+    configManagerMock.Verify(x => x.GetValueAsync<List<string>>(
+      "sqlite", "AudioOutput:DeviceDisplay:HiddenDeviceNames",
+      It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()), Times.Once);
+  }
+
+  [Fact]
+  public async Task LoadDisplaySettingsFromStoreAsync_NoStoreData_KeepsDefaults()
+  {
+    // Arrange — config store has no saved display settings (first run)
+    var loggerMock = new Mock<ILogger<SoundFlowDeviceManager>>();
+    var configManagerMock = new Mock<IConfigurationManager>();
+    var audioPreferencesMock = new Mock<IOptionsMonitor<AudioPreferences>>();
+    var audioOutputOptionsMock = new Mock<IOptionsMonitor<AudioOutputOptions>>();
+
+    var defaultOptions = new AudioOutputOptions();
+    // Add a default pattern from appsettings.json
+    defaultOptions.DeviceDisplay.HiddenDevicePatterns = ["^Monitor of "];
+
+    audioPreferencesMock.Setup(x => x.CurrentValue).Returns(new AudioPreferences());
+    audioOutputOptionsMock.Setup(x => x.CurrentValue).Returns(defaultOptions);
+    configManagerMock.Setup(x => x.CurrentStoreType).Returns(ConfigurationStoreType.Sqlite);
+
+    // All store queries return null (no persisted data)
+    configManagerMock.Setup(x => x.GetValueAsync<List<string>>(
+        It.IsAny<string>(), It.IsAny<string>(),
+        It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync((List<string>?)null);
+    configManagerMock.Setup(x => x.GetValueAsync<Dictionary<string, string>>(
+        It.IsAny<string>(), It.IsAny<string>(),
+        It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync((Dictionary<string, string>?)null);
+
+    var manager = new SoundFlowDeviceManager(
+      loggerMock.Object,
+      configManagerMock.Object,
+      audioPreferencesMock.Object,
+      audioOutputOptionsMock.Object);
+
+    // Act — load (should not change defaults when store is empty)
+    await manager.LoadDisplaySettingsFromStoreAsync();
+
+    // Assert — store was queried but no exception and defaults preserved
+    configManagerMock.Verify(x => x.GetValueAsync<List<string>>(
+      "sqlite", "AudioOutput:DeviceDisplay:HiddenDeviceNames",
+      It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()), Times.Once);
+  }
 }

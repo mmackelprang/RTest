@@ -585,6 +585,60 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
   }
 
   /// <summary>
+  /// Loads display settings from the config store (SQLite/JSON) and re-enumerates devices.
+  /// Call this on startup to restore user-persisted hidden/visible device lists
+  /// that are not in appsettings.json.
+  /// </summary>
+  public async Task LoadDisplaySettingsFromStoreAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite
+        ? "sqlite" : "config";
+
+      var hiddenNames = await _configurationManager.GetValueAsync<List<string>>(
+        storeId, "AudioOutput:DeviceDisplay:HiddenDeviceNames", ct: cancellationToken);
+      var visibleNames = await _configurationManager.GetValueAsync<List<string>>(
+        storeId, "AudioOutput:DeviceDisplay:VisibleDeviceNames", ct: cancellationToken);
+      var friendlyNames = await _configurationManager.GetValueAsync<Dictionary<string, string>>(
+        storeId, "AudioOutput:DeviceDisplay:DeviceFriendlyNames", ct: cancellationToken);
+      var hiddenPatterns = await _configurationManager.GetValueAsync<List<string>>(
+        storeId, "AudioOutput:DeviceDisplay:HiddenDevicePatterns", ct: cancellationToken);
+
+      // Only apply if the store had any data (avoids overwriting appsettings.json defaults
+      // when the store is empty, e.g., first run)
+      if (hiddenNames != null || visibleNames != null || friendlyNames != null || hiddenPatterns != null)
+      {
+        var options = new DeviceDisplayOptions
+        {
+          HiddenDeviceNames = hiddenNames ?? _displayOptions.HiddenDeviceNames,
+          VisibleDeviceNames = visibleNames ?? _displayOptions.VisibleDeviceNames,
+          DeviceFriendlyNames = friendlyNames ?? _displayOptions.DeviceFriendlyNames,
+        };
+
+        // Preserve hidden patterns from existing config if not overridden in store
+        if (hiddenPatterns != null)
+          options.HiddenDevicePatterns = hiddenPatterns;
+        else
+          options.HiddenDevicePatterns = _displayOptions.HiddenDevicePatterns;
+
+        ReloadDisplaySettingsInternal(options);
+        _logger.LogInformation(
+          "Loaded display settings from config store: {HiddenCount} hidden, {VisibleCount} visible, {FriendlyCount} friendly names",
+          options.HiddenDeviceNames.Count, options.VisibleDeviceNames.Count, options.DeviceFriendlyNames.Count);
+      }
+      else
+      {
+        _logger.LogDebug("No display settings found in config store, using appsettings.json defaults");
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to load display settings from config store, using defaults");
+    }
+  }
+
+  /// <summary>
   /// Reloads display settings from the current options and re-enumerates devices.
   /// Call this after persisting config changes that may not trigger IOptionsMonitor.OnChange
   /// (e.g., SQLite config store updates).

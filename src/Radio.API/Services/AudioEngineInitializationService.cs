@@ -6,6 +6,7 @@ using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Outputs;
 using Radio.Infrastructure.Audio.Services;
+using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Infrastructure.Configuration.Models;
 using IAppConfigurationManager = Radio.Infrastructure.Configuration.Abstractions.IConfigurationManager;
 
@@ -77,7 +78,14 @@ public class AudioEngineInitializationService : IHostedService
       await _audioEngine.StartAsync(cancellationToken);
       
       _logger.LogInformation("Audio engine initialized and started successfully");
-      
+
+      // Load persisted device display settings from config store (hidden/visible/friendly names).
+      // IOptionsMonitor only loads from appsettings.json; user changes are saved to SQLite.
+      if (_deviceManager is SoundFlowDeviceManager sfDeviceManager)
+      {
+        await sfDeviceManager.LoadDisplaySettingsFromStoreAsync(cancellationToken);
+      }
+
       // Enumerate devices
       var outputDevices = await _deviceManager.GetOutputDevicesAsync(cancellationToken);
       var inputDevices = await _deviceManager.GetInputDevicesAsync(cancellationToken);
