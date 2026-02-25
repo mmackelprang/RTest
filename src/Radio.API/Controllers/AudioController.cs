@@ -3,6 +3,7 @@ using Radio.API.Extensions;
 using Radio.API.Mappers;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.Fingerprinting;
 
 namespace Radio.API.Controllers;
 
@@ -18,6 +19,7 @@ public class AudioController : ControllerBase
   private readonly IAudioEngine _audioEngine;
   private readonly IAudioManager? _audioManager;
   private readonly IDuckingService _duckingService;
+  private readonly BackgroundIdentificationService? _fingerprintService;
 
   /// <summary>
   /// Initializes a new instance of the AudioController.
@@ -26,12 +28,14 @@ public class AudioController : ControllerBase
     ILogger<AudioController> logger,
     IAudioEngine audioEngine,
     IDuckingService duckingService,
-    IAudioManager? audioManager = null)
+    IAudioManager? audioManager = null,
+    BackgroundIdentificationService? fingerprintService = null)
   {
     _logger = logger;
     _audioEngine = audioEngine;
     _audioManager = audioManager;
     _duckingService = duckingService;
+    _fingerprintService = fingerprintService;
   }
 
   /// <summary>
@@ -567,5 +571,43 @@ public class AudioController : ControllerBase
       _logger.LogError(ex, "Error getting now playing information");
       return StatusCode(500, new { error = "Failed to get now playing information" });
     }
+  }
+
+  /// <summary>
+  /// Gets the current fingerprint identification status, including recent events and throughput rates.
+  /// </summary>
+  [HttpGet("fingerprint/status")]
+  [ProducesResponseType(typeof(FingerprintStatusDto), StatusCodes.Status200OK)]
+  public ActionResult<FingerprintStatusDto> GetFingerprintStatus()
+  {
+    if (_fingerprintService == null)
+    {
+      return Ok(new FingerprintStatusDto { IsEnabled = false });
+    }
+
+    var snapshot = _fingerprintService.GetStatus();
+    var dto = new FingerprintStatusDto
+    {
+      Phase = snapshot.Phase.ToString(),
+      IsEnabled = snapshot.IsEnabled,
+      FingerprintsPerMinute = Math.Round(snapshot.FingerprintsPerMinute, 1),
+      MetadataCallsPerMinute = Math.Round(snapshot.MetadataCallsPerMinute, 1),
+      LastError = snapshot.LastError,
+      RecentEvents = snapshot.RecentEvents.Select(e => new FingerprintEventDto
+      {
+        AudioSource = e.AudioSource,
+        FirstMatchAt = e.FirstMatchAt,
+        NoMatchCount = e.NoMatchCount,
+        MatchCount = e.MatchCount,
+        LastConfidence = e.LastConfidence,
+        Title = e.Title,
+        Artist = e.Artist,
+        Album = e.Album,
+        Phase = e.Phase.ToString(),
+        Timestamp = e.Timestamp
+      }).ToList()
+    };
+
+    return Ok(dto);
   }
 }

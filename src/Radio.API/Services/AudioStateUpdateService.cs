@@ -7,6 +7,7 @@ using Radio.API.Mappers;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
+using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Outputs;
 
 namespace Radio.API.Services;
@@ -23,6 +24,7 @@ public class AudioStateUpdateService : BackgroundService
   private readonly IAudioManager? _audioManager;
   private readonly IBluetoothService? _bluetoothService;
   private readonly GoogleCastOutput? _castOutput;
+  private readonly BackgroundIdentificationService? _fingerprintService;
   private string? _apiBaseUrl;
 
   /// <summary>
@@ -59,6 +61,7 @@ public class AudioStateUpdateService : BackgroundService
     _audioManager = serviceProvider.GetService<IAudioManager>();
     _bluetoothService = serviceProvider.GetService<IBluetoothService>();
     _castOutput = serviceProvider.GetService<GoogleCastOutput>();
+    _fingerprintService = serviceProvider.GetService<BackgroundIdentificationService>();
 
     // Resolve API base URL for making relative album art URLs absolute (needed by Cast devices)
     ResolveApiBaseUrl(configuration);
@@ -87,6 +90,13 @@ public class AudioStateUpdateService : BackgroundService
     {
       _castOutput.CastVolumeChanged += OnCastVolumeChanged;
       _logger.LogInformation("Subscribed to Cast volume changes for bidirectional sync");
+    }
+
+    // Subscribe to fingerprint status changes for real-time UI updates
+    if (_fingerprintService != null)
+    {
+      _fingerprintService.StatusChanged += OnFingerprintStatusChanged;
+      _logger.LogInformation("Subscribed to fingerprint status changes");
     }
   }
 
@@ -762,6 +772,39 @@ public class AudioStateUpdateService : BackgroundService
     }
   }
 
+  private async void OnFingerprintStatusChanged(object? sender, FingerprintStatusSnapshot snapshot)
+  {
+    try
+    {
+      var dto = new FingerprintStatusDto
+      {
+        Phase = snapshot.Phase.ToString(),
+        IsEnabled = snapshot.IsEnabled,
+        FingerprintsPerMinute = Math.Round(snapshot.FingerprintsPerMinute, 1),
+        MetadataCallsPerMinute = Math.Round(snapshot.MetadataCallsPerMinute, 1),
+        LastError = snapshot.LastError,
+        RecentEvents = snapshot.RecentEvents.Select(e => new FingerprintEventDto
+        {
+          AudioSource = e.AudioSource,
+          FirstMatchAt = e.FirstMatchAt,
+          NoMatchCount = e.NoMatchCount,
+          MatchCount = e.MatchCount,
+          LastConfidence = e.LastConfidence,
+          Title = e.Title,
+          Artist = e.Artist,
+          Album = e.Album,
+          Phase = e.Phase.ToString(),
+          Timestamp = e.Timestamp
+        }).ToList()
+      };
+      await _hubContext.Clients.All.SendAsync("FingerprintStatusChanged", dto);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Error broadcasting fingerprint status change");
+    }
+  }
+
   public override void Dispose()
   {
     if (_bluetoothService != null)
@@ -776,6 +819,11 @@ public class AudioStateUpdateService : BackgroundService
     if (_castOutput != null)
     {
       _castOutput.CastVolumeChanged -= OnCastVolumeChanged;
+    }
+
+    if (_fingerprintService != null)
+    {
+      _fingerprintService.StatusChanged -= OnFingerprintStatusChanged;
     }
 
     base.Dispose();
