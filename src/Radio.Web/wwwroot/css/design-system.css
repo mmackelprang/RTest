@@ -85,6 +85,7 @@
   /* ── Typography Stacks ── */
   --font-led:       'DSEG14Classic-Bold', 'JetBrains Mono', 'Consolas', monospace;
   --font-led-light: 'DSEG14Classic-Regular', 'JetBrains Mono', 'Consolas', monospace;
+  --font-display:   'Orbitron', 'JetBrains Mono', 'Consolas', monospace;
   --font-mono:      'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
   --font-body:      'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 
@@ -503,15 +504,16 @@ html, body {
 /* ─── §12  LED Display Classes ────────────────────────────────────────────── */
 
 .display-led {
-  font-family: var(--font-led);
+  font-family: var(--font-display);
   color: var(--signal-amber);
   text-shadow: 0 0 8px var(--signal-amber-glow);
   letter-spacing: 2px;
 }
 
 .display-frequency {
-  font-family: var(--font-led);
+  font-family: var(--font-display);
   font-size: 52px;
+  font-weight: 600;
   color: var(--signal-amber);
   text-shadow:
     0 0 12px var(--signal-amber-glow),
@@ -520,7 +522,7 @@ html, body {
   line-height: 1;
 }
 
-/* Ghosted "all segments on" background for DSEG (classic LCD look) */
+/* Ghosted "all segments on" background — DSEG stays for authentic LCD look */
 .display-frequency-ghost {
   position: relative;
 }
@@ -536,8 +538,9 @@ html, body {
 }
 
 .display-clock {
-  font-family: var(--font-led);
+  font-family: var(--font-display);
   font-size: 20px;
+  font-weight: 500;
   color: var(--signal-amber);
   text-shadow: 0 0 8px var(--signal-amber-glow);
   letter-spacing: 2px;
