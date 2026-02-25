@@ -21,7 +21,58 @@
 
   <!-- Album art — large, nearly panel-width -->
   <div style="position: relative; z-index: 1; flex: 1; display: flex; align-items: center; justify-content: center; padding: 12px; min-height: 0;">
-    @if (_hasValidAlbumArt)
+    @if (_showFingerprintDetail)
+    {
+      <!-- Fingerprint detail panel — replaces album art area when badge is tapped -->
+      <div style="width: 100%; height: 100%; display: flex; flex-direction: column; background: rgba(0,0,0,0.75); backdrop-filter: blur(8px); border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1);">
+        <!-- Header with rates -->
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.3);">
+          <div style="font-family: var(--font-mono); font-size: 12px; color: var(--text-medium);">
+            Fingerprints: @(_fpStatus?.FingerprintsPerMinute.ToString("F1") ?? "0.0")/min
+            &nbsp;&bull;&nbsp;
+            Lookups: @(_fpStatus?.MetadataCallsPerMinute.ToString("F1") ?? "0.0")/min
+          </div>
+          <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" Color="Color.Default"
+                         OnClick="ToggleFingerprintDetail" Style="padding: 2px;" />
+        </div>
+        <!-- Event log table -->
+        <div style="flex: 1; overflow-y: auto; padding: 0;">
+          <table style="width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 11px;">
+            <thead>
+              <tr style="color: var(--text-low); border-bottom: 1px solid rgba(255,255,255,0.08);">
+                <th style="text-align: left; padding: 6px 8px; font-weight: 500;">Source</th>
+                <th style="text-align: center; padding: 6px 4px; font-weight: 500;">Miss</th>
+                <th style="text-align: center; padding: 6px 4px; font-weight: 500;">Hit</th>
+                <th style="text-align: center; padding: 6px 4px; font-weight: 500;">Conf</th>
+                <th style="text-align: left; padding: 6px 8px; font-weight: 500;">Track</th>
+              </tr>
+            </thead>
+            <tbody>
+              @if (_fpStatus?.RecentEvents != null)
+              {
+                @foreach (var evt in _fpStatus.RecentEvents.AsEnumerable().Reverse())
+                {
+                  <tr style="border-bottom: 1px solid rgba(255,255,255,0.04); height: 22px; color: @(GetEventRowColor(evt));">
+                    <td style="padding: 3px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 80px;">@evt.AudioSource</td>
+                    <td style="text-align: center; padding: 3px 4px;">@evt.NoMatchCount</td>
+                    <td style="text-align: center; padding: 3px 4px;">@evt.MatchCount</td>
+                    <td style="text-align: center; padding: 3px 4px;">@(evt.LastConfidence.HasValue ? $"{evt.LastConfidence.Value:P0}" : "--")</td>
+                    <td style="padding: 3px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px;">@(FormatEventTrack(evt))</td>
+                  </tr>
+                }
+              }
+              else
+              {
+                <tr>
+                  <td colspan="5" style="padding: 16px; text-align: center; color: var(--text-low);">No fingerprint events yet</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    }
+    else if (_hasValidAlbumArt)
     {
       <div style="position: relative; width: 100%; max-width: 340px; aspect-ratio: 1; border-radius: 8px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.5);">
         <img src="@_albumArtUrl" alt="Album Art" referrerpolicy="no-referrer"
@@ -55,6 +106,17 @@
         </div>
       </div>
     }
+
+    <!-- Fingerprint status badge — top-left of album art area -->
+    @if (_fpStatus?.IsEnabled == true)
+    {
+      <div @onclick="ToggleFingerprintDetail"
+           style="position: absolute; top: 16px; left: 16px; cursor: pointer; display: flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 12px; font-size: 11px; font-family: var(--font-mono); @GetFingerprintBadgeStyle()" title="@GetFingerprintBadgeTooltip()">
+        <span style="width: 7px; height: 7px; border-radius: 50%; @GetFingerprintDotStyle()"></span>
+        <span>@GetFingerprintBadgeText()</span>
+      </div>
+    }
+
     @if (!string.IsNullOrEmpty(_source))
     {
       <div style="position: absolute; top: 16px; right: 16px;">
@@ -150,6 +212,10 @@
   private double _totalDurationSeconds;
   private System.Threading.Timer? _timer;
 
+  // Fingerprint status state
+  private FingerprintStatusDto? _fpStatus;
+  private bool _showFingerprintDetail;
+
   private bool _hasValidAlbumArt =>
     !_albumArtFailed
     && !string.IsNullOrEmpty(_albumArtUrl)
@@ -164,8 +230,10 @@
       HubService.PlaybackStateChanged += OnPlaybackStateChanged;
       HubService.NowPlayingChanged += OnNowPlayingChanged;
       HubService.VolumeChanged += OnVolumeChangedEvent;
+      HubService.FingerprintStatusChanged += OnFingerprintStatusChanged;
 
       await RefreshPlaybackStateAsync();
+      await RefreshFingerprintStatusAsync();
 
       _timer = new System.Threading.Timer(TimerCallback, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
     }
@@ -205,6 +273,24 @@
   {
     await RefreshPlaybackStateAsync();
     await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task OnFingerprintStatusChanged()
+  {
+    await RefreshFingerprintStatusAsync();
+    await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task RefreshFingerprintStatusAsync()
+  {
+    try
+    {
+      _fpStatus = await AudioApi.GetFingerprintStatusAsync();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "Error refreshing fingerprint status");
+    }
   }
 
   private async Task RefreshPlaybackStateAsync()
@@ -260,7 +346,7 @@
         _album = nowPlaying.Album;
         if (_albumArtUrl != nowPlaying.AlbumArtUrl)
         {
-          Logger.LogDebug("Album art URL changed: {OldUrl} → {NewUrl}", _albumArtUrl, nowPlaying.AlbumArtUrl);
+          Logger.LogDebug("Album art URL changed: {OldUrl} -> {NewUrl}", _albumArtUrl, nowPlaying.AlbumArtUrl);
           _albumArtFailed = false;
         }
         _albumArtUrl = nowPlaying.AlbumArtUrl;
@@ -272,6 +358,102 @@
       Logger.LogError(ex, "Error refreshing playback state in NowPlayingPanel");
     }
   }
+
+  // --- Fingerprint badge helpers ---
+
+  private void ToggleFingerprintDetail()
+  {
+    _showFingerprintDetail = !_showFingerprintDetail;
+    if (_showFingerprintDetail)
+    {
+      _ = RefreshFingerprintStatusAsync();
+    }
+  }
+
+  private string GetFingerprintBadgeText()
+  {
+    var phase = _fpStatus?.Phase ?? "Idle";
+    return phase switch
+    {
+      "Capturing" => "Listening",
+      "Fingerprinting" => "Analyzing",
+      "Querying" => "Searching",
+      "Matched" => _fpStatus?.RecentEvents?.LastOrDefault()?.LastConfidence is double c ? $"{c:P0}" : "Match",
+      "NoMatch" => "No ID",
+      "Error" => "Error",
+      _ => "ID"
+    };
+  }
+
+  private string GetFingerprintBadgeStyle()
+  {
+    var phase = _fpStatus?.Phase ?? "Idle";
+    return phase switch
+    {
+      "Capturing" or "Fingerprinting" or "Querying" =>
+        "background: rgba(0,188,212,0.2); border: 1px solid rgba(0,188,212,0.5); color: #00bcd4;",
+      "Matched" =>
+        "background: rgba(76,175,80,0.2); border: 1px solid rgba(76,175,80,0.5); color: #4caf50;",
+      "Error" =>
+        "background: rgba(244,67,54,0.2); border: 1px solid rgba(244,67,54,0.5); color: #f44336;",
+      _ => // Idle, NoMatch
+        "background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: var(--text-low);"
+    };
+  }
+
+  private string GetFingerprintDotStyle()
+  {
+    var phase = _fpStatus?.Phase ?? "Idle";
+    return phase switch
+    {
+      "Capturing" or "Fingerprinting" or "Querying" =>
+        "background: #00bcd4; animation: fpPulse 1.5s ease-in-out infinite;",
+      "Matched" =>
+        "background: #4caf50;",
+      "Error" =>
+        "background: #f44336;",
+      _ =>
+        "background: rgba(255,255,255,0.3);"
+    };
+  }
+
+  private string GetFingerprintBadgeTooltip()
+  {
+    var phase = _fpStatus?.Phase ?? "Idle";
+    return phase switch
+    {
+      "Capturing" => "Capturing audio for fingerprinting",
+      "Fingerprinting" => "Generating audio fingerprint",
+      "Querying" => "Querying AcoustID database",
+      "Matched" => "Track identified",
+      "NoMatch" => "Track not identified",
+      "Error" => $"Fingerprint error: {_fpStatus?.LastError ?? "unknown"}",
+      _ => "Audio fingerprinting idle"
+    };
+  }
+
+  private static string GetEventRowColor(FingerprintEventDto evt)
+  {
+    return evt.Phase switch
+    {
+      "Matched" => "rgba(76,175,80,0.9)",
+      "Error" => "rgba(244,67,54,0.8)",
+      "NoMatch" => "rgba(255,255,255,0.4)",
+      "Capturing" or "Fingerprinting" or "Querying" => "rgba(0,188,212,0.8)",
+      _ => "rgba(255,255,255,0.5)"
+    };
+  }
+
+  private static string FormatEventTrack(FingerprintEventDto evt)
+  {
+    if (string.IsNullOrEmpty(evt.Title)) return "--";
+    var parts = new List<string> { evt.Title };
+    if (!string.IsNullOrEmpty(evt.Artist)) parts.Add(evt.Artist);
+    if (!string.IsNullOrEmpty(evt.Album)) parts.Add(evt.Album);
+    return string.Join(" / ", parts);
+  }
+
+  // --- Existing handlers ---
 
   private async Task HandleSeekAsync(double newPercent)
   {
@@ -416,6 +598,7 @@
     HubService.PlaybackStateChanged -= OnPlaybackStateChanged;
     HubService.NowPlayingChanged -= OnNowPlayingChanged;
     HubService.VolumeChanged -= OnVolumeChangedEvent;
+    HubService.FingerprintStatusChanged -= OnFingerprintStatusChanged;
     _timer?.Dispose();
     await Task.CompletedTask;
   }

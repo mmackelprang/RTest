@@ -12,6 +12,7 @@ namespace Radio.Infrastructure.Audio.Fingerprinting;
 
 /// <summary>
 /// Background service that periodically identifies audio from active sources.
+/// Exposes real-time status via <see cref="GetStatus"/> and <see cref="StatusChanged"/>.
 /// </summary>
 public sealed class BackgroundIdentificationService : BackgroundService
 {
@@ -29,6 +30,22 @@ public sealed class BackgroundIdentificationService : BackgroundService
   // On-demand identification trigger — cancels the current delay to identify immediately
   private CancellationTokenSource? _delayCts;
 
+  // --- Fingerprint status tracking ---
+  private readonly object _statusLock = new();
+  private FingerprintPhase _currentPhase = FingerprintPhase.Idle;
+  private string? _lastError;
+  private string? _currentSourceName;
+
+  // Event log — circular buffer of recent events, capped at MaxRecentEvents
+  private const int MaxRecentEvents = 20;
+  private readonly List<FingerprintEventRecord> _recentEvents = new(MaxRecentEvents + 1);
+  private FingerprintEventRecord? _currentEvent;
+
+  // Rate tracking — timestamps within the rolling window used to compute per-minute rates
+  private static readonly TimeSpan RateWindow = TimeSpan.FromMinutes(5);
+  private readonly List<DateTime> _fingerprintTimestamps = new();
+  private readonly List<DateTime> _metadataCallTimestamps = new();
+
   /// <summary>
   /// Event raised when a track is identified.
   /// </summary>
@@ -38,6 +55,11 @@ public sealed class BackgroundIdentificationService : BackgroundService
   /// Event raised when a song change is detected (different track identified than previous).
   /// </summary>
   public event EventHandler<SongChangedEventArgs>? SongChanged;
+
+  /// <summary>
+  /// Event raised when the fingerprint status changes (phase, event log, rates).
+  /// </summary>
+  public event EventHandler<FingerprintStatusSnapshot>? StatusChanged;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="BackgroundIdentificationService"/> class.
@@ -53,6 +75,26 @@ public sealed class BackgroundIdentificationService : BackgroundService
     _logger = logger;
     _serviceProvider = serviceProvider;
     _options = options.Value;
+  }
+
+  /// <summary>
+  /// Returns the current fingerprint identification status snapshot.
+  /// </summary>
+  public FingerprintStatusSnapshot GetStatus()
+  {
+    lock (_statusLock)
+    {
+      PruneRateTimestamps();
+      return new FingerprintStatusSnapshot
+      {
+        Phase = _currentPhase,
+        IsEnabled = _options.Enabled,
+        FingerprintsPerMinute = ComputeRate(_fingerprintTimestamps),
+        MetadataCallsPerMinute = ComputeRate(_metadataCallTimestamps),
+        RecentEvents = _recentEvents.ToList().AsReadOnly(),
+        LastError = _lastError
+      };
+    }
   }
 
   /// <summary>
@@ -105,10 +147,12 @@ public sealed class BackgroundIdentificationService : BackgroundService
       catch (Exception ex)
       {
         _logger.LogError(ex, "Error during audio identification");
+        UpdatePhase(FingerprintPhase.Error, ex.Message);
       }
 
       try
       {
+        UpdatePhase(FingerprintPhase.Idle);
         using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         _delayCts = delayCts;
         await Task.Delay(
@@ -164,6 +208,11 @@ public sealed class BackgroundIdentificationService : BackgroundService
 
     _logger.LogDebug("Audio source active: {SourceType} - {SourceName}", audioTap.SourceType, audioTap.SourceName);
 
+    // Start or continue an event record for this audio segment
+    var sourceName = audioTap.SourceName ?? audioTap.SourceType.ToString();
+    EnsureCurrentEvent(sourceName);
+    UpdatePhase(FingerprintPhase.Capturing);
+
     FingerprintData fingerprint;
 
     // For file-based sources, fingerprint the actual file to get correct track duration.
@@ -172,6 +221,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
     if (!string.IsNullOrEmpty(sourceFilePath))
     {
       _logger.LogDebug("File source detected, fingerprinting file directly: {FilePath}", sourceFilePath);
+      UpdatePhase(FingerprintPhase.Fingerprinting);
       var fingerprintStartTime = DateTime.UtcNow;
       fingerprint = await fingerprintService.GenerateFingerprintFromFileAsync(sourceFilePath, ct);
       var fingerprintElapsed = (DateTime.UtcNow - fingerprintStartTime).TotalMilliseconds;
@@ -179,9 +229,11 @@ public sealed class BackgroundIdentificationService : BackgroundService
       if (string.IsNullOrEmpty(fingerprint.ChromaprintHash))
       {
         _logger.LogWarning("Failed to generate fingerprint from file: {FilePath}", sourceFilePath);
+        UpdatePhase(FingerprintPhase.Error, "Failed to generate fingerprint from file");
         return;
       }
 
+      RecordFingerprintGenerated();
       _logger.LogDebug("Generated fingerprint {Id} from file (duration={Duration}s) in {Elapsed}ms",
         fingerprint.Id, fingerprint.DurationSeconds, fingerprintElapsed);
     }
@@ -199,15 +251,18 @@ public sealed class BackgroundIdentificationService : BackgroundService
       if (samples == null)
       {
         _logger.LogWarning("No audio samples captured after {Elapsed}ms", captureElapsed);
+        UpdatePhase(FingerprintPhase.Error, "No audio samples captured");
         return;
       }
 
       _logger.LogDebug("Captured {SampleCount} audio samples in {Elapsed}ms", samples.Samples.Length, captureElapsed);
 
+      UpdatePhase(FingerprintPhase.Fingerprinting);
       var fingerprintStartTime = DateTime.UtcNow;
       fingerprint = await fingerprintService.GenerateFingerprintAsync(samples, ct);
       var fingerprintElapsed = (DateTime.UtcNow - fingerprintStartTime).TotalMilliseconds;
 
+      RecordFingerprintGenerated();
       _logger.LogDebug("Generated fingerprint {Id} for {Duration}s of audio in {Elapsed}ms",
         fingerprint.Id, fingerprint.DurationSeconds, fingerprintElapsed);
 
@@ -220,9 +275,11 @@ public sealed class BackgroundIdentificationService : BackgroundService
     // lookup fails. AcoustID uses duration to narrow the search space, and for live
     // captures (vinyl, radio) the capture duration (e.g., 30s) doesn't match the actual
     // track length in the database (e.g., 220s). Try common song durations as fallbacks.
+    UpdatePhase(FingerprintPhase.Querying);
     var lookupStartTime = DateTime.UtcNow;
     _logger.LogDebug("Looking up fingerprint via {LookupService}", lookupService.GetType().Name);
 
+    RecordMetadataCall();
     var result = await lookupService.LookupAsync(fingerprint, ct);
     var lookupElapsed = (DateTime.UtcNow - lookupStartTime).TotalMilliseconds;
 
@@ -247,6 +304,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
         };
 
         _logger.LogInformation("Retrying AcoustID with duration={Duration}s", tryDuration);
+        RecordMetadataCall();
         var fallbackResult = await lookupService.LookupAsync(fallbackFingerprint, ct);
 
         if (fallbackResult?.IsMatch == true)
@@ -262,10 +320,14 @@ public sealed class BackgroundIdentificationService : BackgroundService
       lookupElapsed = (DateTime.UtcNow - lookupStartTime).TotalMilliseconds;
     }
 
-    // Check duplicate suppression
+    // Update event record with result
     if (result?.IsMatch == true && result.Metadata != null)
     {
       var trackKey = $"{result.Metadata.Title}|{result.Metadata.Artist}";
+      UpdateCurrentEventMatch(result.Metadata, result.Confidence);
+      UpdatePhase(FingerprintPhase.Matched);
+
+      // Check duplicate suppression
       if (IsDuplicateIdentification(trackKey))
       {
         _logger.LogDebug("Suppressing duplicate identification: {Title} by {Artist}",
@@ -278,12 +340,17 @@ public sealed class BackgroundIdentificationService : BackgroundService
       // Song change detection: compare with last identification
       DetectSongChange(trackKey, result.Metadata, result.Confidence);
     }
+    else
+    {
+      UpdateCurrentEventNoMatch();
+      UpdatePhase(FingerprintPhase.NoMatch);
+    }
 
     // Raise event for UI updates and play history updates
     if (result?.IsMatch == true && result.Metadata != null)
     {
       _logger.LogInformation(
-        "✓ Identified track: '{Title}' by '{Artist}' (confidence: {Confidence:P0}, source: {Source}, coverArt: {CoverArtUrl})",
+        "Identified track: '{Title}' by '{Artist}' (confidence: {Confidence:P0}, source: {Source}, coverArt: {CoverArtUrl})",
         result.Metadata.Title, result.Metadata.Artist, result.Confidence,
         result.Source, result.Metadata.CoverArtUrl ?? "(none)");
 
@@ -293,7 +360,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
     {
       _logger.LogDebug("Track not identified via fingerprinting");
     }
-    
+
     var totalElapsed = (DateTime.UtcNow - cycleStartTime).TotalMilliseconds;
     _logger.LogDebug("Identification cycle completed in {TotalElapsed}ms (lookup: {Lookup}ms)",
       totalElapsed, lookupElapsed);
@@ -309,6 +376,135 @@ public sealed class BackgroundIdentificationService : BackgroundService
     _lastSongChangeAt = DateTime.MinValue;
     _logger.LogDebug("Song change detection state reset");
   }
+
+  // --- Status tracking helpers ---
+
+  private void UpdatePhase(FingerprintPhase phase, string? error = null)
+  {
+    lock (_statusLock)
+    {
+      _currentPhase = phase;
+      if (error != null)
+        _lastError = error;
+      if (_currentEvent != null)
+      {
+        _currentEvent.Phase = phase;
+        _currentEvent.Timestamp = DateTime.UtcNow;
+      }
+    }
+    FireStatusChanged();
+  }
+
+  /// <summary>
+  /// Ensures a current event record exists for the given source.
+  /// Only starts a new record when the source changes or after an error;
+  /// same-source match/no-match results aggregate into the existing record.
+  /// </summary>
+  internal void EnsureCurrentEvent(string sourceName)
+  {
+    lock (_statusLock)
+    {
+      // Start a new record only if: no current event, source changed, or error (terminal)
+      if (_currentEvent == null || _currentSourceName != sourceName ||
+          _currentEvent.Phase == FingerprintPhase.Error)
+      {
+        _currentEvent = new FingerprintEventRecord { AudioSource = sourceName };
+        _currentSourceName = sourceName;
+        _recentEvents.Add(_currentEvent);
+        if (_recentEvents.Count > MaxRecentEvents)
+          _recentEvents.RemoveAt(0);
+      }
+    }
+  }
+
+  /// <summary>
+  /// Updates the current event record with a successful match.
+  /// If the same song matches again, aggregates (increments MatchCount, updates confidence).
+  /// If a different song matches, starts a new event record.
+  /// </summary>
+  internal void UpdateCurrentEventMatch(TrackMetadata metadata, double confidence)
+  {
+    lock (_statusLock)
+    {
+      if (_currentEvent == null) return;
+
+      // Different song identified → start a new record
+      if (_currentEvent.Title != null && _currentEvent.Title != metadata.Title)
+      {
+        _currentEvent = new FingerprintEventRecord { AudioSource = _currentSourceName ?? "Unknown" };
+        _recentEvents.Add(_currentEvent);
+        if (_recentEvents.Count > MaxRecentEvents)
+          _recentEvents.RemoveAt(0);
+      }
+
+      _currentEvent.MatchCount++;
+      _currentEvent.LastConfidence = confidence;
+      _currentEvent.Title = metadata.Title;
+      _currentEvent.Artist = metadata.Artist;
+      _currentEvent.Album = metadata.Album;
+      _currentEvent.FirstMatchAt ??= DateTime.UtcNow;
+      _currentEvent.Timestamp = DateTime.UtcNow;
+    }
+  }
+
+  /// <summary>
+  /// Updates the current event record with a no-match result.
+  /// Aggregates into the existing record (increments NoMatchCount).
+  /// </summary>
+  internal void UpdateCurrentEventNoMatch()
+  {
+    lock (_statusLock)
+    {
+      if (_currentEvent == null) return;
+      _currentEvent.NoMatchCount++;
+      _currentEvent.Timestamp = DateTime.UtcNow;
+    }
+  }
+
+  private void RecordFingerprintGenerated()
+  {
+    lock (_statusLock)
+    {
+      _fingerprintTimestamps.Add(DateTime.UtcNow);
+    }
+  }
+
+  private void RecordMetadataCall()
+  {
+    lock (_statusLock)
+    {
+      _metadataCallTimestamps.Add(DateTime.UtcNow);
+    }
+  }
+
+  private void PruneRateTimestamps()
+  {
+    var cutoff = DateTime.UtcNow - RateWindow;
+    _fingerprintTimestamps.RemoveAll(t => t < cutoff);
+    _metadataCallTimestamps.RemoveAll(t => t < cutoff);
+  }
+
+  private static double ComputeRate(List<DateTime> timestamps)
+  {
+    if (timestamps.Count == 0) return 0;
+    var oldest = timestamps[0];
+    var elapsed = (DateTime.UtcNow - oldest).TotalMinutes;
+    return elapsed > 0 ? timestamps.Count / elapsed : timestamps.Count;
+  }
+
+  private void FireStatusChanged()
+  {
+    try
+    {
+      StatusChanged?.Invoke(this, GetStatus());
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Error firing StatusChanged event");
+    }
+  }
+
+  // --- Existing helpers ---
 
   private void DetectSongChange(string trackKey, TrackMetadata newTrack, double confidence)
   {
@@ -347,7 +543,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
     _lastSongChangeAt = now;
 
     _logger.LogInformation(
-      "♫ Song change detected: '{OldTitle}' by '{OldArtist}' → '{NewTitle}' by '{NewArtist}' (confidence: {Confidence:P0})",
+      "Song change detected: '{OldTitle}' by '{OldArtist}' -> '{NewTitle}' by '{NewArtist}' (confidence: {Confidence:P0})",
       previousTrack.Title, previousTrack.Artist,
       newTrack.Title, newTrack.Artist, confidence);
 

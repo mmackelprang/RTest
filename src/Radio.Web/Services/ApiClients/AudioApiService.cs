@@ -193,12 +193,25 @@ public class AudioApiService
       {
         _logger.LogWarning("Now playing returned null");
       }
-      
+
       return result;
     }
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to get now playing info");
+      return null;
+    }
+  }
+
+  public async Task<FingerprintStatusDto?> GetFingerprintStatusAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      return await _httpClient.GetFromJsonAsync<FingerprintStatusDto>("/api/audio/fingerprint/status", cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to get fingerprint status");
       return null;
     }
   }

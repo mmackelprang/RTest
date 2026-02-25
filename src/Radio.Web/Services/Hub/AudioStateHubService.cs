@@ -24,6 +24,7 @@ public class AudioStateHubService : IAsyncDisposable
   public event Func<Task>? RadioStateChanged;
   public event Func<Task>? VolumeChanged;
   public event Func<Task>? SourceChanged;
+  public event Func<Task>? FingerprintStatusChanged;
 
   // Throttle disconnect log messages to avoid spam when API is down
   private static DateTime _lastDisconnectLogUtc = DateTime.MinValue;
@@ -108,6 +109,15 @@ public class AudioStateHubService : IAsyncDisposable
         _logger.LogDebug("Received SourceChanged event");
         if (SourceChanged != null)
           await SourceChanged.Invoke();
+      });
+
+      // Server sends FingerprintStatusChanged with a FingerprintStatusDto payload —
+      // accept and discard it so SignalR dispatches the message.
+      _hubConnection.On<object>("FingerprintStatusChanged", async (_) =>
+      {
+        _logger.LogDebug("Received FingerprintStatusChanged event");
+        if (FingerprintStatusChanged != null)
+          await FingerprintStatusChanged.Invoke();
       });
 
       // Connection lifecycle events — throttled to avoid log spam when API is down
