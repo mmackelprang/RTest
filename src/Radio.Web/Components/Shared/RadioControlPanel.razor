@@ -40,7 +40,6 @@
         <div class="display-frequency display-frequency-ghost"
              data-ghost="888.88 MHz"
              @onclick="OpenFrequencyDialog"
-             style="cursor: pointer; font-size: 48px;"
              title="Click to set frequency">
           @FormatFrequency(_radioState.Frequency, _radioState.Band)
         </div>
@@ -211,15 +210,31 @@
 }
 
 <style>
-  /* ═══ Radio Control Panel — Tuner Module ═══ */
+  /* ═══════════════════════════════════════════════════════════ */
+  /*  Radio Control Panel — Command Surface Console Aesthetic   */
+  /*  Professional broadcast equipment: recessed wells, beveled */
+  /*  buttons, LED indicators, precision hardware feel.         */
+  /* ═══════════════════════════════════════════════════════════ */
 
   .rcp-root {
     height: 100%;
     display: flex;
     overflow: hidden;
-    background: var(--surface-inset, #0A0A0C);
+    background: #080809;
     border: 1px solid var(--surface-separator);
     border-radius: 4px;
+    position: relative;
+  }
+
+  /* Subtle brushed-metal noise texture */
+  .rcp-root::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.035'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+    mix-blend-mode: overlay;
   }
 
   /* ── Tuner Section ── */
@@ -230,131 +245,217 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 12px 16px;
+    padding: 16px 24px 12px;
     gap: 10px;
     position: relative;
+    z-index: 1;
     min-width: 0;
+  }
+
+  /* Amber accent hairline at top edge — broadcast channel strip */
+  .rcp-tuner::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 24px;
+    right: 24px;
+    height: 2px;
+    background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(240, 168, 48, 0.25) 15%,
+      rgba(240, 168, 48, 0.6) 40%,
+      var(--signal-amber) 50%,
+      rgba(240, 168, 48, 0.6) 60%,
+      rgba(240, 168, 48, 0.25) 85%,
+      transparent 100%
+    );
+    box-shadow: 0 0 12px rgba(240, 168, 48, 0.15), 0 2px 8px rgba(240, 168, 48, 0.08);
   }
 
   .rcp-module-label {
     position: absolute;
-    top: 8px;
-    left: 12px;
+    top: 10px;
+    left: 18px;
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: 9px;
     font-weight: 700;
-    letter-spacing: 0.15em;
+    letter-spacing: 0.22em;
     color: var(--text-low);
     text-transform: uppercase;
-    opacity: 0.6;
+    opacity: 0.45;
   }
 
-  /* ── Band Selector ── */
+  /* ── Band Selector — Console Push-Buttons ── */
 
   .rcp-band-group {
     display: flex;
-    gap: 3px;
+    gap: 2px;
     padding: 3px;
-    background: var(--surface-base);
-    border-radius: 6px;
-    border: 1px solid var(--surface-separator);
+    background: #0a0a0c;
+    border-radius: 5px;
+    border: 1px solid #1a1a1d;
+    box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.6);
   }
 
   .rcp-band-btn {
-    padding: 0 12px;
-    height: 30px;
-    border-radius: 4px;
+    padding: 0 14px;
+    height: 32px;
+    border-radius: 3px;
     font-family: var(--font-mono);
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.05em;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
     color: var(--text-low);
+    background: linear-gradient(180deg, #161618 0%, #111113 100%);
+    border: 1px solid #1e1e21;
+    border-bottom: 2px solid #0a0a0c;
     display: flex;
     align-items: center;
     cursor: pointer;
-    transition: all 120ms ease;
+    transition: all 80ms ease;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   }
 
   .rcp-band-btn:hover {
     color: var(--text-medium);
-    background: rgba(255, 255, 255, 0.03);
+    background: linear-gradient(180deg, #1c1c1f 0%, #141416 100%);
   }
 
   .rcp-band-btn:active {
-    background: rgba(255, 255, 255, 0.06);
+    transform: translateY(1px);
+    border-bottom-width: 1px;
+    box-shadow: none;
   }
 
   .rcp-band-active {
     color: var(--signal-amber) !important;
-    background: rgba(240, 168, 48, 0.10) !important;
-    box-shadow: inset 0 0 0 1px rgba(240, 168, 48, 0.25);
+    background: linear-gradient(180deg, #1a1508 0%, #14100a 100%) !important;
+    border-color: rgba(240, 168, 48, 0.25) !important;
+    border-bottom-color: rgba(240, 168, 48, 0.15) !important;
+    box-shadow:
+      0 0 10px rgba(240, 168, 48, 0.12),
+      inset 0 1px 0 rgba(240, 168, 48, 0.08) !important;
+    text-shadow: 0 0 8px rgba(240, 168, 48, 0.4);
   }
 
-  /* ── Frequency Well ── */
+  /* ── Frequency Display Well — Recessed LCD Panel ── */
 
   .rcp-freq-well {
     text-align: center;
-    padding: 8px 24px;
-    background: var(--surface-base);
+    padding: 14px 32px 10px;
+    background: #040406;
     border-radius: 6px;
-    border: 1px solid var(--surface-separator);
+    border: 1px solid #0e0e10;
+    box-shadow:
+      inset 0 2px 10px rgba(0, 0, 0, 0.9),
+      inset 0 -1px 3px rgba(0, 0, 0, 0.4),
+      0 1px 0 rgba(255, 255, 255, 0.02);
     position: relative;
+    overflow: hidden;
+    width: 100%;
+    max-width: 420px;
+  }
+
+  /* LCD scan-line texture overlay */
+  .rcp-freq-well::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent 0px,
+      transparent 3px,
+      rgba(0, 0, 0, 0.1) 3px,
+      rgba(0, 0, 0, 0.1) 4px
+    );
+    pointer-events: none;
+    z-index: 2;
+    opacity: 0.6;
+  }
+
+  /* Frequency display sizing override for the well context */
+  .rcp-freq-well .display-frequency {
+    font-size: 54px;
+    position: relative;
+    z-index: 1;
+    cursor: pointer;
+  }
+
+  /* Slightly brighter ghost segments for VFD realism */
+  .rcp-freq-well .display-frequency-ghost::before {
+    opacity: 0.08 !important;
   }
 
   .rcp-freq-indicators {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-top: 4px;
+    margin-top: 6px;
+    position: relative;
+    z-index: 1;
   }
 
   .rcp-step-label {
     font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--text-low);
-    letter-spacing: 0.1em;
-  }
-
-  .rcp-stereo-indicator {
-    font-family: var(--font-mono);
     font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.15em;
     color: var(--text-low);
-    padding: 1px 8px;
-    border: 1px solid var(--surface-separator);
-    border-radius: 3px;
-    transition: all 300ms ease;
-    opacity: 0.4;
-  }
-
-  .rcp-stereo-on {
-    color: var(--accent-primary);
-    border-color: var(--accent-primary);
-    opacity: 1;
-    text-shadow: 0 0 8px var(--accent-primary);
-    box-shadow: 0 0 6px rgba(92, 212, 232, 0.2);
+    letter-spacing: 0.12em;
+    padding: 2px 8px;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 2px;
+    border: 1px solid rgba(255, 255, 255, 0.04);
   }
 
   .rcp-step-clickable {
     cursor: pointer;
-    transition: color 120ms ease;
+    transition: all 120ms ease;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
   }
 
   .rcp-step-clickable:hover {
     color: var(--signal-amber);
-    text-decoration: underline;
-    text-underline-offset: 2px;
+    border-color: rgba(240, 168, 48, 0.2);
+    background: rgba(240, 168, 48, 0.04);
   }
 
-  /* ── Signal Meter ── */
+  .rcp-stereo-indicator {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    color: var(--text-low);
+    padding: 2px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 2px;
+    transition: all 300ms ease;
+    opacity: 0.3;
+  }
+
+  .rcp-stereo-on {
+    color: var(--accent-primary);
+    border-color: rgba(92, 212, 232, 0.4);
+    opacity: 1;
+    background: rgba(92, 212, 232, 0.06);
+    text-shadow: 0 0 8px var(--accent-primary);
+    box-shadow:
+      0 0 8px rgba(92, 212, 232, 0.15),
+      inset 0 0 4px rgba(92, 212, 232, 0.05);
+    animation: rcp-stereo-pulse 2s ease-in-out infinite;
+  }
+
+  @@keyframes rcp-stereo-pulse {
+    0%, 100% { box-shadow: 0 0 8px rgba(92, 212, 232, 0.15); }
+    50% { box-shadow: 0 0 14px rgba(92, 212, 232, 0.25); }
+  }
+
+  /* ── Signal Meter — Recessed LED Bar ── */
 
   .rcp-meter {
-    width: 320px;
+    width: 100%;
+    max-width: 420px;
   }
 
   .rcp-meter-header {
@@ -363,68 +464,89 @@
     align-items: baseline;
     margin-bottom: 4px;
     font-family: var(--font-mono);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.1em;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
     color: var(--text-low);
     text-transform: uppercase;
+    opacity: 0.7;
   }
 
   .rcp-meter-value {
     color: var(--text-medium);
     font-size: 11px;
+    font-weight: 600;
     letter-spacing: 0.05em;
+    opacity: 1;
   }
 
   .rcp-meter-bar {
     display: flex;
     gap: 2px;
-    height: 10px;
+    height: 14px;
+    padding: 3px 4px;
+    background: #040406;
+    border-radius: 3px;
+    border: 1px solid #0e0e10;
+    box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.7);
   }
 
   .rcp-meter-seg {
     flex: 1;
     border-radius: 1px;
-    transition: all 80ms ease;
+    transition: all 60ms ease;
   }
 
   .seg-off {
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(255, 255, 255, 0.025);
   }
 
   .seg-green {
     background: var(--signal-green);
-    box-shadow: 0 0 4px rgba(74, 222, 128, 0.3);
+    box-shadow:
+      0 0 4px rgba(74, 222, 128, 0.4),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.15);
   }
 
   .seg-amber {
     background: var(--signal-amber);
-    box-shadow: 0 0 4px var(--signal-amber-glow);
+    box-shadow:
+      0 0 4px rgba(240, 168, 48, 0.4),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.15);
   }
 
   .seg-red {
     background: var(--signal-red);
-    box-shadow: 0 0 4px rgba(248, 113, 113, 0.3);
+    box-shadow:
+      0 0 6px rgba(248, 113, 113, 0.5),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.15);
   }
 
   /* ── Scanning Indicator ── */
 
   .rcp-scanning {
     font-family: var(--font-mono);
-    font-size: 13px;
-    font-weight: 600;
+    font-size: 12px;
+    font-weight: 700;
     color: var(--signal-amber);
-    letter-spacing: 0.15em;
-    text-shadow: 0 0 8px var(--signal-amber-glow);
+    letter-spacing: 0.2em;
+    text-shadow: 0 0 12px rgba(240, 168, 48, 0.5);
+    padding: 4px 16px;
+    border: 1px solid rgba(240, 168, 48, 0.2);
+    border-radius: 3px;
+    background: rgba(240, 168, 48, 0.04);
     animation: rcp-blink 0.8s infinite;
   }
 
   @@keyframes rcp-blink {
-    0%, 45% { opacity: 1; }
-    50%, 95% { opacity: 0.25; }
+    0%, 40% { opacity: 1; }
+    50%, 90% { opacity: 0.2; }
   }
 
-  /* ── Tuning Controls ── */
+  /* ── Tuning Controls — Hardware Buttons with Bevel ── */
 
   .rcp-controls {
     display: flex;
@@ -433,69 +555,86 @@
   }
 
   .rcp-tune-btn {
-    min-width: 48px !important;
-    min-height: 48px !important;
-    border: 1px solid var(--surface-separator) !important;
+    min-width: 52px !important;
+    min-height: 52px !important;
     border-radius: 6px !important;
     color: var(--signal-amber) !important;
-    background: var(--surface-base) !important;
-    transition: all 100ms ease !important;
+    background: linear-gradient(180deg, #161618 0%, #0f0f11 100%) !important;
+    border: 1px solid #222225 !important;
+    border-bottom: 2px solid #0a0a0c !important;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5) !important;
+    transition: all 80ms ease !important;
   }
 
   .rcp-tune-btn:hover {
-    border-color: rgba(240, 168, 48, 0.3) !important;
-    background: rgba(240, 168, 48, 0.06) !important;
+    border-color: rgba(240, 168, 48, 0.25) !important;
+    background: linear-gradient(180deg, #1a1a1d 0%, #131315 100%) !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 8px rgba(240, 168, 48, 0.08) !important;
   }
 
   .rcp-tune-btn:active {
-    background: rgba(240, 168, 48, 0.12) !important;
-    transform: scale(0.96);
+    transform: translateY(1px) !important;
+    border-bottom-width: 1px !important;
+    box-shadow: 0 0 2px rgba(0, 0, 0, 0.5) !important;
   }
 
   .rcp-scan-btn {
-    min-width: 88px !important;
-    min-height: 40px !important;
+    min-width: 100px !important;
+    min-height: 44px !important;
     font-family: var(--font-mono) !important;
-    font-size: 12px !important;
-    font-weight: 600 !important;
-    letter-spacing: 0.08em !important;
-    border-color: var(--surface-separator) !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.1em !important;
+    border-radius: 4px !important;
+    background: linear-gradient(180deg, #141416 0%, #0d0d0f 100%) !important;
+    border: 1px solid #222225 !important;
+    border-bottom: 2px solid #0a0a0c !important;
     color: var(--text-medium) !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4) !important;
+    transition: all 80ms ease !important;
   }
 
   .rcp-scan-btn:hover {
-    border-color: var(--signal-amber) !important;
+    border-color: rgba(240, 168, 48, 0.2) !important;
     color: var(--signal-amber) !important;
-    background: rgba(240, 168, 48, 0.06) !important;
+    background: linear-gradient(180deg, #181815 0%, #111110 100%) !important;
   }
 
-  /* ── SDR Controls ── */
+  .rcp-scan-btn:active {
+    transform: translateY(1px) !important;
+    border-bottom-width: 1px !important;
+    box-shadow: none !important;
+  }
+
+  /* ── SDR Controls — Recessed Control Strip ── */
 
   .rcp-sdr-controls {
     display: flex;
     gap: 12px;
     align-items: center;
-    width: 320px;
-    padding: 6px 12px;
-    background: var(--surface-base);
+    width: 100%;
+    max-width: 420px;
+    padding: 8px 14px;
+    background: #0a0a0c;
     border-radius: 4px;
-    border: 1px solid var(--surface-separator);
+    border: 1px solid #141416;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
   }
 
   .rcp-sdr-controls .mud-switch {
     align-items: center;
   }
 
-  /* ── Presets Memory Bank ── */
+  /* ═══ Presets Memory Bank ═══ */
 
   .rcp-presets {
-    width: 220px;
+    width: 210px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
     border-left: 1px solid var(--surface-separator);
-    background: var(--surface-raised);
+    background: #0b0b0d;
   }
 
   .rcp-presets-header {
@@ -505,17 +644,31 @@
     padding: 8px 12px;
     border-bottom: 1px solid var(--surface-separator);
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 9px;
     font-weight: 700;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.18em;
     color: var(--text-low);
     flex-shrink: 0;
+    background: linear-gradient(180deg, #0e0e10 0%, #0b0b0d 100%);
   }
 
   .rcp-presets-list {
     flex: 1;
     overflow-y: auto;
-    padding: 6px;
+    padding: 4px;
+    counter-reset: preset;
+  }
+
+  /* Thin custom scrollbar */
+  .rcp-presets-list::-webkit-scrollbar {
+    width: 3px;
+  }
+  .rcp-presets-list::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .rcp-presets-list::-webkit-scrollbar-thumb {
+    background: rgba(240, 168, 48, 0.15);
+    border-radius: 3px;
   }
 
   .rcp-presets-empty {
@@ -527,62 +680,84 @@
     height: 100%;
     color: var(--text-low);
     font-family: var(--font-mono);
-    font-size: 11px;
-    letter-spacing: 0.1em;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    opacity: 0.5;
   }
 
   .rcp-preset-item {
     position: relative;
-    padding: 8px 10px;
-    border-radius: 4px;
+    padding: 7px 10px;
+    border-radius: 3px;
     cursor: pointer;
     border: 1px solid transparent;
-    transition: all 100ms ease;
-    margin-bottom: 4px;
+    transition: all 80ms ease;
+    margin-bottom: 2px;
     -webkit-tap-highlight-color: transparent;
+    counter-increment: preset;
+  }
+
+  /* Memory slot number badge */
+  .rcp-preset-item::before {
+    content: counter(preset, decimal-leading-zero);
+    position: absolute;
+    right: 8px;
+    bottom: 5px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-low);
+    opacity: 0.2;
+    letter-spacing: 0.05em;
   }
 
   .rcp-preset-item:hover {
     background: rgba(240, 168, 48, 0.04);
-    border-color: rgba(240, 168, 48, 0.15);
+    border-color: rgba(240, 168, 48, 0.12);
+  }
+
+  .rcp-preset-item:hover::before {
+    opacity: 0;
   }
 
   .rcp-preset-item:active {
     background: rgba(240, 168, 48, 0.08);
+    border-color: rgba(240, 168, 48, 0.2);
   }
 
   .rcp-preset-name {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--text-high);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     padding-right: 24px;
+    line-height: 1.3;
   }
 
   .rcp-preset-freq {
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: 11px;
     color: var(--signal-amber);
-    margin-top: 2px;
-    text-shadow: 0 0 6px rgba(240, 168, 48, 0.15);
+    margin-top: 1px;
+    text-shadow: 0 0 6px rgba(240, 168, 48, 0.12);
+    line-height: 1.3;
   }
 
   .rcp-preset-band {
     color: var(--text-low);
-    font-size: 10px;
-    letter-spacing: 0.08em;
+    font-size: 9px;
+    letter-spacing: 0.1em;
     margin-left: 4px;
     text-shadow: none;
   }
 
   .rcp-preset-delete {
     position: absolute;
-    top: 6px;
-    right: 4px;
+    top: 4px;
+    right: 2px;
     opacity: 0;
-    transition: opacity 100ms ease;
+    transition: opacity 80ms ease;
   }
 
   .rcp-preset-item:hover .rcp-preset-delete {
