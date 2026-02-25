@@ -27,6 +27,17 @@ public class RadioPanelToggleService
   }
 
   /// <summary>
+  /// Shows the radio panel (e.g., when activating Radio source).
+  /// </summary>
+  public async Task ShowRadioPanelAsync()
+  {
+    if (IsRadioPanelVisible) return;
+    IsRadioPanelVisible = true;
+    if (RadioPanelToggled != null)
+      await RadioPanelToggled.Invoke();
+  }
+
+  /// <summary>
   /// Hides the radio panel (e.g., when switching away from Radio source).
   /// </summary>
   public async Task HideRadioPanelAsync()

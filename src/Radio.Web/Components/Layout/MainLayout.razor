@@ -579,13 +579,17 @@
       return;
     }
 
-    // Hide radio panel when switching away from Radio
-    if (!IsRadioSource(source.Type))
+    // Show radio panel when switching TO Radio, hide when switching away
+    if (IsRadioSource(source.Type))
+    {
+      await HandleSourceChangeAsync(source.Id);
+      await RadioPanelToggle.ShowRadioPanelAsync();
+    }
+    else
     {
       await RadioPanelToggle.HideRadioPanelAsync();
+      await HandleSourceChangeAsync(source.Id);
     }
-
-    await HandleSourceChangeAsync(source.Id);
   }
 
   private static bool IsRadioSource(string sourceType) =>
