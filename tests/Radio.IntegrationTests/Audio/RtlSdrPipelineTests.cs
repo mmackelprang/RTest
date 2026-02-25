@@ -226,7 +226,8 @@ public class RtlSdrPipelineTests : IDisposable
 
   // ── Test 5: Real RTL-SDR device detected ──
 
-  [Fact(Skip = "Requires physical RTL-SDR hardware")]
+  [SkippableFact]
+  [Trait("Category", "RequiresHardware")]
   public void RealDevice_IsDetected_WhenPluggedIn()
   {
     var devices = SdrDeviceFactory.EnumerateDevices();
@@ -238,20 +239,21 @@ public class RtlSdrPipelineTests : IDisposable
       _output.WriteLine($"  [{d.Type}] {d.Name} - {d.Manufacturer} (Serial: {d.Serial}, Available: {d.IsAvailable})");
     }
 
+    Skip.If(rtlDevices.Count == 0, "No RTL-SDR hardware detected — skipping");
     _output.WriteLine($"RTL-SDR devices: {rtlDevices.Count}");
-    Assert.True(rtlDevices.Count > 0, "No RTL-SDR devices detected. Is the dongle plugged in?");
   }
 
   // ── Test 6: Real device streams IQ samples ──
 
-  [Fact(Skip = "Requires physical RTL-SDR hardware")]
+  [SkippableFact]
+  [Trait("Category", "RequiresHardware")]
   public async Task RealDevice_StreamsIqSamples_WithinTimeout()
   {
     var devices = SdrDeviceFactory.EnumerateDevices();
     var rtlInfo = devices.FirstOrDefault(d => d.Type == DeviceType.RTLSDR && d.IsAvailable);
-    Assert.NotNull(rtlInfo);
+    Skip.If(rtlInfo == null, "No available RTL-SDR hardware detected — skipping");
 
-    var device = SdrDeviceFactory.CreateDevice(rtlInfo);
+    var device = SdrDeviceFactory.CreateDevice(rtlInfo!);
     Assert.True(device.Open(), "Failed to open real RTL-SDR device");
 
     try

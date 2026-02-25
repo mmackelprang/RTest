@@ -265,13 +265,7 @@ public class SoundFlowAudioDataIntegrationTests
     });
   }
 
-  [Trait("Category", "RequiresAudioDevice")]
-  [Fact(Skip = "Requires real audio device - run manually")]
-  public async Task TappedOutputStream_CaptureAudio_ReturnsSamples()
-  {
-    // This test would require a real audio device and TappedOutputStream
-    // Skip for automated runs, but document the expected behavior
-    await Task.CompletedTask;
-    Assert.True(true, "Test skipped - requires audio device");
-  }
+  // TappedOutputStream_CaptureAudio_ReturnsSamples was removed — it was a no-op stub
+  // that always passed when run. Real TappedOutputStream testing requires a live audio device
+  // and is covered by manual UAT (tools/Radio.Tools.AudioUAT).
 }

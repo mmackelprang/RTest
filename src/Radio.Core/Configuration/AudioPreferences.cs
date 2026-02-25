@@ -56,6 +56,13 @@ public class AudioPreferences
   /// Stored alongside ID to avoid DB lookups during device enumeration.
   /// </summary>
   public string DefaultCastDeviceName { get; set; } = "";
+
+  /// <summary>
+  /// Per-source gain offsets (linear multiplier 0.0-2.0, where 1.0 = unity/0dB).
+  /// Compensates for volume differences between sources (e.g., Radio vs FilePlayer).
+  /// Key format: AudioSourceType.ToString() (e.g., "Radio", "FilePlayer", "Bluetooth").
+  /// </summary>
+  public Dictionary<string, float> SourceGainOffsets { get; set; } = new();
 }
 
 /// <summary>
