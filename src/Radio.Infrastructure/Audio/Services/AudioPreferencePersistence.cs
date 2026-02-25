@@ -325,6 +325,41 @@ public class AudioPreferencePersistence : IDisposable
   }
 
   /// <summary>
+  /// Clears learned RMS data for a source type, forcing re-learning from scratch.
+  /// </summary>
+  public void ClearSourceLearnedRms(AudioSourceType sourceType)
+  {
+    lock (_sourceRmsLock)
+    {
+      var key = sourceType.ToString();
+      _sourceLearnedRms.Remove(key);
+      _sourceSampleCount.Remove(key);
+    }
+    // Delete from SQLite so stale data doesn't get restored on restart
+    _ = DeleteSourceRmsAsync(sourceType);
+    _logger.LogInformation("Cleared learned RMS data for {SourceType}", sourceType);
+  }
+
+  private async Task DeleteSourceRmsAsync(AudioSourceType sourceType)
+  {
+    if (_configurationManager == null) return;
+    try
+    {
+      var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+      // Write a sentinel empty value — SetValueAsync with empty string effectively clears
+      // (The restore logic uses float.TryParse which will fail on empty, skipping it)
+      await _configurationManager.SetValueAsync(
+        storeId,
+        $"AudioPreferences:SourceRms:{sourceType}",
+        "");
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to delete source RMS for {SourceType}", sourceType);
+    }
+  }
+
+  /// <summary>
   /// Gets the gain mode for a source type ("auto" or "manual", default "auto").
   /// </summary>
   public string GetSourceGainMode(AudioSourceType sourceType)

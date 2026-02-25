@@ -138,34 +138,18 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   {
     if (_preferencePersistence == null) return;
 
+    // Clear learned data so the source re-learns from scratch at unity gain
+    _preferencePersistence.ClearSourceLearnedRms(sourceType);
     _preferencePersistence.SetSourceGainMode(sourceType, "auto");
 
-    // If there's learned data, compute and apply auto-gain immediately
-    var learnedRms = _preferencePersistence.GetSourceLearnedRms(sourceType);
-    if (learnedRms.HasValue && learnedRms.Value > 0.001f)
+    // Reset to unity gain — the learning service will re-measure and adjust
+    _preferencePersistence.SetSourceGainInternal(sourceType, 1.0f);
+    if (_activeSource != null && _activeSource.Type == sourceType && _playbackService != null)
     {
-      var autoGain = Math.Clamp(AudioPreferencePersistence.TargetRms / learnedRms.Value, 0.1f, 2.0f);
-      _preferencePersistence.SetSourceGainInternal(sourceType, autoGain);
-
-      // Update live playback if active
-      if (_activeSource != null && _activeSource.Type == sourceType && _playbackService != null)
-      {
-        _playbackService.SetGainOffset(_activeSource.Id, autoGain);
-      }
-
-      _logger.LogInformation("Reset {SourceType} to auto gain: {Gain:F2}", sourceType, autoGain);
+      _playbackService.SetGainOffset(_activeSource.Id, 1.0f);
     }
-    else
-    {
-      // No learned data yet — reset to unity
-      _preferencePersistence.SetSourceGainInternal(sourceType, 1.0f);
-      if (_activeSource != null && _activeSource.Type == sourceType && _playbackService != null)
-      {
-        _playbackService.SetGainOffset(_activeSource.Id, 1.0f);
-      }
 
-      _logger.LogInformation("Reset {SourceType} to auto gain (no learned data, unity)", sourceType);
-    }
+    _logger.LogInformation("Reset {SourceType} to auto gain (cleared learned data, unity)", sourceType);
   }
 
   /// <inheritdoc/>

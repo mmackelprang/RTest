@@ -84,8 +84,13 @@ public sealed class SourceLevelLearningService : BackgroundService
     // Back-calculate pre-gain RMS to avoid feedback loop.
     // The visualizer sees post-gain audio, so divide out the current gain offset
     // to learn the source's intrinsic loudness rather than the corrected level.
+    // However, when gain is at a clamp boundary (0.1 or 2.0), the system can't
+    // fully compensate and the back-calculation produces misleading values —
+    // skip learning in that case to preserve the last valid measurement.
     var currentGain = _persistence.GetSourceGain(sourceType);
-    var preGainRms = currentGain > 0.01f ? monoRms / currentGain : monoRms;
+    if (currentGain <= 0.1f || currentGain >= 2.0f)
+      return;
+    var preGainRms = monoRms / currentGain;
 
     // Update the EMA for this source (using pre-gain RMS)
     _persistence.UpdateSourceLearnedRms(sourceType, preGainRms);
