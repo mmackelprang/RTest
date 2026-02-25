@@ -574,6 +574,45 @@ public class AudioController : ControllerBase
   }
 
   /// <summary>
+  /// Gets all per-source gain offsets.
+  /// </summary>
+  /// <returns>Dictionary of source type to gain multiplier (0.0-2.0, 1.0 = unity).</returns>
+  [HttpGet("sourcegain")]
+  [ProducesResponseType(typeof(Dictionary<string, float>), StatusCodes.Status200OK)]
+  public ActionResult<Dictionary<string, float>> GetSourceGainOffsets()
+  {
+    if (_audioManager == null)
+      return Ok(new Dictionary<string, float>());
+
+    return Ok(_audioManager.GetAllSourceGains());
+  }
+
+  /// <summary>
+  /// Sets the gain offset for a specific source type.
+  /// </summary>
+  /// <param name="sourceType">The source type name (e.g., Radio, FilePlayer, Bluetooth).</param>
+  /// <param name="gain">Linear gain multiplier (0.0-2.0, 1.0 = unity/0dB).</param>
+  [HttpPost("sourcegain/{sourceType}/{gain:float}")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  public ActionResult SetSourceGain(string sourceType, float gain)
+  {
+    if (_audioManager == null)
+      return StatusCode(500, new { error = "AudioManager not available" });
+
+    if (!Enum.TryParse<Radio.Core.Interfaces.Audio.AudioSourceType>(sourceType, ignoreCase: true, out var parsed))
+      return BadRequest(new { error = $"Invalid source type '{sourceType}'. Valid: Radio, Vinyl, FilePlayer, GenericUSB, Bluetooth" });
+
+    if (gain < 0f || gain > 2f)
+      return BadRequest(new { error = "Gain must be between 0.0 and 2.0" });
+
+    _audioManager.SetSourceGain(parsed, gain);
+    _logger.LogInformation("Source gain set: {SourceType} = {Gain:F2}", sourceType, gain);
+
+    return Ok(new { sourceType, gain });
+  }
+
+  /// <summary>
   /// Gets the current fingerprint identification status, including recent events and throughput rates.
   /// </summary>
   [HttpGet("fingerprint/status")]

@@ -64,4 +64,20 @@ public interface IAudioManager : IAsyncDisposable
   /// Gets or sets the stereo balance (-1.0 = full left, 0.0 = center, 1.0 = full right).
   /// </summary>
   float Balance { get; set; }
+
+  /// <summary>
+  /// Gets the gain offset for a specific source type (linear multiplier, default 1.0).
+  /// </summary>
+  float GetSourceGain(AudioSourceType sourceType);
+
+  /// <summary>
+  /// Sets the gain offset for a specific source type (linear multiplier 0.0-2.0).
+  /// If the source type matches the active source, updates live playback immediately.
+  /// </summary>
+  void SetSourceGain(AudioSourceType sourceType, float gain);
+
+  /// <summary>
+  /// Gets all per-source gain offsets as a dictionary.
+  /// </summary>
+  Dictionary<string, float> GetAllSourceGains();
 }

@@ -41,6 +41,7 @@ public class SystemConfigPageTests : TestContext
     Services.AddHttpClient<ConfigurationApiService>();
     Services.AddHttpClient<SecretsApiService>();
     Services.AddHttpClient<SourcesApiService>();
+    Services.AddHttpClient<AudioApiService>();
     
     // Add AudioStateHubService
     Services.AddSingleton<AudioStateHubService>();

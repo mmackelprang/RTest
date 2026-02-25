@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
@@ -19,7 +20,10 @@ public class AudioPreferencePersistence : IDisposable
   private readonly IConfigurationManager? _configurationManager;
 
   private Timer? _volumePersistTimer;
+  private Timer? _sourceGainPersistTimer;
   private readonly object _volumePersistLock = new();
+  private readonly object _sourceGainPersistLock = new();
+  private readonly Dictionary<string, float> _sourceGainOffsets = new();
   private bool _disposed;
 
   public AudioPreferencePersistence(
@@ -166,6 +170,137 @@ public class AudioPreferencePersistence : IDisposable
     }
   }
 
+  /// <summary>
+  /// Gets the gain offset for a source type (linear multiplier, default 1.0).
+  /// </summary>
+  public float GetSourceGain(AudioSourceType sourceType)
+  {
+    lock (_sourceGainPersistLock)
+    {
+      return _sourceGainOffsets.TryGetValue(sourceType.ToString(), out var gain) ? gain : 1.0f;
+    }
+  }
+
+  /// <summary>
+  /// Sets the gain offset for a source type and schedules persistence.
+  /// </summary>
+  public void SetSourceGain(AudioSourceType sourceType, float gain)
+  {
+    gain = Math.Clamp(gain, 0f, 2f);
+    lock (_sourceGainPersistLock)
+    {
+      _sourceGainOffsets[sourceType.ToString()] = gain;
+    }
+    _logger.LogInformation("Source gain set: {SourceType} = {Gain:F2}", sourceType, gain);
+    ScheduleSourceGainPersist();
+  }
+
+  /// <summary>
+  /// Gets all per-source gain offsets.
+  /// </summary>
+  public Dictionary<string, float> GetAllSourceGains()
+  {
+    lock (_sourceGainPersistLock)
+    {
+      return new Dictionary<string, float>(_sourceGainOffsets);
+    }
+  }
+
+  /// <summary>
+  /// Restores per-source gain offsets from the configuration store.
+  /// </summary>
+  public void RestoreSourceGainOffsets()
+  {
+    if (_configurationManager == null)
+    {
+      _logger.LogWarning("No configuration manager available, cannot restore source gain offsets");
+      return;
+    }
+
+    try
+    {
+      var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+      var store = _configurationManager.GetStoreAsync(storeId).GetAwaiter().GetResult();
+
+      // Read all AudioPreferences:SourceGain:* keys
+      var sourceTypes = Enum.GetValues<AudioSourceType>();
+      var restored = 0;
+      lock (_sourceGainPersistLock)
+      {
+        foreach (var sourceType in sourceTypes)
+        {
+          var key = $"AudioPreferences:SourceGain:{sourceType}";
+          var entry = store.GetEntryAsync(key).GetAwaiter().GetResult();
+          if (entry != null && float.TryParse(entry.Value, CultureInfo.InvariantCulture, out var gain))
+          {
+            _sourceGainOffsets[sourceType.ToString()] = Math.Clamp(gain, 0f, 2f);
+            restored++;
+          }
+        }
+      }
+
+      if (restored > 0)
+      {
+        _logger.LogInformation("Restored {Count} source gain offsets from config store", restored);
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to restore source gain offsets");
+    }
+  }
+
+  /// <summary>
+  /// Schedules a debounced persistence of source gain offsets.
+  /// </summary>
+  private void ScheduleSourceGainPersist()
+  {
+    if (_configurationManager == null) return;
+
+    lock (_sourceGainPersistLock)
+    {
+      _sourceGainPersistTimer?.Dispose();
+      _sourceGainPersistTimer = new Timer(
+        _ => _ = PersistSourceGainAsync(),
+        null,
+        TimeSpan.FromMilliseconds(500),
+        Timeout.InfiniteTimeSpan);
+    }
+  }
+
+  /// <summary>
+  /// Persists all source gain offsets to the configuration store.
+  /// </summary>
+  private async Task PersistSourceGainAsync()
+  {
+    if (_configurationManager == null) return;
+
+    try
+    {
+      var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+
+      Dictionary<string, float> snapshot;
+      lock (_sourceGainPersistLock)
+      {
+        snapshot = new Dictionary<string, float>(_sourceGainOffsets);
+      }
+
+      foreach (var (sourceType, gain) in snapshot)
+      {
+        await _configurationManager.SetValueAsync(
+          storeId,
+          $"AudioPreferences:SourceGain:{sourceType}",
+          gain.ToString("F4", CultureInfo.InvariantCulture));
+      }
+
+      _logger.LogDebug("Persisted {Count} source gain offsets", snapshot.Count);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to persist source gain offsets");
+    }
+  }
+
   public void Dispose()
   {
     if (_disposed) return;
@@ -175,6 +310,12 @@ public class AudioPreferencePersistence : IDisposable
     {
       _volumePersistTimer?.Dispose();
       _volumePersistTimer = null;
+    }
+
+    lock (_sourceGainPersistLock)
+    {
+      _sourceGainPersistTimer?.Dispose();
+      _sourceGainPersistTimer = null;
     }
   }
 }

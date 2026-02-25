@@ -22,6 +22,8 @@ public class SoundFlowPlaybackService : IDisposable
   private readonly Dictionary<string, SoundPlayer> _activePlayers = new();
   private readonly Dictionary<string, SoundComponent> _activeComponents = new();
   private readonly Dictionary<string, VisualizationTapModifier> _visualizationTaps = new();
+  private readonly Dictionary<string, float> _baseVolumes = new();
+  private readonly Dictionary<string, float> _gainOffsets = new();
   private readonly object _playersLock = new();
   private bool _disposed;
 
@@ -127,11 +129,17 @@ public class SoundFlowPlaybackService : IDisposable
       dataProvider = new StreamDataProvider(engine, format, fileStream);
       _logger.LogDebug("PlayFileAsync: StreamDataProvider created successfully");
 
-      // Create a sound player
+      // Create a sound player (apply gain offset if set)
       _logger.LogDebug("PlayFileAsync: Creating SoundPlayer...");
       soundPlayer = new SoundPlayer(engine, format, dataProvider);
-      soundPlayer.Volume = volume;
-      _logger.LogDebug("PlayFileAsync: SoundPlayer created, Volume: {Volume}", volume);
+      float gainOffset;
+      lock (_playersLock)
+      {
+        _baseVolumes[sourceId] = volume;
+        gainOffset = _gainOffsets.GetValueOrDefault(sourceId, 1.0f);
+      }
+      soundPlayer.Volume = Math.Clamp(volume * gainOffset, 0f, 2f);
+      _logger.LogDebug("PlayFileAsync: SoundPlayer created, Volume: {Volume}, GainOffset: {Gain}", volume, gainOffset);
 
       // Add visualization tap if visualizer service is available
       VisualizationTapModifier? tapModifier = null;
@@ -269,9 +277,15 @@ public class SoundFlowPlaybackService : IDisposable
       // Create a data provider from the stream
       var dataProvider = new StreamDataProvider(engine, format, audioStream);
 
-      // Create a sound player
+      // Create a sound player (apply gain offset if set)
       var soundPlayer = new SoundPlayer(engine, format, dataProvider);
-      soundPlayer.Volume = volume;
+      float streamGainOffset;
+      lock (_playersLock)
+      {
+        _baseVolumes[sourceId] = volume;
+        streamGainOffset = _gainOffsets.GetValueOrDefault(sourceId, 1.0f);
+      }
+      soundPlayer.Volume = Math.Clamp(volume * streamGainOffset, 0f, 2f);
 
       // Add visualization tap if visualizer service is available
       VisualizationTapModifier? tapModifier = null;
@@ -349,9 +363,15 @@ public class SoundFlowPlaybackService : IDisposable
 
       _logger.LogDebug("Starting data provider playback for source {SourceId}", sourceId);
 
-      // Create a sound player from the existing data provider
+      // Create a sound player from the existing data provider (apply gain offset if set)
       var soundPlayer = new SoundPlayer(engine, format, dataProvider);
-      soundPlayer.Volume = volume;
+      float dpGainOffset;
+      lock (_playersLock)
+      {
+        _baseVolumes[sourceId] = volume;
+        dpGainOffset = _gainOffsets.GetValueOrDefault(sourceId, 1.0f);
+      }
+      soundPlayer.Volume = Math.Clamp(volume * dpGainOffset, 0f, 2f);
 
       // Add visualization tap if visualizer service is available
       VisualizationTapModifier? tapModifier = null;
@@ -428,8 +448,14 @@ public class SoundFlowPlaybackService : IDisposable
 
       _logger.LogDebug("Starting component playback for source {SourceId}", sourceId);
 
-      // Set volume on the component
-      component.Volume = volume;
+      // Set volume on the component (apply gain offset if set)
+      float compGainOffset;
+      lock (_playersLock)
+      {
+        _baseVolumes[sourceId] = volume;
+        compGainOffset = _gainOffsets.GetValueOrDefault(sourceId, 1.0f);
+      }
+      component.Volume = Math.Clamp(volume * compGainOffset, 0f, 2f);
 
       // Add visualization tap if visualizer service is available
       VisualizationTapModifier? tapModifier = null;
@@ -554,6 +580,8 @@ public class SoundFlowPlaybackService : IDisposable
       {
         _visualizationTaps.Remove(sourceId);
       }
+      _baseVolumes.Remove(sourceId);
+      // Keep _gainOffsets — they persist across stop/start for the same source
     }
 
     var playbackDevice = _audioEngine.GetPlaybackDevice();
@@ -646,7 +674,7 @@ public class SoundFlowPlaybackService : IDisposable
   }
 
   /// <summary>
-  /// Sets the volume for a specific source.
+  /// Sets the volume for a specific source. The effective volume is base volume * gain offset.
   /// </summary>
   /// <param name="sourceId">The source identifier.</param>
   /// <param name="volume">Volume level (0.0 to 1.0).</param>
@@ -656,9 +684,48 @@ public class SoundFlowPlaybackService : IDisposable
 
     lock (_playersLock)
     {
+      _baseVolumes[sourceId] = Math.Clamp(volume, 0f, 1f);
+      var gainOffset = _gainOffsets.GetValueOrDefault(sourceId, 1.0f);
+      var effective = Math.Clamp(volume * gainOffset, 0f, 2f);
+
       if (_activePlayers.TryGetValue(sourceId, out var player))
       {
-        player.Volume = Math.Clamp(volume, 0f, 1f);
+        player.Volume = effective;
+      }
+      if (_activeComponents.TryGetValue(sourceId, out var component))
+      {
+        component.Volume = effective;
+      }
+    }
+  }
+
+  /// <summary>
+  /// Sets the gain offset for a specific source. The effective volume is base volume * gain offset.
+  /// </summary>
+  /// <param name="sourceId">The source identifier.</param>
+  /// <param name="gainOffset">Gain offset (0.0 to 2.0, where 1.0 = unity/0dB).</param>
+  public void SetGainOffset(string sourceId, float gainOffset)
+  {
+    ThrowIfDisposed();
+
+    lock (_playersLock)
+    {
+      gainOffset = Math.Clamp(gainOffset, 0f, 2f);
+      _gainOffsets[sourceId] = gainOffset;
+      var baseVol = _baseVolumes.GetValueOrDefault(sourceId, 1.0f);
+      var effective = Math.Clamp(baseVol * gainOffset, 0f, 2f);
+
+      if (_activePlayers.TryGetValue(sourceId, out var player))
+      {
+        player.Volume = effective;
+        _logger.LogDebug("Applied gain offset {Gain:F2} to player (SourceId={SourceId}, EffectiveVolume={Volume:F2})",
+          gainOffset, sourceId, effective);
+      }
+      if (_activeComponents.TryGetValue(sourceId, out var component))
+      {
+        component.Volume = effective;
+        _logger.LogDebug("Applied gain offset {Gain:F2} to component (SourceId={SourceId}, EffectiveVolume={Volume:F2})",
+          gainOffset, sourceId, effective);
       }
     }
   }

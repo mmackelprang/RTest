@@ -119,8 +119,40 @@
 
     @if (!string.IsNullOrEmpty(_source))
     {
-      <div style="position: absolute; top: 16px; right: 16px;">
+      <div style="position: absolute; top: 16px; right: 16px; display: flex; align-items: center; gap: 4px;">
         <MudChip T="string" Color="Color.Primary" Size="Size.Small">@_source</MudChip>
+        @if (_currentSourceGain != 1.0f)
+        {
+          <MudChip T="string" Size="Size.Small" Color="Color.Secondary"
+                   Style="font-family: var(--font-mono); font-size: 11px; cursor: pointer;"
+                   OnClick="ToggleGainPopover">@FormatGainDb(_currentSourceGain)</MudChip>
+        }
+        else
+        {
+          <MudChip T="string" Size="Size.Small" Color="Color.Default"
+                   Style="font-family: var(--font-mono); font-size: 11px; cursor: pointer; opacity: 0.6;"
+                   OnClick="ToggleGainPopover">0dB</MudChip>
+        }
+      </div>
+    }
+
+    <!-- Source gain popover -->
+    @if (_showGainPopover && !string.IsNullOrEmpty(_nowPlayingSourceType))
+    {
+      <div style="position: absolute; top: 48px; right: 16px; z-index: 10; background: rgba(30,30,30,0.95); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 12px 16px; min-width: 220px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <MudText Typo="Typo.body2" Style="color: var(--text-high);">@(_source ?? "Source") Level</MudText>
+          <MudText Typo="Typo.caption" Style="font-family: var(--font-mono); color: var(--text-medium);">@FormatGainDb(_currentSourceGain)</MudText>
+        </div>
+        <MudSlider T="float" Value="@_currentSourceGain"
+                   ValueChanged="@OnGainSliderChanged"
+                   Min="0.0f" Max="2.0f" Step="0.05f"
+                   Color="Color.Secondary" Size="Size.Small" />
+        <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-low); margin-top: 2px; font-family: var(--font-mono);">
+          <span>-∞</span>
+          <span>0dB</span>
+          <span>+6dB</span>
+        </div>
       </div>
     }
   </div>
@@ -216,6 +248,13 @@
   private FingerprintStatusDto? _fpStatus;
   private bool _showFingerprintDetail;
 
+  // Source gain state
+  private float _currentSourceGain = 1.0f;
+  private string? _nowPlayingSourceType;
+  private bool _showGainPopover;
+  private Dictionary<string, float> _sourceGainOffsets = new();
+  private System.Threading.Timer? _gainDebounceTimer;
+
   private bool _hasValidAlbumArt =>
     !_albumArtFailed
     && !string.IsNullOrEmpty(_albumArtUrl)
@@ -234,6 +273,7 @@
 
       await RefreshPlaybackStateAsync();
       await RefreshFingerprintStatusAsync();
+      await LoadSourceGainOffsetsAsync();
 
       _timer = new System.Threading.Timer(TimerCallback, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
     }
@@ -351,6 +391,8 @@
         }
         _albumArtUrl = nowPlaying.AlbumArtUrl;
         _source = nowPlaying.SourceName;
+        _nowPlayingSourceType = nowPlaying.SourceType;
+        _currentSourceGain = _sourceGainOffsets.TryGetValue(nowPlaying.SourceType, out var g) ? g : 1.0f;
       }
     }
     catch (Exception ex)
@@ -451,6 +493,54 @@
     if (!string.IsNullOrEmpty(evt.Artist)) parts.Add(evt.Artist);
     if (!string.IsNullOrEmpty(evt.Album)) parts.Add(evt.Album);
     return string.Join(" / ", parts);
+  }
+
+  // --- Source gain helpers ---
+
+  private async Task LoadSourceGainOffsetsAsync()
+  {
+    try
+    {
+      _sourceGainOffsets = await AudioApi.GetSourceGainOffsetsAsync() ?? new();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "Error loading source gain offsets");
+    }
+  }
+
+  private void ToggleGainPopover()
+  {
+    _showGainPopover = !_showGainPopover;
+  }
+
+  private void OnGainSliderChanged(float newGain)
+  {
+    if (string.IsNullOrEmpty(_nowPlayingSourceType)) return;
+    _currentSourceGain = newGain;
+    _sourceGainOffsets[_nowPlayingSourceType] = newGain;
+
+    // Debounce the API call
+    _gainDebounceTimer?.Dispose();
+    var sourceType = _nowPlayingSourceType;
+    _gainDebounceTimer = new System.Threading.Timer(async _ =>
+    {
+      try
+      {
+        await AudioApi.SetSourceGainAsync(sourceType, newGain);
+      }
+      catch (Exception ex)
+      {
+        Logger.LogWarning(ex, "Failed to set source gain for {SourceType}", sourceType);
+      }
+    }, null, TimeSpan.FromMilliseconds(200), Timeout.InfiniteTimeSpan);
+  }
+
+  private static string FormatGainDb(float gain)
+  {
+    if (gain <= 0.001f) return "-∞dB";
+    var db = 20.0 * Math.Log10(gain);
+    return db >= 0 ? $"+{db:F1}dB" : $"{db:F1}dB";
   }
 
   // --- Existing handlers ---
@@ -600,6 +690,7 @@
     HubService.VolumeChanged -= OnVolumeChangedEvent;
     HubService.FingerprintStatusChanged -= OnFingerprintStatusChanged;
     _timer?.Dispose();
+    _gainDebounceTimer?.Dispose();
     await Task.CompletedTask;
   }
 }

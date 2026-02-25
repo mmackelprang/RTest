@@ -5,6 +5,7 @@
 @inject ConfigurationApiService ConfigApi
 @inject SecretsApiService SecretsApi
 @inject SourcesApiService SourcesApi
+@inject AudioApiService AudioApi
 @inject AudioStateHubService HubService
 @inject ISnackbar Snackbar
 @inject IJSRuntime JSRuntime
@@ -1063,6 +1064,28 @@
                                  Variant="Variant.Outlined" Min="0" Max="100"
                                  HelperText="Master volume level (0-100)" />
               </MudItem>
+              <!-- Source Gain Levels -->
+              <MudItem xs="12">
+                <MudText Typo="Typo.subtitle1" Class="mt-4 mb-2">Source Levels</MudText>
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
+                  Adjust gain per source to compensate for volume differences. 0dB = unity (no change). Range: -∞ to +6dB.
+                </MudAlert>
+              </MudItem>
+              @foreach (var kvp in _sourceGainLabels)
+              {
+                <MudItem xs="12" md="6">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <MudText Style="min-width: 90px; font-size: 14px;">@kvp.Value</MudText>
+                    <MudSlider T="float" Value="@GetSourceGainValue(kvp.Key)"
+                               ValueChanged="@((float v) => OnSourceGainChanged(kvp.Key, v))"
+                               Min="0.0f" Max="2.0f" Step="0.05f"
+                               Color="Color.Primary" Style="flex: 1;"  />
+                    <MudText Style="min-width: 50px; font-family: var(--font-mono); font-size: 12px; text-align: right;">
+                      @FormatGainDb(GetSourceGainValue(kvp.Key))
+                    </MudText>
+                  </div>
+                </MudItem>
+              }
               <MudItem xs="12">
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAudioPreferencesAsync"
                            StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">
@@ -1513,6 +1536,18 @@
   private FilePlayerPreferencesDto? _filePlayerPreferences;
   private RadioPreferencesDto? _radioPreferences;
   private GenericSourcePreferencesDto? _genericSourcePreferences;
+
+  // Source Gain Offsets
+  private Dictionary<string, float> _sourceGainOffsets = new();
+  private System.Threading.Timer? _sourceGainDebounceTimer;
+  private static readonly Dictionary<string, string> _sourceGainLabels = new()
+  {
+    ["Radio"] = "Radio",
+    ["FilePlayer"] = "File Player",
+    ["Bluetooth"] = "Bluetooth",
+    ["Vinyl"] = "Vinyl",
+    ["GenericUSB"] = "USB Audio",
+  };
 
   // Secrets
   private TTSSecretsDto? _ttsSecrets;
@@ -2360,6 +2395,9 @@
       _filePlayerPreferences = await LoadOrCreatePreferenceAsync<FilePlayerPreferencesDto>("fileplayerpreferences");
       _radioPreferences = await LoadOrCreatePreferenceAsync<RadioPreferencesDto>("radiopreferences");
       _genericSourcePreferences = await LoadOrCreatePreferenceAsync<GenericSourcePreferencesDto>("genericsourcepreferences");
+
+      // Load source gain offsets from API
+      _sourceGainOffsets = await AudioApi.GetSourceGainOffsetsAsync() ?? new();
     }
     catch (Exception ex)
     {
@@ -2414,6 +2452,36 @@
     {
       _isSaving = false;
     }
+  }
+
+  private float GetSourceGainValue(string sourceType)
+  {
+    return _sourceGainOffsets.TryGetValue(sourceType, out var gain) ? gain : 1.0f;
+  }
+
+  private void OnSourceGainChanged(string sourceType, float gain)
+  {
+    _sourceGainOffsets[sourceType] = gain;
+    // Debounce the API call to avoid churn during slider drags
+    _sourceGainDebounceTimer?.Dispose();
+    _sourceGainDebounceTimer = new System.Threading.Timer(async _ =>
+    {
+      try
+      {
+        await AudioApi.SetSourceGainAsync(sourceType, gain);
+      }
+      catch (Exception ex)
+      {
+        Logger.LogWarning(ex, "Failed to persist source gain for {SourceType}", sourceType);
+      }
+    }, null, TimeSpan.FromMilliseconds(300), Timeout.InfiniteTimeSpan);
+  }
+
+  private static string FormatGainDb(float gain)
+  {
+    if (gain <= 0.001f) return "-∞ dB";
+    var db = 20.0 * Math.Log10(gain);
+    return db >= 0 ? $"+{db:F1}dB" : $"{db:F1}dB";
   }
 
   private async Task SaveFilePlayerPreferencesAsync()
@@ -2865,6 +2933,7 @@
   public void Dispose()
   {
     _statsTimer?.Dispose();
+    _sourceGainDebounceTimer?.Dispose();
   }
 }
 
