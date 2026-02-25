@@ -37,11 +37,21 @@ Environment=HOME=/opt/radio-console
 # Audio access
 SupplementaryGroups=bluetooth pulse-access
 
+# PipeWire access for Bluetooth audio capture (pw-record, pw-cli).
+# PipeWire socket lives at /run/user/1000/pipewire-0 (login user session).
+# XDG_RUNTIME_DIR tells pw-cli/pw-record where to find it.
+# ACL on /run/user/1000 grants the radio user traverse permission
+# (radio-pipewire-access.service sets: setfacl -m u:radio:x /run/user/1000).
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+
 # Security hardening
-ProtectSystem=strict
+# NOTE: ProtectHome=true hides /run/user (PipeWire socket), so we can't use it.
+# ProtectSystem=strict creates a read-only overlay over /run, also blocking PipeWire.
+# Both are disabled to allow PipeWire access for BT audio capture.
+ProtectSystem=false
 ReadWritePaths=/opt/radio-console
 PrivateTmp=true
-ProtectHome=true
+ProtectHome=false
 NoNewPrivileges=true
 
 [Install]

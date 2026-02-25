@@ -53,33 +53,16 @@ Also fix:
 - [x] DirectCast silence transition logging → reduced to DBG
 
 ### F.3 Fingerprint Status UI 🟢
-**Status:** pending
+**Status:** complete ✅
 
-Currently no UI shows fingerprint activity. User needs to see:
-- Whether fingerprinting is active/idle
-- Current identification status (listening, analyzing, matched, no match)
-- Last match result + confidence
-- Whether the service is healthy
-
-**Approach ideas (research needed):**
-- Small status indicator on the Now Playing panel (icon + tooltip)
-- Or a subtle status chip/badge near the transport controls
-- BackgroundIdentificationService already exposes `TrackIdentified` and `SongChanged` events
-- Need to add a new SignalR event for fingerprint progress/status (capturing, querying, result)
+Added fingerprint status badge on NowPlayingPanel with detail panel showing event log. Full stack: Core model (FingerprintStatusSnapshot), Infrastructure state tracking in BackgroundIdentificationService (phase transitions, event log aggregation, rolling rate counters), API endpoint + SignalR broadcast, Web badge + detail panel. Code review fixes: deep-copy snapshot records, ComputeRate edge case, extracted DTO mapper. Source name now shows actual source (RTL-SDR, FilePlayer, etc.) instead of "SoundFlow Output". No-match periods show as separate rows after a matched song. 12 unit tests. PRs #239, #240.
 
 ### F.4 Volume Normalization Across Sources 🟢
-**Status:** pending
+**Status:** complete ✅
 
-File source needs soundbar volume raised significantly vs. radio which is much louder.
-
-**Options (expert analysis needed):**
-1. **Per-source gain offset** — Store a gain multiplier per AudioSourceType in config, apply in the mixer before master volume
-2. **ReplayGain** — Read ReplayGain tags from files, normalize to -14 LUFS or similar target
-3. **Automatic Gain Control (AGC)** — A new SoundModifier that maintains target RMS level with configurable attack/release
-4. **Manual per-source volume** — UI slider per source in Settings, simplest approach
-5. **Loudness normalization modifier** — EBU R128 / ITU-R BS.1770 loudness measurement + gain adjustment
-
-Recommendation: Start with option 1 (per-source gain offset with UI control) — simplest, most predictable. Add option 3 later if needed.
+Implemented in two phases:
+1. **Per-source gain offsets** (PR #241) — Manual gain multiplier per AudioSourceType stored in SQLite, applied via `SoundFlowPlaybackService.SetGainOffset()`. UI sliders in Settings page and NowPlayingPanel popover with fine-adjustment arrows (±0.05).
+2. **Auto RMS learning** (PR #241) — `SourceLevelLearningService` background service polls `IVisualizerService.GetLevelData().MonoRms` every 3s, computes EMA per source, auto-applies gain to normalize all sources to -18 dBFS target. Hybrid auto/manual mode: user slider changes switch to manual, "Reset to Auto" reverts. Clamp boundary protection prevents feedback loop at gain limits (0.1x–2.0x). Learned RMS persists to SQLite across restarts.
 
 ### F.5 Waveform Visualizer: Draw From Origin 🟢
 **Status:** complete ✅
@@ -147,14 +130,55 @@ Five issues:
 
 **File:** `src/Radio.Web/Components/Shared/RadioControlPanel.razor`
 
+### F.11 Bluetooth Stability Investigation 🔴
+**Status:** pending
+
+Bluetooth connects to `Grandpas Radio` from phone, but playback is unreliable:
+1. **Album art missing** — Song title & artist usually arrive via AVRCP, but album art rarely comes through. Investigate: is the art URL provided by AVRCP metadata? Does the proxy endpoint work? Is the Web UI requesting it?
+2. **Audio often missing** — After connecting and starting Spotify playback, audio and visualization frequently don't appear. Sometimes works, sometimes doesn't. Investigate: is A2DP stream being received? Is `BluetoothAudioSource` activating? Is the audio pipeline routing correctly? Check logs for errors during BT playback attempts.
+3. **Visualization missing** — When audio doesn't play, visualization is also absent (expected if no audio). But verify visualization works when audio IS playing.
+
+**Investigation approach:**
+- [ ] Deploy, connect BT, play Spotify, capture full logs
+- [ ] Check AVRCP metadata fields (title, artist, album, art URL)
+- [ ] Check A2DP audio stream reception and routing
+- [ ] Check `BluetoothAudioSource` state transitions
+- [ ] Verify BT play history recording (fix committed, untested)
+- [ ] Verify BT visualization data (fix committed, untested)
+
+### F.12 UI/UX Audit & Polish 🟢
+**Status:** pending
+
+Comprehensive audit of all pages for consistency with the modern, clean touch-screen kiosk aesthetic. Fix layout overflows, color mismatches, and improve information density.
+
+**Pages to audit:**
+
+1. **Queue page** — Audit overall aesthetic consistency with Home page. The `LOAD` file browser dialog appears at bottom of screen — colors and button designs should match Home page palette. Improve file browser UX.
+
+2. **Bluetooth page** — Audit all sections (discovery, paired devices, connected device, AVRCP controls) for UX consistency and potential improvements.
+
+3. **Google Cast dialog** — The "Select Google Cast" dialog doesn't match the overall system UX. Audit for consistency and improvements.
+
+4. **Devices page** — General audit for aesthetic consistency.
+
+5. **History page** — Left panel has a horizontal scrollbar that shouldn't be there. Fix layout overflow.
+
+6. **System page** — Left-hand selections use a scrollbar where there appears to be enough space to fit all content without scrolling. `Secrets` sub-page: `Save Secrets` / `Clear All` buttons run off the page despite sufficient real estate. Secret text boxes use entire screen width unnecessarily.
+
+7. **Configuration pages** — Several pages run past the left border. Too many configuration types across the top tabs — find a better way to present this list. Audit all sub-pages for layout overflow.
+
+8. **System > Store Management** — Messy layout when user clicks `Refresh`. Improve the refresh/loading state UX.
+
+**Approach:** Examine each page in the browser, identify issues, fix styling/layout while maintaining existing functionality. Carry forward the "Command Surface" dark-mode broadcast console aesthetic with CSS variables already defined.
+
 ---
 
 ## Phase D: Hardware Integrations (carry-forward) — Partial ✅
 
-### D.1 Phonograph (USB Turntable) ⏸️
-- [ ] Connect USB turntable to Ubuntu
-- [ ] Verify USB audio device appears in device list
-- [ ] Test VinylAudioSource playback
+### D.1 Phonograph (USB Turntable) ✅
+- [x] Connect USB turntable to Ubuntu
+- [x] Verify USB audio device appears in device list
+- [x] Test VinylAudioSource playback
 
 ### D.3 Generic USB Audio ✅ (verified)
 - [x] Test generic USB audio input — playback, volume, source switching, visualization all working
@@ -167,7 +191,7 @@ Five issues:
 
 | Issue | Status | Notes |
 |-------|--------|-------|
-| API SEGV every ~28 min | **New — Critical** | Native crash in MiniAudio/SoundFlow, correlates with fingerprint cycles |
+| API SEGV every ~28 min | **Resolved** | PR #237 — dispose guards + ring buffer reader lifetime fix |
 | Queue add-to-queue reliability | **Resolved** | PR #234 — response parsing, timeouts, Blazor reconnection |
 | Cast latency configurable | **Resolved** | PR #233 — DirectChannel buffer params in UI |
 | Pong not received via SharpCaster | Deferred | CDP workaround reliable |
