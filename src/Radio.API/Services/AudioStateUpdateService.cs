@@ -776,27 +776,7 @@ public class AudioStateUpdateService : BackgroundService
   {
     try
     {
-      var dto = new FingerprintStatusDto
-      {
-        Phase = snapshot.Phase.ToString(),
-        IsEnabled = snapshot.IsEnabled,
-        FingerprintsPerMinute = Math.Round(snapshot.FingerprintsPerMinute, 1),
-        MetadataCallsPerMinute = Math.Round(snapshot.MetadataCallsPerMinute, 1),
-        LastError = snapshot.LastError,
-        RecentEvents = snapshot.RecentEvents.Select(e => new FingerprintEventDto
-        {
-          AudioSource = e.AudioSource,
-          FirstMatchAt = e.FirstMatchAt,
-          NoMatchCount = e.NoMatchCount,
-          MatchCount = e.MatchCount,
-          LastConfidence = e.LastConfidence,
-          Title = e.Title,
-          Artist = e.Artist,
-          Album = e.Album,
-          Phase = e.Phase.ToString(),
-          Timestamp = e.Timestamp
-        }).ToList()
-      };
+      var dto = snapshot.MapToDto();
       await _hubContext.Clients.All.SendAsync("FingerprintStatusChanged", dto);
     }
     catch (Exception ex)

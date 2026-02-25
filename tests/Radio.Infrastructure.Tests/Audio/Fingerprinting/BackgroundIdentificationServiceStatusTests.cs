@@ -178,26 +178,32 @@ public class BackgroundIdentificationServiceStatusTests
   }
 
   [Fact]
-  public void MatchThenNoMatch_SameSong_AggregatesOnSameRecord()
+  public void MatchThenNoMatch_CreatesNewEventRecord()
   {
     // Arrange
     _service.EnsureCurrentEvent("SDR Radio");
 
-    // Act — match, then more no-matches on same source
+    // Act — match, then no-matches on same source
     _service.UpdateCurrentEventMatch(CreateMetadata("Song C", "Artist C"), 0.88);
 
     _service.EnsureCurrentEvent("SDR Radio"); // Same source — should NOT create new record
     _service.UpdateCurrentEventNoMatch();
     _service.UpdateCurrentEventNoMatch();
 
-    // Assert — one record with match + no-match counts
+    // Assert — TWO records: match event + separate no-match event
     var status = _service.GetStatus();
-    Assert.Single(status.RecentEvents);
+    Assert.Equal(2, status.RecentEvents.Count);
 
-    var evt = status.RecentEvents[0];
-    Assert.Equal(1, evt.MatchCount);
-    Assert.Equal(2, evt.NoMatchCount);
-    Assert.Equal("Song C", evt.Title);
+    var matchEvt = status.RecentEvents[0];
+    Assert.Equal(1, matchEvt.MatchCount);
+    Assert.Equal(0, matchEvt.NoMatchCount);
+    Assert.Equal("Song C", matchEvt.Title);
+
+    var noMatchEvt = status.RecentEvents[1];
+    Assert.Equal(0, noMatchEvt.MatchCount);
+    Assert.Equal(2, noMatchEvt.NoMatchCount);
+    Assert.Null(noMatchEvt.Title);
+    Assert.Equal("SDR Radio", noMatchEvt.AudioSource);
   }
 
   [Fact]

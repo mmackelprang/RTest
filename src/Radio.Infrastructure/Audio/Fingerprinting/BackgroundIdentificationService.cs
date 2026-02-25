@@ -91,7 +91,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
         IsEnabled = _options.Enabled,
         FingerprintsPerMinute = ComputeRate(_fingerprintTimestamps),
         MetadataCallsPerMinute = ComputeRate(_metadataCallTimestamps),
-        RecentEvents = _recentEvents.ToList().AsReadOnly(),
+        RecentEvents = _recentEvents.Select(e => e with { }).ToList().AsReadOnly(),
         LastError = _lastError
       };
     }
@@ -449,13 +449,25 @@ public sealed class BackgroundIdentificationService : BackgroundService
 
   /// <summary>
   /// Updates the current event record with a no-match result.
-  /// Aggregates into the existing record (increments NoMatchCount).
+  /// If the current event already has a match (song was identified), starts a new
+  /// event record so no-match periods show as separate rows in the event log.
+  /// Otherwise aggregates into the existing record (increments NoMatchCount).
   /// </summary>
   internal void UpdateCurrentEventNoMatch()
   {
     lock (_statusLock)
     {
       if (_currentEvent == null) return;
+
+      // If current event has a matched song, start a new record for the no-match period
+      if (_currentEvent.MatchCount > 0)
+      {
+        _currentEvent = new FingerprintEventRecord { AudioSource = _currentSourceName ?? "Unknown" };
+        _recentEvents.Add(_currentEvent);
+        if (_recentEvents.Count > MaxRecentEvents)
+          _recentEvents.RemoveAt(0);
+      }
+
       _currentEvent.NoMatchCount++;
       _currentEvent.Timestamp = DateTime.UtcNow;
     }
@@ -489,7 +501,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
     if (timestamps.Count == 0) return 0;
     var oldest = timestamps[0];
     var elapsed = (DateTime.UtcNow - oldest).TotalMinutes;
-    return elapsed > 0 ? timestamps.Count / elapsed : timestamps.Count;
+    return elapsed > 0 ? timestamps.Count / elapsed : 0;
   }
 
   private void FireStatusChanged()
