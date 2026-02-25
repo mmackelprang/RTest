@@ -1094,7 +1094,7 @@
                     }
                     <MudSlider T="float" Value="@GetSourceGainValue(kvp.Key)"
                                ValueChanged="@((float v) => OnSourceGainChanged(kvp.Key, v))"
-                               Min="0.0f" Max="2.0f" Step="0.05f"
+                               Min="0.0f" Max="25.0f" Step="0.1f"
                                Color="Color.Primary" Style="flex: 1;"  />
                     <MudText Style="min-width: 50px; font-family: var(--font-mono); font-size: 12px; text-align: right;">
                       @FormatGainDb(GetSourceGainValue(kvp.Key))

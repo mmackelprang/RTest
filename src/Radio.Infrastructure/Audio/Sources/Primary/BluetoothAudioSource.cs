@@ -156,69 +156,17 @@ public class BluetoothAudioSource : USBAudioSourceBase
       await InitializeAsync(cancellationToken);
     }
 
-    if (_captureDevice != null && _playbackService != null)
+    if (_captureDevice != null || SoundComponent != null)
     {
-      // Linux capture path: bridge AudioCaptureDevice → BufferedSoundGenerator → mixer
-      var engine = _playbackService.GetUnderlyingEngine();
-      var format = _playbackService.GetAudioFormat();
-
-      if (engine == null)
-      {
-        Logger.LogError("BluetoothAudioSource: SoundFlow engine not available — cannot create capture bridge");
-        _captureDevice.Start();
-        return;
-      }
-
-      _captureGenerator = new BufferedSoundGenerator<float>(engine, format, Logger, metricsCollector: MetricsCollector);
-      _captureDevice.OnAudioProcessed += OnCaptureAudioProcessed;
-      _captureDevice.Start();
-
-      _playbackId = $"bt-capture-{Guid.NewGuid():N}";
-      var success = await _playbackService.PlayComponentAsync(
-        _playbackId, _captureGenerator, Volume, cancellationToken);
-
-      if (success)
-      {
-        Logger.LogInformation("BluetoothAudioSource: capture bridge active — AudioCaptureDevice → BufferedSoundGenerator → mixer (PlaybackId={PlaybackId})", _playbackId);
-      }
-      else
-      {
-        Logger.LogError("BluetoothAudioSource: failed to register capture generator with mixer");
-      }
-    }
-    else if (_captureDevice != null)
-    {
-      // Fallback: no playback service, just start capture (audio won't reach speakers)
-      _captureDevice.Start();
-      Logger.LogWarning("BluetoothAudioSource: no playback service — capture started but audio won't reach mixer");
-    }
-    else if (SoundComponent is BufferedSoundGenerator<float> generator && _playbackService != null)
-    {
-      // WASAPI loopback capture path: register generator with SoundFlow mixer
-      _playbackId = $"bt-loopback-{Guid.NewGuid():N}";
-      var success = await _playbackService.PlayComponentAsync(
-        _playbackId, generator, Volume, cancellationToken);
-
-      if (success)
-      {
-        Logger.LogInformation("BluetoothAudioSource: WASAPI loopback generator added to mixer (PlaybackId={PlaybackId})", _playbackId);
-
-        // Start the loopback capture (with endpoint muting logic)
-        if (_bluetoothService is WindowsBluetoothService winBt)
-        {
-          winBt.StartLoopbackCapture();
-        }
-      }
-      else
-      {
-        Logger.LogError("BluetoothAudioSource: Failed to add loopback generator to SoundFlow mixer");
-      }
+      // Capture device available — route through mixer
+      await RouteCaptureThroughMixerAsync();
     }
     else
     {
-      Logger.LogWarning(
-        "BluetoothAudioSource: PlayCoreAsync — no capture path matched (captureDevice={HasCapture}, soundComponent={HasComponent}, playbackService={HasPlayback})",
-        _captureDevice != null, SoundComponent != null, _playbackService != null);
+      // No capture device yet — phone may not be connected. TryAcquireAudioCaptureAsync
+      // will route to mixer when the device connects and capture becomes available.
+      Logger.LogInformation(
+        "BluetoothAudioSource: PlayCoreAsync — no capture device yet, waiting for BT device connection");
     }
   }
 
@@ -240,6 +188,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     {
       _captureDevice.OnAudioProcessed -= OnCaptureAudioProcessed;
       _captureDevice.Stop();
+      _captureDevice = null;
     }
 
     if (_playbackId != null && _playbackService != null)
@@ -250,12 +199,22 @@ public class BluetoothAudioSource : USBAudioSourceBase
         winBt.StopLoopbackCapture();
       }
 
+      // This disposes the generator — clear our references so PlayCoreAsync re-acquires
       await _playbackService.StopAsync(_playbackId, cancellationToken);
       _playbackId = null;
-      Logger.LogInformation("BluetoothAudioSource: loopback capture stopped and generator removed from mixer");
+      Logger.LogInformation("BluetoothAudioSource: capture stopped and generator removed from mixer");
     }
 
-    await _bluetoothService.StopAsync(cancellationToken);
+    // Clear capture state — the generator was disposed by StopAsync above.
+    // Stop the capture subprocess so the cached generator is cleared too.
+    // PlayCoreAsync will re-acquire a fresh capture from LinuxBluetoothService on next play.
+    _captureGenerator = null;
+    SoundComponent = null;
+    _bluetoothService.StopAudioCapture();
+
+    // Do NOT call _bluetoothService.StopAsync() here — that powers off the BT adapter.
+    // The adapter should stay powered so phone can reconnect when BT source is re-activated.
+    // StopAsync is only called in DisposeAsyncCore when the source is fully disposed.
   }
 
   public override async Task NextAsync(CancellationToken cancellationToken = default)
@@ -352,12 +311,24 @@ public class BluetoothAudioSource : USBAudioSourceBase
         _captureDevice = audioCapture;
         State = AudioSourceState.Ready;
         Logger.LogInformation("BluetoothAudioSource: audio capture device acquired after device connected");
+
+        // If source is already Playing (activated before phone connected), route to mixer now
+        if (State == AudioSourceState.Playing || State == AudioSourceState.Ready)
+        {
+          await RouteCaptureThroughMixerAsync();
+        }
       }
       else if (capture is SoundComponent soundComponent)
       {
         SoundComponent = soundComponent;
         State = AudioSourceState.Ready;
-        Logger.LogInformation("BluetoothAudioSource: WASAPI loopback generator acquired after device connected");
+        Logger.LogInformation("BluetoothAudioSource: PipeWire capture generator acquired after device connected");
+
+        // If source is already Playing (activated before phone connected), route to mixer now
+        if (State == AudioSourceState.Playing || State == AudioSourceState.Ready)
+        {
+          await RouteCaptureThroughMixerAsync();
+        }
       }
       else
       {
@@ -370,13 +341,107 @@ public class BluetoothAudioSource : USBAudioSourceBase
     }
   }
 
-  private void OnDeviceDisconnected(object? sender, BluetoothDeviceDisconnectedEventArgs e)
+  /// <summary>
+  /// Routes the acquired capture device/generator through the SoundFlow mixer.
+  /// Called both from PlayCoreAsync and from TryAcquireAudioCaptureAsync when
+  /// capture is acquired after playback already started.
+  /// </summary>
+  private async Task RouteCaptureThroughMixerAsync()
+  {
+    if (_playbackId != null)
+    {
+      Logger.LogDebug("BluetoothAudioSource: capture already routed to mixer (PlaybackId={PlaybackId})", _playbackId);
+      return;
+    }
+
+    if (_captureDevice != null && _playbackService != null)
+    {
+      // Linux capture path: bridge AudioCaptureDevice → BufferedSoundGenerator → mixer
+      var engine = _playbackService.GetUnderlyingEngine();
+      var format = _playbackService.GetAudioFormat();
+
+      if (engine == null)
+      {
+        Logger.LogError("BluetoothAudioSource: SoundFlow engine not available — cannot create capture bridge");
+        _captureDevice.Start();
+        return;
+      }
+
+      _captureGenerator = new BufferedSoundGenerator<float>(engine, format, Logger, metricsCollector: MetricsCollector);
+      _captureDevice.OnAudioProcessed += OnCaptureAudioProcessed;
+      _captureDevice.Start();
+
+      _playbackId = $"bt-capture-{Guid.NewGuid():N}";
+      var success = await _playbackService.PlayComponentAsync(
+        _playbackId, _captureGenerator, Volume, CancellationToken.None);
+
+      if (success)
+      {
+        Logger.LogInformation("BluetoothAudioSource: capture bridge active — AudioCaptureDevice → mixer (PlaybackId={PlaybackId})", _playbackId);
+      }
+      else
+      {
+        Logger.LogError("BluetoothAudioSource: failed to register capture generator with mixer");
+        _playbackId = null;
+      }
+    }
+    else if (SoundComponent is BufferedSoundGenerator<float> generator && _playbackService != null)
+    {
+      // PipeWire/WASAPI capture path: register generator directly with mixer
+      _playbackId = $"bt-capture-{Guid.NewGuid():N}";
+      var success = await _playbackService.PlayComponentAsync(
+        _playbackId, generator, Volume, CancellationToken.None);
+
+      if (success)
+      {
+        Logger.LogInformation("BluetoothAudioSource: capture generator added to mixer (PlaybackId={PlaybackId})", _playbackId);
+
+        // Start loopback capture on Windows (Linux pw-record is already running)
+        if (_bluetoothService is WindowsBluetoothService winBt)
+        {
+          winBt.StartLoopbackCapture();
+        }
+      }
+      else
+      {
+        Logger.LogError("BluetoothAudioSource: failed to add capture generator to SoundFlow mixer");
+        _playbackId = null;
+      }
+    }
+  }
+
+  private async void OnDeviceDisconnected(object? sender, BluetoothDeviceDisconnectedEventArgs e)
   {
     Logger.LogDebug("BluetoothAudioSource: device disconnected event for {DeviceName}", e.Device.Name);
     NeedsFingerprintingLookup = false;
     _hasMediaPlayer = false;
     _btPosition = TimeSpan.Zero;
     _btDuration = null;
+    _lastCoverArtLookupKey = null;
+
+    // Remove capture from mixer and clear capture state so reconnect starts fresh
+    if (_playbackId != null && _playbackService != null)
+    {
+      try
+      {
+        await _playbackService.StopAsync(_playbackId);
+        Logger.LogDebug("BluetoothAudioSource: removed capture generator from mixer on disconnect");
+      }
+      catch (Exception ex)
+      {
+        Logger.LogDebug(ex, "BluetoothAudioSource: error removing capture from mixer on disconnect");
+      }
+      _playbackId = null;
+    }
+
+    if (_captureDevice != null)
+    {
+      _captureDevice.OnAudioProcessed -= OnCaptureAudioProcessed;
+      _captureDevice.Stop();
+      _captureDevice = null;
+    }
+    _captureGenerator = null;
+    SoundComponent = null;
 
     if (State == AudioSourceState.Playing || State == AudioSourceState.Paused)
     {

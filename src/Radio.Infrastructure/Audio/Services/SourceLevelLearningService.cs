@@ -23,6 +23,9 @@ public sealed class SourceLevelLearningService : BackgroundService
   /// <summary>Minimum gain change before applying (avoids jitter).</summary>
   private const float GainChangeThreshold = 0.02f;
 
+  /// <summary>Max auto-gain — delegates to centralized constant.</summary>
+  private const float MaxAutoGain = AudioPreferencePersistence.MaxGain;
+
   public SourceLevelLearningService(
     ILogger<SourceLevelLearningService> logger,
     IVisualizerService visualizerService,
@@ -88,7 +91,7 @@ public sealed class SourceLevelLearningService : BackgroundService
     // fully compensate and the back-calculation produces misleading values —
     // skip learning in that case to preserve the last valid measurement.
     var currentGain = _persistence.GetSourceGain(sourceType);
-    if (currentGain <= 0.1f || currentGain >= 2.0f)
+    if (currentGain <= 0.1f || currentGain >= MaxAutoGain)
       return;
     var preGainRms = monoRms / currentGain;
 
@@ -112,7 +115,7 @@ public sealed class SourceLevelLearningService : BackgroundService
 
     var suggestedGain = Math.Clamp(
       AudioPreferencePersistence.TargetRms / learnedRms.Value,
-      0.1f, 2.0f);
+      0.1f, MaxAutoGain);
 
     // Only apply if different enough from current gain (avoid jitter)
     currentGain = _persistence.GetSourceGain(sourceType);

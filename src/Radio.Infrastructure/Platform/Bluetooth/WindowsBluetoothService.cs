@@ -648,6 +648,11 @@ internal sealed class WindowsBluetoothService : IBluetoothService
         return Task.CompletedTask;
     }
 
+    public void StopAudioCapture()
+    {
+        // Windows uses WASAPI loopback — nothing to stop here (handled by StopLoopbackCapture)
+    }
+
     public async Task StartDiscoveryAsync(CancellationToken cancellationToken = default)
     {
         if (IsDiscovering)

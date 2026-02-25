@@ -263,6 +263,8 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                     _logger.LogError(ex, "Error stopping Bluetooth adapter");
                 }
             }
+
+            _started = false;
         }
 
         public async Task StartDiscoveryAsync(CancellationToken cancellationToken = default)
@@ -689,7 +691,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 try
                 {
                     // Find the PipeWire node name for this BT device
-                    var nodeName = await FindPipeWireBluetoothNodeAsync(connected.Address, cancellationToken);
+                    var (nodeName, nodeId) = await FindPipeWireBluetoothNodeAsync(connected.Address, cancellationToken);
                     if (nodeName == null)
                     {
                         _logger.LogDebug("PipeWire BT node not found for {Address} (attempt {Attempt}/{Max})",
@@ -699,8 +701,8 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                         continue;
                     }
 
-                    _logger.LogInformation("Found PipeWire BT node: {Node} (attempt {Attempt})",
-                        nodeName, attempt);
+                    _logger.LogInformation("Found PipeWire BT node: {Node} (id={NodeId}, attempt {Attempt})",
+                        nodeName, nodeId, attempt);
 
                     var generator = new BufferedSoundGenerator<float>(
                         engine, format, _logger, maxBufferSeconds: 2.0f,
@@ -717,6 +719,26 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                             "pw-record capture running (attempt {Attempt}/{Max}, PID {Pid}, target {Node})",
                             attempt, maxRetries, _captureProcess.Id, nodeName);
                         _activeGenerator = generator;
+
+                        // Set BT source node master volume to 1.0 AFTER pw-record is running
+                        // and AVRCP volume sync has settled. BlueZ sets the PipeWire node volume
+                        // to the phone's AVRCP transport volume (~0.11) during connection setup.
+                        // If we set volume too early, AVRCP resets it. A 1s delay lets AVRCP
+                        // finish, then we override with full volume for capture.
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                await Task.Delay(1000, cancellationToken);
+                                await SetPipeWireNodeVolumeAsync(nodeId);
+                            }
+                            catch (OperationCanceledException) { }
+                            catch (Exception ex)
+                            {
+                                _logger.LogDebug(ex, "Deferred volume set failed for node {NodeId}", nodeId);
+                            }
+                        }, cancellationToken);
+
                         return generator;
                     }
 
@@ -749,7 +771,11 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         /// Queries PipeWire for a bluez_input node matching the given BT address.
         /// Returns the node name (e.g. "bluez_input.D4_3A_2C_64_87_9E.2") or null.
         /// </summary>
-        private async Task<string?> FindPipeWireBluetoothNodeAsync(
+        /// <summary>
+        /// Queries PipeWire for a bluez_input node matching the given BT address.
+        /// Returns (nodeName, pipeWireId) or (null, 0) if not found.
+        /// </summary>
+        private async Task<(string? NodeName, int PipeWireId)> FindPipeWireBluetoothNodeAsync(
             string btAddress, CancellationToken cancellationToken)
         {
             // PipeWire names use underscores: "D4:3A:2C:64:87:9E" → "D4_3A_2C_64_87_9E"
@@ -772,7 +798,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 if (process == null)
                 {
                     _logger.LogWarning("Failed to start pw-cli process");
-                    return null;
+                    return (null, 0);
                 }
 
                 var output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
@@ -784,32 +810,92 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                     _logger.LogDebug("pw-cli exit={ExitCode}, stdout={StdoutLen}b, stderr={Stderr}",
                         process.ExitCode, output.Length,
                         stderr.Length > 200 ? stderr[..200] : stderr.TrimEnd());
-                    return null;
+                    return (null, 0);
                 }
 
-                // Parse pw-cli output for node.name matching our prefix
-                foreach (var line in output.Split('\n'))
+                // Parse pw-cli output for node.name matching our prefix.
+                // Format: "id 68, type PipeWire:Interface:Node/3" followed by properties.
+                var lines = output.Split('\n');
+                var lastNodeId = 0;
+                foreach (var line in lines)
                 {
                     var trimmed = line.Trim();
+
+                    // Track the current object ID: "id 68, type PipeWire:Interface:Node/3"
+                    if (trimmed.StartsWith("id ") && trimmed.Contains(", type PipeWire:Interface:Node"))
+                    {
+                        var commaIdx = trimmed.IndexOf(',');
+                        if (commaIdx > 3 && int.TryParse(trimmed[3..commaIdx], out var id))
+                            lastNodeId = id;
+                    }
+
                     if (trimmed.StartsWith("node.name = ") && trimmed.Contains(prefix))
                     {
                         // Extract: node.name = "bluez_input.D4_3A_2C_64_87_9E.2"
                         var start = trimmed.IndexOf('"') + 1;
                         var end = trimmed.LastIndexOf('"');
                         if (start > 0 && end > start)
-                            return trimmed[start..end];
+                            return (trimmed[start..end], lastNodeId);
                     }
                 }
 
                 _logger.LogDebug("pw-cli returned {Lines} lines but no node matching {Prefix}",
-                    output.Split('\n').Length, prefix);
+                    lines.Length, prefix);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to query PipeWire for BT node");
             }
 
-            return null;
+            return (null, 0);
+        }
+
+        /// <summary>
+        /// Sets the PipeWire node's master volume to 1.0 so pw-record captures at full level.
+        /// BT A2DP source nodes inherit the AVRCP transport volume from the phone (often ~0.11),
+        /// which causes very faint capture audio. We override the node-level "volume" property
+        /// via pw-cli set-param (NOT wpctl set-volume, which only sets channelVolumes).
+        /// </summary>
+        private async Task SetPipeWireNodeVolumeAsync(int pipeWireNodeId)
+        {
+            if (pipeWireNodeId <= 0) return;
+
+            try
+            {
+                // pw-cli set-param sets the node's master volume property directly.
+                // wpctl set-volume only changes channelVolumes, not the master volume
+                // that BlueZ/AVRCP sets — so we must use pw-cli here.
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "pw-cli",
+                    Arguments = $"set-param {pipeWireNodeId} Props '{{\"volume\": 1.0}}'",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = Process.Start(psi);
+                if (process != null)
+                {
+                    await process.WaitForExitAsync();
+                    if (process.ExitCode == 0)
+                    {
+                        _logger.LogInformation(
+                            "Set PipeWire BT node {NodeId} master volume to 1.0 for full capture level", pipeWireNodeId);
+                    }
+                    else
+                    {
+                        var stderr = await process.StandardError.ReadToEndAsync();
+                        _logger.LogDebug("pw-cli set-param {NodeId} failed: exit={ExitCode}, {Stderr}",
+                            pipeWireNodeId, process.ExitCode, stderr.TrimEnd());
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to set PipeWire node volume for {NodeId}", pipeWireNodeId);
+            }
         }
 
         private void StartCaptureSubprocess(
@@ -882,6 +968,11 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
                 _logger.LogInformation("pw-record capture feed loop stopped");
             }, ct);
+        }
+
+        public void StopAudioCapture()
+        {
+            StopCaptureSubprocess();
         }
 
         private void StopCaptureSubprocess()

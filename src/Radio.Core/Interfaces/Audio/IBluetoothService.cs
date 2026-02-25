@@ -83,6 +83,13 @@ public interface IBluetoothService : IAsyncDisposable
   /// </summary>
   Task<object?> GetAudioCaptureDeviceAsync(CancellationToken cancellationToken = default);
 
+  /// <summary>
+  /// Stops the audio capture subprocess and clears the cached generator.
+  /// Does NOT stop the Bluetooth adapter — the adapter stays powered and discoverable.
+  /// Call this when the BT audio source is stopped so a fresh capture can be created on re-play.
+  /// </summary>
+  void StopAudioCapture();
+
   /// <summary>Event raised when adapter state changes.</summary>
   event EventHandler<BluetoothAdapterStateChangedEventArgs>? StateChanged;
 

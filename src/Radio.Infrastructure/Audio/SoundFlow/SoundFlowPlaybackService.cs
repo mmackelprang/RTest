@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.Services;
 using SoundFlow.Abstracts;
 using SoundFlow.Abstracts.Devices;
 using SoundFlow.Components;
@@ -138,7 +139,7 @@ public class SoundFlowPlaybackService : IDisposable
         _baseVolumes[sourceId] = volume;
         gainOffset = _gainOffsets.GetValueOrDefault(sourceId, 1.0f);
       }
-      soundPlayer.Volume = Math.Clamp(volume * gainOffset, 0f, 2f);
+      soundPlayer.Volume = Math.Clamp(volume * gainOffset, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
       _logger.LogDebug("PlayFileAsync: SoundPlayer created, Volume: {Volume}, GainOffset: {Gain}", volume, gainOffset);
 
       // Add visualization tap if visualizer service is available
@@ -285,7 +286,7 @@ public class SoundFlowPlaybackService : IDisposable
         _baseVolumes[sourceId] = volume;
         streamGainOffset = _gainOffsets.GetValueOrDefault(sourceId, 1.0f);
       }
-      soundPlayer.Volume = Math.Clamp(volume * streamGainOffset, 0f, 2f);
+      soundPlayer.Volume = Math.Clamp(volume * streamGainOffset, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
 
       // Add visualization tap if visualizer service is available
       VisualizationTapModifier? tapModifier = null;
@@ -371,7 +372,7 @@ public class SoundFlowPlaybackService : IDisposable
         _baseVolumes[sourceId] = volume;
         dpGainOffset = _gainOffsets.GetValueOrDefault(sourceId, 1.0f);
       }
-      soundPlayer.Volume = Math.Clamp(volume * dpGainOffset, 0f, 2f);
+      soundPlayer.Volume = Math.Clamp(volume * dpGainOffset, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
 
       // Add visualization tap if visualizer service is available
       VisualizationTapModifier? tapModifier = null;
@@ -455,7 +456,7 @@ public class SoundFlowPlaybackService : IDisposable
         _baseVolumes[sourceId] = volume;
         compGainOffset = _gainOffsets.GetValueOrDefault(sourceId, 1.0f);
       }
-      component.Volume = Math.Clamp(volume * compGainOffset, 0f, 2f);
+      component.Volume = Math.Clamp(volume * compGainOffset, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
 
       // Add visualization tap if visualizer service is available
       VisualizationTapModifier? tapModifier = null;
@@ -686,7 +687,7 @@ public class SoundFlowPlaybackService : IDisposable
     {
       _baseVolumes[sourceId] = Math.Clamp(volume, 0f, 1f);
       var gainOffset = _gainOffsets.GetValueOrDefault(sourceId, 1.0f);
-      var effective = Math.Clamp(volume * gainOffset, 0f, 2f);
+      var effective = Math.Clamp(volume * gainOffset, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
 
       if (_activePlayers.TryGetValue(sourceId, out var player))
       {
@@ -710,10 +711,10 @@ public class SoundFlowPlaybackService : IDisposable
 
     lock (_playersLock)
     {
-      gainOffset = Math.Clamp(gainOffset, 0f, 2f);
+      gainOffset = Math.Clamp(gainOffset, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
       _gainOffsets[sourceId] = gainOffset;
       var baseVol = _baseVolumes.GetValueOrDefault(sourceId, 1.0f);
-      var effective = Math.Clamp(baseVol * gainOffset, 0f, 2f);
+      var effective = Math.Clamp(baseVol * gainOffset, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
 
       if (_activePlayers.TryGetValue(sourceId, out var player))
       {

@@ -99,7 +99,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   /// <inheritdoc/>
   public void SetSourceGain(AudioSourceType sourceType, float gain)
   {
-    gain = Math.Clamp(gain, 0f, 2f);
+    gain = Math.Clamp(gain, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
     _preferencePersistence?.SetSourceGain(sourceType, gain);
 
     // If this source is currently active, update the live playback component gain
@@ -121,7 +121,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   /// <inheritdoc/>
   public void SetSourceGainInternal(AudioSourceType sourceType, float gain)
   {
-    gain = Math.Clamp(gain, 0f, 2f);
+    gain = Math.Clamp(gain, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
 
     // If this source is currently active, update the live playback component gain
     if (_activeSource != null && _activeSource.Type == sourceType && _playbackService != null)
@@ -285,7 +285,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
           var learnedRms = _preferencePersistence.GetSourceLearnedRms(source.Type);
           if (learnedRms.HasValue && learnedRms.Value > 0.001f)
           {
-            gain = Math.Clamp(AudioPreferencePersistence.TargetRms / learnedRms.Value, 0.1f, 2.0f);
+            gain = Math.Clamp(AudioPreferencePersistence.TargetRms / learnedRms.Value, 0.1f, AudioPreferencePersistence.MaxGain);
             _preferencePersistence.SetSourceGainInternal(source.Type, gain);
           }
           else
