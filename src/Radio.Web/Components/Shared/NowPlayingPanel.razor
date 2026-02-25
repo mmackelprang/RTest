@@ -136,19 +136,27 @@
       </div>
     }
 
-    <!-- Source gain popover -->
+    <!-- Source gain popover + click-outside backdrop -->
     @if (_showGainPopover && !string.IsNullOrEmpty(_nowPlayingSourceType))
     {
-      <div style="position: absolute; top: 48px; right: 16px; z-index: 10; background: rgba(30,30,30,0.95); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 12px 16px; min-width: 220px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);">
+      <div @onclick="CloseGainPopover" style="position: fixed; inset: 0; z-index: 9;"></div>
+      <div @onclick:stopPropagation="true"
+           style="position: absolute; top: 48px; right: 16px; z-index: 10; background: rgba(30,30,30,0.95); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 12px 16px; min-width: 240px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
           <MudText Typo="Typo.body2" Style="color: var(--text-high);">@(_source ?? "Source") Level</MudText>
           <MudText Typo="Typo.caption" Style="font-family: var(--font-mono); color: var(--text-medium);">@FormatGainDb(_currentSourceGain)</MudText>
         </div>
-        <MudSlider T="float" Value="@_currentSourceGain"
-                   ValueChanged="@OnGainSliderChanged"
-                   Min="0.0f" Max="2.0f" Step="0.05f"
-                   Color="Color.Secondary" Size="Size.Small" />
-        <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-low); margin-top: 2px; font-family: var(--font-mono);">
+        <div style="display: flex; align-items: center; gap: 4px;">
+          <MudIconButton Icon="@Icons.Material.Filled.Remove" Size="Size.Small" Color="Color.Secondary"
+                         OnClick="() => NudgeGain(-0.05f)" Style="padding: 2px; min-width: 28px;" title="-0.25dB" />
+          <MudSlider T="float" Value="@_currentSourceGain"
+                     ValueChanged="@OnGainSliderChanged"
+                     Min="0.0f" Max="2.0f" Step="0.05f"
+                     Color="Color.Secondary" Size="Size.Small" Style="flex: 1;" />
+          <MudIconButton Icon="@Icons.Material.Filled.Add" Size="Size.Small" Color="Color.Secondary"
+                         OnClick="() => NudgeGain(0.05f)" Style="padding: 2px; min-width: 28px;" title="+0.25dB" />
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-low); margin-top: 2px; padding: 0 32px; font-family: var(--font-mono);">
           <span>-∞</span>
           <span>0dB</span>
           <span>+6dB</span>
@@ -512,6 +520,17 @@
   private void ToggleGainPopover()
   {
     _showGainPopover = !_showGainPopover;
+  }
+
+  private void CloseGainPopover()
+  {
+    _showGainPopover = false;
+  }
+
+  private void NudgeGain(float delta)
+  {
+    var newGain = Math.Clamp(_currentSourceGain + delta, 0f, 2f);
+    OnGainSliderChanged(newGain);
   }
 
   private void OnGainSliderChanged(float newGain)
