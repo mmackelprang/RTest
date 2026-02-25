@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Radio Console
+Comment=Grandpa Anderson's Console Radio Web UI
+Exec=google-chrome --kiosk --app=http://localhost:5002 --noerrdialogs --disable-infobars --disable-session-crashed-bubble
+Icon=audio-radio
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;
+StartupNotify=true

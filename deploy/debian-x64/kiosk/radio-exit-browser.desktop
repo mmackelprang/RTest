@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Exit Browser
+Comment=Close the Radio Console browser window
+Exec=pkill -f chrome
+Icon=application-exit
+Terminal=false
+Type=Application
+Categories=Utility;
