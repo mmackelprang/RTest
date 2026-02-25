@@ -243,4 +243,32 @@ public class AudioApiService
       return false;
     }
   }
+
+  public async Task<Dictionary<string, AutoGainInfoDto>?> GetAutoGainStatusAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      return await _httpClient.GetFromJsonAsync<Dictionary<string, AutoGainInfoDto>>("/api/audio/sourcegain/auto", cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to get auto gain status");
+      return null;
+    }
+  }
+
+  public async Task<bool> ResetSourceGainToAutoAsync(string sourceType, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var response = await _httpClient.PostAsync($"/api/audio/sourcegain/{sourceType}/reset-auto", null, cancellationToken);
+      response.EnsureSuccessStatusCode();
+      return true;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to reset source gain to auto for {SourceType}", sourceType);
+      return false;
+    }
+  }
 }

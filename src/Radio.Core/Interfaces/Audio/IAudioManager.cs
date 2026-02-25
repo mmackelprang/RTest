@@ -1,6 +1,11 @@
 namespace Radio.Core.Interfaces.Audio;
 
 /// <summary>
+/// Auto-gain status info for a single source type.
+/// </summary>
+public record AutoGainInfo(float? LearnedRms, float? SuggestedGain, string Mode, int SampleCount);
+
+/// <summary>
 /// Core interface for managing audio sources and playback.
 /// Coordinates the audio engine, mixer, and audio sources.
 /// </summary>
@@ -80,4 +85,21 @@ public interface IAudioManager : IAsyncDisposable
   /// Gets all per-source gain offsets as a dictionary.
   /// </summary>
   Dictionary<string, float> GetAllSourceGains();
+
+  /// <summary>
+  /// Sets the gain offset for a source type WITHOUT switching to manual mode.
+  /// Used by the learning service for auto-gain application.
+  /// If the source is currently active, updates live playback immediately.
+  /// </summary>
+  void SetSourceGainInternal(AudioSourceType sourceType, float gain);
+
+  /// <summary>
+  /// Resets a source to auto gain mode, clearing the manual override.
+  /// </summary>
+  void ResetSourceGainToAuto(AudioSourceType sourceType);
+
+  /// <summary>
+  /// Gets auto-gain status for all source types (learned RMS, suggested gain, mode, sample count).
+  /// </summary>
+  Dictionary<string, AutoGainInfo> GetAutoGainStatus();
 }

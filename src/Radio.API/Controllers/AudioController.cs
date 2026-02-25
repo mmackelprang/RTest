@@ -613,6 +613,44 @@ public class AudioController : ControllerBase
   }
 
   /// <summary>
+  /// Gets auto-gain status for all source types (learned RMS, suggested gain, mode, sample count).
+  /// </summary>
+  [HttpGet("sourcegain/auto")]
+  [ProducesResponseType(typeof(Dictionary<string, AutoGainInfo>), StatusCodes.Status200OK)]
+  public ActionResult<Dictionary<string, AutoGainInfo>> GetAutoGainStatus()
+  {
+    if (_audioManager == null)
+      return Ok(new Dictionary<string, AutoGainInfo>());
+
+    return Ok(_audioManager.GetAutoGainStatus());
+  }
+
+  /// <summary>
+  /// Resets a source to auto gain mode, clearing the manual override.
+  /// </summary>
+  [HttpPost("sourcegain/{sourceType}/reset-auto")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  public ActionResult ResetSourceGainToAuto(string sourceType)
+  {
+    if (_audioManager == null)
+      return StatusCode(500, new { error = "AudioManager not available" });
+
+    if (!Enum.TryParse<Radio.Core.Interfaces.Audio.AudioSourceType>(sourceType, ignoreCase: true, out var parsed))
+      return BadRequest(new { error = $"Invalid source type '{sourceType}'" });
+
+    _audioManager.ResetSourceGainToAuto(parsed);
+    _logger.LogInformation("Reset {SourceType} to auto gain mode", sourceType);
+
+    // Return the updated status for this source
+    var status = _audioManager.GetAutoGainStatus();
+    if (status.TryGetValue(parsed.ToString(), out var info))
+      return Ok(new Dictionary<string, AutoGainInfo> { [parsed.ToString()] = info });
+
+    return Ok(new { sourceType, mode = "auto" });
+  }
+
+  /// <summary>
   /// Gets the current fingerprint identification status, including recent events and throughput rates.
   /// </summary>
   [HttpGet("fingerprint/status")]
