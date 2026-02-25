@@ -4,7 +4,7 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  *
  * Aesthetic: Professional broadcast console / recording studio rack mount
- * Viewport: 1920×576px fixed kiosk display, touch-first
+ * Viewport: 1920×720px fixed kiosk display, touch-first
  * Framework: Blazor Server + MudBlazor 8.x
  *
  * Replaces: custom-theme.css, typography.css, touch-targets.css, animations.css
@@ -91,9 +91,9 @@
 
   /* ── Fixed Dimensions ── */
   --viewport-width:         1920px;
-  --viewport-height:        576px;
+  --viewport-height:        720px;
   --topbar-height:          52px;
-  --content-height:         524px;
+  --content-height:         668px;
 
   /* ── Touch Targets ── */
   --touch-min:              48px;
