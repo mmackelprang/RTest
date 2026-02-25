@@ -81,8 +81,14 @@ public sealed class SourceLevelLearningService : BackgroundService
     if (monoRms < SilenceThreshold)
       return;
 
-    // Update the EMA for this source
-    _persistence.UpdateSourceLearnedRms(sourceType, monoRms);
+    // Back-calculate pre-gain RMS to avoid feedback loop.
+    // The visualizer sees post-gain audio, so divide out the current gain offset
+    // to learn the source's intrinsic loudness rather than the corrected level.
+    var currentGain = _persistence.GetSourceGain(sourceType);
+    var preGainRms = currentGain > 0.01f ? monoRms / currentGain : monoRms;
+
+    // Update the EMA for this source (using pre-gain RMS)
+    _persistence.UpdateSourceLearnedRms(sourceType, preGainRms);
 
     // Check if source is in auto mode
     var mode = _persistence.GetSourceGainMode(sourceType);
@@ -104,8 +110,13 @@ public sealed class SourceLevelLearningService : BackgroundService
       0.1f, 2.0f);
 
     // Only apply if different enough from current gain (avoid jitter)
-    var currentGain = _persistence.GetSourceGain(sourceType);
+    currentGain = _persistence.GetSourceGain(sourceType);
     if (Math.Abs(suggestedGain - currentGain) <= GainChangeThreshold)
+      return;
+
+    // Re-check mode right before applying — closes race window where user
+    // changed gain (switching to manual) between our initial check and now
+    if (_persistence.GetSourceGainMode(sourceType) != "auto")
       return;
 
     // Apply auto-gain (internal — doesn't switch to manual mode)

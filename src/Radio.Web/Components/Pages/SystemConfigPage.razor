@@ -2544,7 +2544,7 @@
   {
     if (rms <= 0.0001f) return "-∞ dB";
     var db = 20.0 * Math.Log10(rms);
-    return $"{db:F1}dB";
+    return $"{db:F1} dB";
   }
 
   private async Task SaveFilePlayerPreferencesAsync()

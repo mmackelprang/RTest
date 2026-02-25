@@ -293,6 +293,7 @@
   private Dictionary<string, float> _sourceGainOffsets = new();
   private Dictionary<string, AutoGainInfoDto> _autoGainStatus = new();
   private System.Threading.Timer? _gainDebounceTimer;
+  private int _timerTickCount;
 
   private bool _hasValidAlbumArt =>
     !_albumArtFailed
@@ -327,6 +328,16 @@
     try
     {
       await RefreshPlaybackStateAsync();
+
+      // Refresh auto-gain status every ~30s (every 6th tick of the 5s timer)
+      _timerTickCount++;
+      if (_timerTickCount % 6 == 0)
+      {
+        await LoadSourceGainOffsetsAsync();
+        if (!string.IsNullOrEmpty(_nowPlayingSourceType))
+          _currentSourceGain = _sourceGainOffsets.TryGetValue(_nowPlayingSourceType, out var g) ? g : 1.0f;
+      }
+
       await InvokeAsync(StateHasChanged);
     }
     catch (ObjectDisposedException) { }
