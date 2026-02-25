@@ -191,7 +191,7 @@ public class AudioPreferencePersistence : IDisposable
   /// </summary>
   public void SetSourceGain(AudioSourceType sourceType, float gain)
   {
-    gain = Math.Clamp(gain, 0f, 2f);
+    gain = Math.Clamp(gain, MinGain, MaxGain);
     lock (_sourceGainPersistLock)
     {
       _sourceGainOffsets[sourceType.ToString()] = gain;
@@ -208,7 +208,7 @@ public class AudioPreferencePersistence : IDisposable
   /// </summary>
   public void SetSourceGainInternal(AudioSourceType sourceType, float gain)
   {
-    gain = Math.Clamp(gain, 0f, 2f);
+    gain = Math.Clamp(gain, MinGain, MaxGain);
     lock (_sourceGainPersistLock)
     {
       _sourceGainOffsets[sourceType.ToString()] = gain;
@@ -255,7 +255,7 @@ public class AudioPreferencePersistence : IDisposable
           var entry = store.GetEntryAsync(key).GetAwaiter().GetResult();
           if (entry != null && float.TryParse(entry.Value, CultureInfo.InvariantCulture, out var gain))
           {
-            _sourceGainOffsets[sourceType.ToString()] = Math.Clamp(gain, 0f, 2f);
+            _sourceGainOffsets[sourceType.ToString()] = Math.Clamp(gain, MinGain, MaxGain);
             restored++;
           }
         }
@@ -279,6 +279,17 @@ public class AudioPreferencePersistence : IDisposable
 
   /// <summary>Target RMS: -18 dBFS = 10^(-18/20) ≈ 0.126 linear.</summary>
   public const float TargetRms = 0.126f;
+
+  /// <summary>Minimum gain multiplier (silence).</summary>
+  public const float MinGain = 0.0f;
+
+  /// <summary>
+  /// Maximum gain multiplier. BT A2DP capture can be very quiet because PipeWire applies
+  /// the phone's AVRCP transport volume (~0.11) to the source node, resulting in -40 to
+  /// -50 dB RMS. At low phone volumes we may need 20-25x gain to normalize to the
+  /// -18 dBFS target. This is safe because the gain is applied digitally in the mixer.
+  /// </summary>
+  public const float MaxGain = 25.0f;
 
   /// <summary>Minimum samples before auto-gain is applied.</summary>
   public const int MinSamplesForAutoGain = 10;
@@ -419,7 +430,7 @@ public class AudioPreferencePersistence : IDisposable
 
       if (learnedRms.HasValue && sampleCount >= MinSamplesForAutoGain && learnedRms.Value > 0.001f)
       {
-        suggestedGain = Math.Clamp(TargetRms / learnedRms.Value, 0.1f, 2.0f);
+        suggestedGain = Math.Clamp(TargetRms / learnedRms.Value, 0.1f, MaxGain);
       }
 
       result[key] = new AutoGainInfo(learnedRms, suggestedGain, mode, sampleCount);

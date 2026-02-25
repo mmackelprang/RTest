@@ -263,6 +263,8 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                     _logger.LogError(ex, "Error stopping Bluetooth adapter");
                 }
             }
+
+            _started = false;
         }
 
         public async Task StartDiscoveryAsync(CancellationToken cancellationToken = default)
@@ -669,11 +671,10 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 return null;
             }
 
-            // Use arecord subprocess to capture from the bt_capture ALSA device.
-            // MiniAudio's ALSA capture thread doesn't work reliably with the ALSA
-            // pulse plugin (callbacks stall), but arecord's synchronous reads work.
-            // The bt_capture PCM is defined in .asoundrc and routes through the ALSA
-            // pulse plugin to PipeWire-Pulse TCP (port 4713) → bt_capture.monitor.
+            // Use pw-record to capture directly from the PipeWire bluez input node.
+            // PipeWire creates a node named "bluez_input.<ADDRESS>.<N>" when a BT A2DP
+            // source connects. pw-record --target captures from it directly — no ALSA
+            // bridge, .asoundrc, or null sink configuration needed.
             const int maxRetries = 20;
             const int retryDelayMs = 1000;
 
@@ -689,35 +690,70 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
                 try
                 {
-                    // Start arecord capture directly. If bt_capture isn't ready
-                    // yet (PipeWire hasn't created the bluez source), arecord will
-                    // exit quickly and we retry.
+                    // Find the PipeWire node name for this BT device
+                    var (nodeName, nodeId) = await FindPipeWireBluetoothNodeAsync(connected.Address, cancellationToken);
+                    if (nodeName == null)
+                    {
+                        _logger.LogDebug("PipeWire BT node not found for {Address} (attempt {Attempt}/{Max})",
+                            connected.Address, attempt, maxRetries);
+                        if (attempt < maxRetries)
+                            await Task.Delay(retryDelayMs, cancellationToken);
+                        continue;
+                    }
+
+                    _logger.LogInformation("Found PipeWire BT node: {Node} (id={NodeId}, attempt {Attempt})",
+                        nodeName, nodeId, attempt);
+
                     var generator = new BufferedSoundGenerator<float>(
                         engine, format, _logger, maxBufferSeconds: 2.0f,
                         metricsCollector: _metricsCollector);
 
-                    StartCaptureSubprocess(generator, format);
+                    StartCaptureSubprocess(generator, format, nodeName);
 
-                    // Give arecord a moment to connect and verify it's running
+                    // Give pw-record a moment to connect and verify it's running
                     await Task.Delay(500, cancellationToken);
 
                     if (_captureProcess != null && !_captureProcess.HasExited)
                     {
                         _logger.LogInformation(
-                            "arecord capture subprocess running (attempt {Attempt}/{Max}, PID {Pid})",
-                            attempt, maxRetries, _captureProcess.Id);
+                            "pw-record capture running (attempt {Attempt}/{Max}, PID {Pid}, target {Node})",
+                            attempt, maxRetries, _captureProcess.Id, nodeName);
                         _activeGenerator = generator;
+
+                        // Set BT source node master volume to 1.0 AFTER pw-record is running
+                        // and AVRCP volume sync has settled. BlueZ sets the PipeWire node volume
+                        // to the phone's AVRCP transport volume (~0.11) during connection setup.
+                        // If we set volume too early, AVRCP resets it. A 1s delay lets AVRCP
+                        // finish, then we override with full volume for capture.
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                await Task.Delay(1000, cancellationToken);
+                                await SetPipeWireNodeVolumeAsync(nodeId);
+                            }
+                            catch (OperationCanceledException) { }
+                            catch (Exception ex)
+                            {
+                                _logger.LogDebug(ex, "Deferred volume set failed for node {NodeId}", nodeId);
+                            }
+                        }, cancellationToken);
+
                         return generator;
                     }
 
-                    // arecord exited immediately — bt_capture not ready yet
-                    _logger.LogDebug("arecord exited early (attempt {Attempt}/{Max})", attempt, maxRetries);
+                    // pw-record exited immediately — read stderr for diagnostics
+                    var pwStderr = "";
+                    try { pwStderr = _captureProcess?.StandardError.ReadToEnd() ?? ""; }
+                    catch { /* ignore */ }
+                    _logger.LogDebug("pw-record exited early (attempt {Attempt}/{Max}): {Stderr}",
+                        attempt, maxRetries, pwStderr.Length > 200 ? pwStderr[..200] : pwStderr.TrimEnd());
                     StopCaptureSubprocess();
                 }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex)
                 {
-                    _logger.LogDebug(ex, "bt_capture test attempt {Attempt} failed", attempt);
+                    _logger.LogDebug(ex, "BT capture attempt {Attempt} failed", attempt);
                 }
 
                 if (attempt < maxRetries)
@@ -726,36 +762,166 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 }
             }
 
-            _logger.LogWarning("bt_capture device not accessible after {MaxRetries}s", maxRetries);
+            _logger.LogWarning("BT capture device not accessible after {MaxRetries} attempts", maxRetries);
             _metricsCollector?.Increment("bluetooth.audio_capture_errors");
             return null;
         }
 
-        private void StartCaptureSubprocess(BufferedSoundGenerator<float> generator, AudioFormat format)
+        /// <summary>
+        /// Queries PipeWire for a bluez_input node matching the given BT address.
+        /// Returns (nodeName, pipeWireId) or (null, 0) if not found.
+        /// </summary>
+        private async Task<(string? NodeName, int PipeWireId)> FindPipeWireBluetoothNodeAsync(
+            string btAddress, CancellationToken cancellationToken)
+        {
+            // PipeWire names use underscores: "D4:3A:2C:64:87:9E" → "D4_3A_2C_64_87_9E"
+            var addressUnderscored = btAddress.Replace(':', '_');
+            var prefix = $"bluez_input.{addressUnderscored}";
+
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "pw-cli",
+                    Arguments = "list-objects",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = Process.Start(psi);
+                if (process == null)
+                {
+                    _logger.LogWarning("Failed to start pw-cli process");
+                    return (null, 0);
+                }
+
+                var output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
+                var stderr = await process.StandardError.ReadToEndAsync(cancellationToken);
+                await process.WaitForExitAsync(cancellationToken);
+
+                if (process.ExitCode != 0 || output.Length == 0)
+                {
+                    _logger.LogDebug("pw-cli exit={ExitCode}, stdout={StdoutLen}b, stderr={Stderr}",
+                        process.ExitCode, output.Length,
+                        stderr.Length > 200 ? stderr[..200] : stderr.TrimEnd());
+                    return (null, 0);
+                }
+
+                // Parse pw-cli output for node.name matching our prefix.
+                // Format: "id 68, type PipeWire:Interface:Node/3" followed by properties.
+                var lines = output.Split('\n');
+                var lastNodeId = 0;
+                foreach (var line in lines)
+                {
+                    var trimmed = line.Trim();
+
+                    // Track the current object ID: "id 68, type PipeWire:Interface:Node/3"
+                    if (trimmed.StartsWith("id ") && trimmed.Contains(", type PipeWire:Interface:Node"))
+                    {
+                        var commaIdx = trimmed.IndexOf(',');
+                        if (commaIdx > 3 && int.TryParse(trimmed[3..commaIdx], out var id))
+                            lastNodeId = id;
+                    }
+
+                    if (trimmed.StartsWith("node.name = ") && trimmed.Contains(prefix))
+                    {
+                        // Extract: node.name = "bluez_input.D4_3A_2C_64_87_9E.2"
+                        var start = trimmed.IndexOf('"') + 1;
+                        var end = trimmed.LastIndexOf('"');
+                        if (start > 0 && end > start)
+                            return (trimmed[start..end], lastNodeId);
+                    }
+                }
+
+                _logger.LogDebug("pw-cli returned {Lines} lines but no node matching {Prefix}",
+                    lines.Length, prefix);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to query PipeWire for BT node");
+            }
+
+            return (null, 0);
+        }
+
+        /// <summary>
+        /// Sets the PipeWire node's master volume to 1.0 so pw-record captures at full level.
+        /// BT A2DP source nodes inherit the AVRCP transport volume from the phone (often ~0.11),
+        /// which causes very faint capture audio. We override the node-level "volume" property
+        /// via pw-cli set-param (NOT wpctl set-volume, which only sets channelVolumes).
+        /// </summary>
+        private async Task SetPipeWireNodeVolumeAsync(int pipeWireNodeId)
+        {
+            if (pipeWireNodeId <= 0) return;
+
+            try
+            {
+                // pw-cli set-param sets the node's master volume property directly.
+                // wpctl set-volume only changes channelVolumes, not the master volume
+                // that BlueZ/AVRCP sets — so we must use pw-cli here.
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "pw-cli",
+                    Arguments = $"set-param {pipeWireNodeId} Props '{{\"volume\": 1.0}}'",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = Process.Start(psi);
+                if (process != null)
+                {
+                    await process.WaitForExitAsync();
+                    if (process.ExitCode == 0)
+                    {
+                        _logger.LogInformation(
+                            "Set PipeWire BT node {NodeId} master volume to 1.0 for full capture level", pipeWireNodeId);
+                    }
+                    else
+                    {
+                        var stderr = await process.StandardError.ReadToEndAsync();
+                        _logger.LogDebug("pw-cli set-param {NodeId} failed: exit={ExitCode}, {Stderr}",
+                            pipeWireNodeId, process.ExitCode, stderr.TrimEnd());
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to set PipeWire node volume for {NodeId}", pipeWireNodeId);
+            }
+        }
+
+        private void StartCaptureSubprocess(
+            BufferedSoundGenerator<float> generator, AudioFormat format, string targetNode)
         {
             StopCaptureSubprocess();
 
             _captureCts = new CancellationTokenSource();
             var ct = _captureCts.Token;
 
+            // pw-record captures directly from a PipeWire node — no ALSA config needed.
+            // Output format: raw S16_LE stereo at 48kHz to stdout.
             _captureProcess = Process.Start(new ProcessStartInfo
             {
-                FileName = "arecord",
-                Arguments = "-D bt_capture -f S16_LE -r 48000 -c 2 -t raw -",
+                FileName = "pw-record",
+                Arguments = $"--target {targetNode} --rate 48000 --channels 2 --format s16 -",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
-                CreateNoWindow = true,
-                Environment = { ["HOME"] = "/opt/radio-console" }
+                CreateNoWindow = true
             });
 
             if (_captureProcess == null)
             {
-                _logger.LogError("Failed to start arecord subprocess");
+                _logger.LogError("Failed to start pw-record subprocess");
                 return;
             }
 
-            _logger.LogInformation("Started arecord capture subprocess (PID {Pid})", _captureProcess.Id);
+            _logger.LogInformation("Started pw-record capture (PID {Pid}, target {Node})",
+                _captureProcess.Id, targetNode);
 
             // Background task to read S16_LE data and feed float samples to generator
             _ = Task.Run(async () =>
@@ -793,11 +959,16 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 catch (OperationCanceledException) { }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "arecord capture feed loop ended");
+                    _logger.LogWarning(ex, "pw-record capture feed loop ended");
                 }
 
-                _logger.LogInformation("arecord capture subprocess feed loop stopped");
+                _logger.LogInformation("pw-record capture feed loop stopped");
             }, ct);
+        }
+
+        public void StopAudioCapture()
+        {
+            StopCaptureSubprocess();
         }
 
         private void StopCaptureSubprocess()
@@ -819,7 +990,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogDebug(ex, "Error stopping arecord subprocess");
+                    _logger.LogDebug(ex, "Error stopping capture subprocess");
                 }
                 _captureProcess.Dispose();
                 _captureProcess = null;

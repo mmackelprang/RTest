@@ -153,7 +153,7 @@
                          OnClick="() => NudgeGain(-0.05f)" Style="padding: 2px; min-width: 28px;" title="-0.25dB" />
           <MudSlider T="float" Value="@_currentSourceGain"
                      ValueChanged="@OnGainSliderChanged"
-                     Min="0.0f" Max="2.0f" Step="0.05f"
+                     Min="0.0f" Max="25.0f" Step="0.1f"
                      Color="Color.Secondary" Size="Size.Small" Style="flex: 1;" />
           <MudIconButton Icon="@Icons.Material.Filled.Add" Size="Size.Small" Color="Color.Secondary"
                          OnClick="() => NudgeGain(0.05f)" Style="padding: 2px; min-width: 28px;" title="+0.25dB" />
@@ -572,7 +572,7 @@
 
   private void NudgeGain(float delta)
   {
-    var newGain = Math.Clamp(_currentSourceGain + delta, 0f, 2f);
+    var newGain = Math.Clamp(_currentSourceGain + delta, 0f, 25f);
     OnGainSliderChanged(newGain);
   }
 

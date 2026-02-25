@@ -96,6 +96,8 @@ public sealed class MockBluetoothService : IBluetoothService
             return Task.FromResult<object?>("mock-capture-endpoint");
         }
 
+        public void StopAudioCapture() { }
+
         public ValueTask DisposeAsync()
         {
             return ValueTask.CompletedTask;

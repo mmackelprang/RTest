@@ -1,0 +1,12 @@
+[Unit]
+Description=Grant radio user access to PipeWire socket directory
+After=user-runtime-dir@1000.service
+Wants=user-runtime-dir@1000.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/setfacl -m u:radio:x /run/user/1000
+RemainAfterExit=yes
+
+[Install]
+WantedBy=radio-api.service

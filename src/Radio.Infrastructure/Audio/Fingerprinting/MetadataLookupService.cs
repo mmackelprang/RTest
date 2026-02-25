@@ -513,13 +513,19 @@ public sealed class MetadataLookupService : IMetadataLookupService
 
     try
     {
-      // Build MusicBrainz recording search query
-      var query = $"recording:\"{Uri.EscapeDataString(title)}\" AND artist:\"{Uri.EscapeDataString(artist)}\"";
+      // Strip streaming service suffixes like "- 2010 Remaster", "(Deluxe Edition)",
+      // "(feat. X)" that Spotify/Tidal append but MusicBrainz doesn't index
+      var cleanTitle = CleanStreamingTitle(title);
+
+      // Build MusicBrainz Lucene search query — escape special chars but not spaces
+      var escapedTitle = Uri.EscapeDataString(cleanTitle);
+      var escapedArtist = Uri.EscapeDataString(artist);
+      var query = $"recording:\"{escapedTitle}\" AND artist:\"{escapedArtist}\"";
       if (!string.IsNullOrWhiteSpace(album))
         query += $" AND release:\"{Uri.EscapeDataString(album)}\"";
 
       var mb = _options.MusicBrainz;
-      var url = $"{mb.BaseUrl}/recording?query={query}&fmt=json&limit=1";
+      var url = $"{mb.BaseUrl}/recording?query={query}&fmt=json&limit=5";
 
       _logger.LogDebug("Searching MusicBrainz for cover art: {Title} by {Artist}", title, artist);
 
@@ -527,27 +533,82 @@ public sealed class MetadataLookupService : IMetadataLookupService
       if (json == null) return null;
 
       var searchResult = JsonSerializer.Deserialize<MusicBrainzSearchResult>(json);
-      var recording = searchResult?.Recordings?.FirstOrDefault();
-      var releaseId = recording?.Releases?.FirstOrDefault()?.Id;
-
-      if (string.IsNullOrEmpty(releaseId))
+      var recordings = searchResult?.Recordings;
+      if (recordings == null || recordings.Count == 0)
       {
-        _logger.LogDebug("No MusicBrainz release found for '{Title}' by '{Artist}'", title, artist);
+        _logger.LogDebug("No MusicBrainz recordings found for '{Title}' by '{Artist}'", title, artist);
         return null;
       }
 
-      var coverArtUrl = await GetCoverArtUrlAsync(releaseId, ct);
-      if (!string.IsNullOrEmpty(coverArtUrl))
+      // Try multiple recordings/releases — the first may not have cover art
+      foreach (var recording in recordings)
       {
-        _logger.LogInformation("Found cover art for '{Title}' by '{Artist}': {Url}", title, artist, coverArtUrl);
+        if (recording.Releases == null) continue;
+        foreach (var release in recording.Releases)
+        {
+          if (string.IsNullOrEmpty(release.Id)) continue;
+          var coverArtUrl = await GetCoverArtUrlAsync(release.Id, ct);
+          if (!string.IsNullOrEmpty(coverArtUrl))
+          {
+            _logger.LogInformation("Found cover art for '{Title}' by '{Artist}': {Url}", title, artist, coverArtUrl);
+            return coverArtUrl;
+          }
+        }
       }
-      return coverArtUrl;
+
+      _logger.LogDebug("No cover art found across {Count} recordings for '{Title}' by '{Artist}'",
+        recordings.Count, title, artist);
+      return null;
     }
     catch (Exception ex)
     {
       _logger.LogDebug(ex, "Cover art text search failed for '{Title}' by '{Artist}'", title, artist);
       return null;
     }
+  }
+
+  /// <summary>
+  /// Strips streaming service suffixes from track titles for better MusicBrainz matching.
+  /// Spotify, Tidal, etc. append remaster/edition/feature info that MusicBrainz doesn't index.
+  /// </summary>
+  private static string CleanStreamingTitle(string title)
+  {
+    // Strip " - Remaster", " - 2010 Remaster", " - Deluxe Edition", etc.
+    var dashIdx = title.IndexOf(" - ", StringComparison.Ordinal);
+    if (dashIdx > 0)
+    {
+      var suffix = title[(dashIdx + 3)..];
+      if (suffix.Contains("Remaster", StringComparison.OrdinalIgnoreCase) ||
+          suffix.Contains("Edition", StringComparison.OrdinalIgnoreCase) ||
+          suffix.Contains("Version", StringComparison.OrdinalIgnoreCase) ||
+          suffix.Contains("Mix", StringComparison.OrdinalIgnoreCase) ||
+          suffix.Contains("Bonus", StringComparison.OrdinalIgnoreCase) ||
+          suffix.Contains("Anniversary", StringComparison.OrdinalIgnoreCase) ||
+          suffix.Contains("Mono", StringComparison.OrdinalIgnoreCase) ||
+          suffix.Contains("Stereo", StringComparison.OrdinalIgnoreCase) ||
+          suffix.Contains("Live", StringComparison.OrdinalIgnoreCase))
+      {
+        title = title[..dashIdx];
+      }
+    }
+
+    // Strip parenthesized suffixes: "(feat. X)", "(Remastered)", "(Deluxe)", etc.
+    var parenIdx = title.IndexOf(" (", StringComparison.Ordinal);
+    if (parenIdx > 0 && title.EndsWith(')'))
+    {
+      var inner = title[(parenIdx + 2)..^1];
+      if (inner.StartsWith("feat", StringComparison.OrdinalIgnoreCase) ||
+          inner.Contains("Remaster", StringComparison.OrdinalIgnoreCase) ||
+          inner.Contains("Edition", StringComparison.OrdinalIgnoreCase) ||
+          inner.Contains("Version", StringComparison.OrdinalIgnoreCase) ||
+          inner.Contains("Deluxe", StringComparison.OrdinalIgnoreCase) ||
+          inner.Contains("Bonus", StringComparison.OrdinalIgnoreCase))
+      {
+        title = title[..parenIdx];
+      }
+    }
+
+    return title.Trim();
   }
 
   /// <summary>
