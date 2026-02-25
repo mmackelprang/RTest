@@ -59,12 +59,19 @@ public class ChromaprintFingerprintService : IFingerprintService
     var tempFile = Path.Combine(Path.GetTempPath(), $"fpcalc_{Guid.NewGuid():N}.wav");
     try
     {
+      // Normalize audio to peak amplitude before fingerprinting.
+      // The audio tap captures post-mixer samples (after volume control), so at low
+      // system volumes the captured audio can be very quiet (-30dB or worse). Chromaprint
+      // needs reasonable signal levels to extract meaningful features — without normalization,
+      // quiet audio produces fingerprints too short (e.g., 75 chars vs 800+) to match.
+      var normalizedSamples = NormalizeSamples(samples.Samples);
+
       // Convert float samples to s16le bytes
-      var pcmDataLength = samples.Samples.Length * 2;
+      var pcmDataLength = normalizedSamples.Length * 2;
       var byteBuffer = new byte[pcmDataLength];
-      for (int i = 0; i < samples.Samples.Length; i++)
+      for (int i = 0; i < normalizedSamples.Length; i++)
       {
-        float sample = Math.Clamp(samples.Samples[i], -1.0f, 1.0f);
+        float sample = Math.Clamp(normalizedSamples[i], -1.0f, 1.0f);
         short pcm = (short)(sample * 32767);
         byteBuffer[i * 2] = (byte)(pcm & 0xFF);
         byteBuffer[i * 2 + 1] = (byte)((pcm >> 8) & 0xFF);
@@ -218,7 +225,7 @@ public class ChromaprintFingerprintService : IFingerprintService
         return null;
       }
 
-      _logger.LogDebug(
+      _logger.LogInformation(
         "fpcalc generated fingerprint: duration={Duration}s, hash length={HashLength}",
         result.Duration, result.Fingerprint.Length);
 
@@ -229,6 +236,51 @@ public class ChromaprintFingerprintService : IFingerprintService
       _logger.LogError(ex, "Error running fpcalc");
       return null;
     }
+  }
+
+  /// <summary>
+  /// Normalizes audio samples to peak amplitude for fingerprinting.
+  /// Captured audio may be very quiet due to low system volume (the tap is post-mixer).
+  /// Chromaprint needs reasonable signal levels to extract meaningful features.
+  /// </summary>
+  private float[] NormalizeSamples(float[] samples)
+  {
+    // Find peak amplitude
+    float peak = 0f;
+    for (int i = 0; i < samples.Length; i++)
+    {
+      var abs = Math.Abs(samples[i]);
+      if (abs > peak) peak = abs;
+    }
+
+    // If already at reasonable level or silent, no normalization needed.
+    // Only normalize when audio is significantly quiet (below -6dB / 0.5 peak),
+    // which indicates the system volume was low when the tap captured audio.
+    if (peak < 0.001f)
+    {
+      _logger.LogWarning("Audio peak is near zero ({Peak:F6}), normalization skipped", peak);
+      return samples;
+    }
+
+    if (peak > 0.5f)
+    {
+      _logger.LogDebug("Audio peak is {Peak:F3} (>0.5), normalization not needed", peak);
+      return samples;
+    }
+
+    // Normalize to 0.95 peak (leave a little headroom)
+    var gain = 0.95f / peak;
+    _logger.LogInformation(
+      "Normalizing audio for fingerprinting: peak={Peak:F4} ({PeakDb:F1}dB), gain={Gain:F1}x ({GainDb:F1}dB)",
+      peak, 20 * Math.Log10(peak), gain, 20 * Math.Log10(gain));
+
+    var normalized = new float[samples.Length];
+    for (int i = 0; i < samples.Length; i++)
+    {
+      normalized[i] = samples[i] * gain;
+    }
+
+    return normalized;
   }
 
   private string ResolveFpcalcPath(string configuredPath)
