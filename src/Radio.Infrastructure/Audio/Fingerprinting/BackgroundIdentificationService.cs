@@ -210,17 +210,57 @@ public sealed class BackgroundIdentificationService : BackgroundService
 
       _logger.LogDebug("Generated fingerprint {Id} for {Duration}s of audio in {Elapsed}ms",
         fingerprint.Id, fingerprint.DurationSeconds, fingerprintElapsed);
+
+      _logger.LogInformation(
+        "Live source fingerprint: duration={Duration}s, hash length={HashLength} chars",
+        fingerprint.DurationSeconds, fingerprint.ChromaprintHash.Length);
     }
 
-    // Lookup metadata
+    // Lookup metadata — for live sources, try multiple duration values if the initial
+    // lookup fails. AcoustID uses duration to narrow the search space, and for live
+    // captures (vinyl, radio) the capture duration (e.g., 30s) doesn't match the actual
+    // track length in the database (e.g., 220s). Try common song durations as fallbacks.
     var lookupStartTime = DateTime.UtcNow;
     _logger.LogDebug("Looking up fingerprint via {LookupService}", lookupService.GetType().Name);
-    
+
     var result = await lookupService.LookupAsync(fingerprint, ct);
     var lookupElapsed = (DateTime.UtcNow - lookupStartTime).TotalMilliseconds;
-    
+
     _logger.LogDebug("Lookup completed in {Elapsed}ms. Match={IsMatch}, Confidence={Confidence}",
       lookupElapsed, result?.IsMatch ?? false, result?.Confidence);
+
+    // For live sources: if no match with actual capture duration, try common song durations
+    if (result?.IsMatch != true && string.IsNullOrEmpty(sourceFilePath))
+    {
+      int[] fallbackDurations = [180, 210, 240, 270, 300];
+      foreach (var tryDuration in fallbackDurations)
+      {
+        if (tryDuration == fingerprint.DurationSeconds) continue;
+
+        var fallbackFingerprint = new FingerprintData
+        {
+          Id = fingerprint.Id,
+          ChromaprintHash = fingerprint.ChromaprintHash,
+          DurationSeconds = tryDuration,
+          GeneratedAt = fingerprint.GeneratedAt,
+          SourcePath = fingerprint.SourcePath
+        };
+
+        _logger.LogInformation("Retrying AcoustID with duration={Duration}s", tryDuration);
+        var fallbackResult = await lookupService.LookupAsync(fallbackFingerprint, ct);
+
+        if (fallbackResult?.IsMatch == true)
+        {
+          _logger.LogInformation(
+            "AcoustID matched with fallback duration={Duration}s (original={Original}s)",
+            tryDuration, fingerprint.DurationSeconds);
+          result = fallbackResult;
+          break;
+        }
+      }
+
+      lookupElapsed = (DateTime.UtcNow - lookupStartTime).TotalMilliseconds;
+    }
 
     // Check duplicate suppression
     if (result?.IsMatch == true && result.Metadata != null)

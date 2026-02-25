@@ -3,6 +3,7 @@
 @inject RadioApiService RadioApi
 @inject AudioStateHubService HubService
 @inject ILogger<RadioControlPanel> Logger
+@inject ISnackbar Snackbar
 @implements IAsyncDisposable
 
 <div class="rcp-root">
@@ -711,7 +712,7 @@
         await InvokeAsync(StateHasChanged);
       }
     }
-    catch { }
+    catch (Exception ex) { Logger.LogError(ex, "Error in HandleAutoGainChangedAsync"); }
   }
 
   private async Task HandleGainChangedAsync(int gain)
@@ -724,7 +725,7 @@
         await InvokeAsync(StateHasChanged);
       }
     }
-    catch { }
+    catch (Exception ex) { Logger.LogError(ex, "Error in HandleGainChangedAsync"); }
   }
 
   private void OpenFrequencyDialog()
@@ -754,7 +755,7 @@
         await InvokeAsync(StateHasChanged);
       }
     }
-    catch { }
+    catch (Exception ex) { Logger.LogError(ex, "Error in SetFrequencyAsync"); }
   }
 
   private void OpenSavePresetDialog()
@@ -768,18 +769,30 @@
 
   private async Task SavePresetAsync()
   {
+    if (_radioState == null || string.IsNullOrWhiteSpace(_presetName))
+      return;
+
     try
     {
-      if (_radioState != null && !string.IsNullOrWhiteSpace(_presetName))
+      var success = await RadioApi.SavePresetAsync(_presetName, _radioState.Frequency, _radioState.Band);
+      if (success)
       {
-        if (await RadioApi.SavePresetAsync(_presetName, _radioState.Frequency, _radioState.Band))
-        {
-          await LoadPresetsAsync();
-          _isSavePresetDialogOpen = false;
-        }
+        await LoadPresetsAsync();
+        _isSavePresetDialogOpen = false;
+        Snackbar.Add($"Preset saved: {_presetName}", Severity.Success);
+      }
+      else
+      {
+        Logger.LogWarning("SavePresetAsync returned false for {Name} at {Freq}Hz {Band}",
+          _presetName, _radioState.Frequency, _radioState.Band);
+        Snackbar.Add("Failed to save preset — check API logs", Severity.Error);
       }
     }
-    catch { }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error saving preset {Name}", _presetName);
+      Snackbar.Add($"Error saving preset: {ex.Message}", Severity.Error);
+    }
   }
 
   private async Task LoadPresetAsync(string id)
@@ -791,8 +804,15 @@
         await LoadRadioStateAsync();
         await InvokeAsync(StateHasChanged);
       }
+      else
+      {
+        Snackbar.Add("Failed to load preset", Severity.Warning);
+      }
     }
-    catch { }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error loading preset {Id}", id);
+    }
   }
 
   private async Task DeletePresetAsync(string id)
@@ -800,9 +820,15 @@
     try
     {
       if (await RadioApi.DeletePresetAsync(id))
+      {
         await LoadPresetsAsync();
+        Snackbar.Add("Preset deleted", Severity.Info);
+      }
     }
-    catch { }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error deleting preset {Id}", id);
+    }
   }
 
   private async Task CycleStepSizeAsync()

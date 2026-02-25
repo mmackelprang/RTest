@@ -4,115 +4,162 @@
 Continue feature development, hardware integration testing, and bug fixes for the Radio Console project on Ubuntu x64 and Raspberry Pi targets.
 
 ## Current Phase
-All planned phases complete. Remaining work: hardware-dependent items (D.1, D.3) and BT verification.
+Phase F — New feature work and bug fixes across 12 work items.
 
 ---
 
 ## Completed (prior sessions)
 
 All prior phases are **COMPLETE**. See git history and previous plan for details:
-- Phases 0–11.3: Full system build (audio engine, sources, outputs, API, UI, song change detection)
-- Phase A (prev): Cast design evaluation (WebSocket, pre-loaded sounds)
-- Phase B (prev): ALSA log noise suppression (SystemdConsoleFormatter + syslog levels)
-- Phase C (prev): Ubuntu x64 target setup (deploy script, setup script, app deployed, Cast verified)
-- Cast drift testing: v10 receiver drift protection (PR #217), ping endpoint + channel registration (PR #218)
-- Cast latency verified: Transit avg 87ms, buffer-ahead steady 3.0s, no drift, no stutter
-- Dual output bug fix: Cast connect now calls SetLocalOutputMuted(true), added disconnect endpoint (PR #220)
-- Architecture cleanup — AudioManager reduced from 18 params / ~1200 lines to 6 params / 472 lines:
-  - Extract PlayHistoryTracker (PR #221)
-  - Extract AudioSourceFactory (PR #222)
-  - Extract AudioPreferencePersistence + BluetoothAutoSwitchService, delete dead RestoreLastSourceAsync (PR #223)
-- Volume persistence verified on Ubuntu + Pi (survives service restarts)
-- Inline radio control panel with broadcast console styling (PR #228)
-- FM audio dropout fix — squelch silence delivery (PR #229)
-- FM audio dropout fix — async DSP processing + startup reorder (PR #230)
-- Radio scan fix — no USB restart during frequency changes (PR #231)
-- Hidden devices persistence — load from config store on startup (PR #232)
-- Ubuntu media & data setup verified (Phase A)
+- Phases 0–11.3, A–E: Full system build, Cast streaming, architecture cleanup, radio scan fix, hidden devices
+- Cast latency configurable from UI (PR #233)
+- Queue add-to-queue reliability fix (PR #234)
 
 ---
 
-## Phase A: Ubuntu Media & Data Setup ✅
+## Phase F: Stability, UX & Features
 
-### A.1 Copy Test Media Files ✅
-- [x] 28 media files already present at `/opt/radio-console/media/audio/`
-- [x] File browser API (`GET /api/files`) lists all files with metadata (artist, album, duration)
+### F.1 Investigate API SEGV Crash (Critical) 🔴
+**Status:** complete ✅
 
-### A.2 Verify File Playback ✅
-- [x] `POST /api/files/play` starts playback — verified with "All The Small Things" (Blink-182) and "Here's To The Night" (Eve 6)
-- [x] Audio output working (local speakers)
-- [ ] Cast output with file playback — not retested this session (Cast verified previously with SDR)
+Root cause: MiniAudio callback racing with SoundFlow dispose during fingerprint tap reader creation. Fixed by adding dispose guards and ensuring ring buffer readers don't outlive the engine. Service running with 0 crashes after fix deployed (PR #237).
 
-### A.3 Verify Fingerprinting ✅
-- [x] `fpcalc` v1.5.1 installed and working on Ubuntu
-- [x] Fingerprint identification working — "All the Small Things" identified at 100% confidence (from cache)
-- [x] AcoustID lookup working — "Here's To The Night" fingerprinted via AcoustID
-- [x] 358 fingerprint entries in SQLite `FingerprintCache` table
-- [x] Play history recording working — entries logged with metadata source (FileTag, Fingerprinting)
+### F.1b Fingerprint Capture Pipeline Fixes 🟡
+**Status:** complete ✅
+
+Three bugs found and fixed in the fingerprinting pipeline:
+1. **Ring buffer capture bug** — `SoundFlowAudioTap.CaptureAsync()` used sync `Read()` which filled 99% of buffer with silence in milliseconds. Fixed: use `ReadAsync()` + skip zero-only chunks.
+2. **Audio normalization** — Added peak normalization for quiet audio (<-6dB) before fingerprinting, since tap captures post-volume audio.
+3. **Multi-duration fallback** — For live sources, retry AcoustID with common song durations (180-300s) if initial lookup fails.
+
+Note: Vinyl fingerprinting still doesn't match AcoustID due to analog audio differences. Panako research spike **complete** — see `.research/panako/PANAKO-RESEARCH.md`. Recommendation: adopt Panako as secondary local fingerprint engine for analog sources (vinyl, FM radio). Estimated 5-9 days to integrate.
+
+### F.2 Log Noise Reduction 🟡
+**Status:** complete ✅
+
+Three major noise sources need attention:
+
+| Source | Rate | Fix |
+|--------|------|-----|
+| ALSA/JACK/PulseAudio stderr spam | ~9,360 lines/hour | Create `~/.asoundrc` to disable unused plugins, or `ALSA_CARD` env var |
+| Fingerprint "no match" cycle | ~480 lines/hour | Reduce to DBG for radio/BT sources (live radio rarely matches AcoustID) |
+| DirectCast chunk logging | ~36,000 lines/hour when casting | Reduce per-chunk logging to DBG |
+
+Also fix:
+- [x] `TaskCanceledException` in VisualizerPanel logged as ERR → silently caught (expected on navigation)
+- [x] `Broadcast NowPlayingChanged` periodic logs → reduced to DBG
+- [x] Album art URL changed `null → ...` on every page init → reduced to DBG
+- [x] DirectCast per-chunk diagnostics → reduced to DBG
+- [x] DirectCast silence transition logging → reduced to DBG
+
+### F.3 Fingerprint Status UI 🟢
+**Status:** pending
+
+Currently no UI shows fingerprint activity. User needs to see:
+- Whether fingerprinting is active/idle
+- Current identification status (listening, analyzing, matched, no match)
+- Last match result + confidence
+- Whether the service is healthy
+
+**Approach ideas (research needed):**
+- Small status indicator on the Now Playing panel (icon + tooltip)
+- Or a subtle status chip/badge near the transport controls
+- BackgroundIdentificationService already exposes `TrackIdentified` and `SongChanged` events
+- Need to add a new SignalR event for fingerprint progress/status (capturing, querying, result)
+
+### F.4 Volume Normalization Across Sources 🟢
+**Status:** pending
+
+File source needs soundbar volume raised significantly vs. radio which is much louder.
+
+**Options (expert analysis needed):**
+1. **Per-source gain offset** — Store a gain multiplier per AudioSourceType in config, apply in the mixer before master volume
+2. **ReplayGain** — Read ReplayGain tags from files, normalize to -14 LUFS or similar target
+3. **Automatic Gain Control (AGC)** — A new SoundModifier that maintains target RMS level with configurable attack/release
+4. **Manual per-source volume** — UI slider per source in Settings, simplest approach
+5. **Loudness normalization modifier** — EBU R128 / ITU-R BS.1770 loudness measurement + gain adjustment
+
+Recommendation: Start with option 1 (per-source gain offset with UI control) — simplest, most predictable. Add option 3 later if needed.
+
+### F.5 Waveform Visualizer: Draw From Origin 🟢
+**Status:** complete ✅
+
+Current waveform draws point-to-point lines. Change to:
+- Draw vertical lines from y=0 (origin) to sample level
+- Positive samples (above 0): one color (e.g., accent-primary / cyan)
+- Negative samples (below 0): different color (e.g., signal-amber / warm)
+- Apply to both L and R channels
+
+**File:** `src/Radio.Web/wwwroot/js/visualizer.js` lines 290-390
+
+### F.6 FM Stereo via RTL-SDR 🟢
+**Status:** complete ✅ (PR #237)
+
+Current WFM demod outputs mono (duplicated to L+R). The 240 kHz demod rate already preserves the stereo subcarrier — the information is there but discarded.
+
+**Implementation plan:**
+1. New class `StereoFmDecoder` in `RTLSDRCore/DSP/`:
+   - 19 kHz bandpass filter for pilot detection
+   - PLL or frequency doubler for 38 kHz carrier recovery
+   - L+R extraction (15 kHz LPF on composite)
+   - L-R extraction (multiply by 38 kHz carrier, 15 kHz LPF)
+   - Matrix decode: L = (L+R) + (L-R), R = (L+R) - (L-R)
+   - Two independent de-emphasis filters
+2. Modify `RadioReceiver.ProcessSamples()` for stereo WFM output
+3. Remove mono-to-stereo duplication in `SDRRadioAudioSource.OnAudioDataAvailable()`
+4. Update `AudioFormat` to 2 channels for WFM
+
+Existing DSP primitives (LowPassFilter, DeEmphasisFilter, AudioDecimator) are reusable. ~200-300 lines new code.
+
+### F.7 Ubuntu Kiosk Setup 🟢
+**Status:** pending
+
+Set up via SSH MCP on Ubuntu (`mmack@radio`):
+- [ ] Desktop shortcut/icon to launch browser in kiosk mode (`chromium --kiosk http://localhost:5002`)
+- [ ] System menu entries: "Exit Browser" (kill chromium), "Shutdown System" (sudo shutdown)
+- [ ] Touchscreen is already installed
+
+### F.8 Now Playing Panel: Larger Album Art 🟢
+**Status:** complete ✅
+
+Current: 180x180px album art centered with title/artist above.
+
+Target: Album art nearly panel-width. Song/Album/Artist metadata overlaid on art with semi-transparent background for readability.
+
+**File:** `src/Radio.Web/Components/Shared/NowPlayingPanel.razor` lines 10-46
+
+### F.9 Queue Auto-Advance + Shuffle/Repeat Indicators 🟡
+**Status:** partial ✅ (indicators done, auto-advance improved)
+
+Two issues:
+1. **Auto-advance investigation:** ✅ Root cause analyzed: `MonitorPlaybackAsync` detects EOF via position tracking (`_position >= _duration`) or `IsPlaying()` fallback. Added diagnostic logging for both paths and wrapped `NextAsync` call in try/catch to prevent silent failures during auto-advance. The logic is structurally correct — will test on hardware to confirm.
+2. **Shuffle/Repeat visual state unclear:** ✅ Active state now has cyan tinted background + border. Repeat-One mode shows dedicated RepeatOne icon.
+
+### F.10 Radio Management UI Fixes 🟡
+**Status:** partial ✅ (AGC + step size + band labels + preset save done, scan behavior pending)
+
+Five issues:
+1. **Step size not changeable** — ✅ Fixed: Clickable step label cycles through per-band AllowedStepSizes (PR #235)
+2. **Scan behavior wrong** — Backend scan logic is correct (continuous scan, 2s dwell on signal, wrap around, auto-stop). UI needs visual indicator for signal pause state. Pending.
+3. **Preset save button broken** — ✅ Fixed: Added proper error handling with ISnackbar feedback. Silent `catch { }` was swallowing errors. Now logs errors and shows toast notification on success/failure.
+4. **AGC toggle text alignment** — ✅ Fixed: `.rcp-sdr-controls .mud-switch { align-items: center; }`
+5. **Band labels overflow** — ✅ Fixed: Use short type codes (AM, FM, SW, AIR, WB, VHF) with full name as tooltip (PR #235)
+
+**File:** `src/Radio.Web/Components/Shared/RadioControlPanel.razor`
 
 ---
 
-## Phase B: Dual Audio Output Bug Fix ✅
-
-Fixed in PR #220. Cast connect now calls `SetLocalOutputMuted(true)`, added `POST /api/devices/cast/disconnect` endpoint that restores local output.
-
----
-
-## Phase C: Architecture Cleanup ✅
-
-Completed across PRs #221–#223. AudioManager reduced from 18 constructor params / ~1200 lines to 6 params / 472 lines.
-
-- **PR #221**: Extracted `PlayHistoryTracker` — subscribes to source state changes, fingerprint identification, and BT AVRCP metadata
-- **PR #222**: Extracted `AudioSourceFactory` — encapsulates all source-creation dependencies
-- **PR #223**: Extracted `AudioPreferencePersistence` (debounced volume/source saves) and `BluetoothAutoSwitchService` (auto-switch on connect, startup pre-warm). Deleted dead `RestoreLastSourceAsync`. Removed redundant `_bluetoothService.DisposeAsync()` from AudioManager.
-
-AudioManager now has 6 constructor params: `ILogger`, `IAudioEngine`, `IAudioSourceFactory`, `BackgroundIdentificationService?`, `AudioPreferencePersistence?`, `PlayHistoryTracker?`
-
----
-
-## Phase D: Hardware Integrations (on Ubuntu) — Partial ✅
+## Phase D: Hardware Integrations (carry-forward) — Partial ✅
 
 ### D.1 Phonograph (USB Turntable) ⏸️
 - [ ] Connect USB turntable to Ubuntu
 - [ ] Verify USB audio device appears in device list
 - [ ] Test VinylAudioSource playback
 
-### D.2 RTL-SDR Radio ✅
-- [x] Connect RTL-SDR dongle to Ubuntu
-- [x] Test SDR audio source — FM playback working, zero-dropout audio
-- [x] Fix FM audio dropouts — squelch silence delivery (PR #229)
-- [x] Fix FM audio dropouts — async DSP queue decouples USB reads from processing (PR #230)
-- [x] Verified 5+ minutes continuous FM at 98 MHz with zero buffer underruns
-
-### D.3 Generic USB Audio ⏸️
-- [ ] Test generic USB audio input
-- [ ] Verify hot-plug detection
-
----
-
-## Phase D.5: Radio Control Panel UI ✅
-
-- **PR #228**: Inline radio control panel with broadcast console "Command Surface" styling
-  - Band selector, DSEG frequency display, signal strength bar, tuning/scan controls, AGC controls, presets sidebar
-  - Touch-first kiosk design (1920x576px fixed viewport)
-
----
-
-## Phase E: Radio Scan Fix & UI Improvements ✅
-
-### E.1 Fix Scan Buttons ✅ (PR #231)
-- [x] Root cause: `SetFrequencyInternal` stopped/restarted USB streaming per frequency step (~300ms overhead)
-- [x] Fix: removed USB stop/restart (`rtlsdr_set_center_freq` is safe while streaming), increased dwell to 150ms
-- [x] Verified: scan up from 88 MHz found 90.1 MHz, scan down from 107 MHz found 106.9 MHz
-
-### E.2 Frequency Updates During Scan ✅ (PR #231)
-- [x] `AudioStateUpdateService` polls every 500ms and broadcasts `RadioStateChanged` via SignalR when frequency changes
-- [x] RadioControlPanel DSEG display updates live during scan
-- [x] Scan stops and holds on station when signal strength exceeds threshold
-
-### E.3 Hidden Devices Persistence ✅ (PR #232)
-- [x] Root cause: `SoundFlowDeviceManager` only loaded from `IOptionsMonitor` (appsettings.json), not SQLite config store
-- [x] Fix: `LoadDisplaySettingsFromStoreAsync()` called from `AudioEngineInitializationService.StartAsync`
+### D.3 Generic USB Audio ✅ (verified)
+- [x] Test generic USB audio input — playback, volume, source switching, visualization all working
+- [x] Stop/start bug found & fixed (PR #235) — endpoints now control active source, not just engine
+- [ ] Verify hot-plug detection (deferred — requires physical unplug/replug)
 
 ---
 
@@ -120,32 +167,26 @@ AudioManager now has 6 constructor params: `ILogger`, `IAudioEngine`, `IAudioSou
 
 | Issue | Status | Notes |
 |-------|--------|-------|
-| Scan buttons not working | **Resolved** | Fixed in PR #231 — no USB restart during freq changes |
-| Scan frequency not updating in UI | **Resolved** | Working via SignalR (PR #231) |
-| Hidden devices not persisting | **Resolved** | Load from config store on startup (PR #232) |
-| Dual audio output (local + Cast) | **Resolved** | Fixed in PR #220 |
-| Volume persistence | **Resolved** | Verified on Ubuntu + Pi (PR #223) |
-| FM audio dropouts | **Resolved** | Async DSP queue + startup reorder (PRs #229, #230) |
-| Pong not received via SharpCaster | Deferred | Channel registration works but pong never arrives; CDP workaround reliable |
-| Receiver double-counts messages | Cosmetic | 20/sec vs sender 10/sec after CDP reload; doesn't affect audio |
-| Album art proxy | **Resolved** | Verified: Web :5002 proxies to API :5000, 200 OK, path traversal blocked |
+| API SEGV every ~28 min | **New — Critical** | Native crash in MiniAudio/SoundFlow, correlates with fingerprint cycles |
+| Queue add-to-queue reliability | **Resolved** | PR #234 — response parsing, timeouts, Blazor reconnection |
+| Cast latency configurable | **Resolved** | PR #233 — DirectChannel buffer params in UI |
+| Pong not received via SharpCaster | Deferred | CDP workaround reliable |
+| Receiver double-counts messages | Cosmetic | 20/sec vs sender 10/sec after CDP reload |
 | BT play history recording | Needs verification | Fix committed, untested on hardware |
 | BT visualization data | Needs verification | Fix committed, untested on hardware |
+| JsonException deserializing RadioDeviceOptionsDto | New — Minor | Config `devices.radio` section doesn't match DTO shape |
 
 ## Design Decisions
 | Decision | Rationale |
 |----------|-----------|
-| Async DSP processing queue | USB read loop blocked by synchronous DSP caused 3.6% throughput deficit; BlockingCollection + dedicated thread eliminates it |
-| 1s pre-fill silence cushion | RTL-SDR USB device takes ~1s to start delivering data; pre-fill keeps mixer fed during startup |
-| Keep MP3 for Cast streaming | WAV requires Content-Length, incompatible with live streams |
+| Async DSP processing queue | USB read loop blocked by synchronous DSP caused 3.6% throughput deficit |
 | DirectChannel for primary Cast | Raw PCM → Base64 → JSON eliminates MP3 encode/decode gaps |
-| StandardErrorPriority=debug | Cleanest way to suppress C library noise without losing it |
-| Parameterize deploy script | Single script for both Pi (arm64) and Ubuntu (x64) targets |
+| Per-source gain offset for volume normalization | Simplest, most predictable approach; AGC can be added later |
+| Native stereo FM decoder | DSP primitives already exist in RTLSDRCore; no external library needed |
 | Use appsettings.Production.json | Deploy script overwrites appsettings.json; Production file survives deploys |
-| CDP for Cast metrics | SharpCaster pong unreliable; Chrome DevTools Protocol reads receiver globals directly |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |-------|---------|------------|
-| FM audio chronic underruns (3.6% silence) | Pre-fill buffer only | Insufficient — buffer drained after ~24s due to synchronous DSP overhead |
-| FM audio chronic underruns (3.6% silence) | Async DSP queue + startup reorder | **Fixed** — zero underruns over 5+ min (PR #230) |
+| FM audio chronic underruns (3.6% silence) | Async DSP queue + startup reorder | **Fixed** (PR #230) |
+| API SEGV every ~28 min | Under investigation | Correlates with fingerprint capture cycles |

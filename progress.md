@@ -1,5 +1,71 @@
 # Progress Log
 
+## Session: 2026-02-24 (continued) — Fingerprint Fixes, Panako Research, UI Fixes
+
+### Completed:
+- [x] F.1b: Ring buffer capture fix — sync Read() → async ReadAsync() + skip zero-only chunks
+- [x] F.1b: Audio normalization for fingerprinting — peak normalization for quiet post-mixer audio
+- [x] F.1b: Multi-duration fallback for live sources — tries 180/210/240/270/300s if initial lookup fails
+- [x] Vinyl fingerprinting investigation — confirmed AcoustID cannot match vinyl (Chromaprint hash is correct at 820+ chars but pitch/speed variance prevents matching)
+- [x] Panako research spike — comprehensive report at `.research/panako/PANAKO-RESEARCH.md`
+- [x] Captured vinyl audio samples (3x 30s recordings of "Twilight" by ELO)
+- [x] F.10: Preset save fix — added ISnackbar feedback, replaced silent catch blocks with proper error logging
+- [x] F.10: Error handling — replaced all empty `catch { }` blocks in RadioControlPanel with proper `Logger.LogError`
+- [x] F.9: Queue auto-advance investigation — added diagnostic logging to MonitorPlaybackAsync and NextAsync, wrapped NextAsync call in try/catch for better error visibility
+- [x] Sticky radio preferences — confirmed already implemented (previous session): PreferencesPersistenceService reads live radio state, SDRRadioAudioSource restores on startup
+
+### Panako Research Key Finding:
+Panako handles pitch shift +/-10% and time-stretch +/-16% — far exceeding vinyl variation (0.1-3%). Uses spectral peak landmarks with relative frequency ratios. AGPL-3.0 license, Java, self-hosted LMDB database. Recommendation: hybrid AcoustID (digital) + Panako (analog) pipeline. Est. 5-9 days to integrate.
+
+---
+
+## Session: 2026-02-24 — Phase F Planning & Initial Work
+
+### Plan:
+- Phase F: Stability, UX & Features — 10 work items (F.1-F.10)
+- Priority: F.1 (SEGV crash) is Critical, F.2 (log noise) is important, rest are features
+
+### Completed:
+- [x] Updated task_plan.md with Phase F (10 items) from user's 12 work requests
+- [x] Research: API SEGV crash analysis (28 crashes/day, ~28min interval)
+- [x] Research: Log noise sources identified (3 major: ALSA, fingerprint, DirectCast)
+- [x] Research: FM stereo feasibility confirmed (~200-300 lines new DSP code)
+- [x] Research: Codebase locations mapped for all Phase F items
+- [x] Updated findings.md with research results
+
+### Completed (implementation):
+- [x] F.2: Log noise reduction — DirectCast chunk logging → DBG, NowPlayingChanged → DBG, album art URL → DBG, VisualizerPanel TaskCanceledException silently caught
+- [x] F.5: Waveform visualizer — vertical bars from origin, cyan (positive) / amber (negative)
+- [x] F.8: Now Playing panel — large album art (340px max) with gradient-overlaid metadata, source chip in top-right
+- [x] F.9 (partial): Shuffle/Repeat indicators — active state has cyan background + border, RepeatOne icon for "One" mode
+- [x] F.10 (partial): AGC toggle alignment — `.mud-switch { align-items: center }` in SDR controls
+
+---
+
+## Session: 2026-02-22 — Queue Add-to-Queue Fix (PR #234)
+
+### Completed:
+- [x] Fixed Blazor.start() ordering in App.razor (JS deps must load before circuit start)
+- [x] Fixed reconnect dialog ID (components-reconnect-modal, not blazor-reconnect-dialog)
+- [x] Added diagnostic logging + timeouts to queue/playlist handlers
+- [x] Fixed false-positive queue success (check addedCount, not just HTTP 200)
+- [x] Added DisconnectedCircuitRetentionPeriod = 10min for kiosk reliability
+- [x] Deployed, tested, created PR #234, merged to main
+
+---
+
+## Previous Session — Cast Latency Configurable (PR #233)
+
+### Completed:
+- [x] Made DirectChannel Cast latency parameters configurable from UI
+- [x] Three new settings: MaxBufferAhead, BufferBeforePlay, ReaderLagSeconds
+- [x] Sender sends config message to receiver on connect
+- [x] Receiver handles config message (mutable defaults)
+- [x] UI controls added to Configuration page
+- [x] Created PR #233, merged to main
+
+---
+
 ## Next Session — Media Setup, Dual Output Bug, Architecture Cleanup
 
 ### Plan:

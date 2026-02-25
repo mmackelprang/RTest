@@ -1,5 +1,52 @@
 # Findings & Decisions
 
+## Session: 2026-02-24 — Phase F Planning & Research
+
+### 1. API SEGV Crash Analysis (F.1)
+- API service (radio-api) crashes with SIGSEGV (signal 11) every ~28 minutes
+- 28 crashes recorded in one day — systemd auto-restarts both services
+- Correlates with fingerprint capture cycles (~56 captures = ~28min)
+- Likely in native code: MiniAudio/SoundFlow or fpcalc subprocess
+- Investigation needed: core dumps, memory leak analysis in TappedOutputStream/FingerprintTapModifier
+
+### 2. Log Noise Sources (F.2)
+Three major noise sources identified:
+
+| Source | Rate | Fix |
+|--------|------|-----|
+| ALSA/JACK/PulseAudio stderr spam | ~9,360 lines/hour | ~/.asoundrc to disable unused plugins |
+| Fingerprint "no match" cycle | ~480 lines/hour | Reduce to DBG for radio/BT (live radio rarely matches AcoustID) |
+| DirectCast chunk logging | ~36,000 lines/hour when casting | Reduce per-chunk logging to DBG |
+
+Additional noise: TaskCanceledException in VisualizerPanel (expected on navigation), periodic "Broadcast NowPlayingChanged", album art URL null→... on page init.
+
+### 3. FM Stereo Feasibility (F.6)
+- Current WFM demod outputs mono (duplicated to L+R)
+- 240 kHz demod rate already preserves the stereo subcarrier — info is there but discarded
+- Implementation: ~200-300 lines new DSP code in `RTLSDRCore/DSP/StereoFmDecoder`
+- Reuses existing DSP primitives: LowPassFilter, DeEmphasisFilter, AudioDecimator
+- Steps: 19kHz pilot detection → 38kHz carrier recovery → L+R/L-R extraction → matrix decode
+
+### 4. Codebase Locations for Phase F Work
+- Visualizer: `src/Radio.Web/wwwroot/js/visualizer.js` lines 290-390 (waveform drawing)
+- Fingerprinting: `src/Radio.Infrastructure/Audio/Fingerprinting/BackgroundIdentificationService.cs`
+- NowPlaying: `src/Radio.Web/Components/Shared/NowPlayingPanel.razor` lines 10-46
+- RadioControl: `src/Radio.Web/Components/Shared/RadioControlPanel.razor`
+- Volume pipeline: `src/Radio.Infrastructure/Audio/SoundFlow/SoundFlowMasterMixer.cs`
+
+---
+
+## Session: 2026-02-22 — Queue Add-to-Queue Fix (PR #234)
+
+### Queue/Playlist Button Fix
+- Buttons animated (CSS :active) but handlers didn't fire on user's browsers
+- Root cause: `Blazor.start()` called before JS dependencies loaded (autostart=false mode)
+- Fixed: Moved Blazor.start() after all script tags, fixed reconnect dialog ID
+- Added diagnostic logging and 10s timeouts to queue/playlist handlers
+- Also fixed false-positive queue success (API returned addedCount:0 with HTTP 200)
+
+---
+
 ## Session: Next — Media Setup, Dual Output Bug, Architecture Cleanup
 
 ### 1. Dual Audio Output Bug — Preliminary Analysis

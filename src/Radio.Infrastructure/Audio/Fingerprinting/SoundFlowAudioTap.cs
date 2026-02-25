@@ -139,28 +139,54 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
       var buffer = new byte[bytesToRead];
       var bytesRead = 0;
 
-      // Read samples over the duration with small intervals
-      var readInterval = TimeSpan.FromMilliseconds(100);
+      // IMPORTANT: Use ReadAsync with real-time pacing, not sync Read.
+      // The ring buffer's ReadForReader returns silence (zeros) when no new
+      // audio is available. Sync Read hammers the buffer at CPU speed, filling
+      // the capture with 99% silence in milliseconds. ReadAsync paces silence
+      // reads to approximate real-time, ensuring we capture actual audio over
+      // the full duration. We also skip zero-only chunks to only accumulate
+      // real audio data.
       var stopwatch = System.Diagnostics.Stopwatch.StartNew();
       var readAttempts = 0;
+      var silenceChunks = 0;
 
       while (stopwatch.Elapsed < duration && bytesRead < bytesToRead && !ct.IsCancellationRequested)
       {
         var remaining = bytesToRead - bytesRead;
-        var read = stream.Read(buffer, bytesRead, Math.Min(remaining, 4096));
+        var chunkSize = Math.Min(remaining, 4096);
+        var tempBuffer = new byte[chunkSize];
+
+        var read = await stream.ReadAsync(tempBuffer, 0, chunkSize, ct);
         readAttempts++;
 
         if (read > 0)
         {
-          bytesRead += read;
-        }
-        else
-        {
-          await Task.Delay(readInterval, ct);
+          // Check if chunk contains actual audio (not all zeros from silence fill)
+          bool hasAudio = false;
+          for (int i = 0; i < read; i += 2)
+          {
+            if (i + 1 < read && (tempBuffer[i] != 0 || tempBuffer[i + 1] != 0))
+            {
+              hasAudio = true;
+              break;
+            }
+          }
+
+          if (hasAudio)
+          {
+            Buffer.BlockCopy(tempBuffer, 0, buffer, bytesRead, read);
+            bytesRead += read;
+          }
+          else
+          {
+            silenceChunks++;
+          }
         }
       }
 
       var captureElapsed = (DateTime.UtcNow - captureStartTime).TotalMilliseconds;
+      _logger.LogDebug("Capture loop: {Attempts} reads, {SilenceChunks} silence chunks skipped, {BytesRead} audio bytes in {Elapsed}ms",
+        readAttempts, silenceChunks, bytesRead, captureElapsed);
 
       if (bytesRead == 0)
       {

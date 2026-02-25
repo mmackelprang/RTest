@@ -344,7 +344,13 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
       if (State == AudioSourceState.Playing)
       {
+        Logger.LogInformation("🎵 FILE PLAYER: Auto-advancing to next track: {File}", Path.GetFileName(_currentFile ?? ""));
         await PlayCoreAsync(cancellationToken);
+      }
+      else
+      {
+        Logger.LogWarning("🎵 FILE PLAYER: Skipped PlayCoreAsync for next track — state is {State} (expected Playing)",
+          State);
       }
       return;
     }
@@ -731,7 +737,6 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     try
     {
       var interval = TimeSpan.FromSeconds(1);
-
       while (!cancellationToken.IsCancellationRequested)
       {
         if (State == AudioSourceState.Playing)
@@ -741,11 +746,14 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
             _position = _position.Add(interval);
             if (_position >= _duration)
             {
+              Logger.LogDebug("🎵 FILE PLAYER: Position {Position} >= Duration {Duration}, track ended",
+                _position, _duration);
               break;
             }
           }
           else if (_playbackService != null && _playbackId != null && !_playbackService.IsPlaying(_playbackId))
           {
+            Logger.LogDebug("🎵 FILE PLAYER: SoundFlow reports not playing, track ended");
             break;
           }
         }
@@ -761,7 +769,14 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
         // Auto-advance to next track. Keep state as Playing so NextAsync sees it
         // and starts playback of the next file. If no more tracks exist, NextAsync
         // calls StopAsync which sets state to Stopped.
-        await NextAsync(CancellationToken.None);
+        try
+        {
+          await NextAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+          Logger.LogError(ex, "🎵 FILE PLAYER: Error during auto-advance to next track");
+        }
       }
     }
     catch (OperationCanceledException)
