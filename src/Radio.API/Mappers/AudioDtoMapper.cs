@@ -146,6 +146,34 @@ public static class AudioDtoMapper
   }
 
   /// <summary>
+  /// Maps a FingerprintStatusSnapshot to a FingerprintStatusDto.
+  /// </summary>
+  public static FingerprintStatusDto MapToDto(this FingerprintStatusSnapshot snapshot)
+  {
+    return new FingerprintStatusDto
+    {
+      Phase = snapshot.Phase.ToString(),
+      IsEnabled = snapshot.IsEnabled,
+      FingerprintsPerMinute = Math.Round(snapshot.FingerprintsPerMinute, 1),
+      MetadataCallsPerMinute = Math.Round(snapshot.MetadataCallsPerMinute, 1),
+      LastError = snapshot.LastError,
+      RecentEvents = snapshot.RecentEvents.Select(e => new FingerprintEventDto
+      {
+        AudioSource = e.AudioSource,
+        FirstMatchAt = e.FirstMatchAt,
+        NoMatchCount = e.NoMatchCount,
+        MatchCount = e.MatchCount,
+        LastConfidence = e.LastConfidence,
+        Title = e.Title,
+        Artist = e.Artist,
+        Album = e.Album,
+        Phase = e.Phase.ToString(),
+        Timestamp = e.Timestamp
+      }).ToList()
+    };
+  }
+
+  /// <summary>
   /// Gets a metadata value as a string, handling null and type conversion.
   /// </summary>
   private static string? GetMetadataValue(IReadOnlyDictionary<string, object> metadata, string key)

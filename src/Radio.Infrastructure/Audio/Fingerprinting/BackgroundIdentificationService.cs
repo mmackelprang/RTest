@@ -91,7 +91,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
         IsEnabled = _options.Enabled,
         FingerprintsPerMinute = ComputeRate(_fingerprintTimestamps),
         MetadataCallsPerMinute = ComputeRate(_metadataCallTimestamps),
-        RecentEvents = _recentEvents.ToList().AsReadOnly(),
+        RecentEvents = _recentEvents.Select(e => e with { }).ToList().AsReadOnly(),
         LastError = _lastError
       };
     }
@@ -489,7 +489,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
     if (timestamps.Count == 0) return 0;
     var oldest = timestamps[0];
     var elapsed = (DateTime.UtcNow - oldest).TotalMinutes;
-    return elapsed > 0 ? timestamps.Count / elapsed : timestamps.Count;
+    return elapsed > 0 ? timestamps.Count / elapsed : 0;
   }
 
   private void FireStatusChanged()
