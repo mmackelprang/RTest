@@ -412,41 +412,48 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
   private async void OnDeviceDisconnected(object? sender, BluetoothDeviceDisconnectedEventArgs e)
   {
-    Logger.LogDebug("BluetoothAudioSource: device disconnected event for {DeviceName}", e.Device.Name);
-    NeedsFingerprintingLookup = false;
-    _hasMediaPlayer = false;
-    _btPosition = TimeSpan.Zero;
-    _btDuration = null;
-    _lastCoverArtLookupKey = null;
-
-    // Remove capture from mixer and clear capture state so reconnect starts fresh
-    if (_playbackId != null && _playbackService != null)
+    try
     {
-      try
+      Logger.LogDebug("BluetoothAudioSource: device disconnected event for {DeviceName}", e.Device.Name);
+      NeedsFingerprintingLookup = false;
+      _hasMediaPlayer = false;
+      _btPosition = TimeSpan.Zero;
+      _btDuration = null;
+      _lastCoverArtLookupKey = null;
+
+      // Remove capture from mixer and clear capture state so reconnect starts fresh
+      if (_playbackId != null && _playbackService != null)
       {
-        await _playbackService.StopAsync(_playbackId);
-        Logger.LogDebug("BluetoothAudioSource: removed capture generator from mixer on disconnect");
+        try
+        {
+          await _playbackService.StopAsync(_playbackId);
+          Logger.LogDebug("BluetoothAudioSource: removed capture generator from mixer on disconnect");
+        }
+        catch (Exception ex)
+        {
+          Logger.LogDebug(ex, "BluetoothAudioSource: error removing capture from mixer on disconnect");
+        }
+        _playbackId = null;
       }
-      catch (Exception ex)
+
+      if (_captureDevice != null)
       {
-        Logger.LogDebug(ex, "BluetoothAudioSource: error removing capture from mixer on disconnect");
+        _captureDevice.OnAudioProcessed -= OnCaptureAudioProcessed;
+        _captureDevice.Stop();
+        _captureDevice = null;
       }
-      _playbackId = null;
-    }
+      _captureGenerator = null;
+      SoundComponent = null;
 
-    if (_captureDevice != null)
-    {
-      _captureDevice.OnAudioProcessed -= OnCaptureAudioProcessed;
-      _captureDevice.Stop();
-      _captureDevice = null;
+      if (State == AudioSourceState.Playing || State == AudioSourceState.Paused)
+      {
+        State = AudioSourceState.Stopped;
+        SetDefaultMetadata("Bluetooth", "Bluetooth", "Bluetooth Device");
+      }
     }
-    _captureGenerator = null;
-    SoundComponent = null;
-
-    if (State == AudioSourceState.Playing || State == AudioSourceState.Paused)
+    catch (Exception ex)
     {
-      State = AudioSourceState.Stopped;
-      SetDefaultMetadata("Bluetooth", "Bluetooth", "Bluetooth Device");
+      Logger.LogError(ex, "BluetoothAudioSource: unhandled error during device disconnect cleanup");
     }
   }
 

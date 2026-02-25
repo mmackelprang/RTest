@@ -769,10 +769,6 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
         /// <summary>
         /// Queries PipeWire for a bluez_input node matching the given BT address.
-        /// Returns the node name (e.g. "bluez_input.D4_3A_2C_64_87_9E.2") or null.
-        /// </summary>
-        /// <summary>
-        /// Queries PipeWire for a bluez_input node matching the given BT address.
         /// Returns (nodeName, pipeWireId) or (null, 0) if not found.
         /// </summary>
         private async Task<(string? NodeName, int PipeWireId)> FindPipeWireBluetoothNodeAsync(
