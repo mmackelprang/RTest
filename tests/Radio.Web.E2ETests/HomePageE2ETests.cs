@@ -85,7 +85,7 @@ public class HomePageE2ETests
 
     var style = await layoutContainer.GetAttributeAsync("style");
     Assert.Contains("1920px", style);
-    Assert.Contains("576px", style);
+    Assert.Contains("720px", style);
   }
 
   [Fact]

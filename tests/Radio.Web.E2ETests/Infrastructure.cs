@@ -80,7 +80,7 @@ public class PlaywrightFixture : IAsyncLifetime
     });
     var context = await Browser.NewContextAsync(new BrowserNewContextOptions
     {
-      ViewportSize = new ViewportSize { Width = 1920, Height = 576 }
+      ViewportSize = new ViewportSize { Width = 1920, Height = 720 }
     });
     Page = await context.NewPageAsync();
     await Page.GotoAsync(BaseUrl);
