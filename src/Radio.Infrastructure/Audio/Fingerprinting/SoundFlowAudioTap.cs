@@ -33,7 +33,7 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
   }
 
   /// <inheritdoc/>
-  public string SourceName => "SoundFlow Output";
+  public string SourceName => _audioManager.ActiveSource?.Name ?? "Unknown";
 
   /// <inheritdoc/>
   public PlaySource SourceType

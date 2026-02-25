@@ -449,13 +449,25 @@ public sealed class BackgroundIdentificationService : BackgroundService
 
   /// <summary>
   /// Updates the current event record with a no-match result.
-  /// Aggregates into the existing record (increments NoMatchCount).
+  /// If the current event already has a match (song was identified), starts a new
+  /// event record so no-match periods show as separate rows in the event log.
+  /// Otherwise aggregates into the existing record (increments NoMatchCount).
   /// </summary>
   internal void UpdateCurrentEventNoMatch()
   {
     lock (_statusLock)
     {
       if (_currentEvent == null) return;
+
+      // If current event has a matched song, start a new record for the no-match period
+      if (_currentEvent.MatchCount > 0)
+      {
+        _currentEvent = new FingerprintEventRecord { AudioSource = _currentSourceName ?? "Unknown" };
+        _recentEvents.Add(_currentEvent);
+        if (_recentEvents.Count > MaxRecentEvents)
+          _recentEvents.RemoveAt(0);
+      }
+
       _currentEvent.NoMatchCount++;
       _currentEvent.Timestamp = DateTime.UtcNow;
     }
