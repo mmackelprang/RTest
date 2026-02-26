@@ -4,7 +4,7 @@
 Continue feature development, hardware integration testing, and bug fixes for the Radio Console project on Ubuntu x64 and Raspberry Pi targets.
 
 ## Current Phase
-Phase F — New feature work and bug fixes across 12 work items.
+All phases complete. Phase G merged as PR #251.
 
 ---
 
@@ -290,6 +290,46 @@ Four root causes identified and fixed:
 
 ---
 
+## Phase G: Cleanup & UX Improvements — Complete ✅ (PR #251)
+
+### G.1 Radio Scan Stop on Preset Selection ✅
+Stop active scan before tuning when loading a preset. 4-line fix in `RadioController.LoadPreset()`.
+
+### G.2 Devices Page: Show All Devices + Type Column ✅
+`GetAllDevicesWithDisplayInfoAsync()` now enumerates virtual outputs (HTTP Stream, Google Cast) and capture/input devices. Display tab shows Type column with Input/Output chips.
+
+### G.3 Metrics Time Range + PB Unit ✅
+Card values now scope to selected time range (1h/24h/7d) by deriving deltas from sparkline history. Added PB/P unit tiers to `FormatBytes()` and `FormatScaled()`.
+
+### G.4 Queue/History Panel Default Tab by Source ✅
+Defaults to Queue tab (0) for FilePlayer, History tab (1) for all other sources. Tracks user manual tab switches to avoid overriding.
+
+### G.5 Winamp-Inspired Visualizations ✅
+Three new visualizations using existing SignalR data:
+- **Spectrogram/Waterfall** — Scrolling frequency-time heatmap (spectrum data)
+- **Circular Spectrum** — Radial frequency bars from center (spectrum data)
+- **Stereo Phase Scope** — L vs R XY scatter with phosphor decay + adaptive scaling (waveform data)
+
+### G.6 Main Bar Icon Touch Behavior ✅
+Removed redundant BT settings and Cast settings icons from topbar. BT second click already navigates to `/bluetooth`. Cast second tap now opens device dialog via `HandleOutputChangeAsync()`.
+
+### G.9 Deploy Script: Kiosk Browser Lifecycle ✅
+Deploy script now kills kiosk Chrome before service restart (`pkill -f 'chrome.*kiosk'`) and relaunches it after services confirmed active.
+
+### BT Audio Fixes (added during G testing)
+
+**Clock drift compensation** — `BufferedSoundGenerator` monitors buffer level every 2s. When buffer drains below 15% with sustained downward trend, rewinds read pointer to duplicate up to 10ms of audio. Prevents underruns from BT/PipeWire vs ALSA clock drift. Also fixed `_lastUnderrunLogTime` initialization bug.
+
+**PipeWire auto-link disconnect on capture start** — WirePlumber auto-links `bluez_input` to default ALSA output when BT connects, causing echo (duplicate audio path). Now disconnects immediately when pw-record starts, plus deferred retries at 1s and 3s since WirePlumber re-creates links during AVRCP setup.
+
+**Enhanced buffer diagnostics** — Promoted periodic buffer stats from Debug to Info level with min/max buffer tracking between log intervals.
+
+### Deferred Items
+- **G.7** Cast default device verification — needs end-to-end testing on kiosk
+- **G.8** NAS mount + default path — needs NAS credentials from user
+
+---
+
 ## Phase D: Hardware Integrations (carry-forward) — Partial ✅
 
 ### D.1 Phonograph (USB Turntable) ✅
@@ -316,8 +356,10 @@ Four root causes identified and fixed:
 | BT play history recording | **Verified** | Working with pw-record capture (PR #242) |
 | BT visualization data | **Verified** | Working with pw-record capture (PR #242) |
 | JsonException deserializing RadioDeviceOptionsDto | New — Minor | Config `devices.radio` section doesn't match DTO shape |
-| Multiple audio sources playing simultaneously | New — F.14 | Observed overlapping inputs; source switch doesn't mute previous |
-| Cast + local output playing simultaneously | New — F.15 | Selecting Cast output didn't mute local soundbar on Ubuntu |
+| Multiple audio sources playing simultaneously | **Resolved** | PR #250 — source exclusivity enforced in AudioManager |
+| Cast + local output playing simultaneously | **Resolved** | PR #250 — verified correct, SetLocalOutputMuted called on Cast connect |
+| BT audio echo (PipeWire auto-link) | **Resolved** | PR #251 — disconnect auto-links on capture start |
+| BT audio clock drift / dragging | **Resolved** | PR #251 — drift compensation in BufferedSoundGenerator |
 
 ## Design Decisions
 | Decision | Rationale |
@@ -327,6 +369,8 @@ Four root causes identified and fixed:
 | Per-source gain offset for volume normalization | Simplest, most predictable approach; AGC can be added later |
 | Native stereo FM decoder | DSP primitives already exist in RTLSDRCore; no external library needed |
 | Use appsettings.Production.json | Deploy script overwrites appsettings.json; Production file survives deploys |
+| Triple auto-link disconnect (0s/1s/3s) | WirePlumber re-creates BT→speaker links during AVRCP setup; single disconnect insufficient |
+| Clock drift compensation via read-pointer rewind | Duplicating ≤10ms of recent audio is inaudible but prevents progressive buffer drain from clock mismatch |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
