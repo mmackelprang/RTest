@@ -486,6 +486,18 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
           i, rawName, displayName, isDefault, isUsb);
       }
 
+      // If MiniAudio reported devices but none is marked as default (e.g. in CI with virtual
+      // audio backends), promote the first physical output to be the default so that
+      // GetDefaultOutputDeviceAsync never returns null when devices are present.
+      if (outputDevices.Count > 0 && !outputDevices.Any(d => d.IsDefault))
+      {
+        var first = outputDevices[0];
+        outputDevices[0] = first with { IsDefault = true };
+        _logger.LogDebug(
+          "No default output device reported by MiniAudio; marking '{Name}' as default",
+          first.Name);
+      }
+
       // Always add virtual outputs for Google Cast and HTTP Stream
       // These are software outputs managed by the application
       outputDevices.Add(new AudioDeviceInfo
