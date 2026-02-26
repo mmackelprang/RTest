@@ -118,8 +118,8 @@ Write-Host "  Build complete (API: $apiSize, Web: $webSize)" -ForegroundColor Gr
 
 # --- Step 2: Stop services ---
 if (-not $NoRestart) {
-  Write-Host "[2/4] Stopping services..." -ForegroundColor Yellow
-  ssh $SshTarget "sudo systemctl stop radio-web 2>/dev/null; sudo systemctl stop radio-api 2>/dev/null; true"
+  Write-Host "[2/4] Stopping services and kiosk browser..." -ForegroundColor Yellow
+  ssh $SshTarget "sudo systemctl stop radio-web 2>/dev/null; sudo systemctl stop radio-api 2>/dev/null; pkill -f 'chrome.*kiosk' 2>/dev/null; true"
 } else {
   Write-Host "[2/4] Skipping service stop (--NoRestart)" -ForegroundColor DarkGray
 }
@@ -196,6 +196,10 @@ if (-not $NoRestart) {
   $webStatus = ssh $SshTarget "systemctl is-active radio-web 2>/dev/null"
 
   if ($apiStatus -eq "active" -and $webStatus -eq "active") {
+    # Relaunch kiosk browser with a fresh single tab
+    Write-Host "  Relaunching kiosk browser..." -ForegroundColor DarkGray
+    ssh $SshTarget "DISPLAY=:0 nohup google-chrome --kiosk --noerrdialogs --disable-infobars --disable-session-crashed-bubble --remote-debugging-port=9223 http://localhost:5002 &>/dev/null &"
+
     Write-Host ""
     Write-Host "=== Deploy successful ===" -ForegroundColor Green
     Write-Host "API: http://${TargetHost}:5000"

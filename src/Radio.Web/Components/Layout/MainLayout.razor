@@ -40,12 +40,6 @@
           <MudIcon Icon="@GetSourceIcon(source.Type)" Size="Size.Medium" />
         </div>
       }
-      @if (IsBluetoothSourceSelected())
-      {
-        <div class="route-toggle" @onclick="@(() => NavigationManager.NavigateTo("/bluetooth"))" title="Bluetooth Settings">
-          <MudIcon Icon="@Icons.Material.Filled.SettingsBluetooth" Size="Size.Medium" />
-        </div>
-      }
     </div>
 
     <div class="topbar-separator"></div>
@@ -64,18 +58,6 @@
           {
             <div class="cast-connecting" style="position:absolute; inset:0; border-radius:inherit; border: 2px solid var(--accent-primary);"></div>
           }
-        </div>
-      }
-      @if (_selectedOutputId == "google-cast" && _defaultCastDevice != null)
-      {
-        <span style="font-size: 11px; color: var(--text-low); max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-          @_defaultCastDevice.Name
-        </span>
-      }
-      @if (_selectedOutputId == "google-cast")
-      {
-        <div class="route-toggle" @onclick="@OpenCastDeviceDialog" title="Select Cast Device">
-          <MudIcon Icon="@Icons.Material.Filled.Settings" Size="Size.Medium" />
         </div>
       }
     </div>
@@ -410,7 +392,16 @@
 
   private async Task HandleOutputChangeAsync(string newOutputId)
   {
-    if (string.IsNullOrEmpty(newOutputId) || newOutputId == _selectedOutputId) return;
+    if (string.IsNullOrEmpty(newOutputId)) return;
+
+    // Second click on already-selected Cast → open device dialog
+    if (newOutputId == _selectedOutputId && newOutputId == "google-cast")
+    {
+      await OpenCastDeviceDialog();
+      return;
+    }
+
+    if (newOutputId == _selectedOutputId) return;
 
     // When selecting Google Cast with a default device, auto-connect
     if (newOutputId == "google-cast" && _defaultCastDevice != null)
@@ -510,13 +501,6 @@
   // Source availability check
   private static bool IsSourceAvailable(AudioSourceDto source) =>
     source.State != "Unavailable" && source.State != "Error";
-
-  private bool IsBluetoothSourceSelected()
-  {
-    if (_selectedSourceId == null) return false;
-    var source = _availableSources.FirstOrDefault(s => s.Id == _selectedSourceId);
-    return source?.Type == "Bluetooth";
-  }
 
   // Active page detection for nav highlighting
   private bool IsCurrentPage(string path)

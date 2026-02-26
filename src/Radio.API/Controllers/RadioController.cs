@@ -720,6 +720,10 @@ public class RadioController : ControllerBase
 
       _logger.LogInformation("Loading preset '{Name}': {Band} {Frequency} Hz", preset.Name, preset.Band, preset.Frequency);
 
+      // Stop any active scan before tuning to the preset frequency
+      if (radioSource.IsScanning)
+        await radioSource.StopScanAsync();
+
       await radioSource.SetBandAsync(preset.Band);
       await radioSource.SetFrequencyAsync(new Frequency((long)preset.Frequency));
 

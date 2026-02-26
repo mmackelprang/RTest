@@ -585,6 +585,8 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
       try
       {
         engine.UpdateAudioDevicesInfo();
+
+        // Playback (output) devices
         var playbackDevices = engine.PlaybackDevices;
         for (int i = 0; i < playbackDevices.Length; i++)
         {
@@ -605,6 +607,58 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
             IsHidden = isHidden,
             FriendlyNameOverride = friendlyOverride,
             Type = AudioDeviceType.Output,
+            IsDefault = device.IsDefault,
+            IsUSBDevice = isUsb
+          });
+        }
+
+        // Virtual output devices (HTTP Stream, Google Cast)
+        result.Add(new DeviceDisplayInfo
+        {
+          DeviceId = "http-stream",
+          RawName = "HTTP Audio Stream",
+          DisplayName = ApplyFriendlyName("HTTP Audio Stream"),
+          IsHidden = IsDeviceHidden("HTTP Audio Stream"),
+          FriendlyNameOverride = _displayOptions.DeviceFriendlyNames.TryGetValue("HTTP Audio Stream", out var httpFn) ? httpFn : null,
+          Type = AudioDeviceType.Output,
+          IsDefault = false,
+          IsUSBDevice = false
+        });
+
+        var castRawName = "Google Cast";
+        result.Add(new DeviceDisplayInfo
+        {
+          DeviceId = "google-cast",
+          RawName = castRawName,
+          DisplayName = ApplyFriendlyName(castRawName),
+          IsHidden = IsDeviceHidden(castRawName),
+          FriendlyNameOverride = _displayOptions.DeviceFriendlyNames.TryGetValue(castRawName, out var castFn) ? castFn : null,
+          Type = AudioDeviceType.Output,
+          IsDefault = false,
+          IsUSBDevice = false
+        });
+
+        // Capture (input) devices
+        var captureDevices = engine.CaptureDevices;
+        for (int i = 0; i < captureDevices.Length; i++)
+        {
+          var device = captureDevices[i];
+          var rawName = string.IsNullOrWhiteSpace(device.Name)
+            ? "Default Audio Input"
+            : device.Name;
+          var isHidden = IsDeviceHidden(rawName);
+          var displayName = ApplyFriendlyName(rawName);
+          var isUsb = rawName.Contains("USB", StringComparison.OrdinalIgnoreCase);
+          var friendlyOverride = _displayOptions.DeviceFriendlyNames.TryGetValue(rawName, out var capFn) ? capFn : null;
+
+          result.Add(new DeviceDisplayInfo
+          {
+            DeviceId = $"capture-{i}",
+            RawName = rawName,
+            DisplayName = displayName,
+            IsHidden = isHidden,
+            FriendlyNameOverride = friendlyOverride,
+            Type = AudioDeviceType.Input,
             IsDefault = device.IsDefault,
             IsUSBDevice = isUsb
           });

@@ -152,6 +152,7 @@
   private string? _selectedCategory;
   private List<string> _categories = new();
   private Dictionary<string, List<double>> _sparklineData = new();
+  private Dictionary<string, List<MetricHistoryDto>> _sparklineHistory = new();
 
   protected override async Task OnInitializedAsync()
   {
@@ -190,6 +191,7 @@
     _timeRange = timeRange;
     await SavePreferenceAsync("timeRange", timeRange);
     await LoadSparklineDataAsync();
+    UpdateCardValuesFromSparklines();
     if (!string.IsNullOrWhiteSpace(_selectedMetric))
       await ViewMetricDetailsAsync(_selectedMetric);
   }
@@ -203,6 +205,7 @@
       await LoadSnapshotsAsync();
       UpdateCategories();
       await LoadSparklineDataAsync();
+      UpdateCardValuesFromSparklines();
     }
     finally { _loading = false; }
   }
@@ -244,18 +247,55 @@
       {
         var history = await MetricsApi.GetMetricHistoryAsync(key, start, end, resolution);
         if (history != null && history.Count > 1)
-          return (key, points: history.Select(h => h.Value).ToList());
+          return (key, points: history.Select(h => h.Value).ToList(), history: (List<MetricHistoryDto>?)history);
       }
       catch { }
-      return (key, points: (List<double>?)null);
+      return (key, points: (List<double>?)null, history: (List<MetricHistoryDto>?)null);
     });
 
     var results = await Task.WhenAll(tasks);
     _sparklineData.Clear();
-    foreach (var (key, points) in results)
+    _sparklineHistory.Clear();
+    foreach (var (key, points, history) in results)
     {
       if (points != null)
         _sparklineData[key] = points;
+      if (history != null)
+        _sparklineHistory[key] = history;
+    }
+  }
+
+  /// <summary>
+  /// Derives time-range-scoped card values from sparkline history data.
+  /// Counters (bytes, count, total): use last - first to show period delta.
+  /// Gauges (usage, ratio, percent, memory): use the latest value.
+  /// </summary>
+  private void UpdateCardValuesFromSparklines()
+  {
+    if (_snapshots == null || _sparklineHistory.Count == 0) return;
+
+    foreach (var (key, history) in _sparklineHistory)
+    {
+      if (history.Count < 2) continue;
+
+      var keyLower = key.ToLowerInvariant();
+      var isCounter = keyLower.Contains("count") || keyLower.Contains("total") ||
+                      keyLower.Contains("bytes") || keyLower.Contains("sent") ||
+                      keyLower.Contains("received") || keyLower.Contains("played") ||
+                      keyLower.Contains("requests") || keyLower.Contains("errors");
+
+      if (isCounter)
+      {
+        // For counters, show the delta over the time range
+        var first = history.First().Value;
+        var last = history.Last().Value;
+        _snapshots[key] = Math.Max(0, last - first);
+      }
+      else
+      {
+        // For gauges, show the latest value in the range
+        _snapshots[key] = history.Last().Value;
+      }
     }
   }
 
@@ -365,7 +405,9 @@
       return $"{bytes / (1024 * 1024):F3} MB";
     if (abs < 1024L * 1024 * 1024 * 1024)
       return $"{bytes / (1024L * 1024 * 1024):F3} GB";
-    return $"{bytes / (1024L * 1024 * 1024 * 1024):F3} TB";
+    if (abs < 1024L * 1024 * 1024 * 1024 * 1024)
+      return $"{bytes / (1024L * 1024 * 1024 * 1024):F3} TB";
+    return $"{bytes / (1024L * 1024 * 1024 * 1024 * 1024):F3} PB";
   }
 
   private static string FormatScaled(double value)
@@ -384,7 +426,9 @@
       return $"{value / 1_000_000:F3} M";
     if (abs < 1_000_000_000_000)
       return $"{value / 1_000_000_000:F3} G";
-    return $"{value / 1_000_000_000_000:F3} T";
+    if (abs < 1_000_000_000_000_000)
+      return $"{value / 1_000_000_000_000:F3} T";
+    return $"{value / 1_000_000_000_000_000:F3} P";
   }
 
   private static string FormatDuration(double value, string key)
