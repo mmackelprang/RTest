@@ -57,4 +57,32 @@ public class SystemApiService
       return null;
     }
   }
+
+  public async Task<bool> PowerOffSystemAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var response = await _httpClient.PostAsync("/api/system/poweroff", null, cancellationToken);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to power off system");
+      return false;
+    }
+  }
+
+  public async Task<bool> RestartServicesAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var response = await _httpClient.PostAsync("/api/system/restart-services", null, cancellationToken);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to restart services");
+      return false;
+    }
+  }
 }

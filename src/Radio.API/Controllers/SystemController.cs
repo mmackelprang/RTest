@@ -500,4 +500,104 @@ public class SystemController : ControllerBase
     
     return Ok(new { message = "Shutdown initiated" });
   }
+
+  /// <summary>
+  /// Powers off the entire system (Linux only).
+  /// Requires the service user to have passwordless sudo for systemctl poweroff,
+  /// or polkit authorization for org.freedesktop.login1.power-off.
+  /// </summary>
+  [HttpPost("poweroff")]
+  [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+  [ProducesResponseType(typeof(object), StatusCodes.Status400BadRequest)]
+  public IActionResult PowerOff()
+  {
+    if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+    {
+      return BadRequest(new { error = "System power off is only supported on Linux" });
+    }
+
+    _logger.LogWarning("System power off requested via API");
+
+    Task.Run(async () =>
+    {
+      try
+      {
+        await Task.Delay(1500); // Allow response to be sent
+        _logger.LogInformation("Executing system power off...");
+
+        var psi = new ProcessStartInfo("systemctl", "poweroff")
+        {
+          RedirectStandardOutput = true,
+          RedirectStandardError = true,
+          UseShellExecute = false,
+        };
+
+        using var proc = Process.Start(psi);
+        if (proc != null)
+        {
+          await proc.WaitForExitAsync();
+          if (proc.ExitCode != 0)
+          {
+            var stderr = await proc.StandardError.ReadToEndAsync();
+            _logger.LogError("systemctl poweroff failed (exit {ExitCode}): {Error}", proc.ExitCode, stderr);
+          }
+        }
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "Failed to execute system power off");
+      }
+    });
+
+    return Ok(new { message = "System power off initiated" });
+  }
+
+  /// <summary>
+  /// Restarts the radio-api and radio-web systemd services (Linux only).
+  /// </summary>
+  [HttpPost("restart-services")]
+  [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+  [ProducesResponseType(typeof(object), StatusCodes.Status400BadRequest)]
+  public IActionResult RestartServices()
+  {
+    if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+    {
+      return BadRequest(new { error = "Service restart is only supported on Linux" });
+    }
+
+    _logger.LogWarning("Service restart requested via API");
+
+    Task.Run(async () =>
+    {
+      try
+      {
+        await Task.Delay(1500); // Allow response to be sent
+        _logger.LogInformation("Restarting radio services...");
+
+        var psi = new ProcessStartInfo("sudo", "systemctl restart radio-api radio-web")
+        {
+          RedirectStandardOutput = true,
+          RedirectStandardError = true,
+          UseShellExecute = false,
+        };
+
+        using var proc = Process.Start(psi);
+        if (proc != null)
+        {
+          await proc.WaitForExitAsync();
+          if (proc.ExitCode != 0)
+          {
+            var stderr = await proc.StandardError.ReadToEndAsync();
+            _logger.LogError("Service restart failed (exit {ExitCode}): {Error}", proc.ExitCode, stderr);
+          }
+        }
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "Failed to restart services");
+      }
+    });
+
+    return Ok(new { message = "Service restart initiated" });
+  }
 }

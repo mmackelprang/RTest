@@ -122,6 +122,28 @@
           </MudCard>
         </MudItem>
       </MudGrid>
+
+      @if (OperatingSystem.IsLinux())
+      {
+        <MudDivider Class="my-4" />
+        <MudGrid Spacing="3">
+          <MudItem xs="12">
+            <MudText Typo="Typo.h6" Class="mb-2">System Actions</MudText>
+          </MudItem>
+          <MudItem xs="6" md="3">
+            <MudButton Variant="Variant.Filled" Color="Color.Warning" FullWidth="true" Size="Size.Large"
+                       StartIcon="@Icons.Material.Filled.Refresh" OnClick="RestartServicesAsync">
+              Restart Services
+            </MudButton>
+          </MudItem>
+          <MudItem xs="6" md="3">
+            <MudButton Variant="Variant.Filled" Color="Color.Error" FullWidth="true" Size="Size.Large"
+                       StartIcon="@Icons.Material.Filled.PowerSettingsNew" OnClick="ShutdownSystemAsync">
+              Shutdown System
+            </MudButton>
+          </MudItem>
+        </MudGrid>
+      }
     </MudTabPanel>
 
     <!-- Tab 2: Configuration Management -->
@@ -2992,6 +3014,38 @@
         Logger.LogError(ex, "Error importing configuration");
         Snackbar.Add($"Error importing: {ex.Message}", Severity.Error);
       }
+    }
+  }
+
+  private async Task RestartServicesAsync()
+  {
+    var confirmed = await DialogService.ShowMessageBox(
+      "Restart Services",
+      "Restart radio-api and radio-web services? The UI will disconnect briefly.",
+      yesText: "Restart", cancelText: "Cancel");
+
+    if (confirmed == true)
+    {
+      Snackbar.Add("Restarting services...", Severity.Info);
+      var ok = await SystemApi.RestartServicesAsync();
+      if (!ok)
+        Snackbar.Add("Failed to restart services", Severity.Error);
+    }
+  }
+
+  private async Task ShutdownSystemAsync()
+  {
+    var confirmed = await DialogService.ShowMessageBox(
+      "Shutdown System",
+      "Power off the system? You will need physical access to turn it back on.",
+      yesText: "Shutdown", cancelText: "Cancel");
+
+    if (confirmed == true)
+    {
+      Snackbar.Add("System shutting down...", Severity.Warning);
+      var ok = await SystemApi.PowerOffSystemAsync();
+      if (!ok)
+        Snackbar.Add("Failed to power off system", Severity.Error);
     }
   }
 
