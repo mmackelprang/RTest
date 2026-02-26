@@ -86,6 +86,18 @@ public class PlayHistoryTracker : IDisposable
     if (source != _getActiveSource())
       return;
 
+    // For Bluetooth sources, delay briefly to let AVRCP metadata arrive.
+    // Without this, the entry gets recorded with the device name (e.g., "Pixel 8 Pro")
+    // as the title because AVRCP metadata is asynchronous and arrives after the
+    // Playing state change.
+    if (source.Type == AudioSourceType.Bluetooth)
+    {
+      await Task.Delay(2000);
+      // Re-check that this source is still active after the delay
+      if (source != _getActiveSource() || source.State != AudioSourceState.Playing)
+        return;
+    }
+
     _logger.LogInformation(
       "Source {SourceName} transitioned to Playing, recording play history",
       source.Name);
