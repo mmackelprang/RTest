@@ -79,9 +79,18 @@
       <!-- Scanning indicator -->
       @if (_radioState.IsScanning)
       {
-        <div class="rcp-scanning">
-          SCANNING @_radioState.ScanDirection
-        </div>
+        @if ((_radioState.SignalStrength ?? 0) >= 30)
+        {
+          <div class="rcp-scan-signal">
+            SIGNAL @(_radioState.SignalStrength)%
+          </div>
+        }
+        else
+        {
+          <div class="rcp-scanning">
+            SCANNING @_radioState.ScanDirection?.ToUpperInvariant()
+          </div>
+        }
       }
 
       <!-- Tuning + Scan Controls -->
@@ -553,9 +562,28 @@
     animation: rcp-blink 0.8s infinite;
   }
 
+  .rcp-scan-signal {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--signal-green);
+    letter-spacing: 0.2em;
+    text-shadow: 0 0 12px rgba(74, 222, 128, 0.5);
+    padding: 4px 16px;
+    border: 1px solid rgba(74, 222, 128, 0.3);
+    border-radius: 3px;
+    background: rgba(74, 222, 128, 0.06);
+    animation: rcp-pulse 1.5s ease-in-out infinite;
+  }
+
   @@keyframes rcp-blink {
     0%, 40% { opacity: 1; }
     50%, 90% { opacity: 0.2; }
+  }
+
+  @@keyframes rcp-pulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 8px rgba(74, 222, 128, 0.15); }
+    50% { opacity: 0.7; box-shadow: 0 0 16px rgba(74, 222, 128, 0.3); }
   }
 
   /* ── Tuning Controls — Hardware Buttons with Bevel ── */
