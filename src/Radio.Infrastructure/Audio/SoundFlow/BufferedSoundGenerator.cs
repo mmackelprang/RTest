@@ -54,6 +54,10 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     private long _underrunSamplesSinceLastLog;
     private int _underrunCountSinceLastLog;
 
+    // Buffer level tracking between log intervals
+    private int _minBufferSinceLastLog = int.MaxValue;
+    private int _maxBufferSinceLastLog;
+
     // Clock drift compensation: when producer (e.g., BT/PipeWire) runs on a different
     // clock than consumer (MiniAudio/ALSA), the buffer slowly drains or fills. We
     // periodically check the buffer level and duplicate a frame of samples when the
@@ -197,6 +201,10 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             _count -= toRead;
             _totalSamplesOutput += toRead;
 
+            // Track min/max buffer levels between log intervals
+            if (_count < _minBufferSinceLastLog) _minBufferSinceLastLog = _count;
+            if (_count > _maxBufferSinceLastLog) _maxBufferSinceLastLog = _count;
+
             if (_overflowStrategy == BufferOverflowStrategy.Block && toRead > 0)
             {
                 Monitor.PulseAll(_bufferLock);
@@ -307,7 +315,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                     }
                 }
 
-                _logger.LogDebug(
+                _logger.LogInformation(
                     "🔄 Clock drift compensation: duplicated {Samples} samples (buffer: {Level}→{NewLevel}/{Capacity}, total compensated: {Total})",
                     deficit, currentLevel, currentLevel + deficit, _maxBufferSamples, _totalSamplesCompensated);
             }
@@ -331,9 +339,21 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             // Don't log if completely idle (no received samples ever)
             if (_totalSamplesReceived > 0)
             {
-                _logger.LogDebug(
-                    "Buffered audio ({Type}): received={Received}, output={Output}, dropped={Dropped}, compensated={Compensated}, buffered={Buffered}",
-                    typeof(T).Name, _totalSamplesReceived, _totalSamplesOutput, _totalSamplesDropped, _totalSamplesCompensated, currentBuffer);
+                var minBuf = _minBufferSinceLastLog == int.MaxValue ? currentBuffer : _minBufferSinceLastLog;
+                var maxBuf = _maxBufferSinceLastLog;
+                var fillPct = (double)currentBuffer / _maxBufferSamples * 100.0;
+                var minPct = (double)minBuf / _maxBufferSamples * 100.0;
+
+                _logger.LogInformation(
+                    "📊 Buffer ({Type}): fill={FillPct:F1}% ({Buffered}/{Capacity}), min={MinBuf} ({MinPct:F1}%), max={MaxBuf}, " +
+                    "recv={Received}, out={Output}, drop={Dropped}, comp={Compensated}, under={Underruns}",
+                    typeof(T).Name, fillPct, currentBuffer, _maxBufferSamples,
+                    minBuf, minPct, maxBuf,
+                    _totalSamplesReceived, _totalSamplesOutput,
+                    _totalSamplesDropped, _totalSamplesCompensated, _underrunCount);
+
+                _minBufferSinceLastLog = currentBuffer;
+                _maxBufferSinceLastLog = currentBuffer;
                 _lastLogTime = now;
 
                 // Report metrics (outside lock — reads of long fields are safe for approximate values)

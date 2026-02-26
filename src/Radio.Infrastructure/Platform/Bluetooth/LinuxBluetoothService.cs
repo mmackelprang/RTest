@@ -727,17 +727,31 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                         // to the phone's AVRCP transport volume (~0.11) during connection setup.
                         // If we set volume too early, AVRCP resets it. A 1s delay lets AVRCP
                         // finish, then we override with full volume for capture.
+                        // Also disconnect PipeWire's auto-link from BT input to the default
+                        // output sink — WirePlumber creates this automatically when a BT device
+                        // connects, causing a quiet echo (duplicate audio path to speakers).
+                        // Disconnect auto-link immediately (WirePlumber may have already created it)
+                        DisconnectPipeWireBtAutoLinks(nodeName);
+
+                        var capturedNodeName = nodeName;
                         _ = Task.Run(async () =>
                         {
                             try
                             {
+                                // Delayed disconnect + volume: WirePlumber re-creates links during
+                                // AVRCP setup, so we disconnect again after settling.
                                 await Task.Delay(1000, cancellationToken);
                                 await SetPipeWireNodeVolumeAsync(nodeId);
+                                DisconnectPipeWireBtAutoLinks(capturedNodeName);
+
+                                // Third attempt: WirePlumber can be slow on some BT codecs
+                                await Task.Delay(2000, cancellationToken);
+                                DisconnectPipeWireBtAutoLinks(capturedNodeName);
                             }
                             catch (OperationCanceledException) { }
                             catch (Exception ex)
                             {
-                                _logger.LogDebug(ex, "Deferred volume set failed for node {NodeId}", nodeId);
+                                _logger.LogDebug(ex, "Deferred volume/link setup failed for node {NodeId}", nodeId);
                             }
                         }, cancellationToken);
 
