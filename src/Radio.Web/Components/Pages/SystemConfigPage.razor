@@ -126,7 +126,7 @@
 
     <!-- Tab 2: Configuration Management -->
     <MudTabPanel Text="Configuration" Icon="@Icons.Material.Filled.Tune">
-      <MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-2">
+      <MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-2" Style="max-width: 900px;">
         
         <!-- Audio Configuration -->
         <MudTabPanel Text="Audio">
@@ -1260,11 +1260,12 @@
 
     <!-- Tab 6: Secrets -->
     <MudTabPanel Text="Secrets" Icon="@Icons.Material.Filled.Lock">
+      <div style="max-width: 720px;">
       <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
         <strong>Security Notice:</strong> Secrets are sensitive credentials. Values are masked by default and encrypted server-side. Only enter secrets in secure environments.
         Secrets must be explicitly saved using the "Save Secrets" button (not auto-saved).
       </MudAlert>
-      
+
       <MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-2">
         
         <!-- TTS Secrets -->
@@ -1364,6 +1365,7 @@
         </MudTabPanel>
 
       </MudTabs>
+      </div>
     </MudTabPanel>
 
     <!-- Tab 7: Store Management -->

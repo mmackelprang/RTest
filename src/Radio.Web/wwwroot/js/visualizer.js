@@ -4,7 +4,6 @@
 export const visualizer = {
   canvases: {},
   animationFrames: {},
-  upsTracking: {}, // Track updates per second for each canvas
 
   // Initialize a canvas for visualization
   init: function (canvasId, width, height) {
@@ -20,8 +19,14 @@ export const visualizer = {
       return false;
     }
 
-    canvas.width = width;
-    canvas.height = height;
+    // Auto-size from container if dimensions not provided (fallback to known panel size)
+    const parent = canvas.parentElement;
+    const actualWidth = width || (parent && parent.clientWidth > 0 ? parent.clientWidth : 710);
+    const actualHeight = height || (parent && parent.clientHeight > 0 ? parent.clientHeight : 640);
+    canvas.width = actualWidth;
+    canvas.height = actualHeight;
+    width = actualWidth;
+    height = actualHeight;
 
     this.canvases[canvasId] = {
       canvas: canvas,
@@ -35,13 +40,6 @@ export const visualizer = {
       targetScaleFactor: 1.0
     };
 
-    // Initialize UPS tracking for this canvas
-    this.upsTracking[canvasId] = {
-      timestamps: [],
-      currentUPS: 0,
-      lastUPSUpdate: Date.now()
-    };
-
     console.log(`Initialized canvas ${canvasId} (${width}x${height})`);
     return true;
   },
@@ -53,51 +51,6 @@ export const visualizer = {
 
     const { ctx, width, height } = canvasData;
     ctx.clearRect(0, 0, width, height);
-  },
-
-  // Track update and calculate UPS
-  trackUpdate: function (canvasId) {
-    const tracking = this.upsTracking[canvasId];
-    if (!tracking) return;
-
-    const now = Date.now();
-    tracking.timestamps.push(now);
-
-    // Keep only last 60 timestamps (enough for 1 second of data at high rates)
-    if (tracking.timestamps.length > 60) {
-      tracking.timestamps.shift();
-    }
-
-    // Update UPS calculation every second
-    if (now - tracking.lastUPSUpdate >= 1000) {
-      // Calculate UPS from timestamps in the last second
-      const oneSecondAgo = now - 1000;
-      const recentTimestamps = tracking.timestamps.filter(t => t >= oneSecondAgo);
-      tracking.currentUPS = recentTimestamps.length;
-      tracking.lastUPSUpdate = now;
-    }
-  },
-
-  // Draw UPS indicator
-  drawUPSIndicator: function (ctx, width, height, ups) {
-    // Determine color based on performance
-    let color;
-    if (ups > 30) {
-      color = '#4ADE80'; // Green
-    } else if (ups >= 15) {
-      color = '#F0A830'; // Amber
-    } else {
-      color = '#F87171'; // Red
-    }
-
-    // Draw in bottom-left corner
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    ctx.fillRect(5, height - 25, 120, 20);
-    
-    ctx.fillStyle = color;
-    ctx.font = '14px Inter, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText(`Updates: ${ups}/sec`, 10, height - 10);
   },
 
   // Update dynamic VU meter scaling
@@ -140,14 +93,24 @@ export const visualizer = {
     canvasData.scaleFactor += (canvasData.targetScaleFactor - canvasData.scaleFactor) * transitionSpeed;
   },
 
+  // Lazy-resize: fix canvas if it was initialized before parent had layout
+  ensureCanvasSize: function (canvasData) {
+    if (canvasData.width > 0 && canvasData.height > 0) return;
+    const parent = canvasData.canvas.parentElement;
+    const w = parent && parent.clientWidth > 0 ? parent.clientWidth : 710;
+    const h = parent && parent.clientHeight > 0 ? parent.clientHeight : 640;
+    canvasData.canvas.width = w;
+    canvasData.canvas.height = h;
+    canvasData.width = w;
+    canvasData.height = h;
+  },
+
   // Draw VU meter
   drawVUMeter: function (canvasId, leftPeak, rightPeak, leftRms, rightRms, isClipping) {
     const canvasData = this.canvases[canvasId];
     if (!canvasData) return;
-    
-    // Track this update for UPS calculation
-    this.trackUpdate(canvasId);
-    
+    this.ensureCanvasSize(canvasData);
+
     // Validate and clamp inputs
     leftPeak = Math.max(0, Math.min(1, leftPeak || 0));
     rightPeak = Math.max(0, Math.min(1, rightPeak || 0));
@@ -183,22 +146,6 @@ export const visualizer = {
     // Draw right meter
     this.drawMeter(ctx, meterX + meterWidth + spacing, meterY, meterWidth, meterHeight, rightPeak, rightRms, isClipping, 'Right');
     
-    // Draw scale factor indicator (top-right corner)
-    if (scaleFactor > 1.01) { // Only show if scaled
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-      ctx.fillRect(width - 85, 5, 80, 25);
-      
-      ctx.fillStyle = '#5CD4E8';
-      ctx.font = '14px Inter, sans-serif';
-      ctx.textAlign = 'right';
-      ctx.fillText(`×${scaleFactor.toFixed(2)}`, width - 10, 22);
-    }
-    
-    // Draw UPS indicator
-    const tracking = this.upsTracking[canvasId];
-    if (tracking) {
-      this.drawUPSIndicator(ctx, width, height, tracking.currentUPS);
-    }
   },
 
   drawMeter: function (ctx, x, y, width, height, peak, rms, isClipping, label) {
@@ -290,9 +237,7 @@ export const visualizer = {
   drawWaveform: function (canvasId, leftSamples, rightSamples) {
     const canvasData = this.canvases[canvasId];
     if (!canvasData) return;
-
-    // Track this update for UPS calculation
-    this.trackUpdate(canvasId);
+    this.ensureCanvasSize(canvasData);
 
     const { ctx, width, height } = canvasData;
     
@@ -327,12 +272,6 @@ export const visualizer = {
     ctx.textAlign = 'left';
     ctx.fillText('Left', 10, 20);
     ctx.fillText('Right', 10, channelHeight + 20);
-    
-    // Draw UPS indicator
-    const tracking = this.upsTracking[canvasId];
-    if (tracking) {
-      this.drawUPSIndicator(ctx, width, height, tracking.currentUPS);
-    }
   },
 
   drawWaveformChannel: function (ctx, samples, x, y, width, height, colorPositive, colorNegative) {
@@ -383,9 +322,7 @@ export const visualizer = {
   drawSpectrum: function (canvasId, magnitudes, frequencies) {
     const canvasData = this.canvases[canvasId];
     if (!canvasData) return;
-
-    // Track this update for UPS calculation
-    this.trackUpdate(canvasId);
+    this.ensureCanvasSize(canvasData);
 
     const { ctx, width, height } = canvasData;
     
@@ -438,12 +375,6 @@ export const visualizer = {
         ctx.fillText(label, labelX, height - 5);
       }
     });
-    
-    // Draw UPS indicator
-    const tracking = this.upsTracking[canvasId];
-    if (tracking) {
-      this.drawUPSIndicator(ctx, width, height, tracking.currentUPS);
-    }
   },
 
   interpolateColor: function (color1, color2, t) {

@@ -86,7 +86,7 @@
       {
         _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/visualizer.js");
 
-        var success = await _jsModule.InvokeAsync<bool>("visualizer.init", "visualizer-panel-canvas", 650, 400);
+        var success = await _jsModule.InvokeAsync<bool>("visualizer.init", "visualizer-panel-canvas", 0, 0);
         if (success)
         {
           _isInitialized = true;
