@@ -137,6 +137,20 @@ public class PlayHistoryTracker : IDisposable
         _logger.LogWarning("ITrackMetadataRepository not available, play history entry will lack track metadata");
       }
 
+      // Skip duplicate entries — same title+artist played within 5 minutes
+      if (!string.IsNullOrWhiteSpace(metadata.Title) && !string.IsNullOrWhiteSpace(metadata.Artist))
+      {
+        var isDuplicate = await playHistoryRepository.ExistsRecentlyPlayedAsync(
+          metadata.Title, metadata.Artist, withinMinutes: 5);
+        if (isDuplicate)
+        {
+          _logger.LogDebug(
+            "Skipping duplicate play history entry for '{Title}' by '{Artist}' (recently played)",
+            metadata.Title, metadata.Artist);
+          return;
+        }
+      }
+
       var entryId = Guid.NewGuid().ToString();
       var entry = new PlayHistoryEntry
       {

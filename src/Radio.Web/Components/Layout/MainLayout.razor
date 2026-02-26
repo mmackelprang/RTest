@@ -47,13 +47,17 @@
     <!-- Output Routing: Icon toggle group -->
     <div class="route-group">
       <span class="route-label">OUT</span>
-      @foreach (var output in _availableOutputs)
+      @foreach (var output in _availableOutputs.OrderBy(o => o.Id.Equals("google-cast", StringComparison.OrdinalIgnoreCase) ? 1 : 0))
       {
-        <div class="route-toggle @(output.Id == _selectedOutputId ? "route-active" : "")"
+        <div class="route-toggle @(output.Id == _selectedOutputId ? "route-active" : "") @(output.Id.Equals("google-cast", StringComparison.OrdinalIgnoreCase) ? "route-cast-output" : "")"
              @onclick="@(() => HandleOutputChangeAsync(output.Id))"
              title="@output.Name"
              style="position: relative;">
           <MudIcon Icon="@GetOutputIcon(output)" Size="Size.Medium" />
+          @if (output.Id.Equals("google-cast", StringComparison.OrdinalIgnoreCase) && _defaultCastDevice != null)
+          {
+            <span class="cast-device-label">@_defaultCastDevice.Name</span>
+          }
           @if (output.Id == "google-cast" && _isCastConnecting)
           {
             <div class="cast-connecting" style="position:absolute; inset:0; border-radius:inherit; border: 2px solid var(--accent-primary);"></div>
@@ -576,8 +580,8 @@
 
   private static string GetOutputIcon(AudioDeviceDto device)
   {
-    if (device.Name.Contains("Cast", StringComparison.OrdinalIgnoreCase) ||
-        device.Name.Contains("Chromecast", StringComparison.OrdinalIgnoreCase))
+    // Use device ID for Cast detection — name gets replaced with cast device name
+    if (device.Id.Equals("google-cast", StringComparison.OrdinalIgnoreCase))
       return Icons.Material.Filled.Cast;
     if (device.Name.Contains("HTTP", StringComparison.OrdinalIgnoreCase) ||
         device.Name.Contains("Stream", StringComparison.OrdinalIgnoreCase))
