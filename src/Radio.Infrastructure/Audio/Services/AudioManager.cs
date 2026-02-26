@@ -23,7 +23,6 @@ public class AudioManager : IAudioManager, IAsyncDisposable
 
   // State
   private IAudioSource? _activeSource;
-  private IAudioSource? _previousSource; // Track previous source for delayed cleanup
   private readonly Dictionary<AudioSourceType, IAudioSource> _sourceCache = new();
   private readonly SemaphoreSlim _switchLock = new(1, 1);
   private readonly SemaphoreSlim _createLock = new(1, 1);
@@ -207,18 +206,34 @@ public class AudioManager : IAudioManager, IAsyncDisposable
       var mixer = _audioEngine.GetMasterMixer();
       var oldSource = _activeSource;
 
-      // Determine if old source should keep playing during transition
-      bool shouldKeepOldSourcePlaying = oldSource != null &&
-                                         oldSource != source &&
-                                         (oldSource.State == AudioSourceState.Playing ||
-                                          oldSource.State == AudioSourceState.Paused);
-
-      if (shouldKeepOldSourcePlaying)
+      // Stop the old source immediately to prevent simultaneous playback.
+      // Only one primary source should ever produce audio at a time.
+      if (oldSource != null && oldSource != source &&
+          (oldSource.State == AudioSourceState.Playing ||
+           oldSource.State == AudioSourceState.Paused))
       {
         _logger.LogInformation(
-          "Keeping old source {OldSource} playing during transition to {NewSource}",
-          oldSource!.Name, source.Name);
-        _previousSource = oldSource;
+          "Stopping old source {OldSource} before switching to {NewSource}",
+          oldSource.Name, source.Name);
+
+        try
+        {
+          if (oldSource is IPrimaryAudioSource oldPrimary)
+          {
+            await oldPrimary.StopAsync(cancellationToken);
+          }
+
+          // Remove from mixer so its audio components are disconnected
+          if (mixer.GetActiveSources().Contains(oldSource))
+          {
+            mixer.RemoveSource(oldSource);
+            _logger.LogInformation("Removed old source {SourceName} from mixer", oldSource.Name);
+          }
+        }
+        catch (Exception ex)
+        {
+          _logger.LogWarning(ex, "Error stopping old source {SourceName} during switch", oldSource.Name);
+        }
       }
 
       // Ensure the new source is in the mixer
@@ -229,7 +244,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
         mixer.AddSource(source);
       }
 
-      // Update the active source reference early so new source becomes "active"
+      // Update the active source reference
       _activeSource = source;
 
       // Reset song change detection state for the new source
@@ -260,15 +275,11 @@ public class AudioManager : IAudioManager, IAsyncDisposable
             "Starting playback on new source: {SourceName}",
             source.Name);
           await newPrimary.PlayAsync(cancellationToken);
-
-          // Cleanup of the old source (stop + mixer removal) is handled centrally
-          // in the StateChanged event handler when the new source transitions to Playing.
-          // This avoids duplicate cleanup paths and potential race conditions.
         }
         else if (!canAutoPlay)
         {
           _logger.LogInformation(
-            "Source {SourceName} requires content selection before playback. Old source will keep playing until new content starts.",
+            "Source {SourceName} requires content selection before playback",
             source.Name);
         }
       }
@@ -457,10 +468,10 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   }
 
   /// <summary>
-  /// Handles source state changes for previous source cleanup when a new source starts playing.
+  /// Handles source state changes. Logs state transitions for diagnostics.
   /// Play history recording is handled separately by PlayHistoryTracker.
   /// </summary>
-  private async void OnSourceStateChanged(object? sender, AudioSourceStateChangedEventArgs e)
+  private void OnSourceStateChanged(object? sender, AudioSourceStateChangedEventArgs e)
   {
     if (sender is not IAudioSource source)
       return;
@@ -468,59 +479,6 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     _logger.LogInformation(
       "Source state changed: {SourceName} ({SourceType}) {OldState} -> {NewState}, IsActiveSource={IsActive}",
       source.Name, source.Type, e.PreviousState, e.NewState, source == _activeSource);
-
-    // Clean up previous source when active source starts playing
-    if (e.NewState == AudioSourceState.Playing && source == _activeSource && _previousSource != null)
-    {
-      await _switchLock.WaitAsync();
-      try
-      {
-        // Double-check after acquiring lock (state may have changed)
-        if (source != _activeSource || _previousSource == null)
-          return;
-
-        // Guard: Prevent cleaning up the active source if it was also tracked as previous
-        if (_previousSource == _activeSource || _previousSource.Id == _activeSource.Id)
-        {
-          _logger.LogInformation("Active source and previous source are the same. Skipping cleanup.");
-          _previousSource = null;
-          return;
-        }
-
-        _logger.LogInformation(
-          "Active source {ActiveSource} is now playing. Cleaning up previous source {PreviousSource}",
-          source.Name, _previousSource.Name);
-
-        try
-        {
-          var mixer = _audioEngine.GetMasterMixer();
-
-          // Stop the previous source
-          if (_previousSource is IPrimaryAudioSource previousPrimary)
-          {
-            await previousPrimary.StopAsync();
-            _logger.LogInformation("Stopped previous source: {SourceName}", _previousSource.Name);
-          }
-
-          // Remove previous source from mixer
-          if (mixer.GetActiveSources().Contains(_previousSource))
-          {
-            mixer.RemoveSource(_previousSource);
-            _logger.LogInformation("Removed previous source {SourceName} from mixer", _previousSource.Name);
-          }
-
-          _previousSource = null;
-        }
-        catch (Exception ex)
-        {
-          _logger.LogError(ex, "Failed to clean up previous source");
-        }
-      }
-      finally
-      {
-        _switchLock.Release();
-      }
-    }
   }
 
   /// <inheritdoc/>
