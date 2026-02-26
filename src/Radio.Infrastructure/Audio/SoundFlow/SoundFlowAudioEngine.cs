@@ -181,23 +181,48 @@ public class SoundFlowAudioEngine : IAudioEngine
 
       if (playbackDevices.Length > 0)
       {
-        // Find the best playback device, skipping null/discard devices.
-        // MiniAudio often lists a null backend "Discard all samples" device at
-        // index 0, which silently drops all audio. We prefer a real device.
-        var deviceIndex = 0;
-        var deviceInfo = playbackDevices[0];
+        // Log all available devices for diagnostics
         for (int i = 0; i < playbackDevices.Length; i++)
         {
-          var name = playbackDevices[i].Name ?? "";
-          if (name.Contains("Discard all samples", StringComparison.OrdinalIgnoreCase) ||
-              name.Contains("generate zero samples", StringComparison.OrdinalIgnoreCase))
+          _logger.LogInformation("  Playback device [{Index}]: {Name} (IsDefault={IsDefault})",
+            i, playbackDevices[i].Name ?? "(null)", playbackDevices[i].IsDefault);
+        }
+
+        // Select the best playback device with this priority:
+        // 1. System default device (IsDefault=true)
+        // 2. First real device (skip null/discard backends)
+        // 3. First device as last resort
+        var deviceIndex = 0;
+        var deviceInfo = playbackDevices[0];
+
+        // Prefer the system default device
+        for (int i = 0; i < playbackDevices.Length; i++)
+        {
+          if (playbackDevices[i].IsDefault)
           {
-            _logger.LogDebug("Skipping null device at index {Index}: {Name}", i, name);
-            continue;
+            deviceIndex = i;
+            deviceInfo = playbackDevices[i];
+            _logger.LogInformation("Selected system default playback device at index {Index}: {Name}", i, deviceInfo.Name);
+            break;
           }
-          deviceIndex = i;
-          deviceInfo = playbackDevices[i];
-          break;
+        }
+
+        // If no default found, fall back to first non-discard device
+        if (!deviceInfo.IsDefault)
+        {
+          for (int i = 0; i < playbackDevices.Length; i++)
+          {
+            var name = playbackDevices[i].Name ?? "";
+            if (name.Contains("Discard all samples", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("generate zero samples", StringComparison.OrdinalIgnoreCase))
+            {
+              _logger.LogDebug("Skipping null device at index {Index}: {Name}", i, name);
+              continue;
+            }
+            deviceIndex = i;
+            deviceInfo = playbackDevices[i];
+            break;
+          }
         }
         _logger.LogInformation("Initializing playback device: {DeviceName} (index {Index} of {Total})",
           deviceInfo.Name, deviceIndex, playbackDevices.Length);
