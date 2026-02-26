@@ -28,6 +28,21 @@
            @onclick="@(() => SelectMode(VisualizationMode.Spectrum))">
         Spectrum
       </div>
+      <div class="route-toggle @(_currentMode == VisualizationMode.Spectrogram ? "route-active" : "")"
+           style="width: 50px; height: 36px; border-radius: 16px; font-size: 13px; font-weight: 600;"
+           @onclick="@(() => SelectMode(VisualizationMode.Spectrogram))">
+        Fall
+      </div>
+      <div class="route-toggle @(_currentMode == VisualizationMode.Circular ? "route-active" : "")"
+           style="width: 50px; height: 36px; border-radius: 16px; font-size: 13px; font-weight: 600;"
+           @onclick="@(() => SelectMode(VisualizationMode.Circular))">
+        Ring
+      </div>
+      <div class="route-toggle @(_currentMode == VisualizationMode.PhaseScope ? "route-active" : "")"
+           style="width: 60px; height: 36px; border-radius: 16px; font-size: 13px; font-weight: 600;"
+           @onclick="@(() => SelectMode(VisualizationMode.PhaseScope))">
+        Phase
+      </div>
     </div>
   </div>
 
@@ -48,7 +63,10 @@
   {
     VUMeter,
     Waveform,
-    Spectrum
+    Spectrum,
+    Spectrogram,
+    Circular,
+    PhaseScope
   }
 
   private VisualizationMode _currentMode = VisualizationMode.VUMeter;
@@ -110,7 +128,12 @@
 
     if (_isInitialized && _jsModule != null)
     {
-      try { await _jsModule.InvokeVoidAsync("visualizer.clear", "visualizer-panel-canvas"); }
+      try
+      {
+        await _jsModule.InvokeVoidAsync("visualizer.clear", "visualizer-panel-canvas");
+        // Reset spectrogram/phase buffers when switching modes
+        await _jsModule.InvokeVoidAsync("visualizer.resetBuffers", "visualizer-panel-canvas");
+      }
       catch (Exception ex) { Logger.LogError(ex, "Error clearing canvas"); }
     }
 
@@ -126,8 +149,13 @@
       switch (_currentMode)
       {
         case VisualizationMode.VUMeter: await VisualizationHub.SubscribeToLevelsAsync(); break;
-        case VisualizationMode.Waveform: await VisualizationHub.SubscribeToWaveformAsync(); break;
-        case VisualizationMode.Spectrum: await VisualizationHub.SubscribeToSpectrumAsync(); break;
+        case VisualizationMode.Waveform:
+        case VisualizationMode.PhaseScope:
+          await VisualizationHub.SubscribeToWaveformAsync(); break;
+        case VisualizationMode.Spectrum:
+        case VisualizationMode.Spectrogram:
+        case VisualizationMode.Circular:
+          await VisualizationHub.SubscribeToSpectrumAsync(); break;
       }
     }
     catch (Exception ex) { Logger.LogError(ex, "Error subscribing to {Mode}", _currentMode); }
@@ -140,8 +168,13 @@
       switch (_currentMode)
       {
         case VisualizationMode.VUMeter: await VisualizationHub.UnsubscribeFromLevelsAsync(); break;
-        case VisualizationMode.Waveform: await VisualizationHub.UnsubscribeFromWaveformAsync(); break;
-        case VisualizationMode.Spectrum: await VisualizationHub.UnsubscribeFromSpectrumAsync(); break;
+        case VisualizationMode.Waveform:
+        case VisualizationMode.PhaseScope:
+          await VisualizationHub.UnsubscribeFromWaveformAsync(); break;
+        case VisualizationMode.Spectrum:
+        case VisualizationMode.Spectrogram:
+        case VisualizationMode.Circular:
+          await VisualizationHub.UnsubscribeFromSpectrumAsync(); break;
       }
     }
     catch (Exception ex) { Logger.LogError(ex, "Error unsubscribing from {Mode}", _currentMode); }
@@ -158,10 +191,13 @@
           if (levels != null) await HandleLevelData(levels);
           break;
         case VisualizationMode.Waveform:
+        case VisualizationMode.PhaseScope:
           var waveform = await VisualizationHub.GetWaveformAsync();
           if (waveform != null) await HandleWaveformData(waveform);
           break;
         case VisualizationMode.Spectrum:
+        case VisualizationMode.Spectrogram:
+        case VisualizationMode.Circular:
           var spectrum = await VisualizationHub.GetSpectrumAsync();
           if (spectrum != null) await HandleSpectrumData(spectrum);
           break;
@@ -188,34 +224,48 @@
 
   private async Task HandleWaveformData(WaveformDataDto data)
   {
-    if (_isDisposed || !_isInitialized || _jsModule == null || _currentMode != VisualizationMode.Waveform) return;
+    if (_isDisposed || !_isInitialized || _jsModule == null) return;
+    if (_currentMode != VisualizationMode.Waveform && _currentMode != VisualizationMode.PhaseScope) return;
     var wasFirst = !_hasReceivedData;
     _hasReceivedData = true;
     try
     {
-      await _jsModule.InvokeVoidAsync("visualizer.drawWaveform",
-        "visualizer-panel-canvas", data.LeftSamples, data.RightSamples);
+      if (_currentMode == VisualizationMode.PhaseScope)
+        await _jsModule.InvokeVoidAsync("visualizer.drawPhaseScope",
+          "visualizer-panel-canvas", data.LeftSamples, data.RightSamples);
+      else
+        await _jsModule.InvokeVoidAsync("visualizer.drawWaveform",
+          "visualizer-panel-canvas", data.LeftSamples, data.RightSamples);
       if (wasFirst) await InvokeAsync(StateHasChanged);
     }
     catch (TaskCanceledException) { }
     catch (OperationCanceledException) { }
-    catch (Exception ex) { Logger.LogError(ex, "Error drawing waveform"); }
+    catch (Exception ex) { Logger.LogError(ex, "Error drawing waveform/{Mode}", _currentMode); }
   }
 
   private async Task HandleSpectrumData(SpectrumDataDto data)
   {
-    if (_isDisposed || !_isInitialized || _jsModule == null || _currentMode != VisualizationMode.Spectrum) return;
+    if (_isDisposed || !_isInitialized || _jsModule == null) return;
+    if (_currentMode != VisualizationMode.Spectrum &&
+        _currentMode != VisualizationMode.Spectrogram &&
+        _currentMode != VisualizationMode.Circular) return;
     var wasFirst = !_hasReceivedData;
     _hasReceivedData = true;
     try
     {
-      await _jsModule.InvokeVoidAsync("visualizer.drawSpectrum",
+      var method = _currentMode switch
+      {
+        VisualizationMode.Spectrogram => "visualizer.drawSpectrogram",
+        VisualizationMode.Circular => "visualizer.drawCircularSpectrum",
+        _ => "visualizer.drawSpectrum"
+      };
+      await _jsModule.InvokeVoidAsync(method,
         "visualizer-panel-canvas", data.Magnitudes, data.Frequencies);
       if (wasFirst) await InvokeAsync(StateHasChanged);
     }
     catch (TaskCanceledException) { }
     catch (OperationCanceledException) { }
-    catch (Exception ex) { Logger.LogError(ex, "Error drawing spectrum"); }
+    catch (Exception ex) { Logger.LogError(ex, "Error drawing spectrum/{Mode}", _currentMode); }
   }
 
   private async Task LoadPreferencesAsync()

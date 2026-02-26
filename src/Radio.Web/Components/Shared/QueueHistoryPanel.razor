@@ -10,11 +10,13 @@
 @inject ISnackbar Snackbar
 @inject Radio.Web.Services.QueuePersistenceService QueuePersistence
 @inject PlaylistApiService PlaylistApi
+@inject SourcesApiService SourcesApi
 @implements IAsyncDisposable
 
 <div style="height: 100%; display: flex; flex-direction: column; padding: 0;">
   <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="true"
-           @bind-ActivePanelIndex="_activeTab"
+           ActivePanelIndex="_activeTab"
+           ActivePanelIndexChanged="OnTabChanged"
            Style="height: 100%; display: flex; flex-direction: column; min-height: 0;">
     <MudTabPanel Text="Queue" Icon="@Icons.Material.Filled.QueueMusic"
                  BadgeData="@(_queueItems.Count > 0 ? _queueItems.Count.ToString() : null)"
@@ -186,6 +188,7 @@
 
 @code {
   private int _activeTab;
+  private bool _userOverrodeTab;
   private List<QueueItemDto> _queueItems = new();
   private List<PlayHistoryEntryDto> _historyItems = new();
   private bool _isLoadingHistory;
@@ -194,7 +197,9 @@
   protected override async Task OnInitializedAsync()
   {
     HubService.QueueChanged += OnQueueChanged;
+    HubService.SourceChanged += OnSourceChanged;
 
+    await SetDefaultTabForSourceAsync();
     await RefreshQueueAsync();
     await RefreshHistoryAsync();
   }
@@ -393,9 +398,39 @@
     };
   }
 
+  private void OnTabChanged(int newTab)
+  {
+    _activeTab = newTab;
+    _userOverrodeTab = true;
+  }
+
+  private async Task OnSourceChanged()
+  {
+    _userOverrodeTab = false;
+    await SetDefaultTabForSourceAsync();
+    await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task SetDefaultTabForSourceAsync()
+  {
+    if (_userOverrodeTab) return;
+    try
+    {
+      var primary = await SourcesApi.GetPrimarySourceAsync();
+      // Queue tab (0) for FilePlayer, History tab (1) for all others
+      _activeTab = primary?.Type == "FilePlayer" ? 0 : 1;
+    }
+    catch
+    {
+      // Default to History if we can't determine the source
+      _activeTab = 1;
+    }
+  }
+
   public async ValueTask DisposeAsync()
   {
     HubService.QueueChanged -= OnQueueChanged;
+    HubService.SourceChanged -= OnSourceChanged;
     await Task.CompletedTask;
   }
 }

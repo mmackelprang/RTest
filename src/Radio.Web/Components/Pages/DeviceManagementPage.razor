@@ -38,6 +38,7 @@
           <MudTable Items="@displaySettings" Hover="true" Striped="true" Dense="true">
             <HeaderContent>
               <MudTh>Visible</MudTh>
+              <MudTh>Type</MudTh>
               <MudTh>Device Name</MudTh>
               <MudTh>Friendly Name</MudTh>
               <MudTh Style="width: 50px"></MudTh>
@@ -49,6 +50,13 @@
                                Size="Size.Small"
                                title="@(context.IsHidden ? "Hidden — click to show" : "Visible — click to hide")"
                                OnClick="@(() => ToggleDeviceVisibilityAsync(context))" />
+              </MudTd>
+              <MudTd DataLabel="Type">
+                <MudChip T="string" Size="Size.Small"
+                         Color="@(context.Type == "Output" ? Color.Info : Color.Success)"
+                         Icon="@(context.Type == "Output" ? Icons.Material.Filled.VolumeUp : Icons.Material.Filled.Mic)">
+                  @context.Type
+                </MudChip>
               </MudTd>
               <MudTd DataLabel="Device Name">
                 <MudText Style="@(context.IsHidden ? "text-decoration: line-through; opacity: 0.5;" : "")">

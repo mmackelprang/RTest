@@ -45,13 +45,28 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     private long _totalSamplesReceived;
     private long _totalSamplesDropped;
     private long _totalSamplesOutput;
+    private long _totalSamplesCompensated;
     private long _underrunCount;
     private long _lastReportedDropped;
     private long _lastReportedUnderruns;
     private DateTime _lastLogTime = DateTime.MinValue;
-    private DateTime _lastUnderrunLogTime = DateTime.MinValue;
+    private DateTime _lastUnderrunLogTime;
     private long _underrunSamplesSinceLastLog;
     private int _underrunCountSinceLastLog;
+
+    // Buffer level tracking between log intervals
+    private int _minBufferSinceLastLog = int.MaxValue;
+    private int _maxBufferSinceLastLog;
+
+    // Clock drift compensation: when producer (e.g., BT/PipeWire) runs on a different
+    // clock than consumer (MiniAudio/ALSA), the buffer slowly drains or fills. We
+    // periodically check the buffer level and duplicate a frame of samples when the
+    // level drops below a threshold, preventing progressive underruns.
+    private readonly int _driftCompensationThreshold; // samples
+    private readonly int _driftCompensationTarget;     // samples
+    private DateTime _lastDriftCheckTime;
+    private int _lastDriftCheckLevel;
+    private int _driftCheckCount;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BufferedSoundGenerator{T}"/> class.
@@ -80,6 +95,11 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         var samplesPerSecond = format.SampleRate * format.Channels;
         _maxBufferSamples = (int)(samplesPerSecond * maxBufferSeconds);
         _ringBuffer = new T[_maxBufferSamples];
+
+        // Clock drift compensation thresholds: check every second, compensate when
+        // buffer drops below 15% of capacity, target refill to 25%.
+        _driftCompensationThreshold = (int)(_maxBufferSamples * 0.15);
+        _driftCompensationTarget = (int)(_maxBufferSamples * 0.25);
 
         Name = $"Buffered Generator ({typeof(T).Name})";
 
@@ -181,10 +201,24 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             _count -= toRead;
             _totalSamplesOutput += toRead;
 
+            // Track min/max buffer levels between log intervals
+            if (_count < _minBufferSinceLastLog) _minBufferSinceLastLog = _count;
+            if (_count > _maxBufferSinceLastLog) _maxBufferSinceLastLog = _count;
+
             if (_overflowStrategy == BufferOverflowStrategy.Block && toRead > 0)
             {
                 Monitor.PulseAll(_bufferLock);
             }
+        }
+
+        // Clock drift compensation: when the buffer is draining faster than the
+        // producer fills it (e.g., BT clock vs ALSA clock drift), push back the
+        // read position by one frame of audio. This duplicates the last frame,
+        // which is inaudible at the sub-millisecond scale but prevents the buffer
+        // from draining to zero and causing full underruns (silence gaps).
+        if (samplesWritten == buffer.Length && _overflowStrategy == BufferOverflowStrategy.DropOldest)
+        {
+            CompensateClockDrift(channels);
         }
 
         // Fill remainder with silence on underrun
@@ -202,7 +236,9 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                 // Log underrun bursts: throttled to once per second to avoid log spam
                 // while still revealing the pattern of when underruns occur.
                 var now = DateTime.UtcNow;
-                if ((now - _lastUnderrunLogTime).TotalSeconds >= 1.0)
+                var sinceLastLog = _lastUnderrunLogTime == default
+                    ? 0.0 : (now - _lastUnderrunLogTime).TotalSeconds;
+                if (sinceLastLog >= 1.0 || _lastUnderrunLogTime == default)
                 {
                     int buffered;
                     lock (_bufferLock) { buffered = _count; }
@@ -210,7 +246,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                         "⚠️ Buffer underrun ({Type}): {Count} underruns, {Deficit} zero samples in last {Interval:F1}s " +
                         "(buffer: {Buffered}/{Capacity}, total underruns: {TotalUnderruns})",
                         typeof(T).Name, _underrunCountSinceLastLog, _underrunSamplesSinceLastLog,
-                        (now - _lastUnderrunLogTime).TotalSeconds,
+                        sinceLastLog,
                         buffered, _maxBufferSamples, _underrunCount);
                     _underrunSamplesSinceLastLog = 0;
                     _underrunCountSinceLastLog = 0;
@@ -220,6 +256,73 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         }
 
         LogStats();
+    }
+
+    /// <summary>
+    /// Detects clock drift between producer and consumer by monitoring buffer level
+    /// trends. When the buffer is consistently draining (producer slower than consumer),
+    /// rewinds the read pointer to duplicate recent audio and prevent underrun.
+    /// This compensates for BT/PipeWire running on a different clock than ALSA playback.
+    /// </summary>
+    private void CompensateClockDrift(int channels)
+    {
+        var now = DateTime.UtcNow;
+        if (_lastDriftCheckTime == default)
+        {
+            _lastDriftCheckTime = now;
+            lock (_bufferLock) { _lastDriftCheckLevel = _count; }
+            return;
+        }
+
+        // Check every ~2 seconds to smooth out transient jitter
+        if ((now - _lastDriftCheckTime).TotalSeconds < 2.0) return;
+
+        int currentLevel;
+        lock (_bufferLock) { currentLevel = _count; }
+
+        _driftCheckCount++;
+
+        // Only compensate if:
+        // 1. Buffer is below threshold (draining toward underrun)
+        // 2. Level decreased since last check (sustained drain, not recovery)
+        // 3. We've had at least 3 checks (avoid reacting to startup/pre-fill)
+        // 4. Data has been received (not idle)
+        var isDraining = currentLevel < _driftCompensationThreshold
+                         && currentLevel < _lastDriftCheckLevel
+                         && _driftCheckCount > 3
+                         && _totalSamplesReceived > 0;
+
+        if (isDraining)
+        {
+            // Rewind read pointer to duplicate recent audio back up to target level.
+            // Frame-align the compensation amount to avoid splitting stereo pairs.
+            var deficit = _driftCompensationTarget - currentLevel;
+            var frameSamples = Math.Max(channels, 2);
+            // Align to frame boundary and cap at 10ms of audio to keep it inaudible
+            var maxCompensation = (int)(Format.SampleRate * Format.Channels * 0.01); // 10ms
+            deficit = Math.Min(deficit, maxCompensation);
+            deficit = (deficit / frameSamples) * frameSamples; // frame-align
+
+            if (deficit > 0)
+            {
+                lock (_bufferLock)
+                {
+                    if (_count + deficit <= _maxBufferSamples)
+                    {
+                        _readPos = (_readPos - deficit + _maxBufferSamples) % _maxBufferSamples;
+                        _count += deficit;
+                        _totalSamplesCompensated += deficit;
+                    }
+                }
+
+                _logger.LogInformation(
+                    "🔄 Clock drift compensation: duplicated {Samples} samples (buffer: {Level}→{NewLevel}/{Capacity}, total compensated: {Total})",
+                    deficit, currentLevel, currentLevel + deficit, _maxBufferSamples, _totalSamplesCompensated);
+            }
+        }
+
+        _lastDriftCheckLevel = currentLevel;
+        _lastDriftCheckTime = now;
     }
 
     private void LogStats()
@@ -236,9 +339,21 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             // Don't log if completely idle (no received samples ever)
             if (_totalSamplesReceived > 0)
             {
-                _logger.LogDebug(
-                    "Buffered audio ({Type}): received={Received}, output={Output}, dropped={Dropped}, buffered={Buffered}",
-                    typeof(T).Name, _totalSamplesReceived, _totalSamplesOutput, _totalSamplesDropped, currentBuffer);
+                var minBuf = _minBufferSinceLastLog == int.MaxValue ? currentBuffer : _minBufferSinceLastLog;
+                var maxBuf = _maxBufferSinceLastLog;
+                var fillPct = (double)currentBuffer / _maxBufferSamples * 100.0;
+                var minPct = (double)minBuf / _maxBufferSamples * 100.0;
+
+                _logger.LogInformation(
+                    "📊 Buffer ({Type}): fill={FillPct:F1}% ({Buffered}/{Capacity}), min={MinBuf} ({MinPct:F1}%), max={MaxBuf}, " +
+                    "recv={Received}, out={Output}, drop={Dropped}, comp={Compensated}, under={Underruns}",
+                    typeof(T).Name, fillPct, currentBuffer, _maxBufferSamples,
+                    minBuf, minPct, maxBuf,
+                    _totalSamplesReceived, _totalSamplesOutput,
+                    _totalSamplesDropped, _totalSamplesCompensated, _underrunCount);
+
+                _minBufferSinceLastLog = currentBuffer;
+                _maxBufferSinceLastLog = currentBuffer;
                 _lastLogTime = now;
 
                 // Report metrics (outside lock — reads of long fields are safe for approximate values)
@@ -320,6 +435,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                 TotalReceived = _totalSamplesReceived,
                 TotalOutput = _totalSamplesOutput,
                 TotalDropped = _totalSamplesDropped,
+                TotalCompensated = _totalSamplesCompensated,
                 BufferCount = _count,
                 BufferCapacity = _maxBufferSamples
             };
@@ -346,8 +462,8 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             }
 
             _logger.LogInformation(
-                "BufferedSoundGenerator disposed. Total samples: received={Received}, output={Output}, dropped={Dropped}",
-                _totalSamplesReceived, _totalSamplesOutput, _totalSamplesDropped);
+                "BufferedSoundGenerator disposed. Total samples: received={Received}, output={Output}, dropped={Dropped}, compensated={Compensated}",
+                _totalSamplesReceived, _totalSamplesOutput, _totalSamplesDropped, _totalSamplesCompensated);
         }
         else
         {
@@ -366,6 +482,7 @@ public struct BufferDiagnostics
     public long TotalReceived { get; set; }
     public long TotalOutput { get; set; }
     public long TotalDropped { get; set; }
+    public long TotalCompensated { get; set; }
     public int BufferCount { get; set; }
     public int BufferCapacity { get; set; }
 }

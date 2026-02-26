@@ -37,7 +37,12 @@ export const visualizer = {
       recentPeaks: [],
       scaleFactor: 1.0,
       lastScaleUpdate: Date.now(),
-      targetScaleFactor: 1.0
+      targetScaleFactor: 1.0,
+      // Spectrogram/waterfall history (circular buffer of spectrum columns)
+      spectrogramHistory: [],
+      spectrogramMaxColumns: width,
+      // Phase scope decay buffer
+      phaseScopeBuffer: null
     };
 
     console.log(`Initialized canvas ${canvasId} (${width}x${height})`);
@@ -377,6 +382,222 @@ export const visualizer = {
     });
   },
 
+  // Draw spectrogram/waterfall — scrolling frequency-time heatmap
+  drawSpectrogram: function (canvasId, magnitudes, frequencies) {
+    const canvasData = this.canvases[canvasId];
+    if (!canvasData || !magnitudes || magnitudes.length === 0) return;
+    this.ensureCanvasSize(canvasData);
+
+    const { ctx, width, height } = canvasData;
+
+    // Add current spectrum as a new column
+    const barCount = Math.min(magnitudes.length, 128);
+    canvasData.spectrogramHistory.push(magnitudes.slice(0, barCount));
+    canvasData.spectrogramMaxColumns = width;
+    if (canvasData.spectrogramHistory.length > width)
+      canvasData.spectrogramHistory.shift();
+
+    // Draw the full spectrogram
+    ctx.fillStyle = '#0A0A0C';
+    ctx.fillRect(0, 0, width, height);
+
+    const cols = canvasData.spectrogramHistory;
+    const colWidth = Math.max(1, width / cols.length);
+
+    for (let x = 0; x < cols.length; x++) {
+      const col = cols[x];
+      const rowHeight = height / col.length;
+      for (let y = 0; y < col.length; y++) {
+        const mag = col[y];
+        if (mag < 0.01) continue; // Skip near-silent bins
+
+        // Heatmap: black → deep blue → cyan → yellow → white
+        const intensity = Math.min(1, mag * 1.5);
+        let r, g, b;
+        if (intensity < 0.25) {
+          const t = intensity / 0.25;
+          r = 0; g = 0; b = Math.floor(80 * t);
+        } else if (intensity < 0.5) {
+          const t = (intensity - 0.25) / 0.25;
+          r = 0; g = Math.floor(200 * t); b = 80 + Math.floor(148 * t);
+        } else if (intensity < 0.75) {
+          const t = (intensity - 0.5) / 0.25;
+          r = Math.floor(240 * t); g = 200 + Math.floor(30 * t); b = Math.floor(228 * (1 - t));
+        } else {
+          const t = (intensity - 0.75) / 0.25;
+          r = 240 + Math.floor(15 * t); g = 230 + Math.floor(25 * t); b = Math.floor(200 * t);
+        }
+
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        // Frequency axis: low at bottom, high at top
+        ctx.fillRect(x * colWidth, height - (y + 1) * rowHeight, colWidth + 0.5, rowHeight + 0.5);
+      }
+    }
+
+    // Frequency axis labels
+    if (frequencies && frequencies.length > 0) {
+      ctx.fillStyle = 'rgba(240,239,244,0.5)';
+      ctx.font = '10px Inter, sans-serif';
+      ctx.textAlign = 'right';
+      const labelCount = 5;
+      for (let i = 0; i < labelCount; i++) {
+        const freqIdx = Math.floor(i * (barCount - 1) / (labelCount - 1));
+        const freq = frequencies[Math.min(freqIdx, frequencies.length - 1)];
+        const labelY = height - (freqIdx / barCount) * height;
+        const label = freq < 1000 ? `${Math.round(freq)}Hz` : `${(freq / 1000).toFixed(1)}k`;
+        ctx.fillText(label, width - 4, labelY + 3);
+      }
+    }
+  },
+
+  // Draw circular spectrum — radial frequency bars from center
+  drawCircularSpectrum: function (canvasId, magnitudes, frequencies) {
+    const canvasData = this.canvases[canvasId];
+    if (!canvasData || !magnitudes || magnitudes.length === 0) return;
+    this.ensureCanvasSize(canvasData);
+
+    const { ctx, width, height } = canvasData;
+
+    ctx.fillStyle = '#0A0A0C';
+    ctx.fillRect(0, 0, width, height);
+
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const innerRadius = Math.min(width, height) * 0.12;
+    const maxRadius = Math.min(width, height) * 0.45;
+    const barCount = Math.min(magnitudes.length, 128);
+    const angleStep = (Math.PI * 2) / barCount;
+
+    for (let i = 0; i < barCount; i++) {
+      const mag = magnitudes[i];
+      const barLength = mag * (maxRadius - innerRadius);
+      const angle = i * angleStep - Math.PI / 2; // Start from top
+
+      const x1 = centerX + Math.cos(angle) * innerRadius;
+      const y1 = centerY + Math.sin(angle) * innerRadius;
+      const x2 = centerX + Math.cos(angle) * (innerRadius + barLength);
+      const y2 = centerY + Math.sin(angle) * (innerRadius + barLength);
+
+      // Color: cyan → amber → red based on magnitude
+      let color;
+      if (mag < 0.6) {
+        color = this.interpolateColor('#5CD4E8', '#F0A830', mag / 0.6);
+      } else {
+        color = this.interpolateColor('#F0A830', '#F87171', (mag - 0.6) / 0.4);
+      }
+
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = Math.max(1.5, (angleStep * innerRadius) * 0.7);
+      ctx.lineCap = 'round';
+      ctx.stroke();
+    }
+
+    // Inner circle glow
+    const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, innerRadius);
+    gradient.addColorStop(0, 'rgba(92, 212, 232, 0.15)');
+    gradient.addColorStop(1, 'rgba(92, 212, 232, 0.02)');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, innerRadius, 0, Math.PI * 2);
+    ctx.fill();
+  },
+
+  // Draw stereo phase scope — L vs R XY scatter with phosphor decay
+  drawPhaseScope: function (canvasId, leftSamples, rightSamples) {
+    const canvasData = this.canvases[canvasId];
+    if (!canvasData || !leftSamples || !rightSamples) return;
+    this.ensureCanvasSize(canvasData);
+
+    const { ctx, width, height } = canvasData;
+
+    // Initialize or fade the phosphor buffer
+    if (!canvasData.phaseScopeBuffer) {
+      canvasData.phaseScopeBuffer = ctx.createImageData(width, height);
+      // Fill with dark background
+      for (let i = 0; i < canvasData.phaseScopeBuffer.data.length; i += 4) {
+        canvasData.phaseScopeBuffer.data[i] = 10;     // R
+        canvasData.phaseScopeBuffer.data[i + 1] = 10;  // G
+        canvasData.phaseScopeBuffer.data[i + 2] = 12;  // B
+        canvasData.phaseScopeBuffer.data[i + 3] = 255; // A
+      }
+    }
+
+    // Phosphor decay: fade existing pixels toward background
+    const buf = canvasData.phaseScopeBuffer.data;
+    for (let i = 0; i < buf.length; i += 4) {
+      buf[i] = buf[i] + (10 - buf[i]) * 0.08;       // R → 10
+      buf[i + 1] = buf[i + 1] + (10 - buf[i + 1]) * 0.08; // G → 10
+      buf[i + 2] = buf[i + 2] + (12 - buf[i + 2]) * 0.08; // B → 12
+    }
+
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const len = Math.min(leftSamples.length, rightSamples.length);
+
+    // Adaptive scaling: find peak amplitude in current frame
+    let maxAmp = 0;
+    for (let i = 0; i < len; i++) {
+      const l = Math.abs(leftSamples[i] || 0);
+      const r = Math.abs(rightSamples[i] || 0);
+      maxAmp = Math.max(maxAmp, l, r);
+    }
+
+    // Track recent peak for smooth scaling (avoid jitter)
+    if (!canvasData.phaseScopePeak) canvasData.phaseScopePeak = maxAmp || 0.5;
+    if (maxAmp > canvasData.phaseScopePeak) {
+      // Attack: fast rise to new peak
+      canvasData.phaseScopePeak = canvasData.phaseScopePeak * 0.3 + maxAmp * 0.7;
+    } else {
+      // Release: slow decay
+      canvasData.phaseScopePeak = canvasData.phaseScopePeak * 0.97 + maxAmp * 0.03;
+    }
+
+    // Scale so the tracked peak fills ~80% of the display; floor at 0.01 to avoid division issues
+    const effectivePeak = Math.max(0.01, canvasData.phaseScopePeak);
+    const scale = (Math.min(width, height) * 0.4) / effectivePeak;
+
+    // Plot L vs R as XY — rotated 45° (Lissajous convention: mid = vertical, side = horizontal)
+    for (let i = 0; i < len; i++) {
+      const l = leftSamples[i] || 0;
+      const r = rightSamples[i] || 0;
+      // Rotate 45°: x = (L - R), y = -(L + R) / sqrt(2)
+      const px = Math.round(centerX + (l - r) * scale);
+      const py = Math.round(centerY - (l + r) * scale * 0.707);
+
+      if (px >= 0 && px < width && py >= 0 && py < height) {
+        const idx = (py * width + px) * 4;
+        // Bright cyan-green phosphor dot
+        buf[idx] = 92;       // R
+        buf[idx + 1] = 232;  // G (phosphor green-ish)
+        buf[idx + 2] = 212;  // B
+      }
+    }
+
+    ctx.putImageData(canvasData.phaseScopeBuffer, 0, 0);
+
+    // Draw crosshair axes
+    ctx.strokeStyle = 'rgba(31, 31, 34, 0.8)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(centerX, 0);
+    ctx.lineTo(centerX, height);
+    ctx.moveTo(0, centerY);
+    ctx.lineTo(width, centerY);
+    ctx.stroke();
+
+    // Labels
+    ctx.fillStyle = 'rgba(240,239,244,0.4)';
+    ctx.font = '12px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('M', centerX, 14);
+    ctx.fillText('S', width - 10, centerY - 4);
+    ctx.fillText('L', centerX - scale * 0.7, centerY - scale * 0.5);
+    ctx.fillText('R', centerX + scale * 0.7, centerY - scale * 0.5);
+  },
+
   interpolateColor: function (color1, color2, t) {
     const hex1 = color1.replace('#', '');
     const hex2 = color2.replace('#', '');
@@ -394,6 +615,15 @@ export const visualizer = {
     const b = Math.round(b1 + (b2 - b1) * t);
     
     return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+  },
+
+  // Reset spectrogram and phase scope buffers
+  resetBuffers: function (canvasId) {
+    const canvasData = this.canvases[canvasId];
+    if (!canvasData) return;
+    canvasData.spectrogramHistory = [];
+    canvasData.phaseScopeBuffer = null;
+    canvasData.phaseScopePeak = null;
   },
 
   // Dispose a canvas
