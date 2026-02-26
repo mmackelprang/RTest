@@ -902,12 +902,22 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             _captureCts = new CancellationTokenSource();
             var ct = _captureCts.Token;
 
+            // Pre-fill the buffer with silence before pw-record starts delivering data.
+            // This provides a cushion so the mixer has audio to consume while the capture
+            // subprocess spins up and during periodic PipeWire graph processing stalls.
+            // Same pattern used by SDR radio source for USB transfer jitter absorption.
+            generator.PreFillSilence(0.5f);
+
             // pw-record captures directly from a PipeWire node — no ALSA config needed.
             // Output format: raw S16_LE stereo at 48kHz to stdout.
+            // Wrap with stdbuf -o0 to disable glibc stdout buffering — without this,
+            // pw-record uses full buffering when piped (64KB blocks), causing data to
+            // arrive in bursts which starves the ring buffer and produces periodic
+            // ~1s audio artifacts every 15-30s.
             _captureProcess = Process.Start(new ProcessStartInfo
             {
-                FileName = "pw-record",
-                Arguments = $"--target {targetNode} --rate 48000 --channels 2 --format s16 -",
+                FileName = "stdbuf",
+                Arguments = $"-o0 pw-record --target {targetNode} --rate 48000 --channels 2 --format s16 -",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -926,23 +936,49 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             // Background task to read S16_LE data and feed float samples to generator
             _ = Task.Run(async () =>
             {
-                const int readBufferSize = 48000 * 2 * 2 / 10; // ~100ms of S16 stereo at 48kHz
+                // ~100ms of S16 stereo at 48kHz = 19,200 bytes
+                const int readBufferSize = 48000 * 2 * 2 / 10;
                 var buffer = new byte[readBufferSize];
                 var stream = _captureProcess.StandardOutput.BaseStream;
+                var pendingByte = -1; // Tracks a leftover byte from odd-length reads
 
                 try
                 {
                     while (!ct.IsCancellationRequested)
                     {
-                        var bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, ct);
+                        // If we had a leftover byte from a previous odd-length read,
+                        // place it at the start of the buffer so it pairs with the next byte
+                        var offset = 0;
+                        if (pendingByte >= 0)
+                        {
+                            buffer[0] = (byte)pendingByte;
+                            offset = 1;
+                            pendingByte = -1;
+                        }
+
+                        var bytesRead = await stream.ReadAsync(buffer, offset, buffer.Length - offset, ct);
                         if (bytesRead == 0) break; // EOF — process exited
 
+                        var totalBytes = offset + bytesRead;
+
+                        // S16_LE = 2 bytes per sample. If we have an odd total, save
+                        // the trailing byte for the next iteration to maintain alignment.
+                        // Without this, MemoryMarshal.Cast drops the byte, shifting all
+                        // subsequent samples by 1 byte → corrupted audio.
+                        if (totalBytes % 2 != 0)
+                        {
+                            pendingByte = buffer[totalBytes - 1];
+                            totalBytes--;
+                        }
+
+                        if (totalBytes < 2) continue;
+
                         // Convert S16_LE samples to float [-1.0, 1.0]
-                        var sampleCount = bytesRead / 2; // 2 bytes per S16 sample
+                        var sampleCount = totalBytes / 2;
                         var floatSamples = ArrayPool<float>.Shared.Rent(sampleCount);
                         try
                         {
-                            var shorts = MemoryMarshal.Cast<byte, short>(buffer.AsSpan(0, bytesRead));
+                            var shorts = MemoryMarshal.Cast<byte, short>(buffer.AsSpan(0, totalBytes));
                             for (var i = 0; i < shorts.Length; i++)
                             {
                                 floatSamples[i] = shorts[i] / 32768f;
