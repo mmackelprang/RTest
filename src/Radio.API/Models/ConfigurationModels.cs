@@ -230,10 +230,6 @@ public class DeviceOptionsDto
   /// </summary>
   public VinylDeviceOptionsDto Vinyl { get; set; } = new();
 
-  /// <summary>
-  /// Gets or sets the cast device options.
-  /// </summary>
-  public CastDeviceOptionsDto Cast { get; set; } = new();
 }
 
 /// <summary>
@@ -256,17 +252,6 @@ public class VinylDeviceOptionsDto
   /// Gets or sets the USB port path for the vinyl device.
   /// </summary>
   public string USBPort { get; set; } = "/dev/ttyUSB1";
-}
-
-/// <summary>
-/// Chromecast device configuration.
-/// </summary>
-public class CastDeviceOptionsDto
-{
-  /// <summary>
-  /// Gets or sets the default Chromecast device name.
-  /// </summary>
-  public string DefaultDevice { get; set; } = "";
 }
 
 // ==================== Preferences DTOs (Phase 2) ====================

@@ -21,11 +21,6 @@ public class DeviceOptions
   /// </summary>
   public VinylDeviceOptions Vinyl { get; set; } = new();
 
-  /// <summary>
-  /// Gets or sets the cast device options.
-  /// </summary>
-  public CastDeviceOptions Cast { get; set; } = new();
-
 }
 
 /// <summary>
@@ -53,14 +48,4 @@ public class VinylDeviceOptions
   public string USBPort { get; set; } = "";
 }
 
-/// <summary>
-/// Configuration options for Chromecast audio output.
-/// </summary>
-public class CastDeviceOptions
-{
-  /// <summary>
-  /// Gets or sets the default Chromecast device name.
-  /// </summary>
-  public string DefaultDevice { get; set; } = "";
-}
 

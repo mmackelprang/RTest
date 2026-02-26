@@ -72,7 +72,14 @@ public class DevicesController : ControllerBase
     {
       var devices = await _deviceManager.GetOutputDevicesAsync();
       var activeId = _deviceManager.GetSelectedOutputDeviceId();
-      return Ok(devices.Select(d => MapToDeviceDto(d, d.Id == activeId)).ToList());
+      var hasUserSelection = !string.IsNullOrEmpty(activeId);
+      return Ok(devices.Select(d =>
+      {
+        var isActive = d.Id == activeId;
+        // If user has selected a device, that one is "default"; otherwise use system default
+        var isDefault = hasUserSelection ? isActive : (bool?)null;
+        return MapToDeviceDto(d, isActive, isDefault);
+      }).ToList());
     }
     catch (Exception ex)
     {
@@ -93,7 +100,13 @@ public class DevicesController : ControllerBase
     {
       var devices = await _deviceManager.GetInputDevicesAsync();
       var activeInputId = _deviceManager.GetSelectedInputDeviceId();
-      return Ok(devices.Select(d => MapToDeviceDto(d, d.Id == activeInputId)).ToList());
+      var hasUserSelection = !string.IsNullOrEmpty(activeInputId);
+      return Ok(devices.Select(d =>
+      {
+        var isActive = d.Id == activeInputId;
+        var isDefault = hasUserSelection ? isActive : (bool?)null;
+        return MapToDeviceDto(d, isActive, isDefault);
+      }).ToList());
     }
     catch (Exception ex)
     {
@@ -149,7 +162,7 @@ public class DevicesController : ControllerBase
         return NotFound(new { error = "No default output device found" });
       }
       var activeId = _deviceManager.GetSelectedOutputDeviceId();
-      return Ok(MapToDeviceDto(device, device.Id == activeId));
+      return Ok(MapToDeviceDto(device, device.Id == activeId, isUserDefault: true));
     }
     catch (Exception ex)
     {
@@ -1423,14 +1436,15 @@ public class DevicesController : ControllerBase
     _castOutput.SetNowPlayingMetadata(title, artist, album, albumArtUrl);
   }
 
-  private static AudioDeviceDto MapToDeviceDto(AudioDeviceInfo device, bool isActive = false)
+  private static AudioDeviceDto MapToDeviceDto(
+    AudioDeviceInfo device, bool isActive = false, bool? isUserDefault = null)
   {
     return new AudioDeviceDto
     {
       Id = device.Id,
       Name = device.Name,
       Type = device.Type.ToString(),
-      IsDefault = device.IsDefault,
+      IsDefault = isUserDefault ?? device.IsDefault,
       IsActive = isActive,
       IsUSBDevice = device.IsUSBDevice,
       USBPort = device.USBPort,
