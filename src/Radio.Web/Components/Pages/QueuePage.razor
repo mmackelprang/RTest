@@ -492,11 +492,25 @@
   {
     try
     {
+      // Load FilePlayer root directory as the default starting path
+      var filePlayerConfig = await ConfigApi.GetConfigurationAsync<FilePlayerConfigDto>("fileplayer");
+      if (filePlayerConfig != null && !string.IsNullOrWhiteSpace(filePlayerConfig.RootDirectory)
+          && filePlayerConfig.RootDirectory != "media/audio")
+      {
+        _browserPath = filePlayerConfig.RootDirectory;
+        _browserRootPath = filePlayerConfig.RootDirectory;
+      }
+
       var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("ui.filebrowser");
       if (prefs != null)
       {
         if (prefs.TryGetValue("lastPath", out var pathObj) && pathObj != null)
-          _browserPath = pathObj.ToString() ?? "/";
+        {
+          var savedPath = pathObj.ToString();
+          // Only override NAS root if saved path is a real directory (not just "/")
+          if (!string.IsNullOrEmpty(savedPath) && savedPath != "/")
+            _browserPath = savedPath;
+        }
         if (prefs.TryGetValue("filterExtension", out var filterObj) && filterObj != null)
         {
           var filter = filterObj.ToString() ?? "*";
@@ -677,7 +691,7 @@
   private async Task ToggleVirtualKeyboard()
   {
     if (_keyboardModule == null) return;
-    try { await _keyboardModule.InvokeVoidAsync("toggleForInput", "#browser-custom-path-input input"); }
+    try { await _keyboardModule.InvokeVoidAsync("toggleForInput", "#browser-custom-path-input"); }
     catch (Exception ex) { Logger.LogError(ex, "Failed to toggle virtual keyboard"); }
   }
 
