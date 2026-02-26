@@ -579,6 +579,7 @@ public class RadioController : ControllerBase
       DeviceVolume = radioSource.DeviceVolume,
       IsScanning = radioSource.IsScanning,
       ScanDirection = radioSource.ScanDirection?.ToString(),
+      ScanStopThreshold = radioSource.ScanStopThreshold,
       AutoGain = radioSource.AutoGainEnabled,
       Gain = (int?)radioSource.Gain,
       IsStereo = radioSource.IsStereo,

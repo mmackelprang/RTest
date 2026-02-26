@@ -121,12 +121,12 @@ Two issues:
 1. **Auto-advance investigation:** ✅ Root cause analyzed: `MonitorPlaybackAsync` detects EOF via position tracking (`_position >= _duration`) or `IsPlaying()` fallback. Added diagnostic logging for both paths and wrapped `NextAsync` call in try/catch to prevent silent failures during auto-advance. The logic is structurally correct — will test on hardware to confirm.
 2. **Shuffle/Repeat visual state unclear:** ✅ Active state now has cyan tinted background + border. Repeat-One mode shows dedicated RepeatOne icon.
 
-### F.10 Radio Management UI Fixes 🟡
-**Status:** partial ✅ (AGC + step size + band labels + preset save done, scan behavior pending)
+### F.10 Radio Management UI Fixes ✅
+**Status:** complete
 
 Five issues:
 1. **Step size not changeable** — ✅ Fixed: Clickable step label cycles through per-band AllowedStepSizes (PR #235)
-2. **Scan behavior wrong** — Backend scan logic is correct (continuous scan, 2s dwell on signal, wrap around, auto-stop). UI needs visual indicator for signal pause state. Pending.
+2. **Scan behavior indicator** — ✅ Fixed: Scanning indicator now shows two states: amber blinking "SCANNING UP/DOWN" while actively stepping, green pulsing "SIGNAL XX%" when scan dwells on a strong signal (≥30% threshold). Uses existing SignalR state updates.
 3. **Preset save button broken** — ✅ Fixed: Added proper error handling with ISnackbar feedback. Silent `catch { }` was swallowing errors. Now logs errors and shows toast notification on success/failure.
 4. **AGC toggle text alignment** — ✅ Fixed: `.rcp-sdr-controls .mud-switch { align-items: center; }`
 5. **Band labels overflow** — ✅ Fixed: Use short type codes (AM, FM, SW, AIR, WB, VHF) with full name as tooltip (PR #235)

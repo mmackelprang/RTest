@@ -278,6 +278,7 @@ public record RadioStateDto(
   int? SignalStrength,
   bool IsScanning,
   string? ScanDirection,
+  int ScanStopThreshold,
   int? Gain,
   bool AutoGain,
   string? Equalizer,

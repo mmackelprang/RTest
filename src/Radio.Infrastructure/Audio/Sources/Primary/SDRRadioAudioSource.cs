@@ -277,6 +277,9 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   public ScanDirection? ScanDirection => _scanDirection;
 
   /// <inheritdoc/>
+  public int ScanStopThreshold => _radioOptions.CurrentValue.ScanStopThreshold;
+
+  /// <inheritdoc/>
   public Task StartScanAsync(ScanDirection direction, CancellationToken cancellationToken = default)
   {
     if (_isScanning)
@@ -299,13 +302,15 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     {
       try
       {
+        // Convert ScanStopThreshold (0-100 UI scale) to 0.0-1.0 for RadioReceiver
+        var threshold = _radioOptions.CurrentValue.ScanStopThreshold / 100.0f;
         if (direction == Radio.Core.Models.Audio.ScanDirection.Up)
         {
-          _radioReceiver.ScanFrequencyUp(_frequencyStep.Hertz);
+          _radioReceiver.ScanFrequencyUp(_frequencyStep.Hertz, threshold);
         }
         else
         {
-          _radioReceiver.ScanFrequencyDown(_frequencyStep.Hertz);
+          _radioReceiver.ScanFrequencyDown(_frequencyStep.Hertz, threshold);
         }
       }
       finally
