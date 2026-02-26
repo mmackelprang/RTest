@@ -137,7 +137,8 @@ public class PlayHistoryTracker : IDisposable
         _logger.LogWarning("ITrackMetadataRepository not available, play history entry will lack track metadata");
       }
 
-      // Skip duplicate entries — same title+artist played within 5 minutes
+      // Skip duplicate entries:
+      // 1. Same title+artist played within 5 minutes (e.g., BT track replayed)
       if (!string.IsNullOrWhiteSpace(metadata.Title) && !string.IsNullOrWhiteSpace(metadata.Artist))
       {
         var isDuplicate = await playHistoryRepository.ExistsRecentlyPlayedAsync(
@@ -147,6 +148,22 @@ public class PlayHistoryTracker : IDisposable
           _logger.LogDebug(
             "Skipping duplicate play history entry for '{Title}' by '{Artist}' (recently played)",
             metadata.Title, metadata.Artist);
+          return;
+        }
+      }
+
+      // 2. Same source recorded very recently (catches rapid state change re-fires
+      //    where metadata changes between events, e.g., BT device name → track name)
+      var recentEntries = await playHistoryRepository.GetRecentAsync(1);
+      if (recentEntries?.Count > 0)
+      {
+        var last = recentEntries[0];
+        var secondsSinceLast = (DateTime.UtcNow - last.PlayedAt).TotalSeconds;
+        if (last.Source == playSource && secondsSinceLast < 10)
+        {
+          _logger.LogDebug(
+            "Skipping rapid-fire play history entry for source {Source} ({Seconds:F1}s since last)",
+            playSource, secondsSinceLast);
           return;
         }
       }
