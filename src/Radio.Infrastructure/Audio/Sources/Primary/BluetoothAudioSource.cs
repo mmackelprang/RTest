@@ -29,6 +29,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private readonly IOptionsMonitor<BluetoothOptions> _options;
   private readonly SoundFlowPlaybackService? _playbackService;
   private readonly SemaphoreSlim _routeLock = new(1, 1);
+  private readonly HashSet<string> _failedArtLookups = new();
   private string? _playbackId;
   private string? _lastCoverArtLookupKey;
   private AudioCaptureDevice? _captureDevice;
@@ -520,7 +521,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     {
       // AVRCP rarely provides album art — look it up via MusicBrainz text search
       var lookupKey = $"{e.Title}|{e.Artist}";
-      if (lookupKey != _lastCoverArtLookupKey)
+      if (lookupKey != _lastCoverArtLookupKey && !_failedArtLookups.Contains(lookupKey))
       {
         _lastCoverArtLookupKey = lookupKey;
         _ = LookupCoverArtAsync(e.Title, e.Artist, e.Album);
@@ -539,6 +540,34 @@ public class BluetoothAudioSource : USBAudioSourceBase
         "Track identified via fingerprinting: '{Title}' by '{Artist}' — skipping further fingerprinting",
         e.Track.Title, e.Track.Artist);
     }
+
+    // Use fingerprint-identified cover art if we don't already have art
+    var hasArt = MetadataInternal.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var existingArt)
+      && existingArt is string artStr && !string.IsNullOrEmpty(artStr);
+
+    if (!hasArt && _serviceScopeFactory != null)
+    {
+      if (!string.IsNullOrEmpty(e.Track.CoverArtUrl))
+      {
+        // Fingerprint pipeline already found cover art — cache it locally
+        _ = CacheAndSetCoverArtAsync(e.Track.CoverArtUrl, e.Track.Title, e.Track.Artist);
+      }
+      else if (!string.IsNullOrEmpty(e.Track.MusicBrainzReleaseId))
+      {
+        // Have a release ID but no art yet — query Cover Art Archive directly
+        _ = LookupCoverArtByReleaseIdAsync(e.Track.MusicBrainzReleaseId, e.Track.Title, e.Track.Artist);
+      }
+      else if (!string.IsNullOrEmpty(e.Track.Title) && !string.IsNullOrEmpty(e.Track.Artist))
+      {
+        // Fingerprint gave us better metadata — retry text search with it
+        var lookupKey = $"{e.Track.Title}|{e.Track.Artist}";
+        if (lookupKey != _lastCoverArtLookupKey && !_failedArtLookups.Contains(lookupKey))
+        {
+          _lastCoverArtLookupKey = lookupKey;
+          _ = LookupCoverArtAsync(e.Track.Title, e.Track.Artist, e.Track.Album);
+        }
+      }
+    }
   }
 
   private async Task LookupCoverArtAsync(string title, string artist, string? album)
@@ -547,8 +576,6 @@ public class BluetoothAudioSource : USBAudioSourceBase
     {
       Logger.LogInformation("Looking up cover art for '{Title}' by '{Artist}' (Album: '{Album}')", title, artist, album);
 
-      // Resolve IMetadataLookupService from a scope (it's registered as scoped,
-      // but BluetoothAudioSource is a long-lived singleton-created instance)
       using var scope = _serviceScopeFactory!.CreateScope();
       var lookupService = scope.ServiceProvider.GetService<IMetadataLookupService>();
       if (lookupService == null)
@@ -558,23 +585,23 @@ public class BluetoothAudioSource : USBAudioSourceBase
       }
 
       var coverArtUrl = await lookupService.SearchCoverArtByTextAsync(title, artist, album);
+
+      // If album was specified but no results, retry without album constraint —
+      // streaming services append edition info that may not match MusicBrainz
+      if (string.IsNullOrEmpty(coverArtUrl) && !string.IsNullOrEmpty(album))
+      {
+        Logger.LogDebug("Retrying cover art search without album for '{Title}' by '{Artist}'", title, artist);
+        coverArtUrl = await lookupService.SearchCoverArtByTextAsync(title, artist);
+      }
+
       if (!string.IsNullOrEmpty(coverArtUrl))
       {
-        // Cache the external URL locally so the Web UI can serve it via /api/albumart/
-        if (_albumArtCache != null)
-        {
-          var localUrl = await _albumArtCache.SaveFromUrlAsync(coverArtUrl);
-          if (!string.IsNullOrEmpty(localUrl))
-          {
-            coverArtUrl = localUrl;
-          }
-        }
-
-        MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = coverArtUrl;
-        Logger.LogInformation("Cover art found for '{Title}' by '{Artist}': {Url}", title, artist, coverArtUrl);
+        await CacheAndSetCoverArtUrlAsync(coverArtUrl, title, artist);
       }
       else
       {
+        // Track this failure to avoid re-querying for the same track
+        _failedArtLookups.Add($"{title}|{artist}");
         Logger.LogInformation("No cover art found for '{Title}' by '{Artist}'", title, artist);
       }
     }
@@ -582,6 +609,61 @@ public class BluetoothAudioSource : USBAudioSourceBase
     {
       Logger.LogWarning(ex, "Cover art lookup failed for '{Title}' by '{Artist}'", title, artist);
     }
+  }
+
+  private async Task CacheAndSetCoverArtAsync(string coverArtUrl, string title, string artist)
+  {
+    try
+    {
+      await CacheAndSetCoverArtUrlAsync(coverArtUrl, title, artist);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to cache cover art from fingerprint for '{Title}' by '{Artist}'", title, artist);
+    }
+  }
+
+  private async Task LookupCoverArtByReleaseIdAsync(string releaseId, string title, string artist)
+  {
+    try
+    {
+      Logger.LogInformation(
+        "Looking up cover art by release ID {ReleaseId} for '{Title}' by '{Artist}'",
+        releaseId, title, artist);
+
+      using var scope = _serviceScopeFactory!.CreateScope();
+      var lookupService = scope.ServiceProvider.GetService<IMetadataLookupService>();
+      if (lookupService == null) return;
+
+      var coverArtUrl = await lookupService.GetCoverArtByReleaseIdAsync(releaseId);
+      if (!string.IsNullOrEmpty(coverArtUrl))
+      {
+        await CacheAndSetCoverArtUrlAsync(coverArtUrl, title, artist);
+      }
+      else
+      {
+        Logger.LogDebug("No cover art at Cover Art Archive for release {ReleaseId}", releaseId);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Cover art lookup by release ID failed for '{Title}' by '{Artist}'", title, artist);
+    }
+  }
+
+  private async Task CacheAndSetCoverArtUrlAsync(string coverArtUrl, string title, string artist)
+  {
+    if (_albumArtCache != null)
+    {
+      var localUrl = await _albumArtCache.SaveFromUrlAsync(coverArtUrl);
+      if (!string.IsNullOrEmpty(localUrl))
+      {
+        coverArtUrl = localUrl;
+      }
+    }
+
+    MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = coverArtUrl;
+    Logger.LogInformation("Cover art found for '{Title}' by '{Artist}': {Url}", title, artist, coverArtUrl);
   }
 
   /// <summary>

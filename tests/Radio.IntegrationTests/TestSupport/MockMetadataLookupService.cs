@@ -127,4 +127,9 @@ public class MockMetadataLookupService : IMetadataLookupService
   {
     return Task.FromResult<string?>(null);
   }
+
+  public Task<string?> GetCoverArtByReleaseIdAsync(string releaseId, CancellationToken ct = default)
+  {
+    return Task.FromResult<string?>(null);
+  }
 }

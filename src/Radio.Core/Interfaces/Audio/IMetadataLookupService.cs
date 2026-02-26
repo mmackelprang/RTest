@@ -40,4 +40,15 @@ public interface IMetadataLookupService
   Task<string?> SearchCoverArtByTextAsync(
     string title, string artist, string? album = null,
     CancellationToken ct = default);
+
+  /// <summary>
+  /// Gets cover art directly from the Cover Art Archive by MusicBrainz release ID.
+  /// Faster than text search when the release ID is already known (e.g., from fingerprinting).
+  /// </summary>
+  /// <param name="releaseId">The MusicBrainz release ID.</param>
+  /// <param name="ct">Cancellation token.</param>
+  /// <returns>The cover art URL, or null if not found.</returns>
+  Task<string?> GetCoverArtByReleaseIdAsync(
+    string releaseId,
+    CancellationToken ct = default);
 }
