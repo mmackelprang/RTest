@@ -427,7 +427,7 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
             continue;
           }
 
-          var isDefault = outputDevices.Count == 0; // First non-hidden device is default
+          var isDefault = device.IsDefault; // Use the system's actual default device
           var displayName = ApplyFriendlyName(rawName);
           var isUsb = rawName.Contains("USB", StringComparison.OrdinalIgnoreCase);
 
@@ -465,7 +465,7 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
           continue;
         }
 
-        var isDefault = inputDevices.Count == 0; // First non-hidden device is default
+        var isDefault = device.IsDefault; // Use the system's actual default device
         var displayName = ApplyFriendlyName(rawName);
         var isUsb = rawName.Contains("USB", StringComparison.OrdinalIgnoreCase);
 
@@ -605,7 +605,7 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
             IsHidden = isHidden,
             FriendlyNameOverride = friendlyOverride,
             Type = AudioDeviceType.Output,
-            IsDefault = result.Count(r => r.Type == AudioDeviceType.Output && !r.IsHidden) == 0 && !isHidden,
+            IsDefault = device.IsDefault,
             IsUSBDevice = isUsb
           });
         }

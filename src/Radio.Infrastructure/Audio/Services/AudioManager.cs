@@ -208,13 +208,14 @@ public class AudioManager : IAudioManager, IAsyncDisposable
 
       // Stop the old source immediately to prevent simultaneous playback.
       // Only one primary source should ever produce audio at a time.
-      if (oldSource != null && oldSource != source &&
-          (oldSource.State == AudioSourceState.Playing ||
-           oldSource.State == AudioSourceState.Paused))
+      // Always stop regardless of state — external events (e.g., AVRCP status)
+      // can set state to Stopped/Ready while the source's audio component
+      // (BufferedSoundGenerator, pw-record subprocess) is still in the mixer.
+      if (oldSource != null && oldSource != source)
       {
         _logger.LogInformation(
-          "Stopping old source {OldSource} before switching to {NewSource}",
-          oldSource.Name, source.Name);
+          "Stopping old source {OldSource} (State={OldState}) before switching to {NewSource}",
+          oldSource.Name, oldSource.State, source.Name);
 
         try
         {

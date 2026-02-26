@@ -34,6 +34,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         private Process? _captureProcess;
         private CancellationTokenSource? _captureCts;
         private object? _activeGenerator;
+        private string? _activeNodeName;
         private DateTime? _connectionStartTime;
 
         // Player tracking
@@ -719,6 +720,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                             "pw-record capture running (attempt {Attempt}/{Max}, PID {Pid}, target {Node})",
                             attempt, maxRetries, _captureProcess.Id, nodeName);
                         _activeGenerator = generator;
+                        _activeNodeName = nodeName;
 
                         // Set BT source node master volume to 1.0 AFTER pw-record is running
                         // and AVRCP volume sync has settled. BlueZ sets the PipeWire node volume
@@ -1030,6 +1032,120 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 }
                 _captureProcess.Dispose();
                 _captureProcess = null;
+            }
+
+            // Disconnect PipeWire's auto-link from the BT input node to the default
+            // output sink. PipeWire/WirePlumber automatically links bluez_input to the
+            // default audio output, which bypasses our application entirely. When we
+            // switch away from BT, we must sever this link so only the active source
+            // (routed through our SoundFlow mixer) reaches the speakers.
+            if (_activeNodeName != null)
+            {
+                DisconnectPipeWireBtAutoLinks(_activeNodeName);
+                _activeNodeName = null;
+            }
+        }
+
+        /// <summary>
+        /// Disconnects PipeWire's automatic links from a bluez_input node to the
+        /// default audio output sink, preventing BT audio from bypassing our mixer.
+        /// </summary>
+        private void DisconnectPipeWireBtAutoLinks(string btNodeName)
+        {
+            try
+            {
+                // Query current links and find ones from this BT node to any output sink
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "pw-link",
+                    Arguments = "-l",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = Process.Start(psi);
+                if (process == null) return;
+
+                var output = process.StandardOutput.ReadToEnd();
+                process.WaitForExit(3000);
+
+                // Parse links: find output ports of the BT node that connect to a sink
+                // Format: "  |-> alsa_output.xxx:playback_FL"
+                // We look for lines under the BT node's output ports
+                var lines = output.Split('\n');
+                var inBtNode = false;
+                string? currentBtPort = null;
+
+                foreach (var rawLine in lines)
+                {
+                    var line = rawLine.TrimEnd();
+
+                    // Detect BT node output port headers (no leading whitespace beyond node name)
+                    if (line.StartsWith(btNodeName + ":"))
+                    {
+                        inBtNode = true;
+                        currentBtPort = line.TrimEnd();
+                        continue;
+                    }
+
+                    // Lines under a different node reset the flag
+                    if (!line.StartsWith(" ") && line.Length > 0)
+                    {
+                        inBtNode = false;
+                        currentBtPort = null;
+                        continue;
+                    }
+
+                    // Under BT node, find links to output sinks
+                    if (inBtNode && currentBtPort != null && line.Contains("|->"))
+                    {
+                        var targetPort = line.Substring(line.IndexOf("|->") + 4).Trim();
+                        if (targetPort.StartsWith("alsa_output."))
+                        {
+                            // Disconnect this link
+                            DisconnectPipeWireLink(currentBtPort, targetPort);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to disconnect PipeWire BT auto-links for {NodeName}", btNodeName);
+            }
+        }
+
+        /// <summary>
+        /// Disconnects a single PipeWire link between two ports.
+        /// </summary>
+        private void DisconnectPipeWireLink(string outputPort, string inputPort)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "pw-link",
+                    Arguments = $"-d \"{outputPort}\" \"{inputPort}\"",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = Process.Start(psi);
+                if (process == null) return;
+
+                process.WaitForExit(3000);
+
+                _logger.LogInformation(
+                    "Disconnected PipeWire auto-link: {Output} -> {Input}",
+                    outputPort, inputPort);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to disconnect PipeWire link {Output} -> {Input}",
+                    outputPort, inputPort);
             }
         }
 
