@@ -611,6 +611,15 @@ public sealed class MetadataLookupService : IMetadataLookupService
     return title.Trim();
   }
 
+  /// <inheritdoc/>
+  public async Task<string?> GetCoverArtByReleaseIdAsync(string releaseId, CancellationToken ct = default)
+  {
+    if (string.IsNullOrWhiteSpace(releaseId))
+      return null;
+
+    return await GetCoverArtUrlAsync(releaseId, ct);
+  }
+
   /// <summary>
   /// Queries the Cover Art Archive for a release's front cover image URL.
   /// Uses a separate HttpClient to avoid sending the MusicBrainz User-Agent to archive.org.

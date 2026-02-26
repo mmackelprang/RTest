@@ -276,21 +276,17 @@ Four root causes identified and fixed:
 
 **Approach:** Use frontend-design skill to holistically adjust the topbar proportions and ensure downstream layout (content-area, panels) remains balanced.
 
-### F.18 Bluetooth Album Art: Prefer BT Metadata Over Online Lookup 🟡
-**Status:** pending
+### F.18 Bluetooth Album Art: Improve Album Art Lookup Pipeline ✅
+**Status:** complete
 
-**Problem:** Bluetooth connections used to provide album art directly via AVRCP metadata, but the current code falls back to MusicBrainz lookup based on song/artist/album name. BT-provided album art is almost always higher quality (the source app sends the actual cover art) compared to MusicBrainz which may return lower-res or mismatched art.
+**Investigation findings:** BlueZ AVRCP does NOT provide album art via D-Bus on this system (confirmed via live dbus-send queries). The Track metadata dict has Title, Artist, TrackNumber, Duration — but no ArtUrl, no Album art data. BlueZ doesn't support AVRCP BIP (Basic Imaging Profile). The task was reframed to improve the online lookup pipeline instead.
 
-**Requirements:**
-1. **First** attempt to retrieve album art from the BT AVRCP metadata (image property on the media player interface)
-2. **Only if BT art is unavailable**, fall back to MusicBrainz/Cover Art Archive online lookup
-3. Cache BT-provided art the same way online art is cached (in `data/albumart/`)
-
-**Investigation approach:**
-- [ ] Check BlueZ D-Bus `org.bluez.MediaPlayer1` for image/art property availability
-- [ ] Review current album art flow in `BluetoothAudioSource` and `AlbumArtService`
-- [ ] Determine if AVRCP art comes as a file path, URL, or binary blob
-- [ ] Wire BT art into the existing album art pipeline with priority over online lookup
+**Changes made:**
+1. **Fingerprint-identified cover art**: `OnTrackIdentified` now uses `e.Track.CoverArtUrl` from the fingerprint pipeline (already looked up via MusicBrainz + Cover Art Archive), caches it, and updates source metadata
+2. **Direct Cover Art Archive lookup**: If fingerprinting has `MusicBrainzReleaseId` but no `CoverArtUrl`, queries Cover Art Archive directly (skipping text search)
+3. **Retry without album**: If album-constrained MusicBrainz search returns null, retries without album constraint (streaming apps append edition info that doesn't match)
+4. **Negative caching**: Failed art lookups tracked in `_failedArtLookups` HashSet to avoid re-querying MusicBrainz for same title/artist within a session
+5. **New interface method**: `IMetadataLookupService.GetCoverArtByReleaseIdAsync()` for direct Cover Art Archive access by release ID
 
 ---
 
