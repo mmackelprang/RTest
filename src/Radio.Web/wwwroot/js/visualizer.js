@@ -535,8 +535,29 @@ export const visualizer = {
 
     const centerX = width / 2;
     const centerY = height / 2;
-    const scale = Math.min(width, height) * 0.4;
     const len = Math.min(leftSamples.length, rightSamples.length);
+
+    // Adaptive scaling: find peak amplitude in current frame
+    let maxAmp = 0;
+    for (let i = 0; i < len; i++) {
+      const l = Math.abs(leftSamples[i] || 0);
+      const r = Math.abs(rightSamples[i] || 0);
+      maxAmp = Math.max(maxAmp, l, r);
+    }
+
+    // Track recent peak for smooth scaling (avoid jitter)
+    if (!canvasData.phaseScopePeak) canvasData.phaseScopePeak = maxAmp || 0.5;
+    if (maxAmp > canvasData.phaseScopePeak) {
+      // Attack: fast rise to new peak
+      canvasData.phaseScopePeak = canvasData.phaseScopePeak * 0.3 + maxAmp * 0.7;
+    } else {
+      // Release: slow decay
+      canvasData.phaseScopePeak = canvasData.phaseScopePeak * 0.97 + maxAmp * 0.03;
+    }
+
+    // Scale so the tracked peak fills ~80% of the display; floor at 0.01 to avoid division issues
+    const effectivePeak = Math.max(0.01, canvasData.phaseScopePeak);
+    const scale = (Math.min(width, height) * 0.4) / effectivePeak;
 
     // Plot L vs R as XY — rotated 45° (Lissajous convention: mid = vertical, side = horizontal)
     for (let i = 0; i < len; i++) {
@@ -602,6 +623,7 @@ export const visualizer = {
     if (!canvasData) return;
     canvasData.spectrogramHistory = [];
     canvasData.phaseScopeBuffer = null;
+    canvasData.phaseScopePeak = null;
   },
 
   // Dispose a canvas
