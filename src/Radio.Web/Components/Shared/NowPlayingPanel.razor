@@ -225,6 +225,18 @@
       </div>
     }
 
+    <!-- Volume Control -->
+    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+      <MudIconButton Icon="@(_isMuted ? Icons.Material.Filled.VolumeOff : Icons.Material.Filled.VolumeUp)"
+                     Color="Color.Default" Size="Size.Medium"
+                     Style="min-width: 44px; min-height: 44px;"
+                     OnClick="@HandleMuteAsync" />
+      <MudSlider T="double" Value="_volume" ValueChanged="@OnVolumeChanged"
+                 Min="0" Max="1" Step="0.01" Size="Size.Small"
+                 Color="Color.Primary" Style="flex: 1;" />
+      <span style="font-family: var(--font-mono); font-size: 14px; color: var(--text-medium); min-width: 40px; text-align: right;">@((_volume * 100).ToString("F0"))%</span>
+    </div>
+
     <!-- Transport Controls -->
     <div class="transport-group">
       <MudIconButton Icon="@Icons.Material.Filled.Shuffle"

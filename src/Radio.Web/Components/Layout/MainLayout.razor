@@ -37,13 +37,13 @@
              data-source="@GetSourceDataAttr(source.Type)"
              @onclick="@(() => HandleSourceToggleAsync(source))"
              title="@source.Name">
-          <MudIcon Icon="@GetSourceIcon(source.Type)" Size="Size.Small" />
+          <MudIcon Icon="@GetSourceIcon(source.Type)" Size="Size.Medium" />
         </div>
       }
       @if (IsBluetoothSourceSelected())
       {
         <div class="route-toggle" @onclick="@(() => NavigationManager.NavigateTo("/bluetooth"))" title="Bluetooth Settings">
-          <MudIcon Icon="@Icons.Material.Filled.SettingsBluetooth" Size="Size.Small" />
+          <MudIcon Icon="@Icons.Material.Filled.SettingsBluetooth" Size="Size.Medium" />
         </div>
       }
     </div>
@@ -59,7 +59,7 @@
              @onclick="@(() => HandleOutputChangeAsync(output.Id))"
              title="@output.Name"
              style="position: relative;">
-          <MudIcon Icon="@GetOutputIcon(output)" Size="Size.Small" />
+          <MudIcon Icon="@GetOutputIcon(output)" Size="Size.Medium" />
           @if (output.Id == "google-cast" && _isCastConnecting)
           {
             <div class="cast-connecting" style="position:absolute; inset:0; border-radius:inherit; border: 2px solid var(--accent-primary);"></div>
@@ -75,39 +75,25 @@
       @if (_selectedOutputId == "google-cast")
       {
         <div class="route-toggle" @onclick="@OpenCastDeviceDialog" title="Select Cast Device">
-          <MudIcon Icon="@Icons.Material.Filled.Settings" Size="Size.Small" />
+          <MudIcon Icon="@Icons.Material.Filled.Settings" Size="Size.Medium" />
         </div>
       }
     </div>
 
-    <div class="topbar-separator"></div>
-
-    <!-- Volume Control -->
-    <div class="volume-control">
-      <MudIconButton Icon="@(_isMuted ? Icons.Material.Filled.VolumeOff : Icons.Material.Filled.VolumeUp)"
-                     Color="Color.Default" Size="Size.Small"
-                     Style="min-width:44px; min-height:44px;"
-                     OnClick="@HandleMuteAsync" />
-      <MudSlider T="double" Value="_volume" ValueChanged="@OnVolumeChanged"
-                 Min="0" Max="1" Step="0.01" Size="Size.Small"
-                 Color="Color.Primary" Style="width: 160px;" />
-      <span class="volume-label">@((_volume * 100).ToString("F0"))%</span>
-    </div>
-
     <!-- Navigation Icons (right-aligned) -->
     <div class="topbar-nav">
-      <MudIconButton Icon="@Icons.Material.Filled.Home" Class="@NavClass("/")" Href="/" Size="Size.Medium" title="Home" />
+      <MudIconButton Icon="@Icons.Material.Filled.Home" Class="@NavClass("/")" Href="/" Size="Size.Large" title="Home" />
       <MudBadge Content="@_queueCount" Overlap="true" Color="Color.Primary" Visible="@(_queueCount > 0)">
-        <MudIconButton Icon="@Icons.Material.Filled.QueueMusic" Class="@NavClass("/queue")" Href="/queue" Size="Size.Medium" title="Queue" />
+        <MudIconButton Icon="@Icons.Material.Filled.QueueMusic" Class="@NavClass("/queue")" Href="/queue" Size="Size.Large" title="Queue" />
       </MudBadge>
-      <MudIconButton Icon="@Icons.Material.Filled.Dashboard" Class="@NavClass("/metrics")" Href="/metrics" Size="Size.Medium" title="Metrics" />
-      <MudIconButton Icon="@Icons.Material.Filled.Devices" Class="@NavClass("/devices")" Href="/devices" Size="Size.Medium" title="Devices" />
-      <MudIconButton Icon="@Icons.Material.Filled.History" Class="@NavClass("/history")" Href="/history" Size="Size.Medium" title="History" />
-      <MudIconButton Icon="@Icons.Material.Filled.Settings" Class="@NavClass("/system")" Href="/system" Size="Size.Medium" title="Settings" />
+      <MudIconButton Icon="@Icons.Material.Filled.Dashboard" Class="@NavClass("/metrics")" Href="/metrics" Size="Size.Large" title="Metrics" />
+      <MudIconButton Icon="@Icons.Material.Filled.Devices" Class="@NavClass("/devices")" Href="/devices" Size="Size.Large" title="Devices" />
+      <MudIconButton Icon="@Icons.Material.Filled.History" Class="@NavClass("/history")" Href="/history" Size="Size.Large" title="History" />
+      <MudIconButton Icon="@Icons.Material.Filled.Settings" Class="@NavClass("/system")" Href="/system" Size="Size.Large" title="Settings" />
     </div>
   </div>
 
-  <!-- Main Content Area — 524px (576 - 52) -->
+  <!-- Main Content Area — 640px (720 - 80) -->
   <div class="content-area">
     <div class="page-transition">
       @Body
@@ -128,15 +114,7 @@
   private CastDeviceDto? _defaultCastDevice;
   private bool _isCastConnecting;
 
-  // Audio state for title bar volume control
-  private bool _isMuted = false;
-  private double _volume = 0.75;
   private int _queueCount = 0;
-  
-  // Volume debouncing
-  private System.Threading.Timer? _volumeDebounceTimer;
-  private double _pendingVolume;
-  private readonly object _volumeLock = new();
 
   private readonly MudTheme _customTheme = new()
   {
@@ -198,8 +176,7 @@
       DeviceDisplayState.DisplaySettingsChanged += OnDeviceDisplaySettingsChanged;
       Logger.LogDebug("MainLayout - Subscribed to audio state events");
 
-      // Load initial audio state
-      await RefreshAudioStateAsync();
+      // Load initial state
       await RefreshQueueCountAsync();
 
       // Update time immediately
@@ -681,13 +658,11 @@
 
   private async Task OnPlaybackStateChanged()
   {
-    await RefreshAudioStateAsync();
     await InvokeAsync(StateHasChanged);
   }
 
   private async Task OnNowPlayingChanged()
   {
-    await RefreshAudioStateAsync();
     await InvokeAsync(StateHasChanged);
   }
 
@@ -715,23 +690,6 @@
     await InvokeAsync(StateHasChanged);
   }
 
-  private async Task RefreshAudioStateAsync()
-  {
-    try
-    {
-      var state = await AudioApi.GetPlaybackStateAsync();
-      if (state != null)
-      {
-        _isMuted = state.IsMuted;
-        _volume = state.Volume;
-      }
-    }
-    catch (Exception ex)
-    {
-      Logger.LogError(ex, "Error refreshing audio state in MainLayout");
-    }
-  }
-
   private async Task RefreshQueueCountAsync()
   {
     try
@@ -746,44 +704,6 @@
     }
   }
 
-  private async Task HandleMuteAsync()
-  {
-    try
-    {
-      await AudioApi.ToggleMuteAsync(!_isMuted);
-      await RefreshAudioStateAsync();
-    }
-    catch (Exception ex)
-    {
-      Logger.LogError(ex, "Error in HandleMuteAsync");
-    }
-  }
-
-  private async Task OnVolumeChanged(double newVolume)
-  {
-    // Update UI immediately but debounce API call
-    _volume = newVolume;
-    
-    lock (_volumeLock)
-    {
-      _pendingVolume = newVolume;
-      
-      // Cancel existing timer and start new one
-      _volumeDebounceTimer?.Dispose();
-      _volumeDebounceTimer = new System.Threading.Timer(async _ =>
-      {
-        try
-        {
-          await AudioApi.SetVolumeAsync((float)_pendingVolume);
-        }
-        catch (Exception ex)
-        {
-          Logger.LogError(ex, "Error in debounced volume change");
-        }
-      }, null, TimeSpan.FromMilliseconds(300), Timeout.InfiniteTimeSpan);
-    }
-  }
-
   public void Dispose()
   {
     // Unsubscribe from events to prevent memory leaks
@@ -795,7 +715,6 @@
 
     _timer?.Stop();
     _timer?.Dispose();
-    _volumeDebounceTimer?.Dispose();
   }
 
   public ValueTask DisposeAsync()

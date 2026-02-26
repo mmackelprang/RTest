@@ -166,7 +166,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Move files into place, preserving data, logs, and Production config
-ssh $SshTarget "sudo mkdir -p $TargetPath/api $TargetPath/web $TargetPath/data $TargetPath/logs && sudo rsync -a --delete --exclude='appsettings.Production.json' /tmp/radio-deploy-api/ $TargetPath/api/ && sudo rsync -a --delete --exclude='appsettings.Production.json' /tmp/radio-deploy-web/ $TargetPath/web/ && sudo chown -R radio:radio $TargetPath && sudo chmod +x $TargetPath/api/Radio.API $TargetPath/web/Radio.Web && rm -rf /tmp/radio-deploy-api /tmp/radio-deploy-web"
+ssh $SshTarget "sudo mkdir -p $TargetPath/api $TargetPath/web $TargetPath/data $TargetPath/logs && sudo rsync -a --delete --exclude='appsettings.Production.json' /tmp/radio-deploy-api/ $TargetPath/api/ && sudo rsync -a --delete --exclude='appsettings.Production.json' /tmp/radio-deploy-web/ $TargetPath/web/ && sudo chown -R ${TargetUser}:${TargetUser} $TargetPath && sudo chmod +x $TargetPath/api/Radio.API $TargetPath/web/Radio.Web && rm -rf /tmp/radio-deploy-api /tmp/radio-deploy-web"
 
 # Deploy target-specific Production config if not already present
 $targetConfigPath = Join-Path $RepoRoot "deploy\$configDir\appsettings.Production.json"
@@ -175,7 +175,7 @@ if (Test-Path $targetConfigPath) {
   if ($LASTEXITCODE -ne 0) {
     Write-Host "  Deploying Production config from deploy/$configDir/..." -ForegroundColor DarkGray
     scp $targetConfigPath "${SshTarget}:/tmp/appsettings.Production.json"
-    ssh $SshTarget "sudo cp /tmp/appsettings.Production.json $TargetPath/api/ && sudo cp /tmp/appsettings.Production.json $TargetPath/web/ && sudo chown radio:radio $TargetPath/api/appsettings.Production.json $TargetPath/web/appsettings.Production.json && rm /tmp/appsettings.Production.json"
+    ssh $SshTarget "sudo cp /tmp/appsettings.Production.json $TargetPath/api/ && sudo cp /tmp/appsettings.Production.json $TargetPath/web/ && sudo chown ${TargetUser}:${TargetUser} $TargetPath/api/appsettings.Production.json $TargetPath/web/appsettings.Production.json && rm /tmp/appsettings.Production.json"
   }
 }
 

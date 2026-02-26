@@ -12,7 +12,7 @@
 <div style="height: 100%; display: flex; gap: 2px; overflow: hidden;">
   <!-- Left: Filters & Statistics -->
   <div class="panel surface-raised" style="width: 360px; flex-shrink: 0; overflow: hidden; padding: 16px; display: flex; flex-direction: column;">
-    <MudStack Spacing="3" Style="overflow-y: auto; flex: 1;">
+    <MudStack Spacing="3" Style="overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0;">
       <MudText Typo="Typo.h6">Play History</MudText>
 
       <MudDatePicker Label="Filter by Date" @bind-Date="_selectedDate" Clearable="true" />
