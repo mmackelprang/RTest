@@ -148,6 +148,9 @@ public class RadioAudioSource : USBAudioSourceBase, Radio.Core.Interfaces.Audio.
   public ScanDirection? ScanDirection => null;
 
   /// <inheritdoc/>
+  public int ScanStopThreshold => 50;
+
+  /// <inheritdoc/>
   /// <remarks>RF320 does not support software-controlled scanning.</remarks>
   public Task StartScanAsync(ScanDirection direction, CancellationToken cancellationToken = default)
   {

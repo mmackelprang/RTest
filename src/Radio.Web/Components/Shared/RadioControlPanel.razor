@@ -79,7 +79,7 @@
       <!-- Scanning indicator -->
       @if (_radioState.IsScanning)
       {
-        @if ((_radioState.SignalStrength ?? 0) >= 30)
+        @if ((_radioState.SignalStrength ?? 0) >= _radioState.ScanStopThreshold)
         {
           <div class="rcp-scan-signal">
             SIGNAL @(_radioState.SignalStrength)%

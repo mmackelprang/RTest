@@ -93,6 +93,11 @@ public interface IRadioControl
   /// </summary>
   ScanDirection? ScanDirection { get; }
 
+  /// <summary>
+  /// Gets the signal strength threshold (0-100) at which the scan pauses on a signal.
+  /// </summary>
+  int ScanStopThreshold { get; }
+
   #endregion
 
   #region Band and Modulation

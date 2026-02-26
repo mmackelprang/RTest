@@ -601,6 +601,7 @@ public class AudioStateUpdateService : BackgroundService
       DeviceVolume = radioControls.DeviceVolume,
       IsScanning = radioControls.IsScanning,
       ScanDirection = radioControls.ScanDirection?.ToString(),
+      ScanStopThreshold = radioControls.ScanStopThreshold,
       AutoGain = radioControls.AutoGainEnabled,
       Gain = (int?)radioControls.Gain,
     };
