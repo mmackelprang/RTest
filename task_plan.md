@@ -95,12 +95,15 @@ Current WFM demod outputs mono (duplicated to L+R). The 240 kHz demod rate alrea
 Existing DSP primitives (LowPassFilter, DeEmphasisFilter, AudioDecimator) are reusable. ~200-300 lines new code.
 
 ### F.7 Ubuntu Kiosk Setup 🟢
-**Status:** pending
+**Status:** complete ✅
 
-Set up via SSH MCP on Ubuntu (`mmack@radio`):
-- [ ] Desktop shortcut/icon to launch browser in kiosk mode (`chromium --kiosk http://localhost:5002`)
-- [ ] System menu entries: "Exit Browser" (kill chromium), "Shutdown System" (sudo shutdown)
-- [ ] Touchscreen is already installed
+Implemented in PR #243:
+- [x] Desktop shortcuts: Radio Console (Chrome kiosk), Exit Browser, Shutdown System
+- [x] GNOME autostart with 5s delay, auto-login, screen blanking disabled
+- [x] `setup-kiosk.sh` installer with service user switch (radio → mmack for PipeWire)
+- [x] Viewport updated from 1920x576 to 1920x720 to match Ubuntu display
+- [x] `radio-refresh-browser` helper using Chrome DevTools Protocol (Wayland-compatible)
+- [x] `unclutter` for hiding idle mouse cursor
 
 ### F.8 Now Playing Panel: Larger Album Art 🟢
 **Status:** complete ✅
@@ -131,23 +134,17 @@ Five issues:
 **File:** `src/Radio.Web/Components/Shared/RadioControlPanel.razor`
 
 ### F.11 Bluetooth Stability Investigation 🔴
-**Status:** pending
+**Status:** complete ✅
 
-Bluetooth connects to `Grandpas Radio` from phone, but playback is unreliable:
-1. **Album art missing** — Song title & artist usually arrive via AVRCP, but album art rarely comes through. Investigate: is the art URL provided by AVRCP metadata? Does the proxy endpoint work? Is the Web UI requesting it?
-2. **Audio often missing** — After connecting and starting Spotify playback, audio and visualization frequently don't appear. Sometimes works, sometimes doesn't. Investigate: is A2DP stream being received? Is `BluetoothAudioSource` activating? Is the audio pipeline routing correctly? Check logs for errors during BT playback attempts.
-3. **Visualization missing** — When audio doesn't play, visualization is also absent (expected if no audio). But verify visualization works when audio IS playing.
-
-**Investigation approach:**
-- [ ] Deploy, connect BT, play Spotify, capture full logs
-- [ ] Check AVRCP metadata fields (title, artist, album, art URL)
-- [ ] Check A2DP audio stream reception and routing
-- [ ] Check `BluetoothAudioSource` state transitions
-- [ ] Verify BT play history recording (fix committed, untested)
-- [ ] Verify BT visualization data (fix committed, untested)
+Fixed in PRs #242 (fix: Bluetooth audio capture and album art lookup):
+1. **Audio capture** — Replaced failing `arecord -D bt_capture` (ALSA bridge never configured) with `pw-record --target` for direct PipeWire capture from `bluez_input.*` nodes. Added `FindPipeWireBluetoothNodeAsync()` for dynamic node discovery with retry logic.
+2. **Album art** — Stripped streaming title suffixes (e.g., "- 2010 Remaster", "(Deluxe Edition)") before MusicBrainz search. Now tries multiple recordings/releases (limit 5) instead of just the first match.
+3. **Visualization** — Confirmed working when BT audio is playing via pw-record capture pipeline.
+4. **Systemd** — Relaxed `ProtectHome`/`ProtectSystem` for PipeWire socket access. New `radio-pipewire-access.service` grants ACL on `/run/user/1000`. Added `After=/Wants=` ordering in `radio-api.service`.
+5. **Code review fixes** — Wrapped `async void OnDeviceDisconnected` in top-level try/catch, removed stale XML doc, fixed systemd ordering race.
 
 ### F.12 UI/UX Audit & Polish 🟢
-**Status:** pending
+**Status:** complete ✅
 
 Comprehensive audit of all pages for consistency with the modern, clean touch-screen kiosk aesthetic. Fix layout overflows, color mismatches, and improve information density.
 
@@ -170,6 +167,130 @@ Comprehensive audit of all pages for consistency with the modern, clean touch-sc
 8. **System > Store Management** — Messy layout when user clicks `Refresh`. Improve the refresh/loading state UX.
 
 **Approach:** Examine each page in the browser, identify issues, fix styling/layout while maintaining existing functionality. Carry forward the "Command Surface" dark-mode broadcast console aesthetic with CSS variables already defined.
+
+### F.13 Bluetooth Audio Buffering Artifacts 🔴
+**Status:** complete ✅
+
+Four root causes identified and fixed:
+1. **No buffer pre-fill** — BufferedSoundGenerator started empty, causing 88+ underruns on startup. Fixed: added `PreFillSilence(0.5f)` in both capture paths (matching SDR pattern).
+2. **Pipe buffering** — `pw-record` used full stdout buffering when piped (~64KB bursts), starving the ring buffer. Fixed: wrapped with `stdbuf -o0` for unbuffered output.
+3. **Byte alignment corruption** — `ReadAsync` could return odd byte counts, shifting S16_LE sample alignment. Fixed: added `pendingByte` tracking to maintain 2-byte alignment across reads.
+4. **Duplicate generators race** — `RouteCaptureThroughMixerAsync()` could be called concurrently from DeviceConnected event and PlayCoreAsync, creating two generators in the mixer. Fixed: added `SemaphoreSlim _routeLock`.
+
+### F.14 Audio Source Exclusivity & State Preservation 🔴
+**Status:** complete ✅ (PR #245)
+
+**Problem:** Multiple audio sources can play simultaneously — user observed overlapping audio from two inputs. Only one primary source should ever send audio to the output at a time (Audio Events are the exception — they are designed to duck/overlay and must ALWAYS be allowed).
+
+**Requirements:**
+1. **Single active source:** Switching to a new input source must stop/pause/mute the previous source before the new one begins producing audio.
+2. **State preservation:** Sources must NOT be disposed on switch-away. Each source retains its state:
+   - **Radio/SDR:** Keep current station, band, frequency
+   - **File Player:** Keep playlist, current track position
+   - **Bluetooth:** Keep connection state, AVRCP metadata
+   - **Vinyl/Phono:** No state to preserve (pass-through)
+   - **Generic USB:** No state to preserve (pass-through)
+3. **Pause/Resume for controllable sources:**
+   - **File Player:** Pause on switch-away, resume on switch-back
+   - **Bluetooth:** Pause (AVRCP) on switch-away, play (AVRCP) on switch-back
+   - **Radio, Vinyl, USB:** Cannot pause — just disconnect from mixer
+4. **Queue/playlist auto-switch:** Loading a playlist is allowed without switching to File Player. But when a track is selected and begins playing, the system must auto-pause/mute the current source and switch to File Player.
+5. **Audio Events (TTS, sound effects):** These are special-case overlay sources that duck the primary source volume. They must ALWAYS be allowed to play regardless of which primary source is active. Do not block or mute events.
+
+**Investigation approach:**
+- [ ] Audit `IAudioEngine.SwitchSourceAsync()` / `AudioManager` for proper old-source teardown
+- [ ] Check if mixer removes old source generator before adding new one
+- [ ] Verify `SoundFlowPlaybackService.PlayComponentAsync()` can't produce parallel generators
+- [ ] Add guard: if source is already active on mixer, skip re-add
+- [ ] Test: switch Radio → BT → File → Radio rapidly, confirm no overlap
+- [ ] Document source lifecycle contract for future source implementations
+
+### F.15 Audio Output Exclusivity 🔴
+**Status:** complete ✅ (verified correct, no changes needed — PR #245)
+
+**Problem:** When switching to Google Cast output, audio continued playing from the local soundbar simultaneously. Only the selected output should receive audio.
+
+**Requirements:**
+1. Switching output must mute/disconnect all other outputs before activating the new one
+2. Local output must be muted when Cast is active (this was fixed on Pi previously — verify the fix applies to Ubuntu)
+3. Cast disconnect must restore local output
+4. HTTP stream output: decide if it should be exclusive or parallel (it's typically used for monitoring)
+
+**Investigation approach:**
+- [ ] Review `SetLocalOutputMuted(true)` in Cast connect flow — verify it's called on Ubuntu
+- [ ] Check if `SwitchPlaybackDevice()` properly tears down old output
+- [ ] Review the Pi fix for this same issue and confirm it's in the Ubuntu code path
+- [ ] Test: Local → Cast → Local, confirm no dual-output at any point
+- [ ] Document the output switching contract
+
+### F.16 Ubuntu Boot Persistence & Shutdown UI 🟡
+**Status:** complete ✅ (PR #245 — Shutdown/Restart buttons added to System page)
+
+**Requirements:**
+1. **Configuration survives reboot:** Verify `appsettings.Production.json`, PipeWire defaults (`pactl set-default-sink`), GNOME settings (auto-login, screen blanking), and kiosk autostart all persist.
+2. **Web UI loads on startup:** Confirm `radio-kiosk-autostart.desktop` in `~/.config/autostart/` launches Chromium in kiosk mode after auto-login. Test by rebooting.
+3. **Shutdown button on System page:** Add a new section or buttons to the System Stats tab:
+   - **"Exit Web UI"** — Stops the `radio-web` service (or closes the browser kiosk)
+   - **"Shutdown System"** — Calls `systemctl poweroff` (with confirmation dialog)
+   - Both need confirmation dialogs ("Are you sure?")
+
+**Implementation approach:**
+- [ ] Add shutdown/restart API endpoints to Radio.API (or use direct SSH/systemd calls from Web)
+- [ ] Add UI buttons with MudDialog confirmation to SystemConfigPage.razor
+- [ ] Verify all kiosk setup from F.7 survives a full reboot cycle
+- [ ] Test: reboot → auto-login → browser kiosk → Web UI loads → all settings intact
+
+### F.17 Audio Level Analysis — Expert Research 🟡
+**Status:** complete ✅ (research complete — PR #245 session)
+
+**Problem:** Different audio sources produce very different volume levels:
+- **Bluetooth audio is noticeably quiet** through local output
+- **BUT the same Bluetooth audio is NOT quiet through Google Cast** — suggesting the issue is in the local playback path, not the BT capture itself
+- Radio SDR has its own AGC toggle in the Web UI
+- Vinyl/Phono levels vary depending on cartridge and preamp
+- File player levels depend on mastering
+
+**Key observation:** If BT audio is quiet locally but normal via Cast, the problem is likely in the local playback path AFTER the mixer (volume scaling, output device gain, PipeWire routing) rather than in the BT capture or mixer input.
+
+**Research questions:**
+1. Where in the audio pipeline does the volume difference originate? (capture → mixer → modifiers → output)
+2. Is the per-source gain offset (F.4) the right approach, or is there a better solution?
+3. Could PipeWire node volume/gain be different for local vs Cast output paths?
+4. Is the Radio AGC toggle interacting with our gain system?
+5. Should we implement proper broadcast-style loudness normalization (EBU R128 / ITU-R BS.1770)?
+6. What do professional streaming audio systems do for multi-source level matching?
+
+**Approach:** Deep research and analysis FIRST. Present findings and options to user before making any code changes. Examine the full signal chain from capture to output for each source type.
+
+### F.19 Topbar Icon Size Increase (~20%) & UI Rebalance 🟡
+**Status:** complete ✅ (PR #245)
+
+**Problem:** Topbar icons are still a little small for comfortable touch screen usage on the kiosk (1920x720). They were enlarged in F.12 (Source/Output to Medium, Nav to Large) but need another ~20% bump for reliable finger-tap targeting.
+
+**Requirements:**
+1. Increase topbar source/output/nav icons by ~20% (may need custom CSS sizing beyond MudBlazor's Size enum)
+2. Rebalance surrounding UI elements to accommodate larger icons — route group padding, topbar height, clock size, separators, spacing
+3. Ensure the topbar still fits within 1920px width without overflow or wrapping
+4. Maintain the "Command Surface" broadcast console aesthetic — larger icons should feel intentional, not cramped
+5. Verify content area height adjusts if topbar height changes
+
+**Approach:** Use frontend-design skill to holistically adjust the topbar proportions and ensure downstream layout (content-area, panels) remains balanced.
+
+### F.18 Bluetooth Album Art: Prefer BT Metadata Over Online Lookup 🟡
+**Status:** pending
+
+**Problem:** Bluetooth connections used to provide album art directly via AVRCP metadata, but the current code falls back to MusicBrainz lookup based on song/artist/album name. BT-provided album art is almost always higher quality (the source app sends the actual cover art) compared to MusicBrainz which may return lower-res or mismatched art.
+
+**Requirements:**
+1. **First** attempt to retrieve album art from the BT AVRCP metadata (image property on the media player interface)
+2. **Only if BT art is unavailable**, fall back to MusicBrainz/Cover Art Archive online lookup
+3. Cache BT-provided art the same way online art is cached (in `data/albumart/`)
+
+**Investigation approach:**
+- [ ] Check BlueZ D-Bus `org.bluez.MediaPlayer1` for image/art property availability
+- [ ] Review current album art flow in `BluetoothAudioSource` and `AlbumArtService`
+- [ ] Determine if AVRCP art comes as a file path, URL, or binary blob
+- [ ] Wire BT art into the existing album art pipeline with priority over online lookup
 
 ---
 
@@ -196,9 +317,11 @@ Comprehensive audit of all pages for consistency with the modern, clean touch-sc
 | Cast latency configurable | **Resolved** | PR #233 — DirectChannel buffer params in UI |
 | Pong not received via SharpCaster | Deferred | CDP workaround reliable |
 | Receiver double-counts messages | Cosmetic | 20/sec vs sender 10/sec after CDP reload |
-| BT play history recording | Needs verification | Fix committed, untested on hardware |
-| BT visualization data | Needs verification | Fix committed, untested on hardware |
+| BT play history recording | **Verified** | Working with pw-record capture (PR #242) |
+| BT visualization data | **Verified** | Working with pw-record capture (PR #242) |
 | JsonException deserializing RadioDeviceOptionsDto | New — Minor | Config `devices.radio` section doesn't match DTO shape |
+| Multiple audio sources playing simultaneously | New — F.14 | Observed overlapping inputs; source switch doesn't mute previous |
+| Cast + local output playing simultaneously | New — F.15 | Selecting Cast output didn't mute local soundbar on Ubuntu |
 
 ## Design Decisions
 | Decision | Rationale |
