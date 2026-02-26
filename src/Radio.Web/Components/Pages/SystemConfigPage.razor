@@ -368,13 +368,6 @@
                               Variant="Variant.Outlined"
                               HelperText="USB audio device name pattern for turntable (e.g., USB Microphone)" />
               </MudItem>
-              <MudItem xs="12" md="6">
-                <MudTextField T="string" @bind-Value="_deviceOptions.Cast.DefaultDevice"
-                              Label="Default Cast Device"
-                              Variant="Variant.Outlined"
-                              HelperText="Default Chromecast device name (optional)" />
-              </MudItem>
-
               <MudItem xs="12">
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveDeviceOptionsAsync"
                            StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">

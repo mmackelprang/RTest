@@ -22,7 +22,6 @@ public class DeviceOptionsResolverTests
     {
       Radio = new RadioDeviceOptions { USBPort = "fallback-radio" },
       Vinyl = new VinylDeviceOptions { USBPort = "fallback-vinyl" },
-      Cast = new CastDeviceOptions { DefaultDevice = "fallback-cast" },
     });
 
     _configManager = new Mock<IConfigurationManager>();
@@ -38,8 +37,6 @@ public class DeviceOptionsResolverTests
       .ReturnsAsync("{\"usbPort\":\"AB13X\"}");
     _configManager.Setup(x => x.GetValueAsync<string>("sqlite", "devices:Vinyl", It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
       .ReturnsAsync("{\"usbPort\":\"TurntableUSB\"}");
-    _configManager.Setup(x => x.GetValueAsync<string>("sqlite", "devices:Cast", It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
-      .ReturnsAsync("{\"defaultDevice\":\"Office speaker\"}");
 
     var resolver = new DeviceOptionsResolver(_logger, _optionsMonitor.Object, _configManager.Object);
 
@@ -47,7 +44,6 @@ public class DeviceOptionsResolverTests
 
     Assert.Equal("AB13X", result.Radio.USBPort);
     Assert.Equal("TurntableUSB", result.Vinyl.USBPort);
-    Assert.Equal("Office speaker", result.Cast.DefaultDevice);
   }
 
   [Fact]
@@ -62,7 +58,6 @@ public class DeviceOptionsResolverTests
 
     Assert.Equal("fallback-radio", result.Radio.USBPort);
     Assert.Equal("fallback-vinyl", result.Vinyl.USBPort);
-    Assert.Equal("fallback-cast", result.Cast.DefaultDevice);
   }
 
   [Fact]

@@ -24,10 +24,7 @@ public class GoogleCastOutputTests
       {
         Enabled = false,
         DiscoveryTimeoutSeconds = 5,
-        PreferredDeviceName = "",
-        DefaultVolume = 0.7f,
-        AutoReconnect = true,
-        ReconnectDelaySeconds = 5
+        DefaultVolume = 0.7f
       }
     };
 

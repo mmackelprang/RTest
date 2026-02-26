@@ -34,10 +34,4 @@ public sealed class ConfigurationOptions
 
   /// <summary>Whether to auto-save changes.</summary>
   public bool AutoSave { get; set; } = true;
-
-  /// <summary>Number of days to retain backups.</summary>
-  public int BackupRetentionDays { get; set; } = 30;
-
-  /// <summary>Debounce delay for auto-save in milliseconds.</summary>
-  public int AutoSaveDebounceMs { get; set; } = 5000;
 }

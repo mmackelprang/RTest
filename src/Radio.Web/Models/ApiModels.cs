@@ -518,7 +518,6 @@ public class DeviceOptionsDto
 {
   public RadioDeviceOptionsDto Radio { get; set; } = new();
   public VinylDeviceOptionsDto Vinyl { get; set; } = new();
-  public CastDeviceOptionsDto Cast { get; set; } = new();
 }
 
 public class RadioDeviceOptionsDto
@@ -529,11 +528,6 @@ public class RadioDeviceOptionsDto
 public class VinylDeviceOptionsDto
 {
   public string USBPort { get; set; } = "/dev/ttyUSB1";
-}
-
-public class CastDeviceOptionsDto
-{
-  public string DefaultDevice { get; set; } = "";
 }
 
 // Preferences DTOs (Phase 2)

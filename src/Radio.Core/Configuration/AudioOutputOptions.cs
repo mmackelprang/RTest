@@ -132,25 +132,9 @@ public class GoogleCastOutputOptions
   public int DiscoveryTimeoutSeconds { get; set; } = 10;
 
   /// <summary>
-  /// Gets or sets the preferred cast device name.
-  /// If empty, uses the first discovered device.
-  /// </summary>
-  public string PreferredDeviceName { get; set; } = "";
-
-  /// <summary>
   /// Gets or sets the default volume level for cast (0.0 to 1.0).
   /// </summary>
   public float DefaultVolume { get; set; } = 0.7f;
-
-  /// <summary>
-  /// Gets or sets whether to automatically reconnect on disconnect.
-  /// </summary>
-  public bool AutoReconnect { get; set; } = true;
-
-  /// <summary>
-  /// Gets or sets the reconnect delay in seconds.
-  /// </summary>
-  public int ReconnectDelaySeconds { get; set; } = 5;
 
   /// <summary>
   /// Gets or sets the file path for caching discovered Cast devices.

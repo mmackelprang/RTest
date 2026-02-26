@@ -33,8 +33,7 @@ public class USBAudioSourceTests
     _deviceOptions = new DeviceOptions
     {
       Radio = new RadioDeviceOptions { USBPort = "/dev/ttyUSB0" },
-      Vinyl = new VinylDeviceOptions { USBPort = "/dev/ttyUSB1" },
-      Cast = new CastDeviceOptions { DefaultDevice = "" }
+      Vinyl = new VinylDeviceOptions { USBPort = "/dev/ttyUSB1" }
     };
 
     _radioOptions = new RadioOptions

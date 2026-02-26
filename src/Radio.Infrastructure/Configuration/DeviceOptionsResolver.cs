@@ -58,8 +58,6 @@ public class DeviceOptionsResolver
                 ?? fallback.Radio ?? new RadioDeviceOptions(),
         Vinyl = await ResolveNestedAsync<VinylDeviceOptions>(storeId, "devices:Vinyl", ct)
                 ?? fallback.Vinyl ?? new VinylDeviceOptions(),
-        Cast = await ResolveNestedAsync<CastDeviceOptions>(storeId, "devices:Cast", ct)
-               ?? fallback.Cast ?? new CastDeviceOptions(),
       };
 
       return result;
