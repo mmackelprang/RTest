@@ -8,7 +8,6 @@ using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Sources.Primary;
-using Radio.Infrastructure.Audio.Validation;
 using Radio.Infrastructure.Configuration;
 using Radio.Infrastructure.Configuration.Abstractions;
 
@@ -38,7 +37,6 @@ public class AudioSourceFactory : IAudioSourceFactory
   private readonly IServiceScopeFactory? _serviceScopeFactory;
   private readonly AlbumArtCacheService? _albumArtCache;
   private readonly DeviceOptionsResolver? _deviceOptionsResolver;
-  private readonly IAudioValidator? _audioValidator;
 
   public AudioSourceFactory(
     ILogger<AudioSourceFactory> logger,
@@ -58,8 +56,7 @@ public class AudioSourceFactory : IAudioSourceFactory
     SoundFlow.SoundFlowPlaybackService? playbackService = null,
     IServiceScopeFactory? serviceScopeFactory = null,
     AlbumArtCacheService? albumArtCache = null,
-    DeviceOptionsResolver? deviceOptionsResolver = null,
-    IAudioValidator? audioValidator = null)
+    DeviceOptionsResolver? deviceOptionsResolver = null)
   {
     _logger = logger;
     _loggerFactory = loggerFactory;
@@ -79,7 +76,6 @@ public class AudioSourceFactory : IAudioSourceFactory
     _serviceScopeFactory = serviceScopeFactory;
     _albumArtCache = albumArtCache;
     _deviceOptionsResolver = deviceOptionsResolver;
-    _audioValidator = audioValidator;
   }
 
   /// <inheritdoc/>
@@ -116,8 +112,7 @@ public class AudioSourceFactory : IAudioSourceFactory
       _metricsCollector,
       _playbackService,
       _serviceScopeFactory,
-      _albumArtCache,
-      _audioValidator);
+      _albumArtCache);
   }
 
   private IAudioSource CreateFilePlayerSource()

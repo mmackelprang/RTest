@@ -8,7 +8,6 @@ using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.SoundFlow;
-using Radio.Infrastructure.Audio.Validation;
 using Radio.Infrastructure.Platform.Bluetooth;
 using SoundFlow.Abstracts;
 using SoundFlow.Abstracts.Devices;
@@ -29,7 +28,6 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private readonly AlbumArtCacheService? _albumArtCache;
   private readonly IOptionsMonitor<BluetoothOptions> _options;
   private readonly SoundFlowPlaybackService? _playbackService;
-  private readonly IAudioValidator? _audioValidator;
   private readonly SemaphoreSlim _routeLock = new(1, 1);
   private readonly HashSet<string> _failedArtLookups = new();
   private string? _playbackId;
@@ -55,8 +53,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     Radio.Core.Interfaces.IMetricsCollector? metricsCollector = null,
     SoundFlowPlaybackService? playbackService = null,
     IServiceScopeFactory? serviceScopeFactory = null,
-    AlbumArtCacheService? albumArtCache = null,
-    IAudioValidator? audioValidator = null)
+    AlbumArtCacheService? albumArtCache = null)
     : base(logger, deviceManager, identificationService, metricsCollector)
   {
     _bluetoothService = bluetoothService;
@@ -65,7 +62,6 @@ public class BluetoothAudioSource : USBAudioSourceBase
     _albumArtCache = albumArtCache;
     _options = options;
     _playbackService = playbackService;
-    _audioValidator = audioValidator;
     SetDefaultMetadata("Bluetooth", "Bluetooth", "Bluetooth Device");
 
     _bluetoothService.MetadataChanged += OnMetadataChanged;
@@ -380,7 +376,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
           return;
         }
 
-        _captureGenerator = new BufferedSoundGenerator<float>(engine, format, Logger, metricsCollector: MetricsCollector, audioValidator: _audioValidator);
+        _captureGenerator = new BufferedSoundGenerator<float>(engine, format, Logger, metricsCollector: MetricsCollector);
 
         // Pre-fill with silence to cushion against capture startup latency and
         // ongoing jitter from the audio capture device callback timing.

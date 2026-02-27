@@ -11,7 +11,6 @@ using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Outputs;
 using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
-using Radio.Infrastructure.Audio.Validation;
 using Radio.Infrastructure.Audio.Visualization;
 using Radio.Infrastructure.Configuration;
 using Radio.Infrastructure.Configuration.Abstractions;
@@ -63,34 +62,6 @@ public static class AudioServiceExtensions
     services.Configure<RadioOptions>(
       configuration.GetSection(RadioOptions.SectionName));
 
-    // Bind audio validation options (diagnostic pipeline)
-    services.Configure<AudioValidationOptions>(
-      configuration.GetSection(AudioValidationOptions.SectionName));
-
-    // Register audio validator (NullAudioValidator when disabled, Composite when enabled)
-    services.AddSingleton<IAudioValidator>(sp =>
-    {
-      var validationOptions = sp.GetRequiredService<IOptions<AudioValidationOptions>>().Value;
-      if (!validationOptions.Enabled)
-        return NullAudioValidator.Instance;
-
-      var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
-      var engineOptions = sp.GetRequiredService<IOptions<AudioEngineOptions>>().Value;
-
-      var frequencyValidator = new FrequencyValidator(
-        loggerFactory.CreateLogger<FrequencyValidator>(),
-        validationOptions,
-        engineOptions.SampleRate,
-        engineOptions.Channels);
-
-      var levelValidator = new LevelValidator(
-        loggerFactory.CreateLogger<LevelValidator>(),
-        validationOptions,
-        engineOptions.Channels);
-
-      return new CompositeAudioValidator(frequencyValidator, levelValidator);
-    });
-
     // Register the master mixer (singleton to maintain state)
     services.AddSingleton<SoundFlowMasterMixer>();
     services.AddSingleton<IMasterMixer>(sp => sp.GetRequiredService<SoundFlowMasterMixer>());
@@ -110,8 +81,7 @@ public static class AudioServiceExtensions
       var deviceManager = sp.GetRequiredService<SoundFlowDeviceManager>();
       var metricsCollector = sp.GetService<IMetricsCollector>();
       var visualizerService = sp.GetService<IVisualizerService>();
-      var audioValidator = sp.GetService<IAudioValidator>();
-      return new SoundFlowAudioEngine(logger, options, masterMixer, deviceManager, metricsCollector, visualizerService, audioValidator);
+      return new SoundFlowAudioEngine(logger, options, masterMixer, deviceManager, metricsCollector, visualizerService);
     });
     services.AddSingleton<IAudioEngine>(sp => sp.GetRequiredService<SoundFlowAudioEngine>());
 

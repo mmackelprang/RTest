@@ -3,7 +3,6 @@ using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
-using Radio.Infrastructure.Audio.Validation;
 using SoundFlow.Abstracts;
 using SoundFlow.Abstracts.Devices;
 using SoundFlow.Backends.MiniAudio;
@@ -28,7 +27,6 @@ public class SoundFlowAudioEngine : IAudioEngine
   private readonly IMetricsCollector? _metricsCollector;
 
   private readonly IVisualizerService? _visualizerService;
-  private readonly IAudioValidator? _audioValidator;
 
   private MiniAudioEngine? _engine;
   private AudioPlaybackDevice? _playbackDevice;
@@ -36,7 +34,6 @@ public class SoundFlowAudioEngine : IAudioEngine
   private TappedOutputStream? _outputTap;
   private FingerprintTapModifier? _fingerprintTap;
   private VisualizationTapModifier? _visualizationTap;
-  private AudioValidatorTapModifier? _validatorTap;
   private BalanceModifier? _balanceModifier;
   private Timer? _hotPlugTimer;
   private AudioEngineState _state = AudioEngineState.Uninitialized;
@@ -67,15 +64,13 @@ public class SoundFlowAudioEngine : IAudioEngine
   /// <param name="deviceManager">The device manager instance.</param>
   /// <param name="metricsCollector">Optional metrics collector for pipeline metrics.</param>
   /// <param name="visualizerService">Optional visualizer service for real-time audio visualization.</param>
-  /// <param name="audioValidator">Optional audio validator for diagnostic pipeline taps.</param>
   public SoundFlowAudioEngine(
     ILogger<SoundFlowAudioEngine> logger,
     IOptions<AudioEngineOptions> options,
     SoundFlowMasterMixer masterMixer,
     SoundFlowDeviceManager deviceManager,
     IMetricsCollector? metricsCollector = null,
-    IVisualizerService? visualizerService = null,
-    IAudioValidator? audioValidator = null)
+    IVisualizerService? visualizerService = null)
   {
     _logger = logger;
     _options = options.Value;
@@ -83,7 +78,6 @@ public class SoundFlowAudioEngine : IAudioEngine
     _deviceManager = deviceManager;
     _metricsCollector = metricsCollector;
     _visualizerService = visualizerService;
-    _audioValidator = audioValidator;
 
     // Subscribe to device manager events
     _deviceManager.DevicesChanged += OnDeviceManagerDevicesChanged;
@@ -288,14 +282,6 @@ public class SoundFlowAudioEngine : IAudioEngine
           _visualizationTap = new VisualizationTapModifier(_visualizerService, _audioFormat);
           _playbackDevice.MasterMixer.AddModifier(_visualizationTap);
           _logger.LogInformation("Visualization tap modifier added to MasterMixer");
-        }
-
-        // Add audio validator tap (last in chain — sees fully processed audio)
-        if (_audioValidator != null && _audioValidator is not NullAudioValidator)
-        {
-          _validatorTap = new AudioValidatorTapModifier(_audioValidator, "V3-Mixer");
-          _playbackDevice.MasterMixer.AddModifier(_validatorTap);
-          _logger.LogInformation("Audio validator tap modifier added to MasterMixer");
         }
 
         // Start the playback device AFTER all modifiers are attached.
@@ -523,12 +509,6 @@ public class SoundFlowAudioEngine : IAudioEngine
         _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
       }
 
-      // Re-attach validator tap
-      if (_validatorTap != null)
-      {
-        _playbackDevice.MasterMixer.AddModifier(_validatorTap);
-      }
-
       _logger.LogInformation("Recovery successful: playback device {Name} initialized with modifiers", deviceInfo.Name);
     }
     catch (Exception ex)
@@ -634,19 +614,6 @@ public class SoundFlowAudioEngine : IAudioEngine
         _logger.LogInformation("Visualization tap created and attached to new playback device");
       }
 
-      // Re-attach validator tap (last in chain)
-      if (_validatorTap != null)
-      {
-        _playbackDevice.MasterMixer.AddModifier(_validatorTap);
-        _logger.LogInformation("Audio validator tap re-attached to new playback device");
-      }
-      else if (_audioValidator != null && _audioValidator is not NullAudioValidator)
-      {
-        _validatorTap = new AudioValidatorTapModifier(_audioValidator, "V3-Mixer");
-        _playbackDevice.MasterMixer.AddModifier(_validatorTap);
-        _logger.LogInformation("Audio validator tap created and attached to new playback device");
-      }
-
       _playbackDevice.Start();
 
       _logger.LogInformation("Successfully switched to playback device: {DeviceName}", newDevice.Name);
@@ -724,8 +691,7 @@ public class SoundFlowAudioEngine : IAudioEngine
       PlaybackDeviceActive = _playbackDevice != null,
       ModifierCount = (_balanceModifier != null ? 1 : 0)
         + (_fingerprintTap != null ? 1 : 0)
-        + (_visualizationTap != null ? 1 : 0)
-        + (_validatorTap != null ? 1 : 0),
+        + (_visualizationTap != null ? 1 : 0),
       OutputTapAvailableBytes = 0,
       FingerprintTapTotalSamples = _fingerprintTap?.TotalSamplesProcessed ?? 0,
       FingerprintTapLastProcessedTime = _fingerprintTap?.LastProcessedTime
@@ -829,26 +795,6 @@ public class SoundFlowAudioEngine : IAudioEngine
     {
       _fingerprintTap.Flush();
       _fingerprintTap = null;
-    }
-
-    // Flush and cleanup validator tap
-    if (_validatorTap != null)
-    {
-      _validatorTap.Flush();
-      _validatorTap = null;
-    }
-
-    // Flush pending validator analysis
-    if (_audioValidator != null)
-    {
-      try
-      {
-        await _audioValidator.FlushAsync();
-      }
-      catch (Exception ex)
-      {
-        _logger.LogWarning(ex, "Error flushing audio validator during disposal");
-      }
     }
 
     // Stop and dispose playback device
