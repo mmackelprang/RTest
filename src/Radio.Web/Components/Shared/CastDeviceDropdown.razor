@@ -23,7 +23,7 @@
       else
       {
         <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small"
-                       Style="padding: 2px;" OnClick="ScanAsync" title="Rescan" />
+                       Style="padding: 2px;" OnClick="RescanAsync" title="Rescan" />
       }
     </div>
 
@@ -124,6 +124,7 @@
   private bool _scanCompleted;
   private bool _isConnecting;
   private bool _initialized;
+  private CancellationTokenSource? _scanCts;
 
   protected override void OnParametersSet()
   {
@@ -142,6 +143,10 @@
 
   private async Task LoadAndScanAsync()
   {
+    _scanCts?.Cancel();
+    _scanCts = new CancellationTokenSource();
+    var token = _scanCts.Token;
+
     // Phase 1: instant cache
     try
     {
@@ -154,18 +159,21 @@
       _devices = new();
     }
 
+    if (token.IsCancellationRequested) return;
+
     // Phase 2: background mDNS
-    await ScanAsync();
+    await ScanAsync(token);
   }
 
-  private async Task ScanAsync()
+  private async Task ScanAsync(CancellationToken cancellationToken = default)
   {
     _isScanning = true;
     StateHasChanged();
 
     try
     {
-      var discovered = await DevicesApi.DiscoverCastDevicesAsync();
+      var discovered = await DevicesApi.DiscoverCastDevicesAsync(cancellationToken);
+      if (cancellationToken.IsCancellationRequested) return;
       if (discovered != null)
       {
         _discoveredIds = discovered.Select(d => d.Id).ToHashSet();
@@ -178,6 +186,10 @@
         _devices = merged;
       }
     }
+    catch (OperationCanceledException)
+    {
+      // Discovery cancelled (dropdown closed)
+    }
     catch (Exception ex)
     {
       Logger?.LogWarning(ex, "Cast discovery failed");
@@ -186,8 +198,16 @@
     {
       _isScanning = false;
       _scanCompleted = true;
-      StateHasChanged();
+      if (!cancellationToken.IsCancellationRequested)
+        StateHasChanged();
     }
+  }
+
+  private async Task RescanAsync()
+  {
+    _scanCts?.Cancel();
+    _scanCts = new CancellationTokenSource();
+    await ScanAsync(_scanCts.Token);
   }
 
   private async Task SelectDeviceAsync(CastDeviceDto device)
@@ -235,6 +255,8 @@
 
   private async Task Close()
   {
+    _scanCts?.Cancel();
+    _isScanning = false;
     await IsOpenChanged.InvokeAsync(false);
   }
 
