@@ -711,7 +711,8 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
                     var generator = new BufferedSoundGenerator<float>(
                         engine, format, _logger, maxBufferSeconds: 2.0f,
-                        metricsCollector: _metricsCollector);
+                        metricsCollector: _metricsCollector,
+                        audioValidator: _audioValidator);
 
                     StartCaptureSubprocess(generator, format, nodeName);
 
