@@ -1,5 +1,4 @@
 @inherits LayoutComponentBase
-@using Radio.Web.Components.Dialogs
 @using Radio.Web.Models
 @inject SystemApiService SystemApi
 @inject SourcesApiService SourcesApi
@@ -9,7 +8,6 @@
 @inject QueueApiService QueueApi
 @inject NavigationManager NavigationManager
 @inject ILogger<MainLayout> Logger
-@inject IDialogService DialogService
 @inject Radio.Web.Services.DeviceDisplayStateService DeviceDisplayState
 @inject Radio.Web.Services.RadioPanelToggleService RadioPanelToggle
 @implements IDisposable
@@ -62,6 +60,16 @@
           {
             <div class="cast-connecting" style="position:absolute; inset:0; border-radius:inherit; border: 2px solid var(--accent-primary);"></div>
           }
+          @if (output.Id.Equals("google-cast", StringComparison.OrdinalIgnoreCase))
+          {
+            <CastDeviceDropdown IsOpen="_showCastDropdown"
+                                IsOpenChanged="@((bool v) => { _showCastDropdown = v; StateHasChanged(); })"
+                                OnDeviceSelected="OnCastDeviceSelected"
+                                OnDisconnect="OnCastDeviceDisconnected"
+                                DevicesApi="DevicesApi"
+                                ConnectedDevice="_defaultCastDevice"
+                                Logger="Logger" />
+          }
         </div>
       }
     </div>
@@ -99,6 +107,7 @@
   private string? _selectedOutputId = null;
   private CastDeviceDto? _defaultCastDevice;
   private bool _isCastConnecting;
+  private bool _showCastDropdown;
 
   private int _queueCount = 0;
 
@@ -398,10 +407,10 @@
   {
     if (string.IsNullOrEmpty(newOutputId)) return;
 
-    // Second click on already-selected Cast → open device dialog
+    // Second click on already-selected Cast → toggle dropdown
     if (newOutputId == _selectedOutputId && newOutputId == "google-cast")
     {
-      await OpenCastDeviceDialog();
+      _showCastDropdown = !_showCastDropdown;
       return;
     }
 
@@ -460,8 +469,8 @@
         await DevicesApi.ClearDefaultCastDeviceAsync();
         _defaultCastDevice = null;
         UpdateCastOutputDisplayName();
+        _showCastDropdown = true;
         StateHasChanged();
-        await OpenCastDeviceDialog();
       }
     }
     catch (Exception ex)
@@ -470,8 +479,8 @@
       await DevicesApi.ClearDefaultCastDeviceAsync();
       _defaultCastDevice = null;
       UpdateCastOutputDisplayName();
+      _showCastDropdown = true;
       StateHasChanged();
-      await OpenCastDeviceDialog();
     }
     finally
     {
@@ -593,37 +602,22 @@
     return Icons.Material.Filled.Speaker;
   }
 
-  private async Task OpenCastDeviceDialog()
+  private async Task OnCastDeviceSelected(CastDeviceDto selectedDevice)
   {
-    var parameters = new DialogParameters
-    {
-      { "DevicesApi", DevicesApi },
-      { "Logger", Logger }
-    };
+    Logger.LogInformation("Selected Cast device: {DeviceName}", selectedDevice.Name);
+    await DevicesApi.SetDefaultCastDeviceAsync(selectedDevice);
+    _defaultCastDevice = selectedDevice;
+    UpdateCastOutputDisplayName();
+    StateHasChanged();
+  }
 
-    var options = new DialogOptions
-    {
-      CloseButton = true,
-      MaxWidth = MaxWidth.False,
-      FullWidth = true,
-      BackgroundClass = "bottom-sheet-backdrop",
-      Position = DialogPosition.BottomCenter,
-      BackdropClick = true
-    };
-
-    var dialog = await DialogService.ShowAsync<CastDeviceDialog>("Select Cast Device", parameters, options);
-    var result = await dialog.Result;
-
-    if (result is { Canceled: false, Data: CastDeviceDto selectedDevice })
-    {
-      Logger.LogInformation("Selected Cast device: {DeviceName}", selectedDevice.Name);
-
-      // Save as default and update dropdown display
-      await DevicesApi.SetDefaultCastDeviceAsync(selectedDevice);
-      _defaultCastDevice = selectedDevice;
-      UpdateCastOutputDisplayName();
-      StateHasChanged();
-    }
+  private async Task OnCastDeviceDisconnected()
+  {
+    Logger.LogInformation("Disconnected from Cast device");
+    await DevicesApi.ClearDefaultCastDeviceAsync();
+    _defaultCastDevice = null;
+    UpdateCastOutputDisplayName();
+    StateHasChanged();
   }
 
   private async Task UpdateSystemStatsAsync()

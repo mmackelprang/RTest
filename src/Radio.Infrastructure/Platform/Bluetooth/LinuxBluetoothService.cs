@@ -12,6 +12,7 @@ using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.SoundFlow;
+using Radio.Infrastructure.Platform.Bluetooth.Native;
 using SoundFlow.Backends.MiniAudio;
 using SoundFlow.Enums;
 using SoundFlow.Structs;
@@ -32,6 +33,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         private IDisposable? _discoveryWatcher;
         private MiniAudioEngine? _captureEngine;
         private Process? _captureProcess;
+        private PipeWireNativeStream? _nativeStream;
         private CancellationTokenSource? _captureCts;
         private object? _activeGenerator;
         private string? _activeNodeName;
@@ -711,77 +713,52 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
                     StartCaptureSubprocess(generator, format, nodeName, nodeSerial);
 
-                    // Give pw-record a moment to connect and verify it's running
+                    // Give the stream a moment to connect
                     await Task.Delay(500, cancellationToken);
 
-                    if (_captureProcess != null && !_captureProcess.HasExited)
+                    // Check if native stream or fallback process is running
+                    var isRunning = _nativeStream != null ||
+                        (_captureProcess != null && !_captureProcess.HasExited);
+
+                    if (isRunning)
                     {
                         _logger.LogInformation(
-                            "pw-record capture running (attempt {Attempt}/{Max}, PID {Pid}, target {Node})",
-                            attempt, maxRetries, _captureProcess.Id, nodeName);
+                            "BT capture running (attempt {Attempt}/{Max}, mode={Mode}, target {Node})",
+                            attempt, maxRetries,
+                            _nativeStream != null ? "native" : "pw-record",
+                            nodeName);
                         _activeGenerator = generator;
                         _activeNodeName = nodeName;
 
-                        // Set BT source node master volume to 1.0 AFTER pw-record is running
-                        // and AVRCP volume sync has settled. BlueZ sets the PipeWire node volume
-                        // to the phone's AVRCP transport volume (~0.11) during connection setup.
-                        // If we set volume too early, AVRCP resets it. A 1s delay lets AVRCP
-                        // finish, then we override with full volume for capture.
-                        var capturedNodeName = nodeName;
-                        // Use the capture CTS token so the monitor is cancelled when
-                        // StopCaptureSubprocess() runs (prevents stale monitors when
-                        // switching BT devices).
+                        // Set BT source node master volume to 1.0 after AVRCP settles
                         var captureCt = _captureCts!.Token;
+                        var capturedNodeName = nodeName;
                         _ = Task.Run(async () =>
                         {
                             try
                             {
-                                // Wait for pw-record's PipeWire ports to register.
-                                // With node.autoconnect=false, --target is just a hint
-                                // and PipeWire won't auto-link. We must create links
-                                // explicitly via pw-link after ports exist (~200ms).
-                                await Task.Delay(500, captureCt);
-                                DisconnectPipeWireBtAutoLinks(capturedNodeName);
-                                LinkPipeWireRecordToBtNode(capturedNodeName);
-
-                                // Set BT node volume after AVRCP handshake settles
-                                await Task.Delay(1000, captureCt);
+                                await Task.Delay(1500, captureCt);
                                 await SetPipeWireNodeVolumeAsync(nodeId);
-                                // Re-link in case AVRCP setup disrupted links
-                                DisconnectPipeWireBtAutoLinks(capturedNodeName);
-                                LinkPipeWireRecordToBtNode(capturedNodeName);
 
-                                // Continuous link monitor: BT transport resets destroy and
-                                // recreate PipeWire nodes, causing all links to be lost.
-                                // Poll every 30s and re-link if needed.
-                                while (!captureCt.IsCancellationRequested)
+                                // For fallback pw-record mode, do link management
+                                if (_nativeStream == null && _captureProcess != null)
                                 {
-                                    await Task.Delay(30_000, captureCt);
-                                    if (!IsPwRecordLinkedToBtNode(capturedNodeName))
-                                    {
-                                        _logger.LogWarning("pw-record lost link to BT node {BtNode}, re-linking", capturedNodeName);
-                                        DisconnectAllLinksToPort("pw-record:input_FL");
-                                        DisconnectAllLinksToPort("pw-record:input_FR");
-                                        LinkPipeWireRecordToBtNode(capturedNodeName);
-                                    }
+                                    DisconnectPipeWireBtAutoLinks(capturedNodeName);
+                                    LinkPipeWireRecordToBtNode(capturedNodeName);
                                 }
                             }
                             catch (OperationCanceledException) { }
                             catch (Exception ex)
                             {
-                                _logger.LogDebug(ex, "Deferred volume/link setup failed for node {NodeId}", nodeId);
+                                _logger.LogDebug(ex, "Deferred volume setup failed for node {NodeId}", nodeId);
                             }
                         }, captureCt);
 
                         return generator;
                     }
 
-                    // pw-record exited immediately — read stderr for diagnostics
-                    var pwStderr = "";
-                    try { pwStderr = _captureProcess?.StandardError.ReadToEnd() ?? ""; }
-                    catch { /* ignore */ }
-                    _logger.LogDebug("pw-record exited early (attempt {Attempt}/{Max}): {Stderr}",
-                        attempt, maxRetries, pwStderr.Length > 200 ? pwStderr[..200] : pwStderr.TrimEnd());
+                    // Capture failed immediately
+                    _logger.LogDebug("Capture exited early (attempt {Attempt}/{Max})", attempt, maxRetries);
                     StopCaptureSubprocess();
                 }
                 catch (OperationCanceledException) { throw; }
@@ -959,35 +936,49 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             StopCaptureSubprocess();
 
             _captureCts = new CancellationTokenSource();
-            var ct = _captureCts.Token;
 
-            // Pre-fill the buffer with silence before pw-record starts delivering data.
-            // This provides a cushion so the mixer has audio to consume while the capture
-            // subprocess spins up and during periodic PipeWire graph processing stalls.
-            // Same pattern used by SDR radio source for USB transfer jitter absorption.
+            // Pre-fill the buffer with silence before the stream starts delivering data.
             generator.PreFillSilence(0.5f);
 
-            // pw-record captures directly from a PipeWire node — no ALSA config needed.
-            // Output format: raw S16_LE stereo at 48kHz to stdout.
-            // Wrap with stdbuf -o0 to disable glibc stdout buffering — without this,
-            // pw-record uses full buffering when piped (64KB blocks), causing data to
-            // arrive in bursts which starves the ring buffer and produces periodic
-            // ~1s audio artifacts every 15-30s.
-            //
-            // CRITICAL: -P '{node.autoconnect=false}' tells WirePlumber to NOT manage
-            // pw-record's links. Without this, WirePlumber's autoconnect policy
-            // continuously re-links pw-record to the default audio source (e.g. USB mic)
-            // instead of the BT node, fighting our explicit pw-link commands every ~10s.
-            // With autoconnect disabled, we create links once via pw-link and WirePlumber
-            // leaves them alone.
-            //
-            // --target still provides the initial connection hint to PipeWire, but the
-            // real link management is done by LinkPipeWireRecordToBtNode() below.
+            // Use PipeWire native stream instead of pw-record subprocess.
+            // The native stream connects directly to the target node via libpipewire,
+            // eliminating subprocess churn and pw-link management entirely.
+            var nodeId = (uint)(targetSerial > 0 ? targetSerial : 0);
+            try
+            {
+                _nativeStream = new PipeWireNativeStream(
+                    nodeId,
+                    format.SampleRate,
+                    format.Channels,
+                    (samples, count) => generator.AddSamples(samples.AsSpan(0, count)),
+                    _logger);
+                _nativeStream.Start();
+                _logger.LogInformation(
+                    "Started PipeWire native capture (target node serial {Serial}, node name {Node})",
+                    nodeId, targetNode);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "PipeWire native stream failed, falling back to pw-record subprocess");
+                _nativeStream?.Dispose();
+                _nativeStream = null;
+                StartCaptureSubprocessFallback(generator, format, targetNode, targetSerial);
+            }
+        }
+
+        /// <summary>
+        /// Fallback to pw-record subprocess if native stream fails (e.g. missing libpw_helper.so).
+        /// </summary>
+        private void StartCaptureSubprocessFallback(
+            BufferedSoundGenerator<float> generator, AudioFormat format, string targetNode,
+            int targetSerial = 0)
+        {
+            var ct = _captureCts!.Token;
             var targetArg = targetSerial > 0 ? targetSerial.ToString() : targetNode;
             _captureProcess = Process.Start(new ProcessStartInfo
             {
                 FileName = "stdbuf",
-                Arguments = $"-o0 pw-record -P node.autoconnect=false --target {targetArg} --rate 48000 --channels 2 --format s16 -",
+                Arguments = $"-o0 pw-record -P node.autoconnect=false --target {targetArg} --rate {format.SampleRate} --channels {format.Channels} --format s16 -",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -1000,24 +991,20 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 return;
             }
 
-            _logger.LogInformation("Started pw-record capture (PID {Pid}, target {Node})",
+            _logger.LogInformation("Started pw-record capture fallback (PID {Pid}, target {Node})",
                 _captureProcess.Id, targetNode);
 
-            // Background task to read S16_LE data and feed float samples to generator
             _ = Task.Run(async () =>
             {
-                // ~100ms of S16 stereo at 48kHz = 19,200 bytes
                 const int readBufferSize = 48000 * 2 * 2 / 10;
                 var buffer = new byte[readBufferSize];
                 var stream = _captureProcess.StandardOutput.BaseStream;
-                var pendingByte = -1; // Tracks a leftover byte from odd-length reads
+                var pendingByte = -1;
 
                 try
                 {
                     while (!ct.IsCancellationRequested)
                     {
-                        // If we had a leftover byte from a previous odd-length read,
-                        // place it at the start of the buffer so it pairs with the next byte
                         var offset = 0;
                         if (pendingByte >= 0)
                         {
@@ -1027,33 +1014,23 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                         }
 
                         var bytesRead = await stream.ReadAsync(buffer, offset, buffer.Length - offset, ct);
-                        if (bytesRead == 0) break; // EOF — process exited
+                        if (bytesRead == 0) break;
 
                         var totalBytes = offset + bytesRead;
-
-                        // S16_LE = 2 bytes per sample. If we have an odd total, save
-                        // the trailing byte for the next iteration to maintain alignment.
-                        // Without this, MemoryMarshal.Cast drops the byte, shifting all
-                        // subsequent samples by 1 byte → corrupted audio.
                         if (totalBytes % 2 != 0)
                         {
                             pendingByte = buffer[totalBytes - 1];
                             totalBytes--;
                         }
-
                         if (totalBytes < 2) continue;
 
-                        // Convert S16_LE samples to float [-1.0, 1.0]
                         var sampleCount = totalBytes / 2;
                         var floatSamples = ArrayPool<float>.Shared.Rent(sampleCount);
                         try
                         {
                             var shorts = MemoryMarshal.Cast<byte, short>(buffer.AsSpan(0, totalBytes));
                             for (var i = 0; i < shorts.Length; i++)
-                            {
                                 floatSamples[i] = shorts[i] / 32768f;
-                            }
-
                             generator.AddSamples(floatSamples.AsSpan(0, sampleCount));
                         }
                         finally
@@ -1067,8 +1044,6 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 {
                     _logger.LogWarning(ex, "pw-record capture feed loop ended");
                 }
-
-                _logger.LogInformation("pw-record capture feed loop stopped");
             }, ct);
         }
 
@@ -1084,6 +1059,15 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             _captureCts = null;
             _activeGenerator = null;
 
+            // Stop native PipeWire stream
+            if (_nativeStream != null)
+            {
+                try { _nativeStream.Dispose(); }
+                catch (Exception ex) { _logger.LogDebug(ex, "Error stopping native PipeWire stream"); }
+                _nativeStream = null;
+            }
+
+            // Stop pw-record fallback subprocess
             if (_captureProcess != null)
             {
                 try
@@ -1104,9 +1088,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
             // Disconnect PipeWire's auto-link from the BT input node to the default
             // output sink. PipeWire/WirePlumber automatically links bluez_input to the
-            // default audio output, which bypasses our application entirely. When we
-            // switch away from BT, we must sever this link so only the active source
-            // (routed through our SoundFlow mixer) reaches the speakers.
+            // default audio output, which bypasses our application entirely.
             if (_activeNodeName != null)
             {
                 DisconnectPipeWireBtAutoLinks(_activeNodeName);
@@ -1417,6 +1399,8 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             _playerPropertiesWatcher?.Dispose();
             _transportPropertiesWatcher?.Dispose();
             _discoveryWatcher?.Dispose();
+            _nativeStream?.Dispose();
+            _nativeStream = null;
             _captureEngine?.Dispose();
             _captureEngine = null;
             await UnregisterAgentAsync();

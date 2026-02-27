@@ -160,13 +160,14 @@ public static class AudioDtoMapper
       RecentEvents = snapshot.RecentEvents.Select(e => new FingerprintEventDto
       {
         AudioSource = e.AudioSource,
-        FirstMatchAt = e.FirstMatchAt,
-        NoMatchCount = e.NoMatchCount,
-        MatchCount = e.MatchCount,
+        SourceType = e.SourceType,
+        IsMatch = e.IsMatch,
+        Count = e.Count,
         LastConfidence = e.LastConfidence,
         Title = e.Title,
         Artist = e.Artist,
         Album = e.Album,
+        HasAlbumArt = e.HasAlbumArt,
         Phase = e.Phase.ToString(),
         Timestamp = e.Timestamp
       }).ToList()

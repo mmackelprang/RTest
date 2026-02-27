@@ -40,11 +40,12 @@
           <table style="width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 11px;">
             <thead>
               <tr style="color: var(--text-low); border-bottom: 1px solid rgba(255,255,255,0.08);">
-                <th style="text-align: left; padding: 6px 8px; font-weight: 500;">Source</th>
-                <th style="text-align: center; padding: 6px 4px; font-weight: 500;">Miss</th>
-                <th style="text-align: center; padding: 6px 4px; font-weight: 500;">Hit</th>
-                <th style="text-align: center; padding: 6px 4px; font-weight: 500;">Conf</th>
+                <th style="text-align: center; padding: 6px 4px; font-weight: 500;">Src</th>
+                <th style="text-align: center; padding: 6px 4px; font-weight: 500;">Match</th>
+                <th style="text-align: center; padding: 6px 4px; font-weight: 500;">#</th>
+                <th style="text-align: center; padding: 6px 4px; font-weight: 500;">Conf%</th>
                 <th style="text-align: left; padding: 6px 8px; font-weight: 500;">Track</th>
+                <th style="text-align: center; padding: 6px 4px; font-weight: 500;">Art</th>
               </tr>
             </thead>
             <tbody>
@@ -53,18 +54,39 @@
                 @foreach (var evt in _fpStatus.RecentEvents.AsEnumerable().Reverse())
                 {
                   <tr style="border-bottom: 1px solid rgba(255,255,255,0.04); height: 22px; color: @(GetEventRowColor(evt));">
-                    <td style="padding: 3px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 80px;">@evt.AudioSource</td>
-                    <td style="text-align: center; padding: 3px 4px;">@evt.NoMatchCount</td>
-                    <td style="text-align: center; padding: 3px 4px;">@evt.MatchCount</td>
+                    <td style="text-align: center; padding: 3px 4px;" title="@evt.SourceType">
+                      <MudIcon Icon="@GetFpSourceIcon(evt.SourceType)" Size="Size.Small" Style="font-size: 14px;" />
+                    </td>
+                    <td style="text-align: center; padding: 3px 4px;">
+                      @if (evt.IsMatch)
+                      {
+                        <span style="color: #4caf50;">&#x2714;</span>
+                      }
+                      else
+                      {
+                        <span style="color: rgba(255,255,255,0.3);">&#x2718;</span>
+                      }
+                    </td>
+                    <td style="text-align: center; padding: 3px 4px;">@evt.Count</td>
                     <td style="text-align: center; padding: 3px 4px;">@(evt.LastConfidence.HasValue ? $"{evt.LastConfidence.Value:P0}" : "--")</td>
                     <td style="padding: 3px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px;">@(FormatEventTrack(evt))</td>
+                    <td style="text-align: center; padding: 3px 4px;">
+                      @if (evt.HasAlbumArt)
+                      {
+                        <span style="color: #4caf50;">&#x2714;</span>
+                      }
+                      else
+                      {
+                        <span style="color: rgba(255,255,255,0.2);">—</span>
+                      }
+                    </td>
                   </tr>
                 }
               }
               else
               {
                 <tr>
-                  <td colspan="5" style="padding: 16px; text-align: center; color: var(--text-low);">No fingerprint events yet</td>
+                  <td colspan="6" style="padding: 16px; text-align: center; color: var(--text-low);">No fingerprint events yet</td>
                 </tr>
               }
             </tbody>
@@ -535,6 +557,16 @@
       _ => "Audio fingerprinting idle"
     };
   }
+
+  private static string GetFpSourceIcon(string sourceType) => sourceType switch
+  {
+    "Vinyl" => Icons.Material.Filled.Album,
+    "File" => Icons.Material.Filled.AudioFile,
+    "Radio" => Icons.Material.Filled.Radio,
+    "Bluetooth" => Icons.Material.Filled.Bluetooth,
+    "GenericUSB" => Icons.Material.Filled.Usb,
+    _ => Icons.Material.Filled.MusicNote
+  };
 
   private static string GetEventRowColor(FingerprintEventDto evt)
   {

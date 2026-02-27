@@ -323,6 +323,23 @@ public class DevicesApiService
   }
 
   /// <summary>
+  /// Disconnects from the current Google Cast device.
+  /// </summary>
+  public async Task<bool> DisconnectFromCastDeviceAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var response = await _httpClient.PostAsync("/api/devices/cast/disconnect", null, cancellationToken);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to disconnect from Cast device");
+      return false;
+    }
+  }
+
+  /// <summary>
   /// Connects to a specific Google Cast device.
   /// </summary>
   public async Task<bool> ConnectToCastDeviceAsync(CastDeviceDto device, CancellationToken cancellationToken = default)

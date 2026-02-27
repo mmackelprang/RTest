@@ -15,7 +15,7 @@ public sealed class FingerprintingOptions
   public int SampleDurationSeconds { get; set; } = 15;
 
   /// <summary>Interval between identification attempts (seconds).</summary>
-  public int IdentificationIntervalSeconds { get; set; } = 30;
+  public int IdentificationIntervalSeconds { get; set; } = 15;
 
   /// <summary>Minimum confidence threshold for accepting a match (0.0 to 1.0).</summary>
   public double MinimumConfidenceThreshold { get; set; } = 0.5;
