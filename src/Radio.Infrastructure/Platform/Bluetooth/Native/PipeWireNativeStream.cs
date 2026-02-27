@@ -99,7 +99,8 @@ internal sealed class PipeWireNativeStream : IDisposable
 
     var loop = pw_thread_loop_get_loop(_threadLoop);
 
-    // Build stream events struct
+    // Build stream events struct — must remain at a stable pinned address
+    // because PipeWire keeps a pointer to it for the lifetime of the stream.
     _events = new PwStreamEvents
     {
       Version = PW_STREAM_EVENTS_VERSION,
@@ -113,7 +114,7 @@ internal sealed class PipeWireNativeStream : IDisposable
 
     _stream = pw_stream_new_simple(
       loop, "radio-bt-stream", props,
-      ref _events, GCHandle.ToIntPtr(_selfHandle));
+      _eventsHandle.AddrOfPinnedObject(), GCHandle.ToIntPtr(_selfHandle));
 
     if (_stream == IntPtr.Zero)
     {
@@ -138,9 +139,11 @@ internal sealed class PipeWireNativeStream : IDisposable
 
       // Connect the stream
       var paramPods = new[] { podBuffer };
+      // Use PW_ID_ANY so PipeWire resolves target from the target.object property
+      const uint PW_ID_ANY = 0xffffffff;
       var result = pw_stream_connect(
-        _stream, PwDirection.Input, _targetNodeId,
-        PwStreamFlags.Autoconnect | PwStreamFlags.MapBuffers | PwStreamFlags.RtProcess,
+        _stream, PwDirection.Input, PW_ID_ANY,
+        PwStreamFlags.Autoconnect | PwStreamFlags.MapBuffers,
         paramPods, 1);
 
       if (result < 0)

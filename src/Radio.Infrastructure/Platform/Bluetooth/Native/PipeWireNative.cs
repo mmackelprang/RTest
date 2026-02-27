@@ -49,7 +49,7 @@ internal static class PipeWireNative
     IntPtr loop,
     [MarshalAs(UnmanagedType.LPUTF8Str)] string name,
     IntPtr props,
-    ref PwStreamEvents events,
+    IntPtr events,
     IntPtr userData);
 
   [DllImport(PipeWireLib, CallingConvention = CallingConvention.Cdecl)]
