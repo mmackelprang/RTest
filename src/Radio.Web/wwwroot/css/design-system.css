@@ -313,6 +313,27 @@ html, body {
   box-shadow: 0 0 6px rgba(74, 222, 128, 0.3);
 }
 
+/* Cast output: wider to accommodate device name label */
+.route-toggle.route-cast-output {
+  width: auto;
+  padding: 0 14px;
+  gap: 6px;
+}
+
+.cast-device-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-medium);
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.route-toggle.route-active .cast-device-label {
+  color: var(--accent-primary);
+}
+
 .route-disabled {
   opacity: 0.25;
   cursor: not-allowed;

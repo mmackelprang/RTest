@@ -193,6 +193,7 @@
   private List<PlayHistoryEntryDto> _historyItems = new();
   private bool _isLoadingHistory;
   private int _playedCount;
+  private CancellationTokenSource? _refreshCts;
 
   protected override async Task OnInitializedAsync()
   {
@@ -202,6 +203,36 @@
     await SetDefaultTabForSourceAsync();
     await RefreshQueueAsync();
     await RefreshHistoryAsync();
+    StartPeriodicHistoryRefresh();
+  }
+
+  private void StartPeriodicHistoryRefresh()
+  {
+    _refreshCts = new CancellationTokenSource();
+    _ = PeriodicHistoryRefreshAsync(_refreshCts.Token);
+  }
+
+  private async Task PeriodicHistoryRefreshAsync(CancellationToken ct)
+  {
+    using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+    while (await timer.WaitForNextTickAsync(ct))
+    {
+      try
+      {
+        // Only refresh when History tab is active
+        if (_activeTab == 1)
+        {
+          var result = await HistoryApi.GetHistoryAsync(limit: 50);
+          _historyItems = result?.Items ?? new();
+          await InvokeAsync(StateHasChanged);
+        }
+      }
+      catch (OperationCanceledException) { break; }
+      catch (Exception ex)
+      {
+        Logger.LogDebug(ex, "Periodic history refresh failed");
+      }
+    }
   }
 
   private async Task OnQueueChanged()
@@ -431,6 +462,8 @@
   {
     HubService.QueueChanged -= OnQueueChanged;
     HubService.SourceChanged -= OnSourceChanged;
+    _refreshCts?.Cancel();
+    _refreshCts?.Dispose();
     await Task.CompletedTask;
   }
 }
