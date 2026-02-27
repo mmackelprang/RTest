@@ -745,23 +745,27 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                         LinkPipeWireRecordToBtNode(nodeName);
 
                         var capturedNodeName = nodeName;
+                        // Use the capture CTS token (not the caller's cancellationToken) so
+                        // the link monitor is cancelled when StopCaptureSubprocess() runs —
+                        // prevents stale monitors from fighting when switching BT devices.
+                        var captureCt = _captureCts!.Token;
                         _ = Task.Run(async () =>
                         {
                             try
                             {
                                 // Delayed re-link: WirePlumber re-creates links during AVRCP setup
-                                await Task.Delay(1000, cancellationToken);
+                                await Task.Delay(1000, captureCt);
                                 await SetPipeWireNodeVolumeAsync(nodeId);
                                 DisconnectPipeWireBtAutoLinks(capturedNodeName);
                                 LinkPipeWireRecordToBtNode(capturedNodeName);
 
                                 // Third attempt: WirePlumber can be slow on some BT codecs
-                                await Task.Delay(2000, cancellationToken);
+                                await Task.Delay(2000, captureCt);
                                 DisconnectPipeWireBtAutoLinks(capturedNodeName);
                                 LinkPipeWireRecordToBtNode(capturedNodeName);
 
                                 // Fourth attempt: final stabilization
-                                await Task.Delay(3000, cancellationToken);
+                                await Task.Delay(3000, captureCt);
                                 DisconnectPipeWireBtAutoLinks(capturedNodeName);
                                 LinkPipeWireRecordToBtNode(capturedNodeName);
 
@@ -770,9 +774,9 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                                 // to be lost. WirePlumber re-creates its default links (BT→speakers)
                                 // but our pw-record links are not restored. Poll every 10s and
                                 // re-link if pw-record is no longer connected to the BT node.
-                                while (!cancellationToken.IsCancellationRequested)
+                                while (!captureCt.IsCancellationRequested)
                                 {
-                                    await Task.Delay(10_000, cancellationToken);
+                                    await Task.Delay(10_000, captureCt);
                                     if (!IsPwRecordLinkedToBtNode(capturedNodeName))
                                     {
                                         _logger.LogWarning("pw-record lost link to BT node {BtNode}, re-linking", capturedNodeName);
@@ -788,7 +792,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                             {
                                 _logger.LogDebug(ex, "Deferred volume/link setup failed for node {NodeId}", nodeId);
                             }
-                        }, cancellationToken);
+                        }, captureCt);
 
                         return generator;
                     }
