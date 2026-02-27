@@ -4,7 +4,8 @@
 <!-- Click-away overlay -->
 @if (IsOpen)
 {
-  <div @onclick="Close" style="position: fixed; inset: 0; z-index: 99;"></div>
+  <div @onclick="Close" @onclick:stopPropagation="true"
+       style="position: fixed; inset: 0; z-index: 99;"></div>
   <div @onclick:stopPropagation="true"
        style="position: absolute; top: 100%; right: 0; z-index: 100; min-width: 280px; max-width: 340px;
               background: rgba(30,30,30,0.95); backdrop-filter: blur(12px);

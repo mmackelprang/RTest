@@ -230,20 +230,24 @@ internal sealed class PipeWireNativeStream : IDisposable
       if (spaBuf.NDatas == 0 || spaBuf.Datas == IntPtr.Zero) return;
 
       var spaData = Marshal.PtrToStructure<SpaData>(spaBuf.Datas);
-      if (spaData.Data == IntPtr.Zero || spaData.ChunkSize == 0) return;
+      if (spaData.Data == IntPtr.Zero || spaData.Chunk == IntPtr.Zero) return;
+
+      var chunk = Marshal.PtrToStructure<SpaChunk>(spaData.Chunk);
+      if (chunk.Size == 0) return;
 
       // S16_LE: 2 bytes per sample
-      var totalBytes = (int)spaData.ChunkSize;
+      var totalBytes = (int)chunk.Size;
       var sampleCount = totalBytes / 2;
 
       if (sampleCount <= 0) return;
 
       // Convert S16_LE to float [-1.0, 1.0]
+      var dataPtr = IntPtr.Add(spaData.Data, (int)chunk.Offset);
       var floatSamples = ArrayPool<float>.Shared.Rent(sampleCount);
       try
       {
         for (var i = 0; i < sampleCount; i++)
-          floatSamples[i] = Marshal.ReadInt16(spaData.Data, i * 2) / 32768f;
+          floatSamples[i] = Marshal.ReadInt16(dataPtr, i * 2) / 32768f;
 
         self._onAudioData(floatSamples, sampleCount);
       }

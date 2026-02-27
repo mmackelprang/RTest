@@ -151,6 +151,17 @@ internal static class PipeWireNative
   }
 
   /// <summary>
+  /// Matches struct spa_chunk.
+  /// </summary>
+  [StructLayout(LayoutKind.Sequential)]
+  public struct SpaChunk
+  {
+    public uint Offset;
+    public uint Size;
+    public int Stride;
+  }
+
+  /// <summary>
   /// Matches struct spa_data.
   /// </summary>
   [StructLayout(LayoutKind.Sequential)]
@@ -162,9 +173,7 @@ internal static class PipeWireNative
     public uint MapOffset;
     public uint MaxSize;
     public IntPtr Data;    // void*
-    public uint ChunkOffset;
-    public uint ChunkSize;
-    public int ChunkStride;
+    public IntPtr Chunk;   // struct spa_chunk*
   }
 
   public const uint PW_STREAM_EVENTS_VERSION = 2;
