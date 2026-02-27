@@ -696,7 +696,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 try
                 {
                     // Find the PipeWire node name for this BT device
-                    var (nodeName, nodeId) = await FindPipeWireBluetoothNodeAsync(connected.Address, cancellationToken);
+                    var (nodeName, nodeId, nodeSerial) = await FindPipeWireBluetoothNodeAsync(connected.Address, cancellationToken);
                     if (nodeName == null)
                     {
                         _logger.LogDebug("PipeWire BT node not found for {Address} (attempt {Attempt}/{Max})",
@@ -706,15 +706,15 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                         continue;
                     }
 
-                    _logger.LogInformation("Found PipeWire BT node: {Node} (id={NodeId}, attempt {Attempt})",
-                        nodeName, nodeId, attempt);
+                    _logger.LogInformation("Found PipeWire BT node: {Node} (id={NodeId}, serial={Serial}, attempt {Attempt})",
+                        nodeName, nodeId, nodeSerial, attempt);
 
                     var generator = new BufferedSoundGenerator<float>(
                         engine, format, _logger, maxBufferSeconds: 2.0f,
                         metricsCollector: _metricsCollector,
                         audioValidator: _audioValidator);
 
-                    StartCaptureSubprocess(generator, format, nodeName);
+                    StartCaptureSubprocess(generator, format, nodeName, nodeSerial);
 
                     // Give pw-record a moment to connect and verify it's running
                     await Task.Delay(500, cancellationToken);
@@ -736,22 +736,52 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                         // output sink — WirePlumber creates this automatically when a BT device
                         // connects, causing a quiet echo (duplicate audio path to speakers).
                         // Disconnect auto-link immediately (WirePlumber may have already created it)
+                        // CRITICAL: WirePlumber overrides pw-record's --target flag and links
+                        // it to the default audio source (e.g. USB mic) instead of the BT node.
+                        // We must: (1) disconnect BT auto-links to speakers, (2) manually link
+                        // pw-record inputs to BT node outputs. Repeat after delays because
+                        // WirePlumber re-creates links during AVRCP/A2DP setup.
                         DisconnectPipeWireBtAutoLinks(nodeName);
+                        LinkPipeWireRecordToBtNode(nodeName);
 
                         var capturedNodeName = nodeName;
                         _ = Task.Run(async () =>
                         {
                             try
                             {
-                                // Delayed disconnect + volume: WirePlumber re-creates links during
-                                // AVRCP setup, so we disconnect again after settling.
+                                // Delayed re-link: WirePlumber re-creates links during AVRCP setup
                                 await Task.Delay(1000, cancellationToken);
                                 await SetPipeWireNodeVolumeAsync(nodeId);
                                 DisconnectPipeWireBtAutoLinks(capturedNodeName);
+                                LinkPipeWireRecordToBtNode(capturedNodeName);
 
                                 // Third attempt: WirePlumber can be slow on some BT codecs
                                 await Task.Delay(2000, cancellationToken);
                                 DisconnectPipeWireBtAutoLinks(capturedNodeName);
+                                LinkPipeWireRecordToBtNode(capturedNodeName);
+
+                                // Fourth attempt: final stabilization
+                                await Task.Delay(3000, cancellationToken);
+                                DisconnectPipeWireBtAutoLinks(capturedNodeName);
+                                LinkPipeWireRecordToBtNode(capturedNodeName);
+
+                                // Continuous link monitor: BT transport resets destroy and
+                                // recreate PipeWire nodes with new serials, causing all links
+                                // to be lost. WirePlumber re-creates its default links (BT→speakers)
+                                // but our pw-record links are not restored. Poll every 10s and
+                                // re-link if pw-record is no longer connected to the BT node.
+                                while (!cancellationToken.IsCancellationRequested)
+                                {
+                                    await Task.Delay(10_000, cancellationToken);
+                                    if (!IsPwRecordLinkedToBtNode(capturedNodeName))
+                                    {
+                                        _logger.LogWarning("pw-record lost link to BT node {BtNode}, re-linking", capturedNodeName);
+                                        DisconnectAllLinksToPort("pw-record:input_FL");
+                                        DisconnectAllLinksToPort("pw-record:input_FR");
+                                        LinkPipeWireRecordToBtNode(capturedNodeName);
+                                    }
+                                    DisconnectPipeWireBtAutoLinks(capturedNodeName);
+                                }
                             }
                             catch (OperationCanceledException) { }
                             catch (Exception ex)
@@ -792,7 +822,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         /// Queries PipeWire for a bluez_input node matching the given BT address.
         /// Returns (nodeName, pipeWireId) or (null, 0) if not found.
         /// </summary>
-        private async Task<(string? NodeName, int PipeWireId)> FindPipeWireBluetoothNodeAsync(
+        private async Task<(string? NodeName, int PipeWireId, int PipeWireSerial)> FindPipeWireBluetoothNodeAsync(
             string btAddress, CancellationToken cancellationToken)
         {
             // PipeWire names use underscores: "D4:3A:2C:64:87:9E" → "D4_3A_2C_64_87_9E"
@@ -815,7 +845,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 if (process == null)
                 {
                     _logger.LogWarning("Failed to start pw-cli process");
-                    return (null, 0);
+                    return (null, 0, 0);
                 }
 
                 var output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
@@ -827,13 +857,19 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                     _logger.LogDebug("pw-cli exit={ExitCode}, stdout={StdoutLen}b, stderr={Stderr}",
                         process.ExitCode, output.Length,
                         stderr.Length > 200 ? stderr[..200] : stderr.TrimEnd());
-                    return (null, 0);
+                    return (null, 0, 0);
                 }
 
                 // Parse pw-cli output for node.name matching our prefix.
                 // Format: "id 68, type PipeWire:Interface:Node/3" followed by properties.
+                // We need: node.name, object.id, and object.serial.
+                // pw-record --target accepts the serial (not the object id).
                 var lines = output.Split('\n');
                 var lastNodeId = 0;
+                string? matchedNodeName = null;
+                var matchedNodeId = 0;
+                var inMatchedNode = false;
+
                 foreach (var line in lines)
                 {
                     var trimmed = line.Trim();
@@ -844,6 +880,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                         var commaIdx = trimmed.IndexOf(',');
                         if (commaIdx > 3 && int.TryParse(trimmed[3..commaIdx], out var id))
                             lastNodeId = id;
+                        inMatchedNode = false;
                     }
 
                     if (trimmed.StartsWith("node.name = ") && trimmed.Contains(prefix))
@@ -852,9 +889,26 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                         var start = trimmed.IndexOf('"') + 1;
                         var end = trimmed.LastIndexOf('"');
                         if (start > 0 && end > start)
-                            return (trimmed[start..end], lastNodeId);
+                        {
+                            matchedNodeName = trimmed[start..end];
+                            matchedNodeId = lastNodeId;
+                            inMatchedNode = true;
+                        }
+                    }
+
+                    // Extract object.serial from the matched node's properties
+                    if (inMatchedNode && trimmed.StartsWith("object.serial = "))
+                    {
+                        var start = trimmed.IndexOf('"') + 1;
+                        var end = trimmed.LastIndexOf('"');
+                        if (start > 0 && end > start && int.TryParse(trimmed[start..end], out var serial))
+                            return (matchedNodeName, matchedNodeId, serial);
                     }
                 }
+
+                // If we found the node but not the serial, return with serial=0
+                if (matchedNodeName != null)
+                    return (matchedNodeName, matchedNodeId, 0);
 
                 _logger.LogDebug("pw-cli returned {Lines} lines but no node matching {Prefix}",
                     lines.Length, prefix);
@@ -864,7 +918,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 _logger.LogWarning(ex, "Failed to query PipeWire for BT node");
             }
 
-            return (null, 0);
+            return (null, 0, 0);
         }
 
         /// <summary>
@@ -916,7 +970,8 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         }
 
         private void StartCaptureSubprocess(
-            BufferedSoundGenerator<float> generator, AudioFormat format, string targetNode)
+            BufferedSoundGenerator<float> generator, AudioFormat format, string targetNode,
+            int targetSerial = 0)
         {
             StopCaptureSubprocess();
 
@@ -935,10 +990,16 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             // pw-record uses full buffering when piped (64KB blocks), causing data to
             // arrive in bursts which starves the ring buffer and produces periodic
             // ~1s audio artifacts every 15-30s.
+            //
+            // CRITICAL: Use --target with the node serial (not name) to pin pw-record
+            // to the specific BT node. Without this, WirePlumber's autoconnect policy
+            // can relink pw-record to the default audio source (e.g. USB mic) instead
+            // of the BT node, causing silence or wrong audio capture.
+            var targetArg = targetSerial > 0 ? targetSerial.ToString() : targetNode;
             _captureProcess = Process.Start(new ProcessStartInfo
             {
                 FileName = "stdbuf",
-                Arguments = $"-o0 pw-record --target {targetNode} --rate 48000 --channels 2 --format s16 -",
+                Arguments = $"-o0 pw-record --target {targetArg} --rate 48000 --channels 2 --format s16 -",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -1065,6 +1126,165 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             {
                 DisconnectPipeWireBtAutoLinks(_activeNodeName);
                 _activeNodeName = null;
+            }
+        }
+
+        /// <summary>
+        /// Manually links pw-record's input ports to the BT node's output ports.
+        /// WirePlumber overrides pw-record's --target flag and links it to the default
+        /// audio source instead. This method: (1) disconnects any existing links to
+        /// pw-record inputs, (2) creates explicit links from the BT node outputs.
+        /// </summary>
+        private void LinkPipeWireRecordToBtNode(string btNodeName)
+        {
+            try
+            {
+                // Disconnect whatever WirePlumber linked to pw-record
+                RunPipeWireLinkCommand($"-d alsa_input.usb-Generic_USB_Microphone_IM20000001-00.analog-stereo:capture_FL pw-record:input_FL");
+                RunPipeWireLinkCommand($"-d alsa_input.usb-Generic_USB_Microphone_IM20000001-00.analog-stereo:capture_FR pw-record:input_FR");
+
+                // Also try disconnecting from any other source that WirePlumber might link
+                // (Built-in Audio, other USB devices, etc.) by querying current links
+                DisconnectAllLinksToPort("pw-record:input_FL");
+                DisconnectAllLinksToPort("pw-record:input_FR");
+
+                // Create explicit links from BT node to pw-record
+                RunPipeWireLinkCommand($"{btNodeName}:output_FL pw-record:input_FL");
+                RunPipeWireLinkCommand($"{btNodeName}:output_FR pw-record:input_FR");
+
+                _logger.LogInformation("Linked pw-record to BT node {BtNode}", btNodeName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to link pw-record to BT node {BtNode}", btNodeName);
+            }
+        }
+
+        /// <summary>
+        /// Disconnects all links connected to the given input port.
+        /// </summary>
+        private void DisconnectAllLinksToPort(string inputPort)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "pw-link",
+                    Arguments = "-l",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = Process.Start(psi);
+                if (process == null) return;
+                var output = process.StandardOutput.ReadToEnd();
+                process.WaitForExit(3000);
+
+                // Parse: "portname\n  |<- sourceport" format
+                var lines = output.Split('\n');
+                var inTargetPort = false;
+
+                foreach (var rawLine in lines)
+                {
+                    var line = rawLine.TrimEnd();
+
+                    if (line.TrimStart() == inputPort || line.Trim() == inputPort)
+                    {
+                        inTargetPort = true;
+                        continue;
+                    }
+
+                    if (!line.StartsWith("  ") && line.Length > 0)
+                    {
+                        inTargetPort = false;
+                        continue;
+                    }
+
+                    if (inTargetPort && line.Contains("|<-"))
+                    {
+                        var sourcePort = line[(line.IndexOf("|<-") + 4)..].Trim();
+                        RunPipeWireLinkCommand($"-d {sourcePort} {inputPort}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to disconnect links to {Port}", inputPort);
+            }
+        }
+
+        /// <summary>
+        /// Runs a pw-link command with the given arguments.
+        /// </summary>
+        private void RunPipeWireLinkCommand(string arguments)
+        {
+            try
+            {
+                using var process = Process.Start(new ProcessStartInfo
+                {
+                    FileName = "pw-link",
+                    Arguments = arguments,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                });
+                process?.WaitForExit(3000);
+            }
+            catch { /* ignore */ }
+        }
+
+        /// <summary>
+        /// Checks whether pw-record is currently linked to the specified BT node.
+        /// Returns false if pw-record inputs are linked to a different source or not linked at all.
+        /// </summary>
+        private bool IsPwRecordLinkedToBtNode(string btNodeName)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "pw-link",
+                    Arguments = "-l",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = Process.Start(psi);
+                if (process == null) return true; // assume ok if we can't check
+                var output = process.StandardOutput.ReadToEnd();
+                process.WaitForExit(3000);
+
+                // Look for "pw-record:input_FL" section with "|<- btNodeName:output_FL"
+                var lines = output.Split('\n');
+                var inPwRecordFL = false;
+
+                foreach (var rawLine in lines)
+                {
+                    var line = rawLine.TrimEnd();
+                    if (line.Trim() == "pw-record:input_FL")
+                    {
+                        inPwRecordFL = true;
+                        continue;
+                    }
+                    if (inPwRecordFL)
+                    {
+                        if (line.Contains("|<-") && line.Contains(btNodeName))
+                            return true;
+                        if (!line.StartsWith("  ") && line.Length > 0)
+                            break; // moved to next port, didn't find our link
+                    }
+                }
+
+                return false;
+            }
+            catch
+            {
+                return true; // assume ok if we can't check
             }
         }
 
