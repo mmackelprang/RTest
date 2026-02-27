@@ -72,7 +72,10 @@ public enum AudioSourceType
   TTS,
 
   /// <summary>Audio file event (notifications, doorbell, etc.).</summary>
-  AudioFileEvent
+  AudioFileEvent,
+
+  /// <summary>Diagnostic test tone (200Hz L / 300Hz R sine waves).</summary>
+  TestTone
 }
 
 /// <summary>

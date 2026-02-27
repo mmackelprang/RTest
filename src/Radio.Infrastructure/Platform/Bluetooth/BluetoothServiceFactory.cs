@@ -7,6 +7,7 @@ using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio;
 using Radio.Infrastructure.Audio.SoundFlow;
+using Radio.Infrastructure.Audio.Validation;
 
 namespace Radio.Infrastructure.Platform.Bluetooth;
 
@@ -26,6 +27,7 @@ public static class BluetoothServiceFactory
 
       var playbackService = serviceProvider.GetService<SoundFlowPlaybackService>();
       var albumArtCache = serviceProvider.GetService<AlbumArtCacheService>();
+      var audioValidator = serviceProvider.GetService<IAudioValidator>();
 
 #if WINDOWS_TARGET
       // Windows TFM: only WindowsBluetoothService is compiled
@@ -36,7 +38,7 @@ public static class BluetoothServiceFactory
       // net8.0 TFM: select by runtime OS detection
       if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
       {
-          return new LinuxBluetoothService(loggerFactory.CreateLogger<LinuxBluetoothService>(), options, deviceManager, metricsCollector, playbackService);
+          return new LinuxBluetoothService(loggerFactory.CreateLogger<LinuxBluetoothService>(), options, deviceManager, metricsCollector, playbackService, audioValidator);
       }
       else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
       {

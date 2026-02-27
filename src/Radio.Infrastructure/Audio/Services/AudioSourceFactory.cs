@@ -8,6 +8,7 @@ using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Sources.Primary;
+using Radio.Infrastructure.Audio.Validation;
 using Radio.Infrastructure.Configuration;
 using Radio.Infrastructure.Configuration.Abstractions;
 
@@ -37,6 +38,7 @@ public class AudioSourceFactory : IAudioSourceFactory
   private readonly IServiceScopeFactory? _serviceScopeFactory;
   private readonly AlbumArtCacheService? _albumArtCache;
   private readonly DeviceOptionsResolver? _deviceOptionsResolver;
+  private readonly IAudioValidator? _audioValidator;
 
   public AudioSourceFactory(
     ILogger<AudioSourceFactory> logger,
@@ -56,7 +58,8 @@ public class AudioSourceFactory : IAudioSourceFactory
     SoundFlow.SoundFlowPlaybackService? playbackService = null,
     IServiceScopeFactory? serviceScopeFactory = null,
     AlbumArtCacheService? albumArtCache = null,
-    DeviceOptionsResolver? deviceOptionsResolver = null)
+    DeviceOptionsResolver? deviceOptionsResolver = null,
+    IAudioValidator? audioValidator = null)
   {
     _logger = logger;
     _loggerFactory = loggerFactory;
@@ -76,6 +79,7 @@ public class AudioSourceFactory : IAudioSourceFactory
     _serviceScopeFactory = serviceScopeFactory;
     _albumArtCache = albumArtCache;
     _deviceOptionsResolver = deviceOptionsResolver;
+    _audioValidator = audioValidator;
   }
 
   /// <inheritdoc/>
@@ -88,6 +92,7 @@ public class AudioSourceFactory : IAudioSourceFactory
       AudioSourceType.Vinyl => CreateVinylSource(),
       AudioSourceType.GenericUSB => CreateGenericUSBSource(),
       AudioSourceType.Bluetooth => CreateBluetoothSource(),
+      AudioSourceType.TestTone => CreateTestToneSource(),
       _ => throw new ArgumentOutOfRangeException(nameof(sourceType), sourceType, "Unsupported source type")
     };
   }
@@ -111,7 +116,8 @@ public class AudioSourceFactory : IAudioSourceFactory
       _metricsCollector,
       _playbackService,
       _serviceScopeFactory,
-      _albumArtCache);
+      _albumArtCache,
+      _audioValidator);
   }
 
   private IAudioSource CreateFilePlayerSource()
@@ -191,6 +197,15 @@ public class AudioSourceFactory : IAudioSourceFactory
       resolvedUSBPort,
       _identificationService,
       _playbackService);
+  }
+
+  private IAudioSource CreateTestToneSource()
+  {
+    if (_playbackService == null)
+      throw new InvalidOperationException("SoundFlowPlaybackService is required for TestTone source");
+
+    var logger = _loggerFactory.CreateLogger<TestToneAudioSource>();
+    return new TestToneAudioSource(logger, _playbackService);
   }
 
   /// <summary>

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces;
+using Radio.Infrastructure.Audio.Validation;
 using SoundFlow.Abstracts;
 using SoundFlow.Structs;
 using System.Runtime.InteropServices;
@@ -34,6 +35,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
 {
     private readonly ILogger _logger;
     private readonly IMetricsCollector? _metricsCollector;
+    private readonly IAudioValidator? _audioValidator;
     private readonly object _bufferLock = new();
     private readonly T[] _ringBuffer;
     private int _writePos;
@@ -77,17 +79,20 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     /// <param name="maxBufferSeconds">Maximum seconds of audio to buffer (default: 2).</param>
     /// <param name="overflowStrategy">Strategy for buffer overflow (default: DropOldest).</param>
     /// <param name="metricsCollector">Optional metrics collector for pipeline metrics.</param>
+    /// <param name="audioValidator">Optional audio validator for diagnostic pipeline taps.</param>
     public BufferedSoundGenerator(
         AudioEngine engine,
         AudioFormat format,
         ILogger logger,
         float maxBufferSeconds = 2.0f,
         BufferOverflowStrategy overflowStrategy = BufferOverflowStrategy.DropOldest,
-        IMetricsCollector? metricsCollector = null)
+        IMetricsCollector? metricsCollector = null,
+        IAudioValidator? audioValidator = null)
         : base(engine, format)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _metricsCollector = metricsCollector;
+        _audioValidator = audioValidator;
         _overflowStrategy = overflowStrategy;
 
         // Calculate max buffer based on output format
@@ -152,6 +157,13 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             _writePos = (_writePos + toWrite) % _maxBufferSamples;
             _count += toWrite;
         }
+
+        // V2-Producer validation: submit samples after ring buffer write
+        if (_audioValidator != null && typeof(T) == typeof(float))
+        {
+            var floatSamples = MemoryMarshal.Cast<T, float>(samples);
+            _audioValidator.Submit(floatSamples, "V2-Producer");
+        }
     }
 
     /// <summary>
@@ -209,6 +221,12 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             {
                 Monitor.PulseAll(_bufferLock);
             }
+        }
+
+        // V2-Consumer validation: submit samples after ring buffer read
+        if (_audioValidator != null && samplesWritten > 0)
+        {
+            _audioValidator.Submit(buffer.Slice(0, samplesWritten), "V2-Consumer");
         }
 
         // Clock drift compensation: when the buffer is draining faster than the
