@@ -86,28 +86,20 @@ public class PlayHistoryTracker : IDisposable
     if (source != _getActiveSource())
       return;
 
-    // For Bluetooth sources, delay briefly to let AVRCP metadata arrive.
-    // Without this, the entry gets recorded with the device name (e.g., "Pixel 8 Pro")
-    // as the title because AVRCP metadata is asynchronous and arrives after the
-    // Playing state change.
-    if (source.Type == AudioSourceType.Bluetooth)
-    {
-      await Task.Delay(2000);
-      // Re-check that this source is still active after the delay
-      if (source != _getActiveSource() || source.State != AudioSourceState.Playing)
-        return;
-    }
-
     _logger.LogInformation(
       "Source {SourceName} transitioned to Playing, recording play history",
       source.Name);
-    await RecordPlayStartAsync(source);
+    await UpsertPlayHistoryAsync(source);
   }
 
   /// <summary>
-  /// Records a play history entry when a track starts playing.
+  /// Upserts a play history entry. If a recent entry exists for the same source,
+  /// updates it with better metadata instead of creating duplicates. This handles:
+  /// - BT device name → real track title (AVRCP arrives after Playing state)
+  /// - Rapid source state re-fires (same source within seconds)
+  /// - Same song replayed within 5 minutes
   /// </summary>
-  private async Task RecordPlayStartAsync(IAudioSource source)
+  private async Task UpsertPlayHistoryAsync(IAudioSource source)
   {
     try
     {
@@ -121,9 +113,9 @@ public class PlayHistoryTracker : IDisposable
 
       var playSource = MapSourceTypeToPlaySource(source.Type);
       var metadata = GetSourceMetadata(source);
-
-      // Build source details including basic metadata for display
       var sourceDetails = $"{metadata.Title} - {metadata.Artist}";
+      var newTitle = metadata.Title;
+      var newArtist = metadata.Artist;
 
       // Get duration from source metadata if available
       int? durationSeconds = null;
@@ -136,48 +128,78 @@ public class PlayHistoryTracker : IDisposable
           durationSeconds = (int)durVal;
       }
 
-      // Persist the track metadata so the play history entry can reference it
+      // Check for a recent entry from the same source to upsert against
+      var recentEntries = await playHistoryRepository.GetRecentAsync(5);
+      var lastForSource = recentEntries?.FirstOrDefault(e => e.Source == playSource);
+
+      if (lastForSource != null)
+      {
+        var secondsSinceLast = (DateTime.UtcNow - lastForSource.PlayedAt).TotalSeconds;
+        var existingTitle = lastForSource.Track?.Title;
+        var existingArtist = lastForSource.Track?.Artist;
+
+        // Same title+artist → skip (already recorded)
+        if (string.Equals(existingTitle, newTitle, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(existingArtist, newArtist, StringComparison.OrdinalIgnoreCase))
+        {
+          _logger.LogDebug(
+            "Skipping duplicate play history for '{Title}' by '{Artist}' (same source, already recorded)",
+            newTitle, newArtist);
+          return;
+        }
+
+        // Recent entry with placeholder/incomplete metadata → update it instead of inserting.
+        // This catches: BT device name → real track, or partial AVRCP → full AVRCP.
+        // "Recent" = within 30s for the same source (covers BT state re-fires).
+        if (secondsSinceLast < 30 && IsPlaceholderMetadata(existingTitle, existingArtist, playSource))
+        {
+          // Persist the new (better) metadata
+          var metadataRepository = scope.ServiceProvider.GetService<ITrackMetadataRepository>();
+          if (metadataRepository != null)
+          {
+            await metadataRepository.StoreAsync(metadata);
+          }
+
+          var updatedEntry = lastForSource with
+          {
+            TrackMetadataId = metadata.Id,
+            MetadataSource = metadata.Source,
+            SourceDetails = sourceDetails,
+            DurationSeconds = durationSeconds ?? lastForSource.DurationSeconds,
+            WasIdentified = true,
+            Track = metadata
+          };
+
+          await playHistoryRepository.UpdateAsync(updatedEntry);
+          _currentPlayHistoryEntryId = lastForSource.Id;
+          _logger.LogInformation(
+            "Updated play history entry {EntryId}: '{OldTitle}' → '{NewTitle}' by '{NewArtist}'",
+            lastForSource.Id, existingTitle, newTitle, newArtist);
+          return;
+        }
+
+        // Same title+artist within 5 minutes (across all sources)
+        if (!string.IsNullOrWhiteSpace(newTitle) && !string.IsNullOrWhiteSpace(newArtist))
+        {
+          var isDuplicate = await playHistoryRepository.ExistsRecentlyPlayedAsync(
+            newTitle, newArtist, withinMinutes: 5);
+          if (isDuplicate)
+          {
+            _logger.LogDebug(
+              "Skipping duplicate play history for '{Title}' by '{Artist}' (recently played)",
+              newTitle, newArtist);
+            return;
+          }
+        }
+      }
+
+      // No recent match — insert a new entry
       string? trackMetadataId = null;
-      var metadataRepository = scope.ServiceProvider.GetService<ITrackMetadataRepository>();
-      if (metadataRepository != null)
+      var metaRepo = scope.ServiceProvider.GetService<ITrackMetadataRepository>();
+      if (metaRepo != null)
       {
-        await metadataRepository.StoreAsync(metadata);
+        await metaRepo.StoreAsync(metadata);
         trackMetadataId = metadata.Id;
-      }
-      else
-      {
-        _logger.LogWarning("ITrackMetadataRepository not available, play history entry will lack track metadata");
-      }
-
-      // Skip duplicate entries:
-      // 1. Same title+artist played within 5 minutes (e.g., BT track replayed)
-      if (!string.IsNullOrWhiteSpace(metadata.Title) && !string.IsNullOrWhiteSpace(metadata.Artist))
-      {
-        var isDuplicate = await playHistoryRepository.ExistsRecentlyPlayedAsync(
-          metadata.Title, metadata.Artist, withinMinutes: 5);
-        if (isDuplicate)
-        {
-          _logger.LogDebug(
-            "Skipping duplicate play history entry for '{Title}' by '{Artist}' (recently played)",
-            metadata.Title, metadata.Artist);
-          return;
-        }
-      }
-
-      // 2. Same source recorded very recently (catches rapid state change re-fires
-      //    where metadata changes between events, e.g., BT device name → track name)
-      var recentEntries = await playHistoryRepository.GetRecentAsync(1);
-      if (recentEntries?.Count > 0)
-      {
-        var last = recentEntries[0];
-        var secondsSinceLast = (DateTime.UtcNow - last.PlayedAt).TotalSeconds;
-        if (last.Source == playSource && secondsSinceLast < 10)
-        {
-          _logger.LogDebug(
-            "Skipping rapid-fire play history entry for source {Source} ({Seconds:F1}s since last)",
-            playSource, secondsSinceLast);
-          return;
-        }
       }
 
       var entryId = Guid.NewGuid().ToString();
@@ -200,13 +222,49 @@ public class PlayHistoryTracker : IDisposable
       _currentPlayHistoryEntryId = entryId;
 
       _logger.LogInformation(
-        "Recorded play history entry {EntryId} for source {SourceName} (identified: {WasIdentified}, source: {PlaySource})",
-        entryId, source.Name, entry.WasIdentified, playSource);
+        "Recorded play history entry {EntryId} for source {SourceName}: '{Title}' by '{Artist}'",
+        entryId, source.Name, newTitle, newArtist);
     }
     catch (Exception ex)
     {
       _logger.LogWarning(ex, "Failed to record play history for source {SourceName}", source.Name);
     }
+  }
+
+  /// <summary>
+  /// Determines if the given title+artist represent placeholder/fallback metadata
+  /// rather than real track information (e.g., BT device name, source type name).
+  /// </summary>
+  private static bool IsPlaceholderMetadata(string? title, string? artist, PlaySource source)
+  {
+    if (string.IsNullOrWhiteSpace(title)) return true;
+
+    // Source-type fallback artists indicate no real metadata was available
+    var fallbackArtist = source switch
+    {
+      PlaySource.Radio => "Radio",
+      PlaySource.File => "File Player",
+      PlaySource.Vinyl => "Vinyl",
+      PlaySource.GenericUSB => "USB Input",
+      PlaySource.Bluetooth => "Bluetooth",
+      _ => null
+    };
+    if (fallbackArtist != null && string.Equals(artist, fallbackArtist, StringComparison.OrdinalIgnoreCase))
+      return true;
+
+    // Source-type fallback titles
+    var fallbackTitles = source switch
+    {
+      PlaySource.Bluetooth => new[] { "Bluetooth Audio", "Bluetooth" },
+      PlaySource.Vinyl => new[] { "Vinyl" },
+      PlaySource.GenericUSB => new[] { "USB Audio", "Generic USB Audio" },
+      PlaySource.Radio => new[] { "SDR Radio", "Radio" },
+      _ => Array.Empty<string>()
+    };
+    if (fallbackTitles.Any(f => string.Equals(title, f, StringComparison.OrdinalIgnoreCase)))
+      return true;
+
+    return false;
   }
 
   /// <summary>
