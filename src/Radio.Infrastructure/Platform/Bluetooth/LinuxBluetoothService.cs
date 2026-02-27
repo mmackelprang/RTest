@@ -12,6 +12,7 @@ using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.SoundFlow;
+using Radio.Infrastructure.Audio.Validation;
 using SoundFlow.Backends.MiniAudio;
 using SoundFlow.Enums;
 using SoundFlow.Structs;
@@ -26,6 +27,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         private readonly SoundFlowDeviceManager? _deviceManager;
         private readonly SoundFlowPlaybackService? _playbackService;
         private readonly IMetricsCollector? _metricsCollector;
+        private readonly IAudioValidator? _audioValidator;
         private Connection? _connection;
         private Linux.IObjectManager? _objectManager;
         private Linux.IAdapter1? _adapter;
@@ -60,13 +62,15 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             IOptions<BluetoothOptions> options,
             SoundFlowDeviceManager? deviceManager = null,
             IMetricsCollector? metricsCollector = null,
-            SoundFlowPlaybackService? playbackService = null)
+            SoundFlowPlaybackService? playbackService = null,
+            IAudioValidator? audioValidator = null)
         {
             _logger = logger;
             _options = options.Value;
             _deviceManager = deviceManager;
             _metricsCollector = metricsCollector;
             _playbackService = playbackService;
+            _audioValidator = audioValidator;
         }
 
         public bool IsAvailable => _connection != null && _adapter != null;
@@ -1001,6 +1005,9 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                             }
 
                             generator.AddSamples(floatSamples.AsSpan(0, sampleCount));
+
+                            // V1-BTCapture: submit decoded BT audio for validation
+                            _audioValidator?.Submit(floatSamples.AsSpan(0, sampleCount), "V1-BTCapture");
                         }
                         finally
                         {

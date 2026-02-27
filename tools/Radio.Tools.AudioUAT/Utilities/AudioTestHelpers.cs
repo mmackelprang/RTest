@@ -141,6 +141,47 @@ public static class AudioTestHelpers
   }
 
   /// <summary>
+  /// Generates a BT diagnostic tone with distinct L/R frequencies for channel validation.
+  /// Left channel: 200Hz, Right channel: 300Hz. Designed for seamless looping.
+  /// </summary>
+  /// <param name="leftHz">Left channel frequency (default 200Hz).</param>
+  /// <param name="rightHz">Right channel frequency (default 300Hz).</param>
+  /// <param name="sampleRate">Sample rate (default 48000).</param>
+  /// <param name="durationSamples">Samples per channel (default 48000 = 1 second).</param>
+  /// <param name="amplitude">Amplitude (0.0 to 1.0).</param>
+  /// <returns>Interleaved stereo float array.</returns>
+  public static float[] GenerateBtDiagnosticTone(int leftHz = 200, int rightHz = 300,
+    int sampleRate = 48000, int durationSamples = 48000, float amplitude = 0.8f)
+  {
+    // 200Hz period=240 samples, 300Hz period=160, LCM=480
+    // 48000 samples = 100 perfect loop points, zero-crossing guaranteed
+    var buffer = new float[durationSamples * 2];
+
+    for (var i = 0; i < durationSamples; i++)
+    {
+      buffer[i * 2] = (float)(Math.Sin(2.0 * Math.PI * leftHz * i / sampleRate) * amplitude);
+      buffer[i * 2 + 1] = (float)(Math.Sin(2.0 * Math.PI * rightHz * i / sampleRate) * amplitude);
+    }
+
+    return buffer;
+  }
+
+  /// <summary>
+  /// Writes the BT diagnostic tone as a 16-bit PCM WAV file.
+  /// </summary>
+  /// <param name="filePath">Output file path.</param>
+  /// <param name="leftHz">Left channel frequency.</param>
+  /// <param name="rightHz">Right channel frequency.</param>
+  /// <param name="sampleRate">Sample rate.</param>
+  /// <param name="durationSamples">Samples per channel.</param>
+  public static void WriteBtDiagnosticToneWav(string filePath, int leftHz = 200, int rightHz = 300,
+    int sampleRate = 48000, int durationSamples = 48000)
+  {
+    var samples = GenerateBtDiagnosticTone(leftHz, rightHz, sampleRate, durationSamples);
+    WriteWavFile(filePath, samples, sampleRate, channels: 2);
+  }
+
+  /// <summary>
   /// Calculates the RMS level of audio samples.
   /// </summary>
   /// <param name="samples">The audio samples.</param>
@@ -298,6 +339,13 @@ public static class AudioTestHelpers
     {
       var announcement = GenerateAnnouncementTone();
       WriteWavFile(announcementPath, announcement);
+    }
+
+    // Generate BT diagnostic tone (200Hz L / 300Hz R)
+    var btDiagPath = Path.Combine(testAudioPath, "bt-diagnostic-tone.wav");
+    if (!File.Exists(btDiagPath))
+    {
+      WriteBtDiagnosticToneWav(btDiagPath);
     }
   }
 

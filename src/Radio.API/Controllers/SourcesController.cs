@@ -88,7 +88,8 @@ public class SourcesController : ControllerBase
           AudioSourceType.Vinyl.ToString(),
           AudioSourceType.FilePlayer.ToString(),
           AudioSourceType.GenericUSB.ToString(),
-          AudioSourceType.Bluetooth.ToString()
+          AudioSourceType.Bluetooth.ToString(),
+          AudioSourceType.TestTone.ToString()
         ],
         ActiveSourceType = primarySource?.Type.ToString(),
         ActiveSources = activeSources.Select(s => s.MapToDto()).ToList(),
