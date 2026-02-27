@@ -764,6 +764,24 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                                 await Task.Delay(3000, cancellationToken);
                                 DisconnectPipeWireBtAutoLinks(capturedNodeName);
                                 LinkPipeWireRecordToBtNode(capturedNodeName);
+
+                                // Continuous link monitor: BT transport resets destroy and
+                                // recreate PipeWire nodes with new serials, causing all links
+                                // to be lost. WirePlumber re-creates its default links (BT→speakers)
+                                // but our pw-record links are not restored. Poll every 10s and
+                                // re-link if pw-record is no longer connected to the BT node.
+                                while (!cancellationToken.IsCancellationRequested)
+                                {
+                                    await Task.Delay(10_000, cancellationToken);
+                                    if (!IsPwRecordLinkedToBtNode(capturedNodeName))
+                                    {
+                                        _logger.LogWarning("pw-record lost link to BT node {BtNode}, re-linking", capturedNodeName);
+                                        DisconnectAllLinksToPort("pw-record:input_FL");
+                                        DisconnectAllLinksToPort("pw-record:input_FR");
+                                        LinkPipeWireRecordToBtNode(capturedNodeName);
+                                    }
+                                    DisconnectPipeWireBtAutoLinks(capturedNodeName);
+                                }
                             }
                             catch (OperationCanceledException) { }
                             catch (Exception ex)
@@ -1216,6 +1234,58 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 process?.WaitForExit(3000);
             }
             catch { /* ignore */ }
+        }
+
+        /// <summary>
+        /// Checks whether pw-record is currently linked to the specified BT node.
+        /// Returns false if pw-record inputs are linked to a different source or not linked at all.
+        /// </summary>
+        private bool IsPwRecordLinkedToBtNode(string btNodeName)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "pw-link",
+                    Arguments = "-l",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = Process.Start(psi);
+                if (process == null) return true; // assume ok if we can't check
+                var output = process.StandardOutput.ReadToEnd();
+                process.WaitForExit(3000);
+
+                // Look for "pw-record:input_FL" section with "|<- btNodeName:output_FL"
+                var lines = output.Split('\n');
+                var inPwRecordFL = false;
+
+                foreach (var rawLine in lines)
+                {
+                    var line = rawLine.TrimEnd();
+                    if (line.Trim() == "pw-record:input_FL")
+                    {
+                        inPwRecordFL = true;
+                        continue;
+                    }
+                    if (inPwRecordFL)
+                    {
+                        if (line.Contains("|<-") && line.Contains(btNodeName))
+                            return true;
+                        if (!line.StartsWith("  ") && line.Length > 0)
+                            break; // moved to next port, didn't find our link
+                    }
+                }
+
+                return false;
+            }
+            catch
+            {
+                return true; // assume ok if we can't check
+            }
         }
 
         /// <summary>
