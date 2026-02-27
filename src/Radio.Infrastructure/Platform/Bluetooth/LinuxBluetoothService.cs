@@ -732,51 +732,36 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                         // to the phone's AVRCP transport volume (~0.11) during connection setup.
                         // If we set volume too early, AVRCP resets it. A 1s delay lets AVRCP
                         // finish, then we override with full volume for capture.
-                        // Also disconnect PipeWire's auto-link from BT input to the default
-                        // output sink — WirePlumber creates this automatically when a BT device
-                        // connects, causing a quiet echo (duplicate audio path to speakers).
-                        // Disconnect auto-link immediately (WirePlumber may have already created it)
-                        // CRITICAL: WirePlumber overrides pw-record's --target flag and links
-                        // it to the default audio source (e.g. USB mic) instead of the BT node.
-                        // We must: (1) disconnect BT auto-links to speakers, (2) manually link
-                        // pw-record inputs to BT node outputs. Repeat after delays because
-                        // WirePlumber re-creates links during AVRCP/A2DP setup.
-                        DisconnectPipeWireBtAutoLinks(nodeName);
-                        LinkPipeWireRecordToBtNode(nodeName);
-
                         var capturedNodeName = nodeName;
-                        // Use the capture CTS token (not the caller's cancellationToken) so
-                        // the link monitor is cancelled when StopCaptureSubprocess() runs —
-                        // prevents stale monitors from fighting when switching BT devices.
+                        // Use the capture CTS token so the monitor is cancelled when
+                        // StopCaptureSubprocess() runs (prevents stale monitors when
+                        // switching BT devices).
                         var captureCt = _captureCts!.Token;
                         _ = Task.Run(async () =>
                         {
                             try
                             {
-                                // Delayed re-link: WirePlumber re-creates links during AVRCP setup
+                                // Wait for pw-record's PipeWire ports to register.
+                                // With node.autoconnect=false, --target is just a hint
+                                // and PipeWire won't auto-link. We must create links
+                                // explicitly via pw-link after ports exist (~200ms).
+                                await Task.Delay(500, captureCt);
+                                DisconnectPipeWireBtAutoLinks(capturedNodeName);
+                                LinkPipeWireRecordToBtNode(capturedNodeName);
+
+                                // Set BT node volume after AVRCP handshake settles
                                 await Task.Delay(1000, captureCt);
                                 await SetPipeWireNodeVolumeAsync(nodeId);
-                                DisconnectPipeWireBtAutoLinks(capturedNodeName);
-                                LinkPipeWireRecordToBtNode(capturedNodeName);
-
-                                // Third attempt: WirePlumber can be slow on some BT codecs
-                                await Task.Delay(2000, captureCt);
-                                DisconnectPipeWireBtAutoLinks(capturedNodeName);
-                                LinkPipeWireRecordToBtNode(capturedNodeName);
-
-                                // Fourth attempt: final stabilization
-                                await Task.Delay(3000, captureCt);
+                                // Re-link in case AVRCP setup disrupted links
                                 DisconnectPipeWireBtAutoLinks(capturedNodeName);
                                 LinkPipeWireRecordToBtNode(capturedNodeName);
 
                                 // Continuous link monitor: BT transport resets destroy and
-                                // recreate PipeWire nodes with new serials, causing all links
-                                // to be lost. WirePlumber re-creates its default links (BT→speakers)
-                                // but our pw-record links are not restored. Poll every 10s and
-                                // re-link if pw-record is no longer connected to the BT node.
+                                // recreate PipeWire nodes, causing all links to be lost.
+                                // Poll every 30s and re-link if needed.
                                 while (!captureCt.IsCancellationRequested)
                                 {
-                                    await Task.Delay(10_000, captureCt);
+                                    await Task.Delay(30_000, captureCt);
                                     if (!IsPwRecordLinkedToBtNode(capturedNodeName))
                                     {
                                         _logger.LogWarning("pw-record lost link to BT node {BtNode}, re-linking", capturedNodeName);
@@ -784,7 +769,6 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                                         DisconnectAllLinksToPort("pw-record:input_FR");
                                         LinkPipeWireRecordToBtNode(capturedNodeName);
                                     }
-                                    DisconnectPipeWireBtAutoLinks(capturedNodeName);
                                 }
                             }
                             catch (OperationCanceledException) { }
@@ -995,15 +979,20 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             // arrive in bursts which starves the ring buffer and produces periodic
             // ~1s audio artifacts every 15-30s.
             //
-            // CRITICAL: Use --target with the node serial (not name) to pin pw-record
-            // to the specific BT node. Without this, WirePlumber's autoconnect policy
-            // can relink pw-record to the default audio source (e.g. USB mic) instead
-            // of the BT node, causing silence or wrong audio capture.
+            // CRITICAL: -P '{node.autoconnect=false}' tells WirePlumber to NOT manage
+            // pw-record's links. Without this, WirePlumber's autoconnect policy
+            // continuously re-links pw-record to the default audio source (e.g. USB mic)
+            // instead of the BT node, fighting our explicit pw-link commands every ~10s.
+            // With autoconnect disabled, we create links once via pw-link and WirePlumber
+            // leaves them alone.
+            //
+            // --target still provides the initial connection hint to PipeWire, but the
+            // real link management is done by LinkPipeWireRecordToBtNode() below.
             var targetArg = targetSerial > 0 ? targetSerial.ToString() : targetNode;
             _captureProcess = Process.Start(new ProcessStartInfo
             {
                 FileName = "stdbuf",
-                Arguments = $"-o0 pw-record --target {targetArg} --rate 48000 --channels 2 --format s16 -",
+                Arguments = $"-o0 pw-record -P node.autoconnect=false --target {targetArg} --rate 48000 --channels 2 --format s16 -",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
