@@ -619,7 +619,12 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 return null;
             }
 
-            // If capture subprocess is already running, return cached generator
+            // If native stream or capture subprocess is already running, return cached generator
+            if (_nativeStream != null && _activeGenerator != null)
+            {
+                _logger.LogDebug("Returning existing capture generator (native stream)");
+                return _activeGenerator;
+            }
             if (_captureProcess != null && !_captureProcess.HasExited && _activeGenerator != null)
             {
                 _logger.LogDebug("Returning existing capture generator (PID {Pid})", _captureProcess.Id);
@@ -638,6 +643,11 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             try
             {
                 // Re-check after acquiring lock — another caller may have completed
+                if (_nativeStream != null && _activeGenerator != null)
+                {
+                    _logger.LogDebug("Capture already active after lock wait (native stream)");
+                    return _activeGenerator;
+                }
                 if (_captureProcess != null && !_captureProcess.HasExited && _activeGenerator != null)
                 {
                     _logger.LogDebug("Capture already active after lock wait (PID {Pid})", _captureProcess.Id);
