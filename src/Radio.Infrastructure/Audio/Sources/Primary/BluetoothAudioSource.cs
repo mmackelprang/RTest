@@ -127,12 +127,12 @@ public class BluetoothAudioSource : USBAudioSourceBase
     }
     else if (capture is SoundComponent soundComponent)
     {
-      // WASAPI loopback capture returns a BufferedSoundGenerator<float>
+      // PipeWire native / WASAPI loopback capture returns a BufferedSoundGenerator<float>
       SoundComponent = soundComponent;
       SetConnectedDeviceMetadata();
       NeedsFingerprintingLookup = true;
       State = AudioSourceState.Ready;
-      Logger.LogInformation("BluetoothAudioSource: using WASAPI loopback capture via SoundFlow pipeline");
+      Logger.LogInformation("BluetoothAudioSource: capture generator acquired via SoundFlow pipeline");
     }
     else
     {
