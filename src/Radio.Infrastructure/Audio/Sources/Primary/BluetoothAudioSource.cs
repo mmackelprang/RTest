@@ -385,7 +385,9 @@ public class BluetoothAudioSource : USBAudioSourceBase
         _captureDevice.OnAudioProcessed += OnCaptureAudioProcessed;
         _captureDevice.Start();
 
-        _playbackId = $"bt-capture-{Guid.NewGuid():N}";
+        // Use the audio source ID so AudioManager.SetSourceGain can find
+        // this component and apply the gain offset (e.g., auto-gain +28dB).
+        _playbackId = Id;
         var success = await _playbackService.PlayComponentAsync(
           _playbackId, _captureGenerator, Volume, CancellationToken.None);
 
@@ -402,7 +404,8 @@ public class BluetoothAudioSource : USBAudioSourceBase
       else if (SoundComponent is BufferedSoundGenerator<float> generator && _playbackService != null)
       {
         // PipeWire/WASAPI capture path: register generator directly with mixer
-        _playbackId = $"bt-capture-{Guid.NewGuid():N}";
+        // Use the audio source ID so AudioManager.SetSourceGain can apply the gain offset.
+        _playbackId = Id;
         var success = await _playbackService.PlayComponentAsync(
           _playbackId, generator, Volume, CancellationToken.None);
 
