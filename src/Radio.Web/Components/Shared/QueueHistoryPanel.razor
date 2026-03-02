@@ -332,10 +332,7 @@
     var options = new DialogOptions
     {
       CloseButton = true,
-      MaxWidth = MaxWidth.False,
-      FullWidth = true,
-      BackgroundClass = "bottom-sheet-backdrop",
-      Position = DialogPosition.BottomCenter,
+      MaxWidth = MaxWidth.Small,
       BackdropClick = true
     };
     await DialogService.ShowAsync<Radio.Web.Components.Dialogs.SavePlaylistDialog>("Save Playlist", options);
