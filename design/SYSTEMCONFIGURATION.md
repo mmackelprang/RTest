@@ -550,8 +550,8 @@ Configuration options are static settings that define application behavior. They
 
 ### AudioEngine
 
-**Section Name:** `AudioEngine`  
-**Source File:** `src/Radio.Core/Configuration/AudioEngineOptions.cs`  
+**Section Name:** `AudioEngine`
+**Source File:** `src/Radio.Core/Configuration/AudioEngineOptions.cs`
 **Description:** Configuration options for the SoundFlow audio engine.
 
 | Property | Type | Default | Description |
@@ -562,6 +562,74 @@ Configuration options are static settings that define application behavior. They
 | `HotPlugIntervalSeconds` | `int` | `5` | Hot-plug detection interval in seconds |
 | `OutputBufferSizeSeconds` | `int` | `5` | Ring buffer size for output stream in seconds |
 | `EnableHotPlugDetection` | `bool` | `true` | Whether hot-plug detection is enabled |
+
+---
+
+### Database
+
+**Section Name:** `Database`
+**Source File:** `src/Radio.Core/Configuration/DatabaseOptions.cs`
+**Description:** Unified configuration for all SQLite database locations. Provides root path and per-database subdirectory/filename settings, plus helper methods to resolve full paths.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `RootPath` | `string` | `./data` | Root directory for all database files |
+| `ConfigurationSubdirectory` | `string` | `config` | Subdirectory for configuration database (→ `./data/config/`) |
+| `ConfigurationFileName` | `string` | `configuration.db` | Configuration database filename |
+| `FingerprintingSubdirectory` | `string` | `fingerprints` | Subdirectory for fingerprinting database (→ `./data/fingerprints/`) |
+| `FingerprintingFileName` | `string` | `fingerprints.db` | Fingerprinting database filename |
+| `SecretsSubdirectory` | `string` | `secrets` | Subdirectory for secrets database (→ `./data/secrets/`) |
+| `SecretsFileName` | `string` | `secrets.db` | Secrets database filename |
+| `BackupSubdirectory` | `string` | `backups` | Subdirectory for database backups (→ `./data/backups/`) |
+| `BackupRetentionDays` | `int` | `30` | Number of days to retain database backups |
+
+**Helper Methods:**
+- `GetConfigurationDatabasePath()` → `{RootPath}/{ConfigurationSubdirectory}/{ConfigurationFileName}`
+- `GetFingerprintingDatabasePath()` → `{RootPath}/{FingerprintingSubdirectory}/{FingerprintingFileName}`
+- `GetSecretsDatabasePath()` → `{RootPath}/{SecretsSubdirectory}/{SecretsFileName}`
+- `GetBackupPath()` → `{RootPath}/{BackupSubdirectory}`
+- `GetAllDatabasePaths()` → returns all three database paths
+
+**Note:** Metrics data is stored in the configuration database (`configuration.db`), not a separate file.
+
+---
+
+### Bluetooth
+
+**Section Name:** `Bluetooth`
+**Source File:** `src/Radio.Core/Configuration/BluetoothOptions.cs`
+**Description:** Configuration options for Bluetooth audio input (A2DP sink).
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `DeviceName` | `string` | `Radio Console` | Device name advertised to Bluetooth clients |
+| `AutoAcceptConnections` | `bool` | `true` | Automatically accept incoming connection requests |
+| `RequirePairing` | `bool` | `false` | Require pairing before connecting |
+| `Enabled` | `bool` | `true` | Master enable/disable switch for Bluetooth |
+| `EnableOnStartup` | `bool` | `true` | Enable Bluetooth on application startup |
+| `AutoSwitchOnConnect` | `bool` | `true` | Automatically switch to Bluetooth source when a device connects |
+| `AudioQuality` | `BluetoothAudioQuality` | `High` | Audio quality setting (`Standard` = 44.1kHz, `High` = 48kHz) |
+| `EnableA2dpSink` | `bool` | `true` | Enable A2DP sink to receive audio from phone (Windows: requires 10 2004+ and MSIX identity) |
+| `EnableMediaSessionMonitoring` | `bool` | `true` | Enable SMTC monitoring for AVRCP-equivalent metadata (Windows only) |
+| `EnableLoopbackCapture` | `bool` | `true` | Enable WASAPI loopback capture to route BT audio through SoundFlow pipeline (Windows only). When enabled, BT audio goes through Cast, visualization, modifiers. When false, platform manages audio directly. |
+
+**Example:**
+```json
+{
+  "Bluetooth": {
+    "DeviceName": "Grandpa's Radio",
+    "AutoAcceptConnections": true,
+    "RequirePairing": false,
+    "Enabled": true,
+    "EnableOnStartup": true,
+    "AutoSwitchOnConnect": true,
+    "AudioQuality": "High",
+    "EnableA2dpSink": true,
+    "EnableMediaSessionMonitoring": true,
+    "EnableLoopbackCapture": true
+  }
+}
+```
 
 ---
 
@@ -802,18 +870,21 @@ When the file sink is configured:
 
 ### Fingerprinting
 
-**Section Name:** `Fingerprinting`  
-**Source File:** `src/Radio.Core/Configuration/FingerprintingOptions.cs`  
+**Section Name:** `Fingerprinting`
+**Source File:** `src/Radio.Core/Configuration/FingerprintingOptions.cs`
 **Description:** Configuration options for the audio fingerprinting system.
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `Enabled` | `bool` | `true` | Enable or disable automatic fingerprinting |
 | `SampleDurationSeconds` | `int` | `15` | Duration of audio to capture for fingerprinting (seconds) |
-| `IdentificationIntervalSeconds` | `int` | `30` | Interval between identification attempts (seconds) |
+| `IdentificationIntervalSeconds` | `int` | `15` | Interval between identification attempts (seconds) |
 | `MinimumConfidenceThreshold` | `double` | `0.5` | Minimum confidence threshold for accepting a match (0.0 to 1.0) |
 | `DuplicateSuppressionMinutes` | `int` | `5` | Minutes to suppress duplicate identifications of the same track |
+| `HighConfidenceDuplicateSuppressionMinutes` | `int` | `30` | Minutes to suppress duplicates for high-confidence matches (score > 0.9) |
+| `MinimumSecondsBetweenSongChanges` | `int` | `20` | Minimum seconds between song change events. Prevents rapid-fire entry creation from noisy fingerprints at song boundaries. |
 | `DatabasePath` | `string` | `./data/fingerprints.db` | SQLite database path for fingerprint cache |
+| `FpcalcPath` | `string` | `""` | Path to the fpcalc binary (native Chromaprint fingerprint calculator). If empty, searches PATH and common installation locations. On Linux: `apt install libchromaprint-tools`. |
 | `AcoustId.ApiKey` | `string` | `""` | AcoustID API key (register at https://acoustid.org/new-application) |
 | `AcoustId.BaseUrl` | `string` | `https://api.acoustid.org/v2` | AcoustID API base URL |
 | `AcoustId.MaxRequestsPerSecond` | `int` | `3` | Maximum requests per second (AcoustID limit is 3) |
@@ -931,14 +1002,21 @@ Preferences are user-modifiable settings that are persisted and auto-saved on ch
 
 ### AudioPreferences
 
-**Section Name:** `AudioPreferences`  
-**Source File:** `src/Radio.Core/Configuration/AudioPreferences.cs`  
+**Section Name:** `AudioPreferences`
+**Source File:** `src/Radio.Core/Configuration/AudioPreferences.cs`
 **Description:** User preferences for audio playback.
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `CurrentSource` | `string` | `Spotify` | Currently selected audio source |
+| `CurrentSource` | `string` | `Radio` | Currently selected audio source |
+| `CurrentOutput` | `string` | `""` | Currently selected audio output device ID. Empty = system default. |
 | `MasterVolume` | `int` | `75` | Master volume level (0-100) |
+| `IsMuted` | `bool` | `false` | Whether audio is muted |
+| `Balance` | `int` | `0` | Audio balance (-100 to 100, where 0 is center) |
+| `CurrentInput` | `string` | `""` | Currently selected audio input device ID (for recording/vinyl). Empty = system default. |
+| `DefaultCastDeviceId` | `string` | `""` | Default Google Cast device ID. When set, auto-connects when Cast output is selected. |
+| `DefaultCastDeviceName` | `string` | `""` | Friendly name of the default Cast device. Stored alongside ID to avoid DB lookups. |
+| `SourceGainOffsets` | `Dictionary<string, float>` | `{}` | Per-source gain offsets (linear multiplier 0.0–2.0, where 1.0 = unity/0dB). Compensates for volume differences between sources. Key format: `AudioSourceType.ToString()` (e.g., `"Radio"`, `"FilePlayer"`, `"Bluetooth"`). |
 
 ---
 
@@ -959,8 +1037,8 @@ Preferences are user-modifiable settings that are persisted and auto-saved on ch
 
 ### FilePlayerPreferences
 
-**Section Name:** `FilePlayerPreferences`  
-**Source File:** `src/Radio.Core/Configuration/AudioPreferences.cs`  
+**Section Name:** `FilePlayerPreferences`
+**Source File:** `src/Radio.Core/Configuration/AudioPreferences.cs`
 **Description:** User preferences for the file player.
 
 | Property | Type | Default | Description |
@@ -969,6 +1047,8 @@ Preferences are user-modifiable settings that are persisted and auto-saved on ch
 | `SongPositionMs` | `long` | `0` | Last song position in milliseconds |
 | `Shuffle` | `bool` | `false` | Whether shuffle mode is enabled |
 | `Repeat` | `RepeatMode` | `Off` | Repeat mode |
+| `QueueItems` | `List<string>` | `[]` | Persisted queue items (file paths in order). Used to restore the queue on application restart. |
+| `CurrentQueueIndex` | `int` | `-1` | Current index in the queue. Used to restore playback position. -1 = no active item. |
 
 ---
 
@@ -984,10 +1064,41 @@ Preferences are user-modifiable settings that are persisted and auto-saved on ch
 
 ---
 
+### BluetoothPreferences
+
+**Section Name:** `BluetoothPreferences`
+**Source File:** `src/Radio.Core/Configuration/BluetoothPreferences.cs`
+**Description:** User and device preference data for Bluetooth audio. Tracks paired/trusted devices and last connection.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `LastConnectedDevice` | `string?` | `null` | Address of the last connected Bluetooth device |
+| `PairedDevices` | `List<string>` | `[]` | List of paired device addresses |
+| `TrustedDevices` | `List<string>` | `[]` | Device trust list — auto-connect without prompt |
+
+---
+
+### RadioPreferences
+
+**Section Name:** `Radio`
+**Source File:** `src/Radio.Core/Configuration/RadioPreferences.cs`
+**Description:** User preferences for radio playback. Persists last-used tuner settings so the radio resumes where the user left off.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `LastBand` | `string` | `FM` | Last selected radio band (FM, AM, WB, VHF, SW) |
+| `LastFrequency` | `double` | `101.5` | Last tuned frequency in MHz (FM) or kHz (AM/other bands) |
+| `LastFrequencyStep` | `double` | `0.1` | Last frequency step size in MHz (FM) or kHz (AM) |
+| `LastDeviceVolume` | `int` | `50` | Last device volume (0-100) |
+| `LastEqualizerMode` | `string` | `Off` | Last equalizer mode |
+| `LastDeviceType` | `string` | `RTLSDRCore` | Last selected radio device type |
+
+---
+
 ### TTSPreferences
 
-**Section Name:** `TTSPreferences`  
-**Source File:** `src/Radio.Core/Configuration/TTSPreferences.cs`  
+**Section Name:** `TTSPreferences`
+**Source File:** `src/Radio.Core/Configuration/TTSPreferences.cs`
 **Description:** User preferences for Text-to-Speech.
 
 | Property | Type | Default | Description |
@@ -1115,6 +1226,12 @@ Example:
 | `Google` | Google Cloud Text-to-Speech |
 | `Azure` | Azure Cognitive Services Speech |
 
+### BluetoothAudioQuality
+| Value | Description |
+|-------|-------------|
+| `Standard` | Standard quality (44.1kHz) |
+| `High` | High quality (48kHz) |
+
 ### RadioBand
 | Value | Description |
 |-------|-------------|
@@ -1123,6 +1240,17 @@ Example:
 | `WB` | Weather Band |
 | `VHF` | Very High Frequency |
 | `SW` | Shortwave |
+
+### RadioEqualizerMode
+| Value | Description |
+|-------|-------------|
+| `Off` | No equalization — flat response |
+| `Pop` | Pop music preset with balanced frequency response |
+| `Rock` | Rock music preset with enhanced bass and treble |
+| `Country` | Country music preset optimized for vocals and acoustic instruments |
+| `Classical` | Classical music preset with natural, wide frequency range |
+| `Jazz` | Jazz music preset |
+| `Normal` | Normal equalization preset |
 
 ---
 
@@ -1154,7 +1282,7 @@ See [API Reference](design/API_REFERENCE.md) for detailed API documentation.
 
 ---
 
-*Last Updated: 2025-12-31*
+*Last Updated: 2026-03-02*
 
 ---
 
