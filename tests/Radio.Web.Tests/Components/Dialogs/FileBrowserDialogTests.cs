@@ -111,4 +111,29 @@ public class FileBrowserDialogTests : TestContext
       .Add(p => p.Subdirectory, "music"));
     Assert.NotNull(cut);
   }
+
+  [Fact]
+  public void FileBrowserDialog_WithAbsoluteMode_Renders_Successfully()
+  {
+    // Verify the component instantiates without error — it has internal
+    // absolute mode state (drives, path bar) that must initialize cleanly.
+    // MudDialog renders empty without IMudDialogInstance, so we just
+    // verify no exceptions during construction.
+    var cut = RenderComponent<FileBrowserDialog>();
+    Assert.NotNull(cut);
+    // Component should have the internal drives list initialized (empty until API call)
+    Assert.NotNull(cut.Instance);
+  }
+
+  [Fact]
+  public void FileBrowserDialog_Accepts_AllParameters_Combined_WithQueueAndPlay()
+  {
+    var cut = RenderComponent<FileBrowserDialog>(parameters => parameters
+      .Add(p => p.AllowMultiSelect, true)
+      .Add(p => p.AllowAddToQueue, true)
+      .Add(p => p.ShowPlayButton, true)
+      .Add(p => p.Subdirectory, "music")
+      .Add(p => p.InitialSelection, "/path/to/song.mp3"));
+    Assert.NotNull(cut);
+  }
 }

@@ -410,8 +410,9 @@ context.addCustomMessageListener(NAMESPACE, (event) => {
 
 ## 9. Queue UI — Deferred Features from /queue Page Removal
 
-**Status:** Deferred — features existed in the old `/queue` page but were excluded from the `FileBrowserDialog` consolidation (PR #263)
+**Status:** Partially implemented — drive selector and path entry added; drag-reorder still deferred
 **Added:** 2026-03-02
+**Updated:** 2026-03-02 — Drive selector + path entry implemented in `FileBrowserDialog`
 **Priority:** Low — current home-page `QueueHistoryPanel` + `FileBrowserDialog` covers primary use cases
 
 ### What Was Removed
@@ -420,15 +421,13 @@ The dedicated `/queue` page had several features not carried over:
 
 1. **Drag-reorder queue items** — The QueuePage had a toggle for drag-and-drop reordering using `MudDropContainer`. The `QueueHistoryPanel` does not support drag reorder. The API endpoint `POST /api/queue/move` exists and works.
 
-2. **Drive selector** — The QueuePage file browser had a drive dropdown (`FileApiService.GetDrivesAsync()`). Not needed on the single-drive Linux kiosk target, but useful if NAS mounts are added later.
+2. ~~**Drive selector**~~ — **IMPLEMENTED** in `FileBrowserDialog` location dropdown. Loads drives via `GET /api/files/drives`, supports browsing absolute paths via `GET /api/files?absolutePath=X`.
 
-3. **Custom path entry + virtual keyboard** — The QueuePage allowed typing an arbitrary filesystem path in a text field. Not needed when the media root is configured via `fileplayer.RootDirectory` in system config.
+3. ~~**Custom path entry + virtual keyboard**~~ — **IMPLEMENTED** as editable path bar in `FileBrowserDialog`. Click the edit icon to enter an absolute path, press Enter to navigate.
 
-### What's Needed to Re-add
+### What's Still Needed
 
 - **Drag-reorder**: Add `MudDropContainer` to `QueueHistoryPanel` queue list, wire up `QueueApiService.MoveItemAsync(fromIndex, toIndex)`. CSS for `.queue-item-draggable` / `.queue-item-dragging` already exists in `design-system.css`.
-- **Drive selector**: Add drive dropdown to `FileBrowserDialog` toolbar, call `FileApiService.GetDrivesAsync()`. Only show when multiple drives are mounted.
-- **Path entry**: Add a text input mode to `FileBrowserDialog` breadcrumbs for manual path entry.
 
 ### Gotchas
 

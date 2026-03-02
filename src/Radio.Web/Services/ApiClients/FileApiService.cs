@@ -32,6 +32,20 @@ public class FileApiService
     }
   }
 
+  public async Task<FileListDto?> BrowseAbsoluteAsync(string absolutePath, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var url = $"/api/files?absolutePath={Uri.EscapeDataString(absolutePath)}";
+      return await _httpClient.GetFromJsonAsync<FileListDto>(url, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to browse absolute path {Path}", absolutePath);
+      return null;
+    }
+  }
+
   public async Task<bool> PlayFileAsync(string filePath, CancellationToken cancellationToken = default)
   {
     try

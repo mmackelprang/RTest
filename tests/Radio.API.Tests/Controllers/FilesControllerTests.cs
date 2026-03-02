@@ -94,6 +94,30 @@ public class FilesControllerTests : IClassFixture<CustomWebApplicationFactory<Pr
   }
 
   [Fact]
+  public async Task GetFiles_WithAbsolutePath_NonExistent_ReturnsNotFound()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/files?absolutePath=%2Fno%2Fsuch%2Fpath");
+
+    // Assert
+    Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+  }
+
+  [Fact]
+  public async Task GetDrives_ReturnsDriveList()
+  {
+    // Act
+    var response = await _client.GetAsync("/api/files/drives");
+    var result = await response.Content.ReadFromJsonAsync<List<DriveInfoDto>>();
+
+    // Assert
+    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    Assert.NotNull(result);
+    // At minimum the OS drive should be present
+    Assert.NotEmpty(result);
+  }
+
+  [Fact]
   public async Task PlayFile_FileNotActive_ReturnsError()
   {
     // Arrange - File Player not currently active
