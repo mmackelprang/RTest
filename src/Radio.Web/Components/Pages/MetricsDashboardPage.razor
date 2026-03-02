@@ -162,6 +162,8 @@
     _refreshTimer = new System.Threading.Timer(async _ =>
     {
       await LoadSnapshotsAsync();
+      await LoadSparklineDataAsync();
+      UpdateCardValuesFromSparklines();
       await InvokeAsync(StateHasChanged);
     }, null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
   }
