@@ -224,7 +224,8 @@
   protected override async Task OnInitializedAsync()
   {
     await LoadMediaRootAsync();
-    _currentPath = Subdirectory ?? _mediaRoot;
+    // Pass Subdirectory if provided, otherwise null lets the API use its configured root
+    _currentPath = Subdirectory;
     UpdateRelativePath();
     await LoadContentsAsync();
   }
@@ -248,21 +249,24 @@
 
   private void UpdateRelativePath()
   {
-    if (string.IsNullOrEmpty(_currentPath) || string.IsNullOrEmpty(_mediaRoot))
+    if (string.IsNullOrEmpty(_currentPath) || _currentPath == "/")
     {
-      _relativePath = _currentPath;
+      _relativePath = null;
       return;
     }
 
-    if (_currentPath.StartsWith(_mediaRoot, StringComparison.OrdinalIgnoreCase))
+    // Strip media root prefix if present (for absolute paths from config)
+    if (!string.IsNullOrEmpty(_mediaRoot) &&
+        _currentPath.StartsWith(_mediaRoot, StringComparison.OrdinalIgnoreCase))
     {
       var relative = _currentPath[_mediaRoot.Length..].TrimStart('/');
       _relativePath = string.IsNullOrEmpty(relative) ? null : relative;
+      return;
     }
-    else
-    {
-      _relativePath = _currentPath;
-    }
+
+    // API returns relative paths — use as-is
+    _relativePath = _currentPath.TrimStart('/');
+    if (string.IsNullOrEmpty(_relativePath)) _relativePath = null;
   }
 
   private async Task LoadContentsAsync()
@@ -320,7 +324,7 @@
 
   private async Task NavigateToFolderAsync(string folderName)
   {
-    _currentPath = string.IsNullOrEmpty(_currentPath)
+    _currentPath = (string.IsNullOrEmpty(_currentPath) || _currentPath == "/")
       ? folderName
       : $"{_currentPath}/{folderName}";
     _searchText = "";
@@ -330,7 +334,7 @@
 
   private async Task NavigateToPathAsync(string? path)
   {
-    _currentPath = path ?? _mediaRoot;
+    _currentPath = path;
     _searchText = "";
     UpdateRelativePath();
     await LoadContentsAsync();
@@ -338,9 +342,7 @@
 
   private async Task NavigateToRelativeAsync(string relativePath)
   {
-    _currentPath = string.IsNullOrEmpty(_mediaRoot)
-      ? relativePath
-      : $"{_mediaRoot}/{relativePath}";
+    _currentPath = relativePath;
     _searchText = "";
     UpdateRelativePath();
     await LoadContentsAsync();
