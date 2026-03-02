@@ -98,6 +98,10 @@ public class PlayHistoryTracker : IDisposable
   /// - BT device name → real track title (AVRCP arrives after Playing state)
   /// - Rapid source state re-fires (same source within seconds)
   /// - Same song replayed within 5 minutes
+  ///
+  /// For Bluetooth sources with only placeholder metadata (device name), skips
+  /// creating an entry entirely — OnBluetoothMetadataChanged will create the
+  /// entry when real AVRCP data arrives.
   /// </summary>
   private async Task UpsertPlayHistoryAsync(IAudioSource source)
   {
@@ -116,6 +120,17 @@ public class PlayHistoryTracker : IDisposable
       var sourceDetails = $"{metadata.Title} - {metadata.Artist}";
       var newTitle = metadata.Title;
       var newArtist = metadata.Artist;
+
+      // For Bluetooth: if metadata is still just the device name (placeholder),
+      // don't create an entry yet. OnBluetoothMetadataChanged will handle it
+      // when real AVRCP metadata arrives.
+      if (playSource == PlaySource.Bluetooth && IsPlaceholderMetadata(newTitle, newArtist, playSource))
+      {
+        _logger.LogDebug(
+          "Skipping BT play history entry with placeholder metadata '{Title}' — waiting for AVRCP",
+          newTitle);
+        return;
+      }
 
       // Get duration from source metadata if available
       int? durationSeconds = null;
@@ -177,19 +192,19 @@ public class PlayHistoryTracker : IDisposable
             lastForSource.Id, existingTitle, newTitle, newArtist);
           return;
         }
+      }
 
-        // Same title+artist within 5 minutes (across all sources)
-        if (!string.IsNullOrWhiteSpace(newTitle) && !string.IsNullOrWhiteSpace(newArtist))
+      // Cross-source dedup: same title+artist within 5 minutes
+      if (!string.IsNullOrWhiteSpace(newTitle) && !string.IsNullOrWhiteSpace(newArtist))
+      {
+        var isDuplicate = await playHistoryRepository.ExistsRecentlyPlayedAsync(
+          newTitle, newArtist, withinMinutes: 5);
+        if (isDuplicate)
         {
-          var isDuplicate = await playHistoryRepository.ExistsRecentlyPlayedAsync(
-            newTitle, newArtist, withinMinutes: 5);
-          if (isDuplicate)
-          {
-            _logger.LogDebug(
-              "Skipping duplicate play history for '{Title}' by '{Artist}' (recently played)",
-              newTitle, newArtist);
-            return;
-          }
+          _logger.LogDebug(
+            "Skipping duplicate play history for '{Title}' by '{Artist}' (recently played)",
+            newTitle, newArtist);
+          return;
         }
       }
 
@@ -512,18 +527,19 @@ public class PlayHistoryTracker : IDisposable
   }
 
   /// <summary>
-  /// Updates the current play history entry when real AVRCP metadata arrives.
-  /// This fixes entries that were recorded with the device name as title before
-  /// the phone sent actual track metadata.
+  /// Handles AVRCP metadata changes for Bluetooth play history.
+  /// - If no current entry exists, creates one (first track after BT connect).
+  /// - If the current entry has placeholder metadata, updates it (device name → real track).
+  /// - If the current entry has DIFFERENT real metadata, finalizes the old entry and creates
+  ///   a new one (song changed on the phone).
+  /// - If the current entry already matches, skips (no-op / duplicate AVRCP event).
   /// </summary>
   private async void OnBluetoothMetadataChanged(object? sender, BluetoothPlaybackMetadata e)
   {
-    // Only update if we have real metadata and the active source is Bluetooth
+    // Only handle if we have real metadata and the active source is Bluetooth
     if (e == null || string.IsNullOrEmpty(e.Title) || string.IsNullOrEmpty(e.Artist))
       return;
     if (_getActiveSource()?.Type != AudioSourceType.Bluetooth)
-      return;
-    if (string.IsNullOrEmpty(_currentPlayHistoryEntryId))
       return;
 
     try
@@ -531,20 +547,23 @@ public class PlayHistoryTracker : IDisposable
       using var scope = _serviceScopeFactory.CreateScope();
       var playHistoryRepository = scope.ServiceProvider.GetService<IPlayHistoryRepository>();
       if (playHistoryRepository == null) return;
-
-      var entry = await playHistoryRepository.GetByIdAsync(_currentPlayHistoryEntryId);
-      if (entry == null) return;
-
-      // Only update if the entry looks like it has a device name as title
-      // (i.e., track metadata wasn't available when the entry was recorded)
-      var existingTitle = entry.Track?.Title;
-      if (existingTitle == e.Title && entry.Track?.Artist == e.Artist)
-        return; // Already up to date
-
       var metadataRepository = scope.ServiceProvider.GetService<ITrackMetadataRepository>();
+
+      // Dedup: skip if this exact title+artist was recently played
+      var isDuplicate = await playHistoryRepository.ExistsRecentlyPlayedAsync(
+        e.Title, e.Artist, withinMinutes: 2);
+      if (isDuplicate)
+      {
+        _logger.LogDebug(
+          "Skipping duplicate BT play history for '{Title}' by '{Artist}' (recently played)",
+          e.Title, e.Artist);
+        return;
+      }
+
+      // Build the new metadata record
       var metadata = new TrackMetadata
       {
-        Id = entry.TrackMetadataId ?? Guid.NewGuid().ToString(),
+        Id = Guid.NewGuid().ToString(),
         Title = e.Title,
         Artist = e.Artist,
         Album = e.Album,
@@ -553,29 +572,104 @@ public class PlayHistoryTracker : IDisposable
         UpdatedAt = DateTime.UtcNow
       };
 
-      if (metadataRepository != null)
+      // Case 1: No current entry — create the first one
+      if (string.IsNullOrEmpty(_currentPlayHistoryEntryId))
       {
-        await metadataRepository.StoreAsync(metadata);
+        await CreateBluetoothHistoryEntryAsync(playHistoryRepository, metadataRepository, metadata, e);
+        return;
       }
 
-      var updatedEntry = entry with
+      var entry = await playHistoryRepository.GetByIdAsync(_currentPlayHistoryEntryId);
+      if (entry == null)
       {
-        TrackMetadataId = metadata.Id,
-        MetadataSource = MetadataSource.Avrcp,
-        SourceDetails = $"{e.Title} - {e.Artist}",
-        WasIdentified = true,
-        Track = metadata
-      };
+        // Entry was deleted or ID is stale — create fresh
+        await CreateBluetoothHistoryEntryAsync(playHistoryRepository, metadataRepository, metadata, e);
+        return;
+      }
 
-      await playHistoryRepository.UpdateAsync(updatedEntry);
+      var existingTitle = entry.Track?.Title;
+      var existingArtist = entry.Track?.Artist;
+
+      // Case 2: Already up to date — skip
+      if (string.Equals(existingTitle, e.Title, StringComparison.OrdinalIgnoreCase) &&
+          string.Equals(existingArtist, e.Artist, StringComparison.OrdinalIgnoreCase))
+        return;
+
+      // Case 3: Current entry is a placeholder (device name) — update in place
+      if (IsPlaceholderMetadata(existingTitle, existingArtist, PlaySource.Bluetooth))
+      {
+        metadata = metadata with { Id = entry.TrackMetadataId ?? metadata.Id };
+        if (metadataRepository != null)
+          await metadataRepository.StoreAsync(metadata);
+
+        var updatedEntry = entry with
+        {
+          TrackMetadataId = metadata.Id,
+          MetadataSource = MetadataSource.Avrcp,
+          SourceDetails = $"{e.Title} - {e.Artist}",
+          WasIdentified = true,
+          Track = metadata
+        };
+
+        await playHistoryRepository.UpdateAsync(updatedEntry);
+        _logger.LogInformation(
+          "Updated BT play history entry {EntryId}: '{OldTitle}' → '{NewTitle}' by '{NewArtist}'",
+          entry.Id, existingTitle, e.Title, e.Artist);
+        return;
+      }
+
+      // Case 4: Different real song — finalize old entry and create new one
+      await playHistoryRepository.FinalizeEntryAsync(entry.Id, DateTime.UtcNow);
       _logger.LogInformation(
-        "Updated play history entry {EntryId} with AVRCP metadata: '{Title}' by '{Artist}'",
-        entry.Id, e.Title, e.Artist);
+        "Finalized BT play history entry {EntryId} ('{Title}' by '{Artist}')",
+        entry.Id, existingTitle, existingArtist);
+
+      await CreateBluetoothHistoryEntryAsync(playHistoryRepository, metadataRepository, metadata, e);
     }
     catch (Exception ex)
     {
       _logger.LogDebug(ex, "Failed to update play history with AVRCP metadata");
     }
+  }
+
+  /// <summary>
+  /// Creates a new play history entry for a Bluetooth track.
+  /// </summary>
+  private async Task CreateBluetoothHistoryEntryAsync(
+    IPlayHistoryRepository playHistoryRepository,
+    ITrackMetadataRepository? metadataRepository,
+    TrackMetadata metadata,
+    BluetoothPlaybackMetadata btMeta)
+  {
+    if (metadataRepository != null)
+      await metadataRepository.StoreAsync(metadata);
+
+    int? durationSeconds = btMeta.Duration > TimeSpan.Zero
+      ? (int)btMeta.Duration.TotalSeconds
+      : null;
+
+    var entryId = Guid.NewGuid().ToString();
+    var entry = new PlayHistoryEntry
+    {
+      Id = entryId,
+      TrackMetadataId = metadata.Id,
+      FingerprintId = null,
+      PlayedAt = DateTime.UtcNow,
+      Source = PlaySource.Bluetooth,
+      MetadataSource = MetadataSource.Avrcp,
+      SourceDetails = $"{btMeta.Title} - {btMeta.Artist}",
+      DurationSeconds = durationSeconds,
+      IdentificationConfidence = null,
+      WasIdentified = true,
+      Track = metadata
+    };
+
+    await playHistoryRepository.RecordPlayAsync(entry);
+    _currentPlayHistoryEntryId = entryId;
+
+    _logger.LogInformation(
+      "Created BT play history entry {EntryId}: '{Title}' by '{Artist}'",
+      entryId, btMeta.Title, btMeta.Artist);
   }
 
   public void Dispose()
