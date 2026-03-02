@@ -281,17 +281,26 @@
       if (history.Count < 2) continue;
 
       var keyLower = key.ToLowerInvariant();
-      var isCounter = keyLower.Contains("count") || keyLower.Contains("total") ||
-                      keyLower.Contains("bytes") || keyLower.Contains("sent") ||
-                      keyLower.Contains("received") || keyLower.Contains("played") ||
-                      keyLower.Contains("requests") || keyLower.Contains("errors");
+      var isGauge = keyLower.Contains("percent") || keyLower.Contains("ratio") ||
+                    keyLower.Contains("rate") || keyLower.Contains("_size") ||
+                    keyLower.Contains("fill") || keyLower.Contains("active");
+
+      var isCounter = !isGauge && (
+        keyLower.Contains("count") || keyLower.Contains("total") ||
+        keyLower.Contains("bytes") || keyLower.Contains("sent") ||
+        keyLower.Contains("received") || keyLower.Contains("played") ||
+        keyLower.Contains("requests") || keyLower.Contains("errors") ||
+        keyLower.Contains("dropped") || keyLower.Contains("underruns") ||
+        keyLower.Contains("skipped") || keyLower.Contains("chunks") ||
+        keyLower.Contains("connected") || keyLower.Contains("disconnected") ||
+        keyLower.Contains("reconnect") || keyLower.Contains("failures") ||
+        keyLower.Contains("queued"));
 
       if (isCounter)
       {
-        // For counters, show the delta over the time range
-        var first = history.First().Value;
-        var last = history.Last().Value;
-        _snapshots[key] = Math.Max(0, last - first);
+        // For counters, sum Value * Count across all buckets for the total over the time range
+        var totalDelta = history.Sum(h => h.Value * h.Count);
+        _snapshots[key] = Math.Max(0, totalDelta);
       }
       else
       {

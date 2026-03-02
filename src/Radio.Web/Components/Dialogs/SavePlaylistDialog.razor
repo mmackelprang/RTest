@@ -12,14 +12,21 @@
   <DialogContent>
     <MudTextField @bind-Value="_name"
                   Label="Playlist Name"
+                  Placeholder="My Playlist"
                   Variant="Variant.Outlined"
                   Required="true"
                   RequiredError="Name is required"
                   Immediate="true"
+                  AutoFocus="true"
+                  InputMode="InputMode.text"
+                  Adornment="Adornment.Start"
+                  AdornmentIcon="@Icons.Material.Filled.Edit"
                   Style="margin-bottom: 16px;" />
     <MudTextField @bind-Value="_description"
                   Label="Description (optional)"
+                  Placeholder="Add a description..."
                   Variant="Variant.Outlined"
+                  InputMode="InputMode.text"
                   Lines="2" />
   </DialogContent>
   <DialogActions>

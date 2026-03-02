@@ -24,6 +24,10 @@ public class AudioVisualizationHubService : IAsyncDisposable
   public event Func<WaveformDataDto, Task>? OnWaveformData;
   public event Func<VisualizationDataDto, Task>? OnVisualizationData;
 
+  // Track active group subscriptions so we can re-subscribe on reconnect
+  private readonly HashSet<string> _activeSubscriptions = new();
+  private readonly object _subscriptionLock = new();
+
   // Throttle disconnect log messages to avoid spam when API is down
   private static DateTime _lastDisconnectLogUtc = DateTime.MinValue;
   private static readonly TimeSpan DisconnectLogInterval = TimeSpan.FromSeconds(10);
@@ -96,11 +100,34 @@ public class AudioVisualizationHubService : IAsyncDisposable
         return Task.CompletedTask;
       };
 
-      _hubConnection.Reconnected += connectionId =>
+      _hubConnection.Reconnected += async connectionId =>
       {
         _lastDisconnectLogUtc = DateTime.MinValue; // Reset throttle
         _logger.LogInformation("Visualization hub reconnected with ID: {ConnectionId}", connectionId);
-        return Task.CompletedTask;
+
+        // Re-subscribe to all active groups — SignalR group membership is per-connection,
+        // so after reconnect (new ConnectionId) the old memberships are gone.
+        string[] subscriptions;
+        lock (_subscriptionLock)
+        {
+          subscriptions = _activeSubscriptions.ToArray();
+        }
+
+        foreach (var group in subscriptions)
+        {
+          try
+          {
+            await _hubConnection.InvokeAsync($"SubscribeTo{group}");
+            _logger.LogDebug("Re-subscribed to {Group} after reconnect", group);
+          }
+          catch (Exception ex)
+          {
+            _logger.LogWarning(ex, "Failed to re-subscribe to {Group} after reconnect", group);
+          }
+        }
+
+        if (subscriptions.Length > 0)
+          _logger.LogInformation("Re-subscribed to {Count} visualization groups after reconnect", subscriptions.Length);
       };
 
       _hubConnection.Closed += exception =>
@@ -151,6 +178,7 @@ public class AudioVisualizationHubService : IAsyncDisposable
     if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
       await _hubConnection.InvokeAsync("SubscribeToSpectrum");
+      lock (_subscriptionLock) { _activeSubscriptions.Add("Spectrum"); }
       _logger.LogDebug("Subscribed to spectrum updates");
     }
     else
@@ -161,6 +189,7 @@ public class AudioVisualizationHubService : IAsyncDisposable
 
   public async Task UnsubscribeFromSpectrumAsync()
   {
+    lock (_subscriptionLock) { _activeSubscriptions.Remove("Spectrum"); }
     if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
       await _hubConnection.InvokeAsync("UnsubscribeFromSpectrum");
@@ -173,6 +202,7 @@ public class AudioVisualizationHubService : IAsyncDisposable
     if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
       await _hubConnection.InvokeAsync("SubscribeToLevels");
+      lock (_subscriptionLock) { _activeSubscriptions.Add("Levels"); }
       _logger.LogDebug("Subscribed to level updates");
     }
     else
@@ -183,6 +213,7 @@ public class AudioVisualizationHubService : IAsyncDisposable
 
   public async Task UnsubscribeFromLevelsAsync()
   {
+    lock (_subscriptionLock) { _activeSubscriptions.Remove("Levels"); }
     if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
       await _hubConnection.InvokeAsync("UnsubscribeFromLevels");
@@ -195,6 +226,7 @@ public class AudioVisualizationHubService : IAsyncDisposable
     if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
       await _hubConnection.InvokeAsync("SubscribeToWaveform");
+      lock (_subscriptionLock) { _activeSubscriptions.Add("Waveform"); }
       _logger.LogDebug("Subscribed to waveform updates");
     }
     else
@@ -205,6 +237,7 @@ public class AudioVisualizationHubService : IAsyncDisposable
 
   public async Task UnsubscribeFromWaveformAsync()
   {
+    lock (_subscriptionLock) { _activeSubscriptions.Remove("Waveform"); }
     if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
       await _hubConnection.InvokeAsync("UnsubscribeFromWaveform");
@@ -217,6 +250,12 @@ public class AudioVisualizationHubService : IAsyncDisposable
     if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
       await _hubConnection.InvokeAsync("SubscribeToAll");
+      lock (_subscriptionLock)
+      {
+        _activeSubscriptions.Add("Spectrum");
+        _activeSubscriptions.Add("Levels");
+        _activeSubscriptions.Add("Waveform");
+      }
       _logger.LogDebug("Subscribed to all visualization updates");
     }
     else
@@ -227,6 +266,7 @@ public class AudioVisualizationHubService : IAsyncDisposable
 
   public async Task UnsubscribeFromAllAsync()
   {
+    lock (_subscriptionLock) { _activeSubscriptions.Clear(); }
     if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
       await _hubConnection.InvokeAsync("UnsubscribeFromAll");
