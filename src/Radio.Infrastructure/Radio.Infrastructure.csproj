@@ -21,6 +21,7 @@
   <ItemGroup Condition="'$(TargetFramework)' == 'net8.0-windows10.0.19041.0'">
     <Compile Remove="Platform\Bluetooth\Linux\**" />
     <Compile Remove="Platform\Bluetooth\LinuxBluetoothService.cs" />
+    <Compile Remove="Platform\Bluetooth\Native\**" />
   </ItemGroup>
   <!-- Common packages -->
   <ItemGroup>

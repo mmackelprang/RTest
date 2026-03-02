@@ -19,13 +19,14 @@ public class FingerprintStatusDto
 public class FingerprintEventDto
 {
   public string AudioSource { get; set; } = string.Empty;
-  public DateTime? FirstMatchAt { get; set; }
-  public int NoMatchCount { get; set; }
-  public int MatchCount { get; set; }
+  public string SourceType { get; set; } = string.Empty;
+  public bool IsMatch { get; set; }
+  public int Count { get; set; }
   public double? LastConfidence { get; set; }
   public string? Title { get; set; }
   public string? Artist { get; set; }
   public string? Album { get; set; }
+  public bool HasAlbumArt { get; set; }
   public string Phase { get; set; } = "Idle";
   public DateTime Timestamp { get; set; }
 }

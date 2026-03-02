@@ -37,7 +37,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
   private string? _currentSourceName;
 
   // Event log — circular buffer of recent events, capped at MaxRecentEvents
-  private const int MaxRecentEvents = 20;
+  private const int MaxRecentEvents = 40;
   private readonly List<FingerprintEventRecord> _recentEvents = new(MaxRecentEvents + 1);
   private FingerprintEventRecord? _currentEvent;
 
@@ -199,18 +199,12 @@ public sealed class BackgroundIdentificationService : BackgroundService
       return;
     }
 
-    // Check if the active source needs fingerprinting (complete metadata → skip)
-    if (!audioTap.NeedsFingerprintingLookup)
-    {
-      _logger.LogDebug("Active source has complete metadata, skipping identification cycle");
-      return;
-    }
-
     _logger.LogDebug("Audio source active: {SourceType} - {SourceName}", audioTap.SourceType, audioTap.SourceName);
 
     // Start or continue an event record for this audio segment
     var sourceName = audioTap.SourceName ?? audioTap.SourceType.ToString();
-    EnsureCurrentEvent(sourceName);
+    var sourceType = audioTap.SourceType.ToString();
+    EnsureCurrentEvent(sourceName, sourceType);
     UpdatePhase(FingerprintPhase.Capturing);
 
     FingerprintData fingerprint;
@@ -400,7 +394,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
   /// Only starts a new record when the source changes or after an error;
   /// same-source match/no-match results aggregate into the existing record.
   /// </summary>
-  internal void EnsureCurrentEvent(string sourceName)
+  internal void EnsureCurrentEvent(string sourceName, string sourceType = "")
   {
     lock (_statusLock)
     {
@@ -408,7 +402,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
       if (_currentEvent == null || _currentSourceName != sourceName ||
           _currentEvent.Phase == FingerprintPhase.Error)
       {
-        _currentEvent = new FingerprintEventRecord { AudioSource = sourceName };
+        _currentEvent = new FingerprintEventRecord { AudioSource = sourceName, SourceType = sourceType };
         _currentSourceName = sourceName;
         _recentEvents.Add(_currentEvent);
         if (_recentEvents.Count > MaxRecentEvents)
@@ -419,8 +413,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
 
   /// <summary>
   /// Updates the current event record with a successful match.
-  /// If the same song matches again, aggregates (increments MatchCount, updates confidence).
-  /// If a different song matches, starts a new event record.
+  /// Same source + same title → Count++; different title or was no-match → new row.
   /// </summary>
   internal void UpdateCurrentEventMatch(TrackMetadata metadata, double confidence)
   {
@@ -428,30 +421,53 @@ public sealed class BackgroundIdentificationService : BackgroundService
     {
       if (_currentEvent == null) return;
 
-      // Different song identified → start a new record
-      if (_currentEvent.Title != null && _currentEvent.Title != metadata.Title)
+      // Aggregate if same source, same title, and already a match row
+      if (_currentEvent.IsMatch && _currentEvent.Title == metadata.Title)
       {
-        _currentEvent = new FingerprintEventRecord { AudioSource = _currentSourceName ?? "Unknown" };
-        _recentEvents.Add(_currentEvent);
-        if (_recentEvents.Count > MaxRecentEvents)
-          _recentEvents.RemoveAt(0);
+        _currentEvent.Count++;
+        _currentEvent.LastConfidence = confidence;
+        _currentEvent.HasAlbumArt = !string.IsNullOrEmpty(metadata.CoverArtUrl);
+        _currentEvent.Timestamp = DateTime.UtcNow;
+        return;
       }
 
-      _currentEvent.MatchCount++;
-      _currentEvent.LastConfidence = confidence;
-      _currentEvent.Title = metadata.Title;
-      _currentEvent.Artist = metadata.Artist;
-      _currentEvent.Album = metadata.Album;
-      _currentEvent.FirstMatchAt ??= DateTime.UtcNow;
-      _currentEvent.Timestamp = DateTime.UtcNow;
+      // Fresh event from EnsureCurrentEvent (Count=0) → convert in place
+      if (_currentEvent.Count == 0)
+      {
+        _currentEvent.IsMatch = true;
+        _currentEvent.Count = 1;
+        _currentEvent.LastConfidence = confidence;
+        _currentEvent.Title = metadata.Title;
+        _currentEvent.Artist = metadata.Artist;
+        _currentEvent.Album = metadata.Album;
+        _currentEvent.HasAlbumArt = !string.IsNullOrEmpty(metadata.CoverArtUrl);
+        _currentEvent.Timestamp = DateTime.UtcNow;
+        return;
+      }
+
+      // Different title or was a no-match row with data → new record
+      _currentEvent = new FingerprintEventRecord
+      {
+        AudioSource = _currentSourceName ?? "Unknown",
+        SourceType = _currentEvent.SourceType,
+        IsMatch = true,
+        Count = 1,
+        LastConfidence = confidence,
+        Title = metadata.Title,
+        Artist = metadata.Artist,
+        Album = metadata.Album,
+        HasAlbumArt = !string.IsNullOrEmpty(metadata.CoverArtUrl),
+        Timestamp = DateTime.UtcNow
+      };
+      _recentEvents.Add(_currentEvent);
+      if (_recentEvents.Count > MaxRecentEvents)
+        _recentEvents.RemoveAt(0);
     }
   }
 
   /// <summary>
   /// Updates the current event record with a no-match result.
-  /// If the current event already has a match (song was identified), starts a new
-  /// event record so no-match periods show as separate rows in the event log.
-  /// Otherwise aggregates into the existing record (increments NoMatchCount).
+  /// Current is not a match row → Count++; otherwise → new row.
   /// </summary>
   internal void UpdateCurrentEventNoMatch()
   {
@@ -459,17 +475,26 @@ public sealed class BackgroundIdentificationService : BackgroundService
     {
       if (_currentEvent == null) return;
 
-      // If current event has a matched song, start a new record for the no-match period
-      if (_currentEvent.MatchCount > 0)
+      // Aggregate into existing no-match row (or fresh empty row from EnsureCurrentEvent)
+      if (!_currentEvent.IsMatch)
       {
-        _currentEvent = new FingerprintEventRecord { AudioSource = _currentSourceName ?? "Unknown" };
-        _recentEvents.Add(_currentEvent);
-        if (_recentEvents.Count > MaxRecentEvents)
-          _recentEvents.RemoveAt(0);
+        _currentEvent.Count++;
+        _currentEvent.Timestamp = DateTime.UtcNow;
+        return;
       }
 
-      _currentEvent.NoMatchCount++;
-      _currentEvent.Timestamp = DateTime.UtcNow;
+      // Was a match row → start new no-match record
+      _currentEvent = new FingerprintEventRecord
+      {
+        AudioSource = _currentSourceName ?? "Unknown",
+        SourceType = _currentEvent.SourceType,
+        IsMatch = false,
+        Count = 1,
+        Timestamp = DateTime.UtcNow
+      };
+      _recentEvents.Add(_currentEvent);
+      if (_recentEvents.Count > MaxRecentEvents)
+        _recentEvents.RemoveAt(0);
     }
   }
 

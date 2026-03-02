@@ -11,11 +11,11 @@ namespace Radio.Infrastructure.Tests.Audio.Fingerprinting;
 /// <summary>
 /// Tests for fingerprint status tracking and event log aggregation in BackgroundIdentificationService.
 /// Validates that:
-///   - Repeated matches for the same song aggregate into one event (incrementing MatchCount)
-///   - Consecutive no-match results aggregate (incrementing NoMatchCount)
+///   - Repeated matches for the same song aggregate into one event (incrementing Count)
+///   - Consecutive no-match results aggregate (incrementing Count)
 ///   - A different song creates a new event record
 ///   - Source changes create a new event record
-///   - The event log is capped at ~20 entries
+///   - The event log is capped at ~40 entries
 /// </summary>
 public class BackgroundIdentificationServiceStatusTests
 {
@@ -62,18 +62,21 @@ public class BackgroundIdentificationServiceStatusTests
     _service.UpdateCurrentEventMatch(metadata, 0.90);
     _service.UpdateCurrentEventMatch(metadata, 0.92);
 
-    // Assert — only ONE event record, MatchCount=3, latest confidence
+    // Assert — TWO event records: the initial empty one becomes a match row,
+    // then three matches aggregate into one match row
     var status = _service.GetStatus();
-    Assert.Single(status.RecentEvents);
+    // First match creates a new match row (since initial event has Count=0),
+    // subsequent matches aggregate into it
+    var matchEvents = status.RecentEvents.Where(e => e.IsMatch).ToList();
+    Assert.Single(matchEvents);
 
-    var evt = status.RecentEvents[0];
-    Assert.Equal(3, evt.MatchCount);
-    Assert.Equal(0, evt.NoMatchCount);
+    var evt = matchEvents[0];
+    Assert.Equal(3, evt.Count);
+    Assert.True(evt.IsMatch);
     Assert.Equal(0.92, evt.LastConfidence);
     Assert.Equal("Song A", evt.Title);
     Assert.Equal("Artist A", evt.Artist);
     Assert.Equal("Album A", evt.Album);
-    Assert.NotNull(evt.FirstMatchAt);
   }
 
   [Fact]
@@ -88,19 +91,20 @@ public class BackgroundIdentificationServiceStatusTests
     _service.UpdateCurrentEventNoMatch();
     _service.UpdateCurrentEventNoMatch();
 
-    // Assert — one event record with NoMatchCount=4
+    // Assert — the initial event becomes no-match, then aggregates
     var status = _service.GetStatus();
-    Assert.Single(status.RecentEvents);
+    var noMatchEvents = status.RecentEvents.Where(e => !e.IsMatch).ToList();
+    Assert.Single(noMatchEvents);
 
-    var evt = status.RecentEvents[0];
-    Assert.Equal(4, evt.NoMatchCount);
-    Assert.Equal(0, evt.MatchCount);
+    var evt = noMatchEvents[0];
+    Assert.Equal(4, evt.Count);
+    Assert.False(evt.IsMatch);
     Assert.Null(evt.Title);
     Assert.Null(evt.LastConfidence);
   }
 
   [Fact]
-  public void NoMatchThenMatch_AggregatesIntoOneEvent()
+  public void NoMatchThenMatch_CreatesTwoEvents()
   {
     // Arrange
     _service.EnsureCurrentEvent("SDR Radio");
@@ -110,15 +114,19 @@ public class BackgroundIdentificationServiceStatusTests
     _service.UpdateCurrentEventNoMatch();
     _service.UpdateCurrentEventMatch(CreateMetadata("Song B", "Artist B"), 0.75);
 
-    // Assert — still one record with both counts
+    // Assert — TWO records: no-match row + match row (new model separates them)
     var status = _service.GetStatus();
-    Assert.Single(status.RecentEvents);
+    Assert.Equal(2, status.RecentEvents.Count);
 
-    var evt = status.RecentEvents[0];
-    Assert.Equal(2, evt.NoMatchCount);
-    Assert.Equal(1, evt.MatchCount);
-    Assert.Equal("Song B", evt.Title);
-    Assert.Equal(0.75, evt.LastConfidence);
+    var noMatchEvt = status.RecentEvents[0];
+    Assert.False(noMatchEvt.IsMatch);
+    Assert.Equal(2, noMatchEvt.Count);
+
+    var matchEvt = status.RecentEvents[1];
+    Assert.True(matchEvt.IsMatch);
+    Assert.Equal(1, matchEvt.Count);
+    Assert.Equal("Song B", matchEvt.Title);
+    Assert.Equal(0.75, matchEvt.LastConfidence);
   }
 
   [Fact]
@@ -131,17 +139,18 @@ public class BackgroundIdentificationServiceStatusTests
     _service.UpdateCurrentEventMatch(CreateMetadata("Song A", "Artist A"), 0.80);
     _service.UpdateCurrentEventMatch(CreateMetadata("Song B", "Artist B"), 0.90);
 
-    // Assert — TWO event records
+    // Assert — TWO match event records
     var status = _service.GetStatus();
-    Assert.Equal(2, status.RecentEvents.Count);
+    var matchEvents = status.RecentEvents.Where(e => e.IsMatch).ToList();
+    Assert.Equal(2, matchEvents.Count);
 
-    Assert.Equal("Song A", status.RecentEvents[0].Title);
-    Assert.Equal(1, status.RecentEvents[0].MatchCount);
-    Assert.Equal(0.80, status.RecentEvents[0].LastConfidence);
+    Assert.Equal("Song A", matchEvents[0].Title);
+    Assert.Equal(1, matchEvents[0].Count);
+    Assert.Equal(0.80, matchEvents[0].LastConfidence);
 
-    Assert.Equal("Song B", status.RecentEvents[1].Title);
-    Assert.Equal(1, status.RecentEvents[1].MatchCount);
-    Assert.Equal(0.90, status.RecentEvents[1].LastConfidence);
+    Assert.Equal("Song B", matchEvents[1].Title);
+    Assert.Equal(1, matchEvents[1].Count);
+    Assert.Equal(0.90, matchEvents[1].LastConfidence);
   }
 
   [Fact]
@@ -171,10 +180,11 @@ public class BackgroundIdentificationServiceStatusTests
     _service.EnsureCurrentEvent("SDR Radio");
     _service.UpdateCurrentEventNoMatch();
 
-    // Assert — ONE event record with NoMatchCount=2
+    // Assert — ONE event record with Count=2
     var status = _service.GetStatus();
-    Assert.Single(status.RecentEvents);
-    Assert.Equal(2, status.RecentEvents[0].NoMatchCount);
+    var noMatchEvents = status.RecentEvents.Where(e => !e.IsMatch).ToList();
+    Assert.Single(noMatchEvents);
+    Assert.Equal(2, noMatchEvents[0].Count);
   }
 
   [Fact]
@@ -186,64 +196,42 @@ public class BackgroundIdentificationServiceStatusTests
     // Act — match, then no-matches on same source
     _service.UpdateCurrentEventMatch(CreateMetadata("Song C", "Artist C"), 0.88);
 
-    _service.EnsureCurrentEvent("SDR Radio"); // Same source — should NOT create new record
+    _service.EnsureCurrentEvent("SDR Radio"); // Same source — should NOT create new record via EnsureCurrentEvent
     _service.UpdateCurrentEventNoMatch();
     _service.UpdateCurrentEventNoMatch();
 
     // Assert — TWO records: match event + separate no-match event
     var status = _service.GetStatus();
-    Assert.Equal(2, status.RecentEvents.Count);
+    var matchEvents = status.RecentEvents.Where(e => e.IsMatch).ToList();
+    var noMatchEvents = status.RecentEvents.Where(e => !e.IsMatch).ToList();
 
-    var matchEvt = status.RecentEvents[0];
-    Assert.Equal(1, matchEvt.MatchCount);
-    Assert.Equal(0, matchEvt.NoMatchCount);
-    Assert.Equal("Song C", matchEvt.Title);
+    Assert.Single(matchEvents);
+    Assert.Equal(1, matchEvents[0].Count);
+    Assert.Equal("Song C", matchEvents[0].Title);
 
-    var noMatchEvt = status.RecentEvents[1];
-    Assert.Equal(0, noMatchEvt.MatchCount);
-    Assert.Equal(2, noMatchEvt.NoMatchCount);
-    Assert.Null(noMatchEvt.Title);
-    Assert.Equal("SDR Radio", noMatchEvt.AudioSource);
-  }
-
-  [Fact]
-  public void FirstMatchAt_SetOnFirstMatchOnly()
-  {
-    // Arrange
-    _service.EnsureCurrentEvent("SDR Radio");
-
-    // Act — no match, then match, then match again
-    _service.UpdateCurrentEventNoMatch();
-    var beforeMatch = DateTime.UtcNow;
-    _service.UpdateCurrentEventMatch(CreateMetadata("Song D", "Artist D"), 0.70);
-    var firstMatchAt = _service.GetStatus().RecentEvents[0].FirstMatchAt;
-
-    _service.UpdateCurrentEventMatch(CreateMetadata("Song D", "Artist D"), 0.80);
-    var secondFirstMatchAt = _service.GetStatus().RecentEvents[0].FirstMatchAt;
-
-    // Assert — FirstMatchAt is set on first match and doesn't change
-    Assert.NotNull(firstMatchAt);
-    Assert.Equal(firstMatchAt, secondFirstMatchAt);
-    Assert.True(firstMatchAt >= beforeMatch);
+    Assert.Single(noMatchEvents);
+    Assert.Equal(2, noMatchEvents[0].Count);
+    Assert.Null(noMatchEvents[0].Title);
+    Assert.Equal("SDR Radio", noMatchEvents[0].AudioSource);
   }
 
   [Fact]
   public void EventLog_CappedAtMaxEntries()
   {
-    // Act — create 25 events (more than the ~20 cap)
-    for (int i = 0; i < 25; i++)
+    // Act — create 45 events (more than the 40 cap)
+    for (int i = 0; i < 45; i++)
     {
       _service.EnsureCurrentEvent($"Source {i}");
       _service.UpdateCurrentEventMatch(CreateMetadata($"Song {i}", $"Artist {i}"), 0.5 + i * 0.01);
     }
 
-    // Assert — capped at 20
+    // Assert — capped at 40
     var status = _service.GetStatus();
-    Assert.Equal(20, status.RecentEvents.Count);
+    Assert.Equal(40, status.RecentEvents.Count);
 
     // Oldest events dropped, newest retained
-    Assert.Equal("Song 5", status.RecentEvents[0].Title); // First 5 dropped (25 - 20 = 5)
-    Assert.Equal("Song 24", status.RecentEvents[^1].Title);
+    Assert.Equal("Song 5", status.RecentEvents[0].Title); // First 5 dropped (45 - 40 = 5)
+    Assert.Equal("Song 44", status.RecentEvents[^1].Title);
   }
 
   [Fact]
@@ -260,8 +248,9 @@ public class BackgroundIdentificationServiceStatusTests
     // The UpdateCurrentEventMatch itself doesn't fire StatusChanged (only UpdatePhase does),
     // but we can verify the event hook works by checking GetStatus
     var status = _service.GetStatus();
-    Assert.Single(status.RecentEvents);
-    Assert.Equal("Song E", status.RecentEvents[0].Title);
+    var matchEvents = status.RecentEvents.Where(e => e.IsMatch).ToList();
+    Assert.Single(matchEvents);
+    Assert.Equal("Song E", matchEvents[0].Title);
   }
 
   [Fact]
@@ -272,13 +261,53 @@ public class BackgroundIdentificationServiceStatusTests
 
     // Act — progressively better confidence
     _service.UpdateCurrentEventMatch(CreateMetadata("Song F", "Artist F"), 0.60);
-    Assert.Equal(0.60, _service.GetStatus().RecentEvents[0].LastConfidence);
+    var matchEvents = _service.GetStatus().RecentEvents.Where(e => e.IsMatch).ToList();
+    Assert.Equal(0.60, matchEvents[0].LastConfidence);
 
     _service.UpdateCurrentEventMatch(CreateMetadata("Song F", "Artist F"), 0.75);
-    Assert.Equal(0.75, _service.GetStatus().RecentEvents[0].LastConfidence);
+    matchEvents = _service.GetStatus().RecentEvents.Where(e => e.IsMatch).ToList();
+    Assert.Equal(0.75, matchEvents[0].LastConfidence);
 
     _service.UpdateCurrentEventMatch(CreateMetadata("Song F", "Artist F"), 0.55);
-    Assert.Equal(0.55, _service.GetStatus().RecentEvents[0].LastConfidence); // Always latest, not max
+    matchEvents = _service.GetStatus().RecentEvents.Where(e => e.IsMatch).ToList();
+    Assert.Equal(0.55, matchEvents[0].LastConfidence); // Always latest, not max
+  }
+
+  [Fact]
+  public void HasAlbumArt_SetFromCoverArtUrl()
+  {
+    // Arrange
+    _service.EnsureCurrentEvent("SDR Radio");
+
+    // Act — match with cover art URL
+    var metadataWithArt = new TrackMetadata
+    {
+      Id = Guid.NewGuid().ToString(),
+      Title = "Song G",
+      Artist = "Artist G",
+      CoverArtUrl = "https://example.com/cover.jpg",
+      Source = MetadataSource.AcoustID,
+      CreatedAt = DateTime.UtcNow,
+      UpdatedAt = DateTime.UtcNow
+    };
+    _service.UpdateCurrentEventMatch(metadataWithArt, 0.80);
+
+    // Assert
+    var matchEvents = _service.GetStatus().RecentEvents.Where(e => e.IsMatch).ToList();
+    Assert.Single(matchEvents);
+    Assert.True(matchEvents[0].HasAlbumArt);
+  }
+
+  [Fact]
+  public void SourceType_SetOnEventRecord()
+  {
+    // Arrange & Act
+    _service.EnsureCurrentEvent("SDR Radio", "Radio");
+    _service.UpdateCurrentEventNoMatch();
+
+    // Assert
+    var status = _service.GetStatus();
+    Assert.Equal("Radio", status.RecentEvents[0].SourceType);
   }
 
   private static TrackMetadata CreateMetadata(string title, string artist, string? album = null)

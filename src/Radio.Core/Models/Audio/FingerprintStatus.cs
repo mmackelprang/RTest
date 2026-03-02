@@ -21,13 +21,14 @@ public enum FingerprintPhase
 public record FingerprintEventRecord
 {
   public string AudioSource { get; init; } = string.Empty;
-  public DateTime? FirstMatchAt { get; set; }
-  public int NoMatchCount { get; set; }
-  public int MatchCount { get; set; }
+  public string SourceType { get; set; } = string.Empty;
+  public bool IsMatch { get; set; }
+  public int Count { get; set; }
   public double? LastConfidence { get; set; }
   public string? Title { get; set; }
   public string? Artist { get; set; }
   public string? Album { get; set; }
+  public bool HasAlbumArt { get; set; }
   public FingerprintPhase Phase { get; set; } = FingerprintPhase.Idle;
   public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 }

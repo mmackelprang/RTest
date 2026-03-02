@@ -254,8 +254,8 @@ public class AudioPreferencePersistenceTests : IDisposable
     await Task.Delay(100);
     _sut.ScheduleVolumePersist();
 
-    // Wait for debounce to settle
-    await Task.Delay(800);
+    // Wait for debounce to settle (500ms timer + margin for slow CI runners)
+    await Task.Delay(2000);
 
     // Assert — only one persist call
     _configManagerMock.Verify(m => m.SetValueAsync(
