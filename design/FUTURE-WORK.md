@@ -113,7 +113,7 @@ No further action needed unless a new radio hardware type is added.
 
 ## 5. Kiosk Mode (Fullscreen Browser)
 
-**Status:** Deferred — infrastructure ready (dual-service deployment), UI not yet validated on Pi
+**Status:** COMPLETE — running on Ubuntu x64 touchscreen (1920x720)
 **Added:** 2026-02-13
 **Priority:** Medium — needed for the final console radio experience, but deferred until all testing/debugging/validation is complete on the Pi
 
@@ -185,7 +185,7 @@ apt install unclutter
 
 ## 6. Google Cast Custom Web Receiver — Low-Latency Streaming
 
-**Status:** Receiver HTML created, not yet registered with Google
+**Status:** COMPLETE — registered, deployed, and tested with DirectChannel streaming
 **Added:** 2026-02-16 (Phase 11.2 Cast latency reduction)
 **Priority:** Medium — eliminates 10-15s Cast buffering delay; code-side changes already reduce ceremony from ~15s to ~8s
 
@@ -405,3 +405,32 @@ context.addCustomMessageListener(NAMESPACE, (event) => {
 - Pre-loading too many large files increases receiver startup time
 - `new Audio()` + `.load()` may not work on all Cast device types (smart speakers vs Chromecast)
 - The existing `AudioFileEventSource` in our pipeline handles event sounds locally — this would be an additional output path specifically for Cast devices
+
+---
+
+## 9. Queue UI — Deferred Features from /queue Page Removal
+
+**Status:** Deferred — features existed in the old `/queue` page but were excluded from the `FileBrowserDialog` consolidation (PR #263)
+**Added:** 2026-03-02
+**Priority:** Low — current home-page `QueueHistoryPanel` + `FileBrowserDialog` covers primary use cases
+
+### What Was Removed
+
+The dedicated `/queue` page had several features not carried over:
+
+1. **Drag-reorder queue items** — The QueuePage had a toggle for drag-and-drop reordering using `MudDropContainer`. The `QueueHistoryPanel` does not support drag reorder. The API endpoint `POST /api/queue/move` exists and works.
+
+2. **Drive selector** — The QueuePage file browser had a drive dropdown (`FileApiService.GetDrivesAsync()`). Not needed on the single-drive Linux kiosk target, but useful if NAS mounts are added later.
+
+3. **Custom path entry + virtual keyboard** — The QueuePage allowed typing an arbitrary filesystem path in a text field. Not needed when the media root is configured via `fileplayer.RootDirectory` in system config.
+
+### What's Needed to Re-add
+
+- **Drag-reorder**: Add `MudDropContainer` to `QueueHistoryPanel` queue list, wire up `QueueApiService.MoveItemAsync(fromIndex, toIndex)`. CSS for `.queue-item-draggable` / `.queue-item-dragging` already exists in `design-system.css`.
+- **Drive selector**: Add drive dropdown to `FileBrowserDialog` toolbar, call `FileApiService.GetDrivesAsync()`. Only show when multiple drives are mounted.
+- **Path entry**: Add a text input mode to `FileBrowserDialog` breadcrumbs for manual path entry.
+
+### Gotchas
+
+- Drag-and-drop in MudBlazor requires `MudDropContainer` + `MudDropZone` with explicit item tracking — the queue index changes after each move, so refresh from API after each reorder
+- Touch drag on the kiosk needs `touch-action: none` on draggable items

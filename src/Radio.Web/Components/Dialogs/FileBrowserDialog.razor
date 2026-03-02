@@ -1,0 +1,415 @@
+@using MudBlazor
+@using Radio.Web.Services.ApiClients
+@inject FileApiService FileApi
+@inject ConfigurationApiService ConfigApi
+@inject ILogger<FileBrowserDialog> Logger
+
+<MudDialog Style="background: rgba(30,30,30,0.95); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px;">
+  <TitleContent>
+    <MudText Typo="Typo.h6">
+      <MudIcon Icon="@Icons.Material.Filled.AudioFile" Class="mr-2" Style="vertical-align: middle;" />
+      @(AllowMultiSelect ? "Select Audio Files" : "Select Audio File")
+    </MudText>
+  </TitleContent>
+  <DialogContent>
+    <div style="display: flex; flex-direction: column; max-height: 480px; min-height: 320px;">
+      <!-- Breadcrumbs + Search/Filter toolbar -->
+      <div class="file-browser-toolbar">
+        <div class="file-browser-breadcrumbs">
+          <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
+                     OnClick="@(() => NavigateToPathAsync(null))"
+                     Disabled="@(string.IsNullOrEmpty(_relativePath))">
+            <MudIcon Icon="@Icons.Material.Filled.Home" Size="Size.Small" Class="mr-1" />
+            Home
+          </MudButton>
+          @if (!string.IsNullOrEmpty(_relativePath))
+          {
+            var pathParts = _relativePath.Split('/').Where(p => !string.IsNullOrEmpty(p)).ToArray();
+            for (int i = 0; i < pathParts.Length; i++)
+            {
+              var index = i;
+              var partialRelative = string.Join("/", pathParts.Take(index + 1));
+              <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small"
+                       Style="color: var(--text-low); flex-shrink: 0;" />
+              <MudButton Variant="Variant.Text"
+                         Color="@(i == pathParts.Length - 1 ? Color.Default : Color.Primary)"
+                         Size="Size.Small"
+                         Disabled="@(i == pathParts.Length - 1)"
+                         OnClick="@(() => NavigateToRelativeAsync(partialRelative))">
+                @pathParts[index]
+              </MudButton>
+            }
+          }
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
+          <MudTextField @bind-Value="_searchText" Placeholder="Search..."
+                        Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                        Immediate="true" DebounceInterval="300"
+                        Style="max-width: 200px; font-size: 13px;"
+                        Variant="Variant.Outlined" Margin="Margin.Dense" />
+          <MudSelect T="string" @bind-Value="_extensionFilter" Label="Type"
+                     Variant="Variant.Outlined" Margin="Margin.Dense"
+                     Style="max-width: 120px; font-size: 13px;" Dense="true">
+            <MudSelectItem T="string" Value="@("")">All</MudSelectItem>
+            @foreach (var ext in _availableExtensions)
+            {
+              <MudSelectItem T="string" Value="@ext">@ext</MudSelectItem>
+            }
+          </MudSelect>
+        </div>
+      </div>
+
+      <!-- File list -->
+      @if (_isLoading)
+      {
+        <div style="flex: 1; display: flex; justify-content: center; align-items: center; padding: 32px;">
+          <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+        </div>
+      }
+      else if (!_directories.Any() && !FilteredFiles.Any())
+      {
+        <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px;">
+          <MudIcon Icon="@Icons.Material.Filled.FolderOff" Style="font-size: 64px; opacity: 0.4;" />
+          <MudText Typo="Typo.body1" Style="margin-top: 12px; color: var(--text-low);">
+            @(string.IsNullOrEmpty(_searchText) ? "No audio files or folders found" : "No matching files")
+          </MudText>
+        </div>
+      }
+      else
+      {
+        <div class="file-browser-list">
+          @* Directories first *@
+          @foreach (var dir in _directories)
+          {
+            <div class="file-item list-item-touch" @onclick="@(() => NavigateToFolderAsync(dir.Name))">
+              <MudIcon Icon="@Icons.Material.Filled.Folder" Color="Color.Warning" />
+              <div style="flex: 1; min-width: 0;">
+                <span style="font-weight: 500;">@dir.Name</span>
+              </div>
+              <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Style="color: var(--text-low);" />
+            </div>
+          }
+
+          @* Files *@
+          @foreach (var file in FilteredFiles)
+          {
+            var isSelected = AllowMultiSelect ? _selectedPaths.Contains(file.Path) : _selectedPath == file.Path;
+            <div class="file-item list-item-touch @(isSelected ? "file-item-selected" : "")"
+                 @onclick="@(() => ToggleFileSelection(file))">
+              @if (AllowMultiSelect)
+              {
+                <MudCheckBox T="bool" Value="@isSelected" ReadOnly="true" Color="Color.Primary"
+                             Style="margin: 0; padding: 0;" Size="Size.Small" />
+              }
+              else
+              {
+                <MudIcon Icon="@Icons.Material.Filled.MusicNote" Color="@(isSelected ? Color.Primary : Color.Default)"
+                         Style="flex-shrink: 0;" />
+              }
+              <div style="flex: 1; min-width: 0;">
+                <div style="font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  @(file.Name)
+                </div>
+                <div class="file-item-meta">
+                  @if (!string.IsNullOrEmpty(file.Artist))
+                  {
+                    @file.Artist
+                  }
+                  @if (!string.IsNullOrEmpty(file.Album))
+                  {
+                    <text> · @file.Album</text>
+                  }
+                  @if (!string.IsNullOrEmpty(file.Duration))
+                  {
+                    <text> · @file.Duration</text>
+                  }
+                </div>
+              </div>
+              @if (ShowPlayButton)
+              {
+                <div @onclick:stopPropagation="true">
+                  <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small"
+                                 Color="Color.Primary" OnClick="@(() => PlayFileAsync(file))"
+                                 title="Play" />
+                </div>
+              }
+              @if (AllowAddToQueue)
+              {
+                <div @onclick:stopPropagation="true">
+                  <MudIconButton Icon="@Icons.Material.Filled.AddToQueue" Size="Size.Small"
+                                 Color="Color.Default" OnClick="@(() => AddSingleToQueueAsync(file))"
+                                 title="Add to Queue" />
+                </div>
+              }
+            </div>
+          }
+        </div>
+      }
+    </div>
+  </DialogContent>
+  <DialogActions>
+    @if (AllowMultiSelect)
+    {
+      <div style="display: flex; align-items: center; gap: 8px; margin-right: auto;">
+        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                   OnClick="SelectAllFiles" Disabled="@(!FilteredFiles.Any())">
+          Select All
+        </MudButton>
+        @if (_selectedPaths.Count > 0)
+        {
+          <MudText Typo="Typo.body2" Style="color: var(--text-medium);">@_selectedPaths.Count selected</MudText>
+        }
+      </div>
+    }
+    <MudButton OnClick="Cancel" Variant="Variant.Text">Cancel</MudButton>
+    @if (AllowAddToQueue && _selectedPaths.Count > 0)
+    {
+      <MudButton OnClick="AddSelectedToQueueAsync" Variant="Variant.Outlined" Color="Color.Primary">
+        Add to Queue (@_selectedPaths.Count)
+      </MudButton>
+    }
+    @if (!AllowAddToQueue)
+    {
+      <MudButton OnClick="Submit" Variant="Variant.Filled" Color="Color.Primary"
+                 Disabled="@(AllowMultiSelect ? _selectedPaths.Count == 0 : _selectedPath == null)">
+        @(AllowMultiSelect && _selectedPaths.Count > 1 ? $"Select ({_selectedPaths.Count})" : "Select")
+      </MudButton>
+    }
+  </DialogActions>
+</MudDialog>
+
+@code {
+  [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+
+  [Parameter] public string? InitialSelection { get; set; }
+  [Parameter] public string? Subdirectory { get; set; }
+  [Parameter] public bool AllowMultiSelect { get; set; }
+  [Parameter] public bool AllowAddToQueue { get; set; }
+  [Parameter] public bool ShowPlayButton { get; set; }
+  [Parameter] public EventCallback<List<string>> OnAddToQueue { get; set; }
+
+  private List<FileItemDto> _directories = new();
+  private List<FileItemDto> _files = new();
+  private bool _isLoading = true;
+  private string? _currentPath; // Full filesystem path
+  private string? _relativePath; // Path relative to media root for display
+  private string? _mediaRoot; // Configured media root directory
+  private string _searchText = "";
+  private string _extensionFilter = "";
+  private string? _selectedPath; // Single-select
+  private HashSet<string> _selectedPaths = new(); // Multi-select
+  private string[] _availableExtensions = [".mp3", ".flac", ".wav", ".ogg", ".aac", ".m4a"];
+
+  private IEnumerable<FileItemDto> FilteredFiles
+  {
+    get
+    {
+      var files = _files.AsEnumerable();
+      if (!string.IsNullOrWhiteSpace(_searchText))
+      {
+        var search = _searchText.Trim();
+        files = files.Where(f =>
+          f.Name.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+          (f.Artist?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+          (f.Album?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false));
+      }
+      if (!string.IsNullOrEmpty(_extensionFilter))
+      {
+        files = files.Where(f => f.Name.EndsWith(_extensionFilter, StringComparison.OrdinalIgnoreCase));
+      }
+      return files;
+    }
+  }
+
+  protected override async Task OnInitializedAsync()
+  {
+    await LoadMediaRootAsync();
+    _currentPath = Subdirectory ?? _mediaRoot;
+    UpdateRelativePath();
+    await LoadContentsAsync();
+  }
+
+  private async Task LoadMediaRootAsync()
+  {
+    try
+    {
+      var config = await ConfigApi.GetConfigurationAsync<FilePlayerConfigDto>("fileplayer");
+      if (config != null && !string.IsNullOrWhiteSpace(config.RootDirectory)
+          && config.RootDirectory != "media/audio")
+      {
+        _mediaRoot = config.RootDirectory.TrimEnd('/');
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "Failed to load FilePlayer config for media root");
+    }
+  }
+
+  private void UpdateRelativePath()
+  {
+    if (string.IsNullOrEmpty(_currentPath) || string.IsNullOrEmpty(_mediaRoot))
+    {
+      _relativePath = _currentPath;
+      return;
+    }
+
+    if (_currentPath.StartsWith(_mediaRoot, StringComparison.OrdinalIgnoreCase))
+    {
+      var relative = _currentPath[_mediaRoot.Length..].TrimStart('/');
+      _relativePath = string.IsNullOrEmpty(relative) ? null : relative;
+    }
+    else
+    {
+      _relativePath = _currentPath;
+    }
+  }
+
+  private async Task LoadContentsAsync()
+  {
+    _isLoading = true;
+    StateHasChanged();
+
+    try
+    {
+      var result = await FileApi.BrowseAsync(_currentPath);
+      if (result != null)
+      {
+        _directories = result.Items.Where(i => i.IsDirectory).OrderBy(i => i.Name).ToList();
+        _files = result.Items.Where(i => !i.IsDirectory).OrderBy(i => i.Name).ToList();
+
+        // Update current path from API response (resolves relative paths)
+        if (!string.IsNullOrEmpty(result.CurrentPath))
+        {
+          _currentPath = result.CurrentPath;
+          UpdateRelativePath();
+        }
+
+        // Pre-select initial file if provided
+        if (!string.IsNullOrWhiteSpace(InitialSelection))
+        {
+          var match = _files.FirstOrDefault(f => f.Path == InitialSelection);
+          if (match != null)
+          {
+            if (AllowMultiSelect)
+              _selectedPaths.Add(match.Path);
+            else
+              _selectedPath = match.Path;
+          }
+          InitialSelection = null; // Only apply once
+        }
+      }
+      else
+      {
+        _directories = new();
+        _files = new();
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to load files at path {Path}", _currentPath);
+      _directories = new();
+      _files = new();
+    }
+    finally
+    {
+      _isLoading = false;
+      StateHasChanged();
+    }
+  }
+
+  private async Task NavigateToFolderAsync(string folderName)
+  {
+    _currentPath = string.IsNullOrEmpty(_currentPath)
+      ? folderName
+      : $"{_currentPath}/{folderName}";
+    _searchText = "";
+    UpdateRelativePath();
+    await LoadContentsAsync();
+  }
+
+  private async Task NavigateToPathAsync(string? path)
+  {
+    _currentPath = path ?? _mediaRoot;
+    _searchText = "";
+    UpdateRelativePath();
+    await LoadContentsAsync();
+  }
+
+  private async Task NavigateToRelativeAsync(string relativePath)
+  {
+    _currentPath = string.IsNullOrEmpty(_mediaRoot)
+      ? relativePath
+      : $"{_mediaRoot}/{relativePath}";
+    _searchText = "";
+    UpdateRelativePath();
+    await LoadContentsAsync();
+  }
+
+  private void ToggleFileSelection(FileItemDto file)
+  {
+    if (AllowMultiSelect)
+    {
+      if (!_selectedPaths.Add(file.Path))
+        _selectedPaths.Remove(file.Path);
+    }
+    else
+    {
+      _selectedPath = _selectedPath == file.Path ? null : file.Path;
+    }
+  }
+
+  private void SelectAllFiles()
+  {
+    foreach (var file in FilteredFiles)
+      _selectedPaths.Add(file.Path);
+  }
+
+  private async Task PlayFileAsync(FileItemDto file)
+  {
+    try
+    {
+      await FileApi.PlayFileAsync(file.Path);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to play file {Path}", file.Path);
+    }
+  }
+
+  private async Task AddSingleToQueueAsync(FileItemDto file)
+  {
+    try
+    {
+      var (success, _) = await FileApi.AddFileToQueueAsync(file.Path);
+      if (success)
+        Logger.LogDebug("Added {Path} to queue", file.Path);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to add file to queue: {Path}", file.Path);
+    }
+  }
+
+  private async Task AddSelectedToQueueAsync()
+  {
+    if (_selectedPaths.Count == 0) return;
+
+    if (OnAddToQueue.HasDelegate)
+    {
+      await OnAddToQueue.InvokeAsync(_selectedPaths.ToList());
+      _selectedPaths.Clear();
+      StateHasChanged();
+    }
+  }
+
+  private void Submit()
+  {
+    if (AllowMultiSelect)
+      MudDialog.Close(DialogResult.Ok(_selectedPaths.ToList()));
+    else
+      MudDialog.Close(DialogResult.Ok(_selectedPath));
+  }
+
+  private void Cancel() => MudDialog.Cancel();
+}

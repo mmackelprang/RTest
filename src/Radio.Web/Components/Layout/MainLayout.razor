@@ -78,7 +78,8 @@
     <div class="topbar-nav">
       <MudIconButton Icon="@Icons.Material.Filled.Home" Class="@NavClass("/")" Href="/" Size="Size.Large" title="Home" />
       <MudBadge Content="@_queueCount" Overlap="true" Color="Color.Primary" Visible="@(_queueCount > 0)">
-        <MudIconButton Icon="@Icons.Material.Filled.QueueMusic" Class="@NavClass("/queue")" Href="/queue" Size="Size.Large" title="Queue" />
+        <MudIconButton Icon="@Icons.Material.Filled.QueueMusic" Size="Size.Large" title="Queue"
+                       Class="@NavClass("/")" OnClick="HandleQueueNavAsync" />
       </MudBadge>
       <MudIconButton Icon="@Icons.Material.Filled.Dashboard" Class="@NavClass("/metrics")" Href="/metrics" Size="Size.Large" title="Metrics" />
       <MudIconButton Icon="@Icons.Material.Filled.Devices" Class="@NavClass("/devices")" Href="/devices" Size="Size.Large" title="Devices" />
@@ -568,6 +569,12 @@
 
   private static bool IsRadioSource(string sourceType) =>
     sourceType is "Radio" or "RTLSDRCore" or "RF320";
+
+  private async Task HandleQueueNavAsync()
+  {
+    await RadioPanelToggle.HideRadioPanelAsync();
+    NavigationManager.NavigateTo("/");
+  }
 
   private void NavigateToSourcePage(string sourceType)
   {
