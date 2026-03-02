@@ -39,19 +39,29 @@ public class FilesController : ControllerBase
   /// Lists audio files and directories in the specified directory.
   /// </summary>
   /// <param name="path">Optional path relative to the configured root directory. Empty for root.</param>
+  /// <param name="absolutePath">Optional absolute filesystem path. When provided, bypasses the configured root and enumerates directly.</param>
   /// <param name="recursive">If true, searches subdirectories recursively. Default is false.</param>
   /// <param name="cancellationToken">Cancellation token.</param>
   /// <returns>A list of files and directories.</returns>
   /// <response code="200">Returns the list of files and directories.</response>
+  /// <response code="404">If the specified absolute path does not exist.</response>
   /// <response code="500">If an error occurs while listing files.</response>
   [HttpGet]
   [ProducesResponseType(typeof(FileListDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status404NotFound)]
   [ProducesResponseType(StatusCodes.Status500InternalServerError)]
   public async Task<IActionResult> ListFiles(
     [FromQuery] string? path = null,
+    [FromQuery] string? absolutePath = null,
     [FromQuery] bool recursive = false,
     CancellationToken cancellationToken = default)
   {
+    // Absolute path mode: bypass _fileBrowser and enumerate directly
+    if (!string.IsNullOrWhiteSpace(absolutePath))
+    {
+      return await ListFilesAbsolute(absolutePath, cancellationToken);
+    }
+
     try
     {
       var currentPath = path ?? "/";
@@ -109,6 +119,119 @@ public class FilesController : ControllerBase
     catch (Exception ex)
     {
       _logger.LogError(ex, "Error listing files from path: {Path}", path);
+      return StatusCode(500, new { error = "Failed to list files", details = ex.Message });
+    }
+  }
+
+  /// <summary>
+  /// Lists files and directories at an absolute filesystem path.
+  /// Used for browsing outside the configured media root (e.g., NAS mounts, USB drives).
+  /// </summary>
+  private async Task<IActionResult> ListFilesAbsolute(
+    string absolutePath,
+    CancellationToken cancellationToken)
+  {
+    try
+    {
+      _logger.LogInformation("Listing files from absolute path: {Path}", absolutePath);
+
+      if (!Directory.Exists(absolutePath))
+      {
+        return NotFound(new { error = "Directory not found", path = absolutePath });
+      }
+
+      var items = new List<FileItemDto>();
+      var supportedExtensions = _fileBrowser.GetSupportedExtensions();
+
+      // Enumerate directories
+      try
+      {
+        foreach (var dir in Directory.GetDirectories(absolutePath))
+        {
+          cancellationToken.ThrowIfCancellationRequested();
+          items.Add(new FileItemDto
+          {
+            Name = System.IO.Path.GetFileName(dir),
+            Path = dir,
+            IsDirectory = true,
+            Size = null,
+            Duration = null,
+            Artist = null,
+            Album = null
+          });
+        }
+      }
+      catch (UnauthorizedAccessException)
+      {
+        _logger.LogDebug("Cannot enumerate subdirectories of {Path} (access denied)", absolutePath);
+      }
+
+      // Enumerate audio files
+      try
+      {
+        foreach (var file in Directory.GetFiles(absolutePath))
+        {
+          cancellationToken.ThrowIfCancellationRequested();
+          var ext = System.IO.Path.GetExtension(file);
+          if (!supportedExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase))
+            continue;
+
+          // Try to get metadata via _fileBrowser, fall back to basic FileInfo
+          try
+          {
+            var fileInfo = await _fileBrowser.GetFileInfoAsync(file, cancellationToken);
+            if (fileInfo != null)
+            {
+              items.Add(new FileItemDto
+              {
+                Name = fileInfo.FileName,
+                Path = file,
+                IsDirectory = false,
+                Size = fileInfo.SizeBytes,
+                Duration = FormatDuration(fileInfo.Duration),
+                Artist = fileInfo.Artist,
+                Album = fileInfo.Album
+              });
+              continue;
+            }
+          }
+          catch
+          {
+            // Fall through to basic FileInfo
+          }
+
+          var basicInfo = new FileInfo(file);
+          items.Add(new FileItemDto
+          {
+            Name = basicInfo.Name,
+            Path = file,
+            IsDirectory = false,
+            Size = basicInfo.Length,
+            Duration = null,
+            Artist = null,
+            Album = null
+          });
+        }
+      }
+      catch (UnauthorizedAccessException)
+      {
+        _logger.LogDebug("Cannot enumerate files in {Path} (access denied)", absolutePath);
+      }
+
+      _logger.LogInformation("Found {Count} items at absolute path {Path} ({DirCount} directories, {FileCount} files)",
+        items.Count, absolutePath,
+        items.Count(i => i.IsDirectory),
+        items.Count(i => !i.IsDirectory));
+
+      return Ok(new FileListDto
+      {
+        CurrentPath = absolutePath,
+        Items = items
+      });
+    }
+    catch (Exception ex) when (ex is not OperationCanceledException)
+    {
+      _logger.LogError(ex, "Error listing files from absolute path: {Path}", absolutePath);
       return StatusCode(500, new { error = "Failed to list files", details = ex.Message });
     }
   }

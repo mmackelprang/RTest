@@ -19,18 +19,6 @@ public class NavigationE2ETests
   }
 
   [Fact]
-  public async Task Navigation_QueuePage_LoadsSuccessfully()
-  {
-    if (!_fixture.IsServerAvailable) return;
-    await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/queue");
-    await _fixture.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-
-    // Queue page should have its header and action buttons
-    var heading = _fixture.Page.Locator("text=Queue").First;
-    await Expect(heading).ToBeVisibleAsync();
-  }
-
-  [Fact]
   public async Task Navigation_RadioPage_LoadsSuccessfully()
   {
     if (!_fixture.IsServerAvailable) return;
@@ -104,7 +92,7 @@ public class NavigationE2ETests
     if (!_fixture.IsServerAvailable) return;
 
     // Navigate to several pages and verify the app bar is always present
-    var pages = new[] { "/", "/queue", "/radio", "/devices", "/history" };
+    var pages = new[] { "/", "/radio", "/devices", "/history" };
     foreach (var path in pages)
     {
       await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}{path}");

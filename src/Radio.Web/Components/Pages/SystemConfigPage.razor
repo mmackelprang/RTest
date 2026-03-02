@@ -1998,27 +1998,24 @@
     var parameters = new DialogParameters
     {
       { "InitialSelection", _selectedSoundFile },
-      { "Subdirectory", null }
+      { "Subdirectory", (string?)null }
     };
 
     var options = new DialogOptions
     {
-      MaxWidth = MaxWidth.False,
-      FullWidth = true,
+      MaxWidth = MaxWidth.Medium,
       CloseButton = true,
       CloseOnEscapeKey = true,
-      BackgroundClass = "bottom-sheet-backdrop",
-      Position = DialogPosition.BottomCenter,
       BackdropClick = true
     };
 
-    var dialog = await DialogService.ShowAsync<Radio.Web.Components.Dialogs.AudioFileSelectionDialog>("Select Audio File", parameters, options);
+    var dialog = await DialogService.ShowAsync<Radio.Web.Components.Dialogs.FileBrowserDialog>("Select Audio File", parameters, options);
     var result = await dialog.Result;
 
     if (result != null && !result.Canceled && result.Data is string selectedPath)
     {
       _selectedSoundFile = selectedPath;
-      
+
       // Load notification sounds if not already loaded to get file info
       if (_notificationSounds == null)
       {
