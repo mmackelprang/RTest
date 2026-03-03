@@ -5,6 +5,8 @@ using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Interfaces.External;
+using Radio.Core.Interfaces.Input;
 using Radio.Infrastructure.Audio;
 using Radio.Infrastructure.Audio.Factories;
 using Radio.Infrastructure.Audio.Fingerprinting;
@@ -14,6 +16,8 @@ using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Infrastructure.Audio.Visualization;
 using Radio.Infrastructure.Configuration;
 using Radio.Infrastructure.Configuration.Abstractions;
+using Radio.Infrastructure.External;
+using Radio.Infrastructure.Platform.Input;
 
 namespace Radio.Infrastructure.DependencyInjection;
 
@@ -170,6 +174,16 @@ public static class AudioServiceExtensions
     // Register visualization services
     services.AddVisualization(configuration);
 
+    // Register announcement service (shared by phone calls + notifications)
+    services.AddSingleton<AnnouncementService>();
+    services.AddSingleton<IAnnouncementService>(sp => sp.GetRequiredService<AnnouncementService>());
+
+    // Register rotary encoder services
+    services.AddRotaryEncoders(configuration);
+
+    // Register phone call integration services
+    services.AddPhoneIntegration(configuration);
+
     return services;
   }
 
@@ -301,6 +315,56 @@ public static class AudioServiceExtensions
     // Register Visualizer Service (singleton to maintain state)
     services.AddSingleton<VisualizerService>();
     services.AddSingleton<IVisualizerService>(sp => sp.GetRequiredService<VisualizerService>());
+
+    return services;
+  }
+
+  /// <summary>
+  /// Adds rotary encoder hardware input services (HID reader + action router).
+  /// </summary>
+  public static IServiceCollection AddRotaryEncoders(
+    this IServiceCollection services,
+    IConfiguration configuration)
+  {
+    // Bind encoder options
+    services.Configure<RotaryEncoderOptions>(
+      configuration.GetSection(RotaryEncoderOptions.SectionName));
+
+    // Register HID encoder service
+    services.AddSingleton<HidRotaryEncoderService>();
+    services.AddSingleton<IRotaryEncoderService>(sp => sp.GetRequiredService<HidRotaryEncoderService>());
+
+    // Register visualization mode service (tracks current viz mode for encoder + SignalR)
+    services.AddSingleton<VisualizationModeService>();
+
+    // Register action router (Func<> defers IAudioManager resolution)
+    services.AddSingleton<RotaryEncoderActionRouter>(sp => new RotaryEncoderActionRouter(
+      sp.GetRequiredService<ILogger<RotaryEncoderActionRouter>>(),
+      sp.GetRequiredService<IRotaryEncoderService>(),
+      () => sp.GetRequiredService<IAudioManager>(),
+      sp.GetRequiredService<VisualizationModeService>(),
+      sp.GetRequiredService<IOptionsMonitor<RotaryEncoderOptions>>()));
+
+    return services;
+  }
+
+  /// <summary>
+  /// Adds phone call integration services (SignalR client + contact lookup).
+  /// </summary>
+  public static IServiceCollection AddPhoneIntegration(
+    this IServiceCollection services,
+    IConfiguration configuration)
+  {
+    // Bind phone integration options
+    services.Configure<PhoneIntegrationOptions>(
+      configuration.GetSection(PhoneIntegrationOptions.SectionName));
+
+    // Register SignalR phone call client
+    services.AddSingleton<PhoneCallClient>();
+    services.AddSingleton<IPhoneIntegrationService>(sp => sp.GetRequiredService<PhoneCallClient>());
+
+    // Register contact lookup service with HttpClient
+    services.AddHttpClient<PhoneContactLookupService>();
 
     return services;
   }

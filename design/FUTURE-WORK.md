@@ -433,3 +433,80 @@ The dedicated `/queue` page had several features not carried over:
 
 - Drag-and-drop in MudBlazor requires `MudDropContainer` + `MudDropZone` with explicit item tracking — the queue index changes after each move, so refresh from API after each reorder
 - Touch drag on the kiosk needs `touch-action: none` on draggable items
+
+---
+
+## 10. Rotary Encoders — Pico HID Report Format Verification
+
+**Status:** Code implemented, HID report parsing assumed
+**Added:** 2026-03-03
+**Priority:** High — must verify on first hardware connection
+
+### What Exists
+
+| File | What's There |
+|------|-------------|
+| `Radio.Infrastructure/Platform/Input/HidRotaryEncoderService.cs` | HID reader, report parsing, event firing |
+| `Radio.Infrastructure/Platform/Input/RotaryEncoderActionRouter.cs` | Maps encoder events → volume/tune/source/viz |
+| `Radio.API/Services/RotaryEncoderHostedService.cs` | BackgroundService, gated by `RotaryEncoder:Enabled` |
+| `Radio.Core/Configuration/RotaryEncoderOptions.cs` | VID=0xCAFE, PID=0x4005, step sizes |
+
+### What Needs Verification
+
+The HID report format is **assumed** based on typical KY-040 Pico implementations:
+- **Bytes 1-4**: signed encoder deltas (`sbyte` per encoder)
+- **Byte 5**: button bitmask (bit N = encoder N)
+- **Report size**: 8 bytes
+
+**On first hardware connection:**
+1. Enable logging, connect Pico, verify report bytes match assumed format
+2. Adjust `ParseReport()` if the actual Pico firmware uses different byte offsets
+3. Verify VID/PID match (`0xCAFE`/`0x4005` are TinyUSB defaults — may differ)
+4. Linux: add udev rule `SUBSYSTEM=="hidraw", ATTRS{idVendor}=="cafe", ATTRS{idProduct}=="4005", MODE="0666"` for hidraw access
+
+### Gotchas
+
+- The Pico firmware is a separate project — both sides may need adjustments
+- HidSharp on Linux needs hidraw permissions (udev rule or running as root)
+- Encoder direction (CW = positive/negative) depends on wiring — may need to negate delta
+
+---
+
+## 11. Phone Call Integration — RotaryPhone Hub Protocol Verification
+
+**Status:** Code implemented, hub protocol assumed
+**Added:** 2026-03-03
+**Priority:** High — must verify when RotaryPhone server is first available
+
+### What Exists
+
+| File | What's There |
+|------|-------------|
+| `Radio.Infrastructure/External/PhoneCallClient.cs` | SignalR client connecting to RotaryPhone hub |
+| `Radio.Infrastructure/External/PhoneContactLookupService.cs` | REST client for contacts API |
+| `Radio.API/Services/PhoneCallIntegrationService.cs` | BackgroundService orchestrating ring + TTS |
+| `Radio.Core/Configuration/PhoneIntegrationOptions.cs` | Hub URL, ring sound path, priorities |
+
+### What Needs Verification
+
+**SignalR hub contract** (assumed):
+- Hub URL: `http://localhost:5555/hubs/phone`
+- Server method: `CallStateChanged(string state, string phoneNumber)` — may also send caller name as 3rd param
+- State values: `"Ringing"`, `"InCall"`, `"Ended"`, `"Idle"` — lenient parser handles variants
+
+**Contacts REST API** (assumed):
+- Endpoint: `GET {baseUrl}/api/contacts/lookup?phone={number}`
+- Response: `{ "Name": "...", "PhoneNumber": "..." }`
+
+**On first integration:**
+1. Start RotaryPhone server, check actual hub URL path
+2. Verify `CallStateChanged` method signature matches (param count, types)
+3. Verify contacts API response shape
+4. Test ring sound file exists at configured path (`media/sounds/phone-ring.wav`)
+5. Provide a placeholder ring sound WAV
+
+### Gotchas
+
+- PhoneCallClient registers two `CallStateChanged` overloads (2 and 3 params) for resilience
+- The call state parser is lenient (`"ringing"`, `"ring"`, `"incoming"` all map to Ringing)
+- If RotaryPhone server isn't running, the client logs a warning and retries with backoff — no crash

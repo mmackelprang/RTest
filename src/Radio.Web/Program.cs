@@ -252,6 +252,19 @@ builder.Services.AddHttpClient<SecretsApiService>(client =>
   return handler;
 });
 
+builder.Services.AddHttpClient<IntegrationsApiService>(client =>
+{
+  client.BaseAddress = new Uri(apiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(30);
+})
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
+});
+
 builder.Services.AddHttpClient("AlbumArtProxy", client =>
 {
   client.BaseAddress = new Uri(apiBaseUrl);
