@@ -284,10 +284,11 @@ public class AudioPreferencePersistence : IDisposable
   public const float MinGain = 0.0f;
 
   /// <summary>
-  /// Maximum gain multiplier. BT A2DP capture can be very quiet because PipeWire applies
-  /// the phone's AVRCP transport volume (~0.11) to the source node, resulting in -40 to
-  /// -50 dB RMS. At low phone volumes we may need 20-25x gain to normalize to the
-  /// -18 dBFS target. This is safe because the gain is applied digitally in the mixer.
+  /// Maximum gain multiplier. BT A2DP capture can be very quiet (~0.002 RMS / -55 dBFS)
+  /// because PipeWire applies the phone's AVRCP transport volume to the source node.
+  /// Gain is applied digitally in the mixer. Capped at 25 to prevent clipping on
+  /// transient peaks (BT music crest factor ~10-15 dB means peaks at 0.02-0.03 raw,
+  /// so 25x gain yields peaks around 0.5-0.75, safely below unity).
   /// </summary>
   public const float MaxGain = 25.0f;
 
@@ -295,7 +296,7 @@ public class AudioPreferencePersistence : IDisposable
   public const int MinSamplesForAutoGain = 10;
 
   /// <summary>EMA smoothing factor (0.1 = slow adaptation, ~30-sample effective window).</summary>
-  private const float EmaAlpha = 0.1f;
+  public const float EmaAlpha = 0.1f;
 
   /// <summary>
   /// Gets the learned RMS for a source type, or null if not enough data.
@@ -316,14 +317,14 @@ public class AudioPreferencePersistence : IDisposable
   /// <summary>
   /// Updates the learned RMS for a source using exponential moving average.
   /// </summary>
-  public void UpdateSourceLearnedRms(AudioSourceType sourceType, float rms)
+  public void UpdateSourceLearnedRms(AudioSourceType sourceType, float rms, float alpha = EmaAlpha)
   {
     lock (_sourceRmsLock)
     {
       var key = sourceType.ToString();
       if (_sourceLearnedRms.TryGetValue(key, out var existing))
       {
-        _sourceLearnedRms[key] = EmaAlpha * rms + (1 - EmaAlpha) * existing;
+        _sourceLearnedRms[key] = alpha * rms + (1 - alpha) * existing;
       }
       else
       {

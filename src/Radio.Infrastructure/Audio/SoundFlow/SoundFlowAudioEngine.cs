@@ -35,6 +35,7 @@ public class SoundFlowAudioEngine : IAudioEngine
   private FingerprintTapModifier? _fingerprintTap;
   private VisualizationTapModifier? _visualizationTap;
   private BalanceModifier? _balanceModifier;
+  private LimiterModifier? _limiterModifier;
   private Timer? _hotPlugTimer;
   private AudioEngineState _state = AudioEngineState.Uninitialized;
   private int _currentDeviceIndex = -1;
@@ -264,12 +265,18 @@ public class SoundFlowAudioEngine : IAudioEngine
       // Add modifiers to capture mixed audio for fingerprinting/streaming
       if (_playbackDevice != null)
       {
-        // Add balance modifier first (before fingerprint tap)
+        // Add balance modifier first (before limiter/fingerprint tap)
         _balanceModifier = new BalanceModifier(_masterMixer);
         _playbackDevice.MasterMixer.AddModifier(_balanceModifier);
         _logger.LogInformation("Balance modifier added to MasterMixer");
 
-        // Add fingerprint tap modifier after balance.
+        // Add limiter after balance to prevent clipping before downstream taps
+        _limiterModifier = new LimiterModifier();
+        _playbackDevice.MasterMixer.AddModifier(_limiterModifier);
+        _logger.LogInformation("Limiter modifier added to MasterMixer (threshold={Threshold:F3})",
+          LimiterModifier.DefaultThreshold);
+
+        // Add fingerprint tap modifier after limiter.
         // Use 2048-sample buffer (~21ms at 48kHz stereo) instead of default 4096 (~42ms)
         // to reduce latency for HTTP streaming to Cast devices.
         _fingerprintTap = new FingerprintTapModifier(this, _logger, bufferSize: 2048, metricsCollector: _metricsCollector);
@@ -499,6 +506,16 @@ public class SoundFlowAudioEngine : IAudioEngine
         _playbackDevice.MasterMixer.AddModifier(_balanceModifier);
       }
 
+      if (_limiterModifier != null)
+      {
+        _playbackDevice.MasterMixer.AddModifier(_limiterModifier);
+      }
+      else
+      {
+        _limiterModifier = new LimiterModifier();
+        _playbackDevice.MasterMixer.AddModifier(_limiterModifier);
+      }
+
       if (_fingerprintTap != null)
       {
         _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
@@ -574,7 +591,7 @@ public class SoundFlowAudioEngine : IAudioEngine
       // Apply current volume/mute state
       _playbackDevice.MasterMixer.Volume = _localOutputMuted ? 0f : _masterMixer.GetEffectiveVolume();
 
-      // Re-attach balance modifier (before fingerprint tap)
+      // Re-attach balance modifier (before limiter/fingerprint tap)
       if (_balanceModifier != null)
       {
         _playbackDevice.MasterMixer.AddModifier(_balanceModifier);
@@ -585,6 +602,19 @@ public class SoundFlowAudioEngine : IAudioEngine
         _balanceModifier = new BalanceModifier(_masterMixer);
         _playbackDevice.MasterMixer.AddModifier(_balanceModifier);
         _logger.LogInformation("Balance modifier created and attached to new playback device");
+      }
+
+      // Re-attach limiter (after balance, before fingerprint tap)
+      if (_limiterModifier != null)
+      {
+        _playbackDevice.MasterMixer.AddModifier(_limiterModifier);
+        _logger.LogInformation("Limiter modifier re-attached to new playback device");
+      }
+      else
+      {
+        _limiterModifier = new LimiterModifier();
+        _playbackDevice.MasterMixer.AddModifier(_limiterModifier);
+        _logger.LogInformation("Limiter modifier created and attached to new playback device");
       }
 
       // Re-attach fingerprint tap if it exists
@@ -690,6 +720,7 @@ public class SoundFlowAudioEngine : IAudioEngine
       EngineState = State.ToString(),
       PlaybackDeviceActive = _playbackDevice != null,
       ModifierCount = (_balanceModifier != null ? 1 : 0)
+        + (_limiterModifier != null ? 1 : 0)
         + (_fingerprintTap != null ? 1 : 0)
         + (_visualizationTap != null ? 1 : 0),
       OutputTapAvailableBytes = 0,

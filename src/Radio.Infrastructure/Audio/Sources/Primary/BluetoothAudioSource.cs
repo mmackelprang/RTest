@@ -37,6 +37,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private TimeSpan _btPosition;
   private TimeSpan? _btDuration;
   private bool _hasMediaPlayer;
+  private CancellationTokenSource? _captureRetryCts;
 
   /// <summary>
   /// When true, the fingerprinting pipeline will attempt to identify the current track.
@@ -165,10 +166,11 @@ public class BluetoothAudioSource : USBAudioSourceBase
     }
     else
     {
-      // No capture device yet — phone may not be connected. TryAcquireAudioCaptureAsync
-      // will route to mixer when the device connects and capture becomes available.
+      // No capture device yet — phone may not be streaming, or PipeWire node isn't ready.
+      // Start a background retry loop that periodically attempts to acquire capture.
       Logger.LogInformation(
-        "BluetoothAudioSource: PlayCoreAsync — no capture device yet, waiting for BT device connection");
+        "BluetoothAudioSource: PlayCoreAsync — no capture device yet, starting background retry");
+      StartCaptureRetryLoop();
     }
   }
 
@@ -186,6 +188,8 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
   protected override async Task StopCoreAsync(CancellationToken cancellationToken)
   {
+    StopCaptureRetryLoop();
+
     if (_captureDevice != null)
     {
       _captureDevice.OnAudioProcessed -= OnCaptureAudioProcessed;
@@ -231,6 +235,8 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
   protected override async ValueTask DisposeAsyncCore()
   {
+    StopCaptureRetryLoop();
+
     if (_captureDevice != null)
     {
       _captureDevice.OnAudioProcessed -= OnCaptureAudioProcessed;
@@ -385,12 +391,15 @@ public class BluetoothAudioSource : USBAudioSourceBase
         _captureDevice.OnAudioProcessed += OnCaptureAudioProcessed;
         _captureDevice.Start();
 
-        _playbackId = $"bt-capture-{Guid.NewGuid():N}";
+        // Use the audio source ID so AudioManager.SetSourceGain can find
+        // this component and apply the gain offset (e.g., auto-gain +28dB).
+        _playbackId = Id;
         var success = await _playbackService.PlayComponentAsync(
           _playbackId, _captureGenerator, Volume, CancellationToken.None);
 
         if (success)
         {
+          StopCaptureRetryLoop();
           Logger.LogInformation("BluetoothAudioSource: capture bridge active — AudioCaptureDevice → mixer (PlaybackId={PlaybackId})", _playbackId);
         }
         else
@@ -402,12 +411,14 @@ public class BluetoothAudioSource : USBAudioSourceBase
       else if (SoundComponent is BufferedSoundGenerator<float> generator && _playbackService != null)
       {
         // PipeWire/WASAPI capture path: register generator directly with mixer
-        _playbackId = $"bt-capture-{Guid.NewGuid():N}";
+        // Use the audio source ID so AudioManager.SetSourceGain can apply the gain offset.
+        _playbackId = Id;
         var success = await _playbackService.PlayComponentAsync(
           _playbackId, generator, Volume, CancellationToken.None);
 
         if (success)
         {
+          StopCaptureRetryLoop();
           Logger.LogInformation("BluetoothAudioSource: capture generator added to mixer (PlaybackId={PlaybackId})", _playbackId);
 
           // Start loopback capture on Windows (Linux pw-record is already running)
@@ -429,11 +440,90 @@ public class BluetoothAudioSource : USBAudioSourceBase
     }
   }
 
+  /// <summary>
+  /// Starts a background loop that periodically attempts to acquire the BT capture device
+  /// when the source is Playing but no capture is established (e.g., phone wasn't streaming
+  /// when source was activated, or PipeWire node disappeared temporarily).
+  /// </summary>
+  private void StartCaptureRetryLoop()
+  {
+    StopCaptureRetryLoop();
+    _captureRetryCts = new CancellationTokenSource();
+    _ = RetryCaptureInBackgroundAsync(_captureRetryCts.Token);
+  }
+
+  private void StopCaptureRetryLoop()
+  {
+    _captureRetryCts?.Cancel();
+    _captureRetryCts?.Dispose();
+    _captureRetryCts = null;
+  }
+
+  private async Task RetryCaptureInBackgroundAsync(CancellationToken ct)
+  {
+    const int maxRetries = 12;
+    const int retryDelaySeconds = 10;
+
+    try
+    {
+      for (int i = 0; i < maxRetries && !ct.IsCancellationRequested; i++)
+      {
+        await Task.Delay(TimeSpan.FromSeconds(retryDelaySeconds), ct);
+
+        if (_playbackId != null || State != AudioSourceState.Playing) return;
+
+        Logger.LogDebug("BluetoothAudioSource: capture retry attempt {Attempt}/{Max}", i + 1, maxRetries);
+        await TryReacquireCaptureAsync(ct);
+        if (_playbackId != null) return;
+      }
+
+      if (State == AudioSourceState.Playing && _playbackId == null)
+        Logger.LogWarning("BluetoothAudioSource: capture retry exhausted after {Max} attempts", maxRetries);
+    }
+    catch (OperationCanceledException) { }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "BluetoothAudioSource: capture retry loop error");
+    }
+  }
+
+  /// <summary>
+  /// Attempts to reacquire the BT capture device and route it through the mixer.
+  /// Unlike TryAcquireAudioCaptureAsync, this does not alter the source state —
+  /// it's designed for use when the source is already in Playing state but lost its capture.
+  /// </summary>
+  private async Task TryReacquireCaptureAsync(CancellationToken ct = default)
+  {
+    try
+    {
+      if (_bluetoothService.IsAudioManagedByPlatform) return;
+      if (_captureDevice != null || SoundComponent != null || _playbackId != null) return;
+
+      var capture = await _bluetoothService.GetAudioCaptureDeviceAsync(ct);
+      if (capture is AudioCaptureDevice audioCapture)
+      {
+        _captureDevice = audioCapture;
+        await RouteCaptureThroughMixerAsync();
+      }
+      else if (capture is SoundComponent soundComponent)
+      {
+        SoundComponent = soundComponent;
+        await RouteCaptureThroughMixerAsync();
+      }
+    }
+    catch (OperationCanceledException) { throw; }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "BluetoothAudioSource: capture reacquisition attempt failed");
+    }
+  }
+
   private async void OnDeviceDisconnected(object? sender, BluetoothDeviceDisconnectedEventArgs e)
   {
     try
     {
       Logger.LogDebug("BluetoothAudioSource: device disconnected event for {DeviceName}", e.Device.Name);
+      StopCaptureRetryLoop();
       NeedsFingerprintingLookup = false;
       _hasMediaPlayer = false;
       _btPosition = TimeSpan.Zero;
@@ -684,8 +774,13 @@ public class BluetoothAudioSource : USBAudioSourceBase
     // whether the phone is playing or paused (drives play history + state updates).
     switch (e)
     {
-      case BluetoothPlaybackStatus.Playing when State == AudioSourceState.Ready || State == AudioSourceState.Paused:
-        State = AudioSourceState.Playing;
+      case BluetoothPlaybackStatus.Playing:
+        if (State == AudioSourceState.Ready || State == AudioSourceState.Paused)
+          State = AudioSourceState.Playing;
+        // Phone started streaming — if source is active but has no capture, try to acquire.
+        // This handles the case where the phone was paused when the source was activated.
+        if (State == AudioSourceState.Playing && _playbackId == null && !_bluetoothService.IsAudioManagedByPlatform)
+          _ = TryReacquireCaptureAsync();
         break;
       case BluetoothPlaybackStatus.Paused when State == AudioSourceState.Playing:
         State = AudioSourceState.Paused;

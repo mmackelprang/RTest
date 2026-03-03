@@ -20,11 +20,17 @@ public sealed class SourceLevelLearningService : BackgroundService
   /// <summary>Silence threshold — don't learn from near-silent audio.</summary>
   private const float SilenceThreshold = 0.001f;
 
-  /// <summary>Minimum gain change before applying (avoids jitter).</summary>
-  private const float GainChangeThreshold = 0.02f;
+  /// <summary>Minimum gain change before applying (avoids jitter/pumping).</summary>
+  private const float GainChangeThreshold = 0.15f;
 
   /// <summary>Max auto-gain — delegates to centralized constant.</summary>
   private const float MaxAutoGain = AudioPreferencePersistence.MaxGain;
+
+  /// <summary>Fast EMA alpha for clipping recovery (0.5 = converges in ~4 samples).</summary>
+  private const float FastEmaAlpha = 0.5f;
+
+  /// <summary>Target peak for gain correction (~-1.4 dBFS, safely below unity).</summary>
+  private const float TargetPeak = 0.85f;
 
   public SourceLevelLearningService(
     ILogger<SourceLevelLearningService> logger,
@@ -76,31 +82,60 @@ public sealed class SourceLevelLearningService : BackgroundService
 
     var sourceType = activeSource.Type;
 
-    // Read current RMS level
+    // Read current level data (RMS + peak + clipping flag)
     var levelData = _visualizerService.GetLevelData();
     var monoRms = levelData.MonoRms;
+    var monoPeak = levelData.MonoPeak;
+    var isClipping = levelData.IsClipping;
 
     // Skip silence — don't learn from it
-    if (monoRms < SilenceThreshold)
+    if (monoRms < SilenceThreshold && monoPeak < SilenceThreshold)
       return;
 
-    // Back-calculate pre-gain RMS to avoid feedback loop.
-    // The visualizer sees post-gain audio, so divide out the current gain offset
-    // to learn the source's intrinsic loudness rather than the corrected level.
-    // However, when gain is at a clamp boundary (0.1 or 2.0), the system can't
-    // fully compensate and the back-calculation produces misleading values —
-    // skip learning in that case to preserve the last valid measurement.
     var currentGain = _persistence.GetSourceGain(sourceType);
-    if (currentGain <= 0.1f || currentGain >= MaxAutoGain)
-      return;
-    var preGainRms = monoRms / currentGain;
 
-    // Update the EMA for this source (using pre-gain RMS)
-    _persistence.UpdateSourceLearnedRms(sourceType, preGainRms);
+    // Low boundary — back-calculation unreliable at very low gain
+    if (currentGain <= 0.1f)
+      return;
+
+    // --- Clipping at max gain: the "death spiral" recovery path ---
+    // When gain is at max AND we're clipping, the old code returned early
+    // and never updated the EMA, locking the bad value forever. Instead,
+    // back-calculate the true source RMS and use a fast EMA to converge.
+    if (isClipping && currentGain >= MaxAutoGain)
+    {
+      var preGainRms = monoRms / currentGain;
+      _persistence.UpdateSourceLearnedRms(sourceType, preGainRms, FastEmaAlpha);
+
+      // Immediately correct gain based on peak overshoot
+      var mode = _persistence.GetSourceGainMode(sourceType);
+      if (monoPeak > 0.001f && mode == "auto")
+      {
+        var correctedGain = Math.Clamp(currentGain * TargetPeak / monoPeak, 0.1f, MaxAutoGain);
+        _persistence.SetSourceGainInternal(sourceType, correctedGain);
+        _audioManager.SetSourceGainInternal(sourceType, correctedGain);
+
+        _logger.LogWarning(
+          "Clipping correction: {SourceType} peak={Peak:F3}, gain {OldGain:F2} → {NewGain:F2}",
+          sourceType, monoPeak, currentGain, correctedGain);
+      }
+
+      return; // Let EMA converge on subsequent polls
+    }
+
+    // --- Normal path: gain in bounds, learn and adjust ---
+
+    // Skip learning at upper boundary when not clipping (measurement unreliable)
+    if (currentGain >= MaxAutoGain)
+      return;
+
+    // Back-calculate pre-gain RMS to avoid feedback loop
+    var normalPreGainRms = monoRms / currentGain;
+    _persistence.UpdateSourceLearnedRms(sourceType, normalPreGainRms);
 
     // Check if source is in auto mode
-    var mode = _persistence.GetSourceGainMode(sourceType);
-    if (mode != "auto")
+    var normalMode = _persistence.GetSourceGainMode(sourceType);
+    if (normalMode != "auto")
       return;
 
     // Check if we have enough samples
@@ -129,8 +164,6 @@ public sealed class SourceLevelLearningService : BackgroundService
 
     // Apply auto-gain (internal — doesn't switch to manual mode)
     _persistence.SetSourceGainInternal(sourceType, suggestedGain);
-
-    // If this source is currently active, update live playback
     _audioManager.SetSourceGainInternal(sourceType, suggestedGain);
 
     _logger.LogInformation(

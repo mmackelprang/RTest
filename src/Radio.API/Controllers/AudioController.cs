@@ -4,6 +4,7 @@ using Radio.API.Mappers;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
+using Radio.Infrastructure.Audio.SoundFlow;
 
 namespace Radio.API.Controllers;
 
@@ -20,6 +21,8 @@ public class AudioController : ControllerBase
   private readonly IAudioManager? _audioManager;
   private readonly IDuckingService _duckingService;
   private readonly BackgroundIdentificationService? _fingerprintService;
+  private readonly IVisualizerService? _visualizerService;
+  private readonly SoundFlowPlaybackService? _playbackService;
 
   /// <summary>
   /// Initializes a new instance of the AudioController.
@@ -29,13 +32,17 @@ public class AudioController : ControllerBase
     IAudioEngine audioEngine,
     IDuckingService duckingService,
     IAudioManager? audioManager = null,
-    BackgroundIdentificationService? fingerprintService = null)
+    BackgroundIdentificationService? fingerprintService = null,
+    IVisualizerService? visualizerService = null,
+    SoundFlowPlaybackService? playbackService = null)
   {
     _logger = logger;
     _audioEngine = audioEngine;
     _audioManager = audioManager;
     _duckingService = duckingService;
     _fingerprintService = fingerprintService;
+    _visualizerService = visualizerService;
+    _playbackService = playbackService;
   }
 
   /// <summary>
@@ -591,7 +598,7 @@ public class AudioController : ControllerBase
   /// Sets the gain offset for a specific source type.
   /// </summary>
   /// <param name="sourceType">The source type name (e.g., Radio, FilePlayer, Bluetooth).</param>
-  /// <param name="gain">Linear gain multiplier (0.0-2.0, 1.0 = unity/0dB).</param>
+  /// <param name="gain">Linear gain multiplier (0.0-25.0, 1.0 = unity/0dB).</param>
   [HttpPost("sourcegain/{sourceType}/{gain:float}")]
   [ProducesResponseType(StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -603,8 +610,8 @@ public class AudioController : ControllerBase
     if (!Enum.TryParse<Radio.Core.Interfaces.Audio.AudioSourceType>(sourceType, ignoreCase: true, out var parsed))
       return BadRequest(new { error = $"Invalid source type '{sourceType}'. Valid: Radio, Vinyl, FilePlayer, GenericUSB, Bluetooth" });
 
-    if (gain < 0f || gain > 2f)
-      return BadRequest(new { error = "Gain must be between 0.0 and 2.0" });
+    if (gain < 0f || gain > 25f)
+      return BadRequest(new { error = "Gain must be between 0.0 and 25.0" });
 
     _audioManager.SetSourceGain(parsed, gain);
     _logger.LogInformation("Source gain set: {SourceType} = {Gain:F2}", sourceType, gain);
@@ -664,5 +671,106 @@ public class AudioController : ControllerBase
 
     var snapshot = _fingerprintService.GetStatus();
     return Ok(snapshot.MapToDto());
+  }
+
+  /// <summary>
+  /// Logs a distortion marker with a snapshot of current audio state for debugging.
+  /// </summary>
+  [HttpPost("debug/distortion-marker")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  public ActionResult ReportDistortionMarker()
+  {
+    var timestamp = DateTimeOffset.UtcNow;
+
+    // Gather audio state snapshot
+    var source = _audioManager?.ActiveSource;
+    var mixer = _audioEngine.GetMasterMixer();
+
+    var snapshot = new Dictionary<string, object?>
+    {
+      ["timestamp"] = timestamp.ToString("o"),
+      ["engineState"] = _audioEngine.State.ToString(),
+      ["masterVolume"] = mixer.MasterVolume,
+      ["isMuted"] = mixer.IsMuted,
+      ["balance"] = mixer.Balance,
+    };
+
+    // Active source info
+    if (source != null)
+    {
+      snapshot["source"] = new
+      {
+        name = source.Name,
+        type = source.Type.ToString(),
+        state = source.State.ToString(),
+      };
+    }
+
+    // Source gain offsets
+    if (_audioManager != null)
+    {
+      snapshot["sourceGains"] = _audioManager.GetAllSourceGains();
+      snapshot["autoGain"] = _audioManager.GetAutoGainStatus();
+    }
+
+    // Visualization levels (RMS, peak, clipping)
+    if (_visualizerService is { IsActive: true })
+    {
+      try
+      {
+        var levels = _visualizerService.GetLevelData();
+        snapshot["levels"] = new
+        {
+          leftRms = levels.LeftRms,
+          rightRms = levels.RightRms,
+          leftPeak = levels.LeftPeak,
+          rightPeak = levels.RightPeak,
+          leftRmsDb = levels.LeftRmsDb,
+          rightRmsDb = levels.RightRmsDb,
+          leftPeakDb = levels.LeftPeakDb,
+          rightPeakDb = levels.RightPeakDb,
+          isClipping = levels.IsClipping,
+        };
+      }
+      catch (Exception ex)
+      {
+        snapshot["levelsError"] = ex.Message;
+      }
+    }
+
+    // Playback service diagnostics (buffer/player state)
+    if (_playbackService != null)
+    {
+      try
+      {
+        var diag = _playbackService.GetDiagnostics();
+        var format = _playbackService.GetAudioFormat();
+        snapshot["playback"] = new
+        {
+          activePlayers = diag.ActivePlayers,
+          activeComponents = diag.ActiveComponents,
+          playerIds = diag.PlayerIds,
+          sampleRate = format.SampleRate,
+          channels = format.Channels,
+        };
+      }
+      catch (Exception ex)
+      {
+        snapshot["playbackError"] = ex.Message;
+      }
+    }
+
+    // Ducking state
+    snapshot["ducking"] = new
+    {
+      isDucking = _duckingService.IsDucking,
+      duckLevel = _duckingService.CurrentDuckLevel,
+      activeEvents = _duckingService.ActiveEventCount,
+    };
+
+    // Log at WARNING so it stands out in journalctl
+    _logger.LogWarning("AUDIO_DISTORTION_MARKER at {Timestamp} — {@Snapshot}", timestamp, snapshot);
+
+    return Ok(snapshot);
   }
 }

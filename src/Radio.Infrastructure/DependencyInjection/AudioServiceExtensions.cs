@@ -86,13 +86,12 @@ public static class AudioServiceExtensions
     services.AddSingleton<IAudioEngine>(sp => sp.GetRequiredService<SoundFlowAudioEngine>());
 
     // Register the playback service (singleton for managing SoundFlow players)
-    // Note: IVisualizerService is injected to enable audio visualization during playback
+    // Visualization is handled by the MasterMixer-level tap in SoundFlowAudioEngine
     services.AddSingleton<SoundFlowPlaybackService>(sp =>
     {
       var logger = sp.GetRequiredService<ILogger<SoundFlowPlaybackService>>();
       var audioEngine = sp.GetRequiredService<SoundFlowAudioEngine>();
-      var visualizerService = sp.GetService<IVisualizerService>();
-      return new SoundFlowPlaybackService(logger, audioEngine, visualizerService);
+      return new SoundFlowPlaybackService(logger, audioEngine);
     });
 
     // Bind audio options for ducking configuration
