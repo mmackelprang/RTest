@@ -161,10 +161,6 @@ public static class AudioServiceExtensions
       sp.GetRequiredService<IOptionsMonitor<BluetoothOptions>>(),
       () => sp.GetRequiredService<IAudioManager>()));
 
-    // Register source level learning service (background RMS polling + auto-gain)
-    services.AddSingleton<SourceLevelLearningService>();
-    services.AddHostedService(sp => sp.GetRequiredService<SourceLevelLearningService>());
-
     // Register event audio source services
     services.AddEventAudioSources(configuration);
 

@@ -1091,42 +1091,13 @@
                 <MudItem xs="12" md="6">
                   <div style="display: flex; align-items: center; gap: 8px;">
                     <MudText Style="min-width: 90px; font-size: 14px;">@kvp.Value</MudText>
-                    @{ var autoInfo = GetAutoGainInfo(kvp.Key); }
-                    @if (autoInfo?.Mode == "manual")
-                    {
-                      <MudChip T="string" Size="Size.Small" Color="Color.Warning"
-                               Style="font-size: 10px; height: 20px; min-width: 0;">MANUAL</MudChip>
-                    }
-                    else if (autoInfo != null && autoInfo.SampleCount >= 10)
-                    {
-                      <MudChip T="string" Size="Size.Small" Color="Color.Success"
-                               Style="font-size: 10px; height: 20px; min-width: 0;">AUTO</MudChip>
-                    }
-                    else
-                    {
-                      <MudChip T="string" Size="Size.Small" Color="Color.Default"
-                               Style="font-size: 10px; height: 20px; min-width: 0; opacity: 0.5;">AUTO</MudChip>
-                    }
                     <MudSlider T="float" Value="@GetSourceGainValue(kvp.Key)"
                                ValueChanged="@((float v) => OnSourceGainChanged(kvp.Key, v))"
-                               Min="0.0f" Max="25.0f" Step="0.1f"
+                               Min="0.0f" Max="2.0f" Step="0.05f"
                                Color="Color.Primary" Style="flex: 1;"  />
                     <MudText Style="min-width: 50px; font-family: var(--font-mono); font-size: 12px; text-align: right;">
                       @FormatGainDb(GetSourceGainValue(kvp.Key))
                     </MudText>
-                    @if (autoInfo?.Mode == "manual")
-                    {
-                      <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small"
-                                     Color="Color.Warning" title="Reset to Auto"
-                                     OnClick="@(() => ResetSourceToAutoAsync(kvp.Key))"
-                                     Style="padding: 2px;" />
-                    }
-                    @if (autoInfo?.LearnedRms != null)
-                    {
-                      <MudText Style="min-width: 70px; font-family: var(--font-mono); font-size: 10px; color: var(--mud-palette-text-secondary); text-align: right;">
-                        @FormatRmsDb(autoInfo.LearnedRms.Value)
-                      </MudText>
-                    }
                   </div>
                 </MudItem>
               }
@@ -1585,7 +1556,6 @@
 
   // Source Gain Offsets
   private Dictionary<string, float> _sourceGainOffsets = new();
-  private Dictionary<string, AutoGainInfoDto> _autoGainStatus = new();
   private System.Threading.Timer? _sourceGainDebounceTimer;
   private static readonly Dictionary<string, string> _sourceGainLabels = new()
   {
@@ -2440,9 +2410,8 @@
       _radioPreferences = await LoadOrCreatePreferenceAsync<RadioPreferencesDto>("radiopreferences");
       _genericSourcePreferences = await LoadOrCreatePreferenceAsync<GenericSourcePreferencesDto>("genericsourcepreferences");
 
-      // Load source gain offsets and auto-gain status from API
+      // Load source gain offsets from API
       _sourceGainOffsets = await AudioApi.GetSourceGainOffsetsAsync() ?? new();
-      _autoGainStatus = await AudioApi.GetAutoGainStatusAsync() ?? new();
     }
     catch (Exception ex)
     {
@@ -2507,9 +2476,6 @@
   private void OnSourceGainChanged(string sourceType, float gain)
   {
     _sourceGainOffsets[sourceType] = gain;
-    // Mark as manual in local state immediately for responsive UI
-    if (_autoGainStatus.TryGetValue(sourceType, out var info))
-      info.Mode = "manual";
     // Debounce the API call to avoid churn during slider drags
     _sourceGainDebounceTimer?.Dispose();
     _sourceGainDebounceTimer = new System.Threading.Timer(async _ =>
@@ -2525,40 +2491,12 @@
     }, null, TimeSpan.FromMilliseconds(300), Timeout.InfiniteTimeSpan);
   }
 
-  private AutoGainInfoDto? GetAutoGainInfo(string sourceType)
-  {
-    return _autoGainStatus.TryGetValue(sourceType, out var info) ? info : null;
-  }
-
-  private async Task ResetSourceToAutoAsync(string sourceType)
-  {
-    var success = await AudioApi.ResetSourceGainToAutoAsync(sourceType);
-    if (success)
-    {
-      // Refresh both gain offsets and auto status
-      _sourceGainOffsets = await AudioApi.GetSourceGainOffsetsAsync() ?? new();
-      _autoGainStatus = await AudioApi.GetAutoGainStatusAsync() ?? new();
-      Snackbar.Add($"{_sourceGainLabels.GetValueOrDefault(sourceType, sourceType)} reset to auto gain", Severity.Success);
-      StateHasChanged();
-    }
-    else
-    {
-      Snackbar.Add("Failed to reset to auto gain", Severity.Error);
-    }
-  }
 
   private static string FormatGainDb(float gain)
   {
     if (gain <= 0.001f) return "-∞ dB";
     var db = 20.0 * Math.Log10(gain);
     return db >= 0 ? $"+{db:F1}dB" : $"{db:F1}dB";
-  }
-
-  private static string FormatRmsDb(float rms)
-  {
-    if (rms <= 0.0001f) return "-∞ dB";
-    var db = 20.0 * Math.Log10(rms);
-    return $"{db:F1} dB";
   }
 
   private async Task SaveFilePlayerPreferencesAsync()

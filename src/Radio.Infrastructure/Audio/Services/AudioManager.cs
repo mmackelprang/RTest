@@ -118,46 +118,6 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   }
 
   /// <inheritdoc/>
-  public void SetSourceGainInternal(AudioSourceType sourceType, float gain)
-  {
-    gain = Math.Clamp(gain, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
-
-    // If this source is currently active, update the live playback component gain
-    if (_activeSource != null && _activeSource.Type == sourceType && _playbackService != null)
-    {
-      _playbackService.SetGainOffset(_activeSource.Id, gain);
-      _logger.LogDebug(
-        "Applied auto-gain offset {Gain:F2} to active source {SourceName}",
-        gain, _activeSource.Name);
-    }
-  }
-
-  /// <inheritdoc/>
-  public void ResetSourceGainToAuto(AudioSourceType sourceType)
-  {
-    if (_preferencePersistence == null) return;
-
-    // Clear learned data so the source re-learns from scratch at unity gain
-    _preferencePersistence.ClearSourceLearnedRms(sourceType);
-    _preferencePersistence.SetSourceGainMode(sourceType, "auto");
-
-    // Reset to unity gain — the learning service will re-measure and adjust
-    _preferencePersistence.SetSourceGainInternal(sourceType, 1.0f);
-    if (_activeSource != null && _activeSource.Type == sourceType && _playbackService != null)
-    {
-      _playbackService.SetGainOffset(_activeSource.Id, 1.0f);
-    }
-
-    _logger.LogInformation("Reset {SourceType} to auto gain (cleared learned data, unity)", sourceType);
-  }
-
-  /// <inheritdoc/>
-  public Dictionary<string, AutoGainInfo> GetAutoGainStatus()
-  {
-    return _preferencePersistence?.GetAutoGainStatus() ?? new Dictionary<string, AutoGainInfo>();
-  }
-
-  /// <inheritdoc/>
   public async Task InitializeAsync(CancellationToken cancellationToken = default)
   {
     if (_initialized)
@@ -286,35 +246,13 @@ public class AudioManager : IAudioManager, IAsyncDisposable
         }
       }
 
-      // Apply per-source gain offset (auto-gain aware)
+      // Apply per-source gain offset
       if (_playbackService != null && _preferencePersistence != null)
       {
-        var mode = _preferencePersistence.GetSourceGainMode(source.Type);
-        float gain;
-
-        if (mode == "auto")
-        {
-          // In auto mode: use learned gain if available, else unity
-          var learnedRms = _preferencePersistence.GetSourceLearnedRms(source.Type);
-          if (learnedRms.HasValue && learnedRms.Value > 0.001f)
-          {
-            gain = Math.Clamp(AudioPreferencePersistence.TargetRms / learnedRms.Value, 0.1f, AudioPreferencePersistence.MaxGain);
-            _preferencePersistence.SetSourceGainInternal(source.Type, gain);
-          }
-          else
-          {
-            gain = _preferencePersistence.GetSourceGain(source.Type);
-          }
-        }
-        else
-        {
-          // Manual mode: use the user's stored value
-          gain = _preferencePersistence.GetSourceGain(source.Type);
-        }
-
+        var gain = _preferencePersistence.GetSourceGain(source.Type);
         _playbackService.SetGainOffset(source.Id, gain);
-        _logger.LogDebug("Applied gain offset {Gain:F2} ({Mode}) for source {SourceName} ({SourceType})",
-          gain, mode, source.Name, source.Type);
+        _logger.LogDebug("Applied gain offset {Gain:F2} for source {SourceName} ({SourceType})",
+          gain, source.Name, source.Type);
       }
 
       // Persist the source selection

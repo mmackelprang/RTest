@@ -732,15 +732,6 @@ public class FingerprintEventDto
   public DateTime Timestamp { get; set; }
 }
 
-// Auto-Gain DTOs
-public class AutoGainInfoDto
-{
-  public float? LearnedRms { get; set; }
-  public float? SuggestedGain { get; set; }
-  public string Mode { get; set; } = "auto";
-  public int SampleCount { get; set; }
-}
-
 // Bluetooth DTOs
 public class BluetoothStatusDto
 {

@@ -21,14 +21,9 @@ public class AudioPreferencePersistence : IDisposable
 
   private Timer? _volumePersistTimer;
   private Timer? _sourceGainPersistTimer;
-  private Timer? _sourceRmsPersistTimer;
   private readonly object _volumePersistLock = new();
   private readonly object _sourceGainPersistLock = new();
-  private readonly object _sourceRmsLock = new();
   private readonly Dictionary<string, float> _sourceGainOffsets = new();
-  private readonly Dictionary<string, float> _sourceLearnedRms = new();
-  private readonly Dictionary<string, string> _sourceGainMode = new();
-  private readonly Dictionary<string, int> _sourceSampleCount = new();
   private bool _disposed;
 
   public AudioPreferencePersistence(
@@ -186,8 +181,17 @@ public class AudioPreferencePersistence : IDisposable
     }
   }
 
+  /// <summary>Minimum gain multiplier (silence).</summary>
+  public const float MinGain = 0.0f;
+
   /// <summary>
-  /// Sets the gain offset for a source type, marks it as manual, and schedules persistence.
+  /// Maximum gain multiplier. Per-source trim for user adjustment.
+  /// Capped at 2.0 (+6 dB) — higher values risk clipping.
+  /// </summary>
+  public const float MaxGain = 2.0f;
+
+  /// <summary>
+  /// Sets the gain offset for a source type and schedules persistence.
   /// </summary>
   public void SetSourceGain(AudioSourceType sourceType, float gain)
   {
@@ -196,24 +200,7 @@ public class AudioPreferencePersistence : IDisposable
     {
       _sourceGainOffsets[sourceType.ToString()] = gain;
     }
-    // User-initiated change → switch to manual mode
-    SetSourceGainMode(sourceType, "manual");
-    _logger.LogInformation("Source gain set: {SourceType} = {Gain:F2} (manual)", sourceType, gain);
-    ScheduleSourceGainPersist();
-  }
-
-  /// <summary>
-  /// Sets the gain offset for a source type WITHOUT switching to manual mode.
-  /// Used by the learning service for auto-gain application.
-  /// </summary>
-  public void SetSourceGainInternal(AudioSourceType sourceType, float gain)
-  {
-    gain = Math.Clamp(gain, MinGain, MaxGain);
-    lock (_sourceGainPersistLock)
-    {
-      _sourceGainOffsets[sourceType.ToString()] = gain;
-    }
-    _logger.LogDebug("Source gain set internally: {SourceType} = {Gain:F2} (auto)", sourceType, gain);
+    _logger.LogInformation("Source gain set: {SourceType} = {Gain:F2}", sourceType, gain);
     ScheduleSourceGainPersist();
   }
 
@@ -255,6 +242,7 @@ public class AudioPreferencePersistence : IDisposable
           var entry = store.GetEntryAsync(key).GetAwaiter().GetResult();
           if (entry != null && float.TryParse(entry.Value, CultureInfo.InvariantCulture, out var gain))
           {
+            // Clamp handles migration from old MaxGain=25 values
             _sourceGainOffsets[sourceType.ToString()] = Math.Clamp(gain, MinGain, MaxGain);
             restored++;
           }
@@ -265,297 +253,10 @@ public class AudioPreferencePersistence : IDisposable
       {
         _logger.LogInformation("Restored {Count} source gain offsets from config store", restored);
       }
-
-      // Also restore learning data (learned RMS + gain mode)
-      RestoreSourceLearningData();
     }
     catch (Exception ex)
     {
       _logger.LogWarning(ex, "Failed to restore source gain offsets");
-    }
-  }
-
-  // --- Source Level Learning ---
-
-  /// <summary>Target RMS: -18 dBFS = 10^(-18/20) ≈ 0.126 linear.</summary>
-  public const float TargetRms = 0.126f;
-
-  /// <summary>Minimum gain multiplier (silence).</summary>
-  public const float MinGain = 0.0f;
-
-  /// <summary>
-  /// Maximum gain multiplier. BT A2DP capture can be very quiet (~0.002 RMS / -55 dBFS)
-  /// because PipeWire applies the phone's AVRCP transport volume to the source node.
-  /// Gain is applied digitally in the mixer. Capped at 25 to prevent clipping on
-  /// transient peaks (BT music crest factor ~10-15 dB means peaks at 0.02-0.03 raw,
-  /// so 25x gain yields peaks around 0.5-0.75, safely below unity).
-  /// </summary>
-  public const float MaxGain = 25.0f;
-
-  /// <summary>Minimum samples before auto-gain is applied.</summary>
-  public const int MinSamplesForAutoGain = 10;
-
-  /// <summary>
-  /// EMA smoothing factor. 0.02 = very slow adaptation (~150-sample effective window,
-  /// ~7.5 minutes at 3s polling). This prevents gain from tracking individual song
-  /// dynamics (quiet verse → loud chorus) and instead learns the source's long-term
-  /// average loudness.
-  /// </summary>
-  public const float EmaAlpha = 0.02f;
-
-  /// <summary>
-  /// Gets the learned RMS for a source type, or null if not enough data.
-  /// </summary>
-  public float? GetSourceLearnedRms(AudioSourceType sourceType)
-  {
-    lock (_sourceRmsLock)
-    {
-      var key = sourceType.ToString();
-      if (!_sourceLearnedRms.TryGetValue(key, out var rms))
-        return null;
-      if (!_sourceSampleCount.TryGetValue(key, out var count) || count < MinSamplesForAutoGain)
-        return null;
-      return rms;
-    }
-  }
-
-  /// <summary>
-  /// Updates the learned RMS for a source using exponential moving average.
-  /// </summary>
-  public void UpdateSourceLearnedRms(AudioSourceType sourceType, float rms, float alpha = EmaAlpha)
-  {
-    lock (_sourceRmsLock)
-    {
-      var key = sourceType.ToString();
-      if (_sourceLearnedRms.TryGetValue(key, out var existing))
-      {
-        _sourceLearnedRms[key] = alpha * rms + (1 - alpha) * existing;
-      }
-      else
-      {
-        _sourceLearnedRms[key] = rms;
-      }
-
-      _sourceSampleCount[key] = _sourceSampleCount.GetValueOrDefault(key, 0) + 1;
-    }
-    ScheduleSourceRmsPersist();
-  }
-
-  /// <summary>
-  /// Clears learned RMS data for a source type, forcing re-learning from scratch.
-  /// </summary>
-  public void ClearSourceLearnedRms(AudioSourceType sourceType)
-  {
-    lock (_sourceRmsLock)
-    {
-      var key = sourceType.ToString();
-      _sourceLearnedRms.Remove(key);
-      _sourceSampleCount.Remove(key);
-    }
-    // Delete from SQLite so stale data doesn't get restored on restart
-    _ = DeleteSourceRmsAsync(sourceType);
-    _logger.LogInformation("Cleared learned RMS data for {SourceType}", sourceType);
-  }
-
-  private async Task DeleteSourceRmsAsync(AudioSourceType sourceType)
-  {
-    if (_configurationManager == null) return;
-    try
-    {
-      var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
-      // Write a sentinel empty value — SetValueAsync with empty string effectively clears
-      // (The restore logic uses float.TryParse which will fail on empty, skipping it)
-      await _configurationManager.SetValueAsync(
-        storeId,
-        $"AudioPreferences:SourceRms:{sourceType}",
-        "");
-    }
-    catch (Exception ex)
-    {
-      _logger.LogWarning(ex, "Failed to delete source RMS for {SourceType}", sourceType);
-    }
-  }
-
-  /// <summary>
-  /// Gets the gain mode for a source type ("auto" or "manual", default "auto").
-  /// </summary>
-  public string GetSourceGainMode(AudioSourceType sourceType)
-  {
-    lock (_sourceRmsLock)
-    {
-      return _sourceGainMode.TryGetValue(sourceType.ToString(), out var mode) ? mode : "auto";
-    }
-  }
-
-  /// <summary>
-  /// Sets the gain mode for a source type and persists immediately.
-  /// </summary>
-  public void SetSourceGainMode(AudioSourceType sourceType, string mode)
-  {
-    lock (_sourceRmsLock)
-    {
-      _sourceGainMode[sourceType.ToString()] = mode;
-    }
-    // Persist mode immediately (not debounced — mode changes are infrequent)
-    _ = PersistSourceGainModeAsync(sourceType, mode);
-  }
-
-  /// <summary>
-  /// Gets the sample count for a source type (resets on restart).
-  /// </summary>
-  public int GetSourceSampleCount(AudioSourceType sourceType)
-  {
-    lock (_sourceRmsLock)
-    {
-      return _sourceSampleCount.GetValueOrDefault(sourceType.ToString(), 0);
-    }
-  }
-
-  /// <summary>
-  /// Returns auto-gain status for all source types.
-  /// </summary>
-  public Dictionary<string, AutoGainInfo> GetAutoGainStatus()
-  {
-    var result = new Dictionary<string, AutoGainInfo>();
-    var sourceTypes = Enum.GetValues<AudioSourceType>();
-
-    foreach (var sourceType in sourceTypes)
-    {
-      var key = sourceType.ToString();
-      float? learnedRms;
-      float? suggestedGain = null;
-      string mode;
-      int sampleCount;
-
-      lock (_sourceRmsLock)
-      {
-        learnedRms = _sourceLearnedRms.TryGetValue(key, out var rms) ? rms : null;
-        mode = _sourceGainMode.TryGetValue(key, out var m) ? m : "auto";
-        sampleCount = _sourceSampleCount.GetValueOrDefault(key, 0);
-      }
-
-      if (learnedRms.HasValue && sampleCount >= MinSamplesForAutoGain && learnedRms.Value > 0.001f)
-      {
-        suggestedGain = Math.Clamp(TargetRms / learnedRms.Value, 0.1f, MaxGain);
-      }
-
-      result[key] = new AutoGainInfo(learnedRms, suggestedGain, mode, sampleCount);
-    }
-
-    return result;
-  }
-
-  /// <summary>
-  /// Restores learned RMS and gain mode from the configuration store.
-  /// Called from RestoreSourceGainOffsets().
-  /// </summary>
-  public void RestoreSourceLearningData()
-  {
-    if (_configurationManager == null) return;
-
-    try
-    {
-      var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
-      var store = _configurationManager.GetStoreAsync(storeId).GetAwaiter().GetResult();
-      var sourceTypes = Enum.GetValues<AudioSourceType>();
-      var restored = 0;
-
-      lock (_sourceRmsLock)
-      {
-        foreach (var sourceType in sourceTypes)
-        {
-          var key = sourceType.ToString();
-
-          // Restore learned RMS
-          var rmsEntry = store.GetEntryAsync($"AudioPreferences:SourceRms:{key}").GetAwaiter().GetResult();
-          if (rmsEntry != null && float.TryParse(rmsEntry.Value, CultureInfo.InvariantCulture, out var rms))
-          {
-            _sourceLearnedRms[key] = rms;
-            // Start with MinSamplesForAutoGain so restored data is immediately usable
-            _sourceSampleCount[key] = MinSamplesForAutoGain;
-            restored++;
-          }
-
-          // Restore gain mode
-          var modeEntry = store.GetEntryAsync($"AudioPreferences:SourceGainMode:{key}").GetAwaiter().GetResult();
-          if (modeEntry != null)
-          {
-            _sourceGainMode[key] = modeEntry.Value;
-          }
-        }
-      }
-
-      if (restored > 0)
-      {
-        _logger.LogInformation("Restored {Count} source learning entries from config store", restored);
-      }
-    }
-    catch (Exception ex)
-    {
-      _logger.LogWarning(ex, "Failed to restore source learning data");
-    }
-  }
-
-  private void ScheduleSourceRmsPersist()
-  {
-    if (_configurationManager == null) return;
-
-    lock (_sourceRmsLock)
-    {
-      _sourceRmsPersistTimer?.Dispose();
-      _sourceRmsPersistTimer = new Timer(
-        _ => _ = PersistSourceRmsAsync(),
-        null,
-        TimeSpan.FromMilliseconds(500),
-        Timeout.InfiniteTimeSpan);
-    }
-  }
-
-  private async Task PersistSourceRmsAsync()
-  {
-    if (_configurationManager == null) return;
-
-    try
-    {
-      var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
-
-      Dictionary<string, float> snapshot;
-      lock (_sourceRmsLock)
-      {
-        snapshot = new Dictionary<string, float>(_sourceLearnedRms);
-      }
-
-      foreach (var (sourceType, rms) in snapshot)
-      {
-        await _configurationManager.SetValueAsync(
-          storeId,
-          $"AudioPreferences:SourceRms:{sourceType}",
-          rms.ToString("F6", CultureInfo.InvariantCulture));
-      }
-
-      _logger.LogDebug("Persisted {Count} source RMS values", snapshot.Count);
-    }
-    catch (Exception ex)
-    {
-      _logger.LogWarning(ex, "Failed to persist source RMS values");
-    }
-  }
-
-  private async Task PersistSourceGainModeAsync(AudioSourceType sourceType, string mode)
-  {
-    if (_configurationManager == null) return;
-
-    try
-    {
-      var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
-      await _configurationManager.SetValueAsync(
-        storeId,
-        $"AudioPreferences:SourceGainMode:{sourceType}",
-        mode);
-    }
-    catch (Exception ex)
-    {
-      _logger.LogWarning(ex, "Failed to persist source gain mode for {SourceType}", sourceType);
     }
   }
 
@@ -626,12 +327,5 @@ public class AudioPreferencePersistence : IDisposable
       _sourceGainPersistTimer?.Dispose();
       _sourceGainPersistTimer = null;
     }
-
-    lock (_sourceRmsLock)
-    {
-      _sourceRmsPersistTimer?.Dispose();
-      _sourceRmsPersistTimer = null;
-    }
   }
 }
-
