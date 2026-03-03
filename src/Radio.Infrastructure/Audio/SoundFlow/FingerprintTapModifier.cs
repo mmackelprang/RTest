@@ -19,6 +19,7 @@ public class FingerprintTapModifier : SoundModifier
   private readonly ILogger? _logger;
   private readonly IMetricsCollector? _metricsCollector;
   private readonly float[] _sampleBuffer;
+  private readonly float[] _flushBuffer;
   private readonly int _bufferSize;
   private int _bufferIndex;
   private readonly object _lock = new();
@@ -30,6 +31,7 @@ public class FingerprintTapModifier : SoundModifier
   private bool _loggedFirstBatch;
   private DateTime _lastLogTime = DateTime.MinValue;
   private DateTime _lastProcessedTime = DateTime.MinValue;
+  private volatile bool _flushInProgress;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="FingerprintTapModifier"/> class.
@@ -49,6 +51,7 @@ public class FingerprintTapModifier : SoundModifier
     _metricsCollector = metricsCollector;
     _bufferSize = bufferSize;
     _sampleBuffer = new float[bufferSize];
+    _flushBuffer = new float[bufferSize];
     _bufferIndex = 0;
     Name = "Fingerprint Tap";
   }
@@ -57,7 +60,9 @@ public class FingerprintTapModifier : SoundModifier
   public override float ProcessSample(float sample, int channel)
   {
     // Hot path: called 96,000 times/second for stereo 48kHz.
-    // Minimize work inside the lock — no DateTime, no allocations.
+    // Only buffer samples on the audio thread — all heavy processing
+    // (PCM conversion, ring buffer writes) is offloaded to ThreadPool.
+    bool shouldFlush = false;
     lock (_lock)
     {
       _totalSamplesProcessed++;
@@ -67,22 +72,32 @@ public class FingerprintTapModifier : SoundModifier
         _sampleBuffer[_bufferIndex++] = sample;
       }
 
-      // When buffer is full, write to output tap and reset
+      // When buffer is full, copy to flush buffer and reset
       if (_bufferIndex >= _bufferSize)
       {
-        _lastProcessedTime = DateTime.UtcNow;
+        if (!_flushInProgress)
+        {
+          Array.Copy(_sampleBuffer, _flushBuffer, _bufferSize);
+          shouldFlush = true;
+        }
+        _bufferIndex = 0;
+      }
+    }
 
+    // Heavy work runs on ThreadPool, not the real-time audio thread.
+    // WriteToOutputTap does per-sample float→PCM conversion (4096 iterations)
+    // which would block the audio callback and cause periodic distortion.
+    if (shouldFlush)
+    {
+      _flushInProgress = true;
+      ThreadPool.QueueUserWorkItem(_ =>
+      {
         try
         {
-          // Create a copy to write to the tap
-          var samplesForTap = new float[_bufferSize];
-          Array.Copy(_sampleBuffer, samplesForTap, _bufferSize);
-
-          // Write to the output tap for fingerprinting/streaming
-          _audioEngine.WriteToOutputTap(samplesForTap);
+          _audioEngine.WriteToOutputTap(_flushBuffer);
           _batchCount++;
+          _lastProcessedTime = DateTime.UtcNow;
 
-          // Log first batch at Information level for diagnostics
           if (!_loggedFirstBatch)
           {
             _loggedFirstBatch = true;
@@ -91,7 +106,6 @@ public class FingerprintTapModifier : SoundModifier
               _bufferSize, _totalSamplesProcessed);
           }
 
-          // Log periodically (every 10 seconds)
           if ((_lastProcessedTime - _lastLogTime).TotalSeconds >= 10)
           {
             _logger?.LogDebug(
@@ -99,7 +113,6 @@ public class FingerprintTapModifier : SoundModifier
               _totalSamplesProcessed, _bufferSize);
             _lastLogTime = _lastProcessedTime;
 
-            // Report metrics
             if (_metricsCollector != null)
             {
               var batchDelta = _batchCount - _lastReportedBatches;
@@ -123,9 +136,11 @@ public class FingerprintTapModifier : SoundModifier
           _writeErrorCount++;
           _logger?.LogWarning(ex, "Error writing samples to output tap");
         }
-
-        _bufferIndex = 0;
-      }
+        finally
+        {
+          _flushInProgress = false;
+        }
+      });
     }
 
     // Pass through unchanged - this is a tap, not an effect

@@ -14,9 +14,11 @@ public class VisualizationTapModifier : SoundModifier
   private readonly IVisualizerService _visualizerService;
   private readonly AudioFormat _format;
   private readonly float[] _sampleBuffer;
+  private readonly float[] _flushBuffer;
   private readonly int _bufferSize;
   private int _bufferIndex;
   private readonly object _lock = new();
+  private volatile bool _flushInProgress;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="VisualizationTapModifier"/> class.
@@ -33,6 +35,7 @@ public class VisualizationTapModifier : SoundModifier
     _format = format;
     _bufferSize = bufferSize;
     _sampleBuffer = new float[bufferSize];
+    _flushBuffer = new float[bufferSize];
     _bufferIndex = 0;
     Name = "Visualization Tap";
   }
@@ -40,7 +43,10 @@ public class VisualizationTapModifier : SoundModifier
   /// <inheritdoc/>
   public override float ProcessSample(float sample, int channel)
   {
-    // Collect samples in the buffer
+    // Hot path: called 96,000 times/second for stereo 48kHz.
+    // Only buffer samples on the audio thread — FFT, RMS, and waveform
+    // analysis are offloaded to ThreadPool to avoid blocking the callback.
+    bool shouldFlush = false;
     lock (_lock)
     {
       if (_bufferIndex < _bufferSize)
@@ -48,25 +54,39 @@ public class VisualizationTapModifier : SoundModifier
         _sampleBuffer[_bufferIndex++] = sample;
       }
 
-      // When buffer is full, send to visualizer and reset
+      // When buffer is full, copy to flush buffer and reset
       if (_bufferIndex >= _bufferSize)
+      {
+        if (!_flushInProgress)
+        {
+          Array.Copy(_sampleBuffer, _flushBuffer, _bufferSize);
+          shouldFlush = true;
+        }
+        _bufferIndex = 0;
+      }
+    }
+
+    // Heavy work (mono conversion, FFT, RMS, waveform) runs on ThreadPool.
+    // Previously this ran synchronously on the audio thread, causing
+    // periodic distortion every ~21ms (2048 samples at 48kHz stereo).
+    if (shouldFlush)
+    {
+      _flushInProgress = true;
+      ThreadPool.QueueUserWorkItem(_ =>
       {
         try
         {
-          // Create a copy to avoid issues with the lock
-          var samplesForVisualizer = new float[_bufferSize];
-          Array.Copy(_sampleBuffer, samplesForVisualizer, _bufferSize);
-
-          // Process samples synchronously to ensure they reach the visualizer
-          _visualizerService.ProcessSamples(samplesForVisualizer);
+          _visualizerService.ProcessSamples(_flushBuffer);
         }
         catch (Exception)
         {
           // Ignore visualization errors — best-effort tap
         }
-
-        _bufferIndex = 0;
-      }
+        finally
+        {
+          _flushInProgress = false;
+        }
+      });
     }
 
     // Pass through unchanged - this is a tap, not an effect
