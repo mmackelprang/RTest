@@ -750,10 +750,15 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                                 await Task.Delay(1500, captureCt);
                                 await SetPipeWireNodeVolumeAsync(nodeId);
 
-                                // For fallback pw-record mode, do link management
+                                // Disconnect PipeWire/WirePlumber auto-links from
+                                // bluez_input → default sink. Without this, BT audio
+                                // plays through both our pipeline AND directly to
+                                // speakers, causing an out-of-sync duplicate.
+                                DisconnectPipeWireBtAutoLinks(capturedNodeName);
+
+                                // For fallback pw-record mode, also do link management
                                 if (_nativeStream == null && _captureProcess != null)
                                 {
-                                    DisconnectPipeWireBtAutoLinks(capturedNodeName);
                                     LinkPipeWireRecordToBtNode(capturedNodeName);
                                 }
                             }

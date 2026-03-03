@@ -296,7 +296,7 @@ public class AudioPreferencePersistence : IDisposable
   public const int MinSamplesForAutoGain = 10;
 
   /// <summary>EMA smoothing factor (0.1 = slow adaptation, ~30-sample effective window).</summary>
-  private const float EmaAlpha = 0.1f;
+  public const float EmaAlpha = 0.1f;
 
   /// <summary>
   /// Gets the learned RMS for a source type, or null if not enough data.
@@ -317,14 +317,14 @@ public class AudioPreferencePersistence : IDisposable
   /// <summary>
   /// Updates the learned RMS for a source using exponential moving average.
   /// </summary>
-  public void UpdateSourceLearnedRms(AudioSourceType sourceType, float rms)
+  public void UpdateSourceLearnedRms(AudioSourceType sourceType, float rms, float alpha = EmaAlpha)
   {
     lock (_sourceRmsLock)
     {
       var key = sourceType.ToString();
       if (_sourceLearnedRms.TryGetValue(key, out var existing))
       {
-        _sourceLearnedRms[key] = EmaAlpha * rms + (1 - EmaAlpha) * existing;
+        _sourceLearnedRms[key] = alpha * rms + (1 - alpha) * existing;
       }
       else
       {
