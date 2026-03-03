@@ -295,8 +295,13 @@ public class AudioPreferencePersistence : IDisposable
   /// <summary>Minimum samples before auto-gain is applied.</summary>
   public const int MinSamplesForAutoGain = 10;
 
-  /// <summary>EMA smoothing factor (0.1 = slow adaptation, ~30-sample effective window).</summary>
-  public const float EmaAlpha = 0.1f;
+  /// <summary>
+  /// EMA smoothing factor. 0.02 = very slow adaptation (~150-sample effective window,
+  /// ~7.5 minutes at 3s polling). This prevents gain from tracking individual song
+  /// dynamics (quiet verse → loud chorus) and instead learns the source's long-term
+  /// average loudness.
+  /// </summary>
+  public const float EmaAlpha = 0.02f;
 
   /// <summary>
   /// Gets the learned RMS for a source type, or null if not enough data.

@@ -20,8 +20,11 @@ public sealed class SourceLevelLearningService : BackgroundService
   /// <summary>Silence threshold — don't learn from near-silent audio.</summary>
   private const float SilenceThreshold = 0.001f;
 
-  /// <summary>Minimum gain change before applying (avoids jitter/pumping).</summary>
-  private const float GainChangeThreshold = 0.15f;
+  /// <summary>
+  /// Minimum gain change before applying. 0.5 means gain must differ by at least
+  /// 0.5x from current before we adjust — prevents audible pumping from music dynamics.
+  /// </summary>
+  private const float GainChangeThreshold = 0.5f;
 
   /// <summary>Max auto-gain — delegates to centralized constant.</summary>
   private const float MaxAutoGain = AudioPreferencePersistence.MaxGain;
@@ -31,6 +34,12 @@ public sealed class SourceLevelLearningService : BackgroundService
 
   /// <summary>Target peak for gain correction (~-1.4 dBFS, safely below unity).</summary>
   private const float TargetPeak = 0.85f;
+
+  /// <summary>Minimum interval between gain applications to prevent audible pumping.</summary>
+  private static readonly TimeSpan GainApplyInterval = TimeSpan.FromSeconds(30);
+
+  /// <summary>Tracks last gain apply time per source type.</summary>
+  private readonly Dictionary<AudioSourceType, DateTime> _lastGainApplyTime = new();
 
   public SourceLevelLearningService(
     ILogger<SourceLevelLearningService> logger,
@@ -157,6 +166,13 @@ public sealed class SourceLevelLearningService : BackgroundService
     if (Math.Abs(suggestedGain - currentGain) <= GainChangeThreshold)
       return;
 
+    // Rate limit: don't change gain more often than every 30s to prevent
+    // audible pumping from natural music dynamics (quiet verse → loud chorus)
+    var now = DateTime.UtcNow;
+    if (_lastGainApplyTime.TryGetValue(sourceType, out var lastApply) &&
+        now - lastApply < GainApplyInterval)
+      return;
+
     // Re-check mode right before applying — closes race window where user
     // changed gain (switching to manual) between our initial check and now
     if (_persistence.GetSourceGainMode(sourceType) != "auto")
@@ -165,6 +181,7 @@ public sealed class SourceLevelLearningService : BackgroundService
     // Apply auto-gain (internal — doesn't switch to manual mode)
     _persistence.SetSourceGainInternal(sourceType, suggestedGain);
     _audioManager.SetSourceGainInternal(sourceType, suggestedGain);
+    _lastGainApplyTime[sourceType] = now;
 
     _logger.LogInformation(
       "Auto-gain applied: {SourceType} learned RMS={LearnedRms:F4}, gain={Gain:F2} ({Samples} samples)",
