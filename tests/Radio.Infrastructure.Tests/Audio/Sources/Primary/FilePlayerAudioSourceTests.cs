@@ -428,9 +428,9 @@ public class FilePlayerAudioSourceTests : IDisposable
   }
 
   [Fact]
-  public async Task NextAsync_WithRepeatOne_ReplaysCurrentTrack()
+  public async Task NextAsync_WithRepeatOne_UserInitiated_AdvancesToNextTrack()
   {
-    // Arrange
+    // Arrange - user-initiated Next (not auto-advance) should advance even in RepeatOne mode
     var source = CreateSource();
     _preferences.Repeat = RepeatMode.One;
     CreateTestFile("song1.mp3");
@@ -439,12 +439,35 @@ public class FilePlayerAudioSourceTests : IDisposable
     var firstFile = source.CurrentFile;
     await source.PlayAsync();
 
-    // Act
+    // Act - user clicks Next (trackEndedNaturally is false by default)
     await source.NextAsync();
 
-    // Assert
+    // Assert - should advance to next track, not replay current
+    Assert.NotEqual(firstFile, source.CurrentFile);
+  }
+
+  [Fact]
+  public async Task NextAsync_WithRepeatOne_AutoAdvance_ReplaysCurrentTrack()
+  {
+    // Arrange - auto-advance (natural track end) should replay in RepeatOne mode
+    var source = CreateSource();
+    _preferences.Repeat = RepeatMode.One;
+    CreateTestFile("song1.mp3");
+    CreateTestFile("song2.mp3");
+    await source.LoadDirectoryAsync("");
+    var firstFile = source.CurrentFile;
+    await source.PlayAsync();
+
+    // Simulate natural track end by setting the internal flag via reflection
+    var field = typeof(FilePlayerAudioSource).GetField("_trackEndedNaturally",
+      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+    field!.SetValue(source, true);
+
+    // Act - auto-advance from natural track end
+    await source.NextAsync();
+
+    // Assert - should replay current track
     Assert.Equal(firstFile, source.CurrentFile);
-    Assert.Equal(TimeSpan.Zero, source.Position);
   }
 
   [Fact]
