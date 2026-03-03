@@ -71,7 +71,7 @@
         }
         else
         {
-          <div id="queue-scroll-container" style="flex: 1; overflow-y: auto; min-height: 0;">
+          <div id="queue-scroll-container" class="scrollable" style="flex: 1; overflow-y: auto; min-height: 0;">
             @foreach (var item in _queueItems)
             {
               var itemState = item.State ?? "Upcoming";
@@ -160,7 +160,7 @@
         }
         else if (_historyItems.Any())
         {
-          <div style="flex: 1; overflow-y: auto; min-height: 0;">
+          <div class="scrollable" style="flex: 1; overflow-y: auto; min-height: 0;">
             @foreach (var item in _historyItems)
             {
               <div class="list-item-touch">

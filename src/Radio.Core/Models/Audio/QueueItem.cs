@@ -113,5 +113,8 @@ public enum QueueChangeType
   Cleared,
 
   /// <summary>The current playing item changed.</summary>
-  CurrentChanged
+  CurrentChanged,
+
+  /// <summary>The queue was reordered (e.g., shuffle toggled).</summary>
+  Reordered
 }

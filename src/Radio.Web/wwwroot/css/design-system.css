@@ -1007,6 +1007,9 @@ html, body {
 .mud-tabs-vertical > .mud-tabs-panels { overflow-y: auto; overflow-x: hidden; }
 .mud-tabs-vertical > .mud-tabs-header { overflow: hidden; min-width: 160px; }
 
+/* Horizontal tabs inside panels — flex-fill so queue/history can scroll */
+.panel .mud-tabs > .mud-tabs-panels { flex: 1; overflow: hidden; min-height: 0; display: flex; flex-direction: column; }
+
 /* Nested horizontal config tabs — compact scrollable */
 .mud-tabs-vertical .mud-tabs:not(.mud-tabs-vertical) .mud-tab { min-height: 36px; font-size: 13px; padding: 0 10px; }
 .mud-tabs-vertical .mud-tabs:not(.mud-tabs-vertical) .mud-tabs-header { overflow-x: auto; flex-wrap: nowrap; }
@@ -1051,22 +1054,27 @@ button, .mud-button-root { min-width: var(--touch-compact); min-height: var(--to
 /* Show thin scrollbars only on explicitly scrollable containers */
 .scrollable,
 .mud-tabs-vertical > .mud-tabs-panels,
-.mud-table-container {
+.mud-table-container,
+#queue-scroll-container {
   scrollbar-width: thin;
   scrollbar-color: var(--surface-separator) transparent;
 }
 .scrollable::-webkit-scrollbar,
 .mud-tabs-vertical > .mud-tabs-panels::-webkit-scrollbar,
-.mud-table-container::-webkit-scrollbar { display: block; width: 6px; }
+.mud-table-container::-webkit-scrollbar,
+#queue-scroll-container::-webkit-scrollbar { display: block; width: 6px; }
 .scrollable::-webkit-scrollbar-track,
 .mud-tabs-vertical > .mud-tabs-panels::-webkit-scrollbar-track,
-.mud-table-container::-webkit-scrollbar-track { background: transparent; }
+.mud-table-container::-webkit-scrollbar-track,
+#queue-scroll-container::-webkit-scrollbar-track { background: transparent; }
 .scrollable::-webkit-scrollbar-thumb,
 .mud-tabs-vertical > .mud-tabs-panels::-webkit-scrollbar-thumb,
-.mud-table-container::-webkit-scrollbar-thumb { background: var(--surface-separator); border-radius: 3px; }
+.mud-table-container::-webkit-scrollbar-thumb,
+#queue-scroll-container::-webkit-scrollbar-thumb { background: var(--surface-separator); border-radius: 3px; }
 .scrollable::-webkit-scrollbar-thumb:hover,
 .mud-tabs-vertical > .mud-tabs-panels::-webkit-scrollbar-thumb:hover,
-.mud-table-container::-webkit-scrollbar-thumb:hover { background: var(--text-low); }
+.mud-table-container::-webkit-scrollbar-thumb:hover,
+#queue-scroll-container::-webkit-scrollbar-thumb:hover { background: var(--text-low); }
 
 
 /* ─── §20  Bottom-Sheet Dialogs ───────────────────────────────────────────── */

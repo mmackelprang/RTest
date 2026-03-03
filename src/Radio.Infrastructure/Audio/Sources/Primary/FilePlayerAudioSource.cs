@@ -302,12 +302,14 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
     // Track skip metric only for user-initiated skips (not auto-advance from end-of-track)
     var wasSkipped = State == AudioSourceState.Playing && _currentFile != null && !_trackEndedNaturally;
+    var isAutoAdvance = _trackEndedNaturally;
     _trackEndedNaturally = false;
 
-    // Handle RepeatMode.One - replay current track
-    if (_preferences.CurrentValue.Repeat == RepeatMode.One && _currentFile != null)
+    // Handle RepeatMode.One - only auto-replay on natural track end.
+    // User-initiated Next should advance to the next track even in RepeatOne mode.
+    if (_preferences.CurrentValue.Repeat == RepeatMode.One && _currentFile != null && isAutoAdvance)
     {
-      Logger.LogDebug("Repeat One enabled - replaying current track");
+      Logger.LogDebug("Repeat One enabled - replaying current track (auto-advance)");
       _position = TimeSpan.Zero;
       if (State == AudioSourceState.Playing)
       {
@@ -518,56 +520,72 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     _preferences.CurrentValue.Shuffle = enabled;
     Logger.LogInformation("Shuffle mode set to {Enabled}", enabled);
 
-    // Rebuild playlist with current state
-    var remainingTracks = _playlist.ToList();
-    
-    // Add current file to the list if it exists
-    if (_currentFile != null)
-    {
-      remainingTracks.Insert(0, _currentFile);
-    }
+    List<string> remainingTracks;
 
-    if (enabled)
+    lock (_playlistLock)
     {
-      // Enable shuffle - randomize remaining tracks except current
-      if (_currentFile != null && remainingTracks.Count > 1)
+      // Rebuild playlist with current state
+      remainingTracks = _playlist.ToList();
+
+      // Add current file to the list if it exists
+      if (_currentFile != null)
       {
-        var current = remainingTracks[0];
-        var toShuffle = remainingTracks.Skip(1).ToList();
-        toShuffle = ShuffleList(toShuffle);
-        remainingTracks = new List<string> { current };
-        remainingTracks.AddRange(toShuffle);
+        remainingTracks.Insert(0, _currentFile);
       }
-    }
-    else
-    {
-      // Disable shuffle - restore original order for remaining tracks
-      if (_originalOrder.Count > 0)
+
+      if (enabled)
       {
-        // Find current position in original order
-        var currentIndex = _currentFile != null ? _originalOrder.IndexOf(_currentFile) : -1;
-        
-        if (currentIndex >= 0)
+        // Enable shuffle - randomize remaining tracks except current
+        if (_currentFile != null && remainingTracks.Count > 1)
         {
-          // Rebuild playlist with remaining tracks in original order
-          remainingTracks = _originalOrder.Skip(currentIndex).ToList();
+          var current = remainingTracks[0];
+          var toShuffle = remainingTracks.Skip(1).ToList();
+          toShuffle = ShuffleList(toShuffle);
+          remainingTracks = new List<string> { current };
+          remainingTracks.AddRange(toShuffle);
         }
-        else
+        else if (_currentFile == null && remainingTracks.Count > 1)
         {
-          // Couldn't find current in original order - just sort what we have
-          remainingTracks.Sort();
+          // Nothing playing yet - shuffle the entire list
+          remainingTracks = ShuffleList(remainingTracks);
         }
       }
+      else
+      {
+        // Disable shuffle - restore original order for remaining tracks
+        if (_originalOrder.Count > 0)
+        {
+          // Find current position in original order
+          var currentIndex = _currentFile != null ? _originalOrder.IndexOf(_currentFile) : -1;
+
+          if (currentIndex >= 0)
+          {
+            // Rebuild playlist with remaining tracks in original order
+            remainingTracks = _originalOrder.Skip(currentIndex).ToList();
+          }
+          else
+          {
+            // Couldn't find current in original order - just sort what we have
+            remainingTracks.Sort();
+          }
+        }
+      }
+
+      // Remove current file from list and rebuild playlist
+      if (_currentFile != null && remainingTracks.Count > 0 && remainingTracks[0] == _currentFile)
+      {
+        remainingTracks.RemoveAt(0);
+      }
+
+      _playlist = new Queue<string>(remainingTracks);
     }
 
-    // Remove current file from list and rebuild playlist
-    if (_currentFile != null && remainingTracks.Count > 0 && remainingTracks[0] == _currentFile)
+    // Notify listeners that the queue order has changed
+    OnQueueChanged(new QueueChangedEventArgs
     {
-      remainingTracks.RemoveAt(0);
-    }
+      ChangeType = QueueChangeType.Reordered
+    });
 
-    _playlist = new Queue<string>(remainingTracks);
-    
     await Task.CompletedTask;
   }
 
