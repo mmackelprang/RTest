@@ -271,4 +271,18 @@ public class AudioApiService
       return false;
     }
   }
+
+  public async Task<bool> ReportDistortionAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var response = await _httpClient.PostAsync("/api/audio/debug/distortion-marker", null, cancellationToken);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to report distortion marker");
+      return false;
+    }
+  }
 }

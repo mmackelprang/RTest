@@ -1300,6 +1300,12 @@ body {
 
 /* ─── §26  Accessibility: Reduced Motion ──────────────────────────────────── */
 
+/* ─── Debug: Distortion Marker Button (temporary) ────────────────────────── */
+
+.debug-distortion-btn { opacity: 0.5; transition: opacity 0.2s; }
+.debug-distortion-btn:hover { opacity: 1; }
+
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

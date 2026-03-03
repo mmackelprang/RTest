@@ -664,6 +664,17 @@ public class SoundFlowPlaybackService : IDisposable
   }
 
   /// <summary>
+  /// Gets diagnostic info about active players and components (for debug markers).
+  /// </summary>
+  public (int ActivePlayers, int ActiveComponents, string[] PlayerIds) GetDiagnostics()
+  {
+    lock (_playersLock)
+    {
+      return (_activePlayers.Count, _activeComponents.Count, _activePlayers.Keys.ToArray());
+    }
+  }
+
+  /// <summary>
   /// Stops all active playback.
   /// </summary>
   public void StopAll()

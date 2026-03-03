@@ -74,6 +74,14 @@
       }
     </div>
 
+    <!-- Debug: Distortion Marker (temporary — remove when done diagnosing) -->
+    <MudIconButton Icon="@Icons.Material.Filled.BugReport"
+                   Color="@_distortionMarkerColor"
+                   Size="Size.Large"
+                   title="Mark audio distortion"
+                   OnClick="HandleDistortionMarkerAsync"
+                   Class="debug-distortion-btn" />
+
     <!-- Navigation Icons (right-aligned) -->
     <div class="topbar-nav">
       <MudIconButton Icon="@Icons.Material.Filled.Home" Class="@NavClass("/")" Href="/" Size="Size.Large" title="Home" />
@@ -111,6 +119,7 @@
   private bool _showCastDropdown;
 
   private int _queueCount = 0;
+  private Color _distortionMarkerColor = Color.Default;
 
   private readonly MudTheme _customTheme = new()
   {
@@ -569,6 +578,16 @@
 
   private static bool IsRadioSource(string sourceType) =>
     sourceType is "Radio" or "RTLSDRCore" or "RF320";
+
+  private async Task HandleDistortionMarkerAsync()
+  {
+    _distortionMarkerColor = Color.Error;
+    StateHasChanged();
+    await AudioApi.ReportDistortionAsync();
+    await Task.Delay(1000);
+    _distortionMarkerColor = Color.Default;
+    StateHasChanged();
+  }
 
   private async Task HandleQueueNavAsync()
   {
