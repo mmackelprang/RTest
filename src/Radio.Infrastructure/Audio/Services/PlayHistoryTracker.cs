@@ -124,7 +124,13 @@ public class PlayHistoryTracker : IDisposable
       // For Bluetooth: if metadata is still just the device name (placeholder),
       // don't create an entry yet. OnBluetoothMetadataChanged will handle it
       // when real AVRCP metadata arrives.
-      if (playSource == PlaySource.Bluetooth && IsPlaceholderMetadata(newTitle, newArtist, playSource))
+      string? btDeviceName = null;
+      if (playSource == PlaySource.Bluetooth && source is IPrimaryAudioSource ps2 &&
+          ps2.Metadata?.TryGetValue("Device", out var deviceObj) == true)
+        btDeviceName = deviceObj?.ToString();
+
+      if (playSource == PlaySource.Bluetooth &&
+          IsPlaceholderMetadata(newTitle, newArtist, playSource, btDeviceName))
       {
         _logger.LogDebug(
           "Skipping BT play history entry with placeholder metadata '{Title}' — waiting for AVRCP",
@@ -144,7 +150,7 @@ public class PlayHistoryTracker : IDisposable
       }
 
       // Check for a recent entry from the same source to upsert against
-      var recentEntries = await playHistoryRepository.GetRecentAsync(5);
+      var recentEntries = await playHistoryRepository.GetRecentAsync(10);
       var lastForSource = recentEntries?.FirstOrDefault(e => e.Source == playSource);
 
       if (lastForSource != null)
@@ -166,7 +172,7 @@ public class PlayHistoryTracker : IDisposable
         // Recent entry with placeholder/incomplete metadata → update it instead of inserting.
         // This catches: BT device name → real track, or partial AVRCP → full AVRCP.
         // "Recent" = within 30s for the same source (covers BT state re-fires).
-        if (secondsSinceLast < 30 && IsPlaceholderMetadata(existingTitle, existingArtist, playSource))
+        if (secondsSinceLast < 30 && IsPlaceholderMetadata(existingTitle, existingArtist, playSource, btDeviceName))
         {
           // Persist the new (better) metadata
           var metadataRepository = scope.ServiceProvider.GetService<ITrackMetadataRepository>();
@@ -250,9 +256,15 @@ public class PlayHistoryTracker : IDisposable
   /// Determines if the given title+artist represent placeholder/fallback metadata
   /// rather than real track information (e.g., BT device name, source type name).
   /// </summary>
-  private static bool IsPlaceholderMetadata(string? title, string? artist, PlaySource source)
+  private static bool IsPlaceholderMetadata(
+    string? title, string? artist, PlaySource source, string? btDeviceName = null)
   {
     if (string.IsNullOrWhiteSpace(title)) return true;
+
+    // BT device name (e.g., "Pixel 8 Pro") used as title before AVRCP arrives
+    if (source == PlaySource.Bluetooth && btDeviceName != null &&
+        string.Equals(title, btDeviceName, StringComparison.OrdinalIgnoreCase))
+      return true;
 
     // Source-type fallback artists indicate no real metadata was available
     var fallbackArtist = source switch
@@ -549,9 +561,10 @@ public class PlayHistoryTracker : IDisposable
       if (playHistoryRepository == null) return;
       var metadataRepository = scope.ServiceProvider.GetService<ITrackMetadataRepository>();
 
-      // Dedup: skip if this exact title+artist was recently played
+      // Dedup: skip if this exact title+artist was recently played (5-min window
+      // matches cross-source dedup in UpsertPlayHistoryAsync, covers source-switch scenarios)
       var isDuplicate = await playHistoryRepository.ExistsRecentlyPlayedAsync(
-        e.Title, e.Artist, withinMinutes: 2);
+        e.Title, e.Artist, withinMinutes: 5);
       if (isDuplicate)
       {
         _logger.LogDebug(
@@ -595,8 +608,15 @@ public class PlayHistoryTracker : IDisposable
           string.Equals(existingArtist, e.Artist, StringComparison.OrdinalIgnoreCase))
         return;
 
+      // Get BT device name for placeholder detection (e.g., "Pixel 8 Pro")
+      string? btDeviceName = null;
+      if (_getActiveSource() is IPrimaryAudioSource btSource &&
+          btSource.Metadata?.TryGetValue("Device", out var devObj) == true)
+        btDeviceName = devObj?.ToString();
+
       // Case 3: Current entry is a placeholder (device name) — update in place
-      if (IsPlaceholderMetadata(existingTitle, existingArtist, PlaySource.Bluetooth))
+      if (entry.Source == PlaySource.Bluetooth &&
+          IsPlaceholderMetadata(existingTitle, existingArtist, PlaySource.Bluetooth, btDeviceName))
       {
         metadata = metadata with { Id = entry.TrackMetadataId ?? metadata.Id };
         if (metadataRepository != null)
@@ -618,11 +638,15 @@ public class PlayHistoryTracker : IDisposable
         return;
       }
 
-      // Case 4: Different real song — finalize old entry and create new one
-      await playHistoryRepository.FinalizeEntryAsync(entry.Id, DateTime.UtcNow);
-      _logger.LogInformation(
-        "Finalized BT play history entry {EntryId} ('{Title}' by '{Artist}')",
-        entry.Id, existingTitle, existingArtist);
+      // Case 4: Different real song — finalize old entry only if it's from BT
+      // (don't finalize Radio/File entries from the BT metadata handler)
+      if (entry.Source == PlaySource.Bluetooth)
+      {
+        await playHistoryRepository.FinalizeEntryAsync(entry.Id, DateTime.UtcNow);
+        _logger.LogInformation(
+          "Finalized BT play history entry {EntryId} ('{Title}' by '{Artist}')",
+          entry.Id, existingTitle, existingArtist);
+      }
 
       await CreateBluetoothHistoryEntryAsync(playHistoryRepository, metadataRepository, metadata, e);
     }
