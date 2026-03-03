@@ -37,6 +37,8 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         private CancellationTokenSource? _captureCts;
         private object? _activeGenerator;
         private string? _activeNodeName;
+        // Note: PipeWire's bluez5 module manages node volume from AVRCP transport
+        // automatically with proper cubic (perceptual) mapping. No pw-cli override needed.
         private DateTime? _connectionStartTime;
 
         // Player tracking
@@ -740,7 +742,9 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                         _activeGenerator = generator;
                         _activeNodeName = nodeName;
 
-                        // Set BT source node master volume to 1.0 after AVRCP settles
+                        // Deferred task: disconnect auto-links after PipeWire settles.
+                        // PipeWire's bluez5 module handles AVRCP→node volume natively
+                        // with cubic (perceptual) mapping — no pw-cli override needed.
                         var captureCt = _captureCts!.Token;
                         var capturedNodeName = nodeName;
                         _ = Task.Run(async () =>
@@ -748,7 +752,6 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                             try
                             {
                                 await Task.Delay(1500, captureCt);
-                                await SetPipeWireNodeVolumeAsync(nodeId);
 
                                 // Disconnect PipeWire/WirePlumber auto-links from
                                 // bluez_input → default sink. Without this, BT audio
@@ -765,7 +768,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                             catch (OperationCanceledException) { }
                             catch (Exception ex)
                             {
-                                _logger.LogDebug(ex, "Deferred volume setup failed for node {NodeId}", nodeId);
+                                _logger.LogDebug(ex, "Deferred link setup failed for node {NodeId}", nodeId);
                             }
                         }, captureCt);
 
@@ -920,53 +923,10 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             return (null, 0, 0);
         }
 
-        /// <summary>
-        /// Sets the PipeWire node's master volume to 1.0 so pw-record captures at full level.
-        /// BT A2DP source nodes inherit the AVRCP transport volume from the phone (often ~0.11),
-        /// which causes very faint capture audio. We override the node-level "volume" property
-        /// via pw-cli set-param (NOT wpctl set-volume, which only sets channelVolumes).
-        /// </summary>
-        private async Task SetPipeWireNodeVolumeAsync(int pipeWireNodeId)
-        {
-            if (pipeWireNodeId <= 0) return;
-
-            try
-            {
-                // pw-cli set-param sets the node's master volume property directly.
-                // wpctl set-volume only changes channelVolumes, not the master volume
-                // that BlueZ/AVRCP sets — so we must use pw-cli here.
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "pw-cli",
-                    Arguments = $"set-param {pipeWireNodeId} Props '{{\"volume\": 1.0}}'",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-
-                using var process = Process.Start(psi);
-                if (process != null)
-                {
-                    await process.WaitForExitAsync();
-                    if (process.ExitCode == 0)
-                    {
-                        _logger.LogInformation(
-                            "Set PipeWire BT node {NodeId} master volume to 1.0 for full capture level", pipeWireNodeId);
-                    }
-                    else
-                    {
-                        var stderr = await process.StandardError.ReadToEndAsync();
-                        _logger.LogDebug("pw-cli set-param {NodeId} failed: exit={ExitCode}, {Stderr}",
-                            pipeWireNodeId, process.ExitCode, stderr.TrimEnd());
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Failed to set PipeWire node volume for {NodeId}", pipeWireNodeId);
-            }
-        }
+        // Note: SetPipeWireNodeVolumeAsync removed — PipeWire's bluez5 module manages
+        // node volume from AVRCP transport natively with cubic perceptual mapping.
+        // Previously we forced volume=1.0 here, which defeated AVRCP and required
+        // the entire auto-gain learning system. Now we let PipeWire handle it.
 
         private void StartCaptureSubprocess(
             BufferedSoundGenerator<float> generator, AudioFormat format, string targetNode,

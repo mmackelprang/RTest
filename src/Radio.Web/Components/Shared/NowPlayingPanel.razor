@@ -143,11 +143,9 @@
     {
       <div style="position: absolute; top: 16px; right: 16px; display: flex; align-items: center; gap: 4px;">
         <MudChip T="string" Color="Color.Primary" Size="Size.Small">@_source</MudChip>
-        @{ var _chipMode = GetCurrentGainMode(); }
         @if (_currentSourceGain != 1.0f)
         {
-          <MudChip T="string" Size="Size.Small"
-                   Color="@(_chipMode == "manual" ? Color.Warning : Color.Success)"
+          <MudChip T="string" Size="Size.Small" Color="Color.Secondary"
                    Style="font-family: var(--font-mono); font-size: 11px; cursor: pointer;"
                    OnClick="ToggleGainPopover">@FormatGainDb(_currentSourceGain)</MudChip>
         }
@@ -175,7 +173,7 @@
                          OnClick="() => NudgeGain(-0.05f)" Style="padding: 2px; min-width: 28px;" title="-0.25dB" />
           <MudSlider T="float" Value="@_currentSourceGain"
                      ValueChanged="@OnGainSliderChanged"
-                     Min="0.0f" Max="25.0f" Step="0.1f"
+                     Min="0.0f" Max="2.0f" Step="0.05f"
                      Color="Color.Secondary" Size="Size.Small" Style="flex: 1;" />
           <MudIconButton Icon="@Icons.Material.Filled.Add" Size="Size.Small" Color="Color.Secondary"
                          OnClick="() => NudgeGain(0.05f)" Style="padding: 2px; min-width: 28px;" title="+0.25dB" />
@@ -184,34 +182,6 @@
           <span>-∞</span>
           <span>0dB</span>
           <span>+6dB</span>
-        </div>
-        @{ var _popoverAutoInfo = GetCurrentAutoGainInfo(); }
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.08);">
-          @if (_popoverAutoInfo?.Mode == "manual")
-          {
-            <MudChip T="string" Size="Size.Small" Color="Color.Warning"
-                     Style="font-size: 9px; height: 18px;">MANUAL</MudChip>
-            <MudButton Size="Size.Small" Color="Color.Warning" Variant="Variant.Text"
-                       StartIcon="@Icons.Material.Filled.Refresh"
-                       OnClick="ResetCurrentSourceToAutoAsync"
-                       Style="font-size: 11px; text-transform: none; padding: 0 4px;">Reset to Auto</MudButton>
-          }
-          else if (_popoverAutoInfo != null && _popoverAutoInfo.SampleCount >= 10)
-          {
-            <MudChip T="string" Size="Size.Small" Color="Color.Success"
-                     Style="font-size: 9px; height: 18px;">AUTO</MudChip>
-            <MudText Typo="Typo.caption" Style="font-size: 10px; color: var(--text-low);">
-              Measured: @FormatRmsDb(_popoverAutoInfo.LearnedRms)
-            </MudText>
-          }
-          else
-          {
-            <MudChip T="string" Size="Size.Small" Color="Color.Default"
-                     Style="font-size: 9px; height: 18px; opacity: 0.5;">AUTO</MudChip>
-            <MudText Typo="Typo.caption" Style="font-size: 10px; color: var(--text-low);">
-              Learning... (@(_popoverAutoInfo?.SampleCount ?? 0)/10 samples)
-            </MudText>
-          }
         </div>
       </div>
     }
@@ -325,9 +295,7 @@
   private string? _nowPlayingSourceType;
   private bool _showGainPopover;
   private Dictionary<string, float> _sourceGainOffsets = new();
-  private Dictionary<string, AutoGainInfoDto> _autoGainStatus = new();
   private System.Threading.Timer? _gainDebounceTimer;
-  private int _timerTickCount;
 
   private bool _hasValidAlbumArt =>
     !_albumArtFailed
@@ -362,15 +330,6 @@
     try
     {
       await RefreshPlaybackStateAsync();
-
-      // Refresh auto-gain status every ~30s (every 6th tick of the 5s timer)
-      _timerTickCount++;
-      if (_timerTickCount % 6 == 0)
-      {
-        await LoadSourceGainOffsetsAsync();
-        if (!string.IsNullOrEmpty(_nowPlayingSourceType))
-          _currentSourceGain = _sourceGainOffsets.TryGetValue(_nowPlayingSourceType, out var g) ? g : 1.0f;
-      }
 
       await InvokeAsync(StateHasChanged);
     }
@@ -596,7 +555,6 @@
     try
     {
       _sourceGainOffsets = await AudioApi.GetSourceGainOffsetsAsync() ?? new();
-      _autoGainStatus = await AudioApi.GetAutoGainStatusAsync() ?? new();
     }
     catch (Exception ex)
     {
@@ -616,7 +574,7 @@
 
   private void NudgeGain(float delta)
   {
-    var newGain = Math.Clamp(_currentSourceGain + delta, 0f, 25f);
+    var newGain = Math.Clamp(_currentSourceGain + delta, 0f, 2f);
     OnGainSliderChanged(newGain);
   }
 
@@ -625,9 +583,6 @@
     if (string.IsNullOrEmpty(_nowPlayingSourceType)) return;
     _currentSourceGain = newGain;
     _sourceGainOffsets[_nowPlayingSourceType] = newGain;
-    // Mark as manual locally for responsive UI
-    if (_autoGainStatus.TryGetValue(_nowPlayingSourceType, out var info))
-      info.Mode = "manual";
 
     // Debounce the API call
     _gainDebounceTimer?.Dispose();
@@ -650,37 +605,6 @@
     if (gain <= 0.001f) return "-∞dB";
     var db = 20.0 * Math.Log10(gain);
     return db >= 0 ? $"+{db:F1}dB" : $"{db:F1}dB";
-  }
-
-  private static string FormatRmsDb(float? rms)
-  {
-    if (!rms.HasValue || rms.Value <= 0.0001f) return "-∞ dB";
-    var db = 20.0 * Math.Log10(rms.Value);
-    return $"{db:F1} dB";
-  }
-
-  private string GetCurrentGainMode()
-  {
-    if (string.IsNullOrEmpty(_nowPlayingSourceType)) return "auto";
-    return _autoGainStatus.TryGetValue(_nowPlayingSourceType, out var info) ? info.Mode : "auto";
-  }
-
-  private AutoGainInfoDto? GetCurrentAutoGainInfo()
-  {
-    if (string.IsNullOrEmpty(_nowPlayingSourceType)) return null;
-    return _autoGainStatus.TryGetValue(_nowPlayingSourceType, out var info) ? info : null;
-  }
-
-  private async Task ResetCurrentSourceToAutoAsync()
-  {
-    if (string.IsNullOrEmpty(_nowPlayingSourceType)) return;
-    var success = await AudioApi.ResetSourceGainToAutoAsync(_nowPlayingSourceType);
-    if (success)
-    {
-      await LoadSourceGainOffsetsAsync();
-      _currentSourceGain = _sourceGainOffsets.TryGetValue(_nowPlayingSourceType, out var g) ? g : 1.0f;
-      StateHasChanged();
-    }
   }
 
   // --- Existing handlers ---

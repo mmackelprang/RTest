@@ -49,6 +49,7 @@ public class BluetoothOptions
   /// (no Cast/viz for BT audio).
   /// </summary>
   public bool EnableLoopbackCapture { get; set; } = true;
+
 }
 
 /// <summary>
