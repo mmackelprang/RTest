@@ -544,6 +544,11 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
           remainingTracks = new List<string> { current };
           remainingTracks.AddRange(toShuffle);
         }
+        else if (_currentFile == null && remainingTracks.Count > 1)
+        {
+          // Nothing playing yet - shuffle the entire list
+          remainingTracks = ShuffleList(remainingTracks);
+        }
       }
       else
       {
