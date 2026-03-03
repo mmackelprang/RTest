@@ -286,11 +286,11 @@ public class AudioPreferencePersistence : IDisposable
   /// <summary>
   /// Maximum gain multiplier. BT A2DP capture can be very quiet (~0.002 RMS / -55 dBFS)
   /// because PipeWire applies the phone's AVRCP transport volume to the source node.
-  /// At typical phone volumes, 60-80x gain is needed to reach the -18 dBFS target.
-  /// This is safe because the gain is applied digitally in the mixer and BT audio
-  /// peaks are well below unity even at high gain.
+  /// Gain is applied digitally in the mixer. Capped at 25 to prevent clipping on
+  /// transient peaks (BT music crest factor ~10-15 dB means peaks at 0.02-0.03 raw,
+  /// so 25x gain yields peaks around 0.5-0.75, safely below unity).
   /// </summary>
-  public const float MaxGain = 100.0f;
+  public const float MaxGain = 25.0f;
 
   /// <summary>Minimum samples before auto-gain is applied.</summary>
   public const int MinSamplesForAutoGain = 10;
