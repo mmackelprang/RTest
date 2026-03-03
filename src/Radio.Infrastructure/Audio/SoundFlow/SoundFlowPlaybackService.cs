@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Logging;
-using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Services;
 using SoundFlow.Abstracts;
 using SoundFlow.Abstracts.Devices;
@@ -14,15 +13,15 @@ namespace Radio.Infrastructure.Audio.SoundFlow;
 /// <summary>
 /// Service that manages SoundFlow playback for audio sources.
 /// Provides methods to play audio through the SoundFlow engine.
+/// Visualization is handled exclusively by the MasterMixer-level tap in SoundFlowAudioEngine,
+/// which sees post-Volume (post-gain) audio — critical for correct auto-gain normalization.
 /// </summary>
 public class SoundFlowPlaybackService : IDisposable
 {
   private readonly ILogger<SoundFlowPlaybackService> _logger;
   private readonly SoundFlowAudioEngine _audioEngine;
-  private readonly IVisualizerService? _visualizerService;
   private readonly Dictionary<string, SoundPlayer> _activePlayers = new();
   private readonly Dictionary<string, SoundComponent> _activeComponents = new();
-  private readonly Dictionary<string, VisualizationTapModifier> _visualizationTaps = new();
   private readonly Dictionary<string, float> _baseVolumes = new();
   private readonly Dictionary<string, float> _gainOffsets = new();
   private readonly object _playersLock = new();
@@ -33,20 +32,13 @@ public class SoundFlowPlaybackService : IDisposable
   /// </summary>
   public SoundFlowPlaybackService(
     ILogger<SoundFlowPlaybackService> logger,
-    SoundFlowAudioEngine audioEngine,
-    IVisualizerService? visualizerService = null)
+    SoundFlowAudioEngine audioEngine)
   {
     _logger = logger;
     _audioEngine = audioEngine;
-    _visualizerService = visualizerService;
 
     // Re-attach active components/players when the playback device changes
     _audioEngine.PlaybackDeviceSwitched += OnPlaybackDeviceSwitched;
-
-    if (_visualizerService != null)
-    {
-      _logger.LogInformation("SoundFlowPlaybackService initialized with visualization tap support");
-    }
   }
 
   /// <summary>
@@ -142,23 +134,6 @@ public class SoundFlowPlaybackService : IDisposable
       soundPlayer.Volume = Math.Clamp(volume * gainOffset, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
       _logger.LogDebug("PlayFileAsync: SoundPlayer created, Volume: {Volume}, GainOffset: {Gain}", volume, gainOffset);
 
-      // Add visualization tap if visualizer service is available
-      VisualizationTapModifier? tapModifier = null;
-      if (_visualizerService != null)
-      {
-        try
-        {
-          tapModifier = new VisualizationTapModifier(_visualizerService, format);
-          soundPlayer.AddModifier(tapModifier);
-          _logger.LogDebug("PlayFileAsync: Added visualization tap modifier");
-        }
-        catch (Exception ex)
-        {
-          _logger.LogWarning(ex, "PlayFileAsync: Failed to add visualization tap modifier");
-          tapModifier = null;
-        }
-      }
-
       // Add to the playback device's mixer
       _logger.LogDebug("PlayFileAsync: Adding to mixer...");
       playbackDevice.MasterMixer.AddComponent(soundPlayer);
@@ -169,14 +144,10 @@ public class SoundFlowPlaybackService : IDisposable
       soundPlayer.Play();
       _logger.LogDebug("PlayFileAsync: Playback started, State: {State}", soundPlayer.State);
 
-      // Track the player and tap
+      // Track the player
       lock (_playersLock)
       {
         _activePlayers[sourceId] = soundPlayer;
-        if (tapModifier != null)
-        {
-          _visualizationTaps[sourceId] = tapModifier;
-        }
       }
 
       var fileName = Path.GetFileName(filePath);
@@ -288,37 +259,16 @@ public class SoundFlowPlaybackService : IDisposable
       }
       soundPlayer.Volume = Math.Clamp(volume * streamGainOffset, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
 
-      // Add visualization tap if visualizer service is available
-      VisualizationTapModifier? tapModifier = null;
-      if (_visualizerService != null)
-      {
-        try
-        {
-          tapModifier = new VisualizationTapModifier(_visualizerService, format);
-          soundPlayer.AddModifier(tapModifier);
-          _logger.LogDebug("PlayStreamAsync: Added visualization tap modifier");
-        }
-        catch (Exception ex)
-        {
-          _logger.LogWarning(ex, "PlayStreamAsync: Failed to add visualization tap modifier");
-          tapModifier = null;
-        }
-      }
-
       // Add to the playback device's mixer
       playbackDevice.MasterMixer.AddComponent(soundPlayer);
 
       // Start playback
       soundPlayer.Play();
 
-      // Track the player and tap
+      // Track the player
       lock (_playersLock)
       {
         _activePlayers[sourceId] = soundPlayer;
-        if (tapModifier != null)
-        {
-          _visualizationTaps[sourceId] = tapModifier;
-        }
       }
 
       _logger.LogInformation("Started stream playback for source {SourceId}", sourceId);
@@ -374,37 +324,16 @@ public class SoundFlowPlaybackService : IDisposable
       }
       soundPlayer.Volume = Math.Clamp(volume * dpGainOffset, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
 
-      // Add visualization tap if visualizer service is available
-      VisualizationTapModifier? tapModifier = null;
-      if (_visualizerService != null)
-      {
-        try
-        {
-          tapModifier = new VisualizationTapModifier(_visualizerService, format);
-          soundPlayer.AddModifier(tapModifier);
-          _logger.LogDebug("PlayDataProviderAsync: Added visualization tap modifier");
-        }
-        catch (Exception ex)
-        {
-          _logger.LogWarning(ex, "PlayDataProviderAsync: Failed to add visualization tap modifier");
-          tapModifier = null;
-        }
-      }
-
       // Add to the playback device's mixer
       playbackDevice.MasterMixer.AddComponent(soundPlayer);
 
       // Start playback
       soundPlayer.Play();
 
-      // Track the player and tap
+      // Track the player
       lock (_playersLock)
       {
         _activePlayers[sourceId] = soundPlayer;
-        if (tapModifier != null)
-        {
-          _visualizationTaps[sourceId] = tapModifier;
-        }
       }
 
       _logger.LogInformation("Started data provider playback for source {SourceId}", sourceId);
@@ -458,23 +387,6 @@ public class SoundFlowPlaybackService : IDisposable
       }
       component.Volume = Math.Clamp(volume * compGainOffset, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
 
-      // Add visualization tap if visualizer service is available
-      VisualizationTapModifier? tapModifier = null;
-      if (_visualizerService != null)
-      {
-        try
-        {
-          tapModifier = new VisualizationTapModifier(_visualizerService, component.Format);
-          component.AddModifier(tapModifier);
-          _logger.LogDebug("PlayComponentAsync: Added visualization tap modifier to {ComponentName}", component.Name ?? component.GetType().Name);
-        }
-        catch (Exception ex)
-        {
-          _logger.LogWarning(ex, "PlayComponentAsync: Failed to add visualization tap modifier");
-          tapModifier = null;
-        }
-      }
-
       // Add to the playback device's mixer
       _logger.LogInformation(
         "🔊 AUDIO ROUTING: Adding component '{ComponentName}' to SoundFlow mixer (SourceId={SourceId}, Volume={Volume:P0})",
@@ -482,14 +394,10 @@ public class SoundFlowPlaybackService : IDisposable
 
       playbackDevice.MasterMixer.AddComponent(component);
 
-      // Track the component and tap
+      // Track the component
       lock (_playersLock)
       {
         _activeComponents[sourceId] = component;
-        if (tapModifier != null)
-        {
-          _visualizationTaps[sourceId] = tapModifier;
-        }
       }
 
       _logger.LogInformation(
@@ -566,7 +474,6 @@ public class SoundFlowPlaybackService : IDisposable
 
     SoundPlayer? player = null;
     SoundComponent? component = null;
-    VisualizationTapModifier? tapModifier = null;
     lock (_playersLock)
     {
       if (_activePlayers.TryGetValue(sourceId, out player))
@@ -576,10 +483,6 @@ public class SoundFlowPlaybackService : IDisposable
       if (_activeComponents.TryGetValue(sourceId, out component))
       {
         _activeComponents.Remove(sourceId);
-      }
-      if (_visualizationTaps.TryGetValue(sourceId, out tapModifier))
-      {
-        _visualizationTaps.Remove(sourceId);
       }
       _baseVolumes.Remove(sourceId);
       // Keep _gainOffsets — they persist across stop/start for the same source
@@ -594,9 +497,6 @@ public class SoundFlowPlaybackService : IDisposable
         _logger.LogInformation(
           "🔇 AUDIO ROUTING: Removing player from SoundFlow mixer (SourceId={SourceId})",
           sourceId);
-
-        // Flush any remaining visualization data
-        tapModifier?.Flush();
 
         player.Stop();
         playbackDevice?.MasterMixer.RemoveComponent(player);
@@ -619,9 +519,6 @@ public class SoundFlowPlaybackService : IDisposable
         _logger.LogInformation(
           "🔇 AUDIO ROUTING: Removing component '{ComponentName}' from SoundFlow mixer (SourceId={SourceId})",
           componentName, sourceId);
-
-        // Flush any remaining visualization data
-        tapModifier?.Flush();
 
         playbackDevice?.MasterMixer.RemoveComponent(component);
         component.Dispose();
@@ -801,20 +698,6 @@ public class SoundFlowPlaybackService : IDisposable
     // Stop all first, then set disposed
     lock (_playersLock)
     {
-      // Flush and clear visualization taps
-      foreach (var tap in _visualizationTaps.Values)
-      {
-        try
-        {
-          tap.Flush();
-        }
-        catch
-        {
-          // Ignore flush errors
-        }
-      }
-      _visualizationTaps.Clear();
-
       foreach (var player in _activePlayers.Values)
       {
         try

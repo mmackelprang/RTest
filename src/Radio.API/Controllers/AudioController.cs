@@ -591,7 +591,7 @@ public class AudioController : ControllerBase
   /// Sets the gain offset for a specific source type.
   /// </summary>
   /// <param name="sourceType">The source type name (e.g., Radio, FilePlayer, Bluetooth).</param>
-  /// <param name="gain">Linear gain multiplier (0.0-2.0, 1.0 = unity/0dB).</param>
+  /// <param name="gain">Linear gain multiplier (0.0-100.0, 1.0 = unity/0dB).</param>
   [HttpPost("sourcegain/{sourceType}/{gain:float}")]
   [ProducesResponseType(StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -603,8 +603,8 @@ public class AudioController : ControllerBase
     if (!Enum.TryParse<Radio.Core.Interfaces.Audio.AudioSourceType>(sourceType, ignoreCase: true, out var parsed))
       return BadRequest(new { error = $"Invalid source type '{sourceType}'. Valid: Radio, Vinyl, FilePlayer, GenericUSB, Bluetooth" });
 
-    if (gain < 0f || gain > 2f)
-      return BadRequest(new { error = "Gain must be between 0.0 and 2.0" });
+    if (gain < 0f || gain > 100f)
+      return BadRequest(new { error = "Gain must be between 0.0 and 100.0" });
 
     _audioManager.SetSourceGain(parsed, gain);
     _logger.LogInformation("Source gain set: {SourceType} = {Gain:F2}", sourceType, gain);
