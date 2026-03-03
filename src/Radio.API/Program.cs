@@ -95,6 +95,12 @@ builder.Services.AddHostedService<VisualizationBroadcastService>();
 // Add the audio state update background service
 builder.Services.AddHostedService<AudioStateUpdateService>();
 
+// Add rotary encoder background service (gated by RotaryEncoder:Enabled)
+builder.Services.AddHostedService<RotaryEncoderHostedService>();
+
+// Add phone call integration background service (gated by PhoneIntegration:Enabled)
+builder.Services.AddHostedService<PhoneCallIntegrationService>();
+
 builder.Services.PostConfigure<Microsoft.Extensions.Hosting.HostOptions>(_ => { });
 
 

@@ -6,9 +6,11 @@ using Radio.API.Hubs;
 using Radio.API.Mappers;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Interfaces.Input;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Outputs;
+using Radio.Infrastructure.Audio.Services;
 
 namespace Radio.API.Services;
 
@@ -25,6 +27,8 @@ public class AudioStateUpdateService : BackgroundService
   private readonly IBluetoothService? _bluetoothService;
   private readonly GoogleCastOutput? _castOutput;
   private readonly BackgroundIdentificationService? _fingerprintService;
+  private readonly VisualizationModeService? _vizModeService;
+  private readonly IRotaryEncoderService? _encoderService;
   private string? _apiBaseUrl;
 
   /// <summary>
@@ -62,6 +66,8 @@ public class AudioStateUpdateService : BackgroundService
     _bluetoothService = serviceProvider.GetService<IBluetoothService>();
     _castOutput = serviceProvider.GetService<GoogleCastOutput>();
     _fingerprintService = serviceProvider.GetService<BackgroundIdentificationService>();
+    _vizModeService = serviceProvider.GetService<VisualizationModeService>();
+    _encoderService = serviceProvider.GetService<IRotaryEncoderService>();
 
     // Resolve API base URL for making relative album art URLs absolute (needed by Cast devices)
     ResolveApiBaseUrl(configuration);
@@ -98,6 +104,20 @@ public class AudioStateUpdateService : BackgroundService
     {
       _fingerprintService.StatusChanged += OnFingerprintStatusChanged;
       _logger.LogInformation("Subscribed to fingerprint status changes");
+    }
+
+    // Subscribe to visualization mode changes from rotary encoder
+    if (_vizModeService != null)
+    {
+      _vizModeService.ModeChanged += OnVisualizationModeChanged;
+      _logger.LogInformation("Subscribed to visualization mode changes");
+    }
+
+    // Subscribe to encoder connection changes for UI status updates
+    if (_encoderService != null)
+    {
+      _encoderService.ConnectionChanged += OnEncoderConnectionChanged;
+      _logger.LogInformation("Subscribed to encoder connection changes");
     }
   }
 
@@ -757,6 +777,46 @@ public class AudioStateUpdateService : BackgroundService
       _fingerprintService.StatusChanged -= OnFingerprintStatusChanged;
     }
 
+    if (_vizModeService != null)
+    {
+      _vizModeService.ModeChanged -= OnVisualizationModeChanged;
+    }
+
+    if (_encoderService != null)
+    {
+      _encoderService.ConnectionChanged -= OnEncoderConnectionChanged;
+    }
+
     base.Dispose();
+  }
+
+  private async void OnEncoderConnectionChanged(object? sender, EncoderConnectionEventArgs e)
+  {
+    try
+    {
+      await _hubContext.Clients.All.SendAsync("EncoderConnectionChanged");
+      _logger.LogDebug("Broadcast EncoderConnectionChanged: IsConnected={IsConnected}", e.IsConnected);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error broadcasting encoder connection change");
+    }
+  }
+
+  private async void OnVisualizationModeChanged(object? sender, VisualizationModeChangedEventArgs e)
+  {
+    try
+    {
+      await _hubContext.Clients.All.SendAsync("VisualizationModeChanged", new
+      {
+        e.Mode,
+        e.IsEnabled
+      });
+      _logger.LogDebug("Broadcast VisualizationModeChanged: {Mode}, Enabled={Enabled}", e.Mode, e.IsEnabled);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error broadcasting visualization mode change");
+    }
   }
 }

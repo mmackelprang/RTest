@@ -751,3 +751,50 @@ public class BluetoothDeviceDto
   public bool IsConnected { get; set; }
   public DateTime? LastConnected { get; set; }
 }
+
+// Integration Status DTOs
+
+public class EncoderStatusDto
+{
+  public bool Enabled { get; set; }
+  public bool IsConnected { get; set; }
+  public string DevicePath { get; set; } = "";
+  public int VendorId { get; set; }
+  public int ProductId { get; set; }
+}
+
+public class PhoneIntegrationStatusDto
+{
+  public bool Enabled { get; set; }
+  public bool IsConnected { get; set; }
+  public string CurrentState { get; set; } = "Idle";
+  public string CallerNumber { get; set; } = "";
+  public string CallerName { get; set; } = "";
+  public string HubUrl { get; set; } = "";
+}
+
+// Integration Configuration DTOs
+
+public class RotaryEncoderConfigDto
+{
+  public bool Enabled { get; set; }
+  public int VendorId { get; set; }
+  public int ProductId { get; set; }
+  public string DevicePath { get; set; } = "";
+  public int PollIntervalMs { get; set; }
+  public int VolumeStepPercent { get; set; }
+  public int TuningStepKHz { get; set; }
+  public int ReconnectDelayMs { get; set; }
+}
+
+public class PhoneIntegrationConfigDto
+{
+  public bool Enabled { get; set; }
+  public string HubUrl { get; set; } = "";
+  public string ContactsApiBaseUrl { get; set; } = "";
+  public string RingSoundPath { get; set; } = "";
+  public int RingPriority { get; set; }
+  public int AnnouncementPriority { get; set; }
+  public int ReconnectBaseDelayMs { get; set; }
+  public int ReconnectMaxDelayMs { get; set; }
+}

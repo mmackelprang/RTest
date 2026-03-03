@@ -10,6 +10,7 @@
 @inject ISnackbar Snackbar
 @inject IJSRuntime JSRuntime
 @inject IDialogService DialogService
+@inject IntegrationsApiService IntegrationsApi
 @inject ILogger<SystemConfigPage> Logger
 @implements IDisposable
 
@@ -1517,6 +1518,274 @@
       </MudStack>
     </MudTabPanel>
 
+    <!-- Tab 8: Integrations -->
+    <MudTabPanel Text="Integrations" Icon="@Icons.Material.Filled.Extension">
+      <MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-2">
+
+        <!-- Sub-tab 1: Rotary Encoders -->
+        <MudTabPanel Text="Rotary Encoders" Icon="@Icons.Material.Filled.Tune">
+          <MudStack Spacing="3">
+            <!-- Status -->
+            <MudPaper Elevation="2" Class="pa-4">
+              <MudText Typo="Typo.h6" Class="mb-3">Encoder Status</MudText>
+              @if (_encoderStatus != null)
+              {
+                <MudGrid>
+                  <MudItem xs="12" md="6">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                      <MudText><strong>Connection:</strong></MudText>
+                      @if (!_encoderStatus.Enabled)
+                      {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Default">Disabled</MudChip>
+                      }
+                      else if (_encoderStatus.IsConnected)
+                      {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success">Connected</MudChip>
+                      }
+                      else
+                      {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Error">Disconnected</MudChip>
+                      }
+                    </MudStack>
+                  </MudItem>
+                  @if (_encoderStatus.Enabled)
+                  {
+                    <MudItem xs="12" md="6">
+                      <MudText><strong>VID/PID:</strong> 0x@(_encoderStatus.VendorId.ToString("X4")):0x@(_encoderStatus.ProductId.ToString("X4"))</MudText>
+                    </MudItem>
+                    @if (!string.IsNullOrEmpty(_encoderStatus.DevicePath))
+                    {
+                      <MudItem xs="12">
+                        <MudText Typo="Typo.caption"><strong>Device:</strong> @_encoderStatus.DevicePath</MudText>
+                      </MudItem>
+                    }
+                  }
+                </MudGrid>
+              }
+              else
+              {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+              }
+            </MudPaper>
+
+            <!-- Encoder Mapping Reference -->
+            <MudPaper Elevation="2" Class="pa-4">
+              <MudText Typo="Typo.h6" Class="mb-3">Encoder Mapping</MudText>
+              <MudSimpleTable Dense="true" Hover="true" Style="max-width: 600px;">
+                <thead>
+                  <tr>
+                    <th>Encoder</th>
+                    <th>Turn</th>
+                    <th>Press</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td>0 - Volume</td><td>Volume Up/Down</td><td>Mute Toggle</td></tr>
+                  <tr><td>1 - Tuning</td><td>Frequency Up/Down</td><td>Seek Next Station</td></tr>
+                  <tr><td>2 - Source</td><td>Cycle Sources</td><td>Play/Pause</td></tr>
+                  <tr><td>3 - Visualizer</td><td>Cycle Viz Modes</td><td>Viz On/Off</td></tr>
+                </tbody>
+              </MudSimpleTable>
+            </MudPaper>
+
+            <!-- Configuration -->
+            <MudPaper Elevation="2" Class="pa-4">
+              <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+                <MudText Typo="Typo.h6">Configuration</MudText>
+                <MudSpacer />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           OnClick="SaveEncoderConfigAsync"
+                           StartIcon="@Icons.Material.Filled.Save"
+                           Disabled="@(_isSaving || _encoderConfig == null)">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save
+                </MudButton>
+              </MudStack>
+              @if (_encoderConfig != null)
+              {
+                <MudGrid>
+                  <MudItem xs="12" md="4">
+                    <MudSwitch T="bool" @bind-Value="_encoderConfig.Enabled" Label="Enabled" Color="Color.Primary" />
+                  </MudItem>
+                  <MudItem xs="6" md="4">
+                    <MudTextField T="int" @bind-Value="_encoderConfig.VendorId" Label="Vendor ID (hex)"
+                                  HelperText="e.g. 51966 = 0xCAFE" />
+                  </MudItem>
+                  <MudItem xs="6" md="4">
+                    <MudTextField T="int" @bind-Value="_encoderConfig.ProductId" Label="Product ID (hex)"
+                                  HelperText="e.g. 16389 = 0x4005" />
+                  </MudItem>
+                  <MudItem xs="12" md="6">
+                    <MudTextField T="string" @bind-Value="_encoderConfig.DevicePath" Label="Device Path"
+                                  HelperText="Leave empty for auto-detect" />
+                  </MudItem>
+                  <MudItem xs="6" md="3">
+                    <MudNumericField T="int" @bind-Value="_encoderConfig.PollIntervalMs" Label="Poll Interval (ms)" Min="1" Max="1000" />
+                  </MudItem>
+                  <MudItem xs="6" md="3">
+                    <MudNumericField T="int" @bind-Value="_encoderConfig.VolumeStepPercent" Label="Volume Step (%)" Min="1" Max="20" />
+                  </MudItem>
+                  <MudItem xs="6" md="3">
+                    <MudNumericField T="int" @bind-Value="_encoderConfig.TuningStepKHz" Label="Tuning Step (kHz)" Min="1" Max="1000" />
+                  </MudItem>
+                  <MudItem xs="6" md="3">
+                    <MudNumericField T="int" @bind-Value="_encoderConfig.ReconnectDelayMs" Label="Reconnect Delay (ms)" Min="500" Max="30000" />
+                  </MudItem>
+                </MudGrid>
+              }
+              else
+              {
+                <MudText Color="Color.Default">Loading configuration...</MudText>
+              }
+            </MudPaper>
+          </MudStack>
+        </MudTabPanel>
+
+        <!-- Sub-tab 2: Phone Integration -->
+        <MudTabPanel Text="Phone Integration" Icon="@Icons.Material.Filled.Phone">
+          <MudStack Spacing="3">
+            <!-- Status -->
+            <MudPaper Elevation="2" Class="pa-4">
+              <MudText Typo="Typo.h6" Class="mb-3">Phone Integration Status</MudText>
+              @if (_phoneStatus != null)
+              {
+                <MudGrid>
+                  <MudItem xs="12" md="4">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                      <MudText><strong>Hub Connection:</strong></MudText>
+                      @if (!_phoneStatus.Enabled)
+                      {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Default">Disabled</MudChip>
+                      }
+                      else if (_phoneStatus.IsConnected)
+                      {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success">Connected</MudChip>
+                      }
+                      else
+                      {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Error">Disconnected</MudChip>
+                      }
+                    </MudStack>
+                  </MudItem>
+                  <MudItem xs="12" md="4">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                      <MudText><strong>Call State:</strong></MudText>
+                      <MudChip T="string" Size="Size.Small" Color="@GetPhoneStateColor(_phoneStatus.CurrentState)">
+                        @_phoneStatus.CurrentState
+                      </MudChip>
+                    </MudStack>
+                  </MudItem>
+                  @if (_phoneStatus.Enabled && _phoneStatus.CurrentState != "Idle")
+                  {
+                    <MudItem xs="12" md="4">
+                      <MudText><strong>Caller:</strong> @(string.IsNullOrEmpty(_phoneStatus.CallerName) ? _phoneStatus.CallerNumber : $"{_phoneStatus.CallerName} ({_phoneStatus.CallerNumber})")</MudText>
+                    </MudItem>
+                  }
+                  @if (_phoneStatus.Enabled && !string.IsNullOrEmpty(_phoneStatus.HubUrl))
+                  {
+                    <MudItem xs="12">
+                      <MudText Typo="Typo.caption"><strong>Hub URL:</strong> @_phoneStatus.HubUrl</MudText>
+                    </MudItem>
+                  }
+                </MudGrid>
+              }
+              else
+              {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+              }
+            </MudPaper>
+
+            <!-- Configuration -->
+            <MudPaper Elevation="2" Class="pa-4">
+              <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+                <MudText Typo="Typo.h6">Configuration</MudText>
+                <MudSpacer />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           OnClick="SavePhoneConfigAsync"
+                           StartIcon="@Icons.Material.Filled.Save"
+                           Disabled="@(_isSaving || _phoneConfig == null)">
+                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                  Save
+                </MudButton>
+              </MudStack>
+              @if (_phoneConfig != null)
+              {
+                <MudGrid>
+                  <MudItem xs="12" md="4">
+                    <MudSwitch T="bool" @bind-Value="_phoneConfig.Enabled" Label="Enabled" Color="Color.Primary" />
+                  </MudItem>
+                  <MudItem xs="12" md="8">
+                    <MudTextField T="string" @bind-Value="_phoneConfig.HubUrl" Label="SignalR Hub URL"
+                                  HelperText="RotaryPhone server hub endpoint" />
+                  </MudItem>
+                  <MudItem xs="12" md="6">
+                    <MudTextField T="string" @bind-Value="_phoneConfig.ContactsApiBaseUrl" Label="Contacts API Base URL"
+                                  HelperText="RotaryPhone contacts REST API" />
+                  </MudItem>
+                  <MudItem xs="12" md="6">
+                    <MudTextField T="string" @bind-Value="_phoneConfig.RingSoundPath" Label="Ring Sound Path"
+                                  HelperText="Path to ring sound WAV/MP3 file" />
+                  </MudItem>
+                  <MudItem xs="6" md="3">
+                    <MudNumericField T="int" @bind-Value="_phoneConfig.RingPriority" Label="Ring Priority" Min="1" Max="10" />
+                  </MudItem>
+                  <MudItem xs="6" md="3">
+                    <MudNumericField T="int" @bind-Value="_phoneConfig.AnnouncementPriority" Label="Announcement Priority" Min="1" Max="10" />
+                  </MudItem>
+                  <MudItem xs="6" md="3">
+                    <MudNumericField T="int" @bind-Value="_phoneConfig.ReconnectBaseDelayMs" Label="Reconnect Base (ms)" Min="500" Max="60000" />
+                  </MudItem>
+                  <MudItem xs="6" md="3">
+                    <MudNumericField T="int" @bind-Value="_phoneConfig.ReconnectMaxDelayMs" Label="Reconnect Max (ms)" Min="1000" Max="120000" />
+                  </MudItem>
+                </MudGrid>
+              }
+              else
+              {
+                <MudText Color="Color.Default">Loading configuration...</MudText>
+              }
+            </MudPaper>
+          </MudStack>
+        </MudTabPanel>
+
+        <!-- Sub-tab 3: Notifications -->
+        <MudTabPanel Text="Notifications" Icon="@Icons.Material.Filled.Notifications">
+          <MudStack Spacing="3">
+            <MudPaper Elevation="2" Class="pa-4">
+              <MudText Typo="Typo.h6" Class="mb-3">Test Announcement</MudText>
+              <MudText Typo="Typo.body2" Class="mb-3">
+                Send a test TTS announcement with audio ducking. Any service can POST to
+                <code>/api/notifications/announce</code> to trigger announcements.
+              </MudText>
+              <MudGrid>
+                <MudItem xs="12" md="8">
+                  <MudTextField T="string" @bind-Value="_testMessage" Label="Message"
+                                Placeholder="Enter announcement text..."
+                                Variant="Variant.Outlined" />
+                </MudItem>
+                <MudItem xs="6" md="2">
+                  <MudNumericField T="int" @bind-Value="_testPriority" Label="Priority" Min="1" Max="10"
+                                   Variant="Variant.Outlined" />
+                </MudItem>
+                <MudItem xs="6" md="2">
+                  <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                             OnClick="SendTestNotificationAsync"
+                             StartIcon="@Icons.Material.Filled.VolumeUp"
+                             Disabled="@(_isSendingNotification || string.IsNullOrWhiteSpace(_testMessage))"
+                             FullWidth="true"
+                             Style="height: 56px;">
+                    @if (_isSendingNotification) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                    Send Test
+                  </MudButton>
+                </MudItem>
+              </MudGrid>
+            </MudPaper>
+          </MudStack>
+        </MudTabPanel>
+
+      </MudTabs>
+    </MudTabPanel>
+
   </MudTabs>
 </div>
 
@@ -1580,6 +1849,15 @@
   private ConfigurationComparisonDto? _comparison;
   private HashSet<string> _selectedDifferences = new();
   private bool _isLoadingComparison = false;
+
+  // Integrations
+  private EncoderStatusDto? _encoderStatus;
+  private PhoneIntegrationStatusDto? _phoneStatus;
+  private RotaryEncoderConfigDto? _encoderConfig;
+  private PhoneIntegrationConfigDto? _phoneConfig;
+  private string _testMessage = "";
+  private int _testPriority = 8;
+  private bool _isSendingNotification = false;
 
   // Output configuration individual fields (for binding)
   private bool _localOutputEnabled;
@@ -1647,6 +1925,9 @@
       Logger.LogError(ex, "Failed to load store info");
     }
 
+    // Load integration status and config
+    await LoadIntegrationDataAsync();
+
     // Setup SignalR for real-time event source updates
     await InitializeSignalRAsync();
 
@@ -1671,6 +1952,26 @@
         await InvokeAsync(async () =>
         {
           await LoadEventSourcesAsync();
+          StateHasChanged();
+        });
+      };
+
+      // Subscribe to encoder connection changes
+      HubService.EncoderConnectionChanged += async () =>
+      {
+        await InvokeAsync(async () =>
+        {
+          _encoderStatus = await IntegrationsApi.GetEncoderStatusAsync();
+          StateHasChanged();
+        });
+      };
+
+      // Subscribe to phone call state changes
+      HubService.PhoneCallStateChanged += async () =>
+      {
+        await InvokeAsync(async () =>
+        {
+          _phoneStatus = await IntegrationsApi.GetPhoneStatusAsync();
           StateHasChanged();
         });
       };
@@ -2976,6 +3277,110 @@
         Snackbar.Add("Failed to power off system", Severity.Error);
     }
   }
+
+  // Integration methods
+
+  private async Task LoadIntegrationDataAsync()
+  {
+    try
+    {
+      _encoderStatus = await IntegrationsApi.GetEncoderStatusAsync();
+      _phoneStatus = await IntegrationsApi.GetPhoneStatusAsync();
+      _encoderConfig = await ConfigApi.GetConfigurationAsync<RotaryEncoderConfigDto>("rotaryencoder") ?? new();
+      _phoneConfig = await ConfigApi.GetConfigurationAsync<PhoneIntegrationConfigDto>("phoneintegration") ?? new();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to load integration data");
+    }
+  }
+
+  private async Task SaveEncoderConfigAsync()
+  {
+    if (_encoderConfig == null) return;
+
+    _isSaving = true;
+    try
+    {
+      var success = await ConfigApi.UpdateConfigurationAsync("rotaryencoder", _encoderConfig);
+      if (success)
+      {
+        Snackbar.Add("Encoder configuration saved. Restart required for changes to take effect.", Severity.Success);
+      }
+      else
+      {
+        Snackbar.Add("Failed to save encoder configuration", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error);
+    }
+    finally
+    {
+      _isSaving = false;
+    }
+  }
+
+  private async Task SavePhoneConfigAsync()
+  {
+    if (_phoneConfig == null) return;
+
+    _isSaving = true;
+    try
+    {
+      var success = await ConfigApi.UpdateConfigurationAsync("phoneintegration", _phoneConfig);
+      if (success)
+      {
+        Snackbar.Add("Phone integration configuration saved. Restart required for changes to take effect.", Severity.Success);
+      }
+      else
+      {
+        Snackbar.Add("Failed to save phone integration configuration", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error);
+    }
+    finally
+    {
+      _isSaving = false;
+    }
+  }
+
+  private async Task SendTestNotificationAsync()
+  {
+    _isSendingNotification = true;
+    try
+    {
+      var success = await IntegrationsApi.SendTestNotificationAsync(_testMessage, _testPriority);
+      if (success)
+      {
+        Snackbar.Add("Announcement sent", Severity.Success);
+      }
+      else
+      {
+        Snackbar.Add("Failed to send announcement", Severity.Error);
+      }
+    }
+    catch (Exception ex)
+    {
+      Snackbar.Add($"Error sending announcement: {ex.Message}", Severity.Error);
+    }
+    finally
+    {
+      _isSendingNotification = false;
+    }
+  }
+
+  private static Color GetPhoneStateColor(string state) => state switch
+  {
+    "Ringing" => Color.Warning,
+    "InCall" => Color.Success,
+    "Ended" => Color.Info,
+    _ => Color.Default
+  };
 
   public void Dispose()
   {

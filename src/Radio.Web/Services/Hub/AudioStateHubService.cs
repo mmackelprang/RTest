@@ -6,8 +6,9 @@ namespace Radio.Web.Services.Hub;
 
 /// <summary>
 /// SignalR hub service for real-time audio state updates
-/// Handles 6 event types: PlaybackStateChanged, NowPlayingChanged, QueueChanged, 
-/// RadioStateChanged, VolumeChanged, SourceChanged
+/// Handles 10 event types: PlaybackStateChanged, NowPlayingChanged, QueueChanged,
+/// RadioStateChanged, VolumeChanged, SourceChanged, FingerprintStatusChanged,
+/// PhoneCallStateChanged, VisualizationModeChanged, EncoderConnectionChanged
 /// </summary>
 public class AudioStateHubService : IAsyncDisposable
 {
@@ -25,6 +26,9 @@ public class AudioStateHubService : IAsyncDisposable
   public event Func<Task>? VolumeChanged;
   public event Func<Task>? SourceChanged;
   public event Func<Task>? FingerprintStatusChanged;
+  public event Func<Task>? PhoneCallStateChanged;
+  public event Func<Task>? VisualizationModeChanged;
+  public event Func<Task>? EncoderConnectionChanged;
 
   // Throttle disconnect log messages to avoid spam when API is down
   private static DateTime _lastDisconnectLogUtc = DateTime.MinValue;
@@ -118,6 +122,30 @@ public class AudioStateHubService : IAsyncDisposable
         _logger.LogDebug("Received FingerprintStatusChanged event");
         if (FingerprintStatusChanged != null)
           await FingerprintStatusChanged.Invoke();
+      });
+
+      // Server sends PhoneCallStateChanged with state payload
+      _hubConnection.On<object>("PhoneCallStateChanged", async (_) =>
+      {
+        _logger.LogDebug("Received PhoneCallStateChanged event");
+        if (PhoneCallStateChanged != null)
+          await PhoneCallStateChanged.Invoke();
+      });
+
+      // Server sends VisualizationModeChanged with mode payload
+      _hubConnection.On<object>("VisualizationModeChanged", async (_) =>
+      {
+        _logger.LogDebug("Received VisualizationModeChanged event");
+        if (VisualizationModeChanged != null)
+          await VisualizationModeChanged.Invoke();
+      });
+
+      // Server sends EncoderConnectionChanged when encoder device connects/disconnects
+      _hubConnection.On("EncoderConnectionChanged", async () =>
+      {
+        _logger.LogDebug("Received EncoderConnectionChanged event");
+        if (EncoderConnectionChanged != null)
+          await EncoderConnectionChanged.Invoke();
       });
 
       // Connection lifecycle events — throttled to avoid log spam when API is down
