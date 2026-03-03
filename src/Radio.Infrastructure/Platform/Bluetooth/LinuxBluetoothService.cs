@@ -834,40 +834,64 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 // Format: "id 68, type PipeWire:Interface:Node/3" followed by properties.
                 // We need: node.name, object.id, and object.serial.
                 // pw-record --target accepts the serial (not the object id).
+                //
+                // IMPORTANT: In pw-cli output, object.serial typically appears BEFORE node.name
+                // within the same object block. We must track the serial as we go and return it
+                // when the node.name matches, rather than looking forward for the serial.
+                // We also reset state on ANY new "id" line (not just Nodes) to prevent
+                // cross-object serial leakage (e.g., picking up a Device serial).
                 var lines = output.Split('\n');
                 var lastNodeId = 0;
+                var lastNodeSerial = 0;
+                var isCurrentObjectANode = false;
                 string? matchedNodeName = null;
                 var matchedNodeId = 0;
-                var inMatchedNode = false;
 
                 foreach (var line in lines)
                 {
                     var trimmed = line.Trim();
 
-                    // Track the current object ID: "id 68, type PipeWire:Interface:Node/3"
-                    if (trimmed.StartsWith("id ") && trimmed.Contains(", type PipeWire:Interface:Node"))
+                    // Any "id X, type ..." line starts a new object — reset tracking state
+                    if (trimmed.StartsWith("id ") && trimmed.Contains(", type PipeWire:Interface:"))
                     {
-                        var commaIdx = trimmed.IndexOf(',');
-                        if (commaIdx > 3 && int.TryParse(trimmed[3..commaIdx], out var id))
-                            lastNodeId = id;
-                        inMatchedNode = false;
+                        isCurrentObjectANode = trimmed.Contains(":Node/") || trimmed.Contains(":Node\n");
+                        if (isCurrentObjectANode)
+                        {
+                            var commaIdx = trimmed.IndexOf(',');
+                            if (commaIdx > 3 && int.TryParse(trimmed[3..commaIdx], out var id))
+                                lastNodeId = id;
+                            lastNodeSerial = 0;
+                        }
+                        continue;
                     }
 
-                    if (trimmed.StartsWith("node.name = ") && trimmed.Contains(prefix))
+                    // Track object.serial for the current object
+                    if (isCurrentObjectANode && trimmed.StartsWith("object.serial = "))
                     {
-                        // Extract: node.name = "bluez_input.D4_3A_2C_64_87_9E.2"
+                        var start = trimmed.IndexOf('"') + 1;
+                        var end = trimmed.LastIndexOf('"');
+                        if (start > 0 && end > start && int.TryParse(trimmed[start..end], out var serial))
+                            lastNodeSerial = serial;
+                    }
+
+                    // Check for matching node.name
+                    if (isCurrentObjectANode && trimmed.StartsWith("node.name = ") && trimmed.Contains(prefix))
+                    {
                         var start = trimmed.IndexOf('"') + 1;
                         var end = trimmed.LastIndexOf('"');
                         if (start > 0 && end > start)
                         {
                             matchedNodeName = trimmed[start..end];
                             matchedNodeId = lastNodeId;
-                            inMatchedNode = true;
+                            // If we already have the serial (appeared before node.name), return now
+                            if (lastNodeSerial > 0)
+                                return (matchedNodeName, matchedNodeId, lastNodeSerial);
+                            // Otherwise keep scanning this object's properties for the serial
                         }
                     }
 
-                    // Extract object.serial from the matched node's properties
-                    if (inMatchedNode && trimmed.StartsWith("object.serial = "))
+                    // If we matched the name but serial came after, catch it here
+                    if (matchedNodeName != null && trimmed.StartsWith("object.serial = "))
                     {
                         var start = trimmed.IndexOf('"') + 1;
                         var end = trimmed.LastIndexOf('"');
