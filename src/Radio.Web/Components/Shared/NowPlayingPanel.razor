@@ -295,6 +295,9 @@
   private Dictionary<string, float> _sourceGainOffsets = new();
   private System.Threading.Timer? _gainDebounceTimer;
 
+  // Periodic fallback poll for now playing updates (safety net for missed SignalR events)
+  private System.Threading.Timer? _nowPlayingPollTimer;
+
   private bool _hasValidAlbumArt =>
     !_albumArtFailed
     && !string.IsNullOrEmpty(_albumArtUrl)
@@ -315,6 +318,14 @@
       await RefreshPlaybackStateAsync();
       await RefreshFingerprintStatusAsync();
       await LoadSourceGainOffsetsAsync();
+
+      // Periodic fallback poll for now playing updates. Catches track identifications
+      // or metadata changes if a SignalR NowPlayingChanged event is missed.
+      _nowPlayingPollTimer = new System.Threading.Timer(
+        async _ => await OnNowPlayingPollAsync(),
+        null,
+        TimeSpan.FromSeconds(10),
+        TimeSpan.FromSeconds(10));
     }
     catch (Exception ex)
     {
@@ -352,6 +363,23 @@
   {
     await RefreshFingerprintStatusAsync();
     await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task OnNowPlayingPollAsync()
+  {
+    try
+    {
+      var nowPlaying = await AudioApi.GetNowPlayingAsync();
+      if (nowPlaying != null && nowPlaying.Title != _title)
+      {
+        await RefreshPlaybackStateAsync();
+        await InvokeAsync(StateHasChanged);
+      }
+    }
+    catch
+    {
+      // Ignore — this is a background safety net, not critical
+    }
   }
 
   private async Task RefreshFingerprintStatusAsync()
@@ -737,6 +765,7 @@
     HubService.VolumeChanged -= OnVolumeChangedEvent;
     HubService.FingerprintStatusChanged -= OnFingerprintStatusChanged;
     _gainDebounceTimer?.Dispose();
+    _nowPlayingPollTimer?.Dispose();
     await Task.CompletedTask;
   }
 }

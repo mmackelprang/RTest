@@ -440,6 +440,10 @@
       {
         _selectedSourceId = newSourceId;
         Logger.LogInformation("Switched to source: {SourceType}", source.Type);
+
+        // Immediately notify NowPlayingPanel of the source change so it refreshes
+        // without waiting for the 500ms AudioStateUpdateService polling cycle.
+        await HubService.NotifySourceChangedAsync();
       }
     }
     catch (Exception ex)
