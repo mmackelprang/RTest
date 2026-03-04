@@ -80,4 +80,10 @@ public interface IAudioManager : IAsyncDisposable
   /// Gets all per-source gain offsets as a dictionary.
   /// </summary>
   Dictionary<string, float> GetAllSourceGains();
+
+  /// <summary>
+  /// Gets a previously created and cached source by type, without switching to it.
+  /// Returns null if the source type has never been created.
+  /// </summary>
+  IAudioSource? GetCachedSource(AudioSourceType sourceType);
 }

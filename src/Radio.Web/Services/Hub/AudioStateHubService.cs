@@ -29,6 +29,7 @@ public class AudioStateHubService : IAsyncDisposable
   public event Func<Task>? PhoneCallStateChanged;
   public event Func<Task>? VisualizationModeChanged;
   public event Func<Task>? EncoderConnectionChanged;
+  public event Func<bool, Task>? SleepStateChanged;
 
   // Throttle disconnect log messages to avoid spam when API is down
   private static DateTime _lastDisconnectLogUtc = DateTime.MinValue;
@@ -146,6 +147,14 @@ public class AudioStateHubService : IAsyncDisposable
         _logger.LogDebug("Received EncoderConnectionChanged event");
         if (EncoderConnectionChanged != null)
           await EncoderConnectionChanged.Invoke();
+      });
+
+      // Server sends SleepStateChanged with bool payload (true=sleeping, false=awake)
+      _hubConnection.On<bool>("SleepStateChanged", async (isSleeping) =>
+      {
+        _logger.LogDebug("Received SleepStateChanged event: IsSleeping={IsSleeping}", isSleeping);
+        if (SleepStateChanged != null)
+          await SleepStateChanged.Invoke(isSleeping);
       });
 
       // Connection lifecycle events — throttled to avoid log spam when API is down

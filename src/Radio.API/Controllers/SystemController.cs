@@ -19,6 +19,7 @@ public class SystemController : ControllerBase
   private readonly ILogger<SystemController> _logger;
   private readonly IAudioEngine _audioEngine;
   private readonly IHostApplicationLifetime _applicationLifetime;
+  private readonly Services.SleepService? _sleepService;
   private static readonly DateTime _startTime = DateTime.UtcNow;
   
   // Cache CPU usage to avoid delays on every request
@@ -36,11 +37,13 @@ public class SystemController : ControllerBase
   public SystemController(
     ILogger<SystemController> logger,
     IAudioEngine audioEngine,
-    IHostApplicationLifetime applicationLifetime)
+    IHostApplicationLifetime applicationLifetime,
+    Services.SleepService? sleepService = null)
   {
     _logger = logger;
     _audioEngine = audioEngine;
     _applicationLifetime = applicationLifetime;
+    _sleepService = sleepService;
   }
 
   /// <summary>
@@ -470,6 +473,40 @@ public class SystemController : ControllerBase
       return $"{(int)ts.TotalMinutes}m {ts.Seconds}s";
     }
     return $"{ts.Seconds}s";
+  }
+
+  /// <summary>
+  /// Gets the current sleep/standby state.
+  /// </summary>
+  [HttpGet("sleep")]
+  [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+  public IActionResult GetSleepState()
+  {
+    return Ok(new { isSleeping = _sleepService?.IsSleeping ?? false });
+  }
+
+  /// <summary>
+  /// Sets the sleep/standby state. When sleeping, audio is muted and the UI shows a black overlay.
+  /// </summary>
+  [HttpPost("sleep")]
+  [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+  public async Task<IActionResult> SetSleepState([FromBody] SetSleepRequest request)
+  {
+    if (_sleepService == null)
+    {
+      return StatusCode(501, new { error = "Sleep service not available" });
+    }
+
+    if (request.Sleep)
+    {
+      await _sleepService.EnterSleepAsync();
+    }
+    else
+    {
+      await _sleepService.WakeAsync("api");
+    }
+
+    return Ok(new { isSleeping = _sleepService.IsSleeping });
   }
 
   /// <summary>

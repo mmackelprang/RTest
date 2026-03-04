@@ -387,6 +387,8 @@ public class QueueController : ControllerBase
 
   /// <summary>
   /// Tries to get the active queue source and validates it supports queue management.
+  /// Falls back to the cached FilePlayer source if the active source doesn't support queue,
+  /// allowing playlist state to be read even when FilePlayer is not the active source.
   /// </summary>
   /// <param name="queueSource">The queue source if found and valid, otherwise null.</param>
   /// <param name="primarySource">The primary source if found, otherwise null.</param>
@@ -395,20 +397,30 @@ public class QueueController : ControllerBase
   {
     primarySource = _audioManager?.ActiveSource ?? _audioEngine.GetActivePrimaryAudioSource();
 
+    // Check active source first
+    if (primarySource is IPlayQueue activeQueue)
+    {
+      queueSource = activeQueue;
+      return null;
+    }
+
+    // Fall back to cached FilePlayer source for playlist persistence across source switches
+    var cachedFilePlayer = _audioManager?.GetCachedSource(AudioSourceType.FilePlayer);
+    if (cachedFilePlayer is IPlayQueue cachedQueue)
+    {
+      primarySource = cachedFilePlayer;
+      queueSource = cachedQueue;
+      return null;
+    }
+
     if (primarySource == null)
     {
       queueSource = null;
       return NotFound(new { error = "No primary audio source is active" });
     }
 
-    if (primarySource is not IPlayQueue queue)
-    {
-      queueSource = null;
-      return BadRequest(new { error = "The active source does not support queue management" });
-    }
-
-    queueSource = queue;
-    return null;
+    queueSource = null;
+    return BadRequest(new { error = "The active source does not support queue management" });
   }
 
   /// <summary>

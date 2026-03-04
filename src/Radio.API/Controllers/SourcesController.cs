@@ -23,6 +23,7 @@ public class SourcesController : ControllerBase
   private readonly IAudioManager? _audioManager;
   private readonly IBluetoothService? _bluetoothService;
   private readonly IOptionsMonitor<BluetoothOptions>? _bluetoothOptions;
+  private readonly IOptionsMonitor<AudioPreferences>? _audioPreferencesOptions;
   private readonly ITTSFactory? _ttsFactory;
   private readonly AudioFileEventSourceFactory? _fileEventFactory;
   private readonly IDuckingService? _duckingService;
@@ -37,6 +38,7 @@ public class SourcesController : ControllerBase
     IAudioManager? audioManager = null,
     IBluetoothService? bluetoothService = null,
     IOptionsMonitor<BluetoothOptions>? bluetoothOptions = null,
+    IOptionsMonitor<AudioPreferences>? audioPreferencesOptions = null,
     ITTSFactory? ttsFactory = null,
     AudioFileEventSourceFactory? fileEventFactory = null,
     IDuckingService? duckingService = null,
@@ -47,6 +49,7 @@ public class SourcesController : ControllerBase
     _audioManager = audioManager;
     _bluetoothService = bluetoothService;
     _bluetoothOptions = bluetoothOptions;
+    _audioPreferencesOptions = audioPreferencesOptions;
     _ttsFactory = ttsFactory;
     _fileEventFactory = fileEventFactory;
     _duckingService = duckingService;
@@ -80,17 +83,25 @@ public class SourcesController : ControllerBase
         }
         : null;
 
+      var allSources = new List<string>
+      {
+        AudioSourceType.Radio.ToString(),
+        AudioSourceType.Vinyl.ToString(),
+        AudioSourceType.FilePlayer.ToString(),
+        AudioSourceType.GenericUSB.ToString(),
+        AudioSourceType.Bluetooth.ToString(),
+        AudioSourceType.TestTone.ToString()
+      };
+
+      // Filter out hidden sources from the UI source bar
+      var hiddenSources = _audioPreferencesOptions?.CurrentValue.HiddenSources ?? new List<string>();
+      var visibleSources = allSources
+        .Where(s => !hiddenSources.Contains(s, StringComparer.OrdinalIgnoreCase))
+        .ToList();
+
       var result = new AvailableSourcesDto
       {
-        PrimarySources =
-        [
-          AudioSourceType.Radio.ToString(),
-          AudioSourceType.Vinyl.ToString(),
-          AudioSourceType.FilePlayer.ToString(),
-          AudioSourceType.GenericUSB.ToString(),
-          AudioSourceType.Bluetooth.ToString(),
-          AudioSourceType.TestTone.ToString()
-        ],
+        PrimarySources = visibleSources,
         ActiveSourceType = primarySource?.Type.ToString(),
         ActiveSources = activeSources.Select(s => s.MapToDto()).ToList(),
         BluetoothDevices = bluetoothDevice != null ? new List<BluetoothDeviceDto> { bluetoothDevice } : new List<BluetoothDeviceDto>(),

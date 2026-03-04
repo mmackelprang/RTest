@@ -16,7 +16,6 @@ namespace Radio.IntegrationTests.Fingerprinting;
 /// Uses fpcalc (native Chromaprint) to generate fingerprints from MP3 files,
 /// then validates identification via live AcoustID and MusicBrainz APIs.
 /// </summary>
-[Trait("Category", "Integration")]
 public class FingerprintingPipelineTests : IAsyncLifetime
 {
   private readonly ITestOutputHelper _output;

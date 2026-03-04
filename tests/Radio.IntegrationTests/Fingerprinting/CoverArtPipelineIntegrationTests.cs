@@ -16,7 +16,6 @@ namespace Radio.IntegrationTests.Fingerprinting;
 /// Verifies that MusicBrainz enrichment + Cover Art Archive returns valid album art URLs.
 /// These tests require network access and use real MusicBrainz/Cover Art Archive APIs.
 /// </summary>
-[Trait("Category", "Integration")]
 public class CoverArtPipelineIntegrationTests : IDisposable
 {
   private readonly ITestOutputHelper _output;

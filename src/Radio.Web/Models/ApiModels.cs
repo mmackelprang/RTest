@@ -536,6 +536,7 @@ public class AudioPreferencesDto
   public string CurrentSource { get; set; } = "Radio";
   public string CurrentOutput { get; set; } = "";
   public int MasterVolume { get; set; } = 75;
+  public List<string> HiddenSources { get; set; } = new() { "TestTone" };
 }
 
 public class FilePlayerPreferencesDto

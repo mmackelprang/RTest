@@ -338,12 +338,14 @@ public static class AudioServiceExtensions
     services.AddSingleton<VisualizationModeService>();
 
     // Register action router (Func<> defers IAudioManager resolution)
+    // ISleepService is registered in Radio.API — optional here via GetService
     services.AddSingleton<RotaryEncoderActionRouter>(sp => new RotaryEncoderActionRouter(
       sp.GetRequiredService<ILogger<RotaryEncoderActionRouter>>(),
       sp.GetRequiredService<IRotaryEncoderService>(),
       () => sp.GetRequiredService<IAudioManager>(),
       sp.GetRequiredService<VisualizationModeService>(),
-      sp.GetRequiredService<IOptionsMonitor<RotaryEncoderOptions>>()));
+      sp.GetRequiredService<IOptionsMonitor<RotaryEncoderOptions>>(),
+      sleepService: sp.GetService<ISleepService>()));
 
     return services;
   }

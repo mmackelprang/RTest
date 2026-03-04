@@ -125,6 +125,17 @@ public class LogEntryDto
 }
 
 /// <summary>
+/// Request to set sleep/standby state.
+/// </summary>
+public class SetSleepRequest
+{
+  /// <summary>
+  /// Gets or sets whether to enter sleep mode (true) or wake (false).
+  /// </summary>
+  public bool Sleep { get; set; }
+}
+
+/// <summary>
 /// Applied log filters.
 /// </summary>
 public class LogFilterDto
