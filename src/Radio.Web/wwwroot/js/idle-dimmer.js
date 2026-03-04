@@ -1,7 +1,7 @@
 // Screen idle dimmer + sleep manager for kiosk mode
 // - Dim: reduces brightness after 5 minutes of no interaction
-// - Sleep: black overlay + mutes audio after 30 minutes of no interaction
-// - Wake: touch/pointer/key restores screen + unmutes audio
+// - Sleep: black overlay, notifies Blazor to pause audio
+// - Wake: touch/pointer/key restores screen, notifies Blazor to resume audio
 // Exposes window.radioSleepManager for JS interop from Blazor
 
 // Safe setter for API base URL (called from Blazor JS interop instead of eval)
@@ -14,14 +14,12 @@ window.radioSetApiBaseUrl = function (url) {
   const SLEEP_TIMEOUT = 30 * 60 * 1000; // 30 minutes → sleep
   const DIM_BRIGHTNESS = 0.3;
 
-  function apiUrl(path) {
-    return (window.radioApiBaseUrl || '') + path;
-  }
   let dimTimer = null;
   let sleepTimer = null;
   let dimmed = false;
   let sleeping = false;
   let overlay = null;
+  let blazorRef = null;
 
   function createOverlay() {
     if (overlay) return overlay;
@@ -72,13 +70,10 @@ window.radioSetApiBaseUrl = function (url) {
     document.body.style.filter = 'brightness(0)';
     dimmed = true;
 
-    // Notify API to mute audio (unless triggered by server)
-    if (source !== 'server') {
-      fetch(apiUrl('/api/system/sleep'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sleep: true })
-      }).catch(function () { /* ignore */ });
+    // Notify Blazor to call API server-side (unless triggered by server)
+    if (source !== 'server' && blazorRef) {
+      blazorRef.invokeMethodAsync('OnJsSleepRequested', true)
+        .catch(function () { /* ignore */ });
     }
 
     clearTimeout(dimTimer);
@@ -102,13 +97,10 @@ window.radioSetApiBaseUrl = function (url) {
       overlay.style.pointerEvents = 'none';
     }
 
-    // Notify API to unmute (unless triggered by server)
-    if (source !== 'server') {
-      fetch(apiUrl('/api/system/sleep'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sleep: false })
-      }).catch(function () { /* ignore */ });
+    // Notify Blazor to call API server-side (unless triggered by server)
+    if (source !== 'server' && blazorRef) {
+      blazorRef.invokeMethodAsync('OnJsSleepRequested', false)
+        .catch(function () { /* ignore */ });
     }
 
     resetTimers();
@@ -137,7 +129,8 @@ window.radioSetApiBaseUrl = function (url) {
   window.radioSleepManager = {
     enterSleep: enterSleep,
     wake: wake,
-    isSleeping: function () { return sleeping; }
+    isSleeping: function () { return sleeping; },
+    setBlazorRef: function (ref) { blazorRef = ref; }
   };
 
   resetTimers();

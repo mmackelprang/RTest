@@ -123,6 +123,7 @@
 
   private int _queueCount = 0;
   private Color _distortionMarkerColor = Color.Default;
+  private DotNetObjectReference<MainLayout>? _selfReference;
 
   private readonly MudTheme _customTheme = new()
   {
@@ -209,9 +210,30 @@
   {
     if (firstRender)
     {
-      // Set API base URL for idle-dimmer.js sleep/wake fetch calls
+      // Set API base URL for idle-dimmer.js (still used by other JS callers)
       var apiBaseUrl = Configuration["ApiBaseUrl"] ?? WebConstants.DefaultApiBaseUrl;
       await JSRuntime.InvokeVoidAsync("radioSetApiBaseUrl", apiBaseUrl);
+
+      // Register .NET reference so JS sleep/wake can call back into Blazor
+      _selfReference = DotNetObjectReference.Create(this);
+      await JSRuntime.InvokeVoidAsync("radioSleepManager.setBlazorRef", _selfReference);
+    }
+  }
+
+  /// <summary>
+  /// Called from JS (idle-dimmer.js) when user interaction triggers sleep or wake.
+  /// Routes through Blazor server-side HttpClient to avoid browser CORS issues.
+  /// </summary>
+  [JSInvokable]
+  public async Task OnJsSleepRequested(bool sleep)
+  {
+    try
+    {
+      await SystemApi.SetSleepAsync(sleep);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Error setting sleep state to {Sleep} from JS callback", sleep);
     }
   }
 
@@ -722,7 +744,10 @@
   {
     try
     {
-      await JSRuntime.InvokeVoidAsync("radioSleepManager.enterSleep", "button");
+      // Show black overlay immediately via JS
+      await JSRuntime.InvokeVoidAsync("radioSleepManager.enterSleep", "server");
+      // Call API server-side to pause audio (avoids browser CORS issues)
+      await SystemApi.SetSleepAsync(true);
     }
     catch (Exception ex)
     {
@@ -762,6 +787,7 @@
 
     _timer?.Stop();
     _timer?.Dispose();
+    _selfReference?.Dispose();
   }
 
   public ValueTask DisposeAsync()
