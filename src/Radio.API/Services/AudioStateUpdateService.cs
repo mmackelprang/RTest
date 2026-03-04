@@ -515,7 +515,8 @@ public class AudioStateUpdateService : BackgroundService
            previous.IsScanning != current.IsScanning ||
            previous.ScanDirection != current.ScanDirection ||
            previous.IsStereo != current.IsStereo ||
-           previous.RdsStationName != current.RdsStationName;
+           previous.RdsStationName != current.RdsStationName ||
+           previous.RdsProgramType != current.RdsProgramType;
   }
 
   private static bool HasVolumeChanged(VolumeDto? previous, VolumeDto? current)
@@ -651,6 +652,7 @@ public class AudioStateUpdateService : BackgroundService
       Gain = (int?)radioControls.Gain,
       IsStereo = radioControls.IsStereo,
       RdsStationName = radioControls.RdsStationName,
+      RdsProgramType = radioControls.RdsProgramType,
     };
   }
 

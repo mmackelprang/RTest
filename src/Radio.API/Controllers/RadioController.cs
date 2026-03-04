@@ -584,6 +584,7 @@ public class RadioController : ControllerBase
       Gain = (int?)radioSource.Gain,
       IsStereo = radioSource.IsStereo,
       RdsStationName = radioSource.RdsStationName,
+      RdsProgramType = radioSource.RdsProgramType,
     };
   }
 

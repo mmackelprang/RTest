@@ -284,7 +284,8 @@ public record RadioStateDto(
   string? Equalizer,
   int? DeviceVolume,
   bool IsStereo = false,
-  string? RdsStationName = null
+  string? RdsStationName = null,
+  string? RdsProgramType = null
 );
 
 public record RadioPowerStateDto(

@@ -68,6 +68,12 @@ public class RadioStateDto
   public string? RdsStationName { get; set; }
 
   /// <summary>
+  /// Gets or sets the RDS Program Type name (e.g., "Rock", "News"),
+  /// or null if not available.
+  /// </summary>
+  public string? RdsProgramType { get; set; }
+
+  /// <summary>
   /// Gets or sets the signal strength threshold (0-100) at which scan pauses on a signal.
   /// </summary>
   public int ScanStopThreshold { get; set; }

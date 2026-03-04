@@ -223,6 +223,12 @@ public interface IRadioControl
   string? RdsStationName { get; }
 
   /// <summary>
+  /// Gets the RDS Program Type name (e.g., "Rock", "News", "Classical"), or null if not available.
+  /// Derived from the PTY code broadcast via RDS.
+  /// </summary>
+  string? RdsProgramType { get; }
+
+  /// <summary>
   /// Gets or sets the power state of the radio device (for devices that support power control).
   /// </summary>
   Task<bool> GetPowerStateAsync(CancellationToken cancellationToken = default);

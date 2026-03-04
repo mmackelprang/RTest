@@ -258,6 +258,10 @@ public class RadioAudioSource : USBAudioSourceBase, Radio.Core.Interfaces.Audio.
   public string? RdsStationName => null;
 
   /// <inheritdoc/>
+  /// <remarks>RF320 has no RDS support.</remarks>
+  public string? RdsProgramType => null;
+
+  /// <inheritdoc/>
   /// <remarks>RF320 power state based on audio capture status.</remarks>
   public Task<bool> GetPowerStateAsync(CancellationToken cancellationToken = default)
   {
