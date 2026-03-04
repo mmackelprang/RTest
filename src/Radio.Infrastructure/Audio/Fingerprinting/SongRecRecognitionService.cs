@@ -104,7 +104,7 @@ public sealed class SongRecRecognitionService : ISongRecRecognitionService
       var psi = new ProcessStartInfo
       {
         FileName = _songRecPath,
-        Arguments = $"audio-file-to-recognized-song \"{wavFilePath}\"",
+        Arguments = $"recognize --json \"{wavFilePath}\"",
         RedirectStandardOutput = true,
         RedirectStandardError = true,
         UseShellExecute = false,
@@ -202,6 +202,10 @@ public sealed class SongRecRecognitionService : ISongRecRecognitionService
         }
       }
     }
+
+    // Genre: prefer sections metadata, fall back to track.genres.primary
+    if (string.IsNullOrEmpty(genre))
+      genre = track.Genres?.Primary;
 
     // Cover art: prefer high-res, fall back to standard
     string? coverArtUrl = track.Images?.CoverArtHq
@@ -343,6 +347,9 @@ public sealed class SongRecRecognitionService : ISongRecRecognitionService
     [JsonPropertyName("sections")]
     public List<SongRecSection>? Sections { get; set; }
 
+    [JsonPropertyName("genres")]
+    public SongRecGenres? Genres { get; set; }
+
     [JsonPropertyName("key")]
     public string? Key { get; set; }
   }
@@ -372,6 +379,12 @@ public sealed class SongRecRecognitionService : ISongRecRecognitionService
 
     [JsonPropertyName("text")]
     public string? Text { get; set; }
+  }
+
+  internal sealed class SongRecGenres
+  {
+    [JsonPropertyName("primary")]
+    public string? Primary { get; set; }
   }
 
   internal sealed class SongRecMatch

@@ -195,6 +195,74 @@ public class SongRecRecognitionServiceTests
   }
 
   [Fact]
+  public void ParseResult_FallsBackToGenresPrimary_WhenNoSectionGenre()
+  {
+    var result = new SongRecRecognitionService.SongRecResult
+    {
+      Track = new SongRecRecognitionService.SongRecTrack
+      {
+        Title = "Test Song",
+        Subtitle = "Test Artist",
+        Genres = new SongRecRecognitionService.SongRecGenres
+        {
+          Primary = "Pop"
+        },
+        Sections =
+        [
+          new SongRecRecognitionService.SongRecSection
+          {
+            Type = "SONG",
+            Metadata =
+            [
+              new SongRecRecognitionService.SongRecMetadataItem
+                { Title = "Album", Text = "Test Album" }
+            ]
+          }
+        ]
+      }
+    };
+
+    var metadata = SongRecRecognitionService.ParseResult(result);
+
+    Assert.NotNull(metadata);
+    Assert.Equal("Pop", metadata.Genre);
+  }
+
+  [Fact]
+  public void ParseResult_PrefersSectionGenre_OverGenresPrimary()
+  {
+    var result = new SongRecRecognitionService.SongRecResult
+    {
+      Track = new SongRecRecognitionService.SongRecTrack
+      {
+        Title = "Test Song",
+        Subtitle = "Test Artist",
+        Genres = new SongRecRecognitionService.SongRecGenres
+        {
+          Primary = "Pop"
+        },
+        Sections =
+        [
+          new SongRecRecognitionService.SongRecSection
+          {
+            Type = "SONG",
+            Metadata =
+            [
+              new SongRecRecognitionService.SongRecMetadataItem
+                { Title = "Genre", Text = "Rock" }
+            ]
+          }
+        ]
+      }
+    };
+
+    var metadata = SongRecRecognitionService.ParseResult(result);
+
+    Assert.NotNull(metadata);
+    Assert.Equal("Rock", metadata.Genre);
+  }
+
+  [Fact]
   public void ParseResult_WithNullTitle_UsesDefault()
   {
     var result = new SongRecRecognitionService.SongRecResult
