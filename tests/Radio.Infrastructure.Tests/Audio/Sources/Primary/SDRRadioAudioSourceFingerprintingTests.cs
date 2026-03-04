@@ -7,6 +7,7 @@ using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
+using Radio.Infrastructure.Audio.Sources;
 using Radio.Infrastructure.Audio.Sources.Primary;
 using RTLSDRCore;
 using RTLSDRCore.Hardware;
@@ -312,7 +313,7 @@ public class SDRRadioAudioSourceFingerprintingTests
     var source = CreateSource(identificationService: identificationService);
     
     // Manually set the state to Playing using reflection to bypass hardware requirement
-    var stateField = typeof(PrimaryAudioSourceBase).GetField(
+    var stateField = typeof(AudioSourceBase).GetField(
       "_state",
       System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
     stateField?.SetValue(source, AudioSourceState.Playing);
@@ -343,7 +344,7 @@ public class SDRRadioAudioSourceFingerprintingTests
     var source = CreateSource(identificationService: identificationService);
     
     // Manually set the state to Paused using reflection to bypass hardware requirement
-    var stateField = typeof(PrimaryAudioSourceBase).GetField(
+    var stateField = typeof(AudioSourceBase).GetField(
       "_state",
       System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
     stateField?.SetValue(source, AudioSourceState.Paused);

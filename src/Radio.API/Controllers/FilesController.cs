@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Radio.API.Extensions;
+using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.API.Models;
@@ -19,6 +21,7 @@ public class FilesController : ControllerBase
   private readonly IFileBrowser _fileBrowser;
   private readonly IAudioEngine _audioEngine;
   private readonly IAudioManager? _audioManager;
+  private readonly IOptionsMonitor<FilePlayerOptions> _filePlayerOptions;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="FilesController"/> class.
@@ -27,11 +30,13 @@ public class FilesController : ControllerBase
     ILogger<FilesController> logger,
     IFileBrowser fileBrowser,
     IAudioEngine audioEngine,
+    IOptionsMonitor<FilePlayerOptions> filePlayerOptions,
     IAudioManager? audioManager = null)
   {
     _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     _fileBrowser = fileBrowser ?? throw new ArgumentNullException(nameof(fileBrowser));
     _audioEngine = audioEngine ?? throw new ArgumentNullException(nameof(audioEngine));
+    _filePlayerOptions = filePlayerOptions ?? throw new ArgumentNullException(nameof(filePlayerOptions));
     _audioManager = audioManager;
   }
 
@@ -59,6 +64,11 @@ public class FilesController : ControllerBase
     // Absolute path mode: bypass _fileBrowser and enumerate directly
     if (!string.IsNullOrWhiteSpace(absolutePath))
     {
+      if (!IsPathAllowed(absolutePath))
+      {
+        _logger.LogWarning("Rejected absolute path access: {Path}", absolutePath);
+        return BadRequest(new { error = "Path is not within an allowed directory" });
+      }
       return await ListFilesAbsolute(absolutePath, cancellationToken);
     }
 
@@ -270,6 +280,13 @@ public class FilesController : ControllerBase
     if (string.IsNullOrWhiteSpace(request.Path))
     {
       return BadRequest(new { error = "File path is required" });
+    }
+
+    // Validate absolute paths against allowed directories
+    if (Path.IsPathRooted(request.Path) && !IsPathAllowed(request.Path))
+    {
+      _logger.LogWarning("Rejected play file path: {Path}", request.Path);
+      return BadRequest(new { error = "Path is not within an allowed directory" });
     }
 
     try
@@ -520,6 +537,42 @@ public class FilesController : ControllerBase
     // Fallback: AudioManager not available
     _logger.LogWarning("IAudioManager not available, cannot activate File Player source");
     return null;
+  }
+
+  /// <summary>
+  /// Validates that a path falls within an allowed directory (media root or configured browse directories).
+  /// Prevents path traversal attacks via ".." segments or symlinks.
+  /// </summary>
+  private bool IsPathAllowed(string path)
+  {
+    try
+    {
+      // Resolve to absolute path, eliminating ".." segments and symlinks
+      var resolvedPath = Path.GetFullPath(path);
+
+      // Check against configured media root
+      var options = _filePlayerOptions.CurrentValue;
+      var mediaRoot = Path.GetFullPath(
+        string.IsNullOrEmpty(options.RootDirectory) ? "." : options.RootDirectory);
+      if (resolvedPath.StartsWith(mediaRoot, StringComparison.OrdinalIgnoreCase))
+        return true;
+
+      // Check against additional allowed browse directories
+      foreach (var allowedDir in options.AllowedBrowseDirectories)
+      {
+        if (string.IsNullOrWhiteSpace(allowedDir)) continue;
+        var resolvedAllowed = Path.GetFullPath(allowedDir);
+        if (resolvedPath.StartsWith(resolvedAllowed, StringComparison.OrdinalIgnoreCase))
+          return true;
+      }
+
+      return false;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Error validating path: {Path}", path);
+      return false;
+    }
   }
 
   /// <summary>

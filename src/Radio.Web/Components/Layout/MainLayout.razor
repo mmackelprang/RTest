@@ -212,7 +212,7 @@
     {
       // Set API base URL for idle-dimmer.js sleep/wake fetch calls
       var apiBaseUrl = Configuration["ApiBaseUrl"] ?? "http://localhost:5000";
-      await JSRuntime.InvokeVoidAsync("eval", $"window.radioApiBaseUrl = '{apiBaseUrl}'");
+      await JSRuntime.InvokeVoidAsync("radioSetApiBaseUrl", apiBaseUrl);
     }
   }
 

@@ -215,7 +215,7 @@
   private async Task LoadAvailableMetricsAsync()
   {
     try { _availableMetrics = await MetricsApi.GetMetricKeysAsync(); }
-    catch { }
+    catch (Exception ex) { Logger.LogWarning(ex, "Failed to load available metrics"); }
   }
 
   private async Task LoadSnapshotsAsync()
@@ -225,7 +225,7 @@
       if (_availableMetrics != null && _availableMetrics.Count > 0)
         _snapshots = await MetricsApi.GetMetricSnapshotsAsync(_availableMetrics);
     }
-    catch { }
+    catch (Exception ex) { Logger.LogWarning(ex, "Failed to load metric snapshots"); }
   }
 
   private async Task LoadSparklineDataAsync()
@@ -251,7 +251,7 @@
         if (history != null && history.Count > 1)
           return (key, points: history.Select(h => h.Value).ToList(), history: (List<MetricHistoryDto>?)history);
       }
-      catch { }
+      catch (Exception ex) { Logger.LogDebug(ex, "Failed to load sparkline data for metric {Key}", key); }
       return (key, points: (List<double>?)null, history: (List<MetricHistoryDto>?)null);
     });
 

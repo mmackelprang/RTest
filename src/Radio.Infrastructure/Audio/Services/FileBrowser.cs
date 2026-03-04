@@ -296,6 +296,7 @@ public class FileBrowser : IFileBrowser
 
   /// <summary>
   /// Gets the full file system path from a relative path.
+  /// Validates that the resolved path stays within the media root to prevent path traversal.
   /// </summary>
   private string GetFullPath(string? relativePath)
   {
@@ -314,7 +315,18 @@ public class FileBrowser : IFileBrowser
       return basePath;
     }
 
-    return Path.Combine(basePath, relativePath);
+    // Resolve the combined path and verify it stays within the base
+    var combined = Path.GetFullPath(Path.Combine(basePath, relativePath));
+    var resolvedBase = Path.GetFullPath(basePath);
+
+    if (!combined.StartsWith(resolvedBase, StringComparison.OrdinalIgnoreCase))
+    {
+      _logger.LogWarning("Path traversal attempt blocked: {RelativePath} resolved to {FullPath} (outside {Base})",
+        relativePath, combined, resolvedBase);
+      throw new UnauthorizedAccessException($"Path '{relativePath}' is outside the allowed media directory");
+    }
+
+    return combined;
   }
 
   /// <summary>

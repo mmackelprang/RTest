@@ -7,16 +7,12 @@ namespace Radio.Infrastructure.Audio.Sources.Primary;
 
 /// <summary>
 /// Base abstract class for primary audio sources.
-/// Provides common functionality for state management and events.
+/// Extends <see cref="AudioSourceBase"/> with pause/resume, seeking, track navigation,
+/// shuffle/repeat support, and playback metrics.
 /// </summary>
-public abstract class PrimaryAudioSourceBase : IPrimaryAudioSource
+public abstract class PrimaryAudioSourceBase : AudioSourceBase, IPrimaryAudioSource
 {
-  private readonly ILogger _logger;
   private readonly IMetricsCollector? _metricsCollector;
-  private AudioSourceState _state = AudioSourceState.Created;
-  private float _volume = 1.0f;
-  private bool _disposed;
-  private string? _id;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="PrimaryAudioSourceBase"/> class.
@@ -24,8 +20,8 @@ public abstract class PrimaryAudioSourceBase : IPrimaryAudioSource
   /// <param name="logger">The logger instance.</param>
   /// <param name="metricsCollector">Optional metrics collector for tracking playback metrics.</param>
   protected PrimaryAudioSourceBase(ILogger logger, IMetricsCollector? metricsCollector = null)
+    : base(logger)
   {
-    _logger = logger;
     _metricsCollector = metricsCollector;
   }
 
@@ -35,42 +31,7 @@ public abstract class PrimaryAudioSourceBase : IPrimaryAudioSource
   protected IMetricsCollector? MetricsCollector => _metricsCollector;
 
   /// <inheritdoc/>
-  public string Id => _id ??= $"{Type}-{Guid.NewGuid():N}";
-
-  /// <inheritdoc/>
-  public abstract string Name { get; }
-
-  /// <inheritdoc/>
-  public abstract AudioSourceType Type { get; }
-
-  /// <inheritdoc/>
-  public AudioSourceCategory Category => AudioSourceCategory.Primary;
-
-  /// <inheritdoc/>
-  public AudioSourceState State
-  {
-    get => _state;
-    protected set
-    {
-      if (_state == value) return;
-      var previousState = _state;
-      _state = value;
-      _logger.LogInformation("Audio source {Id} state changed from {PreviousState} to {NewState}",
-        Id, previousState, value);
-      OnStateChanged(previousState, value);
-    }
-  }
-
-  /// <inheritdoc/>
-  public float Volume
-  {
-    get => _volume;
-    set
-    {
-      _volume = Math.Clamp(value, 0.0f, 1.0f);
-      OnVolumeChanged(_volume);
-    }
-  }
+  public override AudioSourceCategory Category => AudioSourceCategory.Primary;
 
   /// <inheritdoc/>
   public abstract TimeSpan? Duration { get; }
@@ -109,32 +70,13 @@ public abstract class PrimaryAudioSourceBase : IPrimaryAudioSource
   /// <inheritdoc/>
   public virtual RepeatMode RepeatMode => RepeatMode.Off;
 
-  /// <inheritdoc/>
-  public event EventHandler<AudioSourceStateChangedEventArgs>? StateChanged;
-
-  /// <inheritdoc/>
-  public event EventHandler<AudioSourceCompletedEventArgs>? PlaybackCompleted;
-
-  /// <inheritdoc/>
-  public abstract object GetSoundComponent();
-
-  /// <inheritdoc/>
-  public virtual async Task PlayAsync(CancellationToken cancellationToken = default)
+  /// <summary>
+  /// Logs state changes at Information level for primary sources.
+  /// </summary>
+  protected override void LogStateChange(AudioSourceState previousState, AudioSourceState newState)
   {
-    ThrowIfDisposed();
-    if (State == AudioSourceState.Created)
-    {
-      await InitializeAsync(cancellationToken);
-    }
-
-    // Check if initialization failed
-    if (State == AudioSourceState.Error)
-    {
-      return;
-    }
-
-    await PlayCoreAsync(cancellationToken);
-    State = AudioSourceState.Playing;
+    Logger.LogInformation("Audio source {Id} state changed from {PreviousState} to {NewState}",
+      Id, previousState, newState);
   }
 
   /// <inheritdoc/>
@@ -143,7 +85,7 @@ public abstract class PrimaryAudioSourceBase : IPrimaryAudioSource
     ThrowIfDisposed();
     if (State != AudioSourceState.Playing)
     {
-      _logger.LogWarning("Cannot pause {SourceId} - not playing (state: {State})", Id, State);
+      Logger.LogWarning("Cannot pause {SourceId} - not playing (state: {State})", Id, State);
       return;
     }
 
@@ -157,25 +99,12 @@ public abstract class PrimaryAudioSourceBase : IPrimaryAudioSource
     ThrowIfDisposed();
     if (State != AudioSourceState.Paused)
     {
-      _logger.LogWarning("Cannot resume {SourceId} - not paused (state: {State})", Id, State);
+      Logger.LogWarning("Cannot resume {SourceId} - not paused (state: {State})", Id, State);
       return;
     }
 
     await ResumeCoreAsync(cancellationToken);
     State = AudioSourceState.Playing;
-  }
-
-  /// <inheritdoc/>
-  public virtual async Task StopAsync(CancellationToken cancellationToken = default)
-  {
-    ThrowIfDisposed();
-    if (State != AudioSourceState.Playing && State != AudioSourceState.Paused)
-    {
-      return;
-    }
-
-    await StopCoreAsync(cancellationToken);
-    State = AudioSourceState.Stopped;
   }
 
   /// <inheritdoc/>
@@ -234,31 +163,6 @@ public abstract class PrimaryAudioSourceBase : IPrimaryAudioSource
     return Task.CompletedTask;
   }
 
-  /// <inheritdoc/>
-  public async ValueTask DisposeAsync()
-  {
-    if (_disposed) return;
-
-    await DisposeAsyncCore();
-    State = AudioSourceState.Disposed;
-    _disposed = true;
-    GC.SuppressFinalize(this);
-  }
-
-  /// <inheritdoc/>
-  public virtual Task InitializeAsync(CancellationToken cancellationToken = default)
-  {
-    State = AudioSourceState.Initializing;
-    return Task.CompletedTask;
-  }
-
-  /// <summary>
-  /// Core implementation for starting playback.
-  /// </summary>
-  /// <param name="cancellationToken">Cancellation token.</param>
-  /// <returns>A task representing the async operation.</returns>
-  protected abstract Task PlayCoreAsync(CancellationToken cancellationToken);
-
   /// <summary>
   /// Core implementation for pausing playback.
   /// </summary>
@@ -274,13 +178,6 @@ public abstract class PrimaryAudioSourceBase : IPrimaryAudioSource
   protected abstract Task ResumeCoreAsync(CancellationToken cancellationToken);
 
   /// <summary>
-  /// Core implementation for stopping playback.
-  /// </summary>
-  /// <param name="cancellationToken">Cancellation token.</param>
-  /// <returns>A task representing the async operation.</returns>
-  protected abstract Task StopCoreAsync(CancellationToken cancellationToken);
-
-  /// <summary>
   /// Core implementation for seeking.
   /// </summary>
   /// <param name="position">The position to seek to.</param>
@@ -292,43 +189,10 @@ public abstract class PrimaryAudioSourceBase : IPrimaryAudioSource
   }
 
   /// <summary>
-  /// Core implementation for async disposal.
+  /// Raises the <see cref="AudioSourceBase.PlaybackCompleted"/> event
+  /// and tracks metrics for natural completion.
   /// </summary>
-  /// <returns>A task representing the async operation.</returns>
-  protected virtual ValueTask DisposeAsyncCore()
-  {
-    return ValueTask.CompletedTask;
-  }
-
-  /// <summary>
-  /// Called when the volume changes. Override to apply volume to the sound component.
-  /// </summary>
-  /// <param name="volume">The new volume level (0.0 to 1.0).</param>
-  protected virtual void OnVolumeChanged(float volume)
-  {
-  }
-
-  /// <summary>
-  /// Raises the <see cref="StateChanged"/> event.
-  /// </summary>
-  /// <param name="previousState">The previous state.</param>
-  /// <param name="newState">The new state.</param>
-  protected virtual void OnStateChanged(AudioSourceState previousState, AudioSourceState newState)
-  {
-    StateChanged?.Invoke(this, new AudioSourceStateChangedEventArgs
-    {
-      PreviousState = previousState,
-      NewState = newState,
-      SourceId = Id
-    });
-  }
-
-  /// <summary>
-  /// Raises the <see cref="PlaybackCompleted"/> event.
-  /// </summary>
-  /// <param name="reason">The reason for completion.</param>
-  /// <param name="error">Any error that occurred, if applicable.</param>
-  protected virtual void OnPlaybackCompleted(PlaybackCompletionReason reason, Exception? error = null)
+  protected override void OnPlaybackCompleted(PlaybackCompletionReason reason, Exception? error = null)
   {
     // Track metrics for natural completion
     if (reason == PlaybackCompletionReason.EndOfContent)
@@ -336,12 +200,7 @@ public abstract class PrimaryAudioSourceBase : IPrimaryAudioSource
       _metricsCollector?.Increment("audio.songs_played_total");
     }
 
-    PlaybackCompleted?.Invoke(this, new AudioSourceCompletedEventArgs
-    {
-      SourceId = Id,
-      Reason = reason,
-      Error = error
-    });
+    base.OnPlaybackCompleted(reason, error);
   }
 
   /// <summary>
@@ -361,20 +220,4 @@ public abstract class PrimaryAudioSourceBase : IPrimaryAudioSource
   {
     _metricsCollector?.Increment("audio.playback_errors");
   }
-
-  /// <summary>
-  /// Throws an <see cref="ObjectDisposedException"/> if this instance has been disposed.
-  /// </summary>
-  protected void ThrowIfDisposed()
-  {
-    if (_disposed)
-    {
-      throw new ObjectDisposedException(GetType().Name);
-    }
-  }
-
-  /// <summary>
-  /// Gets the logger for this instance.
-  /// </summary>
-  protected ILogger Logger => _logger;
 }

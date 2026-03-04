@@ -314,7 +314,9 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     }
 
     // Serialize source creation to prevent duplicate instances (e.g., two Radio
-    // requests arriving simultaneously, both trying to open the RTL-SDR device)
+    // requests arriving simultaneously, both trying to open the RTL-SDR device).
+    // IMPORTANT: Never call SwitchSourceAsync while holding _createLock — it
+    // acquires _switchLock and would create an inconsistent lock ordering.
     IAudioSource? source = null;
     await _createLock.WaitAsync(cancellationToken);
     try
@@ -323,62 +325,61 @@ public class AudioManager : IAudioManager, IAsyncDisposable
       if (_sourceCache.TryGetValue(sourceType, out cachedSource))
       {
         _logger.LogDebug("Returning cached source for type (after lock): {SourceType}", sourceType);
-        if (switchToSource && cachedSource != _activeSource)
+        source = cachedSource;
+        // Don't return here — fall through to switch logic after lock release
+      }
+      else
+      {
+        _logger.LogInformation("Creating new source for type: {SourceType}", sourceType);
+
+        try
         {
-          await SwitchSourceAsync(cachedSource, cancellationToken);
+          source = _sourceFactory.CreateSource(sourceType);
         }
-        return cachedSource;
-      }
-
-      _logger.LogInformation("Creating new source for type: {SourceType}", sourceType);
-
-      try
-      {
-        source = _sourceFactory.CreateSource(sourceType);
-      }
-      catch (ArgumentOutOfRangeException)
-      {
-        _logger.LogWarning("Source type {SourceType} is not supported", sourceType);
-        return null;
-      }
-      catch (Exception ex)
-      {
-        _logger.LogError(ex, "Failed to create source for type: {SourceType}", sourceType);
-        return null;
-      }
-
-      if (source == null)
-      {
-        _logger.LogWarning("Source type {SourceType} is not supported", sourceType);
-        return null;
-      }
-
-      // Initialize the source before adding to mixer
-      if (source is IPrimaryAudioSource primarySource)
-      {
-        _logger.LogDebug("Initializing source: {SourceName}", source.Name);
-        await primarySource.InitializeAsync(cancellationToken);
-
-        if (source.State == AudioSourceState.Error)
+        catch (ArgumentOutOfRangeException)
         {
-          _logger.LogWarning("Source {SourceName} failed to initialize", source.Name);
+          _logger.LogWarning("Source type {SourceType} is not supported", sourceType);
           return null;
         }
+        catch (Exception ex)
+        {
+          _logger.LogError(ex, "Failed to create source for type: {SourceType}", sourceType);
+          return null;
+        }
+
+        if (source == null)
+        {
+          _logger.LogWarning("Source type {SourceType} is not supported", sourceType);
+          return null;
+        }
+
+        // Initialize the source before adding to mixer
+        if (source is IPrimaryAudioSource primarySource)
+        {
+          _logger.LogDebug("Initializing source: {SourceName}", source.Name);
+          await primarySource.InitializeAsync(cancellationToken);
+
+          if (source.State == AudioSourceState.Error)
+          {
+            _logger.LogWarning("Source {SourceName} failed to initialize", source.Name);
+            return null;
+          }
+        }
+
+        // Cache the source for reuse
+        _sourceCache[sourceType] = source;
+
+        // Subscribe to state changes for source cleanup and play history tracking
+        SubscribeToSourceStateChanges(source);
+
+        // Add to mixer
+        var mixer = _audioEngine.GetMasterMixer();
+        mixer.AddSource(source);
+
+        _logger.LogInformation(
+          "Created and registered source: {SourceName} ({SourceType})",
+          source.Name, source.Type);
       }
-
-      // Cache the source for reuse
-      _sourceCache[sourceType] = source;
-
-      // Subscribe to state changes for source cleanup and play history tracking
-      SubscribeToSourceStateChanges(source);
-
-      // Add to mixer
-      var mixer = _audioEngine.GetMasterMixer();
-      mixer.AddSource(source);
-
-      _logger.LogInformation(
-        "Created and registered source: {SourceName} ({SourceType})",
-        source.Name, source.Type);
     }
     finally
     {
@@ -386,7 +387,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     }
 
     // Switch to the source if requested (outside _createLock to avoid deadlock with _switchLock)
-    if (switchToSource && source != null)
+    if (switchToSource && source != null && source != _activeSource)
     {
       await SwitchSourceAsync(source, cancellationToken);
     }

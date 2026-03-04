@@ -36,15 +36,14 @@ public class SecretsController : ControllerBase
   }
 
   /// <summary>
-  /// Gets all secrets for a section, with values masked by default.
+  /// Gets all secrets for a section, with values always masked.
   /// </summary>
   /// <param name="section">The section name (e.g., "tts", "acoustid").</param>
-  /// <param name="raw">If true, returns raw (unmasked) values.</param>
   [HttpGet("{section}")]
   [ProducesResponseType(typeof(Dictionary<string, string>), StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
   public async Task<ActionResult<Dictionary<string, string>>> GetSectionSecrets(
-    string section, [FromQuery] bool raw = false)
+    string section)
   {
     if (!SectionTagMappings.TryGetValue(section, out var tagMap))
       return BadRequest(new { error = $"Unknown secrets section '{section}'" });
@@ -53,14 +52,7 @@ public class SecretsController : ControllerBase
     foreach (var (property, tag) in tagMap)
     {
       var value = await _secrets.GetSecretAsync(tag);
-      if (raw)
-      {
-        result[property] = value ?? "";
-      }
-      else
-      {
-        result[property] = MaskValue(value);
-      }
+      result[property] = MaskValue(value);
     }
 
     return Ok(result);

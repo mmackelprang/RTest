@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Core.Extensions;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Sharpcaster;
@@ -115,14 +116,14 @@ public class GoogleCastOutput : AudioOutputBase
   protected override void OnVolumeChanged(float volume)
   {
     // Apply volume to connected device if available
-    _ = SetCastVolumeAsync(volume);
+    SetCastVolumeAsync(volume).SafeFireAndForget(_logger, "SetCastVolume");
   }
 
   /// <inheritdoc />
   protected override void OnMuteChanged(bool muted)
   {
     // Apply mute state to connected device if available
-    _ = SetCastMuteAsync(muted);
+    SetCastMuteAsync(muted).SafeFireAndForget(_logger, "SetCastMute");
   }
 
   /// <inheritdoc />
@@ -139,7 +140,8 @@ public class GoogleCastOutput : AudioOutputBase
       // Dispose old client if reinitializing after error
       if (_client != null)
       {
-        try { await _client.DisconnectAsync(); } catch { }
+        try { await _client.DisconnectAsync(); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Error disconnecting previous Cast client during reinit"); }
       }
 
       // Create a fresh ChromecastClient
@@ -433,7 +435,8 @@ public class GoogleCastOutput : AudioOutputBase
         // Create a fresh ChromecastClient for cached connections to avoid stale socket state
         if (_client != null)
         {
-          try { await _client.DisconnectAsync(); } catch { }
+          try { await _client.DisconnectAsync(); }
+          catch (Exception ex) { _logger.LogDebug(ex, "Error disconnecting previous Cast client for cached connection"); }
         }
         _client = new ChromecastClient();
 

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Radio.Core.Extensions;
 using Radio.Infrastructure.Audio.Services;
 using SoundFlow.Abstracts;
 using SoundFlow.Abstracts.Devices;
@@ -690,7 +691,7 @@ public class SoundFlowPlaybackService : IDisposable
 
     foreach (var sourceId in sourceIds)
     {
-      _ = StopAsync(sourceId);
+      StopAsync(sourceId).SafeFireAndForget(_logger, $"StopAsync({sourceId})");
     }
   }
 

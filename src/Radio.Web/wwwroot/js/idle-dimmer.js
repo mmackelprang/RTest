@@ -3,6 +3,12 @@
 // - Sleep: black overlay + mutes audio after 30 minutes of no interaction
 // - Wake: touch/pointer/key restores screen + unmutes audio
 // Exposes window.radioSleepManager for JS interop from Blazor
+
+// Safe setter for API base URL (called from Blazor JS interop instead of eval)
+window.radioSetApiBaseUrl = function (url) {
+  window.radioApiBaseUrl = url;
+};
+
 (function () {
   const IDLE_TIMEOUT = 5 * 60 * 1000; // 5 minutes → dim
   const SLEEP_TIMEOUT = 30 * 60 * 1000; // 30 minutes → sleep

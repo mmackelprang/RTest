@@ -2,6 +2,7 @@ using System.Globalization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Core.Extensions;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Configuration.Abstractions;
 using Radio.Infrastructure.Configuration.Models;
@@ -50,7 +51,7 @@ public class AudioPreferencePersistence : IDisposable
     {
       _volumePersistTimer?.Dispose();
       _volumePersistTimer = new Timer(
-        _ => _ = PersistVolumePreferencesAsync(),
+        _ => PersistVolumePreferencesAsync().SafeFireAndForget(_logger, "PersistVolumePreferences"),
         null,
         TimeSpan.FromMilliseconds(500),
         Timeout.InfiniteTimeSpan);
@@ -271,7 +272,7 @@ public class AudioPreferencePersistence : IDisposable
     {
       _sourceGainPersistTimer?.Dispose();
       _sourceGainPersistTimer = new Timer(
-        _ => _ = PersistSourceGainAsync(),
+        _ => PersistSourceGainAsync().SafeFireAndForget(_logger, "PersistSourceGain"),
         null,
         TimeSpan.FromMilliseconds(500),
         Timeout.InfiniteTimeSpan);
