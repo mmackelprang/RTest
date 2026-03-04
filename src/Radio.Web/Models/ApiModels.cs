@@ -283,7 +283,8 @@ public record RadioStateDto(
   bool AutoGain,
   string? Equalizer,
   int? DeviceVolume,
-  bool IsStereo = false
+  bool IsStereo = false,
+  string? RdsStationName = null
 );
 
 public record RadioPowerStateDto(

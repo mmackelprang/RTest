@@ -583,6 +583,7 @@ public class RadioController : ControllerBase
       AutoGain = radioSource.AutoGainEnabled,
       Gain = (int?)radioSource.Gain,
       IsStereo = radioSource.IsStereo,
+      RdsStationName = radioSource.RdsStationName,
     };
   }
 

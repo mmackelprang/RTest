@@ -62,6 +62,12 @@ public class RadioStateDto
   public bool IsStereo { get; set; }
 
   /// <summary>
+  /// Gets or sets the RDS Program Service station name (up to 8 characters),
+  /// or null if RDS is not available.
+  /// </summary>
+  public string? RdsStationName { get; set; }
+
+  /// <summary>
   /// Gets or sets the signal strength threshold (0-100) at which scan pauses on a signal.
   /// </summary>
   public int ScanStopThreshold { get; set; }

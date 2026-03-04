@@ -43,6 +43,10 @@
              title="Click to set frequency">
           @FrequencyValue(_radioState.Frequency, _radioState.Band)<span class="rcp-freq-unit">@FrequencyUnit(_radioState.Band)</span>
         </div>
+        @if (!string.IsNullOrEmpty(_radioState.RdsStationName))
+        {
+          <div class="rcp-rds-name">@_radioState.RdsStationName</div>
+        }
         <div class="rcp-freq-indicators">
           <div class="rcp-step-label rcp-step-clickable" @onclick="CycleStepSizeAsync"
                title="Click to change step size">
@@ -470,6 +474,26 @@
   @@keyframes rcp-stereo-pulse {
     0%, 100% { box-shadow: 0 0 8px rgba(92, 212, 232, 0.15); }
     50% { box-shadow: 0 0 14px rgba(92, 212, 232, 0.25); }
+  }
+
+  /* ── RDS Station Name ── */
+
+  .rcp-rds-name {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.22em;
+    color: var(--accent-primary);
+    text-shadow: 0 0 10px rgba(92, 212, 232, 0.4);
+    text-align: center;
+    margin-top: 2px;
+    margin-bottom: -2px;
+    animation: rcp-rds-fadein 400ms ease-out;
+  }
+
+  @@keyframes rcp-rds-fadein {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 
   /* ── Signal Meter — Recessed LED Bar ── */

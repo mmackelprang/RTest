@@ -217,6 +217,12 @@ public interface IRadioControl
   bool IsStereo { get; }
 
   /// <summary>
+  /// Gets the RDS Program Service station name (up to 8 characters), or null if not available.
+  /// Only populated for FM when the station transmits RDS data.
+  /// </summary>
+  string? RdsStationName { get; }
+
+  /// <summary>
   /// Gets or sets the power state of the radio device (for devices that support power control).
   /// </summary>
   Task<bool> GetPowerStateAsync(CancellationToken cancellationToken = default);
