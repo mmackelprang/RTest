@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
+using Radio.Core.Interfaces;
 
 namespace Radio.Infrastructure.Audio;
 
@@ -8,7 +9,7 @@ namespace Radio.Infrastructure.Audio;
 /// Provides HTTP-serveable paths for use by Cast devices and the Web UI.
 /// Storage: ./data/albumart/
 /// </summary>
-public sealed class AlbumArtCacheService : IDisposable
+public sealed class AlbumArtCacheService : IAlbumArtCacheService, IDisposable
 {
   private readonly ILogger<AlbumArtCacheService> _logger;
   private readonly string _cacheDir;

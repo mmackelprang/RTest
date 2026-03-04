@@ -19,8 +19,7 @@ public class AudioVisualizationHub : Hub
   private readonly ILogger<AudioVisualizationHub> _logger;
   private readonly IVisualizerService _visualizerService;
   private readonly IMetricsCollector? _metricsCollector;
-  private static int _connectedClients = 0;
-  private static readonly object _lockObject = new();
+  private static int _connectedClients;
 
   /// <summary>
   /// Initializes a new instance of the AudioVisualizationHub.
@@ -167,14 +166,11 @@ public class AudioVisualizationHub : Hub
   /// </summary>
   public override async Task OnConnectedAsync()
   {
-    lock (_lockObject)
-    {
-      _connectedClients++;
-      _metricsCollector?.Gauge("websocket.connected_clients", _connectedClients);
-    }
+    var count = Interlocked.Increment(ref _connectedClients);
+    _metricsCollector?.Gauge("websocket.connected_clients", count);
 
-    _logger.LogInformation("Client {ConnectionId} connected to AudioVisualizationHub (total: {Count})", 
-      Context.ConnectionId, _connectedClients);
+    _logger.LogInformation("Client {ConnectionId} connected to AudioVisualizationHub (total: {Count})",
+      Context.ConnectionId, count);
     await base.OnConnectedAsync();
   }
 
@@ -183,23 +179,20 @@ public class AudioVisualizationHub : Hub
   /// </summary>
   public override async Task OnDisconnectedAsync(Exception? exception)
   {
-    lock (_lockObject)
-    {
-      _connectedClients--;
-      _metricsCollector?.Gauge("websocket.connected_clients", _connectedClients);
-    }
+    var count = Math.Max(0, Interlocked.Decrement(ref _connectedClients));
+    _metricsCollector?.Gauge("websocket.connected_clients", count);
 
     if (exception != null)
     {
-      _logger.LogWarning(exception, "Client {ConnectionId} disconnected with error (total: {Count})", 
-        Context.ConnectionId, _connectedClients);
+      _logger.LogWarning(exception, "Client {ConnectionId} disconnected with error (total: {Count})",
+        Context.ConnectionId, count);
     }
     else
     {
-      _logger.LogInformation("Client {ConnectionId} disconnected (total: {Count})", 
-        Context.ConnectionId, _connectedClients);
+      _logger.LogInformation("Client {ConnectionId} disconnected (total: {Count})",
+        Context.ConnectionId, count);
     }
-    
+
     await base.OnDisconnectedAsync(exception);
   }
 

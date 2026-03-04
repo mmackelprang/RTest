@@ -11,12 +11,12 @@ public static class WebConstants
   public const string DefaultApiBaseUrl = "http://localhost:5000";
 
   /// <summary>
-  /// SignalR hub path constants.
+  /// SignalR hub path constants. Delegates to <see cref="Radio.Core.Constants.ApiPaths.Hubs"/>.
   /// </summary>
   public static class HubPaths
   {
-    public const string Audio = "/hubs/audio";
-    public const string Visualization = "/hubs/visualization";
+    public const string Audio = Radio.Core.Constants.ApiPaths.Hubs.Audio;
+    public const string Visualization = Radio.Core.Constants.ApiPaths.Hubs.Visualization;
   }
 
   /// <summary>

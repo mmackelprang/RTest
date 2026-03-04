@@ -10,6 +10,9 @@ namespace Radio.Infrastructure.Audio.SoundFlow;
 /// </summary>
 internal sealed class TappedOutputStream : Stream
 {
+  /// <summary>Bytes per sample for 16-bit PCM audio.</summary>
+  private const int BytesPerSample16Bit = 2;
+
   private readonly byte[] _buffer;
   private readonly int _bufferSize;
   private readonly int _sampleRate;
@@ -44,7 +47,7 @@ internal sealed class TappedOutputStream : Stream
   {
     _sampleRate = sampleRate;
     _channels = channels;
-    _bytesPerSample = 2; // 16-bit PCM
+    _bytesPerSample = BytesPerSample16Bit;
     _metricsCollector = metricsCollector;
 
     // Calculate buffer size: sampleRate * channels * bytesPerSample * seconds
@@ -61,6 +64,11 @@ internal sealed class TappedOutputStream : Stream
   /// Gets the number of audio channels.
   /// </summary>
   public int Channels => _channels;
+
+  /// <summary>
+  /// Gets the bytes per sample (2 for 16-bit PCM).
+  /// </summary>
+  public int BytesPerSample => _bytesPerSample;
 
   /// <summary>
   /// Gets the number of bytes available to read (legacy single-reader path).
@@ -421,7 +429,7 @@ internal sealed class TappedOutputStreamReader : Stream
       // Silence was emitted — pace to approximate real-time to prevent
       // tight-loop spinning that causes high CPU and bandwidth waste.
       // At 48kHz stereo 16-bit: 192,000 bytes/sec → 192 bytes/ms
-      var bytesPerMs = _parent.SampleRate * _parent.Channels * 2 / 1000;
+      var bytesPerMs = _parent.SampleRate * _parent.Channels * _parent.BytesPerSample / 1000;
       var delayMs = bytesPerMs > 0 ? bytesRead / bytesPerMs : 20;
       await Task.Delay(Math.Max(1, delayMs), cancellationToken);
     }

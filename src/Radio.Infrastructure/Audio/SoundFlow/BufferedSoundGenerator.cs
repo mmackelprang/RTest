@@ -62,6 +62,8 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     // clock than consumer (MiniAudio/ALSA), the buffer slowly drains or fills. We
     // periodically check the buffer level and duplicate a frame of samples when the
     // level drops below a threshold, preventing progressive underruns.
+    private const float DriftCompensationThresholdPercent = 0.15f;
+    private const float DriftCompensationTargetPercent = 0.25f;
     private readonly int _driftCompensationThreshold; // samples
     private readonly int _driftCompensationTarget;     // samples
     private DateTime _lastDriftCheckTime;
@@ -96,10 +98,8 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         _maxBufferSamples = (int)(samplesPerSecond * maxBufferSeconds);
         _ringBuffer = new T[_maxBufferSamples];
 
-        // Clock drift compensation thresholds: check every second, compensate when
-        // buffer drops below 15% of capacity, target refill to 25%.
-        _driftCompensationThreshold = (int)(_maxBufferSamples * 0.15);
-        _driftCompensationTarget = (int)(_maxBufferSamples * 0.25);
+        _driftCompensationThreshold = (int)(_maxBufferSamples * DriftCompensationThresholdPercent);
+        _driftCompensationTarget = (int)(_maxBufferSamples * DriftCompensationTargetPercent);
 
         Name = $"Buffered Generator ({typeof(T).Name})";
 
