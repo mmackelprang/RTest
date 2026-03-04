@@ -262,38 +262,13 @@ public class SoundFlowAudioEngine : IAudioEngine
         _options.OutputBufferSizeSeconds,
         _metricsCollector);
 
-      // Add modifiers to capture mixed audio for fingerprinting/streaming
+      // Add modifiers to capture mixed audio for fingerprinting/streaming.
+      // Start the playback device AFTER all modifiers are attached.
+      // SoundFlow's audio callback must see the full modifier chain from
+      // the first callback invocation, otherwise modifiers receive silence.
       if (_playbackDevice != null)
       {
-        // Add balance modifier first (before limiter/fingerprint tap)
-        _balanceModifier = new BalanceModifier(_masterMixer);
-        _playbackDevice.MasterMixer.AddModifier(_balanceModifier);
-        _logger.LogInformation("Balance modifier added to MasterMixer");
-
-        // Add limiter after balance to prevent clipping before downstream taps
-        _limiterModifier = new LimiterModifier();
-        _playbackDevice.MasterMixer.AddModifier(_limiterModifier);
-        _logger.LogInformation("Limiter modifier added to MasterMixer (threshold={Threshold:F3})",
-          LimiterModifier.DefaultThreshold);
-
-        // Add fingerprint tap modifier after limiter.
-        // Use 2048-sample buffer (~21ms at 48kHz stereo) instead of default 4096 (~42ms)
-        // to reduce latency for HTTP streaming to Cast devices.
-        _fingerprintTap = new FingerprintTapModifier(this, _logger, bufferSize: 2048, metricsCollector: _metricsCollector);
-        _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
-        _logger.LogInformation("Fingerprint tap modifier added to MasterMixer");
-
-        // Add visualization tap modifier for real-time spectrum/level/waveform data
-        if (_visualizerService != null)
-        {
-          _visualizationTap = new VisualizationTapModifier(_visualizerService, _audioFormat);
-          _playbackDevice.MasterMixer.AddModifier(_visualizationTap);
-          _logger.LogInformation("Visualization tap modifier added to MasterMixer");
-        }
-
-        // Start the playback device AFTER all modifiers are attached.
-        // SoundFlow's audio callback must see the full modifier chain from
-        // the first callback invocation, otherwise modifiers receive silence.
+        AttachModifiersToPlaybackDevice();
         _playbackDevice.Start();
         _logger.LogInformation("Playback device started with all modifiers attached");
       }
@@ -495,36 +470,8 @@ public class SoundFlowAudioEngine : IAudioEngine
       _playbackDevice.MasterMixer.Volume = _localOutputMuted ? 0f : _masterMixer.GetEffectiveVolume();
       _playbackDevice.Start();
 
-      // Re-attach modifiers
-      if (_balanceModifier != null)
-      {
-        _playbackDevice.MasterMixer.AddModifier(_balanceModifier);
-      }
-      else
-      {
-        _balanceModifier = new BalanceModifier(_masterMixer);
-        _playbackDevice.MasterMixer.AddModifier(_balanceModifier);
-      }
-
-      if (_limiterModifier != null)
-      {
-        _playbackDevice.MasterMixer.AddModifier(_limiterModifier);
-      }
-      else
-      {
-        _limiterModifier = new LimiterModifier();
-        _playbackDevice.MasterMixer.AddModifier(_limiterModifier);
-      }
-
-      if (_fingerprintTap != null)
-      {
-        _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
-      }
-      else
-      {
-        _fingerprintTap = new FingerprintTapModifier(this, _logger, metricsCollector: _metricsCollector);
-        _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
-      }
+      // Re-attach all modifiers (including visualization tap, which was previously missing here)
+      AttachModifiersToPlaybackDevice();
 
       _logger.LogInformation("Recovery successful: playback device {Name} initialized with modifiers", deviceInfo.Name);
     }
@@ -591,58 +538,8 @@ public class SoundFlowAudioEngine : IAudioEngine
       // Apply current volume/mute state
       _playbackDevice.MasterMixer.Volume = _localOutputMuted ? 0f : _masterMixer.GetEffectiveVolume();
 
-      // Re-attach balance modifier (before limiter/fingerprint tap)
-      if (_balanceModifier != null)
-      {
-        _playbackDevice.MasterMixer.AddModifier(_balanceModifier);
-        _logger.LogInformation("Balance modifier re-attached to new playback device");
-      }
-      else
-      {
-        _balanceModifier = new BalanceModifier(_masterMixer);
-        _playbackDevice.MasterMixer.AddModifier(_balanceModifier);
-        _logger.LogInformation("Balance modifier created and attached to new playback device");
-      }
-
-      // Re-attach limiter (after balance, before fingerprint tap)
-      if (_limiterModifier != null)
-      {
-        _playbackDevice.MasterMixer.AddModifier(_limiterModifier);
-        _logger.LogInformation("Limiter modifier re-attached to new playback device");
-      }
-      else
-      {
-        _limiterModifier = new LimiterModifier();
-        _playbackDevice.MasterMixer.AddModifier(_limiterModifier);
-        _logger.LogInformation("Limiter modifier created and attached to new playback device");
-      }
-
-      // Re-attach fingerprint tap if it exists
-      if (_fingerprintTap != null)
-      {
-        _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
-        _logger.LogInformation("Fingerprint tap re-attached to new playback device");
-      }
-      // If it didn't exist (e.g. started with no device), create it now
-      else
-      {
-        _fingerprintTap = new FingerprintTapModifier(this, _logger, metricsCollector: _metricsCollector);
-        _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
-        _logger.LogInformation("Fingerprint tap created and attached to new playback device");
-      }
-
-      // Re-attach visualization tap
-      if (_visualizationTap != null)
-      {
-        _playbackDevice.MasterMixer.AddModifier(_visualizationTap);
-        _logger.LogInformation("Visualization tap re-attached to new playback device");
-      }
-      else if (_visualizerService != null)
-      {
-        _visualizationTap = new VisualizationTapModifier(_visualizerService, _audioFormat);
-        _playbackDevice.MasterMixer.AddModifier(_visualizationTap);
-        _logger.LogInformation("Visualization tap created and attached to new playback device");
-      }
+      // Re-attach all modifiers to the new device
+      AttachModifiersToPlaybackDevice();
 
       _playbackDevice.Start();
 
@@ -667,6 +564,61 @@ public class SoundFlowAudioEngine : IAudioEngine
       _currentDeviceIndex = -1;
       return false;
     }
+  }
+
+  /// <summary>
+  /// Attaches all audio modifiers (balance, limiter, fingerprint tap, visualization tap)
+  /// to the current playback device's mixer. Creates modifiers if they don't exist yet.
+  /// </summary>
+  private void AttachModifiersToPlaybackDevice()
+  {
+    if (_playbackDevice == null) return;
+
+    // Balance modifier (first in chain)
+    if (_balanceModifier != null)
+    {
+      _playbackDevice.MasterMixer.AddModifier(_balanceModifier);
+    }
+    else
+    {
+      _balanceModifier = new BalanceModifier(_masterMixer);
+      _playbackDevice.MasterMixer.AddModifier(_balanceModifier);
+    }
+
+    // Limiter (after balance, before taps)
+    if (_limiterModifier != null)
+    {
+      _playbackDevice.MasterMixer.AddModifier(_limiterModifier);
+    }
+    else
+    {
+      _limiterModifier = new LimiterModifier();
+      _playbackDevice.MasterMixer.AddModifier(_limiterModifier);
+    }
+
+    // Fingerprint tap (after limiter)
+    if (_fingerprintTap != null)
+    {
+      _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
+    }
+    else
+    {
+      _fingerprintTap = new FingerprintTapModifier(this, _logger, bufferSize: 2048, metricsCollector: _metricsCollector);
+      _playbackDevice.MasterMixer.AddModifier(_fingerprintTap);
+    }
+
+    // Visualization tap (last in chain)
+    if (_visualizationTap != null)
+    {
+      _playbackDevice.MasterMixer.AddModifier(_visualizationTap);
+    }
+    else if (_visualizerService != null)
+    {
+      _visualizationTap = new VisualizationTapModifier(_visualizerService, _audioFormat);
+      _playbackDevice.MasterMixer.AddModifier(_visualizationTap);
+    }
+
+    _logger.LogDebug("All modifiers attached to playback device");
   }
 
   /// <summary>

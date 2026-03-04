@@ -94,13 +94,13 @@ public class FilesControllerTests : IClassFixture<CustomWebApplicationFactory<Pr
   }
 
   [Fact]
-  public async Task GetFiles_WithAbsolutePath_NonExistent_ReturnsNotFound()
+  public async Task GetFiles_WithAbsolutePath_NonExistent_ReturnsBadRequest()
   {
-    // Act
+    // Act - absolute path outside allowed directories is rejected by path traversal protection
     var response = await _client.GetAsync("/api/files?absolutePath=%2Fno%2Fsuch%2Fpath");
 
     // Assert
-    Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
   }
 
   [Fact]

@@ -90,7 +90,7 @@ public class AudioFileEventSource : EventAudioSourceBase
   }
 
   /// <inheritdoc/>
-  protected override async Task InitializeAsync(CancellationToken cancellationToken = default)
+  public override async Task InitializeAsync(CancellationToken cancellationToken = default)
   {
     await base.InitializeAsync(cancellationToken);
 

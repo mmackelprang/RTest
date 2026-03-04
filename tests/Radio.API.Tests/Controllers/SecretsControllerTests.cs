@@ -50,13 +50,16 @@ public class SecretsControllerTests : IClassFixture<CustomWebApplicationFactory<
     var postResponse = await _client.PostAsJsonAsync("/api/secrets/tts", data);
     Assert.True(postResponse.IsSuccessStatusCode);
 
-    // Act - retrieve raw
-    var getResponse = await _client.GetAsync("/api/secrets/tts?raw=true");
+    // Act - retrieve (always masked, raw=true was removed for security)
+    var getResponse = await _client.GetAsync("/api/secrets/tts");
     Assert.True(getResponse.IsSuccessStatusCode);
 
     var result = await getResponse.Content.ReadFromJsonAsync<Dictionary<string, string>>();
     Assert.NotNull(result);
-    Assert.Equal("test-google-key-12345", result!["GoogleAPIKey"]);
+    // Value should be masked (contains "..." and preserves first/last 4 chars)
+    Assert.Contains("...", result!["GoogleAPIKey"]);
+    Assert.StartsWith("test", result["GoogleAPIKey"]);
+    Assert.EndsWith("2345", result["GoogleAPIKey"]);
   }
 
   [Fact]
@@ -78,8 +81,8 @@ public class SecretsControllerTests : IClassFixture<CustomWebApplicationFactory<
     var response = await _client.DeleteAsync("/api/secrets/acoustid");
     Assert.True(response.IsSuccessStatusCode);
 
-    // Verify deleted
-    var getResponse = await _client.GetAsync("/api/secrets/acoustid?raw=true");
+    // Verify deleted (always masked now)
+    var getResponse = await _client.GetAsync("/api/secrets/acoustid");
     var result = await getResponse.Content.ReadFromJsonAsync<Dictionary<string, string>>();
     Assert.NotNull(result);
     Assert.Equal("", result!["ApiKey"]);
