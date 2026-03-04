@@ -58,6 +58,20 @@ public class SystemApiService
     }
   }
 
+  public async Task<bool> SetSleepAsync(bool sleep, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var response = await _httpClient.PostAsJsonAsync("/api/system/sleep", new { sleep }, cancellationToken);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to set sleep state to {Sleep}", sleep);
+      return false;
+    }
+  }
+
   public async Task<bool> PowerOffSystemAsync(CancellationToken cancellationToken = default)
   {
     try
