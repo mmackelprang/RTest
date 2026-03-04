@@ -4,6 +4,7 @@ using Radio.API.Hubs;
 using Radio.API.Middleware;
 using Radio.API.Services;
 using Radio.API.Streaming;
+using Radio.Core.Interfaces;
 using Radio.API.Logging;
 using Radio.Infrastructure.DependencyInjection;
 using Serilog;
@@ -88,6 +89,7 @@ builder.Services.AddRadioServices();
 
 // Add sleep/standby mode service
 builder.Services.AddSingleton<SleepService>();
+builder.Services.AddSingleton<ISleepService>(sp => sp.GetRequiredService<SleepService>());
 
 // Add the audio engine initialization service (must run first)
 builder.Services.AddHostedService<AudioEngineInitializationService>();

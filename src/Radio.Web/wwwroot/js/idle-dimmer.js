@@ -108,14 +108,24 @@
     resetTimers();
   }
 
+  var lastPointerMove = 0;
+
   function onUserActivity() {
     wake('touch');
   }
 
-  // Listen for user activity
-  ['pointerdown', 'pointermove', 'keydown', 'wheel'].forEach(function (evt) {
+  function onPointerMove() {
+    var now = Date.now();
+    if (now - lastPointerMove < 1000) return;
+    lastPointerMove = now;
+    wake('touch');
+  }
+
+  // Listen for user activity (pointermove is throttled to avoid excessive timer resets)
+  ['pointerdown', 'keydown', 'wheel'].forEach(function (evt) {
     document.addEventListener(evt, onUserActivity, { passive: true });
   });
+  document.addEventListener('pointermove', onPointerMove, { passive: true });
 
   // Expose global API for Blazor JS interop
   window.radioSleepManager = {

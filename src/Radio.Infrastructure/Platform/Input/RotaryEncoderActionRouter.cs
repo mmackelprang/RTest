@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Interfaces.Input;
 using Radio.Core.Models.Audio;
@@ -18,7 +19,7 @@ public class RotaryEncoderActionRouter : IDisposable
   private readonly ILogger<RotaryEncoderActionRouter> _logger;
   private readonly IRotaryEncoderService _encoderService;
   private readonly Func<IAudioManager> _audioManagerFactory;
-  private readonly Func<object?>? _sleepServiceFactory;
+  private readonly ISleepService? _sleepService;
   private readonly VisualizationModeService _vizModeService;
   private readonly IOptionsMonitor<RotaryEncoderOptions> _options;
   private bool _disposed;
@@ -40,14 +41,14 @@ public class RotaryEncoderActionRouter : IDisposable
     Func<IAudioManager> audioManagerFactory,
     VisualizationModeService vizModeService,
     IOptionsMonitor<RotaryEncoderOptions> options,
-    Func<object?>? sleepServiceFactory = null)
+    ISleepService? sleepService = null)
   {
     _logger = logger;
     _encoderService = encoderService;
     _audioManagerFactory = audioManagerFactory;
     _vizModeService = vizModeService;
     _options = options;
-    _sleepServiceFactory = sleepServiceFactory;
+    _sleepService = sleepService;
 
     _encoderService.EncoderTurned += OnEncoderTurned;
     _encoderService.ButtonPressed += OnButtonPressed;
@@ -102,22 +103,12 @@ public class RotaryEncoderActionRouter : IDisposable
 
   /// <summary>
   /// Checks if the system is sleeping and wakes it if so.
-  /// Uses reflection to avoid a hard dependency on Radio.API.Services.SleepService.
   /// </summary>
   private bool TryWakeFromSleep(string wakeSource)
   {
-    var sleepService = _sleepServiceFactory?.Invoke();
-    if (sleepService == null) return false;
+    if (_sleepService == null || !_sleepService.IsSleeping) return false;
 
-    var type = sleepService.GetType();
-    var isSleeping = (bool?)type.GetProperty("IsSleeping")?.GetValue(sleepService);
-    if (isSleeping != true) return false;
-
-    var wakeMethod = type.GetMethod("WakeAsync");
-    if (wakeMethod != null)
-    {
-      _ = (Task)wakeMethod.Invoke(sleepService, [wakeSource])!;
-    }
+    _ = _sleepService.WakeAsync(wakeSource);
     _logger.LogInformation("Woke from sleep via {WakeSource}", wakeSource);
     return true;
   }

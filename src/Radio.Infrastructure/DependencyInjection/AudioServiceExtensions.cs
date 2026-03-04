@@ -338,18 +338,14 @@ public static class AudioServiceExtensions
     services.AddSingleton<VisualizationModeService>();
 
     // Register action router (Func<> defers IAudioManager resolution)
-    // SleepService lives in Radio.API so resolve by name to avoid cross-layer reference
+    // ISleepService is registered in Radio.API — optional here via GetService
     services.AddSingleton<RotaryEncoderActionRouter>(sp => new RotaryEncoderActionRouter(
       sp.GetRequiredService<ILogger<RotaryEncoderActionRouter>>(),
       sp.GetRequiredService<IRotaryEncoderService>(),
       () => sp.GetRequiredService<IAudioManager>(),
       sp.GetRequiredService<VisualizationModeService>(),
       sp.GetRequiredService<IOptionsMonitor<RotaryEncoderOptions>>(),
-      sleepServiceFactory: () =>
-      {
-        var sleepType = Type.GetType("Radio.API.Services.SleepService, Radio.API");
-        return sleepType != null ? sp.GetService(sleepType) : null;
-      }));
+      sleepService: sp.GetService<ISleepService>()));
 
     return services;
   }

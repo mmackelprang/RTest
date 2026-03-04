@@ -193,10 +193,16 @@ public class AudioStateUpdateService : BackgroundService
 
     if (currentSourceType != _lastActiveSourceType)
     {
+      // Skip broadcast on first poll (null → initial value) to avoid spurious SourceChanged
+      var isFirstRun = _lastActiveSourceType == null;
       _lastActiveSourceType = currentSourceType;
-      await _hubContext.Clients.All
-        .SendAsync("SourceChanged", cancellationToken);
-      _logger.LogInformation("Broadcast SourceChanged: {SourceType}", currentSourceType ?? "None");
+
+      if (!isFirstRun)
+      {
+        await _hubContext.Clients.All
+          .SendAsync("SourceChanged", cancellationToken);
+        _logger.LogInformation("Broadcast SourceChanged: {SourceType}", currentSourceType ?? "None");
+      }
     }
   }
 
