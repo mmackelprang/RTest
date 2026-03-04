@@ -284,8 +284,6 @@
   private bool _canSeek;
   private double _progressPercent;
   private double _totalDurationSeconds;
-  private System.Threading.Timer? _timer;
-
   // Fingerprint status state
   private FingerprintStatusDto? _fpStatus;
   private bool _showFingerprintDetail;
@@ -316,27 +314,10 @@
       await RefreshPlaybackStateAsync();
       await RefreshFingerprintStatusAsync();
       await LoadSourceGainOffsetsAsync();
-
-      _timer = new System.Threading.Timer(TimerCallback, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
     }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Error initializing NowPlayingPanel");
-    }
-  }
-
-  private async void TimerCallback(object? state)
-  {
-    try
-    {
-      await RefreshPlaybackStateAsync();
-
-      await InvokeAsync(StateHasChanged);
-    }
-    catch (ObjectDisposedException) { }
-    catch (Exception ex)
-    {
-      Logger.LogWarning(ex, "Error in NowPlayingPanel timer callback");
     }
   }
 
@@ -745,7 +726,6 @@
     HubService.NowPlayingChanged -= OnNowPlayingChanged;
     HubService.VolumeChanged -= OnVolumeChangedEvent;
     HubService.FingerprintStatusChanged -= OnFingerprintStatusChanged;
-    _timer?.Dispose();
     _gainDebounceTimer?.Dispose();
     await Task.CompletedTask;
   }

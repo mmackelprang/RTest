@@ -140,10 +140,12 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     }
 
     // Restore volume/mute/balance from persisted preferences
-    _preferencePersistence?.RestoreVolumePreferences();
+    if (_preferencePersistence != null)
+      await _preferencePersistence.RestoreVolumePreferencesAsync();
 
     // Restore per-source gain offsets from persisted preferences
-    _preferencePersistence?.RestoreSourceGainOffsets();
+    if (_preferencePersistence != null)
+      await _preferencePersistence.RestoreSourceGainOffsetsAsync();
 
     _initialized = true;
     _logger.LogInformation("AudioManager initialized successfully");

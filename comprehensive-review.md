@@ -1,6 +1,6 @@
 # Comprehensive Architectural Review
 
-> **Last updated:** 2026-03-04 — PR #273 (high) + PR #274 (medium)
+> **Last updated:** 2026-03-04 — PR #273 (high) + PR #274 (medium) + PR #275 (medium)
 
 ## HIGH Priority
 
@@ -178,7 +178,7 @@
 
 ---
 
-### 22. [PRIORITY: Medium] [DIFFICULTY: Easy]
+### 22. [PRIORITY: Medium] [DIFFICULTY: Easy] --- DONE (PR #275)
 - **Category:** Performance
 - **Location:** `src/Radio.Infrastructure/Audio/Services/AudioPreferencePersistence.cs:239-250`
 - **Issue:** `RestoreSourceGainOffsets()` executes a synchronous blocking DB query (`store.GetEntryAsync(key).GetAwaiter().GetResult()`) inside a foreach loop over all `AudioSourceType` enum values. This is N sequential blocking queries during startup.
@@ -218,7 +218,7 @@
 
 ---
 
-### 27. [PRIORITY: Medium] [DIFFICULTY: Medium]
+### 27. [PRIORITY: Medium] [DIFFICULTY: Medium] --- DONE (PR #275)
 - **Category:** Performance
 - **Location:** `src/Radio.Web/Components/Shared/NowPlayingPanel.razor:328-341` (5-second timer); SignalR subscription at lines ~290-310
 - **Issue:** `NowPlayingPanel` both polls playback state every 5 seconds via a timer AND subscribes to SignalR `PlaybackStateChanged` events. This creates redundant API calls when SignalR is connected and working properly.
@@ -234,7 +234,7 @@
 
 ---
 
-### 29. [PRIORITY: Medium] [DIFFICULTY: Medium]
+### 29. [PRIORITY: Medium] [DIFFICULTY: Medium] --- DONE (PR #275)
 - **Category:** Performance
 - **Location:** `src/Radio.Web/Components/Shared/QueueHistoryPanel.razor`
 - **Issue:** The queue list renders all items without virtualization. Queues can contain 1000+ items, and each render cycle processes the entire list. No `MudVirtualize` or similar virtual scrolling is used.
@@ -250,7 +250,7 @@
 
 ---
 
-### 31. [PRIORITY: Medium] [DIFFICULTY: Medium]
+### 31. [PRIORITY: Medium] [DIFFICULTY: Medium] --- DONE (PR #275)
 - **Category:** Performance
 - **Location:** `src/Radio.Infrastructure/Metrics/Repositories/SqliteMetricsRepository.cs:257-273`
 - **Issue:** `GetCurrentSnapshotsAsync()` iterates over each metric key and calls `GetAggregateAsync()` individually, each executing 2 SQL queries. For N keys, this is 2N database round-trips. `SaveBucketsAsync()` (lines 104-129) creates a new `SqliteCommand` per bucket in a loop.
