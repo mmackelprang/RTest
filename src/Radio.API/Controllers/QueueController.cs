@@ -80,7 +80,7 @@ public class QueueController : ControllerBase
       }
 
       await queueSource!.AddToQueueAsync(request.TrackIdentifier, request.Position);
-      _logger.LogInformation("Added track to queue: {TrackIdentifier}", request.TrackIdentifier);
+      _logger.LogDebug("Added track to queue: {TrackIdentifier}", request.TrackIdentifier);
 
       var queue = await queueSource.GetQueueAsync();
       var queueDtos = queue.Select(MapToQueueItemDto).ToList();
@@ -114,7 +114,7 @@ public class QueueController : ControllerBase
       }
 
       await queueSource!.RemoveFromQueueAsync(index);
-      _logger.LogInformation("Removed item from queue at index: {Index}", index);
+      _logger.LogDebug("Removed item from queue at index: {Index}", index);
 
       var queue = await queueSource.GetQueueAsync();
       var queueDtos = queue.Select(MapToQueueItemDto).ToList();
@@ -152,7 +152,7 @@ public class QueueController : ControllerBase
       }
 
       await queueSource!.ClearQueueAsync();
-      _logger.LogInformation("Cleared queue");
+      _logger.LogDebug("Cleared queue");
 
       return Ok(new { message = "Queue cleared successfully", itemCount = 0 });
     }
@@ -183,7 +183,7 @@ public class QueueController : ControllerBase
       }
 
       await queueSource!.MoveQueueItemAsync(request.FromIndex, request.ToIndex);
-      _logger.LogInformation("Moved queue item from index {FromIndex} to {ToIndex}", request.FromIndex, request.ToIndex);
+      _logger.LogDebug("Moved queue item from index {FromIndex} to {ToIndex}", request.FromIndex, request.ToIndex);
 
       var queue = await queueSource.GetQueueAsync();
       var queueDtos = queue.Select(MapToQueueItemDto).ToList();
@@ -222,7 +222,7 @@ public class QueueController : ControllerBase
       }
 
       await queueSource!.JumpToIndexAsync(index);
-      _logger.LogInformation("Jumped to queue index: {Index}", index);
+      _logger.LogDebug("Jumped to queue index: {Index}", index);
 
       // Return updated playback state
       var state = BuildPlaybackStateDto(primarySource!);
@@ -290,7 +290,7 @@ public class QueueController : ControllerBase
       }
 
       await queueSource!.JumpToFullPlaylistIndexAsync(index);
-      _logger.LogInformation("Jumped to full playlist index: {Index}", index);
+      _logger.LogDebug("Jumped to full playlist index: {Index}", index);
 
       var state = BuildPlaybackStateDto(primarySource!);
       return Ok(state);

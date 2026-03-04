@@ -211,7 +211,7 @@
     if (firstRender)
     {
       // Set API base URL for idle-dimmer.js sleep/wake fetch calls
-      var apiBaseUrl = Configuration["ApiBaseUrl"] ?? "http://localhost:5000";
+      var apiBaseUrl = Configuration["ApiBaseUrl"] ?? WebConstants.DefaultApiBaseUrl;
       await JSRuntime.InvokeVoidAsync("radioSetApiBaseUrl", apiBaseUrl);
     }
   }
@@ -513,27 +513,11 @@
     }
   }
 
-  // Source icon mapping
-  private static string GetSourceIcon(string sourceType) => sourceType switch
-  {
-    "Vinyl" => Icons.Material.Filled.Album,
-    "FilePlayer" => Icons.Material.Filled.AudioFile,
-    "Radio" or "RTLSDRCore" or "RF320" => Icons.Material.Filled.Radio,
-    "Bluetooth" => Icons.Material.Filled.Bluetooth,
-    "GenericUSB" => Icons.Material.Filled.Usb,
-    _ => Icons.Material.Filled.MusicNote
-  };
+  // Source icon mapping — delegates to shared helper
+  private static string GetSourceIcon(string sourceType) => SourceTypeHelper.GetIcon(sourceType);
 
-  // Data attribute for source-specific CSS coloring
-  private static string GetSourceDataAttr(string sourceType) => sourceType switch
-  {
-    "Vinyl" => "vinyl",
-    "FilePlayer" => "file",
-    "Radio" or "RTLSDRCore" or "RF320" => "radio",
-    "Bluetooth" => "bluetooth",
-    "GenericUSB" => "usb",
-    _ => "file"
-  };
+  // Data attribute for source-specific CSS coloring — delegates to shared helper
+  private static string GetSourceDataAttr(string sourceType) => SourceTypeHelper.GetDataAttribute(sourceType);
 
   // Source availability check
   private static bool IsSourceAvailable(AudioSourceDto source) =>

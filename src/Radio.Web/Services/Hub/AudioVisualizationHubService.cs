@@ -52,8 +52,8 @@ public class AudioVisualizationHubService : IAsyncDisposable
         return;
       }
 
-      var apiBaseUrl = _configuration["ApiBaseUrl"] ?? "http://localhost:5000";
-      var hubUrl = $"{apiBaseUrl}/hubs/visualization";
+      var apiBaseUrl = _configuration["ApiBaseUrl"] ?? WebConstants.DefaultApiBaseUrl;
+      var hubUrl = $"{apiBaseUrl}{WebConstants.HubPaths.Visualization}";
 
       _logger.LogInformation("Initializing SignalR connection to {HubUrl}", hubUrl);
 

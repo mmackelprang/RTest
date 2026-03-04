@@ -170,13 +170,16 @@ internal sealed class TappedOutputStream : Stream
 
       var toRead = Math.Min(count, available);
 
-      for (var i = 0; i < toRead; i++)
+      // Block copy instead of byte-by-byte for much better throughput.
+      // Handle ring buffer wrap-around with up to two Array.Copy calls.
+      var firstChunk = Math.Min(toRead, _bufferSize - readPos);
+      Array.Copy(_buffer, readPos, buffer, offset, firstChunk);
+      if (firstChunk < toRead)
       {
-        buffer[offset + i] = _buffer[readPos];
-        readPos = (readPos + 1) % _bufferSize;
+        Array.Copy(_buffer, 0, buffer, offset + firstChunk, toRead - firstChunk);
       }
 
-      _readerPositions[readerId] = readPos;
+      _readerPositions[readerId] = (readPos + toRead) % _bufferSize;
       return toRead;
     }
   }

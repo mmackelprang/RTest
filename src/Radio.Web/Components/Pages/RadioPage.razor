@@ -600,78 +600,18 @@
     }
   }
   
-  private string FormatFrequency(double frequencyHz, string band)
-  {
-    // API returns Hz — convert to display units
-    return band switch
-    {
-      "AM" => $"{frequencyHz / 1_000.0:0} kHz",           // 1010000 Hz → "1010 kHz"
-      _ => $"{frequencyHz / 1_000_000.0:0.00} MHz"        // 87500000 Hz → "87.50 MHz"
-    };
-  }
+  // Frequency formatting — delegates to shared FrequencyFormatter
+  private static string FormatFrequency(double frequencyHz, string band) => FrequencyFormatter.FormatFrequency(frequencyHz, band);
+  private static string FormatStep(double stepHz, string band) => FrequencyFormatter.FormatStep(stepHz);
 
-  private double GetDialogStep()
-  {
-    if (_radioState == null) return 0.1;
-    // Convert step Hz to display units for the dialog numeric field
-    return _radioState.Band == "AM"
-      ? _radioState.Step / 1_000.0       // Hz → kHz
-      : _radioState.Step / 1_000_000.0;  // Hz → MHz
-  }
+  private double GetDialogStep() =>
+    _radioState == null ? 0.1 : FrequencyFormatter.GetDialogStep(_radioState.Step, _radioState.Band);
 
-  private string FormatStep(double stepHz, string band)
-  {
-    // Display step in the most readable unit
-    if (stepHz >= 1_000_000)
-      return $"{stepHz / 1_000_000.0:0.###} MHz";
-    return $"{stepHz / 1_000.0:0.###} kHz";
-  }
-  
-  private double GetMinFrequency()
-  {
-    if (_radioState == null) return 0;
-    
-    var band = _availableBands.FirstOrDefault(b => b.Type == _radioState.Band);
-    if (band != null)
-    {
-        if (band.Type == "AM") return band.MinFrequencyHz / 1000.0;
-        return band.MinFrequencyHz / 1000000.0;
-    }
+  private double GetMinFrequency() =>
+    _radioState == null ? 0 : FrequencyFormatter.GetMinFrequency(_radioState.Band, _availableBands);
 
-    return _radioState.Band switch
-    {
-      "AM" => 520,         // AM: 520-1710 kHz (Medium Wave)
-      "FM" => 87.5,        // FM: 87.5-108.0 MHz
-      "AIR" => 108.0,      // Aircraft: 108.0-137.0 MHz (VHF Air Band)
-      "SW" => 1.8,         // Shortwave: 1.8-30.0 MHz (HF bands)
-      "WB" => 162.400,     // Weather: 162.400-162.550 MHz (NOAA Weather Radio)
-      "VHF" => 136.0,      // VHF: 136.0-174.0 MHz (VHF band)
-      _ => 0               // Default: no minimum for unknown bands
-    };
-  }
-  
-  private double GetMaxFrequency()
-  {
-    if (_radioState == null) return 1000;
-
-    var band = _availableBands.FirstOrDefault(b => b.Type == _radioState.Band);
-    if (band != null)
-    {
-        if (band.Type == "AM") return band.MaxFrequencyHz / 1000.0;
-        return band.MaxFrequencyHz / 1000000.0;
-    }
-
-    return _radioState.Band switch
-    {
-      "AM" => 1710,        // AM: 520-1710 kHz (Medium Wave)
-      "FM" => 108.0,       // FM: 87.5-108.0 MHz
-      "AIR" => 137.0,      // Aircraft: 108.0-137.0 MHz (VHF Air Band)
-      "SW" => 30.0,        // Shortwave: 1.8-30.0 MHz (HF bands)
-      "WB" => 162.550,     // Weather: 162.400-162.550 MHz (NOAA Weather Radio)
-      "VHF" => 174.0,      // VHF: 136.0-174.0 MHz (VHF band)
-      _ => 1000            // Default: reasonable maximum for unknown bands
-    };
-  }
+  private double GetMaxFrequency() =>
+    _radioState == null ? 1000 : FrequencyFormatter.GetMaxFrequency(_radioState.Band, _availableBands);
   
   public async ValueTask DisposeAsync()
   {

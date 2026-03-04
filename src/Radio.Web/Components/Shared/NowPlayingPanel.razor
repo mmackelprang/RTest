@@ -517,15 +517,7 @@
     };
   }
 
-  private static string GetFpSourceIcon(string sourceType) => sourceType switch
-  {
-    "Vinyl" => Icons.Material.Filled.Album,
-    "File" => Icons.Material.Filled.AudioFile,
-    "Radio" => Icons.Material.Filled.Radio,
-    "Bluetooth" => Icons.Material.Filled.Bluetooth,
-    "GenericUSB" => Icons.Material.Filled.Usb,
-    _ => Icons.Material.Filled.MusicNote
-  };
+  private static string GetFpSourceIcon(string sourceType) => SourceTypeHelper.GetIcon(sourceType);
 
   private static string GetEventRowColor(FingerprintEventDto evt)
   {

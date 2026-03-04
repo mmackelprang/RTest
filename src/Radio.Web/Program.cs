@@ -1,6 +1,7 @@
 using System.Net.Sockets;
 using MudBlazor;
 using MudBlazor.Services;
+using Radio.Web;
 using Radio.Web.Services;
 using Radio.Web.Services.ApiClients;
 using Radio.Web.Services.Hub;
@@ -68,7 +69,7 @@ builder.Services.AddMudServices(config =>
 });
 
 // Register API client services with retry policies (Phase 1 Task 1.2)
-var apiBaseUrl = builder.Configuration["ApiBaseUrl"] ?? "http://localhost:5000";
+var apiBaseUrl = builder.Configuration["ApiBaseUrl"] ?? WebConstants.DefaultApiBaseUrl;
 
 // Throttle connection-refused log spam (logs once per 10s instead of every failed call)
 builder.Services.AddTransient<ApiConnectionLoggingHandler>();

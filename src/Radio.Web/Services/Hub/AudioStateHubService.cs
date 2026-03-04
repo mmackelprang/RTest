@@ -55,8 +55,8 @@ public class AudioStateHubService : IAsyncDisposable
         return;
       }
 
-      var apiBaseUrl = _configuration["ApiBaseUrl"] ?? "http://localhost:5000";
-      var hubUrl = $"{apiBaseUrl}/hubs/audio";
+      var apiBaseUrl = _configuration["ApiBaseUrl"] ?? WebConstants.DefaultApiBaseUrl;
+      var hubUrl = $"{apiBaseUrl}{WebConstants.HubPaths.Audio}";
 
       _logger.LogInformation("Initializing SignalR connection to {HubUrl}", hubUrl);
 

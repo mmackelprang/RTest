@@ -75,7 +75,7 @@ public class FilesController : ControllerBase
     try
     {
       var currentPath = path ?? "/";
-      _logger.LogInformation("Listing files from path: {Path}, recursive: {Recursive}",
+      _logger.LogDebug("Listing files from path: {Path}, recursive: {Recursive}",
         currentPath, recursive);
 
       var items = new List<FileItemDto>();
@@ -115,7 +115,7 @@ public class FilesController : ControllerBase
         });
       }
 
-      _logger.LogInformation("Found {Count} items ({DirCount} directories, {FileCount} files)",
+      _logger.LogDebug("Found {Count} items ({DirCount} directories, {FileCount} files)",
         items.Count,
         items.Count(i => i.IsDirectory),
         items.Count(i => !i.IsDirectory));
@@ -143,7 +143,7 @@ public class FilesController : ControllerBase
   {
     try
     {
-      _logger.LogInformation("Listing files from absolute path: {Path}", absolutePath);
+      _logger.LogDebug("Listing files from absolute path: {Path}", absolutePath);
 
       if (!Directory.Exists(absolutePath))
       {
@@ -228,7 +228,7 @@ public class FilesController : ControllerBase
         _logger.LogDebug("Cannot enumerate files in {Path} (access denied)", absolutePath);
       }
 
-      _logger.LogInformation("Found {Count} items at absolute path {Path} ({DirCount} directories, {FileCount} files)",
+      _logger.LogDebug("Found {Count} items at absolute path {Path} ({DirCount} directories, {FileCount} files)",
         items.Count, absolutePath,
         items.Count(i => i.IsDirectory),
         items.Count(i => !i.IsDirectory));
@@ -490,7 +490,7 @@ public class FilesController : ControllerBase
         }
       }
 
-      _logger.LogInformation("Found {Count} drives", drives.Count);
+      _logger.LogDebug("Found {Count} drives", drives.Count);
       return Ok(drives);
     }
     catch (Exception ex)

@@ -345,7 +345,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                 var fillPct = (double)currentBuffer / _maxBufferSamples * 100.0;
                 var minPct = (double)minBuf / _maxBufferSamples * 100.0;
 
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "📊 Buffer ({Type}): fill={FillPct:F1}% ({Buffered}/{Capacity}), min={MinBuf} ({MinPct:F1}%), max={MaxBuf}, " +
                     "recv={Received}, out={Output}, drop={Dropped}, comp={Compensated}, under={Underruns}",
                     typeof(T).Name, fillPct, currentBuffer, _maxBufferSamples,
