@@ -1,10 +1,12 @@
 # Comprehensive Architectural Review
 
+> **Last updated:** 2026-03-04 — PR #273 (high) + PR #274 (medium)
+
 ## HIGH Priority
 
 ---
 
-### 1. [PRIORITY: High] [DIFFICULTY: Easy]
+### 1. [PRIORITY: High] [DIFFICULTY: Easy] --- DONE (PR #273)
 - **Category:** Security
 - **Location:** `src/Radio.API/Controllers/SecretsController.cs:46-67`
 - **Issue:** The `GET /api/secrets/{section}?raw=true` endpoint returns unmasked plaintext secrets (API keys for Google TTS, Azure TTS, AcoustID) with no authentication or authorization. Anyone on the network can retrieve all secrets.
@@ -12,7 +14,7 @@
 
 ---
 
-### 2. [PRIORITY: High] [DIFFICULTY: Easy]
+### 2. [PRIORITY: High] [DIFFICULTY: Easy] --- DONE (PR #273)
 - **Category:** Security
 - **Location:** `src/Radio.API/Controllers/FilesController.cs:55-63, 130-237`
 - **Issue:** The `absolutePath` query parameter on `GET /api/files` is passed directly to `Directory.Exists()`, `Directory.GetDirectories()`, and `Directory.GetFiles()` with zero path validation. An attacker can enumerate the entire filesystem (`/etc`, `/home`, `C:\Windows\System32`).
@@ -20,7 +22,7 @@
 
 ---
 
-### 3. [PRIORITY: High] [DIFFICULTY: Easy]
+### 3. [PRIORITY: High] [DIFFICULTY: Easy] --- DONE (PR #273)
 - **Category:** Security
 - **Location:** `src/Radio.API/Controllers/FilesController.cs:266-323`; `src/Radio.Infrastructure/Audio/Services/FileBrowser.cs:300-317`
 - **Issue:** The `PlayFile` endpoint accepts an arbitrary file path from the POST body and passes it to `LoadFileAsync()`. The `GetFullPath` helper uses `Path.Combine` without `..` traversal protection. An attacker can play any audio file on the system or probe for file existence.
@@ -28,7 +30,7 @@
 
 ---
 
-### 4. [PRIORITY: High] [DIFFICULTY: Easy]
+### 4. [PRIORITY: High] [DIFFICULTY: Easy] --- DONE (PR #273)
 - **Category:** Security
 - **Location:** `src/Radio.Web/Components/Layout/MainLayout.razor:215`
 - **Issue:** `eval()` is used to set a global JS variable: `await JSRuntime.InvokeVoidAsync("eval", $"window.radioApiBaseUrl = '{apiBaseUrl}'")`. Since `apiBaseUrl` comes from `IConfiguration` and the configuration API is unauthenticated, an attacker could inject JavaScript via a chained attack (write malicious config → trigger UI reload).
@@ -36,7 +38,7 @@
 
 ---
 
-### 5. [PRIORITY: High] [DIFFICULTY: Easy]
+### 5. [PRIORITY: High] [DIFFICULTY: Easy] --- DONE (PR #273)
 - **Category:** Error Handling
 - **Location:** `src/Radio.Web/Components/Pages/RadioPage.razor` (8 instances: lines ~258, ~316, ~399, ~530, ~547, ~563, ~580, ~597)
 - **Issue:** Eight separate `catch (Exception) { // Silently fail }` blocks swallow all exceptions including unexpected ones (NullReferenceException, InvalidOperationException, etc.) with no logging. Bugs in radio control logic will be invisible.
@@ -44,7 +46,7 @@
 
 ---
 
-### 6. [PRIORITY: High] [DIFFICULTY: Easy]
+### 6. [PRIORITY: High] [DIFFICULTY: Easy] --- DONE (PR #273)
 - **Category:** Error Handling
 - **Location:** `src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs:142, 436`; `src/Radio.Web/Components/Pages/MetricsDashboardPage.razor:218, 228, 254`
 - **Issue:** Bare `catch { }` blocks (no exception type, no body) silently swallow all exceptions including critical ones. The Cast disconnect failure at line 142 can mask network issues; the metrics page catches at lines 218/228/254 hide data loading failures.
@@ -52,7 +54,7 @@
 
 ---
 
-### 7. [PRIORITY: High] [DIFFICULTY: Easy]
+### 7. [PRIORITY: High] [DIFFICULTY: Easy] --- DONE (PR #273)
 - **Category:** Dead Code
 - **Location:** `src/Radio.Infrastructure/Audio/SoundFlow/SoundFlowAudioEngine.cs:498-527` (TryRecoverPlaybackDevice)
 - **Issue:** `TryRecoverPlaybackDevice()` re-attaches Balance, Limiter, and FingerprintTap modifiers but does NOT re-attach `_visualizationTap`. `SwitchPlaybackDevice()` (lines 594-645) correctly attaches all four. After a device recovery, visualization will silently stop working.
@@ -68,7 +70,7 @@
 
 ---
 
-### 9. [PRIORITY: High] [DIFFICULTY: Medium]
+### 9. [PRIORITY: High] [DIFFICULTY: Medium] --- DONE (PR #273)
 - **Category:** Duplication / Base Class
 - **Location:** `src/Radio.Infrastructure/Audio/Sources/Primary/PrimaryAudioSourceBase.cs` and `src/Radio.Infrastructure/Audio/Sources/Events/EventAudioSourceBase.cs`
 - **Issue:** ~13 methods/properties are duplicated nearly verbatim across both base classes: `Id`, `State`, `Volume`, `PlayAsync`, `StopAsync`, `DisposeAsync`, `InitializeAsync`, `OnStateChanged`, `OnPlaybackCompleted`, `ThrowIfDisposed`, etc. Any bug fix must be applied in two places. The `ThrowIfDisposed` implementations even use different patterns (`ObjectDisposedException.ThrowIf` vs manual throw).
@@ -76,7 +78,7 @@
 
 ---
 
-### 10. [PRIORITY: High] [DIFFICULTY: Medium]
+### 10. [PRIORITY: High] [DIFFICULTY: Medium] --- DONE (PR #273)
 - **Category:** Concurrency
 - **Location:** `src/Radio.Infrastructure/Audio/Services/AudioManager.cs:319-328`
 - **Issue:** `GetOrCreateSourceAsync` calls `SwitchSourceAsync` while holding `_createLock` (line 328), creating a lock ordering of `_createLock → _switchLock`. But the main code path at line 388 intentionally calls `SwitchSourceAsync` *outside* `_createLock` with a comment noting deadlock avoidance. If two threads hit the cache-after-lock path vs. a direct `SwitchSourceAsync`, the inconsistent ordering can deadlock.
@@ -84,7 +86,7 @@
 
 ---
 
-### 11. [PRIORITY: High] [DIFFICULTY: Medium]
+### 11. [PRIORITY: High] [DIFFICULTY: Medium] --- DONE (PR #273)
 - **Category:** Error Handling / Concurrency
 - **Location:** Multiple files in `src/Radio.Infrastructure/` — 19+ instances of `_ =` fire-and-forget async in infrastructure code (see list below)
 - **Issue:** Fire-and-forget async calls (`_ = SomeMethodAsync()`) silently lose exceptions. Key instances: `GoogleCastOutput.cs:118,125` (Cast volume/mute), `LinuxBluetoothService.cs:338,382,387,392` (BT device watching), `BluetoothAudioSource.cs:296,452,783` (audio capture), `SoundFlowPlaybackService.cs:693` (stop), `AudioPreferencePersistence.cs:53,274` (persist). A failed Cast volume set or BT capture acquisition will never be noticed.
@@ -120,7 +122,7 @@
 
 ---
 
-### 15. [PRIORITY: Medium] [DIFFICULTY: Easy]
+### 15. [PRIORITY: Medium] [DIFFICULTY: Easy] --- DONE (PR #274)
 - **Category:** Duplication
 - **Location:** `src/Radio.Web/Components/Layout/MainLayout.razor:517-525` and `src/Radio.Web/Components/Shared/NowPlayingPanel.razor:520-528`
 - **Issue:** Source icon mapping (`GetSourceIcon` / `GetFpSourceIcon`) is duplicated with subtle inconsistencies: MainLayout handles `"FilePlayer"` while NowPlayingPanel uses `"File"`; MainLayout handles `"RTLSDRCore" or "RF320"` while NowPlayingPanel only handles `"Radio"`. A third copy exists at MainLayout:528-536 for CSS data attributes.
@@ -128,7 +130,7 @@
 
 ---
 
-### 16. [PRIORITY: Medium] [DIFFICULTY: Easy]
+### 16. [PRIORITY: Medium] [DIFFICULTY: Easy] --- DONE (PR #274)
 - **Category:** Duplication
 - **Location:** `src/Radio.Web/Components/Pages/RadioPage.razor:603-674` and `src/Radio.Web/Components/Shared/RadioControlPanel.razor:1119-1177`
 - **Issue:** Five frequency-related methods are duplicated verbatim between these two files: `FormatFrequency()`, `FormatStep()`, `GetDialogStep()`, `GetMinFrequency()`, `GetMaxFrequency()`. The RadioPage versions have inline comments; the RadioControlPanel versions are compressed. Both do identical Hz→MHz/kHz conversions.
@@ -136,7 +138,7 @@
 
 ---
 
-### 17. [PRIORITY: Medium] [DIFFICULTY: Easy]
+### 17. [PRIORITY: Medium] [DIFFICULTY: Easy] --- DONE (PR #274)
 - **Category:** Observability
 - **Location:** `src/Radio.API/Middleware/ApiMetricsMiddleware.cs:34-41`
 - **Issue:** The metrics middleware only increments a single `api.requests_total` counter. It tracks no request latency, no error rates, no per-endpoint breakdown, no concurrent request count, and no exception tracking. This provides almost zero operational insight.
@@ -144,7 +146,7 @@
 
 ---
 
-### 18. [PRIORITY: Medium] [DIFFICULTY: Easy]
+### 18. [PRIORITY: Medium] [DIFFICULTY: Easy] --- DONE (PR #274)
 - **Category:** Observability / Logging
 - **Location:** `src/Radio.Infrastructure/Audio/SoundFlow/BufferedSoundGenerator.cs:348,319`; `src/Radio.API/Controllers/FilesController.cs:68,108,136,221`; `src/Radio.API/Controllers/QueueController.cs:83,117,155,186,225,293`
 - **Issue:** Periodic operational telemetry and routine per-request API logs use `LogInformation` instead of `LogDebug`. The buffer stats log fires every 10 seconds during playback; file browse and queue CRUD logs fire on every user interaction. This creates excessive log noise in production.
@@ -152,7 +154,7 @@
 
 ---
 
-### 19. [PRIORITY: Medium] [DIFFICULTY: Easy]
+### 19. [PRIORITY: Medium] [DIFFICULTY: Easy] --- DONE (PR #273, completed as part of item #7)
 - **Category:** Duplication
 - **Location:** `src/Radio.Infrastructure/Audio/SoundFlow/SoundFlowAudioEngine.cs:268-292` (InitializeAsync), `498-527` (TryRecoverPlaybackDevice), `594-645` (SwitchPlaybackDevice)
 - **Issue:** Modifier re-attachment logic (create-or-reuse then AddModifier for Balance, Limiter, FingerprintTap, VisualizationTap) is duplicated across three methods. The `TryRecoverPlaybackDevice` copy is missing `_visualizationTap` (bug, see item #7).
@@ -160,7 +162,7 @@
 
 ---
 
-### 20. [PRIORITY: Medium] [DIFFICULTY: Easy]
+### 20. [PRIORITY: Medium] [DIFFICULTY: Easy] --- DONE (PR #274)
 - **Category:** Readability / Magic Strings
 - **Location:** `src/Radio.Web/Components/Layout/MainLayout.razor` (source types: "Radio", "RTLSDRCore", "RF320", "Bluetooth", etc.); `src/Radio.Web/Components/Shared/RadioControlPanel.razor` (band types: "FM", "AM", "AIR", "SW", "WB", "VHF"); `src/Radio.Web/Components/Shared/QueueHistoryPanel.razor` (queue states: "Current", "Played")
 - **Issue:** String literals for source types, radio bands, and queue item states are scattered across multiple Razor components with no central definition. Typos would cause silent failures (wrong icon, wrong formatting).
@@ -168,7 +170,7 @@
 
 ---
 
-### 21. [PRIORITY: Medium] [DIFFICULTY: Easy]
+### 21. [PRIORITY: Medium] [DIFFICULTY: Easy] --- DONE (PR #274)
 - **Category:** Dependencies
 - **Location:** `tests/*.csproj` files across 7 test projects
 - **Issue:** xUnit version is inconsistent across test projects: 2.5.3, 2.6.3, and 2.9.3 appear in different `.csproj` files. This can cause subtle test behavior differences and makes dependency management harder.
@@ -184,7 +186,7 @@
 
 ---
 
-### 23. [PRIORITY: Medium] [DIFFICULTY: Easy]
+### 23. [PRIORITY: Medium] [DIFFICULTY: Easy] --- DONE (PR #274)
 - **Category:** Error Handling
 - **Location:** `src/Radio.API/Services/PhoneCallIntegrationService.cs:54-68`; `src/Radio.API/Services/RotaryEncoderHostedService.cs:43-53`
 - **Issue:** Both hosted services exit `ExecuteAsync()` permanently if their initial `StartAsync()` call throws. If the RotaryPhone hub or HID device is temporarily unavailable at startup, the integration silently never starts with no retry.
@@ -192,7 +194,7 @@
 
 ---
 
-### 24. [PRIORITY: Medium] [DIFFICULTY: Easy]
+### 24. [PRIORITY: Medium] [DIFFICULTY: Easy] --- DONE (PR #274)
 - **Category:** Concurrency
 - **Location:** Multiple files — 18 `async void` event handlers (e.g., `AudioStateUpdateService.cs:678,692,707,755,769,816,829`; `PlayHistoryTracker.cs:76,421,475,549`; `BluetoothAudioSource.cs:521`)
 - **Issue:** `async void` event handlers that throw unhandled exceptions will crash the entire process. While using `async void` for event handlers is the accepted .NET pattern, each handler must have a top-level try/catch to prevent process termination.
@@ -200,7 +202,7 @@
 
 ---
 
-### 25. [PRIORITY: Medium] [DIFFICULTY: Medium]
+### 25. [PRIORITY: Medium] [DIFFICULTY: Medium] --- DONE (PR #274)
 - **Category:** Duplication / Base Class
 - **Location:** `src/Radio.Infrastructure/Audio/SoundFlow/FingerprintTapModifier.cs:21-25,60-85,90-144,153-173,178-185` and `src/Radio.Infrastructure/Audio/SoundFlow/VisualizationTapModifier.cs:16-21,44-67,72-89,99-119,124-131`
 - **Issue:** Both tap modifiers implement an identical double-buffered, lock-protected, ThreadPool-offloaded sample processing pattern. The field declarations, `ProcessSample` buffering logic, `ThreadPool.QueueUserWorkItem` dispatch, `Flush()`, and `Reset()` methods are character-for-character identical. Only the flush target differs (`WriteToOutputTap` vs `ProcessSamples`).
@@ -224,7 +226,7 @@
 
 ---
 
-### 28. [PRIORITY: Medium] [DIFFICULTY: Medium]
+### 28. [PRIORITY: Medium] [DIFFICULTY: Medium] --- DONE (PR #274)
 - **Category:** Performance
 - **Location:** `src/Radio.Infrastructure/Audio/SoundFlow/TappedOutputStream.cs:173-178`
 - **Issue:** `ReadForReader()` copies data byte-by-byte from the ring buffer. For HTTP audio streaming reads of 4096+ bytes, this is significantly slower than bulk copy. This runs on every HTTP stream client read request.
@@ -316,7 +318,7 @@
 
 ---
 
-### 39. [PRIORITY: Low] [DIFFICULTY: Easy]
+### 39. [PRIORITY: Low] [DIFFICULTY: Easy] --- DONE (PR #274)
 - **Category:** Observability
 - **Location:** `src/Radio.Infrastructure/External/PhoneContactLookupService.cs:52`
 - **Issue:** `_logger.LogInformation("Resolved {PhoneNumber} -> {Name}")` logs caller phone numbers and names at Information level. This is personally identifiable information (PII) appearing in production logs.

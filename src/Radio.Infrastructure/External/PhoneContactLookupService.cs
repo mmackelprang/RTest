@@ -49,7 +49,10 @@ public class PhoneContactLookupService
         var contact = await response.Content.ReadFromJsonAsync<ContactLookupResponse>(cancellationToken: cancellationToken);
         if (!string.IsNullOrWhiteSpace(contact?.Name))
         {
-          _logger.LogInformation("Resolved {PhoneNumber} → {Name}", phoneNumber, contact.Name);
+          var maskedNumber = phoneNumber.Length > 4
+            ? $"***{phoneNumber[^4..]}"
+            : "***";
+          _logger.LogDebug("Resolved {PhoneNumber} → {Name}", maskedNumber, contact.Name);
           return contact.Name;
         }
       }

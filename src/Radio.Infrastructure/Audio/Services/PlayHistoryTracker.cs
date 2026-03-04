@@ -75,21 +75,28 @@ public class PlayHistoryTracker : IDisposable
   /// </summary>
   private async void OnSourceStateChanged(object? sender, AudioSourceStateChangedEventArgs e)
   {
-    if (sender is not IAudioSource source)
-      return;
+    try
+    {
+      if (sender is not IAudioSource source)
+        return;
 
-    // Only record when transitioning to Playing state
-    if (e.NewState != AudioSourceState.Playing)
-      return;
+      // Only record when transitioning to Playing state
+      if (e.NewState != AudioSourceState.Playing)
+        return;
 
-    // Only track primary sources that are the active source
-    if (source != _getActiveSource())
-      return;
+      // Only track primary sources that are the active source
+      if (source != _getActiveSource())
+        return;
 
-    _logger.LogInformation(
-      "Source {SourceName} transitioned to Playing, recording play history",
-      source.Name);
-    await UpsertPlayHistoryAsync(source);
+      _logger.LogInformation(
+        "Source {SourceName} transitioned to Playing, recording play history",
+        source.Name);
+      await UpsertPlayHistoryAsync(source);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Error handling source state change for play history");
+    }
   }
 
   /// <summary>

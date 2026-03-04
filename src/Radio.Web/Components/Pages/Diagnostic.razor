@@ -81,7 +81,7 @@
             _status += $"\n[{DateTime.Now:HH:mm:ss}] Testing HTTP call...";
 
             using var httpClient = new HttpClient();
-            httpClient.BaseAddress = new Uri("http://localhost:5000");
+            httpClient.BaseAddress = new Uri(WebConstants.DefaultApiBaseUrl);
             httpClient.Timeout = TimeSpan.FromSeconds(5);
 
             var response = await httpClient.GetAsync("/api/system/health");

@@ -39,26 +39,37 @@ public class RotaryEncoderHostedService : BackgroundService
     _logger.LogInformation("Starting rotary encoder service (VID=0x{VID:X4}, PID=0x{PID:X4})",
       _options.Value.VendorId, _options.Value.ProductId);
 
-    try
-    {
-      await _encoderService.StartAsync(stoppingToken);
+    var retryDelay = TimeSpan.FromSeconds(5);
+    var maxRetryDelay = TimeSpan.FromMinutes(2);
 
-      // Keep running until cancellation
-      await Task.Delay(Timeout.Infinite, stoppingToken);
-    }
-    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+    while (!stoppingToken.IsCancellationRequested)
     {
-      // Normal shutdown
+      try
+      {
+        await _encoderService.StartAsync(stoppingToken);
+
+        // Keep running until cancellation
+        await Task.Delay(Timeout.Infinite, stoppingToken);
+      }
+      catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+      {
+        break;
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "Rotary encoder service failed, retrying in {Delay}s", retryDelay.TotalSeconds);
+
+        try { await _encoderService.StopAsync(); } catch { /* cleanup best-effort */ }
+
+        try { await Task.Delay(retryDelay, stoppingToken); }
+        catch (OperationCanceledException) { break; }
+
+        retryDelay = TimeSpan.FromSeconds(Math.Min(retryDelay.TotalSeconds * 2, maxRetryDelay.TotalSeconds));
+      }
     }
-    catch (Exception ex)
-    {
-      _logger.LogError(ex, "Rotary encoder service failed");
-    }
-    finally
-    {
-      await _encoderService.StopAsync();
-      _logger.LogInformation("Rotary encoder service stopped");
-    }
+
+    try { await _encoderService.StopAsync(); } catch { /* cleanup best-effort */ }
+    _logger.LogInformation("Rotary encoder service stopped");
   }
 
   public override void Dispose()

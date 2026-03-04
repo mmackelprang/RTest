@@ -1,9 +1,11 @@
+using System.Diagnostics;
 using Radio.Core.Interfaces;
 
 namespace Radio.API.Middleware;
 
 /// <summary>
-/// Middleware that tracks API request metrics.
+/// Middleware that tracks API request metrics including request count,
+/// latency, error rates, and per-endpoint breakdowns.
 /// </summary>
 public class ApiMetricsMiddleware
 {
@@ -11,12 +13,6 @@ public class ApiMetricsMiddleware
   private readonly IMetricsCollector? _metricsCollector;
   private readonly ILogger<ApiMetricsMiddleware> _logger;
 
-  /// <summary>
-  /// Initializes a new instance of the <see cref="ApiMetricsMiddleware"/> class.
-  /// </summary>
-  /// <param name="next">The next middleware in the pipeline.</param>
-  /// <param name="metricsCollector">Optional metrics collector.</param>
-  /// <param name="logger">The logger instance.</param>
   public ApiMetricsMiddleware(
     RequestDelegate next,
     IMetricsCollector? metricsCollector,
@@ -27,17 +23,62 @@ public class ApiMetricsMiddleware
     _logger = logger;
   }
 
-  /// <summary>
-  /// Invokes the middleware to track the API request.
-  /// </summary>
-  /// <param name="context">The HTTP context.</param>
   public async Task InvokeAsync(HttpContext context)
   {
-    // Track API request
-    _metricsCollector?.Increment("api.requests_total");
+    if (_metricsCollector == null)
+    {
+      await _next(context);
+      return;
+    }
 
-    // Continue with the request
-    await _next(context);
+    _metricsCollector.Increment("api.requests_total");
+
+    var endpoint = GetEndpointTag(context);
+    _metricsCollector.Increment($"api.requests.{endpoint}");
+
+    var stopwatch = Stopwatch.StartNew();
+    try
+    {
+      await _next(context);
+    }
+    catch (Exception)
+    {
+      _metricsCollector.Increment("api.errors.unhandled");
+      throw;
+    }
+    finally
+    {
+      stopwatch.Stop();
+      _metricsCollector.Gauge("api.request_duration_ms", stopwatch.Elapsed.TotalMilliseconds);
+
+      var statusCode = context.Response.StatusCode;
+      if (statusCode >= 400 && statusCode < 500)
+        _metricsCollector.Increment("api.errors.client");
+      else if (statusCode >= 500)
+        _metricsCollector.Increment("api.errors.server");
+    }
+  }
+
+  /// <summary>
+  /// Normalizes the request path to a stable metric tag.
+  /// Uses the route template if available, otherwise the first two path segments.
+  /// </summary>
+  private static string GetEndpointTag(HttpContext context)
+  {
+    var endpoint = context.GetEndpoint();
+    var routePattern = (endpoint as Microsoft.AspNetCore.Routing.RouteEndpoint)?.RoutePattern.RawText;
+    if (!string.IsNullOrEmpty(routePattern))
+      return routePattern.Replace('/', '.').TrimStart('.');
+
+    // Fallback: first two segments (e.g., "api.audio")
+    var path = context.Request.Path.Value ?? "/";
+    var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+    return segments.Length switch
+    {
+      0 => "root",
+      1 => segments[0],
+      _ => $"{segments[0]}.{segments[1]}"
+    };
   }
 }
 

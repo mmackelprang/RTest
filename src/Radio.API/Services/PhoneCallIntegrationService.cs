@@ -51,27 +51,38 @@ public class PhoneCallIntegrationService : BackgroundService
 
     _phoneClient.CallStateChanged += OnCallStateChanged;
 
-    try
-    {
-      await _phoneClient.StartAsync(stoppingToken);
+    var retryDelay = TimeSpan.FromSeconds(5);
+    var maxRetryDelay = TimeSpan.FromMinutes(2);
 
-      // Keep running until cancellation
-      await Task.Delay(Timeout.Infinite, stoppingToken);
-    }
-    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+    while (!stoppingToken.IsCancellationRequested)
     {
-      // Normal shutdown
+      try
+      {
+        await _phoneClient.StartAsync(stoppingToken);
+
+        // Keep running until cancellation
+        await Task.Delay(Timeout.Infinite, stoppingToken);
+      }
+      catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+      {
+        break;
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "Phone call integration service failed, retrying in {Delay}s", retryDelay.TotalSeconds);
+
+        try { await _phoneClient.StopAsync(); } catch { /* cleanup best-effort */ }
+
+        try { await Task.Delay(retryDelay, stoppingToken); }
+        catch (OperationCanceledException) { break; }
+
+        retryDelay = TimeSpan.FromSeconds(Math.Min(retryDelay.TotalSeconds * 2, maxRetryDelay.TotalSeconds));
+      }
     }
-    catch (Exception ex)
-    {
-      _logger.LogError(ex, "Phone call integration service failed");
-    }
-    finally
-    {
-      _phoneClient.CallStateChanged -= OnCallStateChanged;
-      await _phoneClient.StopAsync();
-      _logger.LogInformation("Phone call integration service stopped");
-    }
+
+    _phoneClient.CallStateChanged -= OnCallStateChanged;
+    try { await _phoneClient.StopAsync(); } catch { /* cleanup best-effort */ }
+    _logger.LogInformation("Phone call integration service stopped");
   }
 
   private async void OnCallStateChanged(object? sender, PhoneCallStateChangedEventArgs e)

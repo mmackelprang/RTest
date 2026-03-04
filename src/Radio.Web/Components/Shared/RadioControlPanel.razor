@@ -1116,65 +1116,20 @@
     catch (Exception ex) { Logger.LogError(ex, "Error in CycleStepSizeAsync"); }
   }
 
-  private string FormatFrequency(double frequencyHz, string band)
-  {
-    return band switch
-    {
-      "AM" => $"{frequencyHz / 1_000.0:0} kHz",
-      _ => $"{frequencyHz / 1_000_000.0:0.00} MHz"
-    };
-  }
+  // Frequency formatting — delegates to shared FrequencyFormatter
+  private static string FormatFrequency(double frequencyHz, string band) => FrequencyFormatter.FormatFrequency(frequencyHz, band);
+  private static string FrequencyValue(double frequencyHz, string band) => FrequencyFormatter.FrequencyValue(frequencyHz, band);
+  private static string FrequencyUnit(string band) => FrequencyFormatter.FrequencyUnit(band);
+  private static string FormatStep(double stepHz, string band) => FrequencyFormatter.FormatStep(stepHz);
 
-  private string FrequencyValue(double frequencyHz, string band)
-  {
-    return band switch
-    {
-      "AM" => $"{frequencyHz / 1_000.0:0}",
-      _ => $"{frequencyHz / 1_000_000.0:0.00}"
-    };
-  }
+  private double GetDialogStep() =>
+    _radioState == null ? 0.1 : FrequencyFormatter.GetDialogStep(_radioState.Step, _radioState.Band);
 
-  private string FrequencyUnit(string band) => band == "AM" ? " kHz" : " MHz";
+  private double GetMinFrequency() =>
+    _radioState == null ? 0 : FrequencyFormatter.GetMinFrequency(_radioState.Band, _availableBands);
 
-  private string FormatStep(double stepHz, string band)
-  {
-    if (stepHz >= 1_000_000) return $"{stepHz / 1_000_000.0:0.###} MHz";
-    return $"{stepHz / 1_000.0:0.###} kHz";
-  }
-
-  private double GetDialogStep()
-  {
-    if (_radioState == null) return 0.1;
-    return _radioState.Band == "AM"
-      ? _radioState.Step / 1_000.0
-      : _radioState.Step / 1_000_000.0;
-  }
-
-  private double GetMinFrequency()
-  {
-    if (_radioState == null) return 0;
-    var band = _availableBands.FirstOrDefault(b => b.Type == _radioState.Band);
-    if (band != null)
-      return band.Type == "AM" ? band.MinFrequencyHz / 1000.0 : band.MinFrequencyHz / 1000000.0;
-    return _radioState.Band switch
-    {
-      "AM" => 520, "FM" => 87.5, "AIR" => 108.0, "SW" => 1.8,
-      "WB" => 162.400, "VHF" => 136.0, _ => 0
-    };
-  }
-
-  private double GetMaxFrequency()
-  {
-    if (_radioState == null) return 1000;
-    var band = _availableBands.FirstOrDefault(b => b.Type == _radioState.Band);
-    if (band != null)
-      return band.Type == "AM" ? band.MaxFrequencyHz / 1000.0 : band.MaxFrequencyHz / 1000000.0;
-    return _radioState.Band switch
-    {
-      "AM" => 1710, "FM" => 108.0, "AIR" => 137.0, "SW" => 30.0,
-      "WB" => 162.550, "VHF" => 174.0, _ => 1000
-    };
-  }
+  private double GetMaxFrequency() =>
+    _radioState == null ? 1000 : FrequencyFormatter.GetMaxFrequency(_radioState.Band, _availableBands);
 
   public async ValueTask DisposeAsync()
   {
