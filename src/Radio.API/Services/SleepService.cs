@@ -7,8 +7,9 @@ namespace Radio.API.Services;
 
 /// <summary>
 /// Manages sleep/standby mode for the kiosk UI.
-/// When sleeping: mutes audio, broadcasts state via SignalR so UI shows black overlay.
+/// When sleeping: pauses audio playback, mutes audio, broadcasts state via SignalR so UI shows black overlay.
 /// Wake sources: touch screen, rotary encoder, API call.
+/// On wake: restores mute state and resumes playback if it was playing before sleep.
 /// </summary>
 public class SleepService : ISleepService
 {
@@ -18,6 +19,7 @@ public class SleepService : ISleepService
   private readonly SemaphoreSlim _lock = new(1, 1);
   private bool _isSleeping;
   private bool _wasMutedBeforeSleep;
+  private bool _wasPlayingBeforeSleep;
 
   public bool IsSleeping => _isSleeping;
 
@@ -32,7 +34,7 @@ public class SleepService : ISleepService
   }
 
   /// <summary>
-  /// Enters sleep mode: saves mute state, mutes audio, broadcasts to UI.
+  /// Enters sleep mode: pauses active audio source, saves mute state, mutes audio, broadcasts to UI.
   /// </summary>
   public async Task EnterSleepAsync()
   {
@@ -43,9 +45,26 @@ public class SleepService : ISleepService
 
       _logger.LogInformation("Entering sleep mode");
 
-      // Save current mute state and mute audio
       if (_audioManager != null)
       {
+        // Save and pause active playback
+        _wasPlayingBeforeSleep = false;
+        if (_audioManager.ActiveSource is IPrimaryAudioSource primary
+            && primary.State == AudioSourceState.Playing)
+        {
+          _wasPlayingBeforeSleep = true;
+          try
+          {
+            await primary.PauseAsync();
+            _logger.LogInformation("Paused active source {SourceName} for sleep", primary.Name);
+          }
+          catch (Exception ex)
+          {
+            _logger.LogWarning(ex, "Failed to pause source for sleep, falling back to mute-only");
+          }
+        }
+
+        // Save current mute state and mute audio
         _wasMutedBeforeSleep = _audioManager.IsMuted;
         _audioManager.IsMuted = true;
       }
@@ -64,7 +83,7 @@ public class SleepService : ISleepService
   }
 
   /// <summary>
-  /// Wakes from sleep: restores mute state, broadcasts to UI.
+  /// Wakes from sleep: restores mute state, resumes playback if it was active before sleep, broadcasts to UI.
   /// </summary>
   public async Task WakeAsync(string wakeSource = "unknown")
   {
@@ -77,10 +96,26 @@ public class SleepService : ISleepService
 
       _isSleeping = false;
 
-      // Restore pre-sleep mute state
       if (_audioManager != null)
       {
+        // Restore pre-sleep mute state
         _audioManager.IsMuted = _wasMutedBeforeSleep;
+
+        // Resume playback if it was playing before sleep
+        if (_wasPlayingBeforeSleep
+            && _audioManager.ActiveSource is IPrimaryAudioSource primary
+            && primary.State == AudioSourceState.Paused)
+        {
+          try
+          {
+            await primary.ResumeAsync();
+            _logger.LogInformation("Resumed source {SourceName} after wake", primary.Name);
+          }
+          catch (Exception ex)
+          {
+            _logger.LogWarning(ex, "Failed to resume source after wake");
+          }
+        }
       }
 
       await _hubContext.Clients.All
