@@ -336,17 +336,21 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   /// <inheritdoc/>
   protected override Task PauseCoreAsync(CancellationToken cancellationToken)
   {
-    Logger.LogInformation("Pausing {SourceName} audio (stopping capture)", Name);
-    
-    // For live inputs, pause implies stopping the capture stream to release resources
-    // or simply stopping data flow.
+    Logger.LogInformation("Pausing {SourceName} audio (stopping capture + playback)", Name);
+
     try
     {
       _captureDevice?.Stop();
     }
     catch (Exception ex)
     {
-       Logger.LogWarning(ex, "Failed to stop audio capture device during pause for {SourceName}", Name);
+      Logger.LogWarning(ex, "Failed to stop audio capture device during pause for {SourceName}", Name);
+    }
+
+    // Pause the SoundFlow playback component so buffered audio stops flowing to output
+    if (_playbackId != null && _playbackService != null)
+    {
+      _playbackService.Pause(_playbackId);
     }
 
     return Task.CompletedTask;
@@ -356,6 +360,13 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   protected override Task ResumeCoreAsync(CancellationToken cancellationToken)
   {
     Logger.LogInformation("Resuming {SourceName} audio", Name);
+
+    // Resume the SoundFlow playback component before restarting capture
+    if (_playbackId != null && _playbackService != null)
+    {
+      _playbackService.Resume(_playbackId);
+    }
+
     return PlayCoreAsync(cancellationToken);
   }
 
