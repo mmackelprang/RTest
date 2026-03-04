@@ -27,7 +27,6 @@ namespace Radio.IntegrationTests.Fingerprinting;
 ///
 /// These tests exercise each stage independently and combined to find the failure.
 /// </summary>
-[Trait("Category", "Integration")]
 public class FingerprintPipelineComponentTests : IAsyncLifetime
 {
   private readonly ITestOutputHelper _output;
@@ -578,7 +577,6 @@ public class FingerprintPipelineComponentTests : IAsyncLifetime
   /// This is what BackgroundIdentificationService now does for file-based sources.
   /// </summary>
   [SkippableFact]
-  [Trait("Category", "Integration")]
   public async Task Stage6_FileBasedFingerprint_WereReady_MatchesAcoustId()
   {
     RequireFpcalc();
