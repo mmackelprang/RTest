@@ -59,12 +59,18 @@ public class ChromaprintFingerprintService : IFingerprintService
     var tempFile = Path.Combine(Path.GetTempPath(), $"fpcalc_{Guid.NewGuid():N}.wav");
     try
     {
+      // Apply high-pass filter to remove low-frequency noise before fingerprinting.
+      // Vinyl turntables produce significant sub-100Hz rumble (motor/bearing resonance)
+      // that pollutes Chromaprint hashes. This also helps with other capture sources
+      // (radio, USB) that may have DC offset or mains hum.
+      var filteredSamples = ApplyHighPassFilter(samples.Samples, samples.SampleRate, samples.Channels);
+
       // Normalize audio to peak amplitude before fingerprinting.
       // The audio tap captures post-mixer samples (after volume control), so at low
       // system volumes the captured audio can be very quiet (-30dB or worse). Chromaprint
       // needs reasonable signal levels to extract meaningful features — without normalization,
       // quiet audio produces fingerprints too short (e.g., 75 chars vs 800+) to match.
-      var normalizedSamples = NormalizeSamples(samples.Samples);
+      var normalizedSamples = NormalizeSamples(filteredSamples);
 
       // Convert float samples to s16le bytes
       var pcmDataLength = normalizedSamples.Length * 2;
@@ -236,6 +242,66 @@ public class ChromaprintFingerprintService : IFingerprintService
       _logger.LogError(ex, "Error running fpcalc");
       return null;
     }
+  }
+
+  /// <summary>
+  /// High-pass cutoff frequency in Hz. Removes turntable rumble, DC offset, and mains hum
+  /// from captured audio before fingerprinting. Set above the typical rumble range (20-60Hz)
+  /// but well below musical content (lowest piano note A0 = 27.5Hz, bass guitar E1 = 41Hz).
+  /// 80Hz removes rumble while preserving bass fundamentals that contribute to fingerprints.
+  /// </summary>
+  private const float HighPassCutoffHz = 80f;
+
+  /// <summary>
+  /// Applies a 2nd-order Butterworth high-pass filter to remove low-frequency noise.
+  /// Vinyl turntables produce significant sub-100Hz rumble from motor/bearing resonance.
+  /// This also removes DC offset and mains hum from other capture sources.
+  /// </summary>
+  private float[] ApplyHighPassFilter(float[] samples, int sampleRate, int channels)
+  {
+    // Compute 2nd-order Butterworth high-pass coefficients
+    // Using bilinear transform: s-domain prototype → z-domain digital filter
+    double omega = 2.0 * Math.PI * HighPassCutoffHz / sampleRate;
+    double sinOmega = Math.Sin(omega);
+    double cosOmega = Math.Cos(omega);
+    double alpha = sinOmega / (2.0 * Math.Sqrt(2.0)); // Q = sqrt(2)/2 for Butterworth
+
+    // Transfer function coefficients (normalized by a0)
+    double a0 = 1.0 + alpha;
+    double b0 = ((1.0 + cosOmega) / 2.0) / a0;
+    double b1 = (-(1.0 + cosOmega)) / a0;
+    double b2 = ((1.0 + cosOmega) / 2.0) / a0;
+    double a1 = (-2.0 * cosOmega) / a0;
+    double a2 = (1.0 - alpha) / a0;
+
+    var output = new float[samples.Length];
+
+    // Process each channel independently (interleaved samples: L R L R ...)
+    for (int ch = 0; ch < channels; ch++)
+    {
+      // Filter state (two previous input/output samples)
+      double x1 = 0, x2 = 0;
+      double y1 = 0, y2 = 0;
+
+      for (int i = ch; i < samples.Length; i += channels)
+      {
+        double x0 = samples[i];
+        double y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+
+        output[i] = (float)y0;
+
+        x2 = x1;
+        x1 = x0;
+        y2 = y1;
+        y1 = y0;
+      }
+    }
+
+    _logger.LogDebug(
+      "Applied {CutoffHz}Hz high-pass filter for fingerprinting ({Channels}ch, {SampleRate}Hz)",
+      HighPassCutoffHz, channels, sampleRate);
+
+    return output;
   }
 
   /// <summary>
