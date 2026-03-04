@@ -75,5 +75,8 @@ public enum MetadataSource
   Fingerprinting,
 
   /// <summary>Metadata obtained from Bluetooth AVRCP (track info from phone).</summary>
-  Avrcp
+  Avrcp,
+
+  /// <summary>Metadata obtained from SongRec (Shazam) recognition.</summary>
+  Shazam
 }

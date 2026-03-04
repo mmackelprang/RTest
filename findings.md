@@ -1,110 +1,73 @@
 # Findings
 
-## Research & Discoveries
+## Current Fingerprinting Architecture
 
-### Feature 1: RotaryUsb — Rotary Encoder Integration
-
-**Repo**: `mmackelprang/RotaryUsb` (C++/CircuitPython firmware, C# example)
-**Hardware**: 4x KY-040 rotary encoders on Raspberry Pi Pico (RP2040)
-**Communication**: USB HID (Generic HID mode recommended for dedicated apps)
-
-**Protocol (Generic HID mode)**:
-- VID `0xCAFE`, PID `0x4005` (C++ firmware)
-- Usage Page `0xFF00`, Usage `0x01`
-- 8-byte reports: `[ReportID=0x01, Enc1(int8), Enc2(int8), Enc3(int8), Enc4(int8), Buttons(bitmask), Reserved, Reserved]`
-- Encoder values are signed relative deltas: +1 CW, -1 CCW per detent
-- Buttons: bit0=Btn1, bit1=Btn2, bit2=Btn3, bit3=Btn4 (1=pressed)
-- Reports only sent on state change, 10ms minimum interval
-
-**Linux integration**: Use `HidSharp` NuGet (cross-platform, works via hidraw) — NOT `HidLibrary` (Windows-only)
-
-**Parsing (C#)**:
-```csharp
-sbyte enc1 = (sbyte)data[1]; // -127 to +127
-byte buttons = data[5];
-bool btn1 = (buttons & 0x01) != 0;
+### Pipeline
+```
+Sources (Radio/SDR/File/BT/USB)
+  → FingerprintTapModifier (captures float samples from mixer)
+  → SoundFlowAudioTap (15s capture, silence detection, normalization)
+  → ChromaprintFingerprintService (writes WAV, invokes fpcalc binary)
+  → MetadataLookupService (cache → AcoustID → MusicBrainz → Cover Art Archive)
+  → TrackMetadata (Title, Artist, Album, CoverArtUrl)
+  → UI (SignalR events, /api/audio/fingerprint/status)
 ```
 
----
+### Key Files
+- `Radio.Infrastructure/Audio/Fingerprinting/ChromaprintFingerprintService.cs` — fpcalc invocation, WAV generation, normalization
+- `Radio.Infrastructure/Audio/Fingerprinting/BackgroundIdentificationService.cs` — 15s interval loop, per-source logic, song change detection
+- `Radio.Infrastructure/Audio/Fingerprinting/MetadataLookupService.cs` — Cache → AcoustID → MusicBrainz chain
+- `Radio.Infrastructure/Audio/Fingerprinting/SoundFlowAudioTap.cs` — Audio capture, silence detection
+- `Radio.Infrastructure/Audio/SoundFlow/FingerprintTapModifier.cs` — Mixer-level audio tap
+- `Radio.Infrastructure/Audio/Fingerprinting/AcoustIdClient.cs` — HTTP client for AcoustID API
+- `Radio.Core/Configuration/FingerprintingOptions.cs` — All config options
 
-### Feature 2: RotaryPhone — Phone Call Announcements
+### Source-Specific Behavior Today
+- **File sources**: Fingerprints the actual file directly (bypasses capture). Works well.
+- **Live sources (Radio, Vinyl, BT, USB)**: Captures 15s of mixer output, normalizes, runs through fpcalc. AcoustID often fails to match because captured segment duration doesn't match full track. System retries with fallback durations (180s, 210s, 240s, 270s, 300s) — inaccurate.
+- **Bluetooth**: Can get AVRCP metadata (title/artist) directly. Falls back to fingerprinting if AVRCP unavailable.
 
-**Repo**: `mmackelprang/RotaryPhone` (.NET 9, ASP.NET Core + SignalR)
-**What it does**: Rotary phone-to-cell phone bridge via Bluetooth HFP
+### Current Limitations
+1. **Vinyl**: Surface noise, turntable rumble (confirmed via spectrum — strong sub-100Hz energy even with no music), and EQ differences confuse Chromaprint
+2. **FM Radio**: No RDS metadata extraction despite having RTL-SDR hardware. Relies entirely on acoustic fingerprinting, which is unreliable for live radio
+3. **No audio preprocessing**: Raw mixer output goes straight to fpcalc with only amplitude normalization
+4. **Single strategy**: All sources use the same Chromaprint/AcoustID pipeline. No way to swap in ACRCloud, SongRec, or RDS per source type
 
-**Integration point**: SignalR hub at `http://<host>:5555/hub`
-**Key events**:
-- `CallStateChanged(string phoneId, string state)` — states: "Idle", "Dialing", "Ringing", "InCall"
-- `IncomingCall(string phoneId, string phoneNumber)` — caller phone number
+## Vinyl Low-Frequency Noise (Observed)
+- Spectrum analyzer shows tall bars at sub-100Hz even with no music playing
+- Likely turntable rumble (motor/bearing resonance) — common even on direct-drive
+- This energy will pollute Chromaprint fingerprints
+- Fix: High-pass filter (80-100Hz cutoff) on audio samples before passing to fpcalc
+- Note: User's direct-drive turntable should NOT have wow/flutter issues, so pitch correction is unnecessary
 
-**Caller name resolution**: REST API `GET /api/contacts` to look up phone number → name
+## Alternative Metadata Sources
 
-**Note**: The `IncomingCall` SignalR event may need enhancement in RotaryPhone's `SignalRNotifierService` — currently only `CallStateChanged` is broadcast. The phone number may need to be fetched from call history API when state transitions to "Ringing".
+### 1. RDS (Radio Data System) for FM Radio
+- **redsea** (github.com/windytan/redsea): Decodes RDS from RTL-SDR raw IQ stream
+- Provides: Station name (PS), Radio Text (RT) — often contains song title/artist
+- Primary metadata source for FM; fingerprinting as fallback
+- Need to check if RTLSDRCore exposes raw IQ or RDS data
 
-**Integration sequence**:
-1. Connect SignalR client to RotaryPhone hub
-2. On `Ringing` state → play ring audio sample (looped event source with ducking)
-3. Resolve caller name via contacts API
-4. TTS: "Incoming call from [Name]" or "Unknown caller from [Number]"
-5. On state change away from `Ringing` → stop ring audio
+### 2. ACRCloud (acrcloud.com)
+- Cloud-based audio recognition service
+- Handles degraded audio (vinyl, radio) natively
+- User has API key + usage token
+- **Limitation: 5,000 calls/month** — must be used judiciously (not every 15s)
+- Best as fallback when Chromaprint/AcoustID fails
 
----
+### 3. SongRec (github.com/marin-m/SongRec)
+- Open-source Shazam client (unofficial API)
+- Handles degraded audio well (designed for noisy environments)
+- No call limits (unofficial, personal use OK per user)
+- Linux binary available, can be invoked like fpcalc
+- Good for vinyl and radio where AcoustID struggles
 
-### Feature 3: GoogleBroadcast — CRITICAL ISSUE
+## Strategy Per Source Type
 
-**Repo**: `mmackelprang/GoogleBroadcast` — **This is a simulation/scaffold. No actual functionality.**
-- All "broadcast" methods are `SimulateBroadcastCall` that just `Task.Delay(1000)` and log
-- Device discovery returns hardcoded fake devices
-- Google auth is initialized but never used
-- The code appears to be AI-generated boilerplate (single commit from Copilot)
-
-**Direction mismatch**: The repo is about SENDING broadcasts TO Google Home devices. The user wants to RECEIVE broadcasts. Neither direction has a public Google API:
-- **Sending**: Possible via Google Assistant gRPC API workaround (send "broadcast [message]" as assistant text command). Requires OAuth2 user credentials (not service accounts).
-- **Receiving**: No public API exists. Google Home broadcasts are closed-ecosystem — only played on Google Home/Nest speakers.
-
-**Possible alternatives**:
-1. Build a custom broadcast system using the existing Cast infrastructure
-2. Use MQTT or a webhook-based notification system
-3. Integrate with Home Assistant which has Google Assistant SDK integration
-4. Abandon Google broadcast, implement a custom "house intercom" via Cast devices
-
----
-
-## Existing Codebase Integration Points
-
-### Audio Sources
-- `IEventAudioSource` for ephemeral audio (TTS, ring sounds) with auto-ducking
-- `IDuckingService` reduces primary source volume (priority 1-10 scale, event default=8)
-- `ITTSFactory.CreateAsync(text, params)` → returns ready-to-play event source
-- Pattern: create event source → start ducking → play → stop ducking on completion
-
-### Input Devices
-- **NO existing HID/serial/GPIO abstraction** — entirely greenfield
-- USB handling is audio-only (capture devices via MiniAudio)
-- Would need new `IInputDevice` interface + implementations
-
-### System Config UI
-- MudBlazor Material 3 with MudTabs layout
-- Cards for metrics, dialogs for configuration
-- Pattern: Razor component + injected API service + SignalR for real-time updates
-
-### SignalR Infrastructure
-- `AudioStateHub` + `AudioVisualizationHub` already exist
-- `AudioStateUpdateService` broadcasts state changes
-- Well-established pattern for adding new real-time events
-
-## Key Files
-| File | Role |
-|------|------|
-| `src/Radio.Core/Interfaces/Audio/IAudioSource.cs` | Audio source interfaces |
-| `src/Radio.Core/Interfaces/Audio/IEventAudioSource.cs` | Event source (TTS, sounds) |
-| `src/Radio.Infrastructure/Audio/Sources/Event/TTSEventSource.cs` | TTS implementation |
-| `src/Radio.Infrastructure/Audio/Services/DuckingService.cs` | Audio ducking |
-| `src/Radio.Infrastructure/Audio/Sources/Event/AudioFileEventSource.cs` | Audio file playback |
-| `src/Radio.Web/Components/Pages/SystemConfigPage.razor` | System config UI pattern |
-| `src/Radio.API/Services/AudioStateUpdateService.cs` | SignalR state broadcasting |
-
-## Open Questions
-- What should we do about Google Broadcast? (see critical issue above)
-- Where will the RotaryPhone server be running? Same Ubuntu box or separate machine?
-- Which firmware mode for RotaryUsb? (Generic HID recommended)
+| Source | Primary | Fallback | Notes |
+|--------|---------|----------|-------|
+| File | Chromaprint/AcoustID (file) | — | Already works well |
+| Bluetooth | AVRCP metadata | Chromaprint/AcoustID | Already implemented |
+| FM Radio | RDS via redsea | ACRCloud or SongRec | RDS is free, instant |
+| Vinyl | Chromaprint + high-pass filter | SongRec or ACRCloud | Clean audio first |
+| Generic USB | Chromaprint/AcoustID | SongRec or ACRCloud | Same as vinyl approach |

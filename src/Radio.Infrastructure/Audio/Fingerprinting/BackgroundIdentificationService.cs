@@ -208,6 +208,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
     UpdatePhase(FingerprintPhase.Capturing);
 
     FingerprintData fingerprint;
+    AudioSampleBuffer? capturedSamples = null; // Kept for SongRec fallback on live sources
 
     // For file-based sources, fingerprint the actual file to get correct track duration.
     // AcoustID requires duration within ~3s of the real track length to match.
@@ -250,6 +251,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
       }
 
       _logger.LogDebug("Captured {SampleCount} audio samples in {Elapsed}ms", samples.Samples.Length, captureElapsed);
+      capturedSamples = samples; // Save for SongRec fallback
 
       UpdatePhase(FingerprintPhase.Fingerprinting);
       var fingerprintStartTime = DateTime.UtcNow;
@@ -312,6 +314,48 @@ public sealed class BackgroundIdentificationService : BackgroundService
       }
 
       lookupElapsed = (DateTime.UtcNow - lookupStartTime).TotalMilliseconds;
+    }
+
+    // SongRec fallback: if AcoustID failed for a live source and we have captured audio
+    if (result?.IsMatch != true && capturedSamples != null)
+    {
+      var songRec = scope.ServiceProvider.GetService<ISongRecRecognitionService>();
+      if (songRec is { IsAvailable: true })
+      {
+        _logger.LogInformation("AcoustID returned no match, trying SongRec (Shazam) fallback");
+        UpdatePhase(FingerprintPhase.Querying);
+
+        try
+        {
+          RecordMetadataCall();
+          var songRecMetadata = await songRec.RecognizeAsync(capturedSamples, ct);
+          if (songRecMetadata != null)
+          {
+            _logger.LogInformation(
+              "SongRec identified: '{Title}' by '{Artist}' (album: {Album})",
+              songRecMetadata.Title, songRecMetadata.Artist, songRecMetadata.Album ?? "(none)");
+
+            result = new MetadataLookupResult
+            {
+              IsMatch = true,
+              Confidence = 0.8, // SongRec doesn't provide a numeric confidence score
+              FingerprintId = fingerprint.Id,
+              Metadata = songRecMetadata,
+              Source = LookupSource.SongRec
+            };
+          }
+          else
+          {
+            _logger.LogInformation("SongRec also returned no match");
+          }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+          _logger.LogWarning(ex, "SongRec fallback failed");
+        }
+
+        lookupElapsed = (DateTime.UtcNow - lookupStartTime).TotalMilliseconds;
+      }
     }
 
     // Update event record with result

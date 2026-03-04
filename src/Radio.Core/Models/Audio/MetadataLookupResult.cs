@@ -38,6 +38,9 @@ public enum LookupSource
   /// <summary>Result came from AcoustID API.</summary>
   AcoustID,
 
+  /// <summary>Result came from SongRec (Shazam) recognition.</summary>
+  SongRec,
+
   /// <summary>Metadata was manually assigned.</summary>
   Manual
 }

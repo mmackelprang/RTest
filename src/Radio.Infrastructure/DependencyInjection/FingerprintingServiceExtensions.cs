@@ -101,6 +101,9 @@ public static class FingerprintingServiceExtensions
     // Register audio tap as scoped
     services.AddScoped<IAudioSampleProvider, SoundFlowAudioTap>();
 
+    // Register SongRec (Shazam) fallback recognizer — checks IsAvailable at runtime
+    services.AddSingleton<ISongRecRecognitionService, SongRecRecognitionService>();
+
     // Register background identification service as singleton so other components
     // (AudioManager, FilePlayerAudioSource, etc.) can subscribe to TrackIdentified events.
     // AddHostedService alone only registers as IHostedService, not as the concrete type.
