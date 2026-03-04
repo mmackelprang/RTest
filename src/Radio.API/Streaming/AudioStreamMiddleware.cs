@@ -1,3 +1,4 @@
+using Radio.Core.Constants;
 using Radio.Core.Interfaces.Audio;
 
 namespace Radio.API.Streaming;
@@ -32,7 +33,7 @@ public class AudioStreamMiddleware
   public async Task InvokeAsync(HttpContext context, IAudioEngine audioEngine)
   {
     // Check if this is a request for the audio stream endpoint
-    if (!context.Request.Path.StartsWithSegments("/stream/audio"))
+    if (!context.Request.Path.StartsWithSegments(ApiPaths.Streams.Audio))
     {
       await _next(context);
       return;

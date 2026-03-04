@@ -169,9 +169,8 @@
     {
       Logger.LogDebug("MainLayout.OnInitializedAsync - Starting initialization");
 
-      // Load available sources and outputs
-      await LoadSourcesAsync();
-      await LoadOutputDevicesAsync();
+      // Load available sources and outputs concurrently
+      await Task.WhenAll(LoadSourcesAsync(), LoadOutputDevicesAsync());
 
       // Start the SignalR hub connection (subscribes to RadioState/Queue groups)
       await HubService.StartAsync();

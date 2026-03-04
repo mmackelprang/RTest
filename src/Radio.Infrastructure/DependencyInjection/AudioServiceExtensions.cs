@@ -125,6 +125,7 @@ public static class AudioServiceExtensions
 
     // Register album art cache service (singleton for disk-backed image cache)
     services.AddSingleton<AlbumArtCacheService>();
+    services.AddSingleton<IAlbumArtCacheService>(sp => sp.GetRequiredService<AlbumArtCacheService>());
 
     // Register audio source factory (encapsulates all source-creation dependencies)
     services.AddSingleton<AudioSourceFactory>();

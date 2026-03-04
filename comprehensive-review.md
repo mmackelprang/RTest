@@ -1,6 +1,6 @@
 # Comprehensive Architectural Review
 
-> **Last updated:** 2026-03-04 — PR #273 (high) + PR #274 (medium) + PR #275 (medium)
+> **Last updated:** 2026-03-04 — PR #273 (high) + PR #274 (medium) + PR #275 (medium) + PR #276 (low)
 
 ## HIGH Priority
 
@@ -302,7 +302,7 @@
 
 ---
 
-### 37. [PRIORITY: Low] [DIFFICULTY: Easy]
+### 37. [PRIORITY: Low] [DIFFICULTY: Easy] --- DONE (PR #276)
 - **Category:** Dead Code
 - **Location:** `src/Radio.Infrastructure/Audio/Sources/Primary/PrimaryAudioSourceBase.cs:197-201, 208-212, 219-223, 229-234`
 - **Issue:** Four virtual methods (`NextAsync`, `PreviousAsync`, `SetShuffleAsync`, `SetRepeatModeAsync`) throw `NotSupportedException` if the capability property is false, then have an unreachable `return Task.CompletedTask` after the throw. While technically a valid pattern for subclasses that override, the structure is confusing — the throw and return serve different code paths but read as sequential.
@@ -310,7 +310,7 @@
 
 ---
 
-### 38. [PRIORITY: Low] [DIFFICULTY: Easy]
+### 38. [PRIORITY: Low] [DIFFICULTY: Easy] --- DONE (PR #276)
 - **Category:** Readability / Magic Numbers
 - **Location:** `src/Radio.Infrastructure/Audio/SoundFlow/FingerprintTapModifier.cs:53-54` (buffer size 4096); `VisualizationTapModifier.cs:37-38` (buffer size 2048); `BufferedSoundGenerator.cs:101-102` (drift thresholds 15%, 25%); `TappedOutputStream.cs:47` (bytes per sample = 2)
 - **Issue:** Buffer sizes, drift thresholds, and format constants are hardcoded as magic numbers throughout the audio pipeline. Tuning requires finding and modifying scattered literals.
@@ -326,7 +326,7 @@
 
 ---
 
-### 40. [PRIORITY: Low] [DIFFICULTY: Easy]
+### 40. [PRIORITY: Low] [DIFFICULTY: Easy] --- DONE (PR #276)
 - **Category:** Configuration
 - **Location:** `src/Radio.API/Program.cs`; `src/Radio.Web/Program.cs`
 - **Issue:** SignalR hub paths (`/hubs/audio`, `/hubs/visualization`) and stream paths (`/stream/audio`, `/stream/audio/mp3`) are hardcoded string literals in both projects. If a path changes, both projects must be updated.
@@ -334,7 +334,7 @@
 
 ---
 
-### 41. [PRIORITY: Low] [DIFFICULTY: Easy]
+### 41. [PRIORITY: Low] [DIFFICULTY: Easy] --- DONE (PR #276)
 - **Category:** Error Handling
 - **Location:** `src/Radio.API/Hubs/AudioStateHub.cs:20-21`; `src/Radio.API/Hubs/AudioVisualizationHub.cs:22-23`
 - **Issue:** The static `_connectedClients` counter can go negative if `OnDisconnectedAsync` is called without a matching `OnConnectedAsync` (e.g., during abnormal shutdown). No lower-bound clamp exists.
@@ -358,7 +358,7 @@
 
 ---
 
-### 44. [PRIORITY: Low] [DIFFICULTY: Easy]
+### 44. [PRIORITY: Low] [DIFFICULTY: Easy] --- DONE (PR #276)
 - **Category:** Dependencies
 - **Location:** `src/Radio.Infrastructure/Audio/Services/AlbumArtCacheService.cs:127` (registered as concrete type)
 - **Issue:** `AlbumArtCacheService` is registered as `AddSingleton<AlbumArtCacheService>()` without an interface, breaking the Dependency Inversion Principle. All other services in the audio pipeline use interface-based registration.
@@ -398,7 +398,7 @@
 
 ---
 
-### 49. [PRIORITY: Low] [DIFFICULTY: Medium]
+### 49. [PRIORITY: Low] [DIFFICULTY: Medium] --- DONE (PR #276)
 - **Category:** Observability
 - **Location:** `src/Radio.API/` — no health check endpoint
 - **Issue:** There is no `/health` or `/ready` endpoint. The systemd services have no way to verify the API is healthy beyond checking if the process is running. If the audio engine crashes internally but the HTTP server stays up, the system appears healthy when it isn't.
@@ -422,7 +422,7 @@
 
 ---
 
-### 52. [PRIORITY: Low] [DIFFICULTY: Medium]
+### 52. [PRIORITY: Low] [DIFFICULTY: Medium] --- DONE (PR #276)
 - **Category:** Performance
 - **Location:** `src/Radio.Web/Components/Shared/RadioControlPanel.razor` — `OnInitializedAsync`; `src/Radio.Web/Components/Layout/MainLayout.razor` — `OnInitializedAsync`
 - **Issue:** Both components make 3+ sequential API calls during initialization (e.g., `LoadRadioStateAsync()` → `LoadPresetsAsync()` → `LoadBandsAsync()`). These are independent operations that could run concurrently.

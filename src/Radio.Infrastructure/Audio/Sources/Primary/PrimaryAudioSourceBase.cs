@@ -120,46 +120,54 @@ public abstract class PrimaryAudioSourceBase : AudioSourceBase, IPrimaryAudioSou
   }
 
   /// <inheritdoc/>
+  /// <remarks>
+  /// Subclasses that set <see cref="SupportsNext"/> to true should override this method.
+  /// The default implementation is a no-op for sources that declare support but need no custom logic.
+  /// </remarks>
   public virtual Task NextAsync(CancellationToken cancellationToken = default)
   {
     ThrowIfDisposed();
     if (!SupportsNext)
-    {
       throw new NotSupportedException($"Audio source {Id} does not support skipping to next track.");
-    }
     return Task.CompletedTask;
   }
 
   /// <inheritdoc/>
+  /// <remarks>
+  /// Subclasses that set <see cref="SupportsPrevious"/> to true should override this method.
+  /// The default implementation is a no-op for sources that declare support but need no custom logic.
+  /// </remarks>
   public virtual Task PreviousAsync(CancellationToken cancellationToken = default)
   {
     ThrowIfDisposed();
     if (!SupportsPrevious)
-    {
       throw new NotSupportedException($"Audio source {Id} does not support going to previous track.");
-    }
     return Task.CompletedTask;
   }
 
   /// <inheritdoc/>
+  /// <remarks>
+  /// Subclasses that set <see cref="SupportsShuffle"/> to true should override this method.
+  /// The default implementation is a no-op for sources that declare support but need no custom logic.
+  /// </remarks>
   public virtual Task SetShuffleAsync(bool enabled, CancellationToken cancellationToken = default)
   {
     ThrowIfDisposed();
     if (!SupportsShuffle)
-    {
       throw new NotSupportedException($"Audio source {Id} does not support shuffle mode.");
-    }
     return Task.CompletedTask;
   }
 
   /// <inheritdoc/>
+  /// <remarks>
+  /// Subclasses that set <see cref="SupportsRepeat"/> to true should override this method.
+  /// The default implementation is a no-op for sources that declare support but need no custom logic.
+  /// </remarks>
   public virtual Task SetRepeatModeAsync(RepeatMode mode, CancellationToken cancellationToken = default)
   {
     ThrowIfDisposed();
     if (!SupportsRepeat)
-    {
       throw new NotSupportedException($"Audio source {Id} does not support repeat mode.");
-    }
     return Task.CompletedTask;
   }
 

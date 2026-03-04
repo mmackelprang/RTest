@@ -4,6 +4,7 @@ using Radio.API.Hubs;
 using Radio.API.Middleware;
 using Radio.API.Services;
 using Radio.API.Streaming;
+using Radio.Core.Constants;
 using Radio.Core.Interfaces;
 using Radio.API.Logging;
 using Radio.Infrastructure.DependencyInjection;
@@ -81,6 +82,10 @@ builder.Services.AddCors(options =>
 // Add SignalR
 builder.Services.AddSignalR();
 
+// Add health checks
+builder.Services.AddHealthChecks()
+  .AddCheck<Radio.API.Health.AudioEngineHealthCheck>("audio-engine");
+
 builder.Services.AddManagedConfiguration(builder.Configuration);
 builder.Services.AddMetrics(builder.Configuration);
 builder.Services.AddFingerprinting(builder.Configuration);
@@ -150,8 +155,11 @@ app.UseAuthorization();
 app.MapControllers();
 
 // Map SignalR hubs
-app.MapHub<AudioVisualizationHub>("/hubs/visualization");
-app.MapHub<AudioStateHub>("/hubs/audio");
+app.MapHub<AudioVisualizationHub>(ApiPaths.Hubs.Visualization);
+app.MapHub<AudioStateHub>(ApiPaths.Hubs.Audio);
+
+// Map health check endpoint
+app.MapHealthChecks("/health");
 
 try
 {
@@ -176,8 +184,8 @@ try
   Log.Information("  Log directory: {LogPath}", logDirectory);
   Log.Information("════════════════════════════════════════════════════════════════════");
   Log.Information("Swagger UI available at /swagger");
-  Log.Information("SignalR hubs available at /hubs/visualization and /hubs/audio");
-  Log.Information("Audio stream available at /stream/audio");
+  Log.Information("SignalR hubs available at {VizHub} and {AudioHub}", ApiPaths.Hubs.Visualization, ApiPaths.Hubs.Audio);
+  Log.Information("Audio stream available at {StreamPath}", ApiPaths.Streams.Audio);
   app.Run();
 }
 catch (Exception ex)

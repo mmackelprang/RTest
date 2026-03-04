@@ -866,9 +866,7 @@
 
   protected override async Task OnInitializedAsync()
   {
-    await LoadRadioStateAsync();
-    await LoadPresetsAsync();
-    await LoadBandsAsync();
+    await Task.WhenAll(LoadRadioStateAsync(), LoadPresetsAsync(), LoadBandsAsync());
     HubService.RadioStateChanged += HandleRadioStateChanged;
   }
 
