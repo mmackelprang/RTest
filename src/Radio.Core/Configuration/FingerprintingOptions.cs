@@ -50,6 +50,28 @@ public sealed class FingerprintingOptions
   /// On Windows: download from https://acoustid.org/chromaprint
   /// </summary>
   public string FpcalcPath { get; set; } = string.Empty;
+
+  /// <summary>SongRec (Shazam) fallback recognizer configuration.</summary>
+  public SongRecOptions SongRec { get; set; } = new();
+}
+
+/// <summary>
+/// Configuration options for SongRec (Shazam) audio recognition.
+/// SongRec is an open-source Shazam client used as a fallback when AcoustID fails.
+/// Install via: sudo add-apt-repository ppa:marin-m/songrec &amp;&amp; sudo apt install songrec
+/// </summary>
+public sealed class SongRecOptions
+{
+  /// <summary>Enable or disable SongRec fallback recognition.</summary>
+  public bool Enabled { get; set; } = false;
+
+  /// <summary>
+  /// Path to the songrec binary. If empty, searches PATH.
+  /// </summary>
+  public string SongRecPath { get; set; } = string.Empty;
+
+  /// <summary>Timeout in seconds for the songrec process.</summary>
+  public int TimeoutSeconds { get; set; } = 15;
 }
 
 /// <summary>

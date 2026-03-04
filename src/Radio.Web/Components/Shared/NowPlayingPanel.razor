@@ -308,6 +308,7 @@
 
       HubService.PlaybackStateChanged += OnPlaybackStateChanged;
       HubService.NowPlayingChanged += OnNowPlayingChanged;
+      HubService.SourceChanged += OnSourceChanged;
       HubService.VolumeChanged += OnVolumeChangedEvent;
       HubService.FingerprintStatusChanged += OnFingerprintStatusChanged;
 
@@ -330,6 +331,14 @@
   private async Task OnNowPlayingChanged()
   {
     await RefreshPlaybackStateAsync();
+    await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task OnSourceChanged()
+  {
+    // Source switched — immediately refresh to show the new source's metadata
+    await RefreshPlaybackStateAsync();
+    await LoadSourceGainOffsetsAsync();
     await InvokeAsync(StateHasChanged);
   }
 
@@ -724,6 +733,7 @@
   {
     HubService.PlaybackStateChanged -= OnPlaybackStateChanged;
     HubService.NowPlayingChanged -= OnNowPlayingChanged;
+    HubService.SourceChanged -= OnSourceChanged;
     HubService.VolumeChanged -= OnVolumeChangedEvent;
     HubService.FingerprintStatusChanged -= OnFingerprintStatusChanged;
     _gainDebounceTimer?.Dispose();
