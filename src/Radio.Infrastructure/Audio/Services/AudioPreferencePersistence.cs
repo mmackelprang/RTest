@@ -63,7 +63,7 @@ public class AudioPreferencePersistence : IDisposable
   /// Reads from the config store directly (SQLite) since IOptionsMonitor only reflects appsettings.json defaults.
   /// Sets the mixer directly to avoid triggering re-persistence.
   /// </summary>
-  public void RestoreVolumePreferences()
+  public async Task RestoreVolumePreferencesAsync()
   {
     try
     {
@@ -79,14 +79,14 @@ public class AudioPreferencePersistence : IDisposable
         {
           var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
           _logger.LogDebug("Reading volume from config store '{StoreId}'", storeId);
-          var store = _configurationManager.GetStoreAsync(storeId).GetAwaiter().GetResult();
+          var store = await _configurationManager.GetStoreAsync(storeId);
 
-          var volEntry = store.GetEntryAsync("AudioPreferences:MasterVolume").GetAwaiter().GetResult();
+          var volEntry = await store.GetEntryAsync("AudioPreferences:MasterVolume");
           _logger.LogDebug("Config store volume entry: {Entry}", volEntry?.Value ?? "null");
           if (volEntry != null && int.TryParse(volEntry.Value, out var storedVol))
             volumePercent = storedVol;
 
-          var muteEntry = store.GetEntryAsync("AudioPreferences:IsMuted").GetAwaiter().GetResult();
+          var muteEntry = await store.GetEntryAsync("AudioPreferences:IsMuted");
           _logger.LogDebug("Config store mute entry: {Entry}", muteEntry?.Value ?? "null");
           if (muteEntry != null && bool.TryParse(muteEntry.Value, out var storedMuted))
             isMuted = storedMuted;
@@ -219,7 +219,7 @@ public class AudioPreferencePersistence : IDisposable
   /// <summary>
   /// Restores per-source gain offsets from the configuration store.
   /// </summary>
-  public void RestoreSourceGainOffsets()
+  public async Task RestoreSourceGainOffsetsAsync()
   {
     if (_configurationManager == null)
     {
@@ -230,17 +230,24 @@ public class AudioPreferencePersistence : IDisposable
     try
     {
       var storeId = _configurationManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
-      var store = _configurationManager.GetStoreAsync(storeId).GetAwaiter().GetResult();
+      var store = await _configurationManager.GetStoreAsync(storeId);
 
-      // Read all AudioPreferences:SourceGain:* keys
+      // Read all AudioPreferences:SourceGain:* keys concurrently
       var sourceTypes = Enum.GetValues<AudioSourceType>();
+      var tasks = sourceTypes.Select(async sourceType =>
+      {
+        var key = $"AudioPreferences:SourceGain:{sourceType}";
+        var entry = await store.GetEntryAsync(key);
+        return (sourceType, entry);
+      });
+
+      var results = await Task.WhenAll(tasks);
+
       var restored = 0;
       lock (_sourceGainPersistLock)
       {
-        foreach (var sourceType in sourceTypes)
+        foreach (var (sourceType, entry) in results)
         {
-          var key = $"AudioPreferences:SourceGain:{sourceType}";
-          var entry = store.GetEntryAsync(key).GetAwaiter().GetResult();
           if (entry != null && float.TryParse(entry.Value, CultureInfo.InvariantCulture, out var gain))
           {
             // Clamp handles migration from old MaxGain=25 values

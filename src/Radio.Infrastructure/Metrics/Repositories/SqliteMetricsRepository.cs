@@ -101,30 +101,41 @@ public sealed class SqliteMetricsRepository : IMetricsReader
           unit,
           transaction,
           ct);
+
+        // Reuse a single command for all buckets — avoids N command/parameter
+        // allocations per flush cycle.
+        await using var cmd = _dbContext.Connection.CreateCommand();
+        cmd.Transaction = transaction;
+
+        cmd.CommandText = $@"
+          INSERT INTO {tableName}
+            (MetricId, Timestamp, ValueSum, ValueCount, ValueMin, ValueMax, ValueLast)
+          VALUES
+            (@MetricId, @Timestamp, @ValueSum, @ValueCount, @ValueMin, @ValueMax, @ValueLast)
+          ON CONFLICT(MetricId, Timestamp) DO UPDATE SET
+            ValueSum = ValueSum + @ValueSum,
+            ValueCount = ValueCount + @ValueCount,
+            ValueMin = MIN(ValueMin, @ValueMin),
+            ValueMax = MAX(ValueMax, @ValueMax),
+            ValueLast = @ValueLast";
+
+        var pMetricId = cmd.Parameters.Add("@MetricId", SqliteType.Integer);
+        var pTimestamp = cmd.Parameters.Add("@Timestamp", SqliteType.Integer);
+        var pValueSum = cmd.Parameters.Add("@ValueSum", SqliteType.Real);
+        var pValueCount = cmd.Parameters.Add("@ValueCount", SqliteType.Integer);
+        var pValueMin = cmd.Parameters.Add("@ValueMin", SqliteType.Real);
+        var pValueMax = cmd.Parameters.Add("@ValueMax", SqliteType.Real);
+        var pValueLast = cmd.Parameters.Add("@ValueLast", SqliteType.Real);
+
         foreach (var bucket in buckets)
         {
-          await using var cmd = _dbContext.Connection.CreateCommand();
-          cmd.Transaction = transaction;
-
-          cmd.CommandText = $@"
-            INSERT INTO {tableName}
-              (MetricId, Timestamp, ValueSum, ValueCount, ValueMin, ValueMax, ValueLast)
-            VALUES
-              (@MetricId, @Timestamp, @ValueSum, @ValueCount, @ValueMin, @ValueMax, @ValueLast)
-            ON CONFLICT(MetricId, Timestamp) DO UPDATE SET
-              ValueSum = ValueSum + @ValueSum,
-              ValueCount = ValueCount + @ValueCount,
-              ValueMin = MIN(ValueMin, @ValueMin),
-              ValueMax = MAX(ValueMax, @ValueMax),
-              ValueLast = @ValueLast";
-
-          cmd.Parameters.AddWithValue("@MetricId", metricId);
-          cmd.Parameters.AddWithValue("@Timestamp", bucket.Timestamp);
-          cmd.Parameters.AddWithValue("@ValueSum", bucket.ValueSum);
-          cmd.Parameters.AddWithValue("@ValueCount", bucket.ValueCount);
-          cmd.Parameters.AddWithValue("@ValueMin", bucket.ValueMin ?? (object)DBNull.Value);
-          cmd.Parameters.AddWithValue("@ValueMax", bucket.ValueMax ?? (object)DBNull.Value);
-          cmd.Parameters.AddWithValue("@ValueLast", bucket.ValueLast ?? (object)DBNull.Value);
+          pMetricId.Value = metricId;
+          pTimestamp.Value = bucket.Timestamp;
+          pValueSum.Value = bucket.ValueSum;
+          pValueCount.Value = bucket.ValueCount;
+          pValueMin.Value = bucket.ValueMin ?? (object)DBNull.Value;
+          pValueMax.Value = bucket.ValueMax ?? (object)DBNull.Value;
+          pValueLast.Value = bucket.ValueLast ?? (object)DBNull.Value;
 
           await cmd.ExecuteNonQueryAsync(ct);
         }
@@ -258,15 +269,25 @@ public sealed class SqliteMetricsRepository : IMetricsReader
     IEnumerable<string> keys,
     CancellationToken ct = default)
   {
-    var result = new Dictionary<string, double>();
+    var keyList = keys.ToList();
+    if (keyList.Count == 0)
+      return new Dictionary<string, double>();
 
-    foreach (var key in keys)
+    // For small key lists, run individual queries concurrently is fine.
+    // Each GetAggregateAsync uses its own read connection.
+    var tasks = keyList.Select(async key =>
     {
       var value = await GetAggregateAsync(key, ct);
+      return (key, value);
+    });
+
+    var results = await Task.WhenAll(tasks);
+
+    var result = new Dictionary<string, double>();
+    foreach (var (key, value) in results)
+    {
       if (value.HasValue)
-      {
         result[key] = value.Value;
-      }
     }
 
     return result;

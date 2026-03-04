@@ -52,7 +52,7 @@ public class AudioPreferencePersistenceTests : IDisposable
   }
 
   [Fact]
-  public void RestoreVolumePreferences_SetsVolumeFromConfigStore()
+  public async Task RestoreVolumePreferencesAsync_SetsVolumeFromConfigStore()
   {
     // Arrange — stored volume is 50%
     _storeMock.Setup(s => s.GetEntryAsync("AudioPreferences:MasterVolume", It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
@@ -61,7 +61,7 @@ public class AudioPreferencePersistenceTests : IDisposable
       .ReturnsAsync(new ConfigurationEntry { Key = "AudioPreferences:IsMuted", Value = "False" });
 
     // Act
-    _sut.RestoreVolumePreferences();
+    await _sut.RestoreVolumePreferencesAsync();
 
     // Assert
     _mixerMock.VerifySet(m => m.MasterVolume = 0.5f, Times.Once);
@@ -70,7 +70,7 @@ public class AudioPreferencePersistenceTests : IDisposable
   }
 
   [Fact]
-  public void RestoreVolumePreferences_RestoresMutedState()
+  public async Task RestoreVolumePreferencesAsync_RestoresMutedState()
   {
     // Arrange
     _storeMock.Setup(s => s.GetEntryAsync("AudioPreferences:MasterVolume", It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
@@ -79,7 +79,7 @@ public class AudioPreferencePersistenceTests : IDisposable
       .ReturnsAsync(new ConfigurationEntry { Key = "AudioPreferences:IsMuted", Value = "True" });
 
     // Act
-    _sut.RestoreVolumePreferences();
+    await _sut.RestoreVolumePreferencesAsync();
 
     // Assert
     _mixerMock.VerifySet(m => m.MasterVolume = 0.3f, Times.Once);
@@ -87,14 +87,14 @@ public class AudioPreferencePersistenceTests : IDisposable
   }
 
   [Fact]
-  public void RestoreVolumePreferences_FallsBackToOptionsDefaults_WhenConfigStoreEmpty()
+  public async Task RestoreVolumePreferencesAsync_FallsBackToOptionsDefaults_WhenConfigStoreEmpty()
   {
     // Arrange — no entries in config store
     _storeMock.Setup(s => s.GetEntryAsync(It.IsAny<string>(), It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
       .ReturnsAsync((ConfigurationEntry?)null);
 
     // Act
-    _sut.RestoreVolumePreferences();
+    await _sut.RestoreVolumePreferencesAsync();
 
     // Assert — uses defaults from AudioPreferences (75%, not muted)
     _mixerMock.VerifySet(m => m.MasterVolume = 0.75f, Times.Once);
@@ -102,7 +102,7 @@ public class AudioPreferencePersistenceTests : IDisposable
   }
 
   [Fact]
-  public void RestoreVolumePreferences_HandlesNoConfigManager()
+  public async Task RestoreVolumePreferencesAsync_HandlesNoConfigManager()
   {
     // Arrange — create instance without config manager
     var sut = new AudioPreferencePersistence(
@@ -112,7 +112,7 @@ public class AudioPreferencePersistenceTests : IDisposable
       configurationManager: null);
 
     // Act — should not throw
-    sut.RestoreVolumePreferences();
+    await sut.RestoreVolumePreferencesAsync();
 
     // Assert — uses options defaults
     _mixerMock.VerifySet(m => m.MasterVolume = 0.75f, Times.Once);
@@ -120,14 +120,14 @@ public class AudioPreferencePersistenceTests : IDisposable
   }
 
   [Fact]
-  public void RestoreVolumePreferences_HandlesConfigStoreException()
+  public async Task RestoreVolumePreferencesAsync_HandlesConfigStoreException()
   {
     // Arrange
     _configManagerMock.Setup(m => m.GetStoreAsync("config", It.IsAny<CancellationToken>()))
       .ThrowsAsync(new InvalidOperationException("Store not found"));
 
     // Act — should not throw
-    _sut.RestoreVolumePreferences();
+    await _sut.RestoreVolumePreferencesAsync();
 
     // Assert — falls back to options defaults
     _mixerMock.VerifySet(m => m.MasterVolume = 0.75f, Times.Once);
