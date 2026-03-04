@@ -452,6 +452,7 @@
   {
     _userOverrodeTab = false;
     await SetDefaultTabForSourceAsync();
+    await RefreshQueueAsync();
     await InvokeAsync(StateHasChanged);
   }
 

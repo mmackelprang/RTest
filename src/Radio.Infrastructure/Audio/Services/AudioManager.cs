@@ -118,6 +118,12 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   }
 
   /// <inheritdoc/>
+  public IAudioSource? GetCachedSource(AudioSourceType sourceType)
+  {
+    return _sourceCache.TryGetValue(sourceType, out var source) ? source : null;
+  }
+
+  /// <inheritdoc/>
   public async Task InitializeAsync(CancellationToken cancellationToken = default)
   {
     if (_initialized)

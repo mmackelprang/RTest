@@ -86,6 +86,9 @@ builder.Services.AddFingerprinting(builder.Configuration);
 builder.Services.AddSoundFlowAudio(builder.Configuration);
 builder.Services.AddRadioServices();
 
+// Add sleep/standby mode service
+builder.Services.AddSingleton<SleepService>();
+
 // Add the audio engine initialization service (must run first)
 builder.Services.AddHostedService<AudioEngineInitializationService>();
 

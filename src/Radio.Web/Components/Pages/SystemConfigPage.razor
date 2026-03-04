@@ -1080,6 +1080,13 @@
                                  Variant="Variant.Outlined" Min="0" Max="100"
                                  HelperText="Master volume level (0-100)" />
               </MudItem>
+              <!-- Source Visibility -->
+              <MudItem xs="12" md="6">
+                <MudSwitch T="bool" Color="Color.Primary"
+                           Value="@(!_audioPreferences.HiddenSources.Contains("TestTone", StringComparer.OrdinalIgnoreCase))"
+                           ValueChanged="@((bool v) => OnTestToneVisibilityChanged(v))"
+                           Label="Show Test Tone source" />
+              </MudItem>
               <!-- Source Gain Levels -->
               <MudItem xs="12">
                 <MudText Typo="Typo.subtitle1" Class="mt-4 mb-2">Source Levels</MudText>
@@ -2772,6 +2779,19 @@
   private float GetSourceGainValue(string sourceType)
   {
     return _sourceGainOffsets.TryGetValue(sourceType, out var gain) ? gain : 1.0f;
+  }
+
+  private void OnTestToneVisibilityChanged(bool showTestTone)
+  {
+    if (_audioPreferences == null) return;
+    if (showTestTone)
+    {
+      _audioPreferences.HiddenSources.RemoveAll(s => s.Equals("TestTone", StringComparison.OrdinalIgnoreCase));
+    }
+    else if (!_audioPreferences.HiddenSources.Contains("TestTone", StringComparer.OrdinalIgnoreCase))
+    {
+      _audioPreferences.HiddenSources.Add("TestTone");
+    }
   }
 
   private void OnSourceGainChanged(string sourceType, float gain)

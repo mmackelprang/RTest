@@ -18,6 +18,7 @@ public class RotaryEncoderActionRouter : IDisposable
   private readonly ILogger<RotaryEncoderActionRouter> _logger;
   private readonly IRotaryEncoderService _encoderService;
   private readonly Func<IAudioManager> _audioManagerFactory;
+  private readonly Func<object?>? _sleepServiceFactory;
   private readonly VisualizationModeService _vizModeService;
   private readonly IOptionsMonitor<RotaryEncoderOptions> _options;
   private bool _disposed;
@@ -38,13 +39,15 @@ public class RotaryEncoderActionRouter : IDisposable
     IRotaryEncoderService encoderService,
     Func<IAudioManager> audioManagerFactory,
     VisualizationModeService vizModeService,
-    IOptionsMonitor<RotaryEncoderOptions> options)
+    IOptionsMonitor<RotaryEncoderOptions> options,
+    Func<object?>? sleepServiceFactory = null)
   {
     _logger = logger;
     _encoderService = encoderService;
     _audioManagerFactory = audioManagerFactory;
     _vizModeService = vizModeService;
     _options = options;
+    _sleepServiceFactory = sleepServiceFactory;
 
     _encoderService.EncoderTurned += OnEncoderTurned;
     _encoderService.ButtonPressed += OnButtonPressed;
@@ -54,6 +57,10 @@ public class RotaryEncoderActionRouter : IDisposable
   {
     try
     {
+      // If sleeping, wake on any encoder input and consume the event
+      if (TryWakeFromSleep("encoder-turn"))
+        return;
+
       switch (e.EncoderIndex)
       {
         case 0: HandleVolumeTurn(e.Delta); break;
@@ -75,6 +82,10 @@ public class RotaryEncoderActionRouter : IDisposable
 
     try
     {
+      // If sleeping, wake on any encoder input and consume the event
+      if (TryWakeFromSleep("encoder-button"))
+        return;
+
       switch (e.EncoderIndex)
       {
         case 0: HandleVolumePress(); break;
@@ -87,6 +98,28 @@ public class RotaryEncoderActionRouter : IDisposable
     {
       _logger.LogError(ex, "Error handling encoder {Index} button press", e.EncoderIndex);
     }
+  }
+
+  /// <summary>
+  /// Checks if the system is sleeping and wakes it if so.
+  /// Uses reflection to avoid a hard dependency on Radio.API.Services.SleepService.
+  /// </summary>
+  private bool TryWakeFromSleep(string wakeSource)
+  {
+    var sleepService = _sleepServiceFactory?.Invoke();
+    if (sleepService == null) return false;
+
+    var type = sleepService.GetType();
+    var isSleeping = (bool?)type.GetProperty("IsSleeping")?.GetValue(sleepService);
+    if (isSleeping != true) return false;
+
+    var wakeMethod = type.GetMethod("WakeAsync");
+    if (wakeMethod != null)
+    {
+      _ = (Task)wakeMethod.Invoke(sleepService, [wakeSource])!;
+    }
+    _logger.LogInformation("Woke from sleep via {WakeSource}", wakeSource);
+    return true;
   }
 
   // --- Encoder 0: Volume ---

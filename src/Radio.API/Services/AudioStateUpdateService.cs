@@ -47,6 +47,7 @@ public class AudioStateUpdateService : BackgroundService
   private List<QueueItemDto>? _lastQueue;
   private RadioStateDto? _lastRadioState;
   private VolumeDto? _lastVolume;
+  private string? _lastActiveSourceType;
 
   /// <summary>
   /// Initializes a new instance of the AudioStateUpdateService.
@@ -167,6 +168,9 @@ public class AudioStateUpdateService : BackgroundService
     // Get current active source
     var activeSource = _audioManager.ActiveSource;
 
+    // Check source changes (broadcasts SourceChanged for UI sync)
+    await CheckSourceChangedAsync(activeSource, cancellationToken);
+
     // Check playback state changes
     await CheckPlaybackStateAsync(activeSource, cancellationToken);
 
@@ -181,6 +185,19 @@ public class AudioStateUpdateService : BackgroundService
 
     // Check volume changes
     await CheckVolumeAsync(cancellationToken);
+  }
+
+  private async Task CheckSourceChangedAsync(IAudioSource? activeSource, CancellationToken cancellationToken)
+  {
+    var currentSourceType = activeSource?.Type.ToString();
+
+    if (currentSourceType != _lastActiveSourceType)
+    {
+      _lastActiveSourceType = currentSourceType;
+      await _hubContext.Clients.All
+        .SendAsync("SourceChanged", cancellationToken);
+      _logger.LogInformation("Broadcast SourceChanged: {SourceType}", currentSourceType ?? "None");
+    }
   }
 
   private async Task CheckPlaybackStateAsync(IAudioSource? activeSource, CancellationToken cancellationToken)

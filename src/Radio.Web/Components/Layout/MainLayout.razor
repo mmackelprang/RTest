@@ -8,6 +8,7 @@
 @inject QueueApiService QueueApi
 @inject NavigationManager NavigationManager
 @inject ILogger<MainLayout> Logger
+@inject IJSRuntime JSRuntime
 @inject Radio.Web.Services.DeviceDisplayStateService DeviceDisplayState
 @inject Radio.Web.Services.RadioPanelToggleService RadioPanelToggle
 @implements IDisposable
@@ -93,6 +94,7 @@
       <MudIconButton Icon="@Icons.Material.Filled.Devices" Class="@NavClass("/devices")" Href="/devices" Size="Size.Large" title="Devices" />
       <MudIconButton Icon="@Icons.Material.Filled.History" Class="@NavClass("/history")" Href="/history" Size="Size.Large" title="History" />
       <MudIconButton Icon="@Icons.Material.Filled.Settings" Class="@NavClass("/system")" Href="/system" Size="Size.Large" title="Settings" />
+      <MudIconButton Icon="@Icons.Material.Filled.PowerSettingsNew" Class="nav-icon" Size="Size.Large" title="Sleep" OnClick="HandleSleepButtonAsync" />
     </div>
   </div>
 
@@ -178,6 +180,7 @@
       HubService.NowPlayingChanged += OnNowPlayingChanged;
       HubService.QueueChanged += OnQueueChanged;
       HubService.SourceChanged += OnSourceChanged;
+      HubService.SleepStateChanged += OnSleepStateChanged;
       DeviceDisplayState.DisplaySettingsChanged += OnDeviceDisplaySettingsChanged;
       Logger.LogDebug("MainLayout - Subscribed to audio state events");
 
@@ -682,14 +685,55 @@
 
   private async Task OnSourceChanged()
   {
-    // Refresh selected source and hide radio panel if source changed away from Radio
+    // Refresh selected source and sync radio panel with new source
     await LoadSourcesAsync();
     var activeSource = _availableSources.FirstOrDefault(s => s.Id == _selectedSourceId);
-    if (activeSource != null && !IsRadioSource(activeSource.Type))
+    if (activeSource != null)
     {
-      await RadioPanelToggle.HideRadioPanelAsync();
+      if (IsRadioSource(activeSource.Type))
+      {
+        await RadioPanelToggle.ShowRadioPanelAsync();
+      }
+      else
+      {
+        await RadioPanelToggle.HideRadioPanelAsync();
+      }
     }
     await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task OnSleepStateChanged(bool isSleeping)
+  {
+    try
+    {
+      await InvokeAsync(async () =>
+      {
+        if (isSleeping)
+        {
+          await JSRuntime.InvokeVoidAsync("radioSleepManager.enterSleep", "server");
+        }
+        else
+        {
+          await JSRuntime.InvokeVoidAsync("radioSleepManager.wake", "server");
+        }
+      });
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Error handling sleep state change");
+    }
+  }
+
+  private async Task HandleSleepButtonAsync()
+  {
+    try
+    {
+      await JSRuntime.InvokeVoidAsync("radioSleepManager.enterSleep", "button");
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Error entering sleep mode");
+    }
   }
 
   private async Task OnDeviceDisplaySettingsChanged()
@@ -719,6 +763,7 @@
     HubService.NowPlayingChanged -= OnNowPlayingChanged;
     HubService.QueueChanged -= OnQueueChanged;
     HubService.SourceChanged -= OnSourceChanged;
+    HubService.SleepStateChanged -= OnSleepStateChanged;
     DeviceDisplayState.DisplaySettingsChanged -= OnDeviceDisplaySettingsChanged;
 
     _timer?.Stop();

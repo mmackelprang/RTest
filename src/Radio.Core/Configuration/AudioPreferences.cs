@@ -63,6 +63,12 @@ public class AudioPreferences
   /// Key format: AudioSourceType.ToString() (e.g., "Radio", "FilePlayer", "Bluetooth").
   /// </summary>
   public Dictionary<string, float> SourceGainOffsets { get; set; } = new();
+
+  /// <summary>
+  /// Source types hidden from the UI source bar. Hidden sources can still be
+  /// activated via API but won't appear in the Web UI source toggle group.
+  /// </summary>
+  public List<string> HiddenSources { get; set; } = new() { "TestTone" };
 }
 
 /// <summary>
