@@ -11,6 +11,7 @@
 @inject IJSRuntime JSRuntime
 @inject Radio.Web.Services.DeviceDisplayStateService DeviceDisplayState
 @inject Radio.Web.Services.RadioPanelToggleService RadioPanelToggle
+@inject IConfiguration Configuration
 @implements IDisposable
 @implements IAsyncDisposable
 
@@ -202,6 +203,16 @@
     {
       Logger.LogError(ex, "CRITICAL: Exception in MainLayout.OnInitializedAsync - this will crash the Blazor circuit!");
       throw;
+    }
+  }
+
+  protected override async Task OnAfterRenderAsync(bool firstRender)
+  {
+    if (firstRender)
+    {
+      // Set API base URL for idle-dimmer.js sleep/wake fetch calls
+      var apiBaseUrl = Configuration["ApiBaseUrl"] ?? "http://localhost:5000";
+      await JSRuntime.InvokeVoidAsync("eval", $"window.radioApiBaseUrl = '{apiBaseUrl}'");
     }
   }
 

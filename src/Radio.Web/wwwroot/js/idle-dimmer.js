@@ -7,6 +7,10 @@
   const IDLE_TIMEOUT = 5 * 60 * 1000; // 5 minutes → dim
   const SLEEP_TIMEOUT = 30 * 60 * 1000; // 30 minutes → sleep
   const DIM_BRIGHTNESS = 0.3;
+
+  function apiUrl(path) {
+    return (window.radioApiBaseUrl || '') + path;
+  }
   let dimTimer = null;
   let sleepTimer = null;
   let dimmed = false;
@@ -64,7 +68,7 @@
 
     // Notify API to mute audio (unless triggered by server)
     if (source !== 'server') {
-      fetch('/api/system/sleep', {
+      fetch(apiUrl('/api/system/sleep'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sleep: true })
@@ -94,7 +98,7 @@
 
     // Notify API to unmute (unless triggered by server)
     if (source !== 'server') {
-      fetch('/api/system/sleep', {
+      fetch(apiUrl('/api/system/sleep'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sleep: false })
