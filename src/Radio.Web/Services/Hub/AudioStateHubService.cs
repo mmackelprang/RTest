@@ -70,14 +70,18 @@ public class AudioStateHubService : IAsyncDisposable
         .Build();
 
       // Register event handlers
-      _hubConnection.On("PlaybackStateChanged", async () =>
+      // Server sends PlaybackStateChanged with a PlaybackStateDto payload —
+      // accept and discard it so SignalR dispatches the message.
+      _hubConnection.On<object>("PlaybackStateChanged", async (_) =>
       {
         _logger.LogDebug("Received PlaybackStateChanged event");
         if (PlaybackStateChanged != null)
           await PlaybackStateChanged.Invoke();
       });
 
-      _hubConnection.On("NowPlayingChanged", async () =>
+      // Server sends NowPlayingChanged with a NowPlayingDto payload —
+      // accept and discard it so SignalR dispatches the message.
+      _hubConnection.On<object>("NowPlayingChanged", async (_) =>
       {
         _logger.LogDebug("Received NowPlayingChanged event");
         if (NowPlayingChanged != null)
@@ -227,6 +231,17 @@ public class AudioStateHubService : IAsyncDisposable
     {
       _connectionLock.Release();
     }
+  }
+
+  /// <summary>
+  /// Locally triggers the SourceChanged event without going through SignalR.
+  /// Call after a source switch API call succeeds to immediately notify
+  /// NowPlayingPanel and other subscribers (bypasses the 500ms polling delay).
+  /// </summary>
+  public async Task NotifySourceChangedAsync()
+  {
+    if (SourceChanged != null)
+      await SourceChanged.Invoke();
   }
 
   public async Task StopAsync(CancellationToken cancellationToken = default)
