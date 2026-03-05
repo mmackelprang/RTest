@@ -513,7 +513,10 @@ public class AudioStateUpdateService : BackgroundService
            previous.Equalizer != current.Equalizer ||
            previous.DeviceVolume != current.DeviceVolume ||
            previous.IsScanning != current.IsScanning ||
-           previous.ScanDirection != current.ScanDirection;
+           previous.ScanDirection != current.ScanDirection ||
+           previous.IsStereo != current.IsStereo ||
+           previous.RdsStationName != current.RdsStationName ||
+           previous.RdsProgramType != current.RdsProgramType;
   }
 
   private static bool HasVolumeChanged(VolumeDto? previous, VolumeDto? current)
@@ -647,6 +650,9 @@ public class AudioStateUpdateService : BackgroundService
       ScanStopThreshold = radioControls.ScanStopThreshold,
       AutoGain = radioControls.AutoGainEnabled,
       Gain = (int?)radioControls.Gain,
+      IsStereo = radioControls.IsStereo,
+      RdsStationName = radioControls.RdsStationName,
+      RdsProgramType = radioControls.RdsProgramType,
     };
   }
 

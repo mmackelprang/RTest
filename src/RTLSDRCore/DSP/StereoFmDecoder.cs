@@ -50,6 +50,18 @@ namespace RTLSDRCore.DSP
     public float PilotStrength => _pilotStrength;
 
     /// <summary>
+    /// Current PLL phase in radians (0 to 2π), tracking the 19 kHz pilot.
+    /// Used by RDS decoder to derive the phase-coherent 57 kHz (3× pilot) carrier.
+    /// </summary>
+    public float PllPhase => _pllPhase;
+
+    /// <summary>
+    /// Current PLL-tracked frequency in Hz (~19 kHz when locked).
+    /// Used by RDS decoder to compute the 57 kHz carrier step rate.
+    /// </summary>
+    public float PllFrequency => _pllFrequency;
+
+    /// <summary>
     /// Creates a new FM stereo decoder.
     /// </summary>
     /// <param name="sampleRate">Sample rate of the demodulated composite signal (e.g., 240000).</param>

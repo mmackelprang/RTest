@@ -31,6 +31,7 @@ namespace RTLSDRCore
         private AudioDecimator? _audioDecimator;
         private AudioDecimator? _audioDecimatorRight; // second channel for stereo
         private StereoFmDecoder? _stereoDecoder;
+        private RdsDecoder? _rdsDecoder;
         private int _sdrSampleRate;
         private int _demodSampleRate;
 
@@ -330,6 +331,7 @@ namespace RTLSDRCore
 
             if (oldFrequency != frequencyHz)
             {
+                _rdsDecoder?.Reset();
                 FrequencyChanged?.Invoke(this, new FrequencyChangedEventArgs(oldFrequency, frequencyHz));
             }
 
@@ -555,6 +557,23 @@ namespace RTLSDRCore
         /// </summary>
         public bool StereoDetected => _stereoDecoder?.StereoDetected ?? false;
 
+        /// <summary>
+        /// Gets the RDS Program Service station name (up to 8 characters), or null if not decoded.
+        /// Only available for WFM (FM broadcast) when the station transmits RDS.
+        /// </summary>
+        public string? RdsStationName => _rdsDecoder?.StationName;
+
+        /// <summary>
+        /// Gets the RDS Radio Text (up to 64 characters), or null if not decoded.
+        /// Often contains "Artist - Title" or station slogan.
+        /// </summary>
+        public string? RdsRadioText => _rdsDecoder?.RadioText;
+
+        /// <summary>
+        /// Gets the RDS Program Type name (e.g., "Rock", "News"), or null if not decoded.
+        /// </summary>
+        public string? RdsProgramTypeName => _rdsDecoder?.ProgramTypeName;
+
         /// <inheritdoc/>
         public IReadOnlyList<RadioBand> GetAvailableBands() => BandPresets.AllBands;
 
@@ -719,10 +738,12 @@ namespace RTLSDRCore
             if (_currentModulation == ModulationType.WFM)
             {
                 _stereoDecoder = new StereoFmDecoder(_demodSampleRate);
+                _rdsDecoder = new RdsDecoder(_demodSampleRate);
             }
             else
             {
                 _stereoDecoder = null;
+                _rdsDecoder = null;
             }
 
             // Step 6: De-emphasis filter (compensates FM pre-emphasis).
@@ -957,6 +978,12 @@ namespace RTLSDRCore
             if (_stereoDecoder != null)
             {
                 // === STEREO WFM PATH ===
+                // 3a-rds. Capture PLL state BEFORE stereo decode processes this block.
+                // RDS uses the same composite samples, so it needs the PLL phase at
+                // the START of the block, not the end.
+                var pllPhaseForRds = _stereoDecoder.PllPhase;
+                var pllFreqForRds = _stereoDecoder.PllFrequency;
+
                 // 3a. Stereo decode: composite MPX → interleaved L,R at demod rate.
                 // This MUST happen before de-emphasis: the 19kHz pilot and 38kHz
                 // subcarrier would be killed by the de-emphasis IIR.
@@ -967,6 +994,12 @@ namespace RTLSDRCore
                 _stereoDecoder.Decode(
                     _demodBuffer.AsSpan(0, demodCount),
                     _stereoDemodBuffer.AsSpan(0, demodCount * 2));
+
+                // RDS decode runs on the same composite signal, using the PLL phase
+                // captured before stereo decode advanced it.
+                _rdsDecoder?.Process(
+                    _demodBuffer.AsSpan(0, demodCount), demodCount,
+                    pllPhaseForRds, pllFreqForRds);
 
                 // 3b. De-emphasis per channel: de-interleave → process → re-interleave.
                 // DeEmphasisFilter.Process works in-place on contiguous spans, so we

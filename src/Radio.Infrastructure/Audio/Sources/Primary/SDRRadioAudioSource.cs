@@ -472,6 +472,12 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   public bool IsStereo => _radioReceiver.StereoDetected; // true when 19 kHz pilot detected
 
   /// <inheritdoc/>
+  public string? RdsStationName => _radioReceiver.RdsStationName;
+
+  /// <inheritdoc/>
+  public string? RdsProgramType => _radioReceiver.RdsProgramTypeName;
+
+  /// <inheritdoc/>
   public Task<bool> GetPowerStateAsync(CancellationToken cancellationToken = default)
   {
     return Task.FromResult(_radioReceiver.IsRunning);
