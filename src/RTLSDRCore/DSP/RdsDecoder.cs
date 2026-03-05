@@ -21,22 +21,40 @@ public class RdsDecoder
 
   private readonly int _sampleRate;
   private readonly BandPassFilter _rdsBpf;
-  private readonly LowPassFilter _basebandLpf;
+  private readonly LowPassFilter _basebandLpfI; // in-phase (data) channel
+  private readonly LowPassFilter _basebandLpfQ; // quadrature channel (for Costas loop)
 
-  // BPSK carrier phase accumulator (seeded from stereo PLL at 3×)
-  private float _carrierPhase;
-  private float _carrierFrequency;
+  // Costas loop carrier recovery for 57 kHz RDS subcarrier.
+  // Tracks both phase and frequency independently.
+  // Initialized from 3× PLL frequency, then free-runs with corrections.
+  private float _costasPhase;       // carrier phase (radians)
+  private float _costasFreq;        // carrier frequency (Hz)
+  private bool _costasInitialized;
+  private readonly float _costasAlpha; // proportional gain
+  private readonly float _costasBeta;  // integral gain
 
-  // Clock recovery NCO at 1187.5 baud
+  // Clock recovery NCO — runs at CHIP rate (2× baud) because RDS uses biphase coding.
+  // Each data bit is encoded as two chips of opposite polarity (Manchester encoding).
   private const float BaudRate = 1187.5f;
+  private const float ChipRate = BaudRate * 2f; // 2375 chips/sec
   private float _clockPhase;
   private float _clockPhaseStep;
-  private float _integrator;
+  private float _integratorI;  // in-phase integrator (chip decisions)
   private float _previousSample; // for zero-crossing detection
   private int _previousSymbol;
 
   // Differential decoding
   private bool _hasPreviousSymbol;
+
+  // Biphase (Manchester) decoding — each data bit = 2 chips of opposite polarity.
+  // The data is encoded in the TRANSITION between consecutive chips.
+  private float _prevChipValue;         // previous chip integrator output
+  private int _chipClock;               // alternates 0/1 for clock/data chip detection
+  private int _chipClockPolarity;       // which phase (0 or 1) carries data transitions
+  private float _evenChipMagSum;        // magnitude sum for even-indexed chip transitions
+  private float _oddChipMagSum;         // magnitude sum for odd-indexed chip transitions
+  private int _chipWindowCount;         // chips counted in current polarity detection window
+  private const int ChipWindowSize = 128; // chips per polarity detection cycle
 
   // Block sync: 26-bit shift register (16 data + 10 CRC/offset)
   private uint _shiftRegister;
@@ -45,8 +63,19 @@ public class RdsDecoder
   private int _syncConfirmCount;
   private int _blockIndex; // 0=A, 1=B, 2=C, 3=D within a group
   private int _goodBlockRun;
+  private int _badBlockCount;  // consecutive bad blocks in Synced state
   private const int SyncConfirmThreshold = 4; // consecutive good blocks to confirm sync
   private const int SyncLossThreshold = 8;    // consecutive bad blocks to lose sync
+
+  // Diagnostics
+  private int _totalBitsProcessed;
+  private int _searchMatchCount;  // false matches in Searching
+  private DateTime _lastDiagTime = DateTime.MinValue;
+  private float _rdsSignalLevel;  // smoothed RDS subcarrier level after BPF
+  private float _basebandLevel;   // smoothed baseband level after demod + LPF
+  private float _symbolRate;      // measured symbols per second
+  private int _symbolCount;       // symbols decoded since last diag
+  private DateTime _lastSymbolCountTime = DateTime.MinValue;
 
   // Group assembly
   private readonly ushort[] _groupBlocks = new ushort[4]; // A, B, C, D data words
@@ -142,10 +171,19 @@ public class RdsDecoder
     // 57 kHz BPF to isolate RDS subcarrier (55-59 kHz, 127 taps)
     _rdsBpf = new BandPassFilter(sampleRate, 55000f, 59000f, taps: 127);
 
-    // Baseband LPF after BPSK demod — pass up to ~2.4 kHz (2× baud rate)
-    _basebandLpf = new LowPassFilter(sampleRate, 2400f, taps: 65);
+    // Baseband LPFs after BPSK demod — I (data) and Q (Costas loop)
+    _basebandLpfI = new LowPassFilter(sampleRate, 2400f, taps: 65);
+    _basebandLpfQ = new LowPassFilter(sampleRate, 2400f, taps: 65);
 
-    _clockPhaseStep = BaudRate / sampleRate;
+    _clockPhaseStep = ChipRate / sampleRate; // ~2375/240000 ≈ 101 samples/chip
+
+    // Costas loop: locks to the RDS subcarrier's actual phase.
+    // Bandwidth ~30 Hz — fast enough to acquire within ~15ms,
+    // narrow enough not to track data transitions at 1187.5 baud.
+    var costasOmega = 2.0f * MathF.PI * 30f / sampleRate;
+    var costasDamping = 0.707f; // critically damped
+    _costasAlpha = 2.0f * costasDamping * costasOmega;
+    _costasBeta = costasOmega * costasOmega;
   }
 
   /// <summary>
@@ -158,30 +196,77 @@ public class RdsDecoder
   /// <param name="pllFrequency">Current PLL frequency from StereoFmDecoder (~19 kHz).</param>
   public void Process(ReadOnlySpan<float> composite, int count, float pllPhase, float pllFrequency)
   {
-    // Seed our 57 kHz carrier from the stereo PLL's 19 kHz tracking.
-    // We run our own accumulator seeded at block start to avoid per-sample
-    // property reads and allow proper phase stepping.
-    _carrierPhase = pllPhase * 3.0f;
-    _carrierFrequency = pllFrequency * 3.0f;
-    var carrierStep = 2.0f * MathF.PI * _carrierFrequency / _sampleRate;
+    // Initialize Costas loop frequency from the stereo PLL (once).
+    // After that, the Costas loop tracks both frequency and phase independently.
+    if (!_costasInitialized)
+    {
+      _costasFreq = pllFrequency * 3.0f; // ~57000 Hz
+      _costasInitialized = true;
+    }
 
     for (int i = 0; i < count; i++)
     {
       // 1. BPF to isolate 57 kHz RDS subcarrier
       var filtered = _rdsBpf.Process(composite[i]);
 
-      // 2. BPSK demodulation: multiply by coherent 57 kHz carrier
-      var demodulated = filtered * MathF.Cos(_carrierPhase);
+      // Track RDS subcarrier signal level (smoothed absolute value)
+      _rdsSignalLevel += 0.0001f * (MathF.Abs(filtered) - _rdsSignalLevel);
 
-      // Advance carrier phase
-      _carrierPhase += carrierStep;
-      if (_carrierPhase > 2.0f * MathF.PI) _carrierPhase -= 2.0f * MathF.PI;
+      // 2. Costas loop BPSK demodulation.
+      // The Costas loop simultaneously tracks carrier phase AND frequency,
+      // independent of the stereo PLL. This avoids phase ambiguity issues
+      // from the 3× PLL phase multiplication.
+      var demodI = filtered * MathF.Cos(_costasPhase);
+      var demodQ = filtered * -MathF.Sin(_costasPhase);
 
-      // 3. Baseband LPF to remove double-frequency component
-      var baseband = _basebandLpf.Process(demodulated);
+      // 3. Baseband LPFs to remove double-frequency components
+      var basebandI = _basebandLpfI.Process(demodI);
+      var basebandQ = _basebandLpfQ.Process(demodQ);
 
-      // 4. Clock recovery + symbol decision
-      ProcessClockRecovery(baseband);
+      // Track baseband I-channel signal level
+      _basebandLevel += 0.0001f * (MathF.Abs(basebandI) - _basebandLevel);
+
+      // 4. Costas loop error: normalized I*Q for BPSK.
+      // sin(2δ)/2 where δ = phase error. Drives δ → 0 or π (both valid for BPSK).
+      var power = basebandI * basebandI + basebandQ * basebandQ;
+      var phaseError = power > 1e-10f
+        ? basebandI * basebandQ / power
+        : 0f;
+
+      // Update Costas loop (2nd order PLL)
+      _costasFreq += _costasBeta * phaseError;
+      _costasPhase += 2.0f * MathF.PI * _costasFreq / _sampleRate
+                      + _costasAlpha * phaseError;
+
+      // Keep phase in [0, 2π)
+      if (_costasPhase > 2.0f * MathF.PI) _costasPhase -= 2.0f * MathF.PI;
+      else if (_costasPhase < 0) _costasPhase += 2.0f * MathF.PI;
+
+      // 5. Clock recovery + symbol decision (uses I channel — the data channel)
+      ProcessClockRecovery(basebandI);
+    }
+
+    // Periodic diagnostic logging (every 30 seconds)
+    var now = DateTime.UtcNow;
+    if ((now - _lastDiagTime).TotalSeconds >= 30)
+    {
+      if (_lastSymbolCountTime != DateTime.MinValue)
+      {
+        var elapsed = (now - _lastSymbolCountTime).TotalSeconds;
+        _symbolRate = elapsed > 0 ? (float)(_symbolCount / elapsed) : 0;
+      }
+      _lastSymbolCountTime = now;
+      _symbolCount = 0;
+      _lastDiagTime = now;
+      Logger.Debug(
+        "RDS diag: bpfLevel={BpfLevel:F6}, basebandLevel={BasebandLevel:F6}, " +
+        "symbolRate={SymbolRate:F1}/s, syncState={SyncState}, " +
+        "validBlocks={ValidBlocks}, searchMatches={SearchMatches}, " +
+        "costasFreq={CostasFreq:F1} Hz, costasPhase={CostasPhase:F3} rad",
+        _rdsSignalLevel, _basebandLevel,
+        _symbolRate, _syncState,
+        _validBlockCount, _searchMatchCount,
+        _costasFreq, _costasPhase);
     }
   }
 
@@ -191,19 +276,37 @@ public class RdsDecoder
   public void Reset()
   {
     _rdsBpf.Reset();
-    _basebandLpf.Reset();
-    _carrierPhase = 0;
+    _basebandLpfI.Reset();
+    _basebandLpfQ.Reset();
+    _costasPhase = 0;
+    _costasFreq = 57000f;
+    _costasInitialized = false;
     _clockPhase = 0;
-    _integrator = 0;
+    _integratorI = 0;
     _previousSample = 0;
     _previousSymbol = 0;
     _hasPreviousSymbol = false;
+    _prevChipValue = 0;
+    _chipClock = 0;
+    _chipClockPolarity = 0;
+    _evenChipMagSum = 0;
+    _oddChipMagSum = 0;
+    _chipWindowCount = 0;
     _shiftRegister = 0;
     _bitsReceived = 0;
     _syncState = SyncState.Searching;
     _syncConfirmCount = 0;
     _blockIndex = 0;
     _goodBlockRun = 0;
+    _badBlockCount = 0;
+    _totalBitsProcessed = 0;
+    _searchMatchCount = 0;
+    _rdsSignalLevel = 0;
+    _basebandLevel = 0;
+    _symbolRate = 0;
+    _symbolCount = 0;
+    _lastDiagTime = DateTime.MinValue;
+    _lastSymbolCountTime = DateTime.MinValue;
     Array.Clear(_groupBlocks);
     Array.Clear(_psChars);
     Array.Clear(_psCharConfidence);
@@ -227,26 +330,69 @@ public class RdsDecoder
 
   private void ProcessClockRecovery(float sample)
   {
-    // Zero-crossing based timing adjustment
+    // Zero-crossing based timing adjustment.
+    // Transitions should align with chip boundaries (clockPhase ≈ 0).
     if ((_previousSample > 0 && sample <= 0) || (_previousSample < 0 && sample >= 0))
     {
-      // Zero crossing detected — adjust clock phase toward 0.5 (mid-symbol)
-      var phaseError = _clockPhase - 0.5f;
+      // Zero crossing = chip boundary → clock phase should be near 0 (not 0.5)
+      var phaseError = _clockPhase > 0.5f ? (_clockPhase - 1.0f) : _clockPhase;
       _clockPhase -= phaseError * 0.05f; // gentle correction
     }
 
-    // Accumulate for matched filter (integrate over symbol period)
-    _integrator += sample;
+    // Accumulate for matched filter (integrate over one chip period)
+    _integratorI += sample;
 
-    // Advance clock
+    // Advance clock at chip rate (2375 Hz = 2× baud rate)
     _clockPhase += _clockPhaseStep;
 
     if (_clockPhase >= 1.0f)
     {
-      // Symbol boundary — make decision
+      // Chip boundary — dump integrator and decode
       _clockPhase -= 1.0f;
-      var symbol = _integrator >= 0 ? 1 : 0;
-      _integrator = 0;
+      var chipValue = _integratorI;
+      _integratorI = 0;
+
+      ProcessChip(chipValue);
+    }
+
+    _previousSample = sample;
+  }
+
+  private void ProcessChip(float chipValue)
+  {
+    // Biphase (Manchester) decoding:
+    // Each RDS data bit is encoded as two chips with opposite polarity.
+    // The data is carried by the TRANSITION between consecutive chips.
+    // diff = chip[n] - chip[n-1]: large magnitude at data edges, small at clock edges.
+    var biphaseValue = chipValue - _prevChipValue;
+    _prevChipValue = chipValue;
+
+    // Track transition magnitudes to detect clock polarity.
+    // Data transitions have consistently larger magnitudes than clock transitions.
+    var mag = MathF.Abs(biphaseValue);
+    if (_chipClock % 2 == 0)
+      _evenChipMagSum += mag;
+    else
+      _oddChipMagSum += mag;
+
+    _chipWindowCount++;
+    if (_chipWindowCount >= ChipWindowSize)
+    {
+      // Require 20% margin to switch polarity (avoid flapping)
+      if (_evenChipMagSum > _oddChipMagSum * 1.2f)
+        _chipClockPolarity = 0;
+      else if (_oddChipMagSum > _evenChipMagSum * 1.2f)
+        _chipClockPolarity = 1;
+      _evenChipMagSum = 0;
+      _oddChipMagSum = 0;
+      _chipWindowCount = 0;
+    }
+
+    // Output a data bit only on the data-carrying phase
+    if (_chipClock % 2 == _chipClockPolarity)
+    {
+      _symbolCount++; // count data bits for rate diagnostics
+      var symbol = biphaseValue >= 0 ? 1 : 0;
 
       // Differential decoding: bit = currentSymbol XOR previousSymbol
       if (_hasPreviousSymbol)
@@ -258,7 +404,7 @@ public class RdsDecoder
       _hasPreviousSymbol = true;
     }
 
-    _previousSample = sample;
+    _chipClock = (_chipClock + 1) % 2;
   }
 
   private void ProcessBit(int bit)
@@ -266,23 +412,28 @@ public class RdsDecoder
     // Shift in the new bit
     _shiftRegister = ((_shiftRegister << 1) | (uint)bit) & 0x03FFFFFF; // 26 bits
     _bitsReceived++;
+    _totalBitsProcessed++;
 
     switch (_syncState)
     {
       case SyncState.Searching:
-        // Try all four offset words to find sync
+        // Try all four offset words to find sync (checks every bit position)
         if (_bitsReceived >= 26)
         {
           for (int offset = 0; offset < 4; offset++)
           {
             if (CheckSyndrome(_shiftRegister, offset))
             {
+              _searchMatchCount++;
               _syncState = SyncState.Confirming;
               _blockIndex = (offset + 1) % 4; // next expected block
               _syncConfirmCount = 1;
               _goodBlockRun = 1;
               _bitsReceived = 0;
-              ExtractBlockData(offset);
+              // Store the block data but do NOT call ProcessGroup —
+              // we don't have enough confirmed blocks yet
+              StoreBlockData(offset);
+              Logger.Debug("RDS: Potential sync at block {Block}, entering Confirming", offset);
               return;
             }
           }
@@ -295,23 +446,32 @@ public class RdsDecoder
           _bitsReceived = 0;
           if (CheckSyndrome(_shiftRegister, _blockIndex))
           {
-            ExtractBlockData(_blockIndex);
+            StoreBlockData(_blockIndex);
             _syncConfirmCount++;
             _goodBlockRun++;
             if (_syncConfirmCount >= SyncConfirmThreshold)
             {
               _syncState = SyncState.Synced;
+              _badBlockCount = 0;  // fresh counter for synced state
               _goodBlockRun = 0;
               if (!_syncAcquiredLogged)
               {
                 _syncAcquiredLogged = true;
-                Logger.Information("RDS: Block sync acquired after {Blocks} valid blocks", _validBlockCount);
+                Logger.Information("RDS: Block sync acquired after {Confirms} confirmed blocks " +
+                  "(total valid={ValidBlocks}, searchMatches={SearchMatches})",
+                  _syncConfirmCount, _validBlockCount, _searchMatchCount);
+              }
+              else
+              {
+                Logger.Debug("RDS: Block sync re-acquired");
               }
             }
           }
           else
           {
             // Bad block — reset to searching
+            Logger.Debug("RDS: Confirming failed at block {Block} (had {Count} good), back to Searching",
+              _blockIndex, _syncConfirmCount);
             _syncState = SyncState.Searching;
             _syncConfirmCount = 0;
             _goodBlockRun = 0;
@@ -326,18 +486,27 @@ public class RdsDecoder
           _bitsReceived = 0;
           if (CheckSyndrome(_shiftRegister, _blockIndex))
           {
-            ExtractBlockData(_blockIndex);
+            StoreBlockData(_blockIndex);
             _goodBlockRun++;
+            _badBlockCount = 0; // reset consecutive bad block counter
+
+            // Only process groups in Synced state to avoid stale data.
+            // Block D (index 3) completes a group.
+            if (_blockIndex == 3)
+            {
+              ProcessGroup();
+            }
           }
           else
           {
             _goodBlockRun = 0;
-            // Count consecutive failures
-            if (++_syncConfirmCount >= SyncLossThreshold)
+            _badBlockCount++;
+            if (_badBlockCount >= SyncLossThreshold)
             {
-              Logger.Debug("RDS: Block sync lost after {Failures} consecutive bad blocks", SyncLossThreshold);
+              Logger.Information("RDS: Block sync lost after {Failures} consecutive bad blocks", _badBlockCount);
               _syncState = SyncState.Searching;
               _syncConfirmCount = 0;
+              _badBlockCount = 0;
             }
           }
           _blockIndex = (_blockIndex + 1) % 4;
@@ -346,23 +515,11 @@ public class RdsDecoder
     }
   }
 
-  private void ExtractBlockData(int blockIndex)
+  private void StoreBlockData(int blockIndex)
   {
     _validBlockCount++;
     var dataWord = (ushort)(_shiftRegister >> 10); // upper 16 bits are data
     _groupBlocks[blockIndex] = dataWord;
-
-    // Block A always carries PI code
-    if (blockIndex == 0)
-    {
-      UpdatePiCode(dataWord);
-    }
-
-    // When we have block D (index 3), a complete group is assembled
-    if (blockIndex == 3)
-    {
-      ProcessGroup();
-    }
   }
 
   private void UpdatePiCode(ushort piCode)
@@ -380,6 +537,9 @@ public class RdsDecoder
 
   private void ProcessGroup()
   {
+    // Block A carries PI code
+    UpdatePiCode(_groupBlocks[0]);
+
     var blockB = _groupBlocks[1];
     var groupType = (blockB >> 12) & 0x0F;     // bits 15-12: group type (0-15)
     var versionB = ((blockB >> 11) & 0x01) == 1; // bit 11: 0=A, 1=B

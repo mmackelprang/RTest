@@ -978,6 +978,12 @@ namespace RTLSDRCore
             if (_stereoDecoder != null)
             {
                 // === STEREO WFM PATH ===
+                // 3a-rds. Capture PLL state BEFORE stereo decode processes this block.
+                // RDS uses the same composite samples, so it needs the PLL phase at
+                // the START of the block, not the end.
+                var pllPhaseForRds = _stereoDecoder.PllPhase;
+                var pllFreqForRds = _stereoDecoder.PllFrequency;
+
                 // 3a. Stereo decode: composite MPX → interleaved L,R at demod rate.
                 // This MUST happen before de-emphasis: the 19kHz pilot and 38kHz
                 // subcarrier would be killed by the de-emphasis IIR.
@@ -989,11 +995,11 @@ namespace RTLSDRCore
                     _demodBuffer.AsSpan(0, demodCount),
                     _stereoDemodBuffer.AsSpan(0, demodCount * 2));
 
-                // 3a-rds. RDS decode runs on the same composite signal, using PLL
-                // phase from the just-completed stereo decode block.
+                // RDS decode runs on the same composite signal, using the PLL phase
+                // captured before stereo decode advanced it.
                 _rdsDecoder?.Process(
                     _demodBuffer.AsSpan(0, demodCount), demodCount,
-                    _stereoDecoder.PllPhase, _stereoDecoder.PllFrequency);
+                    pllPhaseForRds, pllFreqForRds);
 
                 // 3b. De-emphasis per channel: de-interleave → process → re-interleave.
                 // DeEmphasisFilter.Process works in-place on contiguous spans, so we

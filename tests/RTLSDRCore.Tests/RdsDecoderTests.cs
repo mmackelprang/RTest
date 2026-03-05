@@ -281,9 +281,26 @@ public class RdsDecoderTests
       prevSymbol = symbols[i];
     }
 
-    // Modulate: BPSK on 57 kHz carrier at the given sample rate
-    var samplesPerSymbol = (float)SampleRate / BaudRate;
-    var totalSamples = (int)(symbols.Length * samplesPerSymbol) + SampleRate; // extra 1s for filter settling
+    // Biphase (Manchester) encoding: each diff-encoded symbol → 2 chips of opposite polarity.
+    // This matches the RDS standard where each bit period contains two half-periods.
+    var chips = new List<int>();
+    for (int i = 0; i < symbols.Length; i++)
+    {
+      if (symbols[i] == 1)
+      {
+        chips.Add(1);   // first half positive
+        chips.Add(-1);  // second half negative
+      }
+      else
+      {
+        chips.Add(-1);  // first half negative
+        chips.Add(1);   // second half positive
+      }
+    }
+
+    // Modulate: BPSK on 57 kHz carrier at the given sample rate, one chip per half-symbol
+    var samplesPerChip = (float)SampleRate / (BaudRate * 2); // ~101 samples/chip
+    var totalSamples = (int)(chips.Count * samplesPerChip) + SampleRate; // extra 1s for filter settling
     var composite = new float[totalSamples];
 
     // Pre-fill with carrier (no data) for filter settling
@@ -294,12 +311,12 @@ public class RdsDecoderTests
       composite[i] = 0.05f * MathF.Cos(TwoPi * RdsCarrierFrequency * t);
     }
 
-    // Modulate data symbols
-    for (int sym = 0; sym < symbols.Length; sym++)
+    // Modulate biphase chips
+    for (int chip = 0; chip < chips.Count; chip++)
     {
-      var amplitude = symbols[sym] == 1 ? 0.05f : -0.05f;
-      var startSample = settlingLength + (int)(sym * samplesPerSymbol);
-      var endSample = settlingLength + (int)((sym + 1) * samplesPerSymbol);
+      var amplitude = chips[chip] == 1 ? 0.05f : -0.05f;
+      var startSample = settlingLength + (int)(chip * samplesPerChip);
+      var endSample = settlingLength + (int)((chip + 1) * samplesPerChip);
       endSample = Math.Min(endSample, totalSamples);
 
       for (int i = startSample; i < endSample; i++)
