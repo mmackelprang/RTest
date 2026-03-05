@@ -115,6 +115,9 @@ public class AudioEngineInitializationService : IHostedService
         await _audioManager.InitializeAsync(cancellationToken);
       }
 
+      // Activate persisted audio source (after volume is restored so audio starts at correct level)
+      await ActivatePersistedSourceAsync(cancellationToken);
+
       // Pre-warm Bluetooth source if configured (creates source without switching to it)
       if (_bluetoothAutoSwitch != null)
       {
@@ -220,22 +223,49 @@ public class AudioEngineInitializationService : IHostedService
         }
       }
       
-      // Determine which source to activate
-      var sourceToActivate = !string.IsNullOrEmpty(prefs.CurrentSource) 
-        ? prefs.CurrentSource 
-        : "Radio"; // Default to Radio if no preference
-      
-      _logger.LogInformation("Startup audio source: {SourceType} (from {Origin})",
-        sourceToActivate,
-        !string.IsNullOrEmpty(prefs.CurrentSource) ? "preferences" : "default");
-      
-      // Note: Actual source activation would require IAudioManager or source factory
-      // For now, we log the intent. The MainLayout will handle initial source selection.
-      _logger.LogInformation("Audio startup configuration applied. Source activation deferred to UI.");
+      _logger.LogInformation("Audio startup output configuration applied");
     }
     catch (Exception ex)
     {
       _logger.LogWarning(ex, "Failed to apply startup preferences");
+    }
+  }
+
+  /// <summary>
+  /// Activates the last-used audio source on startup. Falls back to Radio if no preference exists.
+  /// Must be called AFTER AudioManager.InitializeAsync() so volume is restored before audio starts.
+  /// </summary>
+  private async Task ActivatePersistedSourceAsync(CancellationToken cancellationToken)
+  {
+    if (_audioManager == null)
+    {
+      _logger.LogDebug("AudioManager not available, skipping source activation on startup");
+      return;
+    }
+
+    try
+    {
+      var prefs = _audioPreferences.CurrentValue;
+      var sourceToActivate = !string.IsNullOrEmpty(prefs.CurrentSource)
+        ? prefs.CurrentSource
+        : "Radio";
+
+      if (!Enum.TryParse<AudioSourceType>(sourceToActivate, true, out var sourceType))
+      {
+        _logger.LogWarning("Invalid persisted source type '{Source}', falling back to Radio", sourceToActivate);
+        sourceType = AudioSourceType.Radio;
+      }
+
+      _logger.LogInformation("Activating persisted source: {SourceType} (from {Origin})",
+        sourceType,
+        !string.IsNullOrEmpty(prefs.CurrentSource) ? "preferences" : "default");
+
+      await _audioManager.GetOrCreateSourceAsync(sourceType, switchToSource: true, cancellationToken);
+      _logger.LogInformation("Source {SourceType} activated on startup", sourceType);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to activate persisted source, UI will handle default selection");
     }
   }
 

@@ -15,12 +15,35 @@ class VirtualKeyboard {
     this.keyboardElement.id = 'virtual-keyboard';
     this.keyboardElement.className = 'virtual-keyboard-container';
     this.keyboardElement.style.display = 'none';
-    
+
     this.keyboardElement.innerHTML = this.getKeyboardHTML();
     document.body.appendChild(this.keyboardElement);
-    
+
     // Add event listeners
     this.attachEventListeners();
+
+    // Auto-show keyboard when inputs inside dialog overlays receive focus
+    document.addEventListener('focusin', (e) => {
+      const input = e.target;
+      if ((input.tagName === 'INPUT' || input.tagName === 'TEXTAREA') &&
+          input.closest('.mud-overlay, .mud-dialog')) {
+        this.show(input);
+      }
+    });
+
+    // Auto-hide when focus leaves all inputs (but not when clicking keyboard keys)
+    document.addEventListener('focusout', (e) => {
+      setTimeout(() => {
+        const active = document.activeElement;
+        if (!active ||
+            (active.tagName !== 'INPUT' && active.tagName !== 'TEXTAREA' &&
+             !active.closest('#virtual-keyboard'))) {
+          if (this.isVisible && !this.keyboardElement.contains(document.activeElement)) {
+            this.hide();
+          }
+        }
+      }, 100);
+    });
   }
 
   getKeyboardHTML() {
@@ -251,7 +274,8 @@ class VirtualKeyboard {
     this.currentInput = inputElement;
     this.keyboardElement.style.display = 'block';
     this.isVisible = true;
-    
+    document.body.classList.add('keyboard-active');
+
     // Add active class for animations
     setTimeout(() => {
       this.keyboardElement.classList.add('active');
@@ -260,13 +284,14 @@ class VirtualKeyboard {
 
   hide() {
     this.keyboardElement.classList.remove('active');
-    
+    document.body.classList.remove('keyboard-active');
+
     setTimeout(() => {
       this.keyboardElement.style.display = 'none';
       this.isVisible = false;
       this.currentInput = null;
       this.capsLock = false;
-      
+
       // Reset shift button
       const shiftButton = this.keyboardElement.querySelector('[data-action="shift"]');
       if (shiftButton) {
