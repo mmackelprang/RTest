@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Events;
+using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 
@@ -29,6 +30,10 @@ public sealed class BackgroundIdentificationService : BackgroundService
 
   // On-demand identification trigger — cancels the current delay to identify immediately
   private CancellationTokenSource? _delayCts;
+
+  // SongRec exponential backoff — increases delay after consecutive failures
+  private int _consecutiveSongRecFailures;
+  private static readonly int[] BackoffSeconds = [15, 30, 60, 120];
 
   // --- Fingerprint status tracking ---
   private readonly object _statusLock = new();
@@ -155,9 +160,16 @@ public sealed class BackgroundIdentificationService : BackgroundService
         UpdatePhase(FingerprintPhase.Idle);
         using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         _delayCts = delayCts;
-        await Task.Delay(
-          TimeSpan.FromSeconds(_options.IdentificationIntervalSeconds),
-          delayCts.Token);
+
+        var delaySeconds = _options.IdentificationIntervalSeconds;
+        if (_consecutiveSongRecFailures > 0)
+        {
+          delaySeconds = BackoffSeconds[Math.Min(_consecutiveSongRecFailures - 1, BackoffSeconds.Length - 1)];
+          _logger.LogDebug("SongRec backoff: {BackoffSeconds}s after {Failures} consecutive failures",
+            delaySeconds, _consecutiveSongRecFailures);
+        }
+
+        await Task.Delay(TimeSpan.FromSeconds(delaySeconds), delayCts.Token);
         _delayCts = null;
       }
       catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
@@ -207,18 +219,21 @@ public sealed class BackgroundIdentificationService : BackgroundService
     EnsureCurrentEvent(sourceName, sourceType);
     UpdatePhase(FingerprintPhase.Capturing);
 
-    FingerprintData fingerprint;
-    AudioSampleBuffer? capturedSamples = null; // Kept for SongRec fallback on live sources
+    MetadataLookupResult? result = null;
+    double lookupElapsed = 0;
 
-    // For file-based sources, fingerprint the actual file to get correct track duration.
-    // AcoustID requires duration within ~3s of the real track length to match.
+    // Branch on source type: file sources use AcoustID, live sources use SongRec directly.
+    // SongRec consistently outperforms AcoustID for live audio (vinyl, radio, BT, USB)
+    // where the full track duration is unknown. AcoustID works well for file sources
+    // where Chromaprint can fingerprint the entire track with correct duration.
     var sourceFilePath = audioTap.SourceFilePath;
     if (!string.IsNullOrEmpty(sourceFilePath))
     {
+      // --- FILE SOURCE: Chromaprint → AcoustID (unchanged) ---
       _logger.LogDebug("File source detected, fingerprinting file directly: {FilePath}", sourceFilePath);
       UpdatePhase(FingerprintPhase.Fingerprinting);
       var fingerprintStartTime = DateTime.UtcNow;
-      fingerprint = await fingerprintService.GenerateFingerprintFromFileAsync(sourceFilePath, ct);
+      var fingerprint = await fingerprintService.GenerateFingerprintFromFileAsync(sourceFilePath, ct);
       var fingerprintElapsed = (DateTime.UtcNow - fingerprintStartTime).TotalMilliseconds;
 
       if (string.IsNullOrEmpty(fingerprint.ChromaprintHash))
@@ -231,14 +246,25 @@ public sealed class BackgroundIdentificationService : BackgroundService
       RecordFingerprintGenerated();
       _logger.LogDebug("Generated fingerprint {Id} from file (duration={Duration}s) in {Elapsed}ms",
         fingerprint.Id, fingerprint.DurationSeconds, fingerprintElapsed);
+
+      // AcoustID lookup
+      UpdatePhase(FingerprintPhase.Querying);
+      var lookupStartTime = DateTime.UtcNow;
+      _logger.LogDebug("Looking up fingerprint via {LookupService}", lookupService.GetType().Name);
+
+      RecordMetadataCall();
+      result = await lookupService.LookupAsync(fingerprint, ct);
+      lookupElapsed = (DateTime.UtcNow - lookupStartTime).TotalMilliseconds;
+
+      _logger.LogDebug("Lookup completed in {Elapsed}ms. Match={IsMatch}, Confidence={Confidence}",
+        lookupElapsed, result?.IsMatch ?? false, result?.Confidence);
     }
     else
     {
-      // For non-file sources (radio, vinyl, Bluetooth), capture from the output tap.
-      // Note: AcoustID matching may be limited since we can't determine the full track duration.
+      // --- LIVE SOURCE: Capture → SongRec directly (skip Chromaprint/AcoustID) ---
       var captureStartTime = DateTime.UtcNow;
       var sampleDuration = TimeSpan.FromSeconds(_options.SampleDurationSeconds);
-      _logger.LogDebug("Attempting to capture {Duration}s of audio", sampleDuration.TotalSeconds);
+      _logger.LogDebug("Attempting to capture {Duration}s of audio for SongRec", sampleDuration.TotalSeconds);
 
       var samples = await audioTap.CaptureAsync(sampleDuration, ct);
       var captureElapsed = (DateTime.UtcNow - captureStartTime).TotalMilliseconds;
@@ -251,110 +277,75 @@ public sealed class BackgroundIdentificationService : BackgroundService
       }
 
       _logger.LogDebug("Captured {SampleCount} audio samples in {Elapsed}ms", samples.Samples.Length, captureElapsed);
-      capturedSamples = samples; // Save for SongRec fallback
 
-      UpdatePhase(FingerprintPhase.Fingerprinting);
-      var fingerprintStartTime = DateTime.UtcNow;
-      fingerprint = await fingerprintService.GenerateFingerprintAsync(samples, ct);
-      var fingerprintElapsed = (DateTime.UtcNow - fingerprintStartTime).TotalMilliseconds;
-
-      RecordFingerprintGenerated();
-      _logger.LogDebug("Generated fingerprint {Id} for {Duration}s of audio in {Elapsed}ms",
-        fingerprint.Id, fingerprint.DurationSeconds, fingerprintElapsed);
-
-      _logger.LogInformation(
-        "Live source fingerprint: duration={Duration}s, hash length={HashLength} chars",
-        fingerprint.DurationSeconds, fingerprint.ChromaprintHash.Length);
-    }
-
-    // Lookup metadata — for live sources, try multiple duration values if the initial
-    // lookup fails. AcoustID uses duration to narrow the search space, and for live
-    // captures (vinyl, radio) the capture duration (e.g., 30s) doesn't match the actual
-    // track length in the database (e.g., 220s). Try common song durations as fallbacks.
-    UpdatePhase(FingerprintPhase.Querying);
-    var lookupStartTime = DateTime.UtcNow;
-    _logger.LogDebug("Looking up fingerprint via {LookupService}", lookupService.GetType().Name);
-
-    RecordMetadataCall();
-    var result = await lookupService.LookupAsync(fingerprint, ct);
-    var lookupElapsed = (DateTime.UtcNow - lookupStartTime).TotalMilliseconds;
-
-    _logger.LogDebug("Lookup completed in {Elapsed}ms. Match={IsMatch}, Confidence={Confidence}",
-      lookupElapsed, result?.IsMatch ?? false, result?.Confidence);
-
-    // For live sources: if no match with actual capture duration, try common song durations
-    if (result?.IsMatch != true && string.IsNullOrEmpty(sourceFilePath))
-    {
-      int[] fallbackDurations = [180, 210, 240, 270, 300];
-      foreach (var tryDuration in fallbackDurations)
+      // Go directly to SongRec — skip Chromaprint fingerprinting and AcoustID entirely
+      var songRec = scope.ServiceProvider.GetService<ISongRecRecognitionService>();
+      if (songRec is not { IsAvailable: true })
       {
-        if (tryDuration == fingerprint.DurationSeconds) continue;
-
-        var fallbackFingerprint = new FingerprintData
-        {
-          Id = fingerprint.Id,
-          ChromaprintHash = fingerprint.ChromaprintHash,
-          DurationSeconds = tryDuration,
-          GeneratedAt = fingerprint.GeneratedAt,
-          SourcePath = fingerprint.SourcePath
-        };
-
-        _logger.LogInformation("Retrying AcoustID with duration={Duration}s", tryDuration);
-        RecordMetadataCall();
-        var fallbackResult = await lookupService.LookupAsync(fallbackFingerprint, ct);
-
-        if (fallbackResult?.IsMatch == true)
-        {
-          _logger.LogInformation(
-            "AcoustID matched with fallback duration={Duration}s (original={Original}s)",
-            tryDuration, fingerprint.DurationSeconds);
-          result = fallbackResult;
-          break;
-        }
+        _logger.LogWarning("SongRec not available for live source identification");
+        UpdatePhase(FingerprintPhase.NoMatch);
+        return;
       }
 
-      lookupElapsed = (DateTime.UtcNow - lookupStartTime).TotalMilliseconds;
-    }
+      UpdatePhase(FingerprintPhase.Querying);
+      var lookupStartTime = DateTime.UtcNow;
 
-    // SongRec fallback: if AcoustID failed for a live source and we have captured audio
-    if (result?.IsMatch != true && capturedSamples != null)
-    {
-      var songRec = scope.ServiceProvider.GetService<ISongRecRecognitionService>();
-      if (songRec is { IsAvailable: true })
+      try
       {
-        _logger.LogInformation("AcoustID returned no match, trying SongRec (Shazam) fallback");
-        UpdatePhase(FingerprintPhase.Querying);
-
-        try
-        {
-          RecordMetadataCall();
-          var songRecMetadata = await songRec.RecognizeAsync(capturedSamples, ct);
-          if (songRecMetadata != null)
-          {
-            _logger.LogInformation(
-              "SongRec identified: '{Title}' by '{Artist}' (album: {Album})",
-              songRecMetadata.Title, songRecMetadata.Artist, songRecMetadata.Album ?? "(none)");
-
-            result = new MetadataLookupResult
-            {
-              IsMatch = true,
-              Confidence = 0.8, // SongRec doesn't provide a numeric confidence score
-              FingerprintId = fingerprint.Id,
-              Metadata = songRecMetadata,
-              Source = LookupSource.SongRec
-            };
-          }
-          else
-          {
-            _logger.LogInformation("SongRec also returned no match");
-          }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-          _logger.LogWarning(ex, "SongRec fallback failed");
-        }
-
+        RecordMetadataCall();
+        var songRecMetadata = await songRec.RecognizeAsync(samples, ct);
         lookupElapsed = (DateTime.UtcNow - lookupStartTime).TotalMilliseconds;
+
+        if (songRecMetadata != null)
+        {
+          _logger.LogInformation(
+            "SongRec identified: '{Title}' by '{Artist}' (album: {Album})",
+            songRecMetadata.Title, songRecMetadata.Artist, songRecMetadata.Album ?? "(none)");
+
+          // Cache album art from Shazam CDN to serve locally
+          if (!string.IsNullOrEmpty(songRecMetadata.CoverArtUrl))
+          {
+            try
+            {
+              var albumArtCache = scope.ServiceProvider.GetService<IAlbumArtCacheService>();
+              if (albumArtCache != null)
+              {
+                var localPath = await albumArtCache.SaveFromUrlAsync(songRecMetadata.CoverArtUrl);
+                if (localPath != null)
+                {
+                  songRecMetadata = songRecMetadata with { CoverArtUrl = localPath };
+                }
+              }
+            }
+            catch (Exception ex)
+            {
+              _logger.LogDebug(ex, "Failed to cache album art from {Url}, keeping external URL",
+                songRecMetadata.CoverArtUrl);
+            }
+          }
+
+          result = new MetadataLookupResult
+          {
+            IsMatch = true,
+            Confidence = 0.8, // SongRec doesn't provide a numeric confidence score
+            FingerprintId = Guid.NewGuid().ToString(),
+            Metadata = songRecMetadata,
+            Source = LookupSource.SongRec
+          };
+
+          _consecutiveSongRecFailures = 0;
+        }
+        else
+        {
+          _logger.LogInformation("SongRec returned no match for live source");
+          _consecutiveSongRecFailures++;
+        }
+      }
+      catch (Exception ex) when (ex is not OperationCanceledException)
+      {
+        lookupElapsed = (DateTime.UtcNow - lookupStartTime).TotalMilliseconds;
+        _logger.LogWarning(ex, "SongRec recognition failed for live source");
+        _consecutiveSongRecFailures++;
       }
     }
 
@@ -412,6 +403,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
   {
     _lastIdentification = null;
     _lastSongChangeAt = DateTime.MinValue;
+    _consecutiveSongRecFailures = 0;
     _logger.LogDebug("Song change detection state reset");
   }
 

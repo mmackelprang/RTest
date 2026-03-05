@@ -57,13 +57,14 @@ public sealed class FingerprintingOptions
 
 /// <summary>
 /// Configuration options for SongRec (Shazam) audio recognition.
-/// SongRec is an open-source Shazam client used as a fallback when AcoustID fails.
+/// SongRec is the primary recognizer for live audio sources (radio, vinyl, Bluetooth, USB).
+/// AcoustID is used for file sources where full track duration is available.
 /// Install via: sudo add-apt-repository ppa:marin-m/songrec &amp;&amp; sudo apt install songrec
 /// </summary>
 public sealed class SongRecOptions
 {
-  /// <summary>Enable or disable SongRec fallback recognition.</summary>
-  public bool Enabled { get; set; } = false;
+  /// <summary>Enable or disable SongRec recognition for live audio sources.</summary>
+  public bool Enabled { get; set; } = true;
 
   /// <summary>
   /// Path to the songrec binary. If empty, searches PATH.
