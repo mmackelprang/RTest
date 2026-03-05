@@ -193,7 +193,12 @@ public class AudioEngineInitializationServiceTests
   public async Task StartAsync_AppliesAudioPreferences()
   {
     // Arrange
-    var service = CreateService();
+    var audioManagerMock = new Mock<IAudioManager>();
+    audioManagerMock
+      .Setup(x => x.GetOrCreateSourceAsync(It.IsAny<AudioSourceType>(), true, It.IsAny<CancellationToken>()))
+      .ReturnsAsync((IAudioSource?)null);
+
+    var service = CreateService(audioManagerMock.Object);
     var cancellationToken = CancellationToken.None;
 
     var outputDevices = new List<AudioDeviceInfo>
@@ -212,14 +217,18 @@ public class AudioEngineInitializationServiceTests
     // Act
     await service.StartAsync(cancellationToken);
 
-    // Assert - Verify preferences were applied
+    // Assert - Verify persisted source activation was attempted
     _loggerMock.Verify(
       x => x.Log(
         LogLevel.Information,
         It.IsAny<EventId>(),
-        It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Startup audio source")),
+        It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Activating persisted source")),
         null,
         It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+      Times.Once);
+
+    audioManagerMock.Verify(
+      x => x.GetOrCreateSourceAsync(AudioSourceType.Radio, true, cancellationToken),
       Times.Once);
   }
 

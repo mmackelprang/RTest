@@ -49,6 +49,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private CancellationTokenSource? _playbackCts;
   private Task? _playbackMonitorTask;
   private bool _trackEndedNaturally;
+  private long _pendingSeekMs;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="FilePlayerAudioSource"/> class.
@@ -643,8 +644,10 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
           }
           
           _position = TimeSpan.FromMilliseconds(prefs.SongPositionMs);
+          _pendingSeekMs = prefs.SongPositionMs;
           UpdateMetadataFromFile(_currentFile);
-          Logger.LogInformation("Restored queue position at index {Index}: {File}", _currentIndex, Path.GetFileName(_currentFile));
+          Logger.LogInformation("Restored queue position at index {Index}: {File} (seek to {Ms}ms)",
+            _currentIndex, Path.GetFileName(_currentFile), prefs.SongPositionMs);
         }
         else if (_playlist.Count > 0)
         {
@@ -736,6 +739,21 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
       // Successful playback start — reset consecutive skip counter
       _consecutiveSkipCount = 0;
+
+      // Restore persisted playback position if this is the first play after queue restoration
+      if (_pendingSeekMs > 0)
+      {
+        try
+        {
+          await SeekAsync(TimeSpan.FromMilliseconds(_pendingSeekMs), cancellationToken);
+          Logger.LogInformation("🎵 FILE PLAYER: Restored playback position to {Ms}ms", _pendingSeekMs);
+        }
+        catch (Exception ex)
+        {
+          Logger.LogWarning(ex, "Failed to seek to persisted position {Ms}ms", _pendingSeekMs);
+        }
+        _pendingSeekMs = 0;
+      }
 
       Logger.LogInformation(
         "🎵 FILE PLAYER AUDIO FLOW STARTED: \"{FileName}\" routed to SoundFlow (PlaybackId={PlaybackId})",
