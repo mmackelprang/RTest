@@ -124,7 +124,6 @@ public class PlayHistoryTracker : IDisposable
 
       var playSource = MapSourceTypeToPlaySource(source.Type);
       var metadata = GetSourceMetadata(source);
-      var sourceDetails = $"{metadata.Title} - {metadata.Artist}";
       var newTitle = metadata.Title;
       var newArtist = metadata.Artist;
 
@@ -143,6 +142,15 @@ public class PlayHistoryTracker : IDisposable
           "Skipping BT play history entry with placeholder metadata '{Title}' — waiting for AVRCP",
           newTitle);
         return;
+      }
+
+      var sourceDetails = GetSourceDetails(source, playSource, metadata, btDeviceName);
+
+      // For radio: store RDS station name in Album if not already set
+      if (playSource == PlaySource.Radio && string.IsNullOrWhiteSpace(metadata.Album) &&
+          source is IRadioControl radioCtl && !string.IsNullOrWhiteSpace(radioCtl.RdsStationName))
+      {
+        metadata = metadata with { Album = radioCtl.RdsStationName };
       }
 
       // Get duration from source metadata if available
@@ -395,6 +403,47 @@ public class PlayHistoryTracker : IDisposable
         return freq.ToString()!;
     }
     return "Radio";
+  }
+
+  /// <summary>
+  /// Gets rich source details for radio entries: "FM / 101.5 MHz / WFJA" or "FM / 101.5 MHz".
+  /// </summary>
+  private static string GetRadioSourceDetails(IAudioSource source)
+  {
+    var band = "FM";
+    var freq = "";
+    string? station = null;
+
+    if (source is IRadioControl radio)
+    {
+      band = radio.CurrentBand.ToString();
+      freq = radio.CurrentFrequency.ToDisplayString();
+      station = radio.RdsStationName;
+    }
+    else if (source is IPrimaryAudioSource ps && ps.Metadata != null)
+    {
+      if (ps.Metadata.TryGetValue("Frequency", out var f))
+        freq = f?.ToString() ?? "";
+    }
+
+    if (!string.IsNullOrEmpty(station))
+      return $"{band} / {freq} / {station}";
+    if (!string.IsNullOrEmpty(freq))
+      return $"{band} / {freq}";
+    return "Radio";
+  }
+
+  /// <summary>
+  /// Builds source-type-specific SourceDetails string for a play history entry.
+  /// </summary>
+  private static string GetSourceDetails(IAudioSource source, PlaySource playSource, TrackMetadata metadata, string? btDeviceName)
+  {
+    return playSource switch
+    {
+      PlaySource.Radio => GetRadioSourceDetails(source),
+      PlaySource.Bluetooth => btDeviceName != null ? $"Bluetooth / {btDeviceName}" : "Bluetooth",
+      _ => $"{metadata.Title} - {metadata.Artist}"
+    };
   }
 
   /// <summary>

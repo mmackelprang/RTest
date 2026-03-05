@@ -1,6 +1,7 @@
 @page "/history"
 @using Radio.Web.Services.ApiClients
 @using Radio.Web.Models
+@using Radio.Web.Components.Shared
 @inject PlayHistoryApiService HistoryApi
 @inject ConfigurationApiService ConfigApi
 @inject ILogger<PlayHistoryPage> Logger
@@ -122,6 +123,7 @@
                 FixedHeader="true"
                 Style="flex: 1; overflow: auto;">
         <HeaderContent>
+          <MudTh Style="width: 48px; padding: 4px;"></MudTh>
           <MudTh>Date/Time</MudTh>
           <MudTh>Title</MudTh>
           <MudTh>Artist</MudTh>
@@ -131,20 +133,38 @@
           <MudTh>Actions</MudTh>
         </HeaderContent>
         <RowTemplate>
+          <MudTd DataLabel="Art" Style="width: 48px; padding: 4px;">
+            @if (!string.IsNullOrEmpty(context.Track?.CoverArtUrl)
+              && context.Track.CoverArtUrl != "/images/default-album-art.png")
+            {
+              <img src="@context.Track.CoverArtUrl"
+                   style="width: 40px; height: 40px; border-radius: 4px; object-fit: cover;"
+                   loading="lazy" />
+            }
+            else
+            {
+              <MudIcon Icon="@SourceTypeHelper.GetIcon(context.Source)"
+                       Size="Size.Medium"
+                       Style="color: var(--text-low); width: 40px;" />
+            }
+          </MudTd>
           <MudTd DataLabel="Date/Time">@context.PlayedAt.ToString("yyyy-MM-dd HH:mm")</MudTd>
           <MudTd DataLabel="Title">@context.Title</MudTd>
           <MudTd DataLabel="Artist">@context.Artist</MudTd>
           <MudTd DataLabel="Album">@context.Album</MudTd>
           <MudTd DataLabel="Source">
-            <MudChip T="string" Size="Size.Small" Color="@GetSourceColor(context.Source)">@context.Source</MudChip>
+            <MudChip T="string" Size="Size.Small" Color="@GetSourceColor(context.Source)"
+                     Icon="@SourceTypeHelper.GetIcon(context.Source)">
+              @context.Source
+            </MudChip>
           </MudTd>
           <MudTd DataLabel="Duration">@FormatDuration(context.DurationSeconds)</MudTd>
           <MudTd DataLabel="Actions">
-            <MudIconButton Icon="@Icons.Material.Filled.Info" 
+            <MudIconButton Icon="@Icons.Material.Filled.Info"
                            Size="Size.Small"
                            Color="Color.Info"
                            OnClick="@(() => ShowDetailDialog(context))" />
-            <MudIconButton Icon="@Icons.Material.Filled.Delete" 
+            <MudIconButton Icon="@Icons.Material.Filled.Delete"
                            Size="Size.Small"
                            Color="Color.Error"
                            OnClick="@(() => ShowDeleteDialog(context))" />
@@ -187,6 +207,14 @@
     <DialogContent>
       @if (_selectedItem != null)
       {
+        @if (!string.IsNullOrEmpty(_selectedItem.Track?.CoverArtUrl)
+          && _selectedItem.Track.CoverArtUrl != "/images/default-album-art.png")
+        {
+          <div style="text-align: center; margin-bottom: 16px;">
+            <img src="@_selectedItem.Track.CoverArtUrl"
+                 style="max-width: 200px; max-height: 200px; border-radius: 8px; object-fit: cover;" />
+          </div>
+        }
         <MudGrid>
           <MudItem xs="12">
             <MudText Typo="Typo.h6">@_selectedItem.Title</MudText>
@@ -201,12 +229,22 @@
           </MudItem>
           <MudItem xs="6">
             <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Source</MudText>
-            <MudChip T="string" Size="Size.Small" Color="@GetSourceColor(_selectedItem.Source)">@_selectedItem.Source</MudChip>
+            <MudChip T="string" Size="Size.Small" Color="@GetSourceColor(_selectedItem.Source)"
+                     Icon="@SourceTypeHelper.GetIcon(_selectedItem.Source)">
+              @_selectedItem.Source
+            </MudChip>
           </MudItem>
           <MudItem xs="6">
             <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Duration</MudText>
             <MudText>@FormatDuration(_selectedItem.DurationSeconds)</MudText>
           </MudItem>
+          @if (!string.IsNullOrEmpty(_selectedItem.SourceDetails))
+          {
+            <MudItem xs="12">
+              <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Source Details</MudText>
+              <MudText>@_selectedItem.SourceDetails</MudText>
+            </MudItem>
+          }
           <MudItem xs="6">
             <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Played At</MudText>
             <MudText>@_selectedItem.PlayedAt.ToString("yyyy-MM-dd HH:mm:ss")</MudText>
