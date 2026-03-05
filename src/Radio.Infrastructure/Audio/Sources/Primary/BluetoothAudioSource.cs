@@ -146,6 +146,18 @@ public class BluetoothAudioSource : USBAudioSourceBase
       Logger.LogInformation("BluetoothAudioSource: waiting for Bluetooth device connection");
       State = AudioSourceState.Ready;
     }
+
+    // Fix race: PlaybackStatusChanged may fire during StartAsync() (D-Bus sends
+    // current status immediately) before State is set to Ready. The event handler
+    // writes "PlaybackStatus" metadata but skips the state transition because
+    // State wasn't Ready yet. Check if we missed a Playing transition.
+    if (State == AudioSourceState.Ready &&
+        MetadataInternal.TryGetValue("PlaybackStatus", out var pbStatus) &&
+        (string)pbStatus == "Playing")
+    {
+      Logger.LogInformation("BluetoothAudioSource: phone already playing, transitioning to Playing state");
+      State = AudioSourceState.Playing;
+    }
   }
 
   protected override async Task PlayCoreAsync(CancellationToken cancellationToken)
