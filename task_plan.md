@@ -4,7 +4,7 @@
 Build a polished audio console with reliable song identification, rich metadata display, and smooth UX. SongRec (Shazam) is the primary recognition engine for live sources; AcoustID for local files only. RDS provides station identity for FM radio. Modern observability dashboard for system health. Responsive touch UX.
 
 ## Current Phase
-Phase 9 — Metrics Dashboard Redesign (pending)
+Phase 10 — Smart Fingerprinting (pending)
 
 ## Phases
 
@@ -18,10 +18,10 @@ Phase 9 — Metrics Dashboard Redesign (pending)
 | 6 | Play history enhancements | complete | Radio context, album art, source icons. PR #287 merged. |
 | 7 | UX polish | complete | Virtual keyboard auto-show for dialogs, RDS preset auto-naming. PR #288 merged. |
 | 8 | Session persistence | complete | Source auto-activation, file player queue/position restore. PR #288 merged. |
-| 9 | Metrics dashboard redesign | pending | Grafana-inspired layout: stat cards, time-series charts, time range selector, drill-down |
+| 9 | Metrics dashboard redesign | complete | Grafana-inspired layout: hero stat cards, canvas time-series chart, collapsible categories. PR #290 merged. |
 | 10 | Smart fingerprinting (remove AcoustID) | pending | Event-driven recognition for BT/File; remove AcoustID; SongRec-only for all sources |
-| 11 | Radio preset naming format | pending | Change format to `{Band} {CallSign} {Frequency}` |
-| 12 | Numeric keypad mode | pending | Smaller numeric keypad layout for number-only inputs (frequency, etc.) |
+| 11 | Radio preset naming format | complete | `{Band} {CallSign} {Frequency}` format. PR #289 merged. |
+| 12 | Numeric keypad mode | complete | Auto-detect numeric inputs, compact 4×4 numpad. PR #289 merged. |
 | 13 | AB13X USB input debug | pending | Investigate why USB audio input stopped working |
 | 14 | Audio distortion / CPU investigation | pending | Diagnose periodic distortion correlated with UI/metrics loading |
 
@@ -115,64 +115,19 @@ Built full RDS decoder in RTLSDRCore: 57 kHz BPF → Costas loop BPSK demod → 
 
 ## Phase 9: Metrics Dashboard Redesign
 
-**Status**: pending
+**Status**: complete (PR #290)
 
-**Goal**: Transform the metrics page from a flat list of cards into a modern, Grafana-inspired observability dashboard with time-series charts, stat cards with sparklines, gauge visualizations, and intuitive drill-down.
+**Goal**: Transform the metrics page from a flat list of cards into a modern, Grafana-inspired observability dashboard with time-series charts, stat cards with sparklines, and intuitive drill-down.
 
-**Design Inspiration**: Grafana stat panels + time-series charts, AWS CloudWatch dashboards, Google Cloud Monitoring. Key principles: F-reading pattern (critical KPIs top-left), one page = one decision, progressive disclosure, <12 panels per view.
-
-**Current State**:
-- Flat grid of metric cards with tiny SVG sparklines (~200×24px)
-- Categories via filter chips (left panel)
-- Time ranges: 1h, 24h, 7d
-- Click card → shows aggregate stats (count, avg, min, max, stddev)
-- No real time-series charts, no gauges, no drill-down detail view
-- Custom SVG sparklines (no charting library)
-- Data: SQLite with minute/hour/day rollup tables, retention 2h/48h/365d
-
-**Charting Approach**: MudBlazor has a built-in `MudTimeSeriesChart` component. Evaluate whether it's sufficient, or if a lightweight Chart.js wrapper (BlazorChartjs) provides better interactivity (zoom, hover tooltips, annotations). Prefer MudBlazor-native if it meets needs.
-
-**Layout Plan** (Grafana-inspired):
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Time Range: [5m] [1h] [24h] [7d] [30d]    [⟳ Auto-refresh]│
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐          │
-│  │ CPU Temp│ │ Memory  │ │ Buffer  │ │ Underruns│ ← Stat   │
-│  │  42°C   │ │ 312 MB  │ │  47%    │ │   0     │   Cards   │
-│  │ ▁▂▃▅▃▂ │ │ ▃▃▄▅▆▅▄│ │ ▅▅▄▃▄▅▅│ │ ▁▁▁▁▁▁▁│   w/spark │
-│  └─────────┘ └─────────┘ └─────────┘ └─────────┘          │
-├─────────────────────────────────────────────────────────────┤
-│  Category: [All] [Audio] [System] [DB] [UI]                │
-├─────────────────────────────────────────────────────────────┤
-│  ┌───────────────────────────────────────────────────┐      │
-│  │  Time Series Chart (selected metric or group)     │      │
-│  │  ▁▂▃▅▇█▇▅▃▂▁▂▃▅▇█▇▅▃▂▁▂▃▅▇█▇▅▃▂▁              │      │
-│  │  ──────────────────────────────────                │      │
-│  │  10:00    10:15    10:30    10:45    11:00         │      │
-│  └───────────────────────────────────────────────────┘      │
-├─────────────────────────────────────────────────────────────┤
-│  Metric Detail Table (when drilled down)                    │
-│  Count: 1,234 │ Avg: 42.3 │ Min: 12 │ Max: 87 │ P95: 78  │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**Steps**:
-1. Evaluate MudBlazor `MudTimeSeriesChart` vs Chart.js wrapper — build a spike with real metric data
-2. Redesign stat cards: larger sparklines, color-coded thresholds (green/amber/red), gauge for percentages
-3. Add full-width time-series chart panel that shows the selected metric(s) over time
-4. Improve time range selector: add 5m and 30d options, auto-refresh toggle
-5. Add metric grouping/sections with collapsible rows (Audio, System, Database)
-6. Add drill-down: click stat card → expands time-series chart below with detail stats
-7. Responsive: works on 1920×720 touchscreen
-
-**Validation**:
-- Dashboard loads in <2s with all metrics
-- Time-series chart shows smooth lines with hover tooltips
-- Switching time ranges updates all panels
-- Stat cards show current value + trend sparkline + threshold color
-- Touch-friendly: tap card to drill down, swipe time range
+**Result**:
+- Full-width layout with hero stat cards (auto-selected by pattern: cpu, memory, buffer, underrun, error, active)
+- Canvas time-series chart via `metricsChart.js` ES module (area fill, min/max band, hover tooltip, threshold lines, gridlines)
+- Collapsible category sections with compact metric rows, inline sparklines, and trend indicators
+- 5 time ranges (5m/1h/24h/7d/30d) with resolution mapping to 3-tier SQLite rollup
+- Threshold coloring (green/amber/red) with `invertAbove` flag for gauge vs counter metrics
+- Client-side aggregate computation (Count, Avg, Min, Max, StdDev) — API aggregate endpoint returns raw double
+- Auto-refresh every 10s, time range preference persisted
+- Documentation updated in `design/METRICS.md`
 
 ---
 
@@ -235,7 +190,7 @@ Radio/Vinyl/USB → no song boundaries → keep polling (SongRec, 15s cycle)
 
 ## Phase 11: Radio Preset Naming Format
 
-**Status**: pending
+**Status**: complete (PR #289)
 
 **Goal**: Change preset auto-naming from `{RdsStationName}` or `{Band} - {Frequency}` to `{Band} {CallSign} {Frequency}`.
 
@@ -264,7 +219,7 @@ _presetName = !string.IsNullOrEmpty(_radioState.RdsStationName)
 
 ## Phase 12: Numeric Keypad Mode
 
-**Status**: pending
+**Status**: complete (PR #289)
 
 **Goal**: Add a compact numeric keypad layout for number-only inputs (frequency entry, etc.) instead of showing the full QWERTY keyboard.
 
