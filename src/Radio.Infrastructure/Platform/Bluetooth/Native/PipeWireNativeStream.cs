@@ -1,6 +1,7 @@
 #if !WINDOWS_TARGET
 using System;
 using System.Buffers;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using static Radio.Infrastructure.Platform.Bluetooth.Native.PipeWireNative;
@@ -38,6 +39,15 @@ internal sealed class PipeWireNativeStream : IDisposable
   private GCHandle _eventsHandle;
   private GCHandle _selfHandle;
   private bool _disposed;
+
+  // Instrumentation: OnProcess delivery timing
+  private long _lastOnProcessTimestamp;
+  private double _maxOnProcessIntervalMs;
+  private double _minOnProcessIntervalMs = double.MaxValue;
+  private long _onProcessCount;
+  private long _onProcessBurstCount; // intervals < 1ms (burst delivery)
+  private double _maxOnProcessExecutionMs;
+  private DateTime _lastOnProcessLogTime;
 
   // Pinned delegate references to prevent GC collection during native callbacks
   private readonly ProcessDelegate _processDelegate;
@@ -221,6 +231,20 @@ internal sealed class PipeWireNativeStream : IDisposable
 
     if (self == null || self._stream == IntPtr.Zero) return;
 
+    var processStart = Stopwatch.GetTimestamp();
+
+    // Track delivery interval
+    if (self._lastOnProcessTimestamp > 0)
+    {
+      var intervalMs = (double)(processStart - self._lastOnProcessTimestamp)
+        / Stopwatch.Frequency * 1000.0;
+      if (intervalMs > self._maxOnProcessIntervalMs) self._maxOnProcessIntervalMs = intervalMs;
+      if (intervalMs < self._minOnProcessIntervalMs) self._minOnProcessIntervalMs = intervalMs;
+      if (intervalMs < 1.0) self._onProcessBurstCount++;
+    }
+    self._lastOnProcessTimestamp = processStart;
+    self._onProcessCount++;
+
     var pwBufPtr = pw_stream_dequeue_buffer(self._stream);
     if (pwBufPtr == IntPtr.Zero) return;
 
@@ -266,6 +290,27 @@ internal sealed class PipeWireNativeStream : IDisposable
     finally
     {
       pw_stream_queue_buffer(self._stream, pwBufPtr);
+
+      var execMs = (double)(Stopwatch.GetTimestamp() - processStart) / Stopwatch.Frequency * 1000.0;
+      if (execMs > self._maxOnProcessExecutionMs) self._maxOnProcessExecutionMs = execMs;
+    }
+
+    // Log OnProcess stats every 10 seconds
+    var now = DateTime.UtcNow;
+    if ((now - self._lastOnProcessLogTime).TotalSeconds >= 10 && self._onProcessCount > 0)
+    {
+      self._logger.LogDebug(
+        "🔬 PipeWire OnProcess: count={Count}, interval min={Min:F2}ms max={Max:F2}ms, " +
+        "bursts={Bursts}, execution max={Exec:F2}ms",
+        self._onProcessCount,
+        self._minOnProcessIntervalMs == double.MaxValue ? 0 : self._minOnProcessIntervalMs,
+        self._maxOnProcessIntervalMs, self._onProcessBurstCount,
+        self._maxOnProcessExecutionMs);
+      // Reset per-window
+      self._maxOnProcessIntervalMs = 0;
+      self._minOnProcessIntervalMs = double.MaxValue;
+      self._maxOnProcessExecutionMs = 0;
+      self._lastOnProcessLogTime = now;
     }
   }
 

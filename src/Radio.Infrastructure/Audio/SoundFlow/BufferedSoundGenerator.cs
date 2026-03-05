@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces;
 using SoundFlow.Abstracts;
@@ -58,6 +59,29 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     private int _minBufferSinceLastLog = int.MaxValue;
     private int _maxBufferSinceLastLog;
 
+    // Instrumentation: callback timing (all allocation-free via Stopwatch.GetTimestamp)
+    private long _lastGenerateAudioTimestamp;
+    private double _maxCallbackIntervalMs;
+    private double _minCallbackIntervalMs = double.MaxValue;
+    private long _missedDeadlineCount;
+    private double _maxCallbackExecutionMs;
+
+    // Instrumentation: lock contention
+    private long _addSamplesContentionCount;
+    private double _maxAddSamplesLockWaitMs;
+    private long _generateAudioContentionCount;
+    private double _maxGenerateAudioLockWaitMs;
+
+    // GC pause correlation
+    private int _lastGen0Count;
+    private int _lastGen1Count;
+    private int _lastGen2Count;
+    private long _gcCorrelatedMissedDeadlines;
+
+    // Tracking for delta-based metrics reporting
+    private long _lastReportedMissedDeadlines;
+    private long _lastReportedGcCorrelatedMisses;
+
     // Clock drift compensation: when producer (e.g., BT/PipeWire) runs on a different
     // clock than consumer (MiniAudio/ALSA), the buffer slowly drains or fills. We
     // periodically check the buffer level and duplicate a frame of samples when the
@@ -116,7 +140,18 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     {
         if (_isDisposed) return;
 
-        lock (_bufferLock)
+        // Measure lock contention: try non-blocking first, only time if contended
+        double lockWaitMs = 0;
+        var entered = Monitor.TryEnter(_bufferLock);
+        if (!entered)
+        {
+            var waitStart = Stopwatch.GetTimestamp();
+            Monitor.Enter(_bufferLock);
+            lockWaitMs = (double)(Stopwatch.GetTimestamp() - waitStart) / Stopwatch.Frequency * 1000.0;
+            _addSamplesContentionCount++;
+            if (lockWaitMs > _maxAddSamplesLockWaitMs) _maxAddSamplesLockWaitMs = lockWaitMs;
+        }
+        try
         {
             if (_overflowStrategy == BufferOverflowStrategy.Block)
             {
@@ -152,7 +187,10 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             _writePos = (_writePos + toWrite) % _maxBufferSamples;
             _count += toWrite;
         }
-
+        finally
+        {
+            Monitor.Exit(_bufferLock);
+        }
     }
 
     /// <summary>
@@ -160,6 +198,41 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     /// </summary>
     protected override void GenerateAudio(Span<float> buffer, int channels)
     {
+        var callbackStartTicks = Stopwatch.GetTimestamp();
+
+        // Track interval between successive callbacks
+        if (_lastGenerateAudioTimestamp > 0)
+        {
+            var intervalMs = (double)(callbackStartTicks - _lastGenerateAudioTimestamp)
+                / Stopwatch.Frequency * 1000.0;
+            if (intervalMs > _maxCallbackIntervalMs) _maxCallbackIntervalMs = intervalMs;
+            if (intervalMs < _minCallbackIntervalMs) _minCallbackIntervalMs = intervalMs;
+            // Expected quantum is buffer.Length / (sampleRate * channels) * 1000
+            // At 512 samples / (48000 * 2) = ~5.33ms per channel, ~10.67ms total
+            // Flag anything > 2x expected as a missed deadline
+            var expectedMs = (double)buffer.Length / (Format.SampleRate * Format.Channels) * 1000.0;
+            if (intervalMs > expectedMs * 2)
+            {
+                _missedDeadlineCount++;
+                var gen0 = GC.CollectionCount(0);
+                var gen1 = GC.CollectionCount(1);
+                var gen2 = GC.CollectionCount(2);
+                if (gen0 != _lastGen0Count || gen1 != _lastGen1Count || gen2 != _lastGen2Count)
+                {
+                    _gcCorrelatedMissedDeadlines++;
+                    _logger.LogWarning(
+                        "🔬 Missed callback deadline ({Interval:F1}ms) with GC activity: " +
+                        "Gen0 +{G0}, Gen1 +{G1}, Gen2 +{G2}",
+                        intervalMs,
+                        gen0 - _lastGen0Count, gen1 - _lastGen1Count, gen2 - _lastGen2Count);
+                }
+                _lastGen0Count = gen0;
+                _lastGen1Count = gen1;
+                _lastGen2Count = gen2;
+            }
+        }
+        _lastGenerateAudioTimestamp = callbackStartTicks;
+
         if (_isDisposed)
         {
             buffer.Clear();
@@ -168,7 +241,20 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
 
         int samplesWritten = 0;
 
-        lock (_bufferLock)
+        // Measure lock contention: try non-blocking first, only time if contended
+        double generateLockWaitMs = 0;
+        var lockEntered = Monitor.TryEnter(_bufferLock);
+        if (!lockEntered)
+        {
+            var waitStart = Stopwatch.GetTimestamp();
+            Monitor.Enter(_bufferLock);
+            generateLockWaitMs = (double)(Stopwatch.GetTimestamp() - waitStart)
+                / Stopwatch.Frequency * 1000.0;
+            _generateAudioContentionCount++;
+            if (generateLockWaitMs > _maxGenerateAudioLockWaitMs)
+                _maxGenerateAudioLockWaitMs = generateLockWaitMs;
+        }
+        try
         {
             var toRead = Math.Min(buffer.Length, _count);
 
@@ -210,6 +296,10 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             {
                 Monitor.PulseAll(_bufferLock);
             }
+        }
+        finally
+        {
+            Monitor.Exit(_bufferLock);
         }
 
         // Clock drift compensation: when the buffer is draining faster than the
@@ -257,6 +347,10 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         }
 
         LogStats();
+
+        var executionMs = (double)(Stopwatch.GetTimestamp() - callbackStartTicks)
+            / Stopwatch.Frequency * 1000.0;
+        if (executionMs > _maxCallbackExecutionMs) _maxCallbackExecutionMs = executionMs;
     }
 
     /// <summary>
@@ -353,6 +447,23 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                     _totalSamplesReceived, _totalSamplesOutput,
                     _totalSamplesDropped, _totalSamplesCompensated, _underrunCount);
 
+                _logger.LogDebug(
+                    "🔬 Timing ({Type}): callback interval min={MinInterval:F2}ms max={MaxInterval:F2}ms, " +
+                    "missed deadlines={Missed} (GC-correlated={GcMisses}), execution max={MaxExec:F2}ms, " +
+                    "lock contention: addSamples={AddContentions} (max {AddWait:F2}ms), " +
+                    "generateAudio={GenContentions} (max {GenWait:F2}ms)",
+                    typeof(T).Name,
+                    _minCallbackIntervalMs == double.MaxValue ? 0 : _minCallbackIntervalMs,
+                    _maxCallbackIntervalMs, _missedDeadlineCount, _gcCorrelatedMissedDeadlines,
+                    _maxCallbackExecutionMs,
+                    _addSamplesContentionCount, _maxAddSamplesLockWaitMs,
+                    _generateAudioContentionCount, _maxGenerateAudioLockWaitMs);
+
+                // Reset per-window tracking (contention counts and missed deadlines are cumulative)
+                _maxCallbackIntervalMs = 0;
+                _minCallbackIntervalMs = double.MaxValue;
+                _maxCallbackExecutionMs = 0;
+
                 _minBufferSinceLastLog = currentBuffer;
                 _maxBufferSinceLastLog = currentBuffer;
                 _lastLogTime = now;
@@ -363,6 +474,10 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                     var tags = new Dictionary<string, string> { ["type"] = typeof(T).Name };
                     var fillPercent = (double)currentBuffer / _maxBufferSamples * 100.0;
                     _metricsCollector.Gauge("audio.buffer.fill_percent", fillPercent, tags);
+                    _metricsCollector.Gauge("audio.callback.max_interval_ms", _maxCallbackIntervalMs, tags);
+                    _metricsCollector.Gauge("audio.callback.max_execution_ms", _maxCallbackExecutionMs, tags);
+                    _metricsCollector.Gauge("audio.lock.add_samples_max_wait_ms", _maxAddSamplesLockWaitMs, tags);
+                    _metricsCollector.Gauge("audio.lock.generate_audio_max_wait_ms", _maxGenerateAudioLockWaitMs, tags);
 
                     var droppedDelta = _totalSamplesDropped - _lastReportedDropped;
                     if (droppedDelta > 0)
@@ -376,6 +491,20 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                     {
                         _metricsCollector.Increment("audio.buffer.underruns", underrunDelta, tags);
                         _lastReportedUnderruns = _underrunCount;
+                    }
+
+                    var missedDelta = _missedDeadlineCount - _lastReportedMissedDeadlines;
+                    if (missedDelta > 0)
+                    {
+                        _metricsCollector.Increment("audio.callback.missed_deadlines", missedDelta, tags);
+                        _lastReportedMissedDeadlines = _missedDeadlineCount;
+                    }
+
+                    var gcDelta = _gcCorrelatedMissedDeadlines - _lastReportedGcCorrelatedMisses;
+                    if (gcDelta > 0)
+                    {
+                        _metricsCollector.Increment("audio.callback.gc_correlated_misses", gcDelta, tags);
+                        _lastReportedGcCorrelatedMisses = _gcCorrelatedMissedDeadlines;
                     }
                 }
             }

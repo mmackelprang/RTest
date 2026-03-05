@@ -937,7 +937,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             _captureCts = new CancellationTokenSource();
 
             // Pre-fill the buffer with silence before the stream starts delivering data.
-            generator.PreFillSilence(1.5f);
+            generator.PreFillSilence(0.5f);
 
             // Use PipeWire native stream instead of pw-record subprocess.
             // The native stream connects directly to the target node via libpipewire,

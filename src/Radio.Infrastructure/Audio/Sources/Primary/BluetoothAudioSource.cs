@@ -389,7 +389,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
         // Pre-fill with silence to cushion against capture startup latency and
         // ongoing jitter from the audio capture device callback timing.
-        _captureGenerator.PreFillSilence(1.5f);
+        _captureGenerator.PreFillSilence(0.5f);
 
         _captureDevice.OnAudioProcessed += OnCaptureAudioProcessed;
         _captureDevice.Start();
