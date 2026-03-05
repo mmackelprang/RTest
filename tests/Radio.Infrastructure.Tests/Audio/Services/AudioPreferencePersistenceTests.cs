@@ -247,11 +247,11 @@ public class AudioPreferencePersistenceTests : IDisposable
     _mixerMock.Setup(m => m.IsMuted).Returns(false);
     _mixerMock.Setup(m => m.Balance).Returns(0f);
 
-    // Act — rapid calls within 500ms should only result in one persist
+    // Act — rapid calls with no delays (well within the 500ms debounce window)
+    // should only result in one persist. Previous version used Task.Delay(100)
+    // between calls, which could stretch past the 500ms debounce on slow CI runners.
     _sut.ScheduleVolumePersist();
-    await Task.Delay(100);
     _sut.ScheduleVolumePersist();
-    await Task.Delay(100);
     _sut.ScheduleVolumePersist();
 
     // Wait for debounce to settle (500ms timer + margin for slow CI runners)
