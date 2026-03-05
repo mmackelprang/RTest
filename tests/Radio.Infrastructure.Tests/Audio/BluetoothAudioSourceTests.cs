@@ -200,6 +200,25 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   }
 
   [Fact]
+  public void MetadataChanged_NewSongWithoutArt_ClearsPreviousAlbumArt()
+  {
+    // Simulate Song A with art set via a previous lookup
+    _mockBluetooth.SimulateMetadataChange("Song A", "Artist A");
+    // Manually set album art as if MusicBrainz/SongRec resolved it
+    // (source metadata is publicly readable)
+    Assert.False(_source.Metadata.ContainsKey(StandardMetadataKeys.AlbumArtUrl));
+
+    // Now simulate Song B arriving — AVRCP without art (the common case)
+    _mockBluetooth.SimulateMetadataChange("Song B", "Artist B");
+
+    // AlbumArtUrl should NOT carry over from Song A
+    Assert.False(
+      _source.Metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var art)
+      && art is string s && !string.IsNullOrEmpty(s),
+      "AlbumArtUrl should be cleared when new song arrives without art");
+  }
+
+  [Fact]
   public void MockBluetoothService_IsAudioManagedByPlatform_ReturnsFalse()
   {
     Assert.False(_mockBluetooth.IsAudioManagedByPlatform);

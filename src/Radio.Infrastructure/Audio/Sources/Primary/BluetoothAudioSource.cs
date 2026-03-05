@@ -597,10 +597,18 @@ public class BluetoothAudioSource : USBAudioSourceBase
       _btDuration = null;
     }
 
-    // Propagate album art URL from AVRCP if available
+    // Propagate album art URL from AVRCP if available.
+    // Always clear stale art from the previous song — PlayHistoryTracker reads
+    // AlbumArtUrl from source metadata when creating entries, so leftover art
+    // from the previous song would leak into the new song's history entry.
     if (!string.IsNullOrEmpty(e.AlbumArtUrl))
     {
       MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = e.AlbumArtUrl;
+    }
+    else
+    {
+      MetadataInternal.Remove(StandardMetadataKeys.AlbumArtUrl);
+      _lastCoverArtLookupKey = null;
     }
 
     // If metadata is incomplete (no title or artist), request fingerprinting.
