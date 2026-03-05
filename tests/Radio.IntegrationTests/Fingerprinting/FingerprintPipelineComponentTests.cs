@@ -27,6 +27,7 @@ namespace Radio.IntegrationTests.Fingerprinting;
 ///
 /// These tests exercise each stage independently and combined to find the failure.
 /// </summary>
+[Trait("Category", "Integration")]
 public class FingerprintPipelineComponentTests : IAsyncLifetime
 {
   private readonly ITestOutputHelper _output;
