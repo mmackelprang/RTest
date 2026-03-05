@@ -78,6 +78,10 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     private int _lastGen2Count;
     private long _gcCorrelatedMissedDeadlines;
 
+    // Throttle per-miss logging to avoid overwhelming journald
+    // (high-frequency LogWarning calls cause journald CPU spike → memory pressure → more GC → feedback loop)
+    private long _lastMissedDeadlineLogTicks;
+
     // Tracking for delta-based metrics reporting
     private long _lastReportedMissedDeadlines;
     private long _lastReportedGcCorrelatedMisses;
@@ -226,11 +230,18 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                 if (gen0 != _lastGen0Count || gen1 != _lastGen1Count || gen2 != _lastGen2Count)
                 {
                     _gcCorrelatedMissedDeadlines++;
-                    _logger.LogWarning(
-                        "🔬 Missed callback deadline ({Interval:F1}ms) with GC activity: " +
-                        "Gen0 +{G0}, Gen1 +{G1}, Gen2 +{G2}",
-                        intervalMs,
-                        gen0 - _lastGen0Count, gen1 - _lastGen1Count, gen2 - _lastGen2Count);
+                    // Throttle per-miss logging to once per 5s to avoid overwhelming journald
+                    // (high-frequency warnings cause journald CPU spike → memory pressure → more GC)
+                    var now = Stopwatch.GetTimestamp();
+                    if ((now - _lastMissedDeadlineLogTicks) / (double)Stopwatch.Frequency >= 5.0)
+                    {
+                        _lastMissedDeadlineLogTicks = now;
+                        _logger.LogWarning(
+                            "🔬 Missed callback deadline ({Interval:F1}ms) with GC activity: " +
+                            "Gen0 +{G0}, Gen1 +{G1}, Gen2 +{G2}",
+                            intervalMs,
+                            gen0 - _lastGen0Count, gen1 - _lastGen1Count, gen2 - _lastGen2Count);
+                    }
                 }
                 _lastGen0Count = gen0;
                 _lastGen1Count = gen1;

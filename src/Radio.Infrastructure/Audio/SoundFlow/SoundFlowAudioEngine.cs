@@ -38,6 +38,7 @@ public class SoundFlowAudioEngine : IAudioEngine
   private BalanceModifier? _balanceModifier;
   private LimiterModifier? _limiterModifier;
   private Timer? _hotPlugTimer;
+  private Timer? _limiterStatsTimer;
   private AudioEngineState _state = AudioEngineState.Uninitialized;
   private int _currentDeviceIndex = -1;
   private bool _disposed;
@@ -300,6 +301,24 @@ public class SoundFlowAudioEngine : IAudioEngine
           "Hot-plug detection enabled with {Interval}s interval",
           _options.HotPlugIntervalSeconds);
       }
+
+      // Periodically log limiter engagement stats (every 30s)
+      _limiterStatsTimer = new Timer(_ =>
+      {
+        if (_limiterModifier == null) return;
+        var stats = _limiterModifier.GetAndResetStats();
+        if (stats == null) return;
+        var s = stats.Value;
+        if (s.LimitedSamples > 0)
+        {
+          _logger.LogWarning(
+            "🔊 Limiter engaged: {Percent:F1}% of samples compressed ({Limited}/{Total}), " +
+            "max input {MaxInput:F3} ({MaxInputDb:F1} dBFS), max reduction {MaxReduction:F1} dB",
+            s.EngagementPercent, s.LimitedSamples, s.TotalSamples,
+            s.MaxInputAbs, 20f * MathF.Log10(s.MaxInputAbs),
+            s.MaxReductionDb);
+        }
+      }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
 
       State = AudioEngineState.Ready;
       _metricsCollector?.Gauge("audio.engine.buffer_size_samples", _options.BufferSize);
@@ -766,11 +785,16 @@ public class SoundFlowAudioEngine : IAudioEngine
 
     _logger.LogInformation("Disposing audio engine");
 
-    // Stop hot-plug detection
+    // Stop timers
     if (_hotPlugTimer != null)
     {
       await _hotPlugTimer.DisposeAsync();
       _hotPlugTimer = null;
+    }
+    if (_limiterStatsTimer != null)
+    {
+      await _limiterStatsTimer.DisposeAsync();
+      _limiterStatsTimer = null;
     }
 
     // Unsubscribe from device manager events
