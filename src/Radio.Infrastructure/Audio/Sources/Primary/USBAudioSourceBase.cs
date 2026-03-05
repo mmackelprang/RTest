@@ -178,7 +178,10 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
       {
         // Match by device name containing the USB port identifier
         // USB devices on Linux typically include card/device info in the name
-        if (device.Name.Contains(usbPort, StringComparison.OrdinalIgnoreCase))
+        // Skip "Monitor of ..." devices — these are PipeWire loopbacks of output sinks,
+        // not physical audio inputs
+        if (device.Name.Contains(usbPort, StringComparison.OrdinalIgnoreCase) &&
+            !device.Name.StartsWith("Monitor of", StringComparison.OrdinalIgnoreCase))
         {
           targetDevice = device;
           break;
