@@ -622,6 +622,18 @@ The `VisualizerService` performs FFT analysis but **processing cost is invisible
 - `system.memory_usage_mb` (Gauge) ✅
 - `db.file_size_mb` (Gauge) ✅
 
+#### Fingerprint Metrics (Implemented)
+- `fingerprint.identification_attempts` (Counter) ✅ — tags: source={radio|file|vinyl|usb|bt}
+- `fingerprint.identification_successes` (Counter) ✅ — tags: source
+- `fingerprint.identification_failures` (Counter) ✅ — tags: source, reason={no_match|error|timeout}
+- `fingerprint.songrec_latency_ms` (Gauge) ✅
+- `fingerprint.capture_latency_ms` (Gauge) ✅
+- `fingerprint.song_changes` (Counter) ✅ — tags: source
+- `fingerprint.duplicate_suppressions` (Counter) ✅
+- `fingerprint.consecutive_failures` (Gauge) ✅
+- `fingerprint.cover_art_searches` (Counter) ✅ — tags: result={found|not_found|error}
+- `fingerprint.cover_art_fetches` (Counter) ✅ — tags: result={found|not_found|error}
+
 #### Audio Metrics (Partial + Proposed)
 - `audio.songs_played_total` (Counter) ✅
 - `audio.songs_skipped` (Counter) ✅

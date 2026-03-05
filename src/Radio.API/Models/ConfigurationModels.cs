@@ -356,17 +356,6 @@ public class TTSSecretsDto
   public string AzureRegion { get; set; } = "";
 }
 
-/// <summary>
-/// AcoustID API credentials (secrets).
-/// </summary>
-public class AcoustIdSecretDto
-{
-  /// <summary>
-  /// Gets or sets the AcoustID API key.
-  /// </summary>
-  public string ApiKey { get; set; } = "";
-}
-
 // ========== Phase 5: Configuration Store Management DTOs ==========
 
 /// <summary>

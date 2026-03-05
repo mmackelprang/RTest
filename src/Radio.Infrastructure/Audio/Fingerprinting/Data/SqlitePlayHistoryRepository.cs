@@ -503,7 +503,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
           ? null : reader.GetString(reader.GetOrdinal("AlbumArtist")),
         CoverArtUrl = reader.IsDBNull(reader.GetOrdinal("CoverArtUrl"))
           ? null : reader.GetString(reader.GetOrdinal("CoverArtUrl")),
-        Source = MetadataSource.AcoustID,
+        Source = MetadataSource.Fingerprinting,
         CreatedAt = DateTime.UtcNow,
         UpdatedAt = DateTime.UtcNow
       };

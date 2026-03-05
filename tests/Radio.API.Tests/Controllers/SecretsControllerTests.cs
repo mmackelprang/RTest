@@ -74,18 +74,18 @@ public class SecretsControllerTests : IClassFixture<CustomWebApplicationFactory<
   public async Task DeleteSectionSecrets_ReturnsOk()
   {
     // Arrange - store something first
-    var data = new Dictionary<string, string> { ["ApiKey"] = "delete-me" };
-    await _client.PostAsJsonAsync("/api/secrets/acoustid", data);
+    var data = new Dictionary<string, string> { ["AzureRegion"] = "delete-me" };
+    await _client.PostAsJsonAsync("/api/secrets/tts", data);
 
     // Act
-    var response = await _client.DeleteAsync("/api/secrets/acoustid");
+    var response = await _client.DeleteAsync("/api/secrets/tts");
     Assert.True(response.IsSuccessStatusCode);
 
     // Verify deleted (always masked now)
-    var getResponse = await _client.GetAsync("/api/secrets/acoustid");
+    var getResponse = await _client.GetAsync("/api/secrets/tts");
     var result = await getResponse.Content.ReadFromJsonAsync<Dictionary<string, string>>();
     Assert.NotNull(result);
-    Assert.Equal("", result!["ApiKey"]);
+    Assert.Equal("", result!["AzureRegion"]);
   }
 
   [Fact]

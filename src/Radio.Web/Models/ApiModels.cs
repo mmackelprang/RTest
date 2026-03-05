@@ -569,11 +569,6 @@ public class TTSSecretsDto
   public string AzureRegion { get; set; } = "";
 }
 
-public class AcoustIdSecretDto
-{
-  public string ApiKey { get; set; } = "";
-}
-
 // ========== Phase 5: Configuration Store Management DTOs ==========
 
 public class ConfigurationStoreInfoDto

@@ -62,9 +62,6 @@ public sealed record TrackMetadata
 /// </summary>
 public enum MetadataSource
 {
-  /// <summary>Metadata obtained from AcoustID/MusicBrainz lookup.</summary>
-  AcoustID,
-
   /// <summary>Metadata manually entered by user.</summary>
   Manual,
 

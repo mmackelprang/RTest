@@ -124,23 +124,25 @@ public class EndToEndFingerprintingIntegrationTests : IAsyncLifetime
       GeneratedAt = DateTime.UtcNow
     };
 
-    // 4) Simulate metadata lookup (using mock service)
-    var lookupService = new MockMetadataLookupService();
-    lookupService.SetDefaultMetadata(new TrackMetadata
+    // 4) Simulate metadata from SongRec identification
+    var metadata = new TrackMetadata
     {
       Id = Guid.NewGuid().ToString(),
       Title = "Test Track",
       Artist = "Test Artist",
       Album = "Test Album",
-      Source = MetadataSource.AcoustID,
+      Source = MetadataSource.Shazam,
       CreatedAt = DateTime.UtcNow,
       UpdatedAt = DateTime.UtcNow
-    });
-    var lookupResult = await lookupService.LookupAsync(fingerprintData);
-    Assert.NotNull(lookupResult);
-
-    // Verify we got metadata back and store it
-    var metadata = lookupResult!.Metadata ?? throw new InvalidOperationException("Metadata should not be null");
+    };
+    var lookupResult = new MetadataLookupResult
+    {
+      IsMatch = true,
+      FingerprintId = fingerprintData.Id,
+      Metadata = metadata,
+      Confidence = 0.95,
+      Source = LookupSource.SongRec
+    };
 
     // Act - 5) Store fingerprint with metadata
     var cachedFingerprint = await _cacheRepository.StoreAsync(fingerprintData, metadata);
@@ -149,7 +151,7 @@ public class EndToEndFingerprintingIntegrationTests : IAsyncLifetime
     var updatedEntry = playEntry with
     {
       TrackMetadataId = metadata.Id,
-      MetadataSource = MetadataSource.AcoustID,
+      MetadataSource = MetadataSource.Shazam,
       WasIdentified = true,
       IdentificationConfidence = lookupResult.Confidence
     };
@@ -159,7 +161,7 @@ public class EndToEndFingerprintingIntegrationTests : IAsyncLifetime
     var finalEntry = await _historyRepository.GetByIdAsync(playEntry.Id);
     Assert.NotNull(finalEntry);
     Assert.True(finalEntry.WasIdentified);
-    Assert.Equal(MetadataSource.AcoustID, finalEntry.MetadataSource);
+    Assert.Equal(MetadataSource.Shazam, finalEntry.MetadataSource);
     Assert.Equal(metadata.Id, finalEntry.TrackMetadataId);
 
     // Assert - Fingerprint was cached
@@ -308,7 +310,7 @@ public class EndToEndFingerprintingIntegrationTests : IAsyncLifetime
       Album = "A Night at the Opera",
       ReleaseYear = 1975,
       Genre = "Rock",
-      Source = MetadataSource.AcoustID,
+      Source = MetadataSource.Shazam,
       CreatedAt = DateTime.UtcNow,
       UpdatedAt = DateTime.UtcNow
     };

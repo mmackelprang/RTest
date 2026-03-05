@@ -675,7 +675,7 @@
             <MudGrid Spacing="2">
               <MudItem xs="12">
                 <MudAlert Severity="Severity.Info" Dense="true">
-                  AcoustID and MusicBrainz API keys are managed in the Secrets tab.
+                  Fingerprinting uses SongRec (Shazam) for audio recognition. MusicBrainz is used for cover art search.
                 </MudAlert>
               </MudItem>
               <MudItem xs="12" md="4">
@@ -1318,46 +1318,6 @@
           }
         </MudTabPanel>
 
-        <!-- AcoustID Secret -->
-        <MudTabPanel Text="AcoustID">
-          @if (_acoustIdSecret != null)
-          {
-            <MudGrid Spacing="2">
-              <MudItem xs="12">
-                <MudAlert Severity="Severity.Info" Dense="true">
-                  AcoustID API key for audio fingerprinting. Get your key from <a href="https://acoustid.org/new-application" target="_blank">AcoustID</a>.
-                </MudAlert>
-              </MudItem>
-              <MudItem xs="12">
-                <MudTextField T="string" @bind-Value="_acoustIdSecret.ApiKey" Label="API Key - ${secret:acoustid_api_key}"
-                              Variant="Variant.Outlined" 
-                              InputType="@(_showAcoustIdApiKey ? InputType.Text : InputType.Password)"
-                              Adornment="Adornment.End"
-                              AdornmentIcon="@(_showAcoustIdApiKey ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
-                              OnAdornmentClick="@(() => _showAcoustIdApiKey = !_showAcoustIdApiKey)"
-                              HelperText="AcoustID application API key"
-                              Class="@(string.IsNullOrWhiteSpace(_acoustIdSecret.ApiKey) ? "secret-empty" : "secret-filled")" />
-              </MudItem>
-              <MudItem xs="12">
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAcoustIdSecretAsync"
-                           StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving" Class="mr-2">
-                  @if (_isSaving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
-                  Save Secret
-                </MudButton>
-                <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="ClearAcoustIdSecretAsync"
-                           StartIcon="@Icons.Material.Filled.DeleteForever" Disabled="@_isSaving">
-                  Clear
-                </MudButton>
-              </MudItem>
-            </MudGrid>
-          }
-          else
-          {
-            <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
-            <MudText Class="ml-2">Loading AcoustID secret...</MudText>
-          }
-        </MudTabPanel>
-
       </MudTabs>
       </div>
     </MudTabPanel>
@@ -1844,12 +1804,9 @@
 
   // Secrets
   private TTSSecretsDto? _ttsSecrets;
-  private AcoustIdSecretDto? _acoustIdSecret;
-  
   // Secrets visibility toggles
   private bool _showGoogleApiKey = false;
   private bool _showAzureApiKey = false;
-  private bool _showAcoustIdApiKey = false;
 
   // Store Management (Phase 5)
   private ConfigurationStoreInfoDto? _storeInfo;
@@ -2912,7 +2869,6 @@
     {
       // Load or create secrets with default values (empty)
       _ttsSecrets = await LoadOrCreateSecretAsync<TTSSecretsDto>("tts");
-      _acoustIdSecret = await LoadOrCreateSecretAsync<AcoustIdSecretDto>("acoustid");
     }
     catch (Exception ex)
     {
@@ -3042,32 +2998,6 @@
           _ttsSecrets.GoogleAPIKey = "";
           _ttsSecrets.AzureAPIKey = "";
           _ttsSecrets.AzureRegion = "";
-        }
-      }
-    );
-  }
-
-  private async Task SaveAcoustIdSecretAsync()
-  {
-    await SaveSecretsAsync(
-      "acoustid",
-      _acoustIdSecret,
-      "AcoustID",
-      () => _showAcoustIdApiKey = false
-    );
-  }
-
-  private async Task ClearAcoustIdSecretAsync()
-  {
-    await ClearSecretsAsync(
-      "acoustid",
-      _acoustIdSecret,
-      "AcoustID",
-      () =>
-      {
-        if (_acoustIdSecret != null)
-        {
-          _acoustIdSecret.ApiKey = "";
         }
       }
     );

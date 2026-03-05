@@ -4,7 +4,7 @@ namespace Radio.Core.Interfaces.Audio;
 
 /// <summary>
 /// Service for recognizing audio using SongRec (Shazam).
-/// Used as a fallback when AcoustID/Chromaprint fails to identify live audio sources.
+/// The sole recognizer for all audio sources (radio, vinyl, file, USB).
 /// </summary>
 public interface ISongRecRecognitionService
 {
