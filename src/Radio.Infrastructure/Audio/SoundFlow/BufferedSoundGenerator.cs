@@ -76,14 +76,14 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     /// <param name="engine">The SoundFlow audio engine.</param>
     /// <param name="format">The audio format for output.</param>
     /// <param name="logger">Logger for diagnostic output.</param>
-    /// <param name="maxBufferSeconds">Maximum seconds of audio to buffer (default: 2).</param>
+    /// <param name="maxBufferSeconds">Maximum seconds of audio to buffer (default: 4).</param>
     /// <param name="overflowStrategy">Strategy for buffer overflow (default: DropOldest).</param>
     /// <param name="metricsCollector">Optional metrics collector for pipeline metrics.</param>
     public BufferedSoundGenerator(
         AudioEngine engine,
         AudioFormat format,
         ILogger logger,
-        float maxBufferSeconds = 2.0f,
+        float maxBufferSeconds = 4.0f,
         BufferOverflowStrategy overflowStrategy = BufferOverflowStrategy.DropOldest,
         IMetricsCollector? metricsCollector = null)
         : base(engine, format)
@@ -387,8 +387,8 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     /// Call this BEFORE adding the generator to the mixer to prevent startup underruns.
     /// Also protects against brief producer stalls (USB jitter, GC pauses).
     /// </summary>
-    /// <param name="seconds">Seconds of silence to pre-fill (default: 0.5).</param>
-    public void PreFillSilence(float seconds = 0.5f)
+    /// <param name="seconds">Seconds of silence to pre-fill (default: 1.5).</param>
+    public void PreFillSilence(float seconds = 1.5f)
     {
         var samplesToFill = (int)(Format.SampleRate * Format.Channels * seconds);
         samplesToFill = Math.Min(samplesToFill, _maxBufferSamples / 2); // Never exceed half capacity

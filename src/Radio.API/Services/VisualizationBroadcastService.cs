@@ -3,6 +3,9 @@ using Radio.API.Hubs;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
 
+// AudioVisualizationHub.ConnectedClients is used to skip all visualization work
+// (FFT, waveform, level metering, SignalR broadcasts) when no UI clients are watching.
+
 namespace Radio.API.Services;
 
 /// <summary>
@@ -16,9 +19,10 @@ public class VisualizationBroadcastService : BackgroundService
   private readonly IVisualizerService _visualizerService;
 
   /// <summary>
-  /// Gets or sets the target frame rate for broadcasts (default: 30 fps).
+  /// Gets or sets the target frame rate for broadcasts (default: 20 fps).
+  /// Lower rates reduce CPU/memory pressure on resource-constrained hardware.
   /// </summary>
-  public int TargetFrameRate { get; set; } = 30;
+  public int TargetFrameRate { get; set; } = 20;
 
   /// <summary>
   /// Gets or sets whether broadcasting is enabled (default: true).
@@ -46,17 +50,42 @@ public class VisualizationBroadcastService : BackgroundService
     _logger.LogInformation("VisualizationBroadcastService starting with target frame rate: {FrameRate} fps", TargetFrameRate);
 
     var frameDelay = TimeSpan.FromMilliseconds(1000.0 / TargetFrameRate);
+    var idleDelay = TimeSpan.FromMilliseconds(500); // Check less often when no clients
+    var wasProcessing = false;
 
     while (!stoppingToken.IsCancellationRequested)
     {
       try
       {
-        if (IsEnabled && _visualizerService.IsActive)
-        {
-          await BroadcastVisualizationDataAsync(stoppingToken);
-        }
+        var hasClients = AudioVisualizationHub.ConnectedClients > 0;
 
-        await Task.Delay(frameDelay, stoppingToken);
+        // Enable/disable sample processing based on whether anyone is watching.
+        // When disabled, VisualizerService.ProcessSamples() becomes a no-op,
+        // eliminating FFT, level metering, waveform buffering, and all related
+        // lock contention and memory allocations on the audio thread.
+        _visualizerService.IsProcessingEnabled = hasClients && IsEnabled;
+
+        if (hasClients && IsEnabled && _visualizerService.IsActive)
+        {
+          if (!wasProcessing)
+          {
+            _logger.LogInformation(
+              "Visualization broadcasting resumed ({Clients} client(s) connected)",
+              AudioVisualizationHub.ConnectedClients);
+          }
+          wasProcessing = true;
+          await BroadcastVisualizationDataAsync(stoppingToken);
+          await Task.Delay(frameDelay, stoppingToken);
+        }
+        else
+        {
+          if (wasProcessing)
+          {
+            _logger.LogInformation("Visualization broadcasting paused (no clients connected)");
+          }
+          wasProcessing = false;
+          await Task.Delay(idleDelay, stoppingToken);
+        }
       }
       catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
       {
@@ -70,6 +99,7 @@ public class VisualizationBroadcastService : BackgroundService
       }
     }
 
+    _visualizerService.IsProcessingEnabled = false;
     _logger.LogInformation("VisualizationBroadcastService stopped");
   }
 

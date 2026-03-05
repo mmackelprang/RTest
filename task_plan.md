@@ -1,10 +1,10 @@
 # Task Plan
 
 ## Goal
-Build a polished audio console with reliable song identification, rich metadata display, and smooth UX. SongRec (Shazam) is the primary recognition engine for live sources; AcoustID for local files only. RDS provides station identity for FM radio. Modern observability dashboard for system health. Responsive touch UX.
+Build a polished audio console with reliable song identification, rich metadata display, and smooth UX. SongRec (Shazam) is the sole recognition engine for all sources. RDS provides station identity for FM radio. Modern observability dashboard for system health. Responsive touch UX.
 
 ## Current Phase
-Phase 10 — Smart Fingerprinting (pending)
+Phase 14 — Audio Distortion / CPU Investigation (in_progress)
 
 ## Phases
 
@@ -19,10 +19,10 @@ Phase 10 — Smart Fingerprinting (pending)
 | 7 | UX polish | complete | Virtual keyboard auto-show for dialogs, RDS preset auto-naming. PR #288 merged. |
 | 8 | Session persistence | complete | Source auto-activation, file player queue/position restore. PR #288 merged. |
 | 9 | Metrics dashboard redesign | complete | Grafana-inspired layout: hero stat cards, canvas time-series chart, collapsible categories. PR #290 merged. |
-| 10 | Smart fingerprinting (remove AcoustID) | pending | Event-driven recognition for BT/File; remove AcoustID; SongRec-only for all sources |
+| 10 | Smart fingerprinting (remove AcoustID) | complete | Removed AcoustID/Chromaprint entirely. SongRec sole recognizer. 10 new metrics. PR #291 merged. |
 | 11 | Radio preset naming format | complete | `{Band} {CallSign} {Frequency}` format. PR #289 merged. |
 | 12 | Numeric keypad mode | complete | Auto-detect numeric inputs, compact 4×4 numpad. PR #289 merged. |
-| 13 | AB13X USB input debug | pending | Investigate why USB audio input stopped working |
+| 13 | AB13X USB input debug | complete | PipeWire Monitor loopback matched instead of physical input. PR #292 merged. |
 | 14 | Audio distortion / CPU investigation | pending | Diagnose periodic distortion correlated with UI/metrics loading |
 
 ---

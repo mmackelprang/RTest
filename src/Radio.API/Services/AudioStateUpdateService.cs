@@ -41,6 +41,12 @@ public class AudioStateUpdateService : BackgroundService
   /// </summary>
   public bool IsEnabled { get; set; } = true;
 
+  // Throttle fingerprint status broadcasts to max once per 3 seconds.
+  // The fingerprint service fires StatusChanged rapidly during identification cycles,
+  // and each broadcast causes the Web client to make an HTTP API call + re-render.
+  private DateTime _lastFingerprintBroadcast = DateTime.MinValue;
+  private static readonly TimeSpan FingerprintBroadcastThrottle = TimeSpan.FromSeconds(3);
+
   // Cached state to detect changes
   private PlaybackStateDto? _lastPlaybackState;
   private NowPlayingDto? _lastNowPlaying;
@@ -776,6 +782,11 @@ public class AudioStateUpdateService : BackgroundService
   {
     try
     {
+      var now = DateTime.UtcNow;
+      if (now - _lastFingerprintBroadcast < FingerprintBroadcastThrottle)
+        return;
+      _lastFingerprintBroadcast = now;
+
       var dto = snapshot.MapToDto();
       await _hubContext.Clients.All.SendAsync("FingerprintStatusChanged", dto);
     }

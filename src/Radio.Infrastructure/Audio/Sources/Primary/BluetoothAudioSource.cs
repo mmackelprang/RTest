@@ -386,7 +386,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
         // Pre-fill with silence to cushion against capture startup latency and
         // ongoing jitter from the audio capture device callback timing.
-        _captureGenerator.PreFillSilence(0.5f);
+        _captureGenerator.PreFillSilence(1.5f);
 
         _captureDevice.OnAudioProcessed += OnCaptureAudioProcessed;
         _captureDevice.Start();
@@ -754,6 +754,51 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
     MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = coverArtUrl;
     Logger.LogInformation("Cover art found for '{Title}' by '{Artist}': {Url}", title, artist, coverArtUrl);
+
+    // Update the most recent BT play history entry with the resolved cover art
+    await UpdateRecentPlayHistoryCoverArtAsync(coverArtUrl, title, artist);
+  }
+
+  /// <summary>
+  /// Updates the most recent Bluetooth play history entry's cover art URL.
+  /// Called after async MusicBrainz/CoverArtArchive lookup completes.
+  /// </summary>
+  private async Task UpdateRecentPlayHistoryCoverArtAsync(string coverArtUrl, string title, string artist)
+  {
+    try
+    {
+      if (_serviceScopeFactory == null) return;
+
+      using var scope = _serviceScopeFactory.CreateScope();
+      var playHistoryRepo = scope.ServiceProvider.GetService<IPlayHistoryRepository>();
+      var metadataRepo = scope.ServiceProvider.GetService<ITrackMetadataRepository>();
+      if (playHistoryRepo == null || metadataRepo == null) return;
+
+      // Find the most recent BT entry that matches this track
+      var recentEntries = await playHistoryRepo.GetRecentAsync(5);
+      var btEntry = recentEntries?.FirstOrDefault(e =>
+        e.Source == PlaySource.Bluetooth &&
+        string.Equals(e.Track?.Title, title, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(e.Track?.Artist, artist, StringComparison.OrdinalIgnoreCase) &&
+        string.IsNullOrEmpty(e.Track?.CoverArtUrl));
+
+      if (btEntry?.Track != null && !string.IsNullOrEmpty(btEntry.TrackMetadataId))
+      {
+        var updatedMetadata = btEntry.Track with
+        {
+          CoverArtUrl = coverArtUrl,
+          UpdatedAt = DateTime.UtcNow
+        };
+        await metadataRepo.StoreAsync(updatedMetadata);
+        Logger.LogDebug(
+          "Updated play history cover art for '{Title}' by '{Artist}'",
+          title, artist);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "Failed to update play history cover art for '{Title}' by '{Artist}'", title, artist);
+    }
   }
 
   /// <summary>

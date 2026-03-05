@@ -30,6 +30,12 @@ public interface IVisualizerService : IDisposable
   bool IsActive { get; }
 
   /// <summary>
+  /// Gets or sets whether sample processing is enabled. When false, ProcessSamples
+  /// is a no-op — used to skip FFT/level/waveform work when no UI clients are connected.
+  /// </summary>
+  bool IsProcessingEnabled { get; set; }
+
+  /// <summary>
   /// Gets the configured sample rate.
   /// </summary>
   int SampleRate { get; }

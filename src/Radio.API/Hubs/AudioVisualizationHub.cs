@@ -22,6 +22,12 @@ public class AudioVisualizationHub : Hub
   private static int _connectedClients;
 
   /// <summary>
+  /// Gets the current number of connected visualization clients.
+  /// Used by VisualizationBroadcastService to skip work when nobody is watching.
+  /// </summary>
+  public static int ConnectedClients => _connectedClients;
+
+  /// <summary>
   /// Initializes a new instance of the AudioVisualizationHub.
   /// </summary>
   /// <param name="logger">The logger instance.</param>

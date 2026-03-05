@@ -37,13 +37,13 @@ public class SDRSoundGenerator : SoundComponent
   /// <param name="format">The audio format for output.</param>
   /// <param name="radioReceiver">The RTL-SDR radio receiver providing demodulated audio.</param>
   /// <param name="logger">Logger for diagnostic output.</param>
-  /// <param name="maxBufferSeconds">Maximum seconds of audio to buffer (default: 2).</param>
+  /// <param name="maxBufferSeconds">Maximum seconds of audio to buffer (default: 4).</param>
   public SDRSoundGenerator(
     AudioEngine engine,
     AudioFormat format,
     RadioReceiver radioReceiver,
     ILogger logger,
-    float maxBufferSeconds = 2.0f)
+    float maxBufferSeconds = 4.0f)
     : base(engine, format)
   {
     _radioReceiver = radioReceiver ?? throw new ArgumentNullException(nameof(radioReceiver));
