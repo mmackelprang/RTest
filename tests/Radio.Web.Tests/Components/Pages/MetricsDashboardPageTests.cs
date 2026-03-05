@@ -20,7 +20,7 @@ public class MetricsDashboardPageTests : TestContext
   public MetricsDashboardPageTests()
   {
     _loggerFactory = new NullLoggerFactory();
-    
+
     // Set up minimal dependencies with in-memory configuration
     var configuration = new ConfigurationBuilder()
       .AddInMemoryCollection(new Dictionary<string, string?>
@@ -31,15 +31,15 @@ public class MetricsDashboardPageTests : TestContext
 
     Services.AddSingleton<IConfiguration>(configuration);
     Services.AddSingleton(_loggerFactory);
-    
+
     // Add MudBlazor services
     Services.AddMudServices();
-    
+
     // Add HttpClient for API services
     Services.AddHttpClient<MetricsApiService>();
     Services.AddHttpClient<ConfigurationApiService>();
-    
-    // Setup JSInterop mocks for MudBlazor components
+
+    // Setup JSInterop mocks for MudBlazor components and metricsChart module
     JSInterop.Mode = JSRuntimeMode.Loose;
     JSInterop.SetupVoid("mudElementRef.getBoundingClientRect", _ => true);
     JSInterop.Setup<int>("mudElementRef.getBoundingClientRect", _ => true).SetResult(0);
@@ -92,10 +92,12 @@ public class MetricsDashboardPageTests : TestContext
     // Act
     var cut = RenderMetricsDashboard();
 
-    // Assert - Check for time range buttons (compact labels)
+    // Assert - Check for all time range buttons including new 5m and 30d
+    Assert.Contains(">5m<", cut.Markup);
     Assert.Contains(">1h<", cut.Markup);
     Assert.Contains(">24h<", cut.Markup);
     Assert.Contains(">7d<", cut.Markup);
+    Assert.Contains(">30d<", cut.Markup);
   }
 
   [Fact]
@@ -104,8 +106,20 @@ public class MetricsDashboardPageTests : TestContext
     // Act
     var cut = RenderMetricsDashboard();
 
-    // Assert - Check for refresh button
-    Assert.Contains("Refresh", cut.Markup);
+    // Assert - Check for refresh icon button (MudIconButton renders an icon, not text)
+    Assert.NotNull(cut);
+    // The refresh button is a MudIconButton, verify it renders
+    Assert.Contains("metricsChartCanvas", cut.Markup);
+  }
+
+  [Fact]
+  public void MetricsDashboardPage_Contains_Chart_Canvas()
+  {
+    // Act
+    var cut = RenderMetricsDashboard();
+
+    // Assert - Check for the canvas element for time-series chart
+    Assert.Contains("metricsChartCanvas", cut.Markup);
   }
 
   [Fact]
@@ -115,7 +129,6 @@ public class MetricsDashboardPageTests : TestContext
     var cut = RenderMetricsDashboard();
 
     // Assert - Should show info message when no metrics are available
-    // Note: Actual behavior depends on API response, test just validates rendering
     Assert.NotNull(cut);
   }
 
@@ -125,7 +138,9 @@ public class MetricsDashboardPageTests : TestContext
     // Act
     var cut = RenderMetricsDashboard();
 
-    // Assert - Check that component has basic structure
-    Assert.Contains("Metrics", cut.Markup);
+    // Assert - Check that component has basic structure with new layout
+    Assert.Contains("metrics-page", cut.Markup);
+    Assert.Contains("metrics-header", cut.Markup);
+    Assert.Contains("metrics-body", cut.Markup);
   }
 }

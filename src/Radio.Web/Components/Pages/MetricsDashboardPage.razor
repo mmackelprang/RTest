@@ -1,158 +1,160 @@
 @page "/metrics"
 @inject MetricsApiService MetricsApi
 @inject ConfigurationApiService ConfigApi
+@inject IJSRuntime JS
 @inject ILogger<MetricsDashboardPage> Logger
 @inject ISnackbar Snackbar
-@implements IDisposable
+@implements IAsyncDisposable
 
 <PageTitle>Metrics Dashboard</PageTitle>
 
-<div style="height: 100%; display: flex; gap: 2px; overflow: hidden;">
-  <!-- Left: Filters & Controls -->
-  <div class="panel surface-raised" style="width: 300px; flex-shrink: 0; overflow-y: auto; padding: 16px;">
-    <MudStack Spacing="3">
-      <MudText Typo="Typo.h6">Metrics</MudText>
-
-      <div class="route-group" style="padding: 4px 8px; flex-wrap: wrap;">
-        <div class="route-toggle @(_timeRange == "1h" ? "route-active" : "")"
-             style="width: auto; padding: 0 12px; height: 36px; border-radius: 16px; font-size: 14px; font-weight: 600;"
-             @onclick="@(async () => await SetTimeRangeAsync("1h"))">1h</div>
-        <div class="route-toggle @(_timeRange == "24h" ? "route-active" : "")"
-             style="width: auto; padding: 0 12px; height: 36px; border-radius: 16px; font-size: 14px; font-weight: 600;"
-             @onclick="@(async () => await SetTimeRangeAsync("24h"))">24h</div>
-        <div class="route-toggle @(_timeRange == "7d" ? "route-active" : "")"
-             style="width: auto; padding: 0 12px; height: 36px; border-radius: 16px; font-size: 14px; font-weight: 600;"
-             @onclick="@(async () => await SetTimeRangeAsync("7d"))">7d</div>
-      </div>
-
-      <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
-                 OnClick="LoadAllDataAsync" StartIcon="@Icons.Material.Filled.Refresh">
-        Refresh
-      </MudButton>
-
-      @if (_loading)
+<div class="metrics-page">
+  <!-- Header bar -->
+  <div class="metrics-header">
+    <span class="metrics-title">Metrics</span>
+    <div class="route-group" style="padding: 4px 8px; flex-wrap: wrap;">
+      @foreach (var range in _timeRanges)
       {
-        <MudProgressLinear Color="Color.Primary" Indeterminate="true" />
+        <div class="route-toggle @(_timeRange == range ? "route-active" : "")"
+             style="width: auto; padding: 0 12px; height: 36px; border-radius: 16px; font-size: 14px; font-weight: 600;"
+             @onclick="@(async () => await SetTimeRangeAsync(range))">@range</div>
       }
+    </div>
+    <div style="margin-left: auto;">
+      <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Primary"
+                     OnClick="LoadAllDataAsync" Size="Size.Medium" />
+    </div>
+  </div>
 
-      <!-- Category Filter Chips -->
-      @if (_categories.Count > 0)
+  @if (_loading)
+  {
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Style="height: 2px;" />
+  }
+
+  <div class="metrics-body">
+    <!-- Hero stat cards row -->
+    <div class="metrics-hero-row">
+      @foreach (var hero in GetHeroMetrics())
       {
-        <MudText Typo="Typo.caption" Style="color: var(--text-medium); text-transform: uppercase; letter-spacing: 0.05em;">Categories</MudText>
-        <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-          <MudChip T="string" Color="@(_selectedCategory == null ? Color.Primary : Color.Default)"
-                   Variant="@(_selectedCategory == null ? Variant.Filled : Variant.Outlined)"
-                   OnClick="@(() => { _selectedCategory = null; StateHasChanged(); })" Size="Size.Small">All</MudChip>
-          @foreach (var cat in _categories)
+        var thresholdColor = GetThresholdColor(hero.Key, hero.Value);
+        var isSelected = _selectedMetric == hero.Key;
+        <div class="metrics-hero-card @(isSelected ? "selected" : "")"
+             style="border-left-color: @thresholdColor;"
+             @onclick="@(async () => await SelectMetricAsync(hero.Key))">
+          <div class="metrics-hero-label">@GetMetricLabel(hero.Key)</div>
+          <div class="metrics-hero-value" style="color: @thresholdColor;">
+            @FormatMetricValue(hero.Value, hero.Key)
+          </div>
+          @if (_sparklineData.TryGetValue(hero.Key, out var points) && points.Count > 1)
           {
-            <MudChip T="string" Color="@(_selectedCategory == cat ? Color.Primary : Color.Default)"
-                     Variant="@(_selectedCategory == cat ? Variant.Filled : Variant.Outlined)"
-                     OnClick="@(() => { _selectedCategory = cat; StateHasChanged(); })" Size="Size.Small">
-              @cat (@GetCategoryCount(cat))
-            </MudChip>
+            <div style="margin-top: 4px; height: 50px;">
+              @((MarkupString)RenderSparkline(points, 200, 50, thresholdColor))
+            </div>
           }
         </div>
       }
-    </MudStack>
-  </div>
+    </div>
 
-  <!-- Right: Metric Cards + Detail -->
-  <div class="panel surface-raised" style="flex: 1; overflow-y: auto; padding: 16px;">
-    <MudGrid Spacing="2">
+    <!-- Time-series chart panel -->
+    <div class="metrics-chart-panel">
+      <div style="flex: 1; min-height: 0; position: relative;">
+        <canvas id="metricsChartCanvas" style="width: 100%; height: 100%; display: block;"></canvas>
+      </div>
+      @if (!string.IsNullOrEmpty(_selectedMetric) && _selectedMetricAggregate != null)
+      {
+        <div class="metrics-chart-stats">
+          <span><strong>@GetMetricLabel(_selectedMetric!)</strong></span>
+          <span>Count: <strong>@FormatScaled(_selectedMetricAggregate.Count)</strong></span>
+          <span>Avg: <strong>@FormatMetricValue(_selectedMetricAggregate.Average, _selectedMetric!)</strong></span>
+          <span>Min: <strong>@FormatMetricValue(_selectedMetricAggregate.Min, _selectedMetric!)</strong></span>
+          <span>Max: <strong>@FormatMetricValue(_selectedMetricAggregate.Max, _selectedMetric!)</strong></span>
+          <span>StdDev: <strong>@FormatMetricValue(_selectedMetricAggregate.StdDev, _selectedMetric!)</strong></span>
+        </div>
+      }
+    </div>
+
+    <!-- Collapsible category sections -->
+    <div class="metrics-categories">
       @if (_snapshots != null && _snapshots.Count > 0)
       {
-        @foreach (var snapshot in GetFilteredMetrics())
+        @foreach (var category in _categories)
         {
-          <MudItem xs="6" sm="4" md="3">
-            <MudCard Elevation="2" Style="cursor: pointer;" @onclick="@(() => ViewMetricDetailsAsync(snapshot.Key))">
-              <MudCardContent Style="padding: 12px;">
-                <MudText Typo="Typo.overline" Color="Color.Secondary" Style="letter-spacing: 1px;">
-                  @GetMetricCategory(snapshot.Key)
-                </MudText>
-                <MudText Typo="Typo.body2" Style="font-weight: 500; margin-bottom: 4px;">
-                  @GetMetricLabel(snapshot.Key)
-                </MudText>
-                <MudText Typo="Typo.h5" Color="Color.Primary">
-                  @FormatMetricValue(snapshot.Value, snapshot.Key)
-                </MudText>
-                @if (_sparklineData.TryGetValue(snapshot.Key, out var points) && points.Count > 1)
+          var isExpanded = _expandedCategories.Contains(category);
+          var catMetrics = GetMetricsForCategory(category).ToList();
+          <div class="metrics-category">
+            <div class="metrics-category-header" @onclick="@(() => ToggleCategory(category))">
+              <span class="metrics-category-arrow">@(isExpanded ? "\u25BE" : "\u25B8")</span>
+              <span class="metrics-category-name">@category</span>
+              <span class="metrics-category-count">(@catMetrics.Count)</span>
+            </div>
+            @if (isExpanded)
+            {
+              <div class="metrics-category-body">
+                @foreach (var metric in catMetrics)
                 {
-                  <div style="margin-top: 4px; height: 24px;">
-                    @((MarkupString)RenderSparkline(points, 200, 24))
+                  var isRowSelected = _selectedMetric == metric.Key;
+                  var trend = GetTrendIndicator(metric.Key);
+                  <div class="metrics-row @(isRowSelected ? "selected" : "")"
+                       @onclick="@(async () => await SelectMetricAsync(metric.Key))">
+                    <span class="metrics-row-label">@GetMetricLabel(metric.Key)</span>
+                    <span class="metrics-row-value">@FormatMetricValue(metric.Value, metric.Key)</span>
+                    @if (_sparklineData.TryGetValue(metric.Key, out var rowPoints) && rowPoints.Count > 1)
+                    {
+                      <span class="metrics-row-sparkline">
+                        @((MarkupString)RenderSparkline(rowPoints, 150, 20))
+                      </span>
+                    }
+                    <span class="metrics-row-trend @(trend.css)">@trend.symbol</span>
                   </div>
                 }
-              </MudCardContent>
-            </MudCard>
-          </MudItem>
+              </div>
+            }
+          </div>
         }
       }
       else if (!_loading)
       {
-        <MudItem xs="12">
-          <MudAlert Severity="Severity.Info">No metrics available. The backend may not be collecting metrics yet.</MudAlert>
-        </MudItem>
+        <div style="padding: 24px; text-align: center; color: var(--text-low);">
+          No metrics available. The backend may not be collecting metrics yet.
+        </div>
       }
-    </MudGrid>
-
-    <!-- Aggregate Statistics Detail -->
-    @if (_selectedMetricAggregate != null && !string.IsNullOrEmpty(_selectedMetric))
-    {
-      <MudCard Elevation="2">
-        <MudCardHeader>
-          <CardHeaderContent>
-            <MudText Typo="Typo.h6">@_selectedMetric</MudText>
-          </CardHeaderContent>
-          <CardHeaderActions>
-            <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Default" OnClick="@(() => _selectedMetric = null)" />
-          </CardHeaderActions>
-        </MudCardHeader>
-        <MudCardContent>
-          <MudGrid>
-            <MudItem xs="4" md="2">
-              <MudText Typo="Typo.caption">Count</MudText>
-              <MudText Typo="Typo.h6">@FormatScaled(_selectedMetricAggregate.Count)</MudText>
-            </MudItem>
-            <MudItem xs="4" md="2">
-              <MudText Typo="Typo.caption">Average</MudText>
-              <MudText Typo="Typo.h6">@FormatMetricValue(_selectedMetricAggregate.Average, _selectedMetric!)</MudText>
-            </MudItem>
-            <MudItem xs="4" md="2">
-              <MudText Typo="Typo.caption">Min</MudText>
-              <MudText Typo="Typo.h6">@FormatMetricValue(_selectedMetricAggregate.Min, _selectedMetric!)</MudText>
-            </MudItem>
-            <MudItem xs="4" md="2">
-              <MudText Typo="Typo.caption">Max</MudText>
-              <MudText Typo="Typo.h6">@FormatMetricValue(_selectedMetricAggregate.Max, _selectedMetric!)</MudText>
-            </MudItem>
-            <MudItem xs="4" md="2">
-              <MudText Typo="Typo.caption">Std Dev</MudText>
-              <MudText Typo="Typo.h6">@FormatMetricValue(_selectedMetricAggregate.StdDev, _selectedMetric!)</MudText>
-            </MudItem>
-            <MudItem xs="4" md="2">
-              <MudText Typo="Typo.caption">Sum</MudText>
-              <MudText Typo="Typo.h6">@FormatMetricValue(_selectedMetricAggregate.Sum, _selectedMetric!)</MudText>
-            </MudItem>
-          </MudGrid>
-        </MudCardContent>
-      </MudCard>
-    }
-
+    </div>
   </div>
 </div>
 
 @code {
+  private static readonly string[] _timeRanges = ["5m", "1h", "24h", "7d", "30d"];
+
   private string _timeRange = "1h";
   private bool _loading = false;
   private System.Threading.Timer? _refreshTimer;
+  private IJSObjectReference? _jsModule;
+  private bool _chartInitialized;
 
   private List<string>? _availableMetrics;
   private Dictionary<string, double>? _snapshots;
   private string? _selectedMetric;
   private MetricAggregateDto? _selectedMetricAggregate;
-  private string? _selectedCategory;
   private List<string> _categories = new();
+  private HashSet<string> _expandedCategories = new();
   private Dictionary<string, List<double>> _sparklineData = new();
   private Dictionary<string, List<MetricHistoryDto>> _sparklineHistory = new();
+
+  // Hero metrics: pinned top-level metrics by name pattern
+  private static readonly string[] _heroPatterns =
+    ["cpu", "memory", "buffer", "underrun", "error", "active"];
+
+  // Threshold definitions: (warning, critical) by metric name fragment
+  private static readonly Dictionary<string, (double warn, double crit, bool invertAbove)> _thresholds = new()
+  {
+    ["cpu_temp"] = (70, 85, true),
+    ["cpu_usage"] = (80, 95, true),
+    ["memory_percent"] = (80, 95, true),
+    ["buffer_fill"] = (50, 20, false),     // below warn=amber, below crit=red
+    ["buffer_percent"] = (50, 20, false),
+    ["underrun"] = (1, 10, true),
+    ["error"] = (1, 10, true),
+  };
 
   protected override async Task OnInitializedAsync()
   {
@@ -164,8 +166,31 @@
       await LoadSnapshotsAsync();
       await LoadSparklineDataAsync();
       UpdateCardValuesFromSparklines();
+      if (!string.IsNullOrEmpty(_selectedMetric))
+        await RenderChartForSelectedMetricAsync();
       await InvokeAsync(StateHasChanged);
     }, null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+  }
+
+  protected override async Task OnAfterRenderAsync(bool firstRender)
+  {
+    if (firstRender)
+    {
+      try
+      {
+        _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/metricsChart.js");
+        var success = await _jsModule.InvokeAsync<bool>("metricsChart.init", "metricsChartCanvas");
+        _chartInitialized = success;
+
+        // If we already have a selected metric, render it
+        if (_chartInitialized && !string.IsNullOrEmpty(_selectedMetric))
+          await RenderChartForSelectedMetricAsync();
+      }
+      catch (Exception ex)
+      {
+        Logger.LogError(ex, "Error initializing metrics chart canvas");
+      }
+    }
   }
 
   private async Task LoadPreferencesAsync()
@@ -195,7 +220,7 @@
     await LoadSparklineDataAsync();
     UpdateCardValuesFromSparklines();
     if (!string.IsNullOrWhiteSpace(_selectedMetric))
-      await ViewMetricDetailsAsync(_selectedMetric);
+      await SelectMetricAsync(_selectedMetric);
   }
 
   private async Task LoadAllDataAsync()
@@ -208,6 +233,14 @@
       UpdateCategories();
       await LoadSparklineDataAsync();
       UpdateCardValuesFromSparklines();
+
+      // Auto-select first hero metric
+      if (string.IsNullOrEmpty(_selectedMetric))
+      {
+        var heroes = GetHeroMetrics().ToList();
+        if (heroes.Count > 0)
+          _selectedMetric = heroes[0].Key;
+      }
     }
     finally { _loading = false; }
   }
@@ -233,15 +266,9 @@
     if (_availableMetrics == null || _snapshots == null) return;
 
     var (start, end) = GetTimeRangeFromSelection();
-    var resolution = _timeRange switch
-    {
-      "1h" => "Minute",
-      "24h" => "Hour",
-      "7d" => "Hour",
-      _ => "Minute"
-    };
+    var resolution = GetResolution();
 
-    // Load sparkline data in parallel for visible metrics (max 20 to avoid overload)
+    // Load sparkline data in parallel for visible metrics (max 20)
     var metricsToLoad = _snapshots.Keys.Take(20).ToList();
     var tasks = metricsToLoad.Select(async key =>
     {
@@ -251,7 +278,7 @@
         if (history != null && history.Count > 1)
           return (key, points: history.Select(h => h.Value).ToList(), history: (List<MetricHistoryDto>?)history);
       }
-      catch (Exception ex) { Logger.LogDebug(ex, "Failed to load sparkline data for metric {Key}", key); }
+      catch (Exception ex) { Logger.LogDebug(ex, "Failed to load sparkline for {Key}", key); }
       return (key, points: (List<double>?)null, history: (List<MetricHistoryDto>?)null);
     });
 
@@ -260,18 +287,11 @@
     _sparklineHistory.Clear();
     foreach (var (key, points, history) in results)
     {
-      if (points != null)
-        _sparklineData[key] = points;
-      if (history != null)
-        _sparklineHistory[key] = history;
+      if (points != null) _sparklineData[key] = points;
+      if (history != null) _sparklineHistory[key] = history;
     }
   }
 
-  /// <summary>
-  /// Derives time-range-scoped card values from sparkline history data.
-  /// Counters (bytes, count, total): use last - first to show period delta.
-  /// Gauges (usage, ratio, percent, memory): use the latest value.
-  /// </summary>
   private void UpdateCardValuesFromSparklines()
   {
     if (_snapshots == null || _sparklineHistory.Count == 0) return;
@@ -298,16 +318,95 @@
 
       if (isCounter)
       {
-        // For counters, sum Value * Count across all buckets for the total over the time range
         var totalDelta = history.Sum(h => h.Value * h.Count);
         _snapshots[key] = Math.Max(0, totalDelta);
       }
       else
       {
-        // For gauges, show the latest value in the range
         _snapshots[key] = history.Last().Value;
       }
     }
+  }
+
+  private async Task SelectMetricAsync(string metricKey)
+  {
+    _selectedMetric = metricKey;
+    _loading = true;
+    try
+    {
+      // Ensure we have history for this metric
+      if (!_sparklineHistory.ContainsKey(metricKey))
+      {
+        var (start, end) = GetTimeRangeFromSelection();
+        var resolution = GetResolution();
+        var history = await MetricsApi.GetMetricHistoryAsync(metricKey, start, end, resolution);
+        if (history != null && history.Count > 1)
+        {
+          _sparklineHistory[metricKey] = history;
+          _sparklineData[metricKey] = history.Select(h => h.Value).ToList();
+        }
+      }
+
+      // Compute aggregate stats from history data
+      _selectedMetricAggregate = ComputeAggregateFromHistory(metricKey);
+
+      await RenderChartForSelectedMetricAsync();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to load details for {Key}", metricKey);
+      Snackbar.Add($"Failed to load details for {metricKey}", Severity.Error);
+    }
+    finally { _loading = false; }
+  }
+
+  private MetricAggregateDto? ComputeAggregateFromHistory(string metricKey)
+  {
+    if (!_sparklineHistory.TryGetValue(metricKey, out var history) || history.Count == 0)
+      return null;
+
+    var values = history.Select(h => h.Value).ToList();
+    var count = history.Sum(h => h.Count);
+    var sum = values.Sum();
+    var avg = values.Average();
+    var min = history.Min(h => h.Min ?? h.Value);
+    var max = history.Max(h => h.Max ?? h.Value);
+    var variance = values.Count > 1
+      ? values.Sum(v => (v - avg) * (v - avg)) / (values.Count - 1)
+      : 0;
+    var stdDev = Math.Sqrt(variance);
+
+    return new MetricAggregateDto(count, sum, avg, min, max, stdDev);
+  }
+
+  private async Task RenderChartForSelectedMetricAsync()
+  {
+    if (!_chartInitialized || _jsModule == null || string.IsNullOrEmpty(_selectedMetric)) return;
+    if (!_sparklineHistory.TryGetValue(_selectedMetric!, out var history) || history.Count < 2) return;
+
+    try
+    {
+      var labels = history.Select(h => FormatTimestamp(h.Timestamp)).ToArray();
+      var values = history.Select(h => h.Value).ToArray();
+      var min = history.Select(h => h.Min ?? h.Value).ToArray();
+      var max = history.Select(h => h.Max ?? h.Value).ToArray();
+
+      var chartData = new { labels, values, min, max };
+      var thresholdColor = GetThresholdColor(_selectedMetric!, _snapshots?.GetValueOrDefault(_selectedMetric!, 0) ?? 0);
+      var chartOptions = new
+      {
+        color = thresholdColor == "var(--signal-red)" ? "#F87171" :
+                thresholdColor == "var(--signal-amber)" ? "#F0A830" : "#5CD4E8",
+        fillOpacity = 0.15,
+        unit = GetMetricUnit(_selectedMetric!),
+        thresholds = GetChartThresholds(_selectedMetric!)
+      };
+
+      await _jsModule.InvokeVoidAsync("metricsChart.render", "metricsChartCanvas", chartData, chartOptions);
+    }
+    catch (TaskCanceledException) { }
+    catch (OperationCanceledException) { }
+    catch (Exception ex) { Logger.LogError(ex, "Error rendering metrics chart"); }
   }
 
   private void UpdateCategories()
@@ -318,35 +417,82 @@
       .Distinct()
       .OrderBy(c => c)
       .ToList();
+
+    // Expand all categories by default
+    if (_expandedCategories.Count == 0)
+      _expandedCategories = new HashSet<string>(_categories);
   }
 
-  private int GetCategoryCount(string category)
+  private void ToggleCategory(string category)
   {
-    return _snapshots?.Keys.Count(k => GetMetricCategory(k) == category) ?? 0;
+    if (!_expandedCategories.Remove(category))
+      _expandedCategories.Add(category);
   }
 
-  private IEnumerable<KeyValuePair<string, double>> GetFilteredMetrics()
+  private IEnumerable<KeyValuePair<string, double>> GetHeroMetrics()
   {
     if (_snapshots == null) return Enumerable.Empty<KeyValuePair<string, double>>();
-    var metrics = _snapshots.AsEnumerable();
-    if (_selectedCategory != null)
-      metrics = metrics.Where(m => GetMetricCategory(m.Key) == _selectedCategory);
-    return metrics.OrderBy(m => GetMetricCategory(m.Key)).ThenBy(m => m.Key);
+    return _snapshots
+      .Where(m => _heroPatterns.Any(p => m.Key.ToLowerInvariant().Contains(p)))
+      .OrderBy(m => Array.FindIndex(_heroPatterns, p => m.Key.ToLowerInvariant().Contains(p)))
+      .Take(6);
   }
 
-  private async Task ViewMetricDetailsAsync(string metricKey)
+  private IEnumerable<KeyValuePair<string, double>> GetMetricsForCategory(string category)
   {
-    _selectedMetric = metricKey;
-    _loading = true;
-    try
+    if (_snapshots == null) return Enumerable.Empty<KeyValuePair<string, double>>();
+    return _snapshots.Where(m => GetMetricCategory(m.Key) == category).OrderBy(m => m.Key);
+  }
+
+  private string GetThresholdColor(string metricKey, double value)
+  {
+    var keyLower = metricKey.ToLowerInvariant();
+    foreach (var (pattern, (warn, crit, invertAbove)) in _thresholds)
     {
-      var (start, end) = GetTimeRangeFromSelection();
-      _selectedMetricAggregate = await MetricsApi.GetMetricAggregateAsync(metricKey, start, end);
-      if (_selectedMetricAggregate == null)
-        Snackbar.Add($"No data available for {metricKey}", Severity.Warning);
+      if (!keyLower.Contains(pattern)) continue;
+      if (invertAbove)
+      {
+        if (value >= crit) return "var(--signal-red)";
+        if (value >= warn) return "var(--signal-amber)";
+      }
+      else
+      {
+        if (value <= crit) return "var(--signal-red)";
+        if (value <= warn) return "var(--signal-amber)";
+      }
+      return "var(--signal-green)";
     }
-    catch { Snackbar.Add($"Failed to load details for {metricKey}", Severity.Error); }
-    finally { _loading = false; }
+    return "var(--accent-primary)";
+  }
+
+  private object[]? GetChartThresholds(string metricKey)
+  {
+    var keyLower = metricKey.ToLowerInvariant();
+    foreach (var (pattern, (warn, crit, _)) in _thresholds)
+    {
+      if (!keyLower.Contains(pattern)) continue;
+      return new object[]
+      {
+        new { value = warn, color = "#F0A830", label = "Warning" },
+        new { value = crit, color = "#F87171", label = "Critical" }
+      };
+    }
+    return null;
+  }
+
+  private (string symbol, string css) GetTrendIndicator(string metricKey)
+  {
+    if (!_sparklineData.TryGetValue(metricKey, out var points) || points.Count < 3)
+      return ("\u2014", "trend-flat");
+
+    var recent = points.Skip(points.Count - 3).Average();
+    var older = points.Take(3).Average();
+    if (older == 0) return ("\u2014", "trend-flat");
+
+    var change = (recent - older) / Math.Abs(older);
+    if (change > 0.05) return ("\u25B2", "trend-up");
+    if (change < -0.05) return ("\u25BC", "trend-down");
+    return ("\u2014", "trend-flat");
   }
 
   private (DateTime start, DateTime end) GetTimeRangeFromSelection()
@@ -354,12 +500,33 @@
     var end = DateTime.UtcNow;
     var start = _timeRange switch
     {
+      "5m" => end.AddMinutes(-5),
       "1h" => end.AddHours(-1),
       "24h" => end.AddHours(-24),
       "7d" => end.AddDays(-7),
+      "30d" => end.AddDays(-30),
       _ => end.AddHours(-1)
     };
     return (start, end);
+  }
+
+  private string GetResolution()
+  {
+    return _timeRange switch
+    {
+      "5m" => "Minute",
+      "1h" => "Minute",
+      "24h" => "Hour",
+      "7d" => "Hour",
+      "30d" => "Day",
+      _ => "Minute"
+    };
+  }
+
+  private static string FormatTimestamp(DateTime ts)
+  {
+    var local = ts.ToLocalTime();
+    return local.ToString("HH:mm");
   }
 
   private static string GetMetricCategory(string metricKey)
@@ -381,43 +548,45 @@
     return metricKey;
   }
 
+  private static string GetMetricUnit(string metricKey)
+  {
+    var key = metricKey.ToLowerInvariant();
+    if (key.Contains("percent") || key.Contains("_ratio") || (key.Contains("cpu") && key.Contains("usage")))
+      return "%";
+    if (key.Contains("temp")) return "\u00B0C";
+    if (key.Contains("_ms") || key.Contains("latency_ms")) return "ms";
+    if (key.Contains("seconds") || key.Contains("duration")) return "s";
+    if (key.Contains("memory") || key.Contains("bytes")) return "MB";
+    return "";
+  }
+
   private static string FormatMetricValue(double value, string metricKey)
   {
     var key = metricKey.ToLowerInvariant();
 
-    // Byte-based metrics (already reported in MB) — use binary scale KB/MB/GB/TB
     if (key.Contains("memory") || key.Contains("bytes") || key.Contains("_mb") || key.Contains("file_size"))
-      return FormatBytes(value * 1024 * 1024); // Convert MB to bytes for uniform scaling
+      return FormatBytes(value * 1024 * 1024);
 
-    // Percentage metrics
     if (key.Contains("percent") || key.Contains("_ratio"))
       return $"{value:F1}%";
 
-    // CPU usage is a percentage
     if (key.Contains("cpu") && key.Contains("usage"))
       return $"{value:F1}%";
 
-    // Time/duration metrics
     if (key.Contains("seconds") || key.Contains("duration") || key.Contains("latency") || key.Contains("_time"))
       return FormatDuration(value, key);
 
-    // Default: auto-scale with K/M/G/T
     return FormatScaled(value);
   }
 
   private static string FormatBytes(double bytes)
   {
     var abs = Math.Abs(bytes);
-    if (abs < 1024)
-      return $"{bytes:F3} B";
-    if (abs < 1024 * 1024)
-      return $"{bytes / 1024:F3} KB";
-    if (abs < 1024L * 1024 * 1024)
-      return $"{bytes / (1024 * 1024):F3} MB";
-    if (abs < 1024L * 1024 * 1024 * 1024)
-      return $"{bytes / (1024L * 1024 * 1024):F3} GB";
-    if (abs < 1024L * 1024 * 1024 * 1024 * 1024)
-      return $"{bytes / (1024L * 1024 * 1024 * 1024):F3} TB";
+    if (abs < 1024) return $"{bytes:F3} B";
+    if (abs < 1024 * 1024) return $"{bytes / 1024:F3} KB";
+    if (abs < 1024L * 1024 * 1024) return $"{bytes / (1024 * 1024):F3} MB";
+    if (abs < 1024L * 1024 * 1024 * 1024) return $"{bytes / (1024L * 1024 * 1024):F3} GB";
+    if (abs < 1024L * 1024 * 1024 * 1024 * 1024) return $"{bytes / (1024L * 1024 * 1024 * 1024):F3} TB";
     return $"{bytes / (1024L * 1024 * 1024 * 1024 * 1024):F3} PB";
   }
 
@@ -426,19 +595,13 @@
     var abs = Math.Abs(value);
     if (abs < 10000)
     {
-      // Small values: whole numbers for integers, 2 decimals otherwise
-      if (value == Math.Floor(value))
-        return $"{value:F0}";
+      if (value == Math.Floor(value)) return $"{value:F0}";
       return $"{value:F2}";
     }
-    if (abs < 1_000_000)
-      return $"{value / 1_000:F3} K";
-    if (abs < 1_000_000_000)
-      return $"{value / 1_000_000:F3} M";
-    if (abs < 1_000_000_000_000)
-      return $"{value / 1_000_000_000:F3} G";
-    if (abs < 1_000_000_000_000_000)
-      return $"{value / 1_000_000_000_000:F3} T";
+    if (abs < 1_000_000) return $"{value / 1_000:F3} K";
+    if (abs < 1_000_000_000) return $"{value / 1_000_000:F3} M";
+    if (abs < 1_000_000_000_000) return $"{value / 1_000_000_000:F3} G";
+    if (abs < 1_000_000_000_000_000) return $"{value / 1_000_000_000_000:F3} T";
     return $"{value / 1_000_000_000_000_000:F3} P";
   }
 
@@ -449,34 +612,49 @@
     return $"{value:F1} s";
   }
 
-  private static string RenderSparkline(List<double> points, int width, int height)
+  private static string RenderSparkline(List<double> points, int width, int height, string? color = null)
   {
     if (points.Count < 2) return "";
 
     var min = points.Min();
     var max = points.Max();
     var range = max - min;
-    if (range == 0) range = 1; // Avoid division by zero for flat lines
+    if (range == 0) range = 1;
 
     var stepX = (double)width / (points.Count - 1);
     var padding = 1;
     var usableHeight = height - padding * 2;
 
     var pathPoints = new System.Text.StringBuilder();
+    var areaPath = new System.Text.StringBuilder();
     for (int i = 0; i < points.Count; i++)
     {
       var x = i * stepX;
       var y = padding + usableHeight - ((points[i] - min) / range) * usableHeight;
       pathPoints.Append(i == 0 ? $"M{x:F1},{y:F1}" : $" L{x:F1},{y:F1}");
+      areaPath.Append(i == 0 ? $"M{x:F1},{y:F1}" : $" L{x:F1},{y:F1}");
     }
+    // Close area path
+    areaPath.Append($" L{(points.Count - 1) * stepX:F1},{height} L0,{height} Z");
+
+    var strokeColor = color ?? "#5CD4E8";
 
     return $"<svg viewBox=\"0 0 {width} {height}\" preserveAspectRatio=\"none\" style=\"width:100%;height:100%;\">" +
-           $"<path d=\"{pathPoints}\" fill=\"none\" stroke=\"#5CD4E8\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>" +
+           $"<path d=\"{areaPath}\" fill=\"{strokeColor}\" fill-opacity=\"0.1\"/>" +
+           $"<path d=\"{pathPoints}\" fill=\"none\" stroke=\"{strokeColor}\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>" +
            "</svg>";
   }
 
-  public void Dispose()
+  public async ValueTask DisposeAsync()
   {
     _refreshTimer?.Dispose();
+
+    if (_jsModule != null)
+    {
+      try { await _jsModule.InvokeVoidAsync("metricsChart.destroy", "metricsChartCanvas"); }
+      catch { /* ignore */ }
+      try { await _jsModule.DisposeAsync(); }
+      catch { /* ignore */ }
+    }
   }
 }
