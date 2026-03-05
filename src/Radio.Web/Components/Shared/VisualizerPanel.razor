@@ -84,8 +84,6 @@
       if (!VisualizationHub.IsConnected)
         await VisualizationHub.StartAsync();
 
-      await SubscribeToCurrentMode();
-
       VisualizationHub.OnLevelData += HandleLevelData;
       VisualizationHub.OnWaveformData += HandleWaveformData;
       VisualizationHub.OnSpectrumData += HandleSpectrumData;
@@ -108,6 +106,7 @@
         if (success)
         {
           _isInitialized = true;
+          await SubscribeToCurrentMode();
           await RequestInitialData();
         }
       }
