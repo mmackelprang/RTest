@@ -242,7 +242,8 @@ public class PlayHistoryTracker : IDisposable
         SourceDetails = sourceDetails,
         DurationSeconds = durationSeconds,
         IdentificationConfidence = null,
-        WasIdentified = trackMetadataId != null,
+        WasIdentified = trackMetadataId != null
+          && !IsPlaceholderMetadata(newTitle, newArtist, playSource, btDeviceName),
         Track = metadata
       };
 
@@ -448,12 +449,18 @@ public class PlayHistoryTracker : IDisposable
 
       if (existingEntry != null)
       {
+        // Persist the identified track metadata so the DB row exists for JOIN queries
+        var metadataRepository = scope.ServiceProvider.GetService<ITrackMetadataRepository>();
+        if (metadataRepository != null)
+          await metadataRepository.StoreAsync(e.Track);
+
         // Update the existing entry with fingerprinting data
         var updatedEntry = existingEntry with
         {
           TrackMetadataId = e.Track.Id,
           FingerprintId = e.Track.FingerprintId,
           MetadataSource = MetadataSource.Fingerprinting,
+          SourceDetails = $"{e.Track.Title} - {e.Track.Artist}",
           IdentificationConfidence = e.Confidence,
           WasIdentified = true,
           Track = e.Track
