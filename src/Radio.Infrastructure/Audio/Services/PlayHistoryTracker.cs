@@ -636,13 +636,24 @@ public class PlayHistoryTracker : IDisposable
         return;
       }
 
-      // Build the new metadata record
+      // Build the new metadata record, including cover art from the source if available
+      // (BluetoothAudioSource may have already fetched art via MusicBrainz lookup)
+      string? coverArtUrl = null;
+      if (_getActiveSource() is IPrimaryAudioSource btSrc && btSrc.Metadata != null &&
+          btSrc.Metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var artObj))
+      {
+        var artUrl = artObj?.ToString();
+        if (!string.IsNullOrWhiteSpace(artUrl) && artUrl != StandardMetadataKeys.DefaultAlbumArtUrl)
+          coverArtUrl = artUrl;
+      }
+
       var metadata = new TrackMetadata
       {
         Id = Guid.NewGuid().ToString(),
         Title = e.Title,
         Artist = e.Artist,
         Album = e.Album,
+        CoverArtUrl = coverArtUrl,
         Source = MetadataSource.Avrcp,
         CreatedAt = DateTime.UtcNow,
         UpdatedAt = DateTime.UtcNow

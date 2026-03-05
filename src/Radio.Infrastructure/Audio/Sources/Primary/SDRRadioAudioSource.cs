@@ -854,11 +854,12 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
         Logger.LogDebug("📻 SDR RADIO: Created BufferedSoundGenerator and subscribed to AudioDataAvailable");
       }
 
-      // Pre-fill with 1.0s of silence. The RTL-SDR USB device takes ~1s to
+      // Pre-fill with 1.5s of silence. The RTL-SDR USB device takes ~1s to
       // start delivering data after Startup(). This cushion keeps the mixer
-      // fed during that gap and absorbs ongoing USB transfer jitter and
-      // clock drift between the RTL-SDR crystal and the system audio clock.
-      _soundGenerator.PreFillSilence(1.0f);
+      // fed during that gap and absorbs ongoing USB transfer jitter,
+      // clock drift between the RTL-SDR crystal and the system audio clock,
+      // and CPU spikes from Blazor rendering / SongRec identification.
+      _soundGenerator.PreFillSilence(1.5f);
 
       // Start the RTL-SDR receiver — USB callbacks begin arriving and
       // accumulate in the buffer on top of the silence cushion.

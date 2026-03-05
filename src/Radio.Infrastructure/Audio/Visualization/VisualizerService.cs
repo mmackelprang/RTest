@@ -20,11 +20,19 @@ public sealed class VisualizerService : IVisualizerService
   private readonly WaveformAnalyzer _waveformAnalyzer;
 
   private bool _isActive;
+  private volatile bool _isProcessingEnabled = true;
   private bool _disposed;
   private readonly object _lock = new();
 
   /// <inheritdoc/>
   public bool IsActive => _isActive;
+
+  /// <inheritdoc/>
+  public bool IsProcessingEnabled
+  {
+    get => _isProcessingEnabled;
+    set => _isProcessingEnabled = value;
+  }
 
   /// <inheritdoc/>
   public int SampleRate => _sampleRate;
@@ -78,6 +86,9 @@ public sealed class VisualizerService : IVisualizerService
   {
     ThrowIfDisposed();
 
+    // Skip all processing when no UI clients are connected
+    if (!_isProcessingEnabled) return;
+
     lock (_lock)
     {
       _isActive = true;
@@ -95,6 +106,9 @@ public sealed class VisualizerService : IVisualizerService
   public void ProcessSamples(Span<float> samples, int count)
   {
     ThrowIfDisposed();
+
+    // Skip all processing when no UI clients are connected
+    if (!_isProcessingEnabled) return;
 
     lock (_lock)
     {
