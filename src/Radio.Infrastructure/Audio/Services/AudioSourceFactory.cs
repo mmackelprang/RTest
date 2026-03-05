@@ -37,6 +37,7 @@ public class AudioSourceFactory : IAudioSourceFactory
   private readonly IServiceScopeFactory? _serviceScopeFactory;
   private readonly AlbumArtCacheService? _albumArtCache;
   private readonly DeviceOptionsResolver? _deviceOptionsResolver;
+  private readonly IOptions<FingerprintingOptions>? _fingerprintingOptions;
 
   public AudioSourceFactory(
     ILogger<AudioSourceFactory> logger,
@@ -56,7 +57,8 @@ public class AudioSourceFactory : IAudioSourceFactory
     SoundFlow.SoundFlowPlaybackService? playbackService = null,
     IServiceScopeFactory? serviceScopeFactory = null,
     AlbumArtCacheService? albumArtCache = null,
-    DeviceOptionsResolver? deviceOptionsResolver = null)
+    DeviceOptionsResolver? deviceOptionsResolver = null,
+    IOptions<FingerprintingOptions>? fingerprintingOptions = null)
   {
     _logger = logger;
     _loggerFactory = loggerFactory;
@@ -76,6 +78,7 @@ public class AudioSourceFactory : IAudioSourceFactory
     _serviceScopeFactory = serviceScopeFactory;
     _albumArtCache = albumArtCache;
     _deviceOptionsResolver = deviceOptionsResolver;
+    _fingerprintingOptions = fingerprintingOptions;
   }
 
   /// <inheritdoc/>
@@ -102,6 +105,7 @@ public class AudioSourceFactory : IAudioSourceFactory
 
   private IAudioSource CreateBluetoothSource()
   {
+    SyncFingerprintingOptionsFromStore();
     var logger = _loggerFactory.CreateLogger<BluetoothAudioSource>();
     return new BluetoothAudioSource(
       logger,
@@ -112,11 +116,13 @@ public class AudioSourceFactory : IAudioSourceFactory
       _metricsCollector,
       _playbackService,
       _serviceScopeFactory,
-      _albumArtCache);
+      _albumArtCache,
+      _fingerprintingOptions);
   }
 
   private IAudioSource CreateFilePlayerSource()
   {
+    SyncFingerprintingOptionsFromStore();
     var rootDir = _configuration["RootDir"] ?? Directory.GetCurrentDirectory();
     var logger = _loggerFactory.CreateLogger<FilePlayerAudioSource>();
     return new FilePlayerAudioSource(
@@ -128,7 +134,8 @@ public class AudioSourceFactory : IAudioSourceFactory
       _metricsCollector,
       _playbackService,
       _configurationManager,
-      _albumArtCache);
+      _albumArtCache,
+      fingerprintingOptions: _fingerprintingOptions);
   }
 
   private IAudioSource CreateVinylSource()
@@ -201,6 +208,38 @@ public class AudioSourceFactory : IAudioSourceFactory
 
     var logger = _loggerFactory.CreateLogger<TestToneAudioSource>();
     return new TestToneAudioSource(logger, _playbackService);
+  }
+
+  /// <summary>
+  /// Syncs FingerprintingOptions from the runtime config store (SQLite/JSON).
+  /// UI config changes write to the config store, which is separate from the
+  /// IConfiguration/appsettings.json pipeline that IOptions binds from at startup.
+  /// Without this sync, runtime config changes (e.g. UseShazamForAllSources toggle)
+  /// are invisible to IOptions consumers.
+  /// </summary>
+  private void SyncFingerprintingOptionsFromStore()
+  {
+    if (_fingerprintingOptions == null || _configurationManager == null) return;
+    try
+    {
+      var storeId = _configurationManager.CurrentStoreType ==
+        Configuration.Models.ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+      var useShazamStr = _configurationManager
+        .GetValueAsync<string>(storeId, "fingerprinting:useShazamForAllSources")
+        .GetAwaiter().GetResult();
+      if (bool.TryParse(useShazamStr, out var useShazam) &&
+          useShazam != _fingerprintingOptions.Value.UseShazamForAllSources)
+      {
+        _logger.LogDebug(
+          "Syncing FingerprintingOptions.UseShazamForAllSources from config store: {Value}",
+          useShazam);
+        _fingerprintingOptions.Value.UseShazamForAllSources = useShazam;
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Failed to sync fingerprinting options from config store");
+    }
   }
 
   /// <summary>

@@ -200,8 +200,79 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   }
 
   [Fact]
+  public void MetadataChanged_NewSongWithoutArt_ClearsPreviousAlbumArt()
+  {
+    // Simulate Song A with art set via a previous lookup
+    _mockBluetooth.SimulateMetadataChange("Song A", "Artist A");
+    // Manually set album art as if MusicBrainz/SongRec resolved it
+    // (source metadata is publicly readable)
+    Assert.False(_source.Metadata.ContainsKey(StandardMetadataKeys.AlbumArtUrl));
+
+    // Now simulate Song B arriving — AVRCP without art (the common case)
+    _mockBluetooth.SimulateMetadataChange("Song B", "Artist B");
+
+    // AlbumArtUrl should NOT carry over from Song A
+    Assert.False(
+      _source.Metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var art)
+      && art is string s && !string.IsNullOrEmpty(s),
+      "AlbumArtUrl should be cleared when new song arrives without art");
+  }
+
+  [Fact]
   public void MockBluetoothService_IsAudioManagedByPlatform_ReturnsFalse()
   {
     Assert.False(_mockBluetooth.IsAudioManagedByPlatform);
+  }
+
+  [Fact]
+  public async Task MetadataChanged_WithShazamToggleOn_SetsNeedsFingerprintingEvenWithCompleteMetadata()
+  {
+    // Arrange — create source with UseShazamForAllSources enabled
+    var fingerprintingOptions = Options.Create(new FingerprintingOptions
+    {
+      UseShazamForAllSources = true
+    });
+
+    await _source.DisposeAsync();
+    _source = new BluetoothAudioSource(
+      _loggerMock.Object,
+      _deviceManagerMock.Object,
+      _mockBluetooth,
+      _options,
+      identificationService: null,
+      metricsCollector: _metricsMock.Object,
+      fingerprintingOptions: fingerprintingOptions);
+
+    // Act — send complete AVRCP metadata (title + artist present)
+    _mockBluetooth.SimulateMetadataChange("Known Song", "Known Artist");
+
+    // Assert — should still request fingerprinting because toggle is ON
+    Assert.True(_source.NeedsFingerprintingLookup);
+  }
+
+  [Fact]
+  public async Task MetadataChanged_WithShazamToggleOff_DoesNotFingerprintCompleteMetadata()
+  {
+    // Arrange — create source with UseShazamForAllSources disabled (default)
+    var fingerprintingOptions = Options.Create(new FingerprintingOptions
+    {
+      UseShazamForAllSources = false
+    });
+
+    await _source.DisposeAsync();
+    _source = new BluetoothAudioSource(
+      _loggerMock.Object,
+      _deviceManagerMock.Object,
+      _mockBluetooth,
+      _options,
+      identificationService: null,
+      metricsCollector: _metricsMock.Object,
+      fingerprintingOptions: fingerprintingOptions);
+
+    // Act — send complete AVRCP metadata
+    _mockBluetooth.SimulateMetadataChange("Known Song", "Known Artist");
+
+    // Assert — should NOT request fingerprinting because toggle is OFF and metadata is complete
+    Assert.False(_source.NeedsFingerprintingLookup);
   }
 }

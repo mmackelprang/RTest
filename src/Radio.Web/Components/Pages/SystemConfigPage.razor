@@ -675,11 +675,16 @@
             <MudGrid Spacing="2">
               <MudItem xs="12">
                 <MudAlert Severity="Severity.Info" Dense="true">
-                  Fingerprinting uses SongRec (Shazam) for audio recognition. MusicBrainz is used for cover art search.
+                  Fingerprinting uses SongRec (Shazam) for audio recognition. Enable "Use Shazam for All Sources" to get higher-quality cover art from Apple Music CDN on Bluetooth and file sources.
                 </MudAlert>
               </MudItem>
               <MudItem xs="12" md="4">
                 <MudCheckBox T="bool" @bind-Value="_fingerprintingConfig.Enabled" Label="Enabled" Color="Color.Primary" />
+              </MudItem>
+              <MudItem xs="12" md="8">
+                <MudCheckBox T="bool" @bind-Value="_fingerprintingConfig.UseShazamForAllSources" Label="Use Shazam for All Sources" Color="Color.Secondary"
+                             Disabled="@(!_fingerprintingConfig.Enabled)" />
+                <MudText Typo="Typo.caption" Class="ml-8">Use Shazam (SongRec) for metadata and high-quality cover art on all sources, even when Bluetooth AVRCP or file ID3 tags are available</MudText>
               </MudItem>
               <MudItem xs="12" md="4">
                 <MudNumericField T="int" @bind-Value="_fingerprintingConfig.SampleDurationSeconds" Label="Sample Duration (s)"
@@ -700,11 +705,6 @@
                 <MudNumericField T="int" @bind-Value="_fingerprintingConfig.DuplicateSuppressionMinutes" Label="Duplicate Suppression (min)"
                                  Variant="Variant.Outlined" Min="1" Max="60"
                                  HelperText="Ignore re-identification within this window" />
-              </MudItem>
-              <MudItem xs="12" md="4">
-                <MudTextField T="string" @bind-Value="_fingerprintingConfig.FpcalcPath" Label="fpcalc Path"
-                              Variant="Variant.Outlined"
-                              HelperText="Path to fpcalc binary (blank = auto-detect)" />
               </MudItem>
               <MudItem xs="12" md="6">
                 <MudTextField T="string" @bind-Value="_fingerprintingConfig.DatabasePath" Label="Database Path"

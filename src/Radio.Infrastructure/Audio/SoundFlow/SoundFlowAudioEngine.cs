@@ -1,3 +1,4 @@
+using System.Runtime;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
@@ -37,11 +38,13 @@ public class SoundFlowAudioEngine : IAudioEngine
   private BalanceModifier? _balanceModifier;
   private LimiterModifier? _limiterModifier;
   private Timer? _hotPlugTimer;
+  private Timer? _limiterStatsTimer;
   private AudioEngineState _state = AudioEngineState.Uninitialized;
   private int _currentDeviceIndex = -1;
   private bool _disposed;
   private bool _localOutputMuted;
   private readonly object _stateLock = new();
+  private GCLatencyMode _previousLatencyMode;
 
   /// <inheritdoc/>
   public event EventHandler<AudioEngineStateChangedEventArgs>? StateChanged;
@@ -152,6 +155,14 @@ public class SoundFlowAudioEngine : IAudioEngine
 
     try
     {
+      // Reduce GC pause duration during audio processing. SustainedLowLatency
+      // tells .NET to avoid full blocking Gen2 collections, which are the primary
+      // cause of audio callback stalls (40-740ms pauses observed).
+      _previousLatencyMode = GCSettings.LatencyMode;
+      GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;
+      _logger.LogInformation(
+        "GC latency mode set to SustainedLowLatency (was {Previous})", _previousLatencyMode);
+
       _logger.LogInformation(
         "Initializing SoundFlow audio engine (SampleRate: {SampleRate}, Channels: {Channels}, BufferSize: {BufferSize})",
         _options.SampleRate, _options.Channels, _options.BufferSize);
@@ -290,6 +301,24 @@ public class SoundFlowAudioEngine : IAudioEngine
           "Hot-plug detection enabled with {Interval}s interval",
           _options.HotPlugIntervalSeconds);
       }
+
+      // Periodically log limiter engagement stats (every 30s)
+      _limiterStatsTimer = new Timer(_ =>
+      {
+        if (_limiterModifier == null) return;
+        var stats = _limiterModifier.GetAndResetStats();
+        if (stats == null) return;
+        var s = stats.Value;
+        if (s.LimitedSamples > 0)
+        {
+          _logger.LogWarning(
+            "🔊 Limiter engaged: {Percent:F1}% of samples compressed ({Limited}/{Total}), " +
+            "max input {MaxInput:F3} ({MaxInputDb:F1} dBFS), max reduction {MaxReduction:F1} dB",
+            s.EngagementPercent, s.LimitedSamples, s.TotalSamples,
+            s.MaxInputAbs, 20f * MathF.Log10(s.MaxInputAbs),
+            s.MaxReductionDb);
+        }
+      }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
 
       State = AudioEngineState.Ready;
       _metricsCollector?.Gauge("audio.engine.buffer_size_samples", _options.BufferSize);
@@ -756,11 +785,16 @@ public class SoundFlowAudioEngine : IAudioEngine
 
     _logger.LogInformation("Disposing audio engine");
 
-    // Stop hot-plug detection
+    // Stop timers
     if (_hotPlugTimer != null)
     {
       await _hotPlugTimer.DisposeAsync();
       _hotPlugTimer = null;
+    }
+    if (_limiterStatsTimer != null)
+    {
+      await _limiterStatsTimer.DisposeAsync();
+      _limiterStatsTimer = null;
     }
 
     // Unsubscribe from device manager events
@@ -815,6 +849,11 @@ public class SoundFlowAudioEngine : IAudioEngine
       _engine.Dispose();
       _engine = null;
     }
+
+    // Restore previous GC latency mode
+    GCSettings.LatencyMode = _previousLatencyMode;
+    _logger.LogInformation(
+      "GC latency mode restored to {Mode}", _previousLatencyMode);
 
     _logger.LogInformation("Audio engine disposed");
   }

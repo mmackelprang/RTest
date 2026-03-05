@@ -17,12 +17,41 @@ public abstract class BufferedTapModifier : SoundModifier
   private readonly object _lock = new();
   private volatile bool _flushInProgress;
 
+  // Pre-allocated work item to avoid closure allocation on every flush
+  private readonly FlushWorkItem _flushWorkItem;
+
+  /// <summary>
+  /// Pre-allocated IThreadPoolWorkItem to avoid closure allocation (~94/sec)
+  /// when queueing flush work to the ThreadPool.
+  /// </summary>
+  private sealed class FlushWorkItem : IThreadPoolWorkItem
+  {
+    private readonly BufferedTapModifier _owner;
+    public FlushWorkItem(BufferedTapModifier owner) => _owner = owner;
+    public void Execute()
+    {
+      try
+      {
+        _owner.ProcessFlushBuffer(_owner._flushBuffer);
+      }
+      catch (Exception ex)
+      {
+        _owner.OnFlushError(ex);
+      }
+      finally
+      {
+        _owner._flushInProgress = false;
+      }
+    }
+  }
+
   protected BufferedTapModifier(int bufferSize)
   {
     _bufferSize = bufferSize;
     _sampleBuffer = new float[bufferSize];
     _flushBuffer = new float[bufferSize];
     _bufferIndex = 0;
+    _flushWorkItem = new FlushWorkItem(this);
   }
 
   /// <summary>
@@ -34,47 +63,27 @@ public abstract class BufferedTapModifier : SoundModifier
   public override float ProcessSample(float sample, int channel)
   {
     // Hot path: called 96,000 times/second for stereo 48kHz.
-    // Only buffer samples on the audio thread — heavy processing
-    // is offloaded to ThreadPool via ProcessFlushBuffer.
-    bool shouldFlush = false;
-    lock (_lock)
+    // Lock-free sample buffering via atomic index increment.
+    // Only lock briefly for the flush copy to _flushBuffer.
+    var index = Interlocked.Increment(ref _bufferIndex) - 1;
+    if (index < _bufferSize)
     {
+      _sampleBuffer[index] = sample;
       OnSampleBuffered();
-
-      if (_bufferIndex < _bufferSize)
-      {
-        _sampleBuffer[_bufferIndex++] = sample;
-      }
-
-      if (_bufferIndex >= _bufferSize)
-      {
-        if (!_flushInProgress)
-        {
-          Array.Copy(_sampleBuffer, _flushBuffer, _bufferSize);
-          shouldFlush = true;
-        }
-        _bufferIndex = 0;
-      }
     }
 
-    if (shouldFlush)
+    if (index == _bufferSize - 1)
     {
-      _flushInProgress = true;
-      ThreadPool.QueueUserWorkItem(_ =>
+      if (!_flushInProgress)
       {
-        try
+        lock (_lock)
         {
-          ProcessFlushBuffer(_flushBuffer);
+          Array.Copy(_sampleBuffer, _flushBuffer, _bufferSize);
         }
-        catch (Exception ex)
-        {
-          OnFlushError(ex);
-        }
-        finally
-        {
-          _flushInProgress = false;
-        }
-      });
+        _flushInProgress = true;
+        ThreadPool.UnsafeQueueUserWorkItem(_flushWorkItem, preferLocal: false);
+      }
+      Volatile.Write(ref _bufferIndex, 0);
     }
 
     // Pass through unchanged — this is a tap, not an effect
@@ -88,12 +97,13 @@ public abstract class BufferedTapModifier : SoundModifier
   {
     lock (_lock)
     {
-      if (_bufferIndex > 0)
+      var currentIndex = Volatile.Read(ref _bufferIndex);
+      if (currentIndex > 0)
       {
         try
         {
-          var remainingSamples = new float[_bufferIndex];
-          Array.Copy(_sampleBuffer, remainingSamples, _bufferIndex);
+          var remainingSamples = new float[currentIndex];
+          Array.Copy(_sampleBuffer, remainingSamples, currentIndex);
           FlushRemaining(remainingSamples);
         }
         catch
@@ -101,7 +111,7 @@ public abstract class BufferedTapModifier : SoundModifier
           // Ignore flush errors
         }
 
-        _bufferIndex = 0;
+        Volatile.Write(ref _bufferIndex, 0);
       }
     }
   }
@@ -113,7 +123,7 @@ public abstract class BufferedTapModifier : SoundModifier
   {
     lock (_lock)
     {
-      _bufferIndex = 0;
+      Volatile.Write(ref _bufferIndex, 0);
       Array.Clear(_sampleBuffer, 0, _bufferSize);
     }
   }

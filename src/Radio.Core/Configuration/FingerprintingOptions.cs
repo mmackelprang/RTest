@@ -11,6 +11,13 @@ public sealed class FingerprintingOptions
   /// <summary>Enable or disable automatic fingerprinting.</summary>
   public bool Enabled { get; set; } = true;
 
+  /// <summary>
+  /// When true, uses Shazam (SongRec) for metadata and cover art on ALL sources,
+  /// even when AVRCP/ID3 tags provide title and artist. Shazam typically returns
+  /// higher-quality cover art from Apple Music CDN.
+  /// </summary>
+  public bool UseShazamForAllSources { get; set; } = false;
+
   /// <summary>Duration of audio to capture for fingerprinting (seconds).</summary>
   public int SampleDurationSeconds { get; set; } = 15;
 

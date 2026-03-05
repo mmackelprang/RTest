@@ -19,6 +19,9 @@ public sealed class VisualizerService : IVisualizerService
   private readonly LevelMeter _levelMeter;
   private readonly WaveformAnalyzer _waveformAnalyzer;
 
+  // Pre-allocated mono buffer to avoid ~47 float[] allocations/sec (~188KB/sec GC pressure)
+  private float[] _monoBuffer;
+
   private bool _isActive;
   private volatile bool _isProcessingEnabled = true;
   private bool _disposed;
@@ -76,6 +79,10 @@ public sealed class VisualizerService : IVisualizerService
       _options.WaveformSampleCount,
       _sampleRate);
 
+    // Pre-allocate mono buffer sized for typical stereo→mono conversion.
+    // FFTSize is a safe upper bound for mono sample count.
+    _monoBuffer = new float[_options.FFTSize];
+
     _logger.LogInformation(
       "VisualizerService initialized (FFTSize: {FFTSize}, SampleRate: {SampleRate}, WaveformSamples: {WaveformSamples})",
       _options.FFTSize, _sampleRate, _options.WaveformSampleCount);
@@ -94,9 +101,9 @@ public sealed class VisualizerService : IVisualizerService
       _isActive = true;
 
       // Convert interleaved stereo to mono for spectrum analysis
-      var monoSamples = ConvertToMono(samples, samples.Length);
+      var monoCount = ConvertToMono(samples, samples.Length);
 
-      _spectrumAnalyzer.AddSamples(monoSamples);
+      _spectrumAnalyzer.AddSamples(_monoBuffer.AsSpan(), monoCount);
       _levelMeter.ProcessSamples(samples);
       _waveformAnalyzer.AddSamples(samples);
     }
@@ -115,9 +122,9 @@ public sealed class VisualizerService : IVisualizerService
       _isActive = true;
 
       // Convert interleaved stereo to mono for spectrum analysis
-      var monoSamples = ConvertToMono(samples, count);
+      var monoCount = ConvertToMono(samples, count);
 
-      _spectrumAnalyzer.AddSamples(monoSamples);
+      _spectrumAnalyzer.AddSamples(_monoBuffer.AsSpan(), monoCount);
       _levelMeter.ProcessSamples(samples, count);
       _waveformAnalyzer.AddSamples(samples, count);
     }
@@ -208,11 +215,16 @@ public sealed class VisualizerService : IVisualizerService
 
   /// <summary>
   /// Converts interleaved stereo samples to mono by averaging channels.
+  /// Writes into the pre-allocated <see cref="_monoBuffer"/> to avoid per-call allocation.
   /// </summary>
-  private static float[] ConvertToMono(ReadOnlySpan<float> stereoSamples, int count)
+  /// <returns>The number of mono samples written.</returns>
+  private int ConvertToMono(ReadOnlySpan<float> stereoSamples, int count)
   {
     var monoCount = count / 2;
-    var mono = new float[monoCount];
+
+    // Grow buffer if needed (rare — only if input exceeds initial FFTSize capacity)
+    if (monoCount > _monoBuffer.Length)
+      _monoBuffer = new float[monoCount];
 
     for (var i = 0; i < monoCount; i++)
     {
@@ -221,15 +233,15 @@ public sealed class VisualizerService : IVisualizerService
 
       if (rightIndex < count)
       {
-        mono[i] = (stereoSamples[leftIndex] + stereoSamples[rightIndex]) / 2f;
+        _monoBuffer[i] = (stereoSamples[leftIndex] + stereoSamples[rightIndex]) / 2f;
       }
       else
       {
-        mono[i] = stereoSamples[leftIndex];
+        _monoBuffer[i] = stereoSamples[leftIndex];
       }
     }
 
-    return mono;
+    return monoCount;
   }
 
   private void ThrowIfDisposed()
