@@ -165,6 +165,23 @@
             @foreach (var item in _historyItems)
             {
               <div class="list-item-touch">
+                <!-- Album art or source icon -->
+                <div style="width: 36px; height: 36px; flex-shrink: 0; border-radius: 4px; overflow: hidden; display: flex; align-items: center; justify-content: center;">
+                  @if (!string.IsNullOrEmpty(item.Track?.CoverArtUrl)
+                    && item.Track.CoverArtUrl != "/images/default-album-art.png")
+                  {
+                    <img src="@item.Track.CoverArtUrl"
+                         style="width: 36px; height: 36px; object-fit: cover;"
+                         loading="lazy" />
+                  }
+                  else
+                  {
+                    <MudIcon Icon="@SourceTypeHelper.GetIcon(item.Source)"
+                             Size="Size.Small"
+                             Style="color: var(--text-low);" />
+                  }
+                </div>
+                <!-- Track info -->
                 <div style="flex: 1; min-width: 0;">
                   <div style="font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-high);">
                     @(item.Title ?? "Unknown")
@@ -172,8 +189,15 @@
                   <div style="font-size: 14px; color: var(--text-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                     @(item.Artist ?? "--")@if (item.DurationSeconds.HasValue) { <text> · @FormatDuration(item.DurationSeconds)</text> }
                   </div>
+                  @if (!string.IsNullOrEmpty(item.SourceDetails) && item.SourceDetails != $"{item.Title} - {item.Artist}")
+                  {
+                    <div style="font-size: 12px; color: var(--text-low); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                      @item.SourceDetails
+                    </div>
+                  }
                 </div>
-                <MudChip T="string" Size="Size.Small" Color="@GetSourceColor(item.Source)" Style="font-size: 13px;">
+                <MudChip T="string" Size="Size.Small" Color="@GetSourceColor(item.Source)" Style="font-size: 13px;"
+                         Icon="@SourceTypeHelper.GetIcon(item.Source)">
                   @item.Source
                 </MudChip>
               </div>
