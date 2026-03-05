@@ -189,18 +189,18 @@ public class MockSdrDeviceTests
     }
 
     [Fact]
-    public void SamplesAvailable_WhenStreaming_RaisesEvent()
+    public async Task SamplesAvailable_WhenStreaming_RaisesEvent()
     {
         using var device = new MockSdrDevice();
         device.Open();
 
-        var eventRaised = false;
-        device.SamplesAvailable += (s, e) => eventRaised = true;
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        device.SamplesAvailable += (s, e) => tcs.TrySetResult(true);
 
         device.StartStreaming();
-        Thread.Sleep(100); // Wait for samples
 
-        Assert.True(eventRaised);
+        var completed = await Task.WhenAny(tcs.Task, Task.Delay(5000));
+        Assert.True(completed == tcs.Task, "SamplesAvailable event was not raised within 5 seconds");
 
         device.StopStreaming();
     }
