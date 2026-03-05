@@ -22,10 +22,6 @@ public class SecretsController : ControllerBase
       ["GoogleAPIKey"] = "tts_google_api_key",
       ["AzureAPIKey"] = "tts_azure_api_key",
       ["AzureRegion"] = "tts_azure_region"
-    },
-    ["acoustid"] = new(StringComparer.OrdinalIgnoreCase)
-    {
-      ["ApiKey"] = "acoustid_api_key"
     }
   };
 

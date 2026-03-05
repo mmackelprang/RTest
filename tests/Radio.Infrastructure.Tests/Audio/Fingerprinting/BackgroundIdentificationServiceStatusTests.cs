@@ -286,7 +286,7 @@ public class BackgroundIdentificationServiceStatusTests
       Title = "Song G",
       Artist = "Artist G",
       CoverArtUrl = "https://example.com/cover.jpg",
-      Source = MetadataSource.AcoustID,
+      Source = MetadataSource.Shazam,
       CreatedAt = DateTime.UtcNow,
       UpdatedAt = DateTime.UtcNow
     };
@@ -318,7 +318,7 @@ public class BackgroundIdentificationServiceStatusTests
       Title = title,
       Artist = artist,
       Album = album,
-      Source = MetadataSource.AcoustID,
+      Source = MetadataSource.Shazam,
       CreatedAt = DateTime.UtcNow,
       UpdatedAt = DateTime.UtcNow
     };

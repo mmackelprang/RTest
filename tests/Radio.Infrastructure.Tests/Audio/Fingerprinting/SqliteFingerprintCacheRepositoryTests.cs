@@ -227,7 +227,7 @@ public class SqliteFingerprintCacheRepositoryTests : IAsyncLifetime
       Title = "Test Song",
       Artist = "Test Artist",
       Album = "Test Album",
-      Source = MetadataSource.AcoustID,
+      Source = MetadataSource.Shazam,
       CreatedAt = DateTime.UtcNow,
       UpdatedAt = DateTime.UtcNow
     };

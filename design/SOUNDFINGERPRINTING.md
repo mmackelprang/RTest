@@ -1,72 +1,145 @@
 # Audio Fingerprinting & Metadata Recognition Design
 
+> **Phase 10 Update (March 2026):** The AcoustID/Chromaprint pipeline has been **removed entirely**.
+> SongRec (Shazam algorithm) is now the **sole recognizer** for all audio sources (radio, vinyl, USB,
+> file). The Chromaprint/fpcalc binary, AcoustID API client, and `IFingerprintService` interface have
+> been deleted. Cover art is still fetched via MusicBrainz release search + Cover Art Archive.
+> See the "Current Architecture" section below for the simplified pipeline.
+>
+> The historical implementation guide (phases 1-5 below) is retained for reference but no longer
+> reflects the active codebase.
+
 ## Overview
 
-This document outlines the integration of audio fingerprinting technology into the Radio Console project to enable automatic song identification for:
+This document outlines the audio fingerprinting and song identification system in the Radio Console project:
 - **Vinyl Record Player** - Identify songs playing from the turntable
-- **Radio Streams** - Detect songs playing on radio stations  
+- **Radio Streams** - Detect songs playing on radio stations
+- **USB Audio** - Identify tracks from USB sources
 - **Audio Files** - Identify files with missing or no embedded metadata
 
 Identified tracks automatically feed into the **Play History** feature.
 
 ---
 
-## Architecture Overview
+## Current Architecture (Phase 10+)
 
 ### Identification Flow
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           AUDIO IDENTIFICATION FLOW                         │
+│                     AUDIO IDENTIFICATION FLOW (SongRec-Only)                │
 └─────────────────────────────────────────────────────────────────────────────┘
 
-     Audio Source (Vinyl/Radio/File)
+     Audio Source (Radio/Vinyl/USB/File)
                     │
                     ▼
      ┌──────────────────────────────┐
-     │  Capture Audio Samples       │
-     │  (Resample to required rate) │
+     │  NeedsFingerprintingLookup?  │──── NO (BT w/ AVRCP) ───► Skip
+     └──────────────────────────────┘
+                    │ YES
+                    ▼
+     ┌──────────────────────────────┐
+     │  Capture Audio Samples       │   fingerprint.capture_latency_ms
+     │  (SoundFlowAudioTap)         │
      └──────────────────────────────┘
                     │
                     ▼
      ┌──────────────────────────────┐
-     │  Generate Chromaprint        │
-     │  Fingerprint                 │
+     │  SongRec Recognition         │   fingerprint.songrec_latency_ms
+     │  (Shazam algorithm)          │   fingerprint.identification_attempts
      └──────────────────────────────┘
                     │
-                    ▼
-     ┌──────────────────────────────┐
-     │  1. Query LOCAL SQLite Cache │◄──── Match Found? ───► Return Cached Metadata
-     └──────────────────────────────┘              │
-                    │ NO                           │
-                    ▼                              │
-     ┌──────────────────────────────┐              │
-     │  2. Query AcoustID API       │◄──── Match Found? ───► Get MusicBrainz IDs
-     └──────────────────────────────┘              │
-                    │ NO                           │
-                    ▼                              ▼
-     ┌──────────────────────────────┐   ┌──────────────────────────────┐
-     │  Mark as "Unknown"           │   │  3. Fetch MusicBrainz        │
-     │  (Store fingerprint for      │   │     Metadata                 │
-     │   manual tagging later)      │   └──────────────────────────────┘
-     └──────────────────────────────┘              │
-                                                   ▼
-                                       ┌──────────────────────────────┐
-                                       │  4. Cache in SQLite          │
-                                       │     (Fingerprint + Metadata) │
-                                       └──────────────────────────────┘
-                                                   │
-                                                   ▼
-                                       ┌──────────────────────────────┐
-                                       │  5. Record to Play History   │
-                                       └──────────────────────────────┘
+            ┌───────┴───────┐
+            │               │
+         MATCH          NO MATCH
+            │               │
+            ▼               ▼
+     ┌──────────────┐  ┌──────────────────┐
+     │ Same as last?│  │ Record failure   │  fingerprint.identification_failures
+     └──────────────┘  │ Backoff [15-120s]│
+       │          │    └──────────────────┘
+      YES        NO
+       │          │
+       ▼          ▼
+    Suppress   ┌──────────────────────────────┐
+    duplicate  │ Store metadata + cache       │  fingerprint.identification_successes
+               │ Update Play History          │  fingerprint.song_changes
+               └──────────────────────────────┘
 ```
 
 ### Technology Stack
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| Fingerprint Generation | Chromaprint | Generate audio fingerprints compatible with AcoustID |
+| Audio Recognition | SongRec (Shazam) | Identify songs from captured audio samples |
+| Cover Art Search | MusicBrainz API | Search releases by artist/title for cover art |
+| Cover Art Fetch | Cover Art Archive | Download album art thumbnails |
+| Local Cache | SQLite | Store fingerprints and metadata for fast lookup |
+| Audio Capture | SoundFlow (AudioTap) | Capture audio samples from playback pipeline |
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `BackgroundIdentificationService.cs` | Periodic identification loop with backoff |
+| `SongRecRecognitionService.cs` | SongRec binary wrapper |
+| `MetadataLookupService.cs` | Cover art search via MusicBrainz + Cover Art Archive |
+| `SoundFlowAudioTap.cs` | Audio capture from playback pipeline |
+| `FingerprintDbContext.cs` | SQLite database for cache + metadata + history |
+
+### Metrics
+
+| Metric | Type | Tags | Description |
+|--------|------|------|-------------|
+| `fingerprint.identification_attempts` | Counter | source | Every recognition attempt |
+| `fingerprint.identification_successes` | Counter | source | Successful identifications |
+| `fingerprint.identification_failures` | Counter | source, reason | Failed identifications |
+| `fingerprint.songrec_latency_ms` | Gauge | — | SongRec API call duration |
+| `fingerprint.capture_latency_ms` | Gauge | — | Audio capture duration |
+| `fingerprint.song_changes` | Counter | source | Track changed from previous |
+| `fingerprint.duplicate_suppressions` | Counter | — | Skipped (same song still playing) |
+| `fingerprint.consecutive_failures` | Gauge | — | Current failure streak |
+| `fingerprint.cover_art_searches` | Counter | result | Cover art text search results |
+| `fingerprint.cover_art_fetches` | Counter | result | Cover art URL fetch results |
+
+---
+
+## Historical Architecture (Pre-Phase 10)
+
+> The sections below document the original AcoustID/Chromaprint architecture that was removed in Phase 10.
+
+### Original Identification Flow
+
+```
+     Audio Source (Vinyl/Radio/File)
+                    │
+                    ▼
+     ┌──────────────────────────────┐
+     │  Generate Chromaprint        │
+     │  Fingerprint (fpcalc)        │
+     └──────────────────────────────┘
+                    │
+                    ▼
+     ┌──────────────────────────────┐
+     │  1. Query LOCAL SQLite Cache │◄──── Match? ───► Return Cached Metadata
+     └──────────────────────────────┘
+                    │ NO
+                    ▼
+     ┌──────────────────────────────┐
+     │  2. Query AcoustID API       │◄──── Match? ───► Get MusicBrainz IDs
+     └──────────────────────────────┘
+                    │ NO
+                    ▼
+     ┌──────────────────────────────┐
+     │  Mark as "Unknown"           │
+     └──────────────────────────────┘
+```
+
+### Original Technology Stack
+
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| Fingerprint Generation | Chromaprint (fpcalc) | Generate audio fingerprints compatible with AcoustID |
 | External Lookup | AcoustID API | Match fingerprints to MusicBrainz recording IDs |
 | Metadata Enrichment | MusicBrainz API | Fetch detailed track/artist/album metadata |
 | Local Cache | SQLite | Store fingerprints and metadata for offline/fast lookup |

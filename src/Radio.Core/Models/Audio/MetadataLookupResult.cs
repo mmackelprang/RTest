@@ -14,9 +14,6 @@ public sealed record MetadataLookupResult
   /// <summary>Gets the ID of the fingerprint in the database.</summary>
   public required string FingerprintId { get; init; }
 
-  /// <summary>Gets the AcoustID identifier (optional).</summary>
-  public string? AcoustId { get; init; }
-
   /// <summary>Gets the MusicBrainz recording ID (optional).</summary>
   public string? MusicBrainzRecordingId { get; init; }
 
@@ -34,9 +31,6 @@ public enum LookupSource
 {
   /// <summary>Result came from local cache.</summary>
   Cache,
-
-  /// <summary>Result came from AcoustID API.</summary>
-  AcoustID,
 
   /// <summary>Result came from SongRec (Shazam) recognition.</summary>
   SongRec,

@@ -33,8 +33,6 @@ public interface IAudioSampleProvider
   /// <summary>
   /// Gets the file path of the currently playing audio file, if the source is file-based.
   /// Returns null for non-file sources (radio, vinyl, Bluetooth).
-  /// When non-null, callers should prefer <see cref="IFingerprintService.GenerateFingerprintFromFileAsync"/>
-  /// over tap-based capture, since AcoustID requires accurate track duration.
   /// </summary>
   string? SourceFilePath { get; }
 

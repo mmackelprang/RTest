@@ -32,10 +32,7 @@ public sealed class FingerprintingOptions
   /// </summary>
   public int MinimumSecondsBetweenSongChanges { get; set; } = 20;
 
-  /// <summary>AcoustID API configuration.</summary>
-  public AcoustIdOptions AcoustId { get; set; } = new();
-
-  /// <summary>MusicBrainz API configuration.</summary>
+  /// <summary>MusicBrainz API configuration (used for cover art search).</summary>
   public MusicBrainzOptions MusicBrainz { get; set; } = new();
 
   /// <summary>
@@ -43,27 +40,18 @@ public sealed class FingerprintingOptions
   /// </summary>
   public string DatabasePath { get; set; } = "./data/fingerprints.db";
 
-  /// <summary>
-  /// Path to the fpcalc binary (native Chromaprint fingerprint calculator).
-  /// If empty, searches PATH and common installation locations.
-  /// On Linux: install via 'apt install libchromaprint-tools'
-  /// On Windows: download from https://acoustid.org/chromaprint
-  /// </summary>
-  public string FpcalcPath { get; set; } = string.Empty;
-
-  /// <summary>SongRec (Shazam) fallback recognizer configuration.</summary>
+  /// <summary>SongRec (Shazam) recognizer configuration.</summary>
   public SongRecOptions SongRec { get; set; } = new();
 }
 
 /// <summary>
 /// Configuration options for SongRec (Shazam) audio recognition.
-/// SongRec is the primary recognizer for live audio sources (radio, vinyl, Bluetooth, USB).
-/// AcoustID is used for file sources where full track duration is available.
+/// SongRec is the sole recognizer for all audio sources (radio, vinyl, Bluetooth, USB, file).
 /// Install via: sudo add-apt-repository ppa:marin-m/songrec &amp;&amp; sudo apt install songrec
 /// </summary>
 public sealed class SongRecOptions
 {
-  /// <summary>Enable or disable SongRec recognition for live audio sources.</summary>
+  /// <summary>Enable or disable SongRec recognition.</summary>
   public bool Enabled { get; set; } = true;
 
   /// <summary>
@@ -76,25 +64,7 @@ public sealed class SongRecOptions
 }
 
 /// <summary>
-/// Configuration options for AcoustID API.
-/// </summary>
-public sealed class AcoustIdOptions
-{
-  /// <summary>AcoustID API key (register at https://acoustid.org/new-application).</summary>
-  public string ApiKey { get; set; } = string.Empty;
-
-  /// <summary>AcoustID API base URL.</summary>
-  public string BaseUrl { get; set; } = "https://api.acoustid.org/v2";
-
-  /// <summary>Maximum requests per second (AcoustID limit is 3).</summary>
-  public int MaxRequestsPerSecond { get; set; } = 3;
-
-  /// <summary>Request timeout in seconds.</summary>
-  public int TimeoutSeconds { get; set; } = 10;
-}
-
-/// <summary>
-/// Configuration options for MusicBrainz API.
+/// Configuration options for MusicBrainz API (used for cover art search).
 /// </summary>
 public sealed class MusicBrainzOptions
 {

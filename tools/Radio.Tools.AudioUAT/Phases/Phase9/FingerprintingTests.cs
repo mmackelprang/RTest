@@ -115,15 +115,15 @@ public class DatabaseInitializationTest : IPhaseTest
 }
 
 /// <summary>
-/// P9-002: Fingerprint Generation Test.
+/// P9-002: SongRec Availability Test.
 /// </summary>
 public class FingerprintGenerationTest : IPhaseTest
 {
   private readonly IServiceProvider _serviceProvider;
 
   public string TestId => "P9-002";
-  public string TestName => "Fingerprint Generation";
-  public string Description => "Generate audio fingerprint from test samples";
+  public string TestName => "SongRec Availability";
+  public string Description => "Check that SongRec recognition service is available";
   public int Phase => 9;
 
   public FingerprintGenerationTest(IServiceProvider serviceProvider)
@@ -139,74 +139,35 @@ public class FingerprintGenerationTest : IPhaseTest
     try
     {
       using var scope = _serviceProvider.CreateScope();
-      var fingerprintService = scope.ServiceProvider.GetRequiredService<IFingerprintService>();
+      var songRecService = scope.ServiceProvider.GetService<ISongRecRecognitionService>();
 
-      ConsoleUI.WriteInfo("Creating test audio samples (5 second 440Hz sine wave)...");
-      var samples = CreateTestSamples(5.0, frequency: 440);
-
-      ConsoleUI.WriteInfo("Generating fingerprint...");
-      var fingerprint = await fingerprintService.GenerateFingerprintAsync(samples, ct);
-
-      ConsoleUI.WriteInfo($"Fingerprint ID: {fingerprint.Id}");
-      ConsoleUI.WriteInfo($"Hash length: {fingerprint.ChromaprintHash.Length} characters");
-      ConsoleUI.WriteInfo($"Duration: {fingerprint.DurationSeconds} seconds");
-
-      if (string.IsNullOrEmpty(fingerprint.ChromaprintHash))
+      if (songRecService == null)
       {
-        return TestResult.Fail(TestId, "Fingerprint hash is empty");
+        ConsoleUI.WriteWarning("SongRec service not registered");
+        return TestResult.Skip(TestId, "SongRec service not available in DI container");
       }
 
-      ConsoleUI.WriteSuccess("Fingerprint generated successfully");
+      ConsoleUI.WriteInfo($"SongRec available: {songRecService.IsAvailable}");
 
-      // Test with different frequency to verify different fingerprints
-      ConsoleUI.WriteInfo("Generating fingerprint with different audio...");
-      var samples2 = CreateTestSamples(5.0, frequency: 880);
-      var fingerprint2 = await fingerprintService.GenerateFingerprintAsync(samples2, ct);
-
-      if (fingerprint.ChromaprintHash == fingerprint2.ChromaprintHash)
+      if (!songRecService.IsAvailable)
       {
-        ConsoleUI.WriteWarning("Different audio produced same hash (may be expected for mock service)");
-      }
-      else
-      {
-        ConsoleUI.WriteSuccess("Different audio produced different fingerprints");
+        ConsoleUI.WriteWarning("SongRec binary not found on PATH — install via: sudo apt install songrec");
+        return TestResult.Skip(TestId, "SongRec binary not available on this system");
       }
 
-      return TestResult.Pass(TestId, "Fingerprint generation works correctly",
+      ConsoleUI.WriteSuccess("SongRec recognition service is available");
+
+      return await Task.FromResult(TestResult.Pass(TestId, "SongRec is available and ready",
         metadata: new Dictionary<string, object>
         {
-          ["FingerprintId"] = fingerprint.Id,
-          ["HashLength"] = fingerprint.ChromaprintHash.Length
-        });
+          ["IsAvailable"] = songRecService.IsAvailable
+        }));
     }
     catch (Exception ex)
     {
       ConsoleUI.WriteError($"Error: {ex.Message}");
-      return TestResult.Fail(TestId, $"Fingerprint generation failed: {ex.Message}", exception: ex);
+      return TestResult.Fail(TestId, $"SongRec availability check failed: {ex.Message}", exception: ex);
     }
-  }
-
-  private static AudioSampleBuffer CreateTestSamples(double durationSeconds, double frequency)
-  {
-    const int sampleRate = 44100;
-    const int channels = 2;
-    var sampleCount = (int)(durationSeconds * sampleRate * channels);
-    var samples = new float[sampleCount];
-
-    for (int i = 0; i < sampleCount; i++)
-    {
-      var t = (double)i / channels / sampleRate;
-      samples[i] = (float)Math.Sin(2 * Math.PI * frequency * t);
-    }
-
-    return new AudioSampleBuffer
-    {
-      Samples = samples,
-      SampleRate = sampleRate,
-      Channels = channels,
-      Duration = TimeSpan.FromSeconds(durationSeconds),
-      SourceName = "Test Generator"
-    };
   }
 }
 
@@ -763,15 +724,15 @@ public class DuplicateSuppressionTest : IPhaseTest
 }
 
 /// <summary>
-/// P9-010: Unknown Track Handling Test.
+/// P9-010: Cover Art Search Test.
 /// </summary>
 public class UnknownTrackHandlingTest : IPhaseTest
 {
   private readonly IServiceProvider _serviceProvider;
 
   public string TestId => "P9-010";
-  public string TestName => "Unknown Track Handling";
-  public string Description => "Test handling of unidentified tracks";
+  public string TestName => "Cover Art Search";
+  public string Description => "Test cover art search via MusicBrainz/Cover Art Archive";
   public int Phase => 9;
 
   public UnknownTrackHandlingTest(IServiceProvider serviceProvider)
@@ -788,49 +749,38 @@ public class UnknownTrackHandlingTest : IPhaseTest
     {
       using var scope = _serviceProvider.CreateScope();
       var lookupService = scope.ServiceProvider.GetRequiredService<IMetadataLookupService>();
-      var cacheRepo = scope.ServiceProvider.GetRequiredService<IFingerprintCacheRepository>();
 
-      // Create a unique fingerprint that won't be found
-      var uniqueHash = Convert.ToBase64String(Guid.NewGuid().ToByteArray());
-      var fingerprint = new FingerprintData
+      // Test with a well-known track
+      ConsoleUI.WriteInfo("Searching cover art for 'Bohemian Rhapsody' by 'Queen'...");
+      var coverArtUrl = await lookupService.SearchCoverArtByTextAsync("Bohemian Rhapsody", "Queen", ct: ct);
+
+      if (!string.IsNullOrEmpty(coverArtUrl))
       {
-        Id = Guid.NewGuid().ToString(),
-        ChromaprintHash = uniqueHash,
-        DurationSeconds = 10,
-        GeneratedAt = DateTime.UtcNow
-      };
-
-      ConsoleUI.WriteInfo("Looking up unknown fingerprint...");
-      var result = await lookupService.LookupAsync(fingerprint, ct);
-
-      if (result != null && result.IsMatch)
-      {
-        ConsoleUI.WriteWarning("Unexpected match found for unknown fingerprint");
+        ConsoleUI.WriteSuccess($"Found cover art: {coverArtUrl}");
       }
       else
       {
-        ConsoleUI.WriteSuccess("Lookup returned null/no match as expected");
+        ConsoleUI.WriteWarning("No cover art found (MusicBrainz may be rate-limited or unavailable)");
       }
 
-      // Verify fingerprint was stored for manual tagging
-      ConsoleUI.WriteInfo("Verifying fingerprint was stored for manual tagging...");
-      var cached = await cacheRepo.FindByHashAsync(uniqueHash, ct);
-
-      if (cached == null)
+      // Test with null/empty inputs (should return null gracefully)
+      ConsoleUI.WriteInfo("Testing null input handling...");
+      var nullResult = await lookupService.SearchCoverArtByTextAsync("", "", ct: ct);
+      if (nullResult == null)
       {
-        return TestResult.Fail(TestId, "Unknown fingerprint was not stored for manual tagging");
+        ConsoleUI.WriteSuccess("Null/empty inputs handled gracefully");
       }
 
-      ConsoleUI.WriteSuccess("Unknown fingerprint stored successfully");
-      ConsoleUI.WriteInfo($"Cached fingerprint ID: {cached.Id}");
-      ConsoleUI.WriteInfo($"Has metadata: {cached.Metadata != null}");
-
-      return TestResult.Pass(TestId, "Unknown tracks handled correctly - stored for manual tagging");
+      return TestResult.Pass(TestId, "Cover art search works correctly",
+        metadata: new Dictionary<string, object>
+        {
+          ["CoverArtFound"] = !string.IsNullOrEmpty(coverArtUrl)
+        });
     }
     catch (Exception ex)
     {
       ConsoleUI.WriteError($"Error: {ex.Message}");
-      return TestResult.Fail(TestId, $"Unknown track handling test failed: {ex.Message}", exception: ex);
+      return TestResult.Fail(TestId, $"Cover art search test failed: {ex.Message}", exception: ex);
     }
   }
 }

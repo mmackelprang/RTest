@@ -163,7 +163,7 @@ public class FingerprintingConfigurationIntegrationTests : IAsyncLifetime
       Album = "A Night at the Opera",
       ReleaseYear = 1975,
       Genre = "Rock",
-      Source = MetadataSource.AcoustID,
+      Source = MetadataSource.Shazam,
       CreatedAt = DateTime.UtcNow,
       UpdatedAt = DateTime.UtcNow
     };
@@ -226,131 +226,46 @@ public class FingerprintingConfigurationIntegrationTests : IAsyncLifetime
   }
 
   [Fact]
-  public async Task MockAudioSampleProvider_WithMockFingerprinting_ProducesValidData()
+  public async Task MockAudioSampleProvider_CaptureAudio_ProducesValidData()
   {
     // Arrange
     var audioProvider = new MockAudioSampleProvider();
     audioProvider.SetActive(true, "TestAudio", PlaySource.File);
 
-    var lookupService = new MockMetadataLookupService();
-    lookupService.SetDefaultMetadata(new TrackMetadata
-    {
-      Id = Guid.NewGuid().ToString(),
-      Title = "Mock Identified Track",
-      Artist = "Mock Artist",
-      Source = MetadataSource.AcoustID,
-      CreatedAt = DateTime.UtcNow,
-      UpdatedAt = DateTime.UtcNow
-    });
-
     // Act - Capture audio samples
     var samples = await audioProvider.CaptureAsync(TimeSpan.FromSeconds(10));
-
-    // Simulate fingerprint data
-    var fingerprint = new FingerprintData
-    {
-      Id = Guid.NewGuid().ToString(),
-      ChromaprintHash = Convert.ToBase64String(new byte[64]),
-      DurationSeconds = 10,
-      GeneratedAt = DateTime.UtcNow
-    };
-
-    // Lookup via mock service
-    var lookupResult = await lookupService.LookupAsync(fingerprint);
 
     // Assert
     Assert.NotNull(samples);
     Assert.Equal(10, samples.Duration.TotalSeconds);
     Assert.True(samples.Samples.Length > 0);
-
-    Assert.NotNull(lookupResult);
-    Assert.True(lookupResult.IsMatch);
-    Assert.NotNull(lookupResult.Metadata);
-    Assert.Equal("Mock Identified Track", lookupResult.Metadata.Title);
   }
 
   [Fact]
-  public async Task MockMetadataLookupService_TracksLookupHistory()
+  public async Task MockMetadataLookupService_CoverArtSearch_ReturnsNull()
   {
     // Arrange
     var lookupService = new MockMetadataLookupService();
 
-    var fingerprint1 = new FingerprintData
-    {
-      Id = "fp-1",
-      ChromaprintHash = "hash1",
-      DurationSeconds = 10,
-      GeneratedAt = DateTime.UtcNow
-    };
-
-    var fingerprint2 = new FingerprintData
-    {
-      Id = "fp-2",
-      ChromaprintHash = "hash2",
-      DurationSeconds = 15,
-      GeneratedAt = DateTime.UtcNow
-    };
-
     // Act
-    await lookupService.LookupAsync(fingerprint1);
-    await lookupService.LookupAsync(fingerprint2);
-    await lookupService.LookupAsync(fingerprint1);
+    var result = await lookupService.SearchCoverArtByTextAsync("Test", "Artist");
 
-    // Assert
-    Assert.Equal(3, lookupService.LookupHistory.Count);
-    Assert.Equal("fp-1", lookupService.LookupHistory[0].Id);
-    Assert.Equal("fp-2", lookupService.LookupHistory[1].Id);
-    Assert.Equal("fp-1", lookupService.LookupHistory[2].Id);
+    // Assert — mock returns null by default
+    Assert.Null(result);
   }
 
   [Fact]
-  public async Task MockMetadataLookupService_ConfigurableResults_ReturnCorrectData()
+  public async Task MockMetadataLookupService_CoverArtSearch_ReturnsConfiguredUrl()
   {
     // Arrange
     var lookupService = new MockMetadataLookupService();
-
-    // Configure a specific result for a specific fingerprint
-    var specificResult = new MetadataLookupResult
-    {
-      IsMatch = true,
-      Confidence = 0.99,
-      FingerprintId = "specific-fp",
-      Metadata = MockMetadataLookupService.CreateTestMetadata("Specific Track", "Specific Artist"),
-      Source = LookupSource.Cache
-    };
-    lookupService.ConfigureResult("specific-fp", specificResult);
-
-    // Set no match for other lookups
-    lookupService.ShouldMatch = false;
-
-    var specificFingerprint = new FingerprintData
-    {
-      Id = "specific-fp",
-      ChromaprintHash = "hash",
-      DurationSeconds = 10,
-      GeneratedAt = DateTime.UtcNow
-    };
-
-    var otherFingerprint = new FingerprintData
-    {
-      Id = "other-fp",
-      ChromaprintHash = "otherhash",
-      DurationSeconds = 10,
-      GeneratedAt = DateTime.UtcNow
-    };
+    lookupService.CoverArtUrl = "https://example.com/cover.jpg";
 
     // Act
-    var specificLookup = await lookupService.LookupAsync(specificFingerprint);
-    var otherLookup = await lookupService.LookupAsync(otherFingerprint);
+    var result = await lookupService.SearchCoverArtByTextAsync("Test", "Artist");
 
     // Assert
-    Assert.NotNull(specificLookup);
-    Assert.True(specificLookup.IsMatch);
-    Assert.Equal("Specific Track", specificLookup.Metadata?.Title);
-    Assert.Equal(LookupSource.Cache, specificLookup.Source);
-
-    Assert.NotNull(otherLookup);
-    Assert.False(otherLookup.IsMatch);
+    Assert.Equal("https://example.com/cover.jpg", result);
   }
 
   [Fact]
@@ -372,7 +287,7 @@ public class FingerprintingConfigurationIntegrationTests : IAsyncLifetime
     // Arrange & Act - Store metadata with each source type
     var sources = new[]
     {
-      MetadataSource.AcoustID,
+      MetadataSource.Shazam,
       MetadataSource.Manual,
       MetadataSource.FileTag,
       MetadataSource.Fingerprinting
