@@ -205,7 +205,6 @@ internal sealed class TappedOutputStream : Stream
     {
       _totalWriteCalls++;
       _totalBytesWritten += samples.Length * _bytesPerSample;
-      _lastWriteTime = DateTime.UtcNow;
 
       foreach (var sample in samples)
       {
@@ -239,7 +238,6 @@ internal sealed class TappedOutputStream : Stream
     {
       _totalWriteCalls++;
       _totalBytesWritten += count * _bytesPerSample;
-      _lastWriteTime = DateTime.UtcNow;
 
       for (var i = 0; i < count; i++)
       {
@@ -261,9 +259,12 @@ internal sealed class TappedOutputStream : Stream
 
   private void ReportMetrics()
   {
-    if (_metricsCollector == null) return;
-
     var now = DateTime.UtcNow;
+    // Update last write time here instead of in WriteFromEngine hot path
+    // to avoid a syscall (DateTime.UtcNow) on every audio callback
+    _lastWriteTime = now;
+
+    if (_metricsCollector == null) return;
     if ((now - _lastMetricsTime).TotalSeconds < 10) return;
 
     var elapsed = _lastMetricsTime == DateTime.MinValue ? 10.0 : (now - _lastMetricsTime).TotalSeconds;

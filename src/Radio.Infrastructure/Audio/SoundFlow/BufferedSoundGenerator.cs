@@ -82,6 +82,9 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     private long _lastReportedMissedDeadlines;
     private long _lastReportedGcCorrelatedMisses;
 
+    // Pre-allocated metrics tags to avoid Dictionary allocation in LogStats
+    private readonly Dictionary<string, string>? _metricsTags;
+
     // Clock drift compensation: when producer (e.g., BT/PipeWire) runs on a different
     // clock than consumer (MiniAudio/ALSA), the buffer slowly drains or fills. We
     // periodically check the buffer level and duplicate a frame of samples when the
@@ -126,6 +129,9 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         _driftCompensationTarget = (int)(_maxBufferSamples * DriftCompensationTargetPercent);
 
         Name = $"Buffered Generator ({typeof(T).Name})";
+
+        if (_metricsCollector != null)
+            _metricsTags = new Dictionary<string, string> { ["type"] = typeof(T).Name };
 
         _logger.LogDebug(
             "BufferedSoundGenerator created: Type={Type}, OutputSampleRate={SampleRate}Hz, OutputChannels={Channels}, MaxBufferSamples={MaxBuffer}, Strategy={Strategy}",
@@ -447,7 +453,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                     _totalSamplesReceived, _totalSamplesOutput,
                     _totalSamplesDropped, _totalSamplesCompensated, _underrunCount);
 
-                _logger.LogDebug(
+                _logger.LogInformation(
                     "🔬 Timing ({Type}): callback interval min={MinInterval:F2}ms max={MaxInterval:F2}ms, " +
                     "missed deadlines={Missed} (GC-correlated={GcMisses}), execution max={MaxExec:F2}ms, " +
                     "lock contention: addSamples={AddContentions} (max {AddWait:F2}ms), " +
@@ -469,41 +475,40 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                 _lastLogTime = now;
 
                 // Report metrics (outside lock — reads of long fields are safe for approximate values)
-                if (_metricsCollector != null)
+                if (_metricsCollector != null && _metricsTags != null)
                 {
-                    var tags = new Dictionary<string, string> { ["type"] = typeof(T).Name };
                     var fillPercent = (double)currentBuffer / _maxBufferSamples * 100.0;
-                    _metricsCollector.Gauge("audio.buffer.fill_percent", fillPercent, tags);
-                    _metricsCollector.Gauge("audio.callback.max_interval_ms", _maxCallbackIntervalMs, tags);
-                    _metricsCollector.Gauge("audio.callback.max_execution_ms", _maxCallbackExecutionMs, tags);
-                    _metricsCollector.Gauge("audio.lock.add_samples_max_wait_ms", _maxAddSamplesLockWaitMs, tags);
-                    _metricsCollector.Gauge("audio.lock.generate_audio_max_wait_ms", _maxGenerateAudioLockWaitMs, tags);
+                    _metricsCollector.Gauge("audio.buffer.fill_percent", fillPercent, _metricsTags);
+                    _metricsCollector.Gauge("audio.callback.max_interval_ms", _maxCallbackIntervalMs, _metricsTags);
+                    _metricsCollector.Gauge("audio.callback.max_execution_ms", _maxCallbackExecutionMs, _metricsTags);
+                    _metricsCollector.Gauge("audio.lock.add_samples_max_wait_ms", _maxAddSamplesLockWaitMs, _metricsTags);
+                    _metricsCollector.Gauge("audio.lock.generate_audio_max_wait_ms", _maxGenerateAudioLockWaitMs, _metricsTags);
 
                     var droppedDelta = _totalSamplesDropped - _lastReportedDropped;
                     if (droppedDelta > 0)
                     {
-                        _metricsCollector.Increment("audio.buffer.samples_dropped", droppedDelta, tags);
+                        _metricsCollector.Increment("audio.buffer.samples_dropped", droppedDelta, _metricsTags);
                         _lastReportedDropped = _totalSamplesDropped;
                     }
 
                     var underrunDelta = _underrunCount - _lastReportedUnderruns;
                     if (underrunDelta > 0)
                     {
-                        _metricsCollector.Increment("audio.buffer.underruns", underrunDelta, tags);
+                        _metricsCollector.Increment("audio.buffer.underruns", underrunDelta, _metricsTags);
                         _lastReportedUnderruns = _underrunCount;
                     }
 
                     var missedDelta = _missedDeadlineCount - _lastReportedMissedDeadlines;
                     if (missedDelta > 0)
                     {
-                        _metricsCollector.Increment("audio.callback.missed_deadlines", missedDelta, tags);
+                        _metricsCollector.Increment("audio.callback.missed_deadlines", missedDelta, _metricsTags);
                         _lastReportedMissedDeadlines = _missedDeadlineCount;
                     }
 
                     var gcDelta = _gcCorrelatedMissedDeadlines - _lastReportedGcCorrelatedMisses;
                     if (gcDelta > 0)
                     {
-                        _metricsCollector.Increment("audio.callback.gc_correlated_misses", gcDelta, tags);
+                        _metricsCollector.Increment("audio.callback.gc_correlated_misses", gcDelta, _metricsTags);
                         _lastReportedGcCorrelatedMisses = _gcCorrelatedMissedDeadlines;
                     }
                 }

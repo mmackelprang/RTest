@@ -1,3 +1,4 @@
+using System.Runtime;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
@@ -42,6 +43,7 @@ public class SoundFlowAudioEngine : IAudioEngine
   private bool _disposed;
   private bool _localOutputMuted;
   private readonly object _stateLock = new();
+  private GCLatencyMode _previousLatencyMode;
 
   /// <inheritdoc/>
   public event EventHandler<AudioEngineStateChangedEventArgs>? StateChanged;
@@ -152,6 +154,14 @@ public class SoundFlowAudioEngine : IAudioEngine
 
     try
     {
+      // Reduce GC pause duration during audio processing. SustainedLowLatency
+      // tells .NET to avoid full blocking Gen2 collections, which are the primary
+      // cause of audio callback stalls (40-740ms pauses observed).
+      _previousLatencyMode = GCSettings.LatencyMode;
+      GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;
+      _logger.LogInformation(
+        "GC latency mode set to SustainedLowLatency (was {Previous})", _previousLatencyMode);
+
       _logger.LogInformation(
         "Initializing SoundFlow audio engine (SampleRate: {SampleRate}, Channels: {Channels}, BufferSize: {BufferSize})",
         _options.SampleRate, _options.Channels, _options.BufferSize);
@@ -815,6 +825,11 @@ public class SoundFlowAudioEngine : IAudioEngine
       _engine.Dispose();
       _engine = null;
     }
+
+    // Restore previous GC latency mode
+    GCSettings.LatencyMode = _previousLatencyMode;
+    _logger.LogInformation(
+      "GC latency mode restored to {Mode}", _previousLatencyMode);
 
     _logger.LogInformation("Audio engine disposed");
   }

@@ -269,12 +269,18 @@ internal sealed class PipeWireNativeStream : IDisposable
       if (sampleCount <= 0) return;
 
       // Convert S16_LE to float [-1.0, 1.0]
+      // Use unsafe Span cast instead of per-sample Marshal.ReadInt16 to
+      // eliminate ~1024 P/Invoke calls per callback
       var dataPtr = IntPtr.Add(spaData.Data, (int)chunk.Offset);
       var floatSamples = ArrayPool<float>.Shared.Rent(sampleCount);
       try
       {
-        for (var i = 0; i < sampleCount; i++)
-          floatSamples[i] = Marshal.ReadInt16(dataPtr, i * 2) / 32768f;
+        unsafe
+        {
+          var s16Span = new ReadOnlySpan<short>((void*)dataPtr, sampleCount);
+          for (var i = 0; i < sampleCount; i++)
+            floatSamples[i] = s16Span[i] / 32768f;
+        }
 
         self._onAudioData(floatSamples, sampleCount);
       }
@@ -299,7 +305,7 @@ internal sealed class PipeWireNativeStream : IDisposable
     var now = DateTime.UtcNow;
     if ((now - self._lastOnProcessLogTime).TotalSeconds >= 10 && self._onProcessCount > 0)
     {
-      self._logger.LogDebug(
+      self._logger.LogInformation(
         "🔬 PipeWire OnProcess: count={Count}, interval min={Min:F2}ms max={Max:F2}ms, " +
         "bursts={Bursts}, execution max={Exec:F2}ms",
         self._onProcessCount,
