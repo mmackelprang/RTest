@@ -37,6 +37,7 @@ public class AudioSourceFactory : IAudioSourceFactory
   private readonly IServiceScopeFactory? _serviceScopeFactory;
   private readonly AlbumArtCacheService? _albumArtCache;
   private readonly DeviceOptionsResolver? _deviceOptionsResolver;
+  private readonly IOptions<FingerprintingOptions>? _fingerprintingOptions;
 
   public AudioSourceFactory(
     ILogger<AudioSourceFactory> logger,
@@ -56,7 +57,8 @@ public class AudioSourceFactory : IAudioSourceFactory
     SoundFlow.SoundFlowPlaybackService? playbackService = null,
     IServiceScopeFactory? serviceScopeFactory = null,
     AlbumArtCacheService? albumArtCache = null,
-    DeviceOptionsResolver? deviceOptionsResolver = null)
+    DeviceOptionsResolver? deviceOptionsResolver = null,
+    IOptions<FingerprintingOptions>? fingerprintingOptions = null)
   {
     _logger = logger;
     _loggerFactory = loggerFactory;
@@ -76,6 +78,7 @@ public class AudioSourceFactory : IAudioSourceFactory
     _serviceScopeFactory = serviceScopeFactory;
     _albumArtCache = albumArtCache;
     _deviceOptionsResolver = deviceOptionsResolver;
+    _fingerprintingOptions = fingerprintingOptions;
   }
 
   /// <inheritdoc/>
@@ -112,7 +115,8 @@ public class AudioSourceFactory : IAudioSourceFactory
       _metricsCollector,
       _playbackService,
       _serviceScopeFactory,
-      _albumArtCache);
+      _albumArtCache,
+      _fingerprintingOptions);
   }
 
   private IAudioSource CreateFilePlayerSource()
@@ -128,7 +132,8 @@ public class AudioSourceFactory : IAudioSourceFactory
       _metricsCollector,
       _playbackService,
       _configurationManager,
-      _albumArtCache);
+      _albumArtCache,
+      fingerprintingOptions: _fingerprintingOptions);
   }
 
   private IAudioSource CreateVinylSource()

@@ -554,19 +554,44 @@ public class PlayHistoryTracker : IDisposable
 
       var playSource = MapSourceTypeToPlaySource(activeSource.Type);
 
-      // Finalize the previous play history entry
-      if (!string.IsNullOrEmpty(_currentPlayHistoryEntryId))
-      {
-        await playHistoryRepository.FinalizeEntryAsync(_currentPlayHistoryEntryId, e.DetectedAt);
-        _logger.LogInformation(
-          "Finalized play history entry {EntryId} (song ended at {EndedAt})",
-          _currentPlayHistoryEntryId, e.DetectedAt);
-      }
-
       // Store the new track metadata
       if (metadataRepository != null)
       {
         await metadataRepository.StoreAsync(e.NewTrack);
+      }
+
+      // Check if the current entry already matches the new song (AVRCP may have
+      // created an entry before SongRec identified it — avoid creating a duplicate).
+      if (!string.IsNullOrEmpty(_currentPlayHistoryEntryId))
+      {
+        var currentEntry = await playHistoryRepository.GetByIdAsync(_currentPlayHistoryEntryId);
+        if (currentEntry?.Track != null &&
+            string.Equals(currentEntry.Track.Title, e.NewTrack.Title, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(currentEntry.Track.Artist, e.NewTrack.Artist, StringComparison.OrdinalIgnoreCase))
+        {
+          // Same song — enrich the existing entry with fingerprinting data instead of duplicating
+          var updatedEntry = currentEntry with
+          {
+            TrackMetadataId = e.NewTrack.Id,
+            FingerprintId = e.NewTrack.FingerprintId,
+            MetadataSource = MetadataSource.Fingerprinting,
+            SourceDetails = $"{e.NewTrack.Title} - {e.NewTrack.Artist}",
+            IdentificationConfidence = e.Confidence,
+            WasIdentified = true,
+            Track = e.NewTrack
+          };
+          await playHistoryRepository.UpdateAsync(updatedEntry);
+          _logger.LogInformation(
+            "Enriched existing play history entry {EntryId} with fingerprinting data: '{Title}' by '{Artist}' (confidence: {Confidence:P0})",
+            currentEntry.Id, e.NewTrack.Title, e.NewTrack.Artist, e.Confidence);
+          return;
+        }
+
+        // Different song — finalize the previous entry
+        await playHistoryRepository.FinalizeEntryAsync(_currentPlayHistoryEntryId, e.DetectedAt);
+        _logger.LogInformation(
+          "Finalized play history entry {EntryId} (song ended at {EndedAt})",
+          _currentPlayHistoryEntryId, e.DetectedAt);
       }
 
       // Create a new play history entry for the new song
@@ -636,15 +661,14 @@ public class PlayHistoryTracker : IDisposable
         return;
       }
 
-      // Build the new metadata record, including cover art from the source if available
-      // (BluetoothAudioSource may have already fetched art via MusicBrainz lookup)
+      // Use album art from the AVRCP event data (not from btSrc.Metadata, which may
+      // still contain stale art from the previous song — the tracker handler fires
+      // before BluetoothAudioSource.OnMetadataChanged clears it due to subscription order).
+      // Art from MusicBrainz/SongRec lookups will update the entry later via OnTrackIdentified.
       string? coverArtUrl = null;
-      if (_getActiveSource() is IPrimaryAudioSource btSrc && btSrc.Metadata != null &&
-          btSrc.Metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var artObj))
+      if (!string.IsNullOrWhiteSpace(e.AlbumArtUrl))
       {
-        var artUrl = artObj?.ToString();
-        if (!string.IsNullOrWhiteSpace(artUrl) && artUrl != StandardMetadataKeys.DefaultAlbumArtUrl)
-          coverArtUrl = artUrl;
+        coverArtUrl = e.AlbumArtUrl;
       }
 
       var metadata = new TrackMetadata
