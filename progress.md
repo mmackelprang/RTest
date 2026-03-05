@@ -30,3 +30,23 @@
 - Added 9 unit tests for SongRec service (parsing, availability, edge cases)
 - Fixed Now Playing panel stuck on previous source (subscribed to SourceChanged event)
 - All 1,400 tests pass (9 new SongRec tests)
+
+## Session: 2026-03-05
+
+- Phases 7 & 8 implemented and merged (PR #288)
+- Phase 7: Virtual keyboard auto-show for dialogs, RDS preset auto-naming
+- Phase 8: Source auto-activation on startup, file player position restore
+- Fixed virtual-keyboard.js not loading (missing script tag in App.razor)
+- Fixed CSS dialog shift selector (descendant vs direct child)
+- All 1,414 tests pass
+
+## Session: 2026-03-05 (planning)
+
+- Planned 6 new phases (9-14) based on user requirements
+- Researched metrics dashboard: current flat card layout, SQLite 3-tier rollup, custom SVG sparklines
+- Researched Blazor charting: MudBlazor has built-in `MudTimeSeriesChart`, also Chart.js wrappers available
+- Researched SRE dashboard patterns: Grafana F-pattern, stat panels, progressive disclosure, <12 panels/page
+- Researched AcoustID removal: only used for file sources, SongRec can replace for all
+- Researched USB audio (AB13X): config via `Devices:Radio:USBPort`, substring match on MiniAudio device names
+- Researched audio distortion: per-sample locks on audio thread, ThreadPool starvation risk from UI/DB load
+- Ready to begin Phase 9 (Metrics Dashboard Redesign)

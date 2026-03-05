@@ -1091,8 +1091,8 @@
     if (_radioState != null)
     {
       _presetName = !string.IsNullOrEmpty(_radioState.RdsStationName)
-        ? _radioState.RdsStationName
-        : $"{_radioState.Band} - {FormatFrequency(_radioState.Frequency, _radioState.Band)}";
+        ? $"{_radioState.Band} {_radioState.RdsStationName} {FormatFrequency(_radioState.Frequency, _radioState.Band)}"
+        : $"{_radioState.Band} {FormatFrequency(_radioState.Frequency, _radioState.Band)}";
     }
     _isSavePresetDialogOpen = true;
   }

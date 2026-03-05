@@ -210,3 +210,33 @@ body.keyboard-active .mud-overlay .mud-paper {
   transform: translateY(-150px);
   transition: transform 0.3s ease;
 }
+
+/* Numeric keypad — compact centered layout */
+.virtual-keyboard.numpad {
+  max-width: 360px;
+}
+
+.numpad-keys {
+  gap: 10px;
+}
+
+.numpad-keys .keyboard-row {
+  gap: 10px;
+}
+
+.numpad-key {
+  min-width: 70px;
+  min-height: 60px;
+  height: 60px;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.numpad-key.key-backspace {
+  font-size: 24px;
+}
+
+.numpad-key.key-enter {
+  min-width: 70px;
+  font-size: 14px;
+}

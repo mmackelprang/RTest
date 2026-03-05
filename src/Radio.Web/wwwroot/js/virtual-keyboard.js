@@ -7,6 +7,7 @@ class VirtualKeyboard {
     this.currentInput = null;
     this.keyboardElement = null;
     this.capsLock = false;
+    this.currentMode = 'qwerty'; // 'qwerty' or 'numeric'
   }
 
   initialize() {
@@ -16,10 +17,10 @@ class VirtualKeyboard {
     this.keyboardElement.className = 'virtual-keyboard-container';
     this.keyboardElement.style.display = 'none';
 
-    this.keyboardElement.innerHTML = this.getKeyboardHTML();
+    this.keyboardElement.innerHTML = this.getKeyboardHTML('qwerty');
     document.body.appendChild(this.keyboardElement);
 
-    // Add event listeners
+    // Attach event listeners on the outer container (delegates to inner content)
     this.attachEventListeners();
 
     // Auto-show keyboard when inputs inside dialog overlays receive focus
@@ -46,7 +47,12 @@ class VirtualKeyboard {
     });
   }
 
-  getKeyboardHTML() {
+  getKeyboardHTML(mode) {
+    if (mode === 'numeric') return this.getNumericHTML();
+    return this.getQwertyHTML();
+  }
+
+  getQwertyHTML() {
     return `
       <div class="virtual-keyboard">
         <div class="keyboard-header">
@@ -68,7 +74,7 @@ class VirtualKeyboard {
             <button class="key" data-key="0">0</button>
             <button class="key key-backspace" data-action="backspace">⌫</button>
           </div>
-          
+
           <!-- Top Row -->
           <div class="keyboard-row">
             <button class="key" data-key="q">q</button>
@@ -82,7 +88,7 @@ class VirtualKeyboard {
             <button class="key" data-key="o">o</button>
             <button class="key" data-key="p">p</button>
           </div>
-          
+
           <!-- Middle Row -->
           <div class="keyboard-row">
             <button class="key" data-key="a">a</button>
@@ -95,7 +101,7 @@ class VirtualKeyboard {
             <button class="key" data-key="k">k</button>
             <button class="key" data-key="l">l</button>
           </div>
-          
+
           <!-- Bottom Row -->
           <div class="keyboard-row">
             <button class="key key-shift" data-action="shift">⇧ Shift</button>
@@ -109,7 +115,7 @@ class VirtualKeyboard {
             <button class="key" data-key="-">-</button>
             <button class="key" data-key="_">_</button>
           </div>
-          
+
           <!-- Special Characters Row -->
           <div class="keyboard-row">
             <button class="key" data-key="/">/ </button>
@@ -121,6 +127,42 @@ class VirtualKeyboard {
             <button class="key" data-key="$">$</button>
             <button class="key" data-key="#">#</button>
             <button class="key key-enter" data-action="enter">Enter</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  getNumericHTML() {
+    return `
+      <div class="virtual-keyboard numpad">
+        <div class="keyboard-header">
+          <span class="keyboard-title">Numpad</span>
+          <button class="keyboard-close" data-action="close">✕</button>
+        </div>
+        <div class="keyboard-keys numpad-keys">
+          <div class="keyboard-row">
+            <button class="key numpad-key" data-key="7">7</button>
+            <button class="key numpad-key" data-key="8">8</button>
+            <button class="key numpad-key" data-key="9">9</button>
+            <button class="key numpad-key key-backspace" data-action="backspace">⌫</button>
+          </div>
+          <div class="keyboard-row">
+            <button class="key numpad-key" data-key="4">4</button>
+            <button class="key numpad-key" data-key="5">5</button>
+            <button class="key numpad-key" data-key="6">6</button>
+            <button class="key numpad-key" data-key=".">.</button>
+          </div>
+          <div class="keyboard-row">
+            <button class="key numpad-key" data-key="1">1</button>
+            <button class="key numpad-key" data-key="2">2</button>
+            <button class="key numpad-key" data-key="3">3</button>
+            <button class="key numpad-key" data-key="-">-</button>
+          </div>
+          <div class="keyboard-row">
+            <button class="key numpad-key numpad-zero" data-key="0">0</button>
+            <button class="key numpad-key" data-key="00">00</button>
+            <button class="key numpad-key key-enter" data-action="enter">Enter</button>
           </div>
         </div>
       </div>
@@ -270,8 +312,42 @@ class VirtualKeyboard {
     setTimeout(() => this.hide(), 100);
   }
 
+  detectInputMode(inputElement) {
+    // Explicit opt-in via data attribute
+    const dataKeyboard = inputElement.getAttribute('data-keyboard');
+    if (dataKeyboard === 'numeric') return 'numeric';
+    if (dataKeyboard === 'qwerty') return 'qwerty';
+
+    // Detect from input type and inputmode attributes
+    const type = inputElement.getAttribute('type');
+    const inputMode = inputElement.getAttribute('inputmode');
+
+    if (type === 'number' || inputMode === 'numeric' || inputMode === 'decimal') {
+      return 'numeric';
+    }
+
+    // MudNumericField renders an inner <input> with type="number" inside a wrapper
+    // that may have inputmode on the outer element
+    const wrapper = inputElement.closest('.mud-input-control');
+    if (wrapper && wrapper.querySelector('input[type="number"]')) {
+      return 'numeric';
+    }
+
+    return 'qwerty';
+  }
+
   show(inputElement) {
     this.currentInput = inputElement;
+
+    // Detect desired keyboard mode
+    const mode = this.detectInputMode(inputElement);
+
+    // Swap layout if mode changed (event listeners delegate from outer container, no re-attach needed)
+    if (mode !== this.currentMode) {
+      this.currentMode = mode;
+      this.keyboardElement.innerHTML = this.getKeyboardHTML(mode);
+    }
+
     this.keyboardElement.style.display = 'block';
     this.isVisible = true;
     document.body.classList.add('keyboard-active');
@@ -292,11 +368,15 @@ class VirtualKeyboard {
       this.currentInput = null;
       this.capsLock = false;
 
-      // Reset shift button
+      // Reset shift button (only present in qwerty mode)
       const shiftButton = this.keyboardElement.querySelector('[data-action="shift"]');
       if (shiftButton) {
         shiftButton.classList.remove('active');
       }
+
+      // Reset mode so next show() re-evaluates
+      this.currentMode = 'qwerty';
+      this.keyboardElement.innerHTML = this.getKeyboardHTML('qwerty');
     }, 300);
   }
 
