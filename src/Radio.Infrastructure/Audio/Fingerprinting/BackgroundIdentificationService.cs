@@ -34,6 +34,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
   // SongRec exponential backoff — increases delay after consecutive failures
   private int _consecutiveSongRecFailures;
   private static readonly int[] BackoffSeconds = [15, 30, 60, 120];
+  private bool _lastCycleWasLiveSource;
 
   // --- Fingerprint status tracking ---
   private readonly object _statusLock = new();
@@ -158,13 +159,21 @@ public sealed class BackgroundIdentificationService : BackgroundService
       try
       {
         UpdatePhase(FingerprintPhase.Idle);
+
+        // Live sources: skip idle delay — the capture duration already throttles.
+        // Only delay on SongRec backoff or for file sources (AcoustID rate limits).
+        if (_lastCycleWasLiveSource && _consecutiveSongRecFailures == 0)
+          continue;
+
         using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         _delayCts = delayCts;
 
-        var delaySeconds = _options.IdentificationIntervalSeconds;
+        var delaySeconds = _consecutiveSongRecFailures > 0
+          ? BackoffSeconds[Math.Min(_consecutiveSongRecFailures - 1, BackoffSeconds.Length - 1)]
+          : _options.IdentificationIntervalSeconds;
+
         if (_consecutiveSongRecFailures > 0)
         {
-          delaySeconds = BackoffSeconds[Math.Min(_consecutiveSongRecFailures - 1, BackoffSeconds.Length - 1)];
           _logger.LogDebug("SongRec backoff: {BackoffSeconds}s after {Failures} consecutive failures",
             delaySeconds, _consecutiveSongRecFailures);
         }
@@ -227,6 +236,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
     // where the full track duration is unknown. AcoustID works well for file sources
     // where Chromaprint can fingerprint the entire track with correct duration.
     var sourceFilePath = audioTap.SourceFilePath;
+    _lastCycleWasLiveSource = string.IsNullOrEmpty(sourceFilePath);
     if (!string.IsNullOrEmpty(sourceFilePath))
     {
       // --- FILE SOURCE: Chromaprint → AcoustID (unchanged) ---
@@ -338,7 +348,6 @@ public sealed class BackgroundIdentificationService : BackgroundService
         else
         {
           _logger.LogInformation("SongRec returned no match for live source");
-          _consecutiveSongRecFailures++;
         }
       }
       catch (Exception ex) when (ex is not OperationCanceledException)
