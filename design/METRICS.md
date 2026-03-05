@@ -1,3 +1,328 @@
+# Metrics System
+
+The Radio Console metrics system provides end-to-end observability: backend collection with 3-tier SQLite rollup, a REST API for querying, and a Blazor dashboard with real-time charts.
+
+## Architecture Overview
+
+```
+Backend (Radio.API)                          Frontend (Radio.Web)
+┌─────────────────────────────┐              ┌──────────────────────────────┐
+│ IMetricsCollector            │              │ MetricsDashboardPage.razor   │
+│   .Increment(key, value)     │  REST API   │   Hero stat cards            │
+│   .Gauge(key, value)         │ ◄──────────►│   Canvas time-series chart   │
+│                              │             │   Collapsible categories     │
+│ SQLite 3-tier rollup:        │             │   Auto-refresh (10s)         │
+│   Minute → 2h retention      │             │                              │
+│   Hour   → 48h retention     │             │ MetricsApiService.cs         │
+│   Day    → 365d retention    │             │   (API client)               │
+└─────────────────────────────┘              └──────────────────────────────┘
+```
+
+**Key files:**
+
+| Purpose | File |
+|---------|------|
+| Dashboard UI | `src/Radio.Web/Components/Pages/MetricsDashboardPage.razor` |
+| Chart renderer | `src/Radio.Web/wwwroot/js/metricsChart.js` |
+| Dashboard CSS | `src/Radio.Web/wwwroot/css/design-system.css` (§18) |
+| API client | `src/Radio.Web/Services/ApiClients/MetricsApiService.cs` |
+| Web DTOs | `src/Radio.Web/Models/ApiModels.cs` (`MetricHistoryDto`, `MetricAggregateDto`) |
+| API controller | `src/Radio.API/Controllers/MetricsController.cs` |
+| Core models | `src/Radio.Core/Metrics/` |
+| SQLite storage | `src/Radio.Infrastructure/Metrics/` |
+| Configuration | `appsettings.json` → `Metrics` section |
+
+---
+
+## Dashboard Layout
+
+The dashboard (`/metrics`) is a full-width single-panel layout for a 1920x720 kiosk viewport:
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│ METRICS    [5m] [1h] [24h] [7d] [30d]                      [↻ Refresh] │
+├──────────────────────────────────────────────────────────────────────────┤
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐                    │
+│  │ CPU Temp │  │ Memory  │  │ Buffer  │  │ Underrun│  ← Hero stat cards │
+│  │  52.3°C  │  │ 68.2 MB │  │ 94.1%   │  │  0      │                    │
+│  │ ~~spark~~│  │ ~~spark~~│  │ ~~spark~~│  │ ~~spark~~│                    │
+│  └─────────┘  └─────────┘  └─────────┘  └─────────┘                    │
+├──────────────────────────────────────────────────────────────────────────┤
+│ ┌────────────────────────────────────────────────────────────────────┐  │
+│ │                    Canvas Time-Series Chart                        │  │
+│ │  Area fill, min/max band, hover tooltip, threshold lines           │  │
+│ │  Stats bar: Count | Avg | Min | Max | StdDev                       │  │
+│ └────────────────────────────────────────────────────────────────────┘  │
+├──────────────────────────────────────────────────────────────────────────┤
+│ ▾ Audio (12)         ← Collapsible category sections                    │
+│   audio.songs_played_total    42     ~~spark~~  ▲                       │
+│   audio.playback_errors        0     ~~spark~~  —                       │
+│ ▸ System (8)                                                            │
+│ ▸ Streaming (5)      ← Click any row → loads into chart above          │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+### Time Ranges and Resolution
+
+| Button | Window | Resolution | Data Source |
+|--------|--------|------------|-------------|
+| **5m** | Last 5 minutes | Minute | Minute tier (2h retention) |
+| **1h** | Last 1 hour | Minute | Minute tier |
+| **24h** | Last 24 hours | Hour | Hour tier (48h retention) |
+| **7d** | Last 7 days | Hour | Hour tier |
+| **30d** | Last 30 days | Day | Day tier (365d retention) |
+
+The selected time range is persisted in the `ui.metrics` configuration key and restored on page load.
+
+---
+
+## Hero Stat Cards
+
+Hero cards are the large pinned cards at the top of the dashboard. They provide at-a-glance status for the most important metrics.
+
+### How Hero Cards Are Selected
+
+Hero cards are auto-selected by matching metric keys against a pattern list (line 144 of `MetricsDashboardPage.razor`):
+
+```csharp
+private static readonly string[] _heroPatterns =
+  ["cpu", "memory", "buffer", "underrun", "error", "active"];
+```
+
+The dashboard scans all available metric keys and picks those containing any of these substrings. Results are ordered by the pattern array order (cpu first, active last) and capped at **6 cards**.
+
+**To change which metrics appear as hero cards**, edit the `_heroPatterns` array. Each entry is a case-insensitive substring match against the metric key.
+
+Examples:
+- `"cpu"` matches `system.cpu_temp_celsius` and `system.cpu_usage_percent`
+- `"buffer"` matches `audio.buffer_fill_percent`
+- `"error"` matches `audio.playback_errors`, `api.errors_total`, etc.
+
+**To pin a specific metric** that doesn't match existing patterns, add a unique fragment of its key. For example, to pin `tts.latency_ms`, add `"tts_latency"` or just `"latency"` (but note that broad patterns may match more metrics than intended).
+
+**To remove a hero card**, remove the matching pattern from the array.
+
+**To reorder hero cards**, reorder the patterns — the first pattern appears leftmost.
+
+### Threshold Coloring
+
+Each hero card has a colored left border indicating health status:
+- **Green** (`--signal-green`): Normal range
+- **Amber** (`--signal-amber`): Warning threshold crossed
+- **Red** (`--signal-red`): Critical threshold crossed
+- **Accent blue** (`--accent-primary`): No threshold defined for this metric
+
+Thresholds are defined in a static dictionary (line 148):
+
+```csharp
+private static readonly Dictionary<string, (double warn, double crit, bool invertAbove)> _thresholds = new()
+{
+  ["cpu_temp"]       = (70, 85, true),     // ≥70 amber, ≥85 red
+  ["cpu_usage"]      = (80, 95, true),     // ≥80 amber, ≥95 red
+  ["memory_percent"] = (80, 95, true),     // ≥80 amber, ≥95 red
+  ["buffer_fill"]    = (50, 20, false),    // ≤50 amber, ≤20 red (inverted)
+  ["buffer_percent"] = (50, 20, false),    // ≤50 amber, ≤20 red (inverted)
+  ["underrun"]       = (1, 10, true),      // ≥1 amber, ≥10 red
+  ["error"]          = (1, 10, true),      // ≥1 amber, ≥10 red
+};
+```
+
+The `invertAbove` flag controls the comparison direction:
+- **`true`** (normal): Higher values are worse. Value ≥ warn → amber, value ≥ crit → red.
+- **`false`** (inverted): Lower values are worse. Value ≤ warn → amber, value ≤ crit → red. Used for "fill" metrics where dropping below a threshold is bad.
+
+**To add a threshold for a new metric**, add an entry to the `_thresholds` dictionary. The key is a substring match against the metric key (same as hero patterns). If a metric matches multiple threshold entries, the first match wins.
+
+### Sparklines
+
+Each hero card includes a 200x50px SVG sparkline showing the trend over the selected time range. Sparklines are rendered server-side as inline SVG with area fill. The sparkline color matches the threshold color.
+
+---
+
+## Time-Series Chart
+
+The main chart panel uses a `<canvas>` element rendered via JavaScript interop (`metricsChart.js`). It follows the same ES module pattern as the visualizer.
+
+### Features
+- **Area fill**: Translucent gradient below the data line
+- **Min/Max band**: Shaded region between min and max values per data bucket
+- **Threshold lines**: Horizontal dashed lines for warning/critical thresholds
+- **Hover tooltip**: Crosshair + tooltip showing timestamp and value on mouse/touch
+- **Gridlines**: Horizontal gridlines with auto-scaled Y-axis labels
+- **X-axis timestamps**: Evenly spaced time labels formatted as HH:mm
+
+### Selecting a Metric
+- Click any **hero card** to display its data in the chart
+- Click any **metric row** in the category sections below
+- The first hero metric is auto-selected on page load
+- The stats bar below the chart shows: Count, Avg, Min, Max, StdDev
+
+### Chart Colors
+The chart line and fill color reflects the selected metric's threshold status:
+- `#5CD4E8` (accent blue) — normal / no threshold
+- `#F0A830` (amber) — warning
+- `#F87171` (red) — critical
+
+---
+
+## Category Sections
+
+Metrics are grouped into collapsible categories based on the key prefix (everything before the first `.`). For example:
+- `system.cpu_temp_celsius` → **System** category
+- `audio.songs_played_total` → **Audio** category
+- `tts.latency_ms` → **Tts** category
+
+Each category header shows the metric count. Inside, each row displays:
+- **Label**: Metric key with prefix stripped, underscores replaced with spaces, title-cased
+- **Current value**: Formatted with automatic unit detection
+- **Sparkline**: 150x20px inline SVG
+- **Trend indicator**: ▲ (up >5%), ▼ (down >5%), or — (flat), comparing the average of the 3 most recent points to the 3 oldest
+
+All categories are expanded by default. Click a category header to collapse/expand.
+
+---
+
+## Adding a New Metric
+
+### Step 1: Record the metric in the backend
+
+Inject `IMetricsCollector` and call `Increment()` (counter) or `Gauge()` (point-in-time):
+
+```csharp
+// Counter: accumulates over time (songs played, errors, bytes sent)
+_metricsCollector.Increment("audio.songs_played_total", 1.0);
+
+// Gauge: instantaneous value (temperature, percentage, count of active items)
+_metricsCollector.Gauge("system.cpu_temp_celsius", 52.3);
+
+// With tags (stored in metric history, available in hover tooltips)
+_metricsCollector.Increment("api.requests_total", 1.0,
+    new Dictionary<string, string> { ["endpoint"] = "/api/audio" });
+```
+
+### Step 2: Key naming convention
+
+Use dot-separated names: `{category}.{metric_name}`
+
+- The **category** (prefix before first `.`) determines the collapsible section in the dashboard
+- Use **snake_case** for the metric name
+- Include the **unit suffix** when applicable: `_ms`, `_seconds`, `_percent`, `_mb`, `_celsius`
+
+The unit suffix drives automatic formatting in the dashboard — see [Value Formatting](#value-formatting) below.
+
+### Step 3: The metric appears automatically
+
+No dashboard code changes are required for basic display. Once the backend records a metric:
+1. It appears in the API's `/api/metrics/keys` response
+2. The dashboard fetches snapshots for all available keys
+3. It shows up in the appropriate category section with auto-formatted values
+
+### Step 4 (optional): Promote to hero card
+
+To make the metric appear as a hero stat card, add a matching pattern to `_heroPatterns`:
+
+```csharp
+private static readonly string[] _heroPatterns =
+  ["cpu", "memory", "buffer", "underrun", "error", "active", "your_new_pattern"];
+```
+
+### Step 5 (optional): Add threshold coloring
+
+To add red/amber/green coloring, add an entry to `_thresholds`:
+
+```csharp
+["your_metric_fragment"] = (warningValue, criticalValue, invertAbove: true),
+```
+
+Set `invertAbove: true` if higher values are worse (temperature, error counts), or `false` if lower values are worse (buffer fill percentage).
+
+---
+
+## Value Formatting
+
+The dashboard auto-formats values based on patterns in the metric key. This is handled by `FormatMetricValue()` (line 563):
+
+| Key contains | Format | Example |
+|-------------|--------|---------|
+| `memory`, `bytes`, `_mb`, `file_size` | Bytes (KB/MB/GB) | `168.234 MB` |
+| `percent`, `_ratio` | Percentage | `94.1%` |
+| `cpu` + `usage` | Percentage | `12.3%` |
+| `seconds`, `duration`, `latency`, `_time` | Duration (ms or s) | `42.1 ms` |
+| `_ms`, `latency_ms`, `duration_ms` | Milliseconds | `42.1 ms` |
+| (everything else) | Scaled number | `42`, `1.234 K`, `2.345 M` |
+
+### Gauge vs Counter Classification
+
+The dashboard classifies metrics to determine how to compute the display value from history (line 296):
+
+**Gauges** (show latest value): Keys containing `percent`, `ratio`, `rate`, `_size`, `fill`, `active`
+
+**Counters** (show accumulated total): Keys containing `count`, `total`, `bytes`, `sent`, `received`, `played`, `requests`, `errors`, `dropped`, `underruns`, `skipped`, `chunks`, `connected`, `disconnected`, `reconnect`, `failures`, `queued`
+
+If a metric doesn't match either pattern, it's treated as a gauge (latest value shown).
+
+**Tip**: When naming new metrics, include one of these keywords so the dashboard classifies it correctly. For example, name an error counter `audio.decode_errors` (contains "errors") rather than `audio.decode_problems`.
+
+---
+
+## Auto-Refresh
+
+The dashboard refreshes automatically every **10 seconds**. On each tick:
+1. Fetches fresh snapshots for all metrics
+2. Re-fetches sparkline history for up to 20 metrics
+3. Recomputes gauge/counter display values
+4. Re-renders the canvas chart if a metric is selected
+
+The refresh timer is disposed on page navigation (via `IAsyncDisposable`).
+
+---
+
+## Configuration
+
+Metrics are configured in `appsettings.json` under the `Metrics` section:
+
+```json
+{
+  "Metrics": {
+    "Enabled": true,
+    "FlushIntervalSeconds": 60,
+    "DatabasePath": "./data/metrics/metrics.db",
+    "RetentionMinuteData": 120,
+    "RetentionHourData": 48,
+    "RetentionDayData": 365,
+    "RollupIntervalMinutes": 60
+  }
+}
+```
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `Enabled` | `true` | Enable/disable metrics collection |
+| `FlushIntervalSeconds` | `60` | How often buffered metrics are flushed to SQLite |
+| `DatabasePath` | `./data/metrics/metrics.db` | SQLite database location |
+| `RetentionMinuteData` | `120` | Minutes of minute-resolution data to keep |
+| `RetentionHourData` | `48` | Hours of hour-resolution data to keep |
+| `RetentionDayData` | `365` | Days of day-resolution data to keep |
+| `RollupIntervalMinutes` | `60` | How often minute data is rolled up to hour/day tiers |
+
+---
+
+## API Endpoints
+
+All metrics API endpoints are under `/api/metrics`:
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/metrics/keys` | List all metric key names |
+| `GET` | `/api/metrics/snapshots?keys=a,b,c` | Current values for specified keys |
+| `GET` | `/api/metrics/history?key=X&start=...&end=...&resolution=Minute` | Time-series history |
+| `GET` | `/api/metrics/aggregate?key=X&start=...&end=...&resolution=Minute` | Aggregate stats (returns raw `double`) |
+| `POST` | `/api/metrics/event` | Record a UI event metric from the frontend |
+
+**Note**: The aggregate endpoint returns a raw `double`, not a `MetricAggregateDto`. The dashboard computes aggregate stats (count, avg, min, max, stdDev) client-side from history data.
+
+---
+
 ## Proposed Future Expansion
 
 *Analysis Date: 2025-12-05*
