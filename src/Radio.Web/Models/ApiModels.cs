@@ -665,11 +665,11 @@ public class FilePlayerConfigDto
 public class FingerprintingConfigDto
 {
   public bool Enabled { get; set; } = true;
+  public bool UseShazamForAllSources { get; set; } = false;
   public int SampleDurationSeconds { get; set; } = 15;
   public int IdentificationIntervalSeconds { get; set; } = 30;
   public double MinimumConfidenceThreshold { get; set; } = 0.5;
   public int DuplicateSuppressionMinutes { get; set; } = 5;
-  public string FpcalcPath { get; set; } = string.Empty;
   public string DatabasePath { get; set; } = "./data/fingerprints.db";
 }
 

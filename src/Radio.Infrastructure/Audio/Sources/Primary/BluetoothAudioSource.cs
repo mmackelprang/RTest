@@ -27,6 +27,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private readonly IServiceScopeFactory? _serviceScopeFactory;
   private readonly AlbumArtCacheService? _albumArtCache;
   private readonly IOptionsMonitor<BluetoothOptions> _options;
+  private readonly FingerprintingOptions _fingerprintingOptions;
   private readonly SoundFlowPlaybackService? _playbackService;
   private readonly SemaphoreSlim _routeLock = new(1, 1);
   private readonly HashSet<string> _failedArtLookups = new();
@@ -54,7 +55,8 @@ public class BluetoothAudioSource : USBAudioSourceBase
     Radio.Core.Interfaces.IMetricsCollector? metricsCollector = null,
     SoundFlowPlaybackService? playbackService = null,
     IServiceScopeFactory? serviceScopeFactory = null,
-    AlbumArtCacheService? albumArtCache = null)
+    AlbumArtCacheService? albumArtCache = null,
+    IOptions<FingerprintingOptions>? fingerprintingOptions = null)
     : base(logger, deviceManager, identificationService, metricsCollector)
   {
     _bluetoothService = bluetoothService;
@@ -62,6 +64,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     _serviceScopeFactory = serviceScopeFactory;
     _albumArtCache = albumArtCache;
     _options = options;
+    _fingerprintingOptions = fingerprintingOptions?.Value ?? new FingerprintingOptions();
     _playbackService = playbackService;
     SetDefaultMetadata("Bluetooth", "Bluetooth", "Bluetooth Device");
 
@@ -600,8 +603,11 @@ public class BluetoothAudioSource : USBAudioSourceBase
       MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = e.AlbumArtUrl;
     }
 
-    // If metadata is incomplete (no title or artist), request fingerprinting
-    NeedsFingerprintingLookup = string.IsNullOrEmpty(e.Title) || string.IsNullOrEmpty(e.Artist);
+    // If metadata is incomplete (no title or artist), request fingerprinting.
+    // When UseShazamForAllSources is enabled, always fingerprint — SongRec provides
+    // higher-quality cover art (Apple Music CDN) and more accurate metadata.
+    var hasIncompleteMetadata = string.IsNullOrEmpty(e.Title) || string.IsNullOrEmpty(e.Artist);
+    NeedsFingerprintingLookup = hasIncompleteMetadata || _fingerprintingOptions.UseShazamForAllSources;
 
     if (NeedsFingerprintingLookup)
     {
@@ -629,6 +635,28 @@ public class BluetoothAudioSource : USBAudioSourceBase
       Logger.LogDebug(
         "Track identified via fingerprinting: '{Title}' by '{Artist}' — skipping further fingerprinting",
         e.Track.Title, e.Track.Artist);
+    }
+
+    // When UseShazamForAllSources is enabled, SongRec metadata replaces AVRCP metadata
+    // (SongRec is more authoritative and has better cover art from Apple Music CDN)
+    if (_fingerprintingOptions.UseShazamForAllSources)
+    {
+      if (!string.IsNullOrEmpty(e.Track.Title))
+        MetadataInternal[StandardMetadataKeys.Title] = e.Track.Title;
+      if (!string.IsNullOrEmpty(e.Track.Artist))
+        MetadataInternal[StandardMetadataKeys.Artist] = e.Track.Artist;
+      if (!string.IsNullOrEmpty(e.Track.Album))
+        MetadataInternal[StandardMetadataKeys.Album] = e.Track.Album;
+
+      if (!string.IsNullOrEmpty(e.Track.CoverArtUrl) && _serviceScopeFactory != null)
+      {
+        _ = CacheAndSetCoverArtAsync(e.Track.CoverArtUrl, e.Track.Title, e.Track.Artist);
+      }
+
+      Logger.LogInformation(
+        "Shazam metadata replaced AVRCP for BT: '{Title}' by '{Artist}'",
+        e.Track.Title, e.Track.Artist);
+      return;
     }
 
     // Use fingerprint-identified cover art if we don't already have art

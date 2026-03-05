@@ -30,6 +30,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private readonly SoundFlowPlaybackService? _playbackService;
   private readonly IConfigurationManager? _configurationManager;
   private readonly AlbumArtCacheService? _albumArtCache;
+  private readonly FingerprintingOptions _fingerprintingOptions;
   private readonly string _rootDir;
   private readonly Dictionary<string, object> _metadata = new();
   private readonly HashSet<string> _errorFiles = new();
@@ -63,6 +64,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <param name="playbackService">Optional SoundFlow playback service for audio output.</param>
   /// <param name="configurationManager">Optional configuration manager for queue persistence.</param>
   /// <param name="albumArtCache">Optional album art cache for extracting embedded cover art.</param>
+  /// <param name="fingerprintingOptions">Optional fingerprinting options (controls UseShazamForAllSources toggle).</param>
   public FilePlayerAudioSource(
     ILogger<FilePlayerAudioSource> logger,
     IOptionsMonitor<FilePlayerOptions> options,
@@ -72,7 +74,8 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     IMetricsCollector? metricsCollector = null,
     SoundFlowPlaybackService? playbackService = null,
     IConfigurationManager? configurationManager = null,
-    AlbumArtCacheService? albumArtCache = null)
+    AlbumArtCacheService? albumArtCache = null,
+    IOptions<FingerprintingOptions>? fingerprintingOptions = null)
     : base(logger, metricsCollector)
   {
     _options = options;
@@ -82,6 +85,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     _playbackService = playbackService;
     _configurationManager = configurationManager;
     _albumArtCache = albumArtCache;
+    _fingerprintingOptions = fingerprintingOptions?.Value ?? new FingerprintingOptions();
 
     // Subscribe to track identification events if service is available
     if (_identificationService != null)
@@ -1929,14 +1933,16 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
           _metadata.GetValueOrDefault(StandardMetadataKeys.Artist),
           _duration);
 
-        // Check if metadata is incomplete (using defaults)
-        bool hasIncompleteMetadata = 
+        // Check if metadata is incomplete (using defaults), or if Shazam toggle is on
+        bool hasIncompleteMetadata =
           _metadata[StandardMetadataKeys.Artist].Equals(StandardMetadataKeys.DefaultArtist) ||
           _metadata[StandardMetadataKeys.Album].Equals(StandardMetadataKeys.DefaultAlbum);
+        bool needsFingerprinting = hasIncompleteMetadata || _fingerprintingOptions.UseShazamForAllSources;
 
-        if (hasIncompleteMetadata)
+        if (needsFingerprinting)
         {
-          Logger.LogDebug("File {File} has incomplete metadata, fingerprinting may provide additional info", filePath);
+          Logger.LogDebug("File {File} needs fingerprinting (incomplete={Incomplete}, shazamAll={ShazamAll})",
+            filePath, hasIncompleteMetadata, _fingerprintingOptions.UseShazamForAllSources);
           _metadata["NeedsFingerprintingLookup"] = true;
         }
       }
@@ -2016,6 +2022,34 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
     var track = e.Track;
 
+    // Check if current file needs fingerprinting metadata lookup
+    bool needsLookup = _metadata.ContainsKey("NeedsFingerprintingLookup")
+      && _metadata["NeedsFingerprintingLookup"] is bool b && b;
+
+    // When UseShazamForAllSources is enabled, SongRec metadata replaces ID3 metadata
+    // (SongRec is more authoritative and has better cover art from Apple Music CDN)
+    if (_fingerprintingOptions.UseShazamForAllSources && needsLookup)
+    {
+      if (!string.IsNullOrEmpty(track.Title))
+        _metadata[StandardMetadataKeys.Title] = track.Title;
+      if (!string.IsNullOrEmpty(track.Artist))
+        _metadata[StandardMetadataKeys.Artist] = track.Artist;
+      if (!string.IsNullOrEmpty(track.Album))
+        _metadata[StandardMetadataKeys.Album] = track.Album;
+      if (!string.IsNullOrEmpty(track.CoverArtUrl))
+        _metadata[StandardMetadataKeys.AlbumArtUrl] = track.CoverArtUrl;
+
+      _metadata["NeedsFingerprintingLookup"] = false;
+      _metadata["IdentificationConfidence"] = e.Confidence;
+      _metadata["IdentifiedAt"] = e.IdentifiedAt;
+      _metadata["MetadataSource"] = "Shazam";
+
+      Logger.LogInformation(
+        "Shazam metadata replaced ID3 for file: '{Title}' by '{Artist}'",
+        track.Title, track.Artist);
+      return;
+    }
+
     // Update album art from fingerprinting if still using default (no embedded art found).
     if (_metadata.ContainsKey(StandardMetadataKeys.AlbumArtUrl) &&
         _metadata[StandardMetadataKeys.AlbumArtUrl].Equals(StandardMetadataKeys.DefaultAlbumArtUrl) &&
@@ -2025,9 +2059,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       Logger.LogInformation("Album art URL set for '{Title}': {Url}", track.Title, track.CoverArtUrl);
     }
 
-    // Check if current file needs full fingerprinting metadata lookup (incomplete tags)
-    if (!_metadata.ContainsKey("NeedsFingerprintingLookup") ||
-        !(_metadata["NeedsFingerprintingLookup"] is bool needsLookup && needsLookup))
+    if (!needsLookup)
     {
       return;
     }
