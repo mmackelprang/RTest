@@ -206,7 +206,7 @@
 }
 
 /* Shift dialog content up when keyboard is visible so inputs aren't hidden */
-body.keyboard-active .mud-overlay > .mud-paper {
+body.keyboard-active .mud-overlay .mud-paper {
   transform: translateY(-150px);
   transition: transform 0.3s ease;
 }
