@@ -1,142 +1,86 @@
-# Findings
+# Findings: Audio Distortion Investigation
 
-## Current Fingerprinting Architecture
+## Data Summary
 
-### Pipeline
+- **151 distortion markers** across ~90 minutes (14:05 - 15:42), roughly one every 36 seconds
+- **All markers: isClipping=False** — peaks at -6.5 to -11 dBFS, not a clipping issue
+- **BT gain = 1.9** (96% of events), masterVolume = 0.64 — moderate levels
+- **Source state split**: 79 "Playing" / 76 "Ready" — source reports Ready half the time despite audio flowing
+- **Multiple service restarts** in the window (our deploys): PIDs 339597, 344843, 349341, 351164
+- **No app-level errors correlate** — no exceptions, no buffer drops/underruns/compensations in the dense distortion window
+
+## Key System-Level Events
+
+### PipeWire-Pulse Overruns (14:01:32)
 ```
-Sources (Radio/SDR/File/BT/USB)
-  → FingerprintTapModifier (captures float samples from mixer)
-  → SoundFlowAudioTap (15s capture, silence detection, normalization)
-  → ChromaprintFingerprintService (writes WAV, invokes fpcalc binary)
-  → MetadataLookupService (cache → AcoustID → MusicBrainz → Cover Art Archive)
-  → TrackMetadata (Title, Artist, Album, CoverArtUrl)
-  → UI (SignalR events, /api/audio/fingerprint/status)
+mod.protocol-pulse: [Radio.API] overrun recover read:180480 avail:26368 max:15360 skip:22528
+mod.protocol-pulse: [Radio.API] overrun recover read:249088 avail:25344 max:15360 skip:21504
 ```
+MiniAudio output client had overrun — ALSA output buffer emptied because MiniAudio callback wasn't served fast enough. Only 2 events logged, but PipeWire-pulse may only log coalesced events, not every occurrence.
 
-### Key Files
-- `Radio.Infrastructure/Audio/Fingerprinting/ChromaprintFingerprintService.cs` — fpcalc invocation, WAV generation, normalization
-- `Radio.Infrastructure/Audio/Fingerprinting/BackgroundIdentificationService.cs` — 15s interval loop, per-source logic, song change detection
-- `Radio.Infrastructure/Audio/Fingerprinting/MetadataLookupService.cs` — Cache → AcoustID → MusicBrainz chain
-- `Radio.Infrastructure/Audio/Fingerprinting/SoundFlowAudioTap.cs` — Audio capture, silence detection
-- `Radio.Infrastructure/Audio/SoundFlow/FingerprintTapModifier.cs` — Mixer-level audio tap
-- `Radio.Infrastructure/Audio/Fingerprinting/AcoustIdClient.cs` — HTTP client for AcoustID API
-- `Radio.Core/Configuration/FingerprintingOptions.cs` — All config options
+### BufferedSoundGenerator Stats (PID 344843, ~48 min session)
+```
+received=72,892,416  output=72,733,440  dropped=0  compensated=0
+Gap: 158,976 samples = 1.66s accumulated in buffer
+```
+BT clock ~0.035s/min faster than ALSA clock (~2.1s/hour drift). Buffer grows monotonically. No drift compensation fires (compensation only triggers when buffer is BELOW 15% — i.e., draining — but ours is growing).
 
-### Source-Specific Behavior Today
-- **File sources**: Fingerprints the actual file directly (bypasses capture). Works well.
-- **Live sources (Radio, Vinyl, BT, USB)**: Captures 15s of mixer output, normalizes, runs through fpcalc. AcoustID often fails to match because captured segment duration doesn't match full track. System retries with fallback durations (180s, 210s, 240s, 270s, 300s) — inaccurate.
-- **Bluetooth**: Can get AVRCP metadata (title/artist) directly. Falls back to fingerprinting if AVRCP unavailable.
+### BT Audio Format
+```
+Node: bluez_input.D4_3A_2C_64_87_9E.2
+Active: S24LE, 48000Hz, 2ch
+Our stream requests: S16LE, 48000Hz, 2ch
+```
+Sample rate matches (48kHz→48kHz). PipeWire converts S24LE→S16LE. This conversion is handled natively by PipeWire and shouldn't cause issues.
 
-### Current Limitations
-1. **Vinyl**: Surface noise, turntable rumble (confirmed via spectrum — strong sub-100Hz energy even with no music), and EQ differences confuse Chromaprint
-2. **FM Radio**: No RDS metadata extraction despite having RTL-SDR hardware. Relies entirely on acoustic fingerprinting, which is unreliable for live radio
-3. **No audio preprocessing**: Raw mixer output goes straight to fpcalc with only amplitude normalization
-4. **Single strategy**: All sources use the same Chromaprint/AcoustID pipeline. No way to swap in ACRCloud, SongRec, or RDS per source type
+## Buffer Configuration
+- maxBufferSeconds = 4.0 → maxBufferSamples = 384,000
+- PreFill = 1.5s of silence (144,000 samples = 37.5% of buffer)
+- DriftCompensationThreshold = 15% (57,600 samples) — only fires when buffer is LOW
+- DriftCompensationTarget = 25% (96,000 samples)
+- OverflowStrategy = DropOldest
 
-## Vinyl Low-Frequency Noise (Observed)
-- Spectrum analyzer shows tall bars at sub-100Hz even with no music playing
-- Likely turntable rumble (motor/bearing resonance) — common even on direct-drive
-- This energy will pollute Chromaprint fingerprints
-- Fix: High-pass filter (80-100Hz cutoff) on audio samples before passing to fpcalc
-- Note: User's direct-drive turntable should NOT have wow/flutter issues, so pitch correction is unnecessary
+## The received > output Problem
 
-## Alternative Metadata Sources
+The buffer grows because BT clock > ALSA clock. Eventually (after ~72 min from pre-fill):
+1. Buffer hits 100% capacity (384,000 samples)
+2. `AddSamples()` triggers `DropOldest` — advances read pointer, drops oldest audio
+3. Consumer suddenly reads audio that's discontinuous — **audible glitch**
+4. Buffer briefly has space, fills again, drops again
 
-### 1. RDS (Radio Data System) for FM Radio
-- **redsea** (github.com/windytan/redsea): Decodes RDS from RTL-SDR raw IQ stream
-- Provides: Station name (PS), Radio Text (RT) — often contains song title/artist
-- Primary metadata source for FM; fingerprinting as fallback
-- Need to check if RTLSDRCore exposes raw IQ or RDS data
+**But**: In PID 344843 session, the buffer accumulated only 1.66s over 48 min. Starting from 1.5s pre-fill, total = 3.16s. Buffer capacity = 4s. It didn't overflow during the session. **Yet distortion was frequent throughout.**
 
-### 2. ACRCloud (acrcloud.com)
-- Cloud-based audio recognition service
-- Handles degraded audio (vinyl, radio) natively
-- User has API key + usage token
-- **Limitation: 5,000 calls/month** — must be used judiciously (not every 15s)
-- Best as fallback when Chromaprint/AcoustID fails
+## What We Don't Know (Gaps)
 
-### 3. SongRec (github.com/marin-m/SongRec)
-- Open-source Shazam client (unofficial API)
-- Handles degraded audio well (designed for noisy environments)
-- No call limits (unofficial, personal use OK per user)
-- Linux binary available, can be invoked like fpcalc
-- Good for vinyl and radio where AcoustID struggles
+| Unknown | Why It Matters |
+|---------|----------------|
+| MiniAudio output callback timing | Are there scheduling delays causing ALSA xruns? |
+| .NET GC pause frequency/duration | GC could stall the audio callback thread |
+| Lock contention on `_bufferLock` | Both AddSamples (PipeWire thread) and GenerateAudio (MiniAudio thread) compete for this lock |
+| PipeWire graph scheduling | Is the BT node delivering data in steady quanta or bursty? |
+| BT A2DP packet loss | Wi-Fi coexistence? Codec negotiation changes? |
+| Actual audio waveform during distortion | Repeated samples? Dropped samples? Corrupted data? |
+| Whether MiniAudio is hitting ALSA xruns silently | MiniAudio may recover internally without logging |
 
-## Strategy Per Source Type (Updated)
+## Possible Root Causes (Ranked by Likelihood)
 
-| Source | Primary | Fallback | Notes |
-|--------|---------|----------|-------|
-| File | ID3 tags (embedded) | SongRec (if tags incomplete) | AcoustID being removed |
-| Bluetooth | AVRCP metadata | SongRec (if AVRCP incomplete) | Event-driven on AVRCP arrival |
-| FM Radio | SongRec (polling) | — | RDS provides station name only |
-| Vinyl | SongRec (polling) | — | High-pass filter before capture |
-| Generic USB | SongRec (polling) | — | Same as vinyl approach |
+### 1. MiniAudio/ALSA Output Xruns (HIGH)
+The PipeWire-pulse overrun logs confirm the MiniAudio output stream isn't being served fast enough at least sometimes. MiniAudio's callback requests audio → SoundFlow calls `GenerateAudio()` on all components (modifiers, sources) → if ANY step is slow, the ALSA buffer underruns.
 
-## Metrics Dashboard Architecture
+The audio pipeline runs: Sources → MasterMixer → Balance → Limiter → FingerprintTap → VisualizationTap → PlaybackDevice. Each modifier's `Process()` is called synchronously in the callback. If the chain takes longer than one quantum (~10.67ms at 512 samples), it's a missed deadline.
 
-### Current State
-- `MetricsDashboardPage.razor`: flat grid of cards, custom SVG sparklines (~200×24px)
-- Left panel: time range toggles (1h/24h/7d), category filter chips
-- Right panel: metric cards (MudGrid xs=6 sm=4 md=3), click → aggregate stats
-- No real charting library — hand-rolled SVG `<path>` for sparklines
-- Data: SQLite with 3-tier rollup (minute/hour/day), retention 2h/48h/365d
+### 2. Lock Contention Between Producer and Consumer (HIGH)
+`AddSamples()` and `GenerateAudio()` both take `_bufferLock`. If PipeWire delivers a burst of data while `GenerateAudio` is mid-read (or vice versa), one blocks the other. The PipeWire OnProcess callback runs on the PipeWire thread loop — blocking it stalls the entire PipeWire graph.
 
-### Charting Options
-1. **MudBlazor `MudTimeSeriesChart`** — built-in, no new dependencies, Material Design styled
-2. **BlazorChartjs (Chart.js wrapper)** — more features (zoom, tooltips, annotations), but adds JS dependency
-3. **Custom SVG** — current approach, maximally lightweight but limited
+### 3. .NET GC Pauses (MEDIUM)
+Gen2 garbage collection can pause all threads for 10-50ms. At 48kHz with 512-sample quantum (10.67ms period), even a 10ms pause causes a missed callback. The buffer should absorb this, but if GC coincides with the callback, the consumer misses a period.
 
-### API Endpoints
-- `GET /api/metrics/history` → time-series data (key, start, end, resolution)
-- `GET /api/metrics/snapshots` → current values for batch of keys
-- `GET /api/metrics/aggregate` → stats (count, avg, min, max, stddev)
-- `GET /api/metrics/keys` → available metric names
+### 4. BT A2DP Transport Jitter (MEDIUM)
+BT A2DP delivers audio in packets (~128-512 samples). If packets arrive late (interference, scheduling), the BufferedSoundGenerator temporarily starves. The 1.5s pre-fill should absorb this, but sustained jitter could eat into the cushion.
 
-### Data Resolution
-- Minute data: 120 minutes retention → for 5m/1h views
-- Hour data: 48 hours retention → for 24h view
-- Day data: 365 days retention → for 7d/30d views
+### 5. DropOldest Buffer Overflow (LOWER — not yet overflowing)
+With 2.1s/hour drift, overflow takes ~72 min from startup. Most sessions were shorter. But in longer sessions, this WILL become an issue — the buffer silently drops samples at the read position, causing a discontinuity.
 
-### Design References
-- [Grafana dashboard best practices](https://grafana.com/docs/grafana/latest/visualizations/dashboards/build-dashboards/best-practices/) — F-pattern, <12 panels, progressive disclosure
-- [Grafana stat panels](https://grafana.com/docs/grafana/latest/panels-visualizations/visualizations/stat/) — large value + sparkline + threshold colors
-- [MudBlazor TimeSeriesChart](https://mudblazor.com/components/timeserieschart) — built-in Blazor chart component
+## Source State "Ready" Anomaly
 
-## Audio Distortion / CPU Analysis
-
-### Threading Model
-- Audio callback thread: MiniAudio, runs every 5.3ms (512 samples @ 48kHz)
-- Per-sample processing: 96k ops/sec on audio thread (Balance → Limiter → FingerprintTap → VizTap → OutputTap)
-- Each modifier holds a per-sample lock briefly (~1μs)
-- ThreadPool handles tap buffer flushes and FFT computation
-- Risk: ThreadPool starvation delays flushes → lock contention on audio thread
-
-### Known Buffer Settings
-| Component | Size | Impact |
-|-----------|------|--------|
-| MiniAudio period | 512 samples (5.3ms) | Callback frequency |
-| PipeWire quantum | 512 (10.67ms, tuned) | Min graph unit |
-| BufferedSoundGenerator | 2.0s max | Source clock drift absorption |
-| Fingerprint/Viz tap | 2048 samples (~42ms) | Lock batch size |
-| OutputTap ring buffer | 2-5s | HTTP/Cast readers |
-
-### Distortion Correlation with UI Load
-- Blazor Server uses SignalR (WebSocket) — rendering happens server-side, serialized DOM diffs sent to client
-- Loading metrics page: multiple HTTP calls to API (keys, snapshots, history for each metric)
-- API serves metrics from SQLite — may hold write lock during flush, blocking reads
-- Hypothesis: CPU spike from rendering + DB I/O starves ThreadPool → audio tap flushes delayed → callback stalls
-
-## USB Audio (AB13X) Architecture
-
-### Device Selection Flow
-1. Config: `Devices:Radio:USBPort` or `Devices:GenericUSB:USBPort` = "AB13X"
-2. `USBAudioSourceBase.InitializeUSBCaptureAsync("AB13X")`
-3. Searches MiniAudio `CaptureDevices` for name containing "AB13X" (case-insensitive substring)
-4. If not found → falls back to first available capture device (with warning log)
-5. Capture format matched to playback engine (48kHz)
-
-### Potential Failure Points
-- Device not in `appsettings.Production.json` (overwritten on deploy)
-- PipeWire reports different device name than expected
-- USB hub power issue / device disconnected
-- Another source already reserved the USB port
+76 of 155 markers show source state = "Ready" (not "Playing"). This is suspicious — audio is clearly flowing (levels show -20dB signal), yet the source reports Ready. This could indicate a state machine bug where the source doesn't transition to Playing, or the state reporting is async and stale.
