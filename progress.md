@@ -1,5 +1,38 @@
 # Progress Log
 
+## Session: 2026-03-06 (Phase 3 — Root Cause)
+
+### Root Cause Identified & Fixed
+- [x] Deployed Phase 2 capture infrastructure to Ubuntu
+- [x] Captured 60s BT audio at 3 pipeline stages (generator-input, generator-output, post-modifiers)
+- [x] Built waveform analysis test (`AnalyzeBtCapture_InputVsOutput`) with silence gap deep analysis, channel swap detection, windowed correlation
+- [x] **ROOT CAUSE**: `PipeWireNativeStream.OnProcess` converts S16LE→float without stereo frame alignment. PipeWire BT transport delivers non-frame-aligned chunks during packet loss → odd sample count → L/R channel swap for ALL subsequent audio
+- [x] **FIX**: Frame-align `sampleCount` in `PipeWireNativeStream.cs` + defense-in-depth in `BufferedSoundGenerator.AddSamples()`
+- [x] Deployed fix to Ubuntu, captured 60s post-fix audio
+- [x] Verified fix: Output→PostModifiers correlation went from 0.40 → 1.000000 (perfect)
+- [x] Sample delta improved: -32,640 → +1,024
+
+### Files Modified
+- `src/Radio.Infrastructure/Platform/Bluetooth/Native/PipeWireNativeStream.cs` — frame alignment in OnProcess
+- `src/Radio.Infrastructure/Audio/SoundFlow/BufferedSoundGenerator.cs` — defense-in-depth frame alignment in AddSamples
+- `tests/Radio.Infrastructure.Tests/Audio/Diagnostics/WaveformComparisonTests.cs` — capture analysis test
+- `findings.md`, `progress.md`, `task_plan.md`
+
+---
+
+## Session: 2026-03-06 (Phase 2 — Test Infrastructure)
+
+### Implementation Complete (PR #304, merged)
+- [x] `Radio.AudioAnalysis` shared library (8 files)
+- [x] Capture infrastructure (4 files in `Audio/Diagnostics/`)
+- [x] `BufferedSoundGenerator` diagnostic hooks
+- [x] API capture endpoints
+- [x] CI-safe distortion tests + capture session tests + waveform comparison tests
+- [x] All 1416 tests passing
+- [x] Code review: fixed `IsCapturing` race condition
+
+---
+
 ## Session: 2026-03-06 (Planning)
 
 ### Research Completed

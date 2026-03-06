@@ -4,15 +4,15 @@
 Fix kiosk sleep-stops-music bug, build automated audio distortion debugging infrastructure, migrate to .NET 10 LTS + C# 14, address architecture/testing items from comprehensive review, and enhance the metrics dashboard with customizable hero cards and new metrics.
 
 ## Current Phase
-Phase 2 — pending
+Phase 3 — in_progress
 
 ## Phases
 
 | # | Phase | Status | Notes |
 |---|-------|--------|-------|
 | 1 | Kiosk Stability Fix | complete | PR #303 — decoupled screen blank from audio pause, Chrome flags, DPMS, SignalR timeouts |
-| 2 | Audio Distortion — Automated Test Infrastructure | pending | BtSender-based pipeline, capture/compare, waveform analysis tools |
-| 3 | Audio Distortion — Root Cause Investigation & Fix | pending | Use Phase 2 infra to identify and fix distortion without human testing |
+| 2 | Audio Distortion — Automated Test Infrastructure | complete | PR #304 — Radio.AudioAnalysis lib, CaptureSession, DiagnosticCaptureService, 30+ tests, API endpoints verified on Ubuntu |
+| 3 | Audio Distortion — Root Cause Investigation & Fix | in_progress | Using Phase 2 infra to identify and fix distortion |
 | 4 | .NET 10 Migration + C# 14 Adoption | pending | TFM update, breaking changes, NuGet updates, language features |
 | 5 | Core Architecture Refactoring | pending | #26 IAudioManager split, #34 enum consolidation, #14 component decomposition, #36 state store |
 | 6 | Test Coverage + Web Error Handling | pending | #12 AudioManager tests, #13 missing controller tests, #30 Result<T> |

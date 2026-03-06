@@ -172,6 +172,16 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     {
         if (_isDisposed) return;
 
+        // Defense-in-depth: truncate to frame boundary to prevent L/R channel shift.
+        // PipeWire BT transport can deliver non-frame-aligned chunks during packet gaps.
+        var channelCount = Format.Channels;
+        if (channelCount > 1 && samples.Length % channelCount != 0)
+        {
+            var aligned = samples.Length / channelCount * channelCount;
+            if (aligned <= 0) return;
+            samples = samples.Slice(0, aligned);
+        }
+
         // Measure lock contention: try non-blocking first, only time if contended
         double lockWaitMs = 0;
         var entered = Monitor.TryEnter(_bufferLock);
