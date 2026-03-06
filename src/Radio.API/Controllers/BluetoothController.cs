@@ -131,6 +131,24 @@ public class BluetoothController : ControllerBase
     return Ok(BuildStatus());
   }
 
+  [HttpPost("connect")]
+  [ProducesResponseType(typeof(BluetoothStatusDto), StatusCodes.Status200OK)]
+  public async Task<ActionResult<BluetoothStatusDto>> ConnectAsync([FromBody] BluetoothDeviceRequest request)
+  {
+    if (string.IsNullOrWhiteSpace(request.DeviceAddress))
+    {
+      return BadRequest(new { error = "DeviceAddress is required" });
+    }
+
+    var connected = await _bluetoothService.ConnectAsync(request.DeviceAddress);
+    if (!connected)
+    {
+      return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to connect to device" });
+    }
+
+    return Ok(BuildStatus());
+  }
+
   [HttpPost("disconnect")]
   [ProducesResponseType(typeof(BluetoothStatusDto), StatusCodes.Status200OK)]
   public async Task<ActionResult<BluetoothStatusDto>> DisconnectAsync()

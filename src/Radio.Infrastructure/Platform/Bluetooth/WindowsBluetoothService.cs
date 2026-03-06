@@ -734,6 +734,12 @@ internal sealed class WindowsBluetoothService : IBluetoothService
         return Task.FromResult(true);
     }
 
+    public Task<bool> ConnectAsync(string deviceAddress, CancellationToken cancellationToken = default)
+    {
+        // Windows BT service uses InTheHand polling — outbound connect not implemented
+        return Task.FromResult(false);
+    }
+
     public Task DisconnectAsync(CancellationToken cancellationToken = default)
     {
         var device = ConnectedDevice;
@@ -743,7 +749,7 @@ internal sealed class WindowsBluetoothService : IBluetoothService
             RecordDisconnectionMetrics();
             _logger.LogInformation("Disconnected Bluetooth device: {DeviceName} ({Address})",
                 device.Name, device.Address);
-            DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs { Device = device });
+            DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs { Device = device, UserInitiated = true });
 
             // Dispose and recreate client to drop active connections
             try

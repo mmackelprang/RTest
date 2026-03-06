@@ -85,6 +85,20 @@ public sealed class MockBluetoothService : IBluetoothService
             return Task.FromResult(true);
         }
 
+        public Task<bool> ConnectAsync(string deviceAddress, CancellationToken cancellationToken = default)
+        {
+            var device = new BluetoothDeviceInfo
+            {
+                Name = "Mock Device",
+                Address = deviceAddress,
+                IsPaired = true,
+                IsConnected = true
+            };
+            ConnectedDevice = device;
+            DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = device });
+            return Task.FromResult(true);
+        }
+
         public Task DisconnectAsync(CancellationToken cancellationToken = default)
         {
             ConnectedDevice = null;

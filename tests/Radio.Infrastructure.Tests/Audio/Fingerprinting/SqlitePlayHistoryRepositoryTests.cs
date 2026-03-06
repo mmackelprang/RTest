@@ -443,6 +443,104 @@ public class SqlitePlayHistoryRepositoryTests : IAsyncLifetime
     Assert.Null(recorded.EndedAt);
   }
 
+  [Fact]
+  public async Task CloseOrphanedEntriesAsync_ClosesOldOrphanedEntries()
+  {
+    // Arrange — create an orphaned entry (no EndedAt) from 10 minutes ago
+    var entry = CreateTestHistoryEntry() with
+    {
+      PlayedAt = DateTime.UtcNow.AddMinutes(-10),
+      EndedAt = null,
+      DurationSeconds = null
+    };
+    await _repository.RecordPlayAsync(entry);
+
+    // Act — close entries older than 2 minutes
+    var closed = await _repository.CloseOrphanedEntriesAsync(TimeSpan.FromMinutes(2));
+
+    // Assert
+    Assert.Equal(1, closed);
+    var updated = await _repository.GetByIdAsync(entry.Id);
+    Assert.NotNull(updated);
+    Assert.NotNull(updated.EndedAt);
+    Assert.NotNull(updated.DurationSeconds);
+    Assert.True(updated.DurationSeconds > 0);
+  }
+
+  [Fact]
+  public async Task CloseOrphanedEntriesAsync_PreservesDurationWhenAlreadySet()
+  {
+    // Arrange — orphaned entry with Duration already set (e.g. from AVRCP)
+    var entry = CreateTestHistoryEntry() with
+    {
+      PlayedAt = DateTime.UtcNow.AddMinutes(-10),
+      EndedAt = null,
+      DurationSeconds = 180 // 3 minutes from AVRCP
+    };
+    await _repository.RecordPlayAsync(entry);
+
+    // Act
+    var closed = await _repository.CloseOrphanedEntriesAsync(TimeSpan.FromMinutes(2));
+
+    // Assert — Duration should be preserved at 180
+    Assert.Equal(1, closed);
+    var updated = await _repository.GetByIdAsync(entry.Id);
+    Assert.NotNull(updated);
+    Assert.NotNull(updated.EndedAt);
+    Assert.Equal(180, updated.DurationSeconds);
+  }
+
+  [Fact]
+  public async Task CloseOrphanedEntriesAsync_DoesNotCloseRecentEntries()
+  {
+    // Arrange — orphaned entry from 30 seconds ago (within threshold)
+    var entry = CreateTestHistoryEntry() with
+    {
+      PlayedAt = DateTime.UtcNow.AddSeconds(-30),
+      EndedAt = null,
+      DurationSeconds = null
+    };
+    await _repository.RecordPlayAsync(entry);
+
+    // Act — close entries older than 2 minutes
+    var closed = await _repository.CloseOrphanedEntriesAsync(TimeSpan.FromMinutes(2));
+
+    // Assert — should NOT close recent entries
+    Assert.Equal(0, closed);
+    var unchanged = await _repository.GetByIdAsync(entry.Id);
+    Assert.NotNull(unchanged);
+    Assert.Null(unchanged.EndedAt);
+  }
+
+  [Fact]
+  public async Task CloseOrphanedEntriesAsync_DoesNotCloseAlreadyFinalizedEntries()
+  {
+    // Arrange — entry that already has EndedAt set
+    var entry = CreateTestHistoryEntry() with
+    {
+      PlayedAt = DateTime.UtcNow.AddMinutes(-10),
+      EndedAt = DateTime.UtcNow.AddMinutes(-5),
+      DurationSeconds = 300
+    };
+    await _repository.RecordPlayAsync(entry);
+
+    // Act
+    var closed = await _repository.CloseOrphanedEntriesAsync(TimeSpan.FromMinutes(2));
+
+    // Assert — already-finalized entries should not be touched
+    Assert.Equal(0, closed);
+  }
+
+  [Fact]
+  public async Task CloseOrphanedEntriesAsync_ReturnsZeroWhenNoOrphans()
+  {
+    // Act — nothing in the database
+    var closed = await _repository.CloseOrphanedEntriesAsync(TimeSpan.FromMinutes(2));
+
+    // Assert
+    Assert.Equal(0, closed);
+  }
+
   private static PlayHistoryEntry CreateTestHistoryEntry()
   {
     return new PlayHistoryEntry

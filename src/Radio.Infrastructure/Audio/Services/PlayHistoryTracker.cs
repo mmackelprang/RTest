@@ -806,6 +806,26 @@ public class PlayHistoryTracker : IDisposable
     if (_disposed) return;
     _disposed = true;
 
+    // Finalize any in-flight play history entry before unsubscribing
+    if (_currentPlayHistoryEntryId != null)
+    {
+      try
+      {
+        using var scope = _serviceScopeFactory.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IPlayHistoryRepository>();
+        repo.FinalizeEntryAsync(_currentPlayHistoryEntryId, DateTime.UtcNow)
+          .GetAwaiter().GetResult();
+        _logger.LogInformation("Finalized in-flight play history entry {Id} during shutdown",
+          _currentPlayHistoryEntryId);
+        _currentPlayHistoryEntryId = null;
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Failed to finalize play history entry {Id} during shutdown",
+          _currentPlayHistoryEntryId);
+      }
+    }
+
     _bluetoothService.MetadataChanged -= OnBluetoothMetadataChanged;
 
     if (_identificationService != null)

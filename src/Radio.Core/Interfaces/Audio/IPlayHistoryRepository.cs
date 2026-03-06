@@ -120,6 +120,15 @@ public interface IPlayHistoryRepository
   Task<bool> FinalizeEntryAsync(string id, DateTime endedAt, CancellationToken ct = default);
 
   /// <summary>
+  /// Closes orphaned entries (EndedAt IS NULL) older than the threshold.
+  /// Used on startup to clean up after unclean shutdown.
+  /// </summary>
+  /// <param name="olderThan">Only close entries whose PlayedAt is older than now minus this span.</param>
+  /// <param name="ct">Cancellation token.</param>
+  /// <returns>The number of orphaned entries that were closed.</returns>
+  Task<int> CloseOrphanedEntriesAsync(TimeSpan olderThan, CancellationToken ct = default);
+
+  /// <summary>
   /// Searches play history entries by title, artist, or album.
   /// </summary>
   /// <param name="searchTerm">The search term to match against title, artist, or album.</param>

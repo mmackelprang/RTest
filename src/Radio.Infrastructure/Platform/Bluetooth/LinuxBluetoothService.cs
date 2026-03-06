@@ -58,6 +58,8 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         private readonly object _mediaPlayerLock = new();
         private bool _started;
         private Linux.BluezAgent? _agent;
+        private bool _userInitiatedDisconnect;
+        private BluetoothReconnectionLoop? _reconnectionLoop;
 
         public LinuxBluetoothService(
             ILogger logger,
@@ -442,6 +444,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
                             if (connected)
                             {
+                                _reconnectionLoop?.Cancel();
                                 _connectionStartTime = DateTime.UtcNow;
                                 _metricsCollector?.Increment("bluetooth.devices_connected_total");
                                 _metricsCollector?.Gauge("bluetooth.active_connections", 1);
@@ -451,6 +454,9 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                             }
                             else
                             {
+                                var wasUserInitiated = _userInitiatedDisconnect;
+                                _userInitiatedDisconnect = false;
+
                                 RecordDisconnectionMetrics();
                                 StopCaptureSubprocess();
                                 // Clean up media transport on disconnect
@@ -460,9 +466,25 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                                 _mediaTransportPath = null;
                                 DeviceVolume = null;
 
-                                _logger.LogInformation("Bluetooth device disconnected: {DeviceName} ({Address})",
-                                    updatedDevice.Name, updatedDevice.Address);
-                                DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs { Device = updatedDevice });
+                                _logger.LogInformation("Bluetooth device disconnected: {DeviceName} ({Address}) (user-initiated: {UserInitiated})",
+                                    updatedDevice.Name, updatedDevice.Address, wasUserInitiated);
+                                DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs
+                                {
+                                    Device = updatedDevice,
+                                    UserInitiated = wasUserInitiated
+                                });
+
+                                // Start auto-reconnection for unexpected disconnects
+                                if (!wasUserInitiated && _options.AutoReconnect)
+                                {
+                                    _reconnectionLoop?.Dispose();
+                                    _reconnectionLoop = new BluetoothReconnectionLoop(
+                                        _logger, _options,
+                                        (addr, ct) => ConnectAsync(addr, ct),
+                                        () => ConnectedDevice != null,
+                                        _metricsCollector);
+                                    _reconnectionLoop.Start(updatedDevice.Address);
+                                }
                             }
                         }
                     }
@@ -569,6 +591,36 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             return Task.FromResult(true);
         }
 
+        public async Task<bool> ConnectAsync(string deviceAddress, CancellationToken cancellationToken = default)
+        {
+            if (_connection == null)
+            {
+                _logger.LogWarning("Cannot connect: Bluetooth service not started");
+                return false;
+            }
+
+            try
+            {
+                var devicePath = FindDevicePath(deviceAddress);
+                if (devicePath == null)
+                {
+                    _logger.LogWarning("Device {Address} not found for connection", deviceAddress);
+                    return false;
+                }
+
+                var device = _connection.CreateProxy<Linux.IDevice1>(
+                    Linux.BluezConstants.ServiceName, devicePath.Value);
+                await device.ConnectAsync();
+                _logger.LogInformation("Initiated connection to device {Address}", deviceAddress);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to connect to device {Address}", deviceAddress);
+                return false;
+            }
+        }
+
         public async Task DisconnectAsync(CancellationToken cancellationToken = default)
         {
             var connected = ConnectedDevice;
@@ -576,6 +628,9 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             {
                 return;
             }
+
+            _userInitiatedDisconnect = true;
+            _reconnectionLoop?.Cancel();
 
             try
             {
@@ -1395,6 +1450,8 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
         public async ValueTask DisposeAsync()
         {
+            _reconnectionLoop?.Dispose();
+            _reconnectionLoop = null;
             _playerPropertiesWatcher?.Dispose();
             _transportPropertiesWatcher?.Dispose();
             _discoveryWatcher?.Dispose();
