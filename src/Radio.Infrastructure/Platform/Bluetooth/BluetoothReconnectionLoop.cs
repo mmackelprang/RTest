@@ -91,7 +91,7 @@ internal sealed class BluetoothReconnectionLoop : IDisposable
       }
 
       var delay = CalculateBackoffDelay(attempt, _options.ReconnectBaseDelayMs, _options.ReconnectMaxDelayMs);
-      _logger.LogDebug("Reconnect attempt {Attempt}/{Max} for {Address} in {Delay}ms",
+      _logger.LogInformation("Reconnect attempt {Attempt}/{Max} for {Address} in {Delay}ms",
         attempt, _options.MaxReconnectAttempts, deviceAddress, (int)delay.TotalMilliseconds);
 
       try
@@ -129,7 +129,7 @@ internal sealed class BluetoothReconnectionLoop : IDisposable
       }
       catch (Exception ex)
       {
-        _logger.LogDebug(ex, "Reconnect attempt {Attempt} failed for {Address}", attempt, deviceAddress);
+        _logger.LogWarning(ex, "Reconnect attempt {Attempt} failed for {Address}", attempt, deviceAddress);
       }
     }
 
