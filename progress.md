@@ -1,5 +1,34 @@
 # Progress Log
 
+## Session: 2026-03-05 (late — R1 + R4 research)
+
+### R4: BT Active Reconnection — Research Complete
+
+- [x] Analyzed LinuxBluetoothService.cs (1,660 lines) — full D-Bus integration via Tmds.DBus
+- [x] Found key gap: IBluetoothService has DisconnectAsync() but NOT ConnectAsync()
+- [x] D-Bus IDevice1.ConnectAsync() exists in BluezInterfaces.cs but is unreachable from service contract
+- [x] Identified BluetoothPreferences.TrustedDevices list — exists but unused (perfect reconnect target)
+- [x] Analyzed BluetoothAutoSwitchService — already handles source activation on DeviceConnected event
+- [x] Reviewed PhoneCallClient retry pattern — exponential backoff already in codebase, reusable
+- [x] Documented recommended approach: D-Bus Device1.Connect() + exponential backoff (5s→60s cap)
+- [x] Documented edge cases: user-initiated disconnect, phone at car, multiple devices, adapter off
+- [x] Updated task_plan.md R4 section with full findings
+
+### R1: Unify Config Systems — Research Complete
+
+- [x] Analyzed all 20+ IOptions<T> classes and their binding in AudioServiceExtensions.cs
+- [x] Traced full data flow: UI toggle → ConfigurationApiService → ConfigurationController → SQLite store (IOptions stays stale)
+- [x] Analyzed SqliteConfigurationStore.cs — flat key-value with section:key format (matches IConfiguration convention)
+- [x] Analyzed JsonConfigurationStore.cs — file-per-store with in-memory dictionary
+- [x] Analyzed both existing workarounds: SyncFingerprintingOptionsFromStore (mutates IOptions) and DeviceOptionsResolver (reads store)
+- [x] Analyzed PreferencesPersistenceService — saves preferences every 30s, special handling for AudioPreferences
+- [x] Analyzed ConfigurationController — 14 endpoints, UpdateConfigurationSection writes to store only
+- [x] Analyzed SecretResolvingPostConfigureOptions — post-configure hook for secret tag resolution
+- [x] Evaluated 4 options: Drop SQLite, Bridge SQLite→IConfiguration, Drop IOptions, Hybrid
+- [x] Recommended Option 2: Custom SqliteConfigurationProvider bridging SQLite into IConfiguration pipeline
+- [x] Key insight: SQLite key format ("section:key") already matches IConfiguration's colon-delimited paths — migration is natural
+- [x] Updated task_plan.md R1 section with full findings and implementation plan
+
 ## Session: 2026-03-05 (R2 perf optimization)
 
 ### R2: Performance & Memory Deep Dive — Implementation
