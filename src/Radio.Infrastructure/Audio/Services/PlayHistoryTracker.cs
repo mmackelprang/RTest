@@ -23,6 +23,13 @@ public class PlayHistoryTracker : IDisposable
   private readonly IBluetoothService _bluetoothService;
   private readonly IMetricsCollector? _metricsCollector;
 
+  // Pre-allocated fallback title arrays for placeholder detection —
+  // avoids allocating new string[] on every IsPlaceholderMetadata call.
+  private static readonly string[] BluetoothFallbackTitles = ["Bluetooth Audio", "Bluetooth"];
+  private static readonly string[] VinylFallbackTitles = ["Vinyl"];
+  private static readonly string[] UsbFallbackTitles = ["USB Audio", "Generic USB Audio"];
+  private static readonly string[] RadioFallbackTitles = ["SDR Radio", "Radio"];
+
   private string? _currentPlayHistoryEntryId;
   private bool _disposed;
 
@@ -295,13 +302,13 @@ public class PlayHistoryTracker : IDisposable
     if (fallbackArtist != null && string.Equals(artist, fallbackArtist, StringComparison.OrdinalIgnoreCase))
       return true;
 
-    // Source-type fallback titles
+    // Source-type fallback titles (static readonly arrays to avoid per-call allocations)
     var fallbackTitles = source switch
     {
-      PlaySource.Bluetooth => new[] { "Bluetooth Audio", "Bluetooth" },
-      PlaySource.Vinyl => new[] { "Vinyl" },
-      PlaySource.GenericUSB => new[] { "USB Audio", "Generic USB Audio" },
-      PlaySource.Radio => new[] { "SDR Radio", "Radio" },
+      PlaySource.Bluetooth => BluetoothFallbackTitles,
+      PlaySource.Vinyl => VinylFallbackTitles,
+      PlaySource.GenericUSB => UsbFallbackTitles,
+      PlaySource.Radio => RadioFallbackTitles,
       _ => Array.Empty<string>()
     };
     if (fallbackTitles.Any(f => string.Equals(title, f, StringComparison.OrdinalIgnoreCase)))

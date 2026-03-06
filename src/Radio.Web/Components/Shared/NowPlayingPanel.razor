@@ -49,9 +49,9 @@
               </tr>
             </thead>
             <tbody>
-              @if (_fpStatus?.RecentEvents != null)
+              @if (_fpEventsReversed != null)
               {
-                @foreach (var evt in _fpStatus.RecentEvents.AsEnumerable().Reverse())
+                @foreach (var evt in _fpEventsReversed)
                 {
                   <tr style="border-bottom: 1px solid rgba(255,255,255,0.04); height: 22px; color: @(GetEventRowColor(evt));">
                     <td style="text-align: center; padding: 3px 4px;" title="@evt.SourceType">
@@ -286,6 +286,9 @@
   private double _totalDurationSeconds;
   // Fingerprint status state
   private FingerprintStatusDto? _fpStatus;
+  // Pre-reversed event list cached when fingerprint status refreshes,
+  // avoids calling .Reverse() on every render.
+  private List<FingerprintEventDto>? _fpEventsReversed;
   private bool _showFingerprintDetail;
 
   // Source gain state
@@ -297,6 +300,8 @@
 
   // Periodic fallback poll for now playing updates (safety net for missed SignalR events)
   private System.Threading.Timer? _nowPlayingPollTimer;
+  // Tracks when the last SignalR event was received to skip redundant polls
+  private DateTime _lastSignalREventUtc = DateTime.MinValue;
 
   private bool _hasValidAlbumArt =>
     !_albumArtFailed
@@ -321,11 +326,12 @@
 
       // Periodic fallback poll for now playing updates. Catches track identifications
       // or metadata changes if a SignalR NowPlayingChanged event is missed.
+      // 60s interval — SignalR provides real-time updates; this is a safety net only.
       _nowPlayingPollTimer = new System.Threading.Timer(
         async _ => await OnNowPlayingPollAsync(),
         null,
-        TimeSpan.FromSeconds(10),
-        TimeSpan.FromSeconds(10));
+        TimeSpan.FromSeconds(60),
+        TimeSpan.FromSeconds(60));
     }
     catch (Exception ex)
     {
@@ -335,32 +341,54 @@
 
   private async Task OnPlaybackStateChanged()
   {
+    _lastSignalREventUtc = DateTime.UtcNow;
     await RefreshPlaybackStateAsync();
     await InvokeAsync(StateHasChanged);
   }
 
-  private async Task OnNowPlayingChanged()
+  private async Task OnNowPlayingChanged(NowPlayingDto? dto)
   {
-    await RefreshPlaybackStateAsync();
+    _lastSignalREventUtc = DateTime.UtcNow;
+    if (dto != null)
+    {
+      // Use the SignalR payload directly instead of making a redundant HTTP call
+      ApplyNowPlayingDto(dto);
+    }
+    else
+    {
+      await RefreshPlaybackStateAsync();
+    }
     await InvokeAsync(StateHasChanged);
   }
 
   private async Task OnSourceChanged()
   {
+    _lastSignalREventUtc = DateTime.UtcNow;
     // Source switched — immediately refresh to show the new source's metadata
     await RefreshPlaybackStateAsync();
     await LoadSourceGainOffsetsAsync();
     await InvokeAsync(StateHasChanged);
   }
 
-  private async Task OnVolumeChangedEvent()
+  private async Task OnVolumeChangedEvent(VolumeDto? dto)
   {
-    await RefreshPlaybackStateAsync();
+    _lastSignalREventUtc = DateTime.UtcNow;
+    if (dto != null)
+    {
+      // Use the SignalR payload directly instead of making a redundant HTTP call
+      _volume = dto.Volume;
+      _isMuted = dto.IsMuted;
+    }
+    else
+    {
+      await RefreshPlaybackStateAsync();
+    }
     await InvokeAsync(StateHasChanged);
   }
 
   private async Task OnFingerprintStatusChanged()
   {
+    _lastSignalREventUtc = DateTime.UtcNow;
     await RefreshFingerprintStatusAsync();
     await InvokeAsync(StateHasChanged);
   }
@@ -369,6 +397,11 @@
   {
     try
     {
+      // Skip poll if a SignalR event was received within the last 30s —
+      // the real-time path already refreshed state.
+      if ((DateTime.UtcNow - _lastSignalREventUtc).TotalSeconds < 30)
+        return;
+
       var nowPlaying = await AudioApi.GetNowPlayingAsync();
       if (nowPlaying != null && nowPlaying.Title != _title)
       {
@@ -387,6 +420,10 @@
     try
     {
       _fpStatus = await AudioApi.GetFingerprintStatusAsync();
+      // Cache the reversed list so the template doesn't call .Reverse() on every render
+      _fpEventsReversed = _fpStatus?.RecentEvents != null
+        ? Enumerable.Reverse(_fpStatus.RecentEvents).ToList()
+        : null;
     }
     catch (Exception ex)
     {
@@ -460,6 +497,26 @@
     {
       Logger.LogError(ex, "Error refreshing playback state in NowPlayingPanel");
     }
+  }
+
+  /// <summary>
+  /// Applies a NowPlayingDto received via SignalR directly to local state,
+  /// avoiding a redundant HTTP round-trip to re-fetch the same data.
+  /// </summary>
+  private void ApplyNowPlayingDto(NowPlayingDto dto)
+  {
+    _title = dto.Title;
+    _artist = dto.Artist;
+    _album = dto.Album;
+    _isPlaying = dto.IsPlaying;
+    if (_albumArtUrl != dto.AlbumArtUrl)
+    {
+      _albumArtFailed = false;
+    }
+    _albumArtUrl = dto.AlbumArtUrl;
+    _source = dto.SourceName;
+    _nowPlayingSourceType = dto.SourceType;
+    _currentSourceGain = _sourceGainOffsets.TryGetValue(dto.SourceType, out var g) ? g : 1.0f;
   }
 
   // --- Fingerprint badge helpers ---
@@ -594,20 +651,38 @@
     _currentSourceGain = newGain;
     _sourceGainOffsets[_nowPlayingSourceType] = newGain;
 
-    // Debounce the API call
-    _gainDebounceTimer?.Dispose();
-    var sourceType = _nowPlayingSourceType;
-    _gainDebounceTimer = new System.Threading.Timer(async _ =>
+    // Debounce the API call — reuse existing timer via Change() instead of
+    // dispose+recreate on each slider event to reduce GC pressure.
+    _pendingGainSourceType = _nowPlayingSourceType;
+    _pendingGainValue = newGain;
+    if (_gainDebounceTimer != null)
     {
-      try
-      {
-        await AudioApi.SetSourceGainAsync(sourceType, newGain);
-      }
-      catch (Exception ex)
-      {
-        Logger.LogWarning(ex, "Failed to set source gain for {SourceType}", sourceType);
-      }
-    }, null, TimeSpan.FromMilliseconds(200), Timeout.InfiniteTimeSpan);
+      _gainDebounceTimer.Change(TimeSpan.FromMilliseconds(200), Timeout.InfiniteTimeSpan);
+    }
+    else
+    {
+      _gainDebounceTimer = new System.Threading.Timer(
+        OnGainDebounceElapsed, null,
+        TimeSpan.FromMilliseconds(200), Timeout.InfiniteTimeSpan);
+    }
+  }
+
+  private string? _pendingGainSourceType;
+  private float _pendingGainValue;
+
+  private async void OnGainDebounceElapsed(object? _)
+  {
+    try
+    {
+      var sourceType = _pendingGainSourceType;
+      var gain = _pendingGainValue;
+      if (!string.IsNullOrEmpty(sourceType))
+        await AudioApi.SetSourceGainAsync(sourceType, gain);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to set source gain for {SourceType}", _pendingGainSourceType);
+    }
   }
 
   private static string FormatGainDb(float gain)

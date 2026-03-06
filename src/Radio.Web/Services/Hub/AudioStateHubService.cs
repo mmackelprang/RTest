@@ -1,6 +1,7 @@
 using System.Net.Sockets;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
+using Radio.Web.Models;
 
 namespace Radio.Web.Services.Hub;
 
@@ -18,12 +19,14 @@ public class AudioStateHubService : IAsyncDisposable
   private bool _isDisposed;
   private readonly SemaphoreSlim _connectionLock = new(1, 1);
 
-  // Events that components can subscribe to
+  // Events that components can subscribe to.
+  // NowPlayingChanged and VolumeChanged pass the typed payload from SignalR
+  // so subscribers can use it directly instead of making a redundant HTTP call.
   public event Func<Task>? PlaybackStateChanged;
-  public event Func<Task>? NowPlayingChanged;
+  public event Func<NowPlayingDto?, Task>? NowPlayingChanged;
   public event Func<Task>? QueueChanged;
   public event Func<Task>? RadioStateChanged;
-  public event Func<Task>? VolumeChanged;
+  public event Func<VolumeDto?, Task>? VolumeChanged;
   public event Func<Task>? SourceChanged;
   public event Func<Task>? FingerprintStatusChanged;
   public event Func<Task>? PhoneCallStateChanged;
@@ -80,12 +83,12 @@ public class AudioStateHubService : IAsyncDisposable
       });
 
       // Server sends NowPlayingChanged with a NowPlayingDto payload —
-      // accept and discard it so SignalR dispatches the message.
-      _hubConnection.On<object>("NowPlayingChanged", async (_) =>
+      // deserialize and pass through so subscribers can use it directly.
+      _hubConnection.On<NowPlayingDto?>("NowPlayingChanged", async (dto) =>
       {
         _logger.LogDebug("Received NowPlayingChanged event");
         if (NowPlayingChanged != null)
-          await NowPlayingChanged.Invoke();
+          await NowPlayingChanged.Invoke(dto);
       });
 
       // Server sends QueueChanged with a list payload —
@@ -106,11 +109,13 @@ public class AudioStateHubService : IAsyncDisposable
           await RadioStateChanged.Invoke();
       });
 
-      _hubConnection.On("VolumeChanged", async () =>
+      // Server sends VolumeChanged with a VolumeDto payload —
+      // deserialize and pass through so subscribers can update directly.
+      _hubConnection.On<VolumeDto?>("VolumeChanged", async (dto) =>
       {
         _logger.LogDebug("Received VolumeChanged event");
         if (VolumeChanged != null)
-          await VolumeChanged.Invoke();
+          await VolumeChanged.Invoke(dto);
       });
 
       _hubConnection.On("SourceChanged", async () =>

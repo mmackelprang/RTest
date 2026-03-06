@@ -195,6 +195,7 @@ internal sealed class TappedOutputStream : Stream
   /// <summary>
   /// Writes audio samples from the engine to the ring buffer.
   /// Converts float samples (-1.0 to 1.0) to 16-bit PCM.
+  /// Uses two-chunk linear writes to avoid per-sample modulo ops.
   /// </summary>
   /// <param name="samples">The float samples to write.</param>
   public void WriteFromEngine(float[] samples)
@@ -204,21 +205,10 @@ internal sealed class TappedOutputStream : Stream
     lock (_lock)
     {
       _totalWriteCalls++;
-      _totalBytesWritten += samples.Length * _bytesPerSample;
+      var totalBytes = samples.Length * _bytesPerSample;
+      _totalBytesWritten += totalBytes;
 
-      foreach (var sample in samples)
-      {
-        // Clamp and convert float to 16-bit PCM
-        var clampedSample = Math.Clamp(sample, -1f, 1f);
-        var pcm = (short)(clampedSample * short.MaxValue);
-
-        // Write low byte then high byte (little-endian)
-        _buffer[_writePosition] = (byte)(pcm & 0xFF);
-        _writePosition = (_writePosition + 1) % _bufferSize;
-
-        _buffer[_writePosition] = (byte)((pcm >> 8) & 0xFF);
-        _writePosition = (_writePosition + 1) % _bufferSize;
-      }
+      WriteSamplesLinear(samples, 0, samples.Length);
     }
 
     ReportMetrics();
@@ -227,6 +217,7 @@ internal sealed class TappedOutputStream : Stream
   /// <summary>
   /// Writes audio samples from the engine to the ring buffer.
   /// Converts float samples (-1.0 to 1.0) to 16-bit PCM.
+  /// Uses two-chunk linear writes to avoid per-sample modulo ops.
   /// </summary>
   /// <param name="samples">The samples span to write.</param>
   /// <param name="count">The number of samples to write.</param>
@@ -239,22 +230,50 @@ internal sealed class TappedOutputStream : Stream
       _totalWriteCalls++;
       _totalBytesWritten += count * _bytesPerSample;
 
-      for (var i = 0; i < count; i++)
-      {
-        // Clamp and convert float to 16-bit PCM
-        var clampedSample = Math.Clamp(samples[i], -1f, 1f);
-        var pcm = (short)(clampedSample * short.MaxValue);
-
-        // Write low byte then high byte (little-endian)
-        _buffer[_writePosition] = (byte)(pcm & 0xFF);
-        _writePosition = (_writePosition + 1) % _bufferSize;
-
-        _buffer[_writePosition] = (byte)((pcm >> 8) & 0xFF);
-        _writePosition = (_writePosition + 1) % _bufferSize;
-      }
+      WriteSamplesLinear(samples, 0, count);
     }
 
     ReportMetrics();
+  }
+
+  /// <summary>
+  /// Converts float samples to 16-bit PCM and writes to the ring buffer using
+  /// linear chunks. Splits the write at the buffer boundary to avoid per-sample
+  /// modulo operations (reduces from ~192K mod/sec to ~94/sec at 48kHz stereo).
+  /// Must be called under _lock.
+  /// </summary>
+  private void WriteSamplesLinear(ReadOnlySpan<float> samples, int offset, int count)
+  {
+    // How many samples fit before the write position wraps?
+    var bytesBeforeWrap = _bufferSize - _writePosition;
+    var samplesBeforeWrap = bytesBeforeWrap / _bytesPerSample;
+    var firstChunkCount = Math.Min(count, samplesBeforeWrap);
+
+    // First chunk: write linearly from _writePosition
+    var wp = _writePosition;
+    for (var i = offset; i < offset + firstChunkCount; i++)
+    {
+      var pcm = (short)(Math.Clamp(samples[i], -1f, 1f) * short.MaxValue);
+      _buffer[wp] = (byte)(pcm & 0xFF);
+      _buffer[wp + 1] = (byte)((pcm >> 8) & 0xFF);
+      wp += _bytesPerSample;
+    }
+
+    // Second chunk: wrap to start of buffer
+    var secondChunkCount = count - firstChunkCount;
+    if (secondChunkCount > 0)
+    {
+      wp = 0;
+      for (var i = offset + firstChunkCount; i < offset + count; i++)
+      {
+        var pcm = (short)(Math.Clamp(samples[i], -1f, 1f) * short.MaxValue);
+        _buffer[wp] = (byte)(pcm & 0xFF);
+        _buffer[wp + 1] = (byte)((pcm >> 8) & 0xFF);
+        wp += _bytesPerSample;
+      }
+    }
+
+    _writePosition = (_writePosition + count * _bytesPerSample) % _bufferSize;
   }
 
   private void ReportMetrics()

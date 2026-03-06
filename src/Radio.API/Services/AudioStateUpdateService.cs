@@ -51,6 +51,8 @@ public class AudioStateUpdateService : BackgroundService
   private PlaybackStateDto? _lastPlaybackState;
   private NowPlayingDto? _lastNowPlaying;
   private List<QueueItemDto>? _lastQueue;
+  // Lightweight queue snapshot for cheap change detection (avoids building full DTOs every 500ms)
+  private List<(string Id, int Index, bool IsCurrent, string State)>? _lastQueueSnapshot;
   private RadioStateDto? _lastRadioState;
   private VolumeDto? _lastVolume;
   private string? _lastActiveSourceType;
@@ -374,17 +376,25 @@ public class AudioStateUpdateService : BackgroundService
 
     // Use full playlist so UI always gets played + current + upcoming with state
     var fullPlaylist = await playQueue.GetFullPlaylistAsync(cancellationToken);
+
+    // Build lightweight snapshot first for cheap change detection.
+    // Only construct full DTOs when something actually changed.
+    var snapshot = fullPlaylist
+      .Select(item => (item.Id, item.Index, item.IsCurrent, State: item.State.ToString()))
+      .ToList();
+
+    if (!HasQueueSnapshotChanged(_lastQueueSnapshot, snapshot))
+      return;
+
     var currentQueue = fullPlaylist
       .Select(MapToQueueItemDto)
       .ToList();
 
-    if (HasQueueChanged(_lastQueue, currentQueue))
-    {
-      _lastQueue = currentQueue;
-      await _hubContext.Clients.Group("Queue")
-        .SendAsync("QueueChanged", currentQueue, cancellationToken);
-      _logger.LogDebug("Broadcast QueueChanged with {Count} items", currentQueue.Count);
-    }
+    _lastQueueSnapshot = snapshot;
+    _lastQueue = currentQueue;
+    await _hubContext.Clients.Group("Queue")
+      .SendAsync("QueueChanged", currentQueue, cancellationToken);
+    _logger.LogDebug("Broadcast QueueChanged with {Count} items", currentQueue.Count);
   }
 
   private async Task CheckRadioStateAsync(IAudioSource? activeSource, CancellationToken cancellationToken)
@@ -475,27 +485,22 @@ public class AudioStateUpdateService : BackgroundService
            previous.Duration != current.Duration; // Duration can change on track change
   }
 
-  private static bool HasQueueChanged(List<QueueItemDto>? previous, List<QueueItemDto>? current)
+  private static bool HasQueueSnapshotChanged(
+    List<(string Id, int Index, bool IsCurrent, string State)>? previous,
+    List<(string Id, int Index, bool IsCurrent, string State)>? current)
   {
     if (previous == null || current == null)
-    {
       return true;
-    }
     if (previous.Count != current.Count)
-    {
       return true;
-    }
 
-    // Check if items are the same (by ID, order, and state)
     for (int i = 0; i < previous.Count; i++)
     {
       if (previous[i].Id != current[i].Id ||
           previous[i].Index != current[i].Index ||
           previous[i].IsCurrent != current[i].IsCurrent ||
           previous[i].State != current[i].State)
-      {
         return true;
-      }
     }
 
     return false;

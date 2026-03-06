@@ -43,6 +43,13 @@ public sealed class BackgroundIdentificationService : BackgroundService
   private string? _lastError;
   private string? _currentSourceName;
 
+  // Cached status snapshot — only rebuilt when _eventsVersion changes.
+  // GetStatus() is called every ~3s by the API; caching avoids rebuilding
+  // 40 record copies + List + ReadOnlyCollection on every call.
+  private long _eventsVersion;
+  private FingerprintStatusSnapshot? _cachedSnapshot;
+  private long _cachedSnapshotVersion = -1;
+
   // Event log — circular buffer of recent events, capped at MaxRecentEvents
   private const int MaxRecentEvents = 40;
   private readonly List<FingerprintEventRecord> _recentEvents = new(MaxRecentEvents + 1);
@@ -89,13 +96,27 @@ public sealed class BackgroundIdentificationService : BackgroundService
 
   /// <summary>
   /// Returns the current fingerprint identification status snapshot.
+  /// Uses a cached snapshot that is only rebuilt when events change.
   /// </summary>
   public FingerprintStatusSnapshot GetStatus()
   {
     lock (_statusLock)
     {
+      if (_cachedSnapshot != null && _cachedSnapshotVersion == _eventsVersion)
+      {
+        // Snapshot is still valid — only refresh rate counters (cheap)
+        PruneRateTimestamps();
+        return _cachedSnapshot with
+        {
+          Phase = _currentPhase,
+          FingerprintsPerMinute = ComputeRate(_fingerprintTimestamps),
+          MetadataCallsPerMinute = ComputeRate(_metadataCallTimestamps),
+          LastError = _lastError
+        };
+      }
+
       PruneRateTimestamps();
-      return new FingerprintStatusSnapshot
+      _cachedSnapshot = new FingerprintStatusSnapshot
       {
         Phase = _currentPhase,
         IsEnabled = _options.Enabled,
@@ -104,6 +125,8 @@ public sealed class BackgroundIdentificationService : BackgroundService
         RecentEvents = _recentEvents.Select(e => e with { }).ToList().AsReadOnly(),
         LastError = _lastError
       };
+      _cachedSnapshotVersion = _eventsVersion;
+      return _cachedSnapshot;
     }
   }
 
@@ -426,6 +449,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
         _currentEvent.Phase = phase;
         _currentEvent.Timestamp = DateTime.UtcNow;
       }
+      _eventsVersion++;
     }
     FireStatusChanged();
   }
@@ -448,6 +472,7 @@ public sealed class BackgroundIdentificationService : BackgroundService
         _recentEvents.Add(_currentEvent);
         if (_recentEvents.Count > MaxRecentEvents)
           _recentEvents.RemoveAt(0);
+        _eventsVersion++;
       }
     }
   }
@@ -461,6 +486,8 @@ public sealed class BackgroundIdentificationService : BackgroundService
     lock (_statusLock)
     {
       if (_currentEvent == null) return;
+
+      _eventsVersion++;
 
       // Aggregate if same source, same title, and already a match row
       if (_currentEvent.IsMatch && _currentEvent.Title == metadata.Title)
@@ -515,6 +542,8 @@ public sealed class BackgroundIdentificationService : BackgroundService
     lock (_statusLock)
     {
       if (_currentEvent == null) return;
+
+      _eventsVersion++;
 
       // Aggregate into existing no-match row (or fresh empty row from EnsureCurrentEvent)
       if (!_currentEvent.IsMatch)

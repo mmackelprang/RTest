@@ -1,3 +1,4 @@
+using System.Buffers;
 using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
@@ -15,6 +16,9 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
   private readonly ILogger<SoundFlowAudioTap> _logger;
   private readonly IAudioEngine _audioEngine;
   private readonly IAudioManager _audioManager;
+
+  // Reusable chunk buffer — avoids allocating a new byte[4096] per loop iteration
+  private readonly byte[] _chunkBuffer = new byte[4096];
 
   /// <summary>
   /// Initializes a new instance of the <see cref="SoundFlowAudioTap"/> class.
@@ -136,7 +140,10 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
       _logger.LogDebug("Expecting to read {Bytes} bytes ({Samples} samples) for {Duration}s at {SampleRate}Hz {Channels}ch",
         bytesToRead, totalSamples, duration.TotalSeconds, sampleRate, channels);
 
-      var buffer = new byte[bytesToRead];
+      // Rent from ArrayPool to avoid LOH allocation (~2.7MB)
+      var buffer = ArrayPool<byte>.Shared.Rent(bytesToRead);
+      try
+      {
       var bytesRead = 0;
 
       // IMPORTANT: Use ReadAsync with real-time pacing, not sync Read.
@@ -153,10 +160,9 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
       while (stopwatch.Elapsed < duration && bytesRead < bytesToRead && !ct.IsCancellationRequested)
       {
         var remaining = bytesToRead - bytesRead;
-        var chunkSize = Math.Min(remaining, 4096);
-        var tempBuffer = new byte[chunkSize];
+        var chunkSize = Math.Min(remaining, _chunkBuffer.Length);
 
-        var read = await stream.ReadAsync(tempBuffer, 0, chunkSize, ct);
+        var read = await stream.ReadAsync(_chunkBuffer, 0, chunkSize, ct);
         readAttempts++;
 
         if (read > 0)
@@ -165,7 +171,7 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
           bool hasAudio = false;
           for (int i = 0; i < read; i += 2)
           {
-            if (i + 1 < read && (tempBuffer[i] != 0 || tempBuffer[i + 1] != 0))
+            if (i + 1 < read && (_chunkBuffer[i] != 0 || _chunkBuffer[i + 1] != 0))
             {
               hasAudio = true;
               break;
@@ -174,7 +180,7 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
 
           if (hasAudio)
           {
-            Buffer.BlockCopy(tempBuffer, 0, buffer, bytesRead, read);
+            Buffer.BlockCopy(_chunkBuffer, 0, buffer, bytesRead, read);
             bytesRead += read;
           }
           else
@@ -197,24 +203,19 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
       _logger.LogDebug("Read {BytesRead} bytes in {Attempts} attempts over {Elapsed}ms",
         bytesRead, readAttempts, captureElapsed);
 
-      // Convert bytes to float samples
+      // RMS silence check on raw PCM shorts — avoids allocating a float[] (~5.5MB LOH)
+      // when audio is silence (the common case during idle).
       var sampleCount = bytesRead / bytesPerSample;
-      var samples = new float[sampleCount];
-      for (int i = 0; i < sampleCount; i++)
-      {
-        var byteIndex = i * bytesPerSample;
-        if (byteIndex + 1 < buffer.Length)
-        {
-          var pcm = (short)(buffer[byteIndex] | (buffer[byteIndex + 1] << 8));
-          samples[i] = pcm / (float)short.MaxValue;
-        }
-      }
-
-      // RMS silence check: skip if captured audio is below -60dB
       var sumSquares = 0.0;
       for (int i = 0; i < sampleCount; i++)
       {
-        sumSquares += samples[i] * samples[i];
+        var byteIndex = i * bytesPerSample;
+        if (byteIndex + 1 < bytesRead)
+        {
+          var pcm = (short)(buffer[byteIndex] | (buffer[byteIndex + 1] << 8));
+          var normalized = pcm / (double)short.MaxValue;
+          sumSquares += normalized * normalized;
+        }
       }
       var rms = Math.Sqrt(sumSquares / sampleCount);
       var rmsDb = rms > 0 ? 20 * Math.Log10(rms) : -100;
@@ -223,6 +224,18 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
       {
         _logger.LogDebug("Captured audio is silence (RMS: {RmsDb:F1}dB), skipping identification", rmsDb);
         return null;
+      }
+
+      // Audio passed silence check — now convert bytes to float samples
+      var samples = new float[sampleCount];
+      for (int i = 0; i < sampleCount; i++)
+      {
+        var byteIndex = i * bytesPerSample;
+        if (byteIndex + 1 < bytesRead)
+        {
+          var pcm = (short)(buffer[byteIndex] | (buffer[byteIndex + 1] << 8));
+          samples[i] = pcm / (float)short.MaxValue;
+        }
       }
 
       var actualDuration = (double)sampleCount / sampleRate / channels;
@@ -237,6 +250,11 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
         Duration = TimeSpan.FromSeconds(actualDuration),
         SourceName = SourceName
       };
+      }
+      finally
+      {
+        ArrayPool<byte>.Shared.Return(buffer);
+      }
     }
     catch (Exception ex)
     {
