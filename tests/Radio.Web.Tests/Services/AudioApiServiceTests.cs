@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.Extensions.Logging.Abstractions;
 using Radio.Web.Services.ApiClients;
 
@@ -14,7 +15,11 @@ public class AudioApiServiceTests
 
   public AudioApiServiceTests()
   {
-    _httpClient = new HttpClient
+    // Use a handler that immediately returns 503 instead of making real HTTP calls.
+    // The previous approach (real HttpClient to localhost:5000) waited ~4s per test
+    // for TCP connection timeout, wasting ~40s total across 10+ tests.
+    var handler = new ImmediateFailureHandler();
+    _httpClient = new HttpClient(handler)
     {
       BaseAddress = new Uri("http://localhost:5000")
     };
@@ -159,5 +164,18 @@ public class AudioApiServiceTests
     // Assert - Should complete (either with result or cancellation)
     await Task.WhenAll(tasks.Select(t => t.ContinueWith(_ => { })));
     Assert.NotNull(_service); // Verify service remains in valid state
+  }
+
+  /// <summary>
+  /// HttpMessageHandler that immediately throws HttpRequestException,
+  /// simulating a server that is not available without waiting for TCP timeout.
+  /// </summary>
+  private class ImmediateFailureHandler : HttpMessageHandler
+  {
+    protected override Task<HttpResponseMessage> SendAsync(
+      HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+      throw new HttpRequestException("Connection refused", null, HttpStatusCode.ServiceUnavailable);
+    }
   }
 }

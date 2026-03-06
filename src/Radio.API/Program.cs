@@ -39,7 +39,7 @@ builder.Services.AddSingleton(configStoreNotifier);
 // gets the default priority, allowing filtering with `journalctl -p info`.
 Log.Logger = new LoggerConfiguration()
   .ReadFrom.Configuration(builder.Configuration)
-  .WriteTo.Console(new SystemdConsoleFormatter())
+  .WriteTo.Async(a => a.Console(new SystemdConsoleFormatter()))
   .CreateLogger();
 
 builder.Host.UseSerilog();

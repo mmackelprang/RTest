@@ -433,7 +433,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                     }
                 }
 
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "🔄 Clock drift compensation: duplicated {Samples} samples (buffer: {Level}→{NewLevel}/{Capacity}, total compensated: {Total})",
                     deficit, currentLevel, currentLevel + deficit, _maxBufferSamples, _totalSamplesCompensated);
             }
@@ -476,7 +476,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                     _totalSamplesReceived, _totalSamplesOutput,
                     _totalSamplesDropped, _totalSamplesCompensated, _underrunCount);
 
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "🔬 Timing ({Type}): callback interval min={MinInterval:F2}ms max={MaxInterval:F2}ms, " +
                     "missed deadlines={Missed} (GC-correlated={GcMisses}), execution max={MaxExec:F2}ms, " +
                     "lock contention: addSamples={AddContentions} (max {AddWait:F2}ms), " +

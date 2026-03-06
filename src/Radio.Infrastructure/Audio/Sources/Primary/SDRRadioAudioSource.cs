@@ -145,7 +145,7 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
       _silentCallbackCount++;
       if (_silentCallbackCount % 100 == 1)
       {
-        Logger.LogWarning(
+        Logger.LogDebug(
           "SDR RADIO: Silent audio data received ({SampleCount} zero samples, silent callbacks: {SilentCount})",
           sampleCount, _silentCallbackCount);
       }
