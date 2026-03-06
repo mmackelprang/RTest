@@ -49,15 +49,18 @@
   <script>
     // Start Blazor AFTER all JS dependencies are loaded.
     // Configure reconnection for kiosk reliability.
+    // Kiosk-grade circuit reliability: 300 retries x 2s = 10 minutes of reconnection,
+    // matching the server-side DisconnectedCircuitRetentionPeriod of 10 minutes.
+    // Server keepalive is 30s, so client timeout must be > 2x that.
     Blazor.start({
       circuit: {
         reconnectionOptions: {
-          maxRetries: 30,
+          maxRetries: 300,
           retryIntervalMilliseconds: 2000
         },
         configureSignalR: function (builder) {
-          builder.withServerTimeout(60000);
-          builder.withKeepAliveInterval(15000);
+          builder.withServerTimeout(120000);
+          builder.withKeepAliveInterval(30000);
         }
       }
     }).then(function() {
