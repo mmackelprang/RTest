@@ -23,7 +23,7 @@ This document traces every audio sample from source to output, documenting buffe
 Audio Sources
   ├── FilePlayerAudioSource (SoundPlayer → StreamDataProvider → file)
   ├── SDRRadioAudioSource (BufferedSoundGenerator<float> → RTL-SDR USB)
-  ├── BluetoothAudioSource (BufferedSoundGenerator<float> → WASAPI loopback or capture device)
+  ├── BluetoothAudioSource (BufferedSoundGenerator<float> → PipeWire native stream / bluez_input)
   ├── VinylAudioSource (BufferedSoundGenerator<short> → line-in capture)
   └── GenericUSBAudioSource (BufferedSoundGenerator<short> → USB capture)
             │
@@ -34,9 +34,11 @@ Audio Sources
   │                                                         │
   │  Modifiers (processed in order per sample):             │
   │    1. BalanceModifier — stereo L/R gain                 │
-  │    2. FingerprintTapModifier — copies samples to ring   │
+  │    2. LimiterModifier — soft-knee tanh at -1 dBFS      │
+  │    3. FingerprintTapModifier — copies samples to ring   │
   │       buffer (TappedOutputStream) for HTTP streaming    │
   │       and fingerprinting                                │
+  │    4. VisualizationTapModifier — FFT/levels/waveform    │
   └─────────────────────────────────────────────────────────┘
             │                         │
             ▼                         ▼
@@ -49,7 +51,7 @@ Audio Sources
                          │                     │
                     ┌────┴────┐          BackgroundIdentificationService
                     ▼         ▼                │
-                Raw WAV    MP3 (LAME)    fpcalc → AcoustID → MusicBrainz
+                Raw WAV    MP3 (LAME)    SongRec (Shazam) → Apple Music CDN
                 clients    Cast device         │
                                          TrackIdentified event
                                                │
@@ -175,7 +177,7 @@ Audio Sources
 | App launch | CC1AD845 (Default Media Receiver) | 500ms-3s |
 | Post-launch delay | `Task.Delay(500)` | 500ms (hardcoded) |
 | LoadAsync timeout | 5s initial + 30s background | SharpCaster internal |
-| StreamType | Buffered | Chrome decides buffer strategy |
+| StreamType | Live | Chrome starts playback sooner |
 
 **Details:**
 - `StartAsync()` in GoogleCastOutput:
@@ -225,7 +227,9 @@ For comparison, the local playback path has minimal latency:
 |-------|---------|
 | Source → MasterMixer | ~21ms (1024 samples) |
 | BalanceModifier | ~0ms |
+| LimiterModifier | ~0ms (inline) |
 | FingerprintTapModifier | ~0ms (passthrough) |
+| VisualizationTapModifier | ~0ms (passthrough) |
 | MasterMixer → DAC | ~21ms (1024 samples) |
 | DAC → speaker | ~1-5ms |
 | **Total** | **~43-47ms** |
@@ -238,58 +242,42 @@ For comparison, the local playback path has minimal latency:
 
 | Parameter | Value | Config Key |
 |-----------|-------|------------|
-| Startup delay | 5 seconds | Hardcoded |
-| Cycle interval | 30 seconds | `Fingerprinting:IdentificationIntervalSeconds` |
+| Cycle interval | Continuous (no idle delay on success) | — |
 | Sample duration | 15 seconds | `Fingerprinting:SampleDurationSeconds` |
 | Duplicate suppression | 5 minutes | `Fingerprinting:DuplicateSuppressionMinutes` |
-| Min confidence | 0.5 | `Fingerprinting:MinimumConfidenceThreshold` |
+| SongRec backoff | 30s / 60s / 120s / 300s on consecutive failures | Hardcoded |
 
-### Cycle Breakdown
+### Cycle Breakdown (SongRec Pipeline)
 
 ```
-Every 30 seconds:
-  1. Check enabled + active source (1ms)
-  2. Branch:
-     a. File source: call fpcalc on file directly (100-500ms)
-     b. Live source: capture 15s audio from tap (15,000ms real-time)
-  3. Generate fingerprint via fpcalc (200-500ms)
-  4. Check local cache (SQLite) (5-10ms)
-  5. If cache miss:
-     a. AcoustID lookup (500-2000ms, network)
-     b. If match: MusicBrainz lookup (500-2000ms, network)
-     c. If match: Cover Art Archive lookup (500-2000ms, network)
-  6. Store in cache (5-10ms)
-  7. Fire TrackIdentified event (1ms)
-  8. Duplicate suppression check (1ms)
+Continuous loop:
+  1. Check source active + NeedsFingerprintingLookup (1ms)
+  2. Capture 15s audio from SoundFlowAudioTap (15,000ms real-time)
+  3. Skip if silence (RMS < -60dB)
+  4. Send WAV to SongRec for Shazam recognition (1000-5000ms, network)
+  5. If match:
+     a. Cache cover art from Apple Music CDN to /api/albumart/ (200-1000ms)
+     b. Song change detection (compare with last identification)
+     c. Duplicate suppression check
+     d. Fire TrackIdentified event (1ms)
+  6. If no match: increment consecutive failure counter, apply backoff
 ```
 
 ### API Call Analysis
 
 | Scenario | API Calls | Network Time |
 |----------|-----------|-------------|
-| Cache hit | 0 | 0ms |
-| AcoustID miss | 1 | 500-2000ms |
-| Full identification | 3 (AcoustID + MusicBrainz + CoverArt) | 1500-6000ms |
+| SongRec match | 1 (SongRec) + 1 (album art CDN) | 1000-6000ms |
+| SongRec no match | 1 (SongRec) | 1000-5000ms |
+| Duplicate suppressed | 0 (skipped) | 0ms |
 
-### Current Inefficiencies
+### Optimizations Already Implemented
 
-1. **Blind 30s interval**: Runs regardless of track change — wastes API calls on same track
-2. **File sources re-fingerprint**: Even when file has complete ID3 tags (title+artist+album+art)
-3. **No track-change detection**: FilePlayer could trigger on track change instead of timer
-4. **Bluetooth metadata ignored**: AVRCP may provide complete metadata, making fingerprinting unnecessary
-5. **`NeedsFingerprintingLookup` not checked**: Sources set this flag but `BackgroundIdentificationService` ignores it
-6. **Dedup only 5 minutes**: High-confidence matches could be suppressed much longer
-
-### Optimization Recommendations (Phase 5)
-
-| Optimization | Saves | Effort |
-|-------------|-------|--------|
-| Skip if complete metadata (title+artist+album) | 50-80% of API calls for file/BT | Low |
-| Trigger on track change (FilePlayer) | All redundant same-track cycles | Medium |
-| Trigger on AVRCP metadata change (BT) | Redundant cycles | Medium |
-| Check `NeedsFingerprintingLookup` flag | Avoids cycles for identified tracks | Low |
-| Extend dedup to 30min for >0.9 confidence | Reduces repeat lookups | Low |
-| Local recording-ID cache (skip MusicBrainz if seen) | 1 API call per known recording | Low |
+1. **`NeedsFingerprintingLookup` checked**: Sources control whether fingerprinting runs (BT sets false after identification)
+2. **Song change detection**: Detects when track changes and fires `SongChanged` event
+3. **AVRCP metadata used**: BT metadata sets `NeedsFingerprintingLookup` based on completeness + `UseShazamForAllSources` setting
+4. **Immediate identification on demand**: `RequestImmediateIdentification()` cancels backoff delay for urgent cycles
+5. **Silence detection**: Skips SongRec call when captured audio is silence
 
 ---
 
@@ -317,10 +305,9 @@ For Cast (one-way, app → device):
 - Need to subscribe to `ReceiverChannel.StatusChanged` or poll `GetStatus()`
 - When Cast volume changes externally (Google Home app, voice), update `IAudioManager.MasterVolume`
 
-**Bluetooth ↔ App (not implemented):**
-- Windows: AVRCP absolute volume via WinRT `AudioPlaybackConnection` or `MediaTransportControls`
-- Linux: BlueZ `org.bluez.MediaTransport1.Volume` property via D-Bus
-- Bidirectional: both read on connect and subscribe to changes
+**Bluetooth ↔ App:**
+- Linux: PipeWire's bluez5 module manages AVRCP→node volume natively with cubic (perceptual) mapping. No manual pw-cli override needed — PipeWire handles AVRCP volume sync automatically.
+- Windows: AVRCP absolute volume via WinRT (stubbed, see `design/FUTURE-WORK.md`)
 
 ### Volume Persistence (not implemented)
 - No volume persistence — resets to defaults on restart
@@ -487,7 +474,7 @@ All configurable values that affect latency:
 |-------|----------|---------|-------------|
 | FingerprintTap batch size | `FingerprintTapModifier.cs:37` | 4,096 samples | Buffer before writing to ring |
 | MP3 bitrate | `HttpStreamOutput.cs:370` | 192 kbps CBR | LAME encoder bitrate |
-| Cast StreamType | `GoogleCastOutput.cs:848` | Buffered | Chrome buffering strategy |
+| Cast StreamType | `GoogleCastOutput.cs` | Live | Chrome buffering strategy |
 | Cast post-launch delay | `GoogleCastOutput.cs:518` | 500ms | Delay after app launch |
 | Cast LoadAsync timeout | `GoogleCastOutput.cs:557` | 5s | Initial response timeout |
 | State update interval | `AudioStateUpdateService.cs` | 500ms | SignalR poll cycle |

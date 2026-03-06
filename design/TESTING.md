@@ -4,12 +4,16 @@ This document describes the testing infrastructure and practices for the Radio C
 
 ## Test Projects
 
-| Project | Purpose |
-|---------|---------|
-| `tests/Radio.Core.Tests` | Unit tests for core domain models and interfaces |
-| `tests/Radio.Infrastructure.Tests` | Unit tests for infrastructure implementations |
-| `tests/Radio.API.Tests` | Unit tests for API controllers and hubs |
-| `tests/Radio.IntegrationTests` | End-to-end integration tests |
+| Project | Tests | Purpose |
+|---------|-------|---------|
+| `tests/Radio.Core.Tests` | 35 | Unit tests for core domain models and interfaces |
+| `tests/Radio.Infrastructure.Tests` | 817 | Unit tests for infrastructure implementations (audio, BT, config, fingerprinting) |
+| `tests/Radio.API.Tests` | 211 | Unit tests for API controllers, hubs, and middleware |
+| `tests/Radio.Web.Tests` | 116 | Unit tests for Blazor components and Web services |
+| `tests/Radio.Web.E2ETests` | 28 | End-to-end Playwright browser tests (excluded from CI) |
+| `tests/RTLSDRCore.Tests` | 155 | Unit tests for RTL-SDR signal processing library |
+| `tests/Radio.IntegrationTests` | 75 | Integration tests (SignalR, secrets, fingerprinting, play history) |
+| **Total** | **1,437** | |
 
 ## Running Tests
 
@@ -38,9 +42,9 @@ The `Radio.IntegrationTests` project provides comprehensive end-to-end testing f
 
 ### Test Results Summary
 
-- **Total Tests:** 66
-- **Passed:** 65
-- **Skipped:** 1 (requires audio device)
+- **Total Tests:** 75
+- **Passed:** 72
+- **Skipped:** 3 (require external APIs / audio device)
 
 ### Test Files
 
@@ -116,7 +120,7 @@ lookupService.SetDefaultMetadata(new TrackMetadata
 {
   Title = "Test Track",
   Artist = "Test Artist",
-  Source = MetadataSource.AcoustID
+  Source = MetadataSource.SongRec
 });
 
 // Configure specific result for a fingerprint ID
@@ -162,7 +166,7 @@ Tests can be filtered by category using traits:
 ```csharp
 [Trait("Category", "RequiresAudioDevice")]  // Needs audio output device
 [Trait("Category", "RequiresRTLSDR")]       // Needs RTLSDR hardware
-[Trait("Category", "RequiresNetwork")]      // Needs AcoustID API access
+[Trait("Category", "RequiresNetwork")]      // Needs external API access
 [Trait("Category", "LongRunning")]          // Takes > 30 seconds
 ```
 
