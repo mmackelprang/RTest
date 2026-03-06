@@ -240,11 +240,13 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
   public override async Task NextAsync(CancellationToken cancellationToken = default)
   {
+    ClearAudioBuffer();
     await _bluetoothService.NextTrackAsync(cancellationToken);
   }
 
   public override async Task PreviousAsync(CancellationToken cancellationToken = default)
   {
+    ClearAudioBuffer();
     await _bluetoothService.PreviousTrackAsync(cancellationToken);
   }
 
@@ -285,6 +287,20 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
     _routeLock.Dispose();
     await base.DisposeAsyncCore();
+  }
+
+  private void ClearAudioBuffer()
+  {
+    if (_captureGenerator != null)
+    {
+      _captureGenerator.ClearBuffer();
+      Logger.LogDebug("BluetoothAudioSource: cleared audio buffer on song change");
+    }
+    else if (SoundComponent is BufferedSoundGenerator<float> generator)
+    {
+      generator.ClearBuffer();
+      Logger.LogDebug("BluetoothAudioSource: cleared PipeWire audio buffer on song change");
+    }
   }
 
   private void SetConnectedDeviceMetadata()
@@ -589,6 +605,10 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private void OnMetadataChanged(object? sender, BluetoothPlaybackMetadata e)
   {
     if (e == null) return;
+
+    // Clear stale audio from the previous song so the new track is heard immediately
+    // rather than draining 0.8-2.0s of buffered audio from the old song.
+    ClearAudioBuffer();
 
     // AVRCP metadata arriving means a media player is attached — enable next/prev
     _hasMediaPlayer = true;
