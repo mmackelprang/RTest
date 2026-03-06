@@ -85,4 +85,24 @@ public class BluetoothControllerTests : IClassFixture<CustomWebApplicationFactor
     var response = await _client.PostAsync("/api/bluetooth/disconnect", null);
     Assert.Equal(HttpStatusCode.OK, response.StatusCode);
   }
+
+  [Fact]
+  public async Task Connect_WithMissingAddress_ReturnsBadRequest()
+  {
+    var response = await _client.PostAsJsonAsync("/api/bluetooth/connect",
+      new BluetoothDeviceRequest { DeviceAddress = string.Empty });
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+  }
+
+  [Fact]
+  public async Task Connect_WithAddress_ReturnsOkOrServerError()
+  {
+    // ConnectAsync may return false (500) when no real BT adapter is available,
+    // or OK when mock service succeeds
+    var response = await _client.PostAsJsonAsync("/api/bluetooth/connect",
+      new BluetoothDeviceRequest { DeviceAddress = "AA:BB:CC:DD:EE:FF" });
+    Assert.True(
+      response.StatusCode == HttpStatusCode.OK
+      || response.StatusCode == HttpStatusCode.InternalServerError);
+  }
 }

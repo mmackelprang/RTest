@@ -74,6 +74,9 @@ public interface IBluetoothService : IAsyncDisposable
   /// <summary>Accept incoming connection.</summary>
   Task<bool> AcceptConnectionAsync(string deviceAddress, CancellationToken cancellationToken = default);
 
+  /// <summary>Initiate outbound connection to a paired device.</summary>
+  Task<bool> ConnectAsync(string deviceAddress, CancellationToken cancellationToken = default);
+
   /// <summary>Disconnect current device.</summary>
   Task DisconnectAsync(CancellationToken cancellationToken = default);
 
@@ -173,6 +176,8 @@ public class BluetoothDeviceConnectedEventArgs : EventArgs
 public class BluetoothDeviceDisconnectedEventArgs : EventArgs
 {
   public required BluetoothDeviceInfo Device { get; init; }
+  /// <summary>True if disconnect was user-initiated (via DisconnectAsync).</summary>
+  public bool UserInitiated { get; init; }
 }
 
 /// <summary>Device discovered args.</summary>

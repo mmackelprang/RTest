@@ -415,6 +415,45 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
   }
 
   /// <inheritdoc/>
+  public async Task<int> CloseOrphanedEntriesAsync(TimeSpan olderThan, CancellationToken ct = default)
+  {
+    var conn = await _dbContext.GetConnectionAsync(ct);
+    var cutoff = DateTime.UtcNow - olderThan;
+
+    // Close orphaned entries: EndedAt IS NULL and PlayedAt is older than the cutoff.
+    // If Duration is already set (e.g. from AVRCP), compute EndedAt from PlayedAt + Duration.
+    // Otherwise, use the cutoff time as EndedAt and back-calculate Duration.
+    var sql = """
+      UPDATE PlayHistory
+      SET EndedAt = CASE
+            WHEN Duration IS NOT NULL AND Duration > 0
+              THEN datetime(PlayedAt, '+' || Duration || ' seconds')
+            ELSE @Cutoff
+          END,
+          Duration = CASE
+            WHEN Duration IS NOT NULL AND Duration > 0
+              THEN Duration
+            ELSE CAST((julianday(@Cutoff) - julianday(PlayedAt)) * 86400 AS INTEGER)
+          END
+      WHERE EndedAt IS NULL
+        AND PlayedAt < @Cutoff
+      """;
+
+    await using var cmd = conn.CreateCommand();
+    cmd.CommandText = sql;
+    cmd.Parameters.AddWithValue("@Cutoff", cutoff.ToString("O"));
+
+    var rowsAffected = await cmd.ExecuteNonQueryAsync(ct);
+    if (rowsAffected > 0)
+    {
+      _logger.LogInformation("Closed {Count} orphaned play history entries (older than {Cutoff})",
+        rowsAffected, cutoff);
+    }
+
+    return rowsAffected;
+  }
+
+  /// <inheritdoc/>
   public async Task<(IReadOnlyList<PlayHistoryEntry> Items, int TotalCount)> SearchAsync(
     string searchTerm,
     int? limit = null,

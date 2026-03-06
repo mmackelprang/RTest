@@ -31,6 +31,7 @@ public class AudioEngineInitializationService : IHostedService
   private readonly BluetoothAutoSwitchService? _bluetoothAutoSwitch;
   private readonly GoogleCastOutput? _castOutput;
   private readonly HttpStreamOutput? _httpOutput;
+  private readonly IServiceProvider _serviceProvider;
 
   /// <summary>
   /// Initializes a new instance of the AudioEngineInitializationService.
@@ -52,6 +53,7 @@ public class AudioEngineInitializationService : IHostedService
     _masterMixer = masterMixer;
     _bluetoothOptions = bluetoothOptions;
     _audioOutputOptions = audioOutputOptions;
+    _serviceProvider = serviceProvider;
 
     // Try to get IAudioManager (optional)
     _audioManager = serviceProvider.GetService<IAudioManager>();
@@ -69,8 +71,12 @@ public class AudioEngineInitializationService : IHostedService
   {
     try
     {
+      // Clean up orphaned play history entries from unclean shutdown.
+      // Runs before audio engine init to prevent fingerprinting from creating duplicates.
+      await CloseOrphanedPlayHistoryEntriesAsync(cancellationToken);
+
       _logger.LogInformation("Initializing audio engine...");
-      
+
       // Initialize the audio engine
       await _audioEngine.InitializeAsync(cancellationToken);
       
@@ -491,6 +497,30 @@ public class AudioEngineInitializationService : IHostedService
   }
 
   /// <summary>
+  /// Closes orphaned play history entries left by unclean shutdown.
+  /// Must run before audio engine initialization so fingerprinting doesn't create duplicates.
+  /// </summary>
+  private async Task CloseOrphanedPlayHistoryEntriesAsync(CancellationToken cancellationToken)
+  {
+    try
+    {
+      var repo = _serviceProvider.GetService<IPlayHistoryRepository>();
+      if (repo != null)
+      {
+        var closed = await repo.CloseOrphanedEntriesAsync(TimeSpan.FromMinutes(2), cancellationToken);
+        if (closed > 0)
+        {
+          _logger.LogInformation("Cleaned up {Count} orphaned play history entries from previous shutdown", closed);
+        }
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to clean up orphaned play history entries");
+    }
+  }
+
+  /// <summary>
   /// Stops the service and gracefully shuts down the audio engine.
   /// </summary>
   public async Task StopAsync(CancellationToken cancellationToken)
@@ -498,12 +528,12 @@ public class AudioEngineInitializationService : IHostedService
     try
     {
       _logger.LogInformation("Stopping audio engine...");
-      
+
       if (_audioEngine.State == Radio.Core.Interfaces.Audio.AudioEngineState.Running)
       {
         await _audioEngine.StopAsync(cancellationToken);
       }
-      
+
       _logger.LogInformation("Audio engine stopped successfully");
     }
     catch (Exception ex)

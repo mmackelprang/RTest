@@ -50,6 +50,17 @@ public class BluetoothOptions
   /// </summary>
   public bool EnableLoopbackCapture { get; set; } = true;
 
+  /// <summary>Automatically reconnect to known device after unexpected disconnect.</summary>
+  public bool AutoReconnect { get; set; } = true;
+
+  /// <summary>Base delay in ms for exponential backoff reconnection (first attempt).</summary>
+  public int ReconnectBaseDelayMs { get; set; } = 3000;
+
+  /// <summary>Maximum delay in ms between reconnection attempts (backoff cap).</summary>
+  public int ReconnectMaxDelayMs { get; set; } = 60000;
+
+  /// <summary>Maximum number of reconnection attempts before giving up.</summary>
+  public int MaxReconnectAttempts { get; set; } = 20;
 }
 
 /// <summary>
