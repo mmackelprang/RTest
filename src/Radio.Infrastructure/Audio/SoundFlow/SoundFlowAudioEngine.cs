@@ -311,7 +311,7 @@ public class SoundFlowAudioEngine : IAudioEngine
         var s = stats.Value;
         if (s.LimitedSamples > 0)
         {
-          _logger.LogWarning(
+          _logger.LogInformation(
             "🔊 Limiter engaged: {Percent:F1}% of samples compressed ({Limited}/{Total}), " +
             "max input {MaxInput:F3} ({MaxInputDb:F1} dBFS), max reduction {MaxReduction:F1} dB",
             s.EngagementPercent, s.LimitedSamples, s.TotalSamples,

@@ -120,7 +120,7 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
       return null;
     }
 
-    _logger.LogInformation("Capturing {Duration}s of audio from SoundFlow output", duration.TotalSeconds);
+    _logger.LogDebug("Capturing {Duration}s of audio from SoundFlow output", duration.TotalSeconds);
     var captureStartTime = DateTime.UtcNow;
 
     try
@@ -239,7 +239,7 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
       }
 
       var actualDuration = (double)sampleCount / sampleRate / channels;
-      _logger.LogInformation("Successfully captured {Samples} samples ({Duration:F2}s, {Percentage:F0}% of requested, RMS: {RmsDb:F1}dB) in {Elapsed}ms",
+      _logger.LogDebug("Successfully captured {Samples} samples ({Duration:F2}s, {Percentage:F0}% of requested, RMS: {RmsDb:F1}dB) in {Elapsed}ms",
         sampleCount, actualDuration, (actualDuration / duration.TotalSeconds) * 100, rmsDb, captureElapsed);
 
       return new AudioSampleBuffer

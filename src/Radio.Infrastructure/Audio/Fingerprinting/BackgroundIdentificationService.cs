@@ -311,10 +311,6 @@ public sealed class BackgroundIdentificationService : BackgroundService
 
       if (songRecMetadata != null)
       {
-        _logger.LogInformation(
-          "SongRec identified: '{Title}' by '{Artist}' (album: {Album})",
-          songRecMetadata.Title, songRecMetadata.Artist, songRecMetadata.Album ?? "(none)");
-
         // Cache album art from Shazam CDN to serve locally
         if (!string.IsNullOrEmpty(songRecMetadata.CoverArtUrl))
         {
