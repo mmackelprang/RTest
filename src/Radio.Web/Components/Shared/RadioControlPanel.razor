@@ -184,7 +184,7 @@
         }
         else
         {
-          @foreach (var preset in _presets.OrderBy(p => p.CreatedAt))
+          @foreach (var preset in _presets)
           {
             <div class="rcp-preset-item" @onclick="@(() => LoadPresetAsync(preset.Id))">
               <div class="rcp-preset-name">@preset.Name</div>
@@ -954,7 +954,12 @@
 
   private async Task LoadPresetsAsync()
   {
-    try { _presets = await RadioApi.GetPresetsAsync(); }
+    try
+    {
+      var presets = await RadioApi.GetPresetsAsync();
+      // Sort once on load instead of per render via .OrderBy() in the template
+      _presets = presets?.OrderBy(p => p.CreatedAt).ToList();
+    }
     catch { /* Silently fail */ }
   }
 

@@ -72,10 +72,14 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     private long _generateAudioContentionCount;
     private double _maxGenerateAudioLockWaitMs;
 
-    // GC pause correlation
-    private int _lastGen0Count;
-    private int _lastGen1Count;
-    private int _lastGen2Count;
+    // GC pause correlation — counts are sampled in LogStats (every 10s) and cached
+    // via Volatile so the audio callback avoids GC.CollectionCount() syscalls.
+    private int _cachedGen0Count;
+    private int _cachedGen1Count;
+    private int _cachedGen2Count;
+    private int _prevGen0Count;
+    private int _prevGen1Count;
+    private int _prevGen2Count;
     private long _gcCorrelatedMissedDeadlines;
 
     // Throttle per-miss logging to avoid overwhelming journald
@@ -224,10 +228,12 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             if (intervalMs > expectedMs * 2)
             {
                 _missedDeadlineCount++;
-                var gen0 = GC.CollectionCount(0);
-                var gen1 = GC.CollectionCount(1);
-                var gen2 = GC.CollectionCount(2);
-                if (gen0 != _lastGen0Count || gen1 != _lastGen1Count || gen2 != _lastGen2Count)
+                // Read cached GC counts (sampled every 10s in LogStats) to avoid
+                // GC.CollectionCount() syscalls on the audio callback thread.
+                var gen0 = Volatile.Read(ref _cachedGen0Count);
+                var gen1 = Volatile.Read(ref _cachedGen1Count);
+                var gen2 = Volatile.Read(ref _cachedGen2Count);
+                if (gen0 != _prevGen0Count || gen1 != _prevGen1Count || gen2 != _prevGen2Count)
                 {
                     _gcCorrelatedMissedDeadlines++;
                     // Throttle per-miss logging to once per 5s to avoid overwhelming journald
@@ -240,12 +246,12 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                             "🔬 Missed callback deadline ({Interval:F1}ms) with GC activity: " +
                             "Gen0 +{G0}, Gen1 +{G1}, Gen2 +{G2}",
                             intervalMs,
-                            gen0 - _lastGen0Count, gen1 - _lastGen1Count, gen2 - _lastGen2Count);
+                            gen0 - _prevGen0Count, gen1 - _prevGen1Count, gen2 - _prevGen2Count);
                     }
                 }
-                _lastGen0Count = gen0;
-                _lastGen1Count = gen1;
-                _lastGen2Count = gen2;
+                _prevGen0Count = gen0;
+                _prevGen1Count = gen1;
+                _prevGen2Count = gen2;
             }
         }
         _lastGenerateAudioTimestamp = callbackStartTicks;
@@ -442,6 +448,12 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         var now = DateTime.UtcNow;
         if ((now - _lastLogTime).TotalSeconds >= 10)
         {
+            // Sample GC collection counts here (every 10s) so the audio callback
+            // can read cached values via Volatile.Read instead of making syscalls.
+            Volatile.Write(ref _cachedGen0Count, GC.CollectionCount(0));
+            Volatile.Write(ref _cachedGen1Count, GC.CollectionCount(1));
+            Volatile.Write(ref _cachedGen2Count, GC.CollectionCount(2));
+
             int currentBuffer;
             lock (_bufferLock)
             {

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Radio.Web.Models;
 using Radio.Web.Services.Hub;
 
 namespace Radio.Web.Tests.Services;
@@ -82,21 +83,23 @@ public class AudioStateHubServiceTests
   {
     // Arrange
     Func<Task> handler = () => Task.CompletedTask;
+    Func<NowPlayingDto?, Task> nowPlayingHandler = _ => Task.CompletedTask;
+    Func<VolumeDto?, Task> volumeHandler = _ => Task.CompletedTask;
 
     // Act - Subscribe to all event types (should not throw)
     _service.PlaybackStateChanged += handler;
-    _service.NowPlayingChanged += handler;
+    _service.NowPlayingChanged += nowPlayingHandler;
     _service.QueueChanged += handler;
     _service.RadioStateChanged += handler;
-    _service.VolumeChanged += handler;
+    _service.VolumeChanged += volumeHandler;
     _service.SourceChanged += handler;
 
     // Cleanup - Unsubscribe from all (should not throw)
     _service.PlaybackStateChanged -= handler;
-    _service.NowPlayingChanged -= handler;
+    _service.NowPlayingChanged -= nowPlayingHandler;
     _service.QueueChanged -= handler;
     _service.RadioStateChanged -= handler;
-    _service.VolumeChanged -= handler;
+    _service.VolumeChanged -= volumeHandler;
     _service.SourceChanged -= handler;
 
     // Assert - Verify all subscriptions completed successfully

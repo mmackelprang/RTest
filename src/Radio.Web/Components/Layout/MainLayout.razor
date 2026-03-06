@@ -692,7 +692,7 @@
     await InvokeAsync(StateHasChanged);
   }
 
-  private async Task OnNowPlayingChanged()
+  private async Task OnNowPlayingChanged(NowPlayingDto? _)
   {
     await InvokeAsync(StateHasChanged);
   }
