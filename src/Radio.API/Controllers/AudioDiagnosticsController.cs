@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.Diagnostics;
 using Radio.Infrastructure.Audio.SoundFlow;
 
 namespace Radio.API.Controllers;
@@ -16,14 +17,17 @@ public class AudioDiagnosticsController : ControllerBase
   private readonly ILogger<AudioDiagnosticsController> _logger;
   private readonly IAudioEngine _audioEngine;
   private readonly IAudioManager? _audioManager;
+  private readonly DiagnosticCaptureService _captureService;
 
   public AudioDiagnosticsController(
     ILogger<AudioDiagnosticsController> logger,
     IAudioEngine audioEngine,
+    DiagnosticCaptureService captureService,
     IAudioManager? audioManager = null)
   {
     _logger = logger;
     _audioEngine = audioEngine;
+    _captureService = captureService;
     _audioManager = audioManager;
   }
 
@@ -71,6 +75,68 @@ public class AudioDiagnosticsController : ControllerBase
     _logger.LogDebug("Audio pipeline diagnostics requested");
     return Ok(dto);
   }
+
+  /// <summary>
+  /// Starts a bounded diagnostic capture of audio at multiple pipeline stages.
+  /// Writes WAV files for each stage (generator-input, generator-output, post-modifiers).
+  /// </summary>
+  [HttpPost("capture")]
+  public async Task<ActionResult<CaptureResultDto>> StartCapture(
+    [FromBody] CaptureRequestDto? request, CancellationToken ct)
+  {
+    if (_captureService.IsCapturing)
+      return Conflict(new { error = "A capture is already in progress" });
+
+    var duration = request?.DurationSeconds ?? 10;
+    duration = Math.Clamp(duration, 1, 60);
+
+    _logger.LogInformation("Starting diagnostic capture: {Duration}s", duration);
+
+    var result = await _captureService.CaptureAsync(
+      duration, request?.OutputDirectory, ct);
+
+    return Ok(new CaptureResultDto
+    {
+      StartTime = result.StartTime,
+      DurationSeconds = result.Duration.TotalSeconds,
+      OutputDirectory = result.OutputDirectory,
+      StageFiles = result.StageFiles,
+      StageSampleCounts = result.StageSampleCounts,
+      Success = result.Success,
+      ErrorMessage = result.ErrorMessage
+    });
+  }
+
+  /// <summary>
+  /// Stops an active diagnostic capture early.
+  /// </summary>
+  [HttpPost("capture/stop")]
+  public ActionResult StopCapture()
+  {
+    if (!_captureService.IsCapturing)
+      return NotFound(new { error = "No active capture to stop" });
+
+    _captureService.StopCapture();
+    _logger.LogInformation("Diagnostic capture stop requested");
+    return Ok(new { message = "Capture stop requested" });
+  }
+}
+
+public class CaptureRequestDto
+{
+  public int DurationSeconds { get; set; } = 10;
+  public string? OutputDirectory { get; set; }
+}
+
+public class CaptureResultDto
+{
+  public DateTime StartTime { get; set; }
+  public double DurationSeconds { get; set; }
+  public string OutputDirectory { get; set; } = "";
+  public Dictionary<string, string> StageFiles { get; set; } = new();
+  public Dictionary<string, int> StageSampleCounts { get; set; } = new();
+  public bool Success { get; set; }
+  public string? ErrorMessage { get; set; }
 }
 
 public class AudioPipelineDiagnosticsDto

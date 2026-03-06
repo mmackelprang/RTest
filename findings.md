@@ -1,86 +1,125 @@
-# Findings: Audio Distortion Investigation
+# Findings
 
-## Data Summary
+## .NET 10 Migration Research
 
-- **151 distortion markers** across ~90 minutes (14:05 - 15:42), roughly one every 36 seconds
-- **All markers: isClipping=False** — peaks at -6.5 to -11 dBFS, not a clipping issue
-- **BT gain = 1.9** (96% of events), masterVolume = 0.64 — moderate levels
-- **Source state split**: 79 "Playing" / 76 "Ready" — source reports Ready half the time despite audio flowing
-- **Multiple service restarts** in the window (our deploys): PIDs 339597, 344843, 349341, 351164
-- **No app-level errors correlate** — no exceptions, no buffer drops/underruns/compensations in the dense distortion window
+### Release Status
+- **.NET 10 GA**: November 11, 2025 (LTS through November 14, 2028)
+- **.NET 8 EOL**: November 10, 2026 (~8 months remaining)
+- **Tooling**: Visual Studio 2026 or Rider 2025.3+ required
 
-## Key System-Level Events
+### C# 14 Language Features (applicable to this codebase)
 
-### PipeWire-Pulse Overruns (14:01:32)
+| Feature | Use Case in Project | Impact |
+|---------|-------------------|--------|
+| `field` keyword | Volume, balance, gain properties with validation | Eliminates explicit backing fields |
+| Null-conditional assignment | Event handlers, nullable reference handling | Cleaner null guards |
+| `params ReadOnlySpan<T>` | Audio pipeline hot-path methods | Zero-allocation params |
+| Implicit Span conversions | Buffer method signatures (`float[]` ↔ `Span<float>`) | Simpler signatures |
+| Extension members | Utility/extension classes → extension properties | Cleaner API surface |
+| Partial constructors | Blazor code-behind patterns | Source gen support |
+
+### Breaking Changes (NET 8 → NET 10)
+
+| Change | Impact | Action |
+|--------|--------|--------|
+| Swashbuckle/OpenAPI v2.3 changes | Swagger at `/swagger` | Migrate to built-in OpenAPI |
+| `System.Linq.Async` removed | If used anywhere | Replace with `System.Linq.AsyncEnumerable` |
+| `WebHostBuilder` obsolete | Likely not used (modern hosting) | Verify |
+| `WithOpenApi()` deprecated | If used in minimal APIs | Update |
+| Cookie auth no longer redirects for API | Positive change for REST API | Verify |
+| Container images → Ubuntu base | If Docker used | Update base images |
+
+### Runtime Benefits (automatic, no code change)
+- **GC DATAS**: Auto-tunes heap size based on app behavior (memory reduction)
+- **Stack-allocated small arrays**: Zero GC for arrays that don't escape method
+- **JIT cascading inlining**: Better devirtualization, 15-30% perf on AVX-512 hardware
+- **ARM64 write barrier optimization**: Benefits Pi deployment
+
+### NuGet Packages to Audit
+- SoundFlow (audio engine, MiniAudio native interop)
+- SharpCaster 3.0.0 (Google Cast)
+- MudBlazor (Blazor UI framework)
+- Tmds.DBus (BlueZ D-Bus)
+- Serilog + sinks
+- NAudio (Windows BT sender)
+
+---
+
+## Kiosk UI Blanking — Root Cause Analysis
+
+### The Sleep Chain
 ```
-mod.protocol-pulse: [Radio.API] overrun recover read:180480 avail:26368 max:15360 skip:22528
-mod.protocol-pulse: [Radio.API] overrun recover read:249088 avail:25344 max:15360 skip:21504
+idle-dimmer.js (30 min idle)
+  → enterSleep('idle')
+    → blazorRef.invokeMethodAsync('OnJsSleepRequested', true)
+      → SystemApi.SetSleepAsync(true)
+        → POST /api/system/sleep
+          → SleepService.EnterSleepAsync()
+            → primary.PauseAsync()   ← STOPS MUSIC
+            → _audioManager.IsMuted = true  ← MUTES
 ```
-MiniAudio output client had overrun — ALSA output buffer emptied because MiniAudio callback wasn't served fast enough. Only 2 events logged, but PipeWire-pulse may only log coalesced events, not every occurrence.
 
-### BufferedSoundGenerator Stats (PID 344843, ~48 min session)
-```
-received=72,892,416  output=72,733,440  dropped=0  compensated=0
-Gap: 158,976 samples = 1.66s accumulated in buffer
-```
-BT clock ~0.035s/min faster than ALSA clock (~2.1s/hour drift). Buffer grows monotonically. No drift compensation fires (compensation only triggers when buffer is BELOW 15% — i.e., draining — but ours is growing).
+### Contributing Factors
+1. **Sleep system pauses audio BY DESIGN** — the sleep feature was built to stop everything, not just dim the screen
+2. **Chrome timer throttling** — missing `--disable-background-timer-throttling` flag; CSS overlay may make Chrome think page is "hidden", throttling JS timers to 1/min, breaking SignalR keepalive
+3. **DPMS not disabled** — `setup-kiosk.sh` disables GNOME screensaver but NOT X11 DPMS
+4. **Blazor circuit timeout** — client retries only 30x (60s), but Chrome throttling means retries are slow; server kills connection after 30s without keepalive
+5. **No systemd watchdog** — hung processes not detected
 
-### BT Audio Format
-```
-Node: bluez_input.D4_3A_2C_64_87_9E.2
-Active: S24LE, 48000Hz, 2ch
-Our stream requests: S16LE, 48000Hz, 2ch
-```
-Sample rate matches (48kHz→48kHz). PipeWire converts S24LE→S16LE. This conversion is handled natively by PipeWire and shouldn't cause issues.
+### Key Files
+| File | Role |
+|------|------|
+| `src/Radio.Web/wwwroot/js/idle-dimmer.js` | Idle detection, dim/sleep timers |
+| `src/Radio.Web/Components/Layout/MainLayout.razor` | `OnJsSleepRequested` JSInvokable |
+| `src/Radio.API/Services/SleepService.cs` | `EnterSleepAsync` pauses + mutes |
+| `deploy/debian-x64/kiosk/radio-console.desktop` | Chrome launch flags |
+| `deploy/debian-x64/kiosk/setup-kiosk.sh` | GNOME settings, missing DPMS |
+| `src/Radio.Web/Components/App.razor` | Blazor circuit reconnection config |
+| `src/Radio.API/Program.cs` | SignalR server configuration |
 
-## Buffer Configuration
-- maxBufferSeconds = 4.0 → maxBufferSamples = 384,000
-- PreFill = 1.5s of silence (144,000 samples = 37.5% of buffer)
-- DriftCompensationThreshold = 15% (57,600 samples) — only fires when buffer is LOW
-- DriftCompensationTarget = 25% (96,000 samples)
-- OverflowStrategy = DropOldest
+---
 
-## The received > output Problem
+## Audio Distortion — Previous Research Summary
 
-The buffer grows because BT clock > ALSA clock. Eventually (after ~72 min from pre-fill):
-1. Buffer hits 100% capacity (384,000 samples)
-2. `AddSamples()` triggers `DropOldest` — advances read pointer, drops oldest audio
-3. Consumer suddenly reads audio that's discontinuous — **audible glitch**
-4. Buffer briefly has space, fills again, drops again
+### What We Know
+- **151 distortion markers** across ~90 min BT playback — roughly one every 36s
+- **Not clipping** — peaks at -6.5 to -11 dBFS, all `isClipping=False`
+- **No app-level errors correlate** — no exceptions, no buffer drops/underruns/compensations
+- **BT clock drift**: ~0.035s/min faster than ALSA clock (~2.1s/hour)
+- **PipeWire-pulse overrun events** logged — MiniAudio not serviced fast enough
+- **BT format**: S24LE 48kHz 2ch from PipeWire, converted to S16LE for the app's stream
 
-**But**: In PID 344843 session, the buffer accumulated only 1.66s over 48 min. Starting from 1.5s pre-fill, total = 3.16s. Buffer capacity = 4s. It didn't overflow during the session. **Yet distortion was frequent throughout.**
+### Ranked Root Causes
+1. **MiniAudio/ALSA Output Xruns (HIGH)** — modifier chain must complete within quantum (~10.67ms)
+2. **Lock Contention (HIGH)** — `AddSamples()` (PipeWire thread) and `GenerateAudio()` (MiniAudio thread) contend for `_bufferLock`
+3. **.NET GC Pauses (MEDIUM)** — Gen2 can pause 10-50ms, exceeding quantum
+4. **BT A2DP Transport Jitter (MEDIUM)** — irregular packet arrival
+5. **DropOldest Buffer Overflow (LOWER)** — drift causes overflow after ~72 min
 
-## What We Don't Know (Gaps)
+### Critical Unknown
+**Actual audio waveform during distortion was NEVER captured.** Unknown whether it's:
+- Repeated samples (underrun fill)
+- Dropped samples (overflow/skip)
+- Zero-insertion (silence gaps)
+- Byte-shift corruption
 
-| Unknown | Why It Matters |
-|---------|----------------|
-| MiniAudio output callback timing | Are there scheduling delays causing ALSA xruns? |
-| .NET GC pause frequency/duration | GC could stall the audio callback thread |
-| Lock contention on `_bufferLock` | Both AddSamples (PipeWire thread) and GenerateAudio (MiniAudio thread) compete for this lock |
-| PipeWire graph scheduling | Is the BT node delivering data in steady quanta or bursty? |
-| BT A2DP packet loss | Wi-Fi coexistence? Codec negotiation changes? |
-| Actual audio waveform during distortion | Repeated samples? Dropped samples? Corrupted data? |
-| Whether MiniAudio is hitting ALSA xruns silently | MiniAudio may recover internally without logging |
+### Existing Infrastructure
+- `BufferedSoundGenerator` has extensive instrumentation (callback timing, lock contention, GC correlation)
+- `FmAudioDropoutDiagnosticTests` simulate producer/consumer on independent clocks
+- `AudioTestHelpers` generates diagnostic tones and has WAV writer
+- `BtSender` sends known 200Hz/300Hz tone over BT
+- **MISSING**: Capture points for actual waveform data, input/output comparison, automated distortion detection
 
-## Possible Root Causes (Ranked by Likelihood)
+---
 
-### 1. MiniAudio/ALSA Output Xruns (HIGH)
-The PipeWire-pulse overrun logs confirm the MiniAudio output stream isn't being served fast enough at least sometimes. MiniAudio's callback requests audio → SoundFlow calls `GenerateAudio()` on all components (modifiers, sources) → if ANY step is slow, the ALSA buffer underruns.
+## Comprehensive Review Items
 
-The audio pipeline runs: Sources → MasterMixer → Balance → Limiter → FingerprintTap → VisualizationTap → PlaybackDevice. Each modifier's `Process()` is called synchronously in the callback. If the chain takes longer than one quantum (~10.67ms at 512 samples), it's a missed deadline.
-
-### 2. Lock Contention Between Producer and Consumer (HIGH)
-`AddSamples()` and `GenerateAudio()` both take `_bufferLock`. If PipeWire delivers a burst of data while `GenerateAudio` is mid-read (or vice versa), one blocks the other. The PipeWire OnProcess callback runs on the PipeWire thread loop — blocking it stalls the entire PipeWire graph.
-
-### 3. .NET GC Pauses (MEDIUM)
-Gen2 garbage collection can pause all threads for 10-50ms. At 48kHz with 512-sample quantum (10.67ms period), even a 10ms pause causes a missed callback. The buffer should absorb this, but if GC coincides with the callback, the consumer misses a period.
-
-### 4. BT A2DP Transport Jitter (MEDIUM)
-BT A2DP delivers audio in packets (~128-512 samples). If packets arrive late (interference, scheduling), the BufferedSoundGenerator temporarily starves. The 1.5s pre-fill should absorb this, but sustained jitter could eat into the cushion.
-
-### 5. DropOldest Buffer Overflow (LOWER — not yet overflowing)
-With 2.1s/hour drift, overflow takes ~72 min from startup. Most sessions were shorter. But in longer sessions, this WILL become an issue — the buffer silently drops samples at the read position, causing a discontinuity.
-
-## Source State "Ready" Anomaly
-
-76 of 155 markers show source state = "Ready" (not "Playing"). This is suspicious — audio is clearly flowing (levels show -20dB signal), yet the source reports Ready. This could indicate a state machine bug where the source doesn't transition to Playing, or the state reporting is async and stale.
+| # | Category | Priority | Difficulty | Summary |
+|---|----------|----------|------------|---------|
+| 12 | Testing | High | Medium | `AudioManager` has zero unit tests |
+| 13 | Testing | High | Medium | 5 API controllers have no tests |
+| 14 | Architecture | High | Hard | 3 Blazor components >750 lines each |
+| 26 | Architecture | Medium | Medium | `IAudioManager` is 40+ member god interface |
+| 30 | Error Handling | Medium | Medium | All 14 Web API clients silently return null on errors |
+| 34 | Architecture | Medium | Medium | `AudioSourceState`/`AudioOutputState` duplicate 7 values |
+| 36 | State Mgmt | Medium | Hard | Audio state scattered across components, no centralized store |

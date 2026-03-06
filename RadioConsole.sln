@@ -39,6 +39,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Radio.IntegrationTests", "t
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Radio.Tools.BtSender", "tools\Radio.Tools.BtSender\Radio.Tools.BtSender.csproj", "{AF8E1384-536B-468D-B3EF-A3C126E9F6D1}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Radio.AudioAnalysis", "tests\Radio.AudioAnalysis\Radio.AudioAnalysis.csproj", "{E212F4EB-F0DA-420F-B676-D76A264BE17A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -229,6 +231,18 @@ Global
 		{AF8E1384-536B-468D-B3EF-A3C126E9F6D1}.Release|x64.Build.0 = Release|Any CPU
 		{AF8E1384-536B-468D-B3EF-A3C126E9F6D1}.Release|x86.ActiveCfg = Release|Any CPU
 		{AF8E1384-536B-468D-B3EF-A3C126E9F6D1}.Release|x86.Build.0 = Release|Any CPU
+		{E212F4EB-F0DA-420F-B676-D76A264BE17A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E212F4EB-F0DA-420F-B676-D76A264BE17A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E212F4EB-F0DA-420F-B676-D76A264BE17A}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{E212F4EB-F0DA-420F-B676-D76A264BE17A}.Debug|x64.Build.0 = Debug|Any CPU
+		{E212F4EB-F0DA-420F-B676-D76A264BE17A}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{E212F4EB-F0DA-420F-B676-D76A264BE17A}.Debug|x86.Build.0 = Debug|Any CPU
+		{E212F4EB-F0DA-420F-B676-D76A264BE17A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E212F4EB-F0DA-420F-B676-D76A264BE17A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E212F4EB-F0DA-420F-B676-D76A264BE17A}.Release|x64.ActiveCfg = Release|Any CPU
+		{E212F4EB-F0DA-420F-B676-D76A264BE17A}.Release|x64.Build.0 = Release|Any CPU
+		{E212F4EB-F0DA-420F-B676-D76A264BE17A}.Release|x86.ActiveCfg = Release|Any CPU
+		{E212F4EB-F0DA-420F-B676-D76A264BE17A}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -249,5 +263,6 @@ Global
 		{6EDFFACF-2155-47E4-A72A-AECC1FC06424} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{F9CEF1DE-EDD3-4EC7-AEF7-3D971E269603} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{AF8E1384-536B-468D-B3EF-A3C126E9F6D1} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
+		{E212F4EB-F0DA-420F-B676-D76A264BE17A} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

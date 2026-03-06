@@ -26,6 +26,7 @@
     <ProjectReference Include="..\..\src\Radio.Infrastructure\Radio.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Radio.Core\Radio.Core.csproj" />
     <ProjectReference Include="..\..\src\RTLSDRCore\RTLSDRCore.csproj" />
+    <ProjectReference Include="..\Radio.AudioAnalysis\Radio.AudioAnalysis.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />

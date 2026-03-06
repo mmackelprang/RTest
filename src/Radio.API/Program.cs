@@ -112,6 +112,9 @@ builder.Services.AddFingerprinting(builder.Configuration);
 builder.Services.AddSoundFlowAudio(builder.Configuration);
 builder.Services.AddRadioServices();
 
+// Add diagnostic capture service
+builder.Services.AddSingleton<Radio.Infrastructure.Audio.Diagnostics.DiagnosticCaptureService>();
+
 // Add sleep/standby mode service
 builder.Services.AddSingleton<SleepService>();
 builder.Services.AddSingleton<ISleepService>(sp => sp.GetRequiredService<SleepService>());

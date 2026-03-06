@@ -651,6 +651,45 @@ public class SoundFlowAudioEngine : IAudioEngine
   }
 
   /// <summary>
+  /// Adds a diagnostic modifier to the playback device's mixer.
+  /// Used by <see cref="Radio.Infrastructure.Audio.Diagnostics.DiagnosticCaptureService"/>
+  /// to attach capture taps during diagnostic sessions.
+  /// </summary>
+  internal void AddDiagnosticModifier(SoundModifier modifier)
+  {
+    if (_playbackDevice == null) return;
+    _playbackDevice.MasterMixer.AddModifier(modifier);
+    _logger.LogDebug("Diagnostic modifier {Name} attached to mixer", modifier.Name);
+  }
+
+  /// <summary>
+  /// Removes a diagnostic modifier from the playback device's mixer.
+  /// </summary>
+  internal void RemoveDiagnosticModifier(SoundModifier modifier)
+  {
+    if (_playbackDevice == null) return;
+    _playbackDevice.MasterMixer.RemoveModifier(modifier);
+    _logger.LogDebug("Diagnostic modifier {Name} removed from mixer", modifier.Name);
+  }
+
+  /// <summary>
+  /// Gets the active BufferedSoundGenerator from the given audio source, if it uses one.
+  /// Returns null if the source doesn't use a BufferedSoundGenerator.
+  /// </summary>
+  internal static BufferedSoundGenerator<float>? GetGeneratorFromSource(IAudioSource? source)
+  {
+    if (source == null) return null;
+    try
+    {
+      return source.GetSoundComponent() as BufferedSoundGenerator<float>;
+    }
+    catch
+    {
+      return null;
+    }
+  }
+
+  /// <summary>
   /// Gets the index of a playback device by its ID.
   /// </summary>
   /// <param name="deviceId">The device ID (e.g., "playback-0").</param>
