@@ -610,9 +610,20 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
                 var device = _connection.CreateProxy<Linux.IDevice1>(
                     Linux.BluezConstants.ServiceName, devicePath.Value);
-                await device.ConnectAsync();
+
+                // BlueZ Connect() blocks for 30-60s when device is unreachable.
+                // Use a 15s timeout so the reconnection backoff loop can progress.
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(15));
+
+                await device.ConnectAsync().WaitAsync(timeoutCts.Token);
                 _logger.LogInformation("Initiated connection to device {Address}", deviceAddress);
                 return true;
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogDebug("Connect to {Address} timed out after 15s", deviceAddress);
+                return false;
             }
             catch (Exception ex)
             {
