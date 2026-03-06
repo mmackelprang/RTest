@@ -31,10 +31,13 @@ public class BackgroundIdentificationServiceStatusTests
     var serviceProvider = new ServiceCollection().BuildServiceProvider();
     var logger = new Mock<ILogger<BackgroundIdentificationService>>();
 
+    var optionsMonitor = new Mock<IOptionsMonitor<FingerprintingOptions>>();
+    optionsMonitor.Setup(o => o.CurrentValue).Returns(options);
+
     _service = new BackgroundIdentificationService(
       logger.Object,
       serviceProvider,
-      Options.Create(options));
+      optionsMonitor.Object);
   }
 
   [Fact]

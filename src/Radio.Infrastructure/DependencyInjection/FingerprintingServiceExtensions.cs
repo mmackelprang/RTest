@@ -86,7 +86,7 @@ public static class FingerprintingServiceExtensions
       new BackgroundIdentificationService(
         sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<BackgroundIdentificationService>>(),
         sp,
-        sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<FingerprintingOptions>>(),
+        sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<FingerprintingOptions>>(),
         sp.GetService<IMetricsCollector>()));
     services.AddHostedService(sp => sp.GetRequiredService<BackgroundIdentificationService>());
 

@@ -1380,7 +1380,8 @@ public class FilePlayerAudioSourceTests : IDisposable
   public void Constructor_WithShazamToggleOn_DefaultDoesNotThrow()
   {
     // Arrange — create with UseShazamForAllSources enabled
-    var fingerprintingOptions = Options.Create(new FingerprintingOptions
+    var fpMonitor = new Mock<IOptionsMonitor<FingerprintingOptions>>();
+    fpMonitor.Setup(o => o.CurrentValue).Returns(new FingerprintingOptions
     {
       UseShazamForAllSources = true
     });
@@ -1391,7 +1392,7 @@ public class FilePlayerAudioSourceTests : IDisposable
       _optionsMock.Object,
       _preferencesMock.Object,
       _testDir,
-      fingerprintingOptions: fingerprintingOptions);
+      fingerprintingOptions: fpMonitor.Object);
 
     // Assert
     Assert.Equal("File Player", source.Name);

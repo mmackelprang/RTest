@@ -30,10 +30,13 @@ public class BackgroundIdentificationServiceSongChangeTests
     var serviceProvider = new ServiceCollection().BuildServiceProvider();
     var logger = new Mock<ILogger<BackgroundIdentificationService>>();
 
+    var optionsMonitor = new Mock<IOptionsMonitor<FingerprintingOptions>>();
+    optionsMonitor.Setup(o => o.CurrentValue).Returns(_options);
+
     _service = new BackgroundIdentificationService(
       logger.Object,
       serviceProvider,
-      Options.Create(_options));
+      optionsMonitor.Object);
 
     _service.SongChanged += (_, e) => _songChangedEvents.Add(e);
     _service.TrackIdentified += (_, e) => _trackIdentifiedEvents.Add(e);
