@@ -16,7 +16,6 @@ public class DiagnosticCaptureService
   private readonly IAudioManager? _audioManager;
 
   private CancellationTokenSource? _activeCts;
-  private Task? _activeCapture;
   private readonly object _captureLock = new();
 
   // Max capture duration to prevent runaway memory usage
@@ -35,7 +34,7 @@ public class DiagnosticCaptureService
   }
 
   /// <summary>Whether a capture is currently in progress.</summary>
-  public bool IsCapturing => _activeCapture != null && !_activeCapture.IsCompleted;
+  public bool IsCapturing { get { lock (_captureLock) { return _activeCts != null; } } }
 
   /// <summary>
   /// Starts a bounded diagnostic capture across multiple pipeline stages.
@@ -194,7 +193,6 @@ public class DiagnosticCaptureService
       lock (_captureLock)
       {
         _activeCts = null;
-        _activeCapture = null;
       }
     }
   }
