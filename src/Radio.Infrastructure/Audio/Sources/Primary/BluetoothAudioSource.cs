@@ -27,7 +27,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private readonly IServiceScopeFactory? _serviceScopeFactory;
   private readonly AlbumArtCacheService? _albumArtCache;
   private readonly IOptionsMonitor<BluetoothOptions> _options;
-  private readonly FingerprintingOptions _fingerprintingOptions;
+  private readonly IOptionsMonitor<FingerprintingOptions>? _fingerprintingOptionsMonitor;
   private readonly SoundFlowPlaybackService? _playbackService;
   private readonly SemaphoreSlim _routeLock = new(1, 1);
   private readonly HashSet<string> _failedArtLookups = new();
@@ -39,6 +39,10 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private TimeSpan? _btDuration;
   private bool _hasMediaPlayer;
   private CancellationTokenSource? _captureRetryCts;
+
+  /// <summary>Current fingerprinting options (live from IOptionsMonitor).</summary>
+  private FingerprintingOptions FpOptions =>
+    _fingerprintingOptionsMonitor?.CurrentValue ?? new FingerprintingOptions();
 
   /// <summary>
   /// When true, the fingerprinting pipeline will attempt to identify the current track.
@@ -56,7 +60,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     SoundFlowPlaybackService? playbackService = null,
     IServiceScopeFactory? serviceScopeFactory = null,
     AlbumArtCacheService? albumArtCache = null,
-    IOptions<FingerprintingOptions>? fingerprintingOptions = null)
+    IOptionsMonitor<FingerprintingOptions>? fingerprintingOptions = null)
     : base(logger, deviceManager, identificationService, metricsCollector)
   {
     _bluetoothService = bluetoothService;
@@ -64,7 +68,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     _serviceScopeFactory = serviceScopeFactory;
     _albumArtCache = albumArtCache;
     _options = options;
-    _fingerprintingOptions = fingerprintingOptions?.Value ?? new FingerprintingOptions();
+    _fingerprintingOptionsMonitor = fingerprintingOptions;
     _playbackService = playbackService;
     SetDefaultMetadata("Bluetooth", "Bluetooth", "Bluetooth Device");
 
@@ -647,7 +651,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     // When UseShazamForAllSources is enabled, always fingerprint — SongRec provides
     // higher-quality cover art (Apple Music CDN) and more accurate metadata.
     var hasIncompleteMetadata = string.IsNullOrEmpty(e.Title) || string.IsNullOrEmpty(e.Artist);
-    NeedsFingerprintingLookup = hasIncompleteMetadata || _fingerprintingOptions.UseShazamForAllSources;
+    NeedsFingerprintingLookup = hasIncompleteMetadata || FpOptions.UseShazamForAllSources;
 
     if (NeedsFingerprintingLookup)
     {
@@ -679,7 +683,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
     // When UseShazamForAllSources is enabled, SongRec metadata replaces AVRCP metadata
     // (SongRec is more authoritative and has better cover art from Apple Music CDN)
-    if (_fingerprintingOptions.UseShazamForAllSources)
+    if (FpOptions.UseShazamForAllSources)
     {
       if (!string.IsNullOrEmpty(e.Track.Title))
         MetadataInternal[StandardMetadataKeys.Title] = e.Track.Title;

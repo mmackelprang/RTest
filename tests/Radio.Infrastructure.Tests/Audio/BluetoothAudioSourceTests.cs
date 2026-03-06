@@ -228,7 +228,8 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   public async Task MetadataChanged_WithShazamToggleOn_SetsNeedsFingerprintingEvenWithCompleteMetadata()
   {
     // Arrange — create source with UseShazamForAllSources enabled
-    var fingerprintingOptions = Options.Create(new FingerprintingOptions
+    var fpMonitor = new Mock<IOptionsMonitor<FingerprintingOptions>>();
+    fpMonitor.Setup(o => o.CurrentValue).Returns(new FingerprintingOptions
     {
       UseShazamForAllSources = true
     });
@@ -241,7 +242,7 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
       _options,
       identificationService: null,
       metricsCollector: _metricsMock.Object,
-      fingerprintingOptions: fingerprintingOptions);
+      fingerprintingOptions: fpMonitor.Object);
 
     // Act — send complete AVRCP metadata (title + artist present)
     _mockBluetooth.SimulateMetadataChange("Known Song", "Known Artist");
@@ -254,7 +255,8 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   public async Task MetadataChanged_WithShazamToggleOff_DoesNotFingerprintCompleteMetadata()
   {
     // Arrange — create source with UseShazamForAllSources disabled (default)
-    var fingerprintingOptions = Options.Create(new FingerprintingOptions
+    var fpMonitor = new Mock<IOptionsMonitor<FingerprintingOptions>>();
+    fpMonitor.Setup(o => o.CurrentValue).Returns(new FingerprintingOptions
     {
       UseShazamForAllSources = false
     });
@@ -267,7 +269,7 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
       _options,
       identificationService: null,
       metricsCollector: _metricsMock.Object,
-      fingerprintingOptions: fingerprintingOptions);
+      fingerprintingOptions: fpMonitor.Object);
 
     // Act — send complete AVRCP metadata
     _mockBluetooth.SimulateMetadataChange("Known Song", "Known Artist");

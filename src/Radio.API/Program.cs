@@ -7,6 +7,7 @@ using Radio.API.Streaming;
 using Radio.Core.Constants;
 using Radio.Core.Interfaces;
 using Radio.API.Logging;
+using Radio.Infrastructure.Configuration.Bridge;
 using Radio.Infrastructure.DependencyInjection;
 using Serilog;
 
@@ -16,6 +17,19 @@ var builder = WebApplication.CreateBuilder(args);
 // Add custom configuration source (config.json) which is managed by ConfigurationManager
 // This ensures that persistent settings saved by the app are loaded and reloaded on change
 builder.Configuration.AddJsonFile("config.json", optional: true, reloadOnChange: true);
+
+// Bridge the SQLite config store into .NET's IConfiguration pipeline.
+// Values written by the UI (via ConfigurationManager → SQLite) now override appsettings.json
+// defaults, and ConfigStoreChangeNotifier triggers IOptionsMonitor re-evaluation on writes.
+var dbSection = builder.Configuration.GetSection("Database");
+var rootPath = dbSection["RootPath"] ?? "./data";
+var configSubdir = dbSection["ConfigurationSubdirectory"] ?? "config";
+var configFile = dbSection["ConfigurationFileName"] ?? "configuration.db";
+var configDbPath = Path.GetFullPath(Path.Combine(rootPath, configSubdir, configFile));
+
+var configStoreNotifier = new ConfigStoreChangeNotifier();
+builder.Configuration.AddSqliteConfigStore(configDbPath, "sqlite", configStoreNotifier);
+builder.Services.AddSingleton(configStoreNotifier);
 
 // Configure Serilog with systemd-compatible console formatter.
 // The SystemdConsoleFormatter prefixes each log line with <N> syslog priority

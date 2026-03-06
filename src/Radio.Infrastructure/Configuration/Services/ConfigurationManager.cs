@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Infrastructure.Configuration.Abstractions;
+using Radio.Infrastructure.Configuration.Bridge;
 using Radio.Infrastructure.Configuration.Exceptions;
 using Radio.Infrastructure.Configuration.Models;
 
@@ -17,6 +18,7 @@ public sealed class ConfigurationManager : IConfigurationManager
   private readonly ISecretsProvider _secretsProvider;
   private readonly IConfigurationBackupService _backupService;
   private readonly ILogger<ConfigurationManager> _logger;
+  private readonly ConfigStoreChangeNotifier? _changeNotifier;
   private readonly JsonSerializerOptions _jsonOptions;
 
   /// <inheritdoc/>
@@ -33,7 +35,8 @@ public sealed class ConfigurationManager : IConfigurationManager
     IConfigurationStoreFactory storeFactory,
     ISecretsProvider secretsProvider,
     IConfigurationBackupService backupService,
-    ILogger<ConfigurationManager> logger)
+    ILogger<ConfigurationManager> logger,
+    ConfigStoreChangeNotifier? changeNotifier = null)
   {
     ArgumentNullException.ThrowIfNull(options);
     ArgumentNullException.ThrowIfNull(storeFactory);
@@ -46,6 +49,7 @@ public sealed class ConfigurationManager : IConfigurationManager
     _secretsProvider = secretsProvider;
     _backupService = backupService;
     _logger = logger;
+    _changeNotifier = changeNotifier;
     _jsonOptions = new JsonSerializerOptions
     {
       PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -199,6 +203,9 @@ public sealed class ConfigurationManager : IConfigurationManager
 
     await store.SetEntryAsync(key, stringValue, ct);
     _logger.LogDebug("Set value for key {Key} in store {StoreId}", key, storeId);
+
+    // Trigger IOptionsMonitor re-evaluation so consumers see the new value
+    _changeNotifier?.NotifyReload();
   }
 
   /// <inheritdoc/>

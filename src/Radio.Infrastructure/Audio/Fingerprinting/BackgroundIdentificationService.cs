@@ -20,8 +20,11 @@ public sealed class BackgroundIdentificationService : BackgroundService
 {
   private readonly ILogger<BackgroundIdentificationService> _logger;
   private readonly IServiceProvider _serviceProvider;
-  private readonly FingerprintingOptions _options;
+  private readonly IOptionsMonitor<FingerprintingOptions> _optionsMonitor;
   private readonly IMetricsCollector? _metricsCollector;
+
+  /// <summary>Current fingerprinting options (live from IOptionsMonitor).</summary>
+  private FingerprintingOptions _options => _optionsMonitor.CurrentValue;
 
   // Track recent identifications for duplicate suppression (key → (timestamp, confidence))
   private readonly ConcurrentDictionary<string, (DateTime Timestamp, double Confidence)> _recentIdentifications = new();
@@ -85,12 +88,12 @@ public sealed class BackgroundIdentificationService : BackgroundService
   public BackgroundIdentificationService(
     ILogger<BackgroundIdentificationService> logger,
     IServiceProvider serviceProvider,
-    IOptions<FingerprintingOptions> options,
+    IOptionsMonitor<FingerprintingOptions> options,
     IMetricsCollector? metricsCollector = null)
   {
     _logger = logger;
     _serviceProvider = serviceProvider;
-    _options = options.Value;
+    _optionsMonitor = options;
     _metricsCollector = metricsCollector;
   }
 

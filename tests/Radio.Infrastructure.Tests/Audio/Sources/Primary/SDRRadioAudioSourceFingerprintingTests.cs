@@ -455,12 +455,13 @@ public class SDRRadioAudioSourceFingerprintingTests
   {
     var mockLogger = new Mock<ILogger<BackgroundIdentificationService>>();
     var mockServiceProvider = new Mock<IServiceProvider>();
-    var options = Options.Create(new FingerprintingOptions { Enabled = false });
-    
+    var optionsMonitor = new Mock<IOptionsMonitor<FingerprintingOptions>>();
+    optionsMonitor.Setup(o => o.CurrentValue).Returns(new FingerprintingOptions { Enabled = false });
+
     return new BackgroundIdentificationService(
       mockLogger.Object,
       mockServiceProvider.Object,
-      options);
+      optionsMonitor.Object);
   }
 
   private TrackMetadata CreateTrackMetadata(
