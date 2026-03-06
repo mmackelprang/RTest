@@ -622,6 +622,259 @@ public class FmAudioDropoutDiagnosticTests
     }
   }
 
+  [Fact]
+  public void ClockDrift_BtFasterThanPlayback_ShowsDrift()
+  {
+    // Simulate BT clock running 0.035s/min faster than playback clock.
+    // Over 10s, producer delivers ~0.058s extra audio, causing buffer to grow.
+    // With DropOldest, excess samples are dropped to prevent overflow.
+    var format = new AudioFormat
+    {
+      SampleRate = AudioSampleRate, Channels = Channels, Format = SampleFormat.F32
+    };
+    var logger = new Mock<ILogger>();
+    var generator = new TestableGenerator(_engineMock.Object, format, logger.Object,
+      maxBufferSeconds: 1.0f);
+
+    // Producer rate: slightly faster than consumer
+    var driftFactor = 1.00058; // 0.058% faster (0.035s/min)
+    var producerSamplesPerCallback = (int)(MonoSamplesPerCallback * driftFactor);
+
+    var (output, metrics) = RunPipelineSimulation(
+      generator,
+      durationSeconds: 10,
+      callbackProvider: cb =>
+        GenerateToneCallback(producerSamplesPerCallback, cb));
+
+    var zeroRuns = FindZeroRuns(output, minRunLength: 8);
+    LogMetrics("BT clock drift (producer faster)", metrics, zeroRuns, output);
+
+    // Verify DropOldest behavior: some samples should be dropped
+    _output.WriteLine($"Dropped samples: {metrics.Diagnostics.TotalDropped}");
+    _output.WriteLine($"Buffer final fill: {metrics.Diagnostics.BufferCount}/{metrics.Diagnostics.BufferCapacity}");
+
+    // With DropOldest, audio should still play without large gaps
+    var significantGaps = zeroRuns.Where(r => r.Length > StereoSamplesPerCallback).ToList();
+    Assert.Empty(significantGaps);
+  }
+
+  [Fact]
+  public void ClockDrift_BtSlowerThanPlayback_ShowsUnderruns()
+  {
+    // Producer clock slower than consumer → buffer drains → underruns.
+    // Clock drift compensation should mitigate some of this.
+    var format = new AudioFormat
+    {
+      SampleRate = AudioSampleRate, Channels = Channels, Format = SampleFormat.F32
+    };
+    var logger = new Mock<ILogger>();
+    var generator = new TestableGenerator(_engineMock.Object, format, logger.Object,
+      maxBufferSeconds: 2.0f);
+
+    // Deliver fewer samples per callback (simulating slower BT clock)
+    var driftFactor = 0.9994; // 0.06% slower
+    var producerSamplesPerCallback = (int)(MonoSamplesPerCallback * driftFactor);
+
+    var (output, metrics) = RunPipelineSimulation(
+      generator,
+      durationSeconds: 10,
+      callbackProvider: cb =>
+        GenerateToneCallback(producerSamplesPerCallback, cb));
+
+    var zeroRuns = FindZeroRuns(output, minRunLength: 8);
+    LogMetrics("BT clock drift (producer slower)", metrics, zeroRuns, output);
+
+    _output.WriteLine($"Buffer draining — compensated samples: {metrics.Diagnostics.TotalCompensated}");
+
+    // Report drift impact — this is diagnostic, not strictly pass/fail
+    var nonZero = output.Count(s => s != 0f);
+    var fillPct = (double)nonZero / output.Length * 100;
+    _output.WriteLine($"Audio fill: {fillPct:F1}%");
+  }
+
+  [Fact]
+  public void HighFrequencyAddSamples_LockContention_MeasuresImpact()
+  {
+    // Compare small-frequent vs large-infrequent AddSamples calls.
+    // Small-frequent calls increase lock contention on _bufferLock.
+    var format = new AudioFormat
+    {
+      SampleRate = AudioSampleRate, Channels = Channels, Format = SampleFormat.F32
+    };
+    var logger = new Mock<ILogger>();
+
+    // Test 1: Many small writes (simulating PipeWire native 5ms callbacks)
+    var gen1 = new TestableGenerator(_engineMock.Object, format, logger.Object);
+    var smallChunkSize = 480; // 5ms stereo
+    var totalSamples = SamplesPerSecondStereo * 2; // 2 seconds
+    var inputData = new float[totalSamples];
+    for (int i = 0; i < totalSamples; i++)
+      inputData[i] = MathF.Sin(2 * MathF.PI * 440f * (i / 2) / AudioSampleRate) * 0.5f;
+
+    for (int offset = 0; offset < totalSamples; offset += smallChunkSize)
+    {
+      var len = Math.Min(smallChunkSize, totalSamples - offset);
+      gen1.AddSamples(inputData.AsSpan(offset, len));
+    }
+    var output1 = gen1.PullAudio(totalSamples);
+    var diag1 = gen1.GetDiagnostics();
+
+    // Test 2: Fewer large writes (simulating SDR ~68ms callbacks)
+    var gen2 = new TestableGenerator(_engineMock.Object, format, logger.Object);
+    var largeChunkSize = 6554; // ~68ms stereo
+
+    for (int offset = 0; offset < totalSamples; offset += largeChunkSize)
+    {
+      var len = Math.Min(largeChunkSize, totalSamples - offset);
+      gen2.AddSamples(inputData.AsSpan(offset, len));
+    }
+    var output2 = gen2.PullAudio(totalSamples);
+    var diag2 = gen2.GetDiagnostics();
+
+    _output.WriteLine($"Small chunks ({smallChunkSize}): received={diag1.TotalReceived}, output={diag1.TotalOutput}");
+    _output.WriteLine($"Large chunks ({largeChunkSize}): received={diag2.TotalReceived}, output={diag2.TotalOutput}");
+
+    // Both should produce equivalent output
+    Assert.Equal(totalSamples, (int)diag1.TotalReceived);
+    Assert.Equal(totalSamples, (int)diag2.TotalReceived);
+  }
+
+  [Fact]
+  public void GcPauseInjection_DuringCallback_MeasuresDropouts()
+  {
+    // Simulate GC pauses (5-50ms) during producer delivery.
+    // Pauses cause delayed AddSamples, which may cause the consumer
+    // to run ahead and hit underruns.
+    var format = new AudioFormat
+    {
+      SampleRate = AudioSampleRate, Channels = Channels, Format = SampleFormat.F32
+    };
+    var logger = new Mock<ILogger>();
+    var generator = new TestableGenerator(_engineMock.Object, format, logger.Object,
+      maxBufferSeconds: 2.0f);
+    generator.PreFillSilence(0.5f); // Prefill helps absorb GC pauses
+
+    var totalCallbacks = (int)(5 * AudioSampleRate / (double)MonoSamplesPerCallback);
+    var totalOutput = new List<float>();
+    var random = new Random(42);
+
+    for (int cb = 0; cb < totalCallbacks; cb++)
+    {
+      // Inject a GC-like pause every ~20 callbacks
+      if (cb > 0 && cb % 20 == 0)
+      {
+        // Simulate consumer running during the GC pause by pulling audio
+        var gcPauseMs = random.Next(5, 50);
+        var gcPausePulls = (int)(gcPauseMs / ((double)MixerChunkStereo / SamplesPerSecondStereo * 1000));
+        for (int p = 0; p < gcPausePulls; p++)
+        {
+          var chunk = generator.PullAudio(MixerChunkStereo);
+          totalOutput.AddRange(chunk);
+        }
+      }
+
+      // Producer delivers audio
+      var mono = GenerateToneCallback(MonoSamplesPerCallback, cb);
+      var stereo = MonoToStereo(mono);
+      generator.AddSamples(stereo);
+
+      // Consumer pulls
+      var mixerPulls = (int)Math.Ceiling((double)StereoSamplesPerCallback / MixerChunkStereo);
+      for (int p = 0; p < mixerPulls; p++)
+      {
+        var chunk = generator.PullAudio(MixerChunkStereo);
+        totalOutput.AddRange(chunk);
+      }
+    }
+
+    var outputArray = totalOutput.ToArray();
+    var zeroRuns = FindZeroRuns(outputArray, minRunLength: 8);
+
+    _output.WriteLine($"GC pause injection test:");
+    _output.WriteLine($"  Total output: {outputArray.Length} samples");
+    _output.WriteLine($"  Zero runs: {zeroRuns.Count}");
+    if (zeroRuns.Count > 0)
+    {
+      var maxGap = zeroRuns.Max(r => r.Length);
+      var totalGapMs = zeroRuns.Sum(r => (double)r.Length) / SamplesPerSecondStereo * 1000;
+      _output.WriteLine($"  Largest gap: {maxGap} samples ({(double)maxGap / SamplesPerSecondStereo * 1000:F1}ms)");
+      _output.WriteLine($"  Total gap time: {totalGapMs:F1}ms");
+    }
+
+    // Pre-fill should absorb most GC pauses — no catastrophic gaps
+    var diag = generator.GetDiagnostics();
+    _output.WriteLine($"  Buffer final: {diag.BufferCount}/{diag.BufferCapacity}");
+    _output.WriteLine($"  Compensated: {diag.TotalCompensated}");
+  }
+
+  [Fact]
+  public async Task ConcurrentProducerConsumer_StressTest_NoCorruption()
+  {
+    // Real concurrent threading: producer and consumer run on separate threads.
+    // Verifies no data corruption, deadlocks, or crashes under contention.
+    var format = new AudioFormat
+    {
+      SampleRate = AudioSampleRate, Channels = Channels, Format = SampleFormat.F32
+    };
+    var logger = new Mock<ILogger>();
+    var generator = new TestableGenerator(_engineMock.Object, format, logger.Object,
+      maxBufferSeconds: 2.0f);
+    generator.PreFillSilence(0.5f);
+
+    var durationSeconds = 5;
+    var producerDone = false;
+
+    // Producer thread: delivers audio at roughly real-time rate
+    var producerTask = Task.Run(() =>
+    {
+      var totalCallbacks = (int)(durationSeconds * AudioSampleRate / (double)MonoSamplesPerCallback);
+      for (int cb = 0; cb < totalCallbacks; cb++)
+      {
+        var mono = GenerateToneCallback(MonoSamplesPerCallback, cb);
+        var stereo = MonoToStereo(mono);
+        generator.AddSamples(stereo);
+        // Brief yield to simulate real timing (not a sleep)
+        if (cb % 10 == 0) Thread.Yield();
+      }
+      producerDone = true;
+    });
+
+    // Consumer thread: pulls audio at roughly real-time rate
+    var totalOutput = new List<float>();
+    var consumerTask = Task.Run(() =>
+    {
+      while (!producerDone || generator.GetDiagnostics().BufferCount > 0)
+      {
+        var chunk = generator.PullAudio(MixerChunkStereo);
+        lock (totalOutput) { totalOutput.AddRange(chunk); }
+        if (totalOutput.Count > SamplesPerSecondStereo * durationSeconds * 2)
+          break; // Safety: don't accumulate forever
+      }
+    });
+
+    await Task.WhenAll(producerTask, consumerTask);
+
+    var outputArray = totalOutput.ToArray();
+    var diag = generator.GetDiagnostics();
+
+    _output.WriteLine($"Concurrent stress test:");
+    _output.WriteLine($"  Producer: {diag.TotalReceived} samples");
+    _output.WriteLine($"  Consumer: {outputArray.Length} samples");
+    _output.WriteLine($"  Dropped: {diag.TotalDropped}");
+    _output.WriteLine($"  Final buffer: {diag.BufferCount}/{diag.BufferCapacity}");
+
+    // Verify no NaN/Infinity (data corruption indicator)
+    foreach (var sample in outputArray)
+    {
+      Assert.False(float.IsNaN(sample), "NaN detected — concurrent corruption");
+      Assert.False(float.IsInfinity(sample), "Infinity detected — concurrent corruption");
+    }
+
+    // Should have received all samples
+    Assert.True(diag.TotalReceived > 0);
+    Assert.True(diag.TotalOutput > 0);
+  }
+
   private class PipelineMetrics
   {
     public int CallbacksDelivered;

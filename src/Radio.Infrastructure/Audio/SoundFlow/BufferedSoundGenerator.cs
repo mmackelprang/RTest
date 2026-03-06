@@ -8,6 +8,12 @@ using System.Runtime.InteropServices;
 namespace Radio.Infrastructure.Audio.SoundFlow;
 
 /// <summary>
+/// Delegate for diagnostic capture hooks on BufferedSoundGenerator.
+/// Uses a non-generic delegate to accept ReadOnlySpan (ref struct) parameters.
+/// </summary>
+public delegate void DiagnosticCaptureCallback(ReadOnlySpan<float> samples);
+
+/// <summary>
 /// Strategy for handling buffer overflow in BufferedSoundGenerator.
 /// </summary>
 public enum BufferOverflowStrategy
@@ -147,6 +153,18 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     }
 
     /// <summary>
+    /// Optional diagnostic hook: called with raw input samples in AddSamples (float path only).
+    /// Set to null when not capturing (zero cost). Invoked OUTSIDE the buffer lock.
+    /// </summary>
+    public DiagnosticCaptureCallback? DiagnosticInputCapture { get; set; }
+
+    /// <summary>
+    /// Optional diagnostic hook: called with output samples in GenerateAudio (after read from ring buffer).
+    /// Set to null when not capturing (zero cost). Invoked OUTSIDE the buffer lock.
+    /// </summary>
+    public DiagnosticCaptureCallback? DiagnosticOutputCapture { get; set; }
+
+    /// <summary>
     /// Adds samples to the buffer.
     /// </summary>
     /// <param name="samples">The samples to add.</param>
@@ -205,6 +223,11 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         {
             Monitor.Exit(_bufferLock);
         }
+
+        // Diagnostic capture hook — invoked outside the lock to avoid extending lock hold time.
+        // The capture callback does a fast span copy into CaptureSession's own buffer.
+        if (typeof(T) == typeof(float))
+            DiagnosticInputCapture?.Invoke(System.Runtime.InteropServices.MemoryMarshal.Cast<T, float>(samples));
     }
 
     /// <summary>
@@ -324,6 +347,10 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         {
             Monitor.Exit(_bufferLock);
         }
+
+        // Diagnostic output capture hook — invoked outside the lock.
+        if (samplesWritten > 0)
+            DiagnosticOutputCapture?.Invoke(buffer.Slice(0, samplesWritten));
 
         // Clock drift compensation: when the buffer is draining faster than the
         // producer fills it (e.g., BT clock vs ALSA clock drift), push back the
