@@ -49,13 +49,14 @@ internal sealed class BluetoothReconnectionLoop : IDisposable
   /// <summary>Cancels any active reconnection loop.</summary>
   public void Cancel()
   {
-    if (_cts != null)
-    {
-      _cts.Cancel();
-      _cts.Dispose();
-      _cts = null;
-    }
+    var cts = _cts;
+    _cts = null;
     _loopTask = null;
+    if (cts != null)
+    {
+      cts.Cancel();
+      cts.Dispose();
+    }
   }
 
   /// <summary>Whether a reconnection loop is currently active.</summary>

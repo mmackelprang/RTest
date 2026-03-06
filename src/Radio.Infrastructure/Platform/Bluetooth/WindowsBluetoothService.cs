@@ -404,7 +404,7 @@ internal sealed class WindowsBluetoothService : IBluetoothService
                 RecordDisconnectionMetrics();
                 _logger.LogInformation("Bluetooth device disconnected: {DeviceName} ({Address})",
                     device.Name, device.Address);
-                DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs { Device = device });
+                DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs { Device = device, UserInitiated = false });
             }
             else if (connectedNow == null)
             {
@@ -425,7 +425,7 @@ internal sealed class WindowsBluetoothService : IBluetoothService
                 _metricsCollector?.Increment("bluetooth.devices_connected_total");
                 _logger.LogInformation("Bluetooth device switched from {OldDevice} to {NewDevice}",
                     oldDevice.Name, newDevice.Name);
-                DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs { Device = oldDevice });
+                DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs { Device = oldDevice, UserInitiated = false });
                 DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = newDevice });
             }
         }

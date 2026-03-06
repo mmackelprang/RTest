@@ -646,6 +646,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             }
             catch (Exception ex)
             {
+                _userInitiatedDisconnect = false; // reset on failure to prevent suppressing future reconnects
                 _logger.LogError(ex, "Failed to disconnect device {Address}", connected.Address);
             }
         }

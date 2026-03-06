@@ -813,6 +813,9 @@ public class PlayHistoryTracker : IDisposable
       {
         using var scope = _serviceScopeFactory.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<IPlayHistoryRepository>();
+        // Safe to block: Dispose runs on a threadpool thread during hosted service shutdown
+        // (no SynchronizationContext in ASP.NET Core), and it's a single short SQLite call.
+        // Startup orphan cleanup is the backup for crash/kill scenarios where this doesn't run.
         repo.FinalizeEntryAsync(_currentPlayHistoryEntryId, DateTime.UtcNow)
           .GetAwaiter().GetResult();
         _logger.LogInformation("Finalized in-flight play history entry {Id} during shutdown",
