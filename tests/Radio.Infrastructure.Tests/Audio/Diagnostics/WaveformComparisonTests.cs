@@ -234,4 +234,202 @@ public class WaveformComparisonTests
     // Clipped sine should have measurable THD (typically 10-40%)
     Assert.True(thd > 5.0f, $"THD of clipped sine should be > 5%, got {thd:F2}%");
   }
+
+  [SkippableFact]
+  [Trait("Category", "CaptureAnalysis")]
+  public void AnalyzeBtCapture_InputVsOutput()
+  {
+    var captureDir = Path.Combine(
+      AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..",
+      "data", "diagnostics", "bt-capture-60s-postfix");
+
+    var inputPath = Path.Combine(captureDir, "generator-input.wav");
+    var outputPath = Path.Combine(captureDir, "generator-output.wav");
+    var postModPath = Path.Combine(captureDir, "post-modifiers.wav");
+
+    Skip.IfNot(File.Exists(inputPath), "No capture files found — run capture first");
+
+    var input = WavFileHelper.ReadWavFile(inputPath, out var inSr, out var inCh);
+    var output = WavFileHelper.ReadWavFile(outputPath, out var outSr, out var outCh);
+    var postMod = WavFileHelper.ReadWavFile(postModPath, out var pmSr, out var pmCh);
+
+    // === Basic stats ===
+    var inRms = WavFileHelper.CalculateRms(input);
+    var inPeak = WavFileHelper.CalculatePeak(input);
+    var outRms = WavFileHelper.CalculateRms(output);
+    var outPeak = WavFileHelper.CalculatePeak(output);
+    var pmRms = WavFileHelper.CalculateRms(postMod);
+    var pmPeak = WavFileHelper.CalculatePeak(postMod);
+
+    // Log basic info
+    var sb = new System.Text.StringBuilder();
+    sb.AppendLine("=== BT Capture Analysis (60s) ===");
+    sb.AppendLine($"Generator Input:  {input.Length} samples, {inSr}Hz {inCh}ch, RMS={WavFileHelper.LinearToDb(inRms):F1}dB, Peak={WavFileHelper.LinearToDb(inPeak):F1}dB");
+    sb.AppendLine($"Generator Output: {output.Length} samples, {outSr}Hz {outCh}ch, RMS={WavFileHelper.LinearToDb(outRms):F1}dB, Peak={WavFileHelper.LinearToDb(outPeak):F1}dB");
+    sb.AppendLine($"Post-Modifiers:   {postMod.Length} samples, {pmSr}Hz {pmCh}ch, RMS={WavFileHelper.LinearToDb(pmRms):F1}dB, Peak={WavFileHelper.LinearToDb(pmPeak):F1}dB");
+    sb.AppendLine($"Sample diff: input={input.Length}, output={output.Length}, delta={output.Length - input.Length}");
+
+    // === Input vs Output comparison ===
+    sb.AppendLine();
+    sb.AppendLine("--- Generator Input vs Output ---");
+    var ioReport = WaveformComparison.Compare(input, output);
+    sb.AppendLine($"SNR: {ioReport.SnrDb:F1} dB");
+    sb.AppendLine($"RMS Error: {ioReport.RmsError:F6}");
+    sb.AppendLine($"Peak Error: {ioReport.PeakError:F6}");
+    sb.AppendLine($"Gain Ratio: {ioReport.GainRatio:F4}");
+    sb.AppendLine($"Correlation: {ioReport.CorrelationCoefficient:F6}");
+    sb.AppendLine($"IsClean: {ioReport.IsClean}");
+    sb.AppendLine($"Events: {ioReport.Events.Count}");
+    foreach (var evt in ioReport.Events.Take(20))
+      sb.AppendLine($"  [{evt.Type}] offset={evt.SampleOffset} len={evt.Duration} sev={evt.Severity:F2}: {evt.Description}");
+    if (ioReport.Events.Count > 20)
+      sb.AppendLine($"  ... and {ioReport.Events.Count - 20} more events");
+
+    // === Output vs Post-Modifiers comparison ===
+    sb.AppendLine();
+    sb.AppendLine("--- Generator Output vs Post-Modifiers ---");
+    var opReport = WaveformComparison.Compare(output, postMod);
+    sb.AppendLine($"SNR: {opReport.SnrDb:F1} dB");
+    sb.AppendLine($"RMS Error: {opReport.RmsError:F6}");
+    sb.AppendLine($"Peak Error: {opReport.PeakError:F6}");
+    sb.AppendLine($"Gain Ratio: {opReport.GainRatio:F4}");
+    sb.AppendLine($"Correlation: {opReport.CorrelationCoefficient:F6}");
+    sb.AppendLine($"IsClean: {opReport.IsClean}");
+    sb.AppendLine($"Events: {opReport.Events.Count}");
+    foreach (var evt in opReport.Events.Take(20))
+      sb.AppendLine($"  [{evt.Type}] offset={evt.SampleOffset} len={evt.Duration} sev={evt.Severity:F2}: {evt.Description}");
+    if (opReport.Events.Count > 20)
+      sb.AppendLine($"  ... and {opReport.Events.Count - 20} more events");
+
+    // === Silence/repeat/clipping scan on each stage independently ===
+    sb.AppendLine();
+    sb.AppendLine("--- Independent Stage Scans ---");
+    foreach (var (name, samples) in new[] {
+      ("generator-input", input), ("generator-output", output), ("post-modifiers", postMod) })
+    {
+      var zeros = SilenceDetector.FindZeroRuns(samples, minRunLength: 20);
+      var repeats = SilenceDetector.FindRepeatedSampleRuns(samples, minRunLength: 10);
+      var clips = SilenceDetector.FindClippingRuns(samples, 0.999f, minRunLength: 4);
+      sb.AppendLine($"  {name}: {zeros.Count} silence runs, {repeats.Count} repeated runs, {clips.Count} clipping runs");
+      foreach (var z in zeros.Take(5))
+        sb.AppendLine($"    silence: offset={z.Start} len={z.Length}");
+      foreach (var r in repeats.Take(5))
+        sb.AppendLine($"    repeated: offset={r.Start} len={r.Length} val={samples[r.Start]:F6}");
+      foreach (var c in clips.Take(5))
+        sb.AppendLine($"    clipping: offset={c.Start} len={c.Length}");
+    }
+
+    // === Time offset detection (input vs output) ===
+    sb.AppendLine();
+    sb.AppendLine("--- Time Offset Detection ---");
+    var minLen = Math.Min(input.Length, output.Length);
+    if (minLen > 9600)
+    {
+      var (offset, corr) = WaveformComparison.FindTimeOffset(
+        input.AsSpan(0, Math.Min(minLen, 480000)),
+        output.AsSpan(0, Math.Min(minLen, 480000)),
+        maxOffsetSamples: 4800);
+      sb.AppendLine($"Input→Output offset: {offset} samples ({offset / 96.0:F1} ms), correlation: {corr:F4}");
+    }
+
+    // === Silence gap deep analysis (channel alignment) ===
+    sb.AppendLine();
+    sb.AppendLine("--- Silence Gap Deep Analysis (generator-input) ---");
+    var inputZeros = SilenceDetector.FindZeroRuns(input, minRunLength: 20);
+    foreach (var (start, length) in inputZeros)
+    {
+      var isEven = length % 2 == 0;
+      sb.AppendLine($"  Gap at {start}, length={length} ({(isEven ? "EVEN — frame-aligned" : "ODD — MISALIGNED!")})");
+      sb.AppendLine($"    Duration: {length / 96.0:F2} ms ({length / 2} frames)");
+
+      // Show samples around the gap
+      var before = Math.Max(0, start - 6);
+      var after = Math.Min(input.Length, start + length + 6);
+      sb.Append("    Before: ");
+      for (int i = before; i < start; i++)
+        sb.Append($"{input[i]:F4} ");
+      sb.AppendLine();
+      sb.Append("    Gap start: ");
+      for (int i = start; i < Math.Min(start + 6, start + length); i++)
+        sb.Append($"{input[i]:F4} ");
+      sb.AppendLine("...");
+      sb.Append("    Gap end:   ...");
+      for (int i = Math.Max(start, start + length - 6); i < start + length; i++)
+        sb.Append($"{input[i]:F4} ");
+      sb.AppendLine();
+      sb.Append("    After:  ");
+      for (int i = start + length; i < after; i++)
+        sb.Append($"{input[i]:F4} ");
+      sb.AppendLine();
+
+      // Check channel swap after gap: if odd gap, L/R may be swapped
+      if (!isEven && start + length + 20 < input.Length && start >= 20)
+      {
+        // Compare L/R energy pattern before and after gap
+        float preL = 0, preR = 0, postL = 0, postR = 0;
+        for (int i = 0; i < 10; i++)
+        {
+          preL += MathF.Abs(input[start - 20 + i * 2]);
+          preR += MathF.Abs(input[start - 20 + i * 2 + 1]);
+          postL += MathF.Abs(input[start + length + i * 2]);
+          postR += MathF.Abs(input[start + length + i * 2 + 1]);
+        }
+        sb.AppendLine($"    Pre-gap  L avg={preL / 10:F4}, R avg={preR / 10:F4}");
+        sb.AppendLine($"    Post-gap L avg={postL / 10:F4}, R avg={postR / 10:F4}");
+        sb.AppendLine($"    Channel swap indicator: pre L/R ratio={(preL > 0 ? preR / preL : 0):F3}, post L/R ratio={(postL > 0 ? postR / postL : 0):F3}");
+      }
+    }
+
+    // === Windowed correlation analysis (find where distortion occurs) ===
+    sb.AppendLine();
+    sb.AppendLine("--- Windowed Correlation (input vs output, 1s windows) ---");
+    var windowSize = 96000; // 1 second stereo
+    var ioMinLen = Math.Min(input.Length, output.Length);
+    for (int w = 0; w + windowSize <= ioMinLen; w += windowSize)
+    {
+      var refWindow = input.AsSpan(w, windowSize);
+      var capWindow = output.AsSpan(w, windowSize);
+      double cc = 0, re = 0, ce = 0;
+      for (int i = 0; i < windowSize; i++)
+      {
+        cc += refWindow[i] * capWindow[i];
+        re += refWindow[i] * refWindow[i];
+        ce += capWindow[i] * capWindow[i];
+      }
+      var denom = Math.Sqrt(re * ce);
+      var corr = denom > 0 ? cc / denom : 0;
+      var windowSec = w / 96000.0;
+      var marker = corr < 0.9 ? " <<<" : "";
+      sb.AppendLine($"  t={windowSec:F0}s: corr={corr:F4}{marker}");
+    }
+
+    // === Sample-level diff analysis: find largest error regions ===
+    sb.AppendLine();
+    sb.AppendLine("--- Largest Error Regions (input vs output) ---");
+    var errorWindowSize = 4800; // 50ms windows
+    var topErrors = new List<(int offset, float rmsError)>();
+    for (int w = 0; w + errorWindowSize <= ioMinLen; w += errorWindowSize)
+    {
+      double errSum = 0;
+      for (int i = w; i < w + errorWindowSize; i++)
+      {
+        var e = input[i] - output[i];
+        errSum += e * e;
+      }
+      topErrors.Add((w, (float)Math.Sqrt(errSum / errorWindowSize)));
+    }
+    topErrors.Sort((a, b) => b.rmsError.CompareTo(a.rmsError));
+    foreach (var (offset, rmsError) in topErrors.Take(10))
+    {
+      var timeSec = offset / 96000.0;
+      sb.AppendLine($"  t={timeSec:F2}s (offset {offset}): RMS error={rmsError:F4} ({WavFileHelper.LinearToDb(rmsError):F1} dB)");
+    }
+
+    // Write results to file for easy viewing
+    var resultsPath = Path.Combine(captureDir, "analysis-results.txt");
+    File.WriteAllText(resultsPath, sb.ToString());
+
+    // Also output to test runner
+    Assert.True(true, sb.ToString()); // Always passes — this is a diagnostic test
+  }
 }

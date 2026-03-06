@@ -96,19 +96,40 @@ idle-dimmer.js (30 min idle)
 4. **BT A2DP Transport Jitter (MEDIUM)** — irregular packet arrival
 5. **DropOldest Buffer Overflow (LOWER)** — drift causes overflow after ~72 min
 
-### Critical Unknown
-**Actual audio waveform during distortion was NEVER captured.** Unknown whether it's:
-- Repeated samples (underrun fill)
-- Dropped samples (overflow/skip)
-- Zero-insertion (silence gaps)
-- Byte-shift corruption
+### ROOT CAUSE IDENTIFIED (Phase 3)
+
+**Stereo frame misalignment in PipeWireNativeStream.OnProcess**
+
+The `OnProcess` callback converts S16LE bytes to float samples via `sampleCount = totalBytes / 2` — but for stereo audio, a "frame" is 2 samples (L+R = 4 bytes). When PipeWire's BT transport delivers non-frame-aligned chunks (due to packet loss/gaps), `sampleCount` is ODD, causing every subsequent sample to have L/R channels swapped.
+
+**Evidence (pre-fix 60s capture):**
+- 3 silence gaps with ODD lengths (693, 827, 83 samples)
+- L/R channel ratio FLIPS after each gap (e.g., pre=12.833, post=0.056)
+- Sample deficit: 32,640 samples lost (input > output)
+- Output→PostModifiers correlation: 0.40 (poor — channel-swap corrupts modifier processing)
+
+**Fix applied:**
+- `PipeWireNativeStream.cs`: `sampleCount = sampleCount / self._channels * self._channels;` (frame-align)
+- `BufferedSoundGenerator.cs`: Defense-in-depth frame alignment in `AddSamples()`
+
+**Evidence (post-fix 60s capture):**
+- Output→PostModifiers correlation: 1.000000 (perfect, up from 0.40)
+- Sample delta: +1,024 (near-zero, vs pre-fix -32,640)
+- 384 silence gaps still present but these are BT transport dropouts (brief pops), NOT channel swaps
+- ODD-length gaps in captured data are from zero VALUES spanning chunk boundaries — AddSamples always receives frame-aligned data
+
+### Remaining Issue: BT Transport Dropouts
+- 384 silence runs in 60s (clustered, likely RF interference bursts)
+- Causes brief audible pops but NOT sustained distortion
+- Inherent to BT A2DP transport — not fixable in application code
+- Could be mitigated with gap-filling interpolation in a future SoundModifier
 
 ### Existing Infrastructure
 - `BufferedSoundGenerator` has extensive instrumentation (callback timing, lock contention, GC correlation)
 - `FmAudioDropoutDiagnosticTests` simulate producer/consumer on independent clocks
 - `AudioTestHelpers` generates diagnostic tones and has WAV writer
 - `BtSender` sends known 200Hz/300Hz tone over BT
-- **MISSING**: Capture points for actual waveform data, input/output comparison, automated distortion detection
+- **Phase 2 infrastructure**: `DiagnosticCaptureService`, `CaptureSession`, `Radio.AudioAnalysis` library, automated `WaveformComparison` tests
 
 ---
 

@@ -262,9 +262,14 @@ internal sealed class PipeWireNativeStream : IDisposable
       var chunk = Marshal.PtrToStructure<SpaChunk>(spaData.Chunk);
       if (chunk.Size == 0) return;
 
-      // S16_LE: 2 bytes per sample
+      // S16_LE: 2 bytes per sample, stereo = 4 bytes per frame.
+      // PipeWire BT transport can deliver non-frame-aligned chunks during
+      // packet loss/gaps. An odd sample count shifts L↔R channels for all
+      // subsequent audio, causing audible distortion. Round down to frame
+      // boundary (channels samples per frame) to prevent misalignment.
       var totalBytes = (int)chunk.Size;
       var sampleCount = totalBytes / 2;
+      sampleCount = sampleCount / self._channels * self._channels; // frame-align
 
       if (sampleCount <= 0) return;
 
