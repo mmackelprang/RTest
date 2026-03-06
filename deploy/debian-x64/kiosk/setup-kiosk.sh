@@ -99,8 +99,16 @@ echo "[5/7] Disabling screen blanking and lock..."
 gsettings set org.gnome.desktop.session idle-delay 0
 gsettings set org.gnome.desktop.screensaver lock-enabled false
 gsettings set org.gnome.desktop.screensaver idle-activation-enabled false
+
+# Disable X11 DPMS (Display Power Management Signaling).
+# GNOME screensaver settings above don't cover DPMS, which is a separate X11/kernel
+# feature that can blank/suspend the display independently.
+xset s off 2>/dev/null || true
+xset -dpms 2>/dev/null || true
+xset s noblank 2>/dev/null || true
 echo "  Screen blanking disabled."
 echo "  Screen lock disabled."
+echo "  X11 DPMS disabled."
 
 # ---- 6. Install unclutter (hide idle mouse cursor) ----
 echo ""
@@ -111,6 +119,23 @@ if ! command -v unclutter &>/dev/null; then
   echo "  unclutter installed."
 else
   echo "  unclutter already installed."
+fi
+
+# Add DPMS disable to autostart (xset commands only apply to the current session,
+# so they must run on every login)
+DPMS_AUTOSTART="$AUTOSTART_DIR/disable-dpms.desktop"
+if [ ! -f "$DPMS_AUTOSTART" ]; then
+  cat > "$DPMS_AUTOSTART" << 'EOF'
+[Desktop Entry]
+Name=Disable DPMS
+Comment=Disable display power management for kiosk mode
+Exec=bash -c "xset s off; xset -dpms; xset s noblank"
+Terminal=false
+Type=Application
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+EOF
+  echo "  DPMS disable autostart entry created."
 fi
 
 # Add unclutter to autostart if not already there

@@ -1,7 +1,13 @@
 // Screen idle dimmer + sleep manager for kiosk mode
-// - Dim: reduces brightness after 5 minutes of no interaction
-// - Sleep: black overlay, notifies Blazor to pause audio
-// - Wake: touch/pointer/key restores screen, notifies Blazor to resume audio
+//
+// Three states:
+//   1. Dimmed:        brightness reduced after idle timeout (music continues)
+//   2. Screen-blanked: black overlay after longer idle (music continues)
+//   3. Deep sleep:     black overlay + audio paused (explicit user/server action only)
+//
+// Key design: idle timeouts NEVER pause audio. Only explicit sleep (button/server)
+// pauses playback. This lets the radio play indefinitely while preserving the screen.
+//
 // Exposes window.radioSleepManager for JS interop from Blazor
 
 // Safe setter for API base URL (called from Blazor JS interop instead of eval)
@@ -11,13 +17,14 @@ window.radioSetApiBaseUrl = function (url) {
 
 (function () {
   const IDLE_TIMEOUT = 5 * 60 * 1000; // 5 minutes → dim
-  const SLEEP_TIMEOUT = 30 * 60 * 1000; // 30 minutes → sleep
+  const BLANK_TIMEOUT = 30 * 60 * 1000; // 30 minutes → screen blank (visual only)
   const DIM_BRIGHTNESS = 0.3;
 
   let dimTimer = null;
-  let sleepTimer = null;
+  let blankTimer = null;
   let dimmed = false;
-  let sleeping = false;
+  let screenBlanked = false; // Visual-only blank (idle timeout) — music keeps playing
+  let deepSleep = false;     // Full sleep (audio paused) — explicit action only
   let overlay = null;
   let blazorRef = null;
 
@@ -34,9 +41,9 @@ window.radioSetApiBaseUrl = function (url) {
 
   function resetTimers() {
     clearTimeout(dimTimer);
-    clearTimeout(sleepTimer);
+    clearTimeout(blankTimer);
     dimTimer = setTimeout(dim, IDLE_TIMEOUT);
-    sleepTimer = setTimeout(function () { enterSleep('idle'); }, SLEEP_TIMEOUT);
+    blankTimer = setTimeout(function () { blankScreen(); }, BLANK_TIMEOUT);
   }
 
   function undim() {
@@ -48,47 +55,75 @@ window.radioSetApiBaseUrl = function (url) {
   }
 
   function dim() {
-    if (sleeping) return;
+    if (screenBlanked || deepSleep) return;
     document.body.style.transition = 'filter 2s ease';
     document.body.style.filter = 'brightness(' + DIM_BRIGHTNESS + ')';
     dimmed = true;
   }
 
-  function enterSleep(source) {
-    if (sleeping) return;
-    sleeping = true;
+  // Screen blank: visual-only, music keeps playing.
+  // Triggered by idle timeout — does NOT call the API.
+  function blankScreen() {
+    if (screenBlanked || deepSleep) return;
+    screenBlanked = true;
 
     // Show black overlay
     var el = createOverlay();
     el.style.pointerEvents = 'auto';
-    // Force reflow before setting opacity for transition
     void el.offsetWidth;
     el.style.opacity = '1';
 
-    // Dim body as well
+    // Dim body fully
     document.body.style.transition = 'filter 2s ease';
     document.body.style.filter = 'brightness(0)';
     dimmed = true;
 
-    // Notify Blazor to call API server-side (unless triggered by server)
+    clearTimeout(dimTimer);
+    clearTimeout(blankTimer);
+  }
+
+  // Deep sleep: black overlay + audio paused.
+  // Only triggered by explicit action (button press or server command).
+  function enterSleep(source) {
+    if (deepSleep) return;
+
+    // If we're already screen-blanked, upgrade to deep sleep
+    if (!screenBlanked) {
+      // Show black overlay
+      var el = createOverlay();
+      el.style.pointerEvents = 'auto';
+      void el.offsetWidth;
+      el.style.opacity = '1';
+
+      document.body.style.transition = 'filter 2s ease';
+      document.body.style.filter = 'brightness(0)';
+      dimmed = true;
+    }
+
+    deepSleep = true;
+    screenBlanked = false; // Upgrade from blank to deep sleep
+
+    // Notify Blazor to pause audio (unless triggered by server — server already knows)
     if (source !== 'server' && blazorRef) {
       blazorRef.invokeMethodAsync('OnJsSleepRequested', true)
         .catch(function () { /* ignore */ });
     }
 
     clearTimeout(dimTimer);
-    clearTimeout(sleepTimer);
+    clearTimeout(blankTimer);
   }
 
   function wake(source) {
-    if (!sleeping) {
-      // Not sleeping, just undim and reset timers
+    if (!screenBlanked && !deepSleep) {
+      // Not blanked or sleeping, just undim and reset timers
       undim();
       resetTimers();
       return;
     }
 
-    sleeping = false;
+    var wasDeepSleep = deepSleep;
+    deepSleep = false;
+    screenBlanked = false;
     undim();
 
     // Hide overlay
@@ -97,8 +132,9 @@ window.radioSetApiBaseUrl = function (url) {
       overlay.style.pointerEvents = 'none';
     }
 
-    // Notify Blazor to call API server-side (unless triggered by server)
-    if (source !== 'server' && blazorRef) {
+    // Only notify Blazor to resume audio if we were in deep sleep
+    // (screen-blank is visual only — nothing to resume)
+    if (wasDeepSleep && source !== 'server' && blazorRef) {
       blazorRef.invokeMethodAsync('OnJsSleepRequested', false)
         .catch(function () { /* ignore */ });
     }
@@ -127,9 +163,11 @@ window.radioSetApiBaseUrl = function (url) {
 
   // Expose global API for Blazor JS interop
   window.radioSleepManager = {
-    enterSleep: enterSleep,
+    enterSleep: enterSleep,      // Deep sleep (pauses audio) — for button/server
+    blankScreen: blankScreen,    // Screen blank only (no audio impact)
     wake: wake,
-    isSleeping: function () { return sleeping; },
+    isSleeping: function () { return deepSleep; },
+    isScreenBlanked: function () { return screenBlanked; },
     setBlazorRef: function (ref) { blazorRef = ref; }
   };
 

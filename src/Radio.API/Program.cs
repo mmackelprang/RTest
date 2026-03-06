@@ -93,8 +93,14 @@ builder.Services.AddCors(options =>
   });
 });
 
-// Add SignalR
-builder.Services.AddSignalR();
+// Add SignalR — tuned for kiosk reliability.
+// Chrome may throttle JS timers when the page is visually occluded (screen-blanked overlay),
+// so we allow generous timeouts to avoid killing the circuit during idle screen-blank.
+builder.Services.AddSignalR(options =>
+{
+  options.ClientTimeoutInterval = TimeSpan.FromMinutes(2);
+  options.KeepAliveInterval = TimeSpan.FromSeconds(30);
+});
 
 // Add health checks
 builder.Services.AddHealthChecks()
