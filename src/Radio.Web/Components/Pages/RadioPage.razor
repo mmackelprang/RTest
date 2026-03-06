@@ -243,10 +243,17 @@
     await LoadRadioStateAsync();
     await LoadPresetsAsync();
     await LoadBandsAsync();
-    
+
     // Subscribe to SignalR radio state changes
     HubService.RadioStateChanged += HandleRadioStateChanged;
-    await HubService.StartAsync();
+    try
+    {
+      await HubService.StartAsync();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to connect to SignalR hub — radio page will not receive live updates");
+    }
   }
   
   private async Task LoadBandsAsync()
