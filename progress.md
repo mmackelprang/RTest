@@ -1,6 +1,30 @@
 # Progress Log
 
-## Session: 2026-03-06 (Phase 3 — Root Cause)
+## Session: 2026-03-06 (Phase 3 — Root Cause + BT Transport Fix)
+
+### BT Transport Dropout Investigation & Fix
+- [x] Merged PR #305 (frame alignment fix)
+- [x] Deployed and ran 10x60s baseline captures (Intel AX201): 9/10 perfect correlation
+- [x] Investigated PipeWire/BT transport layer distortion — user hearing pops despite correct software processing
+- [x] Identified root cause: Intel AX201 combo WiFi+BT chip coexistence interference (WiFi `Invalid misc` counter: 961,752)
+- [x] Applied quick fixes (CPU governor=performance, WiFi PM=off) — didn't help (coexistence is RF-level)
+- [x] Switched to TP-Link UB500 USB BT adapter — dramatic improvement: 6/10 runs with ZERO silence gaps
+- [x] Upgraded PipeWire 1.0.5 → 1.0.7 via upstream PPA
+- [x] Made all settings permanent: systemd service, NetworkManager dispatcher, udev rule
+- [x] Disabled Intel AX201 BT permanently via udev rule
+- [x] Updated deployment docs (DEPLOYMENT.md, setup.sh) with audio quality tuning section
+- [x] Added deploy config files: `radio-performance.service`, `99-wifi-power-save-off`, `99-disable-intel-bt.rules`
+- [x] Restarted radio-web service (was dead after deployment)
+
+### Files Modified/Created
+- `deploy/DEPLOYMENT.md` — added Audio Quality Tuning section, updated hardware table
+- `deploy/debian-x64/setup.sh` — added audio quality tuning step (CPU governor, WiFi PM, Intel BT disable)
+- `deploy/common/radio-performance.service` — new systemd service
+- `deploy/common/99-wifi-power-save-off` — new NetworkManager dispatcher script
+- `deploy/common/99-disable-intel-bt.rules` — new udev rule
+- `findings.md`, `progress.md`
+
+---
 
 ### Root Cause Identified & Fixed
 - [x] Deployed Phase 2 capture infrastructure to Ubuntu

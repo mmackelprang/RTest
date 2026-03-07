@@ -1,0 +1,6 @@
+#!/bin/bash
+# Disable WiFi power management for Radio Console
+# WiFi PM causes bursty radio activity that interferes with BT audio quality
+if [ "$2" = "up" ]; then
+    /sbin/iwconfig "$1" power off 2>/dev/null || true
+fi

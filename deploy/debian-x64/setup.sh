@@ -226,9 +226,41 @@ systemctl enable radio-api.service
 systemctl enable radio-web.service
 echo "Services installed and enabled (radio-api, radio-web)"
 
-# ---- 7. Configure Audio & Bluetooth ----
+# ---- 7. Audio Quality Tuning ----
 echo ""
-echo "[7/7] Configuring audio and Bluetooth..."
+echo "[7/8] Configuring audio quality tuning..."
+SCRIPT_DIR_COMMON="$SCRIPT_DIR/../common"
+
+# CPU governor: performance (prevents frequency scaling latency)
+if [ -f "$SCRIPT_DIR_COMMON/radio-performance.service" ]; then
+  cp "$SCRIPT_DIR_COMMON/radio-performance.service" /etc/systemd/system/
+  systemctl daemon-reload
+  systemctl enable radio-performance.service
+  systemctl start radio-performance.service 2>/dev/null || true
+  echo "  CPU governor set to performance (persistent)"
+fi
+
+# WiFi power management: off (prevents bursty radio interference with BT)
+if [ -f "$SCRIPT_DIR_COMMON/99-wifi-power-save-off" ]; then
+  cp "$SCRIPT_DIR_COMMON/99-wifi-power-save-off" /etc/NetworkManager/dispatcher.d/ 2>/dev/null || true
+  chmod +x /etc/NetworkManager/dispatcher.d/99-wifi-power-save-off 2>/dev/null || true
+  echo "  WiFi power management disabled (persistent)"
+fi
+
+# Disable Intel AX201 onboard BT if USB BT adapter is present
+if lsusb 2>/dev/null | grep -qi "realtek.*bluetooth\|bluetooth.*realtek\|0bda:"; then
+  if [ -f "$SCRIPT_DIR_COMMON/99-disable-intel-bt.rules" ]; then
+    cp "$SCRIPT_DIR_COMMON/99-disable-intel-bt.rules" /etc/udev/rules.d/
+    udevadm control --reload-rules
+    echo "  Intel AX201 BT disabled (USB BT adapter detected)"
+  fi
+else
+  echo "  No USB BT adapter detected — skipping Intel BT disable"
+fi
+
+# ---- 8. Configure Audio & Bluetooth ----
+echo ""
+echo "[8/8] Configuring audio and Bluetooth..."
 
 # Enable Bluetooth service with auto-power-on after reboot
 systemctl enable bluetooth.service
