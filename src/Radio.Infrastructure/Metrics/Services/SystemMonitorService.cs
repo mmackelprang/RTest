@@ -122,6 +122,31 @@ public sealed class SystemMonitorService : BackgroundService
       _logger.LogWarning(ex, "Failed to collect database file size metric");
     }
 
+    // CPU usage (process CPU % across all cores)
+    try
+    {
+      var process = Process.GetCurrentProcess();
+      var startTime = DateTime.UtcNow;
+      var startCpu = process.TotalProcessorTime;
+
+      await Task.Delay(100, ct); // 100ms sampling window
+
+      process.Refresh();
+      var endTime = DateTime.UtcNow;
+      var endCpu = process.TotalProcessorTime;
+
+      var cpuUsedMs = (endCpu - startCpu).TotalMilliseconds;
+      var elapsedMs = (endTime - startTime).TotalMilliseconds;
+      var cpuPercent = (cpuUsedMs / (Environment.ProcessorCount * elapsedMs)) * 100.0;
+
+      _metricsCollector.Gauge("system.cpu_usage_percent", Math.Round(cpuPercent, 1));
+    }
+    catch (OperationCanceledException) { throw; }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to collect CPU usage metric");
+    }
+
     // CPU Temperature (works on Raspberry Pi, Ubuntu, and other Linux systems)
     try
     {
