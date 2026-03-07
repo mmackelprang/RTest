@@ -38,14 +38,19 @@
       {
         var thresholdColor = GetThresholdColor(hero.Key, hero.Value);
         var isSelected = _selectedMetric == hero.Key;
+        var heroKey = hero.Key;
         <div class="metrics-hero-card @(isSelected ? "selected" : "")"
              style="border-left-color: @thresholdColor;"
-             @onclick="@(async () => await SelectMetricAsync(hero.Key))">
-          <div class="metrics-hero-label">@GetMetricLabel(hero.Key)</div>
+             @onclick="@(async () => await SelectMetricAsync(heroKey))">
+          <button class="metrics-hero-dismiss"
+                  title="Remove from hero cards"
+                  @onclick="@(async () => await RemoveHeroCardAsync(heroKey))"
+                  @onclick:stopPropagation="true">&times;</button>
+          <div class="metrics-hero-label">@GetMetricLabel(heroKey)</div>
           <div class="metrics-hero-value" style="color: @thresholdColor;">
-            @FormatMetricValue(hero.Value, hero.Key)
+            @FormatMetricValue(hero.Value, heroKey)
           </div>
-          @if (_sparklineData.TryGetValue(hero.Key, out var points) && points.Count > 1)
+          @if (_sparklineData.TryGetValue(heroKey, out var points) && points.Count > 1)
           {
             <div style="margin-top: 4px; height: 50px;">
               @((MarkupString)RenderSparkline(points, 200, 50, thresholdColor))
@@ -94,11 +99,19 @@
                 {
                   var isRowSelected = _selectedMetric == metric.Key;
                   var trend = GetTrendIndicator(metric.Key);
+                  var metricKey = metric.Key;
+                  var isPinned = _pinnedHeroKeys.Contains(metricKey);
                   <div class="metrics-row @(isRowSelected ? "selected" : "")"
-                       @onclick="@(async () => await SelectMetricAsync(metric.Key))">
-                    <span class="metrics-row-label">@GetMetricLabel(metric.Key)</span>
-                    <span class="metrics-row-value">@FormatMetricValue(metric.Value, metric.Key)</span>
-                    @if (_sparklineData.TryGetValue(metric.Key, out var rowPoints) && rowPoints.Count > 1)
+                       @onclick="@(async () => await SelectMetricAsync(metricKey))">
+                    <button class="metrics-row-pin @(isPinned ? "pinned" : "")"
+                            title="@(isPinned ? "Remove from hero cards" : "Pin to hero cards")"
+                            @onclick="@(async () => await ToggleHeroCardAsync(metricKey))"
+                            @onclick:stopPropagation="true">
+                      @(isPinned ? "\u2605" : "\u2606")
+                    </button>
+                    <span class="metrics-row-label">@GetMetricLabel(metricKey)</span>
+                    <span class="metrics-row-value">@FormatMetricValue(metric.Value, metricKey)</span>
+                    @if (_sparklineData.TryGetValue(metricKey, out var rowPoints) && rowPoints.Count > 1)
                     {
                       <span class="metrics-row-sparkline">
                         @((MarkupString)RenderSparkline(rowPoints, 150, 20))
@@ -140,9 +153,14 @@
   private Dictionary<string, List<double>> _sparklineData = new();
   private Dictionary<string, List<MetricHistoryDto>> _sparklineHistory = new();
 
-  // Hero metrics: pinned top-level metrics by name pattern
-  private static readonly string[] _heroPatterns =
+  // Hero metrics: user-pinned metric keys (persisted to config)
+  private List<string> _pinnedHeroKeys = new();
+
+  // Default patterns used when no pinned keys are configured
+  private static readonly string[] _defaultHeroPatterns =
     ["cpu", "memory", "buffer", "underrun", "error", "active"];
+
+  private const int MaxHeroCards = 10;
 
   // Threshold definitions: (warning, critical) by metric name fragment
   private static readonly Dictionary<string, (double warn, double crit, bool invertAbove)> _thresholds = new()
@@ -197,11 +215,21 @@
   {
     try
     {
-      var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("ui.metrics");
+      var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, System.Text.Json.JsonElement>>("ui.metrics");
       if (prefs != null)
       {
-        if (prefs.TryGetValue("timeRange", out var trObj) && trObj != null)
-          _timeRange = trObj.ToString() ?? "1h";
+        if (prefs.TryGetValue("timeRange", out var trObj))
+          _timeRange = trObj.GetString() ?? "1h";
+
+        if (prefs.TryGetValue("heroCards", out var heroObj) &&
+            heroObj.ValueKind == System.Text.Json.JsonValueKind.Array)
+        {
+          _pinnedHeroKeys = heroObj.EnumerateArray()
+            .Select(e => e.GetString())
+            .Where(s => !string.IsNullOrEmpty(s))
+            .Select(s => s!)
+            .ToList();
+        }
       }
     }
     catch (Exception ex) { Logger.LogWarning(ex, "Failed to load metrics preferences"); }
@@ -432,10 +460,70 @@
   private IEnumerable<KeyValuePair<string, double>> GetHeroMetrics()
   {
     if (_snapshots == null) return Enumerable.Empty<KeyValuePair<string, double>>();
+
+    // If user has pinned keys, use those (in order); otherwise fall back to pattern defaults
+    if (_pinnedHeroKeys.Count > 0)
+    {
+      return _pinnedHeroKeys
+        .Where(key => _snapshots.ContainsKey(key))
+        .Select(key => new KeyValuePair<string, double>(key, _snapshots[key]))
+        .Take(MaxHeroCards);
+    }
+
     return _snapshots
-      .Where(m => _heroPatterns.Any(p => m.Key.ToLowerInvariant().Contains(p)))
-      .OrderBy(m => Array.FindIndex(_heroPatterns, p => m.Key.ToLowerInvariant().Contains(p)))
+      .Where(m => _defaultHeroPatterns.Any(p => m.Key.ToLowerInvariant().Contains(p)))
+      .OrderBy(m => Array.FindIndex(_defaultHeroPatterns, p => m.Key.ToLowerInvariant().Contains(p)))
       .Take(6);
+  }
+
+  private async Task RemoveHeroCardAsync(string metricKey)
+  {
+    // If using default patterns, initialize pinned list from current defaults first
+    if (_pinnedHeroKeys.Count == 0)
+      InitializePinnedFromDefaults();
+
+    _pinnedHeroKeys.Remove(metricKey);
+    await SaveHeroCardsAsync();
+    StateHasChanged();
+  }
+
+  private async Task ToggleHeroCardAsync(string metricKey)
+  {
+    // If using default patterns, initialize pinned list from current defaults first
+    if (_pinnedHeroKeys.Count == 0)
+      InitializePinnedFromDefaults();
+
+    if (_pinnedHeroKeys.Contains(metricKey))
+    {
+      _pinnedHeroKeys.Remove(metricKey);
+    }
+    else if (_pinnedHeroKeys.Count < MaxHeroCards)
+    {
+      _pinnedHeroKeys.Add(metricKey);
+    }
+    else
+    {
+      Snackbar.Add($"Maximum {MaxHeroCards} hero cards allowed", Severity.Warning);
+      return;
+    }
+
+    await SaveHeroCardsAsync();
+    StateHasChanged();
+  }
+
+  private void InitializePinnedFromDefaults()
+  {
+    if (_snapshots == null) return;
+    _pinnedHeroKeys = _snapshots.Keys
+      .Where(key => _defaultHeroPatterns.Any(p => key.ToLowerInvariant().Contains(p)))
+      .OrderBy(key => Array.FindIndex(_defaultHeroPatterns, p => key.ToLowerInvariant().Contains(p)))
+      .Take(6)
+      .ToList();
+  }
+
+  private async Task SaveHeroCardsAsync()
+  {
+    await SavePreferenceAsync("heroCards", _pinnedHeroKeys);
   }
 
   private IEnumerable<KeyValuePair<string, double>> GetMetricsForCategory(string category)

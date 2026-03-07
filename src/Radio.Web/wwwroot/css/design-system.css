@@ -1388,6 +1388,7 @@ body {
 }
 
 .metrics-hero-card {
+  position: relative;
   flex: 0 0 210px;
   min-width: 180px;
   background: var(--surface-raised);
@@ -1398,6 +1399,37 @@ body {
   cursor: pointer;
   transition: background var(--anim-duration-fast) var(--anim-ease-standard),
               border-color var(--anim-duration-fast) var(--anim-ease-standard);
+}
+
+.metrics-hero-dismiss {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--text-low);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 50%;
+  opacity: 0;
+  transition: opacity var(--anim-duration-fast) var(--anim-ease-standard),
+              background var(--anim-duration-fast) var(--anim-ease-standard);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.metrics-hero-card:hover .metrics-hero-dismiss {
+  opacity: 1;
+}
+
+.metrics-hero-dismiss:hover {
+  background: var(--surface-separator);
+  color: var(--signal-red);
 }
 
 .metrics-hero-card:hover {
@@ -1547,6 +1579,33 @@ body {
   width: 150px;
   height: 20px;
   flex-shrink: 0;
+}
+
+.metrics-row-pin {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-low);
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 50%;
+  flex-shrink: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color var(--anim-duration-fast) var(--anim-ease-standard),
+              background var(--anim-duration-fast) var(--anim-ease-standard);
+}
+
+.metrics-row-pin:hover {
+  background: var(--surface-separator);
+  color: var(--accent-primary);
+}
+
+.metrics-row-pin.pinned {
+  color: var(--signal-amber);
 }
 
 .metrics-row-trend {
