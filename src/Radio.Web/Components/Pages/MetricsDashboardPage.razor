@@ -100,7 +100,7 @@
                   var isRowSelected = _selectedMetric == metric.Key;
                   var trend = GetTrendIndicator(metric.Key);
                   var metricKey = metric.Key;
-                  var isPinned = _pinnedHeroKeys.Contains(metricKey);
+                  var isPinned = _pinnedHeroKeys?.Contains(metricKey) == true;
                   <div class="metrics-row @(isRowSelected ? "selected" : "")"
                        @onclick="@(async () => await SelectMetricAsync(metricKey))">
                     <button class="metrics-row-pin @(isPinned ? "pinned" : "")"
@@ -154,7 +154,8 @@
   private Dictionary<string, List<MetricHistoryDto>> _sparklineHistory = new();
 
   // Hero metrics: user-pinned metric keys (persisted to config)
-  private List<string> _pinnedHeroKeys = new();
+  // null = never configured (use pattern defaults), empty = user dismissed all
+  private List<string>? _pinnedHeroKeys;
 
   // Default patterns used when no pinned keys are configured
   private static readonly string[] _defaultHeroPatterns =
@@ -461,8 +462,9 @@
   {
     if (_snapshots == null) return Enumerable.Empty<KeyValuePair<string, double>>();
 
-    // If user has pinned keys, use those (in order); otherwise fall back to pattern defaults
-    if (_pinnedHeroKeys.Count > 0)
+    // null = never configured → use pattern defaults
+    // non-null (even empty) = user has customized → respect their choice
+    if (_pinnedHeroKeys != null)
     {
       return _pinnedHeroKeys
         .Where(key => _snapshots.ContainsKey(key))
@@ -478,22 +480,22 @@
 
   private async Task RemoveHeroCardAsync(string metricKey)
   {
-    // If using default patterns, initialize pinned list from current defaults first
-    if (_pinnedHeroKeys.Count == 0)
+    // If never configured, initialize from defaults so user can selectively remove
+    if (_pinnedHeroKeys == null)
       InitializePinnedFromDefaults();
 
-    _pinnedHeroKeys.Remove(metricKey);
+    _pinnedHeroKeys!.Remove(metricKey);
     await SaveHeroCardsAsync();
     StateHasChanged();
   }
 
   private async Task ToggleHeroCardAsync(string metricKey)
   {
-    // If using default patterns, initialize pinned list from current defaults first
-    if (_pinnedHeroKeys.Count == 0)
+    // If never configured, initialize from defaults so user can selectively modify
+    if (_pinnedHeroKeys == null)
       InitializePinnedFromDefaults();
 
-    if (_pinnedHeroKeys.Contains(metricKey))
+    if (_pinnedHeroKeys!.Contains(metricKey))
     {
       _pinnedHeroKeys.Remove(metricKey);
     }
@@ -513,7 +515,12 @@
 
   private void InitializePinnedFromDefaults()
   {
-    if (_snapshots == null) return;
+    if (_snapshots == null)
+    {
+      _pinnedHeroKeys = new List<string>();
+      return;
+    }
+
     _pinnedHeroKeys = _snapshots.Keys
       .Where(key => _defaultHeroPatterns.Any(p => key.ToLowerInvariant().Contains(p)))
       .OrderBy(key => Array.FindIndex(_defaultHeroPatterns, p => key.ToLowerInvariant().Contains(p)))
@@ -523,7 +530,7 @@
 
   private async Task SaveHeroCardsAsync()
   {
-    await SavePreferenceAsync("heroCards", _pinnedHeroKeys);
+    await SavePreferenceAsync("heroCards", _pinnedHeroKeys ?? new List<string>());
   }
 
   private IEnumerable<KeyValuePair<string, double>> GetMetricsForCategory(string category)

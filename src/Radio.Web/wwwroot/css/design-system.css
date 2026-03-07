@@ -1540,8 +1540,8 @@ body {
 .metrics-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 6px 12px 6px 34px;
+  gap: 8px;
+  padding: 6px 12px 6px 12px;
   cursor: pointer;
   transition: background var(--anim-duration-fast) var(--anim-ease-standard);
   border-bottom: 1px solid rgba(31, 31, 34, 0.5);
@@ -1554,7 +1554,7 @@ body {
 .metrics-row.selected {
   background: var(--accent-dim);
   border-left: 2px solid var(--accent-primary);
-  padding-left: 32px;
+  padding-left: 10px;
 }
 
 .metrics-row-label {
