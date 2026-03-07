@@ -279,15 +279,21 @@ public class AudioStateUpdateService : BackgroundService
   private string? ResolveAlbumArtUrl(string? albumArtUrl)
   {
     if (string.IsNullOrEmpty(albumArtUrl))
+    {
       return albumArtUrl;
+    }
 
     // Already absolute or data URI — return as-is
     if (albumArtUrl.StartsWith("http://") || albumArtUrl.StartsWith("https://") || albumArtUrl.StartsWith("data:"))
+    {
       return albumArtUrl;
+    }
 
     // Relative path (e.g., /api/albumart/abc123.jpg) — prepend API base URL
     if (_apiBaseUrl != null && albumArtUrl.StartsWith("/"))
+    {
       return _apiBaseUrl + albumArtUrl;
+    }
 
     return albumArtUrl;
   }
@@ -339,9 +345,14 @@ public class AudioStateUpdateService : BackgroundService
     foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
     {
       if (ni.OperationalStatus != OperationalStatus.Up)
+      {
         continue;
+      }
+
       if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+      {
         continue;
+      }
 
       var desc = ni.Description.ToLowerInvariant();
       var name = ni.Name.ToLowerInvariant();
@@ -355,10 +366,14 @@ public class AudioStateUpdateService : BackgroundService
       {
         if (addr.Address.AddressFamily != AddressFamily.InterNetwork ||
             IPAddress.IsLoopback(addr.Address))
+        {
           continue;
+        }
 
         if (!isVirtual)
+        {
           return addr.Address.ToString();
+        }
 
         fallbackIp ??= addr.Address.ToString();
       }
@@ -384,7 +399,9 @@ public class AudioStateUpdateService : BackgroundService
       .ToList();
 
     if (!HasQueueSnapshotChanged(_lastQueueSnapshot, snapshot))
+    {
       return;
+    }
 
     var currentQueue = fullPlaylist
       .Select(MapToQueueItemDto)
@@ -490,9 +507,14 @@ public class AudioStateUpdateService : BackgroundService
     List<(string Id, int Index, bool IsCurrent, string State)>? current)
   {
     if (previous == null || current == null)
+    {
       return true;
+    }
+
     if (previous.Count != current.Count)
+    {
       return true;
+    }
 
     for (int i = 0; i < previous.Count; i++)
     {
@@ -500,7 +522,9 @@ public class AudioStateUpdateService : BackgroundService
           previous[i].Index != current[i].Index ||
           previous[i].IsCurrent != current[i].IsCurrent ||
           previous[i].State != current[i].State)
+      {
         return true;
+      }
     }
 
     return false;
@@ -639,7 +663,11 @@ public class AudioStateUpdateService : BackgroundService
 
   private static string? FormatDuration(TimeSpan? duration)
   {
-    if (duration == null) return null;
+    if (duration == null)
+    {
+      return null;
+    }
+
     var ts = duration.Value;
     return ts.TotalHours >= 1
       ? $"{(int)ts.TotalHours}:{ts.Minutes:D2}:{ts.Seconds:D2}"
@@ -742,7 +770,10 @@ public class AudioStateUpdateService : BackgroundService
   /// </summary>
   private void OnCastVolumeChanged(object? sender, CastVolumeChangedEventArgs e)
   {
-    if (_audioManager == null) return;
+    if (_audioManager == null)
+    {
+      return;
+    }
 
     try
     {
@@ -789,7 +820,10 @@ public class AudioStateUpdateService : BackgroundService
     {
       var now = DateTime.UtcNow;
       if (now - _lastFingerprintBroadcast < FingerprintBroadcastThrottle)
+      {
         return;
+      }
+
       _lastFingerprintBroadcast = now;
 
       var dto = snapshot.MapToDto();

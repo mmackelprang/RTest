@@ -240,7 +240,9 @@ public class RdsDecoderTests
   private static void FeedSyntheticRdsSignal(RdsDecoder decoder, string psName)
   {
     if (psName.Length != 8)
+    {
       throw new ArgumentException("PS name must be exactly 8 characters", nameof(psName));
+    }
 
     // Build the RDS bitstream: multiple repetitions of the complete PS name
     // via Group 0A blocks (4 groups per complete PS name, 4 blocks per group)

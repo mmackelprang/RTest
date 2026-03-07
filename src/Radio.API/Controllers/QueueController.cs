@@ -357,7 +357,11 @@ public class QueueController : ControllerBase
 
   private static string? FormatDuration(TimeSpan? duration)
   {
-    if (duration == null) return null;
+    if (duration == null)
+    {
+      return null;
+    }
+
     var ts = duration.Value;
     return ts.TotalHours >= 1
       ? $"{(int)ts.TotalHours}:{ts.Minutes:D2}:{ts.Seconds:D2}"

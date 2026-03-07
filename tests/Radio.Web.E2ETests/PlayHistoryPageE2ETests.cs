@@ -1,6 +1,6 @@
 using Microsoft.Playwright;
-using static Microsoft.Playwright.Assertions;
 using Xunit;
+using static Microsoft.Playwright.Assertions;
 
 namespace Radio.Web.E2ETests;
 
@@ -20,7 +20,11 @@ public class PlayHistoryPageE2ETests
   [Fact]
   public async Task HistoryPage_HasFilterControls()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/history");
     await _fixture.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
@@ -34,7 +38,11 @@ public class PlayHistoryPageE2ETests
   [Fact]
   public async Task HistoryPage_HasSearchField()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/history");
     await _fixture.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
@@ -46,7 +54,11 @@ public class PlayHistoryPageE2ETests
   [Fact]
   public async Task HistoryPage_ShowsHistoryListOrEmptyState()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/history");
     await _fixture.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 

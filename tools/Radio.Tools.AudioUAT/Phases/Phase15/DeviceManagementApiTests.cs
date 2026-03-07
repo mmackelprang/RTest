@@ -402,20 +402,30 @@ internal class TestDeviceProperties : IPhaseTest
 
         // Check required properties
         if (string.IsNullOrWhiteSpace(device.Id))
+        {
           issues.Add($"Device '{device.Name}' has null or empty Id");
+        }
 
         if (string.IsNullOrWhiteSpace(device.Name))
+        {
           issues.Add($"Device '{device.Id}' has null or empty Name");
+        }
 
         if (string.IsNullOrWhiteSpace(device.Type))
+        {
           issues.Add($"Device '{device.Name}' has null or empty Type");
+        }
 
         if (device.MaxChannels <= 0)
+        {
           issues.Add($"Device '{device.Name}' has invalid MaxChannels: {device.MaxChannels}");
+        }
 
         // If USB device, should have USB port
         if (device.IsUSBDevice && string.IsNullOrWhiteSpace(device.USBPort))
+        {
           issues.Add($"USB device '{device.Name}' has no USBPort specified");
+        }
 
         // Validate supported sample rates
         if (device.SupportedSampleRates != null && device.SupportedSampleRates.Length > 0)

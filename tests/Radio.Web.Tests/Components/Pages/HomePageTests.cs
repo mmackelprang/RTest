@@ -1,15 +1,15 @@
 using Bunit;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Configuration;
+using Moq;
+using MudBlazor;
+using MudBlazor.Services;
 using Radio.Web.Components.Pages;
 using Radio.Web.Services;
 using Radio.Web.Services.ApiClients;
 using Radio.Web.Services.Hub;
-using MudBlazor;
-using MudBlazor.Services;
-using Moq;
 
 namespace Radio.Web.Tests.Components.Pages;
 

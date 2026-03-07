@@ -29,7 +29,11 @@ internal static class TestServer
 
   public static void Stop(Process? process)
   {
-    if (process == null) return;
+    if (process == null)
+    {
+      return;
+    }
+
     try
     {
       if (!process.HasExited)

@@ -53,9 +53,13 @@ public class ApiMetricsMiddleware
 
       var statusCode = context.Response.StatusCode;
       if (statusCode >= 400 && statusCode < 500)
+      {
         _metricsCollector.Increment("api.errors.client");
+      }
       else if (statusCode >= 500)
+      {
         _metricsCollector.Increment("api.errors.server");
+      }
     }
   }
 
@@ -68,7 +72,9 @@ public class ApiMetricsMiddleware
     var endpoint = context.GetEndpoint();
     var routePattern = (endpoint as Microsoft.AspNetCore.Routing.RouteEndpoint)?.RoutePattern.RawText;
     if (!string.IsNullOrEmpty(routePattern))
+    {
       return routePattern.Replace('/', '.').TrimStart('.');
+    }
 
     // Fallback: first two segments (e.g., "api.audio")
     var path = context.Request.Path.Value ?? "/";

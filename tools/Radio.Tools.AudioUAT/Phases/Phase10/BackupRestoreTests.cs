@@ -1,8 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using Radio.Core.Configuration;
+using Radio.Infrastructure.Audio.Fingerprinting.Data;
 using Radio.Infrastructure.Configuration.Abstractions;
 using Radio.Infrastructure.Metrics.Data;
-using Radio.Infrastructure.Audio.Fingerprinting.Data;
 using Radio.Tools.AudioUAT.Utilities;
 using Spectre.Console;
 
@@ -128,7 +128,9 @@ public class RestoreBackupTest : IPhaseTest
       var backups = await backupService.ListBackupsAsync(ct);
       
       if (backups.Count == 0)
+      {
         return TestResult.Fail(TestId, "No backups to restore");
+      }
 
       var backup = backups[0];
       ConsoleUI.WriteInfo($"Restoring: {backup.BackupId}");
@@ -140,7 +142,9 @@ public class RestoreBackupTest : IPhaseTest
       var entry = await store.GetEntryAsync("test-key");
       
       if (entry?.Value != "test-value")
+      {
         return TestResult.Fail(TestId, "Verification failed");
+      }
 
       ConsoleUI.WriteSuccess("Backup restored and verified");
       return TestResult.Pass(TestId, "Restored successfully");

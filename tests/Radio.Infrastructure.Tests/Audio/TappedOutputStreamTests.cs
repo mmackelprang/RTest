@@ -379,7 +379,10 @@ public class TappedOutputStreamTests
     var stream = CreateTappedOutputStream(1000, 1, 1); // 1kHz, mono, 1s buffer = 2000 bytes
     var samples = new float[100]; // 200 bytes of PCM
     for (var i = 0; i < samples.Length; i++)
+    {
       samples[i] = 0.5f;
+    }
+
     InvokeWriteFromEngine(stream, samples);
 
     // Create reader with 100-byte lag — should start behind write position
@@ -400,7 +403,10 @@ public class TappedOutputStreamTests
     var stream = CreateTappedOutputStream(1000, 1, 1);
     var samples = new float[10]; // 20 bytes of PCM
     for (var i = 0; i < samples.Length; i++)
+    {
       samples[i] = 0.5f;
+    }
+
     InvokeWriteFromEngine(stream, samples);
 
     // Create reader requesting more lag than what's been written

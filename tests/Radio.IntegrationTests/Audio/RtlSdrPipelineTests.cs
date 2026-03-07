@@ -51,7 +51,9 @@ public class RtlSdrPipelineTests : IDisposable
     {
       Interlocked.Add(ref samplesReceived, e.Samples.Length);
       if (!sampleTcs.Task.IsCompleted)
+      {
         sampleTcs.TrySetResult(e.Samples);
+      }
     };
 
     _mockDevice.StartStreaming();
@@ -87,7 +89,9 @@ public class RtlSdrPipelineTests : IDisposable
     {
       audioReceived.Add(e.Samples);
       if (!audioBatchTcs.Task.IsCompleted)
+      {
         audioBatchTcs.TrySetResult(e.Samples);
+      }
     };
 
     // Tune to a simulated station with strong signal
@@ -193,7 +197,9 @@ public class RtlSdrPipelineTests : IDisposable
       samplesAdded.Add(e.Samples.ToArray());
       Interlocked.Add(ref totalSamplesAdded, e.Samples.Length);
       if (Interlocked.Read(ref totalSamplesAdded) > 1000 && !samplesTcs.Task.IsCompleted)
+      {
         samplesTcs.TrySetResult(true);
+      }
     };
 
     _receiver.SetFrequency(94_700_000);
@@ -265,7 +271,9 @@ public class RtlSdrPipelineTests : IDisposable
       device.SamplesAvailable += (_, e) =>
       {
         if (!samplesTcs.Task.IsCompleted)
+        {
           samplesTcs.TrySetResult(e.Samples);
+        }
       };
 
       Assert.True(device.StartStreaming(), "Failed to start streaming");
@@ -310,10 +318,15 @@ public class RtlSdrPipelineTests : IDisposable
       lock (queueLock)
       {
         foreach (var s in e.Samples)
+        {
           audioQueue.Enqueue(s);
+        }
+
         totalEnqueued += e.Samples.Length;
         if (totalEnqueued > 4800 && !enoughDataTcs.Task.IsCompleted) // ~100ms at 48kHz
+        {
           enoughDataTcs.TrySetResult(true);
+        }
       }
     };
 
@@ -331,7 +344,9 @@ public class RtlSdrPipelineTests : IDisposable
         var count = Math.Min(audioQueue.Count, 4800);
         outputBuffer = new float[count];
         for (int i = 0; i < count; i++)
+        {
           outputBuffer[i] = audioQueue.Dequeue();
+        }
       }
 
       // Analyze output

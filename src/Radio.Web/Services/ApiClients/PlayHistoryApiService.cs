@@ -23,8 +23,16 @@ public class PlayHistoryApiService
     try
     {
       var query = new List<string>();
-      if (limit.HasValue) query.Add($"limit={limit}");
-      if (offset.HasValue) query.Add($"offset={offset}");
+      if (limit.HasValue)
+      {
+        query.Add($"limit={limit}");
+      }
+
+      if (offset.HasValue)
+      {
+        query.Add($"offset={offset}");
+      }
+
       var queryString = query.Any() ? "?" + string.Join("&", query) : "";
       
       var result = await _httpClient.GetFromJsonAsync<PlayHistoryListDto>($"/api/playhistory{queryString}", cancellationToken);
@@ -68,8 +76,16 @@ public class PlayHistoryApiService
       }
 
       var query = new List<string>();
-      if (limit.HasValue) query.Add($"limit={limit}");
-      if (offset.HasValue) query.Add($"offset={offset}");
+      if (limit.HasValue)
+      {
+        query.Add($"limit={limit}");
+      }
+
+      if (offset.HasValue)
+      {
+        query.Add($"offset={offset}");
+      }
+
       var queryString = query.Any() ? "?" + string.Join("&", query) : "";
 
       var response = await _httpClient.GetAsync($"/api/playhistory/source/{Uri.EscapeDataString(source ?? "")}{queryString}", cancellationToken);
@@ -97,8 +113,16 @@ public class PlayHistoryApiService
     {
       var dateStr = date.ToString("yyyy-MM-dd");
       var query = new List<string>();
-      if (limit.HasValue) query.Add($"limit={limit}");
-      if (offset.HasValue) query.Add($"offset={offset}");
+      if (limit.HasValue)
+      {
+        query.Add($"limit={limit}");
+      }
+
+      if (offset.HasValue)
+      {
+        query.Add($"offset={offset}");
+      }
+
       var queryString = query.Any() ? "?" + string.Join("&", query) : "";
 
       return await _httpClient.GetFromJsonAsync<PlayHistoryListDto>($"/api/playhistory/date/{dateStr}{queryString}", cancellationToken);
@@ -115,8 +139,16 @@ public class PlayHistoryApiService
     try
     {
       var queryParams = new List<string> { $"q={Uri.EscapeDataString(query)}" };
-      if (limit.HasValue) queryParams.Add($"limit={limit}");
-      if (offset.HasValue) queryParams.Add($"offset={offset}");
+      if (limit.HasValue)
+      {
+        queryParams.Add($"limit={limit}");
+      }
+
+      if (offset.HasValue)
+      {
+        queryParams.Add($"offset={offset}");
+      }
+
       var queryString = "?" + string.Join("&", queryParams);
 
       return await _httpClient.GetFromJsonAsync<PlayHistoryListDto>($"/api/playhistory/search{queryString}", cancellationToken);

@@ -58,7 +58,9 @@ public class CompositeSecretsProviderTests : IAsyncDisposable
     try
     {
       if (Directory.Exists(_testDirectory))
+      {
         Directory.Delete(_testDirectory, recursive: true);
+      }
     }
     catch { }
   }

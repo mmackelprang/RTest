@@ -1,10 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Radio.API.Extensions;
+using Radio.API.Models;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
-using Radio.API.Models;
 using Radio.Infrastructure.Audio.Sources.Primary;
 
 namespace Radio.API.Controllers;
@@ -184,7 +184,9 @@ public class FilesController : ControllerBase
           cancellationToken.ThrowIfCancellationRequested();
           var ext = System.IO.Path.GetExtension(file);
           if (!supportedExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase))
+          {
             continue;
+          }
 
           // Try to get metadata via _fileBrowser, fall back to basic FileInfo
           try
@@ -251,7 +253,11 @@ public class FilesController : ControllerBase
   /// </summary>
   private static string? FormatDuration(TimeSpan? duration)
   {
-    if (duration == null) return null;
+    if (duration == null)
+    {
+      return null;
+    }
+
     var ts = duration.Value;
     if (ts.Hours > 0)
     {
@@ -555,15 +561,23 @@ public class FilesController : ControllerBase
       var mediaRoot = Path.GetFullPath(
         string.IsNullOrEmpty(options.RootDirectory) ? "." : options.RootDirectory);
       if (resolvedPath.StartsWith(mediaRoot, StringComparison.OrdinalIgnoreCase))
+      {
         return true;
+      }
 
       // Check against additional allowed browse directories
       foreach (var allowedDir in options.AllowedBrowseDirectories)
       {
-        if (string.IsNullOrWhiteSpace(allowedDir)) continue;
+        if (string.IsNullOrWhiteSpace(allowedDir))
+        {
+          continue;
+        }
+
         var resolvedAllowed = Path.GetFullPath(allowedDir);
         if (resolvedPath.StartsWith(resolvedAllowed, StringComparison.OrdinalIgnoreCase))
+        {
           return true;
+        }
       }
 
       return false;

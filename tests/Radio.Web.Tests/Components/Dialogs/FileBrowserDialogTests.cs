@@ -1,8 +1,8 @@
 using Bunit;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Configuration;
 using MudBlazor.Services;
 using Radio.Web.Components.Dialogs;
 using Radio.Web.Services.ApiClients;
@@ -43,7 +43,10 @@ public class FileBrowserDialogTests : TestContext
   protected override void Dispose(bool disposing)
   {
     if (disposing)
+    {
       _loggerFactory?.Dispose();
+    }
+
     base.Dispose(disposing);
   }
 

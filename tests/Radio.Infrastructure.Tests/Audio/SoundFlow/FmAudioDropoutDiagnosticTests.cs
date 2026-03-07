@@ -81,7 +81,11 @@ public class FmAudioDropoutDiagnosticTests
     {
       if (samples[i] == 0f)
       {
-        if (runStart < 0) runStart = i;
+        if (runStart < 0)
+        {
+          runStart = i;
+        }
+
         runLength++;
       }
       else
@@ -205,7 +209,9 @@ public class FmAudioDropoutDiagnosticTests
 
       // Safety: prevent infinite loop if both times are past duration
       if (nextProducerMs >= durationMs && outputOffset >= totalMixerSamples)
+      {
         break;
+      }
     }
 
     metrics.Diagnostics = generator.GetDiagnostics();
@@ -259,7 +265,11 @@ public class FmAudioDropoutDiagnosticTests
       durationSeconds: 3,
       callbackProvider: cb =>
       {
-        if (cb == gapAtCallback) return null; // Squelch closed → no audio
+        if (cb == gapAtCallback)
+        {
+          return null; // Squelch closed → no audio
+        }
+
         return GenerateToneCallback(MonoSamplesPerCallback, cb);
       });
 
@@ -297,7 +307,11 @@ public class FmAudioDropoutDiagnosticTests
       callbackProvider: cb =>
       {
         // Simulate periodic signal dips — every 7th callback is lost
-        if (cb % 7 == 3) return null;
+        if (cb % 7 == 3)
+        {
+          return null;
+        }
+
         return GenerateToneCallback(MonoSamplesPerCallback, cb);
       });
 
@@ -370,7 +384,11 @@ public class FmAudioDropoutDiagnosticTests
           Array.Copy(tone2, 0, mono, MonoSamplesPerCallback, MonoSamplesPerCallback);
           return mono;
         }
-        if (cb % 10 == 6) return null; // Corresponding gap
+        if (cb % 10 == 6)
+        {
+          return null; // Corresponding gap
+        }
+
         return GenerateToneCallback(MonoSamplesPerCallback, cb);
       });
 
@@ -403,7 +421,11 @@ public class FmAudioDropoutDiagnosticTests
       durationSeconds: 2,
       callbackProvider: cb =>
       {
-        if (cb == gapCallback) return null;
+        if (cb == gapCallback)
+        {
+          return null;
+        }
+
         return GenerateToneCallback(MonoSamplesPerCallback, cb);
       });
 
@@ -520,7 +542,11 @@ public class FmAudioDropoutDiagnosticTests
       durationSeconds: 3,
       callbackProvider: cb =>
       {
-        if (cb == gapAtCallback) return silenceMono; // Silence, not null!
+        if (cb == gapAtCallback)
+        {
+          return silenceMono; // Silence, not null!
+        }
+
         return GenerateToneCallback(MonoSamplesPerCallback, cb);
       });
 
@@ -557,7 +583,11 @@ public class FmAudioDropoutDiagnosticTests
       callbackProvider: cb =>
       {
         // Every 7th callback: signal dips below squelch → deliver silence
-        if (cb % 7 == 3) return silenceMono;
+        if (cb % 7 == 3)
+        {
+          return silenceMono;
+        }
+
         return GenerateToneCallback(MonoSamplesPerCallback, cb);
       });
 
@@ -709,7 +739,9 @@ public class FmAudioDropoutDiagnosticTests
     var totalSamples = SamplesPerSecondStereo * 2; // 2 seconds
     var inputData = new float[totalSamples];
     for (int i = 0; i < totalSamples; i++)
+    {
       inputData[i] = MathF.Sin(2 * MathF.PI * 440f * (i / 2) / AudioSampleRate) * 0.5f;
+    }
 
     for (int offset = 0; offset < totalSamples; offset += smallChunkSize)
     {
@@ -834,7 +866,10 @@ public class FmAudioDropoutDiagnosticTests
         var stereo = MonoToStereo(mono);
         generator.AddSamples(stereo);
         // Brief yield to simulate real timing (not a sleep)
-        if (cb % 10 == 0) Thread.Yield();
+        if (cb % 10 == 0)
+        {
+          Thread.Yield();
+        }
       }
       producerDone = true;
     });
@@ -848,7 +883,9 @@ public class FmAudioDropoutDiagnosticTests
         var chunk = generator.PullAudio(MixerChunkStereo);
         lock (totalOutput) { totalOutput.AddRange(chunk); }
         if (totalOutput.Count > SamplesPerSecondStereo * durationSeconds * 2)
+        {
           break; // Safety: don't accumulate forever
+        }
       }
     });
 

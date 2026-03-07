@@ -66,14 +66,20 @@ public class FileApiService
     {
       var response = await _httpClient.PostAsJsonAsync("/api/files/queue", new { Paths = new List<string> { filePath } }, cancellationToken);
       if (!response.IsSuccessStatusCode)
+      {
         return (false, $"Server returned {response.StatusCode}");
+      }
 
       var result = await response.Content.ReadFromJsonAsync<QueueFilesResponseDto>(cancellationToken: cancellationToken);
       if (result == null)
+      {
         return (false, "Empty response from server");
+      }
 
       if (result.AddedCount > 0)
+      {
         return (true, null);
+      }
 
       var failedPath = result.FailedPaths?.FirstOrDefault() ?? filePath;
       return (false, $"File not found or not supported: {failedPath}");
@@ -105,14 +111,20 @@ public class FileApiService
     {
       var response = await _httpClient.PostAsJsonAsync("/api/files/queue", new { Paths = filePaths }, cancellationToken);
       if (!response.IsSuccessStatusCode)
+      {
         return (false, 0, $"Server returned {response.StatusCode}");
+      }
 
       var result = await response.Content.ReadFromJsonAsync<QueueFilesResponseDto>(cancellationToken: cancellationToken);
       if (result == null)
+      {
         return (false, 0, "Empty response from server");
+      }
 
       if (result.AddedCount > 0)
+      {
         return (true, result.AddedCount, result.FailedCount > 0 ? $"{result.FailedCount} files failed" : null);
+      }
 
       return (false, 0, $"No files could be added ({result.FailedCount} failed)");
     }

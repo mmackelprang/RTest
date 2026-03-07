@@ -155,7 +155,7 @@ public class SoundFlowAudioDataIntegrationTests
       // Verify WAV header - should start with "RIFF"
       var header = new byte[4];
       using var stream = File.OpenRead(filePath);
-      stream.Read(header, 0, 4);
+      _ = stream.ReadAtLeast(header, 4);
       Assert.Equal("RIFF", System.Text.Encoding.ASCII.GetString(header));
     }
     finally
@@ -185,7 +185,7 @@ public class SoundFlowAudioDataIntegrationTests
       // Verify it's a valid WAV file with RIFF header
       var header = new byte[4];
       using var stream = File.OpenRead(filePath);
-      stream.Read(header, 0, 4);
+      _ = stream.ReadAtLeast(header, 4);
       Assert.Equal("RIFF", System.Text.Encoding.ASCII.GetString(header));
     }
     finally

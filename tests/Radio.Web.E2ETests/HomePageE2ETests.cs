@@ -1,7 +1,7 @@
 using System.Text.RegularExpressions;
 using Microsoft.Playwright;
-using static Microsoft.Playwright.Assertions;
 using Xunit;
+using static Microsoft.Playwright.Assertions;
 
 namespace Radio.Web.E2ETests;
 
@@ -21,7 +21,11 @@ public class HomePageE2ETests
   [Fact]
   public async Task HomePage_LoadsSuccessfully()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync(_fixture.BaseUrl);
     await Expect(_fixture.Page).ToHaveTitleAsync(new Regex(".*Radio Console.*", RegexOptions.IgnoreCase));
   }
@@ -29,7 +33,11 @@ public class HomePageE2ETests
   [Fact]
   public async Task HomePage_DisplaysNowPlayingCard()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync(_fixture.BaseUrl);
     var card = _fixture.Page.Locator(".mud-card").First;
     await Expect(card).ToBeVisibleAsync();
@@ -38,7 +46,11 @@ public class HomePageE2ETests
   [Fact]
   public async Task HomePage_HasTransportControls()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync(_fixture.BaseUrl);
 
     var playButton = _fixture.Page.Locator("button[title*='Play' i], button[title*='Pause' i]").First;
@@ -54,7 +66,11 @@ public class HomePageE2ETests
   [Fact]
   public async Task HomePage_HasVolumeControl()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync(_fixture.BaseUrl);
     var volumeText = _fixture.Page.Locator("text=Volume:");
     await Expect(volumeText).ToBeVisibleAsync();
@@ -63,7 +79,11 @@ public class HomePageE2ETests
   [Fact]
   public async Task HomePage_DisplaysNavigationBar()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync(_fixture.BaseUrl);
 
     var appBar = _fixture.Page.Locator(".mud-appbar");
@@ -77,7 +97,11 @@ public class HomePageE2ETests
   [Fact]
   public async Task HomePage_HasResponsiveLayout()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync(_fixture.BaseUrl);
 
     var layoutContainer = _fixture.Page.Locator(".layout-container").First;
@@ -91,7 +115,11 @@ public class HomePageE2ETests
   [Fact]
   public async Task HomePage_HasAudioSourceSelector()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync(_fixture.BaseUrl);
 
     // The Audio Source MudSelect renders as a div with the label text
@@ -102,7 +130,11 @@ public class HomePageE2ETests
   [Fact]
   public async Task HomePage_HasAudioOutputSelector()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync(_fixture.BaseUrl);
 
     var outputLabel = _fixture.Page.Locator("text=Audio Output");
@@ -112,7 +144,11 @@ public class HomePageE2ETests
   [Fact]
   public async Task HomePage_HasMuteButton()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync(_fixture.BaseUrl);
 
     var muteButton = _fixture.Page.Locator("button[title='Mute'], button[title='Unmute']").First;

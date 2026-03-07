@@ -45,8 +45,15 @@ public class MockAudioSampleProvider : IAudioSampleProvider
   public void SetActive(bool active, string? sourceName = null, PlaySource? sourceType = null)
   {
     _isActive = active;
-    if (sourceName != null) _sourceName = sourceName;
-    if (sourceType != null) _sourceType = sourceType.Value;
+    if (sourceName != null)
+    {
+      _sourceName = sourceName;
+    }
+
+    if (sourceType != null)
+    {
+      _sourceType = sourceType.Value;
+    }
   }
 
   /// <summary>

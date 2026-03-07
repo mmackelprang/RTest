@@ -85,7 +85,9 @@ public class AudioDiagnosticsController : ControllerBase
     [FromBody] CaptureRequestDto? request, CancellationToken ct)
   {
     if (_captureService.IsCapturing)
+    {
       return Conflict(new { error = "A capture is already in progress" });
+    }
 
     var duration = request?.DurationSeconds ?? 10;
     duration = Math.Clamp(duration, 1, 60);
@@ -114,7 +116,9 @@ public class AudioDiagnosticsController : ControllerBase
   public ActionResult StopCapture()
   {
     if (!_captureService.IsCapturing)
+    {
       return NotFound(new { error = "No active capture to stop" });
+    }
 
     _captureService.StopCapture();
     _logger.LogInformation("Diagnostic capture stop requested");

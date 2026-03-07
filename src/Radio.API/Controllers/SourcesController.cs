@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Radio.API.Extensions;
 using Radio.API.Mappers;
 using Radio.API.Models;
@@ -6,7 +7,6 @@ using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
-using Microsoft.Extensions.Options;
 
 namespace Radio.API.Controllers;
 
@@ -429,13 +429,19 @@ public class SourcesController : ControllerBase
     try
     {
       if (_ttsFactory == null)
+      {
         return StatusCode(501, new { error = "TTS factory not available" });
+      }
 
       if (!Enum.TryParse<TTSEngine>(engine, ignoreCase: true, out var ttsEngine))
+      {
         return BadRequest(new { error = $"Invalid engine: {engine}. Valid values are: Google, Azure" });
+      }
 
       if (ttsEngine == TTSEngine.ESpeak)
+      {
         return BadRequest(new { error = "Voice refresh is not supported for eSpeak" });
+      }
 
       var count = await _ttsFactory.RefreshVoicesAsync(ttsEngine, cancellationToken);
       return Ok(new { count });
@@ -460,10 +466,14 @@ public class SourcesController : ControllerBase
     try
     {
       if (_ttsFactory == null)
+      {
         return StatusCode(501, new { error = "TTS factory not available" });
+      }
 
       if (!Enum.TryParse<TTSEngine>(engine, ignoreCase: true, out var ttsEngine))
+      {
         return BadRequest(new { error = $"Invalid engine: {engine}" });
+      }
 
       await _ttsFactory.SetVoiceFavoriteAsync(ttsEngine, voiceId, cancellationToken);
       return Ok();
@@ -488,10 +498,14 @@ public class SourcesController : ControllerBase
     try
     {
       if (_ttsFactory == null)
+      {
         return StatusCode(501, new { error = "TTS factory not available" });
+      }
 
       if (!Enum.TryParse<TTSEngine>(engine, ignoreCase: true, out var ttsEngine))
+      {
         return BadRequest(new { error = $"Invalid engine: {engine}" });
+      }
 
       await _ttsFactory.RemoveVoiceFavoriteAsync(ttsEngine, voiceId, cancellationToken);
       return Ok();

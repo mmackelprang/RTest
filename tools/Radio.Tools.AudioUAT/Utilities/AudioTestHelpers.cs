@@ -189,7 +189,9 @@ public static class AudioTestHelpers
   public static float CalculateRmsLevel(float[] samples)
   {
     if (samples.Length == 0)
+    {
       return 0f;
+    }
 
     var sumSquares = 0.0;
     foreach (var sample in samples)
@@ -208,14 +210,18 @@ public static class AudioTestHelpers
   public static float CalculatePeakLevel(float[] samples)
   {
     if (samples.Length == 0)
+    {
       return 0f;
+    }
 
     var peak = 0f;
     foreach (var sample in samples)
     {
       var abs = Math.Abs(sample);
       if (abs > peak)
+      {
         peak = abs;
+      }
     }
 
     return peak;
@@ -229,7 +235,9 @@ public static class AudioTestHelpers
   public static float LinearToDecibels(float linear)
   {
     if (linear <= 0)
+    {
       return float.NegativeInfinity;
+    }
 
     return 20f * (float)Math.Log10(linear);
   }
@@ -368,7 +376,9 @@ public static class AudioTestHelpers
     {
       result.AddRange(beepSamples);
       if (i < 2)
+      {
         result.AddRange(pauseSamples);
+      }
     }
 
     return result.ToArray();

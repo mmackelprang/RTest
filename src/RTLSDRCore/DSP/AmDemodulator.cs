@@ -1,59 +1,58 @@
 using RTLSDRCore.Models;
 
-namespace RTLSDRCore.DSP
-{
-    /// <summary>
-    /// Amplitude Modulation (AM) demodulator using envelope detection
-    /// </summary>
-    public class AmDemodulator : IDemodulator
-    {
-        private float _dcBlockerState;
-        private readonly float _dcBlockerAlpha;
+namespace RTLSDRCore.DSP;
 
-        /// <inheritdoc/>
-        public string Name => "AM";
+  /// <summary>
+  /// Amplitude Modulation (AM) demodulator using envelope detection
+  /// </summary>
+  public class AmDemodulator : IDemodulator
+  {
+      private float _dcBlockerState;
+      private readonly float _dcBlockerAlpha;
 
-        /// <inheritdoc/>
-        public int SampleRate { get; set; } = 2_400_000;
+      /// <inheritdoc/>
+      public string Name => "AM";
 
-        /// <inheritdoc/>
-        public int Bandwidth { get; set; } = 10_000;
+      /// <inheritdoc/>
+      public int SampleRate { get; set; } = 2_400_000;
 
-        /// <summary>
-        /// Gets or sets the DC blocker time constant
-        /// </summary>
-        public float DcBlockerTimeConstant { get; set; } = 0.9999f;
+      /// <inheritdoc/>
+      public int Bandwidth { get; set; } = 10_000;
 
-        /// <summary>
-        /// Creates a new AM demodulator
-        /// </summary>
-        public AmDemodulator()
-        {
-            _dcBlockerAlpha = DcBlockerTimeConstant;
-        }
+      /// <summary>
+      /// Gets or sets the DC blocker time constant
+      /// </summary>
+      public float DcBlockerTimeConstant { get; set; } = 0.9999f;
 
-        /// <inheritdoc/>
-        public int Demodulate(ReadOnlySpan<IqSample> input, Span<float> output)
-        {
-            var outputCount = Math.Min(input.Length, output.Length);
+      /// <summary>
+      /// Creates a new AM demodulator
+      /// </summary>
+      public AmDemodulator()
+      {
+          _dcBlockerAlpha = DcBlockerTimeConstant;
+      }
 
-            for (var i = 0; i < outputCount; i++)
-            {
-                // Envelope detection: magnitude of the complex signal
-                var magnitude = input[i].Magnitude;
+      /// <inheritdoc/>
+      public int Demodulate(ReadOnlySpan<IqSample> input, Span<float> output)
+      {
+          var outputCount = Math.Min(input.Length, output.Length);
 
-                // DC blocking filter to remove the carrier
-                _dcBlockerState = _dcBlockerAlpha * _dcBlockerState + (1 - _dcBlockerAlpha) * magnitude;
-                output[i] = magnitude - _dcBlockerState;
-            }
+          for (var i = 0; i < outputCount; i++)
+          {
+              // Envelope detection: magnitude of the complex signal
+              var magnitude = input[i].Magnitude;
 
-            return outputCount;
-        }
+              // DC blocking filter to remove the carrier
+              _dcBlockerState = _dcBlockerAlpha * _dcBlockerState + (1 - _dcBlockerAlpha) * magnitude;
+              output[i] = magnitude - _dcBlockerState;
+          }
 
-        /// <inheritdoc/>
-        public void Reset()
-        {
-            _dcBlockerState = 0;
-        }
-    }
-}
+          return outputCount;
+      }
+
+      /// <inheritdoc/>
+      public void Reset()
+      {
+          _dcBlockerState = 0;
+      }
+  }

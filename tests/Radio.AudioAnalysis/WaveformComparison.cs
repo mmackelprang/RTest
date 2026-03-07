@@ -21,7 +21,10 @@ public static class WaveformComparison
     ReadOnlySpan<float> reference, ReadOnlySpan<float> captured, int maxOffsetSamples = 4800)
   {
     var minLen = Math.Min(reference.Length, captured.Length);
-    if (minLen == 0) return (0, 0f);
+    if (minLen == 0)
+    {
+      return (0, 0f);
+    }
 
     // Limit search range to avoid exceeding buffer bounds
     maxOffsetSamples = Math.Min(maxOffsetSamples, minLen / 2);
@@ -32,7 +35,9 @@ public static class WaveformComparison
     // Compute reference energy once
     double refEnergy = 0;
     for (int i = 0; i < minLen - maxOffsetSamples; i++)
+    {
       refEnergy += reference[i] * reference[i];
+    }
 
     for (int offset = -maxOffsetSamples; offset <= maxOffsetSamples; offset++)
     {
@@ -118,7 +123,10 @@ public static class WaveformComparison
       sumSignalSq += refSpan[i] * refSpan[i];
 
       var absError = MathF.Abs(error);
-      if (absError > maxError) maxError = absError;
+      if (absError > maxError)
+      {
+        maxError = absError;
+      }
     }
 
     var rmsError = (float)Math.Sqrt(sumErrorSq / compareLen);
@@ -255,7 +263,10 @@ public static class WaveformComparison
     // Normal: corr(refL, capL) + corr(refR, capR)
     // Swapped: corr(refL, capR) + corr(refR, capL)
     int frames = Math.Min(reference.Length, captured.Length) / 2;
-    if (frames < 100) return false;
+    if (frames < 100)
+    {
+      return false;
+    }
 
     double refL_capL = 0, refR_capR = 0;  // Normal alignment
     double refL_capR = 0, refR_capL = 0;  // Swapped alignment
@@ -279,7 +290,9 @@ public static class WaveformComparison
     }
 
     if (refLSq < 0.001 || refRSq < 0.001 || capLSq < 0.001 || capRSq < 0.001)
+    {
       return false;
+    }
 
     // Compute normalized correlations for each channel pair
     var normLL = refL_capL / Math.Sqrt(refLSq * capLSq);
@@ -314,7 +327,10 @@ public static class WaveformComparison
     for (int i = channel; i < samples.Length; i += channels)
     {
       var abs = MathF.Abs(samples[i]);
-      if (abs > peak) peak = abs;
+      if (abs > peak)
+      {
+        peak = abs;
+      }
     }
     return peak;
   }

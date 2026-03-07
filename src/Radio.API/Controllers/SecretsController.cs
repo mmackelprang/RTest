@@ -42,7 +42,9 @@ public class SecretsController : ControllerBase
     string section)
   {
     if (!SectionTagMappings.TryGetValue(section, out var tagMap))
+    {
       return BadRequest(new { error = $"Unknown secrets section '{section}'" });
+    }
 
     var result = new Dictionary<string, string>();
     foreach (var (property, tag) in tagMap)
@@ -66,10 +68,14 @@ public class SecretsController : ControllerBase
     string section, [FromBody] Dictionary<string, string> data)
   {
     if (!SectionTagMappings.TryGetValue(section, out var tagMap))
+    {
       return BadRequest(new { error = $"Unknown secrets section '{section}'" });
+    }
 
     if (data == null || data.Count == 0)
+    {
       return BadRequest(new { error = "No secret data provided" });
+    }
 
     var storedCount = 0;
     foreach (var (property, value) in data)
@@ -107,13 +113,17 @@ public class SecretsController : ControllerBase
   public async Task<ActionResult> DeleteSectionSecrets(string section)
   {
     if (!SectionTagMappings.TryGetValue(section, out var tagMap))
+    {
       return BadRequest(new { error = $"Unknown secrets section '{section}'" });
+    }
 
     var deletedCount = 0;
     foreach (var (_, tag) in tagMap)
     {
       if (await _secrets.DeleteSecretAsync(tag))
+      {
         deletedCount++;
+      }
     }
 
     _logger.LogInformation("Section '{Section}': deleted {Count} secrets", section, deletedCount);
@@ -134,9 +144,15 @@ public class SecretsController : ControllerBase
   private static string MaskValue(string? value)
   {
     if (string.IsNullOrEmpty(value))
+    {
       return "";
+    }
+
     if (value.Length <= 8)
+    {
       return "********";
+    }
+
     return $"{value[..4]}...{value[^4..]}";
   }
 }

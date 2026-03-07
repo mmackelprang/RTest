@@ -137,9 +137,14 @@ public class AudioController : ControllerBase
           return BadRequest(new { error = "Volume must be between 0 and 1" });
         }
         if (_audioManager != null)
+        {
           _audioManager.MasterVolume = request.Volume.Value;
+        }
         else
+        {
           mixer.MasterVolume = request.Volume.Value;
+        }
+
         _logger.LogInformation("Volume set to {Volume}", mixer.MasterVolume);
       }
 
@@ -151,9 +156,14 @@ public class AudioController : ControllerBase
           return BadRequest(new { error = "Balance must be between -1 and 1" });
         }
         if (_audioManager != null)
+        {
           _audioManager.Balance = request.Balance.Value;
+        }
         else
+        {
           mixer.Balance = request.Balance.Value;
+        }
+
         _logger.LogInformation("Balance set to {Balance}", mixer.Balance);
       }
 
@@ -161,9 +171,14 @@ public class AudioController : ControllerBase
       if (request.IsMuted.HasValue)
       {
         if (_audioManager != null)
+        {
           _audioManager.IsMuted = request.IsMuted.Value;
+        }
         else
+        {
           mixer.IsMuted = request.IsMuted.Value;
+        }
+
         _logger.LogInformation("Mute set to {IsMuted}", mixer.IsMuted);
       }
 
@@ -245,9 +260,14 @@ public class AudioController : ControllerBase
     {
       // Ensure the engine is running
       if (_audioEngine.State == AudioEngineState.Uninitialized)
+      {
         await _audioEngine.InitializeAsync();
+      }
+
       if (_audioEngine.State == AudioEngineState.Ready)
+      {
         await _audioEngine.StartAsync();
+      }
 
       // Resume the active source if it was stopped/paused
       if (_audioManager?.ActiveSource is IPrimaryAudioSource primarySource)
@@ -339,9 +359,14 @@ public class AudioController : ControllerBase
 
     var mixer = _audioEngine.GetMasterMixer();
     if (_audioManager != null)
+    {
       _audioManager.MasterVolume = volume;
+    }
     else
+    {
       mixer.MasterVolume = volume;
+    }
+
     _logger.LogInformation("Volume set to {Volume}", volume);
 
     return Ok(new { volume = mixer.MasterVolume });
@@ -357,9 +382,14 @@ public class AudioController : ControllerBase
     var mixer = _audioEngine.GetMasterMixer();
     var newMuted = !mixer.IsMuted;
     if (_audioManager != null)
+    {
       _audioManager.IsMuted = newMuted;
+    }
     else
+    {
       mixer.IsMuted = newMuted;
+    }
+
     _logger.LogInformation("Mute toggled to {IsMuted}", mixer.IsMuted);
 
     return Ok(new { isMuted = mixer.IsMuted });
@@ -589,7 +619,9 @@ public class AudioController : ControllerBase
   public ActionResult<Dictionary<string, float>> GetSourceGainOffsets()
   {
     if (_audioManager == null)
+    {
       return Ok(new Dictionary<string, float>());
+    }
 
     return Ok(_audioManager.GetAllSourceGains());
   }
@@ -605,13 +637,19 @@ public class AudioController : ControllerBase
   public ActionResult SetSourceGain(string sourceType, float gain)
   {
     if (_audioManager == null)
+    {
       return StatusCode(500, new { error = "AudioManager not available" });
+    }
 
     if (!Enum.TryParse<Radio.Core.Interfaces.Audio.AudioSourceType>(sourceType, ignoreCase: true, out var parsed))
+    {
       return BadRequest(new { error = $"Invalid source type '{sourceType}'. Valid: Radio, Vinyl, FilePlayer, GenericUSB, Bluetooth" });
+    }
 
     if (gain < 0f || gain > 2f)
+    {
       return BadRequest(new { error = "Gain must be between 0.0 and 2.0" });
+    }
 
     _audioManager.SetSourceGain(parsed, gain);
     _logger.LogInformation("Source gain set: {SourceType} = {Gain:F2}", sourceType, gain);

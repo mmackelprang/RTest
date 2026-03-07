@@ -84,7 +84,11 @@ public class CoverArtPipelineIntegrationTests : IDisposable
         .OrderByDescending(r =>
         {
           var rg = r.ReleaseGroup;
-          if (rg == null) return 0;
+          if (rg == null)
+          {
+            return 0;
+          }
+
           bool isAlbum = string.Equals(rg.PrimaryType, "Album", StringComparison.OrdinalIgnoreCase);
           bool isCompilation = rg.SecondaryTypes?.Any(st =>
             string.Equals(st, "Compilation", StringComparison.OrdinalIgnoreCase)) == true;

@@ -391,7 +391,9 @@ public class ConfigurationController : ControllerBase
   private static bool IsValidSectionName(string section)
   {
     if (string.IsNullOrWhiteSpace(section))
+    {
       return false;
+    }
 
     // Allow alphanumeric, hyphens, underscores, and dots
     return System.Text.RegularExpressions.Regex.IsMatch(section, @"^[a-zA-Z0-9_\-\.]+$");
@@ -404,11 +406,20 @@ public class ConfigurationController : ControllerBase
   private static object? ParseConfigValue(string value)
   {
     if (bool.TryParse(value, out var boolVal))
+    {
       return boolVal;
+    }
+
     if (long.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var longVal))
+    {
       return longVal;
+    }
+
     if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var doubleVal))
+    {
       return doubleVal;
+    }
+
     return value;
   }
 
@@ -937,16 +948,22 @@ public class ConfigurationController : ControllerBase
   private static string MaskSecretValue(string? value)
   {
     if (string.IsNullOrEmpty(value))
+    {
       return string.Empty;
-    
+    }
+
     // If it's already a secret tag (${secret:...}), return as-is
     if (value.StartsWith("${secret:", StringComparison.OrdinalIgnoreCase) && value.EndsWith("}"))
+    {
       return value;
-    
+    }
+
     // Otherwise, mask the value showing only first/last 4 chars
     if (value.Length <= 8)
+    {
       return "********";
-    
+    }
+
     return $"{value.Substring(0, 4)}...{value.Substring(value.Length - 4)}";
   }
 }

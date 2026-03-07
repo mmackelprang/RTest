@@ -1,114 +1,113 @@
 using RTLSDRCore.Models;
 
-namespace RTLSDRCore.DSP
-{
-    /// <summary>
-    /// Frequency Modulation (FM) demodulator using quadrature detection
-    /// </summary>
-    public class FmDemodulator : IDemodulator
-    {
-        private IqSample _previousSample;
-        private float _gain;
+namespace RTLSDRCore.DSP;
 
-        /// <inheritdoc/>
-        public string Name => "FM";
+  /// <summary>
+  /// Frequency Modulation (FM) demodulator using quadrature detection
+  /// </summary>
+  public class FmDemodulator : IDemodulator
+  {
+      private IqSample _previousSample;
+      private float _gain;
 
-        private int _sampleRate = 2_400_000;
-        private float _maxDeviation = 75_000;
+      /// <inheritdoc/>
+      public string Name => "FM";
 
-        /// <inheritdoc/>
-        public int SampleRate
-        {
-            get => _sampleRate;
-            set { _sampleRate = value; UpdateGain(); }
-        }
+      private int _sampleRate = 2_400_000;
+      private float _maxDeviation = 75_000;
 
-        /// <inheritdoc/>
-        public int Bandwidth { get; set; } = 200_000;
+      /// <inheritdoc/>
+      public int SampleRate
+      {
+          get => _sampleRate;
+          set { _sampleRate = value; UpdateGain(); }
+      }
 
-        /// <summary>
-        /// Gets or sets the maximum frequency deviation in Hz
-        /// </summary>
-        public float MaxDeviation
-        {
-            get => _maxDeviation;
-            set { _maxDeviation = value; UpdateGain(); }
-        }
+      /// <inheritdoc/>
+      public int Bandwidth { get; set; } = 200_000;
 
-        /// <summary>
-        /// Creates a new FM demodulator
-        /// </summary>
-        public FmDemodulator()
-        {
-            UpdateGain();
-        }
+      /// <summary>
+      /// Gets or sets the maximum frequency deviation in Hz
+      /// </summary>
+      public float MaxDeviation
+      {
+          get => _maxDeviation;
+          set { _maxDeviation = value; UpdateGain(); }
+      }
 
-        private void UpdateGain()
-        {
-            // Gain to normalize the output based on max deviation and sample rate
-            _gain = _sampleRate / (2.0f * MathF.PI * _maxDeviation);
-        }
+      /// <summary>
+      /// Creates a new FM demodulator
+      /// </summary>
+      public FmDemodulator()
+      {
+          UpdateGain();
+      }
 
-        /// <inheritdoc/>
-        public int Demodulate(ReadOnlySpan<IqSample> input, Span<float> output)
-        {
-            var outputCount = Math.Min(input.Length, output.Length);
+      private void UpdateGain()
+      {
+          // Gain to normalize the output based on max deviation and sample rate
+          _gain = _sampleRate / (2.0f * MathF.PI * _maxDeviation);
+      }
 
-            for (var i = 0; i < outputCount; i++)
-            {
-                var current = input[i];
+      /// <inheritdoc/>
+      public int Demodulate(ReadOnlySpan<IqSample> input, Span<float> output)
+      {
+          var outputCount = Math.Min(input.Length, output.Length);
 
-                // Quadrature demodulation: phase difference between consecutive samples
-                // Using: atan2(Q[n]*I[n-1] - I[n]*Q[n-1], I[n]*I[n-1] + Q[n]*Q[n-1])
-                var conjugate = _previousSample.Conjugate;
-                var product = current * conjugate;
+          for (var i = 0; i < outputCount; i++)
+          {
+              var current = input[i];
 
-                // Calculate phase difference using atan2
-                var phaseDiff = MathF.Atan2(product.Q, product.I);
+              // Quadrature demodulation: phase difference between consecutive samples
+              // Using: atan2(Q[n]*I[n-1] - I[n]*Q[n-1], I[n]*I[n-1] + Q[n]*Q[n-1])
+              var conjugate = _previousSample.Conjugate;
+              var product = current * conjugate;
 
-                // Scale to audio range
-                output[i] = phaseDiff * _gain;
+              // Calculate phase difference using atan2
+              var phaseDiff = MathF.Atan2(product.Q, product.I);
 
-                _previousSample = current;
-            }
+              // Scale to audio range
+              output[i] = phaseDiff * _gain;
 
-            return outputCount;
-        }
+              _previousSample = current;
+          }
 
-        /// <inheritdoc/>
-        public void Reset()
-        {
-            _previousSample = new IqSample(0, 0);
-        }
-    }
+          return outputCount;
+      }
 
-    /// <summary>
-    /// Wideband FM demodulator for broadcast FM (mono)
-    /// </summary>
-    public class WfmDemodulator : FmDemodulator
-    {
-        /// <summary>
-        /// Creates a new wideband FM demodulator
-        /// </summary>
-        public WfmDemodulator()
-        {
-            Bandwidth = 200_000;
-            MaxDeviation = 75_000;
-        }
-    }
+      /// <inheritdoc/>
+      public void Reset()
+      {
+          _previousSample = new IqSample(0, 0);
+      }
+  }
 
-    /// <summary>
-    /// Narrowband FM demodulator for VHF/UHF communications
-    /// </summary>
-    public class NfmDemodulator : FmDemodulator
-    {
-        /// <summary>
-        /// Creates a new narrowband FM demodulator
-        /// </summary>
-        public NfmDemodulator()
-        {
-            Bandwidth = 12_500;
-            MaxDeviation = 5_000;
-        }
-    }
-}
+  /// <summary>
+  /// Wideband FM demodulator for broadcast FM (mono)
+  /// </summary>
+  public class WfmDemodulator : FmDemodulator
+  {
+      /// <summary>
+      /// Creates a new wideband FM demodulator
+      /// </summary>
+      public WfmDemodulator()
+      {
+          Bandwidth = 200_000;
+          MaxDeviation = 75_000;
+      }
+  }
+
+  /// <summary>
+  /// Narrowband FM demodulator for VHF/UHF communications
+  /// </summary>
+  public class NfmDemodulator : FmDemodulator
+  {
+      /// <summary>
+      /// Creates a new narrowband FM demodulator
+      /// </summary>
+      public NfmDemodulator()
+      {
+          Bandwidth = 12_500;
+          MaxDeviation = 5_000;
+      }
+  }

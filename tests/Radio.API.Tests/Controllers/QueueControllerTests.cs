@@ -1,7 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
-using Radio.API.Tests.TestSupport;
 using Radio.API.Models;
+using Radio.API.Tests.TestSupport;
 
 namespace Radio.API.Tests.Controllers;
 

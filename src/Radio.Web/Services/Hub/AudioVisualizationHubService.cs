@@ -96,7 +96,10 @@ public class AudioVisualizationHubService : IAsyncDisposable
       _hubConnection.Reconnecting += exception =>
       {
         if (exception == null || !IsConnectionRefused(exception))
+        {
           _logger.LogWarning(exception, "Visualization hub reconnecting");
+        }
+
         return Task.CompletedTask;
       };
 
@@ -127,7 +130,9 @@ public class AudioVisualizationHubService : IAsyncDisposable
         }
 
         if (subscriptions.Length > 0)
+        {
           _logger.LogInformation("Re-subscribed to {Count} visualization groups after reconnect", subscriptions.Length);
+        }
       };
 
       _hubConnection.Closed += exception =>
@@ -142,7 +147,10 @@ public class AudioVisualizationHubService : IAsyncDisposable
           }
         }
         else
+        {
           _logger.LogWarning(exception, "Visualization hub connection closed");
+        }
+
         return Task.CompletedTask;
       };
 
@@ -346,7 +354,9 @@ public class AudioVisualizationHubService : IAsyncDisposable
   public async ValueTask DisposeAsync()
   {
     if (_isDisposed)
+    {
       return;
+    }
 
     _isDisposed = true;
 
@@ -366,7 +376,9 @@ public class AudioVisualizationHubService : IAsyncDisposable
   private async Task InvokeEventHandlersAsync<T>(Func<T, Task>? eventHandler, T data, string eventName)
   {
     if (eventHandler == null)
+    {
       return;
+    }
 
     var handlers = eventHandler.GetInvocationList();
     foreach (var handler in handlers)
@@ -389,7 +401,10 @@ public class AudioVisualizationHubService : IAsyncDisposable
     while (current != null)
     {
       if (current is SocketException { SocketErrorCode: SocketError.ConnectionRefused })
+      {
         return true;
+      }
+
       current = current.InnerException;
     }
     return false;

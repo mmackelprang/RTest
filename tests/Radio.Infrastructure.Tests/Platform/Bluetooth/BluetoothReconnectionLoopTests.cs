@@ -165,9 +165,14 @@ public class BluetoothReconnectionLoopTests
       {
         lastAddress = addr;
         if (addr == "11:11:11:11:11:11")
+        {
           Interlocked.Increment(ref firstLoopAttempts);
+        }
         else
+        {
           Interlocked.Increment(ref secondLoopAttempts);
+        }
+
         return Task.FromResult(false);
       },
       isDeviceConnected: () => false);

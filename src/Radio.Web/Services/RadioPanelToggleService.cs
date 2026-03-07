@@ -23,7 +23,9 @@ public class RadioPanelToggleService
   {
     IsRadioPanelVisible = !IsRadioPanelVisible;
     if (RadioPanelToggled != null)
+    {
       await RadioPanelToggled.Invoke();
+    }
   }
 
   /// <summary>
@@ -31,10 +33,16 @@ public class RadioPanelToggleService
   /// </summary>
   public async Task ShowRadioPanelAsync()
   {
-    if (IsRadioPanelVisible) return;
+    if (IsRadioPanelVisible)
+    {
+      return;
+    }
+
     IsRadioPanelVisible = true;
     if (RadioPanelToggled != null)
+    {
       await RadioPanelToggled.Invoke();
+    }
   }
 
   /// <summary>
@@ -42,9 +50,15 @@ public class RadioPanelToggleService
   /// </summary>
   public async Task HideRadioPanelAsync()
   {
-    if (!IsRadioPanelVisible) return;
+    if (!IsRadioPanelVisible)
+    {
+      return;
+    }
+
     IsRadioPanelVisible = false;
     if (RadioPanelToggled != null)
+    {
       await RadioPanelToggled.Invoke();
+    }
   }
 }

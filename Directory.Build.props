@@ -3,6 +3,8 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <WarningsAsErrors />
     <NoWarn>$(NoWarn);CS1591;CS1998;NU1605</NoWarn>
+    <!-- IDE style rules: enforced as warnings, not errors (pre-existing violations in older code) -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);IDE0011;IDE0161</WarningsNotAsErrors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
   </PropertyGroup>

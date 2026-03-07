@@ -25,18 +25,26 @@ public static class FrequencyAnalysis
     // Extract the target channel
     var channelSamples = ExtractChannel(samples, channel, channels);
     if (channelSamples.Length < sampleRate / expectedFrequencyHz)
+    {
       return 0f;
+    }
 
     // Measure power at fundamental and harmonics using Goertzel algorithm
     var fundamentalPower = GoertzelPower(channelSamples, sampleRate, expectedFrequencyHz);
 
-    if (fundamentalPower < 1e-12) return 0f; // No signal at fundamental
+    if (fundamentalPower < 1e-12)
+    {
+      return 0f; // No signal at fundamental
+    }
 
     double harmonicPowerSum = 0;
     for (int h = 2; h <= maxHarmonic; h++)
     {
       var harmonicFreq = expectedFrequencyHz * h;
-      if (harmonicFreq >= sampleRate / 2) break; // Above Nyquist
+      if (harmonicFreq >= sampleRate / 2)
+      {
+        break; // Above Nyquist
+      }
 
       harmonicPowerSum += GoertzelPower(channelSamples, sampleRate, harmonicFreq);
     }
@@ -82,7 +90,10 @@ public static class FrequencyAnalysis
     var count = samples.Length / channels;
     var result = new float[count];
     for (int i = 0; i < count; i++)
+    {
       result[i] = samples[i * channels + channel];
+    }
+
     return result;
   }
 }

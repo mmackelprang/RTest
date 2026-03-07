@@ -23,12 +23,16 @@ public static class NetworkAvailabilityHelper
     get
     {
       if (_isAvailable.HasValue)
+      {
         return _isAvailable.Value;
+      }
 
       lock (Lock)
       {
         if (_isAvailable.HasValue)
+        {
           return _isAvailable.Value;
+        }
 
         _isAvailable = CheckConnectivity();
         return _isAvailable.Value;
@@ -54,7 +58,10 @@ public static class NetworkAvailabilityHelper
       using var client = new TcpClient();
       var connectTask = client.ConnectAsync("musicbrainz.org", 443);
       if (connectTask.Wait(TimeSpan.FromSeconds(3)))
+      {
         return true;
+      }
+
       return false;
     }
     catch

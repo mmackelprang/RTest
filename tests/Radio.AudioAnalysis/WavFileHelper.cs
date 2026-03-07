@@ -41,7 +41,9 @@ public static class WavFileHelper
     var buffer = new float[durationSamples];
 
     for (var i = 0; i < durationSamples; i++)
+    {
       buffer[i] = (float)(Math.Sin(2.0 * Math.PI * frequencyHz * i / sampleRate) * amplitude);
+    }
 
     return buffer;
   }
@@ -58,7 +60,9 @@ public static class WavFileHelper
   {
     var dir = Path.GetDirectoryName(filePath);
     if (!string.IsNullOrEmpty(dir))
+    {
       Directory.CreateDirectory(dir);
+    }
 
     using var fs = new FileStream(filePath, FileMode.Create);
     using var writer = new BinaryWriter(fs);
@@ -107,12 +111,16 @@ public static class WavFileHelper
     // RIFF header
     var riff = reader.ReadBytes(4);
     if (riff[0] != 'R' || riff[1] != 'I' || riff[2] != 'F' || riff[3] != 'F')
+    {
       throw new InvalidDataException("Not a valid WAV file (missing RIFF header)");
+    }
 
     reader.ReadInt32(); // File size
     var wave = reader.ReadBytes(4);
     if (wave[0] != 'W' || wave[1] != 'A' || wave[2] != 'V' || wave[3] != 'E')
+    {
       throw new InvalidDataException("Not a valid WAV file (missing WAVE format)");
+    }
 
     // Find fmt chunk
     sampleRate = 0;
@@ -128,7 +136,9 @@ public static class WavFileHelper
       {
         var audioFormat = reader.ReadInt16();
         if (audioFormat != 1)
+        {
           throw new InvalidDataException($"Unsupported audio format: {audioFormat} (only PCM supported)");
+        }
 
         channels = reader.ReadInt16();
         sampleRate = reader.ReadInt32();
@@ -139,18 +149,24 @@ public static class WavFileHelper
         // Skip any extra format bytes
         var extraBytes = chunkSize - 16;
         if (extraBytes > 0)
+        {
           reader.ReadBytes(extraBytes);
+        }
       }
       else if (chunkId == "data")
       {
         if (bitsPerSample != 16)
+        {
           throw new InvalidDataException($"Unsupported bits per sample: {bitsPerSample} (only 16-bit supported)");
+        }
 
         var sampleCount = chunkSize / (bitsPerSample / 8);
         var samples = new float[sampleCount];
 
         for (int i = 0; i < sampleCount; i++)
+        {
           samples[i] = reader.ReadInt16() / 32768.0f;
+        }
 
         return samples;
       }
@@ -169,11 +185,16 @@ public static class WavFileHelper
   /// </summary>
   public static float CalculateRms(ReadOnlySpan<float> samples)
   {
-    if (samples.Length == 0) return 0f;
+    if (samples.Length == 0)
+    {
+      return 0f;
+    }
 
     double sumSquares = 0;
     foreach (var sample in samples)
+    {
       sumSquares += sample * sample;
+    }
 
     return (float)Math.Sqrt(sumSquares / samples.Length);
   }
@@ -187,7 +208,10 @@ public static class WavFileHelper
     foreach (var sample in samples)
     {
       var abs = MathF.Abs(sample);
-      if (abs > peak) peak = abs;
+      if (abs > peak)
+      {
+        peak = abs;
+      }
     }
     return peak;
   }
