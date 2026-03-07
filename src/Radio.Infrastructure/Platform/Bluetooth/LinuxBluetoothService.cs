@@ -265,7 +265,9 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                     await _adapter.SetAsync("Alias", deviceName);
                 }
                 
+                await _adapter.SetAsync("DiscoverableTimeout", (uint)0);
                 await _adapter.SetAsync("Discoverable", true);
+                await _adapter.SetAsync("PairableTimeout", (uint)0);
                 await _adapter.SetAsync("Pairable", true);
 
                 // Register a BlueZ Agent to handle pairing requests automatically.
