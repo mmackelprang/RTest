@@ -1,6 +1,6 @@
 using Microsoft.Playwright;
-using static Microsoft.Playwright.Assertions;
 using Xunit;
+using static Microsoft.Playwright.Assertions;
 
 namespace Radio.Web.E2ETests;
 
@@ -20,7 +20,11 @@ public class RadioPageE2ETests
   [Fact]
   public async Task RadioPage_HasFrequencyDisplay()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/radio");
     await _fixture.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
@@ -32,7 +36,11 @@ public class RadioPageE2ETests
   [Fact]
   public async Task RadioPage_HasFrequencyButtons()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/radio");
     await _fixture.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
@@ -46,7 +54,11 @@ public class RadioPageE2ETests
   [Fact]
   public async Task RadioPage_HasBandSelector()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/radio");
     await _fixture.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
@@ -58,7 +70,11 @@ public class RadioPageE2ETests
   [Fact]
   public async Task RadioPage_HasScanControls()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/radio");
     await _fixture.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
@@ -72,7 +88,11 @@ public class RadioPageE2ETests
   [Fact]
   public async Task RadioPage_HasPresetsSection()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/radio");
     await _fixture.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 

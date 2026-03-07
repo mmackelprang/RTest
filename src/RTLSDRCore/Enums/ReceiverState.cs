@@ -1,38 +1,37 @@
-namespace RTLSDRCore.Enums
-{
-    /// <summary>
-    /// Represents the operational state of the radio receiver
-    /// </summary>
-    public enum ReceiverState
-    {
-        /// <summary>
-        /// Receiver is stopped and not processing audio
-        /// </summary>
-        Stopped,
+namespace RTLSDRCore.Enums;
 
-        /// <summary>
-        /// Receiver is starting up and initializing
-        /// </summary>
-        Starting,
+  /// <summary>
+  /// Represents the operational state of the radio receiver
+  /// </summary>
+  public enum ReceiverState
+  {
+      /// <summary>
+      /// Receiver is stopped and not processing audio
+      /// </summary>
+      Stopped,
 
-        /// <summary>
-        /// Receiver is running and processing audio
-        /// </summary>
-        Running,
+      /// <summary>
+      /// Receiver is starting up and initializing
+      /// </summary>
+      Starting,
 
-        /// <summary>
-        /// Receiver is scanning for signals
-        /// </summary>
-        Scanning,
+      /// <summary>
+      /// Receiver is running and processing audio
+      /// </summary>
+      Running,
 
-        /// <summary>
-        /// Receiver is stopping
-        /// </summary>
-        Stopping,
+      /// <summary>
+      /// Receiver is scanning for signals
+      /// </summary>
+      Scanning,
 
-        /// <summary>
-        /// Receiver encountered an error
-        /// </summary>
-        Error
-    }
-}
+      /// <summary>
+      /// Receiver is stopping
+      /// </summary>
+      Stopping,
+
+      /// <summary>
+      /// Receiver encountered an error
+      /// </summary>
+      Error
+  }

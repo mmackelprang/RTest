@@ -1,6 +1,6 @@
 using Microsoft.Playwright;
-using static Microsoft.Playwright.Assertions;
 using Xunit;
+using static Microsoft.Playwright.Assertions;
 
 namespace Radio.Web.E2ETests;
 
@@ -20,7 +20,11 @@ public class DevicesPageE2ETests
   [Fact]
   public async Task DevicesPage_HasRefreshButton()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/devices");
     await _fixture.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
@@ -31,7 +35,11 @@ public class DevicesPageE2ETests
   [Fact]
   public async Task DevicesPage_HasOutputDevicesSection()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/devices");
     await _fixture.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
@@ -42,7 +50,11 @@ public class DevicesPageE2ETests
   [Fact]
   public async Task DevicesPage_HasCastDevicesSection()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/devices");
     await _fixture.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
@@ -56,7 +68,11 @@ public class DevicesPageE2ETests
   [Fact]
   public async Task DevicesPage_HasInputDevicesSection()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/devices");
     await _fixture.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 

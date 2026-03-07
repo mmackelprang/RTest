@@ -193,7 +193,9 @@ public class TestRunner
     foreach (var test in tests)
     {
       if (ct.IsCancellationRequested)
+      {
         break;
+      }
 
       var result = await RunTestAsync(test, ct);
       results.Add(result);

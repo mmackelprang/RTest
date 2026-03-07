@@ -244,9 +244,14 @@ public class DevicesApiService
     {
       var response = await _httpClient.GetAsync("/api/devices/cast/default", cancellationToken);
       if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+      {
         return null;
+      }
+
       if (!response.IsSuccessStatusCode)
+      {
         return null;
+      }
 
       return await response.Content.ReadFromJsonAsync<CastDeviceDto>(JsonOptions, cancellationToken);
     }

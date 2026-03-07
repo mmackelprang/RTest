@@ -100,7 +100,9 @@ public class PipelineDistortionTests
     var limiter = new LimiterModifier();
     var limitedOutput = new float[rawOutput.Length];
     for (int i = 0; i < rawOutput.Length; i++)
+    {
       limitedOutput[i] = limiter.ProcessSample(rawOutput[i], i % Channels);
+    }
 
     // Limiter at 0.8 amplitude should not trigger — output should match
     var report = WaveformComparison.Compare(reference, limitedOutput);
@@ -180,7 +182,9 @@ public class PipelineDistortionTests
     var distorted = (float[])reference.Clone();
     var repeatedVal = 0.42f;
     for (int i = 10000; i < 10050; i++)
+    {
       distorted[i] = repeatedVal;
+    }
 
     generator.AddSamples(distorted);
     var output = generator.PullAudio(distorted.Length);
@@ -240,7 +244,9 @@ public class PipelineDistortionTests
     // Inject silence gap
     var distorted = (float[])reference.Clone();
     for (int i = 20000; i < 20100; i++)
+    {
       distorted[i] = 0f;
+    }
 
     generator.AddSamples(distorted);
     var output = generator.PullAudio(distorted.Length);
@@ -278,7 +284,9 @@ public class PipelineDistortionTests
     // Captured should match input
     Assert.Equal(input.Length, captured.Count);
     for (int i = 0; i < input.Length; i++)
+    {
       Assert.Equal(input[i], captured[i]);
+    }
   }
 
   [Fact]

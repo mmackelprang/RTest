@@ -42,11 +42,19 @@ public class SystemApiService
     {
       var queryParams = new List<string>();
       if (!string.IsNullOrEmpty(level))
+      {
         queryParams.Add($"level={level}");
+      }
+
       if (limit.HasValue)
+      {
         queryParams.Add($"limit={limit.Value}");
+      }
+
       if (maxAgeMinutes.HasValue)
+      {
         queryParams.Add($"maxAgeMinutes={maxAgeMinutes.Value}");
+      }
 
       var query = queryParams.Count > 0 ? "?" + string.Join("&", queryParams) : "";
       return await _httpClient.GetFromJsonAsync<SystemLogsResponse>($"/api/system/logs{query}", JsonOptions, cancellationToken);

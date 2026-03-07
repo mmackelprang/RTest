@@ -1,9 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
-using Radio.API.Tests.TestSupport;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Radio.API.Models;
+using Radio.API.Tests.TestSupport;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Xunit;

@@ -44,7 +44,9 @@ public static class Program
     };
 
     if (duration.HasValue)
+    {
       cts.CancelAfter(TimeSpan.FromSeconds(duration.Value));
+    }
 
     // Main resilience loop: find device → play → on failure, wait and retry
     await PlayWithReconnectAsync(searchTerm, cts.Token);
@@ -67,7 +69,9 @@ public static class Program
       if (device == null)
       {
         if (reconnectCount == 0)
+        {
           Console.WriteLine($"Device not found. Waiting for \"{searchTerm}\" to become available...");
+        }
 
         reconnectCount++;
         if (reconnectCount > MaxReconnectAttempts)
@@ -84,9 +88,13 @@ public static class Program
       }
 
       if (reconnectCount > 0)
+      {
         Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Device recovered after {reconnectCount} retries");
+      }
       else
+      {
         Console.WriteLine($"Found device: {device.FriendlyName}");
+      }
 
       reconnectCount = 0;
       Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Sending {LeftHz}Hz (L) / {RightHz}Hz (R) diagnostic tone at {SampleRate}Hz");
@@ -94,12 +102,17 @@ public static class Program
       var (exitReason, error) = PlayDiagnosticTone(device, ct);
 
       if (ct.IsCancellationRequested)
+      {
         return;
+      }
 
       // Playback stopped unexpectedly — log and retry
       Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Playback stopped: {exitReason}");
       if (error != null)
+      {
         Console.WriteLine($"  Error: {error.Message}");
+      }
+
       Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Reconnecting in {ReconnectDelayMs}ms...");
 
       try { await Task.Delay(ReconnectDelayMs, ct); }
@@ -140,7 +153,9 @@ public static class Program
 
         // Check if WASAPI is still in Playing state
         if (wasapiOut.PlaybackState != PlaybackState.Playing)
+        {
           return ("state changed to " + wasapiOut.PlaybackState, null);
+        }
 
         // Check if the device is still active
         try
@@ -173,7 +188,9 @@ public static class Program
     for (var i = 0; i < args.Length - 1; i++)
     {
       if (args[i] == "--duration" && int.TryParse(args[i + 1], out var seconds))
+      {
         return seconds;
+      }
     }
     return null;
   }
@@ -188,7 +205,9 @@ public static class Program
     }
 
     if (devices.Count == 0)
+    {
       Console.WriteLine("  (none)");
+    }
   }
 
   private static MMDevice? FindDevice(string searchTerm)
@@ -239,7 +258,10 @@ public static class Program
         var idx = offset + i * _channels;
         buffer[idx] = (float)(Math.Sin(2.0 * Math.PI * _leftHz * _sampleIndex / _sampleRate) * _amplitude);
         if (_channels > 1)
+        {
           buffer[idx + 1] = (float)(Math.Sin(2.0 * Math.PI * _rightHz * _sampleIndex / _sampleRate) * _amplitude);
+        }
+
         _sampleIndex++;
       }
       return count;

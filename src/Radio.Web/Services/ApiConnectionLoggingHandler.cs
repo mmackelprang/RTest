@@ -64,7 +64,10 @@ public class ApiConnectionLoggingHandler : DelegatingHandler
       _wasDisconnected = true;
       var now = DateTime.UtcNow;
       if (now - _lastLogTimeUtc < LogInterval)
+      {
         return;
+      }
+
       _lastLogTimeUtc = now;
     }
 
@@ -79,7 +82,10 @@ public class ApiConnectionLoggingHandler : DelegatingHandler
     while (inner != null)
     {
       if (inner is SocketException { SocketErrorCode: SocketError.ConnectionRefused })
+      {
         return true;
+      }
+
       inner = inner.InnerException;
     }
     return false;

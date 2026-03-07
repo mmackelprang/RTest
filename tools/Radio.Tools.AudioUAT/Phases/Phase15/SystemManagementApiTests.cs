@@ -68,16 +68,24 @@ internal class TestGetSystemStats : IPhaseTest
       var issues = new List<string>();
 
       if (stats.CpuUsagePercent < 0 || stats.CpuUsagePercent > 100)
+      {
         issues.Add($"CPU usage out of range: {stats.CpuUsagePercent}%");
+      }
 
       if (stats.MemoryUsedBytes < 0 || stats.MemoryUsedBytes > stats.MemoryTotalBytes)
+      {
         issues.Add($"Memory usage invalid: {stats.MemoryUsedBytes} / {stats.MemoryTotalBytes}");
+      }
 
       if (stats.ThreadCount <= 0)
+      {
         issues.Add($"Invalid thread count: {stats.ThreadCount}");
+      }
 
       if (stats.Uptime < TimeSpan.Zero)
+      {
         issues.Add($"Invalid uptime: {stats.Uptime}");
+      }
 
       if (issues.Count > 0)
       {
@@ -143,13 +151,19 @@ internal class TestGetSystemLogs : IPhaseTest
         foreach (var log in logsResponse.Logs)
         {
           if (log.Timestamp == default)
+          {
             issues.Add("Found log entry with default timestamp");
+          }
 
           if (string.IsNullOrWhiteSpace(log.Level))
+          {
             issues.Add("Found log entry with empty level");
+          }
 
           if (string.IsNullOrWhiteSpace(log.Message))
+          {
             issues.Add("Found log entry with empty message");
+          }
         }
 
         if (issues.Count > 0)

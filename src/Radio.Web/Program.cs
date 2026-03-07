@@ -17,12 +17,19 @@ Log.Logger = new LoggerConfiguration()
   // The ApiConnectionLoggingHandler provides a single throttled WARNING instead.
   .Filter.ByExcluding(logEvent =>
   {
-    if (logEvent.Exception is not HttpRequestException httpEx) return false;
+    if (logEvent.Exception is not HttpRequestException httpEx)
+    {
+      return false;
+    }
+
     var inner = httpEx.InnerException;
     while (inner != null)
     {
       if (inner is SocketException { SocketErrorCode: SocketError.ConnectionRefused })
+      {
         return true;
+      }
+
       inner = inner.InnerException;
     }
     return false;
@@ -322,7 +329,9 @@ app.MapGet("/api/albumart/{filename}", async (string filename, IHttpClientFactor
     var client = httpClientFactory.CreateClient("AlbumArtProxy");
     var response = await client.GetAsync($"/api/albumart/{filename}");
     if (!response.IsSuccessStatusCode)
+    {
       return Results.NotFound();
+    }
 
     var bytes = await response.Content.ReadAsByteArrayAsync();
     var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";

@@ -1,5 +1,5 @@
-using Spectre.Console;
 using Radio.Tools.AudioUAT.Results;
+using Spectre.Console;
 
 namespace Radio.Tools.AudioUAT.Utilities;
 

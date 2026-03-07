@@ -44,9 +44,14 @@ public class DiagnosticCaptureIntegrationTests : IClassFixture<WebApplicationFac
 
     _output.WriteLine($"Capture output: {result.OutputDirectory}");
     foreach (var (stage, path) in result.StageFiles)
+    {
       _output.WriteLine($"  {stage}: {path}");
+    }
+
     foreach (var (stage, count) in result.StageSampleCounts)
+    {
       _output.WriteLine($"  {stage}: {count} samples");
+    }
   }
 
   [Fact]
@@ -89,7 +94,9 @@ public class DiagnosticCaptureIntegrationTests : IClassFixture<WebApplicationFac
       // Check if any stage files were created
       _output.WriteLine($"Capture duration: {captureResult.DurationSeconds:F1}s");
       foreach (var (stage, count) in captureResult.StageSampleCounts)
+      {
         _output.WriteLine($"  {stage}: {count} samples");
+      }
 
       // If post-modifiers WAV exists, read and analyze it
       if (captureResult.StageFiles.TryGetValue("post-modifiers", out var postModPath)
@@ -106,7 +113,9 @@ public class DiagnosticCaptureIntegrationTests : IClassFixture<WebApplicationFac
     finally
     {
       if (Directory.Exists(tempDir))
+      {
         Directory.Delete(tempDir, recursive: true);
+      }
     }
   }
 

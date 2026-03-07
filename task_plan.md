@@ -4,7 +4,7 @@
 Fix kiosk sleep-stops-music bug, build automated audio distortion debugging infrastructure, migrate to .NET 10 LTS + C# 14, address architecture/testing items from comprehensive review, and enhance the metrics dashboard with customizable hero cards and new metrics.
 
 ## Current Phase
-Phase 3 — in_progress
+Phase 3B — pending
 
 ## Phases
 
@@ -12,7 +12,8 @@ Phase 3 — in_progress
 |---|-------|--------|-------|
 | 1 | Kiosk Stability Fix | complete | PR #303 — decoupled screen blank from audio pause, Chrome flags, DPMS, SignalR timeouts |
 | 2 | Audio Distortion — Automated Test Infrastructure | complete | PR #304 — Radio.AudioAnalysis lib, CaptureSession, DiagnosticCaptureService, 30+ tests, API endpoints verified on Ubuntu |
-| 3 | Audio Distortion — Root Cause Investigation & Fix | in_progress | Using Phase 2 infra to identify and fix distortion |
+| 3 | Audio Distortion — Root Cause Investigation & Fix | complete | Frame alignment fix (PR #305), USB BT adapter + system tuning (PR #306) |
+| 3B | Cast Device Dropdown UX Fix | pending | First touch=select default, second touch=dropdown, click-outside=close |
 | 4 | .NET 10 Migration + C# 14 Adoption | pending | TFM update, breaking changes, NuGet updates, language features |
 | 5 | Core Architecture Refactoring | pending | #26 IAudioManager split, #34 enum consolidation, #14 component decomposition, #36 state store |
 | 6 | Test Coverage + Web Error Handling | pending | #12 AudioManager tests, #13 missing controller tests, #30 Result<T> |
@@ -120,6 +121,31 @@ Phase 3 — in_progress
 ### 3D. Verify fix with automated tests
 - Re-run Phase 2 tests, confirm distortion eliminated
 - Long-duration soak test (1+ hour)
+
+---
+
+## Phase 3B: Cast Device Dropdown UX Fix
+
+**Current behavior:** Touching the Cast output icon always shows a dropdown menu. The only way to close the menu is to select an item — tapping outside does nothing.
+
+**Goal:** First touch selects the default Cast device (no menu). Second touch opens the dropdown. Tapping outside the dropdown closes it.
+
+### 3B-A. First-touch → select default device
+- If no Cast device is currently selected: first touch opens the dropdown (discovery needed)
+- If a default/last-used Cast device is known: first touch toggles Cast output on/off using that device — no menu
+- Track "has been configured this session" state
+
+### 3B-B. Second-touch → show dropdown menu
+- If Cast is already active (first touch selected it): second touch opens the device dropdown for switching
+- Dropdown shows all discovered Cast devices with the active one highlighted
+
+### 3B-C. Click-outside → close dropdown
+- Tapping anywhere outside the dropdown menu closes it without selecting
+- Use click-away overlay pattern (already exists in `CastDeviceDropdown.razor` — verify it works correctly)
+
+### Files
+- `src/Radio.Web/Components/Shared/CastDeviceDropdown.razor` — dropdown behavior, first/second touch logic
+- Possibly `src/Radio.Web/Components/Layout/MainLayout.razor` — output toggle handler integration
 
 ---
 

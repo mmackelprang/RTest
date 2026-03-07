@@ -239,8 +239,14 @@ public class RdsDecoder
                       + _costasAlpha * phaseError;
 
       // Keep phase in [0, 2π)
-      if (_costasPhase > 2.0f * MathF.PI) _costasPhase -= 2.0f * MathF.PI;
-      else if (_costasPhase < 0) _costasPhase += 2.0f * MathF.PI;
+      if (_costasPhase > 2.0f * MathF.PI)
+      {
+        _costasPhase -= 2.0f * MathF.PI;
+      }
+      else if (_costasPhase < 0)
+      {
+        _costasPhase += 2.0f * MathF.PI;
+      }
 
       // 5. Clock recovery + symbol decision (uses I channel — the data channel)
       ProcessClockRecovery(basebandI);
@@ -371,18 +377,27 @@ public class RdsDecoder
     // Data transitions have consistently larger magnitudes than clock transitions.
     var mag = MathF.Abs(biphaseValue);
     if (_chipClock % 2 == 0)
+    {
       _evenChipMagSum += mag;
+    }
     else
+    {
       _oddChipMagSum += mag;
+    }
 
     _chipWindowCount++;
     if (_chipWindowCount >= ChipWindowSize)
     {
       // Require 20% margin to switch polarity (avoid flapping)
       if (_evenChipMagSum > _oddChipMagSum * 1.2f)
+      {
         _chipClockPolarity = 0;
+      }
       else if (_oddChipMagSum > _evenChipMagSum * 1.2f)
+      {
         _chipClockPolarity = 1;
+      }
+
       _evenChipMagSum = 0;
       _oddChipMagSum = 0;
       _chipWindowCount = 0;
@@ -706,15 +721,25 @@ public class RdsDecoder
     int length = 0;
     for (int i = 0; i < 64; i++)
     {
-      if (!_rtCharReceived[i]) break;
+      if (!_rtCharReceived[i])
+      {
+        break;
+      }
+
       length = i + 1;
     }
 
     // Need at least 4 characters to be meaningful
-    if (length < 4) return;
+    if (length < 4)
+    {
+      return;
+    }
 
     var text = new string(_rtChars, 0, length).Trim();
-    if (string.IsNullOrEmpty(text)) return;
+    if (string.IsNullOrEmpty(text))
+    {
+      return;
+    }
 
     if (text == _candidateRadioText)
     {
@@ -743,10 +768,16 @@ public class RdsDecoder
       ? OffsetWords[2] // Use offset C for version A; C' handled separately
       : OffsetWords[blockIndex];
 
-    if (syndrome == expectedOffset) return true;
+    if (syndrome == expectedOffset)
+    {
+      return true;
+    }
 
     // Also check offset C' for block 2 (Group version B)
-    if (blockIndex == 2 && syndrome == OffsetCPrime) return true;
+    if (blockIndex == 2 && syndrome == OffsetCPrime)
+    {
+      return true;
+    }
 
     return false;
   }

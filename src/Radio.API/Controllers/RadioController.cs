@@ -724,7 +724,9 @@ public class RadioController : ControllerBase
 
       // Stop any active scan before tuning to the preset frequency
       if (radioSource.IsScanning)
+      {
         await radioSource.StopScanAsync();
+      }
 
       await radioSource.SetBandAsync(preset.Band);
       await radioSource.SetFrequencyAsync(new Frequency((long)preset.Frequency));

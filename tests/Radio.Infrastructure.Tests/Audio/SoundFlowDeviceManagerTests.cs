@@ -177,7 +177,9 @@ public class SoundFlowDeviceManagerTests
 
     // Skip assertion when no audio hardware is present (CI runners)
     if (defaultDevice == null)
+    {
       return;
+    }
 
     Assert.True(defaultDevice.IsDefault);
   }
@@ -191,7 +193,9 @@ public class SoundFlowDeviceManagerTests
 
     // Skip when no audio hardware is present (CI runners)
     if (!devices.Any())
+    {
       return;
+    }
 
     var deviceId = devices.First().Id;
 

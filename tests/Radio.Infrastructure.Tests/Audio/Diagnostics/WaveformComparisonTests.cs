@@ -50,7 +50,9 @@ public class WaveformComparisonTests
     // Apply 50% gain reduction
     var gained = new float[reference.Length];
     for (int i = 0; i < reference.Length; i++)
+    {
       gained[i] = reference[i] * 0.5f;
+    }
 
     var report = WaveformComparison.Compare(reference, gained);
 
@@ -68,7 +70,9 @@ public class WaveformComparisonTests
     // Copy and insert 100 samples of silence at position 10000
     var captured = (float[])reference.Clone();
     for (int i = 10000; i < 10100; i++)
+    {
       captured[i] = 0f;
+    }
 
     var report = WaveformComparison.Compare(reference, captured);
 
@@ -85,9 +89,15 @@ public class WaveformComparisonTests
     // Copy and repeat a sample value 50 times at position 5000
     var captured = (float[])reference.Clone();
     var repeatedVal = captured[5000];
-    if (repeatedVal == 0f) repeatedVal = 0.42f; // Ensure non-zero for detection
+    if (repeatedVal == 0f)
+    {
+      repeatedVal = 0.42f; // Ensure non-zero for detection
+    }
+
     for (int i = 5000; i < 5050; i++)
+    {
       captured[i] = repeatedVal;
+    }
 
     var report = WaveformComparison.Compare(reference, captured);
 
@@ -142,7 +152,9 @@ public class WaveformComparisonTests
     finally
     {
       if (File.Exists(tempFile))
+      {
         File.Delete(tempFile);
+      }
     }
   }
 
@@ -152,11 +164,20 @@ public class WaveformComparisonTests
     var samples = new float[1000];
     // Fill with non-zero
     for (int i = 0; i < samples.Length; i++)
+    {
       samples[i] = 0.5f;
+    }
 
     // Insert two zero runs
-    for (int i = 100; i < 120; i++) samples[i] = 0f; // 20-sample run
-    for (int i = 500; i < 510; i++) samples[i] = 0f; // 10-sample run
+    for (int i = 100; i < 120; i++)
+    {
+      samples[i] = 0f; // 20-sample run
+    }
+
+    for (int i = 500; i < 510; i++)
+    {
+      samples[i] = 0f; // 10-sample run
+    }
 
     var runs = SilenceDetector.FindZeroRuns(samples, minRunLength: 8);
 
@@ -172,11 +193,15 @@ public class WaveformComparisonTests
   {
     var samples = new float[1000];
     for (int i = 0; i < samples.Length; i++)
+    {
       samples[i] = MathF.Sin(2 * MathF.PI * 440f * i / 48000f) * 0.5f;
+    }
 
     // Insert a repeated sample run
     for (int i = 300; i < 320; i++)
+    {
       samples[i] = 0.42f;
+    }
 
     var runs = SilenceDetector.FindRepeatedSampleRuns(samples, minRunLength: 8);
 
@@ -190,11 +215,15 @@ public class WaveformComparisonTests
   {
     var samples = new float[1000];
     for (int i = 0; i < samples.Length; i++)
+    {
       samples[i] = MathF.Sin(2 * MathF.PI * 440f * i / 48000f) * 0.5f;
+    }
 
     // Insert clipping
     for (int i = 200; i < 215; i++)
+    {
       samples[i] = 1.0f;
+    }
 
     var runs = SilenceDetector.FindClippingRuns(samples, threshold: 0.999f, minRunLength: 4);
 
@@ -226,7 +255,9 @@ public class WaveformComparisonTests
 
     // Hard clip at 0.5 — creates significant harmonics
     for (int i = 0; i < samples.Length; i++)
+    {
       samples[i] = Math.Clamp(samples[i], -0.5f, 0.5f);
+    }
 
     var thd = FrequencyAnalysis.MeasureTotalHarmonicDistortion(
       samples, sampleRate: 48000, channels: 2, expectedFrequencyHz: 440);
@@ -281,9 +312,14 @@ public class WaveformComparisonTests
     sb.AppendLine($"IsClean: {ioReport.IsClean}");
     sb.AppendLine($"Events: {ioReport.Events.Count}");
     foreach (var evt in ioReport.Events.Take(20))
+    {
       sb.AppendLine($"  [{evt.Type}] offset={evt.SampleOffset} len={evt.Duration} sev={evt.Severity:F2}: {evt.Description}");
+    }
+
     if (ioReport.Events.Count > 20)
+    {
       sb.AppendLine($"  ... and {ioReport.Events.Count - 20} more events");
+    }
 
     // === Output vs Post-Modifiers comparison ===
     sb.AppendLine();
@@ -297,9 +333,14 @@ public class WaveformComparisonTests
     sb.AppendLine($"IsClean: {opReport.IsClean}");
     sb.AppendLine($"Events: {opReport.Events.Count}");
     foreach (var evt in opReport.Events.Take(20))
+    {
       sb.AppendLine($"  [{evt.Type}] offset={evt.SampleOffset} len={evt.Duration} sev={evt.Severity:F2}: {evt.Description}");
+    }
+
     if (opReport.Events.Count > 20)
+    {
       sb.AppendLine($"  ... and {opReport.Events.Count - 20} more events");
+    }
 
     // === Silence/repeat/clipping scan on each stage independently ===
     sb.AppendLine();
@@ -312,11 +353,19 @@ public class WaveformComparisonTests
       var clips = SilenceDetector.FindClippingRuns(samples, 0.999f, minRunLength: 4);
       sb.AppendLine($"  {name}: {zeros.Count} silence runs, {repeats.Count} repeated runs, {clips.Count} clipping runs");
       foreach (var z in zeros.Take(5))
+      {
         sb.AppendLine($"    silence: offset={z.Start} len={z.Length}");
+      }
+
       foreach (var r in repeats.Take(5))
+      {
         sb.AppendLine($"    repeated: offset={r.Start} len={r.Length} val={samples[r.Start]:F6}");
+      }
+
       foreach (var c in clips.Take(5))
+      {
         sb.AppendLine($"    clipping: offset={c.Start} len={c.Length}");
+      }
     }
 
     // === Time offset detection (input vs output) ===
@@ -347,19 +396,31 @@ public class WaveformComparisonTests
       var after = Math.Min(input.Length, start + length + 6);
       sb.Append("    Before: ");
       for (int i = before; i < start; i++)
+      {
         sb.Append($"{input[i]:F4} ");
+      }
+
       sb.AppendLine();
       sb.Append("    Gap start: ");
       for (int i = start; i < Math.Min(start + 6, start + length); i++)
+      {
         sb.Append($"{input[i]:F4} ");
+      }
+
       sb.AppendLine("...");
       sb.Append("    Gap end:   ...");
       for (int i = Math.Max(start, start + length - 6); i < start + length; i++)
+      {
         sb.Append($"{input[i]:F4} ");
+      }
+
       sb.AppendLine();
       sb.Append("    After:  ");
       for (int i = start + length; i < after; i++)
+      {
         sb.Append($"{input[i]:F4} ");
+      }
+
       sb.AppendLine();
 
       // Check channel swap after gap: if odd gap, L/R may be swapped
@@ -469,7 +530,10 @@ public class WaveformComparisonTests
       var outputPath = Path.Combine(dir, "generator-output.wav");
       var postModPath = Path.Combine(dir, "post-modifiers.wav");
 
-      if (!File.Exists(inputPath)) continue;
+      if (!File.Exists(inputPath))
+      {
+        continue;
+      }
 
       var input = WavFileHelper.ReadWavFile(inputPath, out var inSr, out var inCh);
       var output = WavFileHelper.ReadWavFile(outputPath, out var outSr, out var outCh);
@@ -502,7 +566,10 @@ public class WaveformComparisonTests
       sb.AppendLine($"  Silence gaps: in={inputZeros.Count} ({inputOdd} odd), out={outputZeros.Count} ({outputOdd} odd), pm={pmZeros.Count}");
       sb.AppendLine($"  Out→PM: corr={opReport.CorrelationCoefficient:F6}, gain={opReport.GainRatio:F4}, events={opReport.Events.Count}");
       foreach (var evt in opReport.Events)
+      {
         sb.AppendLine($"    [{evt.Type}] {evt.Description}");
+      }
+
       sb.AppendLine();
     }
 
@@ -554,9 +621,13 @@ public class WaveformComparisonTests
     sb.AppendLine("=== VERDICT ===");
     var allClean = correlations.All(c => c >= 0.999f);
     if (allClean)
+    {
       sb.AppendLine("PASS: All runs show perfect output→post-modifier correlation. Frame alignment fix is working correctly. No channel swaps detected.");
+    }
     else
+    {
       sb.AppendLine($"FAIL: {correlations.Count(c => c < 0.999f)} runs have degraded correlation, suggesting possible channel swap.");
+    }
 
     var resultsPath = Path.Combine(baseDir, "batch-analysis-results.txt");
     File.WriteAllText(resultsPath, sb.ToString());

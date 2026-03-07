@@ -129,7 +129,9 @@ public class DevicesController : ControllerBase
     try
     {
       if (string.IsNullOrWhiteSpace(request.DeviceId))
+      {
         return BadRequest(new { error = "DeviceId is required" });
+      }
 
       await _deviceManager.SetInputDeviceAsync(request.DeviceId);
       return Ok(new { message = $"Input device set to {request.DeviceId}" });
@@ -425,7 +427,9 @@ public class DevicesController : ControllerBase
   public async Task<IActionResult> PingCastReceiver()
   {
     if (_castOutput?.DirectStreaming == null)
+    {
       return BadRequest("DirectChannel streaming not active");
+    }
 
     // Capture current state before sending ping
     var previousPong = _castOutput.DirectStreaming.LastPongJson;
@@ -435,7 +439,9 @@ public class DevicesController : ControllerBase
 
     var sent = await _castOutput.DirectStreaming.SendPingAsync();
     if (!sent)
+    {
       return BadRequest("Failed to send ping — no active transport");
+    }
 
     _logger.LogInformation("Cast ping: ping sent, waiting for pong...");
 
@@ -474,7 +480,9 @@ public class DevicesController : ControllerBase
   public async Task<IActionResult> TestCastAudio([FromQuery] string? url = null)
   {
     if (_castOutput == null)
+    {
       return BadRequest("Cast output not available");
+    }
 
     // Use a known-working public MP3 sample if no URL provided
     var testUrl = url ?? "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3";
@@ -890,7 +898,9 @@ public class DevicesController : ControllerBase
     try
     {
       if (_deviceManager is not SoundFlowDeviceManager sfDeviceManager)
+      {
         return StatusCode(500, new { error = "Device manager does not support display settings" });
+      }
 
       var devices = await sfDeviceManager.GetAllDevicesWithDisplayInfoAsync(cancellationToken);
       var result = devices.Select(d => new DeviceDisplayInfoDto
@@ -925,7 +935,9 @@ public class DevicesController : ControllerBase
     CancellationToken cancellationToken)
   {
     if (string.IsNullOrWhiteSpace(request.RawName))
+    {
       return BadRequest(new { error = "RawName is required" });
+    }
 
     try
     {
@@ -942,14 +954,18 @@ public class DevicesController : ControllerBase
         // Remove from hidden, add to visible
         hiddenNames.Remove(request.RawName);
         if (!visibleNames.Contains(request.RawName, StringComparer.OrdinalIgnoreCase))
+        {
           visibleNames.Add(request.RawName);
+        }
       }
       else
       {
         // Add to hidden, remove from visible
         visibleNames.Remove(request.RawName);
         if (!hiddenNames.Contains(request.RawName, StringComparer.OrdinalIgnoreCase))
+        {
           hiddenNames.Add(request.RawName);
+        }
       }
 
       await _configurationManager.SetValueAsync(storeId, "AudioOutput:DeviceDisplay:HiddenDeviceNames", hiddenNames, cancellationToken);
@@ -979,9 +995,14 @@ public class DevicesController : ControllerBase
     CancellationToken cancellationToken)
   {
     if (string.IsNullOrWhiteSpace(request.RawName))
+    {
       return BadRequest(new { error = "RawName is required" });
+    }
+
     if (string.IsNullOrWhiteSpace(request.FriendlyName))
+    {
       return BadRequest(new { error = "FriendlyName is required" });
+    }
 
     try
     {
@@ -1018,7 +1039,9 @@ public class DevicesController : ControllerBase
     CancellationToken cancellationToken)
   {
     if (string.IsNullOrWhiteSpace(rawName))
+    {
       return BadRequest(new { error = "rawName query parameter is required" });
+    }
 
     try
     {
@@ -1051,7 +1074,9 @@ public class DevicesController : ControllerBase
   private async Task ReloadDisplaySettingsFromStoreAsync(string storeId, CancellationToken cancellationToken)
   {
     if (_deviceManager is not SoundFlowDeviceManager sfDeviceManager)
+    {
       return;
+    }
 
     var hiddenNames = await _configurationManager.GetValueAsync<List<string>>(
       storeId, "AudioOutput:DeviceDisplay:HiddenDeviceNames", ct: cancellationToken) ?? [];
@@ -1071,7 +1096,9 @@ public class DevicesController : ControllerBase
 
     // Preserve hidden patterns from existing config if not overridden in store
     if (hiddenPatterns != null)
+    {
       options.HiddenDevicePatterns = hiddenPatterns;
+    }
 
     sfDeviceManager.ReloadDisplaySettings(options);
   }
@@ -1287,11 +1314,19 @@ public class DevicesController : ControllerBase
         {
           // HttpMp3 mode — wire the HTTP audio stream
           if (_httpOutput.State == AudioOutputState.Error)
+          {
             await _httpOutput.InitializeAsync();
+          }
+
           if (_httpOutput.State == AudioOutputState.Created)
+          {
             await _httpOutput.InitializeAsync();
+          }
+
           if (_httpOutput.State == AudioOutputState.Ready || _httpOutput.State == AudioOutputState.Stopped)
+          {
             await _httpOutput.StartAsync();
+          }
 
           if (_httpOutput.State == AudioOutputState.Streaming)
           {
@@ -1353,9 +1388,14 @@ public class DevicesController : ControllerBase
     foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
     {
       if (ni.OperationalStatus != OperationalStatus.Up)
+      {
         continue;
+      }
+
       if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+      {
         continue;
+      }
 
       // Skip virtual adapters (Hyper-V, WSL, Docker, VPN tunnels)
       var desc = ni.Description.ToLowerInvariant();
@@ -1364,14 +1404,18 @@ public class DevicesController : ControllerBase
           name.Contains("vethernet") || name.Contains("wsl") ||
           desc.Contains("docker") || desc.Contains("vmware") ||
           desc.Contains("virtualbox"))
+      {
         continue;
+      }
 
       var props = ni.GetIPProperties();
       foreach (var addr in props.UnicastAddresses)
       {
         if (addr.Address.AddressFamily != AddressFamily.InterNetwork ||
             IPAddress.IsLoopback(addr.Address))
+        {
           continue;
+        }
 
         // If we have a target IP, check if this interface is on the same subnet
         if (targetIp != null && addr.IPv4Mask != null)

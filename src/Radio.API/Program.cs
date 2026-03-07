@@ -1,14 +1,13 @@
-using System.Reflection;
-using Microsoft.OpenApi.Models;
 using Radio.API.Hubs;
+using Radio.API.Logging;
 using Radio.API.Middleware;
 using Radio.API.Services;
 using Radio.API.Streaming;
 using Radio.Core.Constants;
 using Radio.Core.Interfaces;
-using Radio.API.Logging;
 using Radio.Infrastructure.Configuration.Bridge;
 using Radio.Infrastructure.DependencyInjection;
+using Scalar.AspNetCore;
 using Serilog;
 
 
@@ -50,32 +49,7 @@ builder.Services.AddControllers()
     {
         options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
     });
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(options =>
-{
-  options.SwaggerDoc("v1", new OpenApiInfo
-  {
-    Title = "Radio Console API",
-    Version = "v1",
-    Description = "REST API for Grandpa Anderson's Console Radio Remade - A modern audio command center.",
-    Contact = new OpenApiContact
-    {
-      Name = "Radio Console Project"
-    },
-    License = new OpenApiLicense
-    {
-      Name = "MIT License"
-    }
-  });
-
-  // Include XML comments for API documentation
-  var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
-  var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
-  if (File.Exists(xmlPath))
-  {
-    options.IncludeXmlComments(xmlPath);
-  }
-});
+builder.Services.AddOpenApi();
 
 // Add CORS for development
 builder.Services.AddCors(options =>
@@ -143,12 +117,8 @@ var app = builder.Build();
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
-  app.UseSwagger();
-  app.UseSwaggerUI(options =>
-  {
-    options.SwaggerEndpoint("/swagger/v1/swagger.json", "Radio Console API v1");
-    options.RoutePrefix = "swagger";
-  });
+  app.MapOpenApi();
+  app.MapScalarApiReference();
 }
 
 // Add CORS middleware (must be early in pipeline)
@@ -206,7 +176,7 @@ try
   Log.Information("  Environment: {Environment}", app.Environment.EnvironmentName);
   Log.Information("  Log directory: {LogPath}", logDirectory);
   Log.Information("════════════════════════════════════════════════════════════════════");
-  Log.Information("Swagger UI available at /swagger");
+  Log.Information("API docs available at /scalar/v1");
   Log.Information("SignalR hubs available at {VizHub} and {AudioHub}", ApiPaths.Hubs.Visualization, ApiPaths.Hubs.Audio);
   Log.Information("Audio stream available at {StreamPath}", ApiPaths.Streams.Audio);
   app.Run();

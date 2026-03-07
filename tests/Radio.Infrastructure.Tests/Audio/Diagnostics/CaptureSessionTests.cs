@@ -23,7 +23,9 @@ public class CaptureSessionTests
     var result = session.GetSamples();
     Assert.Equal(samples.Length, result.Length);
     for (int i = 0; i < samples.Length; i++)
+    {
       Assert.Equal(samples[i], result[i]);
+    }
   }
 
   [Fact]
@@ -55,7 +57,9 @@ public class CaptureSessionTests
 
     var bigChunk = new float[200];
     for (int i = 0; i < bigChunk.Length; i++)
+    {
       bigChunk[i] = (float)i / bigChunk.Length;
+    }
 
     session.AddSamples(bigChunk);
 
@@ -136,7 +140,9 @@ public class CaptureSessionTests
     finally
     {
       if (File.Exists(tempFile))
+      {
         File.Delete(tempFile);
+      }
     }
   }
 
@@ -156,10 +162,14 @@ public class CaptureSessionTests
       {
         var chunk = new float[960]; // 10ms per write
         for (int i = 0; i < chunk.Length; i++)
+        {
           chunk[i] = (float)(threadIndex + 1) * 0.1f;
+        }
 
         for (int i = 0; i < samplesPerThread / chunk.Length; i++)
+        {
           session.AddSamples(chunk);
+        }
       });
     }
 

@@ -36,7 +36,9 @@ public class MetricsApiService
                   $"&end={HttpUtility.UrlEncode(end.ToString("o"))}";
       
       if (!string.IsNullOrEmpty(resolution))
+      {
         query += $"&resolution={resolution}";
+      }
 
       return await _httpClient.GetFromJsonAsync<List<MetricHistoryDto>>($"/api/metrics/history{query}", cancellationToken);
     }
@@ -120,8 +122,10 @@ public class MetricsApiService
       var response = await _httpClient.PostAsJsonAsync("/api/metrics/event", request, cancellationToken);
       
       if (response.IsSuccessStatusCode)
+      {
         return await response.Content.ReadFromJsonAsync<MetricEventResponse>(cancellationToken: cancellationToken);
-      
+      }
+
       return null;
     }
     catch (Exception ex)

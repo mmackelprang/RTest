@@ -1,10 +1,10 @@
+using System.Diagnostics;
+using System.Globalization;
+using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
-using System.Text.RegularExpressions;
-using System.Globalization;
 
 namespace Radio.API.Controllers;
 
@@ -234,11 +234,15 @@ public class SystemController : ControllerBase
         {
           var line = lines[i];
           if (string.IsNullOrWhiteSpace(line))
+          {
             continue;
+          }
 
           var match = regex.Match(line);
           if (!match.Success)
+          {
             continue;
+          }
 
           var timestampStr = match.Groups[1].Value;
           var logLevel = match.Groups[2].Value;
@@ -261,12 +265,16 @@ public class SystemController : ControllerBase
 
           // Filter by age
           if (minTimestamp.HasValue && timestampUtc < minTimestamp.Value)
+          {
             continue;
+          }
 
           // Filter by level
           var entryLevelPriority = GetLevelPriority(logLevel);
           if (entryLevelPriority < levelPriority)
+          {
             continue;
+          }
 
           // Check for exception on next lines
           string? exception = null;
@@ -281,7 +289,10 @@ public class SystemController : ControllerBase
               for (int j = i + 1; j < lines.Length && j < i + MaxExceptionLines; j++)
               {
                 if (string.IsNullOrWhiteSpace(lines[j]) || regex.IsMatch(lines[j]))
+                {
                   break;
+                }
+
                 exceptionLines.Add(lines[j]);
               }
               if (exceptionLines.Count > 0)
@@ -303,7 +314,9 @@ public class SystemController : ControllerBase
 
         // Stop if we've collected enough entries
         if (logEntries.Count >= limit)
+        {
           break;
+        }
       }
       catch (Exception ex)
       {
@@ -427,7 +440,10 @@ public class SystemController : ControllerBase
         for (var i = 0; i < 10; i++)
         {
           var tempPath = $"/sys/class/thermal/thermal_zone{i}/temp";
-          if (!System.IO.File.Exists(tempPath)) continue;
+          if (!System.IO.File.Exists(tempPath))
+          {
+            continue;
+          }
 
           try
           {
@@ -437,7 +453,10 @@ public class SystemController : ControllerBase
               var tempCelsius = tempMilliC / 1000.0;
 
               // Skip sentinel values (absolute zero = sensor unavailable)
-              if (tempCelsius < -100 || tempCelsius > 150) continue;
+              if (tempCelsius < -100 || tempCelsius > 150)
+              {
+                continue;
+              }
 
               return $"{tempCelsius:F1}°C";
             }

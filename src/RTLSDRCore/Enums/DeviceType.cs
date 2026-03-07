@@ -1,23 +1,22 @@
-namespace RTLSDRCore.Enums
-{
-    /// <summary>
-    /// Defines the types of SDR devices supported
-    /// </summary>
-    public enum DeviceType
-    {
-        /// <summary>
-        /// Mock device for testing without physical hardware
-        /// </summary>
-        Mock,
+namespace RTLSDRCore.Enums;
 
-        /// <summary>
-        /// RTL-SDR USB dongle (RTL2832U based)
-        /// </summary>
-        RTLSDR,
+  /// <summary>
+  /// Defines the types of SDR devices supported
+  /// </summary>
+  public enum DeviceType
+  {
+      /// <summary>
+      /// Mock device for testing without physical hardware
+      /// </summary>
+      Mock,
 
-        /// <summary>
-        /// Generic SDR device
-        /// </summary>
-        Generic
-    }
-}
+      /// <summary>
+      /// RTL-SDR USB dongle (RTL2832U based)
+      /// </summary>
+      RTLSDR,
+
+      /// <summary>
+      /// Generic SDR device
+      /// </summary>
+      Generic
+  }

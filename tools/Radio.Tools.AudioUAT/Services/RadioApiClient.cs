@@ -74,7 +74,10 @@ public class RadioApiClient : IDisposable
   {
     var response = await _httpClient.GetAsync("/api/sources/primary", ct);
     if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+    {
       return null;
+    }
+
     response.EnsureSuccessStatusCode();
     return await response.Content.ReadFromJsonAsync<AudioSourceResponse>(_jsonOptions, ct);
   }
@@ -194,7 +197,10 @@ public class RadioApiClient : IDisposable
     var response = await _httpClient.GetAsync("/api/queue", ct);
     if (response.StatusCode == System.Net.HttpStatusCode.BadRequest ||
         response.StatusCode == System.Net.HttpStatusCode.NotFound)
+    {
       return new List<QueueItemResponse>();
+    }
+
     response.EnsureSuccessStatusCode();
     return await response.Content.ReadFromJsonAsync<List<QueueItemResponse>>(_jsonOptions, ct);
   }
@@ -304,7 +310,10 @@ public class RadioApiClient : IDisposable
   {
     var response = await _httpClient.GetAsync("/api/devices/output/default", ct);
     if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+    {
       return null;
+    }
+
     response.EnsureSuccessStatusCode();
     return await response.Content.ReadFromJsonAsync<AudioDeviceResponse>(_jsonOptions, ct);
   }
@@ -378,7 +387,10 @@ public class RadioApiClient : IDisposable
   {
     var response = await _httpClient.GetAsync("/api/radio/state", ct);
     if (response.StatusCode == System.Net.HttpStatusCode.BadRequest)
+    {
       return null;
+    }
+
     response.EnsureSuccessStatusCode();
     return await response.Content.ReadFromJsonAsync<RadioStateResponse>(_jsonOptions, ct);
   }
@@ -491,7 +503,9 @@ public class RadioApiClient : IDisposable
   {
     var url = $"/api/spotify/search?query={Uri.EscapeDataString(query)}";
     if (!string.IsNullOrWhiteSpace(types))
+    {
       url += $"&types={Uri.EscapeDataString(types)}";
+    }
 
     var response = await _httpClient.GetAsync(url, ct);
     response.EnsureSuccessStatusCode();
@@ -529,7 +543,9 @@ public class RadioApiClient : IDisposable
   {
     var url = "/api/files";
     if (!string.IsNullOrWhiteSpace(path))
+    {
       url += $"?path={Uri.EscapeDataString(path)}";
+    }
 
     var response = await _httpClient.GetAsync(url, ct);
     response.EnsureSuccessStatusCode();
@@ -557,13 +573,20 @@ public class RadioApiClient : IDisposable
   {
     var query = new List<string>();
     if (!string.IsNullOrEmpty(level))
+    {
       query.Add($"level={level}");
+    }
+
     if (limit.HasValue)
+    {
       query.Add($"limit={limit.Value}");
+    }
 
     var url = "/api/system/logs";
     if (query.Count > 0)
+    {
       url += "?" + string.Join("&", query);
+    }
 
     var response = await _httpClient.GetAsync(url, ct);
     response.EnsureSuccessStatusCode();

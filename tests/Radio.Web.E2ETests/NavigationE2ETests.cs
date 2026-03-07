@@ -1,7 +1,7 @@
 using System.Text.RegularExpressions;
 using Microsoft.Playwright;
-using static Microsoft.Playwright.Assertions;
 using Xunit;
+using static Microsoft.Playwright.Assertions;
 
 namespace Radio.Web.E2ETests;
 
@@ -21,7 +21,11 @@ public class NavigationE2ETests
   [Fact]
   public async Task Navigation_RadioPage_LoadsSuccessfully()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/radio");
     await _fixture.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
@@ -32,7 +36,11 @@ public class NavigationE2ETests
   [Fact]
   public async Task Navigation_DevicesPage_LoadsSuccessfully()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/devices");
     await _fixture.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
@@ -43,7 +51,11 @@ public class NavigationE2ETests
   [Fact]
   public async Task Navigation_HistoryPage_LoadsSuccessfully()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/history");
     await _fixture.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
@@ -54,7 +66,11 @@ public class NavigationE2ETests
   [Fact]
   public async Task Navigation_MetricsPage_LoadsSuccessfully()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/metrics");
     await _fixture.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
@@ -66,7 +82,11 @@ public class NavigationE2ETests
   [Fact]
   public async Task Navigation_SystemPage_LoadsSuccessfully()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/system");
     await _fixture.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
@@ -78,7 +98,11 @@ public class NavigationE2ETests
   [Fact]
   public async Task Navigation_BluetoothPage_LoadsSuccessfully()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
+
     await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/bluetooth");
     await _fixture.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
@@ -89,7 +113,10 @@ public class NavigationE2ETests
   [Fact]
   public async Task Navigation_AppBarPersistsAcrossPages()
   {
-    if (!_fixture.IsServerAvailable) return;
+    if (!_fixture.IsServerAvailable)
+    {
+      return;
+    }
 
     // Navigate to several pages and verify the app bar is always present
     var pages = new[] { "/", "/radio", "/devices", "/history" };

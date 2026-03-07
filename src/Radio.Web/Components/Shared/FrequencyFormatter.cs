@@ -54,7 +54,9 @@ public static class FrequencyFormatter
   {
     var bandModel = availableBands?.FirstOrDefault(b => b.Type == band);
     if (bandModel != null)
+    {
       return bandModel.Type == "AM" ? bandModel.MinFrequencyHz / 1000.0 : bandModel.MinFrequencyHz / 1000000.0;
+    }
 
     return band switch
     {
@@ -76,7 +78,9 @@ public static class FrequencyFormatter
   {
     var bandModel = availableBands?.FirstOrDefault(b => b.Type == band);
     if (bandModel != null)
+    {
       return bandModel.Type == "AM" ? bandModel.MaxFrequencyHz / 1000.0 : bandModel.MaxFrequencyHz / 1000000.0;
+    }
 
     return band switch
     {

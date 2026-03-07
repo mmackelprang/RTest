@@ -377,7 +377,9 @@ public class AudioEngineInitializationService : IHostedService
         }
 
         if (_castOutput.State == AudioOutputState.Created)
+        {
           await _castOutput.InitializeAsync(cancellationToken);
+        }
 
         await _castOutput.ConnectAsync(device, cancellationToken);
 
@@ -413,9 +415,15 @@ public class AudioEngineInitializationService : IHostedService
     try
     {
       if (output.State == AudioOutputState.Error)
+      {
         await output.InitializeAsync();
+      }
+
       if (output.State == AudioOutputState.Created)
+      {
         await output.InitializeAsync();
+      }
+
       if (output.State == AudioOutputState.Ready || output.State == AudioOutputState.Stopped)
       {
         await output.StartAsync();
@@ -456,25 +464,43 @@ public class AudioEngineInitializationService : IHostedService
   {
     IPAddress? targetIp = null;
     if (!string.IsNullOrEmpty(targetDeviceIp))
+    {
       IPAddress.TryParse(targetDeviceIp, out targetIp);
+    }
 
     string? fallbackIp = null;
     foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
     {
-      if (ni.OperationalStatus != OperationalStatus.Up) continue;
-      if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+      if (ni.OperationalStatus != OperationalStatus.Up)
+      {
+        continue;
+      }
+
+      if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+      {
+        continue;
+      }
 
       var desc = ni.Description.ToLowerInvariant();
       var name = ni.Name.ToLowerInvariant();
       if (desc.Contains("hyper-v") || desc.Contains("virtual") ||
           name.Contains("vethernet") || name.Contains("wsl") ||
           name.Contains("docker") || name.Contains("br-"))
+      {
         continue;
+      }
 
       foreach (var addr in ni.GetIPProperties().UnicastAddresses)
       {
-        if (addr.Address.AddressFamily != AddressFamily.InterNetwork) continue;
-        if (IPAddress.IsLoopback(addr.Address)) continue;
+        if (addr.Address.AddressFamily != AddressFamily.InterNetwork)
+        {
+          continue;
+        }
+
+        if (IPAddress.IsLoopback(addr.Address))
+        {
+          continue;
+        }
 
         if (targetIp != null && addr.IPv4Mask != null)
         {
@@ -487,7 +513,10 @@ public class AudioEngineInitializationService : IHostedService
             if ((localBytes[i] & maskBytes[i]) != (targetBytes[i] & maskBytes[i]))
             { sameSubnet = false; break; }
           }
-          if (sameSubnet) return addr.Address.ToString();
+          if (sameSubnet)
+          {
+            return addr.Address.ToString();
+          }
         }
 
         fallbackIp ??= addr.Address.ToString();

@@ -67,7 +67,10 @@ public class PlaylistsController : ControllerBase
     try
     {
       var (playlist, items) = await _playlistRepository.GetByIdAsync(id, ct);
-      if (playlist == null) return NotFound();
+      if (playlist == null)
+      {
+        return NotFound();
+      }
 
       return Ok(new PlaylistDetailDto
       {
@@ -104,7 +107,9 @@ public class PlaylistsController : ControllerBase
     [FromBody] CreatePlaylistRequest request, CancellationToken ct)
   {
     if (string.IsNullOrWhiteSpace(request.Name))
+    {
       return BadRequest(new { error = "Playlist name is required" });
+    }
 
     try
     {
@@ -118,13 +123,18 @@ public class PlaylistsController : ControllerBase
             AudioSourceType.FilePlayer, switchToSource: false, ct);
         }
         if (primarySource is not IPlayQueue fileQueue)
+        {
           return BadRequest(new { error = "No queue-capable audio source available" });
+        }
+
         playQueue = fileQueue;
       }
 
       var queueItems = await playQueue.GetQueueAsync(ct);
       if (queueItems == null || queueItems.Count == 0)
+      {
         return BadRequest(new { error = "Queue is empty" });
+      }
 
       var playlistItems = queueItems.Select((q, i) => new PlaylistItem
       {
@@ -192,7 +202,10 @@ public class PlaylistsController : ControllerBase
     try
     {
       var (playlist, items) = await _playlistRepository.GetByIdAsync(id, ct);
-      if (playlist == null) return NotFound();
+      if (playlist == null)
+      {
+        return NotFound();
+      }
 
       var primarySource = _audioManager?.ActiveSource ?? _audioEngine.GetActivePrimaryAudioSource();
       if (primarySource is not IPlayQueue playQueue)
@@ -206,7 +219,9 @@ public class PlaylistsController : ControllerBase
         }
 
         if (primarySource is not IPlayQueue fileQueue)
+        {
           return BadRequest(new { error = "No queue-capable audio source available" });
+        }
 
         playQueue = fileQueue;
       }

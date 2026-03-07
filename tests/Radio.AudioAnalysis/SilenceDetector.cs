@@ -22,20 +22,29 @@ public static class SilenceDetector
     {
       if (samples[i] == 0f)
       {
-        if (runStart < 0) runStart = i;
+        if (runStart < 0)
+        {
+          runStart = i;
+        }
+
         runLength++;
       }
       else
       {
         if (runLength >= minRunLength)
+        {
           runs.Add((runStart, runLength));
+        }
+
         runStart = -1;
         runLength = 0;
       }
     }
 
     if (runLength >= minRunLength)
+    {
       runs.Add((runStart, runLength));
+    }
 
     return runs;
   }
@@ -51,7 +60,10 @@ public static class SilenceDetector
     ReadOnlySpan<float> samples, int minRunLength = 8)
   {
     var runs = new List<(int Start, int Length)>();
-    if (samples.Length < 2) return runs;
+    if (samples.Length < 2)
+    {
+      return runs;
+    }
 
     int runStart = 0;
     int runLength = 1;
@@ -65,14 +77,19 @@ public static class SilenceDetector
       else
       {
         if (runLength >= minRunLength)
+        {
           runs.Add((runStart, runLength));
+        }
+
         runStart = i;
         runLength = 1;
       }
     }
 
     if (runLength >= minRunLength)
+    {
       runs.Add((runStart, runLength));
+    }
 
     return runs;
   }
@@ -95,20 +112,29 @@ public static class SilenceDetector
     {
       if (MathF.Abs(samples[i]) >= threshold)
       {
-        if (runStart < 0) runStart = i;
+        if (runStart < 0)
+        {
+          runStart = i;
+        }
+
         runLength++;
       }
       else
       {
         if (runLength >= minRunLength)
+        {
           runs.Add((runStart, runLength));
+        }
+
         runStart = -1;
         runLength = 0;
       }
     }
 
     if (runLength >= minRunLength)
+    {
       runs.Add((runStart, runLength));
+    }
 
     return runs;
   }

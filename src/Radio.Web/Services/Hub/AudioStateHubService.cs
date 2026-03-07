@@ -79,7 +79,9 @@ public class AudioStateHubService : IAsyncDisposable
       {
         _logger.LogDebug("Received PlaybackStateChanged event");
         if (PlaybackStateChanged != null)
+        {
           await PlaybackStateChanged.Invoke();
+        }
       });
 
       // Server sends NowPlayingChanged with a NowPlayingDto payload —
@@ -88,7 +90,9 @@ public class AudioStateHubService : IAsyncDisposable
       {
         _logger.LogDebug("Received NowPlayingChanged event");
         if (NowPlayingChanged != null)
+        {
           await NowPlayingChanged.Invoke(dto);
+        }
       });
 
       // Server sends QueueChanged with a list payload —
@@ -97,7 +101,9 @@ public class AudioStateHubService : IAsyncDisposable
       {
         _logger.LogDebug("Received QueueChanged event");
         if (QueueChanged != null)
+        {
           await QueueChanged.Invoke();
+        }
       });
 
       // Server sends RadioStateChanged with a RadioStateDto payload —
@@ -106,7 +112,9 @@ public class AudioStateHubService : IAsyncDisposable
       {
         _logger.LogDebug("Received RadioStateChanged event");
         if (RadioStateChanged != null)
+        {
           await RadioStateChanged.Invoke();
+        }
       });
 
       // Server sends VolumeChanged with a VolumeDto payload —
@@ -115,14 +123,18 @@ public class AudioStateHubService : IAsyncDisposable
       {
         _logger.LogDebug("Received VolumeChanged event");
         if (VolumeChanged != null)
+        {
           await VolumeChanged.Invoke(dto);
+        }
       });
 
       _hubConnection.On("SourceChanged", async () =>
       {
         _logger.LogDebug("Received SourceChanged event");
         if (SourceChanged != null)
+        {
           await SourceChanged.Invoke();
+        }
       });
 
       // Server sends FingerprintStatusChanged with a FingerprintStatusDto payload —
@@ -131,7 +143,9 @@ public class AudioStateHubService : IAsyncDisposable
       {
         _logger.LogDebug("Received FingerprintStatusChanged event");
         if (FingerprintStatusChanged != null)
+        {
           await FingerprintStatusChanged.Invoke();
+        }
       });
 
       // Server sends PhoneCallStateChanged with state payload
@@ -139,7 +153,9 @@ public class AudioStateHubService : IAsyncDisposable
       {
         _logger.LogDebug("Received PhoneCallStateChanged event");
         if (PhoneCallStateChanged != null)
+        {
           await PhoneCallStateChanged.Invoke();
+        }
       });
 
       // Server sends VisualizationModeChanged with mode payload
@@ -147,7 +163,9 @@ public class AudioStateHubService : IAsyncDisposable
       {
         _logger.LogDebug("Received VisualizationModeChanged event");
         if (VisualizationModeChanged != null)
+        {
           await VisualizationModeChanged.Invoke();
+        }
       });
 
       // Server sends EncoderConnectionChanged when encoder device connects/disconnects
@@ -155,7 +173,9 @@ public class AudioStateHubService : IAsyncDisposable
       {
         _logger.LogDebug("Received EncoderConnectionChanged event");
         if (EncoderConnectionChanged != null)
+        {
           await EncoderConnectionChanged.Invoke();
+        }
       });
 
       // Server sends SleepStateChanged with bool payload (true=sleeping, false=awake)
@@ -163,7 +183,9 @@ public class AudioStateHubService : IAsyncDisposable
       {
         _logger.LogDebug("Received SleepStateChanged event: IsSleeping={IsSleeping}", isSleeping);
         if (SleepStateChanged != null)
+        {
           await SleepStateChanged.Invoke(isSleeping);
+        }
       });
 
       // Connection lifecycle events — throttled to avoid log spam when API is down
@@ -180,9 +202,13 @@ public class AudioStateHubService : IAsyncDisposable
           }
         }
         else if (error != null)
+        {
           _logger.LogWarning(error, "Audio hub connection closed with error");
+        }
         else
+        {
           _logger.LogInformation("Audio hub connection closed");
+        }
 
         return Task.CompletedTask;
       };
@@ -190,7 +216,10 @@ public class AudioStateHubService : IAsyncDisposable
       _hubConnection.Reconnecting += (error) =>
       {
         if (error == null || !IsConnectionRefused(error))
+        {
           _logger.LogWarning(error, "Audio hub reconnecting...");
+        }
+
         return Task.CompletedTask;
       };
 
@@ -246,7 +275,9 @@ public class AudioStateHubService : IAsyncDisposable
   public async Task NotifySourceChangedAsync()
   {
     if (SourceChanged != null)
+    {
       await SourceChanged.Invoke();
+    }
   }
 
   public async Task StopAsync(CancellationToken cancellationToken = default)
@@ -274,7 +305,9 @@ public class AudioStateHubService : IAsyncDisposable
   public async ValueTask DisposeAsync()
   {
     if (_isDisposed)
+    {
       return;
+    }
 
     _isDisposed = true;
 
@@ -294,7 +327,10 @@ public class AudioStateHubService : IAsyncDisposable
     while (current != null)
     {
       if (current is SocketException { SocketErrorCode: SocketError.ConnectionRefused })
+      {
         return true;
+      }
+
       current = current.InnerException;
     }
     return false;

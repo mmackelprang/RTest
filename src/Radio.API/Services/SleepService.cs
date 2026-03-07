@@ -41,7 +41,10 @@ public class SleepService : ISleepService
     await _lock.WaitAsync();
     try
     {
-      if (_isSleeping) return;
+      if (_isSleeping)
+      {
+        return;
+      }
 
       _logger.LogInformation("Entering sleep mode");
 
@@ -90,7 +93,10 @@ public class SleepService : ISleepService
     await _lock.WaitAsync();
     try
     {
-      if (!_isSleeping) return;
+      if (!_isSleeping)
+      {
+        return;
+      }
 
       _logger.LogInformation("Waking from sleep mode (source: {WakeSource})", wakeSource);
 
