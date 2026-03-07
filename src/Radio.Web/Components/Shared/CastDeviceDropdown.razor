@@ -1,12 +1,13 @@
 @using Radio.Web.Models
 @using Radio.Web.Services.ApiClients
 
-<!-- Click-away overlay -->
+<!-- Click-away overlay (onclick + ontouchend for reliable touch dismissal) -->
 @if (IsOpen)
 {
   <div @onclick="Close" @onclick:stopPropagation="true"
-       style="position: fixed; inset: 0; z-index: 99;"></div>
-  <div @onclick:stopPropagation="true"
+       @ontouchend="Close" @ontouchend:stopPropagation="true"
+       style="position: fixed; inset: 0; z-index: 99; -webkit-tap-highlight-color: transparent;"></div>
+  <div @onclick:stopPropagation="true" @ontouchend:stopPropagation="true"
        style="position: absolute; top: 100%; right: 0; z-index: 100; min-width: 280px; max-width: 340px;
               background: rgba(30,30,30,0.95); backdrop-filter: blur(12px);
               border: 1px solid rgba(255,255,255,0.15); border-radius: 8px;
