@@ -456,21 +456,33 @@
   {
     if (string.IsNullOrEmpty(newOutputId)) return;
 
-    // Second click on already-selected Cast → toggle dropdown
-    if (newOutputId == _selectedOutputId && newOutputId == "google-cast")
+    if (newOutputId == "google-cast")
     {
-      _showCastDropdown = !_showCastDropdown;
+      // Cast already active → toggle dropdown for device switching
+      if (newOutputId == _selectedOutputId)
+      {
+        _showCastDropdown = !_showCastDropdown;
+        return;
+      }
+
+      // First click on Cast with a saved default → auto-connect (no dropdown)
+      if (_defaultCastDevice != null)
+      {
+        await AutoConnectCastDeviceAsync(newOutputId);
+        return;
+      }
+
+      // First click on Cast with no default → open dropdown for device selection
+      _selectedOutputId = newOutputId;
+      _showCastDropdown = true;
       return;
     }
 
     if (newOutputId == _selectedOutputId) return;
 
-    // When selecting Google Cast with a default device, auto-connect
-    if (newOutputId == "google-cast" && _defaultCastDevice != null)
-    {
-      await AutoConnectCastDeviceAsync(newOutputId);
-      return;
-    }
+    // Switching away from Cast → close dropdown if open
+    if (_showCastDropdown)
+      _showCastDropdown = false;
 
     try
     {
