@@ -29,7 +29,7 @@ publish_for_rid() {
   dotnet publish "$REPO_ROOT/src/Radio.API/Radio.API.csproj" \
     --configuration Release \
     --runtime "$RID" \
-    -f net8.0 \
+    -f net10.0 \
     --self-contained true \
     --output "$OUTPUT/api" \
     -p:PublishSingleFile=true \
@@ -42,7 +42,7 @@ publish_for_rid() {
   dotnet publish "$REPO_ROOT/src/Radio.Web/Radio.Web.csproj" \
     --configuration Release \
     --runtime "$RID" \
-    -f net8.0 \
+    -f net10.0 \
     --self-contained true \
     --output "$OUTPUT/web" \
     -p:PublishSingleFile=true \

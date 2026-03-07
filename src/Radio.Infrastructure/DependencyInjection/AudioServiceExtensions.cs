@@ -149,6 +149,8 @@ public static class AudioServiceExtensions
       sp.GetRequiredService<PlayHistoryTracker>(),
       sp.GetRequiredService<SoundFlowPlaybackService>()));
     services.AddSingleton<IAudioManager>(sp => sp.GetRequiredService<AudioManager>());
+    services.AddSingleton<IAudioSourceManager>(sp => sp.GetRequiredService<AudioManager>());
+    services.AddSingleton<IAudioMixerControl>(sp => sp.GetRequiredService<AudioManager>());
 
     // Register play history tracker (Func<> defers IAudioManager resolution, breaking circular dependency)
     services.AddSingleton<PlayHistoryTracker>(sp => new PlayHistoryTracker(

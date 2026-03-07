@@ -292,6 +292,9 @@ builder.Services.AddHttpClient("AlbumArtProxy", client =>
 builder.Services.AddSingleton<AudioStateHubService>();
 builder.Services.AddSingleton<AudioVisualizationHubService>();
 
+// Register centralized audio state store (subscribes to hub, caches state for components)
+builder.Services.AddSingleton<AudioStateStore>();
+
 // Register application services
 builder.Services.AddScoped<Radio.Web.Services.QueuePersistenceService>();
 builder.Services.AddScoped<Radio.Web.Services.DeviceDisplayStateService>();

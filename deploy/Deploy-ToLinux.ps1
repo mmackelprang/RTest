@@ -75,7 +75,7 @@ Write-Host "[1/4] Building for $Runtime..." -ForegroundColor Yellow
 $commonArgs = @(
   "--configuration", "Release",
   "--runtime", $Runtime,
-  "-f", "net8.0",
+  "-f", "net10.0",
   "-v", "quiet"
 )
 
@@ -91,10 +91,10 @@ if ($Quick) {
   )
 }
 
-# Restore for net8.0 (Windows conditional TFM means assets are built for windows TFM by default)
-Write-Host "  Restoring for net8.0 / $Runtime..." -ForegroundColor DarkGray
-dotnet restore "$RepoRoot\src\Radio.API\Radio.API.csproj" --runtime $Runtime -p:TargetFramework=net8.0 -v quiet
-dotnet restore "$RepoRoot\src\Radio.Web\Radio.Web.csproj" --runtime $Runtime -p:TargetFramework=net8.0 -v quiet
+# Restore for net10.0 (Windows conditional TFM means assets are built for windows TFM by default)
+Write-Host "  Restoring for net10.0 / $Runtime..." -ForegroundColor DarkGray
+dotnet restore "$RepoRoot\src\Radio.API\Radio.API.csproj" --runtime $Runtime -p:TargetFramework=net10.0 -v quiet
+dotnet restore "$RepoRoot\src\Radio.Web\Radio.Web.csproj" --runtime $Runtime -p:TargetFramework=net10.0 -v quiet
 
 # Publish Radio.API
 Write-Host "  Publishing Radio.API..." -ForegroundColor DarkGray

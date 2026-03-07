@@ -59,7 +59,7 @@ echo ""
 # Step 1: Build both projects
 echo "[1/4] Building for linux-arm64..."
 
-COMMON_ARGS="--configuration Release --runtime linux-arm64 -f net8.0"
+COMMON_ARGS="--configuration Release --runtime linux-arm64 -f net10.0"
 
 if [ "$QUICK" = true ]; then
   COMMON_ARGS="$COMMON_ARGS --no-self-contained"
