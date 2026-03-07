@@ -64,7 +64,7 @@ SoundFlow mixer without the null sink intermediary.
 | Audio output (3.5mm, USB DAC, or HDMI) | Yes | Audio playback |
 | Network connection (Ethernet or WiFi) | Yes | Google Cast discovery, API access, fingerprinting |
 | USB RTL-SDR dongle | Optional | FM/AM radio reception via SDR |
-| USB Bluetooth adapter | Optional | Only if built-in BT is insufficient |
+| USB Bluetooth adapter | Recommended | Avoids WiFi/BT coexistence interference on combo chips (see Audio Quality Tuning) |
 | 12.5" x 3.75" touchscreen (1920x576) | Optional | Designed display; any browser works too |
 
 ### Software
@@ -374,6 +374,99 @@ bluetoothctl show | grep "Audio"
 # Audio Sink    (0000110b-...)  ← Pi can RECEIVE audio
 # Audio Source  (0000110a-...)  ← Pi can SEND audio
 ```
+
+## Audio Quality Tuning (Bluetooth)
+
+When receiving Bluetooth A2DP audio, several system-level settings significantly
+affect audio quality. These are especially important on systems with combo
+WiFi+Bluetooth chips (e.g., Intel AX201).
+
+### USB Bluetooth Adapter (Recommended)
+
+Combo WiFi+BT chips share a single antenna, causing WiFi/BT coexistence
+interference. This manifests as silence gaps in the A2DP audio stream — the phone
+sends audio correctly, but BT packets are dropped at the radio layer. A dedicated
+USB Bluetooth adapter physically separates BT from WiFi, eliminating this issue.
+
+**Tested adapter:** TP-Link UB500 (Realtek BT 5.1, USB, aptX HD capable)
+
+When using a USB BT adapter alongside an onboard combo chip, disable the onboard
+BT to prevent conflicts:
+
+```bash
+# Install udev rule to disable Intel AX201 BT on boot
+sudo cp deploy/common/99-disable-intel-bt.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules
+
+# Verify after reboot: hci0 should not appear, only hci1 (USB adapter)
+hciconfig -a
+```
+
+**Note:** The udev rule matches Intel AX201 by USB vendor:product ID (`8087:0033`).
+For other combo chips, find the USB ID with `lsusb | grep -i bluetooth` and update
+the rule accordingly.
+
+### CPU Governor
+
+Set CPU governor to `performance` to prevent frequency scaling from adding latency
+to the audio pipeline:
+
+```bash
+sudo cp deploy/common/radio-performance.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now radio-performance.service
+```
+
+### WiFi Power Management
+
+Disable WiFi power management to prevent bursty radio activity that interferes
+with BT reception:
+
+```bash
+sudo cp deploy/common/99-wifi-power-save-off /etc/NetworkManager/dispatcher.d/
+sudo chmod +x /etc/NetworkManager/dispatcher.d/99-wifi-power-save-off
+
+# Apply immediately
+sudo iwconfig wlp0s20f3 power off
+```
+
+### PipeWire Quantum Tuning
+
+MiniAudio requests a 5ms buffer (240 samples at 48kHz). PipeWire rounds this down
+to 128 samples (2.67ms), which can cause ALSA output xruns. Set a minimum quantum
+of 512 (10.67ms) to match the BT transport quantum:
+
+```bash
+mkdir -p ~/.config/pipewire/pipewire.conf.d
+cat > ~/.config/pipewire/pipewire.conf.d/99-radio-quantum.conf << 'EOF'
+context.properties = {
+    default.clock.min-quantum = 512
+}
+EOF
+systemctl --user restart pipewire
+```
+
+### PipeWire Version
+
+Ubuntu 24.04 ships PipeWire 1.0.5. For better BT audio stability, upgrade to the
+latest available version via the upstream PPA:
+
+```bash
+sudo add-apt-repository -y ppa:pipewire-debian/pipewire-upstream
+sudo apt-get update
+sudo apt-get upgrade -y pipewire pipewire-pulse wireplumber libspa-0.2-bluetooth
+systemctl --user restart pipewire wireplumber
+```
+
+### Summary Checklist
+
+| Setting | How | Persists? |
+|---|---|---|
+| USB BT adapter | Plug in USB adapter, install udev rule to disable onboard BT | Yes (udev rule) |
+| CPU governor=performance | `radio-performance.service` | Yes (systemd) |
+| WiFi PM off | NetworkManager dispatcher script | Yes (dispatcher) |
+| PipeWire min-quantum=512 | `~/.config/pipewire/pipewire.conf.d/99-radio-quantum.conf` | Yes (user config) |
+| PipeWire upgrade | PPA `ppa:pipewire-debian/pipewire-upstream` | Yes (apt) |
 
 ## Configuration
 

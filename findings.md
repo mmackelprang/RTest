@@ -118,11 +118,27 @@ The `OnProcess` callback converts S16LE bytes to float samples via `sampleCount 
 - 384 silence gaps still present but these are BT transport dropouts (brief pops), NOT channel swaps
 - ODD-length gaps in captured data are from zero VALUES spanning chunk boundaries — AddSamples always receives frame-aligned data
 
-### Remaining Issue: BT Transport Dropouts
-- 384 silence runs in 60s (clustered, likely RF interference bursts)
-- Causes brief audible pops but NOT sustained distortion
-- Inherent to BT A2DP transport — not fixable in application code
-- Could be mitigated with gap-filling interpolation in a future SoundModifier
+### Remaining Issue: BT Transport Dropouts — RESOLVED
+
+**Root cause**: Intel AX201 combo WiFi+BT chip shares antenna, causing WiFi/BT coexistence interference. WiFi `Invalid misc` counter: 961,752 (extremely high). BT packets dropped at RF level → silence gaps in A2DP stream.
+
+**Evidence**: Phone → standalone BT speaker works fine. Phone → Ubuntu with Intel AX201 has frequent gaps.
+
+**Fix**: TP-Link UB500 USB Bluetooth adapter (Realtek BT 5.1) physically separates BT from WiFi.
+
+**10-run capture comparison (60s each):**
+
+| Configuration | Perfect runs (0 gaps) | Worst correlation | Notes |
+|---|---|---|---|
+| Intel AX201 (baseline) | 0/10 | 0.685 (Run 6) | Constant interference |
+| Intel AX201 + CPU perf + WiFi PM off | 0/9 | 0.106 (Run 5) | Software tuning insufficient |
+| TP-Link UB500 USB adapter | 6/10 | 0.977 (Run 9) | Dramatic improvement |
+
+**System tuning applied (persistent):**
+- CPU governor: `performance` via `radio-performance.service`
+- WiFi PM: off via NetworkManager dispatcher script
+- Intel AX201 BT: disabled via udev rule (`99-disable-intel-bt.rules`)
+- PipeWire: upgraded 1.0.5 → 1.0.7 via upstream PPA
 
 ### Existing Infrastructure
 - `BufferedSoundGenerator` has extensive instrumentation (callback timing, lock contention, GC correlation)
