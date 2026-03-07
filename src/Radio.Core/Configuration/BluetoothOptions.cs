@@ -50,6 +50,13 @@ public class BluetoothOptions
   /// </summary>
   public bool EnableLoopbackCapture { get; set; } = true;
 
+  /// <summary>
+  /// Preferred Bluetooth adapter address (e.g., "78:20:51:F5:FB:A7").
+  /// When set, the service will prefer this adapter over others.
+  /// Useful when multiple adapters are present (e.g., built-in + USB dongle).
+  /// </summary>
+  public string? PreferredAdapterAddress { get; set; }
+
   /// <summary>Automatically reconnect to known device after unexpected disconnect.</summary>
   public bool AutoReconnect { get; set; } = true;
 
