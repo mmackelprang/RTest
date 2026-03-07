@@ -201,13 +201,53 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 _objectManager = _connection.CreateProxy<Linux.IObjectManager>(Linux.BluezConstants.ServiceName, "/");
                 var objects = await _objectManager.GetManagedObjectsAsync();
 
-                // Find first adapter
+                // Find adapter — prefer PreferredAdapterAddress if configured
+                var preferredAddress = _options.PreferredAdapterAddress;
+                Linux.IAdapter1? fallbackAdapter = null;
+                ObjectPath? fallbackPath = null;
+
                 foreach (var obj in objects)
                 {
-                    if (obj.Value.ContainsKey(Linux.BluezConstants.AdapterInterface))
+                    if (!obj.Value.ContainsKey(Linux.BluezConstants.AdapterInterface))
+                        continue;
+
+                    var candidate = _connection.CreateProxy<Linux.IAdapter1>(Linux.BluezConstants.ServiceName, obj.Key);
+
+                    if (!string.IsNullOrEmpty(preferredAddress))
                     {
-                        _adapter = _connection.CreateProxy<Linux.IAdapter1>(Linux.BluezConstants.ServiceName, obj.Key);
-                        break;
+                        try
+                        {
+                            var addr = await candidate.GetAsync<string>("Address");
+                            if (string.Equals(addr, preferredAddress, StringComparison.OrdinalIgnoreCase))
+                            {
+                                _adapter = candidate;
+                                _logger.LogInformation("Selected preferred Bluetooth adapter {Address} at {Path}",
+                                    addr, obj.Key);
+                                break;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Could not read address from adapter at {Path}", obj.Key);
+                        }
+                    }
+
+                    // Keep the first adapter as fallback
+                    fallbackAdapter ??= candidate;
+                    fallbackPath ??= obj.Key;
+                }
+
+                if (_adapter == null && fallbackAdapter != null)
+                {
+                    _adapter = fallbackAdapter;
+                    if (!string.IsNullOrEmpty(preferredAddress))
+                    {
+                        _logger.LogWarning("Preferred adapter {PreferredAddress} not found, falling back to {Path}",
+                            preferredAddress, fallbackPath);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("Selected Bluetooth adapter at {Path}", fallbackPath);
                     }
                 }
 
@@ -225,7 +265,9 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                     await _adapter.SetAsync("Alias", deviceName);
                 }
                 
+                await _adapter.SetAsync("DiscoverableTimeout", (uint)0);
                 await _adapter.SetAsync("Discoverable", true);
+                await _adapter.SetAsync("PairableTimeout", (uint)0);
                 await _adapter.SetAsync("Pairable", true);
 
                 // Register a BlueZ Agent to handle pairing requests automatically.
