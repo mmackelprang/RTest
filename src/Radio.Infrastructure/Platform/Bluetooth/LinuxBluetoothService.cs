@@ -954,82 +954,13 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                     return (null, 0, 0);
                 }
 
-                // Parse pw-cli output for node.name matching our prefix.
-                // Format: "id 68, type PipeWire:Interface:Node/3" followed by properties.
-                // We need: node.name, object.id, and object.serial.
-                // pw-record --target accepts the serial (not the object id).
-                //
-                // IMPORTANT: In pw-cli output, object.serial typically appears BEFORE node.name
-                // within the same object block. We must track the serial as we go and return it
-                // when the node.name matches, rather than looking forward for the serial.
-                // We also reset state on ANY new "id" line (not just Nodes) to prevent
-                // cross-object serial leakage (e.g., picking up a Device serial).
-                var lines = output.Split('\n');
-                var lastNodeId = 0;
-                var lastNodeSerial = 0;
-                var isCurrentObjectANode = false;
-                string? matchedNodeName = null;
-                var matchedNodeId = 0;
+                var result = ParsePwCliOutputForBtNode(output, prefix);
 
-                foreach (var line in lines)
-                {
-                    var trimmed = line.Trim();
+                if (result.NodeName == null)
+                    _logger.LogDebug("pw-cli returned {Lines} lines but no node matching {Prefix}",
+                        output.Split('\n').Length, prefix);
 
-                    // Any "id X, type ..." line starts a new object — reset tracking state
-                    if (trimmed.StartsWith("id ") && trimmed.Contains(", type PipeWire:Interface:"))
-                    {
-                        isCurrentObjectANode = trimmed.Contains(":Node/") || trimmed.Contains(":Node\n");
-                        if (isCurrentObjectANode)
-                        {
-                            var commaIdx = trimmed.IndexOf(',');
-                            if (commaIdx > 3 && int.TryParse(trimmed[3..commaIdx], out var id))
-                                lastNodeId = id;
-                            lastNodeSerial = 0;
-                        }
-                        continue;
-                    }
-
-                    // Track object.serial for the current object
-                    if (isCurrentObjectANode && trimmed.StartsWith("object.serial = "))
-                    {
-                        var start = trimmed.IndexOf('"') + 1;
-                        var end = trimmed.LastIndexOf('"');
-                        if (start > 0 && end > start && int.TryParse(trimmed[start..end], out var serial))
-                            lastNodeSerial = serial;
-                    }
-
-                    // Check for matching node.name
-                    if (isCurrentObjectANode && trimmed.StartsWith("node.name = ") && trimmed.Contains(prefix))
-                    {
-                        var start = trimmed.IndexOf('"') + 1;
-                        var end = trimmed.LastIndexOf('"');
-                        if (start > 0 && end > start)
-                        {
-                            matchedNodeName = trimmed[start..end];
-                            matchedNodeId = lastNodeId;
-                            // If we already have the serial (appeared before node.name), return now
-                            if (lastNodeSerial > 0)
-                                return (matchedNodeName, matchedNodeId, lastNodeSerial);
-                            // Otherwise keep scanning this object's properties for the serial
-                        }
-                    }
-
-                    // If we matched the name but serial came after, catch it here
-                    if (matchedNodeName != null && trimmed.StartsWith("object.serial = "))
-                    {
-                        var start = trimmed.IndexOf('"') + 1;
-                        var end = trimmed.LastIndexOf('"');
-                        if (start > 0 && end > start && int.TryParse(trimmed[start..end], out var serial))
-                            return (matchedNodeName, matchedNodeId, serial);
-                    }
-                }
-
-                // If we found the node but not the serial, return with serial=0
-                if (matchedNodeName != null)
-                    return (matchedNodeName, matchedNodeId, 0);
-
-                _logger.LogDebug("pw-cli returned {Lines} lines but no node matching {Prefix}",
-                    lines.Length, prefix);
+                return result;
             }
             catch (Exception ex)
             {
@@ -1038,6 +969,95 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
             return (null, 0, 0);
         }
+
+    /// <summary>
+    /// Parses pw-cli list-objects output to find a bluez_input node matching the given prefix.
+    /// Extracted as a static method for testability.
+    /// </summary>
+    /// <remarks>
+    /// In pw-cli output, object.serial typically appears BEFORE node.name within the same
+    /// object block. We track the serial as we go and return it when the node.name matches,
+    /// rather than looking forward. We reset state on ANY new "id" line (not just Nodes)
+    /// to prevent cross-object serial leakage (e.g., picking up a Device serial).
+    /// </remarks>
+    internal static (string? NodeName, int PipeWireId, int PipeWireSerial) ParsePwCliOutputForBtNode(
+        string pwCliOutput, string nodeNamePrefix)
+    {
+        var lines = pwCliOutput.Split('\n');
+        var lastNodeId = 0;
+        var lastNodeSerial = 0;
+        var isCurrentObjectANode = false;
+        string? matchedNodeName = null;
+        var matchedNodeId = 0;
+
+        foreach (var line in lines)
+        {
+            var trimmed = line.Trim();
+
+            // Any "id X, type ..." line starts a new object — reset tracking state
+            if (trimmed.StartsWith("id ") && trimmed.Contains(", type PipeWire:Interface:"))
+            {
+                // Reset match state if we cross into a new object without finding serial
+                if (matchedNodeName != null)
+                    return (matchedNodeName, matchedNodeId, 0);
+
+                isCurrentObjectANode = trimmed.Contains(":Node/") || trimmed.Contains(":Node\n");
+                if (isCurrentObjectANode)
+                {
+                    var commaIdx = trimmed.IndexOf(',');
+                    if (commaIdx > 3 && int.TryParse(trimmed[3..commaIdx], out var id))
+                        lastNodeId = id;
+                    lastNodeSerial = 0;
+                }
+                else
+                {
+                    // Non-Node object: reset node tracking to prevent leakage
+                    lastNodeSerial = 0;
+                }
+                continue;
+            }
+
+            // Track object.serial for the current Node object
+            if (isCurrentObjectANode && trimmed.StartsWith("object.serial = "))
+            {
+                var start = trimmed.IndexOf('"') + 1;
+                var end = trimmed.LastIndexOf('"');
+                if (start > 0 && end > start && int.TryParse(trimmed[start..end], out var serial))
+                    lastNodeSerial = serial;
+            }
+
+            // Check for matching node.name
+            if (isCurrentObjectANode && trimmed.StartsWith("node.name = ") && trimmed.Contains(nodeNamePrefix))
+            {
+                var start = trimmed.IndexOf('"') + 1;
+                var end = trimmed.LastIndexOf('"');
+                if (start > 0 && end > start)
+                {
+                    matchedNodeName = trimmed[start..end];
+                    matchedNodeId = lastNodeId;
+                    // If we already have the serial (appeared before node.name), return now
+                    if (lastNodeSerial > 0)
+                        return (matchedNodeName, matchedNodeId, lastNodeSerial);
+                    // Otherwise keep scanning this object's properties for the serial
+                }
+            }
+
+            // If we matched the name but serial came after, catch it here
+            if (matchedNodeName != null && trimmed.StartsWith("object.serial = "))
+            {
+                var start = trimmed.IndexOf('"') + 1;
+                var end = trimmed.LastIndexOf('"');
+                if (start > 0 && end > start && int.TryParse(trimmed[start..end], out var serial))
+                    return (matchedNodeName, matchedNodeId, serial);
+            }
+        }
+
+        // If we found the node but not the serial, return with serial=0
+        if (matchedNodeName != null)
+            return (matchedNodeName, matchedNodeId, 0);
+
+        return (null, 0, 0);
+    }
 
         // Note: SetPipeWireNodeVolumeAsync removed — PipeWire's bluez5 module manages
         // node volume from AVRCP transport natively with cubic perceptual mapping.
