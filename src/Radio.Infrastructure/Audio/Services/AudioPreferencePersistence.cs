@@ -187,9 +187,10 @@ public class AudioPreferencePersistence : IDisposable
 
   /// <summary>
   /// Maximum gain multiplier. Per-source trim for user adjustment.
-  /// Capped at 2.0 (+6 dB) — higher values risk clipping.
+  /// Capped at 5.0 (+14 dB) for sources that need significant boost.
+  /// The LimiterModifier prevents clipping at the output stage.
   /// </summary>
-  public const float MaxGain = 2.0f;
+  public const float MaxGain = 5.0f;
 
   /// <summary>
   /// Sets the gain offset for a source type and schedules persistence.

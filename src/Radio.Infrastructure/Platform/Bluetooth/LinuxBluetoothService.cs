@@ -851,11 +851,11 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                         _activeGenerator = generator;
                         _activeNodeName = nodeName;
 
-                        // Deferred task: disconnect auto-links after PipeWire settles.
-                        // PipeWire's bluez5 module handles AVRCP→node volume natively
-                        // with cubic (perceptual) mapping — no pw-cli override needed.
+                        // Deferred task: disconnect auto-links and normalize volume
+                        // after PipeWire settles.
                         var captureCt = _captureCts!.Token;
                         var capturedNodeName = nodeName;
+                        var capturedNodeId = nodeId;
                         _ = Task.Run(async () =>
                         {
                             try
@@ -867,6 +867,13 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                                 // plays through both our pipeline AND directly to
                                 // speakers, causing an out-of-sync duplicate.
                                 DisconnectPipeWireBtAutoLinks(capturedNodeName);
+
+                                // Override PipeWire's AVRCP-managed node volume to 1.0.
+                                // PipeWire's bluez5 module applies cubic mapping from phone
+                                // AVRCP volume, making BT audio ~30% quieter than other sources.
+                                // We normalize the capture level here and control volume via
+                                // our own master volume and per-source gain instead.
+                                NormalizeBtNodeVolume(capturedNodeId);
 
                                 // For fallback pw-record mode, also do link management
                                 if (_nativeStream == null && _captureProcess != null)
@@ -1463,6 +1470,54 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             {
                 _logger.LogDebug(ex, "Failed to disconnect PipeWire link {Output} -> {Input}",
                     outputPort, inputPort);
+            }
+        }
+
+        /// <summary>
+        /// Overrides the PipeWire node volume of the BT input node to 1.0 (full scale).
+        /// PipeWire's bluez5 module applies AVRCP volume with cubic mapping, which makes
+        /// BT audio significantly quieter than other sources. We normalize capture volume
+        /// here and control output level via our own master volume + per-source gain.
+        /// </summary>
+        private void NormalizeBtNodeVolume(int pipeWireNodeId)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "wpctl",
+                    Arguments = $"set-volume {pipeWireNodeId} 1.0",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = Process.Start(psi);
+                if (process == null)
+                {
+                    _logger.LogWarning("Failed to start wpctl for BT volume normalization");
+                    return;
+                }
+
+                var stderr = process.StandardError.ReadToEnd();
+                process.WaitForExit(3000);
+
+                if (process.ExitCode == 0)
+                {
+                    _logger.LogInformation(
+                        "Normalized BT node volume to 1.0 (PipeWire id={NodeId})", pipeWireNodeId);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "wpctl set-volume failed (exit={ExitCode}): {Stderr}",
+                        process.ExitCode, stderr.Trim());
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to normalize BT node volume (PipeWire id={NodeId})", pipeWireNodeId);
             }
         }
 
