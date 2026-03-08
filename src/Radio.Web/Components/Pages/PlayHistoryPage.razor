@@ -33,6 +33,7 @@
       <MudTextField T="string" Label="Search"
                     @bind-Value="_searchQuery"
                     Placeholder="Search title, artist, album..."
+                    InputMode="InputMode.text"
                     Adornment="Adornment.End"
                     AdornmentIcon="@Icons.Material.Filled.Search"
                     OnKeyUp="@OnSearchKeyUp" />

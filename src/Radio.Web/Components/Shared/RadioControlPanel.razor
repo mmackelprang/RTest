@@ -212,6 +212,7 @@
       <MudNumericField @bind-Value="_newFrequency"
                        Label="@(_radioState?.Band == "AM" ? "Frequency (kHz)" : "Frequency (MHz)")"
                        Variant="Variant.Outlined"
+                       InputMode="@(InputMode.@decimal)"
                        Min="@GetMinFrequency()" Max="@GetMaxFrequency()" Step="@GetDialogStep()"
                        Style="width: 100%;" />
       <div class="d-flex justify-end gap-2 mt-3">
@@ -229,7 +230,7 @@
     <MudPaper Class="pa-4" Style="min-width: 300px;" @onclick:stopPropagation="true">
       <MudText Typo="Typo.h6" Class="mb-3">Save Preset</MudText>
       <MudTextField @bind-Value="_presetName"
-                    Label="Preset Name" Variant="Variant.Outlined" Style="width: 100%;" />
+                    Label="Preset Name" Variant="Variant.Outlined" InputMode="InputMode.text" Style="width: 100%;" />
       <div class="d-flex justify-end gap-2 mt-3">
         <MudButton OnClick="CloseSavePresetDialog">Cancel</MudButton>
         <MudButton Color="Color.Warning" Variant="Variant.Filled"

@@ -188,6 +188,7 @@
       <MudNumericField @bind-Value="_newFrequency"
                        Label="@(_radioState?.Band == "AM" ? "Frequency (kHz)" : "Frequency (MHz)")"
                        Variant="Variant.Outlined"
+                       InputMode="@(InputMode.@decimal)"
                        Min="@GetMinFrequency()"
                        Max="@GetMaxFrequency()"
                        Step="@GetDialogStep()"
@@ -208,6 +209,7 @@
       <MudTextField @bind-Value="_presetName"
                     Label="Preset Name"
                     Variant="Variant.Outlined"
+                    InputMode="InputMode.text"
                     Style="width: 100%;" />
     </DialogContent>
     <DialogActions>

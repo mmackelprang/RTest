@@ -175,16 +175,19 @@
               <MudItem xs="12" md="4">
                 <MudNumericField T="int" @bind-Value="_audioConfig.DuckingPercentage" Label="Ducking Level (%)"
                                  Variant="Variant.Outlined" Min="0" Max="100"
+                                 InputMode="InputMode.numeric"
                                  HelperText="Volume reduction during events" />
               </MudItem>
               <MudItem xs="12" md="4">
                 <MudNumericField T="int" @bind-Value="_audioConfig.DuckingAttackMs" Label="Ducking Attack (ms)"
                                  Variant="Variant.Outlined" Min="0" Max="5000"
+                                 InputMode="InputMode.numeric"
                                  HelperText="Time to reduce volume" />
               </MudItem>
               <MudItem xs="12" md="4">
                 <MudNumericField T="int" @bind-Value="_audioConfig.DuckingReleaseMs" Label="Ducking Release (ms)"
                                  Variant="Variant.Outlined" Min="0" Max="5000"
+                                 InputMode="InputMode.numeric"
                                  HelperText="Time to restore volume" />
               </MudItem>
               <MudItem xs="12">
@@ -221,16 +224,19 @@
               <MudItem xs="12" md="4">
                 <MudNumericField T="int" @bind-Value="_visualizerConfig.WaveformSampleCount" Label="Waveform Samples"
                                  Variant="Variant.Outlined" Min="64" Max="4096"
+                                 InputMode="InputMode.numeric"
                                  HelperText="Points in waveform display" />
               </MudItem>
               <MudItem xs="12" md="4">
                 <MudNumericField T="int" @bind-Value="_visualizerConfig.PeakHoldTimeMs" Label="Peak Hold (ms)"
                                  Variant="Variant.Outlined" Min="0" Max="5000"
+                                 InputMode="InputMode.numeric"
                                  HelperText="Peak indicator hold time" />
               </MudItem>
               <MudItem xs="12" md="6">
                 <MudNumericField T="float" @bind-Value="_visualizerConfig.SpectrumSmoothing" Label="Spectrum Smoothing"
                                  Variant="Variant.Outlined" Min="0" Max="1" Step="0.05f"
+                                 InputMode="@(InputMode.@decimal)"
                                  HelperText="0 = no smoothing, 1 = max smoothing" />
               </MudItem>
               <MudItem xs="12" md="6">
@@ -266,11 +272,12 @@
                   </MudItem>
                   <MudItem xs="12" md="4">
                     <MudTextField T="string" @bind-Value="_localPreferredDevice" Label="Preferred Device ID"
-                                  Variant="Variant.Outlined" HelperText="Leave empty for system default" />
+                                  Variant="Variant.Outlined" InputMode="InputMode.text" HelperText="Leave empty for system default" />
                   </MudItem>
                   <MudItem xs="12" md="4">
                     <MudNumericField T="float" @bind-Value="_localDefaultVolume" Label="Default Volume"
                                      Variant="Variant.Outlined" Min="0" Max="1" Step="0.05f"
+                                     InputMode="@(InputMode.@decimal)"
                                      HelperText="0.0 - 1.0" />
                   </MudItem>
                 </MudGrid>
@@ -284,15 +291,18 @@
                   </MudItem>
                   <MudItem xs="12" md="3">
                     <MudNumericField T="int" @bind-Value="_httpStreamPort" Label="Port"
-                                     Variant="Variant.Outlined" Min="1024" Max="65535" />
+                                     Variant="Variant.Outlined" Min="1024" Max="65535"
+                                     InputMode="InputMode.numeric" />
                   </MudItem>
                   <MudItem xs="12" md="3">
                     <MudNumericField T="int" @bind-Value="_httpStreamSampleRate" Label="Sample Rate (Hz)"
-                                     Variant="Variant.Outlined" Min="8000" Max="192000" />
+                                     Variant="Variant.Outlined" Min="8000" Max="192000"
+                                     InputMode="InputMode.numeric" />
                   </MudItem>
                   <MudItem xs="12" md="3">
                     <MudNumericField T="int" @bind-Value="_httpStreamChannels" Label="Channels"
-                                     Variant="Variant.Outlined" Min="1" Max="8" />
+                                     Variant="Variant.Outlined" Min="1" Max="8"
+                                     InputMode="InputMode.numeric" />
                   </MudItem>
                 </MudGrid>
               </MudExpansionPanel>
@@ -305,11 +315,13 @@
                   </MudItem>
                   <MudItem xs="12" md="4">
                     <MudNumericField T="int" @bind-Value="_castDiscoveryTimeout" Label="Discovery Timeout (s)"
-                                     Variant="Variant.Outlined" Min="1" Max="60" />
+                                     Variant="Variant.Outlined" Min="1" Max="60"
+                                     InputMode="InputMode.numeric" />
                   </MudItem>
                   <MudItem xs="12" md="4">
                     <MudNumericField T="float" @bind-Value="_castDefaultVolume" Label="Default Volume"
                                      Variant="Variant.Outlined" Min="0" Max="1" Step="0.05f"
+                                     InputMode="@(InputMode.@decimal)"
                                      HelperText="0.0 - 1.0" />
                   </MudItem>
                 </MudGrid>
@@ -318,16 +330,19 @@
                   <MudItem xs="12" md="4">
                     <MudNumericField T="float" @bind-Value="_castMaxBufferAhead" Label="Max Buffer Ahead (s)"
                                      Variant="Variant.Outlined" Min="1.0f" Max="5.0f" Step="0.5f"
+                                     InputMode="@(InputMode.@decimal)"
                                      HelperText="Drift protection cap. Lower = less latency (1.0-5.0)" />
                   </MudItem>
                   <MudItem xs="12" md="4">
                     <MudNumericField T="int" @bind-Value="_castBufferBeforePlay" Label="Buffer Before Play (chunks)"
                                      Variant="Variant.Outlined" Min="1" Max="10"
+                                     InputMode="InputMode.numeric"
                                      HelperText="Chunks buffered before playback starts (1-10)" />
                   </MudItem>
                   <MudItem xs="12" md="4">
                     <MudNumericField T="float" @bind-Value="_castReaderLagSeconds" Label="Reader Lag (s)"
                                      Variant="Variant.Outlined" Min="0.1f" Max="2.0f" Step="0.1f"
+                                     InputMode="@(InputMode.@decimal)"
                                      HelperText="Stream reader lag behind write position (0.1-2.0)" />
                   </MudItem>
                 </MudGrid>
@@ -361,12 +376,14 @@
                 <MudTextField T="string" @bind-Value="_deviceOptions.Radio.USBPort"
                               Label="Radio USB Audio (RF320 only)"
                               Variant="Variant.Outlined"
+                              InputMode="InputMode.text"
                               HelperText="Leave empty if using RTL-SDR. Only set for RF320 USB audio capture." />
               </MudItem>
               <MudItem xs="12" md="6">
                 <MudTextField T="string" @bind-Value="_deviceOptions.Vinyl.USBPort"
                               Label="Vinyl Audio Device"
                               Variant="Variant.Outlined"
+                              InputMode="InputMode.text"
                               HelperText="USB audio device name pattern for turntable (e.g., USB Microphone)" />
               </MudItem>
               <MudItem xs="12">
@@ -424,11 +441,13 @@
               <MudItem xs="12" md="4">
                 <MudNumericField T="int" @bind-Value="_audioEngineConfig.HotPlugIntervalSeconds" Label="Hot Plug Interval (s)"
                                  Variant="Variant.Outlined" Min="1" Max="60"
+                                 InputMode="InputMode.numeric"
                                  HelperText="Device detection interval" />
               </MudItem>
               <MudItem xs="12" md="4">
                 <MudNumericField T="int" @bind-Value="_audioEngineConfig.OutputBufferSizeSeconds" Label="Output Buffer (s)"
                                  Variant="Variant.Outlined" Min="1" Max="30"
+                                 InputMode="InputMode.numeric"
                                  HelperText="Output buffer size in seconds" />
               </MudItem>
               <MudItem xs="12" md="4">
@@ -466,52 +485,63 @@
               <MudItem xs="12" md="4">
                 <MudNumericField T="double" @bind-Value="_radioConfig.DefaultFMFrequencyMHz" Label="Default FM Frequency (MHz)"
                                  Variant="Variant.Outlined" Min="87.5" Max="108.0" Step="0.1"
+                                 InputMode="@(InputMode.@decimal)"
                                  HelperText="Startup FM frequency" />
               </MudItem>
               <MudItem xs="12" md="4">
                 <MudNumericField T="double" @bind-Value="_radioConfig.DefaultAMFrequencyKHz" Label="Default AM Frequency (kHz)"
                                  Variant="Variant.Outlined" Min="520" Max="1710" Step="10.0"
+                                 InputMode="@(InputMode.@decimal)"
                                  HelperText="Startup AM frequency" />
               </MudItem>
               <MudItem xs="12" md="3">
                 <MudNumericField T="double" @bind-Value="_radioConfig.DefaultFMStepMHz" Label="FM Step (MHz)"
                                  Variant="Variant.Outlined" Min="0.05" Max="1.0" Step="0.05"
+                                 InputMode="@(InputMode.@decimal)"
                                  HelperText="FM tuning step size" />
               </MudItem>
               <MudItem xs="12" md="3">
                 <MudNumericField T="double" @bind-Value="_radioConfig.DefaultAMStepKHz" Label="AM Step (kHz)"
                                  Variant="Variant.Outlined" Min="1" Max="50" Step="1.0"
+                                 InputMode="@(InputMode.@decimal)"
                                  HelperText="AM tuning step size" />
               </MudItem>
               <MudItem xs="12" md="3">
                 <MudNumericField T="double" @bind-Value="_radioConfig.MinFMFrequencyMHz" Label="Min FM (MHz)"
-                                 Variant="Variant.Outlined" Min="50" Max="200" Step="0.5" />
+                                 Variant="Variant.Outlined" Min="50" Max="200" Step="0.5"
+                                 InputMode="@(InputMode.@decimal)" />
               </MudItem>
               <MudItem xs="12" md="3">
                 <MudNumericField T="double" @bind-Value="_radioConfig.MaxFMFrequencyMHz" Label="Max FM (MHz)"
-                                 Variant="Variant.Outlined" Min="50" Max="200" Step="0.5" />
+                                 Variant="Variant.Outlined" Min="50" Max="200" Step="0.5"
+                                 InputMode="@(InputMode.@decimal)" />
               </MudItem>
               <MudItem xs="12" md="3">
                 <MudNumericField T="double" @bind-Value="_radioConfig.MinAMFrequencyKHz" Label="Min AM (kHz)"
-                                 Variant="Variant.Outlined" Min="100" Max="2000" Step="10.0" />
+                                 Variant="Variant.Outlined" Min="100" Max="2000" Step="10.0"
+                                 InputMode="@(InputMode.@decimal)" />
               </MudItem>
               <MudItem xs="12" md="3">
                 <MudNumericField T="double" @bind-Value="_radioConfig.MaxAMFrequencyKHz" Label="Max AM (kHz)"
-                                 Variant="Variant.Outlined" Min="100" Max="2000" Step="10.0" />
+                                 Variant="Variant.Outlined" Min="100" Max="2000" Step="10.0"
+                                 InputMode="@(InputMode.@decimal)" />
               </MudItem>
               <MudItem xs="12" md="3">
                 <MudNumericField T="int" @bind-Value="_radioConfig.ScanStopThreshold" Label="Scan Stop Threshold"
                                  Variant="Variant.Outlined" Min="0" Max="200"
+                                 InputMode="InputMode.numeric"
                                  HelperText="Signal strength to stop scan" />
               </MudItem>
               <MudItem xs="12" md="3">
                 <MudNumericField T="int" @bind-Value="_radioConfig.ScanStepDelayMs" Label="Scan Step Delay (ms)"
                                  Variant="Variant.Outlined" Min="10" Max="1000"
+                                 InputMode="InputMode.numeric"
                                  HelperText="Delay between scan steps" />
               </MudItem>
               <MudItem xs="12" md="4">
                 <MudNumericField T="int" @bind-Value="_radioConfig.DefaultDeviceVolume" Label="Default Device Volume"
                                  Variant="Variant.Outlined" Min="0" Max="100"
+                                 InputMode="InputMode.numeric"
                                  HelperText="Radio hardware volume (0-100)" />
               </MudItem>
               <MudItem xs="12">
@@ -543,6 +573,7 @@
               <MudItem xs="12" md="6">
                 <MudTextField T="string" @bind-Value="_bluetoothConfig.DeviceName" Label="Device Name"
                               Variant="Variant.Outlined"
+                              InputMode="InputMode.text"
                               HelperText="Name visible to Bluetooth scanners" />
               </MudItem>
               <MudItem xs="12" md="6">
@@ -591,11 +622,13 @@
               <MudItem xs="12" md="6">
                 <MudTextField T="string" @bind-Value="_filePlayerConfig.RootDirectory" Label="Root Directory"
                               Variant="Variant.Outlined"
+                              InputMode="InputMode.text"
                               HelperText="Root path for music library" />
               </MudItem>
               <MudItem xs="12" md="6">
                 <MudTextField T="string" @bind-Value="_filePlayerConfig.SupportedExtensions" Label="Supported Extensions"
                               Variant="Variant.Outlined"
+                              InputMode="InputMode.text"
                               HelperText="Comma-separated file extensions (e.g., .mp3,.flac,.wav)" />
               </MudItem>
               <MudItem xs="12">
@@ -630,26 +663,31 @@
               <MudItem xs="12" md="4">
                 <MudTextField T="string" @bind-Value="_ttsConfig.DefaultVoice" Label="Default Voice"
                               Variant="Variant.Outlined"
+                              InputMode="InputMode.text"
                               HelperText="Voice ID (e.g., 'en' for ESpeak)" />
               </MudItem>
               <MudItem xs="12" md="4">
                 <MudTextField T="string" @bind-Value="_ttsConfig.ESpeakPath" Label="ESpeak Path"
                               Variant="Variant.Outlined"
+                              InputMode="InputMode.text"
                               HelperText="Path to espeak-ng binary" />
               </MudItem>
               <MudItem xs="12" md="4">
                 <MudNumericField T="float" @bind-Value="_ttsConfig.DefaultPitch" Label="Default Pitch"
                                  Variant="Variant.Outlined" Min="0.5f" Max="2.0f" Step="0.1f"
+                                 InputMode="@(InputMode.@decimal)"
                                  HelperText="1.0 = normal pitch" />
               </MudItem>
               <MudItem xs="12" md="4">
                 <MudNumericField T="float" @bind-Value="_ttsConfig.DefaultSpeed" Label="Default Speed"
                                  Variant="Variant.Outlined" Min="0.5f" Max="2.0f" Step="0.1f"
+                                 InputMode="@(InputMode.@decimal)"
                                  HelperText="1.0 = normal speed" />
               </MudItem>
               <MudItem xs="12" md="4">
                 <MudNumericField T="int" @bind-Value="_ttsConfig.GenerationTimeoutSeconds" Label="Generation Timeout (s)"
                                  Variant="Variant.Outlined" Min="5" Max="120"
+                                 InputMode="InputMode.numeric"
                                  HelperText="Max time for TTS generation" />
               </MudItem>
               <MudItem xs="12">
@@ -689,26 +727,31 @@
               <MudItem xs="12" md="4">
                 <MudNumericField T="int" @bind-Value="_fingerprintingConfig.SampleDurationSeconds" Label="Sample Duration (s)"
                                  Variant="Variant.Outlined" Min="5" Max="60"
+                                 InputMode="InputMode.numeric"
                                  HelperText="Audio sample length for fingerprinting" />
               </MudItem>
               <MudItem xs="12" md="4">
                 <MudNumericField T="int" @bind-Value="_fingerprintingConfig.IdentificationIntervalSeconds" Label="Identification Interval (s)"
                                  Variant="Variant.Outlined" Min="10" Max="300"
+                                 InputMode="InputMode.numeric"
                                  HelperText="Time between identification attempts" />
               </MudItem>
               <MudItem xs="12" md="4">
                 <MudNumericField T="double" @bind-Value="_fingerprintingConfig.MinimumConfidenceThreshold" Label="Min Confidence"
                                  Variant="Variant.Outlined" Min="0.0" Max="1.0" Step="0.05"
+                                 InputMode="@(InputMode.@decimal)"
                                  HelperText="0.0 - 1.0 confidence threshold" />
               </MudItem>
               <MudItem xs="12" md="4">
                 <MudNumericField T="int" @bind-Value="_fingerprintingConfig.DuplicateSuppressionMinutes" Label="Duplicate Suppression (min)"
                                  Variant="Variant.Outlined" Min="1" Max="60"
+                                 InputMode="InputMode.numeric"
                                  HelperText="Ignore re-identification within this window" />
               </MudItem>
               <MudItem xs="12" md="6">
                 <MudTextField T="string" @bind-Value="_fingerprintingConfig.DatabasePath" Label="Database Path"
                               Variant="Variant.Outlined"
+                              InputMode="InputMode.text"
                               HelperText="Path to fingerprinting database" />
               </MudItem>
               <MudItem xs="12">
@@ -738,31 +781,37 @@
               <MudItem xs="12" md="4">
                 <MudNumericField T="int" @bind-Value="_metricsConfig.FlushIntervalSeconds" Label="Flush Interval (s)"
                                  Variant="Variant.Outlined" Min="10" Max="600"
+                                 InputMode="InputMode.numeric"
                                  HelperText="How often metrics are flushed to DB" />
               </MudItem>
               <MudItem xs="12" md="4">
                 <MudTextField T="string" @bind-Value="_metricsConfig.DatabasePath" Label="Database Path"
                               Variant="Variant.Outlined"
+                              InputMode="InputMode.text"
                               HelperText="Path to metrics database" />
               </MudItem>
               <MudItem xs="12" md="3">
                 <MudNumericField T="int" @bind-Value="_metricsConfig.RetentionMinuteData" Label="Retention: Minutes"
                                  Variant="Variant.Outlined" Min="1" Max="10080"
+                                 InputMode="InputMode.numeric"
                                  HelperText="Minute-level data retention (minutes)" />
               </MudItem>
               <MudItem xs="12" md="3">
                 <MudNumericField T="int" @bind-Value="_metricsConfig.RetentionHourData" Label="Retention: Hours"
                                  Variant="Variant.Outlined" Min="1" Max="8760"
+                                 InputMode="InputMode.numeric"
                                  HelperText="Hour-level data retention (hours)" />
               </MudItem>
               <MudItem xs="12" md="3">
                 <MudNumericField T="int" @bind-Value="_metricsConfig.RetentionDayData" Label="Retention: Days"
                                  Variant="Variant.Outlined" Min="1" Max="3650"
+                                 InputMode="InputMode.numeric"
                                  HelperText="Day-level data retention (days)" />
               </MudItem>
               <MudItem xs="12" md="3">
                 <MudNumericField T="int" @bind-Value="_metricsConfig.RollupIntervalMinutes" Label="Rollup Interval (min)"
                                  Variant="Variant.Outlined" Min="1" Max="1440"
+                                 InputMode="InputMode.numeric"
                                  HelperText="How often rollups are computed" />
               </MudItem>
               <MudItem xs="12">
@@ -793,7 +842,7 @@
           <MudSelectItem Value="@("error")">Error</MudSelectItem>
         </MudSelect>
 
-        <MudNumericField @bind-Value="_logLimit" Label="Limit" Variant="Variant.Outlined" Min="1" Max="10000" Style="width: 120px;" />
+        <MudNumericField @bind-Value="_logLimit" Label="Limit" Variant="Variant.Outlined" Min="1" Max="10000" InputMode="InputMode.numeric" Style="width: 120px;" />
 
         <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadLogsAsync" StartIcon="@Icons.Material.Filled.Refresh">
           Refresh
@@ -861,7 +910,7 @@
               </CardHeaderContent>
             </MudCardHeader>
             <MudCardContent>
-              <MudTextField @bind-Value="_ttsText" Label="Message" Variant="Variant.Outlined" Lines="3" />
+              <MudTextField @bind-Value="_ttsText" Label="Message" Variant="Variant.Outlined" InputMode="InputMode.text" Lines="3" />
               
               <MudSelect T="string" Value="_selectedTTSEngine" Label="TTS Engine" Variant="Variant.Outlined" Class="mt-3" ValueChanged="@((string e) => OnTTSEngineChangedAsync(e))">
                 @if (_ttsEngines != null)
@@ -903,7 +952,7 @@
                 }
                 else
                 {
-                  <MudTextField @bind-Value="_ttsVoice" Label="Voice (Optional)" Variant="Variant.Outlined" Class="mt-3"
+                  <MudTextField @bind-Value="_ttsVoice" Label="Voice (Optional)" Variant="Variant.Outlined" InputMode="InputMode.text" Class="mt-3"
                                 HelperText="Click 'Scan for Voices' to discover available voices" />
                   <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Search"
                              OnClick="ScanForVoicesAsync" Disabled="_scanningVoices" Class="mt-2">
@@ -913,15 +962,15 @@
               }
               else
               {
-                <MudTextField @bind-Value="_ttsVoice" Label="Voice (Optional)" Variant="Variant.Outlined" Class="mt-3"
+                <MudTextField @bind-Value="_ttsVoice" Label="Voice (Optional)" Variant="Variant.Outlined" InputMode="InputMode.text" Class="mt-3"
                               HelperText="e.g., 'en', 'en-US-Standard-A'" />
               }
 
               <MudStack Row="true" Spacing="2" Class="mt-3">
-                <MudNumericField @bind-Value="_ttsSpeed" Label="Speed" Variant="Variant.Outlined" 
-                                 Min="0.5" Max="2.0" Step="0.1" Style="width: 150px;" />
-                <MudNumericField @bind-Value="_ttsPitch" Label="Pitch" Variant="Variant.Outlined" 
-                                 Min="0.5" Max="2.0" Step="0.1" Style="width: 150px;" />
+                <MudNumericField @bind-Value="_ttsSpeed" Label="Speed" Variant="Variant.Outlined"
+                                 Min="0.5" Max="2.0" Step="0.1" InputMode="@(InputMode.@decimal)" Style="width: 150px;" />
+                <MudNumericField @bind-Value="_ttsPitch" Label="Pitch" Variant="Variant.Outlined"
+                                 Min="0.5" Max="2.0" Step="0.1" InputMode="@(InputMode.@decimal)" Style="width: 150px;" />
               </MudStack>
             </MudCardContent>
             <MudCardActions>
@@ -1078,6 +1127,7 @@
               <MudItem xs="12" md="6">
                 <MudNumericField T="int" @bind-Value="_audioPreferences.MasterVolume" Label="Master Volume"
                                  Variant="Variant.Outlined" Min="0" Max="100"
+                                 InputMode="InputMode.numeric"
                                  HelperText="Master volume level (0-100)" />
               </MudItem>
               <!-- Source Visibility -->
@@ -1138,11 +1188,13 @@
               <MudItem xs="12">
                 <MudTextField T="string" @bind-Value="_filePlayerPreferences.LastSongPlayed" Label="Last Song Played (Path)"
                               Variant="Variant.Outlined"
+                              InputMode="InputMode.text"
                               HelperText="File path of last played track" />
               </MudItem>
               <MudItem xs="12" md="4">
                 <MudNumericField T="long" @bind-Value="_filePlayerPreferences.SongPositionMs" Label="Position (ms)"
                                  Variant="Variant.Outlined" Min="0"
+                                 InputMode="InputMode.numeric"
                                  HelperText="Last playback position in milliseconds" />
               </MudItem>
               <MudItem xs="12" md="4">
@@ -1185,6 +1237,7 @@
               <MudItem xs="12" md="6">
                 <MudNumericField T="float" @bind-Value="_radioPreferences.LastFrequency" Label="Last Frequency (MHz)"
                                  Variant="Variant.Outlined" Min="0"
+                                 InputMode="@(InputMode.@decimal)"
                                  HelperText="Last tuned frequency" />
               </MudItem>
               <MudItem xs="12" md="6">
@@ -1200,6 +1253,7 @@
               <MudItem xs="12">
                 <MudTextField T="string" @bind-Value="_radioPreferences.LastEQMode" Label="Last EQ Mode"
                               Variant="Variant.Outlined"
+                              InputMode="InputMode.text"
                               HelperText="Last equalizer mode (optional)" />
               </MudItem>
               <MudItem xs="12">
@@ -1231,6 +1285,7 @@
               <MudItem xs="12">
                 <MudTextField T="string" @bind-Value="_genericSourcePreferences.USBPort" Label="Generic USB Audio Device"
                               Variant="Variant.Outlined"
+                              InputMode="InputMode.text"
                               HelperText="USB audio device name pattern (e.g., AB13X)" />
               </MudItem>
               <MudItem xs="12">
@@ -1274,7 +1329,8 @@
               </MudItem>
               <MudItem xs="12">
                 <MudTextField T="string" @bind-Value="_ttsSecrets.GoogleAPIKey" Label="Google API Key - ${secret:tts_google_api_key}"
-                              Variant="Variant.Outlined" 
+                              Variant="Variant.Outlined"
+                              InputMode="InputMode.text"
                               InputType="@(_showGoogleApiKey ? InputType.Text : InputType.Password)"
                               Adornment="Adornment.End"
                               AdornmentIcon="@(_showGoogleApiKey ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
@@ -1284,7 +1340,8 @@
               </MudItem>
               <MudItem xs="12">
                 <MudTextField T="string" @bind-Value="_ttsSecrets.AzureAPIKey" Label="Azure API Key - ${secret:tts_azure_api_key}"
-                              Variant="Variant.Outlined" 
+                              Variant="Variant.Outlined"
+                              InputMode="InputMode.text"
                               InputType="@(_showAzureApiKey ? InputType.Text : InputType.Password)"
                               Adornment="Adornment.End"
                               AdornmentIcon="@(_showAzureApiKey ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
@@ -1294,7 +1351,8 @@
               </MudItem>
               <MudItem xs="12">
                 <MudTextField T="string" @bind-Value="_ttsSecrets.AzureRegion" Label="Azure Region - ${secret:tts_azure_region}"
-                              Variant="Variant.Outlined" 
+                              Variant="Variant.Outlined"
+                              InputMode="InputMode.text"
                               HelperText="Azure region (e.g., eastus, westus2)"
                               Class="@(string.IsNullOrWhiteSpace(_ttsSecrets.AzureRegion) ? "secret-empty" : "secret-filled")" />
               </MudItem>
@@ -1576,27 +1634,27 @@
                   </MudItem>
                   <MudItem xs="6" md="4">
                     <MudTextField T="int" @bind-Value="_encoderConfig.VendorId" Label="Vendor ID (hex)"
-                                  HelperText="e.g. 51966 = 0xCAFE" />
+                                  InputMode="InputMode.numeric" HelperText="e.g. 51966 = 0xCAFE" />
                   </MudItem>
                   <MudItem xs="6" md="4">
                     <MudTextField T="int" @bind-Value="_encoderConfig.ProductId" Label="Product ID (hex)"
-                                  HelperText="e.g. 16389 = 0x4005" />
+                                  InputMode="InputMode.numeric" HelperText="e.g. 16389 = 0x4005" />
                   </MudItem>
                   <MudItem xs="12" md="6">
                     <MudTextField T="string" @bind-Value="_encoderConfig.DevicePath" Label="Device Path"
-                                  HelperText="Leave empty for auto-detect" />
+                                  InputMode="InputMode.text" HelperText="Leave empty for auto-detect" />
                   </MudItem>
                   <MudItem xs="6" md="3">
-                    <MudNumericField T="int" @bind-Value="_encoderConfig.PollIntervalMs" Label="Poll Interval (ms)" Min="1" Max="1000" />
+                    <MudNumericField T="int" @bind-Value="_encoderConfig.PollIntervalMs" Label="Poll Interval (ms)" Min="1" Max="1000" InputMode="InputMode.numeric" />
                   </MudItem>
                   <MudItem xs="6" md="3">
-                    <MudNumericField T="int" @bind-Value="_encoderConfig.VolumeStepPercent" Label="Volume Step (%)" Min="1" Max="20" />
+                    <MudNumericField T="int" @bind-Value="_encoderConfig.VolumeStepPercent" Label="Volume Step (%)" Min="1" Max="20" InputMode="InputMode.numeric" />
                   </MudItem>
                   <MudItem xs="6" md="3">
-                    <MudNumericField T="int" @bind-Value="_encoderConfig.TuningStepKHz" Label="Tuning Step (kHz)" Min="1" Max="1000" />
+                    <MudNumericField T="int" @bind-Value="_encoderConfig.TuningStepKHz" Label="Tuning Step (kHz)" Min="1" Max="1000" InputMode="InputMode.numeric" />
                   </MudItem>
                   <MudItem xs="6" md="3">
-                    <MudNumericField T="int" @bind-Value="_encoderConfig.ReconnectDelayMs" Label="Reconnect Delay (ms)" Min="500" Max="30000" />
+                    <MudNumericField T="int" @bind-Value="_encoderConfig.ReconnectDelayMs" Label="Reconnect Delay (ms)" Min="500" Max="30000" InputMode="InputMode.numeric" />
                   </MudItem>
                 </MudGrid>
               }
@@ -1683,27 +1741,27 @@
                   </MudItem>
                   <MudItem xs="12" md="8">
                     <MudTextField T="string" @bind-Value="_phoneConfig.HubUrl" Label="SignalR Hub URL"
-                                  HelperText="RotaryPhone server hub endpoint" />
+                                  InputMode="InputMode.text" HelperText="RotaryPhone server hub endpoint" />
                   </MudItem>
                   <MudItem xs="12" md="6">
                     <MudTextField T="string" @bind-Value="_phoneConfig.ContactsApiBaseUrl" Label="Contacts API Base URL"
-                                  HelperText="RotaryPhone contacts REST API" />
+                                  InputMode="InputMode.text" HelperText="RotaryPhone contacts REST API" />
                   </MudItem>
                   <MudItem xs="12" md="6">
                     <MudTextField T="string" @bind-Value="_phoneConfig.RingSoundPath" Label="Ring Sound Path"
-                                  HelperText="Path to ring sound WAV/MP3 file" />
+                                  InputMode="InputMode.text" HelperText="Path to ring sound WAV/MP3 file" />
                   </MudItem>
                   <MudItem xs="6" md="3">
-                    <MudNumericField T="int" @bind-Value="_phoneConfig.RingPriority" Label="Ring Priority" Min="1" Max="10" />
+                    <MudNumericField T="int" @bind-Value="_phoneConfig.RingPriority" Label="Ring Priority" Min="1" Max="10" InputMode="InputMode.numeric" />
                   </MudItem>
                   <MudItem xs="6" md="3">
-                    <MudNumericField T="int" @bind-Value="_phoneConfig.AnnouncementPriority" Label="Announcement Priority" Min="1" Max="10" />
+                    <MudNumericField T="int" @bind-Value="_phoneConfig.AnnouncementPriority" Label="Announcement Priority" Min="1" Max="10" InputMode="InputMode.numeric" />
                   </MudItem>
                   <MudItem xs="6" md="3">
-                    <MudNumericField T="int" @bind-Value="_phoneConfig.ReconnectBaseDelayMs" Label="Reconnect Base (ms)" Min="500" Max="60000" />
+                    <MudNumericField T="int" @bind-Value="_phoneConfig.ReconnectBaseDelayMs" Label="Reconnect Base (ms)" Min="500" Max="60000" InputMode="InputMode.numeric" />
                   </MudItem>
                   <MudItem xs="6" md="3">
-                    <MudNumericField T="int" @bind-Value="_phoneConfig.ReconnectMaxDelayMs" Label="Reconnect Max (ms)" Min="1000" Max="120000" />
+                    <MudNumericField T="int" @bind-Value="_phoneConfig.ReconnectMaxDelayMs" Label="Reconnect Max (ms)" Min="1000" Max="120000" InputMode="InputMode.numeric" />
                   </MudItem>
                 </MudGrid>
               }
@@ -1728,11 +1786,11 @@
                 <MudItem xs="12" md="8">
                   <MudTextField T="string" @bind-Value="_testMessage" Label="Message"
                                 Placeholder="Enter announcement text..."
-                                Variant="Variant.Outlined" />
+                                Variant="Variant.Outlined" InputMode="InputMode.text" />
                 </MudItem>
                 <MudItem xs="6" md="2">
                   <MudNumericField T="int" @bind-Value="_testPriority" Label="Priority" Min="1" Max="10"
-                                   Variant="Variant.Outlined" />
+                                   Variant="Variant.Outlined" InputMode="InputMode.numeric" />
                 </MudItem>
                 <MudItem xs="6" md="2">
                   <MudButton Variant="Variant.Filled" Color="Color.Primary"

@@ -69,6 +69,7 @@
                               ValueChanged="@(val => OnFriendlyNameChanged(context, val))"
                               Variant="Variant.Outlined"
                               Margin="Margin.Dense"
+                              InputMode="InputMode.text"
                               Placeholder="@context.DisplayName"
                               Disabled="@context.IsHidden"
                               Immediate="false"
