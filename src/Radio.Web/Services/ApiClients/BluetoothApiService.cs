@@ -123,6 +123,21 @@ public class BluetoothApiService
     }
   }
 
+  public async Task<bool> ConnectAsync(string deviceAddress, CancellationToken ct = default)
+  {
+    try
+    {
+      var response = await _httpClient.PostAsJsonAsync("/api/bluetooth/connect",
+        new { DeviceAddress = deviceAddress }, ct);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to connect Bluetooth device {Address}", deviceAddress);
+      return false;
+    }
+  }
+
   public async Task<bool> DisconnectAsync(CancellationToken ct = default)
   {
     try
@@ -133,6 +148,21 @@ public class BluetoothApiService
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to disconnect Bluetooth device");
+      return false;
+    }
+  }
+
+  public async Task<bool> DisconnectAsync(string deviceAddress, CancellationToken ct = default)
+  {
+    try
+    {
+      var response = await _httpClient.PostAsJsonAsync("/api/bluetooth/disconnect",
+        new { DeviceAddress = deviceAddress }, ct);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to disconnect Bluetooth device {Address}", deviceAddress);
       return false;
     }
   }

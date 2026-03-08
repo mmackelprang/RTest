@@ -80,6 +80,9 @@ public interface IBluetoothService : IAsyncDisposable
   /// <summary>Disconnect current device.</summary>
   Task DisconnectAsync(CancellationToken cancellationToken = default);
 
+  /// <summary>Disconnect a specific device by address.</summary>
+  Task DisconnectAsync(string deviceAddress, CancellationToken cancellationToken = default);
+
   /// <summary>
   /// Gets the audio capture device representing the Bluetooth input stream.
   /// Should be SoundFlow-compatible for downstream pipeline consumption.

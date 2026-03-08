@@ -105,6 +105,9 @@ public sealed class MockBluetoothService : IBluetoothService
             return Task.CompletedTask;
         }
 
+        public Task DisconnectAsync(string deviceAddress, CancellationToken cancellationToken = default)
+            => DisconnectAsync(cancellationToken);
+
         public Task<object?> GetAudioCaptureDeviceAsync(CancellationToken cancellationToken = default)
         {
             return Task.FromResult<object?>("mock-capture-endpoint");

@@ -704,6 +704,31 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             }
         }
 
+        public async Task DisconnectAsync(string deviceAddress, CancellationToken cancellationToken = default)
+        {
+            if (_connection == null) return;
+
+            _userInitiatedDisconnect = true;
+            _reconnectionLoop?.Cancel();
+
+            try
+            {
+                var devicePath = FindDevicePath(deviceAddress);
+                if (devicePath != null)
+                {
+                    var device = _connection.CreateProxy<Linux.IDevice1>(
+                        Linux.BluezConstants.ServiceName, devicePath.Value);
+                    await device.DisconnectAsync();
+                    _logger.LogInformation("Disconnected device {Address}", deviceAddress);
+                }
+            }
+            catch (Exception ex)
+            {
+                _userInitiatedDisconnect = false;
+                _logger.LogError(ex, "Failed to disconnect device {Address}", deviceAddress);
+            }
+        }
+
         private ObjectPath? FindDevicePath(string deviceAddress)
         {
             var normalizedAddress = deviceAddress.Replace(":", "_").ToUpperInvariant();

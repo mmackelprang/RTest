@@ -174,8 +174,31 @@
                 </MudTd>
                 <MudTd DataLabel="Actions">
                   <MudStack Row="true" Spacing="1">
-                    @if (!context.IsConnected)
+                    @if (context.IsConnected)
                     {
+                      <MudButton Variant="Variant.Text" Color="Color.Warning" Size="Size.Small"
+                                 OnClick="@(() => DisconnectDeviceAsync(context.Address))"
+                                 Disabled="@(_connectingAddress == context.Address)"
+                                 StartIcon="@Icons.Material.Filled.LinkOff">
+                        Disconnect
+                      </MudButton>
+                    }
+                    else
+                    {
+                      <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
+                                 OnClick="@(() => ConnectDeviceAsync(context.Address))"
+                                 Disabled="@(_connectingAddress == context.Address)"
+                                 StartIcon="@Icons.Material.Filled.Link">
+                        @if (_connectingAddress == context.Address)
+                        {
+                          <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                          <span>Connecting...</span>
+                        }
+                        else
+                        {
+                          <span>Connect</span>
+                        }
+                      </MudButton>
                       <MudButton Variant="Variant.Text" Color="Color.Error" Size="Size.Small"
                                  OnClick="@(() => UnpairAsync(context.Address))">
                         Unpair
@@ -284,6 +307,7 @@
   private bool _isLoading = true;
   private bool _isDisconnecting;
   private string? _pairingAddress;
+  private string? _connectingAddress;
 
   protected override async Task OnInitializedAsync()
   {
@@ -477,6 +501,66 @@
     finally
     {
       _isDisconnecting = false;
+      StateHasChanged();
+    }
+  }
+
+  private async Task ConnectDeviceAsync(string address)
+  {
+    try
+    {
+      _connectingAddress = address;
+      StateHasChanged();
+
+      var success = await BluetoothApi.ConnectAsync(address);
+      if (success)
+      {
+        Snackbar.Add("Connected to device", Severity.Success);
+        await RefreshStatusAsync();
+      }
+      else
+      {
+        Snackbar.Add("Failed to connect — device may be out of range or need re-pairing", Severity.Warning);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error connecting to Bluetooth device {Address}", address);
+      Snackbar.Add("Error connecting to device", Severity.Error);
+    }
+    finally
+    {
+      _connectingAddress = null;
+      StateHasChanged();
+    }
+  }
+
+  private async Task DisconnectDeviceAsync(string address)
+  {
+    try
+    {
+      _connectingAddress = address;
+      StateHasChanged();
+
+      var success = await BluetoothApi.DisconnectAsync(address);
+      if (success)
+      {
+        Snackbar.Add("Device disconnected", Severity.Success);
+        await RefreshStatusAsync();
+      }
+      else
+      {
+        Snackbar.Add("Failed to disconnect device", Severity.Warning);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error disconnecting Bluetooth device {Address}", address);
+      Snackbar.Add("Error disconnecting device", Severity.Error);
+    }
+    finally
+    {
+      _connectingAddress = null;
       StateHasChanged();
     }
   }
