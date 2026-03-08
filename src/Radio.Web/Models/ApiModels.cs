@@ -660,6 +660,7 @@ public class FilePlayerConfigDto
 {
   public string RootDirectory { get; set; } = "media/audio";
   public string SupportedExtensions { get; set; } = ".mp3,.flac,.wav,.ogg,.aac,.m4a,.wma";
+  public string[] AllowedBrowseDirectories { get; set; } = [];
 }
 
 public class FingerprintingConfigDto

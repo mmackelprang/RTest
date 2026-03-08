@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Radio.API.Extensions;
@@ -496,6 +497,24 @@ public class FilesController : ControllerBase
         }
       }
 
+      // On Linux, DriveInfo.GetDrives() misses network/NAS mounts (cifs, nfs, sshfs).
+      // Parse /proc/mounts to discover them.
+      if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+      {
+        var mountDrives = DiscoverLinuxMountPoints();
+        var existingPaths = new HashSet<string>(
+          drives.Select(d => d.Name), StringComparer.Ordinal);
+
+        foreach (var mountDrive in mountDrives)
+        {
+          // Avoid duplicates — DriveInfo may already include some mounts
+          if (!existingPaths.Contains(mountDrive.Name))
+          {
+            drives.Add(mountDrive);
+          }
+        }
+      }
+
       _logger.LogDebug("Found {Count} drives", drives.Count);
       return Ok(drives);
     }
@@ -504,6 +523,171 @@ public class FilesController : ControllerBase
       _logger.LogError(ex, "Error enumerating drives");
       return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to enumerate drives" });
     }
+  }
+
+  /// <summary>
+  /// Parses /proc/mounts to discover user-relevant Linux mount points that
+  /// DriveInfo.GetDrives() misses (NAS/CIFS, NFS, SSHFS, USB drives under /mnt or /media).
+  /// </summary>
+  private List<DriveInfoDto> DiscoverLinuxMountPoints()
+  {
+    var results = new List<DriveInfoDto>();
+
+    // Filesystem types that represent user-relevant storage
+    var relevantFsTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+      "cifs", "nfs", "nfs4", "fuse.sshfs", "ext4", "ext3", "ext2",
+      "xfs", "btrfs", "vfat", "exfat", "ntfs", "fuseblk"
+    };
+
+    // Mount point prefixes that indicate system internals (exclude these)
+    var excludedPrefixes = new[]
+    {
+      "/sys", "/proc", "/dev", "/run", "/snap", "/boot"
+    };
+
+    try
+    {
+      if (!System.IO.File.Exists("/proc/mounts"))
+      {
+        _logger.LogDebug("/proc/mounts not found, skipping Linux mount discovery");
+        return results;
+      }
+
+      var lines = System.IO.File.ReadAllLines("/proc/mounts");
+      foreach (var line in lines)
+      {
+        // Format: device mountpoint fstype options dump pass
+        var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 3)
+        {
+          continue;
+        }
+
+        var device = parts[0];
+        var mountPoint = UnescapeOctalPath(parts[1]);
+        var fsType = parts[2];
+
+        // Only include relevant filesystem types
+        if (!relevantFsTypes.Contains(fsType))
+        {
+          continue;
+        }
+
+        // Only include mounts under /mnt/ or /media/ (user-space mounts)
+        if (!mountPoint.StartsWith("/mnt/", StringComparison.Ordinal) &&
+            !mountPoint.StartsWith("/media/", StringComparison.Ordinal))
+        {
+          continue;
+        }
+
+        // Exclude system-internal paths that might appear under /mnt
+        if (excludedPrefixes.Any(prefix =>
+          mountPoint.StartsWith(prefix, StringComparison.Ordinal)))
+        {
+          continue;
+        }
+
+        try
+        {
+          // Build a friendly label from the mount point directory name
+          var dirName = Path.GetFileName(mountPoint.TrimEnd('/'));
+          var label = string.IsNullOrEmpty(dirName)
+            ? mountPoint
+            : $"{dirName} ({mountPoint})";
+
+          // Map filesystem type to a logical DriveType string
+          var driveType = fsType switch
+          {
+            "cifs" or "nfs" or "nfs4" or "fuse.sshfs" => "Network",
+            "vfat" or "exfat" => "Removable",
+            _ => "Fixed"
+          };
+
+          // Try to read space info; network mounts may be slow or throw
+          long totalSize = 0;
+          long availableSpace = 0;
+          bool isReady = false;
+
+          if (Directory.Exists(mountPoint))
+          {
+            isReady = true;
+            try
+            {
+              var driveInfo = new System.IO.DriveInfo(mountPoint);
+              if (driveInfo.IsReady)
+              {
+                totalSize = driveInfo.TotalSize;
+                availableSpace = driveInfo.AvailableFreeSpace;
+              }
+            }
+            catch
+            {
+              // Space info unavailable — mount is still browsable
+            }
+          }
+
+          results.Add(new DriveInfoDto
+          {
+            Name = mountPoint,
+            Label = label,
+            DriveType = driveType,
+            IsReady = isReady,
+            TotalSize = totalSize,
+            AvailableSpace = availableSpace,
+            DriveFormat = fsType
+          });
+
+          _logger.LogDebug(
+            "Discovered Linux mount: {MountPoint} (type={FsType}, device={Device})",
+            mountPoint, fsType, device);
+        }
+        catch (Exception ex)
+        {
+          _logger.LogDebug(ex, "Error reading mount point info for {MountPoint}", mountPoint);
+        }
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Error parsing /proc/mounts for Linux mount discovery");
+    }
+
+    return results;
+  }
+
+  /// <summary>
+  /// Unescapes octal escape sequences in /proc/mounts paths (e.g., \040 for space,
+  /// \011 for tab). Mount points with special characters use this encoding.
+  /// </summary>
+  private static string UnescapeOctalPath(string path)
+  {
+    if (!path.Contains('\\'))
+    {
+      return path;
+    }
+
+    var result = new System.Text.StringBuilder(path.Length);
+    for (int i = 0; i < path.Length; i++)
+    {
+      if (path[i] == '\\' && i + 3 < path.Length &&
+          char.IsAsciiDigit(path[i + 1]) &&
+          char.IsAsciiDigit(path[i + 2]) &&
+          char.IsAsciiDigit(path[i + 3]))
+      {
+        var octalValue = (path[i + 1] - '0') * 64 +
+                         (path[i + 2] - '0') * 8 +
+                         (path[i + 3] - '0');
+        result.Append((char)octalValue);
+        i += 3;
+      }
+      else
+      {
+        result.Append(path[i]);
+      }
+    }
+
+    return result.ToString();
   }
 
   /// <summary>
