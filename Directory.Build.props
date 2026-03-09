@@ -9,8 +9,8 @@
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
   </PropertyGroup>
 
-  <!-- Shared NuGet packaging defaults for extractable libraries -->
-  <PropertyGroup>
+  <!-- Shared NuGet packaging defaults — only applies to projects with a PackageId -->
+  <PropertyGroup Condition="'$(PackageId)' != ''">
     <Authors>Mark Mackelprang</Authors>
     <Copyright>Copyright (c) 2026 Mark Mackelprang</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
