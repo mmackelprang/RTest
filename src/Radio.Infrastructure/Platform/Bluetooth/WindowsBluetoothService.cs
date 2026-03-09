@@ -767,6 +767,12 @@ internal sealed class WindowsBluetoothService : IBluetoothService
         return Task.CompletedTask;
     }
 
+    public Task DisconnectAsync(string deviceAddress, CancellationToken cancellationToken = default)
+    {
+        // Windows: delegate to the parameterless version (single-device model)
+        return DisconnectAsync(cancellationToken);
+    }
+
     public Task<object?> GetAudioCaptureDeviceAsync(CancellationToken cancellationToken = default)
     {
 #if WINDOWS_TARGET

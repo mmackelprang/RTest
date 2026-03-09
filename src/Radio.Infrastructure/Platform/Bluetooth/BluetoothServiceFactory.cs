@@ -127,6 +127,9 @@ internal sealed class NullBluetoothService : IBluetoothService
       return Task.CompletedTask;
   }
 
+  public Task DisconnectAsync(string deviceAddress, CancellationToken cancellationToken = default)
+      => Task.CompletedTask;
+
   public Task<object?> GetAudioCaptureDeviceAsync(CancellationToken cancellationToken = default)
   {
       return Task.FromResult<object?>(null);

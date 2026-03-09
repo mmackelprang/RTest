@@ -704,6 +704,42 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             }
         }
 
+        public async Task DisconnectAsync(string deviceAddress, CancellationToken cancellationToken = default)
+        {
+            if (_connection == null) return;
+
+            // Only suppress auto-reconnect when disconnecting the active device.
+            // Disconnecting a paired-but-not-active device won't fire a Connected
+            // property-change event, so the flag would never be consumed/reset —
+            // permanently suppressing auto-reconnect.
+            var isActiveDevice = ConnectedDevice?.Address?.Equals(deviceAddress, StringComparison.OrdinalIgnoreCase) == true;
+            if (isActiveDevice)
+            {
+                _userInitiatedDisconnect = true;
+                _reconnectionLoop?.Cancel();
+            }
+
+            try
+            {
+                var devicePath = FindDevicePath(deviceAddress);
+                if (devicePath != null)
+                {
+                    var device = _connection.CreateProxy<Linux.IDevice1>(
+                        Linux.BluezConstants.ServiceName, devicePath.Value);
+                    await device.DisconnectAsync();
+                    _logger.LogInformation("Disconnected device {Address}", deviceAddress);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (isActiveDevice)
+                {
+                    _userInitiatedDisconnect = false; // reset on failure to prevent suppressing future reconnects
+                }
+                _logger.LogError(ex, "Failed to disconnect device {Address}", deviceAddress);
+            }
+        }
+
         private ObjectPath? FindDevicePath(string deviceAddress)
         {
             var normalizedAddress = deviceAddress.Replace(":", "_").ToUpperInvariant();

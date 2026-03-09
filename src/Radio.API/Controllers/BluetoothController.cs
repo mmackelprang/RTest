@@ -151,9 +151,13 @@ public class BluetoothController : ControllerBase
 
   [HttpPost("disconnect")]
   [ProducesResponseType(typeof(BluetoothStatusDto), StatusCodes.Status200OK)]
-  public async Task<ActionResult<BluetoothStatusDto>> DisconnectAsync()
+  public async Task<ActionResult<BluetoothStatusDto>> DisconnectAsync(
+    [FromBody] BluetoothDeviceRequest? request = null)
   {
-    await _bluetoothService.DisconnectAsync();
+    if (!string.IsNullOrWhiteSpace(request?.DeviceAddress))
+      await _bluetoothService.DisconnectAsync(request.DeviceAddress);
+    else
+      await _bluetoothService.DisconnectAsync();
     return Ok(BuildStatus());
   }
 
