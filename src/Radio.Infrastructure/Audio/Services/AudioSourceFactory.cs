@@ -10,6 +10,7 @@ using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Sources.Primary;
 using Radio.Infrastructure.Configuration;
 using Radio.Infrastructure.Configuration.Abstractions;
+using Radio.Metrics;
 
 namespace Radio.Infrastructure.Audio.Services;
 

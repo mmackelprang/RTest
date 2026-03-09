@@ -2,10 +2,9 @@ namespace Radio.Infrastructure.Tests.Metrics;
 
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Radio.Core.Configuration;
-using Radio.Core.Metrics;
-using Radio.Infrastructure.Metrics.Data;
-using Radio.Infrastructure.Metrics.Repositories;
+using Radio.Metrics;
+using Radio.Metrics.Data;
+using Radio.Metrics.Repositories;
 using Xunit;
 
 public class SqliteMetricsRepositoryTests : IAsyncLifetime
@@ -17,15 +16,12 @@ public class SqliteMetricsRepositoryTests : IAsyncLifetime
   public SqliteMetricsRepositoryTests()
   {
     _testDbPath = Path.Combine(Path.GetTempPath(), $"test_metrics_repo_{Guid.NewGuid()}.db");
-    var databaseOptions = Options.Create(new DatabaseOptions
+    var metricsOptions = Options.Create(new MetricsOptions
     {
-      RootPath = Path.GetDirectoryName(_testDbPath)!,
-      ConfigurationSubdirectory = "",
-      ConfigurationFileName = Path.GetFileName(_testDbPath)
+      DatabasePath = _testDbPath
     });
-    var pathResolver = new DatabasePathResolver(databaseOptions);
 
-    _dbContext = new MetricsDbContext(NullLogger<MetricsDbContext>.Instance, pathResolver);
+    _dbContext = new MetricsDbContext(NullLogger<MetricsDbContext>.Instance, metricsOptions);
     _repository = new SqliteMetricsRepository(
       NullLogger<SqliteMetricsRepository>.Instance,
       _dbContext);

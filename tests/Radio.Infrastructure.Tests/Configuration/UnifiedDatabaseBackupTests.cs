@@ -9,6 +9,7 @@ using Radio.Infrastructure.Configuration.Backup;
 using Radio.Infrastructure.Configuration.Models;
 using Radio.Infrastructure.Configuration.Secrets;
 using Radio.Infrastructure.Configuration.Stores;
+using Radio.Metrics;
 
 /// <summary>
 /// Tests for unified database backup service.
@@ -82,7 +83,7 @@ public class UnifiedDatabaseBackupTests : IDisposable
     Assert.Equal("Test unified backup", backup.Description);
     Assert.True(File.Exists(backup.FilePath));
     Assert.True(backup.SizeBytes > 0);
-    // Metrics are stored in the configuration database, so we only have 2 separate database files
+    // Configuration + fingerprinting = 2 separate database files (metrics has its own DB via Radio.Metrics)
     Assert.Equal(2, backup.IncludedDatabases.Count);
     Assert.Contains("configuration.db", backup.IncludedDatabases);
     Assert.Contains("fingerprints.db", backup.IncludedDatabases);

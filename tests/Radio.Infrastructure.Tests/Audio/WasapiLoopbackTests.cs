@@ -7,6 +7,7 @@ using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Sources.Primary;
 using Radio.Infrastructure.Platform.Bluetooth;
+using Radio.Metrics;
 
 namespace Radio.Infrastructure.Tests.Audio;
 

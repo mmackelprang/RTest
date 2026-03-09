@@ -4,6 +4,7 @@ using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
+using Radio.Metrics;
 using SoundFlow.Metadata;
 using System.Diagnostics;
 

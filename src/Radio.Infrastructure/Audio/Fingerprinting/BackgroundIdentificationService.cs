@@ -8,6 +8,7 @@ using Radio.Core.Events;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
+using Radio.Metrics;
 
 namespace Radio.Infrastructure.Audio.Fingerprinting;
 

@@ -10,6 +10,7 @@ using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Infrastructure.Configuration.Abstractions;
 using Radio.Infrastructure.Configuration.Models;
+using Radio.Metrics;
 using SoundFlow.Backends.MiniAudio;
 using SoundFlow.Interfaces;
 using SoundFlow.Metadata;

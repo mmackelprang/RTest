@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.SignalR;
 using Radio.API.Models;
 using Radio.Core.Interfaces;
+using Radio.Metrics;
 
 namespace Radio.API.Hubs;
 

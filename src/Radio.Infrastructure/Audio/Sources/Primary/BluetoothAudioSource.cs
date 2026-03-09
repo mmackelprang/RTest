@@ -9,6 +9,7 @@ using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Infrastructure.Platform.Bluetooth;
+using Radio.Metrics;
 using SoundFlow.Abstracts;
 using SoundFlow.Abstracts.Devices;
 using SoundFlow.Components;
@@ -56,7 +57,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     IBluetoothService bluetoothService,
     IOptionsMonitor<BluetoothOptions> options,
     BackgroundIdentificationService? identificationService = null,
-    Radio.Core.Interfaces.IMetricsCollector? metricsCollector = null,
+    IMetricsCollector? metricsCollector = null,
     SoundFlowPlaybackService? playbackService = null,
     IServiceScopeFactory? serviceScopeFactory = null,
     AlbumArtCacheService? albumArtCache = null,

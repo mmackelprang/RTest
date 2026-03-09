@@ -1,12 +1,10 @@
-namespace Radio.Infrastructure.DependencyInjection;
+namespace Radio.Metrics;
 
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Radio.Core.Configuration;
-using Radio.Core.Interfaces;
-using Radio.Infrastructure.Metrics.Data;
-using Radio.Infrastructure.Metrics.Repositories;
-using Radio.Infrastructure.Metrics.Services;
+using Radio.Metrics.Data;
+using Radio.Metrics.Repositories;
+using Radio.Metrics.Services;
 
 /// <summary>
 /// Extension methods for registering metrics services.

@@ -4,6 +4,7 @@ using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.SoundFlow;
+using Radio.Metrics;
 
 namespace Radio.Infrastructure.Audio.Outputs;
 

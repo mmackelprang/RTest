@@ -6,6 +6,7 @@ using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Sources.Primary;
+using Radio.Metrics;
 
 namespace Radio.Infrastructure.Audio.Services;
 

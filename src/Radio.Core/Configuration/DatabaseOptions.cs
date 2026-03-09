@@ -68,7 +68,6 @@ public sealed class DatabaseOptions
 
   /// <summary>
   /// Gets the full path to the configuration database.
-  /// Metrics are also stored in this database.
   /// </summary>
   public string GetConfigurationDatabasePath()
   {

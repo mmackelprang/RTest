@@ -1,10 +1,8 @@
-namespace Radio.Infrastructure.Metrics.Repositories;
+namespace Radio.Metrics.Repositories;
 
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
-using Radio.Core.Interfaces;
-using Radio.Core.Metrics;
-using Radio.Infrastructure.Metrics.Data;
+using Radio.Metrics.Data;
 using System.Data.Common;
 
 /// <summary>
@@ -34,10 +32,10 @@ public sealed class SqliteMetricsRepository : IMetricsReader
     MetricType metricType,
     string? unit,
     MetricResolution resolution,
-    IEnumerable<MetricBucket> buckets,
+    IReadOnlyList<MetricBucket> buckets,
     CancellationToken ct = default)
   {
-    if (!buckets.Any())
+    if (buckets.Count == 0)
     {
       return;
     }
@@ -144,7 +142,7 @@ public sealed class SqliteMetricsRepository : IMetricsReader
         {
           await transaction.CommitAsync(ct);
           _logger.LogDebug("Saved {Count} buckets for metric {Key} at {Resolution} resolution",
-            buckets.Count(), key, resolution);
+            buckets.Count, key, resolution);
         }
       }
       catch (ObjectDisposedException)

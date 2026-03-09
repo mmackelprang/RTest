@@ -7,6 +7,7 @@ using Radio.Core.Configuration;
 using Radio.Core.Extensions;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
+using Radio.Metrics;
 using Sharpcaster;
 using Sharpcaster.Channels;
 using Sharpcaster.Models;

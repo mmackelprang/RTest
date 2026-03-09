@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces;
+using Radio.Metrics;
 using SoundFlow.Abstracts;
 using SoundFlow.Structs;
 using System.Runtime.InteropServices;

@@ -91,7 +91,7 @@ var host = Host.CreateDefaultBuilder(args)
 
     // Register Configuration and Metrics services for Phase 10 (Backup/Restore)
     services.AddManagedConfiguration(configuration);
-    services.AddMetrics(configuration);
+    Radio.Metrics.MetricsServiceExtensions.AddMetrics(services, configuration);
 
     // Register API client for API-based tests
     var apiBaseUrl = configuration["UAT:ApiBaseUrl"] ?? "http://localhost:5000";

@@ -1,4 +1,4 @@
-namespace Radio.Core.Configuration;
+namespace Radio.Metrics;
 
 /// <summary>
 /// Configuration options for the metrics collection system.

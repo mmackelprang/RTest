@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Radio.API.Hubs;
 using Radio.Core.Interfaces;
+using Radio.Metrics;
 using Xunit;
 
 public class AudioStateHubMetricsTests

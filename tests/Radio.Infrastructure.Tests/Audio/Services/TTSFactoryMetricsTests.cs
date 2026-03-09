@@ -7,6 +7,7 @@ using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.Sources.Events;
+using Radio.Metrics;
 using Xunit;
 
 public class TTSFactoryMetricsTests

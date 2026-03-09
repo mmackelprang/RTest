@@ -1,4 +1,4 @@
-namespace Radio.Core.Metrics;
+namespace Radio.Metrics;
 
 /// <summary>
 /// Represents a single data point in a time-series metric.

@@ -1,13 +1,10 @@
-namespace Radio.Infrastructure.Metrics.Services;
+namespace Radio.Metrics.Services;
 
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Radio.Core.Configuration;
-using Radio.Core.Interfaces;
-using Radio.Core.Metrics;
-using Radio.Infrastructure.Metrics.Data;
-using Radio.Infrastructure.Metrics.Repositories;
+using Radio.Metrics.Data;
+using Radio.Metrics.Repositories;
 using System.Collections.Concurrent;
 
 /// <summary>
@@ -162,7 +159,7 @@ public sealed class BufferedMetricsCollector : IMetricsCollector, IHostedService
       foreach (var buffer in buffersToFlush)
       {
         var buckets = buffer.GetBuckets(MetricResolution.Minute);
-        if (buckets.Any())
+        if (buckets.Count > 0)
         {
           await _repository.SaveBucketsAsync(
             buffer.Key,
@@ -233,7 +230,7 @@ internal sealed class MetricBuffer
     }
   }
 
-  public IEnumerable<MetricBucket> GetBuckets(MetricResolution resolution)
+  public IReadOnlyList<MetricBucket> GetBuckets(MetricResolution resolution)
   {
     List<MetricSample> samples;
     lock (_lock)

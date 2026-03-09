@@ -15,6 +15,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Radio.Core\Radio.Core.csproj" />
+    <ProjectReference Include="..\..\src\Radio.Metrics\Radio.Metrics.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />

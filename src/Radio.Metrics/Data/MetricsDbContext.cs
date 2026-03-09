@@ -1,9 +1,8 @@
-namespace Radio.Infrastructure.Metrics.Data;
+namespace Radio.Metrics.Data;
 
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Radio.Core.Configuration;
 using System.Collections.Concurrent;
 
 /// <summary>
@@ -13,7 +12,7 @@ using System.Collections.Concurrent;
 public sealed class MetricsDbContext : IAsyncDisposable
 {
   private readonly ILogger<MetricsDbContext> _logger;
-  private readonly DatabasePathResolver _pathResolver;
+  private readonly string _databasePath;
   private readonly SemaphoreSlim _initLock = new(1, 1);
   private readonly ConcurrentDictionary<string, int> _metricDefinitionCache = new();
   
@@ -22,10 +21,11 @@ public sealed class MetricsDbContext : IAsyncDisposable
 
   public MetricsDbContext(
     ILogger<MetricsDbContext> logger, 
-    DatabasePathResolver pathResolver)
+    IOptions<MetricsOptions> options)
   {
     _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    _pathResolver = pathResolver ?? throw new ArgumentNullException(nameof(pathResolver));
+    ArgumentNullException.ThrowIfNull(options);
+    _databasePath = Path.GetFullPath(options.Value.DatabasePath);
   }
 
   /// <summary>
@@ -46,9 +46,8 @@ public sealed class MetricsDbContext : IAsyncDisposable
         return;
       }
 
-      // Ensure the directory exists
-      // Metrics are now stored in the configuration database
-      var dbPath = _pathResolver.GetConfigurationDatabasePath();
+      // Ensure the database directory exists
+      var dbPath = _databasePath;
       var directory = Path.GetDirectoryName(dbPath);
       if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
       {
@@ -106,7 +105,7 @@ public sealed class MetricsDbContext : IAsyncDisposable
       throw new InvalidOperationException("MetricsDbContext is not initialized. Call InitializeAsync first.");
     }
 
-    var dbPath = _pathResolver.GetConfigurationDatabasePath();
+    var dbPath = _databasePath;
     var conn = new SqliteConnection($"Data Source={dbPath};Mode=ReadOnly");
     conn.Open();
     return conn;

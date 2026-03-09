@@ -1,4 +1,4 @@
-namespace Radio.Core.Metrics;
+namespace Radio.Metrics;
 
 /// <summary>
 /// Defines the type of metric being collected.

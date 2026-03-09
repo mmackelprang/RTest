@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
-using Radio.Core.Interfaces;
-using Radio.Core.Metrics;
+using Radio.Metrics;
 
 namespace Radio.API.Controllers;
 

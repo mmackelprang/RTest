@@ -9,6 +9,7 @@ using NAudio.Wave;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
+using Radio.Metrics;
 
 namespace Radio.Infrastructure.Audio.Outputs;
 
