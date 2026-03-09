@@ -60,6 +60,7 @@
           {
             <MudTextField @ref="_pathTextField" @bind-Value="_pathBarText" Placeholder="Enter absolute path..."
                           Variant="Variant.Outlined" Margin="Margin.Dense"
+                          InputMode="InputMode.text"
                           Immediate="false"
                           OnKeyDown="OnPathBarKeyDown"
                           Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.KeyboardReturn"
@@ -126,6 +127,7 @@
           <MudTextField @bind-Value="_searchText" Placeholder="Search..."
                         Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
                         Immediate="true" DebounceInterval="300"
+                        InputMode="InputMode.text"
                         Style="max-width: 200px; font-size: 13px;"
                         Variant="Variant.Outlined" Margin="Margin.Dense" />
           <MudSelect T="string" @bind-Value="_extensionFilter" Label="Type"
