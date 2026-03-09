@@ -47,6 +47,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Radio.Metrics", "src\Radio.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Radio.Configuration", "src\Radio.Configuration\Radio.Configuration.csproj", "{928DC03B-E6A1-4E4D-8D2C-6B9494831D35}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Radio.Fingerprinting", "src\Radio.Fingerprinting\Radio.Fingerprinting.csproj", "{82818C12-06D6-49A3-885D-C2DF885FC94B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -285,6 +287,18 @@ Global
 		{928DC03B-E6A1-4E4D-8D2C-6B9494831D35}.Release|x64.Build.0 = Release|Any CPU
 		{928DC03B-E6A1-4E4D-8D2C-6B9494831D35}.Release|x86.ActiveCfg = Release|Any CPU
 		{928DC03B-E6A1-4E4D-8D2C-6B9494831D35}.Release|x86.Build.0 = Release|Any CPU
+		{82818C12-06D6-49A3-885D-C2DF885FC94B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{82818C12-06D6-49A3-885D-C2DF885FC94B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{82818C12-06D6-49A3-885D-C2DF885FC94B}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{82818C12-06D6-49A3-885D-C2DF885FC94B}.Debug|x64.Build.0 = Debug|Any CPU
+		{82818C12-06D6-49A3-885D-C2DF885FC94B}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{82818C12-06D6-49A3-885D-C2DF885FC94B}.Debug|x86.Build.0 = Debug|Any CPU
+		{82818C12-06D6-49A3-885D-C2DF885FC94B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{82818C12-06D6-49A3-885D-C2DF885FC94B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{82818C12-06D6-49A3-885D-C2DF885FC94B}.Release|x64.ActiveCfg = Release|Any CPU
+		{82818C12-06D6-49A3-885D-C2DF885FC94B}.Release|x64.Build.0 = Release|Any CPU
+		{82818C12-06D6-49A3-885D-C2DF885FC94B}.Release|x86.ActiveCfg = Release|Any CPU
+		{82818C12-06D6-49A3-885D-C2DF885FC94B}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -309,5 +323,6 @@ Global
 		{614CB616-CD7F-4A39-9EE2-CD4E408FEB26} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{CEA62E3E-63CC-4882-99C1-105CF2588772} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{928DC03B-E6A1-4E4D-8D2C-6B9494831D35} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{82818C12-06D6-49A3-885D-C2DF885FC94B} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

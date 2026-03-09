@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Configuration.Bridge;
+using Radio.Fingerprinting;
 
 /// <summary>
 /// Tests for the SQLite configuration bridge provider that connects

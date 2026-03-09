@@ -4,11 +4,10 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 
-namespace Radio.Infrastructure.Audio.Fingerprinting;
+namespace Radio.Fingerprinting.Services;
 
 /// <summary>
 /// Audio recognition service using SongRec (open-source Shazam client).

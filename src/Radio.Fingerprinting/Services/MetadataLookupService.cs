@@ -2,12 +2,11 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Metrics;
 
-namespace Radio.Infrastructure.Audio.Fingerprinting;
+namespace Radio.Fingerprinting.Services;
 
 /// <summary>
 /// Service for looking up cover art via MusicBrainz and the Cover Art Archive.

@@ -11,6 +11,8 @@ using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Configuration.Abstractions;
 using Radio.Configuration.Models;
 using Radio.Metrics;
+using Radio.Fingerprinting.Services;
+using Radio.Fingerprinting;
 using SoundFlow.Backends.MiniAudio;
 using SoundFlow.Interfaces;
 using SoundFlow.Metadata;

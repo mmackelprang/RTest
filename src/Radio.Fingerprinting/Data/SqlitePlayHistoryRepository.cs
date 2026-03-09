@@ -1,8 +1,9 @@
 using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
+using Radio.Fingerprinting.Abstractions;
 
-namespace Radio.Infrastructure.Audio.Fingerprinting.Data;
+namespace Radio.Fingerprinting.Data;
 
 /// <summary>
 /// SQLite implementation of the play history repository.
@@ -10,25 +11,25 @@ namespace Radio.Infrastructure.Audio.Fingerprinting.Data;
 public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
 {
   private readonly ILogger<SqlitePlayHistoryRepository> _logger;
-  private readonly FingerprintDbContext _dbContext;
+  private readonly IFingerprintDataConnection _dataConnection;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="SqlitePlayHistoryRepository"/> class.
   /// </summary>
   /// <param name="logger">The logger instance.</param>
-  /// <param name="dbContext">The database context.</param>
+  /// <param name="dataConnection">The fingerprint data connection.</param>
   public SqlitePlayHistoryRepository(
     ILogger<SqlitePlayHistoryRepository> logger,
-    FingerprintDbContext dbContext)
+    IFingerprintDataConnection dataConnection)
   {
     _logger = logger;
-    _dbContext = dbContext;
+    _dataConnection = dataConnection;
   }
 
   /// <inheritdoc/>
   public async Task RecordPlayAsync(PlayHistoryEntry entry, CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     var sql = """
       INSERT INTO PlayHistory (Id, TrackMetadataId, FingerprintId, PlayedAt, EndedAt, Source, MetadataSource, SourceDetails, Duration, IdentificationConfidence, WasIdentified)
@@ -58,7 +59,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     int count = 20,
     CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     var sql = """
       SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.EndedAt, h.Source, h.MetadataSource, h.SourceDetails,
@@ -83,7 +84,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     DateTime end,
     CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     var sql = """
       SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.EndedAt, h.Source, h.MetadataSource, h.SourceDetails,
@@ -109,7 +110,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     int count = 20,
     CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     var sql = """
       SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.EndedAt, h.Source, h.MetadataSource, h.SourceDetails,
@@ -137,7 +138,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     int withinMinutes = 5,
     CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     var cutoffTime = DateTime.UtcNow.AddMinutes(-withinMinutes);
 
@@ -160,7 +161,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
   /// <inheritdoc/>
   public async Task<PlayStatistics> GetStatisticsAsync(CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     // Get total counts
     await using var countCmd = conn.CreateCommand();
@@ -269,7 +270,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
   /// <inheritdoc/>
   public async Task<PlayHistoryEntry?> GetByIdAsync(string id, CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     var sql = """
       SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.EndedAt, h.Source, h.MetadataSource, h.SourceDetails,
@@ -296,7 +297,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
   /// <inheritdoc/>
   public async Task<bool> DeleteAsync(string id, CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     await using var cmd = conn.CreateCommand();
     cmd.CommandText = "DELETE FROM PlayHistory WHERE Id = @Id";
@@ -314,7 +315,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
   /// <inheritdoc/>
   public async Task<bool> UpdateAsync(PlayHistoryEntry entry, CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     var sql = """
       UPDATE PlayHistory
@@ -356,7 +357,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     int withinMinutes = 5,
     CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     var cutoffTime = DateTime.UtcNow.AddMinutes(-withinMinutes);
 
@@ -390,7 +391,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
   /// <inheritdoc/>
   public async Task<bool> FinalizeEntryAsync(string id, DateTime endedAt, CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     // Set EndedAt and calculate DurationSeconds from PlayedAt to endedAt
     var sql = """
@@ -417,7 +418,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
   /// <inheritdoc/>
   public async Task<int> CloseOrphanedEntriesAsync(TimeSpan olderThan, CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
     var cutoff = DateTime.UtcNow - olderThan;
 
     // Close orphaned entries: EndedAt IS NULL and PlayedAt is older than the cutoff.
@@ -462,7 +463,7 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
   {
     ArgumentException.ThrowIfNullOrWhiteSpace(searchTerm);
 
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
     var searchPattern = $"%{searchTerm}%";
 
     // Get total count

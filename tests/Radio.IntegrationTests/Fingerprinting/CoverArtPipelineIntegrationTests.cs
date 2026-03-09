@@ -4,6 +4,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Fingerprinting;
+using Radio.Fingerprinting.Services;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.IntegrationTests.TestSupport;
 using Xunit.Abstractions;

@@ -2,13 +2,14 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Fingerprinting.Abstractions;
 
 namespace Radio.Infrastructure.Audio.Fingerprinting.Data;
 
 /// <summary>
 /// Manages the SQLite database connection for fingerprinting data.
 /// </summary>
-public sealed class FingerprintDbContext : IAsyncDisposable
+public sealed class FingerprintDbContext : IFingerprintDataConnection, IAsyncDisposable
 {
   private readonly ILogger<FingerprintDbContext> _logger;
   private readonly DatabasePathResolver _pathResolver;

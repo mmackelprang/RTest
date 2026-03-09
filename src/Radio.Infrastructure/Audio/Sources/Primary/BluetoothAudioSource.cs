@@ -10,6 +10,8 @@ using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Infrastructure.Platform.Bluetooth;
 using Radio.Metrics;
+using Radio.Fingerprinting.Services;
+using Radio.Fingerprinting;
 using SoundFlow.Abstracts;
 using SoundFlow.Abstracts.Devices;
 using SoundFlow.Components;

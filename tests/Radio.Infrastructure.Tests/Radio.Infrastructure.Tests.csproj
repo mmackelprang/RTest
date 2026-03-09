@@ -22,6 +22,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Radio.Configuration\Radio.Configuration.csproj" />
+    <ProjectReference Include="..\..\src\Radio.Fingerprinting\Radio.Fingerprinting.csproj" />
     <ProjectReference Include="..\..\src\Radio.Infrastructure\Radio.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Radio.AudioAnalysis\Radio.AudioAnalysis.csproj" />
   </ItemGroup>

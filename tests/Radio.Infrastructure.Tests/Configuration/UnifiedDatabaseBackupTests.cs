@@ -10,6 +10,7 @@ using Radio.Infrastructure.Configuration.Backup;
 using Radio.Configuration.Models;
 using Radio.Configuration.Secrets;
 using Radio.Configuration.Stores;
+using Radio.Fingerprinting;
 using Radio.Metrics;
 
 /// <summary>

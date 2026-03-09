@@ -2,8 +2,9 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
+using Radio.Fingerprinting.Abstractions;
 
-namespace Radio.Infrastructure.Audio.Fingerprinting.Data;
+namespace Radio.Fingerprinting.Data;
 
 /// <summary>
 /// SQLite implementation of the fingerprint cache repository.
@@ -11,19 +12,19 @@ namespace Radio.Infrastructure.Audio.Fingerprinting.Data;
 public sealed class SqliteFingerprintCacheRepository : IFingerprintCacheRepository
 {
   private readonly ILogger<SqliteFingerprintCacheRepository> _logger;
-  private readonly FingerprintDbContext _dbContext;
+  private readonly IFingerprintDataConnection _dataConnection;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="SqliteFingerprintCacheRepository"/> class.
   /// </summary>
   /// <param name="logger">The logger instance.</param>
-  /// <param name="dbContext">The database context.</param>
+  /// <param name="dataConnection">The fingerprint data connection.</param>
   public SqliteFingerprintCacheRepository(
     ILogger<SqliteFingerprintCacheRepository> logger,
-    FingerprintDbContext dbContext)
+    IFingerprintDataConnection dataConnection)
   {
     _logger = logger;
-    _dbContext = dbContext;
+    _dataConnection = dataConnection;
   }
 
   /// <inheritdoc/>
@@ -31,7 +32,7 @@ public sealed class SqliteFingerprintCacheRepository : IFingerprintCacheReposito
     string chromaprintHash,
     CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     var sql = """
       SELECT f.Id, f.ChromaprintHash, f.Duration, f.AcoustId, f.MusicBrainzRecordingId,
@@ -64,7 +65,7 @@ public sealed class SqliteFingerprintCacheRepository : IFingerprintCacheReposito
     TrackMetadata? metadata,
     CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     var now = DateTime.UtcNow.ToString("O");
 
@@ -143,7 +144,7 @@ public sealed class SqliteFingerprintCacheRepository : IFingerprintCacheReposito
   /// <inheritdoc/>
   public async Task UpdateLastMatchedAsync(string id, CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     var sql = """
       UPDATE FingerprintCache
@@ -163,7 +164,7 @@ public sealed class SqliteFingerprintCacheRepository : IFingerprintCacheReposito
   /// <inheritdoc/>
   public async Task<int> GetCacheCountAsync(CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     await using var cmd = conn.CreateCommand();
     cmd.CommandText = "SELECT COUNT(*) FROM FingerprintCache";
@@ -178,7 +179,7 @@ public sealed class SqliteFingerprintCacheRepository : IFingerprintCacheReposito
     int pageSize = 50,
     CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     var offset = (page - 1) * pageSize;
     var sql = """
@@ -212,7 +213,7 @@ public sealed class SqliteFingerprintCacheRepository : IFingerprintCacheReposito
   /// <inheritdoc/>
   public async Task<bool> DeleteAsync(string id, CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     // Delete metadata first (foreign key)
     await using var deleteMetadataCmd = conn.CreateCommand();

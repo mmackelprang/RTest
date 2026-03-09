@@ -11,6 +11,8 @@ using Radio.Infrastructure.Audio.Sources.Primary;
 using Radio.Infrastructure.Configuration;
 using Radio.Configuration.Abstractions;
 using Radio.Metrics;
+using Radio.Fingerprinting.Services;
+using Radio.Fingerprinting;
 
 namespace Radio.Infrastructure.Audio.Services;
 

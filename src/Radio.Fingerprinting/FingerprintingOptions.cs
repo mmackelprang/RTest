@@ -1,4 +1,4 @@
-namespace Radio.Core.Configuration;
+namespace Radio.Fingerprinting;
 
 /// <summary>
 /// Configuration options for the audio fingerprinting system.

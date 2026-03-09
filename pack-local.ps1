@@ -31,8 +31,8 @@ $PackableProjects = @(
   "src/Radio.AudioAnalysis/Radio.AudioAnalysis.csproj"
   "src/Radio.Metrics/Radio.Metrics.csproj"
   "src/Radio.Configuration/Radio.Configuration.csproj"
+  "src/Radio.Fingerprinting/Radio.Fingerprinting.csproj"
   # Future:
-  # "src/Radio.Fingerprinting/Radio.Fingerprinting.csproj"
   # "src/Radio.Core/Radio.Core.csproj"
 )
 

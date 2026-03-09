@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
+using Radio.Fingerprinting;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Sources.Primary;
 
