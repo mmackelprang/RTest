@@ -32,10 +32,10 @@ public sealed class SqliteMetricsRepository : IMetricsReader
     MetricType metricType,
     string? unit,
     MetricResolution resolution,
-    IEnumerable<MetricBucket> buckets,
+    IReadOnlyList<MetricBucket> buckets,
     CancellationToken ct = default)
   {
-    if (!buckets.Any())
+    if (buckets.Count == 0)
     {
       return;
     }
@@ -142,7 +142,7 @@ public sealed class SqliteMetricsRepository : IMetricsReader
         {
           await transaction.CommitAsync(ct);
           _logger.LogDebug("Saved {Count} buckets for metric {Key} at {Resolution} resolution",
-            buckets.Count(), key, resolution);
+            buckets.Count, key, resolution);
         }
       }
       catch (ObjectDisposedException)

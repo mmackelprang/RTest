@@ -10,7 +10,6 @@ using Radio.Infrastructure.Configuration.Abstractions;
 /// <summary>
 /// Provides unified backup and restore capabilities for all SQLite databases.
 /// Creates single archive files containing configuration and fingerprinting databases.
-/// Metrics are stored in the configuration database.
 /// </summary>
 public sealed class UnifiedDatabaseBackupService : IUnifiedDatabaseBackupService
 {

@@ -159,7 +159,7 @@ public sealed class BufferedMetricsCollector : IMetricsCollector, IHostedService
       foreach (var buffer in buffersToFlush)
       {
         var buckets = buffer.GetBuckets(MetricResolution.Minute);
-        if (buckets.Any())
+        if (buckets.Count > 0)
         {
           await _repository.SaveBucketsAsync(
             buffer.Key,
@@ -230,7 +230,7 @@ internal sealed class MetricBuffer
     }
   }
 
-  public IEnumerable<MetricBucket> GetBuckets(MetricResolution resolution)
+  public IReadOnlyList<MetricBucket> GetBuckets(MetricResolution resolution)
   {
     List<MetricSample> samples;
     lock (_lock)
