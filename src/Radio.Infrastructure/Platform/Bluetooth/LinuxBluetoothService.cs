@@ -708,8 +708,16 @@ namespace Radio.Infrastructure.Platform.Bluetooth
         {
             if (_connection == null) return;
 
-            _userInitiatedDisconnect = true;
-            _reconnectionLoop?.Cancel();
+            // Only suppress auto-reconnect when disconnecting the active device.
+            // Disconnecting a paired-but-not-active device won't fire a Connected
+            // property-change event, so the flag would never be consumed/reset —
+            // permanently suppressing auto-reconnect.
+            var isActiveDevice = ConnectedDevice?.Address?.Equals(deviceAddress, StringComparison.OrdinalIgnoreCase) == true;
+            if (isActiveDevice)
+            {
+                _userInitiatedDisconnect = true;
+                _reconnectionLoop?.Cancel();
+            }
 
             try
             {
@@ -724,7 +732,10 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             }
             catch (Exception ex)
             {
-                _userInitiatedDisconnect = false;
+                if (isActiveDevice)
+                {
+                    _userInitiatedDisconnect = false; // reset on failure to prevent suppressing future reconnects
+                }
                 _logger.LogError(ex, "Failed to disconnect device {Address}", deviceAddress);
             }
         }

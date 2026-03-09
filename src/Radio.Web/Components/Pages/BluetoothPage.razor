@@ -178,7 +178,7 @@
                     {
                       <MudButton Variant="Variant.Text" Color="Color.Warning" Size="Size.Small"
                                  OnClick="@(() => DisconnectDeviceAsync(context.Address))"
-                                 Disabled="@(_connectingAddress == context.Address)"
+                                 Disabled="@(_connectingAddress != null)"
                                  StartIcon="@Icons.Material.Filled.LinkOff">
                         Disconnect
                       </MudButton>
@@ -187,7 +187,7 @@
                     {
                       <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
                                  OnClick="@(() => ConnectDeviceAsync(context.Address))"
-                                 Disabled="@(_connectingAddress == context.Address)"
+                                 Disabled="@(_connectingAddress != null)"
                                  StartIcon="@Icons.Material.Filled.Link">
                         @if (_connectingAddress == context.Address)
                         {
@@ -200,7 +200,8 @@
                         }
                       </MudButton>
                       <MudButton Variant="Variant.Text" Color="Color.Error" Size="Size.Small"
-                                 OnClick="@(() => UnpairAsync(context.Address))">
+                                 OnClick="@(() => UnpairAsync(context.Address))"
+                                 Disabled="@(_connectingAddress != null)">
                         Unpair
                       </MudButton>
                     }
