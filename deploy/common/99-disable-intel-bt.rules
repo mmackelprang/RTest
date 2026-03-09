@@ -1,5 +1,5 @@
 # Disable Intel AX201 Bluetooth (use dedicated USB BT adapter instead)
 # Intel combo WiFi+BT chip shares antenna, causing coexistence interference
 # that produces silence gaps in BT A2DP audio streams.
-# USB vendor:product 8087:0033 = Intel AX201 Bluetooth
-SUBSYSTEM=="usb", ATTR{idVendor}=="8087", ATTR{idProduct}=="0033", ATTR{authorized}="0"
+# USB vendor:product 8087:0026 = Intel AX201 Bluetooth
+SUBSYSTEM=="usb", ATTR{idVendor}=="8087", ATTR{idProduct}=="0026", ATTR{authorized}="0"
