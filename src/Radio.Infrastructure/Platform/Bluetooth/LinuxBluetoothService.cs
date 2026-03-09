@@ -282,6 +282,10 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                 // reconnections from already-paired phones.
                 await WatchExistingDevicesAsync();
 
+                // If a device is already connected at startup, hide discoverability
+                if (ConnectedDevice != null)
+                    await SetDiscoverableAsync(false);
+
                 State = BluetoothAdapterState.On;
                 StateChanged?.Invoke(this, new BluetoothAdapterStateChangedEventArgs { NewState = State });
                 return true;
@@ -492,6 +496,10 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                                 _metricsCollector?.Gauge("bluetooth.active_connections", 1);
                                 _logger.LogInformation("Bluetooth device connected: {DeviceName} ({Address})",
                                     updatedDevice.Name, updatedDevice.Address);
+
+                                // Hide adapter from other devices while one is connected
+                                _ = SetDiscoverableAsync(false);
+
                                 DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = updatedDevice });
                             }
                             else
@@ -510,6 +518,10 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
                                 _logger.LogInformation("Bluetooth device disconnected: {DeviceName} ({Address}) (user-initiated: {UserInitiated})",
                                     updatedDevice.Name, updatedDevice.Address, wasUserInitiated);
+
+                                // Re-show adapter so other devices can discover and pair
+                                _ = SetDiscoverableAsync(true);
+
                                 DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs
                                 {
                                     Device = updatedDevice,
@@ -1635,7 +1647,11 @@ namespace Radio.Infrastructure.Platform.Bluetooth
 
             try
             {
-                _agent = new Linux.BluezAgent(_logger, _options.AutoAcceptConnections);
+                _agent = new Linux.BluezAgent(_logger, _options.AutoAcceptConnections, () =>
+                {
+                    var device = ConnectedDevice;
+                    return (device?.Address, device?.Name);
+                });
 
                 // Export the agent object on D-Bus so BlueZ can call its methods
                 await _connection.RegisterObjectAsync(_agent);
@@ -1653,6 +1669,26 @@ namespace Radio.Infrastructure.Platform.Bluetooth
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to register Bluetooth pairing agent — pairing may require manual acceptance");
+            }
+        }
+
+        /// <summary>
+        /// Toggles adapter discoverability for single-device exclusivity.
+        /// Hidden when a device is connected (prevents other phones from seeing the radio),
+        /// shown again on disconnect so new devices can pair.
+        /// </summary>
+        private async Task SetDiscoverableAsync(bool discoverable)
+        {
+            if (_adapter == null) return;
+
+            try
+            {
+                await _adapter.SetAsync("Discoverable", discoverable);
+                _logger.LogInformation("Bluetooth adapter discoverable: {Discoverable}", discoverable);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to set adapter discoverable to {Discoverable}", discoverable);
             }
         }
 
