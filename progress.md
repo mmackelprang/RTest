@@ -1,5 +1,21 @@
 # Progress Log
 
+## Session: 2026-03-09 (NuGet Extraction Planning)
+
+### Research Completed
+- [x] Analyzed all src/ and tests/ projects for extraction candidates
+- [x] Reviewed dependency graphs, public API surfaces, test coverage
+- [x] Identified 3 candidates: RTLSDRCore (ready), Radio.AudioAnalysis (needs work), Radio.Core (needs metadata)
+- [x] Created 3-phase task plan
+- [x] Also completed BT single-device exclusivity (PR #322) and task plan status update
+
+### Planning Files
+- [x] `task_plan.md` — 3 phases for NuGet extraction
+- [x] `findings.md` — Candidate analysis summary
+- [x] `progress.md` — This file
+
+---
+
 ## Session: 2026-03-06 (Phase 3 — Root Cause + BT Transport Fix)
 
 ### BT Transport Dropout Investigation & Fix

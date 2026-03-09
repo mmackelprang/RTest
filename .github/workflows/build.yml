@@ -29,3 +29,11 @@ jobs:
         continue-on-error: false
       - name: Test
         run: dotnet test --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage" --filter "FullyQualifiedName!~Radio.Web.E2ETests&Category!=Integration"
+      - name: Pack NuGet packages
+        run: dotnet pack src/RTLSDRCore/RTLSDRCore.csproj --no-build --configuration Release --output ./packages
+      - name: Upload NuGet packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: ./packages/*.nupkg
+          if-no-files-found: warn
