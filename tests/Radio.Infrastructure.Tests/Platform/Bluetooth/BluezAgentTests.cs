@@ -106,6 +106,23 @@ public class BluezAgentTests
   }
 
   [Fact]
+  public async Task AuthorizeServiceAsync_Rejects_WhenDevicePathUnparseable_AndDeviceConnected()
+  {
+    var agent = CreateAgent(
+      autoAccept: true,
+      connectedAddress: "AA:BB:CC:DD:EE:FF",
+      connectedName: "Phone A");
+
+    // Malformed path with no dev_ prefix — should reject (fail-closed)
+    var ex = await Assert.ThrowsAsync<DBusException>(() =>
+      agent.AuthorizeServiceAsync(
+        new ObjectPath("/org/bluez/hci0/something"),
+        "0000110b-0000-1000-8000-00805f9b34fb"));
+
+    Assert.Contains("Another device is already connected", ex.ErrorMessage);
+  }
+
+  [Fact]
   public async Task RequestConfirmationAsync_AutoAccepts()
   {
     var agent = CreateAgent(autoAccept: true);

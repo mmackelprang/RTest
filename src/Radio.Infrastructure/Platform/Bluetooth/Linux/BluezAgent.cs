@@ -103,8 +103,15 @@ internal sealed class BluezAgent : IAgent1
       if (connectedAddress != null)
       {
         var requestingAddress = ExtractAddressFromDevicePath(device);
-        if (requestingAddress != null &&
-            !string.Equals(requestingAddress, connectedAddress, StringComparison.OrdinalIgnoreCase))
+        if (requestingAddress == null)
+        {
+          // Can't determine requesting device — reject to be safe when another device is connected
+          _logger.LogWarning(
+            "Rejecting Bluetooth service {UUID} from {Device} — cannot parse address and {ConnectedName} ({ConnectedAddress}) is already connected",
+            uuid, device, connectedName ?? "Unknown", connectedAddress);
+          throw new DBusException("org.bluez.Error.Rejected", "Another device is already connected");
+        }
+        if (!string.Equals(requestingAddress, connectedAddress, StringComparison.OrdinalIgnoreCase))
         {
           _logger.LogInformation(
             "Rejecting Bluetooth service {UUID} from {Device} — {ConnectedName} ({ConnectedAddress}) is already connected",

@@ -423,6 +423,10 @@ namespace Radio.Infrastructure.Platform.Bluetooth
                     _metricsCollector?.Gauge("bluetooth.active_connections", 1);
                     _logger.LogInformation("Bluetooth device connected: {DeviceName} ({Address})",
                         device.Name, device.Address);
+
+                    // Hide adapter from other devices while one is connected
+                    _ = SetDiscoverableAsync(false);
+
                     DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = device });
                 }
 
