@@ -1,4 +1,85 @@
-# Findings
+# Findings — NuGet Package Extraction
+
+## Candidate Analysis Summary
+
+| Library | Standalone? | Dependencies | Tests | Pub-Ready |
+|---------|-------------|--------------|-------|-----------|
+| RTLSDRCore | YES | Serilog only | 75 | 8/10 |
+| Radio.AudioAnalysis | YES | None | Indirect only | 5/10 |
+| Radio.Core | YES | Extensions only | 37 | 6/10 |
+| Radio.Infrastructure | NO | 7+ packages | 200+ | Not ready |
+
+## Current Build/Deploy Infrastructure
+- **No NuGet infrastructure exists** — no nuget.config, no custom feeds, no pack steps
+- CI (`.github/workflows/build.yml`): build + test only, no packaging
+- Deploy (`Deploy-ToLinux.ps1`): `dotnet restore` → `dotnet publish --self-contained` → rsync to target
+- `Directory.Build.props`: TreatWarningsAsErrors, GenerateDocumentationFile=true, no packaging defaults
+- No `Directory.Packages.props` (no central package versioning)
+- SDK: .NET 10.0.102 (`global.json` with `rollForward: latestMinor`)
+- **Local folder feed is simplest option** — `nuget.config` with `./packages` source, zero infra needed
+- Promotion path: local folder → GitHub Packages → NuGet.org
+
+## RTLSDRCore
+- Already has full NuGet metadata (PR #302): PackageId, Version 1.0.0, MIT, README, symbols
+- 24 source files across Bands/, DSP/, Enums/, Hardware/, Models/
+- `dotnet pack src/RTLSDRCore` already produces .nupkg + .snupkg
+- Only external dependency: Serilog 4.0.0
+- Clean public API: RadioReceiver, IRadioControl, ISdrDevice, demodulators, band presets
+
+## Radio.AudioAnalysis
+- Currently in `tests/` directory with `IsPackable=false`
+- 7 files, ~1,400 LOC: WaveformComparison, FrequencyAnalysis, SilenceDetector, WavFileHelper
+- Zero NuGet dependencies — pure math/DSP
+- **Gap: No dedicated unit tests** — only tested indirectly via integration tests
+- Needs: relocation to src/, unit tests, NuGet metadata, README
+
+## Radio.Core
+- 84 files, ~90+ public types (interfaces, models, enums, config options)
+- Only depends on Microsoft.Extensions.Logging.Abstractions + Options
+- **Concern:** High surface area means strict semantic versioning needed
+- Domain-specific to Radio Console — may not be useful to external consumers
+- Question: publish externally, or just add metadata for internal package management?
+
+## Fingerprinting / Audio Recognition
+- **~2,000 LOC extractable** (65-70% of fingerprinting codebase)
+- Core: SongRecRecognitionService (songrec binary wrapper), MetadataLookupService (MusicBrainz/Cover Art Archive), SQLite cache/metadata repositories
+- Models: TrackMetadata, AudioSampleBuffer, FingerprintData, CachedFingerprint, FingerprintStatus
+- Events: TrackIdentifiedEventArgs, SongChangedEventArgs
+- BackgroundIdentificationService: extractable with one abstraction (IAudioSampleProvider needs Radio-specific properties removed)
+- **NOT extractable**: SoundFlowAudioTap (~270 LOC) — tightly coupled to IAudioEngine/IAudioManager. This is the bridge layer and stays in Radio.Infrastructure.
+- **Two changes needed**: (1) IAudioSampleProvider: strip Radio-specific properties (PlaySource enum, SourceFilePath, NeedsFingerprintingLookup) into a Radio adapter, (2) DatabasePathResolver → Func<string> or options pattern
+- Has good test coverage: ~8 test files across unit + integration
+- External deps: Microsoft.Data.Sqlite, HttpClient (MusicBrainz API), songrec binary at runtime
+
+## Configuration System
+- **35 C# files**, ~90% generic and reusable
+- Core: IConfigurationStore (JSON + SQLite backends), ISecretsProvider (encrypted tag substitution `${secret:id}`), IConfigurationManager, backup/restore (ZIP-based)
+- Bridge: SqliteConfigurationProvider hooks into .NET's IConfiguration/IOptionsMonitor pipeline — elegant and fully reusable
+- ConfigStoreChangeNotifier: UI writes propagate to IOptionsMonitor consumers in real-time
+- **Only 2 Radio-specific files**: DeviceOptionsResolver + PreferencesPersistenceService — these are application-layer consumers, not core config infrastructure. Just exclude them.
+- **One coupling**: DatabasePathResolver usage in SqliteSecretsProvider + ConfigurationStoreFactory → replace with IDatabasePathProvider interface or Func<string>
+- Deps: Microsoft.Data.Sqlite, Microsoft.AspNetCore.DataProtection (encryption), standard Extensions packages
+- Strong test coverage: store operations, backup, bridge integration, secrets
+
+## Metrics System
+- **~1,500 LOC**, 99% generic with zero Radio-specific logic
+- Core: IMetricsCollector (Increment/Gauge), IMetricsReader (history/snapshots/aggregate/keys), MetricPoint, MetricType, MetricResolution
+- Storage: SQLite with 3 resolution tables (Minute/Hour/Day), buffered writes (ConcurrentDictionary → periodic flush)
+- Rollup service: automatic aggregation Minute→Hour→Day with configurable retention policies
+- **One coupling**: MetricsDbContext uses GetConfigurationDatabasePath() → add explicit DatabasePath to MetricsOptions
+- SystemMonitorService (memory/disk/CPU/temp) is OS-specific — keep as optional or exclude
+- Dashboard UI is Radio-specific (hero cards, thresholds) — stays in Radio.Web
+- Deps: Microsoft.Data.Sqlite only
+- Good test coverage: schema, repository CRUD, rollup, API endpoints
+
+## Non-Candidates
+- **Radio.Infrastructure (bulk)**: Too many internal dependencies (SoundFlow, BlueZ, SharpCaster, etc.)
+- **Radio.API / Radio.Web**: Application-specific, not libraries
+- **SoundFlowAudioTap**: Bridge between SoundFlow and fingerprinting — stays in Radio.Infrastructure
+
+---
+
+# Previous Findings (archived)
 
 ## .NET 10 Migration Research
 

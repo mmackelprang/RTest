@@ -20,8 +20,12 @@ src/Radio.Web/data/
 
 # NuGet
 *.nupkg
+*.snupkg
 **/[Pp]ackages/*
 !**/[Pp]ackages/build/
+
+# Local NuGet feed (packages/ at repo root) — keep directory, ignore contents
+!/packages/.gitkeep
 
 # Visual Studio
 .vs/
