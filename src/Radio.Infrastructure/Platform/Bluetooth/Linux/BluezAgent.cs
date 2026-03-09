@@ -13,19 +13,31 @@ namespace Radio.Infrastructure.Platform.Bluetooth.Linux;
 /// Uses "NoInputNoOutput" capability to enable "Just Works" pairing (no PIN required).
 /// Must implement IAgent1 (not just IDBusObject) so Tmds.DBus exposes all methods
 /// on D-Bus — BlueZ calls AuthorizeService to approve A2DP/HFP profiles.
+///
+/// Single-device exclusivity: when a device is already connected, AuthorizeService
+/// rejects connection attempts from other devices. Inspired by bt-speaker's
+/// AutoAcceptSingleAudioAgent pattern.
 /// </summary>
 internal sealed class BluezAgent : IAgent1
 {
   private readonly ILogger _logger;
   private readonly bool _autoAccept;
+  private readonly Func<(string? address, string? name)> _getConnectedDevice;
   private readonly HashSet<string> _authorizedServices = new();
 
   public ObjectPath ObjectPath => new(BluezConstants.AgentPath);
 
-  public BluezAgent(ILogger logger, bool autoAccept)
+  /// <param name="logger">Logger instance.</param>
+  /// <param name="autoAccept">Whether to auto-accept pairing/authorization.</param>
+  /// <param name="getConnectedDevice">
+  /// Callback returning the currently connected device's address and name,
+  /// or (null, null) if no device is connected. Used to enforce single-device exclusivity.
+  /// </param>
+  public BluezAgent(ILogger logger, bool autoAccept, Func<(string? address, string? name)> getConnectedDevice)
   {
     _logger = logger;
     _autoAccept = autoAccept;
+    _getConnectedDevice = getConnectedDevice;
   }
 
   /// <summary>Called when BlueZ needs to release this agent.</summary>
@@ -77,11 +89,37 @@ internal sealed class BluezAgent : IAgent1
     throw new DBusException("org.bluez.Error.Rejected", "Pairing rejected by agent");
   }
 
-  /// <summary>Called to authorize a service connection from a paired device.</summary>
+  /// <summary>
+  /// Called to authorize a service connection from a paired device.
+  /// Enforces single-device exclusivity: rejects if a different device is already connected.
+  /// </summary>
   public Task AuthorizeServiceAsync(ObjectPath device, string uuid)
   {
     if (_autoAccept)
     {
+      // Single-device exclusivity: reject if a different device is already connected.
+      // Extract the requesting device's MAC from the D-Bus path (e.g. /org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF)
+      var (connectedAddress, connectedName) = _getConnectedDevice();
+      if (connectedAddress != null)
+      {
+        var requestingAddress = ExtractAddressFromDevicePath(device);
+        if (requestingAddress == null)
+        {
+          // Can't determine requesting device — reject to be safe when another device is connected
+          _logger.LogWarning(
+            "Rejecting Bluetooth service {UUID} from {Device} — cannot parse address and {ConnectedName} ({ConnectedAddress}) is already connected",
+            uuid, device, connectedName ?? "Unknown", connectedAddress);
+          throw new DBusException("org.bluez.Error.Rejected", "Another device is already connected");
+        }
+        if (!string.Equals(requestingAddress, connectedAddress, StringComparison.OrdinalIgnoreCase))
+        {
+          _logger.LogInformation(
+            "Rejecting Bluetooth service {UUID} from {Device} — {ConnectedName} ({ConnectedAddress}) is already connected",
+            uuid, device, connectedName ?? "Unknown", connectedAddress);
+          throw new DBusException("org.bluez.Error.Rejected", "Another device is already connected");
+        }
+      }
+
       // Log first authorization per service at Info, subsequent repeats at Debug
       // to avoid flooding the log when BlueZ retries A2DP connections
       var key = $"{device}:{uuid}";
@@ -97,6 +135,20 @@ internal sealed class BluezAgent : IAgent1
 
     _logger.LogInformation("Rejecting Bluetooth service {UUID} for {Device} (auto-accept disabled)", uuid, device);
     throw new DBusException("org.bluez.Error.Rejected", "Service authorization rejected by agent");
+  }
+
+  /// <summary>
+  /// Extracts a MAC address from a BlueZ device object path.
+  /// e.g. "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF" → "AA:BB:CC:DD:EE:FF"
+  /// </summary>
+  internal static string? ExtractAddressFromDevicePath(ObjectPath devicePath)
+  {
+    var path = devicePath.ToString();
+    var devPrefix = "/dev_";
+    var idx = path.LastIndexOf(devPrefix, StringComparison.Ordinal);
+    if (idx < 0) return null;
+    var mac = path[(idx + devPrefix.Length)..];
+    return mac.Replace('_', ':');
   }
 
   /// <summary>Called to authorize an incoming pairing request.</summary>
