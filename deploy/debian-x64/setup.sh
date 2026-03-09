@@ -258,6 +258,17 @@ else
   echo "  No USB BT adapter detected — skipping Intel BT disable"
 fi
 
+# WirePlumber: prevent auto-linking BT input to speakers
+# Radio Console captures BT audio via PipeWire native stream and routes through
+# its own mixer. Without this, WirePlumber auto-links bluez_input → default sink,
+# causing duplicate audio that bypasses volume/mute controls.
+WP_BT_RULE="$SCRIPT_DIR_COMMON/90-disable-bt-input-autolink.lua"
+if [ -f "$WP_BT_RULE" ]; then
+  mkdir -p /etc/wireplumber/bluetooth.lua.d
+  cp "$WP_BT_RULE" /etc/wireplumber/bluetooth.lua.d/
+  echo "  WirePlumber BT auto-link prevention rule installed"
+fi
+
 # ---- 8. Configure Audio & Bluetooth ----
 echo ""
 echo "[8/8] Configuring audio and Bluetooth..."
