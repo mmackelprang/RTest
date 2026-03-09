@@ -502,15 +502,21 @@ public class FilesController : ControllerBase
       if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
       {
         var mountDrives = DiscoverLinuxMountPoints();
+        // Normalize paths by trimming trailing separator for consistent comparison
         var existingPaths = new HashSet<string>(
-          drives.Select(d => d.Name), StringComparer.Ordinal);
+          drives.Select(d => d.Name.TrimEnd(Path.DirectorySeparatorChar)),
+          StringComparer.Ordinal);
 
         foreach (var mountDrive in mountDrives)
         {
-          // Avoid duplicates — DriveInfo may already include some mounts
-          if (!existingPaths.Contains(mountDrive.Name))
+          // Normalize mount drive name for comparison
+          var normalizedName = mountDrive.Name.TrimEnd(Path.DirectorySeparatorChar);
+          // Avoid duplicates — DriveInfo may already include some mounts,
+          // and mount drives themselves may overlap
+          if (!existingPaths.Contains(normalizedName))
           {
             drives.Add(mountDrive);
+            existingPaths.Add(normalizedName);
           }
         }
       }
@@ -671,9 +677,9 @@ public class FilesController : ControllerBase
     for (int i = 0; i < path.Length; i++)
     {
       if (path[i] == '\\' && i + 3 < path.Length &&
-          char.IsAsciiDigit(path[i + 1]) &&
-          char.IsAsciiDigit(path[i + 2]) &&
-          char.IsAsciiDigit(path[i + 3]))
+          path[i + 1] >= '0' && path[i + 1] <= '7' &&
+          path[i + 2] >= '0' && path[i + 2] <= '7' &&
+          path[i + 3] >= '0' && path[i + 3] <= '7')
       {
         var octalValue = (path[i + 1] - '0') * 64 +
                          (path[i + 2] - '0') * 8 +
@@ -744,7 +750,12 @@ public class FilesController : ControllerBase
       var options = _filePlayerOptions.CurrentValue;
       var mediaRoot = Path.GetFullPath(
         string.IsNullOrEmpty(options.RootDirectory) ? "." : options.RootDirectory);
-      if (resolvedPath.StartsWith(mediaRoot, StringComparison.OrdinalIgnoreCase))
+      // Ensure trailing separator for prefix matching to prevent /mnt/nasty matching /mnt/nas
+      var mediaRootPrefix = mediaRoot.EndsWith(Path.DirectorySeparatorChar)
+        ? mediaRoot
+        : mediaRoot + Path.DirectorySeparatorChar;
+      if (resolvedPath.StartsWith(mediaRootPrefix, StringComparison.OrdinalIgnoreCase)
+          || resolvedPath.Equals(mediaRoot, StringComparison.OrdinalIgnoreCase))
       {
         return true;
       }
@@ -758,7 +769,12 @@ public class FilesController : ControllerBase
         }
 
         var resolvedAllowed = Path.GetFullPath(allowedDir);
-        if (resolvedPath.StartsWith(resolvedAllowed, StringComparison.OrdinalIgnoreCase))
+        // Ensure trailing separator for prefix matching
+        var prefix = resolvedAllowed.EndsWith(Path.DirectorySeparatorChar)
+          ? resolvedAllowed
+          : resolvedAllowed + Path.DirectorySeparatorChar;
+        if (resolvedPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            || resolvedPath.Equals(resolvedAllowed, StringComparison.OrdinalIgnoreCase))
         {
           return true;
         }
