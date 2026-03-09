@@ -25,6 +25,7 @@ public class SoundFlowPlaybackService : IDisposable
   private readonly Dictionary<string, SoundComponent> _activeComponents = new();
   private readonly Dictionary<string, float> _baseVolumes = new();
   private readonly Dictionary<string, float> _gainOffsets = new();
+  private readonly Dictionary<string, float> _duckingMultipliers = new();
   private readonly object _playersLock = new();
   private bool _disposed;
 
@@ -132,7 +133,8 @@ public class SoundFlowPlaybackService : IDisposable
         _baseVolumes[sourceId] = volume;
         gainOffset = _gainOffsets.GetValueOrDefault(sourceId, 1.0f);
       }
-      soundPlayer.Volume = Math.Clamp(volume * gainOffset, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
+      var fileDuckMult = _duckingMultipliers.GetValueOrDefault(sourceId, 1.0f);
+      soundPlayer.Volume = Math.Clamp(volume * gainOffset * fileDuckMult, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
       _logger.LogDebug("PlayFileAsync: SoundPlayer created, Volume: {Volume}, GainOffset: {Gain}", volume, gainOffset);
 
       // Add to the playback device's mixer
@@ -258,7 +260,8 @@ public class SoundFlowPlaybackService : IDisposable
         _baseVolumes[sourceId] = volume;
         streamGainOffset = _gainOffsets.GetValueOrDefault(sourceId, 1.0f);
       }
-      soundPlayer.Volume = Math.Clamp(volume * streamGainOffset, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
+      var streamDuckMult = _duckingMultipliers.GetValueOrDefault(sourceId, 1.0f);
+      soundPlayer.Volume = Math.Clamp(volume * streamGainOffset * streamDuckMult, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
 
       // Add to the playback device's mixer
       playbackDevice.MasterMixer.AddComponent(soundPlayer);
@@ -323,7 +326,8 @@ public class SoundFlowPlaybackService : IDisposable
         _baseVolumes[sourceId] = volume;
         dpGainOffset = _gainOffsets.GetValueOrDefault(sourceId, 1.0f);
       }
-      soundPlayer.Volume = Math.Clamp(volume * dpGainOffset, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
+      var dpDuckMult = _duckingMultipliers.GetValueOrDefault(sourceId, 1.0f);
+      soundPlayer.Volume = Math.Clamp(volume * dpGainOffset * dpDuckMult, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
 
       // Add to the playback device's mixer
       playbackDevice.MasterMixer.AddComponent(soundPlayer);
@@ -386,7 +390,8 @@ public class SoundFlowPlaybackService : IDisposable
         _baseVolumes[sourceId] = volume;
         compGainOffset = _gainOffsets.GetValueOrDefault(sourceId, 1.0f);
       }
-      component.Volume = Math.Clamp(volume * compGainOffset, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
+      var compDuckMult = _duckingMultipliers.GetValueOrDefault(sourceId, 1.0f);
+      component.Volume = Math.Clamp(volume * compGainOffset * compDuckMult, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
 
       // Add to the playback device's mixer
       _logger.LogInformation(
@@ -486,6 +491,7 @@ public class SoundFlowPlaybackService : IDisposable
         _activeComponents.Remove(sourceId);
       }
       _baseVolumes.Remove(sourceId);
+      _duckingMultipliers.Remove(sourceId);
       // Keep _gainOffsets — they persist across stop/start for the same source
     }
 
@@ -584,17 +590,7 @@ public class SoundFlowPlaybackService : IDisposable
     lock (_playersLock)
     {
       _baseVolumes[sourceId] = Math.Clamp(volume, 0f, 1f);
-      var gainOffset = _gainOffsets.GetValueOrDefault(sourceId, 1.0f);
-      var effective = Math.Clamp(volume * gainOffset, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
-
-      if (_activePlayers.TryGetValue(sourceId, out var player))
-      {
-        player.Volume = effective;
-      }
-      if (_activeComponents.TryGetValue(sourceId, out var component))
-      {
-        component.Volume = effective;
-      }
+      ApplyEffectiveVolume(sourceId);
     }
   }
 
@@ -611,21 +607,67 @@ public class SoundFlowPlaybackService : IDisposable
     {
       gainOffset = Math.Clamp(gainOffset, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
       _gainOffsets[sourceId] = gainOffset;
-      var baseVol = _baseVolumes.GetValueOrDefault(sourceId, 1.0f);
-      var effective = Math.Clamp(baseVol * gainOffset, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
+      ApplyEffectiveVolume(sourceId);
 
-      if (_activePlayers.TryGetValue(sourceId, out var player))
-      {
-        player.Volume = effective;
-        _logger.LogDebug("Applied gain offset {Gain:F2} to player (SourceId={SourceId}, EffectiveVolume={Volume:F2})",
-          gainOffset, sourceId, effective);
-      }
-      if (_activeComponents.TryGetValue(sourceId, out var component))
-      {
-        component.Volume = effective;
-        _logger.LogDebug("Applied gain offset {Gain:F2} to component (SourceId={SourceId}, EffectiveVolume={Volume:F2})",
-          gainOffset, sourceId, effective);
-      }
+      _logger.LogDebug("Applied gain offset {Gain:F2} to source (SourceId={SourceId})",
+        gainOffset, sourceId);
+    }
+  }
+
+  /// <summary>
+  /// Sets a ducking multiplier for a specific source.
+  /// Used by the ducking system to temporarily reduce volume of primary sources
+  /// while event audio (TTS, notifications) plays.
+  /// Effective volume = base volume * gain offset * ducking multiplier.
+  /// </summary>
+  /// <param name="sourceId">The source identifier.</param>
+  /// <param name="multiplier">Ducking multiplier (0.0 to 1.0, where 1.0 = no ducking).</param>
+  public void SetDuckingMultiplier(string sourceId, float multiplier)
+  {
+    ThrowIfDisposed();
+
+    lock (_playersLock)
+    {
+      multiplier = Math.Clamp(multiplier, 0f, 1f);
+      _duckingMultipliers[sourceId] = multiplier;
+      ApplyEffectiveVolume(sourceId);
+    }
+  }
+
+  /// <summary>
+  /// Clears the ducking multiplier for a specific source, restoring full volume.
+  /// </summary>
+  /// <param name="sourceId">The source identifier.</param>
+  public void ClearDuckingMultiplier(string sourceId)
+  {
+    ThrowIfDisposed();
+
+    lock (_playersLock)
+    {
+      _duckingMultipliers.Remove(sourceId);
+      ApplyEffectiveVolume(sourceId);
+    }
+  }
+
+  /// <summary>
+  /// Recalculates and applies the effective volume for a source.
+  /// Must be called under _playersLock.
+  /// </summary>
+  private void ApplyEffectiveVolume(string sourceId)
+  {
+    var baseVol = _baseVolumes.GetValueOrDefault(sourceId, 1.0f);
+    var gainOffset = _gainOffsets.GetValueOrDefault(sourceId, 1.0f);
+    var duckMult = _duckingMultipliers.GetValueOrDefault(sourceId, 1.0f);
+    var effective = Math.Clamp(baseVol * gainOffset * duckMult,
+      AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
+
+    if (_activePlayers.TryGetValue(sourceId, out var player))
+    {
+      player.Volume = effective;
+    }
+    if (_activeComponents.TryGetValue(sourceId, out var component))
+    {
+      component.Volume = effective;
     }
   }
 

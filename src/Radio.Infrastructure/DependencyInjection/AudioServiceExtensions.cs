@@ -147,7 +147,8 @@ public static class AudioServiceExtensions
       sp.GetService<BackgroundIdentificationService>(),
       sp.GetRequiredService<AudioPreferencePersistence>(),
       sp.GetRequiredService<PlayHistoryTracker>(),
-      sp.GetRequiredService<SoundFlowPlaybackService>()));
+      sp.GetRequiredService<SoundFlowPlaybackService>(),
+      sp.GetRequiredService<IDuckingService>()));
     services.AddSingleton<IAudioManager>(sp => sp.GetRequiredService<AudioManager>());
     services.AddSingleton<IAudioSourceManager>(sp => sp.GetRequiredService<AudioManager>());
     services.AddSingleton<IAudioMixerControl>(sp => sp.GetRequiredService<AudioManager>());

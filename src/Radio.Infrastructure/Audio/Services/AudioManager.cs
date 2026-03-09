@@ -5,6 +5,9 @@ using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.SoundFlow;
 
+// Ducking support: AudioManager subscribes to IDuckingService events and applies
+// volume reduction to the active primary source via SoundFlowPlaybackService.
+
 namespace Radio.Infrastructure.Audio.Services;
 
 /// <summary>
@@ -20,6 +23,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   private readonly AudioPreferencePersistence? _preferencePersistence;
   private readonly PlayHistoryTracker? _playHistoryTracker;
   private readonly SoundFlowPlaybackService? _playbackService;
+  private readonly IDuckingService? _duckingService;
 
   // State
   private IAudioSource? _activeSource;
@@ -39,7 +43,8 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     BackgroundIdentificationService? identificationService = null,
     AudioPreferencePersistence? preferencePersistence = null,
     PlayHistoryTracker? playHistoryTracker = null,
-    SoundFlowPlaybackService? playbackService = null)
+    SoundFlowPlaybackService? playbackService = null,
+    IDuckingService? duckingService = null)
   {
     _logger = logger;
     _audioEngine = audioEngine;
@@ -48,6 +53,14 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     _preferencePersistence = preferencePersistence;
     _playHistoryTracker = playHistoryTracker;
     _playbackService = playbackService;
+    _duckingService = duckingService;
+
+    // Subscribe to ducking events to apply volume reduction to active primary source
+    if (_duckingService != null)
+    {
+      _duckingService.DuckingLevelChanged += OnDuckingLevelChanged;
+      _duckingService.DuckingStateChanged += OnDuckingStateChanged;
+    }
   }
 
   /// <inheritdoc/>
@@ -215,6 +228,19 @@ public class AudioManager : IAudioManager, IAsyncDisposable
 
       // Update the active source reference
       _activeSource = source;
+
+      // Clear ducking multiplier on old source (prevents stale multiplier if reactivated)
+      if (oldSource != null && _playbackService != null)
+      {
+        _playbackService.ClearDuckingMultiplier(oldSource.Id);
+      }
+
+      // If ducking is currently active, apply the current duck level to the new source
+      if (_duckingService is { IsDucking: true } && _playbackService != null)
+      {
+        var multiplier = _duckingService.CurrentDuckLevel / 100f;
+        _playbackService.SetDuckingMultiplier(source.Id, multiplier);
+      }
 
       // Reset song change detection state for the new source
       _identificationService?.ResetSongChangeState();
@@ -430,6 +456,53 @@ public class AudioManager : IAudioManager, IAsyncDisposable
       source.Name, source.Type, e.PreviousState, e.NewState, source == _activeSource);
   }
 
+  /// <summary>
+  /// Handles ducking level changes by applying a volume multiplier to the active primary source.
+  /// Called during fade transitions (attack/release) with interpolated duck levels.
+  /// </summary>
+  private void OnDuckingLevelChanged(object? sender, DuckingLevelChangedEventArgs e)
+  {
+    if (_playbackService == null || _activeSource == null)
+      return;
+
+    // Convert duck level percentage (0-100) to multiplier (0.0-1.0)
+    var multiplier = e.NewLevel / 100f;
+    _playbackService.SetDuckingMultiplier(_activeSource.Id, multiplier);
+
+    _logger.LogDebug(
+      "Ducking level: {PrevLevel:F0}% -> {NewLevel:F0}% (multiplier={Mult:F2}, source={Source})",
+      e.PreviousLevel, e.NewLevel, multiplier, _activeSource.Name);
+  }
+
+  /// <summary>
+  /// Handles ducking state changes (start/stop).
+  /// Clears the ducking multiplier when ducking ends to ensure clean restoration.
+  /// </summary>
+  private void OnDuckingStateChanged(object? sender, DuckingStateChangedEventArgs e)
+  {
+    if (_playbackService == null)
+      return;
+
+    if (e.IsDucking)
+    {
+      _logger.LogInformation(
+        "Ducking started: source={TriggerSource}, duckLevel={DuckLevel:F0}%, activeEvents={EventCount}",
+        e.TriggeringSource?.Name ?? "unknown", e.DuckLevel, e.ActiveEventCount);
+    }
+    else
+    {
+      // Ducking ended — clear all ducking multipliers to restore full volume
+      if (_activeSource != null)
+      {
+        _playbackService.ClearDuckingMultiplier(_activeSource.Id);
+      }
+
+      _logger.LogInformation(
+        "Ducking ended: volume restored, activeEvents={EventCount}",
+        e.ActiveEventCount);
+    }
+  }
+
   /// <inheritdoc/>
   public async ValueTask DisposeAsync()
   {
@@ -441,6 +514,13 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     _disposed = true;
 
     _logger.LogInformation("Disposing AudioManager");
+
+    // Unsubscribe from ducking events
+    if (_duckingService != null)
+    {
+      _duckingService.DuckingLevelChanged -= OnDuckingLevelChanged;
+      _duckingService.DuckingStateChanged -= OnDuckingStateChanged;
+    }
 
     // Dispose play history tracker (unsubscribes from identification + BT metadata events)
     _playHistoryTracker?.Dispose();
