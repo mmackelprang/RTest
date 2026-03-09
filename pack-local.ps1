@@ -28,8 +28,8 @@ $RepoRoot = $PSScriptRoot
 # Projects to pack — add new extractable projects here
 $PackableProjects = @(
   "src/RTLSDRCore/RTLSDRCore.csproj"
+  "src/Radio.AudioAnalysis/Radio.AudioAnalysis.csproj"
   # Future:
-  # "src/Radio.AudioAnalysis/Radio.AudioAnalysis.csproj"
   # "src/Radio.Metrics/Radio.Metrics.csproj"
   # "src/Radio.Configuration/Radio.Configuration.csproj"
   # "src/Radio.Fingerprinting/Radio.Fingerprinting.csproj"

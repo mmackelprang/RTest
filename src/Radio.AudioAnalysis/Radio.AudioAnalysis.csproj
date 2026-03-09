@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <!-- NuGet package metadata -->
+    <PackageId>Radio.AudioAnalysis</PackageId>
+    <Version>1.0.0</Version>
+    <Description>Audio analysis toolkit for waveform comparison, distortion detection, frequency analysis (THD, Goertzel), silence detection, and WAV file I/O. Zero dependencies.</Description>
+    <PackageTags>audio;analysis;distortion;waveform;thd;goertzel;wav;dsp;silence-detection</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+</Project>
