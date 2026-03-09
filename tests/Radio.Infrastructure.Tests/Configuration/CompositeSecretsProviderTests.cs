@@ -3,8 +3,8 @@ namespace Radio.Infrastructure.Tests.Configuration;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Radio.Infrastructure.Configuration.Models;
-using Radio.Infrastructure.Configuration.Secrets;
+using Radio.Configuration.Models;
+using Radio.Configuration.Secrets;
 
 /// <summary>
 /// Tests for CompositeSecretsProvider (SQLite primary + JSON fallback).
@@ -23,16 +23,13 @@ public class CompositeSecretsProviderTests : IAsyncDisposable
 
     var dataProtection = DataProtectionProvider.Create("TestApp");
 
-    var databaseOptions = Options.Create(new Radio.Core.Configuration.DatabaseOptions
+    var configOptions1 = Options.Create(new ConfigurationOptions
     {
-      RootPath = _testDirectory,
-      SecretsSubdirectory = "",
-      SecretsFileName = "secrets.db"
+      SecretsDatabasePath = Path.Combine(_testDirectory, "secrets.db")
     });
-    var pathResolver = new Radio.Core.Configuration.DatabasePathResolver(databaseOptions);
 
     _sqliteProvider = new SqliteSecretsProvider(
-      pathResolver,
+      configOptions1,
       dataProtection,
       NullLogger<SqliteSecretsProvider>.Instance);
 

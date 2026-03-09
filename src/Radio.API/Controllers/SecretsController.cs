@@ -1,5 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
-using Radio.Infrastructure.Configuration.Abstractions;
+using Radio.Configuration.Abstractions;
 
 namespace Radio.API.Controllers;
 

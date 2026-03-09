@@ -3,8 +3,8 @@ namespace Radio.Infrastructure.Tests.Configuration;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Radio.Infrastructure.Configuration.Models;
-using Radio.Infrastructure.Configuration.Secrets;
+using Radio.Configuration.Models;
+using Radio.Configuration.Secrets;
 
 /// <summary>
 /// Tests for secrets provider implementations.
@@ -14,7 +14,6 @@ public class SecretsProviderTests : IDisposable
   private readonly string _testDirectory;
   private readonly ConfigurationOptions _options;
   private readonly IDataProtectionProvider _dataProtection;
-  private readonly Radio.Core.Configuration.DatabasePathResolver _pathResolver;
 
   public SecretsProviderTests()
   {
@@ -25,16 +24,9 @@ public class SecretsProviderTests : IDisposable
     {
       BasePath = _testDirectory,
       SecretsFileName = "secrets",
-      SqliteFileName = "secrets.db"
+      SqliteFileName = "secrets.db",
+      SecretsDatabasePath = Path.Combine(_testDirectory, "secrets.db")
     };
-
-    var databaseOptions = Options.Create(new Radio.Core.Configuration.DatabaseOptions
-    {
-      RootPath = _testDirectory,
-      SecretsSubdirectory = "",
-      SecretsFileName = "secrets.db"
-    });
-    _pathResolver = new Radio.Core.Configuration.DatabasePathResolver(databaseOptions);
 
     _dataProtection = DataProtectionProvider.Create("TestApp");
   }
@@ -280,7 +272,7 @@ public class SecretsProviderTests : IDisposable
   private SqliteSecretsProvider CreateSqliteProvider()
   {
     return new SqliteSecretsProvider(
-      _pathResolver,
+      Options.Create(_options),
       _dataProtection,
       NullLogger<SqliteSecretsProvider>.Instance);
   }

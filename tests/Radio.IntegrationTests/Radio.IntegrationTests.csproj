@@ -23,6 +23,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Radio.API\Radio.API.csproj" />
+    <ProjectReference Include="..\..\src\Radio.Configuration\Radio.Configuration.csproj" />
     <ProjectReference Include="..\..\src\Radio.Infrastructure\Radio.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Radio.Core\Radio.Core.csproj" />
     <ProjectReference Include="..\..\src\RTLSDRCore\RTLSDRCore.csproj" />

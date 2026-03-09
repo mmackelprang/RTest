@@ -5,7 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
-using Radio.Infrastructure.Configuration.Bridge;
+using Radio.Configuration.Bridge;
 
 /// <summary>
 /// Tests for the SQLite configuration bridge provider that connects

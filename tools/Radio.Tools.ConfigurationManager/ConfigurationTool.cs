@@ -1,10 +1,10 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Radio.Infrastructure.Configuration.Abstractions;
-using Radio.Infrastructure.Configuration.Models;
+using Radio.Configuration.Abstractions;
+using Radio.Configuration.Models;
 using Spectre.Console;
 
-using IRadioConfigurationManager = Radio.Infrastructure.Configuration.Abstractions.IConfigurationManager;
+using IRadioConfigurationManager = Radio.Configuration.Abstractions.IConfigurationManager;
 
 namespace Radio.Tools.ConfigurationManager;
 

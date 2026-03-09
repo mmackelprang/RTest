@@ -15,7 +15,7 @@ using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Infrastructure.Audio.Visualization;
 using Radio.Infrastructure.Configuration;
-using Radio.Infrastructure.Configuration.Abstractions;
+using Radio.Configuration.Abstractions;
 using Radio.Infrastructure.External;
 using Radio.Infrastructure.Platform.Input;
 using Radio.Metrics;
@@ -137,7 +137,7 @@ public static class AudioServiceExtensions
       sp.GetRequiredService<ILogger<AudioPreferencePersistence>>(),
       sp.GetRequiredService<IAudioEngine>(),
       sp.GetRequiredService<IOptionsMonitor<AudioPreferences>>(),
-      sp.GetService<Configuration.Abstractions.IConfigurationManager>()));
+      sp.GetService<Radio.Configuration.Abstractions.IConfigurationManager>()));
 
     // Register audio manager (singleton to maintain state)
     // Use explicit factory to ensure all optional services are resolved.

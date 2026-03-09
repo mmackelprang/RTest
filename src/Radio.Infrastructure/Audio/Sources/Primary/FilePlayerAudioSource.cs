@@ -8,8 +8,8 @@ using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
-using Radio.Infrastructure.Configuration.Abstractions;
-using Radio.Infrastructure.Configuration.Models;
+using Radio.Configuration.Abstractions;
+using Radio.Configuration.Models;
 using Radio.Metrics;
 using SoundFlow.Backends.MiniAudio;
 using SoundFlow.Interfaces;
@@ -1720,7 +1720,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     try
     {
       var mainStoreId = _configurationManager.CurrentStoreType ==
-        Configuration.Models.ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+        Radio.Configuration.Models.ConfigurationStoreType.Sqlite ? "sqlite" : "config";
 
       IConfigurationStore store;
       try

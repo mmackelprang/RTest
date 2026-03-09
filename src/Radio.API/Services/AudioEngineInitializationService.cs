@@ -7,8 +7,8 @@ using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Outputs;
 using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
-using Radio.Infrastructure.Configuration.Models;
-using IAppConfigurationManager = Radio.Infrastructure.Configuration.Abstractions.IConfigurationManager;
+using Radio.Configuration.Models;
+using IAppConfigurationManager = Radio.Configuration.Abstractions.IConfigurationManager;
 
 namespace Radio.API.Services;
 

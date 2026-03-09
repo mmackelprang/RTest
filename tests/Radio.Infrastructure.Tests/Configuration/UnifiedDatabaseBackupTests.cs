@@ -5,10 +5,11 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Infrastructure.Configuration.Abstractions;
 using Radio.Infrastructure.Configuration.Backup;
-using Radio.Infrastructure.Configuration.Models;
-using Radio.Infrastructure.Configuration.Secrets;
-using Radio.Infrastructure.Configuration.Stores;
+using Radio.Configuration.Models;
+using Radio.Configuration.Secrets;
+using Radio.Configuration.Stores;
 using Radio.Metrics;
 
 /// <summary>

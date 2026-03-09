@@ -16,6 +16,7 @@
     <PackageReference Include="Serilog.AspNetCore" Version="8.*" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\Radio.Configuration\Radio.Configuration.csproj" />
     <ProjectReference Include="..\Radio.Core\Radio.Core.csproj" />
     <ProjectReference Include="..\Radio.Infrastructure\Radio.Infrastructure.csproj" />
     <ProjectReference Include="..\Radio.Metrics\Radio.Metrics.csproj" />

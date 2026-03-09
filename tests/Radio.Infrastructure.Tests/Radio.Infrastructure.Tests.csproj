@@ -21,6 +21,7 @@
     <PackageReference Include="Xunit.SkippableFact" Version="1.4.13" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Radio.Configuration\Radio.Configuration.csproj" />
     <ProjectReference Include="..\..\src\Radio.Infrastructure\Radio.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Radio.AudioAnalysis\Radio.AudioAnalysis.csproj" />
   </ItemGroup>

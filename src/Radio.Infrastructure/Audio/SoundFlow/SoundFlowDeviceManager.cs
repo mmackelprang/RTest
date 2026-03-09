@@ -4,8 +4,8 @@ using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Exceptions;
 using Radio.Core.Interfaces.Audio;
-using Radio.Infrastructure.Configuration.Abstractions;
-using Radio.Infrastructure.Configuration.Models;
+using Radio.Configuration.Abstractions;
+using Radio.Configuration.Models;
 using SoundFlow.Backends.MiniAudio;
 using SoundFlow.Structs;
 
