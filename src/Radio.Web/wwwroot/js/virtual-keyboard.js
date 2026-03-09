@@ -23,12 +23,22 @@ class VirtualKeyboard {
     // Attach event listeners on the outer container (delegates to inner content)
     this.attachEventListeners();
 
-    // Auto-show keyboard when inputs inside dialog overlays receive focus
+    // Auto-show keyboard when any text-like input receives focus (kiosk has no physical keyboard)
     document.addEventListener('focusin', (e) => {
       const input = e.target;
-      if ((input.tagName === 'INPUT' || input.tagName === 'TEXTAREA') &&
-          input.closest('.mud-overlay, .mud-dialog')) {
+      if (input.tagName === 'TEXTAREA') {
         this.show(input);
+        return;
+      }
+      if (input.tagName === 'INPUT') {
+        // Skip inputs that are part of dropdown/select components (they open their own popover)
+        if (input.closest('.mud-select, .mud-autocomplete')) return;
+        // Skip hidden, checkbox, radio, file, color, range, button-like inputs
+        const type = (input.type || 'text').toLowerCase();
+        const textTypes = ['text', 'search', 'email', 'password', 'url', 'tel', 'number'];
+        if (textTypes.includes(type)) {
+          this.show(input);
+        }
       }
     });
 
@@ -185,17 +195,18 @@ class VirtualKeyboard {
       }
     });
     
-    // Prevent keyboard from closing when clicking inside, without blocking default focus/selection
+    // Prevent keyboard clicks from stealing focus from the active text input.
+    // preventDefault on ALL mousedown (including buttons) keeps focus on the input;
+    // the click handler still fires and dispatches key presses.
     this.keyboardElement.addEventListener('mousedown', (e) => {
-      const isButton = e.target.closest('button') !== null;
-      
-      // Always stop propagation so outer handlers (e.g. click-outside-to-close) don't see this
+      e.preventDefault();
       e.stopPropagation();
-      
-      // Only prevent default on non-interactive areas of the keyboard container
-      if (!isButton) {
-        e.preventDefault();
-      }
+    });
+
+    // Same for touchstart — prevent focus steal on touchscreen taps
+    this.keyboardElement.addEventListener('touchstart', (e) => {
+      // Don't preventDefault here (breaks touch click), but stop propagation
+      e.stopPropagation();
     });
   }
 

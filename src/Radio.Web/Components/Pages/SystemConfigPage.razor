@@ -910,7 +910,8 @@
               </CardHeaderContent>
             </MudCardHeader>
             <MudCardContent>
-              <MudTextField @bind-Value="_ttsText" Label="Message" Variant="Variant.Outlined" InputMode="InputMode.text" Lines="3" />
+              <MudTextField T="string" @bind-Value="_ttsText" Label="Message" Variant="Variant.Outlined"
+                            Placeholder="Enter text to speak..." Lines="3" />
               
               <MudSelect T="string" Value="_selectedTTSEngine" Label="TTS Engine" Variant="Variant.Outlined" Class="mt-3" ValueChanged="@((string e) => OnTTSEngineChangedAsync(e))">
                 @if (_ttsEngines != null)

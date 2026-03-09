@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=Radio Console Kiosk
 Comment=Auto-launch Radio Console in kiosk mode
-Exec=google-chrome --kiosk --noerrdialogs --disable-infobars --disable-session-crashed-bubble --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --remote-debugging-port=9223 http://localhost:5002
+Exec=google-chrome --kiosk --noerrdialogs --disable-infobars --disable-session-crashed-bubble --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --force-renderer-accessibility --ozone-platform=wayland --remote-debugging-port=9223 http://localhost:5002
 Icon=audio-radio
 Terminal=false
 Type=Application
