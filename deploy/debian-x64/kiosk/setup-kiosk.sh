@@ -110,9 +110,11 @@ echo "  Screen blanking disabled."
 echo "  Screen lock disabled."
 echo "  X11 DPMS disabled."
 
-# ---- 6. Install unclutter (hide idle mouse cursor) ----
+# ---- 6. Install unclutter + display helpers ----
 echo ""
-echo "[6/7] Installing unclutter..."
+echo "[6/7] Installing unclutter and display helpers..."
+# Note: Virtual keyboard for text entry is built into the Radio Console Web UI.
+# No system-level on-screen keyboard needed (onboard doesn't work on Wayland).
 
 if ! command -v unclutter &>/dev/null; then
   sudo apt-get install -y unclutter
