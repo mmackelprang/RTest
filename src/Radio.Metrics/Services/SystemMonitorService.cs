@@ -1,10 +1,9 @@
-namespace Radio.Infrastructure.Metrics.Services;
+namespace Radio.Metrics.Services;
 
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Radio.Core.Configuration;
-using Radio.Core.Interfaces;
+
 using System.Diagnostics;
 
 /// <summary>

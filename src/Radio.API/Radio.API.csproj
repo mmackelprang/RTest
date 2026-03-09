@@ -18,5 +18,6 @@
   <ItemGroup>
     <ProjectReference Include="..\Radio.Core\Radio.Core.csproj" />
     <ProjectReference Include="..\Radio.Infrastructure\Radio.Infrastructure.csproj" />
+    <ProjectReference Include="..\Radio.Metrics\Radio.Metrics.csproj" />
   </ItemGroup>
 </Project>

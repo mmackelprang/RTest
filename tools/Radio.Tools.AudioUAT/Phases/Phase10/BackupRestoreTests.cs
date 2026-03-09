@@ -2,7 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Radio.Core.Configuration;
 using Radio.Infrastructure.Audio.Fingerprinting.Data;
 using Radio.Infrastructure.Configuration.Abstractions;
-using Radio.Infrastructure.Metrics.Data;
+using Radio.Metrics.Data;
 using Radio.Tools.AudioUAT.Utilities;
 using Spectre.Console;
 

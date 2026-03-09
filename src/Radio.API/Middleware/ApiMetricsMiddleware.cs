@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Radio.Core.Interfaces;
+using Radio.Metrics;
 
 namespace Radio.API.Middleware;
 

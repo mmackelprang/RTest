@@ -1,10 +1,8 @@
-namespace Radio.Infrastructure.Metrics.Repositories;
+namespace Radio.Metrics.Repositories;
 
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
-using Radio.Core.Interfaces;
-using Radio.Core.Metrics;
-using Radio.Infrastructure.Metrics.Data;
+using Radio.Metrics.Data;
 using System.Data.Common;
 
 /// <summary>

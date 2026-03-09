@@ -1,4 +1,4 @@
-namespace Radio.Core.Metrics;
+namespace Radio.Metrics;
 
 /// <summary>
 /// Defines the time resolution for metric data aggregation.

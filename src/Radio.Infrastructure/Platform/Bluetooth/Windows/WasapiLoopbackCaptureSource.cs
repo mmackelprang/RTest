@@ -4,6 +4,7 @@ using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using Radio.Core.Interfaces;
 using Radio.Infrastructure.Audio.SoundFlow;
+using Radio.Metrics;
 using SoundFlow.Abstracts;
 using SoundFlow.Structs;
 

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Radio.Core.Interfaces;
+using Radio.Metrics;
 
 namespace Radio.Infrastructure.Audio.SoundFlow;
 

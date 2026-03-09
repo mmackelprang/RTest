@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
+using Radio.Metrics;
 
 namespace Radio.Infrastructure.Platform.Bluetooth;
 

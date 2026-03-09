@@ -18,6 +18,7 @@ using Radio.Infrastructure.Configuration;
 using Radio.Infrastructure.Configuration.Abstractions;
 using Radio.Infrastructure.External;
 using Radio.Infrastructure.Platform.Input;
+using Radio.Metrics;
 
 namespace Radio.Infrastructure.DependencyInjection;
 

@@ -1,6 +1,6 @@
 namespace Radio.Core.Tests.Metrics;
 
-using Radio.Core.Metrics;
+using Radio.Metrics;
 using Xunit;
 
 public class MetricTypeTests

@@ -5,6 +5,7 @@ using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.SoundFlow;
+using Radio.Metrics;
 using SoundFlow.Abstracts.Devices;
 using SoundFlow.Backends.MiniAudio;
 using SoundFlow.Enums;
@@ -44,7 +45,7 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
     ILogger logger,
     IAudioDeviceManager deviceManager,
     BackgroundIdentificationService? identificationService = null,
-    Radio.Core.Interfaces.IMetricsCollector? metricsCollector = null,
+    IMetricsCollector? metricsCollector = null,
     SoundFlowPlaybackService? playbackService = null)
     : base(logger, metricsCollector)
   {

@@ -9,6 +9,7 @@ using Radio.Infrastructure.Configuration.Backup;
 using Radio.Infrastructure.Configuration.Models;
 using Radio.Infrastructure.Configuration.Secrets;
 using Radio.Infrastructure.Configuration.Stores;
+using Radio.Metrics;
 
 /// <summary>
 /// Tests for unified database backup service.

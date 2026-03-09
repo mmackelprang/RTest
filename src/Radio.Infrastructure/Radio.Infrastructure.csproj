@@ -51,6 +51,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Radio.Core\Radio.Core.csproj" />
+    <ProjectReference Include="..\Radio.Metrics\Radio.Metrics.csproj" />
     <ProjectReference Include="..\RTLSDRCore\RTLSDRCore.csproj" />
   </ItemGroup>
 </Project>

@@ -1,11 +1,9 @@
-namespace Radio.Infrastructure.Metrics.Services;
+namespace Radio.Metrics.Services;
 
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Radio.Core.Configuration;
-using Radio.Core.Metrics;
-using Radio.Infrastructure.Metrics.Repositories;
+using Radio.Metrics.Repositories;
 
 /// <summary>
 /// Background service that rolls up metrics data from higher to lower resolutions

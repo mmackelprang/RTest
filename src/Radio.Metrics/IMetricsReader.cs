@@ -1,6 +1,4 @@
-namespace Radio.Core.Interfaces;
-
-using Radio.Core.Metrics;
+namespace Radio.Metrics;
 
 /// <summary>
 /// Interface for reading historical metrics data.

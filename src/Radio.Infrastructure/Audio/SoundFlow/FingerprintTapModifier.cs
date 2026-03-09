@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces;
+using Radio.Metrics;
 
 namespace Radio.Infrastructure.Audio.SoundFlow;
 

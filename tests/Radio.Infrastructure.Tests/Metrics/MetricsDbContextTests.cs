@@ -2,8 +2,8 @@ namespace Radio.Infrastructure.Tests.Metrics;
 
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Radio.Core.Configuration;
-using Radio.Infrastructure.Metrics.Data;
+using Radio.Metrics;
+using Radio.Metrics.Data;
 using Xunit;
 
 public class MetricsDbContextTests : IAsyncLifetime
@@ -14,15 +14,12 @@ public class MetricsDbContextTests : IAsyncLifetime
   public MetricsDbContextTests()
   {
     _testDbPath = Path.Combine(Path.GetTempPath(), $"test_metrics_{Guid.NewGuid()}.db");
-    var databaseOptions = Options.Create(new DatabaseOptions
+    var metricsOptions = Options.Create(new MetricsOptions
     {
-      RootPath = Path.GetDirectoryName(_testDbPath)!,
-      ConfigurationSubdirectory = "",
-      ConfigurationFileName = Path.GetFileName(_testDbPath)
+      DatabasePath = _testDbPath
     });
-    var pathResolver = new DatabasePathResolver(databaseOptions);
 
-    _dbContext = new MetricsDbContext(NullLogger<MetricsDbContext>.Instance, pathResolver);
+    _dbContext = new MetricsDbContext(NullLogger<MetricsDbContext>.Instance, metricsOptions);
   }
 
   public async Task InitializeAsync()

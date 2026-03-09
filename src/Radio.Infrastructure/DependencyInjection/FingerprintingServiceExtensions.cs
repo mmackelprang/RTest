@@ -7,6 +7,7 @@ using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Fingerprinting.Data;
 using Radio.Infrastructure.Audio.Playlists;
 using Radio.Infrastructure.Audio.Services;
+using Radio.Metrics;
 
 namespace Radio.Infrastructure.DependencyInjection;
 
