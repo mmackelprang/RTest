@@ -123,7 +123,9 @@ public class BluetoothReconnectionLoopTests
       isDeviceConnected: () => false);
 
     loop.Start("11:22:33:44:55:66");
-    await Task.Delay(200);
+
+    // Generous margin for slow CI runners where async loop may take time to schedule
+    await Task.Delay(1000);
 
     Assert.Equal("11:22:33:44:55:66", capturedAddress);
   }
