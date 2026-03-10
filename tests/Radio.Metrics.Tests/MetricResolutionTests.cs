@@ -1,4 +1,4 @@
-namespace Radio.Core.Tests.Metrics;
+namespace Radio.Metrics.Tests;
 
 using Radio.Metrics;
 using Xunit;

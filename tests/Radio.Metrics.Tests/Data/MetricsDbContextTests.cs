@@ -1,4 +1,4 @@
-namespace Radio.Infrastructure.Tests.Metrics;
+namespace Radio.Metrics.Tests.Data;
 
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -31,7 +31,7 @@ public class MetricsDbContextTests : IAsyncLifetime
   {
     await _dbContext.DisposeAsync();
     Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-    
+
     if (File.Exists(_testDbPath))
     {
       try

@@ -1,4 +1,4 @@
-namespace Radio.Infrastructure.Tests.Metrics;
+namespace Radio.Metrics.Tests.Data;
 
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -36,7 +36,7 @@ public class SqliteMetricsRepositoryTests : IAsyncLifetime
   {
     await _dbContext.DisposeAsync();
     Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-    
+
     if (File.Exists(_testDbPath))
     {
       try
@@ -134,7 +134,7 @@ public class SqliteMetricsRepositoryTests : IAsyncLifetime
     var key = "test.history";
     var now = DateTimeOffset.UtcNow;
     var timestamp = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, now.Minute, 0, now.Offset);
-    
+
     var buckets = new[]
     {
       new MetricBucket
