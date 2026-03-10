@@ -169,7 +169,9 @@ internal sealed class WasapiLoopbackCaptureSource : IDisposable
   public bool IsSameDeviceAsDefault(string? soundFlowDeviceId)
   {
     if (string.IsNullOrEmpty(soundFlowDeviceId))
+    {
       return true; // Default device selected → same device
+    }
 
     try
     {
@@ -197,7 +199,9 @@ internal sealed class WasapiLoopbackCaptureSource : IDisposable
   private void OnDataAvailable(WaveInEventArgs e, BufferedSoundGenerator<float> generator)
   {
     if (e.BytesRecorded == 0)
+    {
       return;
+    }
 
     try
     {
@@ -243,7 +247,10 @@ internal sealed class WasapiLoopbackCaptureSource : IDisposable
 
   public void Dispose()
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+      return;
+    }
     _disposed = true;
     StopCapture();
   }

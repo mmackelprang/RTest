@@ -1717,7 +1717,10 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// </summary>
   private async Task SaveQueueStateAsync(List<string> queueItems, int currentIndex)
   {
-    if (_configurationManager == null) return;
+    if (_configurationManager == null)
+    {
+      return;
+    }
 
     try
     {
@@ -1985,14 +1988,18 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private void ExtractEmbeddedAlbumArt(string filePath)
   {
     if (_albumArtCache == null)
+    {
       return;
+    }
 
     try
     {
       using var tagFile = TagLib.File.Create(filePath);
       var pictures = tagFile.Tag.Pictures;
       if (pictures == null || pictures.Length == 0)
+      {
         return;
+      }
 
       // Prefer FrontCover, fall back to first picture
       var picture = pictures.FirstOrDefault(p => p.Type == TagLib.PictureType.FrontCover)
@@ -2000,7 +2007,9 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
       var data = picture.Data?.Data;
       if (data == null || data.Length == 0)
+      {
         return;
+      }
 
       var mime = !string.IsNullOrEmpty(picture.MimeType) ? picture.MimeType : "image/jpeg";
       var cachedUrl = _albumArtCache.Save(data, mime);
@@ -2038,13 +2047,21 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     if (FpOptions.UseShazamForAllSources && needsLookup)
     {
       if (!string.IsNullOrEmpty(track.Title))
+      {
         _metadata[StandardMetadataKeys.Title] = track.Title;
+      }
       if (!string.IsNullOrEmpty(track.Artist))
+      {
         _metadata[StandardMetadataKeys.Artist] = track.Artist;
+      }
       if (!string.IsNullOrEmpty(track.Album))
+      {
         _metadata[StandardMetadataKeys.Album] = track.Album;
+      }
       if (!string.IsNullOrEmpty(track.CoverArtUrl))
+      {
         _metadata[StandardMetadataKeys.AlbumArtUrl] = track.CoverArtUrl;
+      }
 
       _metadata["NeedsFingerprintingLookup"] = false;
       _metadata["IdentificationConfidence"] = e.Confidence;

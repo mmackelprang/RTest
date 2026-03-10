@@ -292,7 +292,9 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
     {
       var device = _cachedInputDevices.Find(d => d.Id == deviceId);
       if (device == null)
+      {
         throw new InvalidOperationException($"Input device '{deviceId}' not found");
+      }
 
       _selectedInputDeviceId = deviceId;
       _logger.LogInformation("Selected input device: {DeviceId} ({DeviceName})", device.Id, device.Name);
@@ -357,9 +359,13 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
   {
     // Per-device name overrides take precedence
     if (_displayOptions.HiddenDeviceNames.Contains(deviceName, StringComparer.OrdinalIgnoreCase))
-      return true;
+    {
+        return true;
+    }
     if (_displayOptions.VisibleDeviceNames.Contains(deviceName, StringComparer.OrdinalIgnoreCase))
-      return false;
+    {
+        return false;
+    }
 
     // Fall back to regex patterns
     return _hiddenPatterns.Any(p => p.IsMatch(deviceName));
@@ -370,14 +376,18 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
     // Per-device name overrides take precedence
     if (_displayOptions.DeviceFriendlyNames.TryGetValue(rawName, out var overrideName) &&
         !string.IsNullOrEmpty(overrideName))
-      return overrideName;
+    {
+        return overrideName;
+    }
 
     // Fall back to substring match
     foreach (var mapping in _displayOptions.FriendlyNames)
     {
       if (!string.IsNullOrEmpty(mapping.Pattern) &&
           rawName.Contains(mapping.Pattern, StringComparison.OrdinalIgnoreCase))
+      {
         return mapping.FriendlyName;
+      }
     }
     return rawName;
   }
@@ -721,9 +731,13 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
 
         // Preserve hidden patterns from existing config if not overridden in store
         if (hiddenPatterns != null)
+        {
           options.HiddenDevicePatterns = hiddenPatterns;
+        }
         else
+        {
           options.HiddenDevicePatterns = _displayOptions.HiddenDevicePatterns;
+        }
 
         ReloadDisplaySettingsInternal(options);
         _logger.LogInformation(
@@ -803,9 +817,13 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
       .ToList();
 
     if (patterns.Count > 0)
+    {
       _logger.LogInformation("Device filtering: {Count} hidden pattern(s) active", patterns.Count);
+    }
     if (options.FriendlyNames.Count > 0)
+    {
       _logger.LogInformation("Device friendly names: {Count} mapping(s) configured", options.FriendlyNames.Count);
+    }
 
     return patterns;
   }

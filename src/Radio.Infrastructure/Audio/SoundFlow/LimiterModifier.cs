@@ -44,7 +44,10 @@ public class LimiterModifier : SoundModifier
   /// </summary>
   public LimiterStats? GetAndResetStats()
   {
-    if (_totalSamples == 0) return null;
+    if (_totalSamples == 0)
+    {
+        return null;
+    }
 
     var stats = new LimiterStats
     {
@@ -71,7 +74,9 @@ public class LimiterModifier : SoundModifier
 
     // Fast path: below threshold, pass through unchanged
     if (abs <= _threshold)
-      return sample;
+    {
+        return sample;
+    }
 
     // Soft-knee: threshold + (1 - threshold) * tanh((|x| - threshold) / (1 - threshold))
     // This is continuous at the threshold (tanh(0) = 0) and asymptotes to ±1.0.
@@ -79,9 +84,15 @@ public class LimiterModifier : SoundModifier
     var limited = _threshold + headroom * MathF.Tanh((abs - _threshold) / headroom);
 
     _limitedSamples++;
-    if (abs > _maxInputAbs) _maxInputAbs = abs;
+    if (abs > _maxInputAbs)
+    {
+        _maxInputAbs = abs;
+    }
     var reduction = (abs - limited) / abs;
-    if (reduction > _maxReduction) _maxReduction = reduction;
+    if (reduction > _maxReduction)
+    {
+        _maxReduction = reduction;
+    }
 
     return sample >= 0 ? limited : -limited;
   }

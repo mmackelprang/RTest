@@ -49,7 +49,9 @@ public class WavFileHelperTests
     // Cross-correlation should be low (different frequencies)
     double crossCorr = 0;
     for (int i = 0; i < left.Length; i++)
+    {
       crossCorr += left[i] * right[i];
+    }
     crossCorr /= left.Length;
     Assert.InRange(Math.Abs(crossCorr), 0, 0.1);
   }

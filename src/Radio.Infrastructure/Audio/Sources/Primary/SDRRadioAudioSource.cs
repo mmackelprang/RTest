@@ -99,7 +99,10 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// </summary>
   private void OnAudioDataAvailable(object? sender, AudioDataEventArgs e)
   {
-    if (_soundGenerator == null) return;
+    if (_soundGenerator == null)
+    {
+      return;
+    }
 
     var sampleCount = e.SampleCount;
 

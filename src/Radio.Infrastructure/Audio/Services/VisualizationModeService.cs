@@ -25,13 +25,13 @@ public class VisualizationModeService
   /// <summary>Current visualization mode name.</summary>
   public string CurrentMode
   {
-    get { lock (_lock) return _currentMode; }
+    get { lock (_lock) { return _currentMode; } }
   }
 
   /// <summary>Whether visualization is enabled.</summary>
   public bool IsEnabled
   {
-    get { lock (_lock) return _isEnabled; }
+    get { lock (_lock) { return _isEnabled; } }
   }
 
   /// <summary>Fired when the visualization mode or enabled state changes.</summary>
@@ -46,7 +46,10 @@ public class VisualizationModeService
     lock (_lock)
     {
       var currentIndex = Array.IndexOf(Modes, _currentMode);
-      if (currentIndex < 0) currentIndex = 0;
+      if (currentIndex < 0)
+      {
+        currentIndex = 0;
+      }
 
       var newIndex = ((currentIndex + direction) % Modes.Length + Modes.Length) % Modes.Length;
       _currentMode = Modes[newIndex];

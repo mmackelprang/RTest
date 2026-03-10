@@ -72,7 +72,9 @@ public sealed class SqlitePlaylistRepository : IPlaylistRepository
     }
 
     if (playlist == null)
+    {
       return (null, Array.Empty<PlaylistItem>());
+    }
 
     // Get items
     using var itemsCmd = conn.CreateCommand();

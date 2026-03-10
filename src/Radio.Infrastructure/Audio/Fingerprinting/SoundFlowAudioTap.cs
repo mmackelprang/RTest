@@ -45,7 +45,10 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
     get
     {
       var activeSource = _audioManager.ActiveSource;
-      if (activeSource == null) return PlaySource.GenericUSB;
+      if (activeSource == null)
+      {
+        return PlaySource.GenericUSB;
+      }
       return activeSource.Type switch
       {
         AudioSourceType.Radio => PlaySource.Radio,
@@ -63,7 +66,9 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
     get
     {
       if (_audioManager.ActiveSource is FilePlayerAudioSource fileSource)
+      {
         return fileSource.CurrentFile;
+      }
       return null;
     }
   }
@@ -74,17 +79,24 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
     get
     {
       var source = _audioManager.ActiveSource;
-      if (source == null) return false;
+      if (source == null)
+      {
+        return false;
+      }
 
       // Bluetooth has a direct property
       if (source is BluetoothAudioSource btSource)
+      {
         return btSource.NeedsFingerprintingLookup;
+      }
 
       // FilePlayer uses metadata dictionary
       if (source is FilePlayerAudioSource fileSource)
       {
         if (fileSource.Metadata?.TryGetValue("NeedsFingerprintingLookup", out var val) == true)
+        {
           return val is bool b && b;
+        }
         return true; // Default: needs fingerprinting if flag not set
       }
 
@@ -100,7 +112,9 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
     {
       // Engine must be running AND an active source must be actually playing
       if (_audioEngine.State != AudioEngineState.Running)
+      {
         return false;
+      }
 
       var activeSource = _audioManager.ActiveSource;
       return activeSource?.State == AudioSourceState.Playing;

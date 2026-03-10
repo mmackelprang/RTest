@@ -97,7 +97,10 @@ internal sealed class PipeWireNativeStream : IDisposable
   /// </summary>
   public void Start()
   {
-    if (_disposed) throw new ObjectDisposedException(nameof(PipeWireNativeStream));
+    if (_disposed)
+    {
+      throw new ObjectDisposedException(nameof(PipeWireNativeStream));
+    }
 
     // Keep a GCHandle to this so the native callback can find us
     _selfHandle = GCHandle.Alloc(this);
@@ -105,7 +108,9 @@ internal sealed class PipeWireNativeStream : IDisposable
     // Create thread loop
     _threadLoop = pw_thread_loop_new("radio-bt-capture", IntPtr.Zero);
     if (_threadLoop == IntPtr.Zero)
+    {
       throw new InvalidOperationException("Failed to create PipeWire thread loop");
+    }
 
     var loop = pw_thread_loop_get_loop(_threadLoop);
 
@@ -183,7 +188,10 @@ internal sealed class PipeWireNativeStream : IDisposable
   /// </summary>
   public void Stop()
   {
-    if (_threadLoop == IntPtr.Zero) return;
+    if (_threadLoop == IntPtr.Zero)
+    {
+      return;
+    }
 
     pw_thread_loop_lock(_threadLoop);
     try
@@ -204,8 +212,14 @@ internal sealed class PipeWireNativeStream : IDisposable
     pw_thread_loop_destroy(_threadLoop);
     _threadLoop = IntPtr.Zero;
 
-    if (_eventsHandle.IsAllocated) _eventsHandle.Free();
-    if (_selfHandle.IsAllocated) _selfHandle.Free();
+    if (_eventsHandle.IsAllocated)
+    {
+      _eventsHandle.Free();
+    }
+    if (_selfHandle.IsAllocated)
+    {
+      _selfHandle.Free();
+    }
 
     _logger.LogInformation("PipeWire native stream stopped");
   }
@@ -216,7 +230,10 @@ internal sealed class PipeWireNativeStream : IDisposable
   /// </summary>
   private static void OnProcess(IntPtr userData)
   {
-    if (userData == IntPtr.Zero) return;
+    if (userData == IntPtr.Zero)
+    {
+      return;
+    }
 
     PipeWireNativeStream? self;
     try
@@ -229,7 +246,10 @@ internal sealed class PipeWireNativeStream : IDisposable
       return;
     }
 
-    if (self == null || self._stream == IntPtr.Zero) return;
+    if (self == null || self._stream == IntPtr.Zero)
+    {
+      return;
+    }
 
     var processStart = Stopwatch.GetTimestamp();
 
@@ -238,29 +258,53 @@ internal sealed class PipeWireNativeStream : IDisposable
     {
       var intervalMs = (double)(processStart - self._lastOnProcessTimestamp)
         / Stopwatch.Frequency * 1000.0;
-      if (intervalMs > self._maxOnProcessIntervalMs) self._maxOnProcessIntervalMs = intervalMs;
-      if (intervalMs < self._minOnProcessIntervalMs) self._minOnProcessIntervalMs = intervalMs;
-      if (intervalMs < 1.0) self._onProcessBurstCount++;
+      if (intervalMs > self._maxOnProcessIntervalMs)
+      {
+        self._maxOnProcessIntervalMs = intervalMs;
+      }
+      if (intervalMs < self._minOnProcessIntervalMs)
+      {
+        self._minOnProcessIntervalMs = intervalMs;
+      }
+      if (intervalMs < 1.0)
+      {
+        self._onProcessBurstCount++;
+      }
     }
     self._lastOnProcessTimestamp = processStart;
     self._onProcessCount++;
 
     var pwBufPtr = pw_stream_dequeue_buffer(self._stream);
-    if (pwBufPtr == IntPtr.Zero) return;
+    if (pwBufPtr == IntPtr.Zero)
+    {
+      return;
+    }
 
     try
     {
       var pwBuf = Marshal.PtrToStructure<PwBuffer>(pwBufPtr);
-      if (pwBuf.Buffer == IntPtr.Zero) return;
+      if (pwBuf.Buffer == IntPtr.Zero)
+      {
+        return;
+      }
 
       var spaBuf = Marshal.PtrToStructure<SpaBuffer>(pwBuf.Buffer);
-      if (spaBuf.NDatas == 0 || spaBuf.Datas == IntPtr.Zero) return;
+      if (spaBuf.NDatas == 0 || spaBuf.Datas == IntPtr.Zero)
+      {
+        return;
+      }
 
       var spaData = Marshal.PtrToStructure<SpaData>(spaBuf.Datas);
-      if (spaData.Data == IntPtr.Zero || spaData.Chunk == IntPtr.Zero) return;
+      if (spaData.Data == IntPtr.Zero || spaData.Chunk == IntPtr.Zero)
+      {
+        return;
+      }
 
       var chunk = Marshal.PtrToStructure<SpaChunk>(spaData.Chunk);
-      if (chunk.Size == 0) return;
+      if (chunk.Size == 0)
+      {
+        return;
+      }
 
       // S16_LE: 2 bytes per sample, stereo = 4 bytes per frame.
       // PipeWire BT transport can deliver non-frame-aligned chunks during
@@ -271,7 +315,10 @@ internal sealed class PipeWireNativeStream : IDisposable
       var sampleCount = totalBytes / 2;
       sampleCount = sampleCount / self._channels * self._channels; // frame-align
 
-      if (sampleCount <= 0) return;
+      if (sampleCount <= 0)
+      {
+        return;
+      }
 
       // Convert S16_LE to float [-1.0, 1.0]
       // Use unsafe Span cast instead of per-sample Marshal.ReadInt16 to
@@ -284,7 +331,9 @@ internal sealed class PipeWireNativeStream : IDisposable
         {
           var s16Span = new ReadOnlySpan<short>((void*)dataPtr, sampleCount);
           for (var i = 0; i < sampleCount; i++)
+          {
             floatSamples[i] = s16Span[i] / 32768f;
+          }
         }
 
         self._onAudioData(floatSamples, sampleCount);
@@ -303,7 +352,10 @@ internal sealed class PipeWireNativeStream : IDisposable
       pw_stream_queue_buffer(self._stream, pwBufPtr);
 
       var execMs = (double)(Stopwatch.GetTimestamp() - processStart) / Stopwatch.Frequency * 1000.0;
-      if (execMs > self._maxOnProcessExecutionMs) self._maxOnProcessExecutionMs = execMs;
+      if (execMs > self._maxOnProcessExecutionMs)
+      {
+        self._maxOnProcessExecutionMs = execMs;
+      }
     }
 
     // Log OnProcess stats every 10 seconds
@@ -327,7 +379,10 @@ internal sealed class PipeWireNativeStream : IDisposable
 
   public void Dispose()
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+      return;
+    }
     _disposed = true;
     Stop();
   }

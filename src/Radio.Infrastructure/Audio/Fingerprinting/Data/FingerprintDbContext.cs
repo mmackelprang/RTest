@@ -37,12 +37,18 @@ public sealed class FingerprintDbContext : IFingerprintDataConnection, IAsyncDis
   /// <param name="ct">Cancellation token.</param>
   public async Task InitializeAsync(CancellationToken ct = default)
   {
-    if (_initialized) return;
+    if (_initialized)
+    {
+      return;
+    }
 
     await _initLock.WaitAsync(ct);
     try
     {
-      if (_initialized) return;
+      if (_initialized)
+      {
+        return;
+      }
 
       var dbPath = _pathResolver.GetFingerprintingDatabasePath();
       var directory = Path.GetDirectoryName(dbPath);
@@ -295,7 +301,10 @@ public sealed class FingerprintDbContext : IFingerprintDataConnection, IAsyncDis
   /// <inheritdoc/>
   public async ValueTask DisposeAsync()
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+      return;
+    }
     _disposed = true;
 
     if (_connection != null)

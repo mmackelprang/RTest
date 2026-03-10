@@ -45,7 +45,10 @@ public class AudioPreferencePersistence : IDisposable
   /// </summary>
   public void ScheduleVolumePersist()
   {
-    if (_configurationManager == null) return;
+    if (_configurationManager == null)
+    {
+      return;
+    }
 
     lock (_volumePersistLock)
     {
@@ -84,12 +87,16 @@ public class AudioPreferencePersistence : IDisposable
           var volEntry = await store.GetEntryAsync("AudioPreferences:MasterVolume");
           _logger.LogDebug("Config store volume entry: {Entry}", volEntry?.Value ?? "null");
           if (volEntry != null && int.TryParse(volEntry.Value, out var storedVol))
+          {
             volumePercent = storedVol;
+          }
 
           var muteEntry = await store.GetEntryAsync("AudioPreferences:IsMuted");
           _logger.LogDebug("Config store mute entry: {Entry}", muteEntry?.Value ?? "null");
           if (muteEntry != null && bool.TryParse(muteEntry.Value, out var storedMuted))
+          {
             isMuted = storedMuted;
+          }
         }
         catch (Exception ex)
         {
@@ -149,7 +156,10 @@ public class AudioPreferencePersistence : IDisposable
   /// </summary>
   private async Task PersistVolumePreferencesAsync()
   {
-    if (_configurationManager == null) return;
+    if (_configurationManager == null)
+    {
+      return;
+    }
 
     try
     {
@@ -274,7 +284,10 @@ public class AudioPreferencePersistence : IDisposable
   /// </summary>
   private void ScheduleSourceGainPersist()
   {
-    if (_configurationManager == null) return;
+    if (_configurationManager == null)
+    {
+      return;
+    }
 
     lock (_sourceGainPersistLock)
     {
@@ -292,7 +305,10 @@ public class AudioPreferencePersistence : IDisposable
   /// </summary>
   private async Task PersistSourceGainAsync()
   {
-    if (_configurationManager == null) return;
+    if (_configurationManager == null)
+    {
+      return;
+    }
 
     try
     {
@@ -322,7 +338,10 @@ public class AudioPreferencePersistence : IDisposable
 
   public void Dispose()
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+      return;
+    }
     _disposed = true;
 
     lock (_volumePersistLock)

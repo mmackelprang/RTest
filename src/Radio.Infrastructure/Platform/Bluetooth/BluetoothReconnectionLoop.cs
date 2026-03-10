@@ -69,9 +69,15 @@ internal sealed class BluetoothReconnectionLoop : IDisposable
   /// </summary>
   public static TimeSpan CalculateBackoffDelay(int attempt, int baseMs, int maxMs)
   {
-    if (attempt <= 0) attempt = 1;
+    if (attempt <= 0)
+    {
+      attempt = 1;
+    }
     var delayMs = baseMs * (1 << Math.Min(attempt - 1, 30)); // prevent overflow
-    if (delayMs < 0 || delayMs > maxMs) delayMs = maxMs; // cap
+    if (delayMs < 0 || delayMs > maxMs)
+    {
+      delayMs = maxMs; // cap
+    }
     return TimeSpan.FromMilliseconds(delayMs);
   }
 
@@ -141,7 +147,10 @@ internal sealed class BluetoothReconnectionLoop : IDisposable
 
   public void Dispose()
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+      return;
+    }
     _disposed = true;
     Cancel();
   }

@@ -25,14 +25,23 @@ public class SecretResolvingPostConfigureOptions<TOptions> : IPostConfigureOptio
 
     private void ResolveSecretsRecursive(object obj)
     {
-        if (obj == null) return;
+        if (obj == null)
+        {
+            return;
+        }
 
         var type = obj.GetType();
-        if (type.IsPrimitive || type == typeof(string) || type.IsValueType) return;
+        if (type.IsPrimitive || type == typeof(string) || type.IsValueType)
+        {
+            return;
+        }
 
         foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
-            if (!prop.CanRead) continue;
+            if (!prop.CanRead)
+            {
+                continue;
+            }
 
             if (prop.PropertyType == typeof(string) && prop.CanWrite)
             {

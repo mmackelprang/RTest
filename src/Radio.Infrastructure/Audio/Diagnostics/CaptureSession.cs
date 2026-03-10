@@ -71,11 +71,17 @@ public class CaptureSession
   /// <param name="samples">Audio samples to capture.</param>
   public void AddSamples(ReadOnlySpan<float> samples)
   {
-    if (!_isCapturing) return;
+    if (!_isCapturing)
+    {
+      return;
+    }
 
     lock (_lock)
     {
-      if (!_isCapturing) return;
+      if (!_isCapturing)
+      {
+        return;
+      }
 
       var remaining = _buffer.Length - _writePos;
       var toCopy = Math.Min(samples.Length, remaining);
@@ -90,7 +96,9 @@ public class CaptureSession
       _writePos += toCopy;
 
       if (_writePos >= _buffer.Length)
+      {
         _isCapturing = false; // Buffer full — auto-stop
+      }
     }
   }
 
@@ -122,7 +130,9 @@ public class CaptureSession
 
     var dir = Path.GetDirectoryName(filePath);
     if (!string.IsNullOrEmpty(dir))
+    {
       Directory.CreateDirectory(dir);
+    }
 
     // Inline WAV write to avoid dependency on Radio.AudioAnalysis
     using var fs = new FileStream(filePath, FileMode.Create);

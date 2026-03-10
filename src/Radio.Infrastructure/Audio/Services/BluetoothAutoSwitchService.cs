@@ -41,7 +41,9 @@ public class BluetoothAutoSwitchService : IDisposable
   public async Task PreWarmBluetoothAsync(CancellationToken cancellationToken = default)
   {
     if (!_bluetoothOptions.CurrentValue.EnableOnStartup)
+    {
       return;
+    }
 
     _logger.LogInformation("Pre-initializing Bluetooth source (EnableOnStartup=true)");
     var audioManager = _getAudioManager();
@@ -56,7 +58,9 @@ public class BluetoothAutoSwitchService : IDisposable
     try
     {
       if (!_bluetoothOptions.CurrentValue.AutoSwitchOnConnect)
+      {
         return;
+      }
 
       if (!_bluetoothService.IsAvailable)
       {
@@ -81,7 +85,10 @@ public class BluetoothAutoSwitchService : IDisposable
 
   public void Dispose()
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+      return;
+    }
     _disposed = true;
 
     _bluetoothService.DeviceConnected -= OnBluetoothDeviceConnected;

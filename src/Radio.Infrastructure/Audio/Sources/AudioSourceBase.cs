@@ -42,7 +42,10 @@ public abstract class AudioSourceBase : IAudioSource, IAsyncDisposable
     get => _state;
     protected set
     {
-      if (_state == value) return;
+      if (_state == value)
+      {
+        return;
+      }
       var previousState = _state;
       _state = value;
       LogStateChange(previousState, value);
@@ -111,7 +114,10 @@ public abstract class AudioSourceBase : IAudioSource, IAsyncDisposable
   /// <inheritdoc/>
   public async ValueTask DisposeAsync()
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+      return;
+    }
 
     await DisposeAsyncCore();
     State = AudioSourceState.Disposed;

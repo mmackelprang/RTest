@@ -154,7 +154,10 @@ public sealed class SystemMonitorService : BackgroundService
         for (var i = 0; i < 10; i++)
         {
           var tempPath = $"/sys/class/thermal/thermal_zone{i}/temp";
-          if (!File.Exists(tempPath)) continue;
+          if (!File.Exists(tempPath))
+          {
+            continue;
+          }
 
           try
           {
@@ -164,7 +167,10 @@ public sealed class SystemMonitorService : BackgroundService
               var tempCelsius = tempMilliC / 1000.0;
 
               // Skip sentinel values (absolute zero = sensor unavailable)
-              if (tempCelsius < -100 || tempCelsius > 150) continue;
+              if (tempCelsius < -100 || tempCelsius > 150)
+              {
+                continue;
+              }
 
               _metricsCollector.Gauge("system.cpu_temp_celsius", tempCelsius);
               break; // Use the first valid reading

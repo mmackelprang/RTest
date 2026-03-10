@@ -60,7 +60,9 @@ public class TestToneAudioSource : PrimaryAudioSourceBase
   {
     var engine = _playbackService.GetUnderlyingEngine();
     if (engine == null)
+    {
       throw new InvalidOperationException("Audio engine not available");
+    }
 
     var format = _playbackService.GetAudioFormat();
 

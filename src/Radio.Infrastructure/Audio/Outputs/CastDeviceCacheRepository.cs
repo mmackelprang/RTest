@@ -100,7 +100,9 @@ public sealed class CastDeviceCacheRepository
 
       var deleted = await cmd.ExecuteNonQueryAsync(ct);
       if (deleted > 0)
+      {
         _logger.LogDebug("Removed {Count} stale Cast devices from cache", deleted);
+      }
     }
     catch (Exception ex)
     {

@@ -123,14 +123,18 @@ public class TTSFactory : ITTSFactory, IDisposable
     CancellationToken cancellationToken = default)
   {
     if (engine == TTSEngine.ESpeak)
+    {
       return await GetESpeakVoicesAsync(cancellationToken);
+    }
 
     // For cloud engines, return cached voices from DB (sorted by favorites + price tier)
     if (_voiceRepository != null)
     {
       var cached = await _voiceRepository.GetCachedVoicesAsync(engine, cancellationToken);
       if (cached.Count > 0)
+      {
         return SortVoices(cached);
+      }
     }
 
     // No cache — return empty list (user must click "Scan for Voices")
@@ -143,7 +147,9 @@ public class TTSFactory : ITTSFactory, IDisposable
     CancellationToken cancellationToken = default)
   {
     if (_voiceRepository == null)
+    {
       throw new InvalidOperationException("Voice repository not available");
+    }
 
     var voices = engine switch
     {
@@ -162,7 +168,9 @@ public class TTSFactory : ITTSFactory, IDisposable
     TTSEngine engine, string voiceId, CancellationToken cancellationToken = default)
   {
     if (_voiceRepository == null)
+    {
       throw new InvalidOperationException("Voice repository not available");
+    }
     await _voiceRepository.AddFavoriteAsync(engine, voiceId, cancellationToken);
   }
 
@@ -171,7 +179,9 @@ public class TTSFactory : ITTSFactory, IDisposable
     TTSEngine engine, string voiceId, CancellationToken cancellationToken = default)
   {
     if (_voiceRepository == null)
+    {
       throw new InvalidOperationException("Voice repository not available");
+    }
     await _voiceRepository.RemoveFavoriteAsync(engine, voiceId, cancellationToken);
   }
 
@@ -199,8 +209,14 @@ public class TTSFactory : ITTSFactory, IDisposable
 
   private static int GetLanguageRank(string language)
   {
-    if (language.StartsWith("en-US", StringComparison.OrdinalIgnoreCase)) return 0;
-    if (language.StartsWith("en-GB", StringComparison.OrdinalIgnoreCase)) return 1;
+    if (language.StartsWith("en-US", StringComparison.OrdinalIgnoreCase))
+    {
+      return 0;
+    }
+    if (language.StartsWith("en-GB", StringComparison.OrdinalIgnoreCase))
+    {
+      return 1;
+    }
     return 2;
   }
 
@@ -390,7 +406,9 @@ public class TTSFactory : ITTSFactory, IDisposable
       ["name"] = voice
     };
     if (modelName != null)
+    {
       voiceParams["modelName"] = modelName;
+    }
 
     var requestBody = new Dictionary<string, object>
     {
@@ -573,8 +591,10 @@ public class TTSFactory : ITTSFactory, IDisposable
   {
     var apiKey = _secrets.CurrentValue.GoogleAPIKey;
     if (string.IsNullOrEmpty(apiKey) || apiKey.Contains("${secret:"))
+    {
       throw new InvalidOperationException(
         "Google TTS API key is not configured. Set it via System Configuration → Secrets.");
+    }
 
     using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
 
@@ -670,7 +690,10 @@ public class TTSFactory : ITTSFactory, IDisposable
   private static string? GetGoogleModelName(string voiceName)
   {
     var parts = voiceName.Split('-');
-    if (parts.Length < 3) return null;
+    if (parts.Length < 3)
+    {
+      return null;
+    }
 
     // The voice type is the 3rd segment: en-US-{Type}-{Variant}
     var voiceType = parts[2];
@@ -698,8 +721,10 @@ public class TTSFactory : ITTSFactory, IDisposable
   {
     var secrets = _secrets.CurrentValue;
     if (string.IsNullOrEmpty(secrets.AzureAPIKey) || string.IsNullOrEmpty(secrets.AzureRegion))
+    {
       throw new InvalidOperationException(
         "Azure TTS API key or region is not configured. Set them via System Configuration → Secrets.");
+    }
 
     using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
     httpClient.DefaultRequestHeaders.Add("Ocp-Apim-Subscription-Key", secrets.AzureAPIKey);

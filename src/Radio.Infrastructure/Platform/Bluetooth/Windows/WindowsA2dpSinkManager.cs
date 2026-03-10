@@ -428,7 +428,10 @@ internal sealed class WindowsA2dpSinkManager : IDisposable
 
   public void Dispose()
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+      return;
+    }
     _disposed = true;
 
     if (_deviceWatcher != null)

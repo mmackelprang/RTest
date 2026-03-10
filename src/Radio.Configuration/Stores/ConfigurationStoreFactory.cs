@@ -134,7 +134,9 @@ public sealed class ConfigurationStoreFactory : IConfigurationStoreFactory
   private List<string> ListJsonStores(string basePath)
   {
     if (!Directory.Exists(basePath))
+    {
       return new List<string>();
+    }
 
     var files = Directory.GetFiles(basePath, $"*{_options.JsonExtension}");
     var storeIds = new List<string>();

@@ -53,11 +53,15 @@ public class SineToneGenerator : SoundComponent
 
       // Right channel: rightHz sine
       if (channels > 1)
+      {
         buffer[idx + 1] = (float)(Math.Sin(2.0 * Math.PI * _rightHz * n / _sampleRate) * _amplitude);
+      }
 
       // Fill any extra channels with silence
       for (var ch = 2; ch < channels; ch++)
+      {
         buffer[idx + ch] = 0f;
+      }
     }
   }
 }

@@ -68,7 +68,9 @@ public abstract class SecretsProviderBase : ISecretsProvider
   public async Task<string> ResolveTagsAsync(string value, CancellationToken ct = default)
   {
     if (string.IsNullOrEmpty(value) || !ContainsSecretTag(value))
+    {
       return value;
+    }
 
     var result = value;
     foreach (var tag in SecretTag.ExtractAll(value))

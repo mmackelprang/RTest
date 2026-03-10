@@ -94,7 +94,10 @@ public sealed class VisualizerService : IVisualizerService
     ThrowIfDisposed();
 
     // Skip all processing when no UI clients are connected
-    if (!_isProcessingEnabled) return;
+    if (!_isProcessingEnabled)
+    {
+      return;
+    }
 
     lock (_lock)
     {
@@ -115,7 +118,10 @@ public sealed class VisualizerService : IVisualizerService
     ThrowIfDisposed();
 
     // Skip all processing when no UI clients are connected
-    if (!_isProcessingEnabled) return;
+    if (!_isProcessingEnabled)
+    {
+      return;
+    }
 
     lock (_lock)
     {
@@ -224,7 +230,9 @@ public sealed class VisualizerService : IVisualizerService
 
     // Grow buffer if needed (rare — only if input exceeds initial FFTSize capacity)
     if (monoCount > _monoBuffer.Length)
+    {
       _monoBuffer = new float[monoCount];
+    }
 
     for (var i = 0; i < monoCount; i++)
     {
@@ -252,7 +260,10 @@ public sealed class VisualizerService : IVisualizerService
   /// <inheritdoc/>
   public void Dispose()
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+      return;
+    }
 
     _disposed = true;
     _isActive = false;

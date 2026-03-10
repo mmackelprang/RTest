@@ -146,7 +146,9 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         Name = $"Buffered Generator ({typeof(T).Name})";
 
         if (_metricsCollector != null)
+        {
             _metricsTags = new Dictionary<string, string> { ["type"] = typeof(T).Name };
+        }
 
         _logger.LogDebug(
             "BufferedSoundGenerator created: Type={Type}, OutputSampleRate={SampleRate}Hz, OutputChannels={Channels}, MaxBufferSamples={MaxBuffer}, Strategy={Strategy}",
@@ -171,7 +173,10 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     /// <param name="samples">The samples to add.</param>
     public void AddSamples(ReadOnlySpan<T> samples)
     {
-        if (_isDisposed) return;
+        if (_isDisposed)
+        {
+            return;
+        }
 
         // Defense-in-depth: truncate to frame boundary to prevent L/R channel shift.
         // PipeWire BT transport can deliver non-frame-aligned chunks during packet gaps.
@@ -179,7 +184,10 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         if (channelCount > 1 && samples.Length % channelCount != 0)
         {
             var aligned = samples.Length / channelCount * channelCount;
-            if (aligned <= 0) return;
+            if (aligned <= 0)
+            {
+                return;
+            }
             samples = samples.Slice(0, aligned);
         }
 
@@ -192,7 +200,10 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             Monitor.Enter(_bufferLock);
             lockWaitMs = (double)(Stopwatch.GetTimestamp() - waitStart) / Stopwatch.Frequency * 1000.0;
             _addSamplesContentionCount++;
-            if (lockWaitMs > _maxAddSamplesLockWaitMs) _maxAddSamplesLockWaitMs = lockWaitMs;
+            if (lockWaitMs > _maxAddSamplesLockWaitMs)
+            {
+                _maxAddSamplesLockWaitMs = lockWaitMs;
+            }
         }
         try
         {
@@ -203,7 +214,10 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                     Monitor.Wait(_bufferLock);
                 }
 
-                if (_isDisposed) return;
+                if (_isDisposed)
+                {
+                    return;
+                }
             }
 
             _totalSamplesReceived += samples.Length;
@@ -238,7 +252,9 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         // Diagnostic capture hook — invoked outside the lock to avoid extending lock hold time.
         // The capture callback does a fast span copy into CaptureSession's own buffer.
         if (typeof(T) == typeof(float))
+        {
             DiagnosticInputCapture?.Invoke(System.Runtime.InteropServices.MemoryMarshal.Cast<T, float>(samples));
+        }
     }
 
     /// <summary>
@@ -253,8 +269,14 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         {
             var intervalMs = (double)(callbackStartTicks - _lastGenerateAudioTimestamp)
                 / Stopwatch.Frequency * 1000.0;
-            if (intervalMs > _maxCallbackIntervalMs) _maxCallbackIntervalMs = intervalMs;
-            if (intervalMs < _minCallbackIntervalMs) _minCallbackIntervalMs = intervalMs;
+            if (intervalMs > _maxCallbackIntervalMs)
+            {
+                _maxCallbackIntervalMs = intervalMs;
+            }
+            if (intervalMs < _minCallbackIntervalMs)
+            {
+                _minCallbackIntervalMs = intervalMs;
+            }
             // Expected quantum is buffer.Length / (sampleRate * channels) * 1000
             // At 512 samples / (48000 * 2) = ~5.33ms per channel, ~10.67ms total
             // Flag anything > 2x expected as a missed deadline
@@ -309,7 +331,9 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                 / Stopwatch.Frequency * 1000.0;
             _generateAudioContentionCount++;
             if (generateLockWaitMs > _maxGenerateAudioLockWaitMs)
+            {
                 _maxGenerateAudioLockWaitMs = generateLockWaitMs;
+            }
         }
         try
         {
@@ -346,8 +370,14 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             _totalSamplesOutput += toRead;
 
             // Track min/max buffer levels between log intervals
-            if (_count < _minBufferSinceLastLog) _minBufferSinceLastLog = _count;
-            if (_count > _maxBufferSinceLastLog) _maxBufferSinceLastLog = _count;
+            if (_count < _minBufferSinceLastLog)
+            {
+                _minBufferSinceLastLog = _count;
+            }
+            if (_count > _maxBufferSinceLastLog)
+            {
+                _maxBufferSinceLastLog = _count;
+            }
 
             if (_overflowStrategy == BufferOverflowStrategy.Block && toRead > 0)
             {
@@ -361,7 +391,9 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
 
         // Diagnostic output capture hook — invoked outside the lock.
         if (samplesWritten > 0)
+        {
             DiagnosticOutputCapture?.Invoke(buffer.Slice(0, samplesWritten));
+        }
 
         // Clock drift compensation: when the buffer is draining faster than the
         // producer fills it (e.g., BT clock vs ALSA clock drift), push back the
@@ -393,7 +425,10 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                 if (sinceLastLog >= 1.0 || _lastUnderrunLogTime == default)
                 {
                     int buffered;
-                    lock (_bufferLock) { buffered = _count; }
+                    lock (_bufferLock)
+                    {
+                        buffered = _count;
+                    }
                     _logger.LogWarning(
                         "⚠️ Buffer underrun ({Type}): {Count} underruns, {Deficit} zero samples in last {Interval:F1}s " +
                         "(buffer: {Buffered}/{Capacity}, total underruns: {TotalUnderruns})",
@@ -411,7 +446,10 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
 
         var executionMs = (double)(Stopwatch.GetTimestamp() - callbackStartTicks)
             / Stopwatch.Frequency * 1000.0;
-        if (executionMs > _maxCallbackExecutionMs) _maxCallbackExecutionMs = executionMs;
+        if (executionMs > _maxCallbackExecutionMs)
+        {
+            _maxCallbackExecutionMs = executionMs;
+        }
     }
 
     /// <summary>
@@ -426,15 +464,24 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         if (_lastDriftCheckTime == default)
         {
             _lastDriftCheckTime = now;
-            lock (_bufferLock) { _lastDriftCheckLevel = _count; }
+            lock (_bufferLock)
+            {
+                _lastDriftCheckLevel = _count;
+            }
             return;
         }
 
         // Check every ~2 seconds to smooth out transient jitter
-        if ((now - _lastDriftCheckTime).TotalSeconds < 2.0) return;
+        if ((now - _lastDriftCheckTime).TotalSeconds < 2.0)
+        {
+            return;
+        }
 
         int currentLevel;
-        lock (_bufferLock) { currentLevel = _count; }
+        lock (_bufferLock)
+        {
+            currentLevel = _count;
+        }
 
         _driftCheckCount++;
 

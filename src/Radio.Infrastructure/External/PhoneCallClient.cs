@@ -142,9 +142,13 @@ public class PhoneCallClient : IPhoneIntegrationService
   private Task OnConnectionClosed(Exception? error)
   {
     if (error != null)
+    {
       _logger.LogWarning(error, "RotaryPhone hub connection closed with error");
+    }
     else
+    {
       _logger.LogInformation("RotaryPhone hub connection closed");
+    }
 
     return Task.CompletedTask;
   }
@@ -152,7 +156,10 @@ public class PhoneCallClient : IPhoneIntegrationService
   /// <inheritdoc />
   public async ValueTask DisposeAsync()
   {
-    if (_isDisposed) return;
+    if (_isDisposed)
+    {
+      return;
+    }
     _isDisposed = true;
 
     if (_hubConnection != null)

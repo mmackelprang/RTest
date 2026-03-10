@@ -157,7 +157,9 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
   public async Task<bool> SendPingAsync()
   {
     if (string.IsNullOrEmpty(_transportId))
+    {
       return false;
+    }
 
     try
     {
@@ -380,14 +382,22 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
           {
             var hasNonZero = false;
             for (var b = totalRead - bytesRead; b < totalRead && !hasNonZero; b++)
-              if (pcmBuffer[b] != 0) hasNonZero = true;
+          {
+            if (pcmBuffer[b] != 0)
+            {
+              hasNonZero = true;
+            }
+          }
             _logger.LogDebug(
               "DirectCast: Read #{Call}: {BytesRead} bytes, nonZero: {NonZero}, availAfter: {Avail}, totalSoFar: {Total}/{Target}",
               readCalls, bytesRead, hasNonZero, tapReader.Available, totalRead, chunkBytes);
           }
         }
 
-        if (ct.IsCancellationRequested) break;
+        if (ct.IsCancellationRequested)
+        {
+          break;
+        }
 
         // Real-time pacing: wait until it's time to send this chunk.
         chunksSinceStart++;
@@ -404,11 +414,16 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
           var isSilence = true;
           for (var i = 0; i < totalRead && isSilence; i++)
           {
-            if (pcmBuffer[i] != 0) isSilence = false;
+            if (pcmBuffer[i] != 0)
+            {
+              isSilence = false;
+            }
           }
 
           if (isSilence)
+          {
             Interlocked.Increment(ref _silenceChunks);
+          }
 
           if (chunksSinceStart <= 10 || isSilence != _lastChunkWasSilence)
           {
@@ -492,7 +507,10 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
   /// </summary>
   private void ReportMetrics(double chunkRate)
   {
-    if (_metricsCollector == null) return;
+    if (_metricsCollector == null)
+    {
+      return;
+    }
 
     _metricsCollector.Gauge("audio.cast.direct.chunk_rate", chunkRate);
     _metricsCollector.Gauge("audio.cast.direct.chunks_sent", _totalChunksSent);
@@ -505,7 +523,10 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
   /// <inheritdoc />
   public async ValueTask DisposeAsync()
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+      return;
+    }
     _disposed = true;
 
     _channel.MessageReceived -= OnChannelMessageReceived;

@@ -35,11 +35,15 @@ public sealed partial record SecretTag
   {
     tag = null;
     if (string.IsNullOrEmpty(value))
+    {
       return false;
+    }
 
     var match = TagPatternRegex().Match(value);
     if (!match.Success)
+    {
       return false;
+    }
 
     tag = new SecretTag
     {
@@ -53,7 +57,9 @@ public sealed partial record SecretTag
   public static IEnumerable<SecretTag> ExtractAll(string? value)
   {
     if (string.IsNullOrEmpty(value))
+    {
       yield break;
+    }
 
     foreach (Match match in TagPatternRegex().Matches(value))
     {

@@ -148,9 +148,13 @@ public class AnnouncementService : IAnnouncementService
     finally
     {
       if (soundSource != null)
+      {
         await CleanupSourceAsync(soundSource);
+      }
       if (ttsSource != null)
+      {
         await CleanupSourceAsync(ttsSource);
+      }
       ClearActiveSource(ttsSource ?? soundSource);
     }
   }

@@ -60,7 +60,9 @@ public class RotaryEncoderActionRouter : IDisposable
     {
       // If sleeping, wake on any encoder input and consume the event
       if (TryWakeFromSleep("encoder-turn"))
+      {
         return;
+      }
 
       switch (e.EncoderIndex)
       {
@@ -79,13 +81,18 @@ public class RotaryEncoderActionRouter : IDisposable
   private void OnButtonPressed(object? sender, EncoderButtonEventArgs e)
   {
     // Only act on press (not release)
-    if (!e.IsPressed) return;
+    if (!e.IsPressed)
+    {
+      return;
+    }
 
     try
     {
       // If sleeping, wake on any encoder input and consume the event
       if (TryWakeFromSleep("encoder-button"))
+      {
         return;
+      }
 
       switch (e.EncoderIndex)
       {
@@ -106,7 +113,10 @@ public class RotaryEncoderActionRouter : IDisposable
   /// </summary>
   private bool TryWakeFromSleep(string wakeSource)
   {
-    if (_sleepService == null || !_sleepService.IsSleeping) return false;
+    if (_sleepService == null || !_sleepService.IsSleeping)
+    {
+      return false;
+    }
 
     _ = _sleepService.WakeAsync(wakeSource);
     _logger.LogInformation("Woke from sleep via {WakeSource}", wakeSource);
@@ -152,9 +162,13 @@ public class RotaryEncoderActionRouter : IDisposable
       for (int i = 0; i < steps; i++)
       {
         if (delta > 0)
+        {
           await radio.StepFrequencyUpAsync();
+        }
         else
+        {
           await radio.StepFrequencyDownAsync();
+        }
       }
     }
     catch (Exception ex)
@@ -226,7 +240,10 @@ public class RotaryEncoderActionRouter : IDisposable
 
   public void Dispose()
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+      return;
+    }
     _disposed = true;
 
     _encoderService.EncoderTurned -= OnEncoderTurned;

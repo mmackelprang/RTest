@@ -269,7 +269,9 @@ public sealed class SqliteMetricsRepository : IMetricsReader
   {
     var keyList = keys.ToList();
     if (keyList.Count == 0)
+    {
       return new Dictionary<string, double>();
+    }
 
     // For small key lists, run individual queries concurrently is fine.
     // Each GetAggregateAsync uses its own read connection.
@@ -285,7 +287,9 @@ public sealed class SqliteMetricsRepository : IMetricsReader
     foreach (var (key, value) in results)
     {
       if (value.HasValue)
+      {
         result[key] = value.Value;
+      }
     }
 
     return result;

@@ -267,7 +267,7 @@ public class WaveformComparisonTests
   }
 
   [SkippableFact]
-  [Trait("Category", "CaptureAnalysis")]
+  [Trait("Category", "Integration")]
   public void AnalyzeBtCapture_InputVsOutput()
   {
     var captureDir = Path.Combine(
@@ -495,7 +495,7 @@ public class WaveformComparisonTests
   }
 
   [SkippableFact]
-  [Trait("Category", "CaptureAnalysis")]
+  [Trait("Category", "Integration")]
   public void AnalyzeBatchCaptures_10Runs()
   {
     var baseDir = Path.Combine(

@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Serilog;
+using Serilog.Events;
 
 namespace Radio.API.Tests.TestSupport;
 
@@ -16,6 +18,13 @@ public class CustomWebApplicationFactory<TProgram> : WebApplicationFactory<TProg
 {
   protected override void ConfigureWebHost(IWebHostBuilder builder)
   {
+    // Suppress Serilog console output during tests. The static Log.Logger is configured
+    // in Program.cs before WebApplicationFactory applies environment overrides, so we
+    // must replace it here to prevent noisy ERR/WRN stack traces in test output.
+    Log.Logger = new LoggerConfiguration()
+      .MinimumLevel.Fatal()
+      .CreateLogger();
+
     // Run the host in a test environment
     builder.UseEnvironment("Testing");
 

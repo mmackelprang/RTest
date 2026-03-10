@@ -566,9 +566,13 @@ public class HttpStreamOutput : AudioOutputBase
     foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
     {
       if (ni.OperationalStatus != OperationalStatus.Up)
+      {
         continue;
+      }
       if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+      {
         continue;
+      }
 
       // Skip virtual adapters (Hyper-V, WSL, Docker, VPN tunnels)
       var desc = ni.Description.ToLowerInvariant();
@@ -583,10 +587,14 @@ public class HttpStreamOutput : AudioOutputBase
       {
         if (addr.Address.AddressFamily != AddressFamily.InterNetwork ||
             IPAddress.IsLoopback(addr.Address))
+        {
           continue;
+        }
 
         if (!isVirtual)
+        {
           return addr.Address.ToString();
+        }
 
         // Track virtual IP as last resort
         fallbackIp ??= addr.Address.ToString();
