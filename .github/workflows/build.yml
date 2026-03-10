@@ -30,7 +30,12 @@ jobs:
       - name: Test
         run: dotnet test --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage" --filter "FullyQualifiedName!~Radio.Web.E2ETests&Category!=Integration"
       - name: Pack NuGet packages
-        run: dotnet pack src/RTLSDRCore/RTLSDRCore.csproj --no-build --configuration Release --output ./packages
+        run: |
+          dotnet pack src/RTLSDRCore/RTLSDRCore.csproj --no-build --configuration Release --output ./packages
+          dotnet pack src/Radio.AudioAnalysis/Radio.AudioAnalysis.csproj --no-build --configuration Release --output ./packages
+          dotnet pack src/Radio.Metrics/Radio.Metrics.csproj --no-build --configuration Release --output ./packages
+          dotnet pack src/Radio.Configuration/Radio.Configuration.csproj --no-build --configuration Release --output ./packages
+          dotnet pack src/Radio.Fingerprinting/Radio.Fingerprinting.csproj --no-build --configuration Release --output ./packages
       - name: Upload NuGet packages
         uses: actions/upload-artifact@v4
         with:
