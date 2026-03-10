@@ -8,9 +8,9 @@ using Radio.Infrastructure.Audio.Fingerprinting.Data;
 using Radio.Fingerprinting;
 using Radio.Fingerprinting.Abstractions;
 using Radio.Fingerprinting.Data;
-using Radio.IntegrationTests.TestSupport;
+using Radio.Fingerprinting.Tests.TestSupport;
 
-namespace Radio.IntegrationTests.Fingerprinting;
+namespace Radio.Fingerprinting.Tests.Integration;
 
 /// <summary>
 /// Integration tests for fingerprinting system configuration and database setup.

@@ -9,7 +9,7 @@ using Radio.Infrastructure.Audio.Fingerprinting.Data;
 using Radio.Fingerprinting.Data;
 using Radio.Fingerprinting.Abstractions;
 
-namespace Radio.IntegrationTests.PlayHistory;
+namespace Radio.Fingerprinting.Tests.Integration;
 
 /// <summary>
 /// Integration tests for play history recording functionality.

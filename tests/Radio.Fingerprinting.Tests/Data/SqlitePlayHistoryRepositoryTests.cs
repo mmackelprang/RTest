@@ -8,7 +8,7 @@ using Radio.Fingerprinting;
 using Radio.Fingerprinting.Abstractions;
 using Radio.Fingerprinting.Data;
 
-namespace Radio.Infrastructure.Tests.Audio.Fingerprinting;
+namespace Radio.Fingerprinting.Tests.Data;
 
 /// <summary>
 /// Unit tests for the SqlitePlayHistoryRepository class.

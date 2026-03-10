@@ -31,5 +31,6 @@
     <InternalsVisibleTo Include="Radio.Infrastructure" />
     <InternalsVisibleTo Include="Radio.Infrastructure.Tests" />
     <InternalsVisibleTo Include="Radio.IntegrationTests" />
+    <InternalsVisibleTo Include="Radio.Fingerprinting.Tests" />
   </ItemGroup>
 </Project>
