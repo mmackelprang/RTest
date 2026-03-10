@@ -436,6 +436,26 @@ public class FilesController : ControllerBase
   }
 
   /// <summary>
+  /// Gets the configured bookmarked directories with accessibility status.
+  /// </summary>
+  /// <returns>A list of bookmarked directories.</returns>
+  [HttpGet("bookmarks")]
+  [ProducesResponseType(typeof(List<BookmarkDto>), StatusCodes.Status200OK)]
+  public IActionResult GetBookmarks()
+  {
+    var options = _filePlayerOptions.CurrentValue;
+    var bookmarks = options.BookmarkedPaths.Select(b => new BookmarkDto
+    {
+      Path = b.Path,
+      Label = b.Label,
+      Tag = b.Tag,
+      IsAccessible = Directory.Exists(b.Path)
+    }).ToList();
+
+    return Ok(bookmarks);
+  }
+
+  /// <summary>
   /// Gets a list of available drives and their information.
   /// </summary>
   /// <returns>A list of available drives with their properties.</returns>
@@ -450,11 +470,21 @@ public class FilesController : ControllerBase
     {
       var drives = new List<DriveInfoDto>();
 
+      // Mount point prefixes that represent system internals (not useful for audio browsing)
+      var systemPrefixes = new[] { "/dev/", "/run/", "/sys/", "/proc/", "/snap/", "/boot/" };
+
       // Get all drives using System.IO.DriveInfo
       foreach (var drive in System.IO.DriveInfo.GetDrives())
       {
         try
         {
+          // Skip system pseudo-mounts on Linux (e.g., /dev/shm, /run, /dev/hugepages)
+          if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) &&
+              systemPrefixes.Any(p => drive.Name.StartsWith(p, StringComparison.Ordinal)))
+          {
+            continue;
+          }
+
           // Only include ready drives to avoid exceptions
           if (!drive.IsReady)
           {
@@ -760,8 +790,11 @@ public class FilesController : ControllerBase
         return true;
       }
 
-      // Check against additional allowed browse directories
-      foreach (var allowedDir in options.AllowedBrowseDirectories)
+      // Check against additional allowed browse directories and bookmarked paths
+      var allowedPaths = options.AllowedBrowseDirectories
+        .Concat(options.BookmarkedPaths.Select(b => b.Path));
+
+      foreach (var allowedDir in allowedPaths)
       {
         if (string.IsNullOrWhiteSpace(allowedDir))
         {

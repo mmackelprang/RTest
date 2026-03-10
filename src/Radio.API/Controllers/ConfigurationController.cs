@@ -402,9 +402,23 @@ public class ConfigurationController : ControllerBase
   /// <summary>
   /// Parses a string config value to its proper JSON type (bool, long, double, or string).
   /// The configuration store persists all values as strings, but clients expect proper types.
+  /// JSON arrays and objects are preserved as JsonElement so they roundtrip correctly.
   /// </summary>
   private static object? ParseConfigValue(string value)
   {
+    // Detect JSON arrays or objects and preserve their structure
+    if (value.Length >= 2 && (value[0] == '[' || value[0] == '{'))
+    {
+      try
+      {
+        return System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(value);
+      }
+      catch (System.Text.Json.JsonException)
+      {
+        // Not valid JSON, fall through to primitive parsing
+      }
+    }
+
     if (bool.TryParse(value, out var boolVal))
     {
       return boolVal;

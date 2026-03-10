@@ -267,3 +267,29 @@ public class DriveInfoDto
   /// </summary>
   public string? DriveFormat { get; set; }
 }
+
+/// <summary>
+/// DTO representing a bookmarked directory for quick access in the file browser.
+/// </summary>
+public class BookmarkDto
+{
+  /// <summary>
+  /// Gets or sets the absolute filesystem path.
+  /// </summary>
+  public required string Path { get; set; }
+
+  /// <summary>
+  /// Gets or sets the user-friendly label.
+  /// </summary>
+  public required string Label { get; set; }
+
+  /// <summary>
+  /// Gets or sets the purpose tag (e.g., "music", "sounds").
+  /// </summary>
+  public required string Tag { get; set; }
+
+  /// <summary>
+  /// Gets or sets whether the path is currently accessible on the filesystem.
+  /// </summary>
+  public bool IsAccessible { get; set; }
+}

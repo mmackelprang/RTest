@@ -217,6 +217,13 @@ public record DriveInfoDto(
   string? DriveFormat
 );
 
+public record BookmarkDto(
+  string Path,
+  string Label,
+  string Tag,
+  bool IsAccessible
+);
+
 public record QueueFilesResponseDto(
   bool Success,
   string? Message,
@@ -661,6 +668,14 @@ public class FilePlayerConfigDto
   public string RootDirectory { get; set; } = "media/audio";
   public string SupportedExtensions { get; set; } = ".mp3,.flac,.wav,.ogg,.aac,.m4a,.wma";
   public string[] AllowedBrowseDirectories { get; set; } = [];
+  public List<BookmarkedPathDto> BookmarkedPaths { get; set; } = [];
+}
+
+public class BookmarkedPathDto
+{
+  public string Path { get; set; } = "";
+  public string Label { get; set; } = "";
+  public string Tag { get; set; } = "";
 }
 
 public class FingerprintingConfigDto

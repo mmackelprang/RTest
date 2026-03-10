@@ -387,6 +387,7 @@
       { "AllowMultiSelect", true },
       { "AllowAddToQueue", true },
       { "ShowPlayButton", true },
+      { "PreferredBookmarkTag", "music" },
       { "OnAddToQueue", EventCallback.Factory.Create<List<string>>(this, HandleAddFilesToQueueAsync) }
     };
     var options = new DialogOptions

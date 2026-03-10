@@ -147,4 +147,17 @@ public class FileApiService
       return null;
     }
   }
+
+  public async Task<List<BookmarkDto>?> GetBookmarksAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      return await _httpClient.GetFromJsonAsync<List<BookmarkDto>>("/api/files/bookmarks", cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to get bookmarks");
+      return null;
+    }
+  }
 }

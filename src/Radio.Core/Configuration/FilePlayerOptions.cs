@@ -27,4 +27,32 @@ public class FilePlayerOptions
   /// directories will be rejected. Empty array means only RootDirectory is allowed.
   /// </summary>
   public string[] AllowedBrowseDirectories { get; set; } = [];
+
+  /// <summary>
+  /// Gets or sets bookmarked directories that appear as quick-access entries in
+  /// the file browser. These paths are also implicitly allowed for browsing.
+  /// </summary>
+  public BookmarkedPath[] BookmarkedPaths { get; set; } = [];
+}
+
+/// <summary>
+/// A bookmarked directory for quick access in the file browser.
+/// </summary>
+public class BookmarkedPath
+{
+  /// <summary>
+  /// The absolute filesystem path to the directory.
+  /// </summary>
+  public string Path { get; set; } = "";
+
+  /// <summary>
+  /// A user-friendly label for the bookmark (e.g., "NAS Music", "Alert Sounds").
+  /// </summary>
+  public string Label { get; set; } = "";
+
+  /// <summary>
+  /// A tag indicating the bookmark's purpose. Used to select context-appropriate
+  /// defaults (e.g., "music" for queue browsing, "sounds" for event file selection).
+  /// </summary>
+  public string Tag { get; set; } = "";
 }
