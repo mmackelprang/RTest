@@ -53,6 +53,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Radio.Metrics.Tests", "test
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Radio.Configuration.Tests", "tests\Radio.Configuration.Tests\Radio.Configuration.Tests.csproj", "{22F2CDB8-4450-4C72-8667-80BB20F60B3F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Radio.Fingerprinting.Tests", "tests\Radio.Fingerprinting.Tests\Radio.Fingerprinting.Tests.csproj", "{8BF0F36E-0812-44AE-8567-595F11CB0BB8}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -327,6 +329,18 @@ Global
 		{22F2CDB8-4450-4C72-8667-80BB20F60B3F}.Release|x64.Build.0 = Release|Any CPU
 		{22F2CDB8-4450-4C72-8667-80BB20F60B3F}.Release|x86.ActiveCfg = Release|Any CPU
 		{22F2CDB8-4450-4C72-8667-80BB20F60B3F}.Release|x86.Build.0 = Release|Any CPU
+		{8BF0F36E-0812-44AE-8567-595F11CB0BB8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8BF0F36E-0812-44AE-8567-595F11CB0BB8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8BF0F36E-0812-44AE-8567-595F11CB0BB8}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{8BF0F36E-0812-44AE-8567-595F11CB0BB8}.Debug|x64.Build.0 = Debug|Any CPU
+		{8BF0F36E-0812-44AE-8567-595F11CB0BB8}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{8BF0F36E-0812-44AE-8567-595F11CB0BB8}.Debug|x86.Build.0 = Debug|Any CPU
+		{8BF0F36E-0812-44AE-8567-595F11CB0BB8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8BF0F36E-0812-44AE-8567-595F11CB0BB8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8BF0F36E-0812-44AE-8567-595F11CB0BB8}.Release|x64.ActiveCfg = Release|Any CPU
+		{8BF0F36E-0812-44AE-8567-595F11CB0BB8}.Release|x64.Build.0 = Release|Any CPU
+		{8BF0F36E-0812-44AE-8567-595F11CB0BB8}.Release|x86.ActiveCfg = Release|Any CPU
+		{8BF0F36E-0812-44AE-8567-595F11CB0BB8}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -354,5 +368,6 @@ Global
 		{82818C12-06D6-49A3-885D-C2DF885FC94B} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{60DB543F-7498-4404-A9B5-E09988B60F9C} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{22F2CDB8-4450-4C72-8667-80BB20F60B3F} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{8BF0F36E-0812-44AE-8567-595F11CB0BB8} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

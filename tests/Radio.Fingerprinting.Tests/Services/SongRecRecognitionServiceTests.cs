@@ -8,7 +8,7 @@ using Xunit;
 using Radio.Fingerprinting.Services;
 using Radio.Fingerprinting;
 
-namespace Radio.Infrastructure.Tests.Audio.Fingerprinting;
+namespace Radio.Fingerprinting.Tests.Services;
 
 public class SongRecRecognitionServiceTests
 {

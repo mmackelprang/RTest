@@ -8,7 +8,7 @@ using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Fingerprinting.Services;
 using Radio.Fingerprinting;
 
-namespace Radio.Infrastructure.Tests.Audio.Fingerprinting;
+namespace Radio.Fingerprinting.Tests.Services;
 
 /// <summary>
 /// Tests for fingerprint status tracking and event log aggregation in BackgroundIdentificationService.

@@ -7,10 +7,10 @@ using Radio.Core.Configuration;
 using Radio.Fingerprinting;
 using Radio.Fingerprinting.Services;
 using Radio.Infrastructure.Audio.Fingerprinting;
-using Radio.IntegrationTests.TestSupport;
+using Radio.Fingerprinting.Tests.TestSupport;
 using Xunit.Abstractions;
 
-namespace Radio.IntegrationTests.Fingerprinting;
+namespace Radio.Fingerprinting.Tests.Integration;
 
 /// <summary>
 /// Integration tests for the Cover Art Archive pipeline.

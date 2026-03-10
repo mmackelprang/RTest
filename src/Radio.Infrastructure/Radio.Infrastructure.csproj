@@ -14,6 +14,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Radio.Infrastructure.Tests" />
     <InternalsVisibleTo Include="Radio.IntegrationTests" />
+    <InternalsVisibleTo Include="Radio.Fingerprinting.Tests" />
   </ItemGroup>
   <!-- Conditional compilation: exclude platform-specific Bluetooth files -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
