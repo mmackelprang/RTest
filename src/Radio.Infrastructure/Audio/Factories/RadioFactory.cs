@@ -9,6 +9,7 @@ using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Infrastructure.Audio.Sources.Primary;
 using Radio.Infrastructure.Configuration;
 using Radio.Metrics;
+using Radio.Fingerprinting.Services;
 using RTLSDRCore;
 using RTLSDRCore.Hardware;
 using RTLSDRCore.Models;

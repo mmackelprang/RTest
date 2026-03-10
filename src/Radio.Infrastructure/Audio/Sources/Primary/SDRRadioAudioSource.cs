@@ -9,6 +9,7 @@ using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Configuration.Abstractions;
 using Radio.Configuration.Models;
 using Radio.Metrics;
+using Radio.Fingerprinting.Services;
 using RTLSDRCore;
 using RTLSDRCore.Enums;
 

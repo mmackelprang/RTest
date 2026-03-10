@@ -5,6 +5,8 @@ using Radio.Core.Configuration;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Xunit;
+using Radio.Fingerprinting.Services;
+using Radio.Fingerprinting;
 
 namespace Radio.Infrastructure.Tests.Audio.Fingerprinting;
 

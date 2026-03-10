@@ -1,8 +1,9 @@
 using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
+using Radio.Fingerprinting.Abstractions;
 
-namespace Radio.Infrastructure.Audio.Fingerprinting.Data;
+namespace Radio.Fingerprinting.Data;
 
 /// <summary>
 /// SQLite implementation of the track metadata repository.
@@ -10,25 +11,25 @@ namespace Radio.Infrastructure.Audio.Fingerprinting.Data;
 public sealed class SqliteTrackMetadataRepository : ITrackMetadataRepository
 {
   private readonly ILogger<SqliteTrackMetadataRepository> _logger;
-  private readonly FingerprintDbContext _dbContext;
+  private readonly IFingerprintDataConnection _dataConnection;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="SqliteTrackMetadataRepository"/> class.
   /// </summary>
   /// <param name="logger">The logger instance.</param>
-  /// <param name="dbContext">The database context.</param>
+  /// <param name="dataConnection">The fingerprint data connection.</param>
   public SqliteTrackMetadataRepository(
     ILogger<SqliteTrackMetadataRepository> logger,
-    FingerprintDbContext dbContext)
+    IFingerprintDataConnection dataConnection)
   {
     _logger = logger;
-    _dbContext = dbContext;
+    _dataConnection = dataConnection;
   }
 
   /// <inheritdoc/>
   public async Task<TrackMetadata?> GetByIdAsync(string id, CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     var sql = """
       SELECT Id, FingerprintId, Title, Artist, Album, AlbumArtist, TrackNumber,
@@ -56,7 +57,7 @@ public sealed class SqliteTrackMetadataRepository : ITrackMetadataRepository
     string fingerprintId,
     CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     var sql = """
       SELECT Id, FingerprintId, Title, Artist, Album, AlbumArtist, TrackNumber,
@@ -84,7 +85,7 @@ public sealed class SqliteTrackMetadataRepository : ITrackMetadataRepository
     string recordingId,
     CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     var sql = """
       SELECT Id, FingerprintId, Title, Artist, Album, AlbumArtist, TrackNumber,
@@ -112,7 +113,7 @@ public sealed class SqliteTrackMetadataRepository : ITrackMetadataRepository
     TrackMetadata metadata,
     CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     var now = DateTime.UtcNow.ToString("O");
     var sql = """
@@ -170,7 +171,7 @@ public sealed class SqliteTrackMetadataRepository : ITrackMetadataRepository
     int limit = 20,
     CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     var searchPattern = $"%{query}%";
     var sql = """
@@ -201,7 +202,7 @@ public sealed class SqliteTrackMetadataRepository : ITrackMetadataRepository
   /// <inheritdoc/>
   public async Task UpdateCoverArtUrlAsync(string id, string coverArtUrl, CancellationToken ct = default)
   {
-    var conn = await _dbContext.GetConnectionAsync(ct);
+    var conn = await _dataConnection.GetConnectionAsync(ct);
 
     var sql = """
       UPDATE TrackMetadata

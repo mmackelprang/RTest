@@ -11,6 +11,7 @@ using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Outputs;
 using Radio.Infrastructure.Audio.Services;
+using Radio.Fingerprinting.Services;
 
 namespace Radio.API.Services;
 

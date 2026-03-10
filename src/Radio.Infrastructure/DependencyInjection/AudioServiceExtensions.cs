@@ -9,6 +9,7 @@ using Radio.Core.Interfaces.External;
 using Radio.Core.Interfaces.Input;
 using Radio.Infrastructure.Audio;
 using Radio.Infrastructure.Audio.Factories;
+using Radio.Fingerprinting.Services;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Outputs;
 using Radio.Infrastructure.Audio.Services;

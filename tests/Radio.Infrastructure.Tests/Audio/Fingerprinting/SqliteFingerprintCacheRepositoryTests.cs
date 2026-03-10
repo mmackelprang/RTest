@@ -4,6 +4,9 @@ using Moq;
 using Radio.Core.Configuration;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting.Data;
+using Radio.Fingerprinting;
+using Radio.Fingerprinting.Abstractions;
+using Radio.Fingerprinting.Data;
 
 namespace Radio.Infrastructure.Tests.Audio.Fingerprinting;
 

@@ -6,6 +6,8 @@ using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting.Data;
+using Radio.Fingerprinting.Data;
+using Radio.Fingerprinting.Abstractions;
 
 namespace Radio.IntegrationTests.PlayHistory;
 

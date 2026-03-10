@@ -7,6 +7,10 @@ using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting.Data;
 using Radio.IntegrationTests.TestSupport;
+using Radio.Fingerprinting.Data;
+using Radio.Fingerprinting.Abstractions;
+using Radio.Fingerprinting.Services;
+using Radio.Fingerprinting;
 
 namespace Radio.IntegrationTests.Fingerprinting;
 

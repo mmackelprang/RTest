@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <!-- NuGet Package Metadata -->
+    <PackageId>Radio.Fingerprinting</PackageId>
+    <Version>1.0.0</Version>
+    <Description>Audio fingerprinting and recognition library providing SongRec (Shazam) integration, MusicBrainz metadata lookup, background identification with duplicate suppression and song change detection, and SQLite persistence for fingerprint cache, track metadata, and play history.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>audio;fingerprinting;shazam;songrec;musicbrainz;recognition;metadata</PackageTags>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Radio.Core\Radio.Core.csproj" />
+    <ProjectReference Include="..\Radio.Metrics\Radio.Metrics.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Radio.Infrastructure" />
+    <InternalsVisibleTo Include="Radio.Infrastructure.Tests" />
+    <InternalsVisibleTo Include="Radio.IntegrationTests" />
+  </ItemGroup>
+</Project>

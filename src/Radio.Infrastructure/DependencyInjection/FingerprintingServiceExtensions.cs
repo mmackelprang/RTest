@@ -1,8 +1,11 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
+using Radio.Fingerprinting;
+using Radio.Fingerprinting.Abstractions;
+using Radio.Fingerprinting.Data;
+using Radio.Fingerprinting.Services;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Fingerprinting.Data;
 using Radio.Infrastructure.Audio.Playlists;
@@ -32,7 +35,9 @@ public static class FingerprintingServiceExtensions
     services.AddSecretResolution<FingerprintingOptions>();
 
     // Register database context as singleton (manages connection)
+    // Also register as IFingerprintDataConnection for the extracted repository implementations
     services.AddSingleton<FingerprintDbContext>();
+    services.AddSingleton<IFingerprintDataConnection>(sp => sp.GetRequiredService<FingerprintDbContext>());
 
     // Register repositories as scoped
     services.AddScoped<IFingerprintCacheRepository, SqliteFingerprintCacheRepository>();

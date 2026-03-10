@@ -12,6 +12,8 @@ using Radio.Infrastructure.Audio.Sources.Primary;
 using Radio.Metrics;
 using RTLSDRCore;
 using RTLSDRCore.Hardware;
+using Radio.Fingerprinting.Services;
+using Radio.Fingerprinting;
 
 namespace Radio.Infrastructure.Tests.Audio.Sources.Primary;
 
