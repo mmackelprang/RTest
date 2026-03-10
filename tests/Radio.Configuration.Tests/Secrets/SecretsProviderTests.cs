@@ -1,4 +1,4 @@
-namespace Radio.Infrastructure.Tests.Configuration;
+namespace Radio.Configuration.Tests.Secrets;
 
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -264,7 +264,7 @@ public class SecretsProviderTests : IDisposable
   private JsonSecretsProvider CreateJsonProvider()
   {
     return new JsonSecretsProvider(
-      Options.Create(_options),
+      Microsoft.Extensions.Options.Options.Create(_options),
       _dataProtection,
       NullLogger<JsonSecretsProvider>.Instance);
   }
@@ -272,7 +272,7 @@ public class SecretsProviderTests : IDisposable
   private SqliteSecretsProvider CreateSqliteProvider()
   {
     return new SqliteSecretsProvider(
-      Options.Create(_options),
+      Microsoft.Extensions.Options.Options.Create(_options),
       _dataProtection,
       NullLogger<SqliteSecretsProvider>.Instance);
   }
