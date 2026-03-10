@@ -30,7 +30,8 @@
               {
                 @foreach (var bookmark in _bookmarks)
                 {
-                  var isActive = _isAbsoluteMode && _absolutePath?.StartsWith(bookmark.Path) == true;
+                  var isActive = _isAbsoluteMode && (_absolutePath == bookmark.Path ||
+                    _absolutePath?.StartsWith(bookmark.Path.TrimEnd('/') + "/", StringComparison.OrdinalIgnoreCase) == true);
                   <div class="file-browser-location-item @(bookmark.IsAccessible ? "" : "file-browser-location-disabled")"
                        @onclick="@(() => NavigateToBookmark(bookmark))"
                        style="@(bookmark.IsAccessible ? "" : "opacity: 0.45; pointer-events: none;")">

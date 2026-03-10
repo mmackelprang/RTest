@@ -2732,8 +2732,12 @@
   {
     if (_filePlayerConfig == null) return;
 
-    // Remove bookmarks with empty paths before saving
+    // Remove bookmarks with empty paths before saving; auto-generate labels from path
     _filePlayerConfig.BookmarkedPaths.RemoveAll(b => string.IsNullOrWhiteSpace(b.Path));
+    foreach (var b in _filePlayerConfig.BookmarkedPaths.Where(b => string.IsNullOrWhiteSpace(b.Label)))
+    {
+      b.Label = b.Path.Split('/').LastOrDefault(s => !string.IsNullOrEmpty(s)) ?? b.Path;
+    }
 
     _isSaving = true;
     try
