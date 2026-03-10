@@ -300,12 +300,24 @@ public class FilesController : ControllerBase
     {
       _logger.LogInformation("Playing audio file: {Path}", request.Path);
 
-      // Verify file exists
-      var fileInfo = await _fileBrowser.GetFileInfoAsync(request.Path, cancellationToken);
-      if (fileInfo == null)
+      // Verify file exists — absolute paths bypass FileBrowser's relative-only GetFullPath
+      AudioFileInfo? fileInfo = null;
+      if (Path.IsPathRooted(request.Path))
       {
-        _logger.LogWarning("File not found or not supported: {Path}", request.Path);
-        return BadRequest(new { error = "File not found or not a supported audio format" });
+        if (!System.IO.File.Exists(request.Path) || !_fileBrowser.IsSupportedAudioFile(request.Path))
+        {
+          _logger.LogWarning("File not found or not supported: {Path}", request.Path);
+          return BadRequest(new { error = "File not found or not a supported audio format" });
+        }
+      }
+      else
+      {
+        fileInfo = await _fileBrowser.GetFileInfoAsync(request.Path, cancellationToken);
+        if (fileInfo == null)
+        {
+          _logger.LogWarning("File not found or not supported: {Path}", request.Path);
+          return BadRequest(new { error = "File not found or not a supported audio format" });
+        }
       }
 
       // Get or activate File Player source
@@ -332,11 +344,11 @@ public class FilesController : ControllerBase
         Success = true,
         Message = "File is now playing",
         FilePath = request.Path,
-        FileName = fileInfo.FileName,
-        Title = fileInfo.Title,
-        Artist = fileInfo.Artist,
-        Album = fileInfo.Album,
-        Duration = fileInfo.Duration
+        FileName = fileInfo?.FileName ?? Path.GetFileName(request.Path),
+        Title = fileInfo?.Title,
+        Artist = fileInfo?.Artist,
+        Album = fileInfo?.Album,
+        Duration = fileInfo?.Duration
       });
     }
     catch (Exception ex)
@@ -394,13 +406,33 @@ public class FilesController : ControllerBase
 
         try
         {
-          // Verify file exists
-          var fileInfo = await _fileBrowser.GetFileInfoAsync(path, cancellationToken);
-          if (fileInfo == null)
+          // Absolute paths (from bookmark/drive browsing) bypass FileBrowser's
+          // relative-path-only GetFullPath. Validate with IsPathAllowed + direct checks.
+          if (Path.IsPathRooted(path))
           {
-            _logger.LogWarning("Skipping file (not found or not supported): {Path}", path);
-            failedPaths.Add(path);
-            continue;
+            if (!IsPathAllowed(path))
+            {
+              _logger.LogWarning("Rejected absolute queue path: {Path}", path);
+              failedPaths.Add(path);
+              continue;
+            }
+            if (!System.IO.File.Exists(path) || !_fileBrowser.IsSupportedAudioFile(path))
+            {
+              _logger.LogWarning("Skipping file (not found or not supported): {Path}", path);
+              failedPaths.Add(path);
+              continue;
+            }
+          }
+          else
+          {
+            // Relative paths go through FileBrowser for resolution + validation
+            var fileInfo = await _fileBrowser.GetFileInfoAsync(path, cancellationToken);
+            if (fileInfo == null)
+            {
+              _logger.LogWarning("Skipping file (not found or not supported): {Path}", path);
+              failedPaths.Add(path);
+              continue;
+            }
           }
 
           // Add to queue
