@@ -1,6 +1,6 @@
 namespace Radio.Infrastructure.Tests.Configuration;
 
-using Radio.Infrastructure.Configuration.Models;
+using Radio.Configuration.Models;
 
 /// <summary>
 /// Tests for the ConfigurationEntry record.

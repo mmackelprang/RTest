@@ -2,11 +2,10 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
-using Radio.Infrastructure.Configuration.Models;
-using Radio.Infrastructure.Configuration.Secrets;
-using Radio.Infrastructure.Configuration.Stores;
+using Radio.Configuration.Models;
+using Radio.Configuration.Secrets;
+using Radio.Configuration.Stores;
 
 namespace Radio.Infrastructure.Tests;
 
@@ -18,7 +17,6 @@ public class InfrastructureTests : IDisposable
 {
   private readonly string _testDirectory;
   private readonly ConfigurationOptions _options;
-  private readonly DatabasePathResolver _pathResolver;
 
   public InfrastructureTests()
   {
@@ -30,16 +28,9 @@ public class InfrastructureTests : IDisposable
       BasePath = _testDirectory,
       JsonExtension = ".json",
       SqliteFileName = "test.db",
-      SecretsFileName = "secrets"
+      SecretsFileName = "secrets",
+      DatabasePath = Path.Combine(_testDirectory, "test.db")
     };
-    
-    var databaseOptions = Options.Create(new DatabaseOptions
-    {
-      RootPath = _testDirectory,
-      ConfigurationSubdirectory = "",
-      ConfigurationFileName = "test.db"
-    });
-    _pathResolver = new DatabasePathResolver(databaseOptions);
   }
 
   public void Dispose()
@@ -72,7 +63,7 @@ public class InfrastructureTests : IDisposable
     var dataProtectionProvider = DataProtectionProvider.Create("TestApp");
     var logger = NullLogger<JsonSecretsProvider>.Instance;
     var secretsProvider = new JsonSecretsProvider(optionsMock, dataProtectionProvider, logger);
-    var factory = new ConfigurationStoreFactory(optionsMock, secretsProvider, NullLoggerFactory.Instance, _pathResolver);
+    var factory = new ConfigurationStoreFactory(optionsMock, secretsProvider, NullLoggerFactory.Instance);
 
     // Act - Database doesn't exist yet
     var stores = await factory.ListStoresAsync(ConfigurationStoreType.Sqlite);
@@ -89,7 +80,7 @@ public class InfrastructureTests : IDisposable
     var dataProtectionProvider = DataProtectionProvider.Create("TestApp");
     var logger = NullLogger<JsonSecretsProvider>.Instance;
     var secretsProvider = new JsonSecretsProvider(optionsMock, dataProtectionProvider, logger);
-    var factory = new ConfigurationStoreFactory(optionsMock, secretsProvider, NullLoggerFactory.Instance, _pathResolver);
+    var factory = new ConfigurationStoreFactory(optionsMock, secretsProvider, NullLoggerFactory.Instance);
 
     // Create a SQLite store to establish the database and table
     var store = await factory.CreateStoreAsync("test-config", ConfigurationStoreType.Sqlite);
@@ -111,7 +102,7 @@ public class InfrastructureTests : IDisposable
     var dataProtectionProvider = DataProtectionProvider.Create("TestApp");
     var logger = NullLogger<JsonSecretsProvider>.Instance;
     var secretsProvider = new JsonSecretsProvider(optionsMock, dataProtectionProvider, logger);
-    var factory = new ConfigurationStoreFactory(optionsMock, secretsProvider, NullLoggerFactory.Instance, _pathResolver);
+    var factory = new ConfigurationStoreFactory(optionsMock, secretsProvider, NullLoggerFactory.Instance);
 
     // Create a JSON store
     var store = await factory.CreateStoreAsync("my-json-store", ConfigurationStoreType.Json);

@@ -2,9 +2,9 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Radio.API.Models;
 using Radio.Core.Configuration;
-using Radio.Infrastructure.Configuration.Abstractions;
-using Radio.Infrastructure.Configuration.Exceptions;
-using IRadioConfigurationManager = Radio.Infrastructure.Configuration.Abstractions.IConfigurationManager;
+using Radio.Configuration.Abstractions;
+using Radio.Configuration.Exceptions;
+using IRadioConfigurationManager = Radio.Configuration.Abstractions.IConfigurationManager;
 
 namespace Radio.API.Controllers;
 
@@ -236,7 +236,7 @@ public class ConfigurationController : ControllerBase
     try
     {
       // Use the main configuration store (determined by CurrentStoreType)
-      var mainStoreId = _configurationManager.CurrentStoreType == Radio.Infrastructure.Configuration.Models.ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+      var mainStoreId = _configurationManager.CurrentStoreType == Radio.Configuration.Models.ConfigurationStoreType.Sqlite ? "sqlite" : "config";
       
       // Try to get the store, create if it doesn't exist
       IConfigurationStore store;
@@ -339,7 +339,7 @@ public class ConfigurationController : ControllerBase
     try
     {
       // Use the main configuration store (determined by CurrentStoreType)
-      var mainStoreId = _configurationManager.CurrentStoreType == Radio.Infrastructure.Configuration.Models.ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+      var mainStoreId = _configurationManager.CurrentStoreType == Radio.Configuration.Models.ConfigurationStoreType.Sqlite ? "sqlite" : "config";
       var sectionPrefix = $"{section.ToLowerInvariant()}:";
       
       // Set each key-value pair with the section prefix
@@ -451,7 +451,7 @@ public class ConfigurationController : ControllerBase
         request.Section, request.Key, request.Value);
 
       // Use the main configuration store with namespaced keys
-      var mainStoreId = _configurationManager.CurrentStoreType == Radio.Infrastructure.Configuration.Models.ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+      var mainStoreId = _configurationManager.CurrentStoreType == Radio.Configuration.Models.ConfigurationStoreType.Sqlite ? "sqlite" : "config";
       var fullKey = $"{request.Section.ToLowerInvariant()}:{request.Key}";
       
       try
@@ -508,12 +508,12 @@ public class ConfigurationController : ControllerBase
       if (!string.IsNullOrEmpty(storeType))
       {
         targetStoreType = storeType.ToLowerInvariant() == "sqlite" 
-          ? Radio.Infrastructure.Configuration.Models.ConfigurationStoreType.Sqlite 
-          : Radio.Infrastructure.Configuration.Models.ConfigurationStoreType.Json;
+          ? Radio.Configuration.Models.ConfigurationStoreType.Sqlite 
+          : Radio.Configuration.Models.ConfigurationStoreType.Json;
       }
 
       // Determine the main store ID
-      var mainStoreId = targetStoreType == Radio.Infrastructure.Configuration.Models.ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+      var mainStoreId = targetStoreType == Radio.Configuration.Models.ConfigurationStoreType.Sqlite ? "sqlite" : "config";
       
       // Get or create the store
       IConfigurationStore store;
@@ -534,7 +534,7 @@ public class ConfigurationController : ControllerBase
       // Build the file path based on configuration
       var basePath = Path.GetFullPath("./config"); // From appsettings
       string filePath;
-      if (targetStoreType == Radio.Infrastructure.Configuration.Models.ConfigurationStoreType.Sqlite)
+      if (targetStoreType == Radio.Configuration.Models.ConfigurationStoreType.Sqlite)
       {
         filePath = Path.Combine(basePath, "configuration.db");
       }
@@ -606,8 +606,8 @@ public class ConfigurationController : ControllerBase
         sqliteStoreInstance = await _configurationManager.CreateStoreAsync("sqlite");
       }
 
-      var jsonEntries = await jsonStoreInstance.GetAllEntriesAsync(Radio.Infrastructure.Configuration.Models.ConfigurationReadMode.Raw);
-      var sqliteEntries = await sqliteStoreInstance.GetAllEntriesAsync(Radio.Infrastructure.Configuration.Models.ConfigurationReadMode.Raw);
+      var jsonEntries = await jsonStoreInstance.GetAllEntriesAsync(Radio.Configuration.Models.ConfigurationReadMode.Raw);
+      var sqliteEntries = await sqliteStoreInstance.GetAllEntriesAsync(Radio.Configuration.Models.ConfigurationReadMode.Raw);
 
       // Build dictionaries for comparison
       var jsonDict = jsonEntries.ToDictionary(e => e.Key, e => e.Value);
@@ -727,7 +727,7 @@ public class ConfigurationController : ControllerBase
       {
         try
         {
-          var entry = await sourceStore.GetEntryAsync(key, Radio.Infrastructure.Configuration.Models.ConfigurationReadMode.Raw);
+          var entry = await sourceStore.GetEntryAsync(key, Radio.Configuration.Models.ConfigurationReadMode.Raw);
           if (entry != null)
           {
             await targetStore.SetEntryAsync(key, entry.Value);
@@ -787,7 +787,7 @@ public class ConfigurationController : ControllerBase
       }
 
       var store = await _configurationManager.GetStoreAsync(storeId);
-      var entries = await store.GetAllEntriesAsync(Radio.Infrastructure.Configuration.Models.ConfigurationReadMode.Raw);
+      var entries = await store.GetAllEntriesAsync(Radio.Configuration.Models.ConfigurationReadMode.Raw);
 
       if (format.ToLowerInvariant() == "radiobak")
       {

@@ -31,7 +31,7 @@ public class RadioFactory : IRadioFactory
   private readonly IConfiguration _configuration;
   private readonly IMetricsCollector? _metricsCollector;
   private readonly DeviceOptionsResolver? _deviceOptionsResolver;
-  private readonly Configuration.Abstractions.IConfigurationManager? _configurationManager;
+  private readonly Radio.Configuration.Abstractions.IConfigurationManager? _configurationManager;
 
   // Device enumeration cache
   private IReadOnlyList<DeviceInfo>? _cachedDevices;
@@ -76,7 +76,7 @@ public class RadioFactory : IRadioFactory
     SoundFlowPlaybackService? playbackService = null,
     IMetricsCollector? metricsCollector = null,
     DeviceOptionsResolver? deviceOptionsResolver = null,
-    Configuration.Abstractions.IConfigurationManager? configurationManager = null)
+    Radio.Configuration.Abstractions.IConfigurationManager? configurationManager = null)
   {
     _logger = logger;
     _loggerFactory = loggerFactory;

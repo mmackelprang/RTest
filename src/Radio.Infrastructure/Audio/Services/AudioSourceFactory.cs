@@ -9,7 +9,7 @@ using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Sources.Primary;
 using Radio.Infrastructure.Configuration;
-using Radio.Infrastructure.Configuration.Abstractions;
+using Radio.Configuration.Abstractions;
 using Radio.Metrics;
 
 namespace Radio.Infrastructure.Audio.Services;
@@ -33,7 +33,7 @@ public class AudioSourceFactory : IAudioSourceFactory
   private readonly IConfiguration _configuration;
   private readonly BackgroundIdentificationService? _identificationService;
   private readonly IMetricsCollector? _metricsCollector;
-  private readonly Configuration.Abstractions.IConfigurationManager? _configurationManager;
+  private readonly Radio.Configuration.Abstractions.IConfigurationManager? _configurationManager;
   private readonly SoundFlow.SoundFlowPlaybackService? _playbackService;
   private readonly IServiceScopeFactory? _serviceScopeFactory;
   private readonly AlbumArtCacheService? _albumArtCache;
@@ -54,7 +54,7 @@ public class AudioSourceFactory : IAudioSourceFactory
     IConfiguration configuration,
     BackgroundIdentificationService? identificationService = null,
     IMetricsCollector? metricsCollector = null,
-    Configuration.Abstractions.IConfigurationManager? configurationManager = null,
+    Radio.Configuration.Abstractions.IConfigurationManager? configurationManager = null,
     SoundFlow.SoundFlowPlaybackService? playbackService = null,
     IServiceScopeFactory? serviceScopeFactory = null,
     AlbumArtCacheService? albumArtCache = null,

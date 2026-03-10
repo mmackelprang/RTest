@@ -5,7 +5,7 @@ using Radio.API.Services;
 using Radio.API.Streaming;
 using Radio.Core.Constants;
 using Radio.Core.Interfaces;
-using Radio.Infrastructure.Configuration.Bridge;
+using Radio.Configuration.Bridge;
 using Radio.Infrastructure.DependencyInjection;
 using Radio.Metrics;
 using Scalar.AspNetCore;

@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Radio.Infrastructure.Configuration.Models;
+using Radio.Configuration.Models;
 using Radio.Infrastructure.DependencyInjection;
 using Radio.Tools.ConfigurationManager;
 

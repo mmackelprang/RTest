@@ -5,8 +5,8 @@ using Moq;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
-using Radio.Infrastructure.Configuration.Abstractions;
-using Radio.Infrastructure.Configuration.Models;
+using Radio.Configuration.Abstractions;
+using Radio.Configuration.Models;
 using Radio.Infrastructure.Configuration.Services;
 
 namespace Radio.Infrastructure.Tests.Configuration;

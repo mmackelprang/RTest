@@ -5,8 +5,8 @@ using Radio.Core.Configuration;
 using Radio.Core.Exceptions;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.SoundFlow;
-using Radio.Infrastructure.Configuration.Abstractions;
-using Radio.Infrastructure.Configuration.Models;
+using Radio.Configuration.Abstractions;
+using Radio.Configuration.Models;
 
 namespace Radio.Infrastructure.Tests.Audio;
 

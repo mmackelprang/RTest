@@ -3,10 +3,10 @@ namespace Radio.Infrastructure.Tests.Configuration;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Radio.Infrastructure.Configuration.Backup;
-using Radio.Infrastructure.Configuration.Models;
-using Radio.Infrastructure.Configuration.Secrets;
-using Radio.Infrastructure.Configuration.Stores;
+using Radio.Configuration.Backup;
+using Radio.Configuration.Models;
+using Radio.Configuration.Secrets;
+using Radio.Configuration.Stores;
 
 /// <summary>
 /// Tests for configuration backup service.
@@ -34,25 +34,17 @@ public class ConfigurationBackupTests : IDisposable
       AutoSave = true
     };
 
+    _options.DatabasePath = Path.Combine(_testDirectory, "config.db");
+
     var optionsMock = Options.Create(_options);
     var dataProtection = DataProtectionProvider.Create("TestApp");
-    
-    var databaseOptions = Options.Create(new Radio.Core.Configuration.DatabaseOptions
-    {
-      RootPath = _testDirectory,
-      ConfigurationSubdirectory = "",
-      ConfigurationFileName = "config.db",
-      BackupSubdirectory = "backups"
-    });
-    var pathResolver = new Radio.Core.Configuration.DatabasePathResolver(databaseOptions);
-    
+
     var secretsProvider = new JsonSecretsProvider(optionsMock, dataProtection, NullLogger<JsonSecretsProvider>.Instance);
 
     _storeFactory = new ConfigurationStoreFactory(
       optionsMock,
       secretsProvider,
-      NullLoggerFactory.Instance,
-      pathResolver);
+      NullLoggerFactory.Instance);
 
     _backupService = new ConfigurationBackupService(
       optionsMock,

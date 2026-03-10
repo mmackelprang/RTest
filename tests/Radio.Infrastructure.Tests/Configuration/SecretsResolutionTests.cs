@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Options;
 using Moq;
-using Radio.Infrastructure.Configuration.Abstractions;
-using Radio.Infrastructure.Configuration.Options;
+using Radio.Configuration.Abstractions;
+using Radio.Configuration.Options;
 using Xunit;
 
 namespace Radio.Infrastructure.Tests.Configuration;

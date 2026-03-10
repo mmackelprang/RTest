@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Radio.Core.Configuration;
 using Radio.Infrastructure.Audio.Fingerprinting.Data;
+using Radio.Configuration.Abstractions;
 using Radio.Infrastructure.Configuration.Abstractions;
 using Radio.Metrics.Data;
 using Radio.Tools.AudioUAT.Utilities;

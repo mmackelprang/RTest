@@ -1,8 +1,8 @@
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Radio.Infrastructure.Configuration.Models;
-using Radio.Infrastructure.Configuration.Secrets;
+using Radio.Configuration.Models;
+using Radio.Configuration.Secrets;
 
 namespace Radio.IntegrationTests.Secrets;
 
@@ -169,16 +169,13 @@ public class SecretsConfigurationIntegrationTests : IDisposable
   public async Task SqliteSecretsProvider_StoreAndRetrieve_RoundTrips()
   {
     // Arrange
-    var databaseOptions = Options.Create(new Radio.Core.Configuration.DatabaseOptions
+    var configOptions = Options.Create(new Radio.Configuration.Models.ConfigurationOptions
     {
-      RootPath = TempDirectory,
-      SecretsSubdirectory = "",
-      SecretsFileName = "test-secrets.db"
+      SecretsDatabasePath = Path.Combine(TempDirectory, "test-secrets.db")
     });
-    var pathResolver = new Radio.Core.Configuration.DatabasePathResolver(databaseOptions);
     var dataProtection = DataProtectionProvider.Create("IntegrationTests");
     var provider = new SqliteSecretsProvider(
-      pathResolver,
+      configOptions,
       dataProtection,
       NullLogger<SqliteSecretsProvider>.Instance);
 
@@ -193,7 +190,7 @@ public class SecretsConfigurationIntegrationTests : IDisposable
     Assert.Equal(secretValue, retrieved);
 
     // Verify the database file exists
-    var dbPath = pathResolver.GetSecretsDatabasePath();
+    var dbPath = configOptions.Value.GetSecretsDatabasePath();
     Assert.True(File.Exists(dbPath), "SQLite database file should exist");
   }
 

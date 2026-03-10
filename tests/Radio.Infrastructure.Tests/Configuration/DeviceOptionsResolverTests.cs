@@ -4,8 +4,8 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Radio.Core.Configuration;
 using Radio.Infrastructure.Configuration;
-using Radio.Infrastructure.Configuration.Abstractions;
-using Radio.Infrastructure.Configuration.Models;
+using Radio.Configuration.Abstractions;
+using Radio.Configuration.Models;
 
 namespace Radio.Infrastructure.Tests.Configuration;
 
