@@ -25,6 +25,39 @@
           {
             <div class="file-browser-location-overlay" @onclick="CloseLocationDropdown"></div>
             <div class="file-browser-location-dropdown" @onclick:stopPropagation="true">
+              @* Bookmarked folders — highlighted at top *@
+              @if (_bookmarks.Any())
+              {
+                @foreach (var bookmark in _bookmarks)
+                {
+                  var isActive = _isAbsoluteMode && (_absolutePath == bookmark.Path ||
+                    _absolutePath?.StartsWith(bookmark.Path.TrimEnd('/') + "/", StringComparison.OrdinalIgnoreCase) == true);
+                  <div class="file-browser-location-item @(bookmark.IsAccessible ? "" : "file-browser-location-disabled")"
+                       @onclick="@(() => NavigateToBookmark(bookmark))"
+                       style="@(bookmark.IsAccessible ? "" : "opacity: 0.45; pointer-events: none;")">
+                    <MudIcon Icon="@Icons.Material.Filled.Star" Size="Size.Small"
+                             Color="Color.Warning" />
+                    <div style="flex: 1; min-width: 0;">
+                      <span style="font-weight: 500; color: var(--mud-palette-warning);">@bookmark.Label</span>
+                      <div style="font-size: 11px; color: var(--text-low); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                        @bookmark.Path
+                      </div>
+                    </div>
+                    @if (isActive)
+                    {
+                      <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Color="Color.Primary"
+                               Style="flex-shrink: 0;" />
+                    }
+                    @if (!bookmark.IsAccessible)
+                    {
+                      <MudIcon Icon="@Icons.Material.Filled.CloudOff" Size="Size.Small"
+                               Style="flex-shrink: 0; color: var(--text-low);" title="Not accessible" />
+                    }
+                  </div>
+                }
+                <div style="border-top: 1px solid var(--border-subtle); margin: 4px 0;"></div>
+              }
+              @* Media Library *@
               <div class="file-browser-location-item" @onclick="ReturnToMediaLibrary">
                 <MudIcon Icon="@Icons.Material.Filled.LibraryMusic" Size="Size.Small" Color="Color.Primary" />
                 <span>Media Library</span>
@@ -287,6 +320,12 @@
   [Parameter] public bool ShowPlayButton { get; set; }
   [Parameter] public EventCallback<List<string>> OnAddToQueue { get; set; }
 
+  /// <summary>
+  /// Tag to match against bookmark tags for selecting the initial default folder.
+  /// E.g., "music" opens the NAS music bookmark, "sounds" opens the local audio folder.
+  /// </summary>
+  [Parameter] public string? PreferredBookmarkTag { get; set; }
+
   private List<FileItemDto> _directories = new();
   private List<FileItemDto> _files = new();
   private bool _isLoading = true;
@@ -308,6 +347,7 @@
   private bool _isEditingPath;
   private bool _showLocationDropdown;
   private List<DriveInfoDto> _drives = new();
+  private List<BookmarkDto> _bookmarks = new();
   private MudTextField<string>? _pathTextField;
 
   private IEnumerable<FileItemDto> FilteredFiles
@@ -333,15 +373,63 @@
 
   protected override async Task OnInitializedAsync()
   {
-    // Load drives and media root in parallel
+    // Load drives, bookmarks, and media root in parallel
     var drivesTask = LoadDrivesAsync();
+    var bookmarksTask = LoadBookmarksAsync();
     var rootTask = LoadMediaRootAsync();
-    await Task.WhenAll(drivesTask, rootTask);
+    await Task.WhenAll(drivesTask, bookmarksTask, rootTask);
 
-    // Pass Subdirectory if provided, otherwise null lets the API use its configured root
-    _currentPath = Subdirectory;
-    UpdateRelativePath();
-    await LoadContentsAsync();
+    // Try to open the best default location:
+    // 1. If Subdirectory is set, use it (relative mode)
+    // 2. If a bookmark matches the preferred tag and is accessible, open it
+    // 3. If any bookmark is accessible, open the first one
+    // 4. Fall back to media library root
+    if (!string.IsNullOrEmpty(Subdirectory))
+    {
+      _currentPath = Subdirectory;
+      UpdateRelativePath();
+      await LoadContentsAsync();
+    }
+    else
+    {
+      var defaultBookmark = FindDefaultBookmark();
+      if (defaultBookmark != null)
+      {
+        _isAbsoluteMode = true;
+        _absolutePath = defaultBookmark.Path;
+        _driveRoot = "/";
+        _pathBarText = defaultBookmark.Path;
+        await LoadContentsAsync();
+      }
+      else
+      {
+        _currentPath = null;
+        UpdateRelativePath();
+        await LoadContentsAsync();
+      }
+    }
+  }
+
+  private BookmarkDto? FindDefaultBookmark()
+  {
+    if (!_bookmarks.Any())
+    {
+      return null;
+    }
+
+    // Prefer a bookmark matching the requested tag
+    if (!string.IsNullOrEmpty(PreferredBookmarkTag))
+    {
+      var tagged = _bookmarks.FirstOrDefault(b =>
+        b.IsAccessible && b.Tag.Equals(PreferredBookmarkTag, StringComparison.OrdinalIgnoreCase));
+      if (tagged != null)
+      {
+        return tagged;
+      }
+    }
+
+    // Fall back to first accessible bookmark
+    return _bookmarks.FirstOrDefault(b => b.IsAccessible);
   }
 
   private async Task LoadDrivesAsync()
@@ -350,11 +438,29 @@
     {
       var drives = await FileApi.GetDrivesAsync();
       if (drives != null)
+      {
         _drives = drives;
+      }
     }
     catch (Exception ex)
     {
       Logger.LogDebug(ex, "Failed to load drives");
+    }
+  }
+
+  private async Task LoadBookmarksAsync()
+  {
+    try
+    {
+      var bookmarks = await FileApi.GetBookmarksAsync();
+      if (bookmarks != null)
+      {
+        _bookmarks = bookmarks;
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "Failed to load bookmarks");
     }
   }
 
@@ -519,6 +625,17 @@
     _searchText = "";
     _errorMessage = null;
     await LoadContentsAsync();
+  }
+
+  private async Task NavigateToBookmark(BookmarkDto bookmark)
+  {
+    if (!bookmark.IsAccessible)
+    {
+      return;
+    }
+    _showLocationDropdown = false;
+    _driveRoot = "/";
+    await NavigateToAbsoluteAsync(bookmark.Path);
   }
 
   private async Task NavigateToDrive(string driveName)

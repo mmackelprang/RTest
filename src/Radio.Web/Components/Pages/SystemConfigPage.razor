@@ -631,6 +631,79 @@
                               InputMode="InputMode.text"
                               HelperText="Comma-separated file extensions (e.g., .mp3,.flac,.wav)" />
               </MudItem>
+
+              <!-- Bookmarked Paths -->
+              <MudItem xs="12">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 8px; margin-bottom: 4px;">
+                  <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">
+                    <MudIcon Icon="@Icons.Material.Filled.Star" Size="Size.Small" Color="Color.Warning"
+                             Style="vertical-align: middle; margin-right: 4px;" />
+                    Bookmarked Folders
+                  </MudText>
+                  <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
+                             StartIcon="@Icons.Material.Filled.Add" OnClick="AddBookmark">
+                    Add Bookmark
+                  </MudButton>
+                </div>
+                <MudText Typo="Typo.caption" Style="color: var(--text-low); margin-bottom: 8px;">
+                  Quick-access folders shown at the top of the file browser. Tag with "music" for queue browsing or "sounds" for event file selection.
+                </MudText>
+
+                @if (_filePlayerConfig.BookmarkedPaths.Count == 0)
+                {
+                  <MudAlert Severity="Severity.Info" Variant="Variant.Text" Dense="true" Class="mb-2">
+                    No bookmarks configured. The file browser will open to the media library root.
+                  </MudAlert>
+                }
+                else
+                {
+                  @for (int i = 0; i < _filePlayerConfig.BookmarkedPaths.Count; i++)
+                  {
+                    var index = i;
+                    var bookmark = _filePlayerConfig.BookmarkedPaths[index];
+                    <MudPaper Outlined="true" Class="pa-3 mb-2" Style="background: rgba(255,255,255,0.02);">
+                      <MudGrid Spacing="2">
+                        <MudItem xs="12" md="5">
+                          <MudTextField T="string" @bind-Value="bookmark.Path" Label="Path"
+                                        Variant="Variant.Outlined" Margin="Margin.Dense"
+                                        InputMode="InputMode.text"
+                                        Placeholder="/mnt/nas/music" />
+                        </MudItem>
+                        <MudItem xs="12" md="3">
+                          <MudTextField T="string" @bind-Value="bookmark.Label" Label="Label"
+                                        Variant="Variant.Outlined" Margin="Margin.Dense"
+                                        InputMode="InputMode.text"
+                                        Placeholder="NAS Music Library" />
+                        </MudItem>
+                        <MudItem xs="8" md="2">
+                          <MudSelect T="string" @bind-Value="bookmark.Tag" Label="Tag"
+                                     Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                            <MudSelectItem Value="@("music")">music</MudSelectItem>
+                            <MudSelectItem Value="@("sounds")">sounds</MudSelectItem>
+                            <MudSelectItem Value="@("")">none</MudSelectItem>
+                          </MudSelect>
+                        </MudItem>
+                        <MudItem xs="4" md="2" Style="display: flex; align-items: center; gap: 4px; justify-content: flex-end;">
+                          @if (index > 0)
+                          {
+                            <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small"
+                                           OnClick="@(() => MoveBookmarkUp(index))" title="Move up" />
+                          }
+                          @if (index < _filePlayerConfig.BookmarkedPaths.Count - 1)
+                          {
+                            <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward" Size="Size.Small"
+                                           OnClick="@(() => MoveBookmarkDown(index))" title="Move down" />
+                          }
+                          <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                         Color="Color.Error"
+                                         OnClick="@(() => RemoveBookmark(index))" title="Remove bookmark" />
+                        </MudItem>
+                      </MudGrid>
+                    </MudPaper>
+                  }
+                }
+              </MudItem>
+
               <MudItem xs="12">
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveFilePlayerConfigAsync"
                            StartIcon="@Icons.Material.Filled.Save" Disabled="@_isSaving">
@@ -2292,7 +2365,8 @@
     var parameters = new DialogParameters
     {
       { "InitialSelection", _selectedSoundFile },
-      { "Subdirectory", (string?)null }
+      { "Subdirectory", (string?)null },
+      { "PreferredBookmarkTag", "sounds" }
     };
 
     var options = new DialogOptions
@@ -2657,6 +2731,14 @@
   private async Task SaveFilePlayerConfigAsync()
   {
     if (_filePlayerConfig == null) return;
+
+    // Remove bookmarks with empty paths before saving; auto-generate labels from path
+    _filePlayerConfig.BookmarkedPaths.RemoveAll(b => string.IsNullOrWhiteSpace(b.Path));
+    foreach (var b in _filePlayerConfig.BookmarkedPaths.Where(b => string.IsNullOrWhiteSpace(b.Label)))
+    {
+      b.Label = b.Path.Split('/').LastOrDefault(s => !string.IsNullOrEmpty(s)) ?? b.Path;
+    }
+
     _isSaving = true;
     try
     {
@@ -2666,6 +2748,37 @@
     }
     catch (Exception ex) { Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error); }
     finally { _isSaving = false; }
+  }
+
+  private void AddBookmark()
+  {
+    _filePlayerConfig?.BookmarkedPaths.Add(new BookmarkedPathDto());
+  }
+
+  private void RemoveBookmark(int index)
+  {
+    if (_filePlayerConfig != null && index >= 0 && index < _filePlayerConfig.BookmarkedPaths.Count)
+    {
+      _filePlayerConfig.BookmarkedPaths.RemoveAt(index);
+    }
+  }
+
+  private void MoveBookmarkUp(int index)
+  {
+    if (_filePlayerConfig != null && index > 0 && index < _filePlayerConfig.BookmarkedPaths.Count)
+    {
+      (_filePlayerConfig.BookmarkedPaths[index - 1], _filePlayerConfig.BookmarkedPaths[index]) =
+        (_filePlayerConfig.BookmarkedPaths[index], _filePlayerConfig.BookmarkedPaths[index - 1]);
+    }
+  }
+
+  private void MoveBookmarkDown(int index)
+  {
+    if (_filePlayerConfig != null && index >= 0 && index < _filePlayerConfig.BookmarkedPaths.Count - 1)
+    {
+      (_filePlayerConfig.BookmarkedPaths[index], _filePlayerConfig.BookmarkedPaths[index + 1]) =
+        (_filePlayerConfig.BookmarkedPaths[index + 1], _filePlayerConfig.BookmarkedPaths[index]);
+    }
   }
 
   private async Task SaveFingerprintingConfigAsync()
