@@ -5,6 +5,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Radio.Core.Interfaces.Audio;
+using Serilog;
+using Serilog.Events;
 
 namespace Radio.IntegrationTests.TestSupport;
 
@@ -78,6 +80,12 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
 
   protected override void ConfigureWebHost(IWebHostBuilder builder)
   {
+    // Suppress Serilog console output during tests
+    Log.Logger = new LoggerConfiguration()
+      .MinimumLevel.Override("Microsoft", LogEventLevel.Fatal)
+      .MinimumLevel.Fatal()
+      .CreateLogger();
+
     builder.UseEnvironment("IntegrationTests");
 
     // Override configuration to use temp directory

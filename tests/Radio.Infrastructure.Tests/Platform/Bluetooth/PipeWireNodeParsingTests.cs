@@ -11,7 +11,10 @@ public class PipeWireNodeParsingTests
   {
     var sb = new System.Text.StringBuilder();
     sb.AppendLine($"id {id}, type PipeWire:Interface:Node/3");
-    if (serial > 0) sb.AppendLine($"  object.serial = \"{serial}\"");
+    if (serial > 0)
+    {
+      sb.AppendLine($"  object.serial = \"{serial}\"");
+    }
     sb.Append($"  node.name = \"{nodeName}\"");
     return sb.ToString();
   }

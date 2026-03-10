@@ -39,7 +39,9 @@ public sealed class CompositeSecretsProvider : ISecretsProvider, IAsyncDisposabl
     // Try SQLite first
     var secret = await _sqliteProvider.GetSecretAsync(tag, ct);
     if (secret != null)
+    {
       return secret;
+    }
 
     // Fall back to JSON
     secret = await _jsonProvider.GetSecretAsync(tag, ct);
@@ -73,7 +75,9 @@ public sealed class CompositeSecretsProvider : ISecretsProvider, IAsyncDisposabl
     var jsonDeleted = await _jsonProvider.DeleteSecretAsync(tag, ct);
 
     if (sqliteDeleted || jsonDeleted)
+    {
       _changeTokenSource?.SignalChange();
+    }
 
     return sqliteDeleted || jsonDeleted;
   }
@@ -87,7 +91,9 @@ public sealed class CompositeSecretsProvider : ISecretsProvider, IAsyncDisposabl
     // Union, deduplicated
     var allTags = new HashSet<string>(sqliteTags);
     foreach (var tag in jsonTags)
+    {
       allTags.Add(tag);
+    }
 
     return allTags.ToList();
   }
@@ -102,7 +108,9 @@ public sealed class CompositeSecretsProvider : ISecretsProvider, IAsyncDisposabl
   public async Task<string> ResolveTagsAsync(string value, CancellationToken ct = default)
   {
     if (string.IsNullOrEmpty(value) || !ContainsSecretTag(value))
+    {
       return value;
+    }
 
     var result = value;
     foreach (var tag in SecretTag.ExtractAll(value))

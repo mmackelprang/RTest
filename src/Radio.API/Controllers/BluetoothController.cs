@@ -155,9 +155,13 @@ public class BluetoothController : ControllerBase
     [FromBody] BluetoothDeviceRequest? request = null)
   {
     if (!string.IsNullOrWhiteSpace(request?.DeviceAddress))
+    {
       await _bluetoothService.DisconnectAsync(request.DeviceAddress);
+    }
     else
+    {
       await _bluetoothService.DisconnectAsync();
+    }
     return Ok(BuildStatus());
   }
 

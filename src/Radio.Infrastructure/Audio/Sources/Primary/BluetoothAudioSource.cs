@@ -82,7 +82,9 @@ public class BluetoothAudioSource : USBAudioSourceBase
     _bluetoothService.DeviceDisconnected += OnDeviceDisconnected;
 
     if (_identificationService != null)
+    {
       _identificationService.TrackIdentified += OnTrackIdentified;
+    }
   }
 
   public override string Name => "Bluetooth Audio";
@@ -287,7 +289,9 @@ public class BluetoothAudioSource : USBAudioSourceBase
     _bluetoothService.DeviceDisconnected -= OnDeviceDisconnected;
 
     if (_identificationService != null)
+    {
       _identificationService.TrackIdentified -= OnTrackIdentified;
+    }
 
     await _bluetoothService.StopAsync();
     await _bluetoothService.DisposeAsync();
@@ -508,15 +512,23 @@ public class BluetoothAudioSource : USBAudioSourceBase
       {
         await Task.Delay(TimeSpan.FromSeconds(retryDelaySeconds), ct);
 
-        if (_playbackId != null || State != AudioSourceState.Playing) return;
+        if (_playbackId != null || State != AudioSourceState.Playing)
+        {
+          return;
+        }
 
         Logger.LogDebug("BluetoothAudioSource: capture retry attempt {Attempt}/{Max}", i + 1, maxRetries);
         await TryReacquireCaptureAsync(ct);
-        if (_playbackId != null) return;
+        if (_playbackId != null)
+        {
+          return;
+        }
       }
 
       if (State == AudioSourceState.Playing && _playbackId == null)
+      {
         Logger.LogWarning("BluetoothAudioSource: capture retry exhausted after {Max} attempts", maxRetries);
+      }
     }
     catch (OperationCanceledException) { }
     catch (Exception ex)
@@ -534,8 +546,14 @@ public class BluetoothAudioSource : USBAudioSourceBase
   {
     try
     {
-      if (_bluetoothService.IsAudioManagedByPlatform) return;
-      if (_captureDevice != null || SoundComponent != null || _playbackId != null) return;
+      if (_bluetoothService.IsAudioManagedByPlatform)
+      {
+        return;
+      }
+      if (_captureDevice != null || SoundComponent != null || _playbackId != null)
+      {
+        return;
+      }
 
       var capture = await _bluetoothService.GetAudioCaptureDeviceAsync(ct);
       if (capture is AudioCaptureDevice audioCapture)
@@ -611,7 +629,10 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
   private void OnMetadataChanged(object? sender, BluetoothPlaybackMetadata e)
   {
-    if (e == null) return;
+    if (e == null)
+    {
+      return;
+    }
 
     // Clear stale audio from the previous song so the new track is heard immediately
     // rather than draining 0.8-2.0s of buffered audio from the old song.
@@ -689,11 +710,17 @@ public class BluetoothAudioSource : USBAudioSourceBase
     if (FpOptions.UseShazamForAllSources)
     {
       if (!string.IsNullOrEmpty(e.Track.Title))
+      {
         MetadataInternal[StandardMetadataKeys.Title] = e.Track.Title;
+      }
       if (!string.IsNullOrEmpty(e.Track.Artist))
+      {
         MetadataInternal[StandardMetadataKeys.Artist] = e.Track.Artist;
+      }
       if (!string.IsNullOrEmpty(e.Track.Album))
+      {
         MetadataInternal[StandardMetadataKeys.Album] = e.Track.Album;
+      }
 
       if (!string.IsNullOrEmpty(e.Track.CoverArtUrl) && _serviceScopeFactory != null)
       {
@@ -798,7 +825,10 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
       using var scope = _serviceScopeFactory!.CreateScope();
       var lookupService = scope.ServiceProvider.GetService<IMetadataLookupService>();
-      if (lookupService == null) return;
+      if (lookupService == null)
+      {
+        return;
+      }
 
       var coverArtUrl = await lookupService.GetCoverArtByReleaseIdAsync(releaseId);
       if (!string.IsNullOrEmpty(coverArtUrl))
@@ -842,12 +872,18 @@ public class BluetoothAudioSource : USBAudioSourceBase
   {
     try
     {
-      if (_serviceScopeFactory == null) return;
+      if (_serviceScopeFactory == null)
+      {
+        return;
+      }
 
       using var scope = _serviceScopeFactory.CreateScope();
       var playHistoryRepo = scope.ServiceProvider.GetService<IPlayHistoryRepository>();
       var metadataRepo = scope.ServiceProvider.GetService<ITrackMetadataRepository>();
-      if (playHistoryRepo == null || metadataRepo == null) return;
+      if (playHistoryRepo == null || metadataRepo == null)
+      {
+        return;
+      }
 
       // Find the most recent BT entry that matches this track
       var recentEntries = await playHistoryRepo.GetRecentAsync(5);
@@ -896,11 +932,15 @@ public class BluetoothAudioSource : USBAudioSourceBase
     {
       case BluetoothPlaybackStatus.Playing:
         if (State == AudioSourceState.Ready || State == AudioSourceState.Paused)
+        {
           State = AudioSourceState.Playing;
+        }
         // Phone started streaming — if source is active but has no capture, try to acquire.
         // This handles the case where the phone was paused when the source was activated.
         if (State == AudioSourceState.Playing && _playbackId == null && !_bluetoothService.IsAudioManagedByPlatform)
+        {
           _ = TryReacquireCaptureAsync();
+        }
         break;
       case BluetoothPlaybackStatus.Paused when State == AudioSourceState.Playing:
         State = AudioSourceState.Paused;

@@ -87,15 +87,21 @@ public class PlayHistoryTracker : IDisposable
     try
     {
       if (sender is not IAudioSource source)
+      {
         return;
+      }
 
       // Only record when transitioning to Playing state
       if (e.NewState != AudioSourceState.Playing)
+      {
         return;
+      }
 
       // Only track primary sources that are the active source
       if (source != _getActiveSource())
+      {
         return;
+      }
 
       _logger.LogInformation(
         "Source {SourceName} transitioned to Playing, recording play history",
@@ -142,7 +148,9 @@ public class PlayHistoryTracker : IDisposable
       string? btDeviceName = null;
       if (playSource == PlaySource.Bluetooth && source is IPrimaryAudioSource ps2 &&
           ps2.Metadata?.TryGetValue("Device", out var deviceObj) == true)
+      {
         btDeviceName = deviceObj?.ToString();
+      }
 
       if (playSource == PlaySource.Bluetooth &&
           IsPlaceholderMetadata(newTitle, newArtist, playSource, btDeviceName))
@@ -168,9 +176,13 @@ public class PlayHistoryTracker : IDisposable
           ps.Metadata.TryGetValue(StandardMetadataKeys.Duration, out var durObj))
       {
         if (durObj is TimeSpan ts)
+        {
           durationSeconds = (int)ts.TotalSeconds;
+        }
         else if (double.TryParse(durObj?.ToString(), out var durVal))
+        {
           durationSeconds = (int)durVal;
+        }
       }
 
       // Check for a recent entry from the same source to upsert against
@@ -284,12 +296,17 @@ public class PlayHistoryTracker : IDisposable
   private static bool IsPlaceholderMetadata(
     string? title, string? artist, PlaySource source, string? btDeviceName = null)
   {
-    if (string.IsNullOrWhiteSpace(title)) return true;
+    if (string.IsNullOrWhiteSpace(title))
+    {
+      return true;
+    }
 
     // BT device name (e.g., "Pixel 8 Pro") used as title before AVRCP arrives
     if (source == PlaySource.Bluetooth && btDeviceName != null &&
         string.Equals(title, btDeviceName, StringComparison.OrdinalIgnoreCase))
+    {
       return true;
+    }
 
     // Source-type fallback artists indicate no real metadata was available
     var fallbackArtist = source switch
@@ -302,7 +319,9 @@ public class PlayHistoryTracker : IDisposable
       _ => null
     };
     if (fallbackArtist != null && string.Equals(artist, fallbackArtist, StringComparison.OrdinalIgnoreCase))
+    {
       return true;
+    }
 
     // Source-type fallback titles (static readonly arrays to avoid per-call allocations)
     var fallbackTitles = source switch
@@ -314,7 +333,9 @@ public class PlayHistoryTracker : IDisposable
       _ => Array.Empty<string>()
     };
     if (fallbackTitles.Any(f => string.Equals(title, f, StringComparison.OrdinalIgnoreCase)))
+    {
       return true;
+    }
 
     return false;
   }
@@ -348,10 +369,22 @@ public class PlayHistoryTracker : IDisposable
     }
 
     // Strip default placeholders so we can apply better fallbacks
-    if (title == StandardMetadataKeys.DefaultTitle) title = null;
-    if (artist == StandardMetadataKeys.DefaultArtist) artist = null;
-    if (album == StandardMetadataKeys.DefaultAlbum) album = null;
-    if (coverArt == StandardMetadataKeys.DefaultAlbumArtUrl) coverArt = null;
+    if (title == StandardMetadataKeys.DefaultTitle)
+    {
+      title = null;
+    }
+    if (artist == StandardMetadataKeys.DefaultArtist)
+    {
+      artist = null;
+    }
+    if (album == StandardMetadataKeys.DefaultAlbum)
+    {
+      album = null;
+    }
+    if (coverArt == StandardMetadataKeys.DefaultAlbumArtUrl)
+    {
+      coverArt = null;
+    }
 
     // Source-specific fallbacks for title
     if (string.IsNullOrWhiteSpace(title))
@@ -409,7 +442,9 @@ public class PlayHistoryTracker : IDisposable
     if (source is IPrimaryAudioSource primary && primary.Metadata != null)
     {
       if (primary.Metadata.TryGetValue("Frequency", out var freq) && freq != null)
+      {
         return freq.ToString()!;
+      }
     }
     return "Radio";
   }
@@ -432,13 +467,19 @@ public class PlayHistoryTracker : IDisposable
     else if (source is IPrimaryAudioSource ps && ps.Metadata != null)
     {
       if (ps.Metadata.TryGetValue("Frequency", out var f))
+      {
         freq = f?.ToString() ?? "";
+      }
     }
 
     if (!string.IsNullOrEmpty(station))
+    {
       return $"{band} / {freq} / {station}";
+    }
     if (!string.IsNullOrEmpty(freq))
+    {
       return $"{band} / {freq}";
+    }
     return "Radio";
   }
 
@@ -461,7 +502,9 @@ public class PlayHistoryTracker : IDisposable
   private static string GetFilePlayerTitle(IAudioSource source)
   {
     if (source is FilePlayerAudioSource filePlayer && !string.IsNullOrEmpty(filePlayer.CurrentFile))
+    {
       return System.IO.Path.GetFileNameWithoutExtension(filePlayer.CurrentFile);
+    }
     return "File Player";
   }
 
@@ -488,7 +531,9 @@ public class PlayHistoryTracker : IDisposable
   {
     var activeSource = _getActiveSource();
     if (activeSource == null)
+    {
       return;
+    }
 
     try
     {
@@ -510,7 +555,9 @@ public class PlayHistoryTracker : IDisposable
         // Persist the identified track metadata so the DB row exists for JOIN queries
         var metadataRepository = scope.ServiceProvider.GetService<ITrackMetadataRepository>();
         if (metadataRepository != null)
+        {
           await metadataRepository.StoreAsync(e.Track);
+        }
 
         // Update the existing entry with fingerprinting data
         var updatedEntry = existingEntry with
@@ -548,7 +595,9 @@ public class PlayHistoryTracker : IDisposable
   {
     var activeSource = _getActiveSource();
     if (activeSource == null)
+    {
       return;
+    }
 
     try
     {
@@ -647,15 +696,22 @@ public class PlayHistoryTracker : IDisposable
   {
     // Only handle if we have real metadata and the active source is Bluetooth
     if (e == null || string.IsNullOrEmpty(e.Title) || string.IsNullOrEmpty(e.Artist))
+    {
       return;
+    }
     if (_getActiveSource()?.Type != AudioSourceType.Bluetooth)
+    {
       return;
+    }
 
     try
     {
       using var scope = _serviceScopeFactory.CreateScope();
       var playHistoryRepository = scope.ServiceProvider.GetService<IPlayHistoryRepository>();
-      if (playHistoryRepository == null) return;
+      if (playHistoryRepository == null)
+      {
+        return;
+      }
       var metadataRepository = scope.ServiceProvider.GetService<ITrackMetadataRepository>();
 
       // Dedup: skip if this exact title+artist was recently played (5-min window
@@ -713,13 +769,17 @@ public class PlayHistoryTracker : IDisposable
       // Case 2: Already up to date — skip
       if (string.Equals(existingTitle, e.Title, StringComparison.OrdinalIgnoreCase) &&
           string.Equals(existingArtist, e.Artist, StringComparison.OrdinalIgnoreCase))
+      {
         return;
+      }
 
       // Get BT device name for placeholder detection (e.g., "Pixel 8 Pro")
       string? btDeviceName = null;
       if (_getActiveSource() is IPrimaryAudioSource btSource &&
           btSource.Metadata?.TryGetValue("Device", out var devObj) == true)
+      {
         btDeviceName = devObj?.ToString();
+      }
 
       // Case 3: Current entry is a placeholder (device name) — update in place
       if (entry.Source == PlaySource.Bluetooth &&
@@ -727,7 +787,9 @@ public class PlayHistoryTracker : IDisposable
       {
         metadata = metadata with { Id = entry.TrackMetadataId ?? metadata.Id };
         if (metadataRepository != null)
+        {
           await metadataRepository.StoreAsync(metadata);
+        }
 
         var updatedEntry = entry with
         {
@@ -773,7 +835,9 @@ public class PlayHistoryTracker : IDisposable
     BluetoothPlaybackMetadata btMeta)
   {
     if (metadataRepository != null)
+    {
       await metadataRepository.StoreAsync(metadata);
+    }
 
     int? durationSeconds = btMeta.Duration > TimeSpan.Zero
       ? (int)btMeta.Duration.TotalSeconds
@@ -805,7 +869,10 @@ public class PlayHistoryTracker : IDisposable
 
   public void Dispose()
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+      return;
+    }
     _disposed = true;
 
     // Finalize any in-flight play history entry before unsubscribing

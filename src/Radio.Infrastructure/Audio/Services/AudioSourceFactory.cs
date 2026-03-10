@@ -205,7 +205,9 @@ public class AudioSourceFactory : IAudioSourceFactory
   private IAudioSource CreateTestToneSource()
   {
     if (_playbackService == null)
+    {
       throw new InvalidOperationException("SoundFlowPlaybackService is required for TestTone source");
+    }
 
     var logger = _loggerFactory.CreateLogger<TestToneAudioSource>();
     return new TestToneAudioSource(logger, _playbackService);

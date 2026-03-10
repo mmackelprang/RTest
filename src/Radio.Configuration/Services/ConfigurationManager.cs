@@ -168,7 +168,9 @@ public sealed class ConfigurationManager : IConfigurationManager
     var entry = await store.GetEntryAsync(key, mode, ct);
 
     if (entry == null)
+    {
       return default;
+    }
 
     if (typeof(T) == typeof(string))
     {

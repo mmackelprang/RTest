@@ -54,7 +54,9 @@ public class WaveformComparisonTests
     var reference = WavFileHelper.GenerateStereoSineWave(200, 300, 48000, 4800, 0.8f);
     var captured = new float[reference.Length];
     for (int i = 0; i < reference.Length; i++)
+    {
       captured[i] = reference[i] * 0.5f; // Half amplitude
+    }
 
     var report = WaveformComparison.Compare(reference, captured);
     Assert.InRange(report.GainRatio, 0.49f, 0.51f);
@@ -68,7 +70,9 @@ public class WaveformComparisonTests
     var captured = (float[])reference.Clone();
     // Insert silence gap
     for (int i = 1000; i < 1100; i++)
+    {
       captured[i] = 0f;
+    }
 
     var report = WaveformComparison.Compare(reference, captured);
     Assert.Contains(report.Events, e => e.Type == DistortionType.SilenceInsertion);

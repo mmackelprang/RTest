@@ -716,7 +716,9 @@ public class GoogleCastOutput : AudioOutputBase
       // Build a new list from existing channels + our custom one
       var newList = new List<object>();
       foreach (var ch in existing)
+      {
         newList.Add(ch);
+      }
       newList.Add(channel);
 
       // Convert to array of the interface type
@@ -725,7 +727,9 @@ public class GoogleCastOutput : AudioOutputBase
       {
         var arr = Array.CreateInstance(interfaceType, newList.Count);
         for (int i = 0; i < newList.Count; i++)
+        {
           arr.SetValue(newList[i], i);
+        }
         prop.SetValue(client, arr);
       }
       else
@@ -862,7 +866,9 @@ public class GoogleCastOutput : AudioOutputBase
   public async Task<object> TestPlayUrlAsync(string url, string contentType)
   {
     if (_client == null)
+    {
       return new { success = false, error = "Not connected to a Cast device" };
+    }
 
     try
     {
@@ -884,7 +890,9 @@ public class GoogleCastOutput : AudioOutputBase
 
       var mediaChannel = _client.GetChannel<MediaChannel>();
       if (mediaChannel == null)
+      {
         return new { success = false, error = "MediaChannel not available" };
+      }
 
       var loadStatus = await mediaChannel.LoadAsync(media, true);
       _logger.LogInformation(
@@ -987,7 +995,10 @@ public class GoogleCastOutput : AudioOutputBase
   {
     var media = BuildMedia();
     var mediaChannel = _client!.GetChannel<MediaChannel>();
-    if (mediaChannel == null) return;
+    if (mediaChannel == null)
+    {
+      return;
+    }
 
     try
     {
@@ -1220,7 +1231,10 @@ public class GoogleCastOutput : AudioOutputBase
   /// </summary>
   private async Task DiagnoseStreamConnectivityAsync()
   {
-    if (string.IsNullOrEmpty(_streamUrl)) return;
+    if (string.IsNullOrEmpty(_streamUrl))
+    {
+      return;
+    }
 
     try
     {
@@ -1245,7 +1259,10 @@ public class GoogleCastOutput : AudioOutputBase
   /// </summary>
   private void SubscribeToReceiverStatus()
   {
-    if (_client == null) return;
+    if (_client == null)
+    {
+      return;
+    }
 
     var receiverChannel = _client.GetChannel<ReceiverChannel>();
     if (receiverChannel != null)
@@ -1260,7 +1277,10 @@ public class GoogleCastOutput : AudioOutputBase
   /// </summary>
   private void UnsubscribeFromReceiverStatus()
   {
-    if (_client == null) return;
+    if (_client == null)
+    {
+      return;
+    }
 
     var receiverChannel = _client.GetChannel<ReceiverChannel>();
     if (receiverChannel != null)
@@ -1274,7 +1294,10 @@ public class GoogleCastOutput : AudioOutputBase
   /// </summary>
   private async Task SyncInitialVolumeAsync()
   {
-    if (_client == null) return;
+    if (_client == null)
+    {
+      return;
+    }
 
     try
     {
@@ -1315,7 +1338,10 @@ public class GoogleCastOutput : AudioOutputBase
   /// </summary>
   private void OnReceiverStatusChanged(object? sender, ChromecastStatus status)
   {
-    if (status.Volume == null) return;
+    if (status.Volume == null)
+    {
+      return;
+    }
 
     var deviceVolume = (float)(status.Volume.Level ?? 0);
     var deviceMuted = status.Volume.Muted ?? false;
@@ -1333,7 +1359,10 @@ public class GoogleCastOutput : AudioOutputBase
     var volumeChanged = Math.Abs(deviceVolume - _lastSetVolume) > 0.01f;
     var muteChanged = deviceMuted != _lastSetMute;
 
-    if (!volumeChanged && !muteChanged) return;
+    if (!volumeChanged && !muteChanged)
+    {
+      return;
+    }
 
     _lastSetVolume = deviceVolume;
     _lastSetMute = deviceMuted;

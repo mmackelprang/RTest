@@ -306,9 +306,15 @@ public class SoundFlowAudioEngine : IAudioEngine
       // Periodically log limiter engagement stats (every 30s)
       _limiterStatsTimer = new Timer(_ =>
       {
-        if (_limiterModifier == null) return;
+        if (_limiterModifier == null)
+        {
+            return;
+        }
         var stats = _limiterModifier.GetAndResetStats();
-        if (stats == null) return;
+        if (stats == null)
+        {
+            return;
+        }
         var s = stats.Value;
         if (s.LimitedSamples > 0)
         {
@@ -460,7 +466,9 @@ public class SoundFlowAudioEngine : IAudioEngine
   internal AudioPlaybackDevice? GetPlaybackDevice()
   {
     if (_playbackDevice != null)
-      return _playbackDevice;
+    {
+        return _playbackDevice;
+    }
 
     // Attempt lazy recovery if engine is running but device is missing
     if (_engine != null && (State == AudioEngineState.Ready || State == AudioEngineState.Running))
@@ -602,7 +610,10 @@ public class SoundFlowAudioEngine : IAudioEngine
   /// </summary>
   private void AttachModifiersToPlaybackDevice()
   {
-    if (_playbackDevice == null) return;
+    if (_playbackDevice == null)
+    {
+        return;
+    }
 
     // Balance modifier (first in chain)
     if (_balanceModifier != null)
@@ -658,7 +669,10 @@ public class SoundFlowAudioEngine : IAudioEngine
   /// </summary>
   internal void AddDiagnosticModifier(SoundModifier modifier)
   {
-    if (_playbackDevice == null) return;
+    if (_playbackDevice == null)
+    {
+        return;
+    }
     _playbackDevice.MasterMixer.AddModifier(modifier);
     _logger.LogDebug("Diagnostic modifier {Name} attached to mixer", modifier.Name);
   }
@@ -668,7 +682,10 @@ public class SoundFlowAudioEngine : IAudioEngine
   /// </summary>
   internal void RemoveDiagnosticModifier(SoundModifier modifier)
   {
-    if (_playbackDevice == null) return;
+    if (_playbackDevice == null)
+    {
+        return;
+    }
     _playbackDevice.MasterMixer.RemoveModifier(modifier);
     _logger.LogDebug("Diagnostic modifier {Name} removed from mixer", modifier.Name);
   }
@@ -679,7 +696,10 @@ public class SoundFlowAudioEngine : IAudioEngine
   /// </summary>
   internal static BufferedSoundGenerator<float>? GetGeneratorFromSource(IAudioSource? source)
   {
-    if (source == null) return null;
+    if (source == null)
+    {
+        return null;
+    }
     try
     {
       return source.GetSoundComponent() as BufferedSoundGenerator<float>;
@@ -760,7 +780,10 @@ public class SoundFlowAudioEngine : IAudioEngine
 
   private void CheckForDeviceChanges(object? state)
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+        return;
+    }
 
     try
     {
@@ -818,7 +841,10 @@ public class SoundFlowAudioEngine : IAudioEngine
   /// <inheritdoc/>
   public async ValueTask DisposeAsync()
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+        return;
+    }
 
     _disposed = true;
     State = AudioEngineState.Disposed;

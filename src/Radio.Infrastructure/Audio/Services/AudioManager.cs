@@ -155,11 +155,15 @@ public class AudioManager : IAudioManager, IAsyncDisposable
 
     // Restore volume/mute/balance from persisted preferences
     if (_preferencePersistence != null)
+    {
       await _preferencePersistence.RestoreVolumePreferencesAsync();
+    }
 
     // Restore per-source gain offsets from persisted preferences
     if (_preferencePersistence != null)
+    {
       await _preferencePersistence.RestoreSourceGainOffsetsAsync();
+    }
 
     _initialized = true;
     _logger.LogInformation("AudioManager initialized successfully");
@@ -450,7 +454,9 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   private void OnSourceStateChanged(object? sender, AudioSourceStateChangedEventArgs e)
   {
     if (sender is not IAudioSource source)
+    {
       return;
+    }
 
     _logger.LogInformation(
       "Source state changed: {SourceName} ({SourceType}) {OldState} -> {NewState}, IsActiveSource={IsActive}",
@@ -464,7 +470,9 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   private void OnDuckingLevelChanged(object? sender, DuckingLevelChangedEventArgs e)
   {
     if (_playbackService == null || _activeSource == null)
+    {
       return;
+    }
 
     // Convert duck level percentage (0-100) to multiplier (0.0-1.0)
     var multiplier = e.NewLevel / 100f;
@@ -482,7 +490,9 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   private void OnDuckingStateChanged(object? sender, DuckingStateChangedEventArgs e)
   {
     if (_playbackService == null)
+    {
       return;
+    }
 
     if (e.IsDucking)
     {

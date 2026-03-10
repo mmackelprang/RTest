@@ -107,7 +107,9 @@ public sealed class MetadataLookupService : IMetadataLookupService
     string title, string artist, string? album = null, CancellationToken ct = default)
   {
     if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(artist))
+    {
       return null;
+    }
 
     try
     {
@@ -120,7 +122,9 @@ public sealed class MetadataLookupService : IMetadataLookupService
       var escapedArtist = Uri.EscapeDataString(artist);
       var query = $"recording:\"{escapedTitle}\" AND artist:\"{escapedArtist}\"";
       if (!string.IsNullOrWhiteSpace(album))
+      {
         query += $" AND release:\"{Uri.EscapeDataString(album)}\"";
+      }
 
       var mb = _options.MusicBrainz;
       var url = $"{mb.BaseUrl}/recording?query={query}&fmt=json&limit=5";
@@ -148,10 +152,16 @@ public sealed class MetadataLookupService : IMetadataLookupService
       // Try multiple recordings/releases — the first may not have cover art
       foreach (var recording in recordings)
       {
-        if (recording.Releases == null) continue;
+        if (recording.Releases == null)
+        {
+          continue;
+        }
         foreach (var release in recording.Releases)
         {
-          if (string.IsNullOrEmpty(release.Id)) continue;
+          if (string.IsNullOrEmpty(release.Id))
+          {
+            continue;
+          }
           var coverArtUrl = await GetCoverArtUrlAsync(release.Id, ct);
           if (!string.IsNullOrEmpty(coverArtUrl))
           {
@@ -226,7 +236,9 @@ public sealed class MetadataLookupService : IMetadataLookupService
   public async Task<string?> GetCoverArtByReleaseIdAsync(string releaseId, CancellationToken ct = default)
   {
     if (string.IsNullOrWhiteSpace(releaseId))
+    {
       return null;
+    }
 
     return await GetCoverArtUrlAsync(releaseId, ct);
   }

@@ -124,12 +124,19 @@ internal sealed class BluezAgent : IAgent1
       // to avoid flooding the log when BlueZ retries A2DP connections
       var key = $"{device}:{uuid}";
       bool isFirst;
-      lock (_authorizedServices) { isFirst = _authorizedServices.Add(key); }
+      lock (_authorizedServices)
+      {
+        isFirst = _authorizedServices.Add(key);
+      }
 
       if (isFirst)
+      {
         _logger.LogInformation("Auto-authorizing Bluetooth service {UUID} for {Device}", uuid, device);
+      }
       else
+      {
         _logger.LogDebug("Re-authorizing Bluetooth service {UUID} for {Device}", uuid, device);
+      }
       return Task.CompletedTask;
     }
 
@@ -146,7 +153,10 @@ internal sealed class BluezAgent : IAgent1
     var path = devicePath.ToString();
     var devPrefix = "/dev_";
     var idx = path.LastIndexOf(devPrefix, StringComparison.Ordinal);
-    if (idx < 0) return null;
+    if (idx < 0)
+    {
+      return null;
+    }
     var mac = path[(idx + devPrefix.Length)..];
     return mac.Replace('_', ':');
   }

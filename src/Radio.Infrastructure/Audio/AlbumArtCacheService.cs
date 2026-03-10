@@ -119,7 +119,9 @@ public sealed class AlbumArtCacheService : IAlbumArtCacheService, IDisposable
 
       var bytes = await response.Content.ReadAsByteArrayAsync();
       if (bytes.Length == 0)
+      {
         return null;
+      }
 
       // Detect MIME from Content-Type header or magic bytes
       var contentType = response.Content.Headers.ContentType?.MediaType;
@@ -141,11 +143,15 @@ public sealed class AlbumArtCacheService : IAlbumArtCacheService, IDisposable
   {
     // Sanitize: only allow alphanumeric, dash, underscore, dot
     if (string.IsNullOrWhiteSpace(filename) || filename.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+    {
       return null;
+    }
 
     // Prevent path traversal
     if (filename.Contains("..") || filename.Contains('/') || filename.Contains('\\'))
+    {
       return null;
+    }
 
     var filePath = Path.Combine(_cacheDir, filename);
     return File.Exists(filePath) ? filePath : null;
@@ -159,7 +165,9 @@ public sealed class AlbumArtCacheService : IAlbumArtCacheService, IDisposable
     try
     {
       if (!Directory.Exists(_cacheDir))
+      {
         return;
+      }
 
       var cutoff = DateTime.UtcNow - Ttl;
       var removed = 0;
@@ -205,20 +213,28 @@ public sealed class AlbumArtCacheService : IAlbumArtCacheService, IDisposable
   internal static string? DetectMimeFromBytes(byte[] data)
   {
     if (data.Length < 4)
+    {
       return null;
+    }
 
     // PNG: 0x89 0x50 0x4E 0x47
     if (data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47)
+    {
       return "image/png";
+    }
 
     // JPEG: 0xFF 0xD8
     if (data[0] == 0xFF && data[1] == 0xD8)
+    {
       return "image/jpeg";
+    }
 
     // WebP: RIFF....WEBP
     if (data.Length >= 12 && data[0] == 0x52 && data[1] == 0x49 && data[2] == 0x46 && data[3] == 0x46
         && data[8] == 0x57 && data[9] == 0x45 && data[10] == 0x42 && data[11] == 0x50)
+    {
       return "image/webp";
+    }
 
     return null;
   }
@@ -246,7 +262,10 @@ public sealed class AlbumArtCacheService : IAlbumArtCacheService, IDisposable
 
   public void Dispose()
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+      return;
+    }
     _disposed = true;
     _cleanupTimer.Dispose();
     _httpClient.Dispose();

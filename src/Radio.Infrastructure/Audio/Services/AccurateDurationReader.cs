@@ -21,7 +21,9 @@ public static class AccurateDurationReader
       using var tagFile = TagLib.File.Create(filePath);
       var duration = tagFile.Properties.Duration;
       if (duration > TimeSpan.Zero)
+      {
         return duration;
+      }
     }
     catch (Exception ex)
     {

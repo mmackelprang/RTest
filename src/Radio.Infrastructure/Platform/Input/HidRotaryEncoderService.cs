@@ -46,7 +46,10 @@ public class HidRotaryEncoderService : IRotaryEncoderService
   /// <inheritdoc />
   public Task StartAsync(CancellationToken cancellationToken = default)
   {
-    if (_disposed) throw new ObjectDisposedException(nameof(HidRotaryEncoderService));
+    if (_disposed)
+    {
+      throw new ObjectDisposedException(nameof(HidRotaryEncoderService));
+    }
 
     _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
     _readTask = ReadLoopAsync(_cts.Token);
@@ -164,7 +167,10 @@ public class HidRotaryEncoderService : IRotaryEncoderService
         return;
       }
 
-      if (bytesRead < 6) continue;
+      if (bytesRead < 6)
+      {
+        continue;
+      }
 
       ParseReport(buffer);
 
@@ -233,7 +239,10 @@ public class HidRotaryEncoderService : IRotaryEncoderService
   /// <inheritdoc />
   public void Dispose()
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+      return;
+    }
     _disposed = true;
     _cts?.Cancel();
     _cts?.Dispose();

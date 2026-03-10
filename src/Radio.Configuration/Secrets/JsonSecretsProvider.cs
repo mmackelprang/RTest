@@ -119,12 +119,18 @@ public sealed class JsonSecretsProvider : SecretsProviderBase, IDisposable
 
   private async Task EnsureLoadedAsync(CancellationToken ct)
   {
-    if (_isLoaded) return;
+    if (_isLoaded)
+    {
+      return;
+    }
 
     await _lock.WaitAsync(ct);
     try
     {
-      if (_isLoaded) return;
+      if (_isLoaded)
+      {
+        return;
+      }
       await LoadAsync(ct);
       _isLoaded = true;
     }
@@ -182,7 +188,10 @@ public sealed class JsonSecretsProvider : SecretsProviderBase, IDisposable
   /// <inheritdoc/>
   public void Dispose()
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+      return;
+    }
     _lock.Dispose();
     _disposed = true;
   }

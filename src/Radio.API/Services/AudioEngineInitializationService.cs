@@ -533,7 +533,8 @@ public class AudioEngineInitializationService : IHostedService
   {
     try
     {
-      var repo = _serviceProvider.GetService<IPlayHistoryRepository>();
+      using var scope = _serviceProvider.CreateScope();
+      var repo = scope.ServiceProvider.GetService<IPlayHistoryRepository>();
       if (repo != null)
       {
         var closed = await repo.CloseOrphanedEntriesAsync(TimeSpan.FromMinutes(2), cancellationToken);

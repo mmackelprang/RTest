@@ -44,9 +44,13 @@ public sealed class SongRecRecognitionService : ISongRecRecognitionService
     _songRecPath = ResolveSongRecPath(songRecOptions.SongRecPath);
 
     if (IsAvailable)
+    {
       _logger.LogInformation("SongRec available at: {SongRecPath}", _songRecPath);
+    }
     else
+    {
       _logger.LogWarning("SongRec binary not found. Install via: sudo add-apt-repository ppa:marin-m/songrec && sudo apt install songrec");
+    }
   }
 
   /// <inheritdoc/>
@@ -82,7 +86,9 @@ public sealed class SongRecRecognitionService : ISongRecRecognitionService
       // Run songrec recognize
       var result = await RunSongRecAsync(tempFile, ct);
       if (result == null)
+      {
         return null;
+      }
 
       // Parse track metadata from Shazam response
       return ParseResult(result);
@@ -174,7 +180,9 @@ public sealed class SongRecRecognitionService : ISongRecRecognitionService
   internal static TrackMetadata? ParseResult(SongRecResult result)
   {
     if (result.Track == null)
+    {
       return null;
+    }
 
     var track = result.Track;
 
@@ -186,25 +194,36 @@ public sealed class SongRecRecognitionService : ISongRecRecognitionService
     {
       foreach (var section in track.Sections)
       {
-        if (section.Metadata == null) continue;
+        if (section.Metadata == null)
+        {
+          continue;
+        }
         foreach (var meta in section.Metadata)
         {
           if (string.Equals(meta.Title, "Album", StringComparison.OrdinalIgnoreCase))
+          {
             album = meta.Text;
+          }
           else if (string.Equals(meta.Title, "Released", StringComparison.OrdinalIgnoreCase))
           {
             if (int.TryParse(meta.Text, out var year))
+            {
               releaseYear = year;
+            }
           }
           else if (string.Equals(meta.Title, "Genre", StringComparison.OrdinalIgnoreCase))
+          {
             genre = meta.Text;
+          }
         }
       }
     }
 
     // Genre: prefer sections metadata, fall back to track.genres.primary
     if (string.IsNullOrEmpty(genre))
+    {
       genre = track.Genres?.Primary;
+    }
 
     // Cover art: prefer high-res, fall back to standard
     string? coverArtUrl = track.Images?.CoverArtHq

@@ -129,7 +129,9 @@ public abstract class PrimaryAudioSourceBase : AudioSourceBase, IPrimaryAudioSou
   {
     ThrowIfDisposed();
     if (!SupportsNext)
+    {
       throw new NotSupportedException($"Audio source {Id} does not support skipping to next track.");
+    }
     return Task.CompletedTask;
   }
 
@@ -142,7 +144,9 @@ public abstract class PrimaryAudioSourceBase : AudioSourceBase, IPrimaryAudioSou
   {
     ThrowIfDisposed();
     if (!SupportsPrevious)
+    {
       throw new NotSupportedException($"Audio source {Id} does not support going to previous track.");
+    }
     return Task.CompletedTask;
   }
 
@@ -155,7 +159,9 @@ public abstract class PrimaryAudioSourceBase : AudioSourceBase, IPrimaryAudioSou
   {
     ThrowIfDisposed();
     if (!SupportsShuffle)
+    {
       throw new NotSupportedException($"Audio source {Id} does not support shuffle mode.");
+    }
     return Task.CompletedTask;
   }
 
@@ -168,7 +174,9 @@ public abstract class PrimaryAudioSourceBase : AudioSourceBase, IPrimaryAudioSou
   {
     ThrowIfDisposed();
     if (!SupportsRepeat)
+    {
       throw new NotSupportedException($"Audio source {Id} does not support repeat mode.");
+    }
     return Task.CompletedTask;
   }
 

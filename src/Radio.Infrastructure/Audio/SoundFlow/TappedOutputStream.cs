@@ -96,7 +96,9 @@ internal sealed class TappedOutputStream : Stream
     lock (_lock)
     {
       if (!_readerPositions.TryGetValue(readerId, out var readPos))
+      {
         return 0;
+      }
       return (_writePosition - readPos + _bufferSize) % _bufferSize;
     }
   }
@@ -156,12 +158,16 @@ internal sealed class TappedOutputStream : Stream
   internal int ReadForReader(string readerId, byte[] buffer, int offset, int count)
   {
     if (_disposed)
+    {
       throw new ObjectDisposedException(nameof(TappedOutputStream));
+    }
 
     lock (_lock)
     {
       if (!_readerPositions.TryGetValue(readerId, out var readPos))
+      {
         return 0;
+      }
 
       var available = (_writePosition - readPos + _bufferSize) % _bufferSize;
 
@@ -201,7 +207,10 @@ internal sealed class TappedOutputStream : Stream
   /// <param name="samples">The float samples to write.</param>
   public void WriteFromEngine(float[] samples)
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+        return;
+    }
 
     lock (_lock)
     {
@@ -224,7 +233,10 @@ internal sealed class TappedOutputStream : Stream
   /// <param name="count">The number of samples to write.</param>
   public void WriteFromEngine(Span<float> samples, int count)
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+        return;
+    }
 
     lock (_lock)
     {
@@ -284,8 +296,14 @@ internal sealed class TappedOutputStream : Stream
     // to avoid a syscall (DateTime.UtcNow) on every audio callback
     _lastWriteTime = now;
 
-    if (_metricsCollector == null) return;
-    if ((now - _lastMetricsTime).TotalSeconds < 10) return;
+    if (_metricsCollector == null)
+    {
+        return;
+    }
+    if ((now - _lastMetricsTime).TotalSeconds < 10)
+    {
+        return;
+    }
 
     var elapsed = _lastMetricsTime == DateTime.MinValue ? 10.0 : (now - _lastMetricsTime).TotalSeconds;
     var bytesWrittenSinceLast = _totalBytesWritten - _lastMetricsBytesWritten;
@@ -425,7 +443,9 @@ internal sealed class TappedOutputStreamReader : Stream
   public override int Read(byte[] buffer, int offset, int count)
   {
     if (_disposed)
+    {
       throw new ObjectDisposedException(nameof(TappedOutputStreamReader));
+    }
     return _parent.ReadForReader(_readerId, buffer, offset, count);
   }
 
@@ -440,7 +460,9 @@ internal sealed class TappedOutputStreamReader : Stream
     byte[] buffer, int offset, int count, CancellationToken cancellationToken)
   {
     if (_disposed)
+    {
       throw new ObjectDisposedException(nameof(TappedOutputStreamReader));
+    }
 
     var available = _parent.GetAvailableForReader(_readerId);
     var bytesRead = _parent.ReadForReader(_readerId, buffer, offset, count);

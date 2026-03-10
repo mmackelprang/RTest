@@ -193,7 +193,9 @@ public sealed class BackgroundIdentificationService : BackgroundService
         // Skip idle delay when there are no failures — the capture duration already throttles.
         // Only delay on SongRec backoff.
         if (_consecutiveSongRecFailures == 0)
+        {
           continue;
+        }
 
         using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         _delayCts = delayCts;
@@ -442,7 +444,9 @@ public sealed class BackgroundIdentificationService : BackgroundService
     {
       _currentPhase = phase;
       if (error != null)
+      {
         _lastError = error;
+      }
       if (_currentEvent != null)
       {
         _currentEvent.Phase = phase;
@@ -470,7 +474,9 @@ public sealed class BackgroundIdentificationService : BackgroundService
         _currentSourceName = sourceName;
         _recentEvents.Add(_currentEvent);
         if (_recentEvents.Count > MaxRecentEvents)
+        {
           _recentEvents.RemoveAt(0);
+        }
         _eventsVersion++;
       }
     }
@@ -484,7 +490,10 @@ public sealed class BackgroundIdentificationService : BackgroundService
   {
     lock (_statusLock)
     {
-      if (_currentEvent == null) return;
+      if (_currentEvent == null)
+      {
+        return;
+      }
 
       _eventsVersion++;
 
@@ -528,7 +537,9 @@ public sealed class BackgroundIdentificationService : BackgroundService
       };
       _recentEvents.Add(_currentEvent);
       if (_recentEvents.Count > MaxRecentEvents)
+      {
         _recentEvents.RemoveAt(0);
+      }
     }
   }
 
@@ -540,7 +551,10 @@ public sealed class BackgroundIdentificationService : BackgroundService
   {
     lock (_statusLock)
     {
-      if (_currentEvent == null) return;
+      if (_currentEvent == null)
+      {
+        return;
+      }
 
       _eventsVersion++;
 
@@ -563,7 +577,9 @@ public sealed class BackgroundIdentificationService : BackgroundService
       };
       _recentEvents.Add(_currentEvent);
       if (_recentEvents.Count > MaxRecentEvents)
+      {
         _recentEvents.RemoveAt(0);
+      }
     }
   }
 
@@ -592,7 +608,10 @@ public sealed class BackgroundIdentificationService : BackgroundService
 
   private static double ComputeRate(List<DateTime> timestamps)
   {
-    if (timestamps.Count == 0) return 0;
+    if (timestamps.Count == 0)
+    {
+      return 0;
+    }
     var oldest = timestamps[0];
     var elapsed = (DateTime.UtcNow - oldest).TotalMinutes;
     return elapsed > 0 ? timestamps.Count / elapsed : 0;

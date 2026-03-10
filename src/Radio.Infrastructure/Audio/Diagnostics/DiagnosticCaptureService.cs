@@ -51,7 +51,9 @@ public class DiagnosticCaptureService
     lock (_captureLock)
     {
       if (IsCapturing)
+      {
         throw new InvalidOperationException("A capture is already in progress");
+      }
     }
 
     durationSeconds = Math.Clamp(durationSeconds, 1, MaxCaptureDurationSeconds);
@@ -107,7 +109,9 @@ public class DiagnosticCaptureService
 
       // Start all sessions
       foreach (var session in sessions.Values)
+      {
         session.Start();
+      }
 
       // Wait for the capture duration
       try
@@ -121,7 +125,9 @@ public class DiagnosticCaptureService
 
       // Stop all sessions
       foreach (var session in sessions.Values)
+      {
         session.Stop();
+      }
 
       // Detach hooks and taps
       if (activeGenerator != null)
@@ -131,7 +137,9 @@ public class DiagnosticCaptureService
       }
 
       if (postModifierTap != null && _audioEngine is SoundFlowAudioEngine sfEngine2)
+      {
         sfEngine2.RemoveDiagnosticModifier(postModifierTap);
+      }
 
       // Write WAV files
       var stageFiles = new Dictionary<string, string>();
@@ -177,7 +185,9 @@ public class DiagnosticCaptureService
 
       // Clean up tap if attached
       if (postModifierTap != null && _audioEngine is SoundFlowAudioEngine sfCleanup)
+      {
         sfCleanup.RemoveDiagnosticModifier(postModifierTap);
+      }
 
       return new CaptureResult
       {

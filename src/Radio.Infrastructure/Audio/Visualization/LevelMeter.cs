@@ -100,7 +100,10 @@ internal sealed class LevelMeter
         samplePairs++;
       }
 
-      if (samplePairs == 0) return;
+      if (samplePairs == 0)
+      {
+        return;
+      }
 
       // Update peak with hold
       UpdatePeakWithHold(newLeftPeak, ref _leftPeak, ref _leftPeakHeld, ref _leftPeakHoldExpiry, now);
@@ -145,7 +148,10 @@ internal sealed class LevelMeter
   {
     get
     {
-      lock (_lock) return _leftPeak;
+      lock (_lock)
+      {
+        return _leftPeak;
+      }
     }
   }
 
@@ -156,7 +162,10 @@ internal sealed class LevelMeter
   {
     get
     {
-      lock (_lock) return _rightPeak;
+      lock (_lock)
+      {
+        return _rightPeak;
+      }
     }
   }
 
@@ -167,7 +176,10 @@ internal sealed class LevelMeter
   {
     get
     {
-      lock (_lock) return _leftRms;
+      lock (_lock)
+      {
+        return _leftRms;
+      }
     }
   }
 
@@ -178,7 +190,10 @@ internal sealed class LevelMeter
   {
     get
     {
-      lock (_lock) return _rightRms;
+      lock (_lock)
+      {
+        return _rightRms;
+      }
     }
   }
 
@@ -203,7 +218,10 @@ internal sealed class LevelMeter
   {
     get
     {
-      lock (_lock) return Math.Max(_leftPeak, _rightPeak);
+      lock (_lock)
+      {
+        return Math.Max(_leftPeak, _rightPeak);
+      }
     }
   }
 
@@ -214,7 +232,10 @@ internal sealed class LevelMeter
   {
     get
     {
-      lock (_lock) return (_leftRms + _rightRms) / 2f;
+      lock (_lock)
+      {
+        return (_leftRms + _rightRms) / 2f;
+      }
     }
   }
 

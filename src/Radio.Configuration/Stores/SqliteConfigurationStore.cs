@@ -299,7 +299,9 @@ public sealed class SqliteConfigurationStore : ConfigurationStoreBase, IAsyncDis
   private async Task EnsureInitializedLocked(CancellationToken ct)
   {
     if (_tableCreated && _connection?.State == System.Data.ConnectionState.Open)
+    {
       return;
+    }
 
     await InitializeAsync(ct);
   }
@@ -347,7 +349,10 @@ public sealed class SqliteConfigurationStore : ConfigurationStoreBase, IAsyncDis
   /// <inheritdoc/>
   public async ValueTask DisposeAsync()
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+      return;
+    }
 
     if (_connection != null)
     {

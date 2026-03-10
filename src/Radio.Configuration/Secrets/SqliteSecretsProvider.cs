@@ -125,13 +125,17 @@ public sealed class SqliteSecretsProvider : SecretsProviderBase, IAsyncDisposabl
   private async Task EnsureInitializedAsync(CancellationToken ct)
   {
     if (_tableCreated && _connection?.State == System.Data.ConnectionState.Open)
+    {
       return;
+    }
 
     await _lock.WaitAsync(ct);
     try
     {
       if (_tableCreated && _connection?.State == System.Data.ConnectionState.Open)
+      {
         return;
+      }
 
       await InitializeAsync(ct);
     }
@@ -184,7 +188,10 @@ public sealed class SqliteSecretsProvider : SecretsProviderBase, IAsyncDisposabl
   /// <inheritdoc/>
   public async ValueTask DisposeAsync()
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+      return;
+    }
 
     if (_connection != null)
     {

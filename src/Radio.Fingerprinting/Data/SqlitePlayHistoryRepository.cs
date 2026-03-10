@@ -199,7 +199,9 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
       while (await reader.ReadAsync(ct))
       {
         if (!Enum.TryParse<PlaySource>(reader.GetString(0), out var source))
+        {
           continue; // Skip rows with unknown source types
+        }
         // SQLite COUNT returns 64-bit integer, guard for NULL
         playsBySource[source] = reader.IsDBNull(1) ? 0 : Convert.ToInt32(reader.GetInt64(1));
       }

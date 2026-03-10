@@ -205,7 +205,9 @@ public class SoundFlowPlaybackService : IDisposable
     try
     {
       if (dataProvider is IDisposable disposable)
+      {
         disposable.Dispose();
+      }
     }
     catch { /* ignore */ }
 
@@ -723,7 +725,10 @@ public class SoundFlowPlaybackService : IDisposable
   public void StopAll()
   {
     // Don't throw if disposed - just return
-    if (_disposed) return;
+    if (_disposed)
+    {
+        return;
+    }
 
     List<string> sourceIds;
     lock (_playersLock)
@@ -745,7 +750,10 @@ public class SoundFlowPlaybackService : IDisposable
   /// <inheritdoc/>
   public void Dispose()
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+        return;
+    }
 
     _audioEngine.PlaybackDeviceSwitched -= OnPlaybackDeviceSwitched;
 

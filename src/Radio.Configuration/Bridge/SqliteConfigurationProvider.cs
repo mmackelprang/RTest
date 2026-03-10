@@ -39,14 +39,18 @@ public sealed class SqliteConfigurationProvider : ConfigurationProvider
       // Extract DB path from connection string to check existence
       var builder = new SqliteConnectionStringBuilder(_connectionString);
       if (!File.Exists(builder.DataSource))
+      {
         return;
+      }
 
       using var connection = new SqliteConnection(_connectionString);
       connection.Open();
 
       // Check if the table exists before querying
       if (!TableExists(connection))
+      {
         return;
+      }
 
       using var cmd = connection.CreateCommand();
       cmd.CommandText = $"SELECT Key, Value FROM {_tableName}";
@@ -103,7 +107,9 @@ public sealed class SqliteConfigurationProvider : ConfigurationProvider
   private static bool IsJsonObjectOrArray(string value)
   {
     if (string.IsNullOrWhiteSpace(value))
+    {
       return false;
+    }
 
     var trimmed = value.TrimStart();
     return trimmed.StartsWith('{') || trimmed.StartsWith('[');

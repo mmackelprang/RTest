@@ -33,7 +33,9 @@ public class PhoneContactLookupService
   public async Task<string> FindCallerNameAsync(string phoneNumber, CancellationToken cancellationToken = default)
   {
     if (string.IsNullOrWhiteSpace(phoneNumber))
+    {
       return "Unknown caller";
+    }
 
     try
     {

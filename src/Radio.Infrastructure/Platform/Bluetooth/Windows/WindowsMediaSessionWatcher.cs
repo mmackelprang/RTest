@@ -69,7 +69,9 @@ internal sealed class WindowsMediaSessionWatcher : IDisposable
       var newSession = _sessionManager?.GetCurrentSession();
 
       if (newSession == _currentSession)
+      {
         return;
+      }
 
       // Detach from old session
       if (_currentSession != null)
@@ -122,12 +124,18 @@ internal sealed class WindowsMediaSessionWatcher : IDisposable
 
   private async Task ReadCurrentMediaPropertiesAsync()
   {
-    if (_currentSession == null) return;
+    if (_currentSession == null)
+    {
+      return;
+    }
 
     try
     {
       var props = await _currentSession.TryGetMediaPropertiesAsync();
-      if (props == null) return;
+      if (props == null)
+      {
+        return;
+      }
 
       string? albumArtUrl = null;
       if (props.Thumbnail != null)
@@ -171,12 +179,18 @@ internal sealed class WindowsMediaSessionWatcher : IDisposable
 
   private void ReadCurrentPlaybackInfo()
   {
-    if (_currentSession == null) return;
+    if (_currentSession == null)
+    {
+      return;
+    }
 
     try
     {
       var info = _currentSession.GetPlaybackInfo();
-      if (info == null) return;
+      if (info == null)
+      {
+        return;
+      }
 
       var status = info.PlaybackStatus switch
       {
@@ -197,12 +211,18 @@ internal sealed class WindowsMediaSessionWatcher : IDisposable
 
   private void ReadCurrentTimelineProperties()
   {
-    if (_currentSession == null) return;
+    if (_currentSession == null)
+    {
+      return;
+    }
 
     try
     {
       var timeline = _currentSession.GetTimelineProperties();
-      if (timeline == null) return;
+      if (timeline == null)
+      {
+        return;
+      }
 
       PositionChanged?.Invoke(this, timeline.Position);
     }
@@ -223,7 +243,9 @@ internal sealed class WindowsMediaSessionWatcher : IDisposable
       var bytes = memoryStream.ToArray();
 
       if (bytes.Length == 0)
+      {
         return null;
+      }
 
       // Detect MIME type from magic bytes
       var mime = AlbumArtCacheService.DetectMimeFromBytes(bytes) ?? "image/jpeg";
@@ -246,7 +268,10 @@ internal sealed class WindowsMediaSessionWatcher : IDisposable
 
   public void Dispose()
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+      return;
+    }
     _disposed = true;
 
     if (_currentSession != null)

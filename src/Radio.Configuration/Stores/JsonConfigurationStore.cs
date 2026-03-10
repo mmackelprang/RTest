@@ -55,10 +55,15 @@ public sealed class JsonConfigurationStore : ConfigurationStoreBase, IDisposable
     await _lock.WaitAsync(ct);
     try
     {
-      if (!_isLoaded) await LoadAsync(ct);
+      if (!_isLoaded)
+      {
+        await LoadAsync(ct);
+      }
 
       if (!_entries.TryGetValue(key, out var stored))
+      {
         return null;
+      }
 
       return await CreateEntryAsync(key, stored.Value, stored.Description, stored.LastModified, mode, ct);
     }
@@ -74,7 +79,10 @@ public sealed class JsonConfigurationStore : ConfigurationStoreBase, IDisposable
     await _lock.WaitAsync(ct);
     try
     {
-      if (!_isLoaded) await LoadAsync(ct);
+      if (!_isLoaded)
+      {
+        await LoadAsync(ct);
+      }
 
       var entries = new List<ConfigurationEntry>();
       foreach (var kvp in _entries)
@@ -95,7 +103,10 @@ public sealed class JsonConfigurationStore : ConfigurationStoreBase, IDisposable
     await _lock.WaitAsync(ct);
     try
     {
-      if (!_isLoaded) await LoadAsync(ct);
+      if (!_isLoaded)
+      {
+        await LoadAsync(ct);
+      }
 
       var prefix = NormalizeSectionPrefix(sectionPrefix);
       var entries = new List<ConfigurationEntry>();
@@ -118,7 +129,10 @@ public sealed class JsonConfigurationStore : ConfigurationStoreBase, IDisposable
     await _lock.WaitAsync(ct);
     try
     {
-      if (!_isLoaded) await LoadAsync(ct);
+      if (!_isLoaded)
+      {
+        await LoadAsync(ct);
+      }
 
       _entries[key] = new StoredEntry
       {
@@ -144,7 +158,10 @@ public sealed class JsonConfigurationStore : ConfigurationStoreBase, IDisposable
     await _lock.WaitAsync(ct);
     try
     {
-      if (!_isLoaded) await LoadAsync(ct);
+      if (!_isLoaded)
+      {
+        await LoadAsync(ct);
+      }
 
       foreach (var entry in entries)
       {
@@ -174,7 +191,10 @@ public sealed class JsonConfigurationStore : ConfigurationStoreBase, IDisposable
     await _lock.WaitAsync(ct);
     try
     {
-      if (!_isLoaded) await LoadAsync(ct);
+      if (!_isLoaded)
+      {
+        await LoadAsync(ct);
+      }
 
       if (_entries.Remove(key))
       {
@@ -199,7 +219,10 @@ public sealed class JsonConfigurationStore : ConfigurationStoreBase, IDisposable
     await _lock.WaitAsync(ct);
     try
     {
-      if (!_isLoaded) await LoadAsync(ct);
+      if (!_isLoaded)
+      {
+        await LoadAsync(ct);
+      }
 
       return _entries.ContainsKey(key);
     }
@@ -216,7 +239,9 @@ public sealed class JsonConfigurationStore : ConfigurationStoreBase, IDisposable
     try
     {
       if (!_isDirty)
+      {
         return true;
+      }
 
       await SaveInternalAsync(ct);
       return true;
@@ -313,7 +338,10 @@ public sealed class JsonConfigurationStore : ConfigurationStoreBase, IDisposable
   /// <inheritdoc/>
   public void Dispose()
   {
-    if (_disposed) return;
+    if (_disposed)
+    {
+      return;
+    }
     _lock.Dispose();
     _disposed = true;
   }

@@ -39,7 +39,9 @@ public class FrequencyAnalysisTests
     // Generate a clipped sine (creates harmonics)
     var samples = WavFileHelper.GenerateMonoSineWave(440, 48000, 48000, 1.0f);
     for (int i = 0; i < samples.Length; i++)
+    {
       samples[i] = Math.Clamp(samples[i] * 2.0f, -1.0f, 1.0f); // Hard clip
+    }
 
     var stereo = new float[samples.Length * 2];
     for (int i = 0; i < samples.Length; i++)
