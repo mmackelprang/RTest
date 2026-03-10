@@ -1,4 +1,4 @@
-namespace Radio.Infrastructure.Tests.Configuration;
+namespace Radio.Configuration.Tests.Models;
 
 using Radio.Configuration.Models;
 

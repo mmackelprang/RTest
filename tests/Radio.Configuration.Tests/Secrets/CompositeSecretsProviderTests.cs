@@ -1,4 +1,4 @@
-namespace Radio.Infrastructure.Tests.Configuration;
+namespace Radio.Configuration.Tests.Secrets;
 
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -23,7 +23,7 @@ public class CompositeSecretsProviderTests : IAsyncDisposable
 
     var dataProtection = DataProtectionProvider.Create("TestApp");
 
-    var configOptions1 = Options.Create(new ConfigurationOptions
+    var configOptions1 = Microsoft.Extensions.Options.Options.Create(new ConfigurationOptions
     {
       SecretsDatabasePath = Path.Combine(_testDirectory, "secrets.db")
     });
@@ -33,7 +33,7 @@ public class CompositeSecretsProviderTests : IAsyncDisposable
       dataProtection,
       NullLogger<SqliteSecretsProvider>.Instance);
 
-    var configOptions = Options.Create(new ConfigurationOptions
+    var configOptions = Microsoft.Extensions.Options.Options.Create(new ConfigurationOptions
     {
       BasePath = _testDirectory,
       SecretsFileName = "secrets"

@@ -4,7 +4,7 @@ using Microsoft.Extensions.Options;
 using Radio.Configuration.Models;
 using Radio.Configuration.Secrets;
 
-namespace Radio.IntegrationTests.Secrets;
+namespace Radio.Configuration.Tests.Integration;
 
 /// <summary>
 /// Integration tests for secrets configuration system.
@@ -87,7 +87,7 @@ public class SecretsConfigurationIntegrationTests : IDisposable
   public async Task JsonSecretsProvider_StoreAndRetrieve_RoundTrips()
   {
     // Arrange
-    var options = Options.Create(new ConfigurationOptions
+    var options = Microsoft.Extensions.Options.Options.Create(new ConfigurationOptions
     {
       BasePath = TempDirectory,
       SecretsFileName = "test-secrets",
@@ -114,7 +114,7 @@ public class SecretsConfigurationIntegrationTests : IDisposable
   public async Task SecretsProvider_ResolveTagsAsync_ResolvesMultipleTags()
   {
     // Arrange
-    var options = Options.Create(new ConfigurationOptions
+    var options = Microsoft.Extensions.Options.Options.Create(new ConfigurationOptions
     {
       BasePath = TempDirectory,
       SecretsFileName = "test-secrets-resolve",
@@ -144,7 +144,7 @@ public class SecretsConfigurationIntegrationTests : IDisposable
   public async Task SecretsProvider_ResolveTagsAsync_PreservesUnknownTags()
   {
     // Arrange
-    var options = Options.Create(new ConfigurationOptions
+    var options = Microsoft.Extensions.Options.Options.Create(new ConfigurationOptions
     {
       BasePath = TempDirectory,
       SecretsFileName = "test-secrets-unknown",
@@ -169,7 +169,7 @@ public class SecretsConfigurationIntegrationTests : IDisposable
   public async Task SqliteSecretsProvider_StoreAndRetrieve_RoundTrips()
   {
     // Arrange
-    var configOptions = Options.Create(new Radio.Configuration.Models.ConfigurationOptions
+    var configOptions = Microsoft.Extensions.Options.Options.Create(new Radio.Configuration.Models.ConfigurationOptions
     {
       SecretsDatabasePath = Path.Combine(TempDirectory, "test-secrets.db")
     });
@@ -198,7 +198,7 @@ public class SecretsConfigurationIntegrationTests : IDisposable
   public async Task SecretsProvider_GenerateTag_CreatesUniqueIdentifiers()
   {
     // Arrange
-    var options = Options.Create(new ConfigurationOptions
+    var options = Microsoft.Extensions.Options.Options.Create(new ConfigurationOptions
     {
       BasePath = TempDirectory,
       SecretsFileName = "test-secrets-unique",
@@ -225,7 +225,7 @@ public class SecretsConfigurationIntegrationTests : IDisposable
   public async Task SecretsProvider_ListTagsAsync_ReturnsAllStoredTags()
   {
     // Arrange
-    var options = Options.Create(new ConfigurationOptions
+    var options = Microsoft.Extensions.Options.Options.Create(new ConfigurationOptions
     {
       BasePath = TempDirectory,
       SecretsFileName = "test-secrets-list",
@@ -255,7 +255,7 @@ public class SecretsConfigurationIntegrationTests : IDisposable
   public async Task SecretsProvider_DeleteSecretAsync_RemovesSecret()
   {
     // Arrange
-    var options = Options.Create(new ConfigurationOptions
+    var options = Microsoft.Extensions.Options.Options.Create(new ConfigurationOptions
     {
       BasePath = TempDirectory,
       SecretsFileName = "test-secrets-delete",
@@ -282,7 +282,7 @@ public class SecretsConfigurationIntegrationTests : IDisposable
   public void SecretsProvider_ContainsSecretTag_DetectsTags()
   {
     // Arrange
-    var options = Options.Create(new ConfigurationOptions
+    var options = Microsoft.Extensions.Options.Options.Create(new ConfigurationOptions
     {
       BasePath = TempDirectory,
       SecretsFileName = "test-secrets",
@@ -305,7 +305,7 @@ public class SecretsConfigurationIntegrationTests : IDisposable
   public async Task SecretsProvider_Persistence_SurvivesProviderRestart()
   {
     // Arrange
-    var options = Options.Create(new ConfigurationOptions
+    var options = Microsoft.Extensions.Options.Options.Create(new ConfigurationOptions
     {
       BasePath = TempDirectory,
       SecretsFileName = "test-secrets-persist",

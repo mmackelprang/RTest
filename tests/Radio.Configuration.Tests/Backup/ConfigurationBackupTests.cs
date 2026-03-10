@@ -1,4 +1,4 @@
-namespace Radio.Infrastructure.Tests.Configuration;
+namespace Radio.Configuration.Tests.Backup;
 
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -36,7 +36,7 @@ public class ConfigurationBackupTests : IDisposable
 
     _options.DatabasePath = Path.Combine(_testDirectory, "config.db");
 
-    var optionsMock = Options.Create(_options);
+    var optionsMock = Microsoft.Extensions.Options.Options.Create(_options);
     var dataProtection = DataProtectionProvider.Create("TestApp");
 
     var secretsProvider = new JsonSecretsProvider(optionsMock, dataProtection, NullLogger<JsonSecretsProvider>.Instance);

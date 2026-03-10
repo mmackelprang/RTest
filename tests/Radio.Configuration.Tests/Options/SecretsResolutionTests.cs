@@ -4,7 +4,7 @@ using Radio.Configuration.Abstractions;
 using Radio.Configuration.Options;
 using Xunit;
 
-namespace Radio.Infrastructure.Tests.Configuration;
+namespace Radio.Configuration.Tests.Options;
 
   public class SecretsResolutionTests
   {

@@ -1,4 +1,4 @@
-namespace Radio.Core.Tests.Configuration;
+namespace Radio.Configuration.Tests;
 
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
@@ -18,7 +18,7 @@ public class DatabasePathResolverTests
       ConfigurationSubdirectory = "cfg",
       ConfigurationFileName = "config.db"
     };
-    var resolver = new DatabasePathResolver(Options.Create(databaseOptions));
+    var resolver = new DatabasePathResolver(Microsoft.Extensions.Options.Options.Create(databaseOptions));
 
     // Act
     var path = resolver.GetConfigurationDatabasePath();
@@ -39,7 +39,7 @@ public class DatabasePathResolverTests
       FingerprintingSubdirectory = "fp",
       FingerprintingFileName = "fingerprints.db"
     };
-    var resolver = new DatabasePathResolver(Options.Create(databaseOptions));
+    var resolver = new DatabasePathResolver(Microsoft.Extensions.Options.Options.Create(databaseOptions));
 
     // Act
     var path = resolver.GetFingerprintingDatabasePath();
@@ -59,7 +59,7 @@ public class DatabasePathResolverTests
       RootPath = "./newdata",
       BackupSubdirectory = "bak"
     };
-    var resolver = new DatabasePathResolver(Options.Create(databaseOptions));
+    var resolver = new DatabasePathResolver(Microsoft.Extensions.Options.Options.Create(databaseOptions));
 
     // Act
     var path = resolver.GetBackupPath();
@@ -79,7 +79,7 @@ public class DatabasePathResolverTests
       SecretsSubdirectory = "sec",
       SecretsFileName = "secrets.db"
     };
-    var resolver = new DatabasePathResolver(Options.Create(databaseOptions));
+    var resolver = new DatabasePathResolver(Microsoft.Extensions.Options.Options.Create(databaseOptions));
 
     // Act
     var path = resolver.GetSecretsDatabasePath();
@@ -95,7 +95,7 @@ public class DatabasePathResolverTests
   {
     // Arrange
     var databaseOptions = new DatabaseOptions();
-    var resolver = new DatabasePathResolver(Options.Create(databaseOptions));
+    var resolver = new DatabasePathResolver(Microsoft.Extensions.Options.Options.Create(databaseOptions));
 
     // Act
     var paths = resolver.GetAllDatabasePaths();
@@ -113,7 +113,7 @@ public class DatabasePathResolverTests
     {
       RootPath = "./data"
     };
-    var resolver = new DatabasePathResolver(Options.Create(databaseOptions));
+    var resolver = new DatabasePathResolver(Microsoft.Extensions.Options.Options.Create(databaseOptions));
 
     // Act
     var paths = resolver.GetAllDatabasePaths();

@@ -1,4 +1,4 @@
-namespace Radio.Infrastructure.Tests.Configuration;
+namespace Radio.Configuration.Tests.Stores;
 
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging;
@@ -32,7 +32,7 @@ public class ConfigurationStoreTests : IDisposable
     };
 
     // Create a simple mock secrets provider that doesn't resolve anything
-    var optionsMock = Options.Create(_options);
+    var optionsMock = Microsoft.Extensions.Options.Options.Create(_options);
     var dataProtectionProvider = DataProtectionProvider.Create("TestApp");
     var logger = NullLogger<JsonSecretsProvider>.Instance;
     _mockSecretsProvider = new JsonSecretsProvider(optionsMock, dataProtectionProvider, logger);
