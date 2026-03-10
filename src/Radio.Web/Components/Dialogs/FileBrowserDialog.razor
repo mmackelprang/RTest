@@ -198,7 +198,7 @@
           }
         </div>
       }
-      else if (!_directories.Any() && !FilteredFiles.Any())
+      else if (!FilteredDirectories.Any() && !FilteredFiles.Any())
       {
         <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px;">
           <MudIcon Icon="@Icons.Material.Filled.FolderOff" Style="font-size: 64px; opacity: 0.4;" />
@@ -211,7 +211,7 @@
       {
         <div class="file-browser-list">
           @* Directories first *@
-          @foreach (var dir in _directories)
+          @foreach (var dir in FilteredDirectories)
           {
             <div class="file-item list-item-touch" @onclick="@(() => NavigateToFolderAsync(dir.Name))">
               <MudIcon Icon="@Icons.Material.Filled.Folder" Color="Color.Warning" />
@@ -349,6 +349,20 @@
   private List<DriveInfoDto> _drives = new();
   private List<BookmarkDto> _bookmarks = new();
   private MudTextField<string>? _pathTextField;
+
+  private IEnumerable<FileItemDto> FilteredDirectories
+  {
+    get
+    {
+      var dirs = _directories.AsEnumerable();
+      if (!string.IsNullOrWhiteSpace(_searchText))
+      {
+        var search = _searchText.Trim();
+        dirs = dirs.Where(d => d.Name.Contains(search, StringComparison.OrdinalIgnoreCase));
+      }
+      return dirs;
+    }
+  }
 
   private IEnumerable<FileItemDto> FilteredFiles
   {
