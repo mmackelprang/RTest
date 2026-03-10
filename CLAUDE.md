@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Grandpa Anderson's Console Radio Remade** - A modern audio command center restoring vintage console radio functionality with modern capabilities (Bluetooth A2DP, streaming, smart home events, Chromecast audio).
 
 **Target Platform:** Raspberry Pi 5 (Linux) with Windows development support
-**Stack:** .NET 8+, ASP.NET Core, Blazor Server, SoundFlow audio engine, SQLite/JSON config
+**Stack:** .NET 10, ASP.NET Core, Blazor Server, SoundFlow audio engine, SQLite/JSON config
 
 ## Build & Test Commands
 
@@ -38,28 +38,34 @@ dotnet run --project tools/Radio.Tools.AudioUAT
 
 ```
 RadioConsole.sln
-├── src/Radio.Core           # Domain interfaces, models, events (no dependencies)
-├── src/Radio.Infrastructure # Audio engine, config stores, BT, Cast, sources, outputs
-│   ├── Audio/SoundFlow/     # Engine, mixer, device manager, tapped output stream
-│   ├── Audio/Sources/       # Primary (Radio, BT, File, Vinyl, USB) + Event (TTS, AudioFile)
-│   ├── Audio/Outputs/       # Local, GoogleCast, HttpStream
-│   ├── Audio/Fingerprinting/# fpcalc + AcoustID integration
-│   ├── Platform/Bluetooth/  # Linux (BlueZ D-Bus) + Windows (WinRT)
-│   └── Configuration/       # JSON/SQLite stores, secrets, backup
-├── src/Radio.API            # REST controllers, SignalR hubs, middleware
-├── src/Radio.Web            # Blazor Server UI (MudBlazor Material 3)
-├── tests/                   # 7 xUnit test projects (~1,257 tests)
-├── tools/                   # AudioUAT, ConfigurationManager CLIs
-├── deploy/                  # Pi deployment scripts, systemd services
-├── design/                  # Architecture docs, decision log, work log
-└── RaddyRF320BT/            # Git submodule for vintage radio protocol
+├── src/Radio.Core              # Domain interfaces, models, events (no dependencies)
+├── src/Radio.Infrastructure    # Audio engine, BT, Cast, sources, outputs, DI wiring
+│   ├── Audio/SoundFlow/        # Engine, mixer, device manager, tapped output stream
+│   ├── Audio/Sources/          # Primary (Radio, BT, File, Vinyl, USB) + Event (TTS, AudioFile)
+│   ├── Audio/Outputs/          # Local, GoogleCast, HttpStream
+│   ├── Audio/Fingerprinting/   # SoundFlowAudioTap, FingerprintDbContext (12-table SQLite)
+│   ├── Platform/Bluetooth/     # Linux (BlueZ D-Bus) + Windows (WinRT)
+│   └── Configuration/          # DeviceOptionsResolver, PreferencesPersistence (Radio-specific)
+├── src/Radio.Configuration     # Standalone NuGet: JSON/SQLite stores, secrets, backup, bridge
+├── src/Radio.Fingerprinting    # Standalone NuGet: SongRec, MusicBrainz, background ID, repos
+├── src/Radio.Metrics           # Standalone NuGet: time-series metrics collection + SQLite storage
+├── src/Radio.AudioAnalysis     # Standalone NuGet: waveform comparison, THD, silence detection
+├── src/RTLSDRCore              # Standalone NuGet: RTL-SDR software-defined radio library
+├── src/Radio.API               # REST controllers, SignalR hubs, middleware
+├── src/Radio.Web               # Blazor Server UI (MudBlazor Material 3)
+├── tests/                      # 7 xUnit test projects (~1,416 tests)
+├── tools/                      # AudioUAT, ConfigurationManager CLIs
+├── deploy/                     # Pi deployment scripts, systemd services
+├── design/                     # Architecture docs, decision log, work log
+└── RaddyRF320BT/               # Git submodule for vintage radio protocol
 ```
 
 ## Architecture
 
 **Layered Architecture:**
 - **Core** - Pure domain (interfaces: IAudioEngine, IAudioSource, IConfigurationStore, IBluetoothService, etc.)
-- **Infrastructure** - SoundFlow wrapper, device management, outputs (Local/Cast/HTTP), sources (Radio/SDR/File/BT/TTS), Bluetooth (Linux BlueZ + Windows WinRT)
+- **Extracted Libraries** - Standalone NuGet packages: Configuration, Fingerprinting, Metrics, AudioAnalysis, RTLSDRCore
+- **Infrastructure** - SoundFlow wrapper, device management, outputs (Local/Cast/HTTP), sources (Radio/SDR/File/BT/TTS), Bluetooth (Linux BlueZ + Windows WinRT), DI wiring
 - **API** - REST endpoints under `/api/*`, SignalR hubs at `/hubs/visualization` and `/hubs/audio`
 - **Web** - Blazor Server UI, 12 pages, shared components, SignalR client
 
@@ -68,7 +74,8 @@ RadioConsole.sln
 - Dual config stores (SQLite/JSON) switchable via appsettings.json
 - Encrypted secrets with tag substitution: `${secret:identifier}`
 - Audio ducking with priority system (1-10 scale)
-- Multi-target framework: `net8.0` (Linux) + `net8.0-windows10.0.19041.0` (WinRT BT)
+- Multi-target framework: `net10.0` (Linux) + `net10.0-windows10.0.19041.0` (WinRT BT)
+- Extracted libraries packable as NuGet (`pack-local.ps1`)
 
 **Audio Pipeline:**
 ```
