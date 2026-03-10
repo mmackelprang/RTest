@@ -223,8 +223,8 @@ public class AudioPreferencePersistenceTests : IDisposable
     // Act
     _sut.ScheduleVolumePersist();
 
-    // Wait for the 500ms debounce timer to fire
-    await Task.Delay(800);
+    // Wait for the 500ms debounce timer to fire (generous margin for slow CI runners)
+    await Task.Delay(2000);
 
     // Assert — volume preferences were persisted
     _configManagerMock.Verify(m => m.SetValueAsync(
