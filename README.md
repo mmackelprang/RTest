@@ -20,7 +20,7 @@ This project restores the original function (Radio/Vinyl) while adding modern ca
 | 7 - Visualization | ✅ Completed | Spectrum analyzer (FFT), VU meters, waveform display |
 | 8 - API | ✅ Completed | 16 REST controllers, 126+ endpoints, 2 SignalR hubs, Swagger |
 | 9 - UI | ✅ Completed | 12-page Blazor Server UI, MudBlazor Material 3, shared components |
-| 10 - Testing | ✅ Substantially Complete | 1,290 tests across 7 projects (unit, integration, E2E) |
+| 10 - Testing | ✅ Substantially Complete | ~1,416 tests across 10 projects (unit, integration, E2E) |
 | 11 - Documentation | 🔄 In Progress | Design docs, decision log, work log (user manual pending) |
 | 12 - Deployment | ✅ Substantially Complete | Dual-service systemd, Pi deploy scripts, tested on hardware |
 
@@ -39,12 +39,26 @@ These major features were developed after the original plan and represent signif
 | Local Output Muting for Cast | Mute local speakers while casting (SoundFlow modifier-based) |
 | Dual-Service Deployment | Separate radio-api + radio-web systemd services, Pi deployment scripts |
 
+### Extracted NuGet Packages
+
+Five standalone libraries have been extracted from the monorepo for independent reuse:
+
+| Package | Description |
+|---------|-------------|
+| **RTLSDRCore** | RTL-SDR software-defined radio: device control, IQ sampling, FM/AM demodulation |
+| **Radio.AudioAnalysis** | Waveform comparison, THD measurement, silence detection, signal analysis |
+| **Radio.Metrics** | Time-series metrics collection with SQLite storage and retention policies |
+| **Radio.Configuration** | JSON/SQLite config stores, encrypted secrets, backup/restore, IConfiguration bridge |
+| **Radio.Fingerprinting** | Audio fingerprinting (SongRec/fpcalc), AcoustID/MusicBrainz lookup, background identification |
+
+Each package has a dedicated test project. Pack locally with `./pack-local.ps1` (outputs to `./nupkg/`).
+
 ## Technical Architecture
 
 | Component | Technology |
 |-----------|------------|
 | Hardware | Raspberry Pi 5 (Raspberry Pi OS / Linux) |
-| Framework | .NET 8+ (C#) |
+| Framework | .NET 10 (C#) |
 | Audio Engine | [SoundFlow](https://github.com/lsxprime/SoundFlow) |
 | UI | Blazor Server |
 | API | ASP.NET Core Web API |
@@ -59,27 +73,36 @@ These major features were developed after the original plan and represent signif
 RadioConsole/
 ├── src/
 │   ├── Radio.Core/              # Core interfaces, models, events (no dependencies)
-│   ├── Radio.Infrastructure/    # Audio engine, config stores, external integrations
+│   ├── Radio.Configuration/     # ★ NuGet: JSON/SQLite config stores, secrets, backup, bridge
+│   ├── Radio.Fingerprinting/    # ★ NuGet: SongRec, MusicBrainz, background ID, SQLite repos
+│   ├── Radio.Metrics/           # ★ NuGet: Time-series metrics collection + SQLite storage
+│   ├── Radio.AudioAnalysis/     # ★ NuGet: Waveform comparison, THD, silence detection
+│   ├── RTLSDRCore/              # ★ NuGet: RTL-SDR software-defined radio library
+│   ├── Radio.Infrastructure/    # Audio engine, DI wiring, platform integrations
 │   │   ├── Audio/
 │   │   │   ├── SoundFlow/       # Audio engine, mixer, device manager, tapped output
 │   │   │   ├── Sources/         # Primary (Radio, File, Vinyl, BT, USB) + Event (TTS, AudioFile)
 │   │   │   ├── Services/        # FileBrowser, TTSFactory, DuckingService, AudioManager
 │   │   │   ├── Outputs/         # Local, GoogleCast, HttpStream
 │   │   │   ├── Visualization/   # Spectrum, LevelMeter, Waveform
-│   │   │   └── Fingerprinting/  # AcoustID, fpcalc, MusicBrainz, auto-skip
+│   │   │   └── Fingerprinting/  # SoundFlowAudioTap, FingerprintDbContext
 │   │   ├── Platform/Bluetooth/  # Linux (BlueZ D-Bus) + Windows (WinRT)
-│   │   ├── Configuration/       # Stores (JSON/SQLite), secrets, backup
+│   │   ├── Configuration/       # DeviceOptionsResolver, PreferencesPersistence
 │   │   └── DependencyInjection/ # Service registration extensions
 │   ├── Radio.API/               # 16 REST controllers, 2 SignalR hubs, middleware
 │   └── Radio.Web/               # 12-page Blazor Server UI (MudBlazor Material 3)
 ├── tests/
-│   ├── Radio.Core.Tests/           # 35 tests
-│   ├── Radio.Infrastructure.Tests/ # 689 tests
-│   ├── Radio.API.Tests/            # 202 tests
-│   ├── Radio.Web.Tests/            # 130 tests
-│   ├── Radio.IntegrationTests/     # 86 tests
-│   ├── RTLSDRCore.Tests/           # 125 tests
-│   └── Radio.Web.E2ETests/         # Playwright infrastructure (tests pending)
+│   ├── Radio.Metrics.Tests/        # ★ 17 tests (metrics package)
+│   ├── Radio.Configuration.Tests/  # ★ 115 tests (configuration package)
+│   ├── Radio.Fingerprinting.Tests/ # ★ 95 tests (fingerprinting package)
+│   ├── RTLSDRCore.Tests/           # ★ 155 tests (SDR package)
+│   ├── Radio.AudioAnalysis.Tests/  # ★ 35 tests (audio analysis package)
+│   ├── Radio.Core.Tests/           # 23 tests
+│   ├── Radio.Infrastructure.Tests/ # 840 tests
+│   ├── Radio.API.Tests/            # 223 tests
+│   ├── Radio.Web.Tests/            # 116 tests
+│   ├── Radio.IntegrationTests/     # 50 tests
+│   └── Radio.Web.E2ETests/         # 28 tests (Playwright)
 ├── tools/
 │   ├── Radio.Tools.AudioUAT/              # Audio UAT testing tool
 │   └── Radio.Tools.ConfigurationManager/  # Configuration management CLI
@@ -567,7 +590,7 @@ audio.play();
 
 ### Prerequisites
 
-- .NET 8.0 SDK or later
+- .NET 10.0 SDK
 - For Raspberry Pi deployment: Raspberry Pi OS with .NET runtime
 - LAME MP3 encoder (for Google Cast audio streaming):
   - **Windows**: Included automatically via NAudio.Lame NuGet package
@@ -655,7 +678,7 @@ Deploy from Windows:
 
 ## Testing
 
-1,290 automated tests across 7 projects:
+~1,416 automated tests across 10 projects:
 
 ```bash
 # Run all tests
@@ -670,14 +693,19 @@ dotnet test --filter "FullyQualifiedName~TestClassName.TestMethodName"
 
 ## Design Documents
 
-- [Development Plan](PLAN.md) - Detailed development phases and progress
-- [Audio Architecture](design/AUDIO.md) - Audio system design
+- [Audio Data Flow](design/AUDIO-DATAFLOW.md) - Audio pipeline architecture
 - [Configuration](design/CONFIGURATION.md) - Configuration infrastructure
 - [Database Configuration](design/DATABASE_CONFIGURATION.md) - Unified database paths and backup system
-- [Web UI](design/WEBUI.md) - UI design specifications
+- [Sound Fingerprinting](design/SOUNDFINGERPRINTING.md) - Audio fingerprinting system design
+- [Metrics](design/METRICS.md) - Time-series metrics collection
+- [System Configuration](design/SYSTEMCONFIGURATION.md) - System-level configuration reference
+- [API Reference](design/API_REFERENCE.md) - Complete REST API documentation
+- [Integrations](design/INTEGRATIONS.md) - External integrations guide
+- [RTL-SDR Debugging](design/RTL_SDR_DEBUGGING_GUIDE.md) - SDR troubleshooting guide
 - [Decision Log](design/DECISION-LOG.md) - Architectural decision records
 - [Work Log](design/WORK-LOG.md) - Development session history
 - [Future Work](design/FUTURE-WORK.md) - Deferred features and stubs
+- [Testing](design/TESTING.md) - Test strategy and coverage
 
 ## License
 

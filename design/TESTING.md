@@ -6,14 +6,18 @@ This document describes the testing infrastructure and practices for the Radio C
 
 | Project | Tests | Purpose |
 |---------|-------|---------|
-| `tests/Radio.Core.Tests` | 35 | Unit tests for core domain models and interfaces |
-| `tests/Radio.Infrastructure.Tests` | 817 | Unit tests for infrastructure implementations (audio, BT, config, fingerprinting) |
-| `tests/Radio.API.Tests` | 211 | Unit tests for API controllers, hubs, and middleware |
+| `tests/Radio.Metrics.Tests` | 17 | Unit tests for Radio.Metrics NuGet package |
+| `tests/Radio.Configuration.Tests` | 115 | Unit tests for Radio.Configuration NuGet package |
+| `tests/Radio.Fingerprinting.Tests` | 95 | Unit + integration tests for Radio.Fingerprinting NuGet package |
+| `tests/RTLSDRCore.Tests` | 155 | Unit tests for RTLSDRCore NuGet package |
+| `tests/Radio.AudioAnalysis.Tests` | 35 | Unit tests for Radio.AudioAnalysis NuGet package |
+| `tests/Radio.Core.Tests` | 23 | Unit tests for core domain models and interfaces |
+| `tests/Radio.Infrastructure.Tests` | 840 | Unit tests for infrastructure implementations (audio, BT, platform) |
+| `tests/Radio.API.Tests` | 223 | Unit tests for API controllers, hubs, and middleware |
 | `tests/Radio.Web.Tests` | 116 | Unit tests for Blazor components and Web services |
+| `tests/Radio.IntegrationTests` | 50 | Cross-cutting integration tests (SignalR, audio data flow) |
 | `tests/Radio.Web.E2ETests` | 28 | End-to-end Playwright browser tests (excluded from CI) |
-| `tests/RTLSDRCore.Tests` | 155 | Unit tests for RTL-SDR signal processing library |
-| `tests/Radio.IntegrationTests` | 75 | Integration tests (SignalR, secrets, fingerprinting, play history) |
-| **Total** | **1,437** | |
+| **Total** | **~1,697** | |
 
 ## Running Tests
 
@@ -42,19 +46,17 @@ The `Radio.IntegrationTests` project provides comprehensive end-to-end testing f
 
 ### Test Results Summary
 
-- **Total Tests:** 75
-- **Passed:** 72
-- **Skipped:** 3 (require external APIs / audio device)
+- **Total Tests:** 50
+- **Passed:** 48
+- **Skipped:** 2 (require external APIs / audio device)
+
+Note: Secrets, fingerprinting, and play history integration tests have been moved to their respective package test projects (`Radio.Configuration.Tests`, `Radio.Fingerprinting.Tests`).
 
 ### Test Files
 
 | File | Tests | Description |
 |------|-------|-------------|
-| `Secrets/SecretsConfigurationIntegrationTests.cs` | 18 | Secret tag parsing, JSON/SQLite providers, encryption/decryption |
-| `PlayHistory/PlayHistoryRecordingIntegrationTests.cs` | 8 | Play history recording, updates, search, statistics |
 | `Audio/SoundFlowAudioDataIntegrationTests.cs` | 13 | Mock audio capture, sample generation, WAV file creation |
-| `Fingerprinting/FingerprintingConfigurationIntegrationTests.cs` | 10 | Database tables, indexes, repository operations |
-| `Fingerprinting/EndToEndFingerprintingIntegrationTests.cs` | 8 | Full fingerprinting flow with play history updates |
 | `SignalR/AudioStateHubIntegrationTests.cs` | 9 | Hub connection, subscriptions, group management |
 
 ### Test Infrastructure
