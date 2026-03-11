@@ -61,19 +61,22 @@ internal sealed class LinuxBluetoothService : IBluetoothService
   private Linux.BluezAgent? _agent;
   private bool _userInitiatedDisconnect;
   private BluetoothReconnectionLoop? _reconnectionLoop;
+  private readonly BluetoothMgmtMonitor? _mgmtMonitor;
 
   public LinuxBluetoothService(
     ILogger logger,
     IOptions<BluetoothOptions> options,
     SoundFlowDeviceManager? deviceManager = null,
     IMetricsCollector? metricsCollector = null,
-    SoundFlowPlaybackService? playbackService = null)
+    SoundFlowPlaybackService? playbackService = null,
+    BluetoothMgmtMonitor? mgmtMonitor = null)
   {
     _logger = logger;
     _options = options.Value;
     _deviceManager = deviceManager;
     _metricsCollector = metricsCollector;
     _playbackService = playbackService;
+    _mgmtMonitor = mgmtMonitor;
   }
 
   public bool IsAvailable => _connection != null && _adapter != null;
