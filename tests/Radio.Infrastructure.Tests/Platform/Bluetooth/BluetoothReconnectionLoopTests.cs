@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Moq;
 using Radio.Core.Configuration;
+using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Platform.Bluetooth;
 
 namespace Radio.Infrastructure.Tests.Platform.Bluetooth;
@@ -192,5 +193,17 @@ public class BluetoothReconnectionLoopTests
     Assert.Equal(firstFinal, firstLoopAttempts);
     // Second loop should be running
     Assert.True(secondLoopAttempts > 0);
+  }
+
+  [Fact]
+  public void ShouldSuppressReconnect_RemoteDisconnect_ReturnsTrue()
+  {
+    Assert.True(BluetoothDisconnectReason.Remote.ShouldSuppressReconnect());
+  }
+
+  [Fact]
+  public void ShouldSuppressReconnect_TimeoutDisconnect_ReturnsFalse()
+  {
+    Assert.False(BluetoothDisconnectReason.Timeout.ShouldSuppressReconnect());
   }
 }
