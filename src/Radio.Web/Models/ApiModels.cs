@@ -814,3 +814,58 @@ public class PhoneIntegrationConfigDto
   public int ReconnectBaseDelayMs { get; set; }
   public int ReconnectMaxDelayMs { get; set; }
 }
+
+// RotaryPhone.API DTOs (calls http://localhost:5004)
+
+public class PhoneSystemStatusDto
+{
+  public string Platform { get; set; } = "";
+  public bool IsRaspberryPi { get; set; }
+  public bool BluetoothEnabled { get; set; }
+  public bool BluetoothConnected { get; set; }
+  public string? BluetoothDeviceAddress { get; set; }
+  public bool SipListening { get; set; }
+  public string? SipListenAddress { get; set; }
+  public int SipPort { get; set; }
+  public string? Ht801IpAddress { get; set; }
+  public bool? Ht801Reachable { get; set; }
+}
+
+public class PhoneCallStateDto
+{
+  public string CallState { get; set; } = "Idle";
+  public string? DialedNumber { get; set; }
+  public string? IncomingNumber { get; set; }
+  public string? CallerName { get; set; }
+  public string? Duration { get; set; }
+}
+
+public record ContactDto
+{
+  public string Id { get; init; } = "";
+  public string Name { get; init; } = "";
+  public string PhoneNumber { get; init; } = "";
+  public string? Email { get; init; }
+  public string? Notes { get; init; }
+  public DateTime CreatedAt { get; init; }
+  public DateTime ModifiedAt { get; init; }
+}
+
+public class ContactFormDto
+{
+  public string Name { get; set; } = "";
+  public string PhoneNumber { get; set; } = "";
+  public string? Email { get; set; }
+}
+
+public class CallHistoryEntryDto
+{
+  public string? Id { get; set; }
+  public DateTime StartTime { get; set; }
+  public DateTime? EndTime { get; set; }
+  public string? Duration { get; set; }
+  public string Direction { get; set; } = "Incoming";
+  public string PhoneNumber { get; set; } = "";
+  public string? AnsweredOn { get; set; }
+  public string? PhoneId { get; set; }
+}

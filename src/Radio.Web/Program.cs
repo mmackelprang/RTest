@@ -276,11 +276,27 @@ builder.Services.AddHttpClient("AlbumArtProxy", client =>
   return handler;
 });
 
-// All 13 API client services are now registered!
+// RotaryPhone.API client (separate service on port 5004)
+var phoneApiBaseUrl = builder.Configuration.GetValue<string>("RotaryPhone:ApiBaseUrl") ?? "http://localhost:5004";
+builder.Services.AddHttpClient<PhoneApiService>(client =>
+{
+  client.BaseAddress = new Uri(phoneApiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(10);
+})
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
+});
+
+// All 14 API client services are now registered!
 
 // Register SignalR hub services as singletons (Phase 1 Task 1.3, Phase 10)
 builder.Services.AddSingleton<AudioStateHubService>();
 builder.Services.AddSingleton<AudioVisualizationHubService>();
+builder.Services.AddSingleton<PhoneHubService>();
 
 // Register centralized audio state store (subscribes to hub, caches state for components)
 builder.Services.AddSingleton<AudioStateStore>();
@@ -338,6 +354,10 @@ app.MapGet("/api/albumart/{filename}", async (string filename, IHttpClientFactor
 
 app.MapRazorComponents<Radio.Web.Components.App>()
   .AddInteractiveServerRenderMode();
+
+// Start RotaryPhone hub connection (non-blocking — logs warning if unavailable)
+var phoneHub = app.Services.GetRequiredService<PhoneHubService>();
+_ = phoneHub.StartAsync();
 
 // Print startup header to console
 var logDirectory = Path.GetFullPath("logs");

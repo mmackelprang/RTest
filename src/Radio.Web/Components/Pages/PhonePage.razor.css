@@ -1,0 +1,29 @@
+/* Phone Page Styles */
+.phone-page { padding: 8px; height: 100%; }
+.phone-dashboard { display: flex; flex-direction: column; gap: 12px; }
+.phone-card { padding: 16px; }
+.card-title { margin: 0 0 12px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px; }
+.status-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.status-item { display: flex; flex-direction: column; gap: 4px; }
+.status-label { font-size: 0.85rem; color: var(--rz-text-secondary-color); }
+.status-detail { font-size: 0.8rem; font-family: monospace; opacity: 0.7; }
+.phone-state-display { text-align: center; padding: 16px 0; }
+::deep .call-state-badge { font-size: 1.1rem !important; padding: 8px 24px !important; }
+.call-info { margin-top: 12px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.phone-number { font-family: monospace; font-size: 1.1rem; }
+.caller-name { color: var(--rz-text-secondary-color); }
+.call-duration { font-family: monospace; color: var(--rz-text-secondary-color); }
+.dev-controls { display: flex; flex-direction: column; gap: 16px; }
+.dev-section { display: flex; flex-direction: column; gap: 8px; }
+.dev-label { font-size: 0.85rem; font-weight: 600; color: var(--rz-text-secondary-color); }
+.dev-buttons { display: flex; gap: 8px; }
+.dev-dialer { display: flex; gap: 8px; align-items: center; }
+.dial-input { max-width: 200px; }
+.contacts-header, .history-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+::deep .contacts-grid { margin-top: 8px; }
+.action-btn { margin: 0 2px; }
+.empty-state { text-align: center; padding: 32px; color: var(--rz-text-secondary-color); }
+.history-list { display: flex; flex-direction: column; gap: 4px; }
+.history-item { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 4px; background: var(--rz-base-background-color); }
+.history-details { flex: 1; display: flex; flex-direction: column; }
+.history-time { font-size: 0.8rem; color: var(--rz-text-secondary-color); }
