@@ -23,106 +23,67 @@
 
     <!-- Tab 1: System Statistics -->
     <RadzenTabsItem Text="System Stats" Icon="insights">
-      <RadzenRow Gap="1rem">
-        <!-- CPU Usage -->
-        <RadzenColumn Size="6" SizeMD="3">
-          <RadzenCard>
-            <h6>CPU Usage</h6>
-            <RadzenProgressBarCircular ProgressBarStyle="ProgressBarStyle.Primary" Size="ProgressBarCircularSize.Large" Value="@_cpuUsage" />
-            <h5 style="color:var(--rz-primary)">@_cpuUsage.ToString("F1")%</h5>
-          </RadzenCard>
-        </RadzenColumn>
+      <!-- Row 1: Gauge cards — compact with small circular progress -->
+      <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; margin-bottom:10px;">
+        <RadzenCard Style="padding:10px; text-align:center">
+          <span style="font-size:0.75rem; color:var(--text-low)">CPU</span>
+          <RadzenProgressBarCircular ProgressBarStyle="ProgressBarStyle.Primary" Size="ProgressBarCircularSize.Medium" Value="@_cpuUsage" ShowValue="true" />
+        </RadzenCard>
+        <RadzenCard Style="padding:10px; text-align:center">
+          <span style="font-size:0.75rem; color:var(--text-low)">RAM</span>
+          <RadzenProgressBarCircular ProgressBarStyle="ProgressBarStyle.Secondary" Size="ProgressBarCircularSize.Medium" Value="@(_ramUsageMb / 10)" ShowValue="false" />
+          <div style="font-size:0.875rem; font-weight:500; color:var(--rz-secondary)">@_ramUsageMb.ToString("F0") MB</div>
+        </RadzenCard>
+        <RadzenCard Style="padding:10px; text-align:center">
+          <span style="font-size:0.75rem; color:var(--text-low)">Disk</span>
+          <RadzenProgressBarCircular ProgressBarStyle="ProgressBarStyle.Info" Size="ProgressBarCircularSize.Medium" Value="@_diskUsage" ShowValue="true" />
+        </RadzenCard>
+        <RadzenCard Style="padding:10px; text-align:center">
+          <span style="font-size:0.75rem; color:var(--text-low)">Threads</span>
+          <div style="font-size:1.5rem; font-weight:600; color:var(--rz-success); margin:8px 0">@_threadCount</div>
+        </RadzenCard>
+      </div>
 
-        <!-- RAM Usage -->
-        <RadzenColumn Size="6" SizeMD="3">
-          <RadzenCard>
-            <h6>RAM Usage</h6>
-            <RadzenProgressBarCircular ProgressBarStyle="ProgressBarStyle.Secondary" Size="ProgressBarCircularSize.Large" Value="@(_ramUsageMb / 10)" />
-            <h5 style="color:var(--rz-secondary)">@_ramUsageMb.ToString("F0") MB</h5>
-          </RadzenCard>
-        </RadzenColumn>
+      <!-- Row 2: Text stats — single row of compact cards -->
+      <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; margin-bottom:10px;">
+        <RadzenCard Style="padding:10px">
+          <span style="font-size:0.75rem; color:var(--text-low)">App Uptime</span>
+          <div style="font-size:0.875rem">@_appUptime</div>
+        </RadzenCard>
+        <RadzenCard Style="padding:10px">
+          <span style="font-size:0.75rem; color:var(--text-low)">System Uptime</span>
+          <div style="font-size:0.875rem">@_systemUptime</div>
+        </RadzenCard>
+        <RadzenCard Style="padding:10px">
+          <span style="font-size:0.75rem; color:var(--text-low)">Temperature</span>
+          <div style="font-size:0.875rem; @(_temperature != "N/A" ? "color:var(--rz-warning)" : "")">@_temperature</div>
+        </RadzenCard>
+        <RadzenCard Style="padding:10px">
+          <span style="font-size:0.75rem; color:var(--text-low)">Audio Engine</span>
+          <div style="font-size:0.875rem">@_audioEngineState</div>
+        </RadzenCard>
+      </div>
 
-        <!-- Disk Usage -->
-        <RadzenColumn Size="6" SizeMD="3">
-          <RadzenCard>
-            <h6>Disk Usage</h6>
-            <RadzenProgressBarCircular ProgressBarStyle="ProgressBarStyle.Info" Size="ProgressBarCircularSize.Large" Value="@_diskUsage" />
-            <h5 style="color:var(--rz-info)">@_diskUsage.ToString("F1")%</h5>
-          </RadzenCard>
-        </RadzenColumn>
+      <!-- Row 3: Platform info — compact inline -->
+      <RadzenCard Style="padding:10px; margin-bottom:10px;">
+        <span style="font-size:0.75rem; color:var(--text-low)">Platform</span>
+        <div style="display:flex; gap:16px; flex-wrap:wrap; font-size:0.8rem; margin-top:4px;">
+          <span><b>OS:</b> @System.Runtime.InteropServices.RuntimeInformation.OSDescription</span>
+          <span><b>Arch:</b> @System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture</span>
+          <span><b>Runtime:</b> @System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription</span>
+        </div>
+      </RadzenCard>
 
-        <!-- Thread Count -->
-        <RadzenColumn Size="6" SizeMD="3">
-          <RadzenCard>
-            <h6>Active Threads</h6>
-            <h3 style="color:var(--rz-success)">@_threadCount</h3>
-          </RadzenCard>
-        </RadzenColumn>
-
-        <!-- App Uptime -->
-        <RadzenColumn Size="6" SizeMD="4">
-          <RadzenCard>
-            <h6>App Uptime</h6>
-            <span style="font-size:1rem">@_appUptime</span>
-          </RadzenCard>
-        </RadzenColumn>
-
-        <!-- System Uptime -->
-        <RadzenColumn Size="6" SizeMD="4">
-          <RadzenCard>
-            <h6>System Uptime</h6>
-            <span style="font-size:1rem">@_systemUptime</span>
-          </RadzenCard>
-        </RadzenColumn>
-
-        <!-- Temperature -->
-        <RadzenColumn Size="6" SizeMD="4">
-          <RadzenCard>
-            <h6>Temperature</h6>
-            <span style="font-size:1rem; @(_temperature != "N/A" ? "color:var(--rz-warning)" : "")">@_temperature</span>
-          </RadzenCard>
-        </RadzenColumn>
-
-        <!-- Audio Engine State -->
-        <RadzenColumn Size="12" SizeMD="6">
-          <RadzenCard>
-            <h6>Audio Engine State</h6>
-            <span style="font-size:1rem">@_audioEngineState</span>
-          </RadzenCard>
-        </RadzenColumn>
-
-        <!-- Platform Info -->
-        <RadzenColumn Size="12" SizeMD="6">
-          <RadzenCard>
-            <h6>Platform</h6>
-            <table class="rz-datatable" style="overflow-x: auto;">
-              <tbody>
-                <tr><td><b>OS</b></td><td>@System.Runtime.InteropServices.RuntimeInformation.OSDescription</td></tr>
-                <tr><td><b>Architecture</b></td><td>@System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture</td></tr>
-                <tr><td><b>Runtime</b></td><td>@System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription</td></tr>
-                <tr><td><b>Runtime ID</b></td><td>@System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier</td></tr>
-              </tbody>
-            </table>
-          </RadzenCard>
-        </RadzenColumn>
-      </RadzenRow>
-
+      <!-- Row 4: System Actions -->
       @if (OperatingSystem.IsLinux())
       {
-        <hr style="border-color:var(--surface-separator); margin:16px 0" />
-        <RadzenRow Gap="1rem">
-          <RadzenColumn Size="12">
-            <h6 style="margin-bottom:8px">System Actions</h6>
-          </RadzenColumn>
-          <RadzenColumn Size="6" SizeMD="3">
-            <RadzenButton Variant="Variant.Filled" ButtonStyle="ButtonStyle.Warning" Style="width:100%"
-                          Icon="refresh" Click="RestartServicesAsync" Text="Restart Services" />
-          </RadzenColumn>
-          <RadzenColumn Size="6" SizeMD="3">
-            <RadzenButton Variant="Variant.Filled" ButtonStyle="ButtonStyle.Danger" Style="width:100%"
-                          Icon="power_settings_new" Click="ShutdownSystemAsync" Text="Shutdown System" />
-          </RadzenColumn>
-        </RadzenRow>
+        <div style="display:flex; gap:10px; align-items:center;">
+          <span style="font-size:0.75rem; color:var(--text-low); margin-right:8px">System Actions</span>
+          <RadzenButton Variant="Variant.Filled" ButtonStyle="ButtonStyle.Warning"
+                        Icon="refresh" Click="RestartServicesAsync" Text="Restart Services" />
+          <RadzenButton Variant="Variant.Filled" ButtonStyle="ButtonStyle.Danger"
+                        Icon="power_settings_new" Click="ShutdownSystemAsync" Text="Shutdown System" />
+        </div>
       }
     </RadzenTabsItem>
 
