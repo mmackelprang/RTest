@@ -95,13 +95,13 @@ internal sealed class BluetoothMgmtMonitor : BackgroundService
         bytesRead = await Task.Run(() =>
         {
           var pollFd = new PollFd { fd = _socketFd, events = PollEvents.POLLIN };
-          int pollResult = poll(ref pollFd, 1, 1000); // 1s timeout for cancellation check
+          int pollResult = poll(ref pollFd, (nuint)1, 1000);
           if (pollResult <= 0 || (pollFd.revents & PollEvents.POLLIN) == 0)
           {
             return 0;
           }
 
-          return read(_socketFd, buffer, buffer.Length);
+          return (int)read(_socketFd, buffer, (nuint)buffer.Length);
         }, ct);
       }
       catch (OperationCanceledException)
@@ -113,6 +113,12 @@ internal sealed class BluetoothMgmtMonitor : BackgroundService
       {
         continue;
       }
+
+      // Log all received mgmt events for debugging
+      var opcode = bytesRead >= 2
+        ? BitConverter.ToUInt16(buffer, 0)
+        : 0;
+      _logger.LogDebug("Mgmt event received: {Bytes} bytes, opcode=0x{Opcode:X4}", bytesRead, opcode);
 
       if (BluetoothMgmtEventParser.TryParseDeviceDisconnected(
         buffer.AsSpan(0, bytesRead), out var address, out var reason))
@@ -197,11 +203,11 @@ internal sealed class BluetoothMgmtMonitor : BackgroundService
   private static extern int bind(int fd, ref SockAddrHci addr, int addrlen);
 
   [DllImport("libc", SetLastError = true)]
-  private static extern int read(int fd, byte[] buf, int count);
+  private static extern nint read(int fd, byte[] buf, nuint count);
 
   [DllImport("libc", SetLastError = true)]
   private static extern int close(int fd);
 
   [DllImport("libc", SetLastError = true)]
-  private static extern int poll(ref PollFd fds, int nfds, int timeout);
+  private static extern int poll(ref PollFd fds, nuint nfds, int timeout);
 }
