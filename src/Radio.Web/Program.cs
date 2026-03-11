@@ -1,6 +1,5 @@
 using System.Net.Sockets;
-using MudBlazor;
-using MudBlazor.Services;
+using Radzen;
 using Radio.Web;
 using Radio.Web.Services;
 using Radio.Web.Services.ApiClients;
@@ -63,17 +62,8 @@ builder.Services.AddRazorComponents()
     options.DisconnectedCircuitRetentionPeriod = TimeSpan.FromMinutes(10);
   });
 
-// Add MudBlazor services
-builder.Services.AddMudServices(config =>
-{
-  config.SnackbarConfiguration.PositionClass = Defaults.Classes.Position.BottomRight;
-  config.SnackbarConfiguration.ShowCloseIcon = true;
-  config.SnackbarConfiguration.VisibleStateDuration = 3000;
-  config.SnackbarConfiguration.PreventDuplicates = false;
-  config.SnackbarConfiguration.NewestOnTop = true;
-  config.SnackbarConfiguration.ShowTransitionDuration = 300;
-  config.SnackbarConfiguration.HideTransitionDuration = 300;
-});
+// Add Radzen Blazor services (dialog, notification, tooltip, context menu)
+builder.Services.AddRadzenComponents();
 
 // Register API client services with retry policies (Phase 1 Task 1.2)
 var apiBaseUrl = builder.Configuration["ApiBaseUrl"] ?? WebConstants.DefaultApiBaseUrl;

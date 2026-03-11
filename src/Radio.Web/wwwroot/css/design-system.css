@@ -238,7 +238,7 @@ html, body {
   -webkit-tap-highlight-color: transparent;
 }
 
-.route-toggle .mud-icon-root {
+.route-toggle .rzi {
   font-size: 30px !important;
   width: 30px;
   height: 30px;
@@ -357,8 +357,8 @@ html, body {
   -webkit-tap-highlight-color: transparent;
 }
 
-.nav-icon .mud-icon-button-label .mud-icon-root,
-.topbar-nav .mud-icon-root {
+.nav-icon .rzi,
+.topbar-nav .rzi {
   font-size: 30px !important;
   width: 30px;
   height: 30px;
@@ -400,7 +400,7 @@ html, body {
   padding: 0 8px;
 }
 
-.volume-control .mud-slider { width: 160px; }
+.volume-control .rz-slider { width: 160px; }
 
 .volume-label {
   font-family: var(--font-mono);
@@ -941,12 +941,10 @@ html, body {
   transition: transform var(--anim-duration-fast) var(--anim-ease-standard);
 }
 
-/* Global touch feedback for MudBlazor interactive elements */
-.mud-button-root:active,
-.mud-icon-button:active,
-.mud-chip:active,
-.mud-tab:active,
-.mud-list-item:active {
+/* Global touch feedback for Radzen interactive elements */
+.rz-button:active,
+.rz-chip:active,
+.rz-tabview-nav-link:active {
   transform: scale(0.93);
   transition: transform 60ms ease;
 }
@@ -967,30 +965,10 @@ html, body {
 }
 
 
-/* ─── §18  MudBlazor Overrides ────────────────────────────────────────────── */
+/* ─── §18  Radzen Component Overrides ─────────────────────────────────────── */
 
-/* AppBar — seamless command surface header */
-.mud-appbar {
-  background: var(--surface-base) !important;
-  box-shadow: none !important;
-  border-bottom: 1px solid var(--surface-separator);
-}
-
-/* Paper — flat panels with subtle borders, no elevation shadows */
-.mud-paper {
-  background: var(--surface-raised) !important;
-  box-shadow: none !important;
-  border: 1px solid var(--surface-separator);
-  border-radius: 8px;
-}
-
-.mud-paper.mud-elevation-0 {
-  background: var(--surface-base) !important;
-  border: none;
-}
-
-/* Cards */
-.mud-card {
+/* Cards — flat panels with subtle borders */
+.rz-card {
   background: var(--surface-raised) !important;
   box-shadow: none !important;
   border: 1px solid var(--surface-separator);
@@ -998,51 +976,21 @@ html, body {
 }
 
 /* Tabs */
-.mud-tabs .mud-tab { min-height: 44px; font-size: 15px; }
-.mud-tab.mud-tab-active { color: var(--accent-primary) !important; }
-
-/* Vertical tabs — left-align text, scrollable panels */
-.mud-tabs-vertical .mud-tab { justify-content: flex-start !important; text-align: left; }
-.mud-tabs-vertical .mud-tab-content { justify-content: flex-start; }
-.mud-tabs-vertical > .mud-tabs-panels { overflow-y: auto; overflow-x: hidden; }
-.mud-tabs-vertical > .mud-tabs-header { overflow: hidden; min-width: 160px; }
-
-/* Horizontal tabs inside panels — flex-fill so queue/history can scroll */
-.panel .mud-tabs > .mud-tabs-panels { flex: 1; overflow: hidden; min-height: 0; display: flex; flex-direction: column; }
-
-/* Nested horizontal config tabs — compact scrollable */
-.mud-tabs-vertical .mud-tabs:not(.mud-tabs-vertical) .mud-tab { min-height: 36px; font-size: 13px; padding: 0 10px; }
-.mud-tabs-vertical .mud-tabs:not(.mud-tabs-vertical) .mud-tabs-header { overflow-x: auto; flex-wrap: nowrap; }
-
-/* Switches — normalize thumb to fit track */
-.mud-switch .mud-switch-thumb { width: 20px; height: 20px; }
-.mud-switch .mud-switch-track { width: 36px; height: 20px; border-radius: 10px; }
-.mud-switch .mud-switch-button { width: 36px; height: 20px; }
-
-/* Chips */
-.mud-chip { border-radius: 16px; font-size: 13px; }
+.rz-tabview-nav-link { min-height: 44px; font-size: 15px; }
+.rz-tabview-nav-link.rz-tabview-selected { color: var(--accent-primary) !important; }
 
 /* Dialogs */
-.mud-dialog-container .mud-dialog {
+.rz-dialog {
   background: var(--surface-overlay) !important;
   border: 1px solid var(--surface-separator);
 }
 
-/* Divider */
-.mud-divider {
-  border-color: var(--surface-separator) !important;
-  opacity: 1;
-}
+/* Chips */
+.rz-chip { border-radius: 16px; font-size: 13px; }
 
-/* Enforce minimum text sizes for readability at viewing distance */
-.mud-typography-body1 { font-size: 16px !important; }
-.mud-typography-body2 { font-size: 15px !important; }
-.mud-typography-caption { font-size: 13px !important; }
-
-/* Touch target enforcement on MudBlazor components */
-button, .mud-button-root { min-width: var(--touch-compact); min-height: var(--touch-compact); }
-.mud-icon-button { min-width: var(--touch-compact); min-height: var(--touch-compact); }
-.mud-table-row { min-height: 56px; }
+/* Touch target enforcement */
+button, .rz-button { min-width: var(--touch-compact); min-height: var(--touch-compact); }
+.rz-datatable .rz-datatable-tbody > tr { min-height: 56px; }
 
 
 /* ─── §19  Scrollbar Styling ──────────────────────────────────────────────── */
@@ -1053,27 +1001,22 @@ button, .mud-button-root { min-width: var(--touch-compact); min-height: var(--to
 
 /* Show thin scrollbars only on explicitly scrollable containers */
 .scrollable,
-.mud-tabs-vertical > .mud-tabs-panels,
-.mud-table-container,
+.rz-datatable-scrollable-body,
 #queue-scroll-container {
   scrollbar-width: thin;
   scrollbar-color: var(--surface-separator) transparent;
 }
 .scrollable::-webkit-scrollbar,
-.mud-tabs-vertical > .mud-tabs-panels::-webkit-scrollbar,
-.mud-table-container::-webkit-scrollbar,
+.rz-datatable-scrollable-body::-webkit-scrollbar,
 #queue-scroll-container::-webkit-scrollbar { display: block; width: 6px; }
 .scrollable::-webkit-scrollbar-track,
-.mud-tabs-vertical > .mud-tabs-panels::-webkit-scrollbar-track,
-.mud-table-container::-webkit-scrollbar-track,
+.rz-datatable-scrollable-body::-webkit-scrollbar-track,
 #queue-scroll-container::-webkit-scrollbar-track { background: transparent; }
 .scrollable::-webkit-scrollbar-thumb,
-.mud-tabs-vertical > .mud-tabs-panels::-webkit-scrollbar-thumb,
-.mud-table-container::-webkit-scrollbar-thumb,
+.rz-datatable-scrollable-body::-webkit-scrollbar-thumb,
 #queue-scroll-container::-webkit-scrollbar-thumb { background: var(--surface-separator); border-radius: 3px; }
 .scrollable::-webkit-scrollbar-thumb:hover,
-.mud-tabs-vertical > .mud-tabs-panels::-webkit-scrollbar-thumb:hover,
-.mud-table-container::-webkit-scrollbar-thumb:hover,
+.rz-datatable-scrollable-body::-webkit-scrollbar-thumb:hover,
 #queue-scroll-container::-webkit-scrollbar-thumb:hover { background: var(--text-low); }
 
 
@@ -1081,8 +1024,7 @@ button, .mud-button-root { min-width: var(--touch-compact); min-height: var(--to
 
 .bottom-sheet-backdrop { background: rgba(0, 0, 0, 0.6) !important; }
 
-.mud-dialog-bottom-center .mud-dialog,
-.mud-dialog-container .bottom-sheet .mud-dialog {
+.bottom-sheet .rz-dialog {
   max-height: 420px;
   border-radius: 16px 16px 0 0 !important;
   margin: 0 !important;
