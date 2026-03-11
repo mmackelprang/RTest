@@ -122,7 +122,7 @@ public class HomePageE2ETests
 
     await _fixture.Page.GotoAsync(_fixture.BaseUrl);
 
-    // The Audio Source MudSelect renders as a div with the label text
+    // The Audio Source RadzenDropDown renders as a div with the label text
     var sourceLabel = _fixture.Page.Locator("text=Audio Source");
     await Expect(sourceLabel).ToBeVisibleAsync();
   }

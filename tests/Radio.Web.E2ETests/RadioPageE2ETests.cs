@@ -62,7 +62,7 @@ public class RadioPageE2ETests
     await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/radio");
     await _fixture.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
-    // Band buttons are MudButton pills — at least FM should be present
+    // Band buttons are RadzenButton pills — at least FM should be present
     var fmButton = _fixture.Page.Locator("button:has-text('FM')").First;
     await Expect(fmButton).ToBeVisibleAsync();
   }

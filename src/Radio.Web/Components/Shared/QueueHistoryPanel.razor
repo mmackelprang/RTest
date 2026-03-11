@@ -5,215 +5,215 @@
 @inject AudioStateHubService HubService
 @inject AudioApiService AudioApi
 @inject FileApiService FileApi
-@inject IDialogService DialogService
+@inject DialogService DialogService
 @inject ILogger<QueueHistoryPanel> Logger
-@inject ISnackbar Snackbar
+@inject NotificationService NotificationService
 @inject Radio.Web.Services.QueuePersistenceService QueuePersistence
 @inject PlaylistApiService PlaylistApi
 @inject SourcesApiService SourcesApi
 @implements IAsyncDisposable
 
 <div style="height: 100%; display: flex; flex-direction: column; padding: 0;">
-  <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="true"
-           ActivePanelIndex="_activeTab"
-           ActivePanelIndexChanged="OnTabChanged"
-           Style="height: 100%; display: flex; flex-direction: column; min-height: 0;">
-    <MudTabPanel Text="Queue" Icon="@Icons.Material.Filled.QueueMusic"
-                 BadgeData="@(_queueItems.Count > 0 ? _queueItems.Count.ToString() : null)"
-                 BadgeColor="Color.Primary"
-                 Style="flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0;">
-      <div style="height: 100%; display: flex; flex-direction: column; min-height: 0;">
-        <!-- Queue Header -->
-        <div class="panel-header">
-          <span>
-            @if (_playedCount > 0)
-            {
-              @($"{_playedCount}/{_queueItems.Count} played")
-            }
-            else
-            {
-              @($"{_queueItems.Count} tracks")
-            }
-          </span>
-          <div style="display: flex; gap: 4px;">
-            <MudIconButton Icon="@Icons.Material.Filled.Add"
-                           Color="Color.Primary"
-                           Size="Size.Small"
-                           OnClick="OpenFileSelectionDialogAsync"
-                           title="Add Files" />
-            <MudIconButton Icon="@Icons.Material.Filled.PlaylistPlay"
-                           Color="Color.Primary"
-                           Size="Size.Small"
-                           OnClick="OpenLoadPlaylistDialogAsync"
-                           title="Load Playlist" />
-            <MudIconButton Icon="@Icons.Material.Filled.Save"
-                           Color="Color.Primary"
-                           Size="Size.Small"
-                           Disabled="@(!_queueItems.Any())"
-                           OnClick="OpenSavePlaylistDialogAsync"
-                           title="Save as Playlist" />
-            <MudIconButton Icon="@Icons.Material.Filled.DeleteSweep"
-                           Color="Color.Error"
-                           Size="Size.Small"
-                           Disabled="@(!_queueItems.Any())"
-                           OnClick="HandleClearQueueAsync"
-                           title="Clear All" />
-          </div>
-        </div>
-
-        <!-- Queue List -->
-        @if (!_queueItems.Any())
-        {
-          <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-low);">
-            <MudIcon Icon="@Icons.Material.Filled.QueueMusic" Style="font-size: 80px; opacity: 0.4; margin-bottom: 12px;" />
-            <span style="font-size: 16px;">No tracks in queue</span>
-          </div>
-        }
-        else
-        {
-          <div id="queue-scroll-container" class="scrollable" style="flex: 1; overflow-y: auto; min-height: 0;">
-            <MudVirtualize Items="@_queueItems" ItemSize="56" OverscanCount="5" Context="item">
-              @{
-                var itemState = item.State ?? "Upcoming";
-                var isError = itemState == "Error";
-                var isCurrent = itemState == "Current";
-                var isPlayed = itemState == "Played";
-                var isClickable = !isError;
+  <RadzenTabs RenderMode="TabRenderMode.Client"
+              SelectedIndex="_activeTab"
+              Change="@(args => OnTabChanged(args))"
+              Style="height: 100%; display: flex; flex-direction: column; min-height: 0;">
+    <Tabs>
+      <RadzenTabsItem Text="@(_queueItems.Count > 0 ? $"Queue ({_queueItems.Count})" : "Queue")"
+                      Icon="queue_music"
+                      Style="flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0;">
+        <div style="height: 100%; display: flex; flex-direction: column; min-height: 0;">
+          <!-- Queue Header -->
+          <div class="panel-header">
+            <span>
+              @if (_playedCount > 0)
+              {
+                @($"{_playedCount}/{_queueItems.Count} played")
               }
+              else
+              {
+                @($"{_queueItems.Count} tracks")
+              }
+            </span>
+            <div style="display: flex; gap: 4px;">
+              <RadzenButton Variant="Variant.Text"
+                            Icon="add"
+                            ButtonStyle="ButtonStyle.Primary"
+                            Size="ButtonSize.Small"
+                            Click="OpenFileSelectionDialogAsync"
+                            title="Add Files" />
+              <RadzenButton Variant="Variant.Text"
+                            Icon="playlist_play"
+                            ButtonStyle="ButtonStyle.Primary"
+                            Size="ButtonSize.Small"
+                            Click="OpenLoadPlaylistDialogAsync"
+                            title="Load Playlist" />
+              <RadzenButton Variant="Variant.Text"
+                            Icon="save"
+                            ButtonStyle="ButtonStyle.Primary"
+                            Size="ButtonSize.Small"
+                            Disabled="@(!_queueItems.Any())"
+                            Click="OpenSavePlaylistDialogAsync"
+                            title="Save as Playlist" />
+              <RadzenButton Variant="Variant.Text"
+                            Icon="delete_sweep"
+                            ButtonStyle="ButtonStyle.Danger"
+                            Size="ButtonSize.Small"
+                            Disabled="@(!_queueItems.Any())"
+                            Click="HandleClearQueueAsync"
+                            title="Clear All" />
+            </div>
+          </div>
 
-              <div class="list-item-touch @(isCurrent ? "list-item-active" : "")"
-                   style="cursor: @(isClickable ? "pointer" : "not-allowed");
-                          opacity: @(isError ? "0.4" : isPlayed ? "0.6" : "1");"
-                   @onclick="@(() => HandleItemClickAsync(item))">
-                <!-- State icon -->
-                <div style="width: 24px; text-align: center; flex-shrink: 0;">
-                  @if (isCurrent)
+          <!-- Queue List -->
+          @if (!_queueItems.Any())
+          {
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-low);">
+              <RadzenIcon Icon="queue_music" Style="font-size: 80px; opacity: 0.4; margin-bottom: 12px;" />
+              <span style="font-size: 16px;">No tracks in queue</span>
+            </div>
+          }
+          else
+          {
+            <div id="queue-scroll-container" class="scrollable" style="flex: 1; overflow-y: auto; min-height: 0;">
+              <Virtualize Items="@_queueItems" ItemSize="56" OverscanCount="5" Context="item">
+                <div class="list-item-touch @((item.State ?? "Upcoming") == "Current" ? "list-item-active" : "")"
+                     style="cursor: @((item.State ?? "Upcoming") == "Error" ? "not-allowed" : "pointer");
+                            opacity: @((item.State ?? "Upcoming") == "Error" ? "0.4" : (item.State ?? "Upcoming") == "Played" ? "0.6" : "1");"
+                     @onclick="@(() => HandleItemClickAsync(item))">
+                  <!-- State icon -->
+                  <div style="width: 24px; text-align: center; flex-shrink: 0;">
+                    @if ((item.State ?? "Upcoming") == "Current")
+                    {
+                      <div class="now-playing-bars">
+                        <span></span><span></span><span></span>
+                      </div>
+                    }
+                    else if ((item.State ?? "Upcoming") == "Played")
+                    {
+                      <RadzenIcon Icon="check" Style="font-size: 20px; color: var(--text-low);" />
+                    }
+                    else if ((item.State ?? "Upcoming") == "Error")
+                    {
+                      <RadzenIcon Icon="error" Style="font-size: 20px; color: var(--rz-danger);" />
+                    }
+                    else
+                    {
+                      <span style="font-size: 13px; color: var(--text-low); font-family: var(--font-mono);">@(item.FullPlaylistIndex + 1)</span>
+                    }
+                  </div>
+
+                  <!-- Track info -->
+                  <div style="flex: 1; min-width: 0;">
+                    <div style="font-size: 16px;
+                                font-weight: @((item.State ?? "Upcoming") == "Current" ? "600" : "400");
+                                color: @((item.State ?? "Upcoming") == "Current" ? "var(--accent-primary)" : (item.State ?? "Upcoming") == "Error" ? "var(--signal-red)" : "var(--text-high)");
+                                white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+                                @((item.State ?? "Upcoming") == "Error" ? "text-decoration: line-through;" : "")">
+                      @item.Title
+                    </div>
+                    <div style="font-size: 14px; color: var(--text-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                      @item.Artist @if (!string.IsNullOrEmpty(item.Duration)) { <text> · @item.Duration</text> }
+                    </div>
+                  </div>
+
+                  <!-- Remove button (only for upcoming items) -->
+                  @if ((item.State ?? "Upcoming") == "Upcoming")
                   {
-                    <div class="now-playing-bars">
-                      <span></span><span></span><span></span>
+                    <div @onclick:stopPropagation="true">
+                      <RadzenButton Variant="Variant.Text"
+                                    Icon="close"
+                                    Size="ButtonSize.Small"
+                                    ButtonStyle="ButtonStyle.Light"
+                                    Click="@(() => HandleRemoveAsync(item.Index))"
+                                    title="Remove" />
                     </div>
                   }
-                  else if (isPlayed)
-                  {
-                    <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Style="color: var(--text-low);" />
-                  }
-                  else if (isError)
-                  {
-                    <MudIcon Icon="@Icons.Material.Filled.Error" Color="Color.Error" Size="Size.Small" />
-                  }
-                  else
-                  {
-                    <span style="font-size: 13px; color: var(--text-low); font-family: var(--font-mono);">@(item.FullPlaylistIndex + 1)</span>
-                  }
                 </div>
-
-                <!-- Track info -->
-                <div style="flex: 1; min-width: 0;">
-                  <div style="font-size: 16px;
-                              font-weight: @(isCurrent ? "600" : "400");
-                              color: @(isCurrent ? "var(--accent-primary)" : isError ? "var(--signal-red)" : "var(--text-high)");
-                              white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-                              @(isError ? "text-decoration: line-through;" : "")">
-                    @item.Title
-                  </div>
-                  <div style="font-size: 14px; color: var(--text-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    @item.Artist @if (!string.IsNullOrEmpty(item.Duration)) { <text> · @item.Duration</text> }
-                  </div>
-                </div>
-
-                <!-- Remove button (only for upcoming items) -->
-                @if (itemState == "Upcoming")
-                {
-                  <div @onclick:stopPropagation="true">
-                    <MudIconButton Icon="@Icons.Material.Filled.Close"
-                                   Size="Size.Small"
-                                   Color="Color.Default"
-                                   OnClick="@(() => HandleRemoveAsync(item.Index))"
-                                   title="Remove" />
-                  </div>
-                }
-              </div>
-            </MudVirtualize>
-          </div>
-        }
-      </div>
-    </MudTabPanel>
-
-    <MudTabPanel Text="History" Icon="@Icons.Material.Filled.History"
-                 Style="flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0;">
-      <div style="height: 100%; display: flex; flex-direction: column; min-height: 0;">
-        <!-- History Header -->
-        <div class="panel-header">
-          <span>Recent Plays</span>
-          <MudIconButton Icon="@Icons.Material.Filled.Refresh"
-                         Color="Color.Default"
-                         Size="Size.Small"
-                         OnClick="RefreshHistoryAsync"
-                         title="Refresh" />
+              </Virtualize>
+            </div>
+          }
         </div>
+      </RadzenTabsItem>
 
-        <!-- History List -->
-        @if (_isLoadingHistory)
-        {
-          <div style="flex: 1; display: flex; align-items: center; justify-content: center;">
-            <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Small" />
+      <RadzenTabsItem Text="History" Icon="history"
+                      Style="flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0;">
+        <div style="height: 100%; display: flex; flex-direction: column; min-height: 0;">
+          <!-- History Header -->
+          <div class="panel-header">
+            <span>Recent Plays</span>
+            <RadzenButton Variant="Variant.Text"
+                          Icon="refresh"
+                          ButtonStyle="ButtonStyle.Light"
+                          Size="ButtonSize.Small"
+                          Click="RefreshHistoryAsync"
+                          title="Refresh" />
           </div>
-        }
-        else if (_historyItems.Any())
-        {
-          <div class="scrollable" style="flex: 1; overflow-y: auto; min-height: 0;">
-            @foreach (var item in _historyItems)
-            {
-              <div class="list-item-touch">
-                <!-- Album art or source icon -->
-                <div style="width: 36px; height: 36px; flex-shrink: 0; border-radius: 4px; overflow: hidden; display: flex; align-items: center; justify-content: center;">
-                  @if (!string.IsNullOrEmpty(item.Track?.CoverArtUrl)
-                    && item.Track.CoverArtUrl != "/images/default-album-art.png")
-                  {
-                    <img src="@item.Track.CoverArtUrl"
-                         style="width: 36px; height: 36px; object-fit: cover;"
-                         loading="lazy" />
-                  }
-                  else
-                  {
-                    <MudIcon Icon="@SourceTypeHelper.GetIcon(item.Source)"
-                             Size="Size.Small"
-                             Style="color: var(--text-low);" />
-                  }
-                </div>
-                <!-- Track info -->
-                <div style="flex: 1; min-width: 0;">
-                  <div style="font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-high);">
-                    @(item.Title ?? "Unknown")
+
+          <!-- History List -->
+          @if (_isLoadingHistory)
+          {
+            <div style="flex: 1; display: flex; align-items: center; justify-content: center;">
+              <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate"
+                                         ProgressBarStyle="ProgressBarStyle.Primary"
+                                         Size="ProgressBarCircularSize.Small" />
+            </div>
+          }
+          else if (_historyItems.Any())
+          {
+            <div class="scrollable" style="flex: 1; overflow-y: auto; min-height: 0;">
+              @foreach (var item in _historyItems)
+              {
+                <div class="list-item-touch">
+                  <!-- Album art or source icon -->
+                  <div style="width: 36px; height: 36px; flex-shrink: 0; border-radius: 4px; overflow: hidden; display: flex; align-items: center; justify-content: center;">
+                    @if (!string.IsNullOrEmpty(item.Track?.CoverArtUrl)
+                      && item.Track.CoverArtUrl != "/images/default-album-art.png")
+                    {
+                      <img src="@item.Track.CoverArtUrl"
+                           style="width: 36px; height: 36px; object-fit: cover;"
+                           loading="lazy" />
+                    }
+                    else
+                    {
+                      <RadzenIcon Icon="@SourceTypeHelper.GetIcon(item.Source)"
+                                  Style="font-size: 20px; color: var(--text-low);" />
+                    }
                   </div>
-                  <div style="font-size: 14px; color: var(--text-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    @(item.Artist ?? "--")@if (item.DurationSeconds.HasValue) { <text> · @FormatDuration(item.DurationSeconds)</text> }
-                  </div>
-                  @if (!string.IsNullOrEmpty(item.SourceDetails) && item.SourceDetails != $"{item.Title} - {item.Artist}")
-                  {
-                    <div style="font-size: 12px; color: var(--text-low); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                      @item.SourceDetails
+                  <!-- Track info -->
+                  <div style="flex: 1; min-width: 0;">
+                    <div style="font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-high);">
+                      @(item.Title ?? "Unknown")
                     </div>
-                  }
+                    <div style="font-size: 14px; color: var(--text-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                      @(item.Artist ?? "--")@if (item.DurationSeconds.HasValue) { <text> · @FormatDuration(item.DurationSeconds)</text> }
+                    </div>
+                    @if (!string.IsNullOrEmpty(item.SourceDetails) && item.SourceDetails != $"{item.Title} - {item.Artist}")
+                    {
+                      <div style="font-size: 12px; color: var(--text-low); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        @item.SourceDetails
+                      </div>
+                    }
+                  </div>
+                  <RadzenBadge BadgeStyle="@GetSourceBadgeStyle(item.Source)"
+                               IsPill="true"
+                               Text="@item.Source"
+                               Style="font-size: 13px;" />
                 </div>
-                <MudChip T="string" Size="Size.Small" Color="@GetSourceColor(item.Source)" Style="font-size: 13px;"
-                         Icon="@SourceTypeHelper.GetIcon(item.Source)">
-                  @item.Source
-                </MudChip>
-              </div>
-            }
-          </div>
-        }
-        else
-        {
-          <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-low);">
-            <MudIcon Icon="@Icons.Material.Filled.History" Style="font-size: 80px; opacity: 0.4; margin-bottom: 12px;" />
-            <span style="font-size: 16px;">No history yet</span>
-          </div>
-        }
-      </div>
-    </MudTabPanel>
-  </MudTabs>
+              }
+            </div>
+          }
+          else
+          {
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-low);">
+              <RadzenIcon Icon="history" Style="font-size: 80px; opacity: 0.4; margin-bottom: 12px;" />
+              <span style="font-size: 16px;">No history yet</span>
+            </div>
+          }
+        </div>
+      </RadzenTabsItem>
+    </Tabs>
+  </RadzenTabs>
 </div>
 
 @code {
@@ -354,26 +354,17 @@
 
   private async Task OpenSavePlaylistDialogAsync()
   {
-    var options = new DialogOptions
-    {
-      CloseButton = true,
-      MaxWidth = MaxWidth.Small,
-      BackdropClick = true
-    };
-    await DialogService.ShowAsync<Radio.Web.Components.Dialogs.SavePlaylistDialog>("Save Playlist", options);
+    await DialogService.OpenAsync<Radio.Web.Components.Dialogs.SavePlaylistDialog>("Save Playlist",
+      new Dictionary<string, object>(),
+      new DialogOptions { ShowClose = true, Width = "400px", CloseDialogOnOverlayClick = true });
   }
 
   private async Task OpenLoadPlaylistDialogAsync()
   {
-    var options = new DialogOptions
-    {
-      CloseButton = true,
-      MaxWidth = MaxWidth.Small,
-      BackdropClick = true
-    };
-    var dialog = await DialogService.ShowAsync<Radio.Web.Components.Dialogs.LoadPlaylistDialog>("Load Playlist", options);
-    var result = await dialog.Result;
-    if (result != null && !result.Canceled)
+    var result = await DialogService.OpenAsync<Radio.Web.Components.Dialogs.LoadPlaylistDialog>("Load Playlist",
+      new Dictionary<string, object>(),
+      new DialogOptions { ShowClose = true, Width = "400px", CloseDialogOnOverlayClick = true });
+    if (result != null)
     {
       await RefreshQueueAsync();
       StateHasChanged();
@@ -382,29 +373,22 @@
 
   private async Task OpenFileSelectionDialogAsync()
   {
-    var parameters = new DialogParameters
-    {
-      { "AllowMultiSelect", true },
-      { "AllowAddToQueue", true },
-      { "ShowPlayButton", true },
-      { "PreferredBookmarkTag", "music" },
-      { "OnAddToQueue", EventCallback.Factory.Create<List<string>>(this, HandleAddFilesToQueueAsync) }
-    };
-    var options = new DialogOptions
-    {
-      CloseButton = true,
-      MaxWidth = MaxWidth.Medium,
-      BackdropClick = true
-    };
+    var result = await DialogService.OpenAsync<Radio.Web.Components.Dialogs.FileBrowserDialog>("Add Files to Queue",
+      new Dictionary<string, object>
+      {
+        { "AllowMultiSelect", true },
+        { "AllowAddToQueue", true },
+        { "ShowPlayButton", true },
+        { "PreferredBookmarkTag", "music" },
+        { "OnAddToQueue", EventCallback.Factory.Create<List<string>>(this, HandleAddFilesToQueueAsync) }
+      },
+      new DialogOptions { ShowClose = true, Width = "600px", CloseDialogOnOverlayClick = true });
 
-    var dialog = await DialogService.ShowAsync<Radio.Web.Components.Dialogs.FileBrowserDialog>("Add Files to Queue", parameters, options);
-    var result = await dialog.Result;
-
-    if (result != null && !result.Canceled)
+    if (result != null)
     {
-      if (result.Data is List<string> selectedPaths)
+      if (result is List<string> selectedPaths)
         await HandleAddFilesToQueueAsync(selectedPaths);
-      else if (result.Data is string selectedPath)
+      else if (result is string selectedPath)
         await HandleAddFilesToQueueAsync(new List<string> { selectedPath });
     }
   }
@@ -418,22 +402,22 @@
       var (success, addedCount, error) = await FileApi.AddFilesToQueueAsync(filePaths);
       if (addedCount > 0)
       {
-        Snackbar.Add($"{addedCount} file{(addedCount != 1 ? "s" : "")} added", Severity.Success);
+        NotificationService.Notify(NotificationSeverity.Success, "Success", $"{addedCount} file{(addedCount != 1 ? "s" : "")} added");
         await RefreshQueueAsync();
       }
       if (!string.IsNullOrEmpty(error))
       {
-        Snackbar.Add(error, Severity.Warning);
+        NotificationService.Notify(NotificationSeverity.Warning, "Warning", error);
       }
       else if (!success)
       {
-        Snackbar.Add("Failed to add files to queue", Severity.Error);
+        NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to add files to queue");
       }
     }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Failed to add files to queue");
-      Snackbar.Add("Error adding files to queue", Severity.Error);
+      NotificationService.Notify(NotificationSeverity.Error, "Error", "Error adding files to queue");
     }
   }
 
@@ -456,15 +440,15 @@
       : ts.ToString(@"m\:ss");
   }
 
-  private static Color GetSourceColor(string source)
+  private static BadgeStyle GetSourceBadgeStyle(string source)
   {
     return source switch
     {
-      "File" => Color.Info,
-      "Radio" => Color.Warning,
-      "Bluetooth" => Color.Secondary,
-      "Vinyl" => Color.Success,
-      _ => Color.Default
+      "File" => BadgeStyle.Info,
+      "Radio" => BadgeStyle.Warning,
+      "Bluetooth" => BadgeStyle.Secondary,
+      "Vinyl" => BadgeStyle.Success,
+      _ => BadgeStyle.Light
     };
   }
 

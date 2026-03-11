@@ -15,10 +15,7 @@
 @implements IDisposable
 @implements IAsyncDisposable
 
-<MudThemeProvider Theme="@_customTheme" IsDarkMode="true" />
-<MudPopoverProvider />
-<MudDialogProvider />
-<MudSnackbarProvider />
+<RadzenComponents />
 
 <div class="layout-container" style="width: 1920px; height: 720px; overflow: hidden;">
   <!-- Top Bar — Command Surface -->
@@ -37,7 +34,7 @@
              data-source="@GetSourceDataAttr(source.Type)"
              @onclick="@(() => HandleSourceToggleAsync(source))"
              title="@source.Name">
-          <MudIcon Icon="@GetSourceIcon(source.Type)" Size="Size.Medium" />
+          <RadzenIcon Icon="@GetSourceIcon(source.Type)" />
         </div>
       }
     </div>
@@ -53,7 +50,7 @@
              @onclick="@(() => HandleOutputChangeAsync(output.Id))"
              title="@output.Name"
              style="position: relative;">
-          <MudIcon Icon="@GetOutputIcon(output)" Size="Size.Medium" />
+          <RadzenIcon Icon="@GetOutputIcon(output)" />
           @if (output.Id.Equals("google-cast", StringComparison.OrdinalIgnoreCase) && _defaultCastDevice != null)
           {
             <span class="cast-device-label">@_defaultCastDevice.Name</span>
@@ -77,25 +74,42 @@
     </div>
 
     <!-- Debug: Distortion Marker (temporary — remove when done diagnosing) -->
-    <MudIconButton Icon="@Icons.Material.Filled.BugReport"
-                   Color="@_distortionMarkerColor"
-                   Size="Size.Large"
-                   title="Mark audio distortion"
-                   OnClick="HandleDistortionMarkerAsync"
-                   Class="debug-distortion-btn" />
+    <RadzenButton Icon="bug_report"
+                  ButtonStyle="ButtonStyle.Light"
+                  Variant="Radzen.Variant.Text"
+                  Size="ButtonSize.Large"
+                  title="Mark audio distortion"
+                  Click="@HandleDistortionMarkerAsync"
+                  class="@($"debug-distortion-btn {_distortionMarkerColor}")" />
 
     <!-- Navigation Icons (right-aligned) -->
     <div class="topbar-nav">
-      <MudIconButton Icon="@Icons.Material.Filled.Home" Class="@NavClass("/")" Href="/" Size="Size.Large" title="Home" />
-      <MudBadge Content="@_queueCount" Overlap="true" Color="Color.Primary" Visible="@(_queueCount > 0)">
-        <MudIconButton Icon="@Icons.Material.Filled.QueueMusic" Size="Size.Large" title="Queue"
-                       Class="@NavClass("/")" OnClick="HandleQueueNavAsync" />
-      </MudBadge>
-      <MudIconButton Icon="@Icons.Material.Filled.Dashboard" Class="@NavClass("/metrics")" Href="/metrics" Size="Size.Large" title="Metrics" />
-      <MudIconButton Icon="@Icons.Material.Filled.Devices" Class="@NavClass("/devices")" Href="/devices" Size="Size.Large" title="Devices" />
-      <MudIconButton Icon="@Icons.Material.Filled.History" Class="@NavClass("/history")" Href="/history" Size="Size.Large" title="History" />
-      <MudIconButton Icon="@Icons.Material.Filled.Settings" Class="@NavClass("/system")" Href="/system" Size="Size.Large" title="Settings" />
-      <MudIconButton Icon="@Icons.Material.Filled.PowerSettingsNew" Class="nav-icon" Size="Size.Large" title="Sleep" OnClick="HandleSleepButtonAsync" />
+      <a href="/" class="@NavClass("/")" title="Home">
+        <RadzenIcon Icon="home" />
+      </a>
+      <span style="position: relative;" class="@NavClass("/")" title="Queue" @onclick="HandleQueueNavAsync">
+        <RadzenIcon Icon="queue_music" />
+        @if (_queueCount > 0)
+        {
+          <RadzenBadge BadgeStyle="BadgeStyle.Primary" Text="@_queueCount.ToString()"
+                       class="nav-badge" />
+        }
+      </span>
+      <a href="/metrics" class="@NavClass("/metrics")" title="Metrics">
+        <RadzenIcon Icon="dashboard" />
+      </a>
+      <a href="/devices" class="@NavClass("/devices")" title="Devices">
+        <RadzenIcon Icon="devices" />
+      </a>
+      <a href="/history" class="@NavClass("/history")" title="History">
+        <RadzenIcon Icon="history" />
+      </a>
+      <a href="/system" class="@NavClass("/system")" title="Settings">
+        <RadzenIcon Icon="settings" />
+      </a>
+      <span class="nav-icon" title="Sleep" @onclick="HandleSleepButtonAsync">
+        <RadzenIcon Icon="power_settings_new" />
+      </span>
     </div>
   </div>
 
@@ -122,47 +136,8 @@
   private bool _showCastDropdown;
 
   private int _queueCount = 0;
-  private Color _distortionMarkerColor = Color.Default;
+  private string _distortionMarkerColor = "";
   private DotNetObjectReference<MainLayout>? _selfReference;
-
-  private readonly MudTheme _customTheme = new()
-  {
-    PaletteLight = new PaletteLight()
-    {
-      Primary = "#5CD4E8",
-      Secondary = "#404045",
-      Background = "#0D0D0F",
-      Surface = "#141416",
-      AppbarBackground = "#0D0D0F",
-    },
-    PaletteDark = new PaletteDark()
-    {
-      Primary = "#5CD4E8",
-      PrimaryContrastText = "#0D0D0F",
-      Secondary = "#4A4A4F",
-      SecondaryContrastText = "#F0EFF4",
-      Tertiary = "#9CA3AF",
-      Background = "#0D0D0F",
-      Surface = "#141416",
-      AppbarBackground = "#0D0D0F",
-      DrawerBackground = "#0D0D0F",
-      TextPrimary = "#F0EFF4",
-      TextSecondary = "#9CA3AF",
-      ActionDefault = "#9CA3AF",
-      ActionDisabled = "#4B5563",
-      ActionDisabledBackground = "#0D0D0F",
-      Divider = "#1F1F22",
-      LinesDefault = "#1F1F22",
-      Error = "#F87171",
-      Warning = "#F0A830",
-      Info = "#5CD4E8",
-      Success = "#4ADE80",
-    },
-    LayoutProperties = new LayoutProperties()
-    {
-      DefaultBorderRadius = "8px",
-    }
-  };
 
   protected override async Task OnInitializedAsync()
   {
@@ -616,11 +591,11 @@
 
   private async Task HandleDistortionMarkerAsync()
   {
-    _distortionMarkerColor = Color.Error;
+    _distortionMarkerColor = "distortion-active";
     StateHasChanged();
     await AudioApi.ReportDistortionAsync();
     await Task.Delay(1000);
-    _distortionMarkerColor = Color.Default;
+    _distortionMarkerColor = "";
     StateHasChanged();
   }
 
@@ -652,15 +627,15 @@
   {
     // Use device ID for Cast detection — name gets replaced with cast device name
     if (device.Id.Equals("google-cast", StringComparison.OrdinalIgnoreCase))
-      return Icons.Material.Filled.Cast;
+      return "cast";
     if (device.Name.Contains("HTTP", StringComparison.OrdinalIgnoreCase) ||
         device.Name.Contains("Stream", StringComparison.OrdinalIgnoreCase))
-      return Icons.Material.Filled.Stream;
+      return "stream";
     if (device.IsUSBDevice)
-      return Icons.Material.Filled.Usb;
+      return "usb";
     if (device.IsDefault)
-      return Icons.Material.Filled.VolumeUp;
-    return Icons.Material.Filled.Speaker;
+      return "volume_up";
+    return "speaker";
   }
 
   private async Task OnCastDeviceSelected(CastDeviceDto selectedDevice)

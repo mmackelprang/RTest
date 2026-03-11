@@ -87,3 +87,4 @@ appsettings.Local.json
 secrets.json
 *.pfx
 *.key
+task_plan.md

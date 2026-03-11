@@ -1,5 +1,3 @@
-using MudBlazor;
-
 namespace Radio.Web.Components.Shared;
 
 /// <summary>
@@ -9,18 +7,18 @@ namespace Radio.Web.Components.Shared;
 public static class SourceTypeHelper
 {
   /// <summary>
-  /// Gets the MudBlazor Material icon for a source type string.
+  /// Gets the Material icon name for a source type string.
   /// Handles both API source type names ("FilePlayer") and fingerprint source names ("File").
   /// </summary>
   public static string GetIcon(string sourceType) => sourceType switch
   {
-    "Vinyl" => Icons.Material.Filled.Album,
-    "FilePlayer" or "File" => Icons.Material.Filled.AudioFile,
-    "Radio" or "RTLSDRCore" or "RF320" => Icons.Material.Filled.Radio,
-    "Bluetooth" => Icons.Material.Filled.Bluetooth,
-    "GenericUSB" => Icons.Material.Filled.Usb,
-    "TestTone" => Icons.Material.Filled.GraphicEq,
-    _ => Icons.Material.Filled.MusicNote
+    "Vinyl" => "album",
+    "FilePlayer" or "File" => "audio_file",
+    "Radio" or "RTLSDRCore" or "RF320" => "radio",
+    "Bluetooth" => "bluetooth",
+    "GenericUSB" => "usb",
+    "TestTone" => "graphic_eq",
+    _ => "music_note"
   };
 
   /// <summary>

@@ -46,7 +46,7 @@ public class PlayHistoryPageE2ETests
     await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/history");
     await _fixture.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
-    // MudTextField with placeholder text
+    // RadzenTextBox with placeholder text
     var searchField = _fixture.Page.Locator("input[placeholder*='Search']").First;
     await Expect(searchField).ToBeVisibleAsync();
   }

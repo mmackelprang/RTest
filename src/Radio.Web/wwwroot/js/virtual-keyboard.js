@@ -32,7 +32,7 @@ class VirtualKeyboard {
       }
       if (input.tagName === 'INPUT') {
         // Skip inputs that are part of dropdown/select components (they open their own popover)
-        if (input.closest('.mud-select, .mud-autocomplete')) return;
+        if (input.closest('.rz-dropdown, .rz-autocomplete')) return;
         // Skip hidden, checkbox, radio, file, color, range, button-like inputs
         const type = (input.type || 'text').toLowerCase();
         const textTypes = ['text', 'search', 'email', 'password', 'url', 'tel', 'number'];
@@ -337,9 +337,8 @@ class VirtualKeyboard {
       return 'numeric';
     }
 
-    // MudNumericField renders an inner <input> with type="number" inside a wrapper
-    // that may have inputmode on the outer element
-    const wrapper = inputElement.closest('.mud-input-control');
+    // RadzenNumeric renders an inner <input> with type="number" inside a wrapper
+    const wrapper = inputElement.closest('.rz-spinner');
     if (wrapper && wrapper.querySelector('input[type="number"]')) {
       return 'numeric';
     }

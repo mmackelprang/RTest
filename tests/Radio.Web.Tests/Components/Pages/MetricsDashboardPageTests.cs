@@ -3,7 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using MudBlazor.Services;
+using Radzen;
 using Radio.Web.Components.Pages;
 using Radio.Web.Services.ApiClients;
 
@@ -32,23 +32,15 @@ public class MetricsDashboardPageTests : TestContext
     Services.AddSingleton<IConfiguration>(configuration);
     Services.AddSingleton(_loggerFactory);
 
-    // Add MudBlazor services
-    Services.AddMudServices();
+    // Add Radzen services
+    Services.AddRadzenComponents();
 
     // Add HttpClient for API services
     Services.AddHttpClient<MetricsApiService>();
     Services.AddHttpClient<ConfigurationApiService>();
 
-    // Setup JSInterop mocks for MudBlazor components and metricsChart module
+    // Setup JSInterop for Radzen components and metricsChart module
     JSInterop.Mode = JSRuntimeMode.Loose;
-    JSInterop.SetupVoid("mudElementRef.getBoundingClientRect", _ => true);
-    JSInterop.Setup<int>("mudElementRef.getBoundingClientRect", _ => true).SetResult(0);
-    JSInterop.SetupVoid("mudPopover.connect", _ => true);
-    JSInterop.SetupVoid("mudPopover.disconnect", _ => true);
-    JSInterop.SetupVoid("mudPopover.initialize", _ => true);
-    JSInterop.SetupVoid("mudSelect.setDisabled", _ => true);
-    JSInterop.SetupVoid("mudKeyInterceptor.connect", _ => true);
-    JSInterop.SetupVoid("mudKeyInterceptor.disconnect", _ => true);
   }
 
   protected override void Dispose(bool disposing)
@@ -62,7 +54,6 @@ public class MetricsDashboardPageTests : TestContext
 
   private IRenderedComponent<MetricsDashboardPage> RenderMetricsDashboard()
   {
-    ComponentFactories.AddStub<MudBlazor.MudPopoverProvider>();
     return RenderComponent<MetricsDashboardPage>();
   }
 
@@ -106,9 +97,9 @@ public class MetricsDashboardPageTests : TestContext
     // Act
     var cut = RenderMetricsDashboard();
 
-    // Assert - Check for refresh icon button (MudIconButton renders an icon, not text)
+    // Assert - Check for refresh icon button (RadzenButton renders an icon, not text)
     Assert.NotNull(cut);
-    // The refresh button is a MudIconButton, verify it renders
+    // The refresh button is a RadzenButton, verify it renders
     Assert.Contains("metricsChartCanvas", cut.Markup);
   }
 

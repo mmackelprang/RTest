@@ -3,7 +3,7 @@
 @inject AudioStateHubService HubService
 @inject ConfigurationApiService ConfigApi
 @inject ILogger<NowPlayingPanel> Logger
-@inject ISnackbar Snackbar
+@inject NotificationService NotificationService
 @implements IAsyncDisposable
 
 <div style="height: 100%; display: flex; flex-direction: column; position: relative; overflow: hidden;">
@@ -32,8 +32,8 @@
             &nbsp;&bull;&nbsp;
             Lookups: @(_fpStatus?.MetadataCallsPerMinute.ToString("F1") ?? "0.0")/min
           </div>
-          <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" Color="Color.Default"
-                         OnClick="ToggleFingerprintDetail" Style="padding: 2px;" />
+          <RadzenButton Icon="close" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Light"
+                        Variant="Variant.Text" Click="@ToggleFingerprintDetail" Style="padding: 2px;" />
         </div>
         <!-- Event log table -->
         <div style="flex: 1; overflow-y: auto; padding: 0;">
@@ -55,7 +55,7 @@
                 {
                   <tr style="border-bottom: 1px solid rgba(255,255,255,0.04); height: 22px; color: @(GetEventRowColor(evt));">
                     <td style="text-align: center; padding: 3px 4px;" title="@evt.SourceType">
-                      <MudIcon Icon="@GetFpSourceIcon(evt.SourceType)" Size="Size.Small" Style="font-size: 14px;" />
+                      <RadzenIcon Icon="@GetFpSourceIcon(evt.SourceType)" Style="font-size: 14px;" />
                     </td>
                     <td style="text-align: center; padding: 3px 4px;">
                       @if (evt.IsMatch)
@@ -119,7 +119,7 @@
     else
     {
       <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;">
-        <MudIcon Icon="@Icons.Material.Filled.MusicNote" Style="font-size: 96px; color: var(--text-low); margin-bottom: 16px;" />
+        <RadzenIcon Icon="music_note" Style="font-size: 96px; color: var(--text-low); margin-bottom: 16px;" />
         <div style="font-size: 28px; font-weight: 600; color: var(--text-high);">
           @(_title ?? "No Track Playing")
         </div>
@@ -142,18 +142,16 @@
     @if (!string.IsNullOrEmpty(_source))
     {
       <div style="position: absolute; top: 16px; right: 16px; display: flex; align-items: center; gap: 4px;">
-        <MudChip T="string" Color="Color.Primary" Size="Size.Small">@_source</MudChip>
+        <RadzenBadge BadgeStyle="BadgeStyle.Primary" IsPill="true" Text="@_source" />
         @if (_currentSourceGain != 1.0f)
         {
-          <MudChip T="string" Size="Size.Small" Color="Color.Secondary"
-                   Style="font-family: var(--font-mono); font-size: 11px; cursor: pointer;"
-                   OnClick="ToggleGainPopover">@FormatGainDb(_currentSourceGain)</MudChip>
+          <button @onclick="ToggleGainPopover"
+                  style="font-family: var(--font-mono); font-size: 11px; cursor: pointer; background: var(--rz-secondary); color: var(--rz-on-secondary, #fff); border: none; border-radius: 12px; padding: 2px 10px; line-height: 1.6;">@FormatGainDb(_currentSourceGain)</button>
         }
         else
         {
-          <MudChip T="string" Size="Size.Small" Color="Color.Default"
-                   Style="font-family: var(--font-mono); font-size: 11px; cursor: pointer; opacity: 0.6;"
-                   OnClick="ToggleGainPopover">0dB</MudChip>
+          <button @onclick="ToggleGainPopover"
+                  style="font-family: var(--font-mono); font-size: 11px; cursor: pointer; opacity: 0.6; background: var(--rz-base-200, rgba(255,255,255,0.15)); color: var(--rz-on-base-200, #fff); border: none; border-radius: 12px; padding: 2px 10px; line-height: 1.6;">0dB</button>
         }
       </div>
     }
@@ -165,18 +163,18 @@
       <div @onclick:stopPropagation="true"
            style="position: absolute; top: 48px; right: 16px; z-index: 10; background: rgba(30,30,30,0.95); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 12px 16px; min-width: 240px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-          <MudText Typo="Typo.body2" Style="color: var(--text-high);">@(_source ?? "Source") Level</MudText>
-          <MudText Typo="Typo.caption" Style="font-family: var(--font-mono); color: var(--text-medium);">@FormatGainDb(_currentSourceGain)</MudText>
+          <span style="font-size: 0.875rem; color: var(--text-high);">@(_source ?? "Source") Level</span>
+          <span style="font-size: 0.75rem; font-family: var(--font-mono); color: var(--text-medium);">@FormatGainDb(_currentSourceGain)</span>
         </div>
         <div style="display: flex; align-items: center; gap: 4px;">
-          <MudIconButton Icon="@Icons.Material.Filled.Remove" Size="Size.Small" Color="Color.Secondary"
-                         OnClick="() => NudgeGain(-0.05f)" Style="padding: 2px; min-width: 28px;" title="-0.25dB" />
-          <MudSlider T="float" Value="@_currentSourceGain"
-                     ValueChanged="@OnGainSliderChanged"
-                     Min="0.0f" Max="2.0f" Step="0.05f"
-                     Color="Color.Secondary" Size="Size.Small" Style="flex: 1;" />
-          <MudIconButton Icon="@Icons.Material.Filled.Add" Size="Size.Small" Color="Color.Secondary"
-                         OnClick="() => NudgeGain(0.05f)" Style="padding: 2px; min-width: 28px;" title="+0.25dB" />
+          <RadzenButton Icon="remove" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Secondary"
+                        Variant="Variant.Text" Click="@(() => NudgeGain(-0.05f))" Style="padding: 2px; min-width: 28px;" title="-0.25dB" />
+          <RadzenSlider TValue="float" Value="@_currentSourceGain"
+                        Change="@OnGainSliderChanged"
+                        Min="0.0m" Max="2.0m" Step="0.05m"
+                        Style="flex: 1;" />
+          <RadzenButton Icon="add" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Secondary"
+                        Variant="Variant.Text" Click="@(() => NudgeGain(0.05f))" Style="padding: 2px; min-width: 28px;" title="+0.25dB" />
         </div>
         <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-low); margin-top: 2px; padding: 0 32px; font-family: var(--font-mono);">
           <span>-∞</span>
@@ -195,14 +193,14 @@
       <div style="margin-bottom: 4px;">
         @if (_canSeek)
         {
-          <MudSlider Value="@_progressPercent"
-                     ValueChanged="@((double v) => HandleSeekAsync(v))"
-                     Min="0" Max="100" Step="0.1"
-                     Color="Color.Primary" Size="Size.Small" />
+          <RadzenSlider TValue="double" Value="@_progressPercent"
+                        Change="@((double v) => HandleSeekAsync(v))"
+                        Min="0" Max="100" Step="0.1"
+                        Style="width: 100%;" />
         }
         else
         {
-          <MudProgressLinear Value="@_progressPercent" Color="Color.Primary" Size="Size.Small" />
+          <RadzenProgressBar Value="@_progressPercent" ProgressBarStyle="ProgressBarStyle.Primary" Style="height: 4px;" />
         }
         <div style="display: flex; justify-content: space-between; font-size: 13px; color: var(--text-medium); margin-top: -2px; font-family: var(--font-mono);">
           <span>@_position</span>
@@ -219,50 +217,56 @@
 
     <!-- Volume Control -->
     <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-      <MudIconButton Icon="@(_isMuted ? Icons.Material.Filled.VolumeOff : Icons.Material.Filled.VolumeUp)"
-                     Color="Color.Default" Size="Size.Medium"
-                     Style="min-width: 44px; min-height: 44px;"
-                     OnClick="@HandleMuteAsync" />
-      <MudSlider T="double" Value="_volume" ValueChanged="@OnVolumeChanged"
-                 Min="0" Max="1" Step="0.01" Size="Size.Small"
-                 Color="Color.Primary" Style="flex: 1;" />
+      <RadzenButton Icon="@(_isMuted ? "volume_off" : "volume_up")"
+                    ButtonStyle="ButtonStyle.Light" Size="ButtonSize.Medium"
+                    Variant="Variant.Text"
+                    Style="min-width: 44px; min-height: 44px;"
+                    Click="@HandleMuteAsync" />
+      <RadzenSlider TValue="double" Value="_volume" Change="@OnVolumeChanged"
+                    Min="0" Max="1" Step="0.01"
+                    Style="flex: 1;" />
       <span style="font-family: var(--font-mono); font-size: 14px; color: var(--text-medium); min-width: 40px; text-align: right;">@((_volume * 100).ToString("F0"))%</span>
     </div>
 
     <!-- Transport Controls -->
     <div class="transport-group">
-      <MudIconButton Icon="@Icons.Material.Filled.Shuffle"
-                     Color="@(_isShuffleEnabled ? Color.Primary : Color.Default)"
-                     Size="Size.Medium"
-                     Class="transport-btn"
-                     Style="@(_isShuffleEnabled ? "background: rgba(92,212,232,0.15); border: 1px solid rgba(92,212,232,0.4); border-radius: 8px;" : "")"
-                     OnClick="HandleShuffleAsync"
-                     title="Shuffle" />
-      <MudIconButton Icon="@Icons.Material.Filled.SkipPrevious"
-                     Color="Color.Default"
-                     Size="Size.Medium"
-                     Class="transport-btn"
-                     OnClick="HandlePreviousAsync"
-                     title="Previous" />
-      <MudIconButton Icon="@(_isPlaying ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)"
-                     Color="Color.Primary"
-                     Size="Size.Large"
-                     Class="transport-btn-primary"
-                     OnClick="HandlePlayPauseAsync"
-                     title="@(_isPlaying ? "Pause" : "Play")" />
-      <MudIconButton Icon="@Icons.Material.Filled.SkipNext"
-                     Color="Color.Default"
-                     Size="Size.Medium"
-                     Class="transport-btn"
-                     OnClick="HandleNextAsync"
-                     title="Next" />
-      <MudIconButton Icon="@(_repeatMode == "One" ? Icons.Material.Filled.RepeatOne : Icons.Material.Filled.Repeat)"
-                     Color="@(_repeatMode != "Off" ? Color.Primary : Color.Default)"
-                     Size="Size.Medium"
-                     Class="transport-btn"
-                     Style="@(_repeatMode != "Off" ? "background: rgba(92,212,232,0.15); border: 1px solid rgba(92,212,232,0.4); border-radius: 8px;" : "")"
-                     OnClick="HandleRepeatAsync"
-                     title="@($"Repeat: {_repeatMode}")" />
+      <RadzenButton Icon="shuffle"
+                    ButtonStyle="@(_isShuffleEnabled ? ButtonStyle.Primary : ButtonStyle.Light)"
+                    Size="ButtonSize.Medium"
+                    Variant="Variant.Text"
+                    class="transport-btn"
+                    Style="@(_isShuffleEnabled ? "background: rgba(92,212,232,0.15); border: 1px solid rgba(92,212,232,0.4); border-radius: 8px;" : "")"
+                    Click="@HandleShuffleAsync"
+                    title="Shuffle" />
+      <RadzenButton Icon="skip_previous"
+                    ButtonStyle="ButtonStyle.Light"
+                    Size="ButtonSize.Medium"
+                    Variant="Variant.Text"
+                    class="transport-btn"
+                    Click="@HandlePreviousAsync"
+                    title="Previous" />
+      <RadzenButton Icon="@(_isPlaying ? "pause" : "play_arrow")"
+                    ButtonStyle="ButtonStyle.Primary"
+                    Size="ButtonSize.Large"
+                    Variant="Variant.Text"
+                    class="transport-btn-primary"
+                    Click="@HandlePlayPauseAsync"
+                    title="@(_isPlaying ? "Pause" : "Play")" />
+      <RadzenButton Icon="skip_next"
+                    ButtonStyle="ButtonStyle.Light"
+                    Size="ButtonSize.Medium"
+                    Variant="Variant.Text"
+                    class="transport-btn"
+                    Click="@HandleNextAsync"
+                    title="Next" />
+      <RadzenButton Icon="@(_repeatMode == "One" ? "repeat_one" : "repeat")"
+                    ButtonStyle="@(_repeatMode != "Off" ? ButtonStyle.Primary : ButtonStyle.Light)"
+                    Size="ButtonSize.Medium"
+                    Variant="Variant.Text"
+                    class="transport-btn"
+                    Style="@(_repeatMode != "Off" ? "background: rgba(92,212,232,0.15); border: 1px solid rgba(92,212,232,0.4); border-radius: 8px;" : "")"
+                    Click="@HandleRepeatAsync"
+                    title="@($"Repeat: {_repeatMode}")" />
     </div>
   </div>
 </div>

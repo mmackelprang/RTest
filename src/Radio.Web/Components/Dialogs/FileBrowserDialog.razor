@@ -1,318 +1,303 @@
-@using MudBlazor
+@using Radzen
+@using Radzen.Blazor
 @using Radio.Web.Services.ApiClients
 @inject FileApiService FileApi
 @inject ConfigurationApiService ConfigApi
+@inject DialogService DialogService
 @inject ILogger<FileBrowserDialog> Logger
 
-<MudDialog Style="background: rgba(30,30,30,0.95); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px;">
-  <TitleContent>
-    <MudText Typo="Typo.h6">
-      <MudIcon Icon="@Icons.Material.Filled.AudioFile" Class="mr-2" Style="vertical-align: middle;" />
-      @(AllowMultiSelect ? "Select Audio Files" : "Select Audio File")
-    </MudText>
-  </TitleContent>
-  <DialogContent>
-    <div style="display: flex; flex-direction: column; max-height: 480px; min-height: 320px;">
-      <!-- Breadcrumbs + Location/Path bar + Search/Filter toolbar -->
-      <div class="file-browser-toolbar">
-        <!-- Location button (drive/mount picker) -->
-        <div style="position: relative; flex-shrink: 0;">
-          <MudIconButton Icon="@Icons.Material.Filled.FolderOpen" Size="Size.Small"
-                         Color="@(_isAbsoluteMode ? Color.Warning : Color.Default)"
-                         OnClick="ToggleLocationDropdown"
-                         title="Browse location" />
-          @if (_showLocationDropdown)
+<div style="display: flex; flex-direction: column; max-height: 480px; min-height: 320px;">
+  <!-- Breadcrumbs + Location/Path bar + Search/Filter toolbar -->
+  <div class="file-browser-toolbar">
+    <!-- Location button (drive/mount picker) -->
+    <div style="position: relative; flex-shrink: 0;">
+      <RadzenButton Icon="folder_open" Size="ButtonSize.Small"
+                    ButtonStyle="@(_isAbsoluteMode ? ButtonStyle.Warning : ButtonStyle.Light)"
+                    Variant="Variant.Text"
+                    Click="@ToggleLocationDropdown"
+                    title="Browse location" />
+      @if (_showLocationDropdown)
+      {
+        <div class="file-browser-location-overlay" @onclick="CloseLocationDropdown"></div>
+        <div class="file-browser-location-dropdown" @onclick:stopPropagation="true">
+          @* Bookmarked folders — highlighted at top *@
+          @if (_bookmarks.Any())
           {
-            <div class="file-browser-location-overlay" @onclick="CloseLocationDropdown"></div>
-            <div class="file-browser-location-dropdown" @onclick:stopPropagation="true">
-              @* Bookmarked folders — highlighted at top *@
-              @if (_bookmarks.Any())
-              {
-                @foreach (var bookmark in _bookmarks)
-                {
-                  var isActive = _isAbsoluteMode && (_absolutePath == bookmark.Path ||
-                    _absolutePath?.StartsWith(bookmark.Path.TrimEnd('/') + "/", StringComparison.OrdinalIgnoreCase) == true);
-                  <div class="file-browser-location-item @(bookmark.IsAccessible ? "" : "file-browser-location-disabled")"
-                       @onclick="@(() => NavigateToBookmark(bookmark))"
-                       style="@(bookmark.IsAccessible ? "" : "opacity: 0.45; pointer-events: none;")">
-                    <MudIcon Icon="@Icons.Material.Filled.Star" Size="Size.Small"
-                             Color="Color.Warning" />
-                    <div style="flex: 1; min-width: 0;">
-                      <span style="font-weight: 500; color: var(--mud-palette-warning);">@bookmark.Label</span>
-                      <div style="font-size: 11px; color: var(--text-low); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                        @bookmark.Path
-                      </div>
-                    </div>
-                    @if (isActive)
-                    {
-                      <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Color="Color.Primary"
-                               Style="flex-shrink: 0;" />
-                    }
-                    @if (!bookmark.IsAccessible)
-                    {
-                      <MudIcon Icon="@Icons.Material.Filled.CloudOff" Size="Size.Small"
-                               Style="flex-shrink: 0; color: var(--text-low);" title="Not accessible" />
-                    }
+            @foreach (var bookmark in _bookmarks)
+            {
+              var isActive = _isAbsoluteMode && (_absolutePath == bookmark.Path ||
+                _absolutePath?.StartsWith(bookmark.Path.TrimEnd('/') + "/", StringComparison.OrdinalIgnoreCase) == true);
+              <div class="file-browser-location-item @(bookmark.IsAccessible ? "" : "file-browser-location-disabled")"
+                   @onclick="@(() => NavigateToBookmark(bookmark))"
+                   style="@(bookmark.IsAccessible ? "" : "opacity: 0.45; pointer-events: none;")">
+                <RadzenIcon Icon="star" Style="font-size: 20px; color: var(--rz-warning);" />
+                <div style="flex: 1; min-width: 0;">
+                  <span style="font-weight: 500; color: var(--rz-warning);">@bookmark.Label</span>
+                  <div style="font-size: 11px; color: var(--text-low); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    @bookmark.Path
                   </div>
-                }
-                <div style="border-top: 1px solid var(--border-subtle); margin: 4px 0;"></div>
-              }
-              @* Media Library *@
-              <div class="file-browser-location-item" @onclick="ReturnToMediaLibrary">
-                <MudIcon Icon="@Icons.Material.Filled.LibraryMusic" Size="Size.Small" Color="Color.Primary" />
-                <span>Media Library</span>
-                @if (!_isAbsoluteMode)
+                </div>
+                @if (isActive)
                 {
-                  <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Color="Color.Primary"
-                           Style="margin-left: auto;" />
+                  <RadzenIcon Icon="check" Style="font-size: 20px; flex-shrink: 0; color: var(--rz-primary);" />
+                }
+                @if (!bookmark.IsAccessible)
+                {
+                  <RadzenIcon Icon="cloud_off" Style="font-size: 20px; flex-shrink: 0; color: var(--text-low);" title="Not accessible" />
                 }
               </div>
-              @if (_drives.Any())
-              {
-                <div style="border-top: 1px solid var(--border-subtle); margin: 4px 0;"></div>
-                @foreach (var drive in _drives.Where(d => d.IsReady))
+            }
+            <div style="border-top: 1px solid var(--border-subtle); margin: 4px 0;"></div>
+          }
+          @* Media Library *@
+          <div class="file-browser-location-item" @onclick="ReturnToMediaLibrary">
+            <RadzenIcon Icon="library_music" Style="font-size: 20px; color: var(--rz-primary);" />
+            <span>Media Library</span>
+            @if (!_isAbsoluteMode)
+            {
+              <RadzenIcon Icon="check" Style="font-size: 20px; margin-left: auto; color: var(--rz-primary);" />
+            }
+          </div>
+          @if (_drives.Any())
+          {
+            <div style="border-top: 1px solid var(--border-subtle); margin: 4px 0;"></div>
+            @foreach (var drive in _drives.Where(d => d.IsReady))
+            {
+              <div class="file-browser-location-item" @onclick="@(() => NavigateToDrive(drive.Name))">
+                <RadzenIcon Icon="storage" Style="font-size: 20px;" />
+                <span>@drive.Label</span>
+                @if (_isAbsoluteMode && _absolutePath?.StartsWith(drive.Name) == true)
                 {
-                  <div class="file-browser-location-item" @onclick="@(() => NavigateToDrive(drive.Name))">
-                    <MudIcon Icon="@Icons.Material.Filled.Storage" Size="Size.Small" />
-                    <span>@drive.Label</span>
-                    @if (_isAbsoluteMode && _absolutePath?.StartsWith(drive.Name) == true)
-                    {
-                      <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Color="Color.Primary"
-                               Style="margin-left: auto;" />
-                    }
-                  </div>
+                  <RadzenIcon Icon="check" Style="font-size: 20px; margin-left: auto; color: var(--rz-primary);" />
                 }
-              }
-            </div>
-          }
-        </div>
-
-        <!-- Breadcrumbs / Path bar -->
-        <div class="file-browser-breadcrumbs">
-          @if (_isEditingPath)
-          {
-            <MudTextField @ref="_pathTextField" @bind-Value="_pathBarText" Placeholder="Enter absolute path..."
-                          Variant="Variant.Outlined" Margin="Margin.Dense"
-                          InputMode="InputMode.text"
-                          Immediate="false"
-                          OnKeyDown="OnPathBarKeyDown"
-                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.KeyboardReturn"
-                          OnAdornmentClick="NavigateToPathBarAsync"
-                          Class="file-browser-path-bar" Style="flex: 1; font-size: 13px;" />
-          }
-          else if (_isAbsoluteMode && !string.IsNullOrEmpty(_absolutePath))
-          {
-            @* Absolute mode breadcrumbs *@
-            <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
-                       OnClick="@(() => NavigateToAbsoluteAsync(_driveRoot ?? "/"))">
-              <MudIcon Icon="@Icons.Material.Filled.Storage" Size="Size.Small" Class="mr-1" />
-              @(_driveRoot ?? "/")
-            </MudButton>
-            @foreach (var seg in GetAbsoluteSegmentsWithPaths())
-            {
-              <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small"
-                       Style="color: var(--text-low); flex-shrink: 0;" />
-              <MudButton Variant="Variant.Text"
-                         Color="@(seg.IsLast ? Color.Default : Color.Primary)"
-                         Size="Size.Small"
-                         Disabled="@seg.IsLast"
-                         OnClick="@(() => NavigateToAbsoluteAsync(seg.FullPath))">
-                @seg.Name
-              </MudButton>
+              </div>
             }
-          }
-          else
-          {
-            @* Relative mode breadcrumbs (existing) *@
-            <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
-                       OnClick="@(() => NavigateToPathAsync(null))"
-                       Disabled="@(string.IsNullOrEmpty(_relativePath))">
-              <MudIcon Icon="@Icons.Material.Filled.Home" Size="Size.Small" Class="mr-1" />
-              Home
-            </MudButton>
-            @if (!string.IsNullOrEmpty(_relativePath))
-            {
-              var pathParts = _relativePath.Split('/').Where(p => !string.IsNullOrEmpty(p)).ToArray();
-              for (int i = 0; i < pathParts.Length; i++)
-              {
-                var index = i;
-                var partialRelative = string.Join("/", pathParts.Take(index + 1));
-                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small"
-                         Style="color: var(--text-low); flex-shrink: 0;" />
-                <MudButton Variant="Variant.Text"
-                           Color="@(i == pathParts.Length - 1 ? Color.Default : Color.Primary)"
-                           Size="Size.Small"
-                           Disabled="@(i == pathParts.Length - 1)"
-                           OnClick="@(() => NavigateToRelativeAsync(partialRelative))">
-                  @pathParts[index]
-                </MudButton>
-              }
-            }
-          }
-        </div>
-
-        <!-- Path edit toggle + Search/Filter -->
-        <div style="display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
-          <MudIconButton Icon="@(_isEditingPath ? Icons.Material.Filled.Close : Icons.Material.Filled.Edit)"
-                         Size="Size.Small" Color="Color.Default"
-                         OnClick="TogglePathEditing"
-                         title="@(_isEditingPath ? "Cancel path editing" : "Edit path")" />
-          <MudTextField @bind-Value="_searchText" Placeholder="Search..."
-                        Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
-                        Immediate="true" DebounceInterval="300"
-                        InputMode="InputMode.text"
-                        Style="max-width: 200px; font-size: 13px;"
-                        Variant="Variant.Outlined" Margin="Margin.Dense" />
-          <MudSelect T="string" @bind-Value="_extensionFilter" Label="Type"
-                     Variant="Variant.Outlined" Margin="Margin.Dense"
-                     Style="max-width: 120px; font-size: 13px;" Dense="true">
-            <MudSelectItem T="string" Value="@("")">All</MudSelectItem>
-            @foreach (var ext in _availableExtensions)
-            {
-              <MudSelectItem T="string" Value="@ext">@ext</MudSelectItem>
-            }
-          </MudSelect>
-        </div>
-      </div>
-
-      <!-- File list -->
-      @if (_isLoading)
-      {
-        <div style="flex: 1; display: flex; justify-content: center; align-items: center; padding: 32px;">
-          <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
-        </div>
-      }
-      else if (_errorMessage != null)
-      {
-        <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px;">
-          <MudIcon Icon="@Icons.Material.Filled.Error" Style="font-size: 64px; opacity: 0.4; color: var(--mud-palette-error);" />
-          <MudText Typo="Typo.body1" Style="margin-top: 12px; color: var(--text-low);">
-            @_errorMessage
-          </MudText>
-          @if (_isAbsoluteMode)
-          {
-            <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
-                       Style="margin-top: 8px;" OnClick="ReturnToMediaLibrary">
-              Return to Media Library
-            </MudButton>
           }
         </div>
       }
-      else if (!FilteredDirectories.Any() && !FilteredFiles.Any())
+    </div>
+
+    <!-- Breadcrumbs / Path bar -->
+    <div class="file-browser-breadcrumbs">
+      @if (_isEditingPath)
       {
-        <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px;">
-          <MudIcon Icon="@Icons.Material.Filled.FolderOff" Style="font-size: 64px; opacity: 0.4;" />
-          <MudText Typo="Typo.body1" Style="margin-top: 12px; color: var(--text-low);">
-            @(string.IsNullOrEmpty(_searchText) ? "No audio files or folders found" : "No matching files")
-          </MudText>
+        <div style="display: flex; align-items: center; flex: 1; gap: 4px;">
+          <RadzenTextBox @ref="_pathTextField" @bind-Value="_pathBarText" Placeholder="Enter absolute path..."
+                         @onkeydown="OnPathBarKeyDown"
+                         Style="flex: 1; font-size: 13px;" />
+          <RadzenButton Icon="keyboard_return" Size="ButtonSize.Small"
+                        Variant="Variant.Text" ButtonStyle="ButtonStyle.Primary"
+                        Click="@NavigateToPathBarAsync" title="Go" />
         </div>
+      }
+      else if (_isAbsoluteMode && !string.IsNullOrEmpty(_absolutePath))
+      {
+        @* Absolute mode breadcrumbs *@
+        <RadzenButton Variant="Variant.Text" ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Small"
+                      Click="@(() => NavigateToAbsoluteAsync(_driveRoot ?? "/"))">
+          <ChildContent>
+            <RadzenIcon Icon="storage" Style="font-size: 18px; margin-right: 4px; vertical-align: middle;" />
+            @(_driveRoot ?? "/")
+          </ChildContent>
+        </RadzenButton>
+        @foreach (var seg in GetAbsoluteSegmentsWithPaths())
+        {
+          <RadzenIcon Icon="chevron_right" Style="font-size: 20px; color: var(--text-low); flex-shrink: 0;" />
+          <RadzenButton Variant="Variant.Text"
+                        ButtonStyle="@(seg.IsLast ? ButtonStyle.Light : ButtonStyle.Primary)"
+                        Size="ButtonSize.Small"
+                        Disabled="@seg.IsLast"
+                        Click="@(() => NavigateToAbsoluteAsync(seg.FullPath))">
+            @seg.Name
+          </RadzenButton>
+        }
       }
       else
       {
-        <div class="file-browser-list">
-          @* Directories first *@
-          @foreach (var dir in FilteredDirectories)
+        @* Relative mode breadcrumbs (existing) *@
+        <RadzenButton Variant="Variant.Text" ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Small"
+                      Click="@(() => NavigateToPathAsync(null))"
+                      Disabled="@(string.IsNullOrEmpty(_relativePath))">
+          <ChildContent>
+            <RadzenIcon Icon="home" Style="font-size: 18px; margin-right: 4px; vertical-align: middle;" />
+            Home
+          </ChildContent>
+        </RadzenButton>
+        @if (!string.IsNullOrEmpty(_relativePath))
+        {
+          var pathParts = _relativePath.Split('/').Where(p => !string.IsNullOrEmpty(p)).ToArray();
+          for (int i = 0; i < pathParts.Length; i++)
           {
-            <div class="file-item list-item-touch" @onclick="@(() => NavigateToFolderAsync(dir.Name))">
-              <MudIcon Icon="@Icons.Material.Filled.Folder" Color="Color.Warning" />
-              <div style="flex: 1; min-width: 0;">
-                <span style="font-weight: 500;">@dir.Name</span>
-              </div>
-              <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Style="color: var(--text-low);" />
+            var index = i;
+            var partialRelative = string.Join("/", pathParts.Take(index + 1));
+            <RadzenIcon Icon="chevron_right" Style="font-size: 20px; color: var(--text-low); flex-shrink: 0;" />
+            <RadzenButton Variant="Variant.Text"
+                          ButtonStyle="@(i == pathParts.Length - 1 ? ButtonStyle.Light : ButtonStyle.Primary)"
+                          Size="ButtonSize.Small"
+                          Disabled="@(i == pathParts.Length - 1)"
+                          Click="@(() => NavigateToRelativeAsync(partialRelative))">
+              @pathParts[index]
+            </RadzenButton>
+          }
+        }
+      }
+    </div>
+
+    <!-- Path edit toggle + Search/Filter -->
+    <div style="display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
+      <RadzenButton Icon="@(_isEditingPath ? "close" : "edit")"
+                    Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Light"
+                    Variant="Variant.Text"
+                    Click="@TogglePathEditing"
+                    title="@(_isEditingPath ? "Cancel path editing" : "Edit path")" />
+      <div style="display: flex; align-items: center; gap: 4px; max-width: 200px;">
+        <RadzenIcon Icon="search" Style="font-size: 18px; color: var(--text-low);" />
+        <RadzenTextBox @bind-Value="_searchText" Placeholder="Search..."
+                       Style="font-size: 13px; width: 100%;"
+                       Change="@OnSearchChanged" />
+      </div>
+      <RadzenDropDown TValue="string" @bind-Value="_extensionFilter" Data="@_filterOptions"
+                      TextProperty="Label" ValueProperty="Value"
+                      Placeholder="Type" Style="max-width: 120px; font-size: 13px;" />
+    </div>
+  </div>
+
+  <!-- File list -->
+  @if (_isLoading)
+  {
+    <div style="flex: 1; display: flex; justify-content: center; align-items: center; padding: 32px;">
+      <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" ProgressBarStyle="ProgressBarStyle.Primary" />
+    </div>
+  }
+  else if (_errorMessage != null)
+  {
+    <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px;">
+      <RadzenIcon Icon="error" Style="font-size: 64px; opacity: 0.4; color: var(--rz-danger);" />
+      <span style="margin-top: 12px; color: var(--text-low);">
+        @_errorMessage
+      </span>
+      @if (_isAbsoluteMode)
+      {
+        <RadzenButton Variant="Variant.Text" ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Small"
+                      Style="margin-top: 8px;" Click="@ReturnToMediaLibrary">
+          Return to Media Library
+        </RadzenButton>
+      }
+    </div>
+  }
+  else if (!FilteredDirectories.Any() && !FilteredFiles.Any())
+  {
+    <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px;">
+      <RadzenIcon Icon="folder_off" Style="font-size: 64px; opacity: 0.4;" />
+      <span style="margin-top: 12px; color: var(--text-low);">
+        @(string.IsNullOrEmpty(_searchText) ? "No audio files or folders found" : "No matching files")
+      </span>
+    </div>
+  }
+  else
+  {
+    <div class="file-browser-list">
+      @* Directories first *@
+      @foreach (var dir in FilteredDirectories)
+      {
+        <div class="file-item list-item-touch" @onclick="@(() => NavigateToFolderAsync(dir.Name))">
+          <RadzenIcon Icon="folder" Style="color: var(--rz-warning);" />
+          <div style="flex: 1; min-width: 0;">
+            <span style="font-weight: 500;">@dir.Name</span>
+          </div>
+          <RadzenIcon Icon="chevron_right" Style="color: var(--text-low);" />
+        </div>
+      }
+
+      @* Files *@
+      @foreach (var file in FilteredFiles)
+      {
+        var isSelected = AllowMultiSelect ? _selectedPaths.Contains(file.Path) : _selectedPath == file.Path;
+        <div class="file-item list-item-touch @(isSelected ? "file-item-selected" : "")"
+             @onclick="@(() => ToggleFileSelection(file))">
+          @if (AllowMultiSelect)
+          {
+            <RadzenCheckBox TValue="bool" Value="@isSelected" ReadOnly="true"
+                            Style="margin: 0; padding: 0; pointer-events: none;" />
+          }
+          else
+          {
+            <RadzenIcon Icon="music_note"
+                        Style="@($"flex-shrink: 0; color: {(isSelected ? "var(--rz-primary)" : "var(--rz-text-color)")}")" />
+          }
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+              @(file.Name)
+            </div>
+            <div class="file-item-meta">
+              @if (!string.IsNullOrEmpty(file.Artist))
+              {
+                @file.Artist
+              }
+              @if (!string.IsNullOrEmpty(file.Album))
+              {
+                <text> · @file.Album</text>
+              }
+              @if (!string.IsNullOrEmpty(file.Duration))
+              {
+                <text> · @file.Duration</text>
+              }
+            </div>
+          </div>
+          @if (ShowPlayButton)
+          {
+            <div @onclick:stopPropagation="true">
+              <RadzenButton Icon="play_arrow" Size="ButtonSize.Small"
+                            ButtonStyle="ButtonStyle.Primary" Variant="Variant.Text"
+                            Click="@(() => PlayFileAsync(file))"
+                            title="Play" />
             </div>
           }
-
-          @* Files *@
-          @foreach (var file in FilteredFiles)
+          @if (AllowAddToQueue)
           {
-            var isSelected = AllowMultiSelect ? _selectedPaths.Contains(file.Path) : _selectedPath == file.Path;
-            <div class="file-item list-item-touch @(isSelected ? "file-item-selected" : "")"
-                 @onclick="@(() => ToggleFileSelection(file))">
-              @if (AllowMultiSelect)
-              {
-                <MudCheckBox T="bool" Value="@isSelected" ReadOnly="true" Color="Color.Primary"
-                             Style="margin: 0; padding: 0;" Size="Size.Small" />
-              }
-              else
-              {
-                <MudIcon Icon="@Icons.Material.Filled.MusicNote" Color="@(isSelected ? Color.Primary : Color.Default)"
-                         Style="flex-shrink: 0;" />
-              }
-              <div style="flex: 1; min-width: 0;">
-                <div style="font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                  @(file.Name)
-                </div>
-                <div class="file-item-meta">
-                  @if (!string.IsNullOrEmpty(file.Artist))
-                  {
-                    @file.Artist
-                  }
-                  @if (!string.IsNullOrEmpty(file.Album))
-                  {
-                    <text> · @file.Album</text>
-                  }
-                  @if (!string.IsNullOrEmpty(file.Duration))
-                  {
-                    <text> · @file.Duration</text>
-                  }
-                </div>
-              </div>
-              @if (ShowPlayButton)
-              {
-                <div @onclick:stopPropagation="true">
-                  <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small"
-                                 Color="Color.Primary" OnClick="@(() => PlayFileAsync(file))"
-                                 title="Play" />
-                </div>
-              }
-              @if (AllowAddToQueue)
-              {
-                <div @onclick:stopPropagation="true">
-                  <MudIconButton Icon="@Icons.Material.Filled.AddToQueue" Size="Size.Small"
-                                 Color="Color.Default" OnClick="@(() => AddSingleToQueueAsync(file))"
-                                 title="Add to Queue" />
-                </div>
-              }
+            <div @onclick:stopPropagation="true">
+              <RadzenButton Icon="add_to_queue" Size="ButtonSize.Small"
+                            ButtonStyle="ButtonStyle.Light" Variant="Variant.Text"
+                            Click="@(() => AddSingleToQueueAsync(file))"
+                            title="Add to Queue" />
             </div>
           }
         </div>
       }
     </div>
-  </DialogContent>
-  <DialogActions>
-    @if (AllowMultiSelect)
-    {
-      <div style="display: flex; align-items: center; gap: 8px; margin-right: auto;">
-        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
-                   OnClick="SelectAllFiles" Disabled="@(!FilteredFiles.Any())">
-          Select All
-        </MudButton>
-        @if (_selectedPaths.Count > 0)
-        {
-          <MudText Typo="Typo.body2" Style="color: var(--text-medium);">@_selectedPaths.Count selected</MudText>
-        }
-      </div>
-    }
-    <MudButton OnClick="Cancel" Variant="Variant.Text">Cancel</MudButton>
-    @if (AllowAddToQueue && _selectedPaths.Count > 0)
-    {
-      <MudButton OnClick="AddSelectedToQueueAsync" Variant="Variant.Outlined" Color="Color.Primary">
-        Add to Queue (@_selectedPaths.Count)
-      </MudButton>
-    }
-    @if (!AllowAddToQueue)
-    {
-      <MudButton OnClick="Submit" Variant="Variant.Filled" Color="Color.Primary"
-                 Disabled="@(AllowMultiSelect ? _selectedPaths.Count == 0 : _selectedPath == null)">
-        @(AllowMultiSelect && _selectedPaths.Count > 1 ? $"Select ({_selectedPaths.Count})" : "Select")
-      </MudButton>
-    }
-  </DialogActions>
-</MudDialog>
+  }
+</div>
+
+<!-- Dialog action buttons -->
+<div style="display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 12px;">
+  @if (AllowMultiSelect)
+  {
+    <div style="display: flex; align-items: center; gap: 8px; margin-right: auto;">
+      <RadzenButton Size="ButtonSize.Small" Variant="Variant.Text" ButtonStyle="ButtonStyle.Primary"
+                    Click="@SelectAllFiles" Disabled="@(!FilteredFiles.Any())">
+        Select All
+      </RadzenButton>
+      @if (_selectedPaths.Count > 0)
+      {
+        <span style="font-size: 0.875rem; color: var(--text-medium);">@_selectedPaths.Count selected</span>
+      }
+    </div>
+  }
+  <RadzenButton Click="@Cancel" Variant="Variant.Text" Text="Cancel" />
+  @if (AllowAddToQueue && _selectedPaths.Count > 0)
+  {
+    <RadzenButton Click="@AddSelectedToQueueAsync" Variant="Variant.Outlined" ButtonStyle="ButtonStyle.Primary"
+                  Text="@($"Add to Queue ({_selectedPaths.Count})")" />
+  }
+  @if (!AllowAddToQueue)
+  {
+    <RadzenButton Click="@Submit" Variant="Variant.Filled" ButtonStyle="ButtonStyle.Primary"
+                  Disabled="@(AllowMultiSelect ? _selectedPaths.Count == 0 : _selectedPath == null)"
+                  Text="@(AllowMultiSelect && _selectedPaths.Count > 1 ? $"Select ({_selectedPaths.Count})" : "Select")" />
+  }
+</div>
 
 @code {
-  [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
-
   [Parameter] public string? InitialSelection { get; set; }
   [Parameter] public string? Subdirectory { get; set; }
   [Parameter] public bool AllowMultiSelect { get; set; }
@@ -348,7 +333,12 @@
   private bool _showLocationDropdown;
   private List<DriveInfoDto> _drives = new();
   private List<BookmarkDto> _bookmarks = new();
-  private MudTextField<string>? _pathTextField;
+  private RadzenTextBox? _pathTextField;
+
+  // Filter options for the extension dropdown
+  private List<FilterOption> _filterOptions = new();
+
+  private record FilterOption(string Label, string Value);
 
   private IEnumerable<FileItemDto> FilteredDirectories
   {
@@ -387,6 +377,10 @@
 
   protected override async Task OnInitializedAsync()
   {
+    // Build filter options for the extension dropdown
+    _filterOptions = new List<FilterOption> { new("All", "") };
+    _filterOptions.AddRange(_availableExtensions.Select(ext => new FilterOption(ext, ext)));
+
     // Load drives, bookmarks, and media root in parallel
     var drivesTask = LoadDrivesAsync();
     var bookmarksTask = LoadBookmarksAsync();
@@ -731,6 +725,14 @@
     _showLocationDropdown = false;
   }
 
+  // --- Search handler ---
+
+  private void OnSearchChanged(string value)
+  {
+    _searchText = value;
+    StateHasChanged();
+  }
+
   // --- Absolute path breadcrumb helpers ---
 
   private record struct BreadcrumbSegment(string Name, string FullPath, bool IsLast);
@@ -828,10 +830,10 @@
   private void Submit()
   {
     if (AllowMultiSelect)
-      MudDialog.Close(DialogResult.Ok(_selectedPaths.ToList()));
+      DialogService.Close(_selectedPaths.ToList());
     else
-      MudDialog.Close(DialogResult.Ok(_selectedPath));
+      DialogService.Close(_selectedPath);
   }
 
-  private void Cancel() => MudDialog.Cancel();
+  private void Cancel() => DialogService.Close();
 }

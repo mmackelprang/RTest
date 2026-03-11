@@ -3,8 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using MudBlazor;
-using MudBlazor.Services;
+using Radzen;
 using Radio.Web.Components.Pages;
 using Radio.Web.Services.ApiClients;
 
@@ -12,7 +11,7 @@ namespace Radio.Web.Tests.Components.Pages;
 
 /// <summary>
 /// bUnit tests for the DeviceManagementPage component.
-/// Uses vertical MudTabs layout — only the active tab panel content is rendered.
+/// Uses vertical RadzenTabs layout — only the active tab panel content is rendered.
 /// </summary>
 public class DeviceManagementPageTests : TestContext
 {
@@ -31,9 +30,8 @@ public class DeviceManagementPageTests : TestContext
 
     Services.AddSingleton<IConfiguration>(configuration);
     Services.AddSingleton(_loggerFactory);
-    Services.AddMudServices();
+    Services.AddRadzenComponents();
     JSInterop.Mode = JSRuntimeMode.Loose;
-    ComponentFactories.AddStub<MudPopoverProvider>();
     Services.AddHttpClient<DevicesApiService>();
     Services.AddScoped<Radio.Web.Services.DeviceDisplayStateService>();
   }
@@ -99,18 +97,18 @@ public class DeviceManagementPageTests : TestContext
     // Display tab shows empty state or loading indicator when API hasn't responded
     var markup = cut.Markup;
     Assert.True(
-      markup.Contains("No devices found") || markup.Contains("mud-progress"),
+      markup.Contains("No devices found") || markup.Contains("rz-spinner"),
       "Should show empty state or loading indicator"
     );
   }
 
   [Fact]
-  public void DeviceManagementPage_Uses_MudBlazor_Components()
+  public void DeviceManagementPage_Uses_Radzen_Components()
   {
     var cut = RenderComponent<DeviceManagementPage>();
 
-    Assert.Contains("mud-tabs", cut.Markup);
-    Assert.Contains("mud-button", cut.Markup);
+    Assert.Contains("rz-tabview", cut.Markup);
+    Assert.Contains("rz-button", cut.Markup);
   }
 
   [Fact]
@@ -132,7 +130,7 @@ public class DeviceManagementPageTests : TestContext
     var cut = RenderComponent<DeviceManagementPage>();
 
     var markup = cut.Markup;
-    Assert.Contains("mud-tabs", markup);
+    Assert.Contains("rz-tabview", markup);
     Assert.Contains("display: flex", markup);
   }
 

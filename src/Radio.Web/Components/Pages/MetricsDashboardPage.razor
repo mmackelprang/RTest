@@ -3,7 +3,7 @@
 @inject ConfigurationApiService ConfigApi
 @inject IJSRuntime JS
 @inject ILogger<MetricsDashboardPage> Logger
-@inject ISnackbar Snackbar
+@inject NotificationService NotificationService
 @implements IAsyncDisposable
 
 <PageTitle>Metrics Dashboard</PageTitle>
@@ -21,14 +21,14 @@
       }
     </div>
     <div style="margin-left: auto;">
-      <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Primary"
-                     OnClick="LoadAllDataAsync" Size="Size.Medium" />
+      <RadzenButton Icon="refresh" ButtonStyle="ButtonStyle.Primary"
+                    Click="LoadAllDataAsync" Size="ButtonSize.Medium" Variant="Variant.Text" />
     </div>
   </div>
 
   @if (_loading)
   {
-    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Style="height: 2px;" />
+    <RadzenProgressBar Mode="ProgressBarMode.Indeterminate" ProgressBarStyle="ProgressBarStyle.Primary" Style="height: 2px;" />
   }
 
   <div class="metrics-body">
@@ -384,7 +384,7 @@
     catch (Exception ex)
     {
       Logger.LogWarning(ex, "Failed to load details for {Key}", metricKey);
-      Snackbar.Add($"Failed to load details for {metricKey}", Severity.Error);
+      NotificationService.Notify(NotificationSeverity.Error, "Error", $"Failed to load details for {metricKey}");
     }
     finally { _loading = false; }
   }
@@ -505,7 +505,7 @@
     }
     else
     {
-      Snackbar.Add($"Maximum {MaxHeroCards} hero cards allowed", Severity.Warning);
+      NotificationService.Notify(NotificationSeverity.Warning, "Warning", $"Maximum {MaxHeroCards} hero cards allowed");
       return;
     }
 
