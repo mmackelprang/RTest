@@ -225,6 +225,7 @@
   private List<CallHistoryEntryDto>? _callHistory;
   private string _dialDigits = "";
   private bool _isAvailable;
+  private bool _disposed;
   private System.Timers.Timer? _pollTimer;
 
   protected override async Task OnInitializedAsync()
@@ -259,9 +260,11 @@
 
   private async Task PollStatusAsync()
   {
+    if (_disposed) return;
     try
     {
       var available = await PhoneApi.IsAvailableAsync();
+      if (_disposed) return;
       if (available != _isAvailable)
       {
         _isAvailable = available;
@@ -273,7 +276,7 @@
         var callState = await PhoneApi.GetCallStateAsync();
         if (callState != null) _callState = callState;
         _systemStatus = await PhoneApi.GetSystemStatusAsync();
-        await InvokeAsync(StateHasChanged);
+        if (!_disposed) await InvokeAsync(StateHasChanged);
       }
     }
     catch { /* Polling failure is non-fatal */ }
@@ -283,29 +286,41 @@
 
   private void OnCallStateChanged(string phoneId, string state)
   {
+    if (_disposed) return;
     _callState.CallState = state;
-    InvokeAsync(StateHasChanged);
+    _ = InvokeAsync(StateHasChanged);
   }
 
   private void OnIncomingCall(string phoneId, string phoneNumber)
   {
+    if (_disposed) return;
     _callState.CallState = "Ringing";
     _callState.IncomingNumber = phoneNumber;
-    InvokeAsync(StateHasChanged);
+    _ = InvokeAsync(StateHasChanged);
   }
 
   private async void OnCallHistoryUpdated()
   {
-    _callHistory = await PhoneApi.GetCallHistoryAsync();
-    await InvokeAsync(StateHasChanged);
+    if (_disposed) return;
+    try
+    {
+      _callHistory = await PhoneApi.GetCallHistoryAsync();
+      if (!_disposed) await InvokeAsync(StateHasChanged);
+    }
+    catch { /* Non-fatal — next poll will catch up */ }
   }
 
   private void OnSystemStatusChanged(object status)
   {
+    if (_disposed) return;
     _ = Task.Run(async () =>
     {
-      _systemStatus = await PhoneApi.GetSystemStatusAsync();
-      await InvokeAsync(StateHasChanged);
+      try
+      {
+        _systemStatus = await PhoneApi.GetSystemStatusAsync();
+        if (!_disposed) await InvokeAsync(StateHasChanged);
+      }
+      catch { /* Non-fatal */ }
     });
   }
 
@@ -412,6 +427,7 @@
 
   public void Dispose()
   {
+    _disposed = true;
     _pollTimer?.Stop();
     _pollTimer?.Dispose();
     PhoneHub.CallStateChanged -= OnCallStateChanged;
