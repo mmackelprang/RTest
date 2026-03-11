@@ -755,6 +755,8 @@ public class BluetoothStatusDto
   public BluetoothDeviceDto? ConnectedDevice { get; set; }
   public List<BluetoothDeviceDto> PairedDevices { get; set; } = [];
   public List<BluetoothDeviceDto> DiscoveredDevices { get; set; } = [];
+  public bool IsReconnecting { get; set; }
+  public string? LastDisconnectReason { get; set; }
 }
 
 public class BluetoothDeviceDto

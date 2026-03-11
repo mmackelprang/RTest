@@ -139,6 +139,15 @@ public interface IBluetoothService : IAsyncDisposable
 
   /// <summary>Go to previous track via AVRCP.</summary>
   Task PreviousTrackAsync(CancellationToken cancellationToken = default);
+
+  /// <summary>Whether a reconnection loop is currently active.</summary>
+  bool IsReconnecting { get; }
+
+  /// <summary>Cancel any active reconnection loop.</summary>
+  void CancelReconnection();
+
+  /// <summary>Last disconnect reason for UI display. Null if no disconnect has occurred.</summary>
+  BluetoothDisconnectReason? LastDisconnectReason { get; }
 }
 
 /// <summary>Bluetooth adapter states.</summary>

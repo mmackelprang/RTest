@@ -83,6 +83,9 @@ internal sealed class NullBluetoothService : IBluetoothService
   public Task SetDeviceVolumeAsync(float volume) => Task.CompletedTask;
   public Task NextTrackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
   public Task PreviousTrackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+  public bool IsReconnecting => false;
+  public void CancelReconnection() { }
+  public BluetoothDisconnectReason? LastDisconnectReason => null;
 
   public Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default)
   {

@@ -108,6 +108,17 @@ internal sealed class LinuxBluetoothService : IBluetoothService
 
   public bool IsAudioManagedByPlatform => false;
 
+  public bool IsReconnecting => _reconnectionLoop?.IsActive == true;
+
+  public void CancelReconnection()
+  {
+    _reconnectionLoop?.Cancel();
+    _logger.LogInformation("Reconnection loop cancelled by user");
+  }
+
+  private BluetoothDisconnectReason? _lastDisconnectReason;
+  public BluetoothDisconnectReason? LastDisconnectReason => _lastDisconnectReason;
+
   public BluetoothDeviceInfo? ConnectedDevice
   {
     get
@@ -520,6 +531,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService
             if (connected)
             {
               _reconnectionLoop?.Cancel();
+              _lastDisconnectReason = null;
               _connectionStartTime = DateTime.UtcNow;
               _metricsCollector?.Increment("bluetooth.devices_connected_total");
               _metricsCollector?.Gauge("bluetooth.active_connections", 1);
@@ -545,6 +557,8 @@ internal sealed class LinuxBluetoothService : IBluetoothService
               {
                 mgmtReason = BluetoothDisconnectReason.LocalHost;
               }
+
+              _lastDisconnectReason = mgmtReason;
 
               RecordDisconnectionMetrics();
               StopCaptureSubprocess();

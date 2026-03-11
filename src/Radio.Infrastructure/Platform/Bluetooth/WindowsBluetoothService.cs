@@ -262,6 +262,10 @@ internal sealed class WindowsBluetoothService : IBluetoothService
       return Task.CompletedTask;
     }
 
+    public bool IsReconnecting => false;
+    public void CancelReconnection() { }
+    public BluetoothDisconnectReason? LastDisconnectReason => null;
+
     private void CheckState(object? state)
     {
         try

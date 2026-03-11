@@ -165,6 +165,14 @@ public class BluetoothController : ControllerBase
     return Ok(BuildStatus());
   }
 
+  [HttpPost("cancel-reconnect")]
+  [ProducesResponseType(typeof(BluetoothStatusDto), StatusCodes.Status200OK)]
+  public ActionResult<BluetoothStatusDto> CancelReconnect()
+  {
+    _bluetoothService.CancelReconnection();
+    return Ok(BuildStatus());
+  }
+
   private BluetoothStatusDto BuildStatus()
   {
     return new BluetoothStatusDto
@@ -176,7 +184,9 @@ public class BluetoothController : ControllerBase
         ? MapDevice(_bluetoothService.ConnectedDevice)
         : null,
       PairedDevices = _bluetoothService.PairedDevices?.Select(MapDevice).ToList() ?? new List<BluetoothDeviceDto>(),
-      DiscoveredDevices = _bluetoothService.DiscoveredDevices?.Select(MapDevice).ToList() ?? new List<BluetoothDeviceDto>()
+      DiscoveredDevices = _bluetoothService.DiscoveredDevices?.Select(MapDevice).ToList() ?? new List<BluetoothDeviceDto>(),
+      IsReconnecting = _bluetoothService.IsReconnecting,
+      LastDisconnectReason = _bluetoothService.LastDisconnectReason?.ToString()
     };
   }
 
