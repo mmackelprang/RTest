@@ -12,7 +12,7 @@
   @if (_radioState == null)
   {
     <div style="flex: 1; display: flex; justify-content: center; align-items: center;">
-      <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+      <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" ProgressBarStyle="ProgressBarStyle.Primary" />
     </div>
   }
   else
@@ -73,62 +73,52 @@
 
       <!-- Tuning + Scan Controls -->
       <div style="display: flex; gap: 8px; align-items: center;">
-        <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowLeft"
-                       Color="Color.Primary" Size="Size.Large"
-                       Style="min-width: 56px; min-height: 56px;"
-                       OnClick="FrequencyDownAsync" title="Frequency Down" />
+        <RadzenButton Icon="keyboard_arrow_left" ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Large"
+                      Variant="Variant.Text"
+                      Style="min-width: 56px; min-height: 56px;"
+                      Click="FrequencyDownAsync" title="Frequency Down" />
         @if (_radioState.IsScanning)
         {
-          <MudButton Variant="Variant.Filled" Color="Color.Error"
-                     Style="min-width: 120px; min-height: 48px; font-size: 16px;"
-                     OnClick="StopScanAsync" StartIcon="@Icons.Material.Filled.Stop">
-            Stop
-          </MudButton>
+          <RadzenButton Variant="Variant.Filled" ButtonStyle="ButtonStyle.Danger"
+                        Style="min-width: 120px; min-height: 48px; font-size: 16px;"
+                        Click="StopScanAsync" Icon="stop" Text="Stop" />
         }
         else
         {
-          <MudButton Variant="Variant.Filled" Color="Color.Primary"
-                     Style="min-width: 100px; min-height: 48px; font-size: 15px;"
-                     OnClick="@(() => StartScanAsync("down"))" StartIcon="@Icons.Material.Filled.Search">
-            Scan ◀
-          </MudButton>
-          <MudButton Variant="Variant.Filled" Color="Color.Primary"
-                     Style="min-width: 100px; min-height: 48px; font-size: 15px;"
-                     OnClick="@(() => StartScanAsync("up"))" EndIcon="@Icons.Material.Filled.Search">
-            ▶ Scan
-          </MudButton>
+          <RadzenButton Variant="Variant.Filled" ButtonStyle="ButtonStyle.Primary"
+                        Style="min-width: 100px; min-height: 48px; font-size: 15px;"
+                        Click="@(() => StartScanAsync("down"))" Icon="search" Text="Scan ◀" />
+          <RadzenButton Variant="Variant.Filled" ButtonStyle="ButtonStyle.Primary"
+                        Style="min-width: 100px; min-height: 48px; font-size: 15px;"
+                        Click="@(() => StartScanAsync("up"))" Icon="search" Text="▶ Scan" />
         }
-        <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowRight"
-                       Color="Color.Primary" Size="Size.Large"
-                       Style="min-width: 56px; min-height: 56px;"
-                       OnClick="FrequencyUpAsync" title="Frequency Up" />
+        <RadzenButton Icon="keyboard_arrow_right" ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Large"
+                      Variant="Variant.Text"
+                      Style="min-width: 56px; min-height: 56px;"
+                      Click="FrequencyUpAsync" title="Frequency Up" />
       </div>
 
       <!-- Step size selector -->
-      <MudSelect T="string" Value="@_radioState.Step.ToString("0")" ValueChanged="@HandleStepChangeAsync"
-                 Label="Step Size" Variant="Variant.Outlined" Dense="true"
-                 Style="min-width: 160px; max-width: 180px;">
-        <MudSelectItem Value="@("1000")">1 kHz</MudSelectItem>
-        <MudSelectItem Value="@("9000")">9 kHz</MudSelectItem>
-        <MudSelectItem Value="@("10000")">10 kHz</MudSelectItem>
-        <MudSelectItem Value="@("25000")">25 kHz</MudSelectItem>
-        <MudSelectItem Value="@("100000")">100 kHz</MudSelectItem>
-        <MudSelectItem Value="@("200000")">200 kHz</MudSelectItem>
-        <MudSelectItem Value="@("1000000")">1 MHz</MudSelectItem>
-      </MudSelect>
+      <RadzenDropDown TValue="string" Value="@_radioState.Step.ToString("0")" Change="@HandleStepDropDownChangeAsync"
+                      Data="@_stepSizeOptions" TextProperty="Label" ValueProperty="Value"
+                      Placeholder="Step Size"
+                      Style="min-width: 160px; max-width: 180px;" />
 
       <!-- SDR Controls (if applicable) -->
       @if (_radioState.Gain.HasValue)
       {
         <div style="display: flex; gap: 16px; align-items: center; width: 400px;">
-          <MudSwitch T="bool" Value="@_radioState.AutoGain" ValueChanged="@HandleAutoGainChangedAsync"
-                     Label="AGC" Color="Color.Primary" />
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <RadzenSwitch Value="@_radioState.AutoGain" Change="@HandleAutoGainSwitchChangedAsync" />
+            <span>AGC</span>
+          </div>
           @if (!_radioState.AutoGain && _radioState.Gain.HasValue)
           {
-            <MudSlider T="int" Value="@_radioState.Gain.Value" ValueChanged="@HandleGainChangedAsync"
-                       Min="0" Max="50" Step="1" Color="Color.Primary" Style="flex: 1;">
-              Gain: @_radioState.Gain dB
-            </MudSlider>
+            <div style="flex: 1; display: flex; flex-direction: column;">
+              <span style="font-size: 13px; color: var(--text-medium);">Gain: @_radioState.Gain dB</span>
+              <RadzenSlider TValue="int" Value="@_radioState.Gain.Value" Change="@HandleGainSliderChangedAsync"
+                            Min="0" Max="50" Step="1" />
+            </div>
           }
         </div>
       }
@@ -138,17 +128,15 @@
     <div class="panel surface-raised" style="width: 480px; flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden;">
       <div class="panel-header">
         <span>Presets</span>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
-                   OnClick="OpenSavePresetDialog" StartIcon="@Icons.Material.Filled.Save">
-          Save Current
-        </MudButton>
+        <RadzenButton Variant="Variant.Filled" ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Small"
+                      Click="OpenSavePresetDialog" Icon="save" Text="Save Current" />
       </div>
 
       <div style="flex: 1; overflow-y: auto; padding: 12px;">
         @if (_presets == null || !_presets.Any())
         {
           <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-low);">
-            <MudIcon Icon="@Icons.Material.Filled.Radio" Style="font-size: 80px; opacity: 0.4; margin-bottom: 12px;" />
+            <RadzenIcon Icon="radio" Style="font-size: 80px; opacity: 0.4; margin-bottom: 12px;" />
             <span style="font-size: 16px;">No presets saved yet</span>
             <span style="font-size: 14px; color: var(--text-low); margin-top: 4px;">Save the current station to create a preset</span>
           </div>
@@ -167,8 +155,9 @@
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
                   <span style="font-size: 13px; color: var(--text-low);">@preset.Band</span>
                   <div @onclick:stopPropagation="true">
-                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
-                                   OnClick="@(() => DeletePresetAsync(preset.Id))" title="Delete" />
+                    <RadzenButton Icon="delete" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small"
+                                  Variant="Variant.Text"
+                                  Click="@(() => DeletePresetAsync(preset.Id))" title="Delete" />
                   </div>
                 </div>
               </div>
@@ -182,41 +171,47 @@
 
 @if (_isFrequencyDialogOpen)
 {
-  <!-- Frequency Set Dialog -->
-  <MudDialog>
-    <DialogContent>
-      <MudNumericField @bind-Value="_newFrequency"
-                       Label="@(_radioState?.Band == "AM" ? "Frequency (kHz)" : "Frequency (MHz)")"
-                       Variant="Variant.Outlined"
-                       InputMode="@(InputMode.@decimal)"
-                       Min="@GetMinFrequency()"
-                       Max="@GetMaxFrequency()"
-                       Step="@GetDialogStep()"
-                       Style="width: 100%;" />
-    </DialogContent>
-    <DialogActions>
-      <MudButton OnClick="CloseFrequencyDialog">Cancel</MudButton>
-      <MudButton Color="Color.Primary" OnClick="SetFrequencyAsync">Set</MudButton>
-    </DialogActions>
-  </MudDialog>
+  <!-- Frequency Set Dialog (CSS overlay) -->
+  <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; justify-content: center; align-items: center;"
+       @onclick="CloseFrequencyDialog">
+    <div style="background: var(--surface-raised, #1e1e1e); border-radius: 12px; padding: 24px; min-width: 320px; max-width: 400px;"
+         @onclick:stopPropagation="true">
+      <h6 style="margin: 0 0 16px 0;">Set Frequency</h6>
+      <RadzenNumeric TValue="double" @bind-Value="_newFrequency"
+                     Placeholder="@(_radioState?.Band == "AM" ? "Frequency (kHz)" : "Frequency (MHz)")"
+                     Min="@((decimal)GetMinFrequency())"
+                     Max="@((decimal)GetMaxFrequency())"
+                     Step="@GetDialogStep().ToString()"
+                     Style="width: 100%;" inputmode="decimal" />
+      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+        <RadzenButton Variant="Variant.Text" ButtonStyle="ButtonStyle.Light" Text="Cancel"
+                      Click="CloseFrequencyDialog" />
+        <RadzenButton Variant="Variant.Filled" ButtonStyle="ButtonStyle.Primary" Text="Set"
+                      Click="SetFrequencyAsync" />
+      </div>
+    </div>
+  </div>
 }
 
 @if (_isSavePresetDialogOpen)
 {
-  <!-- Save Preset Dialog -->
-  <MudDialog>
-    <DialogContent>
-      <MudTextField @bind-Value="_presetName"
-                    Label="Preset Name"
-                    Variant="Variant.Outlined"
-                    InputMode="InputMode.text"
-                    Style="width: 100%;" />
-    </DialogContent>
-    <DialogActions>
-      <MudButton OnClick="CloseSavePresetDialog">Cancel</MudButton>
-      <MudButton Color="Color.Primary" OnClick="SavePresetAsync">Save</MudButton>
-    </DialogActions>
-  </MudDialog>
+  <!-- Save Preset Dialog (CSS overlay) -->
+  <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; justify-content: center; align-items: center;"
+       @onclick="CloseSavePresetDialog">
+    <div style="background: var(--surface-raised, #1e1e1e); border-radius: 12px; padding: 24px; min-width: 320px; max-width: 400px;"
+         @onclick:stopPropagation="true">
+      <h6 style="margin: 0 0 16px 0;">Save Preset</h6>
+      <RadzenTextBox @bind-Value="_presetName"
+                     Placeholder="Preset Name"
+                     Style="width: 100%;" />
+      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+        <RadzenButton Variant="Variant.Text" ButtonStyle="ButtonStyle.Light" Text="Cancel"
+                      Click="CloseSavePresetDialog" />
+        <RadzenButton Variant="Variant.Filled" ButtonStyle="ButtonStyle.Primary" Text="Save"
+                      Click="SavePresetAsync" />
+      </div>
+    </div>
+  </div>
 }
 
 <style>
@@ -230,15 +225,29 @@
   private RadioStateDto? _radioState = null;
   private List<RadioPresetDto>? _presets = null;
   private IEnumerable<Radio.Core.Models.RadioBandModel> _availableBands = Enumerable.Empty<Radio.Core.Models.RadioBandModel>();
-  
+
   // Frequency dialog
   private bool _isFrequencyDialogOpen = false;
   private double _newFrequency = 88.0;
-  
+
   // Save preset dialog
   private bool _isSavePresetDialogOpen = false;
   private string _presetName = "";
-  
+
+  // Step size options for RadzenDropDown
+  private List<StepSizeOption> _stepSizeOptions = new()
+  {
+    new("1 kHz", "1000"),
+    new("9 kHz", "9000"),
+    new("10 kHz", "10000"),
+    new("25 kHz", "25000"),
+    new("100 kHz", "100000"),
+    new("200 kHz", "200000"),
+    new("1 MHz", "1000000"),
+  };
+
+  private record StepSizeOption(string Label, string Value);
+
   protected override async Task OnInitializedAsync()
   {
     await LoadPreferencesAsync();
@@ -257,7 +266,7 @@
       Logger.LogWarning(ex, "Failed to connect to SignalR hub — radio page will not receive live updates");
     }
   }
-  
+
   private async Task LoadBandsAsync()
   {
     try
@@ -298,7 +307,7 @@
       Logger.LogWarning(ex, "Failed to save preference {Key}", key);
     }
   }
-  
+
   private async Task LoadRadioStateAsync()
   {
     try
@@ -315,7 +324,7 @@
       _radioState = null;
     }
   }
-  
+
   private async Task LoadPresetsAsync()
   {
     try
@@ -327,13 +336,13 @@
       Logger.LogWarning(ex, "Failed to load radio presets");
     }
   }
-  
+
   private async Task HandleRadioStateChanged()
   {
     await LoadRadioStateAsync();
     await InvokeAsync(StateHasChanged);
   }
-  
+
   private async Task FrequencyUpAsync()
   {
     try
@@ -371,7 +380,7 @@
       Logger.LogError(ex, "Error calling FrequencyDownAsync");
     }
   }
-  
+
   private void OpenFrequencyDialog()
   {
     if (_radioState != null)
@@ -383,12 +392,12 @@
     }
     _isFrequencyDialogOpen = true;
   }
-  
+
   private void CloseFrequencyDialog()
   {
     _isFrequencyDialogOpen = false;
   }
-  
+
   private async Task SetFrequencyAsync()
   {
     try
@@ -410,13 +419,13 @@
       // Silently fail
     }
   }
-  
+
   private async Task HandleBandChangeAsync(string newBand)
   {
     try
     {
       Logger.LogDebug("Calling HandleBandChangeAsync with band: {Band}", newBand);
-      
+
       // Optimistic update
       if (_radioState != null)
       {
@@ -425,10 +434,10 @@
          // so current frequency might be invalid. The API will handle clamping.
          // We'll trust the eventual state update for frequency.
       }
-      
+
       var success = await RadioApi.SetBandAsync(newBand);
       Logger.LogDebug("SetBandAsync result: {Success}", success);
-      
+
       // Trigger a reload to get the clamped frequency and step immediately
       if (success)
       {
@@ -441,7 +450,16 @@
       Logger.LogError(ex, "Error calling HandleBandChangeAsync");
     }
   }
-  
+
+  // Wrapper for RadzenDropDown Change event (receives object)
+  private async Task HandleStepDropDownChangeAsync(object value)
+  {
+    if (value is string strValue)
+    {
+      await HandleStepChangeAsync(strValue);
+    }
+  }
+
   private async Task HandleStepChangeAsync(string newStep)
   {
     try
@@ -469,7 +487,7 @@
       Logger.LogError(ex, "Error calling HandleStepChangeAsync");
     }
   }
-  
+
   private async Task StartScanAsync(string direction)
   {
     try
@@ -507,7 +525,7 @@
       Logger.LogError(ex, "Error calling StopScanAsync");
     }
   }
-  
+
   private void OpenSavePresetDialog()
   {
     if (_radioState != null)
@@ -516,12 +534,12 @@
     }
     _isSavePresetDialogOpen = true;
   }
-  
+
   private void CloseSavePresetDialog()
   {
     _isSavePresetDialogOpen = false;
   }
-  
+
   private async Task SavePresetAsync()
   {
     try
@@ -574,7 +592,13 @@
       Logger.LogWarning(ex, "Failed to delete radio preset {PresetId}", id);
     }
   }
-  
+
+  // Wrapper for RadzenSwitch Change event (receives bool)
+  private async Task HandleAutoGainSwitchChangedAsync(bool enabled)
+  {
+    await HandleAutoGainChangedAsync(enabled);
+  }
+
   private async Task HandleAutoGainChangedAsync(bool enabled)
   {
     try
@@ -590,6 +614,12 @@
     {
       Logger.LogWarning(ex, "Failed to set auto gain to {Enabled}", enabled);
     }
+  }
+
+  // Wrapper for RadzenSlider Change event (receives int)
+  private async Task HandleGainSliderChangedAsync(int gain)
+  {
+    await HandleGainChangedAsync(gain);
   }
 
   private async Task HandleGainChangedAsync(int gain)
@@ -608,7 +638,7 @@
       Logger.LogWarning(ex, "Failed to set gain to {Gain}", gain);
     }
   }
-  
+
   // Frequency formatting — delegates to shared FrequencyFormatter
   private static string FormatFrequency(double frequencyHz, string band) => FrequencyFormatter.FormatFrequency(frequencyHz, band);
   private static string FormatStep(double stepHz, string band) => FrequencyFormatter.FormatStep(stepHz);
@@ -621,7 +651,7 @@
 
   private double GetMaxFrequency() =>
     _radioState == null ? 1000 : FrequencyFormatter.GetMaxFrequency(_radioState.Band, _availableBands);
-  
+
   public async ValueTask DisposeAsync()
   {
     HubService.RadioStateChanged -= HandleRadioStateChanged;

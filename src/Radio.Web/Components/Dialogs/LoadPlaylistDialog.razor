@@ -1,78 +1,74 @@
 @inject PlaylistApiService PlaylistApi
-@inject ISnackbar Snackbar
+@inject DialogService DialogService
+@inject NotificationService NotificationService
 @inject ILogger<LoadPlaylistDialog> Logger
 
-<MudDialog>
-  <TitleContent>
-    <MudText Typo="Typo.h6">
-      <MudIcon Icon="@Icons.Material.Filled.PlaylistPlay" Class="mr-2" Style="vertical-align: middle;" />
-      Load Playlist
-    </MudText>
-  </TitleContent>
-  <DialogContent>
-    @if (_loading)
+@if (_loading)
+{
+  <div style="display: flex; justify-content: center; padding: 32px;">
+    <RadzenProgressBarCircular Size="ProgressBarCircularSize.Small" Mode="ProgressBarMode.Indeterminate" />
+  </div>
+}
+else if (_playlists == null || _playlists.Count == 0)
+{
+  <div style="text-align: center; padding: 32px;">
+    <RadzenIcon Icon="playlist_remove" Style="font-size: 64px; opacity: 0.5;" />
+    <div style="margin-top: 16px;">
+      <span>No saved playlists</span>
+    </div>
+    <div>
+      <span style="font-size:0.875rem">
+        Save the current queue as a playlist first
+      </span>
+    </div>
+  </div>
+}
+else
+{
+  <div class="playlist-list">
+    @foreach (var playlist in _playlists)
     {
-      <div style="display: flex; justify-content: center; padding: 32px;">
-        <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+      <div class="playlist-item" style="min-height: 64px; display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 8px 0;">
+        <div style="flex: 1;">
+          <span style="font-weight: 500;">@playlist.Name</span>
+          <br />
+          <span style="font-size:0.75rem; color:var(--text-low)">
+            @playlist.ItemCount tracks
+            @if (!string.IsNullOrEmpty(playlist.Description))
+            {
+              @($" - {playlist.Description}")
+            }
+          </span>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <RadzenButton Variant="Variant.Filled"
+                        ButtonStyle="ButtonStyle.Primary"
+                        Size="ButtonSize.Small"
+                        Click="@(() => LoadPlaylistAsync(playlist))"
+                        Disabled="@_actionInProgress"
+                        Text="Load" />
+          <RadzenButton Icon="delete"
+                        ButtonStyle="ButtonStyle.Danger"
+                        Variant="Variant.Text"
+                        Size="ButtonSize.Small"
+                        Click="@(() => DeletePlaylistAsync(playlist))"
+                        Disabled="@_actionInProgress"
+                        title="Delete" />
+        </div>
       </div>
+      <hr style="border-color:var(--surface-separator); margin:0" />
     }
-    else if (_playlists == null || _playlists.Count == 0)
-    {
-      <div style="text-align: center; padding: 32px;">
-        <MudIcon Icon="@Icons.Material.Filled.PlaylistRemove" Style="font-size: 64px; opacity: 0.5;" />
-        <MudText Typo="Typo.body1" Style="margin-top: 16px;">No saved playlists</MudText>
-        <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
-          Save the current queue as a playlist first
-        </MudText>
-      </div>
-    }
-    else
-    {
-      <MudList T="string" Dense="false">
-        @foreach (var playlist in _playlists)
-        {
-          <MudListItem T="string" Style="min-height: 64px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-              <div style="flex: 1;">
-                <MudText Typo="Typo.body1" Style="font-weight: 500;">@playlist.Name</MudText>
-                <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">
-                  @playlist.ItemCount tracks
-                  @if (!string.IsNullOrEmpty(playlist.Description))
-                  {
-                    @($" - {playlist.Description}")
-                  }
-                </MudText>
-              </div>
-              <div style="display: flex; gap: 8px;">
-                <MudButton Variant="Variant.Filled"
-                           Color="Color.Primary"
-                           Size="Size.Small"
-                           OnClick="@(() => LoadPlaylistAsync(playlist))"
-                           Disabled="@_actionInProgress">
-                  Load
-                </MudButton>
-                <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                               Color="Color.Error"
-                               Size="Size.Small"
-                               OnClick="@(() => DeletePlaylistAsync(playlist))"
-                               Disabled="@_actionInProgress"
-                               title="Delete" />
-              </div>
-            </div>
-          </MudListItem>
-          <MudDivider />
-        }
-      </MudList>
-    }
-  </DialogContent>
-  <DialogActions>
-    <MudButton OnClick="Cancel">Close</MudButton>
-  </DialogActions>
-</MudDialog>
+  </div>
+}
+
+<div style="display: flex; justify-content: flex-end; padding-top: 16px;">
+  <RadzenButton Variant="Variant.Text"
+                ButtonStyle="ButtonStyle.Light"
+                Click="Cancel"
+                Text="Close" />
+</div>
 
 @code {
-  [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
-
   private List<Radio.Web.Models.PlaylistSummaryDto>? _playlists;
   private bool _loading = true;
   private bool _actionInProgress = false;
@@ -99,7 +95,7 @@
     }
   }
 
-  private void Cancel() => MudDialog.Cancel();
+  private void Cancel() => DialogService.Close();
 
   private async Task LoadPlaylistAsync(Radio.Web.Models.PlaylistSummaryDto playlist)
   {
@@ -113,23 +109,23 @@
       Logger.LogInformation("PlaylistApi.LoadAsync returned: {Success}", success);
       if (success)
       {
-        Snackbar.Add($"Loaded '{playlist.Name}' ({playlist.ItemCount} tracks)", Severity.Success);
-        MudDialog.Close(DialogResult.Ok(playlist));
+        NotificationService.Notify(NotificationSeverity.Success, "Success", $"Loaded '{playlist.Name}' ({playlist.ItemCount} tracks)");
+        DialogService.Close(playlist);
       }
       else
       {
-        Snackbar.Add("Failed to load playlist", Severity.Error);
+        NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to load playlist");
       }
     }
     catch (OperationCanceledException)
     {
       Logger.LogError("Timeout loading playlist {Id}", playlist.Id);
-      Snackbar.Add("Timed out loading playlist — is the API running?", Severity.Error);
+      NotificationService.Notify(NotificationSeverity.Error, "Error", "Timed out loading playlist — is the API running?");
     }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Failed to load playlist {Id}", playlist.Id);
-      Snackbar.Add("Error loading playlist", Severity.Error);
+      NotificationService.Notify(NotificationSeverity.Error, "Error", "Error loading playlist");
     }
     finally
     {
@@ -145,18 +141,18 @@
       var success = await PlaylistApi.DeleteAsync(playlist.Id);
       if (success)
       {
-        Snackbar.Add($"Deleted '{playlist.Name}'", Severity.Info);
+        NotificationService.Notify(NotificationSeverity.Info, "Info", $"Deleted '{playlist.Name}'");
         _playlists?.Remove(playlist);
       }
       else
       {
-        Snackbar.Add("Failed to delete playlist", Severity.Error);
+        NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to delete playlist");
       }
     }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Failed to delete playlist {Id}", playlist.Id);
-      Snackbar.Add("Error deleting playlist", Severity.Error);
+      NotificationService.Notify(NotificationSeverity.Error, "Error", "Error deleting playlist");
     }
     finally
     {

@@ -3,7 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using MudBlazor.Services;
+using Radzen;
 using Radio.Web.Components.Dialogs;
 using Radio.Web.Services.ApiClients;
 
@@ -11,7 +11,7 @@ namespace Radio.Web.Tests.Components.Dialogs;
 
 /// <summary>
 /// bUnit tests for the FileBrowserDialog component.
-/// MudDialog components render empty without a CascadingParameter IMudDialogInstance,
+/// Dialog components render empty without a proper dialog context,
 /// so these tests verify the component instantiates and accepts parameters without errors.
 /// </summary>
 public class FileBrowserDialogTests : TestContext
@@ -31,7 +31,7 @@ public class FileBrowserDialogTests : TestContext
 
     Services.AddSingleton<IConfiguration>(configuration);
     Services.AddSingleton(_loggerFactory);
-    Services.AddMudServices();
+    Services.AddRadzenComponents();
     Services.AddHttpClient<FileApiService>();
     Services.AddHttpClient<ConfigurationApiService>();
     Services.AddSingleton<ILogger<FileBrowserDialog>>(
@@ -120,7 +120,7 @@ public class FileBrowserDialogTests : TestContext
   {
     // Verify the component instantiates without error — it has internal
     // absolute mode state (drives, path bar) that must initialize cleanly.
-    // MudDialog renders empty without IMudDialogInstance, so we just
+    // Dialog renders empty without a dialog context, so we just
     // verify no exceptions during construction.
     var cut = RenderComponent<FileBrowserDialog>();
     Assert.NotNull(cut);

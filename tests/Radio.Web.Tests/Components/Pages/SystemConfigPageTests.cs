@@ -3,7 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using MudBlazor.Services;
+using Radzen;
 using Radio.Web.Components.Pages;
 using Radio.Web.Services.ApiClients;
 using Radio.Web.Services.Hub;
@@ -33,9 +33,9 @@ public class SystemConfigPageTests : TestContext
     Services.AddSingleton<IConfiguration>(configuration);
     Services.AddSingleton(_loggerFactory);
     
-    // Add MudBlazor services
-    Services.AddMudServices();
-    
+    // Add Radzen services
+    Services.AddRadzenComponents();
+
     // Add HttpClient for API services
     Services.AddHttpClient<SystemApiService>();
     Services.AddHttpClient<ConfigurationApiService>();
@@ -47,10 +47,8 @@ public class SystemConfigPageTests : TestContext
     // Add AudioStateHubService
     Services.AddSingleton<AudioStateHubService>();
     
-    // Setup JSInterop mocks for MudBlazor components
+    // Setup JSInterop for Radzen components
     JSInterop.Mode = JSRuntimeMode.Loose;
-    JSInterop.SetupVoid("mudElementRef.getBoundingClientRect", _ => true);
-    JSInterop.Setup<int>("mudElementRef.getBoundingClientRect", _ => true).SetResult(0);
   }
 
   protected override void Dispose(bool disposing)
@@ -257,7 +255,7 @@ public class SystemConfigPageTests : TestContext
     var cut = RenderComponent<SystemConfigPage>();
 
     // Assert - Verify main Secrets tab exists and component renders
-    // Sub-tab content is loaded dynamically in MudTabs
+    // Sub-tab content is loaded dynamically in RadzenTabs
     Assert.Contains("Secrets", cut.Markup);
     Assert.NotNull(cut);
   }
@@ -269,7 +267,7 @@ public class SystemConfigPageTests : TestContext
     var cut = RenderComponent<SystemConfigPage>();
 
     // Assert - Verify main Secrets tab exists
-    // Sub-tab content is loaded dynamically in MudTabs
+    // Sub-tab content is loaded dynamically in RadzenTabs
     Assert.Contains("Secrets", cut.Markup);
     Assert.NotNull(cut);
   }
@@ -281,7 +279,7 @@ public class SystemConfigPageTests : TestContext
     var cut = RenderComponent<SystemConfigPage>();
 
     // Assert - Verify main Secrets tab exists
-    // Sub-tab content is loaded dynamically in MudTabs
+    // Sub-tab content is loaded dynamically in RadzenTabs
     Assert.Contains("Secrets", cut.Markup);
     Assert.NotNull(cut);
   }

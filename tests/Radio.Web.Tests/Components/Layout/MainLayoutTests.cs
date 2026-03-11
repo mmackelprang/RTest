@@ -3,8 +3,8 @@ using Xunit;
 namespace Radio.Web.Tests.Components.Layout;
 
 /// <summary>
-/// MainLayout tests are deferred pending proper MudBlazor + bUnit setup.
-/// MainLayout uses MudSelect and other MudBlazor components that require extensive
+/// MainLayout tests are deferred pending proper Radzen + bUnit setup.
+/// MainLayout uses RadzenDropDown and other Radzen components that require extensive
 /// JSInterop and service configuration. These will be implemented as integration tests
 /// or E2E tests when the full application is running.
 /// </summary>
@@ -20,8 +20,8 @@ public class MainLayoutTests
     // - Content area (516px) for page content
     
     // Full component testing requires:
-    // 1. MudBlazor services (IKeyInterceptorService, IPopoverService, etc.)
-    // 2. JSInterop setup for MudSelect, MudPopover, and other interactive components
+    // 1. Radzen services (DialogService, NotificationService, etc.)
+    // 2. JSInterop setup for RadzenDropDown and other interactive components
     // 3. NavigationManager for routing
     // 4. API services for data loading
     

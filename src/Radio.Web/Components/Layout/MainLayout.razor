@@ -80,7 +80,7 @@
                   Size="ButtonSize.Large"
                   title="Mark audio distortion"
                   Click="@HandleDistortionMarkerAsync"
-                  class="debug-distortion-btn @_distortionMarkerColor" />
+                  class="@($"debug-distortion-btn {_distortionMarkerColor}")" />
 
     <!-- Navigation Icons (right-aligned) -->
     <div class="topbar-nav">

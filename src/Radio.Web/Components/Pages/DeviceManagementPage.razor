@@ -4,350 +4,347 @@
 @using Radio.Web.Models
 @inject DevicesApiService DevicesApi
 @inject DeviceDisplayStateService DisplayState
-@inject ISnackbar Snackbar
+@inject NotificationService NotificationService
 @inject ILogger<DeviceManagementPage> Logger
 
 <PageTitle>Device Management - Radio Console</PageTitle>
 
 <div style="height: 100%; display: flex; overflow: hidden;">
-  <MudTabs Elevation="0" Rounded="false" Position="Position.Start" ApplyEffectsToContainer="true"
-           PanelClass="pa-4" Style="height: 100%; width: 100%;" Class="system-config-tabs">
+  <RadzenTabs TabPosition="TabPosition.Left" Style="height: 100%; width: 100%;" class="system-config-tabs">
+    <Tabs>
 
-    @* Display Settings Tab *@
-    <MudTabPanel Text="Display" Icon="@Icons.Material.Filled.Visibility">
-      <MudStack Spacing="2">
-        <div class="d-flex justify-space-between align-center">
-          <MudText Typo="Typo.h6">Device Display Settings</MudText>
-          <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
-                     OnClick="RefreshDevicesAsync" StartIcon="@Icons.Material.Filled.Refresh">Refresh</MudButton>
-        </div>
-        <MudText Typo="Typo.body2" Color="Color.Secondary">
-          Control which output devices appear in the taskbar and set friendly names.
-        </MudText>
+      @* Display Settings Tab *@
+      <RadzenTabsItem Text="Display" Icon="visibility">
+        <div style="display:flex; flex-direction:column; gap:8px">
+          <div style="display:flex; flex-direction:row; gap:8px; align-items:center; justify-content:space-between">
+            <h6>Device Display Settings</h6>
+            <RadzenButton Variant="Variant.Filled" ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Small"
+                          Click="RefreshDevicesAsync" Icon="refresh" Text="Refresh" />
+          </div>
+          <span style="font-size:0.875rem">
+            Control which output devices appear in the taskbar and set friendly names.
+          </span>
 
-        @if (isLoadingDisplay)
-        {
-          <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
-        }
-        else if (displaySettings == null || !displaySettings.Any())
-        {
-          <MudAlert Severity="Severity.Info">No devices found. Click Refresh to scan for devices.</MudAlert>
-        }
-        else
-        {
-          <MudTable Items="@displaySettings" Hover="true" Striped="true" Dense="true">
-            <HeaderContent>
-              <MudTh>Visible</MudTh>
-              <MudTh>Type</MudTh>
-              <MudTh>Device Name</MudTh>
-              <MudTh>Friendly Name</MudTh>
-              <MudTh Style="width: 50px"></MudTh>
-            </HeaderContent>
-            <RowTemplate>
-              <MudTd DataLabel="Visible">
-                <MudIconButton Icon="@(context.IsHidden ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
-                               Color="@(context.IsHidden ? Color.Default : Color.Success)"
-                               Size="Size.Small"
-                               title="@(context.IsHidden ? "Hidden — click to show" : "Visible — click to hide")"
-                               OnClick="@(() => ToggleDeviceVisibilityAsync(context))" />
-              </MudTd>
-              <MudTd DataLabel="Type">
-                <MudChip T="string" Size="Size.Small"
-                         Color="@(context.Type == "Output" ? Color.Info : Color.Success)"
-                         Icon="@(context.Type == "Output" ? Icons.Material.Filled.VolumeUp : Icons.Material.Filled.Mic)">
-                  @context.Type
-                </MudChip>
-              </MudTd>
-              <MudTd DataLabel="Device Name">
-                <MudText Style="@(context.IsHidden ? "text-decoration: line-through; opacity: 0.5;" : "")">
-                  @context.RawName
-                </MudText>
-              </MudTd>
-              <MudTd DataLabel="Friendly Name">
-                <MudTextField T="string"
-                              Value="@(GetFriendlyNameEditValue(context))"
-                              ValueChanged="@(val => OnFriendlyNameChanged(context, val))"
-                              Variant="Variant.Outlined"
-                              Margin="Margin.Dense"
-                              InputMode="InputMode.text"
-                              Placeholder="@context.DisplayName"
-                              Disabled="@context.IsHidden"
-                              Immediate="false"
-                              Style="@(context.IsHidden ? "opacity: 0.5;" : "")" />
-              </MudTd>
-              <MudTd>
-                @if (!string.IsNullOrEmpty(context.FriendlyNameOverride))
-                {
-                  <MudIconButton Icon="@Icons.Material.Filled.Clear"
-                                 Color="Color.Default"
-                                 Size="Size.Small"
-                                 title="Clear friendly name"
-                                 OnClick="@(() => ClearFriendlyNameAsync(context))" />
-                }
-              </MudTd>
-            </RowTemplate>
-          </MudTable>
-        }
-      </MudStack>
-    </MudTabPanel>
-
-    @* Output Devices Tab *@
-    <MudTabPanel Text="Outputs" Icon="@Icons.Material.Filled.SpeakerGroup">
-      <MudStack Spacing="2">
-        <MudText Typo="Typo.h6">Output Devices</MudText>
-        
-        @if (isLoadingOutput)
-        {
-          <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
-        }
-        else if (outputDevices == null || !outputDevices.Any())
-        {
-          <MudAlert Severity="Severity.Info">No output devices found. Click Refresh to scan for devices.</MudAlert>
-        }
-        else
-        {
-          <MudTable Items="@outputDevices" Hover="true" Striped="true" Dense="true">
-            <HeaderContent>
-              <MudTh>Name</MudTh>
-              <MudTh>Type</MudTh>
-              <MudTh>Status</MudTh>
-              <MudTh>Actions</MudTh>
-            </HeaderContent>
-            <RowTemplate>
-              <MudTd DataLabel="Name">
-                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
-                  @if (context.IsDefault)
-                  {
-                    <MudIcon Icon="@Icons.Material.Filled.Star" Color="Color.Primary" Size="Size.Small" title="Default Device" />
-                  }
-                  <MudText>@context.Name</MudText>
-                </MudStack>
-              </MudTd>
-              <MudTd DataLabel="Type">@context.Type</MudTd>
-              <MudTd DataLabel="Status">
-                @if (context.IsActive)
-                {
-                  <MudChip T="string" Size="Size.Small" Color="Color.Success" Icon="@Icons.Material.Filled.CheckCircle">Active</MudChip>
-                }
-                else if (context.IsDefault)
-                {
-                  <MudChip T="string" Size="Size.Small" Color="Color.Primary" Icon="@Icons.Material.Filled.Star">Default</MudChip>
-                }
-                else
-                {
-                  <MudChip T="string" Size="Size.Small" Color="Color.Default" Icon="@Icons.Material.Filled.Circle">Available</MudChip>
-                }
-              </MudTd>
-              <MudTd DataLabel="Actions">
-                @if (!context.IsDefault)
-                {
-                  <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
-                             OnClick="@(() => SetDefaultOutputAsync(context.Id))">
-                    Set as Default
-                  </MudButton>
-                }
-              </MudTd>
-            </RowTemplate>
-          </MudTable>
-        }
-      </MudStack>
-    </MudTabPanel>
-
-    @* Google Cast Devices Tab *@
-    <MudTabPanel Text="Cast" Icon="@Icons.Material.Filled.Cast">
-      <MudStack Spacing="2">
-        <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
-          <MudText Typo="Typo.h6">Google Cast Devices</MudText>
-          <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
-                     OnClick="ScanForCastDevicesAsync" StartIcon="@Icons.Material.Filled.Search"
-                     Disabled="@isDiscoveringCast">
-            @if (isDiscoveringCast)
-            {
-              <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-              <span>Scanning...</span>
-            }
-            else
-            {
-              <span>Scan for New Devices</span>
-            }
-          </MudButton>
-        </MudStack>
-
-        @if (isLoadingCast)
-        {
-          <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
-        }
-        else if (castDevices == null || !castDevices.Any())
-        {
-          <MudAlert Severity="Severity.Info">No cached Cast devices. Click "Scan for New Devices" to discover devices on your network.</MudAlert>
-        }
-        else
-        {
-          <MudTable Items="@castDevices" Hover="true" Striped="true" Dense="true">
-            <HeaderContent>
-              <MudTh>Name</MudTh>
-              <MudTh>IP Address</MudTh>
-              <MudTh>Model</MudTh>
-              <MudTh>Default</MudTh>
-              <MudTh>Actions</MudTh>
-            </HeaderContent>
-            <RowTemplate>
-              <MudTd DataLabel="Name">
-                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
-                  <MudIcon Icon="@Icons.Material.Filled.Cast" Size="Size.Small" />
-                  <MudText>@context.Name</MudText>
-                </MudStack>
-              </MudTd>
-              <MudTd DataLabel="IP Address">@context.IpAddress:@context.Port</MudTd>
-              <MudTd DataLabel="Model">@context.Model</MudTd>
-              <MudTd DataLabel="Default">
-                @if (defaultCastDeviceId == context.Id)
-                {
-                  <MudIcon Icon="@Icons.Material.Filled.Star" Color="Color.Warning" Size="Size.Small" title="Default Device" />
-                }
-              </MudTd>
-              <MudTd DataLabel="Actions">
-                <MudStack Row="true" Spacing="1">
-                  <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
-                             OnClick="@(() => ConnectCastDeviceAsync(context))"
-                             Disabled="@connectingCastDeviceId.Equals(context.Id)">
-                    @if (connectingCastDeviceId == context.Id)
+          @if (isLoadingDisplay)
+          {
+            <RadzenProgressBar Mode="ProgressBarMode.Indeterminate" ProgressBarStyle="ProgressBarStyle.Primary" />
+          }
+          else if (displaySettings == null || !displaySettings.Any())
+          {
+            <RadzenAlert AlertStyle="AlertStyle.Info" AllowClose="false">No devices found. Click Refresh to scan for devices.</RadzenAlert>
+          }
+          else
+          {
+            <RadzenDataGrid TItem="DeviceDisplayInfoDto" Data="@displaySettings" Density="Density.Compact">
+              <Columns>
+                <RadzenDataGridColumn Title="Visible" TItem="DeviceDisplayInfoDto">
+                  <Template Context="item">
+                    <RadzenButton Icon="@(item.IsHidden ? "visibility_off" : "visibility")"
+                                  ButtonStyle="@(item.IsHidden ? ButtonStyle.Light : ButtonStyle.Success)"
+                                  Size="ButtonSize.Small"
+                                  title="@(item.IsHidden ? "Hidden — click to show" : "Visible — click to hide")"
+                                  Click="@(() => ToggleDeviceVisibilityAsync(item))"
+                                  Variant="Variant.Text" />
+                  </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn Title="Type" TItem="DeviceDisplayInfoDto">
+                  <Template Context="item">
+                    <RadzenBadge BadgeStyle="@(item.Type == "Output" ? BadgeStyle.Info : BadgeStyle.Success)"
+                                 IsPill="true" Text="@item.Type" />
+                  </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn Title="Device Name" TItem="DeviceDisplayInfoDto">
+                  <Template Context="item">
+                    <span style="@(item.IsHidden ? "text-decoration: line-through; opacity: 0.5;" : "")">
+                      @item.RawName
+                    </span>
+                  </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn Title="Friendly Name" TItem="DeviceDisplayInfoDto">
+                  <Template Context="item">
+                    <RadzenTextBox Value="@(GetFriendlyNameEditValue(item))"
+                                   Change="@(val => OnFriendlyNameChanged(item, val))"
+                                   Placeholder="@item.DisplayName"
+                                   Disabled="@item.IsHidden"
+                                   Style="@(item.IsHidden ? "opacity: 0.5;" : "")" />
+                  </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn Title="" TItem="DeviceDisplayInfoDto" Width="50px">
+                  <Template Context="item">
+                    @if (!string.IsNullOrEmpty(item.FriendlyNameOverride))
                     {
-                      <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
-                      <span>Connecting</span>
+                      <RadzenButton Icon="clear"
+                                    ButtonStyle="ButtonStyle.Light"
+                                    Size="ButtonSize.Small"
+                                    title="Clear friendly name"
+                                    Click="@(() => ClearFriendlyNameAsync(item))"
+                                    Variant="Variant.Text" />
+                    }
+                  </Template>
+                </RadzenDataGridColumn>
+              </Columns>
+            </RadzenDataGrid>
+          }
+        </div>
+      </RadzenTabsItem>
+
+      @* Output Devices Tab *@
+      <RadzenTabsItem Text="Outputs" Icon="speaker_group">
+        <div style="display:flex; flex-direction:column; gap:8px">
+          <h6>Output Devices</h6>
+
+          @if (isLoadingOutput)
+          {
+            <RadzenProgressBar Mode="ProgressBarMode.Indeterminate" ProgressBarStyle="ProgressBarStyle.Primary" />
+          }
+          else if (outputDevices == null || !outputDevices.Any())
+          {
+            <RadzenAlert AlertStyle="AlertStyle.Info" AllowClose="false">No output devices found. Click Refresh to scan for devices.</RadzenAlert>
+          }
+          else
+          {
+            <RadzenDataGrid TItem="AudioDeviceDto" Data="@outputDevices" Density="Density.Compact">
+              <Columns>
+                <RadzenDataGridColumn Title="Name" TItem="AudioDeviceDto">
+                  <Template Context="item">
+                    <div style="display:flex; flex-direction:row; gap:4px; align-items:center">
+                      @if (item.IsDefault)
+                      {
+                        <RadzenIcon Icon="star" title="Default Device" Style="color:var(--rz-primary)" />
+                      }
+                      <span>@item.Name</span>
+                    </div>
+                  </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn Title="Type" TItem="AudioDeviceDto" Property="Type" />
+                <RadzenDataGridColumn Title="Status" TItem="AudioDeviceDto">
+                  <Template Context="item">
+                    @if (item.IsActive)
+                    {
+                      <RadzenBadge BadgeStyle="BadgeStyle.Success" IsPill="true" Text="Active" />
+                    }
+                    else if (item.IsDefault)
+                    {
+                      <RadzenBadge BadgeStyle="BadgeStyle.Primary" IsPill="true" Text="Default" />
                     }
                     else
                     {
-                      <span>Connect</span>
+                      <RadzenBadge BadgeStyle="BadgeStyle.Light" IsPill="true" Text="Available" />
                     }
-                  </MudButton>
-                  @if (defaultCastDeviceId != context.Id)
-                  {
-                    <MudButton Variant="Variant.Text" Color="Color.Secondary" Size="Size.Small"
-                               OnClick="@(() => SetDefaultCastDeviceAsync(context))">
-                      Set Default
-                    </MudButton>
-                  }
-                  else
-                  {
-                    <MudButton Variant="Variant.Text" Color="Color.Default" Size="Size.Small"
-                               OnClick="ClearDefaultCastDeviceAsync">
-                      Clear Default
-                    </MudButton>
-                  }
-                </MudStack>
-              </MudTd>
-            </RowTemplate>
-          </MudTable>
-        }
-      </MudStack>
-    </MudTabPanel>
+                  </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn Title="Actions" TItem="AudioDeviceDto">
+                  <Template Context="item">
+                    @if (!item.IsDefault)
+                    {
+                      <RadzenButton Variant="Variant.Text" ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Small"
+                                    Click="@(() => SetDefaultOutputAsync(item.Id))" Text="Set as Default" />
+                    }
+                  </Template>
+                </RadzenDataGridColumn>
+              </Columns>
+            </RadzenDataGrid>
+          }
+        </div>
+      </RadzenTabsItem>
 
-    @* Input Devices Tab *@
-    <MudTabPanel Text="Inputs" Icon="@Icons.Material.Filled.Mic">
-      <MudStack Spacing="2">
-        <MudText Typo="Typo.h6">Input Devices</MudText>
-        
-        @if (isLoadingInput)
-        {
-          <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
-        }
-        else if (inputDevices == null || !inputDevices.Any())
-        {
-          <MudAlert Severity="Severity.Info">No input devices found. Click Refresh to scan for devices.</MudAlert>
-        }
-        else
-        {
-          <MudTable Items="@inputDevices" Hover="true" Striped="true" Dense="true">
-            <HeaderContent>
-              <MudTh>Name</MudTh>
-              <MudTh>Type</MudTh>
-              <MudTh>Status</MudTh>
-              <MudTh>Actions</MudTh>
-            </HeaderContent>
-            <RowTemplate>
-              <MudTd DataLabel="Name">
-                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
-                  @if (context.IsDefault)
-                  {
-                    <MudIcon Icon="@Icons.Material.Filled.Star" Color="Color.Primary" Size="Size.Small" title="Default Device" />
-                  }
-                  <MudText>@context.Name</MudText>
-                </MudStack>
-              </MudTd>
-              <MudTd DataLabel="Type">@context.Type</MudTd>
-              <MudTd DataLabel="Status">
-                @if (context.IsActive)
+      @* Google Cast Devices Tab *@
+      <RadzenTabsItem Text="Cast" Icon="cast">
+        <div style="display:flex; flex-direction:column; gap:8px">
+          <div style="display:flex; flex-direction:row; gap:8px; align-items:center; justify-content:space-between">
+            <h6>Google Cast Devices</h6>
+            <RadzenButton Variant="Variant.Outlined" ButtonStyle="ButtonStyle.Light" Size="ButtonSize.Small"
+                          Click="ScanForCastDevicesAsync" Icon="search"
+                          Disabled="@isDiscoveringCast">
+              <ChildContent>
+                @if (isDiscoveringCast)
                 {
-                  <MudChip T="string" Size="Size.Small" Color="Color.Success" Icon="@Icons.Material.Filled.CheckCircle">Active</MudChip>
-                }
-                else if (context.IsDefault)
-                {
-                  <MudChip T="string" Size="Size.Small" Color="Color.Primary" Icon="@Icons.Material.Filled.Star">Default</MudChip>
+                  <RadzenProgressBarCircular Size="ProgressBarCircularSize.Small" Mode="ProgressBarMode.Indeterminate" Style="margin-right:8px" />
+                  <span>Scanning...</span>
                 }
                 else
                 {
-                  <MudChip T="string" Size="Size.Small" Color="Color.Default" Icon="@Icons.Material.Filled.Circle">Available</MudChip>
+                  <span>Scan for New Devices</span>
                 }
-              </MudTd>
-              <MudTd DataLabel="Actions">
-                @if (!context.IsActive)
-                {
-                  <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
-                             OnClick="@(() => SetDefaultInputAsync(context.Id))">
-                    Set as Default
-                  </MudButton>
-                }
-              </MudTd>
-            </RowTemplate>
-          </MudTable>
-        }
-      </MudStack>
-    </MudTabPanel>
+              </ChildContent>
+            </RadzenButton>
+          </div>
 
-    @* USB Port Reservations Tab *@
-    <MudTabPanel Text="USB Ports" Icon="@Icons.Material.Filled.Usb">
-      <MudStack Spacing="2">
-        <MudText Typo="Typo.h6">USB Port Reservations</MudText>
-        
-        @if (isLoadingUsb)
-        {
-          <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
-        }
-        else if (usbPorts == null || !usbPorts.Any())
-        {
-          <MudAlert Severity="Severity.Info">No USB port reservations found.</MudAlert>
-        }
-        else
-        {
-          <MudTable Items="@usbPorts" Hover="true" Striped="true" Dense="true">
-            <HeaderContent>
-              <MudTh>Port ID</MudTh>
-              <MudTh>Port Name</MudTh>
-              <MudTh>Reserved</MudTh>
-              <MudTh>Reserved By</MudTh>
-            </HeaderContent>
-            <RowTemplate>
-              <MudTd DataLabel="Port ID">@context.Id</MudTd>
-              <MudTd DataLabel="Port Name">@context.Name</MudTd>
-              <MudTd DataLabel="Reserved">
-                @if (context.IsReserved)
-                {
-                  <MudChip T="string" Size="Size.Small" Color="Color.Warning">Reserved</MudChip>
-                }
-                else
-                {
-                  <MudChip T="string" Size="Size.Small" Color="Color.Success" Icon="@Icons.Material.Filled.CheckCircle">Available</MudChip>
-                }
-              </MudTd>
-              <MudTd DataLabel="Reserved By">@(context.ReservedBy ?? "-")</MudTd>
-            </RowTemplate>
-          </MudTable>
-        }
-      </MudStack>
-    </MudTabPanel>
+          @if (isLoadingCast)
+          {
+            <RadzenProgressBar Mode="ProgressBarMode.Indeterminate" ProgressBarStyle="ProgressBarStyle.Primary" />
+          }
+          else if (castDevices == null || !castDevices.Any())
+          {
+            <RadzenAlert AlertStyle="AlertStyle.Info" AllowClose="false">No cached Cast devices. Click "Scan for New Devices" to discover devices on your network.</RadzenAlert>
+          }
+          else
+          {
+            <RadzenDataGrid TItem="CastDeviceDto" Data="@castDevices" Density="Density.Compact">
+              <Columns>
+                <RadzenDataGridColumn Title="Name" TItem="CastDeviceDto">
+                  <Template Context="item">
+                    <div style="display:flex; flex-direction:row; gap:4px; align-items:center">
+                      <RadzenIcon Icon="cast" />
+                      <span>@item.Name</span>
+                    </div>
+                  </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn Title="IP Address" TItem="CastDeviceDto">
+                  <Template Context="item">
+                    @item.IpAddress:@item.Port
+                  </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn Title="Model" TItem="CastDeviceDto" Property="Model" />
+                <RadzenDataGridColumn Title="Default" TItem="CastDeviceDto">
+                  <Template Context="item">
+                    @if (defaultCastDeviceId == item.Id)
+                    {
+                      <RadzenIcon Icon="star" title="Default Device" Style="color:var(--rz-warning)" />
+                    }
+                  </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn Title="Actions" TItem="CastDeviceDto">
+                  <Template Context="item">
+                    <div style="display:flex; flex-direction:row; gap:4px">
+                      <RadzenButton Variant="Variant.Text" ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Small"
+                                    Click="@(() => ConnectCastDeviceAsync(item))"
+                                    Disabled="@connectingCastDeviceId.Equals(item.Id)">
+                        <ChildContent>
+                          @if (connectingCastDeviceId == item.Id)
+                          {
+                            <RadzenProgressBarCircular Size="ProgressBarCircularSize.Small" Mode="ProgressBarMode.Indeterminate" Style="margin-right:4px" />
+                            <span>Connecting</span>
+                          }
+                          else
+                          {
+                            <span>Connect</span>
+                          }
+                        </ChildContent>
+                      </RadzenButton>
+                      @if (defaultCastDeviceId != item.Id)
+                      {
+                        <RadzenButton Variant="Variant.Text" ButtonStyle="ButtonStyle.Secondary" Size="ButtonSize.Small"
+                                      Click="@(() => SetDefaultCastDeviceAsync(item))" Text="Set Default" />
+                      }
+                      else
+                      {
+                        <RadzenButton Variant="Variant.Text" ButtonStyle="ButtonStyle.Light" Size="ButtonSize.Small"
+                                      Click="ClearDefaultCastDeviceAsync" Text="Clear Default" />
+                      }
+                    </div>
+                  </Template>
+                </RadzenDataGridColumn>
+              </Columns>
+            </RadzenDataGrid>
+          }
+        </div>
+      </RadzenTabsItem>
 
-  </MudTabs>
+      @* Input Devices Tab *@
+      <RadzenTabsItem Text="Inputs" Icon="mic">
+        <div style="display:flex; flex-direction:column; gap:8px">
+          <h6>Input Devices</h6>
+
+          @if (isLoadingInput)
+          {
+            <RadzenProgressBar Mode="ProgressBarMode.Indeterminate" ProgressBarStyle="ProgressBarStyle.Primary" />
+          }
+          else if (inputDevices == null || !inputDevices.Any())
+          {
+            <RadzenAlert AlertStyle="AlertStyle.Info" AllowClose="false">No input devices found. Click Refresh to scan for devices.</RadzenAlert>
+          }
+          else
+          {
+            <RadzenDataGrid TItem="AudioDeviceDto" Data="@inputDevices" Density="Density.Compact">
+              <Columns>
+                <RadzenDataGridColumn Title="Name" TItem="AudioDeviceDto">
+                  <Template Context="item">
+                    <div style="display:flex; flex-direction:row; gap:4px; align-items:center">
+                      @if (item.IsDefault)
+                      {
+                        <RadzenIcon Icon="star" title="Default Device" Style="color:var(--rz-primary)" />
+                      }
+                      <span>@item.Name</span>
+                    </div>
+                  </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn Title="Type" TItem="AudioDeviceDto" Property="Type" />
+                <RadzenDataGridColumn Title="Status" TItem="AudioDeviceDto">
+                  <Template Context="item">
+                    @if (item.IsActive)
+                    {
+                      <RadzenBadge BadgeStyle="BadgeStyle.Success" IsPill="true" Text="Active" />
+                    }
+                    else if (item.IsDefault)
+                    {
+                      <RadzenBadge BadgeStyle="BadgeStyle.Primary" IsPill="true" Text="Default" />
+                    }
+                    else
+                    {
+                      <RadzenBadge BadgeStyle="BadgeStyle.Light" IsPill="true" Text="Available" />
+                    }
+                  </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn Title="Actions" TItem="AudioDeviceDto">
+                  <Template Context="item">
+                    @if (!item.IsActive)
+                    {
+                      <RadzenButton Variant="Variant.Text" ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Small"
+                                    Click="@(() => SetDefaultInputAsync(item.Id))" Text="Set as Default" />
+                    }
+                  </Template>
+                </RadzenDataGridColumn>
+              </Columns>
+            </RadzenDataGrid>
+          }
+        </div>
+      </RadzenTabsItem>
+
+      @* USB Port Reservations Tab *@
+      <RadzenTabsItem Text="USB Ports" Icon="usb">
+        <div style="display:flex; flex-direction:column; gap:8px">
+          <h6>USB Port Reservations</h6>
+
+          @if (isLoadingUsb)
+          {
+            <RadzenProgressBar Mode="ProgressBarMode.Indeterminate" ProgressBarStyle="ProgressBarStyle.Primary" />
+          }
+          else if (usbPorts == null || !usbPorts.Any())
+          {
+            <RadzenAlert AlertStyle="AlertStyle.Info" AllowClose="false">No USB port reservations found.</RadzenAlert>
+          }
+          else
+          {
+            <RadzenDataGrid TItem="UsbPortDto" Data="@usbPorts" Density="Density.Compact">
+              <Columns>
+                <RadzenDataGridColumn Title="Port ID" TItem="UsbPortDto" Property="Id" />
+                <RadzenDataGridColumn Title="Port Name" TItem="UsbPortDto" Property="Name" />
+                <RadzenDataGridColumn Title="Reserved" TItem="UsbPortDto">
+                  <Template Context="item">
+                    @if (item.IsReserved)
+                    {
+                      <RadzenBadge BadgeStyle="BadgeStyle.Warning" IsPill="true" Text="Reserved" />
+                    }
+                    else
+                    {
+                      <RadzenBadge BadgeStyle="BadgeStyle.Success" IsPill="true" Text="Available" />
+                    }
+                  </Template>
+                </RadzenDataGridColumn>
+                <RadzenDataGridColumn Title="Reserved By" TItem="UsbPortDto">
+                  <Template Context="item">
+                    @(item.ReservedBy ?? "-")
+                  </Template>
+                </RadzenDataGridColumn>
+              </Columns>
+            </RadzenDataGrid>
+          }
+        </div>
+      </RadzenTabsItem>
+
+    </Tabs>
+  </RadzenTabs>
 </div>
 
 @code {
@@ -420,7 +417,7 @@
     catch (Exception ex)
     {
       Logger.LogError(ex, "Error loading devices");
-      Snackbar.Add("Error loading devices", Severity.Error);
+      NotificationService.Notify(NotificationSeverity.Error, "Error", "Error loading devices");
       isLoadingOutput = false;
       isLoadingInput = false;
       isLoadingUsb = false;
@@ -435,25 +432,25 @@
     try
     {
       Logger.LogInformation("Refreshing devices...");
-      
+
       var success = await DevicesApi.RefreshDevicesAsync();
-      
+
       if (success)
       {
-        Snackbar.Add("Devices refreshed successfully", Severity.Success);
-        
+        NotificationService.Notify(NotificationSeverity.Success, "Success", "Devices refreshed successfully");
+
         // Reload all devices
         await LoadAllDevicesAsync();
       }
       else
       {
-        Snackbar.Add("Failed to refresh devices", Severity.Warning);
+        NotificationService.Notify(NotificationSeverity.Warning, "Warning", "Failed to refresh devices");
       }
     }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Error refreshing devices");
-      Snackbar.Add("Error refreshing devices", Severity.Error);
+      NotificationService.Notify(NotificationSeverity.Error, "Error", "Error refreshing devices");
     }
   }
 
@@ -465,7 +462,7 @@
       var success = await DevicesApi.SetInputDeviceAsync(deviceId);
       if (success)
       {
-        Snackbar.Add("Default input device updated", Severity.Success);
+        NotificationService.Notify(NotificationSeverity.Success, "Success", "Default input device updated");
         isLoadingInput = true;
         StateHasChanged();
         inputDevices = await DevicesApi.GetInputDevicesAsync();
@@ -474,13 +471,13 @@
       }
       else
       {
-        Snackbar.Add("Failed to set default input device", Severity.Warning);
+        NotificationService.Notify(NotificationSeverity.Warning, "Warning", "Failed to set default input device");
       }
     }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Error setting default input device");
-      Snackbar.Add("Error setting default input device", Severity.Error);
+      NotificationService.Notify(NotificationSeverity.Error, "Error", "Error setting default input device");
       isLoadingInput = false;
       StateHasChanged();
     }
@@ -496,7 +493,7 @@
 
       if (success)
       {
-        Snackbar.Add("Default output device updated", Severity.Success);
+        NotificationService.Notify(NotificationSeverity.Success, "Success", "Default output device updated");
 
         // Reload output devices to reflect the change
         isLoadingOutput = true;
@@ -507,13 +504,13 @@
       }
       else
       {
-        Snackbar.Add("Failed to set default output device", Severity.Warning);
+        NotificationService.Notify(NotificationSeverity.Warning, "Warning", "Failed to set default output device");
       }
     }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Error setting default output device");
-      Snackbar.Add("Error setting default output device", Severity.Error);
+      NotificationService.Notify(NotificationSeverity.Error, "Error", "Error setting default output device");
       isLoadingOutput = false;
       StateHasChanged();
     }
@@ -562,17 +559,17 @@
       if (devices != null)
       {
         castDevices = devices;
-        Snackbar.Add($"Found {devices.Count} Cast device(s)", Severity.Success);
+        NotificationService.Notify(NotificationSeverity.Success, "Success", $"Found {devices.Count} Cast device(s)");
       }
       else
       {
-        Snackbar.Add("Cast device scan failed", Severity.Warning);
+        NotificationService.Notify(NotificationSeverity.Warning, "Warning", "Cast device scan failed");
       }
     }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Error scanning for Cast devices");
-      Snackbar.Add("Error scanning for Cast devices", Severity.Error);
+      NotificationService.Notify(NotificationSeverity.Error, "Error", "Error scanning for Cast devices");
     }
     finally
     {
@@ -593,7 +590,7 @@
 
       if (success)
       {
-        Snackbar.Add($"Connected to {device.Name}", Severity.Success);
+        NotificationService.Notify(NotificationSeverity.Success, "Success", $"Connected to {device.Name}");
         defaultCastDeviceId = device.Id;
 
         // Refresh output devices to reflect updated Cast name
@@ -601,13 +598,13 @@
       }
       else
       {
-        Snackbar.Add($"Failed to connect to {device.Name}", Severity.Warning);
+        NotificationService.Notify(NotificationSeverity.Warning, "Warning", $"Failed to connect to {device.Name}");
       }
     }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Error connecting to Cast device: {Name}", device.Name);
-      Snackbar.Add($"Error connecting to {device.Name}", Severity.Error);
+      NotificationService.Notify(NotificationSeverity.Error, "Error", $"Error connecting to {device.Name}");
     }
     finally
     {
@@ -624,7 +621,7 @@
       if (success)
       {
         defaultCastDeviceId = device.Id;
-        Snackbar.Add($"Default Cast device set to {device.Name}", Severity.Success);
+        NotificationService.Notify(NotificationSeverity.Success, "Success", $"Default Cast device set to {device.Name}");
 
         // Refresh output devices to reflect updated Cast name
         outputDevices = await DevicesApi.GetOutputDevicesAsync();
@@ -632,13 +629,13 @@
       }
       else
       {
-        Snackbar.Add("Failed to set default Cast device", Severity.Warning);
+        NotificationService.Notify(NotificationSeverity.Warning, "Warning", "Failed to set default Cast device");
       }
     }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Error setting default Cast device");
-      Snackbar.Add("Error setting default Cast device", Severity.Error);
+      NotificationService.Notify(NotificationSeverity.Error, "Error", "Error setting default Cast device");
     }
   }
 
@@ -650,7 +647,7 @@
       if (success)
       {
         defaultCastDeviceId = "";
-        Snackbar.Add("Default Cast device cleared", Severity.Success);
+        NotificationService.Notify(NotificationSeverity.Success, "Success", "Default Cast device cleared");
 
         // Refresh output devices to reflect reverted Cast name
         outputDevices = await DevicesApi.GetOutputDevicesAsync();
@@ -658,13 +655,13 @@
       }
       else
       {
-        Snackbar.Add("Failed to clear default Cast device", Severity.Warning);
+        NotificationService.Notify(NotificationSeverity.Warning, "Warning", "Failed to clear default Cast device");
       }
     }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Error clearing default Cast device");
-      Snackbar.Add("Error clearing default Cast device", Severity.Error);
+      NotificationService.Notify(NotificationSeverity.Error, "Error", "Error clearing default Cast device");
     }
   }
 
@@ -694,18 +691,18 @@
       var success = await DevicesApi.SetDeviceFriendlyNameAsync(device.RawName, newValue);
       if (success)
       {
-        Snackbar.Add($"Friendly name set for {device.RawName}", Severity.Success);
+        NotificationService.Notify(NotificationSeverity.Success, "Success", $"Friendly name set for {device.RawName}");
         await ReloadDisplayAndOutputDevicesAsync();
       }
       else
       {
-        Snackbar.Add("Failed to set friendly name", Severity.Warning);
+        NotificationService.Notify(NotificationSeverity.Warning, "Warning", "Failed to set friendly name");
       }
     }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Error setting friendly name");
-      Snackbar.Add("Error setting friendly name", Severity.Error);
+      NotificationService.Notify(NotificationSeverity.Error, "Error", "Error setting friendly name");
     }
   }
 
@@ -718,18 +715,18 @@
       if (success)
       {
         var action = newVisible ? "shown" : "hidden";
-        Snackbar.Add($"Device {action}: {device.RawName}", Severity.Success);
+        NotificationService.Notify(NotificationSeverity.Success, "Success", $"Device {action}: {device.RawName}");
         await ReloadDisplayAndOutputDevicesAsync();
       }
       else
       {
-        Snackbar.Add("Failed to update device visibility", Severity.Warning);
+        NotificationService.Notify(NotificationSeverity.Warning, "Warning", "Failed to update device visibility");
       }
     }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Error toggling device visibility");
-      Snackbar.Add("Error toggling device visibility", Severity.Error);
+      NotificationService.Notify(NotificationSeverity.Error, "Error", "Error toggling device visibility");
     }
   }
 
@@ -740,18 +737,18 @@
       var success = await DevicesApi.ClearDeviceFriendlyNameAsync(device.RawName);
       if (success)
       {
-        Snackbar.Add($"Friendly name cleared for {device.RawName}", Severity.Success);
+        NotificationService.Notify(NotificationSeverity.Success, "Success", $"Friendly name cleared for {device.RawName}");
         await ReloadDisplayAndOutputDevicesAsync();
       }
       else
       {
-        Snackbar.Add("Failed to clear friendly name", Severity.Warning);
+        NotificationService.Notify(NotificationSeverity.Warning, "Warning", "Failed to clear friendly name");
       }
     }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Error clearing friendly name");
-      Snackbar.Add("Error clearing friendly name", Severity.Error);
+      NotificationService.Notify(NotificationSeverity.Error, "Error", "Error clearing friendly name");
     }
   }
 

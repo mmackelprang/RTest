@@ -3,9 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
-using MudBlazor;
-using MudBlazor.Services;
+using Radzen;
 using Radio.Web.Components.Pages;
 using Radio.Web.Services;
 using Radio.Web.Services.ApiClients;
@@ -25,7 +23,7 @@ public class HomePageTests : TestContext
   {
     _loggerFactory = new NullLoggerFactory();
 
-    // Allow all JS interop calls to succeed (needed for MudTabs, canvas, etc.)
+    // Allow all JS interop calls to succeed (needed for RadzenTabs, canvas, etc.)
     JSInterop.Mode = JSRuntimeMode.Loose;
 
     var configuration = new ConfigurationBuilder()
@@ -39,12 +37,8 @@ public class HomePageTests : TestContext
     Services.AddSingleton(_loggerFactory);
     Services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
 
-    // MudBlazor services (full registration needed for MudTabs in QueueHistoryPanel)
-    Services.AddMudServices();
-    var mockSnackbar = new Mock<ISnackbar>();
-    Services.AddSingleton<ISnackbar>(mockSnackbar.Object);
-    var mockDialogService = new Mock<IDialogService>();
-    Services.AddSingleton<IDialogService>(mockDialogService.Object);
+    // Radzen services (full registration needed for RadzenTabs in QueueHistoryPanel)
+    Services.AddRadzenComponents();
 
     // HTTP clients for API services
     Services.AddHttpClient<AudioApiService>();
@@ -152,7 +146,7 @@ public class HomePageTests : TestContext
   {
     var cut = RenderComponent<Home>();
 
-    Assert.Contains("mud-icon", cut.Markup);
+    Assert.Contains("rzi", cut.Markup);
   }
 
   [Fact]
@@ -202,7 +196,7 @@ public class HomePageTests : TestContext
   {
     var cut = RenderComponent<Home>();
 
-    Assert.Contains("mud-icon", cut.Markup);
+    Assert.Contains("rzi", cut.Markup);
     Assert.Contains("No Track Playing", cut.Markup);
   }
 }

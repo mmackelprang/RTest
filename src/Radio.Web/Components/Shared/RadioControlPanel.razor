@@ -3,14 +3,14 @@
 @inject RadioApiService RadioApi
 @inject AudioStateHubService HubService
 @inject ILogger<RadioControlPanel> Logger
-@inject ISnackbar Snackbar
+@inject NotificationService NotificationService
 @implements IAsyncDisposable
 
 <div class="rcp-root">
   @if (_radioState == null)
   {
     <div style="flex: 1; display: flex; justify-content: center; align-items: center;">
-      <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+      <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" ProgressBarStyle="ProgressBarStyle.Primary" />
     </div>
   }
   else
@@ -114,52 +114,49 @@
 
       <!-- Tuning + Scan Controls -->
       <div class="rcp-controls">
-        <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowLeft"
-                       Color="Color.Default" Size="Size.Medium"
-                       Class="rcp-tune-btn"
-                       OnClick="FrequencyDownAsync" title="Frequency Down" />
+        <RadzenButton Icon="keyboard_arrow_left"
+                      ButtonStyle="ButtonStyle.Light" Size="ButtonSize.Medium"
+                      class="rcp-tune-btn" Variant="Variant.Text"
+                      Click="FrequencyDownAsync" title="Frequency Down" />
         @if (_radioState.IsScanning)
         {
-          <MudButton Variant="Variant.Filled" Color="Color.Error"
-                     Class="rcp-scan-btn"
-                     OnClick="StopScanAsync" StartIcon="@Icons.Material.Filled.Stop">
-            STOP
-          </MudButton>
+          <RadzenButton Variant="Variant.Filled" ButtonStyle="ButtonStyle.Danger"
+                        class="rcp-scan-btn"
+                        Click="StopScanAsync" Icon="stop" Text="STOP" />
         }
         else
         {
-          <MudButton Variant="Variant.Outlined" Color="Color.Default"
-                     Class="rcp-scan-btn"
-                     OnClick="@(() => StartScanAsync("down"))" StartIcon="@Icons.Material.Filled.Search">
-            SCAN ◀
-          </MudButton>
-          <MudButton Variant="Variant.Outlined" Color="Color.Default"
-                     Class="rcp-scan-btn"
-                     OnClick="@(() => StartScanAsync("up"))" EndIcon="@Icons.Material.Filled.Search">
-            ▶ SCAN
-          </MudButton>
+          <RadzenButton Variant="Variant.Outlined" ButtonStyle="ButtonStyle.Light"
+                        class="rcp-scan-btn"
+                        Click="@(() => StartScanAsync("down"))" Icon="search" Text="SCAN ◀" />
+          <RadzenButton Variant="Variant.Outlined" ButtonStyle="ButtonStyle.Light"
+                        class="rcp-scan-btn"
+                        Click="@(() => StartScanAsync("up"))" Text="▶ SCAN" Icon="search" />
         }
-        <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowRight"
-                       Color="Color.Default" Size="Size.Medium"
-                       Class="rcp-tune-btn"
-                       OnClick="FrequencyUpAsync" title="Frequency Up" />
+        <RadzenButton Icon="keyboard_arrow_right"
+                      ButtonStyle="ButtonStyle.Light" Size="ButtonSize.Medium"
+                      class="rcp-tune-btn" Variant="Variant.Text"
+                      Click="FrequencyUpAsync" title="Frequency Up" />
       </div>
 
       <!-- SDR Controls -->
       @if (_radioState.Gain.HasValue)
       {
         <div class="rcp-sdr-controls">
-          <MudSwitch T="bool" Value="@_radioState.AutoGain" ValueChanged="@HandleAutoGainChangedAsync"
-                     Label="AGC" Color="Color.Warning" />
+          <div style="display:flex;align-items:center;gap:8px">
+            <RadzenSwitch Value="@_radioState.AutoGain" Change="@(async (bool val) => await HandleAutoGainChangedAsync(val))" />
+            <span class="rcp-agc-label">AGC</span>
+          </div>
           <div class="rcp-gain-slot">
             @if (!_radioState.AutoGain && _radioState.Gain.HasValue)
             {
-              <MudSlider T="int" Value="@_radioState.Gain.Value" ValueChanged="@HandleGainChangedAsync"
-                         Min="0" Max="50" Step="1" Color="Color.Warning" Style="flex: 1;">
+              <div style="flex: 1; display: flex; flex-direction: column;">
                 <span style="font-family: var(--font-mono); font-size: 12px; color: var(--signal-amber);">
                   GAIN @_radioState.Gain dB
                 </span>
-              </MudSlider>
+                <RadzenSlider TValue="int" Value="@_radioState.Gain.Value" Change="@(async (int val) => await HandleGainChangedAsync(val))"
+                              Min="0" Max="50" Step="1" Style="width: 100%;" />
+              </div>
             }
           </div>
         </div>
@@ -170,15 +167,16 @@
     <div class="rcp-presets">
       <div class="rcp-presets-header">
         <span>MEMORY</span>
-        <MudIconButton Icon="@Icons.Material.Filled.Save" Color="Color.Warning" Size="Size.Small"
-                       OnClick="OpenSavePresetDialog" title="Save Current" />
+        <RadzenButton Icon="save" ButtonStyle="ButtonStyle.Warning" Size="ButtonSize.Small"
+                      Variant="Variant.Text"
+                      Click="OpenSavePresetDialog" title="Save Current" />
       </div>
 
       <div class="rcp-presets-list">
         @if (_presets == null || !_presets.Any())
         {
           <div class="rcp-presets-empty">
-            <MudIcon Icon="@Icons.Material.Filled.Radio" Style="font-size: 40px; opacity: 0.3;" />
+            <span class="rzi rzi-radio" style="font-size: 40px; opacity: 0.3;"></span>
             <span>NO PRESETS</span>
           </div>
         }
@@ -193,8 +191,9 @@
                 <span class="rcp-preset-band">@preset.Band</span>
               </div>
               <div class="rcp-preset-delete" @onclick:stopPropagation="true">
-                <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Error" Size="Size.Small"
-                               Style="padding: 2px; width: 24px; height: 24px;" OnClick="@(() => DeletePresetAsync(preset.Id))" />
+                <RadzenButton Icon="close" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small"
+                              Variant="Variant.Text"
+                              Style="padding: 2px; width: 24px; height: 24px;" Click="@(() => DeletePresetAsync(preset.Id))" />
               </div>
             </div>
           }
@@ -206,38 +205,36 @@
 
 @if (_isFrequencyDialogOpen)
 {
-  <MudOverlay Visible="true" DarkBackground="true" OnClick="CloseFrequencyDialog" ZIndex="9999">
-    <MudPaper Class="pa-4" Style="min-width: 300px;" @onclick:stopPropagation="true">
-      <MudText Typo="Typo.h6" Class="mb-3">Set Frequency</MudText>
-      <MudNumericField @bind-Value="_newFrequency"
-                       Label="@(_radioState?.Band == "AM" ? "Frequency (kHz)" : "Frequency (MHz)")"
-                       Variant="Variant.Outlined"
-                       InputMode="@(InputMode.@decimal)"
-                       Min="@GetMinFrequency()" Max="@GetMaxFrequency()" Step="@GetDialogStep()"
-                       Style="width: 100%;" />
-      <div class="d-flex justify-end gap-2 mt-3">
-        <MudButton OnClick="CloseFrequencyDialog">Cancel</MudButton>
-        <MudButton Color="Color.Primary" Variant="Variant.Filled"
-                   OnClick="SetFrequencyAsync">Set</MudButton>
+  <div class="overlay" style="@(_isFrequencyDialogOpen ? "display:flex" : "display:none"); position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center;" @onclick="CloseFrequencyDialog">
+    <div style="min-width: 300px; background: var(--rz-base-background-color, #1e1e2e); border-radius: 8px; padding: 24px; box-shadow: 0 8px 32px rgba(0,0,0,0.6);" @onclick:stopPropagation="true">
+      <h6 style="margin-bottom: 12px;">Set Frequency</h6>
+      <RadzenNumeric TValue="double" @bind-Value="_newFrequency"
+                     Placeholder="@(_radioState?.Band == "AM" ? "Frequency (kHz)" : "Frequency (MHz)")"
+                     Min="@((decimal)GetMinFrequency())" Max="@((decimal)GetMaxFrequency())" Step="@GetDialogStep().ToString()"
+                     Style="width: 100%;" inputmode="decimal" />
+      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px;">
+        <RadzenButton Variant="Variant.Text" Click="CloseFrequencyDialog" Text="Cancel" />
+        <RadzenButton ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled"
+                      Click="SetFrequencyAsync" Text="Set" />
       </div>
-    </MudPaper>
-  </MudOverlay>
+    </div>
+  </div>
 }
 
 @if (_isSavePresetDialogOpen)
 {
-  <MudOverlay Visible="true" DarkBackground="true" OnClick="CloseSavePresetDialog" ZIndex="9999">
-    <MudPaper Class="pa-4" Style="min-width: 300px;" @onclick:stopPropagation="true">
-      <MudText Typo="Typo.h6" Class="mb-3">Save Preset</MudText>
-      <MudTextField @bind-Value="_presetName"
-                    Label="Preset Name" Variant="Variant.Outlined" InputMode="InputMode.text" Style="width: 100%;" />
-      <div class="d-flex justify-end gap-2 mt-3">
-        <MudButton OnClick="CloseSavePresetDialog">Cancel</MudButton>
-        <MudButton Color="Color.Warning" Variant="Variant.Filled"
-                   OnClick="SavePresetAsync">Save</MudButton>
+  <div class="overlay" style="@(_isSavePresetDialogOpen ? "display:flex" : "display:none"); position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center;" @onclick="CloseSavePresetDialog">
+    <div style="min-width: 300px; background: var(--rz-base-background-color, #1e1e2e); border-radius: 8px; padding: 24px; box-shadow: 0 8px 32px rgba(0,0,0,0.6);" @onclick:stopPropagation="true">
+      <h6 style="margin-bottom: 12px;">Save Preset</h6>
+      <RadzenTextBox @bind-Value="_presetName"
+                     Placeholder="Preset Name" Style="width: 100%;" />
+      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px;">
+        <RadzenButton Variant="Variant.Text" Click="CloseSavePresetDialog" Text="Cancel" />
+        <RadzenButton ButtonStyle="ButtonStyle.Warning" Variant="Variant.Filled"
+                      Click="SavePresetAsync" Text="Save" />
       </div>
-    </MudPaper>
-  </MudOverlay>
+    </div>
+  </div>
 }
 
 <style>
@@ -736,49 +733,13 @@
     align-items: center;
   }
 
-  /* Force MudSwitch label inline beside toggle, vertically centered */
-  .rcp-sdr-controls :deep(.mud-input-control) {
-    align-items: center;
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
-  }
-
-  .rcp-sdr-controls :deep(.mud-input-control-input-container) {
-    margin-top: 0 !important;
-  }
-
-  .rcp-sdr-controls :deep(.mud-switch) {
-    align-items: center;
-    margin: 0;
-    flex-shrink: 0;
-  }
-
-  /* Keep label on same line as switch track */
-  .rcp-sdr-controls :deep(.mud-input-label) {
-    position: relative !important;
-    transform: none !important;
-    margin: 0 !important;
-    padding: 0 !important;
+  /* AGC label styling */
+  .rcp-agc-label {
     font-family: var(--font-mono);
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.12em;
     color: var(--signal-amber);
-  }
-
-  /* Compact gain slider — label and track on one line */
-  .rcp-gain-slot :deep(.mud-slider) {
-    width: 100%;
-  }
-
-  .rcp-gain-slot :deep(.mud-typography) {
-    font-size: 11px;
-    margin: 0;
-    line-height: 1;
-  }
-
-  .rcp-gain-slot :deep(.mud-slider-container) {
-    margin-top: 2px;
   }
 
   /* ═══ Presets Memory Bank ═══ */
@@ -1117,19 +1078,19 @@
       {
         await LoadPresetsAsync();
         _isSavePresetDialogOpen = false;
-        Snackbar.Add($"Preset saved: {_presetName}", Severity.Success);
+        NotificationService.Notify(NotificationSeverity.Success, "Preset Saved", $"Preset saved: {_presetName}");
       }
       else
       {
         Logger.LogWarning("SavePresetAsync returned false for {Name} at {Freq}Hz {Band}",
           _presetName, _radioState.Frequency, _radioState.Band);
-        Snackbar.Add("Failed to save preset — check API logs", Severity.Error);
+        NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to save preset — check API logs");
       }
     }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Error saving preset {Name}", _presetName);
-      Snackbar.Add($"Error saving preset: {ex.Message}", Severity.Error);
+      NotificationService.Notify(NotificationSeverity.Error, "Error", $"Error saving preset: {ex.Message}");
     }
   }
 
@@ -1144,7 +1105,7 @@
       }
       else
       {
-        Snackbar.Add("Failed to load preset", Severity.Warning);
+        NotificationService.Notify(NotificationSeverity.Warning, "Warning", "Failed to load preset");
       }
     }
     catch (Exception ex)
@@ -1160,7 +1121,7 @@
       if (await RadioApi.DeletePresetAsync(id))
       {
         await LoadPresetsAsync();
-        Snackbar.Add("Preset deleted", Severity.Info);
+        NotificationService.Notify(NotificationSeverity.Info, "Deleted", "Preset deleted");
       }
     }
     catch (Exception ex)

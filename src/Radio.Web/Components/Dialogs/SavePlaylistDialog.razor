@@ -1,57 +1,47 @@
 @inject PlaylistApiService PlaylistApi
-@inject ISnackbar Snackbar
+@inject DialogService DialogService
+@inject NotificationService NotificationService
 @inject ILogger<SavePlaylistDialog> Logger
 
-<MudDialog>
-  <TitleContent>
-    <MudText Typo="Typo.h6">
-      <MudIcon Icon="@Icons.Material.Filled.PlaylistAdd" Class="mr-2" Style="vertical-align: middle;" />
-      Save Playlist
-    </MudText>
-  </TitleContent>
-  <DialogContent>
-    <MudTextField @bind-Value="_name"
-                  Label="Playlist Name"
-                  Placeholder="My Playlist"
+<div style="min-width: 400px;">
+  <div style="margin-bottom: 16px;">
+    <label style="display: block; margin-bottom: 4px;">Playlist Name</label>
+    <RadzenTextBox @bind-Value="_name"
+                   Placeholder="My Playlist"
+                   Style="width: 100%;"
+                   AutoFocus="true" />
+    @if (string.IsNullOrWhiteSpace(_name))
+    {
+      <span style="color: var(--rz-danger); font-size: 0.75rem;">Name is required</span>
+    }
+  </div>
+  <div style="margin-bottom: 16px;">
+    <label style="display: block; margin-bottom: 4px;">Description (optional)</label>
+    <RadzenTextArea @bind-Value="_description"
+                    Placeholder="Add a description..."
+                    Rows="2"
+                    Style="width: 100%;" />
+  </div>
+  <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+    <RadzenButton Text="Cancel"
                   Variant="Variant.Outlined"
-                  Required="true"
-                  RequiredError="Name is required"
-                  Immediate="true"
-                  AutoFocus="true"
-                  InputMode="InputMode.text"
-                  Adornment="Adornment.Start"
-                  AdornmentIcon="@Icons.Material.Filled.Edit"
-                  Style="margin-bottom: 16px;" />
-    <MudTextField @bind-Value="_description"
-                  Label="Description (optional)"
-                  Placeholder="Add a description..."
-                  Variant="Variant.Outlined"
-                  InputMode="InputMode.text"
-                  Lines="2" />
-  </DialogContent>
-  <DialogActions>
-    <MudButton OnClick="Cancel">Cancel</MudButton>
-    <MudButton Color="Color.Primary"
-               Variant="Variant.Filled"
-               OnClick="SaveAsync"
-               Disabled="@(string.IsNullOrWhiteSpace(_name) || _saving)">
-      @if (_saving)
-      {
-        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-      }
-      Save
-    </MudButton>
-  </DialogActions>
-</MudDialog>
+                  ButtonStyle="ButtonStyle.Light"
+                  Click="Cancel" />
+    <RadzenButton Text="Save"
+                  Variant="Variant.Filled"
+                  ButtonStyle="ButtonStyle.Primary"
+                  Click="SaveAsync"
+                  Disabled="@(string.IsNullOrWhiteSpace(_name) || _saving)"
+                  IsBusy="@_saving" />
+  </div>
+</div>
 
 @code {
-  [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
-
   private string _name = "";
   private string _description = "";
   private bool _saving = false;
 
-  private void Cancel() => MudDialog.Cancel();
+  private void Cancel() => DialogService.Close();
 
   private async Task SaveAsync()
   {
@@ -65,18 +55,18 @@
 
       if (result != null)
       {
-        Snackbar.Add($"Playlist '{result.Name}' saved ({result.ItemCount} tracks)", Severity.Success);
-        MudDialog.Close(DialogResult.Ok(result));
+        NotificationService.Notify(NotificationSeverity.Success, "Success", $"Playlist '{result.Name}' saved ({result.ItemCount} tracks)");
+        DialogService.Close(result);
       }
       else
       {
-        Snackbar.Add("Failed to save playlist", Severity.Error);
+        NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to save playlist");
       }
     }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Failed to save playlist");
-      Snackbar.Add("Error saving playlist", Severity.Error);
+      NotificationService.Notify(NotificationSeverity.Error, "Error", "Error saving playlist");
     }
     finally
     {

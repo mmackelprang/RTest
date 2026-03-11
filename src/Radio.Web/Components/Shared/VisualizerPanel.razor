@@ -10,7 +10,7 @@
   <div style="position: absolute; top: 8px; right: 8px; z-index: 2; display: flex; align-items: center; gap: 6px;">
     @if (!VisualizationHub.IsConnected)
     {
-      <MudChip T="string" Color="Color.Warning" Size="Size.Small" Style="font-size: 12px;">Disconnected</MudChip>
+      <RadzenBadge BadgeStyle="BadgeStyle.Warning" IsPill="true" Text="Disconnected" Style="font-size: 12px;" />
     }
     <div class="route-group" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(8px);">
       <div class="route-toggle @(_currentMode == VisualizationMode.VUMeter ? "route-active" : "")"
@@ -52,7 +52,7 @@
   @if (_isInitialized && !_hasReceivedData)
   {
     <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; animation: ambientPulse 3s ease-in-out infinite;">
-      <MudIcon Icon="@Icons.Material.Filled.GraphicEq" Style="font-size: 64px; color: var(--text-low); margin-bottom: 8px;" />
+      <RadzenIcon Icon="graphic_eq" Style="font-size: 64px; color: var(--text-low); margin-bottom: 8px;" />
       <div style="font-size: 16px; color: var(--text-low);">Waiting for audio data...</div>
     </div>
   }

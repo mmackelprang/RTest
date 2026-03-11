@@ -19,13 +19,14 @@
       <span style="font-size: 12px; font-weight: 500; color: var(--text-medium);">Cast Devices</span>
       @if (_isScanning)
       {
-        <MudProgressCircular Size="Size.Small" Color="Color.Primary" Indeterminate="true"
-                             Style="width: 14px; height: 14px;" />
+        <RadzenProgressBarCircular Size="ProgressBarCircularSize.Small" Mode="ProgressBarMode.Indeterminate"
+                                   ProgressBarStyle="ProgressBarStyle.Primary"
+                                   Style="width: 14px; height: 14px;" />
       }
       else
       {
-        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small"
-                       Style="padding: 2px;" OnClick="RescanAsync" title="Rescan" />
+        <RadzenButton Variant="Variant.Text" Icon="refresh" Size="ButtonSize.Small"
+                      Style="padding: 2px;" Click="RescanAsync" title="Rescan" />
       }
     </div>
 
@@ -34,14 +35,13 @@
     {
       <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px;
                   background: rgba(76,175,80,0.12); border-bottom: 1px solid rgba(255,255,255,0.06);">
-        <MudIcon Icon="@Icons.Material.Filled.CastConnected" Size="Size.Small" Color="Color.Success" />
+        <RadzenIcon Icon="cast_connected" Style="color: var(--rz-success); font-size: 20px;" />
         <span style="flex: 1; font-size: 12px; color: #4caf50; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
           @_connectedDevice.Name
         </span>
-        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error"
-                   OnClick="DisconnectAsync" Style="font-size: 11px; text-transform: none; min-width: auto; padding: 0 6px;">
-          Disconnect
-        </MudButton>
+        <RadzenButton Size="ButtonSize.Small" Variant="Variant.Text" ButtonStyle="ButtonStyle.Danger"
+                      Click="DisconnectAsync" Style="font-size: 11px; text-transform: none; min-width: auto; padding: 0 6px;"
+                      Text="Disconnect" />
       </div>
     }
 
@@ -58,8 +58,8 @@
                       @(isConnected ? "opacity: 0.5; pointer-events: none;" : "")
                       transition: background 0.15s;"
                class="cast-device-row">
-            <MudIcon Icon="@GetDeviceIcon(device)" Size="Size.Small"
-                     Style="font-size: 18px; color: var(--text-medium);" />
+            <RadzenIcon Icon="@GetDeviceIcon(device)"
+                        Style="font-size: 18px; color: var(--text-medium);" />
             <div style="flex: 1; min-width: 0;">
               <div style="font-size: 12px; color: var(--text-high); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                 @device.Name
@@ -96,8 +96,9 @@
     {
       <div style="display: flex; align-items: center; gap: 6px; padding: 8px 12px;
                   border-top: 1px solid rgba(255,255,255,0.06); background: rgba(0,0,0,0.2);">
-        <MudProgressCircular Size="Size.Small" Color="Color.Primary" Indeterminate="true"
-                             Style="width: 14px; height: 14px;" />
+        <RadzenProgressBarCircular Size="ProgressBarCircularSize.Small" Mode="ProgressBarMode.Indeterminate"
+                                   ProgressBarStyle="ProgressBarStyle.Primary"
+                                   Style="width: 14px; height: 14px;" />
         <span style="font-size: 11px; color: var(--text-medium);">Connecting...</span>
       </div>
     }
@@ -266,11 +267,11 @@
   {
     var model = device.Model.ToLowerInvariant();
     if (model.Contains("audio") || model.Contains("speaker") || model.Contains("home"))
-      return Icons.Material.Filled.Speaker;
+      return "speaker";
     if (model.Contains("tv") || model.Contains("ultra"))
-      return Icons.Material.Filled.Tv;
+      return "tv";
     if (model.Contains("display") || model.Contains("hub"))
-      return Icons.Material.Filled.TabletAndroid;
-    return Icons.Material.Filled.Cast;
+      return "tablet_android";
+    return "cast";
   }
 }

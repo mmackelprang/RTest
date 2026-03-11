@@ -5,7 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using MudBlazor.Services;
+using Radzen;
 using Radio.Web.Components.Pages;
 using Radio.Web.Services.ApiClients;
 using Xunit;
@@ -30,22 +30,14 @@ public class PlayHistoryPageTests : TestContext
 
     Services.AddSingleton<IConfiguration>(configuration);
     Services.AddSingleton(_loggerFactory);
-    Services.AddMudServices();
-    
+    Services.AddRadzenComponents();
+
     // Add real HttpClient services
     Services.AddHttpClient<PlayHistoryApiService>();
     Services.AddHttpClient<ConfigurationApiService>();
     
-    // Setup JSInterop mocks for MudBlazor components
+    // Setup JSInterop for Radzen components
     JSInterop.Mode = JSRuntimeMode.Loose;
-    JSInterop.SetupVoid("mudElementRef.getBoundingClientRect", _ => true);
-    JSInterop.Setup<int>("mudElementRef.getBoundingClientRect", _ => true).SetResult(0);
-    JSInterop.SetupVoid("mudPopover.connect", _ => true);
-    JSInterop.SetupVoid("mudPopover.disconnect", _ => true);
-    JSInterop.SetupVoid("mudPopover.initialize", _ => true);
-    JSInterop.SetupVoid("mudSelect.setDisabled", _ => true);
-    JSInterop.SetupVoid("mudKeyInterceptor.connect", _ => true);
-    JSInterop.SetupVoid("mudKeyInterceptor.disconnect", _ => true);
   }
 
   protected override void Dispose(bool disposing)
@@ -59,9 +51,6 @@ public class PlayHistoryPageTests : TestContext
 
   private IRenderedComponent<PlayHistoryPage> RenderPlayHistoryPage()
   {
-    // Stub MudDatePicker and MudSelect to avoid popover provider issues
-    ComponentFactories.AddStub<MudBlazor.MudDatePicker>();
-    ComponentFactories.AddStub<MudBlazor.MudSelect<string>>();
     return RenderComponent<PlayHistoryPage>();
   }
 
@@ -92,7 +81,6 @@ public class PlayHistoryPageTests : TestContext
     var cut = RenderPlayHistoryPage();
 
     // Assert - Check that filter controls section exists
-    // Note: Labels from stubbed components (MudDatePicker, MudSelect) won't appear
     Assert.NotNull(cut);
     Assert.Contains("Search", cut.Markup); // TextField is not stubbed so its placeholder will appear
   }
