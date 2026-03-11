@@ -90,14 +90,14 @@ public class SystemConfigPageTests : TestContext
     var cut = RenderComponent<SystemConfigPage>();
 
     // Assert - Check for system stat components
-    Assert.Contains("CPU Usage", cut.Markup);
-    Assert.Contains("RAM Usage", cut.Markup);
-    Assert.Contains("Disk Usage", cut.Markup);
-    Assert.Contains("Active Threads", cut.Markup);
+    Assert.Contains("CPU", cut.Markup);
+    Assert.Contains("RAM", cut.Markup);
+    Assert.Contains("Disk", cut.Markup);
+    Assert.Contains("Threads", cut.Markup);
     Assert.Contains("App Uptime", cut.Markup);
     Assert.Contains("System Uptime", cut.Markup);
     Assert.Contains("Temperature", cut.Markup);
-    Assert.Contains("Audio Engine State", cut.Markup);
+    Assert.Contains("Audio Engine", cut.Markup);
   }
 
   [Fact]

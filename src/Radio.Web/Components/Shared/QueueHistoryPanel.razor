@@ -76,31 +76,24 @@
           else
           {
             <div id="queue-scroll-container" class="scrollable" style="flex: 1; overflow-y: auto; min-height: 0;">
-              @foreach (var item in _queueItems)
-              {
-                var itemState = item.State ?? "Upcoming";
-                var isError = itemState == "Error";
-                var isCurrent = itemState == "Current";
-                var isPlayed = itemState == "Played";
-                var isClickable = !isError;
-
-                <div class="list-item-touch @(isCurrent ? "list-item-active" : "")"
-                     style="cursor: @(isClickable ? "pointer" : "not-allowed");
-                            opacity: @(isError ? "0.4" : isPlayed ? "0.6" : "1");"
+              <Virtualize Items="@_queueItems" ItemSize="56" OverscanCount="5" Context="item">
+                <div class="list-item-touch @((item.State ?? "Upcoming") == "Current" ? "list-item-active" : "")"
+                     style="cursor: @((item.State ?? "Upcoming") == "Error" ? "not-allowed" : "pointer");
+                            opacity: @((item.State ?? "Upcoming") == "Error" ? "0.4" : (item.State ?? "Upcoming") == "Played" ? "0.6" : "1");"
                      @onclick="@(() => HandleItemClickAsync(item))">
                   <!-- State icon -->
                   <div style="width: 24px; text-align: center; flex-shrink: 0;">
-                    @if (isCurrent)
+                    @if ((item.State ?? "Upcoming") == "Current")
                     {
                       <div class="now-playing-bars">
                         <span></span><span></span><span></span>
                       </div>
                     }
-                    else if (isPlayed)
+                    else if ((item.State ?? "Upcoming") == "Played")
                     {
                       <RadzenIcon Icon="check" Style="font-size: 20px; color: var(--text-low);" />
                     }
-                    else if (isError)
+                    else if ((item.State ?? "Upcoming") == "Error")
                     {
                       <RadzenIcon Icon="error" Style="font-size: 20px; color: var(--rz-danger);" />
                     }
@@ -113,10 +106,10 @@
                   <!-- Track info -->
                   <div style="flex: 1; min-width: 0;">
                     <div style="font-size: 16px;
-                                font-weight: @(isCurrent ? "600" : "400");
-                                color: @(isCurrent ? "var(--accent-primary)" : isError ? "var(--signal-red)" : "var(--text-high)");
+                                font-weight: @((item.State ?? "Upcoming") == "Current" ? "600" : "400");
+                                color: @((item.State ?? "Upcoming") == "Current" ? "var(--accent-primary)" : (item.State ?? "Upcoming") == "Error" ? "var(--signal-red)" : "var(--text-high)");
                                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-                                @(isError ? "text-decoration: line-through;" : "")">
+                                @((item.State ?? "Upcoming") == "Error" ? "text-decoration: line-through;" : "")">
                       @item.Title
                     </div>
                     <div style="font-size: 14px; color: var(--text-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
@@ -125,7 +118,7 @@
                   </div>
 
                   <!-- Remove button (only for upcoming items) -->
-                  @if (itemState == "Upcoming")
+                  @if ((item.State ?? "Upcoming") == "Upcoming")
                   {
                     <div @onclick:stopPropagation="true">
                       <RadzenButton Variant="Variant.Text"
@@ -137,7 +130,7 @@
                     </div>
                   }
                 </div>
-              }
+              </Virtualize>
             </div>
           }
         </div>
