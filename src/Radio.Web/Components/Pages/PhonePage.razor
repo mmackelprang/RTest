@@ -1,0 +1,422 @@
+@page "/phone"
+@inject PhoneApiService PhoneApi
+@inject PhoneHubService PhoneHub
+@inject NotificationService NotificationService
+@implements IDisposable
+
+<PageTitle>Phone - Radio Console</PageTitle>
+
+<div class="phone-page">
+  <RadzenTabs @bind-SelectedIndex="_selectedTab" class="phone-tabs">
+
+    @* ═══ Tab 1: Dashboard ═══ *@
+    <Tabs>
+      <RadzenTabsItem Text="Dashboard" Icon="dashboard">
+        <div class="phone-dashboard">
+
+          @* System Status Card *@
+          <RadzenCard class="phone-card">
+            <h3 class="card-title">
+              <RadzenIcon Icon="info" /> System Status
+            </h3>
+            <div class="status-grid">
+              <div class="status-item">
+                <span class="status-label">Bluetooth</span>
+                <RadzenBadge
+                  BadgeStyle="@(_systemStatus?.BluetoothConnected == true ? BadgeStyle.Success : BadgeStyle.Danger)"
+                  Text="@(_systemStatus?.BluetoothConnected == true ? "Connected" : "Disconnected")" />
+                @if (_systemStatus?.BluetoothDeviceAddress != null)
+                {
+                  <span class="status-detail">@_systemStatus.BluetoothDeviceAddress</span>
+                }
+              </div>
+              <div class="status-item">
+                <span class="status-label">SIP Server</span>
+                <RadzenBadge
+                  BadgeStyle="@(_systemStatus?.SipListening == true ? BadgeStyle.Success : BadgeStyle.Danger)"
+                  Text="@(_systemStatus?.SipListening == true ? "Listening" : "Offline")" />
+                @if (_systemStatus?.SipListenAddress != null)
+                {
+                  <span class="status-detail">@_systemStatus.SipListenAddress:@_systemStatus.SipPort</span>
+                }
+              </div>
+              <div class="status-item">
+                <span class="status-label">HT801 ATA</span>
+                <RadzenBadge
+                  BadgeStyle="@(_systemStatus?.Ht801Reachable == true ? BadgeStyle.Success : BadgeStyle.Danger)"
+                  Text="@(_systemStatus?.Ht801Reachable == true ? "Online" : "Offline")" />
+                @if (_systemStatus?.Ht801IpAddress != null)
+                {
+                  <span class="status-detail">@_systemStatus.Ht801IpAddress</span>
+                }
+              </div>
+            </div>
+          </RadzenCard>
+
+          @* Phone Status Card *@
+          <RadzenCard class="phone-card phone-status-card">
+            <h3 class="card-title">
+              <RadzenIcon Icon="phone" /> Phone Status
+            </h3>
+            <div class="phone-state-display">
+              <RadzenBadge
+                BadgeStyle="@GetCallStateBadgeStyle()"
+                Text="@_callState.CallState"
+                class="call-state-badge" />
+              @if (_callState.CallState == "Ringing" && _callState.IncomingNumber != null)
+              {
+                <div class="call-info">
+                  <RadzenIcon Icon="call_received" />
+                  <span class="phone-number">@_callState.IncomingNumber</span>
+                  @if (_callState.CallerName != null)
+                  {
+                    <span class="caller-name">@_callState.CallerName</span>
+                  }
+                </div>
+              }
+              else if (_callState.CallState == "InCall")
+              {
+                <div class="call-info">
+                  <RadzenIcon Icon="phone_in_talk" />
+                  <span class="phone-number">@(_callState.IncomingNumber ?? _callState.DialedNumber ?? "Unknown")</span>
+                  @if (_callState.Duration != null)
+                  {
+                    <span class="call-duration">@_callState.Duration</span>
+                  }
+                </div>
+              }
+              else if (_callState.CallState == "Dialing" && _callState.DialedNumber != null)
+              {
+                <div class="call-info">
+                  <RadzenIcon Icon="call_made" />
+                  <span class="phone-number">@_callState.DialedNumber</span>
+                </div>
+              }
+            </div>
+          </RadzenCard>
+
+          @* Developer Controls *@
+          <RadzenAccordion class="phone-card">
+            <Items>
+              <RadzenAccordionItem Text="Developer Controls" Icon="code">
+                <div class="dev-controls">
+                  <div class="dev-section">
+                    <span class="dev-label">Handset Simulation</span>
+                    <div class="dev-buttons">
+                      <RadzenButton Text="Lift Handset" Icon="phone"
+                        Click="@(() => SimulateHookAsync(true))"
+                        Disabled="@(_callState.CallState == "InCall")"
+                        ButtonStyle="ButtonStyle.Secondary" Size="ButtonSize.Small" />
+                      <RadzenButton Text="Drop Handset" Icon="phone_disabled"
+                        Click="@(() => SimulateHookAsync(false))"
+                        Disabled="@(_callState.CallState == "Idle")"
+                        ButtonStyle="ButtonStyle.Secondary" Size="ButtonSize.Small" />
+                    </div>
+                  </div>
+                  <div class="dev-section">
+                    <span class="dev-label">Network Simulation</span>
+                    <div class="dev-buttons">
+                      <RadzenButton Text="Simulate Incoming Call" Icon="ring_volume"
+                        Click="@SimulateIncomingCallAsync"
+                        ButtonStyle="ButtonStyle.Warning" Size="ButtonSize.Small" />
+                    </div>
+                  </div>
+                  <div class="dev-section">
+                    <span class="dev-label">Dialer</span>
+                    <div class="dev-dialer">
+                      <RadzenTextBox @bind-Value="_dialDigits" Placeholder="Enter digits..."
+                        class="dial-input" />
+                      <RadzenButton Text="Dial" Icon="dialpad"
+                        Click="@SimulateDialAsync"
+                        Disabled="@(string.IsNullOrWhiteSpace(_dialDigits))"
+                        ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Small" />
+                    </div>
+                  </div>
+                </div>
+              </RadzenAccordionItem>
+            </Items>
+          </RadzenAccordion>
+        </div>
+      </RadzenTabsItem>
+
+      @* ═══ Tab 2: Contacts ═══ *@
+      <RadzenTabsItem Text="Contacts" Icon="contacts">
+        <div class="phone-contacts">
+          <div class="contacts-header">
+            <h3 class="card-title">Contacts</h3>
+            <RadzenButton Text="Add Contact" Icon="person_add"
+              Click="@OpenAddContactDialog"
+              ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Small" />
+          </div>
+          <RadzenDataGrid Data="@_contacts" TItem="ContactDto"
+            AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Simple"
+            class="contacts-grid">
+            <Columns>
+              <RadzenDataGridColumn TItem="ContactDto" Property="Name" Title="Name" Width="200px" />
+              <RadzenDataGridColumn TItem="ContactDto" Property="PhoneNumber" Title="Phone" Width="160px">
+                <Template Context="contact">
+                  <span class="phone-number">@contact.PhoneNumber</span>
+                </Template>
+              </RadzenDataGridColumn>
+              <RadzenDataGridColumn TItem="ContactDto" Property="Email" Title="Email" />
+              <RadzenDataGridColumn TItem="ContactDto" Title="Actions" Width="140px" Sortable="false" Filterable="false">
+                <Template Context="contact">
+                  <RadzenButton Icon="edit" ButtonStyle="ButtonStyle.Light" Size="ButtonSize.Small"
+                    Click="@(() => OpenEditContactDialog(contact))" class="action-btn" />
+                  <RadzenButton Icon="delete" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small"
+                    Click="@(() => DeleteContactAsync(contact))" class="action-btn" />
+                </Template>
+              </RadzenDataGridColumn>
+            </Columns>
+          </RadzenDataGrid>
+        </div>
+      </RadzenTabsItem>
+
+      @* ═══ Tab 3: Call History ═══ *@
+      <RadzenTabsItem Text="Call History" Icon="history">
+        <div class="phone-history">
+          <div class="history-header">
+            <h3 class="card-title">Call History</h3>
+            <RadzenButton Text="Clear History" Icon="delete_sweep"
+              Click="@ClearCallHistoryAsync"
+              ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small"
+              Disabled="@(_callHistory == null || _callHistory.Count == 0)" />
+          </div>
+          @if (_callHistory == null || _callHistory.Count == 0)
+          {
+            <div class="empty-state">No calls recorded</div>
+          }
+          else
+          {
+            <div class="history-list">
+              @foreach (var entry in _callHistory)
+              {
+                <div class="history-item">
+                  <RadzenIcon Icon="@GetCallDirectionIcon(entry)"
+                    Style="@($"color: {GetCallDirectionColor(entry)}")" />
+                  <div class="history-details">
+                    <span class="phone-number">@entry.PhoneNumber</span>
+                    <span class="history-time">@entry.StartTime.ToLocalTime().ToString("g")</span>
+                  </div>
+                  @if (entry.AnsweredOn != null)
+                  {
+                    <RadzenBadge Text="@entry.AnsweredOn"
+                      BadgeStyle="@(entry.AnsweredOn == "RotaryPhone" ? BadgeStyle.Info : BadgeStyle.Light)" />
+                  }
+                  @if (entry.Duration != null)
+                  {
+                    <span class="call-duration">@entry.Duration</span>
+                  }
+                </div>
+              }
+            </div>
+          }
+        </div>
+      </RadzenTabsItem>
+    </Tabs>
+  </RadzenTabs>
+</div>
+
+@code {
+  private int _selectedTab;
+  private PhoneSystemStatusDto? _systemStatus;
+  private PhoneCallStateDto _callState = new();
+  private List<ContactDto>? _contacts;
+  private List<CallHistoryEntryDto>? _callHistory;
+  private string _dialDigits = "";
+  private bool _isAvailable;
+  private System.Timers.Timer? _pollTimer;
+
+  protected override async Task OnInitializedAsync()
+  {
+    _isAvailable = await PhoneApi.IsAvailableAsync();
+    if (_isAvailable)
+    {
+      await RefreshAllAsync();
+    }
+
+    // Subscribe to SignalR events
+    PhoneHub.CallStateChanged += OnCallStateChanged;
+    PhoneHub.IncomingCall += OnIncomingCall;
+    PhoneHub.CallHistoryUpdated += OnCallHistoryUpdated;
+    PhoneHub.SystemStatusChanged += OnSystemStatusChanged;
+
+    // Poll for status every 5 seconds as fallback
+    _pollTimer = new System.Timers.Timer(5000);
+    _pollTimer.Elapsed += async (_, _) => await PollStatusAsync();
+    _pollTimer.Start();
+  }
+
+  private async Task RefreshAllAsync()
+  {
+    _systemStatus = await PhoneApi.GetSystemStatusAsync();
+    var callState = await PhoneApi.GetCallStateAsync();
+    if (callState != null) _callState = callState;
+    _contacts = await PhoneApi.GetContactsAsync();
+    _callHistory = await PhoneApi.GetCallHistoryAsync();
+    await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task PollStatusAsync()
+  {
+    try
+    {
+      var available = await PhoneApi.IsAvailableAsync();
+      if (available != _isAvailable)
+      {
+        _isAvailable = available;
+        if (available) await RefreshAllAsync();
+        else await InvokeAsync(StateHasChanged);
+      }
+      else if (available)
+      {
+        var callState = await PhoneApi.GetCallStateAsync();
+        if (callState != null) _callState = callState;
+        _systemStatus = await PhoneApi.GetSystemStatusAsync();
+        await InvokeAsync(StateHasChanged);
+      }
+    }
+    catch { /* Polling failure is non-fatal */ }
+  }
+
+  // SignalR event handlers
+
+  private void OnCallStateChanged(string phoneId, string state)
+  {
+    _callState.CallState = state;
+    InvokeAsync(StateHasChanged);
+  }
+
+  private void OnIncomingCall(string phoneId, string phoneNumber)
+  {
+    _callState.CallState = "Ringing";
+    _callState.IncomingNumber = phoneNumber;
+    InvokeAsync(StateHasChanged);
+  }
+
+  private async void OnCallHistoryUpdated()
+  {
+    _callHistory = await PhoneApi.GetCallHistoryAsync();
+    await InvokeAsync(StateHasChanged);
+  }
+
+  private void OnSystemStatusChanged(object status)
+  {
+    _ = Task.Run(async () =>
+    {
+      _systemStatus = await PhoneApi.GetSystemStatusAsync();
+      await InvokeAsync(StateHasChanged);
+    });
+  }
+
+  // Developer controls
+
+  private async Task SimulateHookAsync(bool offHook)
+  {
+    await PhoneApi.SimulateHookAsync(offHook);
+  }
+
+  private async Task SimulateIncomingCallAsync()
+  {
+    await PhoneApi.SimulateIncomingCallAsync();
+  }
+
+  private async Task SimulateDialAsync()
+  {
+    if (!string.IsNullOrWhiteSpace(_dialDigits))
+    {
+      await PhoneApi.SimulateDialAsync(_dialDigits);
+      _dialDigits = "";
+    }
+  }
+
+  // Contacts CRUD
+
+  private async Task OpenAddContactDialog()
+  {
+    var form = new ContactFormDto();
+    var result = await ShowContactDialog("Add Contact", form);
+    if (result)
+    {
+      await PhoneApi.CreateContactAsync(form);
+      _contacts = await PhoneApi.GetContactsAsync();
+    }
+  }
+
+  private async Task OpenEditContactDialog(ContactDto contact)
+  {
+    var form = new ContactFormDto
+    {
+      Name = contact.Name,
+      PhoneNumber = contact.PhoneNumber,
+      Email = contact.Email
+    };
+    var result = await ShowContactDialog("Edit Contact", form);
+    if (result)
+    {
+      await PhoneApi.UpdateContactAsync(contact.Id, form);
+      _contacts = await PhoneApi.GetContactsAsync();
+    }
+  }
+
+  private async Task<bool> ShowContactDialog(string title, ContactFormDto form)
+  {
+    // TODO: Replace with RadzenDialog when integrating full dialog service
+    return await Task.FromResult(false);
+  }
+
+  private async Task DeleteContactAsync(ContactDto contact)
+  {
+    var confirmed = await Task.FromResult(true); // TODO: confirmation dialog
+    if (confirmed)
+    {
+      await PhoneApi.DeleteContactAsync(contact.Id);
+      _contacts = await PhoneApi.GetContactsAsync();
+    }
+  }
+
+  // Call History
+
+  private async Task ClearCallHistoryAsync()
+  {
+    await PhoneApi.ClearCallHistoryAsync();
+    _callHistory = await PhoneApi.GetCallHistoryAsync();
+  }
+
+  // Helpers
+
+  private BadgeStyle GetCallStateBadgeStyle() => _callState.CallState switch
+  {
+    "Idle" => BadgeStyle.Success,
+    "Ringing" => BadgeStyle.Warning,
+    "InCall" => BadgeStyle.Danger,
+    "Dialing" => BadgeStyle.Info,
+    _ => BadgeStyle.Light
+  };
+
+  private static string GetCallDirectionIcon(CallHistoryEntryDto entry) => entry.Direction switch
+  {
+    "Incoming" when entry.AnsweredOn != null => "call_received",
+    "Incoming" => "call_missed",
+    "Outgoing" => "call_made",
+    _ => "phone"
+  };
+
+  private static string GetCallDirectionColor(CallHistoryEntryDto entry) => entry.Direction switch
+  {
+    "Incoming" when entry.AnsweredOn != null => "var(--rz-success)",
+    "Incoming" => "var(--rz-danger)",
+    "Outgoing" => "var(--rz-info)",
+    _ => "var(--rz-text-color)"
+  };
+
+  public void Dispose()
+  {
+    _pollTimer?.Stop();
+    _pollTimer?.Dispose();
+    PhoneHub.CallStateChanged -= OnCallStateChanged;
+    PhoneHub.IncomingCall -= OnIncomingCall;
+    PhoneHub.CallHistoryUpdated -= OnCallHistoryUpdated;
+    PhoneHub.SystemStatusChanged -= OnSystemStatusChanged;
+  }
+}
