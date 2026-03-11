@@ -28,6 +28,9 @@ internal sealed class BluetoothMgmtMonitor : BackgroundService
   private const ushort HCI_DEV_NONE = 0xFFFF;
   private const ushort HCI_CHANNEL_CONTROL = 3;
 
+  // Mgmt protocol opcodes
+  private const ushort MGMT_OP_READ_VERSION = 0x0001;
+
   public BluetoothMgmtMonitor(ILogger<BluetoothMgmtMonitor> logger)
   {
     _logger = logger;
@@ -35,15 +38,23 @@ internal sealed class BluetoothMgmtMonitor : BackgroundService
 
   /// <summary>
   /// Gets and removes the last disconnect reason for a device address.
-  /// Returns Unknown if no reason was recorded.
+  /// Waits briefly for the mgmt event to arrive since the D-Bus property
+  /// change may fire before our poll loop processes the kernel event.
+  /// Returns Unknown if no reason was recorded within the wait period.
   /// </summary>
-  public BluetoothDisconnectReason ConsumeDisconnectReason(string deviceAddress)
+  public BluetoothDisconnectReason ConsumeDisconnectReason(string deviceAddress, int maxWaitMs = 300)
   {
-    if (_lastReasons.TryRemove(deviceAddress, out var reason))
+    var deadline = Environment.TickCount64 + maxWaitMs;
+    while (Environment.TickCount64 < deadline)
     {
-      _logger.LogDebug("Consumed disconnect reason {Reason} for {Address}", reason, deviceAddress);
-      return reason;
+      if (_lastReasons.TryRemove(deviceAddress, out var reason))
+      {
+        _logger.LogDebug("Consumed disconnect reason {Reason} for {Address}", reason, deviceAddress);
+        return reason;
+      }
+      Thread.Sleep(25);
     }
+    _logger.LogDebug("No mgmt disconnect reason arrived for {Address} within {MaxWaitMs}ms", deviceAddress, maxWaitMs);
     return BluetoothDisconnectReason.Unknown;
   }
 
@@ -95,7 +106,7 @@ internal sealed class BluetoothMgmtMonitor : BackgroundService
         bytesRead = await Task.Run(() =>
         {
           var pollFd = new PollFd { fd = _socketFd, events = PollEvents.POLLIN };
-          int pollResult = poll(ref pollFd, (nuint)1, 1000);
+          int pollResult = poll(ref pollFd, (nuint)1, 100);
           if (pollResult <= 0 || (pollFd.revents & PollEvents.POLLIN) == 0)
           {
             return 0;
@@ -153,7 +164,45 @@ internal sealed class BluetoothMgmtMonitor : BackgroundService
       return -1;
     }
 
+    // Send MGMT_OP_READ_VERSION to activate event delivery.
+    // The kernel requires this handshake before it starts sending events
+    // like MGMT_EV_DEVICE_DISCONNECTED to the socket.
+    if (!SendReadVersion(fd))
+    {
+      _logger.LogWarning("Failed to send MGMT_OP_READ_VERSION handshake");
+      close(fd);
+      return -1;
+    }
+
+    // Read and discard the version response so the socket is ready for events
+    var responseBuf = new byte[512];
+    var pollFd = new PollFd { fd = fd, events = PollEvents.POLLIN };
+    if (poll(ref pollFd, (nuint)1, 2000) > 0)
+    {
+      var n = (int)read(fd, responseBuf, (nuint)responseBuf.Length);
+      _logger.LogInformation("Mgmt READ_VERSION response: {Bytes} bytes", n);
+    }
+    else
+    {
+      _logger.LogWarning("No response to MGMT_OP_READ_VERSION within 2s");
+    }
+
     return fd;
+  }
+
+  private bool SendReadVersion(int fd)
+  {
+    // mgmt_hdr: opcode (2 bytes LE) + index (2 bytes LE) + length (2 bytes LE)
+    // READ_VERSION: opcode=0x0001, index=0xFFFF (MGMT_INDEX_NONE), length=0
+    var cmd = new byte[] { 0x01, 0x00, 0xFF, 0xFF, 0x00, 0x00 };
+    var written = write(fd, cmd, (nuint)cmd.Length);
+    if (written != cmd.Length)
+    {
+      _logger.LogWarning("write(READ_VERSION) returned {Written}, errno={Errno}",
+        written, Marshal.GetLastPInvokeError());
+      return false;
+    }
+    return true;
   }
 
   private void CloseMgmtSocket()
@@ -204,6 +253,9 @@ internal sealed class BluetoothMgmtMonitor : BackgroundService
 
   [DllImport("libc", SetLastError = true)]
   private static extern nint read(int fd, byte[] buf, nuint count);
+
+  [DllImport("libc", SetLastError = true)]
+  private static extern nint write(int fd, byte[] buf, nuint count);
 
   [DllImport("libc", SetLastError = true)]
   private static extern int close(int fd);

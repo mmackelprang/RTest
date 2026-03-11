@@ -548,7 +548,8 @@ internal sealed class LinuxBluetoothService : IBluetoothService
               var wasUserInitiated = _userInitiatedDisconnect;
               _userInitiatedDisconnect = false;
 
-              // Read disconnect reason from mgmt monitor (arrives before D-Bus property change)
+              // Read disconnect reason from mgmt monitor — wait briefly for it since
+              // the D-Bus property change may arrive before our poll loop processes the kernel event
               var mgmtReason = _mgmtMonitor?.ConsumeDisconnectReason(updatedDevice.Address)
                 ?? BluetoothDisconnectReason.Unknown;
 
