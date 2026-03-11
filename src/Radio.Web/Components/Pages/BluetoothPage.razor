@@ -102,10 +102,27 @@
               </RadzenButton>
             </div>
           }
+          else if (_status.IsReconnecting)
+          {
+            <div style="display:flex; flex-direction:row; gap:12px; align-items:center">
+              <RadzenProgressBarCircular Size="ProgressBarCircularSize.Small" Mode="ProgressBarMode.Indeterminate" />
+              <span style="font-size:0.875rem">Reconnecting to last device...</span>
+              <div style="flex:1"></div>
+              <RadzenButton Variant="Variant.Outlined" ButtonStyle="ButtonStyle.Warning" Size="ButtonSize.Small"
+                            Click="CancelReconnectAsync" Icon="stop" Text="Stop" />
+            </div>
+          }
           else
           {
             <RadzenAlert AlertStyle="AlertStyle.Info" Size="AlertSize.Small" AllowClose="false">
-              No device connected. Pair a device below, or connect a previously paired device.
+              @if (!string.IsNullOrEmpty(_status.LastDisconnectReason))
+              {
+                @GetDisconnectMessage(_status.LastDisconnectReason)
+              }
+              else
+              {
+                <span>No device connected. Pair a device below, or connect a previously paired device.</span>
+              }
             </RadzenAlert>
           }
         </div>
@@ -547,6 +564,30 @@
       StateHasChanged();
     }
   }
+
+  private async Task CancelReconnectAsync()
+  {
+    try
+    {
+      await BluetoothApi.CancelReconnectAsync();
+      NotificationService.Notify(NotificationSeverity.Info, "Bluetooth", "Reconnection cancelled");
+      await RefreshStatusAsync();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error cancelling reconnection");
+      NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to cancel reconnection");
+    }
+  }
+
+  private static string GetDisconnectMessage(string reason) => reason switch
+  {
+    "Remote" => "Device disconnected by user",
+    "Timeout" => "Connection lost (device out of range)",
+    "AuthFailure" => "Authentication failed",
+    "LocalHost" => "Disconnected",
+    _ => "No device connected. Pair a device below, or connect a previously paired device."
+  };
 
   private static BadgeStyle GetStateBadgeStyle(string state)
   {
