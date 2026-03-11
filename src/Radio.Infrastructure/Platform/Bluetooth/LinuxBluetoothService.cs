@@ -61,19 +61,22 @@ internal sealed class LinuxBluetoothService : IBluetoothService
   private Linux.BluezAgent? _agent;
   private bool _userInitiatedDisconnect;
   private BluetoothReconnectionLoop? _reconnectionLoop;
+  private readonly BluetoothMgmtMonitor? _mgmtMonitor;
 
   public LinuxBluetoothService(
     ILogger logger,
     IOptions<BluetoothOptions> options,
     SoundFlowDeviceManager? deviceManager = null,
     IMetricsCollector? metricsCollector = null,
-    SoundFlowPlaybackService? playbackService = null)
+    SoundFlowPlaybackService? playbackService = null,
+    BluetoothMgmtMonitor? mgmtMonitor = null)
   {
     _logger = logger;
     _options = options.Value;
     _deviceManager = deviceManager;
     _metricsCollector = metricsCollector;
     _playbackService = playbackService;
+    _mgmtMonitor = mgmtMonitor;
   }
 
   public bool IsAvailable => _connection != null && _adapter != null;
@@ -104,6 +107,17 @@ internal sealed class LinuxBluetoothService : IBluetoothService
   public bool IsDiscovering { get; private set; }
 
   public bool IsAudioManagedByPlatform => false;
+
+  public bool IsReconnecting => _reconnectionLoop?.IsActive == true;
+
+  public void CancelReconnection()
+  {
+    _reconnectionLoop?.Cancel();
+    _logger.LogInformation("Reconnection loop cancelled by user");
+  }
+
+  private BluetoothDisconnectReason? _lastDisconnectReason;
+  public BluetoothDisconnectReason? LastDisconnectReason => _lastDisconnectReason;
 
   public BluetoothDeviceInfo? ConnectedDevice
   {
@@ -517,6 +531,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService
             if (connected)
             {
               _reconnectionLoop?.Cancel();
+              _lastDisconnectReason = null;
               _connectionStartTime = DateTime.UtcNow;
               _metricsCollector?.Increment("bluetooth.devices_connected_total");
               _metricsCollector?.Gauge("bluetooth.active_connections", 1);
@@ -533,6 +548,19 @@ internal sealed class LinuxBluetoothService : IBluetoothService
               var wasUserInitiated = _userInitiatedDisconnect;
               _userInitiatedDisconnect = false;
 
+              // Read disconnect reason from mgmt monitor — wait briefly for it since
+              // the D-Bus property change may arrive before our poll loop processes the kernel event
+              var mgmtReason = _mgmtMonitor?.ConsumeDisconnectReason(updatedDevice.Address)
+                ?? BluetoothDisconnectReason.Unknown;
+
+              // If user initiated via our UI, override reason to LocalHost
+              if (wasUserInitiated)
+              {
+                mgmtReason = BluetoothDisconnectReason.LocalHost;
+              }
+
+              _lastDisconnectReason = mgmtReason;
+
               RecordDisconnectionMetrics();
               StopCaptureSubprocess();
               // Clean up media transport on disconnect
@@ -542,8 +570,9 @@ internal sealed class LinuxBluetoothService : IBluetoothService
               _mediaTransportPath = null;
               DeviceVolume = null;
 
-              _logger.LogInformation("Bluetooth device disconnected: {DeviceName} ({Address}) (user-initiated: {UserInitiated})",
-                updatedDevice.Name, updatedDevice.Address, wasUserInitiated);
+              _logger.LogInformation(
+                "Bluetooth device disconnected: {DeviceName} ({Address}) reason={Reason} (user-initiated: {UserInitiated})",
+                updatedDevice.Name, updatedDevice.Address, mgmtReason, wasUserInitiated);
 
               // Re-show adapter so other devices can discover and pair
               _ = SetDiscoverableAsync(true);
@@ -551,11 +580,13 @@ internal sealed class LinuxBluetoothService : IBluetoothService
               DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs
               {
                 Device = updatedDevice,
-                UserInitiated = wasUserInitiated
+                UserInitiated = wasUserInitiated,
+                Reason = mgmtReason
               });
 
-              // Start auto-reconnection for unexpected disconnects
-              if (!wasUserInitiated && _options.AutoReconnect)
+              // Start auto-reconnection only for reasons that suggest signal loss
+              var shouldReconnect = _options.AutoReconnect && !mgmtReason.ShouldSuppressReconnect();
+              if (shouldReconnect)
               {
                 _reconnectionLoop?.Dispose();
                 _reconnectionLoop = new BluetoothReconnectionLoop(
@@ -564,6 +595,11 @@ internal sealed class LinuxBluetoothService : IBluetoothService
                   () => ConnectedDevice != null,
                   _metricsCollector);
                 _reconnectionLoop.Start(updatedDevice.Address);
+              }
+              else if (!wasUserInitiated)
+              {
+                _logger.LogInformation("Auto-reconnect suppressed: reason={Reason} for {Address}",
+                  mgmtReason, updatedDevice.Address);
               }
             }
           }

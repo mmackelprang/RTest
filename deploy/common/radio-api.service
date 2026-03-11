@@ -52,7 +52,8 @@ ProtectSystem=false
 ReadWritePaths=/opt/radio-console
 PrivateTmp=true
 ProtectHome=false
-NoNewPrivileges=true
+NoNewPrivileges=false
+AmbientCapabilities=CAP_NET_ADMIN
 
 [Install]
 WantedBy=multi-user.target

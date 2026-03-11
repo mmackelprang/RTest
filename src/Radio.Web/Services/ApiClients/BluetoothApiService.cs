@@ -166,4 +166,18 @@ public class BluetoothApiService
       return false;
     }
   }
+
+  public async Task<bool> CancelReconnectAsync(CancellationToken ct = default)
+  {
+    try
+    {
+      var response = await _httpClient.PostAsync("/api/bluetooth/cancel-reconnect", null, ct);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to cancel Bluetooth reconnection");
+      return false;
+    }
+  }
 }

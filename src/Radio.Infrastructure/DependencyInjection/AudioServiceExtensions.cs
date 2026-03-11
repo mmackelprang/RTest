@@ -115,6 +115,10 @@ public static class AudioServiceExtensions
     services.AddSingleton<RadioFactory>();
     services.AddSingleton<IRadioFactory>(sp => sp.GetRequiredService<RadioFactory>());
 
+    // Register BlueZ mgmt monitor (singleton + hosted service for disconnect reason detection)
+    services.AddSingleton<Platform.Bluetooth.BluetoothMgmtMonitor>();
+    services.AddHostedService(sp => sp.GetRequiredService<Platform.Bluetooth.BluetoothMgmtMonitor>());
+
     // Register Bluetooth service factory + service
     services.AddSingleton<IBluetoothService>(sp =>
     {

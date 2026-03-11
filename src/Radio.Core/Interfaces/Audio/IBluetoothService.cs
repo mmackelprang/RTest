@@ -139,6 +139,15 @@ public interface IBluetoothService : IAsyncDisposable
 
   /// <summary>Go to previous track via AVRCP.</summary>
   Task PreviousTrackAsync(CancellationToken cancellationToken = default);
+
+  /// <summary>Whether a reconnection loop is currently active.</summary>
+  bool IsReconnecting { get; }
+
+  /// <summary>Cancel any active reconnection loop.</summary>
+  void CancelReconnection();
+
+  /// <summary>Last disconnect reason for UI display. Null if no disconnect has occurred.</summary>
+  BluetoothDisconnectReason? LastDisconnectReason { get; }
 }
 
 /// <summary>Bluetooth adapter states.</summary>
@@ -181,6 +190,8 @@ public class BluetoothDeviceDisconnectedEventArgs : EventArgs
   public required BluetoothDeviceInfo Device { get; init; }
   /// <summary>True if disconnect was user-initiated (via DisconnectAsync).</summary>
   public bool UserInitiated { get; init; }
+  /// <summary>Disconnect reason from BlueZ management protocol.</summary>
+  public BluetoothDisconnectReason Reason { get; init; } = BluetoothDisconnectReason.Unknown;
 }
 
 /// <summary>Device discovered args.</summary>

@@ -27,6 +27,7 @@ public static class BluetoothServiceFactory
 
       var playbackService = serviceProvider.GetService<SoundFlowPlaybackService>();
       var albumArtCache = serviceProvider.GetService<AlbumArtCacheService>();
+      var mgmtMonitor = serviceProvider.GetService<BluetoothMgmtMonitor>();
 
 #if WINDOWS_TARGET
       // Windows TFM: only WindowsBluetoothService is compiled
@@ -37,7 +38,7 @@ public static class BluetoothServiceFactory
       // net8.0 TFM: select by runtime OS detection
       if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
       {
-          return new LinuxBluetoothService(loggerFactory.CreateLogger<LinuxBluetoothService>(), options, deviceManager, metricsCollector, playbackService);
+          return new LinuxBluetoothService(loggerFactory.CreateLogger<LinuxBluetoothService>(), options, deviceManager, metricsCollector, playbackService, mgmtMonitor);
       }
       else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
       {
@@ -82,6 +83,9 @@ internal sealed class NullBluetoothService : IBluetoothService
   public Task SetDeviceVolumeAsync(float volume) => Task.CompletedTask;
   public Task NextTrackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
   public Task PreviousTrackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+  public bool IsReconnecting => false;
+  public void CancelReconnection() { }
+  public BluetoothDisconnectReason? LastDisconnectReason => null;
 
   public Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default)
   {
