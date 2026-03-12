@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Interfaces.Bluetooth;
 using Radio.Core.Interfaces.External;
 using Radio.Core.Interfaces.Input;
 using Radio.Infrastructure.Audio;
@@ -17,6 +18,7 @@ using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Infrastructure.Audio.Visualization;
 using Radio.Infrastructure.Configuration;
 using Radio.Configuration.Abstractions;
+using Radio.Infrastructure.Bluetooth;
 using Radio.Infrastructure.External;
 using Radio.Infrastructure.Platform.Input;
 using Radio.Metrics;
@@ -377,6 +379,22 @@ public static class AudioServiceExtensions
 
     // Register contact lookup service with HttpClient
     services.AddHttpClient<PhoneContactLookupService>();
+
+    // PBAP contact sync
+    services.Configure<PbapOptions>(configuration.GetSection(PbapOptions.SectionName));
+
+    var dbRootPath = configuration.GetValue<string>("Database:RootPath") ?? "./data";
+    var pbapDbPath = Path.Combine(dbRootPath, "pbap-contacts.db");
+    services.AddSingleton<IPbapContactRepository>(sp =>
+    {
+      var repo = new PbapContactRepository($"Data Source={pbapDbPath}");
+      repo.InitializeAsync().GetAwaiter().GetResult();
+      return repo;
+    });
+
+    services.AddSingleton<PbapSyncService>();
+    services.AddSingleton<IPbapSyncService>(sp => sp.GetRequiredService<PbapSyncService>());
+    services.AddHostedService(sp => sp.GetRequiredService<PbapSyncService>());
 
     return services;
   }
