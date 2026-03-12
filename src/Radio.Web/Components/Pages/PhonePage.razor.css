@@ -1,5 +1,8 @@
 /* Phone Page Styles */
-.phone-page { padding: 8px; height: 100%; }
+.phone-page { padding: 8px; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+::deep .phone-tabs { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+::deep .phone-tabs > .rz-tabview-panels { flex: 1; min-height: 0; overflow: hidden; }
+::deep .phone-tabs > .rz-tabview-panels > .rz-tabview-panel { height: 100%; overflow: hidden; }
 
 /*
  * All layout selectors use ::deep because they're nested inside
@@ -124,9 +127,10 @@
 ::deep .dial-input { flex: 1; }
 
 /* ── Contacts Tab ── */
+::deep .phone-contacts { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 ::deep .card-title { margin: 0 0 12px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px; }
 ::deep .contacts-header, ::deep .history-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-::deep .contacts-grid { margin-top: 8px; }
+::deep .contacts-grid { margin-top: 8px; flex: 1; min-height: 0; overflow: auto; }
 ::deep .action-btn { margin: 0 2px; }
 
 /* ── Call History Tab ── */
