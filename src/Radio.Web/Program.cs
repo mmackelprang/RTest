@@ -263,6 +263,19 @@ builder.Services.AddHttpClient<IntegrationsApiService>(client =>
   return handler;
 });
 
+builder.Services.AddHttpClient<PbapApiService>(client =>
+{
+  client.BaseAddress = new Uri(apiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(60); // PBAP sync can take a while
+})
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
+});
+
 builder.Services.AddHttpClient("AlbumArtProxy", client =>
 {
   client.BaseAddress = new Uri(apiBaseUrl);
