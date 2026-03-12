@@ -56,4 +56,8 @@
     <ProjectReference Include="..\Radio.Metrics\Radio.Metrics.csproj" />
     <ProjectReference Include="..\RTLSDRCore\RTLSDRCore.csproj" />
   </ItemGroup>
+  <!-- PBAP download helper script — deployed alongside the assembly -->
+  <ItemGroup>
+    <None Include="Bluetooth\pbap_download.py" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

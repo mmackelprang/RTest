@@ -2,32 +2,42 @@ using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Core.Interfaces.Audio;
+using Radio.Core.Interfaces.Bluetooth;
+using Radio.Core.Utilities;
 
 namespace Radio.Infrastructure.External;
 
 /// <summary>
 /// REST client for looking up contact names from the RotaryPhone contacts API.
 /// Falls back to the raw phone number if the API is unavailable or no match is found.
-/// Note: The RotaryPhone contacts API schema is assumed — expect mismatches during integration.
+/// Now checks PBAP-synced contacts first (local, fast) before hitting the REST API.
 /// </summary>
 public class PhoneContactLookupService
 {
   private readonly ILogger<PhoneContactLookupService> _logger;
   private readonly IOptionsMonitor<PhoneIntegrationOptions> _options;
   private readonly HttpClient _httpClient;
+  private readonly IPbapContactRepository? _pbapRepo;
+  private readonly IBluetoothService? _bluetoothService;
 
   public PhoneContactLookupService(
     ILogger<PhoneContactLookupService> logger,
     IOptionsMonitor<PhoneIntegrationOptions> options,
-    HttpClient httpClient)
+    HttpClient httpClient,
+    IPbapContactRepository? pbapRepo = null,
+    IBluetoothService? bluetoothService = null)
   {
     _logger = logger;
     _options = options;
     _httpClient = httpClient;
+    _pbapRepo = pbapRepo;
+    _bluetoothService = bluetoothService;
   }
 
   /// <summary>
   /// Look up a contact name by phone number.
+  /// Checks PBAP contacts first, then falls back to RotaryPhone REST API.
   /// Returns the contact name if found, otherwise the raw phone number.
   /// </summary>
   public async Task<string> FindCallerNameAsync(string phoneNumber, CancellationToken cancellationToken = default)
@@ -35,6 +45,29 @@ public class PhoneContactLookupService
     if (string.IsNullOrWhiteSpace(phoneNumber))
     {
       return "Unknown caller";
+    }
+
+    // Try PBAP contacts first (local, fast)
+    if (_pbapRepo != null && _bluetoothService != null)
+    {
+      try
+      {
+        var connectedDevice = _bluetoothService.ConnectedDevice;
+        if (connectedDevice != null)
+        {
+          var normalized = PhoneNumberNormalizer.Normalize(phoneNumber);
+          var contact = await _pbapRepo.FindByPhoneNumberAsync(connectedDevice.Address, normalized, cancellationToken);
+          if (contact != null)
+          {
+            _logger.LogInformation("PBAP contact found: {Number} → {Name}", phoneNumber, contact.DisplayName);
+            return contact.DisplayName;
+          }
+        }
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "PBAP contact lookup failed, falling through to REST lookup");
+      }
     }
 
     try

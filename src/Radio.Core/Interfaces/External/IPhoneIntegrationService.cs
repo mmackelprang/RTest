@@ -23,6 +23,9 @@ public interface IPhoneIntegrationService : IAsyncDisposable
   /// <summary>Stop the SignalR connection.</summary>
   Task StopAsync(CancellationToken cancellationToken = default);
 
+  /// <summary>Send resolved caller name back to RotaryPhone for UI/logging.</summary>
+  Task ReportCallerResolvedAsync(string phoneNumber, string resolvedName, CancellationToken ct = default);
+
   /// <summary>Fired when the phone call state changes.</summary>
   event EventHandler<PhoneCallStateChangedEventArgs>? CallStateChanged;
 }

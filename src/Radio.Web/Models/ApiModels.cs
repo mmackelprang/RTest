@@ -815,6 +815,13 @@ public class PhoneIntegrationConfigDto
   public int ReconnectMaxDelayMs { get; set; }
 }
 
+public class PbapConfigDto
+{
+  public bool AutoSyncOnConnect { get; set; } = true;
+  public int SyncStaleThresholdHours { get; set; } = 24;
+  public int TransferTimeoutSeconds { get; set; } = 30;
+}
+
 // RotaryPhone.API DTOs (calls http://localhost:5004)
 
 public class PhoneSystemStatusDto

@@ -254,16 +254,59 @@ Expected response (200 OK):
 
 If the API is unavailable or returns no match, the raw phone number is used in the announcement.
 
+### PBAP Contact Sync
+
+Radio.API can download contacts from the connected phone's phonebook via Bluetooth PBAP (Phone Book Access Profile). These contacts are used for caller ID resolution during incoming calls.
+
+**How it works:**
+1. A Python helper script (`pbap_download.py`) manages the D-Bus session bus connection to BlueZ's obexd
+2. It creates an OBEX PBAP session, selects the internal phonebook, and downloads all contacts as a VCF file
+3. The VCF is parsed (vCard 2.1/3.0 with quoted-printable decoding) and stored in SQLite
+4. Phone number lookup uses exact match first, then last-7-digit suffix matching for fuzzy resolution
+5. After sync, the BT connection is automatically restored (OBEX teardown causes a temporary disconnect)
+
+**Prerequisites:**
+- `bluez-obexd` installed and enabled as a user service: `systemctl --user enable --now obex`
+- `python3` with `dbus-python` and `PyGObject` packages (standard on Ubuntu)
+- `DBUS_SESSION_BUS_ADDRESS` environment variable set in the radio-api systemd service
+- Phone must be paired and have granted PBAP access (Android prompts on first access)
+
+**Configuration** (`appsettings.json` → `Bluetooth:Pbap`):
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `AutoSyncOnConnect` | Automatically sync contacts when a phone connects | `true` |
+| `SyncStaleThresholdHours` | Hours before contacts are considered stale and re-synced | `24` |
+| `TransferTimeoutSeconds` | Max seconds to wait for PBAP transfer to complete | `30` |
+
+**REST API** (`/api/bluetooth/pbap`):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/sync?deviceAddress=XX:XX:XX:XX:XX:XX` | Trigger manual sync (uses connected device if omitted) |
+| `GET` | `/contacts?deviceAddress=XX:XX:XX:XX:XX:XX` | List synced contacts for a device |
+| `GET` | `/lookup?phoneNumber=5551234567` | Look up a contact by phone number |
+| `GET` | `/status` | Sync status for all devices |
+
+**Operational notes:**
+- PBAP sync causes a brief BT audio interruption (~5 seconds) as OBEX uses a separate RFCOMM channel
+- The service uses `PrivateTmp=true` in systemd, so temp files are written to `/opt/radio-console/data/` (not `/tmp`) to avoid mount namespace mismatch with obexd
+- A `SemaphoreSlim` prevents concurrent sync attempts from auto-sync and manual API calls
+- On first connect from a new phone, Android will prompt to allow phonebook access — the user must approve on the phone
+
 ### How It Works
 
 When an incoming call is detected (`Ringing` state):
 
-1. The `PhoneCallIntegrationService` looks up the caller name (from the SignalR event, or via the contacts API)
+1. The `PhoneCallIntegrationService` looks up the caller name:
+   - First checks PBAP contacts (local SQLite, synced from phone's phonebook)
+   - Falls back to the RotaryPhone contacts REST API
 2. If a ring sound file exists at `RingSoundPath`, it plays the sound followed by a TTS announcement (e.g., "Incoming call from John Smith")
 3. If no ring sound, just the TTS announcement plays
 4. Audio ducking lowers the main audio during the announcement
-5. When the call ends (`Ended` or `Idle`), the announcement stops and audio returns to normal
-6. Call state changes are broadcast to the Web UI in real-time via SignalR
+5. The resolved caller name is reported back to RotaryPhone via SignalR (`ReportCallerResolved`)
+6. When the call ends (`Ended` or `Idle`), the announcement stops and audio returns to normal
+7. Call state changes are broadcast to the Web UI in real-time via SignalR
 
 ### Troubleshooting
 
@@ -396,7 +439,11 @@ Status indicators update in real-time via SignalR — no page refresh needed.
 │                                 → VisualizationModeService      │
 │                                                                 │
 │  PhoneCallIntegrationService ← IPhoneIntegrationService (SignalR)│
-│    └→ PhoneContactLookupService (REST)                          │
+│    └→ PhoneContactLookupService (PBAP SQLite + REST fallback)   │
+│                                                                 │
+│  PbapSyncService ← IPbapSyncService (D-Bus OBEX via Python)     │
+│    └→ PbapContactRepository (SQLite)                            │
+│    └→ VCardParser                                               │
 │    └→ IAnnouncementService → ITTSFactory + IDuckingService      │
 │                                                                 │
 │  NotificationsController                                        │
@@ -433,12 +480,17 @@ Status indicators update in real-time via SignalR — no page refresh needed.
 | Infrastructure | `Platform/Input/HidRotaryEncoderService.cs` | USB HID reader + event firing |
 | Infrastructure | `Platform/Input/RotaryEncoderActionRouter.cs` | Maps encoder events → audio actions |
 | Infrastructure | `External/PhoneCallClient.cs` | SignalR client for RotaryPhone hub |
-| Infrastructure | `External/PhoneContactLookupService.cs` | REST client for contacts lookup |
+| Infrastructure | `External/PhoneContactLookupService.cs` | PBAP + REST contact lookup |
+| Infrastructure | `Bluetooth/PbapSyncService.cs` | PBAP sync service (D-Bus OBEX) |
+| Infrastructure | `Bluetooth/PbapContactRepository.cs` | SQLite contact storage |
+| Infrastructure | `Bluetooth/VCardParser.cs` | vCard 2.1/3.0 parser |
+| Infrastructure | `Bluetooth/pbap_download.py` | Python D-Bus OBEX helper script |
 | Infrastructure | `Audio/Services/AnnouncementService.cs` | TTS + ducking orchestration |
 | Infrastructure | `Audio/Services/VisualizationModeService.cs` | Viz mode cycling for encoder 3 |
 | API | `Controllers/NotificationsController.cs` | `POST /api/notifications/announce` |
 | API | `Controllers/IntegrationsController.cs` | `GET /api/integrations/{encoder,phone}/status` |
 | API | `Services/RotaryEncoderHostedService.cs` | Encoder lifecycle management |
-| API | `Services/PhoneCallIntegrationService.cs` | Phone call event handling |
+| API | `Services/PhoneCallIntegrationService.cs` | Phone call event handling + caller ID |
+| API | `Controllers/PbapController.cs` | PBAP sync/contacts/lookup REST endpoints |
 | Web | `Services/ApiClients/IntegrationsApiService.cs` | HTTP client for status endpoints |
 | Web | `Components/Pages/SystemConfigPage.razor` | Integrations tab UI |
