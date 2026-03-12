@@ -1523,6 +1523,42 @@
                 <span>Loading configuration...</span>
               }
             </RadzenCard>
+
+            <!-- PBAP Contact Sync -->
+            <RadzenCard>
+              <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px">
+                <h6>Phone Book (PBAP) Sync</h6>
+                <RadzenButton Variant="Variant.Outlined" ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Small"
+                              Click="SavePbapConfigAsync" Icon="save"
+                              Disabled="@(_isSaving || _pbapConfig == null)" Text="Save" />
+              </div>
+              <small style="color:var(--rz-text-secondary-color)">Pull contacts from connected phone for caller ID announcements</small>
+              @if (_pbapConfig != null)
+              {
+                <RadzenRow style="margin-top:12px">
+                  <RadzenColumn Size="12" SizeMD="4">
+                    <div style="display:flex; align-items:center; gap:8px">
+                      <RadzenSwitch @bind-Value="_pbapConfig.AutoSyncOnConnect" />
+                      <span>Auto-sync on connect</span>
+                    </div>
+                  </RadzenColumn>
+                  <RadzenColumn Size="6" SizeMD="4">
+                    <RadzenNumeric TValue="int" @bind-Value="_pbapConfig.SyncStaleThresholdHours"
+                                   Min="1" Max="168" Style="width:100%" />
+                    <small>Re-sync interval (hours)</small>
+                  </RadzenColumn>
+                  <RadzenColumn Size="6" SizeMD="4">
+                    <RadzenNumeric TValue="int" @bind-Value="_pbapConfig.TransferTimeoutSeconds"
+                                   Min="5" Max="120" Style="width:100%" />
+                    <small>Transfer timeout (seconds)</small>
+                  </RadzenColumn>
+                </RadzenRow>
+              }
+              else
+              {
+                <span>Loading configuration...</span>
+              }
+            </RadzenCard>
           </div>
         </RadzenTabsItem>
 
@@ -1624,6 +1660,7 @@
   private PhoneIntegrationStatusDto? _phoneStatus;
   private RotaryEncoderConfigDto? _encoderConfig;
   private PhoneIntegrationConfigDto? _phoneConfig;
+  private PbapConfigDto? _pbapConfig;
   private string _testMessage = "";
   private int _testPriority = 8;
   private bool _isSendingNotification = false;
@@ -3139,6 +3176,7 @@
       _phoneStatus = await IntegrationsApi.GetPhoneStatusAsync();
       _encoderConfig = await ConfigApi.GetConfigurationAsync<RotaryEncoderConfigDto>("rotaryencoder") ?? new();
       _phoneConfig = await ConfigApi.GetConfigurationAsync<PhoneIntegrationConfigDto>("phoneintegration") ?? new();
+      _pbapConfig = await ConfigApi.GetConfigurationAsync<PbapConfigDto>("bluetooth:pbap") ?? new();
     }
     catch (Exception ex)
     {
@@ -3193,6 +3231,33 @@
     catch (Exception ex)
     {
       NotificationService.Notify(NotificationSeverity.Error, "Error", $"Error saving configuration: {ex.Message}");
+    }
+    finally
+    {
+      _isSaving = false;
+    }
+  }
+
+  private async Task SavePbapConfigAsync()
+  {
+    if (_pbapConfig == null) return;
+
+    _isSaving = true;
+    try
+    {
+      var success = await ConfigApi.UpdateConfigurationAsync("bluetooth:pbap", _pbapConfig);
+      if (success)
+      {
+        NotificationService.Notify(NotificationSeverity.Success, "Success", "PBAP configuration saved successfully");
+      }
+      else
+      {
+        NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to save PBAP configuration");
+      }
+    }
+    catch (Exception ex)
+    {
+      NotificationService.Notify(NotificationSeverity.Error, "Error", $"Error saving PBAP configuration: {ex.Message}");
     }
     finally
     {
