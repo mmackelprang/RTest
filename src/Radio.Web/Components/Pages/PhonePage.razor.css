@@ -127,6 +127,7 @@
 ::deep .card-title { margin: 0 0 12px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px; }
 ::deep .contacts-header, ::deep .history-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 ::deep .contacts-grid { margin-top: 8px; }
+::deep .contacts-grid .rz-data-grid-data { max-height: calc(100vh - 310px); overflow: auto !important; }
 ::deep .action-btn { margin: 0 2px; }
 
 /* ── Call History Tab ── */
