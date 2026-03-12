@@ -14,14 +14,17 @@
       <RadzenTabsItem Text="Dashboard" Icon="dashboard">
         <div class="phone-dashboard">
 
-          @* System Status Card *@
-          <RadzenCard class="phone-card">
-            <h3 class="card-title">
-              <RadzenIcon Icon="info" /> System Status
-            </h3>
-            <div class="status-grid">
-              <div class="status-item">
-                <span class="status-label">Bluetooth</span>
+          @* ── System Status Bar ── *@
+          <RadzenCard class="phone-card system-status-card">
+            <h3 class="section-title section-title-green">SYSTEM STATUS</h3>
+            <div class="status-bar">
+              <div class="status-column">
+                <span class="status-column-label">PLATFORM</span>
+                <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@(_isAvailable ? "Linux" : "Unknown")" />
+              </div>
+              <div class="status-divider"></div>
+              <div class="status-column">
+                <span class="status-column-label">BLUETOOTH</span>
                 <RadzenBadge
                   BadgeStyle="@(_systemStatus?.BluetoothConnected == true ? BadgeStyle.Success : BadgeStyle.Danger)"
                   Text="@(_systemStatus?.BluetoothConnected == true ? "Connected" : "Disconnected")" />
@@ -30,8 +33,9 @@
                   <span class="status-detail">@_systemStatus.BluetoothDeviceAddress</span>
                 }
               </div>
-              <div class="status-item">
-                <span class="status-label">SIP Server</span>
+              <div class="status-divider"></div>
+              <div class="status-column">
+                <span class="status-column-label">SIP DEVICE</span>
                 <RadzenBadge
                   BadgeStyle="@(_systemStatus?.SipListening == true ? BadgeStyle.Success : BadgeStyle.Danger)"
                   Text="@(_systemStatus?.SipListening == true ? "Listening" : "Offline")" />
@@ -40,8 +44,9 @@
                   <span class="status-detail">@_systemStatus.SipListenAddress:@_systemStatus.SipPort</span>
                 }
               </div>
-              <div class="status-item">
-                <span class="status-label">HT801 ATA</span>
+              <div class="status-divider"></div>
+              <div class="status-column">
+                <span class="status-column-label">HT801 ATA</span>
                 <RadzenBadge
                   BadgeStyle="@(_systemStatus?.Ht801Reachable == true ? BadgeStyle.Success : BadgeStyle.Danger)"
                   Text="@(_systemStatus?.Ht801Reachable == true ? "Online" : "Offline")" />
@@ -53,89 +58,91 @@
             </div>
           </RadzenCard>
 
-          @* Phone Status Card *@
-          <RadzenCard class="phone-card phone-status-card">
-            <h3 class="card-title">
-              <RadzenIcon Icon="phone" /> Phone Status
-            </h3>
-            <div class="phone-state-display">
-              <RadzenBadge
-                BadgeStyle="@GetCallStateBadgeStyle()"
-                Text="@_callState.CallState"
-                class="call-state-badge" />
-              @if (_callState.CallState == "Ringing" && _callState.IncomingNumber != null)
-              {
-                <div class="call-info">
-                  <RadzenIcon Icon="call_received" />
-                  <span class="phone-number">@_callState.IncomingNumber</span>
-                  @if (_callState.CallerName != null)
-                  {
-                    <span class="caller-name">@_callState.CallerName</span>
-                  }
-                </div>
-              }
-              else if (_callState.CallState == "InCall")
-              {
-                <div class="call-info">
-                  <RadzenIcon Icon="phone_in_talk" />
-                  <span class="phone-number">@(_callState.IncomingNumber ?? _callState.DialedNumber ?? "Unknown")</span>
-                  @if (_callState.Duration != null)
-                  {
-                    <span class="call-duration">@_callState.Duration</span>
-                  }
-                </div>
-              }
-              else if (_callState.CallState == "Dialing" && _callState.DialedNumber != null)
-              {
-                <div class="call-info">
-                  <RadzenIcon Icon="call_made" />
-                  <span class="phone-number">@_callState.DialedNumber</span>
-                </div>
-              }
-            </div>
-          </RadzenCard>
+          @* ── Two-column layout: Status | Dev Controls ── *@
+          <div class="dashboard-columns">
 
-          @* Developer Controls *@
-          <RadzenAccordion class="phone-card">
-            <Items>
-              <RadzenAccordionItem Text="Developer Controls" Icon="code">
-                <div class="dev-controls">
-                  <div class="dev-section">
-                    <span class="dev-label">Handset Simulation</span>
-                    <div class="dev-buttons">
-                      <RadzenButton Text="Lift Handset" Icon="phone"
-                        Click="@(() => SimulateHookAsync(true))"
-                        Disabled="@(_callState.CallState == "InCall")"
-                        ButtonStyle="ButtonStyle.Secondary" Size="ButtonSize.Small" />
-                      <RadzenButton Text="Drop Handset" Icon="phone_disabled"
-                        Click="@(() => SimulateHookAsync(false))"
-                        Disabled="@(_callState.CallState == "Idle")"
-                        ButtonStyle="ButtonStyle.Secondary" Size="ButtonSize.Small" />
-                    </div>
+            @* Left: Phone Status *@
+            <RadzenCard class="phone-card phone-status-card">
+              <div class="phone-state-display">
+                <span class="current-status-label">CURRENT STATUS</span>
+                <RadzenBadge
+                  BadgeStyle="@GetCallStateBadgeStyle()"
+                  Text="@_callState.CallState.ToUpperInvariant()"
+                  class="call-state-badge" />
+                @if (_callState.CallState == "Ringing" && _callState.IncomingNumber != null)
+                {
+                  <div class="call-info">
+                    <RadzenIcon Icon="call_received" />
+                    <span class="phone-number">@_callState.IncomingNumber</span>
+                    @if (_callState.CallerName != null)
+                    {
+                      <span class="caller-name">@_callState.CallerName</span>
+                    }
                   </div>
-                  <div class="dev-section">
-                    <span class="dev-label">Network Simulation</span>
-                    <div class="dev-buttons">
-                      <RadzenButton Text="Simulate Incoming Call" Icon="ring_volume"
-                        Click="@SimulateIncomingCallAsync"
-                        ButtonStyle="ButtonStyle.Warning" Size="ButtonSize.Small" />
-                    </div>
+                }
+                else if (_callState.CallState == "InCall")
+                {
+                  <div class="call-info">
+                    <RadzenIcon Icon="phone_in_talk" />
+                    <span class="phone-number">@(_callState.IncomingNumber ?? _callState.DialedNumber ?? "Unknown")</span>
+                    @if (_callState.Duration != null)
+                    {
+                      <span class="call-duration">@_callState.Duration</span>
+                    }
                   </div>
-                  <div class="dev-section">
-                    <span class="dev-label">Dialer</span>
-                    <div class="dev-dialer">
-                      <RadzenTextBox @bind-Value="_dialDigits" Placeholder="Enter digits..."
-                        class="dial-input" />
-                      <RadzenButton Text="Dial" Icon="dialpad"
-                        Click="@SimulateDialAsync"
-                        Disabled="@(string.IsNullOrWhiteSpace(_dialDigits))"
-                        ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Small" />
-                    </div>
+                }
+                else if (_callState.CallState == "Dialing" && _callState.DialedNumber != null)
+                {
+                  <div class="call-info">
+                    <RadzenIcon Icon="call_made" />
+                    <span class="phone-number">@_callState.DialedNumber</span>
+                  </div>
+                }
+              </div>
+            </RadzenCard>
+
+            @* Right: Dev Controls (always visible) *@
+            <RadzenCard class="phone-card dev-controls-card">
+              <h3 class="section-title section-title-amber">DEV CONTROLS</h3>
+              <p class="dev-description">Simulate hardware events when no rotary phone is connected.</p>
+              <div class="dev-controls">
+                <div class="dev-section">
+                  <span class="dev-label">HANDSET</span>
+                  <div class="dev-buttons">
+                    <RadzenButton Text="Lift Handset" Icon="phone"
+                      Click="@(() => SimulateHookAsync(true))"
+                      Disabled="@(_callState.CallState == "InCall")"
+                      ButtonStyle="ButtonStyle.Success" Size="ButtonSize.Small" />
+                    <RadzenButton Text="Drop Handset" Icon="phone_disabled"
+                      Click="@(() => SimulateHookAsync(false))"
+                      Disabled="@(_callState.CallState == "Idle")"
+                      ButtonStyle="ButtonStyle.Secondary" Size="ButtonSize.Small" />
                   </div>
                 </div>
-              </RadzenAccordionItem>
-            </Items>
-          </RadzenAccordion>
+                <div class="dev-section">
+                  <span class="dev-label">NETWORK</span>
+                  <div class="dev-buttons">
+                    <RadzenButton Text="Simulate Incoming Call" Icon="ring_volume"
+                      Click="@SimulateIncomingCallAsync"
+                      ButtonStyle="ButtonStyle.Warning" Size="ButtonSize.Small"
+                      class="full-width-btn" />
+                  </div>
+                </div>
+                <div class="dev-section">
+                  <span class="dev-label">DIALER</span>
+                  <div class="dev-dialer">
+                    <RadzenTextBox @bind-Value="_dialDigits" Placeholder="Digits"
+                      class="dial-input" />
+                    <RadzenButton Text="Dial" Icon="dialpad"
+                      Click="@SimulateDialAsync"
+                      Disabled="@(string.IsNullOrWhiteSpace(_dialDigits))"
+                      ButtonStyle="ButtonStyle.Secondary" Size="ButtonSize.Small" />
+                  </div>
+                </div>
+              </div>
+            </RadzenCard>
+
+          </div>
         </div>
       </RadzenTabsItem>
 

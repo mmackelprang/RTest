@@ -48,9 +48,9 @@ public class PhonePageTests : TestContext
   public void PhonePage_Renders_SystemStatusSection()
   {
     var cut = RenderComponent<PhonePage>();
-    Assert.Contains("System Status", cut.Markup);
-    Assert.Contains("Bluetooth", cut.Markup);
-    Assert.Contains("SIP Server", cut.Markup);
+    Assert.Contains("SYSTEM STATUS", cut.Markup);
+    Assert.Contains("BLUETOOTH", cut.Markup);
+    Assert.Contains("SIP DEVICE", cut.Markup);
     Assert.Contains("HT801 ATA", cut.Markup);
   }
 
@@ -58,14 +58,14 @@ public class PhonePageTests : TestContext
   public void PhonePage_Renders_PhoneStatusSection()
   {
     var cut = RenderComponent<PhonePage>();
-    Assert.Contains("Phone Status", cut.Markup);
+    Assert.Contains("CURRENT STATUS", cut.Markup);
   }
 
   [Fact]
   public void PhonePage_Renders_DeveloperControls()
   {
     var cut = RenderComponent<PhonePage>();
-    Assert.Contains("Developer Controls", cut.Markup);
+    Assert.Contains("DEV CONTROLS", cut.Markup);
   }
 
   private class EmptyResponseHandler : HttpMessageHandler
