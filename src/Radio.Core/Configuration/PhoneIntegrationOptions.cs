@@ -18,6 +18,9 @@ public class PhoneIntegrationOptions
   /// <summary>Base URL for the RotaryPhone contacts REST API.</summary>
   public string ContactsApiBaseUrl { get; set; } = "http://localhost:5555";
 
+  /// <summary>Play ring sound through radio speakers on incoming call. Disable when physical phone handles ringing.</summary>
+  public bool PlayRingSound { get; set; } = false;
+
   /// <summary>Path to ring sound WAV/MP3 file (relative to app root).</summary>
   public string RingSoundPath { get; set; } = "media/sounds/phone-ring.wav";
 
