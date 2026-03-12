@@ -1,48 +1,55 @@
 /* Phone Page Styles */
 .phone-page { padding: 8px; height: 100%; }
-.phone-dashboard { display: flex; flex-direction: column; gap: 12px; }
-.phone-card { padding: 16px; }
+
+/*
+ * All layout selectors use ::deep because they're nested inside
+ * Radzen component trees (RadzenTabs > RadzenTabsItem > RadzenCard).
+ * Without ::deep, Blazor's CSS isolation attribute selectors don't
+ * match elements rendered inside child component DOM.
+ */
+
+::deep .phone-dashboard { display: flex; flex-direction: column; gap: 12px; }
+::deep .phone-card { padding: 16px; }
 
 /* Section titles — uppercase monospace like the Node version */
-.section-title {
+::deep .section-title {
   margin: 0 0 12px 0;
   font-size: 1rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
 }
-.section-title-green { color: var(--rz-success); }
-.section-title-amber { color: #e8a838; }
+::deep .section-title-green { color: var(--rz-success); }
+::deep .section-title-amber { color: #e8a838; }
 
 /* ── System Status Bar ── */
-.system-status-card { border-left: 3px solid var(--rz-success); }
-.status-bar {
+::deep .system-status-card { border-left: 3px solid var(--rz-success); }
+::deep .status-bar {
   display: flex;
   align-items: flex-start;
-  gap: 0;
 }
-.status-column {
+::deep .status-column {
   flex: 1;
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding: 0 16px;
 }
-.status-column:first-child { padding-left: 0; }
-.status-column:last-child { padding-right: 0; }
-.status-column-label {
+::deep .status-column:first-child { padding-left: 0; }
+::deep .status-column:last-child { padding-right: 0; }
+::deep .status-column-label {
   font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.1em;
   color: var(--rz-text-secondary-color);
   font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
 }
-.status-detail {
+::deep .status-detail {
   font-size: 0.8rem;
   font-family: monospace;
   opacity: 0.7;
 }
-.status-divider {
+::deep .status-divider {
   width: 1px;
   align-self: stretch;
   min-height: 36px;
@@ -50,20 +57,20 @@
 }
 
 /* ── Two-column Dashboard Layout ── */
-.dashboard-columns {
+::deep .dashboard-columns {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
 
 /* Left: Phone Status */
-.phone-status-card {
+::deep .phone-status-card {
   border-left: 3px solid #e8a838;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-.phone-state-display {
+::deep .phone-state-display {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -72,7 +79,7 @@
   width: 100%;
   gap: 16px;
 }
-.current-status-label {
+::deep .current-status-label {
   font-size: 0.85rem;
   font-weight: 600;
   letter-spacing: 0.12em;
@@ -85,46 +92,46 @@
   letter-spacing: 0.1em;
   font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
 }
-.call-info {
+::deep .call-info {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
 }
-.phone-number { font-family: monospace; font-size: 1.1rem; }
-.caller-name { color: var(--rz-text-secondary-color); }
-.call-duration { font-family: monospace; color: var(--rz-text-secondary-color); }
+::deep .phone-number { font-family: monospace; font-size: 1.1rem; }
+::deep .caller-name { color: var(--rz-text-secondary-color); }
+::deep .call-duration { font-family: monospace; color: var(--rz-text-secondary-color); }
 
 /* Right: Dev Controls */
-.dev-controls-card { border-left: 3px solid #e8a838; }
-.dev-description {
+::deep .dev-controls-card { border-left: 3px solid #e8a838; }
+::deep .dev-description {
   font-size: 0.85rem;
   color: var(--rz-text-secondary-color);
   margin: 0 0 16px 0;
 }
-.dev-controls { display: flex; flex-direction: column; gap: 16px; }
-.dev-section { display: flex; flex-direction: column; gap: 8px; }
-.dev-label {
+::deep .dev-controls { display: flex; flex-direction: column; gap: 16px; }
+::deep .dev-section { display: flex; flex-direction: column; gap: 8px; }
+::deep .dev-label {
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.1em;
   color: var(--rz-text-color);
   font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
 }
-.dev-buttons { display: flex; gap: 8px; }
+::deep .dev-buttons { display: flex; gap: 8px; }
 ::deep .full-width-btn { width: 100%; }
-.dev-dialer { display: flex; gap: 8px; align-items: center; }
+::deep .dev-dialer { display: flex; gap: 8px; align-items: center; }
 ::deep .dial-input { flex: 1; }
 
 /* ── Contacts Tab ── */
-.card-title { margin: 0 0 12px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px; }
-.contacts-header, .history-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+::deep .card-title { margin: 0 0 12px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px; }
+::deep .contacts-header, ::deep .history-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 ::deep .contacts-grid { margin-top: 8px; }
-.action-btn { margin: 0 2px; }
+::deep .action-btn { margin: 0 2px; }
 
 /* ── Call History Tab ── */
-.empty-state { text-align: center; padding: 32px; color: var(--rz-text-secondary-color); }
-.history-list { display: flex; flex-direction: column; gap: 4px; }
-.history-item { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 4px; background: var(--rz-base-background-color); }
-.history-details { flex: 1; display: flex; flex-direction: column; }
-.history-time { font-size: 0.8rem; color: var(--rz-text-secondary-color); }
+::deep .empty-state { text-align: center; padding: 32px; color: var(--rz-text-secondary-color); }
+::deep .history-list { display: flex; flex-direction: column; gap: 4px; }
+::deep .history-item { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 4px; background: var(--rz-base-background-color); }
+::deep .history-details { flex: 1; display: flex; flex-direction: column; }
+::deep .history-time { font-size: 0.8rem; color: var(--rz-text-secondary-color); }
