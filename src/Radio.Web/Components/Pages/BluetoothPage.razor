@@ -4,6 +4,9 @@
 @inject BluetoothApiService BluetoothApi
 @inject NotificationService NotificationService
 @inject ILogger<BluetoothPage> Logger
+@inject IntegrationsApiService IntegrationsApi
+@inject PbapApiService PbapApi
+@inject SourcesApiService SourcesApi
 
 <PageTitle>Bluetooth - Radio Console</PageTitle>
 
@@ -80,6 +83,7 @@
 
           @if (_status.ConnectedDevice != null)
           {
+            @* Device header row *@
             <div style="display:flex; flex-direction:row; gap:12px; align-items:center">
               <RadzenIcon Icon="bluetooth_connected" Style="font-size:2rem; color:var(--rz-success)" />
               <div style="display:flex; flex-direction:column; gap:0">
@@ -87,19 +91,56 @@
                 <span style="font-size:0.75rem; color:var(--text-low)">@_status.ConnectedDevice.Address</span>
               </div>
               <div style="flex:1"></div>
-              <RadzenButton Variant="Variant.Outlined" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small"
-                            Click="DisconnectAsync" Icon="link_off"
-                            Disabled="@_isDisconnecting">
-                @if (_isDisconnecting)
-                {
-                  <RadzenProgressBarCircular Size="ProgressBarCircularSize.Small" Mode="ProgressBarMode.Indeterminate" Style="margin-right:4px" />
-                  <span>Disconnecting</span>
-                }
-                else
-                {
-                  <span>Disconnect</span>
-                }
-              </RadzenButton>
+              <RadzenBadge Text="Connected" BadgeStyle="BadgeStyle.Success" IsPill="true" />
+            </div>
+
+            @* Service badges *@
+            <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px">
+              <RadzenBadge Text="@($"🎵 A2DP {A2dpStatusText}")"
+                BadgeStyle="@(IsA2dpActive ? BadgeStyle.Info : BadgeStyle.Light)" IsPill="true" />
+              <RadzenBadge Text="@($"📞 HFP {(IsHfpActive ? "Active" : "Idle")}")"
+                BadgeStyle="@(IsHfpActive ? BadgeStyle.Success : BadgeStyle.Light)" IsPill="true" />
+              <RadzenBadge Text="@($"📇 PBAP {(HasPbapSync ? "Synced" : "None")}")"
+                BadgeStyle="@(HasPbapSync ? BadgeStyle.Success : BadgeStyle.Light)" IsPill="true" />
+            </div>
+
+            @* Service detail rows *@
+            <div style="background:var(--rz-base-800); border-radius:6px; padding:10px; margin-top:4px; font-size:0.8rem">
+              <div style="display:flex; justify-content:space-between; margin-bottom:4px">
+                <span style="color:var(--rz-info)">Audio Streaming</span>
+                <span style="color:var(--text-low)">@A2dpStatusText</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:4px">
+                <span style="color:var(--rz-success)">Phone Integration</span>
+                <span style="color:var(--text-low)">@HfpStatusText</span>
+              </div>
+              <div style="display:flex; justify-content:space-between">
+                <span style="color:var(--rz-warning-light, #80cbc4)">Contacts</span>
+                <span style="color:var(--text-low)">@PbapStatusText</span>
+              </div>
+            </div>
+
+            @* Context-aware disconnect *@
+            <div style="background:var(--rz-danger-lighter, #3e1010); border:1px solid var(--rz-danger-light, #5c2020); border-radius:6px; padding:10px; margin-top:4px">
+              <div style="display:flex; justify-content:space-between; align-items:center">
+                <div>
+                  <div style="color:var(--rz-danger); font-size:0.85rem; font-weight:500">Disconnect Device</div>
+                  <div style="color:var(--text-low); font-size:0.7rem; margin-top:2px">Stops audio, phone, and all BT services</div>
+                </div>
+                <RadzenButton Variant="Variant.Filled" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small"
+                              Click="DisconnectAsync" Icon="link_off"
+                              Disabled="@_isDisconnecting">
+                  @if (_isDisconnecting)
+                  {
+                    <RadzenProgressBarCircular Size="ProgressBarCircularSize.Small" Mode="ProgressBarMode.Indeterminate" Style="margin-right:4px" />
+                    <span>Disconnecting</span>
+                  }
+                  else
+                  {
+                    <span>Disconnect</span>
+                  }
+                </RadzenButton>
+              </div>
             </div>
           }
           else if (_status.IsReconnecting)
@@ -308,6 +349,9 @@
   private bool _isDisconnecting;
   private string? _pairingAddress;
   private string? _connectingAddress;
+  private PhoneIntegrationStatusDto? _phoneStatus;
+  private PbapSyncStatusDto? _pbapStatus;
+  private string? _activeSourceType;
 
   protected override async Task OnInitializedAsync()
   {
@@ -322,6 +366,25 @@
       StateHasChanged();
 
       _status = await BluetoothApi.GetStatusAsync();
+
+      // Fetch service statuses in parallel when device is connected
+      if (_status?.ConnectedDevice != null)
+      {
+        var phoneTask = IntegrationsApi.GetPhoneStatusAsync();
+        var pbapTask = PbapApi.GetSyncStatusAsync();
+        var sourcesTask = SourcesApi.GetSourcesAsync();
+        await Task.WhenAll(phoneTask, pbapTask, sourcesTask);
+        _phoneStatus = phoneTask.Result;
+        _pbapStatus = pbapTask.Result;
+        var sources = sourcesTask.Result;
+        _activeSourceType = sources?.FirstOrDefault(s => s.State == "Active")?.Type;
+      }
+      else
+      {
+        _phoneStatus = null;
+        _pbapStatus = null;
+        _activeSourceType = null;
+      }
     }
     catch (Exception ex)
     {
@@ -578,6 +641,47 @@
       Logger.LogError(ex, "Error cancelling reconnection");
       NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to cancel reconnection");
     }
+  }
+
+  // --- Service badge helpers ---
+
+  private bool IsA2dpActive => _status?.ConnectedDevice != null
+    && string.Equals(_activeSourceType, "Bluetooth", StringComparison.OrdinalIgnoreCase);
+
+  private string A2dpStatusText => IsA2dpActive ? "Playing" : "Idle";
+
+  private bool IsHfpActive => _phoneStatus is { Enabled: true, IsConnected: true };
+
+  private string HfpStatusText => IsHfpActive
+    ? "Connected to RotaryPhone"
+    : (_phoneStatus?.Enabled == true ? "Disconnected" : "Not configured");
+
+  private PbapDeviceSyncInfoDto? ConnectedDevicePbapInfo =>
+    _pbapStatus?.Devices.FirstOrDefault(d =>
+      string.Equals(d.DeviceAddress, _status?.ConnectedDevice?.Address, StringComparison.OrdinalIgnoreCase));
+
+  private bool HasPbapSync => ConnectedDevicePbapInfo != null;
+
+  private string PbapStatusText
+  {
+    get
+    {
+      var info = ConnectedDevicePbapInfo;
+      if (info == null) return "Not synced";
+      var ago = info.LastSynced.HasValue
+        ? FormatTimeAgo(info.LastSynced.Value)
+        : "unknown";
+      return $"{info.ContactCount} synced ({ago})";
+    }
+  }
+
+  private static string FormatTimeAgo(DateTime utcTime)
+  {
+    var span = DateTime.UtcNow - utcTime;
+    if (span.TotalMinutes < 1) return "just now";
+    if (span.TotalMinutes < 60) return $"{(int)span.TotalMinutes}m ago";
+    if (span.TotalHours < 24) return $"{(int)span.TotalHours}h ago";
+    return $"{(int)span.TotalDays}d ago";
   }
 
   private static string GetDisconnectMessage(string reason) => reason switch
