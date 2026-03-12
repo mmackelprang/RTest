@@ -357,6 +357,7 @@
     {
       _pbapContacts = await PbapApi.GetContactsAsync(_btStatus.ConnectedDevice.Address);
     }
+    RebuildMergedContacts();
 
     // Subscribe to SignalR events
     PhoneHub.CallStateChanged += OnCallStateChanged;
@@ -377,6 +378,7 @@
     if (callState != null) _callState = callState;
     _contacts = await PhoneApi.GetContactsAsync();
     _callHistory = await PhoneApi.GetCallHistoryAsync();
+    RebuildMergedContacts();
     await InvokeAsync(StateHasChanged);
   }
 
@@ -479,6 +481,7 @@
     {
       await PhoneApi.CreateContactAsync(form);
       _contacts = await PhoneApi.GetContactsAsync();
+      RebuildMergedContacts();
     }
   }
 
@@ -495,6 +498,7 @@
     {
       await PhoneApi.UpdateContactAsync(contact.Id, form);
       _contacts = await PhoneApi.GetContactsAsync();
+      RebuildMergedContacts();
     }
   }
 
@@ -511,6 +515,7 @@
     {
       await PhoneApi.DeleteContactAsync(contact.Id);
       _contacts = await PhoneApi.GetContactsAsync();
+      RebuildMergedContacts();
     }
   }
 
@@ -565,6 +570,7 @@
         // Refresh PBAP contacts and status
         _pbapContacts = await PbapApi.GetContactsAsync(deviceAddress);
         _pbapStatus = await PbapApi.GetSyncStatusAsync();
+        RebuildMergedContacts();
         NotificationService.Notify(NotificationSeverity.Success, "Sync Complete",
           $"Synced {result.ContactCount} contacts");
       }
@@ -600,31 +606,28 @@
 
   private record MergedContact(string? Id, string Name, string Phone, string? Email, string Source);
 
-  private List<MergedContact> MergedContacts
+  private List<MergedContact> MergedContacts { get; set; } = [];
+
+  private void RebuildMergedContacts()
   {
-    get
+    var merged = new List<MergedContact>();
+
+    if (_contacts != null)
     {
-      var merged = new List<MergedContact>();
-
-      // RotaryPhone contacts (manual)
-      if (_contacts != null)
-      {
-        foreach (var c in _contacts)
-          merged.Add(new MergedContact(c.Id, c.Name, c.PhoneNumber, c.Email, "Manual"));
-      }
-
-      // PBAP contacts
-      if (_pbapContacts != null)
-      {
-        foreach (var c in _pbapContacts)
-        {
-          var phone = c.PhoneNumbers.FirstOrDefault() ?? "";
-          merged.Add(new MergedContact(null, c.DisplayName, phone, null, "PBAP"));
-        }
-      }
-
-      return merged.OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToList();
+      foreach (var c in _contacts)
+        merged.Add(new MergedContact(c.Id, c.Name, c.PhoneNumber, c.Email, "Manual"));
     }
+
+    if (_pbapContacts != null)
+    {
+      foreach (var c in _pbapContacts)
+      {
+        var phone = c.PhoneNumbers.FirstOrDefault() ?? "";
+        merged.Add(new MergedContact(null, c.DisplayName, phone, null, "PBAP"));
+      }
+    }
+
+    MergedContacts = merged.OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToList();
   }
 
   public void Dispose()
