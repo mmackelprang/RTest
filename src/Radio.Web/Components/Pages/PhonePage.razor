@@ -226,6 +226,7 @@
   private string _dialDigits = "";
   private bool _isAvailable;
   private bool _disposed;
+  private bool _polling;
   private System.Timers.Timer? _pollTimer;
 
   protected override async Task OnInitializedAsync()
@@ -260,7 +261,8 @@
 
   private async Task PollStatusAsync()
   {
-    if (_disposed) return;
+    if (_disposed || _polling) return;
+    _polling = true;
     try
     {
       var available = await PhoneApi.IsAvailableAsync();
@@ -280,6 +282,7 @@
       }
     }
     catch { /* Polling failure is non-fatal */ }
+    finally { _polling = false; }
   }
 
   // SignalR event handlers
