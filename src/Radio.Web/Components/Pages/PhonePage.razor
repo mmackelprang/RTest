@@ -352,10 +352,12 @@
     _btStatus = btTask.Result;
     _pbapStatus = pbapTask.Result;
 
-    // Load PBAP contacts if a device is connected
-    if (_btStatus?.ConnectedDevice != null)
+    // Load PBAP contacts — prefer connected device, fall back to most recently synced
+    var pbapDeviceAddress = _btStatus?.ConnectedDevice?.Address
+      ?? _pbapStatus?.Devices.OrderByDescending(d => d.LastSynced).FirstOrDefault()?.DeviceAddress;
+    if (pbapDeviceAddress != null)
     {
-      _pbapContacts = await PbapApi.GetContactsAsync(_btStatus.ConnectedDevice.Address);
+      _pbapContacts = await PbapApi.GetContactsAsync(pbapDeviceAddress);
     }
     RebuildMergedContacts();
 
