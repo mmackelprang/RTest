@@ -228,7 +228,8 @@
           @* Merged contacts grid *@
           <RadzenDataGrid Data="@MergedContacts" TItem="MergedContact"
             AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Simple"
-            Style="height: calc(100vh - 210px)" class="contacts-grid">
+            AllowVirtualization="true" Style="height: calc(100vh - 210px)"
+            class="contacts-grid">
             <Columns>
               <RadzenDataGridColumn TItem="MergedContact" Property="Name" Title="Name" Width="200px" />
               <RadzenDataGridColumn TItem="MergedContact" Property="Phone" Title="Phone" Width="160px">
