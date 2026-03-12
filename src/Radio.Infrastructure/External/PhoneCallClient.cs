@@ -104,6 +104,15 @@ public class PhoneCallClient : IPhoneIntegrationService
     }
   }
 
+  /// <inheritdoc />
+  public async Task ReportCallerResolvedAsync(string phoneNumber, string resolvedName, CancellationToken ct = default)
+  {
+    if (_hubConnection is not null && _hubConnection.State == HubConnectionState.Connected)
+    {
+      await _hubConnection.SendAsync("ReportCallerResolved", phoneNumber, resolvedName, ct);
+    }
+  }
+
   private void OnCallStateChanged(string state, string phoneNumber)
   {
     OnCallStateChangedWithName(state, phoneNumber, callerName: null);

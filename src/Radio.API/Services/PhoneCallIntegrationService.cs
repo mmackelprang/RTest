@@ -143,6 +143,19 @@ public class PhoneCallIntegrationService : BackgroundService
     {
       _logger.LogError(ex, "Error playing incoming call announcement");
     }
+
+    // Send resolved name back to RotaryPhone for UI/logging
+    if (!string.IsNullOrEmpty(e.PhoneNumber))
+    {
+      try
+      {
+        await _phoneClient.ReportCallerResolvedAsync(e.PhoneNumber, callerName);
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Failed to send resolved caller name to RotaryPhone");
+      }
+    }
   }
 
   private async Task BroadcastPhoneStateAsync(PhoneCallStateChangedEventArgs e)
