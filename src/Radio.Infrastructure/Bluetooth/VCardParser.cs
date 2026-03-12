@@ -54,11 +54,13 @@ public static class VCardParser
 
       if (!inCard) continue;
 
-      if (trimmed.StartsWith("FN", StringComparison.OrdinalIgnoreCase))
+      if (trimmed.StartsWith("FN:", StringComparison.OrdinalIgnoreCase)
+        || trimmed.StartsWith("FN;", StringComparison.OrdinalIgnoreCase))
       {
         currentName = ExtractFieldValue(trimmed);
       }
-      else if (trimmed.StartsWith("TEL", StringComparison.OrdinalIgnoreCase))
+      else if (trimmed.StartsWith("TEL:", StringComparison.OrdinalIgnoreCase)
+        || trimmed.StartsWith("TEL;", StringComparison.OrdinalIgnoreCase))
       {
         var raw = ExtractFieldValue(trimmed);
         var normalized = PhoneNumberNormalizer.Normalize(raw);

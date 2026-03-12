@@ -11,7 +11,6 @@ Requires: dbus-python, PyGObject (gi), bluez-obexd running as user service.
 """
 import sys
 import os
-import signal
 
 def main():
   if len(sys.argv) < 3:

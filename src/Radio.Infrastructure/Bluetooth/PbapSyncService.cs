@@ -13,29 +13,31 @@ public class PbapSyncService : BackgroundService, IPbapSyncService
 {
   private readonly IBluetoothService _bluetoothService;
   private readonly IPbapContactRepository _contactRepo;
-  private readonly PbapOptions _options;
+  private readonly IOptionsMonitor<PbapOptions> _optionsMonitor;
   private readonly ILogger<PbapSyncService> _logger;
   private readonly SemaphoreSlim _syncLock = new(1, 1);
+
+  private PbapOptions Options => _optionsMonitor.CurrentValue;
 
   public PbapSyncService(
     IBluetoothService bluetoothService,
     IPbapContactRepository contactRepo,
-    IOptions<PbapOptions> options,
+    IOptionsMonitor<PbapOptions> optionsMonitor,
     ILogger<PbapSyncService> logger)
   {
     _bluetoothService = bluetoothService;
     _contactRepo = contactRepo;
-    _options = options.Value;
+    _optionsMonitor = optionsMonitor;
     _logger = logger;
   }
 
   protected override Task ExecuteAsync(CancellationToken stoppingToken)
   {
-    if (_options.AutoSyncOnConnect)
+    if (Options.AutoSyncOnConnect)
     {
       _bluetoothService.DeviceConnected += OnDeviceConnected;
     }
-    _logger.LogInformation("PBAP sync service started (AutoSync={AutoSync})", _options.AutoSyncOnConnect);
+    _logger.LogInformation("PBAP sync service started (AutoSync={AutoSync})", Options.AutoSyncOnConnect);
     return Task.CompletedTask;
   }
 
@@ -55,7 +57,7 @@ public class PbapSyncService : BackgroundService, IPbapSyncService
       var summary = await _contactRepo.GetSyncSummaryAsync(address);
       var lastSynced = summary.FirstOrDefault().LastSynced;
 
-      if (lastSynced == null || (DateTime.UtcNow - lastSynced.Value).TotalHours >= _options.SyncStaleThresholdHours)
+      if (lastSynced == null || (DateTime.UtcNow - lastSynced.Value).TotalHours >= Options.SyncStaleThresholdHours)
       {
         _logger.LogInformation("PBAP sync needed for {Address} (last sync: {LastSync})", address, lastSynced?.ToString() ?? "never");
         await SyncContactsAsync(address);
@@ -203,7 +205,7 @@ public class PbapSyncService : BackgroundService, IPbapSyncService
       throw new FileNotFoundException($"PBAP download script not found at {scriptPath}");
     }
 
-    var timeout = _options.TransferTimeoutSeconds;
+    var timeout = Options.TransferTimeoutSeconds;
     var psi = new ProcessStartInfo("python3", $"\"{scriptPath}\" \"{deviceAddress}\" \"{outputPath}\" {timeout}")
     {
       RedirectStandardOutput = true,
@@ -281,7 +283,7 @@ public class PbapSyncService : BackgroundService, IPbapSyncService
           DeviceName = device?.Name,
           ContactCount = s.ContactCount,
           LastSynced = s.LastSynced,
-          IsStale = s.LastSynced == null || (DateTime.UtcNow - s.LastSynced.Value).TotalHours >= _options.SyncStaleThresholdHours
+          IsStale = s.LastSynced == null || (DateTime.UtcNow - s.LastSynced.Value).TotalHours >= Options.SyncStaleThresholdHours
         };
       }).ToList()
     };

@@ -22,10 +22,11 @@ public class PbapSyncServiceTests : IDisposable
     _repo.InitializeAsync().GetAwaiter().GetResult();
 
     var btService = new Mock<IBluetoothService>();
-    var options = Options.Create(new PbapOptions());
+    var optionsMonitor = new Mock<IOptionsMonitor<PbapOptions>>();
+    optionsMonitor.Setup(m => m.CurrentValue).Returns(new PbapOptions());
 
     _service = new PbapSyncService(
-      btService.Object, _repo, options,
+      btService.Object, _repo, optionsMonitor.Object,
       NullLogger<PbapSyncService>.Instance);
   }
 
