@@ -31,14 +31,17 @@ public class PbapSyncService : BackgroundService, IPbapSyncService
     _logger = logger;
   }
 
-  protected override Task ExecuteAsync(CancellationToken stoppingToken)
+  protected override async Task ExecuteAsync(CancellationToken stoppingToken)
   {
     if (Options.AutoSyncOnConnect)
     {
       _bluetoothService.DeviceConnected += OnDeviceConnected;
     }
     _logger.LogInformation("PBAP sync service started (AutoSync={AutoSync})", Options.AutoSyncOnConnect);
-    return Task.CompletedTask;
+
+    // Keep the background service alive — actual work is event-driven via DeviceConnected.
+    try { await Task.Delay(Timeout.Infinite, stoppingToken); }
+    catch (OperationCanceledException) { /* normal shutdown */ }
   }
 
   public override Task StopAsync(CancellationToken cancellationToken)

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Radio.Core.Interfaces.Bluetooth;
 using Radio.Core.Models;
@@ -69,34 +70,44 @@ public class PbapContactRepository : IPbapContactRepository
     {
       using var transaction = conn.BeginTransaction();
 
-      // Delete existing contacts for this device
-      using (var delCmd = conn.CreateCommand())
+      try
       {
-        delCmd.CommandText = "DELETE FROM PbapContacts WHERE DeviceAddress = @addr";
-        delCmd.Parameters.AddWithValue("@addr", deviceAddress);
-        await delCmd.ExecuteNonQueryAsync(ct);
-      }
-
-      // Insert new contacts (one row per phone number)
-      var now = DateTime.UtcNow;
-      foreach (var contact in contacts)
-      {
-        foreach (var number in contact.PhoneNumbers)
+        // Delete existing contacts for this device
+        using (var delCmd = conn.CreateCommand())
         {
-          using var insCmd = conn.CreateCommand();
-          insCmd.CommandText = """
-              INSERT OR REPLACE INTO PbapContacts (DeviceAddress, DisplayName, PhoneNumber, LastSynced)
-              VALUES (@addr, @name, @phone, @synced)
-              """;
-          insCmd.Parameters.AddWithValue("@addr", deviceAddress);
-          insCmd.Parameters.AddWithValue("@name", contact.DisplayName);
-          insCmd.Parameters.AddWithValue("@phone", number);
-          insCmd.Parameters.AddWithValue("@synced", now.ToString("o"));
-          await insCmd.ExecuteNonQueryAsync(ct);
+          delCmd.Transaction = transaction;
+          delCmd.CommandText = "DELETE FROM PbapContacts WHERE DeviceAddress = @addr";
+          delCmd.Parameters.AddWithValue("@addr", deviceAddress);
+          await delCmd.ExecuteNonQueryAsync(ct);
         }
-      }
 
-      transaction.Commit();
+        // Insert new contacts (one row per phone number)
+        var now = DateTime.UtcNow;
+        foreach (var contact in contacts)
+        {
+          foreach (var number in contact.PhoneNumbers)
+          {
+            using var insCmd = conn.CreateCommand();
+            insCmd.Transaction = transaction;
+            insCmd.CommandText = """
+                INSERT OR REPLACE INTO PbapContacts (DeviceAddress, DisplayName, PhoneNumber, LastSynced)
+                VALUES (@addr, @name, @phone, @synced)
+                """;
+            insCmd.Parameters.AddWithValue("@addr", deviceAddress);
+            insCmd.Parameters.AddWithValue("@name", contact.DisplayName);
+            insCmd.Parameters.AddWithValue("@phone", number);
+            insCmd.Parameters.AddWithValue("@synced", now.ToString("o"));
+            await insCmd.ExecuteNonQueryAsync(ct);
+          }
+        }
+
+        transaction.Commit();
+      }
+      catch
+      {
+        transaction.Rollback();
+        throw;
+      }
     }
     finally
     {
@@ -205,7 +216,7 @@ public class PbapContactRepository : IPbapContactRepository
       {
         var addr = reader.GetString(0);
         var count = reader.GetInt32(1);
-        DateTime? synced = reader.IsDBNull(2) ? null : DateTime.Parse(reader.GetString(2));
+        DateTime? synced = reader.IsDBNull(2) ? null : DateTime.Parse(reader.GetString(2), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
         results.Add((addr, count, synced));
       }
 
