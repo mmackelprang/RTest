@@ -2,26 +2,127 @@
 .phone-page { padding: 8px; height: 100%; }
 .phone-dashboard { display: flex; flex-direction: column; gap: 12px; }
 .phone-card { padding: 16px; }
-.card-title { margin: 0 0 12px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px; }
-.status-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-.status-item { display: flex; flex-direction: column; gap: 4px; }
-.status-label { font-size: 0.85rem; color: var(--rz-text-secondary-color); }
-.status-detail { font-size: 0.8rem; font-family: monospace; opacity: 0.7; }
-.phone-state-display { text-align: center; padding: 16px 0; }
-::deep .call-state-badge { font-size: 1.1rem !important; padding: 8px 24px !important; }
-.call-info { margin-top: 12px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+
+/* Section titles — uppercase monospace like the Node version */
+.section-title {
+  margin: 0 0 12px 0;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+.section-title-green { color: var(--rz-success); }
+.section-title-amber { color: #e8a838; }
+
+/* ── System Status Bar ── */
+.system-status-card { border-left: 3px solid var(--rz-success); }
+.status-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+}
+.status-column {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 16px;
+}
+.status-column:first-child { padding-left: 0; }
+.status-column:last-child { padding-right: 0; }
+.status-column-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--rz-text-secondary-color);
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+.status-detail {
+  font-size: 0.8rem;
+  font-family: monospace;
+  opacity: 0.7;
+}
+.status-divider {
+  width: 1px;
+  align-self: stretch;
+  min-height: 36px;
+  background: var(--rz-base-600);
+}
+
+/* ── Two-column Dashboard Layout ── */
+.dashboard-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* Left: Phone Status */
+.phone-status-card {
+  border-left: 3px solid #e8a838;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.phone-state-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 0;
+  width: 100%;
+  gap: 16px;
+}
+.current-status-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--rz-text-secondary-color);
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+::deep .call-state-badge {
+  font-size: 1.4rem !important;
+  padding: 12px 40px !important;
+  letter-spacing: 0.1em;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+.call-info {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
 .phone-number { font-family: monospace; font-size: 1.1rem; }
 .caller-name { color: var(--rz-text-secondary-color); }
 .call-duration { font-family: monospace; color: var(--rz-text-secondary-color); }
+
+/* Right: Dev Controls */
+.dev-controls-card { border-left: 3px solid #e8a838; }
+.dev-description {
+  font-size: 0.85rem;
+  color: var(--rz-text-secondary-color);
+  margin: 0 0 16px 0;
+}
 .dev-controls { display: flex; flex-direction: column; gap: 16px; }
 .dev-section { display: flex; flex-direction: column; gap: 8px; }
-.dev-label { font-size: 0.85rem; font-weight: 600; color: var(--rz-text-secondary-color); }
+.dev-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--rz-text-color);
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
 .dev-buttons { display: flex; gap: 8px; }
+::deep .full-width-btn { width: 100%; }
 .dev-dialer { display: flex; gap: 8px; align-items: center; }
-.dial-input { max-width: 200px; }
+::deep .dial-input { flex: 1; }
+
+/* ── Contacts Tab ── */
+.card-title { margin: 0 0 12px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px; }
 .contacts-header, .history-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 ::deep .contacts-grid { margin-top: 8px; }
 .action-btn { margin: 0 2px; }
+
+/* ── Call History Tab ── */
 .empty-state { text-align: center; padding: 32px; color: var(--rz-text-secondary-color); }
 .history-list { display: flex; flex-direction: column; gap: 4px; }
 .history-item { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 4px; background: var(--rz-base-background-color); }
