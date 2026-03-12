@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -13,6 +15,7 @@ public class PbapSyncService : BackgroundService, IPbapSyncService
   private readonly IPbapContactRepository _contactRepo;
   private readonly PbapOptions _options;
   private readonly ILogger<PbapSyncService> _logger;
+  private readonly SemaphoreSlim _syncLock = new(1, 1);
 
   public PbapSyncService(
     IBluetoothService bluetoothService,
@@ -71,30 +74,51 @@ public class PbapSyncService : BackgroundService, IPbapSyncService
   public async Task<PbapSyncResult> SyncContactsAsync(string deviceAddress, CancellationToken ct = default)
   {
     _logger.LogInformation("Starting PBAP sync for {Address}", deviceAddress);
+
+    if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+    {
+      _logger.LogWarning("PBAP sync requires Linux with BlueZ/obexd — skipped on {OS}", RuntimeInformation.OSDescription);
+      return new PbapSyncResult { Success = false, ErrorMessage = "PBAP sync requires Linux" };
+    }
+
+    if (!await _syncLock.WaitAsync(TimeSpan.Zero, ct))
+    {
+      _logger.LogInformation("PBAP sync already in progress for another request — skipping");
+      return new PbapSyncResult { Success = false, ErrorMessage = "Sync already in progress" };
+    }
+
     string? tempFile = null;
 
     try
     {
-      // D-Bus OBEX session lifecycle:
-      // 1. Connect to session bus
-      // 2. CreateSession on org.bluez.obex.Client1 with { "Target": "PBAP" }
-      // 3. Get PhonebookAccess1 interface
-      // 4. Select("int", "pb")
-      // 5. PullAll(tempFile, filters) → Transfer object
-      // 6. Monitor Transfer1.Status via PropertiesChanged signal + TaskCompletionSource
-      // 7. On "complete": read temp file
+      // Use a path outside /tmp — the service runs with PrivateTmp=true, but obexd
+      // (separate user service) writes to the real filesystem. A /tmp path would be
+      // invisible across the mount namespace boundary.
+      var dataDir = Path.Combine(AppContext.BaseDirectory, "..", "data");
+      Directory.CreateDirectory(dataDir);
+      tempFile = Path.Combine(dataDir, $"pbap-sync-{deviceAddress.Replace(":", "")}-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}.vcf");
 
-      tempFile = Path.Combine(Path.GetTempPath(), $"pbap-sync-{deviceAddress.Replace(":", "")}-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}.vcf");
+      // Ensure obexd is running (user service)
+      await EnsureObexdRunningAsync(ct);
 
-      // D-Bus OBEX PBAP session not yet implemented — requires Linux + obexd.
-      // The structure is ready; the actual D-Bus calls will be implemented
-      // when tested on the target device with obexd running.
-      throw new NotImplementedException("D-Bus OBEX PBAP session not yet implemented — requires Linux + obexd");
-    }
-    catch (NotImplementedException)
-    {
-      _logger.LogWarning("PBAP D-Bus implementation pending — sync skipped for {Address}", deviceAddress);
-      return new PbapSyncResult { Success = false, ErrorMessage = "PBAP D-Bus not yet implemented" };
+      // Run the Python helper script that manages the D-Bus OBEX session lifetime.
+      // The script creates a PBAP session, selects the internal phonebook,
+      // downloads all contacts via PullAll, monitors the transfer, and exits.
+      await DownloadPhonebookAsync(deviceAddress, tempFile, ct);
+
+      if (!File.Exists(tempFile) || new FileInfo(tempFile).Length == 0)
+      {
+        _logger.LogWarning("PBAP download produced empty file for {Address}", deviceAddress);
+        return new PbapSyncResult { Success = true, ContactCount = 0 };
+      }
+
+      var result = await ProcessDownloadedVcfAsync(deviceAddress, tempFile, ct);
+
+      // OBEX session teardown causes a LocalHost disconnect, which suppresses
+      // auto-reconnect. Give BlueZ a moment to finish cleanup, then reconnect.
+      _ = ReconnectAfterSyncAsync(deviceAddress);
+
+      return result;
     }
     catch (Exception ex)
     {
@@ -103,13 +127,121 @@ public class PbapSyncService : BackgroundService, IPbapSyncService
     }
     finally
     {
-      // Clean up temp file
       if (tempFile != null && File.Exists(tempFile))
       {
         try { File.Delete(tempFile); }
         catch { /* best effort */ }
       }
+      _syncLock.Release();
     }
+  }
+
+  private async Task ReconnectAfterSyncAsync(string deviceAddress)
+  {
+    try
+    {
+      // Wait for OBEX/BlueZ to finish tearing down the PBAP RFCOMM channel
+      await Task.Delay(3000);
+      _logger.LogInformation("Reconnecting to {Address} after PBAP sync", deviceAddress);
+      await _bluetoothService.ConnectAsync(deviceAddress);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to reconnect after PBAP sync for {Address}", deviceAddress);
+    }
+  }
+
+  private async Task EnsureObexdRunningAsync(CancellationToken ct)
+  {
+    var psi = new ProcessStartInfo("systemctl", "--user is-active obex")
+    {
+      RedirectStandardOutput = true,
+      RedirectStandardError = true,
+      UseShellExecute = false,
+      CreateNoWindow = true
+    };
+
+    using var proc = Process.Start(psi);
+    if (proc == null) return;
+
+    var output = await proc.StandardOutput.ReadToEndAsync(ct);
+    await proc.WaitForExitAsync(ct);
+
+    if (proc.ExitCode != 0 || !output.Trim().Equals("active", StringComparison.OrdinalIgnoreCase))
+    {
+      _logger.LogInformation("Starting obexd user service");
+      var startPsi = new ProcessStartInfo("systemctl", "--user start obex")
+      {
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false,
+        CreateNoWindow = true
+      };
+
+      using var startProc = Process.Start(startPsi);
+      if (startProc != null)
+      {
+        await startProc.WaitForExitAsync(ct);
+        if (startProc.ExitCode != 0)
+        {
+          _logger.LogWarning("Failed to start obexd (exit code {Code})", startProc.ExitCode);
+        }
+        // Give obexd a moment to register on D-Bus
+        await Task.Delay(500, ct);
+      }
+    }
+  }
+
+  private async Task DownloadPhonebookAsync(string deviceAddress, string outputPath, CancellationToken ct)
+  {
+    // Locate the Python helper script — deployed to Bluetooth/ alongside the executable.
+    // Use AppContext.BaseDirectory (works with single-file publish, unlike Assembly.Location).
+    var scriptPath = Path.Combine(AppContext.BaseDirectory, "Bluetooth", "pbap_download.py");
+
+    if (!File.Exists(scriptPath))
+    {
+      throw new FileNotFoundException($"PBAP download script not found at {scriptPath}");
+    }
+
+    var timeout = _options.TransferTimeoutSeconds;
+    var psi = new ProcessStartInfo("python3", $"\"{scriptPath}\" \"{deviceAddress}\" \"{outputPath}\" {timeout}")
+    {
+      RedirectStandardOutput = true,
+      RedirectStandardError = true,
+      UseShellExecute = false,
+      CreateNoWindow = true
+    };
+
+    // Ensure DBUS_SESSION_BUS_ADDRESS is set for the session bus
+    if (!psi.Environment.ContainsKey("DBUS_SESSION_BUS_ADDRESS"))
+    {
+      var uid = Environment.GetEnvironmentVariable("UID")
+        ?? (Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR")?.Split('/').LastOrDefault());
+      var runtimeDir = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR") ?? $"/run/user/{uid ?? "1000"}";
+      psi.Environment["DBUS_SESSION_BUS_ADDRESS"] = $"unix:path={runtimeDir}/bus";
+    }
+
+    _logger.LogDebug("Running PBAP download: python3 {Script} {Address} {Output} {Timeout}",
+      scriptPath, deviceAddress, outputPath, timeout);
+
+    using var proc = Process.Start(psi)
+      ?? throw new InvalidOperationException("Failed to start PBAP download process");
+
+    using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+    timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeout + 10)); // script timeout + margin
+
+    var stdout = await proc.StandardOutput.ReadToEndAsync(timeoutCts.Token);
+    var stderr = await proc.StandardError.ReadToEndAsync(timeoutCts.Token);
+
+    await proc.WaitForExitAsync(timeoutCts.Token);
+
+    if (proc.ExitCode != 0)
+    {
+      var errorDetail = !string.IsNullOrWhiteSpace(stderr) ? stderr.Trim() : stdout.Trim();
+      throw new InvalidOperationException($"PBAP download failed (exit {proc.ExitCode}): {errorDetail}");
+    }
+
+    _logger.LogInformation("PBAP download complete: {Result}", stdout.Trim());
   }
 
   /// <summary>
