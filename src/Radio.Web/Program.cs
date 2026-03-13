@@ -290,7 +290,7 @@ builder.Services.AddHttpClient("AlbumArtProxy", client =>
 });
 
 // RotaryPhone.API client (separate service on port 5004)
-var phoneApiBaseUrl = builder.Configuration.GetValue<string>("RotaryPhone:ApiBaseUrl") ?? "http://localhost:5004";
+var phoneApiBaseUrl = builder.Configuration.GetValue<string>("RotaryPhone:ApiBaseUrl") ?? "http://radio:5004";
 builder.Services.AddHttpClient<PhoneApiService>(client =>
 {
   client.BaseAddress = new Uri(phoneApiBaseUrl);

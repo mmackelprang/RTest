@@ -2,6 +2,8 @@ using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 
 namespace Radio.Infrastructure.Platform.Bluetooth;
@@ -18,6 +20,7 @@ namespace Radio.Infrastructure.Platform.Bluetooth;
 internal sealed class BluetoothMgmtMonitor : BackgroundService
 {
   private readonly ILogger<BluetoothMgmtMonitor> _logger;
+  private readonly int _hciIndex;
   private readonly ConcurrentDictionary<string, BluetoothDisconnectReason> _lastReasons = new(StringComparer.OrdinalIgnoreCase);
   private int _socketFd = -1;
 
@@ -31,9 +34,21 @@ internal sealed class BluetoothMgmtMonitor : BackgroundService
   // Mgmt protocol opcodes
   private const ushort MGMT_OP_READ_VERSION = 0x0001;
 
-  public BluetoothMgmtMonitor(ILogger<BluetoothMgmtMonitor> logger)
+  public BluetoothMgmtMonitor(ILogger<BluetoothMgmtMonitor> logger, IOptions<BluetoothOptions> options)
   {
     _logger = logger;
+    _hciIndex = ParseHciIndex(options.Value.AdapterName);
+  }
+
+  /// <summary>
+  /// Parses the HCI device index from an adapter name (e.g., "hci0" → 0, "hci1" → 1).
+  /// Returns -1 if the name is null/empty or doesn't match the expected format.
+  /// </summary>
+  internal static int ParseHciIndex(string? adapterName)
+  {
+    if (string.IsNullOrEmpty(adapterName) || !adapterName.StartsWith("hci"))
+      return -1;
+    return int.TryParse(adapterName.AsSpan(3), out var index) ? index : -1;
   }
 
   /// <summary>
@@ -76,7 +91,8 @@ internal sealed class BluetoothMgmtMonitor : BackgroundService
         return;
       }
 
-      _logger.LogInformation("BlueZ mgmt socket opened — listening for disconnect events");
+      _logger.LogInformation("BlueZ mgmt socket opened — listening for disconnect events (filter: {Filter})",
+        _hciIndex >= 0 ? $"hci{_hciIndex}" : "all adapters");
       await ReadLoopAsync(stoppingToken);
     }
     catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -126,13 +142,26 @@ internal sealed class BluetoothMgmtMonitor : BackgroundService
       }
 
       // Log all received mgmt events for debugging
+      var span = buffer.AsSpan(0, bytesRead);
       var opcode = bytesRead >= 2
         ? BitConverter.ToUInt16(buffer, 0)
         : 0;
       _logger.LogDebug("Mgmt event received: {Bytes} bytes, opcode=0x{Opcode:X4}", bytesRead, opcode);
 
+      // Filter events by controller index when configured
+      if (_hciIndex >= 0)
+      {
+        var eventIndex = BluetoothMgmtEventParser.GetControllerIndex(span);
+        if (eventIndex >= 0 && eventIndex != _hciIndex)
+        {
+          _logger.LogDebug("Skipping mgmt event from hci{Index} (configured: hci{Configured})",
+            eventIndex, _hciIndex);
+          continue;
+        }
+      }
+
       if (BluetoothMgmtEventParser.TryParseDeviceDisconnected(
-        buffer.AsSpan(0, bytesRead), out var address, out var reason))
+        span, out var address, out var reason))
       {
         _lastReasons[address] = reason;
         _logger.LogInformation("Mgmt disconnect event: {Address} reason={Reason}", address, reason);

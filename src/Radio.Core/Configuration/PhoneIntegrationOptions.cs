@@ -13,10 +13,10 @@ public class PhoneIntegrationOptions
   public bool Enabled { get; set; } = false;
 
   /// <summary>SignalR hub URL for the RotaryPhone server.</summary>
-  public string HubUrl { get; set; } = "http://localhost:5555/hubs/phone";
+  public string HubUrl { get; set; } = "http://radio:5004/hub";
 
   /// <summary>Base URL for the RotaryPhone contacts REST API.</summary>
-  public string ContactsApiBaseUrl { get; set; } = "http://localhost:5555";
+  public string ContactsApiBaseUrl { get; set; } = "http://radio:5004";
 
   /// <summary>Play ring sound through radio speakers on incoming call. Disable when physical phone handles ringing.</summary>
   public bool PlayRingSound { get; set; } = false;
