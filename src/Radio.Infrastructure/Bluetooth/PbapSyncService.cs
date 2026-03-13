@@ -213,7 +213,19 @@ public class PbapSyncService : BackgroundService, IPbapSyncService
 
     var timeout = Options.TransferTimeoutSeconds;
     var adapterName = _btOptions.Value.AdapterName;
-    var adapterArg = !string.IsNullOrEmpty(adapterName) ? $" --adapter {adapterName}" : "";
+    var adapterArg = "";
+    if (!string.IsNullOrEmpty(adapterName))
+    {
+      // Validate adapter name to prevent command injection (must be hciN format)
+      if (!System.Text.RegularExpressions.Regex.IsMatch(adapterName, @"^hci\d+$"))
+      {
+        _logger.LogWarning("Invalid AdapterName '{AdapterName}', ignoring for PBAP download", adapterName);
+      }
+      else
+      {
+        adapterArg = $" --adapter {adapterName}";
+      }
+    }
     var psi = new ProcessStartInfo("python3", $"\"{scriptPath}\" \"{deviceAddress}\" \"{outputPath}\" {timeout}{adapterArg}")
     {
       RedirectStandardOutput = true,

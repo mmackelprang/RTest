@@ -183,8 +183,9 @@ Configuration fields:
 | Field | Description | Default |
 |-------|-------------|---------|
 | `Enabled` | Master switch for phone integration | `false` |
-| `HubUrl` | RotaryPhone SignalR hub URL | `http://localhost:5555/hubs/phone` |
-| `ContactsApiBaseUrl` | RotaryPhone contacts REST API base URL | `http://localhost:5555` |
+| `HubUrl` | RotaryPhone SignalR hub URL | `http://radio:5004/hub` |
+| `ContactsApiBaseUrl` | RotaryPhone contacts REST API base URL | `http://radio:5004` |
+| `PlayRingSound` | Play ring sound through radio speakers (disable when physical phone rings) | `false` |
 | `RingSoundPath` | Path to ring sound file (relative to app root, or absolute) | `media/sounds/phone-ring.wav` |
 | `RingPriority` | Audio ducking priority for the ring sound (1-10) | `9` |
 | `AnnouncementPriority` | Audio ducking priority for TTS caller announcement (1-10) | `8` |
