@@ -128,14 +128,21 @@ public class PhoneCallIntegrationService : BackgroundService
 
     try
     {
-      if (File.Exists(opts.RingSoundPath))
+      if (opts.PlayRingSound)
       {
-        await _announcementService.PlaySoundWithAnnouncementAsync(
-          opts.RingSoundPath, announcement, opts.RingPriority);
+        if (File.Exists(opts.RingSoundPath))
+        {
+          await _announcementService.PlaySoundWithAnnouncementAsync(
+            opts.RingSoundPath, announcement, opts.RingPriority);
+        }
+        else
+        {
+          _logger.LogWarning("Ring sound enabled but file not found: {Path}. Playing TTS only.", opts.RingSoundPath);
+          await _announcementService.AnnounceAsync(announcement, opts.AnnouncementPriority);
+        }
       }
       else
       {
-        _logger.LogWarning("Ring sound file not found: {Path}. Playing TTS only.", opts.RingSoundPath);
         await _announcementService.AnnounceAsync(announcement, opts.AnnouncementPriority);
       }
     }

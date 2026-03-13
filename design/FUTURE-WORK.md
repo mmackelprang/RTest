@@ -490,7 +490,7 @@ The HID report format is **assumed** based on typical KY-040 Pico implementation
 ### What Needs Verification
 
 **SignalR hub contract** (assumed):
-- Hub URL: `http://localhost:5555/hubs/phone`
+- Hub URL: `http://radio:5004/hub`
 - Server method: `CallStateChanged(string state, string phoneNumber)` — may also send caller name as 3rd param
 - State values: `"Ringing"`, `"InCall"`, `"Ended"`, `"Idle"` — lenient parser handles variants
 

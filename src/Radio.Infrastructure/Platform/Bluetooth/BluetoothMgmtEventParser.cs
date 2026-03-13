@@ -17,6 +17,17 @@ internal static class BluetoothMgmtEventParser
   internal const int DisconnectedPayloadSize = 8; // addr_info(7) + reason(1)
 
   /// <summary>
+  /// Extracts the controller index from a mgmt event header (bytes 2-3, little-endian).
+  /// Returns -1 if the buffer is too short.
+  /// </summary>
+  public static int GetControllerIndex(ReadOnlySpan<byte> data)
+  {
+    if (data.Length < 4)
+      return -1;
+    return BinaryPrimitives.ReadUInt16LittleEndian(data.Slice(2));
+  }
+
+  /// <summary>
   /// Attempts to parse a MGMT_EV_DEVICE_DISCONNECTED event from raw bytes.
   /// </summary>
   /// <param name="data">Raw bytes received from mgmt socket.</param>

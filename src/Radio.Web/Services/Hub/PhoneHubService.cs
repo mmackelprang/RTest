@@ -42,7 +42,7 @@ public class PhoneHubService : IAsyncDisposable
         return;
       }
 
-      var hubUrl = _configuration.GetValue<string>("RotaryPhone:HubUrl") ?? "http://localhost:5004/hub";
+      var hubUrl = _configuration.GetValue<string>("RotaryPhone:HubUrl") ?? "http://radio:5004/hub";
 
       _hubConnection = new HubConnectionBuilder()
         .WithUrl(hubUrl)

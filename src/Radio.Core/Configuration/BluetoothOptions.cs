@@ -57,6 +57,13 @@ public class BluetoothOptions
   /// </summary>
   public string? PreferredAdapterAddress { get; set; }
 
+  /// <summary>
+  /// BlueZ adapter name (e.g., "hci0"). When set, restricts all Bluetooth operations
+  /// to this adapter only. Prevents conflicts when multiple adapters are present
+  /// and other services (e.g., RotaryPhone) own a different adapter.
+  /// </summary>
+  public string? AdapterName { get; set; } = "hci0";
+
   /// <summary>Automatically reconnect to known device after unexpected disconnect.</summary>
   public bool AutoReconnect { get; set; } = true;
 

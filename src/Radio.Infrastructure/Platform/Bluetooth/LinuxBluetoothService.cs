@@ -216,15 +216,30 @@ internal sealed class LinuxBluetoothService : IBluetoothService
       _objectManager = _connection.CreateProxy<Linux.IObjectManager>(Linux.BluezConstants.ServiceName, "/");
       var objects = await _objectManager.GetManagedObjectsAsync();
 
-      // Find adapter — prefer PreferredAdapterAddress if configured
+      // Find adapter — filter by AdapterName if configured, then prefer PreferredAdapterAddress
+      var adapterName = _options.AdapterName;
       var preferredAddress = _options.PreferredAdapterAddress;
       Linux.IAdapter1? fallbackAdapter = null;
       ObjectPath? fallbackPath = null;
+
+      // Build adapter path prefix filter (e.g., "/org/bluez/hci0")
+      string? adapterPathPrefix = !string.IsNullOrEmpty(adapterName)
+        ? $"/org/bluez/{adapterName}"
+        : null;
 
       foreach (var obj in objects)
       {
         if (!obj.Value.ContainsKey(Linux.BluezConstants.AdapterInterface))
         {
+          continue;
+        }
+
+        // Skip adapters that don't match the configured adapter name
+        if (adapterPathPrefix != null &&
+            !obj.Key.ToString().StartsWith(adapterPathPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+          _logger.LogDebug("Skipping adapter at {Path} — doesn't match configured adapter {Name}",
+            obj.Key, adapterName);
           continue;
         }
 
@@ -249,7 +264,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService
           }
         }
 
-        // Keep the first adapter as fallback
+        // Keep the first matching adapter as fallback
         fallbackAdapter ??= candidate;
         fallbackPath ??= obj.Key;
       }

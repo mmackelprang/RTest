@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Download phonebook contacts from a Bluetooth device via PBAP/OBEX D-Bus.
 
-Usage: pbap_download.py <device_address> <output_vcf_path> [timeout_seconds]
+Usage: pbap_download.py <device_address> <output_vcf_path> [timeout_seconds] [--adapter hci0]
 
 Connects to the BlueZ OBEX daemon on the D-Bus session bus, creates a PBAP
 session, selects the internal phonebook, and downloads all contacts as a VCF
@@ -13,13 +13,25 @@ import sys
 import os
 
 def main():
-  if len(sys.argv) < 3:
-    print("Usage: pbap_download.py <device_address> <output_vcf_path> [timeout_seconds]", file=sys.stderr)
+  # Parse --adapter flag from any position
+  adapter = None
+  args = []
+  i = 1
+  while i < len(sys.argv):
+    if sys.argv[i] == '--adapter' and i + 1 < len(sys.argv):
+      adapter = sys.argv[i + 1]
+      i += 2
+    else:
+      args.append(sys.argv[i])
+      i += 1
+
+  if len(args) < 2:
+    print("Usage: pbap_download.py <device_address> <output_vcf_path> [timeout_seconds] [--adapter hci0]", file=sys.stderr)
     sys.exit(1)
 
-  device_address = sys.argv[1]
-  output_path = sys.argv[2]
-  timeout = int(sys.argv[3]) if len(sys.argv) > 3 else 30
+  device_address = args[0]
+  output_path = args[1]
+  timeout = int(args[2]) if len(args) > 2 else 30
 
   import dbus
   import dbus.mainloop.glib
@@ -58,7 +70,11 @@ def main():
       'org.bluez.obex.Client1'
     )
 
-    session_path = str(client.CreateSession(device_address, {'Target': dbus.String('pbap')}))
+    session_opts = {'Target': dbus.String('pbap')}
+    if adapter:
+      # Restrict OBEX session to a specific BlueZ adapter (e.g., /org/bluez/hci0)
+      session_opts['Source'] = dbus.String(adapter)
+    session_path = str(client.CreateSession(device_address, session_opts))
 
     # Get PhonebookAccess1 interface
     session_obj = bus.get_object('org.bluez.obex', session_path)

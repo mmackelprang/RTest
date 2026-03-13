@@ -14,6 +14,7 @@ public class PbapSyncService : BackgroundService, IPbapSyncService
   private readonly IBluetoothService _bluetoothService;
   private readonly IPbapContactRepository _contactRepo;
   private readonly IOptionsMonitor<PbapOptions> _optionsMonitor;
+  private readonly IOptions<BluetoothOptions> _btOptions;
   private readonly ILogger<PbapSyncService> _logger;
   private readonly SemaphoreSlim _syncLock = new(1, 1);
 
@@ -23,11 +24,13 @@ public class PbapSyncService : BackgroundService, IPbapSyncService
     IBluetoothService bluetoothService,
     IPbapContactRepository contactRepo,
     IOptionsMonitor<PbapOptions> optionsMonitor,
+    IOptions<BluetoothOptions> btOptions,
     ILogger<PbapSyncService> logger)
   {
     _bluetoothService = bluetoothService;
     _contactRepo = contactRepo;
     _optionsMonitor = optionsMonitor;
+    _btOptions = btOptions;
     _logger = logger;
   }
 
@@ -209,7 +212,21 @@ public class PbapSyncService : BackgroundService, IPbapSyncService
     }
 
     var timeout = Options.TransferTimeoutSeconds;
-    var psi = new ProcessStartInfo("python3", $"\"{scriptPath}\" \"{deviceAddress}\" \"{outputPath}\" {timeout}")
+    var adapterName = _btOptions.Value.AdapterName;
+    var adapterArg = "";
+    if (!string.IsNullOrEmpty(adapterName))
+    {
+      // Validate adapter name to prevent command injection (must be hciN format)
+      if (!System.Text.RegularExpressions.Regex.IsMatch(adapterName, @"^hci\d+$"))
+      {
+        _logger.LogWarning("Invalid AdapterName '{AdapterName}', ignoring for PBAP download", adapterName);
+      }
+      else
+      {
+        adapterArg = $" --adapter {adapterName}";
+      }
+    }
+    var psi = new ProcessStartInfo("python3", $"\"{scriptPath}\" \"{deviceAddress}\" \"{outputPath}\" {timeout}{adapterArg}")
     {
       RedirectStandardOutput = true,
       RedirectStandardError = true,

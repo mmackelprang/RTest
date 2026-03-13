@@ -25,8 +25,10 @@ public class PbapSyncServiceTests : IDisposable
     var optionsMonitor = new Mock<IOptionsMonitor<PbapOptions>>();
     optionsMonitor.Setup(m => m.CurrentValue).Returns(new PbapOptions());
 
+    var btOptions = Options.Create(new BluetoothOptions());
+
     _service = new PbapSyncService(
-      btService.Object, _repo, optionsMonitor.Object,
+      btService.Object, _repo, optionsMonitor.Object, btOptions,
       NullLogger<PbapSyncService>.Instance);
   }
 

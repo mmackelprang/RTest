@@ -263,6 +263,19 @@ builder.Services.AddHttpClient<IntegrationsApiService>(client =>
   return handler;
 });
 
+builder.Services.AddHttpClient<PbapApiService>(client =>
+{
+  client.BaseAddress = new Uri(apiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(60); // PBAP sync can take a while
+})
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
+});
+
 builder.Services.AddHttpClient("AlbumArtProxy", client =>
 {
   client.BaseAddress = new Uri(apiBaseUrl);
@@ -277,7 +290,7 @@ builder.Services.AddHttpClient("AlbumArtProxy", client =>
 });
 
 // RotaryPhone.API client (separate service on port 5004)
-var phoneApiBaseUrl = builder.Configuration.GetValue<string>("RotaryPhone:ApiBaseUrl") ?? "http://localhost:5004";
+var phoneApiBaseUrl = builder.Configuration.GetValue<string>("RotaryPhone:ApiBaseUrl") ?? "http://radio:5004";
 builder.Services.AddHttpClient<PhoneApiService>(client =>
 {
   client.BaseAddress = new Uri(phoneApiBaseUrl);

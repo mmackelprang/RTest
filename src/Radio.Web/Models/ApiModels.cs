@@ -876,3 +876,32 @@ public class CallHistoryEntryDto
   public string? AnsweredOn { get; set; }
   public string? PhoneId { get; set; }
 }
+
+// PBAP DTOs
+
+public class PbapSyncResultDto
+{
+  public bool Success { get; set; }
+  public int ContactCount { get; set; }
+  public string? ErrorMessage { get; set; }
+}
+
+public class PbapSyncStatusDto
+{
+  public List<PbapDeviceSyncInfoDto> Devices { get; set; } = [];
+}
+
+public class PbapDeviceSyncInfoDto
+{
+  public string DeviceAddress { get; set; } = "";
+  public string? DeviceName { get; set; }
+  public int ContactCount { get; set; }
+  public DateTime? LastSynced { get; set; }
+  public bool IsStale { get; set; }
+}
+
+public class PbapContactDto
+{
+  public string DisplayName { get; set; } = "";
+  public List<string> PhoneNumbers { get; set; } = [];
+}
