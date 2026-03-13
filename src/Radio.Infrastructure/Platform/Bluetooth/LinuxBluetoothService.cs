@@ -314,6 +314,11 @@ internal sealed class LinuxBluetoothService : IBluetoothService
       // reconnections from already-paired phones.
       await WatchExistingDevicesAsync();
 
+      // Attach to any media players/transports that already exist (e.g. phone
+      // was connected before radio-api started). Without this, AVRCP metadata
+      // updates won't be received until the next InterfacesAdded event.
+      await CheckForMediaPlayersAsync();
+
       // If a device is already connected at startup, hide discoverability
       if (ConnectedDevice != null)
       {

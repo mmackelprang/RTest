@@ -2,6 +2,21 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Cross-Service Boundary (IMPORTANT)
+
+This service shares the Ubuntu box (`radio`) with RotaryPhone. **Read before any BT/audio work:**
+
+**`D:\prj\RotaryPhone\docs\prompts\RADIO-CONSOLE-BT-AUDIO-BOUNDARY.md`** — Defines which BT adapter, profiles, and WirePlumber configs each service owns. Violating these boundaries will break the other service's audio.
+
+Key rules:
+- Radio Console owns **TP-Link UB500** (`hci0`, `78:20:51:F5:FB:A7`) for music/A2DP
+- RotaryPhone owns **Intel AX201** (`hci1`, `10:91:D1:FE:00:46`) for voice/HFP
+- Radio Console manages all `/etc/wireplumber/bluetooth.lua.d/` configs
+- Always `bluetoothctl select 78:20:51:F5:FB:A7` before any bluetoothctl commands
+- If you need to change any boundary, update the boundary doc first
+
+To request changes from the RotaryPhone session, update the boundary doc's Change Log and optionally create a prompt file at `D:\prj\RotaryPhone\docs\prompts/`. See the boundary doc's "Passing Work Between Sessions" section for the full protocol.
+
 ## Project Overview
 
 **Grandpa Anderson's Console Radio Remade** - A modern audio command center restoring vintage console radio functionality with modern capabilities (Bluetooth A2DP, streaming, smart home events, Chromecast audio).
