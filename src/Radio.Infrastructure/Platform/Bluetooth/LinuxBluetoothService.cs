@@ -130,6 +130,19 @@ internal sealed class LinuxBluetoothService : IBluetoothService
     }
   }
 
+  public BluetoothPipelineStatus PipelineStatus
+  {
+    get
+    {
+      if (!_started) return BluetoothPipelineStatus.Inactive;
+      var connected = ConnectedDevice;
+      if (connected == null) return BluetoothPipelineStatus.Degraded;
+      if (_nativeStream != null || _captureProcess is { HasExited: false })
+        return BluetoothPipelineStatus.Healthy;
+      return BluetoothPipelineStatus.Broken;
+    }
+  }
+
   public event EventHandler<BluetoothAdapterStateChangedEventArgs>? StateChanged;
   public event EventHandler<BluetoothDeviceConnectedEventArgs>? DeviceConnected;
   public event EventHandler<BluetoothDeviceDisconnectedEventArgs>? DeviceDisconnected;

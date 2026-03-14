@@ -48,6 +48,7 @@ public sealed class MockBluetoothService : IBluetoothService
         public bool IsReconnecting => false;
         public void CancelReconnection() { }
         public BluetoothDisconnectReason? LastDisconnectReason => null;
+        public BluetoothPipelineStatus PipelineStatus => BluetoothPipelineStatus.Inactive;
 
         public Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default)
         {

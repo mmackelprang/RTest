@@ -148,6 +148,29 @@ public interface IBluetoothService : IAsyncDisposable
 
   /// <summary>Last disconnect reason for UI display. Null if no disconnect has occurred.</summary>
   BluetoothDisconnectReason? LastDisconnectReason { get; }
+
+  /// <summary>
+  /// Gets the current health status of the Bluetooth audio pipeline.
+  /// </summary>
+  BluetoothPipelineStatus PipelineStatus { get; }
+}
+
+/// <summary>
+/// Describes the health of the Bluetooth audio capture pipeline.
+/// </summary>
+public enum BluetoothPipelineStatus
+{
+  /// <summary>BT is disabled or not started.</summary>
+  Inactive,
+
+  /// <summary>No device connected — waiting for connection.</summary>
+  Degraded,
+
+  /// <summary>Device connected and capture stream active.</summary>
+  Healthy,
+
+  /// <summary>Device connected but capture stream is missing or broken.</summary>
+  Broken
 }
 
 /// <summary>Bluetooth adapter states.</summary>
