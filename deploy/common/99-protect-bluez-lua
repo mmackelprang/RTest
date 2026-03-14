@@ -1,0 +1,5 @@
+// Protect Radio Console WirePlumber patches from being overwritten by apt upgrades.
+// Re-applies bluez.lua patch and verifies WP configs after any wireplumber package update.
+DPkg::Post-Invoke {
+  "if dpkg -l wireplumber 2>/dev/null | grep -q '^ii'; then /opt/radio-console/radio-bt-setup.sh --patch-only 2>&1 | logger -t radio-bt-apt-hook; fi";
+};
