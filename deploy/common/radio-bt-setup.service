@@ -1,0 +1,14 @@
+[Unit]
+Description=Radio Console Bluetooth Setup (adapter config, PipeWire defaults)
+After=bluetooth.target
+Before=radio-api.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/radio-console/radio-bt-setup.sh
+RemainAfterExit=yes
+User=root
+SyslogIdentifier=radio-bt-setup
+
+[Install]
+WantedBy=multi-user.target

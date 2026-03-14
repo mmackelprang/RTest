@@ -226,6 +226,41 @@ systemctl enable radio-api.service
 systemctl enable radio-web.service
 echo "Services installed and enabled (radio-api, radio-web)"
 
+# Install radio-bt-setup (BT adapter config, PipeWire defaults, patch verification)
+BT_SETUP_SRC="$SCRIPT_DIR/../common/radio-bt-setup.sh"
+if [ -f "$BT_SETUP_SRC" ]; then
+  cp "$BT_SETUP_SRC" /opt/radio-console/radio-bt-setup.sh
+  chmod +x /opt/radio-console/radio-bt-setup.sh
+  echo "  Installed radio-bt-setup.sh"
+fi
+
+BT_SERVICE_SRC="$SCRIPT_DIR/../common/radio-bt-setup.service"
+if [ -f "$BT_SERVICE_SRC" ]; then
+  cp "$BT_SERVICE_SRC" /etc/systemd/system/radio-bt-setup.service
+  systemctl daemon-reload
+  systemctl enable radio-bt-setup.service
+  echo "  Installed and enabled radio-bt-setup.service"
+fi
+
+# Install BT music devices config (if not already present — don't overwrite user edits)
+BT_CONF_SRC="$SCRIPT_DIR/../common/bt-music-devices.conf"
+if [ -f "$BT_CONF_SRC" ]; then
+  mkdir -p /opt/radio-console/config
+  if [ ! -f /opt/radio-console/config/bt-music-devices.conf ]; then
+    cp "$BT_CONF_SRC" /opt/radio-console/config/bt-music-devices.conf
+    echo "  Installed bt-music-devices.conf"
+  else
+    echo "  bt-music-devices.conf already exists — skipping (won't overwrite)"
+  fi
+fi
+
+# Install APT hook to protect WirePlumber patches
+APT_HOOK_SRC="$SCRIPT_DIR/../common/99-protect-bluez-lua"
+if [ -f "$APT_HOOK_SRC" ]; then
+  cp "$APT_HOOK_SRC" /etc/apt/apt.conf.d/99-protect-bluez-lua
+  echo "  Installed APT hook for bluez.lua patch protection"
+fi
+
 # ---- 7. Audio Quality Tuning ----
 echo ""
 echo "[7/8] Configuring audio quality tuning..."

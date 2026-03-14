@@ -62,6 +62,8 @@ internal sealed class LinuxBluetoothService : IBluetoothService
   private bool _userInitiatedDisconnect;
   private BluetoothReconnectionLoop? _reconnectionLoop;
   private readonly BluetoothMgmtMonitor? _mgmtMonitor;
+  private CancellationTokenSource? _pipelineMonitorCts;
+  private int _pipelineRecoveryFailures;
 
   public LinuxBluetoothService(
     ILogger logger,
@@ -130,6 +132,19 @@ internal sealed class LinuxBluetoothService : IBluetoothService
     }
   }
 
+  public BluetoothPipelineStatus PipelineStatus
+  {
+    get
+    {
+      if (!_started) return BluetoothPipelineStatus.Inactive;
+      var connected = ConnectedDevice;
+      if (connected == null) return BluetoothPipelineStatus.Degraded;
+      if (_nativeStream != null || _captureProcess is { HasExited: false })
+        return BluetoothPipelineStatus.Healthy;
+      return BluetoothPipelineStatus.Broken;
+    }
+  }
+
   public event EventHandler<BluetoothAdapterStateChangedEventArgs>? StateChanged;
   public event EventHandler<BluetoothDeviceConnectedEventArgs>? DeviceConnected;
   public event EventHandler<BluetoothDeviceDisconnectedEventArgs>? DeviceDisconnected;
@@ -138,7 +153,72 @@ internal sealed class LinuxBluetoothService : IBluetoothService
   public event EventHandler<BluetoothPlaybackStatus>? PlaybackStatusChanged;
   public event EventHandler<TimeSpan>? PositionChanged;
   public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged;
+  public event EventHandler? CaptureStreamRecovered;
   public float? DeviceVolume { get; private set; }
+
+  private async Task MonitorBtPipelineAsync(CancellationToken cancellationToken)
+  {
+    _logger.LogInformation("BT pipeline monitor started (interval: 30s)");
+
+    while (!cancellationToken.IsCancellationRequested)
+    {
+      try
+      {
+        await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+      }
+      catch (OperationCanceledException)
+      {
+        break;
+      }
+
+      try
+      {
+        var connected = ConnectedDevice;
+        if (connected == null)
+        {
+          _pipelineRecoveryFailures = 0;
+          continue;
+        }
+
+        if (_nativeStream != null || _captureProcess is { HasExited: false })
+        {
+          _pipelineRecoveryFailures = 0;
+          continue;
+        }
+
+        if (_pipelineRecoveryFailures >= 3)
+        {
+          continue; // Already logged error, stop retrying
+        }
+
+        _pipelineRecoveryFailures++;
+        _logger.LogWarning(
+          "BT device connected but capture stream missing (attempt {Attempt}/3) — attempting recovery",
+          _pipelineRecoveryFailures);
+
+        // Must use GetAudioCaptureDeviceAsync (not SearchForCaptureDeviceAsync directly)
+        // because it acquires _captureDeviceLock to prevent races with BluetoothAudioSource.
+        var generator = await GetAudioCaptureDeviceAsync(cancellationToken);
+        if (generator != null)
+        {
+          _logger.LogInformation("BT pipeline recovery successful — capture stream re-established");
+          _pipelineRecoveryFailures = 0;
+          CaptureStreamRecovered?.Invoke(this, EventArgs.Empty);
+        }
+        else if (_pipelineRecoveryFailures >= 3)
+        {
+          _logger.LogError(
+            "BT pipeline recovery failed 3 times — giving up until next device connect/disconnect cycle");
+        }
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "Error in BT pipeline monitor");
+      }
+    }
+
+    _logger.LogInformation("BT pipeline monitor stopped");
+  }
 
   public async Task SetDeviceVolumeAsync(float volume)
   {
@@ -302,10 +382,60 @@ internal sealed class LinuxBluetoothService : IBluetoothService
       await _adapter.SetAsync("PairableTimeout", (uint)0);
       await _adapter.SetAsync("Pairable", true);
 
+      // Check for pre-existing device connections before agent registration.
+      // Registering an agent can briefly disconnect devices on some BlueZ versions.
+      BluetoothDeviceInfo? preExistingDevice = null;
+      try
+      {
+        var existingObjects = await _objectManager!.GetManagedObjectsAsync();
+        foreach (var obj in existingObjects)
+        {
+          if (!obj.Value.ContainsKey(Linux.BluezConstants.DeviceInterface))
+            continue;
+
+          var props = obj.Value[Linux.BluezConstants.DeviceInterface];
+          var device = ParseDevice(obj.Key, props);
+          if (device.IsConnected)
+          {
+            preExistingDevice = device;
+            _logger.LogInformation(
+              "Pre-existing BT connection detected: {Name} ({Address}) — agent registration may briefly disconnect it",
+              device.Name, device.Address);
+            break;
+          }
+        }
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Failed to check for pre-existing BT connections");
+      }
+
       // Register a BlueZ Agent to handle pairing requests automatically.
       // Without an agent, pairing fails with "incorrect PIN or passkey" because
       // BlueZ has no one to delegate the pairing decision to.
       await RegisterAgentAsync();
+
+      // If a device was connected before agent registration, poll for its reconnection
+      if (preExistingDevice != null)
+      {
+        _logger.LogInformation("Waiting up to 5s for {Device} to reconnect after agent registration...",
+          preExistingDevice.Name);
+        for (var i = 0; i < 200; i++) // 200 * 25ms = 5s
+        {
+          await Task.Delay(25, cancellationToken);
+          if (ConnectedDevice != null)
+          {
+            _logger.LogInformation("Device {Device} reconnected after {Ms}ms",
+              preExistingDevice.Name, (i + 1) * 25);
+            break;
+          }
+        }
+        if (ConnectedDevice == null)
+        {
+          _logger.LogWarning("Device {Device} did not reconnect within 5s — reconnection loop will handle it",
+            preExistingDevice.Name);
+        }
+      }
 
       // Watch for new interfaces (device connects/disconnects)
       _discoveryWatcher = await _objectManager.WatchInterfacesAddedAsync(OnInterfaceAdded);
@@ -327,6 +457,11 @@ internal sealed class LinuxBluetoothService : IBluetoothService
 
       State = BluetoothAdapterState.On;
       StateChanged?.Invoke(this, new BluetoothAdapterStateChangedEventArgs { NewState = State });
+
+      // Start pipeline health monitor
+      _pipelineMonitorCts = new CancellationTokenSource();
+      _ = MonitorBtPipelineAsync(_pipelineMonitorCts.Token);
+
       return true;
     }
     catch (Exception ex)
@@ -339,6 +474,11 @@ internal sealed class LinuxBluetoothService : IBluetoothService
 
   public async Task StopAsync(CancellationToken cancellationToken = default)
   {
+    // Stop pipeline monitor before other cleanup to prevent recovery attempts during shutdown
+    _pipelineMonitorCts?.Cancel();
+    _pipelineMonitorCts?.Dispose();
+    _pipelineMonitorCts = null;
+
     StopCaptureSubprocess();
     _captureEngine?.Dispose();
     _captureEngine = null;
@@ -442,6 +582,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService
           _metricsCollector?.Gauge("bluetooth.active_connections", 1);
           _logger.LogInformation("Bluetooth device already connected: {DeviceName} ({Address})",
             device.Name, device.Address);
+          _pipelineRecoveryFailures = 0;
           DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = device });
         }
       }
@@ -477,6 +618,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService
         // Hide adapter from other devices while one is connected
         _ = SetDiscoverableAsync(false);
 
+        _pipelineRecoveryFailures = 0;
         DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = device });
       }
 
@@ -561,6 +703,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService
               // Hide adapter from other devices while one is connected
               _ = SetDiscoverableAsync(false);
 
+              _pipelineRecoveryFailures = 0;
               DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = updatedDevice });
             }
             else
@@ -597,6 +740,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService
               // Re-show adapter so other devices can discover and pair
               _ = SetDiscoverableAsync(true);
 
+              _pipelineRecoveryFailures = 0;
               DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs
               {
                 Device = updatedDevice,
@@ -1760,6 +1904,10 @@ internal sealed class LinuxBluetoothService : IBluetoothService
 
   public async ValueTask DisposeAsync()
   {
+    _pipelineMonitorCts?.Cancel();
+    _pipelineMonitorCts?.Dispose();
+    _pipelineMonitorCts = null;
+
     _reconnectionLoop?.Dispose();
     _reconnectionLoop = null;
     _playerPropertiesWatcher?.Dispose();

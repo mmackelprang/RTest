@@ -79,7 +79,8 @@ builder.Services.AddSignalR(options =>
 
 // Add health checks
 builder.Services.AddHealthChecks()
-  .AddCheck<Radio.API.Health.AudioEngineHealthCheck>("audio-engine");
+  .AddCheck<Radio.API.Health.AudioEngineHealthCheck>("audio-engine")
+  .AddCheck<Radio.API.Health.BluetoothHealthCheck>("bluetooth-pipeline");
 
 builder.Services.AddManagedConfiguration(builder.Configuration);
 builder.Services.AddMetrics(builder.Configuration);

@@ -80,6 +80,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     _bluetoothService.PositionChanged += OnPositionChanged;
     _bluetoothService.DeviceConnected += OnDeviceConnected;
     _bluetoothService.DeviceDisconnected += OnDeviceDisconnected;
+    _bluetoothService.CaptureStreamRecovered += OnCaptureStreamRecovered;
 
     if (_identificationService != null)
     {
@@ -287,6 +288,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     _bluetoothService.PositionChanged -= OnPositionChanged;
     _bluetoothService.DeviceConnected -= OnDeviceConnected;
     _bluetoothService.DeviceDisconnected -= OnDeviceDisconnected;
+    _bluetoothService.CaptureStreamRecovered -= OnCaptureStreamRecovered;
 
     if (_identificationService != null)
     {
@@ -335,6 +337,12 @@ public class BluetoothAudioSource : USBAudioSourceBase
     NeedsFingerprintingLookup = true;
 
     // Attempt to acquire audio capture device now that a device is connected
+    _ = TryAcquireAudioCaptureAsync();
+  }
+
+  private void OnCaptureStreamRecovered(object? sender, EventArgs e)
+  {
+    Logger.LogInformation("BluetoothAudioSource: capture stream recovered by pipeline monitor");
     _ = TryAcquireAudioCaptureAsync();
   }
 

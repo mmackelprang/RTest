@@ -41,6 +41,7 @@ public sealed class MockBluetoothService : IBluetoothService
         public event EventHandler<BluetoothPlaybackStatus>? PlaybackStatusChanged;
         public event EventHandler<TimeSpan>? PositionChanged { add { } remove { } }
         public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged { add { } remove { } }
+        public event EventHandler? CaptureStreamRecovered { add { } remove { } }
         public float? DeviceVolume => null;
         public Task SetDeviceVolumeAsync(float volume) => Task.CompletedTask;
         public Task NextTrackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
@@ -48,6 +49,7 @@ public sealed class MockBluetoothService : IBluetoothService
         public bool IsReconnecting => false;
         public void CancelReconnection() { }
         public BluetoothDisconnectReason? LastDisconnectReason => null;
+        public BluetoothPipelineStatus PipelineStatus => BluetoothPipelineStatus.Inactive;
 
         public Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default)
         {

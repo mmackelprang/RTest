@@ -240,6 +240,8 @@ internal sealed class WindowsBluetoothService : IBluetoothService
     public float? DeviceVolume => null;
 #endif
 
+    public event EventHandler? CaptureStreamRecovered { add { } remove { } }
+
     public Task SetDeviceVolumeAsync(float volume)
     {
       // AVRCP absolute volume set is not yet implemented for Windows.
@@ -265,6 +267,7 @@ internal sealed class WindowsBluetoothService : IBluetoothService
     public bool IsReconnecting => false;
     public void CancelReconnection() { }
     public BluetoothDisconnectReason? LastDisconnectReason => null;
+    public BluetoothPipelineStatus PipelineStatus => BluetoothPipelineStatus.Inactive;
 
     private void CheckState(object? state)
     {

@@ -1,7 +1,7 @@
 [Unit]
 Description=Radio Console API (audio engine, REST, SignalR)
-After=network.target sound.target bluetooth.target avahi-daemon.service radio-pipewire-access.service
-Wants=avahi-daemon.service radio-pipewire-access.service
+After=network.target sound.target bluetooth.target avahi-daemon.service radio-pipewire-access.service radio-bt-setup.service
+Wants=avahi-daemon.service radio-pipewire-access.service radio-bt-setup.service
 
 [Service]
 Type=simple
