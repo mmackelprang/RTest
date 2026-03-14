@@ -108,6 +108,12 @@ public interface IBluetoothService : IAsyncDisposable
   /// <summary>Event raised when new device discovered.</summary>
   event EventHandler<BluetoothDeviceDiscoveredEventArgs>? DeviceDiscovered;
 
+  /// <summary>
+  /// Raised when the pipeline monitor successfully recovers a lost capture stream.
+  /// Subscribers should re-attach the capture generator to their audio mixer.
+  /// </summary>
+  event EventHandler? CaptureStreamRecovered;
+
   /// <summary>Event raised when playback metadata changes (Track, Artist, etc.).</summary>
   event EventHandler<BluetoothPlaybackMetadata>? MetadataChanged;
 
