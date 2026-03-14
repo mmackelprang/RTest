@@ -382,10 +382,60 @@ internal sealed class LinuxBluetoothService : IBluetoothService
       await _adapter.SetAsync("PairableTimeout", (uint)0);
       await _adapter.SetAsync("Pairable", true);
 
+      // Check for pre-existing device connections before agent registration.
+      // Registering an agent can briefly disconnect devices on some BlueZ versions.
+      BluetoothDeviceInfo? preExistingDevice = null;
+      try
+      {
+        var existingObjects = await _objectManager!.GetManagedObjectsAsync();
+        foreach (var obj in existingObjects)
+        {
+          if (!obj.Value.ContainsKey(Linux.BluezConstants.DeviceInterface))
+            continue;
+
+          var props = obj.Value[Linux.BluezConstants.DeviceInterface];
+          var device = ParseDevice(obj.Key, props);
+          if (device.IsConnected)
+          {
+            preExistingDevice = device;
+            _logger.LogInformation(
+              "Pre-existing BT connection detected: {Name} ({Address}) — agent registration may briefly disconnect it",
+              device.Name, device.Address);
+            break;
+          }
+        }
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Failed to check for pre-existing BT connections");
+      }
+
       // Register a BlueZ Agent to handle pairing requests automatically.
       // Without an agent, pairing fails with "incorrect PIN or passkey" because
       // BlueZ has no one to delegate the pairing decision to.
       await RegisterAgentAsync();
+
+      // If a device was connected before agent registration, poll for its reconnection
+      if (preExistingDevice != null)
+      {
+        _logger.LogInformation("Waiting up to 5s for {Device} to reconnect after agent registration...",
+          preExistingDevice.Name);
+        for (var i = 0; i < 200; i++) // 200 * 25ms = 5s
+        {
+          await Task.Delay(25);
+          if (ConnectedDevice != null)
+          {
+            _logger.LogInformation("Device {Device} reconnected after {Ms}ms",
+              preExistingDevice.Name, (i + 1) * 25);
+            break;
+          }
+        }
+        if (ConnectedDevice == null)
+        {
+          _logger.LogWarning("Device {Device} did not reconnect within 5s — reconnection loop will handle it",
+            preExistingDevice.Name);
+        }
+      }
 
       // Watch for new interfaces (device connects/disconnects)
       _discoveryWatcher = await _objectManager.WatchInterfacesAddedAsync(OnInterfaceAdded);
