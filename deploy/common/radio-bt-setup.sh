@@ -134,6 +134,15 @@ if [[ -f "$MUSIC_DEVICES_CONF" ]]; then
     systemctl restart bluetooth
     # Wait for BlueZ to come back
     sleep 2
+    # Re-apply adapter config — BlueZ restart resets Discoverable state
+    log "Re-applying adapter config after BlueZ restart..."
+    busctl call org.bluez "$MUSIC_ADAPTER_PATH" org.freedesktop.DBus.Properties Set ssv org.bluez.Adapter1 Alias s "$MUSIC_ADAPTER_ALIAS" 2>/dev/null || true
+    busctl call org.bluez "$MUSIC_ADAPTER_PATH" org.freedesktop.DBus.Properties Set ssv org.bluez.Adapter1 Discoverable b true 2>/dev/null || true
+    if busctl call org.bluez "$VOICE_ADAPTER_PATH" org.freedesktop.DBus.Properties Get ss org.bluez.Adapter1 Address 2>/dev/null >/dev/null; then
+      busctl call org.bluez "$VOICE_ADAPTER_PATH" org.freedesktop.DBus.Properties Set ssv org.bluez.Adapter1 Alias s "$VOICE_ADAPTER_ALIAS" 2>/dev/null || true
+      busctl call org.bluez "$VOICE_ADAPTER_PATH" org.freedesktop.DBus.Properties Set ssv org.bluez.Adapter1 Discoverable b false 2>/dev/null || true
+    fi
+    log "Adapter config re-applied after BlueZ restart"
   else
     log "No stale hci1 pairings found"
   fi

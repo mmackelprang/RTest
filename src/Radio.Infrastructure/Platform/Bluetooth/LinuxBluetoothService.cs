@@ -422,7 +422,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService
           preExistingDevice.Name);
         for (var i = 0; i < 200; i++) // 200 * 25ms = 5s
         {
-          await Task.Delay(25);
+          await Task.Delay(25, cancellationToken);
           if (ConnectedDevice != null)
           {
             _logger.LogInformation("Device {Device} reconnected after {Ms}ms",
@@ -474,6 +474,11 @@ internal sealed class LinuxBluetoothService : IBluetoothService
 
   public async Task StopAsync(CancellationToken cancellationToken = default)
   {
+    // Stop pipeline monitor before other cleanup to prevent recovery attempts during shutdown
+    _pipelineMonitorCts?.Cancel();
+    _pipelineMonitorCts?.Dispose();
+    _pipelineMonitorCts = null;
+
     StopCaptureSubprocess();
     _captureEngine?.Dispose();
     _captureEngine = null;
