@@ -64,6 +64,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService
   private readonly BluetoothMgmtMonitor? _mgmtMonitor;
   private CancellationTokenSource? _pipelineMonitorCts;
   private int _pipelineRecoveryFailures;
+  private bool _captureIntentionallyStopped;
 
   public LinuxBluetoothService(
     ILogger logger,
@@ -185,6 +186,11 @@ internal sealed class LinuxBluetoothService : IBluetoothService
           _pipelineRecoveryFailures = 0;
           continue;
         }
+
+        // Don't recover if capture was intentionally stopped (user switched sources).
+        // The flag is cleared when GetAudioCaptureDeviceAsync is called again.
+        if (_captureIntentionallyStopped)
+          continue;
 
         if (_pipelineRecoveryFailures >= 3)
         {
@@ -1000,6 +1006,9 @@ internal sealed class LinuxBluetoothService : IBluetoothService
 
   public async Task<object?> GetAudioCaptureDeviceAsync(CancellationToken cancellationToken = default)
   {
+    // Clear the intentional-stop flag — someone is requesting capture again
+    _captureIntentionallyStopped = false;
+
     var connected = ConnectedDevice;
     if (connected == null)
     {
@@ -1485,6 +1494,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService
 
   public void StopAudioCapture()
   {
+    _captureIntentionallyStopped = true;
     StopCaptureSubprocess();
   }
 
