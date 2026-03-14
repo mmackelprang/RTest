@@ -191,12 +191,14 @@ public class AudioEngineInitializationService : IHostedService
       {
         // Physical output device
         string? outputToUse = null;
+        string? preferredDeviceName = null;
         if (!string.IsNullOrEmpty(preferredOutputId))
         {
           var preferredOutput = outputDevices.FirstOrDefault(d => d.Id == preferredOutputId);
           if (preferredOutput != null)
           {
             outputToUse = preferredOutput.Id;
+            preferredDeviceName = preferredOutput.Name;
             _logger.LogInformation("Using preferred output device: {DeviceName}", preferredOutput.Name);
           }
           else
@@ -211,6 +213,7 @@ public class AudioEngineInitializationService : IHostedService
           if (defaultOutput != null)
           {
             outputToUse = defaultOutput.Id;
+            preferredDeviceName = defaultOutput.Name;
             _logger.LogInformation("Using default output device: {DeviceName}", defaultOutput.Name);
           }
         }
@@ -225,6 +228,43 @@ public class AudioEngineInitializationService : IHostedService
           catch (Exception ex)
           {
             _logger.LogWarning(ex, "Failed to set output device");
+          }
+
+          // Verify the output device actually connected to the correct PipeWire node.
+          // After PipeWire restarts, MiniAudio device indices may shift, causing the
+          // wrong device to be selected even though the ID matches.
+          try
+          {
+            var currentDevices = await _deviceManager.GetOutputDevicesAsync(cancellationToken);
+            var selectedId = _deviceManager.GetSelectedOutputDeviceId();
+            var activeDevice = selectedId != null
+              ? currentDevices.FirstOrDefault(d => d.Id == selectedId)
+              : null;
+            if (activeDevice != null && preferredDeviceName != null &&
+                !activeDevice.Name.Contains(preferredDeviceName, StringComparison.OrdinalIgnoreCase))
+            {
+              _logger.LogWarning(
+                "Output device mismatch: expected \"{Expected}\" but connected to \"{Actual}\" — searching by name",
+                preferredDeviceName, activeDevice.Name);
+
+              var correctDevice = currentDevices.FirstOrDefault(d =>
+                d.Name.Contains(preferredDeviceName, StringComparison.OrdinalIgnoreCase));
+              if (correctDevice != null)
+              {
+                _logger.LogInformation("Found correct device \"{Name}\" at ID {Id} — switching",
+                  correctDevice.Name, correctDevice.Id);
+                await _deviceManager.SetOutputDeviceAsync(correctDevice.Id, cancellationToken);
+              }
+              else
+              {
+                _logger.LogWarning("Could not find device matching \"{Name}\" — using current device",
+                  preferredDeviceName);
+              }
+            }
+          }
+          catch (Exception ex)
+          {
+            _logger.LogWarning(ex, "Output device verification failed — continuing with current device");
           }
         }
       }
