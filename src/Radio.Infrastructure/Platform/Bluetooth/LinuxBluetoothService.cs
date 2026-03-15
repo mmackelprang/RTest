@@ -142,6 +142,8 @@ internal sealed class LinuxBluetoothService : IBluetoothService
       if (connected == null) return BluetoothPipelineStatus.Degraded;
       if (_nativeStream != null || _captureProcess is { HasExited: false })
         return BluetoothPipelineStatus.Healthy;
+      // Capture was intentionally stopped (user switched sources) — not broken
+      if (_captureIntentionallyStopped) return BluetoothPipelineStatus.Degraded;
       return BluetoothPipelineStatus.Broken;
     }
   }
