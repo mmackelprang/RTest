@@ -86,8 +86,10 @@ public class SleepService : ISleepService
       await _hubContext.Clients.All
         .SendAsync("SleepStateChanged", true);
 
-      // Turn off physical display via GNOME ScreenSaver DPMS
-      await SetDisplayPowerAsync(false);
+      // NOTE: Hardware DPMS (SetDisplayPowerAsync) is disabled because touch-to-wake
+      // doesn't work when the compositor blanks input. Will be re-enabled when rotary
+      // encoders provide a hardware wake source. See design/FUTURE-WORK.md #7.
+      // await SetDisplayPowerAsync(false);
 
       _logger.LogInformation("Sleep mode entered");
     }
@@ -112,8 +114,8 @@ public class SleepService : ISleepService
 
       _logger.LogInformation("Waking from sleep mode (source: {WakeSource})", wakeSource);
 
-      // Turn on physical display FIRST so user sees the UI immediately
-      await SetDisplayPowerAsync(true);
+      // NOTE: Hardware DPMS wake disabled — see sleep comment above.
+      // await SetDisplayPowerAsync(true);
 
       _isSleeping = false;
 
