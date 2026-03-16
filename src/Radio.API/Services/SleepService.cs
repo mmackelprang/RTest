@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.AspNetCore.SignalR;
 using Radio.API.Hubs;
 using Radio.Core.Interfaces;
@@ -7,9 +8,10 @@ namespace Radio.API.Services;
 
 /// <summary>
 /// Manages sleep/standby mode for the kiosk UI.
-/// When sleeping: pauses audio playback, mutes audio, broadcasts state via SignalR so UI shows black overlay.
+/// When sleeping: pauses audio playback, mutes audio, turns off display via DPMS,
+/// broadcasts state via SignalR so UI shows black overlay.
 /// Wake sources: touch screen, rotary encoder, API call.
-/// On wake: restores mute state and resumes playback if it was playing before sleep.
+/// On wake: restores display, mute state, and resumes playback if it was playing before sleep.
 /// </summary>
 public class SleepService : ISleepService
 {
@@ -20,6 +22,13 @@ public class SleepService : ISleepService
   private bool _isSleeping;
   private bool _wasMutedBeforeSleep;
   private bool _wasPlayingBeforeSleep;
+
+  // GNOME ScreenSaver D-Bus for physical display DPMS control.
+  // Runs as the desktop session user (mmack) to reach the GNOME session bus.
+  private const string GnomeScreenSaverSetActive =
+    "gdbus call --session --dest org.gnome.ScreenSaver --object-path /org/gnome/ScreenSaver --method org.gnome.ScreenSaver.SetActive";
+  private const string SessionUser = "mmack";
+  private const string SessionBusEnv = "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus";
 
   public bool IsSleeping => _isSleeping;
 
@@ -77,6 +86,9 @@ public class SleepService : ISleepService
       await _hubContext.Clients.All
         .SendAsync("SleepStateChanged", true);
 
+      // Turn off physical display via GNOME ScreenSaver DPMS
+      await SetDisplayPowerAsync(false);
+
       _logger.LogInformation("Sleep mode entered");
     }
     finally
@@ -99,6 +111,9 @@ public class SleepService : ISleepService
       }
 
       _logger.LogInformation("Waking from sleep mode (source: {WakeSource})", wakeSource);
+
+      // Turn on physical display FIRST so user sees the UI immediately
+      await SetDisplayPowerAsync(true);
 
       _isSleeping = false;
 
@@ -132,6 +147,51 @@ public class SleepService : ISleepService
     finally
     {
       _lock.Release();
+    }
+  }
+
+  /// <summary>
+  /// Controls the physical display via GNOME ScreenSaver D-Bus (DPMS on/off).
+  /// Runs as the desktop session user to reach the GNOME session bus.
+  /// Fails silently on non-Linux or non-GNOME environments.
+  /// </summary>
+  private async Task SetDisplayPowerAsync(bool on)
+  {
+    if (!OperatingSystem.IsLinux()) return;
+
+    var active = on ? "false" : "true"; // ScreenSaver active=true means display OFF
+    var command = $"sudo -u {SessionUser} {SessionBusEnv} {GnomeScreenSaverSetActive} {active}";
+
+    try
+    {
+      using var process = Process.Start(new ProcessStartInfo
+      {
+        FileName = "/bin/bash",
+        Arguments = $"-c \"{command}\"",
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false,
+        CreateNoWindow = true
+      });
+
+      if (process != null)
+      {
+        await process.WaitForExitAsync();
+        if (process.ExitCode == 0)
+        {
+          _logger.LogInformation("Display DPMS {State}", on ? "on" : "off");
+        }
+        else
+        {
+          var stderr = await process.StandardError.ReadToEndAsync();
+          _logger.LogWarning("Display DPMS control failed (exit {Code}): {Error}",
+            process.ExitCode, stderr.Trim());
+        }
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to set display power — GNOME ScreenSaver D-Bus may not be available");
     }
   }
 }

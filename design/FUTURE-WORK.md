@@ -510,3 +510,37 @@ The HID report format is **assumed** based on typical KY-040 Pico implementation
 - PhoneCallClient registers two `CallStateChanged` overloads (2 and 3 params) for resilience
 - The call state parser is lenient (`"ringing"`, `"ring"`, `"incoming"` all map to Ringing)
 - If RotaryPhone server isn't running, the client logs a warning and retries with backoff — no crash
+
+---
+
+## 7. Sleep Mode — Rotary Encoder Wake/Sleep Button
+
+**Status:** Display DPMS control implemented via GNOME ScreenSaver D-Bus in `SleepService`. UI power button works. Rotary encoder integration pending.
+**Added:** 2026-03-16
+**Priority:** Medium — integrate when rotary encoders are wired up
+
+### What's Implemented
+
+- `SleepService` (Radio.API) pauses audio, mutes, turns off display via GNOME ScreenSaver D-Bus, broadcasts via SignalR
+- Web UI power button (`power_settings_new` icon in MainLayout topbar) triggers sleep
+- Wake via API call (`POST /api/system/sleep { sleep: false }`) or touch screen (via JS idle-dimmer)
+- Display DPMS on/off via `gdbus call --session --dest org.gnome.ScreenSaver ... SetActive true/false`
+
+### What's Needed — Rotary Encoder
+
+When rotary encoders are integrated via `RotaryEncoderActionRouter`:
+1. **Sleep trigger:** Long-press (or dedicated button press) on a rotary encoder should call `ISleepService.EnterSleepAsync()`
+2. **Wake trigger:** Any rotary encoder event (press or turn) while sleeping should call `ISleepService.WakeAsync("rotary-encoder")` BEFORE processing the encoder action
+3. **Implementation:** In `RotaryEncoderActionRouter`, check `ISleepService.IsSleeping` at the top of each event handler. If sleeping, call `WakeAsync` and consume the event (don't pass it through as a source change or volume adjustment)
+
+### Code Pointers
+
+- `src/Radio.API/Services/SleepService.cs` — sleep/wake logic + DPMS control
+- `src/Radio.Infrastructure/Platform/Input/RotaryEncoderActionRouter.cs` — encoder event routing
+- `src/Radio.Core/Interfaces/ISleepService.cs` — interface
+
+### Gotchas
+
+- GNOME ScreenSaver D-Bus requires the desktop session user (`mmack`) and session bus address — Radio.API runs `sudo -u mmack DBUS_SESSION_BUS_ADDRESS=... gdbus call`
+- The `SetActive(true)` call may not reliably wake the display on all hardware — test with the actual touchscreen. If unreliable, fall back to `gnome-monitor-config` or `xdg-screensaver reset`
+- On wake, turn on display FIRST (before unmuting/resuming) so the user sees the UI immediately
