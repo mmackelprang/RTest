@@ -302,11 +302,12 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
         var format = _playbackService.GetAudioFormat();
         _playbackId = $"usb-capture-{Id:N}";
 
-        if (_soundGenerator == null)
-        {
-          _soundGenerator = new BufferedSoundGenerator<float>(
-            engine, format, Logger, metricsCollector: MetricsCollector);
-        }
+        // Always create a fresh generator. The previous one was disposed by
+        // PlaybackService.StopAsync (called at the top of PlayComponentAsync).
+        // Reusing a disposed generator causes AddSamples to no-op and GenerateAudio
+        // to fill silence — the root cause of audio dropout after long uptime.
+        _soundGenerator = new BufferedSoundGenerator<float>(
+          engine, format, Logger, metricsCollector: MetricsCollector);
 
         var success = await _playbackService.PlayComponentAsync(
           _playbackId, _soundGenerator, Volume, cancellationToken);
@@ -314,8 +315,8 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
         if (success)
         {
           Logger.LogInformation(
-            "🔊 {SourceName} audio routed to playback output (PlaybackId={PlaybackId})",
-            Name, _playbackId);
+            "🔊 {SourceName} audio routed to playback output (PlaybackId={PlaybackId}, GeneratorId={GeneratorId})",
+            Name, _playbackId, _soundGenerator.GeneratorId);
         }
         else
         {
