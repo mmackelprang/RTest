@@ -398,6 +398,7 @@
   private List<PbapContactDto>? _pbapContacts;
   private bool _isSyncing;
   private bool _showSyncDropdown;
+  private int _pollCount;
 
   // GV Bridge/Trunk state
   private string _gvActiveMode = "";
@@ -468,8 +469,28 @@
     if (callState != null) _callState = callState;
     _contacts = await PhoneApi.GetContactsAsync();
     _callHistory = await PhoneApi.GetCallHistoryAsync();
+    await RefreshGvStatusAsync();
     RebuildMergedContacts();
     await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task RefreshGvStatusAsync()
+  {
+    var bridgeTask = GvBridgeApi.GetStatusAsync();
+    var trunkTask = GvTrunkApi.GetStatusAsync();
+    await Task.WhenAll(bridgeTask, trunkTask);
+    var bridgeStatus = bridgeTask.Result;
+    if (bridgeStatus != null)
+    {
+      _gvBridgeConnected = bridgeStatus.ExtensionConnected;
+      _gvExtensionVersion = bridgeStatus.ExtensionVersion;
+      _gvActiveMode = bridgeStatus.ActiveMode;
+    }
+    var trunkStatus = trunkTask.Result;
+    if (trunkStatus != null)
+    {
+      _gvTrunkRegistered = trunkStatus.IsRegistered;
+    }
   }
 
   private async Task PollStatusAsync()
@@ -491,6 +512,11 @@
         var callState = await PhoneApi.GetCallStateAsync();
         if (callState != null) _callState = callState;
         _systemStatus = await PhoneApi.GetSystemStatusAsync();
+        // Refresh GV status every 6th poll (30s) as SignalR fallback
+        if (++_pollCount % 6 == 0)
+        {
+          await RefreshGvStatusAsync();
+        }
         if (!_disposed) await InvokeAsync(StateHasChanged);
       }
     }
