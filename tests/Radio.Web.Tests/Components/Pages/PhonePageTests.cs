@@ -98,6 +98,15 @@ public class PhonePageTests : TestContext
   }
 
   [Fact]
+  public void PhonePage_Renders_CallPathSection()
+  {
+    var cut = RenderComponent<PhonePage>();
+    Assert.Contains("CALL PATH", cut.Markup);
+    Assert.Contains("CHROME EXTENSION", cut.Markup);
+    Assert.Contains("SIP TRUNK", cut.Markup);
+  }
+
+  [Fact]
   public void PhonePage_ContactsTab_Renders_SourceColumn()
   {
     // RadzenTabs only renders the active tab body; the Contacts tab item
