@@ -35,16 +35,33 @@ public class PhonePageTests : TestContext
       client.BaseAddress = new Uri("http://localhost:5000");
     }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler());
 
-    // Register PhoneHubService
+    // Register GvBridgeApiService with mock handler
+    Services.AddHttpClient<GvBridgeApiService>(client =>
+    {
+      client.BaseAddress = new Uri("http://localhost:5004");
+    }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler());
+
+    // Register GvTrunkApiService with mock handler
+    Services.AddHttpClient<GvTrunkApiService>(client =>
+    {
+      client.BaseAddress = new Uri("http://localhost:5004");
+    }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler());
+
+    // Register hub services
     var config = new ConfigurationBuilder()
       .AddInMemoryCollection(new Dictionary<string, string?>
       {
-        ["RotaryPhone:HubUrl"] = "http://localhost:5004/hub"
+        ["RotaryPhone:HubUrl"] = "http://localhost:5004/hub",
+        ["RotaryPhone:ApiBaseUrl"] = "http://localhost:5004"
       })
       .Build();
     Services.AddSingleton<IConfiguration>(config);
     Services.AddSingleton(new PhoneHubService(
       NullLogger<PhoneHubService>.Instance, config));
+    Services.AddSingleton(new GvBridgeHubService(
+      NullLogger<GvBridgeHubService>.Instance, config));
+    Services.AddSingleton(new GvTrunkHubService(
+      NullLogger<GvTrunkHubService>.Instance, config));
   }
 
   [Fact]
@@ -121,6 +138,12 @@ public class PhonePageTests : TestContext
         var p when p.Contains("/api/bluetooth/pbap/contacts") => "[]",
         var p when p.Contains("/api/bluetooth/status") =>
           """{"isAvailable":true,"state":"Powered","isDiscovering":false,"pairedDevices":[],"discoveredDevices":[]}""",
+        var p when p.Contains("/api/gvbridge/status") =>
+          """{"extensionConnected":false,"extensionVersion":null,"activeMode":"BluetoothHfp"}""",
+        var p when p.Contains("/api/gvtrunk/status") =>
+          """{"isRegistered":false,"callState":"Idle","activeCallDurationSeconds":0}""",
+        var p when p.Contains("/api/gvbridge/") => "[]",
+        var p when p.Contains("/api/gvtrunk/") => "[]",
         _ => "{}"
       };
       return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)

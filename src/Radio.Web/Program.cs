@@ -304,12 +304,40 @@ builder.Services.AddHttpClient<PhoneApiService>(client =>
   return handler;
 });
 
-// All 14 API client services are now registered!
+// GV Bridge API client (same RotaryPhone service)
+builder.Services.AddHttpClient<GvBridgeApiService>(client =>
+{
+  client.BaseAddress = new Uri(phoneApiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(10);
+})
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
+});
+
+// GV Trunk API client (same RotaryPhone service)
+builder.Services.AddHttpClient<GvTrunkApiService>(client =>
+{
+  client.BaseAddress = new Uri(phoneApiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(10);
+})
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
+});
 
 // Register SignalR hub services as singletons (Phase 1 Task 1.3, Phase 10)
 builder.Services.AddSingleton<AudioStateHubService>();
 builder.Services.AddSingleton<AudioVisualizationHubService>();
 builder.Services.AddSingleton<PhoneHubService>();
+builder.Services.AddSingleton<GvBridgeHubService>();
+builder.Services.AddSingleton<GvTrunkHubService>();
 
 // Register centralized audio state store (subscribes to hub, caches state for components)
 builder.Services.AddSingleton<AudioStateStore>();
@@ -368,9 +396,13 @@ app.MapGet("/api/albumart/{filename}", async (string filename, IHttpClientFactor
 app.MapRazorComponents<Radio.Web.Components.App>()
   .AddInteractiveServerRenderMode();
 
-// Start RotaryPhone hub connection (non-blocking — logs warning if unavailable)
+// Start RotaryPhone hub connections (non-blocking — logs warning if unavailable)
 var phoneHub = app.Services.GetRequiredService<PhoneHubService>();
 _ = phoneHub.StartAsync();
+var gvBridgeHub = app.Services.GetRequiredService<GvBridgeHubService>();
+_ = gvBridgeHub.StartAsync();
+var gvTrunkHub = app.Services.GetRequiredService<GvTrunkHubService>();
+_ = gvTrunkHub.StartAsync();
 
 // Print startup header to console
 var logDirectory = Path.GetFullPath("logs");
