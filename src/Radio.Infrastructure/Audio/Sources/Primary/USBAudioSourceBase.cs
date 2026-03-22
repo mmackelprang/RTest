@@ -59,6 +59,12 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
     {
       _identificationService.TrackIdentified += OnTrackIdentified;
     }
+
+    // Subscribe to stalled generator detection for self-healing
+    if (_playbackService != null)
+    {
+      _playbackService.GeneratorStalled += OnGeneratorStalled;
+    }
   }
 
   /// <inheritdoc/>
@@ -402,6 +408,30 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
     }
   }
 
+  private void OnGeneratorStalled(string sourceId)
+  {
+    // Only handle stalls for our own playback
+    if (sourceId != _playbackId) return;
+
+    Logger.LogWarning(
+      "🔴 {SourceName}: generator stalled — recreating capture pipeline (PlaybackId={PlaybackId})",
+      Name, _playbackId);
+
+    _ = Task.Run(async () =>
+    {
+      try
+      {
+        await StopCoreAsync(CancellationToken.None);
+        await PlayCoreAsync(CancellationToken.None);
+        Logger.LogInformation("🟢 {SourceName}: capture pipeline recreated after stall", Name);
+      }
+      catch (Exception ex)
+      {
+        Logger.LogError(ex, "Failed to recreate capture pipeline for {SourceName} after stall", Name);
+      }
+    });
+  }
+
   /// <summary>
   /// Handles the TrackIdentified event from the fingerprinting service.
   /// Updates metadata with identified track information.
@@ -482,7 +512,11 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   /// <inheritdoc/>
   protected override async ValueTask DisposeAsyncCore()
   {
-    // Unsubscribe from fingerprinting events
+    // Unsubscribe from events
+    if (_playbackService != null)
+    {
+      _playbackService.GeneratorStalled -= OnGeneratorStalled;
+    }
     if (_identificationService != null)
     {
       _identificationService.TrackIdentified -= OnTrackIdentified;

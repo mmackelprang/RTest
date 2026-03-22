@@ -82,6 +82,11 @@ public class BluetoothAudioSource : USBAudioSourceBase
     _bluetoothService.DeviceDisconnected += OnDeviceDisconnected;
     _bluetoothService.CaptureStreamRecovered += OnCaptureStreamRecovered;
 
+    if (_playbackService != null)
+    {
+      _playbackService.GeneratorStalled += OnGeneratorStalled;
+    }
+
     if (_identificationService != null)
     {
       _identificationService.TrackIdentified += OnTrackIdentified;
@@ -290,6 +295,11 @@ public class BluetoothAudioSource : USBAudioSourceBase
     _bluetoothService.DeviceDisconnected -= OnDeviceDisconnected;
     _bluetoothService.CaptureStreamRecovered -= OnCaptureStreamRecovered;
 
+    if (_playbackService != null)
+    {
+      _playbackService.GeneratorStalled -= OnGeneratorStalled;
+    }
+
     if (_identificationService != null)
     {
       _identificationService.TrackIdentified -= OnTrackIdentified;
@@ -344,6 +354,38 @@ public class BluetoothAudioSource : USBAudioSourceBase
   {
     Logger.LogInformation("BluetoothAudioSource: capture stream recovered by pipeline monitor");
     _ = TryAcquireAudioCaptureAsync();
+  }
+
+  private void OnGeneratorStalled(string sourceId)
+  {
+    if (sourceId != _playbackId && sourceId != Id) return;
+
+    Logger.LogWarning(
+      "🔴 BluetoothAudioSource: generator stalled — attempting capture re-acquisition (PlaybackId={PlaybackId})",
+      _playbackId);
+
+    _ = Task.Run(async () =>
+    {
+      try
+      {
+        // Stop current capture
+        if (_playbackService != null && _playbackId != null)
+        {
+          await _playbackService.StopAsync(_playbackId, CancellationToken.None);
+          _playbackId = null;
+          _captureGenerator = null;
+          SoundComponent = null;
+        }
+
+        // Re-acquire capture device and route through mixer
+        await TryAcquireAudioCaptureAsync();
+        Logger.LogInformation("🟢 BluetoothAudioSource: capture pipeline recreated after stall");
+      }
+      catch (Exception ex)
+      {
+        Logger.LogError(ex, "Failed to recreate BT capture pipeline after stall");
+      }
+    });
   }
 
   private async Task TryAcquireAudioCaptureAsync()
