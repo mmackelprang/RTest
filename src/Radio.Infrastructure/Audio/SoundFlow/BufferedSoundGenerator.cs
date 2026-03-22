@@ -100,6 +100,21 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     // Pre-allocated metrics tags to avoid Dictionary allocation in LogStats
     private readonly Dictionary<string, string>? _metricsTags;
 
+    // Unique identity for lifecycle tracking across mixer add/remove/dispose
+    private static int _nextGeneratorId;
+
+    /// <summary>Unique ID for tracking this generator through its lifecycle.</summary>
+    public int GeneratorId { get; }
+
+    /// <summary>Total samples received via AddSamples (lifetime).</summary>
+    public long TotalSamplesReceived => _totalSamplesReceived;
+
+    /// <summary>Total samples output via GenerateAudio (lifetime).</summary>
+    public long TotalSamplesOutput => _totalSamplesOutput;
+
+    /// <summary>Whether this generator has been disposed.</summary>
+    public new bool IsDisposed => _isDisposed;
+
     // Clock drift compensation: when producer (e.g., BT/PipeWire) runs on a different
     // clock than consumer (MiniAudio/ALSA), the buffer slowly drains or fills. We
     // periodically check the buffer level and duplicate a frame of samples when the
@@ -130,6 +145,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         IMetricsCollector? metricsCollector = null)
         : base(engine, format)
     {
+        GeneratorId = Interlocked.Increment(ref _nextGeneratorId);
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _metricsCollector = metricsCollector;
         _overflowStrategy = overflowStrategy;
@@ -150,9 +166,9 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             _metricsTags = new Dictionary<string, string> { ["type"] = typeof(T).Name };
         }
 
-        _logger.LogDebug(
-            "BufferedSoundGenerator created: Type={Type}, OutputSampleRate={SampleRate}Hz, OutputChannels={Channels}, MaxBufferSamples={MaxBuffer}, Strategy={Strategy}",
-            typeof(T).Name, format.SampleRate, format.Channels, _maxBufferSamples, _overflowStrategy);
+        _logger.LogInformation(
+            "BufferedSoundGenerator #{GeneratorId} created: Type={Type}, OutputSampleRate={SampleRate}Hz, OutputChannels={Channels}, MaxBufferSamples={MaxBuffer}, Strategy={Strategy}",
+            GeneratorId, typeof(T).Name, format.SampleRate, format.Channels, _maxBufferSamples, _overflowStrategy);
     }
 
     /// <summary>
@@ -705,8 +721,8 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             }
 
             _logger.LogInformation(
-                "BufferedSoundGenerator disposed. Total samples: received={Received}, output={Output}, dropped={Dropped}, compensated={Compensated}",
-                _totalSamplesReceived, _totalSamplesOutput, _totalSamplesDropped, _totalSamplesCompensated);
+                "BufferedSoundGenerator #{GeneratorId} disposed. Total samples: received={Received}, output={Output}, dropped={Dropped}, compensated={Compensated}",
+                GeneratorId, _totalSamplesReceived, _totalSamplesOutput, _totalSamplesDropped, _totalSamplesCompensated);
         }
         else
         {
