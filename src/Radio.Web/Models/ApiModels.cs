@@ -905,3 +905,52 @@ public class PbapContactDto
   public string DisplayName { get; set; } = "";
   public List<string> PhoneNumbers { get; set; } = [];
 }
+
+// GV Bridge DTOs (calls RotaryPhone.API /api/gvbridge)
+
+public class GvBridgeStatusDto
+{
+  public bool ExtensionConnected { get; set; }
+  public string? ExtensionVersion { get; set; }
+  public string ActiveMode { get; set; } = "";
+}
+
+public class GvAdapterModeDto
+{
+  public string ActiveMode { get; set; } = "";
+  public List<GvModeEntryDto> Modes { get; set; } = [];
+}
+
+public class GvModeEntryDto
+{
+  public string Mode { get; set; } = "";
+}
+
+public class GvSmsNotificationDto
+{
+  public string FromNumber { get; set; } = "";
+  public string? Body { get; set; }
+  public DateTime ReceivedAt { get; set; }
+  public string Type { get; set; } = "Sms"; // "Sms" or "MissedCall"
+}
+
+// GV Trunk DTOs (calls RotaryPhone.API /api/gvtrunk)
+
+public class GvTrunkStatusDto
+{
+  public bool IsRegistered { get; set; }
+  public string CallState { get; set; } = "Idle";
+  public int ActiveCallDurationSeconds { get; set; }
+}
+
+public class GvTrunkCallLogEntryDto
+{
+  public int Id { get; set; }
+  public DateTime StartedAt { get; set; }
+  public DateTime? EndedAt { get; set; }
+  public string Direction { get; set; } = "";
+  public string RemoteNumber { get; set; } = "";
+  public string Status { get; set; } = "";
+  public int? DurationSeconds { get; set; }
+  public string? Notes { get; set; }
+}

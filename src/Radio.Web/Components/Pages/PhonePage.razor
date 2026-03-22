@@ -1,6 +1,10 @@
 @page "/phone"
 @inject PhoneApiService PhoneApi
 @inject PhoneHubService PhoneHub
+@inject GvBridgeApiService GvBridgeApi
+@inject GvTrunkApiService GvTrunkApi
+@inject GvBridgeHubService GvBridgeHub
+@inject GvTrunkHubService GvTrunkHub
 @inject NotificationService NotificationService
 @inject PbapApiService PbapApi
 @inject BluetoothApiService BluetoothApi
@@ -55,6 +59,64 @@
                 @if (_systemStatus?.Ht801IpAddress != null)
                 {
                   <span class="status-detail">@_systemStatus.Ht801IpAddress</span>
+                }
+              </div>
+            </div>
+          </RadzenCard>
+
+          @* ── Call Path & GV Status ── *@
+          <RadzenCard class="phone-card call-path-card">
+            <h3 class="section-title section-title-cyan">CALL PATH</h3>
+            <div class="call-path-row">
+              @* Mode selector *@
+              <div class="call-path-modes">
+                <span class="status-column-label">ACTIVE MODE</span>
+                <div class="mode-buttons">
+                  <RadzenButton Text="Bluetooth"
+                    Icon="bluetooth"
+                    ButtonStyle="@(_gvActiveMode == "BluetoothHfp" ? ButtonStyle.Primary : ButtonStyle.Light)"
+                    Size="ButtonSize.Small"
+                    Click="@(() => SwitchModeAsync("BluetoothHfp"))"
+                    Disabled="@_switchingMode" />
+                  <RadzenButton Text="SIP Trunk"
+                    Icon="settings_phone"
+                    ButtonStyle="@(_gvActiveMode == "SipTrunk" ? ButtonStyle.Primary : ButtonStyle.Light)"
+                    Size="ButtonSize.Small"
+                    Click="@(() => SwitchModeAsync("SipTrunk"))"
+                    Disabled="@_switchingMode" />
+                  <RadzenButton Text="GV Browser"
+                    Icon="language"
+                    ButtonStyle="@(_gvActiveMode == "GVBrowser" ? ButtonStyle.Primary : ButtonStyle.Light)"
+                    Size="ButtonSize.Small"
+                    Click="@(() => SwitchModeAsync("GVBrowser"))"
+                    Disabled="@_switchingMode" />
+                </div>
+              </div>
+              <div class="status-divider"></div>
+              @* GV Bridge status *@
+              <div class="status-column">
+                <span class="status-column-label">CHROME EXTENSION</span>
+                <RadzenBadge
+                  BadgeStyle="@(_gvBridgeConnected ? BadgeStyle.Success : BadgeStyle.Danger)"
+                  Text="@(_gvBridgeConnected ? "Connected" : "Disconnected")" />
+                @if (_gvExtensionVersion != null)
+                {
+                  <span class="status-detail">v@(_gvExtensionVersion)</span>
+                }
+              </div>
+              <div class="status-divider"></div>
+              @* GV Trunk status *@
+              <div class="status-column">
+                <span class="status-column-label">SIP TRUNK</span>
+                <RadzenBadge
+                  BadgeStyle="@(_gvTrunkRegistered ? BadgeStyle.Success : BadgeStyle.Danger)"
+                  Text="@(_gvTrunkRegistered ? "Registered" : "Unregistered")" />
+                @if (!_gvTrunkRegistered)
+                {
+                  <RadzenButton Text="Re-register" Size="ButtonSize.ExtraSmall"
+                    ButtonStyle="ButtonStyle.Light"
+                    Click="@ReregisterTrunkAsync"
+                    Style="margin-top:4px" />
                 }
               </div>
             </div>
@@ -336,6 +398,14 @@
   private List<PbapContactDto>? _pbapContacts;
   private bool _isSyncing;
   private bool _showSyncDropdown;
+  private int _pollCount;
+
+  // GV Bridge/Trunk state
+  private string _gvActiveMode = "";
+  private bool _gvBridgeConnected;
+  private string? _gvExtensionVersion;
+  private bool _gvTrunkRegistered;
+  private bool _switchingMode;
 
   protected override async Task OnInitializedAsync()
   {
@@ -345,12 +415,28 @@
       await RefreshAllAsync();
     }
 
-    // Fetch BT and PBAP status for sync UI
+    // Fetch BT, PBAP, and GV status in parallel
     var btTask = BluetoothApi.GetStatusAsync();
     var pbapTask = PbapApi.GetSyncStatusAsync();
-    await Task.WhenAll(btTask, pbapTask);
+    var gvBridgeTask = GvBridgeApi.GetStatusAsync();
+    var gvTrunkTask = GvTrunkApi.GetStatusAsync();
+    await Task.WhenAll(btTask, pbapTask, gvBridgeTask, gvTrunkTask);
     _btStatus = btTask.Result;
     _pbapStatus = pbapTask.Result;
+
+    var bridgeStatus = gvBridgeTask.Result;
+    if (bridgeStatus != null)
+    {
+      _gvBridgeConnected = bridgeStatus.ExtensionConnected;
+      _gvExtensionVersion = bridgeStatus.ExtensionVersion;
+      _gvActiveMode = bridgeStatus.ActiveMode;
+    }
+
+    var trunkStatus = gvTrunkTask.Result;
+    if (trunkStatus != null)
+    {
+      _gvTrunkRegistered = trunkStatus.IsRegistered;
+    }
 
     // Load PBAP contacts — prefer connected device, fall back to most recently synced
     var pbapDeviceAddress = _btStatus?.ConnectedDevice?.Address
@@ -366,6 +452,9 @@
     PhoneHub.IncomingCall += OnIncomingCall;
     PhoneHub.CallHistoryUpdated += OnCallHistoryUpdated;
     PhoneHub.SystemStatusChanged += OnSystemStatusChanged;
+    GvBridgeHub.ExtensionConnectionChanged += OnExtensionConnectionChanged;
+    GvBridgeHub.ModeChanged += OnModeChanged;
+    GvTrunkHub.RegistrationChanged += OnRegistrationChanged;
 
     // Poll for status every 5 seconds as fallback
     _pollTimer = new System.Timers.Timer(5000);
@@ -380,8 +469,28 @@
     if (callState != null) _callState = callState;
     _contacts = await PhoneApi.GetContactsAsync();
     _callHistory = await PhoneApi.GetCallHistoryAsync();
+    await RefreshGvStatusAsync();
     RebuildMergedContacts();
     await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task RefreshGvStatusAsync()
+  {
+    var bridgeTask = GvBridgeApi.GetStatusAsync();
+    var trunkTask = GvTrunkApi.GetStatusAsync();
+    await Task.WhenAll(bridgeTask, trunkTask);
+    var bridgeStatus = bridgeTask.Result;
+    if (bridgeStatus != null)
+    {
+      _gvBridgeConnected = bridgeStatus.ExtensionConnected;
+      _gvExtensionVersion = bridgeStatus.ExtensionVersion;
+      _gvActiveMode = bridgeStatus.ActiveMode;
+    }
+    var trunkStatus = trunkTask.Result;
+    if (trunkStatus != null)
+    {
+      _gvTrunkRegistered = trunkStatus.IsRegistered;
+    }
   }
 
   private async Task PollStatusAsync()
@@ -403,6 +512,11 @@
         var callState = await PhoneApi.GetCallStateAsync();
         if (callState != null) _callState = callState;
         _systemStatus = await PhoneApi.GetSystemStatusAsync();
+        // Refresh GV status every 6th poll (30s) as SignalR fallback
+        if (++_pollCount % 6 == 0)
+        {
+          await RefreshGvStatusAsync();
+        }
         if (!_disposed) await InvokeAsync(StateHasChanged);
       }
     }
@@ -450,6 +564,69 @@
       }
       catch { /* Non-fatal */ }
     });
+  }
+
+  // GV Bridge/Trunk event handlers
+
+  private void OnExtensionConnectionChanged(bool connected)
+  {
+    if (_disposed) return;
+    _gvBridgeConnected = connected;
+    _ = InvokeAsync(StateHasChanged);
+  }
+
+  private void OnModeChanged(string mode)
+  {
+    if (_disposed) return;
+    _gvActiveMode = mode;
+    _ = InvokeAsync(StateHasChanged);
+  }
+
+  private void OnRegistrationChanged(bool registered)
+  {
+    if (_disposed) return;
+    _gvTrunkRegistered = registered;
+    _ = InvokeAsync(StateHasChanged);
+  }
+
+  private async Task SwitchModeAsync(string mode)
+  {
+    if (_switchingMode || _gvActiveMode == mode) return;
+    _switchingMode = true;
+    try
+    {
+      var success = await GvBridgeApi.SetAdapterModeAsync(mode);
+      if (success)
+      {
+        _gvActiveMode = mode;
+        NotificationService.Notify(NotificationSeverity.Success, "Mode Changed",
+          $"Switched to {mode}");
+      }
+      else
+      {
+        NotificationService.Notify(NotificationSeverity.Error, "Mode Switch Failed",
+          $"Could not switch to {mode}");
+      }
+    }
+    finally
+    {
+      _switchingMode = false;
+    }
+  }
+
+  private async Task ReregisterTrunkAsync()
+  {
+    var success = await GvTrunkApi.ReregisterAsync();
+    if (success)
+    {
+      NotificationService.Notify(NotificationSeverity.Info, "Re-registration",
+        "SIP trunk re-registration initiated");
+    }
+    else
+    {
+      NotificationService.Notify(NotificationSeverity.Error, "Re-registration Failed",
+        "Could not initiate SIP trunk re-registration");
+    }
   }
 
   // Developer controls
@@ -641,5 +818,8 @@
     PhoneHub.IncomingCall -= OnIncomingCall;
     PhoneHub.CallHistoryUpdated -= OnCallHistoryUpdated;
     PhoneHub.SystemStatusChanged -= OnSystemStatusChanged;
+    GvBridgeHub.ExtensionConnectionChanged -= OnExtensionConnectionChanged;
+    GvBridgeHub.ModeChanged -= OnModeChanged;
+    GvTrunkHub.RegistrationChanged -= OnRegistrationChanged;
   }
 }
