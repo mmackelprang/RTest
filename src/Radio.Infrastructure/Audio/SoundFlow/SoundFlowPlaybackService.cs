@@ -29,6 +29,16 @@ public class SoundFlowPlaybackService : IDisposable
   private readonly object _playersLock = new();
   private bool _disposed;
 
+  // Audio flow health monitoring
+  private CancellationTokenSource? _flowMonitorCts;
+  private readonly Dictionary<string, long> _lastOutputSamples = new();
+
+  /// <summary>
+  /// Fired when a generator is detected as stalled — receiving samples but not outputting.
+  /// The string parameter is the sourceId of the stalled component.
+  /// </summary>
+  public event Action<string>? GeneratorStalled;
+
   /// <summary>
   /// Initializes a new instance of the <see cref="SoundFlowPlaybackService"/> class.
   /// </summary>
@@ -41,6 +51,10 @@ public class SoundFlowPlaybackService : IDisposable
 
     // Re-attach active components/players when the playback device changes
     _audioEngine.PlaybackDeviceSwitched += OnPlaybackDeviceSwitched;
+
+    // Start audio flow health monitor
+    _flowMonitorCts = new CancellationTokenSource();
+    _ = MonitorAudioFlowAsync(_flowMonitorCts.Token);
   }
 
   /// <summary>
@@ -396,9 +410,10 @@ public class SoundFlowPlaybackService : IDisposable
       component.Volume = Math.Clamp(volume * compGainOffset * compDuckMult, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
 
       // Add to the playback device's mixer
+      var generatorId = (component as BufferedSoundGenerator<float>)?.GeneratorId;
       _logger.LogInformation(
-        "🔊 AUDIO ROUTING: Adding component '{ComponentName}' to SoundFlow mixer (SourceId={SourceId}, Volume={Volume:P0})",
-        component.Name ?? component.GetType().Name, sourceId, volume);
+        "🔊 AUDIO ROUTING: Adding component '{ComponentName}' to SoundFlow mixer (SourceId={SourceId}, Volume={Volume:P0}, GeneratorId={GeneratorId})",
+        component.Name ?? component.GetType().Name, sourceId, volume, generatorId?.ToString() ?? "n/a");
 
       playbackDevice.MasterMixer.AddComponent(component);
 
@@ -409,8 +424,8 @@ public class SoundFlowPlaybackService : IDisposable
       }
 
       _logger.LogInformation(
-        "🔊 AUDIO ROUTING COMPLETE: Component '{ComponentName}' now connected to audio output (SourceId={SourceId})",
-        component.Name ?? component.GetType().Name, sourceId);
+        "🔊 AUDIO ROUTING COMPLETE: Component '{ComponentName}' now connected to audio output (SourceId={SourceId}, GeneratorId={GeneratorId})",
+        component.Name ?? component.GetType().Name, sourceId, generatorId?.ToString() ?? "n/a");
       return true;
     }
     catch (Exception ex)
@@ -525,15 +540,16 @@ public class SoundFlowPlaybackService : IDisposable
       try
       {
         var componentName = component.Name ?? component.GetType().Name;
+        var generatorId = (component as BufferedSoundGenerator<float>)?.GeneratorId;
         _logger.LogInformation(
-          "🔇 AUDIO ROUTING: Removing component '{ComponentName}' from SoundFlow mixer (SourceId={SourceId})",
-          componentName, sourceId);
+          "🔇 AUDIO ROUTING: Removing component '{ComponentName}' from SoundFlow mixer (SourceId={SourceId}, GeneratorId={GeneratorId})",
+          componentName, sourceId, generatorId?.ToString() ?? "n/a");
 
         playbackDevice?.MasterMixer.RemoveComponent(component);
         component.Dispose();
         _logger.LogInformation(
-          "🔇 AUDIO ROUTING REMOVED: Component '{ComponentName}' disconnected from audio output (SourceId={SourceId})",
-          componentName, sourceId);
+          "🔇 AUDIO ROUTING REMOVED: Component '{ComponentName}' disconnected from audio output (SourceId={SourceId}, GeneratorId={GeneratorId})",
+          componentName, sourceId, generatorId?.ToString() ?? "n/a");
       }
       catch (Exception ex)
       {
@@ -742,6 +758,83 @@ public class SoundFlowPlaybackService : IDisposable
     }
   }
 
+  private async Task MonitorAudioFlowAsync(CancellationToken cancellationToken)
+  {
+    _logger.LogInformation("Audio flow health monitor started (interval: 10s)");
+
+    while (!cancellationToken.IsCancellationRequested)
+    {
+      try
+      {
+        await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
+      }
+      catch (OperationCanceledException)
+      {
+        break;
+      }
+
+      try
+      {
+        KeyValuePair<string, SoundComponent>[] snapshot;
+        lock (_playersLock)
+        {
+          snapshot = _activeComponents.ToArray();
+        }
+
+        foreach (var (sourceId, component) in snapshot)
+        {
+          if (component is not BufferedSoundGenerator<float> generator)
+            continue;
+
+          if (generator.IsDisposed)
+          {
+            _logger.LogWarning(
+              "Audio flow monitor: disposed generator #{GeneratorId} still in active components for {SourceId}",
+              generator.GeneratorId, sourceId);
+            continue;
+          }
+
+          var currentOutput = generator.TotalSamplesOutput;
+          var currentReceived = generator.TotalSamplesReceived;
+
+          _lastOutputSamples.TryGetValue(sourceId, out var previousOutput);
+          _lastOutputSamples[sourceId] = currentOutput;
+
+          // Skip first check (no previous baseline)
+          if (previousOutput == 0)
+            continue;
+
+          var outputDelta = currentOutput - previousOutput;
+          var isReceiving = currentReceived > 0;
+
+          // Stalled: generator is in mixer, has received samples, but output hasn't increased
+          if (outputDelta == 0 && isReceiving && currentReceived > currentOutput)
+          {
+            _logger.LogError(
+              "🔴 STALLED GENERATOR: #{GeneratorId} for {SourceId} — received={Received}, output={Output}, delta=0 in last 10s. " +
+              "Generator is in mixer but SoundFlow is not reading from it.",
+              generator.GeneratorId, sourceId, currentReceived, currentOutput);
+
+            GeneratorStalled?.Invoke(sourceId);
+          }
+        }
+
+        // Clean up tracking for removed components
+        var activeIds = snapshot.Select(s => s.Key).ToHashSet();
+        foreach (var key in _lastOutputSamples.Keys.Except(activeIds).ToList())
+        {
+          _lastOutputSamples.Remove(key);
+        }
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "Error in audio flow health monitor");
+      }
+    }
+
+    _logger.LogInformation("Audio flow health monitor stopped");
+  }
+
   private void ThrowIfDisposed()
   {
     ObjectDisposedException.ThrowIf(_disposed, this);
@@ -756,6 +849,9 @@ public class SoundFlowPlaybackService : IDisposable
     }
 
     _audioEngine.PlaybackDeviceSwitched -= OnPlaybackDeviceSwitched;
+
+    _flowMonitorCts?.Cancel();
+    _flowMonitorCts?.Dispose();
 
     // Stop all first, then set disposed
     lock (_playersLock)

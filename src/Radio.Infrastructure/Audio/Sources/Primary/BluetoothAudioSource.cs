@@ -42,6 +42,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private TimeSpan? _btDuration;
   private bool _hasMediaPlayer;
   private CancellationTokenSource? _captureRetryCts;
+  private int _recoveryInProgress;
 
   /// <summary>Current fingerprinting options (live from IOptionsMonitor).</summary>
   private FingerprintingOptions FpOptions =>
@@ -81,6 +82,11 @@ public class BluetoothAudioSource : USBAudioSourceBase
     _bluetoothService.DeviceConnected += OnDeviceConnected;
     _bluetoothService.DeviceDisconnected += OnDeviceDisconnected;
     _bluetoothService.CaptureStreamRecovered += OnCaptureStreamRecovered;
+
+    if (_playbackService != null)
+    {
+      _playbackService.GeneratorStalled += OnGeneratorStalled;
+    }
 
     if (_identificationService != null)
     {
@@ -290,6 +296,11 @@ public class BluetoothAudioSource : USBAudioSourceBase
     _bluetoothService.DeviceDisconnected -= OnDeviceDisconnected;
     _bluetoothService.CaptureStreamRecovered -= OnCaptureStreamRecovered;
 
+    if (_playbackService != null)
+    {
+      _playbackService.GeneratorStalled -= OnGeneratorStalled;
+    }
+
     if (_identificationService != null)
     {
       _identificationService.TrackIdentified -= OnTrackIdentified;
@@ -344,6 +355,41 @@ public class BluetoothAudioSource : USBAudioSourceBase
   {
     Logger.LogInformation("BluetoothAudioSource: capture stream recovered by pipeline monitor");
     _ = TryAcquireAudioCaptureAsync();
+  }
+
+  private void OnGeneratorStalled(string sourceId)
+  {
+    if (sourceId != _playbackId && sourceId != Id) return;
+    if (Interlocked.CompareExchange(ref _recoveryInProgress, 1, 0) != 0)
+    {
+      Logger.LogDebug("BluetoothAudioSource: stall recovery already in progress, skipping");
+      return;
+    }
+
+    Logger.LogWarning(
+      "🔴 BluetoothAudioSource: generator stalled — recreating capture pipeline (PlaybackId={PlaybackId})",
+      _playbackId);
+
+    _ = Task.Run(async () =>
+    {
+      try
+      {
+        // Use full StopCoreAsync to clean up all state (capture device, PipeWire stream,
+        // generator, event subscriptions) — partial cleanup would leave stale references
+        // that prevent TryAcquireAudioCaptureAsync from re-acquiring.
+        await StopCoreAsync(CancellationToken.None);
+        await PlayCoreAsync(CancellationToken.None);
+        Logger.LogInformation("🟢 BluetoothAudioSource: capture pipeline recreated after stall");
+      }
+      catch (Exception ex)
+      {
+        Logger.LogError(ex, "Failed to recreate BT capture pipeline after stall");
+      }
+      finally
+      {
+        Interlocked.Exchange(ref _recoveryInProgress, 0);
+      }
+    });
   }
 
   private async Task TryAcquireAudioCaptureAsync()
@@ -433,6 +479,8 @@ public class BluetoothAudioSource : USBAudioSourceBase
         }
 
         _captureGenerator = new BufferedSoundGenerator<float>(engine, format, Logger, metricsCollector: MetricsCollector);
+        Logger.LogInformation("BluetoothAudioSource: created capture bridge generator #{GeneratorId}",
+          _captureGenerator.GeneratorId);
 
         // Pre-fill with silence to cushion against capture startup latency and
         // ongoing jitter from the audio capture device callback timing.
@@ -469,7 +517,9 @@ public class BluetoothAudioSource : USBAudioSourceBase
         if (success)
         {
           StopCaptureRetryLoop();
-          Logger.LogInformation("BluetoothAudioSource: capture generator added to mixer (PlaybackId={PlaybackId})", _playbackId);
+          Logger.LogInformation(
+            "BluetoothAudioSource: capture generator #{GeneratorId} added to mixer (PlaybackId={PlaybackId})",
+            generator.GeneratorId, _playbackId);
 
           // Start loopback capture on Windows (Linux pw-record is already running)
           if (_bluetoothService is WindowsBluetoothService winBt)

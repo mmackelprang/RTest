@@ -33,6 +33,7 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   private int _audioCaptureCallCount = 0;
   private BufferedSoundGenerator<float>? _soundGenerator;
   private string? _playbackId;
+  private int _recoveryInProgress;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="USBAudioSourceBase"/> class.
@@ -58,6 +59,12 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
     if (_identificationService != null)
     {
       _identificationService.TrackIdentified += OnTrackIdentified;
+    }
+
+    // Subscribe to stalled generator detection for self-healing
+    if (_playbackService != null)
+    {
+      _playbackService.GeneratorStalled += OnGeneratorStalled;
     }
   }
 
@@ -302,11 +309,12 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
         var format = _playbackService.GetAudioFormat();
         _playbackId = $"usb-capture-{Id:N}";
 
-        if (_soundGenerator == null)
-        {
-          _soundGenerator = new BufferedSoundGenerator<float>(
-            engine, format, Logger, metricsCollector: MetricsCollector);
-        }
+        // Always create a fresh generator. The previous one was disposed by
+        // PlaybackService.StopAsync (called at the top of PlayComponentAsync).
+        // Reusing a disposed generator causes AddSamples to no-op and GenerateAudio
+        // to fill silence — the root cause of audio dropout after long uptime.
+        _soundGenerator = new BufferedSoundGenerator<float>(
+          engine, format, Logger, metricsCollector: MetricsCollector);
 
         var success = await _playbackService.PlayComponentAsync(
           _playbackId, _soundGenerator, Volume, cancellationToken);
@@ -314,8 +322,8 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
         if (success)
         {
           Logger.LogInformation(
-            "🔊 {SourceName} audio routed to playback output (PlaybackId={PlaybackId})",
-            Name, _playbackId);
+            "🔊 {SourceName} audio routed to playback output (PlaybackId={PlaybackId}, GeneratorId={GeneratorId})",
+            Name, _playbackId, _soundGenerator.GeneratorId);
         }
         else
         {
@@ -401,6 +409,38 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
     }
   }
 
+  private void OnGeneratorStalled(string sourceId)
+  {
+    if (sourceId != _playbackId) return;
+    if (Interlocked.CompareExchange(ref _recoveryInProgress, 1, 0) != 0)
+    {
+      Logger.LogDebug("{SourceName}: stall recovery already in progress, skipping", Name);
+      return;
+    }
+
+    Logger.LogWarning(
+      "🔴 {SourceName}: generator stalled — recreating capture pipeline (PlaybackId={PlaybackId})",
+      Name, _playbackId);
+
+    _ = Task.Run(async () =>
+    {
+      try
+      {
+        await StopCoreAsync(CancellationToken.None);
+        await PlayCoreAsync(CancellationToken.None);
+        Logger.LogInformation("🟢 {SourceName}: capture pipeline recreated after stall", Name);
+      }
+      catch (Exception ex)
+      {
+        Logger.LogError(ex, "Failed to recreate capture pipeline for {SourceName} after stall", Name);
+      }
+      finally
+      {
+        Interlocked.Exchange(ref _recoveryInProgress, 0);
+      }
+    });
+  }
+
   /// <summary>
   /// Handles the TrackIdentified event from the fingerprinting service.
   /// Updates metadata with identified track information.
@@ -481,7 +521,11 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   /// <inheritdoc/>
   protected override async ValueTask DisposeAsyncCore()
   {
-    // Unsubscribe from fingerprinting events
+    // Unsubscribe from events
+    if (_playbackService != null)
+    {
+      _playbackService.GeneratorStalled -= OnGeneratorStalled;
+    }
     if (_identificationService != null)
     {
       _identificationService.TrackIdentified -= OnTrackIdentified;
