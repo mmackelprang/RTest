@@ -433,6 +433,8 @@ public class BluetoothAudioSource : USBAudioSourceBase
         }
 
         _captureGenerator = new BufferedSoundGenerator<float>(engine, format, Logger, metricsCollector: MetricsCollector);
+        Logger.LogInformation("BluetoothAudioSource: created capture bridge generator #{GeneratorId}",
+          _captureGenerator.GeneratorId);
 
         // Pre-fill with silence to cushion against capture startup latency and
         // ongoing jitter from the audio capture device callback timing.
@@ -469,7 +471,9 @@ public class BluetoothAudioSource : USBAudioSourceBase
         if (success)
         {
           StopCaptureRetryLoop();
-          Logger.LogInformation("BluetoothAudioSource: capture generator added to mixer (PlaybackId={PlaybackId})", _playbackId);
+          Logger.LogInformation(
+            "BluetoothAudioSource: capture generator #{GeneratorId} added to mixer (PlaybackId={PlaybackId})",
+            generator.GeneratorId, _playbackId);
 
           // Start loopback capture on Windows (Linux pw-record is already running)
           if (_bluetoothService is WindowsBluetoothService winBt)
