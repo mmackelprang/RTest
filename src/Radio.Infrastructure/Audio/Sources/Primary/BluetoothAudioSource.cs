@@ -42,6 +42,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private TimeSpan? _btDuration;
   private bool _hasMediaPlayer;
   private CancellationTokenSource? _captureRetryCts;
+  private int _recoveryInProgress;
 
   /// <summary>Current fingerprinting options (live from IOptionsMonitor).</summary>
   private FingerprintingOptions FpOptions =>
@@ -359,31 +360,34 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private void OnGeneratorStalled(string sourceId)
   {
     if (sourceId != _playbackId && sourceId != Id) return;
+    if (Interlocked.CompareExchange(ref _recoveryInProgress, 1, 0) != 0)
+    {
+      Logger.LogDebug("BluetoothAudioSource: stall recovery already in progress, skipping");
+      return;
+    }
 
     Logger.LogWarning(
-      "🔴 BluetoothAudioSource: generator stalled — attempting capture re-acquisition (PlaybackId={PlaybackId})",
+      "🔴 BluetoothAudioSource: generator stalled — recreating capture pipeline (PlaybackId={PlaybackId})",
       _playbackId);
 
     _ = Task.Run(async () =>
     {
       try
       {
-        // Stop current capture
-        if (_playbackService != null && _playbackId != null)
-        {
-          await _playbackService.StopAsync(_playbackId, CancellationToken.None);
-          _playbackId = null;
-          _captureGenerator = null;
-          SoundComponent = null;
-        }
-
-        // Re-acquire capture device and route through mixer
-        await TryAcquireAudioCaptureAsync();
+        // Use full StopCoreAsync to clean up all state (capture device, PipeWire stream,
+        // generator, event subscriptions) — partial cleanup would leave stale references
+        // that prevent TryAcquireAudioCaptureAsync from re-acquiring.
+        await StopCoreAsync(CancellationToken.None);
+        await PlayCoreAsync(CancellationToken.None);
         Logger.LogInformation("🟢 BluetoothAudioSource: capture pipeline recreated after stall");
       }
       catch (Exception ex)
       {
         Logger.LogError(ex, "Failed to recreate BT capture pipeline after stall");
+      }
+      finally
+      {
+        Interlocked.Exchange(ref _recoveryInProgress, 0);
       }
     });
   }

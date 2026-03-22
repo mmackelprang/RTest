@@ -33,6 +33,7 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   private int _audioCaptureCallCount = 0;
   private BufferedSoundGenerator<float>? _soundGenerator;
   private string? _playbackId;
+  private int _recoveryInProgress;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="USBAudioSourceBase"/> class.
@@ -410,8 +411,12 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
 
   private void OnGeneratorStalled(string sourceId)
   {
-    // Only handle stalls for our own playback
     if (sourceId != _playbackId) return;
+    if (Interlocked.CompareExchange(ref _recoveryInProgress, 1, 0) != 0)
+    {
+      Logger.LogDebug("{SourceName}: stall recovery already in progress, skipping", Name);
+      return;
+    }
 
     Logger.LogWarning(
       "🔴 {SourceName}: generator stalled — recreating capture pipeline (PlaybackId={PlaybackId})",
@@ -428,6 +433,10 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
       catch (Exception ex)
       {
         Logger.LogError(ex, "Failed to recreate capture pipeline for {SourceName} after stall", Name);
+      }
+      finally
+      {
+        Interlocked.Exchange(ref _recoveryInProgress, 0);
       }
     });
   }
