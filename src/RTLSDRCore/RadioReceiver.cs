@@ -1045,9 +1045,12 @@ namespace RTLSDRCore;
 
                   var leftDecimCount = _audioDecimator.Decimate(leftSpan, _decimBuffer);
 
-                  // We need a temp buffer for right decimation output
-                  var rightDecimBuf = new float[maxDecimOut]; // small, ~960 samples
-                  var rightDecimCount = _audioDecimatorRight.Decimate(rightSpan, rightDecimBuf);
+                  // Reuse pre-allocated right decimation buffer (avoid per-batch allocation)
+                  if (_decimBufferRight.Length < maxDecimOut)
+                  {
+                      _decimBufferRight = new float[maxDecimOut];
+                  }
+                  var rightDecimCount = _audioDecimatorRight.Decimate(rightSpan, _decimBufferRight);
 
                   // 3d. Interleave decimated L,R into stereo output
                   var stereoCount = Math.Min(leftDecimCount, rightDecimCount);
@@ -1058,7 +1061,7 @@ namespace RTLSDRCore;
                   for (var i = 0; i < stereoCount; i++)
                   {
                       _stereoDemodBuffer[i * 2] = _decimBuffer[i];
-                      _stereoDemodBuffer[i * 2 + 1] = rightDecimBuf[i];
+                      _stereoDemodBuffer[i * 2 + 1] = _decimBufferRight[i];
                   }
                   outputCount = stereoCount * 2; // interleaved sample count
                   outputSamples = _stereoDemodBuffer;
