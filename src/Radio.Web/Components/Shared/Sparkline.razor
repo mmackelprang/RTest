@@ -1,0 +1,143 @@
+@*
+  Sparkline — pure inline-SVG mini line chart introduced by PR 4 of the
+  design tightening arc (handoff §P0·4).
+
+  Renders the supplied series into a fixed 120×28 SVG viewBox with
+  preserveAspectRatio="none" so it stretches to fill its parent
+  horizontally while staying crisp vertically. The line is drawn at the
+  Stroke color; a 10%-opacity fill of the same color sits under the
+  curve to imply magnitude.
+
+  Edge cases:
+    Values null or empty  → empty SVG (no path).
+    Single value          → flat line at mid-height.
+    All equal values      → flat line at mid-height (avoids div-by-zero).
+*@
+
+@using System.Globalization
+@using System.Text
+
+<svg viewBox="0 0 120 28"
+     preserveAspectRatio="none"
+     style="@RootStyle"
+     aria-hidden="true"
+     focusable="false">
+  @if (_hasPath)
+  {
+    <path d="@_areaPath" fill="@Stroke" fill-opacity="0.1" />
+    <path d="@_linePath" fill="none" stroke="@Stroke" stroke-width="1.5"
+          stroke-linecap="round" stroke-linejoin="round" />
+  }
+</svg>
+
+@code {
+  /// <summary>The time series to plot. Null or empty renders an empty SVG.</summary>
+  [Parameter, EditorRequired]
+  public IReadOnlyList<double> Values { get; set; } = Array.Empty<double>();
+
+  /// <summary>
+  /// Stroke and fill color (any CSS color, including <c>var(--…)</c>
+  /// or <c>currentColor</c>). Defaults to <c>currentColor</c> so the
+  /// sparkline inherits its parent's text color when unset.
+  /// </summary>
+  [Parameter]
+  public string Stroke { get; set; } = "currentColor";
+
+  /// <summary>
+  /// Inline style applied to the root SVG. Defaults to filling the
+  /// parent's width and a tile-friendly 28px height.
+  /// </summary>
+  [Parameter]
+  public string RootStyle { get; set; } = "width: 100%; height: 28px; display: block;";
+
+  private bool _hasPath;
+  private string _linePath = string.Empty;
+  private string _areaPath = string.Empty;
+
+  // SVG canvas dimensions — must match the viewBox above.
+  private const double ViewWidth = 120.0;
+  private const double ViewHeight = 28.0;
+
+  protected override void OnParametersSet()
+  {
+    BuildPaths();
+  }
+
+  private void BuildPaths()
+  {
+    _hasPath = false;
+    _linePath = string.Empty;
+    _areaPath = string.Empty;
+
+    if (Values == null || Values.Count == 0)
+      return;
+
+    var inv = CultureInfo.InvariantCulture;
+    var n = Values.Count;
+    var midY = ViewHeight / 2.0;
+
+    // Single-value sparklines render as a flat line at mid-height.
+    if (n == 1)
+    {
+      _linePath = $"M0,{midY.ToString("0.##", inv)} L{ViewWidth.ToString("0.##", inv)},{midY.ToString("0.##", inv)}";
+      _areaPath = $"M0,{midY.ToString("0.##", inv)} L{ViewWidth.ToString("0.##", inv)},{midY.ToString("0.##", inv)} L{ViewWidth.ToString("0.##", inv)},{ViewHeight.ToString("0.##", inv)} L0,{ViewHeight.ToString("0.##", inv)} Z";
+      _hasPath = true;
+      return;
+    }
+
+    double min = Values[0];
+    double max = Values[0];
+    for (var i = 1; i < n; i++)
+    {
+      var v = Values[i];
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+
+    var range = max - min;
+    var stepX = ViewWidth / (n - 1);
+
+    var line = new StringBuilder(n * 12);
+    var area = new StringBuilder(n * 12);
+
+    for (var i = 0; i < n; i++)
+    {
+      var x = i * stepX;
+      double y;
+      if (range == 0)
+      {
+        // All values equal — paint a flat line through the middle so
+        // the tile still reads as "present but unchanging".
+        y = midY;
+      }
+      else
+      {
+        // Normalize into [0, ViewHeight], invert (SVG y grows downward).
+        y = ViewHeight - ((Values[i] - min) / range) * ViewHeight;
+      }
+
+      var xs = x.ToString("0.##", inv);
+      var ys = y.ToString("0.##", inv);
+      if (i == 0)
+      {
+        line.Append('M').Append(xs).Append(',').Append(ys);
+        area.Append('M').Append(xs).Append(',').Append(ys);
+      }
+      else
+      {
+        line.Append(" L").Append(xs).Append(',').Append(ys);
+        area.Append(" L").Append(xs).Append(',').Append(ys);
+      }
+    }
+
+    // Close the area path back along the baseline to form a filled region.
+    var lastX = ((n - 1) * stepX).ToString("0.##", inv);
+    var baseY = ViewHeight.ToString("0.##", inv);
+    area.Append(" L").Append(lastX).Append(',').Append(baseY)
+        .Append(" L0,").Append(baseY).Append(" Z");
+
+    _linePath = line.ToString();
+    _areaPath = area.ToString();
+    _hasPath = true;
+  }
+}

@@ -1,0 +1,116 @@
+@*
+  Skeleton — shape-aware loading placeholder introduced by PR 4 (handoff §P1·5).
+
+  Replaces the centered <RadzenProgressBarCircular /> spinners that
+  used to dominate panel-body initial-load branches. Each Shape value
+  arranges the shimmer-animated .skeleton-* primitives from
+  design-system.css §17 into a layout that roughly matches the real
+  component's silhouette, so the loading state reads as the content
+  about to appear rather than a generic spinner.
+
+  Shape rationale:
+    NowPlaying — album-art block + title/artist lines + progress bar.
+    Radio      — band-button row + freq-well outline + meter band.
+    ListRow    — single 56px row with leading thumb + two text lines.
+    DeviceRow  — list row with trailing action-pill placeholder.
+    MetricTile — category + name + value bar + sparkline strip.
+    Visualizer — full-bleed shimmer block with an axis strip below.
+*@
+
+<div class="skeleton skeleton-@(_shapeClass)" role="status" aria-live="polite" aria-busy="true">
+  @switch (Shape)
+  {
+    case SkeletonShape.NowPlaying:
+      <div class="skeleton-loading skeleton-art"></div>
+      <div class="skeleton-loading skeleton-heading"></div>
+      <div class="skeleton-loading skeleton-text" style="width: 60%;"></div>
+      <div class="skeleton-loading skeleton-progress"></div>
+      break;
+
+    case SkeletonShape.Radio:
+      <div class="skeleton-radio-bands">
+        <div class="skeleton-loading skeleton-band"></div>
+        <div class="skeleton-loading skeleton-band"></div>
+        <div class="skeleton-loading skeleton-band"></div>
+        <div class="skeleton-loading skeleton-band"></div>
+      </div>
+      <div class="skeleton-loading skeleton-freq-well"></div>
+      <div class="skeleton-loading skeleton-meter"></div>
+      break;
+
+    case SkeletonShape.ListRow:
+      <div class="skeleton-list-row">
+        <div class="skeleton-loading skeleton-thumb"></div>
+        <div class="skeleton-list-row-text">
+          <div class="skeleton-loading skeleton-text" style="width: 75%;"></div>
+          <div class="skeleton-loading skeleton-text" style="width: 45%;"></div>
+        </div>
+      </div>
+      break;
+
+    case SkeletonShape.DeviceRow:
+      <div class="skeleton-list-row">
+        <div class="skeleton-loading skeleton-circle"></div>
+        <div class="skeleton-list-row-text">
+          <div class="skeleton-loading skeleton-text" style="width: 60%;"></div>
+          <div class="skeleton-loading skeleton-text" style="width: 35%;"></div>
+        </div>
+        <div class="skeleton-loading skeleton-action-pill"></div>
+      </div>
+      break;
+
+    case SkeletonShape.MetricTile:
+      <div class="skeleton-loading skeleton-text" style="width: 30%; height: 10px;"></div>
+      <div class="skeleton-loading skeleton-text" style="width: 55%;"></div>
+      <div class="skeleton-loading skeleton-text" style="width: 80%; height: 28px;"></div>
+      <div class="skeleton-loading skeleton-spark"></div>
+      break;
+
+    case SkeletonShape.Visualizer:
+      <div class="skeleton-loading skeleton-viz-canvas"></div>
+      <div class="skeleton-viz-axis">
+        <div class="skeleton-loading skeleton-axis-tick"></div>
+        <div class="skeleton-loading skeleton-axis-tick"></div>
+        <div class="skeleton-loading skeleton-axis-tick"></div>
+        <div class="skeleton-loading skeleton-axis-tick"></div>
+      </div>
+      break;
+  }
+  <span class="visually-hidden">Loading…</span>
+</div>
+
+@code {
+  /// <summary>
+  /// Distinct layouts the skeleton can render. Each shape arranges the
+  /// shimmer primitives to match the corresponding real component.
+  /// </summary>
+  public enum SkeletonShape
+  {
+    NowPlaying,
+    Radio,
+    ListRow,
+    DeviceRow,
+    MetricTile,
+    Visualizer,
+  }
+
+  /// <summary>The shape arrangement to render. Required.</summary>
+  [Parameter, EditorRequired]
+  public SkeletonShape Shape { get; set; } = SkeletonShape.ListRow;
+
+  private string _shapeClass = "list-row";
+
+  protected override void OnParametersSet()
+  {
+    _shapeClass = Shape switch
+    {
+      SkeletonShape.NowPlaying => "now-playing",
+      SkeletonShape.Radio => "radio",
+      SkeletonShape.ListRow => "list-row",
+      SkeletonShape.DeviceRow => "device-row",
+      SkeletonShape.MetricTile => "metric-tile",
+      SkeletonShape.Visualizer => "visualizer",
+      _ => "list-row",
+    };
+  }
+}

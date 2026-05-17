@@ -9,9 +9,9 @@
 <div class="rcp-root">
   @if (_radioState == null)
   {
-    <div style="flex: 1; display: flex; justify-content: center; align-items: center;">
-      <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" ProgressBarStyle="ProgressBarStyle.Primary" />
-    </div>
+    @* Initial-load skeleton — shape mirrors the band buttons + freq well +
+       meter strip that take its place once _radioState is hydrated. *@
+    <Skeleton Shape="Skeleton.SkeletonShape.Radio" />
   }
   else
   {

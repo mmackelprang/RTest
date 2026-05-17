@@ -29,7 +29,9 @@
 
           @if (isLoadingDisplay)
           {
-            <RadzenProgressBar Mode="ProgressBarMode.Indeterminate" ProgressBarStyle="ProgressBarStyle.Primary" />
+            <Skeleton Shape="Skeleton.SkeletonShape.DeviceRow" />
+            <Skeleton Shape="Skeleton.SkeletonShape.DeviceRow" />
+            <Skeleton Shape="Skeleton.SkeletonShape.DeviceRow" />
           }
           else if (displaySettings == null || !displaySettings.Any())
           {
@@ -97,7 +99,9 @@
 
           @if (isLoadingOutput)
           {
-            <RadzenProgressBar Mode="ProgressBarMode.Indeterminate" ProgressBarStyle="ProgressBarStyle.Primary" />
+            <Skeleton Shape="Skeleton.SkeletonShape.DeviceRow" />
+            <Skeleton Shape="Skeleton.SkeletonShape.DeviceRow" />
+            <Skeleton Shape="Skeleton.SkeletonShape.DeviceRow" />
           }
           else if (outputDevices == null || !outputDevices.Any())
           {
@@ -174,7 +178,9 @@
 
           @if (isLoadingCast)
           {
-            <RadzenProgressBar Mode="ProgressBarMode.Indeterminate" ProgressBarStyle="ProgressBarStyle.Primary" />
+            <Skeleton Shape="Skeleton.SkeletonShape.DeviceRow" />
+            <Skeleton Shape="Skeleton.SkeletonShape.DeviceRow" />
+            <Skeleton Shape="Skeleton.SkeletonShape.DeviceRow" />
           }
           else if (castDevices == null || !castDevices.Any())
           {
@@ -250,7 +256,9 @@
 
           @if (isLoadingInput)
           {
-            <RadzenProgressBar Mode="ProgressBarMode.Indeterminate" ProgressBarStyle="ProgressBarStyle.Primary" />
+            <Skeleton Shape="Skeleton.SkeletonShape.DeviceRow" />
+            <Skeleton Shape="Skeleton.SkeletonShape.DeviceRow" />
+            <Skeleton Shape="Skeleton.SkeletonShape.DeviceRow" />
           }
           else if (inputDevices == null || !inputDevices.Any())
           {
@@ -310,7 +318,9 @@
 
           @if (isLoadingUsb)
           {
-            <RadzenProgressBar Mode="ProgressBarMode.Indeterminate" ProgressBarStyle="ProgressBarStyle.Primary" />
+            <Skeleton Shape="Skeleton.SkeletonShape.DeviceRow" />
+            <Skeleton Shape="Skeleton.SkeletonShape.DeviceRow" />
+            <Skeleton Shape="Skeleton.SkeletonShape.DeviceRow" />
           }
           else if (usbPorts == null || !usbPorts.Any())
           {

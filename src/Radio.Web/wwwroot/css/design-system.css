@@ -1949,3 +1949,335 @@ body {
 .source-bubble-chevron:active {
   transform: scale(0.92);
 }
+
+/* ─── §28  Visualizer Panel (PR 4) ────────────────────────────────────────── */
+
+/* Replaces the floating chip-group + canvas-overlap layout. The panel is
+   a flex column: 44px header, full-bleed canvas wrap, and an optional
+   16px frequency-band axis strip below for spectrum modes. */
+
+.viz-panel {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-inset);
+  overflow: hidden;
+}
+
+.visualizer-header {
+  position: relative;
+  flex: 0 0 44px;
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--surface-separator);
+  background: var(--surface-base);
+}
+
+.visualizer-mode-picker {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  height: 44px;
+}
+
+.visualizer-mode {
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--surface-separator);
+  color: var(--text-medium);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--anim-duration-fast) var(--anim-ease-standard),
+              color var(--anim-duration-fast) var(--anim-ease-standard);
+}
+
+.visualizer-mode:last-child {
+  border-right: none;
+}
+
+.visualizer-mode:hover:not(.is-active) {
+  color: var(--text-high);
+  background: var(--surface-hover);
+}
+
+.visualizer-mode:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: -2px;
+}
+
+.visualizer-mode.is-active {
+  background: var(--accent-dim);
+  color: var(--accent-primary);
+  box-shadow: inset 0 -2px 0 var(--accent-primary);
+}
+
+/* 8×8 connection dot, top-right of the header. No text label. */
+.visualizer-conn-dot {
+  position: absolute;
+  top: 18px;
+  right: 12px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--signal-red);
+  box-shadow: 0 0 0 2px var(--surface-base);
+  pointer-events: none;
+}
+
+.visualizer-conn-dot.is-connected {
+  background: var(--signal-green);
+}
+
+.visualizer-canvas-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.visualizer-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.visualizer-waiting {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  animation: ambientPulse 3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* Frequency-band axis strip — 16px tall, mono 10px, low contrast.
+   Spectrum-family modes only. */
+.visualizer-axis {
+  flex: 0 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 0 8px;
+  border-top: 1px solid var(--surface-separator);
+  background: var(--surface-base);
+  color: var(--text-low);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+}
+
+/* ─── §29  Metric Tile + Sparkline (PR 4) ─────────────────────────────────── */
+
+/* Replaces the dense MetricsDashboardPage hero/row layout with a grid
+   of category-grouped tiles. Each tile shows: category line, name line,
+   big value (color from threshold band), and an optional inline
+   sparkline matched to the value color. */
+
+.metric-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  background: var(--surface-raised);
+  border: 1px solid var(--surface-separator);
+  border-radius: 8px;
+  min-height: 110px;
+}
+
+.metric-tile-category {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-low);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.metric-tile-name {
+  font-size: 13px;
+  color: var(--text-medium);
+  line-height: 1.25;
+  /* Allow two lines for long metric names without distorting tile height. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 32px;
+}
+
+.metric-tile-value {
+  font-family: var(--font-mono);
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.1;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.metric-tile-spark {
+  margin-top: 4px;
+  height: 28px;
+  /* Sparkline takes its parent's color for stroke when Stroke="currentColor". */
+}
+
+/* ─── §30  Metrics Dashboard — categorized grid (PR 4) ────────────────────── */
+
+.metrics-categories-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 16px 20px 24px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.metrics-category-block {
+  display: flex;
+  flex-direction: column;
+}
+
+.metrics-category-subheader {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: var(--text-low);
+  margin: 0 0 14px;
+}
+
+.metrics-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+/* ─── §31  Skeleton Shapes (PR 4) ─────────────────────────────────────────── */
+
+/* Replaces the generic centered <RadzenProgressBarCircular /> spinners
+   in panel-body initial-load branches. Each shape arranges the existing
+   .skeleton-* shimmer primitives from §17 (animation: shimmer) into a
+   layout that mirrors the real component about to take its place. */
+
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.skeleton .visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skeleton-art {
+  flex: 1 1 auto;
+  min-height: 180px;
+  border-radius: 8px;
+}
+
+.skeleton-progress {
+  height: 4px;
+  border-radius: 2px;
+  width: 100%;
+}
+
+.skeleton-radio-bands {
+  display: flex;
+  gap: 8px;
+}
+
+.skeleton-band {
+  flex: 1;
+  height: 36px;
+  border-radius: 18px;
+}
+
+.skeleton-freq-well {
+  height: 100px;
+  border-radius: 8px;
+}
+
+.skeleton-meter {
+  height: 24px;
+  border-radius: 4px;
+}
+
+.skeleton-list-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--surface-separator);
+}
+
+.skeleton-list-row:last-child {
+  border-bottom: none;
+}
+
+.skeleton-thumb {
+  width: 48px;
+  height: 48px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.skeleton-list-row-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.skeleton-action-pill {
+  width: 96px;
+  height: 28px;
+  border-radius: 14px;
+  flex-shrink: 0;
+}
+
+.skeleton-spark {
+  height: 28px;
+  border-radius: 2px;
+}
+
+.skeleton-viz-canvas {
+  flex: 1 1 auto;
+  border-radius: 4px;
+  min-height: 120px;
+}
+
+.skeleton-viz-axis {
+  display: flex;
+  gap: 12px;
+  padding: 0 8px;
+}
+
+.skeleton-axis-tick {
+  flex: 1;
+  height: 10px;
+  border-radius: 2px;
+}

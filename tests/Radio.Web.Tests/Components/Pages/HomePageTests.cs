@@ -72,6 +72,9 @@ public class HomePageTests : TestContext
 
     // RadioApiService (used by RadioControlPanel child component)
     Services.AddHttpClient<RadioApiService>();
+
+    // VisualizerTelemetryService (PR 4 — consumed by VisualizerPanel).
+    Services.AddSingleton<VisualizerTelemetryService>();
   }
 
   protected override void Dispose(bool disposing)

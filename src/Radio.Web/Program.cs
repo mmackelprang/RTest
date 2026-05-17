@@ -348,6 +348,10 @@ builder.Services.AddScoped<Radio.Web.Services.QueuePersistenceService>();
 builder.Services.AddScoped<Radio.Web.Services.DeviceDisplayStateService>();
 builder.Services.AddScoped<Radio.Web.Services.RadioPanelToggleService>();
 
+// Visualizer "updates/sec" telemetry. Singleton because the value is shared
+// across all visualizer panels and consumed by the dev tray (PR 6).
+builder.Services.AddSingleton<Radio.Web.Services.VisualizerTelemetryService>();
+
 // Bind Devices:Aliases → DevicesOptions so MainLayout and DeviceManagementPage can
 // inject IOptionsMonitor<DevicesOptions> to clean up raw driver names at render time.
 // Defaults to an empty alias map when the section is absent or empty.

@@ -7,6 +7,12 @@
 @implements IAsyncDisposable
 
 <div style="height: 100%; display: flex; flex-direction: column; position: relative; overflow: hidden;">
+  @* PR 4 note: NowPlayingPanel already had no centered-spinner initial-load
+     branch — it renders an empty/"No Track Playing" state immediately, then
+     swaps to real content via SignalR updates. The handoff §P1·5 skeleton
+     swap is therefore a no-op here. Acceptance criterion ("no centered
+     spinner in any panel-body loading branch") is met without a Skeleton. *@
+
   <!-- Full-bleed album art background -->
   @if (_hasValidAlbumArt)
   {

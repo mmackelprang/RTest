@@ -106,8 +106,14 @@
 
     @if (_isLoading)
     {
-      <div style="display:flex; justify-content:center; padding:16px;">
-        <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate" />
+      @* PR 4: panel-body initial-load shows skeleton rows so the
+         placeholder reads as the grid that's about to appear. *@
+      <div style="padding: 8px 0;">
+        <Skeleton Shape="Skeleton.SkeletonShape.ListRow" />
+        <Skeleton Shape="Skeleton.SkeletonShape.ListRow" />
+        <Skeleton Shape="Skeleton.SkeletonShape.ListRow" />
+        <Skeleton Shape="Skeleton.SkeletonShape.ListRow" />
+        <Skeleton Shape="Skeleton.SkeletonShape.ListRow" />
       </div>
     }
     else if (_historyData?.Items.Any() == true)
