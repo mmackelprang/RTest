@@ -1204,21 +1204,35 @@ body::-webkit-scrollbar,
 
 /* ─── §22  File Browser Dialog ─────────────────────────────────────────────── */
 
+/* Toolbar is flex-wrap so the right-hand chip cluster (path-edit toggle + search +
+   chip row) can drop to a second line when 2+ filter chips push past the dialog
+   width at the 1920×720 kiosk viewport. The breadcrumb reserves a 220px minimum
+   so it stays fully visible instead of being shrunk to zero (which used to push
+   it off-screen and produce a horizontal scrollbar on the dialog content). */
 .file-browser-toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border-subtle);
   margin-bottom: 8px;
+}
+
+.file-browser-toolbar-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .file-browser-breadcrumbs {
   display: flex;
   align-items: center;
   gap: 2px;
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 220px;
+  min-width: 220px;
   overflow-x: auto;
   white-space: nowrap;
   font-size: 13px;

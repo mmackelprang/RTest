@@ -212,4 +212,37 @@ public class SourceBubbleTests : TestContext
 
     Assert.Equal("true", cut.Find("button.source-bubble").GetAttribute("aria-pressed"));
   }
+
+  [Fact]
+  public void SourceBubble_RawName_ProjectsToTitleAttribute()
+  {
+    // Per design handoff §P0·2 step 3: every display-name surface must expose the
+    // raw underlying name via a title attribute so hover reveals the unmodified
+    // value (e.g. "GenericUSB Audio Input" while the visible label reads "USB").
+    var cut = RenderComponent<SourceBubble>(p => p
+      .Add(x => x.Icon, "usb")
+      .Add(x => x.Label, "USB")
+      .Add(x => x.RawName, "GenericUSB Audio Input")
+      .Add(x => x.Accent, "--source-usb")
+      .Add(x => x.DataSourceAttr, "usb"));
+
+    var root = cut.Find("button.source-bubble");
+    Assert.Equal("GenericUSB Audio Input", root.GetAttribute("title"));
+  }
+
+  [Fact]
+  public void SourceBubble_RawName_Null_RendersEmptyTitle()
+  {
+    // When RawName is omitted, Razor emits title="" — harmless and keeps the
+    // attribute presence stable for any consumer that wants to query for it.
+    var cut = RenderComponent<SourceBubble>(p => p
+      .Add(x => x.Icon, "radio")
+      .Add(x => x.Label, "Radio")
+      .Add(x => x.Accent, "--source-radio")
+      .Add(x => x.DataSourceAttr, "radio"));
+
+    var root = cut.Find("button.source-bubble");
+    var title = root.GetAttribute("title");
+    Assert.True(title is null || title == string.Empty);
+  }
 }

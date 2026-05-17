@@ -160,6 +160,7 @@
         var accent = GetAccentVarForSource(source.Type);
         <SourceBubble Icon="@GetSourceIcon(source.Type)"
                       Label="@DisplayNames.Source(source)"
+                      RawName="@(source.Name ?? source.Id)"
                       Sub="@GetSourceSubLabel(source)"
                       Accent="@accent"
                       IsActive="isActive"

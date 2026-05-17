@@ -144,8 +144,10 @@
       }
     </div>
 
-    <!-- Path edit toggle + Search/Filter chips -->
-    <div style="display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
+    <!-- Path edit toggle + Search/Filter chips. Uses .file-browser-toolbar-tools
+         so the cluster wraps to a second row when the chip strip grows past the
+         dialog width (preserves breadcrumb visibility at 1920×720). -->
+    <div class="file-browser-toolbar-tools">
       <RadzenButton Icon="@(_isEditingPath ? "close" : "edit")"
                     Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Light"
                     Variant="Variant.Text"

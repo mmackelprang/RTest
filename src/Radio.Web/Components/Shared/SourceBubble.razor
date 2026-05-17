@@ -16,6 +16,7 @@
         @onclick="HandleBodyClick"
         aria-label="@($"Switch to {Label}")"
         aria-pressed="@(IsActive ? "true" : "false")"
+        title="@RawName"
         disabled="@IsDisabled">
   <span class="source-bubble-chip" aria-hidden="true">
     <RadzenIcon Icon="@Icon" />
@@ -61,6 +62,14 @@
 
   /// <summary>Value for the data-source attribute (used by CSS hooks / test selectors).</summary>
   [Parameter] public string DataSourceAttr { get; set; } = "";
+
+  /// <summary>
+  /// Raw underlying source name forwarded to the root button's <c>title</c> attribute
+  /// so hover surfaces the unmodified value (per design handoff §P0·2 step 3 —
+  /// matches the IN/OUT cluster pattern in <c>MainLayout</c>). Optional: a null/empty
+  /// value renders <c>title=""</c>, which is harmless.
+  /// </summary>
+  [Parameter] public string? RawName { get; set; }
 
   /// <summary>Fires when the bubble body is clicked (i.e. switch to this source).</summary>
   [Parameter] public EventCallback OnSwitch { get; set; }
