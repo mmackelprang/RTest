@@ -11,4 +11,20 @@ public class RadioBandModel
     public string DefaultModulation { get; set; } = string.Empty;
     public long DefaultBandwidthHz { get; set; }
     public string Description { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Human-formatted sub-range string for the tall band pills (e.g.
+    /// <c>"76–108 MHz"</c> for FM, <c>"530–1700 kHz"</c> for AM). Composed
+    /// server-side so the UI doesn't repeat unit-selection logic. PR 3 of
+    /// the Radio Controller Polish arc.
+    /// </summary>
+    public string Range { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Maximum number of memory preset slots for this band (e.g. 16 FM,
+    /// 4 WB). Drives the <c>MEMORY · n of N</c> header count and the
+    /// empty-slot placeholder logic. PR 3 of the Radio Controller Polish
+    /// arc.
+    /// </summary>
+    public int BandPresetCapacity { get; set; }
 }

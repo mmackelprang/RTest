@@ -483,6 +483,9 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   public string? RdsProgramType => _radioReceiver.RdsProgramTypeName;
 
   /// <inheritdoc/>
+  public string? RdsRadioText => _radioReceiver.RdsRadioText;
+
+  /// <inheritdoc/>
   public Task<bool> GetPowerStateAsync(CancellationToken cancellationToken = default)
   {
     return Task.FromResult(_radioReceiver.IsRunning);

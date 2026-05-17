@@ -229,6 +229,15 @@ public interface IRadioControl
   string? RdsProgramType { get; }
 
   /// <summary>
+  /// Gets the RDS RadioText (RT) string broadcast by the station, or null if not
+  /// available. Often contains an artist/title pair or station slogan and updates
+  /// roughly once per minute on most stations. PR 3 of the Radio Controller Polish
+  /// arc surfaces this on the wire so the UI can render a one-line ellipsis below
+  /// the frequency display.
+  /// </summary>
+  string? RdsRadioText { get; }
+
+  /// <summary>
   /// Gets or sets the power state of the radio device (for devices that support power control).
   /// </summary>
   Task<bool> GetPowerStateAsync(CancellationToken cancellationToken = default);

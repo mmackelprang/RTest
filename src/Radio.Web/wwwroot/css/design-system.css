@@ -3366,3 +3366,312 @@ body {
   letter-spacing: 0.08em;
   text-transform: lowercase;
 }
+
+/* ─── §W  Tuner Header / RDS Card / Tall Band Pills / RT Line (PR 3) ────────── *
+   Implements handoff §P1·1:
+   - Tuner header (`<h3>Tuner</h3>` + band·range) replaces the old absolute
+     `.rcp-module-label`. Reads as a heading, not a chrome label.
+   - Band pills become two-line (label + sub-range) so users can see the band's
+     coverage without context-switching.
+   - The inline `.rcp-rds-info` block is replaced by `<RdsCard>` mounted above
+     the frequency well.
+   - RT (RadioText) line below the frequency well — one-line ellipsis.
+*/
+
+/* Tuner header — promoted from absolute label to a real heading row */
+.rcp-tuner-header {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 4px 8px;
+  margin: 0 0 16px;
+  border-bottom: 1px solid var(--surface-separator);
+}
+
+.rcp-tuner-title {
+  margin: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-high);
+  letter-spacing: 0.01em;
+}
+
+.rcp-tuner-band-range {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--signal-amber);
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Tall band pills — override §RCP base .rcp-band-btn into a two-line column.
+   The base rule already sets background/hover/active states; we layer on the
+   sizing and inner layout so the dual-line label fits comfortably. */
+.rcp-band-btn {
+  min-width: 64px;
+  height: auto;
+  min-height: 56px;
+  padding: 8px 14px 6px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+
+.rcp-band-label {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+}
+
+.rcp-band-sub {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--text-low);
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.rcp-band-active .rcp-band-sub {
+  /* Sub-range inherits the amber treatment when the pill is active, but at
+     a slightly reduced intensity so the band label stays the row leader. */
+  color: color-mix(in srgb, var(--signal-amber) 70%, var(--text-low));
+}
+
+/* RDS Card — mounts above the frequency well. Renders only when StationName
+   is non-empty (component handles the @if). */
+.rds-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  margin: 0 0 8px;
+  background: var(--surface-elevated, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--surface-separator);
+  border-radius: 8px;
+  width: 100%;
+  max-width: 420px;
+  box-sizing: border-box;
+}
+
+.rds-card-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-low);
+}
+
+.rds-card-station {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-primary);
+  letter-spacing: 0.18em;
+  text-shadow: 0 0 8px color-mix(in srgb, var(--accent-primary) 40%, transparent);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rds-card-pty {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text-medium);
+  padding: 2px 8px;
+  background: var(--surface-raised, rgba(255, 255, 255, 0.04));
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* RT (RadioText) line below the frequency well — one-line ellipsis */
+.rcp-rds-rt {
+  width: 100%;
+  max-width: 420px;
+  margin-top: 4px;
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-low);
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+
+/* ─── §X  Memory Presets Grid (PR 3) ──────────────────────────────────────── *
+   Implements handoff §P1·2 — preset rows become a CSS grid (slot · text · freq),
+   slot numbers are always visible (not hover-only), and the save action is a
+   long-press on the active band pill instead of a separate button. The header
+   carries the "MEMORY · n of N" count + a "HOLD <band> TO SAVE" hint.
+*/
+
+.rcp-presets-count {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-low);
+}
+
+.rcp-presets-hint {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-medium);
+}
+
+.rcp-presets-hint kbd {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 700;
+  padding: 1px 6px;
+  margin: 0 2px;
+  border-radius: 4px;
+  background: var(--surface-raised, rgba(255, 255, 255, 0.05));
+  color: var(--signal-amber);
+  border: 1px solid color-mix(in srgb, var(--signal-amber) 25%, transparent);
+}
+
+/* Preset row — grid layout: slot (22px) | name+band stack (1fr) | freq (64px).
+   This overrides the legacy `.rcp-preset-item` (defined in the RadioControlPanel
+   inline <style>) — both selectors will load, but our grid template + flex
+   children win because the row markup no longer uses .rcp-preset-name as a
+   block child; the row's own grid takes precedence for layout. */
+.rcp-preset-item {
+  display: grid;
+  grid-template-columns: 22px 1fr 64px;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  background: var(--surface-elevated, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--surface-separator);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 80ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.rcp-preset-item:hover {
+  border-color: color-mix(in srgb, var(--signal-amber) 25%, var(--surface-separator));
+  background: color-mix(in srgb, var(--signal-amber) 4%, var(--surface-elevated, rgba(255, 255, 255, 0.02)));
+}
+
+.rcp-preset-item.is-active {
+  border-color: var(--signal-amber);
+  background: color-mix(in srgb, var(--signal-amber) 8%, transparent);
+}
+
+.rcp-preset-slot {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-align: right;
+  color: var(--text-low);
+  /* Slot number is always visible per handoff acceptance "not hover-only or
+     20%-opacity ghosts". */
+  opacity: 1;
+}
+
+.rcp-preset-item.is-active .rcp-preset-slot {
+  color: var(--signal-amber);
+}
+
+.rcp-preset-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Override the legacy `.rcp-preset-name` (which had right-padding for an
+   absolute slot badge) — under the grid layout the slot has its own column. */
+.rcp-preset-item .rcp-preset-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-high);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 0;
+  line-height: 1.25;
+}
+
+/* Override legacy `.rcp-preset-band` (which was inline-amber inside the freq
+   row); under the grid it lives below the name as a dim mono sub-line. */
+.rcp-preset-item .rcp-preset-text .rcp-preset-band {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--text-low);
+  margin-left: 0;
+  text-shadow: none;
+  line-height: 1.25;
+}
+
+/* Override legacy `.rcp-preset-freq` (which was a block sibling). Under the
+   grid it's the right-most cell, DSEG amber, right-aligned, with glow when
+   the row is the active preset. */
+.rcp-preset-item .rcp-preset-freq {
+  font-family: var(--font-led);
+  font-size: 13px;
+  text-align: right;
+  color: var(--signal-amber);
+  text-shadow: 0 0 4px color-mix(in srgb, var(--signal-amber) 30%, transparent);
+  margin-top: 0;
+  line-height: 1.25;
+}
+
+.rcp-preset-item.is-active .rcp-preset-freq {
+  text-shadow: 0 0 6px color-mix(in srgb, var(--signal-amber) 60%, transparent);
+}
+
+/* Empty next-slot placeholder. Dashed border, dim hint text spans columns 2-3. */
+.rcp-preset-empty {
+  border-style: dashed;
+  opacity: 0.55;
+  cursor: default;
+}
+
+.rcp-preset-empty:hover {
+  /* Don't react to hover — the row is intentionally inert. */
+  background: var(--surface-elevated, rgba(255, 255, 255, 0.02));
+  border-color: var(--surface-separator);
+  border-style: dashed;
+}
+
+.rcp-preset-empty-hint {
+  grid-column: 2 / 4;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-style: italic;
+  letter-spacing: 0.06em;
+  color: var(--text-low);
+}
+
+/* Suppress the legacy `::before` counter badge that the inline <style> defines
+   on .rcp-preset-item. Under the new grid layout slot numbers come from a real
+   .rcp-preset-slot element, so the pseudo-element would otherwise paint a
+   duplicate (and misaligned) ordinal in the top-right corner. */
+.rcp-preset-item::before {
+  content: none;
+}

@@ -1,0 +1,29 @@
+@* RDS Card — renders only when StationName is non-empty. Mounted above the
+   frequency well in RadioControlPanel. PR 3 of the Radio Controller Polish
+   arc (handoff §P1·1 step 3). *@
+
+@if (!string.IsNullOrEmpty(StationName))
+{
+  <div class="rds-card">
+    <span class="rds-card-label">RDS</span>
+    <span class="rds-card-station">@StationName</span>
+    @if (!string.IsNullOrEmpty(ProgramType))
+    {
+      <span class="rds-card-pty">@ProgramType</span>
+    }
+  </div>
+}
+
+@code {
+  /// <summary>
+  /// RDS Program Service station name (PS field, up to 8 characters). Required
+  /// in the contract sense — when null/empty the card renders nothing at all.
+  /// </summary>
+  [Parameter, EditorRequired] public string? StationName { get; set; }
+
+  /// <summary>
+  /// RDS Program Type name (PTY field, e.g. "Rock", "News"). Optional — when
+  /// null/empty the PTY chip is omitted but the station name still renders.
+  /// </summary>
+  [Parameter] public string? ProgramType { get; set; }
+}

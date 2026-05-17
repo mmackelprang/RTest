@@ -568,6 +568,11 @@ public class AudioStateUpdateService : BackgroundService
            previous.IsStereo != current.IsStereo ||
            previous.RdsStationName != current.RdsStationName ||
            previous.RdsProgramType != current.RdsProgramType ||
+           // PR 3 of the Radio Controller Polish arc — the RT line below the
+           // frequency well binds to this. RDS RadioText updates roughly once
+           // per minute on most stations; null-safe string comparison is
+           // sufficient here.
+           previous.RdsRadioText != current.RdsRadioText ||
            // PR 2 of the Radio Controller Polish arc — the recognition stream's
            // NOW row anchors on this. Changes must broadcast so the UI's
            // amber-border row tracks the actively-playing fingerprint match.

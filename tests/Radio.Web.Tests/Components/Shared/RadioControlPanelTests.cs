@@ -64,12 +64,15 @@ public class RadioControlPanelTests : TestContext
   /// <summary>
   /// Registers a stub <see cref="RadioApiService"/> backed by a handler that
   /// responds to <c>GET /api/radio/state</c> with the supplied DTO. Presets
-  /// and bands return empty lists so the panel renders without async error
-  /// banners.
+  /// and bands return the supplied lists (or empty by default) so the panel
+  /// renders without async error banners.
   /// </summary>
-  private void UseRadioState(RadioStateDto state)
+  private void UseRadioState(
+    RadioStateDto state,
+    IEnumerable<RadioPresetDto>? presets = null,
+    IEnumerable<Radio.Core.Models.RadioBandModel>? bands = null)
   {
-    var handler = new RadioStateStubHandler(state);
+    var handler = new RadioStateStubHandler(state, presets, bands);
     Services.AddSingleton(_ =>
     {
       var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
@@ -84,11 +87,16 @@ public class RadioControlPanelTests : TestContext
     double appliedGain = 0.0,
     bool autoGain = false,
     int? gain = 0,
-    double scanStopThreshold = -36.0)
+    double scanStopThreshold = -36.0,
+    string? rdsStationName = null,
+    string? rdsProgramType = null,
+    string? rdsRadioText = null,
+    double frequency = 101_500_000,
+    string band = "FM")
   {
     return new RadioStateDto(
-      Frequency: 101_500_000,
-      Band: "FM",
+      Frequency: frequency,
+      Band: band,
       Step: 100_000,
       SignalStrength: signalStrength,
       IsScanning: false,
@@ -99,16 +107,62 @@ public class RadioControlPanelTests : TestContext
       Equalizer: "Normal",
       DeviceVolume: 50,
       IsStereo: false,
-      RdsStationName: null,
-      RdsProgramType: null,
+      RdsStationName: rdsStationName,
+      RdsProgramType: rdsProgramType,
       Clip: clip,
       RssiDbu: rssiDbu,
-      AppliedGain: appliedGain);
+      AppliedGain: appliedGain,
+      NowPlayingMatchId: null,
+      RdsRadioText: rdsRadioText);
   }
 
-  private IRenderedComponent<RadioControlPanel> RenderPanel(RadioStateDto state)
+  /// <summary>
+  /// Builds an FM band model with the PR 3 fields populated. Used by tests
+  /// that need the tuner header / band-pill sub-range / preset capacity to
+  /// render meaningful values without re-doing the server-side projection.
+  /// </summary>
+  private static Radio.Core.Models.RadioBandModel BuildFmBand(int capacity = 16) =>
+    new()
+    {
+      Type = "FM",
+      Name = "FM Broadcast",
+      MinFrequencyHz = 87_500_000,
+      MaxFrequencyHz = 108_000_000,
+      DefaultStepHz = 100_000,
+      AllowedStepSizes = new long[] { 50_000, 100_000, 200_000 },
+      DefaultModulation = "WFM",
+      DefaultBandwidthHz = 200_000,
+      Description = "FM broadcast band",
+      Range = "87.5–108 MHz",
+      BandPresetCapacity = capacity,
+    };
+
+  private static Radio.Core.Models.RadioBandModel BuildAmBand(int capacity = 16) =>
+    new()
+    {
+      Type = "AM",
+      Name = "AM Broadcast",
+      MinFrequencyHz = 530_000,
+      MaxFrequencyHz = 1_700_000,
+      DefaultStepHz = 10_000,
+      AllowedStepSizes = new long[] { 9_000, 10_000 },
+      DefaultModulation = "AM",
+      DefaultBandwidthHz = 10_000,
+      Description = "AM broadcast band",
+      Range = "530–1700 kHz",
+      BandPresetCapacity = capacity,
+    };
+
+  private static RadioPresetDto BuildPreset(
+    string id, string name, double frequency, string band, int slotNumber)
+    => new(id, name, frequency, band, DateTimeOffset.UtcNow, slotNumber);
+
+  private IRenderedComponent<RadioControlPanel> RenderPanel(
+    RadioStateDto state,
+    IEnumerable<RadioPresetDto>? presets = null,
+    IEnumerable<Radio.Core.Models.RadioBandModel>? bands = null)
   {
-    UseRadioState(state);
+    UseRadioState(state, presets, bands);
     var cut = RenderComponent<RadioControlPanel>();
 
     // The panel kicks off async state loads in OnInitializedAsync; bUnit's
@@ -267,6 +321,255 @@ public class RadioControlPanelTests : TestContext
     Assert.Equal(typeof(double), prop!.PropertyType);
   }
 
+  // ─── PR 3 of the Radio Controller Polish arc ──────────────────────────────
+  // Tuner header, RDS card mount, tall band pills, RT line, memory presets
+  // grid (slot · name+band · freq) + dashed empty-slot placeholder.
+
+  [Fact]
+  public void TunerHeader_RendersBandAndRange_WhenBandKnown()
+  {
+    var state = BuildState();
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
+
+    var title = cut.Find(".rcp-tuner-title");
+    Assert.Equal("Tuner", title.TextContent.Trim());
+
+    var range = cut.Find(".rcp-tuner-band-range");
+    Assert.Contains("FM", range.TextContent);
+    Assert.Contains("87.5–108 MHz", range.TextContent);
+  }
+
+  [Fact]
+  public void BandPills_RenderTwoLineLabelAndRange()
+  {
+    var state = BuildState();
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand(), BuildAmBand() });
+
+    var labels = cut.FindAll(".rcp-band-label").Select(e => e.TextContent.Trim()).ToList();
+    Assert.Contains("FM", labels);
+    Assert.Contains("AM", labels);
+
+    var subs = cut.FindAll(".rcp-band-sub").Select(e => e.TextContent.Trim()).ToList();
+    Assert.Contains("87.5–108 MHz", subs);
+    Assert.Contains("530–1700 kHz", subs);
+  }
+
+  [Fact]
+  public void RdsCard_Renders_WhenStationNamePresent()
+  {
+    var state = BuildState(rdsStationName: "KQED FM", rdsProgramType: "News");
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
+
+    var card = cut.Find(".rds-card");
+    Assert.NotNull(card);
+    Assert.Equal("KQED FM", cut.Find(".rds-card-station").TextContent.Trim());
+    Assert.Equal("News", cut.Find(".rds-card-pty").TextContent.Trim());
+  }
+
+  [Fact]
+  public void RdsCard_Hidden_WhenStationNameNull()
+  {
+    var state = BuildState(rdsStationName: null);
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
+
+    Assert.Empty(cut.FindAll(".rds-card"));
+  }
+
+  [Fact]
+  public void RtLine_RendersWithTitleAttribute_WhenPresent()
+  {
+    var state = BuildState(rdsRadioText: "Now playing: Pink Floyd — Wish You Were Here");
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
+
+    var rt = cut.Find(".rcp-rds-rt");
+    Assert.Contains("Pink Floyd", rt.TextContent);
+    // The title attribute carries the full text for accessibility / overflow tooltip
+    Assert.Equal("Now playing: Pink Floyd — Wish You Were Here", rt.GetAttribute("title"));
+  }
+
+  [Fact]
+  public void RtLine_Hidden_WhenRadioTextNull()
+  {
+    var state = BuildState(rdsRadioText: null);
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
+
+    Assert.Empty(cut.FindAll(".rcp-rds-rt"));
+  }
+
+  [Fact]
+  public void RtLine_Hidden_WhenRadioTextEmpty()
+  {
+    var state = BuildState(rdsRadioText: "");
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
+
+    Assert.Empty(cut.FindAll(".rcp-rds-rt"));
+  }
+
+  [Fact]
+  public void PresetsHeader_ShowsCountAndCapacity()
+  {
+    var state = BuildState();
+    var presets = new[]
+    {
+      BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
+      BuildPreset("p2", "KCBS", 99_700_000, "FM", 2),
+    };
+    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16) });
+
+    var count = cut.Find(".rcp-presets-count");
+    Assert.Contains("MEMORY", count.TextContent);
+    Assert.Contains("2 of 16", count.TextContent);
+  }
+
+  [Fact]
+  public void PresetsHeader_ShowsHoldBandHint()
+  {
+    var state = BuildState();
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
+
+    var hint = cut.Find(".rcp-presets-hint");
+    Assert.Contains("HOLD", hint.TextContent);
+    Assert.Contains("TO SAVE", hint.TextContent);
+    var kbd = hint.QuerySelector("kbd");
+    Assert.NotNull(kbd);
+    Assert.Equal("FM", kbd!.TextContent.Trim());
+  }
+
+  [Fact]
+  public void PresetRow_GridLayout_SlotNameBandFreq()
+  {
+    var state = BuildState();
+    var presets = new[]
+    {
+      BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
+    };
+    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand() });
+
+    // Each preset row carries the three grid children: slot, text stack, freq.
+    var rows = cut.FindAll(".rcp-preset-item");
+    var realRows = rows.Where(r => !r.ClassList.Contains("rcp-preset-empty")).ToList();
+    Assert.Single(realRows);
+    var row = realRows[0];
+
+    Assert.Equal("01", row.QuerySelector(".rcp-preset-slot")!.TextContent.Trim());
+    Assert.Equal("KQED", row.QuerySelector(".rcp-preset-name")!.TextContent.Trim());
+    Assert.Equal("FM", row.QuerySelector(".rcp-preset-band")!.TextContent.Trim());
+    Assert.Contains("88.50", row.QuerySelector(".rcp-preset-freq")!.TextContent);
+  }
+
+  [Fact]
+  public void ActivePreset_GetsIsActiveClass_WhenFrequencyMatches()
+  {
+    // Station is tuned to 88.5 MHz; one preset matches, the other doesn't.
+    var state = BuildState(frequency: 88_500_000);
+    var presets = new[]
+    {
+      BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
+      BuildPreset("p2", "KCBS", 99_700_000, "FM", 2),
+    };
+    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand() });
+
+    var actives = cut.FindAll(".rcp-preset-item.is-active");
+    Assert.Single(actives);
+    Assert.Equal("01", actives[0].QuerySelector(".rcp-preset-slot")!.TextContent.Trim());
+  }
+
+  [Fact]
+  public void EmptyPlaceholder_Renders_WhenBelowCapacity()
+  {
+    var state = BuildState();
+    var presets = new[]
+    {
+      BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
+    };
+    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16) });
+
+    var empties = cut.FindAll(".rcp-preset-empty");
+    Assert.Single(empties);
+    // Empty placeholder is the NEXT slot (slot 2 after the first preset).
+    Assert.Equal("02", empties[0].QuerySelector(".rcp-preset-slot")!.TextContent.Trim());
+    Assert.Contains("Empty", empties[0].QuerySelector(".rcp-preset-empty-hint")!.TextContent);
+  }
+
+  [Fact]
+  public void EmptyPlaceholder_Hidden_WhenAtCapacity()
+  {
+    // Build exactly 4 presets and a band with capacity 4 (WB capacity per spec).
+    var state = BuildState(band: "WB", frequency: 162_500_000);
+    var presets = Enumerable.Range(1, 4)
+      .Select(i => BuildPreset($"p{i}", $"NOAA {i}", 162_400_000 + (i * 25_000), "WB", i))
+      .ToArray();
+    var wb = new Radio.Core.Models.RadioBandModel
+    {
+      Type = "WB",
+      Name = "Weather Radio",
+      MinFrequencyHz = 162_400_000,
+      MaxFrequencyHz = 162_550_000,
+      DefaultStepHz = 25_000,
+      AllowedStepSizes = new long[] { 25_000 },
+      DefaultModulation = "NFM",
+      DefaultBandwidthHz = 25_000,
+      Description = "Weather",
+      Range = "162.4–162.55 MHz",
+      BandPresetCapacity = 4,
+    };
+    var cut = RenderPanel(state, presets: presets, bands: new[] { wb });
+
+    Assert.Empty(cut.FindAll(".rcp-preset-empty"));
+  }
+
+  [Fact]
+  public void Presets_FilteredToCurrentBand()
+  {
+    // FM tuned; presets include one AM. The AM preset should not render in
+    // the FM memory bank — the filter runs client-side in LoadPresetsAsync.
+    var state = BuildState(band: "FM");
+    var presets = new[]
+    {
+      BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
+      BuildPreset("p2", "KCBS-AM", 740_000, "AM", 1),
+    };
+    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(), BuildAmBand() });
+
+    var names = cut.FindAll(".rcp-preset-item:not(.rcp-preset-empty) .rcp-preset-name")
+      .Select(e => e.TextContent.Trim()).ToList();
+    Assert.Contains("KQED", names);
+    Assert.DoesNotContain("KCBS-AM", names);
+  }
+
+  [Fact]
+  public void RadioStateDto_HasRdsRadioTextField()
+  {
+    // Confirm via reflection that the wire-shape DTO carries the PR 3 field.
+    var prop = typeof(RadioStateDto).GetProperty(
+      nameof(RadioStateDto.RdsRadioText),
+      BindingFlags.Public | BindingFlags.Instance);
+    Assert.NotNull(prop);
+    Assert.Equal(typeof(string), prop!.PropertyType);
+  }
+
+  [Fact]
+  public void RadioPresetDto_HasSlotNumberField()
+  {
+    var prop = typeof(RadioPresetDto).GetProperty(
+      nameof(RadioPresetDto.SlotNumber),
+      BindingFlags.Public | BindingFlags.Instance);
+    Assert.NotNull(prop);
+    Assert.Equal(typeof(int), prop!.PropertyType);
+  }
+
+  [Fact]
+  public void RadioBandModel_HasRangeAndCapacityFields()
+  {
+    var bandType = typeof(Radio.Core.Models.RadioBandModel);
+    var range = bandType.GetProperty("Range", BindingFlags.Public | BindingFlags.Instance);
+    var cap = bandType.GetProperty("BandPresetCapacity", BindingFlags.Public | BindingFlags.Instance);
+    Assert.NotNull(range);
+    Assert.NotNull(cap);
+    Assert.Equal(typeof(string), range!.PropertyType);
+    Assert.Equal(typeof(int), cap!.PropertyType);
+  }
+
   private static bool IsLitSegment(IElement segment)
   {
     var cls = segment.ClassName ?? string.Empty;
@@ -275,19 +578,26 @@ public class RadioControlPanelTests : TestContext
 
   /// <summary>
   /// Tiny HTTP stub that returns a fixed <see cref="RadioStateDto"/> for
-  /// <c>/api/radio/state</c> and empty arrays for the auxiliary endpoints
-  /// the panel hits during <c>OnInitializedAsync</c> (<c>/api/radio/presets</c>,
-  /// <c>/api/RadioBands</c>). Anything else gets 404 — the panel logs and
-  /// continues so the page still renders.
+  /// <c>/api/radio/state</c> and configurable arrays for the auxiliary
+  /// endpoints the panel hits during <c>OnInitializedAsync</c>
+  /// (<c>/api/radio/presets</c>, <c>/api/RadioBands</c>). Anything else gets
+  /// 404 — the panel logs and continues so the page still renders.
   /// </summary>
   private sealed class RadioStateStubHandler : HttpMessageHandler
   {
     private readonly RadioStateDto _state;
+    private readonly IEnumerable<RadioPresetDto> _presets;
+    private readonly IEnumerable<Radio.Core.Models.RadioBandModel> _bands;
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
 
-    public RadioStateStubHandler(RadioStateDto state)
+    public RadioStateStubHandler(
+      RadioStateDto state,
+      IEnumerable<RadioPresetDto>? presets = null,
+      IEnumerable<Radio.Core.Models.RadioBandModel>? bands = null)
     {
       _state = state;
+      _presets = presets ?? Array.Empty<RadioPresetDto>();
+      _bands = bands ?? Array.Empty<Radio.Core.Models.RadioBandModel>();
     }
 
     protected override Task<HttpResponseMessage> SendAsync(
@@ -297,8 +607,8 @@ public class RadioControlPanelTests : TestContext
       var response = path switch
       {
         "/api/radio/state" => Ok(_state),
-        "/api/radio/presets" => Ok(Array.Empty<RadioPresetDto>()),
-        "/api/RadioBands" => Ok(Array.Empty<Radio.Core.Models.RadioBandModel>()),
+        "/api/radio/presets" => Ok(_presets),
+        "/api/RadioBands" => Ok(_bands),
         _ => new HttpResponseMessage(HttpStatusCode.NotFound),
       };
       return Task.FromResult(response);

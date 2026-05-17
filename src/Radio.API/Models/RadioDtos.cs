@@ -100,6 +100,14 @@ public class RadioStateDto
   public string? RdsProgramType { get; set; }
 
   /// <summary>
+  /// Gets or sets the RDS RadioText (RT) string broadcast by the station,
+  /// or null if not available. Often contains an artist/title pair or a
+  /// station slogan. Rendered as a one-line ellipsised string below the
+  /// frequency display. PR 3 of the Radio Controller Polish arc.
+  /// </summary>
+  public string? RdsRadioText { get; set; }
+
+  /// <summary>
   /// Gets or sets the dBu threshold at which scan pauses on a signal.
   /// Re-typed from <c>int</c> (percent) to <c>double</c> (dBu) in PR 1 of the
   /// Radio Controller Polish arc so the threshold matches the dBu semantics

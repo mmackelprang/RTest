@@ -586,7 +586,18 @@ public class RadioController : ControllerBase
     try
     {
       var presets = await _presetService.GetAllPresetsAsync();
-      return Ok(presets.Select(RadioPresetDto.FromModel));
+
+      // PR 3 of the Radio Controller Polish arc — promote the implicit
+      // "OrderBy(CreatedAt)" ordinal that the UI used to compute client-side
+      // into a real SlotNumber field. Slot numbering is per-band so each band
+      // independently starts at 1 (FM 1, FM 2, ..., AM 1, AM 2, ...).
+      var dtos = presets
+        .GroupBy(p => p.Band)
+        .SelectMany(g => g
+          .OrderBy(p => p.CreatedAt)
+          .Select((p, idx) => RadioPresetDto.FromModel(p, idx + 1)));
+
+      return Ok(dtos);
     }
     catch (Exception ex)
     {
@@ -626,7 +637,18 @@ public class RadioController : ControllerBase
       }
 
       var preset = await _presetService.AddPresetAsync(request.Name, band, request.Frequency);
-      var dto = RadioPresetDto.FromModel(preset);
+
+      // Compute this preset's slot number against the band's current set so
+      // the API response carries the same SlotNumber that GetPresets() will
+      // surface on subsequent reads (PR 3 of the Radio Controller Polish arc).
+      var bandPresets = await _presetService.GetAllPresetsAsync();
+      var slot = bandPresets
+        .Where(p => p.Band == band)
+        .OrderBy(p => p.CreatedAt)
+        .Select((p, idx) => (Id: p.Id, Slot: idx + 1))
+        .FirstOrDefault(t => t.Id == preset.Id).Slot;
+
+      var dto = RadioPresetDto.FromModel(preset, slot);
 
       return CreatedAtAction(nameof(GetPresets), new { id = preset.Id }, dto);
     }

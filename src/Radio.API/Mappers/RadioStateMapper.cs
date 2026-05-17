@@ -65,6 +65,7 @@ public static class RadioStateMapper
       IsStereo = radioSource.IsStereo,
       RdsStationName = radioSource.RdsStationName,
       RdsProgramType = radioSource.RdsProgramType,
+      RdsRadioText = radioSource.RdsRadioText,
       NowPlayingMatchId = nowPlayingMatchId,
     };
   }

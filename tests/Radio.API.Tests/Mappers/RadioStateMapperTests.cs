@@ -1,4 +1,6 @@
 using Radio.API.Mappers;
+using Radio.Core.Interfaces.Audio;
+using Radio.Core.Models.Audio;
 
 namespace Radio.API.Tests.Mappers;
 
@@ -62,5 +64,98 @@ public class RadioStateMapperTests
   {
     Assert.Equal(-60.0, RadioStateMapper.SignalMinDbu);
     Assert.Equal(0.0, RadioStateMapper.SignalMaxDbu);
+  }
+
+  // ─── PR 3 of the Radio Controller Polish arc ──────────────────────────────
+  // Integration-style test: drive a real IRadioControl snapshot through the
+  // actual MapToRadioStateDto code path so the wire-shape RdsRadioText is
+  // proven to flow from the source through the projection without being
+  // dropped by a hand-crafted DTO record. Tester's PR 2 retrospective flagged
+  // bUnit reflection-injected state as having missed a wire-path regression;
+  // this guards against the same class of bug for the new RT field.
+
+  [Fact]
+  public void MapToRadioStateDto_FlowsRdsRadioText_FromSourceToDto()
+  {
+    var source = new FakeRadioControl
+    {
+      RdsStationNameValue = "KQED",
+      RdsProgramTypeValue = "News",
+      RdsRadioTextValue = "Now Playing — Morning Edition",
+    };
+
+    var dto = RadioStateMapper.MapToRadioStateDto(source);
+
+    Assert.Equal("KQED", dto.RdsStationName);
+    Assert.Equal("News", dto.RdsProgramType);
+    Assert.Equal("Now Playing — Morning Edition", dto.RdsRadioText);
+  }
+
+  [Fact]
+  public void MapToRadioStateDto_RdsRadioText_NullPassesThrough()
+  {
+    var source = new FakeRadioControl
+    {
+      RdsStationNameValue = "KQED",
+      RdsRadioTextValue = null,
+    };
+
+    var dto = RadioStateMapper.MapToRadioStateDto(source);
+
+    Assert.Null(dto.RdsRadioText);
+  }
+
+  /// <summary>
+  /// Minimal <see cref="IRadioControl"/> stub for projection tests. Only the
+  /// fields the mapper actually reads need to be settable; the rest get safe
+  /// defaults so the test class can drop fields it doesn't care about.
+  /// </summary>
+  private sealed class FakeRadioControl : IRadioControl
+  {
+    public string? RdsStationNameValue { get; set; }
+    public string? RdsProgramTypeValue { get; set; }
+    public string? RdsRadioTextValue { get; set; }
+
+    public bool IsRunning => true;
+    public Frequency CurrentFrequency => Frequency.FromMegahertz(101.5);
+    public bool IsScanning => false;
+    public ScanDirection? ScanDirection => null;
+    public int ScanStopThreshold => 50;
+    public RadioBand CurrentBand => RadioBand.FM;
+    public Frequency FrequencyStep => Frequency.FromKilohertz(100);
+    public float Volume { get; set; } = 0.5f;
+    public int DeviceVolume { get; set; } = 50;
+    public bool IsMuted { get; set; }
+    public float SquelchThreshold { get; set; }
+    public RadioEqualizerMode EqualizerMode => RadioEqualizerMode.Normal;
+    public bool AutoGainEnabled { get; set; }
+    public float Gain { get; set; }
+    public int SignalStrength => 50;
+    public bool IsStereo => false;
+    public string? RdsStationName => RdsStationNameValue;
+    public string? RdsProgramType => RdsProgramTypeValue;
+    public string? RdsRadioText => RdsRadioTextValue;
+
+    public event EventHandler<RadioStateChangedEventArgs>? StateChanged;
+    public event EventHandler<RadioControlFrequencyChangedEventArgs>? FrequencyChanged;
+    public event EventHandler<RadioControlSignalStrengthEventArgs>? SignalStrengthUpdated;
+
+    public Task<bool> StartupAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
+    public Task ShutdownAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task SetFrequencyAsync(Frequency frequency, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task StepFrequencyUpAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task StepFrequencyDownAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task StartScanAsync(ScanDirection direction, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task StopScanAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task SetBandAsync(RadioBand band, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task SetFrequencyStepAsync(Frequency step, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task SetEqualizerModeAsync(RadioEqualizerMode mode, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task<bool> GetPowerStateAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
+    public Task TogglePowerStateAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    // Suppress warnings about unused events
+    private void RaiseStateChanged() => StateChanged?.Invoke(this, new RadioStateChangedEventArgs("Test", null));
+    private void RaiseFreqChanged() => FrequencyChanged?.Invoke(this, new RadioControlFrequencyChangedEventArgs(Frequency.FromMegahertz(101.5), Frequency.FromMegahertz(101.5)));
+    private void RaiseSig() => SignalStrengthUpdated?.Invoke(this, new RadioControlSignalStrengthEventArgs(0.5f));
   }
 }
