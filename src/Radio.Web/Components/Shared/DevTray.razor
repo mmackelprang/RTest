@@ -1,0 +1,282 @@
+@inject AudioApiService AudioApi
+@inject AudioStateHubService AudioState
+@inject VisualizerTelemetryService VizTelemetry
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject IConfiguration Configuration
+@inject ILogger<DevTray> Logger
+@implements IDisposable
+
+@*
+  DevTray (handoff §P2·2, PR 6 of the design tightening arc).
+
+  Hidden developer surface revealed by a 3-tap gesture on the invisible
+  top-right corner hit area (see dev-gesture.js + MainLayout). When open it
+  slides down with a backdrop blur and presents a 2×3 grid of diagnostic
+  actions. Auto-locks after 30 seconds of no interaction so the tray never
+  sits unlocked in a kiosk that was triple-tapped accidentally.
+
+  Why a component instead of just an overlay:
+    - The "Updates: NN/sec" reading needs a live SignalR-style subscription
+      against VisualizerTelemetryService. That's a component subscription
+      lifecycle, not a one-shot render.
+    - The auto-lock countdown ticks every second and updates the header.
+    - The "Mark distortion" action used to live in the topbar as a Debug-only
+      pill (PR 2). Folding it into a real surface keeps the topbar clean.
+*@
+
+<div class="dev-tray @(IsOpen ? "is-open" : "")"
+     role="dialog"
+     aria-label="Dev tray"
+     aria-hidden="@(IsOpen ? "false" : "true")">
+  <div class="dev-tray-header">
+    <span class="dev-tray-status">● Dev Tray · unlocked · auto-lock @_autoLockRemaining</span>
+    <button type="button"
+            class="dev-tray-close"
+            @onclick="HandleCloseAsync"
+            aria-label="Close dev tray">×</button>
+  </div>
+  <div class="dev-tray-grid">
+    <button type="button"
+            class="dev-card"
+            @onclick="MarkDistortionAsync"
+            aria-label="Mark audio distortion">
+      <div class="dev-card-label">Mark distortion</div>
+      @if (!string.IsNullOrEmpty(_distortionStatus))
+      {
+        <div class="dev-card-value">@_distortionStatus</div>
+      }
+    </button>
+
+    <button type="button"
+            class="dev-card"
+            disabled
+            aria-label="Visualizer updates per second">
+      <div class="dev-card-label">Updates</div>
+      <div class="dev-card-value">@_updatesPerSecond/sec</div>
+    </button>
+
+    <button type="button"
+            class="dev-card"
+            @onclick="DumpAudioFrameAsync"
+            aria-label="Dump audio frame">
+      <div class="dev-card-label">Dump audio frame</div>
+      @if (!string.IsNullOrEmpty(_dumpStatus))
+      {
+        <div class="dev-card-value">@_dumpStatus</div>
+      }
+    </button>
+
+    <button type="button"
+            class="dev-card"
+            @onclick="DownloadLogsAsync"
+            aria-label="Download logs">
+      <div class="dev-card-label">Download logs</div>
+    </button>
+
+    <button type="button"
+            class="dev-card"
+            @onclick="ViewFingerprintEvents"
+            aria-label="View fingerprint events">
+      <div class="dev-card-label">Fingerprint events</div>
+    </button>
+
+    <button type="button"
+            class="dev-card"
+            disabled
+            aria-label="Engine state">
+      <div class="dev-card-label">Engine state</div>
+      <div class="dev-card-value">@_engineState</div>
+    </button>
+  </div>
+</div>
+
+@code {
+  /// <summary>Whether the tray is rendered open. Parent owns this state.</summary>
+  [Parameter] public bool IsOpen { get; set; }
+
+  /// <summary>
+  /// Raised when the user explicitly closes the tray (× button) or the
+  /// auto-lock timer elapses. Parent should set its own state to closed.
+  /// </summary>
+  [Parameter] public EventCallback OnClose { get; set; }
+
+  private const int AutoLockSeconds = 30;
+
+  private int _updatesPerSecond;
+  private string _engineState = "—";
+  private string _autoLockRemaining = "0:30";
+  private string _distortionStatus = string.Empty;
+  private string _dumpStatus = string.Empty;
+  private Timer? _autoLockTimer;
+  private DateTime _lastInteractionUtc = DateTime.UtcNow;
+  private bool _disposed;
+  private bool _wasOpen;
+
+  protected override void OnInitialized()
+  {
+    VizTelemetry.UpdatesPerSecondChanged += OnUpdatesPerSecondChanged;
+    _updatesPerSecond = VizTelemetry.UpdatesPerSecond;
+    UpdateEngineState();
+
+    // Ticks once per second to drive the auto-lock countdown header text
+    // and to fire OnClose when the window elapses.
+    _autoLockTimer = new Timer(_ =>
+    {
+      if (_disposed) return;
+      _ = InvokeAsync(TickAutoLockAsync);
+    }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+  }
+
+  protected override void OnParametersSet()
+  {
+    // Each fresh open resets the auto-lock window. Closing the tray pauses
+    // the countdown logic (TickAutoLockAsync no-ops while IsOpen=false).
+    if (IsOpen && !_wasOpen)
+    {
+      _lastInteractionUtc = DateTime.UtcNow;
+      _autoLockRemaining = FormatRemaining(AutoLockSeconds);
+      UpdateEngineState();
+    }
+    _wasOpen = IsOpen;
+  }
+
+  private void OnUpdatesPerSecondChanged(int n)
+  {
+    _updatesPerSecond = n;
+    _ = InvokeAsync(StateHasChanged);
+  }
+
+  private void UpdateEngineState()
+  {
+    // Engine state surfaces the audio-state hub's SignalR connection — when
+    // it's "Connected" the engine is reachable; "Disconnected"/"Reconnecting"
+    // signals the API tier is down (kiosk-debug useful).
+    _engineState = AudioState.ConnectionState.ToString();
+  }
+
+  private async Task TickAutoLockAsync()
+  {
+    if (_disposed) return;
+    if (!IsOpen)
+    {
+      // Tray closed — reset the countdown so the next open starts fresh.
+      _lastInteractionUtc = DateTime.UtcNow;
+      _autoLockRemaining = FormatRemaining(AutoLockSeconds);
+      return;
+    }
+
+    UpdateEngineState();
+
+    var elapsed = (int)(DateTime.UtcNow - _lastInteractionUtc).TotalSeconds;
+    var remaining = AutoLockSeconds - elapsed;
+    if (remaining <= 0)
+    {
+      _autoLockRemaining = "0:00";
+      StateHasChanged();
+      await OnClose.InvokeAsync();
+      return;
+    }
+
+    _autoLockRemaining = FormatRemaining(remaining);
+    StateHasChanged();
+  }
+
+  private static string FormatRemaining(int seconds)
+  {
+    var s = Math.Max(0, seconds);
+    return $"0:{s:00}";
+  }
+
+  private void RecordInteraction()
+  {
+    _lastInteractionUtc = DateTime.UtcNow;
+    _autoLockRemaining = FormatRemaining(AutoLockSeconds);
+  }
+
+  private async Task HandleCloseAsync()
+  {
+    RecordInteraction();
+    await OnClose.InvokeAsync();
+  }
+
+  private async Task MarkDistortionAsync()
+  {
+    RecordInteraction();
+    _distortionStatus = "marking…";
+    StateHasChanged();
+    try
+    {
+      var ok = await AudioApi.ReportDistortionAsync();
+      _distortionStatus = ok ? "marked" : "failed";
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "DevTray: failed to mark distortion");
+      _distortionStatus = "error";
+    }
+    StateHasChanged();
+  }
+
+  private async Task DumpAudioFrameAsync()
+  {
+    RecordInteraction();
+    _dumpStatus = "dumping…";
+    StateHasChanged();
+    try
+    {
+      // The audio-frame dump endpoint is a debug surface served by the API
+      // tier. The endpoint URL is opened in a new tab so the response (a
+      // .wav download or JSON metadata payload) is captured by the browser.
+      // The server-side endpoint (/api/audio/debug/dump-frame) is a planned
+      // follow-up; the card surfaces the action now so the UI contract is
+      // stable, and clicking it before the endpoint exists shows a 404 in
+      // the new tab — non-destructive.
+      var apiBase = (Configuration["ApiBaseUrl"] ?? WebConstants.DefaultApiBaseUrl).TrimEnd('/');
+      var url = $"{apiBase}/api/audio/debug/dump-frame";
+      await JS.InvokeVoidAsync("open", url, "_blank");
+      _dumpStatus = "opened";
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "DevTray: failed to open audio-frame dump");
+      _dumpStatus = "error";
+    }
+    StateHasChanged();
+  }
+
+  private async Task DownloadLogsAsync()
+  {
+    RecordInteraction();
+    try
+    {
+      // The /api/system/logs/download endpoint is a planned follow-up. The UI
+      // contract ships now; clicking before the endpoint exists shows a 404
+      // in the new tab — non-destructive.
+      var apiBase = (Configuration["ApiBaseUrl"] ?? WebConstants.DefaultApiBaseUrl).TrimEnd('/');
+      var url = $"{apiBase}/api/system/logs/download?period=1h";
+      await JS.InvokeVoidAsync("open", url, "_blank");
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "DevTray: failed to open log download");
+    }
+  }
+
+  private void ViewFingerprintEvents()
+  {
+    RecordInteraction();
+    // Fingerprint events live on the Metrics dashboard (PR 4) — a dedicated
+    // detail panel doesn't exist as a route yet, so we navigate there and
+    // let the user scroll to the fingerprint cards.
+    Nav.NavigateTo("/metrics");
+  }
+
+  public void Dispose()
+  {
+    _disposed = true;
+    VizTelemetry.UpdatesPerSecondChanged -= OnUpdatesPerSecondChanged;
+    _autoLockTimer?.Dispose();
+    _autoLockTimer = null;
+  }
+}

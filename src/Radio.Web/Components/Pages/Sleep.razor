@@ -1,0 +1,189 @@
+@page "/sleep"
+@layout Radio.Web.Components.Layout.EmptyLayout
+@inject NavigationManager Nav
+@inject SystemApiService SystemApi
+@inject AudioApiService AudioApi
+@inject AudioStateHubService AudioState
+@inject ILogger<Sleep> Logger
+@implements IAsyncDisposable
+
+@*
+  Sleep screen (handoff §P2·1, PR 6 of the design tightening arc).
+
+  Replaces the JS black-overlay hack with a real Blazor route. The user lands
+  here from:
+    - The Sleep nav-pill in MainLayout.HandleSleepButtonAsync.
+    - idle-dimmer.js navigating to /sleep after the idle timeout fires.
+    - A server-side push when SleepStateChanged(true) arrives on another tab.
+
+  The screen renders the LED clock, faint album art, current track metadata,
+  and a "tap anywhere to wake" hint. Any tap (or keypress for kiosk a11y)
+  calls SystemApi.SetSleepAsync(false) and navigates home. If the server
+  pushes SleepStateChanged(false) while we're parked on /sleep (because
+  another control flipped it), we also navigate home so this route never
+  lingers behind a woken system.
+*@
+
+<div class="sleep-screen"
+     @onclick="HandleWakeAsync"
+     @onkeydown="HandleWakeKeyDownAsync"
+     role="button"
+     tabindex="0"
+     aria-label="Tap to wake">
+  <div class="sleep-screen-glow" aria-hidden="true"></div>
+
+  @if (_hasValidAlbumArt && !string.IsNullOrEmpty(_albumArtUrl))
+  {
+    <img class="sleep-screen-art" src="@_albumArtUrl" alt="" />
+  }
+
+  <div class="sleep-screen-clock font-led">@_clockText</div>
+
+  @if (!string.IsNullOrEmpty(_title))
+  {
+    <div class="sleep-screen-track">
+      <span class="sleep-screen-title">@_title</span>
+      @if (!string.IsNullOrEmpty(_artist) && _artist != "--")
+      {
+        <span class="sleep-screen-artist">@_artist</span>
+      }
+    </div>
+  }
+
+  <div class="sleep-screen-hint">tap anywhere to wake</div>
+</div>
+
+@code {
+  private string _clockText = string.Empty;
+  private string? _title;
+  private string? _artist;
+  private string? _albumArtUrl;
+  private bool _hasValidAlbumArt;
+  private Timer? _clockTimer;
+  private bool _disposed;
+
+  protected override async Task OnInitializedAsync()
+  {
+    UpdateClock();
+
+    // Tick once per second so the LED clock stays current. We intentionally use
+    // System.Threading.Timer (not System.Timers.Timer) here for cheap allocation
+    // and disposal — the sleep screen often outlives the dim cycle by hours.
+    _clockTimer = new Timer(_ =>
+    {
+      if (_disposed) return;
+      _ = InvokeAsync(() =>
+      {
+        if (_disposed) return;
+        UpdateClock();
+        StateHasChanged();
+      });
+    }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+
+    AudioState.NowPlayingChanged += OnNowPlayingChanged;
+    AudioState.SleepStateChanged += OnSleepStateChanged;
+
+    // Hydrate the track block from the current playback state. Best-effort —
+    // if the API is unreachable we just render the clock alone.
+    try
+    {
+      var nowPlaying = await AudioApi.GetNowPlayingAsync();
+      if (nowPlaying != null)
+      {
+        ApplyNowPlaying(nowPlaying);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "Sleep screen could not hydrate now-playing state");
+    }
+  }
+
+  private void UpdateClock() => _clockText = DateTime.Now.ToString("HH:mm");
+
+  private void ApplyNowPlaying(NowPlayingDto? dto)
+  {
+    if (dto == null)
+    {
+      _title = null;
+      _artist = null;
+      _albumArtUrl = null;
+      _hasValidAlbumArt = false;
+      return;
+    }
+
+    _title = string.IsNullOrWhiteSpace(dto.Title) || dto.Title == "No Track" ? null : dto.Title;
+    _artist = string.IsNullOrWhiteSpace(dto.Artist) ? null : dto.Artist;
+
+    // Suppress the default placeholder so we don't render a faded
+    // "default-album-art.png" at the centre of an otherwise minimal screen.
+    if (!string.IsNullOrEmpty(dto.AlbumArtUrl)
+        && !dto.AlbumArtUrl.Contains("default-album-art", StringComparison.OrdinalIgnoreCase))
+    {
+      _albumArtUrl = dto.AlbumArtUrl;
+      _hasValidAlbumArt = true;
+    }
+    else
+    {
+      _albumArtUrl = null;
+      _hasValidAlbumArt = false;
+    }
+  }
+
+  private Task OnNowPlayingChanged(NowPlayingDto? dto)
+  {
+    return InvokeAsync(() =>
+    {
+      ApplyNowPlaying(dto);
+      StateHasChanged();
+    });
+  }
+
+  /// <summary>
+  /// If the server (or another tab) flips wake while we're on /sleep, follow
+  /// it home so the route doesn't linger behind an awake system. Idempotent —
+  /// firing on a wake we initiated is harmless because we already navigated
+  /// away in HandleWakeAsync.
+  /// </summary>
+  private Task OnSleepStateChanged(bool isSleeping)
+  {
+    if (!isSleeping)
+    {
+      return InvokeAsync(() => Nav.NavigateTo("/"));
+    }
+    return Task.CompletedTask;
+  }
+
+  private async Task HandleWakeAsync()
+  {
+    try
+    {
+      await SystemApi.SetSleepAsync(false);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to clear sleep state on tap; navigating home anyway");
+    }
+    Nav.NavigateTo("/");
+  }
+
+  private Task HandleWakeKeyDownAsync(KeyboardEventArgs e)
+  {
+    // Kiosk a11y: any key wakes. We don't differentiate Enter/Space — the
+    // intent is "any input is wake input" on this screen.
+    return HandleWakeAsync();
+  }
+
+  public async ValueTask DisposeAsync()
+  {
+    _disposed = true;
+    AudioState.NowPlayingChanged -= OnNowPlayingChanged;
+    AudioState.SleepStateChanged -= OnSleepStateChanged;
+
+    if (_clockTimer != null)
+    {
+      await _clockTimer.DisposeAsync();
+      _clockTimer = null;
+    }
+  }
+}

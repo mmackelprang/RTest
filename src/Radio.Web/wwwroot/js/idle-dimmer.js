@@ -1,49 +1,54 @@
-// Screen idle dimmer + sleep manager for kiosk mode
+// Screen idle dimmer + sleep navigator for kiosk mode (PR 6 / handoff §P2·1).
 //
-// Three states:
+// Two states:
 //   1. Dimmed:        brightness reduced after idle timeout (music continues)
-//   2. Screen-blanked: black overlay after longer idle (music continues)
-//   3. Deep sleep:     black overlay + audio paused (explicit user/server action only)
+//   2. Sleep route:   navigate to /sleep after longer idle (music continues —
+//                     the sleep screen does NOT pause audio; only the explicit
+//                     Sleep nav-pill or a server-side SetSleepAsync(true) does).
 //
-// Key design: idle timeouts NEVER pause audio. Only explicit sleep (button/server)
-// pauses playback. This lets the radio play indefinitely while preserving the screen.
+// Removed in PR 6:
+//   - The full-page black overlay element. The sleep screen is a Blazor route
+//     now (/sleep), so we navigate instead of compositing a div on top of the
+//     existing surface. This eliminates the overlay-hack from idle-dimmer.js
+//     entirely (handoff §P2·1 acceptance: "No black overlay hack remains in JS").
 //
-// Exposes window.radioSleepManager for JS interop from Blazor
+// Kept in PR 6:
+//   - The dim step (brightness 0.3 after IDLE_TIMEOUT) — purely cosmetic, music
+//     keeps playing, no API call. Undimmed on the next user activity.
+//   - The Blazor JS interop bridge (window.radioSleepManager) for callers that
+//     drive sleep/wake from server-pushed SleepStateChanged events. The bridge
+//     no longer mutates DOM; it navigates the route instead.
+//
+// Exposes window.radioSleepManager for JS interop from Blazor.
 
-// Safe setter for API base URL (called from Blazor JS interop instead of eval)
+// Safe setter for API base URL (called from Blazor JS interop instead of eval).
 window.radioSetApiBaseUrl = function (url) {
   window.radioApiBaseUrl = url;
 };
 
 (function () {
-  const IDLE_TIMEOUT = 5 * 60 * 1000; // 5 minutes → dim
-  const BLANK_TIMEOUT = 30 * 60 * 1000; // 30 minutes → screen blank (visual only)
+  const IDLE_TIMEOUT = 5 * 60 * 1000;   // 5 minutes → dim
+  const SLEEP_TIMEOUT = 30 * 60 * 1000; // 30 minutes → navigate /sleep
   const DIM_BRIGHTNESS = 0.3;
 
   let dimTimer = null;
-  let blankTimer = null;
+  let sleepTimer = null;
   let dimmed = false;
-  let screenBlanked = false; // Visual-only blank (idle timeout) — music keeps playing
-  let deepSleep = false;     // Full sleep (audio paused) — explicit action only
-  let overlay = null;
   let blazorRef = null;
 
-  function createOverlay() {
-    if (overlay) return overlay;
-    overlay = document.createElement('div');
-    overlay.id = 'sleep-overlay';
-    overlay.style.cssText =
-      'position:fixed;inset:0;z-index:99998;background:#000;' +
-      'opacity:0;pointer-events:none;transition:opacity 2s ease;';
-    document.body.appendChild(overlay);
-    return overlay;
+  function isOnSleepRoute() {
+    return window.location.pathname === '/sleep';
   }
 
   function resetTimers() {
     clearTimeout(dimTimer);
-    clearTimeout(blankTimer);
+    clearTimeout(sleepTimer);
+    // No timers fire while we're on /sleep — the route owns its own lifecycle
+    // and the next user tap navigates home (which triggers a fresh resetTimers
+    // on mount of MainLayout).
+    if (isOnSleepRoute()) return;
     dimTimer = setTimeout(dim, IDLE_TIMEOUT);
-    blankTimer = setTimeout(function () { blankScreen(); }, BLANK_TIMEOUT);
+    sleepTimer = setTimeout(function () { navigateToSleep('idle'); }, SLEEP_TIMEOUT);
   }
 
   function undim() {
@@ -55,90 +60,51 @@ window.radioSetApiBaseUrl = function (url) {
   }
 
   function dim() {
-    if (screenBlanked || deepSleep) return;
+    if (isOnSleepRoute()) return;
     document.body.style.transition = 'filter 2s ease';
     document.body.style.filter = 'brightness(' + DIM_BRIGHTNESS + ')';
     dimmed = true;
   }
 
-  // Screen blank: visual-only, music keeps playing.
-  // Triggered by idle timeout — does NOT call the API.
-  function blankScreen() {
-    if (screenBlanked || deepSleep) return;
-    screenBlanked = true;
-
-    // Show black overlay
-    var el = createOverlay();
-    el.style.pointerEvents = 'auto';
-    void el.offsetWidth;
-    el.style.opacity = '1';
-
-    // Dim body fully
-    document.body.style.transition = 'filter 2s ease';
-    document.body.style.filter = 'brightness(0)';
-    dimmed = true;
-
+  // Navigate to /sleep. The Blazor route owns visual presentation and tap-to-
+  // wake; this function never composites overlays. Visual-only navigation —
+  // does NOT call SystemApi.SetSleepAsync because idle-induced navigation must
+  // not pause playback. The Sleep page itself handles the explicit-wake flow.
+  function navigateToSleep(source) {
+    if (isOnSleepRoute()) return;
+    undim(); // Clear filter so the sleep screen renders at full opacity.
     clearTimeout(dimTimer);
-    clearTimeout(blankTimer);
+    clearTimeout(sleepTimer);
+    window.location.href = '/sleep';
   }
 
-  // Deep sleep: black overlay + audio paused.
-  // Only triggered by explicit action (button press or server command).
+  // Deep sleep: navigate to /sleep AND pause audio.
+  // Called from Blazor (MainLayout sleep button, server push) — not from idle.
   function enterSleep(source) {
-    if (deepSleep) return;
+    if (isOnSleepRoute()) return;
+    undim();
+    clearTimeout(dimTimer);
+    clearTimeout(sleepTimer);
 
-    // If we're already screen-blanked, upgrade to deep sleep
-    if (!screenBlanked) {
-      // Show black overlay
-      var el = createOverlay();
-      el.style.pointerEvents = 'auto';
-      void el.offsetWidth;
-      el.style.opacity = '1';
-
-      document.body.style.transition = 'filter 2s ease';
-      document.body.style.filter = 'brightness(0)';
-      dimmed = true;
-    }
-
-    deepSleep = true;
-    screenBlanked = false; // Upgrade from blank to deep sleep
-
-    // Notify Blazor to pause audio (unless triggered by server — server already knows)
+    // Server already paused audio in this path, so we only notify Blazor for
+    // user-initiated wake. The pause-on-button path is handled server-side via
+    // SystemApi.SetSleepAsync(true) from the button handler.
     if (source !== 'server' && blazorRef) {
       blazorRef.invokeMethodAsync('OnJsSleepRequested', true)
         .catch(function () { /* ignore */ });
     }
 
-    clearTimeout(dimTimer);
-    clearTimeout(blankTimer);
+    window.location.href = '/sleep';
   }
 
   function wake(source) {
-    if (!screenBlanked && !deepSleep) {
-      // Not blanked or sleeping, just undim and reset timers
-      undim();
-      resetTimers();
+    // If we're not idle-blanked, just undim and reset the inactivity timers.
+    // The Sleep page handles its own wake — we don't drive navigation here.
+    undim();
+    if (isOnSleepRoute()) {
+      // Don't reset timers; the sleep page route is in control.
       return;
     }
-
-    var wasDeepSleep = deepSleep;
-    deepSleep = false;
-    screenBlanked = false;
-    undim();
-
-    // Hide overlay
-    if (overlay) {
-      overlay.style.opacity = '0';
-      overlay.style.pointerEvents = 'none';
-    }
-
-    // Only notify Blazor to resume audio if we were in deep sleep
-    // (screen-blank is visual only — nothing to resume)
-    if (wasDeepSleep && source !== 'server' && blazorRef) {
-      blazorRef.invokeMethodAsync('OnJsSleepRequested', false)
-        .catch(function () { /* ignore */ });
-    }
-
     resetTimers();
   }
 
@@ -155,19 +121,19 @@ window.radioSetApiBaseUrl = function (url) {
     wake('touch');
   }
 
-  // Listen for user activity (pointermove is throttled to avoid excessive timer resets)
   ['pointerdown', 'keydown', 'wheel'].forEach(function (evt) {
     document.addEventListener(evt, onUserActivity, { passive: true });
   });
   document.addEventListener('pointermove', onPointerMove, { passive: true });
 
-  // Expose global API for Blazor JS interop
+  // Expose global API for Blazor JS interop. The shape is preserved for
+  // server-push callers (MainLayout.OnSleepStateChanged hits enterSleep/wake)
+  // but the implementations no longer mutate the DOM — they navigate routes.
   window.radioSleepManager = {
-    enterSleep: enterSleep,      // Deep sleep (pauses audio) — for button/server
-    blankScreen: blankScreen,    // Screen blank only (no audio impact)
-    wake: wake,
-    isSleeping: function () { return deepSleep; },
-    isScreenBlanked: function () { return screenBlanked; },
+    enterSleep: enterSleep,         // explicit-action sleep → /sleep
+    wake: wake,                     // reset dim timer; sleep page handles its own wake
+    isSleeping: isOnSleepRoute,
+    isScreenBlanked: function () { return false; }, // overlay hack removed
     setBlazorRef: function (ref) { blazorRef = ref; }
   };
 

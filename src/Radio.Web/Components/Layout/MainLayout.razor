@@ -4,7 +4,6 @@
 @inject SystemApiService SystemApi
 @inject SourcesApiService SourcesApi
 @inject DevicesApiService DevicesApi
-@inject AudioApiService AudioApi
 @inject AudioStateHubService HubService
 @inject QueueApiService QueueApi
 @inject NavigationManager NavigationManager
@@ -130,18 +129,9 @@
           <RadzenIcon Icon="phone" />
           <span class="nav-pill-label">Phone</span>
         </a>
-        @if (IsDebugBuild)
-        {
-          @* Debug-only: distortion marker. PR 6 removes this entirely. *@
-          <button type="button"
-                  class="nav-pill debug-distortion-btn @_distortionMarkerColor"
-                  @onclick="HandleDistortionMarkerAsync"
-                  title="Mark audio distortion"
-                  aria-label="Mark audio distortion">
-            <RadzenIcon Icon="bug_report" />
-            <span class="nav-pill-label">Mark</span>
-          </button>
-        }
+        @* The distortion-marker pill was DEBUG-gated in PR 2 and is now hosted
+           inside the DevTray (PR 6 / §P2·2). Topbar stays clean — production
+           and dev chrome are identical until the 3-tap gesture activates. *@
         <button type="button" class="nav-pill" @onclick="HandleSleepButtonAsync"
                 title="Sleep"
                 aria-label="Enter sleep mode">
@@ -186,22 +176,20 @@
       <NowPlayingDock />
     }
   </div>
+
+  @* Dev tray (handoff §P2·2, PR 6).
+       - .dev-gesture-hit is a 48×48 invisible top-right region. dev-gesture.js
+         counts taps on it and calls back into Blazor (ToggleDevTray) when it
+         sees three within 1.5s.
+       - <DevTray> stays mounted but renders closed (max-height: 0) until
+         _isDevTrayOpen flips. Mounting unconditionally keeps the
+         VisualizerTelemetryService subscription alive so the "Updates: NN/sec"
+         card has fresh values the moment the tray slides open. *@
+  <div class="dev-gesture-hit" data-dev-gesture aria-hidden="true"></div>
+  <DevTray IsOpen="@_isDevTrayOpen" OnClose="@CloseDevTrayAsync" />
 </div>
 
 @code {
-  /// <summary>
-  /// True for Debug builds — gates the temporary distortion-marker pill in the
-  /// topbar. PR 6 removes the marker entirely; until then it should not
-  /// appear in Release builds. Wrapped as a static readonly so the @if guard
-  /// in markup doesn't trip the WAE "unreachable code" rule in Release.
-  /// </summary>
-  private static readonly bool IsDebugBuild =
-#if DEBUG
-    true;
-#else
-    false;
-#endif
-
   private string _currentTime = DateTime.Now.ToString("HH:mm");
   private string _cpuUsage = "0";
   private string _ramUsage = "0";
@@ -219,8 +207,10 @@
   private bool _showCastDropdown;
 
   private int _queueCount = 0;
-  private string _distortionMarkerColor = "";
   private DotNetObjectReference<MainLayout>? _selfReference;
+  private DotNetObjectReference<MainLayout>? _devTrayRef;
+  private IJSObjectReference? _devGestureModule;
+  private bool _isDevTrayOpen;
 
   private AudioSourceDto? ActiveSource =>
     _availableSources.FirstOrDefault(s => s.Id == _selectedSourceId);
@@ -293,7 +283,51 @@
       // Register .NET reference so JS sleep/wake can call back into Blazor
       _selfReference = DotNetObjectReference.Create(this);
       await JSRuntime.InvokeVoidAsync("radioSleepManager.setBlazorRef", _selfReference);
+
+      // Wire the dev-tray triple-tap gesture (handoff §P2·2, PR 6). The JS
+      // module listens on the invisible .dev-gesture-hit element and calls
+      // ToggleDevTray when it detects 3 taps within 1.5s.
+      try
+      {
+        _devTrayRef = DotNetObjectReference.Create(this);
+        _devGestureModule = await JSRuntime.InvokeAsync<IJSObjectReference>(
+          "import", "./js/dev-gesture.js");
+        await _devGestureModule.InvokeVoidAsync("init", _devTrayRef);
+      }
+      catch (Exception ex)
+      {
+        // Module import failure is non-fatal — the layout still works without
+        // the gesture; the dev tray simply stays unreachable in that build.
+        Logger.LogWarning(ex, "Failed to initialize dev-gesture JS module");
+      }
     }
+  }
+
+  /// <summary>
+  /// Called from JS (dev-gesture.js) when the user triple-taps the invisible
+  /// top-right hit area within 1.5s. Toggles the DevTray open/closed.
+  /// </summary>
+  [JSInvokable]
+  public Task ToggleDevTray()
+  {
+    return InvokeAsync(() =>
+    {
+      _isDevTrayOpen = !_isDevTrayOpen;
+      StateHasChanged();
+    });
+  }
+
+  /// <summary>
+  /// Closes the dev tray. Fires from the × button and from the tray's
+  /// 30-second auto-lock timer.
+  /// </summary>
+  private Task CloseDevTrayAsync()
+  {
+    return InvokeAsync(() =>
+    {
+      _isDevTrayOpen = false;
+      StateHasChanged();
+    });
   }
 
   /// <summary>
@@ -783,16 +817,6 @@
   private static bool IsRadioSource(string sourceType) =>
     SourceTypeHelper.IsRadioFamily(sourceType);
 
-  private async Task HandleDistortionMarkerAsync()
-  {
-    _distortionMarkerColor = "distortion-active";
-    StateHasChanged();
-    await AudioApi.ReportDistortionAsync();
-    await Task.Delay(1000);
-    _distortionMarkerColor = "";
-    StateHasChanged();
-  }
-
   private async Task HandleQueueNavAsync()
   {
     await RadioPanelToggle.HideRadioPanelAsync();
@@ -870,41 +894,35 @@
     await InvokeAsync(StateHasChanged);
   }
 
-  private async Task OnSleepStateChanged(bool isSleeping)
+  private Task OnSleepStateChanged(bool isSleeping)
   {
-    try
+    // PR 6 / handoff §P2·1: server-pushed SleepStateChanged drives a route
+    // navigation now (no JS overlay). On the wake side the Sleep page itself
+    // navigates home from its own handler, so MainLayout only needs to act on
+    // the asleep edge.
+    return InvokeAsync(() =>
     {
-      await InvokeAsync(async () =>
+      if (isSleeping)
       {
-        if (isSleeping)
-        {
-          await JSRuntime.InvokeVoidAsync("radioSleepManager.enterSleep", "server");
-        }
-        else
-        {
-          await JSRuntime.InvokeVoidAsync("radioSleepManager.wake", "server");
-        }
-      });
-    }
-    catch (Exception ex)
-    {
-      Logger.LogWarning(ex, "Error handling sleep state change");
-    }
+        NavigationManager.NavigateTo("/sleep");
+      }
+    });
   }
 
   private async Task HandleSleepButtonAsync()
   {
+    // PR 6 / handoff §P2·1: sleep is a real route now (/sleep). Pause audio
+    // server-side, then navigate. The Sleep.razor page handles its own visual
+    // presentation (LED clock, faint art, hint) — no JS overlay involved.
     try
     {
-      // Show black overlay immediately via JS
-      await JSRuntime.InvokeVoidAsync("radioSleepManager.enterSleep", "server");
-      // Call API server-side to pause audio (avoids browser CORS issues)
       await SystemApi.SetSleepAsync(true);
     }
     catch (Exception ex)
     {
-      Logger.LogWarning(ex, "Error entering sleep mode");
+      Logger.LogWarning(ex, "Error setting sleep state on button press");
     }
+    NavigationManager.NavigateTo("/sleep");
   }
 
   private async Task OnDeviceDisplaySettingsChanged()
@@ -941,11 +959,26 @@
     _timer?.Stop();
     _timer?.Dispose();
     _selfReference?.Dispose();
+    _devTrayRef?.Dispose();
   }
 
-  public ValueTask DisposeAsync()
+  public async ValueTask DisposeAsync()
   {
+    // Tear down the dev-gesture JS module before releasing the .NET reference
+    // so the module's handlers don't fire one more time into a disposed ref.
+    if (_devGestureModule != null)
+    {
+      try
+      {
+        await _devGestureModule.InvokeVoidAsync("dispose");
+        await _devGestureModule.DisposeAsync();
+      }
+      catch (Exception ex)
+      {
+        Logger.LogDebug(ex, "Error disposing dev-gesture JS module");
+      }
+      _devGestureModule = null;
+    }
     Dispose();
-    return ValueTask.CompletedTask;
   }
 }

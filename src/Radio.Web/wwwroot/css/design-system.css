@@ -1500,12 +1500,6 @@ body {
 
 /* ─── §26  Accessibility: Reduced Motion ──────────────────────────────────── */
 
-/* ─── Debug: Distortion Marker Button (temporary) ────────────────────────── */
-
-.debug-distortion-btn { opacity: 0.5; transition: opacity 0.2s; }
-.debug-distortion-btn:hover { opacity: 1; }
-
-
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
@@ -2759,4 +2753,225 @@ body {
   font-size: 22px;
   color: var(--signal-amber);
   letter-spacing: 0.02em;
+}
+
+
+/* ─── §P  Sleep Screen (PR 6 / handoff §P2·1) ─────────────────────────────── *
+ *
+ * Full-viewport route at /sleep that replaces the JS black-overlay hack. The
+ * screen renders an amber LED clock as the focal element, a faint album-art
+ * block (40% opacity) when one is available, current track metadata at low
+ * contrast, and a "tap anywhere to wake" hint at the bottom. Any tap or
+ * keystroke on .sleep-screen wakes the system and navigates home.
+ *
+ * Background is hard-coded #050507 (slightly darker than --surface-overlay)
+ * so the LED glow reads as the only emissive element in the room — kiosk in
+ * a dark bedroom should feel like a stereo's "off" state, not a webpage.
+ * ─────────────────────────────────────────────────────────────────────────── */
+.sleep-screen {
+  position: fixed;
+  inset: 0;
+  background: #050507;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  cursor: pointer;
+  z-index: 9999;
+  /* Strip the EmptyLayout wrapper's 20px padding and #222 background — the
+     sleep screen owns the whole viewport visually. */
+  outline: none;
+}
+
+.sleep-screen-glow {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at center,
+    color-mix(in srgb, var(--signal-amber) 12%, transparent),
+    transparent 60%
+  );
+  pointer-events: none;
+}
+
+.sleep-screen-art {
+  width: 160px;
+  height: 160px;
+  opacity: 0.4;
+  object-fit: cover;
+  border-radius: 8px;
+  /* Sit above the radial glow but below the clock — the glow already implies
+     where the focus should land. */
+  position: relative;
+}
+
+.sleep-screen-clock {
+  font-family: var(--font-led);
+  font-size: 96px;
+  color: var(--signal-amber);
+  text-shadow: 0 0 24px color-mix(in srgb, var(--signal-amber) 50%, transparent);
+  letter-spacing: 0.02em;
+  /* Block-level so the radial glow doesn't clip the descenders on the colon
+     glyph in DSEG14. */
+  position: relative;
+  line-height: 1;
+}
+
+.sleep-screen-track {
+  font-size: 18px;
+  color: var(--text-low);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  position: relative;
+}
+
+.sleep-screen-title { color: var(--text-medium); }
+.sleep-screen-artist { color: var(--text-low); }
+
+.sleep-screen-hint {
+  position: absolute;
+  bottom: 32px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-low);
+  text-transform: uppercase;
+  letter-spacing: 0.20em;
+}
+
+
+/* ─── §Q  Dev Tray (PR 6 / handoff §P2·2) ─────────────────────────────────── *
+ *
+ * Hidden developer surface activated by a 3-tap gesture in the top-right
+ * corner of the topbar (see .dev-gesture-hit). Slides down from the top edge
+ * with a backdrop blur and drop shadow; auto-locks after 30 seconds of no
+ * interaction (state lives in DevTray.razor, CSS just animates max-height).
+ *
+ * The cards are a 2×3 grid of touch targets — each hosts one diagnostic
+ * action (Mark distortion, Dump audio frame, Download logs, Fingerprint
+ * events) or a read-only metric (Updates/sec, Engine state).
+ * ─────────────────────────────────────────────────────────────────────────── */
+.dev-tray {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 480px;
+  max-height: 0;
+  background: var(--surface-overlay);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--surface-separator);
+  border-radius: 0 0 0 12px;
+  box-shadow: -4px 4px 24px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  transition: max-height 240ms ease-out;
+  z-index: 9998; /* one below the sleep screen so /sleep always wins */
+}
+
+.dev-tray.is-open {
+  max-height: 400px;
+}
+
+.dev-tray-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--surface-separator);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-medium);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.dev-tray-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dev-tray-close {
+  background: transparent;
+  border: none;
+  color: var(--text-medium);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.dev-tray-close:hover {
+  color: var(--text-high);
+  background: var(--surface-hover);
+}
+
+.dev-tray-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 8px;
+  padding: 12px;
+}
+
+.dev-card {
+  background: var(--surface-elevated);
+  border: 1px solid var(--surface-separator);
+  border-radius: 8px;
+  padding: 12px;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-medium);
+  transition: background 0.15s ease, border-color 0.15s ease;
+  min-height: 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dev-card:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--text-low);
+}
+.dev-card:disabled {
+  cursor: default;
+}
+
+.dev-card-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-medium);
+}
+
+.dev-card-value {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  color: var(--text-high);
+}
+
+
+/* ─── §R  Dev Gesture Hit Area (PR 6) ─────────────────────────────────────── *
+ *
+ * Invisible 48×48 hit zone in the top-right corner of the viewport, scoped
+ * just above the dev tray's z-index so taps land here even when the topbar
+ * paints over the same coordinates. Clicks bubble to dev-gesture.js which
+ * counts taps and asks Blazor to toggle the tray when it sees three in a
+ * 1.5s window.
+ * ─────────────────────────────────────────────────────────────────────────── */
+.dev-gesture-hit {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 48px;
+  height: 48px;
+  z-index: 9997;
+  pointer-events: auto;
+  opacity: 0;
+  /* No background, no border — designed to be invisible to users. The
+     `data-dev-gesture` attribute is the contract; opacity=0 keeps it visually
+     absent without removing it from the hit-test tree. */
 }
