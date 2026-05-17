@@ -35,4 +35,62 @@ public static class SourceTypeHelper
     "TestTone" => "testtone",
     _ => "file"
   };
+
+  /// <summary>
+  /// Gets the CSS custom-property name (e.g. <c>--source-radio</c>) for the
+  /// per-source accent colour. Used by SourceBubble, the IN cluster swatch
+  /// in MainLayout, and the source-color dot in NowPlayingDock.
+  /// Falls back to <c>--accent-primary</c> for unknown / unmapped types.
+  /// </summary>
+  public static string GetAccentVar(string sourceType) => sourceType switch
+  {
+    "Vinyl" => "--source-vinyl",
+    "FilePlayer" or "File" => "--source-file",
+    "Radio" or "RTLSDRCore" or "RF320" => "--source-radio",
+    "Bluetooth" => "--source-bluetooth",
+    "GenericUSB" or "USB" => "--source-usb",
+    _ => "--accent-primary"
+  };
+
+  /// <summary>
+  /// Single source of truth for which source types have a dedicated detail
+  /// surface (radio control panel, Bluetooth pairing page). Consumed by
+  /// <c>MainLayout</c> to drive the chevron affordance on <c>SourceBubble</c>
+  /// (handoff §P1·2) and by other places that need to gate detail-only UI.
+  ///
+  /// Future source types default to <c>false</c> and must be added explicitly.
+  /// </summary>
+  public static bool HasDetail(string sourceType) =>
+    SourcesWithDetail.Contains(sourceType);
+
+  private static readonly HashSet<string> SourcesWithDetail =
+    new(StringComparer.OrdinalIgnoreCase)
+    {
+      "Radio",
+      "RTLSDRCore",
+      "RF320",
+      "Bluetooth"
+    };
+
+  /// <summary>
+  /// Single source of truth for the "radio family" — the set of source types
+  /// that share the radio control panel + tuning workflow. Consumed by
+  /// <c>MainLayout.IsRadioSource</c> (chevron click → "/" + show radio panel)
+  /// and <c>QueueHistoryPanel</c> (default-tab selection treats the whole
+  /// family as one source). Deliberately distinct from <see cref="HasDetail"/>
+  /// — Bluetooth has a detail surface but is not part of the radio family.
+  ///
+  /// Future radio-style source types default to <c>false</c> and must be added
+  /// explicitly. Returns <c>false</c> for null / empty inputs.
+  /// </summary>
+  public static bool IsRadioFamily(string? sourceType) =>
+    !string.IsNullOrEmpty(sourceType) && RadioFamilyTypes.Contains(sourceType);
+
+  private static readonly HashSet<string> RadioFamilyTypes =
+    new(StringComparer.OrdinalIgnoreCase)
+    {
+      "Radio",
+      "RTLSDRCore",
+      "RF320"
+    };
 }

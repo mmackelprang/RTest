@@ -168,16 +168,23 @@
                       HasDetail="@HasSourceDetail(source.Type)"
                       DataSourceAttr="@dataAttr"
                       OnSwitch="@(EventCallback.Factory.Create(this, () => HandleSourceToggleAsync(source)))"
-                      OnOpenDetail="@(EventCallback.Factory.Create(this, () => NavigateToSourcePage(source.Type)))" />
+                      OnOpenDetail="@(EventCallback.Factory.Create(this, () => HandleSourceDetailAsync(source)))" />
       }
     </div>
   </div>
 
-  <!-- Main Content Area (height = viewport - topbar = 720 - var(--topbar-height)) -->
-  <div class="content-area">
+  @* Main Content Area (height = viewport - topbar = 720 - var(--topbar-height)).
+     The .has-dock modifier engages on every route except Home so .page-transition
+     reserves the bottom 64px for <NowPlayingDock> and routed content never slides
+     under it (handoff §P1·1). *@
+  <div class="content-area @(IsDockVisible ? "has-dock" : "")">
     <div class="page-transition">
       @Body
     </div>
+    @if (IsDockVisible)
+    {
+      <NowPlayingDock />
+    }
   </div>
 </div>
 
@@ -200,6 +207,9 @@
   private string _ramUsage = "0";
   private string _threadCount = "0";
   private System.Timers.Timer? _timer;
+  // Cached on every LocationChanged so the render condition is a cheap field
+  // read instead of re-parsing the URI inside the template (handoff §P1·1).
+  private bool _isOnHome = true;
   private List<AudioSourceDto> _availableSources = new();
   private List<AudioDeviceDto> _availableOutputs = new();
   private string? _selectedSourceId = null;
@@ -244,6 +254,11 @@
       HubService.SourceChanged += OnSourceChanged;
       HubService.SleepStateChanged += OnSleepStateChanged;
       DeviceDisplayState.DisplaySettingsChanged += OnDeviceDisplaySettingsChanged;
+
+      // Dock visibility is route-dependent (handoff §P1·1: dock only on
+      // non-Home routes). Seed from the current URI and update on every nav.
+      _isOnHome = IsCurrentlyOnHome();
+      NavigationManager.LocationChanged += OnLocationChanged;
       Logger.LogDebug("MainLayout - Subscribed to audio state events");
 
       // Load initial state
@@ -626,17 +641,12 @@
 
   /// <summary>
   /// Map a source type to the CSS custom-property name for its accent colour.
-  /// Used by SourceBubble (Accent parameter) and the IN cluster swatch.
+  /// Used by SourceBubble (Accent parameter), the IN cluster swatch, and the
+  /// NowPlayingDock source-color dot. Delegates to <see cref="SourceTypeHelper"/>
+  /// so every consumer reads from the same matrix.
   /// </summary>
-  private static string GetAccentVarForSource(string sourceType) => sourceType switch
-  {
-    "Vinyl" => "--source-vinyl",
-    "FilePlayer" or "File" => "--source-file",
-    "Radio" or "RTLSDRCore" or "RF320" => "--source-radio",
-    "Bluetooth" => "--source-bluetooth",
-    "GenericUSB" or "USB" => "--source-usb",
-    _ => "--accent-primary"
-  };
+  private static string GetAccentVarForSource(string sourceType) =>
+    SourceTypeHelper.GetAccentVar(sourceType);
 
   private string GetActiveSourceAccentVar() =>
     ActiveSource is null ? "--text-low" : GetAccentVarForSource(ActiveSource.Type);
@@ -665,10 +675,13 @@
 
   /// <summary>
   /// True if a source has a dedicated detail surface (Radio control panel,
-  /// Bluetooth pairing page) that the chevron can open.
+  /// Bluetooth pairing page) that the chevron can open. Delegates to
+  /// <see cref="SourceTypeHelper.HasDetail(string)"/> so the matrix is defined
+  /// in exactly one place — adding a new source with a detail surface only
+  /// requires updating <c>SourcesWithDetail</c> there.
   /// </summary>
   private static bool HasSourceDetail(string sourceType) =>
-    IsRadioSource(sourceType) || sourceType == "Bluetooth";
+    SourceTypeHelper.HasDetail(sourceType);
 
   // Source availability check
   private static bool IsSourceAvailable(AudioSourceDto source) =>
@@ -682,34 +695,51 @@
     return $"/{uri}".StartsWith(path, StringComparison.OrdinalIgnoreCase);
   }
 
-  // Combined source toggle: switch source AND navigate for Radio/Bluetooth
+  /// <summary>
+  /// True when the routed page is anywhere other than Home — the NowPlayingPanel
+  /// already owns the player surface on <c>/</c>, so the dock is suppressed there
+  /// (handoff §P1·1).
+  /// </summary>
+  private bool IsDockVisible => !_isOnHome;
+
+  private bool IsCurrentlyOnHome()
+  {
+    var rel = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+    // Strip query/fragment so "/?foo=bar" still counts as home.
+    var slash = rel.IndexOfAny(new[] { '?', '#' });
+    if (slash >= 0) rel = rel[..slash];
+    return string.IsNullOrEmpty(rel) || rel == "/";
+  }
+
+  private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+  {
+    var wasOnHome = _isOnHome;
+    _isOnHome = IsCurrentlyOnHome();
+    if (wasOnHome != _isOnHome)
+    {
+      // Dock visibility flipped — trigger a re-render so the <NowPlayingDock>
+      // appears/disappears and .has-dock toggles on .content-area.
+      _ = InvokeAsync(StateHasChanged);
+    }
+  }
+
+  /// <summary>
+  /// Source pill body tap (handoff §P1·2). Tapping a source pill ALWAYS switches
+  /// to that source — nothing else. The pill no longer toggles the radio panel
+  /// on second-tap and no longer navigates between detail surfaces; those
+  /// affordances live on the chevron (<see cref="HandleSourceDetailAsync"/>).
+  ///
+  /// We still maintain the side-effect that switching TO Radio shows the radio
+  /// control panel on Home and switching AWAY hides it — the panel-visibility
+  /// state is a function of the active source, not of user-tap intent.
+  /// </summary>
   private async Task HandleSourceToggleAsync(AudioSourceDto source)
   {
     if (!IsSourceAvailable(source)) return;
-    if (source.Id == _selectedSourceId)
-    {
-      // Already selected — toggle inline panel or navigate
-      if (IsRadioSource(source.Type))
-      {
-        // Toggle radio control panel in the Home page center area
-        var currentPath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
-        if (!string.IsNullOrEmpty(currentPath))
-        {
-          // Not on Home page — navigate there first, panel will auto-show
-          RadioPanelToggle.IsRadioPanelVisible = true;
-          NavigationManager.NavigateTo("/");
-        }
-        else
-        {
-          await RadioPanelToggle.ToggleRadioPanelAsync();
-        }
-        return;
-      }
-      NavigateToSourcePage(source.Type);
-      return;
-    }
+    // Idempotent: tapping the currently-active pill is a no-op for source
+    // switching. The body never opens panels or navigates — that's the chevron.
+    if (source.Id == _selectedSourceId) return;
 
-    // Show radio panel when switching TO Radio, hide when switching away
     if (IsRadioSource(source.Type))
     {
       await HandleSourceChangeAsync(source.Id);
@@ -722,8 +752,36 @@
     }
   }
 
+  /// <summary>
+  /// Chevron tap on a source bubble (handoff §P1·2). The chevron is only rendered
+  /// when the source is active AND has a detail surface (see
+  /// <see cref="SourceTypeHelper.HasDetail(string)"/>). Dispatch:
+  ///
+  /// <list type="bullet">
+  ///   <item>Radio family (Radio / RTLSDRCore / RF320) → navigate Home and show
+  ///         the radio control panel (idempotent).</item>
+  ///   <item>Bluetooth → navigate to the BT pairing page.</item>
+  /// </list>
+  ///
+  /// Unknown / unmapped types fall through silently; the chevron wouldn't have
+  /// rendered for them.
+  /// </summary>
+  private async Task HandleSourceDetailAsync(AudioSourceDto source)
+  {
+    if (IsRadioSource(source.Type))
+    {
+      NavigationManager.NavigateTo("/");
+      await RadioPanelToggle.ShowRadioPanelAsync();
+      return;
+    }
+    if (source.Type == "Bluetooth")
+    {
+      NavigationManager.NavigateTo("/bluetooth");
+    }
+  }
+
   private static bool IsRadioSource(string sourceType) =>
-    sourceType is "Radio" or "RTLSDRCore" or "RF320";
+    SourceTypeHelper.IsRadioFamily(sourceType);
 
   private async Task HandleDistortionMarkerAsync()
   {
@@ -739,24 +797,6 @@
   {
     await RadioPanelToggle.HideRadioPanelAsync();
     NavigationManager.NavigateTo("/");
-  }
-
-  private void NavigateToSourcePage(string sourceType)
-  {
-    switch (sourceType)
-    {
-      case "Radio":
-      case "RTLSDRCore":
-      case "RF320":
-        NavigationManager.NavigateTo("/radio");
-        break;
-      case "Bluetooth":
-        NavigationManager.NavigateTo("/bluetooth");
-        break;
-      default:
-        NavigationManager.NavigateTo("/");
-        break;
-    }
   }
 
   private async Task OnCastDeviceSelected(CastDeviceDto selectedDevice)
@@ -896,6 +936,7 @@
     HubService.SourceChanged -= OnSourceChanged;
     HubService.SleepStateChanged -= OnSleepStateChanged;
     DeviceDisplayState.DisplaySettingsChanged -= OnDeviceDisplaySettingsChanged;
+    NavigationManager.LocationChanged -= OnLocationChanged;
 
     _timer?.Stop();
     _timer?.Dispose();

@@ -1,0 +1,335 @@
+@*
+  NowPlayingDock — 64px persistent player strip mounted at the bottom edge
+  of the .content-area on every route except Home (handoff §P1·1, plan PR 5).
+
+  Renders: 48×48 art → title + artist (with 8×8 source colour dot) →
+  3-bar EQ animation when playing → elapsed → progress bar (3px) → total →
+  ⏮ play/pause ⏭ controls.
+
+  Click the title/art block to navigate Home; the controls @onclick:stopPropagation
+  so they don't trigger the home-nav handler. Subscribes to
+  AudioStateHubService.NowPlayingChanged + PlaybackStateChanged only — no polling
+  beyond what NowPlayingPanel already does (the dock shares the same hub events).
+*@
+
+@rendermode InteractiveServer
+@inject NavigationManager NavigationManager
+@inject AudioApiService AudioApi
+@inject AudioStateHubService HubService
+@inject ILogger<NowPlayingDock> Logger
+@implements IAsyncDisposable
+
+<div class="now-playing-dock"
+     role="region"
+     aria-label="Now playing dock"
+     @onclick="HandleNavigateHome">
+  <div class="now-playing-dock-art" aria-hidden="true">
+    @if (_hasValidAlbumArt)
+    {
+      <img src="@_albumArtUrl"
+           alt=""
+           referrerpolicy="no-referrer"
+           @onerror="OnAlbumArtError" />
+    }
+    else
+    {
+      <RadzenIcon Icon="music_note" />
+    }
+  </div>
+  <div class="now-playing-dock-text">
+    <div class="now-playing-dock-title" title="@_rawTitle">@_displayTitle</div>
+    <div class="now-playing-dock-artist">
+      <span class="source-color-dot"
+            style="@($"background: var({_sourceAccent});")"
+            aria-hidden="true"></span>
+      <span class="now-playing-dock-artist-text">@_displaySubtitle</span>
+    </div>
+  </div>
+  @if (_isPlaying)
+  {
+    <div class="now-playing-bars now-playing-dock-bars" aria-hidden="true">
+      <span></span><span></span><span></span>
+    </div>
+  }
+  else
+  {
+    @* Stable placeholder so the grid column doesn't collapse when paused —
+       avoids the elapsed/total cells jumping horizontally on play/pause. *@
+    <div class="now-playing-dock-bars-placeholder" aria-hidden="true"></div>
+  }
+  <div class="now-playing-dock-elapsed">@_elapsedDisplay</div>
+  <div class="now-playing-dock-progress"
+       role="progressbar"
+       aria-valuemin="0"
+       aria-valuemax="@(_totalSeconds > 0 ? _totalSeconds : 100)"
+       aria-valuenow="@_elapsedSeconds"
+       aria-label="Playback progress">
+    <div class="now-playing-dock-progress-bar"
+         style="@($"width: {_progressPercent.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)}%;")"></div>
+  </div>
+  <div class="now-playing-dock-total">@_totalDisplay</div>
+  <div class="now-playing-dock-controls" @onclick:stopPropagation="true">
+    <button type="button"
+            class="now-playing-dock-btn"
+            @onclick="HandlePrevAsync"
+            aria-label="Previous track">
+      <RadzenIcon Icon="skip_previous" />
+    </button>
+    <button type="button"
+            class="now-playing-dock-btn now-playing-dock-btn-primary"
+            @onclick="HandlePlayPauseAsync"
+            aria-label="@(_isPlaying ? "Pause" : "Play")">
+      <RadzenIcon Icon="@(_isPlaying ? "pause" : "play_arrow")" />
+    </button>
+    <button type="button"
+            class="now-playing-dock-btn"
+            @onclick="HandleNextAsync"
+            aria-label="Next track">
+      <RadzenIcon Icon="skip_next" />
+    </button>
+  </div>
+</div>
+
+@code {
+  private string _displayTitle = "No Track Playing";
+  private string _displaySubtitle = "—";
+  private string _rawTitle = string.Empty;
+  private string? _albumArtUrl;
+  private bool _albumArtFailed;
+  private string _sourceAccent = "--text-low";
+  private bool _isPlaying;
+
+  // Elapsed / total — tracked in seconds (double) so the progress percent stays
+  // smooth. The display strings are formatted once per update via Durations.FormatTrack.
+  private double _elapsedSeconds;
+  private double _totalSeconds;
+  private string _elapsedDisplay = "0:00";
+  private string _totalDisplay = "—";
+  private double _progressPercent;
+
+  private bool _hasValidAlbumArt =>
+    !_albumArtFailed
+    && !string.IsNullOrEmpty(_albumArtUrl)
+    && _albumArtUrl != "/images/default-album-art.png";
+
+  protected override async Task OnInitializedAsync()
+  {
+    HubService.NowPlayingChanged += OnNowPlayingChanged;
+    HubService.PlaybackStateChanged += OnPlaybackStateChanged;
+    await RefreshAsync();
+  }
+
+  private async Task RefreshAsync()
+  {
+    try
+    {
+      var nowPlayingTask = AudioApi.GetNowPlayingAsync();
+      var stateTask = AudioApi.GetPlaybackStateAsync();
+      await Task.WhenAll(nowPlayingTask, stateTask);
+
+      var nowPlaying = await nowPlayingTask;
+      var state = await stateTask;
+
+      if (nowPlaying != null)
+      {
+        ApplyNowPlayingDto(nowPlaying);
+      }
+      if (state != null)
+      {
+        ApplyPlaybackState(state);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "NowPlayingDock initial refresh failed (API offline?)");
+    }
+  }
+
+  private async Task OnNowPlayingChanged(NowPlayingDto? dto)
+  {
+    if (dto is null)
+    {
+      // Source went silent (hub pushed a null payload). Reset to the empty-state
+      // shape so we don't leave the previous track lingering in the dock. Mirrors
+      // the initial render — placeholder title, em-dash subtitle, no album art,
+      // 0:00 / — durations, progress at 0.
+      ClearDockState();
+      await InvokeAsync(StateHasChanged);
+      return;
+    }
+    ApplyNowPlayingDto(dto);
+    await InvokeAsync(StateHasChanged);
+  }
+
+  /// <summary>
+  /// Reset every field touched by <see cref="ApplyNowPlayingDto"/> back to the
+  /// initial empty-state values declared at the top of <c>@code</c>. Called when
+  /// the hub pushes a null payload (source went silent / nothing playing).
+  /// </summary>
+  private void ClearDockState()
+  {
+    _displayTitle = "No Track Playing";
+    _displaySubtitle = "—";
+    _rawTitle = string.Empty;
+    _albumArtUrl = null;
+    _albumArtFailed = false;
+    _sourceAccent = "--text-low";
+    _isPlaying = false;
+    _elapsedSeconds = 0;
+    _totalSeconds = 0;
+    RecomputeProgress();
+  }
+
+  private async Task OnPlaybackStateChanged()
+  {
+    try
+    {
+      var state = await AudioApi.GetPlaybackStateAsync();
+      if (state != null)
+      {
+        ApplyPlaybackState(state);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "Failed to refresh playback state");
+    }
+    await InvokeAsync(StateHasChanged);
+  }
+
+  /// <summary>
+  /// Pull display title / subtitle through <see cref="DisplayNames.Track"/> so the
+  /// dock matches whatever the home page is showing — even when the metadata reader
+  /// only produced "Track N" we get the cleaned-up filename, and the placeholder
+  /// "--" artist surfaces as the canonical em-dash.
+  /// </summary>
+  private void ApplyNowPlayingDto(NowPlayingDto dto)
+  {
+    var (title, subtitle) = DisplayNames.Track(dto);
+    _rawTitle = dto.Title ?? string.Empty;
+    _displayTitle = string.Equals(title, "No Track", StringComparison.Ordinal)
+      ? "No Track Playing"
+      : title;
+    _displaySubtitle = subtitle;
+
+    if (_albumArtUrl != dto.AlbumArtUrl)
+    {
+      _albumArtFailed = false;
+    }
+    _albumArtUrl = dto.AlbumArtUrl;
+
+    _isPlaying = dto.IsPlaying;
+    _sourceAccent = SourceTypeHelper.GetAccentVar(dto.SourceType ?? string.Empty);
+
+    // Always zero out elapsed/total when the DTO omits them, otherwise stale
+    // numbers from the previous source persist (e.g. File → Radio leaves the
+    // last file's elapsed time on screen until the next PlaybackStateChanged).
+    _elapsedSeconds = dto.Position?.TotalSeconds ?? 0;
+    _totalSeconds = dto.Duration?.TotalSeconds ?? 0;
+    RecomputeProgress();
+  }
+
+  /// <summary>
+  /// Apply the elapsed/total/playing fields from a <see cref="PlaybackStateDto"/>.
+  /// Mirrors NowPlayingPanel's parsing logic so the two views stay in lock-step:
+  /// sub-second positions floor to <c>0:00</c>; null/zero durations leave the
+  /// progress bar at 0 and surface the total as an em-dash.
+  /// </summary>
+  private void ApplyPlaybackState(PlaybackStateDto state)
+  {
+    _isPlaying = state.IsPlaying;
+
+    if (!string.IsNullOrEmpty(state.Position)
+        && TimeSpan.TryParse(state.Position, System.Globalization.CultureInfo.InvariantCulture, out var pos))
+    {
+      _elapsedSeconds = pos.TotalSeconds;
+    }
+    else
+    {
+      _elapsedSeconds = 0;
+    }
+
+    if (!string.IsNullOrEmpty(state.Duration)
+        && TimeSpan.TryParse(state.Duration, System.Globalization.CultureInfo.InvariantCulture, out var dur)
+        && dur.TotalSeconds > 0)
+    {
+      _totalSeconds = dur.TotalSeconds;
+    }
+    else
+    {
+      _totalSeconds = 0;
+    }
+
+    RecomputeProgress();
+  }
+
+  private void RecomputeProgress()
+  {
+    _elapsedDisplay = _elapsedSeconds >= 1.0
+      ? Durations.FormatTrack(TimeSpan.FromSeconds(_elapsedSeconds))
+      : "0:00";
+
+    _totalDisplay = _totalSeconds > 0
+      ? Durations.FormatTrack(TimeSpan.FromSeconds(_totalSeconds))
+      : "—";
+
+    _progressPercent = _totalSeconds > 0
+      ? Math.Clamp((_elapsedSeconds / _totalSeconds) * 100.0, 0, 100)
+      : 0;
+  }
+
+  private void HandleNavigateHome()
+  {
+    NavigationManager.NavigateTo("/");
+  }
+
+  private async Task HandlePlayPauseAsync()
+  {
+    try
+    {
+      var action = _isPlaying ? "Pause" : "Play";
+      await AudioApi.UpdatePlaybackStateAsync(new UpdatePlaybackRequest(action, null, null, null));
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Dock play/pause failed");
+    }
+  }
+
+  private async Task HandleNextAsync()
+  {
+    try
+    {
+      await AudioApi.NextAsync();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Dock next-track failed");
+    }
+  }
+
+  private async Task HandlePrevAsync()
+  {
+    try
+    {
+      await AudioApi.PreviousAsync();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Dock previous-track failed");
+    }
+  }
+
+  private void OnAlbumArtError()
+  {
+    _albumArtFailed = true;
+    StateHasChanged();
+  }
+
+  public async ValueTask DisposeAsync()
+  {
+    HubService.NowPlayingChanged -= OnNowPlayingChanged;
+    HubService.PlaybackStateChanged -= OnPlaybackStateChanged;
+    await Task.CompletedTask;
+  }
+}
