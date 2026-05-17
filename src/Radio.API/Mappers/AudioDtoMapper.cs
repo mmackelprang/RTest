@@ -133,6 +133,11 @@ public static class AudioDtoMapper
     nowPlaying.Album = GetMetadataValue(metadata, "Album") ?? "--";
     nowPlaying.AlbumArtUrl = GetMetadataValue(metadata, "AlbumArtUrl") ?? "/images/default-album-art.png";
 
+    // Promote FilePath out of the typeless metadata bag into a first-class DTO field.
+    // The Web layer's DisplayNames.Track helper consumes this to derive a clean title
+    // when only a generic "Track N" was produced by the metadata reader.
+    nowPlaying.FilePath = GetMetadataValue(metadata, "FilePath");
+
     // Build extended metadata dictionary from non-standard keys
     var extendedKeys = metadata.Keys.Except(new[] { "Title", "Artist", "Album", "AlbumArtUrl" });
     if (extendedKeys.Any())

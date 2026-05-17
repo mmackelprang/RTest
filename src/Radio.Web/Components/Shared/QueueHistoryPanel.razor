@@ -23,9 +23,10 @@
                       Icon="queue_music"
                       Style="flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0;">
         <div style="height: 100%; display: flex; flex-direction: column; min-height: 0;">
-          <!-- Queue Header -->
+          <!-- Queue Header. Total runtime rendered with Durations.FormatLong so a queue
+               like "2h 48m 15s" shows as "2:48:15" rather than the raw TimeSpan tail. -->
           <div class="panel-header">
-            <span>
+            <span style="display: inline-flex; align-items: center; gap: 8px;">
               @if (_playedCount > 0)
               {
                 @($"{_playedCount}/{_queueItems.Count} played")
@@ -33,6 +34,13 @@
               else
               {
                 @($"{_queueItems.Count} tracks")
+              }
+              @if (_totalRuntime > TimeSpan.Zero)
+              {
+                <span style="font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-medium);"
+                      title="Total queue runtime">
+                  · @Durations.FormatLong(_totalRuntime)
+                </span>
               }
             </span>
             <div style="display: flex; gap: 4px;">
@@ -77,48 +85,70 @@
           {
             <div id="queue-scroll-container" class="scrollable" style="flex: 1; overflow-y: auto; min-height: 0;">
               <Virtualize Items="@_queueItems" ItemSize="56" OverscanCount="5" Context="item">
-                <div class="list-item-touch @((item.State ?? "Upcoming") == "Current" ? "list-item-active" : "")"
-                     style="cursor: @((item.State ?? "Upcoming") == "Error" ? "not-allowed" : "pointer");
-                            opacity: @((item.State ?? "Upcoming") == "Error" ? "0.4" : (item.State ?? "Upcoming") == "Played" ? "0.6" : "1");"
+                @{
+                  var state = item.State ?? "Upcoming";
+                  var isCurrent = state == "Current";
+                  // queue-row-current paints an amber left-border (var(--signal-amber)),
+                  // overriding the .list-item-active accent-primary treatment for the
+                  // currently-playing track. The class is appended only on the current row.
+                  var rowClasses = "list-item-touch"
+                    + (isCurrent ? " list-item-active queue-row-current" : "");
+                }
+                <div class="@rowClasses"
+                     style="cursor: @(state == "Error" ? "not-allowed" : "pointer");
+                            opacity: @(state == "Error" ? "0.4" : state == "Played" ? "0.6" : "1");"
                      @onclick="@(() => HandleItemClickAsync(item))">
-                  <!-- State icon -->
+                  <!-- State icon. Currently-playing row replaces the numeric index with a ▶
+                       glyph (per the design tightening spec) so the visual hierarchy
+                       reinforces "this is what's playing" without relying on bar animation
+                       being visible on low-contrast displays. -->
                   <div style="width: 24px; text-align: center; flex-shrink: 0;">
-                    @if ((item.State ?? "Upcoming") == "Current")
+                    @if (isCurrent)
                     {
-                      <div class="now-playing-bars">
-                        <span></span><span></span><span></span>
-                      </div>
+                      <span class="queue-row-glyph"
+                            style="font-size: 16px; color: var(--signal-amber); font-family: var(--font-mono); line-height: 1;"
+                            aria-label="Now playing">▶</span>
                     }
-                    else if ((item.State ?? "Upcoming") == "Played")
+                    else if (state == "Played")
                     {
                       <RadzenIcon Icon="check" Style="font-size: 20px; color: var(--text-low);" />
                     }
-                    else if ((item.State ?? "Upcoming") == "Error")
+                    else if (state == "Error")
                     {
                       <RadzenIcon Icon="error" Style="font-size: 20px; color: var(--rz-danger);" />
                     }
                     else
                     {
-                      <span style="font-size: 13px; color: var(--text-low); font-family: var(--font-mono);">@(item.FullPlaylistIndex + 1)</span>
+                      <span style="font-size: 13px; color: var(--text-low); font-family: var(--font-mono); font-variant-numeric: tabular-nums;">@(item.FullPlaylistIndex + 1)</span>
                     }
                   </div>
 
-                  <!-- Track info -->
+                  <!-- Track info (title + artist) -->
                   <div style="flex: 1; min-width: 0;">
                     <div style="font-size: 16px;
-                                font-weight: @((item.State ?? "Upcoming") == "Current" ? "600" : "400");
-                                color: @((item.State ?? "Upcoming") == "Current" ? "var(--accent-primary)" : (item.State ?? "Upcoming") == "Error" ? "var(--signal-red)" : "var(--text-high)");
+                                font-weight: @(isCurrent ? "600" : "400");
+                                color: @(isCurrent ? "var(--signal-amber)" : state == "Error" ? "var(--signal-red)" : "var(--text-high)");
                                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-                                @((item.State ?? "Upcoming") == "Error" ? "text-decoration: line-through;" : "")">
+                                @(state == "Error" ? "text-decoration: line-through;" : "")">
                       @item.Title
                     </div>
                     <div style="font-size: 14px; color: var(--text-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                      @item.Artist @if (!string.IsNullOrEmpty(item.Duration)) { <text> · @item.Duration</text> }
+                      @item.Artist
                     </div>
                   </div>
 
+                  <!-- Duration column — right-aligned, mono, tabular-nums.
+                       Already a clean "m:ss" / "h:mm:ss" string from the server (formatted
+                       via Durations equivalents), so we render as-is without re-parsing. -->
+                  @if (!string.IsNullOrEmpty(item.Duration))
+                  {
+                    <div style="font-size: 13px; color: var(--text-medium); font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; min-width: 56px; flex-shrink: 0;">
+                      @item.Duration
+                    </div>
+                  }
+
                   <!-- Remove button (only for upcoming items) -->
-                  @if ((item.State ?? "Upcoming") == "Upcoming")
+                  @if (state == "Upcoming")
                   {
                     <div @onclick:stopPropagation="true">
                       <RadzenButton Variant="Variant.Text"
@@ -186,7 +216,14 @@
                       @(item.Title ?? "Unknown")
                     </div>
                     <div style="font-size: 14px; color: var(--text-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                      @(item.Artist ?? "--")@if (item.DurationSeconds.HasValue) { <text> · @FormatDuration(item.DurationSeconds)</text> }
+                      @(item.Artist ?? "—")
+                      @if (item.DurationSeconds.HasValue && item.DurationSeconds.Value > 0)
+                      {
+                        <text> · </text>
+                        <span style="font-family: var(--font-mono); font-variant-numeric: tabular-nums;">@Durations.FormatTrack(TimeSpan.FromSeconds(item.DurationSeconds.Value))</span>
+                      }
+                      <text> · </text>
+                      <span style="font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-low);">@Timestamps.FormatRelative(item.PlayedAt.ToLocalTime())</span>
                     </div>
                     @if (!string.IsNullOrEmpty(item.SourceDetails) && item.SourceDetails != $"{item.Title} - {item.Artist}")
                     {
@@ -223,6 +260,9 @@
   private List<PlayHistoryEntryDto> _historyItems = new();
   private bool _isLoadingHistory;
   private int _playedCount;
+  // Aggregate of every queue item's parsed Duration string. Surfaced as "h:mm:ss" in the
+  // header via Durations.FormatLong. Zero when no rows have durations yet.
+  private TimeSpan _totalRuntime = TimeSpan.Zero;
   private CancellationTokenSource? _refreshCts;
 
   protected override async Task OnInitializedAsync()
@@ -289,11 +329,38 @@
       }
 
       _playedCount = _queueItems.Count(i => i.State == "Played");
+      _totalRuntime = SumQueueRuntime(_queueItems);
     }
     catch (Exception ex)
     {
       Logger.LogWarning(ex, "Failed to refresh queue");
     }
+  }
+
+  /// <summary>
+  /// Sums the parsed <c>Duration</c> strings across every queue item.
+  /// Server delivers each row's duration as a pre-formatted "m:ss" / "h:mm:ss" string,
+  /// so we round-trip through <see cref="TimeSpan.TryParse(string?, out TimeSpan)"/> with
+  /// a normalized "hh:mm:ss" form. Rows with empty / unparseable durations contribute zero.
+  /// Exposed as <c>internal static</c> so unit tests can pin the parsing behaviour.
+  /// </summary>
+  internal static TimeSpan SumQueueRuntime(IEnumerable<QueueItemDto> items)
+  {
+    var total = TimeSpan.Zero;
+    foreach (var item in items)
+    {
+      if (string.IsNullOrWhiteSpace(item.Duration)) continue;
+      // TimeSpan.TryParse handles both "m:ss" (treated as "h:mm") and "h:mm:ss";
+      // we normalize "m:ss" to "0:mm:ss" by counting separators.
+      var s = item.Duration.Trim();
+      var colonCount = s.Count(c => c == ':');
+      var normalized = colonCount == 1 ? "00:" + s : s;
+      if (TimeSpan.TryParse(normalized, System.Globalization.CultureInfo.InvariantCulture, out var ts))
+      {
+        total += ts;
+      }
+    }
+    return total;
   }
 
   private async Task RefreshHistoryAsync()
@@ -429,15 +496,6 @@
       await QueuePersistence.SaveQueueStateAsync();
     }
     catch (Exception ex) { Logger.LogWarning(ex, "Failed to auto-save queue state"); }
-  }
-
-  private static string FormatDuration(int? seconds)
-  {
-    if (seconds == null || seconds <= 0) return "";
-    var ts = TimeSpan.FromSeconds(seconds.Value);
-    return ts.TotalHours >= 1
-      ? ts.ToString(@"h\:mm\:ss")
-      : ts.ToString(@"m\:ss");
   }
 
   private static BadgeStyle GetSourceBadgeStyle(string source)

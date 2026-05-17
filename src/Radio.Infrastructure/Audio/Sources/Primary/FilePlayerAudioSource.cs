@@ -1875,6 +1875,10 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     _metadata["FileName"] = Path.GetFileName(filePath);
     _metadata["Directory"] = Path.GetDirectoryName(filePath) ?? "";
     _metadata["Extension"] = Path.GetExtension(filePath);
+    // Full path — consumed by the Web layer's DisplayNames.Track helper when the
+    // metadata reader produced a generic "Track N" title and the original filename
+    // is the best available source for a human-readable display name.
+    _metadata["FilePath"] = filePath;
 
     // Use SoundFlow's metadata reader to get audio tags
     try

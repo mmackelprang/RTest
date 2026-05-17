@@ -62,6 +62,14 @@ public class NowPlayingDto
   public double? ProgressPercentage { get; set; }
 
   /// <summary>
+  /// Gets or sets the absolute filesystem path of the currently playing file.
+  /// Populated for file-player sources; null for non-file sources (Radio, Bluetooth, TTS).
+  /// Surfaced as a first-class property so the Web layer can derive a clean display
+  /// title from the filename when the metadata layer only produced a generic "Track N".
+  /// </summary>
+  public string? FilePath { get; set; }
+
+  /// <summary>
   /// Gets or sets additional metadata specific to the source or track.
   /// May include genre, year, bitrate, or other source-specific information.
   /// </summary>

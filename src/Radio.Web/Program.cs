@@ -1,6 +1,7 @@
 using System.Net.Sockets;
 using Radzen;
 using Radio.Web;
+using Radio.Web.Models;
 using Radio.Web.Services;
 using Radio.Web.Services.ApiClients;
 using Radio.Web.Services.Hub;
@@ -346,6 +347,11 @@ builder.Services.AddSingleton<AudioStateStore>();
 builder.Services.AddScoped<Radio.Web.Services.QueuePersistenceService>();
 builder.Services.AddScoped<Radio.Web.Services.DeviceDisplayStateService>();
 builder.Services.AddScoped<Radio.Web.Services.RadioPanelToggleService>();
+
+// Bind Devices:Aliases → DevicesOptions so MainLayout and DeviceManagementPage can
+// inject IOptionsMonitor<DevicesOptions> to clean up raw driver names at render time.
+// Defaults to an empty alias map when the section is absent or empty.
+builder.Services.Configure<DevicesOptions>(builder.Configuration.GetSection(DevicesOptions.SectionName));
 
 var app = builder.Build();
 

@@ -211,4 +211,59 @@ public class DisplayNamesTests
     var (title, _) = DisplayNames.Track(np);
     title.Should().Be("Bohemian Rhapsody");
   }
+
+  [Fact]
+  public void Track_GenericTitle_ReadsTypedFilePathProperty_Preferred()
+  {
+    // PR 3 added a first-class FilePath property to NowPlayingDto. When present, it
+    // should be preferred over the (legacy) ExtendedMetadata["FilePath"] entry.
+    var np = new NowPlayingDto
+    {
+      Title = "Track 5",
+      Artist = "Some Artist",
+      FilePath = @"C:\music\Some Artist\Album\05 typed property wins.mp3",
+      ExtendedMetadata = new Dictionary<string, object>
+      {
+        ["FilePath"] = @"C:\music\should-be-ignored.mp3",
+      },
+    };
+    var (title, subtitle) = DisplayNames.Track(np);
+    title.Should().Be("Typed Property Wins");
+    subtitle.Should().Be("Some Artist");
+  }
+
+  [Fact]
+  public void Track_NullTypedFilePath_FallsBackToExtendedMetadata()
+  {
+    // Backward-compat: callers that didn't populate the typed FilePath but did stash
+    // the path in ExtendedMetadata must still resolve a clean title.
+    var np = new NowPlayingDto
+    {
+      Title = "Track 1",
+      FilePath = null,
+      ExtendedMetadata = new Dictionary<string, object>
+      {
+        ["FilePath"] = "/music/legacy fallback.mp3",
+      },
+    };
+    var (title, _) = DisplayNames.Track(np);
+    title.Should().Be("Legacy Fallback");
+  }
+
+  [Fact]
+  public void Track_TypedFilePathWithEmptyString_TreatedAsNull()
+  {
+    // Whitespace-only typed values must not short-circuit the metadata fallback.
+    var np = new NowPlayingDto
+    {
+      Title = "Track 7",
+      FilePath = "   ",
+      ExtendedMetadata = new Dictionary<string, object>
+      {
+        ["FilePath"] = "/music/whitespace recovers.flac",
+      },
+    };
+    var (title, _) = DisplayNames.Track(np);
+    title.Should().Be("Whitespace Recovers");
+  }
 }

@@ -630,6 +630,7 @@ public class AudioStateUpdateService : BackgroundService
         dto.Artist = metadataDto.Artist;
         dto.Album = metadataDto.Album;
         dto.AlbumArtUrl = metadataDto.AlbumArtUrl;
+        dto.FilePath = metadataDto.FilePath;
         dto.ExtendedMetadata = metadataDto.ExtendedMetadata;
 
         _logger.LogDebug("Extracted metadata: Title={Title}, Artist={Artist}, Album={Album}",

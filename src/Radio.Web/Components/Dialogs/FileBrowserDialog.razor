@@ -1,5 +1,6 @@
 @using Radzen
 @using Radzen.Blazor
+@using System.Text.Json
 @using Radio.Web.Services.ApiClients
 @inject FileApiService FileApi
 @inject ConfigurationApiService ConfigApi
@@ -143,7 +144,7 @@
       }
     </div>
 
-    <!-- Path edit toggle + Search/Filter -->
+    <!-- Path edit toggle + Search/Filter chips -->
     <div style="display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
       <RadzenButton Icon="@(_isEditingPath ? "close" : "edit")"
                     Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Light"
@@ -156,9 +157,53 @@
                        Style="font-size: 13px; width: 100%;"
                        Change="@OnSearchChanged" />
       </div>
-      <RadzenDropDown TValue="string" @bind-Value="_extensionFilter" Data="@_filterOptions"
-                      TextProperty="Label" ValueProperty="Value"
-                      Placeholder="Type" Style="max-width: 120px; font-size: 13px;" />
+      @* Extension chips. Each chip is a token in _filterExtensions; clicking the ×
+         removes it and re-filters immediately (no Apply button). Adding goes through
+         the dashed "+ add type" affordance which pops a curated extension list. *@
+      <div class="file-browser-chip-row" role="list" aria-label="File type filter">
+        @foreach (var ext in _filterExtensions)
+        {
+          var localExt = ext; // capture for lambda
+          <span class="file-browser-chip" role="listitem">
+            <span class="file-browser-chip-label">@localExt</span>
+            <button type="button" class="file-browser-chip-remove"
+                    @onclick="@(() => RemoveExtensionFilter(localExt))"
+                    title="@($"Remove {localExt} filter")"
+                    aria-label="@($"Remove {localExt} filter")">×</button>
+          </span>
+        }
+        <div style="position: relative;">
+          <button type="button" class="file-browser-chip file-browser-chip-add"
+                  @onclick="ToggleAddTypeDropdown"
+                  title="Add file type filter"
+                  aria-label="Add file type filter"
+                  aria-haspopup="true"
+                  aria-expanded="@(_showAddTypeDropdown ? "true" : "false")">＋ add type</button>
+          @if (_showAddTypeDropdown)
+          {
+            <div class="file-browser-location-overlay" @onclick="CloseAddTypeDropdown"></div>
+            <div class="file-browser-chip-dropdown" @onclick:stopPropagation="true" role="menu">
+              @foreach (var ext in CuratedExtensions)
+              {
+                var localExt = ext;
+                var alreadySelected = _filterExtensions.Contains(localExt, StringComparer.OrdinalIgnoreCase);
+                <button type="button"
+                        class="file-browser-location-item"
+                        role="menuitem"
+                        disabled="@alreadySelected"
+                        style="@(alreadySelected ? "opacity:0.4; cursor:default;" : "")"
+                        @onclick="@(() => AddExtensionFilter(localExt))">
+                  <span style="font-family: var(--font-mono); flex: 1;">@localExt</span>
+                  @if (alreadySelected)
+                  {
+                    <RadzenIcon Icon="check" Style="font-size: 18px; color: var(--rz-primary);" />
+                  }
+                </button>
+              }
+            </div>
+          }
+        </div>
+      </div>
     </div>
   </div>
 
@@ -318,10 +363,15 @@
   private string? _relativePath; // Path relative to media root for display
   private string? _mediaRoot; // Configured media root directory
   private string _searchText = "";
-  private string _extensionFilter = "";
+  /// <summary>
+  /// Active file-extension filter chips. Empty list = no filter (show all audio files).
+  /// Persisted to <c>ui.filebrowser</c>:<c>extensions</c> via <see cref="ConfigurationApiService"/>
+  /// as a JSON <c>string[]</c> — see <see cref="LoadFilterAsync"/> for the double-escape repair pass.
+  /// </summary>
+  private List<string> _filterExtensions = new();
+  private bool _showAddTypeDropdown;
   private string? _selectedPath; // Single-select
   private HashSet<string> _selectedPaths = new(); // Multi-select
-  private string[] _availableExtensions = [".mp3", ".flac", ".wav", ".ogg", ".aac", ".m4a"];
   private string? _errorMessage;
 
   // Absolute path / drive browsing state
@@ -335,10 +385,19 @@
   private List<BookmarkDto> _bookmarks = new();
   private RadzenTextBox? _pathTextField;
 
-  // Filter options for the extension dropdown
-  private List<FilterOption> _filterOptions = new();
+  /// <summary>
+  /// Curated list of common audio extensions surfaced in the "+ add type" popover.
+  /// Order matters: most-common formats first so the dropdown reads top-to-bottom.
+  /// </summary>
+  private static readonly string[] CuratedExtensions =
+    new[] { ".mp3", ".flac", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".wma" };
 
-  private record FilterOption(string Label, string Value);
+  /// <summary>
+  /// Configuration store key for filter persistence. Kept stable so future PRs can
+  /// add a one-time repair migration without re-keying.
+  /// </summary>
+  private const string FilterConfigSection = "ui.filebrowser";
+  private const string FilterConfigKey = "extensions";
 
   private IEnumerable<FileItemDto> FilteredDirectories
   {
@@ -367,9 +426,12 @@
           (f.Artist?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
           (f.Album?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false));
       }
-      if (!string.IsNullOrEmpty(_extensionFilter))
+      // Chip filter: case-insensitive EndsWith across any chip extension.
+      // Empty chip list = no filter (show all files).
+      if (_filterExtensions.Count > 0)
       {
-        files = files.Where(f => f.Name.EndsWith(_extensionFilter, StringComparison.OrdinalIgnoreCase));
+        files = files.Where(f =>
+          _filterExtensions.Any(ext => f.Name.EndsWith(ext, StringComparison.OrdinalIgnoreCase)));
       }
       return files;
     }
@@ -377,15 +439,13 @@
 
   protected override async Task OnInitializedAsync()
   {
-    // Build filter options for the extension dropdown
-    _filterOptions = new List<FilterOption> { new("All", "") };
-    _filterOptions.AddRange(_availableExtensions.Select(ext => new FilterOption(ext, ext)));
-
-    // Load drives, bookmarks, and media root in parallel
+    // Load persisted filter chips (handles the legacy double-escaped form via
+    // LoadFilterAsync's repair pass) alongside drives, bookmarks, and media root.
     var drivesTask = LoadDrivesAsync();
     var bookmarksTask = LoadBookmarksAsync();
     var rootTask = LoadMediaRootAsync();
-    await Task.WhenAll(drivesTask, bookmarksTask, rootTask);
+    var filterTask = LoadFilterAsync();
+    await Task.WhenAll(drivesTask, bookmarksTask, rootTask, filterTask);
 
     // Try to open the best default location:
     // 1. If Subdirectory is set, use it (relative mode)
@@ -542,6 +602,10 @@
           {
             _absolutePath = result.CurrentPath;
             _pathBarText = _absolutePath;
+            // Keep the drive root in sync with whatever the API ended up resolving to.
+            // Prevents a stale "C:\" selector while the breadcrumb shows "D:\..." after
+            // a redirect or symlink walk.
+            _driveRoot = DeriveDriveRoot(_absolutePath);
           }
           else
           {
@@ -642,7 +706,10 @@
       return;
     }
     _showLocationDropdown = false;
-    _driveRoot = "/";
+    // Derive the drive root from the bookmark path so breadcrumb + drive selector
+    // remain consistent. Previously hard-coded "/" which forced the breadcrumb to
+    // show a POSIX-style root even when the bookmark pointed at a Windows drive.
+    _driveRoot = DeriveDriveRoot(bookmark.Path);
     await NavigateToAbsoluteAsync(bookmark.Path);
   }
 
@@ -652,6 +719,23 @@
     _driveRoot = driveName.TrimEnd('/');
     if (string.IsNullOrEmpty(_driveRoot)) _driveRoot = "/";
     await NavigateToAbsoluteAsync(_driveRoot == "/" ? "/" : _driveRoot);
+  }
+
+  /// <summary>
+  /// Inspects an absolute path and returns the appropriate drive root: <c>"/"</c> for
+  /// POSIX-style paths, the <c>"X:\"</c> prefix for Windows-style paths. Keeps the drive
+  /// selector and breadcrumb in sync regardless of which entry-point landed us in
+  /// absolute mode (bookmark, drive picker, path bar).
+  /// </summary>
+  private static string DeriveDriveRoot(string path)
+  {
+    if (string.IsNullOrEmpty(path)) return "/";
+    if (path.StartsWith('/')) return "/";
+    if (path.Length >= 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/'))
+    {
+      return path[..3];
+    }
+    return "/";
   }
 
   private async Task ReturnToMediaLibrary()
@@ -731,6 +815,176 @@
   {
     _searchText = value;
     StateHasChanged();
+  }
+
+  // --- Extension chip handlers + persistence ---
+
+  private void ToggleAddTypeDropdown()
+  {
+    _showAddTypeDropdown = !_showAddTypeDropdown;
+  }
+
+  private void CloseAddTypeDropdown()
+  {
+    _showAddTypeDropdown = false;
+  }
+
+  private async Task AddExtensionFilter(string extension)
+  {
+    if (string.IsNullOrWhiteSpace(extension)) return;
+    var normalized = extension.StartsWith('.') ? extension : "." + extension;
+    if (_filterExtensions.Any(e => string.Equals(e, normalized, StringComparison.OrdinalIgnoreCase)))
+    {
+      _showAddTypeDropdown = false;
+      return;
+    }
+    _filterExtensions.Add(normalized);
+    _showAddTypeDropdown = false;
+    await SaveFilterAsync();
+    StateHasChanged();
+  }
+
+  private async Task RemoveExtensionFilter(string extension)
+  {
+    var idx = _filterExtensions.FindIndex(e => string.Equals(e, extension, StringComparison.OrdinalIgnoreCase));
+    if (idx < 0) return;
+    _filterExtensions.RemoveAt(idx);
+    await SaveFilterAsync();
+    StateHasChanged();
+  }
+
+  /// <summary>
+  /// Loads the persisted filter chips, handling legacy double-escaped JSON via a
+  /// best-effort repair pass: if the stored value is a string-of-a-string-of-..., we
+  /// recursively <see cref="JsonSerializer.Deserialize{T}(string,JsonSerializerOptions?)"/>
+  /// until we land on a <c>string[]</c>. Capped at 4 unwrap iterations to avoid pathological
+  /// loops. Silent on failure — an absent / corrupt blob just leaves the chip list empty.
+  /// </summary>
+  private async Task LoadFilterAsync()
+  {
+    try
+    {
+      var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>(FilterConfigSection);
+      if (prefs == null || !prefs.TryGetValue(FilterConfigKey, out var raw) || raw is null) return;
+
+      var extensions = ParsePersistedFilterValue(raw);
+      if (extensions != null)
+      {
+        _filterExtensions = extensions
+          .Where(e => !string.IsNullOrWhiteSpace(e))
+          .Select(e => e.StartsWith('.') ? e : "." + e)
+          .Distinct(StringComparer.OrdinalIgnoreCase)
+          .ToList();
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "Failed to load file browser filter chips");
+    }
+  }
+
+  /// <summary>
+  /// Repair-pass parser exposed as <c>internal static</c> so unit tests can pin the
+  /// double-escape behaviour. Accepts a raw value from the config store and returns
+  /// the recovered <c>string[]</c>, or null when no shape is recognized.
+  /// </summary>
+  internal static string[]? ParsePersistedFilterValue(object raw)
+  {
+    // Already deserialized into a JsonElement (the typical ConfigApi happy path).
+    if (raw is JsonElement element)
+    {
+      return TryUnwrapJsonElement(element);
+    }
+
+    if (raw is string s)
+    {
+      return TryUnwrapEscapedJsonString(s);
+    }
+
+    // Some store backends round-trip arrays as IEnumerable<object>.
+    if (raw is IEnumerable<object> seq)
+    {
+      return seq.Select(o => o?.ToString() ?? string.Empty).ToArray();
+    }
+
+    return null;
+  }
+
+  private static string[]? TryUnwrapJsonElement(JsonElement element)
+  {
+    // Native array → fast path.
+    if (element.ValueKind == JsonValueKind.Array)
+    {
+      var list = new List<string>(element.GetArrayLength());
+      foreach (var item in element.EnumerateArray())
+      {
+        if (item.ValueKind == JsonValueKind.String)
+        {
+          list.Add(item.GetString() ?? string.Empty);
+        }
+      }
+      return list.ToArray();
+    }
+
+    // String → could be a legacy escaped blob; retry the repair pass.
+    if (element.ValueKind == JsonValueKind.String)
+    {
+      var inner = element.GetString();
+      return inner is null ? null : TryUnwrapEscapedJsonString(inner);
+    }
+
+    return null;
+  }
+
+  /// <summary>
+  /// Recursively deserializes a string that may have been JSON-escaped one or more times
+  /// before being persisted. Each pass tries to parse as <c>string[]</c>; if that fails
+  /// and the result is another string, we unwrap once more (up to 4 levels).
+  /// </summary>
+  private static string[]? TryUnwrapEscapedJsonString(string s)
+  {
+    if (string.IsNullOrWhiteSpace(s)) return null;
+    var current = s;
+    for (var i = 0; i < 4; i++)
+    {
+      try
+      {
+        // Each level was JSON-stringified, so quotes may be escaped. Try the array shape first.
+        var arr = JsonSerializer.Deserialize<string[]>(current);
+        if (arr != null) return arr;
+      }
+      catch (JsonException)
+      {
+        // Fall through and try unwrapping one more level.
+      }
+
+      try
+      {
+        var inner = JsonSerializer.Deserialize<string>(current);
+        if (inner is null || inner == current) return null;
+        current = inner;
+      }
+      catch (JsonException)
+      {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  private async Task SaveFilterAsync()
+  {
+    try
+    {
+      // Persist as a real array — ConfigApi handles the JSON shape so we never re-introduce
+      // the double-escape that the repair pass exists to handle.
+      await ConfigApi.UpdateConfigurationAsync(
+        FilterConfigSection, FilterConfigKey, _filterExtensions.ToArray());
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "Failed to save file browser filter chips");
+    }
   }
 
   // --- Absolute path breadcrumb helpers ---
