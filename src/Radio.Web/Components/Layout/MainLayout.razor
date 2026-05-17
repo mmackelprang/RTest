@@ -781,7 +781,7 @@
   }
 
   private static bool IsRadioSource(string sourceType) =>
-    sourceType is "Radio" or "RTLSDRCore" or "RF320";
+    SourceTypeHelper.IsRadioFamily(sourceType);
 
   private async Task HandleDistortionMarkerAsync()
   {

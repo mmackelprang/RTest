@@ -147,11 +147,37 @@
 
   private async Task OnNowPlayingChanged(NowPlayingDto? dto)
   {
-    if (dto != null)
+    if (dto is null)
     {
-      ApplyNowPlayingDto(dto);
+      // Source went silent (hub pushed a null payload). Reset to the empty-state
+      // shape so we don't leave the previous track lingering in the dock. Mirrors
+      // the initial render — placeholder title, em-dash subtitle, no album art,
+      // 0:00 / — durations, progress at 0.
+      ClearDockState();
+      await InvokeAsync(StateHasChanged);
+      return;
     }
+    ApplyNowPlayingDto(dto);
     await InvokeAsync(StateHasChanged);
+  }
+
+  /// <summary>
+  /// Reset every field touched by <see cref="ApplyNowPlayingDto"/> back to the
+  /// initial empty-state values declared at the top of <c>@code</c>. Called when
+  /// the hub pushes a null payload (source went silent / nothing playing).
+  /// </summary>
+  private void ClearDockState()
+  {
+    _displayTitle = "No Track Playing";
+    _displaySubtitle = "—";
+    _rawTitle = string.Empty;
+    _albumArtUrl = null;
+    _albumArtFailed = false;
+    _sourceAccent = "--text-low";
+    _isPlaying = false;
+    _elapsedSeconds = 0;
+    _totalSeconds = 0;
+    RecomputeProgress();
   }
 
   private async Task OnPlaybackStateChanged()
@@ -195,8 +221,11 @@
     _isPlaying = dto.IsPlaying;
     _sourceAccent = SourceTypeHelper.GetAccentVar(dto.SourceType ?? string.Empty);
 
-    if (dto.Position.HasValue) _elapsedSeconds = dto.Position.Value.TotalSeconds;
-    if (dto.Duration.HasValue) _totalSeconds = dto.Duration.Value.TotalSeconds;
+    // Always zero out elapsed/total when the DTO omits them, otherwise stale
+    // numbers from the previous source persist (e.g. File → Radio leaves the
+    // last file's elapsed time on screen until the next PlaybackStateChanged).
+    _elapsedSeconds = dto.Position?.TotalSeconds ?? 0;
+    _totalSeconds = dto.Duration?.TotalSeconds ?? 0;
     RecomputeProgress();
   }
 

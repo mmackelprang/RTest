@@ -755,7 +755,7 @@
     {
       var primary = await SourcesApi.GetPrimarySourceAsync();
       var primaryType = primary?.Type;
-      _isRadioActive = primaryType is "Radio" or "RTLSDRCore" or "RF320";
+      _isRadioActive = SourceTypeHelper.IsRadioFamily(primaryType);
       // Queue tab for FilePlayer, History tab for all others — preserves the
       // pre-PR-5 default-tab behaviour now that we've renamed the indexes.
       _activeTab = primaryType == "FilePlayer" ? TabQueue : TabHistory;

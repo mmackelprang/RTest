@@ -1,3 +1,4 @@
+using System.Reflection;
 using Bunit;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
@@ -6,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Radzen;
 using Radio.Web.Components.Shared;
+using Radio.Web.Models;
 using Radio.Web.Services.ApiClients;
 using Radio.Web.Services.Hub;
 
@@ -195,5 +197,99 @@ public class NowPlayingDockTests : TestContext
     var dot = artist.QuerySelector(".source-color-dot");
     dot.Should().NotBeNull("the source-color dot lives inside the artist row");
     dot!.GetAttribute("style").Should().Contain("--text-low");
+  }
+
+  // ─── State-handling regressions (PR 5 polisher L2 + tester nit #1) ─────────
+  // The hub service exposes NowPlayingChanged as a typed event. To exercise the
+  // dock's OnNowPlayingChanged handler from a unit test we reach in via
+  // reflection and invoke the multicast delegate directly — the same approach
+  // a SignalR-style fake would use, just inlined.
+
+  /// <summary>
+  /// Pull the dock's subscribed handler off <see cref="AudioStateHubService"/>'s
+  /// <c>NowPlayingChanged</c> event via reflection and invoke it with the supplied
+  /// payload. Lets us simulate a hub push without standing up a real connection.
+  /// </summary>
+  private static async Task FireNowPlayingChangedAsync(AudioStateHubService hub, NowPlayingDto? dto)
+  {
+    var field = typeof(AudioStateHubService).GetField("NowPlayingChanged",
+      BindingFlags.NonPublic | BindingFlags.Instance);
+    field.Should().NotBeNull("NowPlayingChanged backing field must exist");
+    var del = (Func<NowPlayingDto?, Task>?)field!.GetValue(hub);
+    if (del != null)
+    {
+      await del.Invoke(dto);
+    }
+  }
+
+  [Fact]
+  public async Task Dock_NullNowPlayingDto_ClearsState()
+  {
+    // After a real DTO populates the dock, a follow-up null payload (source
+    // went silent) must reset every field — title, subtitle, elapsed, total —
+    // back to the empty-state placeholders. Otherwise the previous track's
+    // metadata lingers indefinitely.
+    var hub = Services.GetRequiredService<AudioStateHubService>();
+    var cut = RenderComponent<NowPlayingDock>();
+
+    var populated = new NowPlayingDto
+    {
+      Title = "Hey Jude",
+      Artist = "The Beatles",
+      SourceType = "FilePlayer",
+      IsPlaying = true,
+      Position = TimeSpan.FromSeconds(45),
+      Duration = TimeSpan.FromMinutes(7)
+    };
+    await cut.InvokeAsync(() => FireNowPlayingChangedAsync(hub, populated));
+    cut.Markup.Should().Contain("Hey Jude");
+
+    // Now fire null — dock should fall back to the placeholder shape.
+    await cut.InvokeAsync(() => FireNowPlayingChangedAsync(hub, null));
+
+    cut.Markup.Should().Contain("No Track Playing");
+    cut.Markup.Should().NotContain("Hey Jude");
+    cut.Find(".now-playing-dock-elapsed").TextContent.Trim().Should().Be("0:00");
+    cut.Find(".now-playing-dock-total").TextContent.Trim().Should().Be("—");
+    cut.FindAll(".now-playing-dock-bars-placeholder").Count.Should().Be(1);
+    cut.FindAll(".now-playing-dock-bars").Count.Should().Be(0);
+  }
+
+  [Fact]
+  public async Task Dock_NowPlayingDtoWithoutPosition_ZerosElapsedAndTotal()
+  {
+    // Radio sources push DTOs without Position/Duration. Before the fix, those
+    // fields were skipped (only updated if HasValue) so stale numbers from a
+    // previous File source would persist. Verify the dock zeros them now.
+    var hub = Services.GetRequiredService<AudioStateHubService>();
+    var cut = RenderComponent<NowPlayingDock>();
+
+    // First push a file source with real position/duration to load stale state.
+    var file = new NowPlayingDto
+    {
+      Title = "Yesterday",
+      Artist = "The Beatles",
+      SourceType = "FilePlayer",
+      IsPlaying = true,
+      Position = TimeSpan.FromSeconds(30),
+      Duration = TimeSpan.FromMinutes(2) + TimeSpan.FromSeconds(5)
+    };
+    await cut.InvokeAsync(() => FireNowPlayingChangedAsync(hub, file));
+    cut.Find(".now-playing-dock-elapsed").TextContent.Trim().Should().Be("0:30");
+
+    // Now switch to a radio source — no position, no duration.
+    var radio = new NowPlayingDto
+    {
+      Title = "104.3 KSFI",
+      Artist = "—",
+      SourceType = "Radio",
+      IsPlaying = true,
+      Position = null,
+      Duration = null
+    };
+    await cut.InvokeAsync(() => FireNowPlayingChangedAsync(hub, radio));
+
+    cut.Find(".now-playing-dock-elapsed").TextContent.Trim().Should().Be("0:00");
+    cut.Find(".now-playing-dock-total").TextContent.Trim().Should().Be("—");
   }
 }

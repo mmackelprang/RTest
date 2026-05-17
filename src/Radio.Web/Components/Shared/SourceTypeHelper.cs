@@ -71,4 +71,26 @@ public static class SourceTypeHelper
       "RF320",
       "Bluetooth"
     };
+
+  /// <summary>
+  /// Single source of truth for the "radio family" — the set of source types
+  /// that share the radio control panel + tuning workflow. Consumed by
+  /// <c>MainLayout.IsRadioSource</c> (chevron click → "/" + show radio panel)
+  /// and <c>QueueHistoryPanel</c> (default-tab selection treats the whole
+  /// family as one source). Deliberately distinct from <see cref="HasDetail"/>
+  /// — Bluetooth has a detail surface but is not part of the radio family.
+  ///
+  /// Future radio-style source types default to <c>false</c> and must be added
+  /// explicitly. Returns <c>false</c> for null / empty inputs.
+  /// </summary>
+  public static bool IsRadioFamily(string? sourceType) =>
+    !string.IsNullOrEmpty(sourceType) && RadioFamilyTypes.Contains(sourceType);
+
+  private static readonly HashSet<string> RadioFamilyTypes =
+    new(StringComparer.OrdinalIgnoreCase)
+    {
+      "Radio",
+      "RTLSDRCore",
+      "RF320"
+    };
 }

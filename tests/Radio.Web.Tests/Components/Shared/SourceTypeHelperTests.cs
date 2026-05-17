@@ -68,4 +68,75 @@ public class SourceTypeHelperTests
   {
     SourceTypeHelper.GetAccentVar(sourceType).Should().Be(expected);
   }
+
+  // ─── IsRadioFamily ────────────────────────────────────────────────────────
+  // IsRadioFamily is the SSOT for the radio control panel + tuning workflow.
+  // It is deliberately a narrower set than HasDetail — Bluetooth has a detail
+  // surface (pairing page) but is NOT a radio source and must return false here.
+  // Two call sites delegate to this method: MainLayout.IsRadioSource (chevron
+  // click dispatch) and QueueHistoryPanel._isRadioActive (default-tab gating).
+
+  [Fact]
+  public void IsRadioFamily_Radio_True()
+  {
+    SourceTypeHelper.IsRadioFamily("Radio").Should().BeTrue();
+  }
+
+  [Fact]
+  public void IsRadioFamily_RTLSDRCore_True()
+  {
+    SourceTypeHelper.IsRadioFamily("RTLSDRCore").Should().BeTrue();
+  }
+
+  [Fact]
+  public void IsRadioFamily_RF320_True()
+  {
+    SourceTypeHelper.IsRadioFamily("RF320").Should().BeTrue();
+  }
+
+  [Fact]
+  public void IsRadioFamily_Bluetooth_False()
+  {
+    // Important boundary: Bluetooth has detail (HasDetail==true) but is NOT a
+    // radio family member. The two matrices are related but distinct.
+    SourceTypeHelper.IsRadioFamily("Bluetooth").Should().BeFalse();
+  }
+
+  [Theory]
+  [InlineData("File")]
+  [InlineData("FilePlayer")]
+  [InlineData("USB")]
+  [InlineData("GenericUSB")]
+  [InlineData("Vinyl")]
+  [InlineData("TestTone")]
+  [InlineData("Spotify")]
+  [InlineData("UnknownFutureSource")]
+  public void IsRadioFamily_NonRadioSources_False(string sourceType)
+  {
+    SourceTypeHelper.IsRadioFamily(sourceType).Should().BeFalse();
+  }
+
+  [Fact]
+  public void IsRadioFamily_CaseInsensitive_True()
+  {
+    // Matches the OrdinalIgnoreCase contract used by HasDetail — capitalization
+    // drift between JSON deserialization and constant strings must not break
+    // the chevron-click → radio-panel dispatch.
+    SourceTypeHelper.IsRadioFamily("radio").Should().BeTrue();
+    SourceTypeHelper.IsRadioFamily("RADIO").Should().BeTrue();
+    SourceTypeHelper.IsRadioFamily("rtlsdrcore").Should().BeTrue();
+    SourceTypeHelper.IsRadioFamily("rf320").Should().BeTrue();
+  }
+
+  [Fact]
+  public void IsRadioFamily_Null_False()
+  {
+    SourceTypeHelper.IsRadioFamily(null).Should().BeFalse();
+  }
+
+  [Fact]
+  public void IsRadioFamily_Empty_False()
+  {
+    SourceTypeHelper.IsRadioFamily(string.Empty).Should().BeFalse();
+  }
 }
