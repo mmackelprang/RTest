@@ -135,7 +135,9 @@ public class PlayHistoryPageTests : TestContext
     // Act
     var cut = RenderPlayHistoryPage();
 
-    // Assert - Check for clear filters button
-    Assert.Contains("Clear Filters", cut.Markup);
+    // Assert - Check for clear filters button (icon class identifies the action;
+    // visible text was shortened to "Clear" in fix/web-history-filter-panel-fit
+    // to fit a half-width side-by-side button cell).
+    Assert.Contains("filter_list_off", cut.Markup);
   }
 }

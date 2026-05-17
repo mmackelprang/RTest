@@ -31,7 +31,9 @@ public class PlayHistoryPageE2ETests
     var filterButton = _fixture.Page.Locator("button:has-text('Filter')");
     await Expect(filterButton).ToBeVisibleAsync();
 
-    var clearButton = _fixture.Page.Locator("button:has-text('Clear Filters')");
+    // Button text shortened from "Clear Filters" -> "Clear" in
+    // fix/web-history-filter-panel-fit to fit a half-width cell.
+    var clearButton = _fixture.Page.Locator("button:has-text('Clear')");
     await Expect(clearButton).ToBeVisibleAsync();
   }
 
