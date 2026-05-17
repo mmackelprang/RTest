@@ -1,0 +1,1932 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=1280" />
+<title>Radio Console — Design Analysis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --surface-base:        #0D0D0F;
+    --surface-raised:      #141416;
+    --surface-inset:       #0A0A0C;
+    --surface-overlay:     #1A1A1D;
+    --surface-separator:   #1F1F22;
+    --surface-hairline:    #25252A;
+
+    --accent:              #5CD4E8;
+    --accent-dim:          rgba(92, 212, 232, 0.10);
+    --accent-glow:         rgba(92, 212, 232, 0.25);
+
+    --amber:               #F0A830;
+    --amber-glow:          rgba(240, 168, 48, 0.30);
+
+    --source-vinyl:        #A78BFA;
+    --source-radio:        #F0A830;
+    --source-bt:           #60A5FA;
+    --source-usb:          #4ADE80;
+    --source-file:         #5CD4E8;
+
+    --sig-red:             #F87171;
+    --sig-amber:           #FBBF24;
+    --sig-green:           #4ADE80;
+
+    --text-hi:             #F0EFF4;
+    --text-md:             #9CA3AF;
+    --text-lo:             #4B5563;
+    --text-dim:            #353841;
+
+    --font-body:           'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono:           'JetBrains Mono', 'SF Mono', Consolas, monospace;
+    --font-led:            'Share Tech Mono', 'JetBrains Mono', monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--surface-base);
+    color: var(--text-hi);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection { background: var(--accent-glow); color: var(--text-hi); }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* ──────────── Layout shell ──────────── */
+  .shell {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 48px 120px;
+  }
+
+  /* ──────────── Top fixed nav rail (mimics product chrome) ──────────── */
+  .rail {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    height: 64px;
+    background: var(--surface-base);
+    border-bottom: 1px solid var(--surface-separator);
+    display: flex;
+    align-items: center;
+    padding: 0 48px;
+    gap: 24px;
+    backdrop-filter: blur(12px);
+  }
+  .rail-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-md);
+  }
+  .rail-brand .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 10px var(--accent-glow);
+  }
+  .rail-clock {
+    margin-left: auto;
+    font-family: var(--font-led);
+    font-size: 18px;
+    color: var(--amber);
+    text-shadow: 0 0 8px var(--amber-glow);
+    letter-spacing: 4px;
+  }
+  .rail-toc {
+    display: flex;
+    gap: 4px;
+    font-size: 12px;
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .rail-toc a {
+    padding: 6px 10px;
+    border-radius: 6px;
+    color: var(--text-md);
+  }
+  .rail-toc a:hover {
+    background: var(--accent-dim);
+    color: var(--text-hi);
+    text-decoration: none;
+  }
+
+  /* ──────────── Hero ──────────── */
+  .hero {
+    padding: 96px 0 64px;
+    border-bottom: 1px solid var(--surface-separator);
+    margin-bottom: 56px;
+  }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 20px;
+  }
+  .eyebrow::before {
+    content: "";
+    display: inline-block;
+    width: 24px;
+    height: 1px;
+    background: var(--accent);
+    vertical-align: middle;
+    margin-right: 10px;
+  }
+  h1 {
+    font-size: 56px;
+    line-height: 1.05;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    margin: 0 0 24px;
+    max-width: 16ch;
+    text-wrap: balance;
+  }
+  h1 em {
+    font-style: normal;
+    color: var(--accent);
+  }
+  .lede {
+    font-size: 19px;
+    color: var(--text-md);
+    max-width: 68ch;
+    text-wrap: pretty;
+  }
+
+  .meta-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--surface-separator);
+    border: 1px solid var(--surface-separator);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-top: 48px;
+  }
+  .meta-cell {
+    background: var(--surface-base);
+    padding: 18px 20px;
+  }
+  .meta-cell .k {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-lo);
+  }
+  .meta-cell .v {
+    font-size: 17px;
+    color: var(--text-hi);
+    margin-top: 6px;
+  }
+
+  /* ──────────── Section heads ──────────── */
+  section { margin-bottom: 96px; }
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    margin-bottom: 36px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--surface-separator);
+  }
+  .section-num {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+  }
+  h2 {
+    font-size: 32px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+  .section-sub {
+    color: var(--text-md);
+    margin-left: auto;
+    font-size: 14px;
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  h3 {
+    font-size: 20px;
+    font-weight: 600;
+    margin: 0 0 8px;
+    letter-spacing: -0.005em;
+  }
+
+  p { margin: 0 0 12px; color: var(--text-md); text-wrap: pretty; }
+  p strong { color: var(--text-hi); font-weight: 600; }
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    background: var(--surface-inset);
+    padding: 1px 6px;
+    border-radius: 4px;
+    color: var(--text-hi);
+    border: 1px solid var(--surface-separator);
+  }
+
+  /* ──────────── Strengths grid ──────────── */
+  .strengths {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  .strength {
+    background: var(--surface-raised);
+    border: 1px solid var(--surface-separator);
+    border-radius: 10px;
+    padding: 20px;
+  }
+  .strength .check {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: rgba(74, 222, 128, 0.10);
+    color: var(--sig-green);
+    margin-bottom: 12px;
+    font-weight: 600;
+  }
+  .strength h4 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0 0 6px;
+    color: var(--text-hi);
+  }
+  .strength p {
+    font-size: 13px;
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  /* ──────────── Issue cards ──────────── */
+  .issue {
+    background: var(--surface-raised);
+    border: 1px solid var(--surface-separator);
+    border-radius: 12px;
+    padding: 28px 32px;
+    margin-bottom: 16px;
+    display: grid;
+    grid-template-columns: 1.1fr 1fr;
+    gap: 32px;
+    align-items: start;
+  }
+  .issue.no-mock { grid-template-columns: 1fr; }
+  .issue-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .severity {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    padding: 4px 10px;
+    border-radius: 4px;
+    text-transform: uppercase;
+  }
+  .sev-p0 { background: rgba(248, 113, 113, 0.12); color: var(--sig-red); border: 1px solid rgba(248, 113, 113, 0.25); }
+  .sev-p1 { background: rgba(251, 191, 36, 0.10); color: var(--sig-amber); border: 1px solid rgba(251, 191, 36, 0.25); }
+  .sev-p2 { background: rgba(92, 212, 232, 0.08); color: var(--accent); border: 1px solid rgba(92, 212, 232, 0.25); }
+  .tag {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-lo);
+    text-transform: uppercase;
+    letter-spacing: 0.10em;
+    padding: 3px 8px;
+    border: 1px solid var(--surface-hairline);
+    border-radius: 4px;
+  }
+  .issue h3 { margin-bottom: 12px; }
+  .issue p { font-size: 14px; }
+  .issue .fix {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px dashed var(--surface-hairline);
+  }
+  .fix .label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  ul.tight { margin: 0; padding-left: 18px; color: var(--text-md); font-size: 14px; }
+  ul.tight li { margin-bottom: 4px; }
+  ul.tight li::marker { color: var(--text-lo); }
+
+  /* ──────────── Mini-mocks ──────────── */
+  .mock {
+    background: var(--surface-inset);
+    border: 1px solid var(--surface-separator);
+    border-radius: 10px;
+    padding: 16px;
+    font-size: 13px;
+  }
+  .mock-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-lo);
+    margin-bottom: 12px;
+  }
+  .mock-label .pill {
+    background: var(--surface-overlay);
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--surface-hairline);
+  }
+  .mock-row + .mock-row { margin-top: 12px; }
+
+  /* Top bar mock */
+  .tb-mock {
+    background: var(--surface-base);
+    border: 1px solid var(--surface-separator);
+    border-radius: 8px;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 64px;
+  }
+  .tb-clock {
+    font-family: var(--font-led);
+    color: var(--amber);
+    text-shadow: 0 0 6px var(--amber-glow);
+    font-size: 16px;
+    letter-spacing: 3px;
+  }
+  .tb-sep {
+    width: 1px; height: 36px;
+    background: var(--surface-separator);
+  }
+  .tb-group {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    background: var(--surface-inset);
+    border: 1px solid var(--surface-separator);
+    border-radius: 28px;
+    padding: 3px 10px;
+  }
+  .tb-group-lbl {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.10em;
+    color: var(--text-lo);
+    padding: 0 6px;
+  }
+  .tb-icon {
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-md);
+    font-size: 16px;
+    position: relative;
+    background: transparent;
+  }
+  .tb-icon.on {
+    background: rgba(240, 168, 48, 0.12);
+    color: var(--amber);
+  }
+  .tb-icon.on::after {
+    content: "";
+    position: absolute;
+    bottom: 4px; left: 25%; right: 25%;
+    height: 2px;
+    background: currentColor;
+    border-radius: 1px;
+  }
+  .tb-nav {
+    margin-left: auto;
+    display: flex;
+    gap: 2px;
+  }
+
+  /* "After" top bar — clearer zoning */
+  .tb-after {
+    flex-direction: column;
+    align-items: stretch;
+    height: auto;
+    padding: 10px 14px;
+    gap: 8px;
+  }
+  .tb-after-row { display: flex; align-items: center; gap: 10px; }
+  .tb-cluster {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 10px;
+    border-right: 1px solid var(--surface-separator);
+  }
+  .tb-cluster:last-child { border-right: none; }
+  .tb-cluster-lbl {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--text-lo);
+  }
+  .tb-cluster-val {
+    color: var(--text-hi);
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .tb-cluster-val .swatch {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 2px;
+    margin-right: 6px;
+    vertical-align: 1px;
+  }
+
+  /* Source bubble strip */
+  .src-strip {
+    display: flex;
+    gap: 6px;
+  }
+  .src-bubble {
+    height: 44px;
+    padding: 0 14px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border-radius: 22px;
+    background: var(--surface-inset);
+    border: 1px solid var(--surface-separator);
+    color: var(--text-md);
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .src-bubble .ic {
+    width: 22px; height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--surface-overlay);
+    font-size: 12px;
+    color: var(--text-md);
+  }
+  .src-bubble.act {
+    background: rgba(240, 168, 48, 0.10);
+    border-color: rgba(240, 168, 48, 0.35);
+    color: var(--amber);
+  }
+  .src-bubble.act .ic { background: rgba(240, 168, 48, 0.25); color: var(--amber); }
+  .src-bubble.dis { opacity: 0.4; }
+
+  /* Metrics tile mock */
+  .metric-tile {
+    background: var(--surface-raised);
+    border: 1px solid var(--surface-separator);
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .metric-tile .cat {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    color: var(--text-lo);
+    text-transform: uppercase;
+  }
+  .metric-tile .name {
+    font-size: 13px;
+    color: var(--text-md);
+    margin-top: 4px;
+  }
+  .metric-tile .val {
+    font-family: var(--font-mono);
+    font-size: 28px;
+    color: var(--accent);
+    margin-top: 6px;
+    font-weight: 500;
+  }
+  .metric-tile .val .unit {
+    font-size: 13px;
+    color: var(--text-md);
+    margin-left: 4px;
+  }
+  .metric-tile .delta {
+    font-size: 11px;
+    color: var(--sig-green);
+    margin-top: 2px;
+    font-family: var(--font-mono);
+  }
+  .metric-tile.bug .val { color: var(--sig-red); }
+  .spark {
+    height: 24px;
+    margin-top: 8px;
+  }
+
+  /* Queue row mocks */
+  .queue-mock {
+    background: var(--surface-raised);
+    border: 1px solid var(--surface-separator);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .qrow {
+    display: grid;
+    grid-template-columns: 24px 1fr 56px 28px;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--surface-separator);
+    font-size: 13px;
+  }
+  .qrow:last-child { border-bottom: none; }
+  .qrow.now {
+    background: rgba(240, 168, 48, 0.06);
+    border-left: 3px solid var(--amber);
+    padding-left: 11px;
+  }
+  .qrow .num {
+    font-family: var(--font-mono);
+    color: var(--text-lo);
+    text-align: center;
+    font-size: 12px;
+  }
+  .qrow.now .num { color: var(--amber); }
+  .qrow .title { color: var(--text-hi); font-weight: 500; }
+  .qrow .sub { color: var(--text-md); font-size: 12px; }
+  .qrow .dur {
+    font-family: var(--font-mono);
+    color: var(--text-md);
+    font-size: 12px;
+    text-align: right;
+  }
+  .qrow .x { color: var(--text-lo); text-align: center; }
+  .qrow.bad .dur { color: var(--sig-red); font-size: 10px; }
+
+  /* File browser mock */
+  .fb-mock {
+    background: var(--surface-raised);
+    border: 1px solid var(--surface-separator);
+    border-radius: 8px;
+    padding: 14px;
+  }
+  .fb-field {
+    background: var(--surface-inset);
+    border: 1px solid var(--surface-separator);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-md);
+    word-break: break-all;
+  }
+  .fb-field.bad { color: var(--sig-red); font-size: 10px; line-height: 1.4; }
+  .fb-field .ph { color: var(--text-lo); }
+  .fb-chips {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+  .fb-chip {
+    height: 28px;
+    padding: 0 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface-inset);
+    border: 1px solid var(--surface-separator);
+    border-radius: 14px;
+    font-size: 12px;
+    color: var(--text-md);
+    font-family: var(--font-mono);
+  }
+
+  /* Now playing dock mock */
+  .dock {
+    background: var(--surface-overlay);
+    border: 1px solid var(--surface-separator);
+    border-radius: 8px;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    backdrop-filter: blur(20px);
+  }
+  .dock .art {
+    width: 44px; height: 44px;
+    background: linear-gradient(135deg, #2a2a30, #1a1a1f);
+    border-radius: 6px;
+    flex-shrink: 0;
+    position: relative;
+    overflow: hidden;
+  }
+  .dock .art::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      135deg,
+      rgba(255,255,255,0.04) 0 6px,
+      transparent 6px 12px
+    );
+  }
+  .dock .meta { flex: 1; min-width: 0; }
+  .dock .t { color: var(--text-hi); font-size: 13px; font-weight: 600; }
+  .dock .a { color: var(--text-md); font-size: 12px; }
+  .dock .eq {
+    display: flex;
+    gap: 2px;
+    align-items: flex-end;
+    height: 14px;
+    margin-right: 4px;
+  }
+  .dock .eq span {
+    width: 3px;
+    background: var(--accent);
+    border-radius: 1px;
+  }
+  .dock .eq span:nth-child(1) { height: 60%; }
+  .dock .eq span:nth-child(2) { height: 100%; }
+  .dock .eq span:nth-child(3) { height: 40%; }
+  .dock .tcontrols {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-md);
+    font-size: 18px;
+  }
+  .dock .tcontrols .pp {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--surface-base);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Two-column compare */
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .compare .mock { margin: 0; }
+
+  /* Roadmap */
+  .roadmap {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--surface-separator);
+    border: 1px solid var(--surface-separator);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .phase {
+    background: var(--surface-base);
+    padding: 24px;
+  }
+  .phase .pnum {
+    font-family: var(--font-led);
+    color: var(--amber);
+    font-size: 22px;
+    letter-spacing: 4px;
+    text-shadow: 0 0 6px var(--amber-glow);
+  }
+  .phase .pname {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 6px 0 14px;
+    color: var(--text-hi);
+  }
+  .phase ul {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 13px;
+    color: var(--text-md);
+  }
+  .phase ul li { margin-bottom: 6px; }
+
+  /* Page audit table */
+  .ptable {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  .ptable th, .ptable td {
+    text-align: left;
+    padding: 14px 18px;
+    vertical-align: top;
+    border-bottom: 1px solid var(--surface-separator);
+  }
+  .ptable th {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-lo);
+    font-weight: 500;
+    background: var(--surface-raised);
+  }
+  .ptable td.name { color: var(--text-hi); font-weight: 600; width: 18%; }
+  .ptable td.is { color: var(--text-md); width: 38%; }
+  .ptable td.fix { color: var(--text-md); }
+  .ptable td.fix strong { color: var(--text-hi); }
+
+  /* Footer */
+  .endplate {
+    margin-top: 80px;
+    padding-top: 24px;
+    border-top: 1px solid var(--surface-separator);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: var(--text-lo);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+
+<!-- ───────────── Top sticky rail ───────────── -->
+<header class="rail">
+  <div class="rail-brand">
+    <span class="dot"></span>
+    <span>Radio.Web · Design Review</span>
+  </div>
+  <nav class="rail-toc">
+    <a href="#context">Context</a>
+    <a href="#strengths">Strengths</a>
+    <a href="#issues">Issues</a>
+    <a href="#pages">Pages</a>
+    <a href="#system">System</a>
+    <a href="#roadmap">Roadmap</a>
+  </nav>
+  <div class="rail-clock" id="clock">--:--</div>
+</header>
+
+<div class="shell">
+
+  <!-- ───────────── Hero ───────────── -->
+  <section class="hero">
+    <div class="eyebrow">Deep design analysis · v1</div>
+    <h1>The console is <em>beautiful</em>. The product underneath it is <em>leaking</em>.</h1>
+    <p class="lede">
+      The 1920×720 broadcast-console aesthetic is genuinely strong — DSEG amber LEDs over a calm
+      dark surface, a confident cyan accent, generous touch targets, and per-source color coding all
+      do real work. But the surface is sitting on top of an interface that is still showing the
+      user its raw machinery: <code>FilePlayer-da7eb94888fa43aab0021…</code> as a "source name",
+      <code>00:03:00.6628571</code> as a track duration, <code>850.4%</code> as a memory reading,
+      escaped JSON in a filter input, and a <strong>debug-only distortion marker</strong> living in
+      production chrome. The work below is mostly about <strong>finishing the surface</strong> so
+      the design language can do its job.
+    </p>
+
+    <div class="meta-row">
+      <div class="meta-cell">
+        <div class="k">Stack</div>
+        <div class="v">Blazor Server · Radzen · SignalR</div>
+      </div>
+      <div class="meta-cell">
+        <div class="k">Viewport</div>
+        <div class="v">1920 × 720 · touch-first kiosk</div>
+      </div>
+      <div class="meta-cell">
+        <div class="k">Surfaces audited</div>
+        <div class="v">9 pages · 5 shared panels · 3 dialogs</div>
+      </div>
+      <div class="meta-cell">
+        <div class="k">Findings</div>
+        <div class="v">5 P0 · 8 P1 · 11 P2</div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ───────────── Context ───────────── -->
+  <section id="context">
+    <div class="section-head">
+      <span class="section-num">01</span>
+      <h2>What we're looking at</h2>
+      <span class="section-sub">Setting the frame</span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 32px; align-items: start;">
+      <div>
+        <p>
+          Radio.Web is a Blazor Server kiosk app that runs on a fixed 1920×720 touchscreen — likely
+          a Raspberry Pi driving a wide-format panel. It controls a multi-source audio engine
+          (FM/AM radio over RTL-SDR, Bluetooth, USB, vinyl, local files, Google Cast) and surfaces
+          a single home view with three columns: <strong>Now Playing</strong>, <strong>Queue /
+          History</strong>, and <strong>Visualizer</strong>. Secondary pages — Devices, Metrics,
+          History, System, Phone, File Browser — share an 80px top bar that doubles as the global
+          source/output router.
+        </p>
+        <p>
+          The aesthetic brief is "professional broadcast console / recording-studio rack mount" —
+          DSEG segmented-LCD type in amber for time and frequency, a single electric-cyan accent
+          for active state, and a calm dark palette (<code>#0D0D0F</code> base,
+          <code>#141416</code> raised). The design system is well-articulated in
+          <code>design-system.css</code>: tokens for surfaces, accents, source colors, touch sizes,
+          animation timing.
+        </p>
+        <p>
+          <strong>The mismatch:</strong> the design system promises a calm, opinionated instrument
+          panel. The screenshots deliver something closer to a half-finished admin tool with a
+          beautiful skin on top — raw API IDs, debug controls, broken units, and pages that have
+          one component and acres of empty void below.
+        </p>
+      </div>
+
+      <!-- Real top-bar reproduction so we share a reference -->
+      <div class="mock">
+        <div class="mock-label">
+          <span>Current top bar · approximation</span>
+          <span class="pill">1920 × 80</span>
+        </div>
+        <div class="tb-mock">
+          <div class="tb-clock">11:29</div>
+          <div class="tb-sep"></div>
+          <div class="tb-group">
+            <span class="tb-group-lbl">In</span>
+            <span class="tb-icon">♪</span>
+            <span class="tb-icon on" style="color: var(--source-radio); background: rgba(240,168,48,0.12);">📻</span>
+            <span class="tb-icon">⌁</span>
+            <span class="tb-icon">▼</span>
+          </div>
+          <div class="tb-sep"></div>
+          <div class="tb-group">
+            <span class="tb-group-lbl">Out</span>
+            <span class="tb-icon on" style="color: var(--accent); background: var(--accent-dim);">▣</span>
+            <span class="tb-icon">▤</span>
+            <span class="tb-icon">⌁</span>
+          </div>
+          <span class="tb-icon" title="debug" style="color: var(--text-lo); margin-left:6px;">🐞</span>
+          <div class="tb-nav">
+            <span class="tb-icon on" style="color: var(--accent);">⌂</span>
+            <span class="tb-icon">≡</span>
+            <span class="tb-icon">▥</span>
+            <span class="tb-icon">⌥</span>
+            <span class="tb-icon">⌖</span>
+            <span class="tb-icon">⏱</span>
+            <span class="tb-icon">⚙</span>
+            <span class="tb-icon">☎</span>
+            <span class="tb-icon">⏻</span>
+          </div>
+        </div>
+        <p style="font-size: 12px; margin-top: 14px; color: var(--text-lo);">
+          Three icon groups sharing one bar, ten of them shaped identically.
+          The bar is doing routing, navigation, and a debug action at the same time —
+          users can't tell from shape alone what each pill <em>does</em>.
+        </p>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ───────────── Strengths ───────────── -->
+  <section id="strengths">
+    <div class="section-head">
+      <span class="section-num">02</span>
+      <h2>Don't break these</h2>
+      <span class="section-sub">Real strengths · keep them</span>
+    </div>
+
+    <div class="strengths">
+      <div class="strength">
+        <div class="check">✓</div>
+        <h4>Token-first design system</h4>
+        <p>One CSS file owns surfaces, accents, type, motion, and touch sizes. Already the right
+        plumbing — most of the work below is enforcement, not invention.</p>
+      </div>
+      <div class="strength">
+        <div class="check">✓</div>
+        <h4>Per-source color coding</h4>
+        <p>Vinyl violet, radio amber, Bluetooth blue, USB green, file cyan — a smart, learnable
+        mapping that pays off across the whole app once enforced.</p>
+      </div>
+      <div class="strength">
+        <div class="check">✓</div>
+        <h4>DSEG LED type as a signature</h4>
+        <p>Amber segmented display for time, frequency and ghost-segment backgrounds is the single
+        most distinctive visual move in the app. Don't dilute it by using it on regular UI.</p>
+      </div>
+      <div class="strength">
+        <div class="check">✓</div>
+        <h4>Real touch sizing</h4>
+        <p>48/56/64px tokens are defined and route toggles hit them. Better than 90% of admin-style
+        Blazor apps in the wild.</p>
+      </div>
+      <div class="strength">
+        <div class="check">✓</div>
+        <h4>SignalR-driven live state</h4>
+        <p>Now playing, queue count, sleep, source — all push-updated. The user never has to
+        refresh. Lean into this with more live state where it currently isn't.</p>
+      </div>
+      <div class="strength">
+        <div class="check">✓</div>
+        <h4>Three-column home</h4>
+        <p>Now Playing · Queue · Visualizer reading left-to-right is the right shape for a kiosk.
+        Most of the design work for the home page is already done.</p>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ───────────── Issues ───────────── -->
+  <section id="issues">
+    <div class="section-head">
+      <span class="section-num">03</span>
+      <h2>What's leaking through</h2>
+      <span class="section-sub">P0 → P2 · sorted by user pain</span>
+    </div>
+
+
+    <!-- ─── ISSUE 1: top bar overload ─── -->
+    <article class="issue">
+      <div>
+        <div class="issue-head">
+          <span class="severity sev-p0">P0</span>
+          <span class="tag">Information architecture</span>
+          <span class="tag">MainLayout</span>
+        </div>
+        <h3>The top bar is three different toolbars stacked into one row</h3>
+        <p>
+          Eighty pixels of vertical space are doing four jobs at once: telling time, routing
+          <em>input</em>, routing <em>output</em>, exposing nine global nav targets — plus a
+          temporary debug button. Every cluster uses the same circular-pill shape, so a user can't
+          tell from form alone whether a pill <em>switches a route</em> or <em>navigates a
+          page</em>. The route toggles also conflate two actions (switch source / open detail) by
+          tap counting.
+        </p>
+        <div class="fix">
+          <div class="label">Recommendation</div>
+          <ul class="tight">
+            <li>Split the bar into <strong>three visually distinct zones</strong>: a status zone
+            (clock + currently-playing pill), a routing zone (clearly labeled IN → OUT with a
+            connector glyph between them), and a nav zone (rectangular icon+label buttons, not
+            circles).</li>
+            <li>Make active source <em>and</em> active output visible as <strong>typeset names</strong>,
+            not just colored pills — operators shouldn't have to remember the color code.</li>
+            <li>Move the <strong>debug distortion marker</strong> behind a dev-tools toggle. It
+            doesn't belong in production chrome.</li>
+            <li>Replace tap-count-to-disambiguate with an explicit affordance: long-press, or a
+            chevron that opens detail.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="mock">
+        <div class="mock-label"><span>Proposed top bar</span><span class="pill">After</span></div>
+        <div class="tb-mock tb-after">
+          <div class="tb-after-row" style="gap: 16px;">
+            <div class="tb-cluster" style="border:none; padding-left:0;">
+              <span class="tb-cluster-lbl">Time</span>
+              <span class="tb-cluster-val" style="font-family: var(--font-led); color: var(--amber); letter-spacing:2px;">11:29</span>
+            </div>
+            <div class="tb-cluster">
+              <span class="tb-cluster-lbl">In · Source</span>
+              <span class="tb-cluster-val"><span class="swatch" style="background: var(--source-radio);"></span>FM Radio · 88.5</span>
+            </div>
+            <div style="color: var(--text-lo); font-size: 18px;">→</div>
+            <div class="tb-cluster">
+              <span class="tb-cluster-lbl">Out · Destination</span>
+              <span class="tb-cluster-val"><span class="swatch" style="background: var(--accent);"></span>Living Room (Cast)</span>
+            </div>
+            <div class="tb-nav" style="gap: 4px;">
+              <span class="tb-icon" style="width:auto; padding:0 10px; border-radius:6px; background: var(--accent-dim); color: var(--accent); font-size: 11px; letter-spacing:0.1em; font-family: var(--font-mono); text-transform: uppercase;">Home</span>
+              <span class="tb-icon" style="width:auto; padding:0 10px; border-radius:6px; color: var(--text-md); font-size: 11px; letter-spacing:0.1em; font-family: var(--font-mono); text-transform: uppercase;">Queue·45</span>
+              <span class="tb-icon" style="width:auto; padding:0 10px; border-radius:6px; color: var(--text-md); font-size: 11px; letter-spacing:0.1em; font-family: var(--font-mono); text-transform: uppercase;">Radio</span>
+              <span class="tb-icon" style="width:auto; padding:0 10px; border-radius:6px; color: var(--text-md); font-size: 11px; letter-spacing:0.1em; font-family: var(--font-mono); text-transform: uppercase;">More</span>
+            </div>
+          </div>
+          <div class="tb-after-row src-strip">
+            <span class="src-bubble"><span class="ic">♪</span>File</span>
+            <span class="src-bubble act"><span class="ic">📻</span>Radio</span>
+            <span class="src-bubble"><span class="ic">⌁</span>Bluetooth</span>
+            <span class="src-bubble dis"><span class="ic">⌖</span>Vinyl · offline</span>
+            <span class="src-bubble"><span class="ic">⎘</span>USB</span>
+          </div>
+        </div>
+        <p style="font-size:12px; margin-top:10px; color: var(--text-lo);">
+          Routing reads as a sentence: <em>FM Radio → Living Room</em>. Source pills move below
+          with full labels — discoverable, learnable, and a "disabled / offline" state stops
+          looking like a faded icon.
+        </p>
+      </div>
+    </article>
+
+
+    <!-- ─── ISSUE 2: UUID source names ─── -->
+    <article class="issue">
+      <div>
+        <div class="issue-head">
+          <span class="severity sev-p0">P0</span>
+          <span class="tag">Data hygiene</span>
+          <span class="tag">All pages</span>
+        </div>
+        <h3>API IDs are leaking into the UI as labels</h3>
+        <p>
+          The Audio Source dropdown in older screenshots shows
+          <code>FilePlayer-da7eb94888fa43aab0021…</code> — a UUID-suffixed internal ID being
+          rendered as a human label. Devices show
+          <code>1 - LG TV SSCR2 (AMD High Definition Audio Device)</code> straight from WASAPI.
+          Tracks fall back to <code>Track 8</code>, <code>Track 9</code>… when metadata is missing.
+          These are <em>all</em> the same problem: the app is showing internal identifiers because
+          the display-name layer is missing or thin.
+        </p>
+        <div class="fix">
+          <div class="label">Recommendation</div>
+          <ul class="tight">
+            <li>One <code>DisplayName</code> projection on every domain DTO, computed server-side.
+            Never bind a raw <code>Id</code>, <code>RawName</code>, or filename to a user-facing
+            string.</li>
+            <li>Filename fallback: parse leading <em>track-number / disc-number</em>, strip
+            extension, title-case. <code>08 - We're Ready.flac</code> → <strong>We're Ready</strong>
+            with subtitle <em>Track 8</em>.</li>
+            <li>Device names: ship a curated alias map for common adapters (VB-Audio, Realtek,
+            HDMI…), with the existing <code>FriendlyNameOverride</code> as the user-edit layer.
+            Show the alias by default, the raw name on long-press.</li>
+            <li>Sources: drop the GUID suffix entirely from the client model. The UI never needs
+            instance identity.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="mock">
+        <div class="mock-label"><span>Source dropdown</span><span class="pill">Before · after</span></div>
+        <div class="compare">
+          <div class="mock" style="background: var(--surface-raised);">
+            <div style="font-family: var(--font-mono); font-size: 10px; color: var(--text-lo); margin-bottom:6px;">BEFORE</div>
+            <div class="fb-field" style="color: var(--text-hi);">FilePlayer-da7eb94888fa43aab0021…</div>
+            <div class="fb-field" style="color: var(--text-hi); margin-top:6px;">1 - LG TV SSCR2 (AMD High Definition Audio Device)</div>
+            <div class="fb-field" style="color: var(--text-hi); margin-top:6px;">CABLE In 16ch (VB-Audio Virtual Cable)</div>
+          </div>
+          <div class="mock" style="background: var(--surface-raised);">
+            <div style="font-family: var(--font-mono); font-size: 10px; color: var(--accent); margin-bottom:6px;">AFTER</div>
+            <div class="fb-field" style="color: var(--text-hi);">File Player <span class="ph">· local</span></div>
+            <div class="fb-field" style="color: var(--text-hi); margin-top:6px;">LG TV <span class="ph">· HDMI</span></div>
+            <div class="fb-field" style="color: var(--text-hi); margin-top:6px;">VB-Audio Cable In <span class="ph">· 16-channel</span></div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+
+    <!-- ─── ISSUE 3: durations ─── -->
+    <article class="issue">
+      <div>
+        <div class="issue-head">
+          <span class="severity sev-p0">P0</span>
+          <span class="tag">Formatting</span>
+          <span class="tag">Queue · NowPlaying</span>
+        </div>
+        <h3>Durations are raw <code>TimeSpan.ToString()</code></h3>
+        <p>
+          The queue is showing track lengths as <code>00:03:00.6628571</code> —
+          <em>hours:minutes:seconds.ticks</em>. No one reads tracks in tick precision. It also
+          makes every column header wider than it needs to be, eating horizontal space the table
+          can't afford. Same problem on History (sub-second precision on date/time).
+        </p>
+        <div class="fix">
+          <div class="label">Recommendation</div>
+          <ul class="tight">
+            <li>One <code>FormatDuration(TimeSpan)</code> helper used everywhere: <code>3:00</code>
+            under an hour, <code>1:02:14</code> over an hour, em-dash for unknown.</li>
+            <li>Right-align all duration columns in a tabular-figures monospaced style — already
+            in your <code>--font-mono</code> token.</li>
+            <li>History date format: <code>Today 08:40</code>, <code>Yesterday 14:22</code>,
+            <code>Feb 6 · 11:05</code> — relative within 48 hours, absolute beyond.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="mock">
+        <div class="mock-label"><span>Queue rows</span><span class="pill">After</span></div>
+        <div class="queue-mock">
+          <div class="qrow now">
+            <span class="num">▶</span>
+            <span>
+              <div class="title">Track 8</div>
+              <div class="sub">Cary High Chorus · Fall Concert 2006</div>
+            </span>
+            <span class="dur">3:00</span>
+            <span class="x">×</span>
+          </div>
+          <div class="qrow">
+            <span class="num">2</span>
+            <span>
+              <div class="title">I'm Not in Love</div>
+              <div class="sub">10cc · Very Best Of</div>
+            </span>
+            <span class="dur">6:04</span>
+            <span class="x">×</span>
+          </div>
+          <div class="qrow">
+            <span class="num">3</span>
+            <span>
+              <div class="title">Bixby Canyon Bridge</div>
+              <div class="sub">Death Cab for Cutie · Narrow Stairs</div>
+            </span>
+            <span class="dur">5:15</span>
+            <span class="x">×</span>
+          </div>
+          <div class="qrow bad" style="opacity:0.5;">
+            <span class="num">4</span>
+            <span>
+              <div class="title">Track 9</div>
+              <div class="sub">Cary High Chorus · Fall Concert 2006</div>
+            </span>
+            <span class="dur" style="color:var(--text-md); font-size:12px;">2:20</span>
+            <span class="x">×</span>
+          </div>
+        </div>
+      </div>
+    </article>
+
+
+    <!-- ─── ISSUE 4: metrics units bug ─── -->
+    <article class="issue">
+      <div>
+        <div class="issue-head">
+          <span class="severity sev-p0">P0</span>
+          <span class="tag">Units · trust</span>
+          <span class="tag">Metrics</span>
+        </div>
+        <h3>"Memory Usage Mb: 850.4%" — units are detached from values</h3>
+        <p>
+          The metrics dashboard is rendering every value into the same template
+          (<code>{value}{suffix}</code>) without knowing what unit the metric is in. So
+          <strong>Memory Usage Mb</strong> ends up labelled <strong>850.4%</strong>, signal
+          strength is unitless, latency reads as a bare number, and the underscored category names
+          (<code>TTS</code>, <code>RADIO</code>) look like backend leakage. The dashboard is
+          actively eroding trust in its own numbers.
+        </p>
+        <p>
+          The page is also a wall of identical tiles — 16+ scalars rendered with zero hierarchy and
+          zero time context. A metrics dashboard with no <em>trend</em> is a list with extra steps.
+        </p>
+        <div class="fix">
+          <div class="label">Recommendation</div>
+          <ul class="tight">
+            <li>Metric registry has the unit baked in (<code>%</code>, <code>MB</code>,
+            <code>ms</code>, <code>count</code>, <code>req/min</code>). Tile reads it; never
+            assumes <code>%</code>.</li>
+            <li>Group tiles by <strong>category</strong> with real sub-headers (System / Audio /
+            Radio / Library / TTS) instead of a tiny grey prefix per tile.</li>
+            <li>Inline <strong>sparkline</strong> for any time-series metric over the selected
+            window — a single <code>&lt;svg&gt;</code> per tile is enough to turn "wall of
+            numbers" into a status board.</li>
+            <li>Color the value only when it's <em>actionable</em>: green for healthy, amber when
+            approaching a threshold, red when over. Don't paint every value cyan.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="mock">
+        <div class="mock-label"><span>Metric tiles</span><span class="pill">Before · after</span></div>
+        <div class="compare">
+          <div class="metric-tile bug">
+            <div class="cat">SYSTEM</div>
+            <div class="name">Memory Usage Mb</div>
+            <div class="val">850.4<span class="unit">%</span></div>
+          </div>
+          <div class="metric-tile">
+            <div class="cat">System · Memory</div>
+            <div class="name">Heap in use</div>
+            <div class="val">850<span class="unit">MB</span></div>
+            <div class="delta">▲ 4% vs 1h ago</div>
+            <svg class="spark" viewBox="0 0 120 24" preserveAspectRatio="none">
+              <polyline fill="none" stroke="#5CD4E8" stroke-width="1.5"
+                points="0,18 10,16 20,17 30,14 40,15 50,12 60,13 70,10 80,11 90,8 100,9 110,7 120,6"/>
+              <polyline fill="rgba(92,212,232,0.10)" stroke="none"
+                points="0,18 10,16 20,17 30,14 40,15 50,12 60,13 70,10 80,11 90,8 100,9 110,7 120,6 120,24 0,24"/>
+            </svg>
+          </div>
+        </div>
+        <div class="compare" style="margin-top:10px;">
+          <div class="metric-tile bug">
+            <div class="cat">RADIO</div>
+            <div class="name">Signal Strength</div>
+            <div class="val">65.39</div>
+          </div>
+          <div class="metric-tile">
+            <div class="cat">Radio · Reception</div>
+            <div class="name">Signal strength</div>
+            <div class="val" style="color: var(--sig-green);">65<span class="unit">%</span></div>
+            <div class="delta" style="color: var(--text-md);">Stable · last 5 min</div>
+            <svg class="spark" viewBox="0 0 120 24" preserveAspectRatio="none">
+              <polyline fill="none" stroke="#4ADE80" stroke-width="1.5"
+                points="0,12 10,11 20,13 30,10 40,9 50,11 60,10 70,9 80,10 90,11 100,9 110,10 120,9"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </article>
+
+
+    <!-- ─── ISSUE 5: file browser JSON ─── -->
+    <article class="issue">
+      <div>
+        <div class="issue-head">
+          <span class="severity sev-p0">P0</span>
+          <span class="tag">Bug</span>
+          <span class="tag">File Browser</span>
+        </div>
+        <h3>The Filter field is showing escaped JSON</h3>
+        <p>
+          The screenshot of the File Browser shows a Filter dropdown whose value reads
+          <code>"\u0022\u0022\\\u0022\\\\\\\\\u0022\\\\\\\\…</code> — a JSON string that was
+          serialized one too many times and is now being rendered as text inside the input. This
+          is the kind of bug that <em>quietly</em> tells a user the system isn't trustworthy.
+        </p>
+        <div class="fix">
+          <div class="label">Recommendation</div>
+          <ul class="tight">
+            <li>Find the binding path — likely a filter that's <code>JsonSerializer.Serialize</code>'d
+            for persistence and then bound directly back to a <code>RadzenDropDown</code> value.
+            It should deserialize before bind.</li>
+            <li>Treat the filter as <strong>chips</strong>, not a text input. Each token is one
+            extension (<code>.mp3</code>, <code>.flac</code>, <code>.wav</code>) with an × — no
+            escaping ever needs to happen.</li>
+            <li>The breadcrumb under the input (<code>Home / D:\</code>) is also wired oddly — it
+            shows <code>D:\</code> while the drive selector says <code>C:\</code>. Single source of
+            truth for "current path".</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="mock">
+        <div class="mock-label"><span>Filter input</span><span class="pill">Before · after</span></div>
+        <div class="fb-mock">
+          <div style="font-family: var(--font-mono); font-size: 10px; color: var(--text-lo); margin-bottom:6px;">BEFORE</div>
+          <div class="fb-field bad">"\u0022\u0022\\\u0022\\\\\\\\\u0022\\\\\\\\\\\\\\\\\u0022\\\\\\\\\\\\\\\\\\\\\\\\…</div>
+        </div>
+        <div class="fb-mock" style="margin-top:12px;">
+          <div style="font-family: var(--font-mono); font-size: 10px; color: var(--accent); margin-bottom:6px;">AFTER · chips</div>
+          <div class="fb-chips">
+            <span class="fb-chip">.mp3 ×</span>
+            <span class="fb-chip">.flac ×</span>
+            <span class="fb-chip">.wav ×</span>
+            <span class="fb-chip" style="color: var(--text-lo);">+ add type</span>
+          </div>
+        </div>
+      </div>
+    </article>
+
+
+    <!-- ─── ISSUE 6: half-empty pages ─── -->
+    <article class="issue">
+      <div>
+        <div class="issue-head">
+          <span class="severity sev-p1">P1</span>
+          <span class="tag">Density</span>
+          <span class="tag">Radio · Devices · Queue · Visualizer</span>
+        </div>
+        <h3>Most secondary pages use 30% of the screen and waste the rest</h3>
+        <p>
+          The radio page renders a small spinner in the middle of an otherwise blank 640px-tall
+          canvas. Devices shows six rows and stops. Queue lists 3 items and leaves ~480px of empty
+          dark. The kiosk has a fixed viewport — there is no fold to scroll to. Empty space below
+          content reads as "broken" or "still loading", not "minimalist".
+        </p>
+        <div class="fix">
+          <div class="label">Recommendation</div>
+          <ul class="tight">
+            <li>Treat each page as a <strong>fixed dashboard</strong>, not a scrolling list.
+            Allocate every region of the 640px content area to a real purpose.</li>
+            <li><strong>Queue</strong>: pair the list with a right-side panel — total runtime,
+            upcoming next 3 with art, "save as playlist" CTA. Already have the data.</li>
+            <li><strong>Devices</strong>: split into two columns (Outputs | Cast destinations),
+            and add a bottom strip with the actively-routed device state.</li>
+            <li><strong>Radio</strong>: while the panel loads, show a skeleton that matches its
+            actual shape (frequency well + band buttons + meter), not a centered spinner.</li>
+            <li><strong>Visualizer</strong>: the chart should fill its panel, not sit in a 60%-width
+            box with empty bands. Also make VU / WAVE / SPECTRUM a segmented control, not three
+            tiny outline buttons hugging the corner.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="mock">
+        <div class="mock-label"><span>Queue page · split layout</span><span class="pill">After</span></div>
+        <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 8px;">
+          <div class="queue-mock">
+            <div class="qrow now">
+              <span class="num">▶</span>
+              <span><div class="title">Track 8</div><div class="sub">Cary High Chorus</div></span>
+              <span class="dur">3:00</span>
+              <span class="x">×</span>
+            </div>
+            <div class="qrow">
+              <span class="num">2</span>
+              <span><div class="title">I'm Not in Love</div><div class="sub">10cc</div></span>
+              <span class="dur">6:04</span><span class="x">×</span>
+            </div>
+            <div class="qrow">
+              <span class="num">3</span>
+              <span><div class="title">Bixby Canyon</div><div class="sub">Death Cab</div></span>
+              <span class="dur">5:15</span><span class="x">×</span>
+            </div>
+          </div>
+          <div style="display: grid; gap:8px;">
+            <div class="metric-tile">
+              <div class="cat">Queue</div>
+              <div class="name">Total runtime</div>
+              <div class="val" style="color: var(--amber); font-family: var(--font-led); letter-spacing:2px;">2:48:15</div>
+            </div>
+            <div class="metric-tile">
+              <div class="cat">Up next</div>
+              <div class="name" style="color:var(--text-hi); margin-top:6px;">I'm Not in Love</div>
+              <div class="name" style="color:var(--text-md);">Bixby Canyon Bridge</div>
+              <div class="name" style="color:var(--text-lo);">Track 10</div>
+            </div>
+            <div class="metric-tile">
+              <div class="cat">Action</div>
+              <div class="name" style="color: var(--accent); margin-top:4px;">＋  Save as playlist</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+
+    <!-- ─── ISSUE 7: no global now playing ─── -->
+    <article class="issue">
+      <div>
+        <div class="issue-head">
+          <span class="severity sev-p1">P1</span>
+          <span class="tag">Persistence</span>
+          <span class="tag">All non-home pages</span>
+        </div>
+        <h3>You lose Now Playing the moment you leave Home</h3>
+        <p>
+          The Now Playing panel is mounted only at <code>/</code>. As soon as you tap into
+          Devices, Metrics, History, System, or Phone, the user has <em>no visible playback
+          state</em> — no track, no transport, no progress, no source. They can see the queue
+          count on the nav icon and that's it. On a kiosk with no back-pocket phone next to it,
+          that's a real loss.
+        </p>
+        <div class="fix">
+          <div class="label">Recommendation</div>
+          <ul class="tight">
+            <li>Add a <strong>persistent mini-dock</strong> at the bottom edge of every non-home
+            page: 56px tall, art thumbnail · title/artist · transport · progress · source dot.
+            Tapping the title takes you home.</li>
+            <li>SignalR is already pushing this state — no new wiring, just a shared component
+            in <code>MainLayout</code> that hides on <code>/</code> (where Now Playing already
+            owns the column).</li>
+            <li>The dock also gives sleep/wake a visible anchor — pulse it dim during sleep
+            instead of blacking the whole screen.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="mock">
+        <div class="mock-label"><span>Persistent dock</span><span class="pill">All non-home pages</span></div>
+        <div class="dock">
+          <div class="art"></div>
+          <div class="meta">
+            <div class="t">Track 8</div>
+            <div class="a">Cary High Chorus · 3:00</div>
+          </div>
+          <div class="eq"><span></span><span></span><span></span></div>
+          <div style="flex:1; height:3px; background: var(--surface-separator); border-radius:2px; overflow:hidden;">
+            <div style="width:42%; height:100%; background: var(--accent);"></div>
+          </div>
+          <div class="tcontrols">
+            ⏮ <span class="pp">▶</span> ⏭
+          </div>
+        </div>
+        <p style="font-size:12px; margin-top:10px; color: var(--text-lo);">
+          Backdrop-blurred, sits over the page above it. Disappears on <code>/</code> where the
+          dedicated Now Playing column owns the job.
+        </p>
+      </div>
+    </article>
+
+
+    <!-- ─── ISSUE 8: source toggle semantics ─── -->
+    <article class="issue">
+      <div>
+        <div class="issue-head">
+          <span class="severity sev-p1">P1</span>
+          <span class="tag">Interaction</span>
+          <span class="tag">MainLayout · HandleSourceToggleAsync</span>
+        </div>
+        <h3>The source toggle does two different things depending on tap count</h3>
+        <p>
+          Reading <code>HandleSourceToggleAsync</code>: a first tap on a non-active source switches
+          to it. A tap on the <em>already</em>-active radio source toggles the Radio Control panel
+          on the home page. A tap on the active vinyl/bluetooth source navigates to its dedicated
+          page. The user can't predict from looking at the button which of those three things
+          they're about to get.
+        </p>
+        <div class="fix">
+          <div class="label">Recommendation</div>
+          <ul class="tight">
+            <li>Source pill = <strong>one action</strong>: switch to that source. Period.</li>
+            <li>"Open detail view" is a separate affordance — a chevron on the active pill, or a
+            dedicated "Source detail" tile in the home layout that's always visible when the
+            active source has one (Radio, Bluetooth).</li>
+            <li>The Radio Control panel currently <em>replaces</em> the Queue/History panel on
+            home. That's a non-obvious state change. Reserve a small persistent strip in the
+            center column for source-specific controls, and keep Queue/History below.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="mock">
+        <div class="mock-label"><span>Source pill states</span><span class="pill">After</span></div>
+        <div class="src-strip" style="flex-wrap: wrap;">
+          <span class="src-bubble"><span class="ic">♪</span>File</span>
+          <span class="src-bubble act">
+            <span class="ic">📻</span>FM Radio · 88.5
+            <span style="margin-left:4px; color: var(--amber); opacity:0.7;">›</span>
+          </span>
+          <span class="src-bubble"><span class="ic">⌁</span>Bluetooth</span>
+          <span class="src-bubble dis"><span class="ic">⌖</span>Vinyl · offline</span>
+        </div>
+        <p style="font-size:12px; margin-top:10px; color: var(--text-lo);">
+          The active pill grows a chevron — <em>that's</em> the "open detail" affordance. Tap the
+          body to stay on the source; tap the chevron to open its dedicated panel.
+        </p>
+      </div>
+    </article>
+
+
+    <!-- ─── ISSUE 9: visualizer placement ─── -->
+    <article class="issue no-mock">
+      <div>
+        <div class="issue-head">
+          <span class="severity sev-p1">P1</span>
+          <span class="tag">Hierarchy</span>
+          <span class="tag">VisualizerPanel</span>
+        </div>
+        <h3>The visualizer panel buries its own modes and shows raw debug</h3>
+        <p>
+          On the home page right column, the visualizer canvas takes ~70% of its panel, three mode
+          buttons (VU / WAVE / SPECTRUM) live in a top-right corner as small outlined chips, a
+          green <strong>Connected</strong> pill sits next to them, and the canvas itself has
+          <strong>"Updates: 22/sec"</strong> burned in as yellow Comic-Sans-y caption text at the
+          bottom-left. That's debug telemetry sitting on a primary visualization.
+        </p>
+        <div class="fix">
+          <div class="label">Recommendation</div>
+          <ul class="tight">
+            <li>Mode picker should be a <strong>segmented control across the top</strong> of the
+            panel, full-width — it's the primary control of this view.</li>
+            <li>"Connected" status belongs as a small dot on the panel header, not a labeled pill.
+            And only show <em>red</em> when it's not connected; green-when-fine is noise.</li>
+            <li>"Updates: 22/sec" is dev info — gate it behind the same dev-tools toggle as the
+            distortion marker.</li>
+            <li>Make the visualization itself <strong>fill the panel</strong>. Add per-mode chrome
+            (frequency labels, dB scale) only where it materially helps reading the signal.</li>
+          </ul>
+        </div>
+      </div>
+    </article>
+
+
+    <!-- ─── ISSUE 10: scrollbars hidden ─── -->
+    <article class="issue no-mock">
+      <div>
+        <div class="issue-head">
+          <span class="severity sev-p1">P1</span>
+          <span class="tag">Discoverability</span>
+          <span class="tag">design-system.css §19</span>
+        </div>
+        <h3>Hidden scrollbars + no overflow cue = invisible content</h3>
+        <p>
+          <code>* { scrollbar-width: none; } *::-webkit-scrollbar { display: none; }</code> hides
+          every scrollbar globally. The justification in the comment is "kiosk touch UI" — fine,
+          but the screenshots show several pages (Queue with 45 tracks, Devices, System tabs)
+          where there's clearly more content below the fold and <strong>nothing tells the user
+          that</strong>. The History page also crops a tall content block at ~520px with no
+          gradient or chevron.
+        </p>
+        <div class="fix">
+          <div class="label">Recommendation</div>
+          <ul class="tight">
+            <li>Keep the bar hidden, but add a <strong>thin always-visible thumb</strong> (~3px
+            wide, 30% opacity) on scrollable panels so the user knows there's more.</li>
+            <li>Or: a fading mask at the bottom edge of any panel whose content is taller than its
+            box. The CSS is one declaration:
+            <code>mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent)</code>.</li>
+            <li>For touch lists, add a momentum-style "✨ scroll for more · N items below"
+            sentinel that fades in when more is hidden.</li>
+          </ul>
+        </div>
+      </div>
+    </article>
+
+
+    <!-- ─── ISSUE 11: empty/loading states ─── -->
+    <article class="issue no-mock">
+      <div>
+        <div class="issue-head">
+          <span class="severity sev-p2">P2</span>
+          <span class="tag">States</span>
+          <span class="tag">Cross-cutting</span>
+        </div>
+        <h3>Loading and empty states are mostly centered spinners</h3>
+        <p>
+          Radio panel: centered <code>RadzenProgressBarCircular</code> in a 640×688 void. Queue
+          panel before data: blank. Devices when there are no Cast devices: nothing. The
+          design-system already defines <code>.skeleton-text</code>, <code>.skeleton-card</code>,
+          <code>.empty-state</code>, and a shimmer animation — they just aren't used.
+        </p>
+        <div class="fix">
+          <div class="label">Recommendation</div>
+          <ul class="tight">
+            <li>Replace every spinner with a <strong>shape-matched skeleton</strong>: Now Playing
+            shows blurred art placeholder + 2 text bars + transport row; Radio shows freq-well +
+            band buttons + meter; Queue shows 6 ghosted rows.</li>
+            <li>Build a small <code>&lt;EmptyState Icon Title Action /&gt;</code> Razor component
+            and use it everywhere — current empty handling is ad-hoc.</li>
+            <li>For network/API failures, surface a single inline banner (not a Radzen toast that
+            pops outside the kiosk surface) with a retry button at touch size.</li>
+          </ul>
+        </div>
+      </div>
+    </article>
+
+
+    <!-- ─── ISSUE 12: debug button ─── -->
+    <article class="issue no-mock">
+      <div>
+        <div class="issue-head">
+          <span class="severity sev-p2">P2</span>
+          <span class="tag">Production hygiene</span>
+          <span class="tag">MainLayout.razor:51</span>
+        </div>
+        <h3>The "distortion marker" debug button is in the production top bar</h3>
+        <p>
+          The comment in <code>MainLayout.razor</code> literally says
+          <em>"Debug: Distortion Marker (temporary — remove when done diagnosing)"</em>. It's still
+          there. It will be there in six months. It pops a 1-second color flash on every press —
+          a touch-friendly target for accidental input.
+        </p>
+        <div class="fix">
+          <div class="label">Recommendation</div>
+          <ul class="tight">
+            <li>Move it behind a build-flag gate (<code>#if DEBUG</code>) or a
+            <code>config.diagnostics.enabled</code> setting that defaults false.</li>
+            <li>Better: a hidden <strong>tap-and-hold-corner gesture</strong> opens a dev panel
+            with this and any other diagnostic actions (audio frame dump, log download). The
+            corner is invisible to normal users and free in screen real estate.</li>
+          </ul>
+        </div>
+      </div>
+    </article>
+
+
+    <!-- ─── ISSUE 13: contrast & font weight ─── -->
+    <article class="issue no-mock">
+      <div>
+        <div class="issue-head">
+          <span class="severity sev-p2">P2</span>
+          <span class="tag">Legibility</span>
+          <span class="tag">Type system</span>
+        </div>
+        <h3>Secondary text leans too dim for a 2-foot kiosk viewing distance</h3>
+        <p>
+          <code>--text-medium: #9CA3AF</code> on <code>--surface-base: #0D0D0F</code> hits ~6.8:1 —
+          fine on paper, fine on a desk monitor. On a glossy 12.5" touchscreen at 2-3 feet,
+          combined with smaller body text (13–14px in side panels), several places in the
+          screenshots read as "noise" rather than information. The History "Statistics" sub-labels
+          and the metric category prefixes are good examples.
+        </p>
+        <div class="fix">
+          <div class="label">Recommendation</div>
+          <ul class="tight">
+            <li>Bump <code>--text-medium</code> to ~<code>#B5BCC9</code> (~9:1) for body, and reserve
+            the current value for <em>tertiary</em> metadata only.</li>
+            <li>Minimum size for any persistent UI string is 14px. Headers and metric values that
+            people glance at across the room should be 18–20px+.</li>
+            <li>Touch-screen calibration matters: ship the theme in two flavors —
+            <code>desk</code> (current) and <code>kiosk</code> (heavier base weight, ~10% larger
+            type scale, slightly elevated contrast) — and pick at startup based on a config flag.</li>
+          </ul>
+        </div>
+      </div>
+    </article>
+
+
+    <!-- ─── ISSUE 14: status semantics ─── -->
+    <article class="issue no-mock">
+      <div>
+        <div class="issue-head">
+          <span class="severity sev-p2">P2</span>
+          <span class="tag">Semantics</span>
+          <span class="tag">Devices · Audio Engine</span>
+        </div>
+        <h3>Status badges all look like "Available" — including the broken ones</h3>
+        <p>
+          On the System Stats page: <strong>Audio Engine State: Active - FilePlayer (Stopped)</strong>
+          — both "Active" and "Stopped" in the same string with no visual indicator of whether
+          this is good or bad. On Devices, every row says <code>Available</code> in the same blue
+          pill that <code>Default</code> uses. Cast disconnect/connect uses transient toasts that
+          don't persist.
+        </p>
+        <div class="fix">
+          <div class="label">Recommendation</div>
+          <ul class="tight">
+            <li>Reserve <strong>color</strong> for state, <strong>pills</strong> for active /
+            default markers, and <strong>plain text</strong> for "Available" (it's the steady
+            state, not a status).</li>
+            <li>Parse the Audio Engine string into a structured tuple: <em>{ active, current
+            source, current state }</em>. Render with three distinct affordances.</li>
+            <li>Persist Cast connect/disconnect to a small <strong>event ribbon</strong> below the
+            dock — last 3 events, auto-clear after 30s. Toasts that don't stick are forgotten
+            information.</li>
+          </ul>
+        </div>
+      </div>
+    </article>
+
+  </section>
+
+
+  <!-- ───────────── Page-by-page ───────────── -->
+  <section id="pages">
+    <div class="section-head">
+      <span class="section-num">04</span>
+      <h2>Page-by-page summary</h2>
+      <span class="section-sub">One row per surface</span>
+    </div>
+
+    <table class="ptable">
+      <thead>
+        <tr><th>Page</th><th>What's there now</th><th>What to add or change</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="name">Home <span style="color:var(--text-lo); font-weight:400;">/</span></td>
+          <td class="is">3-column: Now Playing 520 · Queue/History 688 · Visualizer 710.
+          Strong shape, but the middle column flips between Queue and Radio Control with no
+          breadcrumb back to Queue.</td>
+          <td class="fix">Add a thin <strong>mode toggle</strong> in the middle column header
+          (Queue · History · Radio) so the user knows what they're looking at and can switch back.
+          Make the Visualizer mode picker live in <em>its</em> panel header, full width.</td>
+        </tr>
+        <tr>
+          <td class="name">Radio <span style="color:var(--text-lo); font-weight:400;">/radio</span></td>
+          <td class="is">Currently shows a centered spinner over an empty 640px void on first
+          load. Real content (frequency well, band buttons, signal meter, presets) takes ~50% of
+          the page when loaded.</td>
+          <td class="fix">Shape-matched skeleton on load. Use the right half for <strong>presets
+          + RDS now-playing</strong>, currently absent. Promote frequency entry from a dialog to
+          an inline numpad on the right column.</td>
+        </tr>
+        <tr>
+          <td class="name">Queue <span style="color:var(--text-lo); font-weight:400;">/ via home</span></td>
+          <td class="is">Title-only header, ADD FILES / CLEAR ALL in opposite corner of the
+          screen from the items. Trash icon as the only row action. No reorder. Duration in
+          ticks.</td>
+          <td class="fix">Drag handle on the left (already a touch token at 56px), kebab on the
+          right with reorder/jump/save. Side panel with total runtime + up-next preview.
+          Sticky "playing now" indicator at the top of the list.</td>
+        </tr>
+        <tr>
+          <td class="name">Devices <span style="color:var(--text-lo); font-weight:400;">/devices</span></td>
+          <td class="is">Single flat table; same blue pill for "Default" and "Available" so they
+          read as related states.</td>
+          <td class="fix">Split into <strong>Outputs | Cast targets</strong>. "Available" is the
+          baseline, no badge. Add a small device card on the right showing current routing,
+          format (sample rate · channels), and a "Test tone" button.</td>
+        </tr>
+        <tr>
+          <td class="name">Metrics <span style="color:var(--text-lo); font-weight:400;">/metrics</span></td>
+          <td class="is">16+ identical scalar tiles, unit bugs (850.4%), no grouping, no trend.</td>
+          <td class="fix">Group by category with sub-headers; per-tile sparkline; semantic value
+          color (green/amber/red against threshold); fix the unit registry.</td>
+        </tr>
+        <tr>
+          <td class="name">History <span style="color:var(--text-lo); font-weight:400;">/history</span></td>
+          <td class="is">Heavy filter bar; "Plays by Source" rendered as ~equal blue chips
+          (39/66/43/2) so the eye can't read the distribution.</td>
+          <td class="fix">Replace the chip row with a <strong>horizontal bar chart</strong> (one
+          line, five segments, source-colored). Smarter date formatting. The History table is
+          fine — just give it more vertical space by collapsing the filter into a single row.</td>
+        </tr>
+        <tr>
+          <td class="name">System <span style="color:var(--text-lo); font-weight:400;">/system</span></td>
+          <td class="is">Tab strip with 7 tabs in one row, mixed icon weights. System Stats cards
+          have uneven heights. Audio Engine State card is half-empty.</td>
+          <td class="fix">Consider <strong>left-rail tabs</strong> (vertical) on this page — 7 is
+          a lot for a horizontal strip on touch. Use a 2×3 metric grid with uniform card
+          heights and a single tall "platform" card on the right.</td>
+        </tr>
+        <tr>
+          <td class="name">Phone <span style="color:var(--text-lo); font-weight:400;">/phone</span></td>
+          <td class="is">Has its own scoped CSS file — not audited from screenshots.</td>
+          <td class="fix">Make sure it uses the same dock/route-toggle vocabulary as the rest of
+          the app; phone is an output, not a separate paradigm.</td>
+        </tr>
+        <tr>
+          <td class="name">File Browser <span style="color:var(--text-lo); font-weight:400;">dialog</span></td>
+          <td class="is">JSON-escape bug in filter; breadcrumb / drive mismatch; small folder
+          icons.</td>
+          <td class="fix">Filter as chips. One source of truth for current path. Larger folder
+          icons (current ones are ~24px, should be 36–40px for touch list rows). Recent paths
+          docked to the right.</td>
+        </tr>
+        <tr>
+          <td class="name">Bluetooth <span style="color:var(--text-lo); font-weight:400;">/bluetooth</span></td>
+          <td class="is">Not in screenshots; exists in <code>Pages/</code>.</td>
+          <td class="fix">Treat as a parallel of the Radio detail surface: device list + pairing
+          status + current AVRCP metadata + volume / EQ. Same chrome.</td>
+        </tr>
+        <tr>
+          <td class="name">Diagnostic <span style="color:var(--text-lo); font-weight:400;">/diagnostic</span></td>
+          <td class="is">Internal page.</td>
+          <td class="fix">Move the distortion marker, fingerprint detail panel, and "Updates/sec"
+          telemetry here behind a gesture-unlocked entry.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+
+  <!-- ───────────── System-level ───────────── -->
+  <section id="system">
+    <div class="section-head">
+      <span class="section-num">05</span>
+      <h2>System-level recommendations</h2>
+      <span class="section-sub">Cuts across pages</span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;">
+
+      <div class="strength" style="background: var(--surface-raised);">
+        <h4 style="color: var(--accent); margin-bottom: 10px;">A. One formatting layer</h4>
+        <p>Create <code>Radio.Web/Formatting/</code> with <code>FormatDuration</code>,
+        <code>FormatTimestamp</code>, <code>FormatFrequency</code>, <code>FormatBytes</code>,
+        <code>FormatPercent</code>, <code>FormatDeviceName</code>, <code>FormatSourceName</code>.
+        Forbid passing raw DTOs into Razor templates. This single discipline removes ~half the P0
+        findings above.</p>
+      </div>
+
+      <div class="strength" style="background: var(--surface-raised);">
+        <h4 style="color: var(--accent); margin-bottom: 10px;">B. Skeleton + empty kit</h4>
+        <p>Three Razor components: <code>&lt;Skeleton Shape="now-playing | radio | list" /&gt;</code>,
+        <code>&lt;EmptyState Icon Title Body Action /&gt;</code>,
+        <code>&lt;ErrorState Title Detail Retry /&gt;</code>. Every async-bound surface uses one of
+        these in its <code>@if(_loading)</code> branch.</p>
+      </div>
+
+      <div class="strength" style="background: var(--surface-raised);">
+        <h4 style="color: var(--accent); margin-bottom: 10px;">C. Persistent now-playing dock</h4>
+        <p>Mount once in <code>MainLayout</code>, hide on <code>/</code>. Reads from the same
+        <code>AudioStateHubService</code> already feeding the home page. ~80 lines of Razor +
+        a slot in the layout grid.</p>
+      </div>
+
+      <div class="strength" style="background: var(--surface-raised);">
+        <h4 style="color: var(--accent); margin-bottom: 10px;">D. Dev-tools gate</h4>
+        <p>Triple-tap the top-right corner of the clock to unlock a dev tray containing the
+        distortion marker, fingerprint event log, updates/sec, frame dump, log download. Locks
+        again after 30s of no interaction.</p>
+      </div>
+
+      <div class="strength" style="background: var(--surface-raised);">
+        <h4 style="color: var(--accent); margin-bottom: 10px;">E. Motion budget</h4>
+        <p>You have 30+ <code>@keyframes</code> defined. The screenshots don't show any of them
+        in play. Pick six (page-transition, list-add, list-remove, ken-burns, eq-bounce,
+        track-change) and enforce them on the surfaces that need them. Delete or hide the rest
+        until they're used — they're vocabulary debt right now.</p>
+      </div>
+
+      <div class="strength" style="background: var(--surface-raised);">
+        <h4 style="color: var(--accent); margin-bottom: 10px;">F. Sleep is a screen, not a JS hack</h4>
+        <p>The current sleep flow blacks the screen via JS + a Blazor call. Treat sleep as a
+        first-class route (<code>/sleep</code>) with an ambient view — large clock, faint album
+        art, a single "tap anywhere" hint. Wake on any interaction. Makes the device feel less
+        like "off" and more like "resting".</p>
+      </div>
+
+      <div class="strength" style="background: var(--surface-raised);">
+        <h4 style="color: var(--accent); margin-bottom: 10px;">G. Accessibility passes you'll want anyway</h4>
+        <p>Add <code>aria-label</code> on every icon-only button (90% of the top bar). Make
+        focus rings visible — currently
+        <code>-webkit-tap-highlight-color: transparent</code> across the board removes both touch
+        and keyboard feedback. Use Radzen's <code>Tooltip</code> on the icon nav so the labels
+        appear on long-press.</p>
+      </div>
+
+      <div class="strength" style="background: var(--surface-raised);">
+        <h4 style="color: var(--accent); margin-bottom: 10px;">H. Tighter "source / output" model in UI</h4>
+        <p>Currently three things hold related state: <code>SourcesApiService</code>,
+        <code>DevicesApiService</code>, <code>AudioStateHubService</code>. The UI binds to each
+        separately and races on first load (you'll see brief mismatches in the screenshots —
+        topbar shows FilePlayer source while Now Playing card says Radio). One Razor-side
+        <code>RoutingViewModel</code> that <em>derives</em> from the hub and exposes <code>{
+        source, output, route, isReady }</code> would remove a class of glitches.</p>
+      </div>
+
+    </div>
+  </section>
+
+
+  <!-- ───────────── Roadmap ───────────── -->
+  <section id="roadmap">
+    <div class="section-head">
+      <span class="section-num">06</span>
+      <h2>Suggested order of attack</h2>
+      <span class="section-sub">Three phases · ~3 sprints</span>
+    </div>
+
+    <div class="roadmap">
+      <div class="phase">
+        <div class="pnum">01</div>
+        <div class="pname">Stop the bleeding</div>
+        <ul>
+          <li>Formatting layer for durations, timestamps, sizes</li>
+          <li>Fix the metrics unit registry · kill <code>850.4%</code></li>
+          <li>Fix the File Browser filter JSON-escape bug</li>
+          <li>Strip the distortion-marker debug from production chrome</li>
+          <li>UUID-suffixed source IDs out of dropdowns</li>
+        </ul>
+      </div>
+      <div class="phase">
+        <div class="pnum">02</div>
+        <div class="pname">Finish the surface</div>
+        <ul>
+          <li>Persistent now-playing dock on non-home pages</li>
+          <li>Skeleton kit + EmptyState component, applied everywhere</li>
+          <li>Redesigned top bar — labeled route + nav zones</li>
+          <li>Single-action source pills + explicit "open detail" affordance</li>
+          <li>Metrics: groups, sparklines, semantic color</li>
+        </ul>
+      </div>
+      <div class="phase">
+        <div class="pnum">03</div>
+        <div class="pname">Polish + scale</div>
+        <ul>
+          <li>Queue split layout, history bar chart, devices two-column</li>
+          <li>Visualizer mode picker promoted to panel header</li>
+          <li>Dev-tools gesture + diagnostic page consolidation</li>
+          <li>Sleep as a first-class ambient screen</li>
+          <li>Accessibility + focus pass; <code>kiosk</code> type-scale variant</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+
+  <div class="endplate">
+    <span>Radio.Web · Design Review</span>
+    <span>· · ·</span>
+    <span>Generated · v1 · 2026</span>
+  </div>
+
+</div>
+
+<script>
+  // Light: live clock in the rail
+  function tick() {
+    const d = new Date();
+    const h = String(d.getHours()).padStart(2, '0');
+    const m = String(d.getMinutes()).padStart(2, '0');
+    document.getElementById('clock').textContent = h + ':' + m;
+  }
+  tick();
+  setInterval(tick, 30000);
+</script>
+</body>
+</html>
