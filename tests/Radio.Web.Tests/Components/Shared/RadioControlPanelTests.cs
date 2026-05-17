@@ -173,9 +173,9 @@ public class RadioControlPanelTests : TestContext
     var cut = RenderPanel(state);
 
     var readout = cut.Find(".rcp-meter-dbu");
-    // RssiDbu rendered with "0" format → "-18 dBu". The "−" minus character
-    // in the scale labels is U+2212; ToString("0") emits an ASCII hyphen.
-    Assert.Equal("-18 dBu", readout.TextContent.Trim());
+    // RssiDbu rendered with "0" format then normalized to U+2212 math-minus
+    // so the readout typographically matches the scale labels below.
+    Assert.Equal("−18 dBu", readout.TextContent.Trim());
   }
 
   [Fact]

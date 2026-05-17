@@ -3044,9 +3044,9 @@ body {
   width: 100%;
   max-width: 420px;
   padding: 6px;
-  background: #0a0a0c;
+  background: var(--surface-inset);
   border-radius: 4px;
-  border: 1px solid #141416;
+  border: 1px solid var(--surface-raised);
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
@@ -3058,7 +3058,7 @@ body {
   padding: 6px 10px;
   border-radius: 4px;
   background: linear-gradient(180deg, #141416 0%, #0d0d0f 100%);
-  border: 1px solid #222225;
+  border: 1px solid var(--surface-separator);
   border-bottom: 2px solid #0a0a0c;
   color: var(--text-medium);
   cursor: pointer;
@@ -3095,6 +3095,12 @@ body {
   color: var(--signal-amber);
 }
 
+/* When AGC is OFF (cell not pressed) the label dims so the amber stays
+   exclusive to the AUTO state. The cell button toggles aria-pressed. */
+.rcp-agc-cell:not([aria-pressed="true"]) .rcp-agc-label {
+  color: var(--text-low);
+}
+
 .rcp-agc-chip-auto,
 .rcp-agc-chip-off {
   display: inline-block;
@@ -3116,7 +3122,7 @@ body {
 
 .rcp-agc-chip-off {
   color: var(--text-low);
-  border: 1px solid var(--surface-separator);
+  border: 1px solid var(--text-low);
   background: transparent;
 }
 
@@ -3142,7 +3148,7 @@ body {
   border: 1px solid color-mix(in srgb, var(--signal-amber) 33%, transparent);
   border-radius: 999px;
   padding: 4px 8px;
-  background: rgba(240, 168, 48, 0.04);
+  background: color-mix(in srgb, var(--signal-amber) 4%, transparent);
 }
 
 .rcp-gain-range-hint {
@@ -3170,5 +3176,5 @@ body {
   font-weight: 700;
   letter-spacing: 0.04em;
   color: var(--signal-amber);
-  text-shadow: 0 0 6px rgba(240, 168, 48, 0.18);
+  text-shadow: 0 0 6px color-mix(in srgb, var(--signal-amber) 18%, transparent);
 }

@@ -87,7 +87,7 @@
               {
                 <span class="rcp-clip-pill">CLIP</span>
               }
-              <span class="rcp-meter-dbu">@_radioState.RssiDbu.ToString("0") dBu</span>
+              <span class="rcp-meter-dbu">@($"{_radioState.RssiDbu.ToString("0").Replace("-", "−")} dBu")</span>
             </span>
           </div>
           <div class="rcp-meter-bar">
@@ -582,14 +582,6 @@
     color: var(--text-low);
     text-transform: uppercase;
     opacity: 0.7;
-  }
-
-  .rcp-meter-value {
-    color: var(--text-medium);
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.05em;
-    opacity: 1;
   }
 
   .rcp-meter-bar {
