@@ -21,9 +21,35 @@ public class RadioStateDto
   public double Step { get; set; }
 
   /// <summary>
-  /// Gets or sets the signal strength as a percentage (0-100).
+  /// Gets or sets the signal strength as a percentage (0-100), clamped at the
+  /// API boundary. Values are guaranteed never to exceed 100% even if the raw
+  /// front-end power reading is overdriven — see <see cref="Clip"/>.
   /// </summary>
   public int? SignalStrength { get; set; }
+
+  /// <summary>
+  /// Gets or sets a value indicating whether the front-end is overdriving
+  /// (raw power exceeded the calibrated full-scale reference). Drives the
+  /// CLIP pill in the signal meter UI; independent of the clamped
+  /// <see cref="SignalStrength"/> percentage.
+  /// </summary>
+  public bool Clip { get; set; }
+
+  /// <summary>
+  /// Gets or sets the received-signal level in dBu, mapped linearly from the
+  /// raw front-end reading into the range [-60, 0]. Surfaced as a separate
+  /// field so the UI can render a calibrated readout alongside the clamped
+  /// percent bar.
+  /// </summary>
+  public double RssiDbu { get; set; }
+
+  /// <summary>
+  /// Gets or sets the gain (in dB) currently applied to the front-end.
+  /// When AGC is on this is the device-chosen value; when AGC is off this
+  /// mirrors the user-set <see cref="Gain"/>. Either way the UI can bind one
+  /// field to display the "live" gain in either mode.
+  /// </summary>
+  public double AppliedGain { get; set; }
 
   /// <summary>
   /// Gets or sets the current equalizer mode.
@@ -74,9 +100,12 @@ public class RadioStateDto
   public string? RdsProgramType { get; set; }
 
   /// <summary>
-  /// Gets or sets the signal strength threshold (0-100) at which scan pauses on a signal.
+  /// Gets or sets the dBu threshold at which scan pauses on a signal.
+  /// Re-typed from <c>int</c> (percent) to <c>double</c> (dBu) in PR 1 of the
+  /// Radio Controller Polish arc so the threshold matches the dBu semantics
+  /// of <see cref="RssiDbu"/>. Greenfield project — no back-compat shim.
   /// </summary>
-  public int ScanStopThreshold { get; set; }
+  public double ScanStopThreshold { get; set; }
 }
 
 /// <summary>

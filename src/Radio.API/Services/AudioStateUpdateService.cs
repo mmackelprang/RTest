@@ -546,6 +546,11 @@ public class AudioStateUpdateService : BackgroundService
            previous.Band != current.Band ||
            Math.Abs(previous.Step - current.Step) > 0.001 ||
            sigDelta > 3 ||
+           previous.Clip != current.Clip ||
+           // Same 3-percent tolerance applied via the dBu mapping (~1.8 dBu)
+           // so the meter doesn't flicker on every minor fluctuation.
+           Math.Abs(previous.RssiDbu - current.RssiDbu) > 1.8 ||
+           Math.Abs(previous.AppliedGain - current.AppliedGain) > 0.1 ||
            previous.Equalizer != current.Equalizer ||
            previous.DeviceVolume != current.DeviceVolume ||
            previous.IsScanning != current.IsScanning ||
@@ -677,25 +682,7 @@ public class AudioStateUpdateService : BackgroundService
   }
 
   private static RadioStateDto MapToRadioStateDto(IRadioControl radioControls)
-  {
-    return new RadioStateDto
-    {
-      Frequency = radioControls.CurrentFrequency.Hertz,
-      Band = radioControls.CurrentBand.ToString(),
-      Step = radioControls.FrequencyStep.Hertz,
-      SignalStrength = radioControls.SignalStrength,
-      Equalizer = radioControls.EqualizerMode.ToString(),
-      DeviceVolume = radioControls.DeviceVolume,
-      IsScanning = radioControls.IsScanning,
-      ScanDirection = radioControls.ScanDirection?.ToString(),
-      ScanStopThreshold = radioControls.ScanStopThreshold,
-      AutoGain = radioControls.AutoGainEnabled,
-      Gain = (int?)radioControls.Gain,
-      IsStereo = radioControls.IsStereo,
-      RdsStationName = radioControls.RdsStationName,
-      RdsProgramType = radioControls.RdsProgramType,
-    };
-  }
+    => RadioStateMapper.MapToRadioStateDto(radioControls);
 
   private BluetoothStatusDto BuildBluetoothStatusDto()
   {
