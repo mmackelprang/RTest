@@ -1,0 +1,116 @@
+@*
+  MetricTile — unit-aware metric card used by the metrics dashboard
+  redesign introduced in PR 4 (handoff §P0·4).
+
+  Renders a single metric in three stacked bands:
+    Category — mono 10px uppercase, low contrast
+    Name     — body 13px, medium contrast
+    Value    — mono 30px, threshold-tinted
+
+  When a time-series is supplied the matching <Sparkline /> is rendered
+  underneath, colored to match the value band so the sparkline reads
+  as the same metric at a glance.
+*@
+
+<div class="metric-tile" data-metric-key="@Key">
+  <div class="metric-tile-category">@Category</div>
+  <div class="metric-tile-name">@Name</div>
+  <div class="metric-tile-value" style="color: @_valueColor;">
+    @_formattedValue
+  </div>
+
+  @if (Series is { Count: > 0 })
+  {
+    <div class="metric-tile-spark">
+      <Sparkline Values="@Series" Stroke="@_valueColor" />
+    </div>
+  }
+</div>
+
+@code {
+  /// <summary>
+  /// Category label, e.g. <c>"System · Memory"</c>. Rendered above the metric name.
+  /// </summary>
+  [Parameter, EditorRequired]
+  public string Category { get; set; } = string.Empty;
+
+  /// <summary>
+  /// Human-readable metric name, e.g. <c>"Heap in use"</c>.
+  /// </summary>
+  [Parameter, EditorRequired]
+  public string Name { get; set; } = string.Empty;
+
+  /// <summary>The current value to display.</summary>
+  [Parameter, EditorRequired]
+  public double Value { get; set; }
+
+  /// <summary>
+  /// Display unit used to pick a formatter. Defaults to
+  /// <see cref="Units.Bare"/> when unset.
+  /// </summary>
+  [Parameter, EditorRequired]
+  public Units Unit { get; set; } = Units.Bare;
+
+  /// <summary>
+  /// Optional sparkline series. When provided (and non-empty) a 28px
+  /// sparkline renders under the value, colored to match.
+  /// </summary>
+  [Parameter] public IReadOnlyList<double>? Series { get; set; }
+
+  /// <summary>
+  /// Optional underlying metric key (e.g. <c>"system.memory_usage_mb"</c>).
+  /// Surfaced as a <c>data-metric-key</c> attribute so tests and CSS
+  /// selectors can target a specific tile without depending on label text.
+  /// </summary>
+  [Parameter] public string? Key { get; set; }
+
+  /// <summary>
+  /// Optional warn threshold. Values at or above warn render the value
+  /// in amber. For inverted-above metrics (e.g. buffer fill), set
+  /// <see cref="InvertThresholds"/>.
+  /// </summary>
+  [Parameter] public double? Warn { get; set; }
+
+  /// <summary>
+  /// Optional critical threshold. Values at or above critical render
+  /// the value in red. See <see cref="InvertThresholds"/> for inverted
+  /// semantics.
+  /// </summary>
+  [Parameter] public double? Critical { get; set; }
+
+  /// <summary>
+  /// When true, treat low values as bad (e.g. buffer fill, free disk):
+  /// values at or below <see cref="Critical"/> render red; at or below
+  /// <see cref="Warn"/> render amber. Otherwise high values are bad.
+  /// </summary>
+  [Parameter] public bool InvertThresholds { get; set; }
+
+  private string _formattedValue = string.Empty;
+  private string _valueColor = "var(--text-high)";
+
+  protected override void OnParametersSet()
+  {
+    _formattedValue = UnitsFormatter.Format(Value, Unit);
+    _valueColor = ComputeValueColor();
+  }
+
+  private string ComputeValueColor()
+  {
+    // No thresholds → neutral high-contrast text.
+    if (!Warn.HasValue && !Critical.HasValue)
+      return "var(--text-high)";
+
+    if (InvertThresholds)
+    {
+      // Low values are bad. Order matters: critical wins over warn.
+      if (Critical.HasValue && Value <= Critical.Value) return "var(--signal-red)";
+      if (Warn.HasValue && Value <= Warn.Value) return "var(--signal-amber)";
+      return "var(--signal-green)";
+    }
+
+    // Normal-above semantics: high values are bad.
+    if (Critical.HasValue && Value >= Critical.Value) return "var(--signal-red)";
+    if (Warn.HasValue && Value >= Warn.Value) return "var(--signal-amber)";
+    return "var(--signal-green)";
+  }
+}

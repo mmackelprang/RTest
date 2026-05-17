@@ -183,10 +183,13 @@
           <!-- History List -->
           @if (_isLoadingHistory)
           {
-            <div style="flex: 1; display: flex; align-items: center; justify-content: center;">
-              <RadzenProgressBarCircular Mode="ProgressBarMode.Indeterminate"
-                                         ProgressBarStyle="ProgressBarStyle.Primary"
-                                         Size="ProgressBarCircularSize.Small" />
+            @* PR 4: skeleton row stack instead of a centered spinner —
+               panel-body initial-load reads as "list rows about to appear". *@
+            <div style="flex: 1; min-height: 0; padding: 8px;">
+              <Skeleton Shape="Skeleton.SkeletonShape.ListRow" />
+              <Skeleton Shape="Skeleton.SkeletonShape.ListRow" />
+              <Skeleton Shape="Skeleton.SkeletonShape.ListRow" />
+              <Skeleton Shape="Skeleton.SkeletonShape.ListRow" />
             </div>
           }
           else if (_historyItems.Any())

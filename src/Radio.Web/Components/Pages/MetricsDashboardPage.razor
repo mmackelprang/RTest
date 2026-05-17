@@ -6,10 +6,27 @@
 @inject NotificationService NotificationService
 @implements IAsyncDisposable
 
+@*
+  MetricsDashboardPage — categorized metric tile grid (PR 4 §P0·4).
+
+  Layout:
+    Header: title + time-range pills + refresh.
+    Optional time-series chart panel for the selected metric.
+    Body: one block per category, each block has a mono uppercase
+          sub-header and a CSS-grid of MetricTile cards.
+
+  The unit fixes called out in the handoff (Memory Usage Mb → MB,
+  Signal Strength → %, Frequency Changes → thousands-separated count,
+  Latency Ms → ms/s auto-promotion) are driven by MapKeyToUnit, which
+  classifies the metric key into a Units value. A Radio.Metrics
+  MetricDescriptor.Unit field (added in PR 4) is the eventual
+  authoritative source; until producers register descriptors the
+  key-pattern mapping is the source of truth.
+*@
+
 <PageTitle>Metrics Dashboard</PageTitle>
 
 <div class="metrics-page">
-  <!-- Header bar -->
   <div class="metrics-header">
     <span class="metrics-title">Metrics</span>
     <div class="route-group" style="padding: 4px 8px; flex-wrap: wrap;">
@@ -26,42 +43,17 @@
     </div>
   </div>
 
-  @if (_loading)
+  @if (_loading && (_snapshots == null || _snapshots.Count == 0))
   {
     <RadzenProgressBar Mode="ProgressBarMode.Indeterminate" ProgressBarStyle="ProgressBarStyle.Primary" Style="height: 2px;" />
   }
 
   <div class="metrics-body">
-    <!-- Hero stat cards row -->
-    <div class="metrics-hero-row">
-      @foreach (var hero in GetHeroMetrics())
-      {
-        var thresholdColor = GetThresholdColor(hero.Key, hero.Value);
-        var isSelected = _selectedMetric == hero.Key;
-        var heroKey = hero.Key;
-        <div class="metrics-hero-card @(isSelected ? "selected" : "")"
-             style="border-left-color: @thresholdColor;"
-             @onclick="@(async () => await SelectMetricAsync(heroKey))">
-          <button class="metrics-hero-dismiss"
-                  title="Remove from hero cards"
-                  @onclick="@(async () => await RemoveHeroCardAsync(heroKey))"
-                  @onclick:stopPropagation="true">&times;</button>
-          <div class="metrics-hero-label">@GetMetricLabel(heroKey)</div>
-          <div class="metrics-hero-value" style="color: @thresholdColor;">
-            @FormatMetricValue(hero.Value, heroKey)
-          </div>
-          @if (_sparklineData.TryGetValue(heroKey, out var points) && points.Count > 1)
-          {
-            <div style="margin-top: 4px; height: 50px;">
-              @((MarkupString)RenderSparkline(points, 200, 50, thresholdColor))
-            </div>
-          }
-        </div>
-      }
-    </div>
-
-    <!-- Time-series chart panel -->
-    <div class="metrics-chart-panel">
+    <!-- Time-series chart panel — rendered always so the canvas is in the
+         DOM for metricsChart.init even before the user picks a metric.
+         Collapses to zero height when no metric is selected. -->
+    <div class="metrics-chart-panel"
+         style="@(string.IsNullOrEmpty(_selectedMetric) ? "display: none;" : "")">
       <div style="flex: 1; min-height: 0; position: relative;">
         <canvas id="metricsChartCanvas" style="width: 100%; height: 100%; display: block;"></canvas>
       </div>
@@ -78,60 +70,46 @@
       }
     </div>
 
-    <!-- Collapsible category sections -->
-    <div class="metrics-categories">
-      @if (_snapshots != null && _snapshots.Count > 0)
-      {
+    <!-- Categorized tile grid -->
+    @if (_snapshots != null && _snapshots.Count > 0)
+    {
+      <div class="metrics-categories-grid">
         @foreach (var category in _categories)
         {
-          var isExpanded = _expandedCategories.Contains(category);
           var catMetrics = GetMetricsForCategory(category).ToList();
-          <div class="metrics-category">
-            <div class="metrics-category-header" @onclick="@(() => ToggleCategory(category))">
-              <span class="metrics-category-arrow">@(isExpanded ? "\u25BE" : "\u25B8")</span>
-              <span class="metrics-category-name">@category</span>
-              <span class="metrics-category-count">(@catMetrics.Count)</span>
+          if (catMetrics.Count == 0) continue;
+          <div class="metrics-category-block">
+            <h3 class="metrics-category-subheader">@category</h3>
+            <div class="metrics-tile-grid">
+              @foreach (var metric in catMetrics)
+              {
+                var key = metric.Key;
+                var unit = MapKeyToUnit(key);
+                var (warn, critical, invert) = GetThresholds(key);
+                _sparklineData.TryGetValue(key, out var series);
+                <div @onclick="@(async () => await SelectMetricAsync(key))" style="cursor: pointer;">
+                  <MetricTile Key="@key"
+                              Category="@FormatCategoryLabel(category, key)"
+                              Name="@GetMetricLabel(key)"
+                              Value="@metric.Value"
+                              Unit="@unit"
+                              Series="@series"
+                              Warn="@warn"
+                              Critical="@critical"
+                              InvertThresholds="@invert" />
+                </div>
+              }
             </div>
-            @if (isExpanded)
-            {
-              <div class="metrics-category-body">
-                @foreach (var metric in catMetrics)
-                {
-                  var isRowSelected = _selectedMetric == metric.Key;
-                  var trend = GetTrendIndicator(metric.Key);
-                  var metricKey = metric.Key;
-                  var isPinned = _pinnedHeroKeys?.Contains(metricKey) == true;
-                  <div class="metrics-row @(isRowSelected ? "selected" : "")"
-                       @onclick="@(async () => await SelectMetricAsync(metricKey))">
-                    <button class="metrics-row-pin @(isPinned ? "pinned" : "")"
-                            title="@(isPinned ? "Remove from hero cards" : "Pin to hero cards")"
-                            @onclick="@(async () => await ToggleHeroCardAsync(metricKey))"
-                            @onclick:stopPropagation="true">
-                      @(isPinned ? "\u2605" : "\u2606")
-                    </button>
-                    <span class="metrics-row-label">@GetMetricLabel(metricKey)</span>
-                    <span class="metrics-row-value">@FormatMetricValue(metric.Value, metricKey)</span>
-                    @if (_sparklineData.TryGetValue(metricKey, out var rowPoints) && rowPoints.Count > 1)
-                    {
-                      <span class="metrics-row-sparkline">
-                        @((MarkupString)RenderSparkline(rowPoints, 150, 20))
-                      </span>
-                    }
-                    <span class="metrics-row-trend @(trend.css)">@trend.symbol</span>
-                  </div>
-                }
-              </div>
-            }
           </div>
         }
-      }
-      else if (!_loading)
-      {
-        <div style="padding: 24px; text-align: center; color: var(--text-low);">
-          No metrics available. The backend may not be collecting metrics yet.
-        </div>
-      }
-    </div>
+      </div>
+    }
+    else if (!_loading)
+    {
+      <div style="padding: 24px; text-align: center; color: var(--text-low);">
+        No metrics available. The backend may not be collecting metrics yet.
+      </div>
+    }
   </div>
 </div>
 
@@ -149,27 +127,18 @@
   private string? _selectedMetric;
   private MetricAggregateDto? _selectedMetricAggregate;
   private List<string> _categories = new();
-  private HashSet<string> _expandedCategories = new();
   private Dictionary<string, List<double>> _sparklineData = new();
   private Dictionary<string, List<MetricHistoryDto>> _sparklineHistory = new();
 
-  // Hero metrics: user-pinned metric keys (persisted to config)
-  // null = never configured (use pattern defaults), empty = user dismissed all
-  private List<string>? _pinnedHeroKeys;
-
-  // Default patterns used when no pinned keys are configured
-  private static readonly string[] _defaultHeroPatterns =
-    ["cpu", "memory", "buffer", "underrun", "error", "active"];
-
-  private const int MaxHeroCards = 10;
-
-  // Threshold definitions: (warning, critical) by metric name fragment
+  // Threshold definitions: (warning, critical) by metric name fragment.
+  // invertAbove == true → high is bad (cpu, memory).
+  // invertAbove == false → low is bad (buffer fill).
   private static readonly Dictionary<string, (double warn, double crit, bool invertAbove)> _thresholds = new()
   {
     ["cpu_temp"] = (70, 85, true),
     ["cpu_usage"] = (80, 95, true),
     ["memory_percent"] = (80, 95, true),
-    ["buffer_fill"] = (50, 20, false),     // below warn=amber, below crit=red
+    ["buffer_fill"] = (50, 20, false),
     ["buffer_percent"] = (50, 20, false),
     ["underrun"] = (1, 10, true),
     ["error"] = (1, 10, true),
@@ -193,16 +162,16 @@
 
   protected override async Task OnAfterRenderAsync(bool firstRender)
   {
-    if (firstRender)
+    // The chart canvas only exists when a metric is selected. Init lazily
+    // the first time a metric is picked.
+    if (!_chartInitialized && !string.IsNullOrEmpty(_selectedMetric))
     {
       try
       {
-        _jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/metricsChart.js");
+        _jsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/metricsChart.js");
         var success = await _jsModule.InvokeAsync<bool>("metricsChart.init", "metricsChartCanvas");
         _chartInitialized = success;
-
-        // If we already have a selected metric, render it
-        if (_chartInitialized && !string.IsNullOrEmpty(_selectedMetric))
+        if (_chartInitialized)
           await RenderChartForSelectedMetricAsync();
       }
       catch (Exception ex)
@@ -217,21 +186,8 @@
     try
     {
       var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, System.Text.Json.JsonElement>>("ui.metrics");
-      if (prefs != null)
-      {
-        if (prefs.TryGetValue("timeRange", out var trObj))
-          _timeRange = trObj.GetString() ?? "1h";
-
-        if (prefs.TryGetValue("heroCards", out var heroObj) &&
-            heroObj.ValueKind == System.Text.Json.JsonValueKind.Array)
-        {
-          _pinnedHeroKeys = heroObj.EnumerateArray()
-            .Select(e => e.GetString())
-            .Where(s => !string.IsNullOrEmpty(s))
-            .Select(s => s!)
-            .ToList();
-        }
-      }
+      if (prefs != null && prefs.TryGetValue("timeRange", out var trObj))
+        _timeRange = trObj.GetString() ?? "1h";
     }
     catch (Exception ex) { Logger.LogWarning(ex, "Failed to load metrics preferences"); }
   }
@@ -262,14 +218,6 @@
       UpdateCategories();
       await LoadSparklineDataAsync();
       UpdateCardValuesFromSparklines();
-
-      // Auto-select first hero metric
-      if (string.IsNullOrEmpty(_selectedMetric))
-      {
-        var heroes = GetHeroMetrics().ToList();
-        if (heroes.Count > 0)
-          _selectedMetric = heroes[0].Key;
-      }
     }
     finally { _loading = false; }
   }
@@ -297,8 +245,9 @@
     var (start, end) = GetTimeRangeFromSelection();
     var resolution = GetResolution();
 
-    // Load sparkline data in parallel for visible metrics (max 20)
-    var metricsToLoad = _snapshots.Keys.Take(20).ToList();
+    // Load sparkline data in parallel for visible metrics (cap to avoid
+    // hammering the API on dashboards with hundreds of metrics).
+    var metricsToLoad = _snapshots.Keys.Take(40).ToList();
     var tasks = metricsToLoad.Select(async key =>
     {
       try
@@ -363,7 +312,6 @@
     _loading = true;
     try
     {
-      // Ensure we have history for this metric
       if (!_sparklineHistory.ContainsKey(metricKey))
       {
         var (start, end) = GetTimeRangeFromSelection();
@@ -376,9 +324,7 @@
         }
       }
 
-      // Compute aggregate stats from history data
       _selectedMetricAggregate = ComputeAggregateFromHistory(metricKey);
-
       await RenderChartForSelectedMetricAsync();
     }
     catch (Exception ex)
@@ -421,13 +367,13 @@
       var max = history.Select(h => h.Max ?? h.Value).ToArray();
 
       var chartData = new { labels, values, min, max };
-      var thresholdColor = GetThresholdColor(_selectedMetric!, _snapshots?.GetValueOrDefault(_selectedMetric!, 0) ?? 0);
+      var thresholdColor = GetThresholdColorRaw(_selectedMetric!, _snapshots?.GetValueOrDefault(_selectedMetric!, 0) ?? 0);
       var chartOptions = new
       {
         color = thresholdColor == "var(--signal-red)" ? "#F87171" :
                 thresholdColor == "var(--signal-amber)" ? "#F0A830" : "#5CD4E8",
         fillOpacity = 0.15,
-        unit = GetMetricUnit(_selectedMetric!),
+        unit = GetMetricUnitForChart(_selectedMetric!),
         thresholds = GetChartThresholds(_selectedMetric!)
       };
 
@@ -446,91 +392,6 @@
       .Distinct()
       .OrderBy(c => c)
       .ToList();
-
-    // Expand all categories by default
-    if (_expandedCategories.Count == 0)
-      _expandedCategories = new HashSet<string>(_categories);
-  }
-
-  private void ToggleCategory(string category)
-  {
-    if (!_expandedCategories.Remove(category))
-      _expandedCategories.Add(category);
-  }
-
-  private IEnumerable<KeyValuePair<string, double>> GetHeroMetrics()
-  {
-    if (_snapshots == null) return Enumerable.Empty<KeyValuePair<string, double>>();
-
-    // null = never configured → use pattern defaults
-    // non-null (even empty) = user has customized → respect their choice
-    if (_pinnedHeroKeys != null)
-    {
-      return _pinnedHeroKeys
-        .Where(key => _snapshots.ContainsKey(key))
-        .Select(key => new KeyValuePair<string, double>(key, _snapshots[key]))
-        .Take(MaxHeroCards);
-    }
-
-    return _snapshots
-      .Where(m => _defaultHeroPatterns.Any(p => m.Key.ToLowerInvariant().Contains(p)))
-      .OrderBy(m => Array.FindIndex(_defaultHeroPatterns, p => m.Key.ToLowerInvariant().Contains(p)))
-      .Take(6);
-  }
-
-  private async Task RemoveHeroCardAsync(string metricKey)
-  {
-    // If never configured, initialize from defaults so user can selectively remove
-    if (_pinnedHeroKeys == null)
-      InitializePinnedFromDefaults();
-
-    _pinnedHeroKeys!.Remove(metricKey);
-    await SaveHeroCardsAsync();
-    StateHasChanged();
-  }
-
-  private async Task ToggleHeroCardAsync(string metricKey)
-  {
-    // If never configured, initialize from defaults so user can selectively modify
-    if (_pinnedHeroKeys == null)
-      InitializePinnedFromDefaults();
-
-    if (_pinnedHeroKeys!.Contains(metricKey))
-    {
-      _pinnedHeroKeys.Remove(metricKey);
-    }
-    else if (_pinnedHeroKeys.Count < MaxHeroCards)
-    {
-      _pinnedHeroKeys.Add(metricKey);
-    }
-    else
-    {
-      NotificationService.Notify(NotificationSeverity.Warning, "Warning", $"Maximum {MaxHeroCards} hero cards allowed");
-      return;
-    }
-
-    await SaveHeroCardsAsync();
-    StateHasChanged();
-  }
-
-  private void InitializePinnedFromDefaults()
-  {
-    if (_snapshots == null)
-    {
-      _pinnedHeroKeys = new List<string>();
-      return;
-    }
-
-    _pinnedHeroKeys = _snapshots.Keys
-      .Where(key => _defaultHeroPatterns.Any(p => key.ToLowerInvariant().Contains(p)))
-      .OrderBy(key => Array.FindIndex(_defaultHeroPatterns, p => key.ToLowerInvariant().Contains(p)))
-      .Take(6)
-      .ToList();
-  }
-
-  private async Task SaveHeroCardsAsync()
-  {
-    await SavePreferenceAsync("heroCards", _pinnedHeroKeys ?? new List<string>());
   }
 
   private IEnumerable<KeyValuePair<string, double>> GetMetricsForCategory(string category)
@@ -539,7 +400,58 @@
     return _snapshots.Where(m => GetMetricCategory(m.Key) == category).OrderBy(m => m.Key);
   }
 
-  private string GetThresholdColor(string metricKey, double value)
+  /// <summary>
+  /// Maps a metric key to a display Unit by pattern matching the suffix
+  /// and well-known fragments. This is what fixes the "Memory Usage Mb
+  /// = 850.4%" bug — the key ends in <c>_mb</c> and ought to render
+  /// with the MB suffix.
+  /// </summary>
+  internal static Units MapKeyToUnit(string metricKey)
+  {
+    if (string.IsNullOrEmpty(metricKey)) return Units.Bare;
+    var k = metricKey.ToLowerInvariant();
+
+    // Order matters — match more-specific suffixes first.
+    if (k.EndsWith("_mb") || k.Contains("memory_usage_mb") || k.Contains("_memory_mb")) return Units.Megabytes;
+    if (k.EndsWith("_ms") || k.Contains("latency_ms") || k.Contains("duration_ms")) return Units.Milliseconds;
+    if (k.Contains("percent") || k.Contains("_pct") || k.EndsWith("_ratio") ||
+        (k.Contains("cpu") && k.Contains("usage")) ||
+        (k.Contains("memory") && k.Contains("usage") && !k.EndsWith("_mb"))) return Units.Percent;
+    if (k.Contains("strength") || k.Contains("signal_quality")) return Units.Percent;
+    if (k.EndsWith("_per_min") || k.Contains("rate_per_min") || k.Contains("_per_minute")) return Units.PerMinute;
+    if (k.Contains("frequency_changes") || k.Contains("changes_count") || k.EndsWith("_count")) return Units.Count;
+    if (k.Contains("decibel") || k.EndsWith("_db") || k.Contains("_dbfs")) return Units.Decibels;
+    if (k.Contains("_hz") || k.Contains("frequency_hz") || k.Contains("_freq_hz")) return Units.Frequency;
+    if (k.Contains("count") || k.Contains("total") || k.Contains("errors") ||
+        k.Contains("underruns") || k.Contains("dropped") || k.Contains("requests") ||
+        k.Contains("failures") || k.Contains("connected") || k.Contains("disconnected") ||
+        k.Contains("reconnect") || k.Contains("played") || k.Contains("queued")) return Units.Count;
+
+    return Units.Bare;
+  }
+
+  /// <summary>
+  /// Returns the threshold band for a key (warn, critical, invert), or
+  /// (null, null, false) if no threshold is configured.
+  /// </summary>
+  private static (double? warn, double? critical, bool invert) GetThresholds(string metricKey)
+  {
+    var keyLower = metricKey.ToLowerInvariant();
+    foreach (var (pattern, (warn, crit, invertAbove)) in _thresholds)
+    {
+      if (!keyLower.Contains(pattern)) continue;
+      // invertAbove==true → high is bad (default MetricTile semantics).
+      // invertAbove==false → low is bad → flip via InvertThresholds=true.
+      return invertAbove ? (warn, crit, false) : (warn, crit, true);
+    }
+    return (null, null, false);
+  }
+
+  /// <summary>
+  /// Mirrors GetThresholds for the legacy chart pipeline which expects a
+  /// CSS color string rather than the MetricTile-style threshold band.
+  /// </summary>
+  private string GetThresholdColorRaw(string metricKey, double value)
   {
     var keyLower = metricKey.ToLowerInvariant();
     foreach (var (pattern, (warn, crit, invertAbove)) in _thresholds)
@@ -573,21 +485,6 @@
       };
     }
     return null;
-  }
-
-  private (string symbol, string css) GetTrendIndicator(string metricKey)
-  {
-    if (!_sparklineData.TryGetValue(metricKey, out var points) || points.Count < 3)
-      return ("\u2014", "trend-flat");
-
-    var recent = points.Skip(points.Count - 3).Average();
-    var older = points.Take(3).Average();
-    if (older == 0) return ("\u2014", "trend-flat");
-
-    var change = (recent - older) / Math.Abs(older);
-    if (change > 0.05) return ("\u25B2", "trend-up");
-    if (change < -0.05) return ("\u25BC", "trend-down");
-    return ("\u2014", "trend-flat");
   }
 
   private (DateTime start, DateTime end) GetTimeRangeFromSelection()
@@ -631,58 +528,50 @@
     return parts.Length > 0 ? parts[0] : "Other";
   }
 
-  private static string GetMetricLabel(string metricKey)
+  /// <summary>
+  /// Forms the per-tile category text. Where a metric key has the form
+  /// <c>system.memory.usage_mb</c>, we surface <c>"System · Memory"</c>
+  /// in the tile so the category line carries the sub-component as well.
+  /// </summary>
+  private static string FormatCategoryLabel(string topCategory, string metricKey)
+  {
+    var parts = metricKey.Split('.');
+    if (parts.Length < 3) return TitleCase(topCategory);
+    var sub = parts[1];
+    return TitleCase(topCategory) + " · " + TitleCase(sub);
+  }
+
+  private static string TitleCase(string s)
+  {
+    if (string.IsNullOrEmpty(s)) return s;
+    return System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(s.Replace('_', ' '));
+  }
+
+  internal static string GetMetricLabel(string metricKey)
   {
     if (string.IsNullOrEmpty(metricKey)) return metricKey;
     var parts = metricKey.Split('.');
     if (parts.Length > 1)
     {
       var label = string.Join(" ", parts.Skip(1));
-      return System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(label.Replace('_', ' '));
+      return TitleCase(label);
     }
     return metricKey;
   }
 
-  private static string GetMetricUnit(string metricKey)
+  private static string GetMetricUnitForChart(string metricKey)
   {
-    var key = metricKey.ToLowerInvariant();
-    if (key.Contains("percent") || key.Contains("_ratio") || (key.Contains("cpu") && key.Contains("usage")))
-      return "%";
-    if (key.Contains("temp")) return "\u00B0C";
-    if (key.Contains("_ms") || key.Contains("latency_ms")) return "ms";
-    if (key.Contains("seconds") || key.Contains("duration")) return "s";
-    if (key.Contains("memory") || key.Contains("bytes")) return "MB";
-    return "";
-  }
-
-  private static string FormatMetricValue(double value, string metricKey)
-  {
-    var key = metricKey.ToLowerInvariant();
-
-    if (key.Contains("memory") || key.Contains("bytes") || key.Contains("_mb") || key.Contains("file_size"))
-      return FormatBytes(value * 1024 * 1024);
-
-    if (key.Contains("percent") || key.Contains("_ratio"))
-      return $"{value:F1}%";
-
-    if (key.Contains("cpu") && key.Contains("usage"))
-      return $"{value:F1}%";
-
-    if (key.Contains("seconds") || key.Contains("duration") || key.Contains("latency") || key.Contains("_time"))
-      return FormatDuration(value, key);
-
-    return FormatScaled(value);
-  }
-
-  private static string FormatBytes(double bytes)
-  {
-    var abs = Math.Abs(bytes);
-    if (abs < 1024) return $"{bytes:F3} B";
-    if (abs < 1024 * 1024) return $"{bytes / 1024:F3} KB";
-    if (abs < 1024L * 1024 * 1024) return $"{bytes / (1024 * 1024):F3} MB";
-    if (abs < 1024L * 1024 * 1024 * 1024) return $"{bytes / (1024L * 1024 * 1024):F3} GB";
-    if (abs < 1024L * 1024 * 1024 * 1024 * 1024) return $"{bytes / (1024L * 1024 * 1024 * 1024):F3} TB";
-    return $"{bytes / (1024L * 1024 * 1024 * 1024 * 1024):F3} PB";
+    var unit = MapKeyToUnit(metricKey);
+    return unit switch
+    {
+      Units.Percent => "%",
+      Units.Megabytes => "MB",
+      Units.Milliseconds => "ms",
+      Units.Decibels => "dB",
+      Units.Frequency => "Hz",
+      Units.PerMinute => "/min",
+      _ => ""
+    };
   }
 
   private static string FormatScaled(double value)
@@ -700,45 +589,9 @@
     return $"{value / 1_000_000_000_000_000:F3} P";
   }
 
-  private static string FormatDuration(double value, string key)
-  {
-    if (key.Contains("_ms") || key.Contains("latency_ms") || key.Contains("duration_ms"))
-      return $"{value:F1} ms";
-    return $"{value:F1} s";
-  }
-
-  private static string RenderSparkline(List<double> points, int width, int height, string? color = null)
-  {
-    if (points.Count < 2) return "";
-
-    var min = points.Min();
-    var max = points.Max();
-    var range = max - min;
-    if (range == 0) range = 1;
-
-    var stepX = (double)width / (points.Count - 1);
-    var padding = 1;
-    var usableHeight = height - padding * 2;
-
-    var pathPoints = new System.Text.StringBuilder();
-    var areaPath = new System.Text.StringBuilder();
-    for (int i = 0; i < points.Count; i++)
-    {
-      var x = i * stepX;
-      var y = padding + usableHeight - ((points[i] - min) / range) * usableHeight;
-      pathPoints.Append(i == 0 ? $"M{x:F1},{y:F1}" : $" L{x:F1},{y:F1}");
-      areaPath.Append(i == 0 ? $"M{x:F1},{y:F1}" : $" L{x:F1},{y:F1}");
-    }
-    // Close area path
-    areaPath.Append($" L{(points.Count - 1) * stepX:F1},{height} L0,{height} Z");
-
-    var strokeColor = color ?? "#5CD4E8";
-
-    return $"<svg viewBox=\"0 0 {width} {height}\" preserveAspectRatio=\"none\" style=\"width:100%;height:100%;\">" +
-           $"<path d=\"{areaPath}\" fill=\"{strokeColor}\" fill-opacity=\"0.1\"/>" +
-           $"<path d=\"{pathPoints}\" fill=\"none\" stroke=\"{strokeColor}\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>" +
-           "</svg>";
-  }
+  // Used by the chart stats footer. Mirrors MetricTile's unit-aware formatting.
+  private static string FormatMetricValue(double value, string metricKey)
+    => UnitsFormatter.Format(value, MapKeyToUnit(metricKey));
 
   public async ValueTask DisposeAsync()
   {

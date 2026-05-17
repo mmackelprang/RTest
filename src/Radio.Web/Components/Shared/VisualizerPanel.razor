@@ -1,59 +1,86 @@
 @rendermode InteractiveServer
 @inject AudioVisualizationHubService VisualizationHub
+@inject VisualizerTelemetryService Telemetry
 @inject IJSRuntime JS
 @inject ILogger<VisualizerPanel> Logger
 @inject ConfigurationApiService ConfigApi
 @implements IAsyncDisposable
 
-<div style="height: 100%; position: relative; background: var(--surface-inset); overflow: hidden;">
-  <!-- Floating mode selector pill -->
-  <div style="position: absolute; top: 8px; right: 8px; z-index: 2; display: flex; align-items: center; gap: 6px;">
-    @if (!VisualizationHub.IsConnected)
-    {
-      <RadzenBadge BadgeStyle="BadgeStyle.Warning" IsPill="true" Text="Disconnected" Style="font-size: 12px;" />
-    }
-    <div class="route-group" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(8px);">
-      <div class="route-toggle @(_currentMode == VisualizationMode.VUMeter ? "route-active" : "")"
-           style="width: 40px; height: 36px; border-radius: 16px; font-size: 13px; font-weight: 600;"
-           @onclick="@(() => SelectMode(VisualizationMode.VUMeter))">
-        VU
-      </div>
-      <div class="route-toggle @(_currentMode == VisualizationMode.Waveform ? "route-active" : "")"
-           style="width: 50px; height: 36px; border-radius: 16px; font-size: 13px; font-weight: 600;"
-           @onclick="@(() => SelectMode(VisualizationMode.Waveform))">
-        Wave
-      </div>
-      <div class="route-toggle @(_currentMode == VisualizationMode.Spectrum ? "route-active" : "")"
-           style="width: 70px; height: 36px; border-radius: 16px; font-size: 13px; font-weight: 600;"
-           @onclick="@(() => SelectMode(VisualizationMode.Spectrum))">
-        Spectrum
-      </div>
-      <div class="route-toggle @(_currentMode == VisualizationMode.Spectrogram ? "route-active" : "")"
-           style="width: 50px; height: 36px; border-radius: 16px; font-size: 13px; font-weight: 600;"
-           @onclick="@(() => SelectMode(VisualizationMode.Spectrogram))">
-        Fall
-      </div>
-      <div class="route-toggle @(_currentMode == VisualizationMode.Circular ? "route-active" : "")"
-           style="width: 50px; height: 36px; border-radius: 16px; font-size: 13px; font-weight: 600;"
-           @onclick="@(() => SelectMode(VisualizationMode.Circular))">
-        Ring
-      </div>
-      <div class="route-toggle @(_currentMode == VisualizationMode.PhaseScope ? "route-active" : "")"
-           style="width: 60px; height: 36px; border-radius: 16px; font-size: 13px; font-weight: 600;"
-           @onclick="@(() => SelectMode(VisualizationMode.PhaseScope))">
-        Phase
-      </div>
+@*
+  VisualizerPanel — full-bleed visualizer with promoted 3-segment mode picker.
+
+  PR 4 rework (handoff §P1·3):
+    • Replaced the floating chip group with a full-width 3-segment header
+      (VU / WAVE / SPECTRUM) — 44px tall, mono 12px uppercase 0.10em
+      letter-spacing, active segment tinted with --accent-dim + accent
+      underline.
+    • Canvas now fills the remaining vertical space — no inset padding.
+    • "Connected" pill collapsed to an 8px dot at top-right.
+    • The "Updates: NN/sec" overlay moves out of the canvas into
+      VisualizerTelemetryService so the dev tray (PR 6) can subscribe.
+    • Frequency-band axis labels live in a 16px strip under the canvas
+      (mono 10px, low-contrast).
+
+  The underlying VisualizationMode enum still has six entries because the
+  visualizer.js module supports waveform/phase/spectrogram/circular. The
+  promoted header only exposes the three primary modes; the secondary
+  modes remain reachable from the dev tray (PR 6) and from saved
+  preferences.
+*@
+
+<div class="viz-panel">
+  <!-- 3-segment mode picker header -->
+  <div class="visualizer-header">
+    <div class="visualizer-mode-picker" role="tablist" aria-label="Visualizer mode">
+      <button class="visualizer-mode @(IsVuMode ? "is-active" : "")"
+              type="button"
+              @onclick="@(() => SelectMode(VisualizationMode.VUMeter))"
+              role="tab"
+              aria-selected="@(IsVuMode ? "true" : "false")"
+              aria-label="VU meter mode">VU</button>
+      <button class="visualizer-mode @(IsWaveMode ? "is-active" : "")"
+              type="button"
+              @onclick="@(() => SelectMode(VisualizationMode.Waveform))"
+              role="tab"
+              aria-selected="@(IsWaveMode ? "true" : "false")"
+              aria-label="Waveform mode">Wave</button>
+      <button class="visualizer-mode @(IsSpectrumMode ? "is-active" : "")"
+              type="button"
+              @onclick="@(() => SelectMode(VisualizationMode.Spectrum))"
+              role="tab"
+              aria-selected="@(IsSpectrumMode ? "true" : "false")"
+              aria-label="Spectrum mode">Spectrum</button>
     </div>
+    <span class="visualizer-conn-dot @(VisualizationHub.IsConnected ? "is-connected" : "")"
+          aria-label="@(VisualizationHub.IsConnected ? "Connected" : "Disconnected")"
+          title="@(VisualizationHub.IsConnected ? "Connected" : "Disconnected")"></span>
   </div>
 
-  <!-- Edge-to-edge canvas -->
-  <canvas id="@WebConstants.ElementIds.VisualizerCanvas" style="width: 100%; height: 100%; display: block;"></canvas>
+  <!-- Full-bleed canvas -->
+  <div class="visualizer-canvas-wrap">
+    <canvas id="@WebConstants.ElementIds.VisualizerCanvas" class="visualizer-canvas"></canvas>
 
-  @if (_isInitialized && !_hasReceivedData)
+    @if (_isInitialized && !_hasReceivedData)
+    {
+      <div class="visualizer-waiting" aria-live="polite">
+        <RadzenIcon Icon="graphic_eq" Style="font-size: 64px; color: var(--text-low); margin-bottom: 8px;" />
+        <div style="font-size: 16px; color: var(--text-low);">Waiting for audio data...</div>
+      </div>
+    }
+    else if (!_isInitialized)
+    {
+      <Skeleton Shape="Skeleton.SkeletonShape.Visualizer" />
+    }
+  </div>
+
+  <!-- Frequency-band axis strip (visible in spectrum-family modes) -->
+  @if (IsSpectrumMode)
   {
-    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; animation: ambientPulse 3s ease-in-out infinite;">
-      <RadzenIcon Icon="graphic_eq" Style="font-size: 64px; color: var(--text-low); margin-bottom: 8px;" />
-      <div style="font-size: 16px; color: var(--text-low);">Waiting for audio data...</div>
+    <div class="visualizer-axis" aria-hidden="true">
+      <span>375 Hz</span>
+      <span>750 Hz</span>
+      <span>1.1 kHz</span>
+      <span>1.5 kHz</span>
     </div>
   }
 </div>
@@ -75,6 +102,21 @@
   private bool _hasReceivedData;
   private IJSObjectReference? _jsModule;
 
+  // Updates/sec telemetry — counted in HandleLevelData/HandleWaveformData/
+  // HandleSpectrumData and sampled every second by _telemetryTimer.
+  private int _frameCountSinceLastSample;
+  private System.Threading.Timer? _telemetryTimer;
+
+  // Map the six-mode enum to the three primary buckets the header exposes.
+  private bool IsVuMode => _currentMode == VisualizationMode.VUMeter;
+  private bool IsWaveMode =>
+    _currentMode == VisualizationMode.Waveform ||
+    _currentMode == VisualizationMode.PhaseScope;
+  private bool IsSpectrumMode =>
+    _currentMode == VisualizationMode.Spectrum ||
+    _currentMode == VisualizationMode.Spectrogram ||
+    _currentMode == VisualizationMode.Circular;
+
   protected override async Task OnInitializedAsync()
   {
     try
@@ -87,6 +129,15 @@
       VisualizationHub.OnLevelData += HandleLevelData;
       VisualizationHub.OnWaveformData += HandleWaveformData;
       VisualizationHub.OnSpectrumData += HandleSpectrumData;
+
+      // Publish an "updates/sec" sample once per second by snapshotting
+      // the frame counter and resetting it. The dev tray (PR 6) reads
+      // the value via VisualizerTelemetryService.
+      _telemetryTimer = new System.Threading.Timer(_ =>
+      {
+        var n = System.Threading.Interlocked.Exchange(ref _frameCountSinceLastSample, 0);
+        Telemetry.SetUpdatesPerSecond(n);
+      }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
     }
     catch (Exception ex)
     {
@@ -208,6 +259,7 @@
   private async Task HandleLevelData(LevelDataDto data)
   {
     if (_isDisposed || !_isInitialized || _jsModule == null || _currentMode != VisualizationMode.VUMeter) return;
+    System.Threading.Interlocked.Increment(ref _frameCountSinceLastSample);
     var wasFirst = !_hasReceivedData;
     _hasReceivedData = true;
     try
@@ -225,6 +277,7 @@
   {
     if (_isDisposed || !_isInitialized || _jsModule == null) return;
     if (_currentMode != VisualizationMode.Waveform && _currentMode != VisualizationMode.PhaseScope) return;
+    System.Threading.Interlocked.Increment(ref _frameCountSinceLastSample);
     var wasFirst = !_hasReceivedData;
     _hasReceivedData = true;
     try
@@ -248,6 +301,7 @@
     if (_currentMode != VisualizationMode.Spectrum &&
         _currentMode != VisualizationMode.Spectrogram &&
         _currentMode != VisualizationMode.Circular) return;
+    System.Threading.Interlocked.Increment(ref _frameCountSinceLastSample);
     var wasFirst = !_hasReceivedData;
     _hasReceivedData = true;
     try
@@ -290,6 +344,10 @@
   public async ValueTask DisposeAsync()
   {
     _isDisposed = true;
+
+    _telemetryTimer?.Dispose();
+    // Publish a final zero so subscribers don't see a stale value after dispose.
+    try { Telemetry.SetUpdatesPerSecond(0); } catch { /* ignore */ }
 
     VisualizationHub.OnLevelData -= HandleLevelData;
     VisualizationHub.OnWaveformData -= HandleWaveformData;
