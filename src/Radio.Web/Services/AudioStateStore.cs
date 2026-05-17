@@ -21,6 +21,10 @@ public class AudioStateStore : IAsyncDisposable
   public float Volume { get; private set; } = 0.75f;
   public bool IsMuted { get; private set; }
   public FingerprintStatusDto? FingerprintStatus { get; private set; }
+  // Most recent RadioStateDto delivered by SignalR. Carries NowPlayingMatchId
+  // which the REST /api/radio/state endpoint cannot populate. Subscribers
+  // can read this directly; null until the first hub broadcast.
+  public RadioStateDto? RadioState { get; private set; }
   public int QueueCount { get; private set; }
   public Dictionary<string, float> SourceGainOffsets { get; private set; } = new();
 
@@ -43,8 +47,9 @@ public class AudioStateStore : IAsyncDisposable
   /// <summary>Raised when fingerprint status changes.</summary>
   public event Func<Task>? FingerprintStatusChanged;
 
-  /// <summary>Raised when radio state changes.</summary>
-  public event Func<Task>? RadioStateChanged;
+  /// <summary>Raised when radio state changes. Carries the typed DTO so
+  /// subscribers can read NowPlayingMatchId directly without a REST refetch.</summary>
+  public event Func<RadioStateDto, Task>? RadioStateChanged;
 
   /// <summary>Raised when sleep state changes.</summary>
   public event Func<bool, Task>? SleepStateChanged;
@@ -182,9 +187,20 @@ public class AudioStateStore : IAsyncDisposable
     await NotifyAsync(FingerprintStatusChanged);
   }
 
-  private async Task OnHubRadioStateChanged()
+  private async Task OnHubRadioStateChanged(RadioStateDto dto)
   {
-    await NotifyAsync(RadioStateChanged);
+    RadioState = dto;
+    if (RadioStateChanged != null)
+    {
+      try
+      {
+        await RadioStateChanged.Invoke(dto);
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Error notifying AudioStateStore subscriber");
+      }
+    }
   }
 
   private async Task OnHubSleepStateChanged(bool isSleeping)

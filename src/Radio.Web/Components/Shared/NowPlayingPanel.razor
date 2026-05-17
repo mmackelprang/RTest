@@ -60,7 +60,9 @@
               {
                 <div class="np-recognition-header">NOW</div>
                 <div class="np-recognition-row np-recognition-row-current" data-match-id="@nowMatch.MatchId">
-                  <span class="np-recognition-art-placeholder">♪</span>
+                  <span class="np-recognition-art-wrap is-current">
+                    <span class="np-recognition-art-placeholder">♪</span>
+                  </span>
                   @if (string.IsNullOrEmpty(nowMatch.Title))
                   {
                     <span class="np-recognition-title np-recognition-no-match">No match in window</span>
@@ -82,7 +84,9 @@
                 @foreach (var evt in earlierMatches)
                 {
                   <div class="np-recognition-row" data-match-id="@evt.MatchId">
-                    <span class="np-recognition-art-placeholder">♪</span>
+                    <span class="np-recognition-art-wrap">
+                      <span class="np-recognition-art-placeholder">♪</span>
+                    </span>
                     @if (string.IsNullOrEmpty(evt.Title))
                     {
                       <span class="np-recognition-title np-recognition-no-match">No match in window</span>
@@ -428,10 +432,13 @@
     await InvokeAsync(StateHasChanged);
   }
 
-  private async Task OnRadioStateChanged()
+  private async Task OnRadioStateChanged(RadioStateDto dto)
   {
     _lastSignalREventUtc = DateTime.UtcNow;
-    await RefreshRadioStateAsync();
+    // Use the SignalR payload directly — it carries NowPlayingMatchId, which
+    // the REST /api/radio/state endpoint cannot populate (RadioController
+    // has no access to AudioStateUpdateService._currentMatchId).
+    _radioState = dto;
     await InvokeAsync(StateHasChanged);
   }
 

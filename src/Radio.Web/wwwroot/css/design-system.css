@@ -3220,9 +3220,26 @@ body {
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.08em;
-  text-transform: lowercase;
+  /* No text-transform — the component emits title-case strings
+     ('Strong', 'Likely', 'Possible', 'No match') matching the spec + mock.
+     Earlier `text-transform: lowercase` was silently mangling them on screen. */
   color: var(--text-medium);
   margin-left: 6px;
+}
+
+/* Per-bucket label color hierarchy matching the pip backgrounds —
+   keeps the word and pips visually coupled so the bucket reads at a glance. */
+.confidence-pips[data-bucket="strong"] .confidence-label {
+  color: var(--signal-green);
+}
+.confidence-pips[data-bucket="likely"] .confidence-label {
+  color: color-mix(in srgb, var(--signal-green) 60%, transparent);
+}
+.confidence-pips[data-bucket="possible"] .confidence-label {
+  color: var(--signal-amber);
+}
+.confidence-pips[data-bucket="none"] .confidence-label {
+  color: var(--text-low);
 }
 
 /* ─── §V  Recognition Stream (Radio Controller Polish PR 2) ────────────────── *
@@ -3260,17 +3277,24 @@ body {
 }
 
 .np-recognition-row-current {
-  position: relative;
   border-left: 2px solid var(--signal-amber);
   background: color-mix(in srgb, var(--signal-amber) 6%, transparent);
 }
 
-/* Small amber dot in the top-right corner of the current row's art square. */
-.np-recognition-row-current::after {
+/* Wraps the art square in a relative-positioned container so the
+   "now playing" amber dot can sit on the art's top-right corner per mock
+   (bleeding slightly into the row gutter), not inside the row body. */
+.np-recognition-art-wrap {
+  position: relative;
+  width: 34px;
+  height: 34px;
+}
+
+.np-recognition-art-wrap.is-current::after {
   content: "";
   position: absolute;
-  top: 6px;
-  left: 36px;
+  top: -3px;
+  right: -3px;
   width: 6px;
   height: 6px;
   border-radius: 50%;

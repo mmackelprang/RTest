@@ -85,12 +85,15 @@ public class AudioStateHubServiceTests
     Func<Task> handler = () => Task.CompletedTask;
     Func<NowPlayingDto?, Task> nowPlayingHandler = _ => Task.CompletedTask;
     Func<VolumeDto?, Task> volumeHandler = _ => Task.CompletedTask;
+    // RadioStateChanged now carries the typed DTO so subscribers can read
+    // NowPlayingMatchId directly without a REST refetch.
+    Func<RadioStateDto, Task> radioStateHandler = _ => Task.CompletedTask;
 
     // Act - Subscribe to all event types (should not throw)
     _service.PlaybackStateChanged += handler;
     _service.NowPlayingChanged += nowPlayingHandler;
     _service.QueueChanged += handler;
-    _service.RadioStateChanged += handler;
+    _service.RadioStateChanged += radioStateHandler;
     _service.VolumeChanged += volumeHandler;
     _service.SourceChanged += handler;
 
@@ -98,7 +101,7 @@ public class AudioStateHubServiceTests
     _service.PlaybackStateChanged -= handler;
     _service.NowPlayingChanged -= nowPlayingHandler;
     _service.QueueChanged -= handler;
-    _service.RadioStateChanged -= handler;
+    _service.RadioStateChanged -= radioStateHandler;
     _service.VolumeChanged -= volumeHandler;
     _service.SourceChanged -= handler;
 

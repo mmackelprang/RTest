@@ -337,9 +337,11 @@
     }
   }
 
-  private async Task HandleRadioStateChanged()
+  private async Task HandleRadioStateChanged(RadioStateDto dto)
   {
-    await LoadRadioStateAsync();
+    // Use the SignalR payload directly instead of re-fetching via REST.
+    // The hub broadcast carries NowPlayingMatchId; the REST endpoint cannot.
+    _radioState = dto;
     await InvokeAsync(StateHasChanged);
   }
 

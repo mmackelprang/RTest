@@ -742,6 +742,15 @@ public class AudioEngineConfigDto
 /// Polish arc replaces the raw <c>double?</c> on the wire so the UI renders
 /// a word + pip count instead of a fractional percentage.
 /// </summary>
+/// <remarks>
+/// The API serializes enums as strings via a global <c>JsonStringEnumConverter</c>
+/// registered in <c>Radio.API/Program.cs</c>. The Web's <c>HttpClient</c> calls
+/// (e.g. <c>GetFromJsonAsync</c>) use default <c>JsonSerializerOptions</c> with
+/// no enum converter, so without this attribute deserialization throws
+/// <c>JsonException: The JSON value could not be converted to ConfidenceBucket</c>
+/// on every fingerprint status fetch — silently breaking the recognition UI.
+/// </remarks>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ConfidenceBucket
 {
   None,

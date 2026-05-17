@@ -354,4 +354,76 @@ public class NowPlayingPanelTests : TestContext
     var result = NowPlayingPanel.FormatTimeAgo(threeMinutesAgo, now);
     Assert.Equal("3m ago", result);
   }
+
+  // ─── Wire-path regression: RadioStateChanged carries the typed DTO ─────────
+  //
+  // Tester surfaced during live-kiosk UAT that the recognition NOW row never
+  // anchored because the SignalR RadioStateChanged handler discarded the
+  // payload and re-fetched via REST. The REST endpoint cannot populate
+  // NowPlayingMatchId (it lives in AudioStateUpdateService._currentMatchId
+  // which RadioController has no access to). After the fix, the handler
+  // accepts a RadioStateDto and the panel anchors immediately on hub push.
+  //
+  // This test proves the wire-path end-to-end: build a real hub service,
+  // mount the panel, invoke the typed event with a payload carrying
+  // NowPlayingMatchId, and assert the NOW row anchors to the matching event.
+
+  [Fact]
+  public async Task Recognition_AnchorsNowRow_WhenRadioStateChangedDtoArrives()
+  {
+    var matches = new List<FingerprintEventDto>
+    {
+      MakeEvent("m-old", "Older Song", "Old Artist", ConfidenceBucket.Likely, DateTime.UtcNow.AddMinutes(-5)),
+      MakeEvent("m-target", "Anchored Track", "Anchor Artist", ConfidenceBucket.Strong, DateTime.UtcNow.AddSeconds(-10))
+    };
+    var status = new FingerprintStatusDto
+    {
+      IsEnabled = true,
+      Phase = "Matched",
+      RecentEvents = matches
+    };
+
+    var cut = RenderComponent<NowPlayingPanel>();
+
+    // Seed the fingerprint events without an anchor — same reflective injection
+    // pattern the rest of the suite uses. _radioState stays null until the
+    // typed hub event fires below.
+    var instance = cut.Instance;
+    var type = typeof(NowPlayingPanel);
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+    type.GetField("_fpStatus", flags)!.SetValue(instance, status);
+    type.GetField("_fpEventsReversed", flags)!
+      .SetValue(instance, Enumerable.Reverse(status.RecentEvents).ToList());
+    type.GetField("_showFingerprintDetail", flags)!.SetValue(instance, true);
+    cut.Render();
+
+    // Sanity: nothing is anchored yet (no NowPlayingMatchId).
+    Assert.Empty(cut.FindAll(".np-recognition-row-current"));
+
+    // Now drive the typed hub event. The hub service is a real instance in DI;
+    // we reach into its compiler-generated backing field and invoke directly,
+    // mirroring what SignalR would do on a live wire push.
+    var hubService = Services.GetRequiredService<AudioStateHubService>();
+    var eventField = typeof(AudioStateHubService).GetField(
+      nameof(AudioStateHubService.RadioStateChanged),
+      BindingFlags.NonPublic | BindingFlags.Instance);
+    Assert.NotNull(eventField);
+    var handler = (Func<RadioStateDto, Task>?)eventField!.GetValue(hubService);
+    Assert.NotNull(handler);
+
+    var dto = new RadioStateDto(
+      Frequency: 92.5e6, Band: "FM", Step: 100e3,
+      SignalStrength: 70, IsScanning: false, ScanDirection: null,
+      ScanStopThreshold: -18.0, Gain: 28, AutoGain: true,
+      Equalizer: "Flat", DeviceVolume: 70,
+      NowPlayingMatchId: "m-target");
+
+    await cut.InvokeAsync(() => handler!.Invoke(dto));
+
+    // The NOW row now anchors to the target match — proving the typed payload
+    // reached the panel without a REST refetch.
+    var currentRows = cut.FindAll(".np-recognition-row-current");
+    Assert.Single(currentRows);
+    Assert.Equal("m-target", currentRows[0].GetAttribute("data-match-id"));
+  }
 }
