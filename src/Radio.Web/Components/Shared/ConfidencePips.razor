@@ -1,0 +1,45 @@
+@*
+  ConfidencePips — 3-pip widget that renders a fingerprint match confidence as a
+  fixed number of lit pips plus a single word ("Strong" / "Likely" / "Possible" /
+  "No match"). Replaces the raw "78%" / "94%" percentage badges that PR 2 of the
+  Radio Controller Polish arc explicitly bans. Driven by the API-side
+  ConfidenceBucket enum so the UI never sees the raw double score.
+
+    Strong   ▌▌▌  green
+    Likely   ▌▌·  light green
+    Possible ▌··  amber
+    None     ···  dim, "No match" label
+
+  CSS lives in design-system.css §U Confidence pips.
+*@
+
+<div class="confidence-pips" data-bucket="@Bucket.ToString().ToLowerInvariant()">
+  <span class="confidence-pip @(LitCount >= 1 ? "is-lit" : null)"></span>
+  <span class="confidence-pip @(LitCount >= 2 ? "is-lit" : null)"></span>
+  <span class="confidence-pip @(LitCount >= 3 ? "is-lit" : null)"></span>
+  <span class="confidence-label">@BucketLabel</span>
+</div>
+
+@code {
+  /// <summary>
+  /// Confidence band to render. Drives both the lit-pip count and the label text.
+  /// </summary>
+  [Parameter, EditorRequired]
+  public ConfidenceBucket Bucket { get; set; }
+
+  private int LitCount => Bucket switch
+  {
+    ConfidenceBucket.Strong => 3,
+    ConfidenceBucket.Likely => 2,
+    ConfidenceBucket.Possible => 1,
+    _ => 0
+  };
+
+  private string BucketLabel => Bucket switch
+  {
+    ConfidenceBucket.Strong => "Strong",
+    ConfidenceBucket.Likely => "Likely",
+    ConfidenceBucket.Possible => "Possible",
+    _ => "No match"
+  };
+}

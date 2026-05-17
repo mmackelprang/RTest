@@ -164,11 +164,15 @@ public static class AudioDtoMapper
       LastError = snapshot.LastError,
       RecentEvents = snapshot.RecentEvents.Select(e => new FingerprintEventDto
       {
+        MatchId = e.MatchId,
         AudioSource = e.AudioSource,
         SourceType = e.SourceType,
         IsMatch = e.IsMatch,
         Count = e.Count,
-        LastConfidence = e.LastConfidence,
+        // PR 2 of the Radio Controller Polish arc — the raw double is folded
+        // into a coarse bucket at the API boundary and dropped from the wire
+        // shape. The raw score stays on the server-side record for logging.
+        Confidence = ToConfidenceBucket(e.IsMatch, e.LastConfidence),
         Title = e.Title,
         Artist = e.Artist,
         Album = e.Album,
@@ -177,6 +181,39 @@ public static class AudioDtoMapper
         Timestamp = e.Timestamp
       }).ToList()
     };
+  }
+
+  /// <summary>
+  /// Folds a raw fingerprint confidence score into a coarse
+  /// <see cref="ConfidenceBucket"/>. Thresholds:
+  /// ≥ 0.90 → <c>Strong</c>; 0.80–0.89 → <c>Likely</c>;
+  /// 0.60–0.79 → <c>Possible</c>; otherwise <c>None</c>.
+  /// </summary>
+  /// <param name="isMatch">Whether the fingerprint pipeline produced a match.</param>
+  /// <param name="rawConfidence">Raw confidence score on [0, 1], or null when no match.</param>
+  public static ConfidenceBucket ToConfidenceBucket(bool isMatch, double? rawConfidence)
+  {
+    if (!isMatch || rawConfidence is not double score)
+    {
+      return ConfidenceBucket.None;
+    }
+
+    if (score >= 0.90)
+    {
+      return ConfidenceBucket.Strong;
+    }
+
+    if (score >= 0.80)
+    {
+      return ConfidenceBucket.Likely;
+    }
+
+    if (score >= 0.60)
+    {
+      return ConfidenceBucket.Possible;
+    }
+
+    return ConfidenceBucket.None;
   }
 
   /// <summary>

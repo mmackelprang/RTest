@@ -25,7 +25,12 @@ public class AudioStateHubService : IAsyncDisposable
   public event Func<Task>? PlaybackStateChanged;
   public event Func<NowPlayingDto?, Task>? NowPlayingChanged;
   public event Func<Task>? QueueChanged;
-  public event Func<Task>? RadioStateChanged;
+  // RadioStateChanged carries the full RadioStateDto payload (including
+  // NowPlayingMatchId) so subscribers don't need to re-fetch via REST.
+  // The REST hop drops NowPlayingMatchId because RadioController has no
+  // access to AudioStateUpdateService._currentMatchId — the broadcast is
+  // the only path that carries it.
+  public event Func<RadioStateDto, Task>? RadioStateChanged;
   public event Func<VolumeDto?, Task>? VolumeChanged;
   public event Func<Task>? SourceChanged;
   public event Func<Task>? FingerprintStatusChanged;
@@ -107,13 +112,16 @@ public class AudioStateHubService : IAsyncDisposable
       });
 
       // Server sends RadioStateChanged with a RadioStateDto payload —
-      // accept and discard it so SignalR dispatches the message.
-      _hubConnection.On<object>("RadioStateChanged", async (_) =>
+      // deserialize and pass through so subscribers can read NowPlayingMatchId
+      // directly. (Previously the payload was discarded and subscribers
+      // re-fetched via REST, which strips NowPlayingMatchId and silently
+      // broke the recognition stream's NOW-row anchor.)
+      _hubConnection.On<RadioStateDto>("RadioStateChanged", async (dto) =>
       {
         _logger.LogDebug("Received RadioStateChanged event");
         if (RadioStateChanged != null)
         {
-          await RadioStateChanged.Invoke();
+          await RadioStateChanged.Invoke(dto);
         }
       });
 

@@ -1,5 +1,6 @@
 @rendermode InteractiveServer
 @inject AudioApiService AudioApi
+@inject RadioApiService RadioApi
 @inject AudioStateHubService HubService
 @inject ConfigurationApiService ConfigApi
 @inject ILogger<NowPlayingPanel> Logger
@@ -29,74 +30,87 @@
   <div style="position: relative; z-index: 1; flex: 1; display: flex; align-items: center; justify-content: center; padding: 12px; min-height: 0;">
     @if (_showFingerprintDetail)
     {
-      <!-- Fingerprint detail panel — replaces album art area when badge is tapped -->
+      @* Recognition stream — replaces the legacy <table>+telemetry-strip block
+         per PR 2 of the Radio Controller Polish arc. NOW/EARLIER headers
+         anchor the active match (_radioState.NowPlayingMatchId) at the top
+         with an amber left-border + dot; older matches list beneath with
+         time-ago labels. Failed lookups render as italic "No match in window"
+         sentences. Confidence reads as <ConfidencePips/>, never as a raw
+         percentage. The telemetry strip (Fingerprints/min · Lookups/min) is
+         removed entirely from the panel header; if it resurfaces it'll live
+         in the DevTray (Arc 1 PR 6) in a future PR. *@
       <div style="width: 100%; height: 100%; display: flex; flex-direction: column; background: rgba(0,0,0,0.75); backdrop-filter: blur(8px); border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1);">
-        <!-- Header with rates -->
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.3);">
-          <div style="font-family: var(--font-mono); font-size: 12px; color: var(--text-medium);">
-            Fingerprints: @(_fpStatus?.FingerprintsPerMinute.ToString("F1") ?? "0.0")/min
-            &nbsp;&bull;&nbsp;
-            Lookups: @(_fpStatus?.MetadataCallsPerMinute.ToString("F1") ?? "0.0")/min
-          </div>
+        <div style="display: flex; justify-content: flex-end; align-items: center; padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.3);">
           <RadzenButton Icon="close" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Light"
-                        Variant="Variant.Text" Click="@ToggleFingerprintDetail" Style="padding: 2px;" />
+                        Variant="Variant.Text" Click="@ToggleFingerprintDetail" Style="padding: 2px;"
+                        title="Close recognition stream" />
         </div>
-        <!-- Event log table -->
-        <div style="flex: 1; overflow-y: auto; padding: 0;">
-          <table style="width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 11px;">
-            <thead>
-              <tr style="color: var(--text-low); border-bottom: 1px solid rgba(255,255,255,0.08);">
-                <th style="text-align: center; padding: 6px 4px; font-weight: 500;">Src</th>
-                <th style="text-align: center; padding: 6px 4px; font-weight: 500;">Match</th>
-                <th style="text-align: center; padding: 6px 4px; font-weight: 500;">#</th>
-                <th style="text-align: center; padding: 6px 4px; font-weight: 500;">Conf%</th>
-                <th style="text-align: left; padding: 6px 8px; font-weight: 500;">Track</th>
-                <th style="text-align: center; padding: 6px 4px; font-weight: 500;">Art</th>
-              </tr>
-            </thead>
-            <tbody>
-              @if (_fpEventsReversed != null)
+        <div style="flex: 1; overflow-y: auto;">
+          @if (_fpEventsReversed != null && _fpEventsReversed.Count > 0)
+          {
+            var nowMatchId = _radioState?.NowPlayingMatchId;
+            var nowMatch = !string.IsNullOrEmpty(nowMatchId)
+              ? _fpEventsReversed.FirstOrDefault(e => e.MatchId == nowMatchId)
+              : null;
+            var earlierMatches = nowMatch != null
+              ? _fpEventsReversed.Where(e => e.MatchId != nowMatch.MatchId).ToList()
+              : _fpEventsReversed.ToList();
+            <div class="np-recognition-stream">
+              @if (nowMatch != null)
               {
-                @foreach (var evt in _fpEventsReversed)
+                <div class="np-recognition-header">NOW</div>
+                <div class="np-recognition-row np-recognition-row-current" data-match-id="@nowMatch.MatchId">
+                  <span class="np-recognition-art-wrap is-current">
+                    <span class="np-recognition-art-placeholder">♪</span>
+                  </span>
+                  @if (string.IsNullOrEmpty(nowMatch.Title))
+                  {
+                    <span class="np-recognition-title np-recognition-no-match">No match in window</span>
+                  }
+                  else
+                  {
+                    <div class="np-recognition-text">
+                      <div class="np-recognition-title">@nowMatch.Title</div>
+                      <div class="np-recognition-artist">@(string.IsNullOrEmpty(nowMatch.Artist) ? "—" : nowMatch.Artist)</div>
+                    </div>
+                  }
+                  <ConfidencePips Bucket="@nowMatch.Confidence" />
+                  <span class="np-recognition-now-tag">now</span>
+                </div>
+              }
+              @if (earlierMatches.Count > 0)
+              {
+                <div class="np-recognition-header">EARLIER</div>
+                @foreach (var evt in earlierMatches)
                 {
-                  <tr style="border-bottom: 1px solid rgba(255,255,255,0.04); height: 22px; color: @(GetEventRowColor(evt));">
-                    <td style="text-align: center; padding: 3px 4px;" title="@evt.SourceType">
-                      <RadzenIcon Icon="@GetFpSourceIcon(evt.SourceType)" Style="font-size: 14px;" />
-                    </td>
-                    <td style="text-align: center; padding: 3px 4px;">
-                      @if (evt.IsMatch)
-                      {
-                        <span style="color: #4caf50;">&#x2714;</span>
-                      }
-                      else
-                      {
-                        <span style="color: rgba(255,255,255,0.3);">&#x2718;</span>
-                      }
-                    </td>
-                    <td style="text-align: center; padding: 3px 4px;">@evt.Count</td>
-                    <td style="text-align: center; padding: 3px 4px;">@(evt.LastConfidence.HasValue ? $"{evt.LastConfidence.Value:P0}" : "--")</td>
-                    <td style="padding: 3px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px;">@(FormatEventTrack(evt))</td>
-                    <td style="text-align: center; padding: 3px 4px;">
-                      @if (evt.HasAlbumArt)
-                      {
-                        <span style="color: #4caf50;">&#x2714;</span>
-                      }
-                      else
-                      {
-                        <span style="color: rgba(255,255,255,0.2);">—</span>
-                      }
-                    </td>
-                  </tr>
+                  <div class="np-recognition-row" data-match-id="@evt.MatchId">
+                    <span class="np-recognition-art-wrap">
+                      <span class="np-recognition-art-placeholder">♪</span>
+                    </span>
+                    @if (string.IsNullOrEmpty(evt.Title))
+                    {
+                      <span class="np-recognition-title np-recognition-no-match">No match in window</span>
+                    }
+                    else
+                    {
+                      <div class="np-recognition-text">
+                        <div class="np-recognition-title">@evt.Title</div>
+                        <div class="np-recognition-artist">@(string.IsNullOrEmpty(evt.Artist) ? "—" : evt.Artist)</div>
+                      </div>
+                    }
+                    <ConfidencePips Bucket="@evt.Confidence" />
+                    <span class="np-recognition-time-ago">@FormatTimeAgo(evt.Timestamp)</span>
+                  </div>
                 }
               }
-              else
-              {
-                <tr>
-                  <td colspan="6" style="padding: 16px; text-align: center; color: var(--text-low);">No fingerprint events yet</td>
-                </tr>
-              }
-            </tbody>
-          </table>
+            </div>
+          }
+          else
+          {
+            <div style="padding: 16px; text-align: center; color: var(--text-low); font-family: var(--font-mono); font-size: 11px;">
+              No fingerprint events yet
+            </div>
+          }
         </div>
       </div>
     }
@@ -309,6 +323,11 @@
   private List<FingerprintEventDto>? _fpEventsReversed;
   private bool _showFingerprintDetail;
 
+  // PR 2 of the Radio Controller Polish arc — radio state snapshot for the
+  // recognition stream's NOW-row anchor (binds against NowPlayingMatchId).
+  // Refreshed on RadioStateChanged hub events; null until the first load.
+  private RadioStateDto? _radioState;
+
   // Source gain state
   private float _currentSourceGain = 1.0f;
   private string? _nowPlayingSourceType;
@@ -337,9 +356,11 @@
       HubService.SourceChanged += OnSourceChanged;
       HubService.VolumeChanged += OnVolumeChangedEvent;
       HubService.FingerprintStatusChanged += OnFingerprintStatusChanged;
+      HubService.RadioStateChanged += OnRadioStateChanged;
 
       await RefreshPlaybackStateAsync();
       await RefreshFingerprintStatusAsync();
+      await RefreshRadioStateAsync();
       await LoadSourceGainOffsetsAsync();
 
       // Periodic fallback poll for now playing updates. Catches track identifications
@@ -409,6 +430,31 @@
     _lastSignalREventUtc = DateTime.UtcNow;
     await RefreshFingerprintStatusAsync();
     await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task OnRadioStateChanged(RadioStateDto dto)
+  {
+    _lastSignalREventUtc = DateTime.UtcNow;
+    // Use the SignalR payload directly — it carries NowPlayingMatchId, which
+    // the REST /api/radio/state endpoint cannot populate (RadioController
+    // has no access to AudioStateUpdateService._currentMatchId).
+    _radioState = dto;
+    await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task RefreshRadioStateAsync()
+  {
+    try
+    {
+      _radioState = await RadioApi.GetStateAsync();
+    }
+    catch (Exception ex)
+    {
+      // Non-radio sources (BT, File) return 400 here; that's fine — the
+      // recognition stream simply renders without the NOW anchor.
+      Logger.LogDebug(ex, "Error refreshing radio state in NowPlayingPanel");
+      _radioState = null;
+    }
   }
 
   private async Task OnNowPlayingPollAsync()
@@ -573,10 +619,26 @@
       "Capturing" => "Listening",
       "Fingerprinting" => "Analyzing",
       "Querying" => "Searching",
-      "Matched" => _fpStatus?.RecentEvents?.LastOrDefault()?.LastConfidence is double c ? $"{c:P0}" : "Match",
+      // PR 2 of the Radio Controller Polish arc — the badge mirrors the
+      // recognition stream and renders a word, never a raw percentage. The
+      // bucket label comes from the most-recent match's coarse Confidence.
+      "Matched" => GetMatchedBadgeLabel(),
       "NoMatch" => "No ID",
       "Error" => "Error",
       _ => "ID"
+    };
+  }
+
+  private string GetMatchedBadgeLabel()
+  {
+    var latestMatch = _fpStatus?.RecentEvents?
+      .LastOrDefault(e => e.IsMatch);
+    return latestMatch?.Confidence switch
+    {
+      ConfidenceBucket.Strong => "Strong",
+      ConfidenceBucket.Likely => "Likely",
+      ConfidenceBucket.Possible => "Possible",
+      _ => "Match"
     };
   }
 
@@ -627,27 +689,23 @@
     };
   }
 
-  private static string GetFpSourceIcon(string sourceType) => SourceTypeHelper.GetIcon(sourceType);
+  /// <summary>
+  /// Short relative-time formatter for recognition rows. Renders "Xs ago" /
+  /// "Xm ago" / "Xh ago" / "Xd ago" — chosen over <c>Timestamps.FormatRelative</c>
+  /// because the recognition stream is anchored on very recent events (most
+  /// matches happen in the last few minutes) and the absolute "Today HH:mm"
+  /// form reads as too rigid in that scale.
+  /// </summary>
+  private static string FormatTimeAgo(DateTime utc) => FormatTimeAgo(utc, DateTime.UtcNow);
 
-  private static string GetEventRowColor(FingerprintEventDto evt)
+  internal static string FormatTimeAgo(DateTime utc, DateTime nowUtc)
   {
-    return evt.Phase switch
-    {
-      "Matched" => "rgba(76,175,80,0.9)",
-      "Error" => "rgba(244,67,54,0.8)",
-      "NoMatch" => "rgba(255,255,255,0.4)",
-      "Capturing" or "Fingerprinting" or "Querying" => "rgba(0,188,212,0.8)",
-      _ => "rgba(255,255,255,0.5)"
-    };
-  }
-
-  private static string FormatEventTrack(FingerprintEventDto evt)
-  {
-    if (string.IsNullOrEmpty(evt.Title)) return "--";
-    var parts = new List<string> { evt.Title };
-    if (!string.IsNullOrEmpty(evt.Artist)) parts.Add(evt.Artist);
-    if (!string.IsNullOrEmpty(evt.Album)) parts.Add(evt.Album);
-    return string.Join(" / ", parts);
+    var delta = nowUtc - utc;
+    if (delta.TotalSeconds < 1) return "just now";
+    if (delta.TotalMinutes < 1) return $"{(int)delta.TotalSeconds}s ago";
+    if (delta.TotalHours < 1) return $"{(int)delta.TotalMinutes}m ago";
+    if (delta.TotalDays < 1) return $"{(int)delta.TotalHours}h ago";
+    return $"{(int)delta.TotalDays}d ago";
   }
 
   // --- Source gain helpers ---
@@ -874,6 +932,7 @@
     HubService.SourceChanged -= OnSourceChanged;
     HubService.VolumeChanged -= OnVolumeChangedEvent;
     HubService.FingerprintStatusChanged -= OnFingerprintStatusChanged;
+    HubService.RadioStateChanged -= OnRadioStateChanged;
     _gainDebounceTimer?.Dispose();
     _nowPlayingPollTimer?.Dispose();
     await Task.CompletedTask;
