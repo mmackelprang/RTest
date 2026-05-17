@@ -488,7 +488,7 @@ public class RadioControlPanelTests : TestContext
     Assert.Single(empties);
     // Empty placeholder is the NEXT slot (slot 2 after the first preset).
     Assert.Equal("02", empties[0].QuerySelector(".rcp-preset-slot")!.TextContent.Trim());
-    Assert.Contains("Empty", empties[0].QuerySelector(".rcp-preset-empty-hint")!.TextContent);
+    Assert.Contains("EMPTY", empties[0].QuerySelector(".rcp-preset-empty-hint")!.TextContent);
   }
 
   [Fact]

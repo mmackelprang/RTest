@@ -260,7 +260,7 @@
           var nextSlot = presetCount + 1;
           <div class="rcp-preset-item rcp-preset-empty">
             <span class="rcp-preset-slot">@nextSlot.ToString("00")</span>
-            <span class="rcp-preset-empty-hint">Empty · hold @_radioState.Band to save</span>
+            <span class="rcp-preset-empty-hint">EMPTY · long-press to save</span>
           </div>
         }
       </div>
@@ -376,7 +376,10 @@
 
   .rcp-band-group {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
     gap: 2px;
+    row-gap: 4px;
     padding: 3px;
     background: #0a0a0c;
     border-radius: 5px;
