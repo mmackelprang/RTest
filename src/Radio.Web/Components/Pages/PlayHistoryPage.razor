@@ -12,8 +12,8 @@
 
 <div style="height: 100%; display: flex; gap: 2px; overflow: hidden;">
   <!-- Left: Filters & Statistics -->
-  <div class="panel surface-raised" style="width: 360px; flex-shrink: 0; overflow: hidden; padding: 16px; display: flex; flex-direction: column;">
-    <div style="display:flex; flex-direction:column; gap:12px; overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0;">
+  <div class="panel surface-raised" style="width: 360px; flex-shrink: 0; overflow: hidden; padding: 12px; display: flex; flex-direction: column;">
+    <div class="history-filter-scroll" style="display:flex; flex-direction:column; gap:8px; overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0;">
       <h6>Play History</h6>
 
       <RadzenDatePicker TValue="DateTime?" @bind-Value="_selectedDate" AllowClear="true" Placeholder="Filter by Date" />
@@ -31,22 +31,24 @@
                      Placeholder="Search title, artist, album..."
                      @onkeyup="@OnSearchKeyUp" />
 
-      <RadzenButton Text="Filter"
-                    Icon="filter_list"
-                    ButtonStyle="ButtonStyle.Primary"
-                    Variant="Variant.Filled"
-                    Click="@ApplyFilters"
-                    Style="width:100%" />
-      <RadzenButton Text="Clear Filters"
-                    Icon="filter_list_off"
-                    ButtonStyle="ButtonStyle.Secondary"
-                    Variant="Variant.Outlined"
-                    Click="@ClearAllFilters"
-                    Style="width:100%" />
+      <div style="display:flex; gap:6px;">
+        <RadzenButton Text="Filter"
+                      Icon="filter_list"
+                      ButtonStyle="ButtonStyle.Primary"
+                      Variant="Variant.Filled"
+                      Click="@ApplyFilters"
+                      Style="flex:1" />
+        <RadzenButton Text="Clear"
+                      Icon="filter_list_off"
+                      ButtonStyle="ButtonStyle.Secondary"
+                      Variant="Variant.Outlined"
+                      Click="@ClearAllFilters"
+                      Style="flex:1" />
+      </div>
 
       @if (_stats != null)
       {
-        <hr style="border-color:var(--surface-separator); margin:8px 0" />
+        <hr style="border-color:var(--surface-separator); margin:4px 0" />
         <span style="font-size:0.875rem; font-weight:500; color: var(--text-medium); text-transform: uppercase; letter-spacing: 0.05em;">Statistics</span>
         <RadzenRow Gap="4px">
           <RadzenColumn Size="6">
