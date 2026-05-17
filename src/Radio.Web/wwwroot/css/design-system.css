@@ -2009,14 +2009,14 @@ body {
 }
 
 .visualizer-mode:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-primary);
   outline-offset: -2px;
 }
 
 .visualizer-mode.is-active {
   background: var(--accent-dim);
-  color: var(--accent);
-  box-shadow: inset 0 -2px 0 var(--accent);
+  color: var(--accent-primary);
+  box-shadow: inset 0 -2px 0 var(--accent-primary);
 }
 
 /* 8×8 connection dot, top-right of the header. No text label. */
