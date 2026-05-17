@@ -302,7 +302,11 @@ public record RadioStateDto(
   string? RdsProgramType = null,
   bool Clip = false,
   double RssiDbu = 0.0,
-  double AppliedGain = 0.0
+  double AppliedGain = 0.0,
+  // PR 2 of the Radio Controller Polish arc — anchors the NOW row in the
+  // recognition stream to a specific fingerprint event. Null when no match
+  // is currently anchored (e.g. dead air, no-match window, non-radio source).
+  string? NowPlayingMatchId = null
 );
 
 public record RadioPowerStateDto(
@@ -731,6 +735,21 @@ public class AudioEngineConfigDto
 }
 
 // Fingerprint Status DTOs
+
+/// <summary>
+/// Coarse confidence band for a fingerprint match (mirrors
+/// <c>Radio.API.Models.ConfidenceBucket</c>). PR 2 of the Radio Controller
+/// Polish arc replaces the raw <c>double?</c> on the wire so the UI renders
+/// a word + pip count instead of a fractional percentage.
+/// </summary>
+public enum ConfidenceBucket
+{
+  None,
+  Possible,
+  Likely,
+  Strong
+}
+
 public class FingerprintStatusDto
 {
   public string Phase { get; set; } = "Idle";
@@ -743,11 +762,24 @@ public class FingerprintStatusDto
 
 public class FingerprintEventDto
 {
+  /// <summary>
+  /// Stable identifier for this event record. The UI anchors the
+  /// currently-playing match row when <c>RadioStateDto.NowPlayingMatchId</c>
+  /// equals this value.
+  /// </summary>
+  public string MatchId { get; set; } = string.Empty;
+
   public string AudioSource { get; set; } = string.Empty;
   public string SourceType { get; set; } = string.Empty;
   public bool IsMatch { get; set; }
   public int Count { get; set; }
-  public double? LastConfidence { get; set; }
+
+  /// <summary>
+  /// Coarse confidence band. Replaces the prior raw <c>double? LastConfidence</c>
+  /// field on the API surface (PR 2 of the Radio Controller Polish arc).
+  /// </summary>
+  public ConfidenceBucket Confidence { get; set; } = ConfidenceBucket.None;
+
   public string? Title { get; set; }
   public string? Artist { get; set; }
   public string? Album { get; set; }

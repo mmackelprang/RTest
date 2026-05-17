@@ -58,6 +58,16 @@ public class AudioStateUpdateService : BackgroundService
   private VolumeDto? _lastVolume;
   private string? _lastActiveSourceType;
 
+  // PR 2 of the Radio Controller Polish arc — caches the MatchId of the
+  // fingerprint event currently anchored as the playing match. The
+  // recognition stream in NowPlayingPanel binds against this to render the
+  // NOW header + amber left border above the correct row. Updated by
+  // OnFingerprintStatusChanged when the snapshot's most-recent match changes;
+  // cleared when the active source changes (OnSourceChanged equivalent) or
+  // when the latest event is not a match. Volatile because reads happen on
+  // the background-polling thread and writes on the SignalR callback thread.
+  private volatile string? _currentMatchId;
+
   /// <summary>
   /// Initializes a new instance of the AudioStateUpdateService.
   /// </summary>
@@ -557,7 +567,11 @@ public class AudioStateUpdateService : BackgroundService
            previous.ScanDirection != current.ScanDirection ||
            previous.IsStereo != current.IsStereo ||
            previous.RdsStationName != current.RdsStationName ||
-           previous.RdsProgramType != current.RdsProgramType;
+           previous.RdsProgramType != current.RdsProgramType ||
+           // PR 2 of the Radio Controller Polish arc — the recognition stream's
+           // NOW row anchors on this. Changes must broadcast so the UI's
+           // amber-border row tracks the actively-playing fingerprint match.
+           previous.NowPlayingMatchId != current.NowPlayingMatchId;
   }
 
   private static bool HasVolumeChanged(VolumeDto? previous, VolumeDto? current)
@@ -681,8 +695,8 @@ public class AudioStateUpdateService : BackgroundService
       : $"{ts.Minutes}:{ts.Seconds:D2}";
   }
 
-  private static RadioStateDto MapToRadioStateDto(IRadioControl radioControls)
-    => RadioStateMapper.MapToRadioStateDto(radioControls);
+  private RadioStateDto MapToRadioStateDto(IRadioControl radioControls)
+    => RadioStateMapper.MapToRadioStateDto(radioControls, _currentMatchId);
 
   private BluetoothStatusDto BuildBluetoothStatusDto()
   {
@@ -807,6 +821,15 @@ public class AudioStateUpdateService : BackgroundService
   {
     try
     {
+      // Update the "currently playing match" anchor on every snapshot — this is
+      // independent of the broadcast throttle below so the RadioState path
+      // (which broadcasts on its own cadence in CheckRadioStateAsync) always
+      // has a fresh value. The anchor is the most-recent matched event; when
+      // the latest event is not a match (no-match window, error, or first
+      // capture) we clear it so the recognition stream falls back to its
+      // "no current match" rendering.
+      UpdateCurrentMatchAnchor(snapshot);
+
       var now = DateTime.UtcNow;
       if (now - _lastFingerprintBroadcast < FingerprintBroadcastThrottle)
       {
@@ -822,6 +845,33 @@ public class AudioStateUpdateService : BackgroundService
     {
       _logger.LogDebug(ex, "Error broadcasting fingerprint status change");
     }
+  }
+
+  /// <summary>
+  /// Maintains the <see cref="_currentMatchId"/> anchor used by the recognition
+  /// stream's NOW row. The anchor is the most-recent matched event in the
+  /// snapshot; when the most-recent event is a no-match (or there are no
+  /// events yet) we clear the anchor so the UI doesn't claim a stale row as
+  /// "now playing".
+  /// </summary>
+  private void UpdateCurrentMatchAnchor(FingerprintStatusSnapshot snapshot)
+  {
+    // Latest-first scan: the most-recent event is at the end of the list per
+    // BackgroundIdentificationService's append semantics. We anchor on the
+    // most-recent MATCHED event so a fresh no-match capture at the tail
+    // doesn't blank the NOW row mid-track. Only when no recent matches
+    // exist at all do we clear.
+    string? latestMatch = null;
+    for (var i = snapshot.RecentEvents.Count - 1; i >= 0; i--)
+    {
+      var evt = snapshot.RecentEvents[i];
+      if (evt.IsMatch && !string.IsNullOrEmpty(evt.MatchId))
+      {
+        latestMatch = evt.MatchId;
+        break;
+      }
+    }
+    _currentMatchId = latestMatch;
   }
 
   public override void Dispose()

@@ -106,6 +106,17 @@ public class RadioStateDto
   /// of <see cref="RssiDbu"/>. Greenfield project — no back-compat shim.
   /// </summary>
   public double ScanStopThreshold { get; set; }
+
+  /// <summary>
+  /// Gets or sets the <see cref="FingerprintEventDto.MatchId"/> of the
+  /// fingerprint event that is currently playing, when one has been
+  /// identified. The recognition stream in <c>NowPlayingPanel</c> anchors the
+  /// NOW header + amber-left-border on the row whose <c>MatchId</c> equals
+  /// this value. Null when no match is currently anchored (e.g. dead air,
+  /// no-match window, non-radio source). PR 2 of the Radio Controller
+  /// Polish arc.
+  /// </summary>
+  public string? NowPlayingMatchId { get; set; }
 }
 
 /// <summary>

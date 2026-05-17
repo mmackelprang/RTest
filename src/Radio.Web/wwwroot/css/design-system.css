@@ -3178,3 +3178,162 @@ body {
   color: var(--signal-amber);
   text-shadow: 0 0 6px color-mix(in srgb, var(--signal-amber) 18%, transparent);
 }
+
+/* ─── §U  Confidence Pips (Radio Controller Polish PR 2) ──────────────────── *
+   3-pip widget rendered by Shared/ConfidencePips.razor. Replaces the raw
+   "78%" badges in the recognition stream with a coarse Strong/Likely/Possible
+   word and a fixed pip count, per the handoff's §P0·3 acceptance gate
+   ("No row in the panel contains the literal text 80%").
+
+     Strong   ▌▌▌  --signal-green
+     Likely   ▌▌·  60% --signal-green
+     Possible ▌··  --signal-amber
+     None     ···  unlit, "No match" label
+*/
+.confidence-pips {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.confidence-pip {
+  width: 5px;
+  height: 10px;
+  border-radius: 1px;
+  background: var(--surface-elevated);
+  transition: background 200ms ease;
+}
+
+.confidence-pips[data-bucket="strong"] .confidence-pip.is-lit {
+  background: var(--signal-green);
+}
+
+.confidence-pips[data-bucket="likely"] .confidence-pip.is-lit {
+  background: color-mix(in srgb, var(--signal-green) 60%, transparent);
+}
+
+.confidence-pips[data-bucket="possible"] .confidence-pip.is-lit {
+  background: var(--signal-amber);
+}
+
+.confidence-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  color: var(--text-medium);
+  margin-left: 6px;
+}
+
+/* ─── §V  Recognition Stream (Radio Controller Polish PR 2) ────────────────── *
+   Rewrites the recognition <table> inside NowPlayingPanel.razor into a flex
+   column of rows with NOW/EARLIER headers. The currently-playing match
+   anchors at the top with an amber left border + an amber dot on the art
+   square. Failed lookups render as italic "No match in window" sentences,
+   never as "--". Drops the per-row source-type icon column (the panel-level
+   source bubble already covers it — resolved spec ambiguity #1).
+*/
+.np-recognition-stream {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+}
+
+.np-recognition-header {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--signal-amber);
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  padding-left: 12px;
+  margin-bottom: 4px;
+}
+
+/* Row: 34px art column · title/artist column · pips column · time-ago column. */
+.np-recognition-row {
+  display: grid;
+  grid-template-columns: 34px 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 12px;
+}
+
+.np-recognition-row-current {
+  position: relative;
+  border-left: 2px solid var(--signal-amber);
+  background: color-mix(in srgb, var(--signal-amber) 6%, transparent);
+}
+
+/* Small amber dot in the top-right corner of the current row's art square. */
+.np-recognition-row-current::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: 36px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--signal-amber);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--signal-amber) 50%, transparent);
+}
+
+.np-recognition-art {
+  width: 34px;
+  height: 34px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.np-recognition-art-placeholder {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  background: var(--surface-elevated);
+  color: var(--text-low);
+  border-radius: 4px;
+  font-size: 18px;
+}
+
+.np-recognition-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.np-recognition-title {
+  color: var(--text-high);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.np-recognition-no-match {
+  color: var(--text-low);
+  font-style: italic;
+}
+
+.np-recognition-artist {
+  color: var(--text-medium);
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.np-recognition-time-ago {
+  color: var(--text-low);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.np-recognition-now-tag {
+  color: var(--signal-amber);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+}

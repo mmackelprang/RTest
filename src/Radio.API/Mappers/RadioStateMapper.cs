@@ -35,7 +35,15 @@ public static class RadioStateMapper
   /// Projects an <see cref="IRadioControl"/> snapshot into the DTO shape the
   /// web UI consumes.
   /// </summary>
-  public static RadioStateDto MapToRadioStateDto(IRadioControl radioSource)
+  /// <param name="radioSource">Radio control snapshot.</param>
+  /// <param name="nowPlayingMatchId">
+  /// Optional <see cref="FingerprintEventDto.MatchId"/> of the fingerprint
+  /// match currently anchored as the playing track. PR 2 of the Radio
+  /// Controller Polish arc — surfaces the active match to the recognition
+  /// stream so the UI can render a NOW header + amber border above the
+  /// correct row. Pass <c>null</c> when no match is currently anchored.
+  /// </param>
+  public static RadioStateDto MapToRadioStateDto(IRadioControl radioSource, string? nowPlayingMatchId = null)
   {
     var rawSignal = radioSource.SignalStrength;
     return new RadioStateDto
@@ -57,6 +65,7 @@ public static class RadioStateMapper
       IsStereo = radioSource.IsStereo,
       RdsStationName = radioSource.RdsStationName,
       RdsProgramType = radioSource.RdsProgramType,
+      NowPlayingMatchId = nowPlayingMatchId,
     };
   }
 
