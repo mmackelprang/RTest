@@ -306,7 +306,10 @@ public record RadioStateDto(
   // PR 2 of the Radio Controller Polish arc — anchors the NOW row in the
   // recognition stream to a specific fingerprint event. Null when no match
   // is currently anchored (e.g. dead air, no-match window, non-radio source).
-  string? NowPlayingMatchId = null
+  string? NowPlayingMatchId = null,
+  // PR 3 of the Radio Controller Polish arc — RDS RadioText (RT) line
+  // below the frequency well. Null/empty hides the RT row entirely.
+  string? RdsRadioText = null
 );
 
 public record RadioPowerStateDto(
@@ -318,7 +321,11 @@ public record RadioPresetDto(
   string Name,
   double Frequency,
   string Band,
-  DateTimeOffset? CreatedAt = null
+  DateTimeOffset? CreatedAt = null,
+  // PR 3 of the Radio Controller Polish arc — one-based ordinal slot within
+  // the band, ordered by CreatedAt ascending. Surfaced by the API so the UI
+  // can render a memory-slot column without re-computing the ordinal locally.
+  int SlotNumber = 0
 );
 
 public record RadioDeviceDto(

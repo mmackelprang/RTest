@@ -17,23 +17,56 @@
   {
     <!-- Tuner Module -->
     <div class="rcp-tuner">
-      <!-- Module Label -->
-      <div class="rcp-module-label">TUNER</div>
+      @{
+        // PR 3 of the Radio Controller Polish arc — pull the active band's
+        // metadata once per render so the header range string and preset
+        // capacity stay in sync without scattering lookups across the markup.
+        var activeBand = _availableBands.FirstOrDefault(b => b.Type == _radioState.Band);
+        var activeBandRange = activeBand?.Range ?? "";
+        var activeBandCapacity = activeBand?.BandPresetCapacity ?? 0;
+        var presetCount = _presets?.Count ?? 0;
+        var bandSavable = !string.IsNullOrEmpty(_radioState.Band);
+      }
 
-      <!-- Band selector -->
+      <!-- Tuner section header (handoff §P1·1 step 1) -->
+      <div class="rcp-tuner-header">
+        <h3 class="rcp-tuner-title">Tuner</h3>
+        @if (!string.IsNullOrEmpty(activeBandRange))
+        {
+          <span class="rcp-tuner-band-range">@_radioState.Band · @activeBandRange</span>
+        }
+      </div>
+
+      <!-- Band selector — tall two-line pills (handoff §P1·1 step 2). The
+           active pill carries the long-press save-preset gesture (resolved
+           spec ambiguity #4): short click = switch band, long press = save. -->
       @if (_availableBands.Any())
       {
         <div class="rcp-band-group">
           @foreach (var band in _availableBands)
           {
-            <div class="rcp-band-btn @(band.Type == _radioState.Band ? "rcp-band-active" : "")"
-                 @onclick="@(async () => await HandleBandChangeAsync(band.Type))"
-                 title="@band.Name">
-              @band.Type
-            </div>
+            var isActive = band.Type == _radioState.Band;
+            <button type="button"
+                    class="rcp-band-btn @(isActive ? "rcp-band-active" : "")"
+                    @onclick="@(async () => await HandleBandPillClickAsync(band.Type, isActive))"
+                    @onpointerdown="@(e => HandleBandPointerDown(band.Type, isActive))"
+                    @onpointerup="@(e => HandleBandPointerUp(band.Type, isActive))"
+                    @onpointerleave="@(e => HandleBandPointerCancel())"
+                    @onpointercancel="@(e => HandleBandPointerCancel())"
+                    title="@(isActive ? $"{band.Name} (hold to save preset)" : band.Name)">
+              <span class="rcp-band-label">@band.Type</span>
+              @if (!string.IsNullOrEmpty(band.Range))
+              {
+                <span class="rcp-band-sub">@band.Range</span>
+              }
+            </button>
           }
         </div>
       }
+
+      <!-- RDS card — mounted ABOVE the frequency well (handoff §P1·1 step 3) -->
+      <RdsCard StationName="@_radioState.RdsStationName"
+               ProgramType="@_radioState.RdsProgramType" />
 
       <!-- Frequency display -->
       <div class="rcp-freq-well">
@@ -57,23 +90,12 @@
         </div>
       </div>
 
-      <!-- RDS station info (between frequency and signal meter) -->
-      @if (!string.IsNullOrEmpty(_radioState.RdsStationName) || !string.IsNullOrEmpty(_radioState.RdsProgramType))
+      <!-- RDS RadioText (RT) line — one-line ellipsis below the frequency
+           well (handoff §P1·1 step 4). Hidden when the station doesn't
+           broadcast RT or RT hasn't been confirmed yet. -->
+      @if (!string.IsNullOrEmpty(_radioState.RdsRadioText))
       {
-        <div class="rcp-rds-info">
-          @if (!string.IsNullOrEmpty(_radioState.RdsStationName))
-          {
-            <span class="rcp-rds-name">@_radioState.RdsStationName</span>
-          }
-          @if (!string.IsNullOrEmpty(_radioState.RdsStationName) && !string.IsNullOrEmpty(_radioState.RdsProgramType))
-          {
-            <span class="rcp-rds-separator"></span>
-          }
-          @if (!string.IsNullOrEmpty(_radioState.RdsProgramType))
-          {
-            <span class="rcp-rds-genre">@_radioState.RdsProgramType</span>
-          }
-        </div>
+        <div class="rcp-rds-rt" title="@_radioState.RdsRadioText">@_radioState.RdsRadioText</div>
       }
 
       <!-- Signal strength meter (PR 1 of Radio Controller Polish arc) -->
@@ -190,13 +212,19 @@
       }
     </div>
 
-    <!-- Presets Memory Bank -->
+    <!-- Presets Memory Bank — handoff §P1·2: slot · name+band · freq grid.
+         Save action is a long-press on the active band pill (above) per the
+         resolved spec default; the icon button is replaced by a discoverable
+         hint. -->
     <div class="rcp-presets">
       <div class="rcp-presets-header">
-        <span>MEMORY</span>
-        <RadzenButton Icon="save" ButtonStyle="ButtonStyle.Warning" Size="ButtonSize.Small"
-                      Variant="Variant.Text"
-                      Click="OpenSavePresetDialog" title="Save Current" />
+        <span class="rcp-presets-count">
+          MEMORY · @presetCount of @activeBandCapacity
+        </span>
+        @if (bandSavable)
+        {
+          <span class="rcp-presets-hint">HOLD <kbd>@_radioState.Band</kbd> TO SAVE</span>
+        }
       </div>
 
       <div class="rcp-presets-list">
@@ -211,19 +239,29 @@
         {
           @foreach (var preset in _presets)
           {
-            <div class="rcp-preset-item" @onclick="@(() => LoadPresetAsync(preset.Id))">
-              <div class="rcp-preset-name">@preset.Name</div>
-              <div class="rcp-preset-freq">
-                @FormatFrequency(preset.Frequency, preset.Band)
+            var isActivePreset = IsActivePreset(preset);
+            <button type="button"
+                    class="rcp-preset-item @(isActivePreset ? "is-active" : "")"
+                    @onclick="@(() => LoadPresetAsync(preset.Id))">
+              <span class="rcp-preset-slot">@(preset.SlotNumber > 0 ? preset.SlotNumber.ToString("00") : "")</span>
+              <span class="rcp-preset-text">
+                <span class="rcp-preset-name">@preset.Name</span>
                 <span class="rcp-preset-band">@preset.Band</span>
-              </div>
-              <div class="rcp-preset-delete" @onclick:stopPropagation="true">
-                <RadzenButton Icon="close" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small"
-                              Variant="Variant.Text"
-                              Style="padding: 2px; width: 24px; height: 24px;" Click="@(() => DeletePresetAsync(preset.Id))" />
-              </div>
-            </div>
+              </span>
+              <span class="rcp-preset-freq">@FormatFrequency(preset.Frequency, preset.Band)</span>
+            </button>
           }
+        }
+
+        @* Render exactly ONE dashed-border placeholder for the next empty
+           slot when the band has capacity left (handoff §P1·2 step 3). *@
+        @if (activeBandCapacity > 0 && presetCount < activeBandCapacity)
+        {
+          var nextSlot = presetCount + 1;
+          <div class="rcp-preset-item rcp-preset-empty">
+            <span class="rcp-preset-slot">@nextSlot.ToString("00")</span>
+            <span class="rcp-preset-empty-hint">EMPTY · long-press to save</span>
+          </div>
         }
       </div>
     </div>
@@ -328,24 +366,20 @@
     box-shadow: 0 0 12px rgba(240, 168, 48, 0.15), 0 2px 8px rgba(240, 168, 48, 0.08);
   }
 
-  .rcp-module-label {
-    position: absolute;
-    top: 10px;
-    left: 18px;
-    font-family: var(--font-mono);
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.22em;
-    color: var(--text-low);
-    text-transform: uppercase;
-    opacity: 0.45;
-  }
+  /* PR 3 of the Radio Controller Polish arc — `.rcp-module-label` was the
+     absolute-positioned "TUNER" chrome label at the top of the panel. It is
+     replaced by the real `.rcp-tuner-header` row (Inter h3 + band/range
+     pair) defined in design-system.css §W. The legacy CSS block has been
+     removed. */
 
   /* ── Band Selector — Console Push-Buttons ── */
 
   .rcp-band-group {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
     gap: 2px;
+    row-gap: 4px;
     padding: 3px;
     background: #0a0a0c;
     border-radius: 5px;
@@ -353,20 +387,21 @@
     box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.6);
   }
 
+  /* PR 3 of the Radio Controller Polish arc — band pills are now tall and
+     two-line (label + sub-range). Height/padding/flex-direction live in
+     design-system.css §W so the legacy `height: 32px` rule below was
+     removed. The visual treatment (gradient background, beveled border,
+     amber-active state) stays here because it's specific to the
+     RadioControlPanel chrome aesthetic. */
   .rcp-band-btn {
-    padding: 0 14px;
-    height: 32px;
     border-radius: 3px;
     font-family: var(--font-mono);
-    font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.1em;
     color: var(--text-low);
     background: linear-gradient(180deg, #161618 0%, #111113 100%);
     border: 1px solid #1e1e21;
     border-bottom: 2px solid #0a0a0c;
     display: flex;
-    align-items: center;
     cursor: pointer;
     transition: all 80ms ease;
     user-select: none;
@@ -516,52 +551,11 @@
     50% { box-shadow: 0 0 14px rgba(92, 212, 232, 0.25); }
   }
 
-  /* ── RDS Station Info (name + genre) ── */
-
-  .rcp-rds-info {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0;
-    margin: 6px 0 2px 0;
-    animation: rcp-rds-fadein 400ms ease-out;
-  }
-
-  .rcp-rds-name {
-    font-family: var(--font-mono);
-    font-size: 14px;
-    font-weight: 700;
-    letter-spacing: 0.22em;
-    color: var(--accent-primary);
-    text-shadow: 0 0 10px rgba(92, 212, 232, 0.4);
-  }
-
-  .rcp-rds-separator {
-    width: 3px;
-    height: 3px;
-    border-radius: 50%;
-    background: var(--text-low);
-    margin: 0 10px;
-    opacity: 0.5;
-  }
-
-  .rcp-rds-genre {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.15em;
-    text-transform: uppercase;
-    color: var(--text-medium);
-    padding: 2px 8px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 2px;
-    background: rgba(255, 255, 255, 0.03);
-  }
-
-  @@keyframes rcp-rds-fadein {
-    from { opacity: 0; transform: translateY(4px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
+  /* PR 3 of the Radio Controller Polish arc — RDS info block was extracted
+     into the RdsCard.razor component (see design-system.css section W
+     .rds-card / .rds-card-label / .rds-card-station / .rds-card-pty).
+     The legacy .rcp-rds-info / .rcp-rds-name / .rcp-rds-separator /
+     .rcp-rds-genre rules and rcp-rds-fadein keyframes have been removed. */
 
   /* ── Signal Meter — Recessed LED Bar ── */
 
@@ -794,84 +788,12 @@
     opacity: 0.5;
   }
 
-  .rcp-preset-item {
-    position: relative;
-    padding: 7px 10px;
-    border-radius: 3px;
-    cursor: pointer;
-    border: 1px solid transparent;
-    transition: all 80ms ease;
-    margin-bottom: 2px;
-    -webkit-tap-highlight-color: transparent;
-    counter-increment: preset;
-  }
-
-  /* Memory slot number badge */
-  .rcp-preset-item::before {
-    content: counter(preset, decimal-leading-zero);
-    position: absolute;
-    right: 8px;
-    bottom: 5px;
-    font-family: var(--font-mono);
-    font-size: 9px;
-    color: var(--text-low);
-    opacity: 0.2;
-    letter-spacing: 0.05em;
-  }
-
-  .rcp-preset-item:hover {
-    background: rgba(240, 168, 48, 0.04);
-    border-color: rgba(240, 168, 48, 0.12);
-  }
-
-  .rcp-preset-item:hover::before {
-    opacity: 0;
-  }
-
-  .rcp-preset-item:active {
-    background: rgba(240, 168, 48, 0.08);
-    border-color: rgba(240, 168, 48, 0.2);
-  }
-
-  .rcp-preset-name {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-high);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    padding-right: 24px;
-    line-height: 1.3;
-  }
-
-  .rcp-preset-freq {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--signal-amber);
-    margin-top: 1px;
-    text-shadow: 0 0 6px rgba(240, 168, 48, 0.12);
-    line-height: 1.3;
-  }
-
-  .rcp-preset-band {
-    color: var(--text-low);
-    font-size: 9px;
-    letter-spacing: 0.1em;
-    margin-left: 4px;
-    text-shadow: none;
-  }
-
-  .rcp-preset-delete {
-    position: absolute;
-    top: 4px;
-    right: 2px;
-    opacity: 0;
-    transition: opacity 80ms ease;
-  }
-
-  .rcp-preset-item:hover .rcp-preset-delete {
-    opacity: 1;
-  }
+  /* PR 3 of the Radio Controller Polish arc — preset row rules moved to
+     design-system.css §X. The legacy block (CSS counter-based ::before slot
+     badge, single-column flex layout, preset-name/freq/band rules) has been
+     removed so the grid layout from §X can take over without specificity
+     warfare. Band-pill base rules above (.rcp-band-btn) still apply; the
+     §W stylesheet adds the two-line column override on top. */
 </style>
 
 @code {
@@ -884,9 +806,23 @@
   private bool _isSavePresetDialogOpen;
   private string _presetName = "";
 
+  // PR 3 of the Radio Controller Polish arc — long-press gesture state on the
+  // active band pill. Hold ≥ LongPressThresholdMs to open the save-preset
+  // dialog instead of switching bands. A shorter press falls through to the
+  // band-change handler. Tracks the pointer-down timestamp on the active
+  // pill only so non-active pills still switch bands on a normal click.
+  private const int LongPressThresholdMs = 600;
+  private DateTime _bandPointerDownAt;
+  private string? _bandPointerDownBand;
+  private bool _suppressNextBandClick;
+
   protected override async Task OnInitializedAsync()
   {
-    await Task.WhenAll(LoadRadioStateAsync(), LoadPresetsAsync(), LoadBandsAsync());
+    // Radio state must load BEFORE presets so LoadPresetsAsync can band-filter
+    // the result (PR 3 of the Radio Controller Polish arc). Bands run in
+    // parallel because they don't depend on the state.
+    await Task.WhenAll(LoadRadioStateAsync(), LoadBandsAsync());
+    await LoadPresetsAsync();
     HubService.RadioStateChanged += HandleRadioStateChanged;
   }
 
@@ -911,17 +847,51 @@
     try
     {
       var presets = await RadioApi.GetPresetsAsync();
-      // Sort once on load instead of per render via .OrderBy() in the template
-      _presets = presets?.OrderBy(p => p.CreatedAt).ToList();
+      // Filter to the currently-active band so the memory bank reflects what
+      // the user is tuning. Per-band slot numbering (SlotNumber) is already
+      // assigned server-side (PR 3 of the Radio Controller Polish arc);
+      // ordering by slot makes the list deterministic across reloads.
+      var bandFilter = _radioState?.Band;
+      _presets = presets?
+        .Where(p => string.IsNullOrEmpty(bandFilter) || string.Equals(p.Band, bandFilter, StringComparison.OrdinalIgnoreCase))
+        .OrderBy(p => p.SlotNumber)
+        .ThenBy(p => p.CreatedAt)
+        .ToList();
     }
     catch { /* Silently fail */ }
+  }
+
+  /// <summary>
+  /// Returns true when <paramref name="preset"/> matches the currently-tuned
+  /// frequency and band (within a 1 Hz tolerance to absorb floating-point
+  /// round-trip jitter). The active row carries the amber border + glow per
+  /// handoff §P1·2.
+  /// </summary>
+  private bool IsActivePreset(RadioPresetDto preset)
+  {
+    if (_radioState == null)
+    {
+      return false;
+    }
+    return string.Equals(preset.Band, _radioState.Band, StringComparison.OrdinalIgnoreCase)
+      && Math.Abs(preset.Frequency - _radioState.Frequency) < 1.0;
   }
 
   private async Task HandleRadioStateChanged(RadioStateDto dto)
   {
     // Use the SignalR payload directly instead of re-fetching via REST.
     // The hub broadcast carries NowPlayingMatchId; the REST endpoint cannot.
+    var previousBand = _radioState?.Band;
     _radioState = dto;
+
+    // PR 3 of the Radio Controller Polish arc — presets are band-filtered;
+    // when the band changes via remote control (SignalR push) we need to
+    // re-pull the preset list so the memory bank reflects the new band.
+    if (!string.Equals(previousBand, dto.Band, StringComparison.OrdinalIgnoreCase))
+    {
+      await LoadPresetsAsync();
+    }
+
     await InvokeAsync(StateHasChanged);
   }
 
@@ -959,10 +929,87 @@
       if (await RadioApi.SetBandAsync(newBand))
       {
         await LoadRadioStateAsync();
+        // Presets are band-filtered — re-pull so the memory bank stays in
+        // sync after the band switch.
+        await LoadPresetsAsync();
         await InvokeAsync(StateHasChanged);
       }
     }
     catch (Exception ex) { Logger.LogError(ex, "Error in HandleBandChangeAsync"); }
+  }
+
+  /// <summary>
+  /// PR 3 of the Radio Controller Polish arc — pill-click handler that
+  /// short-circuits when the preceding pointer interaction was a long-press
+  /// (i.e. save-preset gesture). Otherwise it falls through to the standard
+  /// band-change call.
+  /// </summary>
+  private async Task HandleBandPillClickAsync(string newBand, bool isActive)
+  {
+    if (_suppressNextBandClick)
+    {
+      // Long-press already fired on pointerup; the synthesised click event
+      // arrives after — swallow it so we don't ALSO switch the band.
+      _suppressNextBandClick = false;
+      return;
+    }
+
+    await HandleBandChangeAsync(newBand);
+  }
+
+  /// <summary>
+  /// PR 3 of the Radio Controller Polish arc — pointer-down on a band pill
+  /// starts the long-press timer only when the user touches the currently
+  /// active pill. Non-active pills retain their short-click "switch band"
+  /// behaviour without any gesture delay.
+  /// </summary>
+  private void HandleBandPointerDown(string band, bool isActive)
+  {
+    if (!isActive)
+    {
+      _bandPointerDownBand = null;
+      return;
+    }
+
+    _bandPointerDownAt = DateTime.UtcNow;
+    _bandPointerDownBand = band;
+  }
+
+  /// <summary>
+  /// PR 3 of the Radio Controller Polish arc — pointer-up resolves the
+  /// long-press: if the press exceeded <see cref="LongPressThresholdMs"/>,
+  /// open the save-preset dialog (and suppress the trailing click event).
+  /// Shorter presses do nothing here; the click event still fires and runs
+  /// through <see cref="HandleBandPillClickAsync"/> (which is a no-op for
+  /// the already-active pill — the band is already correct).
+  /// </summary>
+  private void HandleBandPointerUp(string band, bool isActive)
+  {
+    if (!isActive || _bandPointerDownBand != band)
+    {
+      _bandPointerDownBand = null;
+      return;
+    }
+
+    var heldMs = (DateTime.UtcNow - _bandPointerDownAt).TotalMilliseconds;
+    _bandPointerDownBand = null;
+
+    if (heldMs >= LongPressThresholdMs)
+    {
+      _suppressNextBandClick = true;
+      OpenSavePresetDialog();
+    }
+  }
+
+  /// <summary>
+  /// PR 3 of the Radio Controller Polish arc — cancel the long-press timer
+  /// if the pointer leaves the pill or the gesture is cancelled (e.g. a
+  /// system-level interruption like a notification). Without this the
+  /// state would leak across interactions.
+  /// </summary>
+  private void HandleBandPointerCancel()
+  {
+    _bandPointerDownBand = null;
   }
 
   private async Task StartScanAsync(string direction)
@@ -1051,8 +1098,13 @@
   {
     if (_radioState != null)
     {
+      // PR 3 of the Radio Controller Polish arc — handoff §P1·2 step 4 says
+      // seed with the RDS station name when present; fall back to band +
+      // formatted frequency ONLY when RDS is unavailable. Never seed with
+      // the raw frequency. Acceptance gate: "The save flow defaults to the
+      // RDS station name when one is present."
       _presetName = !string.IsNullOrEmpty(_radioState.RdsStationName)
-        ? $"{_radioState.Band} {_radioState.RdsStationName} {FormatFrequency(_radioState.Frequency, _radioState.Band)}"
+        ? _radioState.RdsStationName!
         : $"{_radioState.Band} {FormatFrequency(_radioState.Frequency, _radioState.Band)}";
     }
     _isSavePresetDialogOpen = true;
