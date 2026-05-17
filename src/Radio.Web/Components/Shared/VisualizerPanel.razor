@@ -7,13 +7,12 @@
 @implements IAsyncDisposable
 
 @*
-  VisualizerPanel — full-bleed visualizer with promoted 3-segment mode picker.
+  VisualizerPanel — full-bleed visualizer with promoted 6-segment mode picker.
 
   PR 4 rework (handoff §P1·3):
-    • Replaced the floating chip group with a full-width 3-segment header
-      (VU / WAVE / SPECTRUM) — 44px tall, mono 12px uppercase 0.10em
-      letter-spacing, active segment tinted with --accent-dim + accent
-      underline.
+    • Replaced the floating chip group with a full-width header — 44px tall,
+      mono 12px uppercase 0.10em letter-spacing, active segment tinted with
+      --accent-dim + accent underline.
     • Canvas now fills the remaining vertical space — no inset padding.
     • "Connected" pill collapsed to an 8px dot at top-right.
     • The "Updates: NN/sec" overlay moves out of the canvas into
@@ -21,35 +20,54 @@
     • Frequency-band axis labels live in a 16px strip under the canvas
       (mono 10px, low-contrast).
 
-  The underlying VisualizationMode enum still has six entries because the
-  visualizer.js module supports waveform/phase/spectrogram/circular. The
-  promoted header only exposes the three primary modes; the secondary
-  modes remain reachable from the dev tray (PR 6) and from saved
-  preferences.
+  Hot-fix (post-PR 4): the picker exposes all six modes the underlying
+  visualizer.js module supports — VU / Wave / Spectrum / Fall (Spectrogram)
+  / Ring (Circular) / Phase (PhaseScope). The handoff spec referenced only
+  three modes because the spec author worked from a 3-mode screenshot, but
+  the enum, JS draw calls, and SignalR subscribe paths were always wired
+  for all six.
 *@
 
 <div class="viz-panel">
-  <!-- 3-segment mode picker header -->
+  <!-- 6-segment mode picker header -->
   <div class="visualizer-header">
     <div class="visualizer-mode-picker" role="tablist" aria-label="Visualizer mode">
-      <button class="visualizer-mode @(IsVuMode ? "is-active" : "")"
+      <button class="visualizer-mode @(_currentMode == VisualizationMode.VUMeter ? "is-active" : "")"
               type="button"
               @onclick="@(() => SelectMode(VisualizationMode.VUMeter))"
               role="tab"
-              aria-selected="@(IsVuMode ? "true" : "false")"
+              aria-selected="@(_currentMode == VisualizationMode.VUMeter ? "true" : "false")"
               aria-label="VU meter mode">VU</button>
-      <button class="visualizer-mode @(IsWaveMode ? "is-active" : "")"
+      <button class="visualizer-mode @(_currentMode == VisualizationMode.Waveform ? "is-active" : "")"
               type="button"
               @onclick="@(() => SelectMode(VisualizationMode.Waveform))"
               role="tab"
-              aria-selected="@(IsWaveMode ? "true" : "false")"
+              aria-selected="@(_currentMode == VisualizationMode.Waveform ? "true" : "false")"
               aria-label="Waveform mode">Wave</button>
-      <button class="visualizer-mode @(IsSpectrumMode ? "is-active" : "")"
+      <button class="visualizer-mode @(_currentMode == VisualizationMode.Spectrum ? "is-active" : "")"
               type="button"
               @onclick="@(() => SelectMode(VisualizationMode.Spectrum))"
               role="tab"
-              aria-selected="@(IsSpectrumMode ? "true" : "false")"
+              aria-selected="@(_currentMode == VisualizationMode.Spectrum ? "true" : "false")"
               aria-label="Spectrum mode">Spectrum</button>
+      <button class="visualizer-mode @(_currentMode == VisualizationMode.Spectrogram ? "is-active" : "")"
+              type="button"
+              @onclick="@(() => SelectMode(VisualizationMode.Spectrogram))"
+              role="tab"
+              aria-selected="@(_currentMode == VisualizationMode.Spectrogram ? "true" : "false")"
+              aria-label="Spectrogram (falling spectrum) mode">Fall</button>
+      <button class="visualizer-mode @(_currentMode == VisualizationMode.Circular ? "is-active" : "")"
+              type="button"
+              @onclick="@(() => SelectMode(VisualizationMode.Circular))"
+              role="tab"
+              aria-selected="@(_currentMode == VisualizationMode.Circular ? "true" : "false")"
+              aria-label="Circular spectrum mode">Ring</button>
+      <button class="visualizer-mode @(_currentMode == VisualizationMode.PhaseScope ? "is-active" : "")"
+              type="button"
+              @onclick="@(() => SelectMode(VisualizationMode.PhaseScope))"
+              role="tab"
+              aria-selected="@(_currentMode == VisualizationMode.PhaseScope ? "true" : "false")"
+              aria-label="Phase scope mode">Phase</button>
     </div>
     <span class="visualizer-conn-dot @(VisualizationHub.IsConnected ? "is-connected" : "")"
           aria-label="@(VisualizationHub.IsConnected ? "Connected" : "Disconnected")"
@@ -107,11 +125,8 @@
   private int _frameCountSinceLastSample;
   private System.Threading.Timer? _telemetryTimer;
 
-  // Map the six-mode enum to the three primary buckets the header exposes.
-  private bool IsVuMode => _currentMode == VisualizationMode.VUMeter;
-  private bool IsWaveMode =>
-    _currentMode == VisualizationMode.Waveform ||
-    _currentMode == VisualizationMode.PhaseScope;
+  // Spectrum-family modes share the freq-band axis strip beneath the canvas.
+  // Picker buttons compare _currentMode directly — no per-button helper needed.
   private bool IsSpectrumMode =>
     _currentMode == VisualizationMode.Spectrum ||
     _currentMode == VisualizationMode.Spectrogram ||
