@@ -2975,3 +2975,200 @@ body {
      `data-dev-gesture` attribute is the contract; opacity=0 keeps it visually
      absent without removing it from the hit-test tree. */
 }
+
+/* ─── §S  Signal Meter Calibration (Radio Controller Polish PR 1) ─────────── *
+ *
+ * Companion to `.rcp-meter` in RadioControlPanel.razor. Adds the dBu
+ * readout, the CLIP-pill overdrive indicator, and the four-tick scale
+ * label strip under the meter bar. The 20-segment bar itself stays in
+ * RadioControlPanel's inline <style>; only the calibration overlay lives
+ * here because the tokens it consumes (font-mono, signal-red,
+ * text-medium, text-low) come from §2.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+.rcp-meter-readout {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rcp-clip-pill {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--signal-red);
+  background: rgba(248, 113, 113, 0.10);
+  color: var(--signal-red);
+  box-shadow: 0 0 6px rgba(248, 113, 113, 0.4);
+}
+
+.rcp-meter-dbu {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text-medium);
+}
+
+.rcp-meter-scale {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 2px 0;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  color: var(--text-low);
+  opacity: 0.7;
+}
+
+/* ─── §T  AGC Two-Cell Strip (Radio Controller Polish PR 1) ───────────────── *
+ *
+ * Replaces the old flex `.rcp-sdr-controls` strip. The strip is now a
+ * fixed grid: 130px AGC toggle cell on the left, flex gain cell on the
+ * right. Right cell is ALWAYS rendered — when AGC is on it shows the
+ * device-chosen gain ("Tuner is choosing  28.0 dB"); when AGC is off it
+ * shows a fixed-width amber pill (so the value never jitters width),
+ * the slider, and a "0 – 50" range hint.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+.rcp-sdr-grid {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 12px;
+  align-items: stretch;
+  width: 100%;
+  max-width: 420px;
+  padding: 6px;
+  background: #0a0a0c;
+  border-radius: 4px;
+  border: 1px solid #141416;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.rcp-agc-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #141416 0%, #0d0d0f 100%);
+  border: 1px solid #222225;
+  border-bottom: 2px solid #0a0a0c;
+  color: var(--text-medium);
+  cursor: pointer;
+  transition: all 80ms ease;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  /* Reset the <button> defaults the browser applies; the cell renders as a
+     tappable surface, not a chrome button. */
+  font: inherit;
+  line-height: 1;
+  appearance: none;
+}
+
+.rcp-agc-cell:hover {
+  border-color: rgba(240, 168, 48, 0.25);
+  background: linear-gradient(180deg, #1a1a1d 0%, #131315 100%);
+}
+
+.rcp-agc-cell:active {
+  transform: translateY(1px);
+  border-bottom-width: 1px;
+}
+
+.rcp-agc-cell:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.rcp-agc-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--signal-amber);
+}
+
+.rcp-agc-chip-auto,
+.rcp-agc-chip-off {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.rcp-agc-chip-auto {
+  color: var(--signal-green);
+  border: 1px solid var(--signal-green);
+  background: color-mix(in srgb, var(--signal-green) 10%, transparent);
+}
+
+.rcp-agc-chip-off {
+  color: var(--text-low);
+  border: 1px solid var(--surface-separator);
+  background: transparent;
+}
+
+.rcp-gain-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  min-width: 0;
+}
+
+.rcp-gain-pill {
+  flex: 0 0 56px;
+  width: 56px;
+  min-width: 56px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--signal-amber);
+  border: 1px solid color-mix(in srgb, var(--signal-amber) 33%, transparent);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(240, 168, 48, 0.04);
+}
+
+.rcp-gain-range-hint {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--text-low);
+  white-space: nowrap;
+}
+
+.rcp-gain-auto-hint {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--text-low);
+}
+
+.rcp-gain-auto-value {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--signal-amber);
+  text-shadow: 0 0 6px rgba(240, 168, 48, 0.18);
+}

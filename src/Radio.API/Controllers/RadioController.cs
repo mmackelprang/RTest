@@ -563,30 +563,14 @@ public class RadioController : ControllerBase
   }
 
   /// <summary>
-  /// Maps an IRadioControl instance to a RadioStateDto.
+  /// Maps an IRadioControl instance to a RadioStateDto. Delegates to
+  /// <see cref="Radio.API.Mappers.RadioStateMapper.MapToRadioStateDto"/> so the
+  /// REST and SignalR paths share one projection (PR 1).
   /// </summary>
   /// <param name="radioSource">The radio source.</param>
   /// <returns>The radio state DTO.</returns>
   private static RadioStateDto MapToRadioStateDto(IRadioControl radioSource)
-  {
-    return new RadioStateDto
-    {
-      Frequency = radioSource.CurrentFrequency.Hertz,
-      Band = radioSource.CurrentBand.ToString(),
-      Step = radioSource.FrequencyStep.Hertz,
-      SignalStrength = radioSource.SignalStrength,
-      Equalizer = radioSource.EqualizerMode.ToString(),
-      DeviceVolume = radioSource.DeviceVolume,
-      IsScanning = radioSource.IsScanning,
-      ScanDirection = radioSource.ScanDirection?.ToString(),
-      ScanStopThreshold = radioSource.ScanStopThreshold,
-      AutoGain = radioSource.AutoGainEnabled,
-      Gain = (int?)radioSource.Gain,
-      IsStereo = radioSource.IsStereo,
-      RdsStationName = radioSource.RdsStationName,
-      RdsProgramType = radioSource.RdsProgramType,
-    };
-  }
+    => Radio.API.Mappers.RadioStateMapper.MapToRadioStateDto(radioSource);
 
   // ===== RADIO PRESET ENDPOINTS =====
 

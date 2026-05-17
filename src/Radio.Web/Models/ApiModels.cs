@@ -292,14 +292,17 @@ public record RadioStateDto(
   int? SignalStrength,
   bool IsScanning,
   string? ScanDirection,
-  int ScanStopThreshold,
+  double ScanStopThreshold,
   int? Gain,
   bool AutoGain,
   string? Equalizer,
   int? DeviceVolume,
   bool IsStereo = false,
   string? RdsStationName = null,
-  string? RdsProgramType = null
+  string? RdsProgramType = null,
+  bool Clip = false,
+  double RssiDbu = 0.0,
+  double AppliedGain = 0.0
 );
 
 public record RadioPowerStateDto(
