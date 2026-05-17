@@ -14,15 +14,18 @@ using Radio.Web.Services.Hub;
 namespace Radio.Web.Tests.Components.Shared;
 
 /// <summary>
-/// bUnit tests for <see cref="QueueHistoryPanel"/> introduced by PR 3 of the design
-/// tightening arc. Focuses on the currently-playing row treatment (amber-left border
-/// + ▶ glyph) and absence of raw <see cref="TimeSpan"/> formatting in queue rows.
+/// bUnit tests for <see cref="QueueHistoryPanel"/>.
+///
+/// Originally introduced by PR 3 (now-playing row treatment + duration formatting
+/// invariants), expanded by PR 5 to cover the queue-split layout (handoff §P1·4):
+/// the panel now renders a two-column shape (list 1.6 / context 1) with a tab
+/// strip up top, a Queue Total LED tile, an Up Next tile, a Save-as-Playlist CTA,
+/// and a kebab menu replacing the inline ADD / CLEAR header buttons.
 ///
 /// Per the FileBrowserDialog test pattern, the QueueApi / HistoryApi clients return
 /// null when no server is running, so RefreshQueueAsync sets <c>_queueItems</c> to
-/// empty and the queue grid is hidden. To exercise the currently-playing branch we
-/// would need to mock the QueueApi — the existing test rig doesn't, so we only assert
-/// the empty-state and no-fractional-seconds invariants that hold without a server.
+/// empty and the queue grid is hidden. Empty-state assertions are sufficient to lock
+/// the structural contract; richer interaction tests belong in an E2E run.
 /// </summary>
 public class QueueHistoryPanelTests : TestContext
 {
@@ -149,6 +152,140 @@ public class QueueHistoryPanelTests : TestContext
     };
     QueueHistoryPanel.SumQueueRuntime(items)
       .Should().Be(TimeSpan.FromMinutes(2) + TimeSpan.FromSeconds(15));
+  }
+
+  // ── PR 5: queue-split layout assertions ──
+
+  [Fact]
+  public void QueueHistoryPanel_RendersSplitLayout_WithListAndContextColumns()
+  {
+    // The two-column split (handoff §P1·4) replaces the single RadzenTabs body.
+    // Both columns must be in the DOM regardless of API availability.
+    var cut = RenderComponent<QueueHistoryPanel>();
+    cut.FindAll(".queue-split").Count.Should().Be(1);
+    cut.FindAll(".queue-split-list-col").Count.Should().Be(1);
+    cut.FindAll(".queue-split-context-col").Count.Should().Be(1);
+  }
+
+  [Fact]
+  public void QueueHistoryPanel_TabStrip_RendersQueueAndHistoryPills()
+  {
+    // Default state shows Queue and History tabs. The Radio pill is conditional
+    // on the active source being a radio family member, which isn't available
+    // here without an API, so it should NOT render.
+    var cut = RenderComponent<QueueHistoryPanel>();
+    var tabs = cut.FindAll(".queue-split-tab");
+    tabs.Count.Should().BeGreaterThanOrEqualTo(2);
+
+    var tabLabels = tabs.Select(t => t.TextContent.Trim()).ToList();
+    tabLabels.Should().Contain(s => s.StartsWith("Queue"));
+    tabLabels.Should().Contain("History");
+  }
+
+  [Fact]
+  public void QueueHistoryPanel_TabStrip_RendersKebabButton()
+  {
+    // The ADD / CLEAR header buttons move into a kebab menu (handoff §P1·4 step 4).
+    // The kebab affordance itself is always present; its menu opens on click.
+    var cut = RenderComponent<QueueHistoryPanel>();
+    cut.FindAll(".queue-split-kebab").Count.Should().Be(1);
+  }
+
+  [Fact]
+  public void QueueHistoryPanel_QueueTab_RightColumn_ShowsAllThreeTiles()
+  {
+    // The right column on the Queue tab carries the Queue Total LED, Up Next
+    // thumbs, and Save-as-Playlist CTA. The Save CTA is disabled when the
+    // queue is empty. (The component's default tab resolves to History when
+    // there is no API server because SetDefaultTabForSourceAsync's catch-all
+    // picks History — so we click into Queue explicitly first.)
+    var cut = RenderComponent<QueueHistoryPanel>();
+    ClickTab(cut, "Queue");
+    cut.FindAll(".queue-total-tile").Count.Should().Be(1);
+    cut.FindAll(".up-next-tile").Count.Should().Be(1);
+    var savePlaylist = cut.FindAll(".save-playlist-tile");
+    savePlaylist.Count.Should().Be(1);
+    savePlaylist[0].HasAttribute("disabled").Should().BeTrue(
+      "the Save-as-playlist CTA is disabled when the queue is empty");
+  }
+
+  [Fact]
+  public void QueueHistoryPanel_QueueTotalTile_ShowsLedValueAndSubLine()
+  {
+    // The LED value is the only place in the right column using --font-led
+    // amber — locked here so a future refactor of design tokens trips this test.
+    var cut = RenderComponent<QueueHistoryPanel>();
+    ClickTab(cut, "Queue");
+    var ledValue = cut.Find(".queue-total-tile-value");
+    ledValue.TextContent.Trim().Should().NotBeEmpty();
+    cut.FindAll(".queue-total-tile-sub").Count.Should().Be(1);
+  }
+
+  [Fact]
+  public void QueueHistoryPanel_UpNextTile_EmptyState_ShowsPlaceholder()
+  {
+    // With an empty queue, the Up Next tile renders a friendly placeholder
+    // instead of stub rows — keeps the right column from feeling broken.
+    var cut = RenderComponent<QueueHistoryPanel>();
+    ClickTab(cut, "Queue");
+    cut.FindAll(".up-next-empty").Count.Should().Be(1);
+  }
+
+  [Fact]
+  public void QueueHistoryPanel_OpeningKebab_ShowsAddFilesAndClearAllItems()
+  {
+    // Click the kebab — the menu fly-out should list Add Files and Clear All
+    // (per the handoff §P1·4 spec, those move out of the inline header strip).
+    var cut = RenderComponent<QueueHistoryPanel>();
+    cut.Find(".queue-split-kebab").Click();
+    cut.Markup.Should().Contain("Add Files");
+    cut.Markup.Should().Contain("Clear All");
+  }
+
+  [Fact]
+  public void QueueHistoryPanel_SwitchingToHistoryTab_SwapsRightColumnContent()
+  {
+    // Clicking the History tab moves _activeTab → TabHistory; the queue-total /
+    // up-next / save-cta tiles are replaced by the history-stats tile inside the
+    // same right-column flex container (it is NOT remounted, just its children
+    // change). We assert the tile-presence transition.
+    var cut = RenderComponent<QueueHistoryPanel>();
+    ClickTab(cut, "Queue");
+    cut.FindAll(".queue-total-tile").Count.Should().Be(1);
+    cut.FindAll(".history-stats-tile").Count.Should().Be(0);
+
+    // Now click History.
+    ClickTab(cut, "History");
+    cut.FindAll(".queue-total-tile").Count.Should().Be(0);
+    cut.FindAll(".up-next-tile").Count.Should().Be(0);
+    cut.FindAll(".history-stats-tile").Count.Should().Be(1);
+  }
+
+  [Fact]
+  public void QueueHistoryPanel_HistoryStatsTile_HasTotalPlaysTopTrackTopArtistRows()
+  {
+    var cut = RenderComponent<QueueHistoryPanel>();
+    ClickTab(cut, "History");
+
+    var labels = cut.FindAll(".history-stats-label")
+      .Select(e => e.TextContent.Trim())
+      .ToList();
+    labels.Should().Contain("Total Plays");
+    labels.Should().Contain("Top Track");
+    labels.Should().Contain("Top Artist");
+  }
+
+  /// <summary>
+  /// Click the tab whose visible label starts with the given prefix
+  /// (e.g. "Queue" matches "Queue · 0" + spillover when the count is set).
+  /// </summary>
+  private static void ClickTab(IRenderedComponent<QueueHistoryPanel> cut, string labelPrefix)
+  {
+    var tab = cut.FindAll(".queue-split-tab")
+      .FirstOrDefault(t => t.TextContent.TrimStart().StartsWith(labelPrefix, StringComparison.Ordinal));
+    tab.Should().NotBeNull(
+      $"the {labelPrefix} tab must exist in the tab strip");
+    tab!.Click();
   }
 
   private static QueueItemDto MakeItem(string? duration) => new(

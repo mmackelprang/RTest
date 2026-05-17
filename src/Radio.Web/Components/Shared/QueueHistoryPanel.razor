@@ -13,260 +13,388 @@
 @inject SourcesApiService SourcesApi
 @implements IAsyncDisposable
 
-<div style="height: 100%; display: flex; flex-direction: column; padding: 0;">
-  <RadzenTabs RenderMode="TabRenderMode.Client"
-              SelectedIndex="_activeTab"
-              Change="@(args => OnTabChanged(args))"
-              Style="height: 100%; display: flex; flex-direction: column; min-height: 0;">
-    <Tabs>
-      <RadzenTabsItem Text="@(_queueItems.Count > 0 ? $"Queue ({_queueItems.Count})" : "Queue")"
-                      Icon="queue_music"
-                      Style="flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0;">
-        <div style="height: 100%; display: flex; flex-direction: column; min-height: 0;">
-          <!-- Queue Header. Total runtime rendered with Durations.FormatLong so a queue
-               like "2h 48m 15s" shows as "2:48:15" rather than the raw TimeSpan tail. -->
-          <div class="panel-header">
-            <span style="display: inline-flex; align-items: center; gap: 8px;">
-              @if (_playedCount > 0)
-              {
-                @($"{_playedCount}/{_queueItems.Count} played")
-              }
-              else
-              {
-                @($"{_queueItems.Count} tracks")
-              }
-              @if (_totalRuntime > TimeSpan.Zero)
-              {
-                <span style="font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-medium);"
-                      title="Total queue runtime">
-                  · @Durations.FormatLong(_totalRuntime)
-                </span>
-              }
-            </span>
-            <div style="display: flex; gap: 4px;">
-              <RadzenButton Variant="Variant.Text"
-                            Icon="add"
-                            ButtonStyle="ButtonStyle.Primary"
-                            Size="ButtonSize.Small"
-                            Click="OpenFileSelectionDialogAsync"
-                            title="Add Files" />
-              <RadzenButton Variant="Variant.Text"
-                            Icon="playlist_play"
-                            ButtonStyle="ButtonStyle.Primary"
-                            Size="ButtonSize.Small"
-                            Click="OpenLoadPlaylistDialogAsync"
-                            title="Load Playlist" />
-              <RadzenButton Variant="Variant.Text"
-                            Icon="save"
-                            ButtonStyle="ButtonStyle.Primary"
-                            Size="ButtonSize.Small"
-                            Disabled="@(!_queueItems.Any())"
-                            Click="OpenSavePlaylistDialogAsync"
-                            title="Save as Playlist" />
-              <RadzenButton Variant="Variant.Text"
-                            Icon="delete_sweep"
-                            ButtonStyle="ButtonStyle.Danger"
-                            Size="ButtonSize.Small"
-                            Disabled="@(!_queueItems.Any())"
-                            Click="HandleClearQueueAsync"
-                            title="Clear All" />
-            </div>
-          </div>
+@*
+  Queue + History panel — restructured by PR 5 (handoff §P1·4) into a two-column
+  split: a list column on the left (flex 1.6) and a context column on the right
+  (flex 1, fixed-width tiles). Tabs swap the LIST contents only; the right column
+  re-renders its tiles based on _activeTab but is never remounted — so the LED
+  total, Up Next thumbs, and Save CTA persist visual state between switches.
 
-          <!-- Queue List -->
-          @if (!_queueItems.Any())
-          {
-            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-low);">
-              <RadzenIcon Icon="queue_music" Style="font-size: 80px; opacity: 0.4; margin-bottom: 12px;" />
-              <span style="font-size: 16px;">No tracks in queue</span>
-            </div>
-          }
-          else
-          {
-            <div id="queue-scroll-container" class="scrollable" style="flex: 1; overflow-y: auto; min-height: 0;">
-              <Virtualize Items="@_queueItems" ItemSize="56" OverscanCount="5" Context="item">
-                @{
-                  var state = item.State ?? "Upcoming";
-                  var isCurrent = state == "Current";
-                  // queue-row-current paints an amber left-border (var(--signal-amber)),
-                  // overriding the .list-item-active accent-primary treatment for the
-                  // currently-playing track. The class is appended only on the current row.
-                  var rowClasses = "list-item-touch"
-                    + (isCurrent ? " list-item-active queue-row-current" : "");
+  Layout map:
+    .queue-split
+      .queue-split-list-col
+        .queue-split-tabstrip   ← Queue · N / History / Radio? + kebab menu
+        .queue-split-list-body  ← virtualized queue rows OR history rows
+      .queue-split-context-col
+        if _activeTab == queue:    Queue Total LED + Up Next + Save CTA
+        if _activeTab == history:  History stats (total plays, top track, top artist)
+        if _activeTab == radio:    (Radio context block — placeholder until P1·3
+                                    promotes the radio detail surface)
+*@
+
+<div class="queue-split">
+  <!-- ── Left column: tab strip + list body ── -->
+  <div class="queue-split-list-col">
+    <div class="queue-split-tabstrip" role="tablist" aria-label="Queue, History, Radio tabs">
+      <button type="button"
+              class="queue-split-tab @(_activeTab == TabQueue ? "is-active" : "")"
+              role="tab"
+              aria-selected="@(_activeTab == TabQueue ? "true" : "false")"
+              @onclick="@(() => SetTab(TabQueue))">
+        Queue · @_queueItems.Count
+      </button>
+      <button type="button"
+              class="queue-split-tab @(_activeTab == TabHistory ? "is-active" : "")"
+              role="tab"
+              aria-selected="@(_activeTab == TabHistory ? "true" : "false")"
+              @onclick="@(() => SetTab(TabHistory))">
+        History
+      </button>
+      @if (_isRadioActive)
+      {
+        <button type="button"
+                class="queue-split-tab @(_activeTab == TabRadio ? "is-active" : "")"
+                role="tab"
+                aria-selected="@(_activeTab == TabRadio ? "true" : "false")"
+                @onclick="@(() => SetTab(TabRadio))">
+          Radio
+        </button>
+      }
+      <div class="queue-split-tab-spacer"></div>
+      <div style="position: relative;">
+        <button type="button"
+                class="queue-split-kebab"
+                @onclick="ToggleKebab"
+                aria-label="Queue actions">⋮</button>
+        @if (_isKebabOpen)
+        {
+          <div @onclick="CloseKebab" @onclick:stopPropagation="true"
+               style="position: fixed; inset: 0; z-index: 99;"></div>
+          <div @onclick:stopPropagation="true"
+               style="position: absolute; top: 100%; right: 0; z-index: 100; min-width: 180px;
+                      background: rgba(30,30,30,0.95); backdrop-filter: blur(12px);
+                      border: 1px solid rgba(255,255,255,0.15); border-radius: 6px;
+                      box-shadow: 0 8px 24px rgba(0,0,0,0.5); overflow: hidden;
+                      margin-top: 4px;">
+            <button type="button" class="queue-split-kebab-item"
+                    @onclick="@(async () => { CloseKebab(); await OpenFileSelectionDialogAsync(); })"
+                    style="display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 14px;
+                           background: transparent; border: none; color: var(--text-high);
+                           font-size: 13px; cursor: pointer; text-align: left;">
+              <RadzenIcon Icon="add" /> Add Files
+            </button>
+            <button type="button" class="queue-split-kebab-item"
+                    @onclick="@(async () => { CloseKebab(); await OpenLoadPlaylistDialogAsync(); })"
+                    style="display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 14px;
+                           background: transparent; border: none; color: var(--text-high);
+                           font-size: 13px; cursor: pointer; text-align: left;">
+              <RadzenIcon Icon="playlist_play" /> Load Playlist
+            </button>
+            <button type="button" class="queue-split-kebab-item"
+                    disabled="@(!_queueItems.Any())"
+                    @onclick="@(async () => { CloseKebab(); await HandleClearQueueAsync(); })"
+                    style="display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 14px;
+                           background: transparent; border: none;
+                           color: @(_queueItems.Any() ? "var(--rz-danger)" : "var(--text-low)");
+                           font-size: 13px; cursor: @(_queueItems.Any() ? "pointer" : "not-allowed"); text-align: left;">
+              <RadzenIcon Icon="delete_sweep" /> Clear All
+            </button>
+          </div>
+        }
+      </div>
+    </div>
+
+    <div class="queue-split-list-body">
+      @if (_activeTab == TabQueue)
+      {
+        @if (!_queueItems.Any())
+        {
+          <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-low);">
+            <RadzenIcon Icon="queue_music" Style="font-size: 80px; opacity: 0.4; margin-bottom: 12px;" />
+            <span style="font-size: 16px;">No tracks in queue</span>
+          </div>
+        }
+        else
+        {
+          <div id="queue-scroll-container" class="scrollable" style="flex: 1; overflow-y: auto; min-height: 0;">
+            <Virtualize Items="@_queueItems" ItemSize="56" OverscanCount="5" Context="item">
+              @{
+                var state = item.State ?? "Upcoming";
+                var isCurrent = state == "Current";
+                var rowClasses = "list-item-touch"
+                  + (isCurrent ? " list-item-active queue-row-current" : "");
+              }
+              <div class="@rowClasses"
+                   style="cursor: @(state == "Error" ? "not-allowed" : "pointer");
+                          opacity: @(state == "Error" ? "0.4" : state == "Played" ? "0.6" : "1");"
+                   @onclick="@(() => HandleItemClickAsync(item))">
+                <div style="width: 24px; text-align: center; flex-shrink: 0;">
+                  @if (isCurrent)
+                  {
+                    <span class="queue-row-glyph"
+                          style="font-size: 16px; color: var(--signal-amber); font-family: var(--font-mono); line-height: 1;"
+                          aria-label="Now playing">▶</span>
+                  }
+                  else if (state == "Played")
+                  {
+                    <RadzenIcon Icon="check" Style="font-size: 20px; color: var(--text-low);" />
+                  }
+                  else if (state == "Error")
+                  {
+                    <RadzenIcon Icon="error" Style="font-size: 20px; color: var(--rz-danger);" />
+                  }
+                  else
+                  {
+                    <span style="font-size: 13px; color: var(--text-low); font-family: var(--font-mono); font-variant-numeric: tabular-nums;">@(item.FullPlaylistIndex + 1)</span>
+                  }
+                </div>
+                <div style="flex: 1; min-width: 0;">
+                  <div style="font-size: 16px;
+                              font-weight: @(isCurrent ? "600" : "400");
+                              color: @(isCurrent ? "var(--signal-amber)" : state == "Error" ? "var(--signal-red)" : "var(--text-high)");
+                              white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+                              @(state == "Error" ? "text-decoration: line-through;" : "")">
+                    @item.Title
+                  </div>
+                  <div style="font-size: 14px; color: var(--text-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    @item.Artist
+                  </div>
+                </div>
+                @if (!string.IsNullOrEmpty(item.Duration))
+                {
+                  <div style="font-size: 13px; color: var(--text-medium); font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; min-width: 56px; flex-shrink: 0;">
+                    @item.Duration
+                  </div>
                 }
-                <div class="@rowClasses"
-                     style="cursor: @(state == "Error" ? "not-allowed" : "pointer");
-                            opacity: @(state == "Error" ? "0.4" : state == "Played" ? "0.6" : "1");"
-                     @onclick="@(() => HandleItemClickAsync(item))">
-                  <!-- State icon. Currently-playing row replaces the numeric index with a ▶
-                       glyph (per the design tightening spec) so the visual hierarchy
-                       reinforces "this is what's playing" without relying on bar animation
-                       being visible on low-contrast displays. -->
-                  <div style="width: 24px; text-align: center; flex-shrink: 0;">
-                    @if (isCurrent)
-                    {
-                      <span class="queue-row-glyph"
-                            style="font-size: 16px; color: var(--signal-amber); font-family: var(--font-mono); line-height: 1;"
-                            aria-label="Now playing">▶</span>
-                    }
-                    else if (state == "Played")
-                    {
-                      <RadzenIcon Icon="check" Style="font-size: 20px; color: var(--text-low);" />
-                    }
-                    else if (state == "Error")
-                    {
-                      <RadzenIcon Icon="error" Style="font-size: 20px; color: var(--rz-danger);" />
-                    }
-                    else
-                    {
-                      <span style="font-size: 13px; color: var(--text-low); font-family: var(--font-mono); font-variant-numeric: tabular-nums;">@(item.FullPlaylistIndex + 1)</span>
-                    }
+                @if (state == "Upcoming")
+                {
+                  <div @onclick:stopPropagation="true">
+                    <RadzenButton Variant="Variant.Text"
+                                  Icon="close"
+                                  Size="ButtonSize.Small"
+                                  ButtonStyle="ButtonStyle.Light"
+                                  Click="@(() => HandleRemoveAsync(item.Index))"
+                                  title="Remove" />
                   </div>
-
-                  <!-- Track info (title + artist) -->
-                  <div style="flex: 1; min-width: 0;">
-                    <div style="font-size: 16px;
-                                font-weight: @(isCurrent ? "600" : "400");
-                                color: @(isCurrent ? "var(--signal-amber)" : state == "Error" ? "var(--signal-red)" : "var(--text-high)");
-                                white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-                                @(state == "Error" ? "text-decoration: line-through;" : "")">
-                      @item.Title
-                    </div>
-                    <div style="font-size: 14px; color: var(--text-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                      @item.Artist
-                    </div>
-                  </div>
-
-                  <!-- Duration column — right-aligned, mono, tabular-nums.
-                       Already a clean "m:ss" / "h:mm:ss" string from the server (formatted
-                       via Durations equivalents), so we render as-is without re-parsing. -->
-                  @if (!string.IsNullOrEmpty(item.Duration))
-                  {
-                    <div style="font-size: 13px; color: var(--text-medium); font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; min-width: 56px; flex-shrink: 0;">
-                      @item.Duration
-                    </div>
-                  }
-
-                  <!-- Remove button (only for upcoming items) -->
-                  @if (state == "Upcoming")
-                  {
-                    <div @onclick:stopPropagation="true">
-                      <RadzenButton Variant="Variant.Text"
-                                    Icon="close"
-                                    Size="ButtonSize.Small"
-                                    ButtonStyle="ButtonStyle.Light"
-                                    Click="@(() => HandleRemoveAsync(item.Index))"
-                                    title="Remove" />
-                    </div>
-                  }
-                </div>
-              </Virtualize>
-            </div>
-          }
-        </div>
-      </RadzenTabsItem>
-
-      <RadzenTabsItem Text="History" Icon="history"
-                      Style="flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0;">
-        <div style="height: 100%; display: flex; flex-direction: column; min-height: 0;">
-          <!-- History Header -->
-          <div class="panel-header">
-            <span>Recent Plays</span>
-            <RadzenButton Variant="Variant.Text"
-                          Icon="refresh"
-                          ButtonStyle="ButtonStyle.Light"
-                          Size="ButtonSize.Small"
-                          Click="RefreshHistoryAsync"
-                          title="Refresh" />
+                }
+              </div>
+            </Virtualize>
           </div>
-
-          <!-- History List -->
-          @if (_isLoadingHistory)
-          {
-            @* PR 4: skeleton row stack instead of a centered spinner —
-               panel-body initial-load reads as "list rows about to appear". *@
-            <div style="flex: 1; min-height: 0; padding: 8px;">
-              <Skeleton Shape="Skeleton.SkeletonShape.ListRow" />
-              <Skeleton Shape="Skeleton.SkeletonShape.ListRow" />
-              <Skeleton Shape="Skeleton.SkeletonShape.ListRow" />
-              <Skeleton Shape="Skeleton.SkeletonShape.ListRow" />
-            </div>
-          }
-          else if (_historyItems.Any())
-          {
-            <div class="scrollable" style="flex: 1; overflow-y: auto; min-height: 0;">
-              @foreach (var item in _historyItems)
-              {
-                <div class="list-item-touch">
-                  <!-- Album art or source icon -->
-                  <div style="width: 36px; height: 36px; flex-shrink: 0; border-radius: 4px; overflow: hidden; display: flex; align-items: center; justify-content: center;">
-                    @if (!string.IsNullOrEmpty(item.Track?.CoverArtUrl)
-                      && item.Track.CoverArtUrl != "/images/default-album-art.png")
-                    {
-                      <img src="@item.Track.CoverArtUrl"
-                           style="width: 36px; height: 36px; object-fit: cover;"
-                           loading="lazy" />
-                    }
-                    else
-                    {
-                      <RadzenIcon Icon="@SourceTypeHelper.GetIcon(item.Source)"
-                                  Style="font-size: 20px; color: var(--text-low);" />
-                    }
-                  </div>
-                  <!-- Track info -->
-                  <div style="flex: 1; min-width: 0;">
-                    <div style="font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-high);">
-                      @(item.Title ?? "Unknown")
-                    </div>
-                    <div style="font-size: 14px; color: var(--text-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                      @(item.Artist ?? "—")
-                      @if (item.DurationSeconds.HasValue && item.DurationSeconds.Value > 0)
-                      {
-                        <text> · </text>
-                        <span style="font-family: var(--font-mono); font-variant-numeric: tabular-nums;">@Durations.FormatTrack(TimeSpan.FromSeconds(item.DurationSeconds.Value))</span>
-                      }
-                      <text> · </text>
-                      <span style="font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-low);">@Timestamps.FormatRelative(item.PlayedAt.ToLocalTime())</span>
-                    </div>
-                    @if (!string.IsNullOrEmpty(item.SourceDetails) && item.SourceDetails != $"{item.Title} - {item.Artist}")
-                    {
-                      <div style="font-size: 12px; color: var(--text-low); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                        @item.SourceDetails
-                      </div>
-                    }
-                  </div>
-                  <RadzenBadge BadgeStyle="@GetSourceBadgeStyle(item.Source)"
-                               IsPill="true"
-                               Text="@item.Source"
-                               Style="font-size: 13px;" />
+        }
+      }
+      else if (_activeTab == TabHistory)
+      {
+        @if (_isLoadingHistory)
+        {
+          <div style="flex: 1; min-height: 0; padding: 8px;">
+            <Skeleton Shape="Skeleton.SkeletonShape.ListRow" />
+            <Skeleton Shape="Skeleton.SkeletonShape.ListRow" />
+            <Skeleton Shape="Skeleton.SkeletonShape.ListRow" />
+            <Skeleton Shape="Skeleton.SkeletonShape.ListRow" />
+          </div>
+        }
+        else if (_historyItems.Any())
+        {
+          <div class="scrollable" style="flex: 1; overflow-y: auto; min-height: 0;">
+            @foreach (var item in _historyItems)
+            {
+              <div class="list-item-touch">
+                <div style="width: 36px; height: 36px; flex-shrink: 0; border-radius: 4px; overflow: hidden; display: flex; align-items: center; justify-content: center;">
+                  @if (!string.IsNullOrEmpty(item.Track?.CoverArtUrl)
+                    && item.Track.CoverArtUrl != "/images/default-album-art.png")
+                  {
+                    <img src="@item.Track.CoverArtUrl"
+                         style="width: 36px; height: 36px; object-fit: cover;"
+                         loading="lazy" />
+                  }
+                  else
+                  {
+                    <RadzenIcon Icon="@SourceTypeHelper.GetIcon(item.Source)"
+                                Style="font-size: 20px; color: var(--text-low);" />
+                  }
                 </div>
-              }
-            </div>
-          }
-          else
+                <div style="flex: 1; min-width: 0;">
+                  <div style="font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-high);">
+                    @(item.Title ?? "Unknown")
+                  </div>
+                  <div style="font-size: 14px; color: var(--text-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    @(item.Artist ?? "—")
+                    @if (item.DurationSeconds.HasValue && item.DurationSeconds.Value > 0)
+                    {
+                      <text> · </text>
+                      <span style="font-family: var(--font-mono); font-variant-numeric: tabular-nums;">@Durations.FormatTrack(TimeSpan.FromSeconds(item.DurationSeconds.Value))</span>
+                    }
+                    <text> · </text>
+                    <span style="font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-low);">@Timestamps.FormatRelative(item.PlayedAt.ToLocalTime())</span>
+                  </div>
+                  @if (!string.IsNullOrEmpty(item.SourceDetails) && item.SourceDetails != $"{item.Title} - {item.Artist}")
+                  {
+                    <div style="font-size: 12px; color: var(--text-low); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                      @item.SourceDetails
+                    </div>
+                  }
+                </div>
+                <RadzenBadge BadgeStyle="@GetSourceBadgeStyle(item.Source)"
+                             IsPill="true"
+                             Text="@item.Source"
+                             Style="font-size: 13px;" />
+              </div>
+            }
+          </div>
+        }
+        else
+        {
+          <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-low);">
+            <RadzenIcon Icon="history" Style="font-size: 80px; opacity: 0.4; margin-bottom: 12px;" />
+            <span style="font-size: 16px;">No history yet</span>
+          </div>
+        }
+      }
+      else if (_activeTab == TabRadio)
+      {
+        @* Radio tab is a thin placeholder until P1·3 promotes the radio detail
+           surface here. The chevron on the Source Bubble still opens the
+           RadioControlPanel inline on Home — this is just the secondary entry
+           point for kiosk users on the Queue page. *@
+        <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-low); padding: 16px; text-align: center;">
+          <RadzenIcon Icon="radio" Style="font-size: 80px; opacity: 0.4; margin-bottom: 12px;" />
+          <span style="font-size: 16px;">Radio context</span>
+          <span style="font-size: 13px; color: var(--text-low); margin-top: 4px;">Tap the chevron on the Radio pill to open the control panel.</span>
+        </div>
+      }
+    </div>
+  </div>
+
+  <!-- ── Right column: persistent context tiles ── -->
+  <div class="queue-split-context-col">
+    @if (_activeTab == TabHistory)
+    {
+      <!-- History stats: total plays, top track, top artist. Re-renders inside
+           the same column container so the surrounding flex layout doesn't
+           remount the right side when tabs swap. -->
+      <div class="history-stats-tile">
+        <div class="history-stats-row">
+          <span class="history-stats-label">Total Plays</span>
+          <span class="history-stats-value history-stats-value-led">@(_historyStats?.TotalPlays.ToString() ?? "—")</span>
+        </div>
+        <div class="history-stats-row">
+          <span class="history-stats-label">Top Track</span>
+          <span class="history-stats-value" title="@_topTrackTooltip">@_topTrackDisplay</span>
+        </div>
+        <div class="history-stats-row">
+          <span class="history-stats-label">Top Artist</span>
+          <span class="history-stats-value" title="@_topArtistTooltip">@_topArtistDisplay</span>
+        </div>
+      </div>
+    }
+    else if (_activeTab == TabRadio)
+    {
+      <div class="history-stats-tile">
+        <div class="history-stats-row">
+          <span class="history-stats-label">Source</span>
+          <span class="history-stats-value">Radio</span>
+        </div>
+      </div>
+    }
+    else
+    {
+      <!-- Queue Total LED tile. Reads the same _totalRuntime as the older inline
+           header (preserves the PR 3 contract) and formats via Durations.FormatLong. -->
+      <div class="queue-total-tile">
+        <div class="queue-total-tile-value">@(_totalRuntime > TimeSpan.Zero ? Durations.FormatLong(_totalRuntime) : "0:00:00")</div>
+        <div class="queue-total-tile-sub">
+          @_queueItems.Count track@(_queueItems.Count == 1 ? "" : "s")
+          @if (_totalRuntime > TimeSpan.Zero)
           {
-            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-low);">
-              <RadzenIcon Icon="history" Style="font-size: 80px; opacity: 0.4; margin-bottom: 12px;" />
-              <span style="font-size: 16px;">No history yet</span>
-            </div>
+            <text> · ends ~@(DateTime.Now.Add(_totalRuntime).ToString("HH:mm"))</text>
           }
         </div>
-      </RadzenTabsItem>
-    </Tabs>
-  </RadzenTabs>
+      </div>
+
+      <!-- Up Next: three rows of next-upcoming tracks (Played + Current excluded).
+           Album art is best-effort via ExtendedMetadata.CoverArtUrl if the server
+           supplied one; otherwise a music_note icon stands in. -->
+      <div class="up-next-tile">
+        <div class="up-next-tile-header">Up Next</div>
+        @{
+          var upNext = GetUpNext(3);
+        }
+        @if (upNext.Count == 0)
+        {
+          <div class="up-next-empty">Nothing queued.</div>
+        }
+        else
+        {
+          @for (var i = 0; i < upNext.Count; i++)
+          {
+            var dimClass = $"dim-{i + 1}";
+            var entry = upNext[i];
+            <div class="up-next-row @dimClass">
+              <div class="up-next-row-thumb">
+                @if (!string.IsNullOrEmpty(entry.CoverArtUrl)
+                  && entry.CoverArtUrl != "/images/default-album-art.png")
+                {
+                  <img src="@entry.CoverArtUrl" alt="" loading="lazy" />
+                }
+                else
+                {
+                  <RadzenIcon Icon="music_note" />
+                }
+              </div>
+              <div class="up-next-row-text">
+                <div class="up-next-row-title">@entry.Title</div>
+                <div class="up-next-row-artist">@entry.Artist</div>
+              </div>
+            </div>
+          }
+        }
+      </div>
+
+      <!-- Save-as-playlist CTA. Disabled when the queue is empty — saving nothing
+           would create an empty playlist (no current dialog flow handles that). -->
+      <button type="button"
+              class="save-playlist-tile"
+              disabled="@(!_queueItems.Any())"
+              @onclick="OpenSavePlaylistDialogAsync"
+              aria-label="Save current queue as playlist">
+        ＋ Save as playlist
+      </button>
+    }
+  </div>
 </div>
 
 @code {
-  private int _activeTab;
+  // ── Tab constants — define once so markup and code-behind agree. ──
+  private const int TabQueue = 0;
+  private const int TabHistory = 1;
+  private const int TabRadio = 2;
+
+  private int _activeTab = TabQueue;
   private bool _userOverrodeTab;
   private List<QueueItemDto> _queueItems = new();
   private List<PlayHistoryEntryDto> _historyItems = new();
+  private PlayHistoryStatsDto? _historyStats;
   private bool _isLoadingHistory;
   private int _playedCount;
   // Aggregate of every queue item's parsed Duration string. Surfaced as "h:mm:ss" in the
   // header via Durations.FormatLong. Zero when no rows have durations yet.
   private TimeSpan _totalRuntime = TimeSpan.Zero;
   private CancellationTokenSource? _refreshCts;
+
+  // Is the current primary source a radio family member? Drives the optional
+  // Radio tab in the tab strip — only shown when relevant so we don't clutter
+  // the strip for FilePlayer-only kiosk modes.
+  private bool _isRadioActive;
+
+  // Kebab menu open state (Add Files / Load Playlist / Clear All actions).
+  private bool _isKebabOpen;
+
+  // Cached display strings for the history-stats tile so the right column can
+  // render synchronously without re-querying TopTracks/TopArtists each render.
+  private string _topTrackDisplay = "—";
+  private string _topTrackTooltip = string.Empty;
+  private string _topArtistDisplay = "—";
+  private string _topArtistTooltip = string.Empty;
 
   protected override async Task OnInitializedAsync()
   {
@@ -293,10 +421,11 @@
       try
       {
         // Only refresh when History tab is active
-        if (_activeTab == 1)
+        if (_activeTab == TabHistory)
         {
           var result = await HistoryApi.GetHistoryAsync(limit: 50);
           _historyItems = result?.Items ?? new();
+          await RefreshHistoryStatsAsync();
           await InvokeAsync(StateHasChanged);
         }
       }
@@ -366,6 +495,30 @@
     return total;
   }
 
+  /// <summary>
+  /// Picks the next <paramref name="count"/> queue rows whose state is "Upcoming",
+  /// projected into a small UI record so the markup doesn't reach into <see cref="QueueItemDto"/>.
+  /// CoverArtUrl is best-effort — most QueueItemDto rows don't carry album art today,
+  /// so the tile falls back to a music_note icon if the URL is missing.
+  /// </summary>
+  private List<UpNextEntry> GetUpNext(int count)
+  {
+    var result = new List<UpNextEntry>(count);
+    foreach (var item in _queueItems)
+    {
+      if (item.State != "Upcoming") continue;
+      result.Add(new UpNextEntry(
+        item.Title ?? "Unknown",
+        item.Artist ?? "—",
+        // QueueItemDto doesn't currently carry CoverArtUrl; placeholder for future wiring.
+        null));
+      if (result.Count >= count) break;
+    }
+    return result;
+  }
+
+  private record UpNextEntry(string Title, string Artist, string? CoverArtUrl);
+
   private async Task RefreshHistoryAsync()
   {
     try
@@ -373,8 +526,13 @@
       _isLoadingHistory = true;
       StateHasChanged();
 
-      var result = await HistoryApi.GetHistoryAsync(limit: 50);
-      _historyItems = result?.Items ?? new();
+      var listTask = HistoryApi.GetHistoryAsync(limit: 50);
+      var statsTask = HistoryApi.GetStatsAsync();
+      await Task.WhenAll(listTask, statsTask);
+
+      _historyItems = (await listTask)?.Items ?? new();
+      _historyStats = await statsTask;
+      ApplyHistoryStatsProjections();
     }
     catch (Exception ex)
     {
@@ -384,6 +542,60 @@
     {
       _isLoadingHistory = false;
       StateHasChanged();
+    }
+  }
+
+  /// <summary>
+  /// Refreshes only the history stats payload, without disturbing the list-loading
+  /// flag. Called from the periodic refresh loop so a stale stats tile doesn't
+  /// linger while the list itself updates.
+  /// </summary>
+  private async Task RefreshHistoryStatsAsync()
+  {
+    try
+    {
+      _historyStats = await HistoryApi.GetStatsAsync();
+      ApplyHistoryStatsProjections();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "Failed to refresh history stats");
+    }
+  }
+
+  private void ApplyHistoryStatsProjections()
+  {
+    if (_historyStats == null)
+    {
+      _topTrackDisplay = "—";
+      _topTrackTooltip = string.Empty;
+      _topArtistDisplay = "—";
+      _topArtistTooltip = string.Empty;
+      return;
+    }
+
+    var topTrack = _historyStats.TopTracks?.FirstOrDefault();
+    if (topTrack != null)
+    {
+      _topTrackDisplay = $"{topTrack.Title} · {topTrack.PlayCount}×";
+      _topTrackTooltip = $"{topTrack.Title} by {topTrack.Artist} ({topTrack.PlayCount} plays)";
+    }
+    else
+    {
+      _topTrackDisplay = "—";
+      _topTrackTooltip = string.Empty;
+    }
+
+    var topArtist = _historyStats.TopArtists?.FirstOrDefault();
+    if (topArtist != null)
+    {
+      _topArtistDisplay = $"{topArtist.Artist} · {topArtist.PlayCount}×";
+      _topArtistTooltip = $"{topArtist.Artist} ({topArtist.PlayCount} plays)";
+    }
+    else
+    {
+      _topArtistDisplay = "—";
+      _topArtistTooltip = string.Empty;
     }
   }
 
@@ -513,11 +725,20 @@
     };
   }
 
-  private void OnTabChanged(int newTab)
+  private async Task SetTab(int newTab)
   {
+    if (newTab == _activeTab) return;
     _activeTab = newTab;
     _userOverrodeTab = true;
+    if (newTab == TabHistory && _historyStats == null)
+    {
+      // First switch to History — ensure the stats tile has data.
+      await RefreshHistoryStatsAsync();
+    }
   }
+
+  private void ToggleKebab() => _isKebabOpen = !_isKebabOpen;
+  private void CloseKebab() => _isKebabOpen = false;
 
   private async Task OnSourceChanged()
   {
@@ -533,13 +754,17 @@
     try
     {
       var primary = await SourcesApi.GetPrimarySourceAsync();
-      // Queue tab (0) for FilePlayer, History tab (1) for all others
-      _activeTab = primary?.Type == "FilePlayer" ? 0 : 1;
+      var primaryType = primary?.Type;
+      _isRadioActive = primaryType is "Radio" or "RTLSDRCore" or "RF320";
+      // Queue tab for FilePlayer, History tab for all others — preserves the
+      // pre-PR-5 default-tab behaviour now that we've renamed the indexes.
+      _activeTab = primaryType == "FilePlayer" ? TabQueue : TabHistory;
     }
     catch
     {
       // Default to History if we can't determine the source
-      _activeTab = 1;
+      _activeTab = TabHistory;
+      _isRadioActive = false;
     }
   }
 

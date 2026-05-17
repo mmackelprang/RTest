@@ -2281,3 +2281,482 @@ body {
   height: 10px;
   border-radius: 2px;
 }
+
+
+/* ─── §N  Now Playing Dock (PR 5) ─────────────────────────────────────────── */
+
+/*
+ * 64px persistent player strip pinned to the bottom of .content-area on every
+ * route except Home (handoff §P1·1). When mounted, .content-area applies the
+ * .has-dock modifier so .page-transition shrinks by 64px and routed page
+ * content never slides under the dock. The dock is absolute-positioned, so
+ * page content keeps the full content-area as its scroll viewport otherwise.
+ */
+
+.content-area.has-dock .page-transition {
+  height: calc(100% - 64px);
+}
+
+.now-playing-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 64px;
+  display: grid;
+  grid-template-columns: 48px minmax(200px, 1fr) auto auto minmax(200px, 1.6fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--surface-overlay);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-top: 1px solid var(--surface-separator);
+  cursor: pointer;
+  z-index: 5;
+}
+
+.now-playing-dock-art {
+  width: 48px;
+  height: 48px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--surface-inset);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.now-playing-dock-art img {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  display: block;
+}
+
+.now-playing-dock-art .rzi {
+  font-size: 24px;
+  color: var(--text-low);
+}
+
+/* Fixed min-width on the metadata block — keeps the dock layout stable when the
+ * track changes between a short and long title (handoff §P1·1 acceptance:
+ * "no layout shift on track change"). */
+.now-playing-dock-text {
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.now-playing-dock-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-high);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+
+.now-playing-dock-artist {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-medium);
+  line-height: 1.2;
+}
+
+.now-playing-dock-artist .source-color-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.now-playing-dock-artist-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.now-playing-dock-bars {
+  /* Inherits .now-playing-bars sizing (height: 16px, three 3px spans). The dock
+   * just narrows the gap and adds a steady width so the surrounding grid cells
+   * don't reflow when the bars appear/disappear on play/pause. */
+  width: 18px;
+}
+
+.now-playing-dock-bars-placeholder {
+  width: 18px;
+  height: 16px;
+}
+
+.now-playing-dock-elapsed,
+.now-playing-dock-total {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-medium);
+  min-width: 40px;
+  text-align: right;
+}
+
+.now-playing-dock-progress {
+  height: 3px;
+  background: var(--surface-separator);
+  border-radius: 2px;
+  min-width: 200px;
+  position: relative;
+  overflow: hidden;
+}
+
+.now-playing-dock-progress-bar {
+  height: 100%;
+  background: var(--accent-primary);
+  border-radius: 2px;
+  transition: width 200ms linear;
+  width: 0%;
+}
+
+.now-playing-dock-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.now-playing-dock-btn {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-medium);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.now-playing-dock-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-high);
+}
+
+.now-playing-dock-btn .rzi {
+  font-size: 20px;
+}
+
+.now-playing-dock-btn-primary {
+  color: var(--accent-primary);
+}
+
+.now-playing-dock-btn-primary .rzi {
+  font-size: 22px;
+}
+
+
+/* ─── §O  Queue Split Layout (PR 5) ───────────────────────────────────────── */
+
+/*
+ * Two-column queue/history panel (handoff §P1·4). Left column (flex 1.6) holds
+ * a tab strip plus the list itself; right column (flex 1) holds three stacked
+ * context tiles: Queue Total LED, Up Next thumbs, Save-as-Playlist CTA. The
+ * tabs swap the list contents without remounting the right column.
+ */
+
+.queue-split {
+  display: flex;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+}
+
+.queue-split-list-col {
+  flex: 1.6;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.queue-split-context-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  min-width: 0;
+  padding: 8px 0;
+  overflow: hidden;
+}
+
+/* Tab strip — mono uppercase, --accent-dim on the active pill. Matches the
+ * VisualizerPanel mode picker treatment (PR 4) for cross-panel consistency. */
+.queue-split-tabstrip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--surface-separator);
+  flex-shrink: 0;
+}
+
+.queue-split-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-medium);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+  min-height: 32px;
+}
+
+.queue-split-tab:hover {
+  color: var(--text-high);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.queue-split-tab.is-active {
+  background: var(--accent-dim);
+  color: var(--accent-primary);
+  border-color: rgba(92, 212, 232, 0.35);
+}
+
+.queue-split-tab-spacer {
+  flex: 1;
+}
+
+.queue-split-kebab {
+  background: transparent;
+  border: none;
+  color: var(--text-medium);
+  font-size: 18px;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.queue-split-kebab:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-high);
+}
+
+.queue-split-list-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Queue Total tile ── */
+.queue-total-tile {
+  background: var(--surface-overlay);
+  border: 1px solid var(--surface-separator);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.queue-total-tile-value {
+  font-family: var(--font-led);
+  font-size: 30px;
+  color: var(--signal-amber);
+  letter-spacing: 0.02em;
+  line-height: 1.0;
+}
+
+.queue-total-tile-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Up Next tile ── */
+.up-next-tile {
+  background: var(--surface-overlay);
+  border: 1px solid var(--surface-separator);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.up-next-tile-header {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-low);
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  margin-bottom: 2px;
+}
+
+.up-next-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.up-next-row-thumb {
+  width: 32px;
+  height: 32px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--surface-inset);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.up-next-row-thumb img {
+  width: 32px;
+  height: 32px;
+  object-fit: cover;
+}
+
+.up-next-row-thumb .rzi {
+  font-size: 16px;
+  color: var(--text-low);
+}
+
+.up-next-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.up-next-row-title {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+
+.up-next-row-artist {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+
+/* Progressive dimming on the next 3 queue items — visual hierarchy that
+ * mirrors the spec's "text-high → text-medium → text-low" cascade. */
+.up-next-row.dim-1 .up-next-row-title { color: var(--text-high); }
+.up-next-row.dim-1 .up-next-row-artist { color: var(--text-medium); }
+.up-next-row.dim-2 .up-next-row-title { color: var(--text-medium); }
+.up-next-row.dim-2 .up-next-row-artist { color: var(--text-low); }
+.up-next-row.dim-3 .up-next-row-title { color: var(--text-low); }
+.up-next-row.dim-3 .up-next-row-artist { color: var(--text-low); opacity: 0.7; }
+
+.up-next-empty {
+  font-size: 12px;
+  color: var(--text-low);
+  font-style: italic;
+  padding: 6px 0;
+}
+
+/* ── Save-as-playlist CTA tile ── */
+.save-playlist-tile {
+  background: transparent;
+  border: 1px solid var(--accent-primary);
+  color: var(--accent-primary);
+  border-radius: 8px;
+  padding: 14px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+  text-align: center;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.save-playlist-tile:hover:not(:disabled) {
+  background: var(--accent-dim);
+}
+
+.save-playlist-tile:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-color: var(--surface-separator);
+  color: var(--text-low);
+}
+
+/* ── History stats tile (shown in the right column when History tab is active) ── */
+.history-stats-tile {
+  background: var(--surface-overlay);
+  border: 1px solid var(--surface-separator);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.history-stats-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.history-stats-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-low);
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+}
+
+.history-stats-value {
+  font-size: 14px;
+  color: var(--text-high);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60%;
+}
+
+.history-stats-value-led {
+  font-family: var(--font-led);
+  font-size: 22px;
+  color: var(--signal-amber);
+  letter-spacing: 0.02em;
+}
