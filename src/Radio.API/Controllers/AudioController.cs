@@ -590,6 +590,7 @@ public class AudioController : ControllerBase
           nowPlaying.Artist = metadataDto.Artist;
           nowPlaying.Album = metadataDto.Album;
           nowPlaying.AlbumArtUrl = metadataDto.AlbumArtUrl;
+          nowPlaying.FilePath = metadataDto.FilePath;
           nowPlaying.ExtendedMetadata = metadataDto.ExtendedMetadata;
         }
       }

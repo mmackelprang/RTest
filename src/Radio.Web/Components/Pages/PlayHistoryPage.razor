@@ -139,7 +139,12 @@
           </RadzenDataGridColumn>
           <RadzenDataGridColumn TItem="PlayHistoryEntryDto" Title="Date/Time" Sortable="false" Filterable="false">
             <Template Context="item">
-              @item.PlayedAt.ToString("yyyy-MM-dd HH:mm")
+              @* Relative-time projection: "Today HH:mm", "Yesterday HH:mm", or "MMM d · HH:mm".
+                 Caller must convert UTC → local; Timestamps.FormatRelative does not assume timezone. *@
+              <span style="font-family: var(--font-mono); font-variant-numeric: tabular-nums;"
+                    title="@item.PlayedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")">
+                @Timestamps.FormatRelative(item.PlayedAt.ToLocalTime())
+              </span>
             </Template>
           </RadzenDataGridColumn>
           <RadzenDataGridColumn TItem="PlayHistoryEntryDto" Title="Title" Property="Title" Sortable="false" Filterable="false" />
@@ -150,9 +155,11 @@
               <RadzenBadge BadgeStyle="@GetSourceBadgeStyle(item.Source)" IsPill="true" Text="@item.Source" />
             </Template>
           </RadzenDataGridColumn>
-          <RadzenDataGridColumn TItem="PlayHistoryEntryDto" Title="Duration" Sortable="false" Filterable="false">
+          <RadzenDataGridColumn TItem="PlayHistoryEntryDto" Title="Duration" Sortable="false" Filterable="false" TextAlign="TextAlign.Right">
             <Template Context="item">
-              @FormatDuration(item.DurationSeconds)
+              <span style="font-family: var(--font-mono); font-variant-numeric: tabular-nums;">
+                @FormatDuration(item.DurationSeconds)
+              </span>
             </Template>
           </RadzenDataGridColumn>
           <RadzenDataGridColumn TItem="PlayHistoryEntryDto" Title="Actions" Width="100px" Sortable="false" Filterable="false">
@@ -524,15 +531,15 @@
     };
   }
 
-  private string FormatDuration(int? seconds)
+  /// <summary>
+  /// Format a duration-in-seconds value for the history grid. Empty / zero values
+  /// surface as "--:--"; positive values route through <see cref="Durations.FormatTrack(TimeSpan)"/>
+  /// so the long-form ("h:mm:ss") case is handled identically to the queue rows.
+  /// </summary>
+  private static string FormatDuration(int? seconds)
   {
     if (!seconds.HasValue || seconds.Value <= 0) return "--:--";
-    var ts = TimeSpan.FromSeconds(seconds.Value);
-    if (ts.TotalHours >= 1)
-    {
-      return $"{(int)ts.TotalHours}:{ts.Minutes:D2}:{ts.Seconds:D2}";
-    }
-    return $"{ts.Minutes}:{ts.Seconds:D2}";
+    return Durations.FormatTrack(TimeSpan.FromSeconds(seconds.Value));
   }
 
   public void Dispose()

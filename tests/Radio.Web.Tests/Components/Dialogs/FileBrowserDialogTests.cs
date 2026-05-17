@@ -1,4 +1,6 @@
+using System.Text.Json;
 using Bunit;
+using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -138,5 +140,93 @@ public class FileBrowserDialogTests : TestContext
       .Add(p => p.Subdirectory, "music")
       .Add(p => p.InitialSelection, "/path/to/song.mp3"));
     Assert.NotNull(cut);
+  }
+
+  // ─── Chip filter persistence ─────────────────────────────────────────────────
+  // PR 3 replaces the prior single-string filter dropdown with a List<string> of
+  // chips. The repair pass in ParsePersistedFilterValue tolerates the legacy
+  // double-escaped form ("\"[\\\".mp3\\\",\\\".flac\\\"]\"" etc.) so existing
+  // installs migrate cleanly without user intervention.
+
+  [Fact]
+  public void ParsePersistedFilterValue_NativeJsonArray_ReturnsExtensions()
+  {
+    // The happy path: ConfigApi deserializes the persisted blob into a JsonElement
+    // whose ValueKind is Array. We round-trip a small fixture through JsonDocument
+    // to mirror what the config store handler hands us.
+    using var doc = JsonDocument.Parse("[\".mp3\", \".flac\"]");
+    var result = FileBrowserDialog.ParsePersistedFilterValue(doc.RootElement.Clone());
+    result.Should().NotBeNull();
+    result!.Should().BeEquivalentTo(new[] { ".mp3", ".flac" });
+  }
+
+  [Fact]
+  public void ParsePersistedFilterValue_DoubleEscapedString_Recovered()
+  {
+    // Legacy bug: an earlier persistence path stringified the array twice. The repair
+    // pass must keep unwrapping until it lands on a string[] (capped at 4 levels).
+    var inner = JsonSerializer.Serialize(new[] { ".mp3", ".flac" });          // "[\".mp3\",\".flac\"]"
+    var doubleEscaped = JsonSerializer.Serialize(inner);                       // "\"[\\\"...\\\"]\""
+    var result = FileBrowserDialog.ParsePersistedFilterValue(doubleEscaped);
+    result.Should().NotBeNull();
+    result!.Should().BeEquivalentTo(new[] { ".mp3", ".flac" });
+  }
+
+  [Fact]
+  public void ParsePersistedFilterValue_TripleEscapedString_Recovered()
+  {
+    // Pathological case still in scope of the repair pass (we cap unwrap depth at 4).
+    var inner = JsonSerializer.Serialize(new[] { ".wav" });
+    var double_ = JsonSerializer.Serialize(inner);
+    var triple = JsonSerializer.Serialize(double_);
+    var result = FileBrowserDialog.ParsePersistedFilterValue(triple);
+    result.Should().NotBeNull();
+    result!.Should().BeEquivalentTo(new[] { ".wav" });
+  }
+
+  [Fact]
+  public void ParsePersistedFilterValue_PlainStringJunk_ReturnsNull()
+  {
+    // Non-JSON garbage must not throw — the caller silently keeps an empty chip list.
+    FileBrowserDialog.ParsePersistedFilterValue("not-json-at-all").Should().BeNull();
+  }
+
+  [Fact]
+  public void ParsePersistedFilterValue_NestedJsonElementString_Recovered()
+  {
+    // A JsonElement whose ValueKind is String wrapping a legacy escaped blob should
+    // delegate through the string-unwrap path.
+    var blob = JsonSerializer.Serialize(new[] { ".m4a", ".aac" });
+    using var doc = JsonDocument.Parse(JsonSerializer.Serialize(blob)); // string-of-string-of-array
+    var result = FileBrowserDialog.ParsePersistedFilterValue(doc.RootElement.Clone());
+    result.Should().NotBeNull();
+    result!.Should().BeEquivalentTo(new[] { ".m4a", ".aac" });
+  }
+
+  [Fact]
+  public void ParsePersistedFilterValue_EnumerableOfObject_ReadsAsStrings()
+  {
+    // Some backends round-trip arrays as IEnumerable<object>. We coerce each element
+    // via ToString() so the chip list rehydrates cleanly.
+    IEnumerable<object> raw = new object[] { ".opus", ".ogg" };
+    var result = FileBrowserDialog.ParsePersistedFilterValue(raw);
+    result.Should().NotBeNull();
+    result!.Should().BeEquivalentTo(new[] { ".opus", ".ogg" });
+  }
+
+  [Fact]
+  public void ParsePersistedFilterValue_RoundTripsCleanly_NoDoubleEscapeReintroduced()
+  {
+    // Save → load must be an identity for the chip list. We serialize via the same
+    // path SaveFilterAsync uses (a plain string[]), then parse via the repair entry
+    // point and assert no escape characters survive.
+    var original = new[] { ".mp3", ".flac", ".wav" };
+    var serialized = JsonSerializer.Serialize(original);
+    using var doc = JsonDocument.Parse(serialized);
+    var parsed = FileBrowserDialog.ParsePersistedFilterValue(doc.RootElement.Clone());
+    parsed.Should().NotBeNull();
+    parsed!.Should().BeEquivalentTo(original);
+    // No element should contain a backslash — a regression to escape-blobs would surface here.
+    parsed.Should().NotContain(s => s.Contains('\\') || s.Contains('"'));
   }
 }

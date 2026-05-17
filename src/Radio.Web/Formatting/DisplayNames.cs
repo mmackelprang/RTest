@@ -210,11 +210,20 @@ public static partial class DisplayNames
   }
 
   /// <summary>
-  /// Pulls a file path out of <see cref="NowPlayingDto.ExtendedMetadata"/> if one is present.
-  /// We look at a few common keys; callers (or PR-3+ wiring) can populate any of them.
+  /// Pulls a file path out of the now-playing payload.
+  /// Prefers the typed <see cref="NowPlayingDto.FilePath"/> property (PR 3+); falls back to
+  /// the legacy <see cref="NowPlayingDto.ExtendedMetadata"/> dictionary entries so older
+  /// payloads (or non-file callers that piggyback on the metadata bag) still resolve.
   /// </summary>
   private static string? GetFilePath(NowPlayingDto np)
   {
+    // 1. Typed property is the canonical source from PR 3 onward.
+    if (!string.IsNullOrWhiteSpace(np.FilePath))
+    {
+      return np.FilePath;
+    }
+
+    // 2. Legacy / backward-compatible fallback to the typeless metadata dictionary.
     if (np.ExtendedMetadata is null)
     {
       return null;

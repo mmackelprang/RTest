@@ -40,6 +40,13 @@ public class NowPlayingDto
   public TimeSpan? Position { get; set; }
   public TimeSpan? Duration { get; set; }
   public double? ProgressPercentage { get; set; }
+  /// <summary>
+  /// Absolute filesystem path of the currently playing file (file-player sources only).
+  /// Surfaced as a first-class property so <c>DisplayNames.Track</c> can parse a clean
+  /// title from the filename when the metadata layer only produced "Track N".
+  /// Null for non-file sources (Radio, Bluetooth, TTS, etc.).
+  /// </summary>
+  public string? FilePath { get; set; }
   public Dictionary<string, object>? ExtendedMetadata { get; set; }
 }
 

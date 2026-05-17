@@ -18,4 +18,9 @@
     <PackageReference Include="Serilog.Sinks.Async" Version="2.1.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Expose `internal` helpers (parsers, projection methods) to the test project
+         so unit tests can exercise them without making them part of the public API. -->
+    <InternalsVisibleTo Include="Radio.Web.Tests" />
+  </ItemGroup>
 </Project>

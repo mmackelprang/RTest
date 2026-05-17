@@ -2,10 +2,12 @@
 @using Radio.Web.Services
 @using Radio.Web.Services.ApiClients
 @using Radio.Web.Models
+@using Microsoft.Extensions.Options
 @inject DevicesApiService DevicesApi
 @inject DeviceDisplayStateService DisplayState
 @inject NotificationService NotificationService
 @inject ILogger<DeviceManagementPage> Logger
+@inject IOptionsMonitor<DevicesOptions> DevicesOptionsMonitor
 
 <PageTitle>Device Management - Radio Console</PageTitle>
 
@@ -107,12 +109,12 @@
               <Columns>
                 <RadzenDataGridColumn Title="Name" TItem="AudioDeviceDto">
                   <Template Context="item">
-                    <div style="display:flex; flex-direction:row; gap:4px; align-items:center">
+                    <div style="display:flex; flex-direction:row; gap:4px; align-items:center" title="@item.Name">
                       @if (item.IsDefault)
                       {
                         <RadzenIcon Icon="star" title="Default Device" Style="color:var(--rz-primary)" />
                       }
-                      <span>@item.Name</span>
+                      <span>@DisplayNames.Device(item, DeviceAliases)</span>
                     </div>
                   </Template>
                 </RadzenDataGridColumn>
@@ -260,12 +262,12 @@
               <Columns>
                 <RadzenDataGridColumn Title="Name" TItem="AudioDeviceDto">
                   <Template Context="item">
-                    <div style="display:flex; flex-direction:row; gap:4px; align-items:center">
+                    <div style="display:flex; flex-direction:row; gap:4px; align-items:center" title="@item.Name">
                       @if (item.IsDefault)
                       {
                         <RadzenIcon Icon="star" title="Default Device" Style="color:var(--rz-primary)" />
                       }
-                      <span>@item.Name</span>
+                      <span>@DisplayNames.Device(item, DeviceAliases)</span>
                     </div>
                   </Template>
                 </RadzenDataGridColumn>
@@ -353,6 +355,14 @@
   private List<UsbPortDto>? usbPorts;
   private List<CastDeviceDto>? castDevices;
   private List<DeviceDisplayInfoDto>? displaySettings;
+
+  /// <summary>
+  /// Live raw-name → friendly-name alias map from the <c>Devices:Aliases</c> config section.
+  /// Re-evaluated on each render so a hot-reloaded <c>appsettings.json</c> takes effect
+  /// without a circuit restart.
+  /// </summary>
+  private IDictionary<string, string> DeviceAliases =>
+    DevicesOptionsMonitor.CurrentValue.Aliases;
 
   private bool isLoadingOutput = false;
   private bool isLoadingInput = false;

@@ -590,6 +590,15 @@ html, body {
   background: var(--accent-surface);
 }
 
+/* Queue row: currently-playing track.
+   Overrides the .list-item-active accent-primary border with the amber "now playing"
+   signal colour so the queue surface visually agrees with the design tightening spec
+   (P0·3 — amber-left + ▶ glyph). Stays a 3px solid border to match the base rule. */
+.list-item-touch.list-item-active.queue-row-current {
+  border-left: 3px solid var(--signal-amber);
+  background: var(--accent-surface);
+}
+
 .list-item-title {
   font-size: 16px;
   font-weight: 500;
@@ -1195,21 +1204,35 @@ body::-webkit-scrollbar,
 
 /* ─── §22  File Browser Dialog ─────────────────────────────────────────────── */
 
+/* Toolbar is flex-wrap so the right-hand chip cluster (path-edit toggle + search +
+   chip row) can drop to a second line when 2+ filter chips push past the dialog
+   width at the 1920×720 kiosk viewport. The breadcrumb reserves a 220px minimum
+   so it stays fully visible instead of being shrunk to zero (which used to push
+   it off-screen and produce a horizontal scrollbar on the dialog content). */
 .file-browser-toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border-subtle);
   margin-bottom: 8px;
+}
+
+.file-browser-toolbar-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .file-browser-breadcrumbs {
   display: flex;
   align-items: center;
   gap: 2px;
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 220px;
+  min-width: 220px;
   overflow-x: auto;
   white-space: nowrap;
   font-size: 13px;
@@ -1282,6 +1305,107 @@ body::-webkit-scrollbar,
 .file-browser-path-bar input {
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   font-size: 13px !important;
+}
+
+/* File browser extension filter chips (PR 3).
+   Replaces the prior dropdown with a row of removable tokens + an "add type"
+   affordance. The dashed-border chip is the add button; solid chips are active
+   filters. Layout is flex-wrap so long chip rows wrap below the search input. */
+.file-browser-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.file-browser-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 4px 0 10px;
+  border-radius: 13px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-high);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.file-browser-chip-label {
+  letter-spacing: 0.02em;
+}
+
+.file-browser-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: var(--text-medium);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 80ms ease, color 80ms ease;
+}
+
+.file-browser-chip-remove:hover,
+.file-browser-chip-remove:focus-visible {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text-high);
+  outline: none;
+}
+
+.file-browser-chip-add {
+  padding: 0 10px;
+  border-style: dashed;
+  background: transparent;
+  color: var(--text-medium);
+  cursor: pointer;
+  transition: color 80ms ease, border-color 80ms ease, background 80ms ease;
+}
+
+.file-browser-chip-add:hover,
+.file-browser-chip-add:focus-visible {
+  color: var(--text-high);
+  border-color: var(--accent-primary);
+  background: var(--accent-surface);
+  outline: none;
+}
+
+/* "+ add type" popover. Reuses the location-dropdown sizing for visual harmony
+   with the drive picker above it. */
+.file-browser-chip-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  z-index: 100;
+  min-width: 160px;
+  background: rgba(40, 40, 40, 0.98);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 4px 0;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(12px);
+  display: flex;
+  flex-direction: column;
+}
+
+.file-browser-chip-dropdown .file-browser-location-item {
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  color: var(--text-high);
 }
 
 

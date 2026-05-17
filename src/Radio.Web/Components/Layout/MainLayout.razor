@@ -1,5 +1,6 @@
 @inherits LayoutComponentBase
 @using Radio.Web.Models
+@using Microsoft.Extensions.Options
 @inject SystemApiService SystemApi
 @inject SourcesApiService SourcesApi
 @inject DevicesApiService DevicesApi
@@ -12,6 +13,7 @@
 @inject Radio.Web.Services.DeviceDisplayStateService DeviceDisplayState
 @inject Radio.Web.Services.RadioPanelToggleService RadioPanelToggle
 @inject IConfiguration Configuration
+@inject IOptionsMonitor<DevicesOptions> DevicesOptionsMonitor
 @implements IDisposable
 @implements IAsyncDisposable
 
@@ -34,23 +36,28 @@
 
       <div class="topbar-separator"></div>
 
-      <!-- IN cluster: active source name + swatch -->
+      <!-- IN cluster: active source name + swatch.
+           Label routed through DisplayNames.Source so a missing/empty Name on the
+           DTO falls through to a humanized Type instead of leaking a GUID-shaped Id. -->
       <div class="cluster">
         <span class="cluster-label">In</span>
-        <span class="cluster-value">
+        <span class="cluster-value" title="@(ActiveSource?.Name ?? ActiveSource?.Id ?? "")">
           <span class="cluster-swatch" style="@($"--bubble-accent: var({GetActiveSourceAccentVar()});")"></span>
-          @(ActiveSource?.Name ?? "—")
+          @(ActiveSource is null ? "—" : DisplayNames.Source(ActiveSource))
         </span>
       </div>
 
       <span class="topbar-arrow" aria-hidden="true">→</span>
 
-      <!-- OUT cluster: active output name + swatch -->
+      <!-- OUT cluster: active output name + swatch.
+           Label routed through DisplayNames.Device with the configured alias map so
+           "CABLE Input (VB-Audio Virtual Cable)" surfaces as "VB-Audio Cable In", etc.
+           Tooltip preserves the raw name for debugging / a11y. -->
       <div class="cluster">
         <span class="cluster-label">Out</span>
-        <span class="cluster-value">
+        <span class="cluster-value" title="@(ActiveOutput?.Name ?? "")">
           <span class="cluster-swatch" style="@($"--bubble-accent: var({GetActiveOutputAccentVar()});")"></span>
-          @(ActiveOutput?.Name ?? "—")
+          @(ActiveOutput is null ? "—" : DisplayNames.Device(ActiveOutput, DeviceAliases))
           @if (ActiveOutput?.Id.Equals("google-cast", StringComparison.OrdinalIgnoreCase) == true && _isCastConnecting)
           {
             <span class="cast-connecting" style="display:inline-block; width:8px; height:8px; border-radius:50%; background: var(--accent-primary);"></span>
@@ -152,7 +159,8 @@
         var dataAttr = GetSourceDataAttr(source.Type);
         var accent = GetAccentVarForSource(source.Type);
         <SourceBubble Icon="@GetSourceIcon(source.Type)"
-                      Label="@source.Name"
+                      Label="@DisplayNames.Source(source)"
+                      RawName="@(source.Name ?? source.Id)"
                       Sub="@GetSourceSubLabel(source)"
                       Accent="@accent"
                       IsActive="isActive"
@@ -208,6 +216,14 @@
     _availableSources.FirstOrDefault(s => s.Id == _selectedSourceId);
   private AudioDeviceDto? ActiveOutput =>
     _availableOutputs.FirstOrDefault(o => o.Id == _selectedOutputId);
+
+  /// <summary>
+  /// Live view of the configured raw-name → friendly-name alias map.
+  /// Read on every render so <c>appsettings.json</c> hot-reloads via <c>IOptionsMonitor</c>
+  /// propagate without a circuit restart.
+  /// </summary>
+  private IDictionary<string, string> DeviceAliases =>
+    DevicesOptionsMonitor.CurrentValue.Aliases;
 
   protected override async Task OnInitializedAsync()
   {

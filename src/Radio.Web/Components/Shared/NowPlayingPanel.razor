@@ -99,13 +99,16 @@
       <div style="position: relative; width: 100%; max-width: 340px; aspect-ratio: 1; border-radius: 8px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.5);">
         <img src="@_albumArtUrl" alt="Album Art" referrerpolicy="no-referrer"
              style="width: 100%; height: 100%; object-fit: cover;" />
-        <!-- Metadata overlay on bottom of art -->
+        <!-- Metadata overlay on bottom of art.
+             Title/subtitle routed through DisplayNames.Track so a generic "Track N"
+             from the metadata reader gets upgraded to the cleaned-up filename, and
+             the default-placeholder artist "--" surfaces as an em-dash. -->
         <div style="position: absolute; bottom: 0; left: 0; right: 0; padding: 12px 14px 10px; background: linear-gradient(transparent, rgba(0,0,0,0.85) 40%); text-align: left;">
           <div style="font-size: 22px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #fff; text-shadow: 0 1px 6px rgba(0,0,0,0.8);">
-            @(_title ?? "No Track Playing")
+            @_displayTitle
           </div>
           <div style="font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgba(255,255,255,0.85); text-shadow: 0 1px 3px rgba(0,0,0,0.7); margin-top: 2px;">
-            @(_artist ?? "--")
+            @_displaySubtitle
           </div>
           @if (!string.IsNullOrEmpty(_album) && _album != "--")
           {
@@ -121,10 +124,10 @@
       <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;">
         <RadzenIcon Icon="music_note" Style="font-size: 96px; color: var(--text-low); margin-bottom: 16px;" />
         <div style="font-size: 28px; font-weight: 600; color: var(--text-high);">
-          @(_title ?? "No Track Playing")
+          @_displayTitle
         </div>
         <div style="font-size: 18px; color: var(--text-medium); margin-top: 4px;">
-          @(_artist ?? "--")
+          @_displaySubtitle
         </div>
       </div>
     }
@@ -202,7 +205,7 @@
         {
           <RadzenProgressBar Value="@_progressPercent" ProgressBarStyle="ProgressBarStyle.Primary" Style="height: 4px;" />
         }
-        <div style="display: flex; justify-content: space-between; font-size: 13px; color: var(--text-medium); margin-top: -2px; font-family: var(--font-mono);">
+        <div style="display: flex; justify-content: space-between; font-size: 13px; color: var(--text-medium); margin-top: -2px; font-family: var(--font-mono); font-variant-numeric: tabular-nums;">
           <span>@_position</span>
           <span>@_duration</span>
         </div>
@@ -210,7 +213,7 @@
     }
     else if (!string.IsNullOrEmpty(_position) && _position != "0:00")
     {
-      <div style="text-align: center; font-size: 13px; color: var(--text-medium); margin-bottom: 4px; font-family: var(--font-mono);">
+      <div style="text-align: center; font-size: 13px; color: var(--text-medium); margin-bottom: 4px; font-family: var(--font-mono); font-variant-numeric: tabular-nums;">
         <span>@_position</span>
       </div>
     }
@@ -280,6 +283,11 @@
   private string? _title;
   private string? _artist;
   private string? _album;
+  // Cached display projections recomputed by ApplyDisplayProjection() whenever the
+  // underlying now-playing payload changes. We keep _title/_artist as raw caches so
+  // change detection / polling fallbacks still work; the UI binds to _display* instead.
+  private string _displayTitle = "No Track Playing";
+  private string _displaySubtitle = "—";
   private string? _albumArtUrl;
   private bool _albumArtFailed;
   private string? _source;
@@ -449,14 +457,15 @@
         _volume = state.Volume;
         _canSeek = state.CanSeek;
 
-        // Parse position and duration
+        // Parse position and duration. Both routed through Durations.FormatTrack so we
+        // never surface ToString() fractional-seconds tails like 00:03:00.6628571.
+        // Sub-second / zero values keep _position = null so the position-only fallback
+        // branch in the template (the "elapsed only" tile) doesn't fire spuriously.
         var posSeconds = 0.0;
         if (!string.IsNullOrEmpty(state.Position) && TimeSpan.TryParse(state.Position, out var pos))
         {
           posSeconds = pos.TotalSeconds;
-          _position = pos.TotalHours >= 1
-            ? pos.ToString(@"h\:mm\:ss")
-            : pos.ToString(@"m\:ss");
+          _position = pos.TotalSeconds >= 1.0 ? Durations.FormatTrack(pos) : "0:00";
         }
         else
         {
@@ -468,9 +477,7 @@
         {
           _totalDurationSeconds = dur.TotalSeconds;
           _progressPercent = posSeconds > 0 ? (posSeconds / dur.TotalSeconds) * 100.0 : 0;
-          _duration = dur.TotalHours >= 1
-            ? dur.ToString(@"h\:mm\:ss")
-            : dur.ToString(@"m\:ss");
+          _duration = Durations.FormatTrack(dur);
         }
         else
         {
@@ -495,6 +502,7 @@
         _source = nowPlaying.SourceName;
         _nowPlayingSourceType = nowPlaying.SourceType;
         _currentSourceGain = _sourceGainOffsets.TryGetValue(nowPlaying.SourceType, out var g) ? g : 1.0f;
+        ApplyDisplayProjection(nowPlaying);
       }
     }
     catch (Exception ex)
@@ -521,6 +529,23 @@
     _source = dto.SourceName;
     _nowPlayingSourceType = dto.SourceType;
     _currentSourceGain = _sourceGainOffsets.TryGetValue(dto.SourceType, out var g) ? g : 1.0f;
+    ApplyDisplayProjection(dto);
+  }
+
+  /// <summary>
+  /// Computes the cleaned-up title/subtitle pair via <see cref="DisplayNames.Track"/>
+  /// and caches them on the component so the UI renders the projected names instead
+  /// of the raw DTO fields. Called whenever the now-playing payload changes.
+  /// </summary>
+  private void ApplyDisplayProjection(NowPlayingDto dto)
+  {
+    var (title, subtitle) = DisplayNames.Track(dto);
+    // The empty-source case (no track loaded) keeps the friendly "No Track Playing"
+    // copy that pre-dates PR 3, because DisplayNames returns the raw "No Track" default.
+    _displayTitle = string.Equals(title, "No Track", StringComparison.Ordinal)
+      ? "No Track Playing"
+      : title;
+    _displaySubtitle = subtitle;
   }
 
   // --- Fingerprint badge helpers ---
@@ -705,9 +730,9 @@
       var seconds = (newPercent / 100.0) * _totalDurationSeconds;
       var newTime = TimeSpan.FromSeconds(seconds);
       _progressPercent = newPercent;
-      _position = newTime.TotalHours >= 1
-        ? newTime.ToString(@"h\:mm\:ss")
-        : newTime.ToString(@"m\:ss");
+      // Mirror the parsing branch above: sub-second values surface as "0:00" so the
+      // template doesn't flash an em-dash in the elapsed cell during a rapid scrub-to-zero.
+      _position = newTime.TotalSeconds >= 1.0 ? Durations.FormatTrack(newTime) : "0:00";
       await AudioApi.UpdatePlaybackStateAsync(new UpdatePlaybackRequest(
         Action: "Seek", Volume: null, IsMuted: null, Balance: null, SeekPosition: newTime));
       await RefreshPlaybackStateAsync();
