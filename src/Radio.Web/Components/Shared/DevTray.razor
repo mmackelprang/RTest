@@ -228,6 +228,10 @@
       // The audio-frame dump endpoint is a debug surface served by the API
       // tier. The endpoint URL is opened in a new tab so the response (a
       // .wav download or JSON metadata payload) is captured by the browser.
+      // The server-side endpoint (/api/audio/debug/dump-frame) is a planned
+      // follow-up; the card surfaces the action now so the UI contract is
+      // stable, and clicking it before the endpoint exists shows a 404 in
+      // the new tab — non-destructive.
       var apiBase = (Configuration["ApiBaseUrl"] ?? WebConstants.DefaultApiBaseUrl).TrimEnd('/');
       var url = $"{apiBase}/api/audio/debug/dump-frame";
       await JS.InvokeVoidAsync("open", url, "_blank");
@@ -246,6 +250,9 @@
     RecordInteraction();
     try
     {
+      // The /api/system/logs/download endpoint is a planned follow-up. The UI
+      // contract ships now; clicking before the endpoint exists shows a 404
+      // in the new tab — non-destructive.
       var apiBase = (Configuration["ApiBaseUrl"] ?? WebConstants.DefaultApiBaseUrl).TrimEnd('/');
       var url = $"{apiBase}/api/system/logs/download?period=1h";
       await JS.InvokeVoidAsync("open", url, "_blank");
