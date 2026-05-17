@@ -433,8 +433,8 @@ html, body {
 
 .nav-pill {
   position: relative;
-  height: 48px;
-  padding: 0 14px;
+  height: 56px;
+  padding: 0 16px;
   border-radius: 10px;
   display: inline-flex;
   align-items: center;
@@ -1118,37 +1118,32 @@ body::-webkit-scrollbar,
 #app::-webkit-scrollbar { display: none; }
 
 /* Thin scrollbars on scrollable panels (PR 2) */
-.panel-body,
-.queue-list-wrapper,
 .scrollable,
-.rz-datatable-scrollable-body,
-#queue-scroll-container {
+#queue-scroll-container,
+.rz-tabview-panels,
+.rz-data-grid-data {
   scrollbar-width: thin;
   scrollbar-color: var(--text-low) transparent;
 }
-.panel-body::-webkit-scrollbar,
-.queue-list-wrapper::-webkit-scrollbar,
 .scrollable::-webkit-scrollbar,
-.rz-datatable-scrollable-body::-webkit-scrollbar,
-#queue-scroll-container::-webkit-scrollbar { display: block; width: 3px; }
-.panel-body::-webkit-scrollbar-track,
-.queue-list-wrapper::-webkit-scrollbar-track,
+#queue-scroll-container::-webkit-scrollbar,
+.rz-tabview-panels::-webkit-scrollbar,
+.rz-data-grid-data::-webkit-scrollbar { display: block; width: 3px; }
 .scrollable::-webkit-scrollbar-track,
-.rz-datatable-scrollable-body::-webkit-scrollbar-track,
-#queue-scroll-container::-webkit-scrollbar-track { background: transparent; }
-.panel-body::-webkit-scrollbar-thumb,
-.queue-list-wrapper::-webkit-scrollbar-thumb,
+#queue-scroll-container::-webkit-scrollbar-track,
+.rz-tabview-panels::-webkit-scrollbar-track,
+.rz-data-grid-data::-webkit-scrollbar-track { background: transparent; }
 .scrollable::-webkit-scrollbar-thumb,
-.rz-datatable-scrollable-body::-webkit-scrollbar-thumb,
-#queue-scroll-container::-webkit-scrollbar-thumb {
+#queue-scroll-container::-webkit-scrollbar-thumb,
+.rz-tabview-panels::-webkit-scrollbar-thumb,
+.rz-data-grid-data::-webkit-scrollbar-thumb {
   background: var(--text-low);
   border-radius: 2px;
 }
-.panel-body::-webkit-scrollbar-thumb:hover,
-.queue-list-wrapper::-webkit-scrollbar-thumb:hover,
 .scrollable::-webkit-scrollbar-thumb:hover,
-.rz-datatable-scrollable-body::-webkit-scrollbar-thumb:hover,
-#queue-scroll-container::-webkit-scrollbar-thumb:hover { background: var(--text-medium); }
+#queue-scroll-container::-webkit-scrollbar-thumb:hover,
+.rz-tabview-panels::-webkit-scrollbar-thumb:hover,
+.rz-data-grid-data::-webkit-scrollbar-thumb:hover { background: var(--text-medium); }
 
 
 /* ─── §20  Bottom-Sheet Dialogs ───────────────────────────────────────────── */
