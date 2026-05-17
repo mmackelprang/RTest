@@ -1,0 +1,76 @@
+@*
+  SourceBubble — touch-friendly pill control for audio source selection.
+
+  Replaces the icon-only .route-toggle circles used by the topbar in the
+  PR 2 redesign (docs handoff §P0·1). Renders a chip + label + optional
+  sub-label, with an optional chevron "open detail" affordance that
+  appears only when the bubble is active and HasDetail is true.
+
+  The `data-source` attribute on the root is preserved for CSS hooks /
+  test selectors that existed before the redesign.
+*@
+
+<button class="source-bubble @ActiveCls @DisabledCls"
+        data-source="@DataSourceAttr"
+        style="--bubble-accent: var(@Accent);"
+        @onclick="HandleBodyClick"
+        aria-label="@($"Switch to {Label}")"
+        aria-pressed="@(IsActive ? "true" : "false")"
+        disabled="@IsDisabled">
+  <span class="source-bubble-chip" aria-hidden="true">
+    <RadzenIcon Icon="@Icon" />
+  </span>
+  <span class="source-bubble-text">
+    <span class="source-bubble-label">@Label</span>
+    @if (!string.IsNullOrEmpty(Sub) || IsDisabled)
+    {
+      <span class="source-bubble-sub">@(IsDisabled ? $"{Sub} · offline".TrimStart(' ', '·') : Sub)</span>
+    }
+  </span>
+  @if (IsActive && HasDetail)
+  {
+    <button type="button"
+            class="source-bubble-chevron"
+            @onclick="HandleChevronClick"
+            @onclick:stopPropagation="true"
+            aria-label="@($"Open {Label} details")">›</button>
+  }
+</button>
+
+@code {
+  /// <summary>Material icon name shown inside the chip.</summary>
+  [Parameter, EditorRequired] public string Icon { get; set; } = "";
+
+  /// <summary>Visible source label (e.g. "Radio", "Bluetooth").</summary>
+  [Parameter, EditorRequired] public string Label { get; set; } = "";
+
+  /// <summary>Optional sub-label shown beneath Label (e.g. station name).</summary>
+  [Parameter] public string? Sub { get; set; }
+
+  /// <summary>CSS custom-property name for the accent colour, e.g. "--source-radio".</summary>
+  [Parameter, EditorRequired] public string Accent { get; set; } = "--accent-primary";
+
+  /// <summary>Marks the bubble as the currently selected source.</summary>
+  [Parameter] public bool IsActive { get; set; }
+
+  /// <summary>Disables interaction and dims the bubble; appends " · offline" to Sub.</summary>
+  [Parameter] public bool IsDisabled { get; set; }
+
+  /// <summary>If true and IsActive, render a chevron that fires OnOpenDetail.</summary>
+  [Parameter] public bool HasDetail { get; set; }
+
+  /// <summary>Value for the data-source attribute (used by CSS hooks / test selectors).</summary>
+  [Parameter] public string DataSourceAttr { get; set; } = "";
+
+  /// <summary>Fires when the bubble body is clicked (i.e. switch to this source).</summary>
+  [Parameter] public EventCallback OnSwitch { get; set; }
+
+  /// <summary>Fires when the chevron is clicked (open the source's detail surface).</summary>
+  [Parameter] public EventCallback OnOpenDetail { get; set; }
+
+  private string ActiveCls => IsActive ? "is-active" : "";
+  private string DisabledCls => IsDisabled ? "is-disabled" : "";
+
+  private Task HandleBodyClick() => IsDisabled ? Task.CompletedTask : OnSwitch.InvokeAsync();
+  private Task HandleChevronClick() => OnOpenDetail.InvokeAsync();
+}

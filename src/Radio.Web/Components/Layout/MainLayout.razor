@@ -18,105 +18,154 @@
 <RadzenComponents />
 
 <div class="layout-container" style="width: 1920px; height: 720px; overflow: hidden;">
-  <!-- Top Bar — Command Surface -->
+  @* Top Bar — two-row Command Surface (PR 2):
+       row 1 .topbar-primary  → time / IN / arrow / OUT / nav pills
+       row 2 .topbar-sources  → SourceBubble strip *@
   <div class="topbar">
-    <!-- Clock: DSEG amber LED -->
-    <div class="display-clock">@_currentTime</div>
 
-    <div class="topbar-separator"></div>
+    <!-- Row 1: primary command row -->
+    <div class="topbar-primary">
 
-    <!-- Source Routing: Icon toggle group -->
-    <div class="route-group">
-      <span class="route-label">IN</span>
+      <!-- Time cluster -->
+      <div class="cluster">
+        <span class="cluster-label">Time</span>
+        <span class="cluster-value"><span class="font-led">@_currentTime</span></span>
+      </div>
+
+      <div class="topbar-separator"></div>
+
+      <!-- IN cluster: active source name + swatch -->
+      <div class="cluster">
+        <span class="cluster-label">In</span>
+        <span class="cluster-value">
+          <span class="cluster-swatch" style="@($"--bubble-accent: var({GetActiveSourceAccentVar()});")"></span>
+          @(ActiveSource?.Name ?? "—")
+        </span>
+      </div>
+
+      <span class="topbar-arrow" aria-hidden="true">→</span>
+
+      <!-- OUT cluster: active output name + swatch -->
+      <div class="cluster">
+        <span class="cluster-label">Out</span>
+        <span class="cluster-value">
+          <span class="cluster-swatch" style="@($"--bubble-accent: var({GetActiveOutputAccentVar()});")"></span>
+          @(ActiveOutput?.Name ?? "—")
+          @if (ActiveOutput?.Id.Equals("google-cast", StringComparison.OrdinalIgnoreCase) == true && _isCastConnecting)
+          {
+            <span class="cast-connecting" style="display:inline-block; width:8px; height:8px; border-radius:50%; background: var(--accent-primary);"></span>
+          }
+        </span>
+      </div>
+
+      @if (_availableOutputs.Any(o => o.Id.Equals("google-cast", StringComparison.OrdinalIgnoreCase)))
+      {
+        <div style="position: relative;">
+          <button type="button" class="nav-pill"
+                  @onclick="@(() => HandleOutputChangeAsync("google-cast"))"
+                  aria-label="Cast device picker"
+                  title="Cast">
+            <RadzenIcon Icon="cast" />
+            <span class="nav-pill-label">Cast</span>
+          </button>
+          <CastDeviceDropdown IsOpen="_showCastDropdown"
+                              IsOpenChanged="@((bool v) => { _showCastDropdown = v; StateHasChanged(); })"
+                              OnDeviceSelected="OnCastDeviceSelected"
+                              OnDisconnect="OnCastDeviceDisconnected"
+                              DevicesApi="DevicesApi"
+                              ConnectedDevice="_defaultCastDevice"
+                              Logger="Logger" />
+        </div>
+      }
+
+      <!-- Output picker entry (for non-Cast switches) -->
+      <button type="button" class="nav-pill" @onclick="ToggleOutputPicker"
+              aria-label="Output device picker"
+              title="Select audio output">
+        <RadzenIcon Icon="speaker" />
+        <span class="nav-pill-label">Out</span>
+      </button>
+
+      <!-- Nav pills (right-aligned) -->
+      <div class="topbar-nav">
+        <a href="/" class="nav-pill @(IsCurrentPage("/") ? "nav-active" : "")" title="Home" aria-label="Home">
+          <RadzenIcon Icon="home" />
+          <span class="nav-pill-label">Home</span>
+        </a>
+        <button type="button" class="nav-pill @(IsCurrentPage("/") ? "nav-active" : "")"
+                @onclick="HandleQueueNavAsync"
+                title="Queue"
+                aria-label="@($"Queue, {_queueCount} item{(_queueCount == 1 ? "" : "s")}")">
+          <RadzenIcon Icon="queue_music" />
+          <span class="nav-pill-label">Queue</span>
+          @if (_queueCount > 0)
+          {
+            <span class="nav-badge" aria-hidden="true">@_queueCount</span>
+          }
+        </button>
+        <a href="/metrics" class="nav-pill @(IsCurrentPage("/metrics") ? "nav-active" : "")" title="Metrics" aria-label="Metrics">
+          <RadzenIcon Icon="dashboard" />
+          <span class="nav-pill-label">Metrics</span>
+        </a>
+        <a href="/devices" class="nav-pill @(IsCurrentPage("/devices") ? "nav-active" : "")" title="Devices" aria-label="Devices">
+          <RadzenIcon Icon="devices" />
+          <span class="nav-pill-label">Devices</span>
+        </a>
+        <a href="/history" class="nav-pill @(IsCurrentPage("/history") ? "nav-active" : "")" title="History" aria-label="History">
+          <RadzenIcon Icon="history" />
+          <span class="nav-pill-label">History</span>
+        </a>
+        <a href="/system" class="nav-pill @(IsCurrentPage("/system") ? "nav-active" : "")" title="Settings" aria-label="Settings">
+          <RadzenIcon Icon="settings" />
+          <span class="nav-pill-label">Settings</span>
+        </a>
+        <a href="/phone" class="nav-pill @(IsCurrentPage("/phone") ? "nav-active" : "")" title="Phone" aria-label="Phone">
+          <RadzenIcon Icon="phone" />
+          <span class="nav-pill-label">Phone</span>
+        </a>
+        @if (IsDebugBuild)
+        {
+          @* Debug-only: distortion marker. PR 6 removes this entirely. *@
+          <button type="button"
+                  class="nav-pill debug-distortion-btn @_distortionMarkerColor"
+                  @onclick="HandleDistortionMarkerAsync"
+                  title="Mark audio distortion"
+                  aria-label="Mark audio distortion">
+            <RadzenIcon Icon="bug_report" />
+            <span class="nav-pill-label">Mark</span>
+          </button>
+        }
+        <button type="button" class="nav-pill" @onclick="HandleSleepButtonAsync"
+                title="Sleep"
+                aria-label="Enter sleep mode">
+          <RadzenIcon Icon="power_settings_new" />
+          <span class="nav-pill-label">Sleep</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Row 2: SourceBubble strip -->
+    <div class="topbar-sources" role="tablist" aria-label="Audio source selection">
       @foreach (var source in _availableSources)
       {
-        <div class="route-toggle @(source.Id == _selectedSourceId ? "route-active" : "") @(!IsSourceAvailable(source) ? "route-disabled" : "")"
-             data-source="@GetSourceDataAttr(source.Type)"
-             @onclick="@(() => HandleSourceToggleAsync(source))"
-             title="@source.Name">
-          <RadzenIcon Icon="@GetSourceIcon(source.Type)" />
-        </div>
+        var isActive = source.Id == _selectedSourceId;
+        var dataAttr = GetSourceDataAttr(source.Type);
+        var accent = GetAccentVarForSource(source.Type);
+        <SourceBubble Icon="@GetSourceIcon(source.Type)"
+                      Label="@source.Name"
+                      Sub="@GetSourceSubLabel(source)"
+                      Accent="@accent"
+                      IsActive="isActive"
+                      IsDisabled="!IsSourceAvailable(source)"
+                      HasDetail="@HasSourceDetail(source.Type)"
+                      DataSourceAttr="@dataAttr"
+                      OnSwitch="@(EventCallback.Factory.Create(this, () => HandleSourceToggleAsync(source)))"
+                      OnOpenDetail="@(EventCallback.Factory.Create(this, () => NavigateToSourcePage(source.Type)))" />
       }
-    </div>
-
-    <div class="topbar-separator"></div>
-
-    <!-- Output Routing: Icon toggle group -->
-    <div class="route-group">
-      <span class="route-label">OUT</span>
-      @foreach (var output in _availableOutputs.OrderBy(o => o.Id.Equals("google-cast", StringComparison.OrdinalIgnoreCase) ? 1 : 0))
-      {
-        <div class="route-toggle @(output.Id == _selectedOutputId ? "route-active" : "") @(output.Id.Equals("google-cast", StringComparison.OrdinalIgnoreCase) ? "route-cast-output" : "")"
-             @onclick="@(() => HandleOutputChangeAsync(output.Id))"
-             title="@output.Name"
-             style="position: relative;">
-          <RadzenIcon Icon="@GetOutputIcon(output)" />
-          @if (output.Id.Equals("google-cast", StringComparison.OrdinalIgnoreCase) && _defaultCastDevice != null)
-          {
-            <span class="cast-device-label">@_defaultCastDevice.Name</span>
-          }
-          @if (output.Id == "google-cast" && _isCastConnecting)
-          {
-            <div class="cast-connecting" style="position:absolute; inset:0; border-radius:inherit; border: 2px solid var(--accent-primary);"></div>
-          }
-          @if (output.Id.Equals("google-cast", StringComparison.OrdinalIgnoreCase))
-          {
-            <CastDeviceDropdown IsOpen="_showCastDropdown"
-                                IsOpenChanged="@((bool v) => { _showCastDropdown = v; StateHasChanged(); })"
-                                OnDeviceSelected="OnCastDeviceSelected"
-                                OnDisconnect="OnCastDeviceDisconnected"
-                                DevicesApi="DevicesApi"
-                                ConnectedDevice="_defaultCastDevice"
-                                Logger="Logger" />
-          }
-        </div>
-      }
-    </div>
-
-    <!-- Debug: Distortion Marker (temporary — remove when done diagnosing) -->
-    <RadzenButton Icon="bug_report"
-                  ButtonStyle="ButtonStyle.Light"
-                  Variant="Radzen.Variant.Text"
-                  Size="ButtonSize.Large"
-                  title="Mark audio distortion"
-                  Click="@HandleDistortionMarkerAsync"
-                  class="@($"debug-distortion-btn {_distortionMarkerColor}")" />
-
-    <!-- Navigation Icons (right-aligned) -->
-    <div class="topbar-nav">
-      <a href="/" class="@NavClass("/")" title="Home">
-        <RadzenIcon Icon="home" />
-      </a>
-      <span style="position: relative;" class="@NavClass("/")" title="Queue" @onclick="HandleQueueNavAsync">
-        <RadzenIcon Icon="queue_music" />
-        @if (_queueCount > 0)
-        {
-          <RadzenBadge BadgeStyle="BadgeStyle.Primary" Text="@_queueCount.ToString()"
-                       class="nav-badge" />
-        }
-      </span>
-      <a href="/metrics" class="@NavClass("/metrics")" title="Metrics">
-        <RadzenIcon Icon="dashboard" />
-      </a>
-      <a href="/devices" class="@NavClass("/devices")" title="Devices">
-        <RadzenIcon Icon="devices" />
-      </a>
-      <a href="/history" class="@NavClass("/history")" title="History">
-        <RadzenIcon Icon="history" />
-      </a>
-      <a href="/system" class="@NavClass("/system")" title="Settings">
-        <RadzenIcon Icon="settings" />
-      </a>
-      <a href="/phone" class="@NavClass("/phone")" title="Phone">
-        <RadzenIcon Icon="phone" />
-      </a>
-      <span class="nav-icon" title="Sleep" @onclick="HandleSleepButtonAsync">
-        <RadzenIcon Icon="power_settings_new" />
-      </span>
     </div>
   </div>
 
-  <!-- Main Content Area — 640px (720 - 80) -->
+  <!-- Main Content Area (height = viewport - topbar = 720 - var(--topbar-height)) -->
   <div class="content-area">
     <div class="page-transition">
       @Body
@@ -125,6 +174,19 @@
 </div>
 
 @code {
+  /// <summary>
+  /// True for Debug builds — gates the temporary distortion-marker pill in the
+  /// topbar. PR 6 removes the marker entirely; until then it should not
+  /// appear in Release builds. Wrapped as a static readonly so the @if guard
+  /// in markup doesn't trip the WAE "unreachable code" rule in Release.
+  /// </summary>
+  private static readonly bool IsDebugBuild =
+#if DEBUG
+    true;
+#else
+    false;
+#endif
+
   private string _currentTime = DateTime.Now.ToString("HH:mm");
   private string _cpuUsage = "0";
   private string _ramUsage = "0";
@@ -141,6 +203,11 @@
   private int _queueCount = 0;
   private string _distortionMarkerColor = "";
   private DotNetObjectReference<MainLayout>? _selfReference;
+
+  private AudioSourceDto? ActiveSource =>
+    _availableSources.FirstOrDefault(s => s.Id == _selectedSourceId);
+  private AudioDeviceDto? ActiveOutput =>
+    _availableOutputs.FirstOrDefault(o => o.Id == _selectedOutputId);
 
   protected override async Task OnInitializedAsync()
   {
@@ -277,7 +344,7 @@
             if (matchingSource != null)
             {
               _selectedSourceId = matchingSource.Id;
-  
+
             }
             else
             {
@@ -477,6 +544,13 @@
     }
   }
 
+  private void ToggleOutputPicker()
+  {
+    // Output device picker is a deferred concern (PR 3 owns DeviceManagementPage).
+    // For PR 2 the pill simply navigates to the Devices page so the user can pick.
+    NavigationManager.NavigateTo("/devices");
+  }
+
   private async Task AutoConnectCastDeviceAsync(string outputId)
   {
     _isCastConnecting = true;
@@ -534,6 +608,52 @@
   // Data attribute for source-specific CSS coloring — delegates to shared helper
   private static string GetSourceDataAttr(string sourceType) => SourceTypeHelper.GetDataAttribute(sourceType);
 
+  /// <summary>
+  /// Map a source type to the CSS custom-property name for its accent colour.
+  /// Used by SourceBubble (Accent parameter) and the IN cluster swatch.
+  /// </summary>
+  private static string GetAccentVarForSource(string sourceType) => sourceType switch
+  {
+    "Vinyl" => "--source-vinyl",
+    "FilePlayer" or "File" => "--source-file",
+    "Radio" or "RTLSDRCore" or "RF320" => "--source-radio",
+    "Bluetooth" => "--source-bluetooth",
+    "GenericUSB" or "USB" => "--source-usb",
+    _ => "--accent-primary"
+  };
+
+  private string GetActiveSourceAccentVar() =>
+    ActiveSource is null ? "--text-low" : GetAccentVarForSource(ActiveSource.Type);
+
+  private string GetActiveOutputAccentVar()
+  {
+    if (ActiveOutput is null) return "--text-low";
+    if (ActiveOutput.Id.Equals("google-cast", StringComparison.OrdinalIgnoreCase))
+      return "--accent-primary";
+    if (ActiveOutput.IsUSBDevice) return "--source-usb";
+    return "--accent-primary";
+  }
+
+  /// <summary>
+  /// Optional sub-label rendered under the source name in a SourceBubble.
+  /// Kept minimal in PR 2 — richer metadata (station name, BT device, current
+  /// file) is the consumer's job in PR 3.
+  /// </summary>
+  private static string? GetSourceSubLabel(AudioSourceDto source) =>
+    source.State switch
+    {
+      "Unavailable" => "unavailable",
+      "Error" => "error",
+      _ => null
+    };
+
+  /// <summary>
+  /// True if a source has a dedicated detail surface (Radio control panel,
+  /// Bluetooth pairing page) that the chevron can open.
+  /// </summary>
+  private static bool HasSourceDetail(string sourceType) =>
+    IsRadioSource(sourceType) || sourceType == "Bluetooth";
+
   // Source availability check
   private static bool IsSourceAvailable(AudioSourceDto source) =>
     source.State != "Unavailable" && source.State != "Error";
@@ -545,9 +665,6 @@
     if (string.IsNullOrEmpty(uri) && path == "/") return true;
     return $"/{uri}".StartsWith(path, StringComparison.OrdinalIgnoreCase);
   }
-
-  private string NavClass(string path) =>
-    IsCurrentPage(path) ? "nav-icon nav-active" : "nav-icon";
 
   // Combined source toggle: switch source AND navigate for Radio/Bluetooth
   private async Task HandleSourceToggleAsync(AudioSourceDto source)
@@ -624,21 +741,6 @@
         NavigationManager.NavigateTo("/");
         break;
     }
-  }
-
-  private static string GetOutputIcon(AudioDeviceDto device)
-  {
-    // Use device ID for Cast detection — name gets replaced with cast device name
-    if (device.Id.Equals("google-cast", StringComparison.OrdinalIgnoreCase))
-      return "cast";
-    if (device.Name.Contains("HTTP", StringComparison.OrdinalIgnoreCase) ||
-        device.Name.Contains("Stream", StringComparison.OrdinalIgnoreCase))
-      return "stream";
-    if (device.IsUSBDevice)
-      return "usb";
-    if (device.IsDefault)
-      return "volume_up";
-    return "speaker";
   }
 
   private async Task OnCastDeviceSelected(CastDeviceDto selectedDevice)

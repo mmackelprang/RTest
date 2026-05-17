@@ -78,9 +78,13 @@
 
   /* ── Text Hierarchy ── */
   --text-high:              #F0EFF4;
-  --text-medium:            #9CA3AF;
+  --text-medium:            #B5BCC9;   /* legibility bump from #9CA3AF (PR 2) */
   --text-low:               #4B5563;
   --text-inverse:           #0D0D0F;
+
+  /* ── Surface Helpers (PR 2) ── */
+  --surface-elevated:       #1C1C1F;
+  --surface-hover:          rgba(255, 255, 255, 0.05);
 
   /* ── Typography Stacks ── */
   --font-led:       'DSEG14Classic-Bold', 'JetBrains Mono', 'Consolas', monospace;
@@ -92,8 +96,8 @@
   /* ── Fixed Dimensions ── */
   --viewport-width:         1920px;
   --viewport-height:        720px;
-  --topbar-height:          80px;
-  --content-height:         640px;
+  --topbar-height:          120px;   /* two-row topbar: 64px primary + 56px sources (PR 2) */
+  --content-height:         600px;   /* 720 − 120 (PR 2) */
 
   /* ── Touch Targets ── */
   --touch-min:              48px;
@@ -155,20 +159,40 @@ html, body {
 .surface-overlay { background: var(--surface-overlay); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
 
 
-/* ─── §5  Top Bar ─────────────────────────────────────────────────────────── */
+/* ─── §5  Top Bar (two-row layout, PR 2) ──────────────────────────────────── */
 
 .topbar {
   height: var(--topbar-height);
   display: flex;
-  align-items: center;
-  padding: 0 16px;
-  gap: 16px;
+  flex-direction: column;
   background: var(--surface-base);
   border-bottom: 1px solid var(--surface-separator);
   position: fixed;
   top: 0; left: 0; right: 0;
   z-index: 1100;
 }
+
+/* Primary row: time / IN / arrow / OUT / nav pills */
+.topbar-primary {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 16px;
+  border-bottom: 1px solid var(--surface-separator);
+}
+
+/* Sources row: SourceBubble strip, left-aligned */
+.topbar-sources {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.topbar-sources::-webkit-scrollbar { display: none; }
 
 .topbar-clock {
   font-family: var(--font-led);
@@ -187,20 +211,84 @@ html, body {
 
 .topbar-separator {
   width: 1px;
-  height: 48px;
+  height: 32px;
   background: var(--surface-separator);
   margin: 0 4px;
+}
+
+.topbar-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-low);
+  font-size: 20px;
+  line-height: 1;
+  width: 20px;
+  flex-shrink: 0;
+  user-select: none;
 }
 
 .topbar-nav {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   margin-left: auto;
 }
 
+/* Cluster atoms — "label over value" stacks used in the primary row */
+.cluster {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
 
-/* ─── §6  Route Toggle Group (Source / Output Icons) ──────────────────────── */
+.cluster-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-low);
+  line-height: 1;
+}
+
+.cluster-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-high);
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cluster-value .font-led {
+  font-family: var(--font-led);
+  color: var(--signal-amber);
+  text-shadow: 0 0 6px var(--signal-amber-glow);
+  letter-spacing: 2px;
+}
+
+.cluster-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--bubble-accent, var(--accent-primary));
+  flex-shrink: 0;
+}
+
+
+/* ─── §6  Route Toggle Group (Source / Output Icons) ──────────────────────── *
+ * NOTE (PR 2): The topbar no longer uses .route-toggle for source/output —
+ * see §27 .source-bubble and the .nav-pill rules in §7. .route-toggle is
+ * retained because RadioPage (band selector), VisualizerPanel (viz mode),
+ * and MetricsDashboardPage (time range) still render this control. Those
+ * call sites migrate in PR 4 — at which point .route-toggle and the
+ * per-data-source ::after underlines below can be deleted wholesale. */
 
 .route-group {
   display: flex;
@@ -341,53 +429,79 @@ html, body {
 }
 
 
-/* ─── §7  Navigation Icons ────────────────────────────────────────────────── */
+/* ─── §7  Navigation Pills (PR 2) ─────────────────────────────────────────── */
 
-.nav-icon {
+.nav-pill {
   position: relative;
-  width: 52px;
   height: 56px;
-  border-radius: 14px;
-  display: flex;
+  padding: 0 16px;
+  border-radius: 10px;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 8px;
   color: var(--text-medium);
+  text-decoration: none;
   cursor: pointer;
   transition: color 100ms ease, background 100ms ease;
   -webkit-tap-highlight-color: transparent;
+  background: transparent;
+  border: none;
+  font-family: inherit;
 }
 
-.nav-icon .rzi,
+.nav-pill .rzi,
 .topbar-nav .rzi {
-  font-size: 30px !important;
-  width: 30px;
-  height: 30px;
+  font-size: 22px !important;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
 }
 
-.nav-icon:hover {
+.nav-pill-label {
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-medium);
+  white-space: nowrap;
+}
+
+.nav-pill:hover {
   color: var(--text-high);
+  background: var(--surface-hover);
+}
+.nav-pill:hover .nav-pill-label { color: var(--text-high); }
+
+.nav-pill:active {
+  transform: scale(0.96);
+}
+
+.nav-pill.nav-active {
+  color: var(--accent-primary);
   background: var(--accent-dim);
 }
-
-.nav-icon:active {
-  transform: scale(0.93);
-}
-
-.nav-icon.nav-active {
+.nav-pill.nav-active .nav-pill-label {
   color: var(--accent-primary);
 }
 
-.nav-icon.nav-active::after {
-  content: '';
-  position: absolute;
-  bottom: 4px;
-  left: 25%;
-  right: 25%;
-  height: 2px;
-  background: var(--accent-primary);
-  border-radius: 1px;
-  box-shadow: 0 0 6px var(--accent-glow);
-  animation: fadeIn 200ms ease-out;
+/* Queue count badge — amber pill next to the Queue label */
+.nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--signal-amber);
+  color: var(--text-inverse);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 8px;
+  min-width: 18px;
+  height: 16px;
+  line-height: 1;
+  box-shadow: 0 0 6px var(--signal-amber-glow);
 }
 
 
@@ -995,29 +1109,41 @@ button, .rz-button { min-width: var(--touch-compact); min-height: var(--touch-co
 
 /* ─── §19  Scrollbar Styling ──────────────────────────────────────────────── */
 
-/* Hide all scrollbars by default — kiosk touch UI */
-* { scrollbar-width: none; }
-*::-webkit-scrollbar { display: none; }
+/* Hide scrollbars by default on most kiosk surfaces, but allow the panels
+   below to opt back in to a thin scrollbar so users can see there's more
+   content to scroll. (PR 2) */
+html, body, #app { scrollbar-width: none; }
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+#app::-webkit-scrollbar { display: none; }
 
-/* Show thin scrollbars only on explicitly scrollable containers */
+/* Thin scrollbars on scrollable panels (PR 2) */
 .scrollable,
-.rz-datatable-scrollable-body,
-#queue-scroll-container {
+#queue-scroll-container,
+.rz-tabview-panels,
+.rz-data-grid-data {
   scrollbar-width: thin;
-  scrollbar-color: var(--surface-separator) transparent;
+  scrollbar-color: var(--text-low) transparent;
 }
 .scrollable::-webkit-scrollbar,
-.rz-datatable-scrollable-body::-webkit-scrollbar,
-#queue-scroll-container::-webkit-scrollbar { display: block; width: 6px; }
+#queue-scroll-container::-webkit-scrollbar,
+.rz-tabview-panels::-webkit-scrollbar,
+.rz-data-grid-data::-webkit-scrollbar { display: block; width: 3px; }
 .scrollable::-webkit-scrollbar-track,
-.rz-datatable-scrollable-body::-webkit-scrollbar-track,
-#queue-scroll-container::-webkit-scrollbar-track { background: transparent; }
+#queue-scroll-container::-webkit-scrollbar-track,
+.rz-tabview-panels::-webkit-scrollbar-track,
+.rz-data-grid-data::-webkit-scrollbar-track { background: transparent; }
 .scrollable::-webkit-scrollbar-thumb,
-.rz-datatable-scrollable-body::-webkit-scrollbar-thumb,
-#queue-scroll-container::-webkit-scrollbar-thumb { background: var(--surface-separator); border-radius: 3px; }
+#queue-scroll-container::-webkit-scrollbar-thumb,
+.rz-tabview-panels::-webkit-scrollbar-thumb,
+.rz-data-grid-data::-webkit-scrollbar-thumb {
+  background: var(--text-low);
+  border-radius: 2px;
+}
 .scrollable::-webkit-scrollbar-thumb:hover,
-.rz-datatable-scrollable-body::-webkit-scrollbar-thumb:hover,
-#queue-scroll-container::-webkit-scrollbar-thumb:hover { background: var(--text-low); }
+#queue-scroll-container::-webkit-scrollbar-thumb:hover,
+.rz-tabview-panels::-webkit-scrollbar-thumb:hover,
+.rz-data-grid-data::-webkit-scrollbar-thumb:hover { background: var(--text-medium); }
 
 
 /* ─── §20  Bottom-Sheet Dialogs ───────────────────────────────────────────── */
@@ -1559,3 +1685,143 @@ body {
 .metrics-row-trend.trend-up { color: var(--signal-red); }
 .metrics-row-trend.trend-down { color: var(--signal-green); }
 .metrics-row-trend.trend-flat { color: var(--text-low); }
+
+
+/* ─── §27  Source Bubble (PR 2) ───────────────────────────────────────────── */
+
+/* Pill control that replaces the icon-only .route-toggle for source selection
+   in the topbar. Each bubble has its own --bubble-accent (the per-source
+   colour) injected via inline style="--bubble-accent: var(--source-radio);"
+   so the active / chip / chevron all share one accent. */
+
+.source-bubble {
+  position: relative;
+  height: 48px;
+  padding: 0 16px 0 6px;
+  border-radius: 24px;
+  gap: 10px;
+  display: inline-flex;
+  align-items: center;
+  background: var(--surface-elevated);
+  border: 1px solid transparent;
+  color: var(--text-medium);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+  font-family: inherit;
+  flex-shrink: 0;
+}
+
+.source-bubble:hover:not(.is-disabled):not(.is-active) {
+  background: var(--surface-hover);
+  color: var(--text-high);
+}
+
+.source-bubble:active:not(.is-disabled) {
+  transform: scale(0.97);
+  transition: transform 60ms ease;
+}
+
+/* Active: tint background + border with the bubble accent.
+   Uses color-mix for browsers that support it; the simpler tinted-token
+   fallback below relies on alpha channel via CSS vars in the source-*
+   palette and keeps things readable when color-mix is unavailable. */
+.source-bubble.is-active {
+  background: color-mix(in srgb, var(--bubble-accent) 10%, transparent);
+  border-color: color-mix(in srgb, var(--bubble-accent) 33%, transparent);
+  color: var(--bubble-accent);
+}
+
+@supports not (background: color-mix(in srgb, red 50%, transparent)) {
+  .source-bubble.is-active {
+    background: var(--surface-elevated);
+    border-color: var(--bubble-accent);
+    color: var(--bubble-accent);
+  }
+}
+
+.source-bubble.is-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.source-bubble-chip {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--surface-overlay);
+  flex-shrink: 0;
+  color: inherit;
+}
+
+.source-bubble-chip .rzi {
+  font-size: 18px !important;
+  width: 18px;
+  height: 18px;
+}
+
+.source-bubble.is-active .source-bubble-chip {
+  background: color-mix(in srgb, var(--bubble-accent) 20%, var(--surface-overlay));
+  color: var(--bubble-accent);
+}
+
+.source-bubble-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  line-height: 1.15;
+  gap: 2px;
+}
+
+.source-bubble-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: inherit;
+  white-space: nowrap;
+}
+
+.source-bubble-sub {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-low);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+
+.source-bubble.is-active .source-bubble-sub {
+  color: color-mix(in srgb, var(--bubble-accent) 65%, var(--text-low));
+}
+
+.source-bubble-chevron {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--bubble-accent);
+  font-size: 18px;
+  line-height: 1;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 100ms ease;
+  -webkit-tap-highlight-color: transparent;
+  padding: 0;
+  margin-left: 2px;
+}
+
+.source-bubble-chevron:hover {
+  background: var(--surface-hover);
+}
+
+.source-bubble-chevron:active {
+  transform: scale(0.92);
+}
