@@ -7,20 +7,22 @@ namespace Radio.Infrastructure.Tests.Audio.Sources.Primary;
 /// Tests for <see cref="RdsStationNameStabilityTracker"/> — the helper that
 /// filters rolling-PS artifacts before exposing a "stable" station name.
 /// <para>
-/// Task #80 v2: the algorithm was rewritten from "N consecutive identical
-/// samples" to a sliding-window frequency histogram with a call-sign-shape
-/// boost. The prior approach trivially promoted any rotation fragment
-/// because each fragment held for 30-50 consecutive frames at the ~10 Hz
-/// PS decode rate. Live failure modes captured by Tester:
+/// Task #80 v3: the algorithm was rewritten from a 60s sliding-window
+/// histogram (v2) to a lock-and-hold pattern. Live UAT of v2 revealed
+/// two failure modes:
 /// </para>
 /// <list type="bullet">
-///   <item><b>WUNC 91.5</b>: <c>"ON WUNC"</c> &#8596; <c>"On Point"</c>
-///     rotation; old algorithm promoted "On Point".</item>
-///   <item><b>WSMW 97.745</b>: <c>"WSMW"</c> &#8596; <c>"TOO HOT"</c>
-///     &#8596; <c>"KOOL"</c> &#8596; <c>"THE GANG"</c> &#8596; <c>"SIMON"</c>
-///     &#8596; <c>"336"</c> rotation; old algorithm promoted "TOO HOT",
-///     then "336".</item>
+///   <item><b>WSMW 97.745</b>: broadcasts SIMON / 98.7 / 336 — never
+///     "WSMW". v2's call-sign-shape boost can't help when the call sign
+///     isn't in the data.</item>
+///   <item><b>WUNC 91.5</b>: v2 stabilized correctly during T+15-50s but
+///     drifted as lock-time samples aged out of the sliding window.</item>
 /// </list>
+/// <para>
+/// v3: accumulate samples for 30s after first observation; lock the
+/// best candidate (histogram + call-sign tiebreaker); never update
+/// again until Reset (called on frequency change).
+/// </para>
 /// </summary>
 public class RdsStationNameStabilityTrackerTests
 {
@@ -30,12 +32,12 @@ public class RdsStationNameStabilityTrackerTests
   // directly so tests reflect real behavior.
   private static RdsStationNameStabilityTracker CreateTracker(
     TimeProvider? clock = null,
-    TimeSpan? windowDuration = null,
+    TimeSpan? lockAfter = null,
     int callSignBoost = 10,
     int minSamples = 5)
   {
     return new RdsStationNameStabilityTracker(
-      windowDuration: windowDuration ?? TimeSpan.FromSeconds(60),
+      lockAfter: lockAfter ?? TimeSpan.FromSeconds(30),
       callSignBoost: callSignBoost,
       minSamples: minSamples,
       timeProvider: clock);
@@ -50,172 +52,282 @@ public class RdsStationNameStabilityTrackerTests
   }
 
   [Fact]
-  public void Observe_BelowMinSamples_ReturnsNull()
+  public void Stable_BeforeMinSamples_ReturnsNull()
   {
     var tracker = CreateTracker(minSamples: 5);
 
-    // 4 samples — below the 5-sample threshold.
-    for (int i = 0; i < 4; i++)
-    {
-      Assert.Null(tracker.Observe("WUNC"));
-    }
+    // 3 samples — below MinSamples and lockAfter not yet reached.
+    tracker.Observe("WUNC");
+    tracker.Observe("WUNC");
+    tracker.Observe("WUNC");
 
     Assert.Null(tracker.Stable);
-
-    // 5th sample crosses the threshold.
-    Assert.Equal("WUNC", tracker.Observe("WUNC"));
   }
 
   [Fact]
-  public void Observe_SteadyPs_WinsTrivially()
+  public void Stable_BeforeLockTime_ReturnsTransientBest()
   {
-    var tracker = CreateTracker();
+    var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+    var tracker = CreateTracker(clock: clock, minSamples: 5);
 
+    // MinSamples reached before lockAfter elapses — Stable returns the
+    // transient best-effort consensus so the UI can show *something*.
+    for (int i = 0; i < 5; i++)
+    {
+      tracker.Observe("WUNC");
+    }
+    // Only 0s elapsed; lockAfter (30s) not yet reached.
+    Assert.Equal("WUNC", tracker.Stable);
+
+    // Advance partway — still pre-lock.
+    clock.Advance(TimeSpan.FromSeconds(10));
+    Assert.Equal("WUNC", tracker.Stable);
+  }
+
+  [Fact]
+  public void Lock_HappensAt30s_WithSufficientSamples()
+  {
+    var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+    var tracker = CreateTracker(
+      clock: clock,
+      lockAfter: TimeSpan.FromSeconds(30),
+      minSamples: 5);
+
+    // Feed 50 samples spread across 35 seconds — every sample is "WUNC"
+    // so the histogram unambiguously promotes it at lock time.
     for (int i = 0; i < 50; i++)
     {
-      tracker.Observe("Rock 92");
+      tracker.Observe("WUNC");
+      clock.Advance(TimeSpan.FromSeconds(0.7)); // ~35s total
     }
 
-    Assert.Equal("Rock 92", tracker.Stable);
+    // After 30s + ≥ MinSamples, the tracker is locked.
+    Assert.Equal("WUNC", tracker.Stable);
+
+    // Drown the tracker in a different value — locked, so no change.
+    for (int i = 0; i < 1000; i++)
+    {
+      tracker.Observe("OTHER");
+    }
+    Assert.Equal("WUNC", tracker.Stable);
   }
 
   [Fact]
-  public void Observe_SteadyCallSignPs_WinsTrivially()
+  public void Lock_DoesNotHappenBeforeMinSamples_EvenIfTimeElapsed()
   {
-    var tracker = CreateTracker();
+    var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+    var tracker = CreateTracker(
+      clock: clock,
+      lockAfter: TimeSpan.FromSeconds(30),
+      minSamples: 5);
 
-    for (int i = 0; i < 50; i++)
-    {
-      tracker.Observe("KEXP-FM");
-    }
+    // 2 samples, then advance the clock past lockAfter. Still no lock —
+    // MinSamples not met. Stable returns null (below MinSamples).
+    tracker.Observe("WUNC");
+    tracker.Observe("WUNC");
+    clock.Advance(TimeSpan.FromSeconds(60));
+    Assert.Null(tracker.Stable);
 
-    Assert.Equal("KEXP-FM", tracker.Stable);
+    // 3rd and 4th samples — still below MinSamples=5.
+    tracker.Observe("WUNC");
+    tracker.Observe("WUNC");
+    Assert.Null(tracker.Stable);
+
+    // 5th sample crosses MinSamples — and lockAfter has elapsed — so
+    // this sample triggers the lock.
+    tracker.Observe("WUNC");
+    Assert.Equal("WUNC", tracker.Stable);
+
+    // Confirm locked: subsequent observations are no-ops.
+    tracker.Observe("OTHER");
+    tracker.Observe("OTHER");
+    tracker.Observe("OTHER");
+    Assert.Equal("WUNC", tracker.Stable);
   }
 
-  // The WSMW 97.745 rotation that PR #384 promoted "TOO HOT" for.
   [Fact]
-  public void Observe_WsmwRotation_PromotesCallSignVariant()
+  public void Observe_AfterLock_IsNoOp()
   {
-    var tracker = CreateTracker();
+    var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+    var tracker = CreateTracker(
+      clock: clock,
+      lockAfter: TimeSpan.FromSeconds(30),
+      minSamples: 5);
 
-    // Equal frequency for every rotation entry — call-sign boost is
-    // what disambiguates.
-    string[] rotation = { "TOO HOT", "WSMW", "KOOL", "THE GANG", "SIMON", "336" };
-    for (int i = 0; i < 40; i++)
+    // Lock on "WUNC".
+    for (int i = 0; i < 10; i++)
     {
-      foreach (var ps in rotation)
-      {
-        tracker.Observe(ps);
-      }
+      tracker.Observe("WUNC");
     }
+    clock.Advance(TimeSpan.FromSeconds(31));
+    tracker.Observe("WUNC"); // 11th sample triggers the lock check
+    Assert.Equal("WUNC", tracker.Stable);
+
+    // Drown the tracker in another value — must remain "WUNC".
+    for (int i = 0; i < 1000; i++)
+    {
+      tracker.Observe("On Point");
+    }
+    Assert.Equal("WUNC", tracker.Stable);
+  }
+
+  [Fact]
+  public void Reset_ClearsLock_AndAllowsRelock()
+  {
+    var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+    var tracker = CreateTracker(
+      clock: clock,
+      lockAfter: TimeSpan.FromSeconds(30),
+      minSamples: 5);
+
+    // Lock on "WUNC".
+    for (int i = 0; i < 10; i++)
+    {
+      tracker.Observe("WUNC");
+    }
+    clock.Advance(TimeSpan.FromSeconds(31));
+    tracker.Observe("WUNC");
+    Assert.Equal("WUNC", tracker.Stable);
+
+    // Tune to a new station.
+    tracker.Reset();
+    Assert.Null(tracker.Stable);
+
+    // Observe new station samples — lock on "WSMW" after a fresh window.
+    for (int i = 0; i < 10; i++)
+    {
+      tracker.Observe("WSMW");
+    }
+    // The fresh _firstSampleTime is "now" (clock has advanced past 31s).
+    // Advance another 30s to satisfy lockAfter for the new window.
+    clock.Advance(TimeSpan.FromSeconds(31));
+    tracker.Observe("WSMW");
+    Assert.Equal("WSMW", tracker.Stable);
+  }
+
+  // Regression: WUNC rotation observed in Tester's UAT. Both "WUNC" and
+  // "ON WUNC" contain the call sign, both get +10 boost. The one with
+  // higher count wins.
+  [Fact]
+  public void Observe_WuncLockWindow_PromotesCallSign()
+  {
+    var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+    var tracker = CreateTracker(
+      clock: clock,
+      lockAfter: TimeSpan.FromSeconds(30),
+      minSamples: 5);
+
+    // Lock window: WUNC ×10, On Point ×8, ON WUNC ×5.
+    // Scores: WUNC=20, On Point=8, ON WUNC=15. WUNC wins.
+    for (int i = 0; i < 10; i++) tracker.Observe("WUNC");
+    for (int i = 0; i < 8; i++)  tracker.Observe("On Point");
+    for (int i = 0; i < 5; i++)  tracker.Observe("ON WUNC");
+
+    clock.Advance(TimeSpan.FromSeconds(31));
+    // Trigger lock check via one more sample.
+    tracker.Observe("WUNC");
+
+    var stable = tracker.Stable;
+    Assert.NotNull(stable);
+    // Both "WUNC" and "ON WUNC" contain WUNC; spec accepts either as a
+    // pass since both convey the station identity. WUNC has the higher
+    // count so it wins here, but the regression criterion is "contains
+    // the call sign".
+    Assert.Contains("WUNC", stable);
+    Assert.NotEqual("On Point", stable);
+  }
+
+  // Regression: WSMW rotation that broke v2. WSMW broadcasts both its
+  // call sign AND non-call-sign rotation fragments. Spec example:
+  // WSMW ×8, 98.7 ×10, SIMON ×12. With +10 boost: WSMW=18, 98.7=10,
+  // SIMON=12. WSMW wins.
+  [Fact]
+  public void Observe_WsmwLockWindow_PromotesCallSign()
+  {
+    var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+    var tracker = CreateTracker(
+      clock: clock,
+      lockAfter: TimeSpan.FromSeconds(30),
+      minSamples: 5);
+
+    for (int i = 0; i < 8; i++)  tracker.Observe("WSMW");
+    for (int i = 0; i < 10; i++) tracker.Observe("98.7");
+    for (int i = 0; i < 12; i++) tracker.Observe("SIMON");
+
+    clock.Advance(TimeSpan.FromSeconds(31));
+    tracker.Observe("WSMW");
 
     Assert.Equal("WSMW", tracker.Stable);
   }
 
-  // The WUNC 91.5 rotation that PR #384 promoted "On Point" for.
+  // Regression: the exact failure scenario from v2 live UAT. Lock with
+  // "WUNC" at T+30s, then observe 1000 rotation-fragment samples that
+  // would have aged out the call-sign samples in v2's 60s window.
+  // v3 must keep "WUNC" indefinitely.
   [Fact]
-  public void Observe_WuncRotation_PromotesCallSignVariant()
-  {
-    var tracker = CreateTracker();
-
-    for (int i = 0; i < 40; i++)
-    {
-      tracker.Observe("On Point");
-      tracker.Observe("ON WUNC");
-    }
-
-    Assert.Equal("ON WUNC", tracker.Stable);
-  }
-
-  [Fact]
-  public void Observe_RollingPsWithoutCallSign_FallsBackToMostFrequent()
-  {
-    var tracker = CreateTracker();
-
-    for (int i = 0; i < 50; i++)
-    {
-      tracker.Observe("SONG A");
-    }
-    for (int i = 0; i < 30; i++)
-    {
-      tracker.Observe("SONG B");
-    }
-
-    Assert.Equal("SONG A", tracker.Stable);
-  }
-
-  [Fact]
-  public void Observe_OldSamplesOutsideWindow_AreEvicted()
+  public void Observe_PostLock_DriftSamples_DoNotChange_Stable()
   {
     var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
-    var tracker = CreateTracker(clock: clock, windowDuration: TimeSpan.FromSeconds(60));
+    var tracker = CreateTracker(
+      clock: clock,
+      lockAfter: TimeSpan.FromSeconds(30),
+      minSamples: 5);
 
-    // Feed 50 samples of OLD PS at t=0.
-    for (int i = 0; i < 50; i++)
+    // Lock window mimics WUNC: call sign present.
+    for (int i = 0; i < 10; i++) tracker.Observe("WUNC");
+    for (int i = 0; i < 8; i++)  tracker.Observe("On Point");
+    clock.Advance(TimeSpan.FromSeconds(31));
+    tracker.Observe("WUNC");
+    Assert.Equal("WUNC", tracker.Stable);
+
+    // Now the rotation drifts post-lock. v2 would have aged out the
+    // WUNC samples and promoted whichever fragment was most frequent in
+    // the trailing window. v3 must hold WUNC.
+    string[] driftFragments = { "On Point", "Indira", "Lakshman", "On Point" };
+    for (int i = 0; i < 1000; i++)
     {
-      tracker.Observe("OLD PS");
-    }
-    Assert.Equal("OLD PS", tracker.Stable);
-
-    // Advance 90s — beyond the 60s window. Old samples evicted on next
-    // observe / read.
-    clock.Advance(TimeSpan.FromSeconds(90));
-
-    // Stable read after eviction (Stable evicts on read so this is
-    // observable without further Observe calls).
-    Assert.Null(tracker.Stable);
-
-    // Feed 5 NEW samples — enough to satisfy MinSamples.
-    for (int i = 0; i < 5; i++)
-    {
-      tracker.Observe("NEW PS");
+      tracker.Observe(driftFragments[i % driftFragments.Length]);
+      clock.Advance(TimeSpan.FromSeconds(0.1));
     }
 
-    Assert.Equal("NEW PS", tracker.Stable);
+    Assert.Equal("WUNC", tracker.Stable);
   }
 
+  // Regression: a station that broadcasts only non-call-sign values.
+  // Lock the most-frequent value (the v2 boost can't help; v3 still
+  // promotes the most frequent).
   [Fact]
-  public void Observe_SamplesAcrossWindowBoundary_OnlyRecentCount()
+  public void Observe_LockWindowWithoutCallSign_PromotesMostFrequent()
   {
     var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
-    var tracker = CreateTracker(clock: clock, windowDuration: TimeSpan.FromSeconds(60));
+    var tracker = CreateTracker(
+      clock: clock,
+      lockAfter: TimeSpan.FromSeconds(30),
+      minSamples: 5);
 
-    // 30 old samples of "OLD".
-    for (int i = 0; i < 30; i++)
-    {
-      tracker.Observe("OLD");
-    }
+    // Pure non-call-sign rotation: SIMON ×15, 98.7 ×10, 336 ×8.
+    // No values get the +10 boost. SIMON (15) wins.
+    for (int i = 0; i < 15; i++) tracker.Observe("SIMON");
+    for (int i = 0; i < 10; i++) tracker.Observe("98.7");
+    for (int i = 0; i < 8; i++)  tracker.Observe("336");
 
-    // Advance partway — 30s. Old samples still in window.
-    clock.Advance(TimeSpan.FromSeconds(30));
+    clock.Advance(TimeSpan.FromSeconds(31));
+    tracker.Observe("SIMON");
 
-    // 10 new "NEW" samples while OLD still counts.
-    for (int i = 0; i < 10; i++)
-    {
-      tracker.Observe("NEW");
-    }
-
-    Assert.Equal("OLD", tracker.Stable);
-
-    // Advance another 35s — total 65s since OLD samples; they evict.
-    clock.Advance(TimeSpan.FromSeconds(35));
-
-    Assert.Equal("NEW", tracker.Stable);
+    Assert.Equal("SIMON", tracker.Stable);
   }
 
   [Fact]
-  public void Reset_ClearsWindow()
+  public void Reset_ClearsPreLockState()
   {
-    var tracker = CreateTracker();
+    var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+    var tracker = CreateTracker(clock: clock, minSamples: 5);
 
-    for (int i = 0; i < 50; i++)
-    {
-      tracker.Observe("WUNC");
-    }
+    // Pre-lock samples present.
+    for (int i = 0; i < 10; i++) tracker.Observe("WUNC");
     Assert.Equal("WUNC", tracker.Stable);
 
     tracker.Reset();
-
     Assert.Null(tracker.Stable);
   }
 
@@ -233,7 +345,8 @@ public class RdsStationNameStabilityTrackerTests
     tracker.Observe(value);
     Assert.Null(tracker.Stable);
 
-    // Two more real samples crosses the 3-sample threshold.
+    // Two more real samples crosses the 3-sample threshold (transient
+    // pre-lock consensus).
     tracker.Observe("WUNC");
     tracker.Observe("WUNC");
     Assert.Equal("WUNC", tracker.Stable);
@@ -279,18 +392,19 @@ public class RdsStationNameStabilityTrackerTests
   public void Constructor_InvalidArgs_Throw()
   {
     Assert.Throws<ArgumentOutOfRangeException>(
-      () => new RdsStationNameStabilityTracker(windowDuration: TimeSpan.Zero));
+      () => new RdsStationNameStabilityTracker(lockAfter: TimeSpan.Zero));
     Assert.Throws<ArgumentOutOfRangeException>(
-      () => new RdsStationNameStabilityTracker(windowDuration: TimeSpan.FromSeconds(-1)));
+      () => new RdsStationNameStabilityTracker(lockAfter: TimeSpan.FromSeconds(-1)));
     Assert.Throws<ArgumentOutOfRangeException>(
       () => new RdsStationNameStabilityTracker(callSignBoost: -1));
     Assert.Throws<ArgumentOutOfRangeException>(
       () => new RdsStationNameStabilityTracker(minSamples: 0));
   }
 
-  // The call-sign pattern is the heart of the algorithm; exercise it
+  // The call-sign pattern is the heart of the tiebreaker; exercise it
   // explicitly through the tracker so future regressions don't break
-  // shape detection silently.
+  // shape detection silently. Test runs in pre-lock mode (transient
+  // best-effort) so we don't need to advance a clock.
   [Theory]
   // Bare call signs of valid length (3 or 4 letters) starting with K/W.
   [InlineData("WUN", true)]    // 3 letters
@@ -319,7 +433,9 @@ public class RdsStationNameStabilityTrackerTests
     // Feed 5 samples of a known non-call-sign value, then 1 sample of
     // the candidate. If `shouldBoost` is true, the candidate's
     // +100 boost beats the 5-occurrence non-call-sign value. If false,
-    // the candidate stays at score 1 and loses to score 5.
+    // the candidate stays at score 1 and loses to score 5. Pre-lock
+    // transient consensus exposes the winner without needing a clock
+    // advance.
     for (int i = 0; i < 5; i++)
     {
       tracker.Observe("non-shape value");
@@ -334,39 +450,5 @@ public class RdsStationNameStabilityTrackerTests
     {
       Assert.Equal("non-shape value", tracker.Stable);
     }
-  }
-
-  // Regression: the 10 Hz frame-rate simulation that PR #384's
-  // tracker fails — each fragment holds for 30+ consecutive frames. The
-  // new algorithm must NOT promote a mid-roll fragment.
-  [Fact]
-  public void Observe_RollingPsAtFrameRate_PromotesCallSignNotMidRollFragment()
-  {
-    var tracker = CreateTracker();
-
-    // Simulate ~10 Hz frame rate where each rotation fragment holds for
-    // ~30 frames before the next one takes over. This is the live
-    // failure mode PR #384's consecutive-samples algorithm was
-    // promoting "WSMW THE" / "CARS" / etc. for.
-    string[] fragments = { "WSMW THE", "CARS", "SHAKE IT", "UP", "WSMW" };
-    foreach (var fragment in fragments)
-    {
-      for (int frame = 0; frame < 30; frame++)
-      {
-        tracker.Observe(fragment);
-      }
-    }
-
-    // Each fragment has 30 occurrences. "WSMW" gets +10 boost — total 40.
-    // "WSMW THE" also contains "WSMW" — also +10 boost; both tie at 40.
-    // GroupBy preserves first-occurrence order, so "WSMW THE" wins on
-    // the tie. That's still in-rotation-but-rolling territory; the
-    // primary correctness criterion is "no non-call-sign fragment wins".
-    var stable = tracker.Stable;
-    Assert.NotNull(stable);
-    Assert.Contains("WSMW", stable);
-    Assert.NotEqual("CARS", stable);
-    Assert.NotEqual("SHAKE IT", stable);
-    Assert.NotEqual("UP", stable);
   }
 }

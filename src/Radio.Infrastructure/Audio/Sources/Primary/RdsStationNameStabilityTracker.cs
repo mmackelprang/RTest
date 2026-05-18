@@ -4,69 +4,65 @@ namespace Radio.Infrastructure.Audio.Sources.Primary;
 
 /// <summary>
 /// Tracks an RDS Program-Service (PS) signal and emits a "stable" value
-/// by scoring candidates in a sliding time-window. Used by the SDR radio
-/// source to filter rolling-PS artifacts before exposing
+/// using a <b>lock-and-hold</b> strategy. Used by the SDR radio source to
+/// filter rolling-PS artifacts before exposing
 /// <c>IRadioControl.RdsStationNameStable</c> on the wire.
 /// <para>
-/// <b>Algorithm (Task #80 v2)</b>: keep all PS samples observed in the
-/// last <see cref="WindowDuration"/>, group by value, score each unique
-/// value as <c>occurrence_count + (matches_call_sign_shape ? CallSignBoost : 0)</c>,
-/// and expose the highest-scoring value as <see cref="Stable"/>.
+/// <b>Algorithm (Task #80 v3)</b>: accumulate PS samples for a configurable
+/// lock window (default 30 seconds) after the first observation. Once
+/// both the minimum-sample count and the lock window have elapsed,
+/// compute the best candidate using a histogram + call-sign-shape
+/// tiebreaker, then <i>freeze</i> that value. Subsequent <see cref="Observe"/>
+/// calls become no-ops; the tracker returns the locked value forever
+/// until <see cref="Reset"/> is called on a frequency change.
 /// </para>
 /// <para>
-/// <b>Why not "N consecutive identical samples"</b>: rolling-PS broadcasters
-/// hold each fragment of the rotation for 30-50 consecutive frames at the
-/// ~10 Hz decode rate. Any small N is trivially satisfied by every
-/// fragment — including song titles ("TOO HOT"), program titles ("On
-/// Point"), and phone-number digits ("336") — and whichever fragment
-/// happens to be in the buffer when the consumer reads gets promoted.
-/// The frequency-window + shape boost picks the call-sign-shaped
-/// fragment in a rotation, which is the value listeners actually want
-/// (the station identifier, not the show name or song title).
+/// <b>Why lock-and-hold</b>: live UAT of the v2 sliding-window approach
+/// failed because real broadcasters' rotations often don't include the
+/// FCC call sign at all (WSMW broadcasts SIMON / 98.7 / 336 — never
+/// "WSMW"). The call-sign-shape boost can't help when the call sign
+/// isn't in the data. But Tester directly observed during v2 UAT that
+/// during initial RDS lock (T+15-50s after tune), the histogram
+/// algorithm DOES stabilize correctly on both WUNC and WSMW; it just
+/// drifts as lock-time samples age out of the 60-second window. The
+/// fix: stop adapting once a consensus exists.
 /// </para>
 /// <para>
-/// <b>Live behavior</b> on previously-failing rotations:
-/// <list type="bullet">
-///   <item><b>WUNC 91.5</b>: <c>"ON WUNC"</c> wins over <c>"On Point"</c>
-///     because <c>WUNC</c> matches the call-sign-shape pattern.</item>
-///   <item><b>WSMW 97.745</b>: <c>"WSMW"</c> wins over <c>"TOO HOT"</c>,
-///     <c>"KOOL"</c>, <c>"THE GANG"</c>, <c>"SIMON"</c>, <c>"336"</c> —
-///     for the same reason.</item>
-///   <item><b>KEXP-FM</b> (static-PS): wins trivially as the single
-///     histogram entry.</item>
-///   <item><b>Noise-only / international</b>: falls back to
-///     most-frequent value; not perfect but no worse than prior
-///     behavior.</item>
-/// </list>
+/// <b>Trade-off accepted</b>: if a station legitimately rebrands its PS
+/// during the day (rare), the tracker won't pick up the new value until
+/// the next frequency tune. This is the explicit cost of the
+/// lock-and-hold approach and matches the user-facing intent — "save a
+/// preset with the station's identity, not the current playing track."
 /// </para>
 /// <para>
-/// <b>Future enhancement</b> (not in this revision): cross-reference
-/// with RBDS Annex D PI-code &#8594; call-sign decode table for
-/// deterministic disambiguation when no rotation entry matches the
-/// shape heuristic.
+/// <b>Pre-lock behavior</b>: while still accumulating, <see cref="Stable"/>
+/// returns the current transient best-effort consensus (allows partial
+/// UI updates such as preset save) once <see cref="MinSamples"/> has been
+/// reached. Post-lock, the same getter returns the frozen value.
 /// </para>
 /// </summary>
 public sealed class RdsStationNameStabilityTracker
 {
   /// <summary>
-  /// Sliding window duration. Samples observed before
-  /// <c>now - WindowDuration</c> are evicted on each
-  /// <see cref="Observe"/> / <see cref="Stable"/> access.
+  /// Minimum elapsed time (since the first sample) before the tracker
+  /// locks. Default 30s, matching the T+15-50s window in which Tester
+  /// observed correct consensus on both WUNC and WSMW.
   /// </summary>
-  public TimeSpan WindowDuration { get; }
+  public TimeSpan LockAfter { get; }
 
   /// <summary>
   /// Extra score added to a PS value's occurrence count when it contains
   /// a North-American call-sign-shape token (3-4 contiguous uppercase
-  /// letters starting with K or W). Must be large enough to flip a tie
-  /// between equal-occurrence rotation fragments — 10 covers the typical
-  /// case where 4-5 fragments each appear ~30-50 times in a 60s window.
+  /// letters starting with K or W). Used as a tiebreaker during the
+  /// lock window — when both call-sign and rotation-fragment values
+  /// appear before lock (exactly what Tester observed on WUNC), the
+  /// call-sign-shaped value scores higher and wins.
   /// </summary>
   public int CallSignBoost { get; }
 
   /// <summary>
-  /// Minimum number of samples required in the window before any
-  /// <see cref="Stable"/> value is exposed. Prevents flapping during
+  /// Minimum number of samples required before the tracker can lock or
+  /// expose a transient pre-lock consensus. Prevents flapping during
   /// initial RDS lock when only 1-2 samples have been observed.
   /// </summary>
   public int MinSamples { get; }
@@ -82,42 +78,42 @@ public sealed class RdsStationNameStabilityTracker
 
   private readonly TimeProvider _timeProvider;
   private readonly object _lock = new();
-  private readonly List<(DateTimeOffset Time, string Ps)> _samples = new();
+  private readonly List<string> _preLockSamples = new();
+  private DateTimeOffset? _firstSampleTime;
+  private string? _lockedValue;
 
   /// <summary>
-  /// Creates a tracker with the given tunables. All have defaults
-  /// chosen for North-American FM rolling-PS broadcasters at the
-  /// ~10 Hz RDS PS frame rate.
+  /// Creates a tracker with the given tunables. Defaults are tuned for
+  /// North-American FM rolling-PS broadcasters at the ~10 Hz RDS PS
+  /// frame rate.
   /// </summary>
-  /// <param name="windowDuration">
-  /// Sliding window. Default 60s. Longer windows give more stable
-  /// consensus at the cost of slower adaptation to a real station
-  /// change (mitigated by calling <see cref="Reset"/> on frequency
-  /// tune). Must be positive.
+  /// <param name="lockAfter">
+  /// Lock window. Default 30s. Configurable so the value can be tuned
+  /// later without an API break. Must be positive.
   /// </param>
   /// <param name="callSignBoost">
   /// Score bonus when the PS value contains a call-sign-shape token.
   /// Default 10. Must be non-negative.
   /// </param>
   /// <param name="minSamples">
-  /// Minimum samples in the window before <see cref="Stable"/>
-  /// exposes a value. Default 5. Must be ≥ 1.
+  /// Minimum samples required before lock or pre-lock consensus exposes
+  /// a value. Default 5. Must be ≥ 1.
   /// </param>
   /// <param name="timeProvider">
-  /// Time source. Tests pass a <c>FakeTimeProvider</c> to drive
-  /// window-eviction deterministically. Defaults to
+  /// Time source. Tests pass a <c>FakeTimeProvider</c> to drive the lock
+  /// window deterministically. Defaults to
   /// <see cref="TimeProvider.System"/>.
   /// </param>
   public RdsStationNameStabilityTracker(
-    TimeSpan? windowDuration = null,
+    TimeSpan? lockAfter = null,
     int callSignBoost = 10,
     int minSamples = 5,
     TimeProvider? timeProvider = null)
   {
-    var window = windowDuration ?? TimeSpan.FromSeconds(60);
+    var window = lockAfter ?? TimeSpan.FromSeconds(30);
     if (window <= TimeSpan.Zero)
     {
-      throw new ArgumentOutOfRangeException(nameof(windowDuration), "WindowDuration must be > 0");
+      throw new ArgumentOutOfRangeException(nameof(lockAfter), "LockAfter must be > 0");
     }
     if (callSignBoost < 0)
     {
@@ -128,7 +124,7 @@ public sealed class RdsStationNameStabilityTracker
       throw new ArgumentOutOfRangeException(nameof(minSamples), "MinSamples must be ≥ 1");
     }
 
-    WindowDuration = window;
+    LockAfter = window;
     CallSignBoost = callSignBoost;
     MinSamples = minSamples;
     _timeProvider = timeProvider ?? TimeProvider.System;
@@ -136,82 +132,101 @@ public sealed class RdsStationNameStabilityTracker
 
   /// <summary>
   /// Pushes a new PS sample into the tracker. Null / empty / whitespace
-  /// samples are ignored (an RDS dropout shouldn't poison the histogram).
-  /// Non-null samples are trimmed before scoring. Returns the current
-  /// stable value after this sample is incorporated (null when below
-  /// <see cref="MinSamples"/>).
+  /// samples are ignored. Non-null samples are trimmed before scoring.
+  /// Once the tracker has locked, this method is a no-op — call
+  /// <see cref="Reset"/> (e.g. on frequency change) to allow relocking.
+  /// Returns the current <see cref="Stable"/> value after the sample is
+  /// incorporated (transient pre-lock consensus, locked value, or null).
   /// </summary>
   public string? Observe(string? sample)
   {
     if (string.IsNullOrWhiteSpace(sample))
     {
       // Return the current stable value without mutating state.
-      return ComputeStable();
+      return ReadStable();
     }
 
     var trimmed = sample.Trim();
 
     lock (_lock)
     {
+      // Already locked — the whole point of v3: ignore everything until Reset.
+      if (_lockedValue != null) return _lockedValue;
+
       var now = _timeProvider.GetUtcNow();
-      _samples.Add((now, trimmed));
-      EvictExpired_NoLock(now);
+      _firstSampleTime ??= now;
+      _preLockSamples.Add(trimmed);
+
+      // Lock when both conditions hold: enough samples AND lock-after elapsed.
+      if (_preLockSamples.Count >= MinSamples &&
+          now - _firstSampleTime.Value >= LockAfter)
+      {
+        _lockedValue = ComputeBestCandidate_NoLock();
+        _preLockSamples.Clear();
+        _preLockSamples.TrimExcess();
+        return _lockedValue;
+      }
+
       return ComputeStable_NoLock();
     }
   }
 
   /// <summary>
-  /// Current stable PS value, or <c>null</c> when the window holds
-  /// fewer than <see cref="MinSamples"/> samples. Window eviction runs
-  /// on read so a long gap of silence eventually drains the histogram.
+  /// Current stable PS value. Pre-lock: best-effort transient consensus
+  /// once <see cref="MinSamples"/> is reached, or <c>null</c>. Post-lock:
+  /// the frozen value, which never changes until <see cref="Reset"/>.
   /// </summary>
-  public string? Stable => ComputeStable();
+  public string? Stable => ReadStable();
 
   /// <summary>
-  /// Clears the tracker. Use after a frequency/band change so the
-  /// previous station's histogram doesn't leak across tunes.
+  /// Clears the tracker — drops the locked value and pre-lock samples.
+  /// Use after a frequency/band change so the previous station's
+  /// consensus doesn't leak across tunes.
   /// </summary>
   public void Reset()
   {
     lock (_lock)
     {
-      _samples.Clear();
+      _preLockSamples.Clear();
+      _preLockSamples.TrimExcess();
+      _firstSampleTime = null;
+      _lockedValue = null;
     }
   }
 
-  private string? ComputeStable()
+  private string? ReadStable()
   {
     lock (_lock)
     {
-      EvictExpired_NoLock(_timeProvider.GetUtcNow());
+      if (_lockedValue != null) return _lockedValue;
       return ComputeStable_NoLock();
     }
   }
 
   private string? ComputeStable_NoLock()
   {
-    if (_samples.Count < MinSamples)
-    {
-      return null;
-    }
+    if (_preLockSamples.Count < MinSamples) return null;
+    return ComputeBestCandidate_NoLock();
+  }
 
-    // Group by ordinal PS value, score, return highest-scoring.
-    // Tie-break is undefined but stable enough in practice — when two
-    // values tie on score, GroupBy preserves first-occurrence order.
-    string? bestPs = null;
-    var bestScore = int.MinValue;
+  private string? ComputeBestCandidate_NoLock()
+  {
+    if (_preLockSamples.Count == 0) return null;
 
-    // Manual aggregation avoids a LINQ allocation chain on the hot path.
-    // The histogram is bounded by the number of unique PS values in a
-    // 60s window — typically 1 (static) to ~10 (rolling) — so a flat
-    // dictionary scan stays trivially small.
+    // Histogram + call-sign-shape tiebreaker. Manual aggregation avoids
+    // a LINQ allocation chain on the hot path. The histogram is bounded
+    // by the number of unique PS values in the lock window — typically
+    // 1 (static) to ~10 (rolling) — so a flat dictionary scan stays
+    // trivially small.
     var counts = new Dictionary<string, int>(StringComparer.Ordinal);
-    foreach (var (_, ps) in _samples)
+    foreach (var ps in _preLockSamples)
     {
       counts.TryGetValue(ps, out var current);
       counts[ps] = current + 1;
     }
 
+    string? bestPs = null;
+    var bestScore = int.MinValue;
     foreach (var (ps, count) in counts)
     {
       var score = count + (CallSignPattern.IsMatch(ps) ? CallSignBoost : 0);
@@ -223,22 +238,5 @@ public sealed class RdsStationNameStabilityTracker
     }
 
     return bestPs;
-  }
-
-  private void EvictExpired_NoLock(DateTimeOffset now)
-  {
-    var cutoff = now - WindowDuration;
-    // Samples are appended in non-decreasing time order, so the
-    // expired prefix is contiguous. Walk from the front until we hit a
-    // surviving sample, then drop the prefix in one RemoveRange.
-    var expired = 0;
-    while (expired < _samples.Count && _samples[expired].Time < cutoff)
-    {
-      expired++;
-    }
-    if (expired > 0)
-    {
-      _samples.RemoveRange(0, expired);
-    }
   }
 }
