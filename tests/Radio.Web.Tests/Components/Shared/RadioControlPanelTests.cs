@@ -194,11 +194,26 @@ public class RadioControlPanelTests : TestContext
     var state = BuildState(signalStrength: 100, clip: true, rssiDbu: 0.0);
     var cut = RenderPanel(state);
 
-    Assert.DoesNotContain("118", cut.Markup);
-
+    // Task #15 flake fix #83 — tighten the regression-guard so random bUnit
+    // / Blazor-generated attribute values containing "118" as a substring
+    // (Radzen element keys, internal __blazorId fragments, etc.) do not
+    // create false positives. The original `Assert.DoesNotContain("118",
+    // cut.Markup)` was a probabilistic flake: ~0.4% of test runs surfaced
+    // a randomly-generated id containing "118" and failed the assertion
+    // even though the meter rendered correctly.
+    //
+    // The regression we actually care about is the pre-clamp "118%" /
+    // "118 dBu" rendering. Two assertions cover the meaningful surfaces:
+    //   1. Word-boundary regex over the meter's text content — "118" as a
+    //      standalone token (segment count, dBu readout, percentage,
+    //      anything humanly visible) would match.
+    //   2. The "118 dBu" / "118%" literal suffix — what the bug would
+    //      have produced before the clamp landed.
     var meter = cut.Find(".rcp-meter");
+    Assert.DoesNotMatch(@"\b118\b", meter.TextContent);
+    Assert.DoesNotContain("118 dBu", meter.TextContent);
+    Assert.DoesNotContain("118%", meter.TextContent);
     Assert.DoesNotContain("%", meter.TextContent);
-    Assert.DoesNotContain("118", meter.TextContent);
 
     // 20 segments total; all should carry one of the lit segment classes.
     var segs = cut.FindAll(".rcp-meter-seg");

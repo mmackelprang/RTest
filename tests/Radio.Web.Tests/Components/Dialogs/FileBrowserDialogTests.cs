@@ -229,4 +229,112 @@ public class FileBrowserDialogTests : TestContext
     // No element should contain a backslash — a regression to escape-blobs would surface here.
     parsed.Should().NotContain(s => s.Contains('\\') || s.Contains('"'));
   }
+
+  // ─── Task #15 PR E item #2: drive selector deepest-match-only check ──────
+  //
+  // The location dropdown previously showed BOTH the bookmark check AND the
+  // root-drive check when _absolutePath was a descendant of both (e.g.
+  // "/mnt/nas/music" matched the "NAS Music Library" bookmark AND the root
+  // "/" drive). ResolveDeepestSelectorPath returns the single longest-path
+  // candidate so only the most-specific entry renders a check icon.
+
+  [Fact]
+  public void ResolveDeepestSelectorPath_BookmarkAndRootDrive_ReturnsBookmark()
+  {
+    // Classic case: bookmark at the exact path + root drive that is also a
+    // prefix. Deepest match wins → bookmark, not "/".
+    var result = FileBrowserDialog.ResolveDeepestSelectorPath(
+      "/mnt/nas/music",
+      bookmarkPaths: new[] { "/mnt/nas/music" },
+      drivePaths: new[] { "/" });
+    result.Should().Be("/mnt/nas/music");
+  }
+
+  [Fact]
+  public void ResolveDeepestSelectorPath_OnlyRootDrive_ReturnsRootDrive()
+  {
+    // Path lives inside the root drive but no bookmark matches — the root
+    // drive entry is the only candidate and should carry the check.
+    var result = FileBrowserDialog.ResolveDeepestSelectorPath(
+      "/var/log",
+      bookmarkPaths: new[] { "/mnt/nas/music", "/home/mmack/audio" },
+      drivePaths: new[] { "/" });
+    result.Should().Be("/");
+  }
+
+  [Fact]
+  public void ResolveDeepestSelectorPath_BookmarkDescendant_ReturnsBookmark()
+  {
+    // Browser is inside the bookmark's tree but not at the bookmark root.
+    // The bookmark is still the most-specific match (root drive "/" is
+    // strictly shorter).
+    var result = FileBrowserDialog.ResolveDeepestSelectorPath(
+      "/mnt/nas/music/Pink Floyd/Animals",
+      bookmarkPaths: new[] { "/mnt/nas/music" },
+      drivePaths: new[] { "/" });
+    result.Should().Be("/mnt/nas/music");
+  }
+
+  [Fact]
+  public void ResolveDeepestSelectorPath_NoMatch_ReturnsNull()
+  {
+    // Path is on a drive that isn't in the candidate list — nothing lights
+    // up. Renders zero checks (correct: the location dropdown should not
+    // claim any active entry).
+    var result = FileBrowserDialog.ResolveDeepestSelectorPath(
+      "D:\\Music",
+      bookmarkPaths: new[] { "/mnt/nas/music" },
+      drivePaths: new[] { "/", "C:\\" });
+    result.Should().BeNull();
+  }
+
+  [Fact]
+  public void ResolveDeepestSelectorPath_EmptyPath_ReturnsNull()
+  {
+    // _absolutePath is null/empty before the user navigates anywhere. No
+    // entry should be marked active.
+    FileBrowserDialog.ResolveDeepestSelectorPath(null, new[] { "/" }, Array.Empty<string>())
+      .Should().BeNull();
+    FileBrowserDialog.ResolveDeepestSelectorPath(string.Empty, new[] { "/" }, Array.Empty<string>())
+      .Should().BeNull();
+  }
+
+  [Fact]
+  public void ResolveDeepestSelectorPath_WindowsDriveAndBookmark_PicksBookmark()
+  {
+    // Windows path variant: bookmark deep inside C:\ — bookmark wins over
+    // the C:\ root drive. Comparison is case-insensitive (matches the
+    // OrdinalIgnoreCase check the dialog used historically).
+    var result = FileBrowserDialog.ResolveDeepestSelectorPath(
+      "C:\\Users\\mmack\\Music\\Sample.mp3",
+      bookmarkPaths: new[] { "C:\\Users\\mmack\\Music" },
+      drivePaths: new[] { "C:\\" });
+    result.Should().Be("C:\\Users\\mmack\\Music");
+  }
+
+  [Fact]
+  public void ResolveDeepestSelectorPath_FalsePrefixGuard_RejectsSiblingDirectory()
+  {
+    // "/mnt" must NOT match "/mntfoo" — the naive StartsWith would create a
+    // false positive, so the prefix check requires a separator after the
+    // candidate (or exact match).
+    var result = FileBrowserDialog.ResolveDeepestSelectorPath(
+      "/mntfoo/data",
+      bookmarkPaths: new[] { "/mnt" },
+      drivePaths: new[] { "/" });
+    // "/mnt" is rejected; only "/" matches → root drive carries the check.
+    result.Should().Be("/");
+  }
+
+  [Fact]
+  public void ResolveDeepestSelectorPath_TwoOverlappingBookmarks_PicksDeepest()
+  {
+    // Hypothetical: two bookmarks both prefix the current path (a parent
+    // and a child). The longer-path bookmark wins.
+    var result = FileBrowserDialog.ResolveDeepestSelectorPath(
+      "/mnt/nas/music/jazz/coltrane",
+      bookmarkPaths: new[] { "/mnt/nas", "/mnt/nas/music" },
+      drivePaths: new[] { "/" });
+    result.Should().Be("/mnt/nas/music");
+  }
 }

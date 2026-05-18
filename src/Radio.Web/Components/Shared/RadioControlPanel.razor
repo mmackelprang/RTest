@@ -103,7 +103,12 @@
       {
         <div class="rcp-meter">
           <div class="rcp-meter-header">
-            <span>SIGNAL</span>
+            @* Task #15 PR E item #29 — header label renamed from "SIGNAL" to
+               "RSSI" so it aligns with the dBu-scaled axis labels and the
+               calibrated readout to its right. Mock + Tester both expected
+               RSSI here; the prior SIGNAL label drifted from what the meter
+               actually shows. *@
+            <span>RSSI</span>
             <span class="rcp-meter-readout">
               @if (_radioState.Clip)
               {

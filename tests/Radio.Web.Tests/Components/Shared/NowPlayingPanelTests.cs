@@ -84,6 +84,12 @@ public class NowPlayingPanelTests : TestContext
         sp.GetRequiredService<IConfiguration>()
       )
     );
+
+    // Task #15 PR E item #47 — gain-popover backdrop is now portaled to
+    // MainLayout via this scoped service. The panel injects it for the
+    // open/close + OnClose subscription wiring, so test renders need it
+    // registered too.
+    Services.AddScoped<Radio.Web.Services.GainPopoverService>();
   }
 
   protected override void Dispose(bool disposing)
@@ -811,6 +817,74 @@ public class NowPlayingPanelTests : TestContext
     Assert.Contains("88.10", freq);
     var rds = cut.Find(".np-status-rds-station");
     Assert.Equal("KFOG", rds.TextContent);
+  }
+
+  // ─── Task #15 PR E item #47: gain-popover backdrop portal wiring ─────────
+  //
+  // The click-away backdrop for the gain popover used to live INSIDE
+  // NowPlayingPanel, which is rendered under .page-transition. That wrapper
+  // declares transform + will-change which creates a stacking context that
+  // traps z-index 9999 — meaning the backdrop's @onclick never received
+  // events when the user clicked outside the popover-anchor sub-tree (the
+  // RadioControlPanel sat above it). The fix portals the backdrop to
+  // MainLayout via GainPopoverService. These tests pin the wire-path:
+  //
+  // 1. ToggleGainPopover opens the service-driven backdrop.
+  // 2. CloseGainPopover closes both the local popover AND the service.
+  // 3. Subscribing to GainPopover.OnClose (the MainLayout-side backdrop
+  //    click) tears down _showGainPopover on the panel — verified by
+  //    invoking the service's HandleBackdropClick directly.
+
+  [Fact]
+  public void GainPopover_ToggleGainPopover_OpensServiceBackdrop()
+  {
+    var cut = RenderComponent<NowPlayingPanel>();
+    var svc = Services.GetRequiredService<Radio.Web.Services.GainPopoverService>();
+    svc.IsOpen.Should().BeFalse("the backdrop should start unmounted");
+
+    // The instance-level toggle is private; reflect into it to mirror the
+    // path the status-strip gain cell hits via @onclick. Reflective access
+    // here is consistent with how long-press / band-pill tests drive
+    // RadioControlPanel.
+    var toggle = typeof(NowPlayingPanel).GetMethod(
+      "ToggleGainPopover",
+      BindingFlags.NonPublic | BindingFlags.Instance);
+    toggle.Should().NotBeNull();
+    cut.InvokeAsync(() => toggle!.Invoke(cut.Instance, Array.Empty<object>()));
+
+    svc.IsOpen.Should().BeTrue(
+      "ToggleGainPopover must drive the layout-mounted backdrop, not just the local popover");
+  }
+
+  [Fact]
+  public void GainPopover_BackdropClickFromLayout_ClosesLocalPopover()
+  {
+    var cut = RenderComponent<NowPlayingPanel>();
+    var svc = Services.GetRequiredService<Radio.Web.Services.GainPopoverService>();
+
+    // Open via the panel surface, then simulate the backdrop click that
+    // MainLayout would have wired to HandleBackdropClick. The panel must
+    // close its local _showGainPopover in response (so re-rendering hides
+    // the popover anchor) AND the service must end up closed (so the
+    // backdrop unmounts in MainLayout).
+    var toggle = typeof(NowPlayingPanel).GetMethod(
+      "ToggleGainPopover",
+      BindingFlags.NonPublic | BindingFlags.Instance);
+    cut.InvokeAsync(() => toggle!.Invoke(cut.Instance, Array.Empty<object>()));
+    svc.IsOpen.Should().BeTrue();
+
+    cut.InvokeAsync(() => svc.HandleBackdropClick());
+
+    svc.IsOpen.Should().BeFalse();
+    // The panel's private _showGainPopover field should have been cleared
+    // by the OnClose subscriber.
+    var showField = typeof(NowPlayingPanel).GetField(
+      "_showGainPopover",
+      BindingFlags.NonPublic | BindingFlags.Instance);
+    showField.Should().NotBeNull();
+    var showValue = (bool)showField!.GetValue(cut.Instance)!;
+    showValue.Should().BeFalse(
+      "backdrop click must tear down the panel's local popover state via OnClose");
   }
 
   // ─── PR 4 fixer: GainPopoverKicker strips "SDR Radio (...)" wrapper ────────

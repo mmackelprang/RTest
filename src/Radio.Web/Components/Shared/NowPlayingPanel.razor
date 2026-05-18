@@ -5,6 +5,7 @@
 @inject ConfigurationApiService ConfigApi
 @inject ILogger<NowPlayingPanel> Logger
 @inject NotificationService NotificationService
+@inject Radio.Web.Services.GainPopoverService GainPopover
 @implements IAsyncDisposable
 
 <div style="height: 100%; display: flex; flex-direction: column; position: relative; overflow: hidden;">
@@ -229,12 +230,15 @@
       </div>
     }
 
-    @* PR 4 — gain popover. Mounted in the same absolute slot the legacy inline
-       popover occupied; click-outside backdrop closes it. The actual slider /
-       peak meter / scale labels live in GainControlPopover.razor. *@
+    @* PR 4 — gain popover. The popover anchor lives here in NowPlayingPanel
+       (so it's positioned over the gain trigger and inherits the panel's
+       column/transition). Task #15 PR E item #47 — the click-away BACKDROP
+       has moved to MainLayout via GainPopoverService so it escapes the
+       .page-transition stacking context that previously trapped its
+       z-index: 9999. The actual slider / peak meter / scale labels still
+       live in GainControlPopover.razor. *@
     @if (_showGainPopover && !string.IsNullOrEmpty(_nowPlayingSourceType))
     {
-      <div @onclick="CloseGainPopover" style="position: fixed; inset: 0; z-index: 9999;"></div>
       <div class="np-gain-popover-anchor">
         <GainControlPopover IsOpen="true"
                             SourceType="@_nowPlayingSourceType"
@@ -514,6 +518,11 @@
       HubService.FingerprintStatusChanged += OnFingerprintStatusChanged;
       HubService.RadioStateChanged += OnRadioStateChanged;
 
+      // Task #15 PR E item #47 — receive the backdrop-click signal from
+      // MainLayout's layout-mounted backdrop. Paired with the unsubscribe
+      // in DisposeAsync so the circuit stays leak-free.
+      GainPopover.OnClose += OnGainPopoverBackdropClicked;
+
       await RefreshPlaybackStateAsync();
       await RefreshFingerprintStatusAsync();
       await RefreshRadioStateAsync();
@@ -782,11 +791,37 @@
   private void ToggleGainPopover()
   {
     _showGainPopover = !_showGainPopover;
+    // Task #15 PR E item #47 — drive the layout-mounted backdrop in lock-step
+    // with the local popover visibility. Open() / Close() are idempotent on
+    // the service so a redundant call is cheap and never fires StateChanged
+    // a second time.
+    if (_showGainPopover)
+    {
+      GainPopover.Open();
+    }
+    else
+    {
+      GainPopover.Close();
+    }
   }
 
   private void CloseGainPopover()
   {
     _showGainPopover = false;
+    GainPopover.Close();
+  }
+
+  /// <summary>
+  /// Handler subscribed to <see cref="Services.GainPopoverService.OnClose"/>.
+  /// Fired when the layout-mounted backdrop receives a click — the panel
+  /// tears down its local popover state and re-renders. Subscription paired
+  /// with the unsubscribe in <c>DisposeAsync</c>.
+  /// </summary>
+  private void OnGainPopoverBackdropClicked()
+  {
+    if (!_showGainPopover) return;
+    _showGainPopover = false;
+    _ = InvokeAsync(StateHasChanged);
   }
 
   /// <summary>
@@ -1035,6 +1070,10 @@
     HubService.VolumeChanged -= OnVolumeChangedEvent;
     HubService.FingerprintStatusChanged -= OnFingerprintStatusChanged;
     HubService.RadioStateChanged -= OnRadioStateChanged;
+    GainPopover.OnClose -= OnGainPopoverBackdropClicked;
+    // Defensive: ensure the layout backdrop unmounts if the panel is being
+    // torn down while the popover was open (page navigation, hot reload).
+    GainPopover.Close();
     _gainDebounceTimer?.Dispose();
     _nowPlayingPollTimer?.Dispose();
     await Task.CompletedTask;

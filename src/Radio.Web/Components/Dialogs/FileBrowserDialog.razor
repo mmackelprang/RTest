@@ -21,13 +21,28 @@
       {
         <div class="file-browser-location-overlay" @onclick="CloseLocationDropdown"></div>
         <div class="file-browser-location-dropdown" @onclick:stopPropagation="true">
+          @{
+            // Task #15 PR E item #2 — show the check icon on only the deepest
+            // matching entry. Previously a path like "/mnt/nas/music" lit BOTH
+            // the bookmark check (when the bookmark itself pointed at that
+            // path) AND the root-drive "/" check, which is visually noisy and
+            // redundant. The helper below collects every candidate path
+            // (bookmarks + ready drives) that is a prefix of _absolutePath in
+            // absolute mode, then returns the longest one — the single entry
+            // that should render the active check.
+            var checkedDrivePath = _isAbsoluteMode
+              ? ResolveDeepestSelectorPath(
+                  _absolutePath,
+                  _bookmarks.Select(b => b.Path),
+                  _drives.Where(d => d.IsReady).Select(d => d.Name))
+              : null;
+          }
           @* Bookmarked folders — highlighted at top *@
           @if (_bookmarks.Any())
           {
             @foreach (var bookmark in _bookmarks)
             {
-              var isActive = _isAbsoluteMode && (_absolutePath == bookmark.Path ||
-                _absolutePath?.StartsWith(bookmark.Path.TrimEnd('/') + "/", StringComparison.OrdinalIgnoreCase) == true);
+              var isActive = string.Equals(bookmark.Path, checkedDrivePath, StringComparison.OrdinalIgnoreCase);
               <div class="file-browser-location-item @(bookmark.IsAccessible ? "" : "file-browser-location-disabled")"
                    @onclick="@(() => NavigateToBookmark(bookmark))"
                    style="@(bookmark.IsAccessible ? "" : "opacity: 0.45; pointer-events: none;")">
@@ -67,7 +82,7 @@
               <div class="file-browser-location-item" @onclick="@(() => NavigateToDrive(drive.Name))">
                 <RadzenIcon Icon="storage" Style="font-size: 20px;" />
                 <span>@drive.Label</span>
-                @if (_isAbsoluteMode && _absolutePath?.StartsWith(drive.Name) == true)
+                @if (string.Equals(drive.Name, checkedDrivePath, StringComparison.OrdinalIgnoreCase))
                 {
                   <RadzenIcon Icon="check" Style="font-size: 20px; margin-left: auto; color: var(--rz-primary);" />
                 }
@@ -883,6 +898,86 @@
     {
       Logger.LogDebug(ex, "Failed to load file browser filter chips");
     }
+  }
+
+  /// <summary>
+  /// Returns the deepest (longest-path) entry whose path is a prefix of
+  /// <paramref name="absolutePath"/>, considering both bookmarks and drive
+  /// roots. Used by the location dropdown to render the active check on
+  /// only the most-specific match — preventing the dual-check confusion
+  /// where a bookmark at "/mnt/nas/music" AND the root drive "/" both
+  /// lit up when the browser was inside the bookmark's tree.
+  ///
+  /// Returns <c>null</c> when <paramref name="absolutePath"/> is empty or
+  /// when no entry matches. Comparison is case-insensitive (matches the
+  /// case-insensitive prefix check the original code did via StartsWith).
+  /// Exposed as <c>internal static</c> so unit tests can pin the
+  /// deepest-match algorithm directly without needing to drive the full
+  /// dialog through a Radzen DialogService.
+  /// </summary>
+  internal static string? ResolveDeepestSelectorPath(
+    string? absolutePath,
+    IEnumerable<string> bookmarkPaths,
+    IEnumerable<string> drivePaths)
+  {
+    if (string.IsNullOrEmpty(absolutePath)) return null;
+
+    // Normalize candidates: trim trailing slashes so "/" stays "/" but
+    // "/mnt/nas/music/" becomes "/mnt/nas/music" before we compare lengths.
+    // The empty-string case is filtered out (a malformed bookmark with no
+    // path would otherwise match everything).
+    string? best = null;
+    var bestLen = -1;
+
+    foreach (var raw in bookmarkPaths.Concat(drivePaths))
+    {
+      if (string.IsNullOrEmpty(raw)) continue;
+
+      if (!IsPathPrefix(raw, absolutePath)) continue;
+
+      // Length comparison against the raw stored path keeps the returned
+      // value identical to what the caller passed in, so the per-row
+      // equality check in the template ("does THIS entry's path equal the
+      // resolved deepest path?") just works without a normalization round
+      // trip.
+      var len = raw.Length;
+      if (len > bestLen)
+      {
+        bestLen = len;
+        best = raw;
+      }
+    }
+
+    return best;
+  }
+
+  /// <summary>
+  /// True when <paramref name="candidate"/> is a path-prefix of
+  /// <paramref name="path"/>. Handles the trailing-slash edge case so
+  /// "/mnt" matches "/mnt/nas/music" but does NOT match "/mntfoo" (which
+  /// would be a false positive with a naive StartsWith). The root paths
+  /// "/" and "X:\" are special-cased because they end in their own
+  /// separator already.
+  /// </summary>
+  private static bool IsPathPrefix(string candidate, string path)
+  {
+    if (string.Equals(candidate, path, StringComparison.OrdinalIgnoreCase))
+    {
+      return true;
+    }
+
+    // Root drives ("/" or "C:\") end in their separator; matching by
+    // direct StartsWith is correct because "/mnt" already starts with
+    // "/" and "C:\Users" starts with "C:\".
+    if (candidate == "/" || candidate.EndsWith('/') || candidate.EndsWith('\\'))
+    {
+      return path.StartsWith(candidate, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Otherwise require a path separator after the prefix so "/foo" does
+    // not match "/foobar".
+    return path.StartsWith(candidate + "/", StringComparison.OrdinalIgnoreCase)
+        || path.StartsWith(candidate + "\\", StringComparison.OrdinalIgnoreCase);
   }
 
   /// <summary>

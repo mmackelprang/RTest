@@ -11,6 +11,7 @@
 @inject IJSRuntime JSRuntime
 @inject Radio.Web.Services.DeviceDisplayStateService DeviceDisplayState
 @inject Radio.Web.Services.RadioPanelToggleService RadioPanelToggle
+@inject Radio.Web.Services.GainPopoverService GainPopover
 @inject IConfiguration Configuration
 @inject IOptionsMonitor<DevicesOptions> DevicesOptionsMonitor
 @implements IDisposable
@@ -187,6 +188,23 @@
          card has fresh values the moment the tray slides open. *@
   <div class="dev-gesture-hit" data-dev-gesture aria-hidden="true"></div>
   <DevTray IsOpen="@_isDevTrayOpen" OnClose="@CloseDevTrayAsync" />
+
+  @* Task #15 PR E item #47 — gain-popover click-away backdrop.
+       Mounted at the layout root (outside .page-transition) so the
+       backdrop escapes the .page-transition stacking context trap that
+       previously prevented its z-index: 9999 from rendering above the
+       RadioControlPanel. NowPlayingPanel owns the popover itself; this
+       element only catches the click-away dismiss. Visibility is driven
+       by the scoped GainPopoverService — opening the popover in NowPlayingPanel
+       calls GainPopover.Open(); the backdrop's @onclick → HandleBackdropClick
+       fires the OnClose event so NowPlayingPanel can tear down its popover
+       state in sync. *@
+  @if (GainPopover.IsOpen)
+  {
+    <div class="np-gain-popover-backdrop"
+         style="position: fixed; inset: 0; z-index: 9999;"
+         @onclick="@(() => GainPopover.HandleBackdropClick())"></div>
+  }
 </div>
 
 @code {
@@ -244,6 +262,12 @@
       HubService.SourceChanged += OnSourceChanged;
       HubService.SleepStateChanged += OnSleepStateChanged;
       DeviceDisplayState.DisplaySettingsChanged += OnDeviceDisplaySettingsChanged;
+
+      // Task #15 PR E item #47 — re-render when the gain popover service
+      // toggles so the layout-mounted backdrop mounts/unmounts in lock-step
+      // with NowPlayingPanel's popover open/close. Subscription is paired
+      // with the unsubscribe in Dispose().
+      GainPopover.StateChanged += OnGainPopoverStateChanged;
 
       // Dock visibility is route-dependent (handoff §P1·1: dock only on
       // non-Home routes). Seed from the current URI and update on every nav.
@@ -952,6 +976,13 @@
     }
   }
 
+  /// <summary>
+  /// Re-renders MainLayout when the gain-popover service flips visibility,
+  /// causing the layout-level backdrop to mount/unmount. Subscribed in
+  /// OnInitializedAsync; unsubscribed in Dispose to keep the circuit clean.
+  /// </summary>
+  private void OnGainPopoverStateChanged() => InvokeAsync(StateHasChanged);
+
   public void Dispose()
   {
     // Unsubscribe from events to prevent memory leaks
@@ -961,6 +992,7 @@
     HubService.SourceChanged -= OnSourceChanged;
     HubService.SleepStateChanged -= OnSleepStateChanged;
     DeviceDisplayState.DisplaySettingsChanged -= OnDeviceDisplaySettingsChanged;
+    GainPopover.StateChanged -= OnGainPopoverStateChanged;
     NavigationManager.LocationChanged -= OnLocationChanged;
 
     _timer?.Stop();
