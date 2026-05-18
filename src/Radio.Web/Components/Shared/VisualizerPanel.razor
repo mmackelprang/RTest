@@ -76,6 +76,27 @@
 
   <!-- Full-bleed canvas -->
   <div class="visualizer-canvas-wrap">
+    @*
+      Canvas is rendered UNCONDITIONALLY here, not inside the @if branch
+      below. visualizer.js's init call in OnAfterRenderAsync targets the
+      canvas by element id (WebConstants.ElementIds.VisualizerCanvas), so
+      the element must already exist in the DOM on the first render pass —
+      we can't gate it on _isInitialized without creating a chicken-and-egg
+      between "init runs after canvas mounts" and "canvas mounts after
+      init succeeds".
+
+      The Skeleton in the !_isInitialized branch therefore overlays the
+      already-mounted-but-not-yet-drawn-to canvas for the brief window
+      between first render and the successful return of visualizer.init.
+      This produces a visible "skeleton sitting on top of blank canvas"
+      flash for ~1 frame on slow connections. That is INTENTIONAL — it
+      bridges the gap so users don't see a blank black rectangle. Don't
+      "fix" the overlap by hiding the canvas behind _isInitialized; that
+      would break visualizer.init's element lookup. The visualizer-canvas
+      and skeleton both fill the wrap via position: absolute / inset: 0,
+      and the skeleton's z-index sits above the canvas until the @if
+      flips and the skeleton unmounts.
+    *@
     <canvas id="@WebConstants.ElementIds.VisualizerCanvas" class="visualizer-canvas"></canvas>
 
     @if (_isInitialized && !_hasReceivedData)
