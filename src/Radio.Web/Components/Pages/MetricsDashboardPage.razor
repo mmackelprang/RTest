@@ -370,8 +370,10 @@
       var thresholdColor = GetThresholdColorRaw(_selectedMetric!, _snapshots?.GetValueOrDefault(_selectedMetric!, 0) ?? 0);
       var chartOptions = new
       {
-        color = thresholdColor == "var(--signal-red)" ? "#F87171" :
-                thresholdColor == "var(--signal-amber)" ? "#F0A830" : "#5CD4E8",
+        // PR A #7: chart canvas can't resolve CSS vars; route through ChartColors
+        // so the inline hex literals stay in sync with the design tokens.
+        color = thresholdColor == "var(--signal-red)" ? ChartColors.Red :
+                thresholdColor == "var(--signal-amber)" ? ChartColors.Amber : ChartColors.Cyan,
         fillOpacity = 0.15,
         unit = GetMetricUnitForChart(_selectedMetric!),
         thresholds = GetChartThresholds(_selectedMetric!)
@@ -478,10 +480,12 @@
     foreach (var (pattern, (warn, crit, _)) in _thresholds)
     {
       if (!keyLower.Contains(pattern)) continue;
+      // PR A #7: route chart hex literals through ChartColors so they stay
+      // in sync with --signal-amber / --signal-red design tokens.
       return new object[]
       {
-        new { value = warn, color = "#F0A830", label = "Warning" },
-        new { value = crit, color = "#F87171", label = "Critical" }
+        new { value = warn, color = ChartColors.Amber, label = "Warning" },
+        new { value = crit, color = ChartColors.Red, label = "Critical" }
       };
     }
     return null;

@@ -53,6 +53,7 @@
   --surface-inset:          #0A0A0C;
   --surface-overlay:        #1A1A1D;
   --surface-separator:      #1F1F22;
+  --border-subtle:          var(--surface-separator);  /* alias for "subtle hairline" borders (PR A follow-up #1) */
 
   /* ── Accent: Electric Cyan ── */
   --accent-primary:         #5CD4E8;
@@ -1057,6 +1058,125 @@ html, body {
 .skeleton-heading { height: 24px; margin: 12px 0; width: 60%; border-radius: 4px; }
 .skeleton-circle { width: 48px; height: 48px; border-radius: 50%; }
 .skeleton-card { height: 120px; border-radius: 8px; }
+
+/* §17.b — Skeleton shape classes (per PR 4; moved here from §31 in PR A
+   follow-up #8 so all skeleton CSS lives next to the shimmer primitives
+   it composes with). Each shape arranges the .skeleton-* shimmer
+   primitives above into a layout that mirrors the real component about
+   to take its place — replaces the generic centered
+   <RadzenProgressBarCircular /> spinners in panel-body initial-load
+   branches. */
+
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.skeleton .visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skeleton-art {
+  flex: 1 1 auto;
+  min-height: 180px;
+  border-radius: 8px;
+}
+
+.skeleton-progress {
+  height: 4px;
+  border-radius: 2px;
+  width: 100%;
+}
+
+.skeleton-radio-bands {
+  display: flex;
+  gap: 8px;
+}
+
+.skeleton-band {
+  flex: 1;
+  height: 36px;
+  border-radius: 18px;
+}
+
+.skeleton-freq-well {
+  height: 100px;
+  border-radius: 8px;
+}
+
+.skeleton-meter {
+  height: 24px;
+  border-radius: 4px;
+}
+
+.skeleton-list-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--surface-separator);
+}
+
+.skeleton-list-row:last-child {
+  border-bottom: none;
+}
+
+.skeleton-thumb {
+  width: 48px;
+  height: 48px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.skeleton-list-row-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.skeleton-action-pill {
+  width: 96px;
+  height: 28px;
+  border-radius: 14px;
+  flex-shrink: 0;
+}
+
+.skeleton-spark {
+  height: 28px;
+  border-radius: 2px;
+}
+
+.skeleton-viz-canvas {
+  flex: 1 1 auto;
+  border-radius: 4px;
+  min-height: 120px;
+}
+
+.skeleton-viz-axis {
+  display: flex;
+  gap: 12px;
+  padding: 0 8px;
+}
+
+.skeleton-axis-tick {
+  flex: 1;
+  height: 10px;
+  border-radius: 2px;
+}
 
 .spinner        { animation: spin 1s linear infinite; }
 .pulse          { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
@@ -2192,125 +2312,6 @@ body {
   gap: 12px;
 }
 
-/* ─── §31  Skeleton Shapes (PR 4) ─────────────────────────────────────────── */
-
-/* Replaces the generic centered <RadzenProgressBarCircular /> spinners
-   in panel-body initial-load branches. Each shape arranges the existing
-   .skeleton-* shimmer primitives from §17 (animation: shimmer) into a
-   layout that mirrors the real component about to take its place. */
-
-.skeleton {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 16px;
-  width: 100%;
-  height: 100%;
-  box-sizing: border-box;
-}
-
-.skeleton .visually-hidden {
-  position: absolute !important;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-.skeleton-art {
-  flex: 1 1 auto;
-  min-height: 180px;
-  border-radius: 8px;
-}
-
-.skeleton-progress {
-  height: 4px;
-  border-radius: 2px;
-  width: 100%;
-}
-
-.skeleton-radio-bands {
-  display: flex;
-  gap: 8px;
-}
-
-.skeleton-band {
-  flex: 1;
-  height: 36px;
-  border-radius: 18px;
-}
-
-.skeleton-freq-well {
-  height: 100px;
-  border-radius: 8px;
-}
-
-.skeleton-meter {
-  height: 24px;
-  border-radius: 4px;
-}
-
-.skeleton-list-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 4px;
-  border-bottom: 1px solid var(--surface-separator);
-}
-
-.skeleton-list-row:last-child {
-  border-bottom: none;
-}
-
-.skeleton-thumb {
-  width: 48px;
-  height: 48px;
-  border-radius: 4px;
-  flex-shrink: 0;
-}
-
-.skeleton-list-row-text {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.skeleton-action-pill {
-  width: 96px;
-  height: 28px;
-  border-radius: 14px;
-  flex-shrink: 0;
-}
-
-.skeleton-spark {
-  height: 28px;
-  border-radius: 2px;
-}
-
-.skeleton-viz-canvas {
-  flex: 1 1 auto;
-  border-radius: 4px;
-  min-height: 120px;
-}
-
-.skeleton-viz-axis {
-  display: flex;
-  gap: 12px;
-  padding: 0 8px;
-}
-
-.skeleton-axis-tick {
-  flex: 1;
-  height: 10px;
-  border-radius: 2px;
-}
-
-
 /* ─── §N  Now Playing Dock (PR 5) ─────────────────────────────────────────── */
 
 /*
@@ -2817,8 +2818,9 @@ body {
   gap: 24px;
   cursor: pointer;
   z-index: 9999;
-  /* Strip the EmptyLayout wrapper's 20px padding and #222 background — the
-     sleep screen owns the whole viewport visually. */
+  /* The sleep screen owns the whole viewport visually. After PR A #22 the
+     EmptyLayout wrapper itself is padding: 0 + background: var(--surface-base)
+     so this `position: fixed` mask only needs to assert the topmost layer. */
   outline: none;
 }
 
@@ -3235,7 +3237,7 @@ body {
 .confidence-pips {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;  /* mock fidelity (mocks.jsx:728); was 4px */
 }
 
 .confidence-pip {
@@ -3260,8 +3262,8 @@ body {
 
 .confidence-label {
   font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.08em;
+  font-size: 9.5px;        /* mock fidelity; was 10px */
+  letter-spacing: 0.06em;  /* mock fidelity; was 0.08em */
   /* No text-transform — the component emits title-case strings
      ('Strong', 'Likely', 'Possible', 'No match') matching the spec + mock.
      Earlier `text-transform: lowercase` was silently mangling them on screen. */
@@ -3415,7 +3417,10 @@ body {
    - RT (RadioText) line below the frequency well — one-line ellipsis.
 */
 
-/* Tuner header — promoted from absolute label to a real heading row */
+/* Tuner header — promoted from absolute label to a real heading row.
+   Bottom margin removed in PR A follow-up #37; the 24px gap below the
+   header is now owned by `margin-top: 24px` on `.rcp-band-group` (the
+   first content element below) to match spec §P1·1 step 1 wording. */
 .rcp-tuner-header {
   width: 100%;
   display: flex;
@@ -3423,7 +3428,7 @@ body {
   justify-content: space-between;
   gap: 12px;
   padding: 0 4px 8px;
-  margin: 0 0 16px;
+  margin: 0;
   border-bottom: 1px solid var(--surface-separator);
 }
 
@@ -3899,7 +3904,10 @@ body {
   letter-spacing: 0.05em;
 }
 
-.np-status-mhz-chip {
+/* Reusable inline unit indicator chip (e.g. "MHz", "kHz", "dB"). Renamed
+   from `.np-status-mhz-chip` in PR A follow-up #46 so it can be reused
+   across radio surfaces beyond the NowPlaying status strip. */
+.unit-chip {
   font-family: var(--font-mono);
   font-size: 9px;
   letter-spacing: 0.10em;
@@ -4098,7 +4106,7 @@ body {
 
 .gain-popover-body {
   display: grid;
-  grid-template-columns: 18px 1fr 32px;
+  grid-template-columns: 16px 1fr 32px;  /* PR A #45: peak meter column 18px → 16px per spec §P2·1 */
   grid-template-rows: 124px;
   gap: 12px;
   margin-bottom: 16px;

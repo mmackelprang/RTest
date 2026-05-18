@@ -1,5 +1,13 @@
 @inherits LayoutComponentBase
 
-<div style="padding: 20px; background: #222; min-height: 100vh;">
+@*
+    PR A follow-up #22: stripped leftover `padding: 20px` and `background: #222`
+    from this wrapper. The Sleep screen (the primary consumer) used to mask the
+    wrapper via `position: fixed; inset: 0; z-index: 9999;` but the wrapper was
+    still painting a 20px dark-grey frame underneath wastefully. Now the wrapper
+    is zero-padding and uses --surface-base (the deepest design-system surface)
+    so any consumer renders against the same background the sleep screen uses.
+*@
+<div style="padding: 0; background: var(--surface-base, #0D0D0F); min-height: 100vh;">
     @Body
 </div>

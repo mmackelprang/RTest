@@ -37,7 +37,10 @@
     <img class="sleep-screen-art" src="@_albumArtUrl" alt="" />
   }
 
-  <div class="sleep-screen-clock font-led">@_clockText</div>
+  @* PR A #16: dropped redundant `.font-led` class; that rule is scoped
+     to `.cluster-value .font-led` and never matched on `/sleep`. The
+     LED font is set directly via `.sleep-screen-clock`. *@
+  <div class="sleep-screen-clock">@_clockText</div>
 
   @if (!string.IsNullOrEmpty(_title))
   {

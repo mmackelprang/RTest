@@ -460,7 +460,11 @@
        a real boundary to pivot against. Combined with the min-width
        reduction in .rcp-band-btn (design-system.css §W: 64 → 56) and
        the smaller sub-range font, six pills now fit cleanly or wrap
-       to 3+3 on narrower containers. */
+       to 3+3 on narrower containers.
+
+       PR A follow-up #37: 24px top margin moved here from the tuner
+       header's bottom margin (16px) to match spec §P1·1 step 1's
+       wording ("24 px top margin on the content below the header"). */
     display: flex;
     flex-wrap: wrap;
     width: 100%;
@@ -468,6 +472,7 @@
     gap: 2px;
     row-gap: 4px;
     padding: 3px;
+    margin-top: 24px;
     background: #0a0a0c;
     border-radius: 5px;
     border: 1px solid #1a1a1d;
