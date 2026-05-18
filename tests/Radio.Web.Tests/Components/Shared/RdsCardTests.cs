@@ -1,4 +1,7 @@
+using System.IO;
+using System.Text.RegularExpressions;
 using Bunit;
+using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Radzen;
 using Radio.Web.Components.Shared;
@@ -83,5 +86,58 @@ public class RdsCardTests : TestContext
       .Add(x => x.ProgramType, null));
 
     Assert.Empty(cut.FindAll(".rds-card-pty"));
+  }
+
+  // ─── Task #15 PR B (handoff item #39): cyan accent on station name ────────
+  //
+  // The station name on RdsCard is the design's call-out colour: --accent-primary
+  // (cyan). bUnit doesn't fully resolve CSS variables on getComputedStyle, so
+  // we pin both the class (component contract) AND the design-system rule
+  // (the only place the colour is bound). Together they prove the wire path:
+  // the element receives the class, and the class binds to the cyan token.
+
+  [Fact]
+  public void RdsCard_StationName_ComputedColorIsAccentPrimary()
+  {
+    // Component contract: the station-name span carries the .rds-card-station
+    // class that the design-system stylesheet targets with the cyan colour rule.
+    var cut = RenderComponent<RdsCard>(p => p
+      .Add(x => x.StationName, "KEXP"));
+
+    var station = cut.Find(".rds-card-station");
+    station.ClassList.Should().Contain("rds-card-station",
+      "the station name span must carry the class that the cyan rule targets");
+
+    // Stylesheet contract: the .rds-card-station rule must bind colour to
+    // --accent-primary (the cyan token). If a future refactor recolours the
+    // station name to anything else, this assertion trips.
+    var cssPath = LocateDesignSystemCss();
+    var css = File.ReadAllText(cssPath);
+    var rulePattern = new Regex(
+      @"\.rds-card-station\s*\{[^}]*?color:\s*var\(--accent-primary\)",
+      RegexOptions.Singleline);
+    rulePattern.IsMatch(css).Should().BeTrue(
+      "the .rds-card-station rule in design-system.css must bind colour to --accent-primary");
+  }
+
+  /// <summary>
+  /// Locate the design-system.css source file by walking up from the test
+  /// binary directory until we find the Radio.Web/wwwroot/css folder. The
+  /// stylesheet isn't copied into the test output, so a relative path
+  /// lookup is the load-bearing piece.
+  /// </summary>
+  private static string LocateDesignSystemCss()
+  {
+    var dir = AppContext.BaseDirectory;
+    for (var i = 0; i < 10 && dir != null; i++)
+    {
+      var candidate = Path.Combine(dir, "src", "Radio.Web", "wwwroot", "css", "design-system.css");
+      if (File.Exists(candidate))
+      {
+        return candidate;
+      }
+      dir = Path.GetDirectoryName(dir);
+    }
+    throw new FileNotFoundException("design-system.css not found by walking up from test base dir");
   }
 }

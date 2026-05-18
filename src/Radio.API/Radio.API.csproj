@@ -21,4 +21,10 @@
     <ProjectReference Include="..\Radio.Infrastructure\Radio.Infrastructure.csproj" />
     <ProjectReference Include="..\Radio.Metrics\Radio.Metrics.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Expose `internal` helpers (UpdateCurrentMatchAnchor and friends) to the
+         test project so unit tests can exercise the private/internal anchor
+         logic without going through full SignalR/HostedService plumbing. -->
+    <InternalsVisibleTo Include="Radio.API.Tests" />
+  </ItemGroup>
 </Project>

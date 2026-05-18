@@ -1,5 +1,6 @@
 using System.Reflection;
 using Bunit;
+using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -844,5 +845,121 @@ public class NowPlayingPanelTests : TestContext
   public void GetSourceShortToken_StripsSdrRadioWrapper(string input, string expected)
   {
     Assert.Equal(expected, NowPlayingPanel.GetSourceShortToken(input));
+  }
+
+  // ─── Task #15 PR B (handoff item #6): DisplayNames.Track projection on hub push ───
+  //
+  // The panel must run incoming NowPlayingDto payloads through the
+  // DisplayNames.Track projection so a generic "Track 8" title (which the
+  // file-player surfaces while metadata is still being read) gets upgraded
+  // to the cleaned-up filename. Wire path: AudioStateHubService raises
+  // NowPlayingChanged → panel's OnNowPlayingChanged → ApplyNowPlayingDto →
+  // ApplyDisplayProjection → DisplayNames.Track(dto) → _displayTitle.
+
+  [Fact]
+  public async Task NowPlayingPanel_DisplayNamesTrackProjection_AppliedFromHubPush()
+  {
+    var cut = RenderComponent<NowPlayingPanel>();
+
+    var hub = Services.GetRequiredService<AudioStateHubService>();
+    var field = typeof(AudioStateHubService).GetField(
+      nameof(AudioStateHubService.NowPlayingChanged),
+      BindingFlags.NonPublic | BindingFlags.Instance);
+    Assert.NotNull(field);
+    var handler = (Func<NowPlayingDto?, Task>?)field!.GetValue(hub);
+    Assert.NotNull(handler);
+
+    // Generic "Track N" title — the kind the metadata reader emits before it
+    // resolves real tags. With a populated FilePath the panel's projection
+    // pipeline must surface "Opening Night" instead.
+    var dto = new NowPlayingDto
+    {
+      Title = "Track 8",
+      Artist = "Cary High Chorus",
+      FilePath = @"C:\music\Cary High Chorus\2006 Fall Concert\08 opening night.mp3",
+      IsPlaying = true,
+      SourceType = "FilePlayer",
+      SourceName = "File Player",
+    };
+
+    await cut.InvokeAsync(() => handler!.Invoke(dto));
+
+    // The DisplayNames.Track projection rewrites the generic "Track 8" to the
+    // parsed file-name. The rendered title block carries the cleaned name —
+    // never the original "Track 8" payload.
+    cut.Markup.Should().Contain("Opening Night");
+    cut.Markup.Should().NotContain("Track 8");
+  }
+
+  // ─── Task #15 PR B (handoff item #34): anchor flips on NowPlayingMatchId change ───
+  //
+  // The recognition stream's NOW row anchors on RadioStateDto.NowPlayingMatchId.
+  // When the server identifies a new match (different MatchId in the snapshot),
+  // the panel must transfer the .np-recognition-row-current class to the new
+  // row — the previous "current" row reverts to the EARLIER section. This pins
+  // the wire-path behaviour: re-firing RadioStateChanged with a new MatchId
+  // shifts the active row, not just appends another one.
+
+  [Fact]
+  public async Task Recognition_AnchorFlips_WhenNowPlayingMatchIdChanges()
+  {
+    // Seed the panel with two matched events. Initial anchor = "m-first";
+    // after the second hub push the anchor moves to "m-second".
+    var matches = new List<FingerprintEventDto>
+    {
+      MakeEvent("m-first", "First Song", "First Artist", ConfidenceBucket.Strong, DateTime.UtcNow.AddMinutes(-2)),
+      MakeEvent("m-second", "Second Song", "Second Artist", ConfidenceBucket.Strong, DateTime.UtcNow.AddSeconds(-15)),
+    };
+    var status = new FingerprintStatusDto
+    {
+      IsEnabled = true,
+      Phase = "Matched",
+      RecentEvents = matches
+    };
+
+    var cut = RenderComponent<NowPlayingPanel>();
+
+    // Seed events + open the recognition detail; both pushes below go through
+    // the real hub event so the wire path is exercised end-to-end.
+    var instance = cut.Instance;
+    var type = typeof(NowPlayingPanel);
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+    type.GetField("_fpStatus", flags)!.SetValue(instance, status);
+    type.GetField("_fpEventsReversed", flags)!
+      .SetValue(instance, Enumerable.Reverse(status.RecentEvents).ToList());
+    type.GetField("_showFingerprintDetail", flags)!.SetValue(instance, true);
+    cut.Render();
+
+    var hub = Services.GetRequiredService<AudioStateHubService>();
+    var eventField = typeof(AudioStateHubService).GetField(
+      nameof(AudioStateHubService.RadioStateChanged),
+      BindingFlags.NonPublic | BindingFlags.Instance);
+    var handler = (Func<RadioStateDto, Task>?)eventField!.GetValue(hub);
+    Assert.NotNull(handler);
+
+    // First push: anchor on m-first.
+    var firstState = new RadioStateDto(
+      Frequency: 92.5e6, Band: "FM", Step: 100e3,
+      SignalStrength: 70, IsScanning: false, ScanDirection: null,
+      ScanStopThreshold: -18.0, Gain: 28, AutoGain: true,
+      Equalizer: "Flat", DeviceVolume: 70,
+      NowPlayingMatchId: "m-first");
+    await cut.InvokeAsync(() => handler!.Invoke(firstState));
+
+    var currentBefore = cut.FindAll(".np-recognition-row-current");
+    Assert.Single(currentBefore);
+    Assert.Equal("m-first", currentBefore[0].GetAttribute("data-match-id"));
+
+    // Second push: anchor on m-second. The current-row class must migrate —
+    // m-second now carries it; m-first drops back to a plain EARLIER row.
+    var secondState = firstState with { NowPlayingMatchId = "m-second" };
+    await cut.InvokeAsync(() => handler!.Invoke(secondState));
+
+    var currentAfter = cut.FindAll(".np-recognition-row-current");
+    Assert.Single(currentAfter);
+    Assert.Equal("m-second", currentAfter[0].GetAttribute("data-match-id"));
+    // m-first must NOT carry the current-row class anymore.
+    var firstRows = cut.FindAll("[data-match-id=\"m-first\"].np-recognition-row-current");
+    Assert.Empty(firstRows);
   }
 }

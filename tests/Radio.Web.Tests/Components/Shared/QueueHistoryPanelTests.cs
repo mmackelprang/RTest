@@ -1,3 +1,4 @@
+using System.Reflection;
 using Bunit;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
@@ -297,4 +298,81 @@ public class QueueHistoryPanelTests : TestContext
     IsCurrent: false,
     State: "Upcoming",
     FullPlaylistIndex: 0);
+
+  // ── Task #15 PR B (handoff item #5): currently-playing row visual ──
+  //
+  // Reach into _queueItems directly (the production path is RefreshQueueAsync
+  // hitting the API, but the test fixture deliberately has no API server).
+  // Seeding the field + re-rendering exercises the same template branch the
+  // live UI lights up — the `queue-row-current` class + ▶ glyph + amber
+  // styling driven by `State == "Current"`.
+
+  /// <summary>
+  /// Reflectively poke the panel into a "queue has one currently-playing
+  /// track" state AND force the Queue tab active. Mirrors the
+  /// SetRecognitionState pattern in NowPlayingPanelTests — same idea,
+  /// different field set. The active-tab flip is the load-bearing piece:
+  /// without an API server, <c>SetDefaultTabForSourceAsync</c> drops the
+  /// component on the History tab (the catch branch), so the queue rows
+  /// would never render.
+  /// </summary>
+  private static void SeedQueueItems(
+    IRenderedComponent<QueueHistoryPanel> cut,
+    IEnumerable<QueueItemDto> items)
+  {
+    var instance = cut.Instance;
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+    typeof(QueueHistoryPanel).GetField("_queueItems", flags)!
+      .SetValue(instance, items.ToList());
+    // Force the Queue tab + mark the user-override flag so OnParametersSet /
+    // any subsequent SetDefaultTabForSourceAsync don't snap us back.
+    typeof(QueueHistoryPanel).GetField("_activeTab", flags)!
+      .SetValue(instance, 0 /* TabQueue */);
+    typeof(QueueHistoryPanel).GetField("_userOverrodeTab", flags)!
+      .SetValue(instance, true);
+    cut.Render();
+  }
+
+  [Fact]
+  public void QueueHistoryPanel_CurrentlyPlayingRow_HasAmberBorderAndPlayGlyph()
+  {
+    // Build a queue with one Current track + one upcoming. The Virtualize block
+    // renders both rows; only the Current row carries the `queue-row-current`
+    // class (which paints the amber border per design-system.css) AND swaps the
+    // slot index for the ▶ glyph. The other row renders its FullPlaylistIndex.
+    var items = new[]
+    {
+      new QueueItemDto(
+        Index: 0,
+        Title: "Now Playing Track",
+        Artist: "Some Artist",
+        Album: "Some Album",
+        Duration: "3:42",
+        IsCurrent: true,
+        State: "Current",
+        FullPlaylistIndex: 0),
+      new QueueItemDto(
+        Index: 1,
+        Title: "Upcoming Track",
+        Artist: "Other Artist",
+        Album: "Other Album",
+        Duration: "4:10",
+        IsCurrent: false,
+        State: "Upcoming",
+        FullPlaylistIndex: 1),
+    };
+
+    var cut = RenderComponent<QueueHistoryPanel>();
+    SeedQueueItems(cut, items);
+
+    // Exactly one currently-playing row, carrying both the class and the glyph.
+    var currentRows = cut.FindAll(".queue-row-current");
+    currentRows.Count.Should().Be(1, "exactly one queue row must carry the current-row class");
+
+    // The ▶ glyph (U+25B6) lives inside the .queue-row-glyph span on the
+    // current row only. The other row renders its slot number instead.
+    var glyphs = cut.FindAll(".queue-row-glyph");
+    glyphs.Count.Should().Be(1, "the play-glyph is unique to the currently-playing row");
+    glyphs[0].TextContent.Trim().Should().Be("▶");
+  }
 }
