@@ -825,4 +825,24 @@ public class NowPlayingPanelTests : TestContext
     var rds = cut.Find(".np-status-rds-station");
     Assert.Equal("KFOG", rds.TextContent);
   }
+
+  // ─── PR 4 fixer: GainPopoverKicker strips "SDR Radio (...)" wrapper ────────
+  //
+  // The kicker passed to GainControlPopover's header used to render as
+  // "SDR · SDR Radio (RTL-SDR)" because _source carries the friendly name
+  // "SDR Radio (RTL-SDR)" and the format string already prepends "SDR · ".
+  // GetSourceShortToken strips the wrapper so the kicker reads
+  // "SDR · RTL-SDR" — matching the spec.
+
+  [Theory]
+  [InlineData("SDR Radio (RTL-SDR)", "RTL-SDR")]
+  [InlineData("SDR Radio (RF320)", "RF320")]
+  [InlineData("SDR Radio (HackRF One)", "HackRF One")]
+  [InlineData("Generic Source", "Generic Source")] // fallback — no wrapper
+  [InlineData("", "")]
+  [InlineData("   ", "   ")]
+  public void GetSourceShortToken_StripsSdrRadioWrapper(string input, string expected)
+  {
+    Assert.Equal(expected, NowPlayingPanel.GetSourceShortToken(input));
+  }
 }

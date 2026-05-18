@@ -234,7 +234,7 @@
        peak meter / scale labels live in GainControlPopover.razor. *@
     @if (_showGainPopover && !string.IsNullOrEmpty(_nowPlayingSourceType))
     {
-      <div @onclick="CloseGainPopover" style="position: fixed; inset: 0; z-index: 9;"></div>
+      <div @onclick="CloseGainPopover" style="position: fixed; inset: 0; z-index: 9999;"></div>
       <div class="np-gain-popover-anchor">
         <GainControlPopover IsOpen="true"
                             SourceType="@_nowPlayingSourceType"
@@ -407,11 +407,28 @@
 
   /// <summary>
   /// Mono kicker inside the gain popover header. Empty for sources that don't
-  /// have a meaningful "RF gain" sub-context; otherwise "SDR · {source-name}".
+  /// have a meaningful "RF gain" sub-context; otherwise "SDR · {short-token}".
+  /// The short token strips the "SDR Radio (...)" wrapper from the friendly
+  /// source name so e.g. "SDR Radio (RTL-SDR)" renders as "SDR · RTL-SDR"
+  /// instead of the doubled "SDR · SDR Radio (RTL-SDR)".
   /// </summary>
   private string GainPopoverKicker => _isTunerSource && !string.IsNullOrEmpty(_source)
-    ? $"SDR · {_source}"
+    ? $"SDR · {GetSourceShortToken(_source)}"
     : string.Empty;
+
+  /// <summary>
+  /// Strips the conventional "SDR Radio (…)" wrapper from a friendly source
+  /// name. <c>"SDR Radio (RTL-SDR)"</c> → <c>"RTL-SDR"</c>. Falls back to the
+  /// input as-is for any source that doesn't follow the wrapper convention.
+  /// </summary>
+  internal static string GetSourceShortToken(string sourceName)
+  {
+    if (string.IsNullOrWhiteSpace(sourceName)) return sourceName;
+    var match = System.Text.RegularExpressions.Regex.Match(
+      sourceName, @"^SDR Radio\s*\(([^)]+)\)\s*$");
+    if (match.Success) return match.Groups[1].Value.Trim();
+    return sourceName;
+  }
 
   /// <summary>Header title in the gain popover. Radio sources surface "RF gain"; everything else gets "Source gain".</summary>
   private string GainPopoverTitle => _isTunerSource ? "RF gain" : "Source gain";

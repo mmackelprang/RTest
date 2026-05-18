@@ -3892,6 +3892,8 @@ body {
 /* Frequency cell — DSEG LED value + small mono unit chip. */
 .np-status-freq {
   font-family: var(--font-led);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   font-size: 12px;
   color: var(--signal-amber);
   letter-spacing: 0.05em;
@@ -4029,7 +4031,7 @@ body {
   position: absolute;
   top: 8px;
   right: 16px;
-  z-index: 10;
+  z-index: 10000;
 }
 
 .gain-popover {
@@ -4097,8 +4099,8 @@ body {
 .gain-popover-body {
   display: grid;
   grid-template-columns: 18px 1fr 32px;
+  grid-template-rows: 124px;
   gap: 12px;
-  height: 124px;
   margin-bottom: 16px;
 }
 
@@ -4110,6 +4112,9 @@ body {
   background: var(--surface-inset);
   border-radius: 3px;
   padding: 1px;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .gain-popover-peak-segment {
@@ -4148,6 +4153,9 @@ body {
   align-items: center;
   justify-content: center;
   position: relative;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .gain-popover-slider.is-disabled {
@@ -4164,6 +4172,7 @@ body {
   direction: rtl;
   width: 24px;
   height: 100%;
+  max-height: 100%;
   background: transparent;
   accent-color: var(--signal-amber);
   cursor: pointer;
@@ -4188,6 +4197,8 @@ body {
   color: var(--text-low);
   letter-spacing: 0.05em;
   text-align: right;
+  min-height: 0;
+  height: 100%;
 }
 
 .gain-popover-footer {
@@ -4200,6 +4211,8 @@ body {
 
 .gain-popover-value {
   font-family: var(--font-led);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   font-size: 22px;
   color: var(--signal-amber);
   letter-spacing: 0.05em;
