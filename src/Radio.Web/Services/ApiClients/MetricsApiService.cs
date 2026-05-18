@@ -109,6 +109,25 @@ public class MetricsApiService
   }
 
   /// <summary>
+  /// GET /api/metrics/descriptors - Gets all registered metric descriptors
+  /// (key, unit, category, threshold bands). PR D #11. Empty list when no
+  /// producer has registered any descriptors yet — caller falls back to
+  /// the residual MapKeyToUnit heuristic.
+  /// </summary>
+  public async Task<List<MetricDescriptorDto>?> GetMetricDescriptorsAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      return await _httpClient.GetFromJsonAsync<List<MetricDescriptorDto>>("/api/metrics/descriptors", cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to get metric descriptors");
+      return null;
+    }
+  }
+
+  /// <summary>
   /// POST /api/metrics/event - Records a UI event metric from the frontend
   /// </summary>
   public async Task<MetricEventResponse?> RecordUIEventAsync(

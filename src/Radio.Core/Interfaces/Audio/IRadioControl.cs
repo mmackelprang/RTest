@@ -223,6 +223,25 @@ public interface IRadioControl
   string? RdsStationName { get; }
 
   /// <summary>
+  /// Gets the last <em>stable</em> RDS Program Service station name — the value
+  /// that has been observed unchanged for several consecutive PS updates.
+  /// Mid-rolling stations (e.g. "Rock 92" cycling through "anoidRoc", "k92 PaR",
+  /// etc. as the PS rotates 8 chars at a time) frequently have a transient PS
+  /// at the moment a user long-presses to save a preset; the stable variant
+  /// is the consensus value that's safe to seed save dialogs and history
+  /// records with. Null while no station has yet produced N consecutive
+  /// identical PS frames. PR D #40 of the Arc follow-up backlog.
+  /// </summary>
+  /// <remarks>
+  /// Default implementation simply mirrors <see cref="RdsStationName"/>. The
+  /// SDR-based <c>SDRRadioAudioSource</c> overrides this with a ring-buffer
+  /// tracker that emits the consensus value after 3 consecutive identical
+  /// updates. Other implementations (e.g. the RF320 stub) may leave it
+  /// equal to the live name.
+  /// </remarks>
+  string? RdsStationNameStable => RdsStationName;
+
+  /// <summary>
   /// Gets the RDS Program Type name (e.g., "Rock", "News", "Classical"), or null if not available.
   /// Derived from the PTY code broadcast via RDS.
   /// </summary>

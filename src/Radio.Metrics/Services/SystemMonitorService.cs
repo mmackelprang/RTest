@@ -15,16 +15,73 @@ public sealed class SystemMonitorService : BackgroundService
   private readonly ILogger<SystemMonitorService> _logger;
   private readonly MetricsOptions _options;
   private readonly IMetricsCollector _metricsCollector;
+  private readonly IMetricDescriptorRegistry? _descriptorRegistry;
   private readonly TimeSpan _collectInterval = TimeSpan.FromMinutes(5);
 
   public SystemMonitorService(
     ILogger<SystemMonitorService> logger,
     IOptions<MetricsOptions> options,
-    IMetricsCollector metricsCollector)
+    IMetricsCollector metricsCollector,
+    IMetricDescriptorRegistry? descriptorRegistry = null)
   {
     _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
     _metricsCollector = metricsCollector ?? throw new ArgumentNullException(nameof(metricsCollector));
+    _descriptorRegistry = descriptorRegistry;
+
+    // Register authoritative descriptors for the system metrics this service
+    // produces. PR D #11 — replaces the client-side MapKeyToUnit heuristic
+    // for these keys with server-side ground truth. Registration happens in
+    // the constructor (not ExecuteAsync) so the descriptors are available
+    // immediately at service startup, before any sample is collected.
+    if (_descriptorRegistry != null)
+    {
+      _descriptorRegistry.Register(new MetricDescriptor
+      {
+        Key = "system.memory_usage_mb",
+        Unit = MetricUnit.Megabytes,
+        Category = "System",
+        DisplayName = "Memory Usage",
+      });
+      _descriptorRegistry.Register(new MetricDescriptor
+      {
+        Key = "system.disk_usage_percent",
+        Unit = MetricUnit.Percent,
+        Category = "System",
+        DisplayName = "Disk Usage",
+        Warn = 80,
+        Critical = 95,
+      });
+      _descriptorRegistry.Register(new MetricDescriptor
+      {
+        Key = "system.cpu_usage_percent",
+        Unit = MetricUnit.Percent,
+        Category = "System",
+        DisplayName = "CPU Usage",
+        Warn = 80,
+        Critical = 95,
+      });
+      // CPU temperature has no matching MetricUnit (no Celsius/Fahrenheit
+      // entry today). Register it as Bare so dashboards don't accidentally
+      // tag it with the wrong suffix; the dashboard's residual heuristic
+      // pulls "°C" from the key suffix when present.
+      _descriptorRegistry.Register(new MetricDescriptor
+      {
+        Key = "system.cpu_temp_celsius",
+        Unit = MetricUnit.Bare,
+        Category = "System",
+        DisplayName = "CPU Temperature",
+        Warn = 70,
+        Critical = 85,
+      });
+      _descriptorRegistry.Register(new MetricDescriptor
+      {
+        Key = "db.file_size_mb",
+        Unit = MetricUnit.Megabytes,
+        Category = "Database",
+        DisplayName = "DB File Size",
+      });
+    }
   }
 
   protected override async Task ExecuteAsync(CancellationToken stoppingToken)

@@ -498,8 +498,9 @@
   /// <summary>
   /// Picks the next <paramref name="count"/> queue rows whose state is "Upcoming",
   /// projected into a small UI record so the markup doesn't reach into <see cref="QueueItemDto"/>.
-  /// CoverArtUrl is best-effort — most QueueItemDto rows don't carry album art today,
-  /// so the tile falls back to a music_note icon if the URL is missing.
+  /// Album art is sourced from <see cref="QueueItemDto.AlbumArtUrl"/> (PR D #15) —
+  /// populated server-side from file ID3 tags / album-art proxy. Tile falls back
+  /// to a music_note icon when the URL is null or the default placeholder.
   /// </summary>
   private List<UpNextEntry> GetUpNext(int count)
   {
@@ -510,8 +511,7 @@
       result.Add(new UpNextEntry(
         item.Title ?? "Unknown",
         item.Artist ?? "—",
-        // QueueItemDto doesn't currently carry CoverArtUrl; placeholder for future wiring.
-        null));
+        item.AlbumArtUrl));
       if (result.Count >= count) break;
     }
     return result;

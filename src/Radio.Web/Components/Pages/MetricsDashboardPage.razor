@@ -84,7 +84,7 @@
               @foreach (var metric in catMetrics)
               {
                 var key = metric.Key;
-                var unit = MapKeyToUnit(key);
+                var unit = GetUnitForKey(key);
                 var (warn, critical, invert) = GetThresholds(key);
                 _sparklineData.TryGetValue(key, out var series);
                 <div @onclick="@(async () => await SelectMetricAsync(key))" style="cursor: pointer;">
@@ -129,6 +129,10 @@
   private List<string> _categories = new();
   private Dictionary<string, List<double>> _sparklineData = new();
   private Dictionary<string, List<MetricHistoryDto>> _sparklineHistory = new();
+  // PR D #11 — descriptor map populated from /api/metrics/descriptors.
+  // GetUnitForKey consults this first; MapKeyToUnit is the residual fallback
+  // for keys that no producer has registered yet.
+  private Dictionary<string, MetricDescriptorDto> _descriptors = new(StringComparer.Ordinal);
 
   // Threshold definitions: (warning, critical) by metric name fragment.
   // invertAbove == true → high is bad (cpu, memory).
@@ -214,12 +218,35 @@
     try
     {
       await LoadAvailableMetricsAsync();
+      await LoadDescriptorsAsync();
       await LoadSnapshotsAsync();
       UpdateCategories();
       await LoadSparklineDataAsync();
       UpdateCardValuesFromSparklines();
     }
     finally { _loading = false; }
+  }
+
+  /// <summary>
+  /// Loads server-registered metric descriptors (PR D #11). Failures are
+  /// non-fatal — the dashboard falls back to the residual MapKeyToUnit
+  /// heuristic for any key without a descriptor.
+  /// </summary>
+  private async Task LoadDescriptorsAsync()
+  {
+    try
+    {
+      var descriptors = await MetricsApi.GetMetricDescriptorsAsync();
+      _descriptors.Clear();
+      if (descriptors != null)
+      {
+        foreach (var d in descriptors)
+        {
+          _descriptors[d.Key] = d;
+        }
+      }
+    }
+    catch (Exception ex) { Logger.LogWarning(ex, "Failed to load metric descriptors"); }
   }
 
   private async Task LoadAvailableMetricsAsync()
@@ -403,10 +430,31 @@
   }
 
   /// <summary>
+  /// Returns the Unit for the given metric key. Consults the server-registered
+  /// descriptor map first (PR D #11) and falls back to the key-pattern
+  /// heuristic <see cref="MapKeyToUnit"/> for keys without a registered
+  /// descriptor.
+  /// </summary>
+  private Units GetUnitForKey(string metricKey)
+  {
+    if (_descriptors.TryGetValue(metricKey, out var descriptor)
+        && Enum.TryParse<Units>(descriptor.Unit, ignoreCase: true, out var parsed))
+    {
+      return parsed;
+    }
+    return MapKeyToUnit(metricKey);
+  }
+
+  /// <summary>
   /// Maps a metric key to a display Unit by pattern matching the suffix
   /// and well-known fragments. This is what fixes the "Memory Usage Mb
   /// = 850.4%" bug — the key ends in <c>_mb</c> and ought to render
   /// with the MB suffix.
+  /// <para>
+  /// PR D #11 — retained as a residual fallback for any key that does not
+  /// have a server-registered descriptor. <see cref="GetUnitForKey"/> is
+  /// the preferred entry point; consult descriptors first.
+  /// </para>
   /// </summary>
   internal static Units MapKeyToUnit(string metricKey)
   {
@@ -563,9 +611,9 @@
     return metricKey;
   }
 
-  private static string GetMetricUnitForChart(string metricKey)
+  private string GetMetricUnitForChart(string metricKey)
   {
-    var unit = MapKeyToUnit(metricKey);
+    var unit = GetUnitForKey(metricKey);
     return unit switch
     {
       Units.Percent => "%",
@@ -594,8 +642,8 @@
   }
 
   // Used by the chart stats footer. Mirrors MetricTile's unit-aware formatting.
-  private static string FormatMetricValue(double value, string metricKey)
-    => UnitsFormatter.Format(value, MapKeyToUnit(metricKey));
+  private string FormatMetricValue(double value, string metricKey)
+    => UnitsFormatter.Format(value, GetUnitForKey(metricKey));
 
   public async ValueTask DisposeAsync()
   {

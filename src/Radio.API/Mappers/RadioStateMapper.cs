@@ -66,6 +66,7 @@ public static class RadioStateMapper
       Gain = (int?)radioSource.Gain,
       IsStereo = radioSource.IsStereo,
       RdsStationName = radioSource.RdsStationName,
+      RdsStationNameStable = radioSource.RdsStationNameStable,
       RdsProgramType = radioSource.RdsProgramType,
       RdsRadioText = radioSource.RdsRadioText,
       NowPlayingMatchId = nowPlayingMatchId,

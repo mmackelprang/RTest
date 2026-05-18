@@ -59,6 +59,11 @@ public record UpdatePlaybackRequest(
 );
 
 // Queue API DTOs
+//
+// AlbumArtUrl mirrors the API surface (Radio.API.Models.QueueItemDto.AlbumArtUrl)
+// — populated by the server-side projection from the QueueItem source data
+// (file ID3 / MusicBrainz proxy / fingerprint payload). When null, Up Next
+// thumbs render the music_note placeholder glyph (PR D #15).
 public record QueueItemDto(
   int Index,
   string? Title,
@@ -67,7 +72,8 @@ public record QueueItemDto(
   string? Duration,
   bool IsCurrent,
   string State = "Upcoming",
-  int FullPlaylistIndex = 0
+  int FullPlaylistIndex = 0,
+  string? AlbumArtUrl = null
 );
 
 // Sources API DTOs
@@ -198,6 +204,22 @@ public record MetricEventResponse(
   string Metric
 );
 
+/// <summary>
+/// Mirror of <c>Radio.Metrics.MetricDescriptor</c> on the Web side. The
+/// dashboard fetches a list of these from <c>/api/metrics/descriptors</c>
+/// and uses them to resolve units, categories, and threshold bands without
+/// resorting to client-side key-pattern heuristics (PR D #11 of the Arc
+/// follow-up backlog).
+/// </summary>
+public record MetricDescriptorDto(
+  string Key,
+  string Unit,
+  string? Category,
+  double? Warn,
+  double? Critical,
+  string? DisplayName
+);
+
 // File API DTOs
 public record FileListDto(
   string CurrentPath,
@@ -309,7 +331,12 @@ public record RadioStateDto(
   string? NowPlayingMatchId = null,
   // PR 3 of the Radio Controller Polish arc — RDS RadioText (RT) line
   // below the frequency well. Null/empty hides the RT row entirely.
-  string? RdsRadioText = null
+  string? RdsRadioText = null,
+  // PR D #40 of the Arc follow-up backlog — last-stable RDS PS value
+  // (consensus after 3+ identical samples). Save-preset dialog seeds
+  // from this rather than RdsStationName so rolling-PS stations don't
+  // capture mid-roll fragments like "anoidRoc".
+  string? RdsStationNameStable = null
 );
 
 public record RadioPowerStateDto(
@@ -679,7 +706,17 @@ public class RadioConfigDto
   public double MaxFMFrequencyMHz { get; set; } = 108.0;
   public double MinAMFrequencyKHz { get; set; } = 520.0;
   public double MaxAMFrequencyKHz { get; set; } = 1710.0;
+
+  /// <summary>
+  /// Signal-strength percentage at which the scan stops on a station.
+  /// Server-side <c>RadioStateMapper.PercentToDbu</c> clamps to <c>[0, 100]</c>;
+  /// the API validation layer rejects values outside that range with a
+  /// 400 so silent saturation isn't a footgun (PR D #30).
+  /// </summary>
+  [System.ComponentModel.DataAnnotations.Range(0, 100,
+    ErrorMessage = "ScanStopThreshold must be between 0 and 100 (percent).")]
   public int ScanStopThreshold { get; set; } = 50;
+
   public int ScanStepDelayMs { get; set; } = 100;
   public int DefaultDeviceVolume { get; set; } = 50;
 }
