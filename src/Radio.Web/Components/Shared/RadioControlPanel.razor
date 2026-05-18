@@ -299,16 +299,28 @@
 
     @* Preset action menu — anchored by absolute positioning when open. Only
        one menu is open at a time; clicking the overlay or hitting Esc closes
-       it. Actions call into RenamePresetAsync / DeletePresetAsync below. *@
+       it. Actions call into RenamePresetAsync / DeletePresetAsync below.
+       A11y: the popover surface carries role="menu" + aria-label so screen
+       readers announce it as a menu; items carry role="menuitem". Esc
+       dismissal is wired on the overlay (tabindex=0 so it can receive
+       keydown) and bubbles from the focused menu items. *@
     @if (!string.IsNullOrEmpty(_actionMenuPresetId))
     {
-      <div class="rcp-preset-menu-overlay" @onclick="CloseActionMenu">
-        <div class="rcp-preset-menu" @onclick:stopPropagation="true">
+      <div class="rcp-preset-menu-overlay"
+           tabindex="0"
+           @onclick="CloseActionMenu"
+           @onkeydown="HandleActionMenuKeyDown">
+        <div class="rcp-preset-menu"
+             role="menu"
+             aria-label="Preset actions"
+             @onclick:stopPropagation="true">
           <button type="button" class="rcp-preset-menu-item"
+                  role="menuitem"
                   @onclick="@(() => OpenRenameDialog(_actionMenuPresetId!))">
             <span class="rzi rzi-edit" aria-hidden="true"></span> Rename
           </button>
           <button type="button" class="rcp-preset-menu-item rcp-preset-menu-danger"
+                  role="menuitem"
                   @onclick="@(() => ConfirmDeleteAsync(_actionMenuPresetId!))">
             <span class="rzi rzi-delete" aria-hidden="true"></span> Delete
           </button>
@@ -1252,19 +1264,74 @@
     }
   }
 
+  // Holds the most-recently deleted preset so the toast Click handler can
+  // re-create it (Undo affordance). Cleared on next delete or on successful
+  // undo. Only the wire-shape fields (Name / Band / Frequency) are restored —
+  // the server assigns a fresh Id + SlotNumber, which matches in-tree
+  // create-preset semantics.
+  private RadioPresetDto? _lastDeletedPreset;
+
   private async Task DeletePresetAsync(string id)
   {
+    var preset = _presets?.FirstOrDefault(p => p.Id == id);
     try
     {
       if (await RadioApi.DeletePresetAsync(id))
       {
+        _lastDeletedPreset = preset;
         await LoadPresetsAsync();
-        NotificationService.Notify(NotificationSeverity.Info, "Deleted", "Preset deleted");
+
+        // PR plan called for a toast with name + Undo. The Click handler on
+        // the NotificationMessage fires when the toast itself is clicked; the
+        // user gets ~5s to undo before the toast auto-dismisses.
+        var detail = preset != null
+          ? $"\"{preset.Name}\" removed — click to undo"
+          : "Preset deleted";
+        NotificationService.Notify(new NotificationMessage
+        {
+          Severity = NotificationSeverity.Info,
+          Summary = "Preset deleted",
+          Detail = detail,
+          Duration = 5000,
+          Click = async _ => await UndoDeletePresetAsync(),
+        });
       }
     }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Error deleting preset {Id}", id);
+    }
+  }
+
+  /// <summary>
+  /// Re-creates the most-recently deleted preset via the existing save path.
+  /// Note: the server assigns a fresh Id and SlotNumber — the visual slot
+  /// number may differ from the original. Wire-shape fidelity (Name / Band /
+  /// Frequency) is preserved.
+  /// </summary>
+  private async Task UndoDeletePresetAsync()
+  {
+    if (_lastDeletedPreset == null) return;
+    var preset = _lastDeletedPreset;
+    _lastDeletedPreset = null;
+
+    try
+    {
+      if (await RadioApi.SavePresetAsync(preset.Name, preset.Frequency, preset.Band))
+      {
+        await LoadPresetsAsync();
+        NotificationService.Notify(NotificationSeverity.Success, "Restored", $"\"{preset.Name}\" restored");
+        await InvokeAsync(StateHasChanged);
+      }
+      else
+      {
+        NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to restore preset — check API logs");
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error undoing delete of preset {Name}", preset.Name);
+      NotificationService.Notify(NotificationSeverity.Error, "Error", $"Error restoring preset: {ex.Message}");
     }
   }
 
@@ -1354,6 +1421,20 @@
   private void CloseActionMenu()
   {
     _actionMenuPresetId = null;
+  }
+
+  /// <summary>
+  /// Keydown handler on the action-menu overlay. Esc dismisses the menu
+  /// (matches the inline-CSS comment that promises Esc + overlay-tap close).
+  /// The overlay carries tabindex=0 so it can receive keyboard events; Esc
+  /// from a focused menu-item button also bubbles up to this handler.
+  /// </summary>
+  private void HandleActionMenuKeyDown(KeyboardEventArgs e)
+  {
+    if (e.Key == "Escape")
+    {
+      CloseActionMenu();
+    }
   }
 
   /// <summary>

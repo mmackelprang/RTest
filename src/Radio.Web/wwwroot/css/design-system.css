@@ -3801,11 +3801,11 @@ body {
 }
 
 .rcp-preset-menu-danger {
-  color: #ff6b6b;
+  color: var(--rz-danger);
 }
 
 .rcp-preset-menu-danger:hover {
-  background: rgba(255, 107, 107, 0.12);
+  background: color-mix(in srgb, var(--rz-danger) 12%, transparent);
 }
 
 /* Suppress the legacy `::before` counter badge that the inline <style> defines

@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using AngleSharp.Dom;
 using Bunit;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -636,6 +637,58 @@ public class RadioControlPanelTests : TestContext
     Assert.Single(cut.FindAll(".rcp-preset-menu"));
 
     cut.Find(".rcp-preset-menu-overlay").Click();
+    Assert.Empty(cut.FindAll(".rcp-preset-menu"));
+  }
+
+  [Fact]
+  public void PresetActionMenu_HasMenuRole()
+  {
+    // Polisher pass on PR #373: a11y. The popover surface must announce as a
+    // menu (role=menu + aria-label), and each item must carry role=menuitem
+    // so screen readers traverse the actions correctly. The kebab button
+    // itself is already an accessible <button> with aria-label.
+    var state = BuildState();
+    var presets = new[]
+    {
+      BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
+    };
+    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16) });
+
+    cut.Find(".rcp-preset-kebab").Click();
+
+    var menu = cut.Find(".rcp-preset-menu");
+    Assert.Equal("menu", menu.GetAttribute("role"));
+    Assert.False(string.IsNullOrWhiteSpace(menu.GetAttribute("aria-label")));
+
+    var items = cut.FindAll(".rcp-preset-menu-item");
+    Assert.Equal(2, items.Count);
+    foreach (var item in items)
+    {
+      Assert.Equal("menuitem", item.GetAttribute("role"));
+    }
+  }
+
+  [Fact]
+  public void PresetActionMenu_EscKey_ClosesMenu()
+  {
+    // Polisher pass on PR #373: the inline-CSS comment at design-system.css
+    // promises "Esc / overlay tap closes" — overlay tap was wired but Esc
+    // wasn't. After this fix, a keydown of "Escape" on the overlay dismisses
+    // the menu (the overlay is tabindex=0 so it can receive keyboard events,
+    // and Esc from focused menu items bubbles up).
+    var state = BuildState();
+    var presets = new[]
+    {
+      BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
+    };
+    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16) });
+
+    cut.Find(".rcp-preset-kebab").Click();
+    Assert.Single(cut.FindAll(".rcp-preset-menu"));
+
+    var overlay = cut.Find(".rcp-preset-menu-overlay");
+    overlay.KeyDown(new KeyboardEventArgs { Key = "Escape" });
+
     Assert.Empty(cut.FindAll(".rcp-preset-menu"));
   }
 
