@@ -699,6 +699,59 @@ public class RadioController : ControllerBase
   }
 
   /// <summary>
+  /// Renames an existing radio preset. Band and frequency are immutable on a
+  /// saved preset; only the display name is updated.
+  /// </summary>
+  /// <param name="id">The preset ID to rename.</param>
+  /// <param name="request">The new name payload.</param>
+  /// <returns>The renamed preset DTO, or 404 if the ID does not exist.</returns>
+  /// <response code="200">Returns the updated preset.</response>
+  /// <response code="400">If the new name is empty or whitespace.</response>
+  /// <response code="404">If the preset was not found.</response>
+  [HttpPut("presets/{id}")]
+  [ProducesResponseType(typeof(RadioPresetDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status404NotFound)]
+  public async Task<ActionResult<RadioPresetDto>> RenamePreset(string id, [FromBody] RenameRadioPresetRequest request)
+  {
+    if (request == null || string.IsNullOrWhiteSpace(request.Name))
+    {
+      return BadRequest(new { error = "Preset name must not be empty or whitespace." });
+    }
+
+    try
+    {
+      var renamed = await _presetService.RenamePresetAsync(id, request.Name);
+      if (renamed == null)
+      {
+        return NotFound(new { error = $"Preset with ID '{id}' not found" });
+      }
+
+      // Compute the slot number against the band's current set so the response
+      // carries the same SlotNumber GetPresets() would surface. Mirrors the
+      // logic in CreatePreset above.
+      var bandPresets = await _presetService.GetAllPresetsAsync();
+      var slot = bandPresets
+        .Where(p => p.Band == renamed.Band)
+        .OrderBy(p => p.CreatedAt)
+        .Select((p, idx) => new { p.Id, Slot = idx + 1 })
+        .FirstOrDefault(t => t.Id == renamed.Id)?.Slot ?? 0;
+
+      return Ok(RadioPresetDto.FromModel(renamed, slot));
+    }
+    catch (ArgumentException ex)
+    {
+      _logger.LogWarning(ex, "Invalid rename payload for preset {Id}", id);
+      return BadRequest(new { error = ex.Message });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error renaming radio preset {Id}", id);
+      return StatusCode(500, new { error = "Failed to rename radio preset" });
+    }
+  }
+
+  /// <summary>
   /// Loads a radio preset — sets the band and tunes to the saved frequency.
   /// </summary>
   /// <param name="id">The preset ID to load.</param>

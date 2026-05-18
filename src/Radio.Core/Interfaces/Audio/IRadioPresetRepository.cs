@@ -47,6 +47,19 @@ public interface IRadioPresetRepository
   Task<bool> DeleteAsync(string id, CancellationToken ct = default);
 
   /// <summary>
+  /// Updates the display name on an existing preset, refreshing
+  /// <see cref="RadioPreset.LastModifiedAt"/>. Band and frequency are
+  /// intentionally immutable here — the kebab-menu rename action off the
+  /// PR #371 hot-fix only renames; reassigning a band/frequency would be a
+  /// new preset.
+  /// </summary>
+  /// <param name="id">The preset ID to rename.</param>
+  /// <param name="newName">The new display name.</param>
+  /// <param name="ct">Cancellation token.</param>
+  /// <returns>True if the row was updated, false if the ID was not found.</returns>
+  Task<bool> UpdateNameAsync(string id, string newName, CancellationToken ct = default);
+
+  /// <summary>
   /// Gets the count of saved presets.
   /// </summary>
   /// <param name="ct">Cancellation token.</param>

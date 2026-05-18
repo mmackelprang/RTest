@@ -286,6 +286,57 @@ public class RadioPresetServiceTests
     Assert.False(result);
   }
 
+  // ── Hot-fix off PR #371: rename endpoint coverage ──
+
+  [Fact]
+  public async Task RenamePresetAsync_TrimWhitespaceAndReturnsUpdatedPreset()
+  {
+    // The service trims the new name before passing to the repository, then
+    // re-fetches the updated row so the controller can echo it back to the
+    // client without an extra round-trip.
+    var renamed = new RadioPreset
+    {
+      Id = "1", Name = "KQED", Band = RadioBand.FM, Frequency = 88_500_000
+    };
+    _repositoryMock
+      .Setup(r => r.UpdateNameAsync("1", "KQED", It.IsAny<CancellationToken>()))
+      .ReturnsAsync(true);
+    _repositoryMock
+      .Setup(r => r.GetByIdAsync("1", It.IsAny<CancellationToken>()))
+      .ReturnsAsync(renamed);
+
+    var service = CreateService();
+    var result = await service.RenamePresetAsync("1", "  KQED  ");
+
+    Assert.NotNull(result);
+    Assert.Equal("KQED", result!.Name);
+    _repositoryMock.Verify(r => r.UpdateNameAsync("1", "KQED", It.IsAny<CancellationToken>()), Times.Once);
+  }
+
+  [Fact]
+  public async Task RenamePresetAsync_ReturnsNullWhenIdNotFound()
+  {
+    _repositoryMock
+      .Setup(r => r.UpdateNameAsync("missing", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync(false);
+
+    var service = CreateService();
+    var result = await service.RenamePresetAsync("missing", "Anything");
+
+    Assert.Null(result);
+  }
+
+  [Theory]
+  [InlineData("")]
+  [InlineData("   ")]
+  [InlineData(null)]
+  public async Task RenamePresetAsync_ThrowsOnEmptyOrWhitespaceName(string? name)
+  {
+    var service = CreateService();
+    await Assert.ThrowsAsync<ArgumentException>(
+      () => service.RenamePresetAsync("1", name!));
+  }
+
   [Fact]
   public async Task PresetExistsAsync_ReturnsTrueWhenExists()
   {

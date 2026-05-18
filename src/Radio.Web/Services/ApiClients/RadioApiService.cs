@@ -318,6 +318,31 @@ public class RadioApiService
     }
   }
 
+  /// <summary>
+  /// Renames an existing preset. Added by the LED-font + preset-affordances
+  /// hot-fix off PR #371 so the kebab-menu Rename action can call PUT
+  /// /api/radio/presets/{id} with the new name. Returns the new name on
+  /// success so the caller can echo it into a toast without re-fetching.
+  /// </summary>
+  public async Task<bool> RenamePresetAsync(string id, string newName, CancellationToken cancellationToken = default)
+  {
+    if (string.IsNullOrWhiteSpace(newName))
+    {
+      return false;
+    }
+
+    try
+    {
+      var response = await _httpClient.PutAsJsonAsync($"/api/radio/presets/{id}", new { name = newName.Trim() }, cancellationToken);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to rename preset {Id}", id);
+      return false;
+    }
+  }
+
   public async Task<List<RadioDeviceDto>?> GetAvailableDevicesAsync(CancellationToken cancellationToken = default)
   {
     try

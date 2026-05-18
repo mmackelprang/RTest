@@ -156,6 +156,43 @@ public sealed class SqliteRadioPresetRepository : IRadioPresetRepository
   }
 
   /// <inheritdoc/>
+  public async Task<bool> UpdateNameAsync(string id, string newName, CancellationToken ct = default)
+  {
+    // Added by the LED-font + preset-affordances hot-fix off PR #371 so the
+    // kebab-menu Rename action has somewhere to land. Band/Frequency stay
+    // immutable — only Name + LastModifiedAt are touched. ROWS_AFFECTED
+    // disambiguates "not found" (0) from "renamed" (1) without an extra
+    // SELECT round-trip.
+    var conn = await _dbContext.GetConnectionAsync(ct);
+
+    var sql = """
+      UPDATE RadioPresets
+      SET Name = @Name, LastModifiedAt = @LastModifiedAt
+      WHERE Id = @Id
+      """;
+
+    await using var cmd = conn.CreateCommand();
+    cmd.CommandText = sql;
+    cmd.Parameters.AddWithValue("@Id", id);
+    cmd.Parameters.AddWithValue("@Name", newName);
+    cmd.Parameters.AddWithValue("@LastModifiedAt", DateTimeOffset.UtcNow.ToString("O"));
+
+    var rowsAffected = await cmd.ExecuteNonQueryAsync(ct);
+    var updated = rowsAffected > 0;
+
+    if (updated)
+    {
+      _logger.LogDebug("Renamed radio preset {Id} to {Name}", id, newName);
+    }
+    else
+    {
+      _logger.LogDebug("Radio preset {Id} not found for rename", id);
+    }
+
+    return updated;
+  }
+
+  /// <inheritdoc/>
   public async Task<int> GetCountAsync(CancellationToken ct = default)
   {
     var conn = await _dbContext.GetConnectionAsync(ct);
