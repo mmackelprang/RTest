@@ -175,9 +175,7 @@
     _albumArtFailed = false;
     _sourceAccent = "--text-low";
     _isPlaying = false;
-    _elapsedSeconds = 0;
-    _totalSeconds = 0;
-    RecomputeProgress();
+    ResetProgress();
   }
 
   private async Task OnPlaybackStateChanged()
@@ -224,9 +222,9 @@
     // Always zero out elapsed/total when the DTO omits them, otherwise stale
     // numbers from the previous source persist (e.g. File → Radio leaves the
     // last file's elapsed time on screen until the next PlaybackStateChanged).
-    _elapsedSeconds = dto.Position?.TotalSeconds ?? 0;
-    _totalSeconds = dto.Duration?.TotalSeconds ?? 0;
-    RecomputeProgress();
+    // Projection helper applies the sub-second floor / em-dash / percent clamp
+    // (Arc 3 PR C item #14 — single source of truth shared with NowPlayingPanel).
+    ApplyProgress(PlaybackProgressProjection.From(dto));
   }
 
   /// <summary>
@@ -238,44 +236,29 @@
   private void ApplyPlaybackState(PlaybackStateDto state)
   {
     _isPlaying = state.IsPlaying;
-
-    if (!string.IsNullOrEmpty(state.Position)
-        && TimeSpan.TryParse(state.Position, System.Globalization.CultureInfo.InvariantCulture, out var pos))
-    {
-      _elapsedSeconds = pos.TotalSeconds;
-    }
-    else
-    {
-      _elapsedSeconds = 0;
-    }
-
-    if (!string.IsNullOrEmpty(state.Duration)
-        && TimeSpan.TryParse(state.Duration, System.Globalization.CultureInfo.InvariantCulture, out var dur)
-        && dur.TotalSeconds > 0)
-    {
-      _totalSeconds = dur.TotalSeconds;
-    }
-    else
-    {
-      _totalSeconds = 0;
-    }
-
-    RecomputeProgress();
+    ApplyProgress(PlaybackProgressProjection.From(state));
   }
 
-  private void RecomputeProgress()
+  /// <summary>
+  /// Fan out the projection record onto the component's elapsed / total /
+  /// display fields. Keeps the projection helper pure (no state mutation).
+  /// </summary>
+  private void ApplyProgress(PlaybackProgress progress)
   {
-    _elapsedDisplay = _elapsedSeconds >= 1.0
-      ? Durations.FormatTrack(TimeSpan.FromSeconds(_elapsedSeconds))
-      : "0:00";
+    _elapsedSeconds = progress.ElapsedSeconds;
+    _totalSeconds = progress.TotalSeconds;
+    _elapsedDisplay = progress.ElapsedDisplay;
+    _totalDisplay = progress.TotalDisplay;
+    _progressPercent = progress.Percent;
+  }
 
-    _totalDisplay = _totalSeconds > 0
-      ? Durations.FormatTrack(TimeSpan.FromSeconds(_totalSeconds))
-      : "—";
-
-    _progressPercent = _totalSeconds > 0
-      ? Math.Clamp((_elapsedSeconds / _totalSeconds) * 100.0, 0, 100)
-      : 0;
+  /// <summary>
+  /// Resets elapsed / total / display strings to the empty-state shape used by
+  /// <see cref="ClearDockState"/> (called when the hub pushes a null payload).
+  /// </summary>
+  private void ResetProgress()
+  {
+    ApplyProgress(PlaybackProgressProjection.From(0, 0));
   }
 
   private void HandleNavigateHome()

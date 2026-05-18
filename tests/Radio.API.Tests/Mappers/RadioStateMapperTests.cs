@@ -84,7 +84,7 @@ public class RadioStateMapperTests
       RdsRadioTextValue = "Now Playing — Morning Edition",
     };
 
-    var dto = RadioStateMapper.MapToRadioStateDto(source);
+    var dto = source.MapToRadioStateDto();
 
     Assert.Equal("KQED", dto.RdsStationName);
     Assert.Equal("News", dto.RdsProgramType);
@@ -100,7 +100,7 @@ public class RadioStateMapperTests
       RdsRadioTextValue = null,
     };
 
-    var dto = RadioStateMapper.MapToRadioStateDto(source);
+    var dto = source.MapToRadioStateDto();
 
     Assert.Null(dto.RdsRadioText);
   }

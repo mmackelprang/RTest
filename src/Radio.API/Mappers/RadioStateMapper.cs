@@ -33,7 +33,9 @@ public static class RadioStateMapper
 
   /// <summary>
   /// Projects an <see cref="IRadioControl"/> snapshot into the DTO shape the
-  /// web UI consumes.
+  /// web UI consumes. Exposed as an extension method so call sites read
+  /// <c>radioSource.MapToRadioStateDto(matchId)</c>, mirroring the style of
+  /// <see cref="AudioDtoMapper.MapToDto(IAudioSource)"/> (Arc 3 PR C item #28).
   /// </summary>
   /// <param name="radioSource">Radio control snapshot.</param>
   /// <param name="nowPlayingMatchId">
@@ -43,7 +45,7 @@ public static class RadioStateMapper
   /// stream so the UI can render a NOW header + amber border above the
   /// correct row. Pass <c>null</c> when no match is currently anchored.
   /// </param>
-  public static RadioStateDto MapToRadioStateDto(IRadioControl radioSource, string? nowPlayingMatchId = null)
+  public static RadioStateDto MapToRadioStateDto(this IRadioControl radioSource, string? nowPlayingMatchId = null)
   {
     var rawSignal = radioSource.SignalStrength;
     return new RadioStateDto

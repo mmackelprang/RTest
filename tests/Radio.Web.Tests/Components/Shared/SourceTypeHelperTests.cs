@@ -139,4 +139,72 @@ public class SourceTypeHelperTests
   {
     SourceTypeHelper.IsRadioFamily(string.Empty).Should().BeFalse();
   }
+
+  // ─── GetDetailRoute ────────────────────────────────────────────────────────
+  // Arc 3 PR C folded-in item #13. Extracts the routing decision from
+  // MainLayout.HandleSourceDetailAsync so we can test the dispatch without
+  // spinning up Radzen + bUnit. MainLayout consumes the enum result and
+  // switches on it; SourceDetailRoute.None covers the chevron-shouldn't-have-
+  // rendered fallthrough.
+
+  [Fact]
+  public void GetDetailRoute_Radio_ReturnsRadioPanel()
+  {
+    SourceTypeHelper.GetDetailRoute("Radio").Should().Be(SourceTypeHelper.SourceDetailRoute.RadioPanel);
+  }
+
+  [Fact]
+  public void GetDetailRoute_RTLSDRCore_ReturnsRadioPanel()
+  {
+    SourceTypeHelper.GetDetailRoute("RTLSDRCore").Should().Be(SourceTypeHelper.SourceDetailRoute.RadioPanel);
+  }
+
+  [Fact]
+  public void GetDetailRoute_RF320_ReturnsRadioPanel()
+  {
+    SourceTypeHelper.GetDetailRoute("RF320").Should().Be(SourceTypeHelper.SourceDetailRoute.RadioPanel);
+  }
+
+  [Fact]
+  public void GetDetailRoute_Bluetooth_ReturnsBluetoothPage()
+  {
+    SourceTypeHelper.GetDetailRoute("Bluetooth").Should().Be(SourceTypeHelper.SourceDetailRoute.BluetoothPage);
+  }
+
+  [Theory]
+  [InlineData("File")]
+  [InlineData("FilePlayer")]
+  [InlineData("Vinyl")]
+  [InlineData("GenericUSB")]
+  [InlineData("USB")]
+  [InlineData("TestTone")]
+  [InlineData("UnknownFutureSource")]
+  public void GetDetailRoute_NonDetailSources_ReturnsNone(string sourceType)
+  {
+    SourceTypeHelper.GetDetailRoute(sourceType).Should().Be(SourceTypeHelper.SourceDetailRoute.None);
+  }
+
+  [Fact]
+  public void GetDetailRoute_Null_ReturnsNone()
+  {
+    SourceTypeHelper.GetDetailRoute(null).Should().Be(SourceTypeHelper.SourceDetailRoute.None);
+  }
+
+  [Fact]
+  public void GetDetailRoute_Empty_ReturnsNone()
+  {
+    SourceTypeHelper.GetDetailRoute(string.Empty).Should().Be(SourceTypeHelper.SourceDetailRoute.None);
+  }
+
+  [Fact]
+  public void GetDetailRoute_CaseInsensitive_True()
+  {
+    // OrdinalIgnoreCase on the underlying IsRadioFamily hash set + the
+    // Equals call on "Bluetooth"; both branches must tolerate JSON
+    // deserialization re-casing.
+    SourceTypeHelper.GetDetailRoute("radio").Should().Be(SourceTypeHelper.SourceDetailRoute.RadioPanel);
+    SourceTypeHelper.GetDetailRoute("RADIO").Should().Be(SourceTypeHelper.SourceDetailRoute.RadioPanel);
+    SourceTypeHelper.GetDetailRoute("bluetooth").Should().Be(SourceTypeHelper.SourceDetailRoute.BluetoothPage);
+    SourceTypeHelper.GetDetailRoute("BLUETOOTH").Should().Be(SourceTypeHelper.SourceDetailRoute.BluetoothPage);
+  }
 }
