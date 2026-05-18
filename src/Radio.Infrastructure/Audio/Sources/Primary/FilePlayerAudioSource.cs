@@ -1598,6 +1598,11 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       Logger.LogDebug(ex, "Failed to read metadata for {File}, using defaults", filePath);
     }
 
+    // Populate album art from embedded picture tags so Up Next tiles render real art
+    // instead of falling back to the music_note placeholder. Content-addressed cache
+    // makes repeated reads idempotent.
+    var albumArtUrl = TryGetEmbeddedAlbumArtUrl(filePath);
+
     return new QueueItem
     {
       Id = filePath,
@@ -1605,6 +1610,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       Artist = artist,
       Album = album,
       Duration = duration,
+      AlbumArtUrl = albumArtUrl,
       Index = index,
       IsCurrent = isCurrent,
       State = isCurrent ? QueueItemState.Current : QueueItemState.Upcoming,
@@ -1657,6 +1663,11 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       Logger.LogDebug(ex, "Failed to read metadata for {File}, using defaults", filePath);
     }
 
+    // Populate album art from embedded picture tags so Up Next / Recent tiles render real
+    // art instead of falling back to the music_note placeholder. Content-addressed cache
+    // makes repeated reads idempotent.
+    var albumArtUrl = TryGetEmbeddedAlbumArtUrl(filePath);
+
     return new QueueItem
     {
       Id = filePath,
@@ -1664,6 +1675,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       Artist = artist,
       Album = album,
       Duration = duration,
+      AlbumArtUrl = albumArtUrl,
       Index = fullPlaylistIndex, // For operational compatibility
       IsCurrent = state == QueueItemState.Current,
       State = state,
@@ -1987,13 +1999,30 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
   /// <summary>
   /// Extracts embedded album art from audio file metadata using TagLib.
-  /// Saves to the album art cache and sets AlbumArtUrl if found.
+  /// Saves to the album art cache and sets AlbumArtUrl on the current-track metadata if found.
   /// </summary>
   private void ExtractEmbeddedAlbumArt(string filePath)
   {
+    var cachedUrl = TryGetEmbeddedAlbumArtUrl(filePath);
+    if (cachedUrl != null)
+    {
+      _metadata[StandardMetadataKeys.AlbumArtUrl] = cachedUrl;
+    }
+  }
+
+  /// <summary>
+  /// Reads embedded album art from <paramref name="filePath"/> via TagLib, writes it to the
+  /// content-addressed album-art cache, and returns the resulting proxy URL
+  /// (e.g. <c>/api/albumart/&lt;hash&gt;.jpg</c>). Returns <c>null</c> when no cache service
+  /// is configured, no embedded picture exists, or any error occurs.
+  /// Safe to call from both the current-track metadata path and the queue-item enqueue path:
+  /// the cache is content-addressed so repeated calls for the same file are idempotent.
+  /// </summary>
+  private string? TryGetEmbeddedAlbumArtUrl(string filePath)
+  {
     if (_albumArtCache == null)
     {
-      return;
+      return null;
     }
 
     try
@@ -2002,7 +2031,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       var pictures = tagFile.Tag.Pictures;
       if (pictures == null || pictures.Length == 0)
       {
-        return;
+        return null;
       }
 
       // Prefer FrontCover, fall back to first picture
@@ -2012,19 +2041,21 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       var data = picture.Data?.Data;
       if (data == null || data.Length == 0)
       {
-        return;
+        return null;
       }
 
       var mime = !string.IsNullOrEmpty(picture.MimeType) ? picture.MimeType : "image/jpeg";
       var cachedUrl = _albumArtCache.Save(data, mime);
-      _metadata[StandardMetadataKeys.AlbumArtUrl] = cachedUrl;
 
       Logger.LogDebug("Extracted embedded album art from {File}: {Url} ({Bytes} bytes)",
         Path.GetFileName(filePath), cachedUrl, data.Length);
+
+      return cachedUrl;
     }
     catch (Exception ex)
     {
       Logger.LogDebug(ex, "Failed to extract embedded album art from {File}", filePath);
+      return null;
     }
   }
 
