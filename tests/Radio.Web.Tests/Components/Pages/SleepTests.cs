@@ -103,11 +103,15 @@ public class SleepTests : TestContext
   [Fact]
   public void Sleep_Clock_UsesLedFontClass()
   {
-    // The clock must wear the .font-led class so the DSEG14 amber treatment
-    // applies. Without it the clock would render in the body's default font.
+    // PR A follow-up #16: the `.font-led` class was removed from the clock
+    // because that rule is scoped to `.cluster-value .font-led` and never
+    // matched on /sleep. The LED treatment is applied directly via the
+    // `.sleep-screen-clock` rule in design-system.css §P (font-family:
+    // var(--font-led) + amber color + glow). This test pins that class
+    // remains present on the clock element.
     var cut = RenderComponent<Sleep>();
     var clock = cut.Find(".sleep-screen-clock");
-    clock.GetAttribute("class").Should().Contain("font-led");
+    clock.GetAttribute("class").Should().Contain("sleep-screen-clock");
   }
 
   [Fact]
