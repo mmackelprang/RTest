@@ -71,6 +71,18 @@ public class NowPlayingPanelTests : TestContext
         sp.GetRequiredService<IConfiguration>()
       )
     );
+
+    // PR 4 — GainControlPopover is rendered inline when _showGainPopover is true;
+    // it depends on AudioVisualizationHubService for its peak meter. Register a
+    // real instance so the popover branches render. StartAsync will fail-silently
+    // against the unreachable test ApiBaseUrl, which is exactly how the production
+    // popover behaves on a cold start.
+    Services.AddSingleton(sp =>
+      new AudioVisualizationHubService(
+        NullLogger<AudioVisualizationHubService>.Instance,
+        sp.GetRequiredService<IConfiguration>()
+      )
+    );
   }
 
   protected override void Dispose(bool disposing)
@@ -308,9 +320,13 @@ public class NowPlayingPanelTests : TestContext
     var cut = RenderComponent<NowPlayingPanel>();
     SetRecognitionState(cut, status, nowPlayingMatchId: "m-anchor");
 
-    // One ConfidencePips widget per row (active + earlier).
-    var pips = cut.FindAll(".confidence-pips");
-    Assert.Equal(2, pips.Count);
+    // One ConfidencePips widget per recognition row (active + earlier). PR 4
+    // adds a separate ConfidencePips inside the match badge under the song
+    // title — that one is outside the recognition stream container, so we
+    // scope the assertion to .np-recognition-stream descendants only.
+    var stream = cut.Find(".np-recognition-stream");
+    var pips = stream.QuerySelectorAll(".confidence-pips");
+    Assert.Equal(2, pips.Length);
   }
 
   [Fact]
@@ -425,5 +441,388 @@ public class NowPlayingPanelTests : TestContext
     var currentRows = cut.FindAll(".np-recognition-row-current");
     Assert.Single(currentRows);
     Assert.Equal("m-target", currentRows[0].GetAttribute("data-match-id"));
+  }
+
+  // ─── PR 4: Status strip + match badge ──────────────────────────────────────
+  //
+  // The status strip lives at the top of the panel. Its visibility is driven by
+  // _nowPlayingSourceType — once set, the strip renders with the source cell
+  // always present, frequency + RDS conditional on tuner-family + RDS data, and
+  // gain always present. The match badge sits inside the album-art card and
+  // requires either an active fingerprint match or RDS station info to render.
+
+  /// <summary>
+  /// Reflectively seeds the panel's now-playing + radio state without touching
+  /// HTTP. Mirrors the pattern <see cref="SetRecognitionState"/> uses for the
+  /// recognition stream tests.
+  /// </summary>
+  private static void SetStatusStripState(
+    IRenderedComponent<NowPlayingPanel> cut,
+    string sourceType,
+    string sourceName = "Source",
+    RadioStateDto? radioState = null,
+    float gain = 1.0f,
+    FingerprintStatusDto? fpStatus = null)
+  {
+    var instance = cut.Instance;
+    var type = typeof(NowPlayingPanel);
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+
+    type.GetField("_nowPlayingSourceType", flags)!.SetValue(instance, sourceType);
+    type.GetField("_source", flags)!.SetValue(instance, sourceName);
+    type.GetField("_currentSourceGain", flags)!.SetValue(instance, gain);
+    if (radioState != null)
+    {
+      type.GetField("_radioState", flags)!.SetValue(instance, radioState);
+    }
+    if (fpStatus != null)
+    {
+      type.GetField("_fpStatus", flags)!.SetValue(instance, fpStatus);
+      type.GetField("_fpEventsReversed", flags)!
+        .SetValue(instance, Enumerable.Reverse(fpStatus.RecentEvents).ToList());
+    }
+    cut.Render();
+  }
+
+  [Fact]
+  public void StatusStrip_RendersAllFourCells_WhenTunerActiveWithRds()
+  {
+    var radioState = new RadioStateDto(
+      Frequency: 92.5e6, Band: "FM", Step: 100e3,
+      SignalStrength: 70, IsScanning: false, ScanDirection: null,
+      ScanStopThreshold: -18.0, Gain: 28, AutoGain: true,
+      Equalizer: "Flat", DeviceVolume: 70,
+      RdsStationName: "KEXP",
+      AppliedGain: 28.0);
+
+    var cut = RenderComponent<NowPlayingPanel>();
+    SetStatusStripState(cut, "RTLSDRCore", "SDR Radio", radioState);
+
+    var strip = cut.Find(".np-status-strip");
+    Assert.NotNull(strip);
+
+    // All four cells present and in order: source, freq, rds, gain.
+    Assert.Single(cut.FindAll(".np-status-cell-source"));
+    Assert.Single(cut.FindAll(".np-status-cell-frequency"));
+    Assert.Single(cut.FindAll(".np-status-cell-rds"));
+    Assert.Single(cut.FindAll(".np-status-cell-gain"));
+  }
+
+  [Fact]
+  public void StatusStrip_OmitsFrequencyCell_WhenNonTunerSource()
+  {
+    var cut = RenderComponent<NowPlayingPanel>();
+    SetStatusStripState(cut, "FilePlayer", "File Player");
+
+    Assert.Single(cut.FindAll(".np-status-cell-source"));
+    Assert.Empty(cut.FindAll(".np-status-cell-frequency"));
+    Assert.Empty(cut.FindAll(".np-status-cell-rds"));
+    Assert.Single(cut.FindAll(".np-status-cell-gain"));
+  }
+
+  [Fact]
+  public void StatusStrip_OmitsRdsCell_WhenNoStationName()
+  {
+    var radioState = new RadioStateDto(
+      Frequency: 92.5e6, Band: "FM", Step: 100e3,
+      SignalStrength: 70, IsScanning: false, ScanDirection: null,
+      ScanStopThreshold: -18.0, Gain: 28, AutoGain: true,
+      Equalizer: "Flat", DeviceVolume: 70,
+      RdsStationName: null);
+
+    var cut = RenderComponent<NowPlayingPanel>();
+    SetStatusStripState(cut, "RTLSDRCore", "SDR Radio", radioState);
+
+    Assert.Single(cut.FindAll(".np-status-cell-frequency"));
+    Assert.Empty(cut.FindAll(".np-status-cell-rds"));
+  }
+
+  [Fact]
+  public void StatusStrip_FrequencyCell_RendersValueAndUnit()
+  {
+    var radioState = new RadioStateDto(
+      Frequency: 92.5e6, Band: "FM", Step: 100e3,
+      SignalStrength: 70, IsScanning: false, ScanDirection: null,
+      ScanStopThreshold: -18.0, Gain: 28, AutoGain: true,
+      Equalizer: "Flat", DeviceVolume: 70);
+
+    var cut = RenderComponent<NowPlayingPanel>();
+    SetStatusStripState(cut, "RTLSDRCore", "SDR Radio", radioState);
+
+    var freqCell = cut.Find(".np-status-cell-frequency");
+    Assert.Contains("92.50", freqCell.TextContent);
+    Assert.Contains("MHz", freqCell.TextContent);
+  }
+
+  [Fact]
+  public void StatusStrip_FrequencyCell_AmBand_RendersKHz()
+  {
+    var radioState = new RadioStateDto(
+      Frequency: 1010e3, Band: "AM", Step: 10e3,
+      SignalStrength: 40, IsScanning: false, ScanDirection: null,
+      ScanStopThreshold: -22.0, Gain: 12, AutoGain: false,
+      Equalizer: "Flat", DeviceVolume: 70);
+
+    var cut = RenderComponent<NowPlayingPanel>();
+    SetStatusStripState(cut, "RTLSDRCore", "SDR Radio", radioState);
+
+    var freqCell = cut.Find(".np-status-cell-frequency");
+    Assert.Contains("1010", freqCell.TextContent);
+    Assert.Contains("kHz", freqCell.TextContent);
+  }
+
+  [Fact]
+  public void StatusStrip_RdsCell_RendersStationName()
+  {
+    var radioState = new RadioStateDto(
+      Frequency: 92.5e6, Band: "FM", Step: 100e3,
+      SignalStrength: 70, IsScanning: false, ScanDirection: null,
+      ScanStopThreshold: -18.0, Gain: 28, AutoGain: true,
+      Equalizer: "Flat", DeviceVolume: 70,
+      RdsStationName: "WKQX");
+
+    var cut = RenderComponent<NowPlayingPanel>();
+    SetStatusStripState(cut, "RTLSDRCore", "SDR Radio", radioState);
+
+    var rds = cut.Find(".np-status-rds-station");
+    Assert.Equal("WKQX", rds.TextContent);
+    // The dim tag carries the literal "RDS".
+    var tag = cut.Find(".np-status-rds-tag");
+    Assert.Equal("RDS", tag.TextContent);
+  }
+
+  [Fact]
+  public void StatusStrip_AppliesArtBgClass_WhenAlbumArtPresent()
+  {
+    var cut = RenderComponent<NowPlayingPanel>();
+    var instance = cut.Instance;
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+    typeof(NowPlayingPanel).GetField("_nowPlayingSourceType", flags)!.SetValue(instance, "FilePlayer");
+    typeof(NowPlayingPanel).GetField("_source", flags)!.SetValue(instance, "File");
+    typeof(NowPlayingPanel).GetField("_albumArtUrl", flags)!.SetValue(instance, "/api/albumart/track-123.jpg");
+    cut.Render();
+
+    var strip = cut.Find(".np-status-strip");
+    Assert.Contains("has-art-bg", strip.ClassList);
+  }
+
+  [Fact]
+  public void StatusStrip_GainCell_OpensPopover_OnClick()
+  {
+    var cut = RenderComponent<NowPlayingPanel>();
+    SetStatusStripState(cut, "FilePlayer", "File");
+
+    // Sanity: popover not rendered yet.
+    Assert.Empty(cut.FindAll(".gain-popover"));
+
+    cut.Find(".np-status-cell-gain").Click();
+
+    // Popover renders after the click.
+    Assert.Single(cut.FindAll(".gain-popover"));
+  }
+
+  [Fact]
+  public void StatusStrip_SourceSwatch_UsesSourceAccent()
+  {
+    var cut = RenderComponent<NowPlayingPanel>();
+    SetStatusStripState(cut, "RTLSDRCore", "SDR Radio");
+
+    var swatch = cut.Find(".np-status-swatch");
+    var styleAttr = swatch.GetAttribute("style") ?? string.Empty;
+    Assert.Contains("--source-radio", styleAttr);
+  }
+
+  // ─── Match badge ──────────────────────────────────────────────────────────
+
+  [Fact]
+  public void MatchBadge_RendersConfidencePips_WhenFingerprintMatchActive()
+  {
+    var events = new List<FingerprintEventDto>
+    {
+      MakeEvent("m-active", "Hit Song", "Artist", ConfidenceBucket.Strong, DateTime.UtcNow.AddSeconds(-12))
+    };
+    var fpStatus = new FingerprintStatusDto
+    {
+      IsEnabled = true,
+      Phase = "Matched",
+      RecentEvents = events
+    };
+    var radioState = new RadioStateDto(
+      Frequency: 92.5e6, Band: "FM", Step: 100e3,
+      SignalStrength: 70, IsScanning: false, ScanDirection: null,
+      ScanStopThreshold: -18.0, Gain: 28, AutoGain: true,
+      Equalizer: "Flat", DeviceVolume: 70,
+      NowPlayingMatchId: "m-active");
+
+    var cut = RenderComponent<NowPlayingPanel>();
+    SetStatusStripState(cut, "RTLSDRCore", "SDR Radio", radioState, fpStatus: fpStatus);
+
+    var badge = cut.Find(".np-match-badge");
+    // ConfidencePips is rendered inside the badge.
+    Assert.Single(badge.QuerySelectorAll(".confidence-pips"));
+    // Label text reads "Strong match · …".
+    Assert.Contains("Strong match", badge.TextContent);
+  }
+
+  [Fact]
+  public void MatchBadge_RendersRdsLabel_WhenNoFingerprintButRdsPresent()
+  {
+    var radioState = new RadioStateDto(
+      Frequency: 92.5e6, Band: "FM", Step: 100e3,
+      SignalStrength: 70, IsScanning: false, ScanDirection: null,
+      ScanStopThreshold: -18.0, Gain: 28, AutoGain: true,
+      Equalizer: "Flat", DeviceVolume: 70,
+      RdsStationName: "WKQX",
+      NowPlayingMatchId: null);
+
+    var cut = RenderComponent<NowPlayingPanel>();
+    SetStatusStripState(cut, "RTLSDRCore", "SDR Radio", radioState);
+
+    var badge = cut.Find(".np-match-badge");
+    Assert.Contains("is-rds", badge.ClassList);
+    Assert.Contains("RDS · station-supplied", badge.TextContent);
+    // No ConfidencePips for the RDS variant.
+    Assert.Empty(badge.QuerySelectorAll(".confidence-pips"));
+  }
+
+  [Fact]
+  public void MatchBadge_Hidden_WhenNeitherFingerprintNorRds()
+  {
+    var radioState = new RadioStateDto(
+      Frequency: 92.5e6, Band: "FM", Step: 100e3,
+      SignalStrength: 70, IsScanning: false, ScanDirection: null,
+      ScanStopThreshold: -18.0, Gain: 28, AutoGain: true,
+      Equalizer: "Flat", DeviceVolume: 70,
+      RdsStationName: null,
+      NowPlayingMatchId: null);
+
+    var cut = RenderComponent<NowPlayingPanel>();
+    SetStatusStripState(cut, "RTLSDRCore", "SDR Radio", radioState);
+
+    Assert.Empty(cut.FindAll(".np-match-badge"));
+  }
+
+  [Fact]
+  public void MatchBadge_OpensRecognitionStream_OnClick()
+  {
+    var events = new List<FingerprintEventDto>
+    {
+      MakeEvent("m-active", "Hit Song", "Artist", ConfidenceBucket.Likely, DateTime.UtcNow.AddSeconds(-30))
+    };
+    var fpStatus = new FingerprintStatusDto
+    {
+      IsEnabled = true,
+      Phase = "Matched",
+      RecentEvents = events
+    };
+    var radioState = new RadioStateDto(
+      Frequency: 92.5e6, Band: "FM", Step: 100e3,
+      SignalStrength: 70, IsScanning: false, ScanDirection: null,
+      ScanStopThreshold: -18.0, Gain: 28, AutoGain: true,
+      Equalizer: "Flat", DeviceVolume: 70,
+      NowPlayingMatchId: "m-active");
+
+    var cut = RenderComponent<NowPlayingPanel>();
+    SetStatusStripState(cut, "RTLSDRCore", "SDR Radio", radioState, fpStatus: fpStatus);
+
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+    var detailField = typeof(NowPlayingPanel).GetField("_showFingerprintDetail", flags)!;
+
+    // Sanity: recognition stream is closed.
+    Assert.False((bool)detailField.GetValue(cut.Instance)!);
+
+    cut.Find(".np-match-badge").Click();
+
+    // After the click, _showFingerprintDetail flipped to true — confirming the
+    // match badge wires its OnClick to ToggleFingerprintDetail. The handler
+    // also fires a background RefreshFingerprintStatusAsync which throws under
+    // the no-API-server test fixture and nulls out _fpEventsReversed, so we
+    // assert the boolean flip directly rather than the rendered DOM (which
+    // would race against the background refresh's null-out).
+    Assert.True((bool)detailField.GetValue(cut.Instance)!);
+  }
+
+  // ─── Legacy floating pills must not render ────────────────────────────────
+
+  [Fact]
+  public void LegacyFloatingPills_NotRendered_WhenStatusStripOwnsSource()
+  {
+    // The pre-PR-4 panel rendered three independent pills:
+    //   - Fingerprint status pill in the top-left ("Searching" / "Strong" / …)
+    //     written via inline styles + GetFingerprintBadge*() helpers.
+    //   - Source RadzenBadge in the top-right ("SDR · RTL-SDR").
+    //   - Gain button next to the source badge ("0dB" / "+1.5dB").
+    //
+    // PR 4 folds all three into the status strip. The regression guard asserts
+    // none of the legacy artifacts survive. We render against a typical
+    // tuner-active scenario so all three previous pills would have been live.
+    var radioState = new RadioStateDto(
+      Frequency: 92.5e6, Band: "FM", Step: 100e3,
+      SignalStrength: 70, IsScanning: false, ScanDirection: null,
+      ScanStopThreshold: -18.0, Gain: 28, AutoGain: true,
+      Equalizer: "Flat", DeviceVolume: 70,
+      RdsStationName: "KEXP");
+    var fpStatus = new FingerprintStatusDto
+    {
+      IsEnabled = true,
+      Phase = "Querying", // would have surfaced as "Searching" pill
+      RecentEvents = new List<FingerprintEventDto>()
+    };
+    var cut = RenderComponent<NowPlayingPanel>();
+    SetStatusStripState(cut, "RTLSDRCore", "SDR Radio", radioState, fpStatus: fpStatus);
+
+    // No standalone "Searching" pill — the only place "Searching" appears would
+    // be inside the legacy badge, which is gone.
+    Assert.DoesNotContain("Searching", cut.Markup);
+    // No standalone RadzenBadge text rendered as a floating element.
+    var radzenBadges = cut.FindAll(".rz-badge");
+    Assert.Empty(radzenBadges);
+    // No leftover absolute-positioned "0dB" button — the gain cell now uses
+    // the formatted "+0.0 dB" string via FormatGainDb.
+    Assert.DoesNotMatch(@">\s*0dB\s*<", cut.Markup);
+  }
+
+  // ─── Wire-path regression: status strip updates on hub push ────────────────
+  //
+  // The status strip reads frequency / RDS / applied-gain off _radioState, which
+  // is populated by the typed RadioStateChanged hub event (PR 2). The PR 2
+  // wire-path test proves the recognition stream updates; this complementary
+  // test proves the status strip does too — same hub, same DTO, different
+  // consumer surface.
+
+  [Fact]
+  public async Task StatusStrip_FrequencyCell_UpdatesOnRadioStateHubPush()
+  {
+    var cut = RenderComponent<NowPlayingPanel>();
+
+    var instance = cut.Instance;
+    var type = typeof(NowPlayingPanel);
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+    type.GetField("_nowPlayingSourceType", flags)!.SetValue(instance, "RTLSDRCore");
+    type.GetField("_source", flags)!.SetValue(instance, "SDR Radio");
+    cut.Render();
+
+    var hubService = Services.GetRequiredService<AudioStateHubService>();
+    var eventField = typeof(AudioStateHubService).GetField(
+      nameof(AudioStateHubService.RadioStateChanged),
+      BindingFlags.NonPublic | BindingFlags.Instance);
+    Assert.NotNull(eventField);
+    var handler = (Func<RadioStateDto, Task>?)eventField!.GetValue(hubService);
+    Assert.NotNull(handler);
+
+    var dto = new RadioStateDto(
+      Frequency: 88.1e6, Band: "FM", Step: 100e3,
+      SignalStrength: 60, IsScanning: false, ScanDirection: null,
+      ScanStopThreshold: -20.0, Gain: 24, AutoGain: false,
+      Equalizer: "Flat", DeviceVolume: 70,
+      RdsStationName: "KFOG",
+      AppliedGain: 24.0);
+
+    await cut.InvokeAsync(() => handler!.Invoke(dto));
+
+    var freq = cut.Find(".np-status-cell-frequency").TextContent;
+    Assert.Contains("88.10", freq);
+    var rds = cut.Find(".np-status-rds-station");
+    Assert.Equal("KFOG", rds.TextContent);
   }
 }

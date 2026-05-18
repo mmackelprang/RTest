@@ -26,6 +26,59 @@
     <div style="position: absolute; inset: 0; background: var(--surface-inset);"></div>
   }
 
+  @* PR 4 status strip (handoff §P1·3) — replaces the three floating pills that
+     used to scatter the corners of the panel (Searching badge, source pill,
+     0dB gain pill). Source · Frequency · RDS · Gain in one row with 1px
+     separators. Frequency cell only renders for tuner sources; RDS cell
+     hides entirely when no station name. The gain cell is the entry point
+     for GainControlPopover. *@
+  @if (!string.IsNullOrEmpty(_nowPlayingSourceType))
+  {
+    <div class="np-status-strip @(_hasValidAlbumArt ? "has-art-bg" : null)"
+         style="position: relative; z-index: 2;">
+      @* Source cell — always shown. Coloured square uses the source-accent
+         CSS var (--source-radio / --source-file / etc) and the display name
+         comes from DisplayNames.Source so generic backend tokens like
+         "RTLSDRCore" surface as "SDR Radio". *@
+      <div class="np-status-cell np-status-cell-source">
+        <span class="np-status-swatch"
+              style="background: var(--@SourceAccentName);"></span>
+        <span class="np-status-name">@(string.IsNullOrEmpty(_source) ? _nowPlayingSourceType : _source)</span>
+      </div>
+
+      @* Frequency cell — only for radio-family sources. Routes through
+         FrequencyFormatter so AM/FM units differ correctly. *@
+      @if (_isTunerSource && _radioState != null)
+      {
+        <div class="np-status-cell np-status-cell-frequency">
+          <span class="np-status-freq">@FrequencyFormatter.FrequencyValue(_radioState.Frequency, _radioState.Band)</span>
+          <span class="np-status-mhz-chip">@(_radioState.Band == "AM" ? "kHz" : "MHz")</span>
+        </div>
+      }
+
+      @* RDS station cell — hidden when RDS hasn't surfaced a station name. *@
+      @if (_isTunerSource && !string.IsNullOrEmpty(_radioState?.RdsStationName))
+      {
+        <div class="np-status-cell np-status-cell-rds">
+          <span class="np-status-rds-station">@_radioState.RdsStationName</span>
+          <span class="np-status-rds-tag">RDS</span>
+        </div>
+      }
+
+      @* Gain cell — entry point for the popover. Always rendered; the
+         popover's auto pill / peak meter / slider live in GainControlPopover. *@
+      <div class="np-status-cell np-status-cell-gain"
+           role="button"
+           tabindex="0"
+           @onclick="ToggleGainPopover"
+           @onkeydown="HandleGainCellKeyDown"
+           title="Adjust source gain"
+           aria-label="Adjust source gain">
+        <span class="np-status-gain">@FormatGainDb(_currentSourceGain)</span>
+      </div>
+    </div>
+  }
+
   <!-- Album art — large, nearly panel-width -->
   <div style="position: relative; z-index: 1; flex: 1; display: flex; align-items: center; justify-content: center; padding: 12px; min-height: 0;">
     @if (_showFingerprintDetail)
@@ -152,58 +205,48 @@
       </div>
     }
 
-    <!-- Fingerprint status badge — top-left of album art area -->
-    @if (_fpStatus?.IsEnabled == true)
+    @* PR 4 — match badge anchored below the song title. Renders a ConfidencePips
+       widget plus a one-line summary ("Strong match · 12 s ago"). When the active
+       track came from RDS rather than the fingerprinter, the label reads
+       "RDS · station-supplied". When neither pipeline supplied the metadata,
+       the badge is hidden — no fake placeholder. Tapping the badge opens the
+       recognition stream (which is also how the legacy "Searching" pill worked,
+       so this is the new affordance). *@
+    @if (HasMatchBadge)
     {
-      <div @onclick="ToggleFingerprintDetail"
-           style="position: absolute; top: 16px; left: 16px; cursor: pointer; display: flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 12px; font-size: 11px; font-family: var(--font-mono); @GetFingerprintBadgeStyle()" title="@GetFingerprintBadgeTooltip()">
-        <span style="width: 7px; height: 7px; border-radius: 50%; @GetFingerprintDotStyle()"></span>
-        <span>@GetFingerprintBadgeText()</span>
+      <div class="np-match-badge @(IsRdsBadge ? "is-rds" : null)"
+           role="button"
+           tabindex="0"
+           @onclick="ToggleFingerprintDetail"
+           @onkeydown="HandleMatchBadgeKeyDown"
+           title="@MatchBadgeTooltip"
+           aria-label="@MatchBadgeTooltip">
+        @if (!IsRdsBadge)
+        {
+          <ConfidencePips Bucket="@(_activeMatch?.Confidence ?? ConfidenceBucket.None)" />
+        }
+        <span class="np-match-badge-label">@MatchBadgeLabel</span>
       </div>
     }
 
-    @if (!string.IsNullOrEmpty(_source))
-    {
-      <div style="position: absolute; top: 16px; right: 16px; display: flex; align-items: center; gap: 4px;">
-        <RadzenBadge BadgeStyle="BadgeStyle.Primary" IsPill="true" Text="@_source" />
-        @if (_currentSourceGain != 1.0f)
-        {
-          <button @onclick="ToggleGainPopover"
-                  style="font-family: var(--font-mono); font-size: 11px; cursor: pointer; background: var(--rz-secondary); color: var(--rz-on-secondary, #fff); border: none; border-radius: 12px; padding: 2px 10px; line-height: 1.6;">@FormatGainDb(_currentSourceGain)</button>
-        }
-        else
-        {
-          <button @onclick="ToggleGainPopover"
-                  style="font-family: var(--font-mono); font-size: 11px; cursor: pointer; opacity: 0.6; background: var(--rz-base-200, rgba(255,255,255,0.15)); color: var(--rz-on-base-200, #fff); border: none; border-radius: 12px; padding: 2px 10px; line-height: 1.6;">0dB</button>
-        }
-      </div>
-    }
-
-    <!-- Source gain popover + click-outside backdrop -->
+    @* PR 4 — gain popover. Mounted in the same absolute slot the legacy inline
+       popover occupied; click-outside backdrop closes it. The actual slider /
+       peak meter / scale labels live in GainControlPopover.razor. *@
     @if (_showGainPopover && !string.IsNullOrEmpty(_nowPlayingSourceType))
     {
       <div @onclick="CloseGainPopover" style="position: fixed; inset: 0; z-index: 9;"></div>
-      <div @onclick:stopPropagation="true"
-           style="position: absolute; top: 48px; right: 16px; z-index: 10; background: rgba(30,30,30,0.95); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 12px 16px; min-width: 240px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-          <span style="font-size: 0.875rem; color: var(--text-high);">@(_source ?? "Source") Level</span>
-          <span style="font-size: 0.75rem; font-family: var(--font-mono); color: var(--text-medium);">@FormatGainDb(_currentSourceGain)</span>
-        </div>
-        <div style="display: flex; align-items: center; gap: 4px;">
-          <RadzenButton Icon="remove" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Secondary"
-                        Variant="Variant.Text" Click="@(() => NudgeGain(-0.05f))" Style="padding: 2px; min-width: 28px;" title="-0.25dB" />
-          <RadzenSlider TValue="float" Value="@_currentSourceGain"
-                        Change="@OnGainSliderChanged"
-                        Min="0.0m" Max="2.0m" Step="0.05m"
-                        Style="flex: 1;" />
-          <RadzenButton Icon="add" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Secondary"
-                        Variant="Variant.Text" Click="@(() => NudgeGain(0.05f))" Style="padding: 2px; min-width: 28px;" title="+0.25dB" />
-        </div>
-        <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-low); margin-top: 2px; padding: 0 32px; font-family: var(--font-mono);">
-          <span>-∞</span>
-          <span>0dB</span>
-          <span>+6dB</span>
-        </div>
+      <div class="np-gain-popover-anchor">
+        <GainControlPopover IsOpen="true"
+                            SourceType="@_nowPlayingSourceType"
+                            SourceKicker="@GainPopoverKicker"
+                            Title="@GainPopoverTitle"
+                            ShowAutoToggle="@SourceSupportsAutoGain"
+                            IsAuto="@(_radioState?.AutoGain ?? false)"
+                            CurrentValue="@_currentSourceGain"
+                            AppliedGainDb="@(_radioState?.AppliedGain ?? 0.0)"
+                            OnValueChanged="OnGainSliderChanged"
+                            OnAutoToggled="ToggleAutoGainAsync"
+                            OnReset="ResetGainAsync" />
       </div>
     }
   </div>
@@ -334,6 +377,102 @@
   private bool _showGainPopover;
   private Dictionary<string, float> _sourceGainOffsets = new();
   private System.Threading.Timer? _gainDebounceTimer;
+
+  // PR 4 — convenience predicates for the status strip / match badge. Computed
+  // off the cached _nowPlayingSourceType so the template stays readable.
+  private bool _isTunerSource => SourceTypeHelper.IsRadioFamily(_nowPlayingSourceType);
+
+  /// <summary>
+  /// CSS custom-property name (without the leading <c>--</c>) for the source
+  /// accent colour. The status strip's coloured square uses this — paired with
+  /// the <c>--</c> prefix in the template's inline style.
+  /// </summary>
+  private string SourceAccentName
+  {
+    get
+    {
+      var raw = SourceTypeHelper.GetAccentVar(_nowPlayingSourceType ?? string.Empty);
+      // GetAccentVar returns "--source-radio" etc. The template prepends "--",
+      // so strip the leading double-hyphen here.
+      return raw.StartsWith("--", StringComparison.Ordinal) ? raw[2..] : raw;
+    }
+  }
+
+  /// <summary>
+  /// True when the gain cell should expose an AGC toggle inside the popover —
+  /// i.e. the active source is part of the radio family (RTL-SDR). For
+  /// non-radio sources gain is purely manual.
+  /// </summary>
+  private bool SourceSupportsAutoGain => _isTunerSource;
+
+  /// <summary>
+  /// Mono kicker inside the gain popover header. Empty for sources that don't
+  /// have a meaningful "RF gain" sub-context; otherwise "SDR · {source-name}".
+  /// </summary>
+  private string GainPopoverKicker => _isTunerSource && !string.IsNullOrEmpty(_source)
+    ? $"SDR · {_source}"
+    : string.Empty;
+
+  /// <summary>Header title in the gain popover. Radio sources surface "RF gain"; everything else gets "Source gain".</summary>
+  private string GainPopoverTitle => _isTunerSource ? "RF gain" : "Source gain";
+
+  // PR 4 — match badge state derived from _fpStatus + _radioState.
+  // _activeMatch resolves to the row whose MatchId == NowPlayingMatchId when the
+  // recognition stream has an anchor; otherwise null (no fingerprint match).
+  private FingerprintEventDto? _activeMatch
+  {
+    get
+    {
+      var anchorId = _radioState?.NowPlayingMatchId;
+      if (string.IsNullOrEmpty(anchorId) || _fpEventsReversed == null) return null;
+      return _fpEventsReversed.FirstOrDefault(e => e.MatchId == anchorId && e.IsMatch);
+    }
+  }
+
+  /// <summary>
+  /// True when the now-playing track was supplied by RDS rather than by the
+  /// fingerprinter. RDS supplies a station name; track-level metadata for an
+  /// FM station is uncommon, so we treat "tuner source + station name + no
+  /// fingerprint anchor" as the RDS case.
+  /// </summary>
+  private bool IsRdsBadge =>
+    _isTunerSource
+    && !string.IsNullOrEmpty(_radioState?.RdsStationName)
+    && _activeMatch == null;
+
+  /// <summary>
+  /// True when the match badge should render at all — either we have a real
+  /// fingerprint match, or we're showing the RDS-supplied fallback line.
+  /// </summary>
+  private bool HasMatchBadge => _activeMatch != null || IsRdsBadge;
+
+  /// <summary>
+  /// Human-readable badge label. For a fingerprint match it reads
+  /// <c>{Bucket} match · {time-ago}</c>; for RDS it reads
+  /// <c>RDS · station-supplied</c>. Never surfaces a percentage.
+  /// </summary>
+  private string MatchBadgeLabel
+  {
+    get
+    {
+      if (IsRdsBadge) return "RDS · station-supplied";
+      var m = _activeMatch;
+      if (m == null) return string.Empty;
+      var label = m.Confidence switch
+      {
+        ConfidenceBucket.Strong => "Strong match",
+        ConfidenceBucket.Likely => "Likely match",
+        ConfidenceBucket.Possible => "Possible match",
+        _ => "Match"
+      };
+      return $"{label} · {FormatTimeAgo(m.Timestamp)}";
+    }
+  }
+
+  /// <summary>Tooltip + aria-label for the match badge. Doubles as a hint that taps open the recognition stream.</summary>
+  private string MatchBadgeTooltip => IsRdsBadge
+    ? "RDS-supplied track info. Tap to view the recognition stream."
+    : "Tap to view the recognition stream.";
 
   // Periodic fallback poll for now playing updates (safety net for missed SignalR events)
   private System.Threading.Timer? _nowPlayingPollTimer;
@@ -611,82 +750,16 @@
     }
   }
 
-  private string GetFingerprintBadgeText()
+  /// <summary>
+  /// Keyboard activator for the match badge — Enter / Space mimic the click
+  /// handler so the badge is reachable without a touch event.
+  /// </summary>
+  private void HandleMatchBadgeKeyDown(KeyboardEventArgs e)
   {
-    var phase = _fpStatus?.Phase ?? "Idle";
-    return phase switch
+    if (e.Key == "Enter" || e.Key == " ")
     {
-      "Capturing" => "Listening",
-      "Fingerprinting" => "Analyzing",
-      "Querying" => "Searching",
-      // PR 2 of the Radio Controller Polish arc — the badge mirrors the
-      // recognition stream and renders a word, never a raw percentage. The
-      // bucket label comes from the most-recent match's coarse Confidence.
-      "Matched" => GetMatchedBadgeLabel(),
-      "NoMatch" => "No ID",
-      "Error" => "Error",
-      _ => "ID"
-    };
-  }
-
-  private string GetMatchedBadgeLabel()
-  {
-    var latestMatch = _fpStatus?.RecentEvents?
-      .LastOrDefault(e => e.IsMatch);
-    return latestMatch?.Confidence switch
-    {
-      ConfidenceBucket.Strong => "Strong",
-      ConfidenceBucket.Likely => "Likely",
-      ConfidenceBucket.Possible => "Possible",
-      _ => "Match"
-    };
-  }
-
-  private string GetFingerprintBadgeStyle()
-  {
-    var phase = _fpStatus?.Phase ?? "Idle";
-    return phase switch
-    {
-      "Capturing" or "Fingerprinting" or "Querying" =>
-        "background: rgba(0,188,212,0.2); border: 1px solid rgba(0,188,212,0.5); color: #00bcd4;",
-      "Matched" =>
-        "background: rgba(76,175,80,0.2); border: 1px solid rgba(76,175,80,0.5); color: #4caf50;",
-      "Error" =>
-        "background: rgba(244,67,54,0.2); border: 1px solid rgba(244,67,54,0.5); color: #f44336;",
-      _ => // Idle, NoMatch
-        "background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: var(--text-low);"
-    };
-  }
-
-  private string GetFingerprintDotStyle()
-  {
-    var phase = _fpStatus?.Phase ?? "Idle";
-    return phase switch
-    {
-      "Capturing" or "Fingerprinting" or "Querying" =>
-        "background: #00bcd4; animation: fpPulse 1.5s ease-in-out infinite;",
-      "Matched" =>
-        "background: #4caf50;",
-      "Error" =>
-        "background: #f44336;",
-      _ =>
-        "background: rgba(255,255,255,0.3);"
-    };
-  }
-
-  private string GetFingerprintBadgeTooltip()
-  {
-    var phase = _fpStatus?.Phase ?? "Idle";
-    return phase switch
-    {
-      "Capturing" => "Capturing audio for fingerprinting",
-      "Fingerprinting" => "Generating audio fingerprint",
-      "Querying" => "Querying AcoustID database",
-      "Matched" => "Track identified",
-      "NoMatch" => "Track not identified",
-      "Error" => $"Fingerprint error: {_fpStatus?.LastError ?? "unknown"}",
-      _ => "Audio fingerprinting idle"
-    };
+      ToggleFingerprintDetail();
+    }
   }
 
   /// <summary>
@@ -732,10 +805,53 @@
     _showGainPopover = false;
   }
 
-  private void NudgeGain(float delta)
+  /// <summary>
+  /// Keyboard activator for the status-strip gain cell — Enter / Space open
+  /// the popover, mirroring the click handler so the cell stays reachable
+  /// without a touch event.
+  /// </summary>
+  private void HandleGainCellKeyDown(KeyboardEventArgs e)
   {
-    var newGain = Math.Clamp(_currentSourceGain + delta, 0f, 2f);
-    OnGainSliderChanged(newGain);
+    if (e.Key == "Enter" || e.Key == " ")
+    {
+      ToggleGainPopover();
+    }
+  }
+
+  /// <summary>
+  /// AGC toggle from inside the popover. Mirrors the path
+  /// <c>RadioControlPanel.HandleAutoGainChangedAsync</c> walks — both surfaces
+  /// converge on <see cref="RadioApiService.SetAutoGainAsync"/> and the server
+  /// then rebroadcasts the new <c>AutoGain</c> via the typed RadioStateChanged
+  /// hub event so both panels stay in sync (handoff §P2·1 / arc risk note).
+  /// </summary>
+  private async Task ToggleAutoGainAsync()
+  {
+    if (!_isTunerSource) return; // Auto only meaningful for radio sources
+    var current = _radioState?.AutoGain ?? false;
+    try
+    {
+      await RadioApi.SetAutoGainAsync(!current);
+      // Refresh via REST as a safety net — the typed hub push will normally
+      // beat this round-trip and update _radioState.AutoGain first.
+      await RefreshRadioStateAsync();
+      await InvokeAsync(StateHasChanged);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to toggle AGC from gain popover");
+    }
+  }
+
+  /// <summary>
+  /// Reset the per-source playback gain to unity (linear 1.0 → 0 dB). The
+  /// slider value-changed callback follows immediately so the debounce timer
+  /// fires the API write through the same path as a manual slider drag.
+  /// </summary>
+  private void ResetGainAsync()
+  {
+    if (_radioState?.AutoGain == true) return; // disabled while AGC is on
+    OnGainSliderChanged(1.0f);
   }
 
   private void OnGainSliderChanged(float newGain)

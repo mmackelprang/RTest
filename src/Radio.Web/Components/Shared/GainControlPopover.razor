@@ -1,0 +1,306 @@
+@*
+  GainControlPopover — extracted from the inline RadzenSlider+nudge buttons block that
+  used to live in NowPlayingPanel.razor lines ~168–194. Per the Radio Controller Polish
+  arc PR 4 (handoff §P2·1), the popover now carries:
+
+    - A vertical peak meter on the left, driven by the AudioVisualizationHub OnLevelData
+      stream. Segments light bottom-up: 12 green / 5 amber / 3 red across a 0..20 range
+      mapped from -60..0 dBFS. A 1px hold line decays 0.5 dB / 200 ms (~1 segment / 600 ms).
+    - A vertical slider in the middle with a dashed "0 dB" tick at midpoint. The slider
+      operates in linear gain space (0.0 .. 2.0, matching the existing source-gain API)
+      so the parent's existing OnGainSliderChanged / debounce wiring stays unchanged.
+      Scale labels (+6 / +3 / 0 / −12 / −24 / −∞) come from the dB column on the right.
+    - An "Auto on / Auto off" pill in the header. Only meaningful for radio-family
+      sources (RTL-SDR AGC). For non-radio sources the pill is hidden — gain is purely
+      manual.
+    - A footer with the current gain in DSEG amber and a "Reset to 0 dB" button.
+      Reset is disabled while Auto is on (the device is choosing the gain).
+
+  CSS in design-system.css §Z Gain Control Popover.
+
+  The component is "dumb" — it takes a snapshot of state via parameters and emits events
+  for value change / auto toggle / reset / close. The parent (NowPlayingPanel) owns the
+  debounce timer + API calls, exactly as it did with the inline popover.
+*@
+
+@inject AudioVisualizationHubService VisualizationHub
+@inject ILogger<GainControlPopover> Logger
+@implements IAsyncDisposable
+
+<div class="gain-popover @(IsOpen ? "is-open" : null)"
+     role="dialog"
+     aria-label="Gain control"
+     @onclick:stopPropagation="true">
+  <div class="gain-popover-header">
+    @if (!string.IsNullOrEmpty(SourceKicker))
+    {
+      <span class="gain-popover-kicker">@SourceKicker</span>
+    }
+    <span class="gain-popover-title">@Title</span>
+    @if (ShowAutoToggle)
+    {
+      <button class="gain-popover-auto @(IsAuto ? "is-on" : "is-off")"
+              type="button"
+              @onclick="HandleAutoToggleAsync"
+              aria-pressed="@(IsAuto.ToString().ToLowerInvariant())">
+        @(IsAuto ? "Auto on" : "Auto off")
+      </button>
+    }
+  </div>
+
+  <div class="gain-popover-body">
+    <div class="gain-popover-peakmeter" aria-label="Peak meter">
+      @for (var i = 0; i < SegmentCount; i++)
+      {
+        <div class="gain-popover-peak-segment @(i < _peakSegments ? "is-lit" : null)"></div>
+      }
+      @* Hold mark renders as a 1px line. Positioning relative to the bottom of
+         the column matches the bottom-up flex-direction of the segments. *@
+      @if (_peakHoldSegment > 0)
+      {
+        var holdPercent = (double)_peakHoldSegment / SegmentCount * 100.0;
+        <div class="gain-popover-peak-hold"
+             style="bottom: @holdPercent.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)%"></div>
+      }
+    </div>
+    <div class="gain-popover-slider @(IsAuto ? "is-disabled" : null)">
+      <input type="range"
+             min="0" max="2" step="0.01"
+             value="@CurrentValue.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)"
+             @oninput="HandleSliderInput"
+             disabled="@IsAuto"
+             aria-label="Gain"
+             aria-valuemin="0" aria-valuemax="2"
+             aria-valuenow="@CurrentValue.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)" />
+      <div class="gain-popover-zero-tick"></div>
+    </div>
+    <div class="gain-popover-scale">
+      <span>+6</span>
+      <span>+3</span>
+      <span>0</span>
+      <span>−12</span>
+      <span>−24</span>
+      <span>−∞</span>
+    </div>
+  </div>
+
+  <div class="gain-popover-footer">
+    @* IsAuto routes to the dB overload (device-reported gain is already in dB).
+       Manual mode routes to the float overload so the linear 0..2 slider value
+       gets log-converted into a dB readout. Split conditional avoids C#'s
+       widening of the float to double through a single ternary expression. *@
+    @if (IsAuto)
+    {
+      <span class="gain-popover-value">@FormatGainDb(AppliedGainDb)</span>
+    }
+    else
+    {
+      <span class="gain-popover-value">@FormatGainDb(CurrentValue)</span>
+    }
+    <button class="gain-popover-reset"
+            type="button"
+            @onclick="HandleResetAsync"
+            disabled="@IsAuto">
+      Reset to 0 dB
+    </button>
+  </div>
+</div>
+
+@code {
+  /// <summary>
+  /// Whether the popover is rendered open. Drives the <c>is-open</c> class so the
+  /// CSS can fade/scale-in.
+  /// </summary>
+  [Parameter] public bool IsOpen { get; set; }
+
+  /// <summary>
+  /// Source type token (e.g. "RTLSDRCore", "FilePlayer"). Used only to decide
+  /// whether to show the Auto on/off pill — gain stays in linear 0..2 space.
+  /// </summary>
+  [Parameter] public string SourceType { get; set; } = string.Empty;
+
+  /// <summary>
+  /// Short uppercase mono kicker rendered in the header (e.g. "SDR · RTL-SDR").
+  /// Optional — hidden when empty.
+  /// </summary>
+  [Parameter] public string SourceKicker { get; set; } = string.Empty;
+
+  /// <summary>
+  /// Header title (Inter 14px). Defaults to "Gain". For radio sources callers
+  /// pass "RF gain" so the kicker + title combine to "SDR · RTL-SDR / RF gain".
+  /// </summary>
+  [Parameter] public string Title { get; set; } = "Gain";
+
+  /// <summary>
+  /// Whether AGC is on (radio sources only). When true the slider is dimmed,
+  /// pointer events are blocked, Reset is disabled, and the footer surfaces
+  /// the device-chosen gain (<see cref="AppliedGainDb"/>) instead of the
+  /// slider value.
+  /// </summary>
+  [Parameter] public bool IsAuto { get; set; }
+
+  /// <summary>
+  /// Whether the Auto on/off pill is visible. Defaults to false; the parent
+  /// flips it to true for radio-family sources (RTL-SDR AGC).
+  /// </summary>
+  [Parameter] public bool ShowAutoToggle { get; set; }
+
+  /// <summary>
+  /// Live linear gain value (0.0 .. 2.0). Mirrors the existing source-gain API
+  /// — 0.0 is mute, 1.0 is unity (0 dB), 2.0 is +6.02 dB.
+  /// </summary>
+  [Parameter] public float CurrentValue { get; set; } = 1.0f;
+
+  /// <summary>
+  /// Device-reported applied gain in dB when AGC is on. Shown in the footer in
+  /// place of the slider value while <see cref="IsAuto"/> is true.
+  /// </summary>
+  [Parameter] public double AppliedGainDb { get; set; }
+
+  /// <summary>Number of vertical segments in the peak meter. Default 20.</summary>
+  [Parameter] public int SegmentCount { get; set; } = 20;
+
+  /// <summary>Fires when the slider value changes. Parent owns the debounce + API call.</summary>
+  [Parameter] public EventCallback<float> OnValueChanged { get; set; }
+
+  /// <summary>Fires when the Auto pill is tapped. Parent owns the AGC API call.</summary>
+  [Parameter] public EventCallback OnAutoToggled { get; set; }
+
+  /// <summary>Fires when Reset is tapped. Parent applies <c>1.0f</c> (0 dB linear).</summary>
+  [Parameter] public EventCallback OnReset { get; set; }
+
+  // ── Peak meter state ───────────────────────────────────────────────────────
+
+  private int _peakSegments;
+  private int _peakHoldSegment;
+  private DateTime _lastHoldUpdate = DateTime.UtcNow;
+  private System.Threading.Timer? _decayTimer;
+  private bool _subscribed;
+  private bool _isDisposed;
+
+  protected override async Task OnInitializedAsync()
+  {
+    // Subscribe to the visualizer hub's level stream — same source the VU meter
+    // already consumes. If the hub isn't running yet, ensure it starts; the
+    // VisualizerPanel also calls StartAsync defensively, so a no-op race is fine.
+    try
+    {
+      VisualizationHub.OnLevelData += HandleLevelData;
+      _subscribed = true;
+      // Ensure the hub is started and we're subscribed to the Levels group so
+      // ReceiveLevels actually fires. Both calls are idempotent.
+      await VisualizationHub.StartAsync();
+      await VisualizationHub.SubscribeToLevelsAsync();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "GainControlPopover: failed to wire up levels subscription");
+    }
+
+    // Decay the hold mark by ~1 segment every 600 ms (≈0.5 dB / 200 ms on
+    // a 60 dB range mapped to 20 segments → 3 dB / segment → 1.2 s / segment.
+    // We pick 600 ms as a livelier compromise that still matches the spec).
+    _decayTimer = new System.Threading.Timer(_ =>
+    {
+      if (_isDisposed) return;
+      _ = InvokeAsync(() =>
+      {
+        DecayHold();
+        StateHasChanged();
+      });
+    }, null, TimeSpan.FromMilliseconds(600), TimeSpan.FromMilliseconds(600));
+  }
+
+  private Task HandleLevelData(LevelDataDto data)
+  {
+    if (_isDisposed) return Task.CompletedTask;
+    // Map peak dBFS into 0..SegmentCount. The two channels independently
+    // populate the meter — take the higher of the two so a louder side
+    // drives the bars (matches typical "peak meter" semantics).
+    var peakDb = Math.Max(data.LeftPeakDb, data.RightPeakDb);
+    // -60 dBFS → 0 lit; 0 dBFS → SegmentCount lit. Clamp into range.
+    var lit = (int)Math.Round((peakDb + 60.0) / 60.0 * SegmentCount);
+    lit = Math.Clamp(lit, 0, SegmentCount);
+    _peakSegments = lit;
+    if (lit > _peakHoldSegment)
+    {
+      _peakHoldSegment = lit;
+      _lastHoldUpdate = DateTime.UtcNow;
+    }
+    return InvokeAsync(StateHasChanged);
+  }
+
+  private void DecayHold()
+  {
+    // Hold decays one segment every 600 ms after the most recent hit.
+    var elapsed = (DateTime.UtcNow - _lastHoldUpdate).TotalMilliseconds;
+    if (elapsed >= 600 && _peakHoldSegment > 0)
+    {
+      _peakHoldSegment = Math.Max(0, _peakHoldSegment - 1);
+      _lastHoldUpdate = DateTime.UtcNow;
+    }
+  }
+
+  private async Task HandleSliderInput(ChangeEventArgs e)
+  {
+    if (IsAuto) return;
+    if (e.Value == null) return;
+    if (float.TryParse(e.Value.ToString(), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var v))
+    {
+      CurrentValue = Math.Clamp(v, 0f, 2f);
+      await OnValueChanged.InvokeAsync(CurrentValue);
+    }
+  }
+
+  private async Task HandleAutoToggleAsync()
+  {
+    await OnAutoToggled.InvokeAsync();
+  }
+
+  private async Task HandleResetAsync()
+  {
+    if (IsAuto) return;
+    CurrentValue = 1.0f; // linear 0 dB
+    await OnReset.InvokeAsync();
+    await OnValueChanged.InvokeAsync(CurrentValue);
+  }
+
+  /// <summary>
+  /// Formats a linear gain (0..2 ish) into a dB display string. 0.0 surfaces as
+  /// "−∞ dB"; everything else uses 20·log10. Mirrors the existing
+  /// <c>NowPlayingPanel.FormatGainDb</c> so the popover and the strip cell
+  /// agree to the tenth.
+  /// </summary>
+  internal static string FormatGainDb(float gain)
+  {
+    if (gain <= 0.001f) return "−∞ dB";
+    var db = 20.0 * Math.Log10(gain);
+    return db >= 0 ? $"+{db:F1} dB" : $"{db:F1} dB";
+  }
+
+  /// <summary>
+  /// Footer overload — when AGC is on the parent feeds the device-chosen dB
+  /// value directly and we render it as-is (already in dB, no log conversion).
+  /// </summary>
+  private static string FormatGainDb(double db)
+  {
+    if (double.IsNaN(db) || double.IsInfinity(db)) return "—";
+    return db >= 0 ? $"+{db:F1} dB" : $"{db:F1} dB";
+  }
+
+  public async ValueTask DisposeAsync()
+  {
+    _isDisposed = true;
+    if (_subscribed)
+    {
+      VisualizationHub.OnLevelData -= HandleLevelData;
+      _subscribed = false;
+    }
+    if (_decayTimer != null)
+    {
+      await _decayTimer.DisposeAsync();
+      _decayTimer = null;
+    }
+  }
+}
