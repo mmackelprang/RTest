@@ -47,7 +47,7 @@
   </ItemGroup>
   <!-- Linux-only: Tmds.DBus for BlueZ D-Bus interop -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
-    <PackageReference Include="Tmds.DBus" Version="0.90.2" />
+    <PackageReference Include="Tmds.DBus" Version="0.93.0" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Radio.Configuration\Radio.Configuration.csproj" />
