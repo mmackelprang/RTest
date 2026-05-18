@@ -5,6 +5,7 @@ using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Fingerprinting;
 using Radio.Core.Models.Audio;
+using Radio.Infrastructure.Audio;
 using Radio.Infrastructure.Audio.Sources.Primary;
 
 namespace Radio.Infrastructure.Tests.Audio.Sources.Primary;
@@ -837,12 +838,233 @@ public class FilePlayerAudioSourceTests : IDisposable
     // Assert
     Assert.NotNull(queue);
     Assert.Equal(2, queue.Count);
-    
+
     // Check metadata fields are populated (using defaults since test files don't have tags)
     Assert.NotNull(queue[0].Title);
     Assert.NotNull(queue[0].Artist);
     Assert.NotNull(queue[0].Album);
     Assert.NotNull(queue[0].Id);
+  }
+
+  // -- Album-art-on-enqueue tests (Task #81) ------------------------------------
+  //
+  // PR D added AlbumArtUrl to QueueItemDto and Up Next reads it with music_note fallback.
+  // FilePlayerAudioSource is the producer; CreateQueueItem / CreateQueueItemWithState
+  // must surface the URL so Up Next renders real art instead of placeholder icons.
+
+  [Fact]
+  public async Task GetQueueAsync_WithoutAlbumArtCache_ReturnsNullAlbumArtUrl()
+  {
+    // Arrange: source with no AlbumArtCacheService — TryGetEmbeddedAlbumArtUrl
+    // returns null on the cache==null guard, regardless of file content.
+    var source = CreateSource();
+    CreateTestFile("song1.mp3");
+    await source.LoadDirectoryAsync("");
+
+    // Act
+    var queue = await source.GetQueueAsync();
+
+    // Assert
+    Assert.Single(queue);
+    Assert.Null(queue[0].AlbumArtUrl);
+  }
+
+  [Fact]
+  public async Task GetQueueAsync_WithCacheButInvalidFile_ReturnsNullAlbumArtUrl()
+  {
+    // Arrange: cache wired but file content is "test" — TagLib throws and we
+    // log+swallow, returning null. Up Next falls back to music_note.
+    var cache = CreateAlbumArtCacheService();
+    var source = CreateSourceWithAlbumArtCache(cache);
+    CreateTestFile("song1.mp3");
+    await source.LoadDirectoryAsync("");
+
+    // Act
+    var queue = await source.GetQueueAsync();
+
+    // Assert
+    Assert.Single(queue);
+    Assert.Null(queue[0].AlbumArtUrl);
+  }
+
+  [Fact]
+  public async Task GetQueueAsync_WithCacheAndEmbeddedArt_PopulatesAlbumArtUrl()
+  {
+    // Arrange: real MP3 fixture with an APIC frame injected via TagLib#.
+    // Producer must surface the cached /api/albumart/<hash>.<ext> URL.
+    var cache = CreateAlbumArtCacheService();
+    var source = CreateSourceWithAlbumArtCache(cache);
+    var mp3WithArt = CreateMp3WithEmbeddedArt("song-with-art.mp3");
+    try
+    {
+      await source.LoadDirectoryAsync("");
+
+      // Act
+      var queue = await source.GetQueueAsync();
+
+      // Assert: art-bearing track has a real proxy URL.
+      var item = queue.Single(q => q.Id == mp3WithArt);
+      Assert.NotNull(item.AlbumArtUrl);
+      Assert.StartsWith("/api/albumart/", item.AlbumArtUrl);
+    }
+    finally
+    {
+      await source.DisposeAsync();
+    }
+  }
+
+  [Fact]
+  public async Task GetQueueAsync_WithCacheAndNoArt_ReturnsNullAlbumArtUrl()
+  {
+    // Arrange: real MP3 fixture WITHOUT any embedded picture.
+    // TryGetEmbeddedAlbumArtUrl returns null on the pictures==empty guard.
+    var cache = CreateAlbumArtCacheService();
+    var source = CreateSourceWithAlbumArtCache(cache);
+    var mp3NoArt = CreateMp3WithoutEmbeddedArt("song-no-art.mp3");
+    try
+    {
+      await source.LoadDirectoryAsync("");
+
+      // Act
+      var queue = await source.GetQueueAsync();
+
+      // Assert
+      var item = queue.Single(q => q.Id == mp3NoArt);
+      Assert.Null(item.AlbumArtUrl);
+    }
+    finally
+    {
+      await source.DisposeAsync();
+    }
+  }
+
+  [Fact]
+  public async Task GetFullPlaylistAsync_WithEmbeddedArt_PopulatesAlbumArtUrl()
+  {
+    // Arrange: same as above but exercises the CreateQueueItemWithState path used by
+    // GetFullPlaylistAsync (the path that backs /api/queue/full — the endpoint the
+    // Up Next tile reads).
+    var cache = CreateAlbumArtCacheService();
+    var source = CreateSourceWithAlbumArtCache(cache);
+    var mp3WithArt = CreateMp3WithEmbeddedArt("full-playlist-art.mp3");
+    try
+    {
+      await source.LoadFileAsync(Path.GetFileName(mp3WithArt));
+
+      // Act
+      var fullPlaylist = await source.GetFullPlaylistAsync();
+
+      // Assert: the loaded (current) track surfaces the album-art URL through the
+      // CreateQueueItemWithState path used by full-playlist projection.
+      var item = fullPlaylist.Single(q => q.Id == mp3WithArt);
+      Assert.NotNull(item.AlbumArtUrl);
+      Assert.StartsWith("/api/albumart/", item.AlbumArtUrl);
+    }
+    finally
+    {
+      await source.DisposeAsync();
+    }
+  }
+
+  // -- Album-art test helpers ---------------------------------------------------
+
+  // The album-art cache writes to ./data/albumart by design (content-addressed,
+  // shared cache). We let it write there and rely on the SHA-256 dedup to keep
+  // the on-disk footprint minimal across test runs.
+  private static AlbumArtCacheService CreateAlbumArtCacheService()
+  {
+    var logger = new Mock<ILogger<AlbumArtCacheService>>().Object;
+    return new AlbumArtCacheService(logger);
+  }
+
+  private FilePlayerAudioSource CreateSourceWithAlbumArtCache(AlbumArtCacheService cache)
+  {
+    return new FilePlayerAudioSource(
+      _loggerMock.Object,
+      _optionsMock.Object,
+      _preferencesMock.Object,
+      _testDir,
+      albumArtCache: cache);
+  }
+
+  // Path to a real MP3 already in the repo. Used as the "base" of fixture files
+  // because constructing a valid MP3 from scratch is non-trivial and TagLib needs
+  // a real audio container to write tags to.
+  private static readonly string SampleMp3 =
+    Path.GetFullPath(Path.Combine(
+      AppContext.BaseDirectory,
+      "..", "..", "..", "..", "..", "src", "Radio.API", "media", "audio", "alarm",
+      "PD - Alert.mp3"));
+
+  // A tiny synthetic PNG payload (8x8 transparent) used as the embedded picture.
+  // Generated once via System.Drawing-equivalent magic-byte construction. PNG
+  // header + IHDR + IDAT + IEND chunks for an 8x8 RGBA image. TagLib treats this
+  // as opaque bytes — it never decodes the image.
+  private static readonly byte[] TinyPng = new byte[]
+  {
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
+    0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR length + type
+    0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x08, // 8x8
+    0x08, 0x06, 0x00, 0x00, 0x00, 0xC4, 0x0F, 0xBE, // 8-bit RGBA + CRC
+    0x8B,
+    0x00, 0x00, 0x00, 0x13, 0x49, 0x44, 0x41, 0x54, // IDAT length + type
+    0x78, 0x9C, 0x63, 0xF8, 0xCF, 0xC0, 0xF0, 0x1F, // zlib-compressed solid
+    0x09, 0x00, 0x80, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, // (placeholder; CRC may be off
+    0x00, 0x00, 0x00, 0xFF,                         // but TagLib doesn't validate)
+    0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, // IEND length + type
+    0xAE, 0x42, 0x60, 0x82                          // IEND CRC
+  };
+
+  // Copies the sample MP3 into the test dir under the given name, then injects a
+  // FrontCover APIC frame. Returns the absolute path to the resulting file.
+  private string CreateMp3WithEmbeddedArt(string relativePath)
+  {
+    var dest = CopySampleMp3(relativePath);
+    using (var tag = TagLib.File.Create(dest))
+    {
+      tag.Tag.Pictures = new TagLib.IPicture[]
+      {
+        new TagLib.Picture(new TagLib.ByteVector(TinyPng))
+        {
+          Type = TagLib.PictureType.FrontCover,
+          MimeType = "image/png",
+          Description = "Cover"
+        }
+      };
+      tag.Save();
+    }
+    return dest;
+  }
+
+  // Copies the sample MP3 into the test dir under the given name and ensures no
+  // pictures are present (TagLib defaults strip embedded art on Save when the
+  // pictures collection is empty).
+  private string CreateMp3WithoutEmbeddedArt(string relativePath)
+  {
+    var dest = CopySampleMp3(relativePath);
+    using (var tag = TagLib.File.Create(dest))
+    {
+      tag.Tag.Pictures = Array.Empty<TagLib.IPicture>();
+      tag.Save();
+    }
+    return dest;
+  }
+
+  private string CopySampleMp3(string relativePath)
+  {
+    if (!System.IO.File.Exists(SampleMp3))
+    {
+      throw new InvalidOperationException(
+        $"Sample MP3 fixture not found at expected repo path: {SampleMp3}");
+    }
+    var dest = Path.Combine(_testDir, relativePath);
+    var destDir = Path.GetDirectoryName(dest);
+    if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir))
+    {
+      Directory.CreateDirectory(destDir);
+    }
+    System.IO.File.Copy(SampleMp3, dest, overwrite: true);
+    return dest;
   }
 
   [Fact]
