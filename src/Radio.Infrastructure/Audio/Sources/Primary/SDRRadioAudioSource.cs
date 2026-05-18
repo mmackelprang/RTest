@@ -38,16 +38,19 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   private string? _playbackId;
   private bool _hasRestoredPreferences;
 
-  // PR D #40 + Task #80 — tracks the last-stable RDS Program-Service (PS)
-  // value so the save-preset dialog and history records don't seed with
-  // mid-roll fragments. Observe() is driven by the receiver's
-  // RdsStationNameChanged event (which fires once per RDS PS frame, ~10 Hz)
-  // — NOT by the broadcast loop polling RdsStationNameStable. Sampling at
-  // the property-read rate gave only ~2 Hz, which let rolling-PS fragments
-  // (e.g. "WSMW THE", "CARS") accumulate 3 consecutive identical poll
-  // samples and get promoted to "stable".
+  // PR D #40 + Task #80 (v2) — tracks the last-stable RDS Program-Service
+  // (PS) value so the save-preset dialog and history records don't seed
+  // with mid-roll fragments. Observe() is driven by the receiver's
+  // RdsStationNameChanged event (~10 Hz frame rate). The tracker scores
+  // each unique PS value in a 60s sliding window by occurrence count
+  // plus a +10 boost when the value contains a North-American
+  // call-sign-shape token — so rolling-PS rotations like
+  // {"ON WUNC", "On Point"} or {"WSMW", "TOO HOT", "KOOL", "THE GANG",
+  // "SIMON", "336"} promote the call-sign-shaped fragment instead of
+  // whichever non-station-ID rotation entry happened to be in the
+  // buffer.
   private readonly RdsStationNameStabilityTracker _rdsStationNameStabilityTracker
-    = new RdsStationNameStabilityTracker(windowSize: 3);
+    = new RdsStationNameStabilityTracker();
 
   /// <summary>
   /// Initializes a new instance of the <see cref="SDRRadioAudioSource"/> class.
