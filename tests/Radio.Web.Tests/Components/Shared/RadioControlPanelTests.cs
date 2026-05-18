@@ -422,10 +422,19 @@ public class RadioControlPanelTests : TestContext
   }
 
   [Fact]
-  public void SavePresetDialog_NameField_SeededWithRdsStationName_WhenPresent()
+  public void SavePresetDialog_NameField_SeededWithRdsStationNameStable_WhenPresent()
   {
-    // RDS station name available → seed = the RDS name (no band/freq fallback).
-    var state = BuildState(rdsStationName: "Rock 92", frequency: 92_300_000);
+    // Task #80 v4 — the dialog seeds from RdsStationNameStable, which is the
+    // NRSC-4-B Annex D call-sign decode of the PI code (e.g. PI=0x8ACC → "WUNC").
+    // The live RdsStationName (rotating PS) is intentionally NOT used as a
+    // fallback: that's exactly the value the v1/v2/v3 attempts were trying
+    // to filter against, and which routinely captures mid-rotation fragments
+    // like song titles / DJ names at the instant of the long-press.
+    var state = BuildState(frequency: 92_300_000) with
+    {
+      RdsStationName = "TOO HOT",   // rolling fragment — must NOT be used
+      RdsStationNameStable = "WSMW", // PI-decoded call sign — must win
+    };
     var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
 
     var instance = cut.Instance;
@@ -437,17 +446,24 @@ public class RadioControlPanelTests : TestContext
     cut.Render();
 
     var seed = (string?)type.GetField("_presetName", flags)!.GetValue(instance);
-    seed.Should().Be("Rock 92",
-      "with RDS station name present the seed must use the RDS name verbatim");
+    seed.Should().Be("WSMW",
+      "the PI-decoded call sign on RdsStationNameStable is the authoritative seed; " +
+      "the live rolling RdsStationName must never be used as a fallback");
   }
 
   [Fact]
-  public void SavePresetDialog_NameField_SeededWithBandPlusFrequency_WhenNoRds()
+  public void SavePresetDialog_NameField_SeededWithBandPlusFrequency_WhenNoStableName()
   {
-    // No RDS station name → fall back to "<band> <formatted-freq>" composition.
-    // FM band + 92.30 MHz frequency must produce "FM 92.30 MHz" (the panel's
-    // FormatFrequency helper handles the per-band unit logic).
-    var state = BuildState(rdsStationName: null, frequency: 92_300_000, band: "FM");
+    // No PI-decoded call sign (RDS dropout, 3-letter station, international,
+    // LP, or pre-lock) → fall back to "<band> <formatted-freq>" composition.
+    // FM band + 92.30 MHz frequency must produce "FM 92.30 MHz".
+    //
+    // Task #80 v4 — we deliberately do NOT fall back to the live rolling
+    // RdsStationName even when present, so this test sets it to a value
+    // that would have been used by the v3-era dual-fallback chain to
+    // assert the new behavior.
+    var state = BuildState(rdsStationName: "TOO HOT", frequency: 92_300_000, band: "FM");
+    // RdsStationNameStable defaults to null on BuildState — that's the case under test.
     var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
 
     var instance = cut.Instance;
@@ -460,11 +476,14 @@ public class RadioControlPanelTests : TestContext
 
     var seed = (string?)type.GetField("_presetName", flags)!.GetValue(instance);
     seed.Should().StartWith("FM ",
-      "the fallback seed prefixes with the active band");
+      "the fallback seed prefixes with the active band when no PI-decoded call sign is available");
     seed.Should().Contain("92.30",
       "the fallback seed embeds the formatted frequency for the active band");
     seed.Should().Contain("MHz",
       "FM band carries the MHz unit (the panel's FormatFrequency helper applies the per-band unit)");
+    seed.Should().NotContain("TOO HOT",
+      "Task #80 v4 — the live rolling RdsStationName must never appear in the seed; " +
+      "absent a stable call sign, band+frequency is the correct default");
   }
 
   [Fact]

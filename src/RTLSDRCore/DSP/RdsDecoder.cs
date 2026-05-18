@@ -178,6 +178,20 @@ public class RdsDecoder
   public event EventHandler<RdsStationNameDecodedEventArgs>? StationNameDecoded;
 
   /// <summary>
+  /// Raised when the decoded RDS PI (Program Identification) code changes.
+  /// Fires once on first decode after RDS lock, then again only if the PI
+  /// value mutates (typically only on frequency change followed by re-lock).
+  /// </summary>
+  /// <remarks>
+  /// PI is broadcast on Block A of every RDS group, so it locks essentially
+  /// immediately once RDS sync is acquired (within 1-2 valid frames).
+  /// Subscribers should treat the value as authoritative without further
+  /// stability filtering — unlike PS, PI does not rotate. Task #80 v4
+  /// (NRSC-4-B Annex D PI → call sign decode) consumes this event.
+  /// </remarks>
+  public event EventHandler<ushort>? ProgramIdChanged;
+
+  /// <summary>
   /// Creates a new RDS decoder.
   /// </summary>
   /// <param name="sampleRate">Sample rate of the composite FM signal (e.g., 240000 Hz).</param>
@@ -564,6 +578,10 @@ public class RdsDecoder
         _piCodeLogged = true;
         Logger.Information("RDS: PI code = 0x{PiCode:X4}", piCode);
       }
+      // Task #80 v4 — notify subscribers (RadioReceiver → SDRRadioAudioSource →
+      // RbdsCallSignDecoder) so the call sign becomes available the instant
+      // the first valid PI arrives, without polling.
+      ProgramIdChanged?.Invoke(this, piCode);
     }
   }
 

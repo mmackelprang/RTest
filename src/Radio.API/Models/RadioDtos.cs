@@ -120,6 +120,16 @@ public class RadioStateDto
   public string? RdsRadioText { get; set; }
 
   /// <summary>
+  /// Gets or sets the RDS PI (Program Identification) code — the 16-bit
+  /// station identifier broadcast on every RDS frame. Null until first RDS
+  /// lock or for non-RDS sources. Task #80 v4 — exposed for diagnostics and
+  /// so the call-sign decode that drives <see cref="RdsStationNameStable"/>
+  /// is debuggable from the wire without log scraping. Surfaced as a
+  /// nullable ushort so JSON consumers see a number, not a hex string.
+  /// </summary>
+  public ushort? RdsPi { get; set; }
+
+  /// <summary>
   /// Gets or sets the dBu threshold at which scan pauses on a signal.
   /// Re-typed from <c>int</c> (percent) to <c>double</c> (dBu) in PR 1 of the
   /// Radio Controller Polish arc so the threshold matches the dBu semantics

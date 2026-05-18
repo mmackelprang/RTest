@@ -1218,20 +1218,18 @@
       // the raw frequency. Acceptance gate: "The save flow defaults to the
       // RDS station name when one is present."
       //
-      // PR D #40 — prefer the server-tracked stable PS (RdsStationNameStable)
-      // over the live RdsStationName. Rolling-PS stations like "Rock 92"
-      // cycle 8 chars at a time; the live name often catches a mid-roll
-      // fragment ("anoidRoc") at the instant the user long-presses. The
-      // stable variant emits only after 3 consecutive identical samples.
-      // Fall back to the live name when the stable tracker hasn't yet
-      // reached consensus (new station, RDS dropout, etc.).
+      // Task #80 v4 — RdsStationNameStable is now the deterministic
+      // NRSC-4-B Annex D call-sign decode of the PI code (e.g. WUNC for
+      // PI=0x8ACC). When present it's authoritative. When absent (RDS
+      // dropout, 3-letter call sign, international, LP), fall back
+      // directly to band + frequency. We deliberately do NOT fall back to
+      // RdsStationName (the live, rolling PS) — that's the value the prior
+      // three task #80 attempts were trying to filter against and which
+      // routinely captures "TOO HOT", "SIMON", "336", song titles, etc.
+      // at the instant the user long-presses. Band+freq is a safer default.
       var stable = _radioState.RdsStationNameStable;
-      var live = _radioState.RdsStationName;
-      var seed = !string.IsNullOrEmpty(stable) ? stable
-               : !string.IsNullOrEmpty(live) ? live
-               : null;
-      _presetName = !string.IsNullOrEmpty(seed)
-        ? seed!
+      _presetName = !string.IsNullOrEmpty(stable)
+        ? stable!
         : $"{_radioState.Band} {FormatFrequency(_radioState.Frequency, _radioState.Band)}";
     }
     _isSavePresetDialogOpen = true;

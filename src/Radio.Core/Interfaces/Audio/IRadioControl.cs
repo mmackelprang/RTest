@@ -257,6 +257,15 @@ public interface IRadioControl
   string? RdsRadioText { get; }
 
   /// <summary>
+  /// Gets the RDS PI (Program Identification) code — the 16-bit station
+  /// identifier broadcast on every RDS frame. Null until first RDS lock or
+  /// for non-RDS sources. Task #80 v4 — exposed primarily for diagnostics
+  /// and so the call-sign decode (<see cref="RdsStationNameStable"/>) is
+  /// debuggable from the DTO without scraping logs.
+  /// </summary>
+  ushort? RdsProgramId => null;
+
+  /// <summary>
   /// Gets or sets the power state of the radio device (for devices that support power control).
   /// </summary>
   Task<bool> GetPowerStateAsync(CancellationToken cancellationToken = default);

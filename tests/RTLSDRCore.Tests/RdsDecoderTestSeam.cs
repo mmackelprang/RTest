@@ -24,8 +24,11 @@ internal static class RdsDecoderTestSeam
   /// Generates a synthetic RDS-modulated FM composite signal carrying the
   /// given 8-character PS name and feeds it to the decoder. Drives the same
   /// path real-world RDS data takes through <c>RdsDecoder.Process</c>.
+  /// Optionally accepts a PI code so tests targeting the PI-based call-sign
+  /// decode (Task #80 v4) can verify a specific value rather than the
+  /// default 0x1234.
   /// </summary>
-  internal static void FeedSyntheticRdsSignal(RdsDecoder decoder, string psName)
+  internal static void FeedSyntheticRdsSignal(RdsDecoder decoder, string psName, ushort piCode = 0x1234)
   {
     if (psName.Length != 8)
     {
@@ -33,7 +36,6 @@ internal static class RdsDecoderTestSeam
     }
 
     var bits = new List<int>();
-    var piCode = (ushort)0x1234; // arbitrary PI code
 
     // Repeat 4 times for noise rejection (PsConfirmThreshold = 2, need
     // multiple complete names to confirm).

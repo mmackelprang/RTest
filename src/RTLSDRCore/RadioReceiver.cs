@@ -103,6 +103,22 @@ namespace RTLSDRCore;
       public event EventHandler<RdsStationNameChangedEventArgs>? RdsStationNameChanged;
 
       /// <summary>
+      /// Raised when the RDS PI (Program Identification) code is decoded for
+      /// the first time after RDS lock, and on any subsequent change (rare —
+      /// typically only on frequency change). Task #80 v4 — consumed by
+      /// <c>SDRRadioAudioSource</c> to decode the call sign via NRSC-4-B
+      /// Annex D and surface it as the stable station identifier.
+      /// </summary>
+      /// <remarks>
+      /// PI is a 16-bit value broadcast on Block A of every RDS group; it
+      /// does NOT rotate like PS. The argument is the raw PI code; the call
+      /// sign decode lives in the Infrastructure layer
+      /// (<c>RbdsCallSignDecoder</c>) so RTLSDRCore stays a pure-DSP
+      /// concern without knowledge of FCC call-sign rules.
+      /// </remarks>
+      public event EventHandler<ushort>? ProgramIdChanged;
+
+      /// <summary>
       /// Creates a new radio receiver with the specified device
       /// </summary>
       /// <param name="device">SDR device to use</param>
@@ -599,6 +615,14 @@ namespace RTLSDRCore;
       /// </summary>
       public string? RdsProgramTypeName => _rdsDecoder?.ProgramTypeName;
 
+      /// <summary>
+      /// Gets the RDS PI (Program Identification) code — a 16-bit station
+      /// identifier that does not rotate. Null until the first valid RDS
+      /// frame has been decoded after lock. Task #80 v4 — the call sign
+      /// decode (<c>RbdsCallSignDecoder</c>) consumes this.
+      /// </summary>
+      public ushort? RdsProgramId => _rdsDecoder?.ProgramId;
+
       /// <inheritdoc/>
       public IReadOnlyList<RadioBand> GetAvailableBands() => BandPresets.AllBands;
 
@@ -768,6 +792,7 @@ namespace RTLSDRCore;
           if (_rdsDecoder != null)
           {
               _rdsDecoder.StationNameDecoded -= OnRdsDecoderStationNameDecoded;
+              _rdsDecoder.ProgramIdChanged -= OnRdsDecoderProgramIdChanged;
           }
 
           if (_currentModulation == ModulationType.WFM)
@@ -775,6 +800,7 @@ namespace RTLSDRCore;
               _stereoDecoder = new StereoFmDecoder(_demodSampleRate);
               _rdsDecoder = new RdsDecoder(_demodSampleRate);
               _rdsDecoder.StationNameDecoded += OnRdsDecoderStationNameDecoded;
+              _rdsDecoder.ProgramIdChanged += OnRdsDecoderProgramIdChanged;
           }
           else
           {
@@ -914,6 +940,18 @@ namespace RTLSDRCore;
       private void OnRdsDecoderStationNameDecoded(object? sender, RdsStationNameDecodedEventArgs e)
       {
           RdsStationNameChanged?.Invoke(this, new RdsStationNameChangedEventArgs(e.Name));
+      }
+
+      /// <summary>
+      /// Forwards the decoder's PI-changed event up to receiver subscribers.
+      /// Task #80 v4 — fires once per tune (after first RDS frame decodes)
+      /// and again only on actual PI mutation. Runs on the DSP processing
+      /// thread; handlers should be cheap (e.g. decode the call sign and
+      /// raise a state-changed flag).
+      /// </summary>
+      private void OnRdsDecoderProgramIdChanged(object? sender, ushort piCode)
+      {
+          ProgramIdChanged?.Invoke(this, piCode);
       }
 
       private void OnSamplesAvailable(object? sender, IqSamplesEventArgs e)
@@ -1178,6 +1216,7 @@ namespace RTLSDRCore;
           if (_rdsDecoder != null)
           {
               _rdsDecoder.StationNameDecoded -= OnRdsDecoderStationNameDecoded;
+              _rdsDecoder.ProgramIdChanged -= OnRdsDecoderProgramIdChanged;
           }
 
           _device.Dispose();

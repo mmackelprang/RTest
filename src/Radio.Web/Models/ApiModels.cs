@@ -332,11 +332,17 @@ public record RadioStateDto(
   // PR 3 of the Radio Controller Polish arc — RDS RadioText (RT) line
   // below the frequency well. Null/empty hides the RT row entirely.
   string? RdsRadioText = null,
-  // PR D #40 of the Arc follow-up backlog — last-stable RDS PS value
-  // (consensus after 3+ identical samples). Save-preset dialog seeds
-  // from this rather than RdsStationName so rolling-PS stations don't
-  // capture mid-roll fragments like "anoidRoc".
-  string? RdsStationNameStable = null
+  // PR D #40 of the Arc follow-up backlog — last-stable RDS PS value.
+  // Task #80 v4 redefined this: it's now the NRSC-4-B Annex D call-sign
+  // decode of the receiver's PI code (e.g. PI=0x8ACC → "WUNC"), not a
+  // PS-rotation consensus. PI is invariant per station so a single
+  // decode is authoritative. Save-preset dialog seeds from this when
+  // present, then falls back to band + frequency.
+  string? RdsStationNameStable = null,
+  // Task #80 v4 — raw RDS PI code, exposed for diagnostics so the
+  // decode that drives RdsStationNameStable is debuggable from the
+  // wire without log scraping. Null for non-RDS sources or pre-lock.
+  ushort? RdsPi = null
 );
 
 public record RadioPowerStateDto(

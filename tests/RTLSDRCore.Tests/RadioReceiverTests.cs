@@ -241,6 +241,63 @@ public class RadioReceiverTests
         Assert.Equal("WUNC-FM", observed);
     }
 
+    // Task #80 v4: the decoder's ProgramIdChanged event must propagate up
+    // through the receiver. This is the wire path the Infrastructure layer's
+    // PI-based call-sign decode (RbdsCallSignDecoder) relies on. Verified by
+    // pushing a synthetic RDS frame containing a known PI (0x8ACC = WUNC)
+    // and asserting the receiver fires ProgramIdChanged with that value.
+    [Fact]
+    public void ProgramIdChanged_ForwardsDecoderEvent()
+    {
+        using var receiver = RadioReceiver.CreateWithMockDevice();
+
+        receiver.SetBand(BandType.FM, 98_500_000);
+        Assert.True(receiver.Startup(), "Receiver Startup should succeed with mock device");
+        receiver.Shutdown();
+
+        var decoderField = typeof(RadioReceiver).GetField(
+            "_rdsDecoder",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        Assert.NotNull(decoderField);
+
+        var decoder = decoderField.GetValue(receiver) as RTLSDRCore.DSP.RdsDecoder;
+        Assert.NotNull(decoder);
+
+        ushort? observed = null;
+        receiver.ProgramIdChanged += (_, pi) => observed = pi;
+
+        // Synthetic frame uses PI 0x8ACC (WUNC) — the same value Tester
+        // captured live from the station. The PS name itself is arbitrary;
+        // PI fires regardless of PS content.
+        RdsDecoderTestSeam.FeedSyntheticRdsSignal(decoder, "WUNC-FM ", piCode: 0x8ACC);
+
+        Assert.Equal((ushort)0x8ACC, observed);
+    }
+
+    // Task #80 v4: RadioReceiver.RdsProgramId must reflect the decoder's
+    // current PI value after a frame has been decoded. This is the
+    // property the API mapper reads when projecting RdsPi onto the wire.
+    [Fact]
+    public void RdsProgramId_ExposesDecoderPiAfterFrame()
+    {
+        using var receiver = RadioReceiver.CreateWithMockDevice();
+        receiver.SetBand(BandType.FM, 98_500_000);
+        Assert.True(receiver.Startup());
+        receiver.Shutdown();
+
+        var decoderField = typeof(RadioReceiver).GetField(
+            "_rdsDecoder",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var decoder = decoderField!.GetValue(receiver) as RTLSDRCore.DSP.RdsDecoder;
+        Assert.NotNull(decoder);
+
+        Assert.Null(receiver.RdsProgramId);
+
+        RdsDecoderTestSeam.FeedSyntheticRdsSignal(decoder, "WSMW    ", piCode: 0x857E);
+
+        Assert.Equal((ushort)0x857E, receiver.RdsProgramId);
+    }
+
     // Task #80: after Dispose, the receiver must have detached from the
     // decoder so a stale subscription doesn't fire orphan events. Verified
     // by holding a reference to the inner decoder, disposing the receiver,
@@ -261,7 +318,9 @@ public class RadioReceiverTests
         Assert.NotNull(decoder);
 
         var fired = false;
+        var piFired = false;
         receiver.RdsStationNameChanged += (_, _) => fired = true;
+        receiver.ProgramIdChanged += (_, _) => piFired = true;
 
         receiver.Dispose();
 
@@ -270,6 +329,7 @@ public class RadioReceiverTests
         RdsDecoderTestSeam.FeedSyntheticRdsSignal(decoder, "WUNC-FM ");
 
         Assert.False(fired, "Receiver should not raise RdsStationNameChanged after Dispose");
+        Assert.False(piFired, "Receiver should not raise ProgramIdChanged after Dispose (Task #80 v4)");
     }
 
     #endregion
