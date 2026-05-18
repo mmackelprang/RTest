@@ -38,11 +38,14 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   private string? _playbackId;
   private bool _hasRestoredPreferences;
 
-  // PR D #40 — tracks the last-stable RDS Program-Service (PS) value so the
-  // save-preset dialog and history records don't seed with mid-roll fragments.
-  // Observe() is called inside the RdsStationNameStable getter — each poll
-  // of the property pushes the current live PS into the tracker, and after
-  // WindowSize identical samples the consensus value is emitted.
+  // PR D #40 + Task #80 — tracks the last-stable RDS Program-Service (PS)
+  // value so the save-preset dialog and history records don't seed with
+  // mid-roll fragments. Observe() is driven by the receiver's
+  // RdsStationNameChanged event (which fires once per RDS PS frame, ~10 Hz)
+  // — NOT by the broadcast loop polling RdsStationNameStable. Sampling at
+  // the property-read rate gave only ~2 Hz, which let rolling-PS fragments
+  // (e.g. "WSMW THE", "CARS") accumulate 3 consecutive identical poll
+  // samples and get promoted to "stable".
   private readonly RdsStationNameStabilityTracker _rdsStationNameStabilityTracker
     = new RdsStationNameStabilityTracker(windowSize: 3);
 
@@ -81,6 +84,12 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     _radioReceiver.FrequencyChanged += OnRTLSDRFrequencyChanged;
     _radioReceiver.SignalStrengthUpdated += OnRTLSDRSignalStrengthUpdated;
     _radioReceiver.StateChanged += OnRTLSDRStateChanged;
+
+    // Task #80 — observe RDS PS at the underlying frame rate, not the
+    // property-poll rate. Subscribed here (constructor) so any PS frame
+    // decoded during a startup/scan reaches the tracker even before the
+    // first RdsStationNameStable read.
+    _radioReceiver.RdsStationNameChanged += OnRdsStationNameChanged;
 
     // Subscribe to track identification events if service is available
     if (_identificationService != null)
@@ -489,19 +498,13 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
 
   /// <inheritdoc/>
   /// <remarks>
-  /// Each read pushes the current live PS into the stability tracker so the
-  /// broadcast loop (AudioStateUpdateService at ~1 Hz) naturally drives the
-  /// 3-consecutive-identical-samples window. The property returns the
-  /// consensus value, or null until consensus is reached.
+  /// Pure read of the tracker's current consensus value — no side effect.
+  /// Samples are pushed into the tracker by <see cref="OnRdsStationNameChanged"/>
+  /// at the underlying RDS PS frame rate (~10 Hz), not at the property-read
+  /// rate. This is what gives the 3-consecutive-identical-samples filter the
+  /// resolution needed to reject mid-roll rolling-PS fragments (Task #80).
   /// </remarks>
-  public string? RdsStationNameStable
-  {
-    get
-    {
-      _rdsStationNameStabilityTracker.Observe(_radioReceiver.RdsStationName);
-      return _rdsStationNameStabilityTracker.Stable;
-    }
-  }
+  public string? RdsStationNameStable => _rdsStationNameStabilityTracker.Stable;
 
   /// <inheritdoc/>
   public string? RdsProgramType => _radioReceiver.RdsProgramTypeName;
@@ -567,6 +570,19 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     _rdsStationNameStabilityTracker.Reset();
 
     FrequencyChanged?.Invoke(this, new RadioControlFrequencyChangedEventArgs(oldFreq, newFreq));
+  }
+
+  /// <summary>
+  /// Pushes a freshly-decoded PS candidate into the stability tracker.
+  /// Called by <see cref="RTLSDRCore.RadioReceiver.RdsStationNameChanged"/>
+  /// at the natural RDS PS frame rate (~10 Hz). Task #80 — this replaces
+  /// the previous per-property-read observation, which sampled at the
+  /// broadcast-loop poll rate (~2 Hz) and let rolling-PS fragments get
+  /// promoted to "stable".
+  /// </summary>
+  private void OnRdsStationNameChanged(object? sender, RTLSDRCore.RdsStationNameChangedEventArgs e)
+  {
+    _rdsStationNameStabilityTracker.Observe(e.NewName);
   }
 
   /// <summary>
@@ -989,6 +1005,7 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     _radioReceiver.SignalStrengthUpdated -= OnRTLSDRSignalStrengthUpdated;
     _radioReceiver.StateChanged -= OnRTLSDRStateChanged;
     _radioReceiver.AudioDataAvailable -= OnAudioDataAvailable;
+    _radioReceiver.RdsStationNameChanged -= OnRdsStationNameChanged;
 
     // Unsubscribe from fingerprinting events
     if (_identificationService != null)

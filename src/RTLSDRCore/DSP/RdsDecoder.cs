@@ -161,6 +161,23 @@ public class RdsDecoder
     ? PtyNames[_ptyCode] : null;
 
   /// <summary>
+  /// Raised whenever a complete 8-character Program Service name is decoded
+  /// from an RDS group 0A/0B frame, regardless of whether the decoder
+  /// considers the name "confirmed" yet. Fires at the natural RDS PS frame
+  /// cadence (~10 Hz when the signal is clean), with the freshly-decoded
+  /// candidate name. Downstream consumers can apply their own stability
+  /// filter (e.g. <c>RdsStationNameStabilityTracker</c>) at this rate to
+  /// reject mid-roll rolling-PS fragments.
+  /// </summary>
+  /// <remarks>
+  /// This fires BEFORE the decoder's internal 2-sample confirmation step
+  /// updates <see cref="StationName"/>. The argument is the raw candidate
+  /// from this single frame; subscribers should not treat it as a final
+  /// station identifier without their own consensus logic.
+  /// </remarks>
+  public event EventHandler<RdsStationNameDecodedEventArgs>? StationNameDecoded;
+
+  /// <summary>
   /// Creates a new RDS decoder.
   /// </summary>
   /// <param name="sampleRate">Sample rate of the composite FM signal (e.g., 240000 Hz).</param>
@@ -620,6 +637,12 @@ public class RdsDecoder
         var name = new string(_psChars).Trim();
         if (!string.IsNullOrEmpty(name))
         {
+          // Fire raw-frame event BEFORE the decoder's internal 2-sample
+          // confirmation. Downstream stability filters (see SDRRadioAudioSource)
+          // need to observe at the natural ~10 Hz PS frame rate so rolling-PS
+          // fragments (e.g. "WSMW THE", "CARS") never accumulate enough
+          // consecutive identical samples to be promoted to "stable".
+          StationNameDecoded?.Invoke(this, new RdsStationNameDecodedEventArgs(name));
           TryConfirmStationName(name);
         }
       }
@@ -808,5 +831,29 @@ public class RdsDecoder
     Searching,
     Confirming,
     Synced
+  }
+}
+
+/// <summary>
+/// Event arguments for <see cref="RdsDecoder.StationNameDecoded"/>.
+/// Carries the raw, freshly-decoded candidate PS name from a single
+/// RDS group 0A/0B frame. The value has NOT been filtered through any
+/// stability/confirmation logic — downstream consumers should treat it
+/// as a per-frame observation, not a confirmed station identifier.
+/// </summary>
+public class RdsStationNameDecodedEventArgs : EventArgs
+{
+  /// <summary>
+  /// The candidate Program Service name (trimmed, non-empty).
+  /// </summary>
+  public string Name { get; }
+
+  /// <summary>
+  /// Creates a new RDS station-name decoded event args.
+  /// </summary>
+  /// <param name="name">The candidate PS name (trimmed, non-empty).</param>
+  public RdsStationNameDecodedEventArgs(string name)
+  {
+    Name = name ?? throw new ArgumentNullException(nameof(name));
   }
 }
