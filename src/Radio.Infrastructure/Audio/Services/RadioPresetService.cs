@@ -107,6 +107,32 @@ public sealed class RadioPresetService : IRadioPresetService
   }
 
   /// <inheritdoc/>
+  public async Task<RadioPreset?> RenamePresetAsync(string id, string newName, CancellationToken cancellationToken = default)
+  {
+    // Added by the LED-font + preset-affordances hot-fix off PR #371. Empty
+    // / whitespace names are rejected up-front — the API controller does the
+    // same check but defending here keeps callers (tests, future internal
+    // callers) from sneaking through a blank rename via a direct service
+    // call.
+    if (string.IsNullOrWhiteSpace(newName))
+    {
+      throw new ArgumentException("Preset name must not be empty or whitespace.", nameof(newName));
+    }
+
+    var trimmed = newName.Trim();
+    var updated = await _repository.UpdateNameAsync(id, trimmed, cancellationToken);
+    if (!updated)
+    {
+      _logger.LogWarning("Radio preset {Id} not found for rename", id);
+      return null;
+    }
+
+    var renamed = await _repository.GetByIdAsync(id, cancellationToken);
+    _logger.LogInformation("Renamed radio preset {Id} → {Name}", id, trimmed);
+    return renamed;
+  }
+
+  /// <inheritdoc/>
   public async Task<bool> PresetExistsAsync(RadioBand band, double frequency, CancellationToken cancellationToken = default)
   {
     var preset = await _repository.GetByBandAndFrequencyAsync(band, frequency, cancellationToken);

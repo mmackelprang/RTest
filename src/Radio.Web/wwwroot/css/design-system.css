@@ -87,8 +87,19 @@
   --surface-hover:          rgba(255, 255, 255, 0.05);
 
   /* ── Typography Stacks ── */
-  --font-led:       'DSEG14Classic-Bold', 'JetBrains Mono', 'Consolas', monospace;
-  --font-led-light: 'DSEG14Classic-Regular', 'JetBrains Mono', 'Consolas', monospace;
+  /* Hot-fix (user feedback off PR #371): the DSEG14 "calculator LCD" font
+     read as cheap/toy-like on the live kiosk. The user asked for the LED
+     surfaces (clocks, frequency well, preset frequency column, queue total
+     tile, history led-value) to use the same display font as the radio
+     main frequency — that's Orbitron via --font-display. We point
+     --font-led at the same stack so every LED consumer migrates with a
+     single token swap. Bold weight is applied at each consumer site
+     (font-weight: 700) so the new font reads as "display chrome", not
+     body copy. --font-led-light retains DSEG-Regular for the rare
+     consumer that wanted the lighter LCD glyph weight; we keep the font
+     face available but no consumer references it after this fix. */
+  --font-led:       'Orbitron', 'JetBrains Mono', 'Consolas', monospace;
+  --font-led-light: 'Orbitron', 'JetBrains Mono', 'Consolas', monospace;
   --font-display:   'Orbitron', 'JetBrains Mono', 'Consolas', monospace;
   --font-mono:      'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
   --font-body:      'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -196,7 +207,12 @@ html, body {
 
 .topbar-clock {
   font-family: var(--font-led);
-  font-size: 28px;
+  /* Hot-fix off PR #371: Orbitron at the previous DSEG14 size reads too
+     thick for the topbar; nudge slightly smaller while keeping the bold
+     weight that gives the clock its "display chrome" presence. */
+  font-size: 26px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   color: var(--signal-amber);
   text-shadow: 0 0 8px var(--signal-amber-glow);
   min-width: 100px;
@@ -267,6 +283,8 @@ html, body {
 
 .cluster-value .font-led {
   font-family: var(--font-led);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   color: var(--signal-amber);
   text-shadow: 0 0 6px var(--signal-amber-glow);
   letter-spacing: 2px;
@@ -669,17 +687,26 @@ html, body {
 
 .display-frequency {
   font-family: var(--font-display);
-  font-size: 52px;
+  /* Hot-fix off PR #371: user asked for the radio main frequency to be
+     20% smaller so it sits proportionally in the tuner column. Base
+     size dropped from 52px to 42px (52 × 0.8 = 41.6, rounded up to 42
+     for clean pixel alignment). Letter-spacing scaled in proportion
+     (4px → 3px) so the kerning still reads as "display chrome". */
+  font-size: 42px;
   font-weight: 600;
   color: var(--signal-amber);
   text-shadow:
     0 0 12px var(--signal-amber-glow),
     0 0 40px rgba(240, 168, 48, 0.10);
-  letter-spacing: 4px;
+  letter-spacing: 3px;
   line-height: 1;
 }
 
-/* Ghosted "all segments on" background — DSEG stays for authentic LCD look */
+/* Ghosted "all segments on" background — was DSEG14's "888.88 MHz" all-on
+   look. After the PR #371 hot-fix the LED stack is Orbitron, so the ghost
+   becomes a faint Orbitron silhouette of the same magnitude — still
+   reads as "set the display dimensions before the real value paints"
+   without the calculator-LCD vibe the user vetoed. */
 .display-frequency-ghost {
   position: relative;
 }
@@ -688,6 +715,8 @@ html, body {
   position: absolute;
   inset: 0;
   font-family: var(--font-led);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   font-size: inherit;
   letter-spacing: inherit;
   color: rgba(240, 168, 48, 0.06);
@@ -2578,6 +2607,8 @@ body {
 
 .queue-total-tile-value {
   font-family: var(--font-led);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   font-size: 30px;
   color: var(--signal-amber);
   letter-spacing: 0.02em;
@@ -2755,6 +2786,8 @@ body {
 
 .history-stats-value-led {
   font-family: var(--font-led);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   font-size: 22px;
   color: var(--signal-amber);
   letter-spacing: 0.02em;
@@ -2813,12 +2846,16 @@ body {
 
 .sleep-screen-clock {
   font-family: var(--font-led);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   font-size: 96px;
   color: var(--signal-amber);
   text-shadow: 0 0 24px color-mix(in srgb, var(--signal-amber) 50%, transparent);
   letter-spacing: 0.02em;
-  /* Block-level so the radial glow doesn't clip the descenders on the colon
-     glyph in DSEG14. */
+  /* Block-level so the radial glow doesn't clip descenders on the colon
+     glyph. (Was a DSEG14 quirk before the PR #371 hot-fix; Orbitron has
+     no descenders, but the rule remains harmless and keeps the layout
+     stable if the font swaps again.) */
   position: relative;
   line-height: 1;
 }
@@ -3410,12 +3447,21 @@ body {
 
 /* Tall band pills — override §RCP base .rcp-band-btn into a two-line column.
    The base rule already sets background/hover/active states; we layer on the
-   sizing and inner layout so the dual-line label fits comfortably. */
+   sizing and inner layout so the dual-line label fits comfortably.
+
+   Hot-fix off PR #371: min-width dropped 64 → 56 and sub-range font 8 → 7.5px
+   to free ~50px of horizontal budget across the six-pill row at 1920×720.
+   The user was still seeing AM + VHF labels clipped after the PR 3 fixer
+   added flex-wrap; combined with `width: 100%` on .rcp-band-group (set in
+   the component's inline style block), the row now fits cleanly or wraps
+   to 3+3 if the container narrows further. Inner padding also dropped
+   slightly (14px → 10px horizontal) so each pill is tighter without
+   crowding the dual-line label. */
 .rcp-band-btn {
-  min-width: 64px;
+  min-width: 56px;
   height: auto;
   min-height: 56px;
-  padding: 8px 14px 6px;
+  padding: 8px 10px 6px;
   flex-direction: column;
   justify-content: center;
   gap: 2px;
@@ -3431,8 +3477,8 @@ body {
 
 .rcp-band-sub {
   font-family: var(--font-mono);
-  font-size: 8px;
-  letter-spacing: 0.14em;
+  font-size: 7.5px;
+  letter-spacing: 0.12em;
   color: var(--text-low);
   line-height: 1;
   text-transform: uppercase;
@@ -3551,14 +3597,14 @@ body {
   border: 1px solid color-mix(in srgb, var(--signal-amber) 25%, transparent);
 }
 
-/* Preset row — grid layout: slot (22px) | name+band stack (1fr) | freq (64px).
-   This overrides the legacy `.rcp-preset-item` (defined in the RadioControlPanel
-   inline <style>) — both selectors will load, but our grid template + flex
-   children win because the row markup no longer uses .rcp-preset-name as a
-   block child; the row's own grid takes precedence for layout. */
+/* Preset row — grid layout: slot (22px) | name+band stack (1fr) | freq (64px) | kebab (24px).
+   Kebab column added by the LED-font + preset-affordances hot-fix off PR #371
+   so each row exposes a Rename / Delete affordance without consuming the
+   row's tap target. Long-press on the row also opens the kebab menu —
+   mirrors the band-pill long-press-to-save gesture from PR 3. */
 .rcp-preset-item {
   display: grid;
-  grid-template-columns: 22px 1fr 64px;
+  grid-template-columns: 22px 1fr 64px 24px;
   gap: 8px;
   align-items: center;
   padding: 6px 8px;
@@ -3629,10 +3675,15 @@ body {
 }
 
 /* Override legacy `.rcp-preset-freq` (which was a block sibling). Under the
-   grid it's the right-most cell, DSEG amber, right-aligned, with glow when
-   the row is the active preset. */
+   grid it's the right-most cell, amber, right-aligned, with glow when
+   the row is the active preset. Hot-fix off PR #371 swapped DSEG14 for
+   Orbitron via --font-led — bold + tabular-nums keeps the column
+   visually a "display chrome" cell and stops the kHz/MHz numerals from
+   jittering between rows. */
 .rcp-preset-item .rcp-preset-freq {
   font-family: var(--font-led);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   font-size: 13px;
   text-align: right;
   color: var(--signal-amber);
@@ -3660,12 +3711,101 @@ body {
 }
 
 .rcp-preset-empty-hint {
-  grid-column: 2 / 4;
+  /* Spans from column 2 through the kebab cell — the empty placeholder has
+     no kebab affordance so this lets the hint fill the row. The grid is
+     now 4-column (slot | text | freq | kebab) after the PR #371 hot-fix
+     added the kebab cell. */
+  grid-column: 2 / 5;
   font-family: var(--font-mono);
   font-size: 9px;
   letter-spacing: 0.10em;
   text-transform: uppercase;
   color: var(--text-low);
+}
+
+/* Kebab affordance — small text-low ⋮ button that opens the Rename / Delete
+   popover. Lives in the 4th grid column on .rcp-preset-item. Click bubbles
+   are stopped at the markup level so tapping the kebab opens the menu
+   without also firing the row's "load preset" handler. Added by the
+   LED-font + preset-affordances hot-fix off PR #371. */
+.rcp-preset-kebab {
+  background: transparent;
+  border: none;
+  color: var(--text-low);
+  font-size: 18px;
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 80ms ease, color 80ms ease;
+  -webkit-tap-highlight-color: transparent;
+  /* Right-align inside the column; the column itself is fixed-width so the
+     kebab sits flush with the row's right edge. */
+  justify-self: end;
+}
+
+.rcp-preset-kebab:hover {
+  background: color-mix(in srgb, var(--signal-amber) 12%, transparent);
+  color: var(--text-high);
+}
+
+.rcp-preset-kebab:focus-visible {
+  outline: 1px solid var(--signal-amber);
+  outline-offset: 1px;
+}
+
+/* Preset menu overlay — full-viewport dim with a centered card carrying
+   Rename and Delete actions. Esc / overlay tap closes. The danger variant
+   (.rcp-preset-menu-danger) wears a red text accent so Delete reads as
+   destructive without an extra confirm dialog (the action is undoable via
+   re-save). */
+.rcp-preset-menu-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rcp-preset-menu {
+  min-width: 200px;
+  background: var(--surface-elevated, #1e1e2e);
+  border: 1px solid var(--surface-separator);
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rcp-preset-menu-item {
+  background: transparent;
+  border: none;
+  color: var(--text-high);
+  font-size: 14px;
+  padding: 10px 14px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 80ms ease;
+}
+
+.rcp-preset-menu-item:hover {
+  background: color-mix(in srgb, var(--signal-amber) 12%, transparent);
+}
+
+.rcp-preset-menu-danger {
+  color: #ff6b6b;
+}
+
+.rcp-preset-menu-danger:hover {
+  background: rgba(255, 107, 107, 0.12);
 }
 
 /* Suppress the legacy `::before` counter badge that the inline <style> defines

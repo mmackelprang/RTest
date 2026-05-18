@@ -556,6 +556,67 @@ public class RadioControllerTests : IClassFixture<CustomWebApplicationFactory<Pr
     Assert.DoesNotContain(presets, p => p.Id == createdPreset.Id);
   }
 
+  [Fact]
+  public async Task RenamePreset_WithValidData_UpdatesNameOnly()
+  {
+    // Hot-fix off PR #371 added PUT /api/radio/presets/{id} so the kebab
+    // Rename action has a server endpoint. Band/Frequency stay immutable —
+    // only Name + LastModifiedAt are touched.
+    var uniqueFreq = 96.7 + (Random.Shared.NextDouble() * 0.5);
+    var originalName = $"Rename Original {Guid.NewGuid():N}";
+    var createRequest = new CreateRadioPresetRequest
+    {
+      Name = originalName,
+      Band = "FM",
+      Frequency = uniqueFreq
+    };
+    var createResponse = await _client.PostAsJsonAsync("/api/radio/presets", createRequest);
+    if (createResponse.StatusCode == HttpStatusCode.Conflict)
+    {
+      uniqueFreq = 105.1 + (Random.Shared.NextDouble() * 0.5);
+      createRequest = createRequest with { Frequency = uniqueFreq };
+      createResponse = await _client.PostAsJsonAsync("/api/radio/presets", createRequest);
+    }
+    Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+    var createdPreset = await createResponse.Content.ReadFromJsonAsync<RadioPresetDto>();
+    Assert.NotNull(createdPreset);
+
+    var newName = $"Renamed {Guid.NewGuid():N}";
+    var renameResponse = await _client.PutAsJsonAsync(
+      $"/api/radio/presets/{createdPreset.Id}",
+      new RenameRadioPresetRequest { Name = newName });
+    Assert.Equal(HttpStatusCode.OK, renameResponse.StatusCode);
+    var renamed = await renameResponse.Content.ReadFromJsonAsync<RadioPresetDto>();
+    Assert.NotNull(renamed);
+    Assert.Equal(newName, renamed.Name);
+    Assert.Equal(createdPreset.Band, renamed.Band);
+    Assert.Equal(createdPreset.Frequency, renamed.Frequency);
+    Assert.Equal(createdPreset.Id, renamed.Id);
+
+    // Cleanup
+    await _client.DeleteAsync($"/api/radio/presets/{createdPreset.Id}");
+  }
+
+  [Fact]
+  public async Task RenamePreset_WithNonexistentId_ReturnsNotFound()
+  {
+    var response = await _client.PutAsJsonAsync(
+      "/api/radio/presets/nonexistent-id",
+      new RenameRadioPresetRequest { Name = "Anything" });
+    Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+  }
+
+  [Fact]
+  public async Task RenamePreset_WithEmptyName_ReturnsBadRequest()
+  {
+    // The controller rejects empty / whitespace-only names up-front so
+    // the preset always carries a usable label.
+    var response = await _client.PutAsJsonAsync(
+      "/api/radio/presets/anything",
+      new RenameRadioPresetRequest { Name = "   " });
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+  }
+
   #region Device Factory Endpoint Tests
 
   [Fact]

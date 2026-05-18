@@ -100,3 +100,20 @@ public sealed record CreateRadioPresetRequest
   /// </summary>
   public required double Frequency { get; init; }
 }
+
+/// <summary>
+/// Request DTO for renaming an existing radio preset. Carries only the new
+/// name — band and frequency are immutable on a saved preset (changing those
+/// would create a different station; the user should delete + re-save).
+/// Added by the LED-font + preset-affordances hot-fix off PR #371 so the
+/// kebab-menu Rename action has a server endpoint to call.
+/// </summary>
+public sealed record RenameRadioPresetRequest
+{
+  /// <summary>
+  /// The new display name for the preset. Empty / whitespace is rejected
+  /// at the controller layer (400 Bad Request); the preset always retains
+  /// a usable label.
+  /// </summary>
+  public required string Name { get; init; }
+}

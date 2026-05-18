@@ -406,8 +406,13 @@ public class RadioControlPanelTests : TestContext
   }
 
   [Fact]
-  public void PresetsHeader_ShowsCountAndCapacity()
+  public void PresetsHeader_ShowsTotalSavedCount()
   {
+    // Hot-fix off PR #371: the header counter dropped the per-band "N of CAP"
+    // form (which was confusing once the list itself stopped filtering by
+    // band) and now shows the total saved count across all bands. The empty
+    // placeholder remains scoped to the current band's capacity — tested
+    // separately.
     var state = BuildState();
     var presets = new[]
     {
@@ -418,7 +423,9 @@ public class RadioControlPanelTests : TestContext
 
     var count = cut.Find(".rcp-presets-count");
     Assert.Contains("MEMORY", count.TextContent);
-    Assert.Contains("2 of 16", count.TextContent);
+    Assert.Contains("2 saved", count.TextContent);
+    // The old "of CAP" form must be gone — defends against a regression.
+    Assert.DoesNotContain(" of ", count.TextContent);
   }
 
   [Fact]
@@ -519,22 +526,171 @@ public class RadioControlPanelTests : TestContext
   }
 
   [Fact]
-  public void Presets_FilteredToCurrentBand()
+  public void Presets_ShowAllBands_NotFilteredByCurrentBand()
   {
-    // FM tuned; presets include one AM. The AM preset should not render in
-    // the FM memory bank — the filter runs client-side in LoadPresetsAsync.
+    // Hot-fix off PR #371: user couldn't find their saved WB preset while
+    // tuned to FM. The list now shows ALL saved presets across all bands;
+    // the per-row .rcp-preset-band sub-line carries the band context so
+    // cross-band visibility is navigable.
     var state = BuildState(band: "FM");
     var presets = new[]
     {
       BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
       BuildPreset("p2", "KCBS-AM", 740_000, "AM", 1),
+      BuildPreset("p3", "WX-Sierra", 162_550_000, "WB", 1),
     };
     var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(), BuildAmBand() });
 
     var names = cut.FindAll(".rcp-preset-item:not(.rcp-preset-empty) .rcp-preset-name")
       .Select(e => e.TextContent.Trim()).ToList();
     Assert.Contains("KQED", names);
-    Assert.DoesNotContain("KCBS-AM", names);
+    Assert.Contains("KCBS-AM", names);
+    Assert.Contains("WX-Sierra", names);
+  }
+
+  [Fact]
+  public void EmptyPlaceholder_ScopedToCurrentBand_WhenOtherBandSavedPresetsExist()
+  {
+    // Hot-fix off PR #371: even though the list shows all bands, the empty
+    // placeholder still scopes to the CURRENT band so saving stays in-band.
+    // FM is current; one FM preset saved (capacity 16); AM has its own
+    // preset that should NOT count toward the empty slot calculation.
+    var state = BuildState(band: "FM");
+    var presets = new[]
+    {
+      BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
+      BuildPreset("p2", "KCBS-AM", 740_000, "AM", 1),
+    };
+    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16), BuildAmBand(16) });
+
+    var empties = cut.FindAll(".rcp-preset-empty");
+    Assert.Single(empties);
+    // Slot 2 — second FM preset, NOT the third row in the (mixed-band) list.
+    Assert.Equal("02", empties[0].QuerySelector(".rcp-preset-slot")!.TextContent.Trim());
+    Assert.Contains("FM", empties[0].QuerySelector(".rcp-preset-empty-hint")!.TextContent);
+  }
+
+  [Fact]
+  public void PresetRow_RendersKebabButton()
+  {
+    // Hot-fix off PR #371: each row carries a trailing ⋮ button that opens
+    // the Rename / Delete menu. Verifies the kebab is on EVERY real preset
+    // row (the empty placeholder has no kebab — it isn't actionable).
+    var state = BuildState();
+    var presets = new[]
+    {
+      BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
+      BuildPreset("p2", "KCBS", 99_700_000, "FM", 2),
+    };
+    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16) });
+
+    var realRows = cut.FindAll(".rcp-preset-item:not(.rcp-preset-empty)");
+    Assert.Equal(2, realRows.Count);
+    foreach (var row in realRows)
+    {
+      var kebab = row.QuerySelector(".rcp-preset-kebab");
+      Assert.NotNull(kebab);
+      Assert.Equal("⋮", kebab!.TextContent.Trim());
+    }
+  }
+
+  [Fact]
+  public void PresetKebabClick_OpensActionMenu()
+  {
+    // Hot-fix off PR #371: clicking the kebab opens the action popover with
+    // Rename + Delete options. The popover is rendered via @if on the
+    // _actionMenuPresetId field so it materialises after the click.
+    var state = BuildState();
+    var presets = new[]
+    {
+      BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
+    };
+    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16) });
+
+    Assert.Empty(cut.FindAll(".rcp-preset-menu"));
+
+    var kebab = cut.Find(".rcp-preset-kebab");
+    kebab.Click();
+
+    var menu = cut.Find(".rcp-preset-menu");
+    Assert.NotNull(menu);
+    var items = cut.FindAll(".rcp-preset-menu-item");
+    Assert.Equal(2, items.Count);
+    Assert.Contains("Rename", items[0].TextContent);
+    Assert.Contains("Delete", items[1].TextContent);
+  }
+
+  [Fact]
+  public void PresetMenuOverlayClick_ClosesActionMenu()
+  {
+    // Clicking the overlay (background of the menu) closes the menu — same
+    // dismiss pattern as the save/rename dialogs.
+    var state = BuildState();
+    var presets = new[]
+    {
+      BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
+    };
+    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16) });
+
+    cut.Find(".rcp-preset-kebab").Click();
+    Assert.Single(cut.FindAll(".rcp-preset-menu"));
+
+    cut.Find(".rcp-preset-menu-overlay").Click();
+    Assert.Empty(cut.FindAll(".rcp-preset-menu"));
+  }
+
+  [Fact]
+  public void PresetMenuRenameClick_OpensRenameDialogPrefilled()
+  {
+    // The Rename action transitions from the popover into a text-entry
+    // dialog pre-filled with the preset's current name (one-keystroke
+    // small-edit UX).
+    var state = BuildState();
+    var presets = new[]
+    {
+      BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
+    };
+    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16) });
+
+    cut.Find(".rcp-preset-kebab").Click();
+    var renameItem = cut.FindAll(".rcp-preset-menu-item")[0];
+    renameItem.Click();
+
+    // Menu closes, rename dialog opens.
+    Assert.Empty(cut.FindAll(".rcp-preset-menu"));
+    Assert.Single(cut.FindAll(".rcp-preset-rename-card"));
+  }
+
+  [Fact]
+  public void RadioPresetDto_DtoFieldShapeIsStable()
+  {
+    // The hot-fix introduced a new API client method (RenamePresetAsync)
+    // and a new server-side endpoint (PUT /api/radio/presets/{id}). The
+    // wire-shape DTO is unchanged — verify by asserting on the fields the
+    // Web side serialises/deserialises.
+    var t = typeof(RadioPresetDto);
+    Assert.NotNull(t.GetProperty(nameof(RadioPresetDto.Id), BindingFlags.Public | BindingFlags.Instance));
+    Assert.NotNull(t.GetProperty(nameof(RadioPresetDto.Name), BindingFlags.Public | BindingFlags.Instance));
+    Assert.NotNull(t.GetProperty(nameof(RadioPresetDto.Band), BindingFlags.Public | BindingFlags.Instance));
+    Assert.NotNull(t.GetProperty(nameof(RadioPresetDto.Frequency), BindingFlags.Public | BindingFlags.Instance));
+    Assert.NotNull(t.GetProperty(nameof(RadioPresetDto.SlotNumber), BindingFlags.Public | BindingFlags.Instance));
+  }
+
+  [Fact]
+  public void RadioApiService_ExposesRenamePresetAsync()
+  {
+    // Hot-fix off PR #371: the kebab Rename action calls PUT
+    // /api/radio/presets/{id}. Verify via reflection that the Web client
+    // exposes the new method with the expected signature (id, newName, ct).
+    var method = typeof(RadioApiService).GetMethod(
+      "RenamePresetAsync",
+      BindingFlags.Public | BindingFlags.Instance);
+    Assert.NotNull(method);
+    var parameters = method!.GetParameters();
+    Assert.Equal(3, parameters.Length);
+    Assert.Equal(typeof(string), parameters[0].ParameterType);
+    Assert.Equal(typeof(string), parameters[1].ParameterType);
+    Assert.Equal(typeof(CancellationToken), parameters[2].ParameterType);
   }
 
   [Fact]

@@ -46,6 +46,17 @@ public interface IRadioPresetService
   Task<bool> DeletePresetAsync(string id, CancellationToken cancellationToken = default);
 
   /// <summary>
+  /// Renames an existing preset. Band and frequency are immutable; only the
+  /// display name is updated. Empty or whitespace-only names are rejected
+  /// (the caller — the controller layer — must validate first).
+  /// </summary>
+  /// <param name="id">The preset ID to rename.</param>
+  /// <param name="newName">The new display name (already trimmed/validated).</param>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <returns>The renamed preset if found, or null if no preset matches the ID.</returns>
+  Task<RadioPreset?> RenamePresetAsync(string id, string newName, CancellationToken cancellationToken = default);
+
+  /// <summary>
   /// Checks if a preset with the given band and frequency already exists.
   /// </summary>
   /// <param name="band">The radio band.</param>

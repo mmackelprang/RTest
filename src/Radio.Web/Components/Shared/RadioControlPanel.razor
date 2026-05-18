@@ -212,14 +212,24 @@
       }
     </div>
 
-    <!-- Presets Memory Bank — handoff §P1·2: slot · name+band · freq grid.
-         Save action is a long-press on the active band pill (above) per the
-         resolved spec default; the icon button is replaced by a discoverable
-         hint. -->
+    <!-- Presets Memory Bank — handoff §P1·2 (slot · name+band · freq grid),
+         updated by the hot-fix off PR #371 (user feedback) so:
+           1. ALL presets across ALL bands are shown (not just the current
+              band) — the user couldn't find their saved WB station while
+              tuned to FM. The .rcp-preset-band sub-line on each row already
+              communicates the band context, so cross-band visibility is
+              navigable.
+           2. The header counter shows total saved across all bands rather
+              than "N of CAP" (mixing band capacities would be confusing).
+           3. Each row gains a trailing kebab opening a Rename + Delete
+              popover. Long-press on the row also opens the same popover
+              (matches the band-pill long-press-to-save gesture from PR 3).
+           4. The single empty-slot placeholder still scopes to the
+              current band so saving stays in-band. -->
     <div class="rcp-presets">
       <div class="rcp-presets-header">
         <span class="rcp-presets-count">
-          MEMORY · @presetCount of @activeBandCapacity
+          MEMORY · @presetCount saved
         </span>
         @if (bandSavable)
         {
@@ -240,31 +250,71 @@
           @foreach (var preset in _presets)
           {
             var isActivePreset = IsActivePreset(preset);
-            <button type="button"
-                    class="rcp-preset-item @(isActivePreset ? "is-active" : "")"
-                    @onclick="@(() => LoadPresetAsync(preset.Id))">
+            var presetId = preset.Id;
+            <div class="rcp-preset-item @(isActivePreset ? "is-active" : "")"
+                 data-preset-id="@presetId"
+                 @onclick="@(() => HandlePresetRowClickAsync(presetId))"
+                 @onpointerdown="@(e => HandlePresetPointerDown(presetId))"
+                 @onpointerup="@(e => HandlePresetPointerUp(presetId))"
+                 @onpointerleave="@(e => HandlePresetPointerCancel())"
+                 @onpointercancel="@(e => HandlePresetPointerCancel())"
+                 role="button"
+                 tabindex="0"
+                 title="Click to tune; long-press or use ⋮ for rename / delete">
               <span class="rcp-preset-slot">@(preset.SlotNumber > 0 ? preset.SlotNumber.ToString("00") : "")</span>
               <span class="rcp-preset-text">
                 <span class="rcp-preset-name">@preset.Name</span>
                 <span class="rcp-preset-band">@preset.Band</span>
               </span>
               <span class="rcp-preset-freq">@FormatFrequency(preset.Frequency, preset.Band)</span>
-            </button>
+              <button type="button"
+                      class="rcp-preset-kebab"
+                      aria-label="Rename or delete preset @preset.Name"
+                      title="Rename / delete"
+                      @onclick="@(e => HandleKebabClickAsync(presetId))"
+                      @onclick:stopPropagation="true">⋮</button>
+            </div>
           }
         }
 
         @* Render exactly ONE dashed-border placeholder for the next empty
-           slot when the band has capacity left (handoff §P1·2 step 3). *@
-        @if (activeBandCapacity > 0 && presetCount < activeBandCapacity)
+           slot when the CURRENT band has capacity left. Slot numbering is
+           per-band, so this counts the active-band presets only — keeps the
+           "long-press to save" affordance scoped to where a new save will
+           actually land. *@
+        @if (activeBandCapacity > 0 && _presets != null)
         {
-          var nextSlot = presetCount + 1;
-          <div class="rcp-preset-item rcp-preset-empty">
-            <span class="rcp-preset-slot">@nextSlot.ToString("00")</span>
-            <span class="rcp-preset-empty-hint">EMPTY · long-press to save</span>
-          </div>
+          var activeBandCount = _presets.Count(p => string.Equals(p.Band, _radioState.Band, StringComparison.OrdinalIgnoreCase));
+          if (activeBandCount < activeBandCapacity)
+          {
+            var nextSlot = activeBandCount + 1;
+            <div class="rcp-preset-item rcp-preset-empty">
+              <span class="rcp-preset-slot">@nextSlot.ToString("00")</span>
+              <span class="rcp-preset-empty-hint">EMPTY · long-press @(_radioState.Band) to save</span>
+            </div>
+          }
         }
       </div>
     </div>
+
+    @* Preset action menu — anchored by absolute positioning when open. Only
+       one menu is open at a time; clicking the overlay or hitting Esc closes
+       it. Actions call into RenamePresetAsync / DeletePresetAsync below. *@
+    @if (!string.IsNullOrEmpty(_actionMenuPresetId))
+    {
+      <div class="rcp-preset-menu-overlay" @onclick="CloseActionMenu">
+        <div class="rcp-preset-menu" @onclick:stopPropagation="true">
+          <button type="button" class="rcp-preset-menu-item"
+                  @onclick="@(() => OpenRenameDialog(_actionMenuPresetId!))">
+            <span class="rzi rzi-edit" aria-hidden="true"></span> Rename
+          </button>
+          <button type="button" class="rcp-preset-menu-item rcp-preset-menu-danger"
+                  @onclick="@(() => ConfirmDeleteAsync(_actionMenuPresetId!))">
+            <span class="rzi rzi-delete" aria-hidden="true"></span> Delete
+          </button>
+        </div>
+      </div>
+    }
   }
 </div>
 
@@ -297,6 +347,22 @@
         <RadzenButton Variant="Variant.Text" Click="CloseSavePresetDialog" Text="Cancel" />
         <RadzenButton ButtonStyle="ButtonStyle.Warning" Variant="Variant.Filled"
                       Click="SavePresetAsync" Text="Save" />
+      </div>
+    </div>
+  </div>
+}
+
+@if (_isRenamePresetDialogOpen)
+{
+  <div class="overlay" style="display:flex; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center;" @onclick="CloseRenamePresetDialog">
+    <div class="rcp-preset-rename-card" style="min-width: 320px; background: var(--rz-base-background-color, #1e1e2e); border-radius: 8px; padding: 24px; box-shadow: 0 8px 32px rgba(0,0,0,0.6);" @onclick:stopPropagation="true">
+      <h6 style="margin-bottom: 12px;">Rename Preset</h6>
+      <RadzenTextBox @bind-Value="_renamePresetName"
+                     Placeholder="Preset Name" Style="width: 100%;" />
+      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px;">
+        <RadzenButton Variant="Variant.Text" Click="CloseRenamePresetDialog" Text="Cancel" />
+        <RadzenButton ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled"
+                      Click="RenamePresetAsync" Text="Save" />
       </div>
     </div>
   </div>
@@ -375,8 +441,17 @@
   /* ── Band Selector — Console Push-Buttons ── */
 
   .rcp-band-group {
+    /* Hot-fix off PR #371 (user feedback): even with flex-wrap, the AM
+       + VHF labels were clipping at 1920×720 because the group was
+       sized to its content and overflowed its parent before wrap could
+       fire. width: 100% pins the row to the parent column so wrap has
+       a real boundary to pivot against. Combined with the min-width
+       reduction in .rcp-band-btn (design-system.css §W: 64 → 56) and
+       the smaller sub-range font, six pills now fit cleanly or wrap
+       to 3+3 on narrower containers. */
     display: flex;
     flex-wrap: wrap;
+    width: 100%;
     justify-content: center;
     gap: 2px;
     row-gap: 4px;
@@ -466,9 +541,12 @@
     opacity: 0.6;
   }
 
-  /* Frequency display sizing override for the well context */
+  /* Frequency display sizing override for the well context.
+     Hot-fix off PR #371: user asked for the radio frequency to be 20%
+     smaller. 54px × 0.8 = 43.2 → 43px keeps a clean pixel boundary and
+     leaves more headroom for the well's bezel + scan/step row below. */
   .rcp-freq-well .display-frequency {
-    font-size: 54px;
+    font-size: 43px;
     position: relative;
     z-index: 1;
     cursor: pointer;
@@ -816,6 +894,24 @@
   private string? _bandPointerDownBand;
   private bool _suppressNextBandClick;
 
+  // ── Hot-fix off PR #371: preset row gestures + action menu ──
+  // Long-press on a preset row opens the same Rename / Delete popover the
+  // kebab opens. Mirrors the band-pill gesture above. _suppressNextPresetClick
+  // makes sure the synthesised click after a long-press doesn't also fire
+  // LoadPresetAsync (which would re-tune to the preset the user was about to
+  // rename/delete).
+  private DateTime _presetPointerDownAt;
+  private string? _presetPointerDownId;
+  private bool _suppressNextPresetClick;
+
+  // Action menu state — single popover at a time. Null when closed; the
+  // preset ID when open. Rename dialog has its own dedicated open flag
+  // because it transitions out of the action menu into a text-entry surface.
+  private string? _actionMenuPresetId;
+  private bool _isRenamePresetDialogOpen;
+  private string? _renamePresetId;
+  private string _renamePresetName = "";
+
   protected override async Task OnInitializedAsync()
   {
     // Radio state must load BEFORE presets so LoadPresetsAsync can band-filter
@@ -847,14 +943,16 @@
     try
     {
       var presets = await RadioApi.GetPresetsAsync();
-      // Filter to the currently-active band so the memory bank reflects what
-      // the user is tuning. Per-band slot numbering (SlotNumber) is already
-      // assigned server-side (PR 3 of the Radio Controller Polish arc);
-      // ordering by slot makes the list deterministic across reloads.
-      var bandFilter = _radioState?.Band;
+      // Hot-fix off PR #371: the user couldn't find their saved WB preset
+      // while on FM because the previous filter scoped the list to the
+      // currently-tuned band. Removed the band filter so ALL saved presets
+      // render here; the .rcp-preset-band sub-line on each row already
+      // carries the band context. Sort by Band first (alphabetical) then by
+      // server-assigned per-band SlotNumber — visually groups bands without
+      // breaking the per-band slot numbering the API surfaces.
       _presets = presets?
-        .Where(p => string.IsNullOrEmpty(bandFilter) || string.Equals(p.Band, bandFilter, StringComparison.OrdinalIgnoreCase))
-        .OrderBy(p => p.SlotNumber)
+        .OrderBy(p => p.Band, StringComparer.OrdinalIgnoreCase)
+        .ThenBy(p => p.SlotNumber)
         .ThenBy(p => p.CreatedAt)
         .ToList();
     }
@@ -881,17 +979,10 @@
   {
     // Use the SignalR payload directly instead of re-fetching via REST.
     // The hub broadcast carries NowPlayingMatchId; the REST endpoint cannot.
-    var previousBand = _radioState?.Band;
+    // Hot-fix off PR #371: presets are no longer band-filtered, so a band
+    // change doesn't require a re-fetch — the empty-slot placeholder
+    // re-evaluates against the new band's count on the next render.
     _radioState = dto;
-
-    // PR 3 of the Radio Controller Polish arc — presets are band-filtered;
-    // when the band changes via remote control (SignalR push) we need to
-    // re-pull the preset list so the memory bank reflects the new band.
-    if (!string.Equals(previousBand, dto.Band, StringComparison.OrdinalIgnoreCase))
-    {
-      await LoadPresetsAsync();
-    }
-
     await InvokeAsync(StateHasChanged);
   }
 
@@ -929,9 +1020,10 @@
       if (await RadioApi.SetBandAsync(newBand))
       {
         await LoadRadioStateAsync();
-        // Presets are band-filtered — re-pull so the memory bank stays in
-        // sync after the band switch.
-        await LoadPresetsAsync();
+        // Hot-fix off PR #371: presets are no longer band-filtered, so we
+        // skip the re-fetch the previous implementation did on band change.
+        // The empty-slot placeholder re-evaluates against the new band's
+        // count on the next render via _presets.Count(p => p.Band == ...).
         await InvokeAsync(StateHasChanged);
       }
     }
@@ -1174,6 +1266,166 @@
     {
       Logger.LogError(ex, "Error deleting preset {Id}", id);
     }
+  }
+
+  // ─── Preset row gestures + action menu — hot-fix off PR #371 ──────────────
+  // The user asked for a way to rename / delete saved presets. Each row now
+  // carries a trailing kebab and supports a long-press; both open the same
+  // small popover with Rename + Delete actions. The Rename action transitions
+  // into a dedicated text-entry dialog (mirrors the Save dialog pattern).
+
+  /// <summary>
+  /// Handles a normal click on a preset row — falls through to LoadPresetAsync
+  /// unless the preceding gesture was a long-press (in which case we swallow
+  /// the synthesised click so the row's tune-to-preset action doesn't fire
+  /// alongside the action menu open).
+  /// </summary>
+  private async Task HandlePresetRowClickAsync(string presetId)
+  {
+    if (_suppressNextPresetClick)
+    {
+      _suppressNextPresetClick = false;
+      return;
+    }
+
+    await LoadPresetAsync(presetId);
+  }
+
+  /// <summary>
+  /// Starts the long-press timer when the user puts a finger / mouse on a
+  /// preset row. Stored ID lets us correlate the eventual pointerup with the
+  /// originating row so a press that drifts onto another row doesn't fire.
+  /// </summary>
+  private void HandlePresetPointerDown(string presetId)
+  {
+    _presetPointerDownAt = DateTime.UtcNow;
+    _presetPointerDownId = presetId;
+  }
+
+  /// <summary>
+  /// Resolves the long-press: if the press exceeded
+  /// <see cref="LongPressThresholdMs"/>, open the action menu (and suppress
+  /// the synthesised click so the row doesn't also tune the preset). Shorter
+  /// presses fall through to the click handler which loads the preset.
+  /// </summary>
+  private void HandlePresetPointerUp(string presetId)
+  {
+    if (_presetPointerDownId != presetId)
+    {
+      _presetPointerDownId = null;
+      return;
+    }
+
+    var heldMs = (DateTime.UtcNow - _presetPointerDownAt).TotalMilliseconds;
+    _presetPointerDownId = null;
+
+    if (heldMs >= LongPressThresholdMs)
+    {
+      _suppressNextPresetClick = true;
+      _actionMenuPresetId = presetId;
+    }
+  }
+
+  /// <summary>
+  /// Cancels the long-press timer when the pointer leaves the row or the
+  /// gesture is interrupted.
+  /// </summary>
+  private void HandlePresetPointerCancel()
+  {
+    _presetPointerDownId = null;
+  }
+
+  /// <summary>
+  /// Kebab click — opens the action menu for the given preset without firing
+  /// the row's load-preset handler (markup stops propagation, this method is
+  /// the menu open).
+  /// </summary>
+  private Task HandleKebabClickAsync(string presetId)
+  {
+    _actionMenuPresetId = presetId;
+    return Task.CompletedTask;
+  }
+
+  /// <summary>
+  /// Closes the action menu — called by the overlay click handler and after
+  /// each action that transitions to another surface (rename dialog) or
+  /// completes terminally (delete).
+  /// </summary>
+  private void CloseActionMenu()
+  {
+    _actionMenuPresetId = null;
+  }
+
+  /// <summary>
+  /// Transitions from the action menu into the rename text-entry dialog.
+  /// Pre-fills the input with the preset's current name so a small edit is
+  /// a single keystroke + Save.
+  /// </summary>
+  private void OpenRenameDialog(string presetId)
+  {
+    var preset = _presets?.FirstOrDefault(p => p.Id == presetId);
+    if (preset == null)
+    {
+      _actionMenuPresetId = null;
+      return;
+    }
+
+    _renamePresetId = presetId;
+    _renamePresetName = preset.Name;
+    _isRenamePresetDialogOpen = true;
+    _actionMenuPresetId = null;
+  }
+
+  private void CloseRenamePresetDialog()
+  {
+    _isRenamePresetDialogOpen = false;
+    _renamePresetId = null;
+    _renamePresetName = "";
+  }
+
+  /// <summary>
+  /// Commits the rename via the API and re-loads the preset list so the new
+  /// name surfaces immediately. The dialog stays open if the API call fails
+  /// so the user can retry without re-typing.
+  /// </summary>
+  private async Task RenamePresetAsync()
+  {
+    if (string.IsNullOrEmpty(_renamePresetId) || string.IsNullOrWhiteSpace(_renamePresetName))
+    {
+      return;
+    }
+
+    try
+    {
+      var success = await RadioApi.RenamePresetAsync(_renamePresetId, _renamePresetName);
+      if (success)
+      {
+        await LoadPresetsAsync();
+        NotificationService.Notify(NotificationSeverity.Success, "Renamed", $"Preset renamed to {_renamePresetName.Trim()}");
+        CloseRenamePresetDialog();
+      }
+      else
+      {
+        NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to rename preset — check API logs");
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error renaming preset {Id}", _renamePresetId);
+      NotificationService.Notify(NotificationSeverity.Error, "Error", $"Error renaming preset: {ex.Message}");
+    }
+  }
+
+  /// <summary>
+  /// Delete action from the kebab menu. Calls the existing DeletePresetAsync
+  /// which already toasts on success. No two-step confirm — the action is
+  /// reversible (the user can re-save the same band/frequency from the
+  /// long-press-band gesture).
+  /// </summary>
+  private async Task ConfirmDeleteAsync(string presetId)
+  {
+    _actionMenuPresetId = null;
+    await DeletePresetAsync(presetId);
   }
 
   private async Task CycleStepSizeAsync()
