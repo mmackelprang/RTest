@@ -84,6 +84,41 @@ namespace RTLSDRCore;
       public event EventHandler<FrequencyChangedEventArgs>? FrequencyChanged;
 
       /// <summary>
+      /// Raised every time the RDS decoder produces a complete Program
+      /// Service (PS) name candidate from an RDS group 0A/0B frame.
+      /// Fires at the natural RDS PS frame cadence (~10 Hz when the signal
+      /// is clean), independent of how often consumers read
+      /// <see cref="RdsStationName"/>. The argument carries the raw candidate
+      /// from a single frame — subscribers must apply their own stability
+      /// filter before treating the value as a real station identifier.
+      /// </summary>
+      /// <remarks>
+      /// This is the right hook for a downstream
+      /// <c>RdsStationNameStabilityTracker</c>: it samples at the underlying
+      /// frame rate rather than at the rate consumers happen to poll the
+      /// property, so mid-roll rolling-PS fragments do not get promoted to
+      /// "stable" just because the property happens to be read while a
+      /// fragment is displayed.
+      /// </remarks>
+      public event EventHandler<RdsStationNameChangedEventArgs>? RdsStationNameChanged;
+
+      /// <summary>
+      /// Raised when the RDS PI (Program Identification) code is decoded for
+      /// the first time after RDS lock, and on any subsequent change (rare —
+      /// typically only on frequency change). Task #80 v4 — consumed by
+      /// <c>SDRRadioAudioSource</c> to decode the call sign via NRSC-4-B
+      /// Annex D and surface it as the stable station identifier.
+      /// </summary>
+      /// <remarks>
+      /// PI is a 16-bit value broadcast on Block A of every RDS group; it
+      /// does NOT rotate like PS. The argument is the raw PI code; the call
+      /// sign decode lives in the Infrastructure layer
+      /// (<c>RbdsCallSignDecoder</c>) so RTLSDRCore stays a pure-DSP
+      /// concern without knowledge of FCC call-sign rules.
+      /// </remarks>
+      public event EventHandler<ushort>? ProgramIdChanged;
+
+      /// <summary>
       /// Creates a new radio receiver with the specified device
       /// </summary>
       /// <param name="device">SDR device to use</param>
@@ -580,6 +615,14 @@ namespace RTLSDRCore;
       /// </summary>
       public string? RdsProgramTypeName => _rdsDecoder?.ProgramTypeName;
 
+      /// <summary>
+      /// Gets the RDS PI (Program Identification) code — a 16-bit station
+      /// identifier that does not rotate. Null until the first valid RDS
+      /// frame has been decoded after lock. Task #80 v4 — the call sign
+      /// decode (<c>RbdsCallSignDecoder</c>) consumes this.
+      /// </summary>
+      public ushort? RdsProgramId => _rdsDecoder?.ProgramId;
+
       /// <inheritdoc/>
       public IReadOnlyList<RadioBand> GetAvailableBands() => BandPresets.AllBands;
 
@@ -741,10 +784,23 @@ namespace RTLSDRCore;
           // Step 5: FM stereo decoder (WFM only).
           // Must run BEFORE de-emphasis: the 19kHz pilot and 23-53kHz L-R subcarrier
           // would be attenuated by de-emphasis, making stereo decode impossible.
+
+          // Detach the previous decoder's event (if any) before replacing it —
+          // SetupSignalProcessing can be called multiple times for the same
+          // receiver (modulation/band change), so leftover subscriptions
+          // would leak and fire stale events from a discarded decoder.
+          if (_rdsDecoder != null)
+          {
+              _rdsDecoder.StationNameDecoded -= OnRdsDecoderStationNameDecoded;
+              _rdsDecoder.ProgramIdChanged -= OnRdsDecoderProgramIdChanged;
+          }
+
           if (_currentModulation == ModulationType.WFM)
           {
               _stereoDecoder = new StereoFmDecoder(_demodSampleRate);
               _rdsDecoder = new RdsDecoder(_demodSampleRate);
+              _rdsDecoder.StationNameDecoded += OnRdsDecoderStationNameDecoded;
+              _rdsDecoder.ProgramIdChanged += OnRdsDecoderProgramIdChanged;
           }
           else
           {
@@ -874,6 +930,28 @@ namespace RTLSDRCore;
           }
 
           return (sdrRate, demodRate);
+      }
+
+      /// <summary>
+      /// Forwards the decoder's per-frame PS event up to receiver subscribers.
+      /// Runs on the DSP processing thread; handlers should be cheap and
+      /// non-blocking (e.g. push the sample into a stability tracker).
+      /// </summary>
+      private void OnRdsDecoderStationNameDecoded(object? sender, RdsStationNameDecodedEventArgs e)
+      {
+          RdsStationNameChanged?.Invoke(this, new RdsStationNameChangedEventArgs(e.Name));
+      }
+
+      /// <summary>
+      /// Forwards the decoder's PI-changed event up to receiver subscribers.
+      /// Task #80 v4 — fires once per tune (after first RDS frame decodes)
+      /// and again only on actual PI mutation. Runs on the DSP processing
+      /// thread; handlers should be cheap (e.g. decode the call sign and
+      /// raise a state-changed flag).
+      /// </summary>
+      private void OnRdsDecoderProgramIdChanged(object? sender, ushort piCode)
+      {
+          ProgramIdChanged?.Invoke(this, piCode);
       }
 
       private void OnSamplesAvailable(object? sender, IqSamplesEventArgs e)
@@ -1132,6 +1210,15 @@ namespace RTLSDRCore;
       public void Dispose()
       {
           Shutdown();
+
+          // Detach decoder event so a stale subscription doesn't survive
+          // a Shutdown→Startup cycle if the decoder is recreated.
+          if (_rdsDecoder != null)
+          {
+              _rdsDecoder.StationNameDecoded -= OnRdsDecoderStationNameDecoded;
+              _rdsDecoder.ProgramIdChanged -= OnRdsDecoderProgramIdChanged;
+          }
+
           _device.Dispose();
           GC.SuppressFinalize(this);
       }
@@ -1217,5 +1304,32 @@ namespace RTLSDRCore;
       {
           OldState = oldState;
           NewState = newState;
+      }
+  }
+
+  /// <summary>
+  /// Event arguments for <see cref="RadioReceiver.RdsStationNameChanged"/>.
+  /// Carries the raw, per-frame Program Service name candidate produced by
+  /// the RDS decoder. Fired on every successful PS group decode (~10 Hz when
+  /// the signal is clean) — not just when the value changes — so downstream
+  /// stability filters can apply their consensus logic at the underlying
+  /// frame rate rather than at the property-poll rate.
+  /// </summary>
+  public class RdsStationNameChangedEventArgs : EventArgs
+  {
+      /// <summary>
+      /// The candidate Program Service name decoded from this RDS frame.
+      /// Trimmed, non-empty. Has NOT been filtered through any stability
+      /// or confirmation logic.
+      /// </summary>
+      public string NewName { get; }
+
+      /// <summary>
+      /// Creates new RDS station-name changed event args.
+      /// </summary>
+      /// <param name="newName">The candidate PS name (trimmed, non-empty).</param>
+      public RdsStationNameChangedEventArgs(string newName)
+      {
+          NewName = newName ?? throw new ArgumentNullException(nameof(newName));
       }
   }

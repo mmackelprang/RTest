@@ -181,6 +181,43 @@ public class RdsDecoderTests
     Assert.Equal("KUOW", decoder.StationName);
   }
 
+  // Task #80: the decoder must fire StationNameDecoded for each complete
+  // PS frame it assembles, BEFORE its internal 2-sample confirmation.
+  // Downstream consumers depend on this event firing at the underlying
+  // RDS PS frame rate (~10 Hz) so their own stability filters work.
+  [Fact]
+  public void StationNameDecoded_Event_FiresWithDecodedName()
+  {
+    var decoder = new RdsDecoder(SampleRate);
+    var fired = new List<string>();
+    decoder.StationNameDecoded += (_, e) => fired.Add(e.Name);
+
+    FeedSyntheticRdsSignal(decoder, "KEXP-FM ");
+
+    // The synthetic signal repeats the PS name many times — we expect at
+    // least one event, and every event payload should be the decoded name.
+    Assert.NotEmpty(fired);
+    Assert.All(fired, name => Assert.Equal("KEXP-FM", name));
+  }
+
+  // Task #80: each fully-assembled PS frame should fire the event, so a
+  // long synthetic signal produces multiple events (not just one when the
+  // decoder confirms internally).
+  [Fact]
+  public void StationNameDecoded_Event_FiresPerFrame_NotJustOnConfirmation()
+  {
+    var decoder = new RdsDecoder(SampleRate);
+    var fireCount = 0;
+    decoder.StationNameDecoded += (_, _) => fireCount++;
+
+    FeedSyntheticRdsSignal(decoder, "WUNC-FM ");
+
+    // The synthetic feed sends the PS name multiple times. The event
+    // should fire more than once — that's the whole point: per-frame
+    // sampling, not per-confirmation.
+    Assert.True(fireCount >= 2, $"Expected at least 2 frame-level events, got {fireCount}");
+  }
+
   #endregion
 
   #region Test Helpers

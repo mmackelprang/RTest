@@ -38,13 +38,20 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   private string? _playbackId;
   private bool _hasRestoredPreferences;
 
-  // PR D #40 — tracks the last-stable RDS Program-Service (PS) value so the
-  // save-preset dialog and history records don't seed with mid-roll fragments.
-  // Observe() is called inside the RdsStationNameStable getter — each poll
-  // of the property pushes the current live PS into the tracker, and after
-  // WindowSize identical samples the consensus value is emitted.
-  private readonly RdsStationNameStabilityTracker _rdsStationNameStabilityTracker
-    = new RdsStationNameStabilityTracker(windowSize: 3);
+  // Task #80 v4 — the last-decoded call sign from the receiver's PI code,
+  // computed once per PI event via NRSC-4-B Annex D
+  // (<see cref="RbdsCallSignDecoder"/>). PI is broadcast on every RDS
+  // frame and does not rotate, so a single decode at first RDS lock
+  // produces a stable identifier — no histogram, no sliding window, no
+  // call-sign-shape heuristic. Reset to null on frequency change.
+  // <para>
+  // The previous three attempts at this problem (v1 event-driven sampling,
+  // v2 frequency-window + shape boost, v3 lock-and-hold) all relied on PS
+  // rotation patterns and all failed live UAT because real broadcasters
+  // spend 60-80% of airtime broadcasting song titles / DJ names / phone
+  // numbers in PS. PI is the industry-standard answer.
+  // </para>
+  private string? _decodedCallSign;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="SDRRadioAudioSource"/> class.
@@ -81,6 +88,13 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     _radioReceiver.FrequencyChanged += OnRTLSDRFrequencyChanged;
     _radioReceiver.SignalStrengthUpdated += OnRTLSDRSignalStrengthUpdated;
     _radioReceiver.StateChanged += OnRTLSDRStateChanged;
+
+    // Task #80 v4 — the receiver fires ProgramIdChanged once per RDS lock
+    // (and again on PI mutation, which only happens on tune). The handler
+    // decodes the call sign via NRSC-4-B Annex D into _decodedCallSign.
+    // Subscribed in the constructor so a PI decoded during a startup/scan
+    // reaches us even before the first RdsStationNameStable read.
+    _radioReceiver.ProgramIdChanged += OnRadioReceiverProgramIdChanged;
 
     // Subscribe to track identification events if service is available
     if (_identificationService != null)
@@ -489,25 +503,29 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
 
   /// <inheritdoc/>
   /// <remarks>
-  /// Each read pushes the current live PS into the stability tracker so the
-  /// broadcast loop (AudioStateUpdateService at ~1 Hz) naturally drives the
-  /// 3-consecutive-identical-samples window. The property returns the
-  /// consensus value, or null until consensus is reached.
+  /// Task #80 v4 — returns the deterministic NRSC-4-B Annex D call-sign
+  /// decode of the receiver's current PI code. Null when:
+  /// <list type="bullet">
+  ///   <item>RDS hasn't locked yet (no PI received)</item>
+  ///   <item>The PI is outside the 4-letter K/W North-American range (3-letter
+  ///         stations, LP, international, unencodable)</item>
+  ///   <item>The receiver doesn't expose PI (non-RDS modulation or stub)</item>
+  /// </list>
+  /// Callers (e.g. the save-preset dialog) should fall back to
+  /// band + frequency in any of those cases rather than the live rolling PS
+  /// — the live PS catches mid-rotation fragments and is exactly what we're
+  /// trying to avoid here.
   /// </remarks>
-  public string? RdsStationNameStable
-  {
-    get
-    {
-      _rdsStationNameStabilityTracker.Observe(_radioReceiver.RdsStationName);
-      return _rdsStationNameStabilityTracker.Stable;
-    }
-  }
+  public string? RdsStationNameStable => _decodedCallSign;
 
   /// <inheritdoc/>
   public string? RdsProgramType => _radioReceiver.RdsProgramTypeName;
 
   /// <inheritdoc/>
   public string? RdsRadioText => _radioReceiver.RdsRadioText;
+
+  /// <inheritdoc/>
+  public ushort? RdsProgramId => _radioReceiver.RdsProgramId;
 
   /// <inheritdoc/>
   public Task<bool> GetPowerStateAsync(CancellationToken cancellationToken = default)
@@ -561,12 +579,33 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     // Track frequency change metric
     MetricsCollector?.Increment("radio.frequency_changes");
 
-    // PR D #40 — the previous station's stable PS is no longer meaningful
-    // after a re-tune. Reset so the next station has to earn its own
-    // consensus from scratch.
-    _rdsStationNameStabilityTracker.Reset();
+    // Task #80 v4 — the previous station's call sign is no longer
+    // meaningful after a re-tune. Clear so the next station has to wait
+    // for its own PI decode. (The RDS decoder also resets _piCode on
+    // frequency change, but that's an internal RTLSDRCore detail; clearing
+    // here makes the Infrastructure-level state machine explicit.)
+    _decodedCallSign = null;
 
     FrequencyChanged?.Invoke(this, new RadioControlFrequencyChangedEventArgs(oldFreq, newFreq));
+  }
+
+  /// <summary>
+  /// Decodes the receiver's PI code into a call sign on the first RDS
+  /// lock after tune (and on any subsequent PI change). Task #80 v4 —
+  /// replaces the three prior PS-rotation-based attempts. PI is invariant
+  /// per station, so a single decode produces the final stable
+  /// identifier; no histogram, sliding window, or lock-and-hold needed.
+  /// </summary>
+  /// <remarks>
+  /// The result may be null if the PI falls outside the 4-letter K/W
+  /// range covered by NRSC-4-B Annex D (3-letter call signs, LP
+  /// stations, international, unencodable). That's intentional — the
+  /// save-preset seed chain then falls back to band + frequency, which
+  /// is correct for those cases.
+  /// </remarks>
+  private void OnRadioReceiverProgramIdChanged(object? sender, ushort piCode)
+  {
+    _decodedCallSign = RbdsCallSignDecoder.DecodeCallSign(piCode);
   }
 
   /// <summary>
@@ -989,6 +1028,7 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     _radioReceiver.SignalStrengthUpdated -= OnRTLSDRSignalStrengthUpdated;
     _radioReceiver.StateChanged -= OnRTLSDRStateChanged;
     _radioReceiver.AudioDataAvailable -= OnAudioDataAvailable;
+    _radioReceiver.ProgramIdChanged -= OnRadioReceiverProgramIdChanged;
 
     // Unsubscribe from fingerprinting events
     if (_identificationService != null)

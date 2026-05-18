@@ -569,6 +569,10 @@ public class AudioStateUpdateService : BackgroundService
            previous.RdsStationName != current.RdsStationName ||
            previous.RdsStationNameStable != current.RdsStationNameStable ||
            previous.RdsProgramType != current.RdsProgramType ||
+           // Task #80 v4 — broadcast on PI change so the call-sign decode
+           // reaches the UI the instant the first RDS frame is decoded
+           // after a tune, without waiting for some other state delta.
+           previous.RdsPi != current.RdsPi ||
            // PR 3 of the Radio Controller Polish arc — the RT line below the
            // frequency well binds to this. RDS RadioText updates roughly once
            // per minute on most stations; null-safe string comparison is

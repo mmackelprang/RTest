@@ -69,6 +69,7 @@ public static class RadioStateMapper
       RdsStationNameStable = radioSource.RdsStationNameStable,
       RdsProgramType = radioSource.RdsProgramType,
       RdsRadioText = radioSource.RdsRadioText,
+      RdsPi = radioSource.RdsProgramId,
       NowPlayingMatchId = nowPlayingMatchId,
     };
   }

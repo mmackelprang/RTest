@@ -202,6 +202,136 @@ public class RadioReceiverTests
         Assert.Equal(98_100_000, newFreq);
     }
 
+    // Task #80: when the inner RDS decoder fires StationNameDecoded the
+    // receiver MUST forward it as RdsStationNameChanged with the same name.
+    // This is the public hook the SDR audio source uses to drive its
+    // stability tracker at the underlying RDS PS frame rate (~10 Hz)
+    // instead of at the property-poll rate.
+    [Fact]
+    public void RdsStationNameChanged_ForwardsDecoderEvent()
+    {
+        using var receiver = RadioReceiver.CreateWithMockDevice();
+
+        // FM band + Startup builds the inner RdsDecoder and subscribes to
+        // its StationNameDecoded event. We then Shutdown to stop the mock
+        // streaming pipeline (otherwise the DSP processing thread would race
+        // our synthetic Process() call on the shared decoder buffers); the
+        // decoder field is retained, so the event wiring persists.
+        receiver.SetBand(BandType.FM, 98_500_000);
+        Assert.True(receiver.Startup(), "Receiver Startup should succeed with mock device");
+        receiver.Shutdown();
+
+        var decoderField = typeof(RadioReceiver).GetField(
+            "_rdsDecoder",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        Assert.NotNull(decoderField);
+
+        var decoder = decoderField.GetValue(receiver) as RTLSDRCore.DSP.RdsDecoder;
+        Assert.NotNull(decoder);
+
+        string? observed = null;
+        receiver.RdsStationNameChanged += (_, e) => observed = e.NewName;
+
+        // Reach in and feed a synthetic PS frame through the inner decoder.
+        // Group 0A logic is identical to the path the receiver normally
+        // drives through Process(...). The decoder fires StationNameDecoded
+        // for every complete frame; the receiver must forward it.
+        RdsDecoderTestSeam.FeedSyntheticRdsSignal(decoder, "WUNC-FM ");
+
+        Assert.Equal("WUNC-FM", observed);
+    }
+
+    // Task #80 v4: the decoder's ProgramIdChanged event must propagate up
+    // through the receiver. This is the wire path the Infrastructure layer's
+    // PI-based call-sign decode (RbdsCallSignDecoder) relies on. Verified by
+    // pushing a synthetic RDS frame containing a known PI (0x8ACC = WUNC)
+    // and asserting the receiver fires ProgramIdChanged with that value.
+    [Fact]
+    public void ProgramIdChanged_ForwardsDecoderEvent()
+    {
+        using var receiver = RadioReceiver.CreateWithMockDevice();
+
+        receiver.SetBand(BandType.FM, 98_500_000);
+        Assert.True(receiver.Startup(), "Receiver Startup should succeed with mock device");
+        receiver.Shutdown();
+
+        var decoderField = typeof(RadioReceiver).GetField(
+            "_rdsDecoder",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        Assert.NotNull(decoderField);
+
+        var decoder = decoderField.GetValue(receiver) as RTLSDRCore.DSP.RdsDecoder;
+        Assert.NotNull(decoder);
+
+        ushort? observed = null;
+        receiver.ProgramIdChanged += (_, pi) => observed = pi;
+
+        // Synthetic frame uses PI 0x8ACC (WUNC) — the same value Tester
+        // captured live from the station. The PS name itself is arbitrary;
+        // PI fires regardless of PS content.
+        RdsDecoderTestSeam.FeedSyntheticRdsSignal(decoder, "WUNC-FM ", piCode: 0x8ACC);
+
+        Assert.Equal((ushort)0x8ACC, observed);
+    }
+
+    // Task #80 v4: RadioReceiver.RdsProgramId must reflect the decoder's
+    // current PI value after a frame has been decoded. This is the
+    // property the API mapper reads when projecting RdsPi onto the wire.
+    [Fact]
+    public void RdsProgramId_ExposesDecoderPiAfterFrame()
+    {
+        using var receiver = RadioReceiver.CreateWithMockDevice();
+        receiver.SetBand(BandType.FM, 98_500_000);
+        Assert.True(receiver.Startup());
+        receiver.Shutdown();
+
+        var decoderField = typeof(RadioReceiver).GetField(
+            "_rdsDecoder",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var decoder = decoderField!.GetValue(receiver) as RTLSDRCore.DSP.RdsDecoder;
+        Assert.NotNull(decoder);
+
+        Assert.Null(receiver.RdsProgramId);
+
+        RdsDecoderTestSeam.FeedSyntheticRdsSignal(decoder, "WSMW    ", piCode: 0x857E);
+
+        Assert.Equal((ushort)0x857E, receiver.RdsProgramId);
+    }
+
+    // Task #80: after Dispose, the receiver must have detached from the
+    // decoder so a stale subscription doesn't fire orphan events. Verified
+    // by holding a reference to the inner decoder, disposing the receiver,
+    // then driving synthetic frames into the (now-orphaned) decoder and
+    // asserting the receiver's event does NOT fire.
+    [Fact]
+    public void Dispose_DetachesDecoderSubscription()
+    {
+        var receiver = RadioReceiver.CreateWithMockDevice();
+        receiver.SetBand(BandType.FM, 98_500_000);
+        Assert.True(receiver.Startup());
+        receiver.Shutdown();
+
+        var decoderField = typeof(RadioReceiver).GetField(
+            "_rdsDecoder",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var decoder = decoderField!.GetValue(receiver) as RTLSDRCore.DSP.RdsDecoder;
+        Assert.NotNull(decoder);
+
+        var fired = false;
+        var piFired = false;
+        receiver.RdsStationNameChanged += (_, _) => fired = true;
+        receiver.ProgramIdChanged += (_, _) => piFired = true;
+
+        receiver.Dispose();
+
+        // After dispose, the receiver should no longer respond to decoder
+        // events. Push a synthetic frame through the (now-detached) decoder.
+        RdsDecoderTestSeam.FeedSyntheticRdsSignal(decoder, "WUNC-FM ");
+
+        Assert.False(fired, "Receiver should not raise RdsStationNameChanged after Dispose");
+        Assert.False(piFired, "Receiver should not raise ProgramIdChanged after Dispose (Task #80 v4)");
+    }
+
     #endregion
 
     #region Scanning Tests
