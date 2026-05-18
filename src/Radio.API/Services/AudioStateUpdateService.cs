@@ -432,7 +432,7 @@ public class AudioStateUpdateService : BackgroundService
       return;
     }
 
-    var currentRadioState = MapToRadioStateDto(radioControls);
+    var currentRadioState = radioControls.MapToRadioStateDto(_currentMatchId);
 
     if (HasRadioStateChanged(_lastRadioState, currentRadioState))
     {
@@ -699,9 +699,6 @@ public class AudioStateUpdateService : BackgroundService
       ? $"{(int)ts.TotalHours}:{ts.Minutes:D2}:{ts.Seconds:D2}"
       : $"{ts.Minutes}:{ts.Seconds:D2}";
   }
-
-  private RadioStateDto MapToRadioStateDto(IRadioControl radioControls)
-    => RadioStateMapper.MapToRadioStateDto(radioControls, _currentMatchId);
 
   private BluetoothStatusDto BuildBluetoothStatusDto()
   {

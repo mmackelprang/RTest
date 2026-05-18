@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Radio.API.Extensions;
+using Radio.API.Mappers;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
@@ -54,7 +55,7 @@ public class RadioController : ControllerBase
         return BadRequest(new { error = "Radio is not the active source" });
       }
 
-      return Ok(MapToRadioStateDto(radioSource));
+      return Ok(radioSource.MapToRadioStateDto());
     }
     catch (Exception ex)
     {
@@ -86,7 +87,7 @@ public class RadioController : ControllerBase
       }
 
       await radioSource.SetFrequencyAsync(new Frequency(request.Frequency));
-      return Ok(MapToRadioStateDto(radioSource));
+      return Ok(radioSource.MapToRadioStateDto());
     }
     catch (ArgumentOutOfRangeException ex)
     {
@@ -120,7 +121,7 @@ public class RadioController : ControllerBase
       }
 
       await radioSource.StepFrequencyUpAsync();
-      return Ok(MapToRadioStateDto(radioSource));
+      return Ok(radioSource.MapToRadioStateDto());
     }
     catch (Exception ex)
     {
@@ -149,7 +150,7 @@ public class RadioController : ControllerBase
       }
 
       await radioSource.StepFrequencyDownAsync();
-      return Ok(MapToRadioStateDto(radioSource));
+      return Ok(radioSource.MapToRadioStateDto());
     }
     catch (Exception ex)
     {
@@ -185,7 +186,7 @@ public class RadioController : ControllerBase
       }
 
       await radioSource.SetBandAsync(band);
-      return Ok(MapToRadioStateDto(radioSource));
+      return Ok(radioSource.MapToRadioStateDto());
     }
     catch (Exception ex)
     {
@@ -217,7 +218,7 @@ public class RadioController : ControllerBase
       }
 
       await radioSource.SetFrequencyStepAsync(new Frequency(request.Step));
-      return Ok(MapToRadioStateDto(radioSource));
+      return Ok(radioSource.MapToRadioStateDto());
     }
     catch (ArgumentOutOfRangeException ex)
     {
@@ -258,7 +259,7 @@ public class RadioController : ControllerBase
       }
 
       await radioSource.StartScanAsync(direction);
-      return Ok(MapToRadioStateDto(radioSource));
+      return Ok(radioSource.MapToRadioStateDto());
     }
     catch (Exception ex)
     {
@@ -287,7 +288,7 @@ public class RadioController : ControllerBase
       }
 
       await radioSource.StopScanAsync();
-      return Ok(MapToRadioStateDto(radioSource));
+      return Ok(radioSource.MapToRadioStateDto());
     }
     catch (Exception ex)
     {
@@ -323,7 +324,7 @@ public class RadioController : ControllerBase
       }
 
       await radioSource.SetEqualizerModeAsync(mode);
-      return Ok(MapToRadioStateDto(radioSource));
+      return Ok(radioSource.MapToRadioStateDto());
     }
     catch (Exception ex)
     {
@@ -362,7 +363,7 @@ public class RadioController : ControllerBase
       radioSource.DeviceVolume = request.Volume;
       
       // Return result on the same async context
-      return await Task.FromResult(Ok(MapToRadioStateDto(radioSource)));
+      return await Task.FromResult(Ok(radioSource.MapToRadioStateDto()));
     }
     catch (Exception ex)
     {
@@ -397,7 +398,7 @@ public class RadioController : ControllerBase
       }
 
       radioSource.Gain = request.Gain;
-      return Ok(MapToRadioStateDto(radioSource));
+      return Ok(radioSource.MapToRadioStateDto());
     }
     catch (Exception ex)
     {
@@ -427,7 +428,7 @@ public class RadioController : ControllerBase
       }
 
       radioSource.AutoGainEnabled = request.Enabled;
-      return Ok(MapToRadioStateDto(radioSource));
+      return Ok(radioSource.MapToRadioStateDto());
     }
     catch (Exception ex)
     {
@@ -561,16 +562,6 @@ public class RadioController : ControllerBase
   {
     return _audioEngine.GetActiveRadioSource();
   }
-
-  /// <summary>
-  /// Maps an IRadioControl instance to a RadioStateDto. Delegates to
-  /// <see cref="Radio.API.Mappers.RadioStateMapper.MapToRadioStateDto"/> so the
-  /// REST and SignalR paths share one projection (PR 1).
-  /// </summary>
-  /// <param name="radioSource">The radio source.</param>
-  /// <returns>The radio state DTO.</returns>
-  private static RadioStateDto MapToRadioStateDto(IRadioControl radioSource)
-    => Radio.API.Mappers.RadioStateMapper.MapToRadioStateDto(radioSource);
 
   // ===== RADIO PRESET ENDPOINTS =====
 
@@ -790,7 +781,7 @@ public class RadioController : ControllerBase
       await radioSource.SetBandAsync(preset.Band);
       await radioSource.SetFrequencyAsync(new Frequency((long)preset.Frequency));
 
-      return Ok(MapToRadioStateDto(radioSource));
+      return Ok(radioSource.MapToRadioStateDto());
     }
     catch (Exception ex)
     {

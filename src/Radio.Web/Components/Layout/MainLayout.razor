@@ -802,15 +802,22 @@
   /// </summary>
   private async Task HandleSourceDetailAsync(AudioSourceDto source)
   {
-    if (IsRadioSource(source.Type))
+    // Routing decision lives in SourceTypeHelper.GetDetailRoute so the dispatch
+    // is unit-testable without spinning up Radzen + bUnit (Arc 3 PR C item #13).
+    var route = SourceTypeHelper.GetDetailRoute(source.Type);
+    switch (route)
     {
-      NavigationManager.NavigateTo("/");
-      await RadioPanelToggle.ShowRadioPanelAsync();
-      return;
-    }
-    if (source.Type == "Bluetooth")
-    {
-      NavigationManager.NavigateTo("/bluetooth");
+      case SourceTypeHelper.SourceDetailRoute.RadioPanel:
+        NavigationManager.NavigateTo("/");
+        await RadioPanelToggle.ShowRadioPanelAsync();
+        break;
+      case SourceTypeHelper.SourceDetailRoute.BluetoothPage:
+        NavigationManager.NavigateTo("/bluetooth");
+        break;
+      case SourceTypeHelper.SourceDetailRoute.None:
+        // Chevron wouldn't have rendered for sources without a detail surface;
+        // nothing to do if the tap ever reaches us anyway.
+        break;
     }
   }
 

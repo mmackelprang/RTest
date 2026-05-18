@@ -354,23 +354,9 @@ public class NowPlayingPanelTests : TestContext
     Assert.Empty(cut.FindAll(".np-recognition-stream table"));
   }
 
-  [Fact]
-  public void FormatTimeAgo_RecentSeconds_RendersSecondsAgo()
-  {
-    var now = new DateTime(2026, 5, 17, 12, 0, 0, DateTimeKind.Utc);
-    var twentySecondsAgo = now.AddSeconds(-20);
-    var result = NowPlayingPanel.FormatTimeAgo(twentySecondsAgo, now);
-    Assert.Equal("20s ago", result);
-  }
-
-  [Fact]
-  public void FormatTimeAgo_Minutes_RendersMinutesAgo()
-  {
-    var now = new DateTime(2026, 5, 17, 12, 0, 0, DateTimeKind.Utc);
-    var threeMinutesAgo = now.AddMinutes(-3);
-    var result = NowPlayingPanel.FormatTimeAgo(threeMinutesAgo, now);
-    Assert.Equal("3m ago", result);
-  }
+  // Note: FormatTimeAgo unit tests moved to TimestampsTests.FormatRecentRelative_*
+  // in Arc 3 PR C (item #35) — the helper was extracted into Timestamps so any
+  // surface that needs short-relative formatting can consume it.
 
   // ─── Wire-path regression: RadioStateChanged carries the typed DTO ─────────
   //

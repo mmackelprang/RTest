@@ -152,7 +152,7 @@
                       </div>
                     }
                     <ConfidencePips Bucket="@evt.Confidence" />
-                    <span class="np-recognition-time-ago">@FormatTimeAgo(evt.Timestamp)</span>
+                    <span class="np-recognition-time-ago">@Timestamps.FormatRecentRelative(evt.Timestamp)</span>
                   </div>
                 }
               }
@@ -246,7 +246,7 @@
                             AppliedGainDb="@(_radioState?.AppliedGain ?? 0.0)"
                             OnValueChanged="OnGainSliderChanged"
                             OnAutoToggled="ToggleAutoGainAsync"
-                            OnReset="ResetGainAsync" />
+                            OnReset="ResetGain" />
       </div>
     }
   </div>
@@ -482,7 +482,7 @@
         ConfidenceBucket.Possible => "Possible match",
         _ => "Match"
       };
-      return $"{label} · {FormatTimeAgo(m.Timestamp)}";
+      return $"{label} · {Timestamps.FormatRecentRelative(m.Timestamp)}";
     }
   }
 
@@ -665,34 +665,19 @@
         _volume = state.Volume;
         _canSeek = state.CanSeek;
 
-        // Parse position and duration. Both routed through Durations.FormatTrack so we
-        // never surface ToString() fractional-seconds tails like 00:03:00.6628571.
-        // Sub-second / zero values keep _position = null so the position-only fallback
-        // branch in the template (the "elapsed only" tile) doesn't fire spuriously.
-        var posSeconds = 0.0;
-        if (!string.IsNullOrEmpty(state.Position) && TimeSpan.TryParse(state.Position, out var pos))
-        {
-          posSeconds = pos.TotalSeconds;
-          _position = pos.TotalSeconds >= 1.0 ? Durations.FormatTrack(pos) : "0:00";
-        }
-        else
-        {
-          _position = null;
-        }
-
-        // Parse duration (may be null for live/streaming sources like BT)
-        if (!string.IsNullOrEmpty(state.Duration) && TimeSpan.TryParse(state.Duration, out var dur) && dur.TotalSeconds > 0)
-        {
-          _totalDurationSeconds = dur.TotalSeconds;
-          _progressPercent = posSeconds > 0 ? (posSeconds / dur.TotalSeconds) * 100.0 : 0;
-          _duration = Durations.FormatTrack(dur);
-        }
-        else
-        {
-          _duration = null;
-          _totalDurationSeconds = 0;
-          _progressPercent = 0;
-        }
+        // Both elapsed/total are projected through PlaybackProgressProjection so the
+        // panel and dock surfaces share one rounding / em-dash / percent-clamp contract
+        // (Arc 3 PR C item #14). Position-only ("elapsed only") fallback branch in the
+        // template keys off _position being non-null + _duration being null, so we
+        // null-out _position when the input string didn't parse and _duration when the
+        // total is zero.
+        var progress = PlaybackProgressProjection.From(state);
+        var hasPosition = !string.IsNullOrEmpty(state.Position)
+          && TimeSpan.TryParse(state.Position, System.Globalization.CultureInfo.InvariantCulture, out _);
+        _position = hasPosition ? progress.ElapsedDisplay : null;
+        _totalDurationSeconds = progress.TotalSeconds;
+        _progressPercent = progress.Percent;
+        _duration = progress.TotalSeconds > 0 ? progress.TotalDisplay : null;
       }
 
       var nowPlaying = await AudioApi.GetNowPlayingAsync();
@@ -779,24 +764,6 @@
     }
   }
 
-  /// <summary>
-  /// Short relative-time formatter for recognition rows. Renders "Xs ago" /
-  /// "Xm ago" / "Xh ago" / "Xd ago" — chosen over <c>Timestamps.FormatRelative</c>
-  /// because the recognition stream is anchored on very recent events (most
-  /// matches happen in the last few minutes) and the absolute "Today HH:mm"
-  /// form reads as too rigid in that scale.
-  /// </summary>
-  private static string FormatTimeAgo(DateTime utc) => FormatTimeAgo(utc, DateTime.UtcNow);
-
-  internal static string FormatTimeAgo(DateTime utc, DateTime nowUtc)
-  {
-    var delta = nowUtc - utc;
-    if (delta.TotalSeconds < 1) return "just now";
-    if (delta.TotalMinutes < 1) return $"{(int)delta.TotalSeconds}s ago";
-    if (delta.TotalHours < 1) return $"{(int)delta.TotalMinutes}m ago";
-    if (delta.TotalDays < 1) return $"{(int)delta.TotalHours}h ago";
-    return $"{(int)delta.TotalDays}d ago";
-  }
 
   // --- Source gain helpers ---
 
@@ -864,8 +831,9 @@
   /// Reset the per-source playback gain to unity (linear 1.0 → 0 dB). The
   /// slider value-changed callback follows immediately so the debounce timer
   /// fires the API write through the same path as a manual slider drag.
+  /// Synchronous body — the Async suffix on the previous name was misleading.
   /// </summary>
-  private void ResetGainAsync()
+  private void ResetGain()
   {
     if (_radioState?.AutoGain == true) return; // disabled while AGC is on
     OnGainSliderChanged(1.0f);
@@ -926,10 +894,11 @@
     {
       var seconds = (newPercent / 100.0) * _totalDurationSeconds;
       var newTime = TimeSpan.FromSeconds(seconds);
-      _progressPercent = newPercent;
-      // Mirror the parsing branch above: sub-second values surface as "0:00" so the
-      // template doesn't flash an em-dash in the elapsed cell during a rapid scrub-to-zero.
-      _position = newTime.TotalSeconds >= 1.0 ? Durations.FormatTrack(newTime) : "0:00";
+      // Route the formatting through the shared projection so a rapid scrub-to-zero
+      // surfaces "0:00" (not em-dash) in the elapsed cell, matching the dock.
+      var progress = PlaybackProgressProjection.From(seconds, _totalDurationSeconds);
+      _progressPercent = progress.Percent;
+      _position = progress.ElapsedDisplay;
       await AudioApi.UpdatePlaybackStateAsync(new UpdatePlaybackRequest(
         Action: "Seek", Volume: null, IsMuted: null, Balance: null, SeekPosition: newTime));
       await RefreshPlaybackStateAsync();

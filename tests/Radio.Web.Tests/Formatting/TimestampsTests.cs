@@ -64,4 +64,62 @@ public class TimestampsTests
     result.Should().NotBeNullOrWhiteSpace();
     result.Should().StartWith("Today ");
   }
+
+  // ─── FormatRecentRelative ─────────────────────────────────────────────────
+  // Extracted from NowPlayingPanel.FormatTimeAgo in Arc 3 PR C (item #35).
+  // Distinct from FormatRelative because the recognition stream and dev-tray
+  // event log anchor on very-recent timestamps where "Today HH:mm" reads as
+  // too rigid — "12s ago" / "5m ago" is the appropriate scale.
+
+  private static readonly DateTime NowUtc = new(2026, 5, 17, 14, 0, 0, DateTimeKind.Utc);
+
+  [Fact]
+  public void FormatRecentRelative_FiveSecondsAgo_RendersSecondsAgo()
+  {
+    var t = NowUtc.AddSeconds(-5);
+    Timestamps.FormatRecentRelative(t, NowUtc).Should().Be("5s ago");
+  }
+
+  [Fact]
+  public void FormatRecentRelative_SubSecond_RendersJustNow()
+  {
+    // Delta below 1s: avoid the "0s ago" surprise — use "just now" instead.
+    var t = NowUtc.AddMilliseconds(-500);
+    Timestamps.FormatRecentRelative(t, NowUtc).Should().Be("just now");
+  }
+
+  [Fact]
+  public void FormatRecentRelative_NinetySecondsAgo_RendersOneMinuteAgo()
+  {
+    // (int) cast on TotalMinutes truncates 1.5 → 1, matching the prior
+    // NowPlayingPanel.FormatTimeAgo behaviour.
+    var t = NowUtc.AddSeconds(-90);
+    Timestamps.FormatRecentRelative(t, NowUtc).Should().Be("1m ago");
+  }
+
+  [Fact]
+  public void FormatRecentRelative_FiveHoursAgo_RendersHoursAgo()
+  {
+    var t = NowUtc.AddHours(-5);
+    Timestamps.FormatRecentRelative(t, NowUtc).Should().Be("5h ago");
+  }
+
+  [Fact]
+  public void FormatRecentRelative_ThreeDaysAgo_RendersDaysAgo()
+  {
+    var t = NowUtc.AddDays(-3);
+    Timestamps.FormatRecentRelative(t, NowUtc).Should().Be("3d ago");
+  }
+
+  [Fact]
+  public void FormatRecentRelative_NoArg_DelegatesToUtcNowOverload()
+  {
+    // Smoke test: the no-arg form picks up DateTime.UtcNow and emits a
+    // non-empty short-relative string for "right now".
+    var result = Timestamps.FormatRecentRelative(DateTime.UtcNow);
+    result.Should().NotBeNullOrWhiteSpace();
+    // Either "just now" (< 1s elapsed) or "0s ago" (some millis elapsed) —
+    // depending on test machine timing. Both are valid short-relative shapes.
+    result.Should().Match(r => r == "just now" || r.EndsWith("s ago"));
+  }
 }

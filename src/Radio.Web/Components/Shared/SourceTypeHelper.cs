@@ -93,4 +93,42 @@ public static class SourceTypeHelper
       "RTLSDRCore",
       "RF320"
     };
+
+  /// <summary>
+  /// Destinations the chevron tap on a <c>SourceBubble</c> can route to
+  /// (Arc 3 PR C folded-in item #13). Extracted from
+  /// <c>MainLayout.HandleSourceDetailAsync</c> so the routing decision is
+  /// unit-testable without spinning up Radzen + bUnit.
+  /// </summary>
+  public enum SourceDetailRoute
+  {
+    /// <summary>Source has no detail surface; chevron tap is a no-op.</summary>
+    None,
+    /// <summary>Radio family — navigate Home and show the radio control panel.</summary>
+    RadioPanel,
+    /// <summary>Bluetooth — navigate to the BT pairing page.</summary>
+    BluetoothPage,
+  }
+
+  /// <summary>
+  /// Resolves the detail-surface destination for a given source type. Returns
+  /// <see cref="SourceDetailRoute.None"/> for null / empty / unknown types so
+  /// <c>MainLayout</c> can switch over the enum without inline string checks.
+  /// </summary>
+  public static SourceDetailRoute GetDetailRoute(string? sourceType)
+  {
+    if (string.IsNullOrEmpty(sourceType))
+    {
+      return SourceDetailRoute.None;
+    }
+    if (IsRadioFamily(sourceType))
+    {
+      return SourceDetailRoute.RadioPanel;
+    }
+    if (sourceType.Equals("Bluetooth", StringComparison.OrdinalIgnoreCase))
+    {
+      return SourceDetailRoute.BluetoothPage;
+    }
+    return SourceDetailRoute.None;
+  }
 }
