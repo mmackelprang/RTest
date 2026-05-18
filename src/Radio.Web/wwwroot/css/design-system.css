@@ -3815,3 +3815,429 @@ body {
 .rcp-preset-item::before {
   content: none;
 }
+
+
+/* ─── §Y  NowPlaying Status Strip (Radio Controller Polish PR 4) ──────────── *
+ * Unified Source · Frequency · RDS · Gain strip at the top of NowPlayingPanel.
+ * Replaces the three floating pills (Searching badge, source pill, 0dB
+ * cyan button) that PR 4 of the handoff explicitly bans.
+ *
+ * Cell visibility is template-driven: the source cell is always present,
+ * frequency + RDS only render for radio-family sources, the gain cell is
+ * always present (its tap opens GainControlPopover, see §Z).
+ *
+ * The strip sits in the same stacking context as the album art card. When
+ * a track has art the strip uses a translucent backdrop so it reads as
+ * "floating glass" rather than a hard chrome bar.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+.np-status-strip {
+  display: flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 12px;
+  gap: 12px;
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--surface-separator);
+  flex-shrink: 0;
+}
+
+/* When album art is behind the strip, fade the chrome to translucent glass so
+   the art's mood comes through. The blur is applied only here — the source
+   cells stay legible because the swatches and text use high-contrast tokens. */
+.np-status-strip.has-art-bg {
+  background: rgba(20, 20, 22, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.np-status-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 12px;
+  border-right: 1px solid var(--surface-separator);
+  min-width: 0; /* allow ellipsis on children */
+}
+
+.np-status-strip.has-art-bg .np-status-cell {
+  border-right-color: rgba(255, 255, 255, 0.10);
+}
+
+.np-status-cell:last-child {
+  border-right: none;
+  padding-right: 0;
+  margin-left: auto; /* push the gain cell to the trailing edge */
+}
+
+/* Source cell — 8×8 coloured square + name. */
+.np-status-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.np-status-name {
+  font-size: 12px;
+  color: var(--text-high);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+
+/* Frequency cell — DSEG LED value + small mono unit chip. */
+.np-status-freq {
+  font-family: var(--font-led);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--signal-amber);
+  letter-spacing: 0.05em;
+}
+
+.np-status-mhz-chip {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-medium);
+  padding: 1px 4px;
+  background: var(--surface-elevated);
+  border-radius: 4px;
+}
+
+/* RDS cell — cyan accent station name + dim "RDS" tag. */
+.np-status-rds-station {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent-primary);
+  letter-spacing: 0.10em;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: 120px;
+}
+
+.np-status-rds-tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-low);
+}
+
+/* Gain cell — tappable; cyan to suggest interactivity. */
+.np-status-cell-gain {
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: background var(--anim-duration-fast) var(--anim-ease-standard);
+}
+
+.np-status-cell-gain:hover,
+.np-status-cell-gain:focus-visible {
+  background: var(--accent-dim);
+  outline: none;
+}
+
+.np-status-cell-gain:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 1px;
+}
+
+.np-status-gain {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--accent-primary);
+}
+
+
+/* ─── §Y2 NowPlaying Match Badge (Radio Controller Polish PR 4) ─────────── *
+ * Confidence pips + label anchored under the song title inside the album-art
+ * card. The badge replaces the legacy "Searching/Strong" floating pill in
+ * the top-left corner. Tapping the badge opens the recognition stream.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+.np-match-badge {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  cursor: pointer;
+  z-index: 3;
+  transition: background var(--anim-duration-fast) var(--anim-ease-standard);
+}
+
+.np-match-badge:hover,
+.np-match-badge:focus-visible {
+  background: rgba(0, 0, 0, 0.75);
+  outline: none;
+}
+
+.np-match-badge:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.np-match-badge-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.10em;
+  color: var(--text-medium);
+}
+
+.np-match-badge.is-rds .np-match-badge-label {
+  color: var(--accent-primary);
+}
+
+
+/* ─── §Z  Gain Control Popover (Radio Controller Polish PR 4) ─────────────── *
+ * Vertical peak meter · vertical slider · scale-label column. Replaces the
+ * inline RadzenSlider+nudge buttons block that lived in NowPlayingPanel.
+ * The popover is anchored to the gain status-strip cell; positioning is
+ * absolute within NowPlayingPanel's bounding box.
+ *
+ * The peak meter receives ReceiveLevels SignalR pushes via
+ * AudioVisualizationHubService.OnLevelData. Cadence is whatever the visualizer
+ * is producing (~20fps in normal play). Segments paint reactively; a 1px
+ * hold mark decays at ~1 segment / 600 ms.
+ *
+ * AGC: when the source is part of the radio family the header carries an
+ * "Auto on / Auto off" pill. Activating Auto dims the slider track + knob to
+ * 35% opacity and blocks pointer events; the footer surfaces the device-
+ * chosen gain in dB instead of the slider value.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* Anchors the popover just under the status strip's gain cell at the
+   trailing edge of the album-art container. The popover lives inside the
+   album-art container (which starts immediately below the 36px strip),
+   so 8px of top inset puts the popover ≈44px from the panel top — i.e.
+   directly under the gain cell without overlapping the strip. */
+.np-gain-popover-anchor {
+  position: absolute;
+  top: 8px;
+  right: 16px;
+  z-index: 10000;
+}
+
+.gain-popover {
+  width: 340px;
+  background: var(--surface-overlay);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--surface-separator);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.50);
+  padding: 16px;
+  color: var(--text-high);
+  font-family: var(--font-body);
+}
+
+.gain-popover-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.gain-popover-kicker {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-low);
+}
+
+.gain-popover-title {
+  font-size: 14px;
+  color: var(--text-high);
+  font-weight: 500;
+  flex: 1;
+}
+
+.gain-popover-auto {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--anim-duration-fast) var(--anim-ease-standard);
+}
+
+.gain-popover-auto.is-on {
+  color: var(--signal-green);
+  border: 1px solid var(--signal-green);
+  background: color-mix(in srgb, var(--signal-green) 12%, transparent);
+}
+
+.gain-popover-auto.is-off {
+  color: var(--text-medium);
+  border: 1px solid var(--surface-separator);
+}
+
+.gain-popover-auto:hover {
+  filter: brightness(1.15);
+}
+
+.gain-popover-body {
+  display: grid;
+  grid-template-columns: 18px 1fr 32px;
+  grid-template-rows: 124px;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.gain-popover-peakmeter {
+  display: flex;
+  flex-direction: column-reverse; /* segments stack bottom-up */
+  gap: 1px;
+  position: relative;
+  background: var(--surface-inset);
+  border-radius: 3px;
+  padding: 1px;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.gain-popover-peak-segment {
+  flex: 1;
+  background: var(--surface-elevated);
+  border-radius: 1px;
+}
+
+/* Bottom 12 segments (0..−24 dBFS) light green, next 5 (−24..−9) amber,
+   top 3 (−9..0) red. Using :nth-child with column-reverse means segment 1 is
+   at the bottom of the visible column — counted from the source-order start
+   of the flex container. */
+.gain-popover-peak-segment.is-lit:nth-child(-n+12) {
+  background: var(--signal-green);
+}
+
+.gain-popover-peak-segment.is-lit:nth-child(n+13):nth-child(-n+17) {
+  background: var(--signal-amber);
+}
+
+.gain-popover-peak-segment.is-lit:nth-child(n+18) {
+  background: var(--signal-red);
+}
+
+.gain-popover-peak-hold {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--text-medium);
+  pointer-events: none;
+}
+
+.gain-popover-slider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.gain-popover-slider.is-disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* Vertical-style range via writing-mode (more reliable than transform: rotate
+   in modern browsers; falls back to horizontal in legacy ones). */
+.gain-popover-slider input[type=range] {
+  -webkit-appearance: slider-vertical;
+  appearance: slider-vertical;
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 24px;
+  height: 100%;
+  max-height: 100%;
+  background: transparent;
+  accent-color: var(--signal-amber);
+  cursor: pointer;
+}
+
+.gain-popover-zero-tick {
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  right: 4px;
+  height: 0;
+  border-top: 1px dashed var(--text-low);
+  pointer-events: none;
+}
+
+.gain-popover-scale {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-low);
+  letter-spacing: 0.05em;
+  text-align: right;
+  min-height: 0;
+  height: 100%;
+}
+
+.gain-popover-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 12px;
+  border-top: 1px solid var(--surface-separator);
+}
+
+.gain-popover-value {
+  font-family: var(--font-led);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 22px;
+  color: var(--signal-amber);
+  letter-spacing: 0.05em;
+}
+
+.gain-popover-reset {
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid var(--surface-separator);
+  color: var(--text-medium);
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  transition: all var(--anim-duration-fast) var(--anim-ease-standard);
+}
+
+.gain-popover-reset:hover {
+  color: var(--text-high);
+  border-color: var(--text-low);
+  background: var(--surface-hover);
+}
+
+.gain-popover-reset:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
