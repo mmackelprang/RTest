@@ -112,6 +112,21 @@ public class DisplayNamesTests
   }
 
   [Fact]
+  public void Device_60CharName_TruncatesTo39CharsPlusEllipsis()
+  {
+    // Task #15 PR B / handoff item #3 — a 60-char fixture is the canonical
+    // long-name regression case (Bluetooth speakers + USB cards routinely
+    // approach this length on Linux PipeWire descriptions). The cap result
+    // is still 39 chars + the U+2026 ellipsis = 40, never the original 60.
+    var name = new string('A', 60);
+    var d = new AudioDeviceDto { Name = name };
+    var result = DisplayNames.Device(d, null);
+    result.Length.Should().Be(40);
+    result.EndsWith('…').Should().BeTrue();
+    result.Should().Be(new string('A', 39) + "…");
+  }
+
+  [Fact]
   public void Device_HeuristicHeadStrip_AppliedWhenHeadHasSpaceAndIs4Plus()
   {
     // "BigCo Speaker" (13 chars, has a space) head → stripped, even though the paren content

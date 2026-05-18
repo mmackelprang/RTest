@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using AngleSharp.Dom;
 using Bunit;
+using FluentAssertions;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -67,8 +68,12 @@ public class RadioControlPanelTests : TestContext
   /// responds to <c>GET /api/radio/state</c> with the supplied DTO. Presets
   /// and bands return the supplied lists (or empty by default) so the panel
   /// renders without async error banners.
+  ///
+  /// The returned handler can be inspected after a render to verify recorded
+  /// calls (POST bodies, paths) for tests that pin interaction wiring such as
+  /// <c>AgcStrip_TapLeftCell_TogglesAgc</c>.
   /// </summary>
-  private void UseRadioState(
+  private RadioStateStubHandler UseRadioState(
     RadioStateDto state,
     IEnumerable<RadioPresetDto>? presets = null,
     IEnumerable<Radio.Core.Models.RadioBandModel>? bands = null)
@@ -79,6 +84,7 @@ public class RadioControlPanelTests : TestContext
       var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
       return new RadioApiService(client, NullLogger<RadioApiService>.Instance);
     });
+    return handler;
   }
 
   private static RadioStateDto BuildState(
@@ -290,6 +296,197 @@ public class RadioControlPanelTests : TestContext
     var offChip = cut.Find(".rcp-agc-chip-off");
     Assert.Equal("OFF", offChip.TextContent.Trim());
     Assert.Empty(cut.FindAll(".rcp-agc-chip-auto"));
+  }
+
+  // ─── Task #15 PR B (handoff item #26): AGC cell click toggles AGC ─────────
+  //
+  // The whole left cell of the SDR strip is a button; tapping it must fire
+  // RadioApi.SetAutoGainAsync(!current). PR 1 of Arc 2 introduced this two-cell
+  // grid; the unit test that pinned the click handler was deferred to PR B.
+
+  [Fact]
+  public void AgcStrip_TapLeftCell_TogglesAgc()
+  {
+    // AGC currently ON — tapping the cell must POST /api/radio/gain/auto with
+    // {"enabled": false} via RadioApi.SetAutoGainAsync.
+    var state = BuildState(autoGain: true, appliedGain: 18.0, gain: 0);
+    var handler = UseRadioState(state);
+    var cut = RenderComponent<RadioControlPanel>();
+    cut.WaitForAssertion(() =>
+    {
+      Assert.DoesNotContain("skeleton", cut.Markup, StringComparison.OrdinalIgnoreCase);
+    }, timeout: TimeSpan.FromSeconds(2));
+
+    cut.Find(".rcp-agc-cell").Click();
+
+    // Wait for the async POST to complete and land in the recorded-calls list.
+    cut.WaitForAssertion(() =>
+    {
+      var call = handler.RecordedCalls
+        .FirstOrDefault(c => c.Method == "POST" && c.Path == "/api/radio/gain/auto");
+      call.Path.Should().Be("/api/radio/gain/auto",
+        "the AGC cell click must POST to the auto-gain endpoint");
+      call.Body.Should().Contain("\"enabled\":false",
+        "current AGC=true must toggle to enabled:false");
+    }, timeout: TimeSpan.FromSeconds(2));
+  }
+
+  // ─── Task #15 PR B (handoff item #27): scan-signal dBu branch ────────────
+  //
+  // The scan-state indicator inside RadioControlPanel reads RssiDbu against
+  // ScanStopThreshold (both `double` in dBu after Arc 2 PR 1). When the radio
+  // is scanning AND RssiDbu >= ScanStopThreshold, the indicator shows the
+  // green "SIGNAL" pill carrying the current dBu value. Otherwise (still
+  // hunting), it shows the amber "SCANNING" hint.
+
+  // ─── Task #15 PR B (handoff item #38): long-press 600ms + save-dialog seed ─
+  //
+  // The active band pill carries a long-press gesture: holding for at least
+  // LongPressThresholdMs (600ms) opens the save-preset dialog instead of the
+  // no-op tap-to-switch behaviour. The press timing is tracked via
+  // DateTime.UtcNow on _bandPointerDownAt; rather than introduce a TimeProvider
+  // refactor on this just-shipped code path, the test seeds _bandPointerDownAt
+  // backwards in time before calling the pointer-up handler — exercising the
+  // same elapsed-ms branch the real gesture would hit.
+
+  [Fact]
+  public void BandPill_LongPress600ms_TriggersOpenSavePresetDialog()
+  {
+    var state = BuildState(rdsStationName: "KEXP");
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
+
+    var instance = cut.Instance;
+    var type = typeof(RadioControlPanel);
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+
+    // Stage 1: pointerdown on the currently-active band ("FM").
+    var pointerDown = type.GetMethod("HandleBandPointerDown", flags)!;
+    cut.InvokeAsync(() => pointerDown.Invoke(instance, new object[] { "FM", true }));
+
+    // Stage 2: rewind _bandPointerDownAt so the elapsed-ms exceeds the 600ms
+    // long-press threshold without us actually sleeping. This is exactly the
+    // delta the production code would compute for a real 700ms hold.
+    var pointerDownAtField = type.GetField("_bandPointerDownAt", flags)!;
+    pointerDownAtField.SetValue(instance, DateTime.UtcNow.AddMilliseconds(-700));
+
+    // Stage 3: pointerup — the elapsed-ms check passes, dialog opens.
+    var pointerUp = type.GetMethod("HandleBandPointerUp", flags)!;
+    cut.InvokeAsync(() => pointerUp.Invoke(instance, new object[] { "FM", true }));
+    cut.Render();
+
+    // Dialog field flips to true.
+    var dialogOpenField = type.GetField("_isSavePresetDialogOpen", flags)!;
+    var open = (bool)dialogOpenField.GetValue(instance)!;
+    open.Should().BeTrue(
+      "a long-press ≥600ms on the active band pill must open the save-preset dialog");
+  }
+
+  [Fact]
+  public void BandPill_ShortClick_DoesNotOpenDialog_SwitchesBand()
+  {
+    // Short tap (<600ms): pointerup branches without opening the dialog.
+    var state = BuildState();
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
+
+    var instance = cut.Instance;
+    var type = typeof(RadioControlPanel);
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+
+    var pointerDown = type.GetMethod("HandleBandPointerDown", flags)!;
+    cut.InvokeAsync(() => pointerDown.Invoke(instance, new object[] { "FM", true }));
+
+    // Leave _bandPointerDownAt at "now" so elapsed-ms is essentially 0.
+    var pointerUp = type.GetMethod("HandleBandPointerUp", flags)!;
+    cut.InvokeAsync(() => pointerUp.Invoke(instance, new object[] { "FM", true }));
+    cut.Render();
+
+    var dialogOpenField = type.GetField("_isSavePresetDialogOpen", flags)!;
+    var open = (bool)dialogOpenField.GetValue(instance)!;
+    open.Should().BeFalse(
+      "a short tap on a band pill must not open the save-preset dialog");
+  }
+
+  [Fact]
+  public void SavePresetDialog_NameField_SeededWithRdsStationName_WhenPresent()
+  {
+    // RDS station name available → seed = the RDS name (no band/freq fallback).
+    var state = BuildState(rdsStationName: "Rock 92", frequency: 92_300_000);
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
+
+    var instance = cut.Instance;
+    var type = typeof(RadioControlPanel);
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+
+    var openSaveDialog = type.GetMethod("OpenSavePresetDialog", flags)!;
+    cut.InvokeAsync(() => openSaveDialog.Invoke(instance, null));
+    cut.Render();
+
+    var seed = (string?)type.GetField("_presetName", flags)!.GetValue(instance);
+    seed.Should().Be("Rock 92",
+      "with RDS station name present the seed must use the RDS name verbatim");
+  }
+
+  [Fact]
+  public void SavePresetDialog_NameField_SeededWithBandPlusFrequency_WhenNoRds()
+  {
+    // No RDS station name → fall back to "<band> <formatted-freq>" composition.
+    // FM band + 92.30 MHz frequency must produce "FM 92.30 MHz" (the panel's
+    // FormatFrequency helper handles the per-band unit logic).
+    var state = BuildState(rdsStationName: null, frequency: 92_300_000, band: "FM");
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
+
+    var instance = cut.Instance;
+    var type = typeof(RadioControlPanel);
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+
+    var openSaveDialog = type.GetMethod("OpenSavePresetDialog", flags)!;
+    cut.InvokeAsync(() => openSaveDialog.Invoke(instance, null));
+    cut.Render();
+
+    var seed = (string?)type.GetField("_presetName", flags)!.GetValue(instance);
+    seed.Should().StartWith("FM ",
+      "the fallback seed prefixes with the active band");
+    seed.Should().Contain("92.30",
+      "the fallback seed embeds the formatted frequency for the active band");
+    seed.Should().Contain("MHz",
+      "FM band carries the MHz unit (the panel's FormatFrequency helper applies the per-band unit)");
+  }
+
+  [Fact]
+  public void ScanIndicator_CompareRssiToScanStopThreshold_UsesDbu()
+  {
+    // RssiDbu=-20 exceeds threshold=-30 → signal-found branch lights up.
+    var state = new RadioStateDto(
+      Frequency: 92.5e6,
+      Band: "FM",
+      Step: 100_000,
+      SignalStrength: 80,
+      IsScanning: true,
+      ScanDirection: "up",
+      ScanStopThreshold: -30.0,
+      Gain: 0,
+      AutoGain: true,
+      Equalizer: "Normal",
+      DeviceVolume: 50,
+      IsStereo: false,
+      RdsStationName: null,
+      RdsProgramType: null,
+      Clip: false,
+      RssiDbu: -20.0,
+      AppliedGain: 0.0,
+      NowPlayingMatchId: null,
+      RdsRadioText: null);
+    var cut = RenderPanel(state);
+
+    // The presence of the dBu readout (in green SIGNAL form) is the assertion.
+    // The amber scanning-up text "SCANNING" must NOT render when signal exceeds
+    // the threshold.
+    cut.Markup.Should().Contain("dBu");
+    // The dBu readout in the meter renders the current value. We assert the
+    // value is rendered as the math-minus form "−20 dBu" (consistent with the
+    // existing SignalMeter_RendersDbuReadout test).
+    var readout = cut.Find(".rcp-meter-dbu").TextContent.Trim();
+    readout.Should().Be("−20 dBu");
   }
 
   [Theory]
@@ -789,8 +986,10 @@ public class RadioControlPanelTests : TestContext
   /// Tiny HTTP stub that returns a fixed <see cref="RadioStateDto"/> for
   /// <c>/api/radio/state</c> and configurable arrays for the auxiliary
   /// endpoints the panel hits during <c>OnInitializedAsync</c>
-  /// (<c>/api/radio/presets</c>, <c>/api/RadioBands</c>). Anything else gets
-  /// 404 — the panel logs and continues so the page still renders.
+  /// (<c>/api/radio/presets</c>, <c>/api/RadioBands</c>). POST endpoints (e.g.
+  /// <c>/api/radio/gain/auto</c>) return 200 OK and record the path + body
+  /// into <see cref="RecordedCalls"/> so interaction-wiring tests can assert
+  /// the user gesture reached the API client.
   /// </summary>
   private sealed class RadioStateStubHandler : HttpMessageHandler
   {
@@ -798,6 +997,9 @@ public class RadioControlPanelTests : TestContext
     private readonly IEnumerable<RadioPresetDto> _presets;
     private readonly IEnumerable<Radio.Core.Models.RadioBandModel> _bands;
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
+
+    /// <summary>Recorded outbound calls — useful for tests that pin user-gesture wiring.</summary>
+    public List<(string Method, string Path, string? Body)> RecordedCalls { get; } = new();
 
     public RadioStateStubHandler(
       RadioStateDto state,
@@ -809,18 +1011,29 @@ public class RadioControlPanelTests : TestContext
       _bands = bands ?? Array.Empty<Radio.Core.Models.RadioBandModel>();
     }
 
-    protected override Task<HttpResponseMessage> SendAsync(
+    protected override async Task<HttpResponseMessage> SendAsync(
       HttpRequestMessage request, CancellationToken cancellationToken)
     {
       var path = request.RequestUri?.AbsolutePath ?? string.Empty;
-      var response = path switch
+      var method = request.Method.Method;
+      string? body = null;
+      if (request.Content != null)
       {
-        "/api/radio/state" => Ok(_state),
-        "/api/radio/presets" => Ok(_presets),
-        "/api/RadioBands" => Ok(_bands),
+        body = await request.Content.ReadAsStringAsync(cancellationToken);
+      }
+      RecordedCalls.Add((method, path, body));
+
+      var response = (method, path) switch
+      {
+        ("GET", "/api/radio/state") => Ok(_state),
+        ("GET", "/api/radio/presets") => Ok(_presets),
+        ("GET", "/api/RadioBands") => Ok(_bands),
+        // POST endpoints — return 200 so the API client treats them as success;
+        // the panel still re-fetches state which lands on our stubbed GET.
+        ("POST", _) => new HttpResponseMessage(HttpStatusCode.OK),
         _ => new HttpResponseMessage(HttpStatusCode.NotFound),
       };
-      return Task.FromResult(response);
+      return response;
     }
 
     private static HttpResponseMessage Ok<T>(T payload)

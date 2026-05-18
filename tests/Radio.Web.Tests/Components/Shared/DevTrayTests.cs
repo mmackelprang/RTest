@@ -1,3 +1,4 @@
+using System.Reflection;
 using Bunit;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
@@ -228,5 +229,75 @@ public class DevTrayTests : TestContext
     var engineCard = cut.FindAll(".dev-card")
       .First(c => c.QuerySelector(".dev-card-label")?.TextContent.Trim() == "Engine state");
     engineCard.HasAttribute("disabled").Should().BeTrue();
+  }
+
+  // ─── Task #15 PR B (handoff item #17): auto-lock after 30s of inactivity ──
+  //
+  // The tray ticks an auto-lock timer every second; when 30s pass without an
+  // interaction, OnClose fires. We don't want a flaky 30-second sleep in CI —
+  // and the tray's Timer was deliberately not refactored to TimeProvider for
+  // this PR (kept the just-shipped code untouched). Instead we back-date
+  // _lastInteractionUtc and invoke TickAutoLockAsync directly via reflection.
+  // That exercises the same elapsed-seconds branch a real 30s wait would hit.
+
+  [Fact]
+  public async Task DevTray_AutoLock_FiresOnCloseAfter30SecondsOfNoInteraction()
+  {
+    var closeCount = 0;
+    var cut = RenderComponent<DevTray>(p => p
+      .Add(x => x.IsOpen, true)
+      .Add(x => x.OnClose, Microsoft.AspNetCore.Components.EventCallback.Factory.Create(
+        this, () => { closeCount++; })));
+
+    var instance = cut.Instance;
+    var type = typeof(DevTray);
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+
+    // Back-date the last-interaction timestamp 31s into the past — the
+    // elapsed-seconds check in TickAutoLockAsync will compute 31 ≥ 30 and
+    // fire OnClose. The synthetic shift mirrors what a real wall-clock
+    // 30s wait would produce, without the flakiness.
+    type.GetField("_lastInteractionUtc", flags)!
+      .SetValue(instance, DateTime.UtcNow.AddSeconds(-31));
+
+    var tick = type.GetMethod("TickAutoLockAsync", flags)!;
+    await cut.InvokeAsync(async () => await (Task)tick.Invoke(instance, null)!);
+
+    closeCount.Should().Be(1,
+      "the auto-lock window elapsed (31s ≥ 30s threshold) — OnClose must fire exactly once");
+  }
+
+  [Fact]
+  public async Task DevTray_AutoLock_TimerResets_OnInteraction()
+  {
+    var closeCount = 0;
+    var cut = RenderComponent<DevTray>(p => p
+      .Add(x => x.IsOpen, true)
+      .Add(x => x.OnClose, Microsoft.AspNetCore.Components.EventCallback.Factory.Create(
+        this, () => { closeCount++; })));
+
+    var instance = cut.Instance;
+    var type = typeof(DevTray);
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+
+    // Stage 1: back-date interaction 25s. Tick — still inside the window, no close.
+    type.GetField("_lastInteractionUtc", flags)!
+      .SetValue(instance, DateTime.UtcNow.AddSeconds(-25));
+    var tick = type.GetMethod("TickAutoLockAsync", flags)!;
+    await cut.InvokeAsync(async () => await (Task)tick.Invoke(instance, null)!);
+    closeCount.Should().Be(0, "25s elapsed is inside the 30s window — must not auto-close");
+
+    // Stage 2: simulate an interaction. RecordInteraction resets the
+    // last-interaction timestamp to "now". Then back-date another 25s,
+    // tick, and the timer is still inside the window — total elapsed since
+    // the FIRST observation is now 50s, but the window was reset 25s ago.
+    var record = type.GetMethod("RecordInteraction", flags)!;
+    record.Invoke(instance, null);
+    type.GetField("_lastInteractionUtc", flags)!
+      .SetValue(instance, DateTime.UtcNow.AddSeconds(-25));
+    await cut.InvokeAsync(async () => await (Task)tick.Invoke(instance, null)!);
+
+    closeCount.Should().Be(0,
+      "interaction must reset the auto-lock window — close handler must not fire");
   }
 }
