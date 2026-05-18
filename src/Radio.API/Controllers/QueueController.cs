@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Radio.API.Extensions;
+using Radio.API.Mappers;
 using Radio.API.Models;
 using Radio.Core.Interfaces.Audio;
 
@@ -383,7 +384,11 @@ public class QueueController : ControllerBase
     if (source is IPrimaryAudioSource primary)
     {
       dto.IsSeekable = primary.IsSeekable;
-      dto.Metadata = primary.Metadata.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+      // Use AudioDtoMapper.CopyMetadataSafe rather than .ToDictionary() — see that
+      // helper's doc for why .ToDictionary() can throw an ArgumentException when
+      // background threads mutate the source's live metadata dictionary during
+      // enumeration.
+      dto.Metadata = AudioDtoMapper.CopyMetadataSafe(primary.Metadata);
     }
 
     return dto;

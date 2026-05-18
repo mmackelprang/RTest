@@ -38,7 +38,13 @@ public static class AudioDtoMapper
     if (source is IPrimaryAudioSource primary)
     {
       dto.IsSeekable = primary.IsSeekable;
-      dto.Metadata = primary.Metadata.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+      // Use last-write-wins copy rather than .ToDictionary(): the source's Metadata
+      // is a live, mutable Dictionary shared with background threads (fingerprinting,
+      // AVRCP metadata events, file metadata loading). If a resize/rehash races with
+      // enumeration here, the iterator can yield the same key twice and .ToDictionary
+      // throws ArgumentException ("An item with the same key has already been added.
+      // Key: Duration"). Indexer assignment swallows that race deterministically.
+      dto.Metadata = CopyMetadataSafe(primary.Metadata);
 
       // Bluetooth metadata enrichment
       if (source.Type == AudioSourceType.Bluetooth)
@@ -226,5 +232,24 @@ public static class AudioDtoMapper
       return value.ToString();
     }
     return null;
+  }
+
+  /// <summary>
+  /// Copies a source metadata dictionary into a fresh <see cref="Dictionary{TKey, TValue}"/> using
+  /// last-write-wins semantics for duplicate keys. Audio source <c>Metadata</c> is a live, mutable
+  /// dictionary shared with background threads (fingerprinting, AVRCP, file metadata loaders).
+  /// A raw <see cref="Enumerable.ToDictionary{TSource, TKey, TElement}(IEnumerable{TSource}, Func{TSource, TKey}, Func{TSource, TElement})"/>
+  /// call would throw <see cref="ArgumentException"/> if a concurrent mutation caused the iterator
+  /// to yield the same key (e.g. <c>Duration</c>) twice. Indexer assignment swallows that race
+  /// deterministically — any duplicate observed during enumeration just overwrites the earlier value.
+  /// </summary>
+  public static Dictionary<string, object> CopyMetadataSafe(IReadOnlyDictionary<string, object> source)
+  {
+    var copy = new Dictionary<string, object>(source.Count);
+    foreach (var kvp in source)
+    {
+      copy[kvp.Key] = kvp.Value;
+    }
+    return copy;
   }
 }
