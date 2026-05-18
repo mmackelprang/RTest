@@ -15,6 +15,7 @@ public class MetricsController : ControllerBase
   private readonly ILogger<MetricsController> _logger;
   private readonly IMetricsReader _metricsReader;
   private readonly IMetricsCollector? _metricsCollector;
+  private readonly IMetricDescriptorRegistry? _descriptorRegistry;
 
   /// <summary>
   /// Initializes a new instance of the MetricsController.
@@ -22,11 +23,32 @@ public class MetricsController : ControllerBase
   public MetricsController(
     ILogger<MetricsController> logger,
     IMetricsReader metricsReader,
-    IMetricsCollector? metricsCollector = null)
+    IMetricsCollector? metricsCollector = null,
+    IMetricDescriptorRegistry? descriptorRegistry = null)
   {
     _logger = logger;
     _metricsReader = metricsReader;
     _metricsCollector = metricsCollector;
+    _descriptorRegistry = descriptorRegistry;
+  }
+
+  /// <summary>
+  /// Lists all registered metric descriptors (key, unit, category, thresholds).
+  /// Dashboards consume this surface to render unit-aware tiles without
+  /// resorting to key-pattern heuristics. PR D #11 of the Arc follow-up
+  /// backlog.
+  /// </summary>
+  /// <param name="ct">Cancellation token</param>
+  /// <returns>The list of registered descriptors; empty when no descriptors are registered.</returns>
+  [HttpGet("descriptors")]
+  [ProducesResponseType(typeof(IReadOnlyList<MetricDescriptor>), StatusCodes.Status200OK)]
+  public ActionResult<IReadOnlyList<MetricDescriptor>> GetDescriptors(CancellationToken ct = default)
+  {
+    if (_descriptorRegistry == null)
+    {
+      return Ok(Array.Empty<MetricDescriptor>());
+    }
+    return Ok(_descriptorRegistry.All);
   }
 
   /// <summary>

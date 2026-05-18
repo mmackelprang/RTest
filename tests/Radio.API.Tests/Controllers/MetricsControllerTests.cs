@@ -298,4 +298,62 @@ public class MetricsControllerTests
       x => x.Increment("ui.play_button_clicked_", 1.0, null),
       Times.Once);
   }
+
+  // PR D #11 — descriptor endpoint contract tests.
+
+  [Fact]
+  public void GetDescriptors_NoRegistry_ReturnsEmptyOk()
+  {
+    // Arrange — controller built without an injected IMetricDescriptorRegistry.
+    var controller = new MetricsController(
+      NullLogger<MetricsController>.Instance,
+      _mockMetricsReader.Object,
+      _mockMetricsCollector.Object,
+      descriptorRegistry: null);
+
+    // Act
+    var result = controller.GetDescriptors();
+
+    // Assert
+    var okResult = Assert.IsType<OkObjectResult>(result.Result);
+    var list = Assert.IsAssignableFrom<IReadOnlyList<MetricDescriptor>>(okResult.Value);
+    Assert.Empty(list);
+  }
+
+  [Fact]
+  public void GetDescriptors_PopulatedRegistry_ReturnsRegisteredEntries()
+  {
+    // Arrange
+    var registry = new MetricDescriptorRegistry();
+    registry.Register(new MetricDescriptor
+    {
+      Key = "system.memory_usage_mb",
+      Unit = MetricUnit.Megabytes,
+      Category = "System",
+      DisplayName = "Memory Usage",
+    });
+    registry.Register(new MetricDescriptor
+    {
+      Key = "audio.buffer.underruns",
+      Unit = MetricUnit.Count,
+      Category = "Audio | Buffer",
+    });
+
+    var controller = new MetricsController(
+      NullLogger<MetricsController>.Instance,
+      _mockMetricsReader.Object,
+      _mockMetricsCollector.Object,
+      descriptorRegistry: registry);
+
+    // Act
+    var result = controller.GetDescriptors();
+
+    // Assert
+    var okResult = Assert.IsType<OkObjectResult>(result.Result);
+    var list = Assert.IsAssignableFrom<IReadOnlyList<MetricDescriptor>>(okResult.Value);
+    Assert.Equal(2, list.Count);
+    var memory = list.FirstOrDefault(d => d.Key == "system.memory_usage_mb");
+    Assert.NotNull(memory);
+    Assert.Equal(MetricUnit.Megabytes, memory!.Unit);
+  }
 }

@@ -6,7 +6,7 @@
     <LangVersion>latest</LangVersion>
     <!-- NuGet package metadata -->
     <PackageId>Radio.Metrics</PackageId>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Description>Lightweight metrics collection and time-series storage library with SQLite backend. Supports counters and gauges, buffered writes, multi-resolution rollup (minute/hour/day), configurable retention, and system monitoring. Zero external service dependencies.</Description>
     <PackageTags>metrics;telemetry;time-series;sqlite;counters;gauges;monitoring;rollup</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>

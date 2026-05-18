@@ -336,6 +336,15 @@ public class ConfigurationController : ControllerBase
       }
     }
 
+    // PR D #30 — section-specific value validation. RadioOptions.ScanStopThreshold
+    // is clamped silently by RadioStateMapper.PercentToDbu; explicit validation
+    // is friendlier to API consumers than silent saturation.
+    var sectionValidation = ValidateSectionValues(section, data);
+    if (sectionValidation != null)
+    {
+      return sectionValidation;
+    }
+
     try
     {
       // Use the main configuration store (determined by CurrentStoreType)
@@ -382,6 +391,72 @@ public class ConfigurationController : ControllerBase
     {
       _logger.LogError(ex, "Error updating configuration section {Section}", section);
       return StatusCode(500, new { error = "Failed to update configuration" });
+    }
+  }
+
+  /// <summary>
+  /// Section-specific validation. Called after the generic shape checks pass.
+  /// Returns a <see cref="BadRequestObjectResult"/> on validation failure, or
+  /// <c>null</c> if the values are acceptable. Today this only enforces the
+  /// radio-section threshold range (PR D #30); add additional sections as
+  /// they accumulate hard-bound fields.
+  /// </summary>
+  private static ActionResult? ValidateSectionValues(string section, IDictionary<string, object> data)
+  {
+    if (string.Equals(section, "radio", StringComparison.OrdinalIgnoreCase))
+    {
+      if (data.TryGetValue("ScanStopThreshold", out var rawValue))
+      {
+        if (TryReadInt(rawValue, out var pct))
+        {
+          if (pct < 0 || pct > 100)
+          {
+            return new BadRequestObjectResult(new
+            {
+              error = "ScanStopThreshold must be between 0 and 100 (percent).",
+              field = "ScanStopThreshold",
+              value = pct
+            });
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  /// <summary>
+  /// Reads an int out of a raw JSON value or boxed CLR value. Returns false
+  /// when the source cannot be coerced to an int (e.g. nested object, array,
+  /// or non-numeric string).
+  /// </summary>
+  private static bool TryReadInt(object? value, out int result)
+  {
+    result = 0;
+    if (value is System.Text.Json.JsonElement el)
+    {
+      if (el.ValueKind == System.Text.Json.JsonValueKind.Number)
+      {
+        return el.TryGetInt32(out result);
+      }
+      if (el.ValueKind == System.Text.Json.JsonValueKind.String)
+      {
+        return int.TryParse(el.GetString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out result);
+      }
+      return false;
+    }
+    return value switch
+    {
+      int i => SetAndReturn(i, out result),
+      long l when l >= int.MinValue && l <= int.MaxValue => SetAndReturn((int)l, out result),
+      double d when d >= int.MinValue && d <= int.MaxValue && Math.Truncate(d) == d => SetAndReturn((int)d, out result),
+      string s when int.TryParse(s, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var parsed) => SetAndReturn(parsed, out result),
+      _ => false,
+    };
+
+    static bool SetAndReturn(int value, out int target)
+    {
+      target = value;
+      return true;
     }
   }
 

@@ -37,6 +37,13 @@ public static class MetricsServiceExtensions
     // Register reader
     services.AddSingleton<IMetricsReader>(sp => sp.GetRequiredService<SqliteMetricsRepository>());
 
+    // Register descriptor registry (PR D #11 — replaces the client-side
+    // MapKeyToUnit heuristic with an authoritative server-registered unit
+    // table). Singleton so producers (background services, controllers) and
+    // consumers (dashboards via the API) share the same map for the
+    // process lifetime.
+    services.AddSingleton<IMetricDescriptorRegistry, MetricDescriptorRegistry>();
+
     // Register background services
     services.AddHostedService<MetricsRollupService>();
     services.AddHostedService<SystemMonitorService>();

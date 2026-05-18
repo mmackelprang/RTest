@@ -89,9 +89,21 @@ public class RadioStateDto
 
   /// <summary>
   /// Gets or sets the RDS Program Service station name (up to 8 characters),
-  /// or null if RDS is not available.
+  /// or null if RDS is not available. This is the <em>live</em> value — for
+  /// rolling-PS stations it cycles every few seconds. Use
+  /// <see cref="RdsStationNameStable"/> for save-seed scenarios where a
+  /// transient rolling frame would be the wrong value to capture.
   /// </summary>
   public string? RdsStationName { get; set; }
+
+  /// <summary>
+  /// Gets or sets the last <em>stable</em> RDS Program Service station name —
+  /// the consensus value after several consecutive identical PS frames.
+  /// Used by the save-preset dialog and history records so rolling-PS
+  /// stations (e.g. "Rock 92" cycling 8 chars at a time) don't end up
+  /// seeded with mid-roll fragments like "anoidRoc". PR D #40.
+  /// </summary>
+  public string? RdsStationNameStable { get; set; }
 
   /// <summary>
   /// Gets or sets the RDS Program Type name (e.g., "Rock", "News"),

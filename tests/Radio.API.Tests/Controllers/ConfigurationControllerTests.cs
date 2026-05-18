@@ -131,11 +131,58 @@ public class ConfigurationControllerTests : IClassFixture<CustomWebApplicationFa
     // Act
     var response = await _client.PostAsJsonAsync("/api/configuration", request);
 
-    // Assert - Should return 200 OK if ConfigurationManager is available, 
+    // Assert - Should return 200 OK if ConfigurationManager is available,
     // or 501 if not yet integrated
     Assert.True(
       response.StatusCode == System.Net.HttpStatusCode.OK ||
       response.StatusCode == System.Net.HttpStatusCode.NotImplemented,
       $"Expected OK or NotImplemented, got {response.StatusCode}");
+  }
+
+  // PR D #30 — ScanStopThreshold range validation.
+  [Fact]
+  public async Task UpdateRadioSection_ScanStopThresholdAbove100_ReturnsBadRequest()
+  {
+    // Arrange — POST /api/configuration/radio with ScanStopThreshold = 150
+    var sectionPayload = new Dictionary<string, object>
+    {
+      ["ScanStopThreshold"] = 150,
+    };
+
+    // Act
+    var response = await _client.PostAsJsonAsync("/api/configuration/radio", sectionPayload);
+
+    // Assert
+    Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+    var body = await response.Content.ReadAsStringAsync();
+    Assert.Contains("ScanStopThreshold", body);
+  }
+
+  [Fact]
+  public async Task UpdateRadioSection_ScanStopThresholdNegative_ReturnsBadRequest()
+  {
+    var sectionPayload = new Dictionary<string, object>
+    {
+      ["ScanStopThreshold"] = -5,
+    };
+
+    var response = await _client.PostAsJsonAsync("/api/configuration/radio", sectionPayload);
+
+    Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+  }
+
+  [Fact]
+  public async Task UpdateRadioSection_ScanStopThresholdInRange_DoesNotReturn400()
+  {
+    var sectionPayload = new Dictionary<string, object>
+    {
+      ["ScanStopThreshold"] = 75,
+    };
+
+    var response = await _client.PostAsJsonAsync("/api/configuration/radio", sectionPayload);
+
+    // Acceptable: 200 OK (write succeeded) or 5xx (configuration manager
+    // unavailable in this test host). The case we MUST NOT see is 400.
+    Assert.NotEqual(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
   }
 }

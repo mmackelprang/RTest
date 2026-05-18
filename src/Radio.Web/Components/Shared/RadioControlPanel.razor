@@ -1212,8 +1212,21 @@
       // formatted frequency ONLY when RDS is unavailable. Never seed with
       // the raw frequency. Acceptance gate: "The save flow defaults to the
       // RDS station name when one is present."
-      _presetName = !string.IsNullOrEmpty(_radioState.RdsStationName)
-        ? _radioState.RdsStationName!
+      //
+      // PR D #40 — prefer the server-tracked stable PS (RdsStationNameStable)
+      // over the live RdsStationName. Rolling-PS stations like "Rock 92"
+      // cycle 8 chars at a time; the live name often catches a mid-roll
+      // fragment ("anoidRoc") at the instant the user long-presses. The
+      // stable variant emits only after 3 consecutive identical samples.
+      // Fall back to the live name when the stable tracker hasn't yet
+      // reached consensus (new station, RDS dropout, etc.).
+      var stable = _radioState.RdsStationNameStable;
+      var live = _radioState.RdsStationName;
+      var seed = !string.IsNullOrEmpty(stable) ? stable
+               : !string.IsNullOrEmpty(live) ? live
+               : null;
+      _presetName = !string.IsNullOrEmpty(seed)
+        ? seed!
         : $"{_radioState.Band} {FormatFrequency(_radioState.Frequency, _radioState.Band)}";
     }
     _isSavePresetDialogOpen = true;

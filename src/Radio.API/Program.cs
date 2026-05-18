@@ -84,6 +84,10 @@ builder.Services.AddHealthChecks()
 
 builder.Services.AddManagedConfiguration(builder.Configuration);
 builder.Services.AddMetrics(builder.Configuration);
+// Register authoritative MetricDescriptor entries for API-tier metrics
+// (PR D #11). Replaces the client-side MapKeyToUnit heuristic for these
+// keys; dashboards fall back to the heuristic for any key not described.
+builder.Services.AddHostedService<Radio.API.Services.ApiMetricDescriptorRegistration>();
 builder.Services.AddFingerprinting(builder.Configuration);
 builder.Services.AddSoundFlowAudio(builder.Configuration);
 builder.Services.AddRadioServices();

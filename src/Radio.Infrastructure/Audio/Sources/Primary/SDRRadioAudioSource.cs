@@ -38,6 +38,14 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   private string? _playbackId;
   private bool _hasRestoredPreferences;
 
+  // PR D #40 — tracks the last-stable RDS Program-Service (PS) value so the
+  // save-preset dialog and history records don't seed with mid-roll fragments.
+  // Observe() is called inside the RdsStationNameStable getter — each poll
+  // of the property pushes the current live PS into the tracker, and after
+  // WindowSize identical samples the consensus value is emitted.
+  private readonly RdsStationNameStabilityTracker _rdsStationNameStabilityTracker
+    = new RdsStationNameStabilityTracker(windowSize: 3);
+
   /// <summary>
   /// Initializes a new instance of the <see cref="SDRRadioAudioSource"/> class.
   /// </summary>
@@ -480,6 +488,22 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   public string? RdsStationName => _radioReceiver.RdsStationName;
 
   /// <inheritdoc/>
+  /// <remarks>
+  /// Each read pushes the current live PS into the stability tracker so the
+  /// broadcast loop (AudioStateUpdateService at ~1 Hz) naturally drives the
+  /// 3-consecutive-identical-samples window. The property returns the
+  /// consensus value, or null until consensus is reached.
+  /// </remarks>
+  public string? RdsStationNameStable
+  {
+    get
+    {
+      _rdsStationNameStabilityTracker.Observe(_radioReceiver.RdsStationName);
+      return _rdsStationNameStabilityTracker.Stable;
+    }
+  }
+
+  /// <inheritdoc/>
   public string? RdsProgramType => _radioReceiver.RdsProgramTypeName;
 
   /// <inheritdoc/>
@@ -533,10 +557,15 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   {
     var oldFreq = new Frequency(e.OldFrequency);
     var newFreq = new Frequency(e.NewFrequency);
-    
+
     // Track frequency change metric
     MetricsCollector?.Increment("radio.frequency_changes");
-    
+
+    // PR D #40 — the previous station's stable PS is no longer meaningful
+    // after a re-tune. Reset so the next station has to earn its own
+    // consensus from scratch.
+    _rdsStationNameStabilityTracker.Reset();
+
     FrequencyChanged?.Invoke(this, new RadioControlFrequencyChangedEventArgs(oldFreq, newFreq));
   }
 

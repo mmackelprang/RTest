@@ -567,6 +567,7 @@ public class AudioStateUpdateService : BackgroundService
            previous.ScanDirection != current.ScanDirection ||
            previous.IsStereo != current.IsStereo ||
            previous.RdsStationName != current.RdsStationName ||
+           previous.RdsStationNameStable != current.RdsStationNameStable ||
            previous.RdsProgramType != current.RdsProgramType ||
            // PR 3 of the Radio Controller Polish arc — the RT line below the
            // frequency well binds to this. RDS RadioText updates roughly once
