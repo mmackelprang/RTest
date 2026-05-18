@@ -119,7 +119,17 @@ public class AudioEngineInitializationServiceTests
     await service.StartAsync(cancellationToken);
 
     // Assert
-    _deviceManagerMock.Verify(x => x.GetOutputDevicesAsync(cancellationToken), Times.Once);
+    // Task #15 flake fix #72 — the service calls GetOutputDevicesAsync TWICE
+    // during normal startup when a default output device exists in the list:
+    //   1) Initial enumeration at the top of StartAsync (the call this test
+    //      was originally pinning).
+    //   2) A post-SetOutputDeviceAsync verification re-fetch inside
+    //      ApplyStartupPreferencesAsync — the "did MiniAudio actually
+    //      connect to the device we asked for, or did the indices shift
+    //      after a PipeWire restart?" check. That second call is the real
+    //      reason this assertion was failing as a "flake".
+    // GetInputDevicesAsync is called once (only the initial enumeration).
+    _deviceManagerMock.Verify(x => x.GetOutputDevicesAsync(cancellationToken), Times.Exactly(2));
     _deviceManagerMock.Verify(x => x.GetInputDevicesAsync(cancellationToken), Times.Once);
   }
 

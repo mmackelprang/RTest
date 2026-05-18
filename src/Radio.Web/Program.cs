@@ -348,6 +348,12 @@ builder.Services.AddScoped<Radio.Web.Services.QueuePersistenceService>();
 builder.Services.AddScoped<Radio.Web.Services.DeviceDisplayStateService>();
 builder.Services.AddScoped<Radio.Web.Services.RadioPanelToggleService>();
 
+// Task #15 PR E item #47 — gain-popover backdrop portal. Scoped so the
+// circuit's NowPlayingPanel + MainLayout share a single instance per user
+// session; mounted in MainLayout (OUTSIDE .page-transition) so the backdrop
+// escapes the sub-tree stacking context that previously trapped it.
+builder.Services.AddScoped<Radio.Web.Services.GainPopoverService>();
+
 // Visualizer "updates/sec" telemetry. Singleton because the value is shared
 // across all visualizer panels and consumed by the dev tray (PR 6).
 builder.Services.AddSingleton<Radio.Web.Services.VisualizerTelemetryService>();

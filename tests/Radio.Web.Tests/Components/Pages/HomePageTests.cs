@@ -70,6 +70,10 @@ public class HomePageTests : TestContext
     // RadioPanelToggleService (used by Home.razor for radio panel toggle)
     Services.AddScoped<RadioPanelToggleService>();
 
+    // Task #15 PR E item #47 — NowPlayingPanel (rendered inside Home) now
+    // injects GainPopoverService for the layout-portaled backdrop wiring.
+    Services.AddScoped<GainPopoverService>();
+
     // RadioApiService (used by RadioControlPanel child component)
     Services.AddHttpClient<RadioApiService>();
 
