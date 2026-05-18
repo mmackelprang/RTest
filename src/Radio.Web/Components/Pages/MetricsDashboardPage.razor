@@ -599,8 +599,16 @@
     return System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(s.Replace('_', ' '));
   }
 
-  internal static string GetMetricLabel(string metricKey)
+  internal string GetMetricLabel(string metricKey)
   {
+    // Prefer the server-registered descriptor's DisplayName when present
+    // (PR D #11) — that's the authoritative human label and avoids the
+    // "Memory Usage Mb" artifact from suffix-aware humanization.
+    if (_descriptors.TryGetValue(metricKey, out var descriptor)
+        && !string.IsNullOrWhiteSpace(descriptor.DisplayName))
+    {
+      return descriptor.DisplayName!;
+    }
     if (string.IsNullOrEmpty(metricKey)) return metricKey;
     var parts = metricKey.Split('.');
     if (parts.Length > 1)
