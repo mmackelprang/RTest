@@ -124,6 +124,33 @@ sudo systemctl status radio-api radio-web
 - **API:** `http://piradio:5000` (Swagger at `/swagger`)
 - **Web UI:** `http://piradio:5002`
 
+### 5. Verifying the Deployed Commit
+
+Both deploy scripts (`Deploy-ToLinux.ps1` and `deploy-to-pi.sh`) bake the local
+git HEAD into the API assembly via `-p:SourceRevisionId=<sha>`, then after the
+services come up they `curl http://<host>:5000/api/health/version` and fail the
+deploy if the returned `gitSha` doesn't match what was just built.
+
+You can also check manually at any time:
+
+```bash
+curl -s http://piradio:5000/api/health/version | jq
+# {
+#   "gitSha": "abc123...",
+#   "gitShaShort": "abc123f",
+#   "informationalVersion": "1.0.0+abc123...",
+#   "assemblyVersion": "1.0.0.0",
+#   "buildTimestampUtc": "2026-05-20T18:42:11Z",
+#   "assemblyName": "Radio.API"
+# }
+
+# Compare against local HEAD
+git rev-parse HEAD
+```
+
+If `gitSha` is `"unknown"`, the binary was built outside a git checkout (e.g.
+from a tarball) — rebuild from a clone to get a real SHA.
+
 ## Cross-Compilation Note
 
 Radio.Infrastructure multi-targets (`net8.0` and `net8.0-windows10.0.19041.0`). When
