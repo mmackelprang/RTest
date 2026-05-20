@@ -18,6 +18,10 @@ public class AudioStateHubService : IAsyncDisposable
   private HubConnection? _hubConnection;
   private bool _isDisposed;
   private readonly SemaphoreSlim _connectionLock = new(1, 1);
+  // Background retry loop activated when the initial StartAsync fails (radio-api not yet
+  // listening at deploy time, network blip, etc.). Mirrors the recovery pattern used by
+  // GvBridgeHubService and AudioVisualizationHubService.
+  private CancellationTokenSource? _retryCts;
 
   // Events that components can subscribe to.
   // NowPlayingChanged and VolumeChanged pass the typed payload from SignalR
@@ -57,9 +61,21 @@ public class AudioStateHubService : IAsyncDisposable
     await _connectionLock.WaitAsync(cancellationToken);
     try
     {
+      // Already connected — nothing to do.
+      if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
+      {
+        _logger.LogDebug("Hub connection already initialized and connected");
+        return;
+      }
+      // Connection object exists but isn't connected yet (Connecting, Reconnecting, or
+      // Disconnected with a background retry loop polling). Returning is safe — once the
+      // hub establishes, the Reconnected handler or the retry-loop success path replays
+      // the group subscriptions. Without this guard a failed initial StartAsync would
+      // leave _hubConnection non-null and every subsequent call would skip silently —
+      // the exact bug fixed in this change.
       if (_hubConnection != null)
       {
-        _logger.LogDebug("Hub connection already initialized");
+        _logger.LogDebug("Hub connection initialization already in progress (State={State})", _hubConnection.State);
         return;
       }
 
@@ -248,31 +264,84 @@ public class AudioStateHubService : IAsyncDisposable
         }
       };
 
-      // Start the connection
-      await _hubConnection.StartAsync(cancellationToken);
-      _logger.LogInformation("SignalR connection established successfully");
-
-      // Subscribe to group-based channels that require explicit opt-in
+      // Start the connection. If radio-api hasn't bound its listener yet (typical
+      // during a fresh deploy that starts api + web together), the negotiate POST
+      // fails fast — handle that as a recoverable startup race rather than a hard
+      // failure that locks the hub object into a dead state.
       try
       {
-        await _hubConnection.InvokeAsync("SubscribeToRadioState", cancellationToken);
-        await _hubConnection.InvokeAsync("SubscribeToQueue", cancellationToken);
-        _logger.LogInformation("Subscribed to RadioState and Queue groups");
+        await _hubConnection.StartAsync(cancellationToken);
+        _logger.LogInformation("SignalR connection established successfully");
+        await SubscribeToGroupsAsync(cancellationToken);
       }
       catch (Exception ex)
       {
-        _logger.LogWarning(ex, "Failed to subscribe to SignalR groups");
+        _logger.LogWarning(ex, "Initial connection to AudioStateHub at {Url} failed — retrying in background", hubUrl);
+        StartRetryLoop(hubUrl);
       }
-    }
-    catch (Exception ex)
-    {
-      _logger.LogError(ex, "Failed to establish SignalR connection");
-      throw;
     }
     finally
     {
       _connectionLock.Release();
     }
+  }
+
+  /// <summary>
+  /// Subscribes to the group-based channels that require explicit opt-in
+  /// (RadioState, Queue). Used both by the initial StartAsync path and by
+  /// the background retry loop after it successfully connects.
+  /// </summary>
+  private async Task SubscribeToGroupsAsync(CancellationToken cancellationToken)
+  {
+    if (_hubConnection == null) return;
+    try
+    {
+      await _hubConnection.InvokeAsync("SubscribeToRadioState", cancellationToken);
+      await _hubConnection.InvokeAsync("SubscribeToQueue", cancellationToken);
+      _logger.LogInformation("Subscribed to RadioState and Queue groups");
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to subscribe to SignalR groups");
+    }
+  }
+
+  /// <summary>
+  /// Polls the hub until <see cref="HubConnection.StartAsync(CancellationToken)"/> succeeds,
+  /// then re-subscribes to the RadioState + Queue groups. Idempotent — cancels any prior
+  /// loop before starting a new one. Mirrors <c>AudioVisualizationHubService.StartRetryLoop</c>.
+  /// </summary>
+  private void StartRetryLoop(string hubUrl)
+  {
+    _retryCts?.Cancel();
+    _retryCts?.Dispose();
+    _retryCts = new CancellationTokenSource();
+    var ct = _retryCts.Token;
+    _ = Task.Run(async () =>
+    {
+      var delays = new[] { 2, 5, 10, 30 };
+      for (var attempt = 0; !ct.IsCancellationRequested; attempt++)
+      {
+        var delaySec = delays[Math.Min(attempt, delays.Length - 1)];
+        try { await Task.Delay(TimeSpan.FromSeconds(delaySec), ct); }
+        catch (OperationCanceledException) { return; }
+
+        if (ct.IsCancellationRequested || _hubConnection == null) return;
+        if (_hubConnection.State != HubConnectionState.Disconnected) return;
+
+        try
+        {
+          await _hubConnection.StartAsync(ct);
+          _logger.LogInformation("Connected to AudioStateHub at {Url} (retry #{Attempt})", hubUrl, attempt + 1);
+          await SubscribeToGroupsAsync(ct);
+          return;
+        }
+        catch (Exception ex)
+        {
+          _logger.LogDebug(ex, "Audio state hub retry #{Attempt} failed", attempt + 1);
+        }
+      }
+    }, ct);
   }
 
   /// <summary>
@@ -290,6 +359,10 @@ public class AudioStateHubService : IAsyncDisposable
 
   public async Task StopAsync(CancellationToken cancellationToken = default)
   {
+    _retryCts?.Cancel();
+    _retryCts?.Dispose();
+    _retryCts = null;
+
     await _connectionLock.WaitAsync(cancellationToken);
     try
     {
@@ -318,6 +391,9 @@ public class AudioStateHubService : IAsyncDisposable
     }
 
     _isDisposed = true;
+    _retryCts?.Cancel();
+    _retryCts?.Dispose();
+    _retryCts = null;
 
     if (_hubConnection != null)
     {
