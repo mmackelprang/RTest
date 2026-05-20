@@ -36,7 +36,7 @@ public class HealthControllerTests : IClassFixture<CustomWebApplicationFactory<P
     Assert.False(string.IsNullOrEmpty(info.InformationalVersion));
     Assert.False(string.IsNullOrEmpty(info.AssemblyVersion));
     Assert.False(string.IsNullOrEmpty(info.GitSha));
-    // Short SHA should be 7 chars when full SHA is present, otherwise mirrors GitSha
-    Assert.True(info.GitShaShort.Length <= info.GitSha.Length);
+    Assert.Equal(Math.Min(7, info.GitSha.Length), info.GitShaShort.Length);
+    Assert.Equal(info.GitSha[..info.GitShaShort.Length], info.GitShaShort);
   }
 }

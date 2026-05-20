@@ -39,7 +39,9 @@
       <Output TaskParameter="ExitCode" PropertyName="_GitExitCode" />
     </Exec>
     <PropertyGroup Condition="'$(_GitExitCode)' == '0' And '$(_GitCommitHash)' != ''">
-      <SourceRevisionId>$(_GitCommitHash)</SourceRevisionId>
+      <!-- Trim guards against stray newlines that some git/MSBuild combos emit;
+           an untrimmed value would embed whitespace in InformationalVersion. -->
+      <SourceRevisionId>$(_GitCommitHash.Trim())</SourceRevisionId>
     </PropertyGroup>
   </Target>
 </Project>

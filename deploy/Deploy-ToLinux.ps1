@@ -67,10 +67,22 @@ $configDir = switch ($Runtime) {
 
 # Capture the local git SHA so we can (a) bake it into the assembly via
 # -p:SourceRevisionId and (b) verify the deployed binary reports the same SHA
-# from /api/health/version after restart.
-$ExpectedSha = (& git -C $RepoRoot rev-parse HEAD 2>$null).Trim()
-if ([string]::IsNullOrWhiteSpace($ExpectedSha)) {
-  $ExpectedSha = "unknown"
+# from /api/health/version after restart. Guarded so a missing `git` (or a
+# non-git checkout) just downgrades to "unknown" instead of crashing on a
+# .Trim() against $null.
+$ExpectedSha = "unknown"
+try {
+  $gitOutput = & git -C $RepoRoot rev-parse HEAD 2>$null
+  if ($gitOutput) {
+    $trimmed = ([string]$gitOutput).Trim()
+    if (-not [string]::IsNullOrWhiteSpace($trimmed)) {
+      $ExpectedSha = $trimmed
+    }
+  }
+} catch {
+  # git not installed or repo unreadable — fall through with "unknown"
+}
+if ($ExpectedSha -eq "unknown") {
   Write-Host "WARNING: could not read git HEAD; deploy verification will be skipped" -ForegroundColor Yellow
 }
 
