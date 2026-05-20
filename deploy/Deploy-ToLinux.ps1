@@ -119,13 +119,16 @@ Write-Host "  Build complete (API: $apiSize, Web: $webSize)" -ForegroundColor Gr
 # --- Step 2: Stop services ---
 if (-not $NoRestart) {
   Write-Host "[2/4] Stopping services and kiosk browser..." -ForegroundColor Yellow
-  # Wipe Chrome's HTTP disk cache for the kiosk profile alongside the kill. Without
-  # this, the relaunch in step 4 can serve a stale HTML/CSS bundle from
-  # ~/.cache/google-chrome that pre-dates the deploy — we hit exactly that during the
-  # Radzen theme migration, where Chrome served the old MudBlazor markup despite
-  # radio-web returning the new HTML. Profile data (bookmarks, localStorage, kiosk
-  # extension state) stays intact because we only target the Cache/ subtree.
-  ssh $SshTarget "sudo systemctl stop radio-web 2>/dev/null; sudo systemctl stop radio-api 2>/dev/null; pkill -f 'chrome.*kiosk' 2>/dev/null; rm -rf ~/.cache/google-chrome/Default/Cache ~/.cache/google-chrome/Default/Code\ Cache 2>/dev/null; true"
+  # On stop: (a) wipe Chrome's HTTP disk cache so the relaunch can't serve a stale
+  # HTML/CSS bundle from ~/.cache/google-chrome that pre-dates the deploy — we hit
+  # that during the Radzen theme migration, where Chrome served the old MudBlazor
+  # markup despite radio-web returning the new HTML. (b) remove Chrome's Singleton
+  # lock files; pkill -f sends SIGTERM/SIGKILL without the orderly shutdown that
+  # cleans those up, so on the next relaunch Chrome would see "another instance"
+  # and refuse to start. Profile data (bookmarks, localStorage, kiosk extension
+  # state) stays intact — we only target Cache/, Code Cache/, and the Singleton*
+  # lock files at the profile root.
+  ssh $SshTarget "sudo systemctl stop radio-web 2>/dev/null; sudo systemctl stop radio-api 2>/dev/null; pkill -f 'chrome.*kiosk' 2>/dev/null; rm -rf ~/.cache/google-chrome/Default/Cache ~/.cache/google-chrome/Default/Code\ Cache 2>/dev/null; rm -f ~/.config/google-chrome/Singleton* 2>/dev/null; true"
 } else {
   Write-Host "[2/4] Skipping service stop (--NoRestart)" -ForegroundColor DarkGray
 }
