@@ -61,6 +61,9 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     private DateTime _lastUnderrunLogTime;
     private long _underrunSamplesSinceLastLog;
     private int _underrunCountSinceLastLog;
+    private DateTime _lastCompensationLogTime;
+    private long _compensationSamplesSinceLastLog;
+    private int _compensationCountSinceLastLog;
 
     // Buffer level tracking between log intervals
     private int _minBufferSinceLastLog = int.MaxValue;
@@ -433,6 +436,13 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                 _underrunSamplesSinceLastLog += deficit;
                 _underrunCountSinceLastLog++;
 
+                // Counters bump on EVERY underrun (independent of log throttle)
+                if (_metricsCollector != null && _metricsTags != null)
+                {
+                    _metricsCollector.Increment("audio.buffer.underrun_total", 1, _metricsTags);
+                    _metricsCollector.Increment("audio.buffer.underrun_samples_total", deficit, _metricsTags);
+                }
+
                 // Log underrun bursts: throttled to once per second to avoid log spam
                 // while still revealing the pattern of when underruns occur.
                 var now = DateTime.UtcNow;
@@ -524,6 +534,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
 
             if (deficit > 0)
             {
+                bool applied = false;
                 lock (_bufferLock)
                 {
                     if (_count + deficit <= _maxBufferSamples)
@@ -531,12 +542,42 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                         _readPos = (_readPos - deficit + _maxBufferSamples) % _maxBufferSamples;
                         _count += deficit;
                         _totalSamplesCompensated += deficit;
+                        applied = true;
                     }
                 }
 
-                _logger.LogDebug(
-                    "🔄 Clock drift compensation: duplicated {Samples} samples (buffer: {Level}→{NewLevel}/{Capacity}, total compensated: {Total})",
-                    deficit, currentLevel, currentLevel + deficit, _maxBufferSamples, _totalSamplesCompensated);
+                if (applied)
+                {
+                    // Counters bump on EVERY successful compensation (independent of log throttle)
+                    if (_metricsCollector != null && _metricsTags != null)
+                    {
+                        _metricsCollector.Increment("audio.buffer.drift_compensation_total", 1, _metricsTags);
+                        _metricsCollector.Increment("audio.buffer.drift_compensation_samples_total", deficit, _metricsTags);
+                    }
+
+                    _compensationCountSinceLastLog++;
+                    _compensationSamplesSinceLastLog += deficit;
+
+                    // Log compensation bursts at Info: throttled to once per 5 seconds.
+                    // Compensation runs at most once per ~2s (per the drift check interval),
+                    // so 5s gives 2-3 events per log line and still reveals the cadence
+                    // of the audible "underwater" artifact (10ms of duplicated audio per event).
+                    var compNow = DateTime.UtcNow;
+                    var compSinceLastLog = _lastCompensationLogTime == default
+                        ? 0.0 : (compNow - _lastCompensationLogTime).TotalSeconds;
+                    if (compSinceLastLog >= 5.0 || _lastCompensationLogTime == default)
+                    {
+                        _logger.LogInformation(
+                            "🔄 Clock drift compensation ({Type}): {Count} events, {Samples} duplicated samples in last {Interval:F1}s " +
+                            "(buffer: {Level}→{NewLevel}/{Capacity}, total compensated: {Total})",
+                            typeof(T).Name, _compensationCountSinceLastLog, _compensationSamplesSinceLastLog,
+                            compSinceLastLog,
+                            currentLevel, currentLevel + deficit, _maxBufferSamples, _totalSamplesCompensated);
+                        _compensationSamplesSinceLastLog = 0;
+                        _compensationCountSinceLastLog = 0;
+                        _lastCompensationLogTime = compNow;
+                    }
+                }
             }
         }
 
