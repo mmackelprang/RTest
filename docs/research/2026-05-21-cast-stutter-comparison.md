@@ -52,6 +52,25 @@ Each filled cell carries an evidence tag so the reader knows what they're lookin
 
 Findings without an evidence tag should not appear in the filled doc.
 
+### Measurement-discipline tier (per speculative idea in §7) — *added by retrofit 2026-05-22*
+
+Every speculative idea in §7 is structured as a **testable hypothesis**, not a wish. The §7 ideas below were originally written without measurement scaffolding; this retrofit adds five mandatory blocks to each so a debug agent can demonstrably show whether a coding-agent change is an *actual* improvement. The companion BT doc ([`2026-05-22-bt-audio-stabilization.md`](2026-05-22-bt-audio-stabilization.md)) bakes the same discipline in from the start.
+
+1. **Evidence motivating this** — a pointer to a concrete *observable phenomenon* in the current system, not "this is a known pattern from elsewhere." Without this block, the idea is speculation and gets dropped.
+
+2. **Baseline probe** — an exact, reproducible measurement of the current system that captures the phenomenon. Must be:
+   - **Scripted** — a one-liner shell command, a `python3 scripts/...` invocation, or a labeled DevTools sequence. Not a paragraph of prose.
+   - **Reproducible** — runs the same way each time, takes the same arguments, produces the same artifact shape.
+   - **Bounded** — runs for a known duration / sample size, so before/after can be compared statistically.
+
+3. **Post-change probe** — the *same* probe, run after the change is applied. The probe identity is what makes before/after comparable; any change to the probe between runs invalidates the comparison.
+
+4. **Success criterion** — a quantitative pass/fail bar. No success criterion = no measurement = idea stays in research, doesn't go to queue.
+
+5. **Debug-agent verification steps** — a copy-pasteable sequence a debug agent (or a coding agent's CI step) can run to confirm the success criterion. Numbered, exact commands, no judgment calls. Must produce a single artifact (a number, a boolean, a side-by-side comparison) that the agent can include in its report.
+
+Per-probe note: where a probe requires telemetry that doesn't yet exist in RTest (e.g. aggregating `bufferAhead` values received in `pong` messages), the probe declares the instrumentation as a prerequisite step inside the verification block. The instrumentation is part of the *research deliverable*, not part of the change being measured — it must exist *before* the baseline run.
+
 ### Tools needed for the research execution pass
 - A Chromecast on the LAN (we have at least one — `_defaultCastDevice` in RTest's config).
 - TuneIn + Plex installed on a controller device (phone or tablet) able to initiate a cast session.
@@ -152,77 +171,347 @@ Reading across the now-filled matrices, five patterns stand out. All five descri
 
 Each idea explicitly **is not a commitment**. A future plan would consume any one of these and turn it into real work via the normal Builder/queue flow.
 
+**Every idea below carries five mandatory measurement blocks** (per §3 measurement-discipline tier, added by retrofit 2026-05-22): Evidence motivating this, Baseline probe, Post-change probe, Success criterion, and Debug-agent verification steps. The Risk / Trade-off and Confidence blocks remain from the original framing.
+
+### Shared probe infrastructure (referenced by multiple ideas)
+
+To avoid restating identical setup across ideas, three probe scaffoldings are referenced by name below. Each must exist *before* any baseline run; building them is part of the research execution pass, not the change being measured.
+
+| Probe scaffolding | What it captures | Setup |
+|---|---|---|
+| **PROBE-CAST-BUFFER** | `bufferAhead` distribution + chunk-drop rate from receiver telemetry | One-time scaffolding commit: in `DirectCastStreamingService` pong-message handler, call `IMetricsCollector.RecordHistogram("cast.dc.buffer_ahead_s", msg.bufferAhead)` and `Increment("cast.dc.chunk_drops_total")` on receiver-reported drop. Probe reads from `metrics.db`. |
+| **PROBE-CAST-AUDIO** | Objective audio-output glitch detection via silence-run + spectral discontinuity analysis | USB audio interface recording from Chromecast HDMI/optical out into laptop; `arecord -D <iface> -d <secs> -f cd > out.wav`; `python3 scripts/research/cast_audio_glitch.py out.wav --silence-min-ms 50 --click-detect`. Outputs `silence_events=<N>, silence_total_ms=<M>, click_events=<X>` |
+| **PROBE-CAST-LONGTASK** | Receiver-side JS main-thread blocking via DevTools Performance Long Task API | DevTools Protocol session attached to Chromecast via `chrome://inspect`; recorded via `scripts/research/cast_longtask_capture.js` (Playwright-driven for reproducibility); outputs `long_tasks_per_min=<N>, p99_duration_ms=<X>, total_blocked_pct=<P>` |
+
+Probe scaffolding scripts (`cast_audio_glitch.py`, `cast_longtask_capture.js`, etc.) and the metrics-collector instrumentation are *part of the research deliverable*, not prerequisites the user provides. The research execution pass commits them to `scripts/research/` and a one-time `instrumentation` branch before any §7 idea's baseline runs.
+
 ---
 
 > **Idea — Grow DC pre-play buffer toward Shaka's `bufferingGoal`**
+>
 > **Addresses**: FM1 (receiver underrun), FM2 (sender pipeline jitter), FM5 (network jitter)
+>
+> **Evidence motivating this** — §4 FM1 RTest-DC cell: receiver pre-buffers only `BUFFER_BEFORE_PLAY = 3` chunks (~300 ms) and caps steady-state at `MAX_BUFFER_AHEAD = 3.0 s`. §6 Pattern 1 documents the reference cluster sitting at 10 s (Shaka `bufferingGoal`) — **30× larger**. Receiver already calculates `bufferAhead` per pong message ([receiver-direct-channel.html:L311-L344](../../docs/receiver-direct-channel.html)) but sender ignores it for control purposes — this is the *measurable phenomenon* the idea attacks.
+>
 > **What changes in RTest**: Receiver — increase `BUFFER_BEFORE_PLAY` from 3 chunks (300 ms) and `MAX_BUFFER_AHEAD` from 3.0 s. A 2 s pre-play / 4–10 s steady-state ceiling matches the reference cluster (Shaka 10 s `bufferingGoal`, 2 s `rebufferingGoal` floor). Sender's reader-lag default at 1.0 s would also need to grow to match.
+>
 > **Scope**: ~20 LOC in `receiver-direct-channel.html` constants + ~10 LOC in `DirectCastStreamingService.cs` + `AudioOutputOptions.cs` defaults. No protocol change.
+>
 > **Risk / trade-off**: Adds initial latency (2–4 s before audio starts). Worse for "live" feel (e.g., switching radio sources); fine for queued album playback. Memory cost on Chromecast is small (≤ 1 MB at 2 s × 192 kbps equivalent).
+>
 > **Confidence**: **High** — every reference system clusters 10× higher (§6 Pattern 1). Google's CAF docs flag 0.1 s as the *minimum* supported segment size, not the recommended one.
+>
+> **Baseline probe**: PROBE-CAST-BUFFER + PROBE-CAST-AUDIO, run concurrently for **1 hour of continuous DC-mode playback** of a known-content playlist (recorded reference, so per-run audio content is identical). Capture: bufferAhead distribution (p5/p50/p95/p99), chunk-drop count, silence_events, silence_total_ms.
+> ```bash
+> # Sender-side (parallel with audio recording):
+> ssh mmack@radio "sqlite3 /opt/radio-console/data/metrics/metrics.db \
+>   'SELECT value, ts FROM histogram_samples WHERE metric=\"cast.dc.buffer_ahead_s\" \
+>    AND ts > strftime(\"%s\",\"now\",\"-1 hour\")*1000;'" \
+>   | python3 scripts/research/cast_dc_buffer_summarize.py \
+>   > baseline_cast_buffer.txt
+>
+> # Receiver-side (laptop with USB audio interface):
+> arecord -D plughw:CARD=USB_Audio -d 3600 -f cd /tmp/cast_baseline.wav
+> python3 scripts/research/cast_audio_glitch.py /tmp/cast_baseline.wav \
+>   --silence-min-ms 50 --click-detect \
+>   > baseline_cast_audio.txt
+> ```
+>
+> **Post-change probe**: identical commands, same 1-hour playlist, after the buffer-growth change ships.
+>
+> **Success criterion** (all three must hold):
+> - p5 `bufferAhead` rises from baseline `<1.0 s` to `≥2.0 s`
+> - `chunk_drops_total` over the hour drops to `0`
+> - `silence_events` (silence runs `>50 ms`) over the hour drops to `≤1`
+>
+> **Debug-agent verification steps**:
+> 1. Run `scripts/research/setup_cast_audio_capture.sh` to verify USB audio interface, Chromecast routing, and reference playlist are all healthy
+> 2. `git checkout main && ./deploy/Deploy-ToLinux.ps1 -TargetHost radio -Runtime linux-x64`
+> 3. Start DC-mode cast of reference playlist; start both probes simultaneously; wait 1 h
+> 4. Save artifacts as `baseline_cast_buffer.txt` and `baseline_cast_audio.txt`
+> 5. `git checkout <feature-branch> && ./deploy/Deploy-ToLinux.ps1 ...`; repeat step 3; save as `after_*.txt`
+> 6. Run `python3 scripts/research/cast_buffer_compare.py baseline_* after_*` — emits PASS/FAIL + per-metric deltas
 
 ---
 
 > **Idea — Split DC sender into producer + consumer with a bounded queue**
+>
 > **Addresses**: FM2 (sender pipeline jitter) — the dominant DC-specific exposure
+>
+> **Evidence motivating this** — §4 FM2 RTest-DC cell: `StreamingLoopAsync` awaits `_channel.SendMessageAsync` for every chunk before reading/encoding the next ([DirectCastStreamingService.cs:L317-L502](../../src/Radio.Infrastructure/Audio/Outputs/DirectCastStreamingService.cs)). If the Cast control socket blocks (LAN congestion, Cast device GC), encoding stops. The *observable phenomenon*: per-chunk wall-clock interval should be 100 ms ± tight bound under healthy conditions, but `Stopwatch`-measured intervals in the loop would show a long tail when the socket lags.
+>
 > **What changes in RTest**: Sender — refactor `StreamingLoopAsync` so PCM-read + JSON-encode + Base64 runs on a producer task that fills a `Channel<byte[]>` of capacity ~50 chunks; a separate consumer task drains it via `_channel.SendMessageAsync`. The `SendMessageAsync` await is no longer in the encode hot path. Drop oldest on overflow.
+>
 > **Scope**: ~100 LOC in `DirectCastStreamingService.cs`. No receiver change. No wire-protocol change.
+>
 > **Risk / trade-off**: Adds one extra in-process queue (~1 MB worst case at 50 × 25 KB). Slight complexity in shutdown / cancellation. Loses the natural per-chunk pacing if the consumer overruns the producer (currently `Stopwatch` enforces both at once).
+>
 > **Confidence**: **High** — no reference system awaits ACK per encode step (§6 Pattern 4). Pull-based systems sidestep this entirely; push-based systems must decouple producer/consumer to absorb socket jitter.
+>
+> **Baseline probe**: 30-minute DC-mode continuous playback with sender instrumented to record per-iteration loop time (PCM-read → encode → send → next).
+> ```bash
+> # Prereq scaffolding: in DirectCastStreamingService.StreamingLoopAsync, wrap
+> # each iteration with Stopwatch and call MetricsCollector.RecordHistogram(
+> # "cast.dc.send_loop_iter_ms", elapsed). Separately log encode-only and
+> # send-only durations as "cast.dc.encode_ms" and "cast.dc.send_ms".
+>
+> ssh mmack@radio "sqlite3 /opt/radio-console/data/metrics/metrics.db \
+>   'SELECT metric, value FROM histogram_samples \
+>    WHERE metric IN (\"cast.dc.send_loop_iter_ms\",\"cast.dc.encode_ms\",\"cast.dc.send_ms\") \
+>    AND ts > strftime(\"%s\",\"now\",\"-30 minutes\")*1000;'" \
+>   | python3 scripts/research/cast_dc_loop_summarize.py \
+>   > baseline_cast_loop.txt
+> ```
+> Output: per-stage p50/p95/p99/max + count of `iter_ms > 150` events ("jitter spikes").
+>
+> **Post-change probe**: identical query + parser, after producer/consumer split lands.
+>
+> **Success criterion**:
+> - Producer-side `iter_ms` p99 drops from baseline (expected `>150 ms`, since `send_ms` tail bleeds in) to `≤110 ms`
+> - "Jitter spike" count (`iter_ms > 150`) drops by `≥90 %`
+> - Receiver-side `bufferAhead` p5 (from PROBE-CAST-BUFFER) rises by `≥0.5 s` (downstream confirmation that producer no longer stalls)
+>
+> **Debug-agent verification steps**:
+> 1. Deploy `main` with the instrumentation scaffolding; verify loop-time metrics flowing (`sqlite3 metrics.db 'SELECT COUNT(*)...'`)
+> 2. Run 30 min DC playback; save `baseline_cast_loop.txt` and (concurrently) `baseline_cast_buffer.txt`
+> 3. Deploy feature branch; repeat
+> 4. `python3 scripts/research/cast_loop_compare.py baseline_* after_*` — PASS/FAIL + deltas
 
 ---
 
 > **Idea — Move DC audio onto a separate transport from metadata + control**
+>
 > **Addresses**: FM5 (network / transport jitter — currently the highest-exposure mode for DC)
+>
+> **Evidence motivating this** — §4 FM5 RTest-DC cell: audio chunks + config + ping/pong + SharpCaster control traffic (volume, media status, `LoadAsync` metadata updates) all share the same TLS Cast control TCP socket ([GoogleCastOutput.cs:L646-L656,L774-L807,L1382-L1430](../../src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs)). The *observable phenomenon*: when a `LoadMediaWithRecoveryAsync` fires (album-art update), a 200 KB metadata blob queues on the same socket as audio. Should be measurable as a correlation between metadata-send timestamps and `bufferAhead` drops within a small time window.
+>
 > **What changes in RTest**: Either (a) move metadata to a *second* Cast custom namespace and accept that SharpCaster will still multiplex over the same TCP socket — i.e., this option does *not* actually fix HoL blocking, only logical separation; or (b) move audio chunks onto a WebSocket from the receiver page back to the API, parallel to the Cast control socket. (b) is the meaningful fix.
+>
 > **Scope**: ~200 LOC — new WebSocket endpoint in Radio.API (Kestrel side, not the port-8080 HttpListener), new client in `receiver-direct-channel.html`, sender writes to the WS instead of via SharpCaster's `SendMessageAsync`. Cast bus still used for handshake + control.
+>
 > **Risk / trade-off**: Requires receiver-page outbound network reach to the API server (mDNS or hardcoded LAN IP). Adds a second TLS handshake at session start. Loses Cast's automatic relaunch-on-disconnect for the audio channel only.
+>
 > **Confidence**: **High** — every reference system uses a separate transport for audio vs metadata (§6 Pattern 3); RTest-HM already does this and benefits from it.
+>
+> **Baseline probe**: Synthetic-load test — force a `LoadMediaWithRecoveryAsync` every 30 s during 1 h continuous DC playback. Correlate metadata-send timestamps with bufferAhead-drop events.
+> ```bash
+> # Prereq: instrument MetricsCollector.Increment("cast.dc.metadata_sent")
+> # at LoadMediaWithRecoveryAsync entry, with timestamp event log.
+> # Already-present PROBE-CAST-BUFFER captures buffer drops with timestamps.
+>
+> # Test harness (forces frequent metadata updates):
+> ssh mmack@radio "/opt/radio-console/scripts/research/force_metadata_burst.sh 30 3600" &
+>
+> # Collect:
+> python3 scripts/research/cast_metadata_correlation.py \
+>   --metrics-db /opt/radio-console/data/metrics/metrics.db \
+>   --window-ms 500 --duration 3600 \
+>   > baseline_metadata_correlation.txt
+> ```
+> Output: `metadata_events=<N>, buffer_drops_within_500ms=<M>, correlation_coefficient=<C>, pearson_p_value=<P>`.
+>
+> **Post-change probe**: identical with WebSocket split deployed.
+>
+> **Success criterion**:
+> - `correlation_coefficient` between metadata-send and buffer-drop events drops from baseline (expected `>0.5`) to `<0.1`
+> - `buffer_drops_within_500ms` count drops by `≥80 %`
+> - PROBE-CAST-AUDIO `silence_events` (run in parallel) drops by `≥50 %` during the forced-metadata burst window
+>
+> **Debug-agent verification steps**:
+> 1. Confirm `scripts/research/force_metadata_burst.sh` works on a healthy `main` deploy (logs show metadata-send events at the requested cadence)
+> 2. Deploy `main`; 1 h soak with the burst harness active; save baseline artifacts
+> 3. Deploy feature branch; 1 h soak with the same burst harness; save after artifacts
+> 4. `python3 scripts/research/cast_metadata_compare.py` — PASS/FAIL + correlation deltas
 
 ---
 
 > **Idea — Switch DC to MSE with 1–2 s chunks instead of Web Audio with 100 ms chunks**
+>
 > **Addresses**: FM4 (receiver scheduling slips), FM6 (codec boundary glitches)
+>
+> **Evidence motivating this** — §4 FM4 RTest-DC cell: every chunk creates a new `AudioBufferSourceNode` and calls `source.start(nextPlayTime)` with absolute scheduling against `audioCtx.currentTime`; Int16→Float32 conversion runs on the JS main thread per chunk. The *observable phenomenon*: PROBE-CAST-LONGTASK should show frequent long tasks at the 100 ms chunk cadence, with `chunksScheduled` incrementing but `nextPlayTime` occasionally being reset to `now + 0.02` ([receiver-direct-channel.html:L141-L144](../../docs/receiver-direct-channel.html)) when the main thread was busy when a message arrived.
+>
 > **What changes in RTest**: Both — sender encodes 1–2 s fMP4 (or webm/opus) segments instead of raw PCM; receiver uses `SourceBuffer.appendBuffer` into an MSE-backed `<audio>` element instead of `AudioBufferSourceNode`. Pre-encoded segments mean decode runs in Chrome's C++ pipeline, off the JS main thread.
+>
 > **Scope**: ~500 LOC — pull in an Opus or fragmented-MP4 encoder dependency (likely native via P/Invoke, since LAME's MP3 frames don't fragment cleanly into MSE), rewrite `receiver-direct-channel.html` audio path entirely.
+>
 > **Risk / trade-off**: Loses the real-time-ness that's the explicit selling point of DirectChannel mode. End-to-end latency floors at ~2 s instead of ~300 ms. If we accept that latency, much of DirectChannel's advantage over HM evaporates.
+>
 > **Confidence**: **Medium-high** — this is the CAF official path (§6 Pattern 2), but it largely reduces DC into "HM with a better codec." Worth considering as a deliberate retreat rather than an improvement.
+>
+> **Baseline probe**: PROBE-CAST-LONGTASK over 5 minutes of DC-mode playback, plus PROBE-CAST-AUDIO over the same window. Capture: long-task count, p99 duration, total blocked %, audio glitch count.
+>
+> **Post-change probe**: identical, after MSE switch ships.
+>
+> **Success criterion**:
+> - `long_tasks_per_min` (tasks `>50 ms`) drops by `≥90 %`
+> - `total_blocked_pct` drops below `5 %`
+> - PROBE-CAST-AUDIO `click_events` (sample-boundary discontinuity detections) drops by `≥80 %`
+> - **Negative-criterion check**: end-to-end latency (from `arecord` first-sample timestamp vs sender's first-PCM-byte timestamp) does *not* exceed `2.5 s`
+>
+> **Debug-agent verification steps**:
+> 1. Confirm DevTools Protocol Playwright session attaches to receiver via `chrome://inspect`; verify long-task event stream live
+> 2. Deploy `main`; 5 min DC playback with PROBE-CAST-LONGTASK + PROBE-CAST-AUDIO; save baseline
+> 3. Deploy feature branch; repeat
+> 4. `python3 scripts/research/cast_longtask_compare.py` + latency-floor check — PASS/FAIL
 
 ---
 
 > **Idea — Add receiver→sender rate feedback for DC clock drift correction**
+>
 > **Addresses**: FM3 (clock drift)
-> **What changes in RTest**: Sender — consume the existing `bufferAhead` value already reported in `pong` messages (currently ignored). When `bufferAhead < lowerThreshold`, briefly send chunks at < 100 ms cadence; when `bufferAhead > upperThreshold`, briefly delay. Smooth via a PI controller. Prevents the receiver from accumulating drift to the point of chunk-drop every ~22 minutes.
+>
+> **Evidence motivating this** — §4 FM3 RTest-DC cell: receiver acknowledges `~2.3 ms/sec` drift between `audioCtx.currentTime` and sender wall-clock. Predicts chunk-drop every `~22 minutes` at the current configuration. `bufferAhead` already reported in `pong` (PROBE-CAST-BUFFER captures it) but sender ignores it for control purposes. The *observable phenomenon*: in a multi-hour soak, the chunk-drop count should grow approximately linearly with elapsed time at the predicted ~2.7 drops/hour rate.
+>
+> **What changes in RTest**: Sender — consume the existing `bufferAhead` value already reported in `pong` messages. When `bufferAhead < lowerThreshold`, briefly send chunks at < 100 ms cadence; when `bufferAhead > upperThreshold`, briefly delay. Smooth via a PI controller. Prevents the receiver from accumulating drift to the point of chunk-drop every ~22 minutes.
+>
 > **Scope**: ~60 LOC in `DirectCastStreamingService.cs` (read `pong`, maintain controller state, adjust pacing). No receiver change — the telemetry path already exists.
+>
 > **Risk / trade-off**: Controller tuning is non-trivial; bad gain values could amplify jitter. If `pong` traffic is itself HoL-blocked (FM5), the controller sees stale data.
+>
 > **Confidence**: **Medium** — reference systems sidestep the problem by being pull-based (the receiver pulls at its own clock pace). This is a workaround for the push model, not a fix for the architectural mismatch.
+>
+> **Baseline probe**: PROBE-CAST-BUFFER over a **6-hour** continuous DC-mode playback session. Long window because the failure rate is ~1 drop per 22 min; need enough samples to estimate drift slope.
+> ```bash
+> # 6h with the same metrics.db query as PROBE-CAST-BUFFER, plus drift-slope estimation:
+> python3 scripts/research/cast_drift_slope.py \
+>   --metrics-db /opt/radio-console/data/metrics/metrics.db \
+>   --window-hours 6 \
+>   > baseline_cast_drift.txt
+> ```
+> Output: `drops_per_hour=<R>, bufferAhead_slope_ms_per_sec=<S>, drift_predicted_drops_per_hour=<P>, slope_linear_r2=<X>`.
+>
+> **Post-change probe**: identical, after feedback controller ships.
+>
+> **Success criterion**:
+> - `drops_per_hour` drops from baseline (expected `~2.7`) to `≤0.3`
+> - `bufferAhead_slope_ms_per_sec` flattens: `|slope| < 0.3 ms/sec` (vs baseline `~2.3 ms/sec`)
+> - PROBE-CAST-AUDIO over the same window: `silence_events` attributable to chunk-drops (silence-at-chunk-boundary correlation) drops by `≥80 %`
+>
+> **Debug-agent verification steps**:
+> 1. Verify a 6 h `radio-api` uptime budget on the test box (no scheduled reboots / deploys during the window)
+> 2. Deploy `main`; 6 h continuous playback; save baseline
+> 3. Deploy feature branch; 6 h continuous playback; save after
+> 4. `python3 scripts/research/cast_drift_compare.py` — PASS/FAIL + slope deltas
 
 ---
 
 > **Idea — Replace raw PCM with Opus on the DC wire**
+>
 > **Addresses**: FM2 (sender pipeline jitter — smaller writes), FM5 (network jitter — less bandwidth)
+>
+> **Evidence motivating this** — §5 row "Chunk size & cadence" RTest-DC cell: 19 200 B PCM → ~25 700 B Base64 in JSON envelope, sent 10×/sec = ~1.5 Mbps on the shared Cast TLS socket. Compared to reference systems' AAC at 64–128 kbps and Plex's MP3 at 192 kbps, RTest-DC's per-second byte rate is **~10× higher**. The *observable phenomenon*: `tcpdump` on the Cast control socket during DC playback should show this bandwidth differential directly.
+>
 > **What changes in RTest**: Sender — encode each chunk as Opus (96 kbps target) instead of raw Int16LE. Receiver — `AudioContext.decodeAudioData(opusBytes)` instead of manual Int16→Float32 conversion. Bandwidth drops from ~1.5 Mbps to ~96 kbps; per-message size drops from 25 KB to ~1.2 KB.
+>
 > **Scope**: ~200 LOC — Opus encoder via P/Invoke on the sender (libopus), receiver uses `decodeAudioData` which is built into Chrome. Wire format changes — `fmt:"opus"`.
+>
 > **Risk / trade-off**: Adds a native dependency on Linux + Windows. `decodeAudioData` is async and decodes off the JS main thread (good for FM4) but returns an `AudioBuffer` that still has to be scheduled with `AudioBufferSourceNode` — doesn't get us out of the Web Audio scheduling problem entirely. Encoding adds ~10–20 ms latency per chunk.
+>
 > **Confidence**: **Medium** — bandwidth savings are clear-cut, but Opus alone doesn't fix the receiver-side scheduling (only the transport). Pairs naturally with the producer/consumer split idea.
+>
+> **Baseline probe**: `tcpdump` on the Cast control TLS port (typically 8009) for 5 min of DC playback. Compute bytes/sec to that endpoint; record peak and sustained.
+> ```bash
+> # Identify Chromecast IP first:
+> CHROMECAST_IP=$(ssh mmack@radio "cat /opt/radio-console/api/appsettings.Production.json | jq -r '.GoogleCast.DefaultDeviceIp'")
+>
+> # Capture (run on radio host where the Cast traffic originates):
+> ssh mmack@radio "sudo tcpdump -i any -w /tmp/cast.pcap host $CHROMECAST_IP and tcp port 8009" &
+> # Start 5-min DC playback
+> sleep 300 && ssh mmack@radio "sudo pkill tcpdump"
+>
+> ssh mmack@radio "sudo tcpdump -r /tmp/cast.pcap -nn" \
+>   | python3 scripts/research/cast_bw_summarize.py \
+>   > baseline_cast_bandwidth.txt
+> ```
+> Output: `bytes_per_sec_p50=<X>, bytes_per_sec_p95=<Y>, peak_bps=<P>, total_mb=<M>`.
+>
+> **Post-change probe**: identical, after Opus switch.
+>
+> **Success criterion**:
+> - `bytes_per_sec_p50` drops by `≥85 %` (PCM ~190 KB/s → Opus ~12 KB/s)
+> - PROBE-CAST-AUDIO `click_events` (after Opus decode-and-reschedule path) does **not** regress: count must stay `≤` baseline +10 %
+> - PROBE-CAST-BUFFER chunk-drop count under forced-metadata-burst harness (see Idea #3 probe) drops by `≥50 %` — confirms bandwidth pressure was a meaningful contributor to FM5
+>
+> **Debug-agent verification steps**:
+> 1. Confirm `tcpdump` runs with `sudo` non-interactively (NOPASSWD setup) on the test host
+> 2. Deploy `main`; run 5 min DC playback with PROBE-CAST-BANDWIDTH + PROBE-CAST-AUDIO + PROBE-CAST-BUFFER under forced-metadata burst; save baseline
+> 3. Deploy feature branch; repeat
+> 4. `python3 scripts/research/cast_bandwidth_compare.py` + regression checks — PASS/FAIL
 
 ---
 
 > **Idea — Move DC receiver-side decode + format conversion into a Web Worker**
+>
 > **Addresses**: FM4 (receiver scheduling slips) without changing protocol or buffer depth
+>
+> **Evidence motivating this** — Same observable phenomenon as Idea #4 (the MSE switch): the `view.getInt16` loop in `receiver-direct-channel.html` (L107-L195) runs on the JS main thread for every chunk; PROBE-CAST-LONGTASK should attribute frequent long tasks to this loop. Distinct from Idea #4 because this idea preserves the Web Audio path and only moves the decode off the main thread.
+>
 > **What changes in RTest**: Receiver — move the `view.getInt16` loop and `AudioBuffer.copyToChannel` calls into a Web Worker; main thread receives the already-built Float32Array and only schedules the `AudioBufferSourceNode`. Eliminates per-chunk JS work on the main thread.
+>
 > **Scope**: ~80 LOC — new `decoder.worker.js`, `postMessage` plumbing in `receiver-direct-channel.html`.
+>
 > **Risk / trade-off**: `AudioContext` is main-thread-only — can't move scheduling into the worker, only decode. Worker has its own GC pauses (rarer because of smaller heap). Adds a `postMessage` copy.
+>
 > **Confidence**: **Medium** — doesn't change the architectural shape, only relieves the worst-case symptom. Cheap insurance pairing with buffer-depth growth.
+>
+> **Baseline probe**: PROBE-CAST-LONGTASK over 5 min DC-mode playback (same protocol as Idea #4). Also capture per-task attribution where DevTools provides it (Chromium long-task entries include `attribution.containerSrc`).
+>
+> **Post-change probe**: identical.
+>
+> **Success criterion**:
+> - `long_tasks_per_min` attributable to the decode loop (filter by `attribution.containerSrc ~= "decoder.worker.js"` is *good* — these are off-main-thread) drops by `≥90 %` on the main thread
+> - `total_blocked_pct` drops from baseline (expected `>10 %` if decode is the dominant contributor) to `≤2 %`
+> - PROBE-CAST-AUDIO `click_events` from `nextPlayTime` resets ([receiver-direct-channel.html:L141-L144](../../docs/receiver-direct-channel.html)) drops by `≥70 %` — observable via correlating reset-log timestamps with audio-record glitches
+> - **Negative-criterion check**: bufferAhead p5 does not regress (no new latency introduced by `postMessage` overhead)
+>
+> **Debug-agent verification steps**:
+> 1. Confirm DevTools long-task `attribution` field populated for `receiver-direct-channel.html` long tasks on `main`
+> 2. Deploy `main`; 5 min DC playback with full probe suite; save baseline
+> 3. Deploy feature branch; repeat
+> 4. `python3 scripts/research/cast_longtask_compare.py --attribution-filter decode` — PASS/FAIL + per-attribution deltas
 
 ---
 
 > **Idea — Proactive sender-side detection + relaunch of wedged DC receiver**
+>
 > **Addresses**: FM7 (receiver lifecycle)
-> **What changes in RTest**: Sender — track `lastPongTimestamp`. If no `pong` received for `maxInactivity = 30 s` while audio is being sent, call `LaunchApplicationAsync(directChannelAppId)` and re-init the channel. Currently `StartAsync` has no mid-session recovery for DC mode (only HM has `LoadMediaWithRecoveryAsync`).
+>
+> **Evidence motivating this** — §4 FM7 RTest-DC cell: on receiver crash, sender keeps sending and Cast SDK errors get logged ([DirectCastStreamingService.cs:L478-L486](../../src/Radio.Infrastructure/Audio/Outputs/DirectCastStreamingService.cs)); no automatic relaunch path for DC mode in `StartAsync`. HM mode already has `LoadMediaWithRecoveryAsync` ([GoogleCastOutput.cs:L994-L1062](../../src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs)). The *observable phenomenon*: artificially kill the receiver via `chrome://inspect` "Inspect Receiver → close tab", and audio never resumes — manual restart required. Time-to-recovery is effectively infinite today.
+>
+> **What changes in RTest**: Sender — track `lastPongTimestamp`. If no `pong` received for `maxInactivity = 30 s` while audio is being sent, call `LaunchApplicationAsync(directChannelAppId)` and re-init the channel. Wire-compatible — receiver already replies to `ping`.
+>
 > **Scope**: ~80 LOC in `DirectCastStreamingService.cs` + `GoogleCastOutput.cs`. Wire-compatible — receiver already replies to `ping`.
+>
 > **Risk / trade-off**: Risk of relaunch loops if `pong` is dropped due to legitimate network issues (treat the receiver as dead when it's actually fine). Mitigate by requiring N consecutive missed pings before relaunch.
+>
 > **Confidence**: **Medium** — HM already has this recovery; bringing DC to parity is straightforward. Not motivated by the reference systems (their lifecycle handling is implicit in CAF/Shaka), but it closes a known gap.
+>
+> **Baseline probe**: Scripted "kill receiver mid-stream, measure time to audio resume" — repeated 10× with cooldown between trials.
+> ```bash
+> # Test harness:
+> python3 scripts/research/cast_kill_recovery_trial.py \
+>   --trials 10 --cooldown-sec 60 \
+>   --kill-method "chrome-devtools-close-tab" \
+>   --audio-capture-device "USB_Audio" \
+>   > baseline_cast_recovery.txt
+> ```
+> Output per trial: `trial_n=<i>, kill_timestamp=<T1>, audio_resume_timestamp=<T2>|never, recovery_seconds=<dt>|inf`. Summary: `mean_recovery_s=<M>, success_rate=<S/10>, max_recovery_s=<X>`.
+>
+> **Post-change probe**: identical 10-trial harness, after the relaunch path ships.
+>
+> **Success criterion**:
+> - `success_rate` rises from baseline `0/10` (no auto-recovery exists today) to `≥9/10`
+> - `mean_recovery_s` (for successful trials) `≤ 35 s` (matches 30 s `maxInactivity` + ~5 s relaunch overhead)
+> - `max_recovery_s` (for successful trials) `≤ 60 s`
+> - **No false-positive relaunches**: 1-hour soak with healthy receiver shows `0` relaunch events in journalctl
+>
+> **Debug-agent verification steps**:
+> 1. Confirm `cast_kill_recovery_trial.py` works against `main` deploy (correctly kills the receiver and detects no recovery)
+> 2. Deploy `main`; run 10-trial harness; save baseline
+> 3. Run separate 1 h healthy-receiver soak on `main`; confirm `0` relaunches (sanity)
+> 4. Deploy feature branch; repeat both
+> 5. `python3 scripts/research/cast_recovery_compare.py` — PASS/FAIL + per-trial deltas
 
 ---
 
