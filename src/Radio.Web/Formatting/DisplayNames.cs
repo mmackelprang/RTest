@@ -255,10 +255,19 @@ public static partial class DisplayNames
       return string.Empty;
     }
 
+    // File paths in NowPlayingDto.FilePath or ExtendedMetadata["FilePath"] arrive from
+    // multiple sources (file-browser scans, fingerprinting metadata, AVRCP Position
+    // metadata, restored play-history rows) — any of which may carry Windows-style
+    // separators even though radio-api runs on Linux. Path.GetFileNameWithoutExtension
+    // honors the *runtime* platform's separator only, so on Linux it would keep
+    // `C:\music\...\file.mp3` as a single filename. Normalize both separators to `/`
+    // so the cross-platform extraction is deterministic.
+    var normalized = path.Replace('\\', '/');
+
     string fileName;
     try
     {
-      fileName = Path.GetFileNameWithoutExtension(path) ?? string.Empty;
+      fileName = Path.GetFileNameWithoutExtension(normalized) ?? string.Empty;
     }
     catch (ArgumentException)
     {
