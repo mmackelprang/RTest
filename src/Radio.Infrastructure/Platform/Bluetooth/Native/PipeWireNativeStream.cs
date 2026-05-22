@@ -3,6 +3,7 @@ using System;
 using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Threading;
 using Microsoft.Extensions.Logging;
 using static Radio.Infrastructure.Platform.Bluetooth.Native.PipeWireNative;
 
@@ -48,6 +49,27 @@ internal sealed class PipeWireNativeStream : IDisposable
   private long _onProcessBurstCount; // intervals < 1ms (burst delivery)
   private double _maxOnProcessExecutionMs;
   private DateTime _lastOnProcessLogTime;
+
+  /// <summary>
+  /// Wall-clock-equivalent stopwatch timestamp of the most recent OnProcess callback.
+  /// Zero if OnProcess has not fired yet. Used by BluetoothCaptureWatchdog to detect
+  /// FM-BT-3 silent quiescence. Safe to read from any thread.
+  /// </summary>
+  public long LastOnProcessTimestamp => Volatile.Read(ref _lastOnProcessTimestamp);
+
+  /// <summary>
+  /// Returns the elapsed milliseconds since the last OnProcess callback, or
+  /// <see cref="long.MaxValue"/> if no callback has fired yet.
+  /// </summary>
+  public long MillisecondsSinceLastOnProcess()
+  {
+    var last = LastOnProcessTimestamp;
+    if (last == 0)
+    {
+      return long.MaxValue;
+    }
+    return (long)((Stopwatch.GetTimestamp() - last) / (double)Stopwatch.Frequency * 1000.0);
+  }
 
   // Pinned delegate references to prevent GC collection during native callbacks
   private readonly ProcessDelegate _processDelegate;
