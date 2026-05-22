@@ -51,6 +51,13 @@ public sealed class MockBluetoothService : IBluetoothService
         public BluetoothDisconnectReason? LastDisconnectReason => null;
         public BluetoothPipelineStatus PipelineStatus => BluetoothPipelineStatus.Inactive;
 
+        // A2DP codec observability — Mock implementation is a no-op (no real BT transport).
+#pragma warning disable 67 // event never raised in mock
+        public event EventHandler<A2dpCodecChangedEventArgs>? A2dpCodecChanged;
+#pragma warning restore 67
+        public Task<A2dpCodecInfo?> GetA2dpCodecInfoAsync(string deviceAddress, CancellationToken ct = default)
+          => Task.FromResult<A2dpCodecInfo?>(null);
+
         public Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default)
         {
             State = BluetoothAdapterState.On;

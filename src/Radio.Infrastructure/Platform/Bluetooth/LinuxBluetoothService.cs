@@ -157,6 +157,9 @@ internal sealed class LinuxBluetoothService : IBluetoothService
   public event EventHandler<TimeSpan>? PositionChanged;
   public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged;
   public event EventHandler? CaptureStreamRecovered;
+  // A2DP codec observability — raised by EmitCodecAsync after each successful
+  // MediaTransport1.{Codec,Configuration} read (on attach + on PropertiesChanged).
+  public event EventHandler<A2dpCodecChangedEventArgs>? A2dpCodecChanged;
   public float? DeviceVolume { get; private set; }
 
   private async Task MonitorBtPipelineAsync(CancellationToken cancellationToken)
@@ -2125,6 +2128,12 @@ internal sealed class LinuxBluetoothService : IBluetoothService
       }
 
       _logger.LogInformation("Attached to MediaTransport1 at {Path}", objectPath);
+
+      // Initial A2DP codec emission (Plan C / FM-BT-6) — give BlueZ a beat to
+      // populate Codec + Configuration on the transport, then emit once so the
+      // initial negotiated codec is logged + surfaced as metrics + UI badge
+      // even when no later property change fires.
+      _ = Task.Run(EmitInitialCodecAsync);
     }
     catch (Exception ex)
     {
@@ -2134,6 +2143,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService
 
   private void OnTransportPropertiesChanged(PropertyChanges changes)
   {
+    var codecChanged = false;
     foreach (var prop in changes.Changed)
     {
       if (prop.Key == "Volume" && prop.Value is ushort volume)
@@ -2143,7 +2153,79 @@ internal sealed class LinuxBluetoothService : IBluetoothService
         VolumeChanged?.Invoke(this, new BluetoothVolumeChangedEventArgs { Volume = normalized });
         _logger.LogDebug("BT AVRCP volume changed: {Raw}/127 ({Normalized:P0})", volume, normalized);
       }
+      else if (prop.Key == "Codec" || prop.Key == "Configuration")
+      {
+        codecChanged = true;
+      }
     }
+
+    // Codec/Configuration arrives via PropertiesChanged on BlueZ re-negotiation.
+    // Fire-and-forget the async D-Bus read + emission so we don't block the
+    // signal callback (Tmds.DBus invokes this on a pool thread).
+    if (codecChanged)
+    {
+      _ = Task.Run(() => EmitCodecAsync("changed"));
+    }
+  }
+
+  /// <summary>
+  /// Initial codec emission after MediaTransport1 attach. Waits briefly so BlueZ
+  /// can populate Codec + Configuration on the transport before we read.
+  /// </summary>
+  private async Task EmitInitialCodecAsync()
+  {
+    try
+    {
+      await Task.Delay(500);
+    }
+    catch
+    {
+      // ignore
+    }
+    await EmitCodecAsync("initial");
+  }
+
+  /// <summary>
+  /// Reads the negotiated A2DP codec from MediaTransport1 and emits log line +
+  /// metrics gauges + <see cref="A2dpCodecChanged"/> event. Safe to call from any
+  /// thread; tolerates a null transport or partial read.
+  /// </summary>
+  private async Task EmitCodecAsync(string trigger)
+  {
+    var connected = ConnectedDevice;
+    if (connected == null)
+    {
+      return;
+    }
+    A2dpCodecInfo? info;
+    try
+    {
+      info = await GetA2dpCodecInfoAsync(connected.Address);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "EmitCodecAsync ({Trigger}) read failed", trigger);
+      return;
+    }
+    if (info == null)
+    {
+      return;
+    }
+
+    _logger.LogInformation(
+      "BluetoothCodec: {Address} {Trigger} codec={Codec} sampleRate={Rate}Hz bitpool={Bitpool}",
+      connected.Address, trigger, info.CodecName, info.SampleRateHz,
+      info.BitpoolOrNull?.ToString() ?? "n/a");
+
+    _metricsCollector?.Gauge("bluetooth.a2dp.codec", info.CodecId);
+    _metricsCollector?.Gauge("bluetooth.a2dp.sample_rate_hz", info.SampleRateHz);
+    _metricsCollector?.Gauge("bluetooth.a2dp.bitpool", info.BitpoolOrNull ?? -1);
+
+    A2dpCodecChanged?.Invoke(this, new A2dpCodecChangedEventArgs
+    {
+      DeviceAddress = connected.Address,
+      CodecInfo = info
+    });
   }
 
   private void OnPlayerPropertiesChanged(PropertyChanges changes)
@@ -2230,6 +2312,37 @@ internal sealed class LinuxBluetoothService : IBluetoothService
       return s;
     }
     return string.Empty;
+  }
+
+  // A2DP codec observability — Plan C Task 4 — reads BlueZ MediaTransport1.Codec
+  // (byte) + Configuration (byte[]) properties and parses them via the pure
+  // A2dpCodecConfigParser. Used by the API surface (BluetoothController.BuildStatus
+  // → BluetoothStatusDto.CodecName / SampleRateHz / Bitpool) and by the
+  // OnTransportPropertiesChanged handler that emits the A2dpCodecChanged event.
+  // Returns null if no transport is attached or the read fails.
+  public async Task<A2dpCodecInfo?> GetA2dpCodecInfoAsync(string deviceAddress, CancellationToken ct = default)
+  {
+    var transport = _mediaTransport;
+    if (transport == null)
+    {
+      return null;
+    }
+
+    try
+    {
+      var codecId = await transport.GetAsync<byte>("Codec");
+      var config = await transport.GetAsync<byte[]>("Configuration");
+      if (config == null)
+      {
+        return null;
+      }
+      return Linux.A2dpCodecConfigParser.Parse(codecId, config);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "GetA2dpCodecInfoAsync read failed for {Address}", deviceAddress);
+      return null;
+    }
   }
 }
 

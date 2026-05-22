@@ -89,6 +89,11 @@ internal sealed class NullBluetoothService : IBluetoothService
   public BluetoothDisconnectReason? LastDisconnectReason => null;
   public BluetoothPipelineStatus PipelineStatus => BluetoothPipelineStatus.Inactive;
 
+  // A2DP codec observability — null service has no transport.
+  public event EventHandler<A2dpCodecChangedEventArgs>? A2dpCodecChanged { add { } remove { } }
+  public Task<A2dpCodecInfo?> GetA2dpCodecInfoAsync(string deviceAddress, CancellationToken ct = default)
+    => Task.FromResult<A2dpCodecInfo?>(null);
+
   public Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default)
   {
       return Task.FromResult(false);

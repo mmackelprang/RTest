@@ -102,6 +102,12 @@
                 BadgeStyle="@(IsHfpActive ? BadgeStyle.Success : BadgeStyle.Light)" IsPill="true" />
               <RadzenBadge Text="@($"📇 PBAP {(HasPbapSync ? "Synced" : "None")}")"
                 BadgeStyle="@(HasPbapSync ? BadgeStyle.Success : BadgeStyle.Light)" IsPill="true" />
+              @* Plan C / FM-BT-6 — surfaces BlueZ MediaTransport1's negotiated
+                 codec (e.g. "SBC 48.0 kHz bitpool 53", "AAC 44.1 kHz", "aptX"). *@
+              @if (!string.IsNullOrEmpty(_status.CodecName))
+              {
+                <RadzenBadge Text="@CodecBadgeText" BadgeStyle="BadgeStyle.Info" IsPill="true" />
+              }
             </div>
 
             @* Service detail rows *@
@@ -649,6 +655,29 @@
     && string.Equals(_activeSourceType, "Bluetooth", StringComparison.OrdinalIgnoreCase);
 
   private string A2dpStatusText => IsA2dpActive ? "Playing" : "Idle";
+
+  // Plan C / FM-BT-6 — composes the codec badge label from the codec name,
+  // sample rate, and SBC bitpool when present. Example outputs:
+  //   "🎚️ SBC 48.0 kHz bitpool 53"
+  //   "🎚️ AAC 44.1 kHz"
+  //   "🎚️ aptX"
+  private string CodecBadgeText
+  {
+    get
+    {
+      if (_status?.CodecName == null) return string.Empty;
+      var parts = new List<string> { _status.CodecName };
+      if (_status.SampleRateHz is > 0)
+      {
+        parts.Add($"{(_status.SampleRateHz.Value / 1000.0).ToString("F1")} kHz");
+      }
+      if (_status.Bitpool is > 0)
+      {
+        parts.Add($"bitpool {_status.Bitpool}");
+      }
+      return "🎚️ " + string.Join(" ", parts);
+    }
+  }
 
   private bool IsHfpActive => _phoneStatus is { Enabled: true, IsConnected: true };
 
