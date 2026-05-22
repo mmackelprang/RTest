@@ -163,10 +163,24 @@ public static class AudioServiceExtensions
       return Platform.Bluetooth.BluetoothServiceFactory.Create(sp, options, logger, deviceManager, metricsCollector);
     });
 
-    // FM-BT-3 watchdog (Linux-only; constructor receives null on Windows/Mock
-    // and logs once before exiting). Uses the AddSingleton + AddHostedService
-    // factory pattern so the concrete type is resolvable from DI (per MEMORY
-    // "DI / Hosted Service Gotchas").
+    // FM-BT-3 watchdog snapshot source. On Linux this resolves to the
+    // LinuxBluetoothService singleton; on Windows / Mock / BT-disabled, the
+    // null fallback keeps the watchdog idle.
+    services.AddSingleton<ICaptureStreamSnapshotSource>(sp =>
+    {
+#if !WINDOWS_TARGET
+      var linuxService = sp.GetService<Platform.Bluetooth.LinuxBluetoothService>();
+      if (linuxService != null)
+      {
+        return linuxService;
+      }
+#endif
+      return NullCaptureStreamSnapshotSource.Instance;
+    });
+
+    // FM-BT-3 watchdog. AddSingleton + AddHostedService(factory) so the
+    // concrete type is resolvable from DI (per MEMORY "DI / Hosted Service
+    // Gotchas").
     services.AddSingleton<BluetoothCaptureWatchdog>();
     services.AddHostedService(sp => sp.GetRequiredService<BluetoothCaptureWatchdog>());
 

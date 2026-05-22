@@ -5,9 +5,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
-#if !WINDOWS_TARGET
-using Radio.Infrastructure.Platform.Bluetooth;
-#endif
 
 namespace Radio.Infrastructure.Audio.Services;
 
@@ -22,38 +19,40 @@ namespace Radio.Infrastructure.Audio.Services;
 /// generator-stall recovery.
 /// </summary>
 /// <remarks>
-/// Linux-only. On Windows the watchdog compiles as a no-op (no Linux service to
-/// observe).
+/// Depends on <see cref="ICaptureStreamSnapshotSource"/>, which on Linux is
+/// implemented by <c>LinuxBluetoothService</c>. On Windows / Mock /
+/// BT-disabled, the registered implementation is
+/// <see cref="NullCaptureStreamSnapshotSource"/>, which always returns
+/// <c>null</c>; the watchdog then idles without ever firing.
 /// </remarks>
 internal sealed class BluetoothCaptureWatchdog : BackgroundService
 {
   private readonly ILogger<BluetoothCaptureWatchdog> _logger;
-#if !WINDOWS_TARGET
   private readonly IOptionsMonitor<BluetoothOptions> _options;
-  private readonly LinuxBluetoothService? _linuxService;
+  private readonly ICaptureStreamSnapshotSource _snapshotSource;
   private int _consecutiveStalledChecks;
 
   public BluetoothCaptureWatchdog(
     ILogger<BluetoothCaptureWatchdog> logger,
     IOptionsMonitor<BluetoothOptions> options,
-    LinuxBluetoothService? linuxService = null)
+    ICaptureStreamSnapshotSource snapshotSource)
   {
     _logger = logger;
     _options = options;
-    _linuxService = linuxService;
+    _snapshotSource = snapshotSource;
   }
 
   /// <summary>
   /// Exposed for unit tests via <c>InternalsVisibleTo</c> for
-  /// <c>Radio.Infrastructure.Tests</c>. Production code observes the watchdog's
-  /// effect via the <see cref="LinuxBluetoothService.CaptureStreamStalled"/>
-  /// event, not this counter.
+  /// <c>Radio.Infrastructure.Tests</c>. Production code observes the
+  /// watchdog's effect via the BT service's <c>CaptureStreamStalled</c> event,
+  /// not this counter.
   /// </summary>
   internal int ConsecutiveStalledChecksForTest => _consecutiveStalledChecks;
 
   protected override async Task ExecuteAsync(CancellationToken stoppingToken)
   {
-    if (_linuxService == null)
+    if (_snapshotSource is NullCaptureStreamSnapshotSource)
     {
       _logger.LogInformation(
         "BluetoothCaptureWatchdog: no Linux BT service available, watchdog disabled");
@@ -69,7 +68,7 @@ internal sealed class BluetoothCaptureWatchdog : BackgroundService
     while (!stoppingToken.IsCancellationRequested)
     {
       var opts = _options.CurrentValue;
-      var tickMs = Math.Max(100, opts.WatchdogTickIntervalMs);
+      var tickMs = Math.Max(10, opts.WatchdogTickIntervalMs);
 
       try
       {
@@ -80,7 +79,7 @@ internal sealed class BluetoothCaptureWatchdog : BackgroundService
           continue;
         }
 
-        var snapshot = _linuxService.GetCaptureStreamSnapshot();
+        var snapshot = _snapshotSource.GetCaptureStreamSnapshot();
         if (snapshot == null)
         {
           // No active native capture stream — reset the consecutive counter.
@@ -91,7 +90,7 @@ internal sealed class BluetoothCaptureWatchdog : BackgroundService
           _consecutiveStalledChecks++;
           if (_consecutiveStalledChecks >= opts.ConsecutiveStalledChecks)
           {
-            _linuxService.RaiseCaptureStreamStalled(
+            _snapshotSource.RaiseCaptureStreamStalled(
               snapshot.Value.Address,
               snapshot.Value.ElapsedMs,
               _consecutiveStalledChecks);
@@ -128,21 +127,4 @@ internal sealed class BluetoothCaptureWatchdog : BackgroundService
 
     _logger.LogInformation("BluetoothCaptureWatchdog: stopped");
   }
-#else
-  // Windows: no Linux BT service exists, watchdog is a no-op for API symmetry.
-  public BluetoothCaptureWatchdog(
-    ILogger<BluetoothCaptureWatchdog> logger,
-    IOptionsMonitor<BluetoothOptions> options)
-  {
-    _logger = logger;
-    _ = options;
-  }
-
-  protected override Task ExecuteAsync(CancellationToken stoppingToken)
-  {
-    _logger.LogInformation(
-      "BluetoothCaptureWatchdog: Windows build, watchdog disabled (Linux-only feature)");
-    return Task.CompletedTask;
-  }
-#endif
 }

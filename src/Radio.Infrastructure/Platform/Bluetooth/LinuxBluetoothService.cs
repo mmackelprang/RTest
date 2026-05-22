@@ -11,6 +11,7 @@ using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Infrastructure.Platform.Bluetooth.Native;
 using Radio.Metrics;
@@ -21,7 +22,7 @@ using Tmds.DBus;
 
 namespace Radio.Infrastructure.Platform.Bluetooth;
 
-internal sealed class LinuxBluetoothService : IBluetoothService
+internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamSnapshotSource
 {
   private readonly ILogger _logger;
   private readonly BluetoothOptions _options;
@@ -161,12 +162,13 @@ internal sealed class LinuxBluetoothService : IBluetoothService
   public float? DeviceVolume { get; private set; }
 
   /// <summary>
-  /// Snapshot for BluetoothCaptureWatchdog: connected device address + elapsed
-  /// milliseconds since the native capture stream's last OnProcess callback.
-  /// Returns null when no native capture stream is active (no connected device,
-  /// or capture intentionally stopped, or running pw-record fallback).
+  /// Snapshot for <see cref="BluetoothCaptureWatchdog"/>: connected device
+  /// address + elapsed milliseconds since the native capture stream's last
+  /// OnProcess callback. Returns null when no native capture stream is active
+  /// (no connected device, capture intentionally stopped, or running pw-record
+  /// fallback). Implements <see cref="ICaptureStreamSnapshotSource"/>.
   /// </summary>
-  internal (string Address, long ElapsedMs)? GetCaptureStreamSnapshot()
+  public (string Address, long ElapsedMs)? GetCaptureStreamSnapshot()
   {
     var stream = _nativeStream;
     var device = ConnectedDevice;
@@ -178,10 +180,11 @@ internal sealed class LinuxBluetoothService : IBluetoothService
   }
 
   /// <summary>
-  /// Invoked by BluetoothCaptureWatchdog when a stall is confirmed. Raises
-  /// <see cref="CaptureStreamStalled"/> and increments the detection metric.
+  /// Invoked by <see cref="BluetoothCaptureWatchdog"/> when a stall is
+  /// confirmed. Raises <see cref="CaptureStreamStalled"/> and increments the
+  /// detection metric. Implements <see cref="ICaptureStreamSnapshotSource"/>.
   /// </summary>
-  internal void RaiseCaptureStreamStalled(string address, long elapsedMs, int consecutiveChecks)
+  public void RaiseCaptureStreamStalled(string address, long elapsedMs, int consecutiveChecks)
   {
     _metricsCollector?.Increment("bluetooth.capture_stall_detected_total");
     _logger.LogWarning(
