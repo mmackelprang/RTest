@@ -62,6 +62,14 @@ Consumed from the cast/BT research arc per embedded-audio-engineering prioritiza
 
 **Phase 3+ ideas remain in research** until Phase 1+2 measurement points the finger.
 
+### CI infrastructure — RTest appserver runner migration
+
+Selected as a follow-up after the cast/BT Phase 1+2 tranche revealed that the project's monthly GH Actions minutes pool can be a real blocker. Plan modeled on FamilyWorkspace's 2026-05-17 migration which already provisioned the runner.
+
+| Plan | Branch | Scope |
+|---|---|---|
+| [`2026-05-22-rtest-ci-appserver-migration.md`](plans/2026-05-22-rtest-ci-appserver-migration.md) | `chore/rtest-ci-appserver-migration` | Flip 4 Linux workflows from `runs-on: ubuntu-latest` to `runs-on: [self-hosted, linux, x64, appserver]`. `audio-uat.yml` (Windows) stays. Advisory-mode CI; no branch-protection change. Mark verifies first run before merge. |
+
 ---
 
 ## Active in-progress
