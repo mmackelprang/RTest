@@ -62,6 +62,14 @@ Consumed from the cast/BT research arc per embedded-audio-engineering prioritiza
 
 **Phase 3+ ideas remain in research** until Phase 1+2 measurement points the finger.
 
+### Active follow-up arc — BT clock-skew "underwater" audio (selected 2026-05-22)
+
+PR #400's observability surfaced 217–391 ppm clock skew between the BT phone clock and the local speaker clock during BT → Cast playback — ~10–20× over BT A2DP spec. The skew is unfixable in software (two crystals cannot be sync'd); the goal is to make the compensation that masks it less audible.
+
+- **Research**: [`docs/research/2026-05-22-bt-clock-skew-measurement.md`](research/2026-05-22-bt-clock-skew-measurement.md) — measurement methodology, architectural analysis, mitigation menu
+- **Plan in flight**: [`docs/plans/2026-05-22-bt-drift-compensation-refinement.md`](plans/2026-05-22-bt-drift-compensation-refinement.md) — Path C: smaller, more-frequent compensation events with cosine-ramp crossfade smoothing. Branch `feat/bt-drift-compensation-refinement`.
+- **Path D (variable-rate resampler) deferred** pending Path C subjective UAT result.
+
 ### CI infrastructure — RTest appserver runner migration
 
 Selected as a follow-up after the cast/BT Phase 1+2 tranche revealed that the project's monthly GH Actions minutes pool can be a real blocker. Plan modeled on FamilyWorkspace's 2026-05-17 migration which already provisioned the runner.
