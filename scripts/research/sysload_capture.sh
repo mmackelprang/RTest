@@ -4,7 +4,7 @@
 # Captures one row per second of:
 #   - CPU/IO/scheduler stats from vmstat 1
 #   - Per-device IO from iostat -x 1
-#   - Per-process CPU/IO for radio-api/radio-web/journald/sqlite3/sshd via pidstat
+#   - Per-process CPU/IO for Radio.API/Radio.Web/journald/sqlite3/sshd via pidstat
 #   - Per-second journald log-line count
 #   - Per-second active sshd session count
 #
@@ -25,6 +25,16 @@ DURATION="${1:-60}"
 if ! [[ "$DURATION" =~ ^[0-9]+$ ]]; then
   echo "Usage: $0 <duration_seconds>" >&2
   exit 2
+fi
+
+# Required external tools — fail fast with an actionable message.
+if ! command -v iostat >/dev/null 2>&1; then
+  echo "ERROR: iostat not found. Install sysstat: sudo apt install -y sysstat" >&2
+  exit 3
+fi
+if ! command -v vmstat >/dev/null 2>&1; then
+  echo "ERROR: vmstat not found (should be in procps)" >&2
+  exit 3
 fi
 
 TS="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -57,17 +67,22 @@ iostat -x 1 "$DURATION" 2>/dev/null \
 IOSTAT_PID=$!
 
 # Per-process CPU sampler — resolve PIDs each second; missing process == 0.
+# pgrep -x requires the comm to match exactly. The Radio.API/Radio.Web .NET
+# single-file binaries publish to /opt/radio-console/{api,web}/Radio.API and
+# Radio.Web; the kernel comm field is the basename ("Radio.API", "Radio.Web").
+# Without -x, pgrep also matches things like "Radio.API.Tests" if any process
+# happens to be running with that name.
 ( for ((i=0; i<DURATION; i++)); do
     api_cpu=0; web_cpu=0; jrn_cpu=0; sql_cpu=0; ssh_cpu=0
-    for pid in $(pgrep -d ' ' radio-api 2>/dev/null); do
+    for pid in $(pgrep -d ' ' -x Radio.API 2>/dev/null); do
       v=$(awk -v pid="$pid" '$1==pid {print $9}' <(top -b -n 1 -p "$pid" 2>/dev/null | tail -n +8))
       api_cpu=$(awk -v a="$api_cpu" -v b="${v:-0}" 'BEGIN{print a+b}')
     done
-    for pid in $(pgrep -d ' ' radio-web 2>/dev/null); do
+    for pid in $(pgrep -d ' ' -x Radio.Web 2>/dev/null); do
       v=$(awk -v pid="$pid" '$1==pid {print $9}' <(top -b -n 1 -p "$pid" 2>/dev/null | tail -n +8))
       web_cpu=$(awk -v a="$web_cpu" -v b="${v:-0}" 'BEGIN{print a+b}')
     done
-    for pid in $(pgrep -d ' ' systemd-journald 2>/dev/null); do
+    for pid in $(pgrep -d ' ' -x systemd-journald 2>/dev/null); do
       v=$(awk -v pid="$pid" '$1==pid {print $9}' <(top -b -n 1 -p "$pid" 2>/dev/null | tail -n +8))
       jrn_cpu=$(awk -v a="$jrn_cpu" -v b="${v:-0}" 'BEGIN{print a+b}')
     done
@@ -108,5 +123,15 @@ paste "$TMPDIR/meter.tsv" "$TMPDIR/vmstat.tsv" "$TMPDIR/iostat.tsv" "$TMPDIR/pid
       api=$11; web=$12; jrn=$13; sql=$14; ssd=$15
       print mono"\t"wall"\t"us"\t"sy"\t"id"\t"wa"\t"drd"\t"dwr"\t"logs"\t"ssh"\t"api"\t"web"\t"jrn"\t"sql"\t"ssd
     }' >> "$OUTFILE"
+
+# Sanity check — warn if the merge produced only the header. Most common cause
+# is a per-producer command failing silently (e.g., iostat missing, pgrep
+# matching no PIDs because the process names are wrong).
+LINES=$(wc -l < "$OUTFILE")
+if [ "$LINES" -lt 2 ]; then
+  echo "WARNING: sysload_capture produced only header (no data rows). Check producer output:" >&2
+  ls -la "$TMPDIR/" >&2
+  wc -l "$TMPDIR"/*.tsv >&2
+fi
 
 echo "$OUTFILE"
