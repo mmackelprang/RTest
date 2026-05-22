@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
 using Microsoft.Extensions.Logging;
+using Radio.Infrastructure.Audio.SoundFlow;
 using static Radio.Infrastructure.Platform.Bluetooth.Native.PipeWireNative;
 
 namespace Radio.Infrastructure.Platform.Bluetooth.Native;
@@ -35,6 +36,15 @@ internal sealed class PipeWireNativeStream : IDisposable
   private readonly ILogger _logger;
   private readonly bool _useRealtime;
   private readonly int _rtPriority;
+
+  // Variable-rate resampler (Path D — docs/plans/2026-05-22-bt-input-resampler.md).
+  // When non-null, OnProcess routes the input samples through libsamplerate
+  // before forwarding to _onAudioData, eliminating the time-domain duplication
+  // that BufferedSoundGenerator.CompensateClockDrift would otherwise apply.
+  // Owned by this stream — disposed in Dispose(). Only touched from the
+  // PipeWire thread loop callback, so no additional synchronization is needed.
+  private readonly SrcVariableResampler? _resampler;
+  private readonly float[]? _resampleOutputBuffer;
 
   private IntPtr _threadLoop;
   private IntPtr _stream;
@@ -102,10 +112,23 @@ internal sealed class PipeWireNativeStream : IDisposable
   /// SCHED_FIFO priority to apply when <paramref name="useRealtime"/> is true.
   /// Requires the host systemd unit to allow real-time scheduling.
   /// </param>
+  /// <param name="useResampler">
+  /// When true, captured samples are routed through a libsamplerate
+  /// variable-rate resampler before delivery, eliminating BT-vs-speaker
+  /// clock-skew time-domain duplication. See Path D in
+  /// <c>docs/plans/2026-05-22-bt-input-resampler.md</c>. Feature-flagged via
+  /// <c>BluetoothOptions.UseInputResampler</c>.
+  /// </param>
+  /// <param name="initialResamplerRatio">
+  /// Initial conversion ratio (output_rate / input_rate). Measured ~1.00025
+  /// (250 ppm consumer-faster) on the Ubuntu N100 + Pixel-class phone combo.
+  /// Ignored when <paramref name="useResampler"/> is false.
+  /// </param>
   public PipeWireNativeStream(
     uint targetNodeId, int sampleRate, int channels,
     AudioDataCallback onAudioData, ILogger logger,
-    bool useRealtime = false, int rtPriority = 50)
+    bool useRealtime = false, int rtPriority = 50,
+    bool useResampler = false, double initialResamplerRatio = 1.0)
   {
     _targetNodeId = targetNodeId;
     _sampleRate = sampleRate;
@@ -114,6 +137,19 @@ internal sealed class PipeWireNativeStream : IDisposable
     _logger = logger;
     _useRealtime = useRealtime;
     _rtPriority = rtPriority;
+
+    if (useResampler)
+    {
+      _resampler = new SrcVariableResampler(
+        logger, channels, initialResamplerRatio, SrcQuality.SincFastest);
+
+      // Resampler output buffer. Sized generously: PipeWire BT buffers are
+      // typically ~1024-2048 samples per OnProcess; ratio is ~1.00025 so
+      // worst-case stretch is well under 1 % extra. 8192 floats (~85 ms of
+      // stereo 48 kHz audio) is several × the largest plausible single
+      // callback, with headroom for SINC filter startup transients.
+      _resampleOutputBuffer = new float[8192];
+    }
 
     // Pin delegate to prevent GC
     _processDelegate = OnProcess;
@@ -403,7 +439,27 @@ internal sealed class PipeWireNativeStream : IDisposable
           }
         }
 
-        self._onAudioData(floatSamples, sampleCount);
+        if (self._resampler != null && self._resampleOutputBuffer != null)
+        {
+          // Path D: route input through libsamplerate variable-rate SRC,
+          // stretching the BT-clock stream to match the consumer clock.
+          // The output buffer is sized for ~85 ms of audio (8192 floats
+          // stereo 48 kHz); single OnProcess buffers are well under that.
+          var inputSpan = floatSamples.AsSpan(0, sampleCount);
+          var outputSpan = self._resampleOutputBuffer.AsSpan();
+          var framesOut = self._resampler.Process(inputSpan, outputSpan);
+          var samplesOut = framesOut * self._channels;
+          if (samplesOut > 0)
+          {
+            self._onAudioData(self._resampleOutputBuffer, samplesOut);
+          }
+        }
+        else
+        {
+          // Direct path: resampler disabled, BufferedSoundGenerator's
+          // CompensateClockDrift handles skew via time-domain duplication.
+          self._onAudioData(floatSamples, sampleCount);
+        }
       }
       finally
       {
@@ -452,6 +508,9 @@ internal sealed class PipeWireNativeStream : IDisposable
     }
     _disposed = true;
     Stop();
+    // Resampler dispose AFTER Stop() so the PW thread loop is no longer
+    // calling OnProcess by the time we free the native SRC state.
+    _resampler?.Dispose();
   }
 }
 #endif
