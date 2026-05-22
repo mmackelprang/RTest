@@ -131,6 +131,16 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     private int _driftCheckCount;
 
     /// <summary>
+    /// When true, the per-callback <see cref="CompensateClockDrift"/> entry is
+    /// short-circuited. Set by the BT capture path when the libsamplerate
+    /// input resampler is active (Path D — docs/plans/2026-05-22-bt-input-resampler.md),
+    /// to avoid double-correcting the clock skew (the resampler smoothly
+    /// stretches the input stream, so the legacy time-domain duplication would
+    /// over-correct and introduce its own artifacts).
+    /// </summary>
+    private readonly bool _disableDriftCompensation;
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="BufferedSoundGenerator{T}"/> class.
     /// </summary>
     /// <param name="engine">The SoundFlow audio engine.</param>
@@ -139,19 +149,28 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     /// <param name="maxBufferSeconds">Maximum seconds of audio to buffer (default: 4).</param>
     /// <param name="overflowStrategy">Strategy for buffer overflow (default: DropOldest).</param>
     /// <param name="metricsCollector">Optional metrics collector for pipeline metrics.</param>
+    /// <param name="disableDriftCompensation">
+    /// When true, the per-callback clock-drift compensation hook is disabled.
+    /// Set by the BT capture path when the libsamplerate input resampler is
+    /// active (Path D) to avoid double-correcting clock skew. Default false
+    /// preserves the pre-existing behaviour for all other generators (USB,
+    /// file, SDR, etc.).
+    /// </param>
     public BufferedSoundGenerator(
         AudioEngine engine,
         AudioFormat format,
         ILogger logger,
         float maxBufferSeconds = 4.0f,
         BufferOverflowStrategy overflowStrategy = BufferOverflowStrategy.DropOldest,
-        IMetricsCollector? metricsCollector = null)
+        IMetricsCollector? metricsCollector = null,
+        bool disableDriftCompensation = false)
         : base(engine, format)
     {
         GeneratorId = Interlocked.Increment(ref _nextGeneratorId);
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _metricsCollector = metricsCollector;
         _overflowStrategy = overflowStrategy;
+        _disableDriftCompensation = disableDriftCompensation;
 
         // Calculate max buffer based on output format
         // Note: This assumes input sample rate matches output sample rate.
@@ -170,8 +189,9 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         }
 
         _logger.LogInformation(
-            "BufferedSoundGenerator #{GeneratorId} created: Type={Type}, OutputSampleRate={SampleRate}Hz, OutputChannels={Channels}, MaxBufferSamples={MaxBuffer}, Strategy={Strategy}",
-            GeneratorId, typeof(T).Name, format.SampleRate, format.Channels, _maxBufferSamples, _overflowStrategy);
+            "BufferedSoundGenerator #{GeneratorId} created: Type={Type}, OutputSampleRate={SampleRate}Hz, OutputChannels={Channels}, MaxBufferSamples={MaxBuffer}, Strategy={Strategy}, DriftCompensation={Drift}",
+            GeneratorId, typeof(T).Name, format.SampleRate, format.Channels, _maxBufferSamples, _overflowStrategy,
+            _disableDriftCompensation ? "disabled" : "enabled");
     }
 
     /// <summary>
@@ -419,7 +439,15 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         // read position by one frame of audio. This duplicates the last frame,
         // which is inaudible at the sub-millisecond scale but prevents the buffer
         // from draining to zero and causing full underruns (silence gaps).
-        if (samplesWritten == buffer.Length && _overflowStrategy == BufferOverflowStrategy.DropOldest)
+        //
+        // Path D (docs/plans/2026-05-22-bt-input-resampler.md): when the BT
+        // input is going through libsamplerate, the resampler smoothly stretches
+        // the producer stream to match the consumer rate — there's no per-call
+        // drift to compensate, and running the legacy duplication on top would
+        // over-correct. Callers opt out via the ctor's disableDriftCompensation.
+        if (!_disableDriftCompensation
+            && samplesWritten == buffer.Length
+            && _overflowStrategy == BufferOverflowStrategy.DropOldest)
         {
             CompensateClockDrift(channels);
         }

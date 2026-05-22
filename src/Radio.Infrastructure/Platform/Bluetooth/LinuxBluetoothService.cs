@@ -1192,7 +1192,11 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
 
         var generator = new BufferedSoundGenerator<float>(
           engine, format, _logger, maxBufferSeconds: 4.0f,
-          metricsCollector: _metricsCollector);
+          metricsCollector: _metricsCollector,
+          // Path D: when the libsamplerate resampler is doing the work,
+          // disable the legacy CompensateClockDrift hook to avoid
+          // double-correcting the clock skew.
+          disableDriftCompensation: _options.UseInputResampler);
 
         StartCaptureSubprocess(generator, format, nodeName, nodeSerial);
 
@@ -1690,7 +1694,12 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
         (samples, count) => generator.AddSamples(samples.AsSpan(0, count)),
         _logger,
         _options.UseRealtimeCaptureThread,
-        _options.RealtimeCaptureThreadPriority);
+        _options.RealtimeCaptureThreadPriority,
+        // Path D (docs/plans/2026-05-22-bt-input-resampler.md): variable-rate
+        // libsamplerate resampler eliminates the BT-vs-speaker clock-skew
+        // duplication. Default true; flip via BluetoothOptions.UseInputResampler.
+        useResampler: _options.UseInputResampler,
+        initialResamplerRatio: _options.InputResamplerInitialRatio);
       _nativeStream.Start();
       _logger.LogInformation(
         "Started PipeWire native capture (target node serial {Serial}, node name {Node})",
