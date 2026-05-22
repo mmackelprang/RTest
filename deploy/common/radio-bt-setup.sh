@@ -67,6 +67,23 @@ verify_wp_configs() {
   else
     log "WARNING: $missing WP bluetooth config(s) missing — BT audio may not work correctly"
   fi
+
+  # main.lua.d rules — restore-stream exclusion for BT (Path B prevention).
+  # If this rule is missing, restore-stream may auto-route BT to default sink
+  # on reconnect, producing dual audio paths.
+  local main_dir="/etc/wireplumber/main.lua.d"
+  local main_missing=0
+  for f in 41-disable-bt-input-restore-target.lua; do
+    if [[ ! -f "$main_dir/$f" ]]; then
+      log "WARNING: Missing WP main config: $main_dir/$f"
+      main_missing=$((main_missing + 1))
+    fi
+  done
+  if [[ $main_missing -eq 0 ]]; then
+    log "WP main configs: OK (1/1 present)"
+  else
+    log "WARNING: $main_missing WP main config(s) missing — BT may dual-route via restore-stream"
+  fi
 }
 
 # If --patch-only, just verify patches and exit
