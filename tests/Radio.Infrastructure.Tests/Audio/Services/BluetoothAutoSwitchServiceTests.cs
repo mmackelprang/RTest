@@ -71,6 +71,12 @@ public class BluetoothAutoSwitchServiceTests
       }
     }
 
+    // Codec observability — added by PR #389 (codec observability); the FakeBluetoothService
+    // is unused by codec-related code paths, so a permanent null-impl is correct here.
+    public event EventHandler<A2dpCodecChangedEventArgs>? A2dpCodecChanged { add { } remove { } }
+    public Task<A2dpCodecInfo?> GetA2dpCodecInfoAsync(string deviceAddress, CancellationToken ct = default)
+      => Task.FromResult<A2dpCodecInfo?>(null);
+
     public Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default)
       => Task.FromResult(true);
     public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
