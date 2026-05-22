@@ -5,7 +5,9 @@ Wants=avahi-daemon.service radio-pipewire-access.service radio-bt-setup.service
 
 [Service]
 Type=simple
-User=radio
+# Runs as mmack (uid 1000) — needed for PipeWire access via XDG_RUNTIME_DIR=/run/user/1000.
+# Group=audio gives access to /dev/snd/* devices.
+User=mmack
 Group=audio
 WorkingDirectory=/opt/radio-console
 

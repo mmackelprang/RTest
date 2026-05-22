@@ -5,8 +5,9 @@ Requires=radio-api.service
 
 [Service]
 Type=simple
-User=radio
-Group=radio
+# Matches radio-api's user/group for consistent file ownership in /opt/radio-console.
+User=mmack
+Group=mmack
 WorkingDirectory=/opt/radio-console
 
 # === Complement to radio-api's pin to cores 2,3 (Plan D, 2026-05-22) ===
