@@ -25,9 +25,9 @@ public class BluetoothController : ControllerBase
 
   [HttpGet("status")]
   [ProducesResponseType(typeof(BluetoothStatusDto), StatusCodes.Status200OK)]
-  public ActionResult<BluetoothStatusDto> GetStatus()
+  public async Task<ActionResult<BluetoothStatusDto>> GetStatus()
   {
-    var status = BuildStatus();
+    var status = await BuildStatusAsync();
     return Ok(status);
   }
 
@@ -50,7 +50,7 @@ public class BluetoothController : ControllerBase
       return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to start Bluetooth adapter" });
     }
 
-    return Ok(BuildStatus());
+    return Ok(await BuildStatusAsync());
   }
 
   [HttpPost("stop")]
@@ -58,7 +58,7 @@ public class BluetoothController : ControllerBase
   public async Task<ActionResult<BluetoothStatusDto>> StopAsync()
   {
     await _bluetoothService.StopAsync();
-    return Ok(BuildStatus());
+    return Ok(await BuildStatusAsync());
   }
 
   [HttpPost("discovery/start")]
@@ -92,7 +92,7 @@ public class BluetoothController : ControllerBase
       return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to pair device" });
     }
 
-    return Ok(BuildStatus());
+    return Ok(await BuildStatusAsync());
   }
 
   [HttpPost("unpair")]
@@ -110,7 +110,7 @@ public class BluetoothController : ControllerBase
       return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to unpair device" });
     }
 
-    return Ok(BuildStatus());
+    return Ok(await BuildStatusAsync());
   }
 
   [HttpPost("accept")]
@@ -128,7 +128,7 @@ public class BluetoothController : ControllerBase
       return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to accept connection" });
     }
 
-    return Ok(BuildStatus());
+    return Ok(await BuildStatusAsync());
   }
 
   [HttpPost("connect")]
@@ -146,7 +146,7 @@ public class BluetoothController : ControllerBase
       return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to connect to device" });
     }
 
-    return Ok(BuildStatus());
+    return Ok(await BuildStatusAsync());
   }
 
   [HttpPost("disconnect")]
@@ -162,32 +162,55 @@ public class BluetoothController : ControllerBase
     {
       await _bluetoothService.DisconnectAsync();
     }
-    return Ok(BuildStatus());
+    return Ok(await BuildStatusAsync());
   }
 
   [HttpPost("cancel-reconnect")]
   [ProducesResponseType(typeof(BluetoothStatusDto), StatusCodes.Status200OK)]
-  public ActionResult<BluetoothStatusDto> CancelReconnect()
+  public async Task<ActionResult<BluetoothStatusDto>> CancelReconnect()
   {
     _bluetoothService.CancelReconnection();
-    return Ok(BuildStatus());
+    return Ok(await BuildStatusAsync());
   }
 
-  private BluetoothStatusDto BuildStatus()
+  private async Task<BluetoothStatusDto> BuildStatusAsync()
   {
-    return new BluetoothStatusDto
+    var connected = _bluetoothService.ConnectedDevice;
+    var dto = new BluetoothStatusDto
     {
       IsAvailable = _bluetoothService.IsAvailable,
       State = _bluetoothService.State.ToString(),
       IsDiscovering = _bluetoothService.IsDiscovering,
-      ConnectedDevice = _bluetoothService.ConnectedDevice != null
-        ? MapDevice(_bluetoothService.ConnectedDevice)
-        : null,
+      ConnectedDevice = connected != null ? MapDevice(connected) : null,
       PairedDevices = _bluetoothService.PairedDevices?.Select(MapDevice).ToList() ?? new List<BluetoothDeviceDto>(),
       DiscoveredDevices = _bluetoothService.DiscoveredDevices?.Select(MapDevice).ToList() ?? new List<BluetoothDeviceDto>(),
       IsReconnecting = _bluetoothService.IsReconnecting,
       LastDisconnectReason = _bluetoothService.LastDisconnectReason?.ToString()
     };
+
+    // Plan C / FM-BT-6 — populate negotiated A2DP codec when a transport is
+    // attached. GetA2dpCodecInfoAsync is null-safe (returns null if no
+    // transport, or on D-Bus read failure).
+    if (connected != null)
+    {
+      try
+      {
+        var codec = await _bluetoothService.GetA2dpCodecInfoAsync(connected.Address, HttpContext.RequestAborted);
+        if (codec != null)
+        {
+          dto.CodecName = codec.CodecName;
+          dto.SampleRateHz = codec.SampleRateHz;
+          dto.Bitpool = codec.BitpoolOrNull;
+        }
+      }
+      catch (Exception ex)
+      {
+        // Codec is diagnostic only — never fail the status read because of it.
+        _logger.LogDebug(ex, "Failed to read A2DP codec for {Address}", connected.Address);
+      }
+    }
+
+    return dto;
   }
 
   private static BluetoothDeviceDto MapDevice(BluetoothDeviceInfo device)

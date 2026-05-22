@@ -277,6 +277,15 @@ internal sealed class WindowsBluetoothService : IBluetoothService
     public BluetoothDisconnectReason? LastDisconnectReason => null;
     public BluetoothPipelineStatus PipelineStatus => BluetoothPipelineStatus.Inactive;
 
+    // A2DP codec observability — Windows path uses AudioPlaybackConnection (WinRT),
+    // which does NOT surface a codec ID. Stub returns null; the event is declared
+    // for interface conformance but never raised under WINDOWS_TARGET.
+#pragma warning disable CS0067
+    public event EventHandler<A2dpCodecChangedEventArgs>? A2dpCodecChanged;
+#pragma warning restore CS0067
+    public Task<A2dpCodecInfo?> GetA2dpCodecInfoAsync(string deviceAddress, CancellationToken ct = default)
+      => Task.FromResult<A2dpCodecInfo?>(null);
+
     private void CheckState(object? state)
     {
         try

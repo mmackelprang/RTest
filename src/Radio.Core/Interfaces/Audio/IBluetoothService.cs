@@ -173,6 +173,19 @@ public interface IBluetoothService : IAsyncDisposable
   /// Gets the current health status of the Bluetooth audio pipeline.
   /// </summary>
   BluetoothPipelineStatus PipelineStatus { get; }
+
+  /// <summary>
+  /// Gets the currently-negotiated A2DP codec info for the device. Returns null
+  /// if no transport is active or the codec is not yet known.
+  /// </summary>
+  Task<A2dpCodecInfo?> GetA2dpCodecInfoAsync(string deviceAddress, CancellationToken ct = default);
+
+  /// <summary>
+  /// Raised when the negotiated A2DP codec changes (on connect, or if BlueZ
+  /// re-negotiates mid-session). Subscribers should refresh any cached codec
+  /// state.
+  /// </summary>
+  event EventHandler<A2dpCodecChangedEventArgs>? A2dpCodecChanged;
 }
 
 /// <summary>

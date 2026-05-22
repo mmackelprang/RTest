@@ -858,6 +858,13 @@ public class BluetoothStatusDto
   public List<BluetoothDeviceDto> DiscoveredDevices { get; set; } = [];
   public bool IsReconnecting { get; set; }
   public string? LastDisconnectReason { get; set; }
+
+  // A2DP codec observability (Plan C / FM-BT-6) — mirrors Radio.API.Models
+  // BluetoothStatusDto. Null when no device is connected or the negotiated codec
+  // is not yet known.
+  public string? CodecName { get; set; }
+  public int? SampleRateHz { get; set; }
+  public int? Bitpool { get; set; }
 }
 
 public class BluetoothDeviceDto
