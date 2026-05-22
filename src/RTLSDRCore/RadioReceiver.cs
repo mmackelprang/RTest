@@ -978,6 +978,13 @@ namespace RTLSDRCore;
                       e.Samples.Length);
               }
           }
+          catch (ObjectDisposedException)
+          {
+              // Queue was disposed during shutdown race — producer and
+              // disposer ran out of order. Drop the batch silently.
+              // (Must precede InvalidOperationException — ODE derives from it.)
+              Logger.Debug("DSP processing queue disposed while enqueuing — shutdown race");
+          }
           catch (InvalidOperationException)
           {
               // Queue has been marked as complete (shutdown)
@@ -1005,6 +1012,15 @@ namespace RTLSDRCore;
           catch (OperationCanceledException)
           {
               // Normal shutdown
+          }
+          catch (ObjectDisposedException)
+          {
+              // Shutdown race: Dispose() on another thread tore down
+              // _processingQueue (or its underlying CTS) before this
+              // consumer noticed CompleteAdding/Cancel. Treat as a
+              // clean exit — letting this escape would unhandle on the
+              // background thread and crash the host (e.g. test runner).
+              Logger.Debug("DSP processing queue disposed during shutdown — exiting loop");
           }
           Logger.Information("DSP processing thread stopped");
       }

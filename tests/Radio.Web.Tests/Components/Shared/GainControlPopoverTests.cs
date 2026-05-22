@@ -141,7 +141,7 @@ public class GainControlPopoverTests : TestContext
   }
 
   [Fact]
-  public void AutoPill_Click_FiresOnAutoToggled()
+  public async Task AutoPill_Click_FiresOnAutoToggled()
   {
     var toggled = false;
     var cut = RenderComponent<GainControlPopover>(parameters => parameters
@@ -151,7 +151,14 @@ public class GainControlPopoverTests : TestContext
       .Add(p => p.IsAuto, false)
       .Add(p => p.OnAutoToggled, () => { toggled = true; }));
 
-    cut.Find(".gain-popover-auto").Click();
+    // Component handler is `async Task HandleAutoToggleAsync() => await
+    // OnAutoToggled.InvokeAsync();` — `toggled` is set INSIDE the awaited
+    // continuation. bUnit's sync Click() waits on the dispatch task, but on
+    // slower CI runners the OnInitializedAsync hub-connect attempt can leave
+    // the dispatcher queue non-empty, so the callback's continuation can lag
+    // behind the assertion. Route the click through cut.InvokeAsync so the
+    // full handler chain runs on the renderer's dispatcher and we await it.
+    await cut.InvokeAsync(() => cut.Find(".gain-popover-auto").Click());
 
     Assert.True(toggled);
   }

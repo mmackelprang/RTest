@@ -2827,18 +2827,49 @@ body {
 .sleep-screen-glow {
   position: absolute;
   inset: 0;
+  /* Glow softened to 5 % (was 12 %) to match the dimmer clock color below —
+     a brighter glow against a dim clock reads as a halo around an absent
+     element. The radial position drifts in lock-step with the clock cluster
+     via the .sleep-screen-drift wrapper's transform, so the visual relationship
+     between focal point and the element being highlighted stays intact. */
   background: radial-gradient(
     circle at center,
-    color-mix(in srgb, var(--signal-amber) 12%, transparent),
+    color-mix(in srgb, var(--signal-amber) 5%, transparent),
     transparent 60%
   );
   pointer-events: none;
 }
 
+/* Anti-burn-in drift wrapper (Sleep.razor):
+   The C# component sets --sleep-shift-x / --sleep-shift-y inline every 60 s.
+   We translate the cluster (clock + art + track text) by those values and
+   ease the transition over 3 s so the eye reads it as a slow glide. transform
+   composes nicely with the flex centering on the parent — the offsets are
+   relative to the centered position, not absolute, so we never need to know
+   the actual rendered size of the children. */
+.sleep-screen-drift {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  transform: translate(var(--sleep-shift-x, 0px), var(--sleep-shift-y, 0px));
+  transition: transform 3s cubic-bezier(0.4, 0.0, 0.2, 1);
+  /* Honors the user's reduced-motion preference — burn-in mitigation is still
+     achieved by the position jumps (each new offset is a different pixel
+     region), but without the visible glide animation. */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sleep-screen-drift { transition: none; }
+}
+
 .sleep-screen-art {
   width: 160px;
   height: 160px;
-  opacity: 0.4;
+  /* Dropped from 0.4 → 0.15 in line with the dimmer clock — see the comment
+     on .sleep-screen-clock below. The pale image at this opacity still reads
+     as "currently playing" cue without contributing emissive pixels. */
+  opacity: 0.15;
   object-fit: cover;
   border-radius: 8px;
   /* Sit above the radial glow but below the clock — the glow already implies
@@ -2851,8 +2882,15 @@ body {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   font-size: 96px;
-  color: var(--signal-amber);
-  text-shadow: 0 0 24px color-mix(in srgb, var(--signal-amber) 50%, transparent);
+  /* Dimmed to ~35 % amber + dropped the bright halo. This page is parked on
+     the kiosk for hours overnight; running a full-saturation amber at 96 px
+     in a fixed position was the burn-in worry the user flagged. The drift
+     wrapper handles position rotation; this rule handles brightness. We use
+     color-mix against the background (#050507) rather than rgba so the LED
+     glyphs end up an actual dim-amber pixel value rather than a translucent
+     one — matters for subpixel anti-aliasing on the kiosk's IPS panel. */
+  color: color-mix(in srgb, var(--signal-amber) 35%, #050507);
+  text-shadow: 0 0 12px color-mix(in srgb, var(--signal-amber) 15%, transparent);
   letter-spacing: 0.02em;
   /* Block-level so the radial glow doesn't clip descenders on the colon
      glyph. (Was a DSEG14 quirk before the PR #371 hot-fix; Orbitron has

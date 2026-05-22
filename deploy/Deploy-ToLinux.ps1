@@ -143,7 +143,16 @@ Write-Host "  Build complete (API: $apiSize, Web: $webSize)" -ForegroundColor Gr
 # --- Step 2: Stop services ---
 if (-not $NoRestart) {
   Write-Host "[2/4] Stopping services and kiosk browser..." -ForegroundColor Yellow
-  ssh $SshTarget "sudo systemctl stop radio-web 2>/dev/null; sudo systemctl stop radio-api 2>/dev/null; pkill -f 'chrome.*kiosk' 2>/dev/null; true"
+  # On stop: (a) wipe Chrome's HTTP disk cache so the relaunch can't serve a stale
+  # HTML/CSS bundle from ~/.cache/google-chrome that pre-dates the deploy — we hit
+  # that during the Radzen theme migration, where Chrome served the old MudBlazor
+  # markup despite radio-web returning the new HTML. (b) remove Chrome's Singleton
+  # lock files; pkill -f sends SIGTERM/SIGKILL without the orderly shutdown that
+  # cleans those up, so on the next relaunch Chrome would see "another instance"
+  # and refuse to start. Profile data (bookmarks, localStorage, kiosk extension
+  # state) stays intact — we only target Cache/, Code Cache/, and the Singleton*
+  # lock files at the profile root.
+  ssh $SshTarget "sudo systemctl stop radio-web 2>/dev/null; sudo systemctl stop radio-api 2>/dev/null; pkill -f 'chrome.*kiosk' 2>/dev/null; rm -rf ~/.cache/google-chrome/Default/Cache ~/.cache/google-chrome/Default/Code\ Cache 2>/dev/null; rm -f ~/.config/google-chrome/Singleton* 2>/dev/null; true"
 } else {
   Write-Host "[2/4] Skipping service stop (--NoRestart)" -ForegroundColor DarkGray
 }
@@ -213,7 +222,14 @@ Write-Host "  Files synced" -ForegroundColor Green
 # --- Step 4: Restart ---
 if (-not $NoRestart) {
   Write-Host "[4/4] Starting services..." -ForegroundColor Yellow
-  ssh $SshTarget "sudo systemctl daemon-reload && sudo systemctl start radio-api && sudo systemctl start radio-web"
+  # Start radio-api first, then poll until its visualization hub is reachable, then
+  # start radio-web. systemctl returns when the process is launched (not when its
+  # listener is bound) so the previous "api && web" parallel-launch always lost the
+  # race on slow boxes: radio-web's SignalR client tried to negotiate before radio-api
+  # had opened port 5000, the initial StartAsync threw, and the visualization hub stayed
+  # dead for the lifetime of the radio-web process (pre-Fix A behavior). The poll below
+  # — ~10s max — eliminates the race regardless of hub-service code resilience.
+  ssh $SshTarget "sudo systemctl daemon-reload && sudo systemctl start radio-api && for i in `$(seq 1 20); do curl -sf -X POST http://localhost:5000/hubs/visualization/negotiate?negotiateVersion=1 >/dev/null 2>&1 && break || sleep 0.5; done && sudo systemctl start radio-web"
   Start-Sleep -Seconds 2
 
   $apiStatus = ssh $SshTarget "systemctl is-active radio-api 2>/dev/null"

@@ -32,26 +32,40 @@
      aria-label="Tap to wake">
   <div class="sleep-screen-glow" aria-hidden="true"></div>
 
-  @if (_hasValidAlbumArt && !string.IsNullOrEmpty(_albumArtUrl))
-  {
-    <img class="sleep-screen-art" src="@_albumArtUrl" alt="" />
-  }
+  @*
+    Anti-burn-in container — translates the clock cluster off-center by a small,
+    slowly-drifting offset so any given pixel never sees the LED segments for
+    more than ~60 s before they shift. The dim color rules live in CSS so
+    `.sleep-screen.is-dimmed` (always on while we're on /sleep) governs both
+    opacity AND glow without touching layout. The shift uses CSS variables
+    --sleep-shift-x / --sleep-shift-y set inline from C# (`_shiftStyle`); CSS
+    handles the 3-second eased transition between values. Album art and track
+    metadata ride along inside this wrapper so the whole composition drifts as
+    one block — keeps the visual relationship intact and avoids the "scattered
+    elements" look you'd get if only the clock moved.
+  *@
+  <div class="sleep-screen-drift" style="@_shiftStyle">
+    @if (_hasValidAlbumArt && !string.IsNullOrEmpty(_albumArtUrl))
+    {
+      <img class="sleep-screen-art" src="@_albumArtUrl" alt="" />
+    }
 
-  @* PR A #16: dropped redundant `.font-led` class; that rule is scoped
-     to `.cluster-value .font-led` and never matched on `/sleep`. The
-     LED font is set directly via `.sleep-screen-clock`. *@
-  <div class="sleep-screen-clock">@_clockText</div>
+    @* PR A #16: dropped redundant `.font-led` class; that rule is scoped
+       to `.cluster-value .font-led` and never matched on `/sleep`. The
+       LED font is set directly via `.sleep-screen-clock`. *@
+    <div class="sleep-screen-clock">@_clockText</div>
 
-  @if (!string.IsNullOrEmpty(_title))
-  {
-    <div class="sleep-screen-track">
-      <span class="sleep-screen-title">@_title</span>
-      @if (!string.IsNullOrEmpty(_artist) && _artist != "--")
-      {
-        <span class="sleep-screen-artist">@_artist</span>
-      }
-    </div>
-  }
+    @if (!string.IsNullOrEmpty(_title))
+    {
+      <div class="sleep-screen-track">
+        <span class="sleep-screen-title">@_title</span>
+        @if (!string.IsNullOrEmpty(_artist) && _artist != "--")
+        {
+          <span class="sleep-screen-artist">@_artist</span>
+        }
+      </div>
+    }
+  </div>
 
   <div class="sleep-screen-hint">tap anywhere to wake</div>
 </div>
@@ -63,7 +77,26 @@
   private string? _albumArtUrl;
   private bool _hasValidAlbumArt;
   private Timer? _clockTimer;
+  private Timer? _driftTimer;
   private bool _disposed;
+
+  // Anti-burn-in drift state. The clock cluster is positioned via CSS transform —
+  // we expose the offset to CSS through two custom properties on the wrapper
+  // (--sleep-shift-x / --sleep-shift-y) and let CSS handle the 3-second easing
+  // between values. We pick fresh offsets every ~60 s from a deterministic but
+  // varied PRNG (we don't need crypto here, just non-repeating offsets within the
+  // safe area). The safe area is ±20% of the viewport — wide enough that the
+  // hot pixels never overlap across two consecutive positions, tight enough that
+  // the composition stays roughly centered on the 1920×720 kiosk panel.
+  //
+  // 20 % of 1920 = ±384 px horizontal play; 20 % of 720 = ±144 px vertical play.
+  // The DSEG/Orbitron clock at 96 px is ~360 px wide, so we still leave a safe
+  // margin to the bezel on the worst case offset.
+  private const int DriftIntervalSeconds = 60;
+  private const double DriftAmplitudeX = 0.20; // fraction of viewport width
+  private const double DriftAmplitudeY = 0.20; // fraction of viewport height
+  private string _shiftStyle = "--sleep-shift-x: 0px; --sleep-shift-y: 0px;";
+  private readonly Random _drift = new();
 
   protected override async Task OnInitializedAsync()
   {
@@ -82,6 +115,22 @@
         StateHasChanged();
       });
     }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+
+    // Pick a fresh drift offset immediately so the clock doesn't sit at dead-center
+    // for the first 60 seconds, then re-pick on every interval. The CSS-side
+    // transition (3 s ease-in-out) smooths each jump so the user sees a slow glide
+    // rather than a teleport — important for the "drift" feel rather than "twitch".
+    PickNewDriftOffset();
+    _driftTimer = new Timer(_ =>
+    {
+      if (_disposed) return;
+      _ = InvokeAsync(() =>
+      {
+        if (_disposed) return;
+        PickNewDriftOffset();
+        StateHasChanged();
+      });
+    }, null, TimeSpan.FromSeconds(DriftIntervalSeconds), TimeSpan.FromSeconds(DriftIntervalSeconds));
 
     AudioState.NowPlayingChanged += OnNowPlayingChanged;
     AudioState.SleepStateChanged += OnSleepStateChanged;
@@ -103,6 +152,23 @@
   }
 
   private void UpdateClock() => _clockText = DateTime.Now.ToString("HH:mm");
+
+  /// <summary>
+  /// Picks a new random offset within ±DriftAmplitude × viewport from center and
+  /// writes it into <c>_shiftStyle</c>. CSS handles the eased transition between
+  /// the previous offset and this one. Viewport is the kiosk-fixed 1920×720
+  /// (matches App.razor's <c>&lt;meta name="viewport"&gt;</c>); on the slim chance
+  /// the page renders at a different size, the CSS variables clamp via
+  /// <c>min(...)</c> in the transform calc so we never push the clock off-screen.
+  /// </summary>
+  private void PickNewDriftOffset()
+  {
+    // NextDouble returns [0,1); shift into [-1,1) then scale.
+    var dx = ((_drift.NextDouble() * 2.0) - 1.0) * DriftAmplitudeX * 1920.0;
+    var dy = ((_drift.NextDouble() * 2.0) - 1.0) * DriftAmplitudeY * 720.0;
+    _shiftStyle = string.Create(System.Globalization.CultureInfo.InvariantCulture,
+      $"--sleep-shift-x: {dx:F0}px; --sleep-shift-y: {dy:F0}px;");
+  }
 
   private void ApplyNowPlaying(NowPlayingDto? dto)
   {
@@ -187,6 +253,11 @@
     {
       await _clockTimer.DisposeAsync();
       _clockTimer = null;
+    }
+    if (_driftTimer != null)
+    {
+      await _driftTimer.DisposeAsync();
+      _driftTimer = null;
     }
   }
 }

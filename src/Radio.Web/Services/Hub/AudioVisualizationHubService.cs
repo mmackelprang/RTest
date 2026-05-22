@@ -17,6 +17,11 @@ public class AudioVisualizationHubService : IAsyncDisposable
   private HubConnection? _hubConnection;
   private bool _isDisposed;
   private readonly SemaphoreSlim _connectionLock = new(1, 1);
+  // Background retry loop activated when the initial StartAsync fails (radio-api not yet
+  // listening at deploy time, network blip, etc.). The loop polls until the hub is
+  // reachable, then replays any subscriptions the UI recorded while we were offline.
+  // Mirrors the pattern in GvBridgeHubService.
+  private CancellationTokenSource? _retryCts;
 
   // Events that components can subscribe to
   public event Func<SpectrumDataDto, Task>? OnSpectrumData;
@@ -46,9 +51,21 @@ public class AudioVisualizationHubService : IAsyncDisposable
     await _connectionLock.WaitAsync(cancellationToken);
     try
     {
+      // Already connected — nothing to do.
+      if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
+      {
+        _logger.LogDebug("Hub connection already initialized and connected");
+        return;
+      }
+      // Connection object exists but isn't connected. Two cases:
+      //   1. SignalR's WithAutomaticReconnect is between attempts — let it run.
+      //   2. The initial StartAsync threw and left _hubConnection in Disconnected state.
+      //      In that case our background _retryCts loop is already polling — also leave it alone.
+      // Either way, returning is safe: when the connection eventually establishes, the
+      // Reconnected handler (or the retry-loop success path) replays subscriptions.
       if (_hubConnection != null)
       {
-        _logger.LogDebug("Hub connection already initialized");
+        _logger.LogDebug("Hub connection initialization already in progress (State={State})", _hubConnection.State);
         return;
       }
 
@@ -154,8 +171,21 @@ public class AudioVisualizationHubService : IAsyncDisposable
         return Task.CompletedTask;
       };
 
-      await _hubConnection.StartAsync(cancellationToken);
-      _logger.LogInformation("Connected to AudioVisualizationHub");
+      try
+      {
+        await _hubConnection.StartAsync(cancellationToken);
+        _logger.LogInformation("Connected to AudioVisualizationHub");
+      }
+      catch (Exception ex)
+      {
+        // Initial connect failed — typically because radio-api hasn't bound port 5000 yet
+        // during a fresh deploy (api + web start in parallel; web is faster). Don't leave
+        // _hubConnection in a dead non-null state that future StartAsync calls skip past;
+        // instead, kick off a background retry loop and leave the connection object intact
+        // so once it succeeds, the existing event handlers are wired up.
+        _logger.LogWarning(ex, "Initial connection to AudioVisualizationHub at {Url} failed — retrying in background", hubUrl);
+        StartRetryLoop(hubUrl);
+      }
     }
     finally
     {
@@ -163,8 +193,81 @@ public class AudioVisualizationHubService : IAsyncDisposable
     }
   }
 
+  /// <summary>
+  /// Polls the hub until <see cref="HubConnection.StartAsync(CancellationToken)"/> succeeds,
+  /// then replays any group subscriptions the UI recorded while we were offline. Cancelled
+  /// on Stop/Dispose. Idempotent — cancels any previous loop before starting a new one.
+  /// Mirrors <c>GvBridgeHubService.StartRetryLoop</c>.
+  /// </summary>
+  private void StartRetryLoop(string hubUrl)
+  {
+    _retryCts?.Cancel();
+    _retryCts?.Dispose();
+    _retryCts = new CancellationTokenSource();
+    var ct = _retryCts.Token;
+    _ = Task.Run(async () =>
+    {
+      // Tight at first (the typical case is a 1–3 second startup race), then back off.
+      var delays = new[] { 2, 5, 10, 30 };
+      for (var attempt = 0; !ct.IsCancellationRequested; attempt++)
+      {
+        var delaySec = delays[Math.Min(attempt, delays.Length - 1)];
+        try { await Task.Delay(TimeSpan.FromSeconds(delaySec), ct); }
+        catch (OperationCanceledException) { return; }
+
+        if (ct.IsCancellationRequested || _hubConnection == null) return;
+        if (_hubConnection.State != HubConnectionState.Disconnected) return; // someone else got it
+
+        try
+        {
+          await _hubConnection.StartAsync(ct);
+          _logger.LogInformation("Connected to AudioVisualizationHub at {Url} (retry #{Attempt})", hubUrl, attempt + 1);
+          await ReplaySubscriptionsAsync();
+          return;
+        }
+        catch (Exception ex)
+        {
+          _logger.LogDebug(ex, "Visualization hub retry #{Attempt} failed", attempt + 1);
+        }
+      }
+    }, ct);
+  }
+
+  /// <summary>
+  /// Invokes each recorded subscription against the hub after a successful retry-loop
+  /// connect. The <c>Reconnected</c> event already handles this for post-disconnect
+  /// recoveries, but doesn't fire for an initial-connect-after-retry, so we do it here.
+  /// </summary>
+  private async Task ReplaySubscriptionsAsync()
+  {
+    string[] subscriptions;
+    lock (_subscriptionLock) { subscriptions = _activeSubscriptions.ToArray(); }
+    foreach (var group in subscriptions)
+    {
+      try
+      {
+        await _hubConnection!.InvokeAsync($"SubscribeTo{group}");
+        _logger.LogDebug("Replayed subscription to {Group} after initial connect", group);
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Failed to replay subscription to {Group} after initial connect", group);
+      }
+    }
+    if (subscriptions.Length > 0)
+    {
+      _logger.LogInformation("Replayed {Count} visualization subscription(s) after initial connect", subscriptions.Length);
+    }
+  }
+
   public async Task StopAsync()
   {
+    // Cancel any in-flight initial-connect retry first so it doesn't race with the
+    // explicit stop below.
+    _retryCts?.Cancel();
+    _retryCts?.Dispose();
+    _retryCts = null;
+
     await _connectionLock.WaitAsync();
     try
     {
@@ -180,18 +283,25 @@ public class AudioVisualizationHubService : IAsyncDisposable
     }
   }
 
-  // Subscription methods
+  // Subscription methods.
+  //
+  // Subscribe semantics: record the desired subscription FIRST, then invoke the RPC if
+  // the hub is connected. The recorded set is the source of truth for what the UI wants;
+  // the RPC is the live binding. When the hub is offline (initial deploy race, or a
+  // mid-session drop), the retry/reconnect paths replay the recorded set on connect.
+  // This is why _activeSubscriptions.Add() runs unconditionally — losing the intent would
+  // mean the user's mode picker selection silently fails to take effect after recovery.
   public async Task SubscribeToSpectrumAsync()
   {
+    lock (_subscriptionLock) { _activeSubscriptions.Add("Spectrum"); }
     if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
       await _hubConnection.InvokeAsync("SubscribeToSpectrum");
-      lock (_subscriptionLock) { _activeSubscriptions.Add("Spectrum"); }
       _logger.LogDebug("Subscribed to spectrum updates");
     }
     else
     {
-      _logger.LogWarning("Cannot subscribe to spectrum: Hub not connected");
+      _logger.LogDebug("Recorded spectrum subscription intent; will activate when hub connects");
     }
   }
 
@@ -207,15 +317,15 @@ public class AudioVisualizationHubService : IAsyncDisposable
 
   public async Task SubscribeToLevelsAsync()
   {
+    lock (_subscriptionLock) { _activeSubscriptions.Add("Levels"); }
     if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
       await _hubConnection.InvokeAsync("SubscribeToLevels");
-      lock (_subscriptionLock) { _activeSubscriptions.Add("Levels"); }
       _logger.LogDebug("Subscribed to level updates");
     }
     else
     {
-      _logger.LogWarning("Cannot subscribe to levels: Hub not connected");
+      _logger.LogDebug("Recorded levels subscription intent; will activate when hub connects");
     }
   }
 
@@ -231,15 +341,15 @@ public class AudioVisualizationHubService : IAsyncDisposable
 
   public async Task SubscribeToWaveformAsync()
   {
+    lock (_subscriptionLock) { _activeSubscriptions.Add("Waveform"); }
     if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
       await _hubConnection.InvokeAsync("SubscribeToWaveform");
-      lock (_subscriptionLock) { _activeSubscriptions.Add("Waveform"); }
       _logger.LogDebug("Subscribed to waveform updates");
     }
     else
     {
-      _logger.LogWarning("Cannot subscribe to waveform: Hub not connected");
+      _logger.LogDebug("Recorded waveform subscription intent; will activate when hub connects");
     }
   }
 
@@ -255,20 +365,20 @@ public class AudioVisualizationHubService : IAsyncDisposable
 
   public async Task SubscribeToAllAsync()
   {
+    lock (_subscriptionLock)
+    {
+      _activeSubscriptions.Add("Spectrum");
+      _activeSubscriptions.Add("Levels");
+      _activeSubscriptions.Add("Waveform");
+    }
     if (_hubConnection != null && _hubConnection.State == HubConnectionState.Connected)
     {
       await _hubConnection.InvokeAsync("SubscribeToAll");
-      lock (_subscriptionLock)
-      {
-        _activeSubscriptions.Add("Spectrum");
-        _activeSubscriptions.Add("Levels");
-        _activeSubscriptions.Add("Waveform");
-      }
       _logger.LogDebug("Subscribed to all visualization updates");
     }
     else
     {
-      _logger.LogWarning("Cannot subscribe to all: Hub not connected");
+      _logger.LogDebug("Recorded all-visualization subscription intent; will activate when hub connects");
     }
   }
 
@@ -359,6 +469,10 @@ public class AudioVisualizationHubService : IAsyncDisposable
     }
 
     _isDisposed = true;
+
+    _retryCts?.Cancel();
+    _retryCts?.Dispose();
+    _retryCts = null;
 
     if (_hubConnection != null)
     {
