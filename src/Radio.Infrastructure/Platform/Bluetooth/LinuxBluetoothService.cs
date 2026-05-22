@@ -157,6 +157,10 @@ internal sealed class LinuxBluetoothService : IBluetoothService
   public event EventHandler<TimeSpan>? PositionChanged;
   public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged;
   public event EventHandler? CaptureStreamRecovered;
+  // Raised via RaiseCaptureStreamStalled() invoked by BluetoothCaptureWatchdog (Task 4).
+#pragma warning disable CS0067
+  public event EventHandler<CaptureStreamStalledEventArgs>? CaptureStreamStalled;
+#pragma warning restore CS0067
   public float? DeviceVolume { get; private set; }
 
   private async Task MonitorBtPipelineAsync(CancellationToken cancellationToken)

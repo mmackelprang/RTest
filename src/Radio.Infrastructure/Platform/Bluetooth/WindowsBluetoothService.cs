@@ -241,6 +241,7 @@ internal sealed class WindowsBluetoothService : IBluetoothService
 #endif
 
     public event EventHandler? CaptureStreamRecovered { add { } remove { } }
+    public event EventHandler<CaptureStreamStalledEventArgs>? CaptureStreamStalled { add { } remove { } }
 
     public Task SetDeviceVolumeAsync(float volume)
     {

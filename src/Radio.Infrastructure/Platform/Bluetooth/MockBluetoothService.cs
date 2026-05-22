@@ -42,6 +42,7 @@ public sealed class MockBluetoothService : IBluetoothService
         public event EventHandler<TimeSpan>? PositionChanged { add { } remove { } }
         public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged { add { } remove { } }
         public event EventHandler? CaptureStreamRecovered { add { } remove { } }
+        public event EventHandler<CaptureStreamStalledEventArgs>? CaptureStreamStalled { add { } remove { } }
         public float? DeviceVolume => null;
         public Task SetDeviceVolumeAsync(float volume) => Task.CompletedTask;
         public Task NextTrackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
