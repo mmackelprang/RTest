@@ -241,6 +241,14 @@ internal sealed class WindowsBluetoothService : IBluetoothService
 #endif
 
     public event EventHandler? CaptureStreamRecovered { add { } remove { } }
+    // Windows never raises CaptureNodeAvailable — Windows audio routing is platform-managed
+    // and there is no PipeWire-style capture-node concept on this TFM.
+    public event EventHandler<CaptureNodeAvailableEventArgs>? CaptureNodeAvailable { add { } remove { } }
+
+    // Windows always reports the capture node as available — the platform manages routing
+    // through WASAPI/A2DP sink, no probe equivalent is needed.
+    public Task<bool> IsCaptureNodeAvailableAsync(string deviceAddress, CancellationToken cancellationToken = default)
+        => Task.FromResult(true);
 
     public Task SetDeviceVolumeAsync(float volume)
     {

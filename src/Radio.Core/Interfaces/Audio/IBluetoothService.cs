@@ -96,6 +96,13 @@ public interface IBluetoothService : IAsyncDisposable
   /// </summary>
   void StopAudioCapture();
 
+  /// <summary>
+  /// Probes whether a PipeWire BT capture node currently exists for the given device.
+  /// On non-Linux platforms returns true (audio routing is platform-managed).
+  /// Does not acquire the capture — pure probe.
+  /// </summary>
+  Task<bool> IsCaptureNodeAvailableAsync(string deviceAddress, CancellationToken cancellationToken = default);
+
   /// <summary>Event raised when adapter state changes.</summary>
   event EventHandler<BluetoothAdapterStateChangedEventArgs>? StateChanged;
 
@@ -113,6 +120,13 @@ public interface IBluetoothService : IAsyncDisposable
   /// Subscribers should re-attach the capture generator to their audio mixer.
   /// </summary>
   event EventHandler? CaptureStreamRecovered;
+
+  /// <summary>
+  /// Raised when a previously-absent PipeWire BT capture node has appeared for the
+  /// connected device. Fires once per appearance; subscribers wishing to act repeatedly
+  /// must re-subscribe.
+  /// </summary>
+  event EventHandler<CaptureNodeAvailableEventArgs>? CaptureNodeAvailable;
 
   /// <summary>Event raised when playback metadata changes (Track, Artist, etc.).</summary>
   event EventHandler<BluetoothPlaybackMetadata>? MetadataChanged;
@@ -234,4 +248,20 @@ public class BluetoothVolumeChangedEventArgs : EventArgs
 {
   /// <summary>Normalized volume (0.0 to 1.0).</summary>
   public required float Volume { get; init; }
+}
+
+/// <summary>
+/// Event args for <see cref="IBluetoothService.CaptureNodeAvailable"/> — fired when a
+/// previously-absent PipeWire BT capture node appears.
+/// </summary>
+public class CaptureNodeAvailableEventArgs : EventArgs
+{
+  /// <summary>The Bluetooth address of the device whose capture node became available.</summary>
+  public required string DeviceAddress { get; init; }
+
+  /// <summary>
+  /// PipeWire object.serial of the discovered node, or 0 if not known to the probe.
+  /// (The probe path may not always extract a serial; the full acquisition path does.)
+  /// </summary>
+  public required int PipeWireSerial { get; init; }
 }

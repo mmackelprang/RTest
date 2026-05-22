@@ -157,6 +157,9 @@ internal sealed class LinuxBluetoothService : IBluetoothService
   public event EventHandler<TimeSpan>? PositionChanged;
   public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged;
   public event EventHandler? CaptureStreamRecovered;
+#pragma warning disable CS0067 // CaptureNodeAvailable is raised by the periodic rescan loop (Task 3)
+  public event EventHandler<CaptureNodeAvailableEventArgs>? CaptureNodeAvailable;
+#pragma warning restore CS0067
   public float? DeviceVolume { get; private set; }
 
   private async Task MonitorBtPipelineAsync(CancellationToken cancellationToken)
@@ -1215,32 +1218,9 @@ internal sealed class LinuxBluetoothService : IBluetoothService
 
     try
     {
-      var psi = new ProcessStartInfo
+      var output = await RunPwCliListNodesAsync(cancellationToken);
+      if (output == null)
       {
-        FileName = "pw-cli",
-        Arguments = "list-objects",
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        UseShellExecute = false,
-        CreateNoWindow = true
-      };
-
-      using var process = Process.Start(psi);
-      if (process == null)
-      {
-        _logger.LogWarning("Failed to start pw-cli process");
-        return (null, 0, 0);
-      }
-
-      var output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
-      var stderr = await process.StandardError.ReadToEndAsync(cancellationToken);
-      await process.WaitForExitAsync(cancellationToken);
-
-      if (process.ExitCode != 0 || output.Length == 0)
-      {
-        _logger.LogDebug("pw-cli exit={ExitCode}, stdout={StdoutLen}b, stderr={Stderr}",
-          process.ExitCode, output.Length,
-          stderr.Length > 200 ? stderr[..200] : stderr.TrimEnd());
         return (null, 0, 0);
       }
 
@@ -1260,6 +1240,72 @@ internal sealed class LinuxBluetoothService : IBluetoothService
     }
 
     return (null, 0, 0);
+  }
+
+  /// <summary>
+  /// Runs `pw-cli list-objects` and returns the stdout payload, or null on failure.
+  /// Shared by the probe (<see cref="IsCaptureNodeAvailableAsync"/>) and the full
+  /// acquisition path (<see cref="FindPipeWireBluetoothNodeAsync"/>).
+  /// </summary>
+  private async Task<string?> RunPwCliListNodesAsync(CancellationToken cancellationToken)
+  {
+    var psi = new ProcessStartInfo
+    {
+      FileName = "pw-cli",
+      Arguments = "list-objects",
+      RedirectStandardOutput = true,
+      RedirectStandardError = true,
+      UseShellExecute = false,
+      CreateNoWindow = true
+    };
+
+    using var process = Process.Start(psi);
+    if (process == null)
+    {
+      _logger.LogWarning("Failed to start pw-cli process");
+      return null;
+    }
+
+    var output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
+    var stderr = await process.StandardError.ReadToEndAsync(cancellationToken);
+    await process.WaitForExitAsync(cancellationToken);
+
+    if (process.ExitCode != 0 || output.Length == 0)
+    {
+      _logger.LogDebug("pw-cli exit={ExitCode}, stdout={StdoutLen}b, stderr={Stderr}",
+        process.ExitCode, output.Length,
+        stderr.Length > 200 ? stderr[..200] : stderr.TrimEnd());
+      return null;
+    }
+
+    return output;
+  }
+
+  /// <summary>
+  /// Probes whether a PipeWire bluez_input source node exists for the given BT address.
+  /// Pure probe — does NOT acquire the capture. Returns false on transient errors (treated
+  /// as not-available so the caller falls through to the deferred event subscription).
+  /// </summary>
+  public async Task<bool> IsCaptureNodeAvailableAsync(string deviceAddress, CancellationToken cancellationToken = default)
+  {
+    var prefix = $"bluez_input.{deviceAddress.Replace(':', '_')}";
+    try
+    {
+      var output = await RunPwCliListNodesAsync(cancellationToken);
+      if (output == null)
+      {
+        return false;
+      }
+
+      var (nodeName, _, _) = ParsePwCliOutputForBtNode(output, prefix);
+      return nodeName != null;
+    }
+    catch (OperationCanceledException) { throw; }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "IsCaptureNodeAvailableAsync probe failed (treating as not-available)");
+      return false;
+    }
   }
 
   /// <summary>

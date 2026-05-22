@@ -80,6 +80,8 @@ internal sealed class NullBluetoothService : IBluetoothService
   public event EventHandler<TimeSpan>? PositionChanged { add { } remove { } }
   public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged { add { } remove { } }
   public event EventHandler? CaptureStreamRecovered { add { } remove { } }
+  // Null service never raises CaptureNodeAvailable.
+  public event EventHandler<CaptureNodeAvailableEventArgs>? CaptureNodeAvailable { add { } remove { } }
   public float? DeviceVolume => null;
   public Task SetDeviceVolumeAsync(float volume) => Task.CompletedTask;
   public Task NextTrackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
@@ -143,6 +145,10 @@ internal sealed class NullBluetoothService : IBluetoothService
   }
 
   public void StopAudioCapture() { }
+
+  // Null service has no capture node to probe — return false (treat as not-available).
+  public Task<bool> IsCaptureNodeAvailableAsync(string deviceAddress, CancellationToken cancellationToken = default)
+      => Task.FromResult(false);
 
   public ValueTask DisposeAsync()
   {
