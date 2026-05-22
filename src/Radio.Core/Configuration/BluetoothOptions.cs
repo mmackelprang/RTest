@@ -75,6 +75,26 @@ public class BluetoothOptions
 
   /// <summary>Maximum number of reconnection attempts before giving up.</summary>
   public int MaxReconnectAttempts { get; set; } = 20;
+
+  /// <summary>
+  /// Threshold in milliseconds for the OnProcess-interval watchdog (FM-BT-3 detection).
+  /// When wall-clock now minus the last OnProcess timestamp exceeds this for
+  /// <see cref="ConsecutiveStalledChecks"/> consecutive watchdog ticks, the watchdog
+  /// raises CaptureStreamStalled. Set to 0 to disable the watchdog entirely.
+  /// </summary>
+  public int OnProcessStallThresholdMs { get; set; } = 5000;
+
+  /// <summary>
+  /// How often the watchdog checks the OnProcess timestamp (milliseconds).
+  /// </summary>
+  public int WatchdogTickIntervalMs { get; set; } = 2000;
+
+  /// <summary>
+  /// Number of consecutive watchdog ticks past <see cref="OnProcessStallThresholdMs"/>
+  /// required before the watchdog raises the stall event. Default 3 (~6 s @ 2 s tick)
+  /// to suppress single transient hiccups.
+  /// </summary>
+  public int ConsecutiveStalledChecks { get; set; } = 3;
 }
 
 /// <summary>
