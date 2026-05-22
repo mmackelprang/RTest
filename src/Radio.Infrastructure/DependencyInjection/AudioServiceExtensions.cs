@@ -121,15 +121,54 @@ public static class AudioServiceExtensions
     services.AddSingleton<Platform.Bluetooth.BluetoothMgmtMonitor>();
     services.AddHostedService(sp => sp.GetRequiredService<Platform.Bluetooth.BluetoothMgmtMonitor>());
 
-    // Register Bluetooth service factory + service
+#if !WINDOWS_TARGET
+    // On Linux, register LinuxBluetoothService as the concrete type so the
+    // BluetoothCaptureWatchdog (FM-BT-3) can resolve it to read the native
+    // PipeWire OnProcess timestamp. The IBluetoothService below resolves the
+    // same instance via GetService<LinuxBluetoothService>() to avoid creating
+    // two competing instances of the BT service.
+    if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+          System.Runtime.InteropServices.OSPlatform.Linux))
+    {
+      services.AddSingleton<Platform.Bluetooth.LinuxBluetoothService>(sp =>
+      {
+        var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+        var options = sp.GetRequiredService<IOptions<BluetoothOptions>>();
+        var deviceManager = sp.GetRequiredService<IAudioDeviceManager>() as SoundFlowDeviceManager;
+        var metricsCollector = sp.GetService<IMetricsCollector>();
+        var playbackService = sp.GetService<Audio.SoundFlow.SoundFlowPlaybackService>();
+        var mgmtMonitor = sp.GetService<Platform.Bluetooth.BluetoothMgmtMonitor>();
+        return new Platform.Bluetooth.LinuxBluetoothService(
+          loggerFactory.CreateLogger<Platform.Bluetooth.LinuxBluetoothService>(),
+          options, deviceManager, metricsCollector, playbackService, mgmtMonitor);
+      });
+    }
+#endif
+
+    // Register Bluetooth service. On Linux + enabled, reuse the LinuxBluetoothService
+    // concrete singleton registered above; otherwise fall back to the factory.
     services.AddSingleton<IBluetoothService>(sp =>
     {
+#if !WINDOWS_TARGET
+      var linuxService = sp.GetService<Platform.Bluetooth.LinuxBluetoothService>();
+      if (linuxService != null)
+      {
+        return linuxService;
+      }
+#endif
       var logger = sp.GetRequiredService<ILoggerFactory>();
       var options = sp.GetRequiredService<IOptions<BluetoothOptions>>();
       var deviceManager = sp.GetRequiredService<IAudioDeviceManager>() as SoundFlowDeviceManager;
       var metricsCollector = sp.GetService<IMetricsCollector>();
       return Platform.Bluetooth.BluetoothServiceFactory.Create(sp, options, logger, deviceManager, metricsCollector);
     });
+
+    // FM-BT-3 watchdog (Linux-only; constructor receives null on Windows/Mock
+    // and logs once before exiting). Uses the AddSingleton + AddHostedService
+    // factory pattern so the concrete type is resolvable from DI (per MEMORY
+    // "DI / Hosted Service Gotchas").
+    services.AddSingleton<BluetoothCaptureWatchdog>();
+    services.AddHostedService(sp => sp.GetRequiredService<BluetoothCaptureWatchdog>());
 
     // Register album art cache service (singleton for disk-backed image cache)
     services.AddSingleton<AlbumArtCacheService>();

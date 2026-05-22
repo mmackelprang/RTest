@@ -157,11 +157,43 @@ internal sealed class LinuxBluetoothService : IBluetoothService
   public event EventHandler<TimeSpan>? PositionChanged;
   public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged;
   public event EventHandler? CaptureStreamRecovered;
-  // Raised via RaiseCaptureStreamStalled() invoked by BluetoothCaptureWatchdog (Task 4).
-#pragma warning disable CS0067
   public event EventHandler<CaptureStreamStalledEventArgs>? CaptureStreamStalled;
-#pragma warning restore CS0067
   public float? DeviceVolume { get; private set; }
+
+  /// <summary>
+  /// Snapshot for BluetoothCaptureWatchdog: connected device address + elapsed
+  /// milliseconds since the native capture stream's last OnProcess callback.
+  /// Returns null when no native capture stream is active (no connected device,
+  /// or capture intentionally stopped, or running pw-record fallback).
+  /// </summary>
+  internal (string Address, long ElapsedMs)? GetCaptureStreamSnapshot()
+  {
+    var stream = _nativeStream;
+    var device = ConnectedDevice;
+    if (stream == null || device == null)
+    {
+      return null;
+    }
+    return (device.Address, stream.MillisecondsSinceLastOnProcess());
+  }
+
+  /// <summary>
+  /// Invoked by BluetoothCaptureWatchdog when a stall is confirmed. Raises
+  /// <see cref="CaptureStreamStalled"/> and increments the detection metric.
+  /// </summary>
+  internal void RaiseCaptureStreamStalled(string address, long elapsedMs, int consecutiveChecks)
+  {
+    _metricsCollector?.Increment("bluetooth.capture_stall_detected_total");
+    _logger.LogWarning(
+      "BluetoothCaptureWatchdog: stall detected for {Address}, elapsed {Elapsed}ms after {N} consecutive checks",
+      address, elapsedMs, consecutiveChecks);
+    CaptureStreamStalled?.Invoke(this, new CaptureStreamStalledEventArgs
+    {
+      DeviceAddress = address,
+      ElapsedMsSinceLastCallback = elapsedMs,
+      ConsecutiveStalledChecks = consecutiveChecks,
+    });
+  }
 
   private async Task MonitorBtPipelineAsync(CancellationToken cancellationToken)
   {
