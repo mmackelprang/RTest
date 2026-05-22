@@ -57,6 +57,7 @@ $RepoRoot = (Resolve-Path "$PSScriptRoot\..").Path
 $ApiPublishDir = Join-Path $RepoRoot "publish\$Runtime\api"
 $WebPublishDir = Join-Path $RepoRoot "publish\$Runtime\web"
 $SshTarget = "${TargetUser}@${TargetHost}"
+$ApiPort = if ($env:RADIO_API_PORT) { $env:RADIO_API_PORT } else { "5000" }
 
 # Determine which config directory to use based on runtime
 $configDir = switch ($Runtime) {
@@ -64,9 +65,31 @@ $configDir = switch ($Runtime) {
   "linux-x64"   { "debian-x64" }
 }
 
+# Capture the local git SHA so we can (a) bake it into the assembly via
+# -p:SourceRevisionId and (b) verify the deployed binary reports the same SHA
+# from /api/health/version after restart. Guarded so a missing `git` (or a
+# non-git checkout) just downgrades to "unknown" instead of crashing on a
+# .Trim() against $null.
+$ExpectedSha = "unknown"
+try {
+  $gitOutput = & git -C $RepoRoot rev-parse HEAD 2>$null
+  if ($gitOutput) {
+    $trimmed = ([string]$gitOutput).Trim()
+    if (-not [string]::IsNullOrWhiteSpace($trimmed)) {
+      $ExpectedSha = $trimmed
+    }
+  }
+} catch {
+  # git not installed or repo unreadable — fall through with "unknown"
+}
+if ($ExpectedSha -eq "unknown") {
+  Write-Host "WARNING: could not read git HEAD; deploy verification will be skipped" -ForegroundColor Yellow
+}
+
 Write-Host "=== Radio Console Deploy ===" -ForegroundColor Cyan
 Write-Host "Target:  ${SshTarget}:${TargetPath}"
 Write-Host "Runtime: $Runtime"
+Write-Host "Commit:  $ExpectedSha"
 Write-Host ""
 
 # --- Step 1: Build both projects ---
@@ -76,6 +99,7 @@ $commonArgs = @(
   "--configuration", "Release",
   "--runtime", $Runtime,
   "-f", "net10.0",
+  "-p:SourceRevisionId=$ExpectedSha",
   "-v", "quiet"
 )
 
@@ -196,13 +220,50 @@ if (-not $NoRestart) {
   $webStatus = ssh $SshTarget "systemctl is-active radio-web 2>/dev/null"
 
   if ($apiStatus -eq "active" -and $webStatus -eq "active") {
+    # Verify the running API reports the SHA we just built. Poll because the
+    # service takes a few seconds to bind its HTTP listener after start.
+    if ($ExpectedSha -ne "unknown") {
+      Write-Host "  Verifying deployed commit via /api/health/version..." -ForegroundColor DarkGray
+      $verifyUrl = "http://${TargetHost}:${ApiPort}/api/health/version"
+      $deployedSha = $null
+      for ($attempt = 1; $attempt -le 10; $attempt++) {
+        try {
+          $resp = Invoke-RestMethod -Uri $verifyUrl -TimeoutSec 3 -ErrorAction Stop
+          if ($resp -and $resp.gitSha) {
+            $deployedSha = $resp.gitSha
+            break
+          }
+        } catch {
+          # Service not ready yet; retry
+        }
+        Start-Sleep -Seconds 2
+      }
+
+      if (-not $deployedSha) {
+        Write-Host ""
+        Write-Host "=== DEPLOY VERIFICATION FAILED ===" -ForegroundColor Red
+        Write-Host "  Could not reach $verifyUrl after 10 attempts."
+        Write-Host "  Check: ssh $SshTarget 'journalctl -u radio-api -n 50'"
+        exit 1
+      } elseif ($deployedSha -ne $ExpectedSha) {
+        Write-Host ""
+        Write-Host "=== DEPLOY VERIFICATION FAILED ===" -ForegroundColor Red
+        Write-Host "  Expected commit: $ExpectedSha"
+        Write-Host "  Running commit:  $deployedSha"
+        Write-Host "  The deployed binary does not match the local HEAD."
+        exit 1
+      } else {
+        Write-Host "  Verified: API is running commit $($deployedSha.Substring(0, 7))" -ForegroundColor Green
+      }
+    }
+
     # Relaunch kiosk browser with a fresh single tab
     Write-Host "  Relaunching kiosk browser..." -ForegroundColor DarkGray
     ssh $SshTarget "DISPLAY=:0 nohup google-chrome --kiosk --noerrdialogs --disable-infobars --disable-session-crashed-bubble --remote-debugging-port=9223 http://localhost:5002 &>/dev/null &"
 
     Write-Host ""
     Write-Host "=== Deploy successful ===" -ForegroundColor Green
-    Write-Host "API: http://${TargetHost}:5000"
+    Write-Host "API: http://${TargetHost}:${ApiPort}"
     Write-Host "Web: http://${TargetHost}:5002"
   } else {
     Write-Host ""
@@ -210,6 +271,7 @@ if (-not $NoRestart) {
     Write-Host "  radio-api: $apiStatus"
     Write-Host "  radio-web: $webStatus"
     Write-Host "Check: ssh $SshTarget 'journalctl -u radio-api -u radio-web -n 20'"
+    exit 1
   }
 } else {
   Write-Host "[4/4] Skipping restart (--NoRestart)" -ForegroundColor DarkGray

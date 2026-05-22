@@ -51,15 +51,25 @@ done
 SSH_TARGET="$PI_USER@$PI_HOST"
 API_PUBLISH_DIR="$REPO_ROOT/publish/linux-arm64/api"
 WEB_PUBLISH_DIR="$REPO_ROOT/publish/linux-arm64/web"
+API_PORT="${RADIO_API_PORT:-5000}"
+
+# Capture the local git SHA so we can (a) bake it into the assembly via
+# -p:SourceRevisionId and (b) verify the deployed binary reports the same SHA
+# from /api/health/version after restart.
+EXPECTED_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+if [ "$EXPECTED_SHA" = "unknown" ]; then
+  echo "WARNING: could not read git HEAD; deploy verification will be skipped" >&2
+fi
 
 echo "=== Radio Console Deploy ==="
 echo "Target: $SSH_TARGET:$PI_PATH"
+echo "Commit: $EXPECTED_SHA"
 echo ""
 
 # Step 1: Build both projects
 echo "[1/4] Building for linux-arm64..."
 
-COMMON_ARGS="--configuration Release --runtime linux-arm64 -f net10.0"
+COMMON_ARGS="--configuration Release --runtime linux-arm64 -f net10.0 -p:SourceRevisionId=$EXPECTED_SHA"
 
 if [ "$QUICK" = true ]; then
   COMMON_ARGS="$COMMON_ARGS --no-self-contained"
@@ -119,9 +129,42 @@ if [ "$RESTART" = true ]; then
   WEB_STATUS=$(ssh "$SSH_TARGET" "systemctl is-active radio-web 2>/dev/null" || true)
 
   if [ "$API_STATUS" = "active" ] && [ "$WEB_STATUS" = "active" ]; then
+    # Verify the running API reports the SHA we just built. Poll because the
+    # service takes a few seconds to bind its HTTP listener after start.
+    if [ "$EXPECTED_SHA" != "unknown" ]; then
+      echo "  Verifying deployed commit via /api/health/version..."
+      VERIFY_URL="http://$PI_HOST:$API_PORT/api/health/version"
+      DEPLOYED_SHA=""
+      for attempt in 1 2 3 4 5 6 7 8 9 10; do
+        DEPLOYED_SHA=$(curl -sf --max-time 3 "$VERIFY_URL" 2>/dev/null \
+          | sed -n 's/.*"gitSha"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+        if [ -n "$DEPLOYED_SHA" ]; then
+          break
+        fi
+        sleep 2
+      done
+
+      if [ -z "$DEPLOYED_SHA" ]; then
+        echo ""
+        echo "=== DEPLOY VERIFICATION FAILED ==="
+        echo "  Could not reach $VERIFY_URL after 10 attempts."
+        echo "  Check: ssh $SSH_TARGET 'journalctl -u radio-api -n 50'"
+        exit 1
+      elif [ "$DEPLOYED_SHA" != "$EXPECTED_SHA" ]; then
+        echo ""
+        echo "=== DEPLOY VERIFICATION FAILED ==="
+        echo "  Expected commit: $EXPECTED_SHA"
+        echo "  Running commit:  $DEPLOYED_SHA"
+        echo "  The deployed binary does not match the local HEAD."
+        exit 1
+      else
+        echo "  Verified: API is running commit ${DEPLOYED_SHA:0:7}"
+      fi
+    fi
+
     echo ""
     echo "=== Deploy successful ==="
-    echo "API: http://$PI_HOST:5000"
+    echo "API: http://$PI_HOST:$API_PORT"
     echo "Web: http://$PI_HOST:5002"
   else
     echo ""
@@ -129,6 +172,7 @@ if [ "$RESTART" = true ]; then
     echo "  radio-api: $API_STATUS"
     echo "  radio-web: $WEB_STATUS"
     echo "Check: ssh $SSH_TARGET 'journalctl -u radio-api -u radio-web -n 20'"
+    exit 1
   fi
 else
   echo "[4/4] Skipping restart (--no-restart)"

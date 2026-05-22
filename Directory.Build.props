@@ -19,4 +19,29 @@
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
+
+  <!-- Stamp the current git commit SHA into AssemblyInformationalVersion so the
+       /api/health/version endpoint (and deploy verification) can confirm exactly
+       which commit a running binary was built from. Deploy scripts pass
+       -p:SourceRevisionId=<sha> explicitly; this target is the fallback for
+       local builds. The .NET SDK appends +$(SourceRevisionId) to
+       InformationalVersion automatically when this property is set. -->
+  <Target Name="_StampGitCommitHash"
+          BeforeTargets="GetAssemblyVersion;GenerateNuspec;CoreCompile"
+          Condition="'$(SourceRevisionId)' == ''">
+    <Exec Command="git rev-parse HEAD"
+          ConsoleToMSBuild="true"
+          IgnoreExitCode="true"
+          EchoOff="true"
+          StandardOutputImportance="Low"
+          StandardErrorImportance="Low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitCommitHash" />
+      <Output TaskParameter="ExitCode" PropertyName="_GitExitCode" />
+    </Exec>
+    <PropertyGroup Condition="'$(_GitExitCode)' == '0' And '$(_GitCommitHash)' != ''">
+      <!-- Trim guards against stray newlines that some git/MSBuild combos emit;
+           an untrimmed value would embed whitespace in InformationalVersion. -->
+      <SourceRevisionId>$(_GitCommitHash.Trim())</SourceRevisionId>
+    </PropertyGroup>
+  </Target>
 </Project>

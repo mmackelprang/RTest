@@ -172,7 +172,7 @@ public class GainControlPopoverTests : TestContext
   }
 
   [Fact]
-  public void Slider_Input_FiresOnValueChanged_WhenNotAuto()
+  public async Task Slider_Input_FiresOnValueChanged_WhenNotAuto()
   {
     float? received = null;
     var cut = RenderComponent<GainControlPopover>(parameters => parameters
@@ -182,7 +182,14 @@ public class GainControlPopoverTests : TestContext
       .Add(p => p.CurrentValue, 1.0f)
       .Add(p => p.OnValueChanged, (float v) => { received = v; }));
 
-    cut.Find("input[type=range]").Input("0.75");
+    // Component handler is `async Task HandleSliderInput(...)` that awaits
+    // `OnValueChanged.InvokeAsync(...)` — `received` is set INSIDE the awaited
+    // continuation. bUnit's sync Input() waits on the dispatch task, but on
+    // slower CI runners the OnInitializedAsync hub-connect attempt can leave
+    // the dispatcher queue non-empty, so the callback's continuation can lag
+    // behind the assertion. Route the input through cut.InvokeAsync so the
+    // full handler chain runs on the renderer's dispatcher and we await it.
+    await cut.InvokeAsync(() => cut.Find("input[type=range]").Input("0.75"));
 
     Assert.NotNull(received);
     Assert.Equal(0.75f, received!.Value, precision: 2);
@@ -201,7 +208,7 @@ public class GainControlPopoverTests : TestContext
   }
 
   [Fact]
-  public void Reset_Click_FiresOnResetAndOnValueChangedWithOne()
+  public async Task Reset_Click_FiresOnResetAndOnValueChangedWithOne()
   {
     var resetFired = false;
     float? lastValue = null;
@@ -213,7 +220,15 @@ public class GainControlPopoverTests : TestContext
       .Add(p => p.OnReset, () => { resetFired = true; })
       .Add(p => p.OnValueChanged, (float v) => { lastValue = v; }));
 
-    cut.Find(".gain-popover-reset").Click();
+    // Component handler is `async Task HandleResetAsync()` that awaits
+    // `OnReset.InvokeAsync()` then `OnValueChanged.InvokeAsync(...)` — both
+    // callbacks set their flags INSIDE awaited continuations. bUnit's sync
+    // Click() waits on the dispatch task, but on slower CI runners the
+    // OnInitializedAsync hub-connect attempt can leave the dispatcher queue
+    // non-empty, so the callback continuations can lag behind the assertion.
+    // Route the click through cut.InvokeAsync so the full handler chain runs
+    // on the renderer's dispatcher and we await it.
+    await cut.InvokeAsync(() => cut.Find(".gain-popover-reset").Click());
 
     Assert.True(resetFired);
     Assert.Equal(1.0f, lastValue);
