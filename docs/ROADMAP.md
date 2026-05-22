@@ -39,9 +39,28 @@ Research arcs explore a problem space deeply enough that *if* the team decides t
 
 ## Planning queue (scoped, ready for implementation)
 
-*Empty.*
+### Cast/BT research — Phase 1 + Phase 2 (selected 2026-05-22)
 
-When a plan lands in [`docs/plans/`](plans/), reference it here with its target acceptance criteria, dependencies, and rough scope.
+Consumed from the cast/BT research arc per embedded-audio-engineering prioritization (transcript record). Sequenced and scoped in [`docs/plans/2026-05-22-cast-bt-phase-1-2-arc.md`](plans/2026-05-22-cast-bt-phase-1-2-arc.md).
+
+**Phase 1 — stop the bleeding** (3 plans, ~280 LOC; can run in any order or parallel):
+
+| Plan | Idea | Addresses | Branch |
+|---|---|---|---|
+| [`2026-05-22-bt-capture-watchdog.md`](plans/2026-05-22-bt-capture-watchdog.md) | #12 Watchdog on `OnProcess` interval | FM-BT-3 (known long-uptime quiescence bug) | `feat/bt-capture-watchdog` |
+| [`2026-05-22-bt-autoswitch-gate.md`](plans/2026-05-22-bt-autoswitch-gate.md) | #13 Gate `autoSwitchOnConnect` on PW node existence | FM-BT-1 (autoSwitch retries on missing PW node) | `feat/bt-autoswitch-gate` |
+| [`2026-05-22-bt-codec-observability.md`](plans/2026-05-22-bt-codec-observability.md) | #15 Surface negotiated codec + bitpool as observable metric | FM-BT-6 (codec quality degradation currently invisible) | `feat/bt-codec-observability` |
+
+**Phase 2 — isolate the audio path** (2 plans, ~165 LOC; ships immediately after Phase 1 completes; CPU affinity before PW event subscription):
+
+| Order | Plan | Idea | Addresses | Branch |
+|---|---|---|---|---|
+| 1 | [`2026-05-22-audio-thread-isolation.md`](plans/2026-05-22-audio-thread-isolation.md) | #9 Pin radio-api to dedicated CPU cores + SCHED_FIFO | FM2 + FM8 + FM-BT-11 (load contention) | `feat/audio-thread-isolation` |
+| 2 | [`2026-05-22-pw-event-subscription.md`](plans/2026-05-22-pw-event-subscription.md) | #14 Replace pw-cli scraping with PipeWire event subscription | FM-BT-1 + FM-BT-2 (eliminates scrape race) | `feat/pw-event-subscription` |
+
+**Shared scaffolding** (research-tier code in `scripts/research/`, declared per-plan in Task 0): `sysload_capture.sh`, `sysload_correlate.py`, `bt_stall_detect.py`, `bt_autoswitch_audit.py`, `bt_codec_observability_probe.sh`, `heavy_load_harness.sh`, `bt_pair_cycle_harness.sh`, plus the per-plan `*_compare.py` PASS/FAIL gates.
+
+**Phase 3+ ideas remain in research** until Phase 1+2 measurement points the finger.
 
 ---
 
