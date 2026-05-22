@@ -30,6 +30,37 @@ The application runs as two separate systemd services:
 `radio-web` has `Requires=radio-api.service` — stopping the API automatically stops the Web UI.
 Both services use `WorkingDirectory=/opt/radio-console` so relative paths (`./data`, `logs/`) resolve to the shared directories.
 
+### CPU affinity layout (added 2026-05-22, Plan D)
+
+Both production deployment targets (Ubuntu N100 `radio` and Raspberry Pi 5 `piradio`) have
+4 cores. The systemd units split them to keep audio paths isolated from the rest of the
+host workload:
+
+| Cores | Tenants |
+|---|---|
+| `0,1` | OS + `systemd-journald` + `sshd` + `radio-web` |
+| `2,3` | `radio-api` (BT capture, Cast encode, all audio paths) |
+
+`radio-api` also gets `Nice=-5`, `IOSchedulingClass=2 IOSchedulingPriority=2` (best-effort
+near-realtime), `LimitNICE=-5:0`, `LimitRTPRIO=99`, and `LimitMEMLOCK=infinity`. The RT
+limit allows the optional `BluetoothOptions.UseRealtimeCaptureThread` flag (default off)
+to bump the PipeWire capture thread to `SCHED_FIFO` priority 50 via `pthread_setschedparam`.
+
+Verify after deploy:
+
+```bash
+ssh mmack@radio "taskset -p \$(pgrep radio-api)"   # mask 0xC (cores 2,3)
+ssh mmack@radio "taskset -p \$(pgrep radio-web)"   # mask 0x3 (cores 0,1)
+ssh mmack@radio "ps -o pid,nice,comm \$(pgrep radio-api)"   # NI=-5
+ssh mmack@radio "sudo ionice -p \$(pgrep radio-api)"        # best-effort: prio 2
+ssh mmack@radio "cat /proc/\$(pgrep radio-api)/limits | grep RTPRIO"   # Max=99
+```
+
+If RotaryPhone is ever co-located on the same host (it is not currently — RotaryPhone runs
+as a separate Ubuntu service and is consumed by Radio.Web via REST), document its affinity
+layout in `D:\prj\RotaryPhone\docs\prompts\RADIO-CONSOLE-BT-AUDIO-BOUNDARY.md` to avoid
+double-pinning the audio cores.
+
 ### Audio Pipeline
 
 ```
