@@ -66,6 +66,15 @@ internal sealed class LinuxBluetoothService : IBluetoothService
   private int _pipelineRecoveryFailures;
   private bool _captureIntentionallyStopped;
 
+  // Periodic PW BT-node rescan loop (Plan B: BT autoswitch gate).
+  // The rescan polls `pw-cli list-objects` every CaptureNodeRescanIntervalMs and raises
+  // CaptureNodeAvailable for any node that transitioned from absent to present for the
+  // connected device. Lives until DisposeAsync or until no device is connected.
+  private CancellationTokenSource? _rescanCts;
+  private Task? _rescanTask;
+  private readonly HashSet<string> _knownNodeAddresses = new(StringComparer.OrdinalIgnoreCase);
+  private readonly object _knownNodesLock = new();
+
   public LinuxBluetoothService(
     ILogger logger,
     IOptions<BluetoothOptions> options,
@@ -157,9 +166,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService
   public event EventHandler<TimeSpan>? PositionChanged;
   public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged;
   public event EventHandler? CaptureStreamRecovered;
-#pragma warning disable CS0067 // CaptureNodeAvailable is raised by the periodic rescan loop (Task 3)
   public event EventHandler<CaptureNodeAvailableEventArgs>? CaptureNodeAvailable;
-#pragma warning restore CS0067
   public float? DeviceVolume { get; private set; }
 
   private async Task MonitorBtPipelineAsync(CancellationToken cancellationToken)
@@ -594,6 +601,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService
           _logger.LogInformation("Bluetooth device already connected: {DeviceName} ({Address})",
             device.Name, device.Address);
           _pipelineRecoveryFailures = 0;
+          EnsureRescanLoopRunning();
           DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = device });
         }
       }
@@ -630,6 +638,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService
         _ = SetDiscoverableAsync(false);
 
         _pipelineRecoveryFailures = 0;
+        EnsureRescanLoopRunning();
         DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = device });
       }
 
@@ -715,6 +724,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService
               _ = SetDiscoverableAsync(false);
 
               _pipelineRecoveryFailures = 0;
+              EnsureRescanLoopRunning();
               DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = updatedDevice });
             }
             else
@@ -737,6 +747,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService
 
               RecordDisconnectionMetrics();
               StopCaptureSubprocess();
+              StopRescanLoop();
               // Clean up media transport on disconnect
               _transportPropertiesWatcher?.Dispose();
               _transportPropertiesWatcher = null;
@@ -1305,6 +1316,94 @@ internal sealed class LinuxBluetoothService : IBluetoothService
     {
       _logger.LogDebug(ex, "IsCaptureNodeAvailableAsync probe failed (treating as not-available)");
       return false;
+    }
+  }
+
+  /// <summary>
+  /// Starts the periodic PW BT-node rescan loop if not already running. Idempotent —
+  /// safe to call from multiple DeviceConnected handlers.
+  /// </summary>
+  private void EnsureRescanLoopRunning()
+  {
+    if (_rescanTask != null && !_rescanTask.IsCompleted)
+    {
+      return;
+    }
+    _rescanCts = new CancellationTokenSource();
+    var token = _rescanCts.Token;
+    _rescanTask = Task.Run(() => RescanLoopAsync(token), token);
+  }
+
+  /// <summary>
+  /// Stops the rescan loop and clears the known-node-address cache.
+  /// Called from device-disconnect path and DisposeAsync.
+  /// </summary>
+  private void StopRescanLoop()
+  {
+    try
+    {
+      _rescanCts?.Cancel();
+    }
+    catch (ObjectDisposedException) { /* already torn down */ }
+    _rescanCts?.Dispose();
+    _rescanCts = null;
+    _rescanTask = null;
+    lock (_knownNodesLock)
+    {
+      _knownNodeAddresses.Clear();
+    }
+  }
+
+  /// <summary>
+  /// Periodic rescan loop. Polls IsCaptureNodeAvailableAsync against the currently-connected
+  /// device every <see cref="BluetoothOptions.CaptureNodeRescanIntervalMs"/>; raises
+  /// <see cref="CaptureNodeAvailable"/> on the absent→present transition.
+  /// </summary>
+  private async Task RescanLoopAsync(CancellationToken ct)
+  {
+    var interval = Math.Max(250, _options.CaptureNodeRescanIntervalMs);
+    while (!ct.IsCancellationRequested)
+    {
+      try
+      {
+        var connectedAddress = ConnectedDevice?.Address;
+        if (connectedAddress != null)
+        {
+          var available = await IsCaptureNodeAvailableAsync(connectedAddress, ct);
+          bool wasKnown;
+          lock (_knownNodesLock)
+          {
+            wasKnown = _knownNodeAddresses.Contains(connectedAddress);
+            if (available)
+            {
+              _knownNodeAddresses.Add(connectedAddress);
+            }
+            else
+            {
+              _knownNodeAddresses.Remove(connectedAddress);
+            }
+          }
+          if (available && !wasKnown)
+          {
+            _logger.LogInformation("PW capture node appeared for {Address}", connectedAddress);
+            _metricsCollector?.Increment("bluetooth.capture_node_appeared_total");
+            CaptureNodeAvailable?.Invoke(this, new CaptureNodeAvailableEventArgs
+            {
+              DeviceAddress = connectedAddress,
+              // Serial is filled by the full acquisition path; not needed for the gate decision.
+              PipeWireSerial = 0
+            });
+          }
+        }
+      }
+      catch (OperationCanceledException) { break; }
+      catch (Exception ex)
+      {
+        _logger.LogDebug(ex, "Rescan loop iteration failed");
+      }
+
+      try { await Task.Delay(interval, ct); }
+      catch (OperationCanceledException) { break; }
     }
   }
 
@@ -1965,6 +2064,8 @@ internal sealed class LinuxBluetoothService : IBluetoothService
     _pipelineMonitorCts?.Cancel();
     _pipelineMonitorCts?.Dispose();
     _pipelineMonitorCts = null;
+
+    StopRescanLoop();
 
     _reconnectionLoop?.Dispose();
     _reconnectionLoop = null;
