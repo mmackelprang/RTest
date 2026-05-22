@@ -96,6 +96,13 @@ public interface IBluetoothService : IAsyncDisposable
   /// </summary>
   void StopAudioCapture();
 
+  /// <summary>
+  /// Probes whether a PipeWire BT capture node currently exists for the given device.
+  /// On non-Linux platforms returns true (audio routing is platform-managed).
+  /// Does not acquire the capture — pure probe.
+  /// </summary>
+  Task<bool> IsCaptureNodeAvailableAsync(string deviceAddress, CancellationToken cancellationToken = default);
+
   /// <summary>Event raised when adapter state changes.</summary>
   event EventHandler<BluetoothAdapterStateChangedEventArgs>? StateChanged;
 
@@ -120,6 +127,13 @@ public interface IBluetoothService : IAsyncDisposable
   /// Subscribers should attempt recovery via the same path used for OnGeneratorStalled.
   /// </summary>
   event EventHandler<CaptureStreamStalledEventArgs>? CaptureStreamStalled;
+
+  /// <summary>
+  /// Raised when a previously-absent PipeWire BT capture node has appeared for the
+  /// connected device. Fires once per appearance; subscribers wishing to act repeatedly
+  /// must re-subscribe.
+  /// </summary>
+  event EventHandler<CaptureNodeAvailableEventArgs>? CaptureNodeAvailable;
 
   /// <summary>Event raised when playback metadata changes (Track, Artist, etc.).</summary>
   event EventHandler<BluetoothPlaybackMetadata>? MetadataChanged;
@@ -166,6 +180,19 @@ public interface IBluetoothService : IAsyncDisposable
   /// Gets the current health status of the Bluetooth audio pipeline.
   /// </summary>
   BluetoothPipelineStatus PipelineStatus { get; }
+
+  /// <summary>
+  /// Gets the currently-negotiated A2DP codec info for the device. Returns null
+  /// if no transport is active or the codec is not yet known.
+  /// </summary>
+  Task<A2dpCodecInfo?> GetA2dpCodecInfoAsync(string deviceAddress, CancellationToken ct = default);
+
+  /// <summary>
+  /// Raised when the negotiated A2DP codec changes (on connect, or if BlueZ
+  /// re-negotiates mid-session). Subscribers should refresh any cached codec
+  /// state.
+  /// </summary>
+  event EventHandler<A2dpCodecChangedEventArgs>? A2dpCodecChanged;
 }
 
 /// <summary>
@@ -258,4 +285,20 @@ public class CaptureStreamStalledEventArgs : EventArgs
 
   /// <summary>Number of consecutive watchdog ticks above threshold when the stall was raised.</summary>
   public required int ConsecutiveStalledChecks { get; init; }
+}
+
+/// <summary>
+/// Event args for <see cref="IBluetoothService.CaptureNodeAvailable"/> — fired when a
+/// previously-absent PipeWire BT capture node appears.
+/// </summary>
+public class CaptureNodeAvailableEventArgs : EventArgs
+{
+  /// <summary>The Bluetooth address of the device whose capture node became available.</summary>
+  public required string DeviceAddress { get; init; }
+
+  /// <summary>
+  /// PipeWire object.serial of the discovered node, or 0 if not known to the probe.
+  /// (The probe path may not always extract a serial; the full acquisition path does.)
+  /// </summary>
+  public required int PipeWireSerial { get; init; }
 }

@@ -67,6 +67,15 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   private int _pipelineRecoveryFailures;
   private bool _captureIntentionallyStopped;
 
+  // Periodic PW BT-node rescan loop (Plan B: BT autoswitch gate).
+  // The rescan polls `pw-cli list-objects` every CaptureNodeRescanIntervalMs and raises
+  // CaptureNodeAvailable for any node that transitioned from absent to present for the
+  // connected device. Lives until DisposeAsync or until no device is connected.
+  private CancellationTokenSource? _rescanCts;
+  private Task? _rescanTask;
+  private readonly HashSet<string> _knownNodeAddresses = new(StringComparer.OrdinalIgnoreCase);
+  private readonly object _knownNodesLock = new();
+
   public LinuxBluetoothService(
     ILogger logger,
     IOptions<BluetoothOptions> options,
@@ -159,6 +168,10 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged;
   public event EventHandler? CaptureStreamRecovered;
   public event EventHandler<CaptureStreamStalledEventArgs>? CaptureStreamStalled;
+  public event EventHandler<CaptureNodeAvailableEventArgs>? CaptureNodeAvailable;
+  // A2DP codec observability — raised by EmitCodecAsync after each successful
+  // MediaTransport1.{Codec,Configuration} read (on attach + on PropertiesChanged).
+  public event EventHandler<A2dpCodecChangedEventArgs>? A2dpCodecChanged;
   public float? DeviceVolume { get; private set; }
 
   /// <summary>
@@ -630,6 +643,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
           _logger.LogInformation("Bluetooth device already connected: {DeviceName} ({Address})",
             device.Name, device.Address);
           _pipelineRecoveryFailures = 0;
+          EnsureRescanLoopRunning();
           DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = device });
         }
       }
@@ -666,6 +680,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
         _ = SetDiscoverableAsync(false);
 
         _pipelineRecoveryFailures = 0;
+        EnsureRescanLoopRunning();
         DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = device });
       }
 
@@ -751,6 +766,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
               _ = SetDiscoverableAsync(false);
 
               _pipelineRecoveryFailures = 0;
+              EnsureRescanLoopRunning();
               DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = updatedDevice });
             }
             else
@@ -773,6 +789,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
 
               RecordDisconnectionMetrics();
               StopCaptureSubprocess();
+              StopRescanLoop();
               // Clean up media transport on disconnect
               _transportPropertiesWatcher?.Dispose();
               _transportPropertiesWatcher = null;
@@ -1254,32 +1271,9 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
 
     try
     {
-      var psi = new ProcessStartInfo
+      var output = await RunPwCliListNodesAsync(cancellationToken);
+      if (output == null)
       {
-        FileName = "pw-cli",
-        Arguments = "list-objects",
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        UseShellExecute = false,
-        CreateNoWindow = true
-      };
-
-      using var process = Process.Start(psi);
-      if (process == null)
-      {
-        _logger.LogWarning("Failed to start pw-cli process");
-        return (null, 0, 0);
-      }
-
-      var output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
-      var stderr = await process.StandardError.ReadToEndAsync(cancellationToken);
-      await process.WaitForExitAsync(cancellationToken);
-
-      if (process.ExitCode != 0 || output.Length == 0)
-      {
-        _logger.LogDebug("pw-cli exit={ExitCode}, stdout={StdoutLen}b, stderr={Stderr}",
-          process.ExitCode, output.Length,
-          stderr.Length > 200 ? stderr[..200] : stderr.TrimEnd());
         return (null, 0, 0);
       }
 
@@ -1299,6 +1293,160 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
     }
 
     return (null, 0, 0);
+  }
+
+  /// <summary>
+  /// Runs `pw-cli list-objects` and returns the stdout payload, or null on failure.
+  /// Shared by the probe (<see cref="IsCaptureNodeAvailableAsync"/>) and the full
+  /// acquisition path (<see cref="FindPipeWireBluetoothNodeAsync"/>).
+  /// </summary>
+  private async Task<string?> RunPwCliListNodesAsync(CancellationToken cancellationToken)
+  {
+    var psi = new ProcessStartInfo
+    {
+      FileName = "pw-cli",
+      Arguments = "list-objects",
+      RedirectStandardOutput = true,
+      RedirectStandardError = true,
+      UseShellExecute = false,
+      CreateNoWindow = true
+    };
+
+    using var process = Process.Start(psi);
+    if (process == null)
+    {
+      _logger.LogWarning("Failed to start pw-cli process");
+      return null;
+    }
+
+    var output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
+    var stderr = await process.StandardError.ReadToEndAsync(cancellationToken);
+    await process.WaitForExitAsync(cancellationToken);
+
+    if (process.ExitCode != 0 || output.Length == 0)
+    {
+      _logger.LogDebug("pw-cli exit={ExitCode}, stdout={StdoutLen}b, stderr={Stderr}",
+        process.ExitCode, output.Length,
+        stderr.Length > 200 ? stderr[..200] : stderr.TrimEnd());
+      return null;
+    }
+
+    return output;
+  }
+
+  /// <summary>
+  /// Probes whether a PipeWire bluez_input source node exists for the given BT address.
+  /// Pure probe — does NOT acquire the capture. Returns false on transient errors (treated
+  /// as not-available so the caller falls through to the deferred event subscription).
+  /// </summary>
+  public async Task<bool> IsCaptureNodeAvailableAsync(string deviceAddress, CancellationToken cancellationToken = default)
+  {
+    var prefix = $"bluez_input.{deviceAddress.Replace(':', '_')}";
+    try
+    {
+      var output = await RunPwCliListNodesAsync(cancellationToken);
+      if (output == null)
+      {
+        return false;
+      }
+
+      var (nodeName, _, _) = ParsePwCliOutputForBtNode(output, prefix);
+      return nodeName != null;
+    }
+    catch (OperationCanceledException) { throw; }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "IsCaptureNodeAvailableAsync probe failed (treating as not-available)");
+      return false;
+    }
+  }
+
+  /// <summary>
+  /// Starts the periodic PW BT-node rescan loop if not already running. Idempotent —
+  /// safe to call from multiple DeviceConnected handlers.
+  /// </summary>
+  private void EnsureRescanLoopRunning()
+  {
+    if (_rescanTask != null && !_rescanTask.IsCompleted)
+    {
+      return;
+    }
+    _rescanCts = new CancellationTokenSource();
+    var token = _rescanCts.Token;
+    _rescanTask = Task.Run(() => RescanLoopAsync(token), token);
+  }
+
+  /// <summary>
+  /// Stops the rescan loop and clears the known-node-address cache.
+  /// Called from device-disconnect path and DisposeAsync.
+  /// </summary>
+  private void StopRescanLoop()
+  {
+    try
+    {
+      _rescanCts?.Cancel();
+    }
+    catch (ObjectDisposedException) { /* already torn down */ }
+    _rescanCts?.Dispose();
+    _rescanCts = null;
+    _rescanTask = null;
+    lock (_knownNodesLock)
+    {
+      _knownNodeAddresses.Clear();
+    }
+  }
+
+  /// <summary>
+  /// Periodic rescan loop. Polls IsCaptureNodeAvailableAsync against the currently-connected
+  /// device every <see cref="BluetoothOptions.CaptureNodeRescanIntervalMs"/>; raises
+  /// <see cref="CaptureNodeAvailable"/> on the absent→present transition.
+  /// </summary>
+  private async Task RescanLoopAsync(CancellationToken ct)
+  {
+    var interval = Math.Max(250, _options.CaptureNodeRescanIntervalMs);
+    while (!ct.IsCancellationRequested)
+    {
+      try
+      {
+        var connectedAddress = ConnectedDevice?.Address;
+        if (connectedAddress != null)
+        {
+          var available = await IsCaptureNodeAvailableAsync(connectedAddress, ct);
+          bool wasKnown;
+          lock (_knownNodesLock)
+          {
+            wasKnown = _knownNodeAddresses.Contains(connectedAddress);
+            if (available)
+            {
+              _knownNodeAddresses.Add(connectedAddress);
+            }
+            else
+            {
+              _knownNodeAddresses.Remove(connectedAddress);
+            }
+          }
+          if (available && !wasKnown)
+          {
+            _logger.LogInformation("PW capture node appeared for {Address}", connectedAddress);
+            _metricsCollector?.Increment("bluetooth.capture_node_appeared_total");
+            CaptureNodeAvailable?.Invoke(this, new CaptureNodeAvailableEventArgs
+            {
+              DeviceAddress = connectedAddress,
+              // Serial is filled by the full acquisition path; not needed for the gate decision.
+              PipeWireSerial = 0
+            });
+          }
+        }
+      }
+      catch (OperationCanceledException) { break; }
+      catch (Exception ex)
+      {
+        _logger.LogDebug(ex, "Rescan loop iteration failed");
+      }
+
+      try { await Task.Delay(interval, ct); }
+      catch (OperationCanceledException) { break; }
+    }
   }
 
   /// <summary>
@@ -1959,6 +2107,8 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
     _pipelineMonitorCts?.Dispose();
     _pipelineMonitorCts = null;
 
+    StopRescanLoop();
+
     _reconnectionLoop?.Dispose();
     _reconnectionLoop = null;
     _playerPropertiesWatcher?.Dispose();
@@ -2164,6 +2314,12 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       }
 
       _logger.LogInformation("Attached to MediaTransport1 at {Path}", objectPath);
+
+      // Initial A2DP codec emission (Plan C / FM-BT-6) — give BlueZ a beat to
+      // populate Codec + Configuration on the transport, then emit once so the
+      // initial negotiated codec is logged + surfaced as metrics + UI badge
+      // even when no later property change fires.
+      _ = Task.Run(EmitInitialCodecAsync);
     }
     catch (Exception ex)
     {
@@ -2173,6 +2329,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
 
   private void OnTransportPropertiesChanged(PropertyChanges changes)
   {
+    var codecChanged = false;
     foreach (var prop in changes.Changed)
     {
       if (prop.Key == "Volume" && prop.Value is ushort volume)
@@ -2182,7 +2339,79 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
         VolumeChanged?.Invoke(this, new BluetoothVolumeChangedEventArgs { Volume = normalized });
         _logger.LogDebug("BT AVRCP volume changed: {Raw}/127 ({Normalized:P0})", volume, normalized);
       }
+      else if (prop.Key == "Codec" || prop.Key == "Configuration")
+      {
+        codecChanged = true;
+      }
     }
+
+    // Codec/Configuration arrives via PropertiesChanged on BlueZ re-negotiation.
+    // Fire-and-forget the async D-Bus read + emission so we don't block the
+    // signal callback (Tmds.DBus invokes this on a pool thread).
+    if (codecChanged)
+    {
+      _ = Task.Run(() => EmitCodecAsync("changed"));
+    }
+  }
+
+  /// <summary>
+  /// Initial codec emission after MediaTransport1 attach. Waits briefly so BlueZ
+  /// can populate Codec + Configuration on the transport before we read.
+  /// </summary>
+  private async Task EmitInitialCodecAsync()
+  {
+    try
+    {
+      await Task.Delay(500);
+    }
+    catch
+    {
+      // ignore
+    }
+    await EmitCodecAsync("initial");
+  }
+
+  /// <summary>
+  /// Reads the negotiated A2DP codec from MediaTransport1 and emits log line +
+  /// metrics gauges + <see cref="A2dpCodecChanged"/> event. Safe to call from any
+  /// thread; tolerates a null transport or partial read.
+  /// </summary>
+  private async Task EmitCodecAsync(string trigger)
+  {
+    var connected = ConnectedDevice;
+    if (connected == null)
+    {
+      return;
+    }
+    A2dpCodecInfo? info;
+    try
+    {
+      info = await GetA2dpCodecInfoAsync(connected.Address);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "EmitCodecAsync ({Trigger}) read failed", trigger);
+      return;
+    }
+    if (info == null)
+    {
+      return;
+    }
+
+    _logger.LogInformation(
+      "BluetoothCodec: {Address} {Trigger} codec={Codec} sampleRate={Rate}Hz bitpool={Bitpool}",
+      connected.Address, trigger, info.CodecName, info.SampleRateHz,
+      info.BitpoolOrNull?.ToString() ?? "n/a");
+
+    _metricsCollector?.Gauge("bluetooth.a2dp.codec", info.CodecId);
+    _metricsCollector?.Gauge("bluetooth.a2dp.sample_rate_hz", info.SampleRateHz);
+    _metricsCollector?.Gauge("bluetooth.a2dp.bitpool", info.BitpoolOrNull ?? -1);
+
+    A2dpCodecChanged?.Invoke(this, new A2dpCodecChangedEventArgs
+    {
+      DeviceAddress = connected.Address,
+      CodecInfo = info
+    });
   }
 
   private void OnPlayerPropertiesChanged(PropertyChanges changes)
@@ -2269,6 +2498,37 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       return s;
     }
     return string.Empty;
+  }
+
+  // A2DP codec observability — Plan C Task 4 — reads BlueZ MediaTransport1.Codec
+  // (byte) + Configuration (byte[]) properties and parses them via the pure
+  // A2dpCodecConfigParser. Used by the API surface (BluetoothController.BuildStatus
+  // → BluetoothStatusDto.CodecName / SampleRateHz / Bitpool) and by the
+  // OnTransportPropertiesChanged handler that emits the A2dpCodecChanged event.
+  // Returns null if no transport is attached or the read fails.
+  public async Task<A2dpCodecInfo?> GetA2dpCodecInfoAsync(string deviceAddress, CancellationToken ct = default)
+  {
+    var transport = _mediaTransport;
+    if (transport == null)
+    {
+      return null;
+    }
+
+    try
+    {
+      var codecId = await transport.GetAsync<byte>("Codec");
+      var config = await transport.GetAsync<byte[]>("Configuration");
+      if (config == null)
+      {
+        return null;
+      }
+      return Linux.A2dpCodecConfigParser.Parse(codecId, config);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "GetA2dpCodecInfoAsync read failed for {Address}", deviceAddress);
+      return null;
+    }
   }
 }
 
