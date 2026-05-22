@@ -194,17 +194,25 @@ internal sealed class PipeWireRegistryListener : IDisposable
     {
       _logger.LogWarning(
         ex,
-        "PipeWireRegistryListener: native library missing (libpipewire-0.3 or libpw_helper); "
-        + "falling back to periodic pw-cli scrape");
+        "PipeWireRegistryListener: native library {Library} not found "
+        + "(check ldconfig cache for libpipewire-0.3 and libpw_helper); "
+        + "falling back to periodic pw-cli scrape",
+        ex.Message);
       IsHealthy = false;
       Cleanup();
     }
     catch (EntryPointNotFoundException ex)
     {
+      // Log the actual missing symbol + library — the previous message blamed
+      // libpw_helper.so for every entry-point miss, which masked the real cause
+      // (pw_core_get_registry is static inline in libpipewire-0.3 headers, so
+      // it has no real symbol; we bind it through libpw_helper now — see
+      // PipeWireNative.pw_core_get_registry).
       _logger.LogWarning(
         ex,
-        "PipeWireRegistryListener: required native symbol missing "
-        + "(rebuild libpw_helper.so?); falling back to periodic pw-cli scrape");
+        "PipeWireRegistryListener: required native entry point missing: {Detail}; "
+        + "falling back to periodic pw-cli scrape",
+        ex.Message);
       IsHealthy = false;
       Cleanup();
     }
@@ -212,7 +220,9 @@ internal sealed class PipeWireRegistryListener : IDisposable
     {
       _logger.LogWarning(
         ex,
-        "PipeWireRegistryListener failed to start; falling back to periodic pw-cli scrape");
+        "PipeWireRegistryListener failed to start ({ExceptionType}: {Message}); "
+        + "falling back to periodic pw-cli scrape",
+        ex.GetType().Name, ex.Message);
       IsHealthy = false;
       Cleanup();
     }

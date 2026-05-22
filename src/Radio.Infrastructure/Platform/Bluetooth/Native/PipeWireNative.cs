@@ -86,6 +86,15 @@ internal static class PipeWireNative
   // `pw_core_get_registry(core, version, sz) → pw_registry *`;
   // `pw_proxy_add_listener(registry, &hook, &events_struct, user_data)`.
   // Each pw_thread_loop owns its own context/core/registry chain.
+  //
+  // CAUTION: `pw_core_get_registry` is declared `static inline` in
+  // <pipewire/core.h> (it expands the `spa_interface_call_res` vtable-dispatch
+  // macro), so no real symbol of that name exists in libpipewire-0.3.so. .NET
+  // P/Invoke against `pipewire-0.3` would throw EntryPointNotFoundException at
+  // first call. We instead bind to a thin wrapper exported from libpw_helper
+  // (see pw_helper.c::pw_helper_core_get_registry). Do not "fix" this binding
+  // back to PipeWireLib — it will break PipeWireRegistryListener.Start() and
+  // force the consumer back onto the periodic pw-cli scrape fallback.
 
   [DllImport(PipeWireLib, CallingConvention = CallingConvention.Cdecl)]
   public static extern IntPtr pw_context_new(IntPtr loop, IntPtr props, UIntPtr userDataSize);
@@ -96,7 +105,10 @@ internal static class PipeWireNative
   [DllImport(PipeWireLib, CallingConvention = CallingConvention.Cdecl)]
   public static extern void pw_context_destroy(IntPtr context);
 
-  [DllImport(PipeWireLib, CallingConvention = CallingConvention.Cdecl)]
+  // Bound to libpw_helper because pw_core_get_registry is static inline in
+  // PipeWire's public headers — see header comment block above.
+  [DllImport(HelperLib, EntryPoint = "pw_helper_core_get_registry",
+    CallingConvention = CallingConvention.Cdecl)]
   public static extern IntPtr pw_core_get_registry(IntPtr core, uint version, UIntPtr userDataSize);
 
   [DllImport(PipeWireLib, CallingConvention = CallingConvention.Cdecl)]

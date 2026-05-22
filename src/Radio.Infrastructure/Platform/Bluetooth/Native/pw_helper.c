@@ -1,19 +1,34 @@
 /*
- * pw_helper.c — Minimal helper for building SPA format pods from C#.
+ * pw_helper.c — Thin C wrappers exposing PipeWire helpers that .NET cannot
+ * P/Invoke directly. PipeWire 0.3 ships a number of useful APIs as either
+ *   1. preprocessor macros (e.g., SPA pod builders), or
+ *   2. `static inline` functions that expand the `spa_interface_call_res`
+ *      vtable-dispatch macro (e.g., `pw_core_get_registry`,
+ *      `pw_registry_add_listener`, `spa_dict_lookup`).
  *
- * PipeWire's SPA pod builder macros are C-preprocessor-only and cannot
- * be called via P/Invoke. This tiny shared library exposes a single
- * function that builds an SPA_FORMAT_AUDIO_RAW pod (S16_LE, given rate
- * and channels) into a caller-supplied buffer.
+ * Neither is reachable via DllImport because no real symbol is exported from
+ * libpipewire-0.3.so. We materialise each one as an exported helper here.
+ *
+ * Currently exposed:
+ *   - pw_helper_build_s16le_format_pod  (SPA pod builder, macro-only in headers)
+ *   - pw_helper_spa_dict_lookup         (spa_dict_lookup, static-inline)
+ *   - pw_helper_core_get_registry       (pw_core_get_registry, static-inline)
  *
  * Build:
- *   gcc -shared -fPIC -o libpw_helper.so pw_helper.c \
+ *   gcc -shared -fPIC -O2 -o libpw_helper.so pw_helper.c \
  *       $(pkg-config --cflags --libs libpipewire-0.3)
+ *   sudo cp libpw_helper.so /usr/local/lib/
+ *   sudo ldconfig
+ *
+ * The ldconfig step matters: the .NET runtime resolves `libpw_helper` via
+ * the dynamic linker, which only sees the file once it's been picked up by
+ * ldconfig (or `LD_LIBRARY_PATH`).
  */
 
 #include <spa/param/audio/format-utils.h>
 #include <spa/pod/builder.h>
 #include <spa/utils/dict.h>
+#include <pipewire/pipewire.h>
 
 /**
  * Builds an SPA_FORMAT_AUDIO_RAW pod for S16_LE capture.
@@ -64,4 +79,30 @@ const char *pw_helper_spa_dict_lookup(const struct spa_dict *dict, const char *k
     if (!dict || !key)
         return NULL;
     return spa_dict_lookup(dict, key);
+}
+
+/**
+ * Wraps the static-inline `pw_core_get_registry` from <pipewire/core.h>.
+ *
+ * The PipeWire 0.3 ABI exposes `pw_core_get_registry` ONLY as a `static inline`
+ * helper that expands the `spa_interface_call_res` vtable-dispatch macro. There
+ * is no exported symbol named `pw_core_get_registry` in libpipewire-0.3.so, so
+ * .NET P/Invoke cannot bind to it directly (it throws EntryPointNotFoundException).
+ *
+ * This thin wrapper compiles the inline helper into a real, exported symbol
+ * (`pw_helper_core_get_registry`) that managed callers can DllImport via
+ * `libpw_helper`. The semantics are identical: returns a `pw_registry*` or NULL.
+ *
+ * @param core            pw_core* returned by pw_context_connect. Safe to pass NULL.
+ * @param version         Registry interface version (PW_VERSION_REGISTRY = 3).
+ * @param user_data_size  Bytes of caller user-data to attach to the proxy
+ *                        (0 for the common case).
+ * @return                pw_registry* on success, NULL if `core` is NULL or
+ *                        the vtable call failed.
+ */
+void *pw_helper_core_get_registry(void *core, uint32_t version, size_t user_data_size)
+{
+    if (!core)
+        return NULL;
+    return pw_core_get_registry((struct pw_core *)core, version, user_data_size);
 }
