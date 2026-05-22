@@ -75,6 +75,25 @@ public class BluetoothOptions
 
   /// <summary>Maximum number of reconnection attempts before giving up.</summary>
   public int MaxReconnectAttempts { get; set; } = 20;
+
+  /// <summary>
+  /// How long the auto-switch probes for the PipeWire capture node before falling back
+  /// to event-driven wait (milliseconds). The probe interval is fixed at 500 ms.
+  /// </summary>
+  public int AutoSwitchProbeWindowMs { get; set; } = 5000;
+
+  /// <summary>
+  /// Maximum time the auto-switch waits for a CaptureNodeAvailable event before giving up
+  /// (milliseconds). Default 60 s — typical phone-attaches-A2DP delay is well under that.
+  /// </summary>
+  public int AutoSwitchMaxWaitMs { get; set; } = 60000;
+
+  /// <summary>
+  /// Interval at which LinuxBluetoothService re-scans for newly-appeared PW BT nodes
+  /// (milliseconds). The re-scan raises CaptureNodeAvailable for any node not present in
+  /// the previous scan.
+  /// </summary>
+  public int CaptureNodeRescanIntervalMs { get; set; } = 1000;
 }
 
 /// <summary>
