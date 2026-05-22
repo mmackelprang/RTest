@@ -13,6 +13,7 @@
 
 #include <spa/param/audio/format-utils.h>
 #include <spa/pod/builder.h>
+#include <spa/utils/dict.h>
 
 /**
  * Builds an SPA_FORMAT_AUDIO_RAW pod for S16_LE capture.
@@ -43,4 +44,24 @@ int pw_helper_build_s16le_format_pod(
         return 0;
 
     return (int)SPA_POD_SIZE(pod);
+}
+
+/**
+ * Looks up a key in a spa_dict and returns the value (as a C string pointer).
+ *
+ * Used by PipeWireRegistryListener (Plan E) to read node.name from the
+ * spa_dict* exposed to the pw_registry global() callback. P/Invoking
+ * spa_dict_lookup directly is awkward because it is a static-inline helper
+ * (not exported). This thin wrapper materialises it as a real symbol.
+ *
+ * @param dict  Pointer to spa_dict. Safe to pass NULL.
+ * @param key   Null-terminated key to look up. Safe to pass NULL.
+ * @return      Value string pointer (lifetime tied to the dict), or NULL if
+ *              the dict is NULL, the key is NULL, or the key is missing.
+ */
+const char *pw_helper_spa_dict_lookup(const struct spa_dict *dict, const char *key)
+{
+    if (!dict || !key)
+        return NULL;
+    return spa_dict_lookup(dict, key);
 }

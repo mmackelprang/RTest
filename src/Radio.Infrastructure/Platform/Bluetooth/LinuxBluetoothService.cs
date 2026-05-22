@@ -71,10 +71,20 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   // The rescan polls `pw-cli list-objects` every CaptureNodeRescanIntervalMs and raises
   // CaptureNodeAvailable for any node that transitioned from absent to present for the
   // connected device. Lives until DisposeAsync or until no device is connected.
+  //
+  // PLAN E: this loop is now the FALLBACK path. The primary path is the event-driven
+  // PipeWireRegistryListener; the rescan loop runs only when the listener is unhealthy
+  // (e.g., libpw_helper.so is missing the spa_dict_lookup symbol or pw_context_connect
+  // failed on startup). EnsureRescanLoopRunning is gated on the listener health.
   private CancellationTokenSource? _rescanCts;
   private Task? _rescanTask;
   private readonly HashSet<string> _knownNodeAddresses = new(StringComparer.OrdinalIgnoreCase);
   private readonly object _knownNodesLock = new();
+
+  // Plan E: event-driven PW registry listener. When healthy, replaces the Plan B
+  // periodic pw-cli scrape with a real pw_registry_add_listener subscription.
+  // Disposed in DisposeAsync (after StopRescanLoop, before connection cleanup).
+  private PipeWireRegistryListener? _registryListener;
 
   public LinuxBluetoothService(
     ILogger logger,
@@ -517,6 +527,12 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
 
       State = BluetoothAdapterState.On;
       StateChanged?.Invoke(this, new BluetoothAdapterStateChangedEventArgs { NewState = State });
+
+      // Plan E: bring up the event-driven PipeWire registry listener. When
+      // healthy, it replaces Plan B's periodic pw-cli scrape (the scrape
+      // loop is gated on _registryListener.IsHealthy in EnsureRescanLoopRunning).
+      // On failure, the scrape path continues to function as fallback.
+      StartRegistryListener();
 
       // Start pipeline health monitor
       _pipelineMonitorCts = new CancellationTokenSource();
@@ -1362,11 +1378,106 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   }
 
   /// <summary>
+  /// Plan E: brings up the event-driven PipeWire registry listener. Wires its
+  /// NodeAppeared/NodeDisappeared events into CaptureNodeAvailable so existing
+  /// consumers (BluetoothAudioSource autoswitch gate) see the same event
+  /// contract regardless of which detection path produced it.
+  ///
+  /// If the listener fails to start (missing libpw_helper.so symbol, no
+  /// PipeWire daemon, ...), IsHealthy stays false and EnsureRescanLoopRunning
+  /// falls back to the Plan B periodic pw-cli scrape.
+  /// </summary>
+  private void StartRegistryListener()
+  {
+    if (_registryListener != null)
+    {
+      return;
+    }
+    try
+    {
+      _registryListener = new PipeWireRegistryListener(_logger);
+      _registryListener.NodeAppeared += OnRegistryNodeAppeared;
+      _registryListener.NodeDisappeared += OnRegistryNodeDisappeared;
+      _registryListener.Start();
+
+      if (_registryListener.IsHealthy)
+      {
+        _logger.LogInformation(
+          "PW registry listener active — Plan B periodic re-scan disabled");
+      }
+      else
+      {
+        _logger.LogWarning(
+          "PW registry listener unhealthy — falling back to Plan B periodic re-scan loop");
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to start PipeWireRegistryListener — fallback scrape will be used");
+      _registryListener = null;
+    }
+  }
+
+  /// <summary>
+  /// Handler for <see cref="PipeWireRegistryListener.NodeAppeared"/>. Surfaces
+  /// the appearance as <see cref="CaptureNodeAvailable"/> for the existing
+  /// downstream consumers (Plan B autoswitch gate). The registry's global id
+  /// doubles as the object.serial that PipeWireNativeStream.Connect needs as
+  /// target.object.
+  /// </summary>
+  private void OnRegistryNodeAppeared(object? sender, BtNodeRegistryEventArgs e)
+  {
+    lock (_knownNodesLock)
+    {
+      _knownNodeAddresses.Add(e.DeviceAddress);
+    }
+    _metricsCollector?.Increment("bluetooth.capture_node_appeared_total");
+    _logger.LogInformation(
+      "PW capture node appeared for {Address} (registry id={Id})",
+      e.DeviceAddress, e.Id);
+    CaptureNodeAvailable?.Invoke(this, new CaptureNodeAvailableEventArgs
+    {
+      DeviceAddress = e.DeviceAddress,
+      PipeWireSerial = (int)e.Id,
+    });
+  }
+
+  /// <summary>
+  /// Handler for <see cref="PipeWireRegistryListener.NodeDisappeared"/>.
+  /// Currently informational + metric-only: BT-layer disconnect signals
+  /// drive the actual capture teardown via WatchDevicePropertiesAsync;
+  /// this event arrives in parallel (often earlier than D-Bus) and is
+  /// recorded for observability and for the Plan E lifecycle harness.
+  /// </summary>
+  private void OnRegistryNodeDisappeared(object? sender, BtNodeRegistryEventArgs e)
+  {
+    lock (_knownNodesLock)
+    {
+      _knownNodeAddresses.Remove(e.DeviceAddress);
+    }
+    _metricsCollector?.Increment("bluetooth.capture_node_disappeared_total");
+    _logger.LogInformation(
+      "PW registry: BT node disappeared id={Id} address={Address}",
+      e.Id, e.DeviceAddress);
+  }
+
+  /// <summary>
   /// Starts the periodic PW BT-node rescan loop if not already running. Idempotent —
   /// safe to call from multiple DeviceConnected handlers.
+  ///
+  /// Plan E: skips entirely when the event-driven <see cref="_registryListener"/>
+  /// is healthy. The scrape loop is the fallback path; when the listener is up,
+  /// node appearance/disappearance is surfaced via OnRegistryNodeAppeared /
+  /// OnRegistryNodeDisappeared instead.
   /// </summary>
   private void EnsureRescanLoopRunning()
   {
+    // Plan E: gate on listener health — listener-healthy means no scrape needed.
+    if (_registryListener?.IsHealthy == true)
+    {
+      return;
+    }
+
     if (_rescanTask != null && !_rescanTask.IsCompleted)
     {
       return;
@@ -2110,6 +2221,24 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
     _pipelineMonitorCts = null;
 
     StopRescanLoop();
+
+    // Plan E: dispose the registry listener before the rest of the chain so
+    // the pw_thread_loop unwinds cleanly while the rest of the BT/DBus state
+    // is still intact.
+    if (_registryListener != null)
+    {
+      try
+      {
+        _registryListener.NodeAppeared -= OnRegistryNodeAppeared;
+        _registryListener.NodeDisappeared -= OnRegistryNodeDisappeared;
+        _registryListener.Dispose();
+      }
+      catch (Exception ex)
+      {
+        _logger.LogDebug(ex, "PipeWireRegistryListener disposal threw");
+      }
+      _registryListener = null;
+    }
 
     _reconnectionLoop?.Dispose();
     _reconnectionLoop = null;
