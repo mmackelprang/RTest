@@ -175,7 +175,8 @@ public static class AudioServiceExtensions
       sp.GetRequiredService<ILogger<BluetoothAutoSwitchService>>(),
       sp.GetRequiredService<IBluetoothService>(),
       sp.GetRequiredService<IOptionsMonitor<BluetoothOptions>>(),
-      () => sp.GetRequiredService<IAudioManager>()));
+      () => sp.GetRequiredService<IAudioManager>(),
+      sp.GetService<IMetricsCollector>()));
 
     // Register event audio source services
     services.AddEventAudioSources(configuration);

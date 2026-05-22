@@ -42,6 +42,8 @@ public sealed class MockBluetoothService : IBluetoothService
         public event EventHandler<TimeSpan>? PositionChanged { add { } remove { } }
         public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged { add { } remove { } }
         public event EventHandler? CaptureStreamRecovered { add { } remove { } }
+        // Mock never raises CaptureNodeAvailable — the platform manages capture-node visibility.
+        public event EventHandler<CaptureNodeAvailableEventArgs>? CaptureNodeAvailable { add { } remove { } }
         public float? DeviceVolume => null;
         public Task SetDeviceVolumeAsync(float volume) => Task.CompletedTask;
         public Task NextTrackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
@@ -126,6 +128,10 @@ public sealed class MockBluetoothService : IBluetoothService
         }
 
         public void StopAudioCapture() { }
+
+        // Mock always reports the capture node as available — platform-equivalent stub.
+        public Task<bool> IsCaptureNodeAvailableAsync(string deviceAddress, CancellationToken cancellationToken = default)
+            => Task.FromResult(true);
 
         public ValueTask DisposeAsync()
         {
