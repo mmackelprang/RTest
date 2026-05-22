@@ -1,0 +1,177 @@
+@using Radio.Web.Formatting
+@using Radio.Web.Models
+
+@*
+  OutputPickerDropdown — popover-style picker for the topbar "Out" pill.
+  Mirrors CastDeviceDropdown's visual + interaction pattern (lightweight popover,
+  click-away overlay with stopPropagation per MEMORY note) so the two popovers
+  feel like siblings.
+
+  Lists *local* outputs only — the Cast entry is filtered out so it stays
+  owned by CastDeviceDropdown (separate scan/connect lifecycle). Selecting a
+  local output here calls the parent's OnOutputSelected callback, which is
+  expected to route through DevicesApiService.SetOutputDeviceAsync; the API
+  side (DevicesController.SetOutputDevice) already enforces mutual-exclusivity
+  by tearing down Cast/HTTP outputs and un-muting local speakers when a local
+  device is selected — so this component does not need to dispatch a separate
+  Cast-disconnect call.
+
+  The parent owns _availableOutputs loading; this component is presentational.
+*@
+
+<!-- Click-away overlay (onclick + ontouchend for reliable touch dismissal) -->
+@if (IsOpen)
+{
+  <div @onclick="HandleClickAwayAsync" @onclick:stopPropagation="true"
+       @ontouchend="HandleClickAwayAsync" @ontouchend:stopPropagation="true"
+       style="position: fixed; inset: 0; z-index: 99; -webkit-tap-highlight-color: transparent;"></div>
+  <div @onclick:stopPropagation="true" @ontouchend:stopPropagation="true"
+       class="output-picker-popover"
+       style="position: absolute; top: 100%; right: 0; z-index: 100; min-width: 260px; max-width: 340px;
+              background: rgba(30,30,30,0.95); backdrop-filter: blur(12px);
+              border: 1px solid rgba(255,255,255,0.15); border-radius: 8px;
+              box-shadow: 0 8px 24px rgba(0,0,0,0.5); overflow: hidden;">
+
+    <!-- Header -->
+    <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+                border-bottom: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.3);">
+      <RadzenIcon Icon="speaker" Style="font-size: 16px; color: var(--text-medium);" />
+      <span style="font-size: 12px; font-weight: 500; color: var(--text-medium);">Select Output</span>
+    </div>
+
+    <!-- Device list -->
+    <div style="max-height: 240px; overflow-y: auto;">
+      @{
+        // Filter out the Cast virtual output — CastDeviceDropdown owns that selection.
+        var localOutputs = AvailableOutputs.Where(d => !IsCastOutput(d)).ToList();
+      }
+      @if (localOutputs.Count > 0)
+      {
+        @foreach (var device in localOutputs)
+        {
+          var isActive = device.Id == CurrentOutputId;
+          <div @onclick="@(() => HandleSelectAsync(device))"
+               class="output-picker-row @(isActive ? "is-active" : "")"
+               style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer;
+                      @(isActive ? "background: rgba(76,175,80,0.12);" : "")
+                      transition: background 0.15s;">
+            <RadzenIcon Icon="@GetIconForDevice(device)"
+                        Style="@($"font-size: 18px; color: {(isActive ? "var(--rz-success)" : "var(--text-medium)")};")" />
+            <div style="flex: 1; min-width: 0;">
+              <div class="output-picker-name"
+                   style="font-size: 12px; color: var(--text-high); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                @DisplayNames.Device(device, DeviceAliases)
+              </div>
+              @if (device.IsUSBDevice && !string.IsNullOrEmpty(device.USBPort))
+              {
+                <div style="font-size: 10px; color: var(--text-low);">USB · @device.USBPort</div>
+              }
+            </div>
+            @if (isActive)
+            {
+              <RadzenIcon Icon="check" Class="output-picker-checkmark"
+                          Style="font-size: 18px; color: var(--rz-success);" />
+            }
+          </div>
+        }
+      }
+      else
+      {
+        <div class="output-picker-empty"
+             style="padding: 16px; text-align: center; font-size: 12px; color: var(--text-low);">
+          No local outputs detected.
+        </div>
+      }
+    </div>
+  </div>
+}
+
+<style>
+  .output-picker-row:not(.is-active):hover {
+    background: rgba(255,255,255,0.06);
+  }
+</style>
+
+@code {
+  /// <summary>
+  /// Controls popover visibility. Bind via <c>IsOpenChanged</c> so parent can
+  /// flip the flag from click-away handlers without round-tripping state.
+  /// </summary>
+  [Parameter] public bool IsOpen { get; set; }
+
+  /// <summary>
+  /// Fires whenever the popover wants to close itself (click-away, post-select).
+  /// Parent should mirror the new value into its own state field.
+  /// </summary>
+  [Parameter] public EventCallback<bool> IsOpenChanged { get; set; }
+
+  /// <summary>
+  /// Fires when the user picks a device. Parent is expected to call
+  /// <c>DevicesApiService.SetOutputDeviceAsync</c>. The popover closes itself
+  /// before invoking this callback so the visual feedback feels instant.
+  /// </summary>
+  [Parameter] public EventCallback<AudioDeviceDto> OnOutputSelected { get; set; }
+
+  /// <summary>
+  /// Currently-selected output's id — used to render the active row's check.
+  /// </summary>
+  [Parameter] public string? CurrentOutputId { get; set; }
+
+  /// <summary>
+  /// All available output devices (already filtered for hidden devices upstream
+  /// in MainLayout.LoadOutputDevicesAsync). The picker filters out Cast itself
+  /// before rendering.
+  /// </summary>
+  [Parameter] public List<AudioDeviceDto> AvailableOutputs { get; set; } = new();
+
+  /// <summary>
+  /// Optional alias map (raw-name → friendly-name) passed through to
+  /// <see cref="DisplayNames.Device"/>. MainLayout reads this from
+  /// <c>IOptionsMonitor&lt;DevicesOptions&gt;</c> so config edits hot-reload.
+  /// </summary>
+  [Parameter] public IDictionary<string, string>? DeviceAliases { get; set; }
+
+  private async Task HandleSelectAsync(AudioDeviceDto device)
+  {
+    // Close first so the popover feels responsive even if SetOutputDeviceAsync
+    // takes a moment server-side.
+    await IsOpenChanged.InvokeAsync(false);
+    await OnOutputSelected.InvokeAsync(device);
+  }
+
+  private Task HandleClickAwayAsync() => IsOpenChanged.InvokeAsync(false);
+
+  /// <summary>
+  /// Sentinel id used by DevicesController to identify the virtual Cast
+  /// output (see <c>DevicesController.SetOutputDevice</c>). Hard-coded here
+  /// to mirror the sentinel used at <c>MainLayout.razor:55,71,555</c>.
+  /// </summary>
+  private static bool IsCastOutput(AudioDeviceDto d) =>
+    d.Id.Equals("google-cast", StringComparison.OrdinalIgnoreCase);
+
+  /// <summary>
+  /// Best-effort icon mapping based on a few common device-name heuristics.
+  /// Falls back to a generic speaker glyph so every row stays visually consistent.
+  /// </summary>
+  private static string GetIconForDevice(AudioDeviceDto d)
+  {
+    if (d.IsUSBDevice)
+    {
+      return "usb";
+    }
+    var name = (d.Name ?? "").ToLowerInvariant();
+    if (name.Contains("hdmi") || name.Contains("display"))
+    {
+      return "tv";
+    }
+    if (name.Contains("headphone") || name.Contains("headset"))
+    {
+      return "headphones";
+    }
+    if (name.Contains("bluetooth") || name.Contains("a2dp"))
+    {
+      return "bluetooth";
+    }
+    return "speaker";
+  }
+}

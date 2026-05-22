@@ -85,13 +85,22 @@
         </div>
       }
 
-      <!-- Output picker entry (for non-Cast switches) -->
-      <button type="button" class="nav-pill" @onclick="ToggleOutputPicker"
-              aria-label="Output device picker"
-              title="Select audio output">
-        <RadzenIcon Icon="speaker" />
-        <span class="nav-pill-label">Out</span>
-      </button>
+      <!-- Output picker entry (for non-Cast switches).
+           Wrapper provides the absolute-positioning anchor for the popover. -->
+      <div style="position: relative;">
+        <button type="button" class="nav-pill" @onclick="ToggleOutputPicker"
+                aria-label="Output device picker"
+                title="Select audio output">
+          <RadzenIcon Icon="speaker" />
+          <span class="nav-pill-label">Out</span>
+        </button>
+        <OutputPickerDropdown IsOpen="_showOutputDropdown"
+                              IsOpenChanged="@((bool v) => { _showOutputDropdown = v; StateHasChanged(); })"
+                              OnOutputSelected="OnLocalOutputSelectedAsync"
+                              CurrentOutputId="@_selectedOutputId"
+                              AvailableOutputs="_availableOutputs"
+                              DeviceAliases="DeviceAliases" />
+      </div>
 
       <!-- Nav pills (right-aligned) -->
       <div class="topbar-nav">
@@ -223,6 +232,7 @@
   private CastDeviceDto? _defaultCastDevice;
   private bool _isCastConnecting;
   private bool _showCastDropdown;
+  private bool _showOutputDropdown;
 
   private int _queueCount = 0;
   private DotNetObjectReference<MainLayout>? _selfReference;
@@ -592,6 +602,13 @@
 
     if (newOutputId == "google-cast")
     {
+      // Cast pill closes the sibling Output picker so the two popovers never
+      // overlap (the two are mutually exclusive — see ToggleOutputPicker).
+      if (_showOutputDropdown)
+      {
+        _showOutputDropdown = false;
+      }
+
       // Cast already active → toggle dropdown for device switching
       if (newOutputId == _selectedOutputId)
       {
@@ -633,11 +650,57 @@
     }
   }
 
+  /// <summary>
+  /// Toggles the output-picker popover. The two topbar popovers (Cast and Output)
+  /// are mutually exclusive — opening Output closes Cast and vice versa — so the
+  /// user can't end up with overlapping menus.
+  /// </summary>
   private void ToggleOutputPicker()
   {
-    // Output device picker is a deferred concern (PR 3 owns DeviceManagementPage).
-    // For PR 2 the pill simply navigates to the Devices page so the user can pick.
-    NavigationManager.NavigateTo("/devices");
+    _showOutputDropdown = !_showOutputDropdown;
+    if (_showOutputDropdown && _showCastDropdown)
+    {
+      _showCastDropdown = false;
+    }
+    StateHasChanged();
+  }
+
+  /// <summary>
+  /// Output-picker selection handler. Calls the same API endpoint that the
+  /// legacy <c>/devices</c> page already uses; the server side
+  /// (<c>DevicesController.SetOutputDevice</c>) handles the mutual-exclusivity
+  /// invariant — tearing down the Cast + HTTP outputs and un-muting local
+  /// speakers when a local device is selected — so no extra Cast disconnect
+  /// dispatch is needed here.
+  /// </summary>
+  private async Task OnLocalOutputSelectedAsync(AudioDeviceDto device)
+  {
+    if (device is null || string.IsNullOrEmpty(device.Id))
+    {
+      return;
+    }
+    if (device.Id == _selectedOutputId)
+    {
+      return;
+    }
+
+    try
+    {
+      var success = await DevicesApi.SetOutputDeviceAsync(device.Id);
+      if (success)
+      {
+        _selectedOutputId = device.Id;
+        Logger.LogInformation("Switched audio output via picker to: {Name} ({Id})", device.Name, device.Id);
+      }
+      else
+      {
+        Logger.LogWarning("DevicesApi.SetOutputDeviceAsync returned false for {Id}", device.Id);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to switch audio output via picker to {Id}", device.Id);
+    }
   }
 
   private async Task AutoConnectCastDeviceAsync(string outputId)
