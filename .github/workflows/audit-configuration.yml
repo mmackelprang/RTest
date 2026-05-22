@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   audit:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, appserver]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
