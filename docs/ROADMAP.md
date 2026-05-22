@@ -68,7 +68,19 @@ PR #400's observability surfaced 217–391 ppm clock skew between the BT phone c
 
 - **Research**: [`docs/research/2026-05-22-bt-clock-skew-measurement.md`](research/2026-05-22-bt-clock-skew-measurement.md) — measurement methodology, architectural analysis, mitigation menu
 - **Plan in flight**: [`docs/plans/2026-05-22-bt-drift-compensation-refinement.md`](plans/2026-05-22-bt-drift-compensation-refinement.md) — Path C: smaller, more-frequent compensation events with cosine-ramp crossfade smoothing. Branch `feat/bt-drift-compensation-refinement`.
-- **Path D (variable-rate resampler) deferred** pending Path C subjective UAT result.
+- **Path D shipped** (PR #404 / commit `781a455`). UAT showed objective metrics REGRESSED across all 3 criteria — but diagnosis revealed this was a measurement artifact from a previously-undiagnosed dual-audio-path issue, not a Path D failure.
+
+### Active follow-up arc — BT dual-routing fix + output picker UI (selected 2026-05-22)
+
+`pactl list sink-inputs` on radio revealed **two independent audio paths** feeding the local soundbar simultaneously:
+1. **Path A (designed)**: BT → Radio.API → audio engine → outputs
+2. **Path B (rogue)**: BT → PipeWire stream-restore → default sink directly (bypassing Radio.API entirely)
+
+The dual-path explains both Mark's "audio from both soundbar AND Cast" complaint AND the Path D regression (the resampler added latency to Path A while Path B remained delay-free, creating comb-filter "underwater" artifacts).
+
+- **Research**: [`docs/research/2026-05-22-bt-dual-routing-investigation.md`](research/2026-05-22-bt-dual-routing-investigation.md)
+- **Plan: WP rule (Part 1, critical-path)**: [`docs/plans/2026-05-22-wp-bt-route-exclusivity.md`](plans/2026-05-22-wp-bt-route-exclusivity.md) — WirePlumber config that prevents BT A2DP from auto-routing to default sink. Without this, Path D can't be measured cleanly. ~30 LOC infra config.
+- **Plan: Output picker UI (Part 2, UX)**: [`docs/plans/2026-05-22-output-picker-ui.md`](plans/2026-05-22-output-picker-ui.md) — replaces the `MainLayout.razor:636-641` stub (currently `NavigationManager.NavigateTo("/devices")`) with a real popover. ~150-200 LOC mirroring `CastDeviceDropdown.razor`.
 
 ### CI infrastructure — RTest appserver runner migration
 
