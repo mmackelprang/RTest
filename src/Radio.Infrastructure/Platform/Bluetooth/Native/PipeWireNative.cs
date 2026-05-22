@@ -291,5 +291,87 @@ internal static class PipeWireNative
 
   [DllImport("libc", EntryPoint = "pthread_setschedparam", SetLastError = true)]
   public static extern int pthread_setschedparam(IntPtr thread, int policy, ref SchedParam param);
+
+  // --- libsamplerate (Secret Rabbit Code) bindings ----------------------------
+  //
+  // Variable-rate sample-rate converter used by the BT input path to compensate
+  // for clock skew between the BT phone clock and the local speaker clock
+  // (see docs/research/2026-05-22-bt-clock-skew-measurement.md and
+  //  docs/plans/2026-05-22-bt-input-resampler.md — Path D).
+  //
+  // Native dependency: libsamplerate0 (apt install libsamplerate0). LGPL.
+  // Header: <samplerate.h>. Documentation: http://libsndfile.github.io/libsamplerate/
+  //
+  // Conceptually distinct from PipeWire, but kept in this Linux-only native
+  // interop file for build-time consistency — both libraries are gated behind
+  // the same `#if !WINDOWS_TARGET` and consumed by the same BT capture path.
+
+  /// <summary>
+  /// libsamplerate converter-quality identifiers (from &lt;samplerate.h&gt;).
+  /// SincFastest is the default for the BT-input use case: best quality/CPU
+  /// trade-off for slow continuous drift correction (~5-10 % of one core for
+  /// stereo 48 kHz; trivial on the Intel N100).
+  /// </summary>
+  public enum SrcQuality
+  {
+    SincBestQuality = 0,
+    SincMediumQuality = 1,
+    SincFastest = 2,
+    ZeroOrderHold = 3,
+    Linear = 4,
+  }
+
+  /// <summary>
+  /// Marshals to <c>struct SRC_DATA</c> from &lt;samplerate.h&gt;. Field order
+  /// and types must match the C ABI exactly — do not reorder or change widths.
+  /// <para>
+  /// <c>long</c> on Linux/x64 is 8 bytes; .NET's <see cref="long"/> matches.
+  /// </para>
+  /// </summary>
+  [StructLayout(LayoutKind.Sequential)]
+  public struct SrcData
+  {
+    public IntPtr DataIn;        // const float *data_in
+    public IntPtr DataOut;       // float       *data_out
+    public long InputFrames;     // long  input_frames
+    public long OutputFrames;    // long  output_frames
+    public long InputFramesUsed; // long  input_frames_used
+    public long OutputFramesGen; // long  output_frames_gen
+    public int EndOfInput;       // int   end_of_input (boolean)
+    public double SrcRatio;      // double src_ratio (output_rate / input_rate)
+  }
+
+  private const string SampleRateLib = "libsamplerate.so.0";
+
+  [DllImport(SampleRateLib, EntryPoint = "src_new", CallingConvention = CallingConvention.Cdecl)]
+  public static extern IntPtr src_new(int converterType, int channels, out int error);
+
+  [DllImport(SampleRateLib, EntryPoint = "src_delete", CallingConvention = CallingConvention.Cdecl)]
+  public static extern IntPtr src_delete(IntPtr state);
+
+  [DllImport(SampleRateLib, EntryPoint = "src_process", CallingConvention = CallingConvention.Cdecl)]
+  public static extern int src_process(IntPtr state, ref SrcData data);
+
+  [DllImport(SampleRateLib, EntryPoint = "src_set_ratio", CallingConvention = CallingConvention.Cdecl)]
+  public static extern int src_set_ratio(IntPtr state, double newRatio);
+
+  [DllImport(SampleRateLib, EntryPoint = "src_reset", CallingConvention = CallingConvention.Cdecl)]
+  public static extern int src_reset(IntPtr state);
+
+  [DllImport(SampleRateLib, EntryPoint = "src_strerror", CallingConvention = CallingConvention.Cdecl)]
+  private static extern IntPtr src_strerror(int errorCode);
+
+  /// <summary>
+  /// Returns a managed copy of libsamplerate's error string for the given code,
+  /// or a generic fallback if the native call returns NULL. Safe to call from
+  /// any thread — the underlying C function returns static read-only strings.
+  /// </summary>
+  public static string SrcErrorMessage(int errorCode)
+  {
+    var ptr = src_strerror(errorCode);
+    return ptr == IntPtr.Zero
+      ? $"libsamplerate error {errorCode}"
+      : Marshal.PtrToStringAnsi(ptr) ?? "unknown";
+  }
 }
 #endif
