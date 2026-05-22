@@ -56,11 +56,23 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
     _displayOptions = audioOutputOptions.CurrentValue.DeviceDisplay;
     _hiddenPatterns = CompileHiddenPatterns(_displayOptions);
 
-    // Subscribe to config changes for runtime refresh
-    _audioOutputOptionsMonitor.OnChange(opts =>
+    // Subscribe to config changes for runtime refresh.
+    //
+    // IMPORTANT: must NOT use `opts.DeviceDisplay` directly here. `IOptionsMonitor`
+    // reflects ONLY appsettings.json — the SQLite config store (where the actual
+    // FriendlyNames / HiddenDeviceNames / VisibleDeviceNames live in production)
+    // is read separately via LoadDisplaySettingsFromStoreAsync. Using opts.DeviceDisplay
+    // overwrites the SQLite-loaded values with whatever's in appsettings.json (often
+    // empty), silently breaking friendly-name lookups including "Built-in Audio
+    // Analog Stereo" → "Soundbar". This change-event fires on every config reload
+    // (secret-tag failures, audio-preference saves, etc.) — clobbering on every fire.
+    //
+    // Re-loading from the store on change is the correct merge: the store is the
+    // source of truth in production; appsettings.json is only the boot-time default.
+    _audioOutputOptionsMonitor.OnChange(_unusedOpts =>
     {
-      _logger.LogInformation("Audio output options changed, reloading display settings");
-      ReloadDisplaySettingsInternal(opts.DeviceDisplay);
+      _logger.LogInformation("Audio output options changed, reloading display settings from store");
+      _ = LoadDisplaySettingsFromStoreAsync();
     });
 
     // Initialize device cache immediately
