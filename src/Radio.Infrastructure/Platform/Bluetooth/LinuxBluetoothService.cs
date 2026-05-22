@@ -157,6 +157,12 @@ internal sealed class LinuxBluetoothService : IBluetoothService
   public event EventHandler<TimeSpan>? PositionChanged;
   public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged;
   public event EventHandler? CaptureStreamRecovered;
+  // A2DP codec observability — Task 4 of Plan C fills in the real implementation
+  // (D-Bus MediaTransport1 reads + transport-properties handler emission). The
+  // CS0067 suppression here is removed once Task 4 wires up the invocation.
+#pragma warning disable CS0067
+  public event EventHandler<A2dpCodecChangedEventArgs>? A2dpCodecChanged;
+#pragma warning restore CS0067
   public float? DeviceVolume { get; private set; }
 
   private async Task MonitorBtPipelineAsync(CancellationToken cancellationToken)
@@ -2231,5 +2237,10 @@ internal sealed class LinuxBluetoothService : IBluetoothService
     }
     return string.Empty;
   }
+
+  // A2DP codec observability — Plan C Task 4 replaces this stub with the real
+  // BlueZ MediaTransport1 read.
+  public Task<A2dpCodecInfo?> GetA2dpCodecInfoAsync(string deviceAddress, CancellationToken ct = default)
+    => Task.FromResult<A2dpCodecInfo?>(null);
 }
 
