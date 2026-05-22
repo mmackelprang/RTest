@@ -235,4 +235,38 @@ BT audio pipeline debugging on physical Pi:
 
 ---
 
+## 2026-05-21 — 2026-05-22 — Cast stutter + BT audio stabilization research arc
+
+**Branch:** `research/cast-bt-comparison`
+**Commits:** 3b06f79, c5c2636, f0145d4, 1ed52e8, e3db645, bda7d7a, fbdfe4d (+ roadmap/work-log)
+
+Research arc producing two comparison docs that contrast RTest's Cast and BT audio paths against known-good reference implementations. **No code changes** — explicit non-goal is implementation work. Output is consumed later by a separate plan.
+
+### Cast doc — [`docs/research/2026-05-21-cast-stutter-comparison.md`](../docs/research/2026-05-21-cast-stutter-comparison.md)
+- RTest HttpMp3 + DirectChannel vs SoundCloud (Shaka HLS-MSE) + Plex (HTTP MP3 byte-stream)
+- 8 failure modes × 4 systems matrix; 10 pipeline rows × 4 systems
+- §6 synthesis identified 5 patterns (DC's buffer depth 30× smaller than reference cluster; Web Audio scheduling on JS main thread unique to DC; shared transport for audio + metadata + control unique to DC; push-and-pace pacing model unique to DC; ABR only in SoundCloud)
+- §7 had 8 speculative ideas; retrofitted with full 5-block measurement methodology in commit e3db645
+
+### BT doc — [`docs/research/2026-05-22-bt-audio-stabilization.md`](../docs/research/2026-05-22-bt-audio-stabilization.md)
+- RTest vs PW-stock (no RTest layer) + bluez-alsa + AOSP-BT (Bluedroid/Fluoride)
+- 11 failure modes × 4 systems matrix; 11 pipeline rows × 4 systems
+- §6 synthesis identified 6 patterns (RTest alone scrapes `pw-cli`; alone runs PW thread in-process with everything else; alone has codec invisibility; missing silent-quiesce watchdog; frame-alignment guard reveals API-surface mismatch; reference isolation is structural)
+- §7 has 5 BT-specific ideas + 3 system-isolation ideas shared with cast doc; all with full 5-block measurement methodology
+
+### Cross-cutting addition — concurrent-load discipline (commit bda7d7a)
+MEMORY documents that audio distortion correlates with SSH activity, journald log queries, and SQLite reads on the Ubuntu N100 production box. Both docs were updated to:
+- Add a host-resource-contention failure mode (Cast FM8, BT FM-BT-11)
+- Add a host-resource-contention pipeline row
+- Require every §7 probe to capture `PROBE-SYS-LOAD` (vmstat / iostat / pidstat / journalctl-rate / SSH-session-count) concurrently
+- Run every probe under a two-scenario protocol (light vs heavy load) with the cross-scenario gap reported as a primary metric
+- Add 3 system-isolation ideas (CPU affinity + SCHED_FIFO, synchronous-logging audit, gating background SQLite + fingerprint operations on audio-active state) in the cast doc, cross-referenced from the BT doc
+
+### Roadmap addition
+[`docs/ROADMAP.md`](../docs/ROADMAP.md) — new top-level roadmap, with this research arc as inaugural entry. Established the convention: research arcs do not produce implementation work; a separate plan in `docs/plans/` would scope any chosen ideas with the research's measurement blocks as acceptance criteria.
+
+**Key files:** `docs/research/2026-05-21-cast-stutter-comparison.md`, `docs/research/2026-05-22-bt-audio-stabilization.md`, `docs/ROADMAP.md`
+
+---
+
 <!-- NEW SESSION ENTRIES GO ABOVE THIS LINE -->

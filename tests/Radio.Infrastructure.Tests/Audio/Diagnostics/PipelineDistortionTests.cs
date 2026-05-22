@@ -127,36 +127,73 @@ public class PipelineDistortionTests
     var reference = WavFileHelper.GenerateStereoSineWave(
       leftHz: 200, rightHz: 300, durationSamples: durationSamples, amplitude: 0.8f);
 
+    // Pre-fill the buffer above the drift-compensation threshold so the
+    // interleaved push/pull below stays in the "healthy" buffer-fill region
+    // and the clock-drift compensation path stays dormant. The test's purpose
+    // is signal-integrity through the basic ring-buffer transport, not
+    // compensation behaviour; compensation has its own dedicated tests in
+    // BufferedSoundGeneratorTests.cs.
+    //
+    // Path C (docs/plans/2026-05-22-bt-drift-compensation-refinement.md)
+    // removed the 2-second cooldown that previously kept compensation
+    // dormant during this tight push/pull simulation; without the prefill,
+    // the buffer drains to a level below the 15 % threshold on every cycle
+    // and triggers continuous compensation events that legitimately distort
+    // the test signal (rewind + crossfade by design).
+    //
+    // Threshold = 15 % of 4-second buffer = ~600 ms = ~57 600 samples; we
+    // prefill 1.5 s = 144 000 samples to ride comfortably above it. The
+    // prefilled silence comes out of the generator first; we capture and
+    // discard those leading samples before comparing the reference against
+    // the trailing samples that contain the actual signal.
+    generator.PreFillSilence(1.5f);
+    var prefillSamples = (int)(SampleRate * Channels * 1.5);
+
     // Interleave push/pull (simulating real producer/consumer behavior)
     // Push a chunk, then pull the same amount — prevents buffer overflow.
+    // Pull `prefillSamples + reference.Length` total: the leading prefill
+    // samples are silence (discarded), the trailing samples are the signal.
     var pushChunkSize = 6554; // ~2 RTL-SDR callbacks worth of stereo
     var pullChunkSize = 512;  // Mixer quantum
-    var output = new float[reference.Length];
+    var totalPullSamples = prefillSamples + reference.Length;
+    var fullOutput = new float[totalPullSamples];
     var pushOffset = 0;
     var pullOffset = 0;
 
-    while (pushOffset < reference.Length || pullOffset < output.Length)
+    while (pushOffset < reference.Length || pullOffset < fullOutput.Length)
     {
-      // Push one chunk
+      // Push one chunk. Once reference is exhausted, push silence so the
+      // buffer headroom stays above the drift-compensation threshold for
+      // the pull-only tail of the loop. The trailing silence appears past
+      // the trim window and does not affect the comparison output.
       if (pushOffset < reference.Length)
       {
         var len = Math.Min(pushChunkSize, reference.Length - pushOffset);
         generator.AddSamples(reference.AsSpan(pushOffset, len));
         pushOffset += len;
       }
+      else if (pullOffset < fullOutput.Length)
+      {
+        generator.AddSamples(new float[pushChunkSize]);
+      }
 
       // Pull equivalent amount in mixer-sized chunks
-      var toPull = Math.Min(pushChunkSize, output.Length - pullOffset);
-      while (toPull > 0 && pullOffset < output.Length)
+      var toPull = Math.Min(pushChunkSize, fullOutput.Length - pullOffset);
+      while (toPull > 0 && pullOffset < fullOutput.Length)
       {
         var pullSize = Math.Min(pullChunkSize, toPull);
-        pullSize = Math.Min(pullSize, output.Length - pullOffset);
+        pullSize = Math.Min(pullSize, fullOutput.Length - pullOffset);
         var chunk = generator.PullAudio(pullSize);
-        Array.Copy(chunk, 0, output, pullOffset, pullSize);
+        Array.Copy(chunk, 0, fullOutput, pullOffset, pullSize);
         pullOffset += pullSize;
         toPull -= pullSize;
       }
     }
+
+    // Trim the leading prefill silence; the signal lives in the trailing
+    // `reference.Length` samples.
+    var output = new float[reference.Length];
+    Array.Copy(fullOutput, prefillSamples, output, 0, reference.Length);
 
     var report = WaveformComparison.Compare(reference, output);
 

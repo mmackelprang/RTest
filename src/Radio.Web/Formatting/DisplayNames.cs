@@ -255,19 +255,19 @@ public static partial class DisplayNames
       return string.Empty;
     }
 
-    // Normalize backslashes to forward slashes BEFORE calling Path.GetFileNameWithoutExtension.
-    // On Windows that API recognizes both `\` and `/` as directory separators, but on Linux
-    // (where the radio runs in production) only `/` is a separator — so a Windows-formed
-    // path like `C:\music\...\08 opening night.mp3` is treated as a single filename and the
-    // whole string comes back from GetFileNameWithoutExtension. Music libraries on SMB mounts
-    // or ID3 tags written by Windows apps regularly carry backslashes through the metadata
-    // pipeline, so we normalize at parse time rather than at write time.
-    var normalizedPath = path.Replace('\\', '/');
+    // File paths in NowPlayingDto.FilePath or ExtendedMetadata["FilePath"] arrive from
+    // multiple sources (file-browser scans, fingerprinting metadata, AVRCP Position
+    // metadata, restored play-history rows) — any of which may carry Windows-style
+    // separators even though radio-api runs on Linux. Path.GetFileNameWithoutExtension
+    // honors the *runtime* platform's separator only, so on Linux it would keep
+    // `C:\music\...\file.mp3` as a single filename. Normalize both separators to `/`
+    // so the cross-platform extraction is deterministic.
+    var normalized = path.Replace('\\', '/');
 
     string fileName;
     try
     {
-      fileName = Path.GetFileNameWithoutExtension(normalizedPath) ?? string.Empty;
+      fileName = Path.GetFileNameWithoutExtension(normalized) ?? string.Empty;
     }
     catch (ArgumentException)
     {

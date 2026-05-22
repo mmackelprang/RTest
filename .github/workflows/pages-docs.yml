@@ -1,5 +1,21 @@
 name: Deploy GitHub Pages (docs)
 
+# Runner placement (since 2026-05-22, RTest CI appserver migration):
+#   - Jobs run on the self-hosted appserver runner (labels:
+#     [self-hosted, linux, x64, appserver]) — eliminates the GH Actions
+#     monthly-quota dependency that surfaced during the cast/BT research
+#     arc Phase 1 rollout.
+#   - Builds the static docs site from docs/** and deploys to GitHub
+#     Pages via actions/deploy-pages@v4. Lightweight: no SDK or system
+#     deps needed beyond checkout + artifact upload + deploy-pages.
+#   - CI is ADVISORY: main branch protection is off; the Builder's local
+#     gates are the merge-blocking truth. CI here is a second-opinion
+#     signal.
+#   - Rollback: revert this PR — runs-on flips back to ubuntu-latest.
+#
+# audio-uat.yml stays on windows-latest (intentional — Windows-only
+# feature surface; appserver runner is Linux).
+
 on:
   push:
     branches:
@@ -19,7 +35,7 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, appserver]
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

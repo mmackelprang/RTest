@@ -277,10 +277,24 @@ public class FmAudioDropoutDiagnosticTests
     var zeroRuns = FindZeroRuns(output, minRunLength: 8);
     LogMetrics("Single squelch gap", metrics, zeroRuns, output);
 
-    // Assert: Should show exactly 1 missed callback and at least one zero run
+    // Assert: The missed callback was observed by the pipeline (metric).
+    //
+    // Pre-Path-C (docs/plans/2026-05-22-bt-drift-compensation-refinement.md)
+    // the dropout symptom was directly visible as a zero-run in the output,
+    // because the cooldown-gated compensation could only fill a small slice
+    // of the 68 ms gap.
+    //
+    // Post-Path-C the per-call cap is small (2 ms) but runs on every Process
+    // callback while the buffer is draining, so the cumulative compensation
+    // across the 68 ms gap will MASK most or all of the zero-run from the
+    // output sample stream. The miss is still observable via the metric
+    // (`CallbacksMissed == 1`) and via the underrun counters emitted from
+    // BufferedSoundGenerator, but the symptom in the output waveform is
+    // intentionally suppressed. We therefore assert only on the metric,
+    // and tolerate any zero-run count >= 0.
     Assert.Equal(1, metrics.CallbacksMissed);
-    Assert.NotEmpty(zeroRuns);
-    _output.WriteLine($"DETECTED: Single missed callback creates {zeroRuns.Count} zero run(s)");
+    _output.WriteLine($"OBSERVED: Single missed callback produced {zeroRuns.Count} zero run(s) "
+      + "after Path C compensation (pre-Path-C this was always >= 1).");
     foreach (var run in zeroRuns)
     {
       var durationMs = (double)run.Length / SamplesPerSecondStereo * 1000;

@@ -80,6 +80,9 @@ internal sealed class NullBluetoothService : IBluetoothService
   public event EventHandler<TimeSpan>? PositionChanged { add { } remove { } }
   public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged { add { } remove { } }
   public event EventHandler? CaptureStreamRecovered { add { } remove { } }
+  public event EventHandler<CaptureStreamStalledEventArgs>? CaptureStreamStalled { add { } remove { } }
+  // Null service never raises CaptureNodeAvailable.
+  public event EventHandler<CaptureNodeAvailableEventArgs>? CaptureNodeAvailable { add { } remove { } }
   public float? DeviceVolume => null;
   public Task SetDeviceVolumeAsync(float volume) => Task.CompletedTask;
   public Task NextTrackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
@@ -88,6 +91,11 @@ internal sealed class NullBluetoothService : IBluetoothService
   public void CancelReconnection() { }
   public BluetoothDisconnectReason? LastDisconnectReason => null;
   public BluetoothPipelineStatus PipelineStatus => BluetoothPipelineStatus.Inactive;
+
+  // A2DP codec observability — null service has no transport.
+  public event EventHandler<A2dpCodecChangedEventArgs>? A2dpCodecChanged { add { } remove { } }
+  public Task<A2dpCodecInfo?> GetA2dpCodecInfoAsync(string deviceAddress, CancellationToken ct = default)
+    => Task.FromResult<A2dpCodecInfo?>(null);
 
   public Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default)
   {
@@ -143,6 +151,10 @@ internal sealed class NullBluetoothService : IBluetoothService
   }
 
   public void StopAudioCapture() { }
+
+  // Null service has no capture node to probe — return false (treat as not-available).
+  public Task<bool> IsCaptureNodeAvailableAsync(string deviceAddress, CancellationToken cancellationToken = default)
+      => Task.FromResult(false);
 
   public ValueTask DisposeAsync()
   {

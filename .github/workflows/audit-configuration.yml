@@ -1,5 +1,23 @@
 name: Audit System Configuration
 
+# Runner placement (since 2026-05-22, RTest CI appserver migration):
+#   - Jobs run on the self-hosted appserver runner (labels:
+#     [self-hosted, linux, x64, appserver]) — eliminates the GH Actions
+#     monthly-quota dependency that surfaced during the cast/BT research
+#     arc Phase 1 rollout.
+#   - This workflow is cron-driven (Mondays 09:00 UTC) + workflow_dispatch
+#     — it does NOT trigger on PRs, so the first appserver-runner exercise
+#     of this file happens on the next Monday cron or manual dispatch.
+#     Lightweight: Python 3.x via actions/setup-python@v4 + one audit
+#     script run.
+#   - CI is ADVISORY: main branch protection is off; the Builder's local
+#     gates are the merge-blocking truth. CI here is a second-opinion
+#     signal.
+#   - Rollback: revert this PR — runs-on flips back to ubuntu-latest.
+#
+# audio-uat.yml stays on windows-latest (intentional — Windows-only
+# feature surface; appserver runner is Linux).
+
 on:
   schedule:
     - cron: '0 9 * * 1' # Mondays at 9am UTC
@@ -11,7 +29,7 @@ permissions:
 
 jobs:
   audit:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, appserver]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

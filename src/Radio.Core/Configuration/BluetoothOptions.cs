@@ -75,6 +75,62 @@ public class BluetoothOptions
 
   /// <summary>Maximum number of reconnection attempts before giving up.</summary>
   public int MaxReconnectAttempts { get; set; } = 20;
+
+  /// <summary>
+  /// Threshold in milliseconds for the OnProcess-interval watchdog (FM-BT-3 detection).
+  /// When wall-clock now minus the last OnProcess timestamp exceeds this for
+  /// <see cref="ConsecutiveStalledChecks"/> consecutive watchdog ticks, the watchdog
+  /// raises CaptureStreamStalled. Set to 0 to disable the watchdog entirely.
+  /// </summary>
+  public int OnProcessStallThresholdMs { get; set; } = 5000;
+
+  /// <summary>
+  /// How often the watchdog checks the OnProcess timestamp (milliseconds).
+  /// </summary>
+  public int WatchdogTickIntervalMs { get; set; } = 2000;
+
+  /// <summary>
+  /// Number of consecutive watchdog ticks past <see cref="OnProcessStallThresholdMs"/>
+  /// required before the watchdog raises the stall event. Default 3 (~6 s @ 2 s tick)
+  /// to suppress single transient hiccups.
+  /// </summary>
+  public int ConsecutiveStalledChecks { get; set; } = 3;
+
+  /// <summary>
+  /// How long the auto-switch probes for the PipeWire capture node before falling back
+  /// to event-driven wait (milliseconds). The probe interval is fixed at 500 ms.
+  /// </summary>
+  public int AutoSwitchProbeWindowMs { get; set; } = 5000;
+
+  /// <summary>
+  /// Maximum time the auto-switch waits for a CaptureNodeAvailable event before giving up
+  /// (milliseconds). Default 60 s — typical phone-attaches-A2DP delay is well under that.
+  /// </summary>
+  public int AutoSwitchMaxWaitMs { get; set; } = 60000;
+
+  /// <summary>
+  /// Interval at which LinuxBluetoothService re-scans for newly-appeared PW BT nodes
+  /// (milliseconds). The re-scan raises CaptureNodeAvailable for any node not present in
+  /// the previous scan.
+  /// </summary>
+  public int CaptureNodeRescanIntervalMs { get; set; } = 1000;
+
+  /// <summary>
+  /// When true, the PipeWire capture thread is bumped to SCHED_FIFO priority
+  /// <see cref="RealtimeCaptureThreadPriority"/> via pthread_setschedparam on
+  /// the first OnProcess callback. Requires the host systemd unit to allow
+  /// real-time scheduling (LimitRTPRIO &gt;= priority). Linux only — ignored
+  /// on Windows. Default false; turn on only after measurement confirms the
+  /// systemd-level isolation in Plan D is insufficient.
+  /// </summary>
+  public bool UseRealtimeCaptureThread { get; set; } = false;
+
+  /// <summary>
+  /// SCHED_FIFO priority to apply when <see cref="UseRealtimeCaptureThread"/>
+  /// is true. Values 50-70 are typical for application audio (above default
+  /// kernel IRQ threads at ~50, below kernel critical threads at 99). Default 50.
+  /// </summary>
+  public int RealtimeCaptureThreadPriority { get; set; } = 50;
 }
 
 /// <summary>

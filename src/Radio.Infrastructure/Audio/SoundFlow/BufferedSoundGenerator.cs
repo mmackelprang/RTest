@@ -61,6 +61,9 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     private DateTime _lastUnderrunLogTime;
     private long _underrunSamplesSinceLastLog;
     private int _underrunCountSinceLastLog;
+    private DateTime _lastCompensationLogTime;
+    private long _compensationSamplesSinceLastLog;
+    private int _compensationCountSinceLastLog;
 
     // Buffer level tracking between log intervals
     private int _minBufferSinceLastLog = int.MaxValue;
@@ -433,6 +436,13 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                 _underrunSamplesSinceLastLog += deficit;
                 _underrunCountSinceLastLog++;
 
+                // Counters bump on EVERY underrun (independent of log throttle)
+                if (_metricsCollector != null && _metricsTags != null)
+                {
+                    _metricsCollector.Increment("audio.buffer.underrun_total", 1, _metricsTags);
+                    _metricsCollector.Increment("audio.buffer.underrun_samples_total", deficit, _metricsTags);
+                }
+
                 // Log underrun bursts: throttled to once per second to avoid log spam
                 // while still revealing the pattern of when underruns occur.
                 var now = DateTime.UtcNow;
@@ -469,10 +479,23 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     }
 
     /// <summary>
+    /// Cosine-ramp crossfade length (samples) applied at the rewind boundary to
+    /// blend the duplicated chunk smoothly. ~0.67 ms at 48 kHz stereo (16 frames).
+    /// </summary>
+    private const int CrossfadeSamples = 32;
+
+    /// <summary>
     /// Detects clock drift between producer and consumer by monitoring buffer level
     /// trends. When the buffer is consistently draining (producer slower than consumer),
     /// rewinds the read pointer to duplicate recent audio and prevent underrun.
     /// This compensates for BT/PipeWire running on a different clock than ALSA playback.
+    ///
+    /// Path C refinement (2026-05-22): per-call cap dropped from 10 ms to 2 ms and the
+    /// 2-second cooldown was removed so the same total compensation is redistributed
+    /// across ~5× more events that are each individually sub-perceptual. A cosine-ramp
+    /// crossfade is applied across the rewind boundary on the float ring buffer to
+    /// eliminate the boundary discontinuity click. See
+    /// docs/plans/2026-05-22-bt-drift-compensation-refinement.md.
     /// </summary>
     private void CompensateClockDrift(int channels)
     {
@@ -487,11 +510,10 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             return;
         }
 
-        // Check every ~2 seconds to smooth out transient jitter
-        if ((now - _lastDriftCheckTime).TotalSeconds < 2.0)
-        {
-            return;
-        }
+        // No cooldown — the per-call cap below keeps each correction small (≤2 ms),
+        // so running on every Process call redistributes the necessary compensation
+        // across many short events rather than concentrating it into audible 10 ms
+        // duplications every ~2 seconds.
 
         int currentLevel;
         lock (_bufferLock)
@@ -513,35 +535,117 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
 
         if (isDraining)
         {
-            // Rewind read pointer to duplicate recent audio back up to target level.
-            // Frame-align the compensation amount to avoid splitting stereo pairs.
-            var deficit = _driftCompensationTarget - currentLevel;
+            // Per-call cap: 2 ms of audio (96 samples at 48 kHz stereo). Smaller events
+            // are less audible per occurrence; total samples compensated per second stays
+            // roughly the same because it is driven by the underlying rate mismatch.
             var frameSamples = Math.Max(channels, 2);
-            // Align to frame boundary and cap at 10ms of audio to keep it inaudible
-            var maxCompensation = (int)(Format.SampleRate * Format.Channels * 0.01); // 10ms
-            deficit = Math.Min(deficit, maxCompensation);
+            var maxCompensationPerCall = (int)(Format.SampleRate * Format.Channels * 0.002);
+            var deficit = Math.Min(_driftCompensationTarget - currentLevel, maxCompensationPerCall);
             deficit = (deficit / frameSamples) * frameSamples; // frame-align
 
             if (deficit > 0)
             {
+                bool applied = false;
+                int rewindStartPos = 0;
                 lock (_bufferLock)
                 {
                     if (_count + deficit <= _maxBufferSamples)
                     {
                         _readPos = (_readPos - deficit + _maxBufferSamples) % _maxBufferSamples;
+                        rewindStartPos = _readPos;
                         _count += deficit;
                         _totalSamplesCompensated += deficit;
+                        applied = true;
                     }
                 }
 
-                _logger.LogDebug(
-                    "🔄 Clock drift compensation: duplicated {Samples} samples (buffer: {Level}→{NewLevel}/{Capacity}, total compensated: {Total})",
-                    deficit, currentLevel, currentLevel + deficit, _maxBufferSamples, _totalSamplesCompensated);
+                if (applied)
+                {
+                    // Apply cosine-ramp crossfade across the rewind boundary for the
+                    // float ring buffer (BT/A2DP path). Short path is non-musical
+                    // (radio TTS / synth events) and left untouched.
+                    if (typeof(T) == typeof(float))
+                    {
+                        var rampLen = Math.Min(CrossfadeSamples, deficit);
+                        // Frame-align ramp length so we never split a multi-channel frame.
+                        rampLen = (rampLen / frameSamples) * frameSamples;
+                        if (rampLen > 0)
+                        {
+                            ApplyCrossfadeFloat(rewindStartPos, rampLen);
+                        }
+                    }
+
+                    // Counters bump on EVERY successful compensation (independent of log throttle)
+                    if (_metricsCollector != null && _metricsTags != null)
+                    {
+                        _metricsCollector.Increment("audio.buffer.drift_compensation_total", 1, _metricsTags);
+                        _metricsCollector.Increment("audio.buffer.drift_compensation_samples_total", deficit, _metricsTags);
+                    }
+
+                    _compensationCountSinceLastLog++;
+                    _compensationSamplesSinceLastLog += deficit;
+
+                    // Log compensation bursts at Info: throttled to once per 5 seconds.
+                    // With no cooldown, compensation can now fire on every Process call
+                    // while draining; the 5 s throttle aggregates the burst into a single
+                    // line revealing event-count + total-duplicated-samples cadence.
+                    var compNow = DateTime.UtcNow;
+                    var compSinceLastLog = _lastCompensationLogTime == default
+                        ? 0.0 : (compNow - _lastCompensationLogTime).TotalSeconds;
+                    if (compSinceLastLog >= 5.0 || _lastCompensationLogTime == default)
+                    {
+                        _logger.LogInformation(
+                            "🔄 Clock drift compensation ({Type}): {Count} events, {Samples} duplicated samples in last {Interval:F1}s " +
+                            "(buffer: {Level}→{NewLevel}/{Capacity}, total compensated: {Total})",
+                            typeof(T).Name, _compensationCountSinceLastLog, _compensationSamplesSinceLastLog,
+                            compSinceLastLog,
+                            currentLevel, currentLevel + deficit, _maxBufferSamples, _totalSamplesCompensated);
+                        _compensationSamplesSinceLastLog = 0;
+                        _compensationCountSinceLastLog = 0;
+                        _lastCompensationLogTime = compNow;
+                    }
+                }
             }
         }
 
         _lastDriftCheckLevel = currentLevel;
         _lastDriftCheckTime = now;
+    }
+
+    /// <summary>
+    /// Applies a cosine-ramp gain (0 → 1) across <paramref name="rampLength"/> samples
+    /// starting at <paramref name="startPos"/> in the float ring buffer. Used to blend
+    /// the boundary between the original signal and the duplicated chunk produced by
+    /// <see cref="CompensateClockDrift"/>, eliminating the discontinuity click that
+    /// otherwise contributes to the perceived "underwater" artifact.
+    ///
+    /// Safe to mutate the buffer in place: <see cref="BufferedSoundGenerator{T}"/> is
+    /// single-consumer (the master mixer reads via <see cref="GenerateAudio"/>); the
+    /// crossfade is applied immediately after the rewind under the buffer lock so no
+    /// reader has yet observed the duplicated samples.
+    /// </summary>
+    private void ApplyCrossfadeFloat(int startPos, int rampLength)
+    {
+        if (rampLength <= 0)
+        {
+            return;
+        }
+
+        // _ringBuffer is typed T[]; at this branch T == float so the cast is safe.
+        // MemoryMarshal.Cast reinterprets the existing array; no allocation.
+        var floatRing = MemoryMarshal.Cast<T, float>(_ringBuffer.AsSpan());
+
+        lock (_bufferLock)
+        {
+            for (int i = 0; i < rampLength; i++)
+            {
+                // Cosine ramp: 0 → 1 over rampLength samples (raised-cosine half-window).
+                var phase = (i / (double)rampLength) * Math.PI;
+                var gain = (float)((1.0 - Math.Cos(phase)) * 0.5);
+                var idx = (startPos + i) % _maxBufferSamples;
+                floatRing[idx] = floatRing[idx] * gain;
+            }
+        }
     }
 
     private void LogStats()
