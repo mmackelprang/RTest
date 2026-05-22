@@ -293,15 +293,31 @@ else
   echo "  No USB BT adapter detected — skipping Intel BT disable"
 fi
 
-# WirePlumber: prevent auto-linking BT input to speakers
-# Radio Console captures BT audio via PipeWire native stream and routes through
-# its own mixer. Without this, WirePlumber auto-links bluez_input → default sink,
-# causing duplicate audio that bypasses volume/mute controls.
+# WirePlumber: prevent auto-linking BT input to speakers (two complementary rules).
+#
+# bluetooth.lua.d/90-disable-bt-input-autolink.lua sets `node.autoconnect = false`
+# on bluez_input nodes, which stops policy-node.lua from picking a default target
+# and auto-linking.
+#
+# main.lua.d/41-disable-bt-input-restore-target.lua additionally tells
+# restore-stream.lua to NOT save/restore the per-stream `target.node` for these
+# nodes. Without this second rule, restore-stream remembers a once-routed target
+# (e.g. the soundbar sink) keyed by media.name and re-writes target.node metadata
+# on every BT reconnect — which policy-node.lua then honours, producing a rogue
+# parallel audio path that bypasses Radio.API entirely. See
+# docs/research/2026-05-22-bt-dual-routing-investigation.md.
 WP_BT_RULE="$SCRIPT_DIR_COMMON/90-disable-bt-input-autolink.lua"
 if [ -f "$WP_BT_RULE" ]; then
   mkdir -p /etc/wireplumber/bluetooth.lua.d
   cp "$WP_BT_RULE" /etc/wireplumber/bluetooth.lua.d/
   echo "  WirePlumber BT auto-link prevention rule installed"
+fi
+
+WP_MAIN_RULE="$SCRIPT_DIR_COMMON/41-disable-bt-input-restore-target.lua"
+if [ -f "$WP_MAIN_RULE" ]; then
+  mkdir -p /etc/wireplumber/main.lua.d
+  cp "$WP_MAIN_RULE" /etc/wireplumber/main.lua.d/
+  echo "  WirePlumber BT stream-restore exclusion rule installed"
 fi
 
 # ---- 8. Configure Audio & Bluetooth ----

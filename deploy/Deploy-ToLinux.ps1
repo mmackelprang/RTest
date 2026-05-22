@@ -217,6 +217,80 @@ if ($LASTEXITCODE -ne 0) {
   exit 1
 }
 
+# Sync WirePlumber Lua rules.
+#
+# Two destinations, distinguished by source-filename prefix (we keep them
+# flat in deploy/common/ so they live next to the existing config artifacts):
+#   * 4x-*.lua            -> /etc/wireplumber/main.lua.d/
+#                            (currently: stream-restore behaviour overrides)
+#   * 8x-*.lua / 9x-*.lua -> /etc/wireplumber/bluetooth.lua.d/
+#                            (bluez_monitor properties + bluez per-node rules)
+#
+# WirePlumber needs a SIGHUP-equivalent restart to reload Lua scripts. The
+# user-mode unit is owned by the desktop user (mmack); we restart it as that
+# user via XDG_RUNTIME_DIR. We do not run with `sudo --user mmack` because the
+# script may already be running as mmack over SSH.
+#
+# Explicit file names (no `cp deploy/common/*.lua`) so dropping unrelated
+# .lua artifacts into deploy/common/ never accidentally lands them in
+# /etc/wireplumber. Mirror this list in deploy/debian-x64/setup.sh and
+# deploy/common/radio-bt-setup.sh (verify_wp_configs).
+$wpMainRules = @(
+  "41-disable-bt-input-restore-target.lua"
+)
+$wpBluetoothRules = @(
+  "90-disable-bt-input-autolink.lua"
+)
+
+$wpRulesChanged = $false
+function Sync-WpRule($name, $remoteDir) {
+  $localPath = Join-Path $RepoRoot "deploy\common\$name"
+  if (-not (Test-Path $localPath)) {
+    Write-Host "  WARNING: missing $localPath (skipped)" -ForegroundColor Yellow
+    return $false
+  }
+  $remoteTmp = "/tmp/wp-rule-$name"
+  scp -q $localPath "${SshTarget}:${remoteTmp}" 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "  WARNING: scp $name failed" -ForegroundColor Yellow
+    return $false
+  }
+  # Compare-and-install only when content changes, so we know whether to
+  # restart wireplumber. cmp returns 0 = equal, 1 = different, 2 = missing.
+  $cmpScript = "sudo mkdir -p $remoteDir && if cmp -s $remoteTmp $remoteDir/$name 2>/dev/null; then echo 'unchanged'; rm -f $remoteTmp; else sudo install -m 0644 -o root -g root $remoteTmp $remoteDir/$name && rm -f $remoteTmp && echo 'changed'; fi"
+  $result = ssh $SshTarget $cmpScript
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "  WARNING: install $name failed" -ForegroundColor Yellow
+    return $false
+  }
+  if ($result -match 'changed') {
+    Write-Host "    + $remoteDir/$name" -ForegroundColor DarkGray
+    return $true
+  }
+  return $false
+}
+
+Write-Host "  Syncing WirePlumber rules..." -ForegroundColor DarkGray
+foreach ($r in $wpMainRules) {
+  if (Sync-WpRule -name $r -remoteDir "/etc/wireplumber/main.lua.d") { $wpRulesChanged = $true }
+}
+foreach ($r in $wpBluetoothRules) {
+  if (Sync-WpRule -name $r -remoteDir "/etc/wireplumber/bluetooth.lua.d") { $wpRulesChanged = $true }
+}
+
+if ($wpRulesChanged) {
+  Write-Host "  WirePlumber rules changed — restarting wireplumber..." -ForegroundColor DarkGray
+  # User-mode systemd: must run as the desktop user, with XDG_RUNTIME_DIR so
+  # systemctl --user can reach the right session bus.
+  ssh $SshTarget "XDG_RUNTIME_DIR=/run/user/1000 systemctl --user restart wireplumber 2>&1 || true"
+  # restart-stream module re-reads its state on next stream connect, no extra
+  # action needed. Existing saved targets only re-apply on stream re-creation
+  # (i.e. next BT reconnect) — the operator clears `~/.local/state/wireplumber/restore-stream`
+  # to take effect for already-saved BT routings (see plan Task 2).
+} else {
+  Write-Host "    WirePlumber rules up to date" -ForegroundColor DarkGray
+}
+
 Write-Host "  Files synced" -ForegroundColor Green
 
 # --- Step 4: Restart ---
