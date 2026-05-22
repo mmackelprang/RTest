@@ -42,6 +42,9 @@ public sealed class MockBluetoothService : IBluetoothService
         public event EventHandler<TimeSpan>? PositionChanged { add { } remove { } }
         public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged { add { } remove { } }
         public event EventHandler? CaptureStreamRecovered { add { } remove { } }
+        public event EventHandler<CaptureStreamStalledEventArgs>? CaptureStreamStalled { add { } remove { } }
+        // Mock never raises CaptureNodeAvailable — the platform manages capture-node visibility.
+        public event EventHandler<CaptureNodeAvailableEventArgs>? CaptureNodeAvailable { add { } remove { } }
         public float? DeviceVolume => null;
         public Task SetDeviceVolumeAsync(float volume) => Task.CompletedTask;
         public Task NextTrackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
@@ -50,6 +53,13 @@ public sealed class MockBluetoothService : IBluetoothService
         public void CancelReconnection() { }
         public BluetoothDisconnectReason? LastDisconnectReason => null;
         public BluetoothPipelineStatus PipelineStatus => BluetoothPipelineStatus.Inactive;
+
+        // A2DP codec observability — Mock implementation is a no-op (no real BT transport).
+#pragma warning disable 67 // event never raised in mock
+        public event EventHandler<A2dpCodecChangedEventArgs>? A2dpCodecChanged;
+#pragma warning restore 67
+        public Task<A2dpCodecInfo?> GetA2dpCodecInfoAsync(string deviceAddress, CancellationToken ct = default)
+          => Task.FromResult<A2dpCodecInfo?>(null);
 
         public Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default)
         {
@@ -119,6 +129,10 @@ public sealed class MockBluetoothService : IBluetoothService
         }
 
         public void StopAudioCapture() { }
+
+        // Mock always reports the capture node as available — platform-equivalent stub.
+        public Task<bool> IsCaptureNodeAvailableAsync(string deviceAddress, CancellationToken cancellationToken = default)
+            => Task.FromResult(true);
 
         public ValueTask DisposeAsync()
         {

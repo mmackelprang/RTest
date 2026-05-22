@@ -1,5 +1,23 @@
 name: Build and Test
 
+# Runner placement (since 2026-05-22, RTest CI appserver migration):
+#   - Jobs run on the self-hosted appserver runner (labels:
+#     [self-hosted, linux, x64, appserver]) — eliminates the GH Actions
+#     monthly-quota dependency that surfaced during the cast/BT research
+#     arc Phase 1 rollout.
+#   - This is the heaviest of the four migrated workflows: dotnet build +
+#     dotnet test across 11 test projects + Playwright browser install
+#     (--with-deps, needs apt) + NuGet pack of 5 packages. .NET 10 SDK is
+#     installed per-job via actions/setup-dotnet@v4; pwsh and Playwright
+#     system deps resolve via apt inside the ephemeral runner container.
+#   - CI is ADVISORY: main branch protection is off; the Builder's local
+#     gates (dotnet build / dotnet test) are the merge-blocking truth.
+#     CI here is a second-opinion signal.
+#   - Rollback: revert this PR — runs-on flips back to ubuntu-latest.
+#
+# audio-uat.yml stays on windows-latest (intentional — Windows-only
+# feature surface; appserver runner is Linux).
+
 on:
   push:
     branches: [main, develop]
@@ -11,7 +29,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, appserver]
     steps:
       - uses: actions/checkout@v4
         with:

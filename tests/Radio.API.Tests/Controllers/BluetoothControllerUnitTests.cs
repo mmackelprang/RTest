@@ -18,7 +18,7 @@ public class BluetoothControllerUnitTests
   }
 
   [Fact]
-  public void GetStatus_ReturnsMappedStatus()
+  public async Task GetStatus_ReturnsMappedStatus()
   {
     var device = new BluetoothDeviceInfo
     {
@@ -36,7 +36,7 @@ public class BluetoothControllerUnitTests
 
     var controller = CreateController();
 
-    var result = controller.GetStatus();
+    var result = await controller.GetStatus();
 
     var ok = Assert.IsType<OkObjectResult>(result.Result);
     var dto = Assert.IsType<BluetoothStatusDto>(ok.Value);
@@ -183,12 +183,12 @@ public class BluetoothControllerUnitTests
   }
 
   [Fact]
-  public void GetStatus_WhenPairedDevicesNull_ReturnsEmptyList()
+  public async Task GetStatus_WhenPairedDevicesNull_ReturnsEmptyList()
   {
     _serviceMock.SetupGet(s => s.PairedDevices).Returns((IReadOnlyList<BluetoothDeviceInfo>?)null!);
 
     var controller = CreateController();
-    var result = controller.GetStatus();
+    var result = await controller.GetStatus();
 
     var ok = Assert.IsType<OkObjectResult>(result.Result);
     var dto = Assert.IsType<BluetoothStatusDto>(ok.Value);

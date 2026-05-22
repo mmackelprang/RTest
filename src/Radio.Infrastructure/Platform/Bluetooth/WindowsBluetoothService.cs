@@ -241,6 +241,15 @@ internal sealed class WindowsBluetoothService : IBluetoothService
 #endif
 
     public event EventHandler? CaptureStreamRecovered { add { } remove { } }
+    public event EventHandler<CaptureStreamStalledEventArgs>? CaptureStreamStalled { add { } remove { } }
+    // Windows never raises CaptureNodeAvailable — Windows audio routing is platform-managed
+    // and there is no PipeWire-style capture-node concept on this TFM.
+    public event EventHandler<CaptureNodeAvailableEventArgs>? CaptureNodeAvailable { add { } remove { } }
+
+    // Windows always reports the capture node as available — the platform manages routing
+    // through WASAPI/A2DP sink, no probe equivalent is needed.
+    public Task<bool> IsCaptureNodeAvailableAsync(string deviceAddress, CancellationToken cancellationToken = default)
+        => Task.FromResult(true);
 
     public Task SetDeviceVolumeAsync(float volume)
     {
@@ -268,6 +277,15 @@ internal sealed class WindowsBluetoothService : IBluetoothService
     public void CancelReconnection() { }
     public BluetoothDisconnectReason? LastDisconnectReason => null;
     public BluetoothPipelineStatus PipelineStatus => BluetoothPipelineStatus.Inactive;
+
+    // A2DP codec observability — Windows path uses AudioPlaybackConnection (WinRT),
+    // which does NOT surface a codec ID. Stub returns null; the event is declared
+    // for interface conformance but never raised under WINDOWS_TARGET.
+#pragma warning disable CS0067
+    public event EventHandler<A2dpCodecChangedEventArgs>? A2dpCodecChanged;
+#pragma warning restore CS0067
+    public Task<A2dpCodecInfo?> GetA2dpCodecInfoAsync(string deviceAddress, CancellationToken ct = default)
+      => Task.FromResult<A2dpCodecInfo?>(null);
 
     private void CheckState(object? state)
     {

@@ -5,9 +5,38 @@ Wants=avahi-daemon.service radio-pipewire-access.service radio-bt-setup.service
 
 [Service]
 Type=simple
-User=radio
+# Runs as mmack (uid 1000) — needed for PipeWire access via XDG_RUNTIME_DIR=/run/user/1000.
+# Group=audio gives access to /dev/snd/* devices.
+User=mmack
 Group=audio
 WorkingDirectory=/opt/radio-console
+
+# === Audio-thread isolation (added 2026-05-22, Plan D) ===
+# Pin to cores 2,3 (leave 0,1 for OS + journald + sshd + radio-web).
+# Ubuntu N100 has 4 cores; layout: [OS,web] [audio,audio].
+CPUAffinity=2 3
+
+# Boost scheduling priority. LimitNICE is soft:hard where soft=highest-allowed-nice
+# (least privilege) and hard=lowest-allowed-nice (most privilege). To allow the
+# process to lower its nice to -5 we need hard=-5, soft=0 (or any value ≥ -5).
+Nice=-5
+LimitNICE=0:-5
+
+# IO best-effort near-realtime (class 2, priority 2). Class 1 (realtime) is
+# usually overkill for application audio; class 2 + low prio matches CCRMA/JACK
+# guidance.
+IOSchedulingClass=2
+IOSchedulingPriority=2
+
+# Allow process to use SCHED_FIFO up to priority 99 if it requests it via
+# pthread_setschedparam (feature-flagged behind BluetoothOptions.UseRealtimeCaptureThread,
+# default off). Without this limit the call would fail with EPERM.
+LimitRTPRIO=99
+
+# Allow mlock for any future low-latency pages (not used today; cheap to allow).
+LimitMEMLOCK=infinity
+# === end audio-thread isolation ===
+
 ExecStart=/opt/radio-console/api/Radio.API
 Restart=always
 RestartSec=10

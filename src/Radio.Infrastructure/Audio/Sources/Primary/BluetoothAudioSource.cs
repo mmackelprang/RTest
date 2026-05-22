@@ -82,6 +82,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     _bluetoothService.DeviceConnected += OnDeviceConnected;
     _bluetoothService.DeviceDisconnected += OnDeviceDisconnected;
     _bluetoothService.CaptureStreamRecovered += OnCaptureStreamRecovered;
+    _bluetoothService.CaptureStreamStalled += OnCaptureStreamStalled;
 
     if (_playbackService != null)
     {
@@ -295,6 +296,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     _bluetoothService.DeviceConnected -= OnDeviceConnected;
     _bluetoothService.DeviceDisconnected -= OnDeviceDisconnected;
     _bluetoothService.CaptureStreamRecovered -= OnCaptureStreamRecovered;
+    _bluetoothService.CaptureStreamStalled -= OnCaptureStreamStalled;
 
     if (_playbackService != null)
     {
@@ -355,6 +357,22 @@ public class BluetoothAudioSource : USBAudioSourceBase
   {
     Logger.LogInformation("BluetoothAudioSource: capture stream recovered by pipeline monitor");
     _ = TryAcquireAudioCaptureAsync();
+  }
+
+  /// <summary>
+  /// Handler for FM-BT-3 watchdog detection. Funnels into the same recovery
+  /// path used for SoundFlow downstream generator stalls so the existing
+  /// <c>_recoveryInProgress</c> interlock dedups both stall sources.
+  /// </summary>
+  private void OnCaptureStreamStalled(object? sender, CaptureStreamStalledEventArgs e)
+  {
+    Logger.LogWarning(
+      "BluetoothAudioSource: capture stream stall detected via watchdog ({Address}, elapsed={Elapsed}ms, consecutive={N}); triggering recovery",
+      e.DeviceAddress, e.ElapsedMsSinceLastCallback, e.ConsecutiveStalledChecks);
+    // OnGeneratorStalled accepts either _playbackId or Id — use Id so recovery
+    // fires even if _playbackId hasn't been set yet (capture acquired but not
+    // yet routed through the mixer).
+    OnGeneratorStalled(Id);
   }
 
   private void OnGeneratorStalled(string sourceId)
