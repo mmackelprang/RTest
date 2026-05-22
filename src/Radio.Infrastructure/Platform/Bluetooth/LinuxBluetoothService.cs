@@ -1577,7 +1577,9 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
         format.SampleRate,
         format.Channels,
         (samples, count) => generator.AddSamples(samples.AsSpan(0, count)),
-        _logger);
+        _logger,
+        _options.UseRealtimeCaptureThread,
+        _options.RealtimeCaptureThreadPriority);
       _nativeStream.Start();
       _logger.LogInformation(
         "Started PipeWire native capture (target node serial {Serial}, node name {Node})",

@@ -33,6 +33,8 @@ internal sealed class PipeWireNativeStream : IDisposable
   private readonly int _channels;
   private readonly AudioDataCallback _onAudioData;
   private readonly ILogger _logger;
+  private readonly bool _useRealtime;
+  private readonly int _rtPriority;
 
   private IntPtr _threadLoop;
   private IntPtr _stream;
@@ -49,6 +51,11 @@ internal sealed class PipeWireNativeStream : IDisposable
   private long _onProcessBurstCount; // intervals < 1ms (burst delivery)
   private double _maxOnProcessExecutionMs;
   private DateTime _lastOnProcessLogTime;
+
+  // SCHED_FIFO bump (Plan D, feature-flagged). Applied once on the first
+  // OnProcess callback so we mutate the thread that actually drives the audio
+  // pipeline, not the managed thread that constructed us.
+  private bool _rtPriorityApplied;
 
   /// <summary>
   /// Wall-clock-equivalent stopwatch timestamp of the most recent OnProcess callback.
@@ -86,15 +93,27 @@ internal sealed class PipeWireNativeStream : IDisposable
   /// <param name="channels">Channel count (e.g. 2).</param>
   /// <param name="onAudioData">Called on the PipeWire thread with float samples in [-1,1].</param>
   /// <param name="logger">Logger instance.</param>
+  /// <param name="useRealtime">
+  /// When true, the OnProcess thread is bumped to SCHED_FIFO priority
+  /// <paramref name="rtPriority"/> on the first callback. Feature-flagged via
+  /// <see cref="Radio.Core.Configuration.BluetoothOptions.UseRealtimeCaptureThread"/>.
+  /// </param>
+  /// <param name="rtPriority">
+  /// SCHED_FIFO priority to apply when <paramref name="useRealtime"/> is true.
+  /// Requires the host systemd unit to allow real-time scheduling.
+  /// </param>
   public PipeWireNativeStream(
     uint targetNodeId, int sampleRate, int channels,
-    AudioDataCallback onAudioData, ILogger logger)
+    AudioDataCallback onAudioData, ILogger logger,
+    bool useRealtime = false, int rtPriority = 50)
   {
     _targetNodeId = targetNodeId;
     _sampleRate = sampleRate;
     _channels = channels;
     _onAudioData = onAudioData;
     _logger = logger;
+    _useRealtime = useRealtime;
+    _rtPriority = rtPriority;
 
     // Pin delegate to prevent GC
     _processDelegate = OnProcess;
@@ -271,6 +290,32 @@ internal sealed class PipeWireNativeStream : IDisposable
     if (self == null || self._stream == IntPtr.Zero)
     {
       return;
+    }
+
+    // Apply SCHED_FIFO priority on the first callback (feature-flagged via
+    // BluetoothOptions.UseRealtimeCaptureThread). This must run on the
+    // PipeWire thread that actually drives OnProcess, not the managed thread
+    // that constructed the stream — that's why it lives here rather than in
+    // Start(). Idempotent guard ensures one call per stream lifetime.
+    if (!self._rtPriorityApplied && self._useRealtime)
+    {
+      self._rtPriorityApplied = true;
+      var param = new SchedParam { sched_priority = self._rtPriority };
+      var result = pthread_setschedparam(pthread_self(), SCHED_FIFO, ref param);
+      if (result != 0)
+      {
+        // EPERM (1) is the common failure when systemd LimitRTPRIO is too low.
+        self._logger.LogWarning(
+          "pthread_setschedparam(SCHED_FIFO, {Prio}) failed: errno={Errno}. " +
+          "Verify radio-api.service has LimitRTPRIO>={Prio}.",
+          self._rtPriority, Marshal.GetLastPInvokeError(), self._rtPriority);
+      }
+      else
+      {
+        self._logger.LogInformation(
+          "PipeWire capture thread bumped to SCHED_FIFO priority {Prio}",
+          self._rtPriority);
+      }
     }
 
     var processStart = Stopwatch.GetTimestamp();
