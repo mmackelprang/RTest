@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging.Abstractions;
 using Radio.Infrastructure.Platform.Bluetooth.Native;
 
@@ -59,5 +61,33 @@ public class PipeWireRegistryListenerTests
     listener.Dispose();
 
     Assert.Throws<ObjectDisposedException>(() => listener.Start());
+  }
+
+  /// <summary>
+  /// Regression guard: <c>pw_core_get_registry</c> is declared <c>static inline</c>
+  /// in <c>pipewire/core.h</c> (it expands the <c>spa_interface_call_res</c>
+  /// vtable-dispatch macro), so no real symbol of that name exists in
+  /// <c>libpipewire-0.3.so</c>. Binding the DllImport against <c>pipewire-0.3</c>
+  /// throws <see cref="EntryPointNotFoundException"/> at first call and forces
+  /// the registry listener back onto the periodic <c>pw-cli</c> scrape fallback.
+  /// The fix routes the call through <c>libpw_helper</c>'s
+  /// <c>pw_helper_core_get_registry</c> wrapper. This test locks that wiring in
+  /// so an unwitting "cleanup" doesn't move the binding back to PipeWireLib.
+  /// </summary>
+  [Fact]
+  public void PwCoreGetRegistry_IsBoundToHelperLibrary_NotPipeWireLib()
+  {
+    var method = typeof(PipeWireNative).GetMethod(
+      "pw_core_get_registry",
+      BindingFlags.Public | BindingFlags.Static)!;
+    Assert.NotNull(method);
+
+    var dllImport = method.GetCustomAttribute<DllImportAttribute>()!;
+    Assert.NotNull(dllImport);
+
+    // Must be bound through the helper shared library (which exports a real
+    // pw_helper_core_get_registry symbol that wraps the static-inline call).
+    Assert.Equal("pw_helper", dllImport.Value);
+    Assert.Equal("pw_helper_core_get_registry", dllImport.EntryPoint);
   }
 }
