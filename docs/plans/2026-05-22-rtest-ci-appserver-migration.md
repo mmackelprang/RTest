@@ -274,3 +274,24 @@ Once the PR merges to `main`:
 - FW deploy plan: `D:\prj\FamilyWorkspace\docs\plans\2026-05-17-phase-5b-fw-appserver-deploy.md`.
 - FW operator setup log: `D:\prj\FamilyWorkspace\docs\operator\appserver-setup-2026-05-16.md` (referenced by FW's plan; provides the runner-registration commands).
 - RTest CI run history that motivated this plan: `gh run list --branch main --workflow build.yml` showing the run-failure pattern across the cast/BT arc.
+
+---
+
+## Post-facto amendment — 2026-05-22 (execution findings)
+
+The migration shipped as PR #398 (commit `db437b1`). Three things surfaced during execution that the plan did not anticipate:
+
+1. **User-account runners are repo-scoped, not org-scoped.** The original plan's "Task 0 is Mark's pre-flight check" was intended to validate runner readiness. What it *did not* anticipate: `mmackelprang` is a User account (not an Organization), so even though FW already had a runner on appserver labeled `[self-hosted, linux, x64, appserver]`, that runner was registered against `mmackelprang/FamilyWorkspace` only and was invisible to RTest workflows. **Resolution**: register a SECOND runner on the same physical box, scoped to `mmackelprang/RTest`, with the same labels. The plan's "share the generic `appserver` label" decision held — it's the *registration* that's per-repo, not the label.
+
+2. **The same fine-grained PAT works across all of Mark's repos.** The plan defaulted to "one PAT per repo" per `.env.example`'s wording, but the existing `FW_RUNNER_PAT` is a fine-grained PAT with Actions+Admin scope on all of Mark's repos. The RTest runner reuses `FW_RUNNER_PAT` directly; no second PAT was created. FW's `compose.runner.yml` header comment (FW PR #651) was updated to call this out.
+
+3. **`myoung34/github-runner:latest` is Ubuntu Focal (20.04 / glibc 2.31), not noble.** Focal's glibc is too old for RTest's `libminiaudio.so` (from SoundFlow), which requires GLIBC_2.33+. First CI run on the new runner failed with `version 'GLIBC_2.33' not found`. **Resolution**: pin the rtest-runner image to `myoung34/github-runner:ubuntu-noble` (24.04 / glibc 2.39, matching GH-hosted `ubuntu-latest`). FW's `fw-runner` stays on `:latest` because FW's CI is Python-only and doesn't need newer glibc. The image-tag selection rule is documented in FW's compose-file header for future runners.
+
+**Net result**: PR #398 went green on the second-attempt CI run (after image swap to noble), and is merged. The runner is now compose-managed via FW's `infra/runner/compose.runner.yml` (FW PR #651). Monthly GH Actions minutes for RTest now drop to roughly just `audio-uat.yml` × PR-cycle count — the four migrated workflows no longer charge.
+
+**Rollback path unchanged**: revert PR #398 → `runs-on:` lines flip back to `ubuntu-latest`. The runner container can be left running (idle, no harm); or de-registered + container removed.
+
+**Plan template updates for the next migration** — a future "migrate Project X to appserver" plan should incorporate these three findings as locked decisions instead of discovering them:
+- Add a Task: "register a per-repo runner via the existing PAT (PAT is shared across Mark's repos)".
+- Default the runner image to `:ubuntu-noble` for any .NET / native-deps project; `:latest` for pure-language projects only after verifying glibc requirements.
+- Reference FW's `compose.runner.yml` as the canonical place to add the new service block.
