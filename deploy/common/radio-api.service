@@ -8,6 +8,32 @@ Type=simple
 User=radio
 Group=audio
 WorkingDirectory=/opt/radio-console
+
+# === Audio-thread isolation (added 2026-05-22, Plan D) ===
+# Pin to cores 2,3 (leave 0,1 for OS + journald + sshd + radio-web).
+# Verify against `nproc` on each deployment target — radio (N100) has 4 cores;
+# Pi 5 has 4 cores; both layouts identical.
+CPUAffinity=2 3
+
+# Boost scheduling priority. Requires LimitNICE below to be actually grant-able.
+Nice=-5
+LimitNICE=-5:0
+
+# IO best-effort near-realtime (class 2, priority 2). Class 1 (realtime) is
+# usually overkill for application audio; class 2 + low prio matches CCRMA/JACK
+# guidance.
+IOSchedulingClass=2
+IOSchedulingPriority=2
+
+# Allow process to use SCHED_FIFO up to priority 99 if it requests it via
+# pthread_setschedparam (feature-flagged behind BluetoothOptions.UseRealtimeCaptureThread,
+# default off). Without this limit the call would fail with EPERM.
+LimitRTPRIO=99
+
+# Allow mlock for any future low-latency pages (not used today; cheap to allow).
+LimitMEMLOCK=infinity
+# === end audio-thread isolation ===
+
 ExecStart=/opt/radio-console/api/Radio.API
 Restart=always
 RestartSec=10

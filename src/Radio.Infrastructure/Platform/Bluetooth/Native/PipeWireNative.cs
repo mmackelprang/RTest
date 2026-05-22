@@ -177,5 +177,28 @@ internal static class PipeWireNative
   }
 
   public const uint PW_STREAM_EVENTS_VERSION = 2;
+
+  // --- POSIX thread scheduling (Plan D, feature-flagged via
+  //     BluetoothOptions.UseRealtimeCaptureThread) ---
+  //
+  // glibc 2.34+ folded libpthread into libc. We can no longer rely on
+  // "libpthread.so.0" being present on every distro (notably Pi OS Bookworm
+  // has it, but newer Ubuntu/Debian ship libc-only). pthread_self and
+  // pthread_setschedparam are now exported from libc, so DllImport against
+  // "libc" works on every distro we ship to.
+
+  [StructLayout(LayoutKind.Sequential)]
+  public struct SchedParam
+  {
+    public int sched_priority;
+  }
+
+  public const int SCHED_FIFO = 1;
+
+  [DllImport("libc", EntryPoint = "pthread_self")]
+  public static extern IntPtr pthread_self();
+
+  [DllImport("libc", EntryPoint = "pthread_setschedparam", SetLastError = true)]
+  public static extern int pthread_setschedparam(IntPtr thread, int policy, ref SchedParam param);
 }
 #endif

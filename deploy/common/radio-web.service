@@ -8,6 +8,13 @@ Type=simple
 User=radio
 Group=radio
 WorkingDirectory=/opt/radio-console
+
+# === Complement to radio-api's pin to cores 2,3 (Plan D, 2026-05-22) ===
+# Keep radio-web on cores 0,1 so it doesn't crowd the audio cores.
+CPUAffinity=0 1
+# Web is not audio-critical — default scheduling priority.
+# === end ===
+
 ExecStart=/opt/radio-console/web/Radio.Web
 Restart=always
 RestartSec=10

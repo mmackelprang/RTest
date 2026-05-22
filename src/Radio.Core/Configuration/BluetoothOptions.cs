@@ -114,6 +114,23 @@ public class BluetoothOptions
   /// the previous scan.
   /// </summary>
   public int CaptureNodeRescanIntervalMs { get; set; } = 1000;
+
+  /// <summary>
+  /// When true, the PipeWire capture thread is bumped to SCHED_FIFO priority
+  /// <see cref="RealtimeCaptureThreadPriority"/> via pthread_setschedparam on
+  /// the first OnProcess callback. Requires the host systemd unit to allow
+  /// real-time scheduling (LimitRTPRIO &gt;= priority). Linux only — ignored
+  /// on Windows. Default false; turn on only after measurement confirms the
+  /// systemd-level isolation in Plan D is insufficient.
+  /// </summary>
+  public bool UseRealtimeCaptureThread { get; set; } = false;
+
+  /// <summary>
+  /// SCHED_FIFO priority to apply when <see cref="UseRealtimeCaptureThread"/>
+  /// is true. Values 50-70 are typical for application audio (above default
+  /// kernel IRQ threads at ~50, below kernel critical threads at 99). Default 50.
+  /// </summary>
+  public int RealtimeCaptureThreadPriority { get; set; } = 50;
 }
 
 /// <summary>
