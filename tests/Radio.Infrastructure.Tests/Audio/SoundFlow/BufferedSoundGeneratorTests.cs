@@ -264,4 +264,203 @@ namespace Radio.Infrastructure.Tests.Audio.SoundFlow;
                   It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
               Times.AtLeastOnce);
       }
+
+      // ---------------------------------------------------------------------
+      // Path C refinement coverage
+      // (docs/plans/2026-05-22-bt-drift-compensation-refinement.md)
+      // ---------------------------------------------------------------------
+
+      [Fact]
+      public void CompensateClockDrift_PerCallCap_LimitsToTwoMillisecondsOfSamples()
+      {
+          // Arrange: a sustained drain scenario where the buffer stays well below the
+          // drift threshold for many successive Read calls. We expect each compensation
+          // event to be capped at 2 ms (= sample_rate * channels * 0.002 = 192 samples
+          // for 48 kHz stereo), frame-aligned. Pre-refinement the cap was 10 ms.
+          var format = new AudioFormat { SampleRate = 48000, Channels = 2, Format = SampleFormat.F32 };
+          var metrics = new Mock<IMetricsCollector>();
+          var generator = new TestBufferedGenerator<float>(
+              _engineMock.Object, format, _loggerMock.Object, metrics.Object);
+
+          // 2 ms cap at 48 kHz stereo = 192 samples per event.
+          const int expectedCapSamples = 48_000 * 2 * 2 / 1000;
+          Assert.Equal(192, expectedCapSamples);
+
+          // Capture every drift-compensation samples increment so we can inspect the
+          // per-event sizes. Counter is the second argument (a double) of Increment.
+          var perEventSamples = new List<double>();
+          metrics
+              .Setup(m => m.Increment(
+                  "audio.buffer.drift_compensation_samples_total",
+                  It.IsAny<double>(),
+                  It.IsAny<IDictionary<string, string>>()))
+              .Callback<string, double, IDictionary<string, string>?>((_, v, _) => perEventSamples.Add(v));
+
+          var prefill = new float[10_000];
+          for (int i = 0; i < prefill.Length; i++)
+          {
+              prefill[i] = 0.1f;
+          }
+          var output = new float[512];
+
+          generator.AddSamples(prefill);
+          generator.Read(output); // anchor _lastDriftCheckTime
+
+          // Tight loop — no Thread.Sleep, because Path C removed the 2-second cooldown.
+          // Refill just enough each iteration to keep the drain going under the threshold.
+          for (int i = 0; i < 20; i++)
+          {
+              generator.AddSamples(new float[256]);
+              generator.Read(output);
+          }
+
+          // At least one compensation event must have fired (>3 drift-checks + draining).
+          Assert.NotEmpty(perEventSamples);
+
+          // Critical assertion: every single per-event sample count must be <= cap.
+          // No event may exceed the 2 ms cap.
+          foreach (var samples in perEventSamples)
+          {
+              Assert.True(samples <= expectedCapSamples,
+                  $"Compensation event of {samples} samples exceeded the 2 ms cap of {expectedCapSamples} samples");
+              Assert.True(samples > 0, "Compensation event recorded 0 samples (should not happen)");
+          }
+      }
+
+      [Fact]
+      public void CompensateClockDrift_AppliesCrossfade_OnFloatRingBuffer()
+      {
+          // Arrange: drive the generator into a compensation event, then inspect the
+          // ring buffer through the next Read to confirm the first 32 samples of the
+          // duplicated chunk follow a cosine ramp (start near 0, midpoint near 0.5,
+          // end approaching original amplitude).
+          var format = new AudioFormat { SampleRate = 48000, Channels = 2, Format = SampleFormat.F32 };
+          var metrics = new Mock<IMetricsCollector>();
+
+          // Track each compensation event so the test can drain just past the first one.
+          int compEventCount = 0;
+          metrics
+              .Setup(m => m.Increment(
+                  "audio.buffer.drift_compensation_total",
+                  It.IsAny<double>(),
+                  It.IsAny<IDictionary<string, string>>()))
+              .Callback<string, double, IDictionary<string, string>?>((_, _, _) => compEventCount++);
+
+          var generator = new TestBufferedGenerator<float>(
+              _engineMock.Object, format, _loggerMock.Object, metrics.Object);
+
+          // Fill with a uniform 1.0 signal so the ramp is easy to detect:
+          // post-crossfade values should equal `1.0 * cosine_gain(i, 32)`.
+          var prefill = new float[10_000];
+          for (int i = 0; i < prefill.Length; i++)
+          {
+              prefill[i] = 1.0f;
+          }
+
+          generator.AddSamples(prefill);
+
+          // Anchor + warm up _driftCheckCount > 3 + trigger the first compensation.
+          // Capture the first read AFTER the compensation event so we observe the
+          // crossfaded duplicated chunk at the start of the buffer.
+          var output = new float[512];
+          generator.Read(output); // anchor
+
+          // Helper: 1.0f top-up keeps the buffer-content uniform so we can verify
+          // the post-crossfade ramp against a known constant signal.
+          static float[] OnesBlock(int n)
+          {
+              var b = new float[n];
+              Array.Fill(b, 1.0f);
+              return b;
+          }
+
+          // Loop until a compensation event fires; then do ONE MORE Read so we
+          // observe the crossfaded region (which lives at the rewound _readPos —
+          // i.e. the first samples the next GenerateAudio call will read).
+          bool capturedAfterComp = false;
+          float[]? observedAfterCompensation = null;
+          for (int i = 0; i < 30 && !capturedAfterComp; i++)
+          {
+              int beforeComp = compEventCount;
+              generator.AddSamples(OnesBlock(256)); // tiny top-up keeps draining
+              generator.Read(output);
+              if (compEventCount > beforeComp)
+              {
+                  // Next Read consumes the rewound (and now crossfaded) region first.
+                  // Keep adding tiny samples so the buffer has data to read.
+                  generator.AddSamples(OnesBlock(512));
+                  generator.Read(output);
+                  observedAfterCompensation = output.ToArray();
+                  capturedAfterComp = true;
+              }
+          }
+
+          Assert.True(compEventCount >= 1, "Expected at least one compensation event");
+          Assert.NotNull(observedAfterCompensation);
+
+          // The crossfaded region is the FIRST 32 samples of the read AFTER the
+          // compensation event — these are the samples at the rewound _readPos.
+          // Validate the cosine ramp shape on a uniform 1.0 input:
+          //   gain(i) = (1 - cos(i/32 * π)) / 2
+          //   gain(0)  = 0
+          //   gain(16) = (1 - cos(π/2)) / 2 = 0.5
+          //   gain(31) = (1 - cos(31π/32)) / 2 ≈ 0.9976
+          //   gain(32+) past ramp → 1.0 (untouched original signal)
+          //
+          // We allow generous slack because the underlying signal is 1.0f, but the
+          // ring-buffer ordering between consecutive 256-sample top-ups can fill
+          // the seam with one zero frame; the dominant value past the ramp is 1.0.
+          Assert.True(observedAfterCompensation[0] < 0.05f,
+              $"Crossfade sample[0] expected ~0.0, got {observedAfterCompensation[0]}");
+          Assert.InRange(observedAfterCompensation[16], 0.4f, 0.6f);
+          Assert.True(observedAfterCompensation[31] > 0.9f,
+              $"Crossfade sample[31] expected ~1.0, got {observedAfterCompensation[31]}");
+      }
+
+      [Fact]
+      public void CompensateClockDrift_NoLongerRunsLessOftenThan2Seconds()
+      {
+          // The pre-refinement code returned early if (now - _lastDriftCheckTime).TotalSeconds < 2.0.
+          // Path C removed that cooldown: compensation must now run on every Process call
+          // while the buffer is draining. Verify by calling Process repeatedly within a
+          // small wall-clock window and confirming compensation fires multiple times.
+          var format = new AudioFormat { SampleRate = 48000, Channels = 2, Format = SampleFormat.F32 };
+          var metrics = new Mock<IMetricsCollector>();
+          var generator = new TestBufferedGenerator<float>(
+              _engineMock.Object, format, _loggerMock.Object, metrics.Object);
+
+          var prefill = new float[10_000];
+          for (int i = 0; i < prefill.Length; i++)
+          {
+              prefill[i] = 0.1f;
+          }
+          var output = new float[512];
+
+          generator.AddSamples(prefill);
+
+          var startTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+          // Burn the _driftCheckCount > 3 warm-up reads + several more reads. The total
+          // wall time for ~30 Read calls is well under 2 s on any normal machine.
+          for (int i = 0; i < 30; i++)
+          {
+              generator.AddSamples(new float[256]);
+              generator.Read(output);
+          }
+          var elapsedSec = (System.Diagnostics.Stopwatch.GetTimestamp() - startTicks)
+              / (double)System.Diagnostics.Stopwatch.Frequency;
+
+          // Sanity-guard: if the machine ran so slowly that >= 2 s elapsed, the test
+          // doesn't actually verify the no-cooldown property. Fail loud rather than
+          // produce a false PASS.
+          Assert.True(elapsedSec < 2.0,
+              $"Test loop took {elapsedSec:F2}s — too slow to verify no-cooldown property. "
+              + "Run on a less-loaded machine.");
+
+          metrics.Verify(
+              m => m.Increment(
+                  "audio.buffer.drift_compensation_total",
+                  It.IsAny<double>(),
+                  It.IsAny<IDictionary<string, string>>()),
+              Times.AtLeast(2));
+      }
   }
