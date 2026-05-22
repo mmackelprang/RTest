@@ -11,6 +11,7 @@ using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Infrastructure.Platform.Bluetooth.Native;
 using Radio.Metrics;
@@ -21,7 +22,7 @@ using Tmds.DBus;
 
 namespace Radio.Infrastructure.Platform.Bluetooth;
 
-internal sealed class LinuxBluetoothService : IBluetoothService
+internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamSnapshotSource
 {
   private readonly ILogger _logger;
   private readonly BluetoothOptions _options;
@@ -166,11 +167,49 @@ internal sealed class LinuxBluetoothService : IBluetoothService
   public event EventHandler<TimeSpan>? PositionChanged;
   public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged;
   public event EventHandler? CaptureStreamRecovered;
+  public event EventHandler<CaptureStreamStalledEventArgs>? CaptureStreamStalled;
   public event EventHandler<CaptureNodeAvailableEventArgs>? CaptureNodeAvailable;
   // A2DP codec observability — raised by EmitCodecAsync after each successful
   // MediaTransport1.{Codec,Configuration} read (on attach + on PropertiesChanged).
   public event EventHandler<A2dpCodecChangedEventArgs>? A2dpCodecChanged;
   public float? DeviceVolume { get; private set; }
+
+  /// <summary>
+  /// Snapshot for <see cref="BluetoothCaptureWatchdog"/>: connected device
+  /// address + elapsed milliseconds since the native capture stream's last
+  /// OnProcess callback. Returns null when no native capture stream is active
+  /// (no connected device, capture intentionally stopped, or running pw-record
+  /// fallback). Implements <see cref="ICaptureStreamSnapshotSource"/>.
+  /// </summary>
+  public (string Address, long ElapsedMs)? GetCaptureStreamSnapshot()
+  {
+    var stream = _nativeStream;
+    var device = ConnectedDevice;
+    if (stream == null || device == null)
+    {
+      return null;
+    }
+    return (device.Address, stream.MillisecondsSinceLastOnProcess());
+  }
+
+  /// <summary>
+  /// Invoked by <see cref="BluetoothCaptureWatchdog"/> when a stall is
+  /// confirmed. Raises <see cref="CaptureStreamStalled"/> and increments the
+  /// detection metric. Implements <see cref="ICaptureStreamSnapshotSource"/>.
+  /// </summary>
+  public void RaiseCaptureStreamStalled(string address, long elapsedMs, int consecutiveChecks)
+  {
+    _metricsCollector?.Increment("bluetooth.capture_stall_detected_total");
+    _logger.LogWarning(
+      "BluetoothCaptureWatchdog: stall detected for {Address}, elapsed {Elapsed}ms after {N} consecutive checks",
+      address, elapsedMs, consecutiveChecks);
+    CaptureStreamStalled?.Invoke(this, new CaptureStreamStalledEventArgs
+    {
+      DeviceAddress = address,
+      ElapsedMsSinceLastCallback = elapsedMs,
+      ConsecutiveStalledChecks = consecutiveChecks,
+    });
+  }
 
   private async Task MonitorBtPipelineAsync(CancellationToken cancellationToken)
   {

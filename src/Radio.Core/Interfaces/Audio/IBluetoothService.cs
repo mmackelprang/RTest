@@ -122,6 +122,13 @@ public interface IBluetoothService : IAsyncDisposable
   event EventHandler? CaptureStreamRecovered;
 
   /// <summary>
+  /// Raised when the watchdog detects that the BT capture stream's OnProcess callback
+  /// has been silent past the configured threshold (FM-BT-3 detection).
+  /// Subscribers should attempt recovery via the same path used for OnGeneratorStalled.
+  /// </summary>
+  event EventHandler<CaptureStreamStalledEventArgs>? CaptureStreamStalled;
+
+  /// <summary>
   /// Raised when a previously-absent PipeWire BT capture node has appeared for the
   /// connected device. Fires once per appearance; subscribers wishing to act repeatedly
   /// must re-subscribe.
@@ -261,6 +268,23 @@ public class BluetoothVolumeChangedEventArgs : EventArgs
 {
   /// <summary>Normalized volume (0.0 to 1.0).</summary>
   public required float Volume { get; init; }
+}
+
+/// <summary>
+/// Raised by the BluetoothCaptureWatchdog when the OnProcess callback on the
+/// active PipeWire capture stream has been silent past the configured threshold
+/// for the configured number of consecutive watchdog ticks (FM-BT-3 detection).
+/// </summary>
+public class CaptureStreamStalledEventArgs : EventArgs
+{
+  /// <summary>BlueZ device address of the currently connected device (e.g., "AA:BB:CC:DD:EE:FF").</summary>
+  public required string DeviceAddress { get; init; }
+
+  /// <summary>Elapsed milliseconds since the most recent OnProcess callback fired.</summary>
+  public required long ElapsedMsSinceLastCallback { get; init; }
+
+  /// <summary>Number of consecutive watchdog ticks above threshold when the stall was raised.</summary>
+  public required int ConsecutiveStalledChecks { get; init; }
 }
 
 /// <summary>

@@ -77,6 +77,10 @@ public class BluetoothAutoSwitchServiceTests
     public Task<A2dpCodecInfo?> GetA2dpCodecInfoAsync(string deviceAddress, CancellationToken ct = default)
       => Task.FromResult<A2dpCodecInfo?>(null);
 
+    // Capture-stream stall — added by PR #390 (capture watchdog); the autoswitch tests do not
+    // exercise watchdog behavior, so a permanent never-raises stub is correct here.
+    public event EventHandler<CaptureStreamStalledEventArgs>? CaptureStreamStalled { add { } remove { } }
+
     public Task<bool> StartAsync(string deviceName, CancellationToken cancellationToken = default)
       => Task.FromResult(true);
     public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;

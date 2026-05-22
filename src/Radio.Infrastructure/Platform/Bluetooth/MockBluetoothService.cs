@@ -42,6 +42,7 @@ public sealed class MockBluetoothService : IBluetoothService
         public event EventHandler<TimeSpan>? PositionChanged { add { } remove { } }
         public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged { add { } remove { } }
         public event EventHandler? CaptureStreamRecovered { add { } remove { } }
+        public event EventHandler<CaptureStreamStalledEventArgs>? CaptureStreamStalled { add { } remove { } }
         // Mock never raises CaptureNodeAvailable — the platform manages capture-node visibility.
         public event EventHandler<CaptureNodeAvailableEventArgs>? CaptureNodeAvailable { add { } remove { } }
         public float? DeviceVolume => null;

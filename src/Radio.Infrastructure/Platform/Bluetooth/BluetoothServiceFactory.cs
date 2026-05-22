@@ -80,6 +80,7 @@ internal sealed class NullBluetoothService : IBluetoothService
   public event EventHandler<TimeSpan>? PositionChanged { add { } remove { } }
   public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged { add { } remove { } }
   public event EventHandler? CaptureStreamRecovered { add { } remove { } }
+  public event EventHandler<CaptureStreamStalledEventArgs>? CaptureStreamStalled { add { } remove { } }
   // Null service never raises CaptureNodeAvailable.
   public event EventHandler<CaptureNodeAvailableEventArgs>? CaptureNodeAvailable { add { } remove { } }
   public float? DeviceVolume => null;
