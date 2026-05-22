@@ -35,8 +35,8 @@ Four columns in every matrix in this document:
 |---|---|---|
 | **RTest-HM** | RTest HttpMp3 mode | RTest's default — closer to "how most Cast audio works" |
 | **RTest-DC** | RTest DirectChannel mode | RTest's experimental mode — pure custom-receiver, push protocol |
-| **TuneIn** | TuneIn Radio Cast app | Closest real-world analog: continuous internet radio with custom CAF receiver |
-| **Plex** | Plex (audio cast via Plex receiver) | Public engineering blog detail, custom CAF receiver, mixed continuous + queued |
+| **SoundCloud** | SoundCloud web/Cast playback | Strongest public engineering documentation for continuous-audio Cast (HLS-MSE, configurable buffer, constrained-memory device handling). Swap from framework's TuneIn slot authorized by §8 — TuneIn corpus is sparse. See https://developers.soundcloud.com/blog/playback-on-web-at-soundcloud/ |
+| **Plex** | Plex (audio cast via Plex receiver) | Public engineering blog detail + community-documented Chromecast profile; transcoded-MP3 byte stream into native `<audio>` element |
 
 ---
 
@@ -52,6 +52,31 @@ Each filled cell carries an evidence tag so the reader knows what they're lookin
 
 Findings without an evidence tag should not appear in the filled doc.
 
+### Measurement-discipline tier (per speculative idea in §7) — *added by retrofit 2026-05-22*
+
+Every speculative idea in §7 is structured as a **testable hypothesis**, not a wish. The §7 ideas below were originally written without measurement scaffolding; this retrofit adds five mandatory blocks to each so a debug agent can demonstrably show whether a coding-agent change is an *actual* improvement. The companion BT doc ([`2026-05-22-bt-audio-stabilization.md`](2026-05-22-bt-audio-stabilization.md)) bakes the same discipline in from the start.
+
+1. **Evidence motivating this** — a pointer to a concrete *observable phenomenon* in the current system, not "this is a known pattern from elsewhere." Without this block, the idea is speculation and gets dropped.
+
+2. **Baseline probe** — an exact, reproducible measurement of the current system that captures the phenomenon. Must be:
+   - **Scripted** — a one-liner shell command, a `python3 scripts/...` invocation, or a labeled DevTools sequence. Not a paragraph of prose.
+   - **Reproducible** — runs the same way each time, takes the same arguments, produces the same artifact shape.
+   - **Bounded** — runs for a known duration / sample size, so before/after can be compared statistically.
+
+3. **Post-change probe** — the *same* probe, run after the change is applied. The probe identity is what makes before/after comparable; any change to the probe between runs invalidates the comparison.
+
+4. **Success criterion** — a quantitative pass/fail bar. No success criterion = no measurement = idea stays in research, doesn't go to queue.
+
+5. **Debug-agent verification steps** — a copy-pasteable sequence a debug agent (or a coding agent's CI step) can run to confirm the success criterion. Numbered, exact commands, no judgment calls. Must produce a single artifact (a number, a boolean, a side-by-side comparison) that the agent can include in its report.
+
+Per-probe note: where a probe requires telemetry that doesn't yet exist in RTest (e.g. aggregating `bufferAhead` values received in `pong` messages), the probe declares the instrumentation as a prerequisite step inside the verification block. The instrumentation is part of the *research deliverable*, not part of the change being measured — it must exist *before* the baseline run.
+
+### Concurrent-load discipline — *added by 2026-05-22 update*
+
+[MEMORY explicitly documents](../../C:/Users/mark/.claude/projects/D--prj-RTest-RTest/memory/MEMORY.md) that on the Ubuntu N100 production box, audio distortion correlates with SSH activity, journald log queries, and SQLite DB reads — the host is resource-constrained and the audio pipeline shares CPU/IO with background work. Any audio probe that captures *only* audio-layer metrics will miss load-correlated stutters and will therefore credit a change with "fixing" a stutter that recurs the next time the box is under load.
+
+**Every baseline and post-change probe in §7 must capture `PROBE-SYS-LOAD` concurrently** (see §7's shared probe-scaffolding table). The probe is defined once and referenced by every idea. Post-processing correlates audio-layer events against load events; the success criterion for every idea includes a load-correlation check where applicable. A change that lowers stutter under light load but does not lower it under heavy load has only solved half the problem — and the doc records both halves so the reader can see which.
+
 ### Tools needed for the research execution pass
 - A Chromecast on the LAN (we have at least one — `_defaultCastDevice` in RTest's config).
 - TuneIn + Plex installed on a controller device (phone or tablet) able to initiate a cast session.
@@ -65,7 +90,7 @@ Receivers can change between releases. Date-stamp every receiver-walked finding 
 
 ## 4. Failure-mode catalog (the diagnostic spine)
 
-Seven modes, each independently capable of producing the *click-pause-resume* the user hears. The matrix below is filled per system × mode during the research pass.
+Eight modes, each independently capable of producing the *click-pause-resume* the user hears. The matrix below is filled per system × mode during the research pass.
 
 ### Modes
 
@@ -78,6 +103,7 @@ Seven modes, each independently capable of producing the *click-pause-resume* th
 | **FM5** | Network / transport jitter | TCP head-of-line on Cast bus, WiFi retransmits, mDNS contention | Bursty stutters, sometimes 1+ second; correlates with other LAN activity |
 | **FM6** | Codec / format boundary glitches | A chunk straddles an MP3 frame, AAC ADTS sync, or PCM block boundary in a way the decoder can't seamlessly join | Periodic pops at the chunk interval (every 100 ms in DC mode; every ~46 ms per MP3 frame in HM mode) |
 | **FM7** | Receiver app lifecycle event | Chromecast OS evicts/restarts the receiver under memory pressure or backgrounding; custom-HTML receivers especially vulnerable | Long gap (1+ s) followed by playback resuming. Rare but real. |
+| **FM8** | Sender-host resource contention | `radio-api` process competes with concurrent system activity (journald log volume, SQLite WAL checkpoints, SSH sessions querying logs/DB, radio-web on same box, fingerprinting backfill at 15 s interval) for CPU / IO / memory on the constrained Ubuntu N100 host; jitter spikes in the sender pipeline correlate with these external events | Same audible result as FM2 but root cause is *external* to the audio code path — fix targets system isolation (CPU pinning, IO niceness, async logging, gated background work), not the audio pipeline itself |
 
 ### Failure-mode matrix (to be filled)
 
@@ -87,15 +113,16 @@ For each cell:
 - **Mitigation** — concrete: chunk size, buffer depth, codec, scheduling approach
 - **Evidence** — `[source-walked]`, `[doc-cited]`, or `[inferred-from-behavior]`
 
-| Mode | RTest-HM | RTest-DC | TuneIn | Plex |
+| Mode | RTest-HM | RTest-DC | SoundCloud | Plex |
 |---|---|---|---|---|
-| FM1 — Receiver underrun | _to fill_ | _to fill_ | _to fill_ | _to fill_ |
-| FM2 — Sender pipeline jitter | _to fill_ | _to fill_ | _to fill_ | _to fill_ |
-| FM3 — Clock drift / resampling | _to fill_ | _to fill_ | _to fill_ | _to fill_ |
-| FM4 — Receiver scheduling slips | _to fill_ | _to fill_ | _to fill_ | _to fill_ |
-| FM5 — Network / transport jitter | _to fill_ | _to fill_ | _to fill_ | _to fill_ |
-| FM6 — Codec / boundary glitches | _to fill_ | _to fill_ | _to fill_ | _to fill_ |
-| FM7 — Receiver lifecycle | _to fill_ | _to fill_ | _to fill_ | _to fill_ |
+| FM1 — Receiver underrun | **Exposure:** Y — `StreamType.Live` means receiver cannot seek/refill; depends entirely on sender pacing. **Mitigation:** Receiver forces play() at 3.0 s of buffered audio (server pre-burst, then real-time +10 s cap). Server CBR 320 kbps MP3 supplies a steady byte rate; ring-buffer reader emits 4 KB silence (~21 ms) when no real audio is available so the HTTP stream never goes dry. [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/HttpStreamOutput.cs:L404-L422,L429-L443; docs/receiver.html:L50-L84; src/Radio.Infrastructure/Audio/SoundFlow/TappedOutputStream.cs:L174-L184] | **Exposure:** Y — receiver pre-buffers only `BUFFER_BEFORE_PLAY = 3` chunks (~300 ms at 100 ms chunks) before starting Web Audio scheduling; once playing, any sender stall drains the AudioBuffer queue silently because there is no continuation buffer in the receiver beyond what has been scheduled. **Mitigation:** Sender reader lag default 1.0 s of ring-buffer history; receiver `MAX_BUFFER_AHEAD = 3.0 s` cap (drops chunks above that). Empty audio engine returns 4 KB silence per `ReadForReader` call so the streaming loop never blocks. [source-walked, sha=3b06f79, docs/receiver-direct-channel.html:L41-L42,L253-L260; src/Radio.Infrastructure/Audio/Outputs/DirectCastStreamingService.cs:L253-L272; src/Radio.Core/Configuration/AudioOutputOptions.cs:L180-L194] | **Exposure:** N — Shaka Player default `bufferingGoal = 10 s` keeps the receiver an order of magnitude further ahead of underrun than RTest-DC; SoundCloud's blog explicitly mentions "configurable buffer length and cache size, work on devices with constrained memory such as Chromecast." HLS segments are 4–6 s each, so even one missed segment fetch leaves margin. **Mitigation:** Shaka's `rebufferingGoal = 2 s` floor + 10 s headroom + adaptive variant switching to lower bitrate on bandwidth drop. [doc-cited, https://developers.soundcloud.com/blog/playback-on-web-at-soundcloud/, 2026-05-21; https://shaka-player-demo.appspot.com/docs/api/tutorial-network-and-buffering-config.html, 2026-05-21] | **Exposure:** Low when direct-streaming MP3; medium when transcoding (transcoder stalls dominate). Native `<audio>` element manages buffer via Chrome's MediaSource heuristic (≤2 MB MSE cap on audio-only Cast). **Mitigation:** Chrome `<audio>` element auto-buffers until cap; MP3 self-synchronizing frames let decoder resume cleanly after gap. [community-reported, https://forums.plex.tv/t/why-is-my-plex-transcoding-to-play-on-chromecast/223264, 2026-05-21; doc-cited, https://developers.google.com/cast/docs/audio, 2026-05-21] |
+| FM2 — Sender pipeline jitter | **Exposure:** Y — single-threaded per-client loop in `HandleClientAsync`: blocking PCM read, then synchronous LAME `mp3Writer.Write` (encode), then `OutputStream.Flush()`, then `Task.Delay` for pacing. Any LAME GC pause or socket Flush stall blocks the next read. No producer/consumer split. **Mitigation:** Real-time pacing only delays after `aheadSec > 10.0 s`, so up to 10 s of slack absorbs jitter; ring buffer holds 5 s of audio at the engine side. [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/HttpStreamOutput.cs:L396-L491; src/Radio.Infrastructure/Audio/SoundFlow/TappedOutputStream.cs:L46-L56] | **Exposure:** Y (high) — `StreamingLoopAsync` awaits `_channel.SendMessageAsync` for every chunk before reading/encoding the next one. SharpCaster's `SendAsync` is a TCP write on the Cast control socket; if that socket blocks (LAN congestion, Cast device GC), encoding stops and the receiver's 3 s buffer-ahead cap drains. JSON serialization + Base64 (~25.7 KB per 100 ms chunk) happens on the same task. **Mitigation:** Per-chunk pacing via `Stopwatch` enforces "no faster than chunkMs"; send errors logged but loop just continues with a 100 ms delay. No queue, no parallelism. [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/DirectCastStreamingService.cs:L317-L490,L439-L457; src/Radio.Infrastructure/Audio/Outputs/DirectCastAudioChannel.cs:L48-L51] | **Exposure:** N/A — sender is SoundCloud's CDN (pre-encoded HLS segments), not a user-controlled live pipeline. There is no encode-and-push step; the receiver pulls already-segmented content. [doc-cited, https://developers.soundcloud.com/blog/playback-on-web-at-soundcloud/, 2026-05-21] | **Exposure:** Y — Plex Media Server transcoding stalls are the *dominant* user-reported Cast buffering cause; transcoder CPU spikes, disk I/O on library scan, or transcode-target mismatch all manifest as receiver-side rebuffering. **Mitigation:** Direct-stream when source is MP3 (no transcode); otherwise rely on Chrome `<audio>` element buffering to absorb short stalls. [community-reported, https://support.plex.tv/articles/201575036-why-is-my-video-stream-buffering/, 2026-05-21] |
+| FM3 — Clock drift / resampling | **Exposure:** Y — sender's PCM source rate is 48 000 Hz (audio engine); MP3 encoded at the same rate. Pacing uses wall-clock `DateTime.UtcNow` vs accumulated PCM bytes, no PTS in the stream. Default Media Receiver runs its own audio clock and resamples on output. Drift across hours possible; no PTS-aware sync. **Mitigation:** None in code beyond the 10 s server-side cushion and receiver's natural elastic buffering (~3 s); receiver does not signal back drift. [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/HttpStreamOutput.cs:L415-L481; src/Radio.Core/Configuration/AudioOutputOptions.cs:L222-L235] | **Exposure:** Y (explicit and acknowledged) — receiver comment "sender's wall clock and the AudioContext hardware clock drift at ~2.3 ms/sec" without correction. Sender's `Stopwatch` pacing vs receiver's `audioCtx.currentTime` are independent oscillators. **Mitigation:** Receiver drops whole chunks when `bufferAhead > MAX_BUFFER_AHEAD = 3.0 s` (no resampling, just discard) — produces an audible jump every ~22 minutes at 2.3 ms/sec drift. Sender does not resample either. `transitDelay` and `bufferAhead` are reported back via pong but not used to feedback-correct rate. [source-walked, sha=3b06f79, docs/receiver-direct-channel.html:L146-L159,L65-L77,L226-L233; src/Radio.Infrastructure/Audio/Outputs/DirectCastStreamingService.cs:L357-L410] | **Exposure:** N — HLS PROGRAM-DATE-TIME alignment + MSE-paced playback. Each segment carries its own presentation timestamp; receiver clock is master and the player schedules against it. No sender-side clock to drift against. [doc-cited, https://developers.google.com/cast/docs/web_receiver/streaming_protocols, 2026-05-21] | **Exposure:** N — Plex serves an HTTP byte-stream of MP3; the receiver's `<audio>` element is decoder-paced (it pulls only what it consumes). No sender-side timing model, so there is nothing to drift against. [community-reported, https://gist.github.com/648f9f3dbf0436f72cd0, 2026-05-21] |
+| FM4 — Receiver scheduling slips | **Exposure:** N for this mode — the HM receiver is the Default Media Receiver / `cast-media-player` element; scheduling is handled by Chrome's `<video>`/`<audio>` element pipeline, which is C++ and decoupled from JS main thread. Our custom `receiver.html` only adds a `setInterval(500 ms)` `media.play()` force-loop until buffered ≥ 3.0 s. **Mitigation:** Once `play()` succeeds the JS loop exits; no per-chunk JS scheduling. [source-walked, sha=3b06f79, docs/receiver.html:L50-L88] | **Exposure:** Y (high) — every chunk creates a new `AudioBufferSourceNode` and calls `source.start(nextPlayTime)` with absolute scheduling against `audioCtx.currentTime`. Decode (Int16 → Float32 conversion via for-loop over `view.getInt16` for every sample) runs on the JS main thread. If the main thread is busy when a message arrives (e.g., another message decode, status update DOM write at L347), `nextPlayTime` may already be in the past → branch at L141 resets to `now + 0.02` and the audio queue has a gap. **Mitigation:** Buffer-ahead of 3 s gives slack; status DOM updates only every 100 received chunks (L266-L278); no other heavy work. [source-walked, sha=3b06f79, docs/receiver-direct-channel.html:L107-L195,L141-L144,L162-L170] | **Exposure:** Low — HLS-via-MSE drives a native `<audio>` element; sample-accurate scheduling lives in Chrome's C++ media pipeline. Shaka's JS work is segment-fetch + MSE append (coarse, ~5 s cadence), not per-chunk Web Audio scheduling. [doc-cited, https://developer.bitmovin.com/playback/docs/custom-chromecast-cafv3-receiver-use-cases, 2026-05-21] | **Exposure:** Low — Plex's Chromecast profile uses `<audio>` element + MP3 byte-stream, not Web Audio API. Per-frame scheduling happens in Chrome's media pipeline; no JS main-thread risk. [community-reported, https://gist.github.com/648f9f3dbf0436f72cd0, 2026-05-21] |
+| FM5 — Network / transport jitter | **Exposure:** Medium — Cast device pulls MP3 over a dedicated TCP `GET /stream/audio/mp3` connection on port 8080, separate from the Cast control channel. WiFi retransmits or LAN HoL block only the audio fetch. CORS preflight (OPTIONS) handled before stream open. **Mitigation:** Chunked transfer with `KeepAlive=true`, `Accept-Ranges: none`, `Cache-Control: no-cache`; CBR 320 kbps keeps bandwidth predictable (~40 KB/s) so jitter is small relative to LAN capacity. Receiver's 3 s buffer absorbs typical WiFi reorder. [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/HttpStreamOutput.cs:L312-L361,L378-L394] | **Exposure:** Y (high) — all DirectChannel traffic (audio, config, ping/pong) plus all other SharpCaster control traffic (volume, media status, receiver status) share the **same TLS Cast control TCP socket**. A 200 KB metadata blob (album-art URL update via `LoadMediaWithRecoveryAsync`) head-of-line-blocks audio chunks behind it; AVRCP volume sync events arrive on the same socket. **Mitigation:** None. There is no second transport. [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/DirectCastAudioChannel.cs:L23-L51; src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs:L646-L656,L774-L807,L1382-L1430] | **Exposure:** Y — CDN/WiFi hiccup can stall a segment fetch. **Mitigation:** 10 s Shaka buffer + adaptive variant switching to lower bitrate when bandwidth probe drops; segments fetched over separate HTTPS connections (one per segment), no shared socket with metadata. Metadata flows over a separate Cast custom message bus. [doc-cited, https://developers.google.com/cast/docs/web_receiver/streaming_protocols (HLS section), 2026-05-21; https://developers.soundcloud.com/blog/playback-on-web-at-soundcloud/, 2026-05-21] | **Exposure:** Y — WiFi/LAN hiccup affects the single open HTTP MP3 byte-stream. **Mitigation:** Chrome `<audio>` element's MediaSource-managed buffer (Chrome heuristic) absorbs jitter; 2 MB MSE cap on audio-only Cast = ~80 s at 192 kbps but the heuristic targets much less. Metadata uses a separate Cast custom message bus (Plex namespace), so a metadata blob cannot HoL-block the audio fetch. [doc-cited, https://developers.google.com/cast/docs/audio, 2026-05-21; community-reported, https://github.com/iwalton3/plex-mpv-shim, 2026-05-21] |
+| FM6 — Codec / boundary glitches | **Exposure:** Y — LAME runs CBR (`Math.Clamp(_options.Mp3Bitrate, 128, 320)`, default 320 kbps) with no `mp3Writer.Flush()` ever called (preserves bit reservoir across chunks). MP3 frames at 48 kHz are 1152 samples = 24 ms. Underlying `OutputStream.Flush()` flushes TCP only, not the encoder. PCM read sizes are `ClientBufferSize = 65536` bytes (~170 ms) which does not align to MP3 frame boundaries, but the LAME stream is continuous so frames straddle write boundaries cleanly. **Mitigation:** Persistent LAME instance across the client lifetime; reader lag 5 s aligned to `frameSize = channels * bytesPerSample = 4` bytes to avoid byte-shift. [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/HttpStreamOutput.cs:L374-L394,L458-L465; src/Radio.Infrastructure/Audio/SoundFlow/TappedOutputStream.cs:L116-L142] | **Exposure:** Low — sender ships raw Int16LE PCM (no codec); each 100 ms chunk is 19 200 bytes (4800 stereo samples) exactly divisible by `frameSize = 4`, so no straddling. Receiver concatenates by `nextPlayTime += audioBuffer.duration` — sample-accurate as long as chunks are contiguous in sequence. **Mitigation:** Sequence-gap warnings (L240-L242) but no insertion/skip on gap; dropped chunks cause an explicit gap of `chunkMs` in the audio queue (no PLC). [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/DirectCastStreamingService.cs:L317-L335,L437-L450; docs/receiver-direct-channel.html:L107-L170,L240-L243] | **Exposure:** N — AAC-LC in HLS-TS (or fMP4); MSE auto-stitches segment boundaries via the SourceBuffer API. AAC ADTS framing is self-synchronizing and Shaka inserts each segment cleanly into the MSE buffer. [doc-cited, https://developers.google.com/cast/docs/web_receiver/streaming_protocols, 2026-05-21] | **Exposure:** Low — LAME-class MP3 transcode; MP3 frames are self-synchronizing (each frame carries a sync word) so the decoder resyncs cleanly even after a partial frame. **Mitigation:** Open byte-stream, no application-level chunking, so no straddling boundaries to mishandle. [community-reported, https://gist.github.com/648f9f3dbf0436f72cd0, 2026-05-21] |
+| FM7 — Receiver lifecycle | **Exposure:** Y — uses Google's Default Media Receiver `CC1AD845` by default (but `appsettings.json` actually sets `567E3DBA` — custom receiver). Custom `receiver.html` calls `context.start({ disableIdleTimeout: true })`. Sender has `IsCastSessionExpired` recovery: detects `INVALID_MEDIA_SESSION_ID` / `No running applications` / `session not found` and calls `LaunchApplicationAsync` again then re-loads media (one retry). **Mitigation:** Auto-recovery is async via `LoadMediaWithRecoveryAsync`; `disableIdleTimeout: true` prevents Cast OS from evicting on idle. Memory pressure eviction not handled — would surface as connection loss. [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs:L994-L1062; docs/receiver.html:L109-L112; src/Radio.API/appsettings.json:L125] | **Exposure:** Y — custom receiver `receiver-direct-channel.html` sets `options.disableIdleTimeout = true`. On receiver crash, sender keeps sending and Cast SDK errors get logged at L478-L486; no automatic relaunch path for DirectChannel mode in `StartAsync` (only `StartDirectChannelAsync` fall-through to HttpMp3 on missing transport ID, no mid-session recovery). **Mitigation:** `disableIdleTimeout: true`; AudioContext recreated on first chunk via `ensureAudioContext()`. No memory-pressure handling; receiver accumulates `chunksScheduled` counter forever (no leak in audio nodes because they GC after `start()` returns and source plays). [source-walked, sha=3b06f79, docs/receiver-direct-channel.html:L352-L358; src/Radio.Infrastructure/Audio/Outputs/DirectCastStreamingService.cs:L473-L489; src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs:L596-L638] | **Exposure:** Y residual — CAF idle-timeout default applies, but live HLS (continuous segment fetch) keeps the receiver app active. SoundCloud's blog notes constrained-memory device handling but does not detail explicit memory-pressure recovery. [doc-cited, https://developers.soundcloud.com/blog/playback-on-web-at-soundcloud/, 2026-05-21] | **Exposure:** `[pending live inspection]` — needs Plex Cast receiver source walk to confirm idle-timeout config and any custom relaunch handlers. |
+| FM8 — Host resource contention | **Exposure:** Y (acknowledged in MEMORY) — Ubuntu N100 box is resource-constrained; user has observed audio distortion correlating with SSH log queries, journald activity, and SQLite reads. `radio-api` runs as `mmack` user with default Linux scheduling (no `CPUAffinity=`, no SCHED_FIFO, no IO niceness). `radio-web` and `radio-api` share the host; background work (fingerprinting backfill at 15 s interval per FingerprintingOptions, SQLite WAL checkpoints across 3 DBs, metrics flushes) runs in-process and competes with the audio loop. Recent async-logging work reduced log volume 69% (per MEMORY) but didn't isolate the audio thread from synchronous-flush events. **Mitigation:** None today. [doc-cited, MEMORY: "Audio distortion correlates with SSH activity"; source-walked, src/Radio.Infrastructure/Audio/Outputs/HttpStreamOutput.cs:L396-L491; appsettings.json fingerprint cadence; deploy/radio-api.service systemd unit lacks resource directives] | **Exposure:** Y (same as RTest-HM — same host) | **Exposure:** N/A — sender side (SoundCloud's CDN) is a managed service with isolation that's not our concern; receiver runs on a Chromecast appliance with its own resource envelope. [inferred] | **Exposure:** Y — Plex Media Server transcoding stalls are *the* dominant user-reported buffering cause (already noted under FM2). Library scans, watch-folder events, and concurrent transcodes all compete with the audio transcode. **Mitigation:** PMS has explicit "transcoder temporary directory" and "library scan schedule" tunables, plus per-stream transcoder process. [community-reported, https://support.plex.tv/articles/202213283-resource-utilization-while-streaming/, 2026-05-21] |
 
 ---
 
@@ -103,45 +130,540 @@ For each cell:
 
 Ten rows × the same four columns. Each cell with an evidence tag.
 
-| Row | What it captures | RTest-HM | RTest-DC | TuneIn | Plex |
+| Row | What it captures | RTest-HM | RTest-DC | SoundCloud | Plex |
 |---|---|---|---|---|---|
-| Source format | Samples the sender starts with (PCM s16le 48 kHz stereo? 24-bit float?) | _to fill_ | _to fill_ | _to fill_ | _to fill_ |
-| Codec / container | MP3 / AAC / Opus / WAV / raw PCM; bitrate; CBR vs VBR | _to fill_ | _to fill_ | _to fill_ | _to fill_ |
-| Chunk size & cadence | "100 ms WAV every 100 ms" vs "2 s OGG every 2 s" vs "no chunking — open HTTP stream" | _to fill_ | _to fill_ | _to fill_ | _to fill_ |
-| Transport | HTTP byte stream / Cast message bus / MSE-fed Range requests / HLS playlist polling | _to fill_ | _to fill_ | _to fill_ | _to fill_ |
-| Receiver decoder API | `<audio>` element / Media Source Extensions (MSE) / Web Audio API (`AudioBufferSourceNode`) / native CAF `PlayerManager` | _to fill_ | _to fill_ | _to fill_ | _to fill_ |
-| Buffer target depth | Seconds the receiver tries to keep queued before playing | _to fill_ | _to fill_ | _to fill_ | _to fill_ |
-| Adaptive behavior | Does buffer grow under jitter? Bitrate switch on bandwidth drop? | _to fill_ | _to fill_ | _to fill_ | _to fill_ |
-| Clock sync model | Sender-clock master / receiver-clock master / NTP-aligned timestamps / no sync | _to fill_ | _to fill_ | _to fill_ | _to fill_ |
-| Backpressure | Receiver tells sender to slow down? Or sender just blasts? | _to fill_ | _to fill_ | _to fill_ | _to fill_ |
-| Metadata channel | Separate from audio path or interleaved? Frequency? | _to fill_ | _to fill_ | _to fill_ | _to fill_ |
+| Source format | Samples the sender starts with (PCM s16le 48 kHz stereo? 24-bit float?) | PCM s16le, 48 000 Hz, 2 ch (192 000 B/s) — engine writes float32 to ring buffer, ring buffer converts to s16le on read. [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/SoundFlow/TappedOutputStream.cs:L258-L290; src/Radio.API/appsettings.json:L136-L140] | PCM s16le, 48 000 Hz, 2 ch — identical source path; ring buffer reader returns the same bytes. Receiver overrides its `AudioContext` sample rate from `msg.sr` per chunk. [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/DirectCastStreamingService.cs:L321-L326,L440-L450; docs/receiver-direct-channel.html:L82-L96,L221-L223] | AAC-LC, typically 64–128 kbps stereo (pre-encoded by SoundCloud's CDN; sender side is invisible to receiver). [doc-cited, https://developers.soundcloud.com/blog/playback-on-web-at-soundcloud/, 2026-05-21] | Library-originals (FLAC / MP3 / AAC / ALAC) on Plex Media Server, transcoded to a Chromecast-compatible target before streaming. [community-reported, https://support.plex.tv/articles/audio-configuration/, 2026-05-21] |
+| Codec / container | MP3 / AAC / Opus / WAV / raw PCM; bitrate; CBR vs VBR | MP3 CBR 320 kbps default (configurable 128–320), encoded by NAudio.Lame `LameMP3FileWriter`. Container: bare MP3 frames over HTTP chunked transfer (no MP4 / no ID3). MP3 frame at 48 kHz = 1152 samples = 24 ms. No `mp3Writer.Flush()` (preserves bit reservoir). [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/HttpStreamOutput.cs:L374-L394,L458-L465; src/Radio.Core/Configuration/AudioOutputOptions.cs:L246-L253] | Raw PCM s16le wrapped in a JSON envelope: `{ type:"audio", data:<base64>, seq, fmt:"pcm", sr, ch, ts }`. **No MP3, no WAV header on the wire** — receiver builds an `AudioBuffer` from raw Int16 samples directly. (Class comments and `WavChunkEncoder` reference an older WAV-based scheme; current implementation does not use them.) [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/DirectCastStreamingService.cs:L436-L450; docs/receiver-direct-channel.html:L107-L137; src/Radio.Infrastructure/Audio/Outputs/WavChunkEncoder.cs:L1-L62 (unused at runtime)] | HLS (fragmented MP4 or TS) with AAC-LC. Multiple bitrate variants for ABR. [doc-cited, https://developers.soundcloud.com/blog/playback-on-web-at-soundcloud/, 2026-05-21] | Transcoded to MP3 192 kbps for Chromecast (FLAC denied by default media receiver; ALAC/FLAC always transcode). Single target — no adaptive ladder. [community-reported, https://gist.github.com/648f9f3dbf0436f72cd0, 2026-05-21] |
+| Chunk size & cadence | "100 ms WAV every 100 ms" vs "2 s OGG every 2 s" vs "no chunking — open HTTP stream" | Open HTTP byte stream; no application-level chunking. Server-side read buffer = `ClientBufferSize = 65 536 B` (~341 ms of 48 kHz s16le stereo PCM in, ~1.64 s of 320 kbps MP3 out per read). After initial burst the server paces to "no more than 10.0 s ahead of real time" before delaying. [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/HttpStreamOutput.cs:L404-L422,L467-L481; src/Radio.Core/Configuration/AudioOutputOptions.cs:L245] | 100 ms per chunk default (clamped 50–200 ms in `DirectChannelChunkSizeMs`). At 100 ms: 19 200 B PCM → ~25 700 B Base64 in JSON envelope = 10 messages/sec. Real-time pacing via `Stopwatch` enforces "no faster than chunkMs per chunk". [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/DirectCastStreamingService.cs:L321-L333,L402-L410; src/Radio.Core/Configuration/AudioOutputOptions.cs:L158-L167] | 4–6 s HLS segments (industry consensus per https://bitmovin.com/blog/mpeg-dash-hls-segment-length/). Google's CAF docs explicitly state segments shorter than 0.1 s are not supported — RTest-DC's 100 ms chunks sit *exactly* at that minimum with no margin. Exact `#EXT-X-TARGETDURATION` `[pending live inspection]` via `chrome://inspect`. [doc-cited, https://developers.google.com/cast/docs/web_receiver/streaming_protocols, 2026-05-21] | Open HTTP byte-stream — no protocol-level chunking. MP3 frames at 44.1 kHz are 1152 samples = 26.1 ms each. [community-reported, https://gist.github.com/648f9f3dbf0436f72cd0, 2026-05-21] |
+| Transport | HTTP byte stream / Cast message bus / MSE-fed Range requests / HLS playlist polling | HTTP/1.1 `GET` to `http://<LAN-ip>:8080/stream/audio/mp3`, chunked transfer, `KeepAlive=true`, `Accept-Ranges: none`. Server uses raw `HttpListener` (not Kestrel) on port 8080, separate from API on 5000. CORS `*` for the Default Media Receiver origin. [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/HttpStreamOutput.cs:L100-L137,L312-L361] | Cast custom message bus (Sharpcaster `ChromecastChannel` over the same TLS Cast control TCP socket) on namespace `urn:x-cast:com.radioconsole.audio`. JSON messages via `SendAsync` → per-message TCP write. Channel registered by reflection into SharpCaster's internal channel list. [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/DirectCastAudioChannel.cs:L23-L62; src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs:L621-L638,L691-L748] | HTTPS byte-range segment fetch via CAF/Shaka loader; one HTTPS connection per segment (or HTTP/2 multiplex), separate from Cast control channel. [doc-cited, https://developer.bitmovin.com/playback/docs/custom-chromecast-cafv3-receiver-use-cases, 2026-05-21] | HTTP byte-stream from Plex Media Server to receiver `<audio>` element. Separate from Cast control channel. [community-reported, https://gist.github.com/648f9f3dbf0436f72cd0, 2026-05-21] |
+| Receiver decoder API | `<audio>` element / Media Source Extensions (MSE) / Web Audio API (`AudioBufferSourceNode`) / native CAF `PlayerManager` | Native CAF `PlayerManager` driving the `<cast-media-player>` element (which hosts a `<video>` or `<audio>` element). MP3 decoded by Chrome's media pipeline (C++). [source-walked, sha=3b06f79, docs/receiver.html:L25-L88; src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs:L1169-L1202] | Web Audio API — for every chunk: `AudioContext.createBuffer(2, samplesPerChannel, sr)` → manual de-interleave Int16 → Float32 in JS → `AudioBufferSourceNode.start(nextPlayTime)`. CAF `PlayerManager` is **not** used for media; only `CastReceiverContext` for the custom message bus. [source-walked, sha=3b06f79, docs/receiver-direct-channel.html:L82-L195,L213-L264] | CAF `PlayerManager` → Shaka Player → MSE → native `<audio>` element. AAC decoded by Chrome's media pipeline (C++). [doc-cited, https://developer.bitmovin.com/playback/docs/custom-chromecast-cafv3-receiver-use-cases, 2026-05-21] | Default media receiver `<audio>` element with MP3 byte-stream — *not* Web Audio. [community-reported, https://gist.github.com/648f9f3dbf0436f72cd0, 2026-05-21] |
+| Buffer target depth | Seconds the receiver tries to keep queued before playing | Server-side: pre-burst the ring-buffer reader 5.0 s behind write position, then pace to ≤ 10.0 s ahead of real time. Receiver-side: force play() when `media.buffered.end(0) >= 3.0 s`. So initial latency ≈ 3 s; steady-state Chrome-buffered depth grows toward 10 s (the server cap). [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/HttpStreamOutput.cs:L399-L422; docs/receiver.html:L50-L84] | Pre-play buffer: `BUFFER_BEFORE_PLAY = 3` chunks = 300 ms (configurable via `config` message). Steady-state target: 0–3.0 s (`MAX_BUFFER_AHEAD`, configurable). Sender reader lag default 1.0 s of historical PCM. [source-walked, sha=3b06f79, docs/receiver-direct-channel.html:L41-L42,L253-L260,L150-L159; src/Radio.Core/Configuration/AudioOutputOptions.cs:L176-L194] | Shaka Player defaults: `bufferingGoal = 10 s` (steady-state target), `rebufferingGoal = 2 s` (floor before resuming after stall). SoundCloud's blog says the value is configurable for constrained-memory devices but doesn't quote the override. MSE buffered-range readout `[pending live inspection]`. [doc-cited, https://shaka-player-demo.appspot.com/docs/api/tutorial-network-and-buffering-config.html, 2026-05-21; https://developers.soundcloud.com/blog/playback-on-web-at-soundcloud/, 2026-05-21] | Browser-managed by Chrome's MediaSource heuristic on the `<audio>` element. Audio-only Cast devices have a hard 2 MB MSE buffer cap (Google) — at 192 kbps that's roughly 80 s of audio, but the heuristic targets much less. Exact readout `[pending live inspection]`. [doc-cited, https://developers.google.com/cast/docs/audio, 2026-05-21] |
+| Adaptive behavior | Does buffer grow under jitter? Bitrate switch on bandwidth drop? | None — CBR bitrate fixed at config time, no ABR / no HLS, no bandwidth probing. Buffer in the receiver can grow with jitter (no upper bound on the receiver side beyond Chrome's internal media-element heuristics); server caps growth at 10 s ahead by inserting `Task.Delay`. [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/HttpStreamOutput.cs:L378-L394,L467-L481] | None — fixed chunk size, fixed PCM rate, no bitrate adaptation. Drift protection drops whole chunks when buffer-ahead exceeds 3.0 s rather than shrinking the rate; sender does not throttle on receiver feedback. [source-walked, sha=3b06f79, docs/receiver-direct-channel.html:L146-L159; src/Radio.Infrastructure/Audio/Outputs/DirectCastStreamingService.cs:L317-L502] | HLS variant switching driven by Shaka's ABR algorithm — bandwidth probe per segment, switches between encoded ladder rungs (64 / 128 / etc.) when the rolling estimate crosses thresholds. Buffer grows toward `bufferingGoal` under jitter. [doc-cited, https://shaka-player-demo.appspot.com/docs/api/tutorial-network-and-buffering-config.html, 2026-05-21] | None — single transcode target, no bitrate ladder. Stalls trigger transcode re-negotiation, not on-the-fly rate change. [community-reported, https://forums.plex.tv/t/why-is-my-plex-transcoding-to-play-on-chromecast/223264, 2026-05-21] |
+| Clock sync model | Sender-clock master / receiver-clock master / NTP-aligned timestamps / no sync | Effectively sender-clock master via real-time `Stopwatch`-equivalent pacing (`DateTime.UtcNow` math: `sentAudioSec - elapsedSec`); no PTS embedded in MP3 frames; receiver runs Chrome's audio-element clock independently. No sync feedback loop. [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/HttpStreamOutput.cs:L413-L481] | Sender-clock master: `Stopwatch` paces `chunksSinceStart * chunkMs`. Each message carries `ts = UnixTimeMs` (sender wall clock); receiver computes `transitDelay = Date.now() - msg.ts` for telemetry only (reported in pong) — not used to correct rate. AudioContext clock is the receiver master for playback; drift compensated only by chunk-drop. [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/DirectCastStreamingService.cs:L357-L410,L439-L450; docs/receiver-direct-channel.html:L65-L77,L141-L159,L226-L233,L311-L344] | Receiver-clock master with timestamp alignment via HLS `#EXT-X-PROGRAM-DATE-TIME`. Each segment carries presentation timestamps that the MSE buffer schedules against; the player pulls segments at its own pace. [doc-cited, https://developers.google.com/cast/docs/web_receiver/streaming_protocols (HLS section), 2026-05-21] | None — there is no sender-side timing model. The `<audio>` element consumes from the open HTTP byte-stream at its own decoder pace; TCP flow control governs the rate. [inferred-from-matrices] |
+| Backpressure | Receiver tells sender to slow down? Or sender just blasts? | Implicit backpressure via TCP — if receiver stops reading, `OutputStream.WriteAsync` blocks and the sender loop stalls naturally. No application-level signal. Server has its own real-time governor (10 s ahead cap) so it does not "blast" in practice. [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/HttpStreamOutput.cs:L458-L505] | None at the application level — sender awaits per-chunk `SendMessageAsync` ACK (TCP write completion), which is the only backpressure. Receiver telemetry (`bufferAhead` in pong) is informational only; sender never reads it. Receiver compensates unilaterally by dropping chunks. [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/DirectCastStreamingService.cs:L453-L489; docs/receiver-direct-channel.html:L146-L159,L311-L344] | Implicit pull-based — receiver requests the next segment when its MSE buffer drops below `bufferingGoal`. CDN serves on demand; no sender push to throttle. [doc-cited, https://shaka-player-demo.appspot.com/docs/api/tutorial-network-and-buffering-config.html, 2026-05-21] | TCP flow control only — `<audio>` element consumes from the open byte-stream at decoder pace; PMS's HTTP write blocks naturally when the receiver pauses reading. [inferred-from-matrices] |
+| Metadata channel | Separate from audio path or interleaved? Frequency? | Separate — audio is HTTP/1.1 on port 8080; metadata is a SharpCaster `MediaChannel.LoadAsync(media, true)` over the TLS Cast control socket (different transport). Updates debounced 3 s and sent only on track change. Album art is an absolute URL inside the metadata payload, not a binary blob. [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs:L933-L988,L994-L1031,L1169-L1202] | Interleaved — `type:"audio"`, `type:"config"`, `type:"ping"`, `type:"pong"`, `type:"stop"` all share the **same** custom Cast namespace on the **same** TLS socket. Album-art metadata still goes via `MediaChannel.LoadAsync` (separate channel, same socket) when `UpdateNowPlayingMetadataAsync` runs. Frequency: 10 audio msgs/sec + occasional config/ping. [source-walked, sha=3b06f79, src/Radio.Infrastructure/Audio/Outputs/DirectCastStreamingService.cs:L119-L138,L156-L180,L336-L352,L437-L457; docs/receiver-direct-channel.html:L213-L344] | Separate — ID3 inside HLS-TS segments (in-band, but consumed by the player out of the audio-decode path) or out-of-band over a Cast custom message bus for now-playing updates. Audio segment fetches don't compete with metadata. [doc-cited, https://developers.google.com/cast/docs/web_receiver/streaming_protocols (HLS section), 2026-05-21] | Separate — Plex namespace on the Cast custom message bus for now-playing/track-change updates; audio MP3 byte-stream is independent. [community-reported, https://github.com/iwalton3/plex-mpv-shim, 2026-05-21] |
+| Host resource-contention surface | What concurrent system activity competes with the audio sender? What isolation primitives are in use? | `radio-api` runs as `mmack` user on Ubuntu N100 / Pi 5; systemd unit has **no** `CPUAffinity=`, **no** `Nice=`, **no** `IOSchedulingClass=`, **no** `LimitRTPRIO=`. Audio encode loop ([HttpStreamOutput.cs:L396-L491](../../src/Radio.Infrastructure/Audio/Outputs/HttpStreamOutput.cs)) and DC streaming loop ([DirectCastStreamingService.cs:L317-L502](../../src/Radio.Infrastructure/Audio/Outputs/DirectCastStreamingService.cs)) run on the default thread pool. Concurrent: `radio-web` (same box), 3× SQLite DBs (config, metrics, fingerprints), `journald`, fingerprint backfill (15 s interval, all active sources), `radio-api`'s own metrics flush. SSH activity has been observed to correlate with audible distortion (per MEMORY). [source-walked + doc-cited, deploy/*.service files; appsettings.json fingerprint cadence; MEMORY: "Audio distortion correlates with SSH activity"] | Same as RTest-HM (same process) | n/a — sender side is SoundCloud's managed CDN, receiver is appliance | Plex Media Server runs on the user's host; transcoder + library scan documented as primary contention surfaces. Plex exposes `Transcoder temporary directory`, `Scan my library automatically` schedule tunables. [community-reported, https://support.plex.tv/articles/202213283-resource-utilization-while-streaming/, 2026-05-21] |
 
 ---
 
-## 6. Findings synthesis (to be written after the matrices are filled)
+## 6. Findings synthesis
 
-A short prose section (~500 words) that reads across rows and columns of the two matrices and pulls out 3–5 *patterns* — not prescriptions. Examples of the *kind* of finding expected (not actual content, just shape):
+Reading across the now-filled matrices, five patterns stand out. All five describe the *shape of the gap* between RTest-DC and the reference systems; the reference systems and RTest-HM are surprisingly close to each other along most axes.
 
-- "Every reference system uses MSE rather than Web Audio API for continuous-audio cast; only RTest DirectChannel uses Web Audio with manual scheduling."
-- "Buffer depths cluster around 4–8 seconds across reference systems; RTest's 100 ms chunk cadence with no jitter buffer is an outlier by an order of magnitude."
-- "Reference systems all separate the metadata channel from the audio channel (so a 200 KB album-art payload can't head-of-line-block 100 ms of audio); RTest DirectChannel interleaves them on the same custom message bus."
+### Pattern 1 — Buffer depth is an order of magnitude smaller in RTest-DC than anywhere else
 
-Patterns. Not prescriptions. The "what to do about it" goes in §7.
+§5 row "Buffer target depth" shows RTest-HM at 3 s initial → 10 s steady, SoundCloud at 10 s (Shaka `bufferingGoal`) with a 2 s rebuffer floor, and Plex bounded by Chrome's 2 MB MSE cap (≈ 80 s of headroom at 192 kbps, though the heuristic targets less). RTest-DC sits at **300 ms pre-play and 3 s steady-state ceiling** — about 30× smaller than the reference cluster. Google's own CAF documentation explicitly states that the Web Receiver Player "does not support segments shorter than 0.1 s"; RTest-DC's 100 ms chunk size from §5 row "Chunk size & cadence" sits *exactly* at that documented minimum, with zero margin.
+
+### Pattern 2 — RTest-DC is the only system that uses Web Audio API for continuous audio
+
+§5 row "Receiver decoder API": RTest-HM uses CAF `PlayerManager` driving a `<cast-media-player>` element; SoundCloud uses Shaka → MSE → native `<audio>`; Plex uses default media receiver `<audio>` directly. All three push decoding into Chrome's C++ media pipeline. RTest-DC alone uses `AudioBufferSourceNode` with manual `start(when)` scheduling on the JS main thread, including an Int16→Float32 conversion in a JS for-loop per chunk. §4 FM4 exposure follows directly: RTest-DC is the only column marked **Y (high)**; the other three are N or Low.
+
+### Pattern 3 — RTest-DC is the only system that interleaves audio with control traffic on a shared transport
+
+§5 row "Metadata channel" and §4 FM5: SoundCloud fetches segments over separate HTTPS connections, separate from the Cast custom message bus that carries now-playing updates. Plex serves audio over a dedicated HTTP byte-stream and uses a separate Cast namespace for metadata. RTest-HM does the same (port 8080 for MP3, TLS Cast socket for metadata). RTest-DC alone places **audio chunks, config, ping/pong, and Cast-bus control traffic on the same TLS Cast control TCP socket** — and the SharpCaster session sends `LoadAsync` metadata updates and AVRCP volume sync events on the same socket. A 200 KB album-art URL update head-of-line-blocks audio chunks behind it.
+
+### Pattern 4 — Sender-driven push-and-pace is unique to RTest
+
+§5 row "Backpressure" and "Clock sync model": SoundCloud is pull-based — receiver requests the next 4–6 s segment when MSE drops below `bufferingGoal`. Plex is pull-based via TCP flow control on an open byte-stream consumed by the `<audio>` decoder. RTest-HM is also effectively pull-based (TCP write blocks naturally if the receiver stops reading). Only RTest-DC's sender is push-driven with a wall-clock pacer and no application-level feedback loop. The `bufferAhead` telemetry the receiver reports in `pong` is informational; the sender ignores it. The receiver compensates unilaterally by dropping chunks above `MAX_BUFFER_AHEAD = 3.0 s` — §4 FM3 predicts an audible jump every ~22 minutes at the receiver-acknowledged 2.3 ms/sec drift.
+
+### Pattern 5 — Adaptive bitrate is absent everywhere except SoundCloud
+
+§5 row "Adaptive behavior": SoundCloud's Shaka does ABR per-segment. RTest-HM, RTest-DC, and Plex are all single-rate. So adaptive switching is *not* the differentiator between RTest's stutters and the reference systems — buffer depth, decoder API, and transport separation are. SoundCloud's ABR is a defence-in-depth feature, not the load-bearing one for stutter avoidance.
+
+---
+
+**Summary of patterns**: RTest-DC differs from all three other systems on buffer depth (30× smaller), decoder choice (Web Audio vs MSE/native), transport separation (interleaved vs separate), and pacing model (push vs pull). RTest-HM is much closer to the reference cluster on every axis except codec choice (CBR vs ABR). The gap is widest exactly where the failure-mode exposure is highest.
 
 ---
 
 ## 7. Speculative — things RTest could try (research output, not a roadmap)
 
-Five to eight entries, each in this shape:
-
-> **Idea — \<short name\>**
-> **Addresses**: FM1, FM5 (the failure modes this would mitigate)
-> **What changes in RTest**: brief, concrete; sender? receiver? both? what code area?
-> **Scope**: rough sense of how much code (e.g., "~50 LOC in receiver.html, no protocol change")
-> **Risk / trade-off**: what we'd give up to get the mitigation (latency, complexity, etc.)
-> **Confidence**: how strongly the reference systems' behavior suggests this is the right move (high / medium / low)
-
 Each idea explicitly **is not a commitment**. A future plan would consume any one of these and turn it into real work via the normal Builder/queue flow.
+
+**Every idea below carries five mandatory measurement blocks** (per §3 measurement-discipline tier, added by retrofit 2026-05-22): Evidence motivating this, Baseline probe, Post-change probe, Success criterion, and Debug-agent verification steps. The Risk / Trade-off and Confidence blocks remain from the original framing.
+
+### Shared probe infrastructure (referenced by multiple ideas)
+
+To avoid restating identical setup across ideas, three probe scaffoldings are referenced by name below. Each must exist *before* any baseline run; building them is part of the research execution pass, not the change being measured.
+
+| Probe scaffolding | What it captures | Setup |
+|---|---|---|
+| **PROBE-CAST-BUFFER** | `bufferAhead` distribution + chunk-drop rate from receiver telemetry | One-time scaffolding commit: in `DirectCastStreamingService` pong-message handler, call `IMetricsCollector.RecordHistogram("cast.dc.buffer_ahead_s", msg.bufferAhead)` and `Increment("cast.dc.chunk_drops_total")` on receiver-reported drop. Probe reads from `metrics.db`. |
+| **PROBE-CAST-AUDIO** | Objective audio-output glitch detection via silence-run + spectral discontinuity analysis | USB audio interface recording from Chromecast HDMI/optical out into laptop; `arecord -D <iface> -d <secs> -f cd > out.wav`; `python3 scripts/research/cast_audio_glitch.py out.wav --silence-min-ms 50 --click-detect`. Outputs `silence_events=<N>, silence_total_ms=<M>, click_events=<X>` |
+| **PROBE-CAST-LONGTASK** | Receiver-side JS main-thread blocking via DevTools Performance Long Task API | DevTools Protocol session attached to Chromecast via `chrome://inspect`; recorded via `scripts/research/cast_longtask_capture.js` (Playwright-driven for reproducibility); outputs `long_tasks_per_min=<N>, p99_duration_ms=<X>, total_blocked_pct=<P>` |
+| **PROBE-SYS-LOAD** | Concurrent host CPU / IO / memory / log-volume / per-process resource use, time-aligned with audio probes | One-shot capture wrapper `scripts/research/sysload_capture.sh <duration_s>` running on the sender host: starts `vmstat 1`, `iostat -x 1`, `pidstat -p $(pgrep -d, radio-api,radio-web,journald,sqlite3,sshd) 1`, plus a per-second snapshot of `journalctl --since "1 second ago" -o cat \| wc -l` (log line rate) and `pgrep sshd \| wc -l` (active SSH session count). All streams tagged with monotonic timestamps for post-hoc correlation. Post-processing via `scripts/research/sysload_correlate.py <audio_probe_artifact> <sysload_artifact>` produces a correlation table: for each audio-layer event (stutter / chunk-drop / long-task), the 5-second window of concurrent CPU%, IO MB/s, log line rate, SSH session count immediately preceding it. |
+
+Probe scaffolding scripts (`cast_audio_glitch.py`, `cast_longtask_capture.js`, `sysload_capture.sh`, `sysload_correlate.py`, etc.) and the metrics-collector instrumentation are *part of the research deliverable*, not prerequisites the user provides. The research execution pass commits them to `scripts/research/` and a one-time `instrumentation` branch before any §7 idea's baseline runs.
+
+### Two-scenario protocol — *load-aware probing*
+
+Every idea below is measured under **two scenarios run back-to-back**, with `PROBE-SYS-LOAD` capturing alongside each:
+
+- **Light load**: probe runs on a quiet host — no concurrent SSH sessions, no log queries, no concurrent fingerprint-backfill (gate it off for the window if possible), `radio-web` idle.
+- **Heavy load**: probe runs with a scripted load harness producing the kind of contention MEMORY documents: `journalctl -f` streaming in one SSH session, `sqlite3 metrics.db 'SELECT * FROM ...'` busy-loop in another, fingerprint-backfill forced to run every 5 s instead of 15 s, `radio-web` exercised by a hammer-load Playwright script.
+
+A change is considered a *full* improvement only when its success criterion holds in **both scenarios**. A change that improves under light load but not heavy load is documented as a *half* improvement — the doc records both deltas so a future reader can see the gap, and the load-sensitive scenario indicates whether system-isolation work (Ideas #9-11 below) is the missing co-requisite.
+
+---
+
+> **Idea — Grow DC pre-play buffer toward Shaka's `bufferingGoal`**
+>
+> **Addresses**: FM1 (receiver underrun), FM2 (sender pipeline jitter), FM5 (network jitter)
+>
+> **Evidence motivating this** — §4 FM1 RTest-DC cell: receiver pre-buffers only `BUFFER_BEFORE_PLAY = 3` chunks (~300 ms) and caps steady-state at `MAX_BUFFER_AHEAD = 3.0 s`. §6 Pattern 1 documents the reference cluster sitting at 10 s (Shaka `bufferingGoal`) — **30× larger**. Receiver already calculates `bufferAhead` per pong message ([receiver-direct-channel.html:L311-L344](../../docs/receiver-direct-channel.html)) but sender ignores it for control purposes — this is the *measurable phenomenon* the idea attacks.
+>
+> **What changes in RTest**: Receiver — increase `BUFFER_BEFORE_PLAY` from 3 chunks (300 ms) and `MAX_BUFFER_AHEAD` from 3.0 s. A 2 s pre-play / 4–10 s steady-state ceiling matches the reference cluster (Shaka 10 s `bufferingGoal`, 2 s `rebufferingGoal` floor). Sender's reader-lag default at 1.0 s would also need to grow to match.
+>
+> **Scope**: ~20 LOC in `receiver-direct-channel.html` constants + ~10 LOC in `DirectCastStreamingService.cs` + `AudioOutputOptions.cs` defaults. No protocol change.
+>
+> **Risk / trade-off**: Adds initial latency (2–4 s before audio starts). Worse for "live" feel (e.g., switching radio sources); fine for queued album playback. Memory cost on Chromecast is small (≤ 1 MB at 2 s × 192 kbps equivalent).
+>
+> **Confidence**: **High** — every reference system clusters 10× higher (§6 Pattern 1). Google's CAF docs flag 0.1 s as the *minimum* supported segment size, not the recommended one.
+>
+> **Baseline probe**: PROBE-CAST-BUFFER + PROBE-CAST-AUDIO, run concurrently for **1 hour of continuous DC-mode playback** of a known-content playlist (recorded reference, so per-run audio content is identical). Capture: bufferAhead distribution (p5/p50/p95/p99), chunk-drop count, silence_events, silence_total_ms.
+> ```bash
+> # Sender-side (parallel with audio recording):
+> ssh mmack@radio "sqlite3 /opt/radio-console/data/metrics/metrics.db \
+>   'SELECT value, ts FROM histogram_samples WHERE metric=\"cast.dc.buffer_ahead_s\" \
+>    AND ts > strftime(\"%s\",\"now\",\"-1 hour\")*1000;'" \
+>   | python3 scripts/research/cast_dc_buffer_summarize.py \
+>   > baseline_cast_buffer.txt
+>
+> # Receiver-side (laptop with USB audio interface):
+> arecord -D plughw:CARD=USB_Audio -d 3600 -f cd /tmp/cast_baseline.wav
+> python3 scripts/research/cast_audio_glitch.py /tmp/cast_baseline.wav \
+>   --silence-min-ms 50 --click-detect \
+>   > baseline_cast_audio.txt
+> ```
+>
+> **Post-change probe**: identical commands, same 1-hour playlist, after the buffer-growth change ships.
+>
+> **Success criterion** (all three must hold):
+> - p5 `bufferAhead` rises from baseline `<1.0 s` to `≥2.0 s`
+> - `chunk_drops_total` over the hour drops to `0`
+> - `silence_events` (silence runs `>50 ms`) over the hour drops to `≤1`
+>
+> **Debug-agent verification steps**:
+> 1. Run `scripts/research/setup_cast_audio_capture.sh` to verify USB audio interface, Chromecast routing, and reference playlist are all healthy
+> 2. `git checkout main && ./deploy/Deploy-ToLinux.ps1 -TargetHost radio -Runtime linux-x64`
+> 3. Start DC-mode cast of reference playlist; start both probes simultaneously; wait 1 h
+> 4. Save artifacts as `baseline_cast_buffer.txt` and `baseline_cast_audio.txt`
+> 5. `git checkout <feature-branch> && ./deploy/Deploy-ToLinux.ps1 ...`; repeat step 3; save as `after_*.txt`
+> 6. Run `python3 scripts/research/cast_buffer_compare.py baseline_* after_*` — emits PASS/FAIL + per-metric deltas
+
+---
+
+> **Idea — Split DC sender into producer + consumer with a bounded queue**
+>
+> **Addresses**: FM2 (sender pipeline jitter) — the dominant DC-specific exposure
+>
+> **Evidence motivating this** — §4 FM2 RTest-DC cell: `StreamingLoopAsync` awaits `_channel.SendMessageAsync` for every chunk before reading/encoding the next ([DirectCastStreamingService.cs:L317-L502](../../src/Radio.Infrastructure/Audio/Outputs/DirectCastStreamingService.cs)). If the Cast control socket blocks (LAN congestion, Cast device GC), encoding stops. The *observable phenomenon*: per-chunk wall-clock interval should be 100 ms ± tight bound under healthy conditions, but `Stopwatch`-measured intervals in the loop would show a long tail when the socket lags.
+>
+> **What changes in RTest**: Sender — refactor `StreamingLoopAsync` so PCM-read + JSON-encode + Base64 runs on a producer task that fills a `Channel<byte[]>` of capacity ~50 chunks; a separate consumer task drains it via `_channel.SendMessageAsync`. The `SendMessageAsync` await is no longer in the encode hot path. Drop oldest on overflow.
+>
+> **Scope**: ~100 LOC in `DirectCastStreamingService.cs`. No receiver change. No wire-protocol change.
+>
+> **Risk / trade-off**: Adds one extra in-process queue (~1 MB worst case at 50 × 25 KB). Slight complexity in shutdown / cancellation. Loses the natural per-chunk pacing if the consumer overruns the producer (currently `Stopwatch` enforces both at once).
+>
+> **Confidence**: **High** — no reference system awaits ACK per encode step (§6 Pattern 4). Pull-based systems sidestep this entirely; push-based systems must decouple producer/consumer to absorb socket jitter.
+>
+> **Baseline probe**: 30-minute DC-mode continuous playback with sender instrumented to record per-iteration loop time (PCM-read → encode → send → next).
+> ```bash
+> # Prereq scaffolding: in DirectCastStreamingService.StreamingLoopAsync, wrap
+> # each iteration with Stopwatch and call MetricsCollector.RecordHistogram(
+> # "cast.dc.send_loop_iter_ms", elapsed). Separately log encode-only and
+> # send-only durations as "cast.dc.encode_ms" and "cast.dc.send_ms".
+>
+> ssh mmack@radio "sqlite3 /opt/radio-console/data/metrics/metrics.db \
+>   'SELECT metric, value FROM histogram_samples \
+>    WHERE metric IN (\"cast.dc.send_loop_iter_ms\",\"cast.dc.encode_ms\",\"cast.dc.send_ms\") \
+>    AND ts > strftime(\"%s\",\"now\",\"-30 minutes\")*1000;'" \
+>   | python3 scripts/research/cast_dc_loop_summarize.py \
+>   > baseline_cast_loop.txt
+> ```
+> Output: per-stage p50/p95/p99/max + count of `iter_ms > 150` events ("jitter spikes").
+>
+> **Post-change probe**: identical query + parser, after producer/consumer split lands.
+>
+> **Success criterion**:
+> - Producer-side `iter_ms` p99 drops from baseline (expected `>150 ms`, since `send_ms` tail bleeds in) to `≤110 ms`
+> - "Jitter spike" count (`iter_ms > 150`) drops by `≥90 %`
+> - Receiver-side `bufferAhead` p5 (from PROBE-CAST-BUFFER) rises by `≥0.5 s` (downstream confirmation that producer no longer stalls)
+>
+> **Debug-agent verification steps**:
+> 1. Deploy `main` with the instrumentation scaffolding; verify loop-time metrics flowing (`sqlite3 metrics.db 'SELECT COUNT(*)...'`)
+> 2. Run 30 min DC playback; save `baseline_cast_loop.txt` and (concurrently) `baseline_cast_buffer.txt`
+> 3. Deploy feature branch; repeat
+> 4. `python3 scripts/research/cast_loop_compare.py baseline_* after_*` — PASS/FAIL + deltas
+
+---
+
+> **Idea — Move DC audio onto a separate transport from metadata + control**
+>
+> **Addresses**: FM5 (network / transport jitter — currently the highest-exposure mode for DC)
+>
+> **Evidence motivating this** — §4 FM5 RTest-DC cell: audio chunks + config + ping/pong + SharpCaster control traffic (volume, media status, `LoadAsync` metadata updates) all share the same TLS Cast control TCP socket ([GoogleCastOutput.cs:L646-L656,L774-L807,L1382-L1430](../../src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs)). The *observable phenomenon*: when a `LoadMediaWithRecoveryAsync` fires (album-art update), a 200 KB metadata blob queues on the same socket as audio. Should be measurable as a correlation between metadata-send timestamps and `bufferAhead` drops within a small time window.
+>
+> **What changes in RTest**: Either (a) move metadata to a *second* Cast custom namespace and accept that SharpCaster will still multiplex over the same TCP socket — i.e., this option does *not* actually fix HoL blocking, only logical separation; or (b) move audio chunks onto a WebSocket from the receiver page back to the API, parallel to the Cast control socket. (b) is the meaningful fix.
+>
+> **Scope**: ~200 LOC — new WebSocket endpoint in Radio.API (Kestrel side, not the port-8080 HttpListener), new client in `receiver-direct-channel.html`, sender writes to the WS instead of via SharpCaster's `SendMessageAsync`. Cast bus still used for handshake + control.
+>
+> **Risk / trade-off**: Requires receiver-page outbound network reach to the API server (mDNS or hardcoded LAN IP). Adds a second TLS handshake at session start. Loses Cast's automatic relaunch-on-disconnect for the audio channel only.
+>
+> **Confidence**: **High** — every reference system uses a separate transport for audio vs metadata (§6 Pattern 3); RTest-HM already does this and benefits from it.
+>
+> **Baseline probe**: Synthetic-load test — force a `LoadMediaWithRecoveryAsync` every 30 s during 1 h continuous DC playback. Correlate metadata-send timestamps with bufferAhead-drop events.
+> ```bash
+> # Prereq: instrument MetricsCollector.Increment("cast.dc.metadata_sent")
+> # at LoadMediaWithRecoveryAsync entry, with timestamp event log.
+> # Already-present PROBE-CAST-BUFFER captures buffer drops with timestamps.
+>
+> # Test harness (forces frequent metadata updates):
+> ssh mmack@radio "/opt/radio-console/scripts/research/force_metadata_burst.sh 30 3600" &
+>
+> # Collect:
+> python3 scripts/research/cast_metadata_correlation.py \
+>   --metrics-db /opt/radio-console/data/metrics/metrics.db \
+>   --window-ms 500 --duration 3600 \
+>   > baseline_metadata_correlation.txt
+> ```
+> Output: `metadata_events=<N>, buffer_drops_within_500ms=<M>, correlation_coefficient=<C>, pearson_p_value=<P>`.
+>
+> **Post-change probe**: identical with WebSocket split deployed.
+>
+> **Success criterion**:
+> - `correlation_coefficient` between metadata-send and buffer-drop events drops from baseline (expected `>0.5`) to `<0.1`
+> - `buffer_drops_within_500ms` count drops by `≥80 %`
+> - PROBE-CAST-AUDIO `silence_events` (run in parallel) drops by `≥50 %` during the forced-metadata burst window
+>
+> **Debug-agent verification steps**:
+> 1. Confirm `scripts/research/force_metadata_burst.sh` works on a healthy `main` deploy (logs show metadata-send events at the requested cadence)
+> 2. Deploy `main`; 1 h soak with the burst harness active; save baseline artifacts
+> 3. Deploy feature branch; 1 h soak with the same burst harness; save after artifacts
+> 4. `python3 scripts/research/cast_metadata_compare.py` — PASS/FAIL + correlation deltas
+
+---
+
+> **Idea — Switch DC to MSE with 1–2 s chunks instead of Web Audio with 100 ms chunks**
+>
+> **Addresses**: FM4 (receiver scheduling slips), FM6 (codec boundary glitches)
+>
+> **Evidence motivating this** — §4 FM4 RTest-DC cell: every chunk creates a new `AudioBufferSourceNode` and calls `source.start(nextPlayTime)` with absolute scheduling against `audioCtx.currentTime`; Int16→Float32 conversion runs on the JS main thread per chunk. The *observable phenomenon*: PROBE-CAST-LONGTASK should show frequent long tasks at the 100 ms chunk cadence, with `chunksScheduled` incrementing but `nextPlayTime` occasionally being reset to `now + 0.02` ([receiver-direct-channel.html:L141-L144](../../docs/receiver-direct-channel.html)) when the main thread was busy when a message arrived.
+>
+> **What changes in RTest**: Both — sender encodes 1–2 s fMP4 (or webm/opus) segments instead of raw PCM; receiver uses `SourceBuffer.appendBuffer` into an MSE-backed `<audio>` element instead of `AudioBufferSourceNode`. Pre-encoded segments mean decode runs in Chrome's C++ pipeline, off the JS main thread.
+>
+> **Scope**: ~500 LOC — pull in an Opus or fragmented-MP4 encoder dependency (likely native via P/Invoke, since LAME's MP3 frames don't fragment cleanly into MSE), rewrite `receiver-direct-channel.html` audio path entirely.
+>
+> **Risk / trade-off**: Loses the real-time-ness that's the explicit selling point of DirectChannel mode. End-to-end latency floors at ~2 s instead of ~300 ms. If we accept that latency, much of DirectChannel's advantage over HM evaporates.
+>
+> **Confidence**: **Medium-high** — this is the CAF official path (§6 Pattern 2), but it largely reduces DC into "HM with a better codec." Worth considering as a deliberate retreat rather than an improvement.
+>
+> **Baseline probe**: PROBE-CAST-LONGTASK over 5 minutes of DC-mode playback, plus PROBE-CAST-AUDIO over the same window. Capture: long-task count, p99 duration, total blocked %, audio glitch count.
+>
+> **Post-change probe**: identical, after MSE switch ships.
+>
+> **Success criterion**:
+> - `long_tasks_per_min` (tasks `>50 ms`) drops by `≥90 %`
+> - `total_blocked_pct` drops below `5 %`
+> - PROBE-CAST-AUDIO `click_events` (sample-boundary discontinuity detections) drops by `≥80 %`
+> - **Negative-criterion check**: end-to-end latency (from `arecord` first-sample timestamp vs sender's first-PCM-byte timestamp) does *not* exceed `2.5 s`
+>
+> **Debug-agent verification steps**:
+> 1. Confirm DevTools Protocol Playwright session attaches to receiver via `chrome://inspect`; verify long-task event stream live
+> 2. Deploy `main`; 5 min DC playback with PROBE-CAST-LONGTASK + PROBE-CAST-AUDIO; save baseline
+> 3. Deploy feature branch; repeat
+> 4. `python3 scripts/research/cast_longtask_compare.py` + latency-floor check — PASS/FAIL
+
+---
+
+> **Idea — Add receiver→sender rate feedback for DC clock drift correction**
+>
+> **Addresses**: FM3 (clock drift)
+>
+> **Evidence motivating this** — §4 FM3 RTest-DC cell: receiver acknowledges `~2.3 ms/sec` drift between `audioCtx.currentTime` and sender wall-clock. Predicts chunk-drop every `~22 minutes` at the current configuration. `bufferAhead` already reported in `pong` (PROBE-CAST-BUFFER captures it) but sender ignores it for control purposes. The *observable phenomenon*: in a multi-hour soak, the chunk-drop count should grow approximately linearly with elapsed time at the predicted ~2.7 drops/hour rate.
+>
+> **What changes in RTest**: Sender — consume the existing `bufferAhead` value already reported in `pong` messages. When `bufferAhead < lowerThreshold`, briefly send chunks at < 100 ms cadence; when `bufferAhead > upperThreshold`, briefly delay. Smooth via a PI controller. Prevents the receiver from accumulating drift to the point of chunk-drop every ~22 minutes.
+>
+> **Scope**: ~60 LOC in `DirectCastStreamingService.cs` (read `pong`, maintain controller state, adjust pacing). No receiver change — the telemetry path already exists.
+>
+> **Risk / trade-off**: Controller tuning is non-trivial; bad gain values could amplify jitter. If `pong` traffic is itself HoL-blocked (FM5), the controller sees stale data.
+>
+> **Confidence**: **Medium** — reference systems sidestep the problem by being pull-based (the receiver pulls at its own clock pace). This is a workaround for the push model, not a fix for the architectural mismatch.
+>
+> **Baseline probe**: PROBE-CAST-BUFFER over a **6-hour** continuous DC-mode playback session. Long window because the failure rate is ~1 drop per 22 min; need enough samples to estimate drift slope.
+> ```bash
+> # 6h with the same metrics.db query as PROBE-CAST-BUFFER, plus drift-slope estimation:
+> python3 scripts/research/cast_drift_slope.py \
+>   --metrics-db /opt/radio-console/data/metrics/metrics.db \
+>   --window-hours 6 \
+>   > baseline_cast_drift.txt
+> ```
+> Output: `drops_per_hour=<R>, bufferAhead_slope_ms_per_sec=<S>, drift_predicted_drops_per_hour=<P>, slope_linear_r2=<X>`.
+>
+> **Post-change probe**: identical, after feedback controller ships.
+>
+> **Success criterion**:
+> - `drops_per_hour` drops from baseline (expected `~2.7`) to `≤0.3`
+> - `bufferAhead_slope_ms_per_sec` flattens: `|slope| < 0.3 ms/sec` (vs baseline `~2.3 ms/sec`)
+> - PROBE-CAST-AUDIO over the same window: `silence_events` attributable to chunk-drops (silence-at-chunk-boundary correlation) drops by `≥80 %`
+>
+> **Debug-agent verification steps**:
+> 1. Verify a 6 h `radio-api` uptime budget on the test box (no scheduled reboots / deploys during the window)
+> 2. Deploy `main`; 6 h continuous playback; save baseline
+> 3. Deploy feature branch; 6 h continuous playback; save after
+> 4. `python3 scripts/research/cast_drift_compare.py` — PASS/FAIL + slope deltas
+
+---
+
+> **Idea — Replace raw PCM with Opus on the DC wire**
+>
+> **Addresses**: FM2 (sender pipeline jitter — smaller writes), FM5 (network jitter — less bandwidth)
+>
+> **Evidence motivating this** — §5 row "Chunk size & cadence" RTest-DC cell: 19 200 B PCM → ~25 700 B Base64 in JSON envelope, sent 10×/sec = ~1.5 Mbps on the shared Cast TLS socket. Compared to reference systems' AAC at 64–128 kbps and Plex's MP3 at 192 kbps, RTest-DC's per-second byte rate is **~10× higher**. The *observable phenomenon*: `tcpdump` on the Cast control socket during DC playback should show this bandwidth differential directly.
+>
+> **What changes in RTest**: Sender — encode each chunk as Opus (96 kbps target) instead of raw Int16LE. Receiver — `AudioContext.decodeAudioData(opusBytes)` instead of manual Int16→Float32 conversion. Bandwidth drops from ~1.5 Mbps to ~96 kbps; per-message size drops from 25 KB to ~1.2 KB.
+>
+> **Scope**: ~200 LOC — Opus encoder via P/Invoke on the sender (libopus), receiver uses `decodeAudioData` which is built into Chrome. Wire format changes — `fmt:"opus"`.
+>
+> **Risk / trade-off**: Adds a native dependency on Linux + Windows. `decodeAudioData` is async and decodes off the JS main thread (good for FM4) but returns an `AudioBuffer` that still has to be scheduled with `AudioBufferSourceNode` — doesn't get us out of the Web Audio scheduling problem entirely. Encoding adds ~10–20 ms latency per chunk.
+>
+> **Confidence**: **Medium** — bandwidth savings are clear-cut, but Opus alone doesn't fix the receiver-side scheduling (only the transport). Pairs naturally with the producer/consumer split idea.
+>
+> **Baseline probe**: `tcpdump` on the Cast control TLS port (typically 8009) for 5 min of DC playback. Compute bytes/sec to that endpoint; record peak and sustained.
+> ```bash
+> # Identify Chromecast IP first:
+> CHROMECAST_IP=$(ssh mmack@radio "cat /opt/radio-console/api/appsettings.Production.json | jq -r '.GoogleCast.DefaultDeviceIp'")
+>
+> # Capture (run on radio host where the Cast traffic originates):
+> ssh mmack@radio "sudo tcpdump -i any -w /tmp/cast.pcap host $CHROMECAST_IP and tcp port 8009" &
+> # Start 5-min DC playback
+> sleep 300 && ssh mmack@radio "sudo pkill tcpdump"
+>
+> ssh mmack@radio "sudo tcpdump -r /tmp/cast.pcap -nn" \
+>   | python3 scripts/research/cast_bw_summarize.py \
+>   > baseline_cast_bandwidth.txt
+> ```
+> Output: `bytes_per_sec_p50=<X>, bytes_per_sec_p95=<Y>, peak_bps=<P>, total_mb=<M>`.
+>
+> **Post-change probe**: identical, after Opus switch.
+>
+> **Success criterion**:
+> - `bytes_per_sec_p50` drops by `≥85 %` (PCM ~190 KB/s → Opus ~12 KB/s)
+> - PROBE-CAST-AUDIO `click_events` (after Opus decode-and-reschedule path) does **not** regress: count must stay `≤` baseline +10 %
+> - PROBE-CAST-BUFFER chunk-drop count under forced-metadata-burst harness (see Idea #3 probe) drops by `≥50 %` — confirms bandwidth pressure was a meaningful contributor to FM5
+>
+> **Debug-agent verification steps**:
+> 1. Confirm `tcpdump` runs with `sudo` non-interactively (NOPASSWD setup) on the test host
+> 2. Deploy `main`; run 5 min DC playback with PROBE-CAST-BANDWIDTH + PROBE-CAST-AUDIO + PROBE-CAST-BUFFER under forced-metadata burst; save baseline
+> 3. Deploy feature branch; repeat
+> 4. `python3 scripts/research/cast_bandwidth_compare.py` + regression checks — PASS/FAIL
+
+---
+
+> **Idea — Move DC receiver-side decode + format conversion into a Web Worker**
+>
+> **Addresses**: FM4 (receiver scheduling slips) without changing protocol or buffer depth
+>
+> **Evidence motivating this** — Same observable phenomenon as Idea #4 (the MSE switch): the `view.getInt16` loop in `receiver-direct-channel.html` (L107-L195) runs on the JS main thread for every chunk; PROBE-CAST-LONGTASK should attribute frequent long tasks to this loop. Distinct from Idea #4 because this idea preserves the Web Audio path and only moves the decode off the main thread.
+>
+> **What changes in RTest**: Receiver — move the `view.getInt16` loop and `AudioBuffer.copyToChannel` calls into a Web Worker; main thread receives the already-built Float32Array and only schedules the `AudioBufferSourceNode`. Eliminates per-chunk JS work on the main thread.
+>
+> **Scope**: ~80 LOC — new `decoder.worker.js`, `postMessage` plumbing in `receiver-direct-channel.html`.
+>
+> **Risk / trade-off**: `AudioContext` is main-thread-only — can't move scheduling into the worker, only decode. Worker has its own GC pauses (rarer because of smaller heap). Adds a `postMessage` copy.
+>
+> **Confidence**: **Medium** — doesn't change the architectural shape, only relieves the worst-case symptom. Cheap insurance pairing with buffer-depth growth.
+>
+> **Baseline probe**: PROBE-CAST-LONGTASK over 5 min DC-mode playback (same protocol as Idea #4). Also capture per-task attribution where DevTools provides it (Chromium long-task entries include `attribution.containerSrc`).
+>
+> **Post-change probe**: identical.
+>
+> **Success criterion**:
+> - `long_tasks_per_min` attributable to the decode loop (filter by `attribution.containerSrc ~= "decoder.worker.js"` is *good* — these are off-main-thread) drops by `≥90 %` on the main thread
+> - `total_blocked_pct` drops from baseline (expected `>10 %` if decode is the dominant contributor) to `≤2 %`
+> - PROBE-CAST-AUDIO `click_events` from `nextPlayTime` resets ([receiver-direct-channel.html:L141-L144](../../docs/receiver-direct-channel.html)) drops by `≥70 %` — observable via correlating reset-log timestamps with audio-record glitches
+> - **Negative-criterion check**: bufferAhead p5 does not regress (no new latency introduced by `postMessage` overhead)
+>
+> **Debug-agent verification steps**:
+> 1. Confirm DevTools long-task `attribution` field populated for `receiver-direct-channel.html` long tasks on `main`
+> 2. Deploy `main`; 5 min DC playback with full probe suite; save baseline
+> 3. Deploy feature branch; repeat
+> 4. `python3 scripts/research/cast_longtask_compare.py --attribution-filter decode` — PASS/FAIL + per-attribution deltas
+
+---
+
+> **Idea — Proactive sender-side detection + relaunch of wedged DC receiver**
+>
+> **Addresses**: FM7 (receiver lifecycle)
+>
+> **Evidence motivating this** — §4 FM7 RTest-DC cell: on receiver crash, sender keeps sending and Cast SDK errors get logged ([DirectCastStreamingService.cs:L478-L486](../../src/Radio.Infrastructure/Audio/Outputs/DirectCastStreamingService.cs)); no automatic relaunch path for DC mode in `StartAsync`. HM mode already has `LoadMediaWithRecoveryAsync` ([GoogleCastOutput.cs:L994-L1062](../../src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs)). The *observable phenomenon*: artificially kill the receiver via `chrome://inspect` "Inspect Receiver → close tab", and audio never resumes — manual restart required. Time-to-recovery is effectively infinite today.
+>
+> **What changes in RTest**: Sender — track `lastPongTimestamp`. If no `pong` received for `maxInactivity = 30 s` while audio is being sent, call `LaunchApplicationAsync(directChannelAppId)` and re-init the channel. Wire-compatible — receiver already replies to `ping`.
+>
+> **Scope**: ~80 LOC in `DirectCastStreamingService.cs` + `GoogleCastOutput.cs`. Wire-compatible — receiver already replies to `ping`.
+>
+> **Risk / trade-off**: Risk of relaunch loops if `pong` is dropped due to legitimate network issues (treat the receiver as dead when it's actually fine). Mitigate by requiring N consecutive missed pings before relaunch.
+>
+> **Confidence**: **Medium** — HM already has this recovery; bringing DC to parity is straightforward. Not motivated by the reference systems (their lifecycle handling is implicit in CAF/Shaka), but it closes a known gap.
+>
+> **Baseline probe**: Scripted "kill receiver mid-stream, measure time to audio resume" — repeated 10× with cooldown between trials.
+> ```bash
+> # Test harness:
+> python3 scripts/research/cast_kill_recovery_trial.py \
+>   --trials 10 --cooldown-sec 60 \
+>   --kill-method "chrome-devtools-close-tab" \
+>   --audio-capture-device "USB_Audio" \
+>   > baseline_cast_recovery.txt
+> ```
+> Output per trial: `trial_n=<i>, kill_timestamp=<T1>, audio_resume_timestamp=<T2>|never, recovery_seconds=<dt>|inf`. Summary: `mean_recovery_s=<M>, success_rate=<S/10>, max_recovery_s=<X>`.
+>
+> **Post-change probe**: identical 10-trial harness, after the relaunch path ships.
+>
+> **Success criterion**:
+> - `success_rate` rises from baseline `0/10` (no auto-recovery exists today) to `≥9/10`
+> - `mean_recovery_s` (for successful trials) `≤ 35 s` (matches 30 s `maxInactivity` + ~5 s relaunch overhead)
+> - `max_recovery_s` (for successful trials) `≤ 60 s`
+> - **No false-positive relaunches**: 1-hour soak with healthy receiver shows `0` relaunch events in journalctl
+>
+> **Debug-agent verification steps**:
+> 1. Confirm `cast_kill_recovery_trial.py` works against `main` deploy (correctly kills the receiver and detects no recovery)
+> 2. Deploy `main`; run 10-trial harness; save baseline
+> 3. Run separate 1 h healthy-receiver soak on `main`; confirm `0` relaunches (sanity)
+> 4. Deploy feature branch; repeat both
+> 5. `python3 scripts/research/cast_recovery_compare.py` — PASS/FAIL + per-trial deltas
+
+---
+
+### System-isolation ideas (targeting FM8) — *added by 2026-05-22 update*
+
+The next three ideas address FM8 specifically. They do not change the audio code path; they change how the host treats the audio process. They are most useful when measurement under the two-scenario protocol shows that the audio-layer ideas (#1-8) close the light-load gap but leave the heavy-load gap unchanged.
+
+---
+
+> **Idea — Pin radio-api to dedicated CPU cores via systemd `CPUAffinity` + raise audio-thread scheduling priority**
+>
+> **Addresses**: FM2 (sender pipeline jitter), FM8 (host resource contention) — measured separately under light vs heavy load
+>
+> **Evidence motivating this** — Three signals: (1) MEMORY: "Audio distortion correlates with SSH activity" — direct user observation. (2) Source walk: `deploy/radio-api.service` lacks any of `CPUAffinity=`, `Nice=`, `IOSchedulingClass=`, `LimitRTPRIO=`. (3) The Ubuntu N100 has 4 cores; `radio-api`, `radio-web`, `journald`, and `sshd` all currently share the full 4-core CPU mask. Running PROBE-SYS-LOAD during the known-bad SSH-correlated stutters will show per-process CPU% on shared cores — measurable as direct contention.
+>
+> **What changes in RTest**: `deploy/radio-api.service` adds `CPUAffinity=2,3` (last two cores reserved for audio) + `Nice=-5` (boost scheduling priority — does not require root once `LimitNICE=` is configured) + `IOSchedulingClass=2 IOSchedulingPriority=2` (best-effort, near-realtime IO). Optionally, in `PipeWireNativeStream.cs` (BT capture) and `HttpStreamOutput.HandleClientAsync` (Cast sender), call `pthread_setschedparam` via P/Invoke to bump the thread to `SCHED_FIFO` priority 50. `radio-web.service` gets the complementary `CPUAffinity=0,1` so it doesn't crowd back into the audio cores.
+>
+> **Scope**: ~15 LOC in `deploy/radio-api.service` + `deploy/radio-web.service`. Optionally ~40 LOC for the SCHED_FIFO thread priority via P/Invoke (Linux-only, behind `#if !WINDOWS_TARGET`).
+>
+> **Risk / trade-off**: Wrong affinity choice could starve other components — verify radio-web doesn't end up on the same cores. SCHED_FIFO done badly can lock up the system (runaway thread); requires testing on Pi as well as Ubuntu. Nice and SCHED_FIFO are NOPs on Windows.
+>
+> **Confidence**: **High** — standard Linux audio isolation practice (CCRMA, JACK guides, low-latency Linux kernel docs).
+>
+> **Baseline probe**: PROBE-CAST-BUFFER + PROBE-CAST-AUDIO + PROBE-SYS-LOAD, run under the **two-scenario protocol** (§7 intro). 1 hour per scenario.
+>
+> **Post-change probe**: identical, after the systemd unit + thread priority changes.
+>
+> **Success criterion** (must hold across **both** scenarios):
+> - **Light load**: `silence_events/h` from PROBE-CAST-AUDIO does not regress (≤ baseline +1 event); `bufferAhead` p5 does not regress (≥ baseline -0.5 s)
+> - **Heavy load**: `silence_events/h` drops by `≥80 %` vs baseline-heavy; `bufferAhead` p5 stays within `1.0 s` of light-load p5
+> - **Cross-scenario gap** (heavy minus light): on baseline, expect e.g. `+8 silence events/h` of degradation; post-change, this gap drops to `≤+2 events/h`
+> - PROBE-SYS-LOAD shows `radio-api` CPU% on cores 2,3 unchanged or higher (confirming pinning took effect) and SSH/journald CPU% on cores 0,1 unchanged (no crowding)
+>
+> **Debug-agent verification steps**:
+> 1. Verify systemd directives parse cleanly: `ssh mmack@radio "systemd-analyze verify /opt/radio-console/radio-api.service"`
+> 2. Confirm `LimitNICE=-5:0` + `LimitRTPRIO=99` are honored by checking `ps -L -o pid,tid,nice,rtprio,comm $(pgrep radio-api)` after deploy
+> 3. Deploy `main`; run probe suite under light scenario for 1 h; save `baseline_cast_load_light.txt`
+> 4. Run probe suite under heavy scenario for 1 h (with `scripts/research/heavy_load_harness.sh` active); save `baseline_cast_load_heavy.txt`
+> 5. Deploy feature branch; repeat steps 3-4 → `after_cast_load_light.txt`, `after_cast_load_heavy.txt`
+> 6. `python3 scripts/research/cast_load_compare.py baseline_cast_load_*.txt after_cast_load_*.txt` — PASS/FAIL per scenario + cross-scenario gap delta
+
+---
+
+> **Idea — Eliminate synchronous logging from audio hot paths**
+>
+> **Addresses**: FM2 (sender pipeline jitter — encode loop blocking on log flush), FM8 (load amplifies the cost of any synchronous flush)
+>
+> **Evidence motivating this** — MEMORY notes "perf: Async logging, reduce log noise 69%" was already done — but doesn't confirm every hot-path log call uses async sinks. `HttpStreamOutput.HandleClientAsync` ([HttpStreamOutput.cs:L396-L491](../../src/Radio.Infrastructure/Audio/Outputs/HttpStreamOutput.cs)) and `DirectCastStreamingService.StreamingLoopAsync` ([DirectCastStreamingService.cs:L317-L502](../../src/Radio.Infrastructure/Audio/Outputs/DirectCastStreamingService.cs)) both call `Logger.LogXxx` inside their per-iteration code paths. Under heavy load (journald backlogged), a synchronous flush from these threads stalls the audio loop. `dotnet-trace` can directly measure this.
+>
+> **What changes in RTest**: Run a `dotnet-trace` audit to enumerate logging-API wall-clock time from the audio threads. For any `LogInformation`/`LogDebug` call in the audio hot path: (a) confirm it routes through an async sink (Serilog Async, or `BlockingCollection`-buffered ILogger wrapper); (b) wrap fire-frequency-sensitive calls in `[Conditional("DEBUG")]` or `_logger.IsEnabled(LogLevel.Information)` guards. Keep `LogError`/`LogWarning` synchronous (they're rare and need flush-on-crash).
+>
+> **Scope**: Audit-only first (~0 LOC, deliverable is a written audit). Implementation: ~50 LOC depending on what the audit finds. May involve replacing `ILogger<T>` injection with a custom audio-thread-aware logger in 2-3 hot-path classes.
+>
+> **Risk / trade-off**: Losing useful logs. Mitigation: keep ERROR/WARNING synchronous; only INFO+DEBUG go async. Async logging adds slight latency to log appearance but doesn't lose lines.
+>
+> **Confidence**: **Medium** — confidence rises after the audit pinpoints actual hot-path culprits, falls if the audit finds nothing.
+>
+> **Baseline probe**: `dotnet-trace collect --process-id $(pgrep radio-api) --providers Microsoft-Extensions-Logging --duration 00:05:00` during DC playback, repeated under both load scenarios. Plus PROBE-CAST-BUFFER + PROBE-CAST-AUDIO + PROBE-SYS-LOAD concurrently.
+> ```bash
+> ssh mmack@radio "/usr/bin/dotnet-trace collect --process-id \$(pgrep radio-api) \
+>   --providers Microsoft-Extensions-Logging \
+>   --duration 00:05:00 \
+>   --output /tmp/audio_logging.nettrace"
+> # Pull and analyze:
+> scp mmack@radio:/tmp/audio_logging.nettrace ./
+> python3 scripts/research/cast_logging_audit.py audio_logging.nettrace \
+>   --audio-thread-pattern "HandleClientAsync|StreamingLoopAsync|OnProcess" \
+>   > baseline_logging.txt
+> ```
+> Output: `audio_thread_logging_ms_total=<T>, calls_per_min=<N>, top_callsites=[<file:line>=<ms>]`.
+>
+> **Post-change probe**: identical, after the audit-driven fixes.
+>
+> **Success criterion**:
+> - **Both scenarios**: `audio_thread_logging_ms_total` drops by `≥80 %`
+> - **Heavy scenario specifically**: `silence_events/h` drops by `≥40 %` (because under heavy load, the synchronous-flush cost dominates more)
+> - **Negative check**: ERROR/WARNING log lines per hour stay within `±10 %` of baseline (verifying we didn't drop important logs)
+>
+> **Debug-agent verification steps**:
+> 1. Confirm `dotnet-trace` available on `radio` host (`apt install dotnet-trace` if missing)
+> 2. Deploy `main`; run `dotnet-trace` capture + PROBE-CAST-AUDIO under light scenario; save baseline
+> 3. Repeat under heavy scenario
+> 4. Deploy feature branch; repeat both
+> 5. `python3 scripts/research/cast_logging_compare.py baseline_* after_*` — PASS/FAIL per scenario + before/after callsite table
+
+---
+
+> **Idea — Gate background SQLite + fingerprint operations on audio-active state**
+>
+> **Addresses**: FM8 (host resource contention from in-process background work)
+>
+> **Evidence motivating this** — Three sources of in-process contention with the audio loop, all observable: (1) Fingerprinting backfill runs at 15 s intervals for all active sources per MEMORY ("Fingerprinting now runs for ALL active sources... 15s interval"); each run does fpcalc CPU work + AcoustID HTTP + SQLite write. (2) SQLite WAL checkpoints fire automatically (default `wal_autocheckpoint = 1000` pages); large pending writes can block. (3) Metrics writes to `metrics.db` happen per-event. All three compete with the audio thread for the same process's lock manager and IO bandwidth. `pidstat` during stutter events will show these threads spiking.
+>
+> **What changes in RTest**: Introduce `IAudioActivityGate` (singleton). Background services consult it before doing expensive work: if audio is `Playing` to a stutter-sensitive output (Cast OR BT-as-source), defer the operation for up to `BackgroundDeferralMaxMs` (e.g. 30 s) or until audio becomes idle. Force the operation on a configurable max-deferral interval regardless to prevent indefinite starvation.
+> Consumers:
+> - `BackgroundIdentificationService` — skip fingerprint backfill ticks when audio active (already has graceful skipping, just needs explicit gate)
+> - `SqliteMetricsStore` flush loop — batch larger, flush less often, gate flush on audio-idle if pending size is below a high-water mark
+> - `ConfigurationManager` — already write-on-edit, low frequency; lower priority
+>
+> **Scope**: ~150 LOC: new `IAudioActivityGate` + implementation, wire-up at 2-3 consumer sites, config options for deferral max.
+>
+> **Risk / trade-off**: Deferred operations queue up; need bounded queue. Failing to ever drain causes data loss (metrics gaps, missed identifications). Mitigate via forced-drain interval.
+>
+> **Confidence**: **Medium-high** — direct cause-effect identifiable via `pidstat` correlation; mitigation pattern is standard (Linux audio "real-time priority" docs recommend exactly this kind of gating for non-RT work).
+>
+> **Baseline probe**: PROBE-CAST-BUFFER + PROBE-CAST-AUDIO + PROBE-SYS-LOAD over 1 h DC playback **under heavy load only** (this idea is heavy-load-specific). Also tag fingerprint and SQLite-checkpoint events with timestamps via Radio.Metrics, so PROBE-SYS-LOAD correlation can pin stutters to specific background-op events.
+> ```bash
+> # Prereq scaffolding: emit metrics events from BackgroundIdentificationService.RunAsync
+> # ("fingerprint.backfill.start" / ".end") and from SqliteMetricsStore.Checkpoint
+> # ("metrics.checkpoint.start" / ".end").
+>
+> python3 scripts/research/cast_bg_op_correlation.py \
+>   --metrics-db /opt/radio-console/data/metrics/metrics.db \
+>   --audio-artifact baseline_cast_audio_heavy.txt \
+>   --window-ms 500 \
+>   > baseline_bg_correlation.txt
+> ```
+> Output: `silence_events_total=<N>, silence_within_500ms_of_fingerprint=<F>, silence_within_500ms_of_checkpoint=<C>, attributable_pct=<P>`.
+>
+> **Post-change probe**: identical, after the gate ships.
+>
+> **Success criterion**:
+> - `silence_within_500ms_of_fingerprint` drops by `≥90 %`
+> - `silence_within_500ms_of_checkpoint` drops by `≥90 %`
+> - `attributable_pct` (silence events correlated with background ops) drops from baseline (expected >30 % under heavy load) to `<10 %`
+> - **Negative check**: total fingerprint identifications per hour does not drop by more than `25 %` (verify we didn't starve the identification path); metrics persistence gap stays `≤60 s` (verify forced-drain works)
+>
+> **Debug-agent verification steps**:
+> 1. Confirm prereq metrics events are emitted on `main` deploy (sanity: `sqlite3 metrics.db "SELECT COUNT(*) FROM events WHERE metric LIKE 'fingerprint.backfill.%'"`)
+> 2. Deploy `main`; 1 h DC playback under heavy scenario; save artifacts
+> 3. Deploy feature branch; repeat
+> 4. `python3 scripts/research/cast_bg_compare.py baseline_* after_*` — PASS/FAIL + per-op-type deltas
+> 5. **Sanity-only**: also confirm fingerprint identification continues to work — pull a known-track segment of the recording and verify identification happened (non-regression check)
 
 ---
 
@@ -150,20 +672,33 @@ Each idea explicitly **is not a commitment**. A future plan would consume any on
 - TuneIn's receiver build number / Plex's receiver build number will be captured the moment we attach to each. Receiver code changes; this doc's findings are dated.
 - If the inspection effort reveals that TuneIn or Plex has switched to a *native* CAF target (no HTML receiver), the column is dropped and replaced with the next-best candidate (Pandora, SoundCloud, NPR One).
 - If RTest's stutter is reproducible *only on HttpMp3 mode* or *only on DirectChannel mode*, the failure-mode matrix for the un-affected mode is filled as "not applicable to symptom" rather than left blank — useful negative evidence.
+- **TuneIn → SoundCloud swap applied (2026-05-21)**: the TuneIn column was replaced with SoundCloud during the consolidation pass. SoundCloud's public engineering blog (https://developers.soundcloud.com/blog/playback-on-web-at-soundcloud/) explicitly discusses Chromecast architecture with HLS-MSE, configurable buffer, and constrained-memory device handling; the TuneIn corpus is sparse by comparison. Swap authorized by the framework provision above ("dropped and replaced with the next-best candidate").
+
+### Source-walk discrepancies vs framework assumptions (sha=3b06f79)
+
+These were noticed while filling RTest-HM / RTest-DC and may affect interpretation:
+
+- **DC mode does NOT send WAV-base64** despite the framework description, the class-level XML comments in `DirectCastStreamingService.cs` (which mention "encodes each chunk as MP3 via LAME"), the `DirectCastAudioChannel` XML comment (mentions "Base64-encoded WAV"), and the existence of `WavChunkEncoder.cs`. The actual `StreamingLoopAsync` at L317-L502 ships **raw Int16LE PCM** in a JSON envelope; `WavChunkEncoder` is dead code at the current SHA. The DC receiver (`docs/receiver-direct-channel.html`, v11, "raw PCM Int16LE") confirms this.
+- **HM mode AppId in `appsettings.json` is `567E3DBA`** (the *custom* receiver), not `CC1AD845` (Google's Default Media Receiver). The `GoogleCastOutputOptions` default value is still `CC1AD845`, but the deployed config overrides it. This means even HM mode currently launches the custom `receiver.html` and relies on its `setMessageInterceptor(LOAD)` to coerce `StreamType.LIVE` and the `setInterval(500ms)` force-play loop. The framework's assumption that "Chromecast's Default Media Receiver plays it" is currently false in production config.
+- **There is no `StreamController` in Radio.API.** The MP3 endpoint `/stream/audio/mp3` is served by `HttpStreamOutput`'s own `HttpListener` on port 8080, not by Kestrel on port 5000. CORS, chunked transfer, and the LAME pipeline all live in `HttpStreamOutput.HandleClientAsync`.
+- **`docs/receiver.html` has a JS bug**: the `setMessageInterceptor` callback is missing its closing `})` for the interceptor lambda — the `return request;` and `playerManager.addEventListener(...)` calls fall outside the lambda. This may or may not affect runtime behavior depending on how `setMessageInterceptor` defaults when no return value is provided. Worth verifying in DevTools during the runtime pass.
+- **MP3 frame size at 48 kHz is 1152 samples = 24 ms**, not the "~26 ms" / "~46 ms per MP3 frame" referenced in §4 FM6 framing-question guidance. (26 ms is the 44.1 kHz frame size, 46 ms is double-frame.) Doesn't change the qualitative finding but worth knowing.
+- Reader lag for HM is documented at 5.0 s in code (`lagSeconds = isMp3Endpoint ? 5.0 : null`) — this is *historical* PCM the reader gets immediately on connect to provide the initial 3 s burst to the Cast device. It is not "buffer depth" in the queueing-theory sense.
 
 ---
 
 ## Execution checklist (for the research pass that fills this doc)
 
-- [ ] Verify `chrome://inspect` reach to the Chromecast on the LAN
-- [ ] Cast from TuneIn, attach DevTools, capture receiver build number + URL
-- [ ] Walk TuneIn receiver: decoder, buffer depth, chunk handling — fill TuneIn column of both matrices
-- [ ] Cast from Plex, repeat
-- [ ] Walk RTest-HM (`/stream/audio/mp3` server + Default Media Receiver behavior via DevTools)
-- [ ] Walk RTest-DC (`receiver.html` source + `DirectCastStreamingService.cs` sender)
-- [ ] Fill failure-mode matrix
-- [ ] Fill pipeline table
-- [ ] Write §6 synthesis
-- [ ] Draft §7 speculative ideas
-- [ ] Spec self-review (placeholders / contradictions / scope) — fix inline
+- [ ] Verify `chrome://inspect` reach to the Chromecast on the LAN — needed for the remaining `[pending live inspection]` cells
+- [x] ~~Cast from TuneIn, attach DevTools, capture receiver build number + URL~~ — *TuneIn dropped, replaced with SoundCloud (public-doc-cited); see §8*
+- [x] Walk SoundCloud reference architecture via public engineering blog + Shaka docs — both matrix columns filled with `[doc-cited]` evidence
+- [ ] Cast from Plex, attach DevTools — needed for the Plex `[pending live inspection]` cells (FM7 lifecycle; buffered-range readout)
+- [x] Walk RTest-HM (`/stream/audio/mp3` server + Default Media Receiver behavior) — source-walked, sha=3b06f79
+- [x] Walk RTest-DC (`receiver-direct-channel.html` source + `DirectCastStreamingService.cs` sender) — source-walked, sha=3b06f79
+- [x] Fill failure-mode matrix — all 28 cells populated (SoundCloud + Plex via public docs; RTest columns via source walk)
+- [x] Fill pipeline table — all 40 cells populated
+- [x] Write §6 synthesis
+- [x] Draft §7 speculative ideas (8 entries)
+- [x] Spec self-review (placeholders / contradictions / scope) — `[pending live inspection]` retained only where genuine LAN access is required
+- [ ] Live-inspection pass via `chrome://inspect` on Mark's LAN (SoundCloud `#EXT-X-TARGETDURATION`, SoundCloud + Plex MSE buffered-range, Plex FM7 receiver source walk, all-columns `AudioBufferSourceNode.onended` timestamp logging)
 - [ ] Surface to user for review
