@@ -84,6 +84,16 @@ Every speculative improvement idea in §7 is structured as a **testable hypothes
 
 5. **Debug-agent verification steps** — a copy-pasteable sequence a debug agent (or a coding agent's CI step) can run to confirm the success criterion. Numbered, exact commands, no judgment calls. Must produce a single artifact (a number, a boolean, a side-by-side comparison) that the agent can include in its report.
 
+### Concurrent-load discipline — every probe captures system load
+
+[MEMORY](../../C:/Users/mark/.claude/projects/D--prj-RTest-RTest/memory/MEMORY.md) documents that on the Ubuntu N100 production host, audio distortion correlates with SSH activity, journald log queries, and SQLite DB reads. The host is resource-constrained and the BT capture pipeline (PipeWire native thread + downstream mixer) shares CPU/IO with background work. Any probe that captures *only* BT-layer metrics will miss load-correlated stalls.
+
+**Every baseline and post-change probe in §7 must capture `PROBE-SYS-LOAD` concurrently** (shared with the Cast doc; see [`2026-05-21-cast-stutter-comparison.md#shared-probe-infrastructure`](2026-05-21-cast-stutter-comparison.md)). `PROBE-SYS-LOAD` runs `vmstat 1`, `iostat -x 1`, `pidstat -p $(pgrep -d, radio-api,radio-web,journald,sqlite3,sshd) 1`, per-second `journalctl … | wc -l` and `pgrep sshd | wc -l`, all time-aligned. Post-processing correlates BT-layer events (capture stalls, OnProcess interval spikes, generator stalls, reconnect events) against the load snapshot in the 5 seconds preceding each event.
+
+A change is considered a *full* improvement only when its success criterion holds under **both** a **light-load** scenario (quiet host) and a **heavy-load** scenario (scripted `journalctl -f` + `sqlite3 metrics.db 'SELECT *'` busy-loop + radio-web hammer-load). A change that improves under light load but not heavy load is documented as a *half* improvement — both deltas recorded, so the reader can see whether system-isolation work is the missing co-requisite.
+
+The system-isolation ideas in the Cast doc's §7 (Idea #9 CPU affinity, Idea #10 logging-path audit, Idea #11 background-op gating) are **shared** — they affect both Cast and BT paths because both paths live in the same `radio-api` process. Implementing them once benefits both outputs; success criteria reference each path's probes.
+
 ### Tools available for the research execution pass
 
 - **Live SSH to `radio` (Ubuntu N100, primary)** and `piradio` (Pi 5). Both run `radio-api` under `mmack` user with PipeWire.
@@ -106,7 +116,7 @@ Every speculative improvement idea in §7 is structured as a **testable hypothes
 
 ## 4. Failure-mode catalog (the diagnostic spine)
 
-Ten modes, each independently capable of producing a distinct audible or operational failure. The matrix below is filled per system × mode during the research pass.
+Eleven modes, each independently capable of producing a distinct audible or operational failure. The matrix below is filled per system × mode during the research pass.
 
 ### Modes
 
@@ -122,6 +132,7 @@ Ten modes, each independently capable of producing a distinct audible or operati
 | **FM-BT-8** | AVRCP desync (volume, metadata, transport) | Phone's AVRCP target reports state X; PW + RTest hold state Y; user-perceived volume / now-playing / play-pause disagree. | Volume jumps when AVRCP catches up; metadata stale across track changes; play-pause hits wrong system. |
 | **FM-BT-9** | Reconnect-after-walkaway | Phone walks out of range, comes back. Does RTest detect the disconnect? Reconnect? Restart the capture stream cleanly? Or is manual intervention required? | Audio doesn't resume after return; or resumes but with stale routing; or works fine. |
 | **FM-BT-10** | Adapter / profile contention | A second profile (HFP) activates on the same adapter, suspending A2DP; OR another service (RotaryPhone) takes over the adapter. RTest's dual-adapter split addresses this *for the HFP-vs-A2DP-on-one-adapter* case, but cross-adapter pairing can still race. | A2DP suspends silently mid-session; reconnect required to restore. |
+| **FM-BT-11** | Host resource contention | `radio-api` competes with concurrent system activity (SSH log queries, journald write throughput, SQLite WAL checkpoints, fingerprint backfill, `radio-web` on same box) for CPU / IO / memory on the Ubuntu N100 host; PipeWire native thread's `OnProcess` callback misses its scheduling window when host is busy. MEMORY explicitly documents the SSH-correlation. Shared with Cast doc's FM8 — same process, same host. | Audible glitches that don't correlate with BT-layer events (no transport drop, no PW node state change); correlate instead with host CPU spikes, log-volume surges, or SQLite checkpoint events. Distinct from FM-BT-3 (capture-loop quiesces silently for hours) because FM-BT-11 is transient per-event correlation. |
 
 ### Failure-mode matrix (to be filled)
 
@@ -143,6 +154,7 @@ For each cell:
 | FM-BT-8 — AVRCP desync | *[pending — BluetoothAudioSource subscribes to MetadataChanged, PlaybackStatusChanged, PositionChanged; need to map full AVRCP state-sync surface]* | *[pending]* | n/a (bluez-alsa is A2DP only, no AVRCP) | *[pending]* |
 | FM-BT-9 — Reconnect-after-walkaway | *[pending — `BluetoothReconnectionLoop` exists with exponential backoff; need to walk its trigger conditions]* | *[pending]* | *[pending]* | *[pending]* |
 | FM-BT-10 — Adapter / profile contention | *[pending — dual-adapter split deployed; need to enumerate residual race conditions]* | *[pending]* | *[pending]* | *[pending]* |
+| FM-BT-11 — Host resource contention | **Exposure:** Y (acknowledged in MEMORY) — `radio-api` runs as `mmack` user on Ubuntu N100 with default Linux scheduling. No `CPUAffinity=`, no `SCHED_FIFO`, no IO niceness in [radio-api.service](../../deploy/radio-api.service). The PipeWire native callback (`OnProcess`) runs on a PW-owned thread loop but the loop itself is in `radio-api`'s process and shares CPU with `radio-web`, journald, SQLite, fingerprint backfill (15 s interval), and any concurrent SSH sessions. The existing `🔬 PipeWire OnProcess` 10 s-window stats ([PipeWireNativeStream.cs:L364-L376](../../src/Radio.Infrastructure/Platform/Bluetooth/Native/PipeWireNativeStream.cs)) already log `interval max` and `execution max` — these are the directly-observable signals when the host is loaded. **Mitigation:** None today. Recent async-logging work reduced overall log volume but didn't isolate the PW thread from synchronous-flush events. [doc-cited, MEMORY: "Audio distortion correlates with SSH activity"; source-walked, deploy/radio-api.service lacks resource directives; PipeWireNativeStream telemetry] | **Exposure:** Lower — PW-stock deployments typically run on lighter desktops without competing application workloads; but the failure mode exists if the host is loaded. WirePlumber + pipewire daemons themselves run as user-level services with no special isolation by default. [doc-cited, https://docs.pipewire.org/page_man_pipewire-daemon_1.html, 2026-05-22] | **Exposure:** Variable — bluez-alsa's `bluealsa` daemon is usually run with elevated permissions or a dedicated user; many audiophile distros run it on a low-latency kernel with `chrt` priority. [doc-cited, https://github.com/Arkq/bluez-alsa/wiki, 2026-05-22] | **Exposure:** N — Android isolates `audioserver` as a dedicated system process with `audio_policy_configuration` granting it elevated scheduling priority. The BT stack itself runs in `system_server` with realtime threads for the A2DP encoder. [doc-cited, https://source.android.com/docs/core/audio, 2026-05-22] |
 
 ---
 
@@ -162,6 +174,7 @@ Ten rows × the same four columns. Each cell with an evidence tag.
 | Recovery model | What triggers a restart / reconnect? | (a) `BluetoothReconnectionLoop` (exponential backoff on disconnect, [BluetoothReconnectionLoop.cs](../../src/Radio.Infrastructure/Platform/Bluetooth/BluetoothReconnectionLoop.cs)); (b) `CaptureStreamRecovered` event from `IBluetoothService`; (c) `SoundFlowPlaybackService.GeneratorStalled` → `OnGeneratorStalled` with `_recoveryInProgress` interlock dedup ([BluetoothAudioSource.cs:L354-L390](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)); (d) double-search guard in `GetAudioCaptureDeviceAsync` race ([LinuxBluetoothService.cs:L1022,L1045](../../src/Radio.Infrastructure/Platform/Bluetooth/LinuxBluetoothService.cs)). [source-walked] | *[pending]* | *[pending]* | *[pending]* |
 | Observable telemetry | What counters / logs / events does the system surface? | (a) `🔬 PipeWire OnProcess` 10s-window stats (count, min/max interval, burst count for sub-1ms intervals, max execution ms) — [PipeWireNativeStream.cs:L364-L376](../../src/Radio.Infrastructure/Platform/Bluetooth/Native/PipeWireNativeStream.cs); (b) `bluetooth.reconnect_*_total` counters in Radio.Metrics SQLite store; (c) BlueZ D-Bus property-change logs. [source-walked] | *[pending — `pw-top`, `pw-dump`, journal]* | *[pending — `bluealsa --syslog`]* | *[pending — Android `dumpsys media.audio_flinger`]* |
 | Metadata channel (AVRCP) | How does track / play-state / volume info flow? | Separate from audio. BluezAgent + `AttachMediaPlayerAsync` ([LinuxBluetoothService.cs:L2043](../../src/Radio.Infrastructure/Platform/Bluetooth/LinuxBluetoothService.cs)) subscribes to `org.bluez.MediaPlayer1` D-Bus property changes; events bridge to `BluetoothAudioSource.OnMetadataChanged` / `OnPlaybackStatusChanged` / `OnPositionChanged`. [source-walked] | *[pending]* | n/a (no AVRCP in bluez-alsa) | *[pending]* |
+| Host resource-contention surface | What concurrent system activity competes with the BT capture / mixer threads? What isolation primitives are in use? | `radio-api` runs as `mmack` user on Ubuntu N100 / Pi 5; systemd unit has **no** `CPUAffinity=`, **no** `Nice=`, **no** `IOSchedulingClass=`, **no** `LimitRTPRIO=`. PipeWire `OnProcess` callback runs on PW thread loop *inside* radio-api's process — shares scheduling with everything else in the process. Concurrent contention: `radio-web` (same box), 3× SQLite DBs, journald, fingerprint backfill loop at 15 s (active for BT source per [BluetoothAudioSource.cs:L91-L94](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)), SSH activity (acknowledged correlation per MEMORY). Existing telemetry: `🔬 PipeWire OnProcess` log captures interval min/max + execution max + burst count every 10 s — directly observable signal for FM-BT-11. [source-walked + doc-cited, deploy/radio-api.service; PipeWireNativeStream.cs:L364-L376; MEMORY] | WirePlumber + pipewire run as user-level services; no special CPU/IO isolation by default. Audio routing thread shares the same priority class as the rest of pipewire's audio graph. [doc-cited, https://docs.pipewire.org/, 2026-05-22] | `bluealsa-aplay` typically run with `chrt -f` SCHED_FIFO in audiophile distros; many ship a low-latency kernel. [doc-cited, https://github.com/Arkq/bluez-alsa/wiki, 2026-05-22] | `audioserver` is a dedicated process with elevated scheduling; A2DP encoder thread runs at realtime priority. [doc-cited, https://source.android.com/docs/core/audio, 2026-05-22] |
 
 ---
 
@@ -195,23 +208,32 @@ Each idea explicitly **is not a commitment**. A future plan would consume any on
 >
 > **Confidence**: **High** *(pending FM-BT-3 column fill — confidence rises if reference systems also detect callback-stall, falls if they sidestep it by never having the failure mode)*.
 >
-> **Baseline probe**:
+> **Baseline probe**: 72 h soak with phone connected and periodic source switches, captured **alongside `PROBE-SYS-LOAD`** (per §3 concurrent-load discipline) so stall events can be classified as load-correlated vs not.
 > ```bash
-> # Run for 72h on Ubuntu N100 with phone connected, periodic source switches.
-> # Counts capture-stall events (windows with no '🔬 PipeWire OnProcess' line for ≥60s
-> # despite BluetoothAudioSource state == Playing).
+> # Audio probe: counts capture-stall events (windows with no '🔬 PipeWire OnProcess'
+> # line for ≥60s despite BluetoothAudioSource state == Playing).
 > ssh mmack@radio "journalctl -u radio-api --since '72 hours ago' -o cat" \
 >   | python3 scripts/research/bt_stall_detect.py --window 60s \
 >   > baseline_bt_stall.txt
-> ```
-> Output artifact: `baseline_bt_stall.txt` containing `events=<N>, mean_gap_minutes=<M>, max_gap_minutes=<X>, total_uptime_hours=<H>`.
 >
-> **Post-change probe**: identical command + parser, same 72 h soak. Output: `after_bt_stall.txt`.
+> # Run concurrently for the full 72 h window:
+> ssh mmack@radio "/opt/radio-console/scripts/research/sysload_capture.sh 259200" \
+>   > baseline_bt_sysload.txt
+>
+> # Post-process: classify each stall event by load context
+> python3 scripts/research/sysload_correlate.py \
+>   baseline_bt_stall.txt baseline_bt_sysload.txt \
+>   > baseline_bt_stall_classified.txt
+> ```
+> Output artifact: `baseline_bt_stall_classified.txt` containing `events_total=<N>, events_load_correlated=<L>, events_quiet_host=<Q>, mean_gap_minutes=<M>, max_gap_minutes=<X>, total_uptime_hours=<H>`. ("Load-correlated" = CPU >70 % OR `journalctl` line-rate >100/s OR active SSH session in the 5 s preceding the stall.)
+>
+> **Post-change probe**: identical command sequence + same parsers, same 72 h soak. Output: `after_bt_stall_classified.txt`.
 >
 > **Success criterion**:
-> - `events` count drops to ≤1 over a 72 h soak (vs current observed multiple per week)
-> - For any event that still occurs: `OnGeneratorStalled` recovery fires within ≤15 s of the stall (verified by log timestamps)
-> - Audible-gap test (see §3 tools: loopback recording): no silence > 5 s in the 72 h recording
+> - `events_quiet_host` (stalls without concurrent host load) drops to `≤1` over the 72 h soak (this idea's primary target — these are the FM-BT-3 stalls the watchdog directly addresses)
+> - For any `events_quiet_host` that remain: `OnGeneratorStalled` recovery fires within `≤15 s` of the stall
+> - `events_load_correlated` is **expected to be unchanged or reduced only as a side effect** — this idea does not claim to fix FM-BT-11; that's the job of the system-isolation ideas (shared with Cast doc §7 Ideas #9-11). Reporting the delta separately makes the gap visible.
+> - Audible-gap test (see §3 tools: loopback recording): no silence > 5 s in the 72 h recording during quiet-host windows
 >
 > **Debug-agent verification steps**:
 > 1. `git checkout main && ./deploy/Deploy-ToLinux.ps1 -TargetHost radio -Runtime linux-x64`
@@ -239,15 +261,19 @@ Each idea explicitly **is not a commitment**. A future plan would consume any on
 >
 > **Confidence**: **High** — direct cause-effect with code evidence, no architectural unknowns.
 >
-> **Baseline probe**:
+> **Baseline probe**: 24 h scripted pair/unpair cycle, captured alongside `PROBE-SYS-LOAD` (per §3 concurrent-load discipline) so we can verify the `retry_loop_hours` reduction isn't being masked by an idle host coincidence.
 > ```bash
 > # Counts: (a) source switches to BT, (b) GetAudioCaptureDeviceAsync invocations,
 > # (c) "waiting for PW node" log lines, over 24h with N pair/unpair cycles.
 > ssh mmack@radio "journalctl -u radio-api --since '24 hours ago' -o cat" \
 >   | python3 scripts/research/bt_autoswitch_audit.py \
 >   > baseline_autoswitch.txt
+>
+> # Concurrent system-load capture for the same window:
+> ssh mmack@radio "/opt/radio-console/scripts/research/sysload_capture.sh 86400" \
+>   > baseline_autoswitch_sysload.txt
 > ```
-> Output: `switches=<N>, getcapture_invocations=<M>, waiting_log_lines=<L>, retry_loop_hours=<T>`.
+> Output: `switches=<N>, getcapture_invocations=<M>, waiting_log_lines=<L>, retry_loop_hours=<T>`, plus the sysload artifact for cross-reference (this idea doesn't filter by load context — included for completeness so a future reader can see whether the retry loop was load-amplified).
 >
 > **Post-change probe**: identical command + parser, after the change ships.
 >
@@ -283,8 +309,8 @@ Each idea explicitly **is not a commitment**. A future plan would consume any on
 
 ### Framework (this commit)
 - [x] §1-3 scope, reference systems, methodology (incl. measurement-discipline tier)
-- [x] §4 failure-mode catalog with 10 modes defined; RTest column citations seeded
-- [x] §5 pipeline-table row definitions; RTest column citations seeded
+- [x] §4 failure-mode catalog with 11 modes defined (FM-BT-11 added 2026-05-22 for host-resource-contention); RTest column citations seeded
+- [x] §5 pipeline-table row definitions (11 rows incl. host-resource-contention surface added 2026-05-22); RTest column citations seeded
 - [x] §6 synthesis section stubbed
 - [x] §7 speculative ideas section stubbed + 2 illustrative drafts to validate measurement structure
 - [x] §8 out-of-band notes
