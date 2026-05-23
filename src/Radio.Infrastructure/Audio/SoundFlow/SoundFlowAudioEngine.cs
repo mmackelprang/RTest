@@ -195,6 +195,15 @@ public class SoundFlowAudioEngine : IAudioEngine
       var isHttp = string.Equals(outputId, "http-stream", StringComparison.OrdinalIgnoreCase);
       var isLocal = !isCast && !isHttp;
 
+      // Detect a transition AWAY from Cast — Cast needs a full tear-down
+      // (media STOP + CLOSE_APP + disconnect receiver) so the Chromecast
+      // returns to its default state. The bare DeactivateVirtualOutputAsync
+      // only sends media STOP via output.StopAsync; without DisconnectAsync
+      // the receiver app keeps the session and audio keeps playing on Cast
+      // (the user has to manually disconnect via the Cast UI, which was the
+      // bug observed in UAT scenario D).
+      var leavingCast = !isCast && string.Equals(previous, "google-cast", StringComparison.OrdinalIgnoreCase);
+
       // Order: deactivate -> mute-state -> activate. Muting before activation
       // avoids a brief dual-output blip on the playback device's next callback.
       if (isLocal)
@@ -203,7 +212,14 @@ public class SoundFlowAudioEngine : IAudioEngine
         // The local-device switch (native MiniAudio swap) is the caller's
         // responsibility via IAudioDeviceManager.SetOutputDeviceAsync — this
         // gate only owns mute state, virtual-output lifecycle, and persistence.
-        await DeactivateVirtualOutputAsync(_castOutput, "Google Cast", cancellationToken).ConfigureAwait(false);
+        if (leavingCast)
+        {
+          await TearDownCastOutputAsync(cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+          await DeactivateVirtualOutputAsync(_castOutput, "Google Cast", cancellationToken).ConfigureAwait(false);
+        }
         await DeactivateVirtualOutputAsync(_httpOutput, "HTTP Stream", cancellationToken).ConfigureAwait(false);
         SetLocalOutputMuted(false);
       }
@@ -221,7 +237,14 @@ public class SoundFlowAudioEngine : IAudioEngine
       {
         // HTTP without Cast: HTTP active, Cast deactivated, local muted.
         SetLocalOutputMuted(true);
-        await DeactivateVirtualOutputAsync(_castOutput, "Google Cast", cancellationToken).ConfigureAwait(false);
+        if (leavingCast)
+        {
+          await TearDownCastOutputAsync(cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+          await DeactivateVirtualOutputAsync(_castOutput, "Google Cast", cancellationToken).ConfigureAwait(false);
+        }
         await ActivateVirtualOutputAsync(_httpOutput, "HTTP Stream", cancellationToken).ConfigureAwait(false);
       }
 
@@ -261,6 +284,56 @@ public class SoundFlowAudioEngine : IAudioEngine
     if (output.State == AudioOutputState.Streaming || output.State == AudioOutputState.Ready)
     {
       await output.StopAsync(ct).ConfigureAwait(false);
+    }
+  }
+
+  /// <summary>
+  /// Full graceful tear-down of the Cast output: sends media STOP via
+  /// <c>StopAsync</c> AND <c>CLOSE_APP</c> + receiver-channel disconnect via
+  /// <c>DisconnectAsync</c>. Required when transitioning away from Cast
+  /// (output picker switching to soundbar / http-stream) or on engine
+  /// shutdown — without the DisconnectAsync step the Chromecast receiver
+  /// app keeps the session and audio keeps streaming.
+  ///
+  /// Best-effort: capped at 5 s, swallows exceptions, never blocks the gate.
+  /// Shares the same shutdown sequence used by AudioEngineInitializationService.StopAsync.
+  /// </summary>
+  public async Task TearDownCastOutputAsync(CancellationToken cancellationToken)
+  {
+    if (_castOutput == null)
+    {
+      return;
+    }
+
+    try
+    {
+      using var castCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+      castCts.CancelAfter(TimeSpan.FromSeconds(5));
+
+      // StopAsync sends MediaChannel.StopAsync (terminates media session) and
+      // tears down DirectChannel streaming if active. Safe to call regardless
+      // of current state — the override has its own ValidateCanStop guard.
+      if (_castOutput.State == AudioOutputState.Streaming ||
+          _castOutput.State == AudioOutputState.Ready ||
+          _castOutput.State == AudioOutputState.Connecting)
+      {
+        await _castOutput.StopAsync(castCts.Token).ConfigureAwait(false);
+      }
+
+      // DisconnectAsync sends CLOSE_APP and closes the receiver-channel
+      // connection. Only GoogleCastOutput knows how to do this — the
+      // IAudioOutput interface doesn't expose it. Runtime cast keeps the
+      // engine's _castOutput field typed as IAudioOutput? for testability.
+      if (_castOutput is Radio.Infrastructure.Audio.Outputs.GoogleCastOutput cast)
+      {
+        await cast.DisconnectAsync(castCts.Token).ConfigureAwait(false);
+      }
+
+      _logger.LogInformation("Cast output stopped + disconnected gracefully");
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Graceful Cast tear-down failed; continuing");
     }
   }
 
