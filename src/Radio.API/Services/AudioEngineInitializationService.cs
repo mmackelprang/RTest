@@ -583,6 +583,33 @@ public class AudioEngineInitializationService : IHostedService
     {
       _logger.LogInformation("Stopping audio engine...");
 
+      // Graceful Cast shutdown: stop media + disconnect cleanly so the
+      // Chromecast returns to its default state instead of holding a stale
+      // session that the next startup has to fight through. Best-effort;
+      // never block engine stop. 5s outer cap covers the media-stop +
+      // disconnect combined (each has its own internal 5s timeout — see
+      // GoogleCastOutput.cs).
+      if (_castOutput != null &&
+          (_castOutput.State == AudioOutputState.Streaming ||
+           _castOutput.State == AudioOutputState.Ready ||
+           _castOutput.State == AudioOutputState.Connecting))
+      {
+        try
+        {
+          using var castCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+          // StopAsync sends MediaChannel.StopAsync (terminates media session)
+          // and tears down DirectChannel streaming if active.
+          await _castOutput.StopAsync(castCts.Token);
+          // DisconnectAsync sends CLOSE_APP / closes the receiver connection.
+          await _castOutput.DisconnectAsync(castCts.Token);
+          _logger.LogInformation("Cast output stopped + disconnected gracefully");
+        }
+        catch (Exception ex)
+        {
+          _logger.LogWarning(ex, "Graceful Cast shutdown failed; continuing engine stop");
+        }
+      }
+
       if (_audioEngine.State == Radio.Core.Interfaces.Audio.AudioEngineState.Running)
       {
         await _audioEngine.StopAsync(cancellationToken);
