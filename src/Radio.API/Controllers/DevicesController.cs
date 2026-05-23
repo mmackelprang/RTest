@@ -671,8 +671,11 @@ public class DevicesController : ControllerBase
         await _castOutput.StartAsync(cancellationToken);
       }
 
-      // Mute local speakers — audio pipeline continues for Cast streaming
-      _audioEngine?.SetLocalOutputMuted(true);
+      // Promote Cast to the active output via the gate (handles mute + persist).
+      if (_audioEngine != null)
+      {
+        await _audioEngine.SetActiveOutputAsync("google-cast", cancellationToken);
+      }
 
       // Save as default Cast device for auto-connect
       await SaveDefaultCastDeviceAsync(request.DeviceId, request.Name ?? "Cast Device");
