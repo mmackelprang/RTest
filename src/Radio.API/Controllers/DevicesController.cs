@@ -194,94 +194,78 @@ public class DevicesController : ControllerBase
       var deviceId = request.DeviceId;
       _logger.LogInformation("Switching audio output to: {DeviceId}", deviceId);
 
-      // Handle virtual outputs (HTTP Stream, Google Cast)
+      if (_audioEngine == null)
+      {
+        return StatusCode(503, new { error = "Audio engine not available" });
+      }
+
+      // Single gate call: atomically activates/deactivates the virtual outputs,
+      // sets local-output mute, and persists AudioPreferences:CurrentOutput.
+      // Replaces the per-branch SetLocalOutputMuted convention that was
+      // enforced at three sites here.
+      await _audioEngine.SetActiveOutputAsync(deviceId);
+
+      if (deviceId == "google-cast")
+      {
+        // Auto-connect remains controller-side (depends on saved-device lookup).
+        await TryAutoConnectDefaultCastDeviceAsync();
+        return Ok(new { message = "Output device set", deviceId = deviceId });
+      }
+
       if (deviceId == "http-stream")
       {
-        // Activate HTTP stream output, deactivate others
-        await ActivateOutputAsync(_httpOutput, "HTTP Stream");
-        await DeactivateOutputAsync(_castOutput, "Google Cast");
-
-        // Unmute local speakers when switching away from Cast
-        _audioEngine?.SetLocalOutputMuted(false);
+        return Ok(new { message = "Output device set", deviceId = deviceId });
       }
-      else if (deviceId == "google-cast")
+
+      // Local device path: validate + perform the native MiniAudio switch.
+      // The gate set the mute state and persisted preferences; this block
+      // still owns the device-index-to-id mapping and the native swap.
+      var deviceIndex = _audioEngine.GetDeviceIndexById(deviceId);
+      if (deviceIndex < 0)
       {
-        // Activate Cast output AND HTTP stream — Cast streams audio via HTTP
-        await ActivateOutputAsync(_castOutput, "Google Cast");
-        await ActivateOutputAsync(_httpOutput, "HTTP Stream");
-
-        // Mute local speakers — audio pipeline continues for HTTP/Cast streaming
-        _audioEngine?.SetLocalOutputMuted(true);
-
-        // Auto-connect to default Cast device if one is saved
-        await TryAutoConnectDefaultCastDeviceAsync();
-      }
-      else
-      {
-        // Local audio device - switch the local output device
-        await DeactivateOutputAsync(_castOutput, "Google Cast");
-        await DeactivateOutputAsync(_httpOutput, "HTTP Stream");
-
-        // Unmute local speakers when switching back from Cast
-        _audioEngine?.SetLocalOutputMuted(false);
-
-        // Validate the device exists before responding
-        if (_audioEngine != null)
-        {
-          var deviceIndex = _audioEngine.GetDeviceIndexById(deviceId);
-          if (deviceIndex < 0)
-          {
-            _logger.LogDebug("Device {DeviceId} is not a local playback device, skipping engine switch", deviceId);
-          }
-          else
-          {
-            // Persist preference and respond BEFORE the native switch.
-            // SwitchPlaybackDevice calls native MiniAudio Stop/Dispose/Init/Start
-            // which can tear down the HTTP socket before the response is sent.
-            await _deviceManager.SetOutputDeviceAsync(deviceId);
-
-            if (_localOutput != null)
-            {
-              _localOutput.UpdateDeviceId(deviceId);
-            }
-
-            _logger.LogInformation("Output device preference saved to {DeviceId}, starting native switch...", deviceId);
-
-            // Fire-and-forget the native device switch on the thread pool
-            var capturedIndex = deviceIndex;
-            var capturedDeviceId = deviceId;
-            _ = Task.Run(async () =>
-            {
-              try
-              {
-                var success = _audioEngine.SwitchPlaybackDevice(capturedIndex);
-                if (!success)
-                {
-                  _logger.LogWarning("Failed to switch SoundFlow playback device to {DeviceId}", capturedDeviceId);
-                }
-                else
-                {
-                  _logger.LogInformation("Native playback device switch to {DeviceId} completed", capturedDeviceId);
-                }
-              }
-              catch (Exception ex)
-              {
-                _logger.LogError(ex, "Error during native playback device switch to {DeviceId}", capturedDeviceId);
-              }
-            });
-
-            return Ok(new { message = "Output device set", deviceId = deviceId });
-          }
-        }
-
+        _logger.LogDebug("Device {DeviceId} is not a local playback device, skipping engine switch", deviceId);
         if (_localOutput != null)
         {
           await _localOutput.SelectDeviceAsync(deviceId);
         }
+        await _deviceManager.SetOutputDeviceAsync(deviceId);
+        return Ok(new { message = "Output device set", deviceId = deviceId });
       }
 
+      // Persist device manager state before the native switch so the response
+      // is sent quickly. SwitchPlaybackDevice does Stop/Dispose/Init/Start on
+      // the audio backend and can briefly disrupt the HTTP socket.
       await _deviceManager.SetOutputDeviceAsync(deviceId);
-      _logger.LogInformation("Output device set to {DeviceId}", deviceId);
+
+      if (_localOutput != null)
+      {
+        _localOutput.UpdateDeviceId(deviceId);
+      }
+
+      _logger.LogInformation("Output device preference saved to {DeviceId}, starting native switch...", deviceId);
+
+      // Fire-and-forget the native device switch on the thread pool
+      var capturedIndex = deviceIndex;
+      var capturedDeviceId = deviceId;
+      _ = Task.Run(async () =>
+      {
+        try
+        {
+          var success = _audioEngine.SwitchPlaybackDevice(capturedIndex);
+          if (!success)
+          {
+            _logger.LogWarning("Failed to switch SoundFlow playback device to {DeviceId}", capturedDeviceId);
+          }
+          else
+          {
+            _logger.LogInformation("Native playback device switch to {DeviceId} completed", capturedDeviceId);
+          }
+        }
+        catch (Exception ex)
+        {
+          _logger.LogError(ex, "Error during native playback device switch to {DeviceId}", capturedDeviceId);
+        }
+      });
 
       return Ok(new { message = "Output device set", deviceId = deviceId });
     }
