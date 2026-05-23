@@ -28,7 +28,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private readonly IBluetoothService _bluetoothService;
   private readonly BackgroundIdentificationService? _identificationService;
   private readonly IServiceScopeFactory? _serviceScopeFactory;
-  private readonly AlbumArtCacheService? _albumArtCache;
+  private readonly IAlbumArtCacheService? _albumArtCache;
   private readonly IOptionsMonitor<BluetoothOptions> _options;
   private readonly IOptionsMonitor<FingerprintingOptions>? _fingerprintingOptionsMonitor;
   private readonly SoundFlowPlaybackService? _playbackService;
@@ -63,7 +63,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     IMetricsCollector? metricsCollector = null,
     SoundFlowPlaybackService? playbackService = null,
     IServiceScopeFactory? serviceScopeFactory = null,
-    AlbumArtCacheService? albumArtCache = null,
+    IAlbumArtCacheService? albumArtCache = null,
     IOptionsMonitor<FingerprintingOptions>? fingerprintingOptions = null)
     : base(logger, deviceManager, identificationService, metricsCollector)
   {
@@ -737,13 +737,31 @@ public class BluetoothAudioSource : USBAudioSourceBase
     // Always clear stale art from the previous song — PlayHistoryTracker reads
     // AlbumArtUrl from source metadata when creating entries, so leftover art
     // from the previous song would leak into the new song's history entry.
+    //
+    // AVRCP ArtUrl is usually a file:///data/data/com.android.<player>/cache/...
+    // URI on the PHONE'S local filesystem, which the browser cannot fetch. Route
+    // every URL through the album-art cache: it downloads the bytes (for http(s)://)
+    // or returns null (for file:// — HttpClient throws NotSupportedException,
+    // caught inside SaveFromUrlAsync). On null we leave AlbumArtUrl absent so the
+    // UI shows the fallback icon; SongRec, if it later identifies the track via
+    // OnTrackIdentified, will populate the art then.
+    MetadataInternal.Remove(StandardMetadataKeys.AlbumArtUrl);
     if (!string.IsNullOrEmpty(e.AlbumArtUrl))
     {
-      MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = e.AlbumArtUrl;
+      if (_albumArtCache != null && _serviceScopeFactory != null)
+      {
+        _ = CacheAvrcpArtAsync(e.AlbumArtUrl, e.Title, e.Artist);
+      }
+      else
+      {
+        Logger.LogWarning(
+          "AVRCP delivered ArtUrl '{Url}' but album-art cache or scope factory is null — " +
+          "BT album art will not appear. Check DI registration of IAlbumArtCacheService.",
+          e.AlbumArtUrl);
+      }
     }
     else
     {
-      MetadataInternal.Remove(StandardMetadataKeys.AlbumArtUrl);
       _lastCoverArtLookupKey = null;
     }
 
@@ -888,6 +906,39 @@ public class BluetoothAudioSource : USBAudioSourceBase
     catch (Exception ex)
     {
       Logger.LogWarning(ex, "Failed to cache cover art from fingerprint for '{Title}' by '{Artist}'", title, artist);
+    }
+  }
+
+  /// <summary>
+  /// Downloads the AVRCP-supplied album art URL into the local cache and
+  /// sets <see cref="StandardMetadataKeys.AlbumArtUrl"/> to the resulting
+  /// /api/albumart/... path. If the cache returns null (file:// URLs,
+  /// network errors, etc.) metadata is left without AlbumArtUrl and the
+  /// UI falls back to the default icon.
+  /// </summary>
+  private async Task CacheAvrcpArtAsync(string artUrl, string title, string artist)
+  {
+    try
+    {
+      var localUrl = await _albumArtCache!.SaveFromUrlAsync(artUrl);
+      if (string.IsNullOrEmpty(localUrl))
+      {
+        Logger.LogDebug(
+          "AVRCP art URL not cacheable for '{Title}' by '{Artist}' (URL: {Url}); waiting for SongRec",
+          title, artist, artUrl);
+        return;
+      }
+
+      MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = localUrl;
+      Logger.LogInformation(
+        "Cached AVRCP album art for '{Title}' by '{Artist}': {LocalUrl}",
+        title, artist, localUrl);
+
+      await UpdateRecentPlayHistoryCoverArtAsync(localUrl, title, artist);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to cache AVRCP album art for '{Title}' by '{Artist}'", title, artist);
     }
   }
 
