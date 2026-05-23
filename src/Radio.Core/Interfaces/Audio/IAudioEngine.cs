@@ -83,6 +83,27 @@ public interface IAudioEngine : IAsyncDisposable
   /// </summary>
   /// <param name="muted">True to mute local output, false to restore volume.</param>
   void SetLocalOutputMuted(bool muted);
+
+  /// <summary>
+  /// Gets the id of the currently active output ("google-cast", "http-stream",
+  /// or a local device id). Null until the first activation completes.
+  /// </summary>
+  string? ActiveOutputId { get; }
+
+  /// <summary>
+  /// Atomically switches the active audio output. Exactly one output is active
+  /// at any time: either a local playback device (identified by its MiniAudio
+  /// device id), or one of the virtual outputs "google-cast" / "http-stream".
+  /// Activates the requested output, deactivates the others, sets local-output
+  /// mute appropriately, and persists the choice to AudioPreferences:CurrentOutput.
+  /// </summary>
+  /// <param name="outputId">"google-cast", "http-stream", or a local device id.</param>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <remarks>
+  /// Callers must not re-enter this method from within an output's StartAsync/StopAsync
+  /// callbacks — the gate holds a SemaphoreSlim and will deadlock under reentrancy.
+  /// </remarks>
+  Task SetActiveOutputAsync(string outputId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
