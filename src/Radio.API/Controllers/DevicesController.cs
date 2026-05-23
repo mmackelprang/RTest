@@ -1341,10 +1341,9 @@ public class DevicesController : ControllerBase
 
         await _castOutput.StartAsync();
 
-        // Mute local speakers — audio pipeline continues for Cast streaming
-        _audioEngine?.SetLocalOutputMuted(true);
+        // (Gate already muted local in the caller; no per-call mute needed here.)
 
-        _logger.LogInformation("Auto-connected to default Cast device: {Name} (mode: {Mode}, local output muted)",
+        _logger.LogInformation("Auto-connected to default Cast device: {Name} (mode: {Mode})",
           device.FriendlyName, autoConnectOptions.StreamingMode);
       }
       catch (Exception ex)
