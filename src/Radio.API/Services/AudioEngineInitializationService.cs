@@ -77,6 +77,15 @@ public class AudioEngineInitializationService : IHostedService
 
       _logger.LogInformation("Initializing audio engine...");
 
+      // Wire the virtual outputs + config manager into the engine so
+      // SetActiveOutputAsync can activate/deactivate them and persist the
+      // choice. The engine treats these as optional dependencies; the
+      // controller-side activation paths still go through the same gate.
+      if (_audioEngine is SoundFlowAudioEngine sfEngine)
+      {
+        sfEngine.AttachOutputCoordination(_castOutput, _httpOutput, _configManager);
+      }
+
       // Initialize the audio engine
       await _audioEngine.InitializeAsync(cancellationToken);
       

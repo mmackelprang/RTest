@@ -47,6 +47,16 @@ public class SoundFlowAudioEngine : IAudioEngine
   private readonly object _stateLock = new();
   private GCLatencyMode _previousLatencyMode;
 
+  // Optional virtual-output references for SetActiveOutputAsync. Injected via
+  // AttachOutputCoordination (not the constructor) to avoid a chicken-and-egg
+  // dependency cycle: GoogleCastOutput can hold the engine indirectly when
+  // DirectChannel mode is enabled.
+  private IAudioOutput? _castOutput;
+  private IAudioOutput? _httpOutput;
+  private Radio.Configuration.Abstractions.IConfigurationManager? _configManager;
+  private string? _activeOutputId;
+  private readonly SemaphoreSlim _activeOutputLock = new(1, 1);
+
   /// <inheritdoc/>
   public event EventHandler<AudioEngineStateChangedEventArgs>? StateChanged;
 
@@ -139,6 +149,137 @@ public class SoundFlowAudioEngine : IAudioEngine
     _localOutputMuted = muted;
     UpdatePlaybackDeviceVolume();
     _logger.LogInformation("Local output {State}", muted ? "muted (casting to external device)" : "unmuted");
+  }
+
+  /// <inheritdoc/>
+  public string? ActiveOutputId => _activeOutputId;
+
+  /// <summary>
+  /// Wires the virtual outputs + configuration manager so
+  /// <see cref="SetActiveOutputAsync"/> can activate/deactivate them and persist
+  /// the choice. Called from DI startup after all singletons are constructed
+  /// (avoids a constructor-time cycle with Cast/HTTP outputs).
+  /// </summary>
+  /// <param name="castOutput">Optional Google Cast output instance.</param>
+  /// <param name="httpOutput">Optional HTTP stream output instance.</param>
+  /// <param name="configManager">Optional configuration manager for persisting the choice.</param>
+  public void AttachOutputCoordination(
+    IAudioOutput? castOutput,
+    IAudioOutput? httpOutput,
+    Radio.Configuration.Abstractions.IConfigurationManager? configManager)
+  {
+    _castOutput = castOutput;
+    _httpOutput = httpOutput;
+    _configManager = configManager;
+    _logger.LogDebug(
+      "Output coordination attached (cast={HasCast}, http={HasHttp}, config={HasConfig})",
+      castOutput != null, httpOutput != null, configManager != null);
+  }
+
+  /// <inheritdoc/>
+  public async Task SetActiveOutputAsync(string outputId, CancellationToken cancellationToken = default)
+  {
+    if (string.IsNullOrWhiteSpace(outputId))
+    {
+      throw new ArgumentException("outputId is required", nameof(outputId));
+    }
+
+    await _activeOutputLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+    try
+    {
+      var previous = _activeOutputId;
+      _logger.LogInformation(
+        "SetActiveOutputAsync: {Previous} -> {Next}", previous ?? "<none>", outputId);
+
+      var isCast = string.Equals(outputId, "google-cast", StringComparison.OrdinalIgnoreCase);
+      var isHttp = string.Equals(outputId, "http-stream", StringComparison.OrdinalIgnoreCase);
+      var isLocal = !isCast && !isHttp;
+
+      // Order: deactivate -> mute-state -> activate. Muting before activation
+      // avoids a brief dual-output blip on the playback device's next callback.
+      if (isLocal)
+      {
+        // Going to local: stop Cast + HTTP, then unmute local.
+        // The local-device switch (native MiniAudio swap) is the caller's
+        // responsibility via IAudioDeviceManager.SetOutputDeviceAsync — this
+        // gate only owns mute state, virtual-output lifecycle, and persistence.
+        await DeactivateVirtualOutputAsync(_castOutput, "Google Cast", cancellationToken).ConfigureAwait(false);
+        await DeactivateVirtualOutputAsync(_httpOutput, "HTTP Stream", cancellationToken).ConfigureAwait(false);
+        SetLocalOutputMuted(false);
+      }
+      else if (isCast)
+      {
+        // Cast needs HTTP active too (HttpMp3 mode wires audio through it).
+        // DirectChannel mode tolerates HTTP being active — HttpStreamOutput is
+        // a no-op if there are no readers. No current caller relies on HTTP
+        // being explicitly stopped while Cast is active.
+        SetLocalOutputMuted(true);
+        await ActivateVirtualOutputAsync(_httpOutput, "HTTP Stream", cancellationToken).ConfigureAwait(false);
+        await ActivateVirtualOutputAsync(_castOutput, "Google Cast", cancellationToken).ConfigureAwait(false);
+      }
+      else // isHttp
+      {
+        // HTTP without Cast: HTTP active, Cast deactivated, local muted.
+        SetLocalOutputMuted(true);
+        await DeactivateVirtualOutputAsync(_castOutput, "Google Cast", cancellationToken).ConfigureAwait(false);
+        await ActivateVirtualOutputAsync(_httpOutput, "HTTP Stream", cancellationToken).ConfigureAwait(false);
+      }
+
+      _activeOutputId = outputId;
+      await PersistActiveOutputAsync(outputId, cancellationToken).ConfigureAwait(false);
+    }
+    finally
+    {
+      _activeOutputLock.Release();
+    }
+  }
+
+  private static async Task ActivateVirtualOutputAsync(
+    IAudioOutput? output, string name, CancellationToken ct)
+  {
+    if (output == null)
+    {
+      return;
+    }
+    if (output.State == AudioOutputState.Error || output.State == AudioOutputState.Created)
+    {
+      await output.InitializeAsync(ct).ConfigureAwait(false);
+    }
+    if (output.State == AudioOutputState.Ready || output.State == AudioOutputState.Stopped)
+    {
+      await output.StartAsync(ct).ConfigureAwait(false);
+    }
+  }
+
+  private static async Task DeactivateVirtualOutputAsync(
+    IAudioOutput? output, string name, CancellationToken ct)
+  {
+    if (output == null)
+    {
+      return;
+    }
+    if (output.State == AudioOutputState.Streaming || output.State == AudioOutputState.Ready)
+    {
+      await output.StopAsync(ct).ConfigureAwait(false);
+    }
+  }
+
+  private async Task PersistActiveOutputAsync(string outputId, CancellationToken ct)
+  {
+    if (_configManager == null)
+    {
+      return;
+    }
+    try
+    {
+      var storeId = _configManager.CurrentStoreType ==
+        Radio.Configuration.Models.ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+      await _configManager.SetValueAsync(storeId, "AudioPreferences:CurrentOutput", outputId, ct).ConfigureAwait(false);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to persist AudioPreferences:CurrentOutput = {Id}", outputId);
+    }
   }
 
   /// <inheritdoc/>
