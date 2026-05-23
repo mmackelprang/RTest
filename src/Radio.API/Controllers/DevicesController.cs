@@ -719,16 +719,33 @@ public class DevicesController : ControllerBase
         await _httpOutput.StopAsync(cancellationToken);
       }
 
-      // Unmute local speakers so audio resumes locally
-      _audioEngine?.SetLocalOutputMuted(false);
+      // Promote the local output back via the gate. Use the persisted local
+      // device id; if none, fall back to "default" (the gate is a no-op on
+      // virtual outputs for an unknown id and will still unmute local).
+      var fallbackOutputId = _deviceManager.GetSelectedOutputDeviceId() ?? "default";
+      if (_audioEngine != null)
+      {
+        await _audioEngine.SetActiveOutputAsync(fallbackOutputId, cancellationToken);
+      }
 
       _logger.LogInformation("Disconnected from Cast device: {Name}, local output unmuted", deviceName);
       return Ok(new { message = "Disconnected from Cast device", device = deviceName });
     }
     catch (Exception ex)
     {
-      // Even if disconnect fails, unmute local so user isn't stuck with no audio
-      _audioEngine?.SetLocalOutputMuted(false);
+      // Even if disconnect fails, restore local output so user isn't stuck with no audio
+      try
+      {
+        var fallbackOutputId = _deviceManager.GetSelectedOutputDeviceId() ?? "default";
+        if (_audioEngine != null)
+        {
+          await _audioEngine.SetActiveOutputAsync(fallbackOutputId);
+        }
+      }
+      catch (Exception fallbackEx)
+      {
+        _logger.LogWarning(fallbackEx, "Failed to restore local output after Cast disconnect failure");
+      }
       _logger.LogError(ex, "Error disconnecting from Cast device");
       return StatusCode(500, new { error = "Failed to disconnect from Cast device", details = ex.Message });
     }
