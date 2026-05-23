@@ -16,7 +16,7 @@ namespace Radio.Fingerprinting.Services;
 /// All source types (radio, file, vinyl, USB) use the same SongRec capture-and-recognize path.
 /// Exposes real-time status via <see cref="GetStatus"/> and <see cref="StatusChanged"/>.
 /// </summary>
-public sealed class BackgroundIdentificationService : BackgroundService
+public class BackgroundIdentificationService : BackgroundService
 {
   private readonly ILogger<BackgroundIdentificationService> _logger;
   private readonly IServiceProvider _serviceProvider;
@@ -148,6 +148,17 @@ public sealed class BackgroundIdentificationService : BackgroundService
     {
       // Timer already disposed, ignore
     }
+  }
+
+  /// <summary>
+  /// Internal test hook: raises the <see cref="TrackIdentified"/> event without
+  /// running a real SongRec identification cycle. Used by Infrastructure.Tests
+  /// to verify downstream subscribers (e.g., BluetoothAudioSource's
+  /// OnTrackIdentified handler) without spinning up the full audio pipeline.
+  /// </summary>
+  internal void RaiseTrackIdentifiedForTesting(TrackIdentifiedEventArgs e)
+  {
+    TrackIdentified?.Invoke(this, e);
   }
 
   /// <inheritdoc/>
