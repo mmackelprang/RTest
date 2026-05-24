@@ -354,7 +354,6 @@ builder.Services.AddHttpClient<GvTrunkApiService>(client =>
 builder.Services.AddSingleton<AudioStateHubService>();
 builder.Services.AddSingleton<AudioVisualizationHubService>();
 builder.Services.AddSingleton<PhoneHubService>();
-builder.Services.AddSingleton<GvBridgeHubService>();
 builder.Services.AddSingleton<GvTrunkHubService>();
 
 // Register centralized audio state store (subscribes to hub, caches state for components)
@@ -480,8 +479,6 @@ app.MapRazorComponents<Radio.Web.Components.App>()
 // Start RotaryPhone hub connections (non-blocking — logs warning if unavailable)
 var phoneHub = app.Services.GetRequiredService<PhoneHubService>();
 _ = phoneHub.StartAsync();
-var gvBridgeHub = app.Services.GetRequiredService<GvBridgeHubService>();
-_ = gvBridgeHub.StartAsync();
 var gvTrunkHub = app.Services.GetRequiredService<GvTrunkHubService>();
 _ = gvTrunkHub.StartAsync();
 

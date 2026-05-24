@@ -58,8 +58,6 @@ public class PhonePageTests : TestContext
     Services.AddSingleton<IConfiguration>(config);
     Services.AddSingleton(new PhoneHubService(
       NullLogger<PhoneHubService>.Instance, config));
-    Services.AddSingleton(new GvBridgeHubService(
-      NullLogger<GvBridgeHubService>.Instance, config));
     Services.AddSingleton(new GvTrunkHubService(
       NullLogger<GvTrunkHubService>.Instance, config));
   }
@@ -102,7 +100,7 @@ public class PhonePageTests : TestContext
   {
     var cut = RenderComponent<PhonePage>();
     Assert.Contains("CALL PATH", cut.Markup);
-    Assert.Contains("CHROME EXTENSION", cut.Markup);
+    Assert.Contains("GV API", cut.Markup);
     Assert.Contains("SIP TRUNK", cut.Markup);
   }
 
@@ -148,7 +146,7 @@ public class PhonePageTests : TestContext
         var p when p.Contains("/api/bluetooth/status") =>
           """{"isAvailable":true,"state":"Powered","isDiscovering":false,"pairedDevices":[],"discoveredDevices":[]}""",
         var p when p.Contains("/api/gvbridge/status") =>
-          """{"extensionConnected":false,"extensionVersion":null,"activeMode":"BluetoothHfp"}""",
+          """{"available":false,"activeMode":"BluetoothHfp"}""",
         var p when p.Contains("/api/gvtrunk/status") =>
           """{"isRegistered":false,"callState":"Idle","activeCallDurationSeconds":0}""",
         var p when p.Contains("/api/gvbridge/") => "[]",
