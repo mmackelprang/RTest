@@ -473,6 +473,113 @@ public class SleepForecastPaneTests : TestContext
     pane.GetAttribute("aria-label").Should().Contain("stale");
   }
 
+  // ── Material Symbols Rounded font wiring (regression pin) ──────────────
+  //
+  // These tests pin the two pieces required for the icon spans on the sleep
+  // pane to render as actual glyphs instead of as literal text:
+  //
+  //   1. App.razor MUST <link> the Material Symbols Rounded stylesheet from
+  //      Google Fonts. Without it, the font is never loaded and the
+  //      ligature-substitution that turns "foggy" / "thunderstorm" into
+  //      glyphs never engages.
+  //   2. design-system.css MUST declare a base .material-symbols-rounded
+  //      rule with font-family: 'Material Symbols Rounded'. This is the
+  //      defensive companion to the <link>: if the Google Fonts CDN is
+  //      momentarily unavailable but the user has the font locally cached
+  //      or installed, the spans still resolve correctly.
+  //
+  // Visual UAT after PR #418 caught the icons rendering as literal text
+  // ("foggy", "thunderstorm" overlapping the temperature numerals). These
+  // tests would have failed in that state.
+
+  [Fact]
+  public void AppRazor_LinksMaterialSymbolsRoundedStylesheet()
+  {
+    var appRazor = File.ReadAllText(LocateAppRazor());
+    appRazor.Should().Contain(
+      "Material+Symbols+Rounded",
+      "App.razor must <link> the Material Symbols Rounded font from Google Fonts; "
+      + "without it, the .material-symbols-rounded spans render their icon-key text "
+      + "as literal words (e.g. \"foggy\", \"thunderstorm\") instead of as glyphs");
+  }
+
+  [Fact]
+  public void DesignSystemCss_DeclaresMaterialSymbolsRoundedFontFamily()
+  {
+    var css = File.ReadAllText(LocateDesignSystemCss());
+
+    // Match the base .material-symbols-rounded rule body (not the more
+    // specific descendant selectors like .sleep-forecast-card-icon
+    // .material-symbols-rounded which only set font-size / color).
+    var baseRule = Regex.Match(
+      css,
+      @"^\s*\.material-symbols-rounded\s*\{([^}]*)\}",
+      RegexOptions.Multiline | RegexOptions.Singleline);
+
+    baseRule.Success.Should().BeTrue(
+      "design-system.css must declare a base .material-symbols-rounded rule "
+      + "so the icon font resolves even if the Google Fonts CDN is briefly "
+      + "unavailable; without a font-family declaration, icon spans render "
+      + "their icon-key text as literal words");
+    baseRule.Groups[1].Value.Should().Contain(
+      "font-family: 'Material Symbols Rounded'",
+      "the base rule must point at the Material Symbols Rounded font family");
+  }
+
+  [Fact]
+  public void Pane_PrimaryIcon_SpanCarriesMaterialSymbolsRoundedClass()
+  {
+    // Without this class the icon-key text ("foggy", "thunderstorm", etc.)
+    // renders as plain words instead of as the Material Symbol glyph.
+    // Pins the class on the PRIMARY block icon specifically.
+    var cut = RenderComponent<SleepForecastPane>(p => p
+      .Add(x => x.Forecast, BuildForecast(3))
+      .Add(x => x.TemperatureUnit, "F"));
+
+    var primaryIconSpan = cut.Find(".sleep-forecast-primary-icon span");
+    primaryIconSpan.ClassList.Should().Contain(
+      "material-symbols-rounded",
+      "the primary icon span must carry the icon-font class so its text "
+      + "content is replaced by the corresponding Material Symbol glyph");
+  }
+
+  [Fact]
+  public void Pane_EveryForecastCardIcon_SpanCarriesMaterialSymbolsRoundedClass()
+  {
+    // Same regression pin, applied to every card icon (1–3 cards depending
+    // on day count) so a future refactor of the card markup can't silently
+    // drop the class on one card while leaving it on the others.
+    var cut = RenderComponent<SleepForecastPane>(p => p
+      .Add(x => x.Forecast, BuildForecast(3))
+      .Add(x => x.TemperatureUnit, "F"));
+
+    var cards = cut.FindAll(".sleep-forecast-card");
+    cards.Should().HaveCount(3);
+    foreach (var card in cards)
+    {
+      var iconSpan = card.QuerySelector(".sleep-forecast-card-icon span");
+      iconSpan.Should().NotBeNull("each card must render an icon span");
+      iconSpan!.ClassList.Should().Contain(
+        "material-symbols-rounded",
+        "every card icon span must carry the icon-font class");
+    }
+  }
+
+  [Fact]
+  public void Pane_StaleIconSpan_CarriesMaterialSymbolsRoundedClass()
+  {
+    // The sub-line's sync_problem glyph (rendered only in the stale state)
+    // is the third icon surface on the pane. Pin it for completeness.
+    var cut = RenderComponent<SleepForecastPane>(p => p
+      .Add(x => x.Forecast, BuildForecast(3, isStale: true))
+      .Add(x => x.TemperatureUnit, "F"));
+
+    var staleIcon = cut.Find(".sleep-forecast-stale-icon");
+    staleIcon.ClassList.Should().Contain(
+      "material-symbols-rounded",
+      "the stale-state sync_problem icon span must carry the icon-font class");
+  }
+
   // ── Helpers ─────────────────────────────────────────────────────────────
 
   /// <summary>
@@ -494,5 +601,24 @@ public class SleepForecastPaneTests : TestContext
       dir = Path.GetDirectoryName(dir);
     }
     throw new FileNotFoundException("design-system.css not found by walking up from test base dir");
+  }
+
+  /// <summary>
+  /// Locate the App.razor source file (companion to <see cref="LocateDesignSystemCss"/>).
+  /// Same upward walk strategy; the source isn't copied into the test output.
+  /// </summary>
+  private static string LocateAppRazor()
+  {
+    var dir = AppContext.BaseDirectory;
+    for (var i = 0; i < 10 && dir != null; i++)
+    {
+      var candidate = Path.Combine(dir, "src", "Radio.Web", "Components", "App.razor");
+      if (File.Exists(candidate))
+      {
+        return candidate;
+      }
+      dir = Path.GetDirectoryName(dir);
+    }
+    throw new FileNotFoundException("App.razor not found by walking up from test base dir");
   }
 }
