@@ -200,8 +200,8 @@ public sealed class NwsWeatherService : IWeatherService
   /// Fetches ZIP coordinates with stampede protection — double-checked cache
   /// inspection around a per-ZIP <see cref="SemaphoreSlim"/> so two
   /// simultaneous cold-cache callers don't both hit zippopotam.us. This
-  /// fixes the <see cref="IMemoryCache.GetOrCreateAsync"/> concurrency
-  /// pitfall flagged in the PR #415 first review.
+  /// fixes the <c>IMemoryCache.GetOrCreateAsync</c> concurrency pitfall
+  /// flagged in the PR #415 first review.
   /// </summary>
   private async Task<ZipCoordinates?> GetOrFillCoordsAsync(string zip, CancellationToken ct)
   {
@@ -425,6 +425,27 @@ public sealed class NwsWeatherService : IWeatherService
       1 => "Tomorrow",
       _ => date.ToDateTime(TimeOnly.MinValue).ToString("ddd", CultureInfo.InvariantCulture),
     };
+  }
+
+  /// <summary>
+  /// Test-only seam: inject a forecast cache entry with a controlled
+  /// FetchedAtUtc so the stale-while-revalidate path can be exercised
+  /// without waiting out the real fresh-TTL. Exposed via
+  /// <c>[InternalsVisibleTo("Radio.Infrastructure.Tests")]</c> on the
+  /// Infrastructure csproj — see <c>NwsWeatherServiceTests.GetForecastAsync_StaleEntry_RefreshFails_ReturnsStale</c>.
+  ///
+  /// Keeping this as an explicit named method (rather than promoting the
+  /// private CachedForecast record to internal) means the test depends on a
+  /// stable, intention-revealing API rather than on the cache value's
+  /// internal struct shape — that record can be refactored freely.
+  /// </summary>
+  internal void SetForecastCacheEntryForTesting(string zip, WeatherForecast forecast, DateTimeOffset fetchedAtUtc)
+  {
+    var key = ForecastKeyPrefix + zip + ForecastKeySuffix;
+    _cache.Set(key, new CachedForecast(forecast, fetchedAtUtc), new MemoryCacheEntryOptions
+    {
+      AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(48),
+    });
   }
 
   // ------------------------ internal helper types ------------------------

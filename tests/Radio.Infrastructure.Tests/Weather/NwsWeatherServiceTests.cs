@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Moq.Protected;
 using Radio.Core.Configuration;
+using Radio.Core.Models;
 using Radio.Infrastructure.Weather;
 using Radio.Infrastructure.Weather.Dtos;
 
@@ -261,13 +262,21 @@ public class NwsWeatherServiceTests
     var forecastCalls = 0;
     var gate = new SemaphoreSlim(0, int.MaxValue);
 
+    // Endpoint discrimination by path-prefix rather than Host because the
+    // shared MakeFactory helper hands every caller (zippopotam resolver, NWS
+    // points fetch, NWS forecast fetch) the same HttpClient with BaseAddress
+    // api.weather.gov. The path prefixes /us/, /points/, and the gridpoints
+    // forecast URL are still distinct so we can count each leg separately.
     var handler = new Mock<HttpMessageHandler>(MockBehavior.Strict);
     handler.Protected()
       .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
       .Returns<HttpRequestMessage, CancellationToken>(async (req, _) =>
       {
         var uri = req.RequestUri!;
-        if (uri.Host == "api.zippopotam.us")
+        var path = uri.IsAbsoluteUri ? uri.AbsolutePath : uri.OriginalString;
+        var absoluteUri = uri.IsAbsoluteUri ? uri.AbsoluteUri : string.Empty;
+
+        if (path.StartsWith("/us/", StringComparison.Ordinal))
         {
           Interlocked.Increment(ref zippopotamCalls);
           // Hold the first caller inside the resolver call so the second
@@ -280,7 +289,7 @@ public class NwsWeatherServiceTests
               System.Text.Encoding.UTF8, "application/json"),
           };
         }
-        if (uri.AbsolutePath.StartsWith("/points/", StringComparison.Ordinal))
+        if (path.StartsWith("/points/", StringComparison.Ordinal))
         {
           Interlocked.Increment(ref pointsCalls);
           await gate.WaitAsync().ConfigureAwait(false);
@@ -291,7 +300,7 @@ public class NwsWeatherServiceTests
               System.Text.Encoding.UTF8, "application/geo+json"),
           };
         }
-        if (uri.IsAbsoluteUri && uri.AbsoluteUri.StartsWith("https://api.weather.gov/gridpoints", StringComparison.Ordinal))
+        if (absoluteUri.StartsWith("https://api.weather.gov/gridpoints", StringComparison.Ordinal))
         {
           Interlocked.Increment(ref forecastCalls);
           return new HttpResponseMessage(HttpStatusCode.OK)
@@ -316,12 +325,13 @@ public class NwsWeatherServiceTests
     // The second caller will be blocked on the per-ZIP semaphore — if the
     // semaphore is missing, it would race past and hit the gate as a second
     // pending zippopotam.us request, which would push the counter to 2 BEFORE
-    // we release the gate.
-    await Task.Delay(100);
-    // Release the gated zippopotam.us call first, then the /points call.
-    gate.Release(1);
-    await Task.Delay(50);
-    gate.Release(1);
+    // we release the gate. 250 ms is generous but keeps the test fast; the
+    // ConcurrentDictionary.GetOrAdd + SemaphoreSlim.WaitAsync path is sub-ms.
+    await Task.Delay(250);
+    // Release enough gate permits to satisfy any chain call that's blocked
+    // (1 zippopotam + 1 /points = 2 with the lock; up to 4 without). Extra
+    // permits are harmless — they just sit unused in the SemaphoreSlim.
+    gate.Release(4);
 
     var results = await Task.WhenAll(t1, t2);
 
@@ -347,63 +357,58 @@ public class NwsWeatherServiceTests
       ["https://api.weather.gov/gridpoints/RAH/53,68/forecast"] = JsonResponse(ForecastResponseBody(generatedAt: DateTimeOffset.UtcNow.AddHours(-1))),
     };
 
-    var failOnRefresh = false;
+    // Handler returns 500 for any /points or forecast call — we want the
+    // refresh attempt to fail. The pre-injected stale entry should be served.
     var handler = new Mock<HttpMessageHandler>(MockBehavior.Strict);
     handler.Protected()
       .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-      .Returns<HttpRequestMessage, CancellationToken>((req, _) =>
-      {
-        var isForecastUrl = req.RequestUri!.IsAbsoluteUri && req.RequestUri.AbsoluteUri.StartsWith("https://api.weather.gov/gridpoints", StringComparison.Ordinal);
-        if (failOnRefresh && isForecastUrl)
-        {
-          return Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError));
-        }
-        var key = isForecastUrl ? req.RequestUri.AbsoluteUri : req.RequestUri.PathAndQuery;
-        return Task.FromResult(goodResponses.TryGetValue(key, out var resp)
-          ? CloneResponse(resp)
-          : new HttpResponseMessage(HttpStatusCode.NotFound));
-      });
+      .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.InternalServerError));
 
     var factory = MakeFactory(handler.Object);
-    // 1-minute fresh TTL so the test can age it artificially without sleeping.
+    // 15-minute fresh TTL; the pre-injected entry is 2 hours old → past fresh
+    // but inside the 24h stale-serve horizon, so the service must attempt a
+    // refresh and fall back to the stale entry when the refresh fails.
     var options = new TestMonitor<WeatherDisplayOptions>(new WeatherDisplayOptions { Enabled = true, RefreshIntervalMinutes = 15 });
     var cache = new MemoryCache(new MemoryCacheOptions());
     var resolver = new ZipCoordinatesResolver(factory.Object, NullLogger<ZipCoordinatesResolver>.Instance);
 
     var svc = new NwsWeatherService(factory.Object, resolver, cache, options, NullLogger<NwsWeatherService>.Instance);
 
-    // 1st call — populate cache.
-    var first = await svc.GetForecastAsync("27312");
-    Assert.NotNull(first);
-    Assert.False(first!.IsStale);
+    // Inject a stale-aged forecast directly via the internal test seam.
+    // Using SetForecastCacheEntryForTesting instead of Activator.CreateInstance
+    // on the private nested record keeps the test from breaking the day
+    // someone renames CachedForecast or reorders its constructor parameters
+    // (MAJOR 2 from PR #415 first review).
+    var pristineForecast = BuildForecast("27312");
+    svc.SetForecastCacheEntryForTesting("27312", pristineForecast, DateTimeOffset.UtcNow.AddHours(-2));
 
-    // Age the cached entry by reconstructing it with an old FetchedAtUtc —
-    // we can't wait 16+ minutes in a unit test. The CachedForecast type is
-    // a private nested record (Forecast, FetchedAtUtc); use BindingFlags to
-    // reach the non-public ctor.
-    var forecastCacheKey = "weather:zip:27312:forecast";
-    var cached = cache.Get(forecastCacheKey);
-    Assert.NotNull(cached);
-    var cachedType = cached!.GetType();
-    var forecastProp = cachedType.GetProperty("Forecast");
-    Assert.NotNull(forecastProp);
-    var forecastValue = forecastProp!.GetValue(cached);
-    var aged = Activator.CreateInstance(
-      cachedType,
-      System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance,
-      binder: null,
-      args: new object?[] { forecastValue, DateTimeOffset.UtcNow.AddHours(-2) },
-      culture: null);
-    Assert.NotNull(aged);
-    cache.Set(forecastCacheKey, aged!);
+    var result = await svc.GetForecastAsync("27312");
 
-    // Flip the handler so refresh attempts fail.
-    failOnRefresh = true;
-
-    var second = await svc.GetForecastAsync("27312");
-    Assert.NotNull(second);
-    Assert.True(second!.IsStale, "Refresh failure should serve stale entry with IsStale=true");
+    Assert.NotNull(result);
+    Assert.True(result!.IsStale, "Refresh failure should serve stale entry with IsStale=true");
+    // Returned forecast should be the SAME logical forecast we injected —
+    // confirms the service served stale rather than refetching a different one.
+    Assert.Equal(pristineForecast.GeneratedAtUtc, result.GeneratedAtUtc);
+    Assert.Equal(pristineForecast.Zip, result.Zip);
+    Assert.Equal(pristineForecast.LocationName, result.LocationName);
   }
+
+  /// <summary>
+  /// Helper: build a non-empty <see cref="WeatherForecast"/> we can inject
+  /// into the cache for stale-serve tests.
+  /// </summary>
+  private static WeatherForecast BuildForecast(string zip) => new(
+    Zip: zip,
+    LocationName: "Pittsboro, NC",
+    GeneratedAtUtc: DateTimeOffset.UtcNow.AddHours(-2),
+    FetchedAtUtc: DateTimeOffset.UtcNow.AddHours(-2),
+    IsStale: false,
+    Days: new List<WeatherDay>
+    {
+      new(new DateOnly(2026, 5, 23), "Today", 75, 60, 24, 16, "Sunny", "Sunny", 0, "sunny", null),
+      new(new DateOnly(2026, 5, 24), "Tomorrow", 78, 62, 26, 17, "Partly Cloudy", "Partly Cloudy", 20, "mostly-sunny", null),
+      new(new DateOnly(2026, 5, 25), "Mon", 70, 55, 21, 13, "Showers", "Showers", 60, "rain", null),
+    });
 
   [Fact]
   public async Task GetForecastAsync_NoCache_UpstreamFails_ReturnsNull()
