@@ -31,10 +31,54 @@ namespace Radio.Core.Models;
 /// fewer forecast periods (e.g. late-evening boundary case); the UI centers
 /// the cards it has rather than rendering placeholders.
 /// </param>
+/// <param name="Current">
+/// Snapshot of currently-observed conditions from the nearest reporting
+/// station, or <c>null</c> when the observation chain failed (no nearby
+/// station, station returned no data, network failure, sensor out of range).
+/// The sleep pane renders this as the headline numeral when present, and
+/// falls back to today's forecast high when null (the "v2 fallback" behavior
+/// preserved verbatim per HANDOFF-sleep-weather-current-conditions.md §6).
+/// Always nullable — observation failures MUST never break the forecast.
+/// </param>
 public sealed record WeatherForecast(
   string Zip,
   string LocationName,
   DateTimeOffset GeneratedAtUtc,
   DateTimeOffset FetchedAtUtc,
   bool IsStale,
-  IReadOnlyList<WeatherDay> Days);
+  IReadOnlyList<WeatherDay> Days,
+  CurrentObservation? Current);
+
+/// <summary>
+/// A snapshot of currently-observed weather conditions from the nearest
+/// reporting station, paired with the broader <see cref="WeatherForecast"/>.
+/// The sleep screen renders this as the headline numeral (the "what is it
+/// doing right now" answer) while the per-day forecast handles the outlook.
+///
+/// Always nullable on the parent forecast — if the observation chain fails
+/// (no nearby station, station returned no data, network failure), the
+/// forecast still renders with today's high as the headline (v2 fallback).
+/// </summary>
+/// <param name="TempF">Observed temperature, rounded to nearest int Fahrenheit.</param>
+/// <param name="TempC">Observed temperature, rounded to nearest int Celsius.</param>
+/// <param name="ConditionShort">Short condition label from
+/// <c>properties.textDescription</c> (e.g. <c>"Partly Cloudy"</c>). NWS labels
+/// are already capitalized.</param>
+/// <param name="IconKey">Stable icon key mapped from
+/// <c>properties.icon</c> via the same NwsIconMapper used for forecast
+/// periods. Same vocabulary as <see cref="WeatherDay.IconKey"/>.</param>
+/// <param name="ObservedAtUtc">When the observation was taken by the station
+/// (<c>properties.timestamp</c>). Used both for the staleness rule and
+/// (optionally, future) an "observed at HH:mm" affordance.</param>
+/// <param name="IsStale"><c>true</c> when the observation is older than 2
+/// hours from now (regardless of whether the cache or the network supplied
+/// it) OR when the observation API call failed and we are serving a cached
+/// value. UI applies the same opacity-0.7 + sync_problem affordance the
+/// parent forecast already uses.</param>
+public sealed record CurrentObservation(
+  int TempF,
+  int TempC,
+  string ConditionShort,
+  string IconKey,
+  DateTimeOffset ObservedAtUtc,
+  bool IsStale);

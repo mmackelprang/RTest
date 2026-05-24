@@ -191,7 +191,8 @@ public sealed class NwsWeatherService : IWeatherService
       GeneratedAtUtc: nwsForecast.GeneratedAt ?? DateTimeOffset.UtcNow,
       FetchedAtUtc: DateTimeOffset.UtcNow,
       IsStale: false,
-      Days: days);
+      Days: days,
+      Current: null);
 
     return new CachedForecast(forecast, DateTimeOffset.UtcNow);
   }

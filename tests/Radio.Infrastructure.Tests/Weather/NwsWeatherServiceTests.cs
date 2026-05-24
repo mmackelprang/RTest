@@ -408,7 +408,8 @@ public class NwsWeatherServiceTests
       new(new DateOnly(2026, 5, 23), "Today", 75, 60, 24, 16, "Sunny", "Sunny", 0, "sunny", null),
       new(new DateOnly(2026, 5, 24), "Tomorrow", 78, 62, 26, 17, "Partly Cloudy", "Partly Cloudy", 20, "mostly-sunny", null),
       new(new DateOnly(2026, 5, 25), "Mon", 70, 55, 21, 13, "Showers", "Showers", 60, "rain", null),
-    });
+    },
+    Current: null);
 
   [Fact]
   public async Task GetForecastAsync_NoCache_UpstreamFails_ReturnsNull()
