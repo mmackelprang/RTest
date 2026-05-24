@@ -40,7 +40,8 @@ namespace RTLSDRCore;
       private float[] _demodBuffer = Array.Empty<float>();
       private float[] _stereoDemodBuffer = Array.Empty<float>(); // interleaved L,R at demod rate
       private float[] _decimBuffer = Array.Empty<float>();
-      private float[] _decimBufferRight = Array.Empty<float>(); // right channel decimation
+      private float[] _decimBufferRight = Array.Empty<float>(); // right channel demod (de-interleave + de-emphasis)
+      private float[] _decimBufferRightOut = Array.Empty<float>(); // right channel decimation output
       private IqSample[] _iqDecimBuffer = Array.Empty<IqSample>();
       // Pre-allocated silence buffer delivered when squelch closes or muted.
       // Keeps the downstream BufferedSoundGenerator fed at a consistent rate
@@ -865,11 +866,13 @@ namespace RTLSDRCore;
           {
               _stereoDemodBuffer = new float[maxDemodSamples * 2]; // interleaved L,R
               _decimBufferRight = new float[maxDemodSamples / (_audioDecimator?.Factor ?? 1) + 1];
+              _decimBufferRightOut = new float[maxDemodSamples / (_audioDecimator?.Factor ?? 1) + 1];
           }
           else
           {
               _stereoDemodBuffer = Array.Empty<float>();
               _decimBufferRight = Array.Empty<float>();
+              _decimBufferRightOut = Array.Empty<float>();
           }
 
           _agc.Reset();
@@ -1139,9 +1142,16 @@ namespace RTLSDRCore;
 
                   var leftDecimCount = _audioDecimator.Decimate(leftSpan, _decimBuffer);
 
-                  // We need a temp buffer for right decimation output
-                  var rightDecimBuf = new float[maxDecimOut]; // small, ~960 samples
-                  var rightDecimCount = _audioDecimatorRight.Decimate(rightSpan, rightDecimBuf);
+                  // Reuse pre-allocated right-channel decimation output buffer (avoid per-batch allocation).
+                  // Allocating a new float[] here per IQ batch (~200 Hz) previously produced ~131 GB of
+                  // garbage over a 2-day uptime test, causing GC storms (14M Gen0 in a single callback
+                  // interval) that starved MiniAudio's audio callback and caused PipeWire to drop the
+                  // stream. The radio reported "Playing" but produced no audio.
+                  if (_decimBufferRightOut.Length < maxDecimOut)
+                  {
+                      _decimBufferRightOut = new float[maxDecimOut];
+                  }
+                  var rightDecimCount = _audioDecimatorRight.Decimate(rightSpan, _decimBufferRightOut);
 
                   // 3d. Interleave decimated L,R into stereo output
                   var stereoCount = Math.Min(leftDecimCount, rightDecimCount);
@@ -1152,7 +1162,7 @@ namespace RTLSDRCore;
                   for (var i = 0; i < stereoCount; i++)
                   {
                       _stereoDemodBuffer[i * 2] = _decimBuffer[i];
-                      _stereoDemodBuffer[i * 2 + 1] = rightDecimBuf[i];
+                      _stereoDemodBuffer[i * 2 + 1] = _decimBufferRightOut[i];
                   }
                   outputCount = stereoCount * 2; // interleaved sample count
                   outputSamples = _stereoDemodBuffer;
