@@ -91,6 +91,10 @@ builder.Services.AddHostedService<Radio.API.Services.ApiMetricDescriptorRegistra
 builder.Services.AddFingerprinting(builder.Configuration);
 builder.Services.AddSoundFlowAudio(builder.Configuration);
 builder.Services.AddRadioServices();
+// Weather (NWS) service backing the sleep-screen 3-day forecast. Registers
+// IWeatherService + IMemoryCache + named HttpClients ("nws", "weather-zippopotam")
+// and binds Display:Weather → WeatherDisplayOptions. See ADR-022.
+builder.Services.AddRadioWeather(builder.Configuration);
 
 // Add diagnostic capture service
 builder.Services.AddSingleton<Radio.Infrastructure.Audio.Diagnostics.DiagnosticCaptureService>();
