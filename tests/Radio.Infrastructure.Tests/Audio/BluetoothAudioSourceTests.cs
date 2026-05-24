@@ -127,6 +127,33 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   }
 
   [Fact]
+  public void CaptureStreamRecovered_AfterDisconnect_ReenablesFingerprintingLookup()
+  {
+    // Regression for: after a BT capture pipeline recovery event, SongRec stops being
+    // triggered for new tracks indefinitely (no album art). Root cause: OnDeviceDisconnected
+    // clears NeedsFingerprintingLookup, and OnCaptureStreamRecovered did not re-set it —
+    // so BackgroundIdentificationService's gate stayed false until service restart.
+    var device = new BluetoothDeviceInfo
+    {
+      Address = "AA:BB:CC:DD:EE:FF",
+      Name = "My Speaker",
+      IsPaired = true,
+      IsConnected = true
+    };
+
+    _mockBluetooth.SimulateConnection(device);
+    Assert.True(_source.NeedsFingerprintingLookup);
+
+    _mockBluetooth.SimulateDisconnection(device);
+    Assert.False(_source.NeedsFingerprintingLookup);
+
+    // Pipeline monitor reports recovery — capture stream is re-established.
+    _mockBluetooth.SimulateCaptureStreamRecovered();
+
+    Assert.True(_source.NeedsFingerprintingLookup);
+  }
+
+  [Fact]
   public async Task InitializeAsync_WhenNoCaptureDevice_SetsReadyState()
   {
     // MockBluetoothService returns "mock-capture-endpoint" (string, not AudioCaptureDevice)

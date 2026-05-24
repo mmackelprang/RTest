@@ -41,7 +41,7 @@ public sealed class MockBluetoothService : IBluetoothService
         public event EventHandler<BluetoothPlaybackStatus>? PlaybackStatusChanged;
         public event EventHandler<TimeSpan>? PositionChanged { add { } remove { } }
         public event EventHandler<BluetoothVolumeChangedEventArgs>? VolumeChanged { add { } remove { } }
-        public event EventHandler? CaptureStreamRecovered { add { } remove { } }
+        public event EventHandler? CaptureStreamRecovered;
         public event EventHandler<CaptureStreamStalledEventArgs>? CaptureStreamStalled { add { } remove { } }
         // Mock never raises CaptureNodeAvailable — the platform manages capture-node visibility.
         public event EventHandler<CaptureNodeAvailableEventArgs>? CaptureNodeAvailable { add { } remove { } }
@@ -165,5 +165,11 @@ public sealed class MockBluetoothService : IBluetoothService
         {
             ConnectedDevice = null;
             DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs { Device = device, UserInitiated = userInitiated });
+        }
+
+        // Mock helper to simulate the BT capture pipeline monitor raising recovery after a stall.
+        public void SimulateCaptureStreamRecovered()
+        {
+            CaptureStreamRecovered?.Invoke(this, EventArgs.Empty);
         }
 }
