@@ -363,6 +363,12 @@ builder.Services.AddSingleton<Radio.Web.Services.VisualizerTelemetryService>();
 // Defaults to an empty alias map when the section is absent or empty.
 builder.Services.Configure<DevicesOptions>(builder.Configuration.GetSection(DevicesOptions.SectionName));
 
+// HANDOFF-rds-accumulating-scroll — bind Radio:Rds → RdsScrollOptions so
+// RadioControlPanel can inject IOptionsMonitor<RdsScrollOptions> and react
+// to SQLite-store writes (PR #298 config bridge) without a page reload.
+// Defaults (256 chars, 40 px/s, " • ") apply when the section is absent.
+builder.Services.Configure<RdsScrollOptions>(builder.Configuration.GetSection(RdsScrollOptions.SectionName));
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
