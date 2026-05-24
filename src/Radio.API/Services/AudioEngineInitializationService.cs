@@ -77,6 +77,15 @@ public class AudioEngineInitializationService : IHostedService
 
       _logger.LogInformation("Initializing audio engine...");
 
+      // Wire the virtual outputs + config manager into the engine so
+      // SetActiveOutputAsync can activate/deactivate them and persist the
+      // choice. The engine treats these as optional dependencies; the
+      // controller-side activation paths still go through the same gate.
+      if (_audioEngine is SoundFlowAudioEngine sfEngine)
+      {
+        sfEngine.AttachOutputCoordination(_castOutput, _httpOutput, _configManager);
+      }
+
       // Initialize the audio engine
       await _audioEngine.InitializeAsync(cancellationToken);
       
@@ -177,15 +186,24 @@ public class AudioEngineInitializationService : IHostedService
       var preferredOutputId = !string.IsNullOrEmpty(persistedOutput) ? persistedOutput : prefs.CurrentOutput;
 
       // Handle virtual outputs (google-cast, http-stream)
-      if (preferredOutputId == "google-cast")
+      if (preferredOutputId == "google-cast" || preferredOutputId == "http-stream")
       {
-        _logger.LogInformation("Restoring Google Cast output from startup preferences");
-        await ActivateVirtualOutputsForCastAsync(cancellationToken);
-      }
-      else if (preferredOutputId == "http-stream")
-      {
-        _logger.LogInformation("Restoring HTTP Stream output from startup preferences");
-        await ActivateOutputAsync(_httpOutput, "HTTP Stream");
+        _logger.LogInformation("Restoring {Output} output from startup preferences", preferredOutputId);
+
+        // Single gate call: atomically activates the virtual output, stops the
+        // other virtual output, sets local-output mute, and persists the choice.
+        // This replaces the previous startup path which only activated outputs
+        // and forgot to mute the local sink — that omission caused dual-output
+        // (Cast + soundbar) after service restart with persisted "google-cast".
+        await _audioEngine.SetActiveOutputAsync(preferredOutputId, cancellationToken);
+
+        // Cast still needs background auto-connect to the saved default device.
+        // The gate handles activation; auto-connect remains here since it
+        // depends on AudioPreferences.DefaultCastDeviceId lookup.
+        if (preferredOutputId == "google-cast")
+        {
+          StartCastAutoConnect(cancellationToken);
+        }
       }
       else
       {
@@ -254,6 +272,7 @@ public class AudioEngineInitializationService : IHostedService
                 _logger.LogInformation("Found correct device \"{Name}\" at ID {Id} — switching",
                   correctDevice.Name, correctDevice.Id);
                 await _deviceManager.SetOutputDeviceAsync(correctDevice.Id, cancellationToken);
+                outputToUse = correctDevice.Id;
               }
               else
               {
@@ -266,9 +285,21 @@ public class AudioEngineInitializationService : IHostedService
           {
             _logger.LogWarning(ex, "Output device verification failed — continuing with current device");
           }
+
+          // Notify the gate that local is the active output. This stops any
+          // lingering virtual outputs, unmutes the local sink, and persists
+          // AudioPreferences:CurrentOutput so the next restart picks the same device.
+          try
+          {
+            await _audioEngine.SetActiveOutputAsync(outputToUse, cancellationToken);
+          }
+          catch (Exception ex)
+          {
+            _logger.LogWarning(ex, "Failed to set active output via gate for local device {DeviceId}", outputToUse);
+          }
         }
       }
-      
+
       _logger.LogInformation("Audio startup output configuration applied");
     }
     catch (Exception ex)
@@ -360,25 +391,14 @@ public class AudioEngineInitializationService : IHostedService
   }
 
   /// <summary>
-  /// Activates Cast and HTTP Stream outputs, then auto-connects to the default Cast device.
+  /// Starts background auto-connect to the saved default Cast device.
+  /// Assumes Cast + HTTP outputs are already activated by
+  /// <see cref="IAudioEngine.SetActiveOutputAsync"/>.
   /// </summary>
-  private async Task ActivateVirtualOutputsForCastAsync(CancellationToken cancellationToken)
+  private void StartCastAutoConnect(CancellationToken cancellationToken)
   {
     var castOptions = _audioOutputOptions.Value.GoogleCast;
     var isDirectChannel = string.Equals(castOptions.StreamingMode, "DirectChannel", StringComparison.OrdinalIgnoreCase);
-
-    // DirectChannel mode bypasses HTTP — audio is sent directly over the Cast protocol.
-    // Only start the HTTP stream for the standard HttpMp3 mode.
-    if (!isDirectChannel)
-    {
-      await ActivateOutputAsync(_httpOutput, "HTTP Stream");
-    }
-    else
-    {
-      _logger.LogInformation("DirectChannel mode: skipping HTTP stream activation");
-    }
-
-    await ActivateOutputAsync(_castOutput, "Google Cast");
 
     // In DirectChannel mode, wire the audio engine so GoogleCastOutput can
     // create a stream reader for sending PCM data over the Cast message bus.
@@ -388,7 +408,6 @@ public class AudioEngineInitializationService : IHostedService
       _logger.LogInformation("DirectChannel mode: audio engine wired to Cast output");
     }
 
-    // Auto-connect to saved default Cast device
     var prefs = _audioPreferences.CurrentValue;
     if (string.IsNullOrEmpty(prefs.DefaultCastDeviceId) || _castOutput == null)
     {
@@ -439,41 +458,6 @@ public class AudioEngineInitializationService : IHostedService
         _logger.LogWarning(ex, "Failed to auto-connect to Cast device on startup");
       }
     }, cancellationToken);
-  }
-
-  /// <summary>
-  /// Activates an audio output (initialize + start) if available.
-  /// </summary>
-  private async Task ActivateOutputAsync(IAudioOutput? output, string name)
-  {
-    if (output == null)
-    {
-      _logger.LogDebug("{Name} output not available", name);
-      return;
-    }
-
-    try
-    {
-      if (output.State == AudioOutputState.Error)
-      {
-        await output.InitializeAsync();
-      }
-
-      if (output.State == AudioOutputState.Created)
-      {
-        await output.InitializeAsync();
-      }
-
-      if (output.State == AudioOutputState.Ready || output.State == AudioOutputState.Stopped)
-      {
-        await output.StartAsync();
-        _logger.LogInformation("{Name} output activated on startup", name);
-      }
-    }
-    catch (Exception ex)
-    {
-      _logger.LogWarning(ex, "Failed to activate {Name} output on startup", name);
-    }
   }
 
   /// <summary>
@@ -598,6 +582,17 @@ public class AudioEngineInitializationService : IHostedService
     try
     {
       _logger.LogInformation("Stopping audio engine...");
+
+      // Graceful Cast shutdown: stop media + CLOSE_APP + disconnect receiver
+      // so the Chromecast returns to its default state instead of holding a
+      // stale session that the next startup has to fight through. Single
+      // source of truth: the same TearDownCastOutputAsync that the
+      // SetActiveOutputAsync gate uses when transitioning away from Cast.
+      // Best-effort; never blocks engine stop (5s internal cap + try/catch).
+      if (_audioEngine is SoundFlowAudioEngine sfEngine)
+      {
+        await sfEngine.TearDownCastOutputAsync(cancellationToken);
+      }
 
       if (_audioEngine.State == Radio.Core.Interfaces.Audio.AudioEngineState.Running)
       {
