@@ -11,9 +11,12 @@ namespace Radio.Web.Tests.Components.Shared;
 /// <summary>
 /// bUnit tests for the <see cref="RdsCard"/> widget introduced by PR 3 of the
 /// Radio Controller Polish arc. The card mounts above the frequency well in
-/// <c>RadioControlPanel</c>; it renders nothing at all when no station name is
-/// present (so the layout collapses gracefully on AM/SW or before RDS confirms
-/// the PS field), and renders the PTY chip only when supplied.
+/// <c>RadioControlPanel</c>. Renders when EITHER <c>StationName</c> OR
+/// <c>RadioText</c> is non-empty, and is hidden only when both are absent
+/// (post HANDOFF-rds-inline-scroll-revision — the RT marquee lives in the
+/// PS slot so the card stays useful during transient tune-in states where
+/// RT chunks arrive before PS confirms). PTY chip renders only when
+/// supplied.
 /// </summary>
 public class RdsCardTests : TestContext
 {
@@ -24,10 +27,17 @@ public class RdsCardTests : TestContext
   }
 
   [Fact]
-  public void RdsCard_RendersNothing_WhenStationNameNull()
+  public void RdsCard_RendersNothing_WhenBothStationNameAndRadioTextNull()
   {
+    // Post HANDOFF-rds-inline-scroll-revision the render gate is
+    // (!IsNullOrEmpty(StationName) || !IsNullOrEmpty(RadioText)). The
+    // card hides ONLY in the both-empty case — RadioText alone is now
+    // enough to keep the card on screen during transient tune-ins. Pass
+    // RadioText explicitly so the both-empty intent is obvious at the
+    // assertion level rather than relying on the parameter default.
     var cut = RenderComponent<RdsCard>(p => p
-      .Add(x => x.StationName, null));
+      .Add(x => x.StationName, null)
+      .Add(x => x.RadioText, null));
 
     // No .rds-card root in DOM — the card collapses entirely so the
     // surrounding layout doesn't have to skirt an empty box.
@@ -35,10 +45,13 @@ public class RdsCardTests : TestContext
   }
 
   [Fact]
-  public void RdsCard_RendersNothing_WhenStationNameEmpty()
+  public void RdsCard_RendersNothing_WhenBothStationNameAndRadioTextEmpty()
   {
+    // Empty-string variant of the both-absent gate — IsNullOrEmpty treats
+    // null and "" the same, so both forms must collapse the card.
     var cut = RenderComponent<RdsCard>(p => p
-      .Add(x => x.StationName, string.Empty));
+      .Add(x => x.StationName, string.Empty)
+      .Add(x => x.RadioText, string.Empty));
 
     Assert.Empty(cut.FindAll(".rds-card"));
   }
