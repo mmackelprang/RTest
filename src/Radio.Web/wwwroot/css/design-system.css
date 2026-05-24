@@ -2953,6 +2953,29 @@ body {
  * See HANDOFF-sleep-weather-visual-redesign.md §3–§7 for the geometry,
  * §4 for typography, §6 for the color budget.
  * ─────────────────────────────────────────────────────────────────────────── */
+
+/* Base font-family for any Material Symbols Rounded glyph in the app.
+   Google Fonts also injects this declaration via the <link> in App.razor;
+   pinning it here makes the dependency grep-discoverable and survives a
+   network blip on the Google Fonts CDN as long as the font is locally
+   cached. Without a font-family resolving to "Material Symbols Rounded",
+   the ligature-substitution font never engages and spans render their
+   icon-key text as literal words (e.g. "foggy", "thunderstorm"). */
+.material-symbols-rounded {
+  font-family: 'Material Symbols Rounded';
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+}
+
 .sleep-forecast-pane {
   display: flex;
   flex-direction: column;
