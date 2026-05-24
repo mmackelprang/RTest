@@ -39,14 +39,12 @@
         <span style="flex: 1; font-size: 12px; color: #4caf50; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
           @_connectedDevice.Name
         </span>
-        <RadzenButton Size="ButtonSize.Small" Variant="Variant.Text" ButtonStyle="ButtonStyle.Danger"
-                      Click="DisconnectAsync" Style="font-size: 11px; text-transform: none; min-width: auto; padding: 0 6px;"
-                      Text="Disconnect" />
       </div>
     }
 
     <!-- Device list -->
-    <div style="max-height: 200px; overflow-y: auto;">
+    <div style="max-height: 200px; overflow-y: auto;
+                @(_isDisconnecting ? "opacity: 0.6; pointer-events: none;" : "")">
       @if (_devices != null && _devices.Count > 0)
       {
         @foreach (var device in _devices)
@@ -102,11 +100,54 @@
         <span style="font-size: 11px; color: var(--text-medium);">Connecting...</span>
       </div>
     }
+
+    <!-- Stop Casting action row (only when a device is connected) -->
+    @if (_connectedDevice != null)
+    {
+      var stopLabel = _disconnectError
+        ? "Couldn't stop. Try again."
+        : (_isDisconnecting ? "Stopping…" : "Stop Casting");
+      var stopAriaLabel = string.IsNullOrEmpty(_connectedDevice.Name)
+        ? "Disconnect from Cast device"
+        : $"Disconnect from {_connectedDevice.Name}";
+      var stopColor = _disconnectError ? "var(--rz-danger)" : "var(--text-high)";
+
+      <button type="button"
+              class="cast-stop-row"
+              aria-label="@stopAriaLabel"
+              title="@stopAriaLabel"
+              aria-busy="@(_isDisconnecting ? "true" : "false")"
+              aria-disabled="@(_isDisconnecting ? "true" : "false")"
+              @onclick="StopCastingAsync"
+              style="@($"display: flex; align-items: center; gap: 8px; padding: 8px 12px; width: 100%; " +
+                      $"border: none; border-top: 1px solid rgba(255,255,255,0.1); " +
+                      $"background: rgba(0,0,0,0.2); color: {stopColor}; cursor: pointer; text-align: left; " +
+                      $"font-family: inherit; font-size: 12px; transition: background 0.15s;" +
+                      (_isDisconnecting ? " pointer-events: none;" : ""))">
+        @if (_isDisconnecting)
+        {
+          <RadzenProgressBarCircular Size="ProgressBarCircularSize.Small" Mode="ProgressBarMode.Indeterminate"
+                                     ProgressBarStyle="ProgressBarStyle.Primary"
+                                     Style="width: 14px; height: 14px;" aria-hidden="true" />
+        }
+        else
+        {
+          var stopIcon = _disconnectError ? "error_outline" : "cast_off";
+          <RadzenIcon Icon="@stopIcon"
+                      Style="@($"font-size: 18px; color: {stopColor};")"
+                      aria-hidden="true" />
+        }
+        <span style="flex: 1;">@stopLabel</span>
+      </button>
+    }
   </div>
 }
 
 <style>
   .cast-device-row:hover {
+    background: rgba(255,255,255,0.06);
+  }
+  .cast-stop-row:hover {
     background: rgba(255,255,255,0.06);
   }
 </style>
@@ -126,8 +167,17 @@
   private bool _isScanning;
   private bool _scanCompleted;
   private bool _isConnecting;
+  private bool _isDisconnecting;
+  private bool _disconnectError;
   private bool _initialized;
   private CancellationTokenSource? _scanCts;
+  private CancellationTokenSource? _errorRevertCts;
+
+  // Auto-revert window for the error state on the Stop Casting row.
+  // Spec §3 Error state: after 5s of idle, label snaps back to "Stop Casting"
+  // so the popover doesn't get stuck in error state. Exposed (internal) so
+  // bUnit tests don't have to wait the wall-clock 5s.
+  internal TimeSpan ErrorRevertDelay { get; set; } = TimeSpan.FromSeconds(5);
 
   protected override void OnParametersSet()
   {
@@ -241,11 +291,35 @@
     }
   }
 
-  private async Task DisconnectAsync()
+  /// <summary>
+  /// Handles the "Stop Casting" action row click. Mirrors the discoverability
+  /// goal called out in the spec (HANDOFF-stop-casting-menu-item.md §1):
+  /// one canonical, explicit way to stop casting. Internally routes to the
+  /// existing DevicesController.DisconnectFromCastDevice endpoint, which
+  /// post-PR #409 goes through SetActiveOutputAsync and unmutes local output.
+  /// </summary>
+  private async Task StopCastingAsync()
   {
+    if (_isDisconnecting) return;
+
+    // Cancel any pending error auto-revert — user is retrying.
+    _errorRevertCts?.Cancel();
+    _errorRevertCts = null;
+
+    _isDisconnecting = true;
+    _disconnectError = false;
+    StateHasChanged();
+
     try
     {
-      await DevicesApi.DisconnectFromCastDeviceAsync();
+      var success = await DevicesApi.DisconnectFromCastDeviceAsync();
+      if (!success)
+      {
+        // DevicesApiService swallows transport exceptions and returns false;
+        // treat that as a user-visible failure so the row surfaces the retry
+        // affordance described in the spec.
+        throw new InvalidOperationException("Cast disconnect endpoint returned an unsuccessful status");
+      }
       _connectedDevice = null;
       await OnDisconnect.InvokeAsync();
       await Close();
@@ -253,13 +327,40 @@
     catch (Exception ex)
     {
       Logger?.LogError(ex, "Error disconnecting from Cast device");
+      _disconnectError = true;
+      // Schedule auto-revert: per spec §3 Error state, after 5s of idle revert
+      // the label back to "Stop Casting" so the popover doesn't get stuck.
+      _errorRevertCts = new CancellationTokenSource();
+      _ = ScheduleErrorRevertAsync(_errorRevertCts.Token);
+    }
+    finally
+    {
+      _isDisconnecting = false;
+      StateHasChanged();
+    }
+  }
+
+  private async Task ScheduleErrorRevertAsync(CancellationToken token)
+  {
+    try
+    {
+      await Task.Delay(ErrorRevertDelay, token);
+      if (token.IsCancellationRequested) return;
+      _disconnectError = false;
+      await InvokeAsync(StateHasChanged);
+    }
+    catch (OperationCanceledException)
+    {
+      // Cancelled — either a retry or the popover closed; nothing to do.
     }
   }
 
   private async Task Close()
   {
     _scanCts?.Cancel();
+    _errorRevertCts?.Cancel();
     _isScanning = false;
+    _disconnectError = false;
     await IsOpenChanged.InvokeAsync(false);
   }
 
