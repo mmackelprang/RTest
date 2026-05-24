@@ -140,13 +140,14 @@ public sealed class MockBluetoothService : IBluetoothService
         }
         
         // Mock helper to simulate metadata
-        public void SimulateMetadataChange(string title, string artist)
+        public void SimulateMetadataChange(string title, string artist, string? albumArtUrl = null)
         {
-            MetadataChanged?.Invoke(this, new BluetoothPlaybackMetadata 
-            { 
-               Title = title, 
+            MetadataChanged?.Invoke(this, new BluetoothPlaybackMetadata
+            {
+               Title = title,
                Artist = artist,
-               Album = "Mock Album"
+               Album = "Mock Album",
+               AlbumArtUrl = albumArtUrl
             });
         }
 

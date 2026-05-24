@@ -1,11 +1,14 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Radio.Core.Configuration;
+using Radio.Core.Events;
 using Radio.Core.Interfaces;
 using Radio.Fingerprinting;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
+using Radio.Fingerprinting.Services;
 using Radio.Infrastructure.Audio.Sources.Primary;
 using Radio.Infrastructure.Platform.Bluetooth;
 using Radio.Metrics;
@@ -278,5 +281,214 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
 
     // Assert — should NOT request fingerprinting because toggle is OFF and metadata is complete
     Assert.False(_source.NeedsFingerprintingLookup);
+  }
+
+  // -----------------------------------------------------------------------
+  // BT album-art tests — verify AVRCP fast path + SongRec fallback routing.
+  //
+  // Bug A regression: file:// AVRCP URLs (the common Spotify/YouTube Music
+  // case on Android) must not be propagated raw to the browser. The fix
+  // routes every AVRCP ArtUrl through AlbumArtCacheService.SaveFromUrlAsync,
+  // which returns null for file:// (HttpClient throws NotSupportedException,
+  // caught internally) and a /api/albumart/{hash}.{ext} URL for http(s)://.
+  // -----------------------------------------------------------------------
+
+  /// <summary>
+  /// Minimal IServiceScopeFactory for tests: the scope it produces has no
+  /// IPlayHistoryRepository / ITrackMetadataRepository registered, so
+  /// UpdateRecentPlayHistoryCoverArtAsync no-ops cleanly via its null guards.
+  /// </summary>
+  private static IServiceScopeFactory BuildScopeFactory()
+  {
+    var services = new ServiceCollection();
+    return services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+  }
+
+  /// <summary>
+  /// Builds a real BackgroundIdentificationService (no SongRec, no audio
+  /// capture) suitable for raising TrackIdentified via the internal
+  /// RaiseTrackIdentifiedForTesting hook.
+  /// </summary>
+  private static BackgroundIdentificationService BuildIdentificationServiceForTests()
+  {
+    var services = new ServiceCollection();
+    var sp = services.BuildServiceProvider();
+    var optionsMonitor = new Mock<IOptionsMonitor<FingerprintingOptions>>();
+    optionsMonitor.Setup(o => o.CurrentValue).Returns(new FingerprintingOptions());
+    var logger = new Mock<ILogger<BackgroundIdentificationService>>().Object;
+    return new BackgroundIdentificationService(logger, sp, optionsMonitor.Object);
+  }
+
+  [Fact]
+  public async Task MetadataChanged_WithFileSchemeArtUrl_DoesNotStoreRawUrlInMetadata()
+  {
+    // Arrange — cache mock returns null for file:// (simulating HttpClient
+    // NotSupportedException caught inside SaveFromUrlAsync).
+    var cacheMock = new Mock<IAlbumArtCacheService>();
+    cacheMock
+      .Setup(c => c.SaveFromUrlAsync(It.Is<string>(u => u.StartsWith("file://"))))
+      .ReturnsAsync((string?)null);
+
+    await _source.DisposeAsync();
+    _source = new BluetoothAudioSource(
+      _loggerMock.Object,
+      _deviceManagerMock.Object,
+      _mockBluetooth,
+      _options,
+      identificationService: null,
+      metricsCollector: _metricsMock.Object,
+      serviceScopeFactory: BuildScopeFactory(),
+      albumArtCache: cacheMock.Object);
+
+    // Act — simulate AVRCP metadata with a phone-local file:// URI (the
+    // common case from Spotify/YouTube Music on Android — Track.ArtUrl
+    // points to the phone's app cache directory, unreachable from the browser).
+    _mockBluetooth.SimulateMetadataChange(
+      "Song", "Artist",
+      albumArtUrl: "file:///data/data/com.android.spotify/cache/art.jpg");
+
+    // Allow the fire-and-forget CacheAvrcpArtAsync task to complete.
+    await Task.Delay(200);
+
+    // Assert — AlbumArtUrl must NOT be set to the raw file:// URL. It must
+    // be either absent or empty (UI then falls back to the default-art icon).
+    var hasArt = _source.Metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var art);
+    Assert.False(
+      hasArt && art is string s && s.StartsWith("file://"),
+      "Raw file:// AVRCP URL must not be propagated to metadata");
+
+    // And the cache was invoked exactly once for the file:// URL — we route
+    // every URL through the cache (rather than scheme-filtering up front) so
+    // future schemes (data:, embedded http://localhost servers) work
+    // automatically once the cache learns to handle them.
+    cacheMock.Verify(c => c.SaveFromUrlAsync(It.Is<string>(u => u.StartsWith("file://"))), Times.Once);
+  }
+
+  [Fact]
+  public async Task MetadataChanged_WithHttpsArtUrl_StoresCachedRelativeUrl()
+  {
+    // Arrange — cache mock returns a cached /api/albumart URL.
+    var cacheMock = new Mock<IAlbumArtCacheService>();
+    cacheMock
+      .Setup(c => c.SaveFromUrlAsync("https://example.com/art.jpg"))
+      .ReturnsAsync("/api/albumart/abc123.jpg");
+
+    await _source.DisposeAsync();
+    _source = new BluetoothAudioSource(
+      _loggerMock.Object,
+      _deviceManagerMock.Object,
+      _mockBluetooth,
+      _options,
+      identificationService: null,
+      metricsCollector: _metricsMock.Object,
+      serviceScopeFactory: BuildScopeFactory(),
+      albumArtCache: cacheMock.Object);
+
+    // Act — AVRCP metadata with an https:// art URL (rare from phones, common
+    // from local-music players that expose art via MPRIS).
+    _mockBluetooth.SimulateMetadataChange(
+      "Song", "Artist",
+      albumArtUrl: "https://example.com/art.jpg");
+    await Task.Delay(200);  // let the fire-and-forget CacheAvrcpArtAsync complete
+
+    // Assert — metadata holds the cache's relative URL (browser-fetchable).
+    Assert.True(_source.Metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var art));
+    Assert.Equal("/api/albumart/abc123.jpg", art);
+    cacheMock.Verify(c => c.SaveFromUrlAsync("https://example.com/art.jpg"), Times.Once);
+  }
+
+  [Fact]
+  public async Task TrackIdentified_AfterEmptyAvrcp_CachesSongRecCoverArtUrl()
+  {
+    // Arrange — cache mock returns a /api/albumart URL when called with the
+    // SongRec CDN URL. SongRec provides Apple Music CDN URLs which are HTTPS.
+    var cacheMock = new Mock<IAlbumArtCacheService>();
+    cacheMock
+      .Setup(c => c.SaveFromUrlAsync("https://itunes.apple.com/some-art.jpg"))
+      .ReturnsAsync("/api/albumart/songrec-abc.jpg");
+
+    var identificationService = BuildIdentificationServiceForTests();
+
+    await _source.DisposeAsync();
+    _source = new BluetoothAudioSource(
+      _loggerMock.Object,
+      _deviceManagerMock.Object,
+      _mockBluetooth,
+      _options,
+      identificationService: identificationService,
+      metricsCollector: _metricsMock.Object,
+      serviceScopeFactory: BuildScopeFactory(),
+      albumArtCache: cacheMock.Object);
+
+    // AVRCP delivers only Title (Spotify/YouTube-style: Artist empty) — this
+    // sets NeedsFingerprintingLookup = true and the SongRec path engages.
+    _mockBluetooth.SimulateMetadataChange("Some Song", "", albumArtUrl: null);
+    Assert.True(_source.NeedsFingerprintingLookup);
+
+    // Act — SongRec identifies the track later.
+    identificationService.RaiseTrackIdentifiedForTesting(new TrackIdentifiedEventArgs(
+      new TrackMetadata
+      {
+        Id = Guid.NewGuid().ToString(),
+        Title = "Some Song",
+        Artist = "Real Artist",
+        CoverArtUrl = "https://itunes.apple.com/some-art.jpg",
+        Source = MetadataSource.Shazam,
+        CreatedAt = DateTime.UtcNow,
+        UpdatedAt = DateTime.UtcNow
+      },
+      confidence: 0.95));
+    await Task.Delay(200);
+
+    // Assert — metadata holds the cached SongRec art URL.
+    Assert.True(_source.Metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var art));
+    Assert.Equal("/api/albumart/songrec-abc.jpg", art);
+  }
+
+  [Fact]
+  public async Task TrackIdentified_WithNoCoverArtUrl_LeavesAlbumArtUrlAbsent()
+  {
+    // Arrange — cache mock should NEVER be called (no URL to download).
+    var cacheMock = new Mock<IAlbumArtCacheService>(MockBehavior.Strict);
+
+    var identificationService = BuildIdentificationServiceForTests();
+
+    await _source.DisposeAsync();
+    _source = new BluetoothAudioSource(
+      _loggerMock.Object,
+      _deviceManagerMock.Object,
+      _mockBluetooth,
+      _options,
+      identificationService: identificationService,
+      metricsCollector: _metricsMock.Object,
+      serviceScopeFactory: BuildScopeFactory(),
+      albumArtCache: cacheMock.Object);
+
+    _mockBluetooth.SimulateMetadataChange("Mystery Song", "", albumArtUrl: null);
+
+    // Act — SongRec identifies but has no cover art (track not on Apple Music
+    // CDN, or SongRec returned partial metadata).
+    identificationService.RaiseTrackIdentifiedForTesting(new TrackIdentifiedEventArgs(
+      new TrackMetadata
+      {
+        Id = Guid.NewGuid().ToString(),
+        Title = "Mystery Song",
+        Artist = "Mystery Artist",
+        CoverArtUrl = null,
+        Source = MetadataSource.Shazam,
+        CreatedAt = DateTime.UtcNow,
+        UpdatedAt = DateTime.UtcNow
+      },
+      confidence: 0.7));
+    await Task.Delay(200);
+
+    // Assert — AlbumArtUrl must be absent (UI shows fallback icon — accepted UX).
+    var hasArt = _source.Metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var art);
+    Assert.False(
+      hasArt && art is string s && !string.IsNullOrEmpty(s),
+      "AlbumArtUrl must remain absent when neither AVRCP nor SongRec provides art");
+
+    // And the cache was never touched (MockBehavior.Strict throws on any unset call).
+    cacheMock.VerifyNoOtherCalls();
   }
 }
