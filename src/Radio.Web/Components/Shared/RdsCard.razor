@@ -1,29 +1,78 @@
-@* RDS Card — renders only when StationName is non-empty. Mounted above the
-   frequency well in RadioControlPanel. PR 3 of the Radio Controller Polish
-   arc (handoff §P1·1 step 3). *@
+@* RDS Card — single visual unit grouping the three RDS fields exposed by the
+   tuner: the "RDS" label tag, the PS station name (blue), the optional PTY
+   chip, and (NEW) the accumulating RadioText (RT) marquee on a second row.
 
-@if (!string.IsNullOrEmpty(StationName))
+   Mounts above the frequency well in RadioControlPanel. PR 3 of the Radio
+   Controller Polish arc (handoff §P1·1 step 3) introduced the original
+   PS/PTY-only form. PR #414 added the standalone <RdsScrollMarquee> BELOW
+   the frequency well, which read as a doubled RDS surface to the user
+   ("RDS data shown twice"). This card now hosts the marquee inline so all
+   RDS info lives in one card under the "RDS" tag with the blue text. *@
+
+@if (!string.IsNullOrEmpty(StationName) || !string.IsNullOrEmpty(RadioText))
 {
   <div class="rds-card">
-    <span class="rds-card-label">RDS</span>
-    <span class="rds-card-station">@StationName</span>
-    @if (!string.IsNullOrEmpty(ProgramType))
+    <div class="rds-card-row">
+      <span class="rds-card-label">RDS</span>
+      @if (!string.IsNullOrEmpty(StationName))
+      {
+        <span class="rds-card-station">@StationName</span>
+      }
+      else
+      {
+        @* Spacer keeps the PTY chip pushed to the right when PS is missing
+           but RT is present — so the row geometry stays stable as PS comes
+           and goes during a tune. *@
+        <span class="rds-card-station-spacer"></span>
+      }
+      @if (!string.IsNullOrEmpty(ProgramType))
+      {
+        <span class="rds-card-pty">@ProgramType</span>
+      }
+    </div>
+    @if (!string.IsNullOrEmpty(RadioText))
     {
-      <span class="rds-card-pty">@ProgramType</span>
+      @* Inline marquee — the same component PR #414 originally placed
+         standalone below the frequency well, now nested inside the RDS
+         card so it shares the "RDS" tag header and visual surround. The
+         marquee handles its own collapse-when-empty inside the
+         component, so passing through an empty string would render
+         nothing — but the @if above already gates on non-empty. *@
+      <RdsScrollMarquee Text="@RadioText"
+                        ScrollSpeedPxPerSec="@ScrollSpeedPxPerSec" />
     }
   </div>
 }
 
 @code {
   /// <summary>
-  /// RDS Program Service station name (PS field, up to 8 characters). Required
-  /// in the contract sense — when null/empty the card renders nothing at all.
+  /// RDS Program Service station name (PS field, up to 8 characters). Optional
+  /// — when null/empty AND <see cref="RadioText"/> is also null/empty the
+  /// card renders nothing at all. When null/empty but RT is present, the
+  /// station-name slot is left blank and the card still renders so RT can
+  /// scroll on its own.
   /// </summary>
-  [Parameter, EditorRequired] public string? StationName { get; set; }
+  [Parameter] public string? StationName { get; set; }
 
   /// <summary>
   /// RDS Program Type name (PTY field, e.g. "Rock", "News"). Optional — when
   /// null/empty the PTY chip is omitted but the station name still renders.
   /// </summary>
   [Parameter] public string? ProgramType { get; set; }
+
+  /// <summary>
+  /// Accumulating RDS RadioText (RT) buffer text rendered as a scrolling
+  /// marquee on the second row of the card. Optional — when null/empty the
+  /// marquee row is omitted and the card renders only the PS/PTY row.
+  /// Caller passes the post-accumulation, post-dedup string from the
+  /// <see cref="Radio.Web.Services.Rds.RdsAccumulatingScrollBuffer"/>.
+  /// </summary>
+  [Parameter] public string? RadioText { get; set; }
+
+  /// <summary>
+  /// Marquee scroll speed in pixels per second. Threaded through to the
+  /// nested <see cref="RdsScrollMarquee"/>; matches its default so callers
+  /// that don't care about per-instance tuning can omit this parameter.
+  /// </summary>
+  [Parameter] public int ScrollSpeedPxPerSec { get; set; } = 40;
 }

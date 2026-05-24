@@ -3673,12 +3673,25 @@ body {
   color: color-mix(in srgb, var(--signal-amber) 70%, var(--text-low));
 }
 
-/* RDS Card — mounts above the frequency well. Renders only when StationName
-   is non-empty (component handles the @if). */
+/* RDS Card — mounts above the frequency well. Hosts the RDS label tag, PS
+   station name (blue), optional PTY chip, AND (post-#414 hotfix) the
+   accumulating RT marquee as a second row inside the same card. Renders
+   when EITHER StationName OR RadioText is non-empty (component handles
+   the @if).
+
+   Layout: flex column with two sub-rows.
+     1. .rds-card-row  — RDS label · station name · PTY chip (existing form)
+     2. .rcp-rds-rt-scroll — marquee, nested as the card's second child
+
+   Prior to the #414 hotfix, .rds-card was flex-row with only the
+   label/station/PTY children. The marquee was a sibling block below the
+   frequency well — which read as a duplicated RDS surface. Moving the
+   marquee inside the card gives the user a single visual unit under
+   the "RDS" tag. */
 .rds-card {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  gap: 4px;
   padding: 8px 12px;
   margin: 0 0 8px;
   background: var(--surface-elevated, rgba(255, 255, 255, 0.03));
@@ -3687,6 +3700,23 @@ body {
   width: 100%;
   max-width: 420px;
   box-sizing: border-box;
+}
+
+/* Top row of the RDS card — RDS label, station name, PTY chip. Mirrors the
+   pre-#414-hotfix flex-row layout that lived on .rds-card directly. */
+.rds-card-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Spacer used when PS station name is missing but RT is present (transient
+   state during a tune-in). Keeps the PTY chip pushed to the right so the
+   row geometry stays stable as PS comes and goes. */
+.rds-card-station-spacer {
+  flex: 1;
+  min-width: 0;
 }
 
 .rds-card-label {
@@ -3724,6 +3754,15 @@ body {
   border-radius: 999px;
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+/* Marquee-nested-in-card adjustment — when the .rcp-rds-rt-scroll lives
+   inside an .rds-card, drop the standalone-block top margin and zero out
+   the max-width override so the marquee respects the card's inner padding
+   rather than punching out to the global 420 px ceiling. */
+.rds-card .rcp-rds-rt-scroll {
+  margin-top: 0;
+  max-width: 100%;
 }
 
 /* RT (RadioText) line below the frequency well — one-line ellipsis */

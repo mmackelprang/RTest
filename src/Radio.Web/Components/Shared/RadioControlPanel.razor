@@ -67,9 +67,19 @@
         </div>
       }
 
-      <!-- RDS card — mounted ABOVE the frequency well (handoff §P1·1 step 3) -->
+      <!-- RDS card — mounted ABOVE the frequency well (handoff §P1·1 step 3).
+           Hosts the PS station name + PTY chip AND (post-fix) the
+           accumulating RT marquee on a second row inside the same card.
+           PR #414's first cut placed the marquee as a standalone block
+           BELOW the frequency well, which read as a doubled RDS surface
+           to the user — the bug fix consolidates all RDS info into this
+           single card under one "RDS" tag header so the RT data scrolls
+           inside the bar with the blue station-name text.
+           HANDOFF-rds-accumulating-scroll. -->
       <RdsCard StationName="@_radioState.RdsStationName"
-               ProgramType="@_radioState.RdsProgramType" />
+               ProgramType="@_radioState.RdsProgramType"
+               RadioText="@_rdsBuffer.Text"
+               ScrollSpeedPxPerSec="@_rdsScrollOptions.RtScrollSpeedPxPerSec" />
 
       <!-- Frequency display -->
       <div class="rcp-freq-well">
@@ -92,16 +102,6 @@
           }
         </div>
       </div>
-
-      <!-- RDS RadioText (RT) line — accumulating rolling scroll marquee
-           below the frequency well. Replaces the legacy one-line ellipsis
-           with a rolling 256-char (default) buffer that scrolls right-to-
-           left at 40 px/s (defaults configurable via Radio:Rds in System
-           Config). The marquee collapses entirely when the buffer is empty
-           (no station broadcasting RT, or just-tuned and waiting for the
-           first chunk). HANDOFF-rds-accumulating-scroll. -->
-      <RdsScrollMarquee Text="@_rdsBuffer.Text"
-                        ScrollSpeedPxPerSec="@_rdsScrollOptions.RtScrollSpeedPxPerSec" />
 
       <!-- Signal strength meter (PR 1 of Radio Controller Polish arc) -->
       @if (_radioState.SignalStrength.HasValue)

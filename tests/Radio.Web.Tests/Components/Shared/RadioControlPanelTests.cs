@@ -606,12 +606,34 @@ public class RadioControlPanelTests : TestContext
   }
 
   [Fact]
-  public void RdsCard_Hidden_WhenStationNameNull()
+  public void RdsCard_Hidden_WhenStationNameNullAndRadioTextNull()
   {
-    var state = BuildState(rdsStationName: null);
+    // Post-#414-hotfix: the card now renders when EITHER StationName OR
+    // RadioText is present (because RT lives inside the card). When BOTH
+    // are null the card collapses entirely — same as the pre-hotfix
+    // contract for the station-only case.
+    var state = BuildState(rdsStationName: null, rdsRadioText: null);
     var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
 
     Assert.Empty(cut.FindAll(".rds-card"));
+  }
+
+  [Fact]
+  public void RdsCard_Renders_WhenRadioTextPresentButStationNameNull()
+  {
+    // Post-#414-hotfix: transient state during a tune-in where RT chunks
+    // arrive before PS is confirmed. The card must still render so the
+    // RT marquee has a home — otherwise we'd regress the prior PR #414
+    // behaviour where RT could show without PS.
+    var state = BuildState(rdsStationName: null, rdsRadioText: "Tuning in...");
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
+
+    var card = cut.Find(".rds-card");
+    Assert.NotNull(card);
+    // Station-name slot must be absent (no PS yet); marquee inside card.
+    Assert.Empty(cut.FindAll(".rds-card-station"));
+    var rt = cut.Find(".rcp-rds-rt-scroll");
+    Assert.Contains("Tuning in", rt.TextContent);
   }
 
   [Fact]
@@ -622,7 +644,13 @@ public class RadioControlPanelTests : TestContext
     // contract is still "text shows up, title attribute carries the full
     // string" — but the scroll container also exposes the buffer via the
     // sr-only mirror for screen readers.
-    var state = BuildState(rdsRadioText: "Now playing: Pink Floyd — Wish You Were Here");
+    //
+    // Post-#414-hotfix: the marquee now lives INSIDE .rds-card rather than
+    // as a standalone block below the frequency well. The .rcp-rds-rt-scroll
+    // selector still finds it (component-level selector unchanged).
+    var state = BuildState(
+      rdsStationName: "WKQX",
+      rdsRadioText: "Now playing: Pink Floyd — Wish You Were Here");
     var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
 
     var rt = cut.Find(".rcp-rds-rt-scroll");
@@ -634,7 +662,7 @@ public class RadioControlPanelTests : TestContext
   [Fact]
   public void RtLine_Hidden_WhenRadioTextNull()
   {
-    var state = BuildState(rdsRadioText: null);
+    var state = BuildState(rdsStationName: "WKQX", rdsRadioText: null);
     var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
 
     Assert.Empty(cut.FindAll(".rcp-rds-rt-scroll"));
@@ -643,10 +671,45 @@ public class RadioControlPanelTests : TestContext
   [Fact]
   public void RtLine_Hidden_WhenRadioTextEmpty()
   {
-    var state = BuildState(rdsRadioText: "");
+    var state = BuildState(rdsStationName: "WKQX", rdsRadioText: "");
     var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
 
     Assert.Empty(cut.FindAll(".rcp-rds-rt-scroll"));
+  }
+
+  [Fact]
+  public void RtLine_RendersExactlyOnce_InsideRdsCard_NoDuplicate()
+  {
+    // Regression guard against the bug PR #414 shipped: the new accumulating
+    // marquee was added as a NEW standalone element below the frequency well
+    // instead of replacing the existing static RT line, causing the RT to
+    // render twice in the panel (user-reported: "RDS data doubled up").
+    //
+    // The fix consolidates the marquee into a single location INSIDE
+    // .rds-card. This test pins that contract:
+    //   1. Exactly ONE .rcp-rds-rt-scroll element renders for non-empty RT.
+    //   2. That single element is a descendant of .rds-card (i.e. lives
+    //      inside the RDS bar with the blue station-name text, NOT as a
+    //      standalone sibling).
+    var state = BuildState(
+      rdsStationName: "WUNC",
+      rdsProgramType: "News",
+      rdsRadioText: "Morning Edition with Steve Inskeep");
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
+
+    var marquees = cut.FindAll(".rcp-rds-rt-scroll");
+    marquees.Should().HaveCount(1,
+      "PR #414's first cut rendered the RT marquee twice (standalone below " +
+      "freq well + would-be-replacement intended for inside the RDS bar) — " +
+      "the hotfix consolidates to a single render location inside .rds-card");
+
+    // The single marquee must be a descendant of the RDS card so all
+    // RDS data lives in one visual unit under the "RDS" tag header.
+    var card = cut.Find(".rds-card");
+    var marqueeInsideCard = card.QuerySelector(".rcp-rds-rt-scroll");
+    marqueeInsideCard.Should().NotBeNull(
+      "the marquee must live INSIDE .rds-card so the user sees a single " +
+      "'RDS bar' containing both the blue station name and the scrolling RT");
   }
 
   [Fact]
