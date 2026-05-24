@@ -363,6 +363,14 @@ builder.Services.AddSingleton<Radio.Web.Services.VisualizerTelemetryService>();
 // Defaults to an empty alias map when the section is absent or empty.
 builder.Services.Configure<DevicesOptions>(builder.Configuration.GetSection(DevicesOptions.SectionName));
 
+// Bind Display:* → DisplayOptions for the wall-clock time-format setting.
+// Consumed by MainLayout (topbar Time cluster), Sleep (LED clock), and
+// QueueHistoryPanel (ends-~ prediction) via IOptionsMonitor so a user save
+// on the System Configuration page repaints all three on the next 1s tick
+// without a circuit restart. Defaults to 24h no-seconds (preserves the
+// pre-PR behaviour) when the section is absent.
+builder.Services.Configure<DisplayOptions>(builder.Configuration.GetSection(DisplayOptions.SectionName));
+
 // HANDOFF-rds-accumulating-scroll — bind Radio:Rds → RdsScrollOptions so
 // RadioControlPanel can inject IOptionsMonitor<RdsScrollOptions> and react
 // to SQLite-store writes (PR #298 config bridge) without a page reload.
