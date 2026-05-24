@@ -297,18 +297,25 @@
         </RadzenTabsItem>
 
         <!-- Display Configuration -->
-        @* Wall-clock format settings (12h/24h + seconds). Hot-reloads via the
-           SQLite-config bridge → IOptionsMonitor<DisplayOptions>; the topbar
-           Time cluster, Sleep screen, and Queue ends-prediction repaint on
-           their next 1 s tick. See HANDOFF-configurable-time-format.md §6. *@
+        @* Wall-clock format settings (12h/24h + seconds) + sleep-screen
+           weather forecast group. Both groups hot-reload via the SQLite-config
+           bridge → IOptionsMonitor<DisplayOptions> / <WeatherDisplayOptions>;
+           the topbar Time cluster, Sleep screen, and Queue ends-prediction
+           repaint on their next 1 s tick. See HANDOFF-configurable-time-format.md §6
+           and HANDOFF-sleep-mode-weather-forecast.md §5. *@
         <RadzenTabsItem Text="Display" Icon="schedule">
-          @if (_displayConfig != null)
+          @if (_displayConfig != null && _weatherDisplayConfig != null)
           {
             <RadzenRow Gap="0.5rem">
               <RadzenColumn Size="12">
                 <RadzenAlert AlertStyle="AlertStyle.Info" Size="AlertSize.Small" AllowClose="false">
-                  Controls how the kiosk renders the wall clock. Applies to the topbar Time cluster, the sleep screen, and the queue end-time prediction. Saves take effect within ~1 second — no restart required.
+                  Controls how the kiosk renders the wall clock and the sleep-screen forecast. Saves take effect within ~1 second — no restart required.
                 </RadzenAlert>
+              </RadzenColumn>
+
+              @* ── Time Format group ─────────────────────────────────────── *@
+              <RadzenColumn Size="12">
+                <h4 style="margin-top:0.5rem;margin-bottom:0.25rem;font-size:0.9rem;text-transform:uppercase;letter-spacing:0.06em;color:var(--rz-text-tertiary-color)">Time format</h4>
               </RadzenColumn>
               <RadzenColumn Size="12" SizeMD="6">
                 <RadzenDropDown TValue="string" @bind-Value="_displayConfig.TimeFormat"
@@ -326,6 +333,55 @@
                 </div>
                 <small>Adds <code>:ss</code> to the topbar and sleep clocks (e.g. <code>15:45:22</code> / <code>3:45:22 PM</code>). Off by default — the sleep screen is designed to be calm. Queue end-time always omits seconds regardless of this setting.</small>
               </RadzenColumn>
+
+              @* ── Sleep-screen Weather group ────────────────────────────── *@
+              <RadzenColumn Size="12">
+                <h4 style="margin-top:1.25rem;margin-bottom:0.25rem;font-size:0.9rem;text-transform:uppercase;letter-spacing:0.06em;color:var(--rz-text-tertiary-color)">Sleep-screen weather</h4>
+                <small>Adds a 3-day forecast that alternates with the clock on the sleep screen, using the US National Weather Service. Free, no API key required.</small>
+              </RadzenColumn>
+              <RadzenColumn Size="12">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <RadzenCheckBox TValue="bool" @bind-Value="_weatherDisplayConfig.Enabled"
+                                  aria-label="Enable weather on sleep screen" />
+                  <span>Enable weather on sleep screen</span>
+                </div>
+              </RadzenColumn>
+              <RadzenColumn Size="12" SizeMD="6">
+                <RadzenLabel Text="ZIP code" />
+                <RadzenTextBox @bind-Value="_weatherDisplayConfig.Zip"
+                               MaxLength="5"
+                               Disabled="@(!_weatherDisplayConfig.Enabled)"
+                               Style="width:100%"
+                               aria-label="ZIP code" />
+                <small>5-digit US ZIP. Invalid ZIPs cause the sleep screen to fall back to clock-only (no error toast).</small>
+              </RadzenColumn>
+              <RadzenColumn Size="12" SizeMD="6">
+                <RadzenLabel Text="Refresh interval (minutes)" />
+                <RadzenNumeric TValue="int" @bind-Value="_weatherDisplayConfig.RefreshIntervalMinutes"
+                               Min="15" Max="360" Step="15"
+                               Disabled="@(!_weatherDisplayConfig.Enabled)"
+                               Style="width:100%"
+                               aria-label="Forecast refresh interval in minutes" />
+                <small>15 – 360 minutes. NWS updates roughly hourly; anything less aggressive than 60 min is wasted bandwidth.</small>
+              </RadzenColumn>
+              <RadzenColumn Size="12" SizeMD="6">
+                <RadzenLabel Text="Temperature unit" />
+                <RadzenDropDown TValue="string" @bind-Value="_weatherDisplayConfig.TemperatureUnit"
+                                Data="@_temperatureUnitOptions"
+                                TextProperty="Text" ValueProperty="Value"
+                                Disabled="@(!_weatherDisplayConfig.Enabled)"
+                                Style="width:100%"
+                                aria-label="Temperature unit" />
+              </RadzenColumn>
+              <RadzenColumn Size="12" SizeMD="6">
+                <RadzenLabel Text="Contact email (optional)" />
+                <RadzenTextBox @bind-Value="_weatherDisplayConfig.ContactEmail"
+                               Disabled="@(!_weatherDisplayConfig.Enabled)"
+                               Style="width:100%"
+                               aria-label="NWS contact email" />
+                <small>Sent to NWS as a User-Agent so they can contact you if there's an issue. Defaults to a placeholder when blank.</small>
+              </RadzenColumn>
+
               <RadzenColumn Size="12">
                 <RadzenButton Variant="Variant.Filled" ButtonStyle="ButtonStyle.Primary" Click="SaveDisplayConfigAsync"
                               Icon="save" Disabled="@_isSaving" Text="Save Display Settings" />
@@ -1698,6 +1754,10 @@
   // public get/set primitives. Hot-reload propagation happens via the
   // SQLite-bridge → IOptionsMonitor pipeline (no extra wiring needed here).
   private DisplayOptions? _displayConfig;
+  // Display:Weather:* sleep-screen forecast settings. Bound to the same
+  // Display sub-tab as _displayConfig and saved by the same Save button
+  // (one round trip writes both sets per HANDOFF-sleep-mode-weather-forecast.md §5).
+  private Radio.Core.Configuration.WeatherDisplayOptions? _weatherDisplayConfig;
   private bool _isSaving = false;
 
   // Preferences
@@ -1784,6 +1844,20 @@
   private record DropDownItem(string Text, string Value);
   private record DropDownItem<T>(string Text, T Value);
 
+  /// <summary>
+  /// Round-trip shape for the <c>display</c> configuration section. Carries
+  /// the wall-clock keys at the root and the weather group as a nested
+  /// object so a single GET/POST covers both groups in the Display sub-tab.
+  /// Nullable members so an unconfigured section gracefully falls back to
+  /// type defaults at the call site.
+  /// </summary>
+  private sealed class DisplayConfigEnvelope
+  {
+    public string? TimeFormat { get; set; }
+    public bool? ShowSeconds { get; set; }
+    public Radio.Core.Configuration.WeatherDisplayOptions? Weather { get; set; }
+  }
+
   private static readonly List<DropDownItem> _defaultSourceOptions = new()
   {
     new("Radio", "Radio"), new("File Player", "FilePlayer"), new("Vinyl", "Vinyl")
@@ -1845,6 +1919,16 @@
   {
     new("12-hour (3:45 PM)", "12h"),
     new("24-hour (15:45)", "24h"),
+  };
+
+  // Display:Weather:TemperatureUnit options. Values match the strings
+  // SleepForecastPane.razor switches on ("F" / "C" / "both"); labels follow
+  // the same parenthesised-exemplar pattern as time format.
+  private static readonly List<DropDownItem> _temperatureUnitOptions = new()
+  {
+    new("Fahrenheit (°F)", "F"),
+    new("Celsius (°C)", "C"),
+    new("Both (°F · °C)", "both"),
   };
 
   // Dynamic dropdown data computed from runtime state
@@ -1981,10 +2065,23 @@
       var deviceOptions = await ConfigApi.GetConfigurationAsync<DeviceOptionsDto>("devices");
       _deviceOptions = deviceOptions ?? new DeviceOptionsDto();
 
-      // Load display options. Falls through to defaults (24h, no seconds) when
-      // the section has never been saved — matches the historical hardcoded
-      // behaviour so an unconfigured kiosk renders identically to the pre-PR build.
-      _displayConfig = await ConfigApi.GetConfigurationAsync<DisplayOptions>("display") ?? new DisplayOptions();
+      // Load display options. The Display section is a composite that carries
+      // both PR #1's wall-clock keys (TimeFormat / ShowSeconds) at the root
+      // and PR #2's weather keys under a nested "Weather" key. We fetch the
+      // section once as a typed envelope and split it into two POCOs so the
+      // existing _displayConfig keeps its narrow shape and the new
+      // _weatherDisplayConfig binds cleanly to the Weather group.
+      //
+      // Falls through to defaults when the section has never been saved —
+      // matches the historical hardcoded behaviour so an unconfigured kiosk
+      // renders identically to the pre-PR build.
+      var displayEnvelope = await ConfigApi.GetConfigurationAsync<DisplayConfigEnvelope>("display") ?? new DisplayConfigEnvelope();
+      _displayConfig = new DisplayOptions
+      {
+        TimeFormat = displayEnvelope.TimeFormat ?? "24h",
+        ShowSeconds = displayEnvelope.ShowSeconds ?? false,
+      };
+      _weatherDisplayConfig = displayEnvelope.Weather ?? new Radio.Core.Configuration.WeatherDisplayOptions();
 
       // Load additional configuration sections
       _bluetoothConfig = await ConfigApi.GetConfigurationAsync<BluetoothConfigDto>("bluetooth") ?? new();
@@ -2563,23 +2660,45 @@
     _isSaving = true;
     try
     {
-      if (_displayConfig == null)
+      if (_displayConfig == null || _weatherDisplayConfig == null)
       {
         NotificationService.Notify(NotificationSeverity.Error, "Error", "Display configuration is not loaded");
         return;
       }
 
-      // POST the whole section. The API server writes through ConfigurationManager,
-      // which fires ConfigStoreChangeNotifier.NotifyReload(); SqliteConfigurationProvider
-      // re-reads the table; IOptionsMonitor<DisplayOptions>.OnChange fires; the three
-      // wall-clock consumers (MainLayout, Sleep, QueueHistoryPanel) pick up the new
-      // CurrentValue on their next 1 s tick. No restart, no circuit drop.
-      var success = await ConfigApi.UpdateConfigurationAsync("display", _displayConfig);
+      // POST a combined payload to the "display" section. Time-format keys
+      // land directly under display:* (TimeFormat / ShowSeconds); the nested
+      // Weather object lands as display:Weather:{...} and is then flattened
+      // by SqliteConfigurationProvider into display:Weather:Enabled etc. on
+      // read — same hot-reload pipeline ConfigStoreChangeNotifier already
+      // drives for DisplayOptions and WeatherDisplayOptions consumers.
+      //
+      // We use an anonymous object rather than a strongly-typed DTO so the
+      // shape is obvious at the call site (and so this method doesn't need
+      // a new DTO file just to flatten two POCOs).
+      var payload = new
+      {
+        _displayConfig.TimeFormat,
+        _displayConfig.ShowSeconds,
+        Weather = new
+        {
+          _weatherDisplayConfig.Enabled,
+          _weatherDisplayConfig.Zip,
+          _weatherDisplayConfig.RefreshIntervalMinutes,
+          _weatherDisplayConfig.TemperatureUnit,
+          _weatherDisplayConfig.ContactEmail,
+        }
+      };
+
+      var success = await ConfigApi.UpdateConfigurationAsync("display", payload);
       if (success)
       {
         NotificationService.Notify(NotificationSeverity.Success, "Success", "Display configuration saved successfully");
-        Logger.LogInformation("Display configuration updated: TimeFormat={TimeFormat}, ShowSeconds={ShowSeconds}",
-          _displayConfig.TimeFormat, _displayConfig.ShowSeconds);
+        Logger.LogInformation(
+          "Display configuration updated: TimeFormat={TimeFormat}, ShowSeconds={ShowSeconds}, Weather.Enabled={WxEnabled}, Weather.Zip={WxZip}, Weather.RefreshMin={WxRefresh}, Weather.Unit={WxUnit}",
+          _displayConfig.TimeFormat, _displayConfig.ShowSeconds,
+          _weatherDisplayConfig.Enabled, _weatherDisplayConfig.Zip,
+          _weatherDisplayConfig.RefreshIntervalMinutes, _weatherDisplayConfig.TemperatureUnit);
       }
       else
       {
