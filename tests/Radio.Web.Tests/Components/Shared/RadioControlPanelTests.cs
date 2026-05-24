@@ -645,9 +645,11 @@ public class RadioControlPanelTests : TestContext
     // string" — but the scroll container also exposes the buffer via the
     // sr-only mirror for screen readers.
     //
-    // Post-#414-hotfix: the marquee now lives INSIDE .rds-card rather than
-    // as a standalone block below the frequency well. The .rcp-rds-rt-scroll
-    // selector still finds it (component-level selector unchanged).
+    // Post HANDOFF-rds-inline-scroll-revision: the marquee now lives in the
+    // PS slot of .rds-card and the track text is "{PS} • {RT}" so the user
+    // sees one continuous scroll string. The title attribute mirrors that
+    // composed string — that's what's actually scrolling, so the tooltip
+    // matches what the user is reading.
     var state = BuildState(
       rdsStationName: "WKQX",
       rdsRadioText: "Now playing: Pink Floyd — Wish You Were Here");
@@ -655,8 +657,11 @@ public class RadioControlPanelTests : TestContext
 
     var rt = cut.Find(".rcp-rds-rt-scroll");
     Assert.Contains("Pink Floyd", rt.TextContent);
-    // The title attribute carries the full buffer text — overflow tooltip + a11y
-    Assert.Equal("Now playing: Pink Floyd — Wish You Were Here", rt.GetAttribute("title"));
+    Assert.Contains("WKQX", rt.TextContent);
+    // Title carries the full composed track text — "{PS} • {RT}".
+    Assert.Equal(
+      "WKQX • Now playing: Pink Floyd — Wish You Were Here",
+      rt.GetAttribute("title"));
   }
 
   [Fact]
@@ -710,6 +715,97 @@ public class RadioControlPanelTests : TestContext
     marqueeInsideCard.Should().NotBeNull(
       "the marquee must live INSIDE .rds-card so the user sees a single " +
       "'RDS bar' containing both the blue station name and the scrolling RT");
+  }
+
+  // ─── HANDOFF-rds-inline-scroll-revision: single-row + empty-state matrix ──
+  //
+  // PR #416 nested the marquee as a SECOND row inside .rds-card, which fixed
+  // the duplication PR #414 introduced but pushed the frequency display +
+  // STEREO badge below the visible viewport at 1920×720. The revision
+  // collapses the card back to a single row: the PS slot itself becomes the
+  // marquee surface. These three tests pin the new layout + empty-state
+  // behaviour so a future regression can't sneak the second-row wrapper back.
+
+  [Fact]
+  public void RdsCard_RendersAsSingleRow_PSAndRtShareOneLine()
+  {
+    // PS + RT both present: the marquee track text must be "{PS} • {RT}" and
+    // the .rds-card must NOT contain a .rds-card-row wrapper (the PR #416
+    // two-row wrapper that this revision deletes). Exactly one marquee
+    // descendant. Tests RadioControlPanel-level wiring so the configured
+    // RtChunkSeparator threads through.
+    var state = BuildState(
+      rdsStationName: "Eagles",
+      rdsRadioText: "Green Day · Boulevard",
+      rdsProgramType: "ROCK");
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
+
+    var card = cut.Find(".rds-card");
+
+    // The PR #416 two-row wrapper must be gone.
+    card.QuerySelector(".rds-card-row").Should().BeNull(
+      "the single-row revision deletes the .rds-card-row wrapper so the " +
+      "card stays one line tall and doesn't push the frequency display down");
+
+    // Exactly one marquee track, and its text contains both PS and RT joined
+    // by the default separator ` • ` (the configured RtChunkSeparator).
+    var tracks = cut.FindAll(".rcp-rds-rt-track");
+    tracks.Should().HaveCount(1,
+      "the marquee renders once in the PS slot; no second-row duplicate");
+    var trackText = tracks[0].TextContent;
+    trackText.Should().Contain("Eagles");
+    trackText.Should().Contain("Green Day · Boulevard");
+    trackText.Should().Contain(" • ",
+      "the configured RtChunkSeparator (' • ' default) joins PS and RT so " +
+      "the scroll reads as one continuous identity-plus-context string");
+  }
+
+  [Fact]
+  public void RdsCard_RtEmpty_RendersStaticStationOnly()
+  {
+    // PS present + RT empty: the card must fall back to the original static
+    // .rds-card-station span — no marquee, no animation, no scroll. This is
+    // the regression-prevention case from the handoff matrix: a single short
+    // station name should never scroll.
+    var state = BuildState(
+      rdsStationName: "Eagles",
+      rdsRadioText: null,
+      rdsProgramType: "ROCK");
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
+
+    // Static PS renders.
+    var staticStation = cut.Find(".rds-card-station");
+    staticStation.TextContent.Trim().Should().Be("Eagles");
+
+    // No marquee surface anywhere.
+    cut.FindAll(".rcp-rds-rt-scroll").Should().BeEmpty(
+      "when RT is empty the card reverts to the static PS span; no marquee " +
+      "must render or the user would see a pointless scroll on a single name");
+    cut.FindAll(".rcp-rds-rt-track").Should().BeEmpty();
+  }
+
+  [Fact]
+  public void RdsCard_PsEmpty_RtPresent_RendersMarqueeWithoutLeadingSeparator()
+  {
+    // PS empty + RT present (transient tune-in): the marquee renders with
+    // just the RT text — NO leading " • " separator. The user must not see
+    // a stray bullet at the head of the scroll when station identity hasn't
+    // arrived yet.
+    var state = BuildState(
+      rdsStationName: null,
+      rdsRadioText: "Some RT");
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
+
+    var track = cut.Find(".rcp-rds-rt-track");
+    var trackText = track.TextContent.Trim();
+
+    trackText.Should().NotStartWith(" • ",
+      "when PS is empty the marquee must not lead with a separator — that " +
+      "would look like a dangling bullet at the head of the scroll");
+    trackText.Should().NotStartWith("•",
+      "no bullet glyph at the head either (covers separator variants)");
+    trackText.Should().Be("Some RT",
+      "track text is just the RT when PS is empty — no prefix, no separator");
   }
 
   [Fact]
