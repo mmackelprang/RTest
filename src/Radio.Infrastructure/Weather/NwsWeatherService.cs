@@ -36,11 +36,29 @@ public sealed class NwsWeatherService : IWeatherService
   private const string GridKeySuffix = ":grid";
   private const string ForecastKeyPrefix = "weather:zip:";
   private const string ForecastKeySuffix = ":forecast";
+  // Observation chain — added per HANDOFF-sleep-weather-current-conditions §4.3.
+  private const string StationsKeyPrefix = "weather:zip:";
+  private const string StationsKeySuffix = ":stations";
+  private const string ObservationKeyPrefix = "weather:zip:";
+  private const string ObservationKeySuffix = ":observation";
 
   // ADR §2.3 — grid assignments are stable; coords never move; forecast has a
   // fresh-TTL (configurable) and a stale-serve TTL (24h hard ceiling).
   private static readonly TimeSpan GridCacheTtl = TimeSpan.FromDays(30);
   private static readonly TimeSpan StaleServeHorizon = TimeSpan.FromHours(24);
+
+  // Observation freshness (HANDOFF §4.3): fixed 30 min — independent of the
+  // configurable forecast refresh interval. Stations report ~hourly so 30 min
+  // gives sub-hour data without hammering the endpoint. The 2-hour threshold
+  // is the staleness flag for the UI affordance (HANDOFF §7).
+  private static readonly TimeSpan ObservationFreshTtl = TimeSpan.FromMinutes(30);
+  private static readonly TimeSpan ObservationStaleThreshold = TimeSpan.FromHours(2);
+
+  // Sanity guard for observation temperature (HANDOFF §4.5). NWS sensors
+  // occasionally glitch to absurd values (+/- 9999 sentinel, stuck-at-zero
+  // boards). Anything outside [-60, 60] °C is treated as "no observation."
+  private const double TempCMin = -60.0;
+  private const double TempCMax = 60.0;
 
   // Per-ZIP semaphores serialize cold-cache fills for the coords and grid
   // steps so two simultaneous callers can't both invoke the async factory
@@ -56,6 +74,10 @@ public sealed class NwsWeatherService : IWeatherService
   // semaphore tier would just queue requests behind a slow upstream call.
   private static readonly ConcurrentDictionary<string, SemaphoreSlim> _coordsLocks = new(StringComparer.Ordinal);
   private static readonly ConcurrentDictionary<string, SemaphoreSlim> _gridLocks = new(StringComparer.Ordinal);
+  // Mirrors the coords/grid pattern — stampede protection for the per-ZIP
+  // stations-list fetch (HANDOFF §4.3). The observation cache is intentionally
+  // unguarded for the same rationale as the forecast cache.
+  private static readonly ConcurrentDictionary<string, SemaphoreSlim> _stationsLocks = new(StringComparer.Ordinal);
 
   public NwsWeatherService(
     IHttpClientFactory httpClientFactory,
@@ -175,8 +197,20 @@ public sealed class NwsWeatherService : IWeatherService
       throw new InvalidOperationException($"NWS points endpoint did not return a forecast URL for ZIP {zip}");
     }
 
-    // Step 3 — forecast.
-    var nwsForecast = await FetchForecastPeriodsAsync(gridInfo.ForecastUrl, ct).ConfigureAwait(false);
+    // Step 3 — forecast AND observation in parallel (HANDOFF §4.2). Both
+    // calls are independent given the grid info; sequencing them would
+    // double the cold-start latency (~200-400 ms per leg). Failure isolation
+    // is preserved by TryFetchObservationAsync — it NEVER throws so
+    // Task.WhenAll surfaces only the forecast's exceptions, and the
+    // observation failure produces Current = null without poisoning the
+    // forecast path.
+    var forecastTask = FetchForecastPeriodsAsync(gridInfo.ForecastUrl, ct);
+    var observationTask = TryFetchObservationAsync(zip, gridInfo, ct);
+
+    await Task.WhenAll(forecastTask, observationTask).ConfigureAwait(false);
+
+    var nwsForecast = await forecastTask.ConfigureAwait(false);
+    var observation = await observationTask.ConfigureAwait(false);
 
     // Aggregate day+night pairs into calendar-day WeatherDay records.
     var days = AggregateToDays(nwsForecast.Periods ?? new List<NwsForecastPeriod>(), DateTime.Now.Date);
@@ -192,9 +226,253 @@ public sealed class NwsWeatherService : IWeatherService
       FetchedAtUtc: DateTimeOffset.UtcNow,
       IsStale: false,
       Days: days,
-      Current: null);
+      Current: observation);
 
     return new CachedForecast(forecast, DateTimeOffset.UtcNow);
+  }
+
+  /// <summary>
+  /// Firewall around the observation chain (HANDOFF §6 load-bearing contract).
+  /// Catches everything except <see cref="OperationCanceledException"/> so a
+  /// broken observation chain produces <c>Current = null</c> without ever
+  /// poisoning the forecast fetch or surfacing as a pane-disappears bug.
+  /// </summary>
+  private async Task<CurrentObservation?> TryFetchObservationAsync(
+    string zip, GridInfo gridInfo, CancellationToken ct)
+  {
+    try
+    {
+      return await GetOrFillObservationAsync(zip, gridInfo, ct).ConfigureAwait(false);
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+      throw;
+    }
+    catch (Exception ex)
+    {
+      // Log at Warning — the forecast still renders; the operator sees the
+      // "forecast only" fallback qualifier on the sub-line and can debug
+      // from the structured log if they care.
+      _logger.LogWarning(ex, "Observation chain failed for ZIP {Zip}; pane will fall back to today's forecast", zip);
+      return null;
+    }
+  }
+
+  /// <summary>
+  /// Observation cache + refresh. Stale-while-revalidate matches the forecast
+  /// cache pattern (HANDOFF §4.3): fresh hit returns immediately, stale entry
+  /// triggers a refresh, refresh failure with cached entry inside the 24 h
+  /// stale-serve horizon returns the cached observation marked IsStale.
+  /// </summary>
+  private async Task<CurrentObservation?> GetOrFillObservationAsync(
+    string zip, GridInfo gridInfo, CancellationToken ct)
+  {
+    if (string.IsNullOrEmpty(gridInfo.ObservationStationsUrl))
+    {
+      // NWS didn't supply an observationStations URL for this grid — nothing
+      // to fetch. Not an error condition; just no observation available.
+      return null;
+    }
+
+    var key = ObservationKeyPrefix + zip + ObservationKeySuffix;
+
+    // Fresh cache hit — return as-is, recomputing IsStale against wall-clock
+    // (the cache entry's IsStale might have been false at fetch time but
+    // crossed the 2-hour threshold since).
+    if (_cache.TryGetValue<CachedObservation>(key, out var cached) && cached is not null)
+    {
+      var age = DateTimeOffset.UtcNow - cached.FetchedAtUtc;
+      if (age < ObservationFreshTtl)
+      {
+        var isStale = ComputeObservationStale(cached.Observation.ObservedAtUtc, wasCachedFallback: false);
+        return cached.Observation with { IsStale = isStale };
+      }
+    }
+
+    // Cache miss OR stale — attempt a refresh.
+    try
+    {
+      var stationId = await GetOrFillClosestStationAsync(zip, gridInfo, ct).ConfigureAwait(false);
+      if (string.IsNullOrEmpty(stationId))
+      {
+        // Stations list returned no usable station — closest-station-only
+        // policy (HANDOFF §4.4) means we can't fall back further.
+        return null;
+      }
+
+      var fresh = await FetchLatestObservationAsync(stationId, ct).ConfigureAwait(false);
+      if (fresh is null)
+      {
+        // Sanity-guard tripped or observation has no usable data.
+        // Fall through to the cached-fallback path below.
+        throw new InvalidOperationException("Observation parsing produced no value");
+      }
+
+      _cache.Set(key, new CachedObservation(fresh, DateTimeOffset.UtcNow), new MemoryCacheEntryOptions
+      {
+        // Mirrors the forecast cache: hold up to 48 h so a brief outage can
+        // serve stale data through the 24 h horizon plus a GC buffer.
+        AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(48),
+      });
+
+      var freshIsStale = ComputeObservationStale(fresh.ObservedAtUtc, wasCachedFallback: false);
+      return fresh with { IsStale = freshIsStale };
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+      throw;
+    }
+    catch (Exception ex)
+    {
+      if (cached is not null)
+      {
+        var age = DateTimeOffset.UtcNow - cached.FetchedAtUtc;
+        if (age <= StaleServeHorizon)
+        {
+          _logger.LogWarning(ex, "Observation refresh failed for ZIP {Zip}; serving stale (age {Age}m)", zip, (int)age.TotalMinutes);
+          return cached.Observation with { IsStale = true };
+        }
+        _logger.LogWarning(ex, "Observation refresh failed for ZIP {Zip} and cached entry is too old (age {Age}h); returning null", zip, (int)age.TotalHours);
+      }
+      else
+      {
+        _logger.LogInformation(ex, "Observation chain failed for ZIP {Zip} with no cached fallback; Current = null", zip);
+      }
+      return null;
+    }
+  }
+
+  /// <summary>
+  /// Per-ZIP stations-list cache with the same double-checked-locking pattern
+  /// as <see cref="GetOrFillCoordsAsync"/> / <see cref="GetOrFillGridAsync"/>.
+  /// HANDOFF §4.3: stations rarely change; cached for process lifetime
+  /// (<see cref="CacheItemPriority.NeverRemove"/>). Returns the closest
+  /// station's identifier or null when the list is empty / fetch fails.
+  /// </summary>
+  private async Task<string?> GetOrFillClosestStationAsync(
+    string zip, GridInfo gridInfo, CancellationToken ct)
+  {
+    var key = StationsKeyPrefix + zip + StationsKeySuffix;
+    if (_cache.TryGetValue<string>(key, out var cached) && !string.IsNullOrEmpty(cached))
+    {
+      return cached;
+    }
+
+    var sem = _stationsLocks.GetOrAdd(zip, _ => new SemaphoreSlim(1, 1));
+    await sem.WaitAsync(ct).ConfigureAwait(false);
+    try
+    {
+      // Re-check after the lock — another caller may have filled the cache.
+      if (_cache.TryGetValue<string>(key, out cached) && !string.IsNullOrEmpty(cached))
+      {
+        return cached;
+      }
+
+      var fresh = await FetchClosestStationAsync(gridInfo.ObservationStationsUrl, ct).ConfigureAwait(false);
+      if (!string.IsNullOrEmpty(fresh))
+      {
+        _cache.Set(key, fresh, new MemoryCacheEntryOptions
+        {
+          Priority = CacheItemPriority.NeverRemove,
+        });
+      }
+      // null/empty NOT cached — re-asking later is cheap and lets a transient
+      // upstream failure recover on the next observation refresh.
+      return fresh;
+    }
+    finally
+    {
+      sem.Release();
+    }
+  }
+
+  private async Task<string?> FetchClosestStationAsync(string observationStationsUrl, CancellationToken ct)
+  {
+    var client = _httpClientFactory.CreateClient("nws");
+    using var response = await client.GetAsync(observationStationsUrl, ct).ConfigureAwait(false);
+    response.EnsureSuccessStatusCode();
+    var body = await response.Content.ReadFromJsonAsync<NwsStationsResponse>(ct).ConfigureAwait(false);
+
+    var first = body?.Features?.FirstOrDefault();
+    return first?.Properties?.StationIdentifier;
+  }
+
+  /// <summary>
+  /// Fetches the latest observation for a station and maps it to a
+  /// <see cref="CurrentObservation"/>. Returns null when the upstream returns
+  /// no usable data (null sensor value, out-of-range temperature, missing
+  /// timestamp). 404 / 5xx surface as exceptions so the caller can apply the
+  /// stale-fallback logic.
+  /// </summary>
+  private async Task<CurrentObservation?> FetchLatestObservationAsync(string stationId, CancellationToken ct)
+  {
+    var client = _httpClientFactory.CreateClient("nws");
+    var url = $"/stations/{stationId}/observations/latest";
+
+    using var response = await client.GetAsync(url, ct).ConfigureAwait(false);
+    response.EnsureSuccessStatusCode();
+    var body = await response.Content.ReadFromJsonAsync<NwsObservationResponse>(ct).ConfigureAwait(false);
+
+    return MapObservation(body?.Properties);
+  }
+
+  /// <summary>
+  /// Maps the raw NWS observation payload to <see cref="CurrentObservation"/>.
+  /// Applies the HANDOFF §4.5 sanity guard (null OR outside [-60, 60] °C
+  /// → null) and the HANDOFF §4.5 rounding rule (round each unit
+  /// independently, MidpointRounding.AwayFromZero, matching AggregateToDays).
+  /// Internal so it's reachable from the test project (NwsWeatherServiceTests).
+  /// </summary>
+  internal static CurrentObservation? MapObservation(NwsObservationProperties? props)
+  {
+    if (props is null)
+    {
+      return null;
+    }
+
+    var tempC = props.Temperature?.Value;
+    if (tempC is null || double.IsNaN(tempC.Value) || double.IsInfinity(tempC.Value))
+    {
+      return null;
+    }
+    if (tempC.Value < TempCMin || tempC.Value > TempCMax)
+    {
+      return null;
+    }
+    if (props.Timestamp is null)
+    {
+      return null;
+    }
+
+    var tempCInt = (int)Math.Round(tempC.Value, MidpointRounding.AwayFromZero);
+    var tempFInt = (int)Math.Round(tempC.Value * 9.0 / 5.0 + 32, MidpointRounding.AwayFromZero);
+    var iconKey = NwsIconMapper.MapToIconKey(props.Icon);
+    var conditionShort = props.TextDescription ?? string.Empty;
+
+    var observedAt = props.Timestamp.Value;
+    var isStale = ComputeObservationStale(observedAt, wasCachedFallback: false);
+
+    return new CurrentObservation(
+      TempF: tempFInt,
+      TempC: tempCInt,
+      ConditionShort: conditionShort,
+      IconKey: iconKey,
+      ObservedAtUtc: observedAt,
+      IsStale: isStale);
+  }
+
+  /// <summary>
+  /// HANDOFF §7 staleness rule: <c>true</c> when ObservedAtUtc &lt; now - 2h
+  /// OR when we are serving a cached value after a refresh failure.
+  /// </summary>
+  private static bool ComputeObservationStale(DateTimeOffset observedAtUtc, bool wasCachedFallback)
+  {
+    if (wasCachedFallback)
+    {
+      return true;
+    }
+    var age = DateTimeOffset.UtcNow - observedAtUtc;
+    return age > ObservationStaleThreshold;
   }
 
   /// <summary>
@@ -305,7 +583,11 @@ public sealed class NwsWeatherService : IWeatherService
     return new GridInfo(
       ForecastUrl: props.Forecast ?? string.Empty,
       City: props.RelativeLocation?.Properties?.City ?? string.Empty,
-      State: props.RelativeLocation?.Properties?.State ?? string.Empty);
+      State: props.RelativeLocation?.Properties?.State ?? string.Empty,
+      // HANDOFF §4.3 — empty when NWS omits the field; the observation fetch
+      // treats empty as "no observation available" and returns null without
+      // an upstream call.
+      ObservationStationsUrl: props.ObservationStations ?? string.Empty);
   }
 
   private async Task<NwsForecastProperties> FetchForecastPeriodsAsync(string forecastUrl, CancellationToken ct)
@@ -449,11 +731,47 @@ public sealed class NwsWeatherService : IWeatherService
     });
   }
 
+  /// <summary>
+  /// Test-only seam mirroring <see cref="SetForecastCacheEntryForTesting"/>:
+  /// inject an observation cache entry with a controlled
+  /// <paramref name="fetchedAtUtc"/> so the stale-while-revalidate path can be
+  /// exercised without waiting out the real 30-min fresh-TTL.
+  /// </summary>
+  internal void SetObservationCacheEntryForTesting(string zip, CurrentObservation observation, DateTimeOffset fetchedAtUtc)
+  {
+    var key = ObservationKeyPrefix + zip + ObservationKeySuffix;
+    _cache.Set(key, new CachedObservation(observation, fetchedAtUtc), new MemoryCacheEntryOptions
+    {
+      AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(48),
+    });
+  }
+
+  /// <summary>
+  /// Test-only seam: pre-seed the stations cache so tests for the
+  /// observation-only path can skip the stations chain entirely. Mirrors the
+  /// pattern of <see cref="SetForecastCacheEntryForTesting"/>.
+  /// </summary>
+  internal void SetStationsCacheEntryForTesting(string zip, string stationId)
+  {
+    var key = StationsKeyPrefix + zip + StationsKeySuffix;
+    _cache.Set(key, stationId, new MemoryCacheEntryOptions
+    {
+      Priority = CacheItemPriority.NeverRemove,
+    });
+  }
+
   // ------------------------ internal helper types ------------------------
 
-  private sealed record GridInfo(string ForecastUrl, string City, string State);
+  private sealed record GridInfo(string ForecastUrl, string City, string State, string ObservationStationsUrl);
 
   private sealed record CachedForecast(WeatherForecast Forecast, DateTimeOffset FetchedAtUtc);
+
+  /// <summary>
+  /// Cache entry for observations — wraps the public record with the wall-clock
+  /// time we fetched it, so the fresh/stale boundary can be computed without
+  /// trusting the upstream timestamp alone.
+  /// </summary>
+  private sealed record CachedObservation(CurrentObservation Observation, DateTimeOffset FetchedAtUtc);
 
   private sealed class DayBucket
   {

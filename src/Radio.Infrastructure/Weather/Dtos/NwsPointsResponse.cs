@@ -17,6 +17,16 @@ internal sealed class NwsPointsProperties
   [JsonPropertyName("forecast")]
   public string? Forecast { get; set; }
 
+  /// <summary>
+  /// URL of the observation stations list for this grid cell. NWS returns a
+  /// GeoJSON FeatureCollection ordered by distance from the grid point;
+  /// <see cref="NwsWeatherService"/> picks the closest (features[0]). May be
+  /// null when NWS doesn't emit the field for the grid (treated as "no
+  /// observation available").
+  /// </summary>
+  [JsonPropertyName("observationStations")]
+  public string? ObservationStations { get; set; }
+
   [JsonPropertyName("relativeLocation")]
   public NwsRelativeLocation? RelativeLocation { get; set; }
 }
