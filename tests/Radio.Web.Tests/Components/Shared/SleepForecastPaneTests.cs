@@ -56,7 +56,8 @@ public class SleepForecastPaneTests : TestContext
       GeneratedAtUtc: DateTime.UtcNow.AddHours(isStale ? -25 : -1),
       FetchedAtUtc: DateTime.UtcNow.AddMinutes(-1),
       IsStale: isStale,
-      Days: days.Take(dayCount).ToList());
+      Days: days.Take(dayCount).ToList(),
+      Current: null);
   }
 
   // ── Region 1 — primary block contract ───────────────────────────────────

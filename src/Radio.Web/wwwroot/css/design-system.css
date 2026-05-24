@@ -3171,6 +3171,61 @@ body {
   color: color-mix(in srgb, var(--signal-amber) 35%, #050507);
 }
 
+/* ── Supplementary "Today" stack — current-conditions iteration ───────────
+   When Forecast.Current is populated the big-number block shows the CURRENT
+   observed temp; today's forecast H/L moves down to this smaller
+   supplementary row for context. Specced in HANDOFF-sleep-weather-current-
+   conditions.md §5.2. Zero new tokens — every color and font already exists. */
+
+.sleep-forecast-primary-supplementary {
+  /* Stacks the "Today" label above the H/L numerals. Sits 8 px below the
+     condition slot (the parent .sleep-forecast-primary-right gap rule
+     supplies the spacing). */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  line-height: 1;
+}
+
+.sleep-forecast-supplementary-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-low);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  line-height: 1;
+}
+
+.sleep-forecast-supplementary-hl {
+  /* 16 px LED dim amber — NO text-shadow per HANDOFF §5.2 (the glow muddies
+     the glyph at small sizes). Same dim-amber color as the big readout for
+     the "same instrument family" reading. */
+  font-family: var(--font-led);
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--signal-amber) 35%, #050507);
+  letter-spacing: 0.02em;
+  line-height: 1;
+  /* Intentionally no text-shadow. */
+}
+
+.sleep-forecast-supplementary-hl-sep {
+  /* Tier-quieter separator matches the 28 px H/L rule in v2 — the slash is a
+     thin marker rather than a numeric character. */
+  color: var(--text-low);
+  font-weight: 400;
+}
+
+.sleep-forecast-supplementary-deg {
+  /* The trailing ° on the low matches the inline ° between H and L. Same
+     low color so the degree symbols don't pile up visually. */
+  color: var(--text-low);
+  font-weight: 400;
+}
+
 /* ── Sub-line — location · day · time ─────────────────────────────────── */
 
 .sleep-forecast-subline {
@@ -3196,6 +3251,21 @@ body {
   color: var(--text-low);
   font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 20;
   /* Inherits the pane's opacity: 0.7 because it lives inside .is-stale. */
+  line-height: 1;
+}
+
+.sleep-forecast-subline-fallback {
+  /* Fallback qualifier ` · forecast only` (HANDOFF §5.2). Italic differentiates
+     from the upright relative-time stale qualifier ("yesterday at HH:mm") —
+     gives the operator a visual cue that "this is a fallback state, not a
+     stale state." Tier-quieter --text-low so the location and time stay the
+     primary read. */
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-style: italic;
+  font-weight: 400;
+  color: var(--text-low);
+  letter-spacing: 0.06em;
   line-height: 1;
 }
 

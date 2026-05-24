@@ -1,22 +1,32 @@
 @*
-  Sleep-mode weather forecast pane — v2 visual redesign.
-
-  Implements HANDOFF-sleep-weather-visual-redesign.md (supersedes the v1
-  "wall of three coequal cards" treatment from HANDOFF-sleep-mode-weather-
-  forecast.md §2). Composition:
+  Sleep-mode weather forecast pane — v2 visual redesign + current observations
+  (HANDOFF-sleep-weather-current-conditions.md, extends HANDOFF-sleep-weather-
+  visual-redesign.md). Composition:
 
     Region 1 (primary block, 880×180):
-      [96px Material Symbol icon] [96px Orbitron LED current temp + °]
+      [96px Material Symbol icon] [96px Orbitron LED PRIMARY temp + °]
       [small F·C unit indicator]  [24px condition text]
-                                  [28px LED today H/L]
+                                  [supplementary "Today" label + 16px LED H/L]
+                                  ─── OR (fallback) ──────────────────────────
+                                  [28px LED today H/L]                (v2)
 
     Sub-line (14px mono, --text-medium):
-      "<City> · <Day> <Time>"     — or "<icon> <City> · yesterday at HH:mm"
-                                    when IsStale
+      "<City> · <Day> <Time>"        — fresh, with Current present
+      "<City> · <Day> <Time> · forecast only"  — fresh, Current == null
+      "<icon> <City> · yesterday at HH:mm"     — stale forecast
 
     Region 2 (forecast row, omitted when Days.Count < 2):
       3 (or 2) cards, 32px gaps, whitespace-only separation
       Each card: 48px icon + 14px mono day label + 28px LED high + 20px LED low
+
+  States (HANDOFF-sleep-weather-current-conditions.md §5):
+    State G — Current observation available (the new default):
+      Big number / icon / condition ← Current.* (observed NOW)
+      Supplementary "Today: H°/L°" line ← Today.HighF/LowF
+    State H — Current == null (fallback to v2):
+      Big number / icon / condition ← Today.* (today's FORECAST)
+      v2 H/L line returns in its original position
+      Sub-line gains " · forecast only" qualifier
 
   All emissive elements share a single color:
     color-mix(in srgb, var(--signal-amber) 35%, #050507)
@@ -26,15 +36,11 @@
   amber "instrument" as the wall clock.
 
   Rides inside the existing .sleep-screen-drift wrapper; alternation cadence,
-  anti-burn-in math, NWS fetch, and config UI are all unchanged from v1
-  (handoff §10 "out of scope").
+  anti-burn-in math, NWS fetch, and config UI are all unchanged from v1.
 
   Null / zero-day forecasts MUST be caught upstream — this component assumes
-  a non-null Forecast with at least one day. Sleep.razor guards via
-  `_forecast.Days.Count > 0`. For a single-day forecast the pane DOES render:
-  the primary block + sub-line are the entire output and Region 2 is omitted
-  (v2 spec §3 State D — a single forecast card duplicating today's data has
-  no comparative value).
+  a non-null Forecast with at least one day. Forecast.Current MAY be null;
+  the pane handles both cases per State G / State H above.
 
   All state is supplied via parameters; the pane is purely presentational.
 *@
@@ -42,38 +48,63 @@
 @using Radio.Core.Models
 @using System.Globalization
 
-<div class="sleep-forecast-pane @(Forecast.IsStale ? "is-stale" : null) @(IsBoth ? "unit-both" : null)"
+<div class="sleep-forecast-pane @(PaneIsStale ? "is-stale" : null) @(IsBoth ? "unit-both" : null)"
      role="region"
      aria-live="polite"
      aria-atomic="true"
      aria-label="@_ariaLabel">
 
-  @* Region 1 — primary current-weather block *@
+  @* Region 1 — primary current-weather block. Big number / icon / condition
+     rebind to Current.* when an observation is available (State G); fall back
+     to Today.* (today's forecast) when Current is null (State H — v2). *@
   <div class="sleep-forecast-primary">
     <div class="sleep-forecast-primary-icon">
-      <span class="material-symbols-rounded">@IconKeyToSymbol(Today.IconKey)</span>
+      <span class="material-symbols-rounded">@IconKeyToSymbol(PrimaryIconKey)</span>
     </div>
     <div class="sleep-forecast-primary-temp">
-      @CurrentTempDisplay<span class="sleep-forecast-primary-degree">°</span>
+      @PrimaryTempDisplay<span class="sleep-forecast-primary-degree">°</span>
     </div>
     <div class="sleep-forecast-primary-unit" aria-hidden="true">
       <span class="@(IsCelsius ? "is-inactive" : "is-active")">F</span><span class="sleep-forecast-primary-unit-sep">·</span><span class="@(IsCelsius ? "is-active" : "is-inactive")">C</span>
     </div>
     <div class="sleep-forecast-primary-right">
-      <div class="sleep-forecast-primary-condition">@Today.ConditionShort</div>
-      <div class="sleep-forecast-primary-hl">
-        <span class="sleep-forecast-primary-high">@TodayHigh</span><span class="sleep-forecast-primary-hl-sep">/</span><span class="sleep-forecast-primary-low">@TodayLow</span>
-      </div>
+      <div class="sleep-forecast-primary-condition">@PrimaryConditionDisplay</div>
+      @if (HasCurrent)
+      {
+        @* State G: current observation is the headline; today's forecast H/L
+           moves down to a smaller supplementary line for context (HANDOFF §5.1). *@
+        <div class="sleep-forecast-primary-supplementary">
+          <div class="sleep-forecast-supplementary-label">Today</div>
+          <div class="sleep-forecast-supplementary-hl">
+            <span class="sleep-forecast-supplementary-high">@TodayHigh</span><span class="sleep-forecast-supplementary-hl-sep">°/</span><span class="sleep-forecast-supplementary-low">@TodayLow</span><span class="sleep-forecast-supplementary-deg">°</span>
+          </div>
+        </div>
+      }
+      else
+      {
+        @* State H: fallback — primary block IS today's forecast, so the v2
+           H/L line returns in its original position (no supplementary label —
+           would be redundant with the headline). *@
+        <div class="sleep-forecast-primary-hl">
+          <span class="sleep-forecast-primary-high">@TodayHigh</span><span class="sleep-forecast-primary-hl-sep">/</span><span class="sleep-forecast-primary-low">@TodayLow</span>
+        </div>
+      }
     </div>
   </div>
 
-  @* Sub-line — location · day · time (with optional stale indicator) *@
+  @* Sub-line — location · day · time (with optional stale indicator). When
+     Current is null we append " · forecast only" so the operator can tell at
+     a glance why the headline reads as today's high (HANDOFF §5.1). *@
   <div class="sleep-forecast-subline">
-    @if (Forecast.IsStale)
+    @if (PaneIsStale)
     {
       <span class="sleep-forecast-stale-icon material-symbols-rounded" aria-hidden="true">sync_problem</span>
     }
     <span class="sleep-forecast-subline-text">@_subLineText</span>
+    @if (!HasCurrent)
+    {
+      <span class="sleep-forecast-subline-fallback"> · forecast only</span>
+    }
   </div>
 
   @* Region 2 — forecast row. Omitted entirely when only one day is
@@ -144,6 +175,18 @@
 
   private WeatherDay Today => Forecast.Days[0];
 
+  private CurrentObservation? Current => Forecast.Current;
+  private bool HasCurrent => Current is not null;
+
+  /// <summary>
+  /// Whether the pane should render with the `.is-stale` opacity treatment.
+  /// True when EITHER the forecast cache is stale OR the observation is stale
+  /// (HANDOFF §5.1 "State G + IsStale"). Both states share the same single
+  /// dimming knob — the operator sees "this is old data" without needing to
+  /// distinguish which source went stale.
+  /// </summary>
+  private bool PaneIsStale => Forecast.IsStale || (Current is not null && Current.IsStale);
+
   private bool IsCelsius =>
     string.Equals(TemperatureUnit, "C", StringComparison.OrdinalIgnoreCase);
 
@@ -151,13 +194,22 @@
     string.Equals(TemperatureUnit, "both", StringComparison.OrdinalIgnoreCase);
 
   /// <summary>
-  /// Primary-block current-temperature numeral. In single-unit mode this is
-  /// the per-unit field directly; in "both" mode we fall back to Fahrenheit
-  /// per spec §3 State F (the 96 px "60°F · 16°C" string would blow the
-  /// column budget at 480 px — the user explicitly opted into "both" for the
-  /// cards, not for the primary readout).
+  /// Primary-block headline temperature numeral. When a current observation
+  /// is available it's the observed temperature (HANDOFF §5 State G); when
+  /// null it falls back to today's forecast high (State H — v2 behavior).
+  /// In "both" mode the 96 px numeral keeps to Fahrenheit per HANDOFF §5.2
+  /// (the 480 px "48°F · 9°C" string would blow the column budget).
   /// </summary>
-  private int CurrentTempDisplay => IsCelsius ? Today.HighC : Today.HighF;
+  private int PrimaryTempDisplay =>
+    HasCurrent
+      ? (IsCelsius ? Current!.TempC : Current!.TempF)
+      : (IsCelsius ? Today.HighC : Today.HighF);
+
+  private string PrimaryConditionDisplay =>
+    HasCurrent ? Current!.ConditionShort : Today.ConditionShort;
+
+  private string PrimaryIconKey =>
+    HasCurrent ? Current!.IconKey : Today.IconKey;
 
   private int TodayHigh => IsCelsius ? Today.HighC : Today.HighF;
   private int TodayLow => IsCelsius ? Today.LowC : Today.LowF;
@@ -194,9 +246,10 @@
     // Aria-live label — single sentence the screen reader can read end-to-end.
     // Regenerate only on data change to avoid spamming the SR on every swap-in
     // (per Designer §8 caching). The signature folds in everything visible.
-    // v2: include Today.IconKey so a same-day icon change retriggers the
-    // announcement (spec §9 "_lastAnnouncedSignature" note).
-    var signature = $"{Forecast.Zip}|{Forecast.GeneratedAtUtc.Ticks}|{Forecast.IsStale}|{TemperatureUnit}|{Forecast.Days.Count}|{Today.IconKey}";
+    // Current-conditions iteration: include Current.TempF, Current.ObservedAtUtc,
+    // and Current.IsStale so an updated observation retriggers the SR
+    // announcement (HANDOFF §5.5).
+    var signature = $"{Forecast.Zip}|{Forecast.GeneratedAtUtc.Ticks}|{Forecast.IsStale}|{TemperatureUnit}|{Forecast.Days.Count}|{Today.IconKey}|{Current?.TempF}|{Current?.ObservedAtUtc.Ticks}|{Current?.IsStale}";
     if (_lastAnnouncedSignature != signature)
     {
       _lastAnnouncedSignature = signature;
@@ -225,17 +278,41 @@
       sb.Append($"Forecast data is stale. ");
     }
 
-    // v2: lead with the current condition + temperature so the SR description
+    // Lead with the current condition + temperature so the SR description
     // mirrors the visual layout (primary block first, then the day-by-day
     // breakdown). Same Fahrenheit-default rule as the visible primary block
     // applies in "both" mode — the SR string stays compact.
+    //
+    // The word "Currently" is preserved in both Current-present and
+    // Current-null branches — to a screen-reader user, the distinction
+    // "observed vs. forecast" isn't actionable; what matters is "what should
+    // I expect right now if I walk outside" (HANDOFF §5.5).
     var unit = IsCelsius ? "Celsius" : "Fahrenheit";
-    sb.Append($"Currently {CurrentTempDisplay} degrees {unit}, {Today.ConditionShort} in {Forecast.LocationName}. ");
+    sb.Append($"Currently {PrimaryTempDisplay} degrees {unit}, {PrimaryConditionDisplay} in {Forecast.LocationName}. ");
 
-    foreach (var d in Forecast.Days)
+    // When the headline is the current observation, the per-day breakdown
+    // for today should lead with the H/L (Today's high/low) rather than
+    // duplicating the now-current condition. When the headline IS today's
+    // forecast (fallback), the per-day breakdown mirrors v2 behavior.
+    if (HasCurrent)
     {
-      var (high, low) = IsCelsius ? (d.HighC, d.LowC) : (d.HighF, d.LowF);
-      sb.Append($"{d.DayName} {d.ConditionShort}, high {high} {unit}, low {low} {unit}. ");
+      var (todayHigh, todayLow) = IsCelsius ? (Today.HighC, Today.LowC) : (Today.HighF, Today.LowF);
+      sb.Append($"Today's high {todayHigh}, low {todayLow}. ");
+      // Skip Days[0] in the per-day breakdown — we just covered it.
+      for (var i = 1; i < Forecast.Days.Count; i++)
+      {
+        var d = Forecast.Days[i];
+        var (high, low) = IsCelsius ? (d.HighC, d.LowC) : (d.HighF, d.LowF);
+        sb.Append($"{d.DayName} {d.ConditionShort}, high {high} {unit}, low {low} {unit}. ");
+      }
+    }
+    else
+    {
+      foreach (var d in Forecast.Days)
+      {
+        var (high, low) = IsCelsius ? (d.HighC, d.LowC) : (d.HighF, d.LowF);
+        sb.Append($"{d.DayName} {d.ConditionShort}, high {high} {unit}, low {low} {unit}. ");
+      }
     }
     return sb.ToString();
   }
