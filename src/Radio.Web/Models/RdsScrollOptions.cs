@@ -1,9 +1,10 @@
 namespace Radio.Web.Models;
 
 /// <summary>
-/// Strongly-typed binding for the <c>Radio:Rds</c> configuration section.
-/// Controls the behaviour of the accumulating RDS RadioText ticker that lives
-/// beneath the frequency well in <c>RadioControlPanel</c>.
+/// Strongly-typed binding for the RDS ticker settings under the <c>Radio</c>
+/// configuration section. Controls the behaviour of the accumulating RDS
+/// RadioText ticker that lives beneath the frequency well in
+/// <c>RadioControlPanel</c>.
 /// </summary>
 /// <remarks>
 /// Read by the Razor component via <see cref="Microsoft.Extensions.Options.IOptionsMonitor{TOptions}"/>
@@ -17,7 +18,19 @@ public class RdsScrollOptions
   /// Configuration section name. Bind with
   /// <c>builder.Services.Configure&lt;RdsScrollOptions&gt;(builder.Configuration.GetSection(RdsScrollOptions.SectionName))</c>.
   /// </summary>
-  public const string SectionName = "Radio:Rds";
+  /// <remarks>
+  /// Bound to "Radio" (not "Radio:Rds" as the spec §5 originally hinted) because
+  /// the existing Web → API config save path round-trips a flat <c>RadioConfigDto</c>
+  /// with one SQLite key per property (e.g. <c>radio:DefaultFMFrequencyMHz</c>),
+  /// not a nested object. Putting the three new RDS keys directly on
+  /// RadioConfigDto means they land at <c>radio:RtBufferMaxChars</c> etc., which
+  /// this section name picks up via the standard .NET configuration binder. The
+  /// alternative — carving out a nested <c>Rds</c> sub-object — would require
+  /// server-side ConfigurationController changes that are out of scope for this
+  /// PR. The end user observes the same UI; only the on-disk key layout differs
+  /// from the §5 hint.
+  /// </remarks>
+  public const string SectionName = "Radio";
 
   /// <summary>
   /// Maximum buffer length in characters. Once exceeded, the oldest characters
