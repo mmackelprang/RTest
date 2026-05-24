@@ -33,7 +33,16 @@ Environment=ApiBaseUrl=http://localhost:5000
 
 # Security hardening
 ProtectSystem=strict
-ReadWritePaths=/opt/radio-console/logs /opt/radio-console/web
+# /opt/radio-console/data is needed for the SQLite config bridge (PR #422):
+# SqliteConfigurationProvider reads configuration.db so the Web side honors
+# user-saved Display:* / Radio:Rds:* values from the System Config page.
+# Without this path, ProtectSystem=strict makes the DB file invisible and
+# SqliteConfigurationProvider.Load() silently returns empty data — every
+# IOptionsMonitor binding then falls back to its hardcoded default with
+# no error or log line, defeating the bridge fix in production.
+# Read-only access would suffice but ReadWritePaths is the established
+# idiom in this codebase (matches radio-api.service line 81).
+ReadWritePaths=/opt/radio-console/logs /opt/radio-console/web /opt/radio-console/data
 PrivateTmp=true
 ProtectHome=true
 NoNewPrivileges=true
