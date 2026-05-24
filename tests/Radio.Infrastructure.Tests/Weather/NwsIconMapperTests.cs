@@ -121,4 +121,33 @@ public class NwsIconMapperTests
   {
     Assert.Equal(expected, NwsIconMapper.MapToIconKey(url));
   }
+
+  /// <summary>
+  /// Smoke test for the current-conditions iteration (HANDOFF
+  /// -sleep-weather-current-conditions.md §9.2). NWS observation icon URLs
+  /// follow the SAME URL shape as forecast period icons, so the existing
+  /// mapper should "just work" — but a regression where the observation
+  /// integration accidentally diverges (e.g. a future refactor splits the
+  /// path-parsing logic) would silently render "unknown" cloud_off glyphs on
+  /// the live current-conditions readout. This table pins a dozen real
+  /// observation icon URLs at the mapper level so any drift surfaces in CI
+  /// rather than during live observation.
+  /// </summary>
+  [Theory]
+  [InlineData("https://api.weather.gov/icons/land/day/few?size=medium", "sunny")]
+  [InlineData("https://api.weather.gov/icons/land/night/few?size=medium", "clear-night")]
+  [InlineData("https://api.weather.gov/icons/land/day/sct?size=medium", "mostly-sunny")]
+  [InlineData("https://api.weather.gov/icons/land/night/sct?size=medium", "partly-cloudy-night")]
+  [InlineData("https://api.weather.gov/icons/land/day/bkn?size=medium", "partly-cloudy")]
+  [InlineData("https://api.weather.gov/icons/land/night/ovc?size=medium", "cloudy")]
+  [InlineData("https://api.weather.gov/icons/land/day/rain?size=medium", "rain")]
+  [InlineData("https://api.weather.gov/icons/land/night/rain_light?size=medium", "rain-light")]
+  [InlineData("https://api.weather.gov/icons/land/day/tsra?size=medium", "thunderstorm")]
+  [InlineData("https://api.weather.gov/icons/land/night/fog?size=medium", "fog")]
+  [InlineData("https://api.weather.gov/icons/land/day/wind_few?size=medium", "wind")]
+  [InlineData("https://api.weather.gov/icons/land/day/snow?size=medium", "snow")]
+  public void MapToIconKey_NwsObservationIcons_ReturnsExpectedKeys(string url, string expected)
+  {
+    Assert.Equal(expected, NwsIconMapper.MapToIconKey(url));
+  }
 }
