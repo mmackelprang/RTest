@@ -985,8 +985,9 @@ public class PhoneCallStateDto
   public string CallState { get; set; } = "Idle";
   public string? DialedNumber { get; set; }
   public string? IncomingNumber { get; set; }
-  public string? CallerName { get; set; }
-  public string? Duration { get; set; }
+  // CallerName and Duration intentionally absent — the RotaryPhone /api/phone/status
+  // controller has never populated them (anonymous response with only the three fields
+  // above). Re-add only if the server starts emitting them.
 }
 
 public record ContactDto
@@ -1052,8 +1053,12 @@ public class PbapContactDto
 
 public class GvBridgeStatusDto
 {
-  public bool ExtensionConnected { get; set; }
-  public string? ExtensionVersion { get; set; }
+  // Server shape (post-SIP-WSS migration, March 2026):
+  //   { available: bool, activeMode: string }
+  // ExtensionConnected/ExtensionVersion were dropped when the Chrome extension
+  // path was replaced by SIP-over-WebSocket. Two-badge UI (SipRegistered +
+  // CookiesValid) is gated on RotaryPhone exposing those fields — Phase B.
+  public bool Available { get; set; }
   public string ActiveMode { get; set; } = "";
 }
 
@@ -1073,7 +1078,18 @@ public class GvSmsNotificationDto
   public string FromNumber { get; set; } = "";
   public string? Body { get; set; }
   public DateTime ReceivedAt { get; set; }
-  public string Type { get; set; } = "Sms"; // "Sms" or "MissedCall"
+  // Server serializes the SmsType enum as int (System.Text.Json default — no
+  // JsonStringEnumConverter is registered on RotaryPhone). Use a matching
+  // enum so deserialization succeeds for both numeric and string payloads.
+  public GvSmsType Type { get; set; } = GvSmsType.Sms;
+}
+
+// Must match the ordinal values of RotaryPhoneController.GVTrunk.Models.SmsType
+// (Sms = 0, MissedCall = 1).
+public enum GvSmsType
+{
+  Sms = 0,
+  MissedCall = 1
 }
 
 // GV Trunk DTOs (calls RotaryPhone.API /api/gvtrunk)

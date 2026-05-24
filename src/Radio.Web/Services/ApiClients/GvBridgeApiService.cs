@@ -7,7 +7,9 @@ namespace Radio.Web.Services.ApiClients;
 
 /// <summary>
 /// HTTP client for RotaryPhone.API GV Bridge endpoints.
-/// Provides access to Chrome extension status, connection mode switching, and SMS.
+/// Provides GV availability status and call-adapter mode switching. SMS lives on
+/// the GV Trunk side (<see cref="GvTrunkApiService"/>) — there are no SMS routes
+/// under /api/gvbridge/* and there never have been.
 /// </summary>
 public class GvBridgeApiService
 {
@@ -82,33 +84,4 @@ public class GvBridgeApiService
     }
   }
 
-  public async Task<List<GvSmsNotificationDto>?> GetRecentSmsAsync(CancellationToken ct = default)
-  {
-    try
-    {
-      return await _httpClient.GetFromJsonAsync<List<GvSmsNotificationDto>>(
-        "/api/gvbridge/sms", JsonOptions, ct);
-    }
-    catch (Exception ex)
-    {
-      _logger.LogError(ex, "Failed to get recent SMS");
-      return null;
-    }
-  }
-
-  public async Task<bool> SendSmsAsync(string to, string body, CancellationToken ct = default)
-  {
-    try
-    {
-      var content = new StringContent(
-        JsonSerializer.Serialize(new { to, body }), Encoding.UTF8, "application/json");
-      var response = await _httpClient.PostAsync("/api/gvbridge/sms/send", content, ct);
-      return response.IsSuccessStatusCode;
-    }
-    catch (Exception ex)
-    {
-      _logger.LogError(ex, "Failed to send SMS to {To}", to);
-      return false;
-    }
-  }
 }

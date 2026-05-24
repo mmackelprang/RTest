@@ -3,7 +3,6 @@
 @inject PhoneHubService PhoneHub
 @inject GvBridgeApiService GvBridgeApi
 @inject GvTrunkApiService GvTrunkApi
-@inject GvBridgeHubService GvBridgeHub
 @inject GvTrunkHubService GvTrunkHub
 @inject NotificationService NotificationService
 @inject PbapApiService PbapApi
@@ -84,25 +83,24 @@
                     Size="ButtonSize.Small"
                     Click="@(() => SwitchModeAsync("SipTrunk"))"
                     Disabled="@_switchingMode" />
-                  <RadzenButton Text="GV Browser"
+                  <RadzenButton Text="GV API"
                     Icon="language"
-                    ButtonStyle="@(_gvActiveMode == "GVBrowser" ? ButtonStyle.Primary : ButtonStyle.Light)"
+                    ButtonStyle="@(_gvActiveMode == "GVApi" ? ButtonStyle.Primary : ButtonStyle.Light)"
                     Size="ButtonSize.Small"
-                    Click="@(() => SwitchModeAsync("GVBrowser"))"
+                    Click="@(() => SwitchModeAsync("GVApi"))"
                     Disabled="@_switchingMode" />
                 </div>
               </div>
               <div class="status-divider"></div>
-              @* GV Bridge status *@
+              @* GV Bridge status — single Available/Unavailable badge sourced
+                 from the post-SIP-WSS server shape ({ available, activeMode }).
+                 SipRegistered + CookiesValid sub-states will land once RotaryPhone
+                 exposes them (Phase B). *@
               <div class="status-column">
-                <span class="status-column-label">CHROME EXTENSION</span>
+                <span class="status-column-label">GV API</span>
                 <RadzenBadge
-                  BadgeStyle="@(_gvBridgeConnected ? BadgeStyle.Success : BadgeStyle.Danger)"
-                  Text="@(_gvBridgeConnected ? "Connected" : "Disconnected")" />
-                @if (_gvExtensionVersion != null)
-                {
-                  <span class="status-detail">v@(_gvExtensionVersion)</span>
-                }
+                  BadgeStyle="@(_gvBridgeAvailable ? BadgeStyle.Success : BadgeStyle.Warning)"
+                  Text="@(_gvBridgeAvailable ? "Available" : "Unavailable")" />
               </div>
               <div class="status-divider"></div>
               @* GV Trunk status *@
@@ -138,10 +136,6 @@
                   <div class="call-info">
                     <RadzenIcon Icon="call_received" />
                     <span class="phone-number">@_callState.IncomingNumber</span>
-                    @if (_callState.CallerName != null)
-                    {
-                      <span class="caller-name">@_callState.CallerName</span>
-                    }
                   </div>
                 }
                 else if (_callState.CallState == "InCall")
@@ -149,10 +143,6 @@
                   <div class="call-info">
                     <RadzenIcon Icon="phone_in_talk" />
                     <span class="phone-number">@(_callState.IncomingNumber ?? _callState.DialedNumber ?? "Unknown")</span>
-                    @if (_callState.Duration != null)
-                    {
-                      <span class="call-duration">@_callState.Duration</span>
-                    }
                   </div>
                 }
                 else if (_callState.CallState == "Dialing" && _callState.DialedNumber != null)
@@ -402,8 +392,7 @@
 
   // GV Bridge/Trunk state
   private string _gvActiveMode = "";
-  private bool _gvBridgeConnected;
-  private string? _gvExtensionVersion;
+  private bool _gvBridgeAvailable;
   private bool _gvTrunkRegistered;
   private bool _switchingMode;
 
@@ -427,8 +416,7 @@
     var bridgeStatus = gvBridgeTask.Result;
     if (bridgeStatus != null)
     {
-      _gvBridgeConnected = bridgeStatus.ExtensionConnected;
-      _gvExtensionVersion = bridgeStatus.ExtensionVersion;
+      _gvBridgeAvailable = bridgeStatus.Available;
       _gvActiveMode = bridgeStatus.ActiveMode;
     }
 
@@ -447,13 +435,12 @@
     }
     RebuildMergedContacts();
 
-    // Subscribe to SignalR events
+    // Subscribe to SignalR events. (RotaryPhone has no /hubs/gvbridge — GV-mode
+    // changes are picked up via the 30s status poll in PollStatusAsync.)
     PhoneHub.CallStateChanged += OnCallStateChanged;
     PhoneHub.IncomingCall += OnIncomingCall;
     PhoneHub.CallHistoryUpdated += OnCallHistoryUpdated;
     PhoneHub.SystemStatusChanged += OnSystemStatusChanged;
-    GvBridgeHub.ExtensionConnectionChanged += OnExtensionConnectionChanged;
-    GvBridgeHub.ModeChanged += OnModeChanged;
     GvTrunkHub.RegistrationChanged += OnRegistrationChanged;
 
     // Poll for status every 5 seconds as fallback
@@ -482,8 +469,7 @@
     var bridgeStatus = bridgeTask.Result;
     if (bridgeStatus != null)
     {
-      _gvBridgeConnected = bridgeStatus.ExtensionConnected;
-      _gvExtensionVersion = bridgeStatus.ExtensionVersion;
+      _gvBridgeAvailable = bridgeStatus.Available;
       _gvActiveMode = bridgeStatus.ActiveMode;
     }
     var trunkStatus = trunkTask.Result;
@@ -566,21 +552,8 @@
     });
   }
 
-  // GV Bridge/Trunk event handlers
-
-  private void OnExtensionConnectionChanged(bool connected)
-  {
-    if (_disposed) return;
-    _gvBridgeConnected = connected;
-    _ = InvokeAsync(StateHasChanged);
-  }
-
-  private void OnModeChanged(string mode)
-  {
-    if (_disposed) return;
-    _gvActiveMode = mode;
-    _ = InvokeAsync(StateHasChanged);
-  }
+  // GV Trunk event handlers. (GV Bridge has no hub; mode changes are surfaced
+  // by the polling fallback in PollStatusAsync.)
 
   private void OnRegistrationChanged(bool registered)
   {
@@ -818,8 +791,6 @@
     PhoneHub.IncomingCall -= OnIncomingCall;
     PhoneHub.CallHistoryUpdated -= OnCallHistoryUpdated;
     PhoneHub.SystemStatusChanged -= OnSystemStatusChanged;
-    GvBridgeHub.ExtensionConnectionChanged -= OnExtensionConnectionChanged;
-    GvBridgeHub.ModeChanged -= OnModeChanged;
     GvTrunkHub.RegistrationChanged -= OnRegistrationChanged;
   }
 }
