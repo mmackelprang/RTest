@@ -441,6 +441,33 @@
                 <RadzenNumeric TValue="int" @bind-Value="_radioConfig.DefaultDeviceVolume" Min="0" Max="100" Placeholder="Default Device Volume" Style="width:100%" />
                 <small>Radio hardware volume (0-100)</small>
               </RadzenColumn>
+
+              @* HANDOFF-rds-accumulating-scroll §5 — RDS RadioText ticker
+                 settings live under the existing Radio tab so all "how the
+                 radio behaves" tunables stay co-located. The sub-heading row
+                 separates this group visually from the tuning / scan settings
+                 above. *@
+              <RadzenColumn Size="12">
+                <div style="margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--rz-border, #ddd);
+                            font-family: var(--font-mono, monospace); font-size: 0.75rem;
+                            letter-spacing: 0.12em; text-transform: uppercase;
+                            color: var(--text-low, #888);">
+                  RDS RADIOTEXT TICKER
+                </div>
+              </RadzenColumn>
+              <RadzenColumn Size="12" SizeMD="4">
+                <RadzenNumeric TValue="int" @bind-Value="_radioConfig.RtBufferMaxChars" Min="64" Max="2048" Step="32" Placeholder="Max length (chars)" Style="width:100%" />
+                <small>Rolling buffer cap (64-2048)</small>
+              </RadzenColumn>
+              <RadzenColumn Size="12" SizeMD="4">
+                <RadzenNumeric TValue="int" @bind-Value="_radioConfig.RtScrollSpeedPxPerSec" Min="10" Max="200" Step="5" Placeholder="Scroll speed (px/s)" Style="width:100%" />
+                <small>Marquee speed (10-200 px/s)</small>
+              </RadzenColumn>
+              <RadzenColumn Size="12" SizeMD="4">
+                <RadzenTextBox @bind-Value="_radioConfig.RtChunkSeparator" Placeholder="Chunk separator" Style="width:100%" MaxLength="8" />
+                <small>Between chunks (1-8 chars)</small>
+              </RadzenColumn>
+
               <RadzenColumn Size="12">
                 <RadzenButton Variant="Variant.Filled" ButtonStyle="ButtonStyle.Primary" Click="SaveRadioConfigAsync"
                               Icon="save" Disabled="@_isSaving" Text="Save Radio Settings" />

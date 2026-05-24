@@ -1,7 +1,10 @@
 @rendermode InteractiveServer
 @using Radio.Web.Services.ApiClients
+@using Radio.Web.Services.Rds
+@using Microsoft.Extensions.Options
 @inject RadioApiService RadioApi
 @inject AudioStateHubService HubService
+@inject IOptionsMonitor<RdsScrollOptions> RdsScrollOptionsMonitor
 @inject ILogger<RadioControlPanel> Logger
 @inject NotificationService NotificationService
 @implements IAsyncDisposable
@@ -90,13 +93,15 @@
         </div>
       </div>
 
-      <!-- RDS RadioText (RT) line — one-line ellipsis below the frequency
-           well (handoff §P1·1 step 4). Hidden when the station doesn't
-           broadcast RT or RT hasn't been confirmed yet. -->
-      @if (!string.IsNullOrEmpty(_radioState.RdsRadioText))
-      {
-        <div class="rcp-rds-rt" title="@_radioState.RdsRadioText">@_radioState.RdsRadioText</div>
-      }
+      <!-- RDS RadioText (RT) line — accumulating rolling scroll marquee
+           below the frequency well. Replaces the legacy one-line ellipsis
+           with a rolling 256-char (default) buffer that scrolls right-to-
+           left at 40 px/s (defaults configurable via Radio:Rds in System
+           Config). The marquee collapses entirely when the buffer is empty
+           (no station broadcasting RT, or just-tuned and waiting for the
+           first chunk). HANDOFF-rds-accumulating-scroll. -->
+      <RdsScrollMarquee Text="@_rdsBuffer.Text"
+                        ScrollSpeedPxPerSec="@_rdsScrollOptions.RtScrollSpeedPxPerSec" />
 
       <!-- Signal strength meter (PR 1 of Radio Controller Polish arc) -->
       @if (_radioState.SignalStrength.HasValue)
@@ -901,6 +906,16 @@
   private List<RadioPresetDto>? _presets;
   private IEnumerable<Radio.Core.Models.RadioBandModel> _availableBands = Enumerable.Empty<Radio.Core.Models.RadioBandModel>();
 
+  // HANDOFF-rds-accumulating-scroll — client-side rolling buffer for RDS
+  // RadioText. Reconstructed when MaxChars / Separator change via the
+  // IOptionsMonitor change-token (SQLite config bridge, PR #298). The buffer
+  // is mutated from HandleRadioStateChanged after first calling
+  // ResetOnTuneChange — the order matters because a station change must
+  // clear before the new chunk appends.
+  private RdsScrollOptions _rdsScrollOptions = new();
+  private RdsAccumulatingScrollBuffer _rdsBuffer = new(256, " • ");
+  private IDisposable? _rdsScrollOptionsListener;
+
   private bool _isFrequencyDialogOpen;
   private double _newFrequency = 88.0;
   private bool _isSavePresetDialogOpen;
@@ -936,11 +951,46 @@
 
   protected override async Task OnInitializedAsync()
   {
+    // HANDOFF-rds-accumulating-scroll — seed the buffer with the current
+    // options before any state hydration so the very first RT chunk goes
+    // into a correctly-sized buffer with the configured separator.
+    _rdsScrollOptions = RdsScrollOptionsMonitor.CurrentValue;
+    _rdsBuffer = new RdsAccumulatingScrollBuffer(
+      _rdsScrollOptions.RtBufferMaxChars,
+      _rdsScrollOptions.RtChunkSeparator);
+
+    // Listen for config-bridge change tokens (SQLite store writes) so the
+    // user's UI changes take effect without a page reload. A reconfigure
+    // creates a fresh buffer — the buffer's accumulation state is bound to
+    // its size cap, so we don't try to preserve partial content across
+    // re-sizes. The visible effect on the user is "buffer briefly empties
+    // then fills again with the next RT chunk" — acceptable for a settings
+    // change the user just made.
+    _rdsScrollOptionsListener = RdsScrollOptionsMonitor.OnChange(opts =>
+    {
+      _rdsScrollOptions = opts;
+      _rdsBuffer = new RdsAccumulatingScrollBuffer(
+        opts.RtBufferMaxChars,
+        opts.RtChunkSeparator);
+      _ = InvokeAsync(StateHasChanged);
+    });
+
     // Radio state must load BEFORE presets so LoadPresetsAsync can band-filter
     // the result (PR 3 of the Radio Controller Polish arc). Bands run in
     // parallel because they don't depend on the state.
     await Task.WhenAll(LoadRadioStateAsync(), LoadBandsAsync());
     await LoadPresetsAsync();
+
+    // HANDOFF-rds-accumulating-scroll §6.b — seed the station-identity tracker
+    // and the buffer with whatever the initial GET /api/radio/state returned.
+    // The buffer's first ResetOnTuneChange call won't clear anything (no prior
+    // identity); subsequent calls catch genuine station changes.
+    if (_radioState != null)
+    {
+      _rdsBuffer.ResetOnTuneChange(_radioState.Band, _radioState.Frequency, _radioState.RdsPi);
+      _rdsBuffer.AppendChunk(_radioState.RdsRadioText);
+    }
+
     HubService.RadioStateChanged += HandleRadioStateChanged;
   }
 
@@ -1005,6 +1055,14 @@
     // change doesn't require a re-fetch — the empty-slot placeholder
     // re-evaluates against the new band's count on the next render.
     _radioState = dto;
+
+    // HANDOFF-rds-accumulating-scroll — order matters: reset BEFORE append.
+    // If the station changed, the buffer's dedup tracker resets so the first
+    // chunk on the new station can't accidentally match the last chunk on
+    // the prior station.
+    _rdsBuffer.ResetOnTuneChange(dto.Band, dto.Frequency, dto.RdsPi);
+    _rdsBuffer.AppendChunk(dto.RdsRadioText);
+
     await InvokeAsync(StateHasChanged);
   }
 
@@ -1569,6 +1627,8 @@
   public async ValueTask DisposeAsync()
   {
     HubService.RadioStateChanged -= HandleRadioStateChanged;
+    _rdsScrollOptionsListener?.Dispose();
+    _rdsScrollOptionsListener = null;
     await Task.CompletedTask;
   }
 }

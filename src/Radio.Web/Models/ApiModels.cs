@@ -725,6 +725,40 @@ public class RadioConfigDto
 
   public int ScanStepDelayMs { get; set; } = 100;
   public int DefaultDeviceVolume { get; set; } = 50;
+
+  // HANDOFF-rds-accumulating-scroll §5 — RDS RadioText ticker settings.
+  // Defaults must match RdsScrollOptions in src/Radio.Web/Models so a save
+  // round-trip from the System Config UI never changes the live behaviour
+  // unless the user actually edits a value. Validation ranges are
+  // enforced both client-side (the RadzenNumeric Min/Max attributes in
+  // SystemConfigPage) and server-side (the configuration store accepts
+  // whatever lands; out-of-band values get clamped by the buffer's own
+  // Math.Max(8, ...) floor in RdsAccumulatingScrollBuffer).
+
+  /// <summary>
+  /// Rolling RDS RT buffer max length in characters. Default 256.
+  /// Range 64–2048 per spec §5.
+  /// </summary>
+  [System.ComponentModel.DataAnnotations.Range(64, 2048,
+    ErrorMessage = "RtBufferMaxChars must be between 64 and 2048.")]
+  public int RtBufferMaxChars { get; set; } = 256;
+
+  /// <summary>
+  /// RDS ticker scroll speed in pixels per second. Default 40.
+  /// Range 10–200 per spec §5.
+  /// </summary>
+  [System.ComponentModel.DataAnnotations.Range(10, 200,
+    ErrorMessage = "RtScrollSpeedPxPerSec must be between 10 and 200.")]
+  public int RtScrollSpeedPxPerSec { get; set; } = 40;
+
+  /// <summary>
+  /// Inter-chunk separator string. Default " • " (space, U+2022, space).
+  /// 1–8 characters per spec §5. The buffer treats null/empty as a single
+  /// space, but the UI shouldn't let the user save that.
+  /// </summary>
+  [System.ComponentModel.DataAnnotations.StringLength(8, MinimumLength = 1,
+    ErrorMessage = "RtChunkSeparator must be 1–8 characters.")]
+  public string RtChunkSeparator { get; set; } = " • ";
 }
 
 public class FilePlayerConfigDto

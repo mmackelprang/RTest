@@ -1,0 +1,96 @@
+@* RdsScrollMarquee — accumulating RDS RadioText ticker.
+
+   Renders the rolling buffer below the frequency well in RadioControlPanel.
+   When Text is empty, renders nothing (matches existing rcp-rds-rt
+   collapse-when-empty behaviour). Otherwise renders a single-line marquee
+   driven by a pure CSS @keyframes translateX animation.
+
+   Spec: HANDOFF-rds-accumulating-scroll §3, §4, §7
+*@
+
+@if (!string.IsNullOrEmpty(Text))
+{
+  @* The static-fit threshold (HANDOFF §8 q8) — when the text is short
+     enough that the natural width fits inside the well (max-width 420 px
+     ≈ 7 px/char in 11 px mono with 0.04em letter-spacing), skip the
+     animation entirely and render static centered text. Less twitchy on
+     stations with a single short tagline. *@
+  var isStatic = ApproximateTextWidthPx() <= ContainerMaxWidthPx;
+  var durationSeconds = ComputeScrollDurationSeconds();
+
+  <div class="rcp-rds-rt-scroll @(isStatic ? "is-static" : string.Empty)"
+       tabindex="0"
+       aria-label="RDS RadioText"
+       title="@Text">
+    @* Visible scrolling track — hidden from assistive tech (the mirror
+       below carries the readable copy). *@
+    <div class="rcp-rds-rt-track"
+         aria-hidden="true"
+         style="@($"--scroll-duration: {durationSeconds.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)}s;")">
+      @Text
+    </div>
+
+    @* SR-only mirror — aria-live="polite" so screen readers announce buffer
+       updates without interrupting the user. Debouncing happens upstream in
+       the parent component (caller passes pre-debounced Text). *@
+    <div class="rcp-rds-rt-sr-only" aria-live="polite" aria-atomic="true">
+      @Text
+    </div>
+  </div>
+}
+
+@code {
+  /// <summary>
+  /// Current buffer text rendered into the marquee. Empty / null collapses
+  /// the entire component (no markup).
+  /// </summary>
+  [Parameter, EditorRequired] public string? Text { get; set; }
+
+  /// <summary>
+  /// Marquee scroll speed in pixels per second. Default 40 matches the
+  /// <see cref="Models.RdsScrollOptions"/> default; the parent reads from
+  /// IOptionsMonitor and passes through, so SQLite-store writes take effect
+  /// on the next render.
+  /// </summary>
+  [Parameter] public int ScrollSpeedPxPerSec { get; set; } = 40;
+
+  /// <summary>
+  /// Container width used to compute scroll duration and the static-fit
+  /// threshold. Defaults to 420 px to match the frequency well's max-width;
+  /// override only if the surrounding chrome changes.
+  /// </summary>
+  [Parameter] public int ContainerMaxWidthPx { get; set; } = 420;
+
+  /// <summary>
+  /// Approximate per-character width in pixels. The CSS uses 11 px mono with
+  /// 0.04em letter-spacing → ~7 px/char for ASCII RDS text. Used by both the
+  /// static-fit check and the scroll-duration computation. Overridable for
+  /// tests; production callers stick with the default.
+  /// </summary>
+  [Parameter] public double ApproximateCharWidthPx { get; set; } = 7.0;
+
+  /// <summary>
+  /// Approximate visual width of the current Text, in pixels. Used to decide
+  /// whether to scroll or render static-centered.
+  /// </summary>
+  private double ApproximateTextWidthPx()
+  {
+    return (Text?.Length ?? 0) * ApproximateCharWidthPx;
+  }
+
+  /// <summary>
+  /// Compute the CSS animation duration so the scroll speed (px/s) stays
+  /// constant regardless of buffer length. Formula:
+  ///   duration = (containerWidth + textWidth) / speed
+  /// Clamped to a minimum of 4 s so the animation never feels frantic when
+  /// the buffer is very short. Falls back to a safe positive value when
+  /// ScrollSpeedPxPerSec is misconfigured to 0 or negative.
+  /// </summary>
+  private double ComputeScrollDurationSeconds()
+  {
+    var safeSpeed = Math.Max(1, ScrollSpeedPxPerSec);
+    var travelPx = ContainerMaxWidthPx + ApproximateTextWidthPx();
+    var seconds = travelPx / safeSpeed;
+    return Math.Max(4.0, seconds);
+  }
+}
