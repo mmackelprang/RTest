@@ -1,13 +1,19 @@
 @page "/sleep"
 @layout Radio.Web.Components.Layout.EmptyLayout
 @using Microsoft.Extensions.Options
+@using Radio.Core.Configuration
+@using Radio.Core.Models
+@using Radio.Web.Components.Shared
 @using Radio.Web.Formatting
 @using Radio.Web.Models
+@using Radio.Web.Services.ApiClients
 @inject NavigationManager Nav
 @inject SystemApiService SystemApi
 @inject AudioApiService AudioApi
 @inject AudioStateHubService AudioState
+@inject WeatherApiService WeatherApi
 @inject IOptionsMonitor<DisplayOptions> DisplayOptionsMonitor
+@inject IOptionsMonitor<WeatherDisplayOptions> WeatherOptionsMonitor
 @inject ILogger<Sleep> Logger
 @implements IAsyncDisposable
 
@@ -20,12 +26,20 @@
     - idle-dimmer.js navigating to /sleep after the idle timeout fires.
     - A server-side push when SleepStateChanged(true) arrives on another tab.
 
-  The screen renders the LED clock, faint album art, current track metadata,
-  and a "tap anywhere to wake" hint. Any tap (or keypress for kiosk a11y)
-  calls SystemApi.SetSleepAsync(false) and navigates home. If the server
-  pushes SleepStateChanged(false) while we're parked on /sleep (because
-  another control flipped it), we also navigate home so this route never
-  lingers behind a woken system.
+  The screen alternates two compositions inside the same anti-burn-in drift
+  wrapper:
+    - State A: LED clock + faint album art + current track metadata.
+    - State B: 3-day NWS weather forecast pane (when available).
+  The swap happens on each ~60 s drift-timer tick — 50/50 cadence per
+  HANDOFF-sleep-mode-weather-forecast.md §3. When the forecast isn't
+  available (Display:Weather:Enabled=false, ZIP unresolved, NWS unreachable
+  + no cache) the swap falls back to the clock so the user never sees a
+  blank pane.
+
+  Any tap (or keypress for kiosk a11y) calls SystemApi.SetSleepAsync(false)
+  and navigates home. If the server pushes SleepStateChanged(false) while
+  we're parked on /sleep (because another control flipped it), we also
+  navigate home so this route never lingers behind a woken system.
 *@
 
 <div class="sleep-screen"
@@ -37,37 +51,53 @@
   <div class="sleep-screen-glow" aria-hidden="true"></div>
 
   @*
-    Anti-burn-in container — translates the clock cluster off-center by a small,
-    slowly-drifting offset so any given pixel never sees the LED segments for
-    more than ~60 s before they shift. The dim color rules live in CSS so
-    `.sleep-screen.is-dimmed` (always on while we're on /sleep) governs both
-    opacity AND glow without touching layout. The shift uses CSS variables
-    --sleep-shift-x / --sleep-shift-y set inline from C# (`_shiftStyle`); CSS
-    handles the 3-second eased transition between values. Album art and track
-    metadata ride along inside this wrapper so the whole composition drifts as
-    one block — keeps the visual relationship intact and avoids the "scattered
-    elements" look you'd get if only the clock moved.
+    Anti-burn-in container — translates the inner composition off-center by a
+    small, slowly-drifting offset so any given pixel never sees the LED
+    segments (or the forecast cards) for more than ~60 s before they shift.
+    The shift uses CSS variables --sleep-shift-x / --sleep-shift-y set inline
+    from C# (`_shiftStyle`); CSS handles the 3-second eased transition between
+    values. Clock + art + track metadata + forecast pane all ride inside this
+    same wrapper so the whole composition drifts as one block — keeps the
+    visual relationship intact and avoids the "scattered elements" look you'd
+    get if the swap happened mid-translate.
   *@
   <div class="sleep-screen-drift" style="@_shiftStyle">
-    @if (_hasValidAlbumArt && !string.IsNullOrEmpty(_albumArtUrl))
+    @if (_isShowingForecast && _forecast is not null && _forecast.Days.Count > 0)
     {
-      <img class="sleep-screen-art" src="@_albumArtUrl" alt="" />
+      @* Forecast composition. Album art + track metadata are intentionally
+         suppressed in this state — the forecast pane is dense enough that
+         adding them would crowd the safe area and break the "single focal
+         element" feel the sleep aesthetic depends on. *@
+      <SleepForecastPane Forecast="_forecast"
+                         TemperatureUnit="@_currentTempUnit"
+                         FormatClock="FormatFooterClock" />
     }
-
-    @* PR A #16: dropped redundant `.font-led` class; that rule is scoped
-       to `.cluster-value .font-led` and never matched on `/sleep`. The
-       LED font is set directly via `.sleep-screen-clock`. *@
-    <div class="sleep-screen-clock">@_clockText</div>
-
-    @if (!string.IsNullOrEmpty(_title))
+    else
     {
-      <div class="sleep-screen-track">
-        <span class="sleep-screen-title">@_title</span>
-        @if (!string.IsNullOrEmpty(_artist) && _artist != "--")
-        {
-          <span class="sleep-screen-artist">@_artist</span>
-        }
-      </div>
+      @* Clock composition — the existing State A. Identical to the pre-PR
+         layout when _isShowingForecast is false (or whenever the forecast
+         is null, per the §6.A failure-mode contract: clock-only fallback,
+         no blank slot). *@
+      @if (_hasValidAlbumArt && !string.IsNullOrEmpty(_albumArtUrl))
+      {
+        <img class="sleep-screen-art" src="@_albumArtUrl" alt="" />
+      }
+
+      @* PR A #16: dropped redundant `.font-led` class; that rule is scoped
+         to `.cluster-value .font-led` and never matched on `/sleep`. The
+         LED font is set directly via `.sleep-screen-clock`. *@
+      <div class="sleep-screen-clock">@_clockText</div>
+
+      @if (!string.IsNullOrEmpty(_title))
+      {
+        <div class="sleep-screen-track">
+          <span class="sleep-screen-title">@_title</span>
+          @if (!string.IsNullOrEmpty(_artist) && _artist != "--")
+          {
+            <span class="sleep-screen-artist">@_artist</span>
+          }
+        </div>
+      }
     }
   </div>
 
@@ -84,6 +114,21 @@
   private Timer? _driftTimer;
   private bool _disposed;
 
+  // Weather alternation state. The page starts on the clock (initial-state
+  // choice per HANDOFF §3 — matches the first-impression sleep aesthetic) and
+  // flips to the forecast on the first drift tick. _forecast is hydrated by
+  // FetchForecastAsync called lazily — only when the forecast side of the
+  // cycle is about to render (so we don't hit NWS on a sleep entry that's
+  // about to be a 10-second tap-to-wake).
+  private bool _isShowingForecast;
+  private WeatherForecast? _forecast;
+  private string _currentTempUnit = "F";
+  private bool _firstNullForecastLogged;
+  // Reentry guard for the lazy forecast fetch. The drift timer fires on a
+  // ThreadPool thread; without this a slow NWS call could overlap a second
+  // tick's fetch attempt and waste an upstream round trip.
+  private int _forecastFetchInFlight;
+
   // Anti-burn-in drift state. The clock cluster is positioned via CSS transform —
   // we expose the offset to CSS through two custom properties on the wrapper
   // (--sleep-shift-x / --sleep-shift-y) and let CSS handle the 3-second easing
@@ -95,7 +140,9 @@
   //
   // 20 % of 1920 = ±384 px horizontal play; 20 % of 720 = ±144 px vertical play.
   // The DSEG/Orbitron clock at 96 px is ~360 px wide, so we still leave a safe
-  // margin to the bezel on the worst case offset.
+  // margin to the bezel on the worst case offset. The forecast pane is wider
+  // (640 px) so its worst-case right edge lands at center+384+320 = 1024 px
+  // from center — still ≈ 230 px of bezel clearance on a 1920 px panel.
   private const int DriftIntervalSeconds = 60;
   private const double DriftAmplitudeX = 0.20; // fraction of viewport width
   private const double DriftAmplitudeY = 0.20; // fraction of viewport height
@@ -105,6 +152,7 @@
   protected override async Task OnInitializedAsync()
   {
     UpdateClock();
+    _currentTempUnit = WeatherOptionsMonitor.CurrentValue.TemperatureUnit ?? "F";
 
     // Tick once per second so the LED clock stays current. We intentionally use
     // System.Threading.Timer (not System.Timers.Timer) here for cheap allocation
@@ -116,7 +164,13 @@
       {
         if (_disposed) return;
         UpdateClock();
-        StateHasChanged();
+        // Only re-render when the clock is on-screen; when the forecast is up
+        // the clock string update is invisible, so suppressing the render
+        // saves a Blazor diff every second.
+        if (!_isShowingForecast)
+        {
+          StateHasChanged();
+        }
       });
     }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
 
@@ -128,12 +182,7 @@
     _driftTimer = new Timer(_ =>
     {
       if (_disposed) return;
-      _ = InvokeAsync(() =>
-      {
-        if (_disposed) return;
-        PickNewDriftOffset();
-        StateHasChanged();
-      });
+      _ = InvokeAsync(OnDriftTickAsync);
     }, null, TimeSpan.FromSeconds(DriftIntervalSeconds), TimeSpan.FromSeconds(DriftIntervalSeconds));
 
     AudioState.NowPlayingChanged += OnNowPlayingChanged;
@@ -164,6 +213,114 @@
   // everywhere (handoff §8 open question 4).
   private void UpdateClock()
     => _clockText = Clocks.FormatWallClock(DateTime.Now, DisplayOptionsMonitor.CurrentValue);
+
+  // Shared formatter used by the forecast pane's footer "as of HH:mm" stamp —
+  // the wall-clock format setting governs both surfaces so users don't see
+  // a 24-hour timestamp inside a 12-hour kiosk.
+  private string FormatFooterClock(DateTime local)
+    => Clocks.FormatWallClock(local, DisplayOptionsMonitor.CurrentValue, allowSeconds: false);
+
+  /// <summary>
+  /// Called by the drift timer once per <see cref="DriftIntervalSeconds"/>.
+  /// Picks a new offset (always — burn-in protection is the primary contract),
+  /// flips the composition boolean, and lazily refreshes the forecast when
+  /// the upcoming render is forecast-side. Falls back to clock when the
+  /// forecast is unavailable (per ADR §2.3 + HANDOFF §6.A).
+  /// </summary>
+  private async Task OnDriftTickAsync()
+  {
+    if (_disposed) return;
+    PickNewDriftOffset();
+
+    // Flip the composition boolean. We flip BEFORE deciding whether to fetch
+    // so that "should I be on forecast?" is unambiguous below.
+    _isShowingForecast = !_isShowingForecast;
+
+    if (_isShowingForecast)
+    {
+      // About to show forecast — refresh data. Fire-and-await; we want the
+      // pane to render with the freshest snapshot we can produce, but if
+      // the fetch fails the catch in FetchForecastAsync sets _forecast=null
+      // and the renderer falls back to the clock composition.
+      _currentTempUnit = WeatherOptionsMonitor.CurrentValue.TemperatureUnit ?? "F";
+      await TryRefreshForecastAsync();
+
+      if (_forecast is null || _forecast.Days.Count == 0)
+      {
+        // Forecast unavailable. Per HANDOFF §6.A we keep the alternation
+        // boolean flipped (so the NEXT cycle goes back to clock as expected)
+        // but render the clock composition this cycle. Suppress repeated
+        // "forecast unavailable" logging per HANDOFF §6.A — log Information
+        // on the first miss per session, silent thereafter to avoid spam.
+        if (!_firstNullForecastLogged)
+        {
+          _firstNullForecastLogged = true;
+          Logger.LogInformation("Sleep-screen forecast unavailable; falling back to clock-only renders");
+        }
+        // Force the renderer to take the clock branch — the @if checks the
+        // forecast non-null already, so just leave _isShowingForecast true
+        // and the markup falls through. (Cheaper than flipping back and
+        // forth, and the alternation stays in sync.)
+      }
+      else
+      {
+        // We have a forecast — reset the suppression latch so a future
+        // outage will log again. Successful fetch breaks the streak.
+        _firstNullForecastLogged = false;
+      }
+      // Make sure the clock string is current the moment we swap back —
+      // the 1 s timer suppressed renders while the forecast was up, so the
+      // last value may be up to 60 s stale otherwise.
+      UpdateClock();
+    }
+    else
+    {
+      // About to show clock — refresh the time string so the swap-back
+      // doesn't briefly show last-cycle's HH:mm before the next 1 s tick.
+      UpdateClock();
+    }
+
+    StateHasChanged();
+  }
+
+  /// <summary>
+  /// Lazily refreshes <c>_forecast</c>. Reentrancy-guarded so overlapping
+  /// drift ticks don't double-fetch. Never throws.
+  /// </summary>
+  private async Task TryRefreshForecastAsync()
+  {
+    if (Interlocked.CompareExchange(ref _forecastFetchInFlight, 1, 0) != 0)
+    {
+      // A previous tick is still mid-fetch. Skip — the in-flight call will
+      // update _forecast when it completes; the renderer reads the latest
+      // value either way.
+      return;
+    }
+
+    try
+    {
+      var opts = WeatherOptionsMonitor.CurrentValue;
+      if (!opts.Enabled)
+      {
+        _forecast = null;
+        return;
+      }
+
+      // Use a per-fetch CT so a slow NWS call can't outlive the page.
+      // 15 s upper bound matches the WeatherApiService timeout.
+      using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+      _forecast = await WeatherApi.GetForecastAsync(opts.Zip, cts.Token);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "Sleep-screen forecast refresh failed");
+      _forecast = null;
+    }
+    finally
+    {
+      Interlocked.Exchange(ref _forecastFetchInFlight, 0);
+    }
+  }
 
   /// <summary>
   /// Picks a new random offset within ±DriftAmplitude × viewport from center and
