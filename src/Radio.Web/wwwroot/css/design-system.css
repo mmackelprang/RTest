@@ -2924,98 +2924,310 @@ body {
 }
 
 
-/* ─── §P·6  Sleep-mode 3-day weather forecast pane ──────────────────────────
+/* ─── §P·6  Sleep-mode weather forecast pane (v2 — visual redesign) ─────────
  *
  * Lives inside .sleep-screen-drift (alongside or alternated with the LED
- * clock cluster). All emissive elements use the SAME dim-amber 35 % as the
- * sleep clock so the screen has exactly one emissive color; the icons
- * therefore convey condition by SHAPE, not color. Stale data is signaled
- * by opacity: 0.7 on the pane root + a small sync_problem glyph in the
- * footer — no per-element style change, so we don't introduce a second
- * token. See HANDOFF-sleep-mode-weather-forecast.md §2 for the visual.
+ * clock cluster). Two-region composition:
+ *   Region 1 — primary readout: 96px Material Symbol icon + 96px Orbitron
+ *     LED current temperature (byte-identical to .sleep-screen-clock so the
+ *     temp reads as the same "amber instrument") + small mono F·C unit
+ *     indicator + 24px condition text + 28px LED today H/L.
+ *   Sub-line — single mono line beneath Region 1 carrying location, day,
+ *     and time (formatted via Clocks.FormatWallClock by the parent). When
+ *     stale, prepends a sync_problem glyph.
+ *   Region 2 — 3-card forecast row at 160px per card (200px in "both" mode);
+ *     omitted entirely when Days.Count < 2 (a single card duplicating today
+ *     has no comparative value).
  *
- * Cards are 200 px each; pane is 640 px total (1 / 2 / 3 cards fit
- * comfortably inside the ±384 px drift safe area on the 1920 px kiosk).
- * Card widens to 220 px for TemperatureUnit="both" so the F·C numerics
- * fit on a single line per Designer §2 State E.
+ * All emissive elements share a single color
+ *   color-mix(in srgb, var(--signal-amber) 35 %, #050507)
+ * — the same dim amber as .sleep-screen-clock. Icons convey condition by
+ * SHAPE, not color. Stale data is signaled by opacity: 0.7 on the pane
+ * root + the sync_problem glyph on the sub-line — no per-element overrides,
+ * no new tokens.
+ *
+ * Total pane bounding box: 880×360 (920×380 in "both" mode). Fits inside
+ * the ±384 px horizontal × ±144 px vertical drift safe area on the 1920×720
+ * kiosk with ≥ 100 px of bezel clearance at worst-case drift offset.
+ *
+ * See HANDOFF-sleep-weather-visual-redesign.md §3–§7 for the geometry,
+ * §4 for typography, §6 for the color budget.
  * ─────────────────────────────────────────────────────────────────────────── */
 .sleep-forecast-pane {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: 28px;
   /* Allow the SR-only aria-live region to be picked up regardless of
      positioning; the pane is otherwise inert visually for screen readers
-     because each card's content is decorative (and announced via the
+     because the visible content is decorative (and announced via the
      parent's aria-label). */
   position: relative;
 }
 
 .sleep-forecast-pane.is-stale {
-  /* Single dimming knob — the footer's sync_problem glyph + relative
+  /* Single dimming knob — the sub-line's sync_problem glyph + relative
      "yesterday" / "N days ago" text carry the semantics. */
   opacity: 0.7;
 }
 
-.sleep-forecast-cards {
+/* ── Region 1 — primary current-weather block ─────────────────────────── */
+
+.sleep-forecast-primary {
   display: flex;
   flex-direction: row;
-  gap: 20px;
-  align-items: stretch;
-}
-
-.sleep-forecast-card {
-  width: 200px;
-  display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 8px 4px;
+  justify-content: center;
+  gap: 24px;
+  /* 96 px is the dominant baseline (icon + temp). Right column's two
+     stacked lines + the unit indicator vertically center against it. */
+  min-height: 96px;
 }
 
-.sleep-forecast-day {
-  font-family: var(--font-mono);
-  font-size: 14px;
-  color: var(--text-medium);
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
+.sleep-forecast-primary-icon {
+  /* 96 px icon column — paired with the 96 px LED temp on the same baseline.
+     Width fixed so the row keeps its three-column rhythm regardless of which
+     Material Symbol glyph renders (some are wider than others). */
+  width: 120px;
+  height: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sleep-forecast-primary-icon .material-symbols-rounded {
+  font-size: 96px;
+  color: color-mix(in srgb, var(--signal-amber) 35%, #050507);
+  /* FILL=1 keeps the icon as a solid silhouette — same convention as the
+     card icons. opsz 48 is the largest standard Material Symbols optical
+     axis; the variable font scales 48 → 96 cleanly without geometry
+     artifacts at the bigger size. NO text-shadow on the icon — the glow
+     is reserved for LED numerals; on a 96 px filled silhouette it reads
+     as a smudge (see spec §5). */
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 48;
   line-height: 1;
 }
 
-.sleep-forecast-icon {
-  /* 40 px target per Designer §2 card geometry. Material Symbols Rounded
-     scales cleanly as a variable font; we set font-size on the .material-
-     symbols-rounded child rather than the wrapper so transforms (none in
-     this build) don't blur the glyph. */
+.sleep-forecast-primary-temp {
+  /* Byte-identical to .sleep-screen-clock — same font, size, weight,
+     color-mix recipe, text-shadow, letter-spacing, line-height. The user's
+     mental model on this surface is "this is the amber readout of my
+     radio"; the wall clock and the current temperature are the same
+     instrument doing two jobs (spec §4 "Why the temp numerals match the
+     clock byte-for-byte"). */
+  font-family: var(--font-led);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 96px;
+  color: color-mix(in srgb, var(--signal-amber) 35%, #050507);
+  text-shadow: 0 0 12px color-mix(in srgb, var(--signal-amber) 15%, transparent);
+  letter-spacing: 0.02em;
+  line-height: 1;
+  /* Inline-flex so the degree symbol can nest inside the numeral baseline. */
+  display: inline-flex;
+  align-items: flex-start;
+}
+
+.sleep-forecast-primary-degree {
+  /* Smaller superscript-style degree symbol so the "60°" reads as a single
+     glyph cluster rather than equal-weight characters. Aligned to the top
+     of the numerals. Inherits the dim-amber color + text-shadow from its
+     parent .sleep-forecast-primary-temp. */
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1;
+  margin-left: 2px;
+  /* Lift the degree to sit near the top of the 96 px numeral cap-height.
+     The numeral's effective ascender lives ~80 px above the baseline; the
+     degree's 40 px box gets nudged up so its visual center lands ~10 px
+     below the numeral cap. */
+  margin-top: 4px;
+  align-self: flex-start;
+}
+
+.sleep-forecast-primary-unit {
+  /* "F·C" stamp on the temperature. Display only — no click target, no
+     hover state. 18 px mono matches the sub-line's mono treatment; the
+     active letter is the only emissive piece here. */
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  /* Vertical-align on the temp baseline — sit centered on the 96 px row. */
+  min-height: 96px;
+  /* Small horizontal slot between the temp and the right column. */
+  min-width: 32px;
+}
+
+.sleep-forecast-primary-unit .is-active {
+  color: color-mix(in srgb, var(--signal-amber) 35%, #050507);
+}
+
+.sleep-forecast-primary-unit .is-inactive {
+  color: var(--text-low);
+}
+
+.sleep-forecast-primary-unit-sep {
+  color: var(--text-low);
+  font-weight: 400;
+  /* Tighten the cluster — F · C with the dot a thin marker rather than a
+     full-letter slot. */
+  font-size: 12px;
+  line-height: 1;
+}
+
+/* "both" mode: both glyphs are active (the user explicitly opted into
+   dual-unit display). The separator stays --text-low. */
+.sleep-forecast-pane.unit-both .sleep-forecast-primary-unit .is-active,
+.sleep-forecast-pane.unit-both .sleep-forecast-primary-unit .is-inactive {
+  color: color-mix(in srgb, var(--signal-amber) 35%, #050507);
+}
+
+.sleep-forecast-primary-right {
+  /* Two stacked rows: condition above today H/L, left-aligned within a
+     200 px slot. Vertically centered against the 96 px temp baseline. */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 12px;
+  width: 200px;
+  min-height: 96px;
+}
+
+.sleep-forecast-primary-condition {
+  /* Reads as "tag/label" not "readout" — using --text-medium prevents the
+     200×30 px slab from competing with the big temp for visual weight
+     (see spec §4 "Why condition text is --text-medium and not dim amber").
+     Source string is WeatherDay.ConditionShort verbatim; NWS labels are
+     already capitalised ("Partly Sunny"), so no text-transform here. */
+  font-family: var(--font-mono);
+  font-size: 24px;
+  font-weight: 400;
+  color: var(--text-medium);
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sleep-forecast-primary-hl {
+  /* Today's H/L — same recipe as the big temp so the two numerals read as
+     the same instrument family. Slash separator is --text-low so the
+     numerals dominate. */
+  font-family: var(--font-led);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 28px;
+  color: color-mix(in srgb, var(--signal-amber) 35%, #050507);
+  text-shadow: 0 0 12px color-mix(in srgb, var(--signal-amber) 15%, transparent);
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+.sleep-forecast-primary-hl-sep {
+  color: var(--text-low);
+  font-weight: 400;
+  /* No text-shadow on the separator — keep the glow on the numerals only. */
+  text-shadow: none;
+  margin: 0 4px;
+}
+
+.sleep-forecast-primary-low {
+  /* Same emissive color as the high — both numerals are "readout" on the
+     today row. (The low only de-emphasises in the card row where the
+     comparison-by-day relationship makes the low a supporting datum.) */
+  color: color-mix(in srgb, var(--signal-amber) 35%, #050507);
+}
+
+/* ── Sub-line — location · day · time ─────────────────────────────────── */
+
+.sleep-forecast-subline {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-medium);
+  letter-spacing: 0.12em;
+  /* Tighten the gap to Region 1 — the parent's gap: 28 px would otherwise
+     push the sub-line further from the primary than it belongs. Spec §7:
+     12 px top margin to Region 1, 28 px bottom to Region 2 (the latter
+     supplied by the parent .sleep-forecast-pane gap rule, since the cards
+     are the next sibling). */
+  margin-top: -16px;
+}
+
+.sleep-forecast-stale-icon {
+  font-size: 16px;
+  color: var(--text-low);
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+  /* Inherits the pane's opacity: 0.7 because it lives inside .is-stale. */
+  line-height: 1;
+}
+
+/* ── Region 2 — forecast row of cards ─────────────────────────────────── */
+
+.sleep-forecast-cards {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 32px;
+}
+
+.sleep-forecast-card {
+  width: 160px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 12px 4px;
+}
+
+.sleep-forecast-card-icon {
+  /* 48 px icon — sized between the 96 px primary and v1's 40 px cards so
+     the row reads as discrete units without competing with the primary
+     block (spec §5). */
   height: 56px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.sleep-forecast-icon .material-symbols-rounded {
-  font-size: 40px;
+.sleep-forecast-card-icon .material-symbols-rounded {
+  font-size: 48px;
   color: color-mix(in srgb, var(--signal-amber) 35%, #050507);
-  /* Variable-font axes — set 'fill' so the icon reads as a solid shape
-     rather than the default outline; matches the silhouette aesthetic of
-     a dim LED. */
-  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 40;
+  /* opsz 48 — the natural Material Symbols size axis at 48 px (no scaling
+     stretch). FILL=1 to match the primary icon's silhouette aesthetic. */
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 48;
+  line-height: 1;
 }
 
-.sleep-forecast-condition {
+.sleep-forecast-card-day {
+  /* Identical typography to the sub-line so the two share a visual rhythm. */
   font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-low);
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-medium);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: center;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  margin-top: 2px;
 }
 
-.sleep-forecast-temp {
+.sleep-forecast-card-temp {
   font-family: var(--font-led);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -3023,43 +3235,33 @@ body {
   letter-spacing: 0.02em;
 }
 
-.sleep-forecast-temp-high {
-  font-size: 36px;
+.sleep-forecast-card-temp-high {
+  font-size: 28px;
   color: color-mix(in srgb, var(--signal-amber) 35%, #050507);
   text-shadow: 0 0 12px color-mix(in srgb, var(--signal-amber) 15%, transparent);
+  margin-top: 4px;
 }
 
-.sleep-forecast-temp-low {
-  font-size: 24px;
+.sleep-forecast-card-temp-low {
+  /* The low in the cards is --text-low (not amber) — deliberate hierarchy
+     step (spec §6 color table): high = "the answer", low = "the supporting
+     datum". */
+  font-size: 20px;
   color: var(--text-low);
 }
 
-/* The "both" path renders F·C on a single line — shrink the type so the
-   two numerics + middle dot fit comfortably inside the 220 px card. */
-.sleep-forecast-temp-both.sleep-forecast-temp-high { font-size: 28px; }
-.sleep-forecast-temp-both.sleep-forecast-temp-low  { font-size: 20px; }
-.sleep-forecast-pane.unit-both .sleep-forecast-card { width: 220px; }
+/* "both" path — cards render F·C on a single line. Type shrinks so the
+   two numerics + middle dot fit; card column widens to 200 px so the line
+   still reads cleanly. Total pane grows from 880 → 920 px (still inside
+   the safe area — spec §7 bounding-box table). */
+.sleep-forecast-card-temp-both.sleep-forecast-card-temp-high { font-size: 22px; }
+.sleep-forecast-card-temp-both.sleep-forecast-card-temp-low  { font-size: 16px; }
+.sleep-forecast-pane.unit-both .sleep-forecast-card { width: 200px; }
 
-.sleep-forecast-temp-sep {
+.sleep-forecast-card-temp-sep {
   color: var(--text-low);
   font-weight: 400;
-}
-
-.sleep-forecast-footer {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-low);
-  letter-spacing: 0.08em;
-}
-
-.sleep-forecast-stale-icon {
-  font-size: 14px;
-  color: var(--text-low);
-  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  text-shadow: none;
 }
 
 
