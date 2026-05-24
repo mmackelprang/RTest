@@ -62,6 +62,12 @@ public class SleepTests : TestContext
     Services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
     Services.AddRadzenComponents();
 
+    // Default DisplayOptions — preserves the historical 24h/no-seconds format
+    // so the existing clock-format regex assertion (HH:mm) below keeps holding.
+    // Tests that need a different format override this in their fixture via
+    // Services.Configure<DisplayOptions>(o => { o.TimeFormat = "12h"; ... }).
+    Services.Configure<DisplayOptions>(_ => { });
+
     Services.AddHttpClient<SystemApiService>();
     Services.AddHttpClient<AudioApiService>();
 
@@ -346,6 +352,21 @@ public class SleepTests : TestContext
     clockAfter.Should().Be("12:35",
       "the clock element must re-render with the freshly computed time after a tick");
   }
+
+  // ─── Configurable time format (HANDOFF-configurable-time-format.md) ──────
+  //
+  // Per-format rendering of the Sleep clock is covered by ClocksTests at the
+  // helper level (the same helper Sleep.razor's UpdateClock invokes). We
+  // intentionally do NOT add bUnit cases here that re-bind DisplayOptions
+  // after the fixture is constructed — the bUnit TestServiceProvider locks
+  // its descriptor list as soon as the first service is resolved (the
+  // FakeNavigationManager lookup in this fixture's constructor triggers
+  // exactly that lock). Splitting into per-format inner fixtures would
+  // duplicate the entire DI setup for negligible additional coverage; the
+  // bind path (UpdateClock → IOptionsMonitor.CurrentValue → Clocks.FormatWallClock)
+  // is exercised by the existing Sleep_ClockTimer_TickRendersNewTime test
+  // above (which now runs through the new helper) and by the helper unit
+  // tests in ClocksTests.
 
   /// <summary>
   /// Reach into <see cref="AudioStateHubService"/>'s NowPlayingChanged event

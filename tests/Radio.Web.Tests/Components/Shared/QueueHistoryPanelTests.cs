@@ -51,6 +51,12 @@ public class QueueHistoryPanelTests : TestContext
 
     Services.AddRadzenComponents();
 
+    // QueueHistoryPanel injects IOptionsMonitor<DisplayOptions> for the
+    // "ends ~" prediction's wall-clock formatting. The default (24h, no
+    // seconds) matches the historical hardcoded "HH:mm" behaviour so
+    // pre-existing assertions in this fixture continue to hold.
+    Services.Configure<DisplayOptions>(_ => { });
+
     Services.AddHttpClient<QueueApiService>();
     Services.AddHttpClient<PlayHistoryApiService>();
     Services.AddHttpClient<AudioApiService>();
@@ -220,6 +226,88 @@ public class QueueHistoryPanelTests : TestContext
     var ledValue = cut.Find(".queue-total-tile-value");
     ledValue.TextContent.Trim().Should().NotBeEmpty();
     cut.FindAll(".queue-total-tile-sub").Count.Should().Be(1);
+  }
+
+  // ─── Configurable time format (HANDOFF-configurable-time-format.md §3.4) ──
+  //
+  // The queue total tile renders "ends ~HH:mm" when _totalRuntime > 0. Per
+  // the handoff, the 12h/24h flip is honored (consistent with the topbar
+  // Time cluster), but seconds are ALWAYS suppressed regardless of the
+  // global ShowSeconds setting because :ss precision on a forward-looking
+  // track-total estimate is meaningless.
+  //
+  // The fixture has no API server so _totalRuntime / _queueItems stay at
+  // their initial values; we set them via reflection to drive the conditional
+  // ends-prediction branch.
+
+  [Fact]
+  public void QueueHistoryPanel_EndsTile_12HourFormat_RendersAmOrPmSuffix()
+  {
+    Services.Configure<DisplayOptions>(o => o.TimeFormat = "12h");
+
+    var cut = RenderComponent<QueueHistoryPanel>();
+    ClickTab(cut, "Queue");
+
+    InjectQueueRuntime(cut, TimeSpan.FromMinutes(30), itemCount: 5);
+
+    var sub = cut.Find(".queue-total-tile-sub").TextContent;
+    // 12h with allowSeconds: false → "ends ~h:mm tt" — the suffix is the
+    // single load-bearing visual change vs the default 24h "HH:mm" form.
+    sub.Should().MatchRegex(@"ends ~\d{1,2}:[0-5]\d (AM|PM)",
+      "12h queue ends-prediction must render h:mm tt with uppercase AM/PM");
+  }
+
+  [Fact]
+  public void QueueHistoryPanel_EndsTile_24hWithSeconds_StillSuppressesSeconds()
+  {
+    // Global ShowSeconds = true must NOT bleed into the queue prediction —
+    // the call site passes allowSeconds: false so seconds stay suppressed
+    // regardless. Asserting this guards against accidental future drift
+    // toward "ends ~15:45:22" which would be a meaningless precision claim.
+    Services.Configure<DisplayOptions>(o =>
+    {
+      o.TimeFormat = "24h";
+      o.ShowSeconds = true;
+    });
+
+    var cut = RenderComponent<QueueHistoryPanel>();
+    ClickTab(cut, "Queue");
+
+    InjectQueueRuntime(cut, TimeSpan.FromMinutes(30), itemCount: 5);
+
+    var sub = cut.Find(".queue-total-tile-sub").TextContent;
+    sub.Should().MatchRegex(@"ends ~[0-2]\d:[0-5]\d(\s|$|·)",
+      "queue ends-prediction must NEVER render :ss even when ShowSeconds is on");
+    sub.Should().NotMatchRegex(@"ends ~[0-2]\d:[0-5]\d:[0-5]\d",
+      "the allowSeconds:false override must suppress the seconds component");
+  }
+
+  /// <summary>
+  /// Pokes the panel's <c>_totalRuntime</c> and <c>_queueItems</c> fields via
+  /// reflection so the conditional ends-prediction branch fires without
+  /// requiring an API server. Mirrors the reflection pattern already used in
+  /// <see cref="Pages.SleepTests"/> for the clock-tick test.
+  /// </summary>
+  private static void InjectQueueRuntime(IRenderedComponent<QueueHistoryPanel> cut, TimeSpan runtime, int itemCount)
+  {
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+    var instance = cut.Instance;
+
+    var totalRuntimeField = typeof(QueueHistoryPanel).GetField("_totalRuntime", flags);
+    totalRuntimeField!.SetValue(instance, runtime);
+
+    var queueItemsField = typeof(QueueHistoryPanel).GetField("_queueItems", flags);
+    // Use a Duration that parses cleanly through SumQueueRuntime if recomputed
+    // — though SumQueueRuntime is not re-invoked here, we keep the field shape
+    // self-consistent in case a future refactor adds a re-sum step.
+    var items = Enumerable.Range(0, itemCount)
+      .Select(_ => MakeItem("6:00"))
+      .ToList();
+    queueItemsField!.SetValue(instance, items);
+
+    var stateHasChanged = typeof(Microsoft.AspNetCore.Components.ComponentBase).GetMethod(
+      "StateHasChanged", flags);
+    cut.InvokeAsync(() => stateHasChanged!.Invoke(instance, null)).GetAwaiter().GetResult();
   }
 
   [Fact]
