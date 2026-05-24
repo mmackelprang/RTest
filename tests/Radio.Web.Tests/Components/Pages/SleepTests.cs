@@ -70,6 +70,16 @@ public class SleepTests : TestContext
 
     Services.AddHttpClient<SystemApiService>();
     Services.AddHttpClient<AudioApiService>();
+    // PR #2 adds WeatherApiService as a Sleep.razor dependency. The HttpClient
+    // is unused in these tests (we don't trigger the drift timer's lazy
+    // fetch), but it must be in DI so the component activates.
+    Services.AddHttpClient<WeatherApiService>();
+
+    // Bind the Display:* and Display:Weather:* sections so IOptionsMonitor<T>
+    // can resolve. Empty Configure() is enough — the binding pipeline produces
+    // a monitor backed by the default-constructed POCO.
+    Services.AddOptions<Radio.Web.Models.DisplayOptions>();
+    Services.AddOptions<Radio.Core.Configuration.WeatherDisplayOptions>();
 
     Services.AddSingleton(sp =>
       new AudioStateHubService(

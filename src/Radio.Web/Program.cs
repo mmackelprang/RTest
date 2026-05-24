@@ -290,6 +290,22 @@ builder.Services.AddHttpClient("AlbumArtProxy", client =>
   return handler;
 });
 
+// Weather API client backing the sleep-screen 3-day forecast pane.
+// Timeout is shorter than most endpoints because the Sleep page renders the
+// pane on a 60-second drift cycle — a slow fetch would block the swap.
+builder.Services.AddHttpClient<WeatherApiService>(client =>
+{
+  client.BaseAddress = new Uri(apiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(15);
+})
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
+});
+
 // RotaryPhone.API client (separate service on port 5004)
 var phoneApiBaseUrl = builder.Configuration.GetValue<string>("RotaryPhone:ApiBaseUrl") ?? "http://radio:5004";
 builder.Services.AddHttpClient<PhoneApiService>(client =>
@@ -376,6 +392,13 @@ builder.Services.Configure<DisplayOptions>(builder.Configuration.GetSection(Disp
 // to SQLite-store writes (PR #298 config bridge) without a page reload.
 // Defaults (256 chars, 40 px/s, " • ") apply when the section is absent.
 builder.Services.Configure<RdsScrollOptions>(builder.Configuration.GetSection(RdsScrollOptions.SectionName));
+
+// Bind Display:Weather → WeatherDisplayOptions for the sleep-screen forecast
+// pane. Consumed by Sleep.razor's refresh loop (lazy — only when the next
+// swap-cycle is forecast-side, no eager fetching). Hot-reloads through the
+// same SQLite-bridge + IOptionsMonitor pipeline as DisplayOptions.
+builder.Services.Configure<Radio.Core.Configuration.WeatherDisplayOptions>(
+  builder.Configuration.GetSection(Radio.Core.Configuration.WeatherDisplayOptions.SectionName));
 
 var app = builder.Build();
 

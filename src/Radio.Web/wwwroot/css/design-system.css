@@ -2924,6 +2924,145 @@ body {
 }
 
 
+/* ─── §P·6  Sleep-mode 3-day weather forecast pane ──────────────────────────
+ *
+ * Lives inside .sleep-screen-drift (alongside or alternated with the LED
+ * clock cluster). All emissive elements use the SAME dim-amber 35 % as the
+ * sleep clock so the screen has exactly one emissive color; the icons
+ * therefore convey condition by SHAPE, not color. Stale data is signaled
+ * by opacity: 0.7 on the pane root + a small sync_problem glyph in the
+ * footer — no per-element style change, so we don't introduce a second
+ * token. See HANDOFF-sleep-mode-weather-forecast.md §2 for the visual.
+ *
+ * Cards are 200 px each; pane is 640 px total (1 / 2 / 3 cards fit
+ * comfortably inside the ±384 px drift safe area on the 1920 px kiosk).
+ * Card widens to 220 px for TemperatureUnit="both" so the F·C numerics
+ * fit on a single line per Designer §2 State E.
+ * ─────────────────────────────────────────────────────────────────────────── */
+.sleep-forecast-pane {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  /* Allow the SR-only aria-live region to be picked up regardless of
+     positioning; the pane is otherwise inert visually for screen readers
+     because each card's content is decorative (and announced via the
+     parent's aria-label). */
+  position: relative;
+}
+
+.sleep-forecast-pane.is-stale {
+  /* Single dimming knob — the footer's sync_problem glyph + relative
+     "yesterday" / "N days ago" text carry the semantics. */
+  opacity: 0.7;
+}
+
+.sleep-forecast-cards {
+  display: flex;
+  flex-direction: row;
+  gap: 20px;
+  align-items: stretch;
+}
+
+.sleep-forecast-card {
+  width: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+}
+
+.sleep-forecast-day {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--text-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  line-height: 1;
+}
+
+.sleep-forecast-icon {
+  /* 40 px target per Designer §2 card geometry. Material Symbols Rounded
+     scales cleanly as a variable font; we set font-size on the .material-
+     symbols-rounded child rather than the wrapper so transforms (none in
+     this build) don't blur the glyph. */
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sleep-forecast-icon .material-symbols-rounded {
+  font-size: 40px;
+  color: color-mix(in srgb, var(--signal-amber) 35%, #050507);
+  /* Variable-font axes — set 'fill' so the icon reads as a solid shape
+     rather than the default outline; matches the silhouette aesthetic of
+     a dim LED. */
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 40;
+}
+
+.sleep-forecast-condition {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-low);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.sleep-forecast-temp {
+  font-family: var(--font-led);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+.sleep-forecast-temp-high {
+  font-size: 36px;
+  color: color-mix(in srgb, var(--signal-amber) 35%, #050507);
+  text-shadow: 0 0 12px color-mix(in srgb, var(--signal-amber) 15%, transparent);
+}
+
+.sleep-forecast-temp-low {
+  font-size: 24px;
+  color: var(--text-low);
+}
+
+/* The "both" path renders F·C on a single line — shrink the type so the
+   two numerics + middle dot fit comfortably inside the 220 px card. */
+.sleep-forecast-temp-both.sleep-forecast-temp-high { font-size: 28px; }
+.sleep-forecast-temp-both.sleep-forecast-temp-low  { font-size: 20px; }
+.sleep-forecast-pane.unit-both .sleep-forecast-card { width: 220px; }
+
+.sleep-forecast-temp-sep {
+  color: var(--text-low);
+  font-weight: 400;
+}
+
+.sleep-forecast-footer {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-low);
+  letter-spacing: 0.08em;
+}
+
+.sleep-forecast-stale-icon {
+  font-size: 14px;
+  color: var(--text-low);
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+
 /* ─── §Q  Dev Tray (PR 6 / handoff §P2·2) ─────────────────────────────────── *
  *
  * Hidden developer surface activated by a 3-tap gesture in the top-right
