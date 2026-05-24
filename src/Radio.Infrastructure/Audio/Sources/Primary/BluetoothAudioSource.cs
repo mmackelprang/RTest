@@ -354,6 +354,11 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private void OnCaptureStreamRecovered(object? sender, EventArgs e)
   {
     Logger.LogInformation("BluetoothAudioSource: capture stream recovered by pipeline monitor");
+    // Re-enable fingerprinting lookup — OnDeviceDisconnected cleared it, and a recovered
+    // capture means we have a fresh post-disconnect session that needs SongRec to run for
+    // album-art enrichment. Without this, no track on the recovered session gets identified
+    // until the service restarts.
+    NeedsFingerprintingLookup = true;
     _ = TryAcquireAudioCaptureAsync();
   }
 
