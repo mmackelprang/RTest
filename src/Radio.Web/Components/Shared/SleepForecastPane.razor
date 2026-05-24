@@ -1,15 +1,40 @@
 @*
-  Sleep-mode 3-day weather forecast pane (HANDOFF-sleep-mode-weather-forecast.md §2).
+  Sleep-mode weather forecast pane — v2 visual redesign.
 
-  Rides inside the existing .sleep-screen-drift wrapper on alternate drift cycles,
-  inheriting the same anti-burn-in translate without adding new motion. Single
-  emissive color (dim amber 35% — same as .sleep-screen-clock) and a single
-  passive color (--text-low) preserves the "stereo's off-state" sleep aesthetic.
+  Implements HANDOFF-sleep-weather-visual-redesign.md (supersedes the v1
+  "wall of three coequal cards" treatment from HANDOFF-sleep-mode-weather-
+  forecast.md §2). Composition:
 
-  Null / zero-day forecasts MUST be caught upstream — this component assumes a
-  non-null Forecast with at least one day. The Sleep page guards by simply not
-  rendering this component when Forecast is null (per ADR §2.3 failure-mode
-  contract: null = hide the forecast pane).
+    Region 1 (primary block, 880×180):
+      [96px Material Symbol icon] [96px Orbitron LED current temp + °]
+      [small F·C unit indicator]  [24px condition text]
+                                  [28px LED today H/L]
+
+    Sub-line (14px mono, --text-medium):
+      "<City> · <Day> <Time>"     — or "<icon> <City> · yesterday at HH:mm"
+                                    when IsStale
+
+    Region 2 (forecast row, omitted when Days.Count < 2):
+      3 (or 2) cards, 32px gaps, whitespace-only separation
+      Each card: 48px icon + 14px mono day label + 28px LED high + 20px LED low
+
+  All emissive elements share a single color:
+    color-mix(in srgb, var(--signal-amber) 35%, #050507)
+
+  The primary temperature numeral uses the same font / size / weight /
+  color / text-shadow recipe as .sleep-screen-clock so it reads as the same
+  amber "instrument" as the wall clock.
+
+  Rides inside the existing .sleep-screen-drift wrapper; alternation cadence,
+  anti-burn-in math, NWS fetch, and config UI are all unchanged from v1
+  (handoff §10 "out of scope").
+
+  Null / zero-day forecasts MUST be caught upstream — this component assumes
+  a non-null Forecast with at least one day. Sleep.razor guards via
+  `_forecast.Days.Count > 0`. For a single-day forecast the pane DOES render:
+  the primary block + sub-line are the entire output and Region 2 is omitted
+  (v2 spec §3 State D — a single forecast card duplicating today's data has
+  no comparative value).
 
   All state is supplied via parameters; the pane is purely presentational.
 *@
@@ -17,101 +42,161 @@
 @using Radio.Core.Models
 @using System.Globalization
 
-<div class="sleep-forecast-pane @(Forecast.IsStale ? "is-stale" : null)"
+<div class="sleep-forecast-pane @(Forecast.IsStale ? "is-stale" : null) @(IsBoth ? "unit-both" : null)"
      role="region"
      aria-live="polite"
      aria-atomic="true"
      aria-label="@_ariaLabel">
-  <div class="sleep-forecast-cards">
-    @foreach (var day in Forecast.Days)
-    {
-      <div class="sleep-forecast-card">
-        <div class="sleep-forecast-day">@day.DayName</div>
-        <div class="sleep-forecast-icon">
-          <span class="material-symbols-rounded">@IconKeyToSymbol(day.IconKey)</span>
-        </div>
-        <div class="sleep-forecast-condition">@day.ConditionShort</div>
-        @* Temperature rendering — F / C / both. The both case shrinks the
-           type to 28/20px so the dual numeric fits on one line per
-           Designer §2 State E. *@
-        @if (string.Equals(TemperatureUnit, "both", StringComparison.OrdinalIgnoreCase))
-        {
-          <div class="sleep-forecast-temp sleep-forecast-temp-both sleep-forecast-temp-high">
-            @day.HighF°F<span class="sleep-forecast-temp-sep"> · </span>@day.HighC°C
-          </div>
-          <div class="sleep-forecast-temp sleep-forecast-temp-both sleep-forecast-temp-low">
-            @day.LowF°F<span class="sleep-forecast-temp-sep"> · </span>@day.LowC°C
-          </div>
-        }
-        else if (string.Equals(TemperatureUnit, "C", StringComparison.OrdinalIgnoreCase))
-        {
-          <div class="sleep-forecast-temp sleep-forecast-temp-high">@day.HighC°</div>
-          <div class="sleep-forecast-temp sleep-forecast-temp-low">@day.LowC°</div>
-        }
-        else
-        {
-          @* "F" or any other value falls through to Fahrenheit — matches
-             WeatherDisplayOptions default. *@
-          <div class="sleep-forecast-temp sleep-forecast-temp-high">@day.HighF°</div>
-          <div class="sleep-forecast-temp sleep-forecast-temp-low">@day.LowF°</div>
-        }
+
+  @* Region 1 — primary current-weather block *@
+  <div class="sleep-forecast-primary">
+    <div class="sleep-forecast-primary-icon">
+      <span class="material-symbols-rounded">@IconKeyToSymbol(Today.IconKey)</span>
+    </div>
+    <div class="sleep-forecast-primary-temp">
+      @CurrentTempDisplay<span class="sleep-forecast-primary-degree">°</span>
+    </div>
+    <div class="sleep-forecast-primary-unit" aria-hidden="true">
+      <span class="@(IsCelsius ? "is-inactive" : "is-active")">F</span><span class="sleep-forecast-primary-unit-sep">·</span><span class="@(IsCelsius ? "is-active" : "is-inactive")">C</span>
+    </div>
+    <div class="sleep-forecast-primary-right">
+      <div class="sleep-forecast-primary-condition">@Today.ConditionShort</div>
+      <div class="sleep-forecast-primary-hl">
+        <span class="sleep-forecast-primary-high">@TodayHigh</span><span class="sleep-forecast-primary-hl-sep">/</span><span class="sleep-forecast-primary-low">@TodayLow</span>
       </div>
-    }
+    </div>
   </div>
-  <div class="sleep-forecast-footer">
+
+  @* Sub-line — location · day · time (with optional stale indicator) *@
+  <div class="sleep-forecast-subline">
     @if (Forecast.IsStale)
     {
       <span class="sleep-forecast-stale-icon material-symbols-rounded" aria-hidden="true">sync_problem</span>
     }
-    <span class="sleep-forecast-footer-text">@Forecast.LocationName · @_footerTimestamp</span>
+    <span class="sleep-forecast-subline-text">@_subLineText</span>
   </div>
+
+  @* Region 2 — forecast row. Omitted entirely when only one day is
+     available (the primary block already carries today's data; a single
+     duplicate card adds no comparative value — see spec §3 State D). *@
+  @if (Forecast.Days.Count >= 2)
+  {
+    <div class="sleep-forecast-cards">
+      @foreach (var day in Forecast.Days)
+      {
+        <div class="sleep-forecast-card">
+          <div class="sleep-forecast-card-icon">
+            <span class="material-symbols-rounded">@IconKeyToSymbol(day.IconKey)</span>
+          </div>
+          <div class="sleep-forecast-card-day">@day.DayName</div>
+          @* Card temperature — F / C / both. The "both" path keeps v1's
+             dual-numeric line on a single row at smaller type so the card
+             column still reads cleanly (spec §3 State F). *@
+          @if (IsBoth)
+          {
+            <div class="sleep-forecast-card-temp sleep-forecast-card-temp-both sleep-forecast-card-temp-high">
+              @day.HighF°F<span class="sleep-forecast-card-temp-sep"> · </span>@day.HighC°C
+            </div>
+            <div class="sleep-forecast-card-temp sleep-forecast-card-temp-both sleep-forecast-card-temp-low">
+              @day.LowF°F<span class="sleep-forecast-card-temp-sep"> · </span>@day.LowC°C
+            </div>
+          }
+          else if (IsCelsius)
+          {
+            <div class="sleep-forecast-card-temp sleep-forecast-card-temp-high">@day.HighC°</div>
+            <div class="sleep-forecast-card-temp sleep-forecast-card-temp-low">@day.LowC°</div>
+          }
+          else
+          {
+            @* "F" or any other value falls through to Fahrenheit — matches
+               WeatherDisplayOptions default. *@
+            <div class="sleep-forecast-card-temp sleep-forecast-card-temp-high">@day.HighF°</div>
+            <div class="sleep-forecast-card-temp sleep-forecast-card-temp-low">@day.LowF°</div>
+          }
+        </div>
+      }
+    </div>
+  }
 </div>
 
 @code {
   /// <summary>The forecast to render. MUST be non-null and have at least one day.</summary>
   [Parameter, EditorRequired] public WeatherForecast Forecast { get; set; } = default!;
 
-  /// <summary>"F", "C", or "both" — controls which temperature field renders per card.</summary>
+  /// <summary>"F", "C", or "both" — controls which temperature field renders.</summary>
   [Parameter, EditorRequired] public string TemperatureUnit { get; set; } = "F";
 
   /// <summary>
-  /// Optional time-format string for the footer "as of HH:mm" stamp.
-  /// When null, defaults to invariant 24-hour. Wired to PR #1's
-  /// Clocks.FormatWallClock by the parent.
+  /// Optional time-format string for the sub-line "<Day> HH:mm" stamp.
+  /// When null, defaults to invariant 24-hour. Wired to
+  /// <c>Clocks.FormatWallClock</c> by the parent so the wall-clock setting
+  /// (12h/24h) governs both surfaces in lock-step.
   /// </summary>
   [Parameter] public Func<DateTime, string>? FormatClock { get; set; }
 
   private string _ariaLabel = string.Empty;
-  private string _footerTimestamp = string.Empty;
+  private string _subLineText = string.Empty;
   private string? _lastAnnouncedSignature;
+
+  // ── Computed display helpers ────────────────────────────────────────────
+  // These mirror the v2 spec's "Builder note" code-behind additions (§9).
+  // Today is always Days[0] — the service guarantees chronological order.
+
+  private WeatherDay Today => Forecast.Days[0];
+
+  private bool IsCelsius =>
+    string.Equals(TemperatureUnit, "C", StringComparison.OrdinalIgnoreCase);
+
+  private bool IsBoth =>
+    string.Equals(TemperatureUnit, "both", StringComparison.OrdinalIgnoreCase);
+
+  /// <summary>
+  /// Primary-block current-temperature numeral. In single-unit mode this is
+  /// the per-unit field directly; in "both" mode we fall back to Fahrenheit
+  /// per spec §3 State F (the 96 px "60°F · 16°C" string would blow the
+  /// column budget at 480 px — the user explicitly opted into "both" for the
+  /// cards, not for the primary readout).
+  /// </summary>
+  private int CurrentTempDisplay => IsCelsius ? Today.HighC : Today.HighF;
+
+  private int TodayHigh => IsCelsius ? Today.HighC : Today.HighF;
+  private int TodayLow => IsCelsius ? Today.LowC : Today.LowF;
 
   protected override void OnParametersSet()
   {
-    // Footer timestamp — show "as of HH:mm" for fresh data, add the
-    // "yesterday" / "N days ago" qualifier for stale data older than 12h
-    // (Designer §11 open question 3 — 12h threshold).
+    // Compose the sub-line. Fresh data: "<City> · <Day> <Time>". Stale data
+    // (>12h old) prepends a relative qualifier per the v1 stale rules —
+    // "<City> · yesterday at HH:mm" or "<City> · N days ago at HH:mm".
     var localGenerated = Forecast.GeneratedAtUtc.LocalDateTime;
     var hoursOld = (DateTime.Now - localGenerated).TotalHours;
-    var clockString = FormatClock?.Invoke(localGenerated) ?? localGenerated.ToString("HH:mm", CultureInfo.InvariantCulture);
+    var clockString = FormatClock?.Invoke(localGenerated)
+      ?? localGenerated.ToString("HH:mm", CultureInfo.InvariantCulture);
+    var locationDisplay = ShortLocation(Forecast.LocationName);
 
     if (hoursOld < 12)
     {
-      _footerTimestamp = $"as of {clockString}";
+      // Use today's full weekday name for the sub-line. The forecast cards
+      // still use 3-letter abbreviations (DayName from the API) because
+      // horizontal width matters there — the sub-line has its own slot.
+      var dayName = DateTime.Now.ToString("dddd", CultureInfo.InvariantCulture);
+      _subLineText = $"{locationDisplay} · {dayName} {clockString}";
     }
     else if (hoursOld < 36)
     {
-      _footerTimestamp = $"as of {clockString} yesterday";
+      _subLineText = $"{locationDisplay} · yesterday at {clockString}";
     }
     else
     {
       var daysOld = (int)Math.Floor(hoursOld / 24.0);
-      _footerTimestamp = $"as of {clockString}, {daysOld} days ago";
+      _subLineText = $"{locationDisplay} · {daysOld} days ago at {clockString}";
     }
 
     // Aria-live label — single sentence the screen reader can read end-to-end.
     // Regenerate only on data change to avoid spamming the SR on every swap-in
     // (per Designer §8 caching). The signature folds in everything visible.
-    var signature = $"{Forecast.Zip}|{Forecast.GeneratedAtUtc.Ticks}|{Forecast.IsStale}|{TemperatureUnit}|{Forecast.Days.Count}";
+    // v2: include Today.IconKey so a same-day icon change retriggers the
+    // announcement (spec §9 "_lastAnnouncedSignature" note).
+    var signature = $"{Forecast.Zip}|{Forecast.GeneratedAtUtc.Ticks}|{Forecast.IsStale}|{TemperatureUnit}|{Forecast.Days.Count}|{Today.IconKey}";
     if (_lastAnnouncedSignature != signature)
     {
       _lastAnnouncedSignature = signature;
@@ -119,24 +204,37 @@
     }
   }
 
+  /// <summary>
+  /// Strips ", &lt;state&gt;" from a location string when present (e.g.
+  /// "Pittsboro, NC" → "Pittsboro") so the sub-line stays short. Strings
+  /// without a comma fall through verbatim — state-only / city-only forms
+  /// don't need post-processing.
+  /// </summary>
+  private static string ShortLocation(string locationName)
+  {
+    if (string.IsNullOrWhiteSpace(locationName)) return locationName;
+    var commaIdx = locationName.IndexOf(',');
+    return commaIdx > 0 ? locationName[..commaIdx].Trim() : locationName;
+  }
+
   private string BuildAriaLabel()
   {
     var sb = new System.Text.StringBuilder();
     if (Forecast.IsStale)
     {
-      var localGenerated = Forecast.GeneratedAtUtc.LocalDateTime;
-      sb.Append($"Forecast data is stale, last updated {_footerTimestamp}. ");
+      sb.Append($"Forecast data is stale. ");
     }
-    sb.Append($"{Forecast.Days.Count}-day forecast for {Forecast.LocationName}. ");
+
+    // v2: lead with the current condition + temperature so the SR description
+    // mirrors the visual layout (primary block first, then the day-by-day
+    // breakdown). Same Fahrenheit-default rule as the visible primary block
+    // applies in "both" mode — the SR string stays compact.
+    var unit = IsCelsius ? "Celsius" : "Fahrenheit";
+    sb.Append($"Currently {CurrentTempDisplay} degrees {unit}, {Today.ConditionShort} in {Forecast.LocationName}. ");
 
     foreach (var d in Forecast.Days)
     {
-      var (high, low, unit) = string.Equals(TemperatureUnit, "C", StringComparison.OrdinalIgnoreCase)
-        ? (d.HighC, d.LowC, "Celsius")
-        : (d.HighF, d.LowF, "Fahrenheit");
-      // "Both" reads as Fahrenheit in the SR string to keep the announcement
-      // compact — the visible UI shows both numerics, but the SR description
-      // is one or the other.
+      var (high, low) = IsCelsius ? (d.HighC, d.LowC) : (d.HighF, d.LowF);
       sb.Append($"{d.DayName} {d.ConditionShort}, high {high} {unit}, low {low} {unit}. ");
     }
     return sb.ToString();
@@ -144,10 +242,11 @@
 
   /// <summary>
   /// Resolves a stable IconKey (produced by NwsIconMapper) to a Material
-  /// Symbols Rounded name. The mapping is pinned by HANDOFF §4 — the left
-  /// column is what NwsIconMapper emits, the right column is what we render.
-  /// Unknown keys (including the explicit "unknown" fallback) resolve to
-  /// cloud_off so the pane never renders a blank icon slot.
+  /// Symbols Rounded name. The mapping is pinned by v1 HANDOFF §4 and
+  /// referenced verbatim by the v2 spec §5 — the same Material Symbol name
+  /// renders at 96 px in the primary block and at 48 px in today's card.
+  /// Unknown keys resolve to cloud_off so the pane never renders a blank
+  /// icon slot.
   /// </summary>
   private static string IconKeyToSymbol(string iconKey) => iconKey switch
   {
