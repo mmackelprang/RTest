@@ -242,6 +242,101 @@ public class NwsWeatherServiceTests
   }
 
   [Fact]
+  public async Task GetForecastAsync_ConcurrentColdCacheCallers_OnlyOneUpstreamPointsCall()
+  {
+    // Regression guard for the cache-stampede MAJOR caught in the PR #415
+    // first review. IMemoryCache.GetOrCreateAsync does NOT debounce
+    // concurrent first-fills — without the per-ZIP semaphore in
+    // NwsWeatherService.GetOrFillCoordsAsync / GetOrFillGridAsync, two
+    // simultaneous callers will both hit zippopotam.us AND the /points
+    // endpoint for the same ZIP.
+    //
+    // Use a non-default ZIP (10001) so the coords step actually hits the
+    // resolver's network path (the default 27312 is in the fallback table
+    // and short-circuits without any zippopotam.us call). The resolver's
+    // response is held by a gate so both callers are guaranteed to overlap
+    // inside the would-be stampede window.
+    var zippopotamCalls = 0;
+    var pointsCalls = 0;
+    var forecastCalls = 0;
+    var gate = new SemaphoreSlim(0, int.MaxValue);
+
+    var handler = new Mock<HttpMessageHandler>(MockBehavior.Strict);
+    handler.Protected()
+      .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+      .Returns<HttpRequestMessage, CancellationToken>(async (req, _) =>
+      {
+        var uri = req.RequestUri!;
+        if (uri.Host == "api.zippopotam.us")
+        {
+          Interlocked.Increment(ref zippopotamCalls);
+          // Hold the first caller inside the resolver call so the second
+          // caller has time to arrive and (if the lock is missing) race past.
+          await gate.WaitAsync().ConfigureAwait(false);
+          return new HttpResponseMessage(HttpStatusCode.OK)
+          {
+            Content = new StringContent(
+              """{"post code":"10001","places":[{"place name":"New York","longitude":"-73.9967","state":"New York","state abbreviation":"NY","latitude":"40.7484"}]}""",
+              System.Text.Encoding.UTF8, "application/json"),
+          };
+        }
+        if (uri.AbsolutePath.StartsWith("/points/", StringComparison.Ordinal))
+        {
+          Interlocked.Increment(ref pointsCalls);
+          await gate.WaitAsync().ConfigureAwait(false);
+          return new HttpResponseMessage(HttpStatusCode.OK)
+          {
+            Content = new StringContent(
+              """{"properties":{"forecast":"https://api.weather.gov/gridpoints/OKX/33,35/forecast","relativeLocation":{"properties":{"city":"New York","state":"NY"}}}}""",
+              System.Text.Encoding.UTF8, "application/geo+json"),
+          };
+        }
+        if (uri.IsAbsoluteUri && uri.AbsoluteUri.StartsWith("https://api.weather.gov/gridpoints", StringComparison.Ordinal))
+        {
+          Interlocked.Increment(ref forecastCalls);
+          return new HttpResponseMessage(HttpStatusCode.OK)
+          {
+            Content = new StringContent(ForecastResponseBody(DateTimeOffset.UtcNow), System.Text.Encoding.UTF8, "application/geo+json"),
+          };
+        }
+        return new HttpResponseMessage(HttpStatusCode.NotFound);
+      });
+
+    var factory = MakeFactory(handler.Object);
+    var options = new TestMonitor<WeatherDisplayOptions>(new WeatherDisplayOptions { Enabled = true, RefreshIntervalMinutes = 60 });
+    var cache = new MemoryCache(new MemoryCacheOptions());
+    var resolver = new ZipCoordinatesResolver(factory.Object, NullLogger<ZipCoordinatesResolver>.Instance);
+    var svc = new NwsWeatherService(factory.Object, resolver, cache, options, NullLogger<NwsWeatherService>.Instance);
+
+    // Fire two cold-cache callers concurrently.
+    var t1 = Task.Run(() => svc.GetForecastAsync("10001"));
+    var t2 = Task.Run(() => svc.GetForecastAsync("10001"));
+
+    // Give both Task.Run continuations time to reach the gated coords call.
+    // The second caller will be blocked on the per-ZIP semaphore — if the
+    // semaphore is missing, it would race past and hit the gate as a second
+    // pending zippopotam.us request, which would push the counter to 2 BEFORE
+    // we release the gate.
+    await Task.Delay(100);
+    // Release the gated zippopotam.us call first, then the /points call.
+    gate.Release(1);
+    await Task.Delay(50);
+    gate.Release(1);
+
+    var results = await Task.WhenAll(t1, t2);
+
+    // Both callers got a real forecast back.
+    Assert.All(results, r => Assert.NotNull(r));
+    // The MUST-HAVE assertions — both upstream chains hit exactly once.
+    Assert.Equal(1, zippopotamCalls);
+    Assert.Equal(1, pointsCalls);
+    // Forecast may be 1 or 2 — the spec ONLY guards coords + grid, the
+    // forecast step is intentionally unlocked (tolerates one duplicate
+    // refresh per fresh-TTL boundary). Just sanity-check it ran at least once.
+    Assert.True(forecastCalls >= 1, $"expected at least one forecast call, got {forecastCalls}");
+  }
+
+  [Fact]
   public async Task GetForecastAsync_StaleEntry_RefreshFails_ReturnsStale()
   {
     // First fetch succeeds. Then we age the cache past the fresh TTL and the

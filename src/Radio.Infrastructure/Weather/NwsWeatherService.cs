@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Caching.Memory;
@@ -40,6 +41,21 @@ public sealed class NwsWeatherService : IWeatherService
   // fresh-TTL (configurable) and a stale-serve TTL (24h hard ceiling).
   private static readonly TimeSpan GridCacheTtl = TimeSpan.FromDays(30);
   private static readonly TimeSpan StaleServeHorizon = TimeSpan.FromHours(24);
+
+  // Per-ZIP semaphores serialize cold-cache fills for the coords and grid
+  // steps so two simultaneous callers can't both invoke the async factory
+  // (the IMemoryCache.GetOrCreateAsync pitfall — it does NOT debounce
+  // concurrent first-fills). Static + ConcurrentDictionary because all
+  // instances of the service share the same cache; allocating a SemaphoreSlim
+  // per ZIP is cheaper than letting zippopotam.us / NWS see duplicate first
+  // calls on every cold start.
+  //
+  // The forecast cache is NOT lock-guarded — its stale-while-revalidate path
+  // is designed to tolerate a duplicate refresh on rare race (worst case:
+  // one extra forecast fetch per fresh-TTL boundary), and adding a third
+  // semaphore tier would just queue requests behind a slow upstream call.
+  private static readonly ConcurrentDictionary<string, SemaphoreSlim> _coordsLocks = new(StringComparer.Ordinal);
+  private static readonly ConcurrentDictionary<string, SemaphoreSlim> _gridLocks = new(StringComparer.Ordinal);
 
   public NwsWeatherService(
     IHttpClientFactory httpClientFactory,
@@ -143,14 +159,8 @@ public sealed class NwsWeatherService : IWeatherService
   private async Task<CachedForecast?> FetchForecastAsync(string zip, CancellationToken ct)
   {
     // Step 1 — coords. Cached per process lifetime (centroids don't move).
-    var coordsKey = CoordsKeyPrefix + zip + CoordsKeySuffix;
-    var coords = await _cache.GetOrCreateAsync(coordsKey, async entry =>
-    {
-      // No expiry — re-resolving the same ZIP for the same process is wasted bandwidth.
-      entry.Priority = CacheItemPriority.NeverRemove;
-      return await _zipResolver.ResolveAsync(zip, ct).ConfigureAwait(false);
-    }).ConfigureAwait(false);
-
+    // Stampede-guarded: see GetOrFillCoordsAsync.
+    var coords = await GetOrFillCoordsAsync(zip, ct).ConfigureAwait(false);
     if (coords is null)
     {
       _logger.LogInformation("Skipping forecast fetch — ZIP {Zip} did not resolve to coordinates", zip);
@@ -158,13 +168,8 @@ public sealed class NwsWeatherService : IWeatherService
     }
 
     // Step 2 — grid. Cached for 30 days (NWS grid assignments are stable).
-    var gridKey = GridKeyPrefix + zip + GridKeySuffix;
-    var gridInfo = await _cache.GetOrCreateAsync(gridKey, async entry =>
-    {
-      entry.AbsoluteExpirationRelativeToNow = GridCacheTtl;
-      return await FetchPointsAsync(coords, ct).ConfigureAwait(false);
-    }).ConfigureAwait(false);
-
+    // Stampede-guarded: see GetOrFillGridAsync.
+    var gridInfo = await GetOrFillGridAsync(zip, coords, ct).ConfigureAwait(false);
     if (gridInfo is null || string.IsNullOrEmpty(gridInfo.ForecastUrl))
     {
       throw new InvalidOperationException($"NWS points endpoint did not return a forecast URL for ZIP {zip}");
@@ -189,6 +194,93 @@ public sealed class NwsWeatherService : IWeatherService
       Days: days);
 
     return new CachedForecast(forecast, DateTimeOffset.UtcNow);
+  }
+
+  /// <summary>
+  /// Fetches ZIP coordinates with stampede protection — double-checked cache
+  /// inspection around a per-ZIP <see cref="SemaphoreSlim"/> so two
+  /// simultaneous cold-cache callers don't both hit zippopotam.us. This
+  /// fixes the <see cref="IMemoryCache.GetOrCreateAsync"/> concurrency
+  /// pitfall flagged in the PR #415 first review.
+  /// </summary>
+  private async Task<ZipCoordinates?> GetOrFillCoordsAsync(string zip, CancellationToken ct)
+  {
+    var key = CoordsKeyPrefix + zip + CoordsKeySuffix;
+    if (_cache.TryGetValue<ZipCoordinates>(key, out var cached) && cached is not null)
+    {
+      return cached;
+    }
+
+    var sem = _coordsLocks.GetOrAdd(zip, _ => new SemaphoreSlim(1, 1));
+    await sem.WaitAsync(ct).ConfigureAwait(false);
+    try
+    {
+      // Re-check after acquiring the lock — another caller may have filled
+      // the cache while we waited. Without this guard, the second caller in
+      // would still issue a redundant upstream call.
+      if (_cache.TryGetValue<ZipCoordinates>(key, out cached) && cached is not null)
+      {
+        return cached;
+      }
+
+      var fresh = await _zipResolver.ResolveAsync(zip, ct).ConfigureAwait(false);
+      if (fresh is not null)
+      {
+        // No expiry — ADR §2.2 says coords are cached for process lifetime
+        // (ZIP centroids do not move). NeverRemove keeps the entry alive
+        // under memory pressure too.
+        _cache.Set(key, fresh, new MemoryCacheEntryOptions
+        {
+          Priority = CacheItemPriority.NeverRemove,
+        });
+      }
+      // Note: a null result is NOT cached — we want a future ResolveAsync
+      // call to retry (transient network failure vs. genuinely unknown ZIP
+      // are indistinguishable here, and re-asking later is cheap).
+      return fresh;
+    }
+    finally
+    {
+      sem.Release();
+    }
+  }
+
+  /// <summary>
+  /// Fetches the NWS grid info for a ZIP with the same stampede protection
+  /// as <see cref="GetOrFillCoordsAsync"/>. Grid assignments are stable per
+  /// ADR §2.2 — cached for 30 days.
+  /// </summary>
+  private async Task<GridInfo?> GetOrFillGridAsync(string zip, ZipCoordinates coords, CancellationToken ct)
+  {
+    var key = GridKeyPrefix + zip + GridKeySuffix;
+    if (_cache.TryGetValue<GridInfo>(key, out var cached) && cached is not null)
+    {
+      return cached;
+    }
+
+    var sem = _gridLocks.GetOrAdd(zip, _ => new SemaphoreSlim(1, 1));
+    await sem.WaitAsync(ct).ConfigureAwait(false);
+    try
+    {
+      if (_cache.TryGetValue<GridInfo>(key, out cached) && cached is not null)
+      {
+        return cached;
+      }
+
+      var fresh = await FetchPointsAsync(coords, ct).ConfigureAwait(false);
+      if (fresh is not null)
+      {
+        _cache.Set(key, fresh, new MemoryCacheEntryOptions
+        {
+          AbsoluteExpirationRelativeToNow = GridCacheTtl,
+        });
+      }
+      return fresh;
+    }
+    finally
+    {
+      sem.Release();
+    }
   }
 
   private async Task<GridInfo?> FetchPointsAsync(ZipCoordinates coords, CancellationToken ct)
