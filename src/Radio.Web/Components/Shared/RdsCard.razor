@@ -1,45 +1,59 @@
 @* RDS Card — single visual unit grouping the three RDS fields exposed by the
    tuner: the "RDS" label tag, the PS station name (blue), the optional PTY
-   chip, and (NEW) the accumulating RadioText (RT) marquee on a second row.
+   chip, and the accumulating RadioText (RT) marquee.
 
    Mounts above the frequency well in RadioControlPanel. PR 3 of the Radio
    Controller Polish arc (handoff §P1·1 step 3) introduced the original
-   PS/PTY-only form. PR #414 added the standalone <RdsScrollMarquee> BELOW
+   PS/PTY-only form. PR #414 added a standalone <RdsScrollMarquee> BELOW
    the frequency well, which read as a doubled RDS surface to the user
-   ("RDS data shown twice"). This card now hosts the marquee inline so all
-   RDS info lives in one card under the "RDS" tag with the blue text. *@
+   ("RDS data shown twice"). PR #416 then nested the marquee as a SECOND
+   row inside this card — which fixed the duplication but pushed the
+   frequency display + STEREO badge out of view at the project's 1920×720
+   viewport.
+
+   This revision (HANDOFF-rds-inline-scroll-revision.md, option (c))
+   collapses the card back to a single row: the light-blue PS slot itself
+   BECOMES the marquee surface. When RT is present, the track text is
+   "{PS} • {RT}" — station identity anchors the head, then accumulating
+   RT scrolls after a bullet separator. When RT is empty, render the
+   original static PS span (no animation). When PS is empty but RT is
+   present (transient tune-in), render the marquee with just RT (no
+   leading separator). When both are empty, the @if gate hides the card. *@
 
 @if (!string.IsNullOrEmpty(StationName) || !string.IsNullOrEmpty(RadioText))
 {
   <div class="rds-card">
-    <div class="rds-card-row">
-      <span class="rds-card-label">RDS</span>
-      @if (!string.IsNullOrEmpty(StationName))
-      {
-        <span class="rds-card-station">@StationName</span>
-      }
-      else
-      {
-        @* Spacer keeps the PTY chip pushed to the right when PS is missing
-           but RT is present — so the row geometry stays stable as PS comes
-           and goes during a tune. *@
-        <span class="rds-card-station-spacer"></span>
-      }
-      @if (!string.IsNullOrEmpty(ProgramType))
-      {
-        <span class="rds-card-pty">@ProgramType</span>
-      }
-    </div>
+    <span class="rds-card-label">RDS</span>
     @if (!string.IsNullOrEmpty(RadioText))
     {
-      @* Inline marquee — the same component PR #414 originally placed
-         standalone below the frequency well, now nested inside the RDS
-         card so it shares the "RDS" tag header and visual surround. The
-         marquee handles its own collapse-when-empty inside the
-         component, so passing through an empty string would render
-         nothing — but the @if above already gates on non-empty. *@
-      <RdsScrollMarquee Text="@RadioText"
+      @* Inline marquee fills the PS slot. Track text composition:
+         - PS + RT  → "{PS}{Separator}{RT}" (single continuous scroll string)
+         - PS empty → "{RT}" alone (no leading separator)
+         The CSS override .rds-card .rcp-rds-rt-track restyles the track
+         to inherit PS typography (blue 14 px 700) so the marquee reads
+         as the PS slot rather than as the dim 11 px standalone variant. *@
+      var trackText = string.IsNullOrEmpty(StationName)
+        ? RadioText
+        : $"{StationName}{Separator}{RadioText}";
+      <RdsScrollMarquee Text="@trackText"
                         ScrollSpeedPxPerSec="@ScrollSpeedPxPerSec" />
+    }
+    else if (!string.IsNullOrEmpty(StationName))
+    {
+      @* RT empty → static PS only. Preserves the pre-#414 behaviour:
+         single short station name should not scroll. *@
+      <span class="rds-card-station">@StationName</span>
+    }
+    else
+    {
+      @* Defensive — outer @if already rules out the both-empty case, but
+         keeping a spacer here mirrors the prior intent that the row
+         geometry remain stable if both fields are momentarily null. *@
+      <span class="rds-card-station-spacer"></span>
+    }
+    @if (!string.IsNullOrEmpty(ProgramType))
+    {
+      <span class="rds-card-pty">@ProgramType</span>
     }
   </div>
 }
@@ -49,8 +63,8 @@
   /// RDS Program Service station name (PS field, up to 8 characters). Optional
   /// — when null/empty AND <see cref="RadioText"/> is also null/empty the
   /// card renders nothing at all. When null/empty but RT is present, the
-  /// station-name slot is left blank and the card still renders so RT can
-  /// scroll on its own.
+  /// station-name slot is left blank and the marquee renders just the RT
+  /// (no leading separator).
   /// </summary>
   [Parameter] public string? StationName { get; set; }
 
@@ -62,9 +76,10 @@
 
   /// <summary>
   /// Accumulating RDS RadioText (RT) buffer text rendered as a scrolling
-  /// marquee on the second row of the card. Optional — when null/empty the
-  /// marquee row is omitted and the card renders only the PS/PTY row.
-  /// Caller passes the post-accumulation, post-dedup string from the
+  /// marquee in the PS slot (post-revision). Optional — when null/empty the
+  /// PS slot reverts to a static <c>&lt;span class="rds-card-station"&gt;</c>
+  /// and no marquee renders. Caller passes the post-accumulation, post-dedup
+  /// string from the
   /// <see cref="Radio.Web.Services.Rds.RdsAccumulatingScrollBuffer"/>.
   /// </summary>
   [Parameter] public string? RadioText { get; set; }
@@ -75,4 +90,14 @@
   /// that don't care about per-instance tuning can omit this parameter.
   /// </summary>
   [Parameter] public int ScrollSpeedPxPerSec { get; set; } = 40;
+
+  /// <summary>
+  /// Glyph inserted between the PS station name and the RT buffer when both
+  /// are present (e.g. <c>"Eagles • Green Day · Hotel California"</c>).
+  /// Defaults to <c>" • "</c> to match <see cref="Models.RdsScrollOptions.RtChunkSeparator"/>
+  /// so the PS↔RT join visually matches the inter-chunk joins inside the RT
+  /// buffer. <see cref="RadioControlPanel"/> threads the configured option
+  /// value through; tests can pass an explicit value to assert on it.
+  /// </summary>
+  [Parameter] public string Separator { get; set; } = " • ";
 }

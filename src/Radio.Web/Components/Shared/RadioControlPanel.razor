@@ -68,18 +68,21 @@
       }
 
       <!-- RDS card — mounted ABOVE the frequency well (handoff §P1·1 step 3).
-           Hosts the PS station name + PTY chip AND (post-fix) the
-           accumulating RT marquee on a second row inside the same card.
-           PR #414's first cut placed the marquee as a standalone block
-           BELOW the frequency well, which read as a doubled RDS surface
-           to the user — the bug fix consolidates all RDS info into this
-           single card under one "RDS" tag header so the RT data scrolls
-           inside the bar with the blue station-name text.
-           HANDOFF-rds-accumulating-scroll. -->
+           Single-row layout (post HANDOFF-rds-inline-scroll-revision): the
+           light-blue PS slot itself becomes the marquee surface when RT is
+           present, so PS identity + accumulating RT share one continuous
+           scroll string like "Eagles • Green Day · Hotel California".
+           Collapses the two-row card PR #416 shipped — that variant pushed
+           the frequency display + STEREO badge below the visible viewport
+           at 1920×720.
+           Separator is threaded from the SQLite-backed RdsScrollOptions so
+           the PS↔RT join visually matches the inter-chunk joins inside
+           the RT buffer. -->
       <RdsCard StationName="@_radioState.RdsStationName"
                ProgramType="@_radioState.RdsProgramType"
                RadioText="@_rdsBuffer.Text"
-               ScrollSpeedPxPerSec="@_rdsScrollOptions.RtScrollSpeedPxPerSec" />
+               ScrollSpeedPxPerSec="@_rdsScrollOptions.RtScrollSpeedPxPerSec"
+               Separator="@_rdsScrollOptions.RtChunkSeparator" />
 
       <!-- Frequency display -->
       <div class="rcp-freq-well">
