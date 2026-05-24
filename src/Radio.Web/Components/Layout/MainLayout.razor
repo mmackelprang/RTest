@@ -1,4 +1,5 @@
 @inherits LayoutComponentBase
+@using Radio.Web.Formatting
 @using Radio.Web.Models
 @using Microsoft.Extensions.Options
 @inject SystemApiService SystemApi
@@ -14,6 +15,7 @@
 @inject Radio.Web.Services.GainPopoverService GainPopover
 @inject IConfiguration Configuration
 @inject IOptionsMonitor<DevicesOptions> DevicesOptionsMonitor
+@inject IOptionsMonitor<DisplayOptions> DisplayOptionsMonitor
 @implements IDisposable
 @implements IAsyncDisposable
 
@@ -217,6 +219,10 @@
 </div>
 
 @code {
+  // Seeded with the default 24h, no-seconds form at field-init time so the topbar
+  // renders something sensible before OnInitializedAsync runs. The real format
+  // (honoring the user's Display:TimeFormat / Display:ShowSeconds settings) is
+  // applied at the bottom of OnInitializedAsync and on every subsequent timer tick.
   private string _currentTime = DateTime.Now.ToString("HH:mm");
   private string _cpuUsage = "0";
   private string _ramUsage = "0";
@@ -288,8 +294,10 @@
       // Load initial state
       await RefreshQueueCountAsync();
 
-      // Update time immediately
-      _currentTime = DateTime.Now.ToString("HH:mm");
+      // Update time immediately. Routed through Clocks.FormatWallClock so the
+      // user's saved Display:TimeFormat / Display:ShowSeconds preferences are
+      // honored from first paint — not just on the next timer tick.
+      _currentTime = Clocks.FormatWallClock(DateTime.Now, DisplayOptionsMonitor.CurrentValue);
       Logger.LogDebug("MainLayout - Initial time set to {Time}", _currentTime);
 
       // Start the clock timer using System.Timers.Timer (works reliably in Blazor Server)
@@ -383,7 +391,11 @@
 
   private void OnTimerElapsed(object? sender, System.Timers.ElapsedEventArgs e)
   {
-    _currentTime = DateTime.Now.ToString("HH:mm");
+    // Read DisplayOptionsMonitor.CurrentValue on every tick so saves from the
+    // System Configuration page repaint the topbar Time cluster within 1 s of
+    // the SQLite-bridge change-token fire — no extra OnChange subscription
+    // required, no circuit restart.
+    _currentTime = Clocks.FormatWallClock(DateTime.Now, DisplayOptionsMonitor.CurrentValue);
 
     try
     {

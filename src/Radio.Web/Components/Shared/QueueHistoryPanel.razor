@@ -1,4 +1,7 @@
 @rendermode InteractiveServer
+@using Microsoft.Extensions.Options
+@using Radio.Web.Formatting
+@using Radio.Web.Models
 @using Radio.Web.Services.ApiClients
 @inject QueueApiService QueueApi
 @inject PlayHistoryApiService HistoryApi
@@ -11,6 +14,7 @@
 @inject Radio.Web.Services.QueuePersistenceService QueuePersistence
 @inject PlaylistApiService PlaylistApi
 @inject SourcesApiService SourcesApi
+@inject IOptionsMonitor<DisplayOptions> DisplayOptionsMonitor
 @implements IAsyncDisposable
 
 @*
@@ -306,7 +310,12 @@
           @_queueItems.Count track@(_queueItems.Count == 1 ? "" : "s")
           @if (_totalRuntime > TimeSpan.Zero)
           {
-            <text> · ends ~@(DateTime.Now.Add(_totalRuntime).ToString("HH:mm"))</text>
+            @* Forward-looking estimate, not a wall clock — pass allowSeconds: false
+               so the user's global ShowSeconds setting can't introduce :ss precision
+               that's meaningless for a track-total prediction. The 12h/24h flip is
+               honored so this string reads consistently with the topbar Time cluster
+               (handoff §3.4 + §8 open question 3). *@
+            <text> · ends ~@(Clocks.FormatWallClock(DateTime.Now.Add(_totalRuntime), DisplayOptionsMonitor.CurrentValue, allowSeconds: false))</text>
           }
         </div>
       </div>

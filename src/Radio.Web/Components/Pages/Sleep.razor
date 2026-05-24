@@ -1,9 +1,13 @@
 @page "/sleep"
 @layout Radio.Web.Components.Layout.EmptyLayout
+@using Microsoft.Extensions.Options
+@using Radio.Web.Formatting
+@using Radio.Web.Models
 @inject NavigationManager Nav
 @inject SystemApiService SystemApi
 @inject AudioApiService AudioApi
 @inject AudioStateHubService AudioState
+@inject IOptionsMonitor<DisplayOptions> DisplayOptionsMonitor
 @inject ILogger<Sleep> Logger
 @implements IAsyncDisposable
 
@@ -151,7 +155,15 @@
     }
   }
 
-  private void UpdateClock() => _clockText = DateTime.Now.ToString("HH:mm");
+  // The clock text is rebuilt every 1 s. We read DisplayOptionsMonitor.CurrentValue
+  // on each tick so the format flip (24h↔12h, seconds on/off) applied from the
+  // System Configuration page repaints the sleep clock within the next 1 s — no
+  // circuit restart, no event subscription required. The helper honors the
+  // global ShowSeconds setting (allowSeconds: true by default) — the user opted
+  // in deliberately if they turned it on, and the sleep clock honors that
+  // everywhere (handoff §8 open question 4).
+  private void UpdateClock()
+    => _clockText = Clocks.FormatWallClock(DateTime.Now, DisplayOptionsMonitor.CurrentValue);
 
   /// <summary>
   /// Picks a new random offset within ±DriftAmplitude × viewport from center and

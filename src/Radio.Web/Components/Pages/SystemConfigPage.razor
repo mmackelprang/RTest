@@ -296,6 +296,49 @@
           }
         </RadzenTabsItem>
 
+        <!-- Display Configuration -->
+        @* Wall-clock format settings (12h/24h + seconds). Hot-reloads via the
+           SQLite-config bridge → IOptionsMonitor<DisplayOptions>; the topbar
+           Time cluster, Sleep screen, and Queue ends-prediction repaint on
+           their next 1 s tick. See HANDOFF-configurable-time-format.md §6. *@
+        <RadzenTabsItem Text="Display" Icon="schedule">
+          @if (_displayConfig != null)
+          {
+            <RadzenRow Gap="0.5rem">
+              <RadzenColumn Size="12">
+                <RadzenAlert AlertStyle="AlertStyle.Info" Size="AlertSize.Small" AllowClose="false">
+                  Controls how the kiosk renders the wall clock. Applies to the topbar Time cluster, the sleep screen, and the queue end-time prediction. Saves take effect within ~1 second — no restart required.
+                </RadzenAlert>
+              </RadzenColumn>
+              <RadzenColumn Size="12" SizeMD="6">
+                <RadzenDropDown TValue="string" @bind-Value="_displayConfig.TimeFormat"
+                                Data="@_timeFormatOptions"
+                                TextProperty="Text" ValueProperty="Value"
+                                Placeholder="Time Format" Style="width:100%"
+                                aria-label="Time format" />
+                <small>24-hour matches the historical default. Affects topbar clock, sleep screen, and queue end-time predictions.</small>
+              </RadzenColumn>
+              <RadzenColumn Size="12" SizeMD="6">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <RadzenCheckBox TValue="bool" @bind-Value="_displayConfig.ShowSeconds"
+                                  aria-label="Show seconds in wall clocks" />
+                  <span>Show seconds</span>
+                </div>
+                <small>Adds <code>:ss</code> to the topbar and sleep clocks (e.g. <code>15:45:22</code> / <code>3:45:22 PM</code>). Off by default — the sleep screen is designed to be calm. Queue end-time always omits seconds regardless of this setting.</small>
+              </RadzenColumn>
+              <RadzenColumn Size="12">
+                <RadzenButton Variant="Variant.Filled" ButtonStyle="ButtonStyle.Primary" Click="SaveDisplayConfigAsync"
+                              Icon="save" Disabled="@_isSaving" Text="Save Display Settings" />
+              </RadzenColumn>
+            </RadzenRow>
+          }
+          else
+          {
+            <RadzenProgressBarCircular ProgressBarStyle="ProgressBarStyle.Primary" Size="ProgressBarCircularSize.Small" Mode="ProgressBarMode.Indeterminate" />
+            <span style="margin-left:8px">Loading display configuration...</span>
+          }
+        </RadzenTabsItem>
+
         <!-- Audio Engine Configuration -->
         <RadzenTabsItem Text="Audio Engine">
           @if (_audioEngineConfig != null)
@@ -1623,6 +1666,11 @@
   private TTSConfigDto? _ttsConfig;
   private MetricsConfigDto? _metricsConfig;
   private AudioEngineConfigDto? _audioEngineConfig;
+  // Display:* wall-clock format settings. The POCO doubles as both the bound
+  // form model and the IOptionsMonitor target — reusable because it has only
+  // public get/set primitives. Hot-reload propagation happens via the
+  // SQLite-bridge → IOptionsMonitor pipeline (no extra wiring needed here).
+  private DisplayOptions? _displayConfig;
   private bool _isSaving = false;
 
   // Preferences
@@ -1763,6 +1811,15 @@
     new("AM", "AM"), new("FM", "FM"), new("WB (Weather Band)", "WB"), new("VHF", "VHF"), new("SW (Shortwave)", "SW")
   };
 
+  // Display:TimeFormat options. Values match DisplayOptions.TimeFormat ("12h"/"24h");
+  // labels carry a parenthesised exemplar so screen-reader users get an unambiguous
+  // read of what each option produces without scrubbing between them.
+  private static readonly List<DropDownItem> _timeFormatOptions = new()
+  {
+    new("12-hour (3:45 PM)", "12h"),
+    new("24-hour (15:45)", "24h"),
+  };
+
   // Dynamic dropdown data computed from runtime state
   private IEnumerable<DropDownItem> _availableTTSEngineOptions =>
     _ttsEngines?.Where(e => e.IsAvailable).Select(e => new DropDownItem($"{e.Name} {(e.IsOffline ? "(Offline)" : "(Online)")}", e.Engine))
@@ -1896,6 +1953,11 @@
       // Load device options, create default if not found
       var deviceOptions = await ConfigApi.GetConfigurationAsync<DeviceOptionsDto>("devices");
       _deviceOptions = deviceOptions ?? new DeviceOptionsDto();
+
+      // Load display options. Falls through to defaults (24h, no seconds) when
+      // the section has never been saved — matches the historical hardcoded
+      // behaviour so an unconfigured kiosk renders identically to the pre-PR build.
+      _displayConfig = await ConfigApi.GetConfigurationAsync<DisplayOptions>("display") ?? new DisplayOptions();
 
       // Load additional configuration sections
       _bluetoothConfig = await ConfigApi.GetConfigurationAsync<BluetoothConfigDto>("bluetooth") ?? new();
@@ -2462,6 +2524,44 @@
     catch (Exception ex)
     {
       NotificationService.Notify(NotificationSeverity.Error, "Error", $"Error saving device configuration: {ex.Message}");
+    }
+    finally
+    {
+      _isSaving = false;
+    }
+  }
+
+  private async Task SaveDisplayConfigAsync()
+  {
+    _isSaving = true;
+    try
+    {
+      if (_displayConfig == null)
+      {
+        NotificationService.Notify(NotificationSeverity.Error, "Error", "Display configuration is not loaded");
+        return;
+      }
+
+      // POST the whole section. The API server writes through ConfigurationManager,
+      // which fires ConfigStoreChangeNotifier.NotifyReload(); SqliteConfigurationProvider
+      // re-reads the table; IOptionsMonitor<DisplayOptions>.OnChange fires; the three
+      // wall-clock consumers (MainLayout, Sleep, QueueHistoryPanel) pick up the new
+      // CurrentValue on their next 1 s tick. No restart, no circuit drop.
+      var success = await ConfigApi.UpdateConfigurationAsync("display", _displayConfig);
+      if (success)
+      {
+        NotificationService.Notify(NotificationSeverity.Success, "Success", "Display configuration saved successfully");
+        Logger.LogInformation("Display configuration updated: TimeFormat={TimeFormat}, ShowSeconds={ShowSeconds}",
+          _displayConfig.TimeFormat, _displayConfig.ShowSeconds);
+      }
+      else
+      {
+        NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to save display configuration");
+      }
+    }
+    catch (Exception ex)
+    {
+      NotificationService.Notify(NotificationSeverity.Error, "Error", $"Error saving display configuration: {ex.Message}");
     }
     finally
     {
