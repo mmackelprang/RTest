@@ -3603,6 +3603,121 @@ body {
   box-sizing: border-box;
 }
 
+/* ─── RDS accumulating scroll marquee ────────────────────────────────────────
+   Replaces the legacy chunk-per-display rcp-rds-rt strip with a rolling,
+   continuously-scrolling ticker. CSS keyframes on transform: translateX so
+   the animation runs on the GPU compositor thread — keeps the audio-pipeline-
+   sensitive main thread free.
+
+   Spec: HANDOFF-rds-accumulating-scroll §4 (CSS choice rationale) and §7
+   (accessibility — pause-on-hover/focus, reduced-motion fallback, sr-only
+   aria-live mirror).
+*/
+.rcp-rds-rt-scroll {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  margin-top: 4px;
+  padding: 4px 0;
+  height: 1.6em;
+  overflow: hidden;
+  box-sizing: border-box;
+  cursor: default;
+  /* Edge fade gradients so chars enter/exit smoothly rather than clipping
+     at a hard rectangle border. 8 px each side matches the radio controller
+     handoff's soft-edge well chrome. */
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    black 8px,
+    black calc(100% - 8px),
+    transparent 100%);
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    black 8px,
+    black calc(100% - 8px),
+    transparent 100%);
+}
+
+/* Hover affordance — subtle 1 px outline so the user knows the strip is
+   interactive (focus-pause / hover-pause). Pause itself lives on the
+   .rcp-rds-rt-track rule below. */
+.rcp-rds-rt-scroll:hover,
+.rcp-rds-rt-scroll:focus,
+.rcp-rds-rt-scroll:focus-within {
+  outline: 1px solid rgba(255, 255, 255, 0.12);
+  outline-offset: -1px;
+}
+
+.rcp-rds-rt-track {
+  display: inline-block;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-low);
+  letter-spacing: 0.04em;
+  /* Right-to-left scroll — standard ticker convention. Starts off the
+     right edge (100%) and runs until fully off the left edge (-100%).
+     --scroll-duration is set inline per render by the Razor component so
+     the px/s speed stays constant regardless of buffer length. */
+  animation: rcp-rds-rt-scroll var(--scroll-duration, 17s) linear infinite;
+  will-change: transform;
+}
+
+@keyframes rcp-rds-rt-scroll {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(-100%); }
+}
+
+/* Pause-on-hover and pause-on-focus. CSS pause honours the current keyframe
+   offset exactly — no drift, no JS state. Auto-resumes on un-hover / blur. */
+.rcp-rds-rt-scroll:hover .rcp-rds-rt-track,
+.rcp-rds-rt-scroll:focus .rcp-rds-rt-track,
+.rcp-rds-rt-scroll:focus-within .rcp-rds-rt-track {
+  animation-play-state: paused;
+}
+
+/* Static-fit variant — when buffer width <= container width, the parent
+   component adds .is-static and we skip the marquee animation entirely.
+   Feels less twitchy on stations with a single short tagline (HANDOFF §8 q8). */
+.rcp-rds-rt-scroll.is-static .rcp-rds-rt-track {
+  animation: none;
+  transform: none;
+  display: block;
+  text-align: center;
+  will-change: auto;
+}
+
+/* Reduced-motion fallback — disable the marquee, fall back to a thin
+   horizontal scrollbar so motion-sensitive users can read the buffer at
+   their own pace (HANDOFF §7). */
+@media (prefers-reduced-motion: reduce) {
+  .rcp-rds-rt-track {
+    animation: none;
+    transform: none;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    will-change: auto;
+  }
+}
+
+/* SR-only mirror for the aria-live region. Standard sr-only pattern —
+   positioned off-screen but still accessible to assistive tech. The Razor
+   component sets aria-live="polite" on this element; screen readers
+   announce the full buffer when its text content changes. */
+.rcp-rds-rt-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ─── §X  Memory Presets Grid (PR 3) ──────────────────────────────────────── *
    Implements handoff §P1·2 — preset rows become a CSS grid (slot · text · freq),
    slot numbers are always visible (not hover-only), and the save action is a
