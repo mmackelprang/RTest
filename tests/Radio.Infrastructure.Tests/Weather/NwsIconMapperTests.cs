@@ -33,11 +33,22 @@ public class NwsIconMapperTests
   // ── Thunderstorm ──────────────────────────────────────────────────────────
   [InlineData("https://api.weather.gov/icons/land/day/tsra", "thunderstorm")]
   [InlineData("https://api.weather.gov/icons/land/day/tsra_sct", "thunderstorm")]
-  // ── Snow / mix ────────────────────────────────────────────────────────────
+  // ── Snow (snow-only conditions per NWS docs) ──────────────────────────────
   [InlineData("https://api.weather.gov/icons/land/day/snow", "snow")]
   [InlineData("https://api.weather.gov/icons/land/day/blowing_snow", "snow")]
+  [InlineData("https://api.weather.gov/icons/land/day/snow_showers", "snow")]
+  // ── Sleet / wintry mix (combos with freezing rain take the mix glyph) ────
+  // These were swallowed by the snow branch in the original implementation
+  // because of a .Contains("snow") catch-all — see the regression-guard test
+  // below. Per ADR §2.6 / HANDOFF §4 they MUST render as sleet so the user
+  // sees the visually-distinct icy-mix glyph (weather_mix) instead of pure
+  // snow (weather_snowy).
   [InlineData("https://api.weather.gov/icons/land/day/sleet", "sleet")]
   [InlineData("https://api.weather.gov/icons/land/day/fzra", "sleet")]
+  [InlineData("https://api.weather.gov/icons/land/day/rain_sleet", "sleet")]
+  [InlineData("https://api.weather.gov/icons/land/day/snow_sleet", "sleet")]
+  [InlineData("https://api.weather.gov/icons/land/day/rain_fzra", "sleet")]
+  [InlineData("https://api.weather.gov/icons/land/day/snow_fzra", "sleet")]
   // ── Visibility ────────────────────────────────────────────────────────────
   [InlineData("https://api.weather.gov/icons/land/day/fog", "fog")]
   [InlineData("https://api.weather.gov/icons/land/day/haze", "fog")]
@@ -91,5 +102,23 @@ public class NwsIconMapperTests
     // NWS occasionally renders "split icons" of form .../day/sct/rain — the
     // condition we render is the FIRST half (sct in this case).
     Assert.Equal("mostly-sunny", NwsIconMapper.MapToIconKey("https://api.weather.gov/icons/land/day/sct/rain?size=medium"));
+  }
+
+  /// <summary>
+  /// Regression guard for the BLOCKER caught in the first review of PR #415:
+  /// an earlier version of the snow branch used
+  /// <c>condition.Contains("snow")</c> as a catch-all and ran BEFORE the
+  /// sleet branch, so <c>snow_fzra</c> / <c>snow_sleet</c> silently took the
+  /// snow path and rendered the wrong glyph. ADR §2.6 and HANDOFF §4 both
+  /// list those combos under <c>sleet</c>. This test pins the ordering so
+  /// the bug can't return without a red CI signal.
+  /// </summary>
+  [Theory]
+  [InlineData("https://api.weather.gov/icons/land/day/snow_fzra", "sleet")]
+  [InlineData("https://api.weather.gov/icons/land/day/snow_sleet", "sleet")]
+  [InlineData("https://api.weather.gov/icons/land/night/snow_fzra", "sleet")]
+  public void MapToIconKey_SnowCombosWithFreezingRainOrSleet_AreSleetNotSnow(string url, string expected)
+  {
+    Assert.Equal(expected, NwsIconMapper.MapToIconKey(url));
   }
 }

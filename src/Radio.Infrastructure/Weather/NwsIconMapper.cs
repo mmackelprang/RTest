@@ -107,17 +107,24 @@ public static class NwsIconMapper
       return "thunderstorm";
     }
 
-    // ---- Snow / wintry mix ----
-    if (condition is "snow" or "blowing_snow" or "snow_showers" || condition.Contains("snow", StringComparison.Ordinal))
-    {
-      // "snow_fzra" (snow + freezing rain) and similar combos still read as
-      // snow to a glanceable display — the user cares about the headline
-      // condition, not the intensity sub-class.
-      return "snow";
-    }
+    // ---- Wintry mix / sleet ----
+    // Sleet branch FIRST — combos that mix freezing rain with snow are
+    // visually distinct from pure snow (sleet renders the weather_mix glyph,
+    // snow renders weather_snowy). Per ADR §2.6 + HANDOFF §4 mapping tables,
+    // snow_fzra / snow_sleet belong here, NOT in the snow branch — using a
+    // .Contains("snow") catch-all in the snow branch would swallow them.
     if (condition is "sleet" or "fzra" or "rain_sleet" or "snow_sleet" or "rain_fzra" or "snow_fzra")
     {
       return "sleet";
+    }
+    // ---- Snow ----
+    // Explicit enumeration of the actual snow-only conditions per the NWS
+    // forecast-icons docs (skc/few/sct/bkn/ovc + snow/blowing_snow/
+    // snow_showers). NO .Contains("snow") catch-all here — we already
+    // handled the snow-combo cases in the sleet branch above.
+    if (condition is "snow" or "blowing_snow" or "snow_showers")
+    {
+      return "snow";
     }
 
     // ---- Visibility ----
