@@ -10,6 +10,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Radzen;
 using Radio.Web.Components.Shared;
 using Radio.Web.Models;
@@ -52,6 +53,12 @@ public class RadioControlPanelTests : TestContext
       new AudioStateHubService(
         NullLogger<AudioStateHubService>.Instance,
         sp.GetRequiredService<IConfiguration>()));
+
+    // HANDOFF-rds-accumulating-scroll — the panel injects
+    // IOptionsMonitor<RdsScrollOptions> for the accumulating ticker. Wire up
+    // the standard options pipeline so the binder returns a default-valued
+    // monitor; tests never override these values.
+    Services.AddOptions<RdsScrollOptions>();
   }
 
   protected override void Dispose(bool disposing)
@@ -610,12 +617,17 @@ public class RadioControlPanelTests : TestContext
   [Fact]
   public void RtLine_RendersWithTitleAttribute_WhenPresent()
   {
+    // HANDOFF-rds-accumulating-scroll — the legacy .rcp-rds-rt one-line
+    // ellipsis was replaced by the .rcp-rds-rt-scroll marquee. The visible
+    // contract is still "text shows up, title attribute carries the full
+    // string" — but the scroll container also exposes the buffer via the
+    // sr-only mirror for screen readers.
     var state = BuildState(rdsRadioText: "Now playing: Pink Floyd — Wish You Were Here");
     var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
 
-    var rt = cut.Find(".rcp-rds-rt");
+    var rt = cut.Find(".rcp-rds-rt-scroll");
     Assert.Contains("Pink Floyd", rt.TextContent);
-    // The title attribute carries the full text for accessibility / overflow tooltip
+    // The title attribute carries the full buffer text — overflow tooltip + a11y
     Assert.Equal("Now playing: Pink Floyd — Wish You Were Here", rt.GetAttribute("title"));
   }
 
@@ -625,7 +637,7 @@ public class RadioControlPanelTests : TestContext
     var state = BuildState(rdsRadioText: null);
     var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
 
-    Assert.Empty(cut.FindAll(".rcp-rds-rt"));
+    Assert.Empty(cut.FindAll(".rcp-rds-rt-scroll"));
   }
 
   [Fact]
@@ -634,7 +646,7 @@ public class RadioControlPanelTests : TestContext
     var state = BuildState(rdsRadioText: "");
     var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
 
-    Assert.Empty(cut.FindAll(".rcp-rds-rt"));
+    Assert.Empty(cut.FindAll(".rcp-rds-rt-scroll"));
   }
 
   [Fact]
