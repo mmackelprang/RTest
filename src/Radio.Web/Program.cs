@@ -1,5 +1,6 @@
 using System.Net.Sockets;
 using Radzen;
+using Radio.Configuration.Bridge;
 using Radio.Web;
 using Radio.Web.Models;
 using Radio.Web.Services;
@@ -377,6 +378,33 @@ builder.Services.AddSingleton<Radio.Web.Services.VisualizerTelemetryService>();
 // Bind Devices:Aliases → DevicesOptions so MainLayout and DeviceManagementPage can
 // inject IOptionsMonitor<DevicesOptions> to clean up raw driver names at render time.
 // Defaults to an empty alias map when the section is absent or empty.
+// Bridge the SQLite config store into Radio.Web's IConfiguration pipeline so the
+// System Config page's saves to Display:* / Radio:Rds:* keys are visible to
+// IOptionsMonitor<DisplayOptions> / IOptionsMonitor<RdsScrollOptions> consumers
+// (MainLayout topbar clock, Sleep clock, QueueHistoryPanel ends prediction,
+// RadioControlPanel RDS scroll). The API process already does this at line 31
+// of Radio.API/Program.cs; this is the symmetric Web-side registration.
+//
+// Path resolution mirrors Radio.API exactly (Database:RootPath +
+// Database:ConfigurationSubdirectory + Database:ConfigurationFileName) so both
+// services target the same DB file. On the kiosk both services run from
+// /opt/radio-console/{api,web}/ with appsettings.json overrides that point at
+// the shared ../data/config/configuration.db.
+//
+// Cross-process caveat: ConfigStoreChangeNotifier.NotifyReload() only fires
+// IOptionsMonitor change tokens within the SAME process. Saves originate in
+// radio-api, so radio-web sees them on the next circuit init (page reload) —
+// not live. Cross-process hot-reload is a deferred follow-up.
+var dbSection = builder.Configuration.GetSection("Database");
+var rootPath = dbSection["RootPath"] ?? "./data";
+var configSubdir = dbSection["ConfigurationSubdirectory"] ?? "config";
+var configFile = dbSection["ConfigurationFileName"] ?? "configuration.db";
+var configDbPath = Path.GetFullPath(Path.Combine(rootPath, configSubdir, configFile));
+
+var configStoreNotifier = new ConfigStoreChangeNotifier();
+builder.Configuration.AddSqliteConfigStore(configDbPath, "sqlite", configStoreNotifier);
+builder.Services.AddSingleton(configStoreNotifier);
+
 builder.Services.Configure<DevicesOptions>(builder.Configuration.GetSection(DevicesOptions.SectionName));
 
 // Bind Display:* → DisplayOptions for the wall-clock time-format setting.

@@ -9,6 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Radio.Core\Radio.Core.csproj" />
+    <ProjectReference Include="..\Radio.Configuration\Radio.Configuration.csproj" />
     <ProjectReference Include="..\Radio.Infrastructure\Radio.Infrastructure.csproj" />
   </ItemGroup>
   <ItemGroup>
