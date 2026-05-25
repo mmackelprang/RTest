@@ -191,19 +191,23 @@
   {
     if (CallState.CallState == "InCall" && _inCallStartUtc == null)
     {
-      _inCallStartUtc = DateTime.UtcNow;
+      var capturedStart = DateTime.UtcNow;
+      _inCallStartUtc = capturedStart;
       _durationTimer = new System.Threading.Timer(_ =>
       {
-        _inCallDuration = DateTime.UtcNow - _inCallStartUtc.Value;
+        // capturedStart is immutable — no race with OnParametersSet nulling _inCallStartUtc
+        _inCallDuration = DateTime.UtcNow - capturedStart;
         InvokeAsync(StateHasChanged);
       }, null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
     }
     else if (CallState.CallState != "InCall")
     {
-      _durationTimer?.Dispose();
+      // Dispose after nulling shared refs so an in-flight callback sees null guard
+      var timerToDispose = _durationTimer;
       _durationTimer = null;
       _inCallStartUtc = null;
       _inCallDuration = TimeSpan.Zero;
+      timerToDispose?.Dispose();
     }
   }
 

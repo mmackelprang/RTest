@@ -315,15 +315,6 @@
     await PhoneApi.SimulateIncomingCallAsync();
   }
 
-  private async Task SimulateDialAsync()
-  {
-    if (!string.IsNullOrWhiteSpace(_dialDigits))
-    {
-      await PhoneApi.SimulateDialAsync(_dialDigits);
-      _dialDigits = "";
-    }
-  }
-
   private async Task SimulateDialStringAsync()
   {
     if (!string.IsNullOrWhiteSpace(_dialDigits))
@@ -440,15 +431,6 @@
   private PbapDeviceSyncInfoDto? ConnectedDeviceSyncInfo =>
     _pbapStatus?.Devices.FirstOrDefault(d =>
       string.Equals(d.DeviceAddress, _btStatus?.ConnectedDevice?.Address, StringComparison.OrdinalIgnoreCase));
-
-  private static string FormatTimeAgo(DateTime utcTime)
-  {
-    var span = DateTime.UtcNow - utcTime;
-    if (span.TotalMinutes < 1) return "just now";
-    if (span.TotalMinutes < 60) return $"{(int)span.TotalMinutes}m ago";
-    if (span.TotalHours < 24) return $"{(int)span.TotalHours}h ago";
-    return $"{(int)span.TotalDays}d ago";
-  }
 
   private List<MergedContact> MergedContacts { get; set; } = [];
 
