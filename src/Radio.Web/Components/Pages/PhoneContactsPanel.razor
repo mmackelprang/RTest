@@ -1,0 +1,148 @@
+@using Radio.Web.Models
+
+<div class="phone-contacts">
+  @* Action bar: Sync dropdown + Add Contact *@
+  <div class="contacts-header">
+    <h3 class="phone-card-title">Contacts</h3>
+    <div style="display:flex; gap:8px; align-items:center; position:relative">
+      @* Sync from Phone dropdown *@
+      <div style="position:relative">
+        <RadzenButton Text="@(IsSyncing ? "Syncing..." : "Sync from Phone")"
+          Icon="@(IsSyncing ? "" : "smartphone")"
+          Click="@(() => ShowSyncDropdownChanged.InvokeAsync(!ShowSyncDropdown))"
+          ButtonStyle="ButtonStyle.Info" Size="ButtonSize.Small"
+          Disabled="@IsSyncing">
+          @if (IsSyncing)
+          {
+            <RadzenProgressBarCircular Size="ProgressBarCircularSize.Small"
+              Mode="ProgressBarMode.Indeterminate" Style="margin-right:4px" />
+          }
+        </RadzenButton>
+        @if (ShowSyncDropdown && BtStatus != null)
+        {
+          @* Click-away overlay *@
+          <div style="position:fixed; top:0; left:0; right:0; bottom:0; z-index:99"
+               @onclick="@(() => ShowSyncDropdownChanged.InvokeAsync(false))"
+               @onclick:stopPropagation="true"></div>
+          <div style="position:absolute; top:100%; right:0; margin-top:4px; background:var(--rz-base-800);
+                      border:1px solid var(--rz-base-600); border-radius:6px; padding:4px;
+                      min-width:240px; z-index:100; box-shadow:0 4px 12px rgba(0,0,0,0.5)">
+            <div style="padding:6px 12px; font-size:0.75rem; color:var(--text-low);
+                        border-bottom:1px solid var(--rz-base-700)">Select device to sync:</div>
+            @if (BtStatus.ConnectedDevice != null)
+            {
+              <div style="padding:8px 12px; font-size:0.85rem; cursor:pointer; border-radius:4px;
+                          background:var(--rz-info-lighter, rgba(21,101,192,0.2))"
+                   @onclick="@(() => OnSyncFromDevice.InvokeAsync(BtStatus.ConnectedDevice.Address))"
+                   @onclick:stopPropagation="true">
+                @BtStatus.ConnectedDevice.Name
+                <span style="color:var(--rz-success); font-size:0.7rem">(connected)</span>
+              </div>
+            }
+            @foreach (var device in (BtStatus.PairedDevices ?? []).Where(d => !d.IsConnected))
+            {
+              <div style="padding:8px 12px; font-size:0.85rem; color:var(--text-low);
+                          cursor:pointer; border-radius:4px"
+                   @onclick="@(() => OnSyncFromDevice.InvokeAsync(device.Address))"
+                   @onclick:stopPropagation="true">
+                @device.Name
+                <span style="font-size:0.7rem">(paired)</span>
+              </div>
+            }
+          </div>
+        }
+      </div>
+      <RadzenButton Text="Add Contact" Icon="person_add"
+        Click="@OnAddContact"
+        ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Small" />
+    </div>
+  </div>
+
+  @* Sync status bar *@
+  @if (ConnectedDeviceSyncInfo != null)
+  {
+    var syncInfo = ConnectedDeviceSyncInfo;
+    <div style="background:var(--rz-base-800); border-radius:4px; padding:8px 12px;
+                display:flex; justify-content:space-between; align-items:center; font-size:0.8rem; margin-bottom:8px">
+      <span style="color:var(--text-low)">
+        Last synced from @(syncInfo.DeviceName ?? syncInfo.DeviceAddress):
+        @(syncInfo.LastSynced.HasValue ? FormatTimeAgo(syncInfo.LastSynced.Value) : "never")
+        — @syncInfo.ContactCount contacts
+      </span>
+      <RadzenBadge Text="@(syncInfo.IsStale ? "Stale" : "Fresh")"
+        BadgeStyle="@(syncInfo.IsStale ? BadgeStyle.Warning : BadgeStyle.Success)"
+        IsPill="true" />
+    </div>
+  }
+
+  @* Merged contacts grid *@
+  <RadzenDataGrid Data="@MergedContacts" TItem="MergedContact"
+    AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Simple"
+    class="contacts-grid">
+    <Columns>
+      <RadzenDataGridColumn TItem="MergedContact" Property="Name" Title="Name" Width="200px" />
+      <RadzenDataGridColumn TItem="MergedContact" Property="Phone" Title="Phone" Width="160px">
+        <Template Context="contact">
+          <span class="phone-number">@contact.Phone</span>
+        </Template>
+      </RadzenDataGridColumn>
+      <RadzenDataGridColumn TItem="MergedContact" Property="Email" Title="Email" />
+      <RadzenDataGridColumn TItem="MergedContact" Property="Source" Title="Source" Width="100px"
+        Sortable="true" Filterable="true">
+        <Template Context="contact">
+          @if (contact.Source == "PBAP")
+          {
+            <RadzenBadge Text="PBAP" BadgeStyle="BadgeStyle.Info" IsPill="true"
+              Style="font-size:0.7rem" />
+          }
+          else
+          {
+            <RadzenBadge Text="Manual" BadgeStyle="BadgeStyle.Light" IsPill="true"
+              Style="font-size:0.7rem" />
+          }
+        </Template>
+      </RadzenDataGridColumn>
+      <RadzenDataGridColumn TItem="MergedContact" Title="Actions" Width="100px"
+        Sortable="false" Filterable="false">
+        <Template Context="contact">
+          @if (contact.Source == "Manual" && contact.Id != null)
+          {
+            var original = Contacts?.FirstOrDefault(c => c.Id == contact.Id);
+            @if (original != null)
+            {
+              <RadzenButton Icon="edit" ButtonStyle="ButtonStyle.Light" Size="ButtonSize.Small"
+                Click="@(() => OnEditContact.InvokeAsync(original))"
+                class="action-btn" />
+              <RadzenButton Icon="delete" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small"
+                Click="@(() => OnDeleteContact.InvokeAsync(original))"
+                class="action-btn" />
+            }
+          }
+        </Template>
+      </RadzenDataGridColumn>
+    </Columns>
+  </RadzenDataGrid>
+</div>
+
+@code {
+  [Parameter] public List<MergedContact>? MergedContacts { get; set; }
+  [Parameter] public PbapDeviceSyncInfoDto? ConnectedDeviceSyncInfo { get; set; }
+  [Parameter] public BluetoothStatusDto? BtStatus { get; set; }
+  [Parameter] public bool IsSyncing { get; set; }
+  [Parameter] public bool ShowSyncDropdown { get; set; }
+  [Parameter] public EventCallback<bool> ShowSyncDropdownChanged { get; set; }
+  [Parameter] public EventCallback<string> OnSyncFromDevice { get; set; }
+  [Parameter] public EventCallback OnAddContact { get; set; }
+  [Parameter] public EventCallback<ContactDto> OnEditContact { get; set; }
+  [Parameter] public EventCallback<ContactDto> OnDeleteContact { get; set; }
+  [Parameter] public List<ContactDto>? Contacts { get; set; }
+
+  private static string FormatTimeAgo(DateTime utcTime)
+  {
+    var span = DateTime.UtcNow - utcTime;
+    if (span.TotalMinutes < 1) return "just now";
+    if (span.TotalMinutes < 60) return $"{(int)span.TotalMinutes}m ago";
+    if (span.TotalHours < 24) return $"{(int)span.TotalHours}h ago";
+    return $"{(int)span.TotalDays}d ago";
+  }
+}

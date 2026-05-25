@@ -11,369 +11,72 @@
 
 <PageTitle>Phone - Radio Console</PageTitle>
 
-<div class="phone-page">
-  <RadzenTabs @bind-SelectedIndex="_selectedTab" class="phone-tabs">
+<div class="phone-shell">
+  <div class="phone-tab-rail">
+    <span class="phone-rail-heading">Phone</span>
+    <button type="button" class="phone-rail-tab @(IsTab("dashboard") ? "active" : "")"
+            @onclick='@(() => _activeTab = "dashboard")'>
+      <RadzenIcon Icon="dashboard" />
+      <span class="phone-rail-label">Dashboard</span>
+    </button>
+    <button type="button" class="phone-rail-tab @(IsTab("contacts") ? "active" : "")"
+            @onclick='@(() => _activeTab = "contacts")'>
+      <RadzenIcon Icon="contacts" />
+      <span class="phone-rail-label">Contacts</span>
+    </button>
+    <button type="button" class="phone-rail-tab @(IsTab("history") ? "active" : "")"
+            @onclick='@(() => _activeTab = "history")'>
+      <RadzenIcon Icon="history" />
+      <span class="phone-rail-label">Call History</span>
+    </button>
+  </div>
 
-    @* ═══ Tab 1: Dashboard ═══ *@
-    <Tabs>
-      <RadzenTabsItem Text="Dashboard" Icon="dashboard">
-        <div class="phone-dashboard">
-
-          @* ── System Status Bar ── *@
-          <RadzenCard class="phone-card system-status-card">
-            <h3 class="section-title section-title-green">SYSTEM STATUS</h3>
-            <div class="status-bar">
-              <div class="status-column">
-                <span class="status-column-label">PLATFORM</span>
-                <RadzenBadge BadgeStyle="BadgeStyle.Light" Text="@(_isAvailable ? "Linux" : "Unknown")" />
-              </div>
-              <div class="status-divider"></div>
-              <div class="status-column">
-                <span class="status-column-label">BLUETOOTH</span>
-                <RadzenBadge
-                  BadgeStyle="@(_systemStatus?.BluetoothConnected == true ? BadgeStyle.Success : BadgeStyle.Danger)"
-                  Text="@(_systemStatus?.BluetoothConnected == true ? "Connected" : "Disconnected")" />
-                @if (_systemStatus?.BluetoothDeviceAddress != null)
-                {
-                  <span class="status-detail">@_systemStatus.BluetoothDeviceAddress</span>
-                }
-              </div>
-              <div class="status-divider"></div>
-              <div class="status-column">
-                <span class="status-column-label">SIP DEVICE</span>
-                <RadzenBadge
-                  BadgeStyle="@(_systemStatus?.SipListening == true ? BadgeStyle.Success : BadgeStyle.Danger)"
-                  Text="@(_systemStatus?.SipListening == true ? "Listening" : "Offline")" />
-                @if (_systemStatus?.SipListenAddress != null)
-                {
-                  <span class="status-detail">@_systemStatus.SipListenAddress:@_systemStatus.SipPort</span>
-                }
-              </div>
-              <div class="status-divider"></div>
-              <div class="status-column">
-                <span class="status-column-label">HT801 ATA</span>
-                <RadzenBadge
-                  BadgeStyle="@(_systemStatus?.Ht801Reachable == true ? BadgeStyle.Success : BadgeStyle.Danger)"
-                  Text="@(_systemStatus?.Ht801Reachable == true ? "Online" : "Offline")" />
-                @if (_systemStatus?.Ht801IpAddress != null)
-                {
-                  <span class="status-detail">@_systemStatus.Ht801IpAddress</span>
-                }
-              </div>
-            </div>
-          </RadzenCard>
-
-          @* ── Call Path & GV Status ── *@
-          <RadzenCard class="phone-card call-path-card">
-            <h3 class="section-title section-title-cyan">CALL PATH</h3>
-            <div class="call-path-row">
-              @* Mode selector *@
-              <div class="call-path-modes">
-                <span class="status-column-label">ACTIVE MODE</span>
-                <div class="mode-buttons">
-                  <RadzenButton Text="Bluetooth"
-                    Icon="bluetooth"
-                    ButtonStyle="@(_gvActiveMode == "BluetoothHfp" ? ButtonStyle.Primary : ButtonStyle.Light)"
-                    Size="ButtonSize.Small"
-                    Click="@(() => SwitchModeAsync("BluetoothHfp"))"
-                    Disabled="@_switchingMode" />
-                  <RadzenButton Text="SIP Trunk"
-                    Icon="settings_phone"
-                    ButtonStyle="@(_gvActiveMode == "SipTrunk" ? ButtonStyle.Primary : ButtonStyle.Light)"
-                    Size="ButtonSize.Small"
-                    Click="@(() => SwitchModeAsync("SipTrunk"))"
-                    Disabled="@_switchingMode" />
-                  <RadzenButton Text="GV API"
-                    Icon="language"
-                    ButtonStyle="@(_gvActiveMode == "GVApi" ? ButtonStyle.Primary : ButtonStyle.Light)"
-                    Size="ButtonSize.Small"
-                    Click="@(() => SwitchModeAsync("GVApi"))"
-                    Disabled="@_switchingMode" />
-                </div>
-              </div>
-              <div class="status-divider"></div>
-              @* GV Bridge status — single Available/Unavailable badge sourced
-                 from the post-SIP-WSS server shape ({ available, activeMode }).
-                 SipRegistered + CookiesValid sub-states will land once RotaryPhone
-                 exposes them (Phase B). *@
-              <div class="status-column">
-                <span class="status-column-label">GV API</span>
-                <RadzenBadge
-                  BadgeStyle="@(_gvBridgeAvailable ? BadgeStyle.Success : BadgeStyle.Warning)"
-                  Text="@(_gvBridgeAvailable ? "Available" : "Unavailable")" />
-              </div>
-              <div class="status-divider"></div>
-              @* GV Trunk status *@
-              <div class="status-column">
-                <span class="status-column-label">SIP TRUNK</span>
-                <RadzenBadge
-                  BadgeStyle="@(_gvTrunkRegistered ? BadgeStyle.Success : BadgeStyle.Danger)"
-                  Text="@(_gvTrunkRegistered ? "Registered" : "Unregistered")" />
-                @if (!_gvTrunkRegistered)
-                {
-                  <RadzenButton Text="Re-register" Size="ButtonSize.ExtraSmall"
-                    ButtonStyle="ButtonStyle.Light"
-                    Click="@ReregisterTrunkAsync"
-                    Style="margin-top:4px" />
-                }
-              </div>
-            </div>
-          </RadzenCard>
-
-          @* ── Two-column layout: Status | Dev Controls ── *@
-          <div class="dashboard-columns">
-
-            @* Left: Phone Status *@
-            <RadzenCard class="phone-card phone-status-card">
-              <div class="phone-state-display">
-                <span class="current-status-label">CURRENT STATUS</span>
-                <RadzenBadge
-                  BadgeStyle="@GetCallStateBadgeStyle()"
-                  Text="@_callState.CallState.ToUpperInvariant()"
-                  class="call-state-badge" />
-                @if (_callState.CallState == "Ringing" && _callState.IncomingNumber != null)
-                {
-                  <div class="call-info">
-                    <RadzenIcon Icon="call_received" />
-                    <span class="phone-number">@_callState.IncomingNumber</span>
-                  </div>
-                }
-                else if (_callState.CallState == "InCall")
-                {
-                  <div class="call-info">
-                    <RadzenIcon Icon="phone_in_talk" />
-                    <span class="phone-number">@(_callState.IncomingNumber ?? _callState.DialedNumber ?? "Unknown")</span>
-                  </div>
-                }
-                else if (_callState.CallState == "Dialing" && _callState.DialedNumber != null)
-                {
-                  <div class="call-info">
-                    <RadzenIcon Icon="call_made" />
-                    <span class="phone-number">@_callState.DialedNumber</span>
-                  </div>
-                }
-              </div>
-            </RadzenCard>
-
-            @* Right: Dev Controls (always visible) *@
-            <RadzenCard class="phone-card dev-controls-card">
-              <h3 class="section-title section-title-amber">DEV CONTROLS</h3>
-              <p class="dev-description">Simulate hardware events when no rotary phone is connected.</p>
-              <div class="dev-controls">
-                <div class="dev-section">
-                  <span class="dev-label">HANDSET</span>
-                  <div class="dev-buttons">
-                    <RadzenButton Text="Lift Handset" Icon="phone"
-                      Click="@(() => SimulateHookAsync(true))"
-                      Disabled="@(_callState.CallState == "InCall")"
-                      ButtonStyle="ButtonStyle.Success" Size="ButtonSize.Small" />
-                    <RadzenButton Text="Drop Handset" Icon="phone_disabled"
-                      Click="@(() => SimulateHookAsync(false))"
-                      Disabled="@(_callState.CallState == "Idle")"
-                      ButtonStyle="ButtonStyle.Secondary" Size="ButtonSize.Small" />
-                  </div>
-                </div>
-                <div class="dev-section">
-                  <span class="dev-label">NETWORK</span>
-                  <div class="dev-buttons">
-                    <RadzenButton Text="Simulate Incoming Call" Icon="ring_volume"
-                      Click="@SimulateIncomingCallAsync"
-                      ButtonStyle="ButtonStyle.Warning" Size="ButtonSize.Small"
-                      class="full-width-btn" />
-                  </div>
-                </div>
-                <div class="dev-section">
-                  <span class="dev-label">DIALER</span>
-                  <div class="dev-dialer">
-                    <RadzenTextBox @bind-Value="_dialDigits" Placeholder="Digits"
-                      class="dial-input" />
-                    <RadzenButton Text="Dial" Icon="dialpad"
-                      Click="@SimulateDialAsync"
-                      Disabled="@(string.IsNullOrWhiteSpace(_dialDigits))"
-                      ButtonStyle="ButtonStyle.Secondary" Size="ButtonSize.Small" />
-                  </div>
-                </div>
-              </div>
-            </RadzenCard>
-
-          </div>
-        </div>
-      </RadzenTabsItem>
-
-      @* ═══ Tab 2: Contacts ═══ *@
-      <RadzenTabsItem Text="Contacts" Icon="contacts">
-        <div class="phone-contacts">
-          @* Action bar: Sync dropdown + Add Contact *@
-          <div class="contacts-header">
-            <h3 class="card-title">Contacts</h3>
-            <div style="display:flex; gap:8px; align-items:center; position:relative">
-              @* Sync from Phone dropdown *@
-              <div style="position:relative">
-                <RadzenButton Text="@(_isSyncing ? "Syncing..." : "Sync from Phone")"
-                  Icon="@(_isSyncing ? "" : "smartphone")"
-                  Click="@(() => _showSyncDropdown = !_showSyncDropdown)"
-                  ButtonStyle="ButtonStyle.Info" Size="ButtonSize.Small"
-                  Disabled="@_isSyncing">
-                  @if (_isSyncing)
-                  {
-                    <RadzenProgressBarCircular Size="ProgressBarCircularSize.Small"
-                      Mode="ProgressBarMode.Indeterminate" Style="margin-right:4px" />
-                  }
-                </RadzenButton>
-                @if (_showSyncDropdown && _btStatus != null)
-                {
-                  @* Click-away overlay *@
-                  <div style="position:fixed; top:0; left:0; right:0; bottom:0; z-index:99"
-                       @onclick="@(() => _showSyncDropdown = false)"
-                       @onclick:stopPropagation="true"></div>
-                  <div style="position:absolute; top:100%; right:0; margin-top:4px; background:var(--rz-base-800);
-                              border:1px solid var(--rz-base-600); border-radius:6px; padding:4px;
-                              min-width:240px; z-index:100; box-shadow:0 4px 12px rgba(0,0,0,0.5)">
-                    <div style="padding:6px 12px; font-size:0.75rem; color:var(--text-low);
-                                border-bottom:1px solid var(--rz-base-700)">Select device to sync:</div>
-                    @if (_btStatus.ConnectedDevice != null)
-                    {
-                      <div style="padding:8px 12px; font-size:0.85rem; cursor:pointer; border-radius:4px;
-                                  background:var(--rz-info-lighter, rgba(21,101,192,0.2))"
-                           @onclick="@(() => SyncFromDeviceAsync(_btStatus.ConnectedDevice.Address))"
-                           @onclick:stopPropagation="true">
-                        📱 @_btStatus.ConnectedDevice.Name
-                        <span style="color:var(--rz-success); font-size:0.7rem">(connected)</span>
-                      </div>
-                    }
-                    @foreach (var device in (_btStatus.PairedDevices ?? []).Where(d => !d.IsConnected))
-                    {
-                      <div style="padding:8px 12px; font-size:0.85rem; color:var(--text-low);
-                                  cursor:pointer; border-radius:4px"
-                           @onclick="@(() => SyncFromDeviceAsync(device.Address))"
-                           @onclick:stopPropagation="true">
-                        📱 @device.Name
-                        <span style="font-size:0.7rem">(paired)</span>
-                      </div>
-                    }
-                  </div>
-                }
-              </div>
-              <RadzenButton Text="Add Contact" Icon="person_add"
-                Click="@OpenAddContactDialog"
-                ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Small" />
-            </div>
-          </div>
-
-          @* Sync status bar *@
-          @if (ConnectedDeviceSyncInfo != null)
-          {
-            var syncInfo = ConnectedDeviceSyncInfo;
-            <div style="background:var(--rz-base-800); border-radius:4px; padding:8px 12px;
-                        display:flex; justify-content:space-between; align-items:center; font-size:0.8rem; margin-bottom:8px">
-              <span style="color:var(--text-low)">
-                Last synced from @(syncInfo.DeviceName ?? syncInfo.DeviceAddress):
-                @(syncInfo.LastSynced.HasValue ? FormatTimeAgo(syncInfo.LastSynced.Value) : "never")
-                — @syncInfo.ContactCount contacts
-              </span>
-              <RadzenBadge Text="@(syncInfo.IsStale ? "Stale" : "Fresh")"
-                BadgeStyle="@(syncInfo.IsStale ? BadgeStyle.Warning : BadgeStyle.Success)"
-                IsPill="true" />
-            </div>
-          }
-
-          @* Merged contacts grid *@
-          <RadzenDataGrid Data="@MergedContacts" TItem="MergedContact"
-            AllowSorting="true" AllowFiltering="true" FilterMode="FilterMode.Simple"
-            class="contacts-grid">
-            <Columns>
-              <RadzenDataGridColumn TItem="MergedContact" Property="Name" Title="Name" Width="200px" />
-              <RadzenDataGridColumn TItem="MergedContact" Property="Phone" Title="Phone" Width="160px">
-                <Template Context="contact">
-                  <span class="phone-number">@contact.Phone</span>
-                </Template>
-              </RadzenDataGridColumn>
-              <RadzenDataGridColumn TItem="MergedContact" Property="Email" Title="Email" />
-              <RadzenDataGridColumn TItem="MergedContact" Property="Source" Title="Source" Width="100px"
-                Sortable="true" Filterable="true">
-                <Template Context="contact">
-                  @if (contact.Source == "PBAP")
-                  {
-                    <RadzenBadge Text="📱 PBAP" BadgeStyle="BadgeStyle.Info" IsPill="true"
-                      Style="font-size:0.7rem" />
-                  }
-                  else
-                  {
-                    <RadzenBadge Text="✏️ Manual" BadgeStyle="BadgeStyle.Light" IsPill="true"
-                      Style="font-size:0.7rem" />
-                  }
-                </Template>
-              </RadzenDataGridColumn>
-              <RadzenDataGridColumn TItem="MergedContact" Title="Actions" Width="100px"
-                Sortable="false" Filterable="false">
-                <Template Context="contact">
-                  @if (contact.Source == "Manual" && contact.Id != null)
-                  {
-                    var original = _contacts?.FirstOrDefault(c => c.Id == contact.Id);
-                    @if (original != null)
-                    {
-                      <RadzenButton Icon="edit" ButtonStyle="ButtonStyle.Light" Size="ButtonSize.Small"
-                        Click="@(() => OpenEditContactDialog(original))"
-                        class="action-btn" />
-                      <RadzenButton Icon="delete" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small"
-                        Click="@(() => DeleteContactAsync(original))"
-                        class="action-btn" />
-                    }
-                  }
-                </Template>
-              </RadzenDataGridColumn>
-            </Columns>
-          </RadzenDataGrid>
-        </div>
-      </RadzenTabsItem>
-
-      @* ═══ Tab 3: Call History ═══ *@
-      <RadzenTabsItem Text="Call History" Icon="history">
-        <div class="phone-history">
-          <div class="history-header">
-            <h3 class="card-title">Call History</h3>
-            <RadzenButton Text="Clear History" Icon="delete_sweep"
-              Click="@ClearCallHistoryAsync"
-              ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small"
-              Disabled="@(_callHistory == null || _callHistory.Count == 0)" />
-          </div>
-          @if (_callHistory == null || _callHistory.Count == 0)
-          {
-            <div class="empty-state">No calls recorded</div>
-          }
-          else
-          {
-            <div class="history-list">
-              @foreach (var entry in _callHistory)
-              {
-                <div class="history-item">
-                  <RadzenIcon Icon="@GetCallDirectionIcon(entry)"
-                    Style="@($"color: {GetCallDirectionColor(entry)}")" />
-                  <div class="history-details">
-                    <span class="phone-number">@entry.PhoneNumber</span>
-                    <span class="history-time">@entry.StartTime.ToLocalTime().ToString("g")</span>
-                  </div>
-                  @if (entry.AnsweredOn != null)
-                  {
-                    <RadzenBadge Text="@entry.AnsweredOn"
-                      BadgeStyle="@(entry.AnsweredOn == "RotaryPhone" ? BadgeStyle.Info : BadgeStyle.Light)" />
-                  }
-                  @if (entry.Duration != null)
-                  {
-                    <span class="call-duration">@entry.Duration</span>
-                  }
-                </div>
-              }
-            </div>
-          }
-        </div>
-      </RadzenTabsItem>
-    </Tabs>
-  </RadzenTabs>
+  <div style="overflow: hidden; min-height: 0;">
+    @if (_activeTab == "dashboard")
+    {
+      <PhoneDashboardPanel CallState="_callState"
+                           SystemStatus="_systemStatus"
+                           IsAvailable="_isAvailable"
+                           GvActiveMode="_gvActiveMode"
+                           GvBridgeAvailable="_gvBridgeAvailable"
+                           GvTrunkRegistered="_gvTrunkRegistered"
+                           SwitchingMode="_switchingMode"
+                           DevTrayExpanded="_devTrayExpanded"
+                           DevTrayExpandedChanged="@((bool v) => { _devTrayExpanded = v; StateHasChanged(); })"
+                           DialDigits="_dialDigits"
+                           DialDigitsChanged="@((string v) => { _dialDigits = v; StateHasChanged(); })"
+                           OnSwitchMode="SwitchModeAsync"
+                           OnReregisterTrunk="ReregisterTrunkAsync"
+                           OnSimulateHook="SimulateHookAsync"
+                           OnSimulateIncoming="SimulateIncomingCallAsync"
+                           OnSimulateDial="SimulateDialStringAsync"
+                           Contacts="MergedContacts" />
+    }
+    else if (_activeTab == "contacts")
+    {
+      <PhoneContactsPanel MergedContacts="MergedContacts"
+                          ConnectedDeviceSyncInfo="ConnectedDeviceSyncInfo"
+                          BtStatus="_btStatus"
+                          IsSyncing="_isSyncing"
+                          ShowSyncDropdown="_showSyncDropdown"
+                          ShowSyncDropdownChanged="@((bool v) => { _showSyncDropdown = v; StateHasChanged(); })"
+                          OnSyncFromDevice="SyncFromDeviceAsync"
+                          OnAddContact="OpenAddContactDialog"
+                          OnEditContact="OpenEditContactDialog"
+                          OnDeleteContact="DeleteContactAsync"
+                          Contacts="_contacts" />
+    }
+    else if (_activeTab == "history")
+    {
+      <PhoneHistoryPanel CallHistory="_callHistory"
+                         OnClearHistory="ClearCallHistoryAsync" />
+    }
+  </div>
 </div>
 
 @code {
-  private int _selectedTab;
+  private string _activeTab = "dashboard";
+  private bool _devTrayExpanded;
   private PhoneSystemStatusDto? _systemStatus;
   private PhoneCallStateDto _callState = new();
   private List<ContactDto>? _contacts;
@@ -395,6 +98,8 @@
   private bool _gvBridgeAvailable;
   private bool _gvTrunkRegistered;
   private bool _switchingMode;
+
+  private bool IsTab(string t) => _activeTab == t;
 
   protected override async Task OnInitializedAsync()
   {
@@ -426,7 +131,7 @@
       _gvTrunkRegistered = trunkStatus.IsRegistered;
     }
 
-    // Load PBAP contacts — prefer connected device, fall back to most recently synced
+    // Load PBAP contacts -- prefer connected device, fall back to most recently synced
     var pbapDeviceAddress = _btStatus?.ConnectedDevice?.Address
       ?? _pbapStatus?.Devices.OrderByDescending(d => d.LastSynced).FirstOrDefault()?.DeviceAddress;
     if (pbapDeviceAddress != null)
@@ -435,8 +140,7 @@
     }
     RebuildMergedContacts();
 
-    // Subscribe to SignalR events. (RotaryPhone has no /hubs/gvbridge — GV-mode
-    // changes are picked up via the 30s status poll in PollStatusAsync.)
+    // Subscribe to SignalR events
     PhoneHub.CallStateChanged += OnCallStateChanged;
     PhoneHub.IncomingCall += OnIncomingCall;
     PhoneHub.CallHistoryUpdated += OnCallHistoryUpdated;
@@ -535,7 +239,7 @@
       _callHistory = await PhoneApi.GetCallHistoryAsync();
       if (!_disposed) await InvokeAsync(StateHasChanged);
     }
-    catch { /* Non-fatal — next poll will catch up */ }
+    catch { /* Non-fatal -- next poll will catch up */ }
   }
 
   private void OnSystemStatusChanged(object status)
@@ -551,9 +255,6 @@
       catch { /* Non-fatal */ }
     });
   }
-
-  // GV Trunk event handlers. (GV Bridge has no hub; mode changes are surfaced
-  // by the polling fallback in PollStatusAsync.)
 
   private void OnRegistrationChanged(bool registered)
   {
@@ -614,7 +315,7 @@
     await PhoneApi.SimulateIncomingCallAsync();
   }
 
-  private async Task SimulateDialAsync()
+  private async Task SimulateDialStringAsync()
   {
     if (!string.IsNullOrWhiteSpace(_dialDigits))
     {
@@ -690,22 +391,6 @@
     _ => BadgeStyle.Light
   };
 
-  private static string GetCallDirectionIcon(CallHistoryEntryDto entry) => entry.Direction switch
-  {
-    "Incoming" when entry.AnsweredOn != null => "call_received",
-    "Incoming" => "call_missed",
-    "Outgoing" => "call_made",
-    _ => "phone"
-  };
-
-  private static string GetCallDirectionColor(CallHistoryEntryDto entry) => entry.Direction switch
-  {
-    "Incoming" when entry.AnsweredOn != null => "var(--rz-success)",
-    "Incoming" => "var(--rz-danger)",
-    "Outgoing" => "var(--rz-info)",
-    _ => "var(--rz-text-color)"
-  };
-
   // PBAP Sync
 
   private async Task SyncFromDeviceAsync(string deviceAddress)
@@ -746,17 +431,6 @@
   private PbapDeviceSyncInfoDto? ConnectedDeviceSyncInfo =>
     _pbapStatus?.Devices.FirstOrDefault(d =>
       string.Equals(d.DeviceAddress, _btStatus?.ConnectedDevice?.Address, StringComparison.OrdinalIgnoreCase));
-
-  private static string FormatTimeAgo(DateTime utcTime)
-  {
-    var span = DateTime.UtcNow - utcTime;
-    if (span.TotalMinutes < 1) return "just now";
-    if (span.TotalMinutes < 60) return $"{(int)span.TotalMinutes}m ago";
-    if (span.TotalHours < 24) return $"{(int)span.TotalHours}h ago";
-    return $"{(int)span.TotalDays}d ago";
-  }
-
-  private record MergedContact(string? Id, string Name, string Phone, string? Email, string Source);
 
   private List<MergedContact> MergedContacts { get; set; } = [];
 

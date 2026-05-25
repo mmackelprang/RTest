@@ -1,0 +1,223 @@
+@using Radio.Web.Models
+@implements IDisposable
+
+<div class="phone-hero"
+     style="--phone-hero-state-color: @(StateColors.color);
+            --phone-hero-state-glow: @(StateColors.glow);
+            --phone-hero-glow-color: @(StateColors.glowBg);">
+  <div class="phone-hero-glow"></div>
+  <div class="phone-hero-body">
+
+    @* Top row: state label + source tag *@
+    <div class="phone-hero-top">
+      <span class="phone-hero-state-label">@StateLabel</span>
+      <span class="phone-hero-source-tag">
+        <span class="dot" style="background: @(StateColors.color);
+              box-shadow: 0 0 6px @(StateColors.glow);"></span>
+        via @CallSource
+      </span>
+    </div>
+
+    @* Big LED state word *@
+    <div class="phone-hero-state @(CallState.CallState == "Ringing" ? "ring-pulse" : "")"
+         style="color: @(StateColors.color);
+                text-shadow: 0 0 20px @(StateColors.glow);">
+      @CallState.CallState.ToUpperInvariant()
+    </div>
+
+    @* Caller info or empty state *@
+    @if (ActiveNumber != null)
+    {
+      <div class="phone-hero-meta">
+        <div class="phone-hero-meta-row">
+          <span class="phone-hero-icon"
+                style="background: color-mix(in oklab, @(StateColors.color) 18%, transparent);
+                       color: @(StateColors.color);">
+            <RadzenIcon Icon="@HeroIcon" />
+          </span>
+          <div style="display: flex; flex-direction: column; gap: 2px;">
+            <span class="phone-hero-number">@ActiveNumber</span>
+            @if (CallerName != null)
+            {
+              <span class="phone-hero-name">@CallerName</span>
+            }
+          </div>
+          @if (CallState.CallState == "InCall")
+          {
+            <span class="phone-hero-duration">@FormattedDuration</span>
+          }
+        </div>
+      </div>
+    }
+    else
+    {
+      <div class="phone-hero-empty">
+        <RadzenIcon Icon="phone" />
+        Lift the handset to place a call, or wait for an incoming ring.
+      </div>
+    }
+
+    @* Action buttons -- contextual to state *@
+    <div class="phone-hero-actions">
+      @switch (CallState.CallState)
+      {
+        case "Ringing":
+          <button type="button" class="phone-btn btn-answer" @onclick="OnAnswer">
+            <RadzenIcon Icon="phone" /> Answer
+          </button>
+          <button type="button" class="phone-btn btn-hangup" disabled
+                  title="Physical handset only">
+            <RadzenIcon Icon="call_end" /> Reject
+          </button>
+          <button type="button" class="phone-btn btn-ghost" disabled
+                  title="Not yet implemented">
+            <RadzenIcon Icon="ring_volume" /> Silence
+          </button>
+          break;
+
+        case "InCall":
+          <button type="button" class="phone-btn btn-hangup" @onclick="OnHangup">
+            <RadzenIcon Icon="call_end" /> Hang Up
+          </button>
+          <button type="button" class="phone-btn btn-ghost" disabled
+                  title="Not yet implemented">
+            <RadzenIcon Icon="mic" /> Mute
+          </button>
+          <button type="button" class="phone-btn btn-ghost" disabled
+                  title="Not yet implemented">
+            <RadzenIcon Icon="dialpad" /> Keypad
+          </button>
+          <button type="button" class="phone-btn btn-ghost" disabled
+                  title="Not yet implemented">
+            <RadzenIcon Icon="swap_horiz" /> Move to Soundbar
+          </button>
+          break;
+
+        case "Dialing":
+          <button type="button" class="phone-btn btn-hangup" @onclick="OnHangup">
+            <RadzenIcon Icon="call_end" /> Cancel
+          </button>
+          <button type="button" class="phone-btn btn-ghost" disabled
+                  title="Not yet implemented">
+            <RadzenIcon Icon="speaker" /> Speaker
+          </button>
+          break;
+
+        default: // Idle
+          <button type="button" class="phone-btn btn-ghost" disabled
+                  title="Not yet implemented">
+            <RadzenIcon Icon="dialpad" /> New Call
+          </button>
+          <button type="button" class="phone-btn btn-ghost" disabled
+                  title="Not yet implemented">
+            <RadzenIcon Icon="contacts" /> Pick Contact
+          </button>
+          break;
+      }
+    </div>
+
+  </div>
+</div>
+
+@code {
+  [Parameter] public PhoneCallStateDto CallState { get; set; } = new();
+  [Parameter] public string CallSource { get; set; } = "Rotary Phone";
+  [Parameter] public EventCallback OnAnswer { get; set; }
+  [Parameter] public EventCallback OnHangup { get; set; }
+  [Parameter] public List<MergedContact>? Contacts { get; set; }
+
+  // State color computation
+  private (string color, string glow, string glowBg) StateColors => CallState.CallState switch
+  {
+    "Ringing" => ("var(--signal-amber)", "rgba(240,168,48,0.50)", "rgba(240,168,48,0.15)"),
+    "InCall"  => ("var(--signal-green)", "rgba(74,222,128,0.45)", "rgba(74,222,128,0.12)"),
+    "Dialing" => ("var(--signal-blue)",  "rgba(96,165,250,0.45)", "rgba(96,165,250,0.12)"),
+    _         => ("var(--text-medium)",  "transparent",            "transparent"),
+  };
+
+  // State label mapping
+  private string StateLabel => CallState.CallState switch
+  {
+    "Ringing" => "Incoming Call",
+    "InCall"  => "Active Call",
+    "Dialing" => "Dialing Out",
+    _         => "Awaiting Call",
+  };
+
+  // Active phone number
+  private string? ActiveNumber => CallState.CallState switch
+  {
+    "Ringing" => CallState.IncomingNumber,
+    "InCall"  => CallState.IncomingNumber ?? CallState.DialedNumber,
+    "Dialing" => CallState.DialedNumber,
+    _         => null,
+  };
+
+  // Caller name lookup (client-side contact match)
+  private string? CallerName
+  {
+    get
+    {
+      var number = ActiveNumber;
+      if (string.IsNullOrEmpty(number) || Contacts == null) return null;
+      // Normalize: strip non-digit chars, take last 10 digits for suffix match
+      var digits = new string(number.Where(char.IsDigit).ToArray());
+      var suffix = digits.Length > 10 ? digits[^10..] : digits;
+      if (suffix.Length < 7) return null; // too short for reliable match
+      return Contacts.FirstOrDefault(c =>
+      {
+        var cDigits = new string(c.Phone.Where(char.IsDigit).ToArray());
+        var cSuffix = cDigits.Length > 10 ? cDigits[^10..] : cDigits;
+        return cSuffix == suffix;
+      })?.Name;
+    }
+  }
+
+  // Hero icon per state
+  private string HeroIcon => CallState.CallState switch
+  {
+    "Ringing" => "call_received",
+    "Dialing" => "call_made",
+    "InCall"  => "phone_in_talk",
+    _         => "phone",
+  };
+
+  // InCall duration timer (client-side)
+  private DateTime? _inCallStartUtc;
+  private System.Threading.Timer? _durationTimer;
+  private TimeSpan _inCallDuration;
+
+  protected override void OnParametersSet()
+  {
+    if (CallState.CallState == "InCall" && _inCallStartUtc == null)
+    {
+      var capturedStart = DateTime.UtcNow;
+      _inCallStartUtc = capturedStart;
+      _durationTimer = new System.Threading.Timer(_ =>
+      {
+        // capturedStart is immutable — no race with OnParametersSet nulling _inCallStartUtc
+        _inCallDuration = DateTime.UtcNow - capturedStart;
+        InvokeAsync(StateHasChanged);
+      }, null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
+    }
+    else if (CallState.CallState != "InCall")
+    {
+      // Dispose after nulling shared refs so an in-flight callback sees null guard
+      var timerToDispose = _durationTimer;
+      _durationTimer = null;
+      _inCallStartUtc = null;
+      _inCallDuration = TimeSpan.Zero;
+      timerToDispose?.Dispose();
+    }
+  }
+
+  private string FormattedDuration =>
+    _inCallDuration.TotalHours >= 1
+      ? _inCallDuration.ToString(@"hh\:mm\:ss")
+      : _inCallDuration.ToString(@"mm\:ss");
+
+  public void Dispose()
+  {
+    _durationTimer?.Dispose();
+  }
+}

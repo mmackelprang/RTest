@@ -1,161 +1,17 @@
-/* Phone Page Styles */
-.phone-page { padding: 8px; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+/* PhonePage shell -- all visual styles are in design-system.css §Ph.
+   This file only handles CSS isolation for page-level layout. */
 
-/*
- * All layout selectors use ::deep because they're nested inside
- * Radzen component trees (RadzenTabs > RadzenTabsItem > RadzenCard).
- * Without ::deep, Blazor's CSS isolation attribute selectors don't
- * match elements rendered inside child component DOM.
- */
-
-::deep .phone-dashboard { display: flex; flex-direction: column; gap: 12px; }
-::deep .phone-card { padding: 16px; }
-
-/* Section titles — uppercase monospace like the Node version */
-::deep .section-title {
-  margin: 0 0 12px 0;
-  font-size: 1rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
-}
-::deep .section-title-green { color: var(--rz-success); }
-::deep .section-title-amber { color: #e8a838; }
-::deep .section-title-cyan { color: #26c6da; }
-
-/* ── System Status Bar ── */
-::deep .system-status-card { border-left: 3px solid var(--rz-success); }
-::deep .status-bar {
-  display: flex;
-  align-items: flex-start;
-}
-::deep .status-column {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 0 16px;
-}
-::deep .status-column:first-child { padding-left: 0; }
-::deep .status-column:last-child { padding-right: 0; }
-::deep .status-column-label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  color: var(--rz-text-secondary-color);
-  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
-}
-::deep .status-detail {
-  font-size: 0.8rem;
-  font-family: monospace;
-  opacity: 0.7;
-}
-::deep .status-divider {
-  width: 1px;
-  align-self: stretch;
-  min-height: 36px;
-  background: var(--rz-base-600);
-}
-
-/* ── Call Path Card ── */
-::deep .call-path-card { border-left: 3px solid #26c6da; }
-::deep .call-path-row {
-  display: flex;
-  align-items: flex-start;
-}
-::deep .call-path-modes {
-  flex: 1.5;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 0 16px 0 0;
-}
-::deep .mode-buttons { display: flex; gap: 8px; }
-
-/* ── Two-column Dashboard Layout ── */
-::deep .dashboard-columns {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
-/* Left: Phone Status */
-::deep .phone-status-card {
-  border-left: 3px solid #e8a838;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-::deep .phone-state-display {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 24px 0;
-  width: 100%;
-  gap: 16px;
-}
-::deep .current-status-label {
-  font-size: 0.85rem;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  color: var(--rz-text-secondary-color);
-  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
-}
-::deep .call-state-badge {
-  font-size: 1.4rem !important;
-  padding: 12px 40px !important;
-  letter-spacing: 0.1em;
-  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
-}
-::deep .call-info {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-::deep .phone-number { font-family: monospace; font-size: 1.1rem; }
-::deep .caller-name { color: var(--rz-text-secondary-color); }
-::deep .call-duration { font-family: monospace; color: var(--rz-text-secondary-color); }
-
-/* Right: Dev Controls */
-::deep .dev-controls-card { border-left: 3px solid #e8a838; }
-::deep .dev-description {
-  font-size: 0.85rem;
-  color: var(--rz-text-secondary-color);
-  margin: 0 0 16px 0;
-}
-::deep .dev-controls { display: flex; flex-direction: column; gap: 16px; }
-::deep .dev-section { display: flex; flex-direction: column; gap: 8px; }
-::deep .dev-label {
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  color: var(--rz-text-color);
-  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
-}
-::deep .dev-buttons { display: flex; gap: 8px; }
-::deep .full-width-btn { width: 100%; }
-::deep .dev-dialer { display: flex; gap: 8px; align-items: center; }
-::deep .dial-input { flex: 1; }
-
-/* ── Flex height propagation: phone-page → tabs → panel → contacts → grid ── */
-::deep .phone-tabs { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
-::deep .phone-tabs > .rz-tabview-panels { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
-::deep .phone-tabs > .rz-tabview-panels > .rz-tabview-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+/* Flex height propagation for contacts and history stubs (Radzen grid) */
 ::deep .phone-contacts { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
 ::deep .contacts-grid { flex: 1; min-height: 0; }
 ::deep .contacts-grid .rz-data-grid { height: 100% !important; }
 ::deep .contacts-grid .rz-data-grid-data { overflow: auto !important; }
-
-/* ── Contacts Tab ── */
-::deep .card-title { margin: 0 0 12px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px; }
 ::deep .contacts-header, ::deep .history-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+::deep .card-title { margin: 0 0 12px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px; }
 ::deep .action-btn { margin: 0 2px; }
-
-/* ── Call History Tab ── */
 ::deep .empty-state { text-align: center; padding: 32px; color: var(--rz-text-secondary-color); }
 ::deep .history-list { display: flex; flex-direction: column; gap: 4px; }
 ::deep .history-item { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 4px; background: var(--rz-base-background-color); }
 ::deep .history-details { flex: 1; display: flex; flex-direction: column; }
 ::deep .history-time { font-size: 0.8rem; color: var(--rz-text-secondary-color); }
+::deep .phone-number { font-family: monospace; font-size: 1.1rem; }
