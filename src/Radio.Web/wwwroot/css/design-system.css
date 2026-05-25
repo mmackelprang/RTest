@@ -206,18 +206,13 @@ html, body {
 }
 .topbar-sources::-webkit-scrollbar { display: none; }
 
-.topbar-clock {
-  font-family: var(--font-led);
-  /* Hot-fix off PR #371: Orbitron at the previous DSEG14 size reads too
-     thick for the topbar; nudge slightly smaller while keeping the bold
-     weight that gives the clock its "display chrome" presence. */
-  font-size: 26px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: var(--signal-amber);
-  text-shadow: 0 0 8px var(--signal-amber-glow);
-  min-width: 100px;
-  letter-spacing: 2px;
+/* Time cluster — fixed min-width prevents the topbar from jittering as the
+   clock digits change. Orbitron lacks an OpenType tabular-nums table, so
+   proportional digit widths (e.g. "1" narrower than "0") cause layout
+   shifts every second. The min-width accommodates the widest format string
+   ("12:00:00 PM" in 12h+seconds mode) so downstream nav pills stay put. */
+.cluster-time {
+  min-width: 130px;
 }
 
 .topbar-zone {
