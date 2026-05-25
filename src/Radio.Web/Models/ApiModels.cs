@@ -1049,6 +1049,12 @@ public class PbapContactDto
   public List<string> PhoneNumbers { get; set; } = [];
 }
 
+/// <summary>
+/// Merged view of manual (ContactDto) and phone-synced (PbapContactDto) contacts.
+/// Used by PhonePage and PhoneContactsPanel for the unified contacts grid.
+/// </summary>
+public record MergedContact(string? Id, string Name, string Phone, string? Email, string Source);
+
 // GV Bridge DTOs (calls RotaryPhone.API /api/gvbridge)
 
 public class GvBridgeStatusDto

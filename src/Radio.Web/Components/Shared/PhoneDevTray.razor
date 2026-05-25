@@ -1,0 +1,83 @@
+@using Radio.Web.Models
+
+<div class="phone-dev-drawer @(Expanded ? "expanded" : "collapsed")">
+  <div class="phone-dev-header"
+       @onclick="@(() => ExpandedChanged.InvokeAsync(!Expanded))"
+       role="button"
+       aria-expanded="@Expanded">
+    <div class="left">
+      <RadzenIcon Icon="settings" /> Dev Tray &middot; Simulate Hardware Events
+    </div>
+    <div class="right">
+      <span style="display: inline-flex; align-items: center; gap: 8px;">
+        @if (!Expanded)
+        {
+          <span class="phone-dot-pulse"
+                style="width: 6px; height: 6px; border-radius: 50%;
+                       background: var(--signal-amber); display: inline-block;"></span>
+        }
+        @(Expanded ? "Click to collapse" : "Click to expand")
+        <RadzenIcon Icon="expand_more"
+                    Style="@(Expanded ? "transform: rotate(180deg);" : "")" />
+      </span>
+    </div>
+  </div>
+
+  @if (Expanded)
+  {
+    <div class="phone-dev-body">
+      <div class="phone-dev-section">
+        <span class="phone-dev-label">Handset</span>
+        <div class="phone-dev-buttons">
+          <button type="button" class="phone-btn-sm btn-success"
+                  disabled="@(CallState == "InCall")"
+                  @onclick="@(() => OnSimulateHook.InvokeAsync(true))">
+            <RadzenIcon Icon="phone" /> Lift
+          </button>
+          <button type="button" class="phone-btn-sm btn-danger"
+                  disabled="@(CallState == "Idle")"
+                  @onclick="@(() => OnSimulateHook.InvokeAsync(false))">
+            <RadzenIcon Icon="call_end" /> Drop
+          </button>
+        </div>
+      </div>
+
+      <div class="phone-dev-section">
+        <span class="phone-dev-label">Network</span>
+        <div class="phone-dev-buttons">
+          <button type="button" class="phone-btn-sm btn-warn"
+                  @onclick="OnSimulateIncoming">
+            <RadzenIcon Icon="ring_volume" /> Incoming Call
+          </button>
+        </div>
+      </div>
+
+      <div class="phone-dev-section">
+        <span class="phone-dev-label">Dialer</span>
+        <div class="phone-dev-buttons">
+          <input class="phone-input"
+                 placeholder="Digits"
+                 value="@DialDigits"
+                 @oninput="@(e => DialDigitsChanged.InvokeAsync(e.Value?.ToString() ?? ""))"
+                 style="flex: 1; min-width: 120px;" />
+          <button type="button" class="phone-btn-sm"
+                  disabled="@string.IsNullOrWhiteSpace(DialDigits)"
+                  @onclick="OnSimulateDial">
+            <RadzenIcon Icon="dialpad" /> Dial
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+</div>
+
+@code {
+  [Parameter] public bool Expanded { get; set; }
+  [Parameter] public EventCallback<bool> ExpandedChanged { get; set; }
+  [Parameter] public string CallState { get; set; } = "Idle";
+  [Parameter] public string DialDigits { get; set; } = "";
+  [Parameter] public EventCallback<string> DialDigitsChanged { get; set; }
+  [Parameter] public EventCallback<bool> OnSimulateHook { get; set; }
+  [Parameter] public EventCallback OnSimulateIncoming { get; set; }
+  [Parameter] public EventCallback OnSimulateDial { get; set; }
+}
