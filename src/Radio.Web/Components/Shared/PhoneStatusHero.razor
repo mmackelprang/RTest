@@ -1,17 +1,17 @@
 @using Radio.Web.Models
 @implements IDisposable
 
-<div class="hero"
-     style="--hero-state-color: @(StateColors.color);
-            --hero-state-glow: @(StateColors.glow);
-            --hero-glow-color: @(StateColors.glowBg);">
-  <div class="hero-glow"></div>
-  <div class="hero-body">
+<div class="phone-hero"
+     style="--phone-hero-state-color: @(StateColors.color);
+            --phone-hero-state-glow: @(StateColors.glow);
+            --phone-hero-glow-color: @(StateColors.glowBg);">
+  <div class="phone-hero-glow"></div>
+  <div class="phone-hero-body">
 
     @* Top row: state label + source tag *@
-    <div class="hero-top">
-      <span class="hero-state-label">@StateLabel</span>
-      <span class="hero-source-tag">
+    <div class="phone-hero-top">
+      <span class="phone-hero-state-label">@StateLabel</span>
+      <span class="phone-hero-source-tag">
         <span class="dot" style="background: @(StateColors.color);
               box-shadow: 0 0 6px @(StateColors.glow);"></span>
         via @CallSource
@@ -19,7 +19,7 @@
     </div>
 
     @* Big LED state word *@
-    <div class="hero-state @(CallState.CallState == "Ringing" ? "ring-pulse" : "")"
+    <div class="phone-hero-state @(CallState.CallState == "Ringing" ? "ring-pulse" : "")"
          style="color: @(StateColors.color);
                 text-shadow: 0 0 20px @(StateColors.glow);">
       @CallState.CallState.ToUpperInvariant()
@@ -28,37 +28,37 @@
     @* Caller info or empty state *@
     @if (ActiveNumber != null)
     {
-      <div class="hero-meta">
-        <div class="hero-meta-row">
-          <span class="hero-icon"
+      <div class="phone-hero-meta">
+        <div class="phone-hero-meta-row">
+          <span class="phone-hero-icon"
                 style="background: color-mix(in oklab, @(StateColors.color) 18%, transparent);
                        color: @(StateColors.color);">
             <RadzenIcon Icon="@HeroIcon" />
           </span>
           <div style="display: flex; flex-direction: column; gap: 2px;">
-            <span class="hero-number">@ActiveNumber</span>
+            <span class="phone-hero-number">@ActiveNumber</span>
             @if (CallerName != null)
             {
-              <span class="hero-name">@CallerName</span>
+              <span class="phone-hero-name">@CallerName</span>
             }
           </div>
           @if (CallState.CallState == "InCall")
           {
-            <span class="hero-duration">@FormattedDuration</span>
+            <span class="phone-hero-duration">@FormattedDuration</span>
           }
         </div>
       </div>
     }
     else
     {
-      <div class="hero-empty">
+      <div class="phone-hero-empty">
         <RadzenIcon Icon="phone" />
         Lift the handset to place a call, or wait for an incoming ring.
       </div>
     }
 
     @* Action buttons -- contextual to state *@
-    <div class="hero-actions">
+    <div class="phone-hero-actions">
       @switch (CallState.CallState)
       {
         case "Ringing":

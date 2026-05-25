@@ -133,7 +133,7 @@ public class PhonePageTests : TestContext
   {
     var cut = RenderComponent<PhonePage>();
     // Dashboard tab should have the "active" class
-    var dashButton = cut.FindAll("button.rail-tab")
+    var dashButton = cut.FindAll("button.phone-rail-tab")
       .FirstOrDefault(b => b.TextContent.Contains("Dashboard"));
     Assert.NotNull(dashButton);
     Assert.Contains("active", dashButton.ClassList);

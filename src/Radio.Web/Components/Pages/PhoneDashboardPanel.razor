@@ -1,7 +1,7 @@
 @using Radio.Web.Models
 @using Radio.Web.Components.Shared
 
-<div class="dashboard">
+<div class="phone-dashboard">
   @* Left column, row 1: Hero *@
   <PhoneStatusHero CallState="CallState"
                    CallSource="@(CallState.CallState is "InCall" or "Dialing" ? "Bluetooth HFP" : "Rotary Phone")"
@@ -13,94 +13,94 @@
   <div style="display: flex; flex-direction: column; gap: 12px; grid-column: 2;
               grid-row: 1 / 3; min-height: 0; overflow: auto;">
     @* --- PR-1: existing markup using new CSS classes --- *@
-    <div class="card accent-green">
-      <div class="card-title title-green">
-        <span class="title-text">System Status</span>
-        <span class="pill @(IsAvailable ? "green" : "red")">@(IsAvailable ? "Healthy" : "Offline")</span>
+    <div class="phone-card accent-green">
+      <div class="phone-card-title phone-title-green">
+        <span class="phone-title-text">System Status</span>
+        <span class="phone-pill @(IsAvailable ? "green" : "red")">@(IsAvailable ? "Healthy" : "Offline")</span>
       </div>
-      <div class="status-list">
-        <div class="status-row">
+      <div class="phone-status-list">
+        <div class="phone-status-row">
           <span class="lbl">Platform</span>
           <span class="val">@(SystemStatus?.Platform ?? "Unknown")</span>
-          <span class="pill gray">@(SystemStatus?.IsRaspberryPi == true ? "Pi" : "x64")</span>
+          <span class="phone-pill gray">@(SystemStatus?.IsRaspberryPi == true ? "Pi" : "x64")</span>
         </div>
-        <div class="status-row">
+        <div class="phone-status-row">
           <span class="lbl">Bluetooth</span>
           <span class="val">@(SystemStatus?.BluetoothDeviceAddress ?? "--")</span>
-          <span class="pill @(SystemStatus?.BluetoothConnected == true ? "green" : "red")">
+          <span class="phone-pill @(SystemStatus?.BluetoothConnected == true ? "green" : "red")">
             @(SystemStatus?.BluetoothConnected == true ? "Connected" : "Disconnected")
           </span>
         </div>
-        <div class="status-row">
+        <div class="phone-status-row">
           <span class="lbl">SIP Device</span>
           <span class="val">@(SystemStatus?.SipListenAddress ?? "--"):@(SystemStatus?.SipPort)</span>
-          <span class="pill @(SystemStatus?.SipListening == true ? "green" : "red")">
+          <span class="phone-pill @(SystemStatus?.SipListening == true ? "green" : "red")">
             @(SystemStatus?.SipListening == true ? "Listening" : "Offline")
           </span>
         </div>
-        <div class="status-row">
+        <div class="phone-status-row">
           <span class="lbl">HT801 ATA</span>
           <span class="val">@(SystemStatus?.Ht801IpAddress ?? "--")</span>
-          <span class="pill @(SystemStatus?.Ht801Reachable == true ? "green" : "red")">
+          <span class="phone-pill @(SystemStatus?.Ht801Reachable == true ? "green" : "red")">
             @(SystemStatus?.Ht801Reachable == true ? "Online" : "Offline")
           </span>
         </div>
       </div>
     </div>
 
-    <div class="card accent-cyan">
-      <div class="card-title title-cyan">
-        <span class="title-text">Call Path</span>
+    <div class="phone-card accent-cyan">
+      <div class="phone-card-title phone-title-cyan">
+        <span class="phone-title-text">Call Path</span>
       </div>
-      <div class="callpath-row">
+      <div class="phone-callpath-row">
         <span class="sub">Active Mode</span>
-        <div class="mode-selector">
-          <button type="button" class="mode-btn @(GvActiveMode == "BluetoothHfp" ? "active" : "")"
+        <div class="phone-mode-selector">
+          <button type="button" class="phone-mode-btn @(GvActiveMode == "BluetoothHfp" ? "active" : "")"
                   @onclick="@(() => OnSwitchMode.InvokeAsync("BluetoothHfp"))"
                   disabled="@SwitchingMode">
             <RadzenIcon Icon="bluetooth" /> Bluetooth
           </button>
-          <button type="button" class="mode-btn @(GvActiveMode == "SipTrunk" ? "active" : "")"
+          <button type="button" class="phone-mode-btn @(GvActiveMode == "SipTrunk" ? "active" : "")"
                   @onclick="@(() => OnSwitchMode.InvokeAsync("SipTrunk"))"
                   disabled="@SwitchingMode">
             <RadzenIcon Icon="settings_phone" /> SIP Trunk
           </button>
-          <button type="button" class="mode-btn @(GvActiveMode == "GVApi" ? "active" : "")"
+          <button type="button" class="phone-mode-btn @(GvActiveMode == "GVApi" ? "active" : "")"
                   @onclick="@(() => OnSwitchMode.InvokeAsync("GVApi"))"
                   disabled="@SwitchingMode">
             <RadzenIcon Icon="language" /> GV API
           </button>
         </div>
       </div>
-      <div class="connector-row">
-        <div class="conn-meta">
-          <span class="conn-icon"><RadzenIcon Icon="language" /></span>
-          <div class="conn-name">
+      <div class="phone-connector-row">
+        <div class="phone-conn-meta">
+          <span class="phone-conn-icon"><RadzenIcon Icon="language" /></span>
+          <div class="phone-conn-name">
             <span>GV API</span>
             <span class="sub">@(GvBridgeAvailable ? "SIP-WSS Bridge" : "Bridge")</span>
           </div>
         </div>
-        <div class="right-cluster">
-          <span class="pill @(GvBridgeAvailable ? "green" : "red")">
+        <div class="phone-right-cluster">
+          <span class="phone-pill @(GvBridgeAvailable ? "green" : "red")">
             @(GvBridgeAvailable ? "Available" : "Unavailable")
           </span>
         </div>
       </div>
-      <div class="connector-row">
-        <div class="conn-meta">
-          <span class="conn-icon"><RadzenIcon Icon="settings_phone" /></span>
-          <div class="conn-name">
+      <div class="phone-connector-row">
+        <div class="phone-conn-meta">
+          <span class="phone-conn-icon"><RadzenIcon Icon="settings_phone" /></span>
+          <div class="phone-conn-name">
             <span>SIP Trunk</span>
             <span class="sub">voip.ms &middot; 5060</span>
           </div>
         </div>
-        <div class="right-cluster">
-          <span class="pill @(GvTrunkRegistered ? "green" : "red")">
+        <div class="phone-right-cluster">
+          <span class="phone-pill @(GvTrunkRegistered ? "green" : "red")">
             @(GvTrunkRegistered ? "Registered" : "Unregistered")
           </span>
           @if (!GvTrunkRegistered)
           {
-            <button type="button" class="link-btn" @onclick="OnReregisterTrunk">Re-register</button>
+            <button type="button" class="phone-link-btn" @onclick="OnReregisterTrunk">Re-register</button>
           }
         </div>
       </div>

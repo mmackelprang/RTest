@@ -12,22 +12,22 @@
 <PageTitle>Phone - Radio Console</PageTitle>
 
 <div class="phone-shell">
-  <div class="tab-rail">
-    <span class="rail-heading">Phone</span>
-    <button type="button" class="rail-tab @(IsTab("dashboard") ? "active" : "")"
+  <div class="phone-tab-rail">
+    <span class="phone-rail-heading">Phone</span>
+    <button type="button" class="phone-rail-tab @(IsTab("dashboard") ? "active" : "")"
             @onclick='@(() => _activeTab = "dashboard")'>
       <RadzenIcon Icon="dashboard" />
-      <span class="rail-label">Dashboard</span>
+      <span class="phone-rail-label">Dashboard</span>
     </button>
-    <button type="button" class="rail-tab @(IsTab("contacts") ? "active" : "")"
+    <button type="button" class="phone-rail-tab @(IsTab("contacts") ? "active" : "")"
             @onclick='@(() => _activeTab = "contacts")'>
       <RadzenIcon Icon="contacts" />
-      <span class="rail-label">Contacts</span>
+      <span class="phone-rail-label">Contacts</span>
     </button>
-    <button type="button" class="rail-tab @(IsTab("history") ? "active" : "")"
+    <button type="button" class="phone-rail-tab @(IsTab("history") ? "active" : "")"
             @onclick='@(() => _activeTab = "history")'>
       <RadzenIcon Icon="history" />
-      <span class="rail-label">Call History</span>
+      <span class="phone-rail-label">Call History</span>
     </button>
   </div>
 
