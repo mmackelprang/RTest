@@ -211,7 +211,7 @@ html, body {
    proportional digit widths (e.g. "1" narrower than "0") cause layout
    shifts every second. The min-width accommodates the widest format string
    ("12:00:00 PM" in 12h+seconds mode) so downstream nav pills stay put. */
-.cluster-time {
+.cluster.cluster-time {
   min-width: 130px;
 }
 
