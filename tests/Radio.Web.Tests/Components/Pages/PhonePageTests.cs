@@ -75,41 +75,44 @@ public class PhonePageTests : TestContext
   public void PhonePage_Renders_SystemStatusSection()
   {
     var cut = RenderComponent<PhonePage>();
-    Assert.Contains("SYSTEM STATUS", cut.Markup);
-    Assert.Contains("BLUETOOTH", cut.Markup);
-    Assert.Contains("SIP DEVICE", cut.Markup);
+    Assert.Contains("System Status", cut.Markup);
+    // Status row labels are now lowercase mono text in .lbl class
+    Assert.Contains("Bluetooth", cut.Markup);
+    Assert.Contains("SIP Device", cut.Markup);
     Assert.Contains("HT801 ATA", cut.Markup);
   }
 
   [Fact]
-  public void PhonePage_Renders_PhoneStatusSection()
+  public void PhonePage_Renders_HeroIdleState()
   {
     var cut = RenderComponent<PhonePage>();
-    Assert.Contains("CURRENT STATUS", cut.Markup);
+    Assert.Contains("Awaiting Call", cut.Markup);
+    Assert.Contains("IDLE", cut.Markup);
   }
 
   [Fact]
-  public void PhonePage_Renders_DeveloperControls()
+  public void PhonePage_Renders_DevTray()
   {
     var cut = RenderComponent<PhonePage>();
-    Assert.Contains("DEV CONTROLS", cut.Markup);
+    // Dev tray is collapsed by default; header text is always visible
+    Assert.Contains("Dev Tray", cut.Markup);
+    Assert.Contains("Simulate Hardware Events", cut.Markup);
   }
 
   [Fact]
   public void PhonePage_Renders_CallPathSection()
   {
     var cut = RenderComponent<PhonePage>();
-    Assert.Contains("CALL PATH", cut.Markup);
+    Assert.Contains("Call Path", cut.Markup);
     Assert.Contains("GV API", cut.Markup);
-    Assert.Contains("SIP TRUNK", cut.Markup);
+    Assert.Contains("SIP Trunk", cut.Markup);
   }
 
   [Fact]
   public void PhonePage_ContactsTab_Renders_SourceColumn()
   {
-    // RadzenTabs only renders the active tab body; the Contacts tab item
-    // (header) is always present. Verify the tab renders without error and
-    // the Contacts tab item is in the output.
+    // Rail tab buttons are always present. Verify the component renders
+    // without error and the Contacts tab label is in the output.
     var cut = RenderComponent<PhonePage>();
     Assert.Contains("Contacts", cut.Markup);
     Assert.NotNull(cut);
@@ -118,12 +121,37 @@ public class PhonePageTests : TestContext
   [Fact]
   public void PhonePage_ContactsTab_Renders_SyncButton()
   {
-    // RadzenTabs only renders the active tab body; the Contacts tab item
-    // (header) is always present. Verify the component renders successfully
-    // with PbapApiService and BluetoothApiService injected (no DI error).
+    // Verify the component renders successfully with PbapApiService and
+    // BluetoothApiService injected (no DI error).
     var cut = RenderComponent<PhonePage>();
     Assert.Contains("Contacts", cut.Markup);
     Assert.DoesNotContain("NullReferenceException", cut.Markup);
+  }
+
+  [Fact]
+  public void PhonePage_TabRail_DefaultsToDashboard()
+  {
+    var cut = RenderComponent<PhonePage>();
+    // Dashboard tab should have the "active" class
+    var dashButton = cut.FindAll("button.rail-tab")
+      .FirstOrDefault(b => b.TextContent.Contains("Dashboard"));
+    Assert.NotNull(dashButton);
+    Assert.Contains("active", dashButton.ClassList);
+  }
+
+  [Fact]
+  public void PhonePage_HeroShowsEmptyStateHint_WhenIdle()
+  {
+    var cut = RenderComponent<PhonePage>();
+    Assert.Contains("Lift the handset to place a call", cut.Markup);
+  }
+
+  [Fact]
+  public void PhonePage_DevTray_CollapsedByDefault()
+  {
+    var cut = RenderComponent<PhonePage>();
+    Assert.Contains("Click to expand", cut.Markup);
+    Assert.DoesNotContain("Handset", cut.Markup); // body not rendered when collapsed
   }
 
   private class EmptyResponseHandler : HttpMessageHandler
