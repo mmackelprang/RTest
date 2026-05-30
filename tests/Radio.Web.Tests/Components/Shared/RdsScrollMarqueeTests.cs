@@ -174,4 +174,71 @@ public class RdsScrollMarqueeTests : TestContext
     var scroll = cut.Find(".rcp-rds-rt-scroll");
     scroll.GetAttribute("title").Should().Be(bufferText);
   }
+
+  // --- Render-guard regression tests (RDS scroll-stability fix) ---
+  // The CSS marquee animation restarts whenever this component re-renders (the
+  // track div is re-created and the inline --scroll-duration re-emitted). The
+  // parent (RadioControlPanel) re-renders ~2x/second on signal telemetry, so a
+  // no-op render visibly snaps the ticker back to the right edge ("jerk +
+  // dropped chars"). ShouldRender() suppresses the no-op renders.
+
+  [Fact]
+  public void Marquee_DoesNotReRender_WhenTextUnchanged()
+  {
+    var cut = RenderComponent<RdsScrollMarquee>(p => p
+      .Add(x => x.Text, "WUNC News • Morning Edition"));
+
+    // ShouldRender is NOT consulted before the first frame, so it primes its
+    // last-rendered cache on the FIRST consult (the first SetParametersAndRender).
+    // That first identical update therefore renders once to prime; from then on,
+    // steady-state identical telemetry ticks are suppressed. We assert the
+    // steady state — which is what happens ~2x/second on a live station.
+    cut.SetParametersAndRender(p => p
+      .Add(x => x.Text, "WUNC News • Morning Edition"));
+
+    var afterPrime = cut.RenderCount;
+
+    // Simulate the parent re-rendering on a telemetry tick with identical RDS text.
+    cut.SetParametersAndRender(p => p
+      .Add(x => x.Text, "WUNC News • Morning Edition"));
+
+    cut.RenderCount.Should().Be(afterPrime,
+      "an unchanged Text must not re-render the marquee (no CSS animation restart)");
+  }
+
+  [Fact]
+  public void Marquee_ReRenders_WhenTextChanges()
+  {
+    var cut = RenderComponent<RdsScrollMarquee>(p => p
+      .Add(x => x.Text, "WUNC News"));
+
+    var before = cut.RenderCount;
+
+    cut.SetParametersAndRender(p => p
+      .Add(x => x.Text, "WUNC News • Morning Edition"));
+
+    cut.RenderCount.Should().BeGreaterThan(before,
+      "a changed Text must re-render so the new buffer scrolls");
+  }
+
+  [Fact]
+  public void Marquee_DurationStable_AcrossNoOpReRender()
+  {
+    // Fallback assertion (plan §Task 3): the animation restart is what the
+    // re-emitted --scroll-duration style causes, so an identical-input render
+    // must keep the style string byte-identical (and ideally not re-render).
+    var cut = RenderComponent<RdsScrollMarquee>(p => p
+      .Add(x => x.Text, new string('A', 100))
+      .Add(x => x.ScrollSpeedPxPerSec, 40));
+
+    var styleBefore = cut.Find(".rcp-rds-rt-track").GetAttribute("style");
+
+    cut.SetParametersAndRender(p => p
+      .Add(x => x.Text, new string('A', 100))
+      .Add(x => x.ScrollSpeedPxPerSec, 40));
+
+    var styleAfter = cut.Find(".rcp-rds-rt-track").GetAttribute("style");
+    styleAfter.Should().Be(styleBefore,
+      "an unchanged buffer must not re-emit a new --scroll-duration (which would restart the keyframes)");
+  }
 }

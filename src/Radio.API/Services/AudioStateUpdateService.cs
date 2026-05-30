@@ -436,10 +436,17 @@ public class AudioStateUpdateService : BackgroundService
 
     if (HasRadioStateChanged(_lastRadioState, currentRadioState))
     {
+      // Stamp the per-broadcast discriminator BEFORE caching/sending so the
+      // Web RDS path can skip its accumulator append on telemetry-only ticks.
+      // Computed against the PREVIOUS state (the same baseline HasRadioStateChanged
+      // used), so the very first broadcast (_lastRadioState == null) is RDS-relevant.
+      currentRadioState.RdsRelevantChanged = HasRdsRelevantChanged(_lastRadioState, currentRadioState);
+
       _lastRadioState = currentRadioState;
       await _hubContext.Clients.Group("RadioState")
         .SendAsync("RadioStateChanged", currentRadioState, cancellationToken);
-      _logger.LogDebug("Broadcast RadioStateChanged: {Frequency} {Band}", currentRadioState.Frequency, currentRadioState.Band);
+      _logger.LogDebug("Broadcast RadioStateChanged: {Frequency} {Band} RdsRelevant={Rds}",
+        currentRadioState.Frequency, currentRadioState.Band, currentRadioState.RdsRelevantChanged);
     }
   }
 
@@ -581,6 +588,37 @@ public class AudioStateUpdateService : BackgroundService
            // PR 2 of the Radio Controller Polish arc — the recognition stream's
            // NOW row anchors on this. Changes must broadcast so the UI's
            // amber-border row tracks the actively-playing fingerprint match.
+           previous.NowPlayingMatchId != current.NowPlayingMatchId;
+  }
+
+  /// <summary>
+  /// True when an RDS- or tuning-relevant field changed between broadcasts —
+  /// the fields the Web RDS card, frequency well, and active-preset highlight
+  /// bind to. Deliberately EXCLUDES volatile signal telemetry (signal strength,
+  /// RSSI, clip, applied/manual gain, AGC, stereo, equalizer, device volume,
+  /// scan state) so the RDS marquee doesn't re-run its accumulator ~twice a
+  /// second. A null previous (first broadcast after tune/source-switch) counts
+  /// as relevant so the card populates immediately.
+  ///
+  /// This is a strict subset of <see cref="HasRadioStateChanged"/>'s conditions
+  /// (RDS/tuning rows only), so any tick that is RDS-relevant is also a
+  /// broadcast — the flag can never be true without a broadcast happening.
+  /// </summary>
+  private static bool HasRdsRelevantChanged(RadioStateDto? previous, RadioStateDto? current)
+  {
+    if (previous == null || current == null)
+    {
+      return true;
+    }
+
+    return Math.Abs(previous.Frequency - current.Frequency) > 0.001 ||
+           previous.Band != current.Band ||
+           Math.Abs(previous.Step - current.Step) > 0.001 ||
+           previous.RdsStationName != current.RdsStationName ||
+           previous.RdsStationNameStable != current.RdsStationNameStable ||
+           previous.RdsProgramType != current.RdsProgramType ||
+           previous.RdsPi != current.RdsPi ||
+           previous.RdsRadioText != current.RdsRadioText ||
            previous.NowPlayingMatchId != current.NowPlayingMatchId;
   }
 

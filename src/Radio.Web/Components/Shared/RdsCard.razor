@@ -31,11 +31,11 @@
          - PS empty → "{RT}" alone (no leading separator)
          The CSS override .rds-card .rcp-rds-rt-track restyles the track
          to inherit PS typography (blue 14 px 700) so the marquee reads
-         as the PS slot rather than as the dim 11 px standalone variant. *@
-      var trackText = string.IsNullOrEmpty(StationName)
-        ? RadioText
-        : $"{StationName}{Separator}{RadioText}";
-      <RdsScrollMarquee Text="@trackText"
+         as the PS slot rather than as the dim 11 px standalone variant.
+         _trackText is composed in OnParametersSet (not inline) so the
+         compose + nested-marquee diff don't re-run on every telemetry tick;
+         the ShouldRender guard below gates that churn. *@
+      <RdsScrollMarquee Text="@_trackText"
                         ScrollSpeedPxPerSec="@ScrollSpeedPxPerSec" />
     }
     else if (!string.IsNullOrEmpty(StationName))
@@ -100,4 +100,43 @@
   /// value through; tests can pass an explicit value to assert on it.
   /// </summary>
   [Parameter] public string Separator { get; set; } = " • ";
+
+  // Cached composed marquee track + last-rendered inputs. The parent
+  // re-renders ~2x/second on signal telemetry; this guard stops that churn
+  // from propagating into the nested RdsScrollMarquee diff when nothing the
+  // user sees has changed.
+  private string? _trackText;
+  private string? _renderedStation;
+  private string? _renderedRadioText;
+  private string? _renderedProgramType;
+  private int _renderedSpeed;
+  private string _renderedSeparator = string.Empty;
+
+  protected override void OnParametersSet()
+  {
+    _trackText = string.IsNullOrEmpty(StationName)
+      ? RadioText
+      : $"{StationName}{Separator}{RadioText}";
+  }
+
+  protected override bool ShouldRender()
+  {
+    var changed =
+      !string.Equals(_renderedStation, StationName, StringComparison.Ordinal) ||
+      !string.Equals(_renderedRadioText, RadioText, StringComparison.Ordinal) ||
+      !string.Equals(_renderedProgramType, ProgramType, StringComparison.Ordinal) ||
+      !string.Equals(_renderedSeparator, Separator, StringComparison.Ordinal) ||
+      _renderedSpeed != ScrollSpeedPxPerSec;
+
+    if (changed)
+    {
+      _renderedStation = StationName;
+      _renderedRadioText = RadioText;
+      _renderedProgramType = ProgramType;
+      _renderedSeparator = Separator;
+      _renderedSpeed = ScrollSpeedPxPerSec;
+    }
+
+    return changed;
+  }
 }

@@ -57,14 +57,12 @@
         </div>
       }
 
-      @* RDS station cell — hidden when RDS hasn't surfaced a station name. *@
-      @if (_isTunerSource && !string.IsNullOrEmpty(_radioState?.RdsStationName))
-      {
-        <div class="np-status-cell np-status-cell-rds">
-          <span class="np-status-rds-station">@_radioState.RdsStationName</span>
-          <span class="np-status-rds-tag">RDS</span>
-        </div>
-      }
+      @* RDS station cell removed (Item 2): the RdsCard marquee in the radio
+         panel is the single RDS readout. This status-strip cell duplicated the
+         PS station name on top of that card ("RDS data shown twice"). The
+         frequency cell above and the gain cell below still bind to _radioState,
+         and the source/provenance match badge further down ("RDS · station-
+         supplied") stays — only this duplicate readout is gone. *@
 
       @* Gain cell — entry point for the popover. Always rendered; the
          popover's auto pill / peak meter / slider live in GainControlPopover. *@

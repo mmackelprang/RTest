@@ -146,21 +146,14 @@
           <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
             @foreach (var preset in _presets.OrderBy(p => p.CreatedAt))
             {
-              <div class="list-item-touch" style="flex-direction: column; align-items: stretch; padding: 12px; border-radius: 8px; border: 1px solid var(--surface-separator); cursor: pointer;"
-                   @onclick="@(() => LoadPresetAsync(preset.Id))">
-                <div style="font-size: 16px; font-weight: 600; color: var(--text-high);">@preset.Name</div>
-                <div style="font-size: 14px; color: var(--signal-amber); font-family: var(--font-mono);">
-                  @FormatFrequency(preset.Frequency, preset.Band)
-                </div>
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
-                  <span style="font-size: 13px; color: var(--text-low);">@preset.Band</span>
-                  <div @onclick:stopPropagation="true">
-                    <RadzenButton Icon="delete" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small"
-                                  Variant="Variant.Text"
-                                  Click="@(() => DeletePresetAsync(preset.Id))" title="Delete" />
-                  </div>
-                </div>
-              </div>
+              <PresetCard Variant="PresetCardVariant.Card"
+                          PresetId="@preset.Id"
+                          Name="@preset.Name"
+                          Frequency="@preset.Frequency"
+                          Band="@preset.Band"
+                          IsActive="@(IsActivePreset(preset))"
+                          OnSelect="LoadPresetAsync"
+                          OnDelete="DeletePresetAsync" />
             }
           </div>
         }
@@ -644,6 +637,22 @@
   // Frequency formatting — delegates to shared FrequencyFormatter
   private static string FormatFrequency(double frequencyHz, string band) => FrequencyFormatter.FormatFrequency(frequencyHz, band);
   private static string FormatStep(double stepHz, string band) => FrequencyFormatter.FormatStep(stepHz);
+
+  /// <summary>
+  /// True when the given preset matches the currently-tuned band + frequency.
+  /// Mirrors <c>RadioControlPanel.IsActivePreset</c> so the Radio page presets
+  /// panel highlights the active station consistently with the Home rail
+  /// (PresetCard a11y active cue: amber border + inset left bar).
+  /// </summary>
+  private bool IsActivePreset(RadioPresetDto preset)
+  {
+    if (_radioState == null)
+    {
+      return false;
+    }
+    return string.Equals(preset.Band, _radioState.Band, StringComparison.OrdinalIgnoreCase)
+      && Math.Abs(preset.Frequency - _radioState.Frequency) < 1.0;
+  }
 
   private double GetDialogStep() =>
     _radioState == null ? 0.1 : FrequencyFormatter.GetDialogStep(_radioState.Step, _radioState.Band);

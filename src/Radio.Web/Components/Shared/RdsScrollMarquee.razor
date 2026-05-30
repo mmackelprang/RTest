@@ -14,11 +14,11 @@
      enough that the natural width fits inside the well (max-width 420 px
      ≈ 7 px/char in 11 px mono with 0.04em letter-spacing), skip the
      animation entirely and render static centered text. Less twitchy on
-     stations with a single short tagline. *@
-  var isStatic = ApproximateTextWidthPx() <= ContainerMaxWidthPx;
-  var durationSeconds = ComputeScrollDurationSeconds();
-
-  <div class="rcp-rds-rt-scroll @(isStatic ? "is-static" : string.Empty)"
+     stations with a single short tagline.
+     Both _isStatic and _durationSeconds are recomputed in OnParametersSet
+     (NOT inline here) so they aren't recomputed on every no-op re-render —
+     see the ShouldRender guard below. *@
+  <div class="rcp-rds-rt-scroll @(_isStatic ? "is-static" : string.Empty)"
        tabindex="0"
        aria-label="RDS RadioText"
        title="@Text">
@@ -26,7 +26,7 @@
        below carries the readable copy). *@
     <div class="rcp-rds-rt-track"
          aria-hidden="true"
-         style="@($"--scroll-duration: {durationSeconds.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)}s;")">
+         style="@($"--scroll-duration: {_durationSeconds.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)}s;")">
       @Text
     </div>
 
@@ -68,6 +68,57 @@
   /// tests; production callers stick with the default.
   /// </summary>
   [Parameter] public double ApproximateCharWidthPx { get; set; } = 7.0;
+
+  // Cached render inputs — recomputed in OnParametersSet, read by the markup.
+  // We deliberately do NOT recompute these on every render: the parent
+  // (RadioControlPanel) re-renders ~2x/second because the SignalR radio-state
+  // broadcast lumps volatile signal telemetry (RSSI/signal-strength) in with
+  // RDS text. Recomputing + re-attributing the track div on every one of those
+  // restarts the CSS marquee keyframes, which is the "jerk + dropped chars"
+  // the user reported. ShouldRender() below suppresses the no-op renders.
+  private string? _renderedText;
+  private int _renderedSpeed;
+  private int _renderedContainerWidth;
+  private double _renderedCharWidth;
+  private bool _isStatic;
+  private double _durationSeconds;
+
+  protected override void OnParametersSet()
+  {
+    _isStatic = ApproximateTextWidthPx() <= ContainerMaxWidthPx;
+    _durationSeconds = ComputeScrollDurationSeconds();
+  }
+
+  /// <summary>
+  /// Suppress re-renders that wouldn't change anything the user can see. The
+  /// CSS marquee animation restarts whenever this component re-renders (the
+  /// track div is re-created and the inline --scroll-duration is re-emitted),
+  /// so a no-op render visibly snaps the ticker back to the right edge. We
+  /// only re-render when an input that affects the visible track changed.
+  /// Blazor always renders the first frame regardless of ShouldRender, so the
+  /// cache-priming below correctly captures the first-render inputs.
+  /// </summary>
+  protected override bool ShouldRender()
+  {
+    var changed =
+      !string.Equals(_renderedText, Text, StringComparison.Ordinal) ||
+      _renderedSpeed != ScrollSpeedPxPerSec ||
+      _renderedContainerWidth != ContainerMaxWidthPx ||
+      // ApproximateCharWidthPx feeds _isStatic + _durationSeconds via
+      // OnParametersSet; include it so a (test-only) change to it can't be
+      // swallowed by the guard.
+      _renderedCharWidth != ApproximateCharWidthPx;
+
+    if (changed)
+    {
+      _renderedText = Text;
+      _renderedSpeed = ScrollSpeedPxPerSec;
+      _renderedContainerWidth = ContainerMaxWidthPx;
+      _renderedCharWidth = ApproximateCharWidthPx;
+    }
+
+    return changed;
+  }
 
   /// <summary>
   /// Approximate visual width of the current Text, in pixels. Used to decide

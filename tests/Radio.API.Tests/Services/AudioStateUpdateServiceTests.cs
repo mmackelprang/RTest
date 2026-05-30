@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Radio.API.Hubs;
+using Radio.API.Models;
 using Radio.API.Services;
 using Radio.Core.Models.Audio;
 
@@ -161,5 +162,81 @@ public class AudioStateUpdateServiceTests
     InvokeUpdateCurrentMatchAnchor(svc, snapshot);
 
     Assert.Null(ReadCurrentMatchId(svc));
+  }
+
+  // ─── RDS broadcast-split predicate (Item A) ───────────────────────────────
+  // HasRadioStateChanged keeps deciding WHETHER to broadcast (telemetry
+  // consumers — signal meter, gain, recognition NOW-row — stay fed). The new
+  // HasRdsRelevantChanged predicate decides the per-broadcast flag value that
+  // lets the Web RDS marquee path skip its accumulator append on telemetry-only
+  // ticks. Both are private static — reached via reflection like the existing
+  // anchor tests above.
+
+  private static bool InvokeHasRdsRelevantChanged(RadioStateDto? prev, RadioStateDto? curr)
+  {
+    var m = typeof(AudioStateUpdateService).GetMethod(
+      "HasRdsRelevantChanged",
+      BindingFlags.NonPublic | BindingFlags.Static);
+    Assert.NotNull(m);
+    return (bool)m!.Invoke(null, new object?[] { prev, curr })!;
+  }
+
+  private static bool InvokeHasRadioStateChanged(RadioStateDto? prev, RadioStateDto? curr)
+  {
+    var m = typeof(AudioStateUpdateService).GetMethod(
+      "HasRadioStateChanged",
+      BindingFlags.NonPublic | BindingFlags.Static);
+    Assert.NotNull(m);
+    return (bool)m!.Invoke(null, new object?[] { prev, curr })!;
+  }
+
+  [Fact]
+  public void RdsRelevant_False_OnTelemetryOnlyChange()
+  {
+    // RSSI / signal-strength drift every poll on a live station. That MUST still
+    // broadcast (the meter needs it) but MUST NOT flag the RDS path — otherwise
+    // the RDS accumulator re-runs + the CSS marquee restarts ~twice a second.
+    var prev = new RadioStateDto { Frequency = 105_100_000, Band = "FM", RssiDbu = 0, SignalStrength = 40, RdsRadioText = "Hotel California" };
+    var curr = new RadioStateDto { Frequency = 105_100_000, Band = "FM", RssiDbu = 5, SignalStrength = 60, RdsRadioText = "Hotel California" };
+
+    Assert.True(InvokeHasRadioStateChanged(prev, curr));   // still broadcasts for the signal meter
+    Assert.False(InvokeHasRdsRelevantChanged(prev, curr)); // but does NOT flag the RDS path
+  }
+
+  [Fact]
+  public void RdsRelevant_True_OnRadioTextChange()
+  {
+    var prev = new RadioStateDto { Frequency = 105_100_000, Band = "FM", RdsRadioText = "Hotel California" };
+    var curr = new RadioStateDto { Frequency = 105_100_000, Band = "FM", RdsRadioText = "Life in the Fast Lane" };
+
+    Assert.True(InvokeHasRdsRelevantChanged(prev, curr));
+  }
+
+  [Fact]
+  public void RdsRelevant_True_OnFrequencyTune()
+  {
+    var prev = new RadioStateDto { Frequency = 105_100_000, Band = "FM" };
+    var curr = new RadioStateDto { Frequency = 98_500_000, Band = "FM" };
+
+    Assert.True(InvokeHasRdsRelevantChanged(prev, curr));
+  }
+
+  [Fact]
+  public void RdsRelevant_True_OnNowPlayingMatchIdChange()
+  {
+    var prev = new RadioStateDto { Frequency = 105_100_000, Band = "FM", NowPlayingMatchId = null };
+    var curr = new RadioStateDto { Frequency = 105_100_000, Band = "FM", NowPlayingMatchId = "abc123" };
+
+    Assert.True(InvokeHasRdsRelevantChanged(prev, curr));
+  }
+
+  [Fact]
+  public void RdsRelevant_True_WhenPreviousNull()
+  {
+    // First broadcast after a tune / source-switch (no baseline) must populate
+    // the RDS card immediately.
+    var curr = new RadioStateDto { Frequency = 105_100_000, Band = "FM" };
+
+    Assert.True(InvokeHasRdsRelevantChanged(null, curr));
   }
 }

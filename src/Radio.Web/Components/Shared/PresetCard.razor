@@ -1,0 +1,129 @@
+@* PresetCard — the single saved-station renderer (Proposal A). Two visual
+   variants share one field hierarchy + token set so the Home MEMORY rail and
+   the standalone Radio page can't drift (HANDOFF-saved-station-display §8).
+
+   Variant.Rail  → compact 1-row grid (slot · name+band · freq · kebab),
+                   used in RadioControlPanel's 200px MEMORY rail. Active cue +
+                   slot + kebab + long-press gestures live here.
+   Variant.Card  → 2-column-grid card body (name line, then band + freq + delete
+                   row), used in RadioPage's 480px presets panel.
+
+   All states from the handoff (§6) are honoured in BOTH variants:
+   selected/active (a11y non-color cue), long-name ellipsis + tooltip,
+   no-name→freq-as-primary fallback. Empty-slot + empty-list remain the
+   PARENT's responsibility (they're list-level chrome, not per-card) — see
+   the migration tasks. *@
+
+@{
+  var hasName = !string.IsNullOrWhiteSpace(Name);
+  var freqValue = FrequencyFormatter.FrequencyValue(Frequency, Band);
+  var freqFull = FrequencyFormatter.FormatFrequency(Frequency, Band);
+  var fullLabel = hasName ? Name : freqFull;
+  var rowTitle = $"{fullLabel} — {Band} {freqFull}";
+}
+
+@if (Variant == PresetCardVariant.Rail)
+{
+  <div class="rcp-preset-item @(IsActive ? "is-active" : "")"
+       data-preset-id="@PresetId"
+       @onclick="@(() => OnSelect.InvokeAsync(PresetId))"
+       @onpointerdown="@(_ => OnPointerDown.InvokeAsync(PresetId))"
+       @onpointerup="@(_ => OnPointerUp.InvokeAsync(PresetId))"
+       @onpointerleave="@(_ => OnPointerCancel.InvokeAsync())"
+       @onpointercancel="@(_ => OnPointerCancel.InvokeAsync())"
+       role="button"
+       tabindex="0"
+       title="@($"{rowTitle}. Click to tune; long-press or use ⋮ for rename / delete")">
+    @* Non-color active cue (a11y, handoff §7): a 3px amber inset left bar
+       rendered via CSS on .is-active — no extra element needed here. *@
+    <span class="rcp-preset-slot">@(SlotNumber > 0 ? SlotNumber.ToString("00") : "")</span>
+    @if (hasName)
+    {
+      <span class="rcp-preset-text">
+        <span class="rcp-preset-name">@Name</span>
+        <span class="rcp-preset-band">@Band</span>
+      </span>
+      <span class="rcp-preset-freq">@freqValue</span>
+    }
+    else
+    {
+      @* No-name fallback (handoff §6): promote the frequency to the
+         primary line; drop the dim freq tail. Band sub-line stays. The
+         empty freq cell keeps the 4-column grid intact (kebab in col 4). *@
+      <span class="rcp-preset-text">
+        <span class="rcp-preset-name rcp-preset-name-freq">@freqValue</span>
+        <span class="rcp-preset-band">@Band</span>
+      </span>
+      <span class="rcp-preset-freq"></span>
+    }
+    <button type="button"
+            class="rcp-preset-kebab"
+            aria-label="Rename or delete preset @fullLabel"
+            title="Rename / delete"
+            @onclick="@(_ => OnKebab.InvokeAsync(PresetId))"
+            @onclick:stopPropagation="true">⋮</button>
+  </div>
+}
+else
+{
+  <div class="preset-card @(IsActive ? "is-active" : "")"
+       @onclick="@(() => OnSelect.InvokeAsync(PresetId))"
+       role="button"
+       tabindex="0"
+       title="@rowTitle">
+    @if (hasName)
+    {
+      <div class="preset-card-name">@Name</div>
+    }
+    else
+    {
+      @* No-name fallback: frequency becomes the primary line. *@
+      <div class="preset-card-name preset-card-name-freq">@freqValue</div>
+    }
+    <div class="preset-card-meta">
+      <span class="preset-card-band">@Band</span>
+      <span class="preset-card-meta-right">
+        @if (hasName)
+        {
+          @* Freq demoted: small dim mono tail, no amber, no glow (Proposal A). *@
+          <span class="preset-card-freq">@freqValue</span>
+        }
+        @if (OnDelete.HasDelegate)
+        {
+          <span @onclick:stopPropagation="true">
+            @* Radzen.Variant qualified explicitly — this component has its own
+               Variant parameter (PresetCardVariant) which would otherwise shadow
+               the Radzen Variant enum here. *@
+            <RadzenButton Icon="delete" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small"
+                          Variant="Radzen.Variant.Text"
+                          Click="@(() => OnDelete.InvokeAsync(PresetId))" title="Delete" />
+          </span>
+        }
+      </span>
+    </div>
+  </div>
+}
+
+@code {
+  /// <summary>Stable preset id, echoed back through the callbacks.</summary>
+  [Parameter, EditorRequired] public string PresetId { get; set; } = string.Empty;
+  /// <summary>Station name. Empty/whitespace triggers the freq-as-primary fallback.</summary>
+  [Parameter] public string? Name { get; set; }
+  /// <summary>Frequency in Hz (raw API units).</summary>
+  [Parameter, EditorRequired] public double Frequency { get; set; }
+  /// <summary>Band token ("FM"/"AM"/...). Drives unit selection + the sub-line.</summary>
+  [Parameter, EditorRequired] public string Band { get; set; } = string.Empty;
+  /// <summary>One-based per-band slot number. 0 → blank slot cell (Rail only).</summary>
+  [Parameter] public int SlotNumber { get; set; }
+  /// <summary>Active/selected station — amber border + slot + non-color left bar.</summary>
+  [Parameter] public bool IsActive { get; set; }
+  /// <summary>Which surface this card renders for.</summary>
+  [Parameter] public PresetCardVariant Variant { get; set; } = PresetCardVariant.Rail;
+
+  [Parameter] public EventCallback<string> OnSelect { get; set; }
+  [Parameter] public EventCallback<string> OnKebab { get; set; }
+  [Parameter] public EventCallback<string> OnDelete { get; set; }
+  [Parameter] public EventCallback<string> OnPointerDown { get; set; }
+  [Parameter] public EventCallback<string> OnPointerUp { get; set; }
+  [Parameter] public EventCallback OnPointerCancel { get; set; }
+}

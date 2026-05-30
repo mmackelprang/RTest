@@ -478,8 +478,12 @@ public class NowPlayingPanelTests : TestContext
   }
 
   [Fact]
-  public void StatusStrip_RendersAllFourCells_WhenTunerActiveWithRds()
+  public void StatusStrip_RendersThreeCells_WhenTunerActiveWithRds()
   {
+    // The duplicate RDS station cell was removed (Item 2 of the RDS-UX work):
+    // the single RDS readout is the RdsCard marquee in the radio panel, so the
+    // status strip now carries three cells (source · frequency · gain) even
+    // when RDS surfaces a station name.
     var radioState = new RadioStateDto(
       Frequency: 92.5e6, Band: "FM", Step: 100e3,
       SignalStrength: 70, IsScanning: false, ScanDirection: null,
@@ -494,11 +498,11 @@ public class NowPlayingPanelTests : TestContext
     var strip = cut.Find(".np-status-strip");
     Assert.NotNull(strip);
 
-    // All four cells present and in order: source, freq, rds, gain.
+    // Three cells present and in order: source, freq, gain. No RDS cell.
     Assert.Single(cut.FindAll(".np-status-cell-source"));
     Assert.Single(cut.FindAll(".np-status-cell-frequency"));
-    Assert.Single(cut.FindAll(".np-status-cell-rds"));
     Assert.Single(cut.FindAll(".np-status-cell-gain"));
+    Assert.Empty(cut.FindAll(".np-status-cell-rds"));
   }
 
   [Fact]
@@ -565,8 +569,12 @@ public class NowPlayingPanelTests : TestContext
   }
 
   [Fact]
-  public void StatusStrip_RdsCell_RendersStationName()
+  public void StatusStrip_OmitsDuplicateRdsCell_EvenWithStationName()
   {
+    // Item 2 of the RDS-UX work removed the status-strip RDS cell that
+    // duplicated the PS station name on top of the RdsCard marquee ("RDS data
+    // shown twice"). Even with a live station name, the strip must NOT render
+    // the old .np-status-cell-rds / .np-status-rds-station / .np-status-rds-tag.
     var radioState = new RadioStateDto(
       Frequency: 92.5e6, Band: "FM", Step: 100e3,
       SignalStrength: 70, IsScanning: false, ScanDirection: null,
@@ -577,11 +585,9 @@ public class NowPlayingPanelTests : TestContext
     var cut = RenderComponent<NowPlayingPanel>();
     SetStatusStripState(cut, "RTLSDRCore", "SDR Radio", radioState);
 
-    var rds = cut.Find(".np-status-rds-station");
-    Assert.Equal("WKQX", rds.TextContent);
-    // The dim tag carries the literal "RDS".
-    var tag = cut.Find(".np-status-rds-tag");
-    Assert.Equal("RDS", tag.TextContent);
+    Assert.Empty(cut.FindAll(".np-status-cell-rds"));
+    Assert.Empty(cut.FindAll(".np-status-rds-station"));
+    Assert.Empty(cut.FindAll(".np-status-rds-tag"));
   }
 
   [Fact]
@@ -813,10 +819,12 @@ public class NowPlayingPanelTests : TestContext
 
     await cut.InvokeAsync(() => handler!.Invoke(dto));
 
+    // The frequency cell still updates live off the RadioStateChanged hub push
+    // (it binds to _radioState, which is refreshed every tick). The duplicate
+    // RDS station cell was removed (Item 2), so it must not reappear here.
     var freq = cut.Find(".np-status-cell-frequency").TextContent;
     Assert.Contains("88.10", freq);
-    var rds = cut.Find(".np-status-rds-station");
-    Assert.Equal("KFOG", rds.TextContent);
+    Assert.Empty(cut.FindAll(".np-status-rds-station"));
   }
 
   // ─── Task #15 PR E item #47: gain-popover backdrop portal wiring ─────────
