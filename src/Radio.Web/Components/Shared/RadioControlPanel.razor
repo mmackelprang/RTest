@@ -263,30 +263,18 @@
           @foreach (var preset in _presets)
           {
             var isActivePreset = IsActivePreset(preset);
-            var presetId = preset.Id;
-            <div class="rcp-preset-item @(isActivePreset ? "is-active" : "")"
-                 data-preset-id="@presetId"
-                 @onclick="@(() => HandlePresetRowClickAsync(presetId))"
-                 @onpointerdown="@(e => HandlePresetPointerDown(presetId))"
-                 @onpointerup="@(e => HandlePresetPointerUp(presetId))"
-                 @onpointerleave="@(e => HandlePresetPointerCancel())"
-                 @onpointercancel="@(e => HandlePresetPointerCancel())"
-                 role="button"
-                 tabindex="0"
-                 title="Click to tune; long-press or use ⋮ for rename / delete">
-              <span class="rcp-preset-slot">@(preset.SlotNumber > 0 ? preset.SlotNumber.ToString("00") : "")</span>
-              <span class="rcp-preset-text">
-                <span class="rcp-preset-name">@preset.Name</span>
-                <span class="rcp-preset-band">@preset.Band</span>
-              </span>
-              <span class="rcp-preset-freq">@FormatFrequency(preset.Frequency, preset.Band)</span>
-              <button type="button"
-                      class="rcp-preset-kebab"
-                      aria-label="Rename or delete preset @preset.Name"
-                      title="Rename / delete"
-                      @onclick="@(e => HandleKebabClickAsync(presetId))"
-                      @onclick:stopPropagation="true">⋮</button>
-            </div>
+            <PresetCard Variant="PresetCardVariant.Rail"
+                        PresetId="@preset.Id"
+                        Name="@preset.Name"
+                        Frequency="@preset.Frequency"
+                        Band="@preset.Band"
+                        SlotNumber="@preset.SlotNumber"
+                        IsActive="@isActivePreset"
+                        OnSelect="HandlePresetRowClickAsync"
+                        OnKebab="HandleKebabClickAsync"
+                        OnPointerDown="HandlePresetPointerDown"
+                        OnPointerUp="HandlePresetPointerUp"
+                        OnPointerCancel="HandlePresetPointerCancel" />
           }
         }
 
@@ -1052,19 +1040,29 @@
 
   private async Task HandleRadioStateChanged(RadioStateDto dto)
   {
-    // Use the SignalR payload directly instead of re-fetching via REST.
-    // The hub broadcast carries NowPlayingMatchId; the REST endpoint cannot.
+    // Always refresh _radioState: the signal meter, gain readout, freq well,
+    // STEREO badge, and active-preset highlight all bind to it and legitimately
+    // change on telemetry ticks. The hub broadcast carries NowPlayingMatchId;
+    // the REST endpoint cannot. The child ShouldRender guards (RdsCard /
+    // RdsScrollMarquee) keep the marquee from restarting even on these renders.
     // Hot-fix off PR #371: presets are no longer band-filtered, so a band
     // change doesn't require a re-fetch — the empty-slot placeholder
     // re-evaluates against the new band's count on the next render.
     _radioState = dto;
 
-    // HANDOFF-rds-accumulating-scroll — order matters: reset BEFORE append.
-    // If the station changed, the buffer's dedup tracker resets so the first
-    // chunk on the new station can't accidentally match the last chunk on
-    // the prior station.
-    _rdsBuffer.ResetOnTuneChange(dto.Band, dto.Frequency, dto.RdsPi);
-    _rdsBuffer.AppendChunk(dto.RdsRadioText);
+    // Only touch the RDS accumulator when the broadcast actually carried an
+    // RDS/tuning change. On telemetry-only ticks (RdsRelevantChanged == false)
+    // we skip ResetOnTuneChange + AppendChunk entirely — the buffer text is
+    // unchanged, so RdsCard's ShouldRender suppresses the marquee re-render.
+    if (dto.RdsRelevantChanged)
+    {
+      // HANDOFF-rds-accumulating-scroll — order matters: reset BEFORE append.
+      // If the station changed, the buffer's dedup tracker resets so the first
+      // chunk on the new station can't accidentally match the last chunk on
+      // the prior station.
+      _rdsBuffer.ResetOnTuneChange(dto.Band, dto.Frequency, dto.RdsPi);
+      _rdsBuffer.AppendChunk(dto.RdsRadioText);
+    }
 
     await InvokeAsync(StateHasChanged);
   }

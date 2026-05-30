@@ -4248,7 +4248,10 @@ body {
    mirrors the band-pill long-press-to-save gesture from PR 3. */
 .rcp-preset-item {
   display: grid;
-  grid-template-columns: 22px 1fr 64px 24px;
+  /* Proposal A (HANDOFF-saved-station-display §5): freq column 64px → auto
+     (intrinsic) so a 4-6 char freq like "90.3" takes ~34px instead of a hard-
+     reserved 64px, handing ~30px back to the station name. */
+  grid-template-columns: 22px 1fr auto 24px;
   gap: 8px;
   align-items: center;
   padding: 6px 8px;
@@ -4269,6 +4272,11 @@ body {
 .rcp-preset-item.is-active {
   border-color: var(--signal-amber);
   background: color-mix(in srgb, var(--signal-amber) 8%, transparent);
+  /* Non-color-dependent active cue (a11y, handoff §7): 3px amber inset left
+     bar, mirrors the border-left pattern used elsewhere. Inset box-shadow
+     avoids reflowing the grid the way border-left would. The amber slot
+     number (below) stays as a second redundant cue. */
+  box-shadow: inset 3px 0 0 0 var(--signal-amber);
 }
 
 .rcp-preset-slot {
@@ -4296,7 +4304,9 @@ body {
 /* Override the legacy `.rcp-preset-name` (which had right-padding for an
    absolute slot badge) — under the grid layout the slot has its own column. */
 .rcp-preset-item .rcp-preset-name {
-  font-size: 12px;
+  /* Proposal A §5: name is the primary field — 14px (up from 12px),
+     high-contrast, single line, fits ~20-24 chars before ellipsis. */
+  font-size: 14px;
   font-weight: 500;
   color: var(--text-high);
   white-space: nowrap;
@@ -4304,6 +4314,14 @@ body {
   text-overflow: ellipsis;
   padding-right: 0;
   line-height: 1.25;
+}
+
+/* No-name preset: the frequency is promoted to the primary line. Mono (not
+   LED), high-contrast, 14px to match the name slot it replaces (handoff §6). */
+.rcp-preset-item .rcp-preset-name.rcp-preset-name-freq {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
 }
 
 /* Override legacy `.rcp-preset-band` (which was inline-amber inside the freq
@@ -4318,26 +4336,28 @@ body {
   line-height: 1.25;
 }
 
-/* Override legacy `.rcp-preset-freq` (which was a block sibling). Under the
-   grid it's the right-most cell, amber, right-aligned, with glow when
-   the row is the active preset. Hot-fix off PR #371 swapped DSEG14 for
-   Orbitron via --font-led — bold + tabular-nums keeps the column
-   visually a "display chrome" cell and stops the kHz/MHz numerals from
-   jittering between rows. */
+/* Proposal A §5: freq is the SECONDARY datum — de-styled from the old amber
+   LED/Orbitron "display chrome" to a small dim mono tail. Mono (was --font-led),
+   11px (was 13px), weight 500 (was 700), --text-medium (was --signal-amber),
+   no glow (text-shadow removed). tabular-nums keeps the column aligned. */
 .rcp-preset-item .rcp-preset-freq {
-  font-family: var(--font-led);
-  font-weight: 700;
+  font-family: var(--font-mono);
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
-  font-size: 13px;
+  font-size: 11px;
   text-align: right;
-  color: var(--signal-amber);
-  text-shadow: 0 0 4px color-mix(in srgb, var(--signal-amber) 30%, transparent);
+  color: var(--text-medium);
+  text-shadow: none;
   margin-top: 0;
   line-height: 1.25;
 }
 
+/* Active state (handoff §6): freq lifts from dim to high-contrast, but stays
+   mono / no-glow — the active cue is the border + slot + left bar, NOT a
+   glowing freq. The name color does NOT change on active (kept high-contrast). */
 .rcp-preset-item.is-active .rcp-preset-freq {
-  text-shadow: 0 0 6px color-mix(in srgb, var(--signal-amber) 60%, transparent);
+  color: var(--text-high);
+  text-shadow: none;
 }
 
 /* Empty next-slot placeholder. Dashed border, dim hint text spans columns 2-3. */
@@ -4460,6 +4480,63 @@ body {
   content: none;
 }
 
+/* Shared PresetCard — Card variant (Radio page 480px presets panel). Proposal A
+   hierarchy at card scale: name-primary high-contrast, freq dim mono no-glow.
+   Mirrors the Rail variant's token map at the card's larger sizes. */
+.preset-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--surface-separator);
+  cursor: pointer;
+  transition: all 80ms ease;
+}
+.preset-card:hover {
+  border-color: color-mix(in srgb, var(--signal-amber) 25%, var(--surface-separator));
+}
+.preset-card.is-active {
+  border-color: var(--signal-amber);
+  box-shadow: inset 3px 0 0 0 var(--signal-amber); /* non-color a11y cue */
+}
+.preset-card-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-high);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.preset-card-name.preset-card-name-freq {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.preset-card-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 4px;
+}
+.preset-card-band {
+  font-size: 13px;
+  color: var(--text-low);
+}
+.preset-card-meta-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.preset-card-freq {
+  font-size: 13px;
+  color: var(--text-medium);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.preset-card.is-active .preset-card-freq {
+  color: var(--text-high);
+}
+
 
 /* ─── §Y  NowPlaying Status Strip (Radio Controller Polish PR 4) ──────────── *
  * Unified Source · Frequency · RDS · Gain strip at the top of NowPlayingPanel.
@@ -4557,25 +4634,9 @@ body {
   border-radius: 4px;
 }
 
-/* RDS cell — cyan accent station name + dim "RDS" tag. */
-.np-status-rds-station {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--accent-primary);
-  letter-spacing: 0.10em;
-  text-overflow: ellipsis;
-  overflow: hidden;
-  white-space: nowrap;
-  max-width: 120px;
-}
-
-.np-status-rds-tag {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.10em;
-  text-transform: uppercase;
-  color: var(--text-low);
-}
+/* RDS status-strip cell styles removed with the duplicate readout (Item 2):
+   .np-status-rds-station / .np-status-rds-tag had no remaining markup. The
+   single RDS readout is the RdsCard marquee in the radio panel. */
 
 /* Gain cell — tappable; cyan to suggest interactivity. */
 .np-status-cell-gain {

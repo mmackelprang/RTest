@@ -342,7 +342,13 @@ public record RadioStateDto(
   // Task #80 v4 — raw RDS PI code, exposed for diagnostics so the
   // decode that drives RdsStationNameStable is debuggable from the
   // wire without log scraping. Null for non-RDS sources or pre-lock.
-  ushort? RdsPi = null
+  ushort? RdsPi = null,
+  // Per-broadcast discriminator mirrored from the API DTO — true on RDS/tuning
+  // changes, false on telemetry-only ticks. The RDS marquee path reads it to
+  // skip the accumulator append + card refresh when nothing it shows changed.
+  // Defaults true so REST /api/radio/state (which can't compute a delta) is
+  // always treated as a full refresh.
+  bool RdsRelevantChanged = true
 );
 
 public record RadioPowerStateDto(

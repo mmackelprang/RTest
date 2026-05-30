@@ -147,6 +147,20 @@ public class RadioStateDto
   /// Polish arc.
   /// </summary>
   public string? NowPlayingMatchId { get; set; }
+
+  /// <summary>
+  /// Per-broadcast discriminator (NOT persisted device state). True when this
+  /// broadcast carries a change to an RDS- or tuning-relevant field
+  /// (frequency, band, step, any RDS PS/PTY/RT/PI/stable field, or
+  /// NowPlayingMatchId); false when only volatile signal telemetry
+  /// (RSSI/signal-strength/gain/stereo/scan) changed. The Web RDS marquee
+  /// path reads this to avoid re-running the RDS accumulator + restarting the
+  /// CSS ticker ~twice a second on pure-telemetry ticks. Telemetry consumers
+  /// (signal meter, gain readout, recognition NOW-row) ignore it and read the
+  /// full DTO every broadcast. Defaults true so any non-broadcast construction
+  /// (REST /api/radio/state) is treated as a full refresh.
+  /// </summary>
+  public bool RdsRelevantChanged { get; set; } = true;
 }
 
 /// <summary>
