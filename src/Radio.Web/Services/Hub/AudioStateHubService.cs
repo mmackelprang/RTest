@@ -1,6 +1,7 @@
 using System.Net.Sockets;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
+using Radio.Configuration.Bridge;
 using Radio.Web.Models;
 
 namespace Radio.Web.Services.Hub;
@@ -15,6 +16,12 @@ public class AudioStateHubService : IAsyncDisposable
 {
   private readonly ILogger<AudioStateHubService> _logger;
   private readonly IConfiguration _configuration;
+  // Web-process instance of the SQLite-config reload notifier. Calling
+  // NotifyReload() forces this process's SqliteConfigurationProvider to re-read
+  // the shared config DB — the cross-process half of the ConfigChanged bridge.
+  // Optional so the ~9 test fixtures that new this service up directly keep
+  // compiling; production always injects the registered singleton.
+  private readonly ConfigStoreChangeNotifier? _configStoreNotifier;
   private HubConnection? _hubConnection;
   private bool _isDisposed;
   private readonly SemaphoreSlim _connectionLock = new(1, 1);
@@ -42,6 +49,10 @@ public class AudioStateHubService : IAsyncDisposable
   public event Func<Task>? VisualizationModeChanged;
   public event Func<Task>? EncoderConnectionChanged;
   public event Func<bool, Task>? SleepStateChanged;
+  // Fired after a cross-process ConfigChanged push has reloaded this process's
+  // config snapshot. Optional for subscribers that want an immediate re-render;
+  // the topbar / sleep clocks don't need it (their 1 s timers repaint anyway).
+  public event Func<Task>? ConfigChanged;
 
   // Throttle disconnect log messages to avoid spam when API is down
   private static DateTime _lastDisconnectLogUtc = DateTime.MinValue;
@@ -50,10 +61,14 @@ public class AudioStateHubService : IAsyncDisposable
   public bool IsConnected => _hubConnection?.State == HubConnectionState.Connected;
   public HubConnectionState ConnectionState => _hubConnection?.State ?? HubConnectionState.Disconnected;
 
-  public AudioStateHubService(ILogger<AudioStateHubService> logger, IConfiguration configuration)
+  public AudioStateHubService(
+    ILogger<AudioStateHubService> logger,
+    IConfiguration configuration,
+    ConfigStoreChangeNotifier? configStoreNotifier = null)
   {
     _logger = logger;
     _configuration = configuration;
+    _configStoreNotifier = configStoreNotifier;
   }
 
   public async Task StartAsync(CancellationToken cancellationToken = default)
@@ -209,6 +224,23 @@ public class AudioStateHubService : IAsyncDisposable
         if (SleepStateChanged != null)
         {
           await SleepStateChanged.Invoke(isSleeping);
+        }
+      });
+
+      // Server sends ConfigChanged (section name) when a config write lands in the
+      // API process. radio-web is a SEPARATE process, so the in-process
+      // ConfigStoreChangeNotifier never fired here — trigger it now so the
+      // SQLite-backed IOptionsMonitor snapshots (e.g. DisplayOptions.TimeFormat)
+      // re-read the shared store and the topbar / sleep clocks repaint on their
+      // next 1 s tick. See ConfigurationController.BroadcastConfigChangedAsync.
+      _hubConnection.On<string>("ConfigChanged", async (section) =>
+      {
+        _logger.LogDebug("Received ConfigChanged event for section {Section}", section);
+        _configStoreNotifier?.NotifyReload();
+        var handler = ConfigChanged;
+        if (handler != null)
+        {
+          await handler.Invoke();
         }
       });
 

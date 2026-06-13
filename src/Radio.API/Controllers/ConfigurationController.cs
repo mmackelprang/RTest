@@ -5,6 +5,8 @@ using Radio.Core.Configuration;
 using Radio.Configuration.Abstractions;
 using Radio.Configuration.Exceptions;
 using IRadioConfigurationManager = Radio.Configuration.Abstractions.IConfigurationManager;
+using Microsoft.AspNetCore.SignalR;
+using Radio.API.Hubs;
 
 namespace Radio.API.Controllers;
 
@@ -21,6 +23,7 @@ public class ConfigurationController : ControllerBase
   private readonly IOptionsMonitor<VisualizerOptions> _visualizerOptions;
   private readonly IOptionsMonitor<AudioOutputOptions> _outputOptions;
   private readonly IRadioConfigurationManager _configurationManager;
+  private readonly IHubContext<AudioStateHub> _hubContext;
 
   /// <summary>
   /// Initializes a new instance of the ConfigurationController.
@@ -30,13 +33,15 @@ public class ConfigurationController : ControllerBase
     IOptionsMonitor<AudioOptions> audioOptions,
     IOptionsMonitor<VisualizerOptions> visualizerOptions,
     IOptionsMonitor<AudioOutputOptions> outputOptions,
-    IRadioConfigurationManager configurationManager)
+    IRadioConfigurationManager configurationManager,
+    IHubContext<AudioStateHub> hubContext)
   {
     _logger = logger;
     _audioOptions = audioOptions;
     _visualizerOptions = visualizerOptions;
     _outputOptions = outputOptions;
     _configurationManager = configurationManager;
+    _hubContext = hubContext;
   }
 
   /// <summary>
@@ -385,6 +390,13 @@ public class ConfigurationController : ControllerBase
       }
 
       _logger.LogInformation("Configuration section {Section} updated successfully with {Count} keys", section, data.Count);
+
+      // Cross-process hot-reload bridge (see BroadcastConfigChangedAsync). radio-web
+      // runs as a separate process; without this its IOptionsMonitor snapshot stays
+      // stale until restart (e.g. the Display:TimeFormat clock format wouldn't
+      // repaint live on the topbar / sleep screen).
+      await BroadcastConfigChangedAsync(section);
+
       return Ok(new { message = "Configuration updated successfully", section });
     }
     catch (Exception ex)
@@ -551,6 +563,9 @@ public class ConfigurationController : ControllerBase
           "Configuration updated successfully: {Section}:{Key}",
           request.Section, request.Key);
 
+        // Cross-process hot-reload bridge (see BroadcastConfigChangedAsync).
+        await BroadcastConfigChangedAsync(request.Section);
+
         return Ok(new
         {
           message = "Configuration updated successfully",
@@ -574,6 +589,27 @@ public class ConfigurationController : ControllerBase
     {
       _logger.LogError(ex, "Error updating configuration");
       return StatusCode(500, new { error = "Failed to update configuration" });
+    }
+  }
+
+  /// <summary>
+  /// Notifies connected clients — notably radio-web, which runs as a SEPARATE
+  /// process — that a configuration section changed, so they can reload their
+  /// SQLite-backed IConfiguration / IOptionsMonitor snapshot. The in-process
+  /// ConfigStoreChangeNotifier only fires change tokens within this process, so
+  /// this SignalR fan-out is the cross-process bridge (radio-web subscribes in
+  /// AudioStateHubService and calls its own NotifyReload on receipt). Best-effort:
+  /// a broadcast failure is logged but never fails the configuration write.
+  /// </summary>
+  private async Task BroadcastConfigChangedAsync(string section)
+  {
+    try
+    {
+      await _hubContext.Clients.All.SendAsync("ConfigChanged", section);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to broadcast ConfigChanged for section {Section}", section);
     }
   }
 
