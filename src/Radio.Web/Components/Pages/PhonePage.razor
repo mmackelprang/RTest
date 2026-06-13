@@ -211,6 +211,14 @@
         var callState = await PhoneApi.GetCallStateAsync();
         if (callState != null) _callState = callState;
         _systemStatus = await PhoneApi.GetSystemStatusAsync();
+        // Poll-based fallback for call history. The SignalR CallHistoryUpdated
+        // event (OnCallHistoryUpdated) is the primary trigger, but if it's missed
+        // — hub reconnect after a deploy/service restart, or not fired for a given
+        // call path — the list would otherwise never catch up. This is the "next
+        // poll will catch up" the OnCallHistoryUpdated catch-block assumes. Guard
+        // on non-null so a transient fetch failure doesn't blank the existing list.
+        var history = await PhoneApi.GetCallHistoryAsync();
+        if (history != null) _callHistory = history;
         // Refresh GV status every 6th poll (30s) as SignalR fallback
         if (++_pollCount % 6 == 0)
         {
