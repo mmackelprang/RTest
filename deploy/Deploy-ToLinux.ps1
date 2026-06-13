@@ -263,7 +263,11 @@ function Sync-WpRule($name, $remoteDir) {
     Write-Host "  WARNING: install $name failed" -ForegroundColor Yellow
     return $false
   }
-  if ($result -match 'changed') {
+  # Exact-match the sentinel. NOT `-match 'changed'` — that is a regex/substring
+  # test, and "unchanged" CONTAINS "changed", so every UNCHANGED rule was reported
+  # as changed → a needless `systemctl --user restart wireplumber` (which cycles
+  # BT/audio) fired on every single deploy. Trim() guards a trailing newline from ssh.
+  if ("$result".Trim() -eq 'changed') {
     Write-Host "    + $remoteDir/$name" -ForegroundColor DarkGray
     return $true
   }
