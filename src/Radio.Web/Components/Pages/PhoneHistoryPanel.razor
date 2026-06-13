@@ -1,4 +1,9 @@
 @using Radio.Web.Models
+@using Radio.Core.Utilities
+
+<style>
+  .history-subnumber { font-size: 0.78rem; color: var(--text-low, #8A8895); }
+</style>
 
 <div class="phone-history">
   <div class="history-header">
@@ -21,7 +26,12 @@
           <RadzenIcon Icon="@GetCallDirectionIcon(entry)"
             Style="@($"color: {GetCallDirectionColor(entry)}")" />
           <div class="history-details">
-            <span class="phone-number">@entry.PhoneNumber</span>
+            @{ var contactName = ResolveContactName(entry); }
+            <span class="phone-number">@(contactName ?? entry.PhoneNumber)</span>
+            @if (contactName is not null && !string.IsNullOrEmpty(entry.PhoneNumber))
+            {
+              <span class="history-subnumber">@entry.PhoneNumber</span>
+            }
             <span class="history-time">@entry.StartTime.ToLocalTime().ToString("g")</span>
           </div>
           @if (entry.AnsweredOn != CallAnsweredOn.NotAnswered)
@@ -42,6 +52,39 @@
 @code {
   [Parameter] public List<CallHistoryEntryDto>? CallHistory { get; set; }
   [Parameter] public EventCallback OnClearHistory { get; set; }
+
+  /// <summary>Merged contact set (PBAP phonebook + RotaryPhone contacts) used to
+  /// hydrate call-history entries with a contact name instead of a bare number.</summary>
+  [Parameter] public List<MergedContact>? Contacts { get; set; }
+
+  // Normalized phone digits -> contact name, rebuilt when parameters change so the
+  // per-entry lookup is O(1). First contact wins for a shared number.
+  private Dictionary<string, string> _nameByNumber = new();
+
+  protected override void OnParametersSet()
+  {
+    var map = new Dictionary<string, string>(StringComparer.Ordinal);
+    if (Contacts is not null)
+    {
+      foreach (var c in Contacts)
+      {
+        if (string.IsNullOrWhiteSpace(c.Phone) || string.IsNullOrWhiteSpace(c.Name)) continue;
+        var key = PhoneNumberNormalizer.Normalize(c.Phone);
+        if (key.Length > 0) map.TryAdd(key, c.Name);
+      }
+    }
+    _nameByNumber = map;
+  }
+
+  // Resolution precedence: a name RotaryPhone already attached (CallerName) → a
+  // normalized match in the merged contact set → null (the caller renders the number).
+  private string? ResolveContactName(CallHistoryEntryDto entry)
+  {
+    if (!string.IsNullOrWhiteSpace(entry.CallerName)) return entry.CallerName;
+    if (string.IsNullOrWhiteSpace(entry.PhoneNumber)) return null;
+    var key = PhoneNumberNormalizer.Normalize(entry.PhoneNumber);
+    return key.Length > 0 && _nameByNumber.TryGetValue(key, out var name) ? name : null;
+  }
 
   private static string GetCallDirectionIcon(CallHistoryEntryDto entry) => entry.Direction switch
   {

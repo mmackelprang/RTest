@@ -21,15 +21,21 @@ public class PhoneHistoryPanelTests : TestContext
     JSInterop.Mode = JSRuntimeMode.Loose;
   }
 
-  private static CallHistoryEntryDto Entry(string? duration) => new()
+  private static CallHistoryEntryDto Entry(string? duration = null, string phoneNumber = "9195551212", string? callerName = null) => new()
   {
     Id = "1",
-    PhoneNumber = "9195551212",
+    PhoneNumber = phoneNumber,
+    CallerName = callerName,
     StartTime = new DateTime(2026, 6, 13, 14, 9, 48, DateTimeKind.Local),
     Direction = CallDirection.Incoming,
     AnsweredOn = CallAnsweredOn.RotaryPhone,
     Duration = duration
   };
+
+  private IRenderedComponent<PhoneHistoryPanel> RenderWith(CallHistoryEntryDto entry, List<MergedContact>? contacts = null)
+    => RenderComponent<PhoneHistoryPanel>(p => p
+         .Add(x => x.CallHistory, new List<CallHistoryEntryDto> { entry })
+         .Add(x => x.Contacts, contacts ?? new List<MergedContact>()));
 
   [Fact]
   public void Duration_StripsSubSecondPrecision_ToMinSec()
@@ -57,5 +63,37 @@ public class PhoneHistoryPanelTests : TestContext
       .Add(x => x.CallHistory, new List<CallHistoryEntryDto> { Entry(null) }));
 
     cut.FindAll(".call-duration").Should().BeEmpty();
+  }
+
+  [Fact]
+  public void Name_ResolvesFromContacts_AcrossNumberFormats()
+  {
+    // Contact stored as "+1 (919) 371-8044"; call logged as "9193718044" — must
+    // still match via PhoneNumberNormalizer.
+    var contacts = new List<MergedContact> { new(null, "Mom", "+1 (919) 371-8044", null, "PBAP") };
+
+    var cut = RenderWith(Entry(phoneNumber: "9193718044"), contacts);
+
+    cut.Find(".phone-number").TextContent.Trim().Should().Be("Mom");
+    cut.Find(".history-subnumber").TextContent.Trim().Should().Be("9193718044");
+  }
+
+  [Fact]
+  public void Name_FallsBackToNumber_WhenNoContactMatch()
+  {
+    var cut = RenderWith(Entry(phoneNumber: "5550000000"));
+
+    cut.Find(".phone-number").TextContent.Trim().Should().Be("5550000000");
+    cut.FindAll(".history-subnumber").Should().BeEmpty();
+  }
+
+  [Fact]
+  public void Name_PrefersServerCallerName_OverContactLookup()
+  {
+    var contacts = new List<MergedContact> { new(null, "Mom", "9193718044", null, "PBAP") };
+
+    var cut = RenderWith(Entry(phoneNumber: "9193718044", callerName: "Dad"), contacts);
+
+    cut.Find(".phone-number").TextContent.Trim().Should().Be("Dad");
   }
 }
