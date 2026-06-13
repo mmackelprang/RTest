@@ -24,10 +24,10 @@
             <span class="phone-number">@entry.PhoneNumber</span>
             <span class="history-time">@entry.StartTime.ToLocalTime().ToString("g")</span>
           </div>
-          @if (entry.AnsweredOn != null)
+          @if (entry.AnsweredOn != CallAnsweredOn.NotAnswered)
           {
-            <RadzenBadge Text="@entry.AnsweredOn"
-              BadgeStyle="@(entry.AnsweredOn == "RotaryPhone" ? BadgeStyle.Info : BadgeStyle.Light)" />
+            <RadzenBadge Text="@entry.AnsweredOn.ToString()"
+              BadgeStyle="@(entry.AnsweredOn == CallAnsweredOn.RotaryPhone ? BadgeStyle.Info : BadgeStyle.Light)" />
           }
           @if (entry.Duration != null)
           {
@@ -45,17 +45,17 @@
 
   private static string GetCallDirectionIcon(CallHistoryEntryDto entry) => entry.Direction switch
   {
-    "Incoming" when entry.AnsweredOn != null => "call_received",
-    "Incoming" => "call_missed",
-    "Outgoing" => "call_made",
+    CallDirection.Incoming when entry.AnsweredOn != CallAnsweredOn.NotAnswered => "call_received",
+    CallDirection.Incoming => "call_missed",
+    CallDirection.Outgoing => "call_made",
     _ => "phone"
   };
 
   private static string GetCallDirectionColor(CallHistoryEntryDto entry) => entry.Direction switch
   {
-    "Incoming" when entry.AnsweredOn != null => "var(--rz-success)",
-    "Incoming" => "var(--rz-danger)",
-    "Outgoing" => "var(--rz-info)",
+    CallDirection.Incoming when entry.AnsweredOn != CallAnsweredOn.NotAnswered => "var(--rz-success)",
+    CallDirection.Incoming => "var(--rz-danger)",
+    CallDirection.Outgoing => "var(--rz-info)",
     _ => "var(--rz-text-color)"
   };
 }

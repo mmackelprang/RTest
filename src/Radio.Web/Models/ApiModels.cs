@@ -1020,10 +1020,35 @@ public class CallHistoryEntryDto
   public DateTime StartTime { get; set; }
   public DateTime? EndTime { get; set; }
   public string? Duration { get; set; }
-  public string Direction { get; set; } = "Incoming";
+  // RotaryPhone serializes the CallDirection/CallAnsweredOn enums as int
+  // (System.Text.Json default — no JsonStringEnumConverter is registered on
+  // RotaryPhone). Typing these as string threw JsonException ("Cannot get the
+  // value of a token type 'Number' as a string") and silently dropped the whole
+  // list, so the Call History tab showed an empty state. Use matching int-backed
+  // enums so deserialization succeeds against the numeric payload.
+  public CallDirection Direction { get; set; } = CallDirection.Incoming;
   public string PhoneNumber { get; set; } = "";
-  public string? AnsweredOn { get; set; }
+  public string? CallerName { get; set; }
+  public CallAnsweredOn AnsweredOn { get; set; } = CallAnsweredOn.NotAnswered;
   public string? PhoneId { get; set; }
+}
+
+// Must match the ordinal values of
+// RotaryPhoneController.Core.CallHistory.CallDirection (Incoming = 0, Outgoing = 1).
+public enum CallDirection
+{
+  Incoming = 0,
+  Outgoing = 1
+}
+
+// Must match the ordinal values of
+// RotaryPhoneController.Core.CallHistory.CallAnsweredOn
+// (NotAnswered = 0, RotaryPhone = 1, CellPhone = 2).
+public enum CallAnsweredOn
+{
+  NotAnswered = 0,
+  RotaryPhone = 1,
+  CellPhone = 2
 }
 
 // PBAP DTOs
