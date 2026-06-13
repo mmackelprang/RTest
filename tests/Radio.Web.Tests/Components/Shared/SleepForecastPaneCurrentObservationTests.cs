@@ -212,7 +212,8 @@ public class SleepForecastPaneCurrentObservationTests : TestContext
     // qualifier should appear in the sub-line — they cover orthogonal
     // failure modes (forecast freshness vs. observation availability).
     var subline = cut.Find(".sleep-forecast-subline");
-    subline.TextContent.Should().Contain("yesterday at");
+    subline.TextContent.Should().Contain("as of");
+    subline.TextContent.Should().Contain("yesterday");
     cut.Find(".sleep-forecast-subline-fallback").TextContent.Should().Contain("forecast only");
   }
 
