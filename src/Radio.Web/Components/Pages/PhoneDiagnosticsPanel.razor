@@ -1,0 +1,199 @@
+@using Radio.Web.Models
+@using Radio.Web.Services.ApiClients
+@inject DiagnosticsApiService DiagnosticsApi
+@inject GvBridgeApiService GvBridgeApi
+@implements IDisposable
+
+@*
+  Call-audio diagnostics panel (Diagnostics tab on /phone). Read-only view of
+  RotaryPhone's /api/diagnostics/* over the existing phone API link — consume-only
+  per the BT/audio boundary; no RotaryPhone changes. Built to watch a live GV call's
+  media flow while debugging "no call audio": is the audio bridge active, are RTP
+  frames moving in each direction, and the SIP INVITE→Ringing→Answer→BYE sequence.
+
+  Self-polls every 2s while mounted. The panel only renders when the Diagnostics tab
+  is active (PhonePage swaps the @if), so polling starts on tab-open and stops on
+  tab-change / navigate-away via Dispose — no load on the rest of the phone page.
+*@
+
+<style>
+  .phone-diagnostics-panel { padding: 16px 20px; height: 100%; overflow-y: auto; color: var(--text-high, #F0EFF4); }
+  .phone-diag-heading { display: flex; align-items: center; gap: 8px; font-size: 1.05rem; font-weight: 600; margin-bottom: 14px; }
+  .phone-diag-heading .phone-diag-status { font-size: 0.78rem; color: var(--text-low, #8A8895); font-weight: 400; }
+  .phone-diag-card { background: var(--surface-raised, #161620); border: 1px solid var(--border-subtle, #2A2A38); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
+  .phone-diag-card-title { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-low, #8A8895); margin-bottom: 10px; }
+  .phone-diag-bridge-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .phone-diag-metric { display: flex; flex-direction: column; gap: 3px; }
+  .phone-diag-metric-label { font-size: 0.72rem; color: var(--text-low, #8A8895); }
+  .phone-diag-metric-value { font-family: var(--font-mono, monospace); font-size: 1.15rem; }
+  .phone-diag-metric-value.is-warn { color: var(--signal-red, #E8635C); }
+  .phone-diag-badge { display: inline-block; padding: 2px 9px; border-radius: 6px; font-size: 0.78rem; font-weight: 600; background: var(--border-subtle, #2A2A38); color: var(--text-low, #8A8895); width: fit-content; }
+  .phone-diag-badge.is-on { background: color-mix(in srgb, var(--signal-amber, #5CD4E8) 28%, transparent); color: var(--signal-amber, #5CD4E8); }
+  .phone-diag-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; font-family: var(--font-mono, monospace); }
+  .phone-diag-table th { text-align: left; color: var(--text-low, #8A8895); font-weight: 500; padding: 3px 6px; border-bottom: 1px solid var(--border-subtle, #2A2A38); }
+  .phone-diag-table td { padding: 3px 6px; border-bottom: 1px solid color-mix(in srgb, var(--border-subtle, #2A2A38) 50%, transparent); white-space: nowrap; }
+  .phone-diag-peer { color: var(--text-low, #8A8895); }
+  .phone-diag-empty { color: var(--text-low, #8A8895); font-size: 0.85rem; font-style: italic; }
+  .phone-diag-timeline { list-style: none; margin: 0; padding: 0; font-size: 0.8rem; }
+  .phone-diag-timeline li { display: flex; gap: 10px; padding: 3px 0; }
+  .phone-diag-timeline .phone-diag-time { font-family: var(--font-mono, monospace); color: var(--text-low, #8A8895); }
+  .phone-diag-timeline .phone-diag-event { font-weight: 600; min-width: 96px; }
+</style>
+
+<div class="phone-diagnostics-panel">
+  <div class="phone-diag-heading">
+    <RadzenIcon Icon="monitor_heart" />
+    <span>Call Audio Diagnostics</span>
+    <span class="phone-diag-status">@(_lastError ? "· RotaryPhone API unreachable" : $"· updated {_lastUpdated:HH:mm:ss}")</span>
+  </div>
+
+  @* GV audio-bridge live card — the key "is media flowing" view. *@
+  <div class="phone-diag-card">
+    <div class="phone-diag-card-title">GV Audio Bridge</div>
+    @if (_audio is null)
+    {
+      <div class="phone-diag-empty">No data — RotaryPhone API unreachable.</div>
+    }
+    else
+    {
+      <div class="phone-diag-bridge-grid">
+        <div class="phone-diag-metric">
+          <span class="phone-diag-metric-label">Bridge</span>
+          <span class="phone-diag-badge @(_audio.IsActive ? "is-on" : "is-off")">@(_audio.IsActive ? "ACTIVE" : "inactive")</span>
+        </div>
+        <div class="phone-diag-metric">
+          <span class="phone-diag-metric-label">Audio</span>
+          <span class="phone-diag-badge @(_audio.BidirectionalAudio ? "is-on" : "is-off")">@(_audio.BidirectionalAudio ? "2-way" : "none")</span>
+        </div>
+        <div class="phone-diag-metric">
+          <span class="phone-diag-metric-label">errors</span>
+          <span class="phone-diag-metric-value @((_audio.InboundErrors + _audio.OutboundErrors) > 0 ? "is-warn" : "")">@(_audio.InboundErrors + _audio.OutboundErrors)</span>
+        </div>
+        <div class="phone-diag-metric">
+          <span class="phone-diag-metric-label">→ phone (in frames)</span>
+          <span class="phone-diag-metric-value">@_audio.InboundFramesSent</span>
+        </div>
+        <div class="phone-diag-metric">
+          <span class="phone-diag-metric-label">← phone (out frames)</span>
+          <span class="phone-diag-metric-value">@_audio.OutboundFramesReceived</span>
+        </div>
+        <div class="phone-diag-metric">
+          <span class="phone-diag-metric-label">mode</span>
+          <span class="phone-diag-metric-value" style="font-size:0.9rem;">@(_gvMode ?? "—")</span>
+        </div>
+      </div>
+    }
+  </div>
+
+  @* SIP message log — INVITE / Trying / Ringing / OK / BYE with status codes. *@
+  <div class="phone-diag-card">
+    <div class="phone-diag-card-title">SIP Log</div>
+    @if (_sipLog.Count == 0)
+    {
+      <div class="phone-diag-empty">No SIP messages yet.</div>
+    }
+    else
+    {
+      <table class="phone-diag-table">
+        <thead>
+          <tr><th>Time</th><th>Dir</th><th>Method</th><th>Status</th><th>Peer</th></tr>
+        </thead>
+        <tbody>
+          @foreach (var m in Newest(_sipLog))
+          {
+            <tr>
+              <td>@m.Timestamp.ToLocalTime().ToString("HH:mm:ss")</td>
+              <td>@(m.Direction == 0 ? "→" : "←")</td>
+              <td>@m.Method</td>
+              <td>@(m.StatusCode is null ? "" : $"{m.StatusCode} {m.StatusText}")</td>
+              <td class="phone-diag-peer">@(m.Direction == 0 ? m.ToAddress : m.FromAddress)</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    }
+  </div>
+
+  @* Call timeline — semantic events (REGISTER / INVITE_SENT / RINGING / ANSWERED / ENDED). *@
+  <div class="phone-diag-card">
+    <div class="phone-diag-card-title">Call Timeline</div>
+    @if (_timeline.Count == 0)
+    {
+      <div class="phone-diag-empty">No timeline events yet.</div>
+    }
+    else
+    {
+      <ul class="phone-diag-timeline">
+        @foreach (var e in Newest(_timeline))
+        {
+          <li>
+            <span class="phone-diag-time">@e.Timestamp.ToLocalTime().ToString("HH:mm:ss")</span>
+            <span class="phone-diag-event">@e.EventType</span>
+            <span class="phone-diag-desc">@e.Description</span>
+          </li>
+        }
+      </ul>
+    }
+  </div>
+</div>
+
+@code {
+  private AudioBridgeStatsDto? _audio;
+  private List<SipMessageDto> _sipLog = [];
+  private List<CallTimelineDto> _timeline = [];
+  private string? _gvMode;
+  private DateTime _lastUpdated;
+  private bool _lastError;
+  private System.Timers.Timer? _timer;
+  private bool _disposed;
+
+  // Cap the rendered rows so a long-running session's ring buffer doesn't blow
+  // up the DOM; newest-first for at-a-glance reading.
+  private static IEnumerable<T> Newest<T>(List<T> source)
+    => Enumerable.Reverse(source).Take(20);
+
+  protected override async Task OnInitializedAsync()
+  {
+    // Active call path (GVApi / BluetoothHfp / SipTrunk) — stable during a session,
+    // fetched once so the 2s poll loop stays light.
+    _gvMode = (await GvBridgeApi.GetStatusAsync())?.ActiveMode;
+    await RefreshAsync();
+    _timer = new System.Timers.Timer(2000) { AutoReset = true };
+    _timer.Elapsed += OnTick;
+    _timer.Start();
+  }
+
+  private void OnTick(object? sender, System.Timers.ElapsedEventArgs e)
+    => _ = InvokeAsync(RefreshAsync);
+
+  private async Task RefreshAsync()
+  {
+    if (_disposed) return;
+    try
+    {
+      var audioTask = DiagnosticsApi.GetAudioBridgeAsync();
+      var sipTask = DiagnosticsApi.GetSipLogAsync(30);
+      var timelineTask = DiagnosticsApi.GetTimelineAsync(30);
+      await Task.WhenAll(audioTask, sipTask, timelineTask);
+
+      _audio = audioTask.Result;
+      _sipLog = sipTask.Result;
+      _timeline = timelineTask.Result;
+      _lastError = _audio is null && _sipLog.Count == 0 && _timeline.Count == 0;
+      _lastUpdated = DateTime.Now;
+      StateHasChanged();
+    }
+    catch (ObjectDisposedException) { /* component torn down mid-poll */ }
+  }
+
+  public void Dispose()
+  {
+    _disposed = true;
+    if (_timer is not null)
+    {
+      _timer.Elapsed -= OnTick;
+      _timer.Stop();
+      _timer.Dispose();
+    }
+  }
+}

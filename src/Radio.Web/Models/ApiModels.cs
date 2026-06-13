@@ -1085,6 +1085,44 @@ public class GvModeEntryDto
   public string Mode { get; set; } = "";
 }
 
+// ── Diagnostics (RotaryPhone /api/diagnostics/*) — consumed read-only by
+// PhoneDiagnosticsPanel over the existing phone API link (consume-only per the
+// BT/audio boundary). Shapes verified against live responses 2026-06-13.
+
+/// <summary>Live GV audio-bridge stats from <c>/api/diagnostics/audio-bridge</c>.</summary>
+public class AudioBridgeStatsDto
+{
+  public bool IsActive { get; set; }
+  public int InboundFramesSent { get; set; }
+  public int OutboundFramesReceived { get; set; }
+  public int InboundErrors { get; set; }
+  public int OutboundErrors { get; set; }
+  public bool BidirectionalAudio { get; set; }
+}
+
+/// <summary>One SIP message from <c>/api/diagnostics/sip-log</c>. <c>Direction</c>: 0 = Sent, 1 = Received.</summary>
+public class SipMessageDto
+{
+  public DateTime Timestamp { get; set; }
+  public int Direction { get; set; }
+  public string Method { get; set; } = "";
+  public string? FromAddress { get; set; }
+  public string? ToAddress { get; set; }
+  public int? StatusCode { get; set; }
+  public string? StatusText { get; set; }
+  public string? DiagnosticNote { get; set; }
+  public string? CallId { get; set; }
+}
+
+/// <summary>One call-timeline event from <c>/api/diagnostics/timeline</c>.</summary>
+public class CallTimelineDto
+{
+  public DateTime Timestamp { get; set; }
+  public string EventType { get; set; } = "";
+  public string Description { get; set; } = "";
+  public Dictionary<string, string>? Metadata { get; set; }
+}
+
 public class GvSmsNotificationDto
 {
   public string FromNumber { get; set; } = "";
