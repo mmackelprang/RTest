@@ -29,6 +29,11 @@
       <RadzenIcon Icon="history" />
       <span class="phone-rail-label">Call History</span>
     </button>
+    <button type="button" class="phone-rail-tab @(IsTab("diagnostics") ? "active" : "")"
+            @onclick='@(() => _activeTab = "diagnostics")'>
+      <RadzenIcon Icon="monitor_heart" />
+      <span class="phone-rail-label">Diagnostics</span>
+    </button>
   </div>
 
   <div style="overflow: hidden; min-height: 0;">
@@ -70,6 +75,10 @@
     {
       <PhoneHistoryPanel CallHistory="_callHistory"
                          OnClearHistory="ClearCallHistoryAsync" />
+    }
+    else if (_activeTab == "diagnostics")
+    {
+      <PhoneDiagnosticsPanel />
     }
   </div>
 </div>

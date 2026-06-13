@@ -350,6 +350,20 @@ builder.Services.AddHttpClient<GvTrunkApiService>(client =>
   return handler;
 });
 
+// Diagnostics API client (same RotaryPhone service) — consumed by PhoneDiagnosticsPanel
+builder.Services.AddHttpClient<DiagnosticsApiService>(client =>
+{
+  client.BaseAddress = new Uri(phoneApiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(10);
+})
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
+});
+
 // Register SignalR hub services as singletons (Phase 1 Task 1.3, Phase 10)
 builder.Services.AddSingleton<AudioStateHubService>();
 builder.Services.AddSingleton<AudioVisualizationHubService>();
