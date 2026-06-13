@@ -36,7 +36,7 @@ public class SleepForecastPaneTests : TestContext
   /// reference-image data (60/77/66, "Partly Sunny") so the assertions stay
   /// easy to read.
   /// </summary>
-  private static WeatherForecast BuildForecast(int dayCount, bool isStale = false)
+  private static WeatherForecast BuildForecast(int dayCount, bool isStale = false, DateTime? generatedAtUtc = null)
   {
     var days = new List<WeatherDay>
     {
@@ -51,9 +51,10 @@ public class SleepForecastPaneTests : TestContext
     return new WeatherForecast(
       Zip: "27312",
       LocationName: "Pittsboro, NC",
-      // Fresh: 1 hour old; Stale: 25 hours old so the "yesterday at HH:mm"
-      // sub-line branch fires.
-      GeneratedAtUtc: DateTime.UtcNow.AddHours(isStale ? -25 : -1),
+      // Fresh: 1 hour old; Stale: 25 hours old so the "as of … yesterday"
+      // sub-line branch fires. Callers can pin an explicit timestamp to make
+      // time-of-day assertions deterministic.
+      GeneratedAtUtc: generatedAtUtc ?? DateTime.UtcNow.AddHours(isStale ? -25 : -1),
       FetchedAtUtc: DateTime.UtcNow.AddMinutes(-1),
       IsStale: isStale,
       Days: days.Take(dayCount).ToList(),
@@ -233,7 +234,7 @@ public class SleepForecastPaneTests : TestContext
   // ── Sub-line contract ───────────────────────────────────────────────────
 
   [Fact]
-  public void Pane_SubLine_RendersWithLocationDayAndTime_WhenFresh()
+  public void Pane_SubLine_RendersLocationAndAsOfStamp_WhenFresh()
   {
     var cut = RenderComponent<SleepForecastPane>(p => p
       .Add(x => x.Forecast, BuildForecast(3))
@@ -250,23 +251,38 @@ public class SleepForecastPaneTests : TestContext
     // The middle-dot separator is rendered as a literal "·" inside the
     // text node — verifies the format string is wired correctly.
     text.Should().Contain("·");
+
+    // Fresh data reads as an "as of <time>" freshness stamp.
+    text.Should().Contain("as of");
   }
 
   [Fact]
-  public void Pane_SubLine_RendersFullWeekdayName_NotAbbreviation()
+  public void Pane_SubLine_RendersAsOfFreshnessStamp_NotCurrentWeekday()
   {
-    // Spec §3: the sub-line uses the full weekday name ("Sunday") rather
-    // than the 3-letter abbreviation; abbreviations live only in the
-    // forecast cards. Compute the expected weekday for "today" so the test
-    // doesn't drift over time.
-    var expectedDay = DateTime.Now.ToString("dddd",
+    // Bug fix: the fresh sub-line is a DATA-FRESHNESS stamp ("as of <fetch
+    // time>"), not a live clock. It must show the forecast's generation time,
+    // explicitly labeled "as of", and must NOT show the current weekday — the
+    // old code glued today's DateTime.Now weekday onto the generation time,
+    // which read like a (wrong) wall clock. Pin GeneratedAtUtc so the
+    // time-of-day assertion is deterministic.
+    var generatedUtc = DateTime.UtcNow.AddHours(-1);
+    var expectedTime = generatedUtc.ToLocalTime().ToString("HH:mm",
       System.Globalization.CultureInfo.InvariantCulture);
 
     var cut = RenderComponent<SleepForecastPane>(p => p
-      .Add(x => x.Forecast, BuildForecast(3))
+      .Add(x => x.Forecast, BuildForecast(3, generatedAtUtc: generatedUtc))
       .Add(x => x.TemperatureUnit, "F"));
 
-    cut.Find(".sleep-forecast-subline").TextContent.Should().Contain(expectedDay);
+    var text = cut.Find(".sleep-forecast-subline").TextContent;
+    text.Should().Contain("as of");
+    text.Should().Contain(expectedTime,
+      "the sub-line shows the forecast's generation time, labeled 'as of'");
+
+    var currentWeekday = DateTime.Now.ToString("dddd",
+      System.Globalization.CultureInfo.InvariantCulture);
+    text.Should().NotContain(currentWeekday,
+      "the fresh sub-line must not show the current weekday — that made the "
+      + "forecast-generation time masquerade as a (wrong) live clock");
   }
 
   // ── Stale state contract ────────────────────────────────────────────────
@@ -294,10 +310,11 @@ public class SleepForecastPaneTests : TestContext
       .Add(x => x.Forecast, BuildForecast(3, isStale: true))
       .Add(x => x.TemperatureUnit, "F"));
 
-    // 25h-old forecast (BuildForecast stale path) — sub-line prepends
-    // "yesterday at HH:mm" per spec §3 State B.
+    // 25h-old forecast (BuildForecast stale path) — sub-line reads
+    // "as of HH:mm yesterday" per the design mockup (§2 State C).
     var subline = cut.Find(".sleep-forecast-subline");
-    subline.TextContent.Should().Contain("yesterday at");
+    subline.TextContent.Should().Contain("as of");
+    subline.TextContent.Should().Contain("yesterday");
   }
 
   [Fact]

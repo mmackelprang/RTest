@@ -216,9 +216,14 @@
 
   protected override void OnParametersSet()
   {
-    // Compose the sub-line. Fresh data: "<City> · <Day> <Time>". Stale data
-    // (>12h old) prepends a relative qualifier per the v1 stale rules —
-    // "<City> · yesterday at HH:mm" or "<City> · N days ago at HH:mm".
+    // Compose the sub-line as a DATA-FRESHNESS stamp ("<City> · as of <time>"),
+    // NOT a live clock — the alternating clock pane already carries the current
+    // time. `clockString` is Forecast.GeneratedAtUtc (when the NWS data was
+    // pulled); the explicit "as of" prefix labels it so the fetch time can't be
+    // misread as the current time. Matches the design mockup
+    // (HANDOFF-sleep-mode-weather-forecast.md §2: "· as of 3:00 PM", stale
+    // "· as of 1:00 PM yesterday"). DateTime.Now is used ONLY to bucket the
+    // freshness qualifier (hoursOld) — never to build the displayed time.
     var localGenerated = Forecast.GeneratedAtUtc.LocalDateTime;
     var hoursOld = (DateTime.Now - localGenerated).TotalHours;
     var clockString = FormatClock?.Invoke(localGenerated)
@@ -227,20 +232,16 @@
 
     if (hoursOld < 12)
     {
-      // Use today's full weekday name for the sub-line. The forecast cards
-      // still use 3-letter abbreviations (DayName from the API) because
-      // horizontal width matters there — the sub-line has its own slot.
-      var dayName = DateTime.Now.ToString("dddd", CultureInfo.InvariantCulture);
-      _subLineText = $"{locationDisplay} · {dayName} {clockString}";
+      _subLineText = $"{locationDisplay} · as of {clockString}";
     }
     else if (hoursOld < 36)
     {
-      _subLineText = $"{locationDisplay} · yesterday at {clockString}";
+      _subLineText = $"{locationDisplay} · as of {clockString} yesterday";
     }
     else
     {
       var daysOld = (int)Math.Floor(hoursOld / 24.0);
-      _subLineText = $"{locationDisplay} · {daysOld} days ago at {clockString}";
+      _subLineText = $"{locationDisplay} · as of {clockString} {daysOld} days ago";
     }
 
     // Aria-live label — single sentence the screen reader can read end-to-end.
