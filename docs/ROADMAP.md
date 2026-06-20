@@ -82,6 +82,16 @@ The dual-path explains both Mark's "audio from both soundbar AND Cast" complaint
 - **Plan: WP rule (Part 1, critical-path)**: [`docs/plans/2026-05-22-wp-bt-route-exclusivity.md`](plans/2026-05-22-wp-bt-route-exclusivity.md) — WirePlumber config that prevents BT A2DP from auto-routing to default sink. Without this, Path D can't be measured cleanly. ~30 LOC infra config.
 - **Plan: Output picker UI (Part 2, UX)**: [`docs/plans/2026-05-22-output-picker-ui.md`](plans/2026-05-22-output-picker-ui.md) — replaces the `MainLayout.razor:636-641` stub (currently `NavigationManager.NavigateTo("/devices")`) with a real popover. ~150-200 LOC mirroring `CastDeviceDropdown.razor`.
 
+### GV Messages — Voicemail + SMS UI on `/phone` (selected 2026-06-20)
+
+Consumes the Designer handoff (`docs/design-handoffs/HANDOFF-phone-messages-voicemail-sms.md`) and Architect ADR-022 (`design/decisions/2026-06-20-gvbridge-voicemail-sms-integration.md`). Restructures `/phone` into a unified Messages feed (voicemail + texts + recent calls, segmented filter, "More ▸" rail) consuming RotaryPhone's `gvbridge` API at `radio:5004`. Read experience ships fully now; SMS send is built behind a feature flag (RotaryPhone endpoint not yet shipped). Queued for Builder in [`docs/BUILDER_QUEUE.md`](BUILDER_QUEUE.md).
+
+| # | Plan | Scope | Depends on | Branch |
+|---|---|---|---|---|
+| GV-1 | [`pr1-foundation-ia-shell.md`](superpowers/plans/2026-06-20-gv-messages-pr1-foundation-ia-shell.md) | DTOs, `GvBridgeApiService` reads + absolute audio URL, `PhoneHubService` GV events, `GvBridgeStatusService`, auth-handler seam (OFF), config/DI, Messages-feed IA shell (calls folded in, missed-call badge). | — | `feat/gv-messages-pr1-foundation` |
+| GV-2 | [`pr2-voicemail-surface.md`](superpowers/plans/2026-06-20-gv-messages-pr2-voicemail-surface.md) | Voicemail rows + inline seekable player + transcript states + new-arrival + UI-local/flagged mark-read seam. | GV-1 | `feat/gv-messages-pr2-voicemail` |
+| GV-3 | [`pr3-texts-surface.md`](superpowers/plans/2026-06-20-gv-messages-pr3-texts-surface.md) | Thread list + conversation bubbles + `GvSmsReceived` + compose/keyboard (all flag-gated send) + open-thread-to-RotaryPhone deliverable. | GV-1 | `feat/gv-messages-pr3-texts` |
+
 ### CI infrastructure — RTest appserver runner migration
 
 Selected as a follow-up after the cast/BT Phase 1+2 tranche revealed that the project's monthly GH Actions minutes pool can be a real blocker. Plan modeled on FamilyWorkspace's 2026-05-17 migration which already provisioned the runner.

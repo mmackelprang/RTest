@@ -341,4 +341,14 @@ Shared directory: `/opt/radio-console/{api,web,data,logs}`
 
 ---
 
+## ADR-022: GV Voicemail + SMS Integration (gvbridge consumer)
+
+**Date:** 2026-06-20
+**Status:** Proposed (Architect)
+**Summary:** `Radio.Web` consumes RotaryPhone's `gvbridge` voicemail + GV-SMS contract directly at `radio:5004` (no Radio.API proxy), extends the existing `GvBridgeApiService` + `PhoneHubService` (`/hub`), plays voicemail audio via a native `<audio>` element pointed at an absolute `radio:5004` Range-capable URL (NOT the no-Range album-art proxy), polls `/api/gvbridge/status` via a new `GvBridgeStatusService` singleton, and gates SMS send behind `RotaryPhone:Gv:SendEnabled` (default off). Future `X-RotaryPhone-Auth` header wired as an off-by-default seam.
+
+**Full ADR:** [`design/decisions/2026-06-20-gvbridge-voicemail-sms-integration.md`](decisions/2026-06-20-gvbridge-voicemail-sms-integration.md)
+
+---
+
 <!-- NEW ENTRIES GO ABOVE THIS LINE -->
