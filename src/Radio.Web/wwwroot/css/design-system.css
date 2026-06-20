@@ -5492,3 +5492,31 @@ body {
   50%      { opacity: 0.35; }
 }
 .phone-dot-pulse { animation: phoneDotPulse 1.4s ease-in-out infinite; }
+
+/* §Ph — Messages panel layout (PR1) */
+.phone-messages { display: flex; flex-direction: column; height: 600px; min-height: 0; }
+.phone-messages-body {
+  display: grid; grid-template-columns: 1fr 520px;
+  flex: 1; min-height: 0; overflow: hidden;
+}
+.phone-messages-feed { overflow-y: auto; min-height: 0; }
+.phone-messages-detail {
+  border-left: 1px solid var(--surface-separator);
+  overflow-y: auto; min-height: 0;
+}
+.phone-call-detail-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.phone-call-detail-name { font-size: 18px; font-weight: 600; color: var(--text-high); }
+.phone-call-detail-number {
+  font-family: var(--font-mono); font-size: 13px; color: var(--text-medium);
+  letter-spacing: 0.04em;
+}
+
+/* §Ph — GV reconnecting banner (handoff verbatim) */
+.gv-reconnect-banner {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  background: rgba(240,168,48,0.10);
+  border-bottom: 1px solid var(--surface-separator);
+  color: var(--signal-amber);
+  font-family: var(--font-body); font-size: 13px;
+}

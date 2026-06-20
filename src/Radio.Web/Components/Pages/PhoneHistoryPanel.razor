@@ -23,8 +23,8 @@
       @foreach (var entry in CallHistory)
       {
         <div class="history-item">
-          <RadzenIcon Icon="@GetCallDirectionIcon(entry)"
-            Style="@($"color: {GetCallDirectionColor(entry)}")" />
+          <RadzenIcon Icon="@PhoneCallFormatting.GetCallDirectionIcon(entry)"
+            Style="@($"color: {PhoneCallFormatting.GetCallDirectionColor(entry)}")" />
           <div class="history-details">
             @{ var contactName = ResolveContactName(entry); }
             <span class="phone-number">@(contactName ?? entry.PhoneNumber)</span>
@@ -41,7 +41,7 @@
           }
           @if (!string.IsNullOrEmpty(entry.Duration))
           {
-            <span class="call-duration">@FormatDuration(entry.Duration)</span>
+            <span class="call-duration">@PhoneCallFormatting.FormatDuration(entry.Duration)</span>
           }
         </div>
       }
@@ -84,37 +84,5 @@
     if (string.IsNullOrWhiteSpace(entry.PhoneNumber)) return null;
     var key = PhoneNumberNormalizer.Normalize(entry.PhoneNumber);
     return key.Length > 0 && _nameByNumber.TryGetValue(key, out var name) ? name : null;
-  }
-
-  private static string GetCallDirectionIcon(CallHistoryEntryDto entry) => entry.Direction switch
-  {
-    CallDirection.Incoming when entry.AnsweredOn != CallAnsweredOn.NotAnswered => "call_received",
-    CallDirection.Incoming => "call_missed",
-    CallDirection.Outgoing => "call_made",
-    _ => "phone"
-  };
-
-  private static string GetCallDirectionColor(CallHistoryEntryDto entry) => entry.Direction switch
-  {
-    CallDirection.Incoming when entry.AnsweredOn != CallAnsweredOn.NotAnswered => "var(--rz-success)",
-    CallDirection.Incoming => "var(--rz-danger)",
-    CallDirection.Outgoing => "var(--rz-info)",
-    _ => "var(--rz-text-color)"
-  };
-
-  // Call durations arrive from RotaryPhone as a raw TimeSpan string with full
-  // tick precision (e.g. "00:00:37.9710594"). Strip the sub-second noise and
-  // show a compact "m:ss" (or "h:mm:ss" for calls of an hour or more). Falls
-  // back to the raw string if it ever arrives in an unparseable format.
-  private static string FormatDuration(string? raw)
-  {
-    if (string.IsNullOrWhiteSpace(raw)
-        || !TimeSpan.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture, out var ts))
-    {
-      return raw ?? "";
-    }
-
-    ts = TimeSpan.FromSeconds(Math.Round(ts.TotalSeconds));
-    return ts.TotalHours >= 1 ? ts.ToString(@"h\:mm\:ss") : ts.ToString(@"m\:ss");
   }
 }

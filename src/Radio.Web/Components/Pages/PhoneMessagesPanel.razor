@@ -1,0 +1,197 @@
+@using Radio.Web.Models
+@using Radio.Web.Services
+@using Radio.Core.Utilities
+
+@* Unified Messages feed (Designer Option C). Segmented filter over one
+   newest-first feed. PR1 = shell + call rows; PR2 adds voicemail rows + player;
+   PR3 adds text thread rows + conversation. *@
+
+<div class="phone-messages">
+  @if (!GvAvailable)
+  {
+    <div class="gv-reconnect-banner" role="status">
+      <RadzenIcon Icon="sync_problem" />
+      <span>Google Voice is reconnecting — voicemail and texts may be delayed.</span>
+    </div>
+  }
+
+  <div class="panel-header">
+    <span>MESSAGES</span>
+    <button type="button" class="phone-btn-sm"
+            aria-label="Refresh messages" @onclick="OnRefresh">
+      <RadzenIcon Icon="refresh" />
+    </button>
+  </div>
+
+  <div class="phone-mode-selector" role="tablist" aria-label="Message filter">
+    @foreach (var seg in Segments)
+    {
+      var segKey = seg.Key;
+      <button type="button"
+              class="phone-mode-btn @(_filter == segKey ? "active" : "")"
+              role="tab" aria-selected="@(_filter == segKey)"
+              @onclick="@(() => _filter = segKey)">
+        <span>@seg.Label</span>
+        @if (seg.Count > 0)
+        {
+          <span class="phone-pill cyan">@seg.Count</span>
+        }
+      </button>
+    }
+  </div>
+
+  <div class="phone-messages-body">
+    <div class="phone-messages-feed">
+      @if (_filter is "all" or "calls")
+      {
+        @if (CallHistory == null)
+        {
+          @for (var i = 0; i < 5; i++)
+          {
+            <div class="skeleton-list-row">
+              <div class="skeleton skeleton-list-row-text"></div>
+            </div>
+          }
+        }
+        else if (CallHistory.Count == 0)
+        {
+          <div class="empty-state">
+            <RadzenIcon Icon="call" class="empty-state-icon" />
+            <div class="empty-state-text">No recent calls.</div>
+          </div>
+        }
+        else
+        {
+          @foreach (var entry in CallHistory.OrderByDescending(c => c.StartTime))
+          {
+            var captured = entry;
+            <button type="button"
+                    class="list-item-touch @(ReferenceEquals(_selectedCall, captured) ? "list-item-active" : "")"
+                    @onclick="@(() => _selectedCall = captured)">
+              <RadzenIcon Icon="@PhoneCallFormatting.GetCallDirectionIcon(captured)"
+                          Style="@($"color: {PhoneCallFormatting.GetCallDirectionColor(captured)}")" />
+              <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+                <span class="list-item-title">@ResolveName(captured)</span>
+                <span class="list-item-subtitle">@DirectionLabel(captured)</span>
+              </div>
+              <span class="list-item-meta">@captured.StartTime.ToLocalTime().ToString("g")</span>
+              @if (!string.IsNullOrEmpty(captured.Duration))
+              {
+                <span class="list-item-meta">@PhoneCallFormatting.FormatDuration(captured.Duration)</span>
+              }
+              <RadzenIcon Icon="chevron_right" Style="color: var(--text-low);" />
+            </button>
+          }
+        }
+      }
+      else
+      {
+        @* PR2 (voicemail) / PR3 (texts) fill these filters; until then show empty. *@
+        <div class="empty-state">
+          <RadzenIcon Icon="@(_filter == "voicemail" ? "voicemail" : "forum")" class="empty-state-icon" />
+          <div class="empty-state-text">
+            @(_filter == "voicemail" ? "Voicemail coming online…" : "Texts coming online…")
+          </div>
+        </div>
+      }
+    </div>
+
+    <div class="phone-messages-detail">
+      @if (_selectedCall == null)
+      {
+        <div class="empty-state">
+          <RadzenIcon Icon="forum" class="empty-state-icon" />
+          <div class="empty-state-text">Pick a message to open it here.</div>
+        </div>
+      }
+      else
+      {
+        var call = _selectedCall;
+        <div class="phone-call-detail">
+          <div class="panel-header">
+            <span>CALL DETAIL</span>
+          </div>
+          <div class="phone-call-detail-body">
+            <div class="phone-call-detail-name">@ResolveName(call)</div>
+            <div class="phone-call-detail-number">@call.PhoneNumber</div>
+            <div class="phone-callpath-row">
+              <span class="sub">Direction</span>
+              <span>@DirectionLabel(call)</span>
+            </div>
+            <div class="phone-callpath-row">
+              <span class="sub">When</span>
+              <span>@call.StartTime.ToLocalTime().ToString("f")</span>
+            </div>
+            @if (!string.IsNullOrEmpty(call.Duration))
+            {
+              <div class="phone-callpath-row">
+                <span class="sub">Duration</span>
+                <span>@PhoneCallFormatting.FormatDuration(call.Duration)</span>
+              </div>
+            }
+            @if (call.AnsweredOn != CallAnsweredOn.NotAnswered)
+            {
+              <div class="phone-callpath-row">
+                <span class="sub">Answered On</span>
+                <span class="phone-pill @(call.AnsweredOn == CallAnsweredOn.RotaryPhone ? "blue" : "gray")">
+                  @call.AnsweredOn
+                </span>
+              </div>
+            }
+            @* fast-follow: Call back / Text back (deferred — owner decision 3) *@
+          </div>
+        </div>
+      }
+    </div>
+  </div>
+</div>
+
+@code {
+  [Parameter] public bool GvAvailable { get; set; } = true;
+  [Parameter] public List<CallHistoryEntryDto>? CallHistory { get; set; }
+  [Parameter] public List<MergedContact> Contacts { get; set; } = [];
+  [Parameter] public int UnheardVoicemailCount { get; set; }   // PR2 feeds this
+  [Parameter] public int UnreadThreadCount { get; set; }       // PR3 feeds this
+  [Parameter] public EventCallback OnRefresh { get; set; }
+
+  private string _filter = "all";
+  private CallHistoryEntryDto? _selectedCall;
+
+  private IEnumerable<(string Key, string Label, int Count)> Segments => new[]
+  {
+    ("all", "All", 0),
+    ("voicemail", "Voicemail", UnheardVoicemailCount),
+    ("texts", "Texts", UnreadThreadCount),
+    ("calls", "Calls", 0)
+  };
+
+  // Resolution precedence mirrors PhoneHistoryPanel.ResolveContactName:
+  // a name RotaryPhone already attached (CallerName) → a normalized match in the
+  // merged contact set → the bare number.
+  private string ResolveName(CallHistoryEntryDto e)
+  {
+    if (!string.IsNullOrWhiteSpace(e.CallerName))
+    {
+      return e.CallerName!;
+    }
+    var key = PhoneNumberNormalizer.Normalize(e.PhoneNumber);
+    if (key.Length > 0)
+    {
+      var match = Contacts.FirstOrDefault(c =>
+        PhoneNumberNormalizer.Normalize(c.Phone) == key);
+      if (match != null)
+      {
+        return match.Name;
+      }
+    }
+    return e.PhoneNumber;
+  }
+
+  private static string DirectionLabel(CallHistoryEntryDto e) => e.Direction switch
+  {
+    CallDirection.Incoming when e.AnsweredOn != CallAnsweredOn.NotAnswered => "Incoming",
+    CallDirection.Incoming => "Missed",
+    CallDirection.Outgoing => "Outgoing",
+    _ => "Call"
+  };
+}
