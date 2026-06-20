@@ -343,13 +343,16 @@ builder.Services.AddHttpClient<GvBridgeApiService>(client =>
   return handler;
 });
 
-// GV Trunk API client (same RotaryPhone service)
+// GV Trunk API client (same RotaryPhone service). Carries the RotaryPhoneAuthHandler
+// too so the X-RotaryPhone-Auth seam is consistent across every radio:5004 client
+// — when the gate flips on, all four clients authenticate, not just GV Bridge/Phone.
 builder.Services.AddHttpClient<GvTrunkApiService>(client =>
 {
   client.BaseAddress = new Uri(phoneApiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(10);
 })
 .AddHttpMessageHandler<ApiConnectionLoggingHandler>()
+.AddHttpMessageHandler<Radio.Web.Services.Http.RotaryPhoneAuthHandler>()
 .ConfigurePrimaryHttpMessageHandler(() =>
 {
   var handler = new HttpClientHandler();
@@ -357,13 +360,15 @@ builder.Services.AddHttpClient<GvTrunkApiService>(client =>
   return handler;
 });
 
-// Diagnostics API client (same RotaryPhone service) — consumed by PhoneDiagnosticsPanel
+// Diagnostics API client (same RotaryPhone service) — consumed by PhoneDiagnosticsPanel.
+// Same auth seam as the other radio:5004 clients (see GvTrunk comment above).
 builder.Services.AddHttpClient<DiagnosticsApiService>(client =>
 {
   client.BaseAddress = new Uri(phoneApiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(10);
 })
 .AddHttpMessageHandler<ApiConnectionLoggingHandler>()
+.AddHttpMessageHandler<Radio.Web.Services.Http.RotaryPhoneAuthHandler>()
 .ConfigurePrimaryHttpMessageHandler(() =>
 {
   var handler = new HttpClientHandler();
@@ -387,6 +392,11 @@ builder.Services.AddSingleton<Radio.Web.Services.GvBridgeStatusService>(sp =>
     sp.GetRequiredService<IServiceScopeFactory>(),
     sp.GetRequiredService<ILogger<Radio.Web.Services.GvBridgeStatusService>>(),
     builder.Configuration.GetValue("RotaryPhone:Gv:StatusPollSeconds", 10)));
+// Drive the poll loop via the host so its lifecycle (start at boot, cancel +
+// await at graceful shutdown) is owned by the runtime. AddHostedService does NOT
+// register the concrete type, so reuse the singleton above (memory: DI gotcha).
+builder.Services.AddHostedService(sp =>
+  sp.GetRequiredService<Radio.Web.Services.GvBridgeStatusService>());
 
 // Register centralized audio state store (subscribes to hub, caches state for components)
 builder.Services.AddSingleton<AudioStateStore>();
@@ -514,10 +524,9 @@ _ = phoneHub.StartAsync();
 var gvTrunkHub = app.Services.GetRequiredService<GvTrunkHubService>();
 _ = gvTrunkHub.StartAsync();
 
-// Start the single app-wide GV status poll (drives the Messages reconnecting
-// banner + Send gate). Non-blocking — primes once immediately then ~10s ticks.
-var gvStatusService = app.Services.GetRequiredService<Radio.Web.Services.GvBridgeStatusService>();
-gvStatusService.Start();
+// The single app-wide GV status poll (drives the Messages reconnecting banner +
+// Send gate) is started by the host via IHostedService — see the
+// GvBridgeStatusService registration above. No manual Start() needed here.
 
 // Print startup header to console
 var logDirectory = Path.GetFullPath("logs");

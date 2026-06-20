@@ -30,7 +30,7 @@
     <div class="phone-rail-divider"></div>
 
     <button type="button" class="phone-rail-tab phone-rail-more"
-            aria-expanded="@_moreExpanded"
+            aria-expanded="@(_moreExpanded ? "true" : "false")"
             @onclick="@(() => _moreExpanded = !_moreExpanded)">
       <RadzenIcon Icon="@(_moreExpanded ? "expand_more" : "chevron_right")" />
       <span class="phone-rail-label">More</span>

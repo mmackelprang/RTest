@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Radio.Web.Models;
 using Radio.Web.Services.ApiClients;
 
@@ -11,12 +12,20 @@ namespace Radio.Web.Services;
 /// poll because a singleton cannot inject a scoped/typed HttpClient
 /// (ADR-022 §6.2). RadioConsole only reflects state — RotaryPhone does the
 /// actual cookie recovery.
+///
+/// Implemented as an <see cref="IHostedService"/> so the host owns the
+/// background-loop lifecycle: the poll loop is started once at app boot
+/// (StartAsync) and cancelled + awaited at graceful shutdown (StopAsync). This
+/// avoids the "never-disposed singleton leaks its loop" trap of a manual Start()
+/// (see also the AddHostedService(sp => GetRequiredService&lt;T&gt;()) memory note).
 /// </summary>
-public sealed class GvBridgeStatusService : IAsyncDisposable
+public sealed class GvBridgeStatusService : IHostedService, IAsyncDisposable
 {
   private readonly IServiceScopeFactory _scopeFactory;
   private readonly ILogger<GvBridgeStatusService> _logger;
   private readonly int _pollSeconds;
+  // Guards Start() idempotency across threads (0 = not started, 1 = started).
+  private int _started;
   private PeriodicTimer? _timer;
   private Task? _loop;
   private CancellationTokenSource? _cts;
@@ -35,15 +44,37 @@ public sealed class GvBridgeStatusService : IAsyncDisposable
     _pollSeconds = pollSeconds <= 0 ? 10 : pollSeconds;
   }
 
+  Task IHostedService.StartAsync(CancellationToken cancellationToken)
+  {
+    Start();
+    return Task.CompletedTask;
+  }
+
+  Task IHostedService.StopAsync(CancellationToken cancellationToken) => StopLoopAsync();
+
+  /// <summary>
+  /// Starts the background poll loop. Idempotent and thread-safe: a second call
+  /// is a no-op. Public so unit/integration code can trigger it explicitly; the
+  /// host normally drives it via <see cref="IHostedService.StartAsync"/>.
+  /// </summary>
   public void Start()
   {
-    if (_loop != null)
+    if (Interlocked.CompareExchange(ref _started, 1, 0) != 0)
     {
       return;
     }
     _cts = new CancellationTokenSource();
     _timer = new PeriodicTimer(TimeSpan.FromSeconds(_pollSeconds));
     _loop = Task.Run(() => PollLoopAsync(_cts.Token));
+  }
+
+  private async Task StopLoopAsync()
+  {
+    _cts?.Cancel();
+    if (_loop != null)
+    {
+      try { await _loop; } catch { /* ignore — cancellation/teardown */ }
+    }
   }
 
   private async Task PollLoopAsync(CancellationToken ct)
@@ -88,12 +119,8 @@ public sealed class GvBridgeStatusService : IAsyncDisposable
 
   public async ValueTask DisposeAsync()
   {
-    _cts?.Cancel();
+    await StopLoopAsync();
     _timer?.Dispose();
-    if (_loop != null)
-    {
-      try { await _loop; } catch { /* ignore */ }
-    }
     _cts?.Dispose();
   }
 }
