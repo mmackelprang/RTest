@@ -1090,13 +1090,80 @@ public record MergedContact(string? Id, string Name, string Phone, string? Email
 
 public class GvBridgeStatusDto
 {
-  // Server shape (post-SIP-WSS migration, March 2026):
-  //   { available: bool, activeMode: string }
-  // ExtensionConnected/ExtensionVersion were dropped when the Chrome extension
-  // path was replaced by SIP-over-WebSocket. Two-badge UI (SipRegistered +
-  // CookiesValid) is gated on RotaryPhone exposing those fields — Phase B.
+  // Server shape (post-SIP-WSS migration, March 2026): { available, activeMode }.
+  // SipRegistered / CookiesValid added per ADR-022 §4.4 — defensive/optional:
+  // RotaryPhone may not populate them yet, so defaults keep deserialization safe.
   public bool Available { get; set; }
   public string ActiveMode { get; set; } = "";
+  public bool SipRegistered { get; set; }
+  public bool CookiesValid { get; set; }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// GV (gvbridge) Voicemail + SMS — consumed by the Messages UI (PhonePage).
+// NOTE: GV (gvbridge) SMS is NOT the same product as VoIP.ms trunk SMS.
+// Trunk SMS = GvSmsNotificationDto + GvTrunkHubService.SmsReceived on
+// /hubs/gvtrunk. GV SMS = SmsMessageDto + PhoneHubService.GvSmsReceived on
+// /hub. Do NOT merge or rename these. (ADR-022 §4.3.)
+// ─────────────────────────────────────────────────────────────────────
+
+// ── GV Voicemail ──────────────────────────────────────────────
+public record VoicemailItemDto(
+  string Id,
+  string ThreadId,
+  string FromNumber,            // E.164
+  string? FromName,             // null → UI shows number / contact lookup
+  DateTime ReceivedAt,          // UTC; format to local for display
+  int DurationSeconds,          // 0 = unknown → do NOT render "0:00" as real
+  bool IsRead,                  // UI-LOCAL only — GV mark-read not in v1
+  string? Transcript,           // null = pending/absent
+  string AudioUrl);             // RELATIVE from server; rebuild absolute (ADR D4)
+
+public record VoicemailListDto(
+  IReadOnlyList<VoicemailItemDto> Items,
+  string? NextPageToken,        // null = no more pages
+  DateTime FetchedAtUtc);
+
+// ── GV SMS ────────────────────────────────────────────────────
+public record SmsMessageDto(
+  string Id,
+  string ThreadId,
+  string Direction,             // "Inbound" | "Outbound"; UNKNOWN → Inbound
+  string CounterpartyNumber,    // E.164
+  string? Text,                 // null → render placeholder, do not crash
+  DateTime SentAt,              // UTC
+  bool IsRead);
+
+public record SmsThreadDto(
+  string ThreadId,
+  string CounterpartyNumber,
+  string? CounterpartyName,
+  DateTime LastMessageAt,
+  bool HasUnread,
+  string? LastMessagePreview);
+
+public record SmsThreadListDto(
+  IReadOnlyList<SmsThreadDto> Threads,
+  DateTime FetchedAtUtc);
+
+public record SmsThreadMessagesDto(
+  string ThreadId,
+  IReadOnlyList<SmsMessageDto> Messages,
+  DateTime FetchedAtUtc);
+
+// ── Send (flagged; wired in PR3, endpoint ships later) ─────────
+public record SendSmsRequest(string ThreadId, string Text);
+public record SendSmsResponse(SmsMessageDto? Message, string? Error);  // shape provisional
+
+// Defensive direction mapping: anything not exactly "Outbound" → Inbound.
+// Never throw on an unrecognized value (ADR §4.2 provisional-data rule).
+public static class GvDirection
+{
+  public const string Inbound = "Inbound";
+  public const string Outbound = "Outbound";
+
+  public static bool IsOutbound(string? direction) =>
+    string.Equals(direction, Outbound, StringComparison.OrdinalIgnoreCase);
 }
 
 public class GvAdapterModeDto
