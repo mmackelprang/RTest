@@ -52,6 +52,11 @@ public sealed class GvBridgeStatusService : IHostedService, IAsyncDisposable
 
   Task IHostedService.StopAsync(CancellationToken cancellationToken) => StopLoopAsync();
 
+  // 0 = running, 1 = stop already requested. Guards against StopAsync (host
+  // shutdown) and DisposeAsync (DI teardown) both trying to cancel/await the
+  // same loop — the second caller must be a no-op, not touch a disposed CTS.
+  private int _stopped;
+
   /// <summary>
   /// Starts the background poll loop. Idempotent and thread-safe: a second call
   /// is a no-op. Public so unit/integration code can trigger it explicitly; the
@@ -70,7 +75,14 @@ public sealed class GvBridgeStatusService : IHostedService, IAsyncDisposable
 
   private async Task StopLoopAsync()
   {
-    _cts?.Cancel();
+    // Idempotent: only the first caller (StopAsync OR DisposeAsync, whichever
+    // wins) cancels + awaits the loop. The CTS is disposed in DisposeAsync, so
+    // tolerate ObjectDisposedException if teardown ordering races.
+    if (Interlocked.Exchange(ref _stopped, 1) != 0)
+    {
+      return;
+    }
+    try { _cts?.Cancel(); } catch (ObjectDisposedException) { /* already torn down */ }
     if (_loop != null)
     {
       try { await _loop; } catch { /* ignore — cancellation/teardown */ }
@@ -119,7 +131,7 @@ public sealed class GvBridgeStatusService : IHostedService, IAsyncDisposable
 
   public async ValueTask DisposeAsync()
   {
-    await StopLoopAsync();
+    await StopLoopAsync();   // no-op if the host already stopped us
     _timer?.Dispose();
     _cts?.Dispose();
   }
