@@ -5520,3 +5520,9 @@ body {
   color: var(--signal-amber);
   font-family: var(--font-body); font-size: 13px;
 }
+
+/* §Ph — Messages rail: divider, indented "More" sub-tabs, badge anchor (PR1) */
+.phone-rail-divider { height: 1px; background: var(--surface-separator); margin: var(--sp-2) 0; }
+.phone-rail-sub .phone-rail-label { padding-left: var(--sp-3); font-size: 13px; }
+.phone-rail-tab { position: relative; }
+.phone-rail-tab .nav-badge { position: absolute; top: 6px; right: 6px; }

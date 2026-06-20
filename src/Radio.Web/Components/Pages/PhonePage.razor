@@ -7,6 +7,8 @@
 @inject NotificationService NotificationService
 @inject PbapApiService PbapApi
 @inject BluetoothApiService BluetoothApi
+@inject GvBridgeStatusService GvBridgeStatus
+@inject PhoneUnreadState PhoneUnread
 @implements IDisposable
 
 <PageTitle>Phone - Radio Console</PageTitle>
@@ -14,30 +16,58 @@
 <div class="phone-shell">
   <div class="phone-tab-rail">
     <span class="phone-rail-heading">Phone</span>
-    <button type="button" class="phone-rail-tab @(IsTab("dashboard") ? "active" : "")"
-            @onclick='@(() => _activeTab = "dashboard")'>
-      <RadzenIcon Icon="dashboard" />
-      <span class="phone-rail-label">Dashboard</span>
+
+    <button type="button" class="phone-rail-tab @(IsTab("messages") ? "active" : "")"
+            @onclick='@(() => _activeTab = "messages")'>
+      <RadzenIcon Icon="forum" />
+      <span class="phone-rail-label">Messages</span>
+      @if (UnreadSum > 0)
+      {
+        <span class="nav-badge" aria-hidden="true">@UnreadSum</span>
+      }
     </button>
-    <button type="button" class="phone-rail-tab @(IsTab("contacts") ? "active" : "")"
-            @onclick='@(() => _activeTab = "contacts")'>
-      <RadzenIcon Icon="contacts" />
-      <span class="phone-rail-label">Contacts</span>
+
+    <div class="phone-rail-divider"></div>
+
+    <button type="button" class="phone-rail-tab phone-rail-more"
+            aria-expanded="@_moreExpanded"
+            @onclick="@(() => _moreExpanded = !_moreExpanded)">
+      <RadzenIcon Icon="@(_moreExpanded ? "expand_more" : "chevron_right")" />
+      <span class="phone-rail-label">More</span>
     </button>
-    <button type="button" class="phone-rail-tab @(IsTab("history") ? "active" : "")"
-            @onclick='@(() => _activeTab = "history")'>
-      <RadzenIcon Icon="history" />
-      <span class="phone-rail-label">Call History</span>
-    </button>
-    <button type="button" class="phone-rail-tab @(IsTab("diagnostics") ? "active" : "")"
-            @onclick='@(() => _activeTab = "diagnostics")'>
-      <RadzenIcon Icon="monitor_heart" />
-      <span class="phone-rail-label">Diagnostics</span>
-    </button>
+
+    @if (_moreExpanded)
+    {
+      <button type="button" class="phone-rail-tab phone-rail-sub @(IsTab("dashboard") ? "active" : "")"
+              @onclick='@(() => _activeTab = "dashboard")'>
+        <RadzenIcon Icon="dashboard" /><span class="phone-rail-label">Dashboard</span>
+      </button>
+      <button type="button" class="phone-rail-tab phone-rail-sub @(IsTab("contacts") ? "active" : "")"
+              @onclick='@(() => _activeTab = "contacts")'>
+        <RadzenIcon Icon="contacts" /><span class="phone-rail-label">Contacts</span>
+      </button>
+      <button type="button" class="phone-rail-tab phone-rail-sub @(IsTab("history") ? "active" : "")"
+              @onclick='@(() => _activeTab = "history")'>
+        <RadzenIcon Icon="history" /><span class="phone-rail-label">Call History</span>
+      </button>
+      <button type="button" class="phone-rail-tab phone-rail-sub @(IsTab("diagnostics") ? "active" : "")"
+              @onclick='@(() => _activeTab = "diagnostics")'>
+        <RadzenIcon Icon="monitor_heart" /><span class="phone-rail-label">Diagnostics</span>
+      </button>
+    }
   </div>
 
   <div style="overflow: hidden; min-height: 0;">
-    @if (_activeTab == "dashboard")
+    @if (_activeTab == "messages")
+    {
+      <PhoneMessagesPanel GvAvailable="_gvBridgeAvailable"
+                          CallHistory="_callHistory"
+                          Contacts="MergedContacts"
+                          UnheardVoicemailCount="0"
+                          UnreadThreadCount="0"
+                          OnRefresh="RefreshMessagesAsync" />
+    }
+    else if (_activeTab == "dashboard")
     {
       <PhoneDashboardPanel CallState="_callState"
                            SystemStatus="_systemStatus"
@@ -85,7 +115,8 @@
 </div>
 
 @code {
-  private string _activeTab = "dashboard";
+  private string _activeTab = "messages";
+  private bool _moreExpanded;
   private bool _devTrayExpanded;
   private PhoneSystemStatusDto? _systemStatus;
   private PhoneCallStateDto _callState = new();
@@ -110,6 +141,14 @@
   private bool _switchingMode;
 
   private bool IsTab(string t) => _activeTab == t;
+
+  // UI-local unread badge sum. Missed calls DO count (owner decision 2); PR1 has
+  // no voicemail/text data yet so the sum is the missed-call count. PR2/PR3 add
+  // _unheardVoicemail + _unreadThreads here.
+  private int MissedCallCount => _callHistory?
+    .Count(c => c.Direction == CallDirection.Incoming
+             && c.AnsweredOn == CallAnsweredOn.NotAnswered) ?? 0;
+  private int UnreadSum => MissedCallCount;
 
   protected override async Task OnInitializedAsync()
   {
@@ -157,6 +196,12 @@
     PhoneHub.SystemStatusChanged += OnSystemStatusChanged;
     GvTrunkHub.RegistrationChanged += OnRegistrationChanged;
 
+    // GV Messages: bind to the shared status poll (reconnecting banner) and seed
+    // + publish the UI-local unread badge sum to the topbar /phone pill.
+    _gvBridgeAvailable = GvBridgeStatus.IsAvailable;
+    GvBridgeStatus.StatusChanged += OnGvStatusChanged;
+    PhoneUnread.Set(UnreadSum);
+
     // Poll for status every 5 seconds as fallback
     _pollTimer = new System.Timers.Timer(5000);
     _pollTimer.Elapsed += async (_, _) => await PollStatusAsync();
@@ -172,6 +217,7 @@
     _callHistory = await PhoneApi.GetCallHistoryAsync();
     await RefreshGvStatusAsync();
     RebuildMergedContacts();
+    PhoneUnread.Set(UnreadSum);
     await InvokeAsync(StateHasChanged);
   }
 
@@ -220,6 +266,7 @@
         // on non-null so a transient fetch failure doesn't blank the existing list.
         var history = await PhoneApi.GetCallHistoryAsync();
         if (history != null) _callHistory = history;
+        PhoneUnread.Set(UnreadSum);
         // Refresh GV status every 6th poll (30s) as SignalR fallback
         if (++_pollCount % 6 == 0)
         {
@@ -255,6 +302,7 @@
     try
     {
       _callHistory = await PhoneApi.GetCallHistoryAsync();
+      PhoneUnread.Set(UnreadSum);
       if (!_disposed) await InvokeAsync(StateHasChanged);
     }
     catch { /* Non-fatal -- next poll will catch up */ }
@@ -279,6 +327,25 @@
     if (_disposed) return;
     _gvTrunkRegistered = registered;
     _ = InvokeAsync(StateHasChanged);
+  }
+
+  // GV Messages: the shared status poll drives the reconnecting banner and may
+  // change the badge sum; reflect both and re-render.
+  private void OnGvStatusChanged(GvBridgeStatusDto? status)
+  {
+    if (_disposed) return;
+    _gvBridgeAvailable = GvBridgeStatus.IsAvailable;
+    PhoneUnread.Set(UnreadSum);
+    _ = InvokeAsync(StateHasChanged);
+  }
+
+  // PR1 refresh = re-fetch call history (the only Messages data source yet).
+  private async Task RefreshMessagesAsync()
+  {
+    var history = await PhoneApi.GetCallHistoryAsync();
+    if (history != null) _callHistory = history;
+    PhoneUnread.Set(UnreadSum);
+    await InvokeAsync(StateHasChanged);
   }
 
   private async Task SwitchModeAsync(string mode)
@@ -484,5 +551,6 @@
     PhoneHub.CallHistoryUpdated -= OnCallHistoryUpdated;
     PhoneHub.SystemStatusChanged -= OnSystemStatusChanged;
     GvTrunkHub.RegistrationChanged -= OnRegistrationChanged;
+    GvBridgeStatus.StatusChanged -= OnGvStatusChanged;
   }
 }
