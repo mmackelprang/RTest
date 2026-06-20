@@ -544,3 +544,38 @@ When rotary encoders are integrated via `RotaryEncoderActionRouter`:
 - GNOME ScreenSaver D-Bus requires the desktop session user (`mmack`) and session bus address — Radio.API runs `sudo -u mmack DBUS_SESSION_BUS_ADDRESS=... gdbus call`
 - The `SetActive(true)` call may not reliably wake the display on all hardware — test with the actual touchscreen. If unreliable, fall back to `gnome-monitor-config` or `xdg-screensaver reset`
 - On wake, turn on display FIRST (before unmuting/resuming) so the user sees the UI immediately
+
+---
+
+## 12. GV (Google Voice) Messages — UI-Local State, Send & Auth Seams
+
+**Status:** PR1 foundation shipped (DTOs, read client, status poll, `/phone` Messages IA shell with call rows). Voicemail player (PR2), texts conversation + send (PR3), GV mark-read, and the inter-service auth gate are deferred.
+**Added:** 2026-06-20 (GV Messages PR1 — Foundation + IA shell)
+**Priority:** Medium — PR2/PR3 light up the remaining surfaces; the seams below are wired OFF and ready to flip.
+
+### What's Implemented (PR1)
+
+- DTOs: `VoicemailItemDto`/`VoicemailListDto`, `SmsMessageDto`/`SmsThreadDto`/`SmsThreadListDto`/`SmsThreadMessagesDto`, `SendSmsRequest`/`SendSmsResponse`, `GvDirection` helper (`src/Radio.Web/Models/ApiModels.cs`).
+- `GvBridgeApiService` read methods: voicemail list/item + **absolute** audio-URL builder, SMS threads/messages (`src/Radio.Web/Services/ApiClients/GvBridgeApiService.cs`).
+- `PhoneHubService.GvSmsReceived` / `GvVoicemailReceived` push events on the existing `/hub` connection.
+- `GvBridgeStatusService` — single ~10s `/api/gvbridge/status` poll → reconnecting banner + (future) Send gate.
+- `RotaryPhoneAuthHandler` — header seam, OFF.
+- `PhoneUnreadState` — UI-local unread sum surfaced to the topbar `/phone` pill.
+- `PhoneMessagesPanel` — unified feed shell (segmented filter + call rows + detail pane + reconnecting banner).
+
+### What's Needed / Deferred
+
+1. **UI-local voicemail/SMS read-state** — "heard"/"read" does NOT persist to Google Voice. A hard reload re-derives unread from the server's `isRead`/`hasUnread` fields. Missed-call badging is also UI-local (owner decision 2). To make read-state durable, RotaryPhone needs a **GV mark-read endpoint** (decision 4), then the client seam below becomes a real wire call.
+   - **Gotcha:** because counts are UI-local, two browsers/circuits won't agree until a reload re-derives from the server fields.
+2. **GV mark-read client seam** — add the flagged client method in PR2 (`GvBridgeApiService.MarkVoicemailReadAsync` / `MarkThreadReadAsync`), no-op until RotaryPhone ships the endpoint. Confirm the route + verb with RotaryPhone before wiring.
+3. **GV SMS send** — flagged off via `RotaryPhone:Gv:SendEnabled=false`. Built in PR3; lights up when `POST /api/gvbridge/sms/send` ships on RotaryPhone. **Confirm `SendSmsResponse` shape first** (it's marked provisional in the DTO).
+4. **`RotaryPhoneAuthHandler`** — header (`X-RotaryPhone-Auth`) injected only when `RotaryPhone:Gv:AuthKey` is non-empty; empty today (LAN-only no-auth posture). One place to flip on when the inter-service auth gate ships (ADR-022 §8.1).
+   - **Gotcha:** a native `<audio>` element CANNOT send the auth header. If the voicemail audio endpoint ever becomes auth-required, the direct-`<audio src>` approach (PR2) breaks — it would need a proxied/streamed fetch instead.
+
+### Code Pointers
+
+- `src/Radio.Web/Services/ApiClients/GvBridgeApiService.cs` — read methods + audio-URL builder (PR2 adds mark-read; PR3 adds send).
+- `src/Radio.Web/Services/Http/RotaryPhoneAuthHandler.cs` — the auth seam.
+- `src/Radio.Web/Components/Pages/PhoneMessagesPanel.razor` — feed shell with `@* PR2 *@` / `@* PR3 *@` extension points.
+- `design/decisions/2026-06-20-gvbridge-voicemail-sms-integration.md` — ADR-022 (decisions + risks).
+- Config: `RotaryPhone:Gv:{SendEnabled,StatusPollSeconds,AuthKey}` in `appsettings.json` (+ `appsettings.Production.json` for per-machine `AuthKey`).
