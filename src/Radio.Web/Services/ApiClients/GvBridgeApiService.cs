@@ -6,10 +6,10 @@ using Radio.Web.Models;
 namespace Radio.Web.Services.ApiClients;
 
 /// <summary>
-/// HTTP client for RotaryPhone.API GV Bridge endpoints.
-/// Provides GV availability status and call-adapter mode switching. SMS lives on
-/// the GV Trunk side (<see cref="GvTrunkApiService"/>) — there are no SMS routes
-/// under /api/gvbridge/* and there never have been.
+/// HTTP client for RotaryPhone.API GV Bridge endpoints (radio:5004).
+/// Covers GV availability/status, call-adapter mode, and the GV Voicemail + SMS
+/// read API. NOTE: this is Google Voice SMS (/api/gvbridge/sms/*), NOT the
+/// VoIP.ms trunk SMS surface in GvTrunkApiService.
 /// </summary>
 public class GvBridgeApiService
 {
@@ -84,4 +84,86 @@ public class GvBridgeApiService
     }
   }
 
+  // ── GV Voicemail (read) ───────────────────────────────────────
+
+  public async Task<VoicemailListDto?> GetVoicemailsAsync(
+    int count = 20, string? pageToken = null, CancellationToken ct = default)
+  {
+    try
+    {
+      var url = $"/api/gvbridge/voicemail?count={count}";
+      if (!string.IsNullOrEmpty(pageToken))
+      {
+        url += $"&pageToken={Uri.EscapeDataString(pageToken)}";
+      }
+      return await _httpClient.GetFromJsonAsync<VoicemailListDto>(url, JsonOptions, ct);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to get GV voicemail list");
+      return null;
+    }
+  }
+
+  public async Task<VoicemailItemDto?> GetVoicemailAsync(
+    string id, CancellationToken ct = default)
+  {
+    try
+    {
+      return await _httpClient.GetFromJsonAsync<VoicemailItemDto>(
+        $"/api/gvbridge/voicemail/{Uri.EscapeDataString(id)}", JsonOptions, ct);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to get GV voicemail {Id}", id);
+      return null;
+    }
+  }
+
+  /// <summary>
+  /// Builds the ABSOLUTE radio:5004 URL for a voicemail recording, for binding to
+  /// an &lt;audio src&gt;. The DTO's relative AudioUrl resolves against the Web
+  /// origin (:5002) and 404s — ALWAYS rebuild absolute against the API base
+  /// address (ADR-022 D4 / contract risk #3). Never bind the relative AudioUrl.
+  /// </summary>
+  public string GetVoicemailAudioUrl(string id)
+  {
+    var baseUri = _httpClient.BaseAddress
+      ?? new Uri("http://radio:5004");
+    return new Uri(baseUri, $"/api/gvbridge/voicemail/{Uri.EscapeDataString(id)}/audio")
+      .ToString();
+  }
+
+  // ── GV SMS (read) ─────────────────────────────────────────────
+
+  public async Task<SmsThreadListDto?> GetSmsThreadsAsync(
+    int count = 20, CancellationToken ct = default)
+  {
+    try
+    {
+      return await _httpClient.GetFromJsonAsync<SmsThreadListDto>(
+        $"/api/gvbridge/sms/threads?count={count}", JsonOptions, ct);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to get GV SMS threads");
+      return null;
+    }
+  }
+
+  public async Task<SmsThreadMessagesDto?> GetSmsThreadMessagesAsync(
+    string threadId, int count = 50, CancellationToken ct = default)
+  {
+    try
+    {
+      return await _httpClient.GetFromJsonAsync<SmsThreadMessagesDto>(
+        $"/api/gvbridge/sms/threads/{Uri.EscapeDataString(threadId)}?count={count}",
+        JsonOptions, ct);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to get GV SMS thread {ThreadId}", threadId);
+      return null;
+    }
+  }
 }
