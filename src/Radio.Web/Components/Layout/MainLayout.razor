@@ -13,6 +13,7 @@
 @inject Radio.Web.Services.DeviceDisplayStateService DeviceDisplayState
 @inject Radio.Web.Services.RadioPanelToggleService RadioPanelToggle
 @inject Radio.Web.Services.GainPopoverService GainPopover
+@inject Radio.Web.Services.PhoneUnreadState PhoneUnread
 @inject IConfiguration Configuration
 @inject IOptionsMonitor<DevicesOptions> DevicesOptionsMonitor
 @inject IOptionsMonitor<DisplayOptions> DisplayOptionsMonitor
@@ -137,9 +138,14 @@
           <RadzenIcon Icon="settings" />
           <span class="nav-pill-label">Settings</span>
         </a>
-        <a href="/phone" class="nav-pill @(IsCurrentPage("/phone") ? "nav-active" : "")" title="Phone" aria-label="Phone">
+        <a href="/phone" class="nav-pill @(IsCurrentPage("/phone") ? "nav-active" : "")" title="Phone"
+           aria-label="@(_phoneUnread > 0 ? $"Phone, {_phoneUnread} unread" : "Phone")">
           <RadzenIcon Icon="phone" />
           <span class="nav-pill-label">Phone</span>
+          @if (_phoneUnread > 0)
+          {
+            <span class="nav-badge" aria-hidden="true">@_phoneUnread</span>
+          }
         </a>
         @* The distortion-marker pill was DEBUG-gated in PR 2 and is now hosted
            inside the DevTray (PR 6 / §P2·2). Topbar stays clean — production
@@ -241,6 +247,7 @@
   private bool _showOutputDropdown;
 
   private int _queueCount = 0;
+  private int _phoneUnread = 0;
   private DotNetObjectReference<MainLayout>? _selfReference;
   private DotNetObjectReference<MainLayout>? _devTrayRef;
   private IJSObjectReference? _devGestureModule;
@@ -284,6 +291,11 @@
       // with NowPlayingPanel's popover open/close. Subscription is paired
       // with the unsubscribe in Dispose().
       GainPopover.StateChanged += OnGainPopoverStateChanged;
+
+      // GV Messages: mirror the shared UI-local unread count onto the topbar
+      // /phone pill badge (PhonePage owns the count; we only read + subscribe).
+      _phoneUnread = PhoneUnread.Count;
+      PhoneUnread.Changed += OnPhoneUnreadChanged;
 
       // Dock visibility is route-dependent (handoff §P1·1: dock only on
       // non-Home routes). Seed from the current URI and update on every nav.
@@ -1058,6 +1070,15 @@
   /// </summary>
   private void OnGainPopoverStateChanged() => InvokeAsync(StateHasChanged);
 
+  // GV Messages: re-render the topbar /phone pill when the shared unread count
+  // changes (PhonePage publishes it). Subscribed in OnInitializedAsync;
+  // unsubscribed in Dispose.
+  private void OnPhoneUnreadChanged(int count)
+  {
+    _phoneUnread = count;
+    InvokeAsync(StateHasChanged);
+  }
+
   public void Dispose()
   {
     // Unsubscribe from events to prevent memory leaks
@@ -1068,6 +1089,7 @@
     HubService.SleepStateChanged -= OnSleepStateChanged;
     DeviceDisplayState.DisplaySettingsChanged -= OnDeviceDisplaySettingsChanged;
     GainPopover.StateChanged -= OnGainPopoverStateChanged;
+    PhoneUnread.Changed -= OnPhoneUnreadChanged;
     NavigationManager.LocationChanged -= OnLocationChanged;
 
     _timer?.Stop();
