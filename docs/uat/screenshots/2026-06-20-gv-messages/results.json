@@ -1,0 +1,94 @@
+{
+  "item1": {
+    "httpStatus": 200,
+    "reconnectOverlayShown": false,
+    "shellTextPresent": true,
+    "railLabels": {
+      "Phone": true,
+      "Messages": true,
+      "More": true
+    },
+    "messagesPanelPresent": true,
+    "shot": "D:/prj/RTest/RTest/docs/uat/screenshots/2026-06-20-gv-messages/01-page-load.png"
+  },
+  "item2": {
+    "segments": [
+      "ALL",
+      "VOICEMAIL",
+      "TEXTS",
+      "CALLS"
+    ],
+    "shot": "D:/prj/RTest/RTest/docs/uat/screenshots/2026-06-20-gv-messages/02-filter-bar.png"
+  },
+  "item3": {
+    "active": "ALL",
+    "panelExcerpt": "MESSAGES refresh ALL VOICEMAIL TEXTS CALLS call_made Mark Mackelprang Outgoing 6/19/2026 8:49 PM 0:15 chevron_right call_received Mark Mackelprang Incoming 6/19/2026 8:47 PM 0:07 chevron_right call_re",
+    "skeletonStuck": false,
+    "shot": "D:/prj/RTest/RTest/docs/uat/screenshots/2026-06-20-gv-messages/03-filter-all.png"
+  },
+  "item4": {
+    "stateText": "Couldn't load voicemail.",
+    "hasRetry": true,
+    "skeletonStuck": false,
+    "feedExcerpt": "cloud_off Couldn't load voicemail. Retry",
+    "shot": "D:/prj/RTest/RTest/docs/uat/screenshots/2026-06-20-gv-messages/04-filter-voicemail.png"
+  },
+  "item5": {
+    "stateText": "Couldn't load conversations.",
+    "hasRetry": true,
+    "skeletonStuck": false,
+    "shot": "D:/prj/RTest/RTest/docs/uat/screenshots/2026-06-20-gv-messages/05-filter-texts.png"
+  },
+  "item6": {
+    "emptyText": "Couldn't load conversations.",
+    "callRowCount": 0,
+    "skeletonStuck": false,
+    "shot": "D:/prj/RTest/RTest/docs/uat/screenshots/2026-06-20-gv-messages/06-filter-calls.png"
+  },
+  "item7": {
+    "detailText": "forum Pick a message to open it here.",
+    "shot": "D:/prj/RTest/RTest/docs/uat/screenshots/2026-06-20-gv-messages/07-detail-default.png"
+  },
+  "item8": {
+    "composeInputCount": 0,
+    "sendButtonCount": 0,
+    "enabledSendCount": 0,
+    "shot": "D:/prj/RTest/RTest/docs/uat/screenshots/2026-06-20-gv-messages/08-compose-absence.png"
+  },
+  "item9": {
+    "bannerPresent": false,
+    "shot": "D:/prj/RTest/RTest/docs/uat/screenshots/2026-06-20-gv-messages/09-reconnect-banner-absent.png"
+  },
+  "item10": {
+    "pageErrors": [],
+    "consoleErrors": [],
+    "consoleWarnings": [],
+    "netFailures": [],
+    "gvbridgeResponses": [],
+    "apiResponses": [
+      {
+        "url": "http://radio:5002/api/albumart/e61111e5b377d71e.jpg",
+        "status": 200,
+        "ct": "image/jpeg"
+      }
+    ]
+  },
+  "clickInterceptions": [
+    {
+      "label": "Calls",
+      "tabBox": {
+        "x": 160,
+        "y": 233,
+        "width": 585.328125,
+        "height": 44
+      },
+      "emptyStateBox": {
+        "x": 156,
+        "y": 225,
+        "width": 1244,
+        "height": 495
+      },
+      "err": "TimeoutError: locator.click: Timeout 8000ms exceeded."
+    }
+  ]
+}
