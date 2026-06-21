@@ -96,7 +96,10 @@
       }
       else if (_filter == "all")
       {
-        @* Unified feed: calls + voicemail interleaved by timestamp (PR3 adds texts). *@
+        @* Unified feed: calls + voicemail interleaved by timestamp (PR3 adds texts).
+           Build the projection ONCE per render (the empty-check + the loop both
+           consume it) — recomputing per access re-allocates + re-sorts each time. *@
+        _feed = FeedItems();
         @if (FeedLoading)
         {
           @RenderCallSkeleton
@@ -109,7 +112,7 @@
             <button type="button" class="phone-btn-sm" @onclick="OnRetryVoicemail">Retry</button>
           </div>
         }
-        else if (FeedItems().Count == 0)
+        else if (_feed is { Count: 0 })
         {
           <div class="empty-state">
             <RadzenIcon Icon="forum" class="empty-state-icon" />
@@ -118,7 +121,7 @@
         }
         else
         {
-          @foreach (var item in FeedItems())
+          @foreach (var item in _feed!)
           {
             switch (item.Kind)
             {
@@ -211,6 +214,9 @@
   private CallHistoryEntryDto? _selectedCall;
   private string? _openVoicemailId;   // accordion: one open at a time
   private string? _newVoicemailId;    // most-recent arrival → .list-item-add once
+  // Per-render cache of the interleaved "All" projection (computed once in the
+  // "all" branch, consumed by both the empty-check and the row loop).
+  private List<FeedItem>? _feed;
 
   private IEnumerable<(string Key, string Label, int Count)> Segments => new[]
   {
@@ -276,7 +282,10 @@
   }
 
   // Called by the parent when GvVoicemailReceived fires, to flag the new row.
-  public void FlagNewVoicemail(string id) { _newVoicemailId = id; StateHasChanged(); }
+  // The caller is responsible for triggering the re-render on the render thread
+  // (it owns the voicemail list and re-renders this panel via its own
+  // StateHasChanged); this only sets the one-shot animation flag.
+  public void FlagNewVoicemail(string id) => _newVoicemailId = id;
 
   // Resolution precedence mirrors PhoneHistoryPanel.ResolveContactName:
   // a name RotaryPhone already attached (CallerName) → a normalized match in the

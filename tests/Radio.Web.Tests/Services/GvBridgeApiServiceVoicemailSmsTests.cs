@@ -109,4 +109,44 @@ public class GvBridgeApiServiceVoicemailSmsTests
     Assert.False(result);
     Assert.Equal(0, handler.RequestCount);  // never hit the network
   }
+
+  [Fact]
+  public async Task MarkVoicemailReadAsync_PostsAndReturnsTrue_WhenFlagOn()
+  {
+    // Forward-compat seam (GV-4): with the flag ON it POSTs the mark-read route
+    // and returns success. Guards the wire path that lights up when RotaryPhone
+    // ships the endpoint.
+    var handler = new MockHttpHandler("{}");  // 200 OK by default
+    var client = new HttpClient(handler) { BaseAddress = new Uri("http://radio:5004") };
+    var config = new ConfigurationBuilder()
+      .AddInMemoryCollection(new Dictionary<string, string?>
+        { ["RotaryPhone:Gv:MarkReadEnabled"] = "true" })
+      .Build();
+    var svc = new GvBridgeApiService(client,
+      NullLogger<GvBridgeApiService>.Instance, config);
+
+    var result = await svc.MarkVoicemailReadAsync("vm1");
+
+    Assert.True(result);
+    Assert.Equal(1, handler.RequestCount);  // exactly one POST
+  }
+
+  [Fact]
+  public async Task MarkVoicemailReadAsync_ReturnsFalse_NeverThrows_OnError()
+  {
+    // Fire-and-forget: a non-2xx (or a thrown send) must surface as a silent
+    // false, never an exception that could disturb the UI's optimistic flip.
+    var handler = new MockHttpHandler(statusCode: System.Net.HttpStatusCode.BadGateway);
+    var client = new HttpClient(handler) { BaseAddress = new Uri("http://radio:5004") };
+    var config = new ConfigurationBuilder()
+      .AddInMemoryCollection(new Dictionary<string, string?>
+        { ["RotaryPhone:Gv:MarkReadEnabled"] = "true" })
+      .Build();
+    var svc = new GvBridgeApiService(client,
+      NullLogger<GvBridgeApiService>.Instance, config);
+
+    var result = await svc.MarkVoicemailReadAsync("vm1");
+
+    Assert.False(result);
+  }
 }

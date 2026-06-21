@@ -406,12 +406,18 @@
     {
       _voicemails.Insert(0, _locallyHeard.Contains(vm.Id) ? vm with { IsRead = true } : vm);
     }
-    _messagesPanel?.FlagNewVoicemail(vm.Id);   // animate the row
     // Calm toast — never modal, never audio (hard rule). For v1 it's low-urgency Info.
     NotificationService.Notify(NotificationSeverity.Info, "New voicemail",
       $"{vm.FromName ?? vm.FromNumber}{(vm.DurationSeconds > 0 ? $" · {FormatVmDuration(vm.DurationSeconds)}" : "")}");
     PhoneUnread.Set(UnreadSum);
-    _ = InvokeAsync(StateHasChanged);
+    // This handler runs on the SignalR receive thread (not the render sync
+    // context), so FlagNewVoicemail — which calls StateHasChanged on the panel —
+    // MUST be marshalled onto the render thread or it throws InvalidOperationException.
+    _ = InvokeAsync(() =>
+    {
+      _messagesPanel?.FlagNewVoicemail(vm.Id);   // animate the row
+      StateHasChanged();
+    });
   }
 
   // UI-local mark-heard: flip the row + decrement the badge. Persisted only when
