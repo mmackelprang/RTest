@@ -60,12 +60,18 @@
   <div style="overflow: hidden; min-height: 0;">
     @if (_activeTab == "messages")
     {
-      <PhoneMessagesPanel GvAvailable="_gvBridgeAvailable"
+      <PhoneMessagesPanel @ref="_messagesPanel"
+                          GvAvailable="_gvBridgeAvailable"
                           CallHistory="_callHistory"
                           Contacts="MergedContacts"
-                          UnheardVoicemailCount="0"
+                          Voicemails="_voicemails"
+                          VoicemailLoading="_voicemailLoading"
+                          VoicemailError="_voicemailError"
+                          UnheardVoicemailCount="UnheardVoicemailCount"
                           UnreadThreadCount="0"
-                          OnRefresh="RefreshMessagesAsync" />
+                          OnRefresh="RefreshMessagesAsync"
+                          OnRetryVoicemail="LoadVoicemailsAsync"
+                          OnVoicemailHeard="OnVoicemailHeard" />
     }
     else if (_activeTab == "dashboard")
     {
@@ -140,15 +146,23 @@
   private bool _gvTrunkRegistered;
   private bool _switchingMode;
 
+  // GV voicemail state (PR2). The panel renders this; the page owns fetch + push.
+  private PhoneMessagesPanel? _messagesPanel;
+  private List<VoicemailItemDto>? _voicemails;
+  private bool _voicemailLoading;
+  private bool _voicemailError;
+  private readonly HashSet<string> _locallyHeard = new();   // UI-local read-state
+
   private bool IsTab(string t) => _activeTab == t;
 
-  // UI-local unread badge sum. Missed calls DO count (owner decision 2); PR1 has
-  // no voicemail/text data yet so the sum is the missed-call count. PR2/PR3 add
-  // _unheardVoicemail + _unreadThreads here.
+  // UI-local unread badge sum. Missed calls DO count (owner decision 2). PR2 folds
+  // in unheard voicemail; PR3 adds _unreadThreads here.
   private int MissedCallCount => _callHistory?
     .Count(c => c.Direction == CallDirection.Incoming
              && c.AnsweredOn == CallAnsweredOn.NotAnswered) ?? 0;
-  private int UnreadSum => MissedCallCount;
+  private int UnheardVoicemailCount =>
+    _voicemails?.Count(v => !v.IsRead) ?? 0;
+  private int UnreadSum => MissedCallCount + UnheardVoicemailCount;  // + UnreadThreadCount in PR3
 
   protected override async Task OnInitializedAsync()
   {
@@ -194,6 +208,7 @@
     PhoneHub.IncomingCall += OnIncomingCall;
     PhoneHub.CallHistoryUpdated += OnCallHistoryUpdated;
     PhoneHub.SystemStatusChanged += OnSystemStatusChanged;
+    PhoneHub.GvVoicemailReceived += OnGvVoicemailReceived;
     GvTrunkHub.RegistrationChanged += OnRegistrationChanged;
 
     // GV Messages: bind to the shared status poll (reconnecting banner) and seed
@@ -201,6 +216,9 @@
     _gvBridgeAvailable = GvBridgeStatus.IsAvailable;
     GvBridgeStatus.StatusChanged += OnGvStatusChanged;
     PhoneUnread.Set(UnreadSum);
+
+    // GV Messages PR2: fetch the voicemail list without blocking the page.
+    _ = LoadVoicemailsAsync();
 
     // Poll for status every 5 seconds as fallback
     _pollTimer = new System.Timers.Timer(5000);
@@ -339,13 +357,87 @@
     _ = InvokeAsync(StateHasChanged);
   }
 
-  // PR1 refresh = re-fetch call history (the only Messages data source yet).
+  // Messages refresh = re-fetch call history + voicemail (the Messages sources).
   private async Task RefreshMessagesAsync()
   {
     var history = await PhoneApi.GetCallHistoryAsync();
     if (history != null) _callHistory = history;
+    await LoadVoicemailsAsync();
     PhoneUnread.Set(UnreadSum);
     await InvokeAsync(StateHasChanged);
+  }
+
+  // GV Messages PR2 — voicemail fetch. REST is source-of-truth on (re)load; the
+  // SignalR push only freshens. Keep last good list on a refresh failure (warning
+  // toast, never an error wipe); only surface an error when we have nothing yet.
+  private async Task LoadVoicemailsAsync()
+  {
+    _voicemailLoading = true; _voicemailError = false;
+    var list = await GvBridgeApi.GetVoicemailsAsync();
+    if (list != null)
+    {
+      _voicemails = ApplyLocalHeard(list.Items.ToList());
+    }
+    else if (_voicemails == null)
+    {
+      _voicemailError = true;   // only show error if we have no prior good list
+    }
+    else
+    {
+      NotificationService.Notify(NotificationSeverity.Warning, "Couldn't refresh",
+        "Showing the last update.");
+    }
+    _voicemailLoading = false;
+    PhoneUnread.Set(UnreadSum);
+    await InvokeAsync(StateHasChanged);
+  }
+
+  private List<VoicemailItemDto> ApplyLocalHeard(List<VoicemailItemDto> items) =>
+    items.Select(v => _locallyHeard.Contains(v.Id)
+      ? v with { IsRead = true } : v).ToList();
+
+  // New voicemail push (PhoneHubService.GvVoicemailReceived). HARD RULE: never
+  // steal the screen, never pause audio — calm Info toast only, prepend + animate.
+  private void OnGvVoicemailReceived(VoicemailItemDto vm)
+  {
+    if (_disposed) return;
+    _voicemails ??= new();
+    if (_voicemails.All(v => v.Id != vm.Id))
+    {
+      _voicemails.Insert(0, _locallyHeard.Contains(vm.Id) ? vm with { IsRead = true } : vm);
+    }
+    // Calm toast — never modal, never audio (hard rule). For v1 it's low-urgency Info.
+    NotificationService.Notify(NotificationSeverity.Info, "New voicemail",
+      $"{vm.FromName ?? vm.FromNumber}{(vm.DurationSeconds > 0 ? $" · {FormatVmDuration(vm.DurationSeconds)}" : "")}");
+    PhoneUnread.Set(UnreadSum);
+    // This handler runs on the SignalR receive thread (not the render sync
+    // context), so FlagNewVoicemail — which calls StateHasChanged on the panel —
+    // MUST be marshalled onto the render thread or it throws InvalidOperationException.
+    _ = InvokeAsync(() =>
+    {
+      _messagesPanel?.FlagNewVoicemail(vm.Id);   // animate the row
+      StateHasChanged();
+    });
+  }
+
+  // UI-local mark-heard: flip the row + decrement the badge. Persisted only when
+  // the flagged GV mark-read seam is enabled (today a silent no-op).
+  private void OnVoicemailHeard(string id)
+  {
+    _locallyHeard.Add(id);
+    if (_voicemails != null)
+    {
+      var idx = _voicemails.FindIndex(v => v.Id == id);
+      if (idx >= 0) _voicemails[idx] = _voicemails[idx] with { IsRead = true };
+    }
+    PhoneUnread.Set(UnreadSum);
+    _ = InvokeAsync(StateHasChanged);
+  }
+
+  private static string FormatVmDuration(int s)
+  {
+    var ts = TimeSpan.FromSeconds(s);
+    return ts.TotalHours >= 1 ? ts.ToString(@"h\:mm\:ss") : ts.ToString(@"m\:ss");
   }
 
   private async Task SwitchModeAsync(string mode)
@@ -550,6 +642,7 @@
     PhoneHub.IncomingCall -= OnIncomingCall;
     PhoneHub.CallHistoryUpdated -= OnCallHistoryUpdated;
     PhoneHub.SystemStatusChanged -= OnSystemStatusChanged;
+    PhoneHub.GvVoicemailReceived -= OnGvVoicemailReceived;
     GvTrunkHub.RegistrationChanged -= OnRegistrationChanged;
     GvBridgeStatus.StatusChanged -= OnGvStatusChanged;
   }

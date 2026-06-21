@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Configuration;
 using Radio.Web.Models;
 
 namespace Radio.Web.Services.ApiClients;
@@ -15,15 +16,18 @@ public class GvBridgeApiService
 {
   private readonly HttpClient _httpClient;
   private readonly ILogger<GvBridgeApiService> _logger;
+  private readonly IConfiguration _configuration;
   private static readonly JsonSerializerOptions JsonOptions = new()
   {
     PropertyNameCaseInsensitive = true
   };
 
-  public GvBridgeApiService(HttpClient httpClient, ILogger<GvBridgeApiService> logger)
+  public GvBridgeApiService(HttpClient httpClient,
+    ILogger<GvBridgeApiService> logger, IConfiguration configuration)
   {
     _httpClient = httpClient;
     _logger = logger;
+    _configuration = configuration;
   }
 
   public async Task<bool> IsAvailableAsync(CancellationToken ct = default)
@@ -132,6 +136,33 @@ public class GvBridgeApiService
       ?? new Uri("http://radio:5004");
     return new Uri(baseUri, $"/api/gvbridge/voicemail/{Uri.EscapeDataString(id)}/audio")
       .ToString();
+  }
+
+  /// <summary>
+  /// FLAGGED SEAM (decision 4). v1 read-state is UI-local; there is no GV
+  /// mark-read endpoint yet. When RotaryPhone ships POST
+  /// /api/gvbridge/voicemail/{id}/read, flip RotaryPhone:Gv:MarkReadEnabled=true
+  /// and this becomes the wire call. Today it is a silent no-op returning false
+  /// (not persisted) — the caller has ALREADY flipped the row heard locally, so a
+  /// no-op must never disturb that. Fire-and-forget; never throws.
+  /// </summary>
+  public async Task<bool> MarkVoicemailReadAsync(string id, CancellationToken ct = default)
+  {
+    if (!_configuration.GetValue("RotaryPhone:Gv:MarkReadEnabled", false))
+    {
+      return false;  // UI-local only in v1
+    }
+    try
+    {
+      var response = await _httpClient.PostAsync(
+        $"/api/gvbridge/voicemail/{Uri.EscapeDataString(id)}/read", null, ct);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Mark-read failed for voicemail {Id} (non-fatal)", id);
+      return false;
+    }
   }
 
   // ── GV SMS (read) ─────────────────────────────────────────────

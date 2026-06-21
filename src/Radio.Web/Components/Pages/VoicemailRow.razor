@@ -1,0 +1,63 @@
+@using Radio.Web.Models
+
+<div class="vm-row-wrap @(IsNew ? "list-item-add" : "")">
+  <button type="button"
+          class="list-item-touch @(Expanded ? "list-item-active" : "")"
+          @onclick="OnToggle">
+    <span class="vm-chip"><RadzenIcon Icon="voicemail" /></span>
+    @if (!Item.IsRead)
+    {
+      <span class="unread-dot"></span>
+    }
+    <span class="vm-row-main">
+      <span class="vm-row-title @(Item.IsRead ? "" : "vm-row-unread")">@DisplayName</span>
+      <span class="vm-row-preview">@Preview</span>
+    </span>
+    @if (!SingleStreamView)
+    {
+      <span class="vm-type-label">vmail</span>
+    }
+    <span class="vm-row-duration">@DurationDisplay</span>
+    <RadzenIcon Icon="@(Expanded ? "expand_more" : "chevron_right")" />
+  </button>
+
+  @if (Expanded)
+  {
+    <VoicemailPlayer Item="Item" OnHeard="OnHeard" />
+  }
+</div>
+
+@code {
+  [Parameter, EditorRequired] public VoicemailItemDto Item { get; set; } = default!;
+  [Parameter] public bool Expanded { get; set; }
+  [Parameter] public bool IsNew { get; set; }
+  [Parameter] public bool SingleStreamView { get; set; }   // hide type label in Voicemail filter
+  [Parameter] public string? ResolvedName { get; set; }
+  [Parameter] public EventCallback OnToggle { get; set; }
+  [Parameter] public EventCallback OnHeard { get; set; }
+
+  private string DisplayName => ResolvedName
+    ?? (!string.IsNullOrWhiteSpace(Item.FromName) ? Item.FromName! : Item.FromNumber);
+
+  private bool IsRecent => (DateTime.UtcNow - Item.ReceivedAt) < TimeSpan.FromMinutes(30);
+
+  private string Preview => !string.IsNullOrWhiteSpace(Item.Transcript)
+    ? FirstLine(Item.Transcript!)
+    : (IsRecent ? "Transcript pending…" : "No transcript available.");
+
+  private static string FirstLine(string s)
+  {
+    var nl = s.IndexOf('\n');
+    return nl >= 0 ? s[..nl] : s;
+  }
+
+  private string DurationDisplay
+  {
+    get
+    {
+      if (Item.DurationSeconds <= 0) return "—";
+      var ts = TimeSpan.FromSeconds(Item.DurationSeconds);
+      return ts.TotalHours >= 1 ? ts.ToString(@"h\:mm\:ss") : ts.ToString(@"m\:ss");
+    }
+  }
+}

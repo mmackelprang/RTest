@@ -12,6 +12,10 @@ public sealed class MockHttpHandler : HttpMessageHandler
   private readonly string? _responseContent;
   private readonly HttpStatusCode _statusCode;
 
+  /// <summary>Number of requests that reached the handler — lets tests assert
+  /// a no-op path never hit the network.</summary>
+  public int RequestCount { get; private set; }
+
   public MockHttpHandler(string? responseContent = null, HttpStatusCode statusCode = HttpStatusCode.OK)
   {
     _responseContent = responseContent;
@@ -21,6 +25,7 @@ public sealed class MockHttpHandler : HttpMessageHandler
   protected override Task<HttpResponseMessage> SendAsync(
     HttpRequestMessage request, CancellationToken cancellationToken)
   {
+    RequestCount++;
     var response = new HttpResponseMessage(_statusCode);
     if (_responseContent != null)
     {
