@@ -5576,3 +5576,54 @@ body {
   box-shadow: 0 0 6px var(--accent-glow);   /* existing token */
   flex-shrink: 0;
 }
+
+/* -- §Ph  Texts: thread list, conversation, compose (PR3) ------------------ */
+.texts-thread-list { display: flex; flex-direction: column; }
+
+/* Conversation pane: header pinned top, msg-list grows, compose pinned bottom. */
+.texts-conversation {
+  display: flex; flex-direction: column;
+  height: 100%; min-height: 0;
+}
+.texts-conv-header {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--surface-separator);
+  flex-shrink: 0;
+}
+.texts-conv-title { display: flex; flex-direction: column; min-width: 0; }
+.texts-conv-name {
+  font-size: 16px; font-weight: 600; color: var(--text-high);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.texts-conv-number {
+  font-family: var(--font-mono); font-size: 12px; color: var(--text-medium);
+  letter-spacing: 0.04em;
+}
+
+/* The conversation's msg-list fills the space between header and compose. */
+.texts-conversation .msg-list { flex: 1; min-height: 0; }
+
+/* New-recipient composer: recipient field + inline validation. */
+.texts-compose-new {
+  display: flex; flex-direction: column; gap: var(--sp-1);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--surface-separator);
+  flex-shrink: 0;
+}
+.texts-recipient-error {
+  font-family: var(--font-body); font-size: 12px; color: var(--signal-red);
+}
+
+/* Compose bar pinned to the bottom of the conversation pane. */
+.texts-compose {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--surface-separator);
+  flex-shrink: 0;
+}
+.texts-compose-input { flex: 1; min-width: 0; }
+
+/* The back chevron reuses the ghost button look at the small size. */
+.phone-btn-sm.btn-ghost { background: transparent; border-color: transparent; }
+.phone-btn-sm.btn-ghost:hover { background: var(--surface-overlay); border-color: var(--surface-separator); }

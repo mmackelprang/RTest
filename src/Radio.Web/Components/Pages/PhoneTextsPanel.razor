@@ -1,0 +1,374 @@
+@using Radio.Web.Models
+@using Radio.Web.Services
+@using Radio.Web.Services.ApiClients
+@using Radio.Core.Utilities
+@inject GvBridgeSendService SendService
+@inject GvBridgeStatusService GvStatus
+@inject IJSRuntime JS
+@inject NotificationService Notifications
+
+@* §Ph Texts surface (Screens C/D). One component, three render modes selected by
+   host state:
+     • thread list  — when no thread is open and not composing a new message
+       (loading skeleton / empty / error / loaded rows);
+     • new-recipient composer — _composingNew (recipient field + empty hint + compose bar);
+     • conversation — when OpenThreadId is set (bubbles + day separators + compose bar).
+   Compose + new-recipient are built in full but feature-flagged OFF
+   (GvBridgeSendService.SendEnabled). The on-screen keyboard is the existing
+   global virtual keyboard (auto-shows on input focus); the recipient field opts
+   into the numeric layout via data-keyboard. *@
+
+@if (OpenThreadId != null && !_composingNew)
+{
+  @* ── Conversation pane ──────────────────────────────────────── *@
+  <div class="texts-conversation">
+    <div class="texts-conv-header">
+      <button type="button" class="phone-btn-sm btn-ghost"
+              aria-label="Back to conversations" @onclick="OnBack">
+        <RadzenIcon Icon="chevron_left" />
+      </button>
+      <div class="texts-conv-title">
+        <span class="texts-conv-name">@HeaderName</span>
+        <span class="texts-conv-number">@HeaderNumber</span>
+      </div>
+    </div>
+
+    <div class="msg-list" aria-live="polite" @ref="_listEl">
+      @if (Messages == null && Loading)
+      {
+        @for (var i = 0; i < 5; i++)
+        {
+          <div class="skeleton-list-row"><div class="skeleton skeleton-list-row-text"></div></div>
+        }
+      }
+      else if (Messages != null && Messages.Count == 0)
+      {
+        <div class="empty-state">
+          <RadzenIcon Icon="forum" class="empty-state-icon" />
+          <div class="empty-state-text">Start the conversation below.</div>
+        </div>
+      }
+      else if (Messages != null)
+      {
+        DateTime? lastDay = null;
+        @foreach (var m in Ordered(Messages))
+        {
+          var day = m.SentAt.ToLocalTime().Date;
+          if (lastDay != day)
+          {
+            lastDay = day;
+            <div class="msg-day-sep">@DaySeparator(day)</div>
+          }
+          var captured = m;
+          <MessageBubble Message="captured"
+                         Status="StatusFor(captured)"
+                         OnRetry="@(() => RetrySend(captured))" />
+        }
+      }
+    </div>
+
+    @ComposeBar()
+  </div>
+}
+else if (_composingNew)
+{
+  @* ── New-recipient composer (Screen D) ──────────────────────── *@
+  <div class="texts-conversation">
+    <div class="texts-conv-header">
+      <button type="button" class="phone-btn-sm btn-ghost"
+              aria-label="Back to conversations" @onclick="CancelNew">
+        <RadzenIcon Icon="chevron_left" />
+      </button>
+      <div class="texts-conv-title">
+        <span class="texts-conv-name">NEW MESSAGE</span>
+      </div>
+    </div>
+
+    <div class="texts-compose-new">
+      <input class="phone-input"
+             placeholder="Phone number"
+             aria-label="Recipient phone number"
+             inputmode="tel" data-keyboard="numeric"
+             value="@_recipient"
+             @oninput="@(e => { _recipient = e.Value?.ToString() ?? string.Empty; _recipientError = null; })" />
+      @if (_recipientError != null)
+      {
+        <div class="texts-recipient-error" role="alert">@_recipientError</div>
+      }
+    </div>
+
+    <div class="msg-list" aria-live="polite" @ref="_listEl">
+      <div class="empty-state">
+        <RadzenIcon Icon="forum" class="empty-state-icon" />
+        <div class="empty-state-text">Start the conversation below.</div>
+      </div>
+    </div>
+
+    @ComposeBar()
+  </div>
+}
+else
+{
+  @* ── Thread list (feed pane) ────────────────────────────────── *@
+  <div class="texts-thread-list">
+    @if (Threads == null && Loading)
+    {
+      @for (var i = 0; i < 6; i++)
+      {
+        <div class="skeleton-list-row"><div class="skeleton skeleton-list-row-text"></div></div>
+      }
+    }
+    else if (Error)
+    {
+      <div class="empty-state">
+        <RadzenIcon Icon="forum" class="empty-state-icon" />
+        <div class="empty-state-text">Couldn't load conversations.</div>
+        <button type="button" class="phone-btn-sm" @onclick="OnRetry">Retry</button>
+      </div>
+    }
+    else if (Threads == null || Threads.Count == 0)
+    {
+      <div class="empty-state">
+        <RadzenIcon Icon="forum" class="empty-state-icon" />
+        <div class="empty-state-text">No conversations yet.</div>
+        @if (SendService.SendEnabled)
+        {
+          <button type="button" class="phone-btn-sm" @onclick="StartNew">New message</button>
+        }
+      </div>
+    }
+    else
+    {
+      @foreach (var thread in Threads.OrderByDescending(t => t.LastMessageAt))
+      {
+        var captured = thread;
+        <button type="button"
+                class="list-item-touch @(captured.ThreadId == SelectedThreadId ? "list-item-active" : "")"
+                @onclick="@(() => OnOpenThread.InvokeAsync(captured.ThreadId))">
+          @if (captured.HasUnread)
+          {
+            <span class="unread-dot" aria-hidden="true"></span>
+          }
+          <span class="phone-pill cyan" aria-hidden="true">
+            <RadzenIcon Icon="chat_bubble" />
+          </span>
+          <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+            <span class="list-item-title">@ResolveThreadName(captured)</span>
+            <span class="list-item-subtitle">@PreviewText(captured)</span>
+          </div>
+          <span class="list-item-meta">@captured.LastMessageAt.ToLocalTime().ToString("g")</span>
+          <RadzenIcon Icon="chevron_right" Style="color: var(--text-low);" />
+        </button>
+      }
+    }
+  </div>
+}
+
+@code {
+  public enum SendStatus { None, Sending, Sent, Failed }
+
+  // ── Thread-list inputs (hosted in the feed pane) ──────────────
+  [Parameter] public List<SmsThreadDto>? Threads { get; set; }
+  [Parameter] public bool Loading { get; set; }
+  [Parameter] public bool Error { get; set; }
+  [Parameter] public List<MergedContact> Contacts { get; set; } = [];
+  [Parameter] public string? SelectedThreadId { get; set; }
+  [Parameter] public EventCallback OnRetry { get; set; }
+  [Parameter] public EventCallback<string> OnOpenThread { get; set; }
+
+  // ── Conversation inputs (hosted in the detail pane) ───────────
+  [Parameter] public string? OpenThreadId { get; set; }
+  [Parameter] public List<SmsMessageDto>? Messages { get; set; }
+  [Parameter] public string? HeaderName { get; set; }
+  [Parameter] public string? HeaderNumber { get; set; }
+  [Parameter] public EventCallback OnBack { get; set; }
+  [Parameter] public EventCallback<SmsMessageDto> OnOptimisticAppend { get; set; }
+
+  private string _draft = "";
+  private string _recipient = "";
+  private string? _recipientError;
+  private bool _composingNew;
+  // Optimistic + failed tracking keyed by a client-generated temp id.
+  private readonly Dictionary<string, MessageBubble.SendStatus> _statusById = new();
+  private readonly HashSet<string> _sending = new();
+  private ElementReference _listEl;
+  private string? _lastScrolledThread;
+
+  private bool CanSend =>
+    SendService.SendEnabled && GvStatus.IsAvailable
+    && !string.IsNullOrWhiteSpace(_draft) && _sending.Count == 0
+    && (!_composingNew || !string.IsNullOrWhiteSpace(_recipient));
+
+  private static IEnumerable<SmsMessageDto> Ordered(List<SmsMessageDto> m) =>
+    m.OrderBy(x => x.SentAt);
+
+  private MessageBubble.SendStatus StatusFor(SmsMessageDto m) =>
+    _statusById.TryGetValue(m.Id, out var s) ? s : MessageBubble.SendStatus.None;
+
+  // Compose bar fragment shared by the conversation + new-recipient modes. When
+  // GV is degraded the bar becomes a "Texting unavailable" pill (Send gated
+  // independent of the flag). The message field is an ordinary input so the
+  // global virtual keyboard auto-shows on focus.
+  private RenderFragment ComposeBar() => @<text>
+    @if (GvStatus.IsAvailable)
+    {
+      <div class="texts-compose">
+        <input class="phone-input texts-compose-input @(SendService.SendEnabled ? "compose-send-enabled" : "")"
+               placeholder="Message"
+               aria-label="Type a message"
+               value="@_draft"
+               @oninput="@(e => _draft = e.Value?.ToString() ?? string.Empty)"
+               disabled="@(!SendService.SendEnabled)" />
+        <button type="button" class="phone-btn-sm"
+                disabled="@(!CanSend)" @onclick="SendDraftAsync">Send</button>
+      </div>
+    }
+    else
+    {
+      <div class="texts-compose">
+        <span class="phone-pill amber" title="Google Voice is reconnecting.">Texting unavailable</span>
+      </div>
+    }
+  </text>;
+
+  protected override async Task OnAfterRenderAsync(bool firstRender)
+  {
+    // Auto-scroll to the newest bubble when a conversation first opens (and when
+    // the open thread changes). New-message scroll is handled in SendDraftAsync /
+    // the parent's append path.
+    if (OpenThreadId != null && !_composingNew && _lastScrolledThread != OpenThreadId
+        && Messages is { Count: > 0 })
+    {
+      _lastScrolledThread = OpenThreadId;
+      await ScrollToBottomAsync();
+    }
+  }
+
+  private void StartNew()
+  {
+    _composingNew = true;
+    _recipient = "";
+    _recipientError = null;
+    _draft = "";
+  }
+
+  private void CancelNew()
+  {
+    _composingNew = false;
+    _recipientError = null;
+  }
+
+  private async Task SendDraftAsync()
+  {
+    if (!CanSend) return;
+
+    // New-recipient mode: validate the number lightly (don't pre-validate
+    // aggressively — RotaryPhone normalizes to E.164). Block only obviously
+    // empty/non-numeric; show the inline error and keep the typed text.
+    var targetThreadId = OpenThreadId ?? "";
+    var targetNumber = HeaderNumber ?? "";
+    if (_composingNew)
+    {
+      var normalized = PhoneNumberNormalizer.Normalize(_recipient);
+      if (normalized.Length < 7)
+      {
+        _recipientError = "Enter a valid phone number.";
+        return;
+      }
+      // No thread exists yet; the send creates/resolves it server-side. Use the
+      // raw recipient as the thread key the optimistic bubble is grouped under.
+      targetThreadId = _recipient;
+      targetNumber = _recipient;
+    }
+
+    var text = _draft;
+    var tempId = $"temp-{Guid.NewGuid():N}";
+    var optimistic = new SmsMessageDto(tempId, targetThreadId,
+      GvDirection.Outbound, targetNumber, text, DateTime.UtcNow, true);
+
+    _statusById[tempId] = MessageBubble.SendStatus.Sending;
+    _sending.Add(tempId);
+    _draft = "";                                    // clear input
+    await OnOptimisticAppend.InvokeAsync(optimistic); // parent appends to Messages
+    await ScrollToBottomAsync();
+
+    try
+    {
+      var created = await SendService.SendAsync(targetThreadId, text);
+      _statusById.Remove(tempId);                   // de-dupe: confirmed replaces optimistic
+      _statusById[created.Id] = MessageBubble.SendStatus.Sent;
+      // On a successful new-recipient send, drop back into normal conversation
+      // mode for the resolved thread (parent surfaces it via poll/push).
+      if (_composingNew) _composingNew = false;
+    }
+    catch (SendRateLimitedException)
+    {
+      _statusById[tempId] = MessageBubble.SendStatus.Failed;
+      _draft = text;                                // PRESERVE text
+      Notifications.Notify(NotificationSeverity.Error, "Slow down",
+        "Sending too fast — wait a moment.");
+    }
+    catch (SendNotAvailableException)
+    {
+      _statusById[tempId] = MessageBubble.SendStatus.Failed;
+      _draft = text;
+      Notifications.Notify(NotificationSeverity.Info, "Coming soon",
+        "Texting send isn't available yet.");
+    }
+    catch (Exception)                               // SendUnavailable / network / non-200
+    {
+      _statusById[tempId] = MessageBubble.SendStatus.Failed;
+      _draft = text;                                // PRESERVE; never auto-retry
+      Notifications.Notify(NotificationSeverity.Error, "Message not sent",
+        "Couldn't send your message. Try again.");
+    }
+    finally
+    {
+      _sending.Remove(tempId);
+      await InvokeAsync(StateHasChanged);
+    }
+  }
+
+  private async Task RetrySend(SmsMessageDto m)
+  {
+    _draft = m.Text ?? "";                          // re-arm with the failed text
+    await SendDraftAsync();
+  }
+
+  private async Task ScrollToBottomAsync()
+  {
+    try { await JS.InvokeVoidAsync("phoneScrollToBottom", _listEl); } catch { /* non-fatal */ }
+  }
+
+  // Display-name precedence mirrors PhoneMessagesPanel.ResolveName: a name GV
+  // already attached (CounterpartyName) → a normalized contact match → the number.
+  private string ResolveThreadName(SmsThreadDto t)
+  {
+    if (!string.IsNullOrWhiteSpace(t.CounterpartyName))
+    {
+      return t.CounterpartyName!;
+    }
+    var key = PhoneNumberNormalizer.Normalize(t.CounterpartyNumber);
+    if (key.Length > 0)
+    {
+      var match = Contacts.FirstOrDefault(c =>
+        PhoneNumberNormalizer.Normalize(c.Phone) == key);
+      if (match != null)
+      {
+        return match.Name;
+      }
+    }
+    return t.CounterpartyNumber;
+  }
+
+  private static string PreviewText(SmsThreadDto t) =>
+    string.IsNullOrEmpty(t.LastMessagePreview) ? "" : t.LastMessagePreview!;
+
+  private static string DaySeparator(DateTime day)
+  {
+    var today = DateTime.Now.Date;
+    if (day == today) return "Today";
+    if (day == today.AddDays(-1)) return "Yesterday";
+    return day.Year == today.Year ? day.ToString("MMM d") : day.ToString("MMM d, yyyy");
+  }
+}
