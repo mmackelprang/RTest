@@ -423,32 +423,57 @@
   // Live inbound SMS. HARD RULE: when the affected thread is open, append the
   // bubble in place — no toast, no unread increment. Otherwise bump the thread to
   // the top, mark it unread, and fire a calm Info toast with a truncated preview.
+  // Runs on the SignalR/background thread, so the whole mutation body is marshalled
+  // onto the Blazor sync context via InvokeAsync before touching component state.
   private void OnGvSmsReceived(SmsMessageDto msg)
   {
     if (_disposed) return;
-    var threadOpen = _openThreadId == msg.ThreadId
-                     && (_messagesPanel?.IsThreadOpen(msg.ThreadId) ?? false);
-
-    if (threadOpen)
+    _ = InvokeAsync(() =>
     {
-      _openThreadMessages ??= new();
-      if (_openThreadMessages.All(m => m.Id != msg.Id))
+      if (_disposed) return;
+
+      // Optimistic→confirmed de-dupe: when the server echoes back our OWN outbound
+      // send, collapse the optimistic temp bubble so we don't double-render. The
+      // optimistic bubble lives in _openThreadMessages only while the thread is open,
+      // so this is naturally scoped to the open conversation. Match on
+      // text + recency + outbound (NOT ThreadId): for a new-recipient send the temp
+      // bubble is keyed on the raw phone number while the confirmed message carries
+      // the GV thread id, so a ThreadId match would miss. Remove the first match
+      // (there is at most one in flight for a given text/recency window).
+      if (GvDirection.IsOutbound(msg.Direction) && _openThreadMessages != null)
       {
-        _openThreadMessages.Add(msg);
+        var tempIdx = _openThreadMessages.FindIndex(m =>
+          m.Id.StartsWith("temp-", StringComparison.Ordinal)
+          && GvDirection.IsOutbound(m.Direction)
+          && string.Equals(m.Text, msg.Text, StringComparison.Ordinal)
+          && Math.Abs((m.SentAt - msg.SentAt).TotalSeconds) <= 30);
+        if (tempIdx >= 0) _openThreadMessages.RemoveAt(tempIdx);
       }
-      // Keep the thread at the top + preview fresh, but do NOT mark unread.
-      BumpThread(msg, markUnread: false);
-    }
-    else
-    {
-      BumpThread(msg, markUnread: true);
-      NotificationService.Notify(NotificationSeverity.Info,
-        ResolveThreadName(msg.ThreadId, msg.CounterpartyNumber),
-        Truncate(msg.Text));
-    }
 
-    PhoneUnread.Set(UnreadSum);
-    _ = InvokeAsync(StateHasChanged);
+      var threadOpen = _openThreadId == msg.ThreadId
+                       && (_messagesPanel?.IsThreadOpen(msg.ThreadId) ?? false);
+
+      if (threadOpen)
+      {
+        _openThreadMessages ??= new();
+        if (_openThreadMessages.All(m => m.Id != msg.Id))
+        {
+          _openThreadMessages.Add(msg);
+        }
+        // Keep the thread at the top + preview fresh, but do NOT mark unread.
+        BumpThread(msg, markUnread: false);
+      }
+      else
+      {
+        BumpThread(msg, markUnread: true);
+        NotificationService.Notify(NotificationSeverity.Info,
+          ResolveThreadName(msg.ThreadId, msg.CounterpartyNumber),
+          Truncate(msg.Text));
+      }
+
+      PhoneUnread.Set(UnreadSum);
+      StateHasChanged();
+    });
   }
 
   // Move a thread to the top of the list (newest activity first), refreshing its
@@ -478,13 +503,21 @@
   }
 
   // Optimistic outbound append from the compose bar. The real message collapses
-  // it on the next poll/push (matched by text + recency, or a server id).
+  // it on the next poll/push (matched by text + recency in OnGvSmsReceived).
+  // Reached via an EventCallback already on the UI sync context, but wrapped in
+  // InvokeAsync for consistency with OnGvSmsReceived and safety on the optimistic
+  // path.
   private void OnOptimisticAppend(SmsMessageDto optimistic)
   {
-    _openThreadMessages ??= new();
-    _openThreadMessages.Add(optimistic);
-    BumpThread(optimistic, markUnread: false);
-    _ = InvokeAsync(StateHasChanged);
+    if (_disposed) return;
+    _ = InvokeAsync(() =>
+    {
+      if (_disposed) return;
+      _openThreadMessages ??= new();
+      _openThreadMessages.Add(optimistic);
+      BumpThread(optimistic, markUnread: false);
+      StateHasChanged();
+    });
   }
 
   // Toast title: a contact/thread name when known, else the counterparty number.

@@ -90,7 +90,7 @@ else if (_composingNew)
              aria-label="Recipient phone number"
              inputmode="tel" data-keyboard="numeric"
              value="@_recipient"
-             @oninput="@(e => { _recipient = e.Value?.ToString() ?? string.Empty; _recipientError = null; })" />
+             @oninput="OnRecipientInput" />
       @if (_recipientError != null)
       {
         <div class="texts-recipient-error" role="alert">@_recipientError</div>
@@ -121,7 +121,7 @@ else
     else if (Error)
     {
       <div class="empty-state">
-        <RadzenIcon Icon="forum" class="empty-state-icon" />
+        <RadzenIcon Icon="cloud_off" class="empty-state-icon" />
         <div class="empty-state-text">Couldn't load conversations.</div>
         <button type="button" class="phone-btn-sm" @onclick="OnRetry">Retry</button>
       </div>
@@ -217,7 +217,7 @@ else
                placeholder="Message"
                aria-label="Type a message"
                value="@_draft"
-               @oninput="@(e => _draft = e.Value?.ToString() ?? string.Empty)"
+               @oninput="OnDraftInput"
                disabled="@(!SendService.SendEnabled)" />
         <button type="button" class="phone-btn-sm"
                 disabled="@(!CanSend)" @onclick="SendDraftAsync">Send</button>
@@ -256,6 +256,23 @@ else
   {
     _composingNew = false;
     _recipientError = null;
+  }
+
+  // Explicit input handlers (not inline lambdas) so the Send button's
+  // disabled="@(!CanSend)" re-evaluates live as the user types — CanSend depends on
+  // _draft (and _recipient in new-recipient mode), so we must StateHasChanged on each
+  // keystroke.
+  private void OnDraftInput(ChangeEventArgs e)
+  {
+    _draft = e.Value?.ToString() ?? string.Empty;
+    StateHasChanged();
+  }
+
+  private void OnRecipientInput(ChangeEventArgs e)
+  {
+    _recipient = e.Value?.ToString() ?? string.Empty;
+    _recipientError = null;
+    StateHasChanged();
   }
 
   private async Task SendDraftAsync()
@@ -331,6 +348,10 @@ else
 
   private async Task RetrySend(SmsMessageDto m)
   {
+    // Drop the stale Failed status so the old red bubble doesn't linger alongside
+    // the new sending bubble.
+    _statusById.Remove(m.Id);
+    // TODO(send-ship): also drop the orphan temp bubble from the parent Messages list — needs a parent callback; deferred with the flagged send path.
     _draft = m.Text ?? "";                          // re-arm with the failed text
     await SendDraftAsync();
   }

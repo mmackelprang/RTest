@@ -82,6 +82,24 @@ public class PhoneTextsPanelTests : TestContext
       .Add(x => x.Messages, new List<SmsMessageDto>()));
     Assert.Contains("Texting unavailable", cut.Markup);
     Assert.DoesNotContain("compose-send-enabled", cut.Markup);
+    // Degraded branch replaces the whole compose bar with the pill — no message
+    // input and no Send path are rendered.
+    Assert.Empty(cut.FindAll(".texts-compose-input"));
+  }
+
+  [Fact]
+  public void Degraded_HidesComposeInput_EvenWhenFlagOn()
+  {
+    // Send flag ON but GV unavailable: the degraded gate must still win — the
+    // "Texting unavailable" pill shows and the compose input is absent.
+    Register(sendEnabled: true, available: false);
+    var cut = RenderComponent<PhoneTextsPanel>(p => p
+      .Add(x => x.OpenThreadId, "t1")
+      .Add(x => x.HeaderName, "Mom")
+      .Add(x => x.Messages, new List<SmsMessageDto>()));
+    Assert.Contains("Texting unavailable", cut.Markup);
+    Assert.Empty(cut.FindAll(".texts-compose-input"));
+    Assert.DoesNotContain("compose-send-enabled", cut.Markup);
   }
 
   [Fact]
