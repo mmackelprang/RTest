@@ -16,6 +16,12 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
+    <!-- Pin SQLitePCLRaw 3.0.x to clear GHSA-2m69-gcr7-jv3q (CVE-2025-6965). Microsoft.Data.Sqlite
+         declares bundle_e_sqlite3 (>= 2.1.11), which NuGet resolves to the vulnerable 2.1.11 (ships
+         the deprecated lib.e_sqlite3 with SQLite < 3.50.2). The 3.0.x line replaces lib.e_sqlite3
+         with SourceGear.sqlite3 (>= 3.50.4) and carries no advisory. -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
+    <PackageReference Include="SQLitePCLRaw.core" Version="3.0.3" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.0" />
