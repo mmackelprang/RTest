@@ -42,16 +42,12 @@
 
   <div class="phone-messages-body">
     <div class="phone-messages-feed">
-      @if (_filter is "all" or "calls")
+      @if (_filter == "calls")
       {
+        @* Calls-only stream. *@
         @if (CallHistory == null)
         {
-          @for (var i = 0; i < 5; i++)
-          {
-            <div class="skeleton-list-row">
-              <div class="skeleton skeleton-list-row-text"></div>
-            </div>
-          }
+          @RenderCallSkeleton
         }
         else if (CallHistory.Count == 0)
         {
@@ -64,34 +60,84 @@
         {
           @foreach (var entry in CallHistory.OrderByDescending(c => c.StartTime))
           {
-            var captured = entry;
-            <button type="button"
-                    class="list-item-touch @(ReferenceEquals(_selectedCall, captured) ? "list-item-active" : "")"
-                    @onclick="@(() => _selectedCall = captured)">
-              <RadzenIcon Icon="@PhoneCallFormatting.GetCallDirectionIcon(captured)"
-                          Style="@($"color: {PhoneCallFormatting.GetCallDirectionColor(captured)}")" />
-              <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
-                <span class="list-item-title">@ResolveName(captured)</span>
-                <span class="list-item-subtitle">@DirectionLabel(captured)</span>
-              </div>
-              <span class="list-item-meta">@captured.StartTime.ToLocalTime().ToString("g")</span>
-              @if (!string.IsNullOrEmpty(captured.Duration))
-              {
-                <span class="list-item-meta">@PhoneCallFormatting.FormatDuration(captured.Duration)</span>
-              }
-              <RadzenIcon Icon="chevron_right" Style="color: var(--text-low);" />
-            </button>
+            @RenderCallRow(entry)
+          }
+        }
+      }
+      else if (_filter == "voicemail")
+      {
+        @* Voicemail-only stream (single-stream view — hide the type label). *@
+        @if (VoicemailLoading && Voicemails == null)
+        {
+          @RenderCallSkeleton
+        }
+        else if (VoicemailError && Voicemails == null)
+        {
+          <div class="empty-state">
+            <RadzenIcon Icon="cloud_off" class="empty-state-icon" />
+            <div class="empty-state-text">Couldn't load voicemail.</div>
+            <button type="button" class="phone-btn-sm" @onclick="OnRetryVoicemail">Retry</button>
+          </div>
+        }
+        else if (Voicemails is { Count: 0 })
+        {
+          <div class="empty-state">
+            <RadzenIcon Icon="voicemail" class="empty-state-icon" />
+            <div class="empty-state-text">No voicemails.</div>
+          </div>
+        }
+        else if (Voicemails != null)
+        {
+          @foreach (var vm in Voicemails.OrderByDescending(v => v.ReceivedAt))
+          {
+            @RenderVoicemailRow(vm, singleStream: true)
+          }
+        }
+      }
+      else if (_filter == "all")
+      {
+        @* Unified feed: calls + voicemail interleaved by timestamp (PR3 adds texts). *@
+        @if (FeedLoading)
+        {
+          @RenderCallSkeleton
+        }
+        else if (FeedError)
+        {
+          <div class="empty-state">
+            <RadzenIcon Icon="cloud_off" class="empty-state-icon" />
+            <div class="empty-state-text">Couldn't load messages.</div>
+            <button type="button" class="phone-btn-sm" @onclick="OnRetryVoicemail">Retry</button>
+          </div>
+        }
+        else if (FeedItems().Count == 0)
+        {
+          <div class="empty-state">
+            <RadzenIcon Icon="forum" class="empty-state-icon" />
+            <div class="empty-state-text">No messages yet.</div>
+          </div>
+        }
+        else
+        {
+          @foreach (var item in FeedItems())
+          {
+            switch (item.Kind)
+            {
+              case FeedKind.Call:
+                @RenderCallRow((CallHistoryEntryDto)item.Payload)
+                break;
+              case FeedKind.Voicemail:
+                @RenderVoicemailRow((VoicemailItemDto)item.Payload, singleStream: false)
+                break;
+            }
           }
         }
       }
       else
       {
-        @* PR2 (voicemail) / PR3 (texts) fill these filters; until then show empty. *@
+        @* PR3 (texts) fills this filter; until then show its stub. *@
         <div class="empty-state">
-          <RadzenIcon Icon="@(_filter == "voicemail" ? "voicemail" : "forum")" class="empty-state-icon" />
-          <div class="empty-state-text">
-            @(_filter == "voicemail" ? "Voicemail coming online…" : "Texts coming online…")
-          </div>
+          <RadzenIcon Icon="forum" class="empty-state-icon" />
+          <div class="empty-state-text">Texts coming online…</div>
         </div>
       }
     </div>
@@ -154,8 +200,17 @@
   [Parameter] public int UnreadThreadCount { get; set; }       // PR3 feeds this
   [Parameter] public EventCallback OnRefresh { get; set; }
 
+  // PR2 — voicemail list is owned by the parent (PhonePage); this panel renders it.
+  [Parameter] public List<VoicemailItemDto>? Voicemails { get; set; }
+  [Parameter] public bool VoicemailLoading { get; set; }
+  [Parameter] public bool VoicemailError { get; set; }
+  [Parameter] public EventCallback OnRetryVoicemail { get; set; }
+  [Parameter] public EventCallback<string> OnVoicemailHeard { get; set; }  // id → parent flips IsRead + count
+
   private string _filter = "all";
   private CallHistoryEntryDto? _selectedCall;
+  private string? _openVoicemailId;   // accordion: one open at a time
+  private string? _newVoicemailId;    // most-recent arrival → .list-item-add once
 
   private IEnumerable<(string Key, string Label, int Count)> Segments => new[]
   {
@@ -164,6 +219,64 @@
     ("texts", "Texts", UnreadThreadCount),
     ("calls", "Calls", 0)
   };
+
+  // ── Unified feed projection (Designer Option C) ────────────────────────────
+  // GV-3 (texts) extends this: add a FeedKind.Text case + project text threads
+  // into FeedItems(). Keep the shape — record FeedItem(When, Kind, Payload) — so
+  // the Text case is a trivial add.
+  private enum FeedKind { Call, Voicemail }
+  private record FeedItem(DateTime When, FeedKind Kind, object Payload);
+
+  private List<FeedItem> FeedItems()
+  {
+    var items = new List<FeedItem>();
+    if (CallHistory != null)
+    {
+      foreach (var c in CallHistory)
+      {
+        items.Add(new FeedItem(c.StartTime, FeedKind.Call, c));
+      }
+    }
+    if (Voicemails != null)
+    {
+      foreach (var v in Voicemails)
+      {
+        items.Add(new FeedItem(v.ReceivedAt, FeedKind.Voicemail, v));
+      }
+    }
+    return items.OrderByDescending(f => f.When).ToList();
+  }
+
+  // The "All" feed only shows skeleton/error while NO source has yet produced a
+  // good list; once either has data we render what we have.
+  private bool FeedLoading =>
+    CallHistory == null && Voicemails == null && VoicemailLoading;
+  private bool FeedError =>
+    CallHistory == null && Voicemails == null && VoicemailError;
+
+  // ── Voicemail accordion + heard handlers ──────────────────────────────────
+  private void ToggleVoicemail(string id)
+  {
+    _openVoicemailId = _openVoicemailId == id ? null : id;  // collapse others
+    if (_newVoicemailId == id) _newVoicemailId = null;        // clear new-flag on open
+  }
+
+  private async Task HeardVoicemail(string id)
+  {
+    // Local flip happens in the parent (it owns the list + count); bubble up.
+    await OnVoicemailHeard.InvokeAsync(id);
+  }
+
+  private string ResolveVoicemailName(VoicemailItemDto vm)
+  {
+    if (!string.IsNullOrWhiteSpace(vm.FromName)) return vm.FromName!;
+    var key = PhoneNumberNormalizer.Normalize(vm.FromNumber);
+    var match = Contacts.FirstOrDefault(c => PhoneNumberNormalizer.Normalize(c.Phone) == key);
+    return match?.Name ?? vm.FromNumber;
+  }
+
+  // Called by the parent when GvVoicemailReceived fires, to flag the new row.
+  public void FlagNewVoicemail(string id) { _newVoicemailId = id; StateHasChanged(); }
 
   // Resolution precedence mirrors PhoneHistoryPanel.ResolveContactName:
   // a name RotaryPhone already attached (CallerName) → a normalized match in the
@@ -194,4 +307,40 @@
     CallDirection.Outgoing => "Outgoing",
     _ => "Call"
   };
+
+  // ── Row render fragments (shared by the calls / voicemail / all feeds) ─────
+  private RenderFragment RenderCallSkeleton => @<text>
+    @for (var i = 0; i < 5; i++)
+    {
+      <div class="skeleton-list-row">
+        <div class="skeleton skeleton-list-row-text"></div>
+      </div>
+    }
+  </text>;
+
+  private RenderFragment RenderCallRow(CallHistoryEntryDto entry) => @<button type="button"
+        class="list-item-touch @(ReferenceEquals(_selectedCall, entry) ? "list-item-active" : "")"
+        @onclick="@(() => _selectedCall = entry)">
+    <RadzenIcon Icon="@PhoneCallFormatting.GetCallDirectionIcon(entry)"
+                Style="@($"color: {PhoneCallFormatting.GetCallDirectionColor(entry)}")" />
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+      <span class="list-item-title">@ResolveName(entry)</span>
+      <span class="list-item-subtitle">@DirectionLabel(entry)</span>
+    </div>
+    <span class="list-item-meta">@entry.StartTime.ToLocalTime().ToString("g")</span>
+    @if (!string.IsNullOrEmpty(entry.Duration))
+    {
+      <span class="list-item-meta">@PhoneCallFormatting.FormatDuration(entry.Duration)</span>
+    }
+    <RadzenIcon Icon="chevron_right" Style="color: var(--text-low);" />
+  </button>;
+
+  private RenderFragment RenderVoicemailRow(VoicemailItemDto vm, bool singleStream) => @<VoicemailRow
+        Item="vm"
+        Expanded="@(_openVoicemailId == vm.Id)"
+        IsNew="@(_newVoicemailId == vm.Id)"
+        SingleStreamView="singleStream"
+        ResolvedName="@ResolveVoicemailName(vm)"
+        OnToggle="@(() => ToggleVoicemail(vm.Id))"
+        OnHeard="@(() => HeardVoicemail(vm.Id))" />;
 }
