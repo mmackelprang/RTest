@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Radio.Web.Models;
 using Radio.Web.Services.ApiClients;
@@ -12,7 +13,8 @@ public class GvBridgeApiServiceVoicemailSmsTests
     new() { PropertyNameCaseInsensitive = true };
 
   private static GvBridgeApiService CreateService(HttpClient client) =>
-    new(client, NullLogger<GvBridgeApiService>.Instance);
+    new(client, NullLogger<GvBridgeApiService>.Instance,
+      new ConfigurationBuilder().Build());
 
   [Fact]
   public async Task GetVoicemailsAsync_ReturnsList()
@@ -87,5 +89,24 @@ public class GvBridgeApiServiceVoicemailSmsTests
     var url = CreateService(client).GetVoicemailAudioUrl("vm1");
 
     Assert.Equal("http://radio:5004/api/gvbridge/voicemail/vm1/audio", url);
+  }
+
+  [Fact]
+  public async Task MarkVoicemailReadAsync_NoOps_WhenFlagOff()
+  {
+    // No HTTP call should be made; returns false (not-persisted).
+    var handler = new MockHttpHandler("{}");  // would 200 if called
+    var client = new HttpClient(handler) { BaseAddress = new Uri("http://radio:5004") };
+    var config = new ConfigurationBuilder()
+      .AddInMemoryCollection(new Dictionary<string, string?>
+        { ["RotaryPhone:Gv:MarkReadEnabled"] = "false" })
+      .Build();
+    var svc = new GvBridgeApiService(client,
+      NullLogger<GvBridgeApiService>.Instance, config);
+
+    var result = await svc.MarkVoicemailReadAsync("vm1");
+
+    Assert.False(result);
+    Assert.Equal(0, handler.RequestCount);  // never hit the network
   }
 }
