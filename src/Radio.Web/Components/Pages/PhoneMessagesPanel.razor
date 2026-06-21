@@ -3,8 +3,10 @@
 @using Radio.Core.Utilities
 
 @* Unified Messages feed (Designer Option C). Segmented filter over one
-   newest-first feed. PR1 = shell + call rows; PR2 adds voicemail rows + player;
-   PR3 adds text thread rows + conversation. *@
+   newest-first feed: calls (PR1), voicemail rows + inline player (PR2), and text
+   thread rows + master-detail conversation (PR3). All three project through the
+   single FeedItem/FeedKind interleave so "All" sorts them together by timestamp;
+   each segment is the same projection filtered to one kind. *@
 
 <div class="phone-messages">
   @if (!GvAvailable)
@@ -94,9 +96,41 @@
           }
         }
       }
+      else if (_filter == "texts")
+      {
+        @* Texts-only stream. Thread rows are the same rows the "All" feed
+           interleaves (RenderTextThreadRow), just filtered to this one kind. The
+           list-state gates come from the Threads parameters the parent owns. *@
+        @if (ThreadsLoading && Threads == null)
+        {
+          @RenderCallSkeleton
+        }
+        else if (ThreadsError && Threads == null)
+        {
+          <div class="empty-state">
+            <RadzenIcon Icon="cloud_off" class="empty-state-icon" />
+            <div class="empty-state-text">Couldn't load conversations.</div>
+            <button type="button" class="phone-btn-sm" @onclick="OnRetryThreads">Retry</button>
+          </div>
+        }
+        else if (Threads is { Count: 0 })
+        {
+          <div class="empty-state">
+            <RadzenIcon Icon="forum" class="empty-state-icon" />
+            <div class="empty-state-text">No conversations yet.</div>
+          </div>
+        }
+        else if (Threads != null)
+        {
+          @foreach (var thread in Threads.OrderByDescending(t => t.LastMessageAt))
+          {
+            @RenderTextThreadRow(thread)
+          }
+        }
+      }
       else if (_filter == "all")
       {
-        @* Unified feed: calls + voicemail interleaved by timestamp (PR3 adds texts).
+        @* Unified feed: calls + voicemail + texts interleaved by timestamp.
            Build the projection ONCE per render (the empty-check + the loop both
            consume it) — recomputing per access re-allocates + re-sorts each time. *@
         _feed = FeedItems();
@@ -109,7 +143,7 @@
           <div class="empty-state">
             <RadzenIcon Icon="cloud_off" class="empty-state-icon" />
             <div class="empty-state-text">Couldn't load messages.</div>
-            <button type="button" class="phone-btn-sm" @onclick="OnRetryVoicemail">Retry</button>
+            <button type="button" class="phone-btn-sm" @onclick="RetryFeed">Retry</button>
           </div>
         }
         else if (_feed is { Count: 0 })
@@ -131,22 +165,30 @@
               case FeedKind.Voicemail:
                 @RenderVoicemailRow((VoicemailItemDto)item.Payload, singleStream: false)
                 break;
+              case FeedKind.Text:
+                @RenderTextThreadRow((SmsThreadDto)item.Payload)
+                break;
             }
           }
         }
       }
-      else
-      {
-        @* PR3 (texts) fills this filter; until then show its stub. *@
-        <div class="empty-state">
-          <RadzenIcon Icon="forum" class="empty-state-icon" />
-          <div class="empty-state-text">Texts coming online…</div>
-        </div>
-      }
     </div>
 
     <div class="phone-messages-detail">
-      @if (_selectedCall == null)
+      @if (_openThreadId != null)
+      {
+        @* PR3 — open SMS conversation. Compose + new-inbound append handled by
+           PhoneTextsPanel; the parent feeds OpenThreadMessages + reconciles. *@
+        <PhoneTextsPanel OpenThreadId="_openThreadId"
+                         Threads="Threads"
+                         Contacts="Contacts"
+                         Messages="OpenThreadMessages"
+                         HeaderName="@OpenThreadName"
+                         HeaderNumber="@OpenThreadNumber"
+                         OnBack="CloseThread"
+                         OnOptimisticAppend="OnOptimisticAppend" />
+      }
+      else if (_selectedCall == null)
       {
         <div class="empty-state">
           <RadzenIcon Icon="forum" class="empty-state-icon" />
@@ -210,6 +252,19 @@
   [Parameter] public EventCallback OnRetryVoicemail { get; set; }
   [Parameter] public EventCallback<string> OnVoicemailHeard { get; set; }  // id → parent flips IsRead + count
 
+  // PR3 — GV SMS threads + open-conversation state. The parent (PhonePage) owns
+  // fetch/push/read; this panel renders thread rows in the feed (interleaved via
+  // the FeedItem projection) and hosts PhoneTextsPanel in the detail pane for the
+  // open conversation, tracking which thread is open.
+  [Parameter] public List<SmsThreadDto>? Threads { get; set; }
+  [Parameter] public bool ThreadsLoading { get; set; }
+  [Parameter] public bool ThreadsError { get; set; }
+  [Parameter] public List<SmsMessageDto>? OpenThreadMessages { get; set; }
+  [Parameter] public EventCallback OnRetryThreads { get; set; }
+  [Parameter] public EventCallback<string> OnOpenThread { get; set; }   // threadId → parent loads messages + marks read
+  [Parameter] public EventCallback OnCloseThread { get; set; }          // back → parent clears _openThreadId + _openThreadMessages
+  [Parameter] public EventCallback<SmsMessageDto> OnOptimisticAppend { get; set; }
+
   private string _filter = "all";
   private CallHistoryEntryDto? _selectedCall;
   private string? _openVoicemailId;   // accordion: one open at a time
@@ -217,6 +272,57 @@
   // Per-render cache of the interleaved "All" projection (computed once in the
   // "all" branch, consumed by both the empty-check and the row loop).
   private List<FeedItem>? _feed;
+
+  // The open SMS thread (detail pane shows its conversation). Null = no thread open.
+  private string? _openThreadId;
+  public string? OpenThreadId => _openThreadId;   // parent reads to suppress toast when open
+
+  // Called by the parent on GvSmsReceived to decide append-in-place vs toast.
+  public bool IsThreadOpen(string threadId) => _openThreadId == threadId;
+
+  private async Task OpenThread(string threadId)
+  {
+    _openThreadId = threadId;
+    _selectedCall = null;                          // texts + calls share the detail pane
+    await OnOpenThread.InvokeAsync(threadId);       // parent loads messages, marks thread read
+  }
+
+  // Back out of the open conversation. Clear BOTH the panel's open-thread flag and
+  // the parent's: the parent owns _openThreadId / _openThreadMessages, and if its
+  // copy stayed stale a later inbound for this thread would (a) match the
+  // optimistic de-dupe against a list no longer shown and (b) be dropped instead of
+  // toasted (its threadOpen check ANDs the parent flag with the panel's, which the
+  // panel just cleared). Clearing the parent keeps the two in sync.
+  private async Task CloseThread()
+  {
+    _openThreadId = null;
+    await OnCloseThread.InvokeAsync();
+  }
+
+  private SmsThreadDto? OpenThreadData =>
+    Threads?.FirstOrDefault(t => t.ThreadId == _openThreadId);
+
+  // Header strings for the open conversation. Name precedence mirrors ResolveName:
+  // CounterpartyName → normalized contact match → bare number.
+  private string OpenThreadName
+  {
+    get
+    {
+      var t = OpenThreadData;
+      if (t == null) return _openThreadId ?? "";
+      if (!string.IsNullOrWhiteSpace(t.CounterpartyName)) return t.CounterpartyName!;
+      var key = PhoneNumberNormalizer.Normalize(t.CounterpartyNumber);
+      if (key.Length > 0)
+      {
+        var match = Contacts.FirstOrDefault(c =>
+          PhoneNumberNormalizer.Normalize(c.Phone) == key);
+        if (match != null) return match.Name;
+      }
+      return t.CounterpartyNumber;
+    }
+  }
+
+  private string OpenThreadNumber => OpenThreadData?.CounterpartyNumber ?? "";
 
   private IEnumerable<(string Key, string Label, int Count)> Segments => new[]
   {
@@ -227,10 +333,11 @@
   };
 
   // ── Unified feed projection (Designer Option C) ────────────────────────────
-  // GV-3 (texts) extends this: add a FeedKind.Text case + project text threads
-  // into FeedItems(). Keep the shape — record FeedItem(When, Kind, Payload) — so
-  // the Text case is a trivial add.
-  private enum FeedKind { Call, Voicemail }
+  // One newest-first interleave across all three message kinds. The "All" segment
+  // renders every kind; each single-kind segment is the same data filtered.
+  // FeedItem stays a thin (When, Kind, Payload) record so adding a kind is a
+  // projection line + a render-switch case (PR3 added Text the same way).
+  private enum FeedKind { Call, Voicemail, Text }
   private record FeedItem(DateTime When, FeedKind Kind, object Payload);
 
   private List<FeedItem> FeedItems()
@@ -250,15 +357,33 @@
         items.Add(new FeedItem(v.ReceivedAt, FeedKind.Voicemail, v));
       }
     }
+    if (Threads != null)
+    {
+      foreach (var t in Threads)
+      {
+        items.Add(new FeedItem(t.LastMessageAt, FeedKind.Text, t));
+      }
+    }
     return items.OrderByDescending(f => f.When).ToList();
   }
 
   // The "All" feed only shows skeleton/error while NO source has yet produced a
-  // good list; once either has data we render what we have.
+  // good list; once any has data we render what we have.
   private bool FeedLoading =>
-    CallHistory == null && Voicemails == null && VoicemailLoading;
+    CallHistory == null && Voicemails == null && Threads == null
+    && (VoicemailLoading || ThreadsLoading);
   private bool FeedError =>
-    CallHistory == null && Voicemails == null && VoicemailError;
+    CallHistory == null && Voicemails == null && Threads == null
+    && (VoicemailError || ThreadsError);
+
+  // The "All" error can come from voicemail OR threads (FeedError ORs both), so
+  // Retry must re-fetch both — retrying only one leaves the other source stuck
+  // until the next poll/manual refresh.
+  private async Task RetryFeed()
+  {
+    await OnRetryVoicemail.InvokeAsync();
+    await OnRetryThreads.InvokeAsync();
+  }
 
   // ── Voicemail accordion + heard handlers ──────────────────────────────────
   private void ToggleVoicemail(string id)
@@ -286,6 +411,26 @@
   // (it owns the voicemail list and re-renders this panel via its own
   // StateHasChanged); this only sets the one-shot animation flag.
   public void FlagNewVoicemail(string id) => _newVoicemailId = id;
+
+  // ── Text thread display helpers ────────────────────────────────────────────
+  // Display-name precedence mirrors ResolveName / PhoneTextsPanel.ResolveThreadName:
+  // a name GV already attached (CounterpartyName) → a normalized contact match →
+  // the bare number.
+  private string ResolveThreadName(SmsThreadDto t)
+  {
+    if (!string.IsNullOrWhiteSpace(t.CounterpartyName)) return t.CounterpartyName!;
+    var key = PhoneNumberNormalizer.Normalize(t.CounterpartyNumber);
+    if (key.Length > 0)
+    {
+      var match = Contacts.FirstOrDefault(c =>
+        PhoneNumberNormalizer.Normalize(c.Phone) == key);
+      if (match != null) return match.Name;
+    }
+    return t.CounterpartyNumber;
+  }
+
+  private static string ThreadPreview(SmsThreadDto t) =>
+    string.IsNullOrEmpty(t.LastMessagePreview) ? "" : t.LastMessagePreview!;
 
   // Resolution precedence mirrors PhoneHistoryPanel.ResolveContactName:
   // a name RotaryPhone already attached (CallerName) → a normalized match in the
@@ -317,7 +462,7 @@
     _ => "Call"
   };
 
-  // ── Row render fragments (shared by the calls / voicemail / all feeds) ─────
+  // ── Row render fragments (shared by the calls / voicemail / texts / all feeds) ─
   private RenderFragment RenderCallSkeleton => @<text>
     @for (var i = 0; i < 5; i++)
     {
@@ -329,7 +474,7 @@
 
   private RenderFragment RenderCallRow(CallHistoryEntryDto entry) => @<button type="button"
         class="list-item-touch @(ReferenceEquals(_selectedCall, entry) ? "list-item-active" : "")"
-        @onclick="@(() => _selectedCall = entry)">
+        @onclick="@(() => { _selectedCall = entry; _openThreadId = null; })">
     <RadzenIcon Icon="@PhoneCallFormatting.GetCallDirectionIcon(entry)"
                 Style="@($"color: {PhoneCallFormatting.GetCallDirectionColor(entry)}")" />
     <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
@@ -352,4 +497,26 @@
         ResolvedName="@ResolveVoicemailName(vm)"
         OnToggle="@(() => ToggleVoicemail(vm.Id))"
         OnHeard="@(() => HeardVoicemail(vm.Id))" />;
+
+  // A single text-thread row, interleaved with calls/voicemail in the feed.
+  // Tapping it opens the conversation in the detail pane (and marks read in the
+  // parent). Mirrors PhoneTextsPanel's old inline thread-row markup, moved under
+  // the FeedItem projection so texts sort newest-first with the other kinds.
+  private RenderFragment RenderTextThreadRow(SmsThreadDto thread) => @<button type="button"
+        class="list-item-touch @(thread.ThreadId == _openThreadId ? "list-item-active" : "")"
+        @onclick="@(() => OpenThread(thread.ThreadId))">
+    @if (thread.HasUnread)
+    {
+      <span class="unread-dot" aria-hidden="true"></span>
+    }
+    <span class="phone-pill cyan" aria-hidden="true">
+      <RadzenIcon Icon="chat_bubble" />
+    </span>
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+      <span class="list-item-title">@ResolveThreadName(thread)</span>
+      <span class="list-item-subtitle">@ThreadPreview(thread)</span>
+    </div>
+    <span class="list-item-meta">@thread.LastMessageAt.ToLocalTime().ToString("g")</span>
+    <RadzenIcon Icon="chevron_right" Style="color: var(--text-low);" />
+  </button>;
 }

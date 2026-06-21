@@ -1,4 +1,5 @@
 @page "/phone"
+@using Radio.Core.Utilities
 @inject PhoneApiService PhoneApi
 @inject PhoneHubService PhoneHub
 @inject GvBridgeApiService GvBridgeApi
@@ -68,10 +69,18 @@
                           VoicemailLoading="_voicemailLoading"
                           VoicemailError="_voicemailError"
                           UnheardVoicemailCount="UnheardVoicemailCount"
-                          UnreadThreadCount="0"
+                          UnreadThreadCount="UnreadThreadCount"
+                          Threads="_threads"
+                          ThreadsLoading="_threadsLoading"
+                          ThreadsError="_threadsError"
+                          OpenThreadMessages="_openThreadMessages"
                           OnRefresh="RefreshMessagesAsync"
                           OnRetryVoicemail="LoadVoicemailsAsync"
-                          OnVoicemailHeard="OnVoicemailHeard" />
+                          OnVoicemailHeard="OnVoicemailHeard"
+                          OnRetryThreads="LoadThreadsAsync"
+                          OnOpenThread="OpenThreadAsync"
+                          OnCloseThread="CloseThreadAsync"
+                          OnOptimisticAppend="OnOptimisticAppend" />
     }
     else if (_activeTab == "dashboard")
     {
@@ -146,23 +155,37 @@
   private bool _gvTrunkRegistered;
   private bool _switchingMode;
 
-  // GV voicemail state (PR2). The panel renders this; the page owns fetch + push.
+  // _messagesPanel is captured so the inbound SMS handler can ask which thread is
+  // open (toast vs append-in-place) and the voicemail-arrival path can flag the
+  // new row for its one-shot animation.
   private PhoneMessagesPanel? _messagesPanel;
+
+  // GV voicemail state (PR2). The panel renders this; the page owns fetch + push.
   private List<VoicemailItemDto>? _voicemails;
   private bool _voicemailLoading;
   private bool _voicemailError;
   private readonly HashSet<string> _locallyHeard = new();   // UI-local read-state
 
+  // GV SMS (PR3) — thread list + the open conversation. Read-state is UI-local in
+  // v1 (GV mark-read is GV-4; ADR-024).
+  private List<SmsThreadDto>? _threads;
+  private bool _threadsLoading;
+  private bool _threadsError;
+  private string? _openThreadId;
+  private List<SmsMessageDto>? _openThreadMessages;
+  private readonly HashSet<string> _locallyReadThreads = new();
+
   private bool IsTab(string t) => _activeTab == t;
 
-  // UI-local unread badge sum. Missed calls DO count (owner decision 2). PR2 folds
-  // in unheard voicemail; PR3 adds _unreadThreads here.
+  // UI-local unread badge sum. Missed calls DO count (owner decision 2); PR2 folds
+  // in unheard voicemail; PR3 folds in unread SMS threads.
   private int MissedCallCount => _callHistory?
     .Count(c => c.Direction == CallDirection.Incoming
              && c.AnsweredOn == CallAnsweredOn.NotAnswered) ?? 0;
   private int UnheardVoicemailCount =>
     _voicemails?.Count(v => !v.IsRead) ?? 0;
-  private int UnreadSum => MissedCallCount + UnheardVoicemailCount;  // + UnreadThreadCount in PR3
+  private int UnreadThreadCount => _threads?.Count(t => t.HasUnread) ?? 0;
+  private int UnreadSum => MissedCallCount + UnheardVoicemailCount + UnreadThreadCount;
 
   protected override async Task OnInitializedAsync()
   {
@@ -209,6 +232,7 @@
     PhoneHub.CallHistoryUpdated += OnCallHistoryUpdated;
     PhoneHub.SystemStatusChanged += OnSystemStatusChanged;
     PhoneHub.GvVoicemailReceived += OnGvVoicemailReceived;
+    PhoneHub.GvSmsReceived += OnGvSmsReceived;
     GvTrunkHub.RegistrationChanged += OnRegistrationChanged;
 
     // GV Messages: bind to the shared status poll (reconnecting banner) and seed
@@ -217,8 +241,10 @@
     GvBridgeStatus.StatusChanged += OnGvStatusChanged;
     PhoneUnread.Set(UnreadSum);
 
-    // GV Messages PR2: fetch the voicemail list without blocking the page.
+    // GV Messages: fetch the voicemail list + the SMS thread list without blocking
+    // the page. Both REST lists backstop the SignalR push (poll catches missed ones).
     _ = LoadVoicemailsAsync();
+    _ = LoadThreadsAsync();
 
     // Poll for status every 5 seconds as fallback
     _pollTimer = new System.Timers.Timer(5000);
@@ -357,15 +383,19 @@
     _ = InvokeAsync(StateHasChanged);
   }
 
-  // Messages refresh = re-fetch call history + voicemail (the Messages sources).
+  // Messages refresh = re-fetch call history + voicemail + SMS threads (the
+  // Messages data sources).
   private async Task RefreshMessagesAsync()
   {
     var history = await PhoneApi.GetCallHistoryAsync();
     if (history != null) _callHistory = history;
     await LoadVoicemailsAsync();
+    await LoadThreadsAsync();
     PhoneUnread.Set(UnreadSum);
     await InvokeAsync(StateHasChanged);
   }
+
+  // ── GV voicemail (PR2) ───────────────────────────────────────
 
   // GV Messages PR2 — voicemail fetch. REST is source-of-truth on (re)load; the
   // SignalR push only freshens. Keep last good list on a refresh failure (warning
@@ -439,6 +469,183 @@
     var ts = TimeSpan.FromSeconds(s);
     return ts.TotalHours >= 1 ? ts.ToString(@"h\:mm\:ss") : ts.ToString(@"m\:ss");
   }
+
+  // ── GV SMS (PR3) ─────────────────────────────────────────────
+
+  // Fetch the thread list. On a transient refresh failure keep the last good
+  // list (calm warning toast); only flag a hard error when there's nothing yet.
+  private async Task LoadThreadsAsync()
+  {
+    _threadsLoading = true;
+    _threadsError = false;
+    var list = await GvBridgeApi.GetSmsThreadsAsync();
+    if (list != null)
+    {
+      _threads = ApplyLocalRead(list.Threads.ToList());
+    }
+    else if (_threads == null)
+    {
+      _threadsError = true;
+    }
+    else
+    {
+      NotificationService.Notify(NotificationSeverity.Warning, "Couldn't refresh",
+        "Showing the last update.");
+    }
+    _threadsLoading = false;
+    PhoneUnread.Set(UnreadSum);
+    await InvokeAsync(StateHasChanged);
+  }
+
+  // Counts are UI-local truth in v1 (GV mark-read is GV-4). A thread the user
+  // opened locally stays read across a list refresh until a hard reload.
+  private List<SmsThreadDto> ApplyLocalRead(List<SmsThreadDto> threads) =>
+    threads.Select(t => _locallyReadThreads.Contains(t.ThreadId)
+      ? t with { HasUnread = false } : t).ToList();
+
+  private async Task OpenThreadAsync(string threadId)
+  {
+    _openThreadId = threadId;
+    _locallyReadThreads.Add(threadId);                       // UI-local read
+    var idx = _threads?.FindIndex(t => t.ThreadId == threadId) ?? -1;
+    if (idx >= 0) _threads![idx] = _threads[idx] with { HasUnread = false };
+    var messages = await GvBridgeApi.GetSmsThreadMessagesAsync(threadId);
+    _openThreadMessages = messages?.Messages.ToList() ?? new();
+    PhoneUnread.Set(UnreadSum);
+    await InvokeAsync(StateHasChanged);
+  }
+
+  // Conversation closed (Back). Clear the open-thread state the page owns so a
+  // later inbound for this thread is treated as closed (toast + bump, not a silent
+  // append/de-dupe against a list that's no longer shown). Re-opening the thread
+  // re-fetches its messages via OpenThreadAsync.
+  private async Task CloseThreadAsync()
+  {
+    _openThreadId = null;
+    _openThreadMessages = null;
+    await InvokeAsync(StateHasChanged);
+  }
+
+  // Live inbound SMS. HARD RULE: when the affected thread is open, append the
+  // bubble in place — no toast, no unread increment. Otherwise bump the thread to
+  // the top, mark it unread, and fire a calm Info toast with a truncated preview.
+  // Runs on the SignalR/background thread, so the whole mutation body is marshalled
+  // onto the Blazor sync context via InvokeAsync before touching component state.
+  private void OnGvSmsReceived(SmsMessageDto msg)
+  {
+    if (_disposed) return;
+    _ = InvokeAsync(() =>
+    {
+      if (_disposed) return;
+
+      // Optimistic→confirmed de-dupe: when the server echoes back our OWN outbound
+      // send, collapse the optimistic temp bubble so we don't double-render. The
+      // optimistic bubble lives in _openThreadMessages only while the thread is open,
+      // so this is naturally scoped to the open conversation. Match on
+      // text + recency + outbound (NOT ThreadId): for a new-recipient send the temp
+      // bubble is keyed on the raw phone number while the confirmed message carries
+      // the GV thread id, so a ThreadId match would miss. Remove the first match
+      // (there is at most one in flight for a given text/recency window).
+      if (GvDirection.IsOutbound(msg.Direction) && _openThreadMessages != null)
+      {
+        var tempIdx = _openThreadMessages.FindIndex(m =>
+          m.Id.StartsWith("temp-", StringComparison.Ordinal)
+          && GvDirection.IsOutbound(m.Direction)
+          && string.Equals(m.Text, msg.Text, StringComparison.Ordinal)
+          && Math.Abs((m.SentAt - msg.SentAt).TotalSeconds) <= 30);
+        if (tempIdx >= 0) _openThreadMessages.RemoveAt(tempIdx);
+      }
+
+      var threadOpen = _openThreadId == msg.ThreadId
+                       && (_messagesPanel?.IsThreadOpen(msg.ThreadId) ?? false);
+
+      if (threadOpen)
+      {
+        _openThreadMessages ??= new();
+        if (_openThreadMessages.All(m => m.Id != msg.Id))
+        {
+          _openThreadMessages.Add(msg);
+        }
+        // Keep the thread at the top + preview fresh, but do NOT mark unread.
+        BumpThread(msg, markUnread: false);
+      }
+      else
+      {
+        BumpThread(msg, markUnread: true);
+        NotificationService.Notify(NotificationSeverity.Info,
+          ResolveThreadName(msg.ThreadId, msg.CounterpartyNumber),
+          Truncate(msg.Text));
+      }
+
+      PhoneUnread.Set(UnreadSum);
+      StateHasChanged();
+    });
+  }
+
+  // Move a thread to the top of the list (newest activity first), refreshing its
+  // preview/timestamp. Insert a new thread row if this is the first message we've
+  // seen for it. markUnread=false keeps an open thread read.
+  private void BumpThread(SmsMessageDto msg, bool markUnread)
+  {
+    _threads ??= new();
+    var idx = _threads.FindIndex(t => t.ThreadId == msg.ThreadId);
+    if (idx >= 0)
+    {
+      var existing = _threads[idx];
+      var t = existing with
+      {
+        HasUnread = markUnread || existing.HasUnread,
+        LastMessageAt = msg.SentAt,
+        LastMessagePreview = msg.Text
+      };
+      _threads.RemoveAt(idx);
+      _threads.Insert(0, t);
+    }
+    else
+    {
+      _threads.Insert(0, new SmsThreadDto(msg.ThreadId, msg.CounterpartyNumber,
+        null, msg.SentAt, markUnread, msg.Text));
+    }
+  }
+
+  // Optimistic outbound append from the compose bar. The real message collapses
+  // it on the next poll/push (matched by text + recency in OnGvSmsReceived).
+  // Reached via an EventCallback already on the UI sync context, but wrapped in
+  // InvokeAsync for consistency with OnGvSmsReceived and safety on the optimistic
+  // path.
+  private void OnOptimisticAppend(SmsMessageDto optimistic)
+  {
+    if (_disposed) return;
+    _ = InvokeAsync(() =>
+    {
+      if (_disposed) return;
+      _openThreadMessages ??= new();
+      _openThreadMessages.Add(optimistic);
+      BumpThread(optimistic, markUnread: false);
+      StateHasChanged();
+    });
+  }
+
+  // Toast title: a contact/thread name when known, else the counterparty number.
+  private string ResolveThreadName(string threadId, string counterpartyNumber)
+  {
+    var thread = _threads?.FirstOrDefault(t => t.ThreadId == threadId);
+    if (thread != null && !string.IsNullOrWhiteSpace(thread.CounterpartyName))
+    {
+      return thread.CounterpartyName!;
+    }
+    var key = PhoneNumberNormalizer.Normalize(counterpartyNumber);
+    if (key.Length > 0)
+    {
+      var match = MergedContacts.FirstOrDefault(c =>
+        PhoneNumberNormalizer.Normalize(c.Phone) == key);
+      if (match != null) return match.Name;
+    }
+    return counterpartyNumber;
+  }
+
+  private static string Truncate(string? s, int n = 80) =>
+    string.IsNullOrEmpty(s) ? "" : (s!.Length <= n ? s : s[..n] + "…");
 
   private async Task SwitchModeAsync(string mode)
   {
@@ -643,6 +850,7 @@
     PhoneHub.CallHistoryUpdated -= OnCallHistoryUpdated;
     PhoneHub.SystemStatusChanged -= OnSystemStatusChanged;
     PhoneHub.GvVoicemailReceived -= OnGvVoicemailReceived;
+    PhoneHub.GvSmsReceived -= OnGvSmsReceived;
     GvTrunkHub.RegistrationChanged -= OnRegistrationChanged;
     GvBridgeStatus.StatusChanged -= OnGvStatusChanged;
   }

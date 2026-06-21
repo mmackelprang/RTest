@@ -549,9 +549,10 @@ When rotary encoders are integrated via `RotaryEncoderActionRouter`:
 
 ## 12. GV (Google Voice) Messages — UI-Local State, Send & Auth Seams
 
-**Status:** PR1 foundation + PR2 voicemail surface shipped (DTOs, read client, status poll, `/phone` Messages IA shell with call rows + voicemail rows + inline player + new-arrival path). Texts conversation + send (PR3), the GV mark-read **endpoint** (the client seam is now wired-but-no-op), and the inter-service auth gate are deferred.
+**Status:** PR1 foundation + PR2 voicemail surface + PR3 texts surface shipped (DTOs, read client, status poll, `/phone` unified Messages feed with call rows + voicemail rows + inline player + new-arrival path + **text thread rows interleaved into the feed** + master-detail conversation + bubbles + compose/new-recipient composer). **SMS send is feature-flagged OFF** (`RotaryPhone:Gv:SendEnabled=false`). The GV mark-read **endpoint** (the voicemail client seam is wired-but-no-op; the SMS thread mark-read sibling lands in GV-4) and the inter-service auth gate are deferred.
 **Added:** 2026-06-20 (GV Messages PR1 — Foundation + IA shell); updated 2026-06-20 (PR2 — Voicemail surface).
-**Priority:** Medium — PR3 lights up the remaining surface; the seams below are wired OFF and ready to flip.
+**Updated:** 2026-06-21 (GV Messages PR3 — Texts surface reconciled onto PR2; texts wired into the `FeedItem` projection as `FeedKind.Text`, send + new-recipient composer flag-gated, on-screen entry reuses the existing global virtual keyboard).
+**Priority:** Medium — read experience ships today; SMS send is one config flip + the endpoint. The seams below are wired OFF and ready to flip.
 
 ### What's Implemented (PR1)
 
@@ -575,19 +576,24 @@ When rotary encoders are integrated via `RotaryEncoderActionRouter`:
 
 1. **UI-local voicemail/SMS read-state** — "heard"/"read" does NOT persist to Google Voice. A hard reload re-derives unread from the server's `isRead`/`hasUnread` fields. Missed-call badging is also UI-local (owner decision 2). To make read-state durable, RotaryPhone needs a **GV mark-read endpoint** (decision 4), then the client seam below becomes a real wire call.
    - **Gotcha:** because counts are UI-local, two browsers/circuits won't agree until a reload re-derives from the server fields.
-2. **GV mark-read client seam** — DONE in PR2: `GvBridgeApiService.MarkVoicemailReadAsync` is wired into the heard path and flagged off (`RotaryPhone:Gv:MarkReadEnabled=false`), no-op until RotaryPhone ships the endpoint. **Open thread to RotaryPhone:** request `POST /api/gvbridge/voicemail/{id}/read` be pulled forward (decision 4); confirm the route + verb before flipping the flag. `MarkThreadReadAsync` (SMS) is still to be added in PR3/PR4.
+2. **GV mark-read client seam** — voicemail side DONE in PR2: `GvBridgeApiService.MarkVoicemailReadAsync` is wired into the heard path and flagged off (`RotaryPhone:Gv:MarkReadEnabled=false`), no-op until RotaryPhone ships the endpoint. **Open thread to RotaryPhone:** request `POST /api/gvbridge/voicemail/{id}/read` be pulled forward (decision 4); confirm the route + verb before flipping the flag. The SMS-thread sibling (`MarkSmsThreadReadAsync` → `POST /api/gvbridge/sms/threads/{threadId}/read`) lands in **GV-4** (durable read-state); texts read-state is UI-local today (`_locallyReadThreads`).
    - **Constraint to hold:** keep the voicemail audio endpoint **unauthenticated** (ADR-022 §8.1) — the native `<audio src>` cannot send the auth header (see deferred item 4 gotcha).
-3. **GV SMS send** — flagged off via `RotaryPhone:Gv:SendEnabled=false`. Built in PR3; lights up when `POST /api/gvbridge/sms/send` ships on RotaryPhone. **Confirm `SendSmsResponse` shape first** (it's marked provisional in the DTO).
-4. **`RotaryPhoneAuthHandler`** — header (`X-RotaryPhone-Auth`) injected only when `RotaryPhone:Gv:AuthKey` is non-empty; empty today (LAN-only no-auth posture). One place to flip on when the inter-service auth gate ships (ADR-022 §8.1).
-   - **Gotcha:** a native `<audio>` element CANNOT send the auth header. If the voicemail audio endpoint ever becomes auth-required, the direct-`<audio src>` approach (PR2) breaks — it would need a proxied/streamed fetch instead.
-5. **Voicemail player Call back / Text back quick actions** — deferred (owner decision 3). The `VoicemailPlayer` carries a `@* fast-follow … *@` marker where these belong. Call back routes through the existing phone dial path; Text back opens/creates the GV text thread for the caller (depends on PR3 texts surface). No UI shipped in PR2.
+3. **GV SMS send** — **built in PR3, flagged off** via `RotaryPhone:Gv:SendEnabled=false`. The whole compose/reply + new-recipient write path (optimistic → sending → sent → failed-with-preserved-text, 429/in-flight/degraded guardrails) is implemented behind `GvBridgeSendService` (`src/Radio.Web/Services/ApiClients/GvBridgeSendService.cs`); `SendAsync` throws `SendNotAvailableException` until the flag flips. Lights up via **one config flip** once `POST /api/gvbridge/sms/send` ships on RotaryPhone. **Confirm `SendSmsResponse` shape first** — it is marked **provisional** in the DTO and `SendAsync` reads `result.Message`; a shape mismatch silently fails the de-dupe.
+4. **On-screen text entry — reuses the EXISTING global virtual keyboard.** The compose message field and the new-recipient field are ordinary `<input>`s; the app-wide keyboard (`wwwroot/js/virtual-keyboard.js`, loaded in `App.razor`) auto-shows on focus, and the recipient field opts into the numeric layout via `data-keyboard="numeric"`. **This supersedes the design spec's "build a touch keyboard" recommendation** — no new keyboard component was built or skinned. If explicit show/hide is ever needed, use `window.virtualKeyboardInterop.show(element)` / `.hide()`.
+5. **`RotaryPhoneAuthHandler`** — header (`X-RotaryPhone-Auth`) injected only when `RotaryPhone:Gv:AuthKey` is non-empty; empty today (LAN-only no-auth posture). One place to flip on when the inter-service auth gate ships (ADR-022 §8.1). The `GvBridgeSendService` typed client carries this handler too, so send authenticates the moment the gate flips.
+   - **Gotcha:** a native `<audio>` element CANNOT send the auth header. If the voicemail audio endpoint ever becomes auth-required, the direct-`<audio src>` approach (PR2) breaks — keep that endpoint unauthenticated or token-in-query (ADR-022 §8.1 / contract risk #4).
+6. **Voicemail player Call back / Text back quick actions** — deferred (owner decision 3). The `VoicemailPlayer` carries a `@* fast-follow … *@` marker where these belong. Call back routes through the existing phone dial path; Text back opens/creates the GV text thread for the caller (the PR3 texts surface is now in place to host it). No UI shipped yet.
 
 ### Code Pointers
 
-- `src/Radio.Web/Services/ApiClients/GvBridgeApiService.cs` — read methods + audio-URL builder + `MarkVoicemailReadAsync` flagged seam (PR3 adds SMS send + thread mark-read).
+- `src/Radio.Web/Services/ApiClients/GvBridgeApiService.cs` — read methods + audio-URL builder + `MarkVoicemailReadAsync` flagged seam (GV-4 adds the SMS thread mark-read sibling).
+- `src/Radio.Web/Services/ApiClients/GvBridgeSendService.cs` — **PR3 flagged send seam** (the only write path; 4 typed exceptions + in-flight/429/degraded guardrails).
+- `src/Radio.Web/Components/Pages/PhoneTextsPanel.razor` — **PR3** thread list + conversation + compose + new-recipient composer.
+- `src/Radio.Web/Components/Pages/MessageBubble.razor` — **PR3** inbound/outbound bubble + status glyph.
+- `src/Radio.Web/wwwroot/js/phone-texts.js` — **PR3** auto-scroll-to-bottom helper for the conversation pane.
 - `src/Radio.Web/Components/Pages/VoicemailRow.razor` / `VoicemailPlayer.razor` — voicemail row + inline player (PR2).
-- `src/Radio.Web/wwwroot/js/voicemail-player.js` — seek + HTML5 `<audio>` event bridge.
+- `src/Radio.Web/wwwroot/js/voicemail-player.js` — seek + HTML5 `<audio>` event bridge (PR2).
 - `src/Radio.Web/Services/Http/RotaryPhoneAuthHandler.cs` — the auth seam.
-- `src/Radio.Web/Components/Pages/PhoneMessagesPanel.razor` — unified feed with the `FeedItem`/`FeedKind` projection (PR3 adds the `Text` case) + `@* PR3 *@` extension points.
+- `src/Radio.Web/Components/Pages/PhoneMessagesPanel.razor` — unified feed with the `FeedItem`/`FeedKind` projection: **PR2 added `Call`/`Voicemail`, PR3 added the `Text` case** + renders text thread rows interleaved newest-first + hosts the conversation in the detail pane.
 - `design/decisions/2026-06-20-gvbridge-voicemail-sms-integration.md` — ADR-022 (decisions + risks).
 - Config: `RotaryPhone:Gv:{SendEnabled,MarkReadEnabled,StatusPollSeconds,AuthKey}` in `appsettings.json` (+ `appsettings.Production.json` for per-machine `AuthKey`).
