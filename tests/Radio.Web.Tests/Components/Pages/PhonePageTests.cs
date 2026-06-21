@@ -71,6 +71,13 @@ public class PhonePageTests : TestContext
     Services.AddSingleton(sp => new GvBridgeStatusService(
       sp.GetRequiredService<IServiceScopeFactory>(),
       NullLogger<GvBridgeStatusService>.Instance, 10));
+
+    // PR3: the Messages feed hosts PhoneTextsPanel, which injects the flagged
+    // send service. Register it (send disabled by default) so the panel renders.
+    Services.AddHttpClient<GvBridgeSendService>(client =>
+    {
+      client.BaseAddress = new Uri("http://localhost:5004");
+    }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler());
   }
 
   [Fact]

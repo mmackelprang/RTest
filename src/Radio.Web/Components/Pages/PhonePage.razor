@@ -1,4 +1,5 @@
 @page "/phone"
+@using Radio.Core.Utilities
 @inject PhoneApiService PhoneApi
 @inject PhoneHubService PhoneHub
 @inject GvBridgeApiService GvBridgeApi
@@ -60,11 +61,19 @@
   <div style="overflow: hidden; min-height: 0;">
     @if (_activeTab == "messages")
     {
-      <PhoneMessagesPanel GvAvailable="_gvBridgeAvailable"
+      <PhoneMessagesPanel @ref="_messagesPanel"
+                          GvAvailable="_gvBridgeAvailable"
                           CallHistory="_callHistory"
                           Contacts="MergedContacts"
                           UnheardVoicemailCount="0"
-                          UnreadThreadCount="0"
+                          UnreadThreadCount="UnreadThreadCount"
+                          Threads="_threads"
+                          ThreadsLoading="_threadsLoading"
+                          ThreadsError="_threadsError"
+                          OpenThreadMessages="_openThreadMessages"
+                          OnRetryThreads="LoadThreadsAsync"
+                          OnOpenThread="OpenThreadAsync"
+                          OnOptimisticAppend="OnOptimisticAppend"
                           OnRefresh="RefreshMessagesAsync" />
     }
     else if (_activeTab == "dashboard")
@@ -140,15 +149,26 @@
   private bool _gvTrunkRegistered;
   private bool _switchingMode;
 
+  // GV SMS (PR3) — thread list + the open conversation. Read-state is UI-local in
+  // v1 (GV mark-read is GV-4; ADR-024). _messagesPanel is captured so the inbound
+  // handler can ask which thread is open (toast vs append-in-place).
+  private PhoneMessagesPanel? _messagesPanel;
+  private List<SmsThreadDto>? _threads;
+  private bool _threadsLoading;
+  private bool _threadsError;
+  private string? _openThreadId;
+  private List<SmsMessageDto>? _openThreadMessages;
+  private readonly HashSet<string> _locallyReadThreads = new();
+
   private bool IsTab(string t) => _activeTab == t;
 
-  // UI-local unread badge sum. Missed calls DO count (owner decision 2); PR1 has
-  // no voicemail/text data yet so the sum is the missed-call count. PR2/PR3 add
-  // _unheardVoicemail + _unreadThreads here.
+  // UI-local unread badge sum. Missed calls DO count (owner decision 2); PR3 folds
+  // unread SMS threads in. PR2 will add _unheardVoicemail similarly.
   private int MissedCallCount => _callHistory?
     .Count(c => c.Direction == CallDirection.Incoming
              && c.AnsweredOn == CallAnsweredOn.NotAnswered) ?? 0;
-  private int UnreadSum => MissedCallCount;
+  private int UnreadThreadCount => _threads?.Count(t => t.HasUnread) ?? 0;
+  private int UnreadSum => MissedCallCount + UnreadThreadCount;
 
   protected override async Task OnInitializedAsync()
   {
@@ -201,6 +221,11 @@
     _gvBridgeAvailable = GvBridgeStatus.IsAvailable;
     GvBridgeStatus.StatusChanged += OnGvStatusChanged;
     PhoneUnread.Set(UnreadSum);
+
+    // GV SMS (PR3): load the thread list (non-blocking) + subscribe to the live
+    // inbound push. The thread list backstops the push (poll catches missed ones).
+    PhoneHub.GvSmsReceived += OnGvSmsReceived;
+    _ = LoadThreadsAsync();
 
     // Poll for status every 5 seconds as fallback
     _pollTimer = new System.Timers.Timer(5000);
@@ -339,14 +364,149 @@
     _ = InvokeAsync(StateHasChanged);
   }
 
-  // PR1 refresh = re-fetch call history (the only Messages data source yet).
+  // Messages refresh = re-fetch call history + GV SMS threads (the Messages data
+  // sources). PR2 will add the voicemail list here.
   private async Task RefreshMessagesAsync()
   {
     var history = await PhoneApi.GetCallHistoryAsync();
     if (history != null) _callHistory = history;
+    await LoadThreadsAsync();
     PhoneUnread.Set(UnreadSum);
     await InvokeAsync(StateHasChanged);
   }
+
+  // ── GV SMS (PR3) ─────────────────────────────────────────────
+
+  // Fetch the thread list. On a transient refresh failure keep the last good
+  // list (calm warning toast); only flag a hard error when there's nothing yet.
+  private async Task LoadThreadsAsync()
+  {
+    _threadsLoading = true;
+    _threadsError = false;
+    var list = await GvBridgeApi.GetSmsThreadsAsync();
+    if (list != null)
+    {
+      _threads = ApplyLocalRead(list.Threads.ToList());
+    }
+    else if (_threads == null)
+    {
+      _threadsError = true;
+    }
+    else
+    {
+      NotificationService.Notify(NotificationSeverity.Warning, "Couldn't refresh",
+        "Showing the last update.");
+    }
+    _threadsLoading = false;
+    PhoneUnread.Set(UnreadSum);
+    await InvokeAsync(StateHasChanged);
+  }
+
+  // Counts are UI-local truth in v1 (GV mark-read is GV-4). A thread the user
+  // opened locally stays read across a list refresh until a hard reload.
+  private List<SmsThreadDto> ApplyLocalRead(List<SmsThreadDto> threads) =>
+    threads.Select(t => _locallyReadThreads.Contains(t.ThreadId)
+      ? t with { HasUnread = false } : t).ToList();
+
+  private async Task OpenThreadAsync(string threadId)
+  {
+    _openThreadId = threadId;
+    _locallyReadThreads.Add(threadId);                       // UI-local read
+    var idx = _threads?.FindIndex(t => t.ThreadId == threadId) ?? -1;
+    if (idx >= 0) _threads![idx] = _threads[idx] with { HasUnread = false };
+    var messages = await GvBridgeApi.GetSmsThreadMessagesAsync(threadId);
+    _openThreadMessages = messages?.Messages.ToList() ?? new();
+    PhoneUnread.Set(UnreadSum);
+    await InvokeAsync(StateHasChanged);
+  }
+
+  // Live inbound SMS. HARD RULE: when the affected thread is open, append the
+  // bubble in place — no toast, no unread increment. Otherwise bump the thread to
+  // the top, mark it unread, and fire a calm Info toast with a truncated preview.
+  private void OnGvSmsReceived(SmsMessageDto msg)
+  {
+    if (_disposed) return;
+    var threadOpen = _openThreadId == msg.ThreadId
+                     && (_messagesPanel?.IsThreadOpen(msg.ThreadId) ?? false);
+
+    if (threadOpen)
+    {
+      _openThreadMessages ??= new();
+      if (_openThreadMessages.All(m => m.Id != msg.Id))
+      {
+        _openThreadMessages.Add(msg);
+      }
+      // Keep the thread at the top + preview fresh, but do NOT mark unread.
+      BumpThread(msg, markUnread: false);
+    }
+    else
+    {
+      BumpThread(msg, markUnread: true);
+      NotificationService.Notify(NotificationSeverity.Info,
+        ResolveThreadName(msg.ThreadId, msg.CounterpartyNumber),
+        Truncate(msg.Text));
+    }
+
+    PhoneUnread.Set(UnreadSum);
+    _ = InvokeAsync(StateHasChanged);
+  }
+
+  // Move a thread to the top of the list (newest activity first), refreshing its
+  // preview/timestamp. Insert a new thread row if this is the first message we've
+  // seen for it. markUnread=false keeps an open thread read.
+  private void BumpThread(SmsMessageDto msg, bool markUnread)
+  {
+    _threads ??= new();
+    var idx = _threads.FindIndex(t => t.ThreadId == msg.ThreadId);
+    if (idx >= 0)
+    {
+      var existing = _threads[idx];
+      var t = existing with
+      {
+        HasUnread = markUnread || existing.HasUnread,
+        LastMessageAt = msg.SentAt,
+        LastMessagePreview = msg.Text
+      };
+      _threads.RemoveAt(idx);
+      _threads.Insert(0, t);
+    }
+    else
+    {
+      _threads.Insert(0, new SmsThreadDto(msg.ThreadId, msg.CounterpartyNumber,
+        null, msg.SentAt, markUnread, msg.Text));
+    }
+  }
+
+  // Optimistic outbound append from the compose bar. The real message collapses
+  // it on the next poll/push (matched by text + recency, or a server id).
+  private void OnOptimisticAppend(SmsMessageDto optimistic)
+  {
+    _openThreadMessages ??= new();
+    _openThreadMessages.Add(optimistic);
+    BumpThread(optimistic, markUnread: false);
+    _ = InvokeAsync(StateHasChanged);
+  }
+
+  // Toast title: a contact/thread name when known, else the counterparty number.
+  private string ResolveThreadName(string threadId, string counterpartyNumber)
+  {
+    var thread = _threads?.FirstOrDefault(t => t.ThreadId == threadId);
+    if (thread != null && !string.IsNullOrWhiteSpace(thread.CounterpartyName))
+    {
+      return thread.CounterpartyName!;
+    }
+    var key = PhoneNumberNormalizer.Normalize(counterpartyNumber);
+    if (key.Length > 0)
+    {
+      var match = MergedContacts.FirstOrDefault(c =>
+        PhoneNumberNormalizer.Normalize(c.Phone) == key);
+      if (match != null) return match.Name;
+    }
+    return counterpartyNumber;
+  }
+
+  private static string Truncate(string? s, int n = 80) =>
+    string.IsNullOrEmpty(s) ? "" : (s!.Length <= n ? s : s[..n] + "…");
 
   private async Task SwitchModeAsync(string mode)
   {
@@ -552,5 +712,6 @@
     PhoneHub.SystemStatusChanged -= OnSystemStatusChanged;
     GvTrunkHub.RegistrationChanged -= OnRegistrationChanged;
     GvBridgeStatus.StatusChanged -= OnGvStatusChanged;
+    PhoneHub.GvSmsReceived -= OnGvSmsReceived;
   }
 }
