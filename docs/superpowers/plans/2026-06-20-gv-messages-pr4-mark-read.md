@@ -2,17 +2,17 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Flip read-state from UI-local (GV-2/GV-3 v1) to **durable via GV write-through** against the now-**ratified, stable** contract (ADR-023). Wire the GV-2 `MarkVoicemailReadAsync` seam to the real route, add the SMS-thread sibling, subscribe to the unified `ReadStateChanged` SignalR event on the existing `/hub`, and make reconciliation **idempotent keyed by `(id-or-threadId + isRead)`** so the route's returned DTO and RotaryPhone's unconditional echo (and the 502 keep-optimistic path) all collapse to one badge state with no flicker. Ships behind `RotaryPhone:Gv:MarkReadEnabled` (default OFF) so it builds/tests/merges **before** RotaryPhone's owner-HELD build deploys, and lights up in one flag flip.
+**Goal:** Flip read-state from UI-local (GV-2/GV-3 v1) to **durable via GV write-through** against the now-**ratified, stable** contract (ADR-024). Wire the GV-2 `MarkVoicemailReadAsync` seam to the real route, add the SMS-thread sibling, subscribe to the unified `ReadStateChanged` SignalR event on the existing `/hub`, and make reconciliation **idempotent keyed by `(id-or-threadId + isRead)`** so the route's returned DTO and RotaryPhone's unconditional echo (and the 502 keep-optimistic path) all collapse to one badge state with no flicker. Ships behind `RotaryPhone:Gv:MarkReadEnabled` (default OFF) so it builds/tests/merges **before** RotaryPhone's owner-HELD build deploys, and lights up in one flag flip.
 
-**Owner-baked decisions in scope here (from ADR-023):**
-- **Read-state is GV write-through; Google is the single source of truth; RadioConsole keeps NO local read-state store** (ADR-023 §2.2). The only in-memory state is the per-circuit optimistic flip GV-2/GV-3 already hold — it is presentation, never persistence, and is overwritten by the returned DTO / next list fetch / `ReadStateChanged` push.
-- **List endpoints' `isRead`/`hasUnread` are authoritative on every (re)load** (ADR-023 §2). Drop the UI-local seeding; the now-false `// UI-LOCAL only` comment from GV-2 is corrected.
-- **The de-dupe invariant is the one correctness rule:** RotaryPhone broadcasts `ReadStateChanged` **unconditionally — including back to the originator** (ADR-023 §4.1 / §9). Every mark yields ≥2 signals (returned DTO + echoed broadcast); 502 adds a third path. The handler MUST be idempotent keyed by `(id-or-threadId + isRead)`.
-- **No unread toggle in v1** (ADR-023 §6). `isRead:true` is the contract; `isRead:false` may `400 unread_unsupported` until RotaryPhone's live capture confirms it. The `isRead` parameter exists for forward-compat, but no UI affordance calls it with `false`.
-- **No new auth** (ADR-023 §7). The gvbridge `/api/gvbridge/*` prefix gate auto-covers the two mark routes; reuse the existing `RotaryPhone:Gv:AuthKey` seam (the `RotaryPhoneAuthHandler` from GV-1) on the same `GvBridgeApiService` `HttpClient`.
+**Owner-baked decisions in scope here (from ADR-024):**
+- **Read-state is GV write-through; Google is the single source of truth; RadioConsole keeps NO local read-state store** (ADR-024 §2.2). The only in-memory state is the per-circuit optimistic flip GV-2/GV-3 already hold — it is presentation, never persistence, and is overwritten by the returned DTO / next list fetch / `ReadStateChanged` push.
+- **List endpoints' `isRead`/`hasUnread` are authoritative on every (re)load** (ADR-024 §2). Drop the UI-local seeding; the now-false `// UI-LOCAL only` comment from GV-2 is corrected.
+- **The de-dupe invariant is the one correctness rule:** RotaryPhone broadcasts `ReadStateChanged` **unconditionally — including back to the originator** (ADR-024 §4.1 / §9). Every mark yields ≥2 signals (returned DTO + echoed broadcast); 502 adds a third path. The handler MUST be idempotent keyed by `(id-or-threadId + isRead)`.
+- **No unread toggle in v1** (ADR-024 §6). `isRead:true` is the contract; `isRead:false` may `400 unread_unsupported` until RotaryPhone's live capture confirms it. The `isRead` parameter exists for forward-compat, but no UI affordance calls it with `false`.
+- **No new auth** (ADR-024 §7). The gvbridge `/api/gvbridge/*` prefix gate auto-covers the two mark routes; reuse the existing `RotaryPhone:Gv:AuthKey` seam (the `RotaryPhoneAuthHandler` from GV-1) on the same `GvBridgeApiService` `HttpClient`.
 
 **Sources of truth (do not redesign):**
-- **ADR-023** (ratified contract + the GV-4 build list): `design/decisions/2026-06-20-gv-mark-read-durable-readstate.md` — §3 (routes/shapes/status codes), §4 (event), §8 (component delta), §9 (the de-dupe invariant).
+- **ADR-024** (ratified contract + the GV-4 build list): `design/decisions/2026-06-20-gv-mark-read-durable-readstate.md` — §3 (routes/shapes/status codes), §4 (event), §8 (component delta), §9 (the de-dupe invariant).
 - **Ratification reply** (source contract, frozen shapes): `D:/prj/RotaryPhone/docs/handoffs/radioconsole-gv-markread-reply.md`.
 - The GV-2 `MarkVoicemailReadAsync` seam + `_locallyHeard` it introduced: `docs/superpowers/plans/2026-06-20-gv-messages-pr2-voicemail-surface.md` (Chunk 1 Task 1; Chunk 5 Task 6 `OnVoicemailHeard` / `_locallyHeard`).
 - The GV-3 SMS read surface + `_locallyReadThreads` flag pattern: `docs/superpowers/plans/2026-06-20-gv-messages-pr3-texts-surface.md` (Chunk 5 Task 5 `OpenThreadAsync` / `_locallyReadThreads`).
@@ -36,7 +36,7 @@
 | File | Changes |
 |------|---------|
 | `src/Radio.Web/Services/ApiClients/GvBridgeApiService.cs` | Repoint `MarkVoicemailReadAsync` at `POST /api/gvbridge/voicemail/{id}/read` (parse `VoicemailItemDto`); **add** `MarkSmsThreadReadAsync` → `POST /api/gvbridge/sms/threads/{threadId}/read` (parse `SmsThreadDto`). Both behind `RotaryPhone:Gv:MarkReadEnabled`; `200`→DTO, `404`→null, `502`/non-2xx→null (keep optimistic flip, no auto-retry). |
-| `src/Radio.Web/Models/ApiModels.cs` | Add `ReadStateChangedDto` record `{ Kind, Id, ThreadId, IsRead, ChangedAtUtc }`. Correct the now-false `// UI-LOCAL only` comment on `VoicemailItemDto.IsRead` (and any SMS equivalent) → `// authoritative (GV write-through); ADR-023`. |
+| `src/Radio.Web/Models/ApiModels.cs` | Add `ReadStateChangedDto` record `{ Kind, Id, ThreadId, IsRead, ChangedAtUtc }`. Correct the now-false `// UI-LOCAL only` comment on `VoicemailItemDto.IsRead` (and any SMS equivalent) → `// authoritative (GV write-through); ADR-024`. |
 | `src/Radio.Web/Services/PhoneHubService.cs` | Add `.On<ReadStateChangedDto>("ReadStateChanged", …)` on the **existing `/hub` connection** + an `event Action<ReadStateChangedDto>? ReadStateChanged`. Defensive parse: unknown `Kind` ignored at `Debug`. |
 | `src/Radio.Web/Components/Pages/PhonePage.razor` | Subscribe to `PhoneHub.ReadStateChanged`; route through the **idempotent reconciler** keyed by `(id-or-threadId + isRead)`. Drop the UI-local seeding (`_locallyHeard` / `_locallyReadThreads` no longer source-of-truth on reload); apply server-truth from list endpoints + reconcile from the mark route's returned DTO + the echoed broadcast. Wire the voicemail-heard / thread-open seams to the real mark methods. |
 | `src/Radio.Web/appsettings.json` | Confirm `RotaryPhone:Gv:MarkReadEnabled` exists (GV-2 added it `false`); no change to the value. |
@@ -53,7 +53,7 @@
 - Modify: `src/Radio.Web/Models/ApiModels.cs`
 - Test: `tests/Radio.Web.Tests/Services/ReadStateReconcilerTests.cs` (the dedup tests in Chunk 4 assert the shape parses; the DTO existence is verified by compilation here)
 
-> ADR-023 §8.2: `ReadStateChangedDto` is a new record in `ApiModels.cs`. Defensive — unknown `Kind` ignored. Wire payload is camelCase (`kind`/`id`/`threadId`/`isRead`/`changedAtUtc`); SignalR's JSON options already lowercase-match by default, so the C# PascalCase property names bind without `[JsonPropertyName]`. ADR-023 §2.2 / §8.4: the GV-2 `// UI-LOCAL only` comment on `VoicemailItemDto.IsRead` is now **false** and must be corrected.
+> ADR-024 §8.2: `ReadStateChangedDto` is a new record in `ApiModels.cs`. Defensive — unknown `Kind` ignored. Wire payload is camelCase (`kind`/`id`/`threadId`/`isRead`/`changedAtUtc`); SignalR's JSON options already lowercase-match by default, so the C# PascalCase property names bind without `[JsonPropertyName]`. ADR-024 §2.2 / §8.4: the GV-2 `// UI-LOCAL only` comment on `VoicemailItemDto.IsRead` is now **false** and must be corrected.
 
 - [ ] **Step 1: Add the `ReadStateChangedDto` record**
 
@@ -61,7 +61,7 @@ In `ApiModels.cs`, near the other GV DTOs (`VoicemailItemDto`, `SmsThreadDto`), 
 
 ```csharp
 /// <summary>
-/// Unified read-state change event (ADR-023 §4). Pushed on the existing /hub
+/// Unified read-state change event (ADR-024 §4). Pushed on the existing /hub
 /// "ReadStateChanged" alongside GvVoicemailReceived / GvSmsReceived. Fires on OUR
 /// own marks (path a, ships with the routes) and — once RotaryPhone's poller-flip
 /// fast-follow lands — on externally-originated flips (path b, phone/GV-web reads);
@@ -92,17 +92,17 @@ Find the GV-2 comment on `VoicemailItemDto.IsRead`:
 Replace with:
 
 ```csharp
-//  ... isRead,   // authoritative (GV write-through); ADR-023
+//  ... isRead,   // authoritative (GV write-through); ADR-024
 ```
 
-If `SmsThreadDto.HasUnread` carries any equivalent `// UI-LOCAL` note, correct it the same way to `// authoritative (GV write-through); ADR-023`. (If neither carries a UI-LOCAL comment because they are bare positional records, add the one-line `// authoritative (GV write-through); ADR-023` above each record so the semantics are unambiguous — do NOT change the record shape.)
+If `SmsThreadDto.HasUnread` carries any equivalent `// UI-LOCAL` note, correct it the same way to `// authoritative (GV write-through); ADR-024`. (If neither carries a UI-LOCAL comment because they are bare positional records, add the one-line `// authoritative (GV write-through); ADR-024` above each record so the semantics are unambiguous — do NOT change the record shape.)
 
 - [ ] **Step 3: Build + commit**
 
 ```bash
 dotnet build src/Radio.Web --configuration Release
 git add src/Radio.Web/Models/ApiModels.cs
-git commit -m "feat(web): add ReadStateChangedDto; correct read-state semantics to GV write-through (ADR-023)"
+git commit -m "feat(web): add ReadStateChangedDto; correct read-state semantics to GV write-through (ADR-024)"
 ```
 
 ---
@@ -115,7 +115,7 @@ git commit -m "feat(web): add ReadStateChangedDto; correct read-state semantics 
 - Modify: `src/Radio.Web/Services/ApiClients/GvBridgeApiService.cs`
 - Test: `tests/Radio.Web.Tests/Services/GvBridgeApiServiceVoicemailSmsTests.cs` (extend the GV-1/GV-2 file)
 
-> ADR-023 §3 + §5 + §8.1. The GV-2 seam returned `bool` (no-op). GV-4 changes the return type to the **frozen DTO** (`VoicemailItemDto?` / `SmsThreadDto?`) so the caller reconciles the badge from authoritative state in one round-trip (the contract returns the updated DTO, not 204). Body `{ "isRead": true }` (camelCase). `200`→parse DTO; `404`→null (item gone, drop/refresh, no retry); `502`/non-2xx→null **but the caller keeps the optimistic flip** and reconciles on next list/poll/push. **No client-side auto-retry** — one attempt per user action (the contract is retry-safe, but a UI-driven retry is the right place; a wedged GV would otherwise spin). Both gated on `RotaryPhone:Gv:MarkReadEnabled` (the in-tree key GV-2 already wired — do NOT rename, do NOT confuse with RotaryPhone's server-side `EnableMarkRead` build flag).
+> ADR-024 §3 + §5 + §8.1. The GV-2 seam returned `bool` (no-op). GV-4 changes the return type to the **frozen DTO** (`VoicemailItemDto?` / `SmsThreadDto?`) so the caller reconciles the badge from authoritative state in one round-trip (the contract returns the updated DTO, not 204). Body `{ "isRead": true }` (camelCase). `200`→parse DTO; `404`→null (item gone, drop/refresh, no retry); `502`/non-2xx→null **but the caller keeps the optimistic flip** and reconciles on next list/poll/push. **No client-side auto-retry** — one attempt per user action (the contract is retry-safe, but a UI-driven retry is the right place; a wedged GV would otherwise spin). Both gated on `RotaryPhone:Gv:MarkReadEnabled` (the in-tree key GV-2 already wired — do NOT rename, do NOT confuse with RotaryPhone's server-side `EnableMarkRead` build flag).
 
 - [ ] **Step 1: Replace the GV-2 no-op test, add the SMS test (failing)**
 
@@ -147,7 +147,7 @@ public async Task MarkVoicemailReadAsync_NoOps_WhenFlagOff()
 [Fact]
 public async Task MarkVoicemailReadAsync_ReturnsDto_On200_WhenFlagOn()
 {
-  // Frozen VoicemailItemDto read shape (ADR-023 §3.1).
+  // Frozen VoicemailItemDto read shape (ADR-024 §3.1).
   const string body = """
     { "id":"vm1","threadId":"t1","fromNumber":"+15551234567","fromName":"Jane",
       "receivedAt":"2026-06-20T18:03:11Z","durationSeconds":42,"isRead":true,
@@ -187,7 +187,7 @@ public async Task MarkVoicemailReadAsync_ReturnsNull_On502_NoRetry_WhenFlagOn()
 [Fact]
 public async Task MarkSmsThreadReadAsync_ReturnsDto_On200_WhenFlagOn()
 {
-  // Frozen SmsThreadDto read shape (ADR-023 §3.2).
+  // Frozen SmsThreadDto read shape (ADR-024 §3.2).
   const string body = """
     { "threadId":"t1","counterpartyNumber":"+15551234567","counterpartyName":"Mom",
       "lastMessageAt":"2026-06-20T18:03:11Z","hasUnread":false,"lastMessagePreview":"ok" }
@@ -222,7 +222,7 @@ Remove the GV-2 no-op body and replace with:
 
 ```csharp
 /// <summary>
-/// Mark a voicemail read via GV write-through (ADR-023 §3.1 / §5). Google is the
+/// Mark a voicemail read via GV write-through (ADR-024 §3.1 / §5). Google is the
 /// single source of truth; the returned DTO is authoritative — reconcile the badge
 /// from it. Gated on RotaryPhone:Gv:MarkReadEnabled (in-tree consumer flag; distinct
 /// from RotaryPhone's server-side EnableMarkRead build flag). Flag off → silent no-op
@@ -266,7 +266,7 @@ public async Task<VoicemailItemDto?> MarkVoicemailReadAsync(
 
 ```csharp
 /// <summary>
-/// Mark a whole SMS thread read via GV write-through (ADR-023 §3.2 / §5). Per-thread
+/// Mark a whole SMS thread read via GV write-through (ADR-024 §3.2 / §5). Per-thread
 /// grain → hasUnread=false. Same posture as MarkVoicemailReadAsync: flag-gated,
 /// 200→DTO, 404→null, 502/non-2xx→null (keep optimistic flip), no auto-retry.
 /// </summary>
@@ -299,14 +299,14 @@ public async Task<SmsThreadDto?> MarkSmsThreadReadAsync(
 }
 ```
 
-> Ensure the file's `using`s include `System.Net`, `System.Net.Http.Json`. The `RotaryPhoneAuthHandler` already rides this client's `HttpClient` (GV-1) — the POSTs carry `X-RotaryPhone-Auth` automatically when `RotaryPhone:Gv:AuthKey` is set (ADR-023 §7). No new auth wiring.
+> Ensure the file's `using`s include `System.Net`, `System.Net.Http.Json`. The `RotaryPhoneAuthHandler` already rides this client's `HttpClient` (GV-1) — the POSTs carry `X-RotaryPhone-Auth` automatically when `RotaryPhone:Gv:AuthKey` is set (ADR-024 §7). No new auth wiring.
 
 - [ ] **Step 4: Run tests + commit**
 
 ```bash
 dotnet test tests/Radio.Web.Tests --configuration Release --filter "FullyQualifiedName~GvBridgeApiServiceVoicemailSmsTests"
 git add src/Radio.Web/Services/ApiClients/GvBridgeApiService.cs tests/Radio.Web.Tests/Services/GvBridgeApiServiceVoicemailSmsTests.cs
-git commit -m "feat(web): wire GV mark-read routes (voicemail + sms thread) with 404/502/no-retry posture (ADR-023)"
+git commit -m "feat(web): wire GV mark-read routes (voicemail + sms thread) with 404/502/no-retry posture (ADR-024)"
 ```
 
 ---
@@ -319,7 +319,7 @@ git commit -m "feat(web): wire GV mark-read routes (voicemail + sms thread) with
 - Modify: `src/Radio.Web/Services/PhoneHubService.cs`
 - Test: `tests/Radio.Web.Tests/Services/PhoneHubServiceTests.cs` (extend the GV-1 file; if none exists, create it)
 
-> ADR-023 §4 / §8.3. The event goes on `PhoneHubService` (the `/hub` `RotaryHub` consumer that already owns `GvVoicemailReceived`/`GvSmsReceived`) — **NOT** `GvTrunkHubService` (`/hubs/gvtrunk`, a different product; contract risk #2). Subscribe alongside the existing handlers. Defensive parse: unknown `Kind` (anything other than `"Voicemail"`/`"Sms"`) is ignored at `Debug`, never throws (ADR-023 §4.2). The de-dupe keying lives in `PhonePage` (Chunk 4) — `PhoneHubService` only surfaces the raw event.
+> ADR-024 §4 / §8.3. The event goes on `PhoneHubService` (the `/hub` `RotaryHub` consumer that already owns `GvVoicemailReceived`/`GvSmsReceived`) — **NOT** `GvTrunkHubService` (`/hubs/gvtrunk`, a different product; contract risk #2). Subscribe alongside the existing handlers. Defensive parse: unknown `Kind` (anything other than `"Voicemail"`/`"Sms"`) is ignored at `Debug`, never throws (ADR-024 §4.2). The de-dupe keying lives in `PhonePage` (Chunk 4) — `PhoneHubService` only surfaces the raw event.
 
 - [ ] **Step 1: Add the event declaration**
 
@@ -327,7 +327,7 @@ Alongside the existing `public event Action<VoicemailItemDto>? GvVoicemailReceiv
 
 ```csharp
 /// <summary>
-/// Fired when read-state changes from ANY source (ADR-023 §4). Path (a): our own
+/// Fired when read-state changes from ANY source (ADR-024 §4). Path (a): our own
 /// marks (ships with RotaryPhone's routes). Path (b): externally-originated flips —
 /// phone/GV-web reads — once RotaryPhone's poller-flip fast-follow lands (same event,
 /// no change here). Consumers MUST de-dupe by (id-or-threadId + isRead); RotaryPhone
@@ -343,7 +343,7 @@ Where GV-1 registered `_connection.On<VoicemailItemDto>("GvVoicemailReceived", �
 ```csharp
 _connection.On<ReadStateChangedDto>("ReadStateChanged", dto =>
 {
-  // Defensive: only Voicemail/Sms are known; ignore anything else (ADR-023 §4.2).
+  // Defensive: only Voicemail/Sms are known; ignore anything else (ADR-024 §4.2).
   if (dto is null ||
       (!string.Equals(dto.Kind, "Voicemail", StringComparison.OrdinalIgnoreCase) &&
        !string.Equals(dto.Kind, "Sms", StringComparison.OrdinalIgnoreCase)))
@@ -393,7 +393,7 @@ public void ReadStateChanged_IgnoresUnknownKind()
 ```bash
 dotnet test tests/Radio.Web.Tests --configuration Release --filter "FullyQualifiedName~PhoneHubServiceTests"
 git add src/Radio.Web/Services/PhoneHubService.cs tests/Radio.Web.Tests/Services/PhoneHubServiceTests.cs
-git commit -m "feat(web): subscribe ReadStateChanged on /hub (defensive Kind parse) (ADR-023)"
+git commit -m "feat(web): subscribe ReadStateChanged on /hub (defensive Kind parse) (ADR-024)"
 ```
 
 ---
@@ -406,7 +406,7 @@ git commit -m "feat(web): subscribe ReadStateChanged on /hub (defensive Kind par
 - Modify: `src/Radio.Web/Components/Pages/PhonePage.razor`
 - Test: `tests/Radio.Web.Tests/Services/ReadStateReconcilerTests.cs`
 
-> **ADR-023 §9 — the single most important thing to get right.** RotaryPhone broadcasts `ReadStateChanged` **unconditionally, including back to the originator.** So a single user mark produces (1) the mark route's returned DTO and (2) the echoed broadcast — and a 502 adds a third path (keep optimistic flip, reconcile on next list/poll/push). All three resolve to the SAME logical state, **keyed by `(id-or-threadId + isRead)`**. The reconciler MUST be idempotent on that key: applying `(target, isRead)` that is already applied is a no-op. Get this wrong and the badge flickers / double-applies / fights the optimistic flip. This is a first-class task with its own isolated test, decoupled from Blazor rendering so the invariant is verifiable in a plain unit test.
+> **ADR-024 §9 — the single most important thing to get right.** RotaryPhone broadcasts `ReadStateChanged` **unconditionally, including back to the originator.** So a single user mark produces (1) the mark route's returned DTO and (2) the echoed broadcast — and a 502 adds a third path (keep optimistic flip, reconcile on next list/poll/push). All three resolve to the SAME logical state, **keyed by `(id-or-threadId + isRead)`**. The reconciler MUST be idempotent on that key: applying `(target, isRead)` that is already applied is a no-op. Get this wrong and the badge flickers / double-applies / fights the optimistic flip. This is a first-class task with its own isolated test, decoupled from Blazor rendering so the invariant is verifiable in a plain unit test.
 
 > **Design:** extract the keying + idempotent-apply logic into a small static helper `ReadStateReconciler` (a plain class, no Blazor dependency) so it can be unit-tested in isolation. `PhonePage` holds the two domain lists (`_voicemails`, `_threads`) and calls the helper to compute "did this signal change anything?"; only a real change triggers `StateHasChanged` (so an echo of an already-applied mark is a silent no-op — no re-render, no flicker).
 
@@ -501,7 +501,7 @@ using Radio.Web.Models;
 namespace Radio.Web.Services;
 
 /// <summary>
-/// Idempotent read-state reconciliation keyed by (id-or-threadId + isRead) — ADR-023 §9.
+/// Idempotent read-state reconciliation keyed by (id-or-threadId + isRead) — ADR-024 §9.
 /// RotaryPhone broadcasts ReadStateChanged UNCONDITIONALLY, including back to the
 /// originator, so every mark produces ≥2 signals (the mark route's returned DTO and the
 /// echoed broadcast); 502 adds a third "keep optimistic, reconcile later" path. All
@@ -524,7 +524,7 @@ public static class ReadStateReconciler
 
   /// <summary>
   /// Set thread {threadId} read-state. The event's isRead:true means "thread fully read"
-  /// → HasUnread = false (ADR-023 §4 payload note). Returns true iff something changed.
+  /// → HasUnread = false (ADR-024 §4 payload note). Returns true iff something changed.
   /// </summary>
   public static bool ApplyThread(List<SmsThreadDto> threads, string? threadId, bool isRead)
   {
@@ -582,7 +582,7 @@ Unsubscribe in `Dispose`: `PhoneHub.ReadStateChanged -= OnReadStateChanged;`.
 ```bash
 dotnet test tests/Radio.Web.Tests --configuration Release --filter "FullyQualifiedName~ReadStateReconcilerTests"
 git add src/Radio.Web/Services/ReadStateReconciler.cs src/Radio.Web/Components/Pages/PhonePage.razor tests/Radio.Web.Tests/Services/ReadStateReconcilerTests.cs
-git commit -m "feat(web): idempotent read-state reconciler keyed by (id-or-threadId + isRead) (ADR-023 §9)"
+git commit -m "feat(web): idempotent read-state reconciler keyed by (id-or-threadId + isRead) (ADR-024 §9)"
 ```
 
 ---
@@ -594,20 +594,20 @@ git commit -m "feat(web): idempotent read-state reconciler keyed by (id-or-threa
 **Files:**
 - Modify: `src/Radio.Web/Components/Pages/PhonePage.razor`
 
-> ADR-023 §2 / §8.4. GV-2 seeded read-state from `_locallyHeard` on every reload (`ApplyLocalHeard`) and GV-3 from `_locallyReadThreads` (`ApplyLocalRead`). Those made the local flip a **competing truth** that survived reload — exactly what ADR-023 §2.2 forbids. GV-4 removes that seeding: list endpoints are source-of-truth on (re)load. The per-circuit optimistic flip remains as a presentation-only bridge between tap and the authoritative response — but it is NOT replayed onto fresh list data. The voicemail-heard and thread-open seams now ALSO call the real mark route and reconcile from its returned DTO.
+> ADR-024 §2 / §8.4. GV-2 seeded read-state from `_locallyHeard` on every reload (`ApplyLocalHeard`) and GV-3 from `_locallyReadThreads` (`ApplyLocalRead`). Those made the local flip a **competing truth** that survived reload — exactly what ADR-024 §2.2 forbids. GV-4 removes that seeding: list endpoints are source-of-truth on (re)load. The per-circuit optimistic flip remains as a presentation-only bridge between tap and the authoritative response — but it is NOT replayed onto fresh list data. The voicemail-heard and thread-open seams now ALSO call the real mark route and reconcile from its returned DTO.
 
 - [ ] **Step 1: Remove the UI-local seeding from the list loads**
 
 In `LoadVoicemailsAsync`, replace `_voicemails = ApplyLocalHeard(list.Items.ToList());` with:
 
 ```csharp
-_voicemails = list.Items.ToList();   // list endpoint is source-of-truth (ADR-023 §2)
+_voicemails = list.Items.ToList();   // list endpoint is source-of-truth (ADR-024 §2)
 ```
 
 Delete the `ApplyLocalHeard` method and the `_locallyHeard` field. In `LoadThreadsAsync`, replace `_threads = ApplyLocalRead(list.Threads.ToList());` with:
 
 ```csharp
-_threads = list.Threads.ToList();    // hasUnread is source-of-truth (ADR-023 §2)
+_threads = list.Threads.ToList();    // hasUnread is source-of-truth (ADR-024 §2)
 ```
 
 Delete the `ApplyLocalRead` method and the `_locallyReadThreads` field.
@@ -685,7 +685,7 @@ private async Task OpenThreadAsync(string threadId)
 ```bash
 dotnet build src/Radio.Web --configuration Release
 git add src/Radio.Web/Components/Pages/PhonePage.razor
-git commit -m "feat(web): drop UI-local read-state seeding; mark seams write through + reconcile (ADR-023)"
+git commit -m "feat(web): drop UI-local read-state seeding; mark seams write through + reconcile (ADR-024)"
 ```
 
 ---
@@ -698,7 +698,7 @@ git commit -m "feat(web): drop UI-local read-state seeding; mark seams write thr
 - Modify: `src/Radio.Web/appsettings.json` (confirm only)
 - Modify: `src/Radio.Web/Components/Pages/VoicemailPlayer.razor` (GV-2 already calls the seam on open; confirm it passes `isRead: true` and renders no unread affordance)
 
-> ADR-023 §5 / §6. `RotaryPhone:Gv:MarkReadEnabled` was added (default `false`) by GV-2 Task 1 Step 4 — GV-4 does NOT add a third name or change the value. **No unread toggle in v1** (§6): `isRead:false` may `400 unread_unsupported` until RotaryPhone's live capture confirms it; keep any unread affordance hidden. The `isRead` parameter exists for forward-compat only.
+> ADR-024 §5 / §6. `RotaryPhone:Gv:MarkReadEnabled` was added (default `false`) by GV-2 Task 1 Step 4 — GV-4 does NOT add a third name or change the value. **No unread toggle in v1** (§6): `isRead:false` may `400 unread_unsupported` until RotaryPhone's live capture confirms it; keep any unread affordance hidden. The `isRead` parameter exists for forward-compat only.
 
 - [ ] **Step 1: Confirm the config flag (no edit unless missing)**
 
@@ -721,7 +721,7 @@ In `VoicemailPlayer.razor`, the GV-2 `MarkHeardOnceAsync` already calls `GvBridg
 ```bash
 dotnet build src/Radio.Web --configuration Release
 git add src/Radio.Web/appsettings.json src/Radio.Web/Components/Pages/VoicemailPlayer.razor
-git commit -m "feat(web): single write path for voicemail mark-read; no unread toggle (ADR-023 §6)"
+git commit -m "feat(web): single write path for voicemail mark-read; no unread toggle (ADR-024 §6)"
 ```
 
 ---
@@ -734,7 +734,7 @@ git commit -m "feat(web): single write path for voicemail mark-read; no unread t
 - Modify: `design/FUTURE-WORK.md`
 - Modify: `design/INTEGRATIONS.md`
 
-- [ ] **Step 1: FUTURE-WORK** — replace the GV-2/GV-3 "mark-read seam wired-but-no-op / GV mark-read requested from RotaryPhone" entries with the shipped state: **mark-read is now durable (GV write-through, ADR-023)** behind `RotaryPhone:Gv:MarkReadEnabled` (default off). It lights up when RotaryPhone's owner-HELD build deploys (flip the flag in `appsettings.Production.json` — deploy overwrites `appsettings.json`). Record the two deferred/external items as informational (not blocking):
+- [ ] **Step 1: FUTURE-WORK** — replace the GV-2/GV-3 "mark-read seam wired-but-no-op / GV mark-read requested from RotaryPhone" entries with the shipped state: **mark-read is now durable (GV write-through, ADR-024)** behind `RotaryPhone:Gv:MarkReadEnabled` (default off). It lights up when RotaryPhone's owner-HELD build deploys (flip the flag in `appsettings.Production.json` — deploy overwrites `appsettings.json`). Record the two deferred/external items as informational (not blocking):
   - **Unread support** — `isRead:false` may `400 unread_unsupported` until RotaryPhone's live capture confirms it; UI toggle stays hidden. One UI change when they confirm, no contract change.
   - **Path (b) — phone→kiosk LIVE push** — RotaryPhone's poller-flip fast-follow. Until it ships, phone-side reads reconcile on our **next list refresh / poll**, not as an instant push. SAME `ReadStateChanged` handler covers both — no GV-4-side change when it lands.
 
@@ -744,7 +744,7 @@ git commit -m "feat(web): single write path for voicemail mark-read; no unread t
 
 ```bash
 git add design/FUTURE-WORK.md design/INTEGRATIONS.md
-git commit -m "docs: GV mark-read now durable (GV write-through); document routes/event/flags (ADR-023)"
+git commit -m "docs: GV mark-read now durable (GV write-through); document routes/event/flags (ADR-024)"
 ```
 
 ---
@@ -773,11 +773,11 @@ git commit -m "docs: GV mark-read now durable (GV write-through); document route
 9. **Music never pauses / no modal** on any mark or `ReadStateChanged` (unchanged hard rule from ADR-022 §6.1).
 
 **Self-review checklist (Planner ran):**
-- The de-dupe invariant is a first-class, isolated, unit-tested helper (`ReadStateReconciler`), keyed by `(id-or-threadId + isRead)` (ADR-023 §9). Returned DTO + echoed broadcast + 502-deferred reconcile all collapse to one badge state with no flicker.
+- The de-dupe invariant is a first-class, isolated, unit-tested helper (`ReadStateReconciler`), keyed by `(id-or-threadId + isRead)` (ADR-024 §9). Returned DTO + echoed broadcast + 502-deferred reconcile all collapse to one badge state with no flicker.
 - Client: `200`→frozen DTO, `404`→null, `502`/non-2xx→null with optimistic flip kept, **no client-side auto-retry** (one attempt per user action).
 - No local read-state store (no SQLite/JSON/localStorage/static dict); list endpoints' `isRead`/`hasUnread` are source-of-truth on reload (the GV-2 `_locallyHeard` / GV-3 `_locallyReadThreads` seeding is removed). Per-circuit optimistic flip is presentation-only.
 - `ReadStateChanged` is on `PhoneHubService` (`/hub`), NOT `GvTrunkHubService`; unknown `Kind` ignored defensively.
 - `RotaryPhone:Gv:MarkReadEnabled` is the single in-tree flag name (no third name), default off; distinct from RotaryPhone's server-side `EnableMarkRead`. No new auth key — reuses `RotaryPhone:Gv:AuthKey` via the existing `RotaryPhoneAuthHandler` (prefix gate auto-covers).
-- No unread toggle (hidden — §6). `// UI-LOCAL only` comment corrected to `// authoritative (GV write-through); ADR-023`.
+- No unread toggle (hidden — §6). `// UI-LOCAL only` comment corrected to `// authoritative (GV write-through); ADR-024`.
 - Builds behind `MarkReadEnabled=false` against the STABLE contract now; functions once RotaryPhone deploys (owner-HELD). Path (b) is their fast-follow — same handler, no GV-4-side change.
 - All literal code emitted; no `TBD`, no "similar to Task N" placeholders.

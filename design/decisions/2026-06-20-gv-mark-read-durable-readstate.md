@@ -1,6 +1,6 @@
 # ADR: GV Mark-Read / Durable Read-State — GV write-through (supersedes ADR-022 D4)
 
-- **ID:** ADR-023 (see `design/DECISION-LOG.md` for the one-line pointer)
+- **ID:** ADR-024 (see `design/DECISION-LOG.md` for the one-line pointer)
 - **Status:** Accepted (Architect — ready for Planner; GV-4 builds now against stable shapes behind our flag)
 - **Date:** 2026-06-20
 - **Author:** Architect
@@ -29,7 +29,7 @@ This is **not** a new integration — it extends the same files ADR-022 already 
 
 ### 2.1 Why this supersedes ADR-022 D4
 
-| | ADR-022 D4 (superseded) | ADR-023 (this decision) |
+| | ADR-022 D4 (superseded) | ADR-024 (this decision) |
 |---|---|---|
 | Persistence | UI-local, session-ephemeral | GV write-through; Google is source of truth |
 | Survives reload | No | Yes — list endpoints return durable `isRead`/`hasUnread` |
@@ -47,7 +47,7 @@ Because Google is the single source of truth and RotaryPhone keeps no store, **R
 - The only in-memory state is the **per-circuit optimistic flip** the component holds between a user tap and the authoritative response — and even that is overwritten by the returned DTO / next list fetch / `ReadStateChanged` push. It is presentation, not persistence.
 - On (re)load, the badge state is **whatever the list endpoint returns.** Never seed it from a cached local value.
 
-This keeps the `IsRead` / `HasUnread` fields in the ADR-022 DTOs (`VoicemailItemDto`, `SmsThreadDto`) exactly as they are — but their **semantics change**: the ADR-022 doc-comment `// UI-LOCAL only — GV mark-read not in v1` on `VoicemailItemDto.IsRead` is now **false** and must be corrected to `// authoritative (GV write-through); see ADR-023`.
+This keeps the `IsRead` / `HasUnread` fields in the ADR-022 DTOs (`VoicemailItemDto`, `SmsThreadDto`) exactly as they are — but their **semantics change**: the ADR-022 doc-comment `// UI-LOCAL only — GV mark-read not in v1` on `VoicemailItemDto.IsRead` is now **false** and must be corrected to `// authoritative (GV write-through); see ADR-024`.
 
 ---
 
@@ -199,7 +199,7 @@ All changes are additive to files ADR-022 already established. **No new topology
    - Both behind `RotaryPhone:Gv:MarkReadEnabled`; `200`→DTO, `404`→null, `502`/non-2xx→null (keep optimistic flip, no auto-retry).
 2. **`ReadStateChangedDto` (new record in `ApiModels.cs`):** `{ string Kind, string? Id, string? ThreadId, bool IsRead, DateTime ChangedAtUtc }`. Defensive — unknown `kind` ignored.
 3. **`PhoneHubService` (extend, existing file):** add `.On<ReadStateChangedDto>("ReadStateChanged", …)` on the **existing `/hub` connection** + an `event Action<ReadStateChangedDto>? ReadStateChanged` the Voicemail/Texts components subscribe to. Handler is idempotent, **keyed by `(id-or-threadId + isRead)`**. Place it on `PhoneHubService` specifically (the `/hub` consumer), **not** `GvTrunkHubService`.
-4. **Drop UI-local read-state behavior:** remove any session-persistent / cached read flag; treat list-endpoint `isRead`/`hasUnread` as source-of-truth on (re)load. Correct the now-false `// UI-LOCAL only` comment on `VoicemailItemDto.IsRead` (and any equivalent on the SMS side) → `// authoritative (GV write-through); ADR-023`. Per-circuit optimistic flip is the only allowed in-memory state.
+4. **Drop UI-local read-state behavior:** remove any session-persistent / cached read flag; treat list-endpoint `isRead`/`hasUnread` as source-of-truth on (re)load. Correct the now-false `// UI-LOCAL only` comment on `VoicemailItemDto.IsRead` (and any equivalent on the SMS side) → `// authoritative (GV write-through); ADR-024`. Per-circuit optimistic flip is the only allowed in-memory state.
 5. **Config:** add `RotaryPhone:Gv:MarkReadEnabled` (default `false`, `appsettings.json`; flip per-machine in `appsettings.Production.json` when RotaryPhone deploys). No new auth key — reuses `RotaryPhone:Gv:AuthKey` seam from ADR-022 §8.
 6. **UI wiring (Designer/Planner):** voicemail "mark heard" and SMS thread "mark read" affordances call the seam; on success reconcile from the returned DTO; on `502` keep the optimistic flip and let reconcile fix it. **No unread toggle** (hidden — §6). New arrival / badge interaction is unchanged from ADR-022 §6.1 (never steal screen / pause audio).
 
@@ -220,7 +220,7 @@ All changes are additive to files ADR-022 already established. **No new topology
 GV-2 ships the flagged no-op `MarkVoicemailReadAsync` seam + "UI-local mark-heard" **before** these routes are live. **Verdict: GV-2 stays forward-compatible — no plan change required, provided one guardrail holds.**
 
 - **Compatible as-is:** GV-2's seam is the exact anchor GV-4 repoints. The flag (`MarkReadEnabled` off) keeping it a no-op is correct. Session-ephemeral optimistic flip is fine and is what GV-4 keeps.
-- **The one guardrail (must hold):** GV-2 must **not** build a *persistent* local read-state store — no SQLite table, no JSON file, no `localStorage`, no static/singleton dictionary that survives reload/circuit. ADR-022 D4 said "UI-local state only," which is ambiguous between "session-ephemeral" (fine) and "persisted locally" (would become a competing truth GV-4 must rip out). **Planner action:** confirm GV-2's plan implements the optimistic flip as **per-circuit/in-memory only**. If GV-2's plan already says session-ephemeral / in-memory, **no change**. If it is silent or leans toward persistence, add a one-line constraint: *"read-state optimistic flip is in-memory per circuit; do NOT persist — superseded by ADR-023 GV write-through."*
+- **The one guardrail (must hold):** GV-2 must **not** build a *persistent* local read-state store — no SQLite table, no JSON file, no `localStorage`, no static/singleton dictionary that survives reload/circuit. ADR-022 D4 said "UI-local state only," which is ambiguous between "session-ephemeral" (fine) and "persisted locally" (would become a competing truth GV-4 must rip out). **Planner action:** confirm GV-2's plan implements the optimistic flip as **per-circuit/in-memory only**. If GV-2's plan already says session-ephemeral / in-memory, **no change**. If it is silent or leans toward persistence, add a one-line constraint: *"read-state optimistic flip is in-memory per circuit; do NOT persist — superseded by ADR-024 GV write-through."*
 - Net: GV-2 needs **at most a one-line clarifying constraint**, likely **none**. It does not need rework, and it can ship before GV-4.
 
 ---

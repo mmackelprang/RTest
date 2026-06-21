@@ -351,7 +351,7 @@ Shared directory: `/opt/radio-console/{api,web,data,logs}`
 
 ---
 
-## ADR-023: GV Mark-Read / Durable Read-State — GV write-through (supersedes ADR-022 D4)
+## ADR-024: GV Mark-Read / Durable Read-State — GV write-through (supersedes ADR-022 D4)
 
 **Date:** 2026-06-20
 **Status:** Accepted (Architect)
