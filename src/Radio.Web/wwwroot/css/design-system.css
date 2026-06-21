@@ -5306,13 +5306,17 @@ body {
 
 .phone-mode-selector {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  /* Four segments (All / Voicemail / Texts / Calls). Must stay a single row —
+     a fixed 3-column grid wrapped the 4th (Calls) onto an implicit 2nd row that
+     overflowed the fixed height and overlapped the feed, making Calls unclickable
+     at 1920×720. min-height (not height) lets the bar size to its one row. */
+  grid-template-columns: repeat(4, 1fr);
   gap: 0;
   background: var(--surface-inset);
   border: 1px solid var(--surface-separator);
   border-radius: 8px;
   padding: 3px;
-  height: 40px;
+  min-height: 40px;
 }
 .phone-mode-btn {
   background: transparent;
