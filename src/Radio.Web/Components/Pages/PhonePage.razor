@@ -79,6 +79,7 @@
                           OnVoicemailHeard="OnVoicemailHeard"
                           OnRetryThreads="LoadThreadsAsync"
                           OnOpenThread="OpenThreadAsync"
+                          OnCloseThread="CloseThreadAsync"
                           OnOptimisticAppend="OnOptimisticAppend" />
     }
     else if (_activeTab == "dashboard")
@@ -511,6 +512,17 @@
     var messages = await GvBridgeApi.GetSmsThreadMessagesAsync(threadId);
     _openThreadMessages = messages?.Messages.ToList() ?? new();
     PhoneUnread.Set(UnreadSum);
+    await InvokeAsync(StateHasChanged);
+  }
+
+  // Conversation closed (Back). Clear the open-thread state the page owns so a
+  // later inbound for this thread is treated as closed (toast + bump, not a silent
+  // append/de-dupe against a list that's no longer shown). Re-opening the thread
+  // re-fetches its messages via OpenThreadAsync.
+  private async Task CloseThreadAsync()
+  {
+    _openThreadId = null;
+    _openThreadMessages = null;
     await InvokeAsync(StateHasChanged);
   }
 

@@ -143,7 +143,7 @@
           <div class="empty-state">
             <RadzenIcon Icon="cloud_off" class="empty-state-icon" />
             <div class="empty-state-text">Couldn't load messages.</div>
-            <button type="button" class="phone-btn-sm" @onclick="OnRetryVoicemail">Retry</button>
+            <button type="button" class="phone-btn-sm" @onclick="RetryFeed">Retry</button>
           </div>
         }
         else if (_feed is { Count: 0 })
@@ -185,7 +185,7 @@
                          Messages="OpenThreadMessages"
                          HeaderName="@OpenThreadName"
                          HeaderNumber="@OpenThreadNumber"
-                         OnBack="@(() => _openThreadId = null)"
+                         OnBack="CloseThread"
                          OnOptimisticAppend="OnOptimisticAppend" />
       }
       else if (_selectedCall == null)
@@ -262,6 +262,7 @@
   [Parameter] public List<SmsMessageDto>? OpenThreadMessages { get; set; }
   [Parameter] public EventCallback OnRetryThreads { get; set; }
   [Parameter] public EventCallback<string> OnOpenThread { get; set; }   // threadId → parent loads messages + marks read
+  [Parameter] public EventCallback OnCloseThread { get; set; }          // back → parent clears _openThreadId + _openThreadMessages
   [Parameter] public EventCallback<SmsMessageDto> OnOptimisticAppend { get; set; }
 
   private string _filter = "all";
@@ -284,6 +285,18 @@
     _openThreadId = threadId;
     _selectedCall = null;                          // texts + calls share the detail pane
     await OnOpenThread.InvokeAsync(threadId);       // parent loads messages, marks thread read
+  }
+
+  // Back out of the open conversation. Clear BOTH the panel's open-thread flag and
+  // the parent's: the parent owns _openThreadId / _openThreadMessages, and if its
+  // copy stayed stale a later inbound for this thread would (a) match the
+  // optimistic de-dupe against a list no longer shown and (b) be dropped instead of
+  // toasted (its threadOpen check ANDs the parent flag with the panel's, which the
+  // panel just cleared). Clearing the parent keeps the two in sync.
+  private async Task CloseThread()
+  {
+    _openThreadId = null;
+    await OnCloseThread.InvokeAsync();
   }
 
   private SmsThreadDto? OpenThreadData =>
@@ -362,6 +375,15 @@
   private bool FeedError =>
     CallHistory == null && Voicemails == null && Threads == null
     && (VoicemailError || ThreadsError);
+
+  // The "All" error can come from voicemail OR threads (FeedError ORs both), so
+  // Retry must re-fetch both — retrying only one leaves the other source stuck
+  // until the next poll/manual refresh.
+  private async Task RetryFeed()
+  {
+    await OnRetryVoicemail.InvokeAsync();
+    await OnRetryThreads.InvokeAsync();
+  }
 
   // ── Voicemail accordion + heard handlers ──────────────────────────────────
   private void ToggleVoicemail(string id)
