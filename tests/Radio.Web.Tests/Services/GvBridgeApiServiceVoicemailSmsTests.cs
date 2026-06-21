@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -15,6 +16,18 @@ public class GvBridgeApiServiceVoicemailSmsTests
   private static GvBridgeApiService CreateService(HttpClient client) =>
     new(client, NullLogger<GvBridgeApiService>.Instance,
       new ConfigurationBuilder().Build());
+
+  // GV-4: mark-read routes are gated on RotaryPhone:Gv:MarkReadEnabled; this builds
+  // a service with that flag set so the flag-on/flag-off paths are both exercised.
+  private static GvBridgeApiService BuildSvc(MockHttpHandler handler, bool markReadEnabled)
+  {
+    var client = new HttpClient(handler) { BaseAddress = new Uri("http://radio:5004") };
+    var config = new ConfigurationBuilder()
+      .AddInMemoryCollection(new Dictionary<string, string?>
+        { ["RotaryPhone:Gv:MarkReadEnabled"] = markReadEnabled.ToString() })
+      .Build();
+    return new GvBridgeApiService(client, NullLogger<GvBridgeApiService>.Instance, config);
+  }
 
   [Fact]
   public async Task GetVoicemailsAsync_ReturnsList()
@@ -94,59 +107,81 @@ public class GvBridgeApiServiceVoicemailSmsTests
   [Fact]
   public async Task MarkVoicemailReadAsync_NoOps_WhenFlagOff()
   {
-    // No HTTP call should be made; returns false (not-persisted).
-    var handler = new MockHttpHandler("{}");  // would 200 if called
-    var client = new HttpClient(handler) { BaseAddress = new Uri("http://radio:5004") };
-    var config = new ConfigurationBuilder()
-      .AddInMemoryCollection(new Dictionary<string, string?>
-        { ["RotaryPhone:Gv:MarkReadEnabled"] = "false" })
-      .Build();
-    var svc = new GvBridgeApiService(client,
-      NullLogger<GvBridgeApiService>.Instance, config);
+    var handler = new MockHttpHandler("{}");
+    var svc = BuildSvc(handler, markReadEnabled: false);
 
     var result = await svc.MarkVoicemailReadAsync("vm1");
 
-    Assert.False(result);
-    Assert.Equal(0, handler.RequestCount);  // never hit the network
+    Assert.Null(result);                  // no DTO when flag off
+    Assert.Equal(0, handler.RequestCount); // never hit the network
   }
 
   [Fact]
-  public async Task MarkVoicemailReadAsync_PostsAndReturnsTrue_WhenFlagOn()
+  public async Task MarkVoicemailReadAsync_ReturnsDto_On200_WhenFlagOn()
   {
-    // Forward-compat seam (GV-4): with the flag ON it POSTs the mark-read route
-    // and returns success. Guards the wire path that lights up when RotaryPhone
-    // ships the endpoint.
-    var handler = new MockHttpHandler("{}");  // 200 OK by default
-    var client = new HttpClient(handler) { BaseAddress = new Uri("http://radio:5004") };
-    var config = new ConfigurationBuilder()
-      .AddInMemoryCollection(new Dictionary<string, string?>
-        { ["RotaryPhone:Gv:MarkReadEnabled"] = "true" })
-      .Build();
-    var svc = new GvBridgeApiService(client,
-      NullLogger<GvBridgeApiService>.Instance, config);
+    // Frozen VoicemailItemDto read shape (ADR-024 §3.1).
+    const string body = """
+      { "id":"vm1","threadId":"t1","fromNumber":"+15551234567","fromName":"Jane",
+        "receivedAt":"2026-06-20T18:03:11Z","durationSeconds":42,"isRead":true,
+        "transcript":"hi","audioUrl":"/api/gvbridge/voicemail/vm1/audio" }
+      """;
+    var handler = new MockHttpHandler(body);   // 200 OK
+    var svc = BuildSvc(handler, markReadEnabled: true);
 
-    var result = await svc.MarkVoicemailReadAsync("vm1");
+    var dto = await svc.MarkVoicemailReadAsync("vm1");
 
-    Assert.True(result);
-    Assert.Equal(1, handler.RequestCount);  // exactly one POST
+    Assert.NotNull(dto);
+    Assert.True(dto!.IsRead);
+    Assert.Equal("vm1", dto.Id);
+    Assert.Equal(1, handler.RequestCount);
   }
 
   [Fact]
-  public async Task MarkVoicemailReadAsync_ReturnsFalse_NeverThrows_OnError()
+  public async Task MarkVoicemailReadAsync_ReturnsNull_On404_WhenFlagOn()
   {
-    // Fire-and-forget: a non-2xx (or a thrown send) must surface as a silent
-    // false, never an exception that could disturb the UI's optimistic flip.
-    var handler = new MockHttpHandler(statusCode: System.Net.HttpStatusCode.BadGateway);
-    var client = new HttpClient(handler) { BaseAddress = new Uri("http://radio:5004") };
-    var config = new ConfigurationBuilder()
-      .AddInMemoryCollection(new Dictionary<string, string?>
-        { ["RotaryPhone:Gv:MarkReadEnabled"] = "true" })
-      .Build();
-    var svc = new GvBridgeApiService(client,
-      NullLogger<GvBridgeApiService>.Instance, config);
+    var handler = new MockHttpHandler(statusCode: HttpStatusCode.NotFound);
+    var svc = BuildSvc(handler, markReadEnabled: true);
 
-    var result = await svc.MarkVoicemailReadAsync("vm1");
+    Assert.Null(await svc.MarkVoicemailReadAsync("gone"));
+  }
 
-    Assert.False(result);
+  [Fact]
+  public async Task MarkVoicemailReadAsync_ReturnsNull_On502_NoRetry_WhenFlagOn()
+  {
+    // 502 = GV unreachable. Caller keeps the optimistic flip; client never auto-retries.
+    var handler = new MockHttpHandler(statusCode: HttpStatusCode.BadGateway);
+    var svc = BuildSvc(handler, markReadEnabled: true);
+
+    Assert.Null(await svc.MarkVoicemailReadAsync("vm1"));
+    Assert.Equal(1, handler.RequestCount);  // exactly one attempt, no retry
+  }
+
+  [Fact]
+  public async Task MarkSmsThreadReadAsync_ReturnsDto_On200_WhenFlagOn()
+  {
+    // Frozen SmsThreadDto read shape (ADR-024 §3.2).
+    const string body = """
+      { "threadId":"t1","counterpartyNumber":"+15551234567","counterpartyName":"Mom",
+        "lastMessageAt":"2026-06-20T18:03:11Z","hasUnread":false,"lastMessagePreview":"ok" }
+      """;
+    var handler = new MockHttpHandler(body);
+    var svc = BuildSvc(handler, markReadEnabled: true);
+
+    var dto = await svc.MarkSmsThreadReadAsync("t1");
+
+    Assert.NotNull(dto);
+    Assert.False(dto!.HasUnread);
+    Assert.Equal("t1", dto.ThreadId);
+    Assert.Equal(1, handler.RequestCount);
+  }
+
+  [Fact]
+  public async Task MarkSmsThreadReadAsync_NoOps_WhenFlagOff()
+  {
+    var handler = new MockHttpHandler("{}");
+    var svc = BuildSvc(handler, markReadEnabled: false);
+
+    Assert.Null(await svc.MarkSmsThreadReadAsync("t1"));
+    Assert.Equal(0, handler.RequestCount);
   }
 }

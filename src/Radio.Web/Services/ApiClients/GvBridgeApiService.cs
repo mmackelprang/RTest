@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -139,29 +140,45 @@ public class GvBridgeApiService
   }
 
   /// <summary>
-  /// FLAGGED SEAM (decision 4). v1 read-state is UI-local; there is no GV
-  /// mark-read endpoint yet. When RotaryPhone ships POST
-  /// /api/gvbridge/voicemail/{id}/read, flip RotaryPhone:Gv:MarkReadEnabled=true
-  /// and this becomes the wire call. Today it is a silent no-op returning false
-  /// (not persisted) — the caller has ALREADY flipped the row heard locally, so a
-  /// no-op must never disturb that. Fire-and-forget; never throws.
+  /// Mark a voicemail read via GV write-through (ADR-024 §3.1 / §5). Google is the
+  /// single source of truth; the returned DTO is authoritative — reconcile the badge
+  /// from it. Gated on RotaryPhone:Gv:MarkReadEnabled (in-tree consumer flag; distinct
+  /// from RotaryPhone's server-side EnableMarkRead build flag). Flag off → silent no-op
+  /// returning null (the caller has ALREADY flipped the row read optimistically; a no-op
+  /// must never disturb that). 200 → DTO; 404 → null (item gone); 502/non-2xx → null but
+  /// the caller KEEPS the optimistic flip and reconciles on the next list/poll/push.
+  /// NEVER auto-retries — one attempt per user action (a UI-driven retry is the right place).
+  /// v1 callers pass isRead: true only (§6 — unread may 400 unread_unsupported).
   /// </summary>
-  public async Task<bool> MarkVoicemailReadAsync(string id, CancellationToken ct = default)
+  public async Task<VoicemailItemDto?> MarkVoicemailReadAsync(
+    string id, bool isRead = true, CancellationToken ct = default)
   {
     if (!_configuration.GetValue("RotaryPhone:Gv:MarkReadEnabled", false))
     {
-      return false;  // UI-local only in v1
+      return null;  // UI-local optimistic flip already applied by the caller
     }
     try
     {
-      var response = await _httpClient.PostAsync(
-        $"/api/gvbridge/voicemail/{Uri.EscapeDataString(id)}/read", null, ct);
-      return response.IsSuccessStatusCode;
+      var response = await _httpClient.PostAsJsonAsync(
+        $"/api/gvbridge/voicemail/{Uri.EscapeDataString(id)}/read",
+        new { isRead }, ct);
+
+      if (response.StatusCode == HttpStatusCode.NotFound)
+      {
+        return null;   // item gone
+      }
+      if (!response.IsSuccessStatusCode)
+      {
+        // 502 = GV unreachable. Keep the optimistic flip; reconcile later. No retry.
+        _logger.LogError("Mark-read voicemail {Id} failed: {Status}", id, (int)response.StatusCode);
+        return null;
+      }
+      return await response.Content.ReadFromJsonAsync<VoicemailItemDto>(JsonOptions, ct);
     }
     catch (Exception ex)
     {
-      _logger.LogDebug(ex, "Mark-read failed for voicemail {Id} (non-fatal)", id);
-      return false;
+      _logger.LogError(ex, "Mark-read voicemail {Id} threw (non-fatal); optimistic flip kept", id);
+      return null;
     }
   }
 
@@ -194,6 +211,42 @@ public class GvBridgeApiService
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to get GV SMS thread {ThreadId}", threadId);
+      return null;
+    }
+  }
+
+  /// <summary>
+  /// Mark a whole SMS thread read via GV write-through (ADR-024 §3.2 / §5). Per-thread
+  /// grain → hasUnread=false. Same posture as MarkVoicemailReadAsync: flag-gated,
+  /// 200→DTO, 404→null, 502/non-2xx→null (keep optimistic flip), no auto-retry.
+  /// </summary>
+  public async Task<SmsThreadDto?> MarkSmsThreadReadAsync(
+    string threadId, bool isRead = true, CancellationToken ct = default)
+  {
+    if (!_configuration.GetValue("RotaryPhone:Gv:MarkReadEnabled", false))
+    {
+      return null;
+    }
+    try
+    {
+      var response = await _httpClient.PostAsJsonAsync(
+        $"/api/gvbridge/sms/threads/{Uri.EscapeDataString(threadId)}/read",
+        new { isRead }, ct);
+
+      if (response.StatusCode == HttpStatusCode.NotFound)
+      {
+        return null;
+      }
+      if (!response.IsSuccessStatusCode)
+      {
+        _logger.LogError("Mark-read thread {ThreadId} failed: {Status}", threadId, (int)response.StatusCode);
+        return null;
+      }
+      return await response.Content.ReadFromJsonAsync<SmsThreadDto>(JsonOptions, ct);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Mark-read thread {ThreadId} threw (non-fatal); optimistic flip kept", threadId);
       return null;
     }
   }
