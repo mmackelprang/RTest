@@ -343,6 +343,24 @@ builder.Services.AddHttpClient<GvBridgeApiService>(client =>
   return handler;
 });
 
+// GV Bridge SMS send client (same RotaryPhone service). Isolated from the read
+// client so the only write path is obvious and trivial to light up — it's the
+// flagged send seam (ADR-022 D7). Carries the same auth handler as the other
+// radio:5004 clients so the X-RotaryPhone-Auth gate stays consistent.
+builder.Services.AddHttpClient<GvBridgeSendService>(client =>
+{
+  client.BaseAddress = new Uri(phoneApiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(10);
+})
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
+.AddHttpMessageHandler<Radio.Web.Services.Http.RotaryPhoneAuthHandler>()
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
+});
+
 // GV Trunk API client (same RotaryPhone service). Carries the RotaryPhoneAuthHandler
 // too so the X-RotaryPhone-Auth seam is consistent across every radio:5004 client
 // — when the gate flips on, all four clients authenticate, not just GV Bridge/Phone.
