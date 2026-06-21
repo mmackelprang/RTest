@@ -5526,3 +5526,15 @@ body {
 .phone-rail-sub .phone-rail-label { padding-left: var(--sp-3); font-size: 13px; }
 .phone-rail-tab { position: relative; }
 .phone-rail-tab .nav-badge { position: absolute; top: 6px; right: 6px; }
+
+/* §Ph — Voicemail inline player (PR2) */
+.vm-player { padding: var(--sp-3) var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
+.vm-player-transport { display: flex; align-items: center; gap: var(--sp-3); }
+.vm-scrubber { flex: 1; padding: 11px 0; cursor: pointer; }   /* 3px bar + pad ≥24px hit area */
+.vm-time { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-medium); font-size: 13px; }
+.vm-buffering-note { font-family: var(--font-mono); font-size: 12px; color: var(--text-low); }
+.vm-player-error { display: flex; align-items: center; gap: var(--sp-2); color: var(--signal-red); }
+.vm-transcript-heading { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-low); margin-bottom: var(--sp-1); }
+.vm-transcript-body { color: var(--text-high); line-height: 1.5; }
+.vm-transcript-pending { color: var(--text-medium); font-style: italic; }
+.vm-transcript-absent { color: var(--text-low); }
