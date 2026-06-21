@@ -91,6 +91,7 @@ Consumes the Designer handoff (`docs/design-handoffs/HANDOFF-phone-messages-voic
 | GV-1 | [`pr1-foundation-ia-shell.md`](superpowers/plans/2026-06-20-gv-messages-pr1-foundation-ia-shell.md) | DTOs, `GvBridgeApiService` reads + absolute audio URL, `PhoneHubService` GV events, `GvBridgeStatusService`, auth-handler seam (OFF), config/DI, Messages-feed IA shell (calls folded in, missed-call badge). | — | `feat/gv-messages-pr1-foundation` |
 | GV-2 | [`pr2-voicemail-surface.md`](superpowers/plans/2026-06-20-gv-messages-pr2-voicemail-surface.md) | Voicemail rows + inline seekable player + transcript states + new-arrival + UI-local/flagged mark-read seam. | GV-1 | `feat/gv-messages-pr2-voicemail` |
 | GV-3 | [`pr3-texts-surface.md`](superpowers/plans/2026-06-20-gv-messages-pr3-texts-surface.md) | Thread list + conversation bubbles + `GvSmsReceived` + compose/keyboard (all flag-gated send) + open-thread-to-RotaryPhone deliverable. | GV-1 | `feat/gv-messages-pr3-texts` |
+| GV-4 | _plan deferred_ | Durable GV read-state: wire `MarkVoicemailReadAsync` + SMS-thread mark-read to RotaryPhone's `read` endpoints, subscribe to `ReadStateChanged` SignalR event, optimistic+reconcile, flip read-state flag ON. **⛔ ON HOLD** — blocked on RotaryPhone shipping the mark-read endpoints + ratifying the contract ([request prompt](file:///D:/prj/RotaryPhone/docs/prompts/radioconsole-gv-markread-readstate-request.md)); plan written once shapes are ratified. | GV-2, GV-3, **external: RotaryPhone** | _TBD_ |
 
 ### CI infrastructure — RTest appserver runner migration
 

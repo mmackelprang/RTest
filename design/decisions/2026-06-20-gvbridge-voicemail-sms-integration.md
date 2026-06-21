@@ -2,6 +2,7 @@
 
 - **ID:** ADR-022 (see `design/DECISION-LOG.md` for the one-line pointer)
 - **Status:** Proposed (Architect — ready for Designer + Planner)
+- **⚠ Partially superseded by [ADR-024](2026-06-20-gv-mark-read-durable-readstate.md) (2026-06-20):** read-state is now **durable via GV write-through**, not UI-local. ADR-024 supersedes this ADR's **read-state stance** — specifically the `// UI-LOCAL only — GV mark-read not in v1` note on `VoicemailItemDto.IsRead` (§4.2), the **§10 "Voicemail mark-read / delete — UI-local state only"** stub, and the **§12 open question #3**. **Note:** the "D4" in the §2 summary table is the *voicemail-audio-URL* decision and is **unaffected** — it still stands. Everything else in ADR-022 (boundary, audio URL, hub, status poll, send flag, config, auth seam) is unchanged. Read ADR-024 for the mark-read routes/event/de-dupe.
 - **Date:** 2026-06-20
 - **Author:** Architect
 - **Scope:** RadioConsole `Radio.Web` only. RadioConsole holds **no** Google credentials and never talks to Google. Everything flows through the separate RotaryPhone service (`gvbridge` API on `radio:5004`).
@@ -107,7 +108,7 @@ public record VoicemailItemDto(
     string? FromName,             // null → UI shows number / contact lookup
     DateTime ReceivedAt,         // UTC; format to local for display
     int DurationSeconds,         // 0 = unknown → do NOT render "0:00" as real
-    bool IsRead,                 // UI-LOCAL only — GV mark-read not in v1
+    bool IsRead,                 // SUPERSEDED by ADR-024: authoritative (GV write-through), NOT UI-local
     string? Transcript,          // null = pending/absent
     string AudioUrl);            // RELATIVE from server: "/api/gvbridge/voicemail/{id}/audio"
 
@@ -294,7 +295,7 @@ The boundary doc + RotaryPhone ADR plan an optional `X-RotaryPhone-Auth: <key>` 
 ## 10. What stays stubbed / flagged
 
 - **SMS send** — `GvBridgeSendService.SendAsync` throws `SendNotAvailableException` until `RotaryPhone:Gv:SendEnabled = true` **and** RotaryPhone's `POST /api/gvbridge/sms/send` ships. Compose UI built but flag-gated.
-- **Voicemail mark-read / delete** — **UI-local state only** in v1 (`IsRead` does not persist to Google). No GV-side endpoints. Document in `design/FUTURE-WORK.md`.
+- **Voicemail mark-read / delete** — ~~**UI-local state only** in v1 (`IsRead` does not persist to Google). No GV-side endpoints.~~ **SUPERSEDED by [ADR-024](2026-06-20-gv-mark-read-durable-readstate.md):** mark-read is now **durable via GV write-through** (routes ratified, built as GV-4 behind `RotaryPhone:Gv:MarkReadEnabled`). **Delete remains deferred.**
 - **Inter-service auth header** — seam built (`RotaryPhoneAuthHandler`, `RotaryPhone:Gv:AuthKey`), **OFF** today (empty key → no header). Lights up when the gate ships.
 - **`<audio>` + auth interaction** — if the audio endpoint ever becomes auth-required, D4 must change; raised as a contract dependency (§8.1).
 
@@ -326,7 +327,7 @@ The boundary doc + RotaryPhone ADR plan an optional `X-RotaryPhone-Auth: <key>` 
 
 1. **Audio endpoint + auth gate** — will RotaryPhone exempt `voicemail/{id}/audio` from `X-RotaryPhone-Auth`, or support a query-token? (Blocks nothing today; blocks D4 if the gate goes auth-required.) — for RotaryPhone owner.
 2. **`/api/gvbridge/status` exact fields** — confirm `SipRegistered`/`CookiesValid`/`Available` serialization so the degraded-state derivation is correct.
-3. **Heard/read persistence** — handoff confirms v1 UI-local; OK, or pull GV mark-read forward? — for the owner.
+3. **Heard/read persistence** — ~~handoff confirms v1 UI-local; OK, or pull GV mark-read forward?~~ **RESOLVED → pulled forward, durable.** See [ADR-024](2026-06-20-gv-mark-read-durable-readstate.md): GV write-through, Google is source of truth, no local store.
 4. **On-screen keyboard for compose** — Designer's call (touch kiosk); does not block the read experience or this ADR.
 
 ---

@@ -351,4 +351,32 @@ Shared directory: `/opt/radio-console/{api,web,data,logs}`
 
 ---
 
+## ADR-023: Pin SQLitePCLRaw 3.0.x to clear NU1903 (GHSA-2m69-gcr7-jv3q)
+
+**Date:** 2026-06-20
+**Status:** Accepted
+**Context:** `dotnet build -c Release` (and `deploy/Deploy-ToLinux.ps1`) failed solution-wide on **NU1903** / **GHSA-2m69-gcr7-jv3q** (CVE-2025-6965): `SQLitePCLRaw.lib.e_sqlite3` 2.1.11 ships SQLite < 3.50.2 (aggregate-term memory-corruption bug). With `NuGetAudit` (default on in .NET 10) + `TreatWarningsAsErrors`, the advisory is a build error across all ~16 SQLite-referencing projects. The advisory has **no patched 2.1.x release** — the 2.x `lib.e_sqlite3` line is deprecated. `Microsoft.Data.Sqlite` (even 10.0.9) only declares `bundle_e_sqlite3 (>= 2.1.11)`, which NuGet resolves to the vulnerable 2.1.11 floor, so a `Microsoft.Data.Sqlite` bump alone does **not** fix it.
+
+**Decision:** Add an explicit direct `PackageReference` to `SQLitePCLRaw.bundle_e_sqlite3` **3.0.3** and `SQLitePCLRaw.core` **3.0.3** in the four projects that directly reference `Microsoft.Data.Sqlite` (Radio.Configuration, Radio.Metrics, Radio.Fingerprinting, Radio.Infrastructure). The 3.0.x line replaces the deprecated `lib.e_sqlite3` with `SourceGear.sqlite3` (>= 3.50.4.5, i.e. SQLite past the 3.50.2 fix) and carries no advisory.
+
+**Alternatives considered:**
+- **Bump `Microsoft.Data.Sqlite` only** — rejected; its `>= 2.1.11` floor still resolves the vulnerable native lib.
+- **Targeted `NuGetAuditSuppress` for NU1903** — rejected; a real patched version exists (3.0.x), so suppression would have masked a genuinely fixable CVE. Reserved as fallback only if no patched version had existed.
+- **Global `NuGetAudit=false`** — rejected; disables auditing wholesale and hides future advisories.
+
+**Verification:** Full-solution `dotnet build -c Release` (NuGetAudit enabled, no override flags) → 0 errors, no NU1903. Resolved native dependency is `SourceGear.sqlite3` 3.50.4.5; `lib.e_sqlite3` no longer appears in any restore graph. Test suite green except pre-existing Windows-only (`libsamplerate.so.0`) and `Category=Integration` (live NWS API) failures, both unrelated and handled by CI.
+
+---
+
+## ADR-024: GV Mark-Read / Durable Read-State — GV write-through (supersedes ADR-022 D4)
+
+**Date:** 2026-06-20
+**Status:** Accepted (Architect)
+**Supersedes:** ADR-022's UI-local read-state stance (`VoicemailItemDto.IsRead` note, §10 mark-read stub, §12 open question #3).
+**Summary:** RotaryPhone ratified the durable mark-read contract. Read-state is now **GV write-through — Google is the single source of truth, no local read-state store on either side.** Two idempotent routes (`POST /api/gvbridge/voicemail/{id}/read`, `POST /api/gvbridge/sms/threads/{threadId}/read`), body `{ "isRead": bool }`, each returning the updated frozen DTO (`200` applied-or-no-op, `404` unknown, `502` upstream-GV — keep optimistic flip and reconcile). A unified `ReadStateChanged` event rides the existing `/hub` (broadcast unconditionally incl. originator → consumer de-dupes by `(id/threadId + isRead)`). Consumer delta (GV-4, behind `RotaryPhone:Gv:MarkReadEnabled` default-off, builds now): wire existing `MarkVoicemailReadAsync` + add `MarkSmsThreadReadAsync` on `GvBridgeApiService`, add `ReadStateChangedDto` + handler on `PhoneHubService`, drop UI-local read-state. Unread best-effort (v1 sends `isRead:true` only, toggle hidden). Auth: no new posture — covered by the existing `/api/gvbridge/*` prefix gate.
+
+**Full ADR:** [`design/decisions/2026-06-20-gv-mark-read-durable-readstate.md`](decisions/2026-06-20-gv-mark-read-durable-readstate.md)
+
+---
+
 <!-- NEW ENTRIES GO ABOVE THIS LINE -->
