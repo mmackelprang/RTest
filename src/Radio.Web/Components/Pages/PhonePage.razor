@@ -233,6 +233,7 @@
     PhoneHub.SystemStatusChanged += OnSystemStatusChanged;
     PhoneHub.GvVoicemailReceived += OnGvVoicemailReceived;
     PhoneHub.GvSmsReceived += OnGvSmsReceived;
+    PhoneHub.ReadStateChanged += OnReadStateChanged;
     GvTrunkHub.RegistrationChanged += OnRegistrationChanged;
 
     // GV Messages: bind to the shared status poll (reconnecting banner) and seed
@@ -381,6 +382,39 @@
     _gvBridgeAvailable = GvBridgeStatus.IsAvailable;
     PhoneUnread.Set(UnreadSum);
     _ = InvokeAsync(StateHasChanged);
+  }
+
+  // GV-4 (ADR-024 §9): the central join point for ALL THREE read-state signal paths —
+  // our own mark route's returned DTO, the echoed broadcast (RotaryPhone re-broadcasts
+  // unconditionally, including back to the originator), and the 502-deferred reconcile on
+  // the next list/poll. The reconciler is idempotent on (id-or-threadId + isRead): an echo
+  // of an already-applied mark is a no-op, so we skip StateHasChanged and never flicker.
+  private void OnReadStateChanged(ReadStateChangedDto dto)
+  {
+    if (_disposed) return;
+    var changed = false;
+
+    if (string.Equals(dto.Kind, "Voicemail", StringComparison.OrdinalIgnoreCase))
+    {
+      if (_voicemails != null)
+      {
+        changed = ReadStateReconciler.ApplyVoicemail(_voicemails, dto.Id, dto.IsRead);
+      }
+      // dto.ThreadId is informational here; no thread-badge bump needed for v1.
+    }
+    else if (string.Equals(dto.Kind, "Sms", StringComparison.OrdinalIgnoreCase))
+    {
+      if (_threads != null)
+      {
+        changed = ReadStateReconciler.ApplyThread(_threads, dto.ThreadId, dto.IsRead);
+      }
+    }
+
+    if (changed)                       // skip re-render on an echo of an already-applied mark
+    {
+      PhoneUnread.Set(UnreadSum);
+      _ = InvokeAsync(StateHasChanged);
+    }
   }
 
   // Messages refresh = re-fetch call history + voicemail + SMS threads (the
@@ -851,6 +885,7 @@
     PhoneHub.SystemStatusChanged -= OnSystemStatusChanged;
     PhoneHub.GvVoicemailReceived -= OnGvVoicemailReceived;
     PhoneHub.GvSmsReceived -= OnGvSmsReceived;
+    PhoneHub.ReadStateChanged -= OnReadStateChanged;
     GvTrunkHub.RegistrationChanged -= OnRegistrationChanged;
     GvBridgeStatus.StatusChanged -= OnGvStatusChanged;
   }
