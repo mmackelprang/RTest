@@ -84,20 +84,44 @@
           }
         }
       }
-      else
+      @if (_filter is "all" or "texts")
       {
-        @* PR2 (voicemail) / PR3 (texts) fill these filters; until then show empty. *@
+        @* PR3 — GV SMS thread rows. In "all" they sit below the call rows; in
+           "texts" they are the whole feed. PhoneTextsPanel renders the thread
+           list (loading / empty / error / loaded) when no thread is open. *@
+        <PhoneTextsPanel Threads="Threads"
+                         Loading="ThreadsLoading"
+                         Error="ThreadsError"
+                         Contacts="Contacts"
+                         SelectedThreadId="_openThreadId"
+                         OnRetry="OnRetryThreads"
+                         OnOpenThread="OpenThread" />
+      }
+      else if (_filter == "voicemail")
+      {
+        @* PR2 (voicemail) fills this filter; until then show empty. *@
         <div class="empty-state">
-          <RadzenIcon Icon="@(_filter == "voicemail" ? "voicemail" : "forum")" class="empty-state-icon" />
-          <div class="empty-state-text">
-            @(_filter == "voicemail" ? "Voicemail coming online…" : "Texts coming online…")
-          </div>
+          <RadzenIcon Icon="voicemail" class="empty-state-icon" />
+          <div class="empty-state-text">Voicemail coming online…</div>
         </div>
       }
     </div>
 
     <div class="phone-messages-detail">
-      @if (_selectedCall == null)
+      @if (_openThreadId != null)
+      {
+        @* PR3 — open SMS conversation. Compose + new-inbound append handled by
+           PhoneTextsPanel; the parent feeds OpenThreadMessages + reconciles. *@
+        <PhoneTextsPanel OpenThreadId="_openThreadId"
+                         Threads="Threads"
+                         Contacts="Contacts"
+                         Messages="OpenThreadMessages"
+                         HeaderName="@OpenThreadName"
+                         HeaderNumber="@OpenThreadNumber"
+                         OnBack="@(() => _openThreadId = null)"
+                         OnOptimisticAppend="OnOptimisticAppend" />
+      }
+      else if (_selectedCall == null)
       {
         <div class="empty-state">
           <RadzenIcon Icon="forum" class="empty-state-icon" />
@@ -154,8 +178,58 @@
   [Parameter] public int UnreadThreadCount { get; set; }       // PR3 feeds this
   [Parameter] public EventCallback OnRefresh { get; set; }
 
+  // PR3 — GV SMS threads + open-conversation state. The parent (PhonePage) owns
+  // fetch/push/read; this panel hosts PhoneTextsPanel in the feed (thread list)
+  // and the detail pane (conversation), and tracks which thread is open.
+  [Parameter] public List<SmsThreadDto>? Threads { get; set; }
+  [Parameter] public bool ThreadsLoading { get; set; }
+  [Parameter] public bool ThreadsError { get; set; }
+  [Parameter] public List<SmsMessageDto>? OpenThreadMessages { get; set; }
+  [Parameter] public EventCallback OnRetryThreads { get; set; }
+  [Parameter] public EventCallback<string> OnOpenThread { get; set; }   // threadId → parent loads messages + marks read
+  [Parameter] public EventCallback<SmsMessageDto> OnOptimisticAppend { get; set; }
+
   private string _filter = "all";
   private CallHistoryEntryDto? _selectedCall;
+
+  // The open SMS thread (detail pane shows its conversation). Null = no thread open.
+  private string? _openThreadId;
+  public string? OpenThreadId => _openThreadId;   // parent reads to suppress toast when open
+
+  // Called by the parent on GvSmsReceived to decide append-in-place vs toast.
+  public bool IsThreadOpen(string threadId) => _openThreadId == threadId;
+
+  private async Task OpenThread(string threadId)
+  {
+    _openThreadId = threadId;
+    _selectedCall = null;                          // texts + calls share the detail pane
+    await OnOpenThread.InvokeAsync(threadId);       // parent loads messages, marks thread read
+  }
+
+  private SmsThreadDto? OpenThreadData =>
+    Threads?.FirstOrDefault(t => t.ThreadId == _openThreadId);
+
+  // Header strings for the open conversation. Name precedence mirrors ResolveName:
+  // CounterpartyName → normalized contact match → bare number.
+  private string OpenThreadName
+  {
+    get
+    {
+      var t = OpenThreadData;
+      if (t == null) return _openThreadId ?? "";
+      if (!string.IsNullOrWhiteSpace(t.CounterpartyName)) return t.CounterpartyName!;
+      var key = PhoneNumberNormalizer.Normalize(t.CounterpartyNumber);
+      if (key.Length > 0)
+      {
+        var match = Contacts.FirstOrDefault(c =>
+          PhoneNumberNormalizer.Normalize(c.Phone) == key);
+        if (match != null) return match.Name;
+      }
+      return t.CounterpartyNumber;
+    }
+  }
+
+  private string OpenThreadNumber => OpenThreadData?.CounterpartyNumber ?? "";
 
   private IEnumerable<(string Key, string Label, int Count)> Segments => new[]
   {
