@@ -5538,3 +5538,26 @@ body {
 .vm-transcript-body { color: var(--text-high); line-height: 1.5; }
 .vm-transcript-pending { color: var(--text-medium); font-style: italic; }
 .vm-transcript-absent { color: var(--text-low); }
+
+/* §Ph — Voicemail row (PR2) */
+.vm-row-wrap { display: flex; flex-direction: column; }
+.vm-chip {
+  width: 44px; height: 44px; border-radius: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+  color: var(--accent-primary);
+}
+.vm-row-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.vm-row-title { color: var(--text-medium); }
+.vm-row-title.vm-row-unread { color: var(--text-high); font-weight: 600; }
+.vm-row-preview { color: var(--text-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vm-type-label { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; color: var(--text-low); }
+.vm-row-duration { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-medium); }
+
+/* §Ph — Per-row unread dot (handoff verbatim; first introduced in PR2, reused by PR3) */
+.unread-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent-primary);
+  box-shadow: 0 0 6px var(--accent-glow);
+  flex-shrink: 0;
+}
