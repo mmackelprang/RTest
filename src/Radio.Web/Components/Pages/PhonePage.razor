@@ -393,29 +393,37 @@
   private void OnReadStateChanged(ReadStateChangedDto dto)
   {
     if (_disposed) return;
-    var changed = false;
+    // Fired on the SignalR receive thread (not the Blazor sync context). Marshal the
+    // WHOLE body — list mutation included — onto the render context before touching
+    // _voicemails/_threads, matching OnGvVoicemailReceived/OnGvSmsReceived. Reconciling
+    // off-context would race a concurrent LoadVoicemailsAsync that replaces the list.
+    _ = InvokeAsync(() =>
+    {
+      if (_disposed) return;
+      var changed = false;
 
-    if (string.Equals(dto.Kind, "Voicemail", StringComparison.OrdinalIgnoreCase))
-    {
-      if (_voicemails != null)
+      if (string.Equals(dto.Kind, "Voicemail", StringComparison.OrdinalIgnoreCase))
       {
-        changed = ReadStateReconciler.ApplyVoicemail(_voicemails, dto.Id, dto.IsRead);
+        if (_voicemails != null)
+        {
+          changed = ReadStateReconciler.ApplyVoicemail(_voicemails, dto.Id, dto.IsRead);
+        }
+        // dto.ThreadId is informational here; no thread-badge bump needed for v1.
       }
-      // dto.ThreadId is informational here; no thread-badge bump needed for v1.
-    }
-    else if (string.Equals(dto.Kind, "Sms", StringComparison.OrdinalIgnoreCase))
-    {
-      if (_threads != null)
+      else if (string.Equals(dto.Kind, "Sms", StringComparison.OrdinalIgnoreCase))
       {
-        changed = ReadStateReconciler.ApplyThread(_threads, dto.ThreadId, dto.IsRead);
+        if (_threads != null)
+        {
+          changed = ReadStateReconciler.ApplyThread(_threads, dto.ThreadId, dto.IsRead);
+        }
       }
-    }
 
-    if (changed)                       // skip re-render on an echo of an already-applied mark
-    {
-      PhoneUnread.Set(UnreadSum);
-      _ = InvokeAsync(StateHasChanged);
-    }
+      if (changed)                       // skip re-render on an echo of an already-applied mark
+      {
+        PhoneUnread.Set(UnreadSum);
+        StateHasChanged();
+      }
+    });
   }
 
   // Messages refresh = re-fetch call history + voicemail + SMS threads (the

@@ -1134,13 +1134,12 @@ public record SmsMessageDto(
   DateTime SentAt,              // UTC
   bool IsRead);
 
-// authoritative (GV write-through); ADR-024
 public record SmsThreadDto(
   string ThreadId,
   string CounterpartyNumber,
   string? CounterpartyName,
   DateTime LastMessageAt,
-  bool HasUnread,
+  bool HasUnread,               // authoritative (GV write-through); ADR-024
   string? LastMessagePreview);
 
 public record SmsThreadListDto(

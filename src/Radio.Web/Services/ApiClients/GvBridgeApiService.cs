@@ -159,6 +159,8 @@ public class GvBridgeApiService
     }
     try
     {
+      // PostAsJsonAsync defaults to JsonSerializerDefaults.Web (camelCase), so the
+      // anonymous property serializes to {"isRead":...} per the ADR-024 §3 contract.
       var response = await _httpClient.PostAsJsonAsync(
         $"/api/gvbridge/voicemail/{Uri.EscapeDataString(id)}/read",
         new { isRead }, ct);
@@ -229,6 +231,7 @@ public class GvBridgeApiService
     }
     try
     {
+      // camelCase via PostAsJsonAsync default → {"isRead":...} (ADR-024 §3 contract).
       var response = await _httpClient.PostAsJsonAsync(
         $"/api/gvbridge/sms/threads/{Uri.EscapeDataString(threadId)}/read",
         new { isRead }, ct);
