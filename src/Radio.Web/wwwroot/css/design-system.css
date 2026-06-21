@@ -5526,3 +5526,53 @@ body {
 .phone-rail-sub .phone-rail-label { padding-left: var(--sp-3); font-size: 13px; }
 .phone-rail-tab { position: relative; }
 .phone-rail-tab .nav-badge { position: absolute; top: 6px; right: 6px; }
+
+/* -- §Ph  Text message bubbles (PR3, handoff verbatim) --------------------- */
+.msg-list {
+  display: flex; flex-direction: column;
+  gap: var(--sp-2);                 /* 8px */
+  padding: var(--sp-3) var(--sp-4); /* 12 / 16 */
+  overflow-y: auto; min-height: 0;
+}
+.msg-bubble {
+  max-width: 72%;                    /* layout dim — no :root equiv, see note */
+  padding: var(--sp-2) var(--sp-3);  /* 8 / 12 */
+  border-radius: 14px;
+  font-family: var(--font-body); font-size: 15px; line-height: 1.4;
+  color: var(--text-high); word-break: break-word;
+}
+.msg-bubble.inbound {
+  align-self: flex-start;
+  background: var(--surface-raised);
+  border: 1px solid var(--surface-separator);
+  border-bottom-left-radius: 4px;
+}
+.msg-bubble.outbound {
+  align-self: flex-end;
+  background: var(--accent-surface);           /* rgba(92,212,232,0.08) */
+  border: 1px solid rgba(92,212,232,0.20);     /* derived from --accent-primary */
+  border-bottom-right-radius: 4px;
+}
+.msg-bubble.sending { opacity: 0.6; }
+.msg-bubble.failed {
+  border-color: var(--signal-red);
+  border-left: 3px solid var(--signal-red);
+  cursor: pointer; min-height: var(--touch-min);   /* whole bubble = 48px retry target */
+}
+.msg-meta {
+  display: flex; align-items: center; gap: 6px; margin-top: 4px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-low);
+}
+.msg-meta .msg-status-sent { color: var(--text-low); }     /* done glyph */
+.msg-meta .msg-status-fail { color: var(--signal-red); }   /* error_outline + "Failed to send" */
+.msg-day-sep {
+  align-self: center; margin: var(--sp-2) 0;
+  font-family: var(--font-mono); font-size: 11px;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-low);
+}
+.unread-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent-primary);
+  box-shadow: 0 0 6px var(--accent-glow);   /* existing token */
+  flex-shrink: 0;
+}

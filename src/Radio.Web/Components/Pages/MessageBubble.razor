@@ -1,0 +1,56 @@
+@using Radio.Web.Models
+
+@* §Ph text bubble — inbound left (raised) / outbound right (accent tint), with an
+   outbound status glyph (sending spinner / sent check / failed ⚠). Defensive:
+   null text → "(no text)" placeholder; direction not exactly "Outbound" → inbound.
+   A failed bubble is the whole-bubble retry target (≥48px via .msg-bubble.failed). *@
+
+<div class="msg-bubble @DirectionClass @StatusClass"
+     @onclick="OnFailedClick" role="@(IsFailed ? "button" : null)">
+  <span class="msg-text">@DisplayText</span>
+  <span class="msg-meta">
+    <span class="msg-time">@Message.SentAt.ToLocalTime().ToString("h:mm tt")</span>
+    @if (IsOutbound)
+    {
+      @switch (Status)
+      {
+        case SendStatus.Sending:
+          <span class="spinner"></span>
+          break;
+        case SendStatus.Sent:
+          <RadzenIcon Icon="done" class="msg-status-sent" />
+          break;
+        case SendStatus.Failed:
+          <span class="msg-status-fail">
+            <RadzenIcon Icon="error_outline" /> Failed to send
+          </span>
+          break;
+      }
+    }
+  </span>
+</div>
+
+@code {
+  public enum SendStatus { None, Sending, Sent, Failed }
+
+  [Parameter, EditorRequired] public SmsMessageDto Message { get; set; } = default!;
+  [Parameter] public SendStatus Status { get; set; } = SendStatus.None;
+  [Parameter] public EventCallback OnRetry { get; set; }
+
+  private bool IsOutbound => GvDirection.IsOutbound(Message.Direction);  // unknown → inbound
+  private bool IsFailed => Status == SendStatus.Failed;
+  private string DirectionClass => IsOutbound ? "outbound" : "inbound";
+  private string StatusClass => Status switch
+  {
+    SendStatus.Sending => "sending",
+    SendStatus.Failed => "failed",
+    _ => ""
+  };
+  private string DisplayText =>
+    string.IsNullOrEmpty(Message.Text) ? "(no text)" : Message.Text!;
+
+  private async Task OnFailedClick()
+  {
+    if (IsFailed) await OnRetry.InvokeAsync();
+  }
+}
