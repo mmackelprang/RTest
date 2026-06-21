@@ -316,6 +316,49 @@ When an incoming call is detected (`Ringing` state):
 - **Wrong caller name:** Verify the contacts API response shape matches the expected schema above
 - **Ring sound doesn't play:** Verify the file exists at the configured path and is a valid WAV or MP3
 
+### Google Voice (gvbridge) Messages
+
+The same RotaryPhone service exposes a Google Voice bridge that the Web UI consumes for the unified **Messages** feed on `/phone` (voicemail + texts). Like the rest of the phone integration, Radio Console consumes it over REST/SignalR **only** — no GV backend runs in-process.
+
+**Base host:** `radio:5004` (same RotaryPhone service as the call integration above).
+
+**REST (read), under `/api/gvbridge/*`:**
+
+| Method | Route | Returns |
+|--------|-------|---------|
+| GET | `/api/gvbridge/status` | `{ available, activeMode, sipRegistered?, cookiesValid? }` — drives the reconnecting banner + Send gate |
+| GET | `/api/gvbridge/voicemail?count=&pageToken=` | `VoicemailListDto` (paged) |
+| GET | `/api/gvbridge/voicemail/{id}` | `VoicemailItemDto` |
+| GET | `/api/gvbridge/voicemail/{id}/audio` | voicemail recording (bind an **absolute** URL — see gotcha) |
+| GET | `/api/gvbridge/sms/threads?count=` | `SmsThreadListDto` |
+| GET | `/api/gvbridge/sms/threads/{threadId}?count=` | `SmsThreadMessagesDto` |
+| POST | `/api/gvbridge/sms/send` | `SendSmsResponse` — **not yet shipped** on RotaryPhone; gated by `RotaryPhone:Gv:SendEnabled` (PR3) |
+
+**SignalR push:** rides the existing `/hub` RotaryHub connection (consumed by `PhoneHubService`):
+- `SmsReceived` → `PhoneHubService.GvSmsReceived` (`SmsMessageDto`)
+- `VoicemailReceived` → `PhoneHubService.GvVoicemailReceived` (`VoicemailItemDto`)
+
+> **GV SMS is NOT the same product as VoIP.ms trunk SMS.** Trunk SMS rides `GvTrunkHubService.SmsReceived` on `/hubs/gvtrunk` with a different payload. The C# event for GV SMS is deliberately named `GvSmsReceived` so the two can't be confused. Do not merge or rename them. (ADR-022 §4.3.)
+
+**Config keys** (`appsettings.json`; per-machine overrides in `appsettings.Production.json`):
+
+```json
+"RotaryPhone": {
+  "ApiBaseUrl": "http://radio:5004",
+  "HubUrl": "http://radio:5004/hub",
+  "Gv": {
+    "SendEnabled": false,        // flip true when POST /sms/send ships (PR3)
+    "StatusPollSeconds": 10,     // GvBridgeStatusService poll interval
+    "AuthKey": ""                // set to enable X-RotaryPhone-Auth header (OFF today)
+  }
+}
+```
+
+**Gotchas:**
+- **Voicemail audio URL must be absolute.** The DTO's relative `AudioUrl` resolves against the Web origin (`:5002`) and 404s — always rebuild it against the API base via `GvBridgeApiService.GetVoicemailAudioUrl(id)` (→ `http://radio:5004/...`). Never bind the relative `AudioUrl` (ADR-022 D4).
+- **Read-state is UI-local in v1** — heard/read does not persist to Google Voice; a hard reload re-derives from `isRead`/`hasUnread`. Missed calls count toward the topbar `/phone` badge (owner decision 2).
+- **`RotaryPhoneAuthHandler` is OFF** until `Gv:AuthKey` is set. A native `<audio>` element can't send that header, so an auth-gated audio endpoint would break the direct-`<audio>` approach (ADR-022 §8.1).
+
 ---
 
 ## 3. Notification / Announcement API

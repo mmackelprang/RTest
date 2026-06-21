@@ -19,6 +19,12 @@ public class PhoneHubService : IAsyncDisposable
   public event Action? CallHistoryUpdated;
   public event Action<object>? SystemStatusChanged;
 
+  // GV (gvbridge) push — rides the existing /hub RotaryHub (ADR-022 D5).
+  // NOTE: "GvSmsReceived" deliberately differs from GvTrunkHubService.SmsReceived
+  // (/hubs/gvtrunk, different payload). Do not rename to plain SmsReceived.
+  public event Action<Radio.Web.Models.SmsMessageDto>? GvSmsReceived;
+  public event Action<Radio.Web.Models.VoicemailItemDto>? GvVoicemailReceived;
+
   public bool IsConnected => _hubConnection?.State == HubConnectionState.Connected;
 
   public PhoneHubService(ILogger<PhoneHubService> logger, IConfiguration configuration)
@@ -70,6 +76,18 @@ public class PhoneHubService : IAsyncDisposable
       _hubConnection.On<object>("SystemStatusChanged", (status) =>
       {
         SystemStatusChanged?.Invoke(status);
+      });
+
+      _hubConnection.On<Radio.Web.Models.SmsMessageDto>("SmsReceived", m =>
+      {
+        _logger.LogDebug("GV SMS received on thread {ThreadId}", m.ThreadId);
+        GvSmsReceived?.Invoke(m);
+      });
+
+      _hubConnection.On<Radio.Web.Models.VoicemailItemDto>("VoicemailReceived", v =>
+      {
+        _logger.LogDebug("GV voicemail received {Id}", v.Id);
+        GvVoicemailReceived?.Invoke(v);
       });
 
       _hubConnection.Reconnecting += ex =>
