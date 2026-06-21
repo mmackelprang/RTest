@@ -1,0 +1,183 @@
+@using Radio.Web.Models
+@using Radio.Web.Services.ApiClients
+@inject GvBridgeApiService GvBridgeApi
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<div class="vm-player">
+  <audio src="@AudioSrc" preload="none" @ref="_audioEl"></audio>
+
+  @if (_state == PlayerState.AudioError)
+  {
+    <div class="vm-player-error" role="alert">
+      <RadzenIcon Icon="error_outline" />
+      <span>Couldn't load this recording.</span>
+      <button type="button" class="phone-btn-sm" @onclick="RetryAsync">Retry</button>
+    </div>
+  }
+  else
+  {
+    <div class="vm-player-transport">
+      <button type="button" class="transport-btn-primary"
+              aria-label="@PlayPauseLabel" @onclick="TogglePlayAsync">
+        @if (_state == PlayerState.Buffering)
+        {
+          <span class="spinner"></span>
+        }
+        else
+        {
+          <RadzenIcon Icon="@(_state == PlayerState.Playing ? "pause" : "play_arrow")" />
+        }
+      </button>
+
+      <div class="vm-scrubber" role="slider"
+           aria-label="Playback position"
+           aria-valuemin="0" aria-valuemax="@_totalForAria" aria-valuenow="@((int)_current)"
+           @onclick="OnScrubberClick" @ref="_scrubberEl">
+        <div class="now-playing-dock-progress">
+          <div class="now-playing-dock-progress-bar" style="width:@(ProgressPercent)%"></div>
+        </div>
+      </div>
+
+      <span class="vm-time">@FormatTime(_current) / @TotalDisplay</span>
+    </div>
+
+    @if (_state == PlayerState.Buffering)
+    {
+      <div class="vm-buffering-note">Fetching recording…</div>
+    }
+  }
+
+  <div class="vm-transcript">
+    <div class="vm-transcript-heading">Transcript</div>
+    @if (!string.IsNullOrWhiteSpace(Item.Transcript))
+    {
+      <div class="vm-transcript-body">@Item.Transcript</div>
+    }
+    else if (IsRecent)
+    {
+      <div class="vm-transcript-pending" aria-live="polite">
+        Transcript pending — Google is still transcribing this voicemail.
+      </div>
+    }
+    else
+    {
+      <div class="vm-transcript-absent">No transcript available.</div>
+    }
+  </div>
+
+  @* fast-follow (deferred, owner decision 3): Call back / Text back actions *@
+</div>
+
+@code {
+  [Parameter, EditorRequired] public VoicemailItemDto Item { get; set; } = default!;
+  [Parameter] public EventCallback OnHeard { get; set; }
+
+  private enum PlayerState { Idle, Buffering, Playing, Paused, Ended, AudioError }
+  private PlayerState _state = PlayerState.Idle;
+  private double _current;
+  private double _duration;
+  private ElementReference _audioEl;
+  private ElementReference _scrubberEl;
+  private IJSObjectReference? _module;
+  private IJSObjectReference? _player;
+  private DotNetObjectReference<VoicemailPlayer>? _self;
+  private bool _heardSent;
+
+  private string AudioSrc => GvBridgeApi.GetVoicemailAudioUrl(Item.Id);
+  private bool IsRecent => (DateTime.UtcNow - Item.ReceivedAt) < TimeSpan.FromMinutes(30);
+  private bool DurationKnown => Item.DurationSeconds > 0 || _duration > 0;
+  private double EffectiveDuration => _duration > 0 ? _duration : Item.DurationSeconds;
+  private int _totalForAria => Item.DurationSeconds > 0 ? Item.DurationSeconds : 0;
+  private double ProgressPercent =>
+    EffectiveDuration > 0 ? Math.Clamp(_current / EffectiveDuration * 100, 0, 100) : 0;
+  private string TotalDisplay => DurationKnown ? FormatTime(EffectiveDuration) : "--:--";
+  private string PlayPauseLabel =>
+    _state == PlayerState.Playing ? "Pause" : $"Play voicemail from {Item.FromName ?? Item.FromNumber}";
+
+  protected override async Task OnAfterRenderAsync(bool firstRender)
+  {
+    if (firstRender)
+    {
+      // Resilient import/attach: under bUnit's loose JS interop the module never
+      // really loads, so guard so a test that doesn't mock it doesn't crash. In
+      // production this binds the <audio> events to the JSInvokable callbacks.
+      try
+      {
+        _self = DotNetObjectReference.Create(this);
+        _module = await JS.InvokeAsync<IJSObjectReference>(
+          "import", "./js/voicemail-player.js");
+        _player = await _module.InvokeAsync<IJSObjectReference>("attach", _audioEl, _self);
+      }
+      catch
+      {
+        // No-op: player interactions are null-guarded; transcript + markup remain valid.
+      }
+    }
+  }
+
+  private async Task TogglePlayAsync()
+  {
+    await MarkHeardOnceAsync();
+    if (_player == null) return;            // module not loaded (e.g. under tests)
+    if (_state == PlayerState.Playing)
+    {
+      await _player.InvokeVoidAsync("pause");
+      _state = PlayerState.Paused;
+    }
+    else
+    {
+      _state = PlayerState.Buffering;  // first-play stall is expected (ADR/contract)
+      await _player.InvokeVoidAsync("play");
+    }
+  }
+
+  private async Task OnScrubberClick(MouseEventArgs e)
+  {
+    if (_module == null || _player == null) return;
+    // Compute fraction from clientX vs the scrubber's bounding box (JS reads box).
+    var fraction = await _module.InvokeAsync<double>("fractionFromEvent", _scrubberEl, e.ClientX);
+    await _player.InvokeVoidAsync("seekFraction", fraction);
+  }
+
+  private async Task RetryAsync()
+  {
+    _state = PlayerState.Idle;
+    StateHasChanged();
+    await TogglePlayAsync();
+  }
+
+  private async Task MarkHeardOnceAsync()
+  {
+    if (_heardSent) return;
+    _heardSent = true;
+    await OnHeard.InvokeAsync();                         // UI-local flip (parent)
+    await GvBridgeApi.MarkVoicemailReadAsync(Item.Id);   // flagged no-op seam
+  }
+
+  [JSInvokable] public Task OnTimeUpdate(double current, double duration)
+  {
+    _current = current;
+    if (duration > 0) _duration = duration;
+    return InvokeAsync(StateHasChanged);
+  }
+  [JSInvokable] public Task OnPlaying() { _state = PlayerState.Playing; return InvokeAsync(StateHasChanged); }
+  [JSInvokable] public Task OnBuffering() { if (_state != PlayerState.Playing) _state = PlayerState.Buffering; return InvokeAsync(StateHasChanged); }
+  [JSInvokable] public Task OnEnded() { _state = PlayerState.Ended; _current = 0; return InvokeAsync(StateHasChanged); }
+  [JSInvokable] public Task OnAudioError() { _state = PlayerState.AudioError; return InvokeAsync(StateHasChanged); }
+
+  private static string FormatTime(double seconds)
+  {
+    if (double.IsNaN(seconds) || seconds < 0) seconds = 0;
+    var ts = TimeSpan.FromSeconds(Math.Floor(seconds));
+    return ts.TotalHours >= 1 ? ts.ToString(@"h\:mm\:ss") : ts.ToString(@"m\:ss");
+  }
+
+  public async ValueTask DisposeAsync()
+  {
+    try { if (_player != null) await _player.InvokeVoidAsync("dispose"); } catch { }
+    try { if (_player != null) await _player.DisposeAsync(); } catch { }
+    try { if (_module != null) await _module.DisposeAsync(); } catch { }
+    _self?.Dispose();
+  }
+}
