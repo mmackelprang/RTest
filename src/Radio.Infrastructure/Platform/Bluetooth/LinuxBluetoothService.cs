@@ -55,7 +55,15 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
 
   // Maps object path to device info
   private readonly Dictionary<ObjectPath, BluetoothDeviceInfo> _deviceCache = new();
-  private readonly HashSet<ObjectPath> _watchedDevicePaths = new();
+
+  // Maps a watched device path -> the generation of the subscribe attempt that owns it.
+  // Doubles as the duplicate-watch dedup guard (presence == already being watched). The
+  // generation token disambiguates concurrent subscribe attempts for the same path: a
+  // slow WatchPropertiesAsync completion compares its captured generation against the
+  // current one before storing its watcher, so an evict+rediscover that raced ahead of
+  // it can't be clobbered (which would orphan the newer watcher and duplicate events).
+  private readonly Dictionary<ObjectPath, long> _watchedDevicePaths = new();
+  private long _watchGenerationCounter;
 
   // Maps device path -> its per-device D-Bus PropertiesChanged subscription. The
   // IDisposable returned by WatchPropertiesAsync used to be discarded, leaking one
@@ -740,14 +748,18 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       return;
     }
 
-    // Prevent duplicate watchers — each fires DeviceConnected independently
+    // Prevent duplicate watchers — each fires DeviceConnected independently. Claim the
+    // path and capture a generation token identifying this specific subscribe attempt.
+    long myGeneration;
     lock (_watchedDevicePaths)
     {
-      if (!_watchedDevicePaths.Add(devicePath))
+      if (_watchedDevicePaths.ContainsKey(devicePath))
       {
         _logger.LogDebug("Already watching device properties at {Path}, skipping", devicePath);
         return;
       }
+      myGeneration = ++_watchGenerationCounter;
+      _watchedDevicePaths[devicePath] = myGeneration;
     }
 
     try
@@ -869,30 +881,36 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       });
 
       // Retain the subscription so it can be disposed on device removal / shutdown.
-      // If the device was evicted while we were subscribing (InterfacesRemoved raced
-      // ahead of this await), dispose the watcher immediately rather than leaking it.
-      bool stillWatched;
+      // Only store it if THIS attempt still owns the path (its generation is current).
+      // If the device was evicted while we were subscribing — or evicted and then
+      // re-watched by a newer attempt — the generation won't match, so we dispose this
+      // now-orphaned watcher instead of leaking it or clobbering the newer one.
+      bool stillMine;
       lock (_watchedDevicePaths)
       {
-        stillWatched = _watchedDevicePaths.Contains(devicePath);
-        if (stillWatched)
+        stillMine = _watchedDevicePaths.TryGetValue(devicePath, out var gen) && gen == myGeneration;
+        if (stillMine)
         {
           _devicePropertyWatchers[devicePath] = watcher;
         }
       }
 
-      if (!stillWatched)
+      if (!stillMine)
       {
         watcher.Dispose();
       }
     }
     catch (Exception ex)
     {
-      // Subscription failed — clear the watched marker so a later discovery of the
-      // same device can retry instead of being permanently blocked by the dedup guard.
+      // Subscription failed — release our claim so a later discovery of the same device
+      // can retry instead of being permanently blocked by the dedup guard. Only clear if
+      // we still own it; a newer attempt may already have taken the path over.
       lock (_watchedDevicePaths)
       {
-        _watchedDevicePaths.Remove(devicePath);
+        if (_watchedDevicePaths.TryGetValue(devicePath, out var gen) && gen == myGeneration)
+        {
+          _watchedDevicePaths.Remove(devicePath);
+        }
       }
       _logger.LogDebug(ex, "Failed to watch device properties at {Path}", devicePath);
     }
