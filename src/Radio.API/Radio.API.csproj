@@ -12,6 +12,15 @@
     <PackageReference Include="Serilog.Sinks.Async" Version="2.1.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0" />
+    <!-- Direct pin to override the vulnerable transitive Microsoft.OpenApi 2.0.0
+         pulled in by Microsoft.AspNetCore.OpenApi (which still declares 2.0.0 as
+         of the latest 10.0.x servicing release). 2.0.0 is affected by
+         CVE-2026-49451 / GHSA-v5pm-xwqc-g5wc (uncontrolled recursion on circular
+         schema refs -> stack overflow), flagged as NU1903 and, because Release
+         builds treat warnings as errors, breaking the full-solution build.
+         2.7.5 is the first patched version in the 2.x line; API-compatible with
+         the >=2.0.0 requirement of Microsoft.AspNetCore.OpenApi. -->
+    <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
     <PackageReference Include="Scalar.AspNetCore" Version="2.*" />
     <PackageReference Include="Serilog.AspNetCore" Version="8.*" />
   </ItemGroup>
