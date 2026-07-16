@@ -19,7 +19,7 @@ namespace Radio.Fingerprinting.Services;
 /// of the provided audio. It uses Shazam's algorithm which handles noisy/degraded
 /// audio (vinyl, radio) much better than Chromaprint/AcoustID.
 /// </remarks>
-public sealed class SongRecRecognitionService : ISongRecRecognitionService
+public class SongRecRecognitionService : ISongRecRecognitionService
 {
   private readonly ILogger<SongRecRecognitionService> _logger;
   private readonly string _songRecPath;
@@ -100,10 +100,18 @@ public sealed class SongRecRecognitionService : ISongRecRecognitionService
   }
 
   /// <summary>
+  /// Starts the songrec process from the given start info. Overridable so tests
+  /// can substitute a long-running stand-in process to exercise timeout/kill
+  /// behavior without depending on a real songrec binary.
+  /// </summary>
+  internal virtual Process? StartProcess(ProcessStartInfo startInfo) => Process.Start(startInfo);
+
+  /// <summary>
   /// Runs the songrec recognize command and returns the parsed JSON result.
   /// </summary>
   internal async Task<SongRecResult?> RunSongRecAsync(string wavFilePath, CancellationToken ct)
   {
+    Process? process = null;
     try
     {
       var psi = new ProcessStartInfo
@@ -118,7 +126,7 @@ public sealed class SongRecRecognitionService : ISongRecRecognitionService
 
       _logger.LogDebug("Running: {SongRecPath} {Arguments}", _songRecPath, psi.Arguments);
 
-      using var process = Process.Start(psi);
+      process = StartProcess(psi);
       if (process == null)
       {
         _logger.LogError("Failed to start songrec process");
@@ -128,9 +136,16 @@ public sealed class SongRecRecognitionService : ISongRecRecognitionService
       using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
       timeoutCts.CancelAfter(TimeSpan.FromSeconds(_timeoutSeconds));
 
-      var stdout = await process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
-      var stderr = await process.StandardError.ReadToEndAsync(timeoutCts.Token);
+      // Drain stdout and stderr concurrently to avoid a pipe-buffer deadlock: if
+      // songrec fills one pipe (e.g. stderr) while we block reading the other
+      // (stdout), neither side can progress and we'd hang until the timeout.
+      var stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
+      var stderrTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
+      await Task.WhenAll(stdoutTask, stderrTask);
       await process.WaitForExitAsync(timeoutCts.Token);
+
+      var stdout = await stdoutTask;
+      var stderr = await stderrTask;
 
       if (process.ExitCode != 0)
       {
@@ -164,13 +179,56 @@ public sealed class SongRecRecognitionService : ISongRecRecognitionService
     }
     catch (OperationCanceledException) when (!ct.IsCancellationRequested)
     {
-      _logger.LogWarning("SongRec process timed out after {Timeout}s", _timeoutSeconds);
+      _logger.LogWarning(
+        "SongRec process timed out after {Timeout}s; killing it so it is not orphaned",
+        _timeoutSeconds);
       return null;
     }
     catch (Exception ex) when (ex is not OperationCanceledException)
     {
       _logger.LogError(ex, "Error running songrec");
       return null;
+    }
+    finally
+    {
+      // Guarantee the OS process (and any children songrec spawned) is terminated
+      // on every exit path — timeout, caller cancellation, exception, or normal
+      // return. Disposing the Process only releases the managed handle; it does NOT
+      // kill the underlying process. Skipping this is what leaked ~34 orphaned
+      // songrec processes (~650 MB) over 12 days of uptime in production.
+      KillProcessTree(process);
+    }
+  }
+
+  /// <summary>
+  /// Best-effort termination of the songrec process and its child process tree.
+  /// Safe to call with a null process or one that has already exited.
+  /// </summary>
+  private void KillProcessTree(Process? process)
+  {
+    if (process == null)
+    {
+      return;
+    }
+
+    try
+    {
+      if (!process.HasExited)
+      {
+        process.Kill(entireProcessTree: true);
+      }
+    }
+    catch (Exception ex)
+    {
+      // The process may have exited between the HasExited check and the kill (benign
+      // race), or we may lack permission to signal it. Log at warning: a songrec
+      // process we failed to reap is a potential leak, and lack of visibility into
+      // exactly this failure is what let the original leak run unnoticed for 12 days.
+      _logger.LogWarning(ex, "Failed to kill songrec process during cleanup");
+    }
+    finally
+    {
+      process.Dispose();
     }
   }
 
