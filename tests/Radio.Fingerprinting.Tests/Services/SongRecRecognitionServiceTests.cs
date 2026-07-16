@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -281,6 +282,169 @@ public class SongRecRecognitionServiceTests
     Assert.NotNull(metadata);
     Assert.Equal("Unknown Title", metadata.Title);
     Assert.Equal("Unknown Artist", metadata.Artist);
+  }
+
+  [Fact]
+  public async Task RunSongRecAsync_WhenProcessHangs_KillsProcessInsteadOfLeavingItOrphaned()
+  {
+    // Regression test for the production memory leak: when songrec hangs (e.g. its
+    // network call to Shazam blocks), the timeout fired but the OS process was
+    // never killed — only the managed handle was disposed. Orphaned songrec
+    // processes accumulated (~34 observed live, ~650 MB). This proves the timed-out
+    // subprocess is actually terminated, not orphaned.
+    var options = Options.Create(new FingerprintingOptions
+    {
+      SongRec = new SongRecOptions { Enabled = true, TimeoutSeconds = 1 }
+    });
+    var service = new HangingSongRecService(_loggerMock.Object, options);
+
+    var result = await service.RunSongRecAsync("nonexistent.wav", CancellationToken.None);
+
+    // Timed out => no recognition result.
+    Assert.Null(result);
+
+    // The stand-in process must actually have been launched.
+    Assert.NotNull(service.StartedProcessId);
+    var pid = service.StartedProcessId!.Value;
+
+    try
+    {
+      // Critical assertion: the process must NOT still be running after the timeout.
+      var terminated = await WaitForProcessExitAsync(pid, TimeSpan.FromSeconds(5));
+      Assert.True(
+        terminated,
+        $"songrec stand-in process {pid} was orphaned instead of being killed after the timeout");
+    }
+    finally
+    {
+      TryKill(pid);
+    }
+  }
+
+  [Fact]
+  public async Task RunSongRecAsync_WhenCallerCancels_KillsProcessAndPropagatesCancellation()
+  {
+    // The kill guarantee must hold on the caller-cancellation path too, and — unlike
+    // the timeout path (which returns null) — caller cancellation must still surface
+    // as an OperationCanceledException to the caller. TimeoutSeconds is set high so
+    // the caller's token, not the internal timeout, is what fires.
+    var options = Options.Create(new FingerprintingOptions
+    {
+      SongRec = new SongRecOptions { Enabled = true, TimeoutSeconds = 30 }
+    });
+    var service = new HangingSongRecService(_loggerMock.Object, options);
+
+    using var cts = new CancellationTokenSource();
+    cts.CancelAfter(TimeSpan.FromMilliseconds(500));
+
+    await Assert.ThrowsAnyAsync<OperationCanceledException>(
+      () => service.RunSongRecAsync("nonexistent.wav", cts.Token));
+
+    Assert.NotNull(service.StartedProcessId);
+    var pid = service.StartedProcessId!.Value;
+
+    try
+    {
+      var terminated = await WaitForProcessExitAsync(pid, TimeSpan.FromSeconds(5));
+      Assert.True(
+        terminated,
+        $"songrec stand-in process {pid} was orphaned instead of being killed on caller cancellation");
+    }
+    finally
+    {
+      TryKill(pid);
+    }
+  }
+
+  /// <summary>
+  /// Test double: launches a long-running, cross-platform stand-in process in place
+  /// of the real songrec binary so the timeout path can be exercised deterministically.
+  /// </summary>
+  private sealed class HangingSongRecService : SongRecRecognitionService
+  {
+    public HangingSongRecService(
+      ILogger<SongRecRecognitionService> logger,
+      IOptions<FingerprintingOptions> options)
+      : base(logger, options)
+    {
+    }
+
+    public int? StartedProcessId { get; private set; }
+
+    internal override Process? StartProcess(ProcessStartInfo startInfo)
+    {
+      // Ignore the real songrec command; launch a process that runs far longer than
+      // the timeout and produces no output on its redirected streams, forcing
+      // RunSongRecAsync's read/wait to hit the timeout. Streams are redirected
+      // because RunSongRecAsync reads stdout/stderr.
+      var hangInfo = OperatingSystem.IsWindows()
+        ? new ProcessStartInfo
+        {
+          FileName = "cmd.exe",
+          Arguments = "/c ping -n 60 127.0.0.1",
+          RedirectStandardOutput = true,
+          RedirectStandardError = true,
+          UseShellExecute = false,
+          CreateNoWindow = true
+        }
+        : new ProcessStartInfo
+        {
+          FileName = "/bin/sleep",
+          Arguments = "60",
+          RedirectStandardOutput = true,
+          RedirectStandardError = true,
+          UseShellExecute = false,
+          CreateNoWindow = true
+        };
+
+      var process = Process.Start(hangInfo);
+      StartedProcessId = process?.Id;
+      return process;
+    }
+  }
+
+  private static async Task<bool> WaitForProcessExitAsync(int pid, TimeSpan timeout)
+  {
+    var deadline = DateTime.UtcNow + timeout;
+    while (DateTime.UtcNow < deadline)
+    {
+      if (!IsProcessRunning(pid))
+      {
+        return true;
+      }
+      await Task.Delay(50);
+    }
+    return !IsProcessRunning(pid);
+  }
+
+  private static bool IsProcessRunning(int pid)
+  {
+    try
+    {
+      using var p = Process.GetProcessById(pid);
+      return !p.HasExited;
+    }
+    catch (ArgumentException)
+    {
+      // No process with that id exists (already exited and reaped).
+      return false;
+    }
+  }
+
+  private static void TryKill(int pid)
+  {
+    try
+    {
+      using var p = Process.GetProcessById(pid);
+      if (!p.HasExited)
+      {
+        p.Kill(entireProcessTree: true);
+      }
+    }
+    catch
+    {
+      // Best-effort cleanup — process may already be gone.
+    }
   }
 
   private static AudioSampleBuffer CreateTestSamples(double durationSeconds)
