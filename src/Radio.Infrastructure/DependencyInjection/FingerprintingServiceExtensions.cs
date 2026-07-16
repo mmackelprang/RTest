@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Fingerprinting;
@@ -95,6 +96,12 @@ public static class FingerprintingServiceExtensions
         sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<FingerprintingOptions>>(),
         sp.GetService<IMetricsCollector>()));
     services.AddHostedService(sp => sp.GetRequiredService<BackgroundIdentificationService>());
+
+    // Play-history retention: bind PlayHistory options and register the scheduled
+    // prune (keeps the PlayHistory table bounded — it otherwise only ever grows).
+    services.Configure<PlayHistoryOptions>(
+      configuration.GetSection(PlayHistoryOptions.SectionName));
+    services.AddHostedService<PlayHistoryRetentionService>();
 
     return services;
   }

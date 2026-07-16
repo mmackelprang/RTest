@@ -76,13 +76,17 @@ public class PlayHistoryController : ControllerBase
   /// </summary>
   /// <param name="start">Start date (ISO 8601 format).</param>
   /// <param name="end">End date (ISO 8601 format).</param>
-  /// <returns>A list of play history entries in the date range.</returns>
+  /// <param name="limit">Maximum number of entries to return (default 500, max 1000).</param>
+  /// <param name="offset">Number of entries to skip.</param>
+  /// <returns>A bounded list of play history entries in the date range.</returns>
   [HttpGet("range")]
   [ProducesResponseType(typeof(List<PlayHistoryEntryDto>), StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
   public async Task<ActionResult<List<PlayHistoryEntryDto>>> GetByDateRange(
     [FromQuery] DateTime start,
-    [FromQuery] DateTime end)
+    [FromQuery] DateTime end,
+    [FromQuery] int? limit = null,
+    [FromQuery] int? offset = null)
   {
     try
     {
@@ -91,7 +95,11 @@ public class PlayHistoryController : ControllerBase
         return BadRequest(new { error = "End date must be after start date" });
       }
 
-      var entries = await _playHistoryRepository.GetByDateRangeAsync(start, end);
+      // Bound the query so an arbitrarily wide range can't materialize the whole table.
+      int take = Math.Clamp(limit ?? 500, 1, 1000);
+      int skip = Math.Max(offset ?? 0, 0);
+
+      var entries = await _playHistoryRepository.GetByDateRangeAsync(start, end, take, skip);
       return Ok(entries.Select(MapToDto).ToList());
     }
     catch (Exception ex)
@@ -120,26 +128,18 @@ public class PlayHistoryController : ControllerBase
       // Get full day range
       var start = date.Date;
       var end = start.AddDays(1);
-      
-      var entries = await _playHistoryRepository.GetByDateRangeAsync(start, end);
-      
-      // Apply pagination in memory since repository doesn't support it for date range yet
-      var query = entries.AsEnumerable();
-      var totalCount = query.Count();
-      
-      if (offset.HasValue)
-      {
-        query = query.Skip(offset.Value);
-      }
-      
-      if (limit.HasValue)
-      {
-        query = query.Take(limit.Value);
-      }
-      
+
+      int take = Math.Clamp(limit ?? 100, 1, 1000);
+      int skip = Math.Max(offset ?? 0, 0);
+
+      // Pagination is pushed into SQL (LIMIT/OFFSET) so only the requested page is
+      // materialized; the accurate total for the day comes from a separate COUNT.
+      var entries = await _playHistoryRepository.GetByDateRangeAsync(start, end, take, skip);
+      var totalCount = await _playHistoryRepository.GetCountByDateRangeAsync(start, end);
+
       return Ok(new PlayHistoryListDto
       {
-        Items = query.Select(MapToDto).ToList(),
+        Items = entries.Select(MapToDto).ToList(),
         TotalCount = totalCount
       });
     }
@@ -162,7 +162,9 @@ public class PlayHistoryController : ControllerBase
     {
       var today = DateTime.UtcNow.Date;
       var tomorrow = today.AddDays(1);
-      var entries = await _playHistoryRepository.GetByDateRangeAsync(today, tomorrow);
+      // Bound the fetch — a single day is normally small, but the query must not be
+      // unbounded. 1000 is the repository's default cap; passed explicitly for clarity.
+      var entries = await _playHistoryRepository.GetByDateRangeAsync(today, tomorrow, 1000, 0);
       return Ok(entries.Select(MapToDto).ToList());
     }
     catch (Exception ex)
