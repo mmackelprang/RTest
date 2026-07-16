@@ -858,17 +858,9 @@
     counter-reset: preset;
   }
 
-  /* Thin custom scrollbar */
-  .rcp-presets-list::-webkit-scrollbar {
-    width: 3px;
-  }
-  .rcp-presets-list::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  .rcp-presets-list::-webkit-scrollbar-thumb {
-    background: rgba(240, 168, 48, 0.15);
-    border-radius: 3px;
-  }
+  /* Scrollbar reconciled (P1e): the local amber-thumb override was removed so
+     the canonical global thin dark scrollbar in design-system.css §19 applies
+     here too. */
 
   .rcp-presets-empty {
     display: flex;
