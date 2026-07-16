@@ -25,16 +25,46 @@ public interface IPlayHistoryRepository
     CancellationToken ct = default);
 
   /// <summary>
-  /// Gets play history entries within a date range.
+  /// Gets play history entries within a date range, most recent first, with paging.
+  /// The result is always bounded by <paramref name="limit"/> (a sensible default is
+  /// applied when null) so a wide range cannot materialize the entire table into memory.
+  /// </summary>
+  /// <param name="start">The start date/time.</param>
+  /// <param name="end">The end date/time.</param>
+  /// <param name="limit">Maximum number of entries to return. When null, the repository
+  /// applies a bounded default rather than returning the whole range.</param>
+  /// <param name="offset">Number of entries to skip for pagination. When null, 0.</param>
+  /// <param name="ct">Cancellation token.</param>
+  /// <returns>A bounded, paged list of play history entries within the range.</returns>
+  Task<IReadOnlyList<PlayHistoryEntry>> GetByDateRangeAsync(
+    DateTime start,
+    DateTime end,
+    int? limit = null,
+    int? offset = null,
+    CancellationToken ct = default);
+
+  /// <summary>
+  /// Counts the play history entries within a date range without materializing the rows.
+  /// Used alongside <see cref="GetByDateRangeAsync"/> to report an accurate total for
+  /// paginated views.
   /// </summary>
   /// <param name="start">The start date/time.</param>
   /// <param name="end">The end date/time.</param>
   /// <param name="ct">Cancellation token.</param>
-  /// <returns>A list of play history entries within the range.</returns>
-  Task<IReadOnlyList<PlayHistoryEntry>> GetByDateRangeAsync(
+  /// <returns>The total number of entries in the range.</returns>
+  Task<int> GetCountByDateRangeAsync(
     DateTime start,
     DateTime end,
     CancellationToken ct = default);
+
+  /// <summary>
+  /// Deletes play history entries whose PlayedAt is older than the given cutoff.
+  /// Used by the scheduled retention prune to keep the table bounded.
+  /// </summary>
+  /// <param name="cutoff">Entries with PlayedAt strictly before this are deleted.</param>
+  /// <param name="ct">Cancellation token.</param>
+  /// <returns>The number of entries deleted.</returns>
+  Task<int> PruneOlderThanAsync(DateTime cutoff, CancellationToken ct = default);
 
   /// <summary>
   /// Gets play history entries for a specific source type.

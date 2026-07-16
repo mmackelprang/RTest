@@ -544,6 +544,105 @@ public class SqlitePlayHistoryRepositoryTests : IAsyncLifetime
     Assert.Equal(0, closed);
   }
 
+  [Fact]
+  public async Task GetByDateRangeAsync_RespectsLimit()
+  {
+    // Arrange — 5 entries all within the range, one hour apart.
+    var now = DateTime.UtcNow;
+    for (int i = 0; i < 5; i++)
+    {
+      await _repository.RecordPlayAsync(
+        CreateTestHistoryEntry() with { PlayedAt = now.AddHours(-i) });
+    }
+
+    // Act
+    var page = await _repository.GetByDateRangeAsync(now.AddHours(-24), now.AddHours(1), limit: 2);
+
+    // Assert — limit caps the result; ordered most-recent first.
+    Assert.Equal(2, page.Count);
+    Assert.True(page[0].PlayedAt >= page[1].PlayedAt);
+  }
+
+  [Fact]
+  public async Task GetByDateRangeAsync_RespectsOffset()
+  {
+    // Arrange — 5 entries, deterministic descending order by PlayedAt.
+    var now = DateTime.UtcNow;
+    for (int i = 0; i < 5; i++)
+    {
+      await _repository.RecordPlayAsync(
+        CreateTestHistoryEntry() with { PlayedAt = now.AddHours(-i) });
+    }
+
+    var start = now.AddHours(-24);
+    var end = now.AddHours(1);
+
+    // Act — full ordered list vs. an offset page.
+    var all = await _repository.GetByDateRangeAsync(start, end, limit: 10, offset: 0);
+    var pageAfterOffset = await _repository.GetByDateRangeAsync(start, end, limit: 2, offset: 2);
+
+    // Assert — the offset page starts where the first two left off.
+    Assert.Equal(5, all.Count);
+    Assert.Equal(2, pageAfterOffset.Count);
+    Assert.Equal(all[2].Id, pageAfterOffset[0].Id);
+    Assert.Equal(all[3].Id, pageAfterOffset[1].Id);
+  }
+
+  [Fact]
+  public async Task GetCountByDateRangeAsync_CountsOnlyEntriesInRange()
+  {
+    // Arrange — two inside the range, one outside (older than start).
+    var now = DateTime.UtcNow;
+    await _repository.RecordPlayAsync(CreateTestHistoryEntry() with { PlayedAt = now.AddHours(-1) });
+    await _repository.RecordPlayAsync(CreateTestHistoryEntry() with { PlayedAt = now.AddHours(-2) });
+    await _repository.RecordPlayAsync(CreateTestHistoryEntry() with { PlayedAt = now.AddHours(-10) });
+
+    // Act
+    var count = await _repository.GetCountByDateRangeAsync(now.AddHours(-3), now);
+
+    // Assert
+    Assert.Equal(2, count);
+  }
+
+  [Fact]
+  public async Task PruneOlderThanAsync_DeletesOnlyEntriesOlderThanCutoff()
+  {
+    // Arrange — two recent, two old.
+    var now = DateTime.UtcNow;
+    var recent1 = CreateTestHistoryEntry() with { PlayedAt = now.AddDays(-1) };
+    var recent2 = CreateTestHistoryEntry() with { PlayedAt = now.AddDays(-10) };
+    var old1 = CreateTestHistoryEntry() with { PlayedAt = now.AddDays(-200) };
+    var old2 = CreateTestHistoryEntry() with { PlayedAt = now.AddDays(-365) };
+    await _repository.RecordPlayAsync(recent1);
+    await _repository.RecordPlayAsync(recent2);
+    await _repository.RecordPlayAsync(old1);
+    await _repository.RecordPlayAsync(old2);
+
+    // Act — prune anything older than 180 days.
+    var deleted = await _repository.PruneOlderThanAsync(now.AddDays(-180));
+
+    // Assert — only the two old entries are gone; recent ones survive.
+    Assert.Equal(2, deleted);
+    Assert.NotNull(await _repository.GetByIdAsync(recent1.Id));
+    Assert.NotNull(await _repository.GetByIdAsync(recent2.Id));
+    Assert.Null(await _repository.GetByIdAsync(old1.Id));
+    Assert.Null(await _repository.GetByIdAsync(old2.Id));
+  }
+
+  [Fact]
+  public async Task PruneOlderThanAsync_ReturnsZeroWhenNothingToPrune()
+  {
+    // Arrange — a single recent entry.
+    var now = DateTime.UtcNow;
+    await _repository.RecordPlayAsync(CreateTestHistoryEntry() with { PlayedAt = now.AddDays(-1) });
+
+    // Act
+    var deleted = await _repository.PruneOlderThanAsync(now.AddDays(-180));
+
+    // Assert
+    Assert.Equal(0, deleted);
+  }
+
   private static PlayHistoryEntry CreateTestHistoryEntry()
   {
     return new PlayHistoryEntry

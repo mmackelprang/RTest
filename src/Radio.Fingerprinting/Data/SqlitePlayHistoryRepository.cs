@@ -78,13 +78,28 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
     return await ReadPlayHistoryListAsync(cmd, ct);
   }
 
+  /// <summary>
+  /// Default cap applied to <see cref="GetByDateRangeAsync"/> when the caller does not
+  /// supply an explicit limit. Prevents a wide date range from materializing the whole
+  /// table (which at scale is a multi-tens-of-MB transient allocation / OOM risk).
+  /// </summary>
+  private const int DefaultDateRangeLimit = 1000;
+
   /// <inheritdoc/>
   public async Task<IReadOnlyList<PlayHistoryEntry>> GetByDateRangeAsync(
     DateTime start,
     DateTime end,
+    int? limit = null,
+    int? offset = null,
     CancellationToken ct = default)
   {
     var conn = await _dataConnection.GetConnectionAsync(ct);
+
+    // LIMIT/OFFSET are pushed into SQL (same pattern as SearchAsync) so the database —
+    // not process memory — bounds the result set. A null limit falls back to a bounded
+    // default rather than an unbounded scan of the range.
+    var effectiveLimit = limit is > 0 ? limit.Value : DefaultDateRangeLimit;
+    var effectiveOffset = offset is > 0 ? offset.Value : 0;
 
     var sql = """
       SELECT h.Id, h.TrackMetadataId, h.FingerprintId, h.PlayedAt, h.EndedAt, h.Source, h.MetadataSource, h.SourceDetails,
@@ -94,14 +109,56 @@ public sealed class SqlitePlayHistoryRepository : IPlayHistoryRepository
       LEFT JOIN TrackMetadata m ON h.TrackMetadataId = m.Id
       WHERE h.PlayedAt >= @Start AND h.PlayedAt <= @End
       ORDER BY h.PlayedAt DESC
+      LIMIT @Limit OFFSET @Offset
       """;
 
     await using var cmd = conn.CreateCommand();
     cmd.CommandText = sql;
     cmd.Parameters.AddWithValue("@Start", start.ToString("O"));
     cmd.Parameters.AddWithValue("@End", end.ToString("O"));
+    cmd.Parameters.AddWithValue("@Limit", effectiveLimit);
+    cmd.Parameters.AddWithValue("@Offset", effectiveOffset);
 
     return await ReadPlayHistoryListAsync(cmd, ct);
+  }
+
+  /// <inheritdoc/>
+  public async Task<int> GetCountByDateRangeAsync(
+    DateTime start,
+    DateTime end,
+    CancellationToken ct = default)
+  {
+    var conn = await _dataConnection.GetConnectionAsync(ct);
+
+    await using var cmd = conn.CreateCommand();
+    cmd.CommandText = """
+      SELECT COUNT(*)
+      FROM PlayHistory h
+      WHERE h.PlayedAt >= @Start AND h.PlayedAt <= @End
+      """;
+    cmd.Parameters.AddWithValue("@Start", start.ToString("O"));
+    cmd.Parameters.AddWithValue("@End", end.ToString("O"));
+
+    return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+  }
+
+  /// <inheritdoc/>
+  public async Task<int> PruneOlderThanAsync(DateTime cutoff, CancellationToken ct = default)
+  {
+    var conn = await _dataConnection.GetConnectionAsync(ct);
+
+    await using var cmd = conn.CreateCommand();
+    cmd.CommandText = "DELETE FROM PlayHistory WHERE PlayedAt < @Cutoff";
+    cmd.Parameters.AddWithValue("@Cutoff", cutoff.ToString("O"));
+
+    var rowsAffected = await cmd.ExecuteNonQueryAsync(ct);
+    if (rowsAffected > 0)
+    {
+      _logger.LogInformation(
+        "Pruned {Count} play history entries older than {Cutoff}", rowsAffected, cutoff);
+    }
+
+    return rowsAffected;
   }
 
   /// <inheritdoc/>

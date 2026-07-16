@@ -96,7 +96,9 @@ builder.Services.AddRadioServices();
 // and binds Display:Weather → WeatherDisplayOptions. See ADR-022.
 builder.Services.AddRadioWeather(builder.Configuration);
 
-// Add diagnostic capture service
+// Add diagnostic capture service (+ bind retention options for its output pruning)
+builder.Services.Configure<Radio.Core.Configuration.DiagnosticsOptions>(
+  builder.Configuration.GetSection(Radio.Core.Configuration.DiagnosticsOptions.SectionName));
 builder.Services.AddSingleton<Radio.Infrastructure.Audio.Diagnostics.DiagnosticCaptureService>();
 
 // Add sleep/standby mode service
