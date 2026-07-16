@@ -7,6 +7,16 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Workstation GC (non-Server, non-concurrent) on this 4-core Intel N100 box.
+         Microsoft.NET.Sdk.Web defaults to Server GC, which allocates one heap per
+         logical core and is slow to release committed memory back to the OS. On a
+         resource-constrained single-box deployment shared with RotaryPhone + audio
+         pipeline, Workstation GC trims steady-state RSS by ~60-140MB and returns
+         memory to the OS far more promptly. Concurrent GC is also disabled because
+         the audio thread is already CPU-affinity-pinned (radio-api.service cores 2,3)
+         and background GC threads would compete with the real-time audio path. -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Serilog.Sinks.Async" Version="2.1.0" />

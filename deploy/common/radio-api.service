@@ -37,6 +37,17 @@ LimitRTPRIO=99
 LimitMEMLOCK=infinity
 # === end audio-thread isolation ===
 
+# === Memory guard (SOFT — added 2026-07-16, memory-hardening) ===
+# MemoryHigh is a SOFT limit: when the cgroup's memory usage exceeds it the
+# kernel throttles the process and reclaims aggressively, but it is NEVER
+# OOM-killed for crossing it. This is deliberately NOT MemoryMax (a hard cap
+# that WOULD OOM-kill) — killing the audio service on a memory spike is worse
+# than a brief throttle. 350M is generous headroom above the observed ~146MB
+# steady-state cgroup footprint, leaving room for transient allocations
+# (fingerprinting buffers, PlayHistory queries) without normal-operation churn.
+MemoryHigh=350M
+# === end memory guard ===
+
 ExecStart=/opt/radio-console/api/Radio.API
 Restart=always
 RestartSec=10

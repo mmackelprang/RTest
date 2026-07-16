@@ -55,7 +55,28 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
 
   // Maps object path to device info
   private readonly Dictionary<ObjectPath, BluetoothDeviceInfo> _deviceCache = new();
-  private readonly HashSet<ObjectPath> _watchedDevicePaths = new();
+
+  // Maps a watched device path -> the generation of the subscribe attempt that owns it.
+  // Doubles as the duplicate-watch dedup guard (presence == already being watched). The
+  // generation token disambiguates concurrent subscribe attempts for the same path: a
+  // slow WatchPropertiesAsync completion compares its captured generation against the
+  // current one before storing its watcher, so an evict+rediscover that raced ahead of
+  // it can't be clobbered (which would orphan the newer watcher and duplicate events).
+  private readonly Dictionary<ObjectPath, long> _watchedDevicePaths = new();
+  private long _watchGenerationCounter;
+
+  // Maps device path -> its per-device D-Bus PropertiesChanged subscription. The
+  // IDisposable returned by WatchPropertiesAsync used to be discarded, leaking one
+  // D-Bus match rule + callback delegate for every device ever discovered. We now
+  // retain each subscription so it can be disposed when the device is removed
+  // (InterfacesRemoved) or on shutdown. Guarded by the _watchedDevicePaths lock —
+  // the two collections are always mutated together.
+  private readonly Dictionary<ObjectPath, IDisposable> _devicePropertyWatchers = new();
+
+  // Subscription to BlueZ's InterfacesRemoved signal. Without it, _deviceCache /
+  // _watchedDevicePaths / _devicePropertyWatchers grew unbounded: every discovered
+  // device (paired or not) was added and never evicted over long uptimes.
+  private IDisposable? _interfacesRemovedWatcher;
   private readonly SemaphoreSlim _captureDeviceLock = new(1, 1);
   private readonly object _mediaPlayerLock = new();
   private bool _started;
@@ -510,6 +531,11 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       // Watch for new interfaces (device connects/disconnects)
       _discoveryWatcher = await _objectManager.WatchInterfacesAddedAsync(OnInterfaceAdded);
 
+      // Watch for removed interfaces so devices that BlueZ drops (unpaired, or a
+      // discovered-but-unpaired device that ages out of the object tree) are evicted
+      // from our in-memory caches and their per-device property watcher is disposed.
+      _interfacesRemovedWatcher = await _objectManager.WatchInterfacesRemovedAsync(OnInterfaceRemoved);
+
       // Set up property watchers on all existing devices so we detect
       // reconnections from already-paired phones.
       await WatchExistingDevicesAsync();
@@ -722,14 +748,18 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       return;
     }
 
-    // Prevent duplicate watchers — each fires DeviceConnected independently
+    // Prevent duplicate watchers — each fires DeviceConnected independently. Claim the
+    // path and capture a generation token identifying this specific subscribe attempt.
+    long myGeneration;
     lock (_watchedDevicePaths)
     {
-      if (!_watchedDevicePaths.Add(devicePath))
+      if (_watchedDevicePaths.ContainsKey(devicePath))
       {
         _logger.LogDebug("Already watching device properties at {Path}, skipping", devicePath);
         return;
       }
+      myGeneration = ++_watchGenerationCounter;
+      _watchedDevicePaths[devicePath] = myGeneration;
     }
 
     try
@@ -737,7 +767,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       var device = _connection.CreateProxy<Linux.IDevice1>(
         Linux.BluezConstants.ServiceName, devicePath);
 
-      await device.WatchPropertiesAsync(changes =>
+      var watcher = await device.WatchPropertiesAsync(changes =>
       {
         foreach (var prop in changes.Changed)
         {
@@ -849,10 +879,107 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
           }
         }
       });
+
+      // Retain the subscription so it can be disposed on device removal / shutdown.
+      // Only store it if THIS attempt still owns the path (its generation is current).
+      // If the device was evicted while we were subscribing — or evicted and then
+      // re-watched by a newer attempt — the generation won't match, so we dispose this
+      // now-orphaned watcher instead of leaking it or clobbering the newer one.
+      bool stillMine;
+      lock (_watchedDevicePaths)
+      {
+        stillMine = _watchedDevicePaths.TryGetValue(devicePath, out var gen) && gen == myGeneration;
+        if (stillMine)
+        {
+          _devicePropertyWatchers[devicePath] = watcher;
+        }
+      }
+
+      if (!stillMine)
+      {
+        watcher.Dispose();
+      }
     }
     catch (Exception ex)
     {
+      // Subscription failed — release our claim so a later discovery of the same device
+      // can retry instead of being permanently blocked by the dedup guard. Only clear if
+      // we still own it; a newer attempt may already have taken the path over.
+      lock (_watchedDevicePaths)
+      {
+        if (_watchedDevicePaths.TryGetValue(devicePath, out var gen) && gen == myGeneration)
+        {
+          _watchedDevicePaths.Remove(devicePath);
+        }
+      }
       _logger.LogDebug(ex, "Failed to watch device properties at {Path}", devicePath);
+    }
+  }
+
+  /// <summary>
+  /// Handles BlueZ's InterfacesRemoved signal. Fires when a device is unpaired or when a
+  /// discovered-but-unpaired device ages out of BlueZ's object tree. When the Device1
+  /// interface itself is removed (the whole device object is gone) we evict it from all
+  /// in-memory tracking so the caches don't grow unbounded over long uptimes. A plain
+  /// disconnect does NOT remove Device1 (it only flips Connected=false), so this leaves
+  /// paired-but-disconnected devices in the cache — exactly what we want for reconnects.
+  /// </summary>
+  private void OnInterfaceRemoved((ObjectPath objectPath, string[] interfaces) change)
+  {
+    if (Array.IndexOf(change.interfaces, Linux.BluezConstants.DeviceInterface) < 0)
+    {
+      return;
+    }
+
+    BluetoothDeviceInfo? removed;
+    lock (_deviceCache)
+    {
+      _deviceCache.TryGetValue(change.objectPath, out removed);
+    }
+
+    EvictDevice(change.objectPath);
+
+    if (removed != null)
+    {
+      _logger.LogInformation(
+        "Bluetooth device removed from BlueZ: {DeviceName} ({Address}) — evicted from cache",
+        removed.Name, removed.Address);
+    }
+  }
+
+  /// <summary>
+  /// Evicts a device from all in-memory tracking: drops its cached info and its "watched"
+  /// marker, and disposes its per-device PropertiesChanged subscription. Idempotent and
+  /// safe to call for unknown paths. Centralizes teardown so the InterfacesRemoved signal
+  /// handler and explicit unpair share identical cleanup.
+  /// </summary>
+  private void EvictDevice(ObjectPath devicePath)
+  {
+    IDisposable? watcher = null;
+    lock (_watchedDevicePaths)
+    {
+      _watchedDevicePaths.Remove(devicePath);
+      if (_devicePropertyWatchers.Remove(devicePath, out var w))
+      {
+        watcher = w;
+      }
+    }
+
+    lock (_deviceCache)
+    {
+      _deviceCache.Remove(devicePath);
+    }
+
+    if (watcher != null)
+    {
+      try
+      {
+        watcher.Dispose();
+      }
+      catch (Exception ex)
+      {
+        _logger.LogDebug(ex, "Disposing device property watcher for {Path} threw", devicePath);
+      }
     }
   }
 
@@ -931,10 +1058,10 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       }
 
       await _adapter.RemoveDeviceAsync(devicePath.Value);
-      lock (_deviceCache)
-      {
-        _deviceCache.Remove(devicePath.Value);
-      }
+      // Evict from all caches and dispose the per-device property watcher. BlueZ also
+      // fires InterfacesRemoved for this path, but doing it here makes cleanup immediate
+      // and deterministic (EvictDevice is idempotent, so the signal is a harmless no-op).
+      EvictDevice(devicePath.Value);
       _logger.LogInformation("Unpaired device {Address}", deviceAddress);
       return true;
     }
@@ -2254,6 +2381,30 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
     _playerPropertiesWatcher?.Dispose();
     _transportPropertiesWatcher?.Dispose();
     _discoveryWatcher?.Dispose();
+    _interfacesRemovedWatcher?.Dispose();
+    _interfacesRemovedWatcher = null;
+
+    // Dispose every per-device PropertiesChanged subscription so no D-Bus match rules
+    // or delegates outlive the service.
+    List<IDisposable> deviceWatchers;
+    lock (_watchedDevicePaths)
+    {
+      deviceWatchers = _devicePropertyWatchers.Values.ToList();
+      _devicePropertyWatchers.Clear();
+      _watchedDevicePaths.Clear();
+    }
+    foreach (var deviceWatcher in deviceWatchers)
+    {
+      try
+      {
+        deviceWatcher.Dispose();
+      }
+      catch (Exception ex)
+      {
+        _logger.LogDebug(ex, "Disposing a device property watcher during shutdown threw");
+      }
+    }
+
     _nativeStream?.Dispose();
     _nativeStream = null;
     _captureEngine?.Dispose();
