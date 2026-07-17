@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using Radio.Web.Models;
 
 namespace Radio.Web.Components.Pages;
@@ -40,5 +42,71 @@ public static class PhoneCallFormatting
 
     ts = TimeSpan.FromSeconds(Math.Round(ts.TotalSeconds));
     return ts.TotalHours >= 1 ? ts.ToString(@"h\:mm\:ss") : ts.ToString(@"m\:ss");
+  }
+
+  // Glanceable, relative feed timestamp (replaces the verbose "6/28/2026 4:43 PM"
+  // ToString("g") in the Messages feed). Rules per the phone dark-theme handoff
+  // copy.md: today → "4:43 PM", yesterday → "Yesterday", within the last week →
+  // weekday ("Mon"), same calendar year → "Jun 28", older → "6/28/25". Formatted
+  // with InvariantCulture so the kiosk (en-US) and CI (any locale) agree — the
+  // strings are asserted verbatim in tests. Pass a local DateTime; `nowLocal`
+  // exists only so tests can pin "now" deterministically.
+  public static string FormatFeedTimestamp(DateTime localTime, DateTime? nowLocal = null)
+  {
+    var now = nowLocal ?? DateTime.Now;
+    var today = now.Date;
+    var day = localTime.Date;
+
+    if (day == today)
+    {
+      return localTime.ToString("h:mm tt", CultureInfo.InvariantCulture);
+    }
+    if (day == today.AddDays(-1))
+    {
+      return "Yesterday";
+    }
+    // 2–6 days ago → weekday name. (Exactly 7 days ago falls through so it can't
+    // collide with today's weekday.)
+    if (day > today.AddDays(-7))
+    {
+      return localTime.ToString("ddd", CultureInfo.InvariantCulture);
+    }
+    if (localTime.Year == now.Year)
+    {
+      return localTime.ToString("MMM d", CultureInfo.InvariantCulture);
+    }
+    return localTime.ToString("M/d/yy", CultureInfo.InvariantCulture);
+  }
+
+  // Present a raw phone number in the compact secondary slot beneath a resolved
+  // contact name. US 10-digit (or 11-digit with a leading country "1") →
+  // "(908) 555-0142". Anything else (short codes, already-formatted, international)
+  // is returned trimmed as-is so we never mangle a number we don't understand.
+  public static string FormatPhoneNumber(string? raw)
+  {
+    if (string.IsNullOrWhiteSpace(raw))
+    {
+      return "";
+    }
+
+    var digits = new StringBuilder(raw.Length);
+    foreach (var ch in raw)
+    {
+      if (char.IsDigit(ch))
+      {
+        digits.Append(ch);
+      }
+    }
+
+    var d = digits.ToString();
+    if (d.Length == 11 && d[0] == '1')
+    {
+      d = d[1..];
+    }
+    if (d.Length == 10)
+    {
+      return $"({d[..3]}) {d[3..6]}-{d[6..]}";
+    }
+    return raw.Trim();
   }
 }

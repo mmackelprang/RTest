@@ -17,7 +17,12 @@
     {
       <span class="vm-type-label">vmail</span>
     }
-    <span class="vm-row-duration">@DurationDisplay</span>
+    @* Meta stack mirrors the redesigned call/text rows: smart timestamp over the
+       duration, so every feed kind shares the same right-aligned spine. *@
+    <div class="list-item-meta-stack">
+      <span class="list-item-meta">@PhoneCallFormatting.FormatFeedTimestamp(Item.ReceivedAt.ToLocalTime())</span>
+      <span class="vm-row-duration">@DurationDisplay</span>
+    </div>
     <RadzenIcon Icon="@(Expanded ? "expand_more" : "chevron_right")" />
   </button>
 
