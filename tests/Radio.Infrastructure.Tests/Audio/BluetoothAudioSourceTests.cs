@@ -720,4 +720,68 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
       hasArt && art is string s && !string.IsNullOrEmpty(s),
       "Song A's art must not leak onto the newly-selected Song B");
   }
+
+  [Fact]
+  public async Task PendingArtDownload_CompletingAfterTrackChange_DoesNotLeakButIsCached()
+  {
+    // The generation guard must stop an art download that was kicked off for
+    // Song A but only COMPLETES after the user has already switched to Song B
+    // from writing Song A's art onto Song B's live metadata — while still
+    // caching it so a later return to Song A restores it. Unlike the other
+    // tests, this drives a genuine in-flight race (the download is still
+    // pending when the track changes), so it fails if the _trackGeneration
+    // guard is removed rather than just exercising the synchronous clear.
+    var tcs = new TaskCompletionSource<string?>();
+    var cacheMock = new Mock<IAlbumArtCacheService>();
+    cacheMock
+      .Setup(c => c.SaveFromUrlAsync("https://cdn.example.com/a.jpg"))
+      .Returns(tcs.Task);
+
+    var identificationService = BuildIdentificationServiceForTests();
+
+    await _source.DisposeAsync();
+    _source = new BluetoothAudioSource(
+      _loggerMock.Object,
+      _deviceManagerMock.Object,
+      _mockBluetooth,
+      _options,
+      identificationService: identificationService,
+      metricsCollector: _metricsMock.Object,
+      serviceScopeFactory: BuildScopeFactory(),
+      albumArtCache: cacheMock.Object);
+
+    // Song A arrives, SongRec hands back a REMOTE art URL — the download
+    // (SaveFromUrlAsync) is now pending on the TCS and has NOT completed.
+    _mockBluetooth.SimulateMetadataChange("Song A", "Artist A", albumArtUrl: null);
+    identificationService.RaiseTrackIdentifiedForTesting(new TrackIdentifiedEventArgs(
+      new TrackMetadata
+      {
+        Id = Guid.NewGuid().ToString(),
+        Title = "Song A",
+        Artist = "Artist A",
+        CoverArtUrl = "https://cdn.example.com/a.jpg",
+        Source = MetadataSource.Shazam,
+        CreatedAt = DateTime.UtcNow,
+        UpdatedAt = DateTime.UtcNow
+      },
+      confidence: 0.95));
+
+    // While the download is still in flight, the user switches to Song B.
+    _mockBluetooth.SimulateMetadataChange("Song B", "Artist B", albumArtUrl: null);
+
+    // NOW the Song A download completes.
+    tcs.SetResult("/api/albumart/a.jpg");
+    await Task.Delay(200); // let the awaiting continuation run
+
+    // Guard held: Song A's late art must NOT have leaked onto Song B.
+    var hasBArt = _source.Metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var bArt);
+    Assert.False(
+      hasBArt && bArt is string bs && !string.IsNullOrEmpty(bs),
+      "A late-completing download for the previous track must not write onto the new track");
+
+    // But the art WAS cached — returning to Song A restores it without a new identification.
+    _mockBluetooth.SimulateMetadataChange("Song A", "Artist A", albumArtUrl: null);
+    Assert.True(_source.Metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var artBack));
+    Assert.Equal("/api/albumart/a.jpg", artBack);
+  }
 }
