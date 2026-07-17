@@ -24,6 +24,7 @@ public class PlaybackProgressProjectionTests
     p.ElapsedSeconds.Should().Be(0);
     p.TotalSeconds.Should().Be(0);
     p.Percent.Should().Be(0);
+    p.PercentDisplay.Should().Be("0%");
     p.ElapsedDisplay.Should().Be("0:00");
     // Em-dash placeholder when the total is unknown / zero.
     p.TotalDisplay.Should().Be("—");
@@ -36,10 +37,52 @@ public class PlaybackProgressProjectionTests
 
     p.ElapsedSeconds.Should().Be(30);
     p.TotalSeconds.Should().Be(180);
-    // 30/180 * 100 ≈ 16.666…
+    // 30/180 * 100 ≈ 16.666… — the raw Percent stays full-precision so the
+    // progress-bar width animates smoothly.
     p.Percent.Should().BeApproximately(16.666, 0.01);
+    // PercentDisplay rounds to a whole number for the on-screen readout.
+    p.PercentDisplay.Should().Be("17%");
     p.ElapsedDisplay.Should().Be("0:30");
     p.TotalDisplay.Should().Be("3:00");
+  }
+
+  // ─── PercentDisplay rounding (bug fix) ──────────────────────────────────
+  //
+  // Position/duration sources (Bluetooth especially) produce a percent with a
+  // long decimal tail — e.g. 100/209 → 47.8468…. The raw Percent must stay
+  // full-precision for the bar width, but PercentDisplay must be a rounded,
+  // whole-number string so the UI never shows "47.8468899521%".
+
+  [Fact]
+  public void From_FractionalPercent_PercentDisplayRoundsToWholeNumber()
+  {
+    // 100 / 209 * 100 = 47.8468899521… — a realistic BT position/duration ratio.
+    var p = PlaybackProgressProjection.From(100, 209);
+
+    // Raw value keeps its precision for the bar width.
+    p.Percent.Should().BeApproximately(47.8468, 0.001);
+    // Displayed value is rounded to a whole number with the unit, no decimals.
+    p.PercentDisplay.Should().Be("48%");
+    p.PercentDisplay.Should().NotContain(".");
+  }
+
+  [Fact]
+  public void From_AnyInput_PercentDisplayNeverContainsADecimalPoint()
+  {
+    // Sweep a spread of elapsed/total pairs; none may leak a decimal tail into
+    // the human-readable percent.
+    var samples = new (double elapsed, double total)[]
+    {
+      (1, 3), (2, 7), (5, 6), (100, 209), (17, 60), (0.4, 180), (200, 180), (45, 0), (0, 0)
+    };
+
+    foreach (var (elapsed, total) in samples)
+    {
+      var p = PlaybackProgressProjection.From(elapsed, total);
+      p.PercentDisplay.Should().NotContain(".",
+        $"PercentDisplay for {elapsed}/{total} must be a whole number");
+      p.PercentDisplay.Should().EndWith("%");
+    }
   }
 
   [Fact]
@@ -60,6 +103,7 @@ public class PlaybackProgressProjectionTests
     var p = PlaybackProgressProjection.From(200, 180);
 
     p.Percent.Should().Be(100);
+    p.PercentDisplay.Should().Be("100%");
     // Display strings still reflect the raw elapsed value so the skew is
     // visible to UAT rather than silently truncated.
     p.ElapsedDisplay.Should().Be("3:20");
