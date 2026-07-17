@@ -1,0 +1,14 @@
+[Unit]
+Description=Radio Console post-boot audio verification (diagnostic v1)
+After=radio-api.service
+Wants=radio-api.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/radio-console/radio-audio-verify.sh
+RemainAfterExit=no
+User=root
+SyslogIdentifier=radio-audio-verify
+
+[Install]
+WantedBy=multi-user.target

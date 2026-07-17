@@ -1,0 +1,8 @@
+[Unit]
+Description=Radio Console weekly maintenance (apt upgrade + reboot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/radio-console/radio-weekly-maintenance.sh
