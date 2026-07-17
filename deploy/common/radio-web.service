@@ -21,6 +21,10 @@ CPUAffinity=0 1
 # full rationale on why this is MemoryHigh and not MemoryMax. The Blazor Server UI
 # is lighter than the API; 350M is ample headroom.
 MemoryHigh=350M
+# .NET GC hard heap cap (768 MiB) — folded in from the box-only
+# radio-web.service.d/memory-limit.conf drop-in (IAC audit §3.1). See
+# radio-api.service for the MemoryHigh-vs-GC-cap rationale.
+Environment=DOTNET_GCHeapHardLimit=0x30000000
 # === end memory guard ===
 
 ExecStart=/opt/radio-console/web/Radio.Web

@@ -46,6 +46,11 @@ LimitMEMLOCK=infinity
 # steady-state cgroup footprint, leaving room for transient allocations
 # (fingerprinting buffers, PlayHistory queries) without normal-operation churn.
 MemoryHigh=350M
+# .NET GC hard heap cap (768 MiB). Complements MemoryHigh: this bounds the
+# managed heap the runtime will grow to (GC gets more aggressive as it nears the
+# cap) BEFORE the cgroup soft-throttle engages. Folded in from the box-only
+# radio-api.service.d/memory-limit.conf drop-in (IAC audit §3.1 / P0 memory-hardening).
+Environment=DOTNET_GCHeapHardLimit=0x30000000
 # === end memory guard ===
 
 ExecStart=/opt/radio-console/api/Radio.API
@@ -83,6 +88,10 @@ SupplementaryGroups=bluetooth pulse-access
 # ACL on /run/user/1000 grants the radio user traverse permission
 # (radio-pipewire-access.service sets: setfacl -m u:radio:x /run/user/1000).
 Environment=XDG_RUNTIME_DIR=/run/user/1000
+# DBus session bus — required for obexd (PBAP contact sync) and GNOME sleep/DPMS
+# D-Bus calls. Folded in from the box-only radio-api.service.d/pipewire.conf
+# drop-in (IAC audit §3.1 / P0-3). Same session as XDG_RUNTIME_DIR above.
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
 
 # Security hardening
 # NOTE: ProtectHome=true hides /run/user (PipeWire socket), so we can't use it.

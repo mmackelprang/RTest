@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily restart of radio-api to prevent long-running degradation
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

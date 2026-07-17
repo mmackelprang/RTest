@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly maintenance window: Sunday 03:00 (apt upgrade + reboot)
+
+[Timer]
+OnCalendar=Sun *-*-* 03:00:00
+Persistent=false
+AccuracySec=2min
+
+[Install]
+WantedBy=timers.target
