@@ -518,4 +518,206 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     // And the cache was never touched (MockBehavior.Strict throws on any unset call).
     cacheMock.VerifyNoOtherCalls();
   }
+
+  // -----------------------------------------------------------------------
+  // Resolved-art persistence tests — verify that BT album art survives AVRCP
+  // metadata refreshes, track repeats, and the SongRec re-identification
+  // window instead of being cleared on every metadata event.
+  //
+  // BackgroundIdentificationService pre-caches SongRec art to a local
+  // /api/albumart/... path before raising TrackIdentified, so the value BT
+  // receives is ALREADY browser-fetchable. Re-running SaveFromUrlAsync on it
+  // is a no-op that returns null (cache HttpClient has no BaseAddress), so the
+  // fix skips the download for non-remote URLs (parity with FilePlayer/SDR).
+  // -----------------------------------------------------------------------
+
+  [Fact]
+  public async Task TrackIdentified_WithLocalArtPath_DoesNotReDownload()
+  {
+    // Strict mock — any SaveFromUrlAsync call would throw. The SongRec art is
+    // already a local /api/albumart path, so no re-download must occur.
+    var cacheMock = new Mock<IAlbumArtCacheService>(MockBehavior.Strict);
+    var identificationService = BuildIdentificationServiceForTests();
+
+    await _source.DisposeAsync();
+    _source = new BluetoothAudioSource(
+      _loggerMock.Object,
+      _deviceManagerMock.Object,
+      _mockBluetooth,
+      _options,
+      identificationService: identificationService,
+      metricsCollector: _metricsMock.Object,
+      serviceScopeFactory: BuildScopeFactory(),
+      albumArtCache: cacheMock.Object);
+
+    _mockBluetooth.SimulateMetadataChange("Song", "Artist", albumArtUrl: null);
+
+    // SongRec identifies the track and hands BT an already-local art path
+    // (BackgroundIdentificationService pre-cached it before raising the event).
+    identificationService.RaiseTrackIdentifiedForTesting(new TrackIdentifiedEventArgs(
+      new TrackMetadata
+      {
+        Id = Guid.NewGuid().ToString(),
+        Title = "Song",
+        Artist = "Artist",
+        CoverArtUrl = "/api/albumart/local-abc.jpg",
+        Source = MetadataSource.Shazam,
+        CreatedAt = DateTime.UtcNow,
+        UpdatedAt = DateTime.UtcNow
+      },
+      confidence: 0.95));
+    await Task.Delay(200);
+
+    // Metadata holds the local path verbatim — no re-download rewrote it.
+    Assert.True(_source.Metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var art));
+    Assert.Equal("/api/albumart/local-abc.jpg", art);
+
+    // Proves the redundant SaveFromUrlAsync download was skipped (strict mock
+    // throws on any unset call).
+    cacheMock.VerifyNoOtherCalls();
+  }
+
+  [Fact]
+  public async Task MetadataRefresh_SameTrack_RestoresResolvedArt()
+  {
+    // Core regression: a plain AVRCP metadata refresh (no art) for the SAME
+    // track that SongRec already resolved must NOT blank out the display.
+    var cacheMock = new Mock<IAlbumArtCacheService>(MockBehavior.Strict);
+    var identificationService = BuildIdentificationServiceForTests();
+
+    await _source.DisposeAsync();
+    _source = new BluetoothAudioSource(
+      _loggerMock.Object,
+      _deviceManagerMock.Object,
+      _mockBluetooth,
+      _options,
+      identificationService: identificationService,
+      metricsCollector: _metricsMock.Object,
+      serviceScopeFactory: BuildScopeFactory(),
+      albumArtCache: cacheMock.Object);
+
+    // Song A arrives (no AVRCP art), then SongRec resolves its art.
+    _mockBluetooth.SimulateMetadataChange("Song A", "Artist A", albumArtUrl: null);
+    identificationService.RaiseTrackIdentifiedForTesting(new TrackIdentifiedEventArgs(
+      new TrackMetadata
+      {
+        Id = Guid.NewGuid().ToString(),
+        Title = "Song A",
+        Artist = "Artist A",
+        CoverArtUrl = "/api/albumart/a.jpg",
+        Source = MetadataSource.Shazam,
+        CreatedAt = DateTime.UtcNow,
+        UpdatedAt = DateTime.UtcNow
+      },
+      confidence: 0.95));
+    await Task.Delay(200);
+    Assert.True(_source.Metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var art1));
+    Assert.Equal("/api/albumart/a.jpg", art1);
+
+    // AVRCP fires another metadata update for the SAME track with no art
+    // (position tick, player re-announce, etc.). The art must be restored
+    // from the per-track cache rather than blanked.
+    _mockBluetooth.SimulateMetadataChange("Song A", "Artist A", albumArtUrl: null);
+
+    Assert.True(_source.Metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var art2));
+    Assert.Equal("/api/albumart/a.jpg", art2);
+  }
+
+  [Fact]
+  public async Task RepeatedTrack_RestoresResolvedArtFromCache()
+  {
+    // A re-selected/repeated track (duplicate-suppressed by
+    // BackgroundIdentificationService, so no new TrackIdentified fires) must
+    // still show art — restored from the per-track cache.
+    var cacheMock = new Mock<IAlbumArtCacheService>(MockBehavior.Strict);
+    var identificationService = BuildIdentificationServiceForTests();
+
+    await _source.DisposeAsync();
+    _source = new BluetoothAudioSource(
+      _loggerMock.Object,
+      _deviceManagerMock.Object,
+      _mockBluetooth,
+      _options,
+      identificationService: identificationService,
+      metricsCollector: _metricsMock.Object,
+      serviceScopeFactory: BuildScopeFactory(),
+      albumArtCache: cacheMock.Object);
+
+    // Song A resolves its art.
+    _mockBluetooth.SimulateMetadataChange("Song A", "Artist A", albumArtUrl: null);
+    identificationService.RaiseTrackIdentifiedForTesting(new TrackIdentifiedEventArgs(
+      new TrackMetadata
+      {
+        Id = Guid.NewGuid().ToString(),
+        Title = "Song A",
+        Artist = "Artist A",
+        CoverArtUrl = "/api/albumart/a.jpg",
+        Source = MetadataSource.Shazam,
+        CreatedAt = DateTime.UtcNow,
+        UpdatedAt = DateTime.UtcNow
+      },
+      confidence: 0.95));
+    await Task.Delay(200);
+    Assert.Equal("/api/albumart/a.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+
+    // Switch to Song B — never resolved, so art is absent.
+    _mockBluetooth.SimulateMetadataChange("Song B", "Artist B", albumArtUrl: null);
+    var hasBArt = _source.Metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var bArt);
+    Assert.False(
+      hasBArt && bArt is string bs && !string.IsNullOrEmpty(bs),
+      "Song B never resolved art, so none should be present");
+
+    // Return to Song A (repeat) — no new TrackIdentified fires, but the cache
+    // restores the previously-resolved art.
+    _mockBluetooth.SimulateMetadataChange("Song A", "Artist A", albumArtUrl: null);
+    Assert.True(_source.Metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var artBack));
+    Assert.Equal("/api/albumart/a.jpg", artBack);
+  }
+
+  [Fact]
+  public async Task TrackChange_DoesNotLeakPreviousArtOntoNewTrack()
+  {
+    // Generation guard: switching to a new, unresolved track must clear art —
+    // the previous song's art must not leak onto it.
+    var cacheMock = new Mock<IAlbumArtCacheService>(MockBehavior.Strict);
+    var identificationService = BuildIdentificationServiceForTests();
+
+    await _source.DisposeAsync();
+    _source = new BluetoothAudioSource(
+      _loggerMock.Object,
+      _deviceManagerMock.Object,
+      _mockBluetooth,
+      _options,
+      identificationService: identificationService,
+      metricsCollector: _metricsMock.Object,
+      serviceScopeFactory: BuildScopeFactory(),
+      albumArtCache: cacheMock.Object);
+
+    // Song A resolves its art.
+    _mockBluetooth.SimulateMetadataChange("Song A", "Artist A", albumArtUrl: null);
+    identificationService.RaiseTrackIdentifiedForTesting(new TrackIdentifiedEventArgs(
+      new TrackMetadata
+      {
+        Id = Guid.NewGuid().ToString(),
+        Title = "Song A",
+        Artist = "Artist A",
+        CoverArtUrl = "/api/albumart/a.jpg",
+        Source = MetadataSource.Shazam,
+        CreatedAt = DateTime.UtcNow,
+        UpdatedAt = DateTime.UtcNow
+      },
+      confidence: 0.95));
+    await Task.Delay(200);
+    Assert.Equal("/api/albumart/a.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+
+    // Switch to Song B (no art, never cached). The display for Song B must
+    // show no art — Song A's art must not carry over.
+    _mockBluetooth.SimulateMetadataChange("Song B", "Artist B", albumArtUrl: null);
+    await Task.Delay(50);
+
+    var hasArt = _source.Metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var art);
+    Assert.False(
+      hasArt && art is string s && !string.IsNullOrEmpty(s),
+      "Song A's art must not leak onto the newly-selected Song B");
+  }
 }

@@ -42,6 +42,24 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private CancellationTokenSource? _captureRetryCts;
   private int _recoveryInProgress;
 
+  // Resolved album art keyed by the AVRCP-derived track key (title|artist).
+  // BT clears AlbumArtUrl on every AVRCP metadata event and relies solely on a
+  // fresh SongRec identification to re-populate it — but SongRec is skipped for
+  // the first seconds of a track, for repeats (duplicate suppression), and for
+  // plain metadata refreshes, leaving the display with no art. Caching the
+  // resolved art lets OnMetadataChanged restore it instantly for a known track.
+  private readonly object _artCacheLock = new();
+  private readonly Dictionary<string, string> _resolvedArtByTrack = new(StringComparer.OrdinalIgnoreCase);
+  private readonly Queue<string> _resolvedArtOrder = new();
+  private const int MaxResolvedArtEntries = 64;
+
+  // Monotonic counter bumped whenever the current track changes. Async art
+  // resolution captures the generation at kickoff and only writes to the live
+  // metadata bag if the track hasn't changed since — otherwise the previous
+  // song's art would leak onto the new track. The art is still cached for reuse.
+  private int _trackGeneration;
+  private string? _currentTrackKey;
+
   /// <summary>Current fingerprinting options (live from IOptionsMonitor).</summary>
   private FingerprintingOptions FpOptions =>
     _fingerprintingOptionsMonitor?.CurrentValue ?? new FingerprintingOptions();
@@ -736,19 +754,36 @@ public class BluetoothAudioSource : USBAudioSourceBase
     }
 
     // Propagate album art URL from AVRCP if available.
-    // Always clear stale art from the previous song — PlayHistoryTracker reads
-    // AlbumArtUrl from source metadata when creating entries, so leftover art
-    // from the previous song would leak into the new song's history entry.
     //
     // AVRCP ArtUrl is usually a file:///data/data/com.android.<player>/cache/...
     // URI on the PHONE'S local filesystem, which the browser cannot fetch. Route
-    // every URL through the album-art cache: it downloads the bytes (for http(s)://)
-    // or returns null (for file:// — HttpClient throws NotSupportedException,
-    // caught inside SaveFromUrlAsync). On null we leave AlbumArtUrl absent so the
-    // UI shows the fallback icon; SongRec, if it later identifies the track via
-    // OnTrackIdentified, will populate the art then.
+    // every remote URL through the album-art cache: it downloads the bytes (for
+    // http(s)://) or returns null (for file:// — HttpClient throws
+    // NotSupportedException, caught inside SaveFromUrlAsync). On null we leave
+    // AlbumArtUrl absent so the UI shows the fallback icon; SongRec, if it later
+    // identifies the track via OnTrackIdentified, will populate the art then.
+
+    // Track-change detection drives the async-art generation guard and the
+    // per-track art cache below.
+    var newTrackKey = MakeTrackKey(e.Title, e.Artist);
+    if (!string.Equals(newTrackKey, _currentTrackKey, StringComparison.Ordinal))
+    {
+      _currentTrackKey = newTrackKey;
+      Interlocked.Increment(ref _trackGeneration);
+    }
+
+    // Always clear stale art from the previous song first (PlayHistoryTracker
+    // reads AlbumArtUrl from source metadata, so leftover art must not leak).
     MetadataInternal.Remove(StandardMetadataKeys.AlbumArtUrl);
-    if (!string.IsNullOrEmpty(e.AlbumArtUrl))
+
+    // Restore art we already resolved for this exact track so the display does
+    // not blank out on AVRCP metadata refreshes, track repeats, or the window
+    // before SongRec re-identifies (and while duplicate-suppression blocks it).
+    if (newTrackKey != null && TryGetResolvedArt(newTrackKey, out var cachedArt))
+    {
+      MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = cachedArt;
+    }
+    else if (!string.IsNullOrEmpty(e.AlbumArtUrl))
     {
       if (_albumArtCache != null && _serviceScopeFactory != null)
       {
@@ -854,6 +889,11 @@ public class BluetoothAudioSource : USBAudioSourceBase
   /// </summary>
   private async Task CacheAvrcpArtAsync(string artUrl, string title, string artist)
   {
+    // Capture the track identity/generation at kickoff so a late-completing
+    // download does not write onto a track that has since changed.
+    var generationAtStart = Volatile.Read(ref _trackGeneration);
+    var trackKey = _currentTrackKey ?? MakeTrackKey(title, artist);
+
     try
     {
       var localUrl = await _albumArtCache!.SaveFromUrlAsync(artUrl);
@@ -865,12 +905,29 @@ public class BluetoothAudioSource : USBAudioSourceBase
         return;
       }
 
-      MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = localUrl;
-      Logger.LogInformation(
-        "Cached AVRCP album art for '{Title}' by '{Artist}': {LocalUrl}",
-        title, artist, localUrl);
+      // Remember the resolved art for this track so future refreshes/repeats can
+      // restore it without a fresh (possibly suppressed) identification.
+      if (trackKey != null)
+      {
+        StoreResolvedArt(trackKey, localUrl);
+      }
 
-      await UpdateRecentPlayHistoryCoverArtAsync(localUrl, title, artist);
+      // Only write to the live metadata if we're still on the same track.
+      if (Volatile.Read(ref _trackGeneration) == generationAtStart)
+      {
+        MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = localUrl;
+        Logger.LogInformation(
+          "Cached AVRCP album art for '{Title}' by '{Artist}': {LocalUrl}",
+          title, artist, localUrl);
+
+        await UpdateRecentPlayHistoryCoverArtAsync(localUrl, title, artist);
+      }
+      else
+      {
+        Logger.LogDebug(
+          "Track changed while caching AVRCP art for '{Title}' by '{Artist}'; cached for reuse but not applied to live metadata",
+          title, artist);
+      }
     }
     catch (Exception ex)
     {
@@ -878,9 +935,68 @@ public class BluetoothAudioSource : USBAudioSourceBase
     }
   }
 
+  /// <summary>
+  /// Normalizes a title+artist pair into a stable cache key. Returns null when
+  /// both are empty (e.g. device-name-only metadata) so we don't cache art
+  /// against a meaningless key.
+  /// </summary>
+  private static string? MakeTrackKey(string? title, string? artist)
+  {
+    var t = title?.Trim() ?? string.Empty;
+    var a = artist?.Trim() ?? string.Empty;
+    if (t.Length == 0 && a.Length == 0)
+    {
+      return null;
+    }
+    return $"{t}|{a}".ToLowerInvariant();
+  }
+
+  /// <summary>True when the URL is an absolute remote URL we should download
+  /// and cache. Local proxy paths (/api/albumart/...) and data: URIs are already
+  /// browser-fetchable and must NOT be re-run through SaveFromUrlAsync (whose
+  /// HttpClient has no BaseAddress and would throw on a relative path).</summary>
+  private static bool IsRemoteUrl(string url) =>
+    url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+    url.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+
+  private void StoreResolvedArt(string trackKey, string artUrl)
+  {
+    lock (_artCacheLock)
+    {
+      if (!_resolvedArtByTrack.ContainsKey(trackKey))
+      {
+        _resolvedArtOrder.Enqueue(trackKey);
+        if (_resolvedArtOrder.Count > MaxResolvedArtEntries)
+        {
+          var evicted = _resolvedArtOrder.Dequeue();
+          _resolvedArtByTrack.Remove(evicted);
+        }
+      }
+      _resolvedArtByTrack[trackKey] = artUrl;
+    }
+  }
+
+  private bool TryGetResolvedArt(string trackKey, out string artUrl)
+  {
+    lock (_artCacheLock)
+    {
+      return _resolvedArtByTrack.TryGetValue(trackKey, out artUrl!);
+    }
+  }
+
   private async Task CacheAndSetCoverArtUrlAsync(string coverArtUrl, string title, string artist)
   {
-    if (_albumArtCache != null)
+    // Capture the track identity/generation at kickoff so a late-completing
+    // download does not write onto a track that has since changed.
+    var generationAtStart = Volatile.Read(ref _trackGeneration);
+    var trackKey = _currentTrackKey ?? MakeTrackKey(title, artist);
+
+    // BackgroundIdentificationService already caches SongRec art to a local
+    // /api/albumart/... path before raising TrackIdentified. Only download when
+    // handed an absolute remote URL — re-running SaveFromUrlAsync on an
+    // already-local path is a no-op that returns null (cache HttpClient has no
+    // BaseAddress), matching how FilePlayer/SDR assign the local path directly.
+    if (_albumArtCache != null && IsRemoteUrl(coverArtUrl))
     {
       var localUrl = await _albumArtCache.SaveFromUrlAsync(coverArtUrl);
       if (!string.IsNullOrEmpty(localUrl))
@@ -889,11 +1005,26 @@ public class BluetoothAudioSource : USBAudioSourceBase
       }
     }
 
-    MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = coverArtUrl;
-    Logger.LogInformation("Cover art found for '{Title}' by '{Artist}': {Url}", title, artist, coverArtUrl);
+    // Remember the resolved art for this track so future refreshes/repeats can
+    // restore it without a fresh (possibly suppressed) identification.
+    if (trackKey != null)
+    {
+      StoreResolvedArt(trackKey, coverArtUrl);
+    }
 
-    // Update the most recent BT play history entry with the resolved cover art
-    await UpdateRecentPlayHistoryCoverArtAsync(coverArtUrl, title, artist);
+    // Only write to the live metadata if we're still on the same track.
+    if (Volatile.Read(ref _trackGeneration) == generationAtStart)
+    {
+      MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = coverArtUrl;
+      Logger.LogInformation("Cover art found for '{Title}' by '{Artist}': {Url}", title, artist, coverArtUrl);
+      await UpdateRecentPlayHistoryCoverArtAsync(coverArtUrl, title, artist);
+    }
+    else
+    {
+      Logger.LogDebug(
+        "Track changed while resolving cover art for '{Title}' by '{Artist}'; cached for reuse but not applied to live metadata",
+        title, artist);
+    }
   }
 
   /// <summary>
