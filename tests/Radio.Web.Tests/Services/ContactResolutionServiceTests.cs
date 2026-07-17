@@ -77,15 +77,30 @@ public class ContactResolutionServiceTests
   }
 
   [Fact]
-  public async Task ResolveAsync_NegativeResult_CachedAfterFirstCall()
+  public async Task ResolveAsync_NotFound_CachedAfterFirstCall()
   {
     var handler = new MockHttpHandler(statusCode: HttpStatusCode.NotFound);
     var svc = Create(handler);
 
     Assert.Null(await svc.ResolveAsync("9995551212"));
-    Assert.Null(await svc.ResolveAsync("9995551212"));   // negative cached, not retried
+    Assert.Null(await svc.ResolveAsync("9995551212"));   // definitive miss cached, not retried
     Assert.True(svc.IsResolved("9995551212"));           // confirmed-miss counts as resolved
     Assert.Equal(1, handler.RequestCount);
+  }
+
+  [Fact]
+  public async Task ResolveAsync_TransientFailure_NotCached_AndRetried()
+  {
+    // A 5xx must NOT poison the number: it stays unresolved so the next poll retries.
+    // Otherwise a single backend hiccup on a long-lived kiosk circuit would drop the
+    // contact's name to the raw number for the whole session.
+    var handler = new MockHttpHandler(statusCode: HttpStatusCode.InternalServerError);
+    var svc = Create(handler);
+
+    Assert.Null(await svc.ResolveAsync("9193718044"));
+    Assert.False(svc.IsResolved("9193718044"));   // not cached → eligible for retry
+    Assert.Null(await svc.ResolveAsync("9193718044"));
+    Assert.Equal(2, handler.RequestCount);        // retried, not served from cache
   }
 
   [Fact]

@@ -1,8 +1,23 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Radio.Web.Models;
 
 namespace Radio.Web.Services.ApiClients;
+
+/// <summary>
+/// Outcome of a single contact-number lookup. Distinguishes a definitive
+/// "no such contact" (safe to cache) from a transient backend failure (must NOT
+/// be cached, so the next poll retries) — a long-lived kiosk circuit must recover
+/// its contact names after a backend hiccup rather than poisoning them for the
+/// session.
+/// </summary>
+public enum ContactLookupOutcome
+{
+  Found,
+  NotFound,
+  Unavailable
+}
 
 /// <summary>
 /// API client service for PBAP (Phone Book Access Profile) endpoints
@@ -55,33 +70,39 @@ public class PbapApiService
 
   /// <summary>
   /// Resolve a single phone number to a contact display name via the connected
-  /// device's synced phone book. Returns the name on a match, or null on a 404
-  /// (no match) / unreachable API. Never throws — the Messages feed treats a null
-  /// as "no name yet" and falls back to the formatted number. Callers should cache
-  /// the result (see ContactResolutionService) so the feed issues at most one
-  /// request per unique number.
+  /// device's synced phone book. Returns Found+name on a match, NotFound on a 404
+  /// (no such contact — a definitive answer the caller may cache), or Unavailable
+  /// on any transient failure (5xx, timeout, connection error — the caller must
+  /// NOT cache these so the number is retried later). Never throws.
   /// </summary>
-  public async Task<string?> LookupNumberAsync(string phoneNumber, CancellationToken ct = default)
+  public async Task<(ContactLookupOutcome Outcome, string? Name)> LookupNumberAsync(
+    string phoneNumber, CancellationToken ct = default)
   {
     if (string.IsNullOrWhiteSpace(phoneNumber))
     {
-      return null;
+      return (ContactLookupOutcome.NotFound, null);   // nothing to look up
     }
     try
     {
       var response = await _httpClient.GetAsync(
         $"/api/bluetooth/pbap/lookup?phoneNumber={Uri.EscapeDataString(phoneNumber)}", ct);
+      if (response.StatusCode == HttpStatusCode.NotFound)
+      {
+        return (ContactLookupOutcome.NotFound, null);   // definitive: no such contact
+      }
       if (!response.IsSuccessStatusCode)
       {
-        return null;   // 404 = no contact; any other non-success = treat as unresolved
+        return (ContactLookupOutcome.Unavailable, null);   // transient: retry later
       }
       var dto = await response.Content.ReadFromJsonAsync<PbapLookupDto>(JsonOptions, ct);
-      return string.IsNullOrWhiteSpace(dto?.DisplayName) ? null : dto.DisplayName;
+      return string.IsNullOrWhiteSpace(dto?.DisplayName)
+        ? (ContactLookupOutcome.NotFound, null)
+        : (ContactLookupOutcome.Found, dto.DisplayName);
     }
     catch (Exception ex)
     {
       _logger.LogDebug(ex, "PBAP number lookup failed for {Number}", phoneNumber);
-      return null;
+      return (ContactLookupOutcome.Unavailable, null);   // transient: retry later
     }
   }
 

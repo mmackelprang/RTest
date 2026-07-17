@@ -562,10 +562,14 @@
     @for (var i = 0; i < 5; i++)
     {
       <div class="skeleton-list-row">
-        @* 44px chip block so the skeleton matches the real feed-chip spine and the
-           layout doesn't jump when rows arrive. *@
-        <div class="skeleton skeleton-feed-chip"></div>
-        <div class="skeleton skeleton-list-row-text"></div>
+        @* Shimmering 44px chip + two text bars so the skeleton matches the real
+           feed-chip spine (no layout jump) AND shimmers via the canonical
+           .skeleton-loading primitive. *@
+        <div class="skeleton-loading skeleton-feed-chip"></div>
+        <div class="skeleton-list-row-text">
+          <div class="skeleton-loading skeleton-text" style="width: 42%"></div>
+          <div class="skeleton-loading skeleton-text" style="width: 26%"></div>
+        </div>
       </div>
     }
   </text>;
@@ -634,6 +638,7 @@
   // the FeedItem projection so texts sort newest-first with the other kinds.
   private RenderFragment RenderTextThreadRow(SmsThreadDto thread) => @<button type="button"
         class="list-item-touch @(thread.ThreadId == _openThreadId ? "list-item-active" : "")"
+        aria-label="@($"Conversation with {ResolveThreadName(thread)}{(thread.HasUnread ? ", unread" : "")}")"
         @onclick="@(() => OpenThread(thread.ThreadId))">
     @* Promoted from the old small cyan pill to the shared 44px chip so texts sit on
        the same left spine as calls/voicemail. Unread dot follows the chip (matches

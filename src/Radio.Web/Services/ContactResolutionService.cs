@@ -126,27 +126,60 @@ public class ContactResolutionService
     {
       return Task.FromResult(cached);
     }
-    return _inFlight.GetOrAdd(key, k => LookupAndCacheAsync(k, number!, ct));
+
+    // Dedupe concurrent lookups for the same number: publish a placeholder task
+    // BEFORE starting the work, so the removal-on-completion can never race ahead
+    // of the insert (which would strand a stale task when the request completes
+    // synchronously). Only the caller that wins the insert runs the request.
+    var tcs = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+    var inFlight = _inFlight.GetOrAdd(key, tcs.Task);
+    if (!ReferenceEquals(inFlight, tcs.Task))
+    {
+      return inFlight;   // another call is already resolving this number
+    }
+    _ = RunLookupAsync(key, number!, tcs, ct);
+    return tcs.Task;
   }
 
-  private async Task<string?> LookupAndCacheAsync(string key, string number, CancellationToken ct)
+  private async Task RunLookupAsync(string key, string number,
+    TaskCompletionSource<string?> tcs, CancellationToken ct)
   {
+    string? result = null;
     try
     {
-      var name = await _pbap.LookupNumberAsync(number, ct);
-      _cache[key] = name;   // cache positive AND negative (null) so a miss isn't retried
-      return name;
+      var (outcome, name) = await _pbap.LookupNumberAsync(number, ct);
+      switch (outcome)
+      {
+        case ContactLookupOutcome.Found:
+          _cache[key] = name;   // cache the resolved name
+          result = name;
+          break;
+        case ContactLookupOutcome.NotFound:
+          _cache[key] = null;   // definitive miss — cache so we don't re-request it
+          result = null;
+          break;
+        default:
+          // Transient failure (5xx / timeout / connection error): do NOT cache, so
+          // IsResolved stays false and the next poll retries. Otherwise a single
+          // backend hiccup would poison this number's name for the whole session.
+          result = null;
+          break;
+      }
     }
     catch (Exception ex)
     {
-      // PbapApiService already swallows its own errors, but guard the cache write.
+      // PbapApiService maps its own failures to Unavailable, but guard anyway and
+      // treat anything unexpected as transient (do not cache).
       _logger.LogDebug(ex, "Contact resolution failed for {Number}", number);
-      _cache[key] = null;
-      return null;
+      result = null;
     }
     finally
     {
-      _inFlight.TryRemove(key, out _);
+      // Remove our own entry first (so a re-resolve after a transient miss can start
+      // a fresh request), then release awaiters. TryRemove(KeyValuePair) only drops
+      // the entry if it's still OUR task.
+      _inFlight.TryRemove(new KeyValuePair<string, Task<string?>>(key, tcs.Task));
+      tcs.TrySetResult(result);
     }
   }
 }

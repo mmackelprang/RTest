@@ -5611,10 +5611,9 @@ body {
 .feed-chip--in     { background: color-mix(in srgb, var(--signal-green) 14%, transparent);   color: var(--signal-green); }
 .feed-chip--out    { background: color-mix(in srgb, var(--signal-blue)  14%, transparent);   color: var(--signal-blue);  }
 .feed-chip--missed { background: color-mix(in srgb, var(--signal-red)   14%, transparent);   color: var(--signal-red);   }
-.feed-chip--text,
-.feed-chip--vm     { background: color-mix(in srgb, var(--accent-primary) 14%, transparent); color: var(--accent-primary); }
+.feed-chip--text   { background: color-mix(in srgb, var(--accent-primary) 14%, transparent); color: var(--accent-primary); }
 /* Neutral fallback for a call with no direction (should not occur in practice). */
-.feed-chip--call   { background: color-mix(in srgb, var(--text-medium) 12%, transparent);    color: var(--text-medium); }
+.feed-chip--call   { background: color-mix(in srgb, var(--text-medium) 14%, transparent);    color: var(--text-medium); }
 
 /* Identity column: contact name (title) over the raw number (Task #6). */
 .list-item-identity { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
@@ -5633,6 +5632,10 @@ body {
   flex-shrink: 0;
 }
 .list-item-meta-stack .list-item-meta { font-variant-numeric: tabular-nums; }
+/* The top line (direct child) is the smart timestamp — the primary glanceable
+   field, so it reads at --text-medium; the nested duration stays the dimmer
+   --text-low from the base .list-item-meta rule (two-tier meta hierarchy). */
+.list-item-meta-stack > .list-item-meta { color: var(--text-medium); }
 .list-item-meta-bottom { display: flex; align-items: center; gap: 8px; }
 .list-item-missed {
   color: var(--signal-red);
