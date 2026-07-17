@@ -12,13 +12,20 @@ namespace Radio.Web.Formatting;
 /// </summary>
 /// <param name="ElapsedSeconds">Elapsed playback time, in seconds.</param>
 /// <param name="TotalSeconds">Total track duration, in seconds. Zero when unknown / streaming.</param>
-/// <param name="Percent">Progress percentage on [0, 100]. Zero when total is zero.</param>
+/// <param name="Percent">Progress percentage on [0, 100]. Zero when total is zero.
+///   Kept full-precision so callers can drive a smooth progress-bar width /
+///   animation off it — do NOT surface this raw value to the user (it renders a
+///   long decimal tail like <c>47.8234917</c> for position/duration sources).</param>
+/// <param name="PercentDisplay">Human-readable progress percent, rounded to a
+///   whole number with the <c>%</c> unit (e.g. <c>"48%"</c>). This is the value
+///   to render as text; <see cref="Percent"/> is for the bar width only.</param>
 /// <param name="ElapsedDisplay">Formatted elapsed string. <c>"0:00"</c> for sub-second positions.</param>
 /// <param name="TotalDisplay">Formatted total string. Em-dash when total is zero / unknown.</param>
 public record PlaybackProgress(
   double ElapsedSeconds,
   double TotalSeconds,
   double Percent,
+  string PercentDisplay,
   string ElapsedDisplay,
   string TotalDisplay);
 
@@ -60,20 +67,24 @@ public static class PlaybackProgressProjection
     var elapsed = elapsedSeconds > 0 ? elapsedSeconds : 0;
     var total = totalSeconds > 0 ? totalSeconds : 0;
     var percent = total > 0 ? Math.Clamp(elapsed / total * 100.0, 0, 100) : 0;
+    // Round only the DISPLAYED percent to a whole number so it never renders a
+    // long decimal tail (e.g. "47.8234917%"). The raw `percent` above stays
+    // full-precision for the progress-bar width.
+    var percentDisplay = percent.ToString("F0", CultureInfo.InvariantCulture) + "%";
     var elapsedDisplay = elapsed >= 1.0
       ? Durations.FormatTrack(TimeSpan.FromSeconds(elapsed))
       : "0:00";
     var totalDisplay = total > 0
       ? Durations.FormatTrack(TimeSpan.FromSeconds(total))
       : Dash;
-    return new PlaybackProgress(elapsed, total, percent, elapsedDisplay, totalDisplay);
+    return new PlaybackProgress(elapsed, total, percent, percentDisplay, elapsedDisplay, totalDisplay);
   }
 
   /// <summary>
   /// Convenience overload that resolves elapsed / total from a
   /// <see cref="NowPlayingDto"/> (used by <c>NowPlayingDock</c> when applying
   /// a hub payload). Null DTO surfaces as the empty-state shape:
-  /// <c>(0, 0, 0, "0:00", "—")</c>.
+  /// <c>(0, 0, 0, "0%", "0:00", "—")</c>.
   /// </summary>
   public static PlaybackProgress From(NowPlayingDto? dto)
   {

@@ -120,6 +120,37 @@ public class NowPlayingPanelTests : TestContext
   }
 
   [Fact]
+  public void NowPlayingPanel_ProgressBarLabel_ShowsRoundedWholePercent_NotDecimalTail()
+  {
+    // Regression guard for the "47.8234917%" bug: a non-seekable source (e.g.
+    // Bluetooth) renders the RadzenProgressBar branch, whose default label would
+    // print the raw double _progressPercent. The Template must instead surface
+    // _progressPercentDisplay — a whole-number percent — while the bar WIDTH
+    // still binds to the full-precision _progressPercent.
+    var cut = RenderComponent<NowPlayingPanel>();
+
+    var instance = cut.Instance;
+    var type = typeof(NowPlayingPanel);
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+    // Position + duration present, source not seekable → RadzenProgressBar branch.
+    type.GetField("_position", flags)!.SetValue(instance, "1:40");
+    type.GetField("_duration", flags)!.SetValue(instance, "3:29");
+    type.GetField("_canSeek", flags)!.SetValue(instance, false);
+    // 100 / 209 → 47.8468…; the raw value drives the bar width, the rounded
+    // string ("48%") is what the label must show.
+    type.GetField("_progressPercent", flags)!.SetValue(instance, 47.8468899521531);
+    type.GetField("_progressPercentDisplay", flags)!.SetValue(instance, "48%");
+    cut.Render();
+
+    var bar = cut.Find(".rz-progressbar");
+    // The visible label text (TextContent excludes the width style attribute,
+    // where the full-precision value legitimately lives) reads the rounded
+    // whole-number percent — no decimal point leaks to the user.
+    Assert.Contains("48%", bar.TextContent);
+    Assert.DoesNotContain(".", bar.TextContent);
+  }
+
+  [Fact]
   public void NowPlayingPanel_DurationElements_DeclareTabularNums()
   {
     // PR 3 spec requires tabular-nums on duration text so the elapsed/total columns

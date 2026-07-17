@@ -268,7 +268,13 @@
         }
         else
         {
-          <RadzenProgressBar Value="@_progressPercent" ProgressBarStyle="ProgressBarStyle.Primary" Style="height: 4px;" />
+          @* Value stays full-precision so the bar width is smooth; the Template
+             overrides RadzenProgressBar's default label (which would print the
+             raw double, e.g. "47.8234917%") with the rounded whole-number
+             string from the shared projection. *@
+          <RadzenProgressBar Value="@_progressPercent" ProgressBarStyle="ProgressBarStyle.Primary" Style="height: 4px;">
+            <Template>@_progressPercentDisplay</Template>
+          </RadzenProgressBar>
         }
         <div style="display: flex; justify-content: space-between; font-size: 13px; color: var(--text-medium); margin-top: -2px; font-family: var(--font-mono); font-variant-numeric: tabular-nums;">
           <span>@_position</span>
@@ -360,6 +366,10 @@
   private string? _duration;
   private bool _canSeek;
   private double _progressPercent;
+  // Rounded, human-readable progress percent (e.g. "48%") from the shared
+  // projection. Bound to the progress-bar label so it never shows the raw
+  // decimal tail; _progressPercent (full precision) still drives the bar width.
+  private string _progressPercentDisplay = "0%";
   private double _totalDurationSeconds;
   // Fingerprint status state
   private FingerprintStatusDto? _fpStatus;
@@ -684,6 +694,7 @@
         _position = hasPosition ? progress.ElapsedDisplay : null;
         _totalDurationSeconds = progress.TotalSeconds;
         _progressPercent = progress.Percent;
+        _progressPercentDisplay = progress.PercentDisplay;
         _duration = progress.TotalSeconds > 0 ? progress.TotalDisplay : null;
       }
 
@@ -931,6 +942,7 @@
       // surfaces "0:00" (not em-dash) in the elapsed cell, matching the dock.
       var progress = PlaybackProgressProjection.From(seconds, _totalDurationSeconds);
       _progressPercent = progress.Percent;
+      _progressPercentDisplay = progress.PercentDisplay;
       _position = progress.ElapsedDisplay;
       await AudioApi.UpdatePlaybackStateAsync(new UpdatePlaybackRequest(
         Action: "Seek", Volume: null, IsMuted: null, Balance: null, SeekPosition: newTime));
