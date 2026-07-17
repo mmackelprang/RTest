@@ -80,8 +80,14 @@ public static class FingerprintingServiceExtensions
         sp.GetService<IMetricsCollector>());
     });
 
-    // Register audio tap as scoped
-    services.AddScoped<IAudioSampleProvider, SoundFlowAudioTap>();
+    // Register the audio tap as a SINGLETON. It depends only on singletons
+    // (IAudioEngine, IAudioManager) and holds no per-scope state. Singleton lifetime
+    // is REQUIRED so its reusable capture buffers persist across identification
+    // cycles: BackgroundIdentificationService resolves the tap from a fresh scope
+    // every ~15 s, so a scoped/transient tap would be re-created with empty buffers
+    // each cycle — re-allocating ~7 MB on the LOH per cycle and defeating the
+    // churn-reduction that keeps the Cast capture buffer from starving to zero.
+    services.AddSingleton<IAudioSampleProvider, SoundFlowAudioTap>();
 
     // Register SongRec (Shazam) recognizer — checks IsAvailable at runtime
     services.AddSingleton<ISongRecRecognitionService, SongRecRecognitionService>();

@@ -803,6 +803,16 @@ public class GoogleCastOutput : AudioOutputBase
           {
             _logger.LogDebug("Cast: No active media session to stop (MediaSessionId is null)");
           }
+          catch (Exception ex)
+          {
+            // SharpCaster's MediaChannel.StopAsync → SendAsync can throw once the
+            // session is already tearing down (socket closed / channel disposed by
+            // the concurrent disconnect). The disconnect itself still succeeds, so
+            // log-and-continue rather than letting it escape to the outer catch —
+            // which logged a spurious ERROR *and* skipped the clean teardown below
+            // (leaving IsEnabledInternal stuck true).
+            _logger.LogWarning(ex, "Cast media stop failed during teardown; continuing");
+          }
         }
       }
 
