@@ -51,7 +51,9 @@ else
   TARGET_USER="$(id -un)"
 fi
 TARGET_UID="$(id -u "$TARGET_USER" 2>/dev/null || echo 1000)"
-TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
+# `|| true` inside the substitution so a missing/typo'd user (getent exits non-zero)
+# falls through to the /home/<user> default instead of aborting under set -e/pipefail.
+TARGET_HOME="$(getent passwd "$TARGET_USER" 2>/dev/null | cut -d: -f6 || true)"
 TARGET_HOME="${TARGET_HOME:-/home/$TARGET_USER}"
 
 log()  { echo "[provision] $*"; }
@@ -197,14 +199,22 @@ if install_sys_file "$SCRIPT_DIR/os-tuning/99-radio-swappiness.conf" /etc/sysctl
   log "  applied vm.swappiness"
 fi
 # zram
+zram_changed=false
 if install_sys_file "$SCRIPT_DIR/os-tuning/zramswap" /etc/default/zramswap; then
   log "  installed /etc/default/zramswap"
+  zram_changed=true
 fi
 if systemctl list-unit-files zramswap.service >/dev/null 2>&1; then
   sudo systemctl enable --now zramswap.service >/dev/null 2>&1 || true
-  # Re-apply the new config if it changed (zramswap reloads on restart).
-  sudo systemctl restart zramswap.service >/dev/null 2>&1 || true
-  log "  zramswap.service enabled"
+  # Only restart when the config actually changed — a restart does swapoff+mkswap+
+  # swapon, which forces swapped pages back into RAM (a memory spike this N100 box
+  # is tight on). enable --now above is idempotent and safe on every run.
+  if $zram_changed; then
+    sudo systemctl restart zramswap.service >/dev/null 2>&1 || true
+    log "  zramswap.service restarted (config changed)"
+  else
+    log "  zramswap.service enabled (config unchanged — no restart)"
+  fi
 else
   log "  NOTE: zramswap.service not found — is zram-tools installed? (packages.sh)"
 fi

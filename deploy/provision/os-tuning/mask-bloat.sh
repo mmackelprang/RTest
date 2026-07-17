@@ -14,8 +14,10 @@
 set -uo pipefail
 
 # --- Resolve the target desktop user + their user-bus context ---------------
+# Precedence matches provision.sh: an explicit positional arg wins over SUDO_USER
+# (so `provision.sh --user X` -> `mask-bloat.sh X` masks for X even under top-level sudo).
 if [[ $(id -u) -eq 0 ]]; then
-  TARGET_USER="${SUDO_USER:-${1:-mmack}}"
+  TARGET_USER="${1:-${SUDO_USER:-mmack}}"
 else
   TARGET_USER="${1:-$(id -un)}"
 fi
