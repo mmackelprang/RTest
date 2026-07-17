@@ -1061,4 +1061,53 @@ public class NowPlayingPanelTests : TestContext
     var firstRows = cut.FindAll("[data-match-id=\"m-first\"].np-recognition-row-current");
     Assert.Empty(firstRows);
   }
+
+  // ─── Album-art <img> rendering (BT persistence fix acceptance) ─────────────
+  //
+  // The BT album-art persistence fix keeps a valid /api/albumart/... URL in
+  // source metadata across AVRCP refreshes. These tests pin the consumer side:
+  // when _albumArtUrl carries a real proxy path the panel renders the album-art
+  // <img>; when it holds the default placeholder the panel treats it as invalid
+  // (via _hasValidAlbumArt) and omits the <img> so the fallback surface shows.
+
+  [Fact]
+  public void NowPlayingPanel_RendersAlbumArtImg_WhenAlbumArtUrlPresent()
+  {
+    var cut = RenderComponent<NowPlayingPanel>();
+    var instance = cut.Instance;
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+
+    // A real proxy path + failed=false + fingerprint-detail=false makes
+    // _hasValidAlbumArt true, so the album-art <img> branch renders.
+    typeof(NowPlayingPanel).GetField("_nowPlayingSourceType", flags)!
+      .SetValue(instance, "Bluetooth");
+    typeof(NowPlayingPanel).GetField("_source", flags)!
+      .SetValue(instance, "Bluetooth Audio");
+    typeof(NowPlayingPanel).GetField("_albumArtUrl", flags)!
+      .SetValue(instance, "/api/albumart/track-xyz.jpg");
+    cut.Render();
+
+    var img = cut.Find("img[alt='Album Art']");
+    Assert.Equal("/api/albumart/track-xyz.jpg", img.GetAttribute("src"));
+  }
+
+  [Fact]
+  public void NowPlayingPanel_OmitsAlbumArtImg_WhenDefaultUrl()
+  {
+    var cut = RenderComponent<NowPlayingPanel>();
+    var instance = cut.Instance;
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+
+    // The default placeholder path is explicitly treated as "no valid art" by
+    // _hasValidAlbumArt, so the album-art <img> must NOT render (fallback shows).
+    typeof(NowPlayingPanel).GetField("_nowPlayingSourceType", flags)!
+      .SetValue(instance, "Bluetooth");
+    typeof(NowPlayingPanel).GetField("_source", flags)!
+      .SetValue(instance, "Bluetooth Audio");
+    typeof(NowPlayingPanel).GetField("_albumArtUrl", flags)!
+      .SetValue(instance, "/images/default-album-art.png");
+    cut.Render();
+
+    Assert.Empty(cut.FindAll("img[alt='Album Art']"));
+  }
 }
