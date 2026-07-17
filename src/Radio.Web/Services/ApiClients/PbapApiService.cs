@@ -53,6 +53,38 @@ public class PbapApiService
     }
   }
 
+  /// <summary>
+  /// Resolve a single phone number to a contact display name via the connected
+  /// device's synced phone book. Returns the name on a match, or null on a 404
+  /// (no match) / unreachable API. Never throws — the Messages feed treats a null
+  /// as "no name yet" and falls back to the formatted number. Callers should cache
+  /// the result (see ContactResolutionService) so the feed issues at most one
+  /// request per unique number.
+  /// </summary>
+  public async Task<string?> LookupNumberAsync(string phoneNumber, CancellationToken ct = default)
+  {
+    if (string.IsNullOrWhiteSpace(phoneNumber))
+    {
+      return null;
+    }
+    try
+    {
+      var response = await _httpClient.GetAsync(
+        $"/api/bluetooth/pbap/lookup?phoneNumber={Uri.EscapeDataString(phoneNumber)}", ct);
+      if (!response.IsSuccessStatusCode)
+      {
+        return null;   // 404 = no contact; any other non-success = treat as unresolved
+      }
+      var dto = await response.Content.ReadFromJsonAsync<PbapLookupDto>(JsonOptions, ct);
+      return string.IsNullOrWhiteSpace(dto?.DisplayName) ? null : dto.DisplayName;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "PBAP number lookup failed for {Number}", phoneNumber);
+      return null;
+    }
+  }
+
   public async Task<PbapSyncStatusDto?> GetSyncStatusAsync(CancellationToken ct = default)
   {
     try

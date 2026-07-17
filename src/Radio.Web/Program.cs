@@ -424,6 +424,11 @@ builder.Services.AddScoped<Radio.Web.Services.QueuePersistenceService>();
 builder.Services.AddScoped<Radio.Web.Services.DeviceDisplayStateService>();
 builder.Services.AddScoped<Radio.Web.Services.RadioPanelToggleService>();
 
+// Task #6 — Messages-feed contact-name resolution. Scoped so the per-circuit
+// cache (seeded from the merged contact set, backed by a deduped PBAP lookup)
+// is shared by PhonePage and its child panels for the session.
+builder.Services.AddScoped<Radio.Web.Services.ContactResolutionService>();
+
 // Task #15 PR E item #47 — gain-popover backdrop portal. Scoped so the
 // circuit's NowPlayingPanel + MainLayout share a single instance per user
 // session; mounted in MainLayout (OUTSIDE .page-transition) so the backdrop

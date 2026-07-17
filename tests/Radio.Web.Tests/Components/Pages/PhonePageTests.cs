@@ -78,6 +78,9 @@ public class PhonePageTests : TestContext
     {
       client.BaseAddress = new Uri("http://localhost:5004");
     }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler());
+
+    // Task #6: PhoneMessagesPanel injects the contact-name resolution service.
+    Services.AddScoped<ContactResolutionService>();
   }
 
   [Fact]
