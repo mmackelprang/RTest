@@ -153,6 +153,7 @@ export function init(id, container, track, speedPxPerSec) {
     charWidth: 0,
     onPause: null,
     onMaybeResume: null,
+    resizeObserver: null,
   };
 
   // Pause-on-hover / pause-on-focus (HANDOFF §3 state C). WAAPI pause holds
@@ -178,6 +179,29 @@ export function init(id, container, track, speedPxPerSec) {
   container.addEventListener('pointerleave', inst.onMaybeResume);
   container.addEventListener('focusin', inst.onPause);
   container.addEventListener('focusout', inst.onMaybeResume);
+
+  // The container is a flex item sharing its row with the conditionally-
+  // rendered PTY chip (RdsCard) — the chip appearing/disappearing changes
+  // the available width with NO text/speed change to trigger a re-measure.
+  // (The old percent-based CSS keyframes adapted implicitly; an explicit
+  // pixel engine must observe.) Re-measure + restart the leg from the
+  // preserved offset whenever the measured width actually changes.
+  if (typeof ResizeObserver === 'function') {
+    inst.resizeObserver = new ResizeObserver(() => {
+      if (!instances.has(id)) {
+        return;
+      }
+      const width = inst.container.clientWidth;
+      if (width === inst.containerWidth) {
+        return; // includes the initial fire-on-observe
+      }
+      inst.offset = currentOffset(inst);
+      cancelAnim(inst);
+      measure(inst);
+      start(inst);
+    });
+    inst.resizeObserver.observe(container);
+  }
 
   instances.set(id, inst);
   measure(inst);
@@ -234,6 +258,10 @@ export function dispose(id) {
     return;
   }
   cancelAnim(inst);
+  if (inst.resizeObserver) {
+    inst.resizeObserver.disconnect();
+    inst.resizeObserver = null;
+  }
   inst.container.removeEventListener('pointerenter', inst.onPause);
   inst.container.removeEventListener('pointerleave', inst.onMaybeResume);
   inst.container.removeEventListener('focusin', inst.onPause);

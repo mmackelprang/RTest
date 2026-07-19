@@ -4190,12 +4190,23 @@ body {
 
 /* Reduced-motion fallback — the JS engine never animates under
    prefers-reduced-motion; fall back to a thin horizontal scrollbar so
-   motion-sensitive users can read the buffer at their own pace (HANDOFF §7). */
+   motion-sensitive users can read the buffer at their own pace (HANDOFF §7).
+   The scrollable element must be the width-constrained CONTAINER: the track
+   is an inline-block that shrink-wraps its nowrap content, so overflow-x on
+   the track itself can never engage (pre-merge review finding #2). */
 @media (prefers-reduced-motion: reduce) {
+  .rcp-rds-rt-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    /* The edge-fade mask would dim the very text the user is trying to
+       read while manually scrolling — drop it in this mode. */
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+
   .rcp-rds-rt-track {
     transform: none;
-    overflow-x: auto;
-    scrollbar-width: thin;
     will-change: auto;
   }
 }

@@ -268,6 +268,52 @@ public class RadioTextAssemblerTests
     Assert.Equal(first, assembler.ConfirmedText);
   }
 
+  [Fact]
+  public void OneOffCorruptAbFlagBit_DoesNotClearAssembly()
+  {
+    // Block B is subject to the same CRC-alias risk as the character blocks:
+    // a single group with a flipped A/B bit (flag toggled, otherwise valid)
+    // must NOT wipe the in-progress assembly/candidate — the toggle needs a
+    // second consecutive sighting to commit (pre-merge review finding #3).
+    var assembler = new RadioTextAssembler();
+    var clean = BuildCycle2A(Message, abFlag: false);
+    Feed(assembler, clean); // cycle 1 — every slot staged, none accepted yet
+
+    // One corrupt group mid-stream: segment 5's block B with the A/B bit
+    // flipped (otherwise valid).
+    var corrupt = clean[5];
+    var flippedB = (ushort)(corrupt.BlockB ^ 0x10);
+    assembler.ProcessGroup(flippedB, corrupt.BlockC, corrupt.BlockD, versionB: false);
+
+    // With the staging intact, cycle 2 completes double-receive and the
+    // complete message confirms at the end of this cycle. The old
+    // clear-on-single-sighting behaviour wiped the staged cycle-1 work here,
+    // pushing confirmation out by two more full cycles — this assertion
+    // fails under that behaviour.
+    var confirmed = Feed(assembler, clean);
+    Assert.Equal(new[] { Message }, confirmed);
+  }
+
+  [Fact]
+  public void GenuineAbToggle_CommitsOnSecondSighting_AndStillConfirmsNewMessage()
+  {
+    // The double-receive on the flag drops the first group of the new
+    // message; the segment cycle re-sends it, so the new message still
+    // assembles and confirms within a few cycles.
+    var assembler = new RadioTextAssembler();
+    const string first = "Simon - Blondie :: Call Me";
+    const string second = "Simon - Toto :: Africa";
+    var cycleA = BuildCycle2A(first, abFlag: false);
+    var cycleB = BuildCycle2A(second, abFlag: true);
+
+    // Three cycleA: `first` is not 4-char-aligned, so its complete-text
+    // candidate is set one group later than an aligned message's and needs
+    // the start of cycle 3 to reach the confirm threshold.
+    var confirmed = Feed(assembler, cycleA, cycleA, cycleA, cycleB, cycleB, cycleB, cycleB);
+
+    Assert.Equal(new[] { first, second }, confirmed);
+  }
+
   // ─── Group 2B (2-char segments) ──────────────────────────────────────────
 
   [Fact]

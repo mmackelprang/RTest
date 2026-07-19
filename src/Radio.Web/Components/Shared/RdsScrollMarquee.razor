@@ -159,6 +159,15 @@
       // Circuit tearing down — nothing left to drive; DisposeAsync handles
       // the rest.
     }
+    catch (Exception)
+    {
+      // Broad by design (mirrors VoicemailPlayer's OnAfterRenderAsync interop
+      // guard): a transient module-load failure or JSException here must
+      // degrade to "ticker doesn't animate until the next update" — an
+      // unhandled lifecycle exception would fault the circuit, which on an
+      // unattended kiosk takes down the whole page with nobody there to
+      // reload it. The next text/speed change retries the interop naturally.
+    }
   }
 
   public async ValueTask DisposeAsync()

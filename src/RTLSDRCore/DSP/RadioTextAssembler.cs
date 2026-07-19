@@ -69,6 +69,7 @@ internal sealed class RadioTextAssembler
 
   private bool _abFlag;             // A/B flag — toggles on new message
   private bool _abFlagInitialized;
+  private bool _abFlagTogglePending; // one group carried the opposite flag
   private string? _candidate;       // assembled text awaiting confirmation
   private int _candidateMatchCount; // consecutive identical assemblies
 
@@ -91,15 +92,41 @@ internal sealed class RadioTextAssembler
   public bool ProcessGroup(ushort blockB, ushort blockC, ushort blockD, bool versionB)
   {
     // A/B flag in bit 4 of block B — toggles when the station starts a new
-    // message. Clear the whole assembly INCLUDING the stability candidate so
-    // the outgoing message can't bleed into the incoming one.
+    // message. Block B is subject to the same CRC-alias risk as the character
+    // blocks, so the toggle gets the same double-receive treatment: the FIRST
+    // group carrying the opposite flag is treated as suspect (its characters
+    // are not written anywhere); only a SECOND consecutive opposite-flag group
+    // commits the toggle and clears the assembly INCLUDING the stability
+    // candidate, so the outgoing message can't bleed into the incoming one.
+    // A one-off corrupt flag bit therefore can no longer wipe an in-progress
+    // candidate (pre-merge review finding #3).
     var abFlag = ((blockB >> 4) & 0x01) == 1;
-    if (_abFlagInitialized && abFlag != _abFlag)
+    if (!_abFlagInitialized)
     {
-      ClearAssemblyState();
+      _abFlag = abFlag;
+      _abFlagInitialized = true;
     }
-    _abFlag = abFlag;
-    _abFlagInitialized = true;
+    else if (abFlag != _abFlag)
+    {
+      if (!_abFlagTogglePending)
+      {
+        // First opposite-flag sighting — stage it, drop this group's chars.
+        // If genuine, the station re-sends the segment next cycle; if it was
+        // a corrupt flag bit, the group was suspect anyway.
+        _abFlagTogglePending = true;
+        return false;
+      }
+
+      // Second consecutive opposite-flag group — genuine new message.
+      ClearAssemblyState();
+      _abFlag = abFlag;
+      _abFlagTogglePending = false;
+    }
+    else
+    {
+      // Flag stable/reverted — any prior single opposite sighting was noise.
+      _abFlagTogglePending = false;
+    }
 
     // Block B bits 3-0: text segment address.
     var segmentAddr = blockB & 0x0F;
@@ -139,6 +166,7 @@ internal sealed class RadioTextAssembler
     ClearAssemblyState();
     _abFlag = false;
     _abFlagInitialized = false;
+    _abFlagTogglePending = false;
     ConfirmedText = null;
   }
 
