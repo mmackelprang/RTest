@@ -379,4 +379,33 @@ Shared directory: `/opt/radio-console/{api,web,data,logs}`
 
 ---
 
+## ADR-025: RDS ticker — JS/WAAPI offset-preserving engine + decoder complete-before-partial RT policy
+
+**Date:** 2026-07-19
+**Status:** Accepted
+**Context:** The kiosk RDS marquee (RdsCard → RdsScrollMarquee, HANDOFF-rds-accumulating-scroll + HANDOFF-rds-inline-scroll-revision) showed four production bugs: (1) large position "jerks" on every RT append — the pure-CSS keyframes animated `translateX(100%→-100%)` (percent of the track's own width) with a per-render `--scroll-duration`, so any text change reinterpreted the elapsed fraction against new geometry; (2) truncated/garbled text — the decoder's `RtConfirmThreshold=2` counted consecutive identical assemblies (~0.5 s apart) and published stalled partial prefixes ("Simo") and CRC-aliased corruption ("GivJ It Away", "MaIonna" — verified in radio-20260717.txt), the buffer front-trimmed mid-chunk at its cap, and the static-fit branch used a 7 px/char × 420 px approximation against real in-card 14 px/0.18em typography (measured 10.2 px/char, 418 px container); (3) leak concerns over a long kiosk session; (4) effective scroll speed varied with buffer length (percent keyframes travel 2×trackWidth over a duration computed for container+trackWidth).
+
+**Decision:** Three coordinated changes. (a) **Decoder:** extract RT assembly into `RadioTextAssembler` with per-character double-receive (a slot's value must be decoded twice — one-off CRC-aliased corruption cannot land) and complete-before-partial confirmation (complete = 64 chars via full reception or 0x0D fill confirms at threshold 2; incomplete prefixes need 32 stable assemblies ≈ two full segment cycles, so reception gaps repair before publishing while broken-encoder stations still display in ~10-30 s). (b) **Buffer:** chunk-aware `RdsAccumulatingScrollBuffer` — whole-chunk front eviction (head always a chunk boundary), prefix-extension and same-length minor-correction chunks replace the last chunk in place. (c) **Marquee:** replace the CSS keyframes with `wwwroot/js/rds-marquee.js` driving the same transform via the Web Animations API (still compositor-thread — the HANDOFF §4 N100 rationale holds); the engine owns the offset explicitly, `MarqueeTextDiff` classifies each text change (Continuation/InPlaceSwap/Reset) and the engine restarts its leg from the preserved offset with trimmedChars × measured-char-width compensation; static-fit and speed are driven from real measurements; pause/reduced-motion/SR-mirror behaviours preserved; instances keyed by C#-generated id so dispose survives DOM detach. Plus `RdsScrollSpeedPolicy`: 1.5× catch-up above 75 % buffer fill.
+
+**Alternatives considered:**
+- **Keep CSS animation, suppress more re-renders** — already done (PR-era ShouldRender guards); cannot help because any REAL append must change track width, which is itself the restart/snap trigger.
+- **rAF-driven transform** — works but runs per-frame on the main thread; WAAPI keeps per-frame work on the compositor and JS only runs at text changes / leg boundaries.
+- **Raise RtConfirmThreshold only** — rejected; consecutive-assembly counting confirms any stable state (including corrupt chars that sit in the buffer) regardless of threshold, and higher thresholds punish legitimate complete messages.
+
+**Verification:** 12 `RadioTextAssemblerTests` (direct group 2A/2B frames: loss, corruption, A/B rotation, unterminated), 32 buffer tests incl. a 5 000-append leak bound, 13 `MarqueeTextDiffTests`, bUnit interop-contract tests (init-once / append-with-trim / swap / reset / dispose-on-unmount / zero calls on telemetry ticks), and a Playwright harness against the real engine in Chromium: measured 40.1 px/s at configured 40, append offset 48.8→48.8 (no snap), front-trim glyph position 84.7→84.7 px (invariant), hover pause drift 0.00 px, clean dispose (docs/uat/rds-marquee-harness-results.png). Final confirmation needs the live kiosk + real RDS station (owner UAT).
+
+**Consequences:** New-message display latency rises from ~2-5 s to ~5-15 s (two segment cycles) — the price of never publishing partial/corrupt text. HANDOFF-rds-accumulating-scroll §6.f ("accept the restart jump for v1") is superseded — the JS engine is that anticipated follow-up. Handoff §6.e's drop-oldest-CHARS is refined to drop-oldest-CHUNKS.
+
+---
+
+## ADR-026: Suppress GHSA-pgww-w46g-26qg (AngleSharp, NU1902) in Radio.Web.Tests
+
+**Date:** 2026-07-19
+**Status:** Accepted
+**Context:** A newly published advisory against AngleSharp 1.2.0 (transitive via `bunit.web` 1.40.0) turns NU1902 into a restore **failure** on any fresh restore under `TreatWarningsAsErrors` (main only kept building via cached restore assets; CI and new worktrees break). Per ADR-023's hierarchy, upgrading to a patched version is preferred — but AngleSharp 1.3+ changes the `IHtmlCollection` ABI and bunit 1.40 throws `MissingMethodException` at runtime (verified with 1.5.2), and no bunit release carrying a patched AngleSharp exists yet.
+
+**Decision:** Targeted `<NuGetAuditSuppress Include="https://github.com/advisories/GHSA-pgww-w46g-26qg" />` in `Radio.Web.Tests.csproj` only — the ADR-023 sanctioned fallback for exactly this case (patched version exists but cannot be adopted). Risk is nil in practice: AngleSharp only parses our own bUnit render output in tests; it never sees untrusted input and ships in no production artifact. Revisit when bunit publishes a release on AngleSharp ≥ patched.
+
+---
+
 <!-- NEW ENTRIES GO ABOVE THIS LINE -->
