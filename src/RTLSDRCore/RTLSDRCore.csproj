@@ -19,6 +19,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Test seam for internal DSP state machines (RadioTextAssembler et al.)
+         that are deliberately not public NuGet API surface. -->
+    <InternalsVisibleTo Include="RTLSDRCore.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Core Serilog only — consumers configure their own sinks -->
     <PackageReference Include="Serilog" Version="4.0.0" />
   </ItemGroup>

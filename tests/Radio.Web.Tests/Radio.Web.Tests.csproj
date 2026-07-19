@@ -10,6 +10,16 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- bunit.web 1.40.0 pulls AngleSharp 1.2.0 transitively, which trips
+         NuGet audit advisory GHSA-pgww-w46g-26qg (NU1902) — and
+         TreatWarningsAsErrors turns that into a restore failure on any FRESH
+         restore (CI, new worktrees; main only survives on cached assets).
+         Bumping AngleSharp directly is not an option: 1.3+ changes the
+         IHtmlCollection ABI and bunit 1.40 throws MissingMethodException at
+         runtime. AngleSharp only parses our own bUnit render output in tests
+         (no untrusted input), so suppress THIS advisory until a bunit release
+         carries a patched AngleSharp. -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-pgww-w46g-26qg" />
     <PackageReference Include="bunit.web" Version="1.40.0" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="FluentAssertions" Version="8.8.0" />
