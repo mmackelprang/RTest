@@ -8,14 +8,22 @@ namespace Radio.Web.Services.Rds;
 /// Replaces the previous "latest confirmed RT message replaces the prior in
 /// place" behaviour with an accumulating ticker. Each new confirmed RT chunk
 /// is appended to a rolling buffer (separator-joined) up to
-/// <see cref="MaxChars"/>; when the buffer would overflow, the oldest
-/// characters drop from the front on a whole-char boundary until it fits.
+/// <see cref="MaxChars"/>. Internally the buffer is chunk-aware: when it
+/// would overflow, the oldest WHOLE chunks are evicted from the front rather
+/// than trimming characters mid-chunk — a mid-chunk trim left a permanently
+/// cut-off fragment at the head once the buffer reached its cap (every
+/// steady-state append trimmed the head mid-word), which read as "data not
+/// placed correctly" on the kiosk.
 /// </para>
 /// <para>
-/// Verbatim duplicate chunks are dropped on append (a station holding the same
-/// RT for many decoder cycles would otherwise grow the buffer indefinitely);
-/// the same chunk re-entering after others have intervened IS appended, since
-/// that is part of the rolling history the user wants to see.
+/// Dedup and replacement rules (all against the most recent chunk):
+/// verbatim repeats are dropped; a chunk that merely EXTENDS the last one
+/// (the decoder confirmed a partial prefix, then the complete message)
+/// REPLACES it in place; a chunk that is a shorter prefix of the last one is
+/// dropped as stale; a same-length chunk differing in only a few characters
+/// (the decoder corrected a CRC-aliased corruption) also replaces in place.
+/// The same chunk re-entering after others have intervened IS appended,
+/// since that is part of the rolling history the user wants to see.
 /// </para>
 /// <para>
 /// Tuning to a different station — detected as any of band, frequency (within
@@ -41,7 +49,13 @@ public sealed class RdsAccumulatingScrollBuffer
   /// </summary>
   private const double FrequencyEpsilonHz = 0.001;
 
-  private string _buffer = string.Empty;
+  // Whole chunks in arrival order; Text is their separator-join, cached.
+  private readonly List<string> _chunks = new();
+  private string _cachedText = string.Empty;
+
+  // Dedup / replacement tracker — the most recent chunk AS APPENDED (before
+  // any oversize truncation), so a decoder re-fire of the same oversize chunk
+  // still dedups even though the stored chunk is its truncated tail.
   private string? _lastAppendedChunk;
 
   // Station-identity tracker — populated by ResetOnTuneChange. Sentinel:
@@ -79,16 +93,22 @@ public sealed class RdsAccumulatingScrollBuffer
   public string Separator { get; }
 
   /// <summary>Current buffer contents (empty string when nothing has been appended).</summary>
-  public string Text => _buffer;
+  public string Text => _cachedText;
 
   /// <summary>
-  /// Append a new RT chunk to the buffer if it is non-empty and not a verbatim
-  /// repeat of the most-recently-appended chunk.
+  /// Number of whole chunks currently held. Exposed for the leak-bound tests
+  /// (chunk count must stay bounded alongside <see cref="Text"/> length).
+  /// </summary>
+  public int ChunkCount => _chunks.Count;
+
+  /// <summary>
+  /// Append a new RT chunk, applying the dedup / replacement rules described
+  /// in the class remarks.
   /// </summary>
   /// <remarks>
-  /// Trims the input first — the decoder already trims via <c>.Trim()</c> when
-  /// exposing <c>RadioText</c>, but defensive trim costs nothing and protects
-  /// against future decoder changes.
+  /// Trims the input first — the decoder already trims when exposing
+  /// <c>RadioText</c>, but defensive trim costs nothing and protects against
+  /// future decoder changes.
   /// </remarks>
   public void AppendChunk(string? newChunk)
   {
@@ -99,55 +119,42 @@ public sealed class RdsAccumulatingScrollBuffer
 
     var trimmed = newChunk.Trim();
 
-    // Dedup verbatim repeat (decoder re-fires the same string when the
-    // station holds RT across many cycles).
-    if (string.Equals(trimmed, _lastAppendedChunk, StringComparison.Ordinal))
+    if (_lastAppendedChunk != null && _chunks.Count > 0)
     {
-      return;
+      // Verbatim repeat (decoder re-fires the same string when the station
+      // holds RT across many cycles) → no-op.
+      if (string.Equals(trimmed, _lastAppendedChunk, StringComparison.Ordinal))
+      {
+        return;
+      }
+
+      // Shorter prefix of what we already appended → a stale partial from the
+      // decoder (post-hardening this is rare, but cheap insurance) → no-op.
+      if (_lastAppendedChunk.StartsWith(trimmed, StringComparison.Ordinal))
+      {
+        return;
+      }
+
+      // Extension of the last chunk (partial confirmed first, then the
+      // complete message) or a same-length minor correction (CRC-aliased
+      // corruption fixed on the next confirmation) → replace in place, so the
+      // ticker shows one clean copy instead of "GivJ It Away • Give It Away".
+      var extendsLast = trimmed.StartsWith(_lastAppendedChunk, StringComparison.Ordinal);
+      var correctsLast = IsMinorCorrection(_lastAppendedChunk, trimmed);
+      if (extendsLast || correctsLast)
+      {
+        _chunks[^1] = trimmed;
+        _lastAppendedChunk = trimmed;
+        EnforceCap();
+        RebuildText();
+        return;
+      }
     }
 
-    // Edge case: single chunk longer than MaxChars. Keep the last MaxChars
-    // characters (most-recent text wins) and replace the entire buffer.
-    if (trimmed.Length >= MaxChars)
-    {
-      _buffer = TakeLastCharsSafe(trimmed, MaxChars);
-      _lastAppendedChunk = trimmed;
-      return;
-    }
-
-    // Normal append path. Compute the would-be new length including the
-    // separator (only inserted when the buffer already has content).
-    var prefix = _buffer.Length == 0 ? string.Empty : Separator;
-    var addedLength = prefix.Length + trimmed.Length;
-
-    if (_buffer.Length + addedLength <= MaxChars)
-    {
-      _buffer = _buffer + prefix + trimmed;
-      _lastAppendedChunk = trimmed;
-      return;
-    }
-
-    // Overflow path: drop from the front until the new total fits, then strip
-    // any leading separator fragment so the buffer never starts with the
-    // separator mid-character.
-    var overflow = (_buffer.Length + addedLength) - MaxChars;
-    var dropped = DropFrontCharsSafe(_buffer, overflow);
-    dropped = StripLeadingSeparator(dropped);
-
-    // After the strip, the buffer may be short enough that no separator is
-    // needed for the new chunk; mirror the empty-buffer branch.
-    var newPrefix = dropped.Length == 0 ? string.Empty : Separator;
-    _buffer = dropped + newPrefix + trimmed;
-
-    // Final safety net — if a fat separator and a long chunk together still
-    // exceed MaxChars (cannot in practice given the upstream MaxChars >=
-    // chunk-length guard above, but cheap insurance), tail-trim.
-    if (_buffer.Length > MaxChars)
-    {
-      _buffer = TakeLastCharsSafe(_buffer, MaxChars);
-    }
-
+    _chunks.Add(trimmed);
     _lastAppendedChunk = trimmed;
+    EnforceCap();
+    RebuildText();
   }
 
   /// <summary>
@@ -184,7 +191,8 @@ public sealed class RdsAccumulatingScrollBuffer
 
     if (bandChanged || freqChanged || piChanged || piNowAcquired)
     {
-      _buffer = string.Empty;
+      _chunks.Clear();
+      _cachedText = string.Empty;
       _lastAppendedChunk = null;
     }
 
@@ -205,7 +213,8 @@ public sealed class RdsAccumulatingScrollBuffer
   /// </summary>
   public void Clear()
   {
-    _buffer = string.Empty;
+    _chunks.Clear();
+    _cachedText = string.Empty;
     _lastAppendedChunk = null;
     _hasSeenStation = false;
     _lastBand = null;
@@ -213,14 +222,84 @@ public sealed class RdsAccumulatingScrollBuffer
     _lastPi = null;
   }
 
-  // ─── Surrogate-pair-safe helpers ───────────────────────────────────────
-  //
-  // RDS is ASCII in practice; RDS+ extensions and a hypothetical future
-  // UTF-8-on-the-wire variant could surface astral plane characters. Cheap
-  // insurance: if the boundary would split a surrogate pair, nudge it one
-  // char in the safe direction. Cost is one extra Char.IsHighSurrogate /
-  // IsLowSurrogate test per call.
+  // ─── Internals ─────────────────────────────────────────────────────────────
 
+  /// <summary>
+  /// True when <paramref name="candidate"/> looks like a corrected re-send of
+  /// <paramref name="previous"/>: same length, and only a small number of
+  /// positions differ. Production examples: "GivJ It Away" → "Give It Away"
+  /// (1 diff), "SimoA -FMadonna…" → "Simon - Madonna…" (3 diffs). The budget
+  /// (max(2, length/8)) is far below what two genuinely different rotation
+  /// messages of coincidentally equal length would produce.
+  /// </summary>
+  private static bool IsMinorCorrection(string previous, string candidate)
+  {
+    if (previous.Length != candidate.Length)
+    {
+      return false;
+    }
+
+    // Short strings don't carry enough signal to distinguish "corrected
+    // re-send" from "different message that happens to be the same length" —
+    // real RT corrections show up on full sentence-length messages.
+    if (previous.Length < 16)
+    {
+      return false;
+    }
+
+    var budget = Math.Max(2, previous.Length / 8);
+    var diffs = 0;
+    for (var i = 0; i < previous.Length; i++)
+    {
+      if (previous[i] != candidate[i] && ++diffs > budget)
+      {
+        return false;
+      }
+    }
+
+    // Zero diffs would mean verbatim-equal, which the caller already handled.
+    return diffs > 0;
+  }
+
+  /// <summary>
+  /// Evict whole chunks from the front until the separator-joined length fits
+  /// <see cref="MaxChars"/>. The newest chunk is never evicted; if it alone
+  /// exceeds the cap (HANDOFF §6.d), it is truncated to its LAST MaxChars
+  /// characters — most-recent text wins.
+  /// </summary>
+  private void EnforceCap()
+  {
+    while (_chunks.Count > 1 && JoinedLength() > MaxChars)
+    {
+      _chunks.RemoveAt(0);
+    }
+
+    if (_chunks.Count == 1 && _chunks[0].Length > MaxChars)
+    {
+      _chunks[0] = TakeLastCharsSafe(_chunks[0], MaxChars);
+    }
+  }
+
+  private int JoinedLength()
+  {
+    var length = _chunks.Count > 1 ? Separator.Length * (_chunks.Count - 1) : 0;
+    foreach (var chunk in _chunks)
+    {
+      length += chunk.Length;
+    }
+    return length;
+  }
+
+  private void RebuildText()
+  {
+    _cachedText = string.Join(Separator, _chunks);
+  }
+
+  /// <summary>
+  /// Take the last <paramref name="count"/> chars without splitting a
+  /// surrogate pair. RDS is ASCII in practice; RDS+ extensions could surface
+  /// astral-plane characters — cheap insurance.
+  /// </summary>
   private static string TakeLastCharsSafe(string source, int count)
   {
     if (count >= source.Length)
@@ -235,38 +314,5 @@ public sealed class RdsAccumulatingScrollBuffer
       start++;
     }
     return source.Substring(start);
-  }
-
-  private static string DropFrontCharsSafe(string source, int dropCount)
-  {
-    if (dropCount <= 0)
-    {
-      return source;
-    }
-    if (dropCount >= source.Length)
-    {
-      return string.Empty;
-    }
-    var start = dropCount;
-    if (char.IsLowSurrogate(source[start]))
-    {
-      // Dropping landed mid-pair — drop one more so the next char is the
-      // start of a valid grapheme (or just a normal BMP char).
-      start++;
-    }
-    return source.Substring(start);
-  }
-
-  private string StripLeadingSeparator(string source)
-  {
-    // After dropping front chars we may have left a partial-or-whole separator
-    // at the head. Strip a full separator if present, otherwise nibble any
-    // leading whitespace so the buffer never looks like " WUNC News" or
-    // " • WUNC News".
-    while (source.StartsWith(Separator, StringComparison.Ordinal))
-    {
-      source = source.Substring(Separator.Length);
-    }
-    return source.TrimStart();
   }
 }

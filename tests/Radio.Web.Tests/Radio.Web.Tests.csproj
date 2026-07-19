@@ -10,6 +10,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Direct pin: bunit.web 1.40.0 pulls AngleSharp 1.2.0 transitively,
+         which trips NuGet audit advisory GHSA-pgww-w46g-26qg (NU1902) — and
+         TreatWarningsAsErrors turns that into a restore failure on any fresh
+         restore (CI, new worktrees). Pin the patched version until a bunit
+         release bumps its own dependency. -->
+    <PackageReference Include="AngleSharp" Version="1.5.2" />
     <PackageReference Include="bunit.web" Version="1.40.0" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="FluentAssertions" Version="8.8.0" />

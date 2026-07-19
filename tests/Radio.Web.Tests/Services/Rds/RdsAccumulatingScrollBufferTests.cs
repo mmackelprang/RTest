@@ -207,6 +207,121 @@ public class RdsAccumulatingScrollBufferTests
     buffer.Text.Should().NotStartWith(DefaultSeparator);
   }
 
+  // ─── Prefix-extension / correction replacement (RDS scroll-engine fix) ───
+  // The hardened decoder should no longer emit partial prefixes or corrupt
+  // variants, but the buffer keeps defense-in-depth: a chunk that extends or
+  // minorly corrects the previous one replaces it in place instead of
+  // appending a near-duplicate.
+
+  [Fact]
+  public void AppendChunk_ExtensionOfLastChunk_ReplacesInPlace()
+  {
+    // Production sequence (radio-20260717.txt): "Simo" confirmed, then the
+    // complete message ~5 s later. The ticker must show ONE clean copy.
+    var buffer = new RdsAccumulatingScrollBuffer(256, DefaultSeparator);
+    buffer.AppendChunk("Earlier chunk");
+    buffer.AppendChunk("Simo");
+    buffer.AppendChunk("Simon - Madonna :: Material Girl");
+
+    buffer.Text.Should().Be("Earlier chunk • Simon - Madonna :: Material Girl",
+      "a chunk that extends the previous one is the completed version of the same message, not new history");
+  }
+
+  [Fact]
+  public void AppendChunk_ShorterPrefixOfLastChunk_IsDroppedAsStale()
+  {
+    var buffer = new RdsAccumulatingScrollBuffer(256, DefaultSeparator);
+    buffer.AppendChunk("Simon - Madonna :: Material Girl");
+    buffer.AppendChunk("Simon - Madonna");
+
+    buffer.Text.Should().Be("Simon - Madonna :: Material Girl",
+      "a shorter prefix of the last chunk is a stale partial, not new content");
+  }
+
+  [Fact]
+  public void AppendChunk_SameLengthMinorCorrection_ReplacesInPlace()
+  {
+    // Production sequence: "GivJ It Away" variant confirmed, then corrected.
+    var buffer = new RdsAccumulatingScrollBuffer(256, DefaultSeparator);
+    buffer.AppendChunk("Simon - Red Hot Chili Peppers :: GivJ It Away");
+    buffer.AppendChunk("Simon - Red Hot Chili Peppers :: Give It Away");
+
+    buffer.Text.Should().Be("Simon - Red Hot Chili Peppers :: Give It Away",
+      "a same-length near-identical chunk is a corrected re-send of the same message");
+  }
+
+  [Fact]
+  public void AppendChunk_SameLengthButDifferentMessage_AppendsNormally()
+  {
+    var buffer = new RdsAccumulatingScrollBuffer(256, DefaultSeparator);
+    buffer.AppendChunk("Now Playing Song Alpha on ROCK92");
+    buffer.AppendChunk("Weather:sunny and 75 in the city");
+
+    buffer.Text.Should().Be("Now Playing Song Alpha on ROCK92 • Weather:sunny and 75 in the city",
+      "two genuinely different messages of equal length must both be kept — only near-identical strings count as corrections");
+  }
+
+  [Fact]
+  public void AppendChunk_ExtensionAfterReplacement_StillDedupsVerbatimRefire()
+  {
+    // Decoder re-fires the completed message after the replacement — must
+    // still dedup against the replaced value.
+    var buffer = new RdsAccumulatingScrollBuffer(256, DefaultSeparator);
+    buffer.AppendChunk("Simo");
+    buffer.AppendChunk("Simon - Madonna :: Material Girl");
+    buffer.AppendChunk("Simon - Madonna :: Material Girl");
+
+    buffer.Text.Should().Be("Simon - Madonna :: Material Girl");
+  }
+
+  // ─── Whole-chunk eviction (clean head — the "cut off" fix) ───────────────
+
+  [Fact]
+  public void AppendChunk_Overflow_EvictsWholeChunks_HeadIsAlwaysAChunkBoundary()
+  {
+    // The old implementation trimmed characters mid-chunk, so once the buffer
+    // reached its cap EVERY append left a cut-off fragment at the head
+    // ("vard of Broken Dreams • …"). Whole-chunk eviction keeps the head
+    // clean.
+    var buffer = new RdsAccumulatingScrollBuffer(30, DefaultSeparator);
+    buffer.AppendChunk("AAAAAAAAAA"); // 10
+    buffer.AppendChunk("BBBBBBBBBB"); // 10 → joined 23
+    buffer.AppendChunk("CCCCCCCCCC"); // 10 → joined 36 > 30 → evict AAAA…
+
+    buffer.Text.Should().Be("BBBBBBBBBB • CCCCCCCCCC",
+      "overflow evicts the oldest WHOLE chunk — the head must never be a mid-chunk fragment");
+  }
+
+  // ─── Long-run bound (leak check) ─────────────────────────────────────────
+
+  [Fact]
+  public void AppendChunk_HoursOfSimulatedUpdates_TextAndChunkCountStayBounded()
+  {
+    // ~2 h of worst-case RDS churn: a new distinct full-length chunk every
+    // ~1.5 s (far faster than real stations rotate), with periodic station
+    // changes. The buffer must stay within its cap the whole time — this is
+    // the "no unbounded accumulation over a long-running kiosk session"
+    // guarantee.
+    var buffer = new RdsAccumulatingScrollBuffer(256, DefaultSeparator);
+    buffer.ResetOnTuneChange("FM", 98_700_000, 0x8ACC);
+
+    for (var i = 0; i < 5000; i++)
+    {
+      if (i % 500 == 499)
+      {
+        // Retune every ~500 updates.
+        buffer.ResetOnTuneChange("FM", 98_700_000 + (i * 100_000), (ushort)(0x1000 + i));
+      }
+
+      buffer.AppendChunk($"Song number {i:D5} by Artist {i % 97} on ROCK 92 request line open");
+
+      buffer.Text.Length.Should().BeLessThanOrEqualTo(buffer.MaxChars,
+        $"the joined buffer must never exceed MaxChars (iteration {i})");
+      buffer.ChunkCount.Should().BeLessThanOrEqualTo(buffer.MaxChars / 4,
+        "chunk count is bounded because every kept chunk is at least a few chars plus separator");
+    }
+  }
+
   // ─── Station-change reset (HANDOFF §6.b) ─────────────────────────────────
 
   [Fact]
