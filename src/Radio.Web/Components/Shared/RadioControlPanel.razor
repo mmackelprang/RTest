@@ -77,11 +77,15 @@
            at 1920×720.
            Separator is threaded from the SQLite-backed RdsScrollOptions so
            the PS↔RT join visually matches the inter-chunk joins inside
-           the RT buffer. -->
+           the RT buffer. Speed goes through RdsScrollSpeedPolicy — a modest
+           1.5× catch-up boost when the buffer backlog exceeds 75% of its
+           cap, so a song-change burst surfaces the newest chunk sooner.
+           The JS engine restarts its leg from the preserved offset on a
+           speed change, so the boost engages/disengages seamlessly. -->
       <RdsCard StationName="@_radioState.RdsStationName"
                ProgramType="@_radioState.RdsProgramType"
                RadioText="@_rdsBuffer.Text"
-               ScrollSpeedPxPerSec="@_rdsScrollOptions.RtScrollSpeedPxPerSec"
+               ScrollSpeedPxPerSec="@RdsScrollSpeedPolicy.EffectiveSpeed(_rdsScrollOptions.RtScrollSpeedPxPerSec, _rdsBuffer.Text.Length, _rdsBuffer.MaxChars)"
                Separator="@_rdsScrollOptions.RtChunkSeparator" />
 
       <!-- Frequency display -->

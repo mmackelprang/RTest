@@ -1,38 +1,43 @@
 @* RdsScrollMarquee — accumulating RDS RadioText ticker.
 
-   Renders the rolling buffer below the frequency well in RadioControlPanel.
-   When Text is empty, renders nothing (matches existing rcp-rds-rt
-   collapse-when-empty behaviour). Otherwise renders a single-line marquee
-   driven by a pure CSS @keyframes translateX animation.
+   Renders the rolling buffer inside RdsCard (single-row PS-anchored layout,
+   HANDOFF-rds-inline-scroll-revision). When Text is empty, renders nothing
+   (matches existing rcp-rds-rt collapse-when-empty behaviour).
 
-   Spec: HANDOFF-rds-accumulating-scroll §3, §4, §7
-*@
+   Scroll engine: wwwroot/js/rds-marquee.js (Web Animations API — composited
+   off the main thread, same rationale as the original CSS keyframes choice).
+   The old pure-CSS marquee restarted/reinterpreted its keyframes whenever an
+   append changed the track width + inline --scroll-duration, snapping the
+   text many characters at once ("jerk"). The JS engine owns the scroll
+   offset explicitly and preserves it across renders: appends extend the
+   runway seamlessly, buffer front-evictions are compensated by the trimmed
+   width (MarqueeTextDiff classifies each text change), and the static-fit
+   branch is decided from REAL measured widths instead of the old 7 px/char
+   × 420 px approximation that clipped in-card 14 px text.
+
+   Spec: HANDOFF-rds-accumulating-scroll §3, §4, §7 (behaviours preserved:
+   pause-on-hover/focus, prefers-reduced-motion fallback, SR-only aria-live
+   mirror, static-fit branch, configurable speed). *@
+
+@using Radio.Web.Services.Rds
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+@implements IAsyncDisposable
 
 @if (!string.IsNullOrEmpty(Text))
 {
-  @* The static-fit threshold (HANDOFF §8 q8) — when the text is short
-     enough that the natural width fits inside the well (max-width 420 px
-     ≈ 7 px/char in 11 px mono with 0.04em letter-spacing), skip the
-     animation entirely and render static centered text. Less twitchy on
-     stations with a single short tagline.
-     Both _isStatic and _durationSeconds are recomputed in OnParametersSet
-     (NOT inline here) so they aren't recomputed on every no-op re-render —
-     see the ShouldRender guard below. *@
-  <div class="rcp-rds-rt-scroll @(_isStatic ? "is-static" : string.Empty)"
+  <div @ref="_containerRef"
+       class="rcp-rds-rt-scroll"
        tabindex="0"
        aria-label="RDS RadioText"
        title="@Text">
     @* Visible scrolling track — hidden from assistive tech (the mirror
-       below carries the readable copy). *@
-    <div class="rcp-rds-rt-track"
-         aria-hidden="true"
-         style="@($"--scroll-duration: {_durationSeconds.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)}s;")">
-      @Text
-    </div>
+       below carries the readable copy). The transform is driven entirely by
+       the JS engine; Blazor only ever updates the text content. *@
+    <div @ref="_trackRef" class="rcp-rds-rt-track" aria-hidden="true">@Text</div>
 
     @* SR-only mirror — aria-live="polite" so screen readers announce buffer
-       updates without interrupting the user. Debouncing happens upstream in
-       the parent component (caller passes pre-debounced Text). *@
+       updates without interrupting the user. *@
     <div class="rcp-rds-rt-sr-only" aria-live="polite" aria-atomic="true">
       @Text
     </div>
@@ -42,106 +47,146 @@
 @code {
   /// <summary>
   /// Current buffer text rendered into the marquee. Empty / null collapses
-  /// the entire component (no markup).
+  /// the entire component (no markup) and disposes the JS engine instance.
   /// </summary>
   [Parameter, EditorRequired] public string? Text { get; set; }
 
   /// <summary>
   /// Marquee scroll speed in pixels per second. Default 40 matches the
   /// <see cref="Models.RdsScrollOptions"/> default; the parent reads from
-  /// IOptionsMonitor and passes through, so SQLite-store writes take effect
-  /// on the next render.
+  /// IOptionsMonitor and passes through (optionally boosted by
+  /// <see cref="Services.Rds.RdsScrollSpeedPolicy"/> when the buffer backlog
+  /// grows), so SQLite-store writes take effect on the next render. Speed
+  /// changes restart the animation leg from the preserved offset — no jump.
   /// </summary>
   [Parameter] public int ScrollSpeedPxPerSec { get; set; } = 40;
 
-  /// <summary>
-  /// Container width used to compute scroll duration and the static-fit
-  /// threshold. Defaults to 420 px to match the frequency well's max-width;
-  /// override only if the surrounding chrome changes.
-  /// </summary>
-  [Parameter] public int ContainerMaxWidthPx { get; set; } = 420;
+  // Per-instance id for the JS engine registry. Keyed by number (not by
+  // element) so dispose works even after Blazor detached the elements —
+  // no stale Map entries holding detached DOM (leak guard).
+  private static int s_nextInstanceId;
+  private readonly int _instanceId = System.Threading.Interlocked.Increment(ref s_nextInstanceId);
 
-  /// <summary>
-  /// Approximate per-character width in pixels. The CSS uses 11 px mono with
-  /// 0.04em letter-spacing → ~7 px/char for ASCII RDS text. Used by both the
-  /// static-fit check and the scroll-duration computation. Overridable for
-  /// tests; production callers stick with the default.
-  /// </summary>
-  [Parameter] public double ApproximateCharWidthPx { get; set; } = 7.0;
+  private ElementReference _containerRef;
+  private ElementReference _trackRef;
+  private IJSObjectReference? _module;
+  private bool _engineAttached;
 
-  // Cached render inputs — recomputed in OnParametersSet, read by the markup.
-  // We deliberately do NOT recompute these on every render: the parent
-  // (RadioControlPanel) re-renders ~2x/second because the SignalR radio-state
-  // broadcast lumps volatile signal telemetry (RSSI/signal-strength) in with
-  // RDS text. Recomputing + re-attributing the track div on every one of those
-  // restarts the CSS marquee keyframes, which is the "jerk + dropped chars"
-  // the user reported. ShouldRender() below suppresses the no-op renders.
+  // Last state pushed to the JS engine — the diff baseline for the next push.
+  private string? _engineText;
+  private int _engineSpeed;
+
+  // Last-rendered inputs for the ShouldRender guard.
   private string? _renderedText;
   private int _renderedSpeed;
-  private int _renderedContainerWidth;
-  private double _renderedCharWidth;
-  private bool _isStatic;
-  private double _durationSeconds;
-
-  protected override void OnParametersSet()
-  {
-    _isStatic = ApproximateTextWidthPx() <= ContainerMaxWidthPx;
-    _durationSeconds = ComputeScrollDurationSeconds();
-  }
 
   /// <summary>
   /// Suppress re-renders that wouldn't change anything the user can see. The
-  /// CSS marquee animation restarts whenever this component re-renders (the
-  /// track div is re-created and the inline --scroll-duration is re-emitted),
-  /// so a no-op render visibly snaps the ticker back to the right edge. We
-  /// only re-render when an input that affects the visible track changed.
-  /// Blazor always renders the first frame regardless of ShouldRender, so the
-  /// cache-priming below correctly captures the first-render inputs.
+  /// parent (RadioControlPanel) re-renders ~2x/second because the SignalR
+  /// radio-state broadcast lumps volatile signal telemetry in with RDS text;
+  /// without this guard every telemetry tick would churn the DOM and push a
+  /// no-op interop call. Blazor always renders the first frame regardless of
+  /// ShouldRender, so the cache-priming below correctly captures the
+  /// first-render inputs.
   /// </summary>
   protected override bool ShouldRender()
   {
     var changed =
       !string.Equals(_renderedText, Text, StringComparison.Ordinal) ||
-      _renderedSpeed != ScrollSpeedPxPerSec ||
-      _renderedContainerWidth != ContainerMaxWidthPx ||
-      // ApproximateCharWidthPx feeds _isStatic + _durationSeconds via
-      // OnParametersSet; include it so a (test-only) change to it can't be
-      // swallowed by the guard.
-      _renderedCharWidth != ApproximateCharWidthPx;
+      _renderedSpeed != ScrollSpeedPxPerSec;
 
     if (changed)
     {
       _renderedText = Text;
       _renderedSpeed = ScrollSpeedPxPerSec;
-      _renderedContainerWidth = ContainerMaxWidthPx;
-      _renderedCharWidth = ApproximateCharWidthPx;
     }
 
     return changed;
   }
 
-  /// <summary>
-  /// Approximate visual width of the current Text, in pixels. Used to decide
-  /// whether to scroll or render static-centered.
-  /// </summary>
-  private double ApproximateTextWidthPx()
+  protected override async Task OnAfterRenderAsync(bool firstRender)
   {
-    return (Text?.Length ?? 0) * ApproximateCharWidthPx;
+    try
+    {
+      if (string.IsNullOrEmpty(Text))
+      {
+        // Markup unmounted this render — tear down the engine instance so no
+        // animation/listeners/DOM refs linger (leak guard). A later non-empty
+        // render re-inits against the freshly-created elements.
+        if (_engineAttached && _module != null)
+        {
+          await _module.InvokeVoidAsync("dispose", _instanceId);
+          _engineAttached = false;
+          _engineText = null;
+        }
+        return;
+      }
+
+      _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/rds-marquee.js");
+
+      if (!_engineAttached)
+      {
+        await _module.InvokeVoidAsync("init", _instanceId, _containerRef, _trackRef, ScrollSpeedPxPerSec);
+        _engineAttached = true;
+        _engineText = Text;
+        _engineSpeed = ScrollSpeedPxPerSec;
+        return;
+      }
+
+      if (!string.Equals(_engineText, Text, StringComparison.Ordinal))
+      {
+        // Text changed — classify the transition so the engine can preserve
+        // the scroll offset wherever that is visually meaningful.
+        var diff = MarqueeTextDiff.Compute(_engineText, Text);
+        var mode = diff.Transition switch
+        {
+          MarqueeTransition.Continuation => "append",
+          MarqueeTransition.InPlaceSwap => "swap",
+          _ => "reset",
+        };
+        await _module.InvokeVoidAsync("update", _instanceId, mode, diff.TrimmedCharCount, ScrollSpeedPxPerSec);
+        _engineText = Text;
+        _engineSpeed = ScrollSpeedPxPerSec;
+      }
+      else if (_engineSpeed != ScrollSpeedPxPerSec)
+      {
+        await _module.InvokeVoidAsync("update", _instanceId, "speed", 0, ScrollSpeedPxPerSec);
+        _engineSpeed = ScrollSpeedPxPerSec;
+      }
+    }
+    catch (JSDisconnectedException)
+    {
+      // Circuit tearing down — nothing left to drive; DisposeAsync handles
+      // the rest.
+    }
   }
 
-  /// <summary>
-  /// Compute the CSS animation duration so the scroll speed (px/s) stays
-  /// constant regardless of buffer length. Formula:
-  ///   duration = (containerWidth + textWidth) / speed
-  /// Clamped to a minimum of 4 s so the animation never feels frantic when
-  /// the buffer is very short. Falls back to a safe positive value when
-  /// ScrollSpeedPxPerSec is misconfigured to 0 or negative.
-  /// </summary>
-  private double ComputeScrollDurationSeconds()
+  public async ValueTask DisposeAsync()
   {
-    var safeSpeed = Math.Max(1, ScrollSpeedPxPerSec);
-    var travelPx = ContainerMaxWidthPx + ApproximateTextWidthPx();
-    var seconds = travelPx / safeSpeed;
-    return Math.Max(4.0, seconds);
+    // Mirror the VoicemailPlayer disposal pattern: best-effort interop (the
+    // circuit may already be gone), then release the module reference.
+    try
+    {
+      if (_module != null && _engineAttached)
+      {
+        await _module.InvokeVoidAsync("dispose", _instanceId);
+      }
+    }
+    catch
+    {
+      // JSDisconnected / ObjectDisposed during teardown — nothing to clean.
+    }
+
+    try
+    {
+      if (_module != null)
+      {
+        await _module.DisposeAsync();
+      }
+    }
+    catch
+    {
+      // Ignore — module handle release is best-effort at circuit teardown.
+    }
   }
 }

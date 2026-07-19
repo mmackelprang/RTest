@@ -4114,12 +4114,18 @@ body {
 
 /* ─── RDS accumulating scroll marquee ────────────────────────────────────────
    Replaces the legacy chunk-per-display rcp-rds-rt strip with a rolling,
-   continuously-scrolling ticker. CSS keyframes on transform: translateX so
-   the animation runs on the GPU compositor thread — keeps the audio-pipeline-
-   sensitive main thread free.
+   continuously-scrolling ticker. The transform is driven by
+   wwwroot/js/rds-marquee.js via the Web Animations API — still composited
+   off the main thread (same rationale as the original CSS keyframes:
+   keep the audio-pipeline-sensitive main thread free), but the JS engine
+   owns the scroll offset explicitly so buffer appends / evictions preserve
+   the visual position instead of restarting the animation (the "jerk" fix).
+   No CSS animation remains on the track; pause-on-hover/focus also lives in
+   the JS engine (WAAPI pause/play), and the .is-static class is toggled by
+   the engine from real measured widths.
 
-   Spec: HANDOFF-rds-accumulating-scroll §4 (CSS choice rationale) and §7
-   (accessibility — pause-on-hover/focus, reduced-motion fallback, sr-only
+   Spec: HANDOFF-rds-accumulating-scroll §4 (compositor-thread rationale) and
+   §7 (accessibility — pause-on-hover/focus, reduced-motion fallback, sr-only
    aria-live mirror).
 */
 .rcp-rds-rt-scroll {
@@ -4150,8 +4156,8 @@ body {
 }
 
 /* Hover affordance — subtle 1 px outline so the user knows the strip is
-   interactive (focus-pause / hover-pause). Pause itself lives on the
-   .rcp-rds-rt-track rule below. */
+   interactive (focus-pause / hover-pause). Pause itself lives in the JS
+   engine (rds-marquee.js pointer/focus listeners → WAAPI pause). */
 .rcp-rds-rt-scroll:hover,
 .rcp-rds-rt-scroll:focus,
 .rcp-rds-rt-scroll:focus-within {
@@ -4166,44 +4172,27 @@ body {
   font-size: 11px;
   color: var(--text-low);
   letter-spacing: 0.04em;
-  /* Right-to-left scroll — standard ticker convention. Starts off the
-     right edge (100%) and runs until fully off the left edge (-100%).
-     --scroll-duration is set inline per render by the Razor component so
-     the px/s speed stays constant regardless of buffer length. */
-  animation: rcp-rds-rt-scroll var(--scroll-duration, 17s) linear infinite;
+  /* Right-to-left scroll — standard ticker convention. The translateX is
+     animated by rds-marquee.js (Web Animations API) at a constant px/s
+     regardless of buffer length; no CSS animation here. */
   will-change: transform;
 }
 
-@keyframes rcp-rds-rt-scroll {
-  from { transform: translateX(100%); }
-  to   { transform: translateX(-100%); }
-}
-
-/* Pause-on-hover and pause-on-focus. CSS pause honours the current keyframe
-   offset exactly — no drift, no JS state. Auto-resumes on un-hover / blur. */
-.rcp-rds-rt-scroll:hover .rcp-rds-rt-track,
-.rcp-rds-rt-scroll:focus .rcp-rds-rt-track,
-.rcp-rds-rt-scroll:focus-within .rcp-rds-rt-track {
-  animation-play-state: paused;
-}
-
-/* Static-fit variant — when buffer width <= container width, the parent
-   component adds .is-static and we skip the marquee animation entirely.
-   Feels less twitchy on stations with a single short tagline (HANDOFF §8 q8). */
+/* Static-fit variant — when the measured track width fits the container,
+   the JS engine adds .is-static and skips the marquee entirely. Feels less
+   twitchy on stations with a single short tagline (HANDOFF §8 q8). */
 .rcp-rds-rt-scroll.is-static .rcp-rds-rt-track {
-  animation: none;
   transform: none;
   display: block;
   text-align: center;
   will-change: auto;
 }
 
-/* Reduced-motion fallback — disable the marquee, fall back to a thin
-   horizontal scrollbar so motion-sensitive users can read the buffer at
-   their own pace (HANDOFF §7). */
+/* Reduced-motion fallback — the JS engine never animates under
+   prefers-reduced-motion; fall back to a thin horizontal scrollbar so
+   motion-sensitive users can read the buffer at their own pace (HANDOFF §7). */
 @media (prefers-reduced-motion: reduce) {
   .rcp-rds-rt-track {
-    animation: none;
     transform: none;
     overflow-x: auto;
     scrollbar-width: thin;
