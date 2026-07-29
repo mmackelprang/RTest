@@ -13,6 +13,14 @@ namespace Radio.Web.Tests.Components.Pages;
 
 public class PhonePageTests : TestContext
 {
+  /// <summary>
+  /// ATA reachability the mock system-status response reports. Read lazily per request,
+  /// so a test can flip it before <c>RenderComponent&lt;PhonePage&gt;()</c> to exercise
+  /// the bell-failure states (bell-failure handoff §3.3, §3.6).
+  /// Defaults to a healthy bell so the baseline fixture is a working phone.
+  /// </summary>
+  private bool? _ht801Reachable = true;
+
   public PhonePageTests()
   {
     JSInterop.Mode = JSRuntimeMode.Loose;
@@ -22,7 +30,7 @@ public class PhonePageTests : TestContext
     Services.AddHttpClient<PhoneApiService>(client =>
     {
       client.BaseAddress = new Uri("http://localhost:5004");
-    }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler());
+    }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler(() => _ht801Reachable));
 
     // Register PbapApiService with mock handler
     Services.AddHttpClient<PbapApiService>(client =>
@@ -72,6 +80,14 @@ public class PhonePageTests : TestContext
       sp.GetRequiredService<IServiceScopeFactory>(),
       NullLogger<GvBridgeStatusService>.Instance, 10));
 
+    // Bell-failure surfacing — the page publishes each status fetch into the app-wide
+    // bell health so the topbar fault badge tracks it. Same factory shape and the same
+    // never-started rule as GvBridgeStatusService above: constructing it does not begin
+    // a poll, so no live HTTP happens in tests.
+    Services.AddSingleton(sp => new BellHealthService(
+      sp.GetRequiredService<IServiceScopeFactory>(),
+      NullLogger<BellHealthService>.Instance, 15));
+
     // PR3: the Messages feed hosts PhoneTextsPanel, which injects the flagged
     // send service. Register it (send disabled by default) so the panel renders.
     Services.AddHttpClient<GvBridgeSendService>(client =>
@@ -108,8 +124,74 @@ public class PhonePageTests : TestContext
     // Status row labels are now lowercase mono text in .lbl class
     Assert.Contains("Bluetooth", cut.Markup);
     Assert.Contains("SIP Device", cut.Markup);
-    Assert.Contains("HT801 ATA", cut.Markup);
+    // Bell-failure handoff §3.6 — the ATA row is labelled BELL now; the model number
+    // moved into the value column as a diagnostic detail.
+    Assert.Contains("Bell", cut.Markup);
+    Assert.Contains("HT801", cut.Markup);
+    Assert.DoesNotContain("HT801 ATA", cut.Markup);
   }
+
+  // ── Bell-failure surfacing, end to end through the page ────────────────────
+
+  [Fact]
+  public void PhonePage_BellRow_ReportsOnline_WhenAtaReachable()
+  {
+    _ht801Reachable = true;
+    var cut = RenderComponent<PhonePage>();
+    OpenDashboard(cut);
+
+    var row = BellRow(cut);
+    Assert.Contains("green", row.QuerySelector(".phone-pill")!.ClassList);
+    Assert.Equal("Online", row.QuerySelector(".phone-pill")!.TextContent.Trim());
+  }
+
+  [Fact]
+  public void PhonePage_BellRow_ReportsUnknown_WhenReachabilityIsNull()
+  {
+    // The false-alarm regression, exercised through the real fetch + deserialize path:
+    // a JSON null must not become a red "Offline".
+    _ht801Reachable = null;
+    var cut = RenderComponent<PhonePage>();
+    OpenDashboard(cut);
+
+    var pill = BellRow(cut).QuerySelector(".phone-pill")!;
+    Assert.Contains("gray", pill.ClassList);
+    Assert.Equal("Unknown", pill.TextContent.Trim());
+    Assert.DoesNotContain("red", pill.ClassList);
+  }
+
+  [Fact]
+  public void PhonePage_Hero_ShowsDegradedStrip_WhenAtaUnreachable()
+  {
+    // Proves the whole chain: PhoneApiService -> PhonePage -> PhoneDashboardPanel
+    // -> PhoneStatusHero, and that the now-false "wait for an incoming ring" copy is
+    // replaced rather than merely supplemented.
+    _ht801Reachable = false;
+    var cut = RenderComponent<PhonePage>();
+    OpenDashboard(cut);
+
+    // Assert on rendered text, not raw markup — the apostrophe is HTML-escaped there.
+    Assert.Contains("The phone can't ring right now",
+      cut.Find(".phone-hero-alert").TextContent);
+    Assert.DoesNotContain("wait for an incoming ring", cut.Markup);
+    Assert.Contains("red", BellRow(cut).QuerySelector(".phone-pill")!.ClassList);
+  }
+
+  [Fact]
+  public void PhonePage_Hero_ShowsNoStrip_WhenReachabilityIsNull()
+  {
+    // §7m — never alarm on absence of evidence.
+    _ht801Reachable = null;
+    var cut = RenderComponent<PhonePage>();
+    OpenDashboard(cut);
+
+    Assert.Empty(cut.FindAll(".phone-hero-alert"));
+    Assert.Contains("wait for an incoming ring", cut.Markup);
+  }
+
+  private static AngleSharp.Dom.IElement BellRow(IRenderedComponent<PhonePage> cut) =>
+    cut.FindAll(".phone-status-row")
+       .Single(r => r.QuerySelector(".lbl")!.TextContent.Trim() == "Bell");
 
   [Fact]
   public void PhonePage_Renders_HeroIdleState()
@@ -209,14 +291,31 @@ public class PhonePageTests : TestContext
 
   private class EmptyResponseHandler : HttpMessageHandler
   {
+    // Resolved per request so a test can change the reported reachability after the
+    // handler has already been constructed by the HttpClient factory.
+    private readonly Func<bool?>? _ht801Reachable;
+
+    public EmptyResponseHandler(Func<bool?>? ht801Reachable = null)
+    {
+      _ht801Reachable = ht801Reachable;
+    }
+
     protected override Task<HttpResponseMessage> SendAsync(
       HttpRequestMessage request, CancellationToken cancellationToken)
     {
       var path = request.RequestUri?.PathAndQuery ?? "";
+      // null must serialize as a JSON null (not be omitted) so the "not yet probed"
+      // case is exercised exactly as RotaryPhone would send it.
+      var reachable = (_ht801Reachable?.Invoke()) switch
+      {
+        true => "true",
+        false => "false",
+        _ => "null",
+      };
       string content = path switch
       {
         var p when p.Contains("system-status") =>
-          """{"platform":"Linux","sipListening":false,"ht801Reachable":false}""",
+          $$"""{"platform":"Linux","sipListening":false,"ht801IpAddress":"192.168.1.57","ht801Reachable":{{reachable}}}""",
         var p when p.Contains("/api/phone/status") =>
           """{"callState":"Idle"}""",
         var p when p.Contains("/api/contacts") => "[]",

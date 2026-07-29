@@ -5217,6 +5217,96 @@ body {
   margin-top: 24px;
 }
 
+/* §Ph — Hero alert strip (bell failure; handoff §3.3, §8.5, §10).
+   Chrome is the .phone-btn-sm.btn-danger recipe verbatim — 12% fill, 30% hairline,
+   --signal-red text — so the strip reads as the same family as the existing degraded
+   surfaces (.gv-reconnect-banner, .vm-player-error). Zero new design tokens, zero new
+   keyframes, and no light-mode branch: the app is dark-only (`color-scheme: dark`, one
+   :root set). The strip deliberately does NOT animate in — a slide/fade entrance on a
+   failure notice reads as decorative, and during a call any motion competes with the
+   Answer button for attention (§4).
+   Budget: 44px + 16px margin sits inside the ~156px of vertical slack the hero has at
+   1920x720 (§9), so it appears without reflowing the action row. */
+.phone-hero-alert {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  margin-top: var(--sp-4);
+  min-height: 44px;
+  border-radius: 8px;
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.30);
+  color: var(--signal-red);
+}
+/* notifications_off — a bell with a slash through it. Chosen over error_outline /
+   warning because it carries the specific meaning ("no ringing") without language,
+   which is what keeps the signal alive for a user who cannot distinguish red and for
+   a reduced-motion user who never saw the pulse in the first place (§8.3, §4). */
+.phone-hero-alert .rzi {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+.phone-hero-alert-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.phone-hero-alert-text {
+  font-family: var(--font-body);
+  font-size: 13px;
+  /* Fits on one line at the ~974px hero interior (§9); allowed to wrap, never clip. */
+  overflow-wrap: anywhere;
+}
+.phone-hero-alert-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-low);
+}
+/* §8.5 — .phone-btn-sm is 36px, below the project's 48px --touch-min. Pad the HIT
+   REGION with a pseudo-element rather than enlarging the visual button, so the
+   strip's 44px min-height is not blown out (same intent as .vm-scrubber's
+   "3px bar + pad >= 24px hit area"). */
+.phone-hero-alert .phone-btn-sm {
+  position: relative;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.phone-hero-alert .phone-btn-sm::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: var(--touch-min);
+}
+.phone-hero-alert .phone-btn-sm:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent-primary);
+}
+
+/* §Ph — Topbar nav-pill bell-fault badge (handoff §3.7).
+   Takes the bottom-right corner so it coexists with the existing unread .nav-badge
+   without moving it. A glyph rather than a coloured dot, so the signal survives for a
+   user who cannot distinguish red (§8.3); the pill's aria-label carries it in text
+   regardless. .nav-pill is already position: relative. */
+.phone-nav-fault {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  display: inline-flex;
+  color: var(--signal-red);
+  pointer-events: none;
+}
+/* .nav-pill .rzi forces 22px !important, so the 12px override must match specificity. */
+.phone-nav-fault .rzi {
+  font-size: 12px !important;
+  width: 12px;
+  height: 12px;
+}
+
 /* -- Phone Action Buttons ---------------------------------------------------- */
 .phone-btn {
   height: 56px;

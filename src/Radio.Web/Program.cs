@@ -416,6 +416,18 @@ builder.Services.AddSingleton<Radio.Web.Services.GvBridgeStatusService>(sp =>
 builder.Services.AddHostedService(sp =>
   sp.GetRequiredService<Radio.Web.Services.GvBridgeStatusService>());
 
+// Bell-failure surfacing (handoff §3.7) — the single app-wide poll of the phone
+// system-status endpoint, so the topbar /phone fault badge can light up from any
+// route without the user having visited /phone first. Same singleton + hosted-service
+// + scope-per-poll shape as GvBridgeStatusService above (ADR-022 §6.2).
+builder.Services.AddSingleton<Radio.Web.Services.BellHealthService>(sp =>
+  new Radio.Web.Services.BellHealthService(
+    sp.GetRequiredService<IServiceScopeFactory>(),
+    sp.GetRequiredService<ILogger<Radio.Web.Services.BellHealthService>>(),
+    builder.Configuration.GetValue("RotaryPhone:BellHealthPollSeconds", 15)));
+builder.Services.AddHostedService(sp =>
+  sp.GetRequiredService<Radio.Web.Services.BellHealthService>());
+
 // Register centralized audio state store (subscribes to hub, caches state for components)
 builder.Services.AddSingleton<AudioStateStore>();
 

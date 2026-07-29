@@ -10,6 +10,7 @@
 @inject BluetoothApiService BluetoothApi
 @inject GvBridgeStatusService GvBridgeStatus
 @inject PhoneUnreadState PhoneUnread
+@inject BellHealthService BellHealth
 @implements IDisposable
 
 <PageTitle>Phone - Radio Console</PageTitle>
@@ -100,6 +101,7 @@
                            OnSimulateHook="SimulateHookAsync"
                            OnSimulateIncoming="SimulateIncomingCallAsync"
                            OnSimulateDial="SimulateDialStringAsync"
+                           OnCheckBell="CheckBellAsync"
                            Contacts="MergedContacts" />
     }
     else if (_activeTab == "contacts")
@@ -252,9 +254,34 @@
     _pollTimer.Start();
   }
 
-  private async Task RefreshAllAsync()
+  /// <summary>
+  /// Fetches the phone system status and mirrors it into the app-wide
+  /// <see cref="BellHealthService"/> so the topbar /phone fault badge tracks this page
+  /// instead of lagging it by up to a full background-poll interval. Every assignment
+  /// to <c>_systemStatus</c> goes through here so a future call site cannot silently
+  /// skip the publish and leave the badge asserting a fault the page no longer shows.
+  /// </summary>
+  private async Task RefreshSystemStatusAsync()
   {
     _systemStatus = await PhoneApi.GetSystemStatusAsync();
+    BellHealth.Publish(_systemStatus);
+  }
+
+  /// <summary>
+  /// Backs the hero's State C "Check again" button (bell-failure handoff §3.3).
+  /// Re-reads the server's current view of ATA reachability. It does NOT force a fresh
+  /// probe — that needs <c>POST /api/phone/bell/probe</c> (§6.7), which RotaryPhone has
+  /// not shipped; this is the spec's declared fallback for that case.
+  /// </summary>
+  private async Task CheckBellAsync()
+  {
+    await RefreshSystemStatusAsync();
+    await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task RefreshAllAsync()
+  {
+    await RefreshSystemStatusAsync();
     var callState = await PhoneApi.GetCallStateAsync();
     if (callState != null) _callState = callState;
     _contacts = await PhoneApi.GetContactsAsync();
@@ -301,7 +328,7 @@
       {
         var callState = await PhoneApi.GetCallStateAsync();
         if (callState != null) _callState = callState;
-        _systemStatus = await PhoneApi.GetSystemStatusAsync();
+        await RefreshSystemStatusAsync();
         // Poll-based fallback for call history. The SignalR CallHistoryUpdated
         // event (OnCallHistoryUpdated) is the primary trigger, but if it's missed
         // — hub reconnect after a deploy/service restart, or not fired for a given
@@ -359,7 +386,7 @@
     {
       try
       {
-        _systemStatus = await PhoneApi.GetSystemStatusAsync();
+        await RefreshSystemStatusAsync();
         if (!_disposed) await InvokeAsync(StateHasChanged);
       }
       catch { /* Non-fatal */ }

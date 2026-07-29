@@ -6,6 +6,8 @@
   <PhoneStatusHero CallState="CallState"
                    CallSource="@(CallState.CallState is "InCall" or "Dialing" ? "Bluetooth HFP" : "Rotary Phone")"
                    Contacts="Contacts"
+                   BellHealth="Bell"
+                   OnCheckBell="OnCheckBell"
                    OnAnswer="@(() => OnSimulateHook.InvokeAsync(true))"
                    OnHangup="@(() => OnSimulateHook.InvokeAsync(false))" />
 
@@ -38,11 +40,23 @@
             @(SystemStatus?.SipListening == true ? "Listening" : "Offline")
           </span>
         </div>
+        @* Bell-failure handoff §3.6. Two changes, both load-bearing:
+
+           1. Label HT801 ATA -> BELL. "Bell" is the only word in this card a
+              non-technical household member understands, and this is the row that
+              would have caught the incident. The model number moves into the value
+              column where it belongs as a diagnostic detail.
+           2. The pill is genuinely tri-state. It used to be
+              `Ht801Reachable == true ? green : red`, which painted a *null* — meaning
+              "not probed yet / cannot determine" — as a red Offline on every cold load.
+              A false alarm on the one indicator that would have caught this incident is
+              worse than no indicator at all, so null now reads Unknown in gray, visually
+              distinct from a real Offline (§6.3, §7m). *@
         <div class="phone-status-row">
-          <span class="lbl">HT801 ATA</span>
-          <span class="val">@(SystemStatus?.Ht801IpAddress ?? "--")</span>
-          <span class="phone-pill @(SystemStatus?.Ht801Reachable == true ? "green" : "red")">
-            @(SystemStatus?.Ht801Reachable == true ? "Online" : "Offline")
+          <span class="lbl">Bell</span>
+          <span class="val">HT801 &middot; @(SystemStatus?.Ht801IpAddress ?? "--")</span>
+          <span class="phone-pill @BellHealthRules.PillClass(Bell)">
+            @BellHealthRules.PillText(Bell)
           </span>
         </div>
       </div>
@@ -138,4 +152,16 @@
   [Parameter] public EventCallback OnSimulateIncoming { get; set; }
   [Parameter] public EventCallback OnSimulateDial { get; set; }
   [Parameter] public List<MergedContact>? Contacts { get; set; }
+
+  /// <summary>
+  /// Re-checks whether the bell can ring (State C's "Check again"). Forwarded to the
+  /// hero; the page owns the actual fetch.
+  /// </summary>
+  [Parameter] public EventCallback OnCheckBell { get; set; }
+
+  /// <summary>
+  /// Bell health derived from the status snapshot this panel already receives, so the
+  /// System Status pill and the hero strip can never disagree about the same field.
+  /// </summary>
+  private BellHealth Bell => BellHealthRules.FromSystemStatus(SystemStatus);
 }
