@@ -597,3 +597,78 @@ When rotary encoders are integrated via `RotaryEncoderActionRouter`:
 - `src/Radio.Web/Components/Pages/PhoneMessagesPanel.razor` — unified feed with the `FeedItem`/`FeedKind` projection: **PR2 added `Call`/`Voicemail`, PR3 added the `Text` case** + renders text thread rows interleaved newest-first + hosts the conversation in the detail pane.
 - `design/decisions/2026-06-20-gvbridge-voicemail-sms-integration.md` — ADR-022 (decisions + risks).
 - Config: `RotaryPhone:Gv:{SendEnabled,MarkReadEnabled,StatusPollSeconds,AuthKey}` in `appsettings.json` (+ `appsettings.Production.json` for per-machine `AuthKey`).
+
+---
+
+## 13. Bell-Failure Surfacing — Live-Call States (blocked on RotaryPhone)
+
+**Status:** Persistent signals shipped; the live-call + sticky-note states are stubbed pending a backend contract
+**Added:** 2026-07-29 (PR "surface bell failures")
+**Priority:** Medium — the shipped half already covers the "notice it at all" case; this half closes the 60-second window
+
+### Why this exists
+
+A call arrived, `/phone` showed RINGING in 96px amber with the pulse running, and the physical
+rotary phone stayed silent for the full 60-second timeout. Nothing on screen indicated a
+problem — the screen was not merely unhelpful, it was confidently wrong. Root cause was a
+stale ring-INVITE target inside RotaryPhone (fixed there). Full spec, including the ASCII
+mockups, copy deck and edge-case table, is in
+`docs/design-handoffs/HANDOFF-bell-failure-surfacing.md`.
+
+### What Exists
+
+- `Radio.Web/Models/BellHealth.cs` — the `Ok` / `Suspect` / `Failed` / `Unknown` enum plus
+  `BellHealthRules` (derivation, pill mapping, nav-pill accessible names).
+- `Radio.Web/Services/BellHealthService.cs` — singleton `IHostedService` polling
+  `GET /api/phone/system-status` app-wide (default 15s, `RotaryPhone:BellHealthPollSeconds`)
+  so the topbar badge works from any route. `PhonePage` also `Publish()`es into it.
+- Tri-state BELL pill in the System Status card, the `HT801 ATA` -> `BELL` relabel, the
+  degraded idle hero (State C), and the crossed-bell nav-pill badge.
+
+### What's Stubbed
+
+**`BellHealth.Failed` has no producer.** It is modelled and handled everywhere a value is
+consumed, but nothing ever sets it. Three UI states therefore do not exist yet:
+
+1. **State B (§3.2)** — the live `.phone-hero-alert` strip during `Ringing`, the
+   `· BELL SILENT` label suffix, and withdrawal of `.ring-pulse`.
+2. **The predictive-degrade rule (§2)** — render the strip immediately at `Ringing` onset when
+   health is already `Suspect`, because `BellInviteFailed` lands ~5s *after* `Ringing` and the
+   hero would otherwise lie for that whole window.
+3. **State D (§3.4)** — the sticky amber "A call at 2:14 PM didn't ring the phone." note that
+   survives the call ending, plus its dismissal.
+
+### What's Needed — from RotaryPhone (handoff §6)
+
+| Item | Status | Needed for |
+|---|---|---|
+| `BellInviteFailed` hub event (§6.1, single-DTO shape) | REQUIRED | States B + D |
+| `lastBellFailure` on `GET /api/phone/status` (§6.4) | REQUIRED | State D surviving a reload |
+| `Ht801LastCheckedUtc` on `PhoneSystemStatusDto` (§6.3) | REQUIRED | The `last checked 14:32` sub-line, currently omitted |
+| Recovery signal (§6.2) | REQUIRED | Clearing a fault without waiting for the next call |
+| `PhoneCallStateDto.CallId` (§6.5) | Strongly requested | Correlating a failure to a specific call |
+| `POST /api/phone/bell-failure/ack` (§6.6) | Requested | Durable dismissal across restarts |
+| `POST /api/phone/bell/probe` (§6.7) | Requested | Making "Check again" a real probe rather than a status re-read |
+
+File the request at `D:\prj\RotaryPhone\docs\prompts\radioconsole-bell-failure-request.md`,
+following the convention set by `radioconsole-gv-markread-readstate-request.md`.
+
+### Gotchas
+
+- **Radio.Web is UI-only for phone functionality.** Consume RotaryPhone.API over REST/SignalR;
+  never register RotaryPhone backend services here.
+- **`Ht801Reachable == null` must never alarm** (§7m). It means "not probed / cannot
+  determine". The original bug was rendering it as a red **Offline** on every cold load;
+  `PhoneDashboardPanelTests.BellPill_NullReachable_RendersUnknown_NotOffline` pins this.
+- **Non-obvious edge cases** the naive implementation gets wrong — handoff §7 (f), (h), (i),
+  (m): a failure arriving after the call ended must NOT show a live strip; a later successful
+  ring is the strongest recovery evidence; `[ Dismiss ]` must not silence a live fault; and
+  absence of evidence is not a fault.
+- **Reduced motion makes the glyph load-bearing.** `design-system.css:1675` zeroes all
+  animation globally, so withdrawing `.ring-pulse` communicates nothing to those users. The
+  crossed-bell glyph and text are mandatory channels, not redundancy (§4, §8.3).
+- **`role="alert"` for the live strip only** (§8.1). It must be keyed stably or it re-announces
+  on every hero re-render — the hero re-renders on each `InCall` duration tick.
+- Remaining CSS for those states is specified verbatim in handoff §10:
+  `.phone-hero-alert.is-warn` and `.phone-hero-state-label-fault`. Both were deliberately left
+  out of the first PR rather than shipped unused.

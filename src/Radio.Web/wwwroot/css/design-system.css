@@ -5264,10 +5264,13 @@ body {
   font-size: 11px;
   color: var(--text-low);
 }
-/* §8.5 — .phone-btn-sm is 36px, below the project's 48px --touch-min. Pad the HIT
-   REGION with a pseudo-element rather than enlarging the visual button, so the
-   strip's 44px min-height is not blown out (same intent as .vm-scrubber's
-   "3px bar + pad >= 24px hit area"). */
+/* §8.5 — .phone-btn-sm declares height: 36px, but the global
+   `button { min-height: var(--touch-compact) }` at line 1292 wins, so it actually
+   renders at 44px. Either way it is short of the project's 48px --touch-min for
+   buttons. Pad the HIT REGION with a pseudo-element rather than enlarging the visual
+   button, so the strip's 44px min-height is not blown out (same intent as
+   .vm-scrubber's "3px bar + pad >= 24px hit area"). Measured in-browser: the hit
+   region extends exactly 2px above and below the 44px button = 48px. */
 .phone-hero-alert .phone-btn-sm {
   position: relative;
   margin-left: auto;

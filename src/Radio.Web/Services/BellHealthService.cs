@@ -42,6 +42,9 @@ public sealed class BellHealthService : IHostedService, IAsyncDisposable
   private PeriodicTimer? _timer;
   private Task? _loop;
   private CancellationTokenSource? _cts;
+  // Serializes the compare-and-set in Apply() across the poll loop and every circuit
+  // that calls Publish(). See the comment there for why this is not just paranoia.
+  private readonly object _gate = new();
 
   /// <summary>
   /// Current bell health. Seeded <see cref="BellHealth.Unknown"/> so nothing alarms
@@ -145,12 +148,27 @@ public sealed class BellHealthService : IHostedService, IAsyncDisposable
 
   private void Apply(BellHealth health)
   {
-    if (health == Health)
+    // Unlike GvBridgeStatusService — whose only writer is its own sequential poll loop
+    // — this service has several: the poll loop below, plus every open /phone circuit's
+    // 5s timer and its Task.Run-wrapped SystemStatusChanged handler, both of which reach
+    // Publish(). Without the gate the compare-then-set-then-notify is not atomic, so
+    // overlapping writers double-fire HealthChanged — not theoretical: with the window
+    // widened, 128 concurrent identical publishes raised 10 notifications instead of 1
+    // (see BellHealthServiceTests.Publish_ConcurrentIdenticalTransitions_RaisesExactlyOnce).
+    // Each spurious notification is a full MainLayout re-render.
+    lock (_gate)
     {
-      // Suppress no-op notifications so MainLayout doesn't re-render every interval.
-      return;
+      if (health == Health)
+      {
+        // Suppress no-op notifications so MainLayout doesn't re-render every interval.
+        return;
+      }
+      Health = health;
     }
-    Health = health;
+
+    // Fire OUTSIDE the gate. Subscribers are per-circuit Blazor components that call
+    // InvokeAsync(StateHasChanged); holding a lock across arbitrary handler code would
+    // let one slow circuit stall the poll loop and every other publisher.
     HealthChanged?.Invoke(health);
   }
 

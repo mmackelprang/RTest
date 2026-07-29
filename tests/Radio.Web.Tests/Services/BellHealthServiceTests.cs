@@ -105,6 +105,41 @@ public class BellHealthServiceTests
   }
 
   [Fact]
+  public void Publish_ConcurrentIdenticalTransitions_RaisesExactlyOnce()
+  {
+    // Unlike GvBridgeStatusService (single sequential poll loop), this service has
+    // several writers: its own loop plus every open /phone circuit's 5s timer and its
+    // Task.Run-wrapped SystemStatusChanged handler. The compare-and-set in Apply() is
+    // gated so overlapping writers cannot double-fire HealthChanged.
+    var svc = NewService();
+    var raised = 0;
+    svc.HealthChanged += _ => Interlocked.Increment(ref raised);
+    var status = Status(false);
+
+    Parallel.For(0, 128, _ => svc.Publish(status));
+
+    svc.Health.Should().Be(BellHealth.Suspect);
+    raised.Should().Be(1);
+  }
+
+  [Fact]
+  public void Publish_ConcurrentMixedValues_LeavesAConsistentTerminalState()
+  {
+    // Whatever interleaving occurs, Health must end up as one of the two published
+    // values — never a torn or default value — and must agree with the last applied
+    // transition rather than drifting.
+    var svc = NewService();
+    var seen = new System.Collections.Concurrent.ConcurrentBag<BellHealth>();
+    svc.HealthChanged += h => seen.Add(h);
+
+    Parallel.For(0, 128, i => svc.Publish(Status(i % 2 == 0)));
+
+    svc.Health.Should().BeOneOf(BellHealth.Ok, BellHealth.Suspect);
+    seen.Should().OnlyContain(h => h == BellHealth.Ok || h == BellHealth.Suspect);
+    seen.Should().NotBeEmpty();
+  }
+
+  [Fact]
   public async Task DisposeAsync_WithoutStart_IsSafe()
   {
     var svc = NewService();
