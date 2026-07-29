@@ -14,6 +14,7 @@
 @inject Radio.Web.Services.RadioPanelToggleService RadioPanelToggle
 @inject Radio.Web.Services.GainPopoverService GainPopover
 @inject Radio.Web.Services.PhoneUnreadState PhoneUnread
+@inject Radio.Web.Services.BellHealthService BellHealth
 @inject IConfiguration Configuration
 @inject IOptionsMonitor<DevicesOptions> DevicesOptionsMonitor
 @inject IOptionsMonitor<DisplayOptions> DisplayOptionsMonitor
@@ -138,13 +139,33 @@
           <RadzenIcon Icon="settings" />
           <span class="nav-pill-label">Settings</span>
         </a>
-        <a href="/phone" class="nav-pill @(IsCurrentPage("/phone") ? "nav-active" : "")" title="Phone"
-           aria-label="@(_phoneUnread > 0 ? $"Phone, {_phoneUnread} unread" : "Phone")">
+        @* Bell-failure handoff §3.7 — the fault badge is what makes a dead bell
+           findable without being on /phone, which matters because the phone page is
+           not where anyone is standing when a call comes in. The badge is a crossed-
+           bell GLYPH, not a coloured dot, so the signal survives for a user who cannot
+           distinguish red (§8.3); PhoneNavLabel carries the same fact in text.
+           It is pinned bottom-right so it clears the unread .nav-badge, which in the
+           TOPBAR is an ordinary in-flow flex item (only the RAIL variant is corner-
+           pinned) — so the badge does not move. The pill is a wayfinding cue only; the
+           full explanation lives on /phone.
+           title stays the short static "Phone", matching every other pill in this row:
+           mirroring the dynamic aria-label would give the element an identical
+           accessible name and description, which several screen readers announce twice.
+           §5.6 only ever specified the accessible NAME. *@
+        <a href="/phone" class="nav-pill @(IsCurrentPage("/phone") ? "nav-active" : "")"
+           title="Phone"
+           aria-label="@PhoneNavLabel">
           <RadzenIcon Icon="phone" />
           <span class="nav-pill-label">Phone</span>
           @if (_phoneUnread > 0)
           {
             <span class="nav-badge" aria-hidden="true">@_phoneUnread</span>
+          }
+          @if (BellHealthRules.IsFaulted(_bellHealth))
+          {
+            <span class="phone-nav-fault">
+              <RadzenIcon Icon="notifications_off" aria-hidden="true" />
+            </span>
           }
         </a>
         @* The distortion-marker pill was DEBUG-gated in PR 2 and is now hosted
@@ -248,6 +269,8 @@
 
   private int _queueCount = 0;
   private int _phoneUnread = 0;
+  // Seeded Unknown so nothing alarms before the first status poll returns (§7m).
+  private BellHealth _bellHealth = Radio.Web.Models.BellHealth.Unknown;
   private DotNetObjectReference<MainLayout>? _selfReference;
   private DotNetObjectReference<MainLayout>? _devTrayRef;
   private IJSObjectReference? _devGestureModule;
@@ -296,6 +319,13 @@
       // /phone pill badge (PhonePage owns the count; we only read + subscribe).
       _phoneUnread = PhoneUnread.Count;
       PhoneUnread.Changed += OnPhoneUnreadChanged;
+
+      // Bell-failure handoff §3.7 — seed + subscribe to the app-wide bell health so
+      // the /phone pill can show a fault from any route. Unlike PhoneUnread (which
+      // PhonePage publishes), BellHealthService polls on its own, so the badge does
+      // not require the user to have already visited the page it points at.
+      _bellHealth = BellHealth.Health;
+      BellHealth.HealthChanged += OnBellHealthChanged;
 
       // Dock visibility is route-dependent (handoff §P1·1: dock only on
       // non-Home routes). Seed from the current URI and update on every nav.
@@ -1079,6 +1109,21 @@
     InvokeAsync(StateHasChanged);
   }
 
+  /// <summary>
+  /// Accessible name (and tooltip) for the /phone nav pill. The bell fault is carried
+  /// in text so it is never colour- or glyph-only (handoff §5.6, §8.3).
+  /// </summary>
+  private string PhoneNavLabel =>
+    BellHealthRules.NavPillAriaLabel(_bellHealth, _phoneUnread);
+
+  // Fires only on an actual health transition (BellHealthService suppresses no-op
+  // notifications), so this does not add a re-render per poll interval.
+  private void OnBellHealthChanged(BellHealth health)
+  {
+    _bellHealth = health;
+    InvokeAsync(StateHasChanged);
+  }
+
   public void Dispose()
   {
     // Unsubscribe from events to prevent memory leaks
@@ -1090,6 +1135,7 @@
     DeviceDisplayState.DisplaySettingsChanged -= OnDeviceDisplaySettingsChanged;
     GainPopover.StateChanged -= OnGainPopoverStateChanged;
     PhoneUnread.Changed -= OnPhoneUnreadChanged;
+    BellHealth.HealthChanged -= OnBellHealthChanged;
     NavigationManager.LocationChanged -= OnLocationChanged;
 
     _timer?.Stop();

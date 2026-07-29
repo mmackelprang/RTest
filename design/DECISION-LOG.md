@@ -408,4 +408,23 @@ Shared directory: `/opt/radio-console/{api,web,data,logs}`
 
 ---
 
+## ADR-027: Clear NU1903 (System.Security.Cryptography.Xml) by direct-pinning 10.0.10
+
+**Date:** 2026-07-29
+**Status:** Accepted
+**Context:** Five high-severity advisories landed against `System.Security.Cryptography.Xml` 10.0.8 — GHSA-23rf-6693-g89p, GHSA-8q5v-6pqq-x66h, GHSA-cvvh-rhrc-wg4q, GHSA-g8r8-53c2-pm3f, GHSA-mmjf-rqrv-855v. The package is **transitive**: `Microsoft.AspNetCore.DataProtection` 10.0.8 declares it. With `NuGetAudit` on by default in .NET 10 plus `TreatWarningsAsErrors`, each advisory becomes an NU1903 **restore error** — 10 errors on a `Radio.Web` build, surfacing via `Radio.Configuration` (direct `DataProtection` reference) and `Radio.Infrastructure` (inherits it by ProjectReference). As with ADR-026 this breaks only a **fresh** restore; `main` reproduced it identically, and CI stayed green because the Linux runner restores only the `net10.0` TFM against cached assets.
+
+**Decision:** ADR-023's **preferred** branch — upgrade, not suppress. All five advisories are first patched in 10.0.10. A `NuGetAuditSuppress` was rejected outright: ADR-023 reserves it for when a patched version exists but cannot be adopted (ADR-026's AngleSharp/bunit ABI break), which does not apply here.
+
+Two upgrade routes were implemented independently and in parallel, which is worth recording because the losing one is the more obvious:
+
+- **Shipped (PR #459, `d64b6d5`):** direct-pin `System.Security.Cryptography.Xml` 10.0.10 in `Radio.Configuration.csproj`. A direct reference overrides the transitive resolution, and the pin propagates to every downstream project through the existing ProjectReference graph. This follows the **SQLitePCLRaw pin precedent already in that same csproj**, so the file now has one consistent idiom for "hold a transitive dependency at a known-good version."
+- **Rejected (implemented on `feat/bell-failure-surfacing`, then dropped):** bump the parent `Microsoft.AspNetCore.DataProtection` 10.0.8 → 10.0.10 in `Radio.Configuration` and `Radio.Tools.ConfigurationManager`, plus `DataProtection.Extensions` in two test projects. Equally correct and arguably tidier in principle — it avoids naming a package we do not consume directly — but it touches four files, needs the four to be kept in lockstep, and duplicates a fix already on `main`. Carrying both would have left two competing mechanisms for one advisory.
+
+The rule for next time: **prefer the direct pin**, matching the SQLitePCLRaw precedent, unless the parent bump also brings something we independently want.
+
+**Verification:** `dotnet build RadioConsole.sln -c Release` with NuGet auditing **enabled** and no override flags → `0 Error(s)` (was 10 NU1903 errors). `Radio.Web.Tests` 835/835, `Radio.Configuration.Tests` 115/115.
+
+---
+
 <!-- NEW ENTRIES GO ABOVE THIS LINE -->
