@@ -215,25 +215,17 @@ public class PhoneStatusHeroTests : TestContext
     gate.SetResult();
   }
 
-  [Fact]
-  public void Strip_IsStablyKeyed_SoTheLiveRegionDoesNotRemount()
-  {
-    // §8.1 — a live region that remounts re-announces, and the hero re-renders on every
-    // hub push and InCall duration tick. A strip that remounted would announce over and
-    // over, which is worse than not announcing at all.
-    //
-    // Stamp a probe attribute straight onto the live DOM node. Blazor only rewrites
-    // attributes present in its own render tree, so the probe survives an in-place patch
-    // and is destroyed by a remount — which makes it a direct test of the thing that
-    // matters, rather than of wrapper identity (bUnit hands out a fresh wrapper per
-    // Find(), so reference comparison would prove nothing).
-    var cut = Render(BellHealth.Suspect);
-    cut.Find(".phone-hero-alert").SetAttribute("data-remount-probe", "1");
-
-    cut.SetParametersAndRender(p => p.Add(x => x.BellHealth, BellHealth.Suspect));
-    cut.SetParametersAndRender(p => p.Add(x => x.BellHealth, BellHealth.Suspect));
-
-    cut.Find(".phone-hero-alert").GetAttribute("data-remount-probe")
-      .Should().Be("1", "the strip must be patched in place, never remounted");
-  }
+  // NOTE — §8.1's "keyed stably so the live region is not remounted" is deliberately
+  // NOT covered here, because bUnit cannot observe it. bUnit re-parses the component's
+  // markup into a fresh AngleSharp document on every render rather than patching a
+  // persistent DOM the way a browser does. A control experiment confirmed this: an
+  // attribute stamped on .phone-hero-state — an element that is never inside any
+  // conditional branch, so it can never be remounted — is also gone after a
+  // SetParametersAndRender. Any bUnit test of node identity therefore reports the
+  // renderer's behaviour, not Blazor's, and an earlier version of this test passed only
+  // because re-rendering with identical parameters was a no-op diff.
+  //
+  // The `@key` on the strip is kept as defensive alignment with §8.1. The behaviour is
+  // verified in a real browser instead — stamp a probe attribute on the live node, force
+  // repeated hero re-renders, and confirm the node survives. See the PR's UAT notes.
 }
