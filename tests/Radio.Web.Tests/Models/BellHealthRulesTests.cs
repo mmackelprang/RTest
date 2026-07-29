@@ -67,14 +67,13 @@ public class BellHealthRulesTests
   // ── Pill mapping (§3.6) ─────────────────────────────────────────────────────
 
   [Theory]
-  [InlineData(BellHealth.Ok, "green", "Online")]
-  [InlineData(BellHealth.Suspect, "red", "Offline")]
-  [InlineData(BellHealth.Failed, "red", "Offline")]
-  [InlineData(BellHealth.Unknown, "gray", "Unknown")]
-  public void Pill_IsTriState(BellHealth health, string expectedClass, string expectedText)
+  [InlineData(true, "green", "Online")]
+  [InlineData(false, "red", "Offline")]
+  [InlineData(null, "gray", "Unknown")]
+  public void Pill_IsTriState(bool? reachable, string expectedClass, string expectedText)
   {
-    BellHealthRules.PillClass(health).Should().Be(expectedClass);
-    BellHealthRules.PillText(health).Should().Be(expectedText);
+    BellHealthRules.PillClass(reachable).Should().Be(expectedClass);
+    BellHealthRules.PillText(reachable).Should().Be(expectedText);
   }
 
   [Fact]
@@ -82,10 +81,26 @@ public class BellHealthRulesTests
   {
     // Gray vs red, "Unknown" vs "Offline" — a user must be able to tell "we don't know"
     // apart from "it's broken" without reading the code.
-    BellHealthRules.PillClass(BellHealth.Unknown)
-      .Should().NotBe(BellHealthRules.PillClass(BellHealth.Suspect));
-    BellHealthRules.PillText(BellHealth.Unknown)
-      .Should().NotBe(BellHealthRules.PillText(BellHealth.Suspect));
+    BellHealthRules.PillClass(null).Should().NotBe(BellHealthRules.PillClass(false));
+    BellHealthRules.PillText(null).Should().NotBe(BellHealthRules.PillText(false));
+  }
+
+  [Fact]
+  public void Pill_IsKeyedOnReachability_NotOnBellHealth()
+  {
+    // Regression guard for when RotaryPhone's BellInviteFailed lands and starts
+    // producing BellHealth.Failed. A ring can fail on a perfectly REACHABLE ATA — wrong
+    // target, not registered, rejected. If this pill were keyed on BellHealth, Failed
+    // would fold into red and the reachability row would read "Offline" for a device
+    // that answers: the exact false-alarm class this work exists to remove.
+    //
+    // The pill takes bool? precisely so that mistake is not expressible. This pins the
+    // decoupling — reachable stays green, while the hero and nav badge still treat
+    // Failed as a fault.
+    BellHealthRules.PillClass(true).Should().Be("green");
+    BellHealthRules.PillText(true).Should().Be("Online");
+
+    BellHealthRules.IsFaulted(BellHealth.Failed).Should().BeTrue();
   }
 
   // ── Nav-pill accessible name (§5.6) ─────────────────────────────────────────

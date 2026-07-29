@@ -408,4 +408,16 @@ Shared directory: `/opt/radio-console/{api,web,data,logs}`
 
 ---
 
+## ADR-027: Bump Microsoft.AspNetCore.DataProtection to 10.0.10 to clear NU1903 (System.Security.Cryptography.Xml)
+
+**Date:** 2026-07-29
+**Status:** Accepted
+**Context:** Five high-severity advisories landed against `System.Security.Cryptography.Xml` 10.0.8 — GHSA-23rf-6693-g89p (CVE-2026-50648), GHSA-8q5v-6pqq-x66h (CVE-2026-50525), GHSA-cvvh-rhrc-wg4q (CVE-2026-47302), GHSA-g8r8-53c2-pm3f (CVE-2026-47304), GHSA-mmjf-rqrv-855v (CVE-2026-50527). The package is **transitive**: `Microsoft.AspNetCore.DataProtection` 10.0.8 declares `System.Security.Cryptography.Xml` 10.0.8. With `NuGetAudit` (default on in .NET 10) + `TreatWarningsAsErrors`, each advisory becomes an NU1903 **restore error**, surfacing via `Radio.Configuration` (direct `DataProtection` reference) and `Radio.Infrastructure` (inherits it through the `Radio.Configuration` ProjectReference) — 10 errors on a `Radio.Web` build. Like ADR-026, this only breaks a **fresh** restore: `main` reproduces it identically (so it is pre-existing, not branch-caused), and CI stays green because the Linux runner restores only the `net10.0` TFM against cached assets.
+
+**Decision:** Take ADR-023's **preferred** branch — upgrade, not suppress. All five advisories are patched in `System.Security.Cryptography.Xml` **10.0.10**, and `Microsoft.AspNetCore.DataProtection` 10.0.10 declares exactly that version, so bumping the parent lifts the transitive without pinning a package we do not directly consume. Bumped `Microsoft.AspNetCore.DataProtection` 10.0.8 → **10.0.10** in `Radio.Configuration` and `Radio.Tools.ConfigurationManager`, and `Microsoft.AspNetCore.DataProtection.Extensions` 10.0.8 → **10.0.10** in `Radio.Configuration.Tests` and `Radio.Infrastructure.Tests` (Extensions 10.0.10 → DataProtection 10.0.10 → Xml 10.0.10). A `NuGetAuditSuppress` was explicitly **rejected**: ADR-023 reserves it for when a patched version exists but cannot be adopted (ADR-026's AngleSharp/bunit ABI break), which is not the case here — 10.0.10 is a drop-in servicing release within the same major, adopted with no code change and no ABI issue observed.
+
+**Verification:** `dotnet build src/Radio.Web/Radio.Web.csproj -c Release` with NuGet auditing **enabled** and no override flags → `0 Error(s)` (was 10 NU1903 errors); `Radio.Configuration` and `Radio.Infrastructure` each build to `0 Error(s)` directly. Zero `NU19*` occurrences remain in any build log, and `project.assets.json` for all three projects resolves `System.Security.Cryptography.Xml` **10.0.10** on both the `net10.0` and `net10.0-windows10.0.19041.0` TFMs — 10.0.8 no longer appears in any restore graph. No new warnings: all remaining warnings are the pre-existing IDE0011 "add braces" style rule already listed in `Directory.Build.props`' `WarningsNotAsErrors`.
+
+---
+
 <!-- NEW ENTRIES GO ABOVE THIS LINE -->

@@ -95,8 +95,23 @@ public sealed class BellHealthService : IHostedService, IAsyncDisposable
   /// to a full poll interval. Matters most on recovery: a badge that outlives the fault
   /// it points at is the same "confidently wrong screen" failure this work exists to fix.
   /// </summary>
-  public void Publish(PhoneSystemStatusDto? status) =>
+  /// <param name="status">
+  /// A fetched snapshot, or <c>null</c> meaning the FETCH ITSELF failed. A failed fetch
+  /// is NOT evidence about the bell, so it is ignored and the last known health is
+  /// retained — otherwise one dropped request would blink an established fault off the
+  /// topbar and back on at the next poll, and a fault indicator that flickers is worse
+  /// than none. This is deliberately different from a snapshot that arrives WITH
+  /// <c>Ht801Reachable == null</c>: that is the server explicitly reporting "not probed
+  /// yet", which does map to <see cref="BellHealth.Unknown"/> (§6.3, §7m).
+  /// </param>
+  public void Publish(PhoneSystemStatusDto? status)
+  {
+    if (status is null)
+    {
+      return;
+    }
     Apply(BellHealthRules.FromSystemStatus(status));
+  }
 
   private async Task StopLoopAsync()
   {
@@ -138,11 +153,14 @@ public sealed class BellHealthService : IHostedService, IAsyncDisposable
     }
     catch (Exception ex)
     {
-      // A failed fetch is NOT a bell fault — we simply don't know. Falling back to
-      // Unknown keeps the badge dark rather than alarming on a Radio.Web-side or
-      // network problem that says nothing about the phone (handoff §7m).
-      _logger.LogDebug(ex, "Bell health poll failed; treating as unknown");
-      Apply(BellHealth.Unknown);
+      // A failed poll is NOT evidence about the bell, in either direction. It must not
+      // raise a fault (§7m — never alarm on absence of evidence), and equally it must
+      // not CLEAR one: resetting to Unknown here would let a single network blip switch
+      // the topbar badge off while the bell is still dead, then switch it back on 15s
+      // later. Retaining the last known health is the only reading that adds no false
+      // information. Health starts at Unknown, so a cold start whose first poll fails
+      // still shows nothing.
+      _logger.LogDebug(ex, "Bell health poll failed; retaining last known health {Health}", Health);
     }
   }
 

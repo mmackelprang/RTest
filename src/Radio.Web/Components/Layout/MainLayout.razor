@@ -144,11 +144,16 @@
            not where anyone is standing when a call comes in. The badge is a crossed-
            bell GLYPH, not a coloured dot, so the signal survives for a user who cannot
            distinguish red (§8.3); PhoneNavLabel carries the same fact in text.
-           It takes the bottom-right corner so the existing unread .nav-badge keeps
-           top-right and does not move. The pill is a wayfinding cue only — the full
-           explanation lives on /phone. *@
+           It is pinned bottom-right so it clears the unread .nav-badge, which in the
+           TOPBAR is an ordinary in-flow flex item (only the RAIL variant is corner-
+           pinned) — so the badge does not move. The pill is a wayfinding cue only; the
+           full explanation lives on /phone.
+           title stays the short static "Phone", matching every other pill in this row:
+           mirroring the dynamic aria-label would give the element an identical
+           accessible name and description, which several screen readers announce twice.
+           §5.6 only ever specified the accessible NAME. *@
         <a href="/phone" class="nav-pill @(IsCurrentPage("/phone") ? "nav-active" : "")"
-           title="@PhoneNavLabel"
+           title="Phone"
            aria-label="@PhoneNavLabel">
           <RadzenIcon Icon="phone" />
           <span class="nav-pill-label">Phone</span>
@@ -158,8 +163,8 @@
           }
           @if (BellHealthRules.IsFaulted(_bellHealth))
           {
-            <span class="phone-nav-fault" aria-hidden="true">
-              <RadzenIcon Icon="notifications_off" />
+            <span class="phone-nav-fault">
+              <RadzenIcon Icon="notifications_off" aria-hidden="true" />
             </span>
           }
         </a>

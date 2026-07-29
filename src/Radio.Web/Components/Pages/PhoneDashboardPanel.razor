@@ -51,12 +51,18 @@
               "not probed yet / cannot determine" — as a red Offline on every cold load.
               A false alarm on the one indicator that would have caught this incident is
               worse than no indicator at all, so null now reads Unknown in gray, visually
-              distinct from a real Offline (§6.3, §7m). *@
+              distinct from a real Offline (§6.3, §7m).
+
+           The pill is keyed on Ht801Reachable directly, NOT on the derived BellHealth.
+           This row answers one question — does the ATA answer — and §3.6's table is a
+           function of that field. Once RotaryPhone's BellInviteFailed lands, a reachable
+           ATA that merely failed to ring would otherwise paint "Offline" here. See the
+           remarks on BellHealthRules.PillClass. *@
         <div class="phone-status-row">
           <span class="lbl">Bell</span>
           <span class="val">HT801 &middot; @(SystemStatus?.Ht801IpAddress ?? "--")</span>
-          <span class="phone-pill @BellHealthRules.PillClass(Bell)">
-            @BellHealthRules.PillText(Bell)
+          <span class="phone-pill @BellHealthRules.PillClass(SystemStatus?.Ht801Reachable)">
+            @BellHealthRules.PillText(SystemStatus?.Ht801Reachable)
           </span>
         </div>
       </div>

@@ -58,7 +58,7 @@
          role="status" (polite): an ambient condition with no deadline. The live
          during-ring strip is the assertive one, and it ships with the backend
          BellInviteFailed event (§8.1). *@
-      <div class="phone-hero-alert" role="status">
+      <div class="phone-hero-alert" role="status" @key="AlertKey">
         <RadzenIcon Icon="notifications_off" aria-hidden="true" />
         <div class="phone-hero-alert-body">
           <span class="phone-hero-alert-text">
@@ -73,9 +73,19 @@
              report when WE asked rather than when the ATA was probed. *@
           <span class="phone-hero-alert-sub">Rotary phone unreachable</span>
         </div>
-        <button type="button" class="phone-btn-sm" @onclick="OnCheckBell"
+        @* In-flight state is the ONLY feedback this control has in its most common
+           outcome. When the ATA is still unreachable — the expected result of most
+           presses — the re-render is byte-identical, and the "last checked" timestamp
+           that would otherwise tick is deferred pending Ht801LastCheckedUtc (§6.3). With
+           nothing changing, the button reads as dead and a user concludes the UI is
+           broken on top of the bell. Disabling + relabelling while the fetch is open
+           follows the in-tree idiom (PhoneDashboardPanel's `disabled="@SwitchingMode"`);
+           the page pairs it with a toast so the completed check is acknowledged even
+           when the answer is unchanged. *@
+        <button type="button" class="phone-btn-sm" @onclick="HandleCheckBellAsync"
+                disabled="@_checking"
                 aria-label="Check whether the phone can ring">
-          Check again
+          @(_checking ? "Checking…" : "Check again")
         </button>
       </div>
     }
@@ -179,6 +189,34 @@
   // §3.3. Failed at Idle is State D (the sticky "a call at 2:14 PM didn't ring" note),
   // which is a different strip with different copy and ships with §6.4's lastBellFailure.
   private bool ShowsUnreachableStrip => IsIdle && BellHealth == BellHealth.Suspect;
+
+  // §8.1 requires the strip be keyed stably. It is the middle arm of an if/else-if/else
+  // chain of sibling <div>s, so without an explicit key Blazor is free to reuse the DOM
+  // node across branches — which for a live region means an unrelated branch swap can
+  // read as a content change and re-announce. A constant key pins its identity, so the
+  // node is created once when the fault appears and destroyed once when it clears.
+  private const string AlertKey = "phone-hero-bell-alert";
+
+  // Guards the Check-again round trip. Local to the hero so the button owns its own
+  // in-flight affordance and no caller has to thread a flag down.
+  private bool _checking;
+
+  private async Task HandleCheckBellAsync()
+  {
+    if (_checking)
+    {
+      return;   // re-entrancy guard: a double-tap must not fire two fetches
+    }
+    _checking = true;
+    try
+    {
+      await OnCheckBell.InvokeAsync();
+    }
+    finally
+    {
+      _checking = false;
+    }
+  }
 
   // State color computation
   private (string color, string glow, string glowBg) StateColors => CallState.CallState switch

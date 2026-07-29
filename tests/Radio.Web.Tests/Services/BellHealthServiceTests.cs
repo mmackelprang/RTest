@@ -27,8 +27,9 @@ public class BellHealthServiceTests
   }
 
   [Fact]
-  public void Publish_NullStatus_StaysUnknown_AndDoesNotAlarm()
+  public void Publish_NullStatus_FromColdStart_StaysUnknown_AndDoesNotAlarm()
   {
+    // A failed fetch before we have ever learned anything must not invent a fault.
     var svc = NewService();
 
     svc.Publish(null);
@@ -92,13 +93,33 @@ public class BellHealthServiceTests
   }
 
   [Fact]
-  public void Publish_FaultThenUnknown_StopsAlarming()
+  public void Publish_FailedFetchAfterAFault_RetainsTheFault()
   {
-    // Losing contact with RotaryPhone.API must not pin a stale fault on the topbar.
+    // A dropped request is not evidence in either direction. Clearing the fault here
+    // would let one network blip switch the topbar badge off while the bell is still
+    // dead, then switch it back on at the next poll — and an indicator that flickers is
+    // worse than no indicator. Distinct from Ht801Reachable == null, which is the server
+    // explicitly saying "not probed" (covered by Publish_ReachableNull_IsUnknown...).
+    var svc = NewService();
+    var raised = 0;
+    svc.Publish(Status(false));
+    svc.HealthChanged += _ => raised++;
+
+    svc.Publish(null);
+
+    svc.Health.Should().Be(BellHealth.Suspect);
+    raised.Should().Be(0, "a failed fetch must not even notify, let alone clear");
+  }
+
+  [Fact]
+  public void Publish_ServerReportsNullAfterAFault_DoesClearToUnknown()
+  {
+    // The other half of the distinction: an actual response carrying a null reachability
+    // IS information — the server is telling us it can no longer determine the state.
     var svc = NewService();
     svc.Publish(Status(false));
 
-    svc.Publish(null);
+    svc.Publish(Status(null));
 
     svc.Health.Should().Be(BellHealth.Unknown);
     BellHealthRules.IsFaulted(svc.Health).Should().BeFalse();

@@ -14,7 +14,9 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.0" />
-    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="10.0.8" />
+    <!-- 10.0.10: lifts transitive System.Security.Cryptography.Xml off the vulnerable 10.0.8.
+         See the comment in Radio.Configuration.csproj and ADR-027. -->
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="10.0.10" />
   </ItemGroup>
 
   <ItemGroup>

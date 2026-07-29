@@ -157,4 +157,83 @@ public class PhoneStatusHeroTests : TestContext
     button.Click();
     fired.Should().Be(1);
   }
+
+  // ── "Check again" must be observably alive (§3.3) ───────────────────────────
+
+  [Fact]
+  public void CheckAgainButton_ShowsAnInFlightState_WhileTheCheckIsOpen()
+  {
+    // The most likely outcome of pressing this is "still unreachable", which renders
+    // identically to what the user was already looking at — and the "last checked"
+    // timestamp that would otherwise tick is deferred pending Ht801LastCheckedUtc.
+    // Without an in-flight affordance the button is indistinguishable from a dead one.
+    var gate = new TaskCompletionSource();
+    var cut = RenderComponent<PhoneStatusHero>(p => p
+      .Add(x => x.BellHealth, BellHealth.Suspect)
+      .Add(x => x.CallState, new PhoneCallStateDto { CallState = "Idle" })
+      .Add(x => x.OnCheckBell, EventCallback.Factory.Create(this, () => gate.Task)));
+
+    cut.Find(".phone-hero-alert .phone-btn-sm").TextContent.Trim().Should().Be("Check again");
+    cut.Find(".phone-hero-alert .phone-btn-sm").HasAttribute("disabled").Should().BeFalse();
+
+    cut.Find(".phone-hero-alert .phone-btn-sm").Click();   // stays open until released
+
+    cut.Find(".phone-hero-alert .phone-btn-sm").HasAttribute("disabled")
+      .Should().BeTrue("the check is still in flight");
+    cut.Find(".phone-hero-alert .phone-btn-sm").TextContent.Trim().Should().Be("Checking…");
+
+    gate.SetResult();
+
+    cut.WaitForAssertion(() =>
+    {
+      var b = cut.Find(".phone-hero-alert .phone-btn-sm");
+      b.HasAttribute("disabled").Should().BeFalse();
+      b.TextContent.Trim().Should().Be("Check again");
+    });
+  }
+
+  [Fact]
+  public void CheckAgainButton_DoubleTap_FiresOnlyOneCheck()
+  {
+    // Kiosk touch double-taps are common; a second press while the first is still open
+    // must not queue a second fetch.
+    var gate = new TaskCompletionSource();
+    var fired = 0;
+    var cut = RenderComponent<PhoneStatusHero>(p => p
+      .Add(x => x.BellHealth, BellHealth.Suspect)
+      .Add(x => x.CallState, new PhoneCallStateDto { CallState = "Idle" })
+      .Add(x => x.OnCheckBell, EventCallback.Factory.Create(this, () =>
+      {
+        fired++;
+        return gate.Task;
+      })));
+
+    cut.Find(".phone-hero-alert .phone-btn-sm").Click();
+    cut.Find(".phone-hero-alert .phone-btn-sm").Click();
+
+    fired.Should().Be(1);
+    gate.SetResult();
+  }
+
+  [Fact]
+  public void Strip_IsStablyKeyed_SoTheLiveRegionDoesNotRemount()
+  {
+    // §8.1 — a live region that remounts re-announces, and the hero re-renders on every
+    // hub push and InCall duration tick. A strip that remounted would announce over and
+    // over, which is worse than not announcing at all.
+    //
+    // Stamp a probe attribute straight onto the live DOM node. Blazor only rewrites
+    // attributes present in its own render tree, so the probe survives an in-place patch
+    // and is destroyed by a remount — which makes it a direct test of the thing that
+    // matters, rather than of wrapper identity (bUnit hands out a fresh wrapper per
+    // Find(), so reference comparison would prove nothing).
+    var cut = Render(BellHealth.Suspect);
+    cut.Find(".phone-hero-alert").SetAttribute("data-remount-probe", "1");
+
+    cut.SetParametersAndRender(p => p.Add(x => x.BellHealth, BellHealth.Suspect));
+    cut.SetParametersAndRender(p => p.Add(x => x.BellHealth, BellHealth.Suspect));
+
+    cut.Find(".phone-hero-alert").GetAttribute("data-remount-probe")
+      .Should().Be("1", "the strip must be patched in place, never remounted");
+  }
 }

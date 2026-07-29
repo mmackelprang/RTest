@@ -5225,8 +5225,10 @@ body {
    :root set). The strip deliberately does NOT animate in — a slide/fade entrance on a
    failure notice reads as decorative, and during a call any motion competes with the
    Answer button for attention (§4).
-   Budget: 44px + 16px margin sits inside the ~156px of vertical slack the hero has at
-   1920x720 (§9), so it appears without reflowing the action row. */
+   Budget: min-height is 44px, but the two-line body makes the strip render ~70px
+   (measured at 1920x720). With the 16px margin that is ~86px against the hero's ~156px
+   of vertical slack (§9) — still comfortably inside it, and it appears without
+   reflowing the action row. Use ~70px, not the 44px minimum, in any future §9 budget. */
 .phone-hero-alert {
   display: flex;
   align-items: center;
@@ -5257,12 +5259,20 @@ body {
   font-family: var(--font-body);
   font-size: 13px;
   /* Fits on one line at the ~974px hero interior (§9); allowed to wrap, never clip. */
-  overflow-wrap: anywhere;
+  word-break: break-word;
 }
+/* §8.4 sanctioned --text-low here ONLY for the non-essential "last checked" timestamp.
+   That timestamp is deferred until RotaryPhone ships Ht801LastCheckedUtc (§6.3), so the
+   only content left in this slot is the diagnosis itself — which --text-low cannot
+   carry. Measured against the strip's 12%-red-tinted backdrop (#2F1F21 effective),
+   --text-low is 2.08:1: fails AA and even AA-large, and at 11px mono on a kiosk it is
+   effectively invisible. --text-medium measures 8.2:1 on the same backdrop. Hierarchy
+   below the 13px red primary sentence is still carried by size and colour family,
+   exactly as .phone-status-row .val sits below its .lbl. */
 .phone-hero-alert-sub {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--text-low);
+  color: var(--text-medium);
 }
 /* §8.5 — .phone-btn-sm declares height: 36px, but the global
    `button { min-height: var(--touch-compact) }` at line 1292 wins, so it actually
@@ -5291,20 +5301,31 @@ body {
 }
 
 /* §Ph — Topbar nav-pill bell-fault badge (handoff §3.7).
-   Takes the bottom-right corner so it coexists with the existing unread .nav-badge
-   without moving it. A glyph rather than a coloured dot, so the signal survives for a
-   user who cannot distinguish red (§8.3); the pill's aria-label carries it in text
-   regardless. .nav-pill is already position: relative. */
+   Pinned bottom-right so it coexists with the existing unread .nav-badge without moving
+   it. A glyph rather than a coloured dot, so the signal survives for a user who cannot
+   distinguish red (§8.3); the pill's aria-label carries it in text regardless.
+   .nav-pill is already position: relative.
+
+   §3.7's mockup assumed the unread badge is corner-pinned top-right. That is true only
+   of the RAIL variant (.phone-rail-tab .nav-badge). In the TOPBAR .nav-badge carries no
+   positioning at all — it is an ordinary in-flow flex item, vertically centred — so it
+   sits further left and lower than the mockup implies. At right: 6px the two boxes
+   overlapped by 2px and .nav-badge's `box-shadow: 0 0 6px var(--signal-amber-glow)`
+   washed amber over the red glyph. right: 4px pulls the glyph clear of the badge's
+   right edge; bottom: 4px adds vertical separation so the amber halo falls short of it. */
 .phone-nav-fault {
   position: absolute;
-  bottom: 6px;
-  right: 6px;
+  bottom: 4px;
+  right: 4px;
   display: inline-flex;
   color: var(--signal-red);
   pointer-events: none;
 }
-/* .nav-pill .rzi forces 22px !important, so the 12px override must match specificity. */
-.phone-nav-fault .rzi {
+/* .nav-pill .rzi sets font-size: 22px !important. An !important declaration outranks
+   ANY normal one regardless of specificity, so this override must also be !important;
+   raising specificity alone would not win. Between two !important declarations
+   specificity decides, hence the .nav-pill prefix — (0,3,0) beats (0,2,0). */
+.nav-pill .phone-nav-fault .rzi {
   font-size: 12px !important;
   width: 12px;
   height: 12px;

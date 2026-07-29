@@ -24,7 +24,13 @@
          with SourceGear.sqlite3 (>= 3.50.4) and carries no advisory. -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
     <PackageReference Include="SQLitePCLRaw.core" Version="3.0.3" />
-    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="10.0.8" />
+    <!-- 10.0.10 (not 10.0.8) to clear NU1903 on the transitive System.Security.Cryptography.Xml:
+         DataProtection 10.0.8 declares Cryptography.Xml 10.0.8, which carries five high-severity
+         advisories (GHSA-23rf-6693-g89p, GHSA-8q5v-6pqq-x66h, GHSA-cvvh-rhrc-wg4q,
+         GHSA-g8r8-53c2-pm3f, GHSA-mmjf-rqrv-855v — all patched in 10.0.10). DataProtection 10.0.10
+         declares Cryptography.Xml 10.0.10, so bumping the parent lifts the transitive. Keep these
+         in lockstep with the DataProtection.Extensions pins in the test projects. -->
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="10.0.10" />
     <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />

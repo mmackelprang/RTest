@@ -75,18 +75,36 @@ public static class BellHealthRules
     health is BellHealth.Suspect or BellHealth.Failed;
 
   /// <summary>CSS modifier for the System Status card's BELL pill (handoff §3.6).</summary>
-  public static string PillClass(BellHealth health) => health switch
+  /// <remarks>
+  /// <para>
+  /// Keyed on raw reachability, NOT on <see cref="BellHealth"/>, because §3.6's table is
+  /// explicitly a function of <c>Ht801Reachable</c> and that row reports exactly one
+  /// thing: does the ATA answer.
+  /// </para>
+  /// <para>
+  /// The distinction is about to matter. Routing this through <see cref="BellHealth"/>
+  /// folds <see cref="BellHealth.Failed"/> into red — so once RotaryPhone's
+  /// <c>BellInviteFailed</c> lands, a perfectly REACHABLE ATA that merely failed to ring
+  /// (wrong target, not registered, rejected) would paint <c>Offline</c> in the one row a
+  /// debugger reads for reachability. That is the same false-alarm class this work exists
+  /// to remove. A ring failure belongs in the hero and the Diagnostics card (§3.8).
+  /// </para>
+  /// </remarks>
+  public static string PillClass(bool? reachable) => reachable switch
   {
-    BellHealth.Ok => "green",
-    BellHealth.Suspect or BellHealth.Failed => "red",
+    true => "green",
+    false => "red",
     _ => "gray",
   };
 
-  /// <summary>Text for the System Status card's BELL pill (handoff §3.6).</summary>
-  public static string PillText(BellHealth health) => health switch
+  /// <summary>
+  /// Text for the System Status card's BELL pill (handoff §3.6). Keyed on reachability,
+  /// for the reason documented on <see cref="PillClass"/>.
+  /// </summary>
+  public static string PillText(bool? reachable) => reachable switch
   {
-    BellHealth.Ok => "Online",
-    BellHealth.Suspect or BellHealth.Failed => "Offline",
+    true => "Online",
+    false => "Offline",
     _ => "Unknown",
   };
 
