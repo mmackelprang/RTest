@@ -6,6 +6,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
+    <!-- Workstation GC (non-Server, non-concurrent) — see Radio.API.csproj for rationale.
+         Microsoft.NET.Sdk.Web defaults to Server GC (one heap per core, slow to release).
+         Radio.Web is a Blazor Server UI pinned to cores 0,1 (radio-web.service); Workstation
+         GC keeps its steady-state footprint low and returns memory to the OS promptly. -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Radio.Core\Radio.Core.csproj" />

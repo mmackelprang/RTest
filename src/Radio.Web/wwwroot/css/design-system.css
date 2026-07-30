@@ -47,6 +47,19 @@
 /* ─── §2  CSS Custom Properties ───────────────────────────────────────────── */
 
 :root {
+  /* ── Colour scheme (P1a) ──
+     Declaring the app dark makes Chromium/Firefox render every native
+     control — scrollbars, date/select popups, form widgets — in dark mode
+     instead of the light UA default. This is the root-cause fix for the
+     "bright native scrollbar" and any light-on-light fallback surface. It
+     also makes <button>-based rows (.list-item-touch) stop painting the
+     near-white UA ButtonFace once their background is transparent. */
+  color-scheme: dark;
+
+  /* ── Scrollbar tokens (P1a) — reuse existing text tokens ── */
+  --scrollbar-thumb:        var(--text-low);       /* #4B5563 — resting thumb */
+  --scrollbar-thumb-hover:  var(--text-medium);    /* #B5BCC9 — hover thumb */
+
   /* ── Primary Surfaces ── */
   --surface-base:           #0D0D0F;
   --surface-raised:         #141416;
@@ -589,10 +602,30 @@ html, body {
   transition: background 80ms ease;
   border-left: 3px solid transparent;
   -webkit-tap-highlight-color: transparent;
+  /* Native <button> chrome reset (P1b) — this class is used on <button>
+     rows (PhoneMessagesPanel RenderCallRow / RenderTextThreadRow,
+     VoicemailRow). Without this reset the UA paints ButtonFace (near-white)
+     behind every row. Mirrors the reset .phone-rail-tab / .phone-mode-btn
+     already carry. All of these are no-ops on the <div> uses of this class. */
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  width: 100%;
 }
 
 .list-item-touch:hover {
   background: rgba(255, 255, 255, 0.03);
+}
+
+.list-item-touch:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent-primary);
 }
 
 .list-item-touch:active {
@@ -1262,46 +1295,36 @@ button, .rz-button { min-width: var(--touch-compact); min-height: var(--touch-co
 
 /* ─── §19  Scrollbar Styling ──────────────────────────────────────────────── */
 
-/* Hide scrollbars by default on most kiosk surfaces, but allow the panels
-   below to opt back in to a thin scrollbar so users can see there's more
-   content to scroll. (PR 2) */
+/* Canonical, theme-aware, GLOBAL thin dark scrollbar (P1d).
+   Replaces the old opt-in allowlist (.scrollable / #queue-scroll-container /
+   .rz-tabview-panels / .rz-data-grid-data / .history-filter-scroll). Because
+   scrollbar-width / ::-webkit-scrollbar do NOT inherit, an allowlist left
+   every un-listed scroll container (the phone feed, detail pane, msg-list,
+   any future container) on the raw native bar. One global treatment + the
+   :root { color-scheme: dark } declaration fixes them all at once.
+   Thumb width kept at 3px to minimise deviation from shipped behaviour; the
+   handoff proposes ~4px but flags it as owner-approval-only. */
+
+/* Firefox — thin, theme-aware, on every scroll container */
+* { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
+
+/* Keep the outer kiosk chrome scrollbar-free (higher specificity → wins over *) */
 html, body, #app { scrollbar-width: none; }
 html::-webkit-scrollbar,
 body::-webkit-scrollbar,
 #app::-webkit-scrollbar { display: none; }
 
-/* Thin scrollbars on scrollable panels (PR 2) */
-.scrollable,
-#queue-scroll-container,
-.rz-tabview-panels,
-.rz-data-grid-data,
-.history-filter-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: var(--text-low) transparent;
+/* Chromium/WebKit — thin dark scrollbar for all inner scroll containers */
+::-webkit-scrollbar { width: 3px; height: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 3px;
 }
-.scrollable::-webkit-scrollbar,
-#queue-scroll-container::-webkit-scrollbar,
-.rz-tabview-panels::-webkit-scrollbar,
-.rz-data-grid-data::-webkit-scrollbar,
-.history-filter-scroll::-webkit-scrollbar { display: block; width: 3px; }
-.scrollable::-webkit-scrollbar-track,
-#queue-scroll-container::-webkit-scrollbar-track,
-.rz-tabview-panels::-webkit-scrollbar-track,
-.rz-data-grid-data::-webkit-scrollbar-track,
-.history-filter-scroll::-webkit-scrollbar-track { background: transparent; }
-.scrollable::-webkit-scrollbar-thumb,
-#queue-scroll-container::-webkit-scrollbar-thumb,
-.rz-tabview-panels::-webkit-scrollbar-thumb,
-.rz-data-grid-data::-webkit-scrollbar-thumb,
-.history-filter-scroll::-webkit-scrollbar-thumb {
-  background: var(--text-low);
-  border-radius: 2px;
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
 }
-.scrollable::-webkit-scrollbar-thumb:hover,
-#queue-scroll-container::-webkit-scrollbar-thumb:hover,
-.rz-tabview-panels::-webkit-scrollbar-thumb:hover,
-.rz-data-grid-data::-webkit-scrollbar-thumb:hover,
-.history-filter-scroll::-webkit-scrollbar-thumb:hover { background: var(--text-medium); }
+::-webkit-scrollbar-corner { background: transparent; }
 
 
 /* ─── §20  Bottom-Sheet Dialogs ───────────────────────────────────────────── */
@@ -4091,12 +4114,18 @@ body {
 
 /* ─── RDS accumulating scroll marquee ────────────────────────────────────────
    Replaces the legacy chunk-per-display rcp-rds-rt strip with a rolling,
-   continuously-scrolling ticker. CSS keyframes on transform: translateX so
-   the animation runs on the GPU compositor thread — keeps the audio-pipeline-
-   sensitive main thread free.
+   continuously-scrolling ticker. The transform is driven by
+   wwwroot/js/rds-marquee.js via the Web Animations API — still composited
+   off the main thread (same rationale as the original CSS keyframes:
+   keep the audio-pipeline-sensitive main thread free), but the JS engine
+   owns the scroll offset explicitly so buffer appends / evictions preserve
+   the visual position instead of restarting the animation (the "jerk" fix).
+   No CSS animation remains on the track; pause-on-hover/focus also lives in
+   the JS engine (WAAPI pause/play), and the .is-static class is toggled by
+   the engine from real measured widths.
 
-   Spec: HANDOFF-rds-accumulating-scroll §4 (CSS choice rationale) and §7
-   (accessibility — pause-on-hover/focus, reduced-motion fallback, sr-only
+   Spec: HANDOFF-rds-accumulating-scroll §4 (compositor-thread rationale) and
+   §7 (accessibility — pause-on-hover/focus, reduced-motion fallback, sr-only
    aria-live mirror).
 */
 .rcp-rds-rt-scroll {
@@ -4127,8 +4156,8 @@ body {
 }
 
 /* Hover affordance — subtle 1 px outline so the user knows the strip is
-   interactive (focus-pause / hover-pause). Pause itself lives on the
-   .rcp-rds-rt-track rule below. */
+   interactive (focus-pause / hover-pause). Pause itself lives in the JS
+   engine (rds-marquee.js pointer/focus listeners → WAAPI pause). */
 .rcp-rds-rt-scroll:hover,
 .rcp-rds-rt-scroll:focus,
 .rcp-rds-rt-scroll:focus-within {
@@ -4143,47 +4172,41 @@ body {
   font-size: 11px;
   color: var(--text-low);
   letter-spacing: 0.04em;
-  /* Right-to-left scroll — standard ticker convention. Starts off the
-     right edge (100%) and runs until fully off the left edge (-100%).
-     --scroll-duration is set inline per render by the Razor component so
-     the px/s speed stays constant regardless of buffer length. */
-  animation: rcp-rds-rt-scroll var(--scroll-duration, 17s) linear infinite;
+  /* Right-to-left scroll — standard ticker convention. The translateX is
+     animated by rds-marquee.js (Web Animations API) at a constant px/s
+     regardless of buffer length; no CSS animation here. */
   will-change: transform;
 }
 
-@keyframes rcp-rds-rt-scroll {
-  from { transform: translateX(100%); }
-  to   { transform: translateX(-100%); }
-}
-
-/* Pause-on-hover and pause-on-focus. CSS pause honours the current keyframe
-   offset exactly — no drift, no JS state. Auto-resumes on un-hover / blur. */
-.rcp-rds-rt-scroll:hover .rcp-rds-rt-track,
-.rcp-rds-rt-scroll:focus .rcp-rds-rt-track,
-.rcp-rds-rt-scroll:focus-within .rcp-rds-rt-track {
-  animation-play-state: paused;
-}
-
-/* Static-fit variant — when buffer width <= container width, the parent
-   component adds .is-static and we skip the marquee animation entirely.
-   Feels less twitchy on stations with a single short tagline (HANDOFF §8 q8). */
+/* Static-fit variant — when the measured track width fits the container,
+   the JS engine adds .is-static and skips the marquee entirely. Feels less
+   twitchy on stations with a single short tagline (HANDOFF §8 q8). */
 .rcp-rds-rt-scroll.is-static .rcp-rds-rt-track {
-  animation: none;
   transform: none;
   display: block;
   text-align: center;
   will-change: auto;
 }
 
-/* Reduced-motion fallback — disable the marquee, fall back to a thin
-   horizontal scrollbar so motion-sensitive users can read the buffer at
-   their own pace (HANDOFF §7). */
+/* Reduced-motion fallback — the JS engine never animates under
+   prefers-reduced-motion; fall back to a thin horizontal scrollbar so
+   motion-sensitive users can read the buffer at their own pace (HANDOFF §7).
+   The scrollable element must be the width-constrained CONTAINER: the track
+   is an inline-block that shrink-wraps its nowrap content, so overflow-x on
+   the track itself can never engage (pre-merge review finding #2). */
 @media (prefers-reduced-motion: reduce) {
-  .rcp-rds-rt-track {
-    animation: none;
-    transform: none;
+  .rcp-rds-rt-scroll {
     overflow-x: auto;
+    overflow-y: hidden;
     scrollbar-width: thin;
+    /* The edge-fade mask would dim the very text the user is trying to
+       read while manually scrolling — drop it in this mode. */
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+
+  .rcp-rds-rt-track {
+    transform: none;
     will-change: auto;
   }
 }
@@ -4965,7 +4988,9 @@ body {
   border-right: 1px solid var(--surface-separator);
   display: flex;
   flex-direction: column;
-  padding: 16px 12px;
+  padding: 16px 12px 16px 20px;   /* P1c: +8px left safe-gutter so the rail
+                                     clears the physical left edge on the
+                                     bezeled 1920×720 kiosk */
   gap: 4px;
 }
 
@@ -5005,7 +5030,11 @@ body {
 .phone-rail-tab.active::before {
   content: '';
   position: absolute;
-  left: -12px; top: 8px; bottom: 8px;
+  left: -8px; top: 8px; bottom: 8px;   /* P1c: was -12px. With the 20px rail
+                                          left-padding the bar sits at x≈12px
+                                          and its 8px glow stays at x≥0, so
+                                          .content-area{overflow:hidden} no
+                                          longer clips it */
   width: 3px; border-radius: 2px;
   background: var(--accent-primary);
   box-shadow: 0 0 8px var(--accent-glow);
@@ -5186,6 +5215,120 @@ body {
   color: var(--text-low);
   font-size: 14px;
   margin-top: 24px;
+}
+
+/* §Ph — Hero alert strip (bell failure; handoff §3.3, §8.5, §10).
+   Chrome is the .phone-btn-sm.btn-danger recipe verbatim — 12% fill, 30% hairline,
+   --signal-red text — so the strip reads as the same family as the existing degraded
+   surfaces (.gv-reconnect-banner, .vm-player-error). Zero new design tokens, zero new
+   keyframes, and no light-mode branch: the app is dark-only (`color-scheme: dark`, one
+   :root set). The strip deliberately does NOT animate in — a slide/fade entrance on a
+   failure notice reads as decorative, and during a call any motion competes with the
+   Answer button for attention (§4).
+   Budget: min-height is 44px, but the two-line body makes the strip render ~70px
+   (measured at 1920x720). With the 16px margin that is ~86px against the hero's ~156px
+   of vertical slack (§9) — still comfortably inside it, and it appears without
+   reflowing the action row. Use ~70px, not the 44px minimum, in any future §9 budget. */
+.phone-hero-alert {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  margin-top: var(--sp-4);
+  min-height: 44px;
+  border-radius: 8px;
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.30);
+  color: var(--signal-red);
+}
+/* notifications_off — a bell with a slash through it. Chosen over error_outline /
+   warning because it carries the specific meaning ("no ringing") without language,
+   which is what keeps the signal alive for a user who cannot distinguish red and for
+   a reduced-motion user who never saw the pulse in the first place (§8.3, §4). */
+.phone-hero-alert .rzi {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+.phone-hero-alert-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.phone-hero-alert-text {
+  font-family: var(--font-body);
+  font-size: 13px;
+  /* Fits on one line at the ~974px hero interior (§9); allowed to wrap, never clip. */
+  word-break: break-word;
+}
+/* §8.4 sanctioned --text-low here ONLY for the non-essential "last checked" timestamp.
+   That timestamp is deferred until RotaryPhone ships Ht801LastCheckedUtc (§6.3), so the
+   only content left in this slot is the diagnosis itself — which --text-low cannot
+   carry. Measured against the strip's 12%-red-tinted backdrop (#2F1F21 effective),
+   --text-low is 2.08:1: fails AA and even AA-large, and at 11px mono on a kiosk it is
+   effectively invisible. --text-medium measures 8.2:1 on the same backdrop. Hierarchy
+   below the 13px red primary sentence is still carried by size and colour family,
+   exactly as .phone-status-row .val sits below its .lbl. */
+.phone-hero-alert-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-medium);
+}
+/* §8.5 — .phone-btn-sm declares height: 36px, but the global
+   `button { min-height: var(--touch-compact) }` at line 1292 wins, so it actually
+   renders at 44px. Either way it is short of the project's 48px --touch-min for
+   buttons. Pad the HIT REGION with a pseudo-element rather than enlarging the visual
+   button, so the strip's 44px min-height is not blown out (same intent as
+   .vm-scrubber's "3px bar + pad >= 24px hit area"). Measured in-browser: the hit
+   region extends exactly 2px above and below the 44px button = 48px. */
+.phone-hero-alert .phone-btn-sm {
+  position: relative;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.phone-hero-alert .phone-btn-sm::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: var(--touch-min);
+}
+.phone-hero-alert .phone-btn-sm:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent-primary);
+}
+
+/* §Ph — Topbar nav-pill bell-fault badge (handoff §3.7).
+   Pinned bottom-right so it coexists with the existing unread .nav-badge without moving
+   it. A glyph rather than a coloured dot, so the signal survives for a user who cannot
+   distinguish red (§8.3); the pill's aria-label carries it in text regardless.
+   .nav-pill is already position: relative.
+
+   §3.7's mockup assumed the unread badge is corner-pinned top-right. That is true only
+   of the RAIL variant (.phone-rail-tab .nav-badge). In the TOPBAR .nav-badge carries no
+   positioning at all — it is an ordinary in-flow flex item, vertically centred — so it
+   sits further left and lower than the mockup implies. At right: 6px the two boxes
+   overlapped by 2px and .nav-badge's `box-shadow: 0 0 6px var(--signal-amber-glow)`
+   washed amber over the red glyph. right: 4px pulls the glyph clear of the badge's
+   right edge; bottom: 4px adds vertical separation so the amber halo falls short of it. */
+.phone-nav-fault {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  display: inline-flex;
+  color: var(--signal-red);
+  pointer-events: none;
+}
+/* .nav-pill .rzi sets font-size: 22px !important. An !important declaration outranks
+   ANY normal one regardless of specificity, so this override must also be !important;
+   raising specificity alone would not win. Between two !important declarations
+   specificity decides, hence the .nav-pill prefix — (0,3,0) beats (0,2,0). */
+.nav-pill .phone-nav-fault .rzi {
+  font-size: 12px !important;
+  width: 12px;
+  height: 12px;
 }
 
 /* -- Phone Action Buttons ---------------------------------------------------- */
@@ -5498,7 +5641,12 @@ body {
 .phone-dot-pulse { animation: phoneDotPulse 1.4s ease-in-out infinite; }
 
 /* §Ph — Messages panel layout (PR1) */
-.phone-messages { display: flex; flex-direction: column; height: 600px; min-height: 0; }
+/* P1d-related: was height:600px (the FULL content area). On /phone the
+   NowPlayingDock shrinks .content-area.has-dock .page-transition to
+   calc(100% - 64px) = 536px, so a 600px panel overflowed by 64px and hid its
+   last rows + scrollbar under the dock. height:100% fills the already-correct
+   .page-transition box instead. */
+.phone-messages { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .phone-messages-body {
   display: grid; grid-template-columns: 1fr 520px;
   flex: 1; min-height: 0; overflow: hidden;
@@ -5565,6 +5713,59 @@ body {
   box-shadow: 0 0 6px var(--accent-glow);
   flex-shrink: 0;
 }
+
+/* §Ph — Unified feed row polish (phone dark-theme handoff §Issue 4 + Task #6).
+   A shared 44px identity chip gives calls the same left spine as voicemail
+   (.vm-chip) / texts; direction tints reuse the exact --signal-* / --accent-primary
+   recipe at 14% — no new colours. */
+.feed-chip {
+  width: 44px; height: 44px; border-radius: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.feed-chip--in     { background: color-mix(in srgb, var(--signal-green) 14%, transparent);   color: var(--signal-green); }
+.feed-chip--out    { background: color-mix(in srgb, var(--signal-blue)  14%, transparent);   color: var(--signal-blue);  }
+.feed-chip--missed { background: color-mix(in srgb, var(--signal-red)   14%, transparent);   color: var(--signal-red);   }
+.feed-chip--text   { background: color-mix(in srgb, var(--accent-primary) 14%, transparent); color: var(--accent-primary); }
+/* Neutral fallback for a call with no direction (should not occur in practice). */
+.feed-chip--call   { background: color-mix(in srgb, var(--text-medium) 14%, transparent);    color: var(--text-medium); }
+
+/* Identity column: contact name (title) over the raw number (Task #6). */
+.list-item-identity { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.list-item-subnumber {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--text-medium);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Right-aligned meta stack: smart timestamp over duration / answered-on pill. */
+.list-item-meta-stack {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
+  flex-shrink: 0;
+}
+.list-item-meta-stack .list-item-meta { font-variant-numeric: tabular-nums; }
+/* The top line (direct child) is the smart timestamp — the primary glanceable
+   field, so it reads at --text-medium; the nested duration stays the dimmer
+   --text-low from the base .list-item-meta rule (two-tier meta hierarchy). */
+.list-item-meta-stack > .list-item-meta { color: var(--text-medium); }
+.list-item-meta-bottom { display: flex; align-items: center; gap: 8px; }
+.list-item-missed {
+  color: var(--signal-red);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+
+/* Optional row hairline for scannability at kiosk distance; removed on hover /
+   active so the selected row reads as a solid fill. */
+.phone-messages-feed .list-item-touch { border-bottom: 1px solid var(--surface-separator); }
+.phone-messages-feed .list-item-touch:hover,
+.phone-messages-feed .list-item-touch.list-item-active { border-bottom-color: transparent; }
+
+/* Skeleton chip block so the loading row matches the real feed-chip spine. */
+.skeleton-feed-chip { width: 44px; height: 44px; border-radius: 10px; flex-shrink: 0; }
 
 /* -- §Ph  Text message bubbles (PR3, handoff verbatim) --------------------- */
 .msg-list {

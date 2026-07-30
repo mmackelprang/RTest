@@ -88,15 +88,11 @@ public class RdsDecoder
   private int _candidateMatchCount;
   private const int PsConfirmThreshold = 2; // identical complete names required
 
-  // Radio Text (Group 2A/2B) — 64-char free text, often "Artist - Title"
-  private readonly char[] _rtChars = new char[64];
-  private readonly bool[] _rtCharReceived = new bool[64];
-  private bool _rtAbFlag;             // A/B flag — toggles on new message
-  private bool _rtAbFlagInitialized;
-  private string? _confirmedRadioText;
-  private string? _candidateRadioText;
-  private int _rtCandidateMatchCount;
-  private const int RtConfirmThreshold = 2;
+  // Radio Text (Group 2A/2B) — 64-char free text, often "Artist - Title".
+  // Assembly + noise rejection live in RadioTextAssembler (per-char
+  // double-receive, complete-before-partial confirmation) so the state
+  // machine is unit-testable without the DSP chain.
+  private readonly RadioTextAssembler _rtAssembler = new();
 
   // PI code (Program Identification) — unique station identifier
   private ushort? _piCode;
@@ -140,7 +136,7 @@ public class RdsDecoder
   /// The decoded Radio Text (up to 64 characters), or null if not yet decoded.
   /// Often contains "Artist - Title" or station slogan.
   /// </summary>
-  public string? RadioText => _confirmedRadioText;
+  public string? RadioText => _rtAssembler.ConfirmedText;
 
   /// <summary>
   /// The PI (Program Identification) code, or null if not yet decoded.
@@ -350,13 +346,7 @@ public class RdsDecoder
     _confirmedStationName = null;
     _candidateStationName = null;
     _candidateMatchCount = 0;
-    Array.Clear(_rtChars);
-    Array.Clear(_rtCharReceived);
-    _rtAbFlag = false;
-    _rtAbFlagInitialized = false;
-    _confirmedRadioText = null;
-    _candidateRadioText = null;
-    _rtCandidateMatchCount = 0;
+    _rtAssembler.Reset();
     _piCode = null;
     _piCodeLogged = false;
     _ptyCode = -1;
@@ -693,108 +683,13 @@ public class RdsDecoder
 
   private void ProcessGroup2RT(ushort blockB, ushort blockC, ushort blockD, bool versionB)
   {
-    // A/B flag in bit 4 of block B — toggles when station sends new message
-    var abFlag = ((blockB >> 4) & 0x01) == 1;
-    if (_rtAbFlagInitialized && abFlag != _rtAbFlag)
+    // RadioTextAssembler owns segment assembly, the A/B flag, per-char
+    // double-receive noise rejection, and the complete-before-partial
+    // confirmation policy. It returns true exactly once per newly-confirmed
+    // distinct text.
+    if (_rtAssembler.ProcessGroup(blockB, blockC, blockD, versionB))
     {
-      // New RT message — clear buffer
-      Array.Clear(_rtChars);
-      Array.Clear(_rtCharReceived);
-      Logger.Debug("RDS: Radio Text A/B flag toggled, clearing RT buffer");
-    }
-    _rtAbFlag = abFlag;
-    _rtAbFlagInitialized = true;
-
-    // Block B bits 3-0: text segment address
-    var segmentAddr = blockB & 0x0F;
-
-    if (versionB)
-    {
-      // Group 2B: 2 chars from block D only (block C carries PI code repeat)
-      var pos = segmentAddr * 2;
-      if (pos + 1 < 64)
-      {
-        SetRtChar(pos, (char)((blockD >> 8) & 0xFF));
-        SetRtChar(pos + 1, (char)(blockD & 0xFF));
-      }
-    }
-    else
-    {
-      // Group 2A: 4 chars from blocks C and D
-      var pos = segmentAddr * 4;
-      if (pos + 3 < 64)
-      {
-        SetRtChar(pos, (char)((blockC >> 8) & 0xFF));
-        SetRtChar(pos + 1, (char)(blockC & 0xFF));
-        SetRtChar(pos + 2, (char)((blockD >> 8) & 0xFF));
-        SetRtChar(pos + 3, (char)(blockD & 0xFF));
-      }
-    }
-
-    // Try to assemble a complete Radio Text message
-    TryAssembleRadioText();
-  }
-
-  private void SetRtChar(int pos, char c)
-  {
-    // 0x0D = carriage return, marks end of message (fill remaining with spaces)
-    if (c == 0x0D)
-    {
-      for (int i = pos; i < 64; i++)
-      {
-        _rtChars[i] = ' ';
-        _rtCharReceived[i] = true;
-      }
-      return;
-    }
-
-    // Validate printable ASCII
-    if (c >= 0x20 && c <= 0x7E)
-    {
-      _rtChars[pos] = c;
-      _rtCharReceived[pos] = true;
-    }
-  }
-
-  private void TryAssembleRadioText()
-  {
-    // Check if we have a contiguous run from position 0
-    int length = 0;
-    for (int i = 0; i < 64; i++)
-    {
-      if (!_rtCharReceived[i])
-      {
-        break;
-      }
-
-      length = i + 1;
-    }
-
-    // Need at least 4 characters to be meaningful
-    if (length < 4)
-    {
-      return;
-    }
-
-    var text = new string(_rtChars, 0, length).Trim();
-    if (string.IsNullOrEmpty(text))
-    {
-      return;
-    }
-
-    if (text == _candidateRadioText)
-    {
-      _rtCandidateMatchCount++;
-      if (_rtCandidateMatchCount >= RtConfirmThreshold && _confirmedRadioText != text)
-      {
-        _confirmedRadioText = text;
-        Logger.Information("RDS: Radio Text = \"{RadioText}\"", text);
-      }
-    }
-    else
-    {
-      _candidateRadioText = text;
-      _rtCandidateMatchCount = 1;
+      Logger.Information("RDS: Radio Text = \"{RadioText}\"", _rtAssembler.ConfirmedText);
     }
   }
 

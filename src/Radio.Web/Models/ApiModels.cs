@@ -1081,6 +1081,17 @@ public class PbapContactDto
 }
 
 /// <summary>
+/// Response shape of GET /api/bluetooth/pbap/lookup?phoneNumber= — a single
+/// resolved contact name for one number, or 404 when there is no match. Consumed
+/// by the Messages feed's contact-name resolution (Task #6).
+/// </summary>
+public class PbapLookupDto
+{
+  public string? DisplayName { get; set; }
+  public string? PhoneNumber { get; set; }
+}
+
+/// <summary>
 /// Merged view of manual (ContactDto) and phone-synced (PbapContactDto) contacts.
 /// Used by PhonePage and PhoneContactsPanel for the unified contacts grid.
 /// </summary>

@@ -8,26 +8,36 @@ namespace Radio.Web.Tests.Components.Shared;
 
 /// <summary>
 /// bUnit tests for the <see cref="RdsScrollMarquee"/> component — accumulating
-/// RDS RT ticker rendered below the frequency well in RadioControlPanel.
+/// RDS RT ticker rendered inside RdsCard in RadioControlPanel.
 ///
-/// Component contract under test (HANDOFF-rds-accumulating-scroll §3, §4, §7):
+/// Component contract under test (HANDOFF-rds-accumulating-scroll §3, §4, §7 +
+/// the RDS scroll-engine fix):
 ///   - Renders nothing when Text is null/empty (collapse-when-empty matches
 ///     the legacy rcp-rds-rt behaviour)
 ///   - Renders the scroll container + track + sr-only mirror when Text is set
-///   - Adds the .is-static class when text fits the container width
-///   - Sets --scroll-duration inline so the px/s speed stays constant
-///   - aria-live="polite" on the SR-only mirror (motion-friendly + a11y)
-///   - aria-hidden="true" on the visible track (the mirror carries the
-///     readable copy)
-///   - tabindex="0" on the scroll container (keyboard focus pause)
+///   - aria-live="polite" on the SR-only mirror, aria-hidden="true" on the
+///     visible track, tabindex="0" on the container
+///   - Drives wwwroot/js/rds-marquee.js through the offset-preserving interop
+///     contract: init on first mount, update("append"/"swap"/"reset") on text
+///     changes, update("speed") on speed-only changes, dispose on unmount —
+///     asserted via bUnit's module-interop invocation records
+///   - No DOM churn / no interop on no-op parent re-renders (ShouldRender)
 /// </summary>
 public class RdsScrollMarqueeTests : TestContext
 {
+  private readonly BunitJSModuleInterop _module;
+
   public RdsScrollMarqueeTests()
   {
     Services.AddRadzenComponents();
     JSInterop.Mode = JSRuntimeMode.Loose;
+    _module = JSInterop.SetupModule("./js/rds-marquee.js");
   }
+
+  private IReadOnlyList<JSRuntimeInvocation> EngineCalls(string identifier)
+    => _module.Invocations.Where(i => i.Identifier == identifier).ToList();
+
+  // ─── Markup / accessibility ──────────────────────────────────────────────
 
   [Fact]
   public void Marquee_RendersNothing_WhenTextNull()
@@ -60,63 +70,17 @@ public class RdsScrollMarqueeTests : TestContext
   }
 
   [Fact]
-  public void Marquee_AddsIsStaticClass_WhenTextFitsContainer()
+  public void Marquee_TrackCarriesNoInlineAnimationStyle()
   {
-    // 5 chars * 7 px/char = 35 px, way under default 420 px container — static.
+    // The scroll-engine fix removed the per-render inline --scroll-duration —
+    // re-emitting it was what restarted the CSS keyframes on every append
+    // (the "jerk"). The transform is now owned exclusively by the JS engine.
     var cut = RenderComponent<RdsScrollMarquee>(p => p
-      .Add(x => x.Text, "WUNC"));
-
-    var scroll = cut.Find(".rcp-rds-rt-scroll");
-    scroll.ClassList.Should().Contain("is-static",
-      "short text that fits the container renders static-centered, not scrolling");
-  }
-
-  [Fact]
-  public void Marquee_OmitsIsStaticClass_WhenTextOverflows()
-  {
-    // ~80 chars * 7 px/char = 560 px > 420 px container — scrolls.
-    var longText = new string('A', 80);
-    var cut = RenderComponent<RdsScrollMarquee>(p => p
-      .Add(x => x.Text, longText));
-
-    var scroll = cut.Find(".rcp-rds-rt-scroll");
-    scroll.ClassList.Should().NotContain("is-static");
-  }
-
-  [Fact]
-  public void Marquee_SetsScrollDuration_InlineOnTrack()
-  {
-    // Text longer than container forces a real scroll duration computation.
-    var longText = new string('A', 100);
-    var cut = RenderComponent<RdsScrollMarquee>(p => p
-      .Add(x => x.Text, longText)
-      .Add(x => x.ScrollSpeedPxPerSec, 40)
-      .Add(x => x.ContainerMaxWidthPx, 420)
-      .Add(x => x.ApproximateCharWidthPx, 7.0));
+      .Add(x => x.Text, new string('A', 100)));
 
     var track = cut.Find(".rcp-rds-rt-track");
-    var style = track.GetAttribute("style") ?? string.Empty;
-    style.Should().Contain("--scroll-duration:",
-      "the marquee sets the CSS custom property inline so the px/s speed stays constant regardless of buffer length");
-    style.Should().Contain("s;", "the duration value carries the seconds unit");
-  }
-
-  [Fact]
-  public void Marquee_DurationFloor_HonoursMinimumOfFourSeconds()
-  {
-    // Very short text + very high speed would otherwise produce a sub-second
-    // animation that feels frantic. The component clamps to a 4 s floor.
-    // 50 px / 200 px/s = 0.25 s natural → clamped to 4 s.
-    var cut = RenderComponent<RdsScrollMarquee>(p => p
-      .Add(x => x.Text, new string('A', 1000))
-      .Add(x => x.ScrollSpeedPxPerSec, 40)
-      .Add(x => x.ContainerMaxWidthPx, 420)
-      .Add(x => x.ApproximateCharWidthPx, 7.0));
-
-    var track = cut.Find(".rcp-rds-rt-track");
-    var style = track.GetAttribute("style") ?? string.Empty;
-    // 1000 * 7 + 420 = 7420 px ; 7420 / 40 ≈ 185.5 s — way above floor.
-    style.Should().Contain("185.5s");
+    (track.GetAttribute("style") ?? string.Empty).Should().NotContain("--scroll-duration",
+      "scroll timing lives in rds-marquee.js now — no restart-prone inline animation state");
   }
 
   [Fact]
@@ -153,8 +117,7 @@ public class RdsScrollMarqueeTests : TestContext
   public void Marquee_ScrollContainer_IsKeyboardFocusable()
   {
     // HANDOFF §7 — tabindex="0" so keyboard users can land on the strip and
-    // focus-pause works (CSS :focus / :focus-within selectors in
-    // design-system.css trigger animation-play-state: paused).
+    // the JS engine's focusin listener pauses the scroll.
     var cut = RenderComponent<RdsScrollMarquee>(p => p
       .Add(x => x.Text, "WUNC News"));
 
@@ -175,12 +138,139 @@ public class RdsScrollMarqueeTests : TestContext
     scroll.GetAttribute("title").Should().Be(bufferText);
   }
 
-  // --- Render-guard regression tests (RDS scroll-stability fix) ---
-  // The CSS marquee animation restarts whenever this component re-renders (the
-  // track div is re-created and the inline --scroll-duration re-emitted). The
-  // parent (RadioControlPanel) re-renders ~2x/second on signal telemetry, so a
-  // no-op render visibly snaps the ticker back to the right edge ("jerk +
-  // dropped chars"). ShouldRender() suppresses the no-op renders.
+  // ─── JS engine interop contract (the offset-preserving scroll fix) ───────
+
+  [Fact]
+  public void Marquee_FirstRenderWithText_InitsEngineOnce()
+  {
+    RenderComponent<RdsScrollMarquee>(p => p
+      .Add(x => x.Text, "WUNC News")
+      .Add(x => x.ScrollSpeedPxPerSec, 40));
+
+    var inits = EngineCalls("init");
+    inits.Should().HaveCount(1, "one engine instance per mounted marquee");
+    inits[0].Arguments[3].Should().Be(40, "the configured speed is passed to init");
+    EngineCalls("update").Should().BeEmpty();
+  }
+
+  [Fact]
+  public void Marquee_AppendedText_CallsUpdateAppend_WithZeroTrim_NotReInit()
+  {
+    var cut = RenderComponent<RdsScrollMarquee>(p => p
+      .Add(x => x.Text, "WUNC News"));
+
+    cut.SetParametersAndRender(p => p
+      .Add(x => x.Text, "WUNC News • Morning Edition"));
+
+    EngineCalls("init").Should().HaveCount(1,
+      "an append must NOT re-create the engine (that would reset the scroll offset — the old jerk)");
+    var updates = EngineCalls("update");
+    updates.Should().HaveCount(1);
+    updates[0].Arguments[1].Should().Be("append");
+    updates[0].Arguments[2].Should().Be(0, "nothing was trimmed from the front");
+  }
+
+  [Fact]
+  public void Marquee_FrontTrimmedAppend_PassesTrimmedCharCount()
+  {
+    // Buffer evicted "Old • " (6 chars) off the front while appending — the
+    // engine compensates the offset by exactly that many chars × char width.
+    var cut = RenderComponent<RdsScrollMarquee>(p => p
+      .Add(x => x.Text, "Old • Morning Edition"));
+
+    cut.SetParametersAndRender(p => p
+      .Add(x => x.Text, "Morning Edition • NPR News"));
+
+    var updates = EngineCalls("update");
+    updates.Should().HaveCount(1);
+    updates[0].Arguments[1].Should().Be("append");
+    updates[0].Arguments[2].Should().Be(6,
+      "'Old • ' (6 chars) was evicted from the front; the offset compensation needs the exact count");
+  }
+
+  [Fact]
+  public void Marquee_SameLengthSwap_CallsUpdateSwap()
+  {
+    // Rolling-PS page swap: the 8-char PS head changes, track length is
+    // unchanged — keep the offset, swap the glyphs (no visual jump).
+    var cut = RenderComponent<RdsScrollMarquee>(p => p
+      .Add(x => x.Text, "EAGLES97 • Hotel California"));
+
+    cut.SetParametersAndRender(p => p
+      .Add(x => x.Text, "CLASSICS • Hotel California"));
+
+    var updates = EngineCalls("update");
+    updates.Should().HaveCount(1);
+    updates[0].Arguments[1].Should().Be("swap");
+  }
+
+  [Fact]
+  public void Marquee_UnrelatedText_CallsUpdateReset()
+  {
+    var cut = RenderComponent<RdsScrollMarquee>(p => p
+      .Add(x => x.Text, "WUNC News • Morning Edition"));
+
+    cut.SetParametersAndRender(p => p
+      .Add(x => x.Text, "Completely different station content"));
+
+    var updates = EngineCalls("update");
+    updates.Should().HaveCount(1);
+    updates[0].Arguments[1].Should().Be("reset");
+  }
+
+  [Fact]
+  public void Marquee_SpeedOnlyChange_CallsUpdateSpeed()
+  {
+    var cut = RenderComponent<RdsScrollMarquee>(p => p
+      .Add(x => x.Text, "WUNC News")
+      .Add(x => x.ScrollSpeedPxPerSec, 40));
+
+    // Catch-up boost engaged by RdsScrollSpeedPolicy upstream.
+    cut.SetParametersAndRender(p => p
+      .Add(x => x.Text, "WUNC News")
+      .Add(x => x.ScrollSpeedPxPerSec, 60));
+
+    var updates = EngineCalls("update");
+    updates.Should().HaveCount(1);
+    updates[0].Arguments[1].Should().Be("speed");
+    updates[0].Arguments[3].Should().Be(60);
+  }
+
+  [Fact]
+  public void Marquee_TextCleared_DisposesEngine_AndReInitsOnNextText()
+  {
+    var cut = RenderComponent<RdsScrollMarquee>(p => p
+      .Add(x => x.Text, "WUNC News"));
+
+    cut.SetParametersAndRender(p => p
+      .Add(x => x.Text, string.Empty));
+
+    EngineCalls("dispose").Should().HaveCount(1,
+      "unmounting the markup must tear down the engine instance (animation, listeners, DOM refs — leak guard)");
+
+    cut.SetParametersAndRender(p => p
+      .Add(x => x.Text, "New station content"));
+
+    EngineCalls("init").Should().HaveCount(2,
+      "a later non-empty text re-inits against the freshly-created elements");
+  }
+
+  [Fact]
+  public void Marquee_ComponentDispose_DisposesEngineInstance()
+  {
+    var cut = RenderComponent<RdsScrollMarquee>(p => p
+      .Add(x => x.Text, "WUNC News"));
+
+    DisposeComponents();
+
+    EngineCalls("dispose").Should().HaveCount(1,
+      "circuit/component teardown must release the engine instance");
+  }
+
+  // ─── Render-guard regression tests (RDS scroll-stability fix) ────────────
+  // The parent (RadioControlPanel) re-renders ~2x/second on signal telemetry.
+  // ShouldRender() suppresses the no-op renders so neither the DOM nor the
+  // JS engine sees any churn.
 
   [Fact]
   public void Marquee_DoesNotReRender_WhenTextUnchanged()
@@ -203,7 +293,25 @@ public class RdsScrollMarqueeTests : TestContext
       .Add(x => x.Text, "WUNC News • Morning Edition"));
 
     cut.RenderCount.Should().Be(afterPrime,
-      "an unchanged Text must not re-render the marquee (no CSS animation restart)");
+      "an unchanged Text must not re-render the marquee (no DOM churn, no interop)");
+  }
+
+  [Fact]
+  public void Marquee_NoOpReRenders_ProduceNoEngineCalls()
+  {
+    var cut = RenderComponent<RdsScrollMarquee>(p => p
+      .Add(x => x.Text, "WUNC News"));
+
+    for (var i = 0; i < 10; i++)
+    {
+      cut.SetParametersAndRender(p => p
+        .Add(x => x.Text, "WUNC News"));
+    }
+
+    EngineCalls("init").Should().HaveCount(1,
+      "telemetry-tick re-renders must not re-init the engine (leak + jerk guard)");
+    EngineCalls("update").Should().BeEmpty(
+      "no text/speed change means no engine sync at all");
   }
 
   [Fact]
@@ -219,26 +327,5 @@ public class RdsScrollMarqueeTests : TestContext
 
     cut.RenderCount.Should().BeGreaterThan(before,
       "a changed Text must re-render so the new buffer scrolls");
-  }
-
-  [Fact]
-  public void Marquee_DurationStable_AcrossNoOpReRender()
-  {
-    // Fallback assertion (plan §Task 3): the animation restart is what the
-    // re-emitted --scroll-duration style causes, so an identical-input render
-    // must keep the style string byte-identical (and ideally not re-render).
-    var cut = RenderComponent<RdsScrollMarquee>(p => p
-      .Add(x => x.Text, new string('A', 100))
-      .Add(x => x.ScrollSpeedPxPerSec, 40));
-
-    var styleBefore = cut.Find(".rcp-rds-rt-track").GetAttribute("style");
-
-    cut.SetParametersAndRender(p => p
-      .Add(x => x.Text, new string('A', 100))
-      .Add(x => x.ScrollSpeedPxPerSec, 40));
-
-    var styleAfter = cut.Find(".rcp-rds-rt-track").GetAttribute("style");
-    styleAfter.Should().Be(styleBefore,
-      "an unchanged buffer must not re-emit a new --scroll-duration (which would restart the keyframes)");
   }
 }

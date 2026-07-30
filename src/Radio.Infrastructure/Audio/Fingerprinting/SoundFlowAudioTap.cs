@@ -1,4 +1,3 @@
-using System.Buffers;
 using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
@@ -19,6 +18,22 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
 
   // Reusable chunk buffer — avoids allocating a new byte[4096] per loop iteration
   private readonly byte[] _chunkBuffer = new byte[4096];
+
+  // Reusable capture buffers — eliminate the ~7 MB of Large Object Heap churn that
+  // occurred on every fingerprint cycle (~15 s) and triggered a GC pause which
+  // starved the capture-fill thread (root cause of Cast-output underruns to
+  // 0/384000). Captures are strictly serial: BackgroundIdentificationService runs a
+  // single identification loop, and RequestImmediateIdentification only cancels the
+  // backoff delay — it never starts a concurrent cycle. This matches the existing
+  // single-threaded _chunkBuffer reuse assumption.
+  //
+  // _captureBuffer is internal scratch (never escapes this method) and is grow-only.
+  // _sampleBuffer escapes via AudioSampleBuffer.Samples, whose Length is load-bearing
+  // (SongRec writes exactly Samples.Length samples), so it is reused only on an exact
+  // length match and otherwise reallocated. For a steady, non-silent stream the
+  // captured sampleCount is constant, so it is allocated once and reused thereafter.
+  private byte[] _captureBuffer = Array.Empty<byte>();
+  private float[]? _sampleBuffer;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="SoundFlowAudioTap"/> class.
@@ -154,10 +169,16 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
       _logger.LogDebug("Expecting to read {Bytes} bytes ({Samples} samples) for {Duration}s at {SampleRate}Hz {Channels}ch",
         bytesToRead, totalSamples, duration.TotalSeconds, sampleRate, channels);
 
-      // Rent from ArrayPool to avoid LOH allocation (~2.7MB)
-      var buffer = ArrayPool<byte>.Shared.Rent(bytesToRead);
-      try
+      // Reuse a grow-only scratch buffer instead of renting from the shared
+      // ArrayPool. The shared pool no-ops above ~1 MB, so it allocated and then
+      // immediately discarded this ~2.3 MB buffer on the LOH every cycle. This
+      // buffer never escapes the method, so grow-only reuse is safe.
+      if (_captureBuffer.Length < bytesToRead)
       {
+        _captureBuffer = new byte[bytesToRead];
+      }
+      var buffer = _captureBuffer;
+
       var bytesRead = 0;
 
       // IMPORTANT: Use ReadAsync with real-time pacing, not sync Read.
@@ -240,8 +261,14 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
         return null;
       }
 
-      // Audio passed silence check — now convert bytes to float samples
-      var samples = new float[sampleCount];
+      // Audio passed silence check — now convert bytes to float samples.
+      // Reuse the sample buffer when the length matches (steady stream → constant
+      // sampleCount, allocated once and reused); otherwise reallocate so that
+      // AudioSampleBuffer.Samples.Length stays exact. This removes the ~4.6 MB
+      // float[] LOH allocation per fingerprint cycle.
+      var samples = _sampleBuffer is { } reuse && reuse.Length == sampleCount
+        ? reuse
+        : (_sampleBuffer = new float[sampleCount]);
       for (int i = 0; i < sampleCount; i++)
       {
         var byteIndex = i * bytesPerSample;
@@ -264,11 +291,6 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
         Duration = TimeSpan.FromSeconds(actualDuration),
         SourceName = SourceName
       };
-      }
-      finally
-      {
-        ArrayPool<byte>.Shared.Return(buffer);
-      }
     }
     catch (Exception ex)
     {

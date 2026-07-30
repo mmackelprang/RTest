@@ -120,6 +120,37 @@ public class NowPlayingPanelTests : TestContext
   }
 
   [Fact]
+  public void NowPlayingPanel_ProgressBarLabel_ShowsRoundedWholePercent_NotDecimalTail()
+  {
+    // Regression guard for the "47.8234917%" bug: a non-seekable source (e.g.
+    // Bluetooth) renders the RadzenProgressBar branch, whose default label would
+    // print the raw double _progressPercent. The Template must instead surface
+    // _progressPercentDisplay — a whole-number percent — while the bar WIDTH
+    // still binds to the full-precision _progressPercent.
+    var cut = RenderComponent<NowPlayingPanel>();
+
+    var instance = cut.Instance;
+    var type = typeof(NowPlayingPanel);
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+    // Position + duration present, source not seekable → RadzenProgressBar branch.
+    type.GetField("_position", flags)!.SetValue(instance, "1:40");
+    type.GetField("_duration", flags)!.SetValue(instance, "3:29");
+    type.GetField("_canSeek", flags)!.SetValue(instance, false);
+    // 100 / 209 → 47.8468…; the raw value drives the bar width, the rounded
+    // string ("48%") is what the label must show.
+    type.GetField("_progressPercent", flags)!.SetValue(instance, 47.8468899521531);
+    type.GetField("_progressPercentDisplay", flags)!.SetValue(instance, "48%");
+    cut.Render();
+
+    var bar = cut.Find(".rz-progressbar");
+    // The visible label text (TextContent excludes the width style attribute,
+    // where the full-precision value legitimately lives) reads the rounded
+    // whole-number percent — no decimal point leaks to the user.
+    Assert.Contains("48%", bar.TextContent);
+    Assert.DoesNotContain(".", bar.TextContent);
+  }
+
+  [Fact]
   public void NowPlayingPanel_DurationElements_DeclareTabularNums()
   {
     // PR 3 spec requires tabular-nums on duration text so the elapsed/total columns
@@ -1029,5 +1060,54 @@ public class NowPlayingPanelTests : TestContext
     // m-first must NOT carry the current-row class anymore.
     var firstRows = cut.FindAll("[data-match-id=\"m-first\"].np-recognition-row-current");
     Assert.Empty(firstRows);
+  }
+
+  // ─── Album-art <img> rendering (BT persistence fix acceptance) ─────────────
+  //
+  // The BT album-art persistence fix keeps a valid /api/albumart/... URL in
+  // source metadata across AVRCP refreshes. These tests pin the consumer side:
+  // when _albumArtUrl carries a real proxy path the panel renders the album-art
+  // <img>; when it holds the default placeholder the panel treats it as invalid
+  // (via _hasValidAlbumArt) and omits the <img> so the fallback surface shows.
+
+  [Fact]
+  public void NowPlayingPanel_RendersAlbumArtImg_WhenAlbumArtUrlPresent()
+  {
+    var cut = RenderComponent<NowPlayingPanel>();
+    var instance = cut.Instance;
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+
+    // A real proxy path + failed=false + fingerprint-detail=false makes
+    // _hasValidAlbumArt true, so the album-art <img> branch renders.
+    typeof(NowPlayingPanel).GetField("_nowPlayingSourceType", flags)!
+      .SetValue(instance, "Bluetooth");
+    typeof(NowPlayingPanel).GetField("_source", flags)!
+      .SetValue(instance, "Bluetooth Audio");
+    typeof(NowPlayingPanel).GetField("_albumArtUrl", flags)!
+      .SetValue(instance, "/api/albumart/track-xyz.jpg");
+    cut.Render();
+
+    var img = cut.Find("img[alt='Album Art']");
+    Assert.Equal("/api/albumart/track-xyz.jpg", img.GetAttribute("src"));
+  }
+
+  [Fact]
+  public void NowPlayingPanel_OmitsAlbumArtImg_WhenDefaultUrl()
+  {
+    var cut = RenderComponent<NowPlayingPanel>();
+    var instance = cut.Instance;
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+
+    // The default placeholder path is explicitly treated as "no valid art" by
+    // _hasValidAlbumArt, so the album-art <img> must NOT render (fallback shows).
+    typeof(NowPlayingPanel).GetField("_nowPlayingSourceType", flags)!
+      .SetValue(instance, "Bluetooth");
+    typeof(NowPlayingPanel).GetField("_source", flags)!
+      .SetValue(instance, "Bluetooth Audio");
+    typeof(NowPlayingPanel).GetField("_albumArtUrl", flags)!
+      .SetValue(instance, "/images/default-album-art.png");
+    cut.Render();
+
+    Assert.Empty(cut.FindAll("img[alt='Album Art']"));
   }
 }

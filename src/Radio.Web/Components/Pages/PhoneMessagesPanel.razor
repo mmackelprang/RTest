@@ -1,6 +1,8 @@
 @using Radio.Web.Models
 @using Radio.Web.Services
 @using Radio.Core.Utilities
+@inject ContactResolutionService ContactResolution
+@implements IDisposable
 
 @* Unified Messages feed (Designer Option C). Segmented filter over one
    newest-first feed: calls (PR1), voicemail rows + inline player (PR2), and text
@@ -266,6 +268,7 @@
   [Parameter] public EventCallback<SmsMessageDto> OnOptimisticAppend { get; set; }
 
   private string _filter = "all";
+  private bool _disposed;
   private CallHistoryEntryDto? _selectedCall;
   private string? _openVoicemailId;   // accordion: one open at a time
   private string? _newVoicemailId;    // most-recent arrival → .list-item-add once
@@ -462,31 +465,162 @@
     _ => "Call"
   };
 
+  // ── Redesigned call-row helpers (§Issue 4 + Task #6) ───────────────────────
+  private static bool IsMissed(CallHistoryEntryDto e) =>
+    e.Direction == CallDirection.Incoming && e.AnsweredOn == CallAnsweredOn.NotAnswered;
+
+  // Direction-tinted 44px chip class. Reuses the exact --signal-* / --accent-primary
+  // recipe .vm-chip / .phone-pill already use (no new colours).
+  private static string FeedChipClass(CallHistoryEntryDto e) => e.Direction switch
+  {
+    CallDirection.Incoming when e.AnsweredOn != CallAnsweredOn.NotAnswered => "feed-chip feed-chip--in",
+    CallDirection.Incoming => "feed-chip feed-chip--missed",
+    CallDirection.Outgoing => "feed-chip feed-chip--out",
+    _ => "feed-chip feed-chip--call"
+  };
+
+  // Answered-on pill: amber "Rotary" (answered on the rotary handset) / cyan "GV"
+  // (answered on the cell via the Google Voice trunk — enum value CellPhone).
+  // Missed / unanswered calls get no pill (Label == null).
+  private static (string Class, string? Label) AnsweredPill(CallHistoryEntryDto e) => e.AnsweredOn switch
+  {
+    CallAnsweredOn.RotaryPhone => ("amber", "Rotary"),
+    CallAnsweredOn.CellPhone => ("cyan", "GV"),
+    _ => ("", null)
+  };
+
+  // Contact-name resolution for the row title (Task #6). Prefer the CallerName
+  // RotaryPhone already resolved at call time (which itself came from PBAP + the
+  // RotaryPhone contacts API), then the seeded/cached ContactResolution index.
+  // Returns null when unresolved so the row shows the formatted number as the title.
+  private string? ResolveCallName(CallHistoryEntryDto e)
+  {
+    var attached = string.IsNullOrWhiteSpace(e.CallerName) ? null : e.CallerName;
+    return ContactResolution.TryResolve(e.PhoneNumber, attached);
+  }
+
+  // Screen-reader summary — direction isn't colour-only (the glyph carries it), and
+  // this spells it out: "Missed call from Jane Doe, Jun 28".
+  private string CallAria(CallHistoryEntryDto e)
+  {
+    var display = ResolveCallName(e) ?? PhoneCallFormatting.FormatPhoneNumber(e.PhoneNumber);
+    var prep = e.Direction == CallDirection.Outgoing ? "to" : "from";
+    var when = PhoneCallFormatting.FormatFeedTimestamp(e.StartTime.ToLocalTime());
+    return $"{DirectionLabel(e)} call {prep} {display}, {when}";
+  }
+
+  // ── Contact-name resolution priming + async fallback (Task #6) ─────────────
+  // On every parameter change: (1) rebuild the local contact index from the merged
+  // set (cheap, no network), then (2) fire a deduped async lookup for any call
+  // number still unresolved. The ContactResolutionService caches positive AND
+  // negative results and collapses concurrent lookups per number, so the feed
+  // issues at most one request per unique number no matter how often we re-render.
+  protected override void OnParametersSet()
+  {
+    ContactResolution.PrimeFromContacts(Contacts);
+    _ = ResolveUnknownCallNumbersAsync();
+  }
+
+  private async Task ResolveUnknownCallNumbersAsync()
+  {
+    if (CallHistory == null)
+    {
+      return;
+    }
+    var pending = new HashSet<string>(StringComparer.Ordinal);
+    foreach (var c in CallHistory)
+    {
+      // Skip numbers already named (attached CallerName / index / cache) or already
+      // looked up (incl. a cached miss) so we never re-dispatch.
+      if (!string.IsNullOrWhiteSpace(c.CallerName)) { continue; }
+      if (string.IsNullOrWhiteSpace(c.PhoneNumber)) { continue; }
+      if (ContactResolution.TryResolve(c.PhoneNumber) != null) { continue; }
+      if (ContactResolution.IsResolved(c.PhoneNumber)) { continue; }
+      pending.Add(c.PhoneNumber);
+    }
+    if (pending.Count == 0)
+    {
+      return;
+    }
+
+    var results = await Task.WhenAll(pending.Select(n => ContactResolution.ResolveAsync(n)));
+    if (!_disposed && results.Any(r => r != null))
+    {
+      try
+      {
+        await InvokeAsync(StateHasChanged);   // a name arrived → repaint those rows
+      }
+      catch (ObjectDisposedException) { /* circuit torn down mid-lookup — ignore */ }
+    }
+  }
+
+  // Guards the fire-and-forget contact lookup from repainting after teardown.
+  public void Dispose() => _disposed = true;
+
   // ── Row render fragments (shared by the calls / voicemail / texts / all feeds) ─
   private RenderFragment RenderCallSkeleton => @<text>
     @for (var i = 0; i < 5; i++)
     {
       <div class="skeleton-list-row">
-        <div class="skeleton skeleton-list-row-text"></div>
+        @* Shimmering 44px chip + two text bars so the skeleton matches the real
+           feed-chip spine (no layout jump) AND shimmers via the canonical
+           .skeleton-loading primitive. *@
+        <div class="skeleton-loading skeleton-feed-chip"></div>
+        <div class="skeleton-list-row-text">
+          <div class="skeleton-loading skeleton-text" style="width: 42%"></div>
+          <div class="skeleton-loading skeleton-text" style="width: 26%"></div>
+        </div>
       </div>
     }
   </text>;
 
+  // Redesigned call row (phone dark-theme handoff §Issue 4 + Task #6). Shared 44px
+  // direction-tinted chip → identity column (contact name primary, raw number in a
+  // small mono line beneath — Task #6) → right-aligned meta stack (smart timestamp
+  // over duration / answered-on pill, or a red "Missed" caption). The direction is
+  // carried by the chip icon + tint, so the redundant "Incoming/Outgoing" subtitle
+  // word is gone; unknown callers show the number as the title with nothing below.
   private RenderFragment RenderCallRow(CallHistoryEntryDto entry) => @<button type="button"
         class="list-item-touch @(ReferenceEquals(_selectedCall, entry) ? "list-item-active" : "")"
+        aria-label="@CallAria(entry)"
         @onclick="@(() => { _selectedCall = entry; _openThreadId = null; })">
-    <RadzenIcon Icon="@PhoneCallFormatting.GetCallDirectionIcon(entry)"
-                Style="@($"color: {PhoneCallFormatting.GetCallDirectionColor(entry)}")" />
-    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
-      <span class="list-item-title">@ResolveName(entry)</span>
-      <span class="list-item-subtitle">@DirectionLabel(entry)</span>
-    </div>
-    <span class="list-item-meta">@entry.StartTime.ToLocalTime().ToString("g")</span>
-    @if (!string.IsNullOrEmpty(entry.Duration))
-    {
-      <span class="list-item-meta">@PhoneCallFormatting.FormatDuration(entry.Duration)</span>
+    @{
+      var missed = IsMissed(entry);
+      var name = ResolveCallName(entry);
+      var number = PhoneCallFormatting.FormatPhoneNumber(entry.PhoneNumber);
+      var (pillClass, pillLabel) = AnsweredPill(entry);
     }
-    <RadzenIcon Icon="chevron_right" Style="color: var(--text-low);" />
+    <span class="@FeedChipClass(entry)" aria-hidden="true">
+      <RadzenIcon Icon="@PhoneCallFormatting.GetCallDirectionIcon(entry)" />
+    </span>
+    <div class="list-item-identity">
+      <span class="list-item-title">@(name ?? number)</span>
+      @if (name != null)
+      {
+        <span class="list-item-subnumber">@number</span>
+      }
+    </div>
+    <div class="list-item-meta-stack">
+      <span class="list-item-meta">@PhoneCallFormatting.FormatFeedTimestamp(entry.StartTime.ToLocalTime())</span>
+      @if (missed)
+      {
+        <span class="list-item-missed">Missed</span>
+      }
+      else
+      {
+        <span class="list-item-meta-bottom">
+          @if (pillLabel != null)
+          {
+            <span class="phone-pill @pillClass">@pillLabel</span>
+          }
+          @if (!string.IsNullOrEmpty(entry.Duration))
+          {
+            <span class="list-item-meta">@PhoneCallFormatting.FormatDuration(entry.Duration)</span>
+          }
+        </span>
+      }
+    </div>
+    <RadzenIcon Icon="chevron_right" Style="color: var(--text-low);" aria-hidden="true" />
   </button>;
 
   private RenderFragment RenderVoicemailRow(VoicemailItemDto vm, bool singleStream) => @<VoicemailRow
@@ -504,19 +638,25 @@
   // the FeedItem projection so texts sort newest-first with the other kinds.
   private RenderFragment RenderTextThreadRow(SmsThreadDto thread) => @<button type="button"
         class="list-item-touch @(thread.ThreadId == _openThreadId ? "list-item-active" : "")"
+        aria-label="@($"Conversation with {ResolveThreadName(thread)}{(thread.HasUnread ? ", unread" : "")}")"
         @onclick="@(() => OpenThread(thread.ThreadId))">
+    @* Promoted from the old small cyan pill to the shared 44px chip so texts sit on
+       the same left spine as calls/voicemail. Unread dot follows the chip (matches
+       the voicemail row). *@
+    <span class="feed-chip feed-chip--text" aria-hidden="true">
+      <RadzenIcon Icon="chat_bubble" />
+    </span>
     @if (thread.HasUnread)
     {
       <span class="unread-dot" aria-hidden="true"></span>
     }
-    <span class="phone-pill cyan" aria-hidden="true">
-      <RadzenIcon Icon="chat_bubble" />
-    </span>
-    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+    <div class="list-item-identity">
       <span class="list-item-title">@ResolveThreadName(thread)</span>
       <span class="list-item-subtitle">@ThreadPreview(thread)</span>
     </div>
-    <span class="list-item-meta">@thread.LastMessageAt.ToLocalTime().ToString("g")</span>
-    <RadzenIcon Icon="chevron_right" Style="color: var(--text-low);" />
+    <div class="list-item-meta-stack">
+      <span class="list-item-meta">@PhoneCallFormatting.FormatFeedTimestamp(thread.LastMessageAt.ToLocalTime())</span>
+    </div>
+    <RadzenIcon Icon="chevron_right" Style="color: var(--text-low);" aria-hidden="true" />
   </button>;
 }

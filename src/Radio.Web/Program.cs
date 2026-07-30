@@ -416,6 +416,18 @@ builder.Services.AddSingleton<Radio.Web.Services.GvBridgeStatusService>(sp =>
 builder.Services.AddHostedService(sp =>
   sp.GetRequiredService<Radio.Web.Services.GvBridgeStatusService>());
 
+// Bell-failure surfacing (handoff §3.7) — the single app-wide poll of the phone
+// system-status endpoint, so the topbar /phone fault badge can light up from any
+// route without the user having visited /phone first. Same singleton + hosted-service
+// + scope-per-poll shape as GvBridgeStatusService above (ADR-022 §6.2).
+builder.Services.AddSingleton<Radio.Web.Services.BellHealthService>(sp =>
+  new Radio.Web.Services.BellHealthService(
+    sp.GetRequiredService<IServiceScopeFactory>(),
+    sp.GetRequiredService<ILogger<Radio.Web.Services.BellHealthService>>(),
+    builder.Configuration.GetValue("RotaryPhone:BellHealthPollSeconds", 15)));
+builder.Services.AddHostedService(sp =>
+  sp.GetRequiredService<Radio.Web.Services.BellHealthService>());
+
 // Register centralized audio state store (subscribes to hub, caches state for components)
 builder.Services.AddSingleton<AudioStateStore>();
 
@@ -423,6 +435,11 @@ builder.Services.AddSingleton<AudioStateStore>();
 builder.Services.AddScoped<Radio.Web.Services.QueuePersistenceService>();
 builder.Services.AddScoped<Radio.Web.Services.DeviceDisplayStateService>();
 builder.Services.AddScoped<Radio.Web.Services.RadioPanelToggleService>();
+
+// Task #6 — Messages-feed contact-name resolution. Scoped so the per-circuit
+// cache (seeded from the merged contact set, backed by a deduped PBAP lookup)
+// is shared by PhonePage and its child panels for the session.
+builder.Services.AddScoped<Radio.Web.Services.ContactResolutionService>();
 
 // Task #15 PR E item #47 — gain-popover backdrop portal. Scoped so the
 // circuit's NowPlayingPanel + MainLayout share a single instance per user

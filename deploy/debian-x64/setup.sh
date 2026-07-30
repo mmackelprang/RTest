@@ -14,7 +14,9 @@ set -euo pipefail
 
 APP_DIR="/opt/radio-console"
 APP_USER="radio"
-DOTNET_VERSION="8.0"
+# App targets net10.0. Self-contained deploys bundle the runtime, but installing
+# the 10.0 runtime here keeps framework-dependent (-Quick) deploys working too.
+DOTNET_VERSION="10.0"
 
 echo "========================================="
 echo "Radio Console — Debian x64 Setup"
@@ -42,7 +44,16 @@ apt-get install -y \
   libgdiplus \
   curl \
   wget \
-  unzip
+  unzip \
+  build-essential \
+  pkg-config \
+  libpipewire-0.3-dev
+
+# build-essential + pkg-config + libpipewire-0.3-dev are the toolchain for the
+# native BT capture helper (libpw_helper.so). This script does NOT build it —
+# run deploy/provision/build-native.sh after setup (it installs to /usr/local/lib
+# + ldconfig). The full platform layer (PPAs, PipeWire 1.0.7, OS tuning, ops
+# units) lives in deploy/provision/provision.sh. See deploy/provision/README.md.
 
 # ---- 2. .NET 8 Runtime ----
 echo ""
@@ -306,12 +317,19 @@ fi
 # on every BT reconnect — which policy-node.lua then honours, producing a rogue
 # parallel audio path that bypasses Radio.API entirely. See
 # docs/research/2026-05-22-bt-dual-routing-investigation.md.
-WP_BT_RULE="$SCRIPT_DIR_COMMON/90-disable-bt-input-autolink.lua"
-if [ -f "$WP_BT_RULE" ]; then
-  mkdir -p /etc/wireplumber/bluetooth.lua.d
-  cp "$WP_BT_RULE" /etc/wireplumber/bluetooth.lua.d/
-  echo "  WirePlumber BT auto-link prevention rule installed"
-fi
+# Bluetooth-monitor rules. 85/87/89 are BT/audio-boundary-owned (adapter
+# isolation, HFP-HF handoff to RotaryPhone, A2DP auto-connect); 90 prevents
+# BT-input auto-link. radio-bt-setup.sh (verify_wp_configs) checks all four, and
+# Deploy-ToLinux.ps1 keeps them synced — mirror any change to this list there.
+mkdir -p /etc/wireplumber/bluetooth.lua.d
+for wp_bt in 85-disable-hfp-hf.lua 87-bt-adapter-select.lua 89-bt-autoconnect.lua 90-disable-bt-input-autolink.lua; do
+  if [ -f "$SCRIPT_DIR_COMMON/$wp_bt" ]; then
+    cp "$SCRIPT_DIR_COMMON/$wp_bt" /etc/wireplumber/bluetooth.lua.d/
+    echo "  WirePlumber BT rule installed: $wp_bt"
+  else
+    echo "  WARNING: missing WP BT rule $wp_bt"
+  fi
+done
 
 WP_MAIN_RULE="$SCRIPT_DIR_COMMON/41-disable-bt-input-restore-target.lua"
 if [ -f "$WP_MAIN_RULE" ]; then

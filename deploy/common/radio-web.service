@@ -16,6 +16,17 @@ CPUAffinity=0 1
 # Web is not audio-critical — default scheduling priority.
 # === end ===
 
+# === Memory guard (SOFT — added 2026-07-16, memory-hardening) ===
+# SOFT limit (throttle + reclaim, never OOM-kill) — see radio-api.service for the
+# full rationale on why this is MemoryHigh and not MemoryMax. The Blazor Server UI
+# is lighter than the API; 350M is ample headroom.
+MemoryHigh=350M
+# .NET GC hard heap cap (768 MiB) — folded in from the box-only
+# radio-web.service.d/memory-limit.conf drop-in (IAC audit §3.1). See
+# radio-api.service for the MemoryHigh-vs-GC-cap rationale.
+Environment=DOTNET_GCHeapHardLimit=0x30000000
+# === end memory guard ===
+
 ExecStart=/opt/radio-console/web/Radio.Web
 Restart=always
 RestartSec=10

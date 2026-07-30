@@ -326,6 +326,52 @@ public class DuckingServiceTests
   }
 
   [Fact]
+  public async Task StopDuckingAsync_RemovesPerSourcePriorityOverride()
+  {
+    // Regression test for the _sourcePriorities leak: AnnouncementService sets a
+    // per-source priority (keyed by a fresh GUID id) before every ducking cycle.
+    // StopDuckingAsync must drop that entry so the map does not grow forever.
+    var service = CreateService();
+    var eventSource = CreateMockEventSource("ephemeral-announcement");
+
+    _defaultOptions.DuckingPolicy = DuckingPolicy.Instant;
+
+    service.SetPriority(eventSource.Object, 7);
+    Assert.Equal(7, service.GetPriority(eventSource.Object)); // override in place
+
+    await service.StartDuckingAsync(eventSource.Object);
+    await service.StopDuckingAsync(eventSource.Object);
+
+    // Override must be gone — GetPriority falls back to the category default,
+    // proving the entry was evicted from _sourcePriorities rather than lingering.
+    Assert.Equal(DuckingService.DefaultEventPriority, service.GetPriority(eventSource.Object));
+  }
+
+  [Fact]
+  public async Task RepeatedDuckingCycles_DoNotAccumulatePriorityEntries()
+  {
+    // Simulates many TTS/notification announcements, each with a unique source id.
+    // Before the fix every cycle left a permanent _sourcePriorities entry; after it,
+    // each source's override is released on stop so nothing accumulates. We assert
+    // the observable proxy: every stopped source reverts to its default priority.
+    var service = CreateService();
+    _defaultOptions.DuckingPolicy = DuckingPolicy.Instant;
+
+    for (int i = 0; i < 50; i++)
+    {
+      var source = CreateMockEventSource($"announcement-{i}");
+      service.SetPriority(source.Object, 6);
+      await service.StartDuckingAsync(source.Object);
+      await service.StopDuckingAsync(source.Object);
+
+      Assert.Equal(DuckingService.DefaultEventPriority, service.GetPriority(source.Object));
+    }
+
+    Assert.Equal(0, service.ActiveEventCount);
+    Assert.False(service.IsDucking);
+  }
+
+  [Fact]
   public async Task GetActiveEventsByPriority_ReturnsSortedList()
   {
     var service = CreateService();

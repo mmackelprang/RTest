@@ -157,6 +157,13 @@ public class DuckingService : IDuckingService
     {
       // Remove from active events
       _activeEvents.Remove(eventSource.Id);
+
+      // Also drop any per-source priority override. Callers (e.g. AnnouncementService)
+      // call SetPriority(source) with a fresh GUID id for every TTS/notification before
+      // StartDuckingAsync, so without this removal _sourcePriorities would grow by one
+      // entry per announcement forever — a slow but unbounded memory leak.
+      _sourcePriorities.Remove(eventSource.Id);
+
       remainingEvents = _activeEvents.Count;
 
       // Only restore if no other events are active

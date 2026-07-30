@@ -36,9 +36,42 @@ public static class ConfigurationServiceExtensions
     services.Configure<ConfigurationOptions>(
       configuration.GetSection(ConfigurationOptions.SectionName));
 
-    // Add data protection for secret encryption
+    // Add data protection for secret encryption.
+    //
+    // CRITICAL: persist the key ring to an EXPLICIT, deploy-safe path. Without
+    // this call ASP.NET Core stores keys under the ambient "$HOME/.aspnet/
+    // DataProtection-Keys". That location silently moves whenever the process's
+    // effective HOME changes — which is exactly what happened on 2026-02-13 when
+    // the systemd unit added `Environment=HOME=/opt/radio-console` (the
+    // dual-service split): the key that had encrypted the 2026-02-12 secrets was
+    // written to the pre-change location and orphaned, so every stored secret
+    // became undecryptable ("key {…} was not found in the key ring"). See
+    // design/plans/SECRET-KEYRING-INVESTIGATION.md.
+    //
+    // Resolution order for the key-ring directory:
+    //   1. DataProtection:KeysPath (explicit override), else
+    //   2. <Database:RootPath>/keys (co-located with secrets.db / config.db), else
+    //   3. ./data/keys
+    // The chosen path lives under the persistent data root, which the deploy
+    // preserves (Deploy-ToLinux.ps1's `rsync --delete` only wipes api/ and web/),
+    // and is derived independently of HOME so a future user/HOME change cannot
+    // move it again. SetApplicationName pins the purpose-isolation discriminator.
+    var keysPath = configuration["DataProtection:KeysPath"];
+    if (string.IsNullOrWhiteSpace(keysPath))
+    {
+      var dataRoot = configuration["Database:RootPath"];
+      if (string.IsNullOrWhiteSpace(dataRoot))
+      {
+        dataRoot = "./data";
+      }
+      keysPath = Path.Combine(dataRoot, "keys");
+    }
+    keysPath = Path.GetFullPath(keysPath);
+    Directory.CreateDirectory(keysPath);
+
     services.AddDataProtection()
-      .SetApplicationName("Radio.Configuration");
+      .SetApplicationName("Radio.Configuration")
+      .PersistKeysToFileSystem(new DirectoryInfo(keysPath));
 
     // Register secret change notification source (signals IOptionsMonitor to re-evaluate)
     services.AddSingleton<SecretChangeTokenSource>();

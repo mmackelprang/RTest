@@ -238,7 +238,14 @@ if ($LASTEXITCODE -ne 0) {
 $wpMainRules = @(
   "41-disable-bt-input-restore-target.lua"
 )
+# 85/87/89 are BT/audio-boundary-owned (adapter isolation + HFP-HF handoff to
+# RotaryPhone + A2DP auto-connect). They were box-only until the IAC audit; keep
+# them synced here so a deploy never leaves the box without them. Mirror this
+# list in deploy/debian-x64/setup.sh and radio-bt-setup.sh (verify_wp_configs).
 $wpBluetoothRules = @(
+  "85-disable-hfp-hf.lua",
+  "87-bt-adapter-select.lua",
+  "89-bt-autoconnect.lua",
   "90-disable-bt-input-autolink.lua"
 )
 
