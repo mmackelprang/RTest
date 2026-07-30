@@ -151,8 +151,11 @@
   {
     if (_heardSent) return;
     _heardSent = true;
-    await OnHeard.InvokeAsync();                         // UI-local flip (parent)
-    await GvBridgeApi.MarkVoicemailReadAsync(Item.Id);   // flagged no-op seam
+    // SINGLE write path: bubble to PhonePage.OnVoicemailHeard, which does the optimistic
+    // flip + durable GV write-through + idempotent reconcile (GV-4 / ADR-024). The player
+    // does NOT call MarkVoicemailReadAsync directly — that would double-write. There is no
+    // "mark unread" affordance (ADR-024 §6 — no unread toggle in v1).
+    await OnHeard.InvokeAsync();
   }
 
   [JSInvokable] public Task OnTimeUpdate(double current, double duration)

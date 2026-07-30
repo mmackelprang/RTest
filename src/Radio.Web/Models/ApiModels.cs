@@ -1126,7 +1126,7 @@ public record VoicemailItemDto(
   string? FromName,             // null → UI shows number / contact lookup
   DateTime ReceivedAt,          // UTC; format to local for display
   int DurationSeconds,          // 0 = unknown → do NOT render "0:00" as real
-  bool IsRead,                  // UI-LOCAL only — GV mark-read not in v1
+  bool IsRead,                  // authoritative (GV write-through); ADR-024
   string? Transcript,           // null = pending/absent
   string AudioUrl);             // RELATIVE from server; rebuild absolute (ADR D4)
 
@@ -1150,7 +1150,7 @@ public record SmsThreadDto(
   string CounterpartyNumber,
   string? CounterpartyName,
   DateTime LastMessageAt,
-  bool HasUnread,
+  bool HasUnread,               // authoritative (GV write-through); ADR-024
   string? LastMessagePreview);
 
 public record SmsThreadListDto(
@@ -1161,6 +1161,27 @@ public record SmsThreadMessagesDto(
   string ThreadId,
   IReadOnlyList<SmsMessageDto> Messages,
   DateTime FetchedAtUtc);
+
+// ── Read-state change event (GV-4) ────────────────────────────
+/// <summary>
+/// Unified read-state change event (ADR-024 §4). Pushed on the existing /hub
+/// "ReadStateChanged" alongside GvVoicemailReceived / GvSmsReceived. Fires on OUR
+/// own marks (path a, ships with the routes) and — once RotaryPhone's poller-flip
+/// fast-follow lands — on externally-originated flips (path b, phone/GV-web reads);
+/// SAME handler covers both with no change. RotaryPhone broadcasts UNCONDITIONALLY,
+/// including back to the originator, so de-dupe is keyed by (id-or-threadId + IsRead).
+/// </summary>
+/// <param name="Kind">"Voicemail" | "Sms". Anything else is ignored defensively.</param>
+/// <param name="Id">Voicemail id when Kind=Voicemail; null/empty for Sms thread-level.</param>
+/// <param name="ThreadId">Thread id when Kind=Sms (required); voicemail's threadId when Kind=Voicemail (informational).</param>
+/// <param name="IsRead">New read-state. For Sms thread-level this is "thread fully read" (!hasUnread).</param>
+/// <param name="ChangedAtUtc">ISO-8601 UTC timestamp of the change.</param>
+public record ReadStateChangedDto(
+  string Kind,
+  string? Id,
+  string? ThreadId,
+  bool IsRead,
+  DateTime ChangedAtUtc);
 
 // ── Send (flagged; wired in PR3, endpoint ships later) ─────────
 public record SendSmsRequest(string ThreadId, string Text);

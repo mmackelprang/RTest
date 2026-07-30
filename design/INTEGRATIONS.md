@@ -332,11 +332,19 @@ The same RotaryPhone service exposes a Google Voice bridge that the Web UI consu
 | GET | `/api/gvbridge/voicemail/{id}/audio` | voicemail recording (bind an **absolute** URL — see gotcha) |
 | GET | `/api/gvbridge/sms/threads?count=` | `SmsThreadListDto` |
 | GET | `/api/gvbridge/sms/threads/{threadId}?count=` | `SmsThreadMessagesDto` |
-| POST | `/api/gvbridge/sms/send` | `SendSmsResponse` — **not yet shipped** on RotaryPhone; gated by `RotaryPhone:Gv:SendEnabled` (PR3) |
+| POST | `/api/gvbridge/sms/send` | `SendSmsResponse` — **shipped** on RotaryPhone, dark behind their `GVBridge:EnableSmsSend=false` (returns `409` + `Code:"send_disabled"`). Gated on our side by `RotaryPhone:Gv:SendEnabled` (PR3). **Response shapes have diverged — reconcile before flipping** (see FUTURE-WORK §12 item 2) |
+
+**REST (mark-read / durable read-state, PR4 — ADR-024):** gated by `RotaryPhone:Gv:MarkReadEnabled` (consumer flag); body `{ "isRead": true }`; returns the updated DTO; `200`→DTO, `404`→gone (null), `502`/non-2xx→null but the UI keeps its optimistic flip and reconciles on the next list/poll/push; **no client-side auto-retry**.
+
+| Method | Route | Returns |
+|--------|-------|---------|
+| POST | `/api/gvbridge/voicemail/{id}/read` | updated `VoicemailItemDto` (`isRead` authoritative) |
+| POST | `/api/gvbridge/sms/threads/{threadId}/read` | updated `SmsThreadDto` (`hasUnread` authoritative) |
 
 **SignalR push:** rides the existing `/hub` RotaryHub connection (consumed by `PhoneHubService`):
 - `SmsReceived` → `PhoneHubService.GvSmsReceived` (`SmsMessageDto`)
 - `VoicemailReceived` → `PhoneHubService.GvVoicemailReceived` (`VoicemailItemDto`)
+- `ReadStateChanged` → `PhoneHubService.ReadStateChanged` (`ReadStateChangedDto { Kind, Id, ThreadId, IsRead, ChangedAtUtc }`, PR4) — unified read-state change. RotaryPhone broadcasts **unconditionally, including back to the originator**, so consumers MUST de-dupe by `(id-or-threadId + isRead)` (see the `ReadStateReconciler` gotcha below). Unknown `Kind` is ignored defensively.
 
 > **GV SMS is NOT the same product as VoIP.ms trunk SMS.** Trunk SMS rides `GvTrunkHubService.SmsReceived` on `/hubs/gvtrunk` with a different payload. The C# event for GV SMS is deliberately named `GvSmsReceived` so the two can't be confused. Do not merge or rename them. (ADR-022 §4.3.)
 
@@ -348,6 +356,7 @@ The same RotaryPhone service exposes a Google Voice bridge that the Web UI consu
   "HubUrl": "http://radio:5004/hub",
   "Gv": {
     "SendEnabled": false,        // flip true when POST /sms/send ships (PR3)
+    "MarkReadEnabled": false,    // flip true when the two POST .../read routes ship (PR4)
     "StatusPollSeconds": 10,     // GvBridgeStatusService poll interval
     "AuthKey": ""                // set to enable X-RotaryPhone-Auth header (OFF today)
   }
@@ -356,7 +365,10 @@ The same RotaryPhone service exposes a Google Voice bridge that the Web UI consu
 
 **Gotchas:**
 - **Voicemail audio URL must be absolute.** The DTO's relative `AudioUrl` resolves against the Web origin (`:5002`) and 404s — always rebuild it against the API base via `GvBridgeApiService.GetVoicemailAudioUrl(id)` (→ `http://radio:5004/...`). Never bind the relative `AudioUrl` (ADR-022 D4).
-- **Read-state is UI-local in v1** — heard/read does not persist to Google Voice; a hard reload re-derives from `isRead`/`hasUnread`. Missed calls count toward the topbar `/phone` badge (owner decision 2).
+- **Read-state is durable via GV write-through (PR4 / ADR-024), behind `RotaryPhone:Gv:MarkReadEnabled`.** When the flag is ON, heard/read persists to Google Voice (the single source of truth); RadioConsole keeps **no local read-state store** — list endpoints' `isRead`/`hasUnread` are authoritative on every (re)load. When the flag is OFF (today), read-state is per-circuit optimistic only and any list reload — hard reload, the Refresh button, or error-retry — re-derives from `isRead`/`hasUnread`. Missed calls count toward the topbar `/phone` badge (owner decision 2).
+- **The de-dupe invariant (ADR-024 §9) — the one correctness rule.** Every mark yields ≥2 signals: the mark route's returned DTO **and** the echoed `ReadStateChanged` broadcast (RotaryPhone re-broadcasts unconditionally, including back to the originator); a 502 adds a third "keep optimistic, reconcile later" path. All collapse to one badge state via `ReadStateReconciler`, keyed by `(id-or-threadId + isRead)` — applying an already-applied mark is a no-op (no re-render, no flicker).
+- **Two-flag distinction.** `RotaryPhone:Gv:MarkReadEnabled` is **our consumer flag** (gates whether our seam calls the route). RotaryPhone's server-side `GVBridge:EnableMarkRead` is **their config flag** (gates whether their already-shipped route acts or returns the dark rejection). Both default `false` and are independent — **flip theirs first**, confirm the route no longer rejects, then flip ours. Their `GVBridge:AllowMarkUnread` (also `false`) separately gates `isRead:false`, which we never send.
+- **Mark-read auth is auto-covered.** The two `POST .../read` routes ride the `/api/gvbridge/*` prefix gate and reuse `RotaryPhone:Gv:AuthKey` via the existing `RotaryPhoneAuthHandler` — no new auth key (ADR-024 §7).
 - **`RotaryPhoneAuthHandler` is OFF** until `Gv:AuthKey` is set. A native `<audio>` element can't send that header, so an auth-gated audio endpoint would break the direct-`<audio>` approach (ADR-022 §8.1).
 
 ---

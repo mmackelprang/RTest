@@ -163,19 +163,20 @@
   private PhoneMessagesPanel? _messagesPanel;
 
   // GV voicemail state (PR2). The panel renders this; the page owns fetch + push.
+  // Read-state is durable via GV write-through (GV-4 / ADR-024): list endpoints are
+  // source-of-truth on (re)load; the optimistic flip is presentation-only and is never
+  // replayed onto fresh list data.
   private List<VoicemailItemDto>? _voicemails;
   private bool _voicemailLoading;
   private bool _voicemailError;
-  private readonly HashSet<string> _locallyHeard = new();   // UI-local read-state
 
-  // GV SMS (PR3) — thread list + the open conversation. Read-state is UI-local in
-  // v1 (GV mark-read is GV-4; ADR-024).
+  // GV SMS (PR3) — thread list + the open conversation. Read-state is durable via GV
+  // write-through (GV-4 / ADR-024); hasUnread from the list endpoint is source-of-truth.
   private List<SmsThreadDto>? _threads;
   private bool _threadsLoading;
   private bool _threadsError;
   private string? _openThreadId;
   private List<SmsMessageDto>? _openThreadMessages;
-  private readonly HashSet<string> _locallyReadThreads = new();
 
   private bool IsTab(string t) => _activeTab == t;
 
@@ -235,6 +236,7 @@
     PhoneHub.SystemStatusChanged += OnSystemStatusChanged;
     PhoneHub.GvVoicemailReceived += OnGvVoicemailReceived;
     PhoneHub.GvSmsReceived += OnGvSmsReceived;
+    PhoneHub.ReadStateChanged += OnReadStateChanged;
     GvTrunkHub.RegistrationChanged += OnRegistrationChanged;
 
     // GV Messages: bind to the shared status poll (reconnecting banner) and seed
@@ -448,6 +450,47 @@
     _ = InvokeAsync(StateHasChanged);
   }
 
+  // GV-4 (ADR-024 §9): the central join point for ALL THREE read-state signal paths —
+  // our own mark route's returned DTO, the echoed broadcast (RotaryPhone re-broadcasts
+  // unconditionally, including back to the originator), and the 502-deferred reconcile on
+  // the next list/poll. The reconciler is idempotent on (id-or-threadId + isRead): an echo
+  // of an already-applied mark is a no-op, so we skip StateHasChanged and never flicker.
+  private void OnReadStateChanged(ReadStateChangedDto dto)
+  {
+    if (_disposed) return;
+    // Fired on the SignalR receive thread (not the Blazor sync context). Marshal the
+    // WHOLE body — list mutation included — onto the render context before touching
+    // _voicemails/_threads, matching OnGvVoicemailReceived/OnGvSmsReceived. Reconciling
+    // off-context would race a concurrent LoadVoicemailsAsync that replaces the list.
+    _ = InvokeAsync(() =>
+    {
+      if (_disposed) return;
+      var changed = false;
+
+      if (string.Equals(dto.Kind, "Voicemail", StringComparison.OrdinalIgnoreCase))
+      {
+        if (_voicemails != null)
+        {
+          changed = ReadStateReconciler.ApplyVoicemail(_voicemails, dto.Id, dto.IsRead);
+        }
+        // dto.ThreadId is informational here; no thread-badge bump needed for v1.
+      }
+      else if (string.Equals(dto.Kind, "Sms", StringComparison.OrdinalIgnoreCase))
+      {
+        if (_threads != null)
+        {
+          changed = ReadStateReconciler.ApplyThread(_threads, dto.ThreadId, dto.IsRead);
+        }
+      }
+
+      if (changed)                       // skip re-render on an echo of an already-applied mark
+      {
+        PhoneUnread.Set(UnreadSum);
+        StateHasChanged();
+      }
+    });
+  }
+
   // Messages refresh = re-fetch call history + voicemail + SMS threads (the
   // Messages data sources).
   private async Task RefreshMessagesAsync()
@@ -471,7 +514,7 @@
     var list = await GvBridgeApi.GetVoicemailsAsync();
     if (list != null)
     {
-      _voicemails = ApplyLocalHeard(list.Items.ToList());
+      _voicemails = list.Items.ToList();   // list endpoint is source-of-truth (ADR-024 §2)
     }
     else if (_voicemails == null)
     {
@@ -487,10 +530,6 @@
     await InvokeAsync(StateHasChanged);
   }
 
-  private List<VoicemailItemDto> ApplyLocalHeard(List<VoicemailItemDto> items) =>
-    items.Select(v => _locallyHeard.Contains(v.Id)
-      ? v with { IsRead = true } : v).ToList();
-
   // New voicemail push (PhoneHubService.GvVoicemailReceived). HARD RULE: never
   // steal the screen, never pause audio — calm Info toast only, prepend + animate.
   private void OnGvVoicemailReceived(VoicemailItemDto vm)
@@ -499,7 +538,9 @@
     _voicemails ??= new();
     if (_voicemails.All(v => v.Id != vm.Id))
     {
-      _voicemails.Insert(0, _locallyHeard.Contains(vm.Id) ? vm with { IsRead = true } : vm);
+      // New arrivals carry their authoritative isRead from the push DTO (ADR-024 §2);
+      // do not re-seed from any local state.
+      _voicemails.Insert(0, vm);
     }
     // Calm toast — never modal, never audio (hard rule). For v1 it's low-urgency Info.
     NotificationService.Notify(NotificationSeverity.Info, "New voicemail",
@@ -515,18 +556,30 @@
     });
   }
 
-  // UI-local mark-heard: flip the row + decrement the badge. Persisted only when
-  // the flagged GV mark-read seam is enabled (today a silent no-op).
-  private void OnVoicemailHeard(string id)
+  // Mark-heard (GV-4 / ADR-024): the SINGLE durable write path for voicemail read-state.
+  // Optimistic flip (presentation-only) → durable write-through → idempotent reconcile.
+  private async Task OnVoicemailHeard(string id)
   {
-    _locallyHeard.Add(id);
-    if (_voicemails != null)
-    {
-      var idx = _voicemails.FindIndex(v => v.Id == id);
-      if (idx >= 0) _voicemails[idx] = _voicemails[idx] with { IsRead = true };
-    }
+    if (_voicemails == null) return;
+    // 1) Optimistic flip (presentation-only; no local persistence).
+    ReadStateReconciler.ApplyVoicemail(_voicemails, id, isRead: true);
     PhoneUnread.Set(UnreadSum);
-    _ = InvokeAsync(StateHasChanged);
+    await InvokeAsync(StateHasChanged);
+
+    // 2) Durable write-through. 200 → authoritative DTO reconciles (idempotent — no flicker
+    //    since the optimistic flip already set it). 502/404 → null; the optimistic flip stays
+    //    and the next list/poll/push reconciles. The echoed ReadStateChanged also reconciles
+    //    via OnReadStateChanged — same (id, isRead) key, so it's a no-op.
+    var dto = await GvBridgeApi.MarkVoicemailReadAsync(id, isRead: true);
+    if (dto != null)
+    {
+      var changed = ReadStateReconciler.ApplyVoicemail(_voicemails, dto.Id, dto.IsRead);
+      if (changed)
+      {
+        PhoneUnread.Set(UnreadSum);
+        await InvokeAsync(StateHasChanged);
+      }
+    }
   }
 
   private static string FormatVmDuration(int s)
@@ -546,7 +599,7 @@
     var list = await GvBridgeApi.GetSmsThreadsAsync();
     if (list != null)
     {
-      _threads = ApplyLocalRead(list.Threads.ToList());
+      _threads = list.Threads.ToList();    // hasUnread is source-of-truth (ADR-024 §2)
     }
     else if (_threads == null)
     {
@@ -562,22 +615,35 @@
     await InvokeAsync(StateHasChanged);
   }
 
-  // Counts are UI-local truth in v1 (GV mark-read is GV-4). A thread the user
-  // opened locally stays read across a list refresh until a hard reload.
-  private List<SmsThreadDto> ApplyLocalRead(List<SmsThreadDto> threads) =>
-    threads.Select(t => _locallyReadThreads.Contains(t.ThreadId)
-      ? t with { HasUnread = false } : t).ToList();
-
+  // Open thread (GV-4 / ADR-024): optimistic flip (presentation-only) → durable
+  // write-through (mark whole thread read) → idempotent reconcile. hasUnread from the
+  // list endpoint is source-of-truth on (re)load; the optimistic flip is not replayed.
   private async Task OpenThreadAsync(string threadId)
   {
     _openThreadId = threadId;
-    _locallyReadThreads.Add(threadId);                       // UI-local read
-    var idx = _threads?.FindIndex(t => t.ThreadId == threadId) ?? -1;
-    if (idx >= 0) _threads![idx] = _threads[idx] with { HasUnread = false };
+
+    // 1) Optimistic flip (presentation-only).
+    if (_threads != null)
+    {
+      ReadStateReconciler.ApplyThread(_threads, threadId, isRead: true);
+    }
+
     var messages = await GvBridgeApi.GetSmsThreadMessagesAsync(threadId);
     _openThreadMessages = messages?.Messages.ToList() ?? new();
     PhoneUnread.Set(UnreadSum);
     await InvokeAsync(StateHasChanged);
+
+    // 2) Durable write-through (idempotent reconcile; 502/404 keep the optimistic flip).
+    var dto = await GvBridgeApi.MarkSmsThreadReadAsync(threadId, isRead: true);
+    if (dto != null && _threads != null)
+    {
+      var changed = ReadStateReconciler.ApplyThread(_threads, dto.ThreadId, isRead: !dto.HasUnread);
+      if (changed)
+      {
+        PhoneUnread.Set(UnreadSum);
+        await InvokeAsync(StateHasChanged);
+      }
+    }
   }
 
   // Conversation closed (Back). Clear the open-thread state the page owns so a
@@ -916,6 +982,7 @@
     PhoneHub.SystemStatusChanged -= OnSystemStatusChanged;
     PhoneHub.GvVoicemailReceived -= OnGvVoicemailReceived;
     PhoneHub.GvSmsReceived -= OnGvSmsReceived;
+    PhoneHub.ReadStateChanged -= OnReadStateChanged;
     GvTrunkHub.RegistrationChanged -= OnRegistrationChanged;
     GvBridgeStatus.StatusChanged -= OnGvStatusChanged;
   }

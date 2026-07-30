@@ -25,6 +25,15 @@ public class PhoneHubService : IAsyncDisposable
   public event Action<Radio.Web.Models.SmsMessageDto>? GvSmsReceived;
   public event Action<Radio.Web.Models.VoicemailItemDto>? GvVoicemailReceived;
 
+  /// <summary>
+  /// Fired when read-state changes from ANY source (ADR-024 §4). Path (a): our own
+  /// marks (ships with RotaryPhone's routes). Path (b): externally-originated flips —
+  /// phone/GV-web reads — once RotaryPhone's poller-flip fast-follow lands (same event,
+  /// no change here). Consumers MUST de-dupe by (id-or-threadId + isRead); RotaryPhone
+  /// broadcasts unconditionally, including back to the originator.
+  /// </summary>
+  public event Action<Radio.Web.Models.ReadStateChangedDto>? ReadStateChanged;
+
   public bool IsConnected => _hubConnection?.State == HubConnectionState.Connected;
 
   public PhoneHubService(ILogger<PhoneHubService> logger, IConfiguration configuration)
@@ -90,6 +99,12 @@ public class PhoneHubService : IAsyncDisposable
         GvVoicemailReceived?.Invoke(v);
       });
 
+      // GV-4 (ADR-024 §4): unified read-state change. Same /hub connection; defensive
+      // Kind guard lives in RaiseReadStateChangedForTest so the live handler + the unit
+      // test share one source of truth. Unknown Kind is ignored at Debug, never throws.
+      _hubConnection.On<Radio.Web.Models.ReadStateChangedDto>("ReadStateChanged",
+        RaiseReadStateChangedForTest);
+
       _hubConnection.Reconnecting += ex =>
       {
         _logger.LogWarning(ex, "Phone hub reconnecting...");
@@ -123,6 +138,25 @@ public class PhoneHubService : IAsyncDisposable
     {
       _connectionLock.Release();
     }
+  }
+
+  /// <summary>
+  /// Applies the defensive Kind guard (ADR-024 §4.2) and raises <see cref="ReadStateChanged"/>.
+  /// The live /hub `.On&lt;ReadStateChangedDto&gt;("ReadStateChanged", …)` handler is wired
+  /// directly to this method so the guard is the single source of truth; the unit tests
+  /// invoke it to exercise both branches without a live connection. Only "Voicemail"/"Sms"
+  /// (case-insensitive) are known — anything else is ignored at Debug, never thrown.
+  /// </summary>
+  internal void RaiseReadStateChangedForTest(Radio.Web.Models.ReadStateChangedDto dto)
+  {
+    if (dto is null ||
+        (!string.Equals(dto.Kind, "Voicemail", StringComparison.OrdinalIgnoreCase) &&
+         !string.Equals(dto.Kind, "Sms", StringComparison.OrdinalIgnoreCase)))
+    {
+      _logger.LogDebug("Ignoring ReadStateChanged with unknown Kind '{Kind}'", dto?.Kind);
+      return;
+    }
+    ReadStateChanged?.Invoke(dto);
   }
 
   private void StartRetryLoop(string hubUrl)
