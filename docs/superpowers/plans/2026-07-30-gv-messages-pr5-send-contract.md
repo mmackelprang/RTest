@@ -1254,6 +1254,219 @@ dotnet test tests/Radio.Web.Tests --configuration Release --filter "FullyQualifi
 
 ---
 
+## Chunk 6b: Thread reply-ability (added 2026-07-31)
+
+### Task 6b: Classify the counterparty and gate compose before the POST
+
+**Files:**
+- Modify: `src/Radio.Web/Models/ApiModels.cs` (add `GvCounterpartyKind` + `GvCounterparty`, beside `GvDirection`)
+- Modify: `src/Radio.Web/Services/ApiClients/GvBridgeSendService.cs` (add `SendNotRepliableException` + the pre-flight gate)
+- Modify: `src/Radio.Web/Components/Pages/PhoneTextsPanel.razor` (disable compose + explanation)
+- Test: `tests/Radio.Web.Tests/Services/GvCounterpartyTests.cs` (new)
+
+> ADR-028 §8. **~A third of inbound SMS is from senders that cannot be replied to** — numeric short codes and opaque 36-char sender IDs, not E.164. Sending anyway yields their `400 invalid_number` → a red failed bubble reading *"That number doesn't look right"*, which lies twice: the user did not type a number, and the thread is **structurally** un-repliable. Identical in shape to the `send_disabled` problem §5.1 already solved — **a send that cannot succeed must never render as a send that failed.** Classification is client-side by design (§8.3): it is a pure function of a field we already receive, and adding a DTO field would make it a cross-service contract change.
+
+- [ ] **Step 1: Write the classifier tests first (TDD)**
+
+Create `tests/Radio.Web.Tests/Services/GvCounterpartyTests.cs`:
+
+```csharp
+using Radio.Web.Models;
+
+namespace Radio.Web.Tests.Services;
+
+public class GvCounterpartyTests
+{
+  [Theory]
+  [InlineData("+15551234567")]
+  [InlineData("5551234567")]
+  [InlineData("(555) 123-4567")]
+  [InlineData("+1 555 123 4567")]
+  public void E164AndCommonFormats_AreRepliable(string value)
+  {
+    Assert.Equal(GvCounterpartyKind.PhoneNumber, GvCounterparty.Classify(value));
+    Assert.True(GvCounterparty.CanReply(value));
+  }
+
+  [Theory]
+  [InlineData("262966")]      // 6-digit short code
+  [InlineData("22395")]       // 5-digit
+  [InlineData("4321")]        // 4-digit
+  [InlineData("911")]         // 3-digit
+  public void NumericShortCodes_AreNotRepliable(string value)
+  {
+    Assert.Equal(GvCounterpartyKind.ShortCode, GvCounterparty.Classify(value));
+    Assert.False(GvCounterparty.CanReply(value));
+  }
+
+  [Theory]
+  [InlineData("A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8")]   // 36-char opaque
+  [InlineData("VERIFY")]                                  // alphabetic sender id
+  [InlineData("My-Bank")]
+  public void OpaqueSenderIds_AreNotRepliable(string value)
+  {
+    Assert.Equal(GvCounterpartyKind.OpaqueSenderId, GvCounterparty.Classify(value));
+    Assert.False(GvCounterparty.CanReply(value));
+  }
+
+  [Theory]
+  [InlineData(null)]
+  [InlineData("")]
+  [InlineData("   ")]
+  public void NullOrEmpty_IsNotRepliable_AndDoesNotThrow(string? value)
+  {
+    // Defensive + total: bias toward the RECOVERABLE error (§8.3). Wrongly disabling
+    // reply is a visible, reportable disabled composer; wrongly enabling it produces
+    // the failed-send lie this task exists to prevent.
+    Assert.False(GvCounterparty.CanReply(value));
+  }
+}
+```
+
+- [ ] **Step 2: Implement the classifier**
+
+In `src/Radio.Web/Models/ApiModels.cs`, immediately after the `GvDirection` class (it is the in-tree precedent this mirrors — a client-side, defensive, total classifier over a raw DTO string):
+
+```csharp
+/// <summary>Counterparty kind (ADR-028 §8). Only PhoneNumber is repliable.</summary>
+public enum GvCounterpartyKind { PhoneNumber, ShortCode, OpaqueSenderId }
+
+/// <summary>
+/// Classifies an SMS counterparty identifier (ADR-028 §8.3). Roughly a third of inbound
+/// GV SMS comes from senders that are NOT dialable — numeric short codes and opaque
+/// sender IDs — and replying to them is structurally impossible, not merely likely to fail.
+///
+/// Client-side by design: this is a pure function of a field we already receive, so adding
+/// a DTO field would turn it into a cross-service contract change for no gain.
+///
+/// Defensive and TOTAL: every input returns a kind, null/empty included; nothing throws.
+/// Anything not confidently a dialable number is treated as NOT repliable.
+/// </summary>
+public static class GvCounterparty
+{
+  public static GvCounterpartyKind Classify(string? counterpartyNumber)
+  {
+    if (string.IsNullOrWhiteSpace(counterpartyNumber))
+    {
+      return GvCounterpartyKind.OpaqueSenderId;   // unknown → not repliable
+    }
+
+    // Any non-digit (beyond the formatting punctuation a real number carries) means this
+    // is not a dialable number — e.g. an alphabetic or 36-char opaque sender id.
+    var hasLetter = counterpartyNumber.Any(char.IsLetter);
+    if (hasLetter)
+    {
+      return GvCounterpartyKind.OpaqueSenderId;
+    }
+
+    // Reuse the same normalization the rest of the phone surface uses, so "(555) 123-4567"
+    // and "+15551234567" classify identically.
+    var digits = PhoneNumberNormalizer.Normalize(counterpartyNumber);
+
+    // NANP national number is 10 digits after normalization. Anything shorter that is
+    // purely numeric is a short code (3-8 digits in practice); anything longer is not
+    // something we can hand to their E.164 normalizer with confidence.
+    return digits.Length == 10
+      ? GvCounterpartyKind.PhoneNumber
+      : GvCounterpartyKind.ShortCode;
+  }
+
+  /// <summary>True only when the thread can actually be replied to.</summary>
+  public static bool CanReply(string? counterpartyNumber)
+    => Classify(counterpartyNumber) == GvCounterpartyKind.PhoneNumber;
+}
+```
+
+> **Implementer note:** `ApiModels.cs` will need `using Radio.Core.Utilities;` for `PhoneNumberNormalizer` if it is not already present. If a non-NANP international number ever needs to be repliable, this is the single place to widen — do not scatter the rule.
+
+- [ ] **Step 3: Add the service-level gate (defense in depth)**
+
+In `GvBridgeSendService.cs`, add beside the other typed exceptions:
+
+```csharp
+/// <summary>
+/// The thread's counterparty is not a dialable number (short code / opaque sender id) —
+/// ADR-028 §8. Structurally un-repliable: no optimistic bubble, no failed bubble, no retry.
+/// </summary>
+public class SendNotRepliableException : Exception
+{
+  public SendNotRepliableException()
+    : base("You can't reply to this sender.") { }
+}
+```
+
+and gate **first** in `SendAsync`, ahead of the flag check — a send that is impossible should short-circuit before anything else is considered:
+
+```csharp
+    // ADR-028 §8.4: refuse before the POST. Their server would return 400 invalid_number,
+    // which the UI would render as "That number doesn't look right" — a lie on both counts.
+    if (!GvCounterparty.CanReply(toNumber)) throw new SendNotRepliableException();
+    if (!SendEnabled) throw new SendNotAvailableException();
+```
+
+- [ ] **Step 4: Gate the composer in `PhoneTextsPanel`**
+
+Add a computed guard beside `CanSend`:
+
+```csharp
+  // ADR-028 §8.5: reply-ability is a property of the OPEN THREAD's counterparty. In
+  // new-recipient mode the user types the number, so the recipient-validation path owns it.
+  private bool ThreadIsRepliable =>
+    _composingNew || GvCounterparty.CanReply(HeaderNumber);
+```
+
+Fold it into `CanSend`:
+
+```csharp
+  private bool CanSend =>
+    SendService.SendEnabled && GvStatus.IsAvailable && !_serverSendDark
+    && ThreadIsRepliable
+    && !InCooldown
+    && !string.IsNullOrWhiteSpace(_draft) && _sending.Count == 0
+    && (!_composingNew || !string.IsNullOrWhiteSpace(_recipient));
+```
+
+and give `ComposeBar()` a dedicated branch **before** the degraded branch, so the more specific reason wins:
+
+```razor
+    @if (!ThreadIsRepliable)
+    {
+      <div class="texts-compose">
+        <span class="phone-pill" title="This sender is a short code or automated ID.">You can't reply to this sender.</span>
+      </div>
+    }
+    else if (GvStatus.IsAvailable && !_serverSendDark)
+    {
+```
+
+> Reuses the existing `.phone-pill` + `.texts-compose` shapes — no new CSS. Do **not** hide the composer: the handoff's degraded-state reasoning ("don't let the user type into a dead send path") applies, and an absent composer reads as a rendering bug where a disabled one reads as an answer.
+
+- [ ] **Step 5: Catch the new exception at the call site**
+
+In `SendDraftAsync`, add ahead of the other catches (it should be unreachable given Step 4, which is the point):
+
+```csharp
+    catch (SendNotRepliableException)
+    {
+      // Unreachable if the composer gate works — kept so a future/bypassed path cannot
+      // produce the misleading failed bubble. No bubble, no retry, text preserved.
+      _statusById.Remove(clientId);
+      await OnOptimisticRemove.InvokeAsync(clientId);
+      _draft = text;
+      Notifications.Notify(NotificationSeverity.Info, "Can't reply",
+        "You can't reply to this sender.");
+    }
+```
+
+- [ ] **Step 6: Verify**
+
+```bash
+dotnet test tests/Radio.Web.Tests --configuration Release --filter "FullyQualifiedName~GvCounterparty"
+dotnet build src/Radio.Web --configuration Release
+```
+
+---
+
 ## Chunk 7: Config + documentation
 
 ### Task 7: Config key, ADR pointer, supersession banner, integration docs
@@ -1358,6 +1571,17 @@ One case per code. For each: confirm the exact bubble treatment, that the **comp
 24. `GvBridgeSendServiceTests` — flag-off, degraded gate, in-flight (both the thread-keyed and recipient-keyed cases).
 25. `MessageBubbleTests` — the non-retryable render case.
 26. Full suite: `dotnet test tests/Radio.Web.Tests --configuration Release` green, `dotnet build RadioConsole.sln --configuration Release` at 0 warnings.
+
+### D2. Thread reply-ability (ADR-028 §8)
+
+**Runs with the flag OFF as well as on** — the composer gate is independent of `SendEnabled`.
+
+27. **Open a thread from a numeric short code.** Composer renders **disabled** with the pill **"You can't reply to this sender."** No red bubble, no Retry, no network request on any interaction.
+28. **Open a thread from an opaque sender ID.** Same treatment. Confirm a long (36-char) identifier does not break the compose-bar layout at **1920×720**.
+29. **Open a normal E.164 thread.** Composer is **enabled** exactly as before — confirm this gate did not regress ordinary replies. This is the important negative control.
+30. **New-recipient composer is unaffected** — `＋ New` still allows typing a number; reply-ability gating applies to open threads, not to the composer where the user supplies the number.
+31. **Gate precedence:** on a short-code thread while GV is *also* degraded, the **reply-ability** message wins (it is the more specific and more permanent reason), not "Texting unavailable."
+32. `GvCounterpartyTests` green — including the null/empty/whitespace defensive cases.
 
 ### E. Restore before merge
 

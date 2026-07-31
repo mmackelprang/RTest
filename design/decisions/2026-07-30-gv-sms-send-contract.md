@@ -1,14 +1,20 @@
 # ADR: GV SMS Send — real contract, error taxonomy, and outbound echo de-dupe (supersedes ADR-022 D7)
 
-> ## ⚠ PROVISIONAL — derived from a tree that is not deployed (2026-07-31)
+> ## ✅ Provenance verified — the "wrong tree" concern was raised, investigated, and DISPROVEN (2026-07-31)
 >
-> **This ADR was written by reading `D:\prj\RotaryPhone`. That is NOT the deployed tree.** A Tester confirmed on the live box that the running RotaryPhone service is built from **`D:\prj\rp-deploy` @ `0a86898`**.
+> **Keep this note.** It is short, and it exists so nobody re-raises a settled question.
 >
-> **GV-5 is 🔒 BLOCKED until this contract is re-derived against `D:\prj\rp-deploy` @ `0a86898`.** The analysis below is **unverified, not known-wrong** — a distinction worth holding onto. Do not delete or rewrite it; confirm it.
+> **The concern:** this ADR was derived by reading `D:\prj\RotaryPhone`, while the deployed RotaryPhone service was reported to run from `D:\prj\rp-deploy` @ `0a86898`. Since GV-5 exists *precisely because* GV-3 was built against an anticipated contract rather than the as-built one, deriving GV-5's contract from the wrong tree would have repeated that mistake one level up. GV-5 was blocked pending re-derivation.
 >
-> **Why this is being taken seriously despite looking pedantic:** GV-5 exists *because* GV-3 was built against an anticipated contract instead of the as-built one. Claiming GV-5 against a contract derived from the wrong tree would repeat that exact mistake one level up.
+> **The resolution: they are the same repository.** `D:\prj\rp-deploy\.git` is a **file**, not a directory, containing:
 >
-> **Encouraging early signal (does not unblock).** All four source files this ADR was derived from are **byte-identical** between `D:\prj\RotaryPhone` and `D:\prj\rp-deploy` @ `0a86898`:
+> ```
+> gitdir: D:/prj/RotaryPhone/.git/worktrees/rp-deploy
+> ```
+>
+> It is a detached-HEAD **git worktree** of `D:\prj\RotaryPhone`, pinned at `0a86898` for deployment — same object store, same branches, same remote. **This ADR was derived from the same git objects that get deployed.** There was never a divergent tree. A Builder subsequently landed the GV parser fix on that repo's `main` (merge `627b928`), confirming it as the development origin.
+>
+> **Supporting evidence** (gathered while the question was open, now corroboration rather than a lead): all four source files this ADR was derived from are **byte-identical** across both paths — which is exactly what a shared object store predicts.
 >
 > | File | Result |
 > |---|---|
@@ -17,12 +23,12 @@
 > | `Services/GvThreadPoller.cs` | identical |
 > | `Clients/SmsCorrelationId.cs` | identical |
 >
-> So re-verification is expected to be a **confirmation, not a rewrite**. It is still required, for a reason the table cannot address: **source-tree parity is not deployed-binary parity.** Nothing currently proves the running binary was built from `rp-deploy` @ `0a86898` at all — that is exactly the gap **OPS-1** and the cross-repo build-stamp handoff exist to close. Until a build stamp can answer "what is actually running," reading *any* tree is inference.
+> **GV-5 is unblocked** and depends on GV-3 alone.
 >
-> **To clear this block:** re-read the four files above at `D:\prj\rp-deploy` @ `0a86898`, confirm the §2 taxonomy and §3 request shape still hold, then replace this banner with a dated verification note and flip GV-5 to 📋.
+> One unrelated point survives, and it is **not** a caveat on this ADR: *source parity is not binary provenance* — nothing yet proves which commit the running binary was built from. That is a general deployment-observability gap owned by **OPS-1** (build stamp), applies equally to every contract we consume, and blocks nothing here.
 
 - **ID:** ADR-028 (see `design/DECISION-LOG.md` for the one-line pointer)
-- **Status:** **PROVISIONAL** — pending re-derivation against the deployed tree (see banner). Was: Accepted (Planner — ready for Builder as GV-5; ships behind our existing flag, default OFF).
+- **Status:** **Accepted** — provenance verified 2026-07-31 (see banner). Ready for Builder as GV-5; ships behind our existing flag, default OFF.
 - **Date:** 2026-07-30
 - **Author:** Planner
 - **Supersedes:** **ADR-022 Decision D7 (§7) in full** — the request shape, the response shape, the "non-2xx = generic failure" error model, and the "confirm `SendSmsResponse` before wiring" open contract item. ADR-022 **§8 (config surface) is unaffected**: `RotaryPhone:Gv:SendEnabled` keeps its name, its meaning, and its `false` default.
@@ -212,3 +218,71 @@ No response was observed, so the send may or may not have reached Google. Per Ro
 - **Add a fourth "Confirmed/Delivered" bubble state.** Rejected — see §4.1. Neither side can honestly assert delivery, and the handoff explicitly asks for no visual jump.
 - **Auto-retry on `timeout` / `upstream_error`.** Rejected — a send is an irreversible account write; RotaryPhone's ADR forbids it and the handoff makes retry user-initiated.
 - **Map `send_disabled` to the generic failure path** (status-quo behavior). Rejected — see §5.1.
+
+> Added 2026-07-31. §8 is appended rather than inserted so the existing §-references in the GV-5 plan stay valid.
+
+---
+
+## 8. Decision — thread reply-ability (not every counterparty is dialable)
+
+### 8.1 The finding
+
+A Builder classified the counterparty identifier across the captured SMS threads and found it is **not always a phone number**:
+
+| Counterparty kind | Count | Dialable? |
+|---|---|---|
+| E.164 phone number | 45 | yes |
+| Numeric short code | 20 | **no** |
+| Opaque 36-char sender ID | 7 | **no** |
+
+**Roughly a third of inbound SMS comes from senders that cannot be replied to at all** — the automated end of the spectrum (verification codes, alerts, marketing).
+
+> **⚠ Confirm the counts before relying on them.** The classification was reported as covering **60 captured threads**, but the three buckets sum to **72**. The proportions are directionally clear and the *design* below does not depend on the exact split — but the arithmetic does not reconcile, so treat the numbers as indicative and re-derive them if anything is ever keyed off the ratio. Recording the discrepancy rather than quietly propagating it.
+
+### 8.2 Why this belongs to GV-5
+
+"Can this thread be replied to at all" is a **send-side** question, and GV-5 owns the send path. The display consequences — how such a thread *renders* in the thread list, the conversation header, and contact resolution — are a separate concern tracked as **GV-7**.
+
+### 8.3 Where classification lives
+
+**Decision: classify client-side, in a small pure static helper in `Radio.Web`. Do NOT add a field to the DTO.**
+
+- The classification is a **pure function of `CounterpartyNumber`**, a value we already receive. It needs no server-side knowledge.
+- Adding `CanReply` / `CounterpartyKind` to `SmsMessageDto` / `SmsThreadDto` would make this a **cross-service contract change** requiring a RotaryPhone build and re-ratification. This session is a sustained lesson in how expensive contract drift is; taking on a new shared-shape dependency to compute something we can derive locally is a bad trade.
+- **In-tree precedent:** `GvDirection` in `ApiModels.cs` is already exactly this — a client-side static defensive classifier over a raw string field from the same DTOs. `GvCounterpartyKind` should sit beside it and read the same way.
+
+Shape:
+
+```
+public enum GvCounterpartyKind { PhoneNumber, ShortCode, OpaqueSenderId }
+public static class GvCounterparty
+{
+  public static GvCounterpartyKind Classify(string? counterpartyNumber);
+  public static bool CanReply(string? counterpartyNumber);   // == Classify(...) is PhoneNumber
+}
+```
+
+Classification is **defensive and total** — every input returns a kind, `null`/empty included, and nothing throws. Anything not confidently a dialable number is treated as **not repliable**: the failure mode of wrongly disabling reply on an odd-but-valid number is a visibly disabled composer the user can report, whereas wrongly *enabling* it produces the failed-send lie §8.5 exists to prevent. Bias toward the recoverable error.
+
+### 8.4 What `SendSmsRequest.ToNumber` carries for a non-E.164 thread
+
+**Nothing — we never send.** The question is malformed, and that is the point.
+
+Their server normalizes `ToNumber` to E.164 and returns **`400 invalid_number`** when it cannot. So sending anyway would surface a short-code thread as `SendRejectedException` → a red **failed bubble** with *"That number doesn't look right. Check it and try again."* That copy lies twice over: the user did not type a number, they replied to a thread; and it implies a fixable input error when the thread is **structurally** un-repliable. No amount of user action helps.
+
+### 8.5 UI treatment — consistent with `send_disabled`
+
+This is the **same problem §5.1 already solved**, and it takes the same shape: *a send that cannot succeed must never be presented as a send that failed.*
+
+**Decision: gate compose at the thread level, before the POST.** For a thread whose counterparty is not `PhoneNumber`:
+
+- **No optimistic bubble is ever created** — nothing was attempted.
+- The composer renders **disabled with an explanation**, reusing the handoff's existing "GV unavailable" affordance shape (a `.phone-pill` + short reason) rather than inventing a new one.
+- Do **not** hide the composer outright. The handoff's own reasoning for the degraded case applies verbatim — *"don't let the user type into a dead send path"* — and a silently absent composer reads as a rendering bug, whereas a disabled one with a reason reads as an answer.
+- Copy sits in the calm register the handoff uses elsewhere: **"You can't reply to this sender."**
+
+**Defense in depth:** `GvBridgeSendService.SendAsync` also gates, throwing a typed `SendNotRepliableException` **before** the flag / degraded / single-flight checks, so a bypassed or future UI path cannot produce the misleading failed send. Same belt-and-braces posture as the rest of §5.
+
+### 8.6 Consequence
+
+Reply-ability is **presentation and gating only** — it changes nothing about the wire contract, adds no config, and requires nothing from RotaryPhone. It ships inside GV-5 with `SendEnabled` still `false`.
