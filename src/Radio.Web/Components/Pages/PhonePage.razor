@@ -628,8 +628,12 @@
       ReadStateReconciler.ApplyThread(_threads, threadId, isRead: true);
     }
 
+    // TASK 5 REPLACES THIS. Behaviour-preserving adaptation to the new return type so
+    // this task compiles on its own; the "failure renders as empty" bug is still here.
     var messages = await GvBridgeApi.GetSmsThreadMessagesAsync(threadId);
-    _openThreadMessages = messages?.Messages.ToList() ?? new();
+    _openThreadMessages = messages.IsSuccess
+      ? messages.Value!.Messages.ToList()
+      : new();
     PhoneUnread.Set(UnreadSum);
     await InvokeAsync(StateHasChanged);
 
