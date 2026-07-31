@@ -88,3 +88,12 @@ secrets.json
 *.pfx
 *.key
 task_plan.md
+
+# Playwright MCP scratch output (console logs + page snapshots)
+.playwright-mcp/
+
+# Stray UAT screenshots dropped in the repo root by browser-driving agents.
+# Root-anchored on purpose: curated UAT evidence under docs/uat/ and
+# docs/design-handoffs/ IS tracked and must stay tracked.
+/uat-*.png
+/uat-*.jpg
