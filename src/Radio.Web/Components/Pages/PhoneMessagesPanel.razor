@@ -185,6 +185,9 @@
                          Threads="Threads"
                          Contacts="Contacts"
                          Messages="OpenThreadMessages"
+                         Loading="OpenThreadLoading"
+                         Error="OpenThreadError"
+                         OnRetry="OnRetryOpenThread"
                          HeaderName="@OpenThreadName"
                          HeaderNumber="@OpenThreadNumber"
                          OnBack="CloseThread"
@@ -262,6 +265,15 @@
   [Parameter] public bool ThreadsLoading { get; set; }
   [Parameter] public bool ThreadsError { get; set; }
   [Parameter] public List<SmsMessageDto>? OpenThreadMessages { get; set; }
+
+  // GV-8 / UAT F-1 — the OPEN CONVERSATION's own load state, distinct from the thread
+  // list's ThreadsLoading/ThreadsError above. These forward into PhoneTextsPanel's
+  // existing Loading/Error/OnRetry parameters, which this host previously passed NEITHER
+  // of: that is why a failed load rendered as an empty conversation, and why the
+  // skeleton branch was unreachable dead code (no spinner was ever seen).
+  [Parameter] public bool OpenThreadLoading { get; set; }
+  [Parameter] public bool OpenThreadError { get; set; }
+  [Parameter] public EventCallback OnRetryOpenThread { get; set; }
   [Parameter] public EventCallback OnRetryThreads { get; set; }
   [Parameter] public EventCallback<string> OnOpenThread { get; set; }   // threadId → parent loads messages + marks read
   [Parameter] public EventCallback OnCloseThread { get; set; }          // back → parent clears _openThreadId + _openThreadMessages
