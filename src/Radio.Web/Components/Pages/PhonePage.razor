@@ -631,13 +631,36 @@
   {
     _openThreadId = threadId;
 
-    // 1) Optimistic flip (presentation-only).
+    // 1) Optimistic flip (presentation-only). Remember what it was: if the bodies fail
+    // to load we put the unread marker back (GV-8) rather than clearing the dot for a
+    // conversation the user was never actually shown.
+    var wasUnread = _threads?.FirstOrDefault(t => t.ThreadId == threadId)?.HasUnread ?? false;
     if (_threads != null)
     {
       ReadStateReconciler.ApplyThread(_threads, threadId, isRead: true);
     }
 
-    await LoadOpenThreadMessagesAsync(threadId);
+    var loaded = await LoadOpenThreadMessagesAsync(threadId);
+
+    // Superseded by a newer open while we were fetching — that call owns the state now.
+    if (_openThreadId != threadId)
+    {
+      return;
+    }
+
+    if (!loaded)
+    {
+      // The conversation never rendered. Do NOT tell Google it was read, and do not
+      // spend the 2-3 further upstream calls MarkThreadRead costs inside what is almost
+      // always a dead auth window. Restore the unread marker we optimistically cleared.
+      if (wasUnread && _threads != null
+          && ReadStateReconciler.ApplyThread(_threads, threadId, isRead: false))
+      {
+        PhoneUnread.Set(UnreadSum);
+        await InvokeAsync(StateHasChanged);
+      }
+      return;
+    }
 
     // 2) Durable write-through (idempotent reconcile; 502/404 keep the optimistic flip).
     var dto = await GvBridgeApi.MarkSmsThreadReadAsync(threadId, isRead: true);
