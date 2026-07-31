@@ -34,12 +34,26 @@
     </div>
 
     <div class="msg-list" aria-live="polite" @ref="_listEl">
+      @* GV-8 / UAT F-1. BRANCH ORDER IS THE FIX: skeleton → error → empty → list. The
+         error branch must precede the empty branch so "Start the conversation below."
+         is reachable ONLY when the fetch genuinely succeeded and returned zero messages
+         (UAT F-2). Same cloud_off + copy + Retry shape the thread list already uses at
+         PhoneMessagesPanel.razor:110-117; copy string from
+         HANDOFF-phone-dark-theme-and-scrollbars.md:310. *@
       @if (Messages == null && Loading)
       {
         @for (var i = 0; i < 5; i++)
         {
           <div class="skeleton-list-row"><div class="skeleton skeleton-list-row-text"></div></div>
         }
+      }
+      else if (Error)
+      {
+        <div class="empty-state">
+          <RadzenIcon Icon="cloud_off" class="empty-state-icon" />
+          <div class="empty-state-text">Couldn't load messages.</div>
+          <button type="button" class="phone-btn-sm" @onclick="OnRetry">Retry</button>
+        </div>
       }
       else if (Messages != null && Messages.Count == 0)
       {
@@ -168,6 +182,12 @@ else
   public enum SendStatus { None, Sending, Sent, Failed }
 
   // ── Thread-list inputs (hosted in the feed pane) ──────────────
+  // GV-8: Loading / Error / OnRetry are MODE-SCOPED, not list-scoped. One instance
+  // renders exactly one mode (conversation | new-recipient | thread list), so they
+  // describe whichever fetch that mode is showing — the OPEN CONVERSATION's fetch when
+  // OpenThreadId is set, the thread list's otherwise. PhoneMessagesPanel hosts the
+  // conversation mode only and forwards its OpenThreadLoading / OpenThreadError /
+  // OnRetryOpenThread into these three.
   [Parameter] public List<SmsThreadDto>? Threads { get; set; }
   [Parameter] public bool Loading { get; set; }
   [Parameter] public bool Error { get; set; }

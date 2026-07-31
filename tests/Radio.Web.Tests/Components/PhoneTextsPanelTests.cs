@@ -1,4 +1,5 @@
 using Bunit;
+using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Configuration;
@@ -111,5 +112,77 @@ public class PhoneTextsPanelTests : TestContext
       .Add(x => x.HeaderName, "Mom")
       .Add(x => x.Messages, new List<SmsMessageDto>()));
     Assert.Contains("compose-send-enabled", cut.Markup);
+  }
+
+  // ── GV-8 / UAT F-1: the conversation pane must be able to say "failed" ──────
+
+  [Fact]
+  public void Conversation_ShowsErrorState_NotEmptyState_WhenErrorSet()
+  {
+    // THE regression gate. Assert both halves: the error is present AND the lie is
+    // absent. Before GV-8 this rendered "Start the conversation below." for a 502.
+    Register(sendEnabled: false, available: true);
+    var cut = RenderComponent<PhoneTextsPanel>(p => p
+      .Add(x => x.OpenThreadId, "t1")
+      .Add(x => x.HeaderName, "Mom")
+      .Add(x => x.Messages, (List<SmsMessageDto>?)null)
+      .Add(x => x.Error, true));
+
+    Assert.Contains("Couldn't load messages.", cut.Markup);
+    Assert.DoesNotContain("Start the conversation below.", cut.Markup);
+    Assert.Contains("Retry", cut.Markup);
+  }
+
+  [Fact]
+  public void Conversation_ShowsEmptyState_WhenGenuinelyEmpty()
+  {
+    // The other side of the same coin: a real 200-with-zero-messages (which is also what
+    // a group thread returns today, RotaryPhone Defect B) still reads as empty.
+    Register(sendEnabled: false, available: true);
+    var cut = RenderComponent<PhoneTextsPanel>(p => p
+      .Add(x => x.OpenThreadId, "t1")
+      .Add(x => x.HeaderName, "Mom")
+      .Add(x => x.Messages, new List<SmsMessageDto>())
+      .Add(x => x.Error, false));
+
+    Assert.Contains("Start the conversation below.", cut.Markup);
+    Assert.DoesNotContain("Couldn't load messages.", cut.Markup);
+  }
+
+  [Fact]
+  public void Conversation_ShowsSkeleton_WhileLoading()
+  {
+    // The skeleton branch has existed since GV-3 but was unreachable dead code, because
+    // PhoneMessagesPanel never passed Loading — which is why the UAT saw no spinner.
+    Register(sendEnabled: false, available: true);
+    var cut = RenderComponent<PhoneTextsPanel>(p => p
+      .Add(x => x.OpenThreadId, "t1")
+      .Add(x => x.HeaderName, "Mom")
+      .Add(x => x.Messages, (List<SmsMessageDto>?)null)
+      .Add(x => x.Loading, true));
+
+    Assert.NotEmpty(cut.FindAll(".skeleton-list-row"));
+    Assert.DoesNotContain("Start the conversation below.", cut.Markup);
+    Assert.DoesNotContain("Couldn't load messages.", cut.Markup);
+  }
+
+  [Fact]
+  public void Conversation_RetryButton_InvokesOnRetry()
+  {
+    Register(sendEnabled: false, available: true);
+    var retries = 0;
+    var cut = RenderComponent<PhoneTextsPanel>(p => p
+      .Add(x => x.OpenThreadId, "t1")
+      .Add(x => x.HeaderName, "Mom")
+      .Add(x => x.Messages, (List<SmsMessageDto>?)null)
+      .Add(x => x.Error, true)
+      .Add(x => x.OnRetry, EventCallback.Factory.Create(this, () => retries++)));
+
+    // Find by label: the header Back button and the compose Send button are also
+    // <button>s, so a positional or class selector would be brittle.
+    var retry = cut.FindAll("button").First(b => b.TextContent.Trim() == "Retry");
+    retry.Click();
+
+    Assert.Equal(1, retries);
   }
 }
