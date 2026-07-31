@@ -102,9 +102,16 @@ Content-Type: application/json
 |---|---|---|---|
 | `200 OK` | Mark applied **or already-in-state** (idempotent no-op) | updated `VoicemailItemDto` / `SmsThreadDto` | Reconcile badge from the returned DTO. Never 409 on re-mark. |
 | `404 Not Found` | Unknown `{id}` / `{threadId}` | `{ "error": "..." }` | Treat as "item gone"; drop/refresh the row. Do not retry. |
+| `409 Conflict` | **RotaryPhone's `GVBridge:EnableMarkRead` is `false` (feature dark).** Checked **first**, before any validation — **no GV call is made.** | `{ "error": "markread_disabled" }` | Currently indistinguishable from `502` — see the consequence note below. |
 | `502 Bad Gateway` | Upstream GV `updateread` failed (auth blip / GV 5xx / timeout) | `{ "error": "..." }` | **Keep the optimistic flip; reconcile on next list/poll/push.** Never an empty 200 on failure, so we can always distinguish "marked" from "GV unreachable." Safe to retry. |
 
-**Idempotency is guaranteed by the contract** — re-marking an already-read item returns `200` with the same DTO, not `409`. So our own mark, a retry, and the echoed broadcast are all safe.
+**Idempotency is guaranteed by the contract** — re-marking an already-read item returns `200` with the same DTO, not `409`. So our own mark, a retry, and the echoed broadcast are all safe. **Note the overload:** `409` here means "the feature is switched off," *not* "conflicting state." A re-mark still returns `200`.
+
+> **⚠ Amended 2026-07-31 — the `409` dark-state row was missing from this table.** Verified live on the Ubuntu box during a UAT pass: with `GVBridge:EnableMarkRead=false`, both routes return `409 {"error":"markread_disabled"}` before touching Google. Source: `GvSmsController.MarkThreadRead` (step 0) and the voicemail sibling.
+>
+> **Consequence (accepted for now, tracked as GV-6):** our client maps every non-2xx to `null` and keeps the optimistic flip, so a dark server **degrades acceptably** — no crash, no wrong badge, and the next list fetch is authoritative. But the client **cannot distinguish "the feature is dark" from "GV is unreachable."** That matters in exactly one state: **config skew**, where our `RotaryPhone:Gv:MarkReadEnabled=true` while their `EnableMarkRead=false`. In that window every mark silently no-ops server-side, the optimistic flip reverts on the next refresh, and the logs give no hint whether we are misconfigured or Google is down. Since mark-read has **no user-visible error affordance by design (§6)**, the cost is entirely diagnostic — which is why this is a small follow-up, not a blocker.
+>
+> **Rollout order is therefore not arbitrary:** flip **theirs first**, confirm the routes stop returning `409`, then flip ours. Doing it in the other order produces the skew window above.
 
 ---
 
