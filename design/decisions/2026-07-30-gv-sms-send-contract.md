@@ -1,7 +1,28 @@
 # ADR: GV SMS Send — real contract, error taxonomy, and outbound echo de-dupe (supersedes ADR-022 D7)
 
+> ## ⚠ PROVISIONAL — derived from a tree that is not deployed (2026-07-31)
+>
+> **This ADR was written by reading `D:\prj\RotaryPhone`. That is NOT the deployed tree.** A Tester confirmed on the live box that the running RotaryPhone service is built from **`D:\prj\rp-deploy` @ `0a86898`**.
+>
+> **GV-5 is 🔒 BLOCKED until this contract is re-derived against `D:\prj\rp-deploy` @ `0a86898`.** The analysis below is **unverified, not known-wrong** — a distinction worth holding onto. Do not delete or rewrite it; confirm it.
+>
+> **Why this is being taken seriously despite looking pedantic:** GV-5 exists *because* GV-3 was built against an anticipated contract instead of the as-built one. Claiming GV-5 against a contract derived from the wrong tree would repeat that exact mistake one level up.
+>
+> **Encouraging early signal (does not unblock).** All four source files this ADR was derived from are **byte-identical** between `D:\prj\RotaryPhone` and `D:\prj\rp-deploy` @ `0a86898`:
+>
+> | File | Result |
+> |---|---|
+> | `Api/GvSmsController.cs` | identical |
+> | `Api/GvBridgeReadDtos.cs` | identical |
+> | `Services/GvThreadPoller.cs` | identical |
+> | `Clients/SmsCorrelationId.cs` | identical |
+>
+> So re-verification is expected to be a **confirmation, not a rewrite**. It is still required, for a reason the table cannot address: **source-tree parity is not deployed-binary parity.** Nothing currently proves the running binary was built from `rp-deploy` @ `0a86898` at all — that is exactly the gap **OPS-1** and the cross-repo build-stamp handoff exist to close. Until a build stamp can answer "what is actually running," reading *any* tree is inference.
+>
+> **To clear this block:** re-read the four files above at `D:\prj\rp-deploy` @ `0a86898`, confirm the §2 taxonomy and §3 request shape still hold, then replace this banner with a dated verification note and flip GV-5 to 📋.
+
 - **ID:** ADR-028 (see `design/DECISION-LOG.md` for the one-line pointer)
-- **Status:** Accepted (Planner — ready for Builder as GV-5; ships behind our existing flag, default OFF)
+- **Status:** **PROVISIONAL** — pending re-derivation against the deployed tree (see banner). Was: Accepted (Planner — ready for Builder as GV-5; ships behind our existing flag, default OFF).
 - **Date:** 2026-07-30
 - **Author:** Planner
 - **Supersedes:** **ADR-022 Decision D7 (§7) in full** — the request shape, the response shape, the "non-2xx = generic failure" error model, and the "confirm `SendSmsResponse` before wiring" open contract item. ADR-022 **§8 (config surface) is unaffected**: `RotaryPhone:Gv:SendEnabled` keeps its name, its meaning, and its `false` default.
