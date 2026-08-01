@@ -4,6 +4,36 @@
 
 **Goal:** Replace GV-3's *anticipated* SMS send contract with RotaryPhone's **as-built** one (ADR-028). Fix the request shape (which currently fails **100%** of sends), adopt the full nine-code `Code` taxonomy, subscribe to the **`SmsSent`** outbound echo channel we have never listened on, and make outbound reconciliation **idempotent — keyed first by exact `Id`, then by `(Outbound, normalized counterparty, ordinal text, |ΔSentAt| ≤ 120s)`**. Ships with `RotaryPhone:Gv:SendEnabled` **still `false`**; flipping it on is a separate, later decision.
 
+---
+
+> ## 🔄 Reconciled against `main` — 2026-07-31 (Planner). **Refresh pass, not a re-plan.**
+>
+> **GV-8 merged as PR #461 (`b2d1ffc`) after this plan was written.** Every decision below is **unchanged** — the nine-code taxonomy, `send_disabled` as an availability state, the `SmsSent` subscription, `OutboundSmsReconciler` and its idempotency key, `SendEnabled` staying `false`, and ADR-028 §8's reply-ability gate are all settled and were **re-sited, not revisited**. What changed:
+>
+> **1. Line numbers moved in the three files GV-8 touched.** Every cited anchor in Chunks 5, 6 and 6b was re-verified against `main` and corrected. The offsets, recorded so the diff reads honestly:
+>
+> | File | GV-8 delta | Effect on this plan's citations |
+> |---|---|---|
+> | `PhonePage.razor` | +109 lines, all inserted **above** line 686 | every Chunk 5 anchor shifts (`+3` in the markup, `+109` in `@code`) |
+> | `PhoneTextsPanel.razor` | +51 lines (+47 before `@code`) | every Chunk 6 / 6b anchor shifts `+47` |
+> | `PhoneMessagesPanel.razor` | +12 lines | Chunk 6 Step 7's two anchors shift `+3` / `+12` |
+>
+> **Unchanged and re-verified byte-exact:** `ApiModels.cs:1187-1188` (the two records to replace) and `GvDirection` at `:1192`; `PhoneHubService.cs:25` / `:94`; `MessageBubble.razor:38`; and **`GvBridgeSendService.cs` in full** — GV-8 did not touch it, so Chunk 2's whole-file replacement is valid as written.
+>
+> **2. `GvResult<T>` is now adopted for the send path — and it needed a small extension first, which is the new Chunk 0.** GV-8 introduced `GvResult<T>` / `GvCallOutcome` (`src/Radio.Web/Services/ApiClients/GvResult.cs`) explicitly so later rows adopt it rather than reinventing an outcome shape. This plan predates it and hand-rolled one inline (`result is null` → `MapStatusOnly`). **But `GvResult` as shipped cannot express what this endpoint needs**, for a specific reason: `HttpError(status, errorCode)` sets `Value = null`, and that is a *documented, test-pinned invariant* (`GvResult.cs:58` — "non-null if and only if `IsSuccess`"; `GvResultTests.HttpError_CarriesStatusAndErrorCode_AndReportsFailure` asserts `Assert.Null(result.Value)`). GV-5's mapping is driven off the **`Code` in the response body**, not off HTTP status, and it needs **two** fields off a non-2xx body — `Code` (the nine-way discriminator) and `Error` (prose, into the typed exception). `GvResult` today carries exactly one (`ErrorCode`). Chunk 0 adds a **separate** `FailureBody` + `HttpErrorWithBody` factory, deliberately leaving `Value` null so GV-8's invariant and GV-6's branch idiom survive untouched. See Chunk 0 for the rejected alternative (widening `Value`).
+>
+> **⚠ 3. A trap for anyone "adopting the idiom" the obvious way — recorded, not fixed here.** `GvBridgeApiService.ReadErrorCodeAsync` (`:297-320`) extracts the discriminator by trying `{ "error", "Error", "code", "Code" }` **in that order, first match wins**. That is **correct for the read endpoints**, where RotaryPhone returns `{"error":"upstream_error"}` and `error` *is* the discriminator — and correct for GV-6, whose `{"error":"markread_disabled"}` has the same shape. It is **wrong for `/sms/send`**, whose body carries **both**, with opposite meanings: `code` is the machine taxonomy and `error` is human prose (ADR-028 §2). Feeding a send failure through that helper returns the **prose**, every one of the nine codes falls through `MapCode`'s `_ =>` arm, and the taxonomy silently collapses to a single generic `SendFailedException` — precisely the class of quiet failure this PR exists to remove. **This plan therefore deserializes the whole typed `SendSmsResponse` on non-2xx instead of reusing that helper** (which is also why Chunk 0 stayed small — no hoist, no refactor of GV-8 code). Chunk 0 Step 2 adds a warning comment at the helper so the next reader does not have to rediscover this.
+>
+> **4. The composer now has to compose with a pane that can render a *failed* state — and that decision is GV-5's.** GV-8 rewrote the conversation pane into **four** branches (skeleton → error → empty → list, `PhoneTextsPanel.razor:43-98`), but `@ComposeBar()` at `:101` still renders **unconditionally**, below whichever branch won. GV-8's UAT recorded this as `O-2`. GV-7 is explicitly forbidden from re-deciding composer behaviour, so **the failed-load case is answered here** — new **Chunk 6b Step 5**, with the reasoning and the rejected alternatives. It is not a taste call: see the concrete defect it prevents.
+>
+> **5. Chunk 5 Step 4's blast radius widened.** GV-8 added three new call sites keyed on the open thread id (`LoadOpenThreadMessagesAsync`'s stale-response guard, `RestoreThreadUnreadAsync`, `RetryOpenThreadAsync`). Step 4 makes `BumpThread` **rewrite a row's `ThreadId`**, which can now silently desync `_openThreadId` from `_threads`. A companion guard was added to Step 4.
+>
+> **6. Three pre-existing plan defects fixed while re-siting** (none GV-8's doing, all fatal to a literal-code plan): Chunk 2 Step 3's new test referenced a `NeverCompletesHandler` class **that does not exist** (the real helper is `BlockingHandler(Task<HttpResponseMessage>)`); Chunk 6 Step 1 was the plan's only prose-only step and is now literal; and the Test Plan's §E re-used numbers 27–32 already spent by §D2.
+>
+> **Still true, re-verified, and deliberately NOT changed:** the duplicate-thread-row bug (ADR-028 §6) **still reproduces** — `BumpThread` (`PhonePage.razor:828-849`) is absent from GV-8's diff and still matches on `ThreadId` alone with an unconditional insert-new `else`. It remains **derived from RotaryPhone's source, not observed live**, because reproducing it needs `SendEnabled=true` on both sides.
+
+---
+
 **Owner-baked decisions in scope here (from ADR-028 — do not redesign):**
 - **The request is four fields:** `{ toNumber, text, threadId, clientCorrelationId }`. `toNumber` is **never** a thread id. Reply mode sends the real thread id; new-recipient mode sends `threadId: null` (ADR-028 §3).
 - **`ClientCorrelationId` IS wired**, set to the optimistic bubble's own client id, so the immediate echo matches on exact id and the bubble's client-side id never changes mid-flight (ADR-028 §3). The optimistic id format becomes `rc:{guid:N}` (it is no longer "temp" — it travels cross-service and other clients see it).
@@ -27,7 +57,9 @@
 
 **Tech stack:** Blazor Server, Radzen, SignalR client (`PhoneHubService` on `/hub`), `design-system.css` tokens. No new JS, no new component, no new hub, no new auth posture.
 
-**Dependencies:** **GV-3 must be merged** (`GvBridgeSendService`, `PhoneTextsPanel` compose/reply, `MessageBubble`, the optimistic-append seam in `PhonePage`). GV-4 is merged and unrelated except that its `ReadStateReconciler` is the pattern this plan mirrors. **No external dependency:** RotaryPhone's endpoint is shipped; it is dark behind *their* `GVBridge:EnableSmsSend=false`, which does not block us — a dark server returns `409 send_disabled`, which §5.1 now handles as a first-class state.
+**Dependencies:** **GV-3 must be merged** (`GvBridgeSendService`, `PhoneTextsPanel` compose/reply, `MessageBubble`, the optimistic-append seam in `PhonePage`). GV-4 is merged and unrelated except that its `ReadStateReconciler` is the pattern this plan mirrors. **GV-8 is merged (PR #461)** and is a *soft* dependency in two directions: it supplies `GvResult<T>`, which Chunk 0 extends and Chunk 2 adopts, and it supplies the conversation pane's error branch, which Chunk 6b Step 5 must compose with. **No external dependency:** RotaryPhone's endpoint is shipped; it is dark behind *their* `GVBridge:EnableSmsSend=false`, which does not block us — a dark server returns `409 send_disabled`, which §5.1 now handles as a first-class state.
+
+**Interacts with, but does not block:** **GV-7** consumes `GvCounterparty` from Chunk 6b and must not re-decide composer behaviour (this plan owns it — see Chunk 6b Steps 4 and 5). **GV-6** adopts `GvResult<T>` for the two mark-read methods; Chunk 0 is additive and leaves its idiom (`IsFailure` + `StatusCode` + `ErrorCode`) intact. **GV-9** touches `PhoneTextsPanel`'s thread-list branch; if both are in flight, expect that file to move.
 
 ---
 
@@ -45,6 +77,9 @@
 
 | File | Changes |
 |------|---------|
+| `src/Radio.Web/Services/ApiClients/GvResult.cs` | **(Chunk 0, added 2026-07-31)** Add `FailureBody` + the `HttpErrorWithBody` factory so a non-2xx that carries a *meaningful typed body* — which `/sms/send` does and no read endpoint does — can be expressed without breaking the `Value`-non-null-iff-`IsSuccess` invariant GV-8 documented and GV-6 will branch on. |
+| `src/Radio.Web/Services/ApiClients/GvBridgeApiService.cs` | **(Chunk 0, added 2026-07-31)** Comment only, **no behaviour change**: warn at `ReadErrorCodeAsync` that its `error`-before-`code` precedence is right for the read endpoints and **wrong for `/sms/send`**, whose body carries both with opposite meanings. |
+| `tests/Radio.Web.Tests/Services/GvResultTests.cs` | **(Chunk 0, added 2026-07-31)** Cases for the new factory, including one that **pins `Value` still null** on `HttpErrorWithBody`. |
 | `src/Radio.Web/Models/ApiModels.cs` | **Replace** `SendSmsRequest`/`SendSmsResponse` with the as-built shapes; add `GvSendCode` constants. Delete the `// shape provisional` comment. |
 | `src/Radio.Web/Services/ApiClients/GvBridgeSendService.cs` | Real request; parse `Queued`/`Code`; map the nine codes to typed exceptions; add `SendDisabledException`, `SendRejectedException`, `SendTimedOutException`, `SendFailedException`; single-flight key tolerates a null thread id; new `SendAsync` signature. |
 | `src/Radio.Web/Services/Hub/PhoneHubService.cs` | Add `.On<SmsMessageDto>("SmsSent", …)` on the **existing `/hub`** + `event Action<SmsMessageDto>? GvSmsSent`. |
@@ -58,6 +93,132 @@
 | `design/INTEGRATIONS.md` | Document the send route, the nine-code taxonomy, `SmsSent`, and the de-dupe window key. |
 | `design/DECISION-LOG.md` | ADR-028 pointer entry. |
 | `design/decisions/2026-06-20-gvbridge-voicemail-sms-integration.md` | Supersession banner for D7 (§7). |
+
+---
+
+## Chunk 0: Let `GvResult<T>` carry a typed failure body (added 2026-07-31)
+
+### Task 0: `FailureBody` + `HttpErrorWithBody`, and a hazard note on `ReadErrorCodeAsync`
+
+**Files:**
+- Modify: `src/Radio.Web/Services/ApiClients/GvResult.cs`
+- Modify: `src/Radio.Web/Services/ApiClients/GvBridgeApiService.cs` (comment only)
+- Test: `tests/Radio.Web.Tests/Services/GvResultTests.cs` (extend)
+
+> **Why this chunk exists.** GV-8 introduced `GvResult<T>` / `GvCallOutcome` as *the* reusable outcome shape, and this PR should adopt it rather than hand-roll a second one. It cannot be adopted as-is. `GvResult` models "**success carries a value, failure carries none**" — exactly right for a read, where a non-2xx body is only a diagnostic string. `/api/gvbridge/sms/send` is different in kind: **its failure body is the contract.** ADR-028 §2 is nine `Code`s in the body, not nine HTTP statuses, and mapping needs two fields off a non-2xx — `Code` (the discriminator) and `Error` (prose, into the typed exception's message).
+>
+> **Do NOT solve this by widening `Value` to be populated on `HttpError`.** That invariant is stated in the type's own XML doc (`GvResult.cs:58`) and **pinned by a test** (`GvResultTests.HttpError_CarriesStatusAndErrorCode_AndReportsFailure` → `Assert.Null(result.Value)`). GV-6 is about to branch on `IsFailure` and then read `StatusCode`/`ErrorCode`; a `Value` that can be non-null on a failure invites `result.Value!` on a failure path, which is the same shape of bug GV-8 was written to remove. A **separate** property costs three lines and keeps the invariant absolute.
+>
+> This chunk is deliberately additive: **no existing factory, property or test changes**, so every GV-8 test stays green untouched.
+
+- [ ] **Step 1: Add `FailureBody` and the `HttpErrorWithBody` factory**
+
+In `src/Radio.Web/Services/ApiClients/GvResult.cs`, extend the private constructor and add the property + factory. The constructor currently takes `(outcome, value, statusCode, errorCode)`; add a fifth parameter defaulted to `null` so the four existing factories are unchanged:
+
+```csharp
+  private GvResult(GvCallOutcome outcome, T? value, HttpStatusCode? statusCode,
+    string? errorCode, T? failureBody = null)
+  {
+    Outcome = outcome;
+    Value = value;
+    StatusCode = statusCode;
+    ErrorCode = errorCode;
+    FailureBody = failureBody;
+  }
+```
+
+Beside the existing `ErrorCode` property:
+
+```csharp
+  /// <summary>
+  /// The deserialized body of a NON-2xx response, for the one endpoint whose failure body is
+  /// part of the contract rather than a diagnostic: <c>POST /api/gvbridge/sms/send</c> answers
+  /// every failure with the full <c>SendSmsResponse</c> shape, and ADR-028 §2's nine-code
+  /// taxonomy is read out of it (the HTTP status is only corroboration).
+  /// <para>
+  /// DELIBERATELY SEPARATE FROM <see cref="Value"/>. <c>Value</c> is non-null if and only if
+  /// <see cref="IsSuccess"/>, and that stays absolute — GV-6 and every other consumer branch on
+  /// <c>IsFailure</c> and must never be tempted into <c>Value!</c> on a failure path. Null for
+  /// every read endpoint, and null whenever the failure body was absent or unparseable.
+  /// </para>
+  /// </summary>
+  public T? FailureBody { get; }
+```
+
+and beside the existing factories:
+
+```csharp
+  /// <summary>
+  /// A non-2xx whose body DID deserialize into the expected DTO. <see cref="Value"/> stays null
+  /// (this is still a failure); the payload is exposed as <see cref="FailureBody"/>. Use only
+  /// where the failure body is contractual — today that is the SMS send endpoint alone.
+  /// </summary>
+  public static GvResult<T> HttpErrorWithBody(HttpStatusCode statusCode, T body,
+    string? errorCode = null) =>
+    new(GvCallOutcome.HttpError, null, statusCode, errorCode, body);
+```
+
+> **Implementer note:** `Outcome` is still `HttpError` — this is *not* a new `GvCallOutcome` member. The outcome enum answers "how did the call end," which is unchanged; only "did we manage to keep the body" differs, and that is a property, not an outcome.
+
+- [ ] **Step 2: Add the hazard comment to `ReadErrorCodeAsync` (no behaviour change)**
+
+In `src/Radio.Web/Services/ApiClients/GvBridgeApiService.cs`, immediately above the `foreach (var name in new[] { "error", "Error", "code", "Code" })` loop (`:312`):
+
+```csharp
+      // ⚠ PRECEDENCE IS LOAD-BEARING, and it is right ONLY for endpoints whose failure body
+      // carries ONE discriminator. The read routes return {"error":"upstream_error"} and GV-6's
+      // dark-flag case returns {"error":"markread_disabled"} — for both, `error` IS the code and
+      // trying it first is correct.
+      // It is WRONG for POST /api/gvbridge/sms/send, whose body carries BOTH with OPPOSITE
+      // meanings: `code` is the machine taxonomy (ADR-028 §2, nine values) and `error` is human
+      // prose. This helper would return the prose, every code would fall through to the generic
+      // failure, and the taxonomy would silently collapse to one. GV-5 therefore does NOT use
+      // this helper — it deserializes the whole typed SendSmsResponse on non-2xx. If a future
+      // endpoint needs `code`-first, add a preference parameter rather than reordering here.
+```
+
+**Do not change the array or the order.** Two shipped call sites depend on the current behaviour.
+
+- [ ] **Step 3: Extend `GvResultTests`**
+
+Append to `tests/Radio.Web.Tests/Services/GvResultTests.cs`:
+
+```csharp
+  [Fact]
+  public void HttpErrorWithBody_CarriesTheBody_ButValueStaysNull()
+  {
+    // GV-5 / ADR-028 §2: the send endpoint's failure body IS the contract. It must be
+    // reachable — and it must NOT arrive via Value, because "Value is non-null iff
+    // IsSuccess" is the invariant GV-6 branches on.
+    var result = GvResult<SmsThreadMessagesDto>.HttpErrorWithBody(
+      HttpStatusCode.Conflict, Dto, "send_disabled");
+
+    Assert.True(result.IsFailure);
+    Assert.False(result.IsSuccess);
+    Assert.Equal(GvCallOutcome.HttpError, result.Outcome);
+    Assert.Equal(HttpStatusCode.Conflict, result.StatusCode);
+    Assert.Equal("send_disabled", result.ErrorCode);
+    Assert.Same(Dto, result.FailureBody);
+    Assert.Null(result.Value);                 // the invariant, pinned
+  }
+
+  [Fact]
+  public void EveryOtherFactory_LeavesFailureBodyNull()
+  {
+    // Read endpoints never populate it; nothing may start depending on it there.
+    Assert.Null(GvResult<SmsThreadMessagesDto>.Success(Dto).FailureBody);
+    Assert.Null(GvResult<SmsThreadMessagesDto>.HttpError(HttpStatusCode.BadGateway).FailureBody);
+    Assert.Null(GvResult<SmsThreadMessagesDto>.Timeout().FailureBody);
+    Assert.Null(GvResult<SmsThreadMessagesDto>.Transport().FailureBody);
+    Assert.Null(GvResult<SmsThreadMessagesDto>.Malformed().FailureBody);
+  }
+```
+
+- [ ] **Step 4: Verify — GV-8's existing cases must be untouched and green**
+
+```bash
+dotnet test tests/Radio.Web.Tests --configuration Release --filter "FullyQualifiedName~GvResult|FullyQualifiedName~GvBridgeApiServiceVoicemailSms"
+```
 
 ---
 
@@ -153,6 +314,8 @@ Expect exactly one break — `GvBridgeSendService.cs` constructing the old two-a
 - Test: `tests/Radio.Web.Tests/Services/GvBridgeSendServiceTests.cs` (update)
 
 > ADR-028 §2/§3/§5. The critical fix is the **request**: today we POST `{"threadId":…,"text":…}`, their `ToNumber` binds `null`, and every send returns `400 invalid_number`. Mapping is driven by **`Code`**, not HTTP status — status is only the fallback when the body is unparseable.
+>
+> **Updated 2026-07-31:** the transport half of this task now runs through **`GvResult<SendSmsResponse>`** (Chunk 0) instead of the inline `result is null` handling this plan originally specified. The **typed exceptions stay** — ADR-028 §5's whole mapping table is written in exception terms and `PhoneTextsPanel`'s per-code catch ladder consumes them, so `GvResult` is the *internal transport inside `SendAsync`*, converted to the settled exception at the boundary. Two things get strictly better and neither is a scope change: a `PostAsJsonAsync` **timeout** now maps to `SendTimedOutException` instead of escaping `SendAsync` as a raw `TaskCanceledException` into the UI's generic `catch (Exception)`, and a **transport failure** becomes a mapped `SendFailedException` rather than a bare `HttpRequestException`. `GvBridgeSendService.cs` was **not** touched by GV-8, so the rest of this task's whole-file replacement applies verbatim.
 
 - [ ] **Step 1: Write the code-mapping tests first (TDD)**
 
@@ -442,38 +605,47 @@ public class GvBridgeSendService
     {
       _logger.LogDebug("Sending GV SMS to {To} on thread {ThreadId}", toNumber, threadId ?? "(new)");
 
-      var response = await _httpClient.PostAsJsonAsync("/api/gvbridge/sms/send",
-        new SendSmsRequest(toNumber, text, threadId, clientCorrelationId), ct);
+      var result = await PostSendAsync(toNumber, text, threadId, clientCorrelationId, ct);
 
-      // Parse the body first: `code` is the contract, HTTP status is corroboration.
-      // A failure to parse is itself a failure — fall back to status-based mapping.
-      SendSmsResponse? result = null;
-      try
+      // 1) No usable response at all — there is no Code to map, so map the OUTCOME.
+      if (result.Outcome is GvCallOutcome.Timeout
+          or GvCallOutcome.Transport
+          or GvCallOutcome.Malformed)
       {
-        result = await response.Content.ReadFromJsonAsync<SendSmsResponse>(cancellationToken: ct);
-      }
-      catch (Exception ex)
-      {
-        _logger.LogWarning(ex, "GV send returned an unparseable body ({Status})", (int)response.StatusCode);
+        throw MapOutcome(result.Outcome);
       }
 
-      if (result is null) throw MapStatusOnly(response.StatusCode);
-
-      if (!response.IsSuccessStatusCode || !result.Queued)
+      // 2) Non-2xx. The BODY is the contract on this endpoint (ADR-028 §2) — nine codes,
+      //    not nine statuses. FailureBody (Chunk 0) carries it; Value stays null by design.
+      //    An unparseable failure body is the only case that falls back to status.
+      if (result.Outcome == GvCallOutcome.HttpError)
       {
+        var failure = result.FailureBody;
         _logger.LogWarning("GV send failed: code={Code} status={Status} error={Error}",
-          result.Code, (int)response.StatusCode, result.Error);
-        throw MapCode(result.Code, result.Error, response.StatusCode);
+          failure?.Code ?? "(unparseable)", (int)result.StatusCode!.Value, failure?.Error);
+        throw failure is null
+          ? MapStatusOnly(result.StatusCode!.Value)
+          : MapCode(failure.Code, failure.Error);
+      }
+
+      // 3) 2xx that deserialized. A 2xx is NOT automatically an honest success —
+      //    ADR-028 §4.1 requires Queued == true AND Code == "queued" AND a Message.
+      var body = result.Value!;
+      if (!body.Queued || !string.Equals(body.Code, GvSendCode.Queued, StringComparison.Ordinal))
+      {
+        _logger.LogWarning("GV send returned 2xx but not an honest queued: code={Code} queued={Queued}",
+          body.Code, body.Queued);
+        throw MapCode(body.Code, body.Error);
       }
 
       // Queued == true. This means GOOGLE ACCEPTED it — not that it was delivered.
-      if (result.Message is null)
+      if (body.Message is null)
       {
         _logger.LogWarning("GV send reported queued but returned no message");
         throw new SendFailedException(GvSendCode.Error, "Send returned no message");
       }
 
-      return result.Message;
+      return body.Message;
     }
     finally
     {
@@ -481,9 +653,69 @@ public class GvBridgeSendService
     }
   }
 
+  /// <summary>
+  /// POST the send and reduce it to an outcome (Chunk 0 / GV-8's GvResult idiom) rather than
+  /// letting transport exceptions escape into the compose UI's generic catch. On a NON-2xx the
+  /// whole typed SendSmsResponse is kept via HttpErrorWithBody — the failure body is contractual
+  /// here, unlike every read endpoint.
+  ///
+  /// Deliberately does NOT use GvBridgeApiService.ReadErrorCodeAsync: that helper tries "error"
+  /// BEFORE "code", which is right for the read routes but returns this endpoint's human PROSE
+  /// instead of its machine code, collapsing all nine codes into one generic failure.
+  /// </summary>
+  private async Task<GvResult<SendSmsResponse>> PostSendAsync(string toNumber, string text,
+    string? threadId, string? clientCorrelationId, CancellationToken ct)
+  {
+    try
+    {
+      using var response = await _httpClient.PostAsJsonAsync("/api/gvbridge/sms/send",
+        new SendSmsRequest(toNumber, text, threadId, clientCorrelationId), ct);
+
+      SendSmsResponse? body = null;
+      try
+      {
+        body = await response.Content.ReadFromJsonAsync<SendSmsResponse>(cancellationToken: ct);
+      }
+      catch (Exception ex)
+      {
+        // A body we cannot read is a failure, but not a DIFFERENT failure — keep the status.
+        _logger.LogWarning(ex, "GV send returned an unparseable body ({Status})",
+          (int)response.StatusCode);
+      }
+
+      if (!response.IsSuccessStatusCode)
+      {
+        return body is null
+          ? GvResult<SendSmsResponse>.HttpError(response.StatusCode)
+          : GvResult<SendSmsResponse>.HttpErrorWithBody(response.StatusCode, body, body.Code);
+      }
+
+      // 2xx with no readable body is malformed, not success — §4.1 is checked by the caller
+      // against a body that actually exists.
+      return body is null
+        ? GvResult<SendSmsResponse>.Malformed()
+        : GvResult<SendSmsResponse>.Success(body);
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+      throw;                    // the CALLER cancelled — not a send failure
+    }
+    catch (OperationCanceledException)
+    {
+      // ADR-028 §5.3: ambiguous. The send may or may not have reached Google.
+      _logger.LogWarning("GV send timed out (thread {ThreadId})", threadId ?? "(new)");
+      return GvResult<SendSmsResponse>.Timeout();
+    }
+    catch (HttpRequestException ex)
+    {
+      _logger.LogWarning(ex, "GV send transport failure (thread {ThreadId})", threadId ?? "(new)");
+      return GvResult<SendSmsResponse>.Transport();
+    }
+  }
+
   // ADR-028 §2 taxonomy → typed exception. Unknown codes degrade to a generic retryable
   // failure; never throw on an unrecognized value.
-  private static Exception MapCode(string? code, string? error, HttpStatusCode status) => code switch
+  private static Exception MapCode(string? code, string? error) => code switch
   {
     GvSendCode.SendDisabled => new SendDisabledException(),
     GvSendCode.RateLimited => new SendRateLimitedException(),
@@ -496,7 +728,16 @@ public class GvBridgeSendService
     _ => new SendFailedException(code ?? GvSendCode.Error, error),
   };
 
-  // Fallback when the body could not be parsed at all — status only.
+  // No response body existed to read a Code out of. Maps how the CALL ended, not what the
+  // server said — deliberately narrower than MapCode, and Timeout stays ambiguous (§5.3).
+  private static Exception MapOutcome(GvCallOutcome outcome) => outcome switch
+  {
+    GvCallOutcome.Timeout => new SendTimedOutException(),
+    GvCallOutcome.Transport => new SendFailedException(GvSendCode.Error, "No connection to the phone service"),
+    _ => new SendFailedException(GvSendCode.Error, "Send returned an unreadable response"),
+  };
+
+  // Fallback when a NON-2xx arrived but its body could not be parsed — status only.
   private static Exception MapStatusOnly(HttpStatusCode status) => status switch
   {
     HttpStatusCode.Conflict => new SendDisabledException(),
@@ -509,23 +750,92 @@ public class GvBridgeSendService
 }
 ```
 
+> **Implementer note (added 2026-07-31):** `MapCode` lost its unused `HttpStatusCode status` parameter — it never read it, and with the outcome split the status now has a dedicated home in `MapStatusOnly`. The nine-way mapping itself is **byte-identical** to what this plan originally specified; ADR-028 §5's table is unchanged.
+
 - [ ] **Step 3: Update the GV-3 tests for the new signature**
 
-In `tests/Radio.Web.Tests/Services/GvBridgeSendServiceTests.cs`, every `svc.SendAsync("t1", "hi")` becomes `svc.SendAsync("+15551234567", "hi", "t1", "rc:test")`. The in-flight test's two calls must share a `threadId` (`"t1"`) so they collide on the same flight key. Add one new case:
+> **Corrected 2026-07-31 — the snippet this step used to carry would not compile.** It referenced a `NeverCompletesHandler` class that **does not exist** in the file. The real helper is `BlockingHandler(Task<HttpResponseMessage> gate)` at `GvBridgeSendServiceTests.cs:88-95`, driven by a `TaskCompletionSource` the test releases at the end. Use it. (This was a defect in the original plan, not a GV-8 consequence.)
+
+In `tests/Radio.Web.Tests/Services/GvBridgeSendServiceTests.cs`:
+
+1. Every `svc.SendAsync("t1", "hi")` (`:37`, `:49`, `:60`) becomes `svc.SendAsync("+15551234567", "hi", "t1", "rc:test")`.
+2. `InFlightGuard_RejectsSecondConcurrentSendOnSameThread` (`:63-82`) — its two calls must keep a shared `threadId` (`"t1"`) so they still collide on one flight key: `svc.SendAsync("+15551234567", "one", "t1", "rc:1")` / `("+15551234567", "two", "t1", "rc:2")`.
+3. **`:81` must change type.** It currently asserts `HttpRequestException` on the released first send. Under the new implementation a `500` with an **empty** body parses to `null`, becomes `GvResult.HttpError(500)` with no `FailureBody`, and maps through `MapStatusOnly`'s `_ =>` arm — so the assertion becomes:
+
+```csharp
+    gate.SetResult(new HttpResponseMessage(HttpStatusCode.InternalServerError));
+    await Assert.ThrowsAsync<SendFailedException>(() => first);
+```
+
+4. Add one new case, mirroring the existing `BlockingHandler` shape exactly:
 
 ```csharp
   [Fact]
   public async Task InFlightGuard_KeysOnRecipient_WhenThreadIdIsNull()
   {
-    // New-conversation sends have no thread id; they must still single-flight per recipient.
-    var client = new HttpClient(new NeverCompletesHandler()) { BaseAddress = new Uri("http://radio:5004") };
+    // New-conversation sends have no thread id; they must still single-flight per
+    // recipient. Keying on "" instead would collapse every concurrent new-recipient
+    // send into one slot.
+    var gate = new TaskCompletionSource<HttpResponseMessage>();
+    var client = new HttpClient(new BlockingHandler(gate.Task))
+    {
+      BaseAddress = new Uri("http://radio:5004")
+    };
     var svc = Build(sendEnabled: true, client, AvailableStatus());
 
-    var first = svc.SendAsync("555-123-4567", "one", null, "rc:1");
+    var first = svc.SendAsync("555-123-4567", "one", null, "rc:1");   // takes the slot
     await Assert.ThrowsAsync<SendInFlightException>(
-      () => svc.SendAsync("(555) 123-4567", "two", null, "rc:2"));   // same number, different formatting
+      () => svc.SendAsync("(555) 123-4567", "two", null, "rc:2"));    // same number, different formatting
+
+    // Release the first send so the in-flight key is cleaned up in the finally.
+    gate.SetResult(new HttpResponseMessage(HttpStatusCode.InternalServerError));
+    await Assert.ThrowsAsync<SendFailedException>(() => first);
   }
 ```
+
+5. Add the two outcome cases the `GvResult` adoption makes reachable (added 2026-07-31) — these are new *coverage*, not new *behaviour*:
+
+```csharp
+  [Fact]
+  public async Task TransportFailure_MapsToSendFailed_NotARawHttpRequestException()
+  {
+    // Before GvResult adoption this escaped SendAsync unmapped and landed in the compose
+    // UI's generic catch. It is a failure either way — but a TYPED one, like every other.
+    var client = new HttpClient(new ThrowingHandler(new HttpRequestException("no route")))
+    {
+      BaseAddress = new Uri("http://radio:5004")
+    };
+    var svc = Build(sendEnabled: true, client, AvailableStatus());
+
+    await Assert.ThrowsAsync<SendFailedException>(
+      () => svc.SendAsync("+15551234567", "hi", "t1", "rc:1"));
+  }
+
+  [Fact]
+  public async Task HttpClientTimeout_MapsToSendTimedOut_WhichIsAmbiguousByDesign()
+  {
+    // ADR-028 §5.3: no response observed, so the send may or may not have landed. The
+    // caller must NOT auto-retry — it gets the ambiguous copy, not the generic failure.
+    var client = new HttpClient(new ThrowingHandler(new TaskCanceledException()))
+    {
+      BaseAddress = new Uri("http://radio:5004")
+    };
+    var svc = Build(sendEnabled: true, client, AvailableStatus());
+
+    await Assert.ThrowsAsync<SendTimedOutException>(
+      () => svc.SendAsync("+15551234567", "hi", "t1", "rc:1"));
+  }
+
+  /// <summary>Handler that always throws, to exercise the transport / timeout outcomes.</summary>
+  private sealed class ThrowingHandler(Exception toThrow) : HttpMessageHandler
+  {
+    protected override Task<HttpResponseMessage> SendAsync(
+      HttpRequestMessage request, CancellationToken cancellationToken)
+      => Task.FromException<HttpResponseMessage>(toThrow);
+  }
+```
+
+> **Implementer note:** the timeout case relies on `SendAsync`'s `catch (OperationCanceledException)` arm being reached with `ct.IsCancellationRequested == false` — which holds because the test passes no token. `TaskCanceledException` derives from `OperationCanceledException`, so this is the same path `HttpClient.Timeout` takes.
 
 - [ ] **Step 4: Verify**
 
@@ -543,6 +853,8 @@ dotnet test tests/Radio.Web.Tests --configuration Release --filter "FullyQualifi
 - Modify: `src/Radio.Web/Services/Hub/PhoneHubService.cs`
 
 > ADR-028 §4.2. Outbound messages are broadcast on **`SmsSent`**, never on `SmsReceived`. We have never listened on it — which is why GV-3's optimistic de-dupe is dead code. Same `/hub` connection, same camelCase binding, no new connection.
+>
+> **Re-verified 2026-07-31: both anchors below are still exact.** GV-8 did not touch `PhoneHubService.cs`.
 
 - [ ] **Step 1: Add the event declaration**
 
@@ -837,16 +1149,18 @@ All 12 tests must pass before continuing.
 - Modify: `src/Radio.Web/Components/Pages/PhonePage.razor`
 
 > ADR-028 §4.2 / §6. Three changes: (1) subscribe to the channel outbound actually arrives on; (2) delete the `temp-` de-dupe in `OnGvSmsReceived`, which can never fire because outbound never arrives on `SmsReceived`; (3) fix the duplicate-thread-row bug the new-conversation flow exposes.
+>
+> **⚠ Line numbers re-sited 2026-07-31.** GV-8 inserted **+109 lines** into this file, all **above** line 686 (`LoadOpenThreadMessagesAsync`, `RetryOpenThreadAsync`, `RestoreThreadUnreadAsync`, `MarkOpenThreadReadAsync`, plus the `_openThreadLoading`/`_openThreadError` fields and three new parameters on the `PhoneMessagesPanel` mount). Every anchor below is the **verified current** line on `main` @ `1503a5c`. The *code* to change is unaltered — GV-8 did not touch `OnGvSmsReceived`, `BumpThread` or `OnOptimisticAppend`.
 
 - [ ] **Step 1: Subscribe / unsubscribe**
 
-Beside the existing `PhoneHub.GvSmsReceived += OnGvSmsReceived;` (line ~238):
+Beside the existing `PhoneHub.GvSmsReceived += OnGvSmsReceived;` (**line 247**, was cited as ~238):
 
 ```csharp
     PhoneHub.GvSmsSent += OnGvSmsSent;
 ```
 
-and beside the existing `PhoneHub.GvSmsReceived -= OnGvSmsReceived;` (line ~984):
+and beside the existing `PhoneHub.GvSmsReceived -= OnGvSmsReceived;` (**line 1093**, was cited as ~984):
 
 ```csharp
     PhoneHub.GvSmsSent -= OnGvSmsSent;
@@ -854,7 +1168,7 @@ and beside the existing `PhoneHub.GvSmsReceived -= OnGvSmsReceived;` (line ~984)
 
 - [ ] **Step 2: Delete the unreachable de-dupe from `OnGvSmsReceived`**
 
-In `OnGvSmsReceived`, delete this entire block (lines ~672–688) along with its comment:
+In `OnGvSmsReceived` (**now at `:774-823`**), delete this entire block (**lines 781–797** — comment `781-788` plus the `if` at `789-797`; was cited as ~672–688) along with its comment:
 
 ```csharp
       // Optimistic→confirmed de-dupe: [...full comment abridged here — delete the whole
@@ -880,7 +1194,7 @@ Replace it with a single orienting comment so the next reader does not re-add it
 
 - [ ] **Step 3: Add the `OnGvSmsSent` handler**
 
-Immediately after `OnGvSmsReceived` (after line ~714):
+Immediately after `OnGvSmsReceived` (**after line 823**, was cited as ~714):
 
 ```csharp
   // Outbound echo (ADR-028 §4.2). Arrives up to twice per send: the immediate controller
@@ -925,7 +1239,9 @@ Immediately after `OnGvSmsReceived` (after line ~714):
 
 ADR-028 §6: after a new-conversation send the response's `ThreadId` is RotaryPhone's *synthesized, explicitly-UNVERIFIED* `t.+<E164>`, while the poller later surfaces the same conversation under Google's **real** thread id. `BumpThread` matches on `ThreadId` alone and therefore inserts a second row for one conversation.
 
-Replace the `FindIndex` on line ~722:
+> **Re-verified 2026-07-31 — this bug STILL REPRODUCES.** `BumpThread` (**now `:828-849`**) is **absent from GV-8's diff**: it still matches on `ThreadId` alone, still has an unconditional insert-new `else`, and its update branch still does not carry the thread id forward. GV-8 changed the thread-*open* and read-state paths, and touched `_threads` only through `ReadStateReconciler.ApplyThread` (which mutates `HasUnread`, never membership), so neither the trigger nor the mechanism moved. It remains **derived from RotaryPhone's source (ADR-028 §6), not observed live** — reproducing it needs `SendEnabled=true` on both sides.
+
+Replace the `FindIndex` on **line 831** (was cited as ~722):
 
 ```csharp
     var idx = _threads.FindIndex(t => t.ThreadId == msg.ThreadId);
@@ -959,6 +1275,23 @@ and in the update branch, carry the newest thread id forward so subsequent repli
       };
 ```
 
+- [ ] **Step 4b: Keep `_openThreadId` in step when the row adopts a new id (added 2026-07-31)**
+
+> **Why this is new.** Adopting `msg.ThreadId` onto an existing row means a row's identity can now **change under an open conversation**. Before GV-8 the only consequence was one missed read-flip. GV-8 added **three** more sites keyed on that id — `LoadOpenThreadMessagesAsync`'s stale-response guard (`if (_openThreadId != threadId)`, `:709`), `RestoreThreadUnreadAsync(threadId, wasUnread)`, and `RetryOpenThreadAsync` (reads `_openThreadId`, `:736`) — and all three fail **silently** against a stale id: `ReadStateReconciler.ApplyThread` simply finds nothing and no-ops, so a failed open would leave the unread marker un-restored and Retry would re-fetch under an id the row no longer has.
+
+Immediately after the `existing with { … }` assignment above, before the `RemoveAt`/`Insert`:
+
+```csharp
+      // The row's identity just changed (synthesized "t.+<E164>" → Google's real id). If
+      // this is the conversation currently on screen, follow it — GV-8 keys the stale-fetch
+      // guard, the unread restore and Retry off _openThreadId, and every one of them fails
+      // SILENTLY (a no-op reconcile) against an id no row carries any more.
+      if (_openThreadId == existing.ThreadId && existing.ThreadId != msg.ThreadId)
+      {
+        _openThreadId = msg.ThreadId;
+      }
+```
+
 - [ ] **Step 5: Verify**
 
 ```bash
@@ -977,10 +1310,14 @@ dotnet test tests/Radio.Web.Tests --configuration Release --filter "FullyQualifi
 - Modify: `src/Radio.Web/Components/Pages/MessageBubble.razor`
 
 > ADR-028 §3 / §5 + the handoff's send-failure copy matrix. This is where the taxonomy becomes user-visible.
+>
+> **⚠ Line numbers re-sited 2026-07-31.** GV-8 added **+51 lines** to `PhoneTextsPanel.razor` — the conversation pane went from three branches to **four** (skeleton → error → empty → list, `:43-98`), and `Loading`/`Error`/`OnRetry` are now actually fed from `PhonePage` → `PhoneMessagesPanel`. Net effect on this chunk: **every `@code` anchor shifts +47.** The code being changed is untouched — GV-8 rewrote the *markup* branches, not `SendDraftAsync`, `RetrySend`, `CanSend` or `ComposeBar()`. `MessageBubble.razor` was not touched at all.
 
 - [ ] **Step 1: Add the `Retryable` parameter to `MessageBubble`**
 
-In `MessageBubble.razor`, beside the existing parameters (line ~38):
+> **Made literal 2026-07-31.** This was the plan's only prose-only step ("wherever the failed bubble currently wires `OnRetry`…"), which is exactly the kind of instruction that drifts. `MessageBubble.razor` is 56 lines and **unchanged** by GV-8, so the edits are given exactly.
+
+In `MessageBubble.razor`, beside the existing parameters (**line 38**, `OnRetry`):
 
 ```csharp
   /// <summary>
@@ -991,11 +1328,54 @@ In `MessageBubble.razor`, beside the existing parameters (line ~38):
   [Parameter] public bool Retryable { get; set; } = true;
 ```
 
-Gate the retry affordance on it — wherever the failed bubble currently wires `OnRetry`, require `IsFailed && Retryable` instead of `IsFailed` alone, and add `.msg-bubble.failed-terminal` (no `cursor: pointer`, no `min-height` override) when `IsFailed && !Retryable`.
+Add the derived flag beside `IsFailed` (**line 41**):
+
+```csharp
+  private bool IsFailed => Status == SendStatus.Failed;
+  // A failed bubble is only a TAP TARGET when retrying it could actually help (§5.4).
+  private bool IsRetryTarget => IsFailed && Retryable;
+```
+
+Fold it into `StatusClass` (**lines 43-48**) so the terminal case gets its own hook:
+
+```csharp
+  private string StatusClass => Status switch
+  {
+    SendStatus.Sending => "sending",
+    SendStatus.Failed => Retryable ? "failed" : "failed failed-terminal",
+    _ => ""
+  };
+```
+
+Retarget the root element's two affordance bindings (**lines 8-9**) from `IsFailed` to `IsRetryTarget`:
+
+```razor
+<div class="msg-bubble @DirectionClass @StatusClass"
+     @onclick="OnFailedClick" role="@(IsRetryTarget ? "button" : null)">
+```
+
+and the click guard (**line 54**):
+
+```csharp
+  private async Task OnFailedClick()
+  {
+    if (IsRetryTarget) await OnRetry.InvokeAsync();
+  }
+```
+
+Finally, in `design-system.css`, beside the existing `.msg-bubble.failed` rule, add the terminal variant — it keeps the failed *colouring* but drops the affordance, since the whole point is that there is nothing to tap:
+
+```css
+/* ADR-028 §5.4: invalid_number / invalid_text cannot succeed on retry, so the bubble
+   is not a tap target — no pointer cursor, no 48px touch-target inflation. */
+.msg-bubble.failed.failed-terminal { cursor: default; min-height: 0; }
+```
+
+> **Implementer note:** confirm the exact declarations `.msg-bubble.failed` sets (it is documented in `MessageBubble.razor:6` as "≥48px via `.msg-bubble.failed`") and neutralize *those*, rather than assuming the two above. The rule is a targeted override, not a redefinition.
 
 - [ ] **Step 2: Add the new state fields**
 
-Beside the existing fields (line ~187):
+Beside the existing fields (**line 234**, was cited as ~187):
 
 ```csharp
   // ADR-028 §5.2: their 429 carries no Retry-After, and their window is 5 sends per 10s.
@@ -1015,7 +1395,7 @@ Beside the existing fields (line ~187):
 
 - [ ] **Step 3: Gate `CanSend` on the cooldown and the dark flag**
 
-Replace `CanSend` (line ~197):
+Replace `CanSend` (**lines 244-247**, was cited as ~197):
 
 ```csharp
   private bool CanSend =>
@@ -1029,7 +1409,7 @@ Replace `CanSend` (line ~197):
 
 - [ ] **Step 4: Show the unavailable affordance when the server is dark**
 
-In `ComposeBar()`, change the guard on line 213 from `@if (GvStatus.IsAvailable)` to:
+In `ComposeBar()`, change the guard on **line 260** (was cited as 213) from `@if (GvStatus.IsAvailable)` to:
 
 ```razor
     @if (GvStatus.IsAvailable && !_serverSendDark)
@@ -1037,9 +1417,11 @@ In `ComposeBar()`, change the guard on line 213 from `@if (GvStatus.IsAvailable)
 
 The existing `else` branch already renders the handoff's `Texting unavailable` amber pill, so the server-dark case reuses it verbatim — no new markup.
 
+> **Note (2026-07-31):** two more branches land on this same `ComposeBar()` — `!ThreadIsRepliable` in **Chunk 6b Step 4** and the failed-load gate in **Chunk 6b Step 5**. Their **precedence is specified once, in Chunk 6b Step 5**. Write this step as given, then let 6b insert both ahead of it; do not try to merge the three guards into one expression.
+
 - [ ] **Step 5: Rewrite `SendDraftAsync`**
 
-Replace the whole of `SendDraftAsync` (lines 278–347):
+Replace the whole of `SendDraftAsync` (**lines 325–394**, was cited as 278–347):
 
 ```csharp
   private async Task SendDraftAsync()
@@ -1180,7 +1562,7 @@ Replace the whole of `SendDraftAsync` (lines 278–347):
 
 - [ ] **Step 6: Add the optimistic-remove callback and fix `RetrySend`**
 
-Beside the existing `OnOptimisticAppend` parameter (line ~185):
+Beside the existing `OnOptimisticAppend` parameter (**line 232**, was cited as ~185):
 
 ```csharp
   /// <summary>
@@ -1191,7 +1573,7 @@ Beside the existing `OnOptimisticAppend` parameter (line ~185):
   [Parameter] public EventCallback<string> OnOptimisticRemove { get; set; }
 ```
 
-Replace `RetrySend` (lines 349–357), which currently leaves an orphan bubble behind — the `TODO(send-ship)` marker GV-3 left:
+Replace `RetrySend` (**lines 396–404**, was cited as 349–357), which currently leaves an orphan bubble behind — the `TODO(send-ship)` marker GV-3 left at `:401`:
 
 ```csharp
   private async Task RetrySend(SmsMessageDto m)
@@ -1210,23 +1592,26 @@ Replace `RetrySend` (lines 349–357), which currently leaves an orphan bubble b
   }
 ```
 
-Update the retry status lookup so terminal failures render no Retry — wherever `MessageBubble` is instantiated, add:
+Update the retry status lookup so terminal failures render no Retry. There is exactly **one** `MessageBubble` instantiation, in the conversation pane's list branch (**`PhoneTextsPanel.razor:94-96`**) — note the loop variable is `captured`, not `m`:
 
 ```razor
-                 Retryable="@(!_terminalFailures.Contains(m.Id))"
+          <MessageBubble Message="captured"
+                         Status="StatusFor(captured)"
+                         Retryable="@(!_terminalFailures.Contains(captured.Id))"
+                         OnRetry="@(() => RetrySend(captured))" />
 ```
 
 - [ ] **Step 7: Wire `OnOptimisticRemove` in the parents**
 
-In `PhoneMessagesPanel.razor`, beside `OnOptimisticAppend="OnOptimisticAppend"` (line 191):
+In `PhoneMessagesPanel.razor`, beside `OnOptimisticAppend="OnOptimisticAppend"` (**line 194**, was cited as 191):
 
 ```razor
                          OnOptimisticRemove="OnOptimisticRemove"
 ```
 
-plus the matching `[Parameter] public EventCallback<string> OnOptimisticRemove { get; set; }` beside line 268.
+plus the matching `[Parameter] public EventCallback<string> OnOptimisticRemove { get; set; }` beside the `OnOptimisticAppend` parameter at **line 280** (was cited as 268).
 
-In `PhonePage.razor`, beside `OnOptimisticAppend="OnOptimisticAppend"` (line 84) add `OnOptimisticRemove="OnOptimisticRemove"`, and add the handler beside `OnOptimisticAppend` (after line 758):
+In `PhonePage.razor`, beside `OnOptimisticAppend="OnOptimisticAppend"` (**line 87**, was cited as 84) add `OnOptimisticRemove="OnOptimisticRemove"`, and add the handler beside `OnOptimisticAppend` (**after line 867**, was cited as after 758):
 
 ```csharp
   // Remove an optimistic bubble whose send was never attempted (ADR-028 §5.1) or which is
@@ -1440,10 +1825,86 @@ and give `ComposeBar()` a dedicated branch **before** the degraded branch, so th
 ```
 
 > Reuses the existing `.phone-pill` + `.texts-compose` shapes — no new CSS. Do **not** hide the composer: the handoff's degraded-state reasoning ("don't let the user type into a dead send path") applies, and an absent composer reads as a rendering bug where a disabled one reads as an answer.
+>
+> **Note (2026-07-31):** `HeaderNumber` is fed from the **thread row**, not from the message bodies, so this gate keeps working even when the conversation's bodies failed to load. That matters for Step 5.
 
-- [ ] **Step 5: Catch the new exception at the call site**
+- [ ] **Step 5: Gate the composer on a FAILED conversation load (added 2026-07-31)**
 
-In `SendDraftAsync`, add ahead of the other catches (it should be unreachable given Step 4, which is the point):
+> ### 🔵 DECISION — needs the owner's blessing before Builder claims this row
+>
+> **The question, which is now GV-5's to answer.** GV-8 gave the conversation pane a **fourth** state — `cloud_off` + "Couldn't load messages." + `Retry` — but `@ComposeBar()` at `PhoneTextsPanel.razor:101` renders **unconditionally**, below whichever branch won. GV-8's UAT recorded this as **`O-2`**: under a confirmed 502 the pane shows the error state *and*, beneath it, a live-looking `Message` field with `Send`. It is inert today only because `SendEnabled=false` — and this PR is the one that makes send work. **GV-7 is explicitly forbidden from re-deciding composer behaviour, so the failed-load case is answered here.**
+>
+> **Recommendation: disable the composer with a stated reason. Do not hide it, do not leave it live.**
+>
+> **This is not a taste call — leaving it live is a demonstrable defect.** `PhonePage.OnOptimisticAppend` (`:856-867`) does `_openThreadMessages ??= new(); _openThreadMessages.Add(optimistic);`. On a failed load `_openThreadMessages` is `null` and `_openThreadError` is `true`. Send one message and `Messages` becomes non-null with `Count == 1`, so GV-8's M-1 guard (`Error && Messages == null`) goes false and the pane **falls through to the list branch** — the `cloud_off` error state silently vanishes and is replaced by a single outbound bubble that reads as *the entire conversation*. The user is now looking at a thread the app could not read, presented as one they can. Every branch behaves exactly as designed; the composite is a lie.
+>
+> **Two supporting reasons.** (1) It is the **same argument §5.1 and §8.5 already made twice** — *a send the app cannot honestly stand behind must not be presented as an ordinary send* — resolved the same way both times: disable, explain, don't hide. (2) Replying to a conversation whose last messages you were never shown is a real-world footgun on a **kiosk** surface, where the user cannot scroll back or open another client to check.
+>
+> **Rejected alternatives, recorded:** *Hide the composer* — the handoff's own reasoning kills it ("an absent composer reads as a rendering bug"), and the pane height would jump between error and loaded states. *Leave it enabled and fix only the append* (e.g. teach `OnOptimisticAppend` to preserve the error state) — this keeps the footgun and adds a state the pane has no design for ("failed to load, plus one message you just sent"); GV-7's row already calls the failed-load case "the weakest case for leaving it."
+>
+> **Scope note:** this is a fourth **reason** on an affordance this chunk is already rewriting — one computed property, one `else if`, no new CSS, no new parameter. It is not new scope.
+
+Add the guard beside `ThreadIsRepliable`:
+
+```csharp
+  // ADR-028 §5.1 / §8.5, extended to GV-8's error state (UAT O-2). The conversation's
+  // bodies failed to load, so we do not know what was last said in it. Inviting a reply
+  // is bad on its own — but the concrete failure is that OnOptimisticAppend would make
+  // Messages non-null, which flips the pane out of its `Error && Messages == null` branch
+  // and renders the single sent bubble as if it were the whole conversation.
+  // Predicate deliberately mirrors the pane's own error branch (:61) verbatim.
+  private bool ConversationFailedToLoad =>
+    OpenThreadId != null && !_composingNew && Error && Messages == null;
+```
+
+Fold it into `CanSend`, which now carries all four reasons:
+
+```csharp
+  private bool CanSend =>
+    SendService.SendEnabled && GvStatus.IsAvailable && !_serverSendDark
+    && ThreadIsRepliable
+    && !ConversationFailedToLoad
+    && !InCooldown
+    && !string.IsNullOrWhiteSpace(_draft) && _sending.Count == 0
+    && (!_composingNew || !string.IsNullOrWhiteSpace(_recipient));
+```
+
+and insert the branch into `ComposeBar()` **between** the reply-ability branch (Step 4) and the degraded/dark branch (Chunk 6 Step 4):
+
+```razor
+    @if (!ThreadIsRepliable)
+    {
+      <div class="texts-compose">
+        <span class="phone-pill" title="This sender is a short code or automated ID.">You can't reply to this sender.</span>
+      </div>
+    }
+    else if (ConversationFailedToLoad)
+    {
+      @* Deliberately does NOT repeat the pane's "Couldn't load messages." — that string is
+         already on screen six lines up, with the Retry that fixes it. This says what the
+         COMPOSER is doing and points at the path out. *@
+      <div class="texts-compose">
+        <span class="phone-pill amber" title="This conversation didn't load. Retry above.">Reply once this loads.</span>
+      </div>
+    }
+    else if (GvStatus.IsAvailable && !_serverSendDark)
+    {
+```
+
+**Precedence is specified here, once, for all four reasons — most permanent first:**
+
+| Order | Condition | Why it outranks the next | Resolves when |
+|---|---|---|---|
+| 1 | `!ThreadIsRepliable` | **structural** — no action by anyone ever makes this thread repliable | never |
+| 2 | `ConversationFailedToLoad` | scoped to **this** conversation; the user has a Retry right there | on Retry |
+| 3 | `!GvStatus.IsAvailable \|\| _serverSendDark` | **global** to the surface; nothing the user does here helps | on reconnect / a config flip |
+| 4 | — | normal composer | — |
+
+This extends the rule the Test Plan already states at **§D2 / 31** ("on a short-code thread while GV is *also* degraded, the reply-ability message wins") rather than inventing a second one.
+
+- [ ] **Step 6: Catch the new exception at the call site**
+
+In `SendDraftAsync` (Chunk 6 Step 5), add ahead of the other catches (it should be unreachable given Step 4, which is the point):
 
 ```csharp
     catch (SendNotRepliableException)
@@ -1458,10 +1919,38 @@ In `SendDraftAsync`, add ahead of the other catches (it should be unreachable gi
     }
 ```
 
-- [ ] **Step 6: Verify**
+- [ ] **Step 7: Verify**
+
+Add a bUnit case for Step 5's gate alongside the existing `PhoneTextsPanelTests` (which GV-8 extended — see `:124`, `:141`, `:197` for the `Error` + `OpenThreadId` setup to copy):
+
+```csharp
+  [Fact]
+  public void Composer_IsGated_WhenTheConversationFailedToLoad()
+  {
+    // GV-8 UAT O-2 + ADR-028 §5.1. The pane says it could not read this conversation;
+    // the composer must not invite a reply into it. Asserts the PILL, not just a
+    // disabled input — "disabled with no stated reason" is the F-3 defect one row over.
+    var cut = RenderConversation(openThreadId: "t.1", messages: null, error: true);
+
+    Assert.Contains("Reply once this loads.", cut.Markup);
+    Assert.DoesNotContain("texts-compose-input", cut.Markup);
+  }
+
+  [Fact]
+  public void Composer_IsNotGated_WhenTheConversationLoadedEmpty()
+  {
+    // The important negative control: a genuine empty thread is NOT a failed one, and
+    // GV-8 exists precisely to keep those two apart. Do not let this gate blur them again.
+    var cut = RenderConversation(openThreadId: "t.1", messages: [], error: false);
+
+    Assert.DoesNotContain("Reply once this loads.", cut.Markup);
+  }
+```
+
+> **Implementer note:** `RenderConversation` is illustrative — mirror whatever helper/`SetParametersAndRender` shape `PhoneTextsPanelTests` already uses rather than adding a second one. The second test must pass an **empty list**, not `null`, or it asserts nothing.
 
 ```bash
-dotnet test tests/Radio.Web.Tests --configuration Release --filter "FullyQualifiedName~GvCounterparty"
+dotnet test tests/Radio.Web.Tests --configuration Release --filter "FullyQualifiedName~GvCounterparty|FullyQualifiedName~PhoneTextsPanel"
 dotnet build src/Radio.Web --configuration Release
 ```
 
@@ -1522,13 +2011,22 @@ dotnet build RadioConsole.sln --configuration Release
 dotnet test tests/Radio.Web.Tests --configuration Release
 ```
 
-Expect 0 warnings (warnings-as-errors in Release) and the full Web suite green (846 passing as of GV-4, plus this PR's new tests).
+Expect 0 warnings (warnings-as-errors in Release) and the full Web suite green. **Baseline updated 2026-07-31:** the 846-passing figure was as of GV-4; GV-8 (PR #461) added `PhonePageThreadLoadErrorTests`, `GvResultTests`, and cases in `PhoneTextsPanelTests` / `GvBridgeApiServiceVoicemailSmsTests`. Take the count from a clean run on `main` before starting rather than trusting either number.
 
 ---
 
 ## Test Plan
 
 > Consumed by the Tester agent. **Send is flagged OFF on merge**, so §A is the merge gate and §B/§C require a temporary local flag flip and must NOT be taken as permission to ship the flag on.
+
+> ### ⚠ Live-verification preconditions (added 2026-07-31 — read before §B/§C)
+>
+> These were learned the hard way across the GV-8 cycle; skipping them is how a pass gets invalidated after the fact.
+>
+> 1. **The box is `192.168.86.50`.** `radio` and `piradio` do **not** resolve from WSL, and `Deploy-ToLinux.ps1` defaults to both a wrong host **and** a wrong architecture — the box is `x86_64` while the script defaults to `linux-arm64`. Deploy with `-TargetHost 192.168.86.50 -Runtime linux-x64` (tracked as **OPS-1 (c)**).
+> 2. **Prove the binary under test is actually running.** `systemctl is-active` proves nothing about *which* build is deployed. Until OPS-1 ships a web version endpoint, use a branch-only symbol: `grep -ac OutboundSmsReconciler /opt/radio-console/web/Radio.Web` (non-zero → the new binary is live). `GvCounterparty` and `HttpErrorWithBody` work as second and third probes.
+> 3. **Record wall-clock time against the 20-minute GV auth blackout, for every observation.** `curl -s http://192.168.86.50:5004/api/gvbridge/status` → **`psidtsAgeSeconds` is the only honest field** (`<660` healthy, `660–1200` blackout); `available`/`degraded`/`cookiesValid` read healthy straight through a confirmed outage. §B and §C.14–16 and 18–21 **must run inside a healthy window** or an upstream 502 will masquerade as the result being tested.
+> 4. **`auth_unavailable` (§C.17) is the one code that is free to observe** — it fires *naturally* during a blackout with **no server config change at all**. Run it deliberately at `psidtsAgeSeconds` 660–1200 rather than trying to synthesize it.
 
 ### A. Flag-OFF regression gate (REQUIRED before merge)
 
@@ -1541,6 +2039,8 @@ With `RotaryPhone:Gv:SendEnabled=false` (shipped default):
 5. Browser console: **zero** errors, zero unhandled SignalR exceptions.
 6. Kill the gvbridge status endpoint → amber reconnecting banner appears, compose shows the "Texting unavailable" pill; restore → auto-clears. (Unchanged from GV-3.)
 7. Confirm the `SmsSent` subscription is inert: with no outbound traffic, no new log lines, no re-renders.
+8. **GV-8 regression — the four pane branches still work and this PR did not disturb them** (added 2026-07-31). Open a thread during a blackout (`psidtsAgeSeconds` 660–1200): the pane must still render `cloud_off` + "Couldn't load messages." + a working `Retry`, the thread's unread dot must be **restored**, and a genuinely empty thread must still read as **empty**. This PR touches `OnOptimisticAppend` and the compose bar on the same pane; PR #461's behaviour is the baseline it must not move.
+9. **The new composer gate renders in the failed state** (Chunk 6b Step 5, added 2026-07-31). In that same failed pane, the compose bar shows the **"Reply once this loads."** pill instead of the message field — and the pane still shows its own `cloud_off` + `Retry` above it. **This check runs with the flag OFF**, because the gate is independent of `SendEnabled`. On a successful `Retry`, the normal composer returns.
 
 ### B. Send-path happy path (temporary local flag flip; RotaryPhone `EnableSmsSend=true`)
 
@@ -1568,21 +2068,26 @@ One case per code. For each: confirm the exact bubble treatment, that the **comp
 
 22. `OutboundSmsReconcilerTests` — all 12. These encode the ADR-028 §4.4 invariant; treat any failure as blocking.
 23. `GvBridgeSendServiceCodeMappingTests` — all nine code mappings, the unknown-code fallback, both defensive-200 cases, and **`RequestBody_CarriesToNumberAndCorrelationId`** (the regression test for the defect this PR exists to fix).
-24. `GvBridgeSendServiceTests` — flag-off, degraded gate, in-flight (both the thread-keyed and recipient-keyed cases).
+24. `GvBridgeSendServiceTests` — flag-off, degraded gate, in-flight (both the thread-keyed and recipient-keyed cases), plus the two new outcome cases (transport → `SendFailedException`, timeout → `SendTimedOutException`).
 25. `MessageBubbleTests` — the non-retryable render case.
-26. Full suite: `dotnet test tests/Radio.Web.Tests --configuration Release` green, `dotnet build RadioConsole.sln --configuration Release` at 0 warnings.
+26. **`GvResultTests` — GV-8's four original cases must be green UNCHANGED**, plus Chunk 0's two additions. The one that matters is `HttpErrorWithBody_CarriesTheBody_ButValueStaysNull`: if `Value` ever becomes non-null on a failure, GV-6's branch idiom is compromised and this PR caused it. Also re-run `GvBridgeApiServiceVoicemailSmsTests` untouched — Chunk 0 Step 2 is a comment and must change no behaviour there.
+27. Full suite: `dotnet test tests/Radio.Web.Tests --configuration Release` green, `dotnet build RadioConsole.sln --configuration Release` at 0 warnings.
 
 ### D2. Thread reply-ability (ADR-028 §8)
 
 **Runs with the flag OFF as well as on** — the composer gate is independent of `SendEnabled`.
 
-27. **Open a thread from a numeric short code.** Composer renders **disabled** with the pill **"You can't reply to this sender."** No red bubble, no Retry, no network request on any interaction.
-28. **Open a thread from an opaque sender ID.** Same treatment. Confirm a long (36-char) identifier does not break the compose-bar layout at **1920×720**.
-29. **Open a normal E.164 thread.** Composer is **enabled** exactly as before — confirm this gate did not regress ordinary replies. This is the important negative control.
-30. **New-recipient composer is unaffected** — `＋ New` still allows typing a number; reply-ability gating applies to open threads, not to the composer where the user supplies the number.
-31. **Gate precedence:** on a short-code thread while GV is *also* degraded, the **reply-ability** message wins (it is the more specific and more permanent reason), not "Texting unavailable."
-32. `GvCounterpartyTests` green — including the null/empty/whitespace defensive cases.
+> **Note:** live coverage here is bounded by UAT `G-3` — **zero opaque 36-char sender IDs are reachable from this surface** (the feed caps at 20 threads with no pagination). Case 29 must therefore be run against an **injected** identifier, and recorded as such. Numeric short codes *are* reachable in the live corpus.
+
+28. **Open a thread from a numeric short code.** Composer renders **disabled** with the pill **"You can't reply to this sender."** No red bubble, no Retry, no network request on any interaction.
+29. **Open a thread from an opaque sender ID.** Same treatment. Confirm a long (36-char) identifier does not break the compose-bar layout at **1920×720**. (`G-4` already measured 36 chars as safe in the row and header; this checks the *compose bar*, which it did not cover.)
+30. **Open a normal E.164 thread.** Composer is **enabled** exactly as before — confirm this gate did not regress ordinary replies. This is the important negative control.
+31. **New-recipient composer is unaffected** — `＋ New` still allows typing a number; reply-ability gating applies to open threads, not to the composer where the user supplies the number.
+32. **Gate precedence, all four reasons** (updated 2026-07-31 — Chunk 6b Step 5 added a third). Verify the table's order holds: on a short-code thread that *also* failed to load while GV is *also* degraded, the **reply-ability** message wins; with a repliable counterparty, a failed load beats "Texting unavailable"; and with neither, the degraded pill shows as before.
+33. **A failed load does not leak a bubble** (the defect Chunk 6b Step 5 prevents). With the flag ON and a thread in its failed state, confirm there is **no reachable path** that appends an optimistic bubble — the pane must stay on `cloud_off` + `Retry` and must **never** flip to a one-bubble "conversation."
+34. `GvCounterpartyTests` green — including the null/empty/whitespace defensive cases — plus the two `PhoneTextsPanelTests` composer-gate cases from Chunk 6b Step 7.
 
 ### E. Restore before merge
 
-27. **Confirm `RotaryPhone:Gv:SendEnabled` is back to `false`** in `appsettings.json` and that no `appsettings.Production.json` override was committed. This is a merge blocker.
+35. **Confirm `RotaryPhone:Gv:SendEnabled` is back to `false`** in `appsettings.json` and that no `appsettings.Production.json` override was committed. This is a merge blocker.
+36. Confirm RotaryPhone's `GVBridge:EnableSmsSend` is back to its shipped `false` if §B/§C flipped it — the two flags are independent and both must land dark.
