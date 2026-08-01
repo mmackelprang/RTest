@@ -40,11 +40,15 @@ public class PhoneTextsPanelTests : TestContext
   [Fact]
   public void Loading_ShowsSkeleton()
   {
+    // Tightened (GV-8 H-1): the old assertion (".skeleton-list-row" non-empty) passed
+    // even when the rows were empty static grey bands with zero shimmer — assert the
+    // shimmer primitive itself, at the exact count the ×6 loop implies
+    // (chip + 2 text bars per row).
     Register(sendEnabled: false, available: true);
     var cut = RenderComponent<PhoneTextsPanel>(p => p
       .Add(x => x.Threads, (List<SmsThreadDto>?)null)
       .Add(x => x.Loading, true));
-    Assert.NotEmpty(cut.FindAll(".skeleton-list-row"));
+    Assert.Equal(18, cut.FindAll(".skeleton-loading").Count);
   }
 
   [Fact]
@@ -154,6 +158,10 @@ public class PhoneTextsPanelTests : TestContext
   {
     // The skeleton branch has existed since GV-3 but was unreachable dead code, because
     // PhoneMessagesPanel never passed Loading — which is why the UAT saw no spinner.
+    // Tightened (GV-8 H-1): the old assertion (".skeleton-list-row" non-empty) passed
+    // even when the rows were empty static grey bands with zero shimmer — assert the
+    // shimmer primitive itself, at the exact count the ×5 loop implies
+    // (chip + 2 text bars per row).
     Register(sendEnabled: false, available: true);
     var cut = RenderComponent<PhoneTextsPanel>(p => p
       .Add(x => x.OpenThreadId, "t1")
@@ -161,7 +169,7 @@ public class PhoneTextsPanelTests : TestContext
       .Add(x => x.Messages, (List<SmsMessageDto>?)null)
       .Add(x => x.Loading, true));
 
-    Assert.NotEmpty(cut.FindAll(".skeleton-list-row"));
+    Assert.Equal(15, cut.FindAll(".skeleton-loading").Count);
     Assert.DoesNotContain("Start the conversation below.", cut.Markup);
     Assert.DoesNotContain("Couldn't load messages.", cut.Markup);
   }

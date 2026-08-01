@@ -42,9 +42,20 @@
          HANDOFF-phone-dark-theme-and-scrollbars.md:310. *@
       @if (Messages == null && Loading)
       {
+        @* .skeleton-loading is the shimmer primitive (animation: shimmer); the plain
+           .skeleton wrapper is layout-only and never animates on its own. Canonical
+           composition mirrors PhoneMessagesPanel.RenderCallSkeleton /
+           Skeleton.razor's SkeletonShape.ListRow: a shimmering leading chip plus two
+           shimmering text bars, not an empty static grey band. *@
         @for (var i = 0; i < 5; i++)
         {
-          <div class="skeleton-list-row"><div class="skeleton skeleton-list-row-text"></div></div>
+          <div class="skeleton-list-row">
+            <div class="skeleton-loading skeleton-feed-chip"></div>
+            <div class="skeleton-list-row-text">
+              <div class="skeleton-loading skeleton-text" style="width: 42%"></div>
+              <div class="skeleton-loading skeleton-text" style="width: 26%"></div>
+            </div>
+          </div>
         }
       }
       else if (Error)
@@ -127,9 +138,19 @@ else
   <div class="texts-thread-list">
     @if (Threads == null && Loading)
     {
+      @* Same fix as the conversation-mode branch above: .skeleton-loading is the
+         shimmer primitive, .skeleton alone is inert. Dead in production today (this
+         panel is only ever hosted in conversation mode) but kept in sync so it isn't
+         the next thing someone copies. *@
       @for (var i = 0; i < 6; i++)
       {
-        <div class="skeleton-list-row"><div class="skeleton skeleton-list-row-text"></div></div>
+        <div class="skeleton-list-row">
+          <div class="skeleton-loading skeleton-feed-chip"></div>
+          <div class="skeleton-list-row-text">
+            <div class="skeleton-loading skeleton-text" style="width: 42%"></div>
+            <div class="skeleton-loading skeleton-text" style="width: 26%"></div>
+          </div>
+        </div>
       }
     }
     else if (Error)
