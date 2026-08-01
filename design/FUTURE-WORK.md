@@ -594,7 +594,8 @@ When rotary encoders are integrated via `RotaryEncoderActionRouter`:
 
 ### Code Pointers
 
-- `src/Radio.Web/Services/ApiClients/GvBridgeApiService.cs` — read methods + audio-URL builder + **PR4 durable mark-read** (`MarkVoicemailReadAsync` / `MarkSmsThreadReadAsync` → the two `POST .../read` routes; 200→DTO, 404→null, 502→null-keep-optimistic, no retry; flag-gated).
+- `src/Radio.Web/Services/ApiClients/GvBridgeApiService.cs` — read methods + audio-URL builder + **PR4 durable mark-read** (`MarkVoicemailReadAsync` / `MarkSmsThreadReadAsync` → the two `POST .../read` routes; 200→DTO, 404→null, 502→null-keep-optimistic, no retry; flag-gated). **GV-8:** `GetSmsThreadMessagesAsync` is the one read method that returns `GvResult<T>` rather than `T?`; the others still return `T?` because their callers already handle `null` correctly (the thread list keeps its last good list and toasts).
+- `src/Radio.Web/Services/ApiClients/GvResult.cs` — **GV-8** outcome type (`Success` / `HttpError` / `Timeout` / `Transport` / `Malformed`, plus `StatusCode` and RotaryPhone's `error`/`code` discriminator). Exists because collapsing every failure to `null` let a 502 render as an empty conversation (UAT F-1). **GV-6 adopts this same type** for the two mark-read methods — the two rows share the idiom, not the PR (see `docs/BUILDER_QUEUE.md` § Dependency / ordering notes).
 - `src/Radio.Web/Services/ReadStateReconciler.cs` — **PR4** idempotent `(id-or-threadId + isRead)` reconciler (the ADR-024 §9 invariant; plain unit-tested class, no Blazor dep).
 - `src/Radio.Web/Services/Hub/PhoneHubService.cs` — **PR4** `ReadStateChanged` event on the existing `/hub` (defensive Kind guard), alongside `GvVoicemailReceived` / `GvSmsReceived`.
 - `src/Radio.Web/Services/ApiClients/GvBridgeSendService.cs` — **PR3 flagged send seam** (the only write path; 4 typed exceptions + in-flight/429/degraded guardrails).

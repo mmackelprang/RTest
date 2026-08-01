@@ -78,7 +78,7 @@ public class GvBridgeApiServiceVoicemailSmsTests
   }
 
   [Fact]
-  public async Task GetSmsThreadMessagesAsync_ReturnsMessages()
+  public async Task GetSmsThreadMessagesAsync_ReturnsSuccess_WithMessages()
   {
     var dto = new SmsThreadMessagesDto("t1",
       new[] { new SmsMessageDto("m1", "t1", "Inbound", "+15551234567",
@@ -89,8 +89,77 @@ public class GvBridgeApiServiceVoicemailSmsTests
 
     var result = await CreateService(client).GetSmsThreadMessagesAsync("t1");
 
-    Assert.NotNull(result);
-    Assert.Single(result!.Messages);
+    Assert.True(result.IsSuccess);
+    Assert.Equal(GvCallOutcome.Success, result.Outcome);
+    Assert.NotNull(result.Value);
+    Assert.Single(result.Value!.Messages);
+  }
+
+  // THE test gap the GV-8 queue row calls out. This is the exact live failure: during
+  // RotaryPhone's ~9-minute GV auth blackout the bridge returns 502, which used to
+  // collapse to null and render as an empty conversation (UAT F-1).
+  [Fact]
+  public async Task GetSmsThreadMessagesAsync_ReturnsHttpError_OnNon2xx()
+  {
+    var handler = new MockHttpHandler(statusCode: HttpStatusCode.BadGateway);
+    var client = new HttpClient(handler) { BaseAddress = new Uri("http://radio:5004") };
+
+    var result = await CreateService(client).GetSmsThreadMessagesAsync("t1");
+
+    Assert.False(result.IsSuccess);
+    Assert.True(result.IsFailure);
+    Assert.Equal(GvCallOutcome.HttpError, result.Outcome);
+    Assert.Equal(HttpStatusCode.BadGateway, result.StatusCode);
+    Assert.Null(result.Value);
+  }
+
+  // The error discriminator is what GV-6 will branch on for 409 markread_disabled;
+  // here it is captured so the operator-facing log line names the upstream failure.
+  [Fact]
+  public async Task GetSmsThreadMessagesAsync_CapturesErrorCode_FromFailureBody()
+  {
+    var handler = new MockHttpHandler("{\"error\":\"upstream_error\"}",
+      HttpStatusCode.BadGateway);
+    var client = new HttpClient(handler) { BaseAddress = new Uri("http://radio:5004") };
+
+    var result = await CreateService(client).GetSmsThreadMessagesAsync("t1");
+
+    Assert.Equal(GvCallOutcome.HttpError, result.Outcome);
+    Assert.Equal("upstream_error", result.ErrorCode);
+  }
+
+  // A 200 whose body is not the DTO (RotaryPhone's SPA fallback serves index.html with
+  // HTTP 200 — see F-1-DIAGNOSIS § Defect B) must be a failure, never an empty thread.
+  [Fact]
+  public async Task GetSmsThreadMessagesAsync_ReturnsMalformed_OnUndeserializableBody()
+  {
+    var handler = new MockHttpHandler("<html><body>not json</body></html>");
+    var client = new HttpClient(handler) { BaseAddress = new Uri("http://radio:5004") };
+
+    var result = await CreateService(client).GetSmsThreadMessagesAsync("t1");
+
+    Assert.False(result.IsSuccess);
+    Assert.Equal(GvCallOutcome.Malformed, result.Outcome);
+    Assert.Null(result.Value);
+  }
+
+  // GV-8 L-1: Messages is declared non-nullable on SmsThreadMessagesDto, but STJ
+  // doesn't enforce that at deserialize time — a 2xx body that omits "messages"
+  // must not reach PhonePage's `.Messages.ToList()`, which would throw inside a
+  // Blazor event handler and tear down the circuit (reconnect overlay instead of
+  // the error state).
+  [Fact]
+  public async Task GetSmsThreadMessagesAsync_ReturnsMalformed_WhenMessagesAbsent()
+  {
+    var handler = new MockHttpHandler(
+      "{\"threadId\":\"t1\",\"fetchedAtUtc\":\"2026-06-20T18:03:11Z\"}");
+    var client = new HttpClient(handler) { BaseAddress = new Uri("http://radio:5004") };
+
+    var result = await CreateService(client).GetSmsThreadMessagesAsync("t1");
+
+    Assert.False(result.IsSuccess);
+    Assert.Equal(GvCallOutcome.Malformed, result.Outcome);
+    Assert.Null(result.Value);
   }
 
   [Fact]

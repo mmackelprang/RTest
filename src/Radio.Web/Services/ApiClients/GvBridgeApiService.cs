@@ -201,19 +201,127 @@ public class GvBridgeApiService
     }
   }
 
-  public async Task<SmsThreadMessagesDto?> GetSmsThreadMessagesAsync(
+  /// <summary>
+  /// Fetch one conversation's message bodies. Returns an OUTCOME, never a bare null
+  /// (GV-8 / UAT F-1): a 502, a timeout, a transport failure and an undeserializable
+  /// body are each distinct from "the server returned zero messages," and the caller
+  /// MUST NOT render any of them as an empty conversation.
+  /// <para>
+  /// A group thread whose id contains '/' currently returns a genuine HTTP 200 with an
+  /// empty list — that is RotaryPhone's Defect B (thread ids arrive with a literal
+  /// %2F and fail their exact string compare), and from our side it IS a successful
+  /// empty result. Do NOT special-case it and do NOT change the escaping below:
+  /// double-escaping (%252F) still yields 0 messages, and a raw '/' misses their API
+  /// route entirely and falls through to their SPA fallback, returning index.html with
+  /// HTTP 200. Both were tested. See docs/uat/2026-07-31-gv-live-data/F-1-DIAGNOSIS.md.
+  /// </para>
+  /// </summary>
+  public async Task<GvResult<SmsThreadMessagesDto>> GetSmsThreadMessagesAsync(
     string threadId, int count = 50, CancellationToken ct = default)
+  {
+    var url = $"/api/gvbridge/sms/threads/{Uri.EscapeDataString(threadId)}?count={count}";
+    try
+    {
+      // GetAsync, not GetFromJsonAsync: the latter calls EnsureSuccessStatusCode()
+      // internally, so the status is already thrown away by the time we see the
+      // exception — which is precisely how every non-2xx became an indistinguishable null.
+      using var response = await _httpClient.GetAsync(url, ct);
+
+      if (!response.IsSuccessStatusCode)
+      {
+        var errorCode = await ReadErrorCodeAsync(response, ct);
+        // KEEP the literal "Failed to get GV SMS thread" substring: it is the documented
+        // server-side probe for this surface (journalctl -u radio-web | grep ...). Blazor
+        // Server fetches server-side over SignalR, so this log is the ONLY place the
+        // failure is observable — it never reaches browser instrumentation.
+        _logger.LogError(
+          "Failed to get GV SMS thread {ThreadId}: HTTP {Status} {ErrorCode}",
+          threadId, (int)response.StatusCode, errorCode ?? "-");
+        return GvResult<SmsThreadMessagesDto>.HttpError(response.StatusCode, errorCode);
+      }
+
+      var dto = await response.Content
+        .ReadFromJsonAsync<SmsThreadMessagesDto>(JsonOptions, ct);
+      // Messages is declared non-nullable on SmsThreadMessagesDto, but
+      // System.Text.Json does not enforce that on deserialize — a 2xx body that
+      // omits "messages" (or an empty body) leaves it null. PhonePage's
+      // `.Messages.ToList()` would then throw inside a Blazor event handler and tear
+      // down the circuit (reconnect overlay instead of the error state), so treat
+      // both as malformed here. `dto?.Messages is null` (rather than
+      // `dto == null || dto.Messages == null`) avoids a nullable-analysis warning on
+      // the non-nullable Messages property.
+      if (dto?.Messages is null)
+      {
+        _logger.LogError(
+          "Failed to get GV SMS thread {ThreadId}: 2xx with {Reason}", threadId,
+          dto == null ? "an empty body" : "a missing messages array");
+        return GvResult<SmsThreadMessagesDto>.Malformed();
+      }
+      return GvResult<SmsThreadMessagesDto>.Success(dto);
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+      throw;                    // the CALLER cancelled — not a failure to report as one
+    }
+    catch (OperationCanceledException ex)
+    {
+      _logger.LogError(ex, "Failed to get GV SMS thread {ThreadId}: timed out", threadId);
+      return GvResult<SmsThreadMessagesDto>.Timeout();
+    }
+    catch (JsonException ex)
+    {
+      _logger.LogError(ex, "Failed to get GV SMS thread {ThreadId}: malformed body", threadId);
+      return GvResult<SmsThreadMessagesDto>.Malformed();
+    }
+    catch (NotSupportedException ex)
+    {
+      // 2xx with a non-JSON content type (e.g. an SPA fallback's index.html).
+      _logger.LogError(ex, "Failed to get GV SMS thread {ThreadId}: unsupported content type", threadId);
+      return GvResult<SmsThreadMessagesDto>.Malformed();
+    }
+    catch (HttpRequestException ex)
+    {
+      _logger.LogError(ex, "Failed to get GV SMS thread {ThreadId}: transport failure", threadId);
+      return GvResult<SmsThreadMessagesDto>.Transport();
+    }
+  }
+
+  /// <summary>
+  /// Best-effort read of RotaryPhone's error discriminator from a failure body
+  /// (<c>{"error":"upstream_error"}</c> / <c>{"code":"send_disabled"}</c>). Returns null
+  /// when the body is empty, is not a JSON object, or carries neither property. NEVER
+  /// throws — this is a diagnostic, and a failed parse must not turn one failure into a
+  /// different one. Property lookup is case-sensitive, so both casings are tried.
+  /// GV-6 reuses this for <c>409 markread_disabled</c>.
+  /// </summary>
+  private static async Task<string?> ReadErrorCodeAsync(
+    HttpResponseMessage response, CancellationToken ct)
   {
     try
     {
-      return await _httpClient.GetFromJsonAsync<SmsThreadMessagesDto>(
-        $"/api/gvbridge/sms/threads/{Uri.EscapeDataString(threadId)}?count={count}",
-        JsonOptions, ct);
-    }
-    catch (Exception ex)
-    {
-      _logger.LogError(ex, "Failed to get GV SMS thread {ThreadId}", threadId);
+      var body = await response.Content.ReadAsStringAsync(ct);
+      if (string.IsNullOrWhiteSpace(body))
+      {
+        return null;
+      }
+      using var doc = JsonDocument.Parse(body);
+      if (doc.RootElement.ValueKind != JsonValueKind.Object)
+      {
+        return null;
+      }
+      foreach (var name in new[] { "error", "Error", "code", "Code" })
+      {
+        if (doc.RootElement.TryGetProperty(name, out var element)
+            && element.ValueKind == JsonValueKind.String)
+        {
+          return element.GetString();
+        }
+      }
       return null;
+    }
+    catch
+    {
+      return null;              // non-JSON error body (e.g. an HTML fallback page)
     }
   }
 

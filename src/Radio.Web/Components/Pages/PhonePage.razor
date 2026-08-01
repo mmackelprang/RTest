@@ -75,6 +75,9 @@
                           ThreadsLoading="_threadsLoading"
                           ThreadsError="_threadsError"
                           OpenThreadMessages="_openThreadMessages"
+                          OpenThreadLoading="_openThreadLoading"
+                          OpenThreadError="_openThreadError"
+                          OnRetryOpenThread="RetryOpenThreadAsync"
                           OnRefresh="RefreshMessagesAsync"
                           OnRetryVoicemail="LoadVoicemailsAsync"
                           OnVoicemailHeard="OnVoicemailHeard"
@@ -177,6 +180,12 @@
   private bool _threadsError;
   private string? _openThreadId;
   private List<SmsMessageDto>? _openThreadMessages;
+
+  // GV-8 / UAT F-1 — the open conversation's own load state, deliberately SEPARATE from
+  // _threadsLoading/_threadsError: the thread list and the open conversation are two
+  // independent fetches, and one failing must never be described by the other's flag.
+  private bool _openThreadLoading;
+  private bool _openThreadError;
 
   private bool IsTab(string t) => _activeTab == t;
 
@@ -622,18 +631,48 @@
   {
     _openThreadId = threadId;
 
-    // 1) Optimistic flip (presentation-only).
+    // 1) Optimistic flip (presentation-only). Remember what it was: if the bodies fail
+    // to load we put the unread marker back (GV-8) rather than clearing the dot for a
+    // conversation the user was never actually shown.
+    var wasUnread = _threads?.FirstOrDefault(t => t.ThreadId == threadId)?.HasUnread ?? false;
     if (_threads != null)
     {
       ReadStateReconciler.ApplyThread(_threads, threadId, isRead: true);
     }
 
-    var messages = await GvBridgeApi.GetSmsThreadMessagesAsync(threadId);
-    _openThreadMessages = messages?.Messages.ToList() ?? new();
-    PhoneUnread.Set(UnreadSum);
-    await InvokeAsync(StateHasChanged);
+    var loaded = await LoadOpenThreadMessagesAsync(threadId);
 
-    // 2) Durable write-through (idempotent reconcile; 502/404 keep the optimistic flip).
+    if (!loaded)
+    {
+      // The conversation never rendered. Do NOT tell Google it was read, and do not
+      // spend the 2-3 further upstream calls MarkThreadRead costs inside what is almost
+      // always a dead auth window. Restore the unread marker we optimistically cleared.
+      // Deliberately NOT gated on _openThreadId: if the user has since opened another
+      // thread, THIS thread's marker still has to go back, or a failed open silently
+      // leaves a conversation the user never saw marked read for the rest of the
+      // session (nothing re-fetches the thread list except a manual Refresh).
+      await RestoreThreadUnreadAsync(threadId, wasUnread);
+      return;
+    }
+
+    await MarkOpenThreadReadAsync(threadId);
+  }
+
+  // Put back the unread marker that OpenThreadAsync optimistically cleared, after the
+  // conversation's bodies failed to load. No-op when the thread was already read.
+  private async Task RestoreThreadUnreadAsync(string threadId, bool wasUnread)
+  {
+    if (wasUnread && _threads != null
+        && ReadStateReconciler.ApplyThread(_threads, threadId, isRead: false))
+    {
+      PhoneUnread.Set(UnreadSum);
+      await InvokeAsync(StateHasChanged);
+    }
+  }
+
+  // Durable write-through (idempotent reconcile; 502/404 keep the optimistic flip).
+  private async Task MarkOpenThreadReadAsync(string threadId)
+  {
     var dto = await GvBridgeApi.MarkSmsThreadReadAsync(threadId, isRead: true);
     if (dto != null && _threads != null)
     {
@@ -646,6 +685,71 @@
     }
   }
 
+  // Fetch the open conversation's bodies (GV-8 / UAT F-1). Returns TRUE iff the fetch
+  // succeeded. The old body did `messages?.Messages.ToList() ?? new()`, which made a 502
+  // byte-identical to a genuinely empty conversation and rendered it as "Start the
+  // conversation below." A failure now sets _openThreadError and leaves the message list
+  // NULL, so the pane's error branch owns the state instead of the empty branch.
+  private async Task<bool> LoadOpenThreadMessagesAsync(string threadId)
+  {
+    // Drop the previous thread's bubbles BEFORE awaiting: they are not this thread's
+    // history, and the pane's skeleton branch requires Messages == null to be reachable.
+    _openThreadMessages = null;
+    _openThreadError = false;
+    _openThreadLoading = true;
+    await InvokeAsync(StateHasChanged);
+
+    var result = await GvBridgeApi.GetSmsThreadMessagesAsync(threadId);
+
+    // The user may have opened a different thread while this fetch was in flight. The
+    // newer open owns the PANE, so don't write this thread's messages or error flag
+    // into it — but the READ-STATE decision still belongs to THIS thread, so report
+    // the real outcome rather than a blanket failure. Pane state is scoped to
+    // _openThreadId; read state is scoped to the threadId parameter.
+    if (_openThreadId != threadId)
+    {
+      return result.IsSuccess;
+    }
+
+    if (result.IsSuccess)
+    {
+      _openThreadMessages = result.Value!.Messages.ToList();
+    }
+    else
+    {
+      _openThreadError = true;    // leave _openThreadMessages null — never `?? new()`
+    }
+    _openThreadLoading = false;
+    PhoneUnread.Set(UnreadSum);
+    await InvokeAsync(StateHasChanged);
+    return result.IsSuccess;
+  }
+
+  // Retry from the conversation pane's error state. On failure this deliberately does
+  // NOT repeat the mark-read write-through — a retry usually happens while the upstream
+  // is still unhealthy, and each thread open already costs 2-3 upstream Google calls
+  // (F-1-DIAGNOSIS § Scope-affecting notes). On SUCCESS the user is finally looking at
+  // the conversation, so it must carry the same read-marking the failed open skipped —
+  // otherwise the thread keeps its unread dot for the rest of the session.
+  private async Task RetryOpenThreadAsync()
+  {
+    var threadId = _openThreadId;
+    if (threadId == null)
+    {
+      return;
+    }
+    if (!await LoadOpenThreadMessagesAsync(threadId))
+    {
+      return;
+    }
+    if (_threads != null && ReadStateReconciler.ApplyThread(_threads, threadId, isRead: true))
+    {
+      PhoneUnread.Set(UnreadSum);
+      await InvokeAsync(StateHasChanged);
+    }
+    await MarkOpenThreadReadAsync(threadId);
+  }
+
   // Conversation closed (Back). Clear the open-thread state the page owns so a
   // later inbound for this thread is treated as closed (toast + bump, not a silent
   // append/de-dupe against a list that's no longer shown). Re-opening the thread
@@ -654,6 +758,11 @@
   {
     _openThreadId = null;
     _openThreadMessages = null;
+    // GV-8 M-1 hygiene: also clear the error/loading flags, so re-opening a thread
+    // that previously failed doesn't carry a stale flag into the pane before
+    // LoadOpenThreadMessagesAsync's own reset (line ~698) runs.
+    _openThreadError = false;
+    _openThreadLoading = false;
     await InvokeAsync(StateHasChanged);
   }
 
