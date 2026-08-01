@@ -143,6 +143,25 @@ public class GvBridgeApiServiceVoicemailSmsTests
     Assert.Null(result.Value);
   }
 
+  // GV-8 L-1: Messages is declared non-nullable on SmsThreadMessagesDto, but STJ
+  // doesn't enforce that at deserialize time — a 2xx body that omits "messages"
+  // must not reach PhonePage's `.Messages.ToList()`, which would throw inside a
+  // Blazor event handler and tear down the circuit (reconnect overlay instead of
+  // the error state).
+  [Fact]
+  public async Task GetSmsThreadMessagesAsync_ReturnsMalformed_WhenMessagesAbsent()
+  {
+    var handler = new MockHttpHandler(
+      "{\"threadId\":\"t1\",\"fetchedAtUtc\":\"2026-06-20T18:03:11Z\"}");
+    var client = new HttpClient(handler) { BaseAddress = new Uri("http://radio:5004") };
+
+    var result = await CreateService(client).GetSmsThreadMessagesAsync("t1");
+
+    Assert.False(result.IsSuccess);
+    Assert.Equal(GvCallOutcome.Malformed, result.Outcome);
+    Assert.Null(result.Value);
+  }
+
   [Fact]
   public void GetVoicemailAudioUrl_BuildsAbsoluteUrl_AgainstBaseAddress()
   {

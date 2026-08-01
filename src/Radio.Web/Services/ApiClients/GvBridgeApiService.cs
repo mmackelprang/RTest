@@ -242,10 +242,19 @@ public class GvBridgeApiService
 
       var dto = await response.Content
         .ReadFromJsonAsync<SmsThreadMessagesDto>(JsonOptions, ct);
-      if (dto == null)
+      // Messages is declared non-nullable on SmsThreadMessagesDto, but
+      // System.Text.Json does not enforce that on deserialize — a 2xx body that
+      // omits "messages" (or an empty body) leaves it null. PhonePage's
+      // `.Messages.ToList()` would then throw inside a Blazor event handler and tear
+      // down the circuit (reconnect overlay instead of the error state), so treat
+      // both as malformed here. `dto?.Messages is null` (rather than
+      // `dto == null || dto.Messages == null`) avoids a nullable-analysis warning on
+      // the non-nullable Messages property.
+      if (dto?.Messages is null)
       {
         _logger.LogError(
-          "Failed to get GV SMS thread {ThreadId}: 2xx with an empty body", threadId);
+          "Failed to get GV SMS thread {ThreadId}: 2xx with {Reason}", threadId,
+          dto == null ? "an empty body" : "a missing messages array");
         return GvResult<SmsThreadMessagesDto>.Malformed();
       }
       return GvResult<SmsThreadMessagesDto>.Success(dto);
