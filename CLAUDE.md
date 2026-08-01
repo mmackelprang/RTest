@@ -127,10 +127,27 @@ Sources (Radio/SDR/File/BT/TTS) → Master Mixer → Modifiers (Balance, Fingerp
 
 ## Deployment
 
+**The box is at `192.168.86.50`.** The hostnames `radio` and `piradio` **do not resolve from WSL** — two
+sessions have now had to rediscover this. Use the IP directly for SSH, `curl`, and the browser; the
+in-app service URLs (`http://radio:5004`, etc.) resolve fine *on* the box and should not be changed.
+
+```bash
+ssh radio@192.168.86.50
+```
+
 Dual-service architecture on Raspberry Pi:
 - `radio-api.service` - Radio.API on port 5000 (audio engine, BT, all hardware)
 - `radio-web.service` - Radio.Web on port 5002 (Blazor UI, depends on API)
 - Shared: `/opt/radio-console/{api,web,data,logs}`
+
+**Verifying a deploy actually landed.** `Deploy-ToLinux.ps1` verifies `radio-api` by SHA against
+`/api/health/version`, but for `radio-web` it only checks `systemctl is-active` — so a **stale web
+binary passes verification silently** (this is the gap OPS-1 closes). Interim check: grep the deployed
+binary for a symbol that exists only on the branch under test.
+
+```bash
+grep -ac RetryOpenThreadAsync /opt/radio-console/web/Radio.Web   # non-zero → the new binary is live
+```
 
 ## Cross-Platform Requirements
 
