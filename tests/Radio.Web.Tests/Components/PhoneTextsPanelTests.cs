@@ -138,6 +138,25 @@ public class PhoneTextsPanelTests : TestContext
   }
 
   [Fact]
+  public void Conversation_ShowsMessages_WhenErrorSetButMessagesArrived()
+  {
+    // GV-8 M-1: content outranks a stale error flag. An inbound message can arrive
+    // for an open-but-failed thread (PhonePage.OnGvSmsReceived appends while
+    // _openThreadError is still set) — once Messages has content, show it instead of
+    // keeping the error state until Retry or Back.
+    Register(sendEnabled: false, available: true);
+    var cut = RenderComponent<PhoneTextsPanel>(p => p
+      .Add(x => x.OpenThreadId, "t1")
+      .Add(x => x.HeaderName, "Mom")
+      .Add(x => x.Messages, new List<SmsMessageDto>
+        { new("m1", "t1", "Inbound", "+15551234567", "hi there", DateTime.UtcNow, false) })
+      .Add(x => x.Error, true));
+
+    Assert.Contains("hi there", cut.Markup);
+    Assert.DoesNotContain("Couldn't load messages.", cut.Markup);
+  }
+
+  [Fact]
   public void Conversation_ShowsEmptyState_WhenGenuinelyEmpty()
   {
     // The other side of the same coin: a real 200-with-zero-messages (which is also what

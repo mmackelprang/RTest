@@ -758,6 +758,11 @@
   {
     _openThreadId = null;
     _openThreadMessages = null;
+    // GV-8 M-1 hygiene: also clear the error/loading flags, so re-opening a thread
+    // that previously failed doesn't carry a stale flag into the pane before
+    // LoadOpenThreadMessagesAsync's own reset (line ~698) runs.
+    _openThreadError = false;
+    _openThreadLoading = false;
     await InvokeAsync(StateHasChanged);
   }
 

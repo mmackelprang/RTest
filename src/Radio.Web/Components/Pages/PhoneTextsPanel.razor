@@ -58,8 +58,14 @@
           </div>
         }
       }
-      else if (Error)
+      else if (Error && Messages == null)
       {
+        @* GV-8 M-1: content outranks a stale error flag — canonical shape is
+           XError && X == null (PhoneMessagesPanel.razor:78/110). Without the
+           Messages == null guard, a real inbound message arriving while
+           _openThreadError is still set (PhonePage.OnGvSmsReceived can append to an
+           open-but-failed thread) would stay hidden behind this branch until Retry
+           or Back, even though Messages now has content to show. *@
         <div class="empty-state">
           <RadzenIcon Icon="cloud_off" class="empty-state-icon" />
           <div class="empty-state-text">Couldn't load messages.</div>
