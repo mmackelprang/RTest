@@ -127,22 +127,25 @@ Sources (Radio/SDR/File/BT/TTS) → Master Mixer → Modifiers (Balance, Fingerp
 
 ## Deployment
 
+### Reaching the box
+
 **Use `mmack@radio` for SSH from WSL. Do NOT use the bare IP.**
 
 ```bash
 ssh mmack@radio
 ```
 
-`radio` resolves fine from WSL and is the working form (verified 2026-08-10). The bare IP
-**fails** — `mmack@192.168.86.50` gives `Permission denied (publickey,password)`.
+`radio` resolves fine from WSL and is the working form (verified 2026-08-10) — `radio` →
+`radio.lan` → `192.168.86.50`. The bare IP **fails** — `mmack@192.168.86.50` gives
+`Permission denied (publickey,password)`. The login user is **`mmack`**, not `radio`.
 
 *Why*, so this stops getting rediscovered: `~/.ssh/config` has a `Host radio radio.local` block
 that supplies `IdentityFile ~/.ssh/id_ed25519_radio` together with `IdentitiesOnly yes`.
 Connecting by IP does not match that block, so the correct key is never offered and
-`IdentitiesOnly` suppresses every other key — hence the instant rejection. The IP
-(`192.168.86.50`) is still accurate as *reference* information (`curl`, browser, and
-`ssh -i ~/.ssh/id_ed25519_radio mmack@192.168.86.50` all work), it just must not be the
-default form for SSH.
+`IdentitiesOnly` suppresses every other key — hence the instant rejection. It is the *SSH
+identity* that is hostname-bound, not DNS. The IP (`192.168.86.50`) is still accurate as
+*reference* information (`curl`, browser, and `ssh -i ~/.ssh/id_ed25519_radio
+mmack@192.168.86.50` all work), it just must not be the default form for SSH.
 
 > An earlier revision of this note claimed the opposite — that `radio`/`piradio` do not resolve
 > from WSL and the IP must be used. That was wrong and cost several sessions time. Six
@@ -150,10 +153,57 @@ default form for SSH.
 
 The in-app service URLs (`http://radio:5004`, etc.) resolve *on* the box and should not be changed.
 
-Dual-service architecture on Raspberry Pi:
-- `radio-api.service` - Radio.API on port 5000 (audio engine, BT, all hardware)
-- `radio-web.service` - Radio.Web on port 5002 (Blazor UI, depends on API)
+### What the box actually is
+
+**An Intel N100, `x86_64`, running Ubuntu + GNOME 46 on Wayland** (GDM3 with auto-login; `loginctl`
+session 1, seat0). Not a Raspberry Pi — the project *targets* Pi/ARM64 as well, but the deployed
+appliance is x64, and several traps below follow from that.
+
+⚠ **`Deploy-ToLinux.ps1` defaults to `-Runtime linux-arm64`**, so the literal documented invocation
+ships **ARM binaries to this x64 host**. Always pass `-Runtime linux-x64`. (Its `$TargetHost` default
+of `piradio` is stale for the same reason.) Tracked as **OPS-1 (c)**.
+
+⚠ **The box is resource-constrained and on WiFi.** Heavy `journalctl` reads correlate with audio
+distortion — always bound queries (`--since '-30min'`) and never tail. `enp1s0` is unavailable, so
+WiFi is the only link; do not restart anything that could drop it while nobody is physically present.
+
+### Services
+
+- `radio-api.service` — Radio.API on port 5000 (audio engine, BT, all hardware)
+- `radio-web.service` — Radio.Web on port 5002 (Blazor UI, depends on API)
 - Shared: `/opt/radio-console/{api,web,data,logs}`
+
+### ⚠ Kiosk Chrome must pass `--password-store=basic`
+
+GDM auto-login never unlocks the login keyring. Without this flag Chrome asks gnome-keyring for it and
+gnome-shell raises a modal **"Authentication required"** dialog that **grabs input and covers the
+panel**. On 2026-08-02 this blocked the kiosk for ~33 hours, and the failure was worse than a dialog on
+top of the UI — Chrome never reached navigation at all (0 connections to `:5002`, 0 renderers) while
+`radio-web` returned 200 the whole time. All three launch paths now carry the flag; keep it that way.
+
+**Do not apply the same flag to a browser whose profile already holds `v11` cookies.** `v11` cookies are
+encrypted with the keyring-derived key, and `basic` makes that key unobtainable, so Chrome **discards
+them** — measured live at 45 `v11` → 16 `v10`, destroying the Google Voice session. It is only safe on a
+profile that was `basic` from first run, or paired with a planned re-login.
+
+**The real fix is PAM auto-unlock or an empty-password login keyring** (needs physical access) — that
+resolves every browser at once and costs no session. Full write-up:
+`docs/uat/2026-08-03-osk-wayland-viability/REPORT.md`.
+
+### Remote UI driving is currently unavailable
+
+Kiosk CDP on `:9223` is **dead** — since Chrome 136 the `--remote-debugging-port` flag is silently
+ignored on the default user-data-dir, and this box runs Chrome 151. `radio-refresh-browser` fails for
+the same reason. Restoring it needs a non-default `--user-data-dir` on the kiosk launch line.
+
+For screen capture, Shell's screenshot API and `GetWindows` are `AccessDenied` on GNOME 46, and
+`gnome-screenshot`/`grim`/`scrot` are absent. The working route is
+`org.gnome.Mutter.ScreenCast` → `RecordMonitor` → PipeWire → `gst-launch-1.0 pipewiresrc`. **Mutter only
+emits buffers on damage**, so a static screen starves the stream — force damage, and validate the
+instrument before trusting a "nothing changed" result.
+
+**`--window-position` is a no-op under Wayland.** Windows described elsewhere as "off-screen" are not;
+what makes one visible is stacking order, i.e. whichever browser restarted most recently.
 
 **Verifying a deploy actually landed.** `Deploy-ToLinux.ps1` verifies `radio-api` by SHA against
 `/api/health/version`, but for `radio-web` it only checks `systemctl is-active` — so a **stale web
