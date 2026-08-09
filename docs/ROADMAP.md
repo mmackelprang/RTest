@@ -109,6 +109,59 @@ Selected as a follow-up after the cast/BT Phase 1+2 tranche revealed that the pr
 
 ---
 
+## Queued (intent recorded, not yet scoped)
+
+### Voice control — Home Assistant Assist integration (queued 2026-08-09)
+
+**Goal**: hands-free voice control of the console ("play vinyl", "tune to 98.5", "cast to the living room", "what song is this?") with spoken responses routed through the console's own ducking/TTS event pipeline. The touchscreen stays owned by the Blazor UI — voice state (listening/processing/responding) renders as Blazor overlay components we build, not a separate voice UI.
+
+**Origin**: 2026-08-09 evaluation of [voice-satellite-card-integration](https://github.com/jxlarrea/voice-satellite-card-integration) (browser-based HA voice satellite). Verdict: it is a Home Assistant *frontend* engine — it only runs on HA-served pages, cannot embed in a non-HA app, and its browser-resident wake-word inference is a poor fit for radio's memory budget. Its architecture (client-side wake word → HA Assist pipeline → intents → device actions) is the template; the implementation here should use HA + Wyoming protocol services instead. Licensing note: that project is AGPL-3.0 and this repo is Apache-2.0 — reference its ideas, do not lift its code.
+
+**Host constraints (verified against `homelab` 2026-08-09)**:
+- **radio** (`.50`, N100, 3.6 GiB RAM) is memory-starved — 2.9 GiB used + 2.4 GiB swap at last capture; homelab's standing rule is "don't add anything resident casually." No Docker. The gdm desktop session is load-bearing (PipeWire capture + the GV Chrome session). Anything added on radio must be tiny (≈50 MB resident, no browser, no HA).
+- **No Home Assistant deployment exists anywhere in the homelab** (remote-access spec 2026-07-24 states this explicitly) — standing one up is part of this work, not a prerequisite someone else owns.
+- **appserver** is the natural HA/STT host: the Docker host, with a GTX 1660 SUPER (6 GiB VRAM, currently serving Ollama) for GPU speech-to-text. Runner container limits alone (16+16+24 GB) imply substantial RAM, but exact free RAM/VRAM is not captured in homelab — verify `free -h` / `nvidia-smi` before install, and account for Ollama VRAM contention.
+
+**Conflict analysis vs the GV Chrome / rotary-phone stack (verified against homelab 2026-08-09)** — the design below is shaped to *not touch* the load-bearing pieces documented in `radio/services/rotary-phone.md` and `radio-base.md`:
+- **No browser anywhere in this design.** The GV trunk depends on the logged-in desktop Chrome (CDP `:9224`, cookie refresh cron every 20 min, `mute-gv-browser.py` driving its audio). Voice capture runs as a backend process, so nothing competes with or restarts that Chrome — this is also the decisive reason the browser-based Voice Satellite engine / HA-iframe alternative stays rejected.
+- **Microphone isolation**: voice uses a **dedicated USB mic, addressed by its PipeWire node name — never `default`**. PipeWire tolerates shared capture, but pinning the node means that even if GV Chrome ever opens a mic, the two never contend for the same device, and `radio-bt-setup.service`'s PipeWire defaults are left alone.
+- **Session plumbing**: capture rides the same `mmack` seat0 PipeWire socket radio-api already uses for BT capture (`/run/user/1000/pipewire-0`, `Linger=no`, `radio-pipewire-access` ACL) — a known, already-mitigated pattern, not a new one. A headless rebuild breaks voice capture the same way it breaks BT capture; same DR note covers both.
+- **Ports**: rotary-phone owns SIP `udp/5060`/`5061`, GV-bridge RTP `5070`, RTP `49000+`, SCO `49100+`, CDP `:9224`; payload HTTP is `5000`/`5002`/`5004`. The satellite's default Wyoming port (`tcp/10700`, Option A only) collides with none of these; Option B adds no listener at all.
+- **Memory/CPU**: wake word and STT run on appserver, never on radio. Radio's added load is PCM capture + streaming (~32 kB/s at 16 kHz mono) — no inference. Option B adds zero resident processes; Option A adds one (~30–60 MB).
+
+**Proposed architecture (to be validated by a research arc before planning)** — two variants for the radio side; both keep wake word + STT + TTS + intent handling on appserver and the UX purely in Blazor:
+1. **appserver — new containers**: Home Assistant + Wyoming services: faster-whisper (STT, GPU), piper (TTS), openWakeWord (wake word). Wired together as an HA Assist pipeline.
+2. **radio — mic capture, two options**:
+   - **Option A — off-the-shelf satellite**: a `wyoming-satellite` systemd unit streams the mic to HA; wake detection stays on appserver (`--wake-uri` pointed at the openWakeWord container). Fastest path to a working pipeline; one new resident process; Blazor state arrives via HA's websocket or a radio-api relay.
+   - **Option B — native (preferred end-state): radio-api *is* the satellite.** Radio.Infrastructure already captures PipeWire audio for the BT source; add a mic capture service that streams to HA's **Assist Pipeline WebSocket API** (`assist_pipeline/run`, binary audio frames, pipeline started at the wake stage so detection happens server-side). Pipeline stage events (wake → stt → intent → tts) fan out through the existing SignalR hubs to the Blazor overlay. **Zero new processes on radio, no new listener, voice becomes a first-class Radio Console feature** with its config in the normal appsettings/secrets stores. Cost: more dev work than A; the research arc should validate continuous-stream-over-WiFi behavior (or gate the stream on local VAD) before committing.
+   - Sensible sequence: stand the pipeline up with A to validate end-to-end latency/accuracy, then fold capture into radio-api as B and retire the extra unit.
+3. **Intent → action**: HA custom sentences → `rest_command` → radio-api REST endpoints (sources, tuning, volume, Cast targets, fingerprinting/play-history for "what's playing").
+4. **Blazor overlay**: Radio.Web renders listening/processing/responding state — under Option B this is just another SignalR event stream from radio-api, keeping the UI's dependency surface unchanged (no direct Blazor→HA coupling).
+5. **Responses through the cabinet**: HA automations POST to radio-api's TTS/audio-event endpoints so the existing priority-ducking speaks the reply and fades the music back — no satellite speaker path exists in either option.
+
+**Setup references** (for whoever picks this up):
+- HA container install: <https://www.home-assistant.io/installation/linux#docker-compose>
+- Assist pipelines overview: <https://www.home-assistant.io/voice_control/voice_remote_local_assistant/>
+- Wyoming integration (HA side): <https://www.home-assistant.io/integrations/wyoming/>
+- Wyoming services: <https://github.com/rhasspy/wyoming-satellite> (Option A) · <https://github.com/rhasspy/wyoming-faster-whisper> · <https://github.com/rhasspy/wyoming-piper> · <https://github.com/rhasspy/wyoming-openwakeword>; for GPU STT the `lscr.io/linuxserver/faster-whisper` image has a CUDA variant
+- Custom sentences (intents): <https://www.home-assistant.io/voice_control/custom_sentences/> · `rest_command`: <https://www.home-assistant.io/integrations/rest_command/>
+- Assist Pipeline WebSocket API (Option B's contract): <https://developers.home-assistant.io/docs/voice/pipelines/> · auth/websocket basics: <https://developers.home-assistant.io/docs/api/websocket/>
+
+**Alternative kept on the table**: embedding an HA iframe running Voice Satellite inside the kiosk page (buys its skins/timers/overlay UI for free) — rejected as primary due to radio's memory budget, the HTTPS/mixed-content burden on a LAN-HTTP stack, and the AGPL boundary.
+
+**Hardware**: one USB microphone (or mic array) positioned in/on the cabinet. Everything else already exists.
+
+**Homelab touchpoints — must land with the integration** (recorded here so the config work isn't forgotten when this is picked up):
+- `appserver/`: new compose stack(s) + service docs (`home-assistant.md`, wyoming services), `DASHBOARDS.md` rows, `capture.sh` re-run to pick up the containers, `SECRETS.template.md` entries (HA admin login, long-lived access token used for the radio-api bridge)
+- `radio/`: mic device notes (PipeWire node name, udev), captured-state refresh, DR restore-order update (voice capture depends on the seat0 session, same as BT); **Option A only**: new satellite systemd unit → `radio/services/` doc. Option B changes radio-api config/appsettings instead — captured via the existing appsettings redact/capture flow
+- `monitoring/`: Beszel/Homepage rows for HA + wyoming services
+- `network/`: HA needs a stable name/address; record the new radio→appserver runtime dependency (voice dies if appserver is down — degrade gracefully in the Blazor overlay)
+- homelab `docs/ROADMAP.md`: a project row for the HA deployment itself
+
+**First step when picked up**: read off appserver free RAM/VRAM; then a short research arc benchmarking faster-whisper on the 1660 SUPER (vs CPU, vs Ollama contention), measuring continuous 16 kHz streaming over radio's WiFi (Option B viability), and confirming the GV Chrome never holds a mic node (one `pw-top`/`pactl list source-outputs` read-off during a rotary call — expected: it doesn't, call audio is SIP/RTP); then scope plans in `docs/plans/` (HA deploy · capture path A→B · Blazor overlay · intent catalog).
+
+---
+
 ## Active in-progress
 
 *Empty.*
