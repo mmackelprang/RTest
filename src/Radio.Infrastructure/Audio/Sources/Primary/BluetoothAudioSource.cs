@@ -467,7 +467,9 @@ public class BluetoothAudioSource : USBAudioSourceBase
       if (_bluetoothService.IsAudioManagedByPlatform)
       {
         ApplyDeferredCaptureState();
-        Logger.LogDebug("BluetoothAudioSource: platform manages audio, source set to Ready");
+        Logger.LogDebug(
+          "BluetoothAudioSource: platform manages audio, no capture device needed (state={State})",
+          State);
         return;
       }
 
