@@ -9,10 +9,17 @@ Requires=radio-api.service
 # RestartSec=10 below makes unreachable. See radio-api.service for the full
 # rationale and the tradeoff this accepts.
 #
-# Note the blast radius here is wider than it looks: this unit has
-# Requires=radio-api.service, so if radio-api hits ITS start limit and lands in
-# `failed`, radio-web is stopped too. The whole console goes dark together
-# rather than leaving a UI that cannot reach its API.
+# Note what this deliberately does NOT do. Requires=radio-api.service does not
+# couple the two lifecycles the way it appears to: systemd propagates only an
+# EXPLICIT stop/restart of radio-api to this unit. A unit that deactivates on
+# its own — exactly what radio-api does when it exhausts StartLimitBurst and
+# lands in `failed` — is NOT propagated across Requires= (see systemd.unit(5);
+# BindsTo= is the dependency type that gives joint failure).
+#
+# So when radio-api trips its limiter, radio-web KEEPS RUNNING and serves a UI
+# whose API is gone. That is a worse-looking failure than the console going
+# dark, but switching Requires= to BindsTo= is a real behavior change to
+# production service coupling and is deliberately out of scope for this change.
 StartLimitIntervalSec=300
 StartLimitBurst=5
 
