@@ -442,16 +442,84 @@ public class SDRRadioAudioSourceFingerprintingTests
     Assert.False(source.Metadata.ContainsKey(StandardMetadataKeys.TrackNumber));
   }
 
+  // -----------------------------------------------------------------------
+  // Cross-source contamination tests — TrackIdentified is broadcast to EVERY
+  // subscriber, so the `State != Playing && State != Paused` check is only a
+  // proxy for "am I active": a non-active source can sit in Playing/Paused and
+  // adopt another source's track.
+  // -----------------------------------------------------------------------
+
+  [Fact]
+  public void OnTrackIdentified_WhileDifferentSourceIsActive_DoesNotUpdateMetadata()
+  {
+    // Arrange — the SDR source is Playing (so the state check alone would let
+    // the identification through) but a DIFFERENT source is the active one.
+    var identificationService = CreateIdentificationService();
+    var foreignSource = new Mock<IAudioSource>().Object;
+    var source = CreateSource(identificationService, getActiveSource: () => foreignSource);
+    SetState(source, AudioSourceState.Playing);
+
+    var track = CreateTrackMetadata(
+      title: "Bluetooth Song",
+      artist: "Bluetooth Artist",
+      album: "Bluetooth Album");
+
+    // Act
+    InvokeOnTrackIdentified(source, identificationService, new TrackIdentifiedEventArgs(track, 0.96));
+
+    // Assert — the SDR source kept its own default metadata.
+    Assert.Equal("SDR Radio", source.Metadata[StandardMetadataKeys.Title]);
+    Assert.False(source.Metadata.ContainsKey("IdentificationConfidence"));
+  }
+
+  [Fact]
+  public void OnTrackIdentified_WhileThisSourceIsActive_UpdatesMetadata()
+  {
+    // Arrange — the SDR source is both Playing and the active source.
+    var identificationService = CreateIdentificationService();
+    SDRRadioAudioSource? active = null;
+    active = CreateSource(identificationService, getActiveSource: () => active);
+    SetState(active, AudioSourceState.Playing);
+
+    var track = CreateTrackMetadata(
+      title: "Identified Song",
+      artist: "Identified Artist",
+      album: "Identified Album");
+
+    // Act
+    InvokeOnTrackIdentified(active, identificationService, new TrackIdentifiedEventArgs(track, 0.96));
+
+    // Assert — metadata updated exactly as before the guard existed.
+    Assert.Equal("Identified Song", active.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("Identified Artist", active.Metadata[StandardMetadataKeys.Artist]);
+    Assert.Equal(0.96, active.Metadata["IdentificationConfidence"]);
+  }
+
   #region Helper Methods
 
-  private SDRRadioAudioSource CreateSource(BackgroundIdentificationService? identificationService)
+  private SDRRadioAudioSource CreateSource(
+    BackgroundIdentificationService? identificationService,
+    Func<IAudioSource?>? getActiveSource = null)
   {
     return new SDRRadioAudioSource(
       _loggerMock.Object,
       _radioReceiver,
       _radioOptionsMock.Object,
       _metricsCollectorMock.Object,
-      identificationService);
+      identificationService,
+      getActiveSource: getActiveSource);
+  }
+
+  /// <summary>
+  /// Sets the source state via reflection — the real transitions require
+  /// RTL-SDR hardware.
+  /// </summary>
+  private static void SetState(SDRRadioAudioSource source, AudioSourceState state)
+  {
+    var stateField = typeof(AudioSourceBase).GetField(
+      "_state",
+      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+    stateField!.SetValue(source, state);
   }
 
   private BackgroundIdentificationService CreateIdentificationService()
