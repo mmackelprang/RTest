@@ -72,6 +72,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <param name="configurationManager">Optional configuration manager for queue persistence.</param>
   /// <param name="albumArtCache">Optional album art cache for extracting embedded cover art.</param>
   /// <param name="fingerprintingOptions">Optional fingerprinting options (controls UseShazamForAllSources toggle).</param>
+  /// <param name="getActiveSource">Optional accessor for the audio manager's active source (see <see cref="PrimaryAudioSourceBase.IsActiveSource"/>).</param>
   public FilePlayerAudioSource(
     ILogger<FilePlayerAudioSource> logger,
     IOptionsMonitor<FilePlayerOptions> options,
@@ -82,8 +83,9 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     SoundFlowPlaybackService? playbackService = null,
     IConfigurationManager? configurationManager = null,
     AlbumArtCacheService? albumArtCache = null,
-    IOptionsMonitor<FingerprintingOptions>? fingerprintingOptions = null)
-    : base(logger, metricsCollector)
+    IOptionsMonitor<FingerprintingOptions>? fingerprintingOptions = null,
+    Func<IAudioSource?>? getActiveSource = null)
+    : base(logger, metricsCollector, getActiveSource)
   {
     _options = options;
     _preferences = preferences;
@@ -2065,6 +2067,14 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// </summary>
   private void OnTrackIdentified(object? sender, TrackIdentifiedEventArgs e)
   {
+    // TrackIdentified is broadcast to every subscriber, not just the source the
+    // audio came from. Only the active source may adopt an identification —
+    // fingerprinting always taps the active source's audio.
+    if (!IsActiveSource)
+    {
+      return;
+    }
+
     // Only update metadata if this is the active source
     if (State != AudioSourceState.Playing && State != AudioSourceState.Paused)
     {

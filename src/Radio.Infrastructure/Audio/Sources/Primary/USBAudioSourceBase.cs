@@ -43,13 +43,15 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   /// <param name="identificationService">Optional fingerprinting service for track identification.</param>
   /// <param name="metricsCollector">Optional metrics collector for tracking playback metrics.</param>
   /// <param name="playbackService">Optional SoundFlow playback service for routing captured audio to output.</param>
+  /// <param name="getActiveSource">Optional accessor for the audio manager's active source (see <see cref="PrimaryAudioSourceBase.IsActiveSource"/>).</param>
   protected USBAudioSourceBase(
     ILogger logger,
     IAudioDeviceManager deviceManager,
     BackgroundIdentificationService? identificationService = null,
     IMetricsCollector? metricsCollector = null,
-    SoundFlowPlaybackService? playbackService = null)
-    : base(logger, metricsCollector)
+    SoundFlowPlaybackService? playbackService = null,
+    Func<IAudioSource?>? getActiveSource = null)
+    : base(logger, metricsCollector, getActiveSource)
   {
     _deviceManager = deviceManager;
     _identificationService = identificationService;
@@ -449,6 +451,14 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   /// <param name="e">The event arguments containing track metadata.</param>
   private void OnTrackIdentified(object? sender, TrackIdentifiedEventArgs e)
   {
+    // TrackIdentified is broadcast to every subscriber, not just the source the
+    // audio came from. Only the active source may adopt an identification —
+    // fingerprinting always taps the active source's audio.
+    if (!IsActiveSource)
+    {
+      return;
+    }
+
     // Only update metadata if this is the active source
     if (State != AudioSourceState.Playing && State != AudioSourceState.Paused)
     {

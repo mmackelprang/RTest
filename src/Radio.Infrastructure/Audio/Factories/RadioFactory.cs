@@ -33,6 +33,7 @@ public class RadioFactory : IRadioFactory
   private readonly IMetricsCollector? _metricsCollector;
   private readonly DeviceOptionsResolver? _deviceOptionsResolver;
   private readonly Radio.Configuration.Abstractions.IConfigurationManager? _configurationManager;
+  private readonly Func<IAudioSource?>? _getActiveSource;
 
   // Device enumeration cache
   private IReadOnlyList<DeviceInfo>? _cachedDevices;
@@ -66,6 +67,7 @@ public class RadioFactory : IRadioFactory
   /// <param name="metricsCollector">Optional metrics collector.</param>
   /// <param name="deviceOptionsResolver">Optional resolver for config store device options.</param>
   /// <param name="configurationManager">Optional configuration manager for preference restoration.</param>
+  /// <param name="getActiveSource">Optional accessor for the audio manager's active source, handed to every created source.</param>
   public RadioFactory(
     ILogger<RadioFactory> logger,
     ILoggerFactory loggerFactory,
@@ -77,7 +79,8 @@ public class RadioFactory : IRadioFactory
     SoundFlowPlaybackService? playbackService = null,
     IMetricsCollector? metricsCollector = null,
     DeviceOptionsResolver? deviceOptionsResolver = null,
-    Radio.Configuration.Abstractions.IConfigurationManager? configurationManager = null)
+    Radio.Configuration.Abstractions.IConfigurationManager? configurationManager = null,
+    Func<IAudioSource?>? getActiveSource = null)
   {
     _logger = logger;
     _loggerFactory = loggerFactory;
@@ -90,7 +93,15 @@ public class RadioFactory : IRadioFactory
     _metricsCollector = metricsCollector;
     _deviceOptionsResolver = deviceOptionsResolver;
     _configurationManager = configurationManager;
+    _getActiveSource = getActiveSource;
   }
+
+  /// <summary>
+  /// Gets the active-source accessor handed to every created radio source.
+  /// Exposed for tests that verify DI actually wires the accessor — an
+  /// unwired accessor silently restores the cross-source contamination bug.
+  /// </summary>
+  internal Func<IAudioSource?>? GetActiveSourceAccessor => _getActiveSource;
 
   /// <inheritdoc/>
   public IPrimaryAudioSource CreateRadioSource(string deviceType)
@@ -189,7 +200,8 @@ public class RadioFactory : IRadioFactory
         _metricsCollector,
         _identificationService,
         _playbackService,
-        _configurationManager);
+        _configurationManager,
+        _getActiveSource);
 
       _logger.LogInformation("Successfully created RTL-SDR radio source");
       return source;
@@ -217,7 +229,8 @@ public class RadioFactory : IRadioFactory
         _deviceManager,
         _identificationService,
         resolvedUSBPort,
-        _playbackService);
+        _playbackService,
+        _getActiveSource);
 
       _logger.LogInformation("Successfully created RF320 radio source with USB port: {USBPort}", resolvedUSBPort);
       return source;

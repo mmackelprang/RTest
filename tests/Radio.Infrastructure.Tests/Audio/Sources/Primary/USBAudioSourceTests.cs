@@ -2,8 +2,10 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Radio.Core.Configuration;
+using Radio.Core.Events;
 using Radio.Core.Exceptions;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Sources.Primary;
 
 namespace Radio.Infrastructure.Tests.Audio.Sources.Primary;
@@ -392,6 +394,114 @@ public class USBAudioSourceTests
     // Act & Assert
     await Assert.ThrowsAsync<ObjectDisposedException>(() => radio.PlayAsync());
     await Assert.ThrowsAsync<ObjectDisposedException>(() => radio.PauseAsync());
+  }
+
+  #endregion
+
+  #region Cross-Source Contamination Tests
+
+  // USBAudioSourceBase.OnTrackIdentified is inherited by Vinyl, Radio (RF320),
+  // GenericUSB and Bluetooth. TrackIdentified is broadcast to EVERY subscriber,
+  // so the `State != Playing && State != Paused` check is only a proxy for
+  // "am I active": a non-active source can sit in Playing/Paused and adopt
+  // another source's track.
+
+  [Fact]
+  public void OnTrackIdentified_WhileDifferentSourceIsActive_DoesNotUpdateMetadata()
+  {
+    // Arrange — the vinyl source is Playing (so the state check alone would let
+    // the identification through) but a DIFFERENT source is the active one.
+    var foreignSource = new Mock<IAudioSource>().Object;
+    var source = new VinylAudioSource(
+      _vinylLoggerMock.Object,
+      _deviceOptionsMock.Object,
+      _deviceManagerMock.Object,
+      getActiveSource: () => foreignSource);
+
+    SetDefaultVinylMetadata(source);
+    SetState(source, AudioSourceState.Playing);
+
+    // Act — the radio's audio is fingerprinted and broadcast to every subscriber.
+    InvokeOnTrackIdentified(source, CreateTrackMetadata("Radio Song", "Radio Artist"), 0.95);
+
+    // Assert — the vinyl source kept its own default metadata.
+    Assert.Equal("Vinyl", source.Metadata[StandardMetadataKeys.Title]);
+    Assert.False(source.Metadata.ContainsKey("IdentificationConfidence"));
+  }
+
+  [Fact]
+  public void OnTrackIdentified_WhileThisSourceIsActive_UpdatesMetadata()
+  {
+    // Arrange — the vinyl source is both Playing and the active source.
+    VinylAudioSource? active = null;
+    active = new VinylAudioSource(
+      _vinylLoggerMock.Object,
+      _deviceOptionsMock.Object,
+      _deviceManagerMock.Object,
+      getActiveSource: () => active);
+
+    SetDefaultVinylMetadata(active);
+    SetState(active, AudioSourceState.Playing);
+
+    // Act
+    InvokeOnTrackIdentified(active, CreateTrackMetadata("Vinyl Song", "Vinyl Artist"), 0.95);
+
+    // Assert — metadata updated exactly as before the guard existed.
+    Assert.Equal("Vinyl Song", active.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("Vinyl Artist", active.Metadata[StandardMetadataKeys.Artist]);
+    Assert.Equal(0.95, active.Metadata["IdentificationConfidence"]);
+  }
+
+  /// <summary>
+  /// Populates the default metadata the source would normally get from
+  /// InitializeAsync, which needs real USB capture hardware.
+  /// </summary>
+  private static void SetDefaultVinylMetadata(VinylAudioSource source)
+  {
+    var method = typeof(USBAudioSourceBase).GetMethod(
+      "SetDefaultMetadata",
+      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+    method!.Invoke(source, new object[] { "Vinyl", "Vinyl", "Turntable" });
+  }
+
+  /// <summary>
+  /// Sets the source state via reflection — the real transitions require USB
+  /// capture hardware.
+  /// </summary>
+  private static void SetState(VinylAudioSource source, AudioSourceState state)
+  {
+    var stateField = typeof(Radio.Infrastructure.Audio.Sources.AudioSourceBase).GetField(
+      "_state",
+      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+    stateField!.SetValue(source, state);
+  }
+
+  private static TrackMetadata CreateTrackMetadata(string title, string artist)
+  {
+    return new TrackMetadata
+    {
+      Id = Guid.NewGuid().ToString(),
+      Title = title,
+      Artist = artist,
+      Album = "Some Album",
+      Source = MetadataSource.Fingerprinting,
+      CreatedAt = DateTime.UtcNow,
+      UpdatedAt = DateTime.UtcNow
+    };
+  }
+
+  /// <summary>
+  /// Invokes the private USBAudioSourceBase.OnTrackIdentified handler via reflection.
+  /// </summary>
+  private static void InvokeOnTrackIdentified(
+    VinylAudioSource source,
+    TrackMetadata track,
+    double confidence)
+  {
+    var method = typeof(USBAudioSourceBase).GetMethod(
+      "OnTrackIdentified",
+      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+    method!.Invoke(source, new object?[] { null, new TrackIdentifiedEventArgs(track, confidence) });
   }
 
   #endregion

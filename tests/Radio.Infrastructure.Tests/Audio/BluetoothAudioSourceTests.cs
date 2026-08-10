@@ -9,6 +9,7 @@ using Radio.Fingerprinting;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Fingerprinting.Services;
+using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Sources.Primary;
 using Radio.Infrastructure.Platform.Bluetooth;
 using Radio.Metrics;
@@ -783,5 +784,175 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     _mockBluetooth.SimulateMetadataChange("Song A", "Artist A", albumArtUrl: null);
     Assert.True(_source.Metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var artBack));
     Assert.Equal("/api/albumart/a.jpg", artBack);
+  }
+
+  // -----------------------------------------------------------------------
+  // Cross-source contamination tests — BackgroundIdentificationService
+  // broadcasts TrackIdentified to EVERY subscriber, not just the source the
+  // fingerprinted audio came from. Production regression: while SDR Radio was
+  // active, BT overwrote its own AVRCP Title/Artist/Album with the radio's
+  // track, so switching to BT showed a song that had played on the radio.
+  // -----------------------------------------------------------------------
+
+  [Fact]
+  public async Task TrackIdentified_WhileDifferentSourceIsActive_DoesNotOverwriteAvrcpMetadata()
+  {
+    // Arrange — UseShazamForAllSources ON is the exact production configuration:
+    // SongRec metadata unconditionally replaces AVRCP metadata in the handler.
+    var fpMonitor = new Mock<IOptionsMonitor<FingerprintingOptions>>();
+    fpMonitor.Setup(o => o.CurrentValue).Returns(new FingerprintingOptions
+    {
+      UseShazamForAllSources = true
+    });
+
+    var identificationService = BuildIdentificationServiceForTests();
+
+    // A DIFFERENT source is the audio manager's active source — the radio.
+    var activeSource = new Mock<IAudioSource>().Object;
+
+    await _source.DisposeAsync();
+    _source = new BluetoothAudioSource(
+      _loggerMock.Object,
+      _deviceManagerMock.Object,
+      _mockBluetooth,
+      _options,
+      identificationService: identificationService,
+      metricsCollector: _metricsMock.Object,
+      fingerprintingOptions: fpMonitor.Object,
+      getActiveSource: () => activeSource);
+
+    // The phone's AVRCP metadata is what BT must keep showing.
+    _mockBluetooth.SimulateMetadataChange("Enter Sandman", "Metallica");
+    Assert.Equal("Enter Sandman", _source.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("Metallica", _source.Metadata[StandardMetadataKeys.Artist]);
+
+    // Act — the radio's audio gets fingerprinted and the event is broadcast to
+    // every subscriber, BT included.
+    identificationService.RaiseTrackIdentifiedForTesting(new TrackIdentifiedEventArgs(
+      new TrackMetadata
+      {
+        Id = Guid.NewGuid().ToString(),
+        Title = "Radio Song",
+        Artist = "Radio Artist",
+        Album = "Radio Album",
+        Source = MetadataSource.Shazam,
+        CreatedAt = DateTime.UtcNow,
+        UpdatedAt = DateTime.UtcNow
+      },
+      confidence: 0.95));
+    await Task.Delay(100);
+
+    // Assert — BT kept its own AVRCP metadata; the radio's track did not leak in.
+    Assert.Equal("Enter Sandman", _source.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("Metallica", _source.Metadata[StandardMetadataKeys.Artist]);
+  }
+
+  [Fact]
+  public async Task TrackIdentified_WhileThisSourceIsActive_StillUpdatesMetadata()
+  {
+    // The guard must not break the normal path: when BT *is* the active source,
+    // SongRec metadata still replaces AVRCP metadata as before.
+    var fpMonitor = new Mock<IOptionsMonitor<FingerprintingOptions>>();
+    fpMonitor.Setup(o => o.CurrentValue).Returns(new FingerprintingOptions
+    {
+      UseShazamForAllSources = true
+    });
+
+    var identificationService = BuildIdentificationServiceForTests();
+
+    await _source.DisposeAsync();
+    BluetoothAudioSource? active = null;
+    active = new BluetoothAudioSource(
+      _loggerMock.Object,
+      _deviceManagerMock.Object,
+      _mockBluetooth,
+      _options,
+      identificationService: identificationService,
+      metricsCollector: _metricsMock.Object,
+      fingerprintingOptions: fpMonitor.Object,
+      getActiveSource: () => active);
+    _source = active;
+
+    _mockBluetooth.SimulateMetadataChange("Enter Sandman", "Metallica");
+
+    // Act — BT's own audio is fingerprinted.
+    identificationService.RaiseTrackIdentifiedForTesting(new TrackIdentifiedEventArgs(
+      new TrackMetadata
+      {
+        Id = Guid.NewGuid().ToString(),
+        Title = "Shazam Title",
+        Artist = "Shazam Artist",
+        Album = "Shazam Album",
+        Source = MetadataSource.Shazam,
+        CreatedAt = DateTime.UtcNow,
+        UpdatedAt = DateTime.UtcNow
+      },
+      confidence: 0.95));
+    await Task.Delay(100);
+
+    // Assert — the more authoritative SongRec metadata was adopted.
+    Assert.Equal("Shazam Title", _source.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("Shazam Artist", _source.Metadata[StandardMetadataKeys.Artist]);
+    Assert.Equal("Shazam Album", _source.Metadata[StandardMetadataKeys.Album]);
+  }
+
+  // -----------------------------------------------------------------------
+  // Deferred capture acquisition tests — a BT source activated before the
+  // phone's A2DP stream exists starts a background retry loop. When that retry
+  // later lands, the source must NOT be demoted out of Playing: audio keeps
+  // flowing through the mixer, but SoundFlowAudioTap.IsActive gates on Playing
+  // and would silently stop fingerprinting.
+  // -----------------------------------------------------------------------
+
+  [Fact]
+  public async Task DeferredCaptureAcquisition_AfterPlay_LeavesSourcePlaying()
+  {
+    // MockBluetoothService.GetAudioCaptureDeviceAsync returns a plain string, so
+    // no capture is acquired and PlayCoreAsync takes the production
+    // "no capture device yet, starting background retry" path.
+    await _source.PlayAsync(CancellationToken.None);
+    Assert.Equal(AudioSourceState.Playing, _source.State);
+
+    // The background retry later succeeds and applies the deferred state.
+    _source.ApplyDeferredCaptureState();
+
+    // The source is routed through the mixer and audible — it must stay Playing.
+    Assert.Equal(AudioSourceState.Playing, _source.State);
+  }
+
+  [Fact]
+  public async Task DeferredCaptureAcquisition_AfterPlay_KeepsAudioTapActive()
+  {
+    // The downstream invariant that actually matters: fingerprinting keeps
+    // running. SoundFlowAudioTap.IsActive requires the active source to be
+    // in Playing, so a demotion to Ready here kills song recognition.
+    await _source.PlayAsync(CancellationToken.None);
+    _source.ApplyDeferredCaptureState();
+
+    var engineMock = new Mock<IAudioEngine>();
+    engineMock.Setup(e => e.State).Returns(AudioEngineState.Running);
+
+    var managerMock = new Mock<IAudioManager>();
+    managerMock.Setup(m => m.ActiveSource).Returns(_source);
+
+    var tap = new SoundFlowAudioTap(
+      new Mock<ILogger<SoundFlowAudioTap>>().Object,
+      engineMock.Object,
+      managerMock.Object);
+
+    Assert.True(tap.IsActive, "Fingerprinting must stay active after deferred capture lands");
+  }
+
+  [Fact]
+  public void ApplyDeferredCaptureState_WhenNotPlaying_SetsReady()
+  {
+    // The other half of the invariant: a source that was NOT already playing
+    // (capture acquired via a DeviceConnected event before activation) becomes
+    // Ready, exactly as before.
+    Assert.Equal(AudioSourceState.Created, _source.State);
+
+    _source.ApplyDeferredCaptureState();
+
+    Assert.Equal(AudioSourceState.Ready, _source.State);
   }
 }

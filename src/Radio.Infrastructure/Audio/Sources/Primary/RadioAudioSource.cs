@@ -41,6 +41,7 @@ public class RadioAudioSource : USBAudioSourceBase, Radio.Core.Interfaces.Audio.
   /// <param name="identificationService">Optional fingerprinting service for track identification.</param>
   /// <param name="resolvedUSBPort">USB port resolved from config store, overrides IOptionsMonitor value.</param>
   /// <param name="playbackService">Optional SoundFlow playback service for routing captured audio to output.</param>
+  /// <param name="getActiveSource">Optional accessor for the audio manager's active source (see <see cref="PrimaryAudioSourceBase.IsActiveSource"/>).</param>
   public RadioAudioSource(
     ILogger<RadioAudioSource> logger,
     IOptionsMonitor<DeviceOptions> deviceOptions,
@@ -48,8 +49,9 @@ public class RadioAudioSource : USBAudioSourceBase, Radio.Core.Interfaces.Audio.
     IAudioDeviceManager deviceManager,
     BackgroundIdentificationService? identificationService = null,
     string? resolvedUSBPort = null,
-    SoundFlowPlaybackService? playbackService = null)
-    : base(logger, deviceManager, identificationService, playbackService: playbackService)
+    SoundFlowPlaybackService? playbackService = null,
+    Func<IAudioSource?>? getActiveSource = null)
+    : base(logger, deviceManager, identificationService, playbackService: playbackService, getActiveSource: getActiveSource)
   {
     _deviceOptions = deviceOptions;
     _radioOptions = radioOptions;

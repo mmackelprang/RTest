@@ -63,6 +63,7 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// <param name="identificationService">Optional fingerprinting service for track identification.</param>
   /// <param name="playbackService">Optional SoundFlow playback service for audio output.</param>
   /// <param name="configurationManager">Optional configuration manager for restoring persisted preferences.</param>
+  /// <param name="getActiveSource">Optional accessor for the audio manager's active source (see <see cref="PrimaryAudioSourceBase.IsActiveSource"/>).</param>
   public SDRRadioAudioSource(
     ILogger<SDRRadioAudioSource> logger,
     RadioReceiver radioReceiver,
@@ -70,8 +71,9 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     IMetricsCollector? metricsCollector = null,
     BackgroundIdentificationService? identificationService = null,
     SoundFlowPlaybackService? playbackService = null,
-    IConfigurationManager? configurationManager = null)
-    : base(logger, metricsCollector)
+    IConfigurationManager? configurationManager = null,
+    Func<IAudioSource?>? getActiveSource = null)
+    : base(logger, metricsCollector, getActiveSource)
   {
     _radioReceiver = radioReceiver ?? throw new ArgumentNullException(nameof(radioReceiver));
     _radioOptions = radioOptions ?? throw new ArgumentNullException(nameof(radioOptions));
@@ -648,6 +650,14 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// </summary>
   private void OnTrackIdentified(object? sender, Radio.Core.Events.TrackIdentifiedEventArgs e)
   {
+    // TrackIdentified is broadcast to every subscriber, not just the source the
+    // audio came from. Only the active source may adopt an identification —
+    // fingerprinting always taps the active source's audio.
+    if (!IsActiveSource)
+    {
+      return;
+    }
+
     // Only update metadata if this is the active source
     if (State != AudioSourceState.Playing && State != AudioSourceState.Paused)
     {

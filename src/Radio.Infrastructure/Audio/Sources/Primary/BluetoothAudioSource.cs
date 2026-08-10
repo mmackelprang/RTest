@@ -80,8 +80,9 @@ public class BluetoothAudioSource : USBAudioSourceBase
     SoundFlowPlaybackService? playbackService = null,
     IServiceScopeFactory? serviceScopeFactory = null,
     IAlbumArtCacheService? albumArtCache = null,
-    IOptionsMonitor<FingerprintingOptions>? fingerprintingOptions = null)
-    : base(logger, deviceManager, identificationService, metricsCollector)
+    IOptionsMonitor<FingerprintingOptions>? fingerprintingOptions = null,
+    Func<IAudioSource?>? getActiveSource = null)
+    : base(logger, deviceManager, identificationService, metricsCollector, getActiveSource: getActiveSource)
   {
     _bluetoothService = bluetoothService;
     _identificationService = identificationService;
@@ -431,6 +432,33 @@ public class BluetoothAudioSource : USBAudioSourceBase
     });
   }
 
+  /// <summary>
+  /// Applies the source state after capture is acquired by the deferred
+  /// (post-activation) retry path.
+  /// <para>
+  /// A source activated before the phone's A2DP stream existed is already
+  /// <see cref="AudioSourceState.Playing"/> and must stay that way:
+  /// <c>SoundFlowAudioTap.IsActive</c> and source teardown both treat
+  /// <c>Playing</c> as "actually producing audio", so demoting to
+  /// <c>Ready</c> here silently kills fingerprinting while audio keeps
+  /// flowing through the mixer. Only a source that was not already playing
+  /// lands in <c>Ready</c>.
+  /// </para>
+  /// <para>
+  /// <c>internal</c> for unit testing via <c>InternalsVisibleTo</c>: the real
+  /// call sites require a native SoundFlow <c>AudioEngine</c> to produce an
+  /// <c>AudioCaptureDevice</c>/<c>SoundComponent</c> and cannot be exercised
+  /// directly in a unit test.
+  /// </para>
+  /// </summary>
+  internal void ApplyDeferredCaptureState()
+  {
+    if (State != AudioSourceState.Playing)
+    {
+      State = AudioSourceState.Ready;
+    }
+  }
+
   private async Task TryAcquireAudioCaptureAsync()
   {
     try
@@ -438,8 +466,10 @@ public class BluetoothAudioSource : USBAudioSourceBase
       // Platform manages audio directly — no capture device needed
       if (_bluetoothService.IsAudioManagedByPlatform)
       {
-        State = AudioSourceState.Ready;
-        Logger.LogDebug("BluetoothAudioSource: platform manages audio, source set to Ready");
+        ApplyDeferredCaptureState();
+        Logger.LogDebug(
+          "BluetoothAudioSource: platform manages audio, no capture device needed (state={State})",
+          State);
         return;
       }
 
@@ -453,26 +483,24 @@ public class BluetoothAudioSource : USBAudioSourceBase
       if (capture is AudioCaptureDevice audioCapture)
       {
         _captureDevice = audioCapture;
-        State = AudioSourceState.Ready;
+        ApplyDeferredCaptureState();
         Logger.LogInformation("BluetoothAudioSource: audio capture device acquired after device connected");
 
-        // If source is already Playing (activated before phone connected), route to mixer now
-        if (State == AudioSourceState.Playing || State == AudioSourceState.Ready)
-        {
-          await RouteCaptureThroughMixerAsync();
-        }
+        // Route unconditionally — the capture must reach the mixer whether the
+        // source was already Playing (activated before the phone connected) or
+        // has only just become Ready.
+        await RouteCaptureThroughMixerAsync();
       }
       else if (capture is SoundComponent soundComponent)
       {
         SoundComponent = soundComponent;
-        State = AudioSourceState.Ready;
+        ApplyDeferredCaptureState();
         Logger.LogInformation("BluetoothAudioSource: PipeWire capture generator acquired after device connected");
 
-        // If source is already Playing (activated before phone connected), route to mixer now
-        if (State == AudioSourceState.Playing || State == AudioSourceState.Ready)
-        {
-          await RouteCaptureThroughMixerAsync();
-        }
+        // Route unconditionally — the capture must reach the mixer whether the
+        // source was already Playing (activated before the phone connected) or
+        // has only just become Ready.
+        await RouteCaptureThroughMixerAsync();
       }
       else
       {
@@ -816,6 +844,14 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
   private void OnTrackIdentified(object? sender, TrackIdentifiedEventArgs e)
   {
+    // TrackIdentified is broadcast to every subscriber, not just the source the
+    // audio came from. Only the active source may adopt an identification —
+    // fingerprinting always taps the active source's audio.
+    if (!IsActiveSource)
+    {
+      return;
+    }
+
     // After fingerprinting identifies a track, stop re-fingerprinting
     // until new AVRCP metadata arrives (OnMetadataChanged resets the flag)
     if (NeedsFingerprintingLookup)

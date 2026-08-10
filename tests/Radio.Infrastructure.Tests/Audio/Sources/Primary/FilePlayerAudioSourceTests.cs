@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Radio.Core.Configuration;
+using Radio.Core.Events;
 using Radio.Core.Interfaces.Audio;
 using Radio.Fingerprinting;
 using Radio.Core.Models.Audio;
@@ -1629,6 +1630,129 @@ public class FilePlayerAudioSourceTests : IDisposable
 
     // Assert — source creates successfully with default (toggle off)
     Assert.Equal("File Player", source.Name);
+  }
+
+  #endregion
+
+  #region Cross-Source Contamination Tests
+
+  // TrackIdentified is broadcast to EVERY subscriber, so the
+  // `State != Playing && State != Paused` check is only a proxy for "am I
+  // active": a non-active source can sit in Playing/Paused and adopt another
+  // source's track.
+
+  [Fact]
+  public void OnTrackIdentified_WhileDifferentSourceIsActive_DoesNotUpdateMetadata()
+  {
+    // Arrange — the file player is Playing (so the state check alone would let
+    // the identification through) but a DIFFERENT source is the active one.
+    var foreignSource = new Mock<IAudioSource>().Object;
+    var source = CreateSourceForIdentification(getActiveSource: () => foreignSource);
+    SetState(source, AudioSourceState.Playing);
+
+    var metadata = GetMetadataDictionary(source);
+    metadata[StandardMetadataKeys.Title] = "Local File Title";
+    metadata[StandardMetadataKeys.Artist] = "Local File Artist";
+    metadata["NeedsFingerprintingLookup"] = true;
+
+    // Act — the radio's audio is fingerprinted and broadcast to every subscriber.
+    InvokeOnTrackIdentified(source, CreateTrackMetadata("Radio Song", "Radio Artist"), 0.95);
+
+    // Assert — the file player kept its own ID3 metadata.
+    Assert.Equal("Local File Title", source.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("Local File Artist", source.Metadata[StandardMetadataKeys.Artist]);
+  }
+
+  [Fact]
+  public void OnTrackIdentified_WhileThisSourceIsActive_UpdatesMetadata()
+  {
+    // Arrange — the file player is both Playing and the active source.
+    FilePlayerAudioSource? active = null;
+    active = CreateSourceForIdentification(getActiveSource: () => active);
+    SetState(active, AudioSourceState.Playing);
+
+    var metadata = GetMetadataDictionary(active);
+    metadata[StandardMetadataKeys.Title] = "Local File Title";
+    metadata[StandardMetadataKeys.Artist] = "Local File Artist";
+    metadata["NeedsFingerprintingLookup"] = true;
+
+    // Act
+    InvokeOnTrackIdentified(active, CreateTrackMetadata("Shazam Song", "Shazam Artist"), 0.95);
+
+    // Assert — Shazam metadata replaced the incomplete ID3 tags, as before.
+    Assert.Equal("Shazam Song", active.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("Shazam Artist", active.Metadata[StandardMetadataKeys.Artist]);
+    Assert.Equal("Shazam", active.Metadata["MetadataSource"]);
+  }
+
+  /// <summary>
+  /// Builds a source with UseShazamForAllSources enabled so the identification
+  /// path unconditionally replaces file tags — the branch that leaks another
+  /// source's track when the active-source guard is missing.
+  /// </summary>
+  private FilePlayerAudioSource CreateSourceForIdentification(Func<IAudioSource?>? getActiveSource)
+  {
+    var fpMonitor = new Mock<IOptionsMonitor<FingerprintingOptions>>();
+    fpMonitor.Setup(o => o.CurrentValue).Returns(new FingerprintingOptions
+    {
+      UseShazamForAllSources = true
+    });
+
+    return new FilePlayerAudioSource(
+      _loggerMock.Object,
+      _optionsMock.Object,
+      _preferencesMock.Object,
+      _testDir,
+      fingerprintingOptions: fpMonitor.Object,
+      getActiveSource: getActiveSource);
+  }
+
+  private static TrackMetadata CreateTrackMetadata(string title, string artist)
+  {
+    return new TrackMetadata
+    {
+      Id = Guid.NewGuid().ToString(),
+      Title = title,
+      Artist = artist,
+      Album = "Some Album",
+      Source = MetadataSource.Shazam,
+      CreatedAt = DateTime.UtcNow,
+      UpdatedAt = DateTime.UtcNow
+    };
+  }
+
+  /// <summary>
+  /// Sets the source state via reflection — the real transitions require an
+  /// initialized SoundFlow playback pipeline.
+  /// </summary>
+  private static void SetState(FilePlayerAudioSource source, AudioSourceState state)
+  {
+    var stateField = typeof(Radio.Infrastructure.Audio.Sources.AudioSourceBase).GetField(
+      "_state",
+      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+    stateField!.SetValue(source, state);
+  }
+
+  private static Dictionary<string, object> GetMetadataDictionary(FilePlayerAudioSource source)
+  {
+    var metadataField = typeof(FilePlayerAudioSource).GetField(
+      "_metadata",
+      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+    return (Dictionary<string, object>)metadataField!.GetValue(source)!;
+  }
+
+  /// <summary>
+  /// Invokes the private OnTrackIdentified handler via reflection.
+  /// </summary>
+  private static void InvokeOnTrackIdentified(
+    FilePlayerAudioSource source,
+    TrackMetadata track,
+    double confidence)
+  {
+    var method = typeof(FilePlayerAudioSource).GetMethod(
+      "OnTrackIdentified",
+      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+    method!.Invoke(source, new object?[] { null, new TrackIdentifiedEventArgs(track, confidence) });
   }
 
   #endregion
