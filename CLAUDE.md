@@ -127,13 +127,28 @@ Sources (Radio/SDR/File/BT/TTS) → Master Mixer → Modifiers (Balance, Fingerp
 
 ## Deployment
 
-**The box is at `192.168.86.50`.** The hostnames `radio` and `piradio` **do not resolve from WSL** — two
-sessions have now had to rediscover this. Use the IP directly for SSH, `curl`, and the browser; the
-in-app service URLs (`http://radio:5004`, etc.) resolve fine *on* the box and should not be changed.
+**Use `mmack@radio` for SSH from WSL. Do NOT use the bare IP.**
 
 ```bash
-ssh radio@192.168.86.50
+ssh mmack@radio
 ```
+
+`radio` resolves fine from WSL and is the working form (verified 2026-08-10). The bare IP
+**fails** — `mmack@192.168.86.50` gives `Permission denied (publickey,password)`.
+
+*Why*, so this stops getting rediscovered: `~/.ssh/config` has a `Host radio radio.local` block
+that supplies `IdentityFile ~/.ssh/id_ed25519_radio` together with `IdentitiesOnly yes`.
+Connecting by IP does not match that block, so the correct key is never offered and
+`IdentitiesOnly` suppresses every other key — hence the instant rejection. The IP
+(`192.168.86.50`) is still accurate as *reference* information (`curl`, browser, and
+`ssh -i ~/.ssh/id_ed25519_radio mmack@192.168.86.50` all work), it just must not be the
+default form for SSH.
+
+> An earlier revision of this note claimed the opposite — that `radio`/`piradio` do not resolve
+> from WSL and the IP must be used. That was wrong and cost several sessions time. Six
+> independent checks confirm `mmack@radio` works.
+
+The in-app service URLs (`http://radio:5004`, etc.) resolve *on* the box and should not be changed.
 
 Dual-service architecture on Raspberry Pi:
 - `radio-api.service` - Radio.API on port 5000 (audio engine, BT, all hardware)

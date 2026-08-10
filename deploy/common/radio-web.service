@@ -3,6 +3,26 @@ Description=Radio Console Web UI (Blazor Server)
 After=network.target radio-api.service
 Requires=radio-api.service
 
+# === Restart rate limit (added 2026-08-10, crash-forensics) ===
+# radio-web carried the identical defect as radio-api: no explicit StartLimit*
+# keys, so it inherited DefaultStartLimitIntervalSec=10s / Burst=5, which
+# RestartSec=10 below makes unreachable. See radio-api.service for the full
+# rationale and the tradeoff this accepts.
+#
+# Note what this deliberately does NOT do. Requires=radio-api.service does not
+# couple the two lifecycles the way it appears to: systemd propagates only an
+# EXPLICIT stop/restart of radio-api to this unit. A unit that deactivates on
+# its own — exactly what radio-api does when it exhausts StartLimitBurst and
+# lands in `failed` — is NOT propagated across Requires= (see systemd.unit(5);
+# BindsTo= is the dependency type that gives joint failure).
+#
+# So when radio-api trips its limiter, radio-web KEEPS RUNNING and serves a UI
+# whose API is gone. That is a worse-looking failure than the console going
+# dark, but switching Requires= to BindsTo= is a real behavior change to
+# production service coupling and is deliberately out of scope for this change.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
 [Service]
 Type=simple
 # Matches radio-api's user/group for consistent file ownership in /opt/radio-console.
