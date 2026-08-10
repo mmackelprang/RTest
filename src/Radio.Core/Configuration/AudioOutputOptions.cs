@@ -137,6 +137,21 @@ public class GoogleCastOutputOptions
   public float DefaultVolume { get; set; } = 0.7f;
 
   /// <summary>
+  /// Gets or sets how long startup waits for a persisted "google-cast" output
+  /// to actually reach <see cref="Radio.Core.Interfaces.Audio.AudioOutputState.Streaming"/>
+  /// before giving up and falling back to the local output.
+  ///
+  /// Selecting Cast in the output picker mutes the local sink; if the Cast
+  /// device never connects, nothing unmutes it and the wired speakers stay
+  /// silent indefinitely — across restarts, because the bad preference is
+  /// persisted. This timeout is the watchdog that bounds that failure.
+  ///
+  /// Must comfortably exceed the 3 s discovery settle plus receiver launch
+  /// (~1-3 s). Default: 25 seconds.
+  /// </summary>
+  public int StartupConnectTimeoutSeconds { get; set; } = 25;
+
+  /// <summary>
   /// Gets or sets the file path for caching discovered Cast devices.
   /// </summary>
   public string CacheFilePath { get; set; } = "./data/config/cast-devices.json";

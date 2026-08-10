@@ -97,12 +97,27 @@ public abstract class AudioSourceBase : IAudioSource, IAsyncDisposable
   }
 
   /// <summary>
-  /// Stops playback if the source is currently playing or paused.
+  /// Stops playback and tears down this source's audio components.
+  ///
+  /// Teardown is deliberately NOT gated on <see cref="State"/> being
+  /// Playing/Paused. A source can hold an attached, audible sound component
+  /// while its state reads Ready/Stopped/Error: components are attached by
+  /// async connect, late-acquire, and stall-recovery paths that are decoupled
+  /// from the state machine, and external events can move the state
+  /// independently of what is actually wired into the mixer. Gating teardown
+  /// on the state flag meant those sources kept producing audio after a
+  /// switch-away, because <c>StopCoreAsync</c> — the only code that detaches
+  /// the component — was skipped.
+  ///
+  /// Only Created (nothing has been built yet) and Disposed (teardown already
+  /// happened) are skipped. Every <c>StopCoreAsync</c> implementation is
+  /// null-guarded and idempotent, so running it from a non-playing state is a
+  /// no-op when there is genuinely nothing attached.
   /// </summary>
   public virtual async Task StopAsync(CancellationToken cancellationToken = default)
   {
     ThrowIfDisposed();
-    if (State != AudioSourceState.Playing && State != AudioSourceState.Paused)
+    if (State is AudioSourceState.Created or AudioSourceState.Disposed)
     {
       return;
     }
