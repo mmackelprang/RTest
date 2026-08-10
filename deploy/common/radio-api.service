@@ -3,6 +3,31 @@ Description=Radio Console API (audio engine, REST, SignalR)
 After=network.target sound.target bluetooth.target avahi-daemon.service radio-pipewire-access.service radio-bt-setup.service
 Wants=avahi-daemon.service radio-pipewire-access.service radio-bt-setup.service
 
+# === Restart rate limit (added 2026-08-10, crash-forensics) ===
+# These MUST live in [Unit], not [Service]. systemd >= 229 parses StartLimit*
+# only from [Unit]; in [Service] it logs "Unknown key name ... ignoring" and the
+# setting silently does nothing.
+#
+# Previously these keys were absent, so the unit inherited the system defaults
+# (DefaultStartLimitIntervalSec=10s, DefaultStartLimitBurst=5). That combination
+# is unreachable by construction: tripping it needs 5 starts inside 10s, but
+# RestartSec=10 below guarantees consecutive restarts are >= 10s apart. The
+# limiter could therefore NEVER engage and the service restarted forever no
+# matter how hard it was failing — which is how a 37-hour outage went
+# undiagnosed.
+#
+# 300s comfortably exceeds RestartSec (10s), so 5 failures inside 5 minutes now
+# actually halts the unit.
+#
+# TRADEOFF, stated plainly: a genuine crash loop now leaves the radio DEAD until
+# someone intervenes (`systemctl reset-failed radio-api && systemctl start
+# radio-api`), instead of endlessly half-working. For a home audio appliance
+# that is a real product decision, not a free win. It is deliberate: a unit
+# stuck in `failed` is visible and diagnosable; silent infinite restarting is
+# not. Reverting is a one-line change back to the defaults.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
 [Service]
 Type=simple
 # Runs as mmack (uid 1000) — needed for PipeWire access via XDG_RUNTIME_DIR=/run/user/1000.

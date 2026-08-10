@@ -3,6 +3,19 @@ Description=Radio Console Web UI (Blazor Server)
 After=network.target radio-api.service
 Requires=radio-api.service
 
+# === Restart rate limit (added 2026-08-10, crash-forensics) ===
+# radio-web carried the identical defect as radio-api: no explicit StartLimit*
+# keys, so it inherited DefaultStartLimitIntervalSec=10s / Burst=5, which
+# RestartSec=10 below makes unreachable. See radio-api.service for the full
+# rationale and the tradeoff this accepts.
+#
+# Note the blast radius here is wider than it looks: this unit has
+# Requires=radio-api.service, so if radio-api hits ITS start limit and lands in
+# `failed`, radio-web is stopped too. The whole console goes dark together
+# rather than leaving a UI that cannot reach its API.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
 [Service]
 Type=simple
 # Matches radio-api's user/group for consistent file ownership in /opt/radio-console.

@@ -163,6 +163,10 @@ else
 Description=Radio Console API (audio engine, REST, SignalR)
 After=network.target sound.target bluetooth.target avahi-daemon.service
 Wants=avahi-daemon.service
+# Must be in [Unit] — systemd ignores StartLimit* in [Service]. Interval must
+# exceed RestartSec or the limiter can never engage. See common/radio-api.service.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=notify
@@ -203,6 +207,10 @@ else
 Description=Radio Console Web UI (Blazor Server)
 After=network.target radio-api.service
 Requires=radio-api.service
+# Must be in [Unit] — systemd ignores StartLimit* in [Service]. Interval must
+# exceed RestartSec or the limiter can never engage. See common/radio-web.service.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
