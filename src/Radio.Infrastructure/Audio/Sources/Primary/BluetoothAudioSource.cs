@@ -80,8 +80,9 @@ public class BluetoothAudioSource : USBAudioSourceBase
     SoundFlowPlaybackService? playbackService = null,
     IServiceScopeFactory? serviceScopeFactory = null,
     IAlbumArtCacheService? albumArtCache = null,
-    IOptionsMonitor<FingerprintingOptions>? fingerprintingOptions = null)
-    : base(logger, deviceManager, identificationService, metricsCollector)
+    IOptionsMonitor<FingerprintingOptions>? fingerprintingOptions = null,
+    Func<IAudioSource?>? getActiveSource = null)
+    : base(logger, deviceManager, identificationService, metricsCollector, getActiveSource: getActiveSource)
   {
     _bluetoothService = bluetoothService;
     _identificationService = identificationService;
@@ -816,6 +817,14 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
   private void OnTrackIdentified(object? sender, TrackIdentifiedEventArgs e)
   {
+    // TrackIdentified is broadcast to every subscriber, not just the source the
+    // audio came from. Only the active source may adopt an identification —
+    // fingerprinting always taps the active source's audio.
+    if (!IsActiveSource)
+    {
+      return;
+    }
+
     // After fingerprinting identifies a track, stop re-fingerprinting
     // until new AVRCP metadata arrives (OnMetadataChanged resets the flag)
     if (NeedsFingerprintingLookup)

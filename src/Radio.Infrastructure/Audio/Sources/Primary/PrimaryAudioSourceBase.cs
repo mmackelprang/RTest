@@ -14,22 +14,47 @@ namespace Radio.Infrastructure.Audio.Sources.Primary;
 public abstract class PrimaryAudioSourceBase : AudioSourceBase, IPrimaryAudioSource
 {
   private readonly IMetricsCollector? _metricsCollector;
+  private readonly Func<IAudioSource?>? _getActiveSource;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="PrimaryAudioSourceBase"/> class.
   /// </summary>
   /// <param name="logger">The logger instance.</param>
   /// <param name="metricsCollector">Optional metrics collector for tracking playback metrics.</param>
-  protected PrimaryAudioSourceBase(ILogger logger, IMetricsCollector? metricsCollector = null)
+  /// <param name="getActiveSource">
+  /// Optional accessor for the audio manager's currently active source. Supplied by DI
+  /// (a <c>Func&lt;&gt;</c> defers <c>IAudioManager</c> resolution, breaking the circular
+  /// dependency) and consumed by <see cref="IsActiveSource"/>.
+  /// </param>
+  protected PrimaryAudioSourceBase(
+    ILogger logger,
+    IMetricsCollector? metricsCollector = null,
+    Func<IAudioSource?>? getActiveSource = null)
     : base(logger)
   {
     _metricsCollector = metricsCollector;
+    _getActiveSource = getActiveSource;
   }
 
   /// <summary>
   /// Gets the metrics collector for derived classes.
   /// </summary>
   protected IMetricsCollector? MetricsCollector => _metricsCollector;
+
+  /// <summary>
+  /// Gets a value indicating whether this source is the audio manager's active source.
+  /// <para>
+  /// <c>TrackIdentified</c> is broadcast to every subscriber regardless of which
+  /// source the fingerprinted audio actually came from, so each handler must gate
+  /// on this or it will write another source's track into its own metadata.
+  /// </para>
+  /// <para>
+  /// When no accessor was supplied (direct construction in unit tests) the source
+  /// is treated as active so existing behavior is unchanged.
+  /// </para>
+  /// </summary>
+  protected bool IsActiveSource
+    => _getActiveSource is null || ReferenceEquals(_getActiveSource(), this);
 
   /// <inheritdoc/>
   public override AudioSourceCategory Category => AudioSourceCategory.Primary;

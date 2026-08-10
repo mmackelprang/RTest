@@ -41,6 +41,7 @@ public class AudioSourceFactory : IAudioSourceFactory
   private readonly AlbumArtCacheService? _albumArtCache;
   private readonly DeviceOptionsResolver? _deviceOptionsResolver;
   private readonly IOptionsMonitor<FingerprintingOptions>? _fingerprintingOptions;
+  private readonly Func<IAudioSource?>? _getActiveSource;
 
   public AudioSourceFactory(
     ILogger<AudioSourceFactory> logger,
@@ -61,7 +62,8 @@ public class AudioSourceFactory : IAudioSourceFactory
     IServiceScopeFactory? serviceScopeFactory = null,
     AlbumArtCacheService? albumArtCache = null,
     DeviceOptionsResolver? deviceOptionsResolver = null,
-    IOptionsMonitor<FingerprintingOptions>? fingerprintingOptions = null)
+    IOptionsMonitor<FingerprintingOptions>? fingerprintingOptions = null,
+    Func<IAudioSource?>? getActiveSource = null)
   {
     _logger = logger;
     _loggerFactory = loggerFactory;
@@ -82,7 +84,15 @@ public class AudioSourceFactory : IAudioSourceFactory
     _albumArtCache = albumArtCache;
     _deviceOptionsResolver = deviceOptionsResolver;
     _fingerprintingOptions = fingerprintingOptions;
+    _getActiveSource = getActiveSource;
   }
+
+  /// <summary>
+  /// Gets the active-source accessor handed to every created source.
+  /// Exposed for tests that verify DI actually wires the accessor — an
+  /// unwired accessor silently restores the cross-source contamination bug.
+  /// </summary>
+  internal Func<IAudioSource?>? GetActiveSourceAccessor => _getActiveSource;
 
   /// <inheritdoc/>
   public IAudioSource CreateSource(AudioSourceType sourceType)
@@ -119,7 +129,8 @@ public class AudioSourceFactory : IAudioSourceFactory
       _playbackService,
       _serviceScopeFactory,
       _albumArtCache,
-      _fingerprintingOptions);
+      _fingerprintingOptions,
+      _getActiveSource);
   }
 
   private IAudioSource CreateFilePlayerSource()
@@ -136,7 +147,8 @@ public class AudioSourceFactory : IAudioSourceFactory
       _playbackService,
       _configurationManager,
       _albumArtCache,
-      fingerprintingOptions: _fingerprintingOptions);
+      fingerprintingOptions: _fingerprintingOptions,
+      getActiveSource: _getActiveSource);
   }
 
   private IAudioSource CreateVinylSource()
@@ -156,7 +168,8 @@ public class AudioSourceFactory : IAudioSourceFactory
       _deviceManager,
       _identificationService,
       resolvedUSBPort,
-      _playbackService);
+      _playbackService,
+      _getActiveSource);
   }
 
   /// <summary>
@@ -199,7 +212,8 @@ public class AudioSourceFactory : IAudioSourceFactory
       _deviceManager,
       resolvedUSBPort,
       _identificationService,
-      _playbackService);
+      _playbackService,
+      _getActiveSource);
   }
 
   private IAudioSource CreateTestToneSource()

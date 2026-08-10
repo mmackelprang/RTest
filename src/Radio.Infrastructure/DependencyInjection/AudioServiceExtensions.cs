@@ -214,6 +214,12 @@ public static class AudioServiceExtensions
     services.AddSingleton<IAudioSourceManager>(sp => sp.GetRequiredService<AudioManager>());
     services.AddSingleton<IAudioMixerControl>(sp => sp.GetRequiredService<AudioManager>());
 
+    // Active-source accessor for audio sources (Func<> defers IAudioManager
+    // resolution, breaking the circular dependency — same pattern as PlayHistoryTracker).
+    // Sources use this to ignore TrackIdentified events broadcast while a
+    // different source is active.
+    services.AddSingleton<Func<IAudioSource?>>(sp => () => sp.GetRequiredService<IAudioManager>().ActiveSource);
+
     // Register play history tracker (Func<> defers IAudioManager resolution, breaking circular dependency)
     services.AddSingleton<PlayHistoryTracker>(sp => new PlayHistoryTracker(
       sp.GetRequiredService<ILogger<PlayHistoryTracker>>(),
