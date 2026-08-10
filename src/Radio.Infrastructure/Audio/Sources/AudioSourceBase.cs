@@ -109,10 +109,11 @@ public abstract class AudioSourceBase : IAudioSource, IAsyncDisposable
   /// switch-away, because <c>StopCoreAsync</c> — the only code that detaches
   /// the component — was skipped.
   ///
-  /// Only Created (nothing has been built yet) and Disposed (teardown already
-  /// happened) are skipped. Every <c>StopCoreAsync</c> implementation is
-  /// null-guarded and idempotent, so running it from a non-playing state is a
-  /// no-op when there is genuinely nothing attached.
+  /// Only Created is skipped — nothing has been built yet, so there is genuinely
+  /// nothing to detach. Every <c>StopCoreAsync</c> implementation is null-guarded
+  /// and idempotent, so running it from any other state is a no-op when nothing
+  /// is attached. (The Disposed arm is belt-and-braces: <see cref="ThrowIfDisposed"/>
+  /// runs first, so a disposed source throws rather than reaching it.)
   /// </summary>
   public virtual async Task StopAsync(CancellationToken cancellationToken = default)
   {

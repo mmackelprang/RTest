@@ -101,6 +101,23 @@ public class AudioSourceBaseStopTests
     Assert.False(outgoing.HasAttachedComponent);
   }
 
+  [Fact]
+  public async Task StopAsync_StopCoreThrows_PropagatesAndLeavesStateUnchanged()
+  {
+    // The widened guard runs StopCoreAsync in more states, so it is worth
+    // pinning what a throwing teardown does: the exception propagates and the
+    // state is NOT advanced to Stopped. Real implementations can throw here —
+    // SDRRadioAudioSource's ShutdownAsync and FilePlayerAudioSource's
+    // playback-service stop are not individually try/caught.
+    var source = new FakeAudioSource { ThrowOnStop = true };
+    source.AttachComponent();
+    source.ForceState(AudioSourceState.Ready);
+
+    await Assert.ThrowsAsync<InvalidOperationException>(() => source.StopAsync());
+
+    Assert.Equal(AudioSourceState.Ready, source.State);
+  }
+
   /// <summary>
   /// Minimal AudioSourceBase implementation. "HasAttachedComponent" stands in
   /// for the real sources' mixer registration (playbackId + sound generator),
@@ -116,6 +133,8 @@ public class AudioSourceBaseStopTests
     public int StopCoreCallCount { get; private set; }
 
     public bool HasAttachedComponent { get; private set; }
+
+    public bool ThrowOnStop { get; init; }
 
     public override string Name => "Fake";
 
@@ -142,6 +161,10 @@ public class AudioSourceBaseStopTests
     protected override Task StopCoreAsync(CancellationToken cancellationToken)
     {
       StopCoreCallCount++;
+      if (ThrowOnStop)
+      {
+        throw new InvalidOperationException("teardown failed");
+      }
       HasAttachedComponent = false;
       return Task.CompletedTask;
     }

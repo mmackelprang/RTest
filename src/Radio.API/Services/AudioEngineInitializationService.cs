@@ -545,12 +545,32 @@ public class AudioEngineInitializationService : IHostedService
       }
 
       await _castOutput.StartAsync(ct).ConfigureAwait(false);
+
+      // Late-success guard. Several calls in the connect chain above do not
+      // observe cancellation at all (the SharpCaster-facing ConnectChromecast /
+      // LaunchApplicationAsync / volume-sync calls), so the rollback can have
+      // fired and unmuted the local sink while we were parked inside one of
+      // them. Finishing the connect at that point would leave Cast streaming
+      // AND local unmuted — the dual-output bug the startup mute exists to
+      // prevent, recreated by the guard meant to avoid it. Tear Cast back down.
+      if (Volatile.Read(ref _localFallbackApplied) || ct.IsCancellationRequested)
+      {
+        _logger.LogWarning(
+          "Cast connected after the local-output fallback had already been applied — " +
+          "tearing Cast back down to avoid playing on both outputs");
+        if (_audioEngine is SoundFlowAudioEngine sfEngine)
+        {
+          await sfEngine.TearDownCastOutputAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        return;
+      }
+
       _logger.LogInformation("Startup: Auto-connected to Cast device: {Name} (mode: {Mode})",
         device.FriendlyName, streamingMode);
 
-      // Deliberately no "success" short-circuit here: GoogleCastOutput.StartAsync
-      // returns having set state to Ready (not Streaming) when no receiver is
-      // actually attached. The watchdog is what distinguishes the two.
+      // Deliberately no "success" short-circuit beyond that: GoogleCastOutput
+      // .StartAsync returns having set state to Ready (not Streaming) when no
+      // receiver is actually attached. The watchdog distinguishes the two.
     }
     catch (OperationCanceledException) when (ct.IsCancellationRequested)
     {
@@ -651,6 +671,12 @@ public class AudioEngineInitializationService : IHostedService
     }
     catch (OperationCanceledException)
     {
+      return;
+    }
+    catch (ObjectDisposedException)
+    {
+      // Raced shutdown disposal. SemaphoreSlim.WaitAsync checks disposal before
+      // it checks the token, so a cancelled token does not pre-empt this.
       return;
     }
 

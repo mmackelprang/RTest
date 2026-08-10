@@ -870,6 +870,13 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       "🎵 FILE PLAYER AUDIO FLOW STOPPING: \"{FileName}\" (PlaybackId={PlaybackId}, Position={Position})",
       fileName, _playbackId ?? "none", _position);
 
+    // Whether this stop is tearing down a real playback. Captured before
+    // _playbackId is cleared below, and used to keep the resume position write
+    // idempotent: this method zeroes _position but deliberately leaves
+    // _currentFile set, so a second stop would otherwise re-enter the save
+    // branch with _position == 0 and overwrite a good resume point with zero.
+    var hadLivePlayback = _playbackId != null;
+
     // Cancel playback monitoring
     _playbackCts?.Cancel();
 
@@ -880,11 +887,15 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       Logger.LogInformation(
         "🎵 FILE PLAYER AUDIO FLOW STOPPED: \"{FileName}\" removed from SoundFlow",
         fileName);
-      _playbackId = null;
     }
 
+    // Cleared regardless of whether a playback service is wired: _playbackId
+    // means "this source has a live playback session", and leaving it set after
+    // a stop makes the resume-position guard below read true forever.
+    _playbackId = null;
+
     // Save current position for next session
-    if (_currentFile != null)
+    if (_currentFile != null && hadLivePlayback)
     {
       _preferences.CurrentValue.LastSongPlayed = _currentFile;
       _preferences.CurrentValue.SongPositionMs = (long)_position.TotalMilliseconds;
@@ -959,11 +970,20 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       _identificationService.TrackIdentified -= OnTrackIdentified;
     }
 
-    // Save state for next session
+    // Save state for next session.
     if (_currentFile != null)
     {
       _preferences.CurrentValue.LastSongPlayed = _currentFile;
-      _preferences.CurrentValue.SongPositionMs = (long)_position.TotalMilliseconds;
+
+      // Only overwrite the resume position when this dispose is tearing down
+      // live playback. AudioManager.DisposeAsync stops the source and THEN
+      // disposes it, and StopCoreAsync zeroes _position on the way out — so an
+      // unconditional write here overwrote the just-saved resume point with
+      // zero on every clean shutdown.
+      if (_playbackId != null)
+      {
+        _preferences.CurrentValue.SongPositionMs = (long)_position.TotalMilliseconds;
+      }
     }
 
     CleanupDataProvider();

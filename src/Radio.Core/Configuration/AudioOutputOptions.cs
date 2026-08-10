@@ -146,10 +146,14 @@ public class GoogleCastOutputOptions
   /// silent indefinitely — across restarts, because the bad preference is
   /// persisted. This timeout is the watchdog that bounds that failure.
   ///
-  /// Must comfortably exceed the 3 s discovery settle plus receiver launch
-  /// (~1-3 s). Default: 25 seconds.
+  /// Must comfortably exceed the connect chain's own bounded worst case, which
+  /// is roughly 25 s before any unbounded network time: 3 s discovery settle +
+  /// up to 6 s of port probing (two 3 s TCP timeouts in FindReachablePortAsync)
+  /// + 250 ms receiver settle + ~16 s of media-load retries (5 s attempt, 1 s
+  /// delay, 10 s retry). Default: 40 seconds, which leaves real headroom for a
+  /// slow-but-working Chromecast rather than tearing one down mid-connect.
   /// </summary>
-  public int StartupConnectTimeoutSeconds { get; set; } = 25;
+  public int StartupConnectTimeoutSeconds { get; set; } = 40;
 
   /// <summary>
   /// Gets or sets the file path for caching discovered Cast devices.
