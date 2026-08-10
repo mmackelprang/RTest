@@ -886,7 +886,15 @@ public class AudioEngineInitializationService : IHostedService
       // Stop the Cast confirm-or-roll-back work before tearing anything down, so
       // its watchdog can't fire a fallback (and a config write) mid-shutdown.
       // Bounded drain: this work is best-effort and must not delay shutdown.
-      await _serviceStoppingCts.CancelAsync();
+      try
+      {
+        await _serviceStoppingCts.CancelAsync();
+      }
+      catch (ObjectDisposedException)
+      {
+        // StopAsync called twice — already torn down.
+      }
+
       var castTask = CastAutoConnectTask;
       if (castTask != null)
       {
@@ -917,9 +925,22 @@ public class AudioEngineInitializationService : IHostedService
     }
     finally
     {
-      _serviceStoppingCts.Dispose();
-      _castResolvedCts.Dispose();
-      _fallbackLock.Dispose();
+      // Dispose only once the background work has actually finished — it holds a
+      // linked token source built from these, and the drain above is capped at 1s.
+      // If it is still running the process is exiting anyway, so leaving them to
+      // the process teardown is strictly safer than disposing underneath it.
+      var pending = CastAutoConnectTask;
+      if (pending == null || pending.IsCompleted)
+      {
+        _serviceStoppingCts.Dispose();
+        _castResolvedCts.Dispose();
+        _fallbackLock.Dispose();
+      }
+      else
+      {
+        _logger.LogDebug(
+          "Cast auto-connect task still running at shutdown — deferring synchronisation-primitive disposal");
+      }
     }
   }
 }
