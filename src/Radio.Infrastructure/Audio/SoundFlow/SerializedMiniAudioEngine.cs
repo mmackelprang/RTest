@@ -1,4 +1,6 @@
+using SoundFlow.Abstracts.Devices;
 using SoundFlow.Backends.MiniAudio;
+using SoundFlow.Structs;
 
 namespace Radio.Infrastructure.Audio.SoundFlow;
 
@@ -48,4 +50,48 @@ internal sealed class SerializedMiniAudioEngine : MiniAudioEngine
   /// </remarks>
   public override void UpdateAudioDevicesInfo() =>
     NativeAudioDeviceGate.Run(base.UpdateAudioDevicesInfo);
+
+  // Device open/switch drives the same context main loop that enumeration does
+  // (`ma_device_init__pulse` waits on `pa_operation`s by iterating it), so opening a device
+  // concurrently with an enumeration is the same race. These are reachable today: a device
+  // switch is dispatched fire-and-forget from DevicesController, and TryRecoverPlaybackDevice
+  // enumerates and then opens. Gating them here rather than at their call sites keeps that
+  // guarantee independent of the caller — which is the whole point of putting the gate on the
+  // engine type.
+  //
+  // KNOWN RESIDUAL: Start/Stop/Dispose on the returned AudioPlaybackDevice/AudioCaptureDevice
+  // also drive the main loop, and those live on SoundFlow device types this class cannot
+  // intercept. Closing that needs the gate taken at the call sites in SoundFlowAudioEngine.
+
+  public override AudioPlaybackDevice InitializePlaybackDevice(
+    DeviceInfo? deviceInfo, AudioFormat format, DeviceConfig? config = null) =>
+    NativeAudioDeviceGate.Run(() => base.InitializePlaybackDevice(deviceInfo, format, config));
+
+  public override AudioCaptureDevice InitializeCaptureDevice(
+    DeviceInfo? deviceInfo, AudioFormat format, DeviceConfig? config = null) =>
+    NativeAudioDeviceGate.Run(() => base.InitializeCaptureDevice(deviceInfo, format, config));
+
+  public override FullDuplexDevice InitializeFullDuplexDevice(
+    DeviceInfo? playbackDeviceInfo, DeviceInfo? captureDeviceInfo, AudioFormat format,
+    DeviceConfig? config = null) =>
+    NativeAudioDeviceGate.Run(
+      () => base.InitializeFullDuplexDevice(playbackDeviceInfo, captureDeviceInfo, format, config));
+
+  public override AudioCaptureDevice InitializeLoopbackDevice(
+    AudioFormat format, DeviceConfig? config = null) =>
+    NativeAudioDeviceGate.Run(() => base.InitializeLoopbackDevice(format, config));
+
+  public override AudioPlaybackDevice SwitchDevice(
+    AudioPlaybackDevice oldDevice, DeviceInfo newDeviceInfo, DeviceConfig? config = null) =>
+    NativeAudioDeviceGate.Run(() => base.SwitchDevice(oldDevice, newDeviceInfo, config));
+
+  public override AudioCaptureDevice SwitchDevice(
+    AudioCaptureDevice oldDevice, DeviceInfo newDeviceInfo, DeviceConfig? config = null) =>
+    NativeAudioDeviceGate.Run(() => base.SwitchDevice(oldDevice, newDeviceInfo, config));
+
+  public override FullDuplexDevice SwitchDevice(
+    FullDuplexDevice oldDevice, DeviceInfo? newPlaybackInfo, DeviceInfo? newCaptureInfo,
+    DeviceConfig? config = null) =>
+    NativeAudioDeviceGate.Run(
+      () => base.SwitchDevice(oldDevice, newPlaybackInfo, newCaptureInfo, config));
 }

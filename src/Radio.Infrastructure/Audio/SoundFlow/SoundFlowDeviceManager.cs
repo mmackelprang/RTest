@@ -595,8 +595,10 @@ public class SoundFlowDeviceManager : IAudioDeviceManager, IDisposable
       }
       finally
       {
-        // Only dispose the engine if we created a temporary one
-        tempEngine?.Dispose();
+        // Only dispose the engine if we created a temporary one. Tearing a native context
+        // down (`ma_context_uninit`) drives its main loop just like enumeration does, and
+        // SerializedMiniAudioEngine cannot override Dispose, so the gate is taken here.
+        DisposeTemporaryEngine(tempEngine);
       }
     }
     catch (Exception ex)
@@ -754,7 +756,7 @@ public class SoundFlowDeviceManager : IAudioDeviceManager, IDisposable
       }
       finally
       {
-        tempEngine?.Dispose();
+        DisposeTemporaryEngine(tempEngine);
       }
     }
     catch (Exception ex)
@@ -773,6 +775,27 @@ public class SoundFlowDeviceManager : IAudioDeviceManager, IDisposable
     }
 
     return Task.FromResult<IReadOnlyList<DeviceDisplayInfo>>(result.AsReadOnly());
+  }
+
+  /// <summary>
+  /// Disposes a temporary enumeration engine under the process-wide gate.
+  /// </summary>
+  /// <remarks>
+  /// <c>ma_context_uninit</c> drives the context's PulseAudio main loop exactly as
+  /// enumeration does, and <see cref="SerializedMiniAudioEngine"/> cannot override
+  /// <c>Dispose</c> (it is not virtual on the SoundFlow base), so the gate is taken here
+  /// instead. The realistic collision is a shutdown-time teardown overlapping another
+  /// thread's enumeration. A null engine means the shared engine was used and must not be
+  /// disposed.
+  /// </remarks>
+  private static void DisposeTemporaryEngine(MiniAudioEngine? tempEngine)
+  {
+    if (tempEngine is null)
+    {
+      return;
+    }
+
+    NativeAudioDeviceGate.Run(tempEngine.Dispose);
   }
 
   /// <summary>
@@ -1014,7 +1037,7 @@ public class SoundFlowDeviceManager : IAudioDeviceManager, IDisposable
     }
     finally
     {
-      tempEngine?.Dispose();
+      DisposeTemporaryEngine(tempEngine);
     }
     return null;
   }
