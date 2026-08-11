@@ -183,6 +183,37 @@ Exception: WinRT BT APIs and NAudio WASAPI are Windows-only behind conditional c
 - Comment internal logic, edge cases, protocol details
 - Explicit type annotations preferred
 
+## Pre-Merge Review
+
+Checks the reviewer runs on every PR, on top of the generic pass. Short list — these are the
+failure modes this repo actually ships, not a general-purpose rubric.
+
+- **Do comments, log messages, and XML docs assert only what the code actually does?** Flag any
+  comment claiming an invariant the code does not enforce — *"this lock guards every access"*,
+  *"X is the only code that does Y"*, *"if the state is already Z"* — and any log message
+  describing an action stronger than what actually occurred. Where a comment states a
+  **precondition** that makes unsynchronized or unguarded access safe, verify that precondition is
+  still true *in this diff*.
+
+  *Why, so this stops getting rediscovered:* the repo has shipped three such mismatches, two of
+  which caused real bugs.
+  1. `SoundFlowMasterMixer` logs *"Removed audio source … from mixer"* while only mutating a
+     `List<IAudioSource>` — the real detach lives elsewhere. A later fix (`03a6fea`) trusted the
+     wording, landed one layer too high, and silently did nothing for months.
+  2. `BluetoothAudioSource` carried *"If source is already Playing … route to mixer now"* two
+     lines below an assignment of `State = Ready`, making the `Playing` branch statically
+     unreachable — BT song recognition was silently disabled (fixed in #469).
+  3. `GoogleCastOutput._lifecycleLock` was documented as guarding *every* read/write of
+     `_client` / `_connectedReceiver`; most reads were always outside it. Caught before it cost
+     anything — but note *how*. The corrected comment's own first draft overclaimed in turn
+     (*"never a null one"* — the field is in fact null before the first `InitializeAsync`), and
+     only a reviewer briefed to actively **falsify** it caught that. Reviewing a comment for
+     plausibility is not the same as checking it against the code.
+
+  A wrong comment is worse than no comment: it survives the code it described, and the next
+  engineer debugs the description instead of the behavior. When a comment offers a reason a thing
+  is safe, the reason is the claim to check — not the conclusion.
+
 ## Database Paths
 
 Configured via `appsettings.json` Database section:
