@@ -457,8 +457,15 @@ public class SoundFlowAudioEngine : IAudioEngine
         "Initializing SoundFlow audio engine (SampleRate: {SampleRate}, Channels: {Channels}, BufferSize: {BufferSize})",
         _options.SampleRate, _options.Channels, _options.BufferSize);
 
-      // Initialize SoundFlow MiniAudioEngine
-      _engine = new MiniAudioEngine();
+      // Initialize SoundFlow MiniAudioEngine.
+      //
+      // SerializedMiniAudioEngine, not a raw MiniAudioEngine: its UpdateAudioDevicesInfo
+      // override routes native device enumeration through NativeAudioDeviceGate. That is
+      // what serializes this class's own enumeration call sites — the one below and the one
+      // in TryRecoverPlaybackDevice — against the device manager's and the 30-second
+      // hot-plug timer's, without either call site having to take a lock itself. Two threads
+      // inside MiniAudio's PulseAudio main loop abort the process; see NativeAudioDeviceGate.
+      _engine = SerializedMiniAudioEngine.Create();
 
       // Share the engine with device manager so hot-plug detection reuses it
       // instead of creating/disposing temporary engines (which leak native memory
