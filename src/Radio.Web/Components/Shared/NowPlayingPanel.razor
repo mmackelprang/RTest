@@ -1027,13 +1027,54 @@
   {
     try
     {
+      // The audible change stays immediate — this is the whole point of the slider.
       await AudioApi.SetVolumeAsync((float)newVolume);
-      await SavePreferenceAsync("volume", newVolume);
+
+      // The *persistence* of the volume is debounced. See QueueVolumePreferenceSave.
+      QueueVolumePreferenceSave(newVolume);
     }
     catch (Exception ex)
     {
       Logger.LogError(ex, "Error changing volume");
     }
+  }
+
+  // Volume-preference persistence uses the same trailing-edge debounce as the source-gain
+  // slider above (OnGainSliderChanged / OnGainDebounceElapsed) — one timer, re-armed via
+  // Change() rather than dispose+recreate.
+  //
+  // Why it matters beyond saving writes: a slider drag emits a value-changed event per
+  // pixel, and persisting each one wrote ui.playback on every tick (13 writes inside one
+  // second were captured in the journal). Each write reloads
+  // IOptionsMonitor<AudioOutputOptions> on the API side, and each reload re-enumerates
+  // audio devices — so a single drag put more than a dozen threads into MiniAudio's
+  // non-thread-safe PulseAudio main loop and aborted radio-api on 2026-08-10.
+  // NativeAudioDeviceGate makes that safe on the server; this removes the fan-out at
+  // its source so the gate is not the only thing standing between a drag and a crash.
+  private static readonly TimeSpan VolumePreferenceDebounce = TimeSpan.FromMilliseconds(300);
+  private System.Threading.Timer? _volumePrefDebounceTimer;
+  private double _pendingVolumePreference;
+
+  private void QueueVolumePreferenceSave(double newVolume)
+  {
+    _pendingVolumePreference = newVolume;
+    if (_volumePrefDebounceTimer != null)
+    {
+      _volumePrefDebounceTimer.Change(VolumePreferenceDebounce, Timeout.InfiniteTimeSpan);
+    }
+    else
+    {
+      _volumePrefDebounceTimer = new System.Threading.Timer(
+        OnVolumePreferenceDebounceElapsed, null,
+        VolumePreferenceDebounce, Timeout.InfiniteTimeSpan);
+    }
+  }
+
+  private async void OnVolumePreferenceDebounceElapsed(object? _)
+  {
+    // SavePreferenceAsync owns its own try/catch, which is what keeps this async void
+    // callback from being able to throw onto a timer thread.
+    await SavePreferenceAsync("volume", _pendingVolumePreference);
   }
 
   private void OnAlbumArtError()
@@ -1085,6 +1126,7 @@
     // torn down while the popover was open (page navigation, hot reload).
     GainPopover.Close();
     _gainDebounceTimer?.Dispose();
+    _volumePrefDebounceTimer?.Dispose();
     _nowPlayingPollTimer?.Dispose();
     await Task.CompletedTask;
   }
