@@ -54,16 +54,22 @@ public class GoogleCastOutputConcurrencyTests
       teardownRan = true;
       try { await output.DisconnectAsync(); }
       catch { /* teardown of a half-built connection may fail; not the point */ }
+
+      // Stop listening before handing control back. The connect proceeds to a
+      // Cast handshake we have no intention of satisfying; with the socket gone
+      // it fails immediately with connection-refused instead of parking a task
+      // on it for the rest of the run. That lingering work is not hypothetical —
+      // it measurably destabilised the timing-sensitive Bluetooth fixtures.
+      listener.Stop();
     };
 
     try
     {
-      // Bounded: the listener speaks no Cast protocol, so ConnectChromecast has
-      // nothing to complete against and would otherwise wait indefinitely. The
-      // assertions below only depend on what happened at the hook, which fires
-      // before that call.
+      // Safety net only — with the listener stopped in the hook the connect
+      // fails in milliseconds. The assertions below depend only on what happened
+      // at the hook, which fires before the handshake.
       await output.ConnectAsync(Device("cast-a", port))
-        .WaitAsync(TimeSpan.FromSeconds(10));
+        .WaitAsync(TimeSpan.FromSeconds(5));
     }
     catch (NullReferenceException ex)
     {
@@ -71,7 +77,7 @@ public class GoogleCastOutputConcurrencyTests
     }
     catch (Exception)
     {
-      // Connect failing/timing out against a non-Chromecast listener is expected.
+      // Connect failing against a socket we just closed is the expected path.
     }
 
     Assert.True(teardownRan, "hook did not fire — the test never reached the racing window");
@@ -79,6 +85,53 @@ public class GoogleCastOutputConcurrencyTests
 
     // And the teardown must have won: a superseded connect may not resurrect it.
     Assert.Null(output.ConnectedDevice);
+
+    // Losing the race must leave the output USABLE. ConnectAsync sets
+    // Connecting on entry and refuses to run unless the state is Ready/Stopped,
+    // while ValidateCanInitialize only accepts Created/Error — so a path that
+    // returns while still Connecting wedges Cast until the process restarts.
+    Assert.NotEqual(AudioOutputState.Connecting, output.State);
+  }
+
+  [Fact]
+  public async Task ConnectThatSucceedsButLostTheRace_DiscardsItselfAndStaysUsable()
+  {
+    // The supersede-after-SUCCESS path — the entire reason the generation check
+    // exists, and unreachable offline without substituting the transport, since
+    // a fake socket can never complete a Cast handshake and the connect would
+    // instead divert into the error handler.
+    //
+    // Losing this race is the NORMAL outcome of a teardown landing during
+    // startup auto-connect, so it must not be a one-way door: ConnectAsync sets
+    // Connecting on entry and refuses to run unless Ready/Stopped, and
+    // ValidateCanInitialize only accepts Created/Error — returning while still
+    // Connecting wedges Cast until the process restarts.
+    // The listener only has to satisfy the reachability probe that runs before
+    // the transport; the override means nothing is ever spoken over it.
+    using var listener = StartLoopbackListener(out var port);
+    await using var output = BuildOutput();
+    await output.InitializeAsync();
+
+    // A teardown lands while this connect is in flight...
+    output.ConnectRaceHookForTests = async () =>
+    {
+      try { await output.DisconnectAsync(); } catch { /* not the point */ }
+    };
+    // ...and then the connect nonetheless "succeeds" on the wire.
+    output.ConnectTransportOverrideForTests = _ => Task.CompletedTask;
+
+    await output.ConnectAsync(Device("cast-a", port));
+
+    // The teardown won: the superseded connect must not have published itself.
+    Assert.Null(output.ConnectedDevice);
+    Assert.NotEqual(AudioOutputState.Connecting, output.State);
+
+    // And the output must still be connectable. This is the wedge assertion:
+    // from Connecting, ConnectAsync throws "Cannot connect in state ...".
+    output.ConnectRaceHookForTests = null;
+    await output.ConnectAsync(Device("cast-b", port));
+
+    Assert.Equal("cast-b", output.ConnectedDevice?.Id);
   }
 
   // --- helpers ---

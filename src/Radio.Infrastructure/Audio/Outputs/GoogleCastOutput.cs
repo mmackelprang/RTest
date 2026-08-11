@@ -52,6 +52,16 @@ public class GoogleCastOutput : AudioOutputBase
   /// loop lands on it. Null (and therefore free) in production.
   /// </summary>
   internal Func<Task>? ConnectRaceHookForTests { get; set; }
+
+  /// <summary>
+  /// Test seam: substitutes the SharpCaster transport connect. Without it the
+  /// supersede-after-a-SUCCESSFUL-connect path is unreachable offline — a fake
+  /// socket can never complete a Cast handshake, so the connect always throws
+  /// and diverts into the error handler instead. That path is the whole point of
+  /// the generation check, so it needs to be exercisable without hardware.
+  /// Null (and therefore free) in production.
+  /// </summary>
+  internal Func<ChromecastReceiver, Task>? ConnectTransportOverrideForTests { get; set; }
   private string? _streamUrl;
 
   // Direct Channel streaming (experimental)
@@ -444,24 +454,30 @@ public class GoogleCastOutput : AudioOutputBase
 
     State = AudioOutputState.Connecting;
 
-    // Claim this attempt. Anything that supersedes it (another connect, a
-    // disconnect, disposal) bumps the generation, and the commit below then
-    // abandons rather than publishing over the winner.
-    int myGeneration;
-    ChromecastClient? client;
-    await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+    // Everything from here on must leave State somewhere recoverable. Connecting
+    // is a dead end for this class: ConnectAsync refuses to run unless the state
+    // is Ready/Stopped, and ValidateCanInitialize only accepts Created/Error — so
+    // any path that returns while still Connecting wedges the output until the
+    // process restarts. That includes the claim block below, which can throw
+    // ObjectDisposedException on a disposed lock.
     try
     {
-      myGeneration = ++_connectionGeneration;
-      client = _client;
-    }
-    finally
-    {
-      _lifecycleLock.Release();
-    }
+      // Claim this attempt. Anything that supersedes it (another connect, a
+      // disconnect, disposal) bumps the generation, and the commit below then
+      // abandons rather than publishing over the winner.
+      int myGeneration;
+      ChromecastClient? client;
+      await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+      try
+      {
+        myGeneration = ++_connectionGeneration;
+        client = _client;
+      }
+      finally
+      {
+        _lifecycleLock.Release();
+      }
 
-    try
-    {
       _logger.LogInformation(
         "Connecting to Chromecast: {Name} at {IP}:{Port}",
         device.FriendlyName, device.IpAddress, device.Port);
@@ -519,7 +535,14 @@ public class GoogleCastOutput : AudioOutputBase
       }
 
       _logger.LogDebug("Calling ConnectChromecast with URI: {Uri}", receiver.DeviceUri);
-      await client.ConnectChromecast(receiver).ConfigureAwait(false);
+      if (ConnectTransportOverrideForTests != null)
+      {
+        await ConnectTransportOverrideForTests(receiver).ConfigureAwait(false);
+      }
+      else
+      {
+        await client.ConnectChromecast(receiver).ConfigureAwait(false);
+      }
 
       // Publish only if nothing superseded us while we were on the network.
       if (!await TryPublishConnectionAsync(myGeneration, client, receiver, device, cancellationToken).ConfigureAwait(false))
@@ -529,6 +552,12 @@ public class GoogleCastOutput : AudioOutputBase
           device.FriendlyName);
         try { await client.DisconnectAsync().ConfigureAwait(false); }
         catch (Exception ex) { _logger.LogDebug(ex, "Error discarding superseded Cast connection"); }
+
+        // Hand the state machine back to the winner. Returning while still
+        // Connecting would leave the output permanently unusable — and losing
+        // this race is the NORMAL outcome of a teardown during startup
+        // auto-connect, not an edge case.
+        State = AudioOutputState.Ready;
         return;
       }
 
