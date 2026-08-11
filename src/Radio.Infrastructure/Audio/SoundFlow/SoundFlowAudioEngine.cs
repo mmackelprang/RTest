@@ -577,7 +577,14 @@ public class SoundFlowAudioEngine : IAudioEngine
       if (_playbackDevice != null)
       {
         AttachModifiersToPlaybackDevice();
-        _playbackDevice.Start();
+
+        // Starting a device drives the same PulseAudio main loop that enumeration does
+        // (`ma_device_start__pulse` corks/uncorks the stream and waits by iterating it), so
+        // it takes NativeAudioDeviceGate like every other native device call. One call per
+        // gated region on purpose — the abort needs two threads inside the main loop at the
+        // same time, not a particular interleaving, so serializing each native call is
+        // sufficient and keeps the hold time to that call alone.
+        NativeAudioDeviceGate.Run(_playbackDevice.Start);
         _logger.LogInformation("Playback device started with all modifiers attached");
       }
 
@@ -802,7 +809,9 @@ public class SoundFlowAudioEngine : IAudioEngine
       _currentDeviceIndex = 0;
 
       _playbackDevice.MasterMixer.Volume = _localOutputMuted ? 0f : _masterMixer.GetEffectiveVolume();
-      _playbackDevice.Start();
+
+      // Native main-loop call — gated. See the note in InitializeAsync.
+      NativeAudioDeviceGate.Run(_playbackDevice.Start);
 
       // Re-attach all modifiers (including visualization tap, which was previously missing here)
       AttachModifiersToPlaybackDevice();
@@ -857,11 +866,15 @@ public class SoundFlowAudioEngine : IAudioEngine
 
     try
     {
-      // Stop and dispose current playback device
+      // Stop and dispose current playback device. Both drive the PulseAudio main loop
+      // (`ma_device_stop`/`ma_device_uninit` wait on pa_operations by iterating it), and this
+      // whole method runs on a thread pool thread — DevicesController dispatches it
+      // fire-and-forget — so it can land on top of the 30s hot-plug enumeration.
       if (_playbackDevice != null)
       {
-        _playbackDevice.Stop();
-        _playbackDevice.Dispose();
+        var retiringDevice = _playbackDevice;
+        NativeAudioDeviceGate.Run(retiringDevice.Stop);
+        NativeAudioDeviceGate.Run(retiringDevice.Dispose);
         _playbackDevice = null;
       }
 
@@ -872,10 +885,13 @@ public class SoundFlowAudioEngine : IAudioEngine
       // Apply current volume/mute state
       _playbackDevice.MasterMixer.Volume = _localOutputMuted ? 0f : _masterMixer.GetEffectiveVolume();
 
-      // Re-attach all modifiers to the new device
+      // Re-attach all modifiers to the new device. Deliberately outside the gate: it takes
+      // the mixer's own lock, and nesting a mixer lock inside the gate would introduce a
+      // gate -> mixer lock ordering that nothing else in the codebase needs.
       AttachModifiersToPlaybackDevice();
 
-      _playbackDevice.Start();
+      // Native main-loop call — gated. See the note in InitializeAsync.
+      NativeAudioDeviceGate.Run(_playbackDevice.Start);
 
       _logger.LogInformation("Successfully switched to playback device: {DeviceName}", newDevice.Name);
 
@@ -1181,8 +1197,11 @@ public class SoundFlowAudioEngine : IAudioEngine
     {
       try
       {
-        _playbackDevice.Stop();
-        _playbackDevice.Dispose();
+        // Gated: shutdown teardown can overlap an in-flight hot-plug enumeration, and both
+        // drive the same PulseAudio main loop.
+        var retiringDevice = _playbackDevice;
+        NativeAudioDeviceGate.Run(retiringDevice.Stop);
+        NativeAudioDeviceGate.Run(retiringDevice.Dispose);
       }
       catch (Exception ex)
       {

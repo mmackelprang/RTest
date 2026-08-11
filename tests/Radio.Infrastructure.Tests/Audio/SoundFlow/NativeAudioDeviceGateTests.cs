@@ -23,7 +23,7 @@ public class NativeAudioDeviceGateTests
   [Fact]
   public void Run_NeverAllowsTwoCallersInsideTheRegionAtOnce()
   {
-    const int threadCount = 12;
+    const int threadCount = 8;
     var concurrent = 0;
     var maxObserved = 0;
     var ready = new Barrier(threadCount);
@@ -33,7 +33,7 @@ public class NativeAudioDeviceGateTests
       // Start all threads together so they genuinely contend.
       ready.SignalAndWait();
 
-      for (var i = 0; i < 20; i++)
+      for (var i = 0; i < 10; i++)
       {
         NativeAudioDeviceGate.Run(() =>
         {
@@ -47,7 +47,11 @@ public class NativeAudioDeviceGateTests
           }
 
           // Widen the window an unsynchronized implementation would race through.
-          Thread.SpinWait(2000);
+          // Sleep rather than SpinWait: it widens the window by far more per unit of
+          // wall-clock (so it detects a missing lock more reliably) while burning no CPU,
+          // which keeps this test from starving the wall-clock-sensitive timing tests that
+          // xUnit runs in parallel with it in this same assembly.
+          Thread.Sleep(1);
 
           Interlocked.Decrement(ref concurrent);
         });

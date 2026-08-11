@@ -59,9 +59,10 @@ internal sealed class SerializedMiniAudioEngine : MiniAudioEngine
   // guarantee independent of the caller — which is the whole point of putting the gate on the
   // engine type.
   //
-  // KNOWN RESIDUAL: Start/Stop/Dispose on the returned AudioPlaybackDevice/AudioCaptureDevice
-  // also drive the main loop, and those live on SoundFlow device types this class cannot
-  // intercept. Closing that needs the gate taken at the call sites in SoundFlowAudioEngine.
+  // Start/Stop/Dispose on the returned AudioPlaybackDevice/AudioCaptureDevice also drive the
+  // main loop, but they live on SoundFlow device types this class cannot intercept, so those
+  // take the gate at their call sites in SoundFlowAudioEngine instead. Any new device
+  // lifecycle call there must do the same — the engine override cannot cover it for you.
 
   public override AudioPlaybackDevice InitializePlaybackDevice(
     DeviceInfo? deviceInfo, AudioFormat format, DeviceConfig? config = null) =>
