@@ -137,6 +137,25 @@ public class GoogleCastOutputOptions
   public float DefaultVolume { get; set; } = 0.7f;
 
   /// <summary>
+  /// Gets or sets how long startup waits for a persisted "google-cast" output
+  /// to actually reach <see cref="Radio.Core.Interfaces.Audio.AudioOutputState.Streaming"/>
+  /// before giving up and falling back to the local output.
+  ///
+  /// Selecting Cast in the output picker mutes the local sink; if the Cast
+  /// device never connects, nothing unmutes it and the wired speakers stay
+  /// silent indefinitely — across restarts, because the bad preference is
+  /// persisted. This timeout is the watchdog that bounds that failure.
+  ///
+  /// Must comfortably exceed the connect chain's own bounded worst case, which
+  /// is roughly 25 s before any unbounded network time: 3 s discovery settle +
+  /// up to 6 s of port probing (two 3 s TCP timeouts in FindReachablePortAsync)
+  /// + 250 ms receiver settle + ~16 s of media-load retries (5 s attempt, 1 s
+  /// delay, 10 s retry). Default: 40 seconds, which leaves real headroom for a
+  /// slow-but-working Chromecast rather than tearing one down mid-connect.
+  /// </summary>
+  public int StartupConnectTimeoutSeconds { get; set; } = 40;
+
+  /// <summary>
   /// Gets or sets the file path for caching discovered Cast devices.
   /// </summary>
   public string CacheFilePath { get; set; } = "./data/config/cast-devices.json";

@@ -33,6 +33,43 @@ public class AudioEngineInitializationService : IHostedService
   private readonly HttpStreamOutput? _httpOutput;
   private readonly IServiceProvider _serviceProvider;
 
+  // Cancelled by StopAsync so the Cast confirm-or-roll-back background work
+  // stops instead of racing engine tear-down (it would otherwise still be
+  // sitting in its watchdog delay when the host shuts down).
+  private readonly CancellationTokenSource _serviceStoppingCts = new();
+
+  // Serialises the local-output rollback so the explicit bail-out paths and the
+  // watchdog can never both drive SetActiveOutputAsync.
+  private readonly SemaphoreSlim _fallbackLock = new(1, 1);
+  private bool _localFallbackApplied;
+
+  // Cancelled once the output question is settled in local's favour. This both
+  // retires the watchdog and abandons any still-running Cast connect attempt —
+  // without the latter, a connect that completes after the rollback would start
+  // streaming to Cast while the local sink is unmuted, recreating the very
+  // dual-output bug the startup mute exists to prevent.
+  private readonly CancellationTokenSource _castResolvedCts = new();
+
+  /// <summary>
+  /// The background "confirm Cast is really streaming, else fall back to local"
+  /// task, retained so shutdown can drain it and tests can await the outcome
+  /// deterministically instead of racing a fire-and-forget task.
+  /// Null when the persisted output was not google-cast.
+  /// </summary>
+  internal Task? CastAutoConnectTask { get; private set; }
+
+  /// <summary>
+  /// How long to let Cast discovery settle before looking in the device cache.
+  /// Test seam — production always uses the 3 s default.
+  /// </summary>
+  internal TimeSpan CastDiscoverySettleDelay { get; set; } = TimeSpan.FromSeconds(3);
+
+  /// <summary>
+  /// Overrides <see cref="GoogleCastOutputOptions.StartupConnectTimeoutSeconds"/>.
+  /// Test seam so watchdog tests don't wait the production timeout.
+  /// </summary>
+  internal TimeSpan? CastConnectTimeoutOverride { get; set; }
+
   /// <summary>
   /// Initializes a new instance of the AudioEngineInitializationService.
   /// </summary>
@@ -199,10 +236,16 @@ public class AudioEngineInitializationService : IHostedService
 
         // Cast still needs background auto-connect to the saved default device.
         // The gate handles activation; auto-connect remains here since it
-        // depends on AudioPreferences.DefaultCastDeviceId lookup.
+        // depends on the persisted default-Cast-device lookup.
+        //
+        // IMPORTANT: the gate above has just muted the local sink. "google-cast"
+        // is only a *desired* output at this point — nothing has connected yet.
+        // StartCastAutoConnect owns confirming it, and rolling back to the local
+        // output if it cannot be confirmed, so the local sink is never left
+        // muted for a Cast device that never arrives.
         if (preferredOutputId == "google-cast")
         {
-          StartCastAutoConnect(cancellationToken);
+          CastAutoConnectTask = StartCastAutoConnect(cancellationToken);
         }
       }
       else
@@ -391,11 +434,21 @@ public class AudioEngineInitializationService : IHostedService
   }
 
   /// <summary>
-  /// Starts background auto-connect to the saved default Cast device.
-  /// Assumes Cast + HTTP outputs are already activated by
-  /// <see cref="IAudioEngine.SetActiveOutputAsync"/>.
+  /// Starts background auto-connect to the saved default Cast device and, either
+  /// way, guarantees the local output does not stay muted for a Cast device that
+  /// never becomes usable.
+  ///
+  /// The gate (<see cref="IAudioEngine.SetActiveOutputAsync"/>) has already muted
+  /// the local sink by the time this runs — that mute is correct and deliberate
+  /// (it is what keeps Cast and the soundbar from playing simultaneously), but it
+  /// nominates an output rather than confirming one. Every path out of this method
+  /// therefore either ends with Cast actually <c>Streaming</c> or rolls back to the
+  /// local output. The rollback goes through the gate specifically so it also
+  /// rewrites the persisted <c>AudioPreferences:CurrentOutput</c> — otherwise the
+  /// same inconsistent preference replays the failure on every subsequent restart.
   /// </summary>
-  private void StartCastAutoConnect(CancellationToken cancellationToken)
+  /// <returns>The background confirm-or-roll-back task.</returns>
+  private Task StartCastAutoConnect(CancellationToken cancellationToken)
   {
     var castOptions = _audioOutputOptions.Value.GoogleCast;
     var isDirectChannel = string.Equals(castOptions.StreamingMode, "DirectChannel", StringComparison.OrdinalIgnoreCase);
@@ -408,56 +461,336 @@ public class AudioEngineInitializationService : IHostedService
       _logger.LogInformation("DirectChannel mode: audio engine wired to Cast output");
     }
 
-    var prefs = _audioPreferences.CurrentValue;
-    if (string.IsNullOrEmpty(prefs.DefaultCastDeviceId) || _castOutput == null)
+    var timeout = CastConnectTimeoutOverride
+      ?? TimeSpan.FromSeconds(Math.Max(1, castOptions.StartupConnectTimeoutSeconds));
+
+    // Scheduled with CancellationToken.None and cancelled from inside instead, so
+    // the retained task always runs to completion rather than surfacing as a bare
+    // cancelled task to whoever awaits it.
+    return Task.Run(
+      () => RunCastAutoConnectAsync(isDirectChannel, castOptions.StreamingMode, timeout, cancellationToken),
+      CancellationToken.None);
+  }
+
+  /// <summary>
+  /// Attempts the Cast auto-connect, then independently watchdogs the result.
+  /// The attempt and the watchdog run concurrently so the watchdog also covers
+  /// bail-outs the attempt does not explicitly handle.
+  /// </summary>
+  private async Task RunCastAutoConnectAsync(
+    bool isDirectChannel,
+    string streamingMode,
+    TimeSpan timeout,
+    CancellationToken cancellationToken)
+  {
+    using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+      cancellationToken, _serviceStoppingCts.Token, _castResolvedCts.Token);
+    var ct = linkedCts.Token;
+
+    await Task.WhenAll(
+      TryConnectCastAsync(isDirectChannel, streamingMode, ct),
+      WatchdogCastStreamingAsync(timeout, ct)).ConfigureAwait(false);
+  }
+
+  /// <summary>
+  /// The auto-connect attempt. Every early return falls back to local first —
+  /// these are the paths that previously logged and left the local sink muted.
+  /// </summary>
+  private async Task TryConnectCastAsync(bool isDirectChannel, string streamingMode, CancellationToken ct)
+  {
+    try
     {
-      _logger.LogInformation("No default Cast device configured, Cast output activated but not connected");
+      var castDeviceId = await ResolveDefaultCastDeviceIdAsync(ct).ConfigureAwait(false);
+
+      // Bail-out 1: no default Cast device configured, or no Cast output at all.
+      if (string.IsNullOrEmpty(castDeviceId) || _castOutput == null)
+      {
+        _logger.LogWarning(
+          "Persisted output is google-cast but there is nothing to connect to " +
+          "(defaultCastDeviceConfigured={HasDevice}, castOutputAvailable={HasOutput})",
+          !string.IsNullOrEmpty(castDeviceId), _castOutput != null);
+        await FallBackToLocalOutputAsync("no default Cast device configured", ct).ConfigureAwait(false);
+        return;
+      }
+
+      _logger.LogInformation("Auto-connecting to default Cast device on startup: {Id}", castDeviceId);
+
+      // Capture the output-selection epoch BEFORE any connect work. The connect
+      // runs outside the engine's output lock (it is far too long to hold it),
+      // so this token is what proves at the end that nothing reselected the
+      // output while we were on the network.
+      var castEpoch = _audioEngine is SoundFlowAudioEngine epochEngine
+        ? await epochEngine.BeginCastConnectAsync(ct).ConfigureAwait(false)
+        : (int?)null;
+
+      // Give Cast discovery a moment to populate the cache.
+      await Task.Delay(CastDiscoverySettleDelay, ct).ConfigureAwait(false);
+
+      var cached = await _castOutput.GetCachedDevicesAsync(ct).ConfigureAwait(false);
+      var device = cached.FirstOrDefault(d => d.Id == castDeviceId);
+
+      // Bail-out 2: the saved device isn't on the network.
+      if (device == null)
+      {
+        _logger.LogWarning("Default Cast device {Id} not found in cache after startup, skipping auto-connect",
+          castDeviceId);
+        await FallBackToLocalOutputAsync("default Cast device not discovered", ct).ConfigureAwait(false);
+        return;
+      }
+
+      if (_castOutput.State == AudioOutputState.Created)
+      {
+        await _castOutput.InitializeAsync(ct).ConfigureAwait(false);
+      }
+
+      await _castOutput.ConnectAsync(device, ct).ConfigureAwait(false);
+
+      // Wire the HTTP audio stream (HttpMp3 mode only)
+      if (!isDirectChannel && _httpOutput?.State == AudioOutputState.Streaming)
+      {
+        var streamUrl = GetRoutableStreamUrl(_httpOutput.Mp3StreamUrl, _httpOutput.Port, device.IpAddress);
+        _castOutput.SetStreamUrl(streamUrl);
+      }
+
+      await _castOutput.StartAsync(ct).ConfigureAwait(false);
+
+      // Late-success guard, now decided by the engine under its output lock.
+      // Several calls in the connect chain above do not observe cancellation at
+      // all (the SharpCaster-facing ConnectChromecast / LaunchApplicationAsync /
+      // volume-sync calls), so the rollback can have fired and unmuted the local
+      // sink while we were parked inside one of them. Finishing the connect at
+      // that point would leave Cast streaming AND local unmuted — the dual-output
+      // bug the startup mute exists to prevent.
+      //
+      // Deliberately NOT a check of _localFallbackApplied here: reading a flag
+      // and then tearing down are two steps with a window between them, and the
+      // output can move inside that window. TryCommitCastConnectAsync does the
+      // check and the teardown under one acquisition of the engine's lock.
+      if (castEpoch.HasValue && _audioEngine is SoundFlowAudioEngine commitEngine &&
+          !await commitEngine.TryCommitCastConnectAsync(castEpoch.Value, CancellationToken.None).ConfigureAwait(false))
+      {
+        return;
+      }
+
+      _logger.LogInformation("Startup: Auto-connected to Cast device: {Name} (mode: {Mode})",
+        device.FriendlyName, streamingMode);
+
+      // Deliberately no "success" short-circuit beyond that: GoogleCastOutput
+      // .StartAsync returns having set state to Ready (not Streaming) when no
+      // receiver is actually attached. The watchdog distinguishes the two.
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+      // Host is shutting down — StopAsync owns tear-down. Do not rewrite the
+      // user's persisted output preference on the way out.
+    }
+    catch (Exception ex)
+    {
+      // Bail-out 3: anything else thrown mid-connect.
+      _logger.LogWarning(ex, "Failed to auto-connect to Cast device on startup");
+      await FallBackToLocalOutputAsync("Cast auto-connect failed", ct).ConfigureAwait(false);
+    }
+  }
+
+  /// <summary>
+  /// The durable guard: if Cast has not actually reached
+  /// <see cref="AudioOutputState.Streaming"/> within the timeout, roll back to the
+  /// local output. This covers the explicit bail-outs above plus any future path
+  /// that leaves Cast nominated-but-not-working.
+  /// </summary>
+  private async Task WatchdogCastStreamingAsync(TimeSpan timeout, CancellationToken ct)
+  {
+    try
+    {
+      await Task.Delay(timeout, ct).ConfigureAwait(false);
+    }
+    catch (OperationCanceledException)
+    {
       return;
     }
 
-    _logger.LogInformation("Auto-connecting to default Cast device on startup: {Name} ({Id})",
-      prefs.DefaultCastDeviceName, prefs.DefaultCastDeviceId);
+    // Already rolled back by one of the explicit bail-outs.
+    if (Volatile.Read(ref _localFallbackApplied))
+    {
+      return;
+    }
 
-    // Run auto-connect in background so it doesn't block startup
-    _ = Task.Run(async () =>
+    // Cast is genuinely working — the startup mute is correct, leave it alone.
+    if (_castOutput?.State == AudioOutputState.Streaming)
+    {
+      _logger.LogInformation("Cast output confirmed streaming — local output stays muted");
+      return;
+    }
+
+    _logger.LogWarning(
+      "Cast output did not reach Streaming within {Timeout}s (state={State}) — rolling back to local output",
+      timeout.TotalSeconds, _castOutput?.State.ToString() ?? "<no cast output>");
+
+    await FallBackToLocalOutputAsync("Cast not streaming before timeout", ct).ConfigureAwait(false);
+  }
+
+  /// <summary>
+  /// Resolves the default Cast device id, preferring the SQLite config store.
+  ///
+  /// <c>DevicesController</c> writes <c>AudioPreferences:DefaultCastDeviceId</c>
+  /// to the config store when the user sets a default Cast device, but
+  /// IOptionsMonitor only ever reflects appsettings.json — the same asymmetry
+  /// already called out for CurrentOutput in <see cref="ApplyStartupPreferencesAsync"/>.
+  /// Reading only IOptionsMonitor made a perfectly valid saved device invisible at
+  /// startup, which widened the window where Cast was nominated but unreachable.
+  /// </summary>
+  private async Task<string?> ResolveDefaultCastDeviceIdAsync(CancellationToken cancellationToken)
+  {
+    if (_configManager != null)
     {
       try
       {
-        // Give the Cast discovery a moment to populate cache
-        await Task.Delay(3000, cancellationToken);
-
-        var cached = await _castOutput.GetCachedDevicesAsync(cancellationToken);
-        var device = cached.FirstOrDefault(d => d.Id == prefs.DefaultCastDeviceId);
-        if (device == null)
+        var storeId = _configManager.CurrentStoreType == ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+        var persisted = await _configManager.GetValueAsync<string>(
+          storeId, "AudioPreferences:DefaultCastDeviceId", ct: cancellationToken).ConfigureAwait(false);
+        if (!string.IsNullOrEmpty(persisted))
         {
-          _logger.LogWarning("Default Cast device {Id} not found in cache after startup, skipping auto-connect",
-            prefs.DefaultCastDeviceId);
-          return;
+          _logger.LogInformation("Found persisted default Cast device: {DeviceId}", persisted);
+          return persisted;
         }
-
-        if (_castOutput.State == AudioOutputState.Created)
-        {
-          await _castOutput.InitializeAsync(cancellationToken);
-        }
-
-        await _castOutput.ConnectAsync(device, cancellationToken);
-
-        // Wire the HTTP audio stream (HttpMp3 mode only)
-        if (!isDirectChannel && _httpOutput?.State == AudioOutputState.Streaming)
-        {
-          var streamUrl = GetRoutableStreamUrl(_httpOutput.Mp3StreamUrl, _httpOutput.Port, device.IpAddress);
-          _castOutput.SetStreamUrl(streamUrl);
-        }
-
-        await _castOutput.StartAsync(cancellationToken);
-        _logger.LogInformation("Startup: Auto-connected to Cast device: {Name} (mode: {Mode})",
-          device.FriendlyName, castOptions.StreamingMode);
       }
       catch (Exception ex)
       {
-        _logger.LogWarning(ex, "Failed to auto-connect to Cast device on startup");
+        _logger.LogDebug(ex, "Could not read persisted default Cast device from config store");
       }
-    }, cancellationToken);
+    }
+
+    var fromAppSettings = _audioPreferences.CurrentValue.DefaultCastDeviceId;
+    return string.IsNullOrEmpty(fromAppSettings) ? null : fromAppSettings;
+  }
+
+  /// <summary>
+  /// Rolls the active output back to a local device, unmuting the local sink and
+  /// persisting the corrected preference. Idempotent on success; a transient
+  /// failure (e.g. no devices enumerated yet) leaves the door open for the
+  /// watchdog to retry.
+  /// </summary>
+  private async Task FallBackToLocalOutputAsync(string reason, CancellationToken cancellationToken)
+  {
+    try
+    {
+      await _fallbackLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+    catch (OperationCanceledException)
+    {
+      return;
+    }
+    catch (ObjectDisposedException)
+    {
+      // Raced shutdown disposal. SemaphoreSlim.WaitAsync checks disposal before
+      // it checks the token, so a cancelled token does not pre-empt this.
+      return;
+    }
+
+    bool resolved;
+    try
+    {
+      resolved = await ApplyLocalFallbackAsync(reason, cancellationToken).ConfigureAwait(false);
+    }
+    finally
+    {
+      _fallbackLock.Release();
+    }
+
+    // Signalled outside the lock: cancelling runs continuations synchronously,
+    // and doing that while holding the semaphore invites surprises.
+    if (resolved)
+    {
+      // Retire the watchdog and abandon any in-flight Cast connect.
+      try
+      {
+        await _castResolvedCts.CancelAsync().ConfigureAwait(false);
+      }
+      catch (ObjectDisposedException)
+      {
+        // Raced service shutdown; nothing left to signal.
+      }
+    }
+  }
+
+  /// <summary>
+  /// The guarded body of the rollback. Runs under <c>_fallbackLock</c>.
+  /// </summary>
+  /// <returns>
+  /// True when the output question is settled and no further rollback should be
+  /// attempted; false when nothing was done and a later attempt may still help.
+  /// </returns>
+  private async Task<bool> ApplyLocalFallbackAsync(string reason, CancellationToken cancellationToken)
+  {
+    try
+    {
+      if (_localFallbackApplied)
+      {
+        return false;
+      }
+
+      // Don't stomp a newer choice: by watchdog time the user may have picked a
+      // different output through the UI. A null ActiveOutputId means the engine
+      // never reported one, so treat it as "still ours" and proceed — failing
+      // open here is what keeps the local sink from staying muted.
+      var active = _audioEngine.ActiveOutputId;
+      if (!string.IsNullOrEmpty(active) &&
+          !string.Equals(active, "google-cast", StringComparison.OrdinalIgnoreCase))
+      {
+        _logger.LogInformation(
+          "Skipping local-output fallback ({Reason}): active output is now {ActiveOutput}", reason, active);
+        Volatile.Write(ref _localFallbackApplied, true);
+        return true;
+      }
+
+      // Re-enumerate rather than reusing the startup snapshot — the watchdog can
+      // fire tens of seconds later, by which time the device list may differ.
+      var devices = await _deviceManager.GetOutputDevicesAsync(cancellationToken).ConfigureAwait(false);
+      var target = devices.FirstOrDefault(d => d.IsDefault) ?? devices.FirstOrDefault();
+      if (target == null)
+      {
+        // Nothing to unmute: with no output device there is no local playback
+        // device either. Left retryable on purpose.
+        _logger.LogError(
+          "Cast output unusable ({Reason}) and no local output device is available — " +
+          "cannot restore local audio", reason);
+        return false;
+      }
+
+      _logger.LogWarning(
+        "Falling back to local output \"{DeviceName}\" ({DeviceId}) because Cast could not be confirmed ({Reason})",
+        target.Name, target.Id, reason);
+
+      try
+      {
+        await _deviceManager.SetOutputDeviceAsync(target.Id, cancellationToken).ConfigureAwait(false);
+      }
+      catch (Exception ex)
+      {
+        // Non-fatal: the gate call below still unmutes and persists.
+        _logger.LogWarning(ex, "Fallback: could not select local output device {DeviceId}", target.Id);
+      }
+
+      // The gate tears down the half-open Cast/HTTP outputs, unmutes the local
+      // sink, and persists AudioPreferences:CurrentOutput so the next restart
+      // does not replay this failure.
+      await _audioEngine.SetActiveOutputAsync(target.Id, cancellationToken).ConfigureAwait(false);
+      Volatile.Write(ref _localFallbackApplied, true);
+
+      _logger.LogInformation(
+        "Local output \"{DeviceName}\" restored and unmuted after Cast fallback", target.Name);
+      return true;
+    }
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+    {
+      // Shutting down — leave state alone.
+      return false;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to fall back to local output after Cast could not be confirmed");
+      return false;
+    }
   }
 
   /// <summary>
@@ -583,6 +916,24 @@ public class AudioEngineInitializationService : IHostedService
     {
       _logger.LogInformation("Stopping audio engine...");
 
+      // Stop the Cast confirm-or-roll-back work before tearing anything down, so
+      // its watchdog can't fire a fallback (and a config write) mid-shutdown.
+      // Bounded drain: this work is best-effort and must not delay shutdown.
+      try
+      {
+        await _serviceStoppingCts.CancelAsync();
+      }
+      catch (ObjectDisposedException)
+      {
+        // StopAsync called twice — already torn down.
+      }
+
+      var castTask = CastAutoConnectTask;
+      if (castTask != null)
+      {
+        await Task.WhenAny(castTask, Task.Delay(TimeSpan.FromSeconds(1), CancellationToken.None));
+      }
+
       // Graceful Cast shutdown: stop media + CLOSE_APP + disconnect receiver
       // so the Chromecast returns to its default state instead of holding a
       // stale session that the next startup has to fight through. Single
@@ -604,6 +955,25 @@ public class AudioEngineInitializationService : IHostedService
     catch (Exception ex)
     {
       _logger.LogError(ex, "Error stopping audio engine");
+    }
+    finally
+    {
+      // Dispose only once the background work has actually finished — it holds a
+      // linked token source built from these, and the drain above is capped at 1s.
+      // If it is still running the process is exiting anyway, so leaving them to
+      // the process teardown is strictly safer than disposing underneath it.
+      var pending = CastAutoConnectTask;
+      if (pending == null || pending.IsCompleted)
+      {
+        _serviceStoppingCts.Dispose();
+        _castResolvedCts.Dispose();
+        _fallbackLock.Dispose();
+      }
+      else
+      {
+        _logger.LogDebug(
+          "Cast auto-connect task still running at shutdown — deferring synchronisation-primitive disposal");
+      }
     }
   }
 }

@@ -114,6 +114,88 @@ public class SoundFlowAudioEngineActiveOutputTests
     Assert.Contains(engine.ActiveOutputId, new[] { "google-cast", "playback-1" });
   }
 
+  // --- Cast connect epoch ---
+  //
+  // A Cast connect takes tens of seconds and runs OUTSIDE _activeOutputLock,
+  // because holding the gate that long would block the output picker — a hang is
+  // worse than the race. The epoch is what makes the unlocked connect safe: it
+  // cannot silently win a race it already lost.
+
+  [Fact]
+  public async Task TryCommitCastConnectAsync_NothingIntervened_CommitsAndLeavesCastUp()
+  {
+    var (engine, castMock, _, _) = BuildEngine();
+    await engine.SetActiveOutputAsync("google-cast");
+
+    var epoch = await engine.BeginCastConnectAsync();
+    var committed = await engine.TryCommitCastConnectAsync(epoch);
+
+    Assert.True(committed);
+    Assert.Equal("google-cast", engine.ActiveOutputId);
+    // A successful commit must NOT tear down the connection it just blessed.
+    castMock.Verify(c => c.StopAsync(It.IsAny<CancellationToken>()), Times.Never);
+  }
+
+  [Fact]
+  public async Task TryCommitCastConnectAsync_OutputSwitchedAwayDuringConnect_RejectsAndTearsDown()
+  {
+    // The dual-output window: the connect was in flight when the user (or the
+    // startup rollback) selected the soundbar. Local is now unmuted, so letting
+    // this connection stand would play on BOTH outputs.
+    var (engine, castMock, _, _) = BuildEngine(castState: AudioOutputState.Streaming);
+    await engine.SetActiveOutputAsync("google-cast");
+
+    var epoch = await engine.BeginCastConnectAsync();
+
+    // ... output reselected while the connect was on the network ...
+    await engine.SetActiveOutputAsync("playback-1");
+
+    var committed = await engine.TryCommitCastConnectAsync(epoch);
+
+    Assert.False(committed);
+    Assert.Equal("playback-1", engine.ActiveOutputId);
+    Assert.False(engine.IsLocalOutputMuted);
+    // Torn down: once by the switch itself, once by the rejected commit.
+    castMock.Verify(c => c.StopAsync(It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+  }
+
+  [Fact]
+  public async Task TryCommitCastConnectAsync_CastReselectedDuringConnect_StillRejectsStaleEpoch()
+  {
+    // Subtle case: the output ends up back on google-cast, but via a NEW
+    // selection. The in-flight connect still belongs to the superseded epoch and
+    // must not be blessed — the newer selection owns the connection now.
+    var (engine, _, _, _) = BuildEngine();
+    await engine.SetActiveOutputAsync("google-cast");
+
+    var epoch = await engine.BeginCastConnectAsync();
+
+    await engine.SetActiveOutputAsync("playback-1");
+    await engine.SetActiveOutputAsync("google-cast");
+
+    Assert.False(await engine.TryCommitCastConnectAsync(epoch));
+  }
+
+  [Fact]
+  public async Task BeginCastConnectAsync_DoesNotBlockConcurrentOutputSwitching()
+  {
+    // Guards the hang the epoch design exists to avoid: nothing in the
+    // begin/commit pair may hold _activeOutputLock across the connect itself.
+    var (engine, _, _, _) = BuildEngine();
+    await engine.SetActiveOutputAsync("google-cast");
+
+    var epoch = await engine.BeginCastConnectAsync();
+
+    // With the epoch merely captured (connect notionally in flight), the gate
+    // must still be free.
+    var switching = engine.SetActiveOutputAsync("playback-1");
+    var completed = await Task.WhenAny(switching, Task.Delay(TimeSpan.FromSeconds(5)));
+
+    Assert.Same(switching, completed);
+    await switching;
+    Assert.False(await engine.TryCommitCastConnectAsync(epoch));
+  }
+
   [Fact]
   public async Task SetActiveOutputAsync_NullOrEmpty_Throws()
   {

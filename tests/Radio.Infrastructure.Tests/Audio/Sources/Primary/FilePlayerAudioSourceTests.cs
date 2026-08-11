@@ -344,6 +344,49 @@ public class FilePlayerAudioSourceTests : IDisposable
   }
 
   [Fact]
+  public async Task StopAsync_CalledTwice_DoesNotClobberSavedResumePosition()
+  {
+    // StopCoreAsync zeroes _position but deliberately leaves _currentFile set,
+    // so a second stop used to re-enter the save branch with _position == 0 and
+    // overwrite a good resume point with zero. Reachable in ordinary use:
+    // AudioManager.SwitchSourceAsync stops the outgoing source unconditionally,
+    // so play a file -> switch to Radio -> switch back -> switch away is enough.
+    var source = CreateSource();
+    CreateTestFile("test.mp3");
+    await source.LoadFileAsync("test.mp3");
+    await source.PlayAsync();
+    await source.SeekAsync(TimeSpan.FromMinutes(2.5));
+
+    await source.StopAsync();
+    var savedPosition = _preferences.SongPositionMs;
+    Assert.Equal((long)TimeSpan.FromMinutes(2.5).TotalMilliseconds, savedPosition);
+
+    // Second stop must not overwrite it.
+    await source.StopAsync();
+
+    Assert.Equal(savedPosition, _preferences.SongPositionMs);
+  }
+
+  [Fact]
+  public async Task DisposeAsync_AfterStop_DoesNotClobberSavedResumePosition()
+  {
+    // AudioManager.DisposeAsync stops the source and THEN disposes it, so the
+    // dispose-time save ran with _position already zeroed — every clean shutdown
+    // saved position 0. LastSongPlayed must still be recorded.
+    var source = CreateSource();
+    CreateTestFile("test.mp3");
+    await source.LoadFileAsync("test.mp3");
+    await source.PlayAsync();
+    await source.SeekAsync(TimeSpan.FromMinutes(2.5));
+    await source.StopAsync();
+
+    await source.DisposeAsync();
+
+    Assert.Equal((long)TimeSpan.FromMinutes(2.5).TotalMilliseconds, _preferences.SongPositionMs);
+    Assert.Equal(Path.Combine(_testDir, "test.mp3"), _preferences.LastSongPlayed);
+  }
+
+  [Fact]
   public async Task StateChanged_EventRaised_OnStateChange()
   {
     // Arrange

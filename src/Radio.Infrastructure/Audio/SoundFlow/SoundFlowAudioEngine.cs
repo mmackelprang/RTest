@@ -57,6 +57,13 @@ public class SoundFlowAudioEngine : IAudioEngine
   private string? _activeOutputId;
   private readonly SemaphoreSlim _activeOutputLock = new(1, 1);
 
+  // Incremented under _activeOutputLock on every output transition. A Cast
+  // connect runs OUTSIDE that lock (it is far too long to hold it — see
+  // TryCommitCastConnectAsync), so it captures this value when it starts and
+  // hands it back on completion to prove nothing reselected the output in the
+  // meantime.
+  private int _castConnectEpoch;
+
   /// <inheritdoc/>
   public event EventHandler<AudioEngineStateChangedEventArgs>? StateChanged;
 
@@ -190,6 +197,9 @@ public class SoundFlowAudioEngine : IAudioEngine
       var previous = _activeOutputId;
       _logger.LogInformation(
         "SetActiveOutputAsync: {Previous} -> {Next}", previous ?? "<none>", outputId);
+
+      // Any output transition supersedes a Cast connect that is still in flight.
+      _castConnectEpoch++;
 
       var isCast = string.Equals(outputId, "google-cast", StringComparison.OrdinalIgnoreCase);
       var isHttp = string.Equals(outputId, "http-stream", StringComparison.OrdinalIgnoreCase);
@@ -334,6 +344,71 @@ public class SoundFlowAudioEngine : IAudioEngine
     catch (Exception ex)
     {
       _logger.LogWarning(ex, "Graceful Cast tear-down failed; continuing");
+    }
+  }
+
+  /// <summary>
+  /// Captures the current output-selection epoch before starting a Cast connect.
+  /// Pass the result to <see cref="TryCommitCastConnectAsync"/> when the connect
+  /// finishes.
+  ///
+  /// The connect itself deliberately runs OUTSIDE <c>_activeOutputLock</c>: it can
+  /// take tens of seconds inside SharpCaster calls that do not observe
+  /// cancellation, and holding the gate for that long would block the output
+  /// picker — turning a data race into a hang. The epoch is what makes the
+  /// unlocked connect safe: it cannot silently win a race it already lost.
+  /// </summary>
+  public async Task<int> BeginCastConnectAsync(CancellationToken cancellationToken = default)
+  {
+    await _activeOutputLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+    try
+    {
+      return _castConnectEpoch;
+    }
+    finally
+    {
+      _activeOutputLock.Release();
+    }
+  }
+
+  /// <summary>
+  /// Commits a Cast connect that began at <paramref name="epoch"/>.
+  ///
+  /// Re-checks — atomically, under the same lock that owns output selection —
+  /// that Cast is still the intended output. If anything reselected the output
+  /// while the connect was on the network, the connection is torn back down and
+  /// this returns false. Doing the check and the teardown under one lock
+  /// acquisition is the point: a check-then-act without it leaves a window in
+  /// which a newly-connected Cast starts streaming while the local sink has
+  /// already been unmuted, which is the dual-output bug the startup mute exists
+  /// to prevent.
+  /// </summary>
+  /// <returns>True if the connection is live and Cast is still the active output.</returns>
+  public async Task<bool> TryCommitCastConnectAsync(int epoch, CancellationToken cancellationToken = default)
+  {
+    await _activeOutputLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+    try
+    {
+      var stillCurrent = _castConnectEpoch == epoch &&
+        string.Equals(_activeOutputId, "google-cast", StringComparison.OrdinalIgnoreCase);
+
+      if (stillCurrent)
+      {
+        return true;
+      }
+
+      _logger.LogWarning(
+        "Cast connect superseded (epoch {Started} -> {Now}, active output now {Active}) — tearing it back down",
+        epoch, _castConnectEpoch, _activeOutputId ?? "<none>");
+
+      // TearDownCastOutputAsync does not take the lock (SetActiveOutputAsync
+      // already calls it while holding it), so this is safe and non-reentrant.
+      await TearDownCastOutputAsync(cancellationToken).ConfigureAwait(false);
+      return false;
+    }
+    finally
+    {
+      _activeOutputLock.Release();
     }
   }
 
