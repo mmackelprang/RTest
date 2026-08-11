@@ -453,7 +453,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       // Restore file metadata and data provider
       try
       {
-        _audioEngine ??= new MiniAudioEngine();
+        _audioEngine ??= SerializedMiniAudioEngine.Create();
         _fileStream = File.OpenRead(previousFile);
         _dataProvider = new ChunkedDataProvider(_audioEngine, _fileStream);
         Logger.LogDebug("Loaded previous file with SoundFlow: {File}", previousFile);
@@ -493,7 +493,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
       try
       {
-        _audioEngine ??= new MiniAudioEngine();
+        _audioEngine ??= SerializedMiniAudioEngine.Create();
         _fileStream = File.OpenRead(_currentFile);
         _dataProvider = new ChunkedDataProvider(_audioEngine, _fileStream);
       }
@@ -1062,7 +1062,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
     try
     {
-      _audioEngine ??= new MiniAudioEngine();
+      _audioEngine ??= SerializedMiniAudioEngine.Create();
       _fileStream = File.OpenRead(_currentFile);
       _dataProvider = new ChunkedDataProvider(_audioEngine, _fileStream);
       Logger.LogDebug("Loaded file with SoundFlow: {File}", _currentFile);
@@ -1190,7 +1190,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
         CleanupDataProvider();
         try
         {
-          _audioEngine ??= new MiniAudioEngine();
+          _audioEngine ??= SerializedMiniAudioEngine.Create();
           _fileStream = File.OpenRead(_currentFile);
           _dataProvider = new ChunkedDataProvider(_audioEngine, _fileStream);
           Logger.LogDebug("Loaded file with SoundFlow: {File}", _currentFile);
@@ -1362,7 +1362,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
     try
     {
-      _audioEngine ??= new MiniAudioEngine();
+      _audioEngine ??= SerializedMiniAudioEngine.Create();
       _fileStream = File.OpenRead(_currentFile);
       _dataProvider = new ChunkedDataProvider(_audioEngine, _fileStream);
       Logger.LogDebug("Loaded file with SoundFlow: {File}", _currentFile);
@@ -1854,7 +1854,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     // Try to initialize SoundFlow audio engine and create a data provider
     try
     {
-      _audioEngine ??= new MiniAudioEngine();
+      _audioEngine ??= SerializedMiniAudioEngine.Create();
 
       // Create a data provider from the file using SoundFlow
       // Note: We keep the FileStream open (stored as field) because ChunkedDataProvider needs it

@@ -178,8 +178,13 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
 
     try
     {
-      // Create SoundFlow MiniAudioEngine for audio capture
-      _audioEngine = new MiniAudioEngine();
+      // Create SoundFlow MiniAudioEngine for audio capture.
+      //
+      // Via SerializedMiniAudioEngine.Create so the construction — which runs
+      // ma_context_init and an initial device probe — and every later native device call on
+      // this engine take NativeAudioDeviceGate. Constructing a raw MiniAudioEngine here would
+      // put an ungated native enumeration alongside the shared engine's.
+      _audioEngine = SerializedMiniAudioEngine.Create();
 
       // Find the USB capture device matching the port
       var captureDevices = _audioEngine.CaptureDevices;

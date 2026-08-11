@@ -852,7 +852,7 @@ internal sealed class WindowsBluetoothService : IBluetoothService
 
         try
         {
-            _captureEngine = new MiniAudioEngine();
+            _captureEngine = SerializedMiniAudioEngine.Create();
             var captureDevices = _captureEngine.CaptureDevices;
             var deviceName = ConnectedDevice.Name;
 
