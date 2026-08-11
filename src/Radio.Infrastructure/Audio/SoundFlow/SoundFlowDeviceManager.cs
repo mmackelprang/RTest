@@ -15,8 +15,20 @@ namespace Radio.Infrastructure.Audio.SoundFlow;
 /// SoundFlow implementation of audio device management.
 /// Handles device enumeration and USB port reservations.
 /// </summary>
-public class SoundFlowDeviceManager : IAudioDeviceManager
+public class SoundFlowDeviceManager : IAudioDeviceManager, IDisposable
 {
+  /// <summary>
+  /// Trailing-edge debounce window for config-change-driven display-settings reloads.
+  ///
+  /// A config write storm (a volume-slider drag persists <c>ui.playback</c> on every tick)
+  /// fires one <c>IOptionsMonitor.OnChange</c> per write. Each reload re-enumerates audio
+  /// devices, so an undebounced handler turned N slider ticks into N concurrent native
+  /// enumerations. 300ms is long enough to collapse a drag into a single reload and short
+  /// enough that a genuine settings change still applies while the user is still looking
+  /// at the screen.
+  /// </summary>
+  private static readonly TimeSpan DisplaySettingsReloadDebounce = TimeSpan.FromMilliseconds(300);
+
   private readonly ILogger<SoundFlowDeviceManager> _logger;
   private readonly IConfigurationManager _configurationManager;
   private readonly IOptionsMonitor<AudioPreferences> _audioPreferences;
@@ -26,6 +38,14 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
   private readonly Dictionary<string, string> _usbPortReservations = new();
   private readonly object _reservationLock = new();
   private readonly object _devicesLock = new();
+
+  // Debounce/coalesce state for the options-change handler. The timer is created
+  // disarmed and re-armed on each change; _displaySettingsReloadInFlight keeps a slow
+  // store read from overlapping the next window's reload.
+  private readonly System.Threading.Timer _displaySettingsReloadTimer;
+  private readonly IDisposable? _optionsChangeRegistration;
+  private int _displaySettingsReloadInFlight;
+  private volatile bool _disposed;
 
   private List<AudioDeviceInfo> _cachedOutputDevices = [];
   private List<AudioDeviceInfo> _cachedInputDevices = [];
@@ -69,10 +89,21 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
     //
     // Re-loading from the store on change is the correct merge: the store is the
     // source of truth in production; appsettings.json is only the boot-time default.
-    _audioOutputOptionsMonitor.OnChange(_unusedOpts =>
+    //
+    // The reload is debounced and coalesced rather than fired-and-forgotten. Every
+    // config write raises this event, and every reload re-enumerates audio devices —
+    // so the previous `_ = LoadDisplaySettingsFromStoreAsync()` turned a burst of
+    // writes into a burst of concurrent thread pool threads all calling into the
+    // native device layer at once. That is what aborted radio-api on 2026-08-10.
+    // Serialization is still guaranteed independently by NativeAudioDeviceGate; this
+    // debounce removes the fan-out at its source so the gate is not the only defence.
+    _displaySettingsReloadTimer = new System.Threading.Timer(
+      OnDisplaySettingsReloadDue, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+
+    _optionsChangeRegistration = _audioOutputOptionsMonitor.OnChange(_unusedOpts =>
     {
-      _logger.LogInformation("Audio output options changed, reloading display settings from store");
-      _ = LoadDisplaySettingsFromStoreAsync();
+      _logger.LogInformation("Audio output options changed, scheduling display settings reload");
+      ArmDisplaySettingsReload();
     });
 
     // Initialize device cache immediately
@@ -128,6 +159,21 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
     _sharedEngine = engine;
     _logger.LogDebug("Shared MiniAudioEngine reference {Action}",
       engine != null ? "set" : "cleared");
+
+    // The device manager gates its own native calls explicitly, but the engine's owner
+    // (SoundFlowAudioEngine) calls UpdateAudioDevicesInfo directly on this instance. Those
+    // call sites are serialized only if the instance is a SerializedMiniAudioEngine, whose
+    // override routes through NativeAudioDeviceGate. A raw MiniAudioEngine here means those
+    // calls can re-enter the PulseAudio main loop concurrently and abort the process, so
+    // say so loudly rather than failing as an intermittent SIGABRT weeks later.
+    if (engine != null && engine is not SerializedMiniAudioEngine)
+    {
+      _logger.LogError(
+        "Shared audio engine is {ActualType}, not SerializedMiniAudioEngine — device " +
+        "enumeration performed directly on this engine is NOT serialized and can abort " +
+        "the process. Construct it via SerializedMiniAudioEngine.Create().",
+        engine.GetType().Name);
+    }
   }
 
   /// <inheritdoc/>
@@ -418,22 +464,35 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
       // and triggers SIGSEGV. Only create a temporary engine during initial construction
       // (before the shared engine is set by SoundFlowAudioEngine.InitializeAsync).
       MiniAudioEngine? tempEngine = null;
-      var engine = _sharedEngine;
-      if (engine == null)
+      var shared = _sharedEngine;
+      MiniAudioEngine engine;
+      if (shared != null)
+      {
+        engine = shared;
+      }
+      else
       {
         _logger.LogDebug("No shared engine available, creating temporary engine for enumeration");
-        tempEngine = new MiniAudioEngine();
+        tempEngine = SerializedMiniAudioEngine.Create();
         engine = tempEngine;
       }
 
       try
       {
-        engine.UpdateAudioDevicesInfo();
-
         _logger.LogDebug("Enumerating audio devices using MiniAudio backend...");
 
-        // Enumerate playback (output) devices
-        var playbackDevices = engine.PlaybackDevices;
+        // The native enumeration and the device snapshot it publishes are taken as one
+        // gated region: holding NativeAudioDeviceGate across the native call is what keeps
+        // a second thread out of the PulseAudio main loop, and taking the snapshot inside
+        // the same region means the arrays below belong to *this* enumeration. Everything
+        // after this — filtering, friendly names, DTO construction — is managed-only work
+        // and deliberately runs outside the gate to keep the hold time to the native call.
+        var (playbackDevices, captureDevices) = NativeAudioDeviceGate.Run(() =>
+        {
+          engine.UpdateAudioDevicesInfo();
+          return (engine.PlaybackDevices, engine.CaptureDevices);
+        });
+
         _logger.LogDebug("Found {Count} playback devices from MiniAudio", playbackDevices.Length);
 
         for (int i = 0; i < playbackDevices.Length; i++)
@@ -470,8 +529,7 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
             i, rawName, displayName, isDefault, isUsb);
         }
 
-        // Enumerate capture (input) devices
-        var captureDevices = engine.CaptureDevices;
+        // Enumerate capture (input) devices from the snapshot taken above
       _logger.LogDebug("Found {Count} capture devices from MiniAudio", captureDevices.Length);
 
       for (int i = 0; i < captureDevices.Length; i++)
@@ -597,19 +655,28 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
     {
       // Reuse shared engine to avoid native memory leak (see EnumerateDevices comment)
       MiniAudioEngine? tempEngine = null;
-      var engine = _sharedEngine;
-      if (engine == null)
+      var shared = _sharedEngine;
+      MiniAudioEngine engine;
+      if (shared != null)
       {
-        tempEngine = new MiniAudioEngine();
+        engine = shared;
+      }
+      else
+      {
+        tempEngine = SerializedMiniAudioEngine.Create();
         engine = tempEngine;
       }
 
       try
       {
-        engine.UpdateAudioDevicesInfo();
+        // Native enumeration + snapshot under the process-wide gate; see EnumerateDevices.
+        var (playbackDevices, captureDevices) = NativeAudioDeviceGate.Run(() =>
+        {
+          engine.UpdateAudioDevicesInfo();
+          return (engine.PlaybackDevices, engine.CaptureDevices);
+        });
 
         // Playback (output) devices
-        var playbackDevices = engine.PlaybackDevices;
         for (int i = 0; i < playbackDevices.Length; i++)
         {
           var device = playbackDevices[i];
@@ -660,8 +727,7 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
           IsUSBDevice = false
         });
 
-        // Capture (input) devices
-        var captureDevices = engine.CaptureDevices;
+        // Capture (input) devices from the snapshot taken above
         for (int i = 0; i < captureDevices.Length; i++)
         {
           var device = captureDevices[i];
@@ -707,6 +773,65 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
     }
 
     return Task.FromResult<IReadOnlyList<DeviceDisplayInfo>>(result.AsReadOnly());
+  }
+
+  /// <summary>
+  /// (Re-)arms the trailing-edge debounce timer for a display-settings reload.
+  /// Each call pushes the deadline out, so a burst of config changes produces one reload.
+  /// </summary>
+  private void ArmDisplaySettingsReload()
+  {
+    if (_disposed)
+    {
+      return;
+    }
+
+    try
+    {
+      _displaySettingsReloadTimer.Change(DisplaySettingsReloadDebounce, Timeout.InfiniteTimeSpan);
+    }
+    catch (ObjectDisposedException)
+    {
+      // Raced with Dispose — the reload is no longer wanted.
+    }
+  }
+
+  /// <summary>
+  /// Debounce timer callback: performs the coalesced display-settings reload.
+  /// </summary>
+  /// <remarks>
+  /// <c>async void</c> is the required shape for a <see cref="System.Threading.Timer"/>
+  /// callback, so the body owns its own exception boundary — an escaping exception here
+  /// would tear down the process. This is not the fire-and-forget pattern it replaces:
+  /// at most one reload is scheduled at a time and at most one runs at a time.
+  /// </remarks>
+  private async void OnDisplaySettingsReloadDue(object? state)
+  {
+    if (_disposed)
+    {
+      return;
+    }
+
+    // A store read slower than the debounce window could otherwise let the next
+    // window's reload start on top of this one. Re-arm instead of overlapping.
+    if (Interlocked.CompareExchange(ref _displaySettingsReloadInFlight, 1, 0) != 0)
+    {
+      ArmDisplaySettingsReload();
+      return;
+    }
+
+    try
+    {
+      await LoadDisplaySettingsFromStoreAsync().ConfigureAwait(false);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Debounced display settings reload failed");
+    }
+    finally
+    {
+      Interlocked.Exchange(ref _displaySettingsReloadInFlight, 0);
+    }
   }
 
   /// <summary>
@@ -853,17 +978,27 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
 
     // Reuse shared engine to avoid native memory leak (see EnumerateDevices comment)
     MiniAudioEngine? tempEngine = null;
-    var engine = _sharedEngine;
-    if (engine == null)
+    var shared = _sharedEngine;
+    MiniAudioEngine engine;
+    if (shared != null)
     {
-      tempEngine = new MiniAudioEngine();
+      engine = shared;
+    }
+    else
+    {
+      tempEngine = SerializedMiniAudioEngine.Create();
       engine = tempEngine;
     }
 
     try
     {
-      engine.UpdateAudioDevicesInfo();
-      var devices = engine.CaptureDevices;
+      // Native enumeration + snapshot under the process-wide gate; see EnumerateDevices.
+      var devices = NativeAudioDeviceGate.Run(() =>
+      {
+        engine.UpdateAudioDevicesInfo();
+        return engine.CaptureDevices;
+      });
+
       var match = devices.FirstOrDefault(d =>
         d.Name != null && d.Name.Contains(namePart, StringComparison.OrdinalIgnoreCase));
 
@@ -943,6 +1078,24 @@ public class SoundFlowDeviceManager : IAudioDeviceManager
   protected virtual void OnDevicesChanged(AudioDeviceChangedEventArgs e)
   {
     DevicesChanged?.Invoke(this, e);
+  }
+
+  /// <summary>
+  /// Unsubscribes from options changes and stops the display-settings reload debounce.
+  /// Idempotent — the DI container resolves this instance under two registrations and may
+  /// dispose it twice.
+  /// </summary>
+  public void Dispose()
+  {
+    if (_disposed)
+    {
+      return;
+    }
+
+    _disposed = true;
+    _optionsChangeRegistration?.Dispose();
+    _displaySettingsReloadTimer.Dispose();
+    GC.SuppressFinalize(this);
   }
 }
 
