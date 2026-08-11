@@ -25,17 +25,23 @@ internal sealed class SerializedMiniAudioEngine : MiniAudioEngine
   }
 
   /// <summary>
-  /// Creates an engine, holding the gate across construction.
+  /// Creates an engine whose native device calls are serialized.
   /// </summary>
   /// <remarks>
-  /// Engine construction runs <c>ma_context_init</c>, which probes the JACK/PulseAudio/OSS/ALSA
-  /// backends and performs an initial device enumeration. That initial enumeration re-enters
-  /// this class through <see cref="UpdateAudioDevicesInfo"/> while the gate is already held by
-  /// this thread — safe only because the gate is re-entrant (see
-  /// <see cref="NativeAudioDeviceGate"/>).
+  /// <para>Construction is deliberately NOT wrapped in the gate. <c>ma_context_init</c> probes the
+  /// JACK/PulseAudio/OSS/ALSA backends, which takes on the order of seconds, and it builds a
+  /// <i>brand new</i> <c>ma_context</c> with its own <c>pa_mainloop</c> that no other thread can
+  /// reach yet — so there is nothing for it to race. Holding the gate across it bought no safety
+  /// and serialized a multi-second operation process-wide: doing so took this repository's
+  /// Infrastructure suite from 17s to 6m18s and starved unrelated timing tests into failure.</para>
+  ///
+  /// <para>What construction <i>does</i> need to serialize is the initial device enumeration the
+  /// base constructor performs, because that reads the shared device list — and it gets that for
+  /// free, since the base constructor reaches it through the virtual
+  /// <see cref="UpdateAudioDevicesInfo"/>, which this class overrides. Gating the narrow native
+  /// call rather than the broad slow one is the whole point.</para>
   /// </remarks>
-  internal static SerializedMiniAudioEngine Create() =>
-    NativeAudioDeviceGate.Run(static () => new SerializedMiniAudioEngine());
+  internal static SerializedMiniAudioEngine Create() => new();
 
   /// <summary>
   /// Enumerates native audio devices under the process-wide gate.

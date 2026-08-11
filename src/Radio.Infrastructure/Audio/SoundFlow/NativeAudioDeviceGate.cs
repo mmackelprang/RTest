@@ -26,11 +26,17 @@ namespace Radio.Infrastructure.Audio.SoundFlow;
 /// engine's enumeration overlap the shared engine's.</para>
 ///
 /// <para><b>Why <see cref="Monitor"/> rather than <c>SemaphoreSlim</c>.</b> Monitor is
-/// re-entrant on the owning thread. <see cref="SerializedMiniAudioEngine.Create"/> holds the
-/// gate across construction, and the base constructor itself performs an initial enumeration
-/// that dispatches back through the overridden <c>UpdateAudioDevicesInfo</c> — a non-re-entrant
-/// primitive would self-deadlock there. Every gated region is fully synchronous, so nothing
-/// needs to hold the gate across an <c>await</c>.</para>
+/// re-entrant on the owning thread, so a gated region that reaches another gated region cannot
+/// self-deadlock — e.g. a caller wrapping <c>UpdateAudioDevicesInfo</c> plus its device snapshot
+/// in its own <see cref="Run{T}"/> while the engine override takes the gate again underneath.
+/// Every gated region is fully synchronous, so nothing needs to hold the gate across an
+/// <c>await</c>.</para>
+///
+/// <para><b>Keep gated regions narrow.</b> The gate is process-wide, so anything held inside it
+/// is serialized across every audio path at once. Gate the individual native call, never a
+/// surrounding operation that merely contains one. Wrapping <c>MiniAudioEngine</c> construction
+/// (a multi-second backend probe) was tried and reverted — see
+/// <see cref="SerializedMiniAudioEngine.Create"/>.</para>
 ///
 /// <para><b>Scope.</b> This gate covers device <i>enumeration</i> and engine construction —
 /// the surface the core dump implicates. Device lifecycle calls that also touch the same main
