@@ -28,6 +28,30 @@ public class GoogleCastOutput : AudioOutputBase
   private readonly IMetricsCollector? _metricsCollector;
   private ChromecastClient? _client;
   private ChromecastReceiver? _connectedReceiver;
+
+  // Guards every read/write of _client / _connectedReceiver / ConnectedDevice.
+  //
+  // Held ONLY for short reference swaps — never across a SharpCaster network
+  // call. That is deliberate: a connect can sit for tens of seconds inside calls
+  // that do not observe cancellation, and a teardown that had to queue behind it
+  // would turn a data race into a hang. Instead teardown takes the state out
+  // from under the connect (below) and does its network work on a snapshot.
+  private readonly SemaphoreSlim _lifecycleLock = new(1, 1);
+
+  // Bumped by anything that supersedes an in-flight connect: a newer connect, a
+  // disconnect, or disposal. A connect captures this when it starts and
+  // re-validates before publishing its result — if it changed, the attempt lost
+  // the race and tears down what it built instead of overwriting the winner.
+  private int _connectionGeneration;
+
+  /// <summary>
+  /// Test seam: awaited inside <see cref="ConnectAsync"/> after the receiver has
+  /// been resolved but before the network connect, which is precisely where the
+  /// connect/teardown race used to corrupt state. Lets a test interleave a
+  /// teardown at that exact point deterministically instead of hoping a stress
+  /// loop lands on it. Null (and therefore free) in production.
+  /// </summary>
+  internal Func<Task>? ConnectRaceHookForTests { get; set; }
   private string? _streamUrl;
 
   // Direct Channel streaming (experimental)
@@ -138,17 +162,30 @@ public class GoogleCastOutput : AudioOutputBase
     {
       _logger.LogInformation("Initializing Google Cast output");
 
-      // Dispose old client if reinitializing after error
-      if (_client != null)
+      // Swap in a fresh client under the lock, taking the old one as a snapshot.
+      // Bumping the generation invalidates any connect still in flight — it will
+      // discard itself rather than publish onto the client we just replaced.
+      ChromecastClient? stale;
+      await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+      try
       {
-        try { await _client.DisconnectAsync(); }
-        catch (Exception ex) { _logger.LogDebug(ex, "Error disconnecting previous Cast client during reinit"); }
+        _connectionGeneration++;
+        stale = _client;
+        _client = new ChromecastClient();
+        _connectedReceiver = null;
+        ConnectedDevice = null;
+      }
+      finally
+      {
+        _lifecycleLock.Release();
       }
 
-      // Create a fresh ChromecastClient
-      _client = new ChromecastClient();
-      _connectedReceiver = null;
-      ConnectedDevice = null;
+      // Network work happens on the snapshot, outside the lock.
+      if (stale != null)
+      {
+        try { await stale.DisconnectAsync().ConfigureAwait(false); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Error disconnecting previous Cast client during reinit"); }
+      }
 
       State = AudioOutputState.Ready;
       _logger.LogInformation("Google Cast output initialized");
@@ -407,41 +444,62 @@ public class GoogleCastOutput : AudioOutputBase
 
     State = AudioOutputState.Connecting;
 
+    // Claim this attempt. Anything that supersedes it (another connect, a
+    // disconnect, disposal) bumps the generation, and the commit below then
+    // abandons rather than publishing over the winner.
+    int myGeneration;
+    ChromecastClient? client;
+    await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+    try
+    {
+      myGeneration = ++_connectionGeneration;
+      client = _client;
+    }
+    finally
+    {
+      _lifecycleLock.Release();
+    }
+
     try
     {
       _logger.LogInformation(
         "Connecting to Chromecast: {Name} at {IP}:{Port}",
         device.FriendlyName, device.IpAddress, device.Port);
 
-      // Try to get the live receiver from discovery (preferred - uses original SharpCaster object)
-      // First try by exact ID, then by IP address (IDs can differ due to URI normalization)
-      if (_discoveredReceivers.TryGetValue(device.Id, out _connectedReceiver))
+      // Resolve the receiver into a LOCAL, so a concurrent teardown clearing
+      // _connectedReceiver cannot null it out from under the connect below.
+      // Try live discovery first by exact ID, then by IP (IDs can differ due to
+      // URI normalization).
+      ChromecastReceiver? receiver;
+      if (_discoveredReceivers.TryGetValue(device.Id, out receiver))
       {
         _logger.LogDebug("Using live ChromecastReceiver from discovery (matched by ID)");
       }
-      else if (_discoveredReceiversByIp.TryGetValue(device.IpAddress, out _connectedReceiver))
+      else if (_discoveredReceiversByIp.TryGetValue(device.IpAddress, out receiver))
       {
         _logger.LogInformation("Live ChromecastReceiver matched by IP {IP} (ID mismatch: cached={CachedId}, live={LiveId})",
-          device.IpAddress, device.Id, _connectedReceiver.DeviceUri);
+          device.IpAddress, device.Id, receiver.DeviceUri);
       }
       else
       {
         // Device is from persistent cache, not live discovery.
         // Verify reachability with a TCP connect check before attempting full connection.
-        var connectPort = await FindReachablePortAsync(device, cancellationToken);
+        var connectPort = await FindReachablePortAsync(device, cancellationToken).ConfigureAwait(false);
 
         var deviceUri = new Uri($"https://{device.IpAddress}:{connectPort}");
         _logger.LogInformation("TCP check passed, creating ChromecastReceiver from cache: {Uri}", deviceUri);
 
-        // Create a fresh ChromecastClient for cached connections to avoid stale socket state
-        if (_client != null)
+        // Create a fresh ChromecastClient for cached connections to avoid stale
+        // socket state. Built locally and only published at commit time.
+        var stale = client;
+        client = new ChromecastClient();
+        if (stale != null)
         {
-          try { await _client.DisconnectAsync(); }
+          try { await stale.DisconnectAsync().ConfigureAwait(false); }
           catch (Exception ex) { _logger.LogDebug(ex, "Error disconnecting previous Cast client for cached connection"); }
         }
-        _client = new ChromecastClient();
 
-        _connectedReceiver = new ChromecastReceiver
+        receiver = new ChromecastReceiver
         {
           DeviceUri = deviceUri,
           Port = connectPort,
@@ -450,22 +508,35 @@ public class GoogleCastOutput : AudioOutputBase
         };
       }
 
-      if (_client == null)
+      if (client == null)
       {
         throw new InvalidOperationException("Client not initialized. Call InitializeAsync first.");
       }
 
-      _logger.LogDebug("Calling ConnectChromecast with URI: {Uri}", _connectedReceiver.DeviceUri);
-      await _client.ConnectChromecast(_connectedReceiver);
+      if (ConnectRaceHookForTests != null)
+      {
+        await ConnectRaceHookForTests().ConfigureAwait(false);
+      }
+
+      _logger.LogDebug("Calling ConnectChromecast with URI: {Uri}", receiver.DeviceUri);
+      await client.ConnectChromecast(receiver).ConfigureAwait(false);
+
+      // Publish only if nothing superseded us while we were on the network.
+      if (!await TryPublishConnectionAsync(myGeneration, client, receiver, device, cancellationToken).ConfigureAwait(false))
+      {
+        _logger.LogWarning(
+          "Cast connect to {Name} was superseded while connecting — discarding this connection",
+          device.FriendlyName);
+        try { await client.DisconnectAsync().ConfigureAwait(false); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Error discarding superseded Cast connection"); }
+        return;
+      }
 
       // Subscribe to receiver status changes for bidirectional volume sync
-      SubscribeToReceiverStatus();
+      SubscribeToReceiverStatus(client);
 
       // Read initial device volume
-      await SyncInitialVolumeAsync();
-
-      ConnectedDevice = device;
-      Name = $"Cast: {device.FriendlyName}";
+      await SyncInitialVolumeAsync().ConfigureAwait(false);
 
       Connected?.Invoke(this, new ChromecastConnectedEventArgs { Device = device });
 
@@ -479,7 +550,7 @@ public class GoogleCastOutput : AudioOutputBase
       if (wasStreaming)
       {
         _logger.LogInformation("Restarting Cast stream after device switch");
-        await StartAsync(cancellationToken);
+        await StartAsync(cancellationToken).ConfigureAwait(false);
       }
     }
     catch (Exception ex)
@@ -487,6 +558,39 @@ public class GoogleCastOutput : AudioOutputBase
       _logger.LogError(ex, "Failed to connect to Chromecast: {Name}", device.FriendlyName);
       State = AudioOutputState.Error;
       throw;
+    }
+  }
+
+  /// <summary>
+  /// Publishes a completed connection, but only if this attempt is still the
+  /// current one. Returns false when a newer connect, a disconnect, or disposal
+  /// superseded it while it was on the network — in which case the caller owns
+  /// tearing down what it built.
+  /// </summary>
+  private async Task<bool> TryPublishConnectionAsync(
+    int generation,
+    ChromecastClient client,
+    ChromecastReceiver receiver,
+    ChromecastDeviceInfo device,
+    CancellationToken cancellationToken)
+  {
+    await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+    try
+    {
+      if (_connectionGeneration != generation)
+      {
+        return false;
+      }
+
+      _client = client;
+      _connectedReceiver = receiver;
+      ConnectedDevice = device;
+      Name = $"Cast: {device.FriendlyName}";
+      return true;
+    }
+    finally
+    {
+      _lifecycleLock.Release();
     }
   }
 
@@ -499,7 +603,30 @@ public class GoogleCastOutput : AudioOutputBase
   {
     ThrowIfDisposed();
 
-    if (_connectedReceiver == null)
+    // Take the connection state out from under any in-flight connect FIRST,
+    // then do the network work on the snapshot. Bumping the generation here is
+    // what lets a teardown preempt a connect parked in an uncancellable
+    // SharpCaster call instead of queueing behind it — queueing would convert
+    // this race into a multi-second hang on the output picker.
+    ChromecastClient? client;
+    ChromecastDeviceInfo? disconnectedDevice;
+    bool hadConnection;
+    await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+    try
+    {
+      _connectionGeneration++;
+      hadConnection = _connectedReceiver != null;
+      client = _client;
+      disconnectedDevice = ConnectedDevice;
+      _connectedReceiver = null;
+      ConnectedDevice = null;
+    }
+    finally
+    {
+      _lifecycleLock.Release();
+    }
+
+    if (!hadConnection)
     {
       _logger.LogWarning("No Chromecast device connected");
       return;
@@ -507,18 +634,15 @@ public class GoogleCastOutput : AudioOutputBase
 
     try
     {
-      _logger.LogInformation("Disconnecting from Chromecast: {Name}", ConnectedDevice?.FriendlyName);
+      _logger.LogInformation("Disconnecting from Chromecast: {Name}", disconnectedDevice?.FriendlyName);
 
-      UnsubscribeFromReceiverStatus();
+      UnsubscribeFromReceiverStatus(client);
 
-      if (_client != null)
+      if (client != null)
       {
-        await _client.DisconnectAsync();
+        await client.DisconnectAsync().ConfigureAwait(false);
       }
 
-      var disconnectedDevice = ConnectedDevice;
-      _connectedReceiver = null;
-      ConnectedDevice = null;
       Name = "Google Cast Output";
 
       Disconnected?.Invoke(this, new ChromecastDisconnectedEventArgs
@@ -770,10 +894,23 @@ public class GoogleCastOutput : AudioOutputBase
         _logger.LogInformation("DirectChannel streaming stopped");
       }
 
-      // Stop media playback on the Chromecast
-      if (_client != null)
+      // Stop media playback on the Chromecast. Snapshot the client under the
+      // lock so a concurrent connect swapping _client cannot make us send the
+      // media stop down a half-built connection.
+      ChromecastClient? stopClient;
+      await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+      try
       {
-        var mediaChannel = _client.GetChannel<MediaChannel>();
+        stopClient = _client;
+      }
+      finally
+      {
+        _lifecycleLock.Release();
+      }
+
+      if (stopClient != null)
+      {
+        var mediaChannel = stopClient.GetChannel<MediaChannel>();
         if (mediaChannel != null)
         {
           try
@@ -1267,14 +1404,19 @@ public class GoogleCastOutput : AudioOutputBase
   /// <summary>
   /// Subscribes to ReceiverChannel status events for bidirectional volume sync.
   /// </summary>
-  private void SubscribeToReceiverStatus()
+  /// <param name="client">
+  /// The client to subscribe on, passed explicitly rather than read from
+  /// <c>_client</c> so the caller's snapshot is used — a concurrent connect or
+  /// teardown may already have swapped the field.
+  /// </param>
+  private void SubscribeToReceiverStatus(ChromecastClient? client)
   {
-    if (_client == null)
+    if (client == null)
     {
       return;
     }
 
-    var receiverChannel = _client.GetChannel<ReceiverChannel>();
+    var receiverChannel = client.GetChannel<ReceiverChannel>();
     if (receiverChannel != null)
     {
       receiverChannel.ReceiverStatusChanged += OnReceiverStatusChanged;
@@ -1285,14 +1427,15 @@ public class GoogleCastOutput : AudioOutputBase
   /// <summary>
   /// Unsubscribes from ReceiverChannel status events.
   /// </summary>
-  private void UnsubscribeFromReceiverStatus()
+  /// <param name="client">The client to unsubscribe from (caller's snapshot).</param>
+  private void UnsubscribeFromReceiverStatus(ChromecastClient? client)
   {
-    if (_client == null)
+    if (client == null)
     {
       return;
     }
 
-    var receiverChannel = _client.GetChannel<ReceiverChannel>();
+    var receiverChannel = client.GetChannel<ReceiverChannel>();
     if (receiverChannel != null)
     {
       receiverChannel.ReceiverStatusChanged -= OnReceiverStatusChanged;
@@ -1473,11 +1616,30 @@ public class GoogleCastOutput : AudioOutputBase
       _metadataDebouncesCts = null;
     }
 
-    if (_client != null)
+    // Final generation bump so a connect still in flight discards itself rather
+    // than publishing onto a disposed output, and take the client as a snapshot.
+    ChromecastClient? client;
+    await _lifecycleLock.WaitAsync().ConfigureAwait(false);
+    try
     {
-      await _client.DisconnectAsync();
+      _connectionGeneration++;
+      client = _client;
+      // Deliberately NOT nulled: several Start/stream helpers dereference
+      // _client with `!` on the assumption it outlives the output, and nulling
+      // it here would turn disposal-during-startup into an NRE instead of the
+      // ObjectDisposedException those paths already expect.
+    }
+    finally
+    {
+      _lifecycleLock.Release();
     }
 
+    if (client != null)
+    {
+      await client.DisconnectAsync().ConfigureAwait(false);
+    }
+
+    _lifecycleLock.Dispose();
     DisposeBase();
   }
 }

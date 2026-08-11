@@ -515,6 +515,14 @@ public class AudioEngineInitializationService : IHostedService
 
       _logger.LogInformation("Auto-connecting to default Cast device on startup: {Id}", castDeviceId);
 
+      // Capture the output-selection epoch BEFORE any connect work. The connect
+      // runs outside the engine's output lock (it is far too long to hold it),
+      // so this token is what proves at the end that nothing reselected the
+      // output while we were on the network.
+      var castEpoch = _audioEngine is SoundFlowAudioEngine epochEngine
+        ? await epochEngine.BeginCastConnectAsync(ct).ConfigureAwait(false)
+        : (int?)null;
+
       // Give Cast discovery a moment to populate the cache.
       await Task.Delay(CastDiscoverySettleDelay, ct).ConfigureAwait(false);
 
@@ -546,22 +554,21 @@ public class AudioEngineInitializationService : IHostedService
 
       await _castOutput.StartAsync(ct).ConfigureAwait(false);
 
-      // Late-success guard. Several calls in the connect chain above do not
-      // observe cancellation at all (the SharpCaster-facing ConnectChromecast /
-      // LaunchApplicationAsync / volume-sync calls), so the rollback can have
-      // fired and unmuted the local sink while we were parked inside one of
-      // them. Finishing the connect at that point would leave Cast streaming
-      // AND local unmuted — the dual-output bug the startup mute exists to
-      // prevent, recreated by the guard meant to avoid it. Tear Cast back down.
-      if (Volatile.Read(ref _localFallbackApplied) || ct.IsCancellationRequested)
+      // Late-success guard, now decided by the engine under its output lock.
+      // Several calls in the connect chain above do not observe cancellation at
+      // all (the SharpCaster-facing ConnectChromecast / LaunchApplicationAsync /
+      // volume-sync calls), so the rollback can have fired and unmuted the local
+      // sink while we were parked inside one of them. Finishing the connect at
+      // that point would leave Cast streaming AND local unmuted — the dual-output
+      // bug the startup mute exists to prevent.
+      //
+      // Deliberately NOT a check of _localFallbackApplied here: reading a flag
+      // and then tearing down are two steps with a window between them, and the
+      // output can move inside that window. TryCommitCastConnectAsync does the
+      // check and the teardown under one acquisition of the engine's lock.
+      if (castEpoch.HasValue && _audioEngine is SoundFlowAudioEngine commitEngine &&
+          !await commitEngine.TryCommitCastConnectAsync(castEpoch.Value, CancellationToken.None).ConfigureAwait(false))
       {
-        _logger.LogWarning(
-          "Cast connected after the local-output fallback had already been applied — " +
-          "tearing Cast back down to avoid playing on both outputs");
-        if (_audioEngine is SoundFlowAudioEngine sfEngine)
-        {
-          await sfEngine.TearDownCastOutputAsync(CancellationToken.None).ConfigureAwait(false);
-        }
         return;
       }
 
