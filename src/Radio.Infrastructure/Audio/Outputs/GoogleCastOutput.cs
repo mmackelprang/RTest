@@ -29,13 +29,79 @@ public class GoogleCastOutput : AudioOutputBase
   private ChromecastClient? _client;
   private ChromecastReceiver? _connectedReceiver;
 
-  // Guards every read/write of _client / _connectedReceiver / ConnectedDevice.
+  // Serializes the connection-state SWAPS of _client / _connectedReceiver /
+  // ConnectedDevice — not every access of them. (An earlier revision of this
+  // comment said it guarded every read. It never did, and believing it makes the
+  // unlocked dereferences described below look safer than they actually are.)
   //
-  // Held ONLY for short reference swaps — never across a SharpCaster network
-  // call. That is deliberate: a connect can sit for tens of seconds inside calls
-  // that do not observe cancellation, and a teardown that had to queue behind it
-  // would turn a data race into a hang. Instead teardown takes the state out
-  // from under the connect (below) and does its network work on a snapshot.
+  // WHAT IT SERIALIZES: six await-free critical sections, each touching
+  // _connectionGeneration and/or those three fields as one consistent unit:
+  //     InitializeAsync         bump, install a fresh client, clear receiver+device
+  //     ConnectAsync's claim    bump, snapshot _client
+  //     TryPublishConnection    generation check, then publish client+receiver+device
+  //     DisconnectAsync         bump, snapshot, clear receiver+device
+  //     DisposeAsync            bump, snapshot _client (deliberately NOT clearing it)
+  //     StopAsync               snapshot _client only — touches no generation
+  // Being await-free is the point: no writer can be preempted mid-swap, so no
+  // reader THAT TAKES THE LOCK can observe a half-applied connection. Readers
+  // that skip the lock get no such guarantee — see below for why that is sound.
+  //
+  // Held ONLY for those swaps — never across a SharpCaster network call. That is
+  // deliberate: a connect can sit for tens of seconds inside calls that do not
+  // observe cancellation, and a teardown that had to queue behind it would turn a
+  // data race into a hang. Instead teardown takes the state out from under the
+  // connect and does its network work on a snapshot.
+  //
+  // READS ARE DELIBERATELY UNSYNCHRONIZED. Most reads of these fields — across
+  // the start/stream/volume/teardown paths — take no lock at all. Several
+  // null-check a field and then dereference it on a second, separate read:
+  // SyncInitialVolumeAsync, SetCastVolumeAsync, SetCastMuteAsync, and the
+  // `_client!` dereferences in the Start/stream helpers. Reference assignment is
+  // atomic, so such a read always yields a whole reference — but "whole" is not
+  // "non-null", and check-then-dereference is sound only because of this:
+  //
+  //     PRECONDITION: _client IS NEVER SET BACK TO NULL. It is assigned in
+  //     exactly two places — InitializeAsync and TryPublishConnectionAsync — and
+  //     both assign a non-null client, so the field only ever moves null -> set
+  //     -> set, never set -> null. DisconnectAsync and DisposeAsync deliberately
+  //     leave it set (see the note in DisposeAsync). A reader that has ONCE
+  //     observed non-null can therefore never subsequently observe null; it may
+  //     see a stale or a newer client, but not a null one.
+  //
+  //     Note what that does NOT say: the field IS null before the first
+  //     successful InitializeAsync, and stays null if the ChromecastClient ctor
+  //     throws. So the `_client!` dereferences are not licensed by this
+  //     precondition alone — each sits behind a caller's null guard (StartAsync
+  //     for the Start/stream chain, the reload guard for the metadata path).
+  //     What the precondition buys them is that their guard stays valid across
+  //     the awaits that follow it. The three check-then-dereference sites named
+  //     above rely on it directly.
+  //
+  //     NULL THIS FIELD AND EVERY UNLOCKED DEREFERENCE ABOVE BECOMES AN NRE —
+  //     snapshot it under the lock at each of those sites first.
+  //
+  // _connectedReceiver and ConnectedDevice ARE cleared (InitializeAsync,
+  // DisconnectAsync), so unlocked reads of those two can legitimately see null.
+  // That is safe only because no unlocked site dereferences them —
+  // _connectedReceiver is read purely as an "is anything connected" flag, and
+  // ConnectedDevice only through `?.`. Keep it that way.
+  //
+  // What the unlocked reads do accept is a bounded race: a command aimed at a
+  // client that has since been superseded or torn down. For SetCastVolumeAsync
+  // and SetCastMuteAsync that is genuinely cheap — SharpCaster throws, the
+  // surrounding try/catch logs it, and the winning connection is untouched. A
+  // wasted network call, not corrupt state.
+  //
+  // SyncInitialVolumeAsync is the exception, and it is NOT covered by that
+  // reassurance. It is a read rather than a command, and its SUCCESS path writes
+  // _lastSetVolume/_lastSetMute and fires CastVolumeChanged — whose subscriber
+  // sets *and persists* AudioManager.MasterVolume. Nothing re-checks
+  // _connectionGeneration between the status response and the event fire, so a
+  // teardown landing in that window can persist the volume of a connection that
+  // is no longer current. Note the shape of this one: widening this lock would
+  // NOT close it (the exposure is the event fire, not the field read) — a
+  // generation re-check before the fire would. Left alone deliberately; this
+  // note exists to describe the synchronization honestly, not to change it.
   private readonly SemaphoreSlim _lifecycleLock = new(1, 1);
 
   // Bumped by anything that supersedes an in-flight connect: a newer connect, a
