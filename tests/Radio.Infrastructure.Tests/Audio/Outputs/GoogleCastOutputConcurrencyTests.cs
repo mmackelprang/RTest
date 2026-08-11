@@ -9,20 +9,25 @@ using Xunit;
 namespace Radio.Infrastructure.Tests.Audio.Outputs;
 
 /// <summary>
-/// Exercises the connect/teardown data race on <see cref="GoogleCastOutput"/>'s
+/// Pins the connect/teardown data race on <see cref="GoogleCastOutput"/>'s
 /// <c>_client</c> / <c>_connectedReceiver</c>.
 ///
 /// Before the fix these were mutated with no synchronization at all from two
 /// concurrent actors: the startup auto-connect (which reached into the output
-/// directly) and the output gate's teardown. The classic interleaving is a
+/// directly) and the output gate's teardown. The interleaving that bit is a
 /// teardown nulling <c>_connectedReceiver</c> between the connect's assignment
 /// and its dereference, which surfaced as a NullReferenceException out of a
 /// background task — or, worse, a connect publishing over a completed teardown
 /// and leaving Cast streaming while the local sink had already been unmuted.
 ///
-/// These tests need no Chromecast and no network: every device points at a
-/// closed loopback port, so <c>ConnectAsync</c> fails fast and the interesting
-/// part (the field-mutation interleaving) still happens.
+/// Deliberately ONE deterministic test rather than a stress loop. Concurrent
+/// connect/disconnect loops were tried and discarded: with an unreachable device
+/// the reachability probe fails before the connect ever reaches the racing
+/// window, so they passed against the unfixed code — coverage theatre that also
+/// added enough CPU load to destabilise neighbouring timing-sensitive tests.
+/// This test instead drives the exact interleaving through a hook, and is
+/// mutation-verified: it fails with NullReferenceException against field-based
+/// receiver handling.
 /// </summary>
 public class GoogleCastOutputConcurrencyTests
 {
@@ -76,125 +81,13 @@ public class GoogleCastOutputConcurrencyTests
     Assert.Null(output.ConnectedDevice);
   }
 
-  [Fact]
-  public async Task ConcurrentConnectAndDisconnect_NeverCorruptsConnectionState()
-  {
-    await using var output = BuildOutput();
-    await output.InitializeAsync();
-
-    var device = Device("cast-a");
-    var unexpected = new List<Exception>();
-
-    // Hammer the two racing operations. Connect failures are expected (nothing
-    // is listening); state corruption is not.
-    for (var i = 0; i < 40; i++)
-    {
-      var connect = RunToleratingConnectFailureAsync(
-        () => output.ConnectAsync(device), unexpected);
-      var disconnect = RunToleratingConnectFailureAsync(
-        () => output.DisconnectAsync(), unexpected);
-
-      await Task.WhenAll(connect, disconnect);
-    }
-
-    Assert.True(unexpected.Count == 0,
-      "Concurrent connect/disconnect corrupted state: " +
-      string.Join(" | ", unexpected.Select(e => $"{e.GetType().Name}: {e.Message}")));
-  }
-
-  [Fact]
-  public async Task ConcurrentConnectsToDifferentDevices_LeaveExactlyOneWinner()
-  {
-    // Two connects racing each other must not interleave into a hybrid
-    // connection (one device's receiver against the other's client).
-    await using var output = BuildOutput();
-    await output.InitializeAsync();
-
-    var unexpected = new List<Exception>();
-
-    for (var i = 0; i < 20; i++)
-    {
-      var a = RunToleratingConnectFailureAsync(() => output.ConnectAsync(Device("cast-a")), unexpected);
-      var b = RunToleratingConnectFailureAsync(() => output.ConnectAsync(Device("cast-b")), unexpected);
-      await Task.WhenAll(a, b);
-    }
-
-    Assert.True(unexpected.Count == 0,
-      "Racing connects corrupted state: " +
-      string.Join(" | ", unexpected.Select(e => $"{e.GetType().Name}: {e.Message}")));
-  }
-
-  [Fact]
-  public async Task DisconnectDuringConnect_ClearsConnectedDevice()
-  {
-    // The outcome that matters for the dual-output bug: once a teardown has run,
-    // a connect that completes afterwards must not resurrect ConnectedDevice.
-    await using var output = BuildOutput();
-    await output.InitializeAsync();
-
-    var unexpected = new List<Exception>();
-
-    for (var i = 0; i < 20; i++)
-    {
-      var connect = RunToleratingConnectFailureAsync(
-        () => output.ConnectAsync(Device("cast-a")), unexpected);
-      await Task.Yield();
-      var disconnect = RunToleratingConnectFailureAsync(
-        () => output.DisconnectAsync(), unexpected);
-      await Task.WhenAll(connect, disconnect);
-    }
-
-    // Final explicit teardown is the last word.
-    await RunToleratingConnectFailureAsync(() => output.DisconnectAsync(), unexpected);
-
-    Assert.Null(output.ConnectedDevice);
-    Assert.True(unexpected.Count == 0,
-      "Teardown-during-connect corrupted state: " +
-      string.Join(" | ", unexpected.Select(e => $"{e.GetType().Name}: {e.Message}")));
-  }
-
   // --- helpers ---
 
   /// <summary>
-  /// Runs a lifecycle operation, swallowing the failures that are legitimate for
-  /// an unreachable device while recording the ones that indicate torn state.
-  /// </summary>
-  private static async Task RunToleratingConnectFailureAsync(
-    Func<Task> operation, List<Exception> unexpected)
-  {
-    try
-    {
-      await Task.Run(operation);
-    }
-    catch (NullReferenceException ex)
-    {
-      // The signature failure of the original race.
-      lock (unexpected) { unexpected.Add(ex); }
-    }
-    catch (ObjectDisposedException ex)
-    {
-      lock (unexpected) { unexpected.Add(ex); }
-    }
-    catch (InvalidOperationException ex) when (
-      ex.Message.Contains("Client not initialized", StringComparison.OrdinalIgnoreCase))
-    {
-      // Only torn state can produce this after a successful InitializeAsync.
-      lock (unexpected) { unexpected.Add(ex); }
-    }
-    catch (InvalidOperationException)
-    {
-      // "Cannot connect in state X" — legitimate: the racing operation moved the
-      // state machine first. Not a corruption signal.
-    }
-    catch (Exception)
-    {
-      // Unreachable device: socket errors, timeouts, SharpCaster wrappers.
-    }
-  }
-
-  /// <summary>
-  /// A loopback listener that accepts (and ignores) connections, so the Cast
-  /// reachability probe succeeds and the connect proceeds into the racing window.
+  /// A loopback listener that accepts and immediately closes. The accept is what
+  /// lets the Cast reachability probe succeed so the connect proceeds into the
+  /// racing window; the immediate close makes the subsequent Cast handshake fail
+  /// fast instead of hanging on a socket that never answers.
   /// </summary>
   private static System.Net.Sockets.TcpListener StartLoopbackListener(out int port)
   {
@@ -202,9 +95,6 @@ public class GoogleCastOutputConcurrencyTests
     listener.Start();
     port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
 
-    // Accept and immediately close. The probe's TCP connect succeeds (which is
-    // what gets the connect into the racing window), while the subsequent Cast
-    // handshake fails fast instead of hanging on a socket that never answers.
     _ = Task.Run(async () =>
     {
       try
