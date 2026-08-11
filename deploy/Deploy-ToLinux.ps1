@@ -359,8 +359,21 @@ if (-not $NoRestart) {
     }
 
     # Relaunch kiosk browser with a fresh single tab
+    #
+    # --password-store=basic is REQUIRED, not cosmetic. Without it Chrome asks gnome-keyring
+    # for the login keyring, which GDM auto-login never unlocks; gnome-shell then raises a modal
+    # "Authentication required" prompt that grabs input and sits on top of the kiosk. On
+    # 2026-08-02 this blocked the panel for ~33 hours and Chrome never even reached navigation
+    # (0 connections to :5002, 0 renderers). See docs/uat/2026-08-03-osk-wayland-viability/.
+    #
+    # KNOWN DEFECT, deliberately not fixed here: DISPLAY=:0 assumes X11, but the box runs
+    # Wayland (loginctl session 1, seat0, Type=wayland). This relaunch therefore lands under
+    # XWayland with a different flag set than the boot path in
+    # deploy/debian-x64/kiosk/radio-kiosk-autostart.desktop. Fixing it needs the graphical
+    # session's WAYLAND_DISPLAY / XDG_RUNTIME_DIR / DBUS_SESSION_BUS_ADDRESS and warrants its
+    # own tested change rather than a drive-by edit.
     Write-Host "  Relaunching kiosk browser..." -ForegroundColor DarkGray
-    ssh $SshTarget "DISPLAY=:0 nohup google-chrome --kiosk --noerrdialogs --disable-infobars --disable-session-crashed-bubble --remote-debugging-port=9223 http://localhost:5002 &>/dev/null &"
+    ssh $SshTarget "DISPLAY=:0 nohup google-chrome --kiosk --noerrdialogs --disable-infobars --disable-session-crashed-bubble --remote-debugging-port=9223 --password-store=basic http://localhost:5002 &>/dev/null &"
 
     Write-Host ""
     Write-Host "=== Deploy successful ===" -ForegroundColor Green

@@ -1,0 +1,48 @@
+### wl-debug.log (default flags) — all text_input lines
+51:[  66162.960] wl_registry#2.global(24, "zwp_text_input_manager_v3", 1)
+52:[  66162.964]  -> wl_registry#2.bind(24, "zwp_text_input_manager_v3", 1, new id [unknown]#27)
+146:[  66212.169] wl_registry@2.global(24, "zwp_text_input_manager_v3", 1)
+215:[  66494.074]  -> zwp_text_input_manager_v3#27.get_text_input(new id zwp_text_input_v3#36, wl_seat#17)
+9654:[ 507459.049] zwp_text_input_v3#36.enter(wl_surface#24)
+9661:[ 507460.727] zwp_text_input_v3#36.leave(wl_surface#24)
+44387:[ 885687.633] zwp_text_input_v3#36.enter(wl_surface#24)
+44389:[ 885688.087] zwp_text_input_v3#36.leave(wl_surface#24)
+87104:[1350961.616]  -> zwp_text_input_v3#36.set_surrounding_text("", 0, 0)
+87105:[1350961.636]  -> zwp_text_input_v3#36.commit()
+
+### wl-debug-ime.log (--enable-wayland-ime --wayland-text-input-version=3) — all text_input lines
+51:[1513548.905] wl_registry#2.global(24, "zwp_text_input_manager_v3", 1)
+52:[1513548.909]  -> wl_registry#2.bind(24, "zwp_text_input_manager_v3", 1, new id [unknown]#27)
+146:[1513590.048] wl_registry@2.global(24, "zwp_text_input_manager_v3", 1)
+215:[1513841.375]  -> zwp_text_input_manager_v3#27.get_text_input(new id zwp_text_input_v3#36, wl_seat#17)
+1197:[1547029.050]  -> zwp_text_input_v3#36.set_surrounding_text("", 0, 0)
+1198:[1547029.077]  -> zwp_text_input_v3#36.commit()
+
+### registry globals advertised by mutter
+gtk_shell1
+wl_compositor
+wl_data_device_manager
+wl_output
+wl_seat
+wl_shm
+wl_subcompositor
+wp_fractional_scale_manager_v1
+wp_presentation
+wp_single_pixel_buffer_manager_v1
+wp_viewporter
+xdg_activation_v1
+xdg_wm_base
+zwp_idle_inhibit_manager_v1
+zwp_keyboard_shortcuts_inhibit_manager_v1
+zwp_linux_dmabuf_v1
+zwp_pointer_constraints_v1
+zwp_pointer_gestures_v1
+zwp_primary_selection_device_manager_v1
+zwp_relative_pointer_manager_v1
+zwp_tablet_manager_v2
+zwp_text_input_manager_v3
+zxdg_exporter_v1
+zxdg_exporter_v2
+zxdg_importer_v1
+zxdg_importer_v2
+zxdg_output_manager_v1
