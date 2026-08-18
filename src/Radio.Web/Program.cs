@@ -486,9 +486,10 @@ builder.Services.AddSingleton(configStoreNotifier);
 // DataProtection:KeysPath is visible here, matching Radio.API's ordering (its
 // AddManagedConfiguration call also follows the bridge registration).
 //
-// Blazor Server protects the serialized marker for every interactive component, so
-// this process needs a writable key ring even though it stores no secrets — see the
-// remarks on DataProtectionSetup. With no explicit path, ASP.NET Core falls back to
+// Blazor Server protects the serialized marker it emits for each interactive root
+// component (one per render-mode boundary), so this process needs a writable key
+// ring even though it stores no secrets — see the remarks on DataProtectionSetup.
+// With no explicit path, ASP.NET Core falls back to
 // $HOME/.aspnet/DataProtection-Keys, and radio-web.service runs with
 // ProtectHome=true, which mounts a read-only empty tmpfs over /home while HOME still
 // points at /home/mmack. Minting a key then fails with EROFS and every page render

@@ -71,7 +71,7 @@ Environment=ApiBaseUrl=http://localhost:5000
 # That is exactly how the UI went down on 2026-08-16: DataProtection's default key
 # location is $HOME/.aspnet/DataProtection-Keys, minting a key threw
 # "Read-only file system", and because Blazor Server protects the marker it emits
-# for every interactive component, every page returned 500. Radio.Web now pins its
+# for each interactive root component, every page returned 500. Radio.Web now pins its
 # key ring explicitly (src/Radio.Web/Configuration/DataProtectionSetup.cs, path from
 # appsettings.json's DataProtection:KeysPath), so this line is defense in depth for
 # any OTHER consumer of $HOME rather than the fix itself. See

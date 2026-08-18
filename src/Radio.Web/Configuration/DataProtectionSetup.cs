@@ -7,8 +7,8 @@ using Microsoft.AspNetCore.DataProtection;
 /// </summary>
 /// <remarks>
 /// Radio.Web stores no secrets of its own, but it still needs a writable key ring:
-/// Blazor Server protects the serialized marker it emits for every interactive
-/// component (<c>SSRRenderModeBoundary.ToMarker</c> →
+/// Blazor Server protects the serialized marker it emits for each interactive root
+/// component — one per render-mode boundary (<c>SSRRenderModeBoundary.ToMarker</c> →
 /// <c>ServerComponentSerializer.CreateSerializedServerComponent</c> →
 /// <c>IDataProtector.Protect</c>). That marker is emitted for
 /// <c>InteractiveServerRenderMode(prerender: false)</c> too — suppressing
@@ -61,9 +61,9 @@ internal static class DataProtectionSetup
     //   1. DataProtection:KeysPath (explicit override), else
     //   2. <Database:RootPath>/keys-web, else
     //   3. ./data/keys-web
-    // Every branch is derived from configuration and the caller-supplied base
-    // directory only — never from HOME — so a change to the process's home
-    // directory (or a sandbox that masks it) cannot move the ring.
+    // This method never reads HOME: the result depends only on the configured
+    // values and the caller-supplied base directory, so a change to the process's
+    // home directory (or a sandbox that masks it) cannot move the ring.
     var keysPath = configuration["DataProtection:KeysPath"];
     if (string.IsNullOrWhiteSpace(keysPath))
     {
