@@ -172,8 +172,9 @@ reconcile_dropin radio-api.service DBUS_SESSION_BUS_ADDRESS radio-api.service.d/
 reconcile_dropin radio-api.service DOTNET_GCHeapHardLimit   radio-api.service.d/memory-limit.conf
 reconcile_dropin radio-web.service DOTNET_GCHeapHardLimit   radio-web.service.d/memory-limit.conf
 # radio-web only: HOME must land on a writable path inside the ProtectHome=true
-# sandbox. Needle is the full value, not just "HOME=", so a unit carrying the old
-# (unset/inherited) HOME still gets the drop-in.
+# sandbox. Needle is the full value, not just "HOME=", so a unit that sets no HOME
+# (systemd then derives /home/mmack from User=) or sets a different one still gets
+# the drop-in.
 reconcile_dropin radio-web.service "HOME=/opt/radio-console/data" radio-web.service.d/10-dataprotection-home.conf
 
 # 5b. Ops scripts + units (box-only: audio-verify + weekly-maintenance).
