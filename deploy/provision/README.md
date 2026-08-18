@@ -74,6 +74,7 @@ deploy/provision/
     radio-api.service.d/pipewire.conf      # FALLBACK drop-in (DBus) — see note
     radio-api.service.d/memory-limit.conf  # FALLBACK drop-in (GC cap)
     radio-web.service.d/memory-limit.conf  # FALLBACK drop-in (GC cap)
+    radio-web.service.d/10-dataprotection-home.conf # FALLBACK drop-in (writable HOME)
   scripts/
     radio-audio-verify.sh
     radio-weekly-maintenance.sh
@@ -91,9 +92,11 @@ here) so `Deploy-ToLinux.ps1` and `setup.sh` sync the same files
 ### systemd drop-ins are a fallback, not the primary mechanism
 
 The box had three drop-ins adding `DBUS_SESSION_BUS_ADDRESS` (P0-3) and
-`DOTNET_GCHeapHardLimit`. Those values are now **folded into the canonical
-main units** (`deploy/common/radio-api.service`, `radio-web.service`), so the
-drop-ins are usually redundant. `provision.sh` installs the fallback drop-ins in
+`DOTNET_GCHeapHardLimit`, plus a 2026-08-18 hotfix drop-in giving `radio-web` a
+writable `HOME` (`10-dataprotection-home.conf`). Those values are now **folded
+into the canonical main units** (`deploy/common/radio-api.service`,
+`radio-web.service`), so the drop-ins are usually redundant. `provision.sh`
+installs the fallback drop-ins in
 `systemd/` **only if** a deployed main unit predates the fold (missing the value).
 
 ### Legacy units (captured, not installed)

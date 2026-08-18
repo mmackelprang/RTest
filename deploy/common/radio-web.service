@@ -62,6 +62,32 @@ Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/opt/radio-console/web/.bundle
 Environment=ASPNETCORE_CONTENTROOT=/opt/radio-console/web
 Environment=ApiBaseUrl=http://localhost:5000
 
+# === HOME must point somewhere writable inside the sandbox (added 2026-08-18) ===
+# ProtectHome=true below mounts a read-only, empty tmpfs over /home, but the unit
+# does not override HOME, so the process inherits HOME=/home/mmack — a path it can
+# neither read nor write. Any library that falls back to $HOME therefore fails with
+# EROFS.
+#
+# That is exactly how the UI went down on 2026-08-16: DataProtection's default key
+# location is $HOME/.aspnet/DataProtection-Keys, minting a key threw
+# "Read-only file system", and because Blazor Server protects the marker it emits
+# for every interactive component, every page returned 500. Radio.Web now pins its
+# key ring explicitly (src/Radio.Web/appsettings.json -> DataProtection:KeysPath),
+# so this line is defense in depth for any OTHER consumer of $HOME rather than the
+# fix itself. See design/plans/SECRET-KEYRING-INVESTIGATION.md.
+#
+# MUST be /opt/radio-console/data, NOT /opt/radio-console: ProtectSystem=strict
+# makes the whole filesystem read-only apart from ReadWritePaths, and only logs/,
+# web/ and data/ are listed there — the parent /opt/radio-console is read-only
+# inside this sandbox. Of those three, data/ is the one the deploy preserves.
+#
+# This supersedes the box-only hotfix drop-in
+# /etc/systemd/system/radio-web.service.d/10-dataprotection-home.conf; the same
+# file is kept in deploy/provision/systemd/ as a fallback for a box whose deployed
+# main unit predates this fold (see deploy/provision/README.md).
+Environment=HOME=/opt/radio-console/data
+# === end HOME ===
+
 # Security hardening
 ProtectSystem=strict
 # /opt/radio-console/data is needed for the SQLite config bridge (PR #422):

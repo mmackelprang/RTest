@@ -6,6 +6,10 @@
 `fix/dataprotection-keyring-persist-path` (awaiting review). Owner action required to
 re-enter secrets.
 
+**See also:** the [2026-08-18 addendum](#addendum-2026-08-18--the-same-defect-in-radioweb)
+at the end of this document — the same class of defect in `Radio.Web`, which the
+original text of this investigation explicitly (and wrongly) ruled out.
+
 ---
 
 ## Symptom
@@ -166,12 +170,109 @@ it is derived independently of `HOME`, so no future user/home change can silentl
 
 **Behavioural note (safe):** after this deploys, DataProtection will create a fresh key under
 `data/keys` and ignore the old `.aspnet` ring. That loses nothing — every current secret is
-already undecryptable — and the owner's re-entry (step a) encrypts under the new ring. Only the
-API uses this ring (Radio.Web does not call `AddManagedConfiguration`), so nothing else is
-affected.
+already undecryptable — and the owner's re-entry (step a) encrypts under the new ring. This
+ring is the API's alone: `AddManagedConfiguration` is called only from `Radio.API`, so no
+other process reads or writes `data/keys`.
+
+> ### ⚠ Correction (2026-08-18)
+>
+> The sentence above originally ended *"…so nothing else is affected."* **That was false**,
+> and the error cost a two-day, every-page-500 outage of the Blazor UI — see the
+> [addendum](#addendum-2026-08-18--the-same-defect-in-radioweb).
+>
+> `Radio.Web` not calling `AddManagedConfiguration` means it does not share *this* key ring.
+> It does **not** mean `Radio.Web` is free of DataProtection. Blazor Server protects the
+> serialized marker it emits for every interactive component, so `Radio.Web` had a key ring
+> of its own the whole time — the ambient `$HOME/.aspnet/DataProtection-Keys` one, i.e.
+> exactly the fragile default this investigation set out to eliminate. The remediation
+> above removed the trap from the API and left it in place for the UI.
 
 **Validation:** `Radio.Configuration` builds 0-warning; `Radio.API` (net10.0) builds 0-error;
 `Radio.Configuration.Tests` 115/115 pass.
+
+---
+
+---
+
+## Addendum (2026-08-18) — the same defect in `Radio.Web`
+
+**Status:** root cause confirmed live on the box. Fix on branch
+`fix/web-dataprotection-keyring`.
+
+### Symptom
+
+Every page at `http://radio.local:5002/` returned HTTP 500 from 2026-08-16 onward.
+`MainLayout` still painted — it is static-rendered — while the page body was ASP.NET
+Core's error page, which is why the console looked half-alive rather than dead.
+
+### Causal chain (each step observed, not inferred)
+
+1. `deploy/common/radio-web.service` is hardened with `ProtectSystem=strict` and
+   `ProtectHome=true`, with
+   `ReadWritePaths=/opt/radio-console/logs /opt/radio-console/web /opt/radio-console/data`.
+2. Reading `/proc/<radio-web PID>/mounts` **inside the unit's own mount namespace**
+   shows `/home` masked as a read-only empty tmpfs
+   (`tmpfs /home tmpfs ro,nosuid,nodev,noexec,relatime,…`), while the process
+   environment still carries `HOME=/home/mmack`.
+3. `src/Radio.Web/Program.cs` configured no DataProtection, and `Radio.Web` never
+   calls `AddManagedConfiguration`, so the key ring fell back to the ambient
+   `$HOME/.aspnet/DataProtection-Keys` — inside that namespace, both invisible and
+   unwritable.
+4. Minting a new key therefore failed with
+   `System.IO.IOException: Read-only file system`.
+5. Blazor Server calls `Protect()` to serialize the interactive component marker.
+   Captured stack: `SSRRenderModeBoundary.ToMarker` →
+   `ServerComponentSerializer.CreateSerializedServerComponent` →
+   `TimeLimitedDataProtector.Protect` → `KeyRingProvider.CreateCacheableKeyRingCore`
+   → `FileSystemXmlRepository.StoreElementCore` → `File.Move` → `IOException`.
+   `src/Radio.Web/Components/App.razor` uses
+   `new InteractiveServerRenderMode(prerender: false)` on both `HeadOutlet` and
+   `Routes`; the failure happens anyway, because the marker is emitted regardless of
+   prerendering.
+6. Timeline: zero such errors on Aug 15; they begin immediately after the Sun
+   2026-08-16 03:00:47 restart. The deployed unit file had been rewritten with the
+   hardening on Aug 10 16:56, but the running process kept its old mount namespace
+   until that restart applied it — which is why the outage and the config change are
+   six days apart.
+
+### Why the hardening, not the app, changed the outcome
+
+`Radio.Web` had depended on ambient `$HOME` since it was written. It worked only
+because `HOME` happened to name a writable directory. `ProtectHome=true` removed that
+accident. Nothing in the application changed on Aug 16.
+
+### Fix
+
+1. **`src/Radio.Web/Configuration/DataProtectionSetup.cs`** (+ the call from
+   `src/Radio.Web/Program.cs`) — persists the ring to an explicit, `HOME`-independent
+   path using the same resolution order as `AddManagedConfiguration`:
+   `DataProtection:KeysPath` → `<Database:RootPath>/keys-web` → `./data/keys-web`,
+   then `Path.GetFullPath` against the process working directory +
+   `Directory.CreateDirectory`. `SetApplicationName("Radio.Web")` — a different
+   purpose discriminator from `"Radio.Configuration"` on purpose: `Radio.Web` has no
+   reason to be able to unprotect API secrets.
+2. **`src/Radio.Web/appsettings.json`** — `DataProtection:KeysPath = "./data/keys-web"`,
+   with an inline note. A **separate directory** from the API's `./data/keys` so the
+   secrets ring keeps holding only API-created keys; key files carry no app name, so a
+   shared directory would leave a future secrets investigation unable to attribute
+   them. It is not a security boundary — both services run as `mmack`.
+3. **`deploy/common/radio-web.service`** — `Environment=HOME=/opt/radio-console/data`.
+   Defense in depth for any *other* `$HOME` consumer, not the fix itself.
+   `/opt/radio-console/data` rather than `/opt/radio-console`, because
+   `ProtectSystem=strict` leaves only the `ReadWritePaths` entries writable and the
+   parent is not one of them. Folded into the canonical unit; a matching fallback
+   drop-in lives at
+   `deploy/provision/systemd/radio-web.service.d/10-dataprotection-home.conf` for a
+   box whose deployed unit predates the fold.
+
+### Generalised lesson
+
+*"Service X does not use the secrets store"* does not imply *"service X does not use
+DataProtection"*. ASP.NET Core takes the key ring for antiforgery, for Blazor Server
+component markers, and for anything else built on `IDataProtector`, whether or not the
+app asked for it. When a unit gains `ProtectHome=`/`ProtectSystem=` hardening, the
+writable-path audit has to cover what the *framework* writes, not only what the
+application's own code writes.
 
 ---
 
