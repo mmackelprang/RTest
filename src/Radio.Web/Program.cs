@@ -2,6 +2,7 @@ using System.Net.Sockets;
 using Radzen;
 using Radio.Configuration.Bridge;
 using Radio.Web;
+using Radio.Web.Configuration;
 using Radio.Web.Models;
 using Radio.Web.Services;
 using Radio.Web.Services.ApiClients;
@@ -481,6 +482,40 @@ var configStoreNotifier = new ConfigStoreChangeNotifier();
 builder.Configuration.AddSqliteConfigStore(configDbPath, "sqlite", configStoreNotifier);
 builder.Services.AddSingleton(configStoreNotifier);
 
+// DataProtection key ring. Registered after AddSqliteConfigStore above so a stored
+// DataProtection:KeysPath is visible here, matching Radio.API's ordering (its
+// AddManagedConfiguration call also follows the bridge registration). Note the
+// consequence both services share: configuration.db is bridged into BOTH processes,
+// so a DataProtection:KeysPath row written there would move both rings to the same
+// directory. Nothing writes that key today, and purpose isolation would still hold
+// (different application discriminators), but the separate-directory intent below
+// would be lost silently.
+//
+// Blazor Server protects the serialized marker it emits for each interactive root
+// component (one per render-mode boundary), so this process needs a writable key
+// ring even though it stores no secrets — see the remarks on DataProtectionSetup.
+// With no explicit path, ASP.NET Core falls back to
+// $HOME/.aspnet/DataProtection-Keys, and radio-web.service runs with
+// ProtectHome=true, which mounts a read-only empty tmpfs over /home while HOME still
+// points at /home/mmack. Minting a key then fails with EROFS and every page render
+// throws (production outage, 2026-08-16 — see
+// design/plans/SECRET-KEYRING-INVESTIGATION.md).
+//
+// The configured path is relative, and it is resolved against the process WORKING
+// DIRECTORY rather than the content root — in production those differ, because
+// radio-web.service sets WorkingDirectory=/opt/radio-console and
+// ASPNETCORE_CONTENTROOT=/opt/radio-console/web. The working directory is the one we
+// want: it yields /opt/radio-console/data/keys-web, which is covered by the unit's
+// ReadWritePaths and which the deploy preserves (Deploy-ToLinux.ps1's `rsync
+// --delete` targets api/ and web/ only). Resolving against the content root would
+// place the ring inside web/, where every deploy would delete it. The base directory
+// is passed explicitly so this is a stated choice and not an artifact of the default
+// Path.GetFullPath overload.
+var dataProtectionKeysPath = DataProtectionSetup.ResolveKeysPath(
+  builder.Configuration,
+  Directory.GetCurrentDirectory());
+builder.Services.AddRadioWebDataProtection(dataProtectionKeysPath);
+
 builder.Services.Configure<DevicesOptions>(builder.Configuration.GetSection(DevicesOptions.SectionName));
 
 // Bind Display:* → DisplayOptions for the wall-clock time-format setting.
@@ -571,6 +606,10 @@ Console.WriteLine("║            RADIO CONSOLE WEB - Starting Up               
 Console.WriteLine("╚══════════════════════════════════════════════════════════════════╝");
 Console.WriteLine($"  API URL: {apiBaseUrl}");
 Console.WriteLine($"  Log files: {logDirectory}");
+// Surface the resolved key-ring directory at startup: when DataProtection can't
+// write it, the symptom is a 500 on every page with nothing in the header to say
+// which directory was attempted.
+Console.WriteLine($"  DataProtection keys: {dataProtectionKeysPath}");
 Console.WriteLine($"  Environment: {app.Environment.EnvironmentName}");
 Console.WriteLine();
 
@@ -581,6 +620,7 @@ Log.Information("  Started at: {Timestamp}", DateTime.Now.ToString("yyyy-MM-dd H
 Log.Information("  API URL: {ApiUrl}", apiBaseUrl);
 Log.Information("  Environment: {Environment}", app.Environment.EnvironmentName);
 Log.Information("  Log directory: {LogPath}", logDirectory);
+Log.Information("  DataProtection keys: {KeysPath}", dataProtectionKeysPath);
 Log.Information("════════════════════════════════════════════════════════════════════");
 
 try

@@ -229,8 +229,13 @@ Environment=DOTNET_EnableDiagnostics=0
 Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/opt/radio-console/web/.bundle
 Environment=ASPNETCORE_CONTENTROOT=/opt/radio-console/web
 Environment=ApiBaseUrl=http://localhost:5000
+# HOME must resolve inside ReadWritePaths: ProtectHome=true masks /home
+# read-only, so anything falling back to $HOME (DataProtection's key ring
+# among them) fails with EROFS. See common/radio-web.service.
+Environment=HOME=/opt/radio-console/data
 ProtectSystem=strict
-ReadWritePaths=/opt/radio-console/logs /opt/radio-console/web
+# data/ carries the SQLite config store and the DataProtection key ring.
+ReadWritePaths=/opt/radio-console/logs /opt/radio-console/web /opt/radio-console/data
 PrivateTmp=true
 ProtectHome=true
 NoNewPrivileges=true
