@@ -484,7 +484,12 @@ builder.Services.AddSingleton(configStoreNotifier);
 
 // DataProtection key ring. Registered after AddSqliteConfigStore above so a stored
 // DataProtection:KeysPath is visible here, matching Radio.API's ordering (its
-// AddManagedConfiguration call also follows the bridge registration).
+// AddManagedConfiguration call also follows the bridge registration). Note the
+// consequence both services share: configuration.db is bridged into BOTH processes,
+// so a DataProtection:KeysPath row written there would move both rings to the same
+// directory. Nothing writes that key today, and purpose isolation would still hold
+// (different application discriminators), but the separate-directory intent below
+// would be lost silently.
 //
 // Blazor Server protects the serialized marker it emits for each interactive root
 // component (one per render-mode boundary), so this process needs a writable key
