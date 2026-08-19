@@ -1,0 +1,629 @@
+#!/usr/bin/env bash
+# radio-console-open — the "Radio Console" desktop icon: repair what's down, then open the kiosk.
+#
+# Design: docs/design-handoffs/HANDOFF-kiosk-desktop-launcher.md
+# Plan:   docs/superpowers/plans/2026-08-18-kiosk-desktop-launcher.md (Task B2)
+# Probes: docs/uat/2026-08-18-kiosk-launcher/PROBES.md + PROBES-B.md
+#
+# TWO RULES THAT INVERT THE WHOLE DESIGN IF THEY ARE GOT WRONG:
+#
+#  1. The kiosk browser is the SUBJECT of this action, not a reported component (design §5.1).
+#     The desktop is only visible when the kiosk is closed, so the kiosk is ALWAYS down when
+#     this runs. If starting it counted as a repair, the dialog would fire on every single tap
+#     and the silent path would never happen. It therefore never appears in the status list and
+#     never triggers the report. Its FAILURE is still worth saying — that is kiosk_failed() —
+#     but its routine cold start is invisible, by design.
+#
+#  2. Google Voice auth is dead roughly 9 minutes in every 20, by design, and that blackout is
+#     NEVER reported (design §5.3). This script checks LIVENESS, never auth. Reporting the
+#     routine blackout would fire the dialog on ~45% of taps, for a condition that clears itself
+#     within ten minutes and that nothing here can act on — and a dialog that cries wolf gets
+#     dismissed unread on the day something is actually broken.
+#
+# The Google Voice reading in full, because it is the least obvious thing in this file:
+#   `available`, `degraded` and `cookiesValid` on GET :5004/api/gvbridge/status ARE LIARS.
+#   {"available":true,"degraded":false,"cookiesValid":true,"psidtsAgeSeconds":707} was captured
+#   while both SMS endpoints were returning hard 502s. `psidtsAgeSeconds` is the only honest
+#   field, and it is a live blackout clock:
+#       < 660        healthy window                         -> Online, silent
+#       660 - 1200   routine blackout trough                -> Online, SILENT. The appliance
+#                                                              working as designed. Never
+#                                                              reported.
+#       > 1200       the refresh cycle itself never fired   -> Needs sign-in (amber)
+#       absent/null  same reading as > 1200
+#   The counter resets at ~1200 in every healthy cycle, so a value beyond it is the one reading
+#   that means a genuinely dead session — which is what makes a single stateless probe enough,
+#   with no timestamp file and no history.
+#
+# Not `set -e`: a failed probe is DATA, not a crash. Every probe failure below is a state this
+# script knows how to report.
+set -uo pipefail
+
+# status_block() aligns its columns by padding with bash's ${#s}, which counts CHARACTERS only
+# when the character-type locale is UTF-8 and BYTES otherwise. The value column carries '·'
+# (U+00B7 — one character, two bytes in UTF-8), so under a C/POSIX locale every row with that
+# suffix would come out one column short and the pills would not line up. LC_ALL outranks
+# LC_CTYPE and LANG, so it is the one that has to be right; it is set only when the inherited
+# locale is not already a UTF-8 one. Only character encoding is at stake — every string this
+# script prints is its own English copy, so nothing is being un-translated.
+case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+  *[Uu][Tt][Ff]*) ;;
+  *) export LC_ALL=C.UTF-8 ;;
+esac
+
+KIOSK_LAUNCH=/usr/local/bin/radio-kiosk-launch
+GTK_TOUCH_CONFIG=/usr/local/share/radio-console/gtk-touch
+GV_PROFILE="$HOME/.config/gv-bridge-chrome"
+LOCKFILE="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/radio-console-open.lock"
+
+# Substituted by setup-kiosk.sh from the unit it discovers on the box, because a unit name
+# cannot be committed literally. If that substitution never ran — the script was copied out of a
+# checkout by hand — this stays the literal placeholder and `systemctl start` fails, which
+# surfaces as a red PHONE row rather than as silence.
+ROTARY_UNIT="@ROTARY_UNIT@"
+
+API_URL=http://localhost:5000/api/health/version
+WEB_URL=http://localhost:5002/
+PHONE_URL=http://localhost:5004/api/gvbridge/status
+
+# online | down | started | starting | failed | offline | needsignin
+declare -A STATE
+
+# Dependency order, which is also start order, which is also display order (§5.1).
+LABELS=(AUDIO CONSOLE PHONE VOICE)
+
+# The value column carries the technical identifier, and the design's mockups show it without
+# the `.service` suffix (`radio-api`, `rotary-phone`). ROTARY_UNIT keeps the full unit name
+# because systemctl needs one; only the displayed copy is trimmed.
+declare -A UNITNAME=(
+  [AUDIO]="radio-api"
+  [CONSOLE]="radio-web"
+  [PHONE]="${ROTARY_UNIT%.service}"
+  [VOICE]="Google Voice bridge"
+)
+
+# ---------------------------------------------------------------------------------------------
+# Probes (§5.2 — liveness, and evidence rather than a probe field)
+# ---------------------------------------------------------------------------------------------
+
+# `systemctl is-active` is not health. The repo's own lesson: a health field derived from a
+# probe rather than from "did the last real call return data" reports healthy straight through
+# an outage. Each check below makes a real request that has to come back.
+probe_audio()   { systemctl is-active --quiet radio-api && curl -fsS --max-time 2 -o /dev/null "$API_URL"; }
+probe_console() { systemctl is-active --quiet radio-web && curl -fsS --max-time 2 -o /dev/null "$WEB_URL"; }
+probe_phone()   { curl -fsS --max-time 2 -o /dev/null "$PHONE_URL"; }
+
+# The bridge Chrome is identified by its profile directory, exactly as radio-kiosk-exit
+# identifies the kiosk by its own. NEVER widen this to `chrome`: matching every Chrome on the
+# box is precisely what used to take the bridge down.
+probe_voice_process() { pgrep -f -- "--user-data-dir=$GV_PROFILE" >/dev/null 2>&1; }
+
+# PHONE and VOICE share ONE request to :5004 so the whole probe budget stays at 2s (§5.2b).
+GV_BODY=""
+GV_RC=1
+fetch_gv_status() { GV_BODY="$(curl -fsS --max-time 2 "$PHONE_URL" 2>/dev/null)"; GV_RC=$?; }
+
+# jq IS installed on the box (measured 2026-08-18), and this still parses with grep: the
+# launcher is the thing that runs when the appliance is already unwell, so every dependency it
+# does not need is one fewer way for it to fail for a new reason.
+gv_psidts_age() {
+  printf '%s' "$GV_BODY" \
+    | grep -oE '"psidtsAgeSeconds"[[:space:]]*:[[:space:]]*[0-9]+' \
+    | grep -oE '[0-9]+$' | head -1
+}
+
+classify_voice() {
+  probe_voice_process || { echo offline; return; }
+  local age; age="$(gv_psidts_age)"
+  # Absent, null and unparseable all read the same way: the refresh cycle has stopped
+  # reporting. This guard is also what keeps a failed probe DATA rather than an error — with
+  # the value empty, `[ "$age" -gt 1200 ]` prints "integer expression expected" and evaluates
+  # FALSE, which would report a dead session as Online. The parse above emits digits or
+  # nothing, so the non-numeric arm cannot fire today; it is here so that a later change to
+  # that pipeline cannot quietly reintroduce the silent-Online failure.
+  case "$age" in ''|*[!0-9]*) echo needsignin; return ;; esac
+  [ "$age" -gt 1200 ] && { echo needsignin; return; }
+  echo online   # BOTH the < 660 window and the 660-1200 trough are silent. See the header.
+}
+
+run_probes() {
+  local tmp; tmp="$(mktemp -d)"
+  ( probe_audio   && echo online > "$tmp/AUDIO"   || echo down > "$tmp/AUDIO" ) &
+  ( probe_console && echo online > "$tmp/CONSOLE" || echo down > "$tmp/CONSOLE" ) &
+  ( fetch_gv_status; printf '%s' "$GV_BODY" > "$tmp/body"; printf '%s' "$GV_RC" > "$tmp/rc" ) &
+  wait
+  STATE[AUDIO]="$(cat "$tmp/AUDIO")"
+  STATE[CONSOLE]="$(cat "$tmp/CONSOLE")"
+  GV_BODY="$(cat "$tmp/body")"
+  GV_RC="$(cat "$tmp/rc")"
+  rm -rf "$tmp"
+
+  if [ "$GV_RC" = 0 ]; then STATE[PHONE]=online; else STATE[PHONE]=down; fi
+
+  # An unreachable :5004 is the PHONE row's problem, not VOICE's (§5.3, last table row), so
+  # VOICE falls back to the process check alone instead of inheriting PHONE's failure.
+  if [ "${STATE[PHONE]}" = online ]; then
+    STATE[VOICE]="$(classify_voice)"
+  elif probe_voice_process; then
+    STATE[VOICE]=online
+  else
+    STATE[VOICE]=offline
+  fi
+}
+
+# ---------------------------------------------------------------------------------------------
+# Repair (§5.5 — per-component budgets, and a whole-run ceiling)
+# ---------------------------------------------------------------------------------------------
+
+# The GV bridge ensure script is ROTARYPHONE-OWNED (D:\prj\RotaryPhone). This launcher CALLS it
+# and reads its exit code, and does nothing else with it: it never writes it, installs a unit or
+# timer for it, edits it, or kills the bridge. The contract depended on here is exactly two
+# things — the path and the exit code.
+# It is resolved from a candidate list at runtime because RotaryPhone is bringing the script
+# under version control and the canonical path may move; a relocation then degrades to a
+# reported failure rather than a wrong one. Measured 2026-08-18: only ~/bin/gv-bridge-ensure.sh
+# of the three exists on the box.
+resolve_gv_ensure() {
+  local c
+  for c in "$HOME/bin/gv-bridge-ensure.sh" \
+           /usr/local/bin/gv-bridge-ensure.sh \
+           /opt/rotary-phone/bin/gv-bridge-ensure.sh; do
+    [ -x "$c" ] && { printf '%s\n' "$c"; return 0; }
+  done
+  return 1
+}
+
+# `sudo -n` never prompts. This runs from a desktop icon with no controlling terminal, so a
+# password prompt here would either fail confusingly or raise a second, unrelated dialog on a
+# panel that has no keyboard attached. The box is configured for passwordless sudo, so -n costs
+# nothing there and turns a missing sudoers rule into a red row instead of a stalled run.
+start_audio()   { sudo -n systemctl start radio-api; }
+start_console() { sudo -n systemctl start radio-web; }
+start_phone()   { sudo -n systemctl start "$ROTARY_UNIT"; }
+start_voice()   { local s; s="$(resolve_gv_ensure)" || return 1; "$s"; }
+
+wait_for() {   # $1 = probe function, $2 = budget in seconds
+  local deadline=$(( SECONDS + $2 ))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    "$1" && return 0
+    sleep 1
+  done
+  return 1
+}
+
+# Whole-run ceiling (§5.5). SECONDS is the shell's own uptime counter, so this is 60s from the
+# moment the tap started this process.
+RUN_DEADLINE=$(( SECONDS + 60 ))
+
+# Only a component that is DOWN gets started. `needsignin` is deliberately excluded, and that
+# exclusion is load-bearing rather than tidy: the bridge Chrome is already running in that state
+# (that is how the psidts rule got read at all), so the ensure script would find nothing to do,
+# wait_for would immediately pass on the process that was there all along, and the row would be
+# rewritten to `started` — reporting "the Google Voice link wasn't running, it's started now"
+# for a session only a keyboard can fix, and retiring Variant B2 in silence.
+needs_start() { case "${STATE[$1]}" in down|offline) return 0 ;; *) return 1 ;; esac; }
+
+# A component that started but has not answered inside its budget is AMBER, never red. Red is
+# reserved for "the start command itself failed". That two-tier split is the difference between
+# a dialog worth reading and one that gets dismissed unread.
+repair() {   # $1 = component label
+  # Past the whole-run ceiling nothing further is started, and the row goes amber rather than
+  # red: this component was down at probe time and still is, but nothing tried and failed to
+  # start it, so red would be a lie. `Starting` is the closest honest pill in the approved
+  # vocabulary — the run is out of time, not out of hope.
+  if [ "$SECONDS" -ge "$RUN_DEADLINE" ]; then STATE[$1]=starting; return; fi
+  case "$1" in
+    AUDIO)
+      progress_text "Starting the audio engine…"
+      if start_audio;   then wait_for probe_audio         20 && STATE[AUDIO]=started   || STATE[AUDIO]=starting
+      else STATE[AUDIO]=failed; fi ;;
+    CONSOLE)
+      progress_text "Starting the console…"
+      if start_console; then wait_for probe_console       15 && STATE[CONSOLE]=started || STATE[CONSOLE]=starting
+      else STATE[CONSOLE]=failed; fi ;;
+    PHONE)
+      progress_text "Starting the phone service…"
+      if start_phone;   then wait_for probe_phone         15 && STATE[PHONE]=started   || STATE[PHONE]=starting
+      else STATE[PHONE]=failed; fi ;;
+    VOICE)
+      progress_text "Starting the Google Voice link…"
+      if start_voice;   then wait_for probe_voice_process 20 && STATE[VOICE]=started   || STATE[VOICE]=starting
+      else STATE[VOICE]=failed; fi ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------------------------
+# Dialogs (§6)
+# ---------------------------------------------------------------------------------------------
+
+# XDG_CONFIG_HOME points at the private GTK config dir for this process only, so the 56px touch
+# buttons apply here and no global GTK setting on the box is touched. GTK_THEME=Yaru-dark makes
+# the dialog read as part of a dark appliance rather than as a bright system popup.
+zen() { XDG_CONFIG_HOME="$GTK_TOUCH_CONFIG" GTK_THEME=Yaru-dark zenity "$@"; }
+
+# The corpus's existing --signal-* values. No new tokens (§6.3).
+GREEN='#4ADE80'; AMBER='#F0A830'; RED='#F87171'; LOW='#4B5563'
+
+# echoes "<colour>|<pill>|<value suffix>"
+#
+# Every state that can reach a dialog has an arm here. `down` is deliberately absent: it is a
+# probe-time state only, and main() hands every startable component to repair(), which always
+# rewrites it — to started, starting or failed — before any dialog is composed, including on
+# the whole-run-ceiling path. A `down` row would render with an empty pill, which is visible
+# rather than wrong.
+pill_for() {
+  case "$1" in
+    online)         echo "$GREEN|Online|" ;;
+    started)        echo "$GREEN|Online| · started just now" ;;
+    starting)       echo "$AMBER|Starting| · not answering yet" ;;
+    failed|offline) echo "$RED|Offline| · didn't start" ;;
+    needsignin)     echo "$AMBER|Needs sign-in| · session expired" ;;
+  esac
+}
+
+# Applied to every string this script interpolates into Pango markup. The colours above are the
+# only other interpolated values, and they are hex literals defined in this file that land in
+# attribute position rather than in element content.
+esc() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+
+# Pad by CHARACTERS, not bytes. printf's `%-34s` pads by bytes, and the value column carries
+# '·' (U+00B7 — 2 bytes in UTF-8), so every suffixed row would silently come out one column
+# narrow under it. bash's ${#s} counts characters under the UTF-8 locale established at the top
+# of this file. The RAW string is padded here and escaped afterwards, because escaping first
+# would make an `&` cost five columns instead of one. A value longer than the column widens the
+# row rather than being truncated.
+pad_to() {   # $1 = string, $2 = column width in characters
+  local s="$1" n=$(( $2 - ${#1} )) pad=""
+  while [ "$n" -gt 0 ]; do pad="$pad "; n=$(( n - 1 )); done
+  printf '%s%s' "$s" "$pad"
+}
+
+# The [label][value][pill] row grammar (§6.3), monospaced so the three columns align without a
+# table widget. The labels are ASCII and fixed by construction, so printf's byte padding is
+# exact for them; only the value column needs pad_to.
+status_block() {
+  local c colour pill suffix out=""
+  for c in "${LABELS[@]}"; do
+    IFS='|' read -r colour pill suffix <<< "$(pill_for "${STATE[$c]}")"
+    out+="$(printf '<tt><span size="large">%-9s <span foreground="%s">%s</span> <span foreground="%s">[ %s ]</span></span></tt>' \
+      "$(esc "$c")" "$LOW" "$(esc "$(pad_to "${UNITNAME[$c]}$suffix" 34)")" "$colour" "$(esc "$pill")")"$'\n'
+  done
+  printf '%s' "$out"
+}
+
+headline() { printf '<span size="x-large" weight="bold">%s</span>' "$(esc "$1")"; }
+subline()  { printf '<span foreground="%s">%s</span>' "$LOW" "$(esc "$1")"; }
+
+# Progress dialog (§6.2) — repair path only, never the healthy path.
+PROGRESS_FIFO=""
+PROGRESS_PID=""
+progress_open() {
+  PROGRESS_FIFO="$(mktemp -u)"
+  mkfifo "$PROGRESS_FIFO" || { PROGRESS_FIFO=""; return 0; }
+  zen --progress --pulsate --auto-close --no-cancel --width=760 \
+      --title="Radio Console" --text="Starting…" < "$PROGRESS_FIFO" &
+  PROGRESS_PID=$!
+  # Opening the write end is what unblocks the reader above, and fd 8 then stays open for the
+  # whole repair so the dialog does not see EOF between components.
+  exec 8>"$PROGRESS_FIFO"
+}
+progress_text()  { [ -n "$PROGRESS_PID" ] && printf '#%s\n' "$1" >&8; return 0; }
+progress_close() {
+  [ -n "$PROGRESS_PID" ] || return 0
+  exec 8>&-                       # EOF on stdin is what makes zenity --progress exit
+  wait "$PROGRESS_PID" 2>/dev/null
+  rm -f "$PROGRESS_FIFO"
+  PROGRESS_PID=""
+}
+
+any_state() {   # any_state failed offline -> true if ANY component is in one of the given states
+  local c want
+  for c in "${LABELS[@]}"; do
+    for want in "$@"; do [ "${STATE[$c]}" = "$want" ] && return 0; done
+  done
+  return 1
+}
+
+compute_tier() {
+  if   any_state failed offline; then echo error
+  elif any_state needsignin;     then echo warning
+  elif any_state starting;       then echo warning
+  elif any_state started;        then echo info
+  else echo silent; fi
+}
+
+count_in_state() {
+  local c w n=0
+  for c in "${LABELS[@]}"; do
+    for w in "$@"; do [ "${STATE[$c]}" = "$w" ] && n=$(( n + 1 )); done
+  done
+  echo "$n"
+}
+
+numword() { case "$1" in 2) echo Two;; 3) echo Three;; 4) echo Four;; *) echo Some;; esac; }
+
+# Friendly names, used in headlines only. The technical unit names stay in the dim value column,
+# which is the one place jargon is allowed to live.
+friendly() {
+  case "$1" in
+    AUDIO)   echo "The audio engine" ;;
+    CONSOLE) echo "The console" ;;
+    PHONE)   echo "The phone service" ;;
+    VOICE)   echo "The Google Voice link" ;;
+  esac
+}
+
+# Copy is verbatim from §6.4 / §6.5 / §6.6. House voice: plain, calm, sentence case, one
+# sentence, no exclamation marks, never blames the user, single '…' and never three dots. The
+# per-component failure strings stay distinct — the corpus is explicit that "couldn't load the
+# recording" and "the console can't play it" are different problems with different fixes, and
+# collapsing them into one generic string throws that away.
+compose_report() {
+  local n c head="" sub="" sub_below=0
+  if any_state failed offline; then
+    n="$(count_in_state failed offline)"
+    if [ "$n" = 1 ]; then
+      for c in "${LABELS[@]}"; do
+        case "${STATE[$c]}" in
+          failed|offline)
+            head="$(friendly "$c") didn't start."
+            case "$c" in
+              AUDIO)   sub="The console will open, but there'll be no sound." ;;
+              CONSOLE) sub="The screen will show an error page instead." ;;
+              PHONE)   sub="Calls and texts won't reach the screen." ;;
+              VOICE)   sub="Voicemail and texts won't load. Calls still work." ;;
+            esac ;;
+        esac
+      done
+    else
+      head="$(numword "$n") services didn't start."
+      sub="Some things won't work until they're running."
+    fi
+  elif any_state needsignin; then
+    head="Google Voice needs you to sign in again."
+    sub="You'll need a keyboard — the on-screen one can't type into Google's page."
+  elif any_state starting; then
+    # The FIRST component still starting, in dependency order — the one everything else is
+    # waiting on. The rows carry the full picture when more than one is amber.
+    for c in "${LABELS[@]}"; do
+      if [ "${STATE[$c]}" = starting ]; then
+        head="$(friendly "$c") is still starting — give it a minute."
+        break
+      fi
+    done
+    sub="If sound is still missing in a minute, open the console again."
+    sub_below=1
+  else
+    n="$(count_in_state started)"
+    if [ "$n" = 1 ]; then
+      for c in "${LABELS[@]}"; do
+        [ "${STATE[$c]}" = started ] && head="$(friendly "$c") wasn't running — it's started now."
+      done
+    else
+      head="$(numword "$n") services weren't running — they're started now."
+    fi
+  fi
+
+  # Where the sub-line sits differs by variant, and the design's mockups decide it rather than a
+  # formatting preference: §6.6 and §6.5's B2 put the consequence line directly under the
+  # headline, where it reads as part of the same sentence; §6.5's B1 says "sub-line under the
+  # list", where its advice reads as the next step after the evidence.
+  if [ "$sub_below" = 1 ]; then
+    printf '%s\n\n%s\n\n%s\n' "$(headline "$head")" "$(status_block)" "$(subline "$sub")"
+  elif [ -n "$sub" ]; then
+    printf '%s\n%s\n\n%s\n' "$(headline "$head")" "$(subline "$sub")" "$(status_block)"
+  else
+    printf '%s\n\n%s\n' "$(headline "$head")" "$(status_block)"
+  fi
+  return 0
+}
+
+# `Show the sign-in` is NOT offered while this is 0, and 0 is what ships: raising the bridge
+# Chrome's window under Wayland is unmeasured on this box, and §10.2 is explicit that a button
+# which does nothing must not ship. The amber copy stands on its own without it. This stays one
+# constant plus one function so a measurement can change the behaviour by changing the 0 to a 1
+# — raise_gv_bridge() is unreachable until something does, deliberately.
+GV_RAISE_SUPPORTED=0
+# Launching a second Chrome on the bridge's own profile is forwarded to the running instance,
+# which is the only raise mechanism available here. It starts nothing the bridge does not
+# already own, and kills nothing.
+raise_gv_bridge() { google-chrome --user-data-dir="$GV_PROFILE" https://voice.google.com & }
+
+# Returns 0 only when the owner asked to run the whole thing again; non-zero means "carry on and
+# open the console".
+#
+# zenity 4.0.1's exit-code contract, measured on the box 2026-08-18 by driving the buttons:
+#   --ok-label button    -> rc 0, empty stdout
+#   --extra-button       -> rc 1, the button's LABEL on stdout
+#   dismissed/ESC/closed -> rc 1, EMPTY stdout
+#   --timeout expiry     -> rc 5, empty stdout
+# rc alone therefore cannot separate "Open anyway" from a dismissal, and this design does not
+# need it to: both mean open the console. Leaving the panel dark because the owner swiped a
+# dialog away is the worst outcome available here — the tap that started this run was a request
+# to open the console, and a dismissed dialog must never be read as "hold the kiosk back
+# forever". The captured label is echoed to stderr only so that a UAT run driving the buttons
+# over AT-SPI can tell which of the two fired; nothing branches on it.
+#
+# --icon-name is NOT used: zenity 4 dropped it, and --icon still parses but is silently ignored
+# (measured — the image node is byte-identical with a valid icon name, a nonexistent one, and
+# none at all). The per-tier glyph comes from the dialog TYPE, which is what the design
+# specified all along, and --extra-button works on the stock types, so no glyph is traded for a
+# button and no button is traded for a glyph.
+report_dialog() {
+  local text out rc
+  text="$(compose_report)"
+
+  if any_state failed offline; then
+    out="$(zen --error --width=760 --title="Radio Console" \
+               --ok-label="Try again" --extra-button="Open anyway" --text="$text")"
+    rc=$?
+    [ -n "$out" ] && echo "radio-console-open: dialog button '$out'" >&2
+    [ "$rc" = 0 ] && return 0
+    return 1
+  fi
+
+  if any_state needsignin; then
+    if [ "$GV_RAISE_SUPPORTED" = 1 ]; then
+      out="$(zen --warning --width=760 --title="Radio Console" \
+                 --ok-label="Show the sign-in" --extra-button="Not now" --text="$text")"
+      rc=$?
+      [ -n "$out" ] && echo "radio-console-open: dialog button '$out'" >&2
+      [ "$rc" = 0 ] && raise_gv_bridge
+    else
+      zen --warning --width=760 --title="Radio Console" --ok-label="OK" --text="$text"
+    fi
+    return 1
+  fi
+
+  if any_state starting; then
+    zen --warning --width=760 --title="Radio Console" --ok-label="Continue" --text="$text"
+    return 1
+  fi
+
+  if any_state started; then
+    # Good news should not require a fingertip, and the kiosk is already up behind this dialog
+    # (ordering rule 1), so the timeout costs nothing.
+    zen --info --timeout=10 --width=760 --title="Radio Console" --ok-label="OK" --text="$text"
+    return 1
+  fi
+
+  return 1
+}
+
+# The kiosk is never a reported row (§5.1), but its failure is still worth saying (§6.6).
+kiosk_failed() {
+  zen --error --width=760 --title="Radio Console" \
+      --text="$(headline "The console screen didn't open.")
+
+$(subline "Try again. If it keeps failing, shut down and power back on.")"
+}
+
+# Canned states for one-shot visual sign-off on a box that cannot be screenshotted.
+load_demo_states() {
+  STATE=( [AUDIO]=online [CONSOLE]=online [PHONE]=online [VOICE]=online )
+  case "$1" in
+    A)  STATE[CONSOLE]=started; STATE[PHONE]=started ;;
+    B1) STATE[AUDIO]=starting ;;
+    B2) STATE[VOICE]=needsignin ;;
+    C)  STATE[AUDIO]=failed ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------------------------
+# Sequence (§5.4)
+# ---------------------------------------------------------------------------------------------
+
+main() {
+  run_probes
+
+  local c needs_dialog=0 needs_start_any=0
+  for c in "${LABELS[@]}"; do
+    [ "${STATE[$c]}" = online ] && continue
+    needs_dialog=1
+    needs_start "$c" && needs_start_any=1
+  done
+
+  if [ "$needs_dialog" = 0 ]; then
+    # Variant D: no dialog, no notification, no toast, no sound. The kiosk opening is the entire
+    # feedback, and this is the overwhelmingly common path.
+    "$KIOSK_LAUNCH" || kiosk_failed
+    exit 0
+  fi
+
+  if [ "$needs_start_any" = 1 ]; then
+    # The progress dialog appears only once a repair is known to be needed (§6.2). A repair can
+    # take 20-45s, and twenty seconds of motionless desktop after a tap is indistinguishable
+    # from a dead icon — which produces exactly the double tap this design is trying to prevent.
+    # A run with nothing to start (a dead Google Voice session and nothing else) shows no
+    # progress dialog, because nothing is being started.
+    progress_open
+    for c in "${LABELS[@]}"; do needs_start "$c" && repair "$c"; done
+    progress_close
+  fi
+
+  if any_state failed offline; then
+    # ORDERING RULE 2: on the error path the kiosk is HELD BACK. This is the only place the
+    # design deliberately adds friction — the error dialog carries the only explanation of what
+    # is wrong plus the retry, and a fullscreen kiosk racing it risks burying it.
+    if report_dialog; then
+      # Release the single-instance lock EXPLICITLY before re-running. fd 9 carries no
+      # close-on-exec flag, so the lock survives `exec` into the new image; whether the
+      # reopened `exec 9>` then drops it turns on which open file description the redirect
+      # closes first. That is too subtle a thing for a retry button to stand on — a still-held
+      # lock would make `flock -n` exit 0 immediately and `Try again` do nothing at all, which
+      # is the worst possible failure for a retry. Closing it here means the answer does not
+      # depend on the reasoning.
+      exec 9>&-
+      exec "$0"
+    else
+      "$KIOSK_LAUNCH" || kiosk_failed
+    fi
+  else
+    # ORDERING RULE 1: on the success path the kiosk launches BEFORE the dialog.
+    # --window-position is a no-op under Wayland and stacking is decided by launch order, so a
+    # dialog raised first would be swallowed by the fullscreen kiosk and the owner sees nothing.
+    "$KIOSK_LAUNCH" || kiosk_failed
+    sleep "${RADIO_DIALOG_DELAY:-2}"
+    report_dialog || true
+  fi
+}
+
+usage() {
+  cat >&2 <<'USAGE'
+usage: radio-console-open [--print-status | --dry-run | --dialog-demo A|B1|B2|C]
+  (no arguments)   probe, start what is down, then open the kiosk
+  --print-status   probe only; print each component's state, the psidts age, and the tier
+  --dry-run        probe only; print what a real run WOULD start. Starts nothing.
+  --dialog-demo    render one canned report dialog. Probes nothing, starts nothing.
+USAGE
+}
+
+# ---------------------------------------------------------------------------------------------
+# Argument dispatch. This MUST stay ABOVE the flock guard, and that is not a style choice.
+# ---------------------------------------------------------------------------------------------
+# --print-status / --dry-run / --dialog-demo are what make this box verifiable at all: it cannot
+# be screenshotted, so they are how every tier decision gets checked over SSH. Behind the lock,
+# running any of them WHILE a real repair was in flight would exit 0 with no output whatsoever —
+# a silent empty result from the very tools that exist to tell the truth about a run. None of
+# them starts a service or opens a window that a second instance could duplicate, so none of
+# them needs the lock.
+case "${1:-}" in
+  --print-status)
+    run_probes
+    for c in "${LABELS[@]}"; do printf '%s=%s\n' "$c" "${STATE[$c]}"; done
+    printf 'PSIDTS=%s\n' "$(gv_psidts_age)"
+    printf 'TIER=%s\n' "$(compute_tier)"
+    exit 0 ;;
+  --dry-run)
+    run_probes
+    # A component that is not online but is not startable either — VOICE with a dead Google
+    # session — deliberately produces no line: nothing WOULD be started for it. It surfaces as
+    # VOICE=needsignin / TIER=warning under --print-status, which is the affordance that
+    # reports state.
+    for c in "${LABELS[@]}"; do
+      needs_start "$c" && printf 'WOULD-START %s (%s)\n' "$c" "${UNITNAME[$c]}"
+    done
+    exit 0 ;;
+  --dialog-demo)
+    case "${2:-}" in A|B1|B2|C) ;; *) usage; exit 2 ;; esac
+    load_demo_states "$2"
+    report_dialog
+    exit 0 ;;
+  "") ;;
+  *) usage; exit 2 ;;
+esac
+
+# ---- Single-instance guard — default action only ----
+# Absorb a second tap silently while a run is in flight (§5.6). With `unclutter -idle 3` and
+# touch input there is no cursor feedback at all, so a second tap during a 1-3s cold start is
+# likely rather than hypothetical. flock is present on the box (measured 2026-08-18:
+# /usr/bin/flock), so there is no PID-file fallback to carry.
+exec 9>"$LOCKFILE"
+flock -n 9 || exit 0
+
+# There is no "raise the existing kiosk window" step here, and that is a decision rather than an
+# omission: --window-position is a no-op under Wayland and GetWindows is AccessDenied on GNOME
+# 46, so nothing measured on this box backs a raise. radio-kiosk-launch already declines to
+# spawn a second Chrome when one is running, which is what the design requires (§10.2's
+# fallback). Nothing here pretends to do more than that.
+main
