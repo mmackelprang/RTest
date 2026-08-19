@@ -24,6 +24,7 @@ APPS_DIR="$HOME/.local/share/applications"
 DESKTOP_DIR="$HOME/Desktop"
 BIN_DIR="/usr/local/bin"
 ICON_DIR="$HOME/.local/share/icons/radio-console"
+GTK_DIR="/usr/local/share/radio-console/gtk-touch"
 
 mkdir -p "$APPS_DIR" "$DESKTOP_DIR" "$ICON_DIR"
 
@@ -44,8 +45,8 @@ if [ -z "$ROTARY_UNIT" ]; then
   ROTARY_UNIT="rotary-phone.service"
 fi
 
-# ---- 1/10. Install icon assets ----
-echo "[1/10] Installing icon assets..."
+# ---- 1/11. Install icon assets ----
+echo "[1/11] Installing icon assets..."
 
 # Both files are byte copies of branding/favicon.svg and branding/icon-512.png — the Anderson
 # Console mark, which had never shipped anywhere until now.
@@ -65,9 +66,9 @@ install -m 644 "$SCRIPT_DIR/icons/radio-console-512.png" "$ICON_DIR/radio-consol
 echo "  Installed: $ICON_DIR/radio-console.svg"
 echo "  Installed: $ICON_DIR/radio-console-512.png"
 
-# ---- 2/10. Install desktop shortcuts ----
+# ---- 2/11. Install desktop shortcuts ----
 echo ""
-echo "[2/10] Installing desktop shortcuts..."
+echo "[2/11] Installing desktop shortcuts..."
 
 # Mode 755, NOT `chmod +x`. With the default umask `chmod +x` yields 775, and GNOME REFUSES to
 # launch a group-writable .desktop file — silently, with no error anywhere. That mode bit is
@@ -106,9 +107,9 @@ done
 
 echo "  Desktop shortcuts installed."
 
-# ---- 3/10. Install kiosk helper scripts ----
+# ---- 3/11. Install kiosk helper scripts ----
 echo ""
-echo "[3/10] Installing kiosk helper scripts..."
+echo "[3/11] Installing kiosk helper scripts..."
 
 # These live in /usr/local/bin, not /opt/radio-console, deliberately: Deploy-ToLinux.ps1 wipes
 # /opt/radio-console/{api,web} on every deploy and calls both of these scripts during that same
@@ -118,9 +119,25 @@ for s in radio-kiosk-launch radio-kiosk-exit; do
   echo "  Installed: $BIN_DIR/$s"
 done
 
-# ---- 4/10. Remove entries this setup no longer owns ----
+# ---- 4/11. Install the touch GTK overrides ----
 echo ""
-echo "[4/10] Removing superseded desktop entries..."
+echo "[4/11] Installing touch GTK overrides..."
+
+# GTK's default button metrics do not meet the touch floor and there is no zenity flag for it,
+# so the dialogs get a private GTK config dir that radio-console-open and radio-shutdown-confirm
+# point XDG_CONFIG_HOME at. Nothing global is changed and no other application sees this.
+#
+# It lives under /usr/local/share rather than in $HOME for the same reason the helper scripts
+# live in /usr/local/bin: those scripts read it, and it has to survive a deploy that wipes
+# /opt/radio-console. gtk-4.0/ is the right subdirectory because zenity here is 4.0.1 linked
+# against libgtk-4 (measured 2026-08-18); a gtk-3.0/ file would be read by nothing.
+sudo install -d -m 755 "$GTK_DIR/gtk-4.0"
+sudo install -m 644 "$SCRIPT_DIR/gtk-touch/gtk-4.0/gtk.css" "$GTK_DIR/gtk-4.0/gtk.css"
+echo "  Installed: $GTK_DIR/gtk-4.0/gtk.css"
+
+# ---- 5/11. Remove entries this setup no longer owns ----
+echo ""
+echo "[5/11] Removing superseded desktop entries..."
 
 # `onboard` is dropped: docs/uat/2026-08-03-osk-wayland-viability/REPORT.md measured Chrome 151
 # on Wayland issuing ZERO zwp_text_input_v3.enable() calls, so the OS keyboard cannot type into
@@ -136,9 +153,9 @@ else
 fi
 pkill -x onboard 2>/dev/null || true
 
-# ---- 5/10. Install autostart entry ----
+# ---- 6/11. Install autostart entry ----
 echo ""
-echo "[5/10] Installing autostart entry..."
+echo "[6/11] Installing autostart entry..."
 
 AUTOSTART_DIR="$HOME/.config/autostart"
 mkdir -p "$AUTOSTART_DIR"
@@ -146,9 +163,9 @@ mkdir -p "$AUTOSTART_DIR"
 cp "$SCRIPT_DIR/radio-kiosk-autostart.desktop" "$AUTOSTART_DIR/radio-kiosk-autostart.desktop"
 echo "  Autostart entry installed to $AUTOSTART_DIR/"
 
-# ---- 6/10. Switch services to run as login user ----
+# ---- 7/11. Switch services to run as login user ----
 echo ""
-echo "[6/10] Switching radio services to run as $KIOSK_USER..."
+echo "[7/11] Switching radio services to run as $KIOSK_USER..."
 
 # On a kiosk/desktop system, the radio services need to run as the login user
 # so they have access to PipeWire/PulseAudio audio (which runs per-user).
@@ -173,9 +190,9 @@ sudo chown -R "$KIOSK_USER:$KIOSK_USER" /opt/radio-console
 sudo systemctl daemon-reload
 echo "  Services updated."
 
-# ---- 7/10. Configure GNOME auto-login ----
+# ---- 8/11. Configure GNOME auto-login ----
 echo ""
-echo "[7/10] Configuring GNOME auto-login..."
+echo "[8/11] Configuring GNOME auto-login..."
 
 GDM_CONF="/etc/gdm3/custom.conf"
 if [ -f "$GDM_CONF" ]; then
@@ -190,9 +207,9 @@ else
   echo "  WARNING: $GDM_CONF not found. Auto-login must be configured manually."
 fi
 
-# ---- 8/10. Disable screen blanking and lock ----
+# ---- 9/11. Disable screen blanking and lock ----
 echo ""
-echo "[8/10] Disabling screen blanking and lock..."
+echo "[9/11] Disabling screen blanking and lock..."
 
 gsettings set org.gnome.desktop.session idle-delay 0
 gsettings set org.gnome.desktop.screensaver lock-enabled false
@@ -208,9 +225,9 @@ echo "  Screen blanking disabled."
 echo "  Screen lock disabled."
 echo "  X11 DPMS disabled."
 
-# ---- 9/10. Install unclutter + display helpers ----
+# ---- 10/11. Install unclutter + display helpers ----
 echo ""
-echo "[9/10] Installing unclutter and display helpers..."
+echo "[10/11] Installing unclutter and display helpers..."
 # Note: Virtual keyboard for text entry is built into the Radio Console Web UI.
 # No system-level on-screen keyboard needed (onboard doesn't work on Wayland).
 
@@ -253,9 +270,9 @@ EOF
   echo "  unclutter autostart entry created."
 fi
 
-# ---- 10/10. Install browser refresh helper ----
+# ---- 11/11. Install browser refresh helper ----
 echo ""
-echo "[10/10] Installing browser refresh helper..."
+echo "[11/11] Installing browser refresh helper..."
 
 REFRESH_SCRIPT="/usr/local/bin/radio-refresh-browser"
 sudo tee "$REFRESH_SCRIPT" > /dev/null << 'EOF'
@@ -307,6 +324,7 @@ echo "Installed:"
 echo "  Desktop shortcuts: $DESKTOP_DIR/radio-*.desktop (mode 755)"
 echo "  App menu entries:  $APPS_DIR/radio-*.desktop"
 echo "  Icon assets:       $ICON_DIR/"
+echo "  Dialog GTK theme:  $GTK_DIR/gtk-4.0/gtk.css"
 echo "  Autostart:         $AUTOSTART_DIR/radio-kiosk-autostart.desktop"
 echo "  Kiosk helpers:     $BIN_DIR/radio-kiosk-launch, $BIN_DIR/radio-kiosk-exit"
 echo "  Browser refresh:   $REFRESH_SCRIPT (X11 only — inert on this Wayland box)"

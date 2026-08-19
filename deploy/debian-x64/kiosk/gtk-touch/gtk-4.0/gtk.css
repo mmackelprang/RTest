@@ -1,0 +1,33 @@
+/* Touch sizing for the Radio Console zenity dialogs — and for nothing else on this box.
+ *
+ * Scope: radio-console-open and radio-shutdown-confirm point XDG_CONFIG_HOME at
+ * /usr/local/share/radio-console/gtk-touch for the zenity process alone, so no global GTK
+ * setting is touched and no other application on the box is affected.
+ *
+ * gtk-4.0/, not gtk-3.0/: zenity here is 4.0.1 and links libgtk-4 plus libadwaita-1 (measured
+ * 2026-08-18). A gtk-3.0/gtk.css in this directory would be read by nothing, fail silently, and
+ * ship the default buttons.
+ *
+ * The numbers below are measurements, not preferences. GTK 4's default button height is 44px,
+ * under the 48px touch floor. `min-height: 56px` ALONE overshoots to 76px, because GTK 4 adds
+ * ~20px of vertical padding on top of it. Zeroing the vertical padding lands it exactly:
+ *   push button | 'Try again' | (0, 0, 444, 56)
+ * 56px is --touch-preferred, so the floor is cleared with margin.
+ *
+ * The design's 24px inter-button gap is NOT achievable here, and is deliberately not attempted.
+ * GTK 4's message-dialog action area lays buttons out full-width with a 1px separator, and three
+ * selector variants (`.dialog-action-box separator`, `.dialog-vbox separator`,
+ * `messagedialog .dialog-action-area separator`) all left it at 1px — measured on the box, not
+ * assumed from the docs. The gap's stated intent is that a fingertip aiming at one button must
+ * not land on its neighbour, and that intent is met by a wider margin than the spec asked for:
+ * each button comes out ~444px wide, so the aim point sits ~222px from the seam, against ~100px
+ * in the spec's 200px-wide-button model. Recorded here rather than worked around.
+ */
+button {
+  min-height: 56px;
+  min-width: 200px;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 24px;
+  padding-right: 24px;
+}
