@@ -175,17 +175,33 @@ it in this tree. Documented here only so a rebuild knows the dependency exists.
   (superseded by the google-chrome watchdog).
 - **To provision on a rebuild:** coordinate with the RotaryPhone session — it
   owns the extension/profile install and the `gv-bridge-*` user units/scripts.
-  Radio Console only consumes the GV REST/SignalR feed (`radio:5004`).
+  Radio Console consumes the GV REST/SignalR feed (`radio:5004`) and, since
+  2026-08-18, **invokes `gv-bridge-ensure.sh`** from the kiosk launcher
+  (`radio-console-open`) when the bridge is not running. That is still
+  invoke-and-probe only: the contract is a path and an exit code, and nothing in
+  this tree writes, installs, edits or kills bridge startup. See
+  `design/INTEGRATIONS.md` § Second consumer.
 
 ---
 
 ## Kiosk reconciliation (tracked for a follow-up to `setup-kiosk.sh`)
 
 `setup-kiosk.sh` covers autologin, three gsettings, unclutter, the refresh helper,
-and — since 2026-08-18 — **the three `~/Desktop` entries and the two kiosk helper
-scripts** (`/usr/local/bin/radio-kiosk-launch`, `/usr/local/bin/radio-kiosk-exit`).
-That last part closes the drift loop: before it, nothing had ever copied the repo's
+and — since 2026-08-18 — **everything the desktop itself is made of**:
+
+- the three `~/Desktop` entries (`Exit to Desktop` · `Radio Console` · `Shutdown System`),
+  mode 755, with any hand-dragged icon position cleared;
+- four helper scripts in `/usr/local/bin`: `radio-kiosk-launch`, `radio-kiosk-exit`,
+  `radio-console-open`, `radio-shutdown-confirm`;
+- the icon assets in `~/.local/share/icons/radio-console/`;
+- the dialogs' 56px touch buttons, `/usr/local/share/radio-console/gtk-touch/gtk-4.0/gtk.css`.
+
+That closes the drift loop: before it, nothing had ever copied the repo's
 `.desktop` files onto the box, so `~/Desktop` was hand-maintained and diverged.
+
+**The alphabetical order of the three names is a safety property, not cosmetics** — it keeps
+`Radio Console` physically between `Exit to Desktop` and `Shutdown System`. Any rename must
+preserve `E… < R… < S…`; `setup-kiosk.sh` says so next to the install loop.
 
 **The repo is now the source of truth for `~/Desktop`. Do not hand-edit those entries.**
 The deploy scripts do not ship `deploy/debian-x64/kiosk/`, so re-run the installer from

@@ -187,7 +187,10 @@ installed to `/usr/local/bin/` by `deploy/debian-x64/kiosk/setup-kiosk.sh`. The 
 `Deploy-ToLinux.ps1` both call it. Change flags there and nowhere else — three callers carrying
 three different flag sets is how the box drifted in the first place. The `~/Desktop` entries and
 the helper scripts also come from that directory: **do not hand-edit `~/Desktop`**, re-run
-`setup-kiosk.sh` from a checkout instead.
+`setup-kiosk.sh` from a checkout instead. Since 2026-08-18 that directory is also the source of
+truth for the desktop icon assets, the dialogs' GTK touch override, and four helper scripts —
+`radio-kiosk-launch`, `radio-kiosk-exit`, `radio-console-open` (the Radio Console icon: probe,
+start what is down, then open the kiosk) and `radio-shutdown-confirm`.
 
 ### ⚠ Kiosk Chrome must pass `--password-store=basic`
 
