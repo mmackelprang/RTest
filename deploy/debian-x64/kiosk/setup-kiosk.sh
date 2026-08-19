@@ -18,8 +18,7 @@ echo "========================================="
 echo "User: $KIOSK_USER"
 echo ""
 
-# ---- 1/9. Install desktop shortcuts ----
-echo "[1/9] Installing desktop shortcuts..."
+# ---- Shared paths and discovered values ----
 
 APPS_DIR="$HOME/.local/share/applications"
 DESKTOP_DIR="$HOME/Desktop"
@@ -44,6 +43,31 @@ if [ -z "$ROTARY_UNIT" ]; then
   echo "  WARNING: no rotary-phone service unit found; PHONE repair will be a no-op."
   ROTARY_UNIT="rotary-phone.service"
 fi
+
+# ---- 1/10. Install icon assets ----
+echo "[1/10] Installing icon assets..."
+
+# Both files are byte copies of branding/favicon.svg and branding/icon-512.png — the Anderson
+# Console mark, which had never shipped anywhere until now.
+#
+# The 256px and 128px renders the plan listed are deliberately NOT shipped: rsvg-convert,
+# inkscape and convert are all absent from the box (measured 2026-08-18), so nothing on either
+# side could rasterise them and fabricating them was the only alternative. Little is lost by
+# that — the SVG is the file the desktop actually uses. librsvg2-common is installed and
+# gdk-pixbuf carries a working SVG loader (libpixbufloader-svg.so, measured the same day), so an
+# absolute-path `.svg` in an `Icon=` line resolves and renders. The 512px PNG rides along as the
+# raster fallback.
+#
+# $ICON_DIR is under $HOME, outside /opt/radio-console, so this survives deploys —
+# Deploy-ToLinux.ps1 wipes api/ and web/ only.
+install -m 644 "$SCRIPT_DIR/icons/radio-console.svg" "$ICON_DIR/radio-console.svg"
+install -m 644 "$SCRIPT_DIR/icons/radio-console-512.png" "$ICON_DIR/radio-console-512.png"
+echo "  Installed: $ICON_DIR/radio-console.svg"
+echo "  Installed: $ICON_DIR/radio-console-512.png"
+
+# ---- 2/10. Install desktop shortcuts ----
+echo ""
+echo "[2/10] Installing desktop shortcuts..."
 
 # Mode 755, NOT `chmod +x`. With the default umask `chmod +x` yields 775, and GNOME REFUSES to
 # launch a group-writable .desktop file — silently, with no error anywhere. That mode bit is
@@ -82,9 +106,9 @@ done
 
 echo "  Desktop shortcuts installed."
 
-# ---- 2/9. Install kiosk helper scripts ----
+# ---- 3/10. Install kiosk helper scripts ----
 echo ""
-echo "[2/9] Installing kiosk helper scripts..."
+echo "[3/10] Installing kiosk helper scripts..."
 
 # These live in /usr/local/bin, not /opt/radio-console, deliberately: Deploy-ToLinux.ps1 wipes
 # /opt/radio-console/{api,web} on every deploy and calls both of these scripts during that same
@@ -94,9 +118,9 @@ for s in radio-kiosk-launch radio-kiosk-exit; do
   echo "  Installed: $BIN_DIR/$s"
 done
 
-# ---- 3/9. Remove entries this setup no longer owns ----
+# ---- 4/10. Remove entries this setup no longer owns ----
 echo ""
-echo "[3/9] Removing superseded desktop entries..."
+echo "[4/10] Removing superseded desktop entries..."
 
 # `onboard` is dropped: docs/uat/2026-08-03-osk-wayland-viability/REPORT.md measured Chrome 151
 # on Wayland issuing ZERO zwp_text_input_v3.enable() calls, so the OS keyboard cannot type into
@@ -112,9 +136,9 @@ else
 fi
 pkill -x onboard 2>/dev/null || true
 
-# ---- 4/9. Install autostart entry ----
+# ---- 5/10. Install autostart entry ----
 echo ""
-echo "[4/9] Installing autostart entry..."
+echo "[5/10] Installing autostart entry..."
 
 AUTOSTART_DIR="$HOME/.config/autostart"
 mkdir -p "$AUTOSTART_DIR"
@@ -122,9 +146,9 @@ mkdir -p "$AUTOSTART_DIR"
 cp "$SCRIPT_DIR/radio-kiosk-autostart.desktop" "$AUTOSTART_DIR/radio-kiosk-autostart.desktop"
 echo "  Autostart entry installed to $AUTOSTART_DIR/"
 
-# ---- 5/9. Switch services to run as login user ----
+# ---- 6/10. Switch services to run as login user ----
 echo ""
-echo "[5/9] Switching radio services to run as $KIOSK_USER..."
+echo "[6/10] Switching radio services to run as $KIOSK_USER..."
 
 # On a kiosk/desktop system, the radio services need to run as the login user
 # so they have access to PipeWire/PulseAudio audio (which runs per-user).
@@ -149,9 +173,9 @@ sudo chown -R "$KIOSK_USER:$KIOSK_USER" /opt/radio-console
 sudo systemctl daemon-reload
 echo "  Services updated."
 
-# ---- 6/9. Configure GNOME auto-login ----
+# ---- 7/10. Configure GNOME auto-login ----
 echo ""
-echo "[6/9] Configuring GNOME auto-login..."
+echo "[7/10] Configuring GNOME auto-login..."
 
 GDM_CONF="/etc/gdm3/custom.conf"
 if [ -f "$GDM_CONF" ]; then
@@ -166,9 +190,9 @@ else
   echo "  WARNING: $GDM_CONF not found. Auto-login must be configured manually."
 fi
 
-# ---- 7/9. Disable screen blanking and lock ----
+# ---- 8/10. Disable screen blanking and lock ----
 echo ""
-echo "[7/9] Disabling screen blanking and lock..."
+echo "[8/10] Disabling screen blanking and lock..."
 
 gsettings set org.gnome.desktop.session idle-delay 0
 gsettings set org.gnome.desktop.screensaver lock-enabled false
@@ -184,9 +208,9 @@ echo "  Screen blanking disabled."
 echo "  Screen lock disabled."
 echo "  X11 DPMS disabled."
 
-# ---- 8/9. Install unclutter + display helpers ----
+# ---- 9/10. Install unclutter + display helpers ----
 echo ""
-echo "[8/9] Installing unclutter and display helpers..."
+echo "[9/10] Installing unclutter and display helpers..."
 # Note: Virtual keyboard for text entry is built into the Radio Console Web UI.
 # No system-level on-screen keyboard needed (onboard doesn't work on Wayland).
 
@@ -229,9 +253,9 @@ EOF
   echo "  unclutter autostart entry created."
 fi
 
-# ---- 9/9. Install browser refresh helper ----
+# ---- 10/10. Install browser refresh helper ----
 echo ""
-echo "[9/9] Installing browser refresh helper..."
+echo "[10/10] Installing browser refresh helper..."
 
 REFRESH_SCRIPT="/usr/local/bin/radio-refresh-browser"
 sudo tee "$REFRESH_SCRIPT" > /dev/null << 'EOF'
@@ -282,6 +306,7 @@ echo ""
 echo "Installed:"
 echo "  Desktop shortcuts: $DESKTOP_DIR/radio-*.desktop (mode 755)"
 echo "  App menu entries:  $APPS_DIR/radio-*.desktop"
+echo "  Icon assets:       $ICON_DIR/"
 echo "  Autostart:         $AUTOSTART_DIR/radio-kiosk-autostart.desktop"
 echo "  Kiosk helpers:     $BIN_DIR/radio-kiosk-launch, $BIN_DIR/radio-kiosk-exit"
 echo "  Browser refresh:   $REFRESH_SCRIPT (X11 only — inert on this Wayland box)"

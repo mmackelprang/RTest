@@ -16,3 +16,9 @@
 # working tree is what gets copied.
 *.desktop text eol=lf
 deploy/debian-x64/kiosk/bin/* text eol=lf
+
+# Icon assets are installed onto the box byte-for-byte and are copies of the files in
+# branding/. `* text=auto` treats an .svg as text and hands a Windows working tree a CRLF
+# copy, which would make the shipped icon differ from the source it was copied from.
+# Nothing reads these as source, so keep them out of EOL conversion entirely.
+deploy/debian-x64/kiosk/icons/* -text
