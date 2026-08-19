@@ -29,15 +29,16 @@ GTK_DIR="/usr/local/share/radio-console/gtk-touch"
 mkdir -p "$APPS_DIR" "$DESKTOP_DIR" "$ICON_DIR"
 
 # The rotary-phone unit name is DISCOVERED, not assumed. A wrong name here would make the
-# KIOSK-2 launcher report PHONE as a hard failure forever — which is exactly the cry-wolf
-# failure the Google Voice rule exists to prevent. Defined in this row because install_entry()
-# substitutes it and the script runs under `set -u`. Verified on the box 2026-08-18: the unit
+# launcher report PHONE as a hard failure forever — which is exactly the cry-wolf failure the
+# Google Voice rule exists to prevent. It is derived once, ahead of every numbered step, because
+# render_template() substitutes it into bin/radio-console-open and the script runs under
+# `set -u`. Verified on the box 2026-08-18: the unit
 # is `rotary-phone.service` (a separate `rotary-phone-cookies.service` is a oneshot cookie
 # refresh, not the API — the ^ anchor plus `head -1` keeps it out).
 # The trailing `|| true` is required, not belt-and-braces: this script runs under
 # `set -euo pipefail`, and with pipefail a no-match `grep` fails the whole pipeline, which
-# would abort setup-kiosk.sh at step 1/9 having installed nothing — and would make the
-# `if [ -z ]` fallback directly below it unreachable dead code.
+# would abort setup-kiosk.sh before it installed anything — and would make the `if [ -z ]`
+# fallback directly below it unreachable dead code.
 ROTARY_UNIT="${ROTARY_UNIT:-$(systemctl list-units --type=service --all --no-legend \
   | awk '{print $1}' | grep -iE '^(rotary-?phone|rotaryphone)\.service$' | head -1 || true)}"
 if [ -z "$ROTARY_UNIT" ]; then
@@ -70,12 +71,14 @@ echo "  Installed: $ICON_DIR/radio-console-512.png"
 echo ""
 echo "[2/11] Installing desktop shortcuts..."
 
-# The placeholders (@ICON_DIR@, @KIOSK_USER@, @ROTARY_UNIT@) are what let the repo stay the
-# source of truth for files whose content depends on this box: an absolute icon path under the
-# login user's home, and a discovered unit name, cannot be committed literally. Since KIOSK-2
-# three files carry one — both Radio Console entries carry @ICON_DIR@ and radio-console-open
-# carries @ROTARY_UNIT@ — so the substitution lives here once and is shared by the entry
-# installer, the autostart entry, and the helper-script loop.
+# The placeholders are what let the repo stay the source of truth for files whose content
+# depends on this box: an absolute icon path under the login user's home, and a discovered unit
+# name, cannot be committed literally. Three files carry one — radio-console.desktop and
+# radio-kiosk-autostart.desktop carry @ICON_DIR@, and bin/radio-console-open carries
+# @ROTARY_UNIT@ — so the substitution lives here once and is shared by the entry installer, the
+# autostart entry and the helper-script loop. @KIOSK_USER@ is carried by no file today; it is
+# inherited from KIOSK-1 and left in place because a substitution that matches nothing costs
+# nothing.
 render_template() {   # $1 = source file, $2 = destination for the rendered copy
   sed -e "s|@ICON_DIR@|$ICON_DIR|g" \
       -e "s|@KIOSK_USER@|$KIOSK_USER|g" \
