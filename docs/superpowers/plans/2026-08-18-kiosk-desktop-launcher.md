@@ -95,9 +95,27 @@ The new-consumer note for `RADIO-CONSOLE-BT-AUDIO-BOUNDARY.md`'s Change Log is a
 
 Branch: `fix/kiosk-launch-contract`
 
-## Task A0 — Probe the box and pin the four unknowns
+## Task A0 — Probe the box and pin the four unknowns — ✅ **RESOLVED 2026-08-18**
 
-**No code ships in this task.** It produces one artifact, `docs/uat/2026-08-18-kiosk-launcher/PROBES.md`,
+> **This task is done and is no longer a gate.** The owner read all four unknowns off the live box
+> on 2026-08-18 and the answers are recorded in
+> [`docs/uat/2026-08-18-kiosk-launcher/PROBES.md`](../../uat/2026-08-18-kiosk-launcher/PROBES.md).
+> **Do not re-run the probe block below** — re-checking costs a round trip to the box and risks
+> disagreeing with what was verified. It is retained verbatim for the record.
+>
+> | Unknown | Answer | What it decides |
+> |---|---|---|
+> | zenity version / GTK major | **4.0.1, linked against libgtk-4** | `KIOSK-2` Task B3's 56 px CSS goes in **`gtk-4.0/gtk.css`**, not `gtk-3.0/` |
+> | `--timeout` · `--default-cancel` · `--width` · `--height` | **all supported** | Variant A's 10 s auto-dismiss and Task B6's Cancel default are both available |
+> | `--icon-name` | **NOT SUPPORTED — zenity 4 dropped it** | ⚠ **`KIOSK-2` Task B2 cannot use `--question --icon-name=…`.** Per-tier iconography must come from the built-in `--info` / `--warning` / `--error` glyphs, which take a single button. §10.2 forbids shipping a button that does nothing — but `Try again` / `Open anyway` are both live actions, so the **glyph** gives way, not the buttons. The exact substitution is a `KIOSK-2` decision; it just starts from this constraint instead of discovering it. |
+> | `systemctl --user show-environment` | **carries `WAYLAND_DISPLAY=wayland-0`, `XDG_RUNTIME_DIR=/run/user/1000`, `DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus`, `DISPLAY=:0`** | **The entire Part A relaunch fix rests on this inheritance, and it holds.** Task A2 ships **without** the `--setenv=` fallback block. The owner relaunched the kiosk this way by hand on 2026-08-18 and it worked. |
+> | rotary unit name | **`rotary-phone.service`** (a separate `rotary-phone-cookies.service` is a oneshot cookie refresh, **not** the API) | Task A4's discovery regex anchors on the full unit name so the cookies oneshot cannot win `head -1` |
+>
+> The remaining probes in the block below (DING schema, `flock` / `jq` / `rsvg-convert` presence,
+> the `~/Desktop` mode baseline) gate **`KIOSK-2` tasks only**. They are deliberately left for that
+> row to read at the point it needs them, rather than recorded now and going stale.
+
+**No code ships in this task.** It produced one artifact, `docs/uat/2026-08-18-kiosk-launcher/PROBES.md`,
 and its answers are substituted into later tasks. Do not guess any of these.
 
 ```bash
@@ -136,7 +154,8 @@ grep -l 'password-store=basic' ~/Desktop/*.desktop 2>/dev/null || echo "  NO des
 PROBE
 ```
 
-**Answers that gate later tasks:**
+**Answers that gated later tasks** — the "if it says" column is retained as the Planner wrote it;
+the rows now resolved are marked in the summary block at the top of this task:
 
 | Probe | If it says… | Then… |
 |---|---|---|
@@ -231,18 +250,15 @@ case "${1:-}" in
     export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
     export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
 
-    # The transient unit inherits the USER SERVICE MANAGER's environment, not this shell's.
-    # Task A0 confirms WAYLAND_DISPLAY is present there; if it is not, uncomment the SETENV
-    # block below rather than falling back to DISPLAY=:0 — DISPLAY=:0 is the defect this
-    # script exists to remove (it lands the kiosk under XWayland with the wrong flag set).
-    SETENV=()
-    # SETENV=(--setenv=WAYLAND_DISPLAY=wayland-0 --setenv=XDG_SESSION_TYPE=wayland
-    #         --setenv=XDG_CURRENT_DESKTOP=ubuntu:GNOME)
-
+    # The transient unit inherits the USER SERVICE MANAGER's environment, not this shell's, and
+    # that inheritance is the entire fix. Task A0 CONFIRMED WAYLAND_DISPLAY is present there
+    # (see PROBES.md §3), so the --setenv= fallback this plan originally carried is not shipped.
+    # If some future box ever lacks it, pass --setenv= explicitly rather than falling back to
+    # DISPLAY=:0 — DISPLAY=:0 is the defect this script exists to remove (it lands the kiosk
+    # under XWayland with the wrong flag set).
     systemctl --user reset-failed radio-kiosk.service 2>/dev/null || true
     exec systemd-run --user --collect --unit=radio-kiosk \
       --description="Radio Console kiosk browser" \
-      "${SETENV[@]}" \
       google-chrome "${CHROME_FLAGS[@]}" "$KIOSK_URL"
     ;;
   *) echo "usage: radio-kiosk-launch [--is-running|--print-profile|--print-command]" >&2; exit 2 ;;
@@ -1387,9 +1403,9 @@ Record every result in `docs/uat/2026-08-18-kiosk-launcher/REPORT.md`.
 
 | Risk | Fallback | Where |
 |---|---|---|
-| zenity is GTK 4 → `gtk-3.0/gtk.css` ignored | use `gtk-4.0/gtk.css` | A0 → B3 |
-| `--timeout` / `--icon-name` / `--default-cancel` unsupported | single-button variants; **never a button that does nothing** | A0 → B2, B6 |
-| `WAYLAND_DISPLAY` absent from the user manager env | explicit `--setenv=` block (already written, commented out) | A2 |
+| ~~zenity is GTK 4 → `gtk-3.0/gtk.css` ignored~~ **CONFIRMED: zenity 4.0.1 / libgtk-4** | use `gtk-4.0/gtk.css` — not a risk any more, a requirement | A0 ✅ → B3 |
+| ~~`--timeout` / `--default-cancel` unsupported~~ **both CONFIRMED supported**; **`--icon-name` CONFIRMED ABSENT** | `--icon-name` is gone in zenity 4, so per-tier glyphs must come from `--info`/`--warning`/`--error`. **The glyph gives way, not the buttons** — `Try again` / `Open anyway` are live actions | A0 ✅ → B2, B6 |
+| ~~`WAYLAND_DISPLAY` absent from the user manager env~~ **CONFIRMED PRESENT** (`wayland-0`, plus `XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS`, `DISPLAY=:0`) | risk retired; the `--setenv=` fallback is **not shipped** | A0 ✅ → A2 |
 | Window raise impossible under Wayland | decline-to-launch guard; drop `Show the sign-in` | B2.7 |
 | 56 px override unachievable | wider dialog, fewer larger buttons — and **say so** rather than shipping 34 px | B3 |
 | Dialog buried by the fullscreen kiosk | tune `RADIO_DIALOG_DELAY`; if still buried, invert to dialog-first | T22 |

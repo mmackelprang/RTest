@@ -173,28 +173,63 @@ WiFi is the only link; do not restart anything that could drop it while nobody i
 - `radio-web.service` — Radio.Web on port 5002 (Blazor UI, depends on API)
 - Shared: `/opt/radio-console/{api,web,data,logs}`
 
+**`radio-kiosk.service` is a *transient user* unit — there is no unit file to find.** It is created
+on the fly by `systemd-run --user --collect --unit=radio-kiosk` inside
+`/usr/local/bin/radio-kiosk-launch`, so it lives only while the kiosk Chrome does. Query it with
+`systemctl --user status radio-kiosk` (note `--user`; `sudo systemctl status radio-kiosk` will
+report it does not exist, which is correct and not a fault). Starting it that way is the point:
+the transient unit is created by the *graphical session's own* service manager and therefore
+inherits that session's `WAYLAND_DISPLAY` / `DBUS_SESSION_BUS_ADDRESS` / `XDG_RUNTIME_DIR`, which
+a detached SSH shell does not have.
+
+**The kiosk command line has exactly one definition:** `deploy/debian-x64/kiosk/bin/radio-kiosk-launch`,
+installed to `/usr/local/bin/` by `deploy/debian-x64/kiosk/setup-kiosk.sh`. The autostart entry and
+`Deploy-ToLinux.ps1` both call it. Change flags there and nowhere else — three callers carrying
+three different flag sets is how the box drifted in the first place. The `~/Desktop` entries and
+the helper scripts also come from that directory: **do not hand-edit `~/Desktop`**, re-run
+`setup-kiosk.sh` from a checkout instead.
+
 ### ⚠ Kiosk Chrome must pass `--password-store=basic`
 
 GDM auto-login never unlocks the login keyring. Without this flag Chrome asks gnome-keyring for it and
 gnome-shell raises a modal **"Authentication required"** dialog that **grabs input and covers the
 panel**. On 2026-08-02 this blocked the kiosk for ~33 hours, and the failure was worse than a dialog on
 top of the UI — Chrome never reached navigation at all (0 connections to `:5002`, 0 renderers) while
-`radio-web` returned 200 the whole time. All three launch paths now carry the flag; keep it that way.
+`radio-web` returned 200 the whole time. Every launch path carries the flag; keep it that way. Since
+2026-08-18 the boot path and the deploy relaunch both get it from the single definition in
+`radio-kiosk-launch`, so there is one place to keep right rather than three.
 
 **Do not apply the same flag to a browser whose profile already holds `v11` cookies.** `v11` cookies are
 encrypted with the keyring-derived key, and `basic` makes that key unobtainable, so Chrome **discards
 them** — measured live at 45 `v11` → 16 `v10`, destroying the Google Voice session. It is only safe on a
 profile that was `basic` from first run, or paired with a planned re-login.
 
+The kiosk is now the worked example of the safe case. Since 2026-08-18 it runs on its own
+`--user-data-dir=~/.config/radio-kiosk-chrome`, created `basic` from first run and only ever
+pointed at `localhost:5002` — it holds no Google session to lose. The **Google Voice bridge**
+Chrome (`~/.config/gv-bridge-chrome`) is the profile the warning above is about: it holds the only
+authenticated Google session on the box. Never point `--password-store=basic` at it, and never
+widen a kill to `pkill -f chrome` — `radio-kiosk-exit` matches on the kiosk profile path precisely
+so the bridge survives.
+
 **The real fix is PAM auto-unlock or an empty-password login keyring** (needs physical access) — that
 resolves every browser at once and costs no session. Full write-up:
 `docs/uat/2026-08-03-osk-wayland-viability/REPORT.md`.
 
-### Remote UI driving is currently unavailable
+### Remote UI driving: CDP is back, screen capture is not
 
-Kiosk CDP on `:9223` is **dead** — since Chrome 136 the `--remote-debugging-port` flag is silently
-ignored on the default user-data-dir, and this box runs Chrome 151. `radio-refresh-browser` fails for
-the same reason. Restoring it needs a non-default `--user-data-dir` on the kiosk launch line.
+**Kiosk CDP on `:9223` works again as of 2026-08-18.** Chrome ≥136 silently ignores
+`--remote-debugging-port` on the *default* user-data-dir, and this box runs Chrome 151 — so the flag
+was inert for as long as the kiosk shared that profile. The kiosk now launches with
+`--user-data-dir=~/.config/radio-kiosk-chrome`, which is the documented fix, and
+`curl -sf http://localhost:9223/json/version` returns the browser version JSON. The Google Voice
+bridge keeps its own CDP on **`:9224`**; the two ports are deliberately distinct, and driving the
+bridge is RotaryPhone's business, not this repo's.
+
+**`radio-refresh-browser` is still broken, and the dedicated profile does not fix it.** It fails for
+a different reason: it drives `xdotool`, which is X11-only and cannot see a native Wayland window.
+Nothing calls it — the deploy stops and relaunches the kiosk itself. Re-implementing it over the
+restored CDP would work, but nothing has done that yet.
 
 For screen capture, Shell's screenshot API and `GetWindows` are `AccessDenied` on GNOME 46, and
 `gnome-screenshot`/`grim`/`scrot` are absent. The working route is
@@ -213,6 +248,28 @@ binary for a symbol that exists only on the branch under test.
 ```bash
 grep -ac RetryOpenThreadAsync /opt/radio-console/web/Radio.Web   # non-zero → the new binary is live
 ```
+
+**The deploy now also verifies the kiosk itself, and it checks liveness rather than existence.**
+After relaunching, `Deploy-ToLinux.ps1` polls for up to 20s and prints either
+`Kiosk is live (N established connections to :5002)` in green, or
+`WARNING: 0 established connections to :5002 - the kiosk did not reach the UI.` in red. The warning
+means the **binaries landed and verified fine** — what failed is the browser coming back; the deploy
+does not exit non-zero for it. Established connections are the check because process existence is
+not: during the 2026-08-02 outage Chrome was running and `radio-web` returned 200 for ~33 hours
+while the connection count was **0**. Recover with
+`ssh mmack@radio '/usr/local/bin/radio-kiosk-launch'`, and diagnose with
+`ssh mmack@radio 'systemctl --user status radio-kiosk.service'`.
+
+**One-time cutover, already done on `radio` 2026-08-18 but needed on any box still running the
+old kiosk.** `radio-kiosk-exit` matches the kiosk *by profile path*, so it deliberately does not
+match a kiosk started the old way on the default profile — that Chrome must be stopped once by
+hand (`kill` its PID; **never** `pkill -f chrome`, which takes the Google Voice bridge with it).
+Until it is, a deploy will relaunch on the new profile and leave two kiosks stacked on screen.
+
+**`Deploy-ToLinux.ps1` calls `/usr/local/bin/radio-kiosk-exit` and `/usr/local/bin/radio-kiosk-launch`,
+which `setup-kiosk.sh` installs.** On a box that has never run that installer the deploy prints a
+`WARNING: ... is missing` line and skips the kiosk stop/relaunch rather than falling back to a
+broader `pkill` — a wider match would take the Google Voice bridge with it.
 
 ## Cross-Platform Requirements
 

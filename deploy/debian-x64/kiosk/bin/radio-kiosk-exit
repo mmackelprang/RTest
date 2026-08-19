@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# radio-kiosk-exit — close the Radio Console kiosk screen. Leaves everything else running.
+#
+# This replaces `pkill -f chrome`, which also killed the Google Voice bridge Chrome — and
+# nothing restarts that on demand (its watchdog timer runs on a 2-minute cadence, so voicemail
+# and texts went dark for up to two minutes every time the kiosk was closed).
+#
+# The two Chromes are distinguished by profile: the bridge runs
+# --user-data-dir=~/.config/gv-bridge-chrome, the kiosk runs
+# --user-data-dir=~/.config/radio-kiosk-chrome. NEVER widen this match to `chrome` or `--kiosk`.
+set -uo pipefail
+
+# Resolved from radio-kiosk-launch so the profile path has exactly one definition. The guard
+# below is not defensive padding: without it a failed lookup would leave KIOSK_PROFILE empty,
+# and `pkill -f -- --user-data-dir=` would then match EVERY Chrome carrying that flag — the
+# Google Voice bridge included. That is the precise failure this script was written to prevent,
+# so it refuses to kill anything rather than kill the wrong thing.
+KIOSK_PROFILE="$(/usr/local/bin/radio-kiosk-launch --print-profile 2>/dev/null || true)"
+if [ -z "$KIOSK_PROFILE" ]; then
+  echo "radio-kiosk-exit: could not resolve the kiosk profile path from radio-kiosk-launch." >&2
+  echo "  Refusing to kill anything — an empty match would also close the Google Voice bridge." >&2
+  exit 1
+fi
+
+# Stopping the unit is what actually ends a kiosk started by radio-kiosk-launch. The pkill is
+# the fallback for a kiosk started some other way (a hand-run google-chrome, or a launch that
+# pre-dates this script); it is scoped to the same profile path, so it cannot widen the blast
+# radius beyond the unit stop.
+# `systemctl --user` needs XDG_RUNTIME_DIR to find the user service manager, and this script is
+# called over SSH by Deploy-ToLinux.ps1. pam_systemd normally sets it; this mirrors the same
+# fallback radio-kiosk-launch uses so the unit stop cannot silently no-op and leave the pkill
+# below as the only thing that ran.
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+
+systemctl --user stop radio-kiosk.service 2>/dev/null
+pkill -f -- "--user-data-dir=$KIOSK_PROFILE" 2>/dev/null
+
+# Post-exit there is no dialog, no toast, no confirmation. The desktop appearing is the feedback.
+exit 0

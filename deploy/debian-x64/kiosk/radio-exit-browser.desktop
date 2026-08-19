@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=Exit Browser
 Comment=Close the Radio Console browser window
-Exec=pkill -f chrome
+Exec=/usr/local/bin/radio-kiosk-exit
 Icon=application-exit
 Terminal=false
 Type=Application
