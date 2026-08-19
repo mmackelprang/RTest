@@ -249,8 +249,9 @@ GREEN='#4ADE80'; AMBER='#F0A830'; RED='#F87171'; LOW='#4B5563'
 # Every state that can reach a dialog has an arm here. `down` is deliberately absent: it is a
 # probe-time state only, and main() hands every startable component to repair(), which always
 # rewrites it — to started, starting or failed — before any dialog is composed, including on
-# the whole-run-ceiling path. A `down` row would render with an empty pill, which is visible
-# rather than wrong.
+# the whole-run-ceiling path. If a future change ever let a `down` row reach a dialog, this
+# returns an empty line and that row is composed with an empty colour and an empty pill — do
+# not read that as a working default, add the arm.
 pill_for() {
   case "$1" in
     online)         echo "$GREEN|Online|" ;;
@@ -307,10 +308,24 @@ progress_open() {
   # whole repair so the dialog does not see EOF between components.
   exec 8>"$PROGRESS_FIFO"
 }
-progress_text()  { [ -n "$PROGRESS_PID" ] && printf '#%s\n' "$1" >&8; return 0; }
+# The write goes through a subshell deliberately. If the progress dialog died early — zenity
+# missing, or no display, which is exactly what happens when this script is run over SSH — the
+# read end of the FIFO is gone, and an unwrapped write would take the SIGPIPE and kill the whole
+# launcher mid-repair: services started, nothing reported, no dialog. This way it costs one
+# subshell.
+progress_text() {
+  [ -n "$PROGRESS_PID" ] || return 0
+  ( printf '#%s\n' "$1" >&8 ) 2>/dev/null
+  return 0
+}
 progress_close() {
   [ -n "$PROGRESS_PID" ] || return 0
-  exec 8>&-                       # EOF on stdin is what makes zenity --progress exit
+  exec 8>&-                       # closing the write end sends EOF, which is how this ends
+  # ...and then make sure of it. Whether a given zenity closes on EOF alone was not measured for
+  # this row, and `wait` on a dialog that did not close would hang the run between the repair and
+  # the report — with a progress bar on the panel and no way past it. The dialog has done its job
+  # by this point, so the TERM costs nothing, and it is a no-op on a process that already exited.
+  kill "$PROGRESS_PID" 2>/dev/null
   wait "$PROGRESS_PID" 2>/dev/null
   rm -f "$PROGRESS_FIFO"
   PROGRESS_PID=""
