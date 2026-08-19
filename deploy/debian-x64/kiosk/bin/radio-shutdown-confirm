@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# radio-shutdown-confirm — the confirmation behind the "Shutdown System" desktop icon.
+# Replaces `gnome-session-quit --power-off`.
+#
+# Design: docs/design-handoffs/HANDOFF-kiosk-desktop-launcher.md §8, approved as §11 Q2.
+#
+# GNOME's own confirmation carries a 60-SECOND COUNTDOWN AND THEN POWERS OFF BY ITSELF. On a
+# wall panel that means an accidental tap, followed by the owner walking away, powers the box off
+# anyway. That is not a confirm; it is a delay. A confirm that proceeds on inaction is the wrong
+# shape for a touchscreen, so this one waits indefinitely for an explicit tap.
+#
+# There is deliberately NO --timeout here. Adding one would reintroduce exactly the
+# auto-proceeding behaviour this script exists to remove.
+#
+# Not `set -e`: the decision below is made from zenity's exit code, and `set -e` would turn the
+# Cancel answer into an early exit before that code is read.
+set -uo pipefail
+
+# The private GTK config dir gives this dialog the same 56px touch buttons as the launcher's,
+# for this process only. See deploy/debian-x64/kiosk/gtk-touch/gtk-4.0/gtk.css.
+GTK_TOUCH_CONFIG=/usr/local/share/radio-console/gtk-touch
+
+# --question and --default-cancel are both supported on zenity 4.0.1 (measured 2026-08-18).
+# --icon-name is NOT, so no icon flag is passed: zenity 4 dropped it, and --question carries its
+# own glyph. Cancel is the focused default, so a stray Enter, or a second tap that lands on the
+# dialog rather than the icon, cannot power the box off.
+if XDG_CONFIG_HOME="$GTK_TOUCH_CONFIG" GTK_THEME=Yaru-dark zenity \
+     --question --width=760 --title="Radio Console" \
+     --ok-label="Shut down" --cancel-label="Cancel" --default-cancel \
+     --text='<span size="x-large" weight="bold">Shut down the radio?</span>
+
+<span foreground="#4B5563">Music stops and the screen goes dark. You'"'"'ll need the power button to start it again.</span>'
+then
+  # Only exit code 0 — the "Shut down" button — powers off. zenity returns 1 both for Cancel and
+  # for a dismissal (ESC, or closing the window), and every one of those must leave the box
+  # running: this is the action with no cheap undo on it.
+  systemctl poweroff
+fi
+exit 0
