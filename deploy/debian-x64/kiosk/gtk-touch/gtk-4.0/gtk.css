@@ -24,6 +24,10 @@
  * recorded here so the next person does not read 56 in this file, measure 58 on the box, and
  * go looking for the bug.
  *
+ * min-width and the horizontal padding are preferences rather than measurements: neither
+ * affects the height above, and these buttons render full-width in GTK 4's action area anyway,
+ * so nothing observed on the box turns on them.
+ *
  * The design's 24px inter-button gap is NOT achievable here, and is deliberately not attempted.
  * GTK 4's message-dialog action area lays buttons out full-width with a 1px separator, and three
  * selector variants (`.dialog-action-box separator`, `.dialog-vbox separator`,
