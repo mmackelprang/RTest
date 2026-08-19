@@ -2,7 +2,7 @@
 Name=Radio Console Kiosk
 Comment=Auto-launch Radio Console in kiosk mode
 Exec=/usr/local/bin/radio-kiosk-launch
-Icon=audio-radio
+Icon=@ICON_DIR@/radio-console.svg
 Terminal=false
 Type=Application
 X-GNOME-Autostart-enabled=true

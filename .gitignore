@@ -1,5 +1,11 @@
 # Build results
 [Bb]in/
+
+# The kiosk helper scripts are SOURCE that happens to live in a directory called bin/, so the
+# [Bb]in/ rule above swallows them: `git add` skips them silently and the helper ships only to
+# the box, never to the repo. Un-ignore the directory itself — [Bb]in/ has a trailing slash and
+# so matches directories only, which means nothing inside it is ignored once this line applies.
+!deploy/debian-x64/kiosk/bin/
 [Oo]bj/
 [Oo]ut/
 [Ll]og/

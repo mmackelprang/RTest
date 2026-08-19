@@ -187,7 +187,10 @@ installed to `/usr/local/bin/` by `deploy/debian-x64/kiosk/setup-kiosk.sh`. The 
 `Deploy-ToLinux.ps1` both call it. Change flags there and nowhere else — three callers carrying
 three different flag sets is how the box drifted in the first place. The `~/Desktop` entries and
 the helper scripts also come from that directory: **do not hand-edit `~/Desktop`**, re-run
-`setup-kiosk.sh` from a checkout instead.
+`setup-kiosk.sh` from a checkout instead. Since 2026-08-18 that directory is also the source of
+truth for the desktop icon assets, the dialogs' GTK touch override, and four helper scripts —
+`radio-kiosk-launch`, `radio-kiosk-exit`, `radio-console-open` (the Radio Console icon: probe,
+start what is down, then open the kiosk) and `radio-shutdown-confirm`.
 
 ### ⚠ Kiosk Chrome must pass `--password-store=basic`
 
@@ -216,7 +219,7 @@ so the bridge survives.
 resolves every browser at once and costs no session. Full write-up:
 `docs/uat/2026-08-03-osk-wayland-viability/REPORT.md`.
 
-### Remote UI driving: CDP is back, screen capture is not
+### Remote UI driving: CDP is back, AT-SPI works, screen capture is not
 
 **Kiosk CDP on `:9223` works again as of 2026-08-18.** Chrome ≥136 silently ignores
 `--remote-debugging-port` on the *default* user-data-dir, and this box runs Chrome 151 — so the flag
@@ -236,6 +239,23 @@ For screen capture, Shell's screenshot API and `GetWindows` are `AccessDenied` o
 `org.gnome.Mutter.ScreenCast` → `RecordMonitor` → PipeWire → `gst-launch-1.0 pipewiresrc`. **Mutter only
 emits buffers on damage**, so a static screen starves the stream — force damage, and validate the
 instrument before trusting a "nothing changed" result.
+
+**But a screenshot is often not what you needed. AT-SPI works here, and it answers most UI questions
+directly** (established 2026-08-18 while verifying `KIOSK-2`). `python3-gi` + `Atspi` are installed,
+and the accessibility bus exposes, for any GTK app and for Chrome:
+
+- the **widget tree** — roles, names, and nesting;
+- the **rendered text** of every label, which is how dialog copy gets checked without seeing it;
+- **screen extents in pixels**, which is how the kiosk dialogs' 58 px buttons were measured;
+- a working **`click` action**, so buttons can actually be pressed — that is how `Try again` /
+  `Open anyway` / `Cancel` were exercised end to end;
+- window **states**, including `ACTIVE`, which is a usable proxy for stacking: a dialog mapping over
+  the fullscreen kiosk takes `ACTIVE` off it.
+
+Chrome exposes its tree because the kiosk flag set includes `--force-renderer-accessibility`. Prefer
+this over the ScreenCast route whenever the question is *"what does it say / how big is it / does the
+button work"* rather than *"what does it look like"*. It needs the graphical session's environment —
+`eval "$(systemctl --user show-environment | grep -E 'WAYLAND_DISPLAY|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS' | sed 's/^/export /')"`.
 
 **`--window-position` is a no-op under Wayland.** Windows described elsewhere as "off-screen" are not;
 what makes one visible is stacking order, i.e. whichever browser restarted most recently.

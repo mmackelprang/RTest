@@ -378,6 +378,34 @@ The same RotaryPhone service exposes a Google Voice bridge that the Web UI consu
 - **Mark-read auth is auto-covered.** The two `POST .../read` routes ride the `/api/gvbridge/*` prefix gate and reuse `RotaryPhone:Gv:AuthKey` via the existing `RotaryPhoneAuthHandler` — no new auth key (ADR-024 §7).
 - **`RotaryPhoneAuthHandler` is OFF** until `Gv:AuthKey` is set. ~~A native `<audio>` element can't send that header, so an auth-gated audio endpoint would break the direct-`<audio>` approach (ADR-022 §8.1).~~ **Superseded by [ADR-029](decisions/2026-08-03-gv-audio-through-engine.md) (2026-08-03):** voicemail audio no longer goes to the browser at all — Radio.API fetches it server-side through `GvMediaClient`, which *can* attach the header. **The "keep the audio endpoint unauthenticated" constraint is dissolved and the standing cross-repo ask should be withdrawn** (`docs/BUILDER_QUEUE.md` § Carried risks #3). Note the closure depends on Radio.API holding its own `GvMedia:AuthKey` — it would *not* hold under an opaque-URL design (ADR-029 §10.1).
 
+#### Second consumer: the kiosk desktop launcher (`radio-console-open`)
+
+Since 2026-08-18 the Web UI is **not** the only thing in this repo that leans on the GV bridge.
+`deploy/debian-x64/kiosk/bin/radio-console-open` — the "Radio Console" desktop icon, installed to
+`/usr/local/bin` by `setup-kiosk.sh` — probes the bridge and, when it is down, **invokes**
+`gv-bridge-ensure.sh` to bring it back.
+
+- **`gv-bridge-ensure.sh` is RotaryPhone-owned, and this is invoke-and-probe only.** The launcher
+  calls it and reads its exit code, and does nothing else with it: it never writes, installs,
+  edits or owns bridge startup, never touches the watchdog or nightly timers, and never `pkill`s
+  the bridge. **The entire contract is two things — a path and an exit code.** The path is
+  resolved from a candidate list at runtime (`~/bin/` → `/usr/local/bin/` →
+  `/opt/rotary-phone/bin/`) because RotaryPhone is bringing the script under version control and
+  may relocate it; a relocation then degrades to a *reported* failure rather than a wrong one.
+- **The launcher checks liveness, never auth**, and it reads `psidtsAgeSeconds` by exactly the
+  rule above plus one thing this doc had not needed to spell out before: **`> 1200`, or the field
+  absent or null, is the launcher's dead-session test.** The counter resets at ~1200 in every
+  healthy cycle, so a value beyond it means the refresh cycle itself never fired — which is what
+  makes a single stateless probe sufficient, with no timestamp file and no history.
+- **The `660–1200` trough is deliberately never reported.** It is the appliance working as
+  designed, it clears itself inside ten minutes, and the launcher can do nothing about it.
+  Surfacing it would fire a dialog on roughly 45% of taps, and a status surface that cries wolf
+  is worse than no status surface: by the time something is genuinely broken it is already being
+  dismissed unread. The in-app `/phone` banner owns transient auth decay; the launcher does not.
+- The bridge process is identified by its profile directory
+  (`--user-data-dir=~/.config/gv-bridge-chrome`), never by matching `chrome`. **Never widen any
+  kill or match to `chrome`** — that is what used to take the bridge down.
+
 ---
 
 ## 3. Notification / Announcement API
