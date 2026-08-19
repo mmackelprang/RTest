@@ -10,9 +10,19 @@
  *
  * The numbers below are measurements, not preferences. GTK 4's default button height is 44px,
  * under the 48px touch floor. `min-height: 56px` ALONE overshoots to 76px, because GTK 4 adds
- * ~20px of vertical padding on top of it. Zeroing the vertical padding lands it exactly:
- *   push button | 'Try again' | (0, 0, 444, 56)
- * 56px is --touch-preferred, so the floor is cleared with margin.
+ * ~20px of vertical padding on top of it. Zeroing the vertical padding brings it back to the
+ * 56px content box that --touch-preferred asks for.
+ *
+ * AS SHIPPED THE BUTTONS MEASURE 58px, not 56. Both numbers are real and the difference is the
+ * theme: with no GTK_THEME set, this CSS yields exactly 56px, but radio-console-open and
+ * radio-shutdown-confirm both run zenity under GTK_THEME=Yaru-dark, whose button border adds
+ * 1px top and bottom. Measured over AT-SPI on the box 2026-08-18, through the shipped scripts
+ * rather than a bare zenity:
+ *   push button | 'Try again'   | (414, 58)
+ *   push button | 'Open anyway' | (413, 58)
+ * 58px clears the 48px floor and exceeds the 56px target, so it is left alone; the value is
+ * recorded here so the next person does not read 56 in this file, measure 58 on the box, and
+ * go looking for the bug.
  *
  * The design's 24px inter-button gap is NOT achievable here, and is deliberately not attempted.
  * GTK 4's message-dialog action area lays buttons out full-width with a 1px separator, and three

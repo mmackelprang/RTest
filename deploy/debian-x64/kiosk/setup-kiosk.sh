@@ -98,14 +98,12 @@ install_entry() {
   rm -f "$DESKTOP_DIR/$name.tmp"
   # Mark as trusted so GNOME doesn't show the "untrusted application launcher" warning.
   gio set "$DESKTOP_DIR/$name" metadata::trusted true 2>/dev/null || true
-  # Clear any hand-dragged icon position. This one is the accidental-shutdown mitigation rather
-  # than cosmetics: DING honours a persisted position over alphabetical order, and
-  # `org.gnome.shell.extensions.ding keep-arranged` is false on this box, so its `arrangeorder`
-  # setting never applied. All four live entries carried a position when this was measured
-  # (2026-08-18: GV-Bridge 1789,148 · Shutdown System 1789,263 · Exit Browser 1789,378 · Radio
-  # Console 1789,492), which had Shutdown System and Exit Browser ADJACENT with Radio Console at
-  # the far end — precisely the adjacency the name order below exists to prevent. Tolerant of
-  # failure: an entry that never carried the attribute has nothing to clear.
+  # Clear any hand-dragged icon position. This is a tidy-up, NOT the thing that delivers the
+  # ordering — `keep-arranged` below is. Measured 2026-08-18: DING writes a fresh position for
+  # every icon moments after these files are rewritten, so on its own this unset is overwritten
+  # before it can matter. It is kept because it costs nothing and removes the stale coordinates
+  # a future `keep-arranged false` would otherwise resurrect. Tolerant of failure: an entry that
+  # never carried the attribute has nothing to clear.
   gio set -t unset "$DESKTOP_DIR/$name" metadata::nautilus-icon-position 2>/dev/null || true
   if command -v desktop-file-validate >/dev/null 2>&1; then
     desktop-file-validate "$DESKTOP_DIR/$name" || echo "  WARNING: $name failed validation"
@@ -132,16 +130,33 @@ done
 
 echo "  Desktop shortcuts installed."
 
-# Desktop icon size (§2.2), guarded because the schema exists only where the Desktop Icons NG
-# extension is installed. `large` gives a ~96px tile — past the 56px touch-preferred target and
-# legible from across the room, which is the glanceability bar every other surface in this app
-# is held to. It cannot overflow the 720px height: three entries at ~130px per cell occupy about
-# 390px of it. It was `standard` on the box when this was measured (2026-08-18).
+# Desktop icon layout and size (§2.1, §2.2), guarded because the schema exists only where the
+# Desktop Icons NG extension is installed.
+#
+# `keep-arranged true` IS THE ACCIDENTAL-SHUTDOWN MITIGATION, and it is what actually delivers
+# it — clearing the saved positions in install_entry() does not. Measured on the box 2026-08-18:
+# DING re-persists a position for every icon moments after the entries are rewritten, so a
+# one-shot unset is racing a writer that always wins. `keep-arranged` makes DING auto-arrange by
+# `arrangeorder` and ignore stored positions outright, which is a setting rather than a race.
+# Both are set explicitly rather than trusted as defaults: `keep-arranged` was `false` on this
+# box, which is exactly why `arrangeorder` was already 'NAME' and yet had never applied.
+#
+# Verified after setting it: Exit to Desktop y=34, Radio Console y=206, Shutdown System y=378 —
+# the safe, most-tapped action physically between the two "leaving" actions, which is the whole
+# point. Before it, the live column ran GV-Bridge / Shutdown System / Exit Browser / Radio
+# Console, i.e. Shutdown and Exit ADJACENT.
+#
+# `large` gives a ~96px tile — past the 56px touch-preferred target and legible from across the
+# room, which is the glanceability bar every other surface in this app is held to. It cannot
+# overflow the 720px height: three entries at ~130px per cell occupy about 390px of it. It was
+# `standard` on the box when this was measured (2026-08-18).
 if gsettings list-schemas 2>/dev/null | grep -q '^org.gnome.shell.extensions.ding$'; then
+  gsettings set org.gnome.shell.extensions.ding arrangeorder 'NAME'
+  gsettings set org.gnome.shell.extensions.ding keep-arranged true
   gsettings set org.gnome.shell.extensions.ding icon-size 'large'
-  echo "  Desktop icon size set to 'large'."
+  echo "  Desktop icons: auto-arranged by name, size 'large'."
 else
-  echo "  Desktop Icons NG schema not present; icon size left as it is."
+  echo "  Desktop Icons NG schema not present; icon layout and size left as they are."
 fi
 
 # ---- 3/11. Install kiosk helper scripts ----
