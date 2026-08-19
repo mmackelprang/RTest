@@ -181,18 +181,34 @@ it in this tree. Documented here only so a rebuild knows the dependency exists.
 
 ## Kiosk reconciliation (tracked for a follow-up to `setup-kiosk.sh`)
 
-`setup-kiosk.sh` covers autologin, three gsettings, unclutter, and the refresh
-helper. The live box additionally has (audit §3.8/§3.9) — apply manually or fold
-into `setup-kiosk.sh` later:
+`setup-kiosk.sh` covers autologin, three gsettings, unclutter, the refresh helper,
+and — since 2026-08-18 — **the three `~/Desktop` entries and the two kiosk helper
+scripts** (`/usr/local/bin/radio-kiosk-launch`, `/usr/local/bin/radio-kiosk-exit`).
+That last part closes the drift loop: before it, nothing had ever copied the repo's
+`.desktop` files onto the box, so `~/Desktop` was hand-maintained and diverged.
+
+**The repo is now the source of truth for `~/Desktop`. Do not hand-edit those entries.**
+The deploy scripts do not ship `deploy/debian-x64/kiosk/`, so re-run the installer from
+a checkout after changing anything in it:
+
+```bash
+scp -r deploy/debian-x64/kiosk mmack@radio:/tmp/kiosk-src
+ssh mmack@radio 'cd /tmp/kiosk-src && ./setup-kiosk.sh mmack'
+```
+
+The live box additionally has (audit §3.8/§3.9) — apply manually or fold into
+`setup-kiosk.sh` later:
 
 - gsettings `org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'`
   (the three screensaver/idle keys are already in `setup-kiosk.sh`).
 - `~/.config/autostart/update-notifier.desktop` with `Hidden=true` +
   `X-GNOME-Autostart-enabled=false` (suppress update popups in kiosk).
-- `onboard` on-screen keyboard installed + `~/.config/autostart/onboard-autostart.desktop`
-  — **contradicts** setup-kiosk.sh's note that onboard "doesn't work on Wayland".
-  Decide whether to keep it (`packages.sh` installs `onboard`; the Web UI also has
-  a built-in virtual keyboard).
+- ~~`onboard` on-screen keyboard~~ — **removed 2026-08-18.** The contradiction is resolved in
+  favour of `setup-kiosk.sh`'s note: onboard cannot type into Chrome on Wayland
+  (`docs/uat/2026-08-03-osk-wayland-viability/REPORT.md` measured **zero**
+  `zwp_text_input_v3.enable()` calls from Chrome 151). Dropped from `packages.sh`; the autostart
+  entry is renamed to `.disabled` by `setup-kiosk.sh`. Text entry is the Web UI's virtual
+  keyboard.
 
 ---
 

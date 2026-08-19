@@ -6,3 +6,13 @@
 
 # PowerShell can use either, but keep CRLF for Windows dev
 *.ps1 text eol=crlf
+
+# Desktop entries and the extensionless kiosk helper scripts are read by Linux
+# (GNOME's .desktop parser and /usr/bin/env bash). They are `scp`'d to the box
+# straight out of a Windows checkout, so a CRLF checkout would ship a shebang
+# ending in \r — which bash reports as "bad interpreter: no such file or
+# directory". `* text=auto` alone does NOT prevent that: it normalizes to LF in
+# the repository but restores native CRLF in a Windows working tree, and the
+# working tree is what gets copied.
+*.desktop text eol=lf
+deploy/debian-x64/kiosk/bin/* text eol=lf

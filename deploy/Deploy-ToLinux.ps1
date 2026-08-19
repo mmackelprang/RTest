@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   One-command build and deploy to a Linux target from Windows.
 
@@ -144,15 +144,29 @@ Write-Host "  Build complete (API: $apiSize, Web: $webSize)" -ForegroundColor Gr
 if (-not $NoRestart) {
   Write-Host "[2/4] Stopping services and kiosk browser..." -ForegroundColor Yellow
   # On stop: (a) wipe Chrome's HTTP disk cache so the relaunch can't serve a stale
-  # HTML/CSS bundle from ~/.cache/google-chrome that pre-dates the deploy — we hit
-  # that during the Radzen theme migration, where Chrome served the old MudBlazor
-  # markup despite radio-web returning the new HTML. (b) remove Chrome's Singleton
-  # lock files; pkill -f sends SIGTERM/SIGKILL without the orderly shutdown that
-  # cleans those up, so on the next relaunch Chrome would see "another instance"
-  # and refuse to start. Profile data (bookmarks, localStorage, kiosk extension
-  # state) stays intact — we only target Cache/, Code Cache/, and the Singleton*
-  # lock files at the profile root.
-  ssh $SshTarget "sudo systemctl stop radio-web 2>/dev/null; sudo systemctl stop radio-api 2>/dev/null; pkill -f 'chrome.*kiosk' 2>/dev/null; rm -rf ~/.cache/google-chrome/Default/Cache ~/.cache/google-chrome/Default/Code\ Cache 2>/dev/null; rm -f ~/.config/google-chrome/Singleton* 2>/dev/null; true"
+  # HTML/CSS bundle that pre-dates the deploy — we hit that during the Radzen theme
+  # migration, where Chrome served the old MudBlazor markup despite radio-web
+  # returning the new HTML. (b) remove Chrome's Singleton lock files; the kill sends
+  # SIGTERM/SIGKILL without the orderly shutdown that cleans those up, so on the next
+  # relaunch Chrome would see "another instance" and refuse to start. Profile data
+  # stays intact — only Cache/, Code Cache/, and the Singleton* locks are targeted.
+  #
+  # BOTH PATHS MOVED, and leaving the old ones here would have silently cleared nothing.
+  # The kiosk now runs on --user-data-dir=~/.config/radio-kiosk-chrome, and a profile
+  # started that way keeps its HTTP cache at <profile>/Default/Cache and its Singleton*
+  # locks at <profile>/. The paths below therefore name the kiosk profile, not the
+  # default one, and must move again if that profile ever does.
+  #
+  # ~/.cache/google-chrome and ~/.config/google-chrome are deliberately left alone. They are
+  # the DEFAULT profile's, which the kiosk no longer uses but which other Chrome launches on
+  # this box still could. The kiosk's old data there is therefore orphaned rather than
+  # cleaned — a one-time cutover leftover, not something to delete on every deploy.
+  #
+  # radio-kiosk-exit matches on that same profile path, so the Google Voice bridge
+  # Chrome (~/.config/gv-bridge-chrome) is left running. It replaces a
+  # `pkill -f 'chrome.*kiosk'` that matched the shape of a command line rather than an
+  # identity. Never widen this to `pkill -f chrome`.
+  ssh $SshTarget "sudo systemctl stop radio-web 2>/dev/null; sudo systemctl stop radio-api 2>/dev/null; if [ -x /usr/local/bin/radio-kiosk-exit ]; then /usr/local/bin/radio-kiosk-exit 2>/dev/null; else echo 'WARNING: /usr/local/bin/radio-kiosk-exit is missing - run deploy/debian-x64/kiosk/setup-kiosk.sh on this box; the kiosk was NOT stopped'; fi; rm -rf ~/.config/radio-kiosk-chrome/Default/Cache ~/.config/radio-kiosk-chrome/Default/Code\ Cache 2>/dev/null; rm -f ~/.config/radio-kiosk-chrome/Singleton* 2>/dev/null; true"
 } else {
   Write-Host "[2/4] Skipping service stop (--NoRestart)" -ForegroundColor DarkGray
 }
@@ -358,22 +372,67 @@ if (-not $NoRestart) {
       }
     }
 
-    # Relaunch kiosk browser with a fresh single tab
+    # Relaunch the kiosk browser.
     #
-    # --password-store=basic is REQUIRED, not cosmetic. Without it Chrome asks gnome-keyring
-    # for the login keyring, which GDM auto-login never unlocks; gnome-shell then raises a modal
-    # "Authentication required" prompt that grabs input and sits on top of the kiosk. On
-    # 2026-08-02 this blocked the panel for ~33 hours and Chrome never even reached navigation
-    # (0 connections to :5002, 0 renderers). See docs/uat/2026-08-03-osk-wayland-viability/.
+    # This used to be `DISPLAY=:0 nohup google-chrome ...`, and the comment that stood here
+    # named it a known defect rather than fixing it: DISPLAY=:0 assumes X11, but the box runs
+    # Wayland (loginctl session 1, seat0, Type=wayland), so the relaunch landed under XWayland
+    # with a flag set that did not match the boot path — and in practice left the panel dead
+    # after every deploy. `systemd-run --user` (inside radio-kiosk-launch) starts the browser
+    # from the graphical session's OWN service manager, so it inherits that session's
+    # WAYLAND_DISPLAY / DBUS_SESSION_BUS_ADDRESS / XDG_RUNTIME_DIR instead of an SSH shell's.
+    # Verified by hand on the box 2026-08-18.
     #
-    # KNOWN DEFECT, deliberately not fixed here: DISPLAY=:0 assumes X11, but the box runs
-    # Wayland (loginctl session 1, seat0, Type=wayland). This relaunch therefore lands under
-    # XWayland with a different flag set than the boot path in
-    # deploy/debian-x64/kiosk/radio-kiosk-autostart.desktop. Fixing it needs the graphical
-    # session's WAYLAND_DISPLAY / XDG_RUNTIME_DIR / DBUS_SESSION_BUS_ADDRESS and warrants its
-    # own tested change rather than a drive-by edit.
+    # The flag set is no longer duplicated here — radio-kiosk-launch owns it, and the autostart
+    # entry calls the same script, so boot and deploy can no longer drift apart.
+    # --password-store=basic lives there too and is still REQUIRED, not cosmetic: without it
+    # Chrome asks gnome-keyring for the login keyring, which GDM auto-login never unlocks, and
+    # gnome-shell raises a modal "Authentication required" prompt that grabs input and sits on
+    # top of the kiosk. On 2026-08-02 that blocked the panel for ~33 hours and Chrome never even
+    # reached navigation. See docs/uat/2026-08-03-osk-wayland-viability/.
     Write-Host "  Relaunching kiosk browser..." -ForegroundColor DarkGray
-    ssh $SshTarget "DISPLAY=:0 nohup google-chrome --kiosk --noerrdialogs --disable-infobars --disable-session-crashed-bubble --remote-debugging-port=9223 --password-store=basic http://localhost:5002 &>/dev/null &"
+    ssh $SshTarget "if [ -x /usr/local/bin/radio-kiosk-launch ]; then /usr/local/bin/radio-kiosk-launch; else echo 'WARNING: /usr/local/bin/radio-kiosk-launch is missing - run deploy/debian-x64/kiosk/setup-kiosk.sh on this box'; fi"
+
+    # Liveness, not process existence. During the 2026-08-02 outage Chrome was running and
+    # radio-web returned 200 for ~33 hours while the panel showed an auth dialog and made ZERO
+    # connections to :5002. Established connections are the check that would have caught it.
+    #
+    # This counts established TCP sockets whose source OR destination port is 5002, so a single
+    # browser session shows up as more than one line — both ends of the socket are on this box.
+    # The number is a liveness signal, not a tab count; only "at least one" is meaningful.
+    #
+    # The port test is ss's own filter, not `grep ':5002'`. That substring also matches the
+    # ephemeral ports 50020-50029, which sit inside this box's ip_local_port_range (32768-60999)
+    # — so an unrelated socket could have reported a dead kiosk as live, defeating the one check
+    # this block exists to make. `-H` drops the header row so `grep -c .` counts sockets only.
+    Write-Host "  Verifying the kiosk reached the UI..." -ForegroundColor DarkGray
+    $kioskConns = 0
+    for ($i = 0; $i -lt 10; $i++) {
+      Start-Sleep -Seconds 2
+      $raw = ssh $SshTarget "ss -Htn state established '( sport = :5002 or dport = :5002 )' | grep -c . || true"
+      $parsed = 0
+      if ([int]::TryParse((($raw | Select-Object -Last 1) -as [string]).Trim(), [ref]$parsed)) {
+        $kioskConns = $parsed
+      }
+      if ($kioskConns -ge 1) { break }
+    }
+    # Corroborating evidence, not the gate. The connection count alone cannot distinguish a kiosk
+    # THIS deploy relaunched from one that was never stopped — which is exactly what a missing
+    # radio-kiosk-exit leaves behind. `radio-kiosk.service` is a transient unit that only exists
+    # because radio-kiosk-launch created it, so `active` is positive proof of the new launch path.
+    $rawUnit = ssh $SshTarget "systemctl --user is-active radio-kiosk.service 2>/dev/null || echo unknown"
+    $kioskUnit = "$($rawUnit | Select-Object -Last 1)".Trim()
+
+    if ($kioskConns -ge 1) {
+      Write-Host "  Kiosk is live ($kioskConns established connections to :5002, radio-kiosk.service=$kioskUnit)" -ForegroundColor Green
+    } else {
+      # Deliberately a warning, not exit 1: the binaries deployed and verified successfully.
+      # What failed is the browser relaunch, and saying so loudly is the whole point — the old
+      # code said nothing at all and the owner found a dead screen.
+      Write-Host "  WARNING: 0 established connections to :5002 - the kiosk did not reach the UI." -ForegroundColor Red
+      Write-Host "    Check: ssh $SshTarget 'systemctl --user status radio-kiosk.service'"
+      Write-Host "    Retry: ssh $SshTarget '/usr/local/bin/radio-kiosk-launch'"
+    }
 
     Write-Host ""
     Write-Host "=== Deploy successful ===" -ForegroundColor Green

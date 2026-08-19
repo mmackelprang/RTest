@@ -80,14 +80,19 @@ PIPEWIRE_PKGS=(pipewire wireplumber libspa-0.2-bluetooth libpipewire-0.3-dev)
 BUILD_PKGS=(build-essential pkg-config)
 
 # Feature + ops packages.
+#
+# `onboard` was removed 2026-08-18. docs/uat/2026-08-03-osk-wayland-viability/REPORT.md measured
+# Google Chrome 151 on Wayland issuing ZERO zwp_text_input_v3.enable() calls when a web-page
+# input takes focus, so the OS keyboard cannot type into the kiosk at all. Text entry is the Web
+# UI's own virtual keyboard. setup-kiosk.sh disables a leftover autostart entry on already-
+# provisioned boxes; the package itself is left installed there rather than removed by script.
 FEATURE_PKGS=(
   songrec           # Shazam recognition (PPA)
   bluez-obexd       # PBAP contact sync (obex.service)
   zram-tools        # compressed swap (zramswap.service)
   google-chrome-stable
-  onboard           # on-screen keyboard (touchscreen kiosk)
   unclutter         # hide idle cursor
-  xdotool           # kiosk browser refresh helper
+  xdotool           # kiosk browser refresh helper (X11 only - inert on Wayland)
   rtl-sdr           # RTL-SDR tuner tools
   python3           # BT/audio research harness scripts
 )

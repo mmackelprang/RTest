@@ -2,7 +2,7 @@
 # setup-kiosk.sh — Configure Ubuntu GNOME kiosk mode for Radio Console
 #
 # Usage:
-#   ./setup-kiosk.sh [--user USERNAME]
+#   ./setup-kiosk.sh [USERNAME]        # positional, NOT --user USERNAME
 #
 # Installs desktop shortcuts, configures auto-login, disables screen blanking,
 # and sets up autostart for the Radio Console Web UI in Chromium kiosk mode.
@@ -18,29 +18,103 @@ echo "========================================="
 echo "User: $KIOSK_USER"
 echo ""
 
-# ---- 1. Install desktop shortcuts ----
-echo "[1/5] Installing desktop shortcuts..."
+# ---- 1/9. Install desktop shortcuts ----
+echo "[1/9] Installing desktop shortcuts..."
 
 APPS_DIR="$HOME/.local/share/applications"
 DESKTOP_DIR="$HOME/Desktop"
+BIN_DIR="/usr/local/bin"
+ICON_DIR="$HOME/.local/share/icons/radio-console"
 
-mkdir -p "$APPS_DIR"
-mkdir -p "$DESKTOP_DIR"
+mkdir -p "$APPS_DIR" "$DESKTOP_DIR" "$ICON_DIR"
 
+# The rotary-phone unit name is DISCOVERED, not assumed. A wrong name here would make the
+# KIOSK-2 launcher report PHONE as a hard failure forever — which is exactly the cry-wolf
+# failure the Google Voice rule exists to prevent. Defined in this row because install_entry()
+# substitutes it and the script runs under `set -u`. Verified on the box 2026-08-18: the unit
+# is `rotary-phone.service` (a separate `rotary-phone-cookies.service` is a oneshot cookie
+# refresh, not the API — the ^ anchor plus `head -1` keeps it out).
+# The trailing `|| true` is required, not belt-and-braces: this script runs under
+# `set -euo pipefail`, and with pipefail a no-match `grep` fails the whole pipeline, which
+# would abort setup-kiosk.sh at step 1/9 having installed nothing — and would make the
+# `if [ -z ]` fallback directly below it unreachable dead code.
+ROTARY_UNIT="${ROTARY_UNIT:-$(systemctl list-units --type=service --all --no-legend \
+  | awk '{print $1}' | grep -iE '^(rotary-?phone|rotaryphone)\.service$' | head -1 || true)}"
+if [ -z "$ROTARY_UNIT" ]; then
+  echo "  WARNING: no rotary-phone service unit found; PHONE repair will be a no-op."
+  ROTARY_UNIT="rotary-phone.service"
+fi
+
+# Mode 755, NOT `chmod +x`. With the default umask `chmod +x` yields 775, and GNOME REFUSES to
+# launch a group-writable .desktop file — silently, with no error anywhere. That mode bit is
+# why the box's GV-Bridge entry never worked. `install -m 755` states the mode instead of
+# incrementing it, so the umask cannot leak in.
+#
+# The placeholders substituted below (@ICON_DIR@, @KIOSK_USER@, @ROTARY_UNIT@) are what let the
+# repo stay the source of truth for entries whose content depends on this box: an absolute icon
+# path and a unit name cannot be committed literally. No entry carries ANY of the three yet —
+# they arrive with KIOSK-2 — so today all three substitutions are a no-op on every file. They
+# are here because the installer, not the entries, is what this row fixes.
+install_entry() {
+  local src="$1" name; name="$(basename "$src")"
+  sed -e "s|@ICON_DIR@|$ICON_DIR|g" \
+      -e "s|@KIOSK_USER@|$KIOSK_USER|g" \
+      -e "s|@ROTARY_UNIT@|$ROTARY_UNIT|g" \
+      "$src" > "$DESKTOP_DIR/$name.tmp"
+  install -m 755 "$DESKTOP_DIR/$name.tmp" "$DESKTOP_DIR/$name"
+  install -m 644 "$DESKTOP_DIR/$name.tmp" "$APPS_DIR/$name"
+  rm -f "$DESKTOP_DIR/$name.tmp"
+  # Mark as trusted so GNOME doesn't show the "untrusted application launcher" warning.
+  gio set "$DESKTOP_DIR/$name" metadata::trusted true 2>/dev/null || true
+  if command -v desktop-file-validate >/dev/null 2>&1; then
+    desktop-file-validate "$DESKTOP_DIR/$name" || echo "  WARNING: $name failed validation"
+  fi
+  echo "  Installed: $name (mode $(stat -c '%a' "$DESKTOP_DIR/$name"))"
+}
+
+# Installing from the repo is the whole point of this block. Nothing had ever copied these
+# entries onto the box, so ~/Desktop was hand-maintained and drifted: the in-tree
+# radio-console.desktop has carried --password-store=basic since 2026-08-11 and the live copy
+# still did not. Three separate instances of that drift turned up in one day.
 for file in radio-console.desktop radio-exit-browser.desktop radio-shutdown.desktop; do
-  cp "$SCRIPT_DIR/$file" "$APPS_DIR/$file"
-  cp "$SCRIPT_DIR/$file" "$DESKTOP_DIR/$file"
-  chmod +x "$DESKTOP_DIR/$file"
-  # Mark as trusted so GNOME doesn't show "untrusted" warning
-  gio set "$DESKTOP_DIR/$file" metadata::trusted true 2>/dev/null || true
-  echo "  Installed: $file"
+  install_entry "$SCRIPT_DIR/$file"
 done
 
 echo "  Desktop shortcuts installed."
 
-# ---- 2. Install autostart entry ----
+# ---- 2/9. Install kiosk helper scripts ----
 echo ""
-echo "[2/5] Installing autostart entry..."
+echo "[2/9] Installing kiosk helper scripts..."
+
+# These live in /usr/local/bin, not /opt/radio-console, deliberately: Deploy-ToLinux.ps1 wipes
+# /opt/radio-console/{api,web} on every deploy and calls both of these scripts during that same
+# deploy. /usr/local/bin survives.
+for s in radio-kiosk-launch radio-kiosk-exit; do
+  sudo install -m 755 "$SCRIPT_DIR/bin/$s" "$BIN_DIR/$s"
+  echo "  Installed: $BIN_DIR/$s"
+done
+
+# ---- 3/9. Remove entries this setup no longer owns ----
+echo ""
+echo "[3/9] Removing superseded desktop entries..."
+
+# `onboard` is dropped: docs/uat/2026-08-03-osk-wayland-viability/REPORT.md measured Chrome 151
+# on Wayland issuing ZERO zwp_text_input_v3.enable() calls, so the OS keyboard cannot type into
+# a web page here at all. The Web UI's built-in virtual keyboard is the only working text input.
+# The package is dropped from deploy/provision/packages.sh; this disables the autostart entry a
+# hand-provisioned box may still carry. Renamed rather than deleted so it is recoverable.
+ONBOARD_AUTOSTART="$HOME/.config/autostart/onboard-autostart.desktop"
+if [ -f "$ONBOARD_AUTOSTART" ]; then
+  mv "$ONBOARD_AUTOSTART" "$ONBOARD_AUTOSTART.disabled"
+  echo "  Disabled: onboard-autostart.desktop"
+else
+  echo "  onboard-autostart.desktop not present (already disabled, or never installed)."
+fi
+pkill -x onboard 2>/dev/null || true
+
+# ---- 4/9. Install autostart entry ----
+echo ""
+echo "[4/9] Installing autostart entry..."
 
 AUTOSTART_DIR="$HOME/.config/autostart"
 mkdir -p "$AUTOSTART_DIR"
@@ -48,9 +122,9 @@ mkdir -p "$AUTOSTART_DIR"
 cp "$SCRIPT_DIR/radio-kiosk-autostart.desktop" "$AUTOSTART_DIR/radio-kiosk-autostart.desktop"
 echo "  Autostart entry installed to $AUTOSTART_DIR/"
 
-# ---- 3. Switch services to run as login user ----
+# ---- 5/9. Switch services to run as login user ----
 echo ""
-echo "[3/7] Switching radio services to run as $KIOSK_USER..."
+echo "[5/9] Switching radio services to run as $KIOSK_USER..."
 
 # On a kiosk/desktop system, the radio services need to run as the login user
 # so they have access to PipeWire/PulseAudio audio (which runs per-user).
@@ -75,9 +149,9 @@ sudo chown -R "$KIOSK_USER:$KIOSK_USER" /opt/radio-console
 sudo systemctl daemon-reload
 echo "  Services updated."
 
-# ---- 4. Configure GNOME auto-login ----
+# ---- 6/9. Configure GNOME auto-login ----
 echo ""
-echo "[4/7] Configuring GNOME auto-login..."
+echo "[6/9] Configuring GNOME auto-login..."
 
 GDM_CONF="/etc/gdm3/custom.conf"
 if [ -f "$GDM_CONF" ]; then
@@ -92,9 +166,9 @@ else
   echo "  WARNING: $GDM_CONF not found. Auto-login must be configured manually."
 fi
 
-# ---- 5. Disable screen blanking and lock ----
+# ---- 7/9. Disable screen blanking and lock ----
 echo ""
-echo "[5/7] Disabling screen blanking and lock..."
+echo "[7/9] Disabling screen blanking and lock..."
 
 gsettings set org.gnome.desktop.session idle-delay 0
 gsettings set org.gnome.desktop.screensaver lock-enabled false
@@ -110,9 +184,9 @@ echo "  Screen blanking disabled."
 echo "  Screen lock disabled."
 echo "  X11 DPMS disabled."
 
-# ---- 6. Install unclutter + display helpers ----
+# ---- 8/9. Install unclutter + display helpers ----
 echo ""
-echo "[6/7] Installing unclutter and display helpers..."
+echo "[8/9] Installing unclutter and display helpers..."
 # Note: Virtual keyboard for text entry is built into the Radio Console Web UI.
 # No system-level on-screen keyboard needed (onboard doesn't work on Wayland).
 
@@ -155,16 +229,21 @@ EOF
   echo "  unclutter autostart entry created."
 fi
 
-# ---- 7. Install browser refresh helper ----
+# ---- 9/9. Install browser refresh helper ----
 echo ""
-echo "[7/7] Installing browser refresh helper..."
+echo "[9/9] Installing browser refresh helper..."
 
 REFRESH_SCRIPT="/usr/local/bin/radio-refresh-browser"
 sudo tee "$REFRESH_SCRIPT" > /dev/null << 'EOF'
 #!/bin/bash
-# Refresh the Radio Console kiosk browser.
-# Uses xdotool to send F5 to the Chrome window.
-# Called after deploys or manually when needed.
+# Refresh the Radio Console kiosk browser by sending F5 to the Chrome window with xdotool.
+#
+# KNOWN BROKEN ON THIS BOX, and installed anyway only so a working X11 host still has it:
+# xdotool talks X11, the appliance runs Wayland, and `xdotool search` cannot see a native
+# Wayland window — so this prints "No browser window found" and does nothing. It is NOT the
+# post-deploy refresh path: Deploy-ToLinux.ps1 stops and relaunches the kiosk itself via
+# radio-kiosk-exit / radio-kiosk-launch. Fixing this properly means driving CDP on :9223, which
+# the dedicated kiosk profile has just made reachable again — tracked separately, not here.
 export DISPLAY=:0
 if command -v xdotool &>/dev/null; then
   WID=$(xdotool search --name "Radio Console" 2>/dev/null | head -1)
@@ -191,7 +270,8 @@ if ! command -v xdotool &>/dev/null; then
   sudo apt-get install -y xdotool
 fi
 echo "  Installed: $REFRESH_SCRIPT"
-echo "  Usage: radio-refresh-browser (after deploy or code update)"
+echo "  NOTE: radio-refresh-browser does not work on Wayland (xdotool is X11-only)."
+echo "        Deploys relaunch the kiosk themselves; nothing needs to call it."
 
 # ---- Done ----
 echo ""
@@ -200,14 +280,19 @@ echo "Kiosk setup complete!"
 echo "========================================="
 echo ""
 echo "Installed:"
-echo "  Desktop shortcuts: $DESKTOP_DIR/radio-*.desktop"
+echo "  Desktop shortcuts: $DESKTOP_DIR/radio-*.desktop (mode 755)"
 echo "  App menu entries:  $APPS_DIR/radio-*.desktop"
 echo "  Autostart:         $AUTOSTART_DIR/radio-kiosk-autostart.desktop"
-echo "  Browser refresh:   $REFRESH_SCRIPT"
+echo "  Kiosk helpers:     $BIN_DIR/radio-kiosk-launch, $BIN_DIR/radio-kiosk-exit"
+echo "  Browser refresh:   $REFRESH_SCRIPT (X11 only — inert on this Wayland box)"
 echo ""
 echo "Next steps:"
 echo "  1. Reboot to test auto-login + auto-launch"
-echo "  2. Use 'Exit Browser' shortcut to close kiosk"
+echo "  2. Use 'Exit Browser' shortcut to close the kiosk (spares the Google Voice bridge)"
 echo "  3. Use 'Shutdown System' shortcut to power off"
-echo "  4. After deploys, run: radio-refresh-browser"
+echo "  4. Deploys relaunch the kiosk themselves and report whether it reached the UI."
+echo "     To relaunch by hand: radio-kiosk-launch"
+echo ""
+echo "This script is the source of truth for ~/Desktop. Do not hand-edit those entries —"
+echo "re-run it from a checkout instead, or the box drifts from the repo again."
 echo ""

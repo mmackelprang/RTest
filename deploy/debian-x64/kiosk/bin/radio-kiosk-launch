@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# radio-kiosk-launch — the single definition of the Radio Console kiosk browser command line.
+#
+# Callers: radio-kiosk-autostart.desktop (boot) and Deploy-ToLinux.ps1 (post-deploy relaunch).
+# KIOSK-2 adds a third, radio-console-open (the desktop icon). Before this script those callers
+# carried three DIFFERENT flag sets, which is how the box drifted. Every flag change belongs
+# here and nowhere else.
+set -euo pipefail
+
+KIOSK_PROFILE="${RADIO_KIOSK_PROFILE:-$HOME/.config/radio-kiosk-chrome}"
+KIOSK_URL="${RADIO_KIOSK_URL:-http://localhost:5002}"
+CDP_PORT="${RADIO_KIOSK_CDP_PORT:-9223}"
+
+# --user-data-dir is load-bearing three times over, not tidiness:
+#   1. It is what will let KIOSK-2's "Exit to Desktop" kill the kiosk WITHOUT killing the
+#      Google Voice bridge Chrome, which runs on ~/.config/gv-bridge-chrome and which nothing
+#      restarts on demand (its watchdog timer is a 2-minute cadence). radio-kiosk-exit, shipped
+#      alongside this script, already matches on this profile for the same reason.
+#   2. Chrome >= 136 silently ignores --remote-debugging-port on the DEFAULT user-data-dir.
+#      A non-default profile is the documented fix, so CDP on :9223 becomes real again.
+#   3. CLAUDE.md records that --password-store=basic DESTROYS v11 cookies on a profile that
+#      already holds them (measured live: 45 v11 -> 16 v10, taking the Google Voice session
+#      with it). It is safe only on a profile that was `basic` from first run. This profile is
+#      created by this script and only ever visits localhost:5002, so it holds no session to
+#      lose. Do not point these flags back at the default profile.
+CHROME_FLAGS=(
+  --kiosk
+  --user-data-dir="$KIOSK_PROFILE"
+  --ozone-platform=wayland
+  --password-store=basic
+  --no-first-run
+  --no-default-browser-check
+  --noerrdialogs
+  --disable-infobars
+  --disable-session-crashed-bubble
+  --disable-background-timer-throttling
+  --disable-renderer-backgrounding
+  --disable-backgrounding-occluded-windows
+  --force-renderer-accessibility
+  --remote-debugging-port="$CDP_PORT"
+)
+
+# Matching on the profile path identifies the kiosk positively. Matching on the ABSENCE of a
+# flag (which is all that was possible before this profile existed) would also match the GV
+# bridge and anything else Chrome-shaped.
+kiosk_pids() { pgrep -f -- "--user-data-dir=$KIOSK_PROFILE" 2>/dev/null || true; }
+
+case "${1:-}" in
+  --is-running) [ -n "$(kiosk_pids)" ] ;;
+  --print-profile) printf '%s\n' "$KIOSK_PROFILE" ;;
+  --print-command) printf '%s ' google-chrome "${CHROME_FLAGS[@]}" "$KIOSK_URL"; echo ;;
+  "")
+    if [ -n "$(kiosk_pids)" ]; then
+      echo "radio-kiosk-launch: kiosk already running ($(kiosk_pids | tr '\n' ' '))" >&2
+      exit 0
+    fi
+
+    # XDG_RUNTIME_DIR is how `systemd-run --user` finds the user service manager. On this box
+    # pam_systemd (session line in /etc/pam.d/common-session) sets it for SSH sessions too, so
+    # both assignments are normally no-ops — they are a fallback for an environment where the
+    # PAM session module is absent, not a fix for a known gap here.
+    export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+
+    # The transient unit inherits the USER SERVICE MANAGER's environment, not this shell's, and
+    # that inheritance is the entire fix. Verified on this box 2026-08-18: `systemctl --user
+    # show-environment` carries WAYLAND_DISPLAY=wayland-0, XDG_RUNTIME_DIR=/run/user/1000,
+    # DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus and DISPLAY=:0. No --setenv= is
+    # needed here. If a future box ever lacks WAYLAND_DISPLAY there, pass it explicitly with
+    # --setenv= rather than falling back to DISPLAY=:0 — DISPLAY=:0 is the defect this script
+    # exists to remove; it lands the kiosk under XWayland with a flag set that does not match
+    # the boot path.
+    systemctl --user reset-failed radio-kiosk.service 2>/dev/null || true
+    exec systemd-run --user --collect --unit=radio-kiosk \
+      --description="Radio Console kiosk browser" \
+      google-chrome "${CHROME_FLAGS[@]}" "$KIOSK_URL"
+    ;;
+  *) echo "usage: radio-kiosk-launch [--is-running|--print-profile|--print-command]" >&2; exit 2 ;;
+esac
