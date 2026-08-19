@@ -129,6 +129,18 @@ done
 
 echo "  Desktop shortcuts installed."
 
+# Desktop icon size (§2.2), guarded because the schema exists only where the Desktop Icons NG
+# extension is installed. `large` gives a ~96px tile — past the 56px touch-preferred target and
+# legible from across the room, which is the glanceability bar every other surface in this app
+# is held to. It cannot overflow the 720px height: three entries at ~130px per cell occupy about
+# 390px of it. It was `standard` on the box when this was measured (2026-08-18).
+if gsettings list-schemas 2>/dev/null | grep -q '^org.gnome.shell.extensions.ding$'; then
+  gsettings set org.gnome.shell.extensions.ding icon-size 'large'
+  echo "  Desktop icon size set to 'large'."
+else
+  echo "  Desktop Icons NG schema not present; icon size left as it is."
+fi
+
 # ---- 3/11. Install kiosk helper scripts ----
 echo ""
 echo "[3/11] Installing kiosk helper scripts..."
@@ -136,10 +148,20 @@ echo "[3/11] Installing kiosk helper scripts..."
 # These live in /usr/local/bin, not /opt/radio-console, deliberately: Deploy-ToLinux.ps1 wipes
 # /opt/radio-console/{api,web} on every deploy and calls both of these scripts during that same
 # deploy. /usr/local/bin survives.
-for s in radio-kiosk-launch radio-kiosk-exit; do
+for s in radio-kiosk-launch radio-kiosk-exit radio-shutdown-confirm; do
   sudo install -m 755 "$SCRIPT_DIR/bin/$s" "$BIN_DIR/$s"
   echo "  Installed: $BIN_DIR/$s"
 done
+
+# radio-console-open is installed separately because it carries @ROTARY_UNIT@ and so has to go
+# through the same substitution the desktop entries get. It is rendered to a temp file first:
+# render_template writes with this script's own privileges and $BIN_DIR is root-owned, so the
+# redirect inside it cannot write there directly.
+RCO_TMP="$(mktemp)"
+render_template "$SCRIPT_DIR/bin/radio-console-open" "$RCO_TMP"
+sudo install -m 755 "$RCO_TMP" "$BIN_DIR/radio-console-open"
+rm -f "$RCO_TMP"
+echo "  Installed: $BIN_DIR/radio-console-open (ROTARY_UNIT=$ROTARY_UNIT)"
 
 # ---- 4/11. Install the touch GTK overrides ----
 echo ""
@@ -174,6 +196,31 @@ else
   echo "  onboard-autostart.desktop not present (already disabled, or never installed)."
 fi
 pkill -x onboard 2>/dev/null || true
+
+# The GV Bridge entry pointed at `systemctl --user start gv-bridge-chrome`, an ABANDONED
+# snap-Chromium unit — different browser, different profile, different extension — rather than
+# the live path. It was also mode 775, and GNOME silently refuses to launch a group-writable
+# .desktop file; that mode bit, not a "permission problem", is why it never worked. Its job now
+# lives inside radio-console-open, which calls the canonical ensure script
+# (~/bin/gv-bridge-ensure.sh: google-chrome + ~/.config/gv-bridge-chrome +
+# /opt/rotary-phone/ChromeExtension). Removing it also closes the ambiguity flagged in
+# design/plans/IAC-PRISTINE-INSTALL-AUDIT.md §7.
+#
+# This removes a DESKTOP ENTRY and nothing else. The bridge itself — the script, its watchdog
+# and nightly timers, its profile and its extension — is RotaryPhone-owned and is not touched
+# here, now or ever.
+#
+# Measured 2026-08-18: the live entry is exactly `GV-Bridge.desktop` in ~/Desktop, and
+# ~/.local/share/applications held only the three radio-* entries. The lower-case spellings are
+# kept anyway — removing a file that is not there costs nothing, and missing a stale launcher
+# over its capitalisation costs a broken icon nobody can account for.
+for stale in "$DESKTOP_DIR/GV-Bridge.desktop" "$APPS_DIR/GV-Bridge.desktop" \
+             "$DESKTOP_DIR/gv-bridge.desktop" "$APPS_DIR/gv-bridge.desktop"; do
+  if [ -f "$stale" ]; then
+    rm -f "$stale"
+    echo "  Removed: $stale"
+  fi
+done
 
 # ---- 6/11. Install autostart entry ----
 echo ""
@@ -353,7 +400,8 @@ echo "  App menu entries:  $APPS_DIR/radio-*.desktop"
 echo "  Icon assets:       $ICON_DIR/"
 echo "  Dialog GTK theme:  $GTK_DIR/gtk-4.0/gtk.css"
 echo "  Autostart:         $AUTOSTART_DIR/radio-kiosk-autostart.desktop"
-echo "  Kiosk helpers:     $BIN_DIR/radio-kiosk-launch, $BIN_DIR/radio-kiosk-exit"
+echo "  Kiosk helpers:     $BIN_DIR/{radio-kiosk-launch, radio-kiosk-exit,"
+echo "                     radio-console-open, radio-shutdown-confirm}"
 echo "  Browser refresh:   $REFRESH_SCRIPT (X11 only — inert on this Wayland box)"
 echo ""
 echo "Next steps:"
