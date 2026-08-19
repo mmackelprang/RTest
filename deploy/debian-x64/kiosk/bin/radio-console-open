@@ -180,7 +180,15 @@ resolve_gv_ensure() {
 start_audio()   { sudo -n systemctl start radio-api; }
 start_console() { sudo -n systemctl start radio-web; }
 start_phone()   { sudo -n systemctl start "$ROTARY_UNIT"; }
-start_voice()   { local s; s="$(resolve_gv_ensure)" || return 1; "$s"; }
+# The 20s cap matches the VOICE budget in design §5.5 and exists because this is the only
+# starter that calls something this repo does not own. RUN_DEADLINE is checked on ENTRY to
+# repair(), so it cannot interrupt a call already in flight: without the timeout, an ensure
+# script that never returned would wedge the launcher with the --no-cancel progress dialog on
+# the glass and fd 9 still holding the lock — after which EVERY later tap of the icon exits 0
+# silently, leaving a dead icon on a panel with no keyboard until someone reboots the box.
+# A timeout turns that into a red VOICE row, which is data, which is what this script does with
+# every other failure.
+start_voice()   { local s; s="$(resolve_gv_ensure)" || return 1; timeout 20 "$s"; }
 
 wait_for() {   # $1 = probe function, $2 = budget in seconds
   local deadline=$(( SECONDS + $2 ))
@@ -206,7 +214,16 @@ needs_start() { case "${STATE[$1]}" in down|offline) return 0 ;; *) return 1 ;; 
 # A component that started but has not answered inside its budget is AMBER, never red. Red is
 # reserved for "the start command itself failed". That two-tier split is the difference between
 # a dialog worth reading and one that gets dismissed unread.
+# A unit that is already active but whose health endpoint did not answer inside the 2s probe
+# budget arrives at repair() as `down` — plausible on this box, which CLAUDE.md records as
+# resource-constrained. `systemctl start` on it then returns 0 immediately and the next probe
+# passes, so calling the result `started` would put "wasn't running — it's started now" on the
+# glass about a service that was running the whole time. §6.3 reserves the `· started just now`
+# suffix for "we started it, it came up", so the pre-start reading decides which one is true.
+started_or_online() { systemctl is-active --quiet "$1" && echo online || echo started; }
+
 repair() {   # $1 = component label
+  local came_up
   # Past the whole-run ceiling nothing further is started, and the row goes amber rather than
   # red: this component was down at probe time and still is, but nothing tried and failed to
   # start it, so red would be a lie. `Starting` is the closest honest pill in the approved
@@ -215,15 +232,18 @@ repair() {   # $1 = component label
   case "$1" in
     AUDIO)
       progress_text "Starting the audio engine…"
-      if start_audio;   then wait_for probe_audio         20 && STATE[AUDIO]=started   || STATE[AUDIO]=starting
+      came_up="$(started_or_online radio-api)"
+      if start_audio;   then wait_for probe_audio         20 && STATE[AUDIO]=$came_up   || STATE[AUDIO]=starting
       else STATE[AUDIO]=failed; fi ;;
     CONSOLE)
       progress_text "Starting the console…"
-      if start_console; then wait_for probe_console       15 && STATE[CONSOLE]=started || STATE[CONSOLE]=starting
+      came_up="$(started_or_online radio-web)"
+      if start_console; then wait_for probe_console       15 && STATE[CONSOLE]=$came_up || STATE[CONSOLE]=starting
       else STATE[CONSOLE]=failed; fi ;;
     PHONE)
       progress_text "Starting the phone service…"
-      if start_phone;   then wait_for probe_phone         15 && STATE[PHONE]=started   || STATE[PHONE]=starting
+      came_up="$(started_or_online "$ROTARY_UNIT")"
+      if start_phone;   then wait_for probe_phone         15 && STATE[PHONE]=$came_up   || STATE[PHONE]=starting
       else STATE[PHONE]=failed; fi ;;
     VOICE)
       progress_text "Starting the Google Voice link…"
@@ -344,6 +364,16 @@ compute_tier() {
   elif any_state needsignin;     then echo warning
   elif any_state starting;       then echo warning
   elif any_state started;        then echo info
+  # `down` is a PROBE-TIME state that no dialog ever sees — main() hands every down component to
+  # repair(), which rewrites it before anything is composed. It reaches here only through
+  # --print-status, which reports the states as probed rather than as repaired. Without this arm
+  # that case fell through to `silent`, so `--print-status` answered TIER=silent while a service
+  # was down (measured on the box 2026-08-18: CONSOLE=down, TIER=silent) — the one answer that
+  # is definitely wrong, from the affordance that exists to tell the truth about a run, and
+  # flatly contradicted by --dry-run printing WOULD-START for the same component.
+  # `info` is the projection: a down component gets started, and if it comes up the run reports
+  # Variant A. If the start FAILS the real run reports error, which no pre-repair probe can know.
+  elif any_state down;           then echo info
   else echo silent; fi
 }
 
@@ -442,7 +472,11 @@ GV_RAISE_SUPPORTED=0
 # Launching a second Chrome on the bridge's own profile is forwarded to the running instance,
 # which is the only raise mechanism available here. It starts nothing the bridge does not
 # already own, and kills nothing.
-raise_gv_bridge() { google-chrome --user-data-dir="$GV_PROFILE" https://voice.google.com & }
+# 9>&- matters the moment GV_RAISE_SUPPORTED becomes 1. fd 9 carries no close-on-exec flag (the
+# same fact the retry path relies on), so without it this long-lived Chrome would inherit the
+# single-instance lock and hold it for its entire lifetime — after which every later tap of the
+# icon exits 0 silently.
+raise_gv_bridge() { google-chrome --user-data-dir="$GV_PROFILE" https://voice.google.com 9>&- & }
 
 # Returns 0 only when the owner asked to run the whole thing again; non-zero means "carry on and
 # open the console".
@@ -578,8 +612,15 @@ main() {
     # --window-position is a no-op under Wayland and stacking is decided by launch order, so a
     # dialog raised first would be swallowed by the fullscreen kiosk and the owner sees nothing.
     "$KIOSK_LAUNCH" || kiosk_failed
-    sleep "${RADIO_DIALOG_DELAY:-2}"
-    report_dialog || true
+    # Only report if there is something to report. A component that was merely slow to answer
+    # and turned out to be running all along leaves every row `online`, and §6.7 is explicit
+    # that nothing wrong means no dialog, no toast, no sound. This guard is also what keeps
+    # compose_report's counting branch honest: with every row online, count_in_state started is
+    # 0, and it would otherwise compose "Some services weren't running — they're started now."
+    if any_state started starting needsignin; then
+      sleep "${RADIO_DIALOG_DELAY:-2}"
+      report_dialog || true
+    fi
   fi
 }
 

@@ -12,6 +12,19 @@ set -euo pipefail
 KIOSK_USER="${1:-$(whoami)}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# APPS_DIR, DESKTOP_DIR and ICON_DIR below are all derived from $HOME — the user RUNNING this
+# script — while KIOSK_USER decides which user the services are switched to. Those are the same
+# user in the documented invocation, and this script has always assumed so. Since KIOSK-2 the
+# assumption is load-bearing rather than cosmetic: ICON_DIR is substituted into `Icon=` inside
+# the rendered entries, so a mismatch writes entries pointing into another user's home. Warned
+# rather than refused, because the mismatch is legitimate for an inspection run.
+if [ "$KIOSK_USER" != "$(whoami)" ]; then
+  echo "  WARNING: installing as $(whoami) but configuring for $KIOSK_USER."
+  echo "           Desktop entries, icons and the rendered Icon= path all go to $HOME."
+  echo "           Run this as $KIOSK_USER unless that is deliberate."
+  echo ""
+fi
+
 echo "========================================="
 echo "Radio Console — Kiosk Mode Setup"
 echo "========================================="
@@ -39,7 +52,12 @@ mkdir -p "$APPS_DIR" "$DESKTOP_DIR" "$ICON_DIR"
 # `set -euo pipefail`, and with pipefail a no-match `grep` fails the whole pipeline, which
 # would abort setup-kiosk.sh before it installed anything — and would make the `if [ -z ]`
 # fallback directly below it unreachable dead code.
+# The leading `sed` strips the status bullet that `systemctl list-units --all` prefixes to units
+# in a failed or not-found state. Without it `awk '{print $1}'` yields the bullet, the `^` anchor
+# never matches, and discovery silently misses a rotary-phone unit that happens to be FAILED at
+# install time — exactly when getting the name right matters most.
 ROTARY_UNIT="${ROTARY_UNIT:-$(systemctl list-units --type=service --all --no-legend \
+  | sed 's/^[[:space:]]*[^[:alnum:]][[:space:]]*//' \
   | awk '{print $1}' | grep -iE '^(rotary-?phone|rotaryphone)\.service$' | head -1 || true)}"
 if [ -z "$ROTARY_UNIT" ]; then
   echo "  WARNING: no rotary-phone service unit found; PHONE repair will be a no-op."
@@ -116,14 +134,22 @@ install_entry() {
 # radio-console.desktop has carried --password-store=basic since 2026-08-11 and the live copy
 # still did not. Three separate instances of that drift turned up in one day.
 #
-# THE ALPHABETICAL ORDER OF THESE THREE NAMES IS THE ACCIDENTAL-SHUTDOWN MITIGATION, NOT
-# COSMETICS. DING arranges desktop icons by name, so they land as
-#   `Exit to Desktop` · `Radio Console` · `Shutdown System`
-# — the safe, most-tapped action sits physically BETWEEN the two "leaving" actions, Exit and
-# Shutdown are never neighbours, and a fingertip that misses Exit lands on something harmless.
-# ANY FUTURE RENAME MUST PRESERVE `E… < R… < S…`. Renaming `Shutdown System` to, say, `Power
-# Off` would sort it straight next to `Exit to Desktop` and quietly undo this, with nothing
-# failing to say so.
+# THE NAME ORDER OF THESE THREE ENTRIES IS THE ACCIDENTAL-SHUTDOWN MITIGATION, NOT COSMETICS.
+# Sorted by name they are `Exit to Desktop` < `Radio Console` < `Shutdown System`, so the safe,
+# most-tapped action sits physically BETWEEN the two "leaving" actions: Exit and Shutdown are
+# never neighbours, and a fingertip that misses Exit lands on something harmless.
+#
+# What makes this robust is that `Radio Console` is the MIDDLE of three, and the middle of a
+# three-element sort is the same element whichever direction the sort runs. That matters here,
+# because the direction was NOT stable in measurement: with keep-arranged on (set below), two
+# consecutive installs on 2026-08-18 laid the column out as Exit(y=34) / Console(206) /
+# Shutdown(378), and then as Shutdown(34) / Console(206) / Exit(378) — the second stable across
+# a 60s settle. Radio Console was in the middle both times, which is the property the design
+# actually needs, so this comment claims that and not a specific top-to-bottom order.
+#
+# ANY FUTURE RENAME MUST KEEP `Radio Console` SORTING BETWEEN THE OTHER TWO. Renaming
+# `Shutdown System` to, say, `Power Off` would sort it straight next to `Exit to Desktop` and
+# quietly undo this, with nothing failing to say so.
 for file in radio-console.desktop radio-exit-browser.desktop radio-shutdown.desktop; do
   install_entry "$SCRIPT_DIR/$file"
 done
