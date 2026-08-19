@@ -1,6 +1,6 @@
 [Desktop Entry]
-Name=Exit Browser
-Comment=Close the Radio Console browser window
+Name=Exit to Desktop
+Comment=Close the Radio Console screen. Leaves everything else running.
 Exec=/usr/local/bin/radio-kiosk-exit
 Icon=application-exit
 Terminal=false

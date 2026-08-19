@@ -70,27 +70,40 @@ echo "  Installed: $ICON_DIR/radio-console-512.png"
 echo ""
 echo "[2/11] Installing desktop shortcuts..."
 
+# The placeholders (@ICON_DIR@, @KIOSK_USER@, @ROTARY_UNIT@) are what let the repo stay the
+# source of truth for files whose content depends on this box: an absolute icon path under the
+# login user's home, and a discovered unit name, cannot be committed literally. Since KIOSK-2
+# three files carry one — both Radio Console entries carry @ICON_DIR@ and radio-console-open
+# carries @ROTARY_UNIT@ — so the substitution lives here once and is shared by the entry
+# installer, the autostart entry, and the helper-script loop.
+render_template() {   # $1 = source file, $2 = destination for the rendered copy
+  sed -e "s|@ICON_DIR@|$ICON_DIR|g" \
+      -e "s|@KIOSK_USER@|$KIOSK_USER|g" \
+      -e "s|@ROTARY_UNIT@|$ROTARY_UNIT|g" \
+      "$1" > "$2"
+}
+
 # Mode 755, NOT `chmod +x`. With the default umask `chmod +x` yields 775, and GNOME REFUSES to
 # launch a group-writable .desktop file — silently, with no error anywhere. That mode bit is
 # why the box's GV-Bridge entry never worked. `install -m 755` states the mode instead of
 # incrementing it, so the umask cannot leak in.
-#
-# The placeholders substituted below (@ICON_DIR@, @KIOSK_USER@, @ROTARY_UNIT@) are what let the
-# repo stay the source of truth for entries whose content depends on this box: an absolute icon
-# path and a unit name cannot be committed literally. No entry carries ANY of the three yet —
-# they arrive with KIOSK-2 — so today all three substitutions are a no-op on every file. They
-# are here because the installer, not the entries, is what this row fixes.
 install_entry() {
   local src="$1" name; name="$(basename "$src")"
-  sed -e "s|@ICON_DIR@|$ICON_DIR|g" \
-      -e "s|@KIOSK_USER@|$KIOSK_USER|g" \
-      -e "s|@ROTARY_UNIT@|$ROTARY_UNIT|g" \
-      "$src" > "$DESKTOP_DIR/$name.tmp"
+  render_template "$src" "$DESKTOP_DIR/$name.tmp"
   install -m 755 "$DESKTOP_DIR/$name.tmp" "$DESKTOP_DIR/$name"
   install -m 644 "$DESKTOP_DIR/$name.tmp" "$APPS_DIR/$name"
   rm -f "$DESKTOP_DIR/$name.tmp"
   # Mark as trusted so GNOME doesn't show the "untrusted application launcher" warning.
   gio set "$DESKTOP_DIR/$name" metadata::trusted true 2>/dev/null || true
+  # Clear any hand-dragged icon position. This one is the accidental-shutdown mitigation rather
+  # than cosmetics: DING honours a persisted position over alphabetical order, and
+  # `org.gnome.shell.extensions.ding keep-arranged` is false on this box, so its `arrangeorder`
+  # setting never applied. All four live entries carried a position when this was measured
+  # (2026-08-18: GV-Bridge 1789,148 · Shutdown System 1789,263 · Exit Browser 1789,378 · Radio
+  # Console 1789,492), which had Shutdown System and Exit Browser ADJACENT with Radio Console at
+  # the far end — precisely the adjacency the name order below exists to prevent. Tolerant of
+  # failure: an entry that never carried the attribute has nothing to clear.
+  gio set -t unset "$DESKTOP_DIR/$name" metadata::nautilus-icon-position 2>/dev/null || true
   if command -v desktop-file-validate >/dev/null 2>&1; then
     desktop-file-validate "$DESKTOP_DIR/$name" || echo "  WARNING: $name failed validation"
   fi
@@ -101,6 +114,15 @@ install_entry() {
 # entries onto the box, so ~/Desktop was hand-maintained and drifted: the in-tree
 # radio-console.desktop has carried --password-store=basic since 2026-08-11 and the live copy
 # still did not. Three separate instances of that drift turned up in one day.
+#
+# THE ALPHABETICAL ORDER OF THESE THREE NAMES IS THE ACCIDENTAL-SHUTDOWN MITIGATION, NOT
+# COSMETICS. DING arranges desktop icons by name, so they land as
+#   `Exit to Desktop` · `Radio Console` · `Shutdown System`
+# — the safe, most-tapped action sits physically BETWEEN the two "leaving" actions, Exit and
+# Shutdown are never neighbours, and a fingertip that misses Exit lands on something harmless.
+# ANY FUTURE RENAME MUST PRESERVE `E… < R… < S…`. Renaming `Shutdown System` to, say, `Power
+# Off` would sort it straight next to `Exit to Desktop` and quietly undo this, with nothing
+# failing to say so.
 for file in radio-console.desktop radio-exit-browser.desktop radio-shutdown.desktop; do
   install_entry "$SCRIPT_DIR/$file"
 done
@@ -160,7 +182,12 @@ echo "[6/11] Installing autostart entry..."
 AUTOSTART_DIR="$HOME/.config/autostart"
 mkdir -p "$AUTOSTART_DIR"
 
-cp "$SCRIPT_DIR/radio-kiosk-autostart.desktop" "$AUTOSTART_DIR/radio-kiosk-autostart.desktop"
+# Rendered, not copied: since KIOSK-2 this entry carries @ICON_DIR@ too, and a plain `cp` would
+# leave the placeholder in place and hand GNOME an icon path that cannot resolve.
+AUTOSTART_ENTRY="$AUTOSTART_DIR/radio-kiosk-autostart.desktop"
+render_template "$SCRIPT_DIR/radio-kiosk-autostart.desktop" "$AUTOSTART_ENTRY.tmp"
+install -m 644 "$AUTOSTART_ENTRY.tmp" "$AUTOSTART_ENTRY"
+rm -f "$AUTOSTART_ENTRY.tmp"
 echo "  Autostart entry installed to $AUTOSTART_DIR/"
 
 # ---- 7/11. Switch services to run as login user ----
@@ -331,7 +358,7 @@ echo "  Browser refresh:   $REFRESH_SCRIPT (X11 only — inert on this Wayland b
 echo ""
 echo "Next steps:"
 echo "  1. Reboot to test auto-login + auto-launch"
-echo "  2. Use 'Exit Browser' shortcut to close the kiosk (spares the Google Voice bridge)"
+echo "  2. Use 'Exit to Desktop' shortcut to close the kiosk (spares the Google Voice bridge)"
 echo "  3. Use 'Shutdown System' shortcut to power off"
 echo "  4. Deploys relaunch the kiosk themselves and report whether it reached the UI."
 echo "     To relaunch by hand: radio-kiosk-launch"

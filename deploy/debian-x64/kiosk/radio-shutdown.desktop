@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=Shutdown System
-Comment=Shut down the Radio Console system
-Exec=gnome-session-quit --power-off
+Comment=Shut down the Radio Console system.
+Exec=/usr/local/bin/radio-shutdown-confirm
 Icon=system-shutdown
 Terminal=false
 Type=Application

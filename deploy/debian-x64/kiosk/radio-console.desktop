@@ -1,8 +1,8 @@
 [Desktop Entry]
 Name=Radio Console
-Comment=Grandpa Anderson's Console Radio Web UI
-Exec=/usr/local/bin/radio-kiosk-launch
-Icon=audio-radio
+Comment=Open the Radio Console. Starts anything that isn't running.
+Exec=/usr/local/bin/radio-console-open
+Icon=@ICON_DIR@/radio-console.svg
 Terminal=false
 Type=Application
 Categories=AudioVideo;Audio;
