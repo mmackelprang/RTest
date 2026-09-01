@@ -1,8 +1,9 @@
 # HANDOFF — GA punch list for the cabinet install
 
-**Status:** **`[PLANNER-PHASE DRAFT — FOR OWNER REVIEW]`**. Nothing here is queued. No row has been added to
-`docs/BUILDER_QUEUE.md` as a result of this document, and none should be until the owner has read §7 and
-answered at least the decisions marked **BLOCKING**.
+**Status:** **`[APPROVED 2026-09-01 — EXECUTING]`**. The owner has read §7, closed `D23` / `D24` / `D9`, and
+authorised autonomous execution against this list in the §2 order, merging on green review + tests + UAT.
+**`D25` remains unruled** and is the one item that must be escalated rather than defaulted.
+Original state: planner-phase draft, nothing queued.
 **Date:** 2026-08-19
 **Author:** Planner, consolidating six research scouts and one Designer pass.
 **Consumers:** Owner (§7 decisions, §8 quick wins) → Architect (three escalations) → Planner (spec + plan per
@@ -987,17 +988,20 @@ the affected item says so in place.
 
 ### Still open
 
-Rev 3 closed the two design questions that were pending and opened three new ones — **and the owner has
-since answered the largest of them (D22, the D8 narrowing: approved).** What is left is **three of
-Designer's four §13 questions, plus one fork this document raised and nobody has ruled on.** None of them
-blocks starting work.
+**Owner answered D23, D24 and D9 on 2026-09-01.** One decision is left — `D25` — and it is the fork this
+document flagged as the one that must not default silently.
 
 | ID | Question | Notes / recommendation |
 |---|---|---|
-| **D23** | ⭐ **NEW — Detents per revolution** (Rev 3 §5.2, §13 Q2). The last mechanical unknown, and a much smaller one than the question D5 retired. | **It affects no count** — only the *"≈2.5 revolutions to cross the FM band"* feel figures. If the knob bodies turn out to be 24- or 30-detent, the counts stay exactly right and the feel gets slightly slower or faster. **One full turn on `ENC-14`'s Calibrate flow answers it once the knobs are in hand.** Not a blocker for anything. |
-| **D24** | ⭐ **NEW — Do you actually want to hand-edit the 24 config fields?** (Rev 3 §7.8, §13 Q3) You get full read-only visibility, four `Reverse` toggles and Save. Direct numeric editing is the part Designer held back. | Designer's recommendation, and this document agrees: **no.** These numbers are a designed feel with a safety budget behind them, derived against the actual FM channel grid and a volume-slam budget. *"A field that can be set to ×50 will eventually be set to ×50."* If a number genuinely needs adjusting it should come back to the handoff **so the reasoning moves with the number**, rather than drifting silently on a settings page. |
-| **D25** | ⭐ **NEW — Do you want the `PHN-2` stopgap, or the full ADR-029 arc only?** Voicemail currently plays through a browser `<audio>` element at full level, bypassing mute, master volume, balance, ducking and Cast routing. The full fix (`PHN-1` + `PHN-2`) is **1.5–2 weeks**. A **half-day JS-interop stopgap** could route that element's volume and mute through master volume. | ⚠ **This should not silently default into the full arc — it is a real fork, and it has not been ruled on.** The stopgap **fixes mute and level** and **does not fix ducking or Cast routing**: the radio still will not duck under a voicemail, and with Cast active the voicemail still comes out of the local speakers. It is a partial patch on a bypass, not a fix. **Worth taking only if 1.5–2 weeks does not fit before install** — in which case it is the difference between *"voicemail ignores the mute button"* and *"voicemail ignores everything."* |
-| **D9** | **A configurable maximum volume ceiling?** (Rev 3 §13 Q4) | Unchanged. Designer still leans no; so does this document. The four guards in `ENC-3` already bound the hazard, and a ceiling is easy to forget about and then be confused by. |
+| **D25** | **Do you want the `PHN-2` stopgap, or the full ADR-029 arc only?** Voicemail currently plays through a browser `<audio>` element at full level, bypassing mute, master volume, balance, ducking and Cast routing. The full fix (`PHN-1` + `PHN-2`) is **1.5–2 weeks**. A **half-day JS-interop stopgap** could route that element's volume and mute through master volume. | ⚠ **Still unruled. A real fork.** The stopgap **fixes mute and level** and **does not fix ducking or Cast routing**: the radio still will not duck under a voicemail, and with Cast active the voicemail still comes out of the local speakers. It is a partial patch on a bypass, not a fix. **Worth taking only if 1.5–2 weeks does not fit before install** — in which case it is the difference between *"voicemail ignores the mute button"* and *"voicemail ignores everything."* |
+
+### Closed 2026-09-01 by the owner
+
+| ID | Question | Answer |
+|---|---|---|
+| **D23** | Detents per revolution (Rev 3 §5.2, §13 Q2). | ✅ **CLOSED — the question was mis-framed, and the correction lands on `ENC-1`, not on the feel figures.** The owner: *"the encoder firmware already manages detents per revolution — you just need to manage configuring the device and reading direction and velocity from the device."* So detent density is **the device's business, already handled in firmware**. The host's job is (a) push configuration to the device and (b) read **direction and velocity** off it. ⚠ **This is an input to `ENC-1`, and it must be reconciled against Rev 3 §5 before the decoder is written** — Rev 3 describes a 37-byte report carrying `int32` positions and free-running accumulators, and §10's re-baseline rule exists because *diffing accumulators across a disconnect* replays the whole outage as one delta. If the device reports direction and velocity **per report**, that hazard is designed out rather than defended against, and `ENC-1` gets simpler. **Confirm which the firmware actually sends before relying on either reading.** The *"≈2.5 revolutions to cross the FM band"* figures are unaffected either way, and `ENC-14`'s Calibrate flow is no longer needed to answer this. |
+| **D24** | Hand-edit the 24 config fields? (Rev 3 §7.8, §13 Q3) | ✅ **CLOSED — no.** Owner agrees with Designer and this document. Read-only visibility, four `Reverse` toggles, Save. No direct numeric editing. *"A field that can be set to ×50 will eventually be set to ×50."* A number that needs changing comes back through the handoff so the reasoning moves with it. |
+| **D9** | A configurable maximum volume ceiling? (Rev 3 §13 Q4) | ✅ **CLOSED — no.** Owner agrees. The four guards in `ENC-3` already bound the hazard; a ceiling is easy to forget about and then be confused by. |
 
 **Not decisions, just unfiled actions:** **D18** (file the bell-failure contract request to RotaryPhone —
 never filed) and **D20** (write `docs/BUILDER_PROMPT.md` — every Builder is pointed at a document that has
@@ -1156,4 +1160,6 @@ now a 15-minute record correction. Do not budget the remaining five as guarantee
 
 ---
 
-**Not approved. Planner-phase draft, pending owner review. No queue rows have been added.**
+**Approved 2026-09-01. Executing in §2 order.** `D23` / `D24` / `D9` closed by the owner; **`D25` is still
+open and must be escalated, not defaulted.** The §2 ordering constraints still bind — `O4` (`LOG-6` before
+`LOG-10`) can brick the appliance and `O9` (knob order before drilling) is irreversible.
